@@ -149,27 +149,27 @@ fn legend(t: &T) -> Vec<String> {
 #[test]
 fn the_transfer_pane_draws_its_measurements_group_only() {
     let mut t = loaded(two_groups());
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     assert_eq!(legend(&t), ["L ÷ tower", "Main L", "t10", "t13"]);
     assert_eq!(transfer_group(&t), Some(MeasId(1)));
-    t.st.update(
+    t.st.apply(
         Msg::PanePick(t.pane(PaneKind::Transfer), PaneMenuRow::Meas(MeasId(3))),
         &t.keys,
     );
     assert_eq!(legend(&t), ["Delay tower", "t11"]);
     // A trace's row only selects it.
-    t.st.update(Msg::SelectTrace(TraceId(13)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(13)), &t.keys);
     assert_eq!(transfer_group(&t), Some(MeasId(3)));
     assert_eq!(legend(&t), ["Delay tower", "t11"]);
     // The math channel shown on the pane draws its owner's group.
-    t.st.update(
+    t.st.apply(
         Msg::PanePick(t.pane(PaneKind::Transfer), PaneMenuRow::Meas(MeasId(6))),
         &t.keys,
     );
     assert_eq!(transfer_group(&t), Some(MeasId(1)));
     assert_eq!(legend(&t), ["L ÷ tower", "Main L", "t10", "t13"]);
     // A hidden measurement leaves its live curve out; its group stays.
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     t.key("A");
     assert_eq!(legend(&t), ["L ÷ tower", "t10", "t13"]);
 }
@@ -179,7 +179,7 @@ fn the_transfer_pane_draws_its_measurements_group_only() {
 #[test]
 fn v_steps_the_selection_and_moves_no_pane() {
     let mut t = loaded(two_groups());
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     let layout = t.st.layout.clone();
     let mut seen = Vec::new();
     for key in [
@@ -188,21 +188,21 @@ fn v_steps_the_selection_and_moves_no_pane() {
         let out = t.key(key);
         assert!(out.is_empty(), "{key}: {out:?}");
         assert_eq!(t.st.layout, layout, "{key} moved a pane");
-        assert!(!t.st.own_panes_due, "{key} synced the layout");
+        assert!(!t.st.rig.own_panes_due, "{key} synced the layout");
         assert_eq!(transfer_group(&t), Some(MeasId(1)));
-        seen.extend(t.st.selected_trace);
+        seen.extend(t.st.rig.selected_trace);
     }
     assert!(seen.contains(&TraceId(10)), "{seen:?}");
     assert!(seen.contains(&TraceId(11)), "{seen:?}");
     // Delay tower's capture is selected while the pane keeps Main L's group.
-    t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(10)), &t.keys);
     for _ in 0..6 {
-        if t.st.selected_trace == Some(TraceId(11)) {
+        if t.st.rig.selected_trace == Some(TraceId(11)) {
             break;
         }
         t.key("V");
     }
-    assert_eq!(t.st.selected_trace, Some(TraceId(11)));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(11)));
     assert_eq!(legend(&t), ["L ÷ tower", "Main L", "t10", "t13"]);
 }
 
@@ -215,12 +215,12 @@ fn the_trace_selected_after_a_delete_moves_no_pane() {
         let mut s = two_groups();
         s.traces[2].edit.visible = false;
         let mut t = loaded(s);
-        t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
+        t.st.apply(Msg::SelectMeas(MeasId(3)), &t.keys);
         if maximised {
             t.key("W");
         }
         assert_eq!(t.st.layout.maximized, maximised);
-        t.st.update(Msg::SelectTrace(TraceId(11)), &t.keys);
+        t.st.apply(Msg::SelectTrace(TraceId(11)), &t.keys);
         let layout = t.st.layout.clone();
         assert_eq!(transfer_group(&t), Some(MeasId(3)));
         assert!(t.key("Delete").is_empty());
@@ -236,7 +236,7 @@ fn the_trace_selected_after_a_delete_moves_no_pane() {
             "{out:?}"
         );
         assert_eq!(
-            t.st.selected_trace,
+            t.st.rig.selected_trace,
             Some(TraceId(13)),
             "the next shown trace"
         );
@@ -249,7 +249,7 @@ fn the_trace_selected_after_a_delete_moves_no_pane() {
 #[test]
 fn a_moved_import_joins_its_measurements_pane() {
     let mut t = loaded(two_groups());
-    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(3)), &t.keys);
     assert_eq!(legend(&t), ["Delay tower", "t11"]);
     let mut s = two_groups();
     s.traces[2].edit.owner = under(3);
@@ -264,7 +264,7 @@ fn a_moved_import_joins_its_measurements_pane() {
 #[test]
 fn average_takes_the_panes_group_only() {
     let mut t = loaded(two_groups());
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     let r = t.key("M");
     let [
         Request::Call {
@@ -277,7 +277,7 @@ fn average_takes_the_panes_group_only() {
     };
     assert_eq!(traces, &[TraceId(10), TraceId(13)]);
     // Delay tower's group holds one capture: nothing to average.
-    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(3)), &t.keys);
     assert!(t.key("M").is_empty());
 }
 
@@ -354,13 +354,13 @@ fn a_sweeps_runs_show_when_the_sweep_is_the_panes() {
     t.conn(ConnEvent::Trace(data, grid));
     tf_frames(&mut t, &[1]);
     // Selecting the sweep in the list leaves the transfer pane on the live measurement.
-    t.st.update(Msg::SelectMeas(MeasId(5)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(5)), &t.keys);
     assert_eq!(
         t.st.kind_meas(PaneKind::Transfer).map(|m| m.id),
         Some(MeasId(1))
     );
     assert_eq!(legend(&t), ["Main L"]);
-    t.st.update(
+    t.st.apply(
         Msg::PanePick(t.pane(PaneKind::Transfer), PaneMenuRow::Meas(MeasId(5))),
         &t.keys,
     );
@@ -371,14 +371,14 @@ fn a_sweeps_runs_show_when_the_sweep_is_the_panes() {
         Some(MeasId(1))
     );
     assert!(t.key("S").is_empty());
-    t.st.update(
+    t.st.apply(
         Msg::PanePick(t.pane(PaneKind::Transfer), PaneMenuRow::Meas(MeasId(1))),
         &t.keys,
     );
     assert_eq!(legend(&t), ["Main L"]);
     // A run's row only selects it: the pane keeps Main L.
-    t.st.update(Msg::SelectTrace(TraceId(20)), &t.keys);
-    assert_eq!(t.st.selected_trace, Some(TraceId(20)));
+    t.st.apply(Msg::SelectTrace(TraceId(20)), &t.keys);
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(20)));
     assert_eq!(legend(&t), ["Main L"]);
 }
 
@@ -439,12 +439,12 @@ fn chooser(t: &T) -> (String, Vec<String>) {
 fn c_compares_the_selection_on_the_transfer_pane() {
     use ac2_scene::meas_list::TreeKey;
     let mut t = loaded(two_groups());
-    t.st.update(
+    t.st.apply(
         Msg::PanePick(t.pane(PaneKind::Transfer), PaneMenuRow::Meas(MeasId(1))),
         &t.keys,
     );
     let before = legend(&t);
-    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(3)), &t.keys);
     assert!(t.key("C").is_empty(), "nothing is compared before a target");
     let (title, rows) = chooser(&t);
     assert_eq!(title, "Compare Delay tower with…");
@@ -455,7 +455,7 @@ fn c_compares_the_selection_on_the_transfer_pane() {
     );
     assert!(rows.iter().all(|r| !r.contains("Delay tower")), "{rows:?}");
     // The row chosen put Delay tower on the pane; Main L back there draws as before.
-    t.st.update(
+    t.st.apply(
         Msg::PanePick(t.pane(PaneKind::Transfer), PaneMenuRow::Meas(MeasId(1))),
         &t.keys,
     );
@@ -473,8 +473,8 @@ fn c_compares_the_selection_on_the_transfer_pane() {
     assert_eq!(chooser(&t).1[0], "\u{2713} Main L");
     t.key("Escape");
     assert_eq!(t.st.overlay, Overlay::None);
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
-    t.st.update(Msg::SelectTrace(TraceId(12)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(12)), &t.keys);
     assert!(t.key("C").is_empty());
     assert!(
         t.last_toast().starts_with("t12 is under Imported"),
@@ -482,12 +482,12 @@ fn c_compares_the_selection_on_the_transfer_pane() {
         t.last_toast()
     );
     assert_eq!(t.st.overlay, Overlay::None);
-    t.st.update(Msg::SelectTrace(TraceId(11)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(11)), &t.keys);
     t.key("C");
     let r = t.key("Enter");
     t.answer(&r);
     t.key("Escape");
-    t.st.update(
+    t.st.apply(
         Msg::PanePick(t.pane(PaneKind::Transfer), PaneMenuRow::Meas(MeasId(1))),
         &t.keys,
     );
@@ -502,7 +502,7 @@ fn c_compares_the_selection_on_the_transfer_pane() {
     assert!(tree_detail(&t, TreeKey::Live(MeasId(3))).ends_with(" · cmp"));
     assert!(tree_detail(&t, TreeKey::Trace(TraceId(11))).ends_with(" · cmp"));
     // Compare is an overlay: M averages the group's own traces.
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     let r = t.key("M");
     assert!(
         matches!(
@@ -518,14 +518,14 @@ fn c_compares_the_selection_on_the_transfer_pane() {
     assert!(rows.iter().all(|r| !r.contains("Main L")), "{rows:?}");
     t.key("Escape");
     // Enter on a ticked row takes it out.
-    t.st.update(Msg::SelectTrace(TraceId(11)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(11)), &t.keys);
     t.key("C");
     assert_eq!(chooser(&t).1[0], "\u{2713} Main L");
     let r = t.key("Enter");
     t.answer(&r);
     assert_eq!(t.last_toast(), "t11: no longer compared into Main L");
     t.key("Escape");
-    t.st.update(
+    t.st.apply(
         Msg::PanePick(t.pane(PaneKind::Transfer), PaneMenuRow::Meas(MeasId(1))),
         &t.keys,
     );
@@ -557,7 +557,7 @@ fn compare_lists_come_from_the_daemon() {
         Compared::Meas { meas: MeasId(3) },
     ];
     let mut t = loaded(s.clone());
-    t.st.update(
+    t.st.apply(
         Msg::PanePick(t.pane(PaneKind::Transfer), PaneMenuRow::Meas(MeasId(1))),
         &t.keys,
     );
@@ -580,7 +580,7 @@ fn compare_lists_come_from_the_daemon() {
 #[test]
 fn the_cursor_is_on_the_palette_not_c() {
     let mut t = loaded(two_groups());
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     t.key("C");
     assert_eq!(t.st.view.cursor_hz, None);
     t.key("Escape");
@@ -599,7 +599,7 @@ fn a_stopped_transfer_measurement_keeps_its_curve_tagged() {
     s.traces = vec![owned(10, under(1))];
     s.traces[0].edit.slot = Some(1);
     let mut t = loaded(s.clone());
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     let pane = t.pane(PaneKind::Transfer);
     let main = |t: &T| {
         crate::scenes::transfer(&t.st, pane, &Theme::dark(), SIZE, now())
@@ -626,7 +626,7 @@ fn a_stopped_transfer_measurement_keeps_its_curve_tagged() {
     for _ in 0..3 {
         t.key("Shift+G");
     }
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     t.key("A");
     assert_eq!(legend(&t), ["t10"]);
     t.key("A");
@@ -653,7 +653,7 @@ fn a_legend_row_click_selects_its_curve_for_a() {
             ];
         }
     });
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     let pane = t.pane(PaneKind::Transfer);
     // The click as the pane makes it: the scene's row under the pointer.
     let click = |t: &mut T, name: &str| {
@@ -667,7 +667,7 @@ fn a_legend_row_click_selects_its_curve_for_a() {
             .rect;
         let key =
             ac2_scene::legend::hit_at(&s.legend_hits, r.x + 4.0, r.y + r.h / 2.0).expect("hit");
-        t.st.update(Msg::LegendPick(pane, key), &t.keys);
+        t.st.apply(Msg::LegendPick(pane, key), &t.keys);
         key
     };
     let active = |t: &T| {
@@ -706,9 +706,12 @@ fn a_legend_row_click_selects_its_curve_for_a() {
     ] {
         assert_eq!(click(&mut t, name), key);
         match key {
-            TraceKey::Stored(id) => assert_eq!(t.st.selected_trace, Some(id)),
+            TraceKey::Stored(id) => assert_eq!(t.st.rig.selected_trace, Some(id)),
             TraceKey::Live(id) => {
-                assert_eq!((t.st.selected, t.st.selected_trace), (Some(id), None));
+                assert_eq!(
+                    (t.st.rig.selected, t.st.rig.selected_trace),
+                    (Some(id), None)
+                );
             }
         }
         assert!(active(&t).contains(&row), "{name}: {:?}", active(&t));

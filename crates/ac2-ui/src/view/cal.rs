@@ -22,6 +22,7 @@ pub(super) fn cal_page(app: &App, ui: &mut egui::Ui, v: &CalView, ch: &Chrome) {
     let now = super::now();
     let offset = ac2_scene::time::ClockOffset(
         app.state
+            .rig
             .mirror
             .as_ref()
             .and_then(|m| m.clock_offset_ns)

@@ -13,7 +13,8 @@ impl AppState {
     pub fn autosave_label(&self, client_now: WallNs) -> Option<AutosaveLabel> {
         let daemon = self.daemon()?;
         let offset = ClockOffset(
-            self.mirror
+            self.rig
+                .mirror
                 .as_ref()
                 .and_then(|v| v.clock_offset_ns)
                 .map_or(0, |o| {

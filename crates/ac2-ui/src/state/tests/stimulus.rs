@@ -5,7 +5,7 @@ use super::*;
 #[test]
 fn selects_the_first_transfer_measurement() {
     let t = T::new();
-    assert_eq!(t.st.selected, Some(MeasId(1)));
+    assert_eq!(t.st.rig.selected, Some(MeasId(1)));
     let names: Vec<&str> =
         t.st.measurements()
             .iter()
@@ -24,20 +24,20 @@ fn stimulus_needs_a_typed_level() {
         &t.st.overlay,
         Overlay::Prompt(p) if p.kind == PromptKind::StimulusLevel && p.text.is_empty()
     ));
-    assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
     // Enter in the prompt applies it; it does not fire.
     t.text("-20");
     let r = t.key("Enter");
     assert!(r.is_empty(), "{r:?}");
-    assert_eq!(t.st.stimulus.level, Some(Dbfs(-20.0)));
+    assert_eq!(t.st.rig.stimulus.level, Some(Dbfs(-20.0)));
     assert_eq!(t.st.overlay, Overlay::None);
-    assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
 }
 
 #[test]
 fn arm_fire_level_stop() {
     let mut t = T::new();
-    t.st.stimulus.level = Some(Dbfs(-20.0));
+    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
     // Enter before arming does nothing but say so.
     assert!(t.key("Enter").is_empty());
     assert!(t.last_toast().contains("not armed"));
@@ -52,20 +52,20 @@ fn arm_fire_level_stop() {
         }
         other => panic!("{other:?}"),
     }
-    assert_eq!(t.st.stimulus.phase, StimPhase::Arming);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Arming);
     // A second Space while arming sends nothing.
     assert!(t.key("Space").is_empty());
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
-    assert_eq!(t.st.stimulus.phase, StimPhase::Armed);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Armed);
 
     let r = t.key("Enter");
     assert_eq!(
         r.iter().filter_map(set_level).collect::<Vec<_>>(),
         [(-20.0, true, true)]
     );
-    assert_eq!(t.st.stimulus.phase, StimPhase::FireRequested);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::FireRequested);
     t.conn(ConnEvent::Stimulus(StimEvent::Set { firing: true }));
-    assert_eq!(t.st.stimulus.phase, StimPhase::Firing);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Firing);
 
     // ↑/↓ change the level of the running stimulus; Shift steps 3 dB.
     let r = t.key("Up");
@@ -81,9 +81,9 @@ fn arm_fire_level_stop() {
 
     let r = t.key("Esc");
     assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
-    assert_eq!(t.st.stimulus.phase, StimPhase::Stopping);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Stopping);
     t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
-    assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
 }
 
 /// Space right after Esc, while the stop is still on its way: nothing goes out then (the
@@ -93,11 +93,11 @@ fn arm_fire_level_stop() {
 #[test]
 fn space_during_a_stop_arms_once_the_stop_lands() {
     let stopping = |t: &mut T| {
-        t.st.stimulus.level = Some(Dbfs(-20.0));
-        t.st.stimulus.phase = StimPhase::Firing;
+        t.st.rig.stimulus.level = Some(Dbfs(-20.0));
+        t.st.rig.stimulus.phase = StimPhase::Firing;
         let r = t.key("Esc");
         assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
-        assert_eq!(t.st.stimulus.phase, StimPhase::Stopping);
+        assert_eq!(t.st.rig.stimulus.phase, StimPhase::Stopping);
         assert!(
             t.key("Space").is_empty(),
             "nothing while the stop is in flight"
@@ -111,16 +111,16 @@ fn space_during_a_stop_arms_once_the_stop_lands() {
     stopping(&mut t);
     let r = t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
     assert!(is_arm(&r), "{r:?}");
-    assert_eq!(t.st.stimulus.phase, StimPhase::Arming);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Arming);
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
-    assert_eq!(t.st.stimulus.phase, StimPhase::Armed);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Armed);
 
     // The stop failed: the lease is in doubt, nothing arms.
     let mut t = T::new();
     stopping(&mut t);
     let r = t.conn(ConnEvent::Stimulus(StimEvent::Failed("timeout".into())));
     assert!(r.is_empty(), "{r:?}");
-    assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
     assert!(t.conn(ConnEvent::Stimulus(StimEvent::Stopped)).is_empty());
 
     // The lease is gone.
@@ -136,7 +136,7 @@ fn space_during_a_stop_arms_once_the_stop_lands() {
         t.key(chord);
         let r = t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
         assert!(r.is_empty(), "{chord}: {r:?}");
-        assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
+        assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
     }
 
     // The connection dropped: a new one holds no lease and arms nothing.
@@ -147,7 +147,7 @@ fn space_during_a_stop_arms_once_the_stop_lands() {
         error: "not responding".into(),
         retry_in: std::time::Duration::from_secs(2),
     });
-    assert!(!t.st.stimulus.arm_after_stop);
+    assert!(!t.st.rig.stimulus.arm_after_stop);
     assert!(t.conn(ConnEvent::Stimulus(StimEvent::Stopped)).is_empty());
 
     // The audio stopped meanwhile: the daemon disarmed it, and nothing arms after the stop.
@@ -163,7 +163,7 @@ fn space_during_a_stop_arms_once_the_stop_lands() {
         },
     });
     t.conn(mirror(s));
-    assert!(!t.st.stimulus.arm_after_stop);
+    assert!(!t.st.rig.stimulus.arm_after_stop);
     assert!(t.last_toast().contains("the audio stopped"));
     assert!(t.conn(ConnEvent::Stimulus(StimEvent::Stopped)).is_empty());
 }
@@ -180,10 +180,10 @@ fn level_never_exceeds_the_ceiling() {
         Overlay::Prompt(p) => assert!(p.error.as_deref().unwrap_or("").contains("ceiling")),
         o => panic!("{o:?}"),
     }
-    assert_eq!(t.st.stimulus.level, None);
+    assert_eq!(t.st.rig.stimulus.level, None);
     t.key("Esc");
-    t.st.stimulus.level = Some(Dbfs(-7.0));
-    t.st.stimulus.phase = StimPhase::Armed;
+    t.st.rig.stimulus.level = Some(Dbfs(-7.0));
+    t.st.rig.stimulus.phase = StimPhase::Armed;
     let r = t.key("Shift+Up");
     assert_eq!(
         r.iter().filter_map(set_level).collect::<Vec<_>>(),
@@ -203,13 +203,13 @@ fn arrows_without_level_send_nothing() {
             .last()
             .is_some_and(|x| x.severity == Severity::Warning)
     );
-    assert_eq!(t.st.stimulus.level, None);
+    assert_eq!(t.st.rig.stimulus.level, None);
 }
 
 #[test]
 fn escape_closes_a_window_or_stops() {
     let mut t = T::new();
-    t.st.stimulus.level = Some(Dbfs(-20.0));
+    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
     t.key("Space");
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     // Esc from inside the palette only closes it; the next Esc, with nothing open, stops.
@@ -217,7 +217,7 @@ fn escape_closes_a_window_or_stops() {
     assert!(matches!(t.st.overlay, Overlay::Palette(_)));
     assert!(t.key("Esc").is_empty());
     assert_eq!(t.st.overlay, Overlay::None);
-    assert_eq!(t.st.stimulus.phase, StimPhase::Armed);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Armed);
     let r = t.key("Esc");
     assert!(matches!(r.as_slice(), [Request::StimStop]));
     // Another client's running generator: Esc stops it too (gen.stop is universal).
@@ -240,26 +240,26 @@ fn escape_closes_a_window_or_stops() {
 #[test]
 fn disconnected_never_arms() {
     let mut t = T::disconnected();
-    t.st.stimulus.level = Some(Dbfs(-20.0));
+    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
     assert!(t.key("Space").is_empty());
     assert!(t.last_toast().contains("not connected"));
-    assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
 }
 
 #[test]
 fn lost_lease_returns_to_idle() {
     let mut t = T::new();
-    t.st.stimulus.level = Some(Dbfs(-20.0));
+    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
     t.key("Space");
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     t.conn(ConnEvent::Stimulus(StimEvent::Lost("taken over".into())));
-    assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
     assert!(t.last_toast().contains("taken over"));
     assert!(t.key("Enter").is_empty());
     // A failed arm also returns to idle.
     t.key("Space");
     t.conn(ConnEvent::Stimulus(StimEvent::Failed("lease held".into())));
-    assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
 }
 
 #[test]
@@ -272,10 +272,10 @@ fn opening_key_is_not_typed_into_the_prompt() {
         Overlay::Prompt(p) => assert_eq!(p.text, "-18"),
         o => panic!("{o:?}"),
     }
-    t.st.update(Msg::Backspace, &t.keys.clone());
+    t.st.apply(Msg::Backspace, &t.keys.clone());
     t.text("9");
     t.key("Enter");
-    assert_eq!(t.st.stimulus.level, Some(Dbfs(-19.0)));
+    assert_eq!(t.st.rig.stimulus.level, Some(Dbfs(-19.0)));
 }
 
 /// P on the spectrum pane steps the focused pane's measurement off → peak hold → peak
@@ -490,7 +490,7 @@ fn transfer_commands() {
     assert_eq!(t.st.view.tf.phase, PhaseView::Wrapped);
     t.key("Shift+P");
     assert!(matches!(t.st.view.tf.phase, PhaseView::Unwrapped { .. }));
-    t.st.update(Msg::Command(CommandId::CoherencePlacement), &t.keys);
+    t.st.apply(Msg::Command(CommandId::CoherencePlacement), &t.keys);
     assert_eq!(
         t.st.view.tf.coherence_placement,
         ac2_scene::view::CoherencePlacement::OverlayOnMagnitude
@@ -568,12 +568,12 @@ fn transfer_commands_need_a_transfer_measurement() {
     let mut t = T::new();
     // The spectrum picked in the list: the spectrum pane takes the keys, and a transfer
     // command from the palette says what it needs.
-    t.st.update(Msg::SelectMeas(MeasId(2)), &t.keys);
-    assert_eq!(t.st.selected, Some(MeasId(2)));
+    t.st.apply(Msg::SelectMeas(MeasId(2)), &t.keys);
+    assert_eq!(t.st.rig.selected, Some(MeasId(2)));
     assert_eq!(t.focus_kind(), PaneKind::Spectrum);
     assert!(t.key("X").is_empty());
     assert!(
-        t.st.update(Msg::Command(CommandId::InsertDelay), &t.keys)
+        t.st.apply(Msg::Command(CommandId::InsertDelay), &t.keys)
             .is_empty()
     );
     assert!(t.last_toast().contains("transfer-function"));
@@ -581,13 +581,13 @@ fn transfer_commands_need_a_transfer_measurement() {
 
 /// Arms the generator at −20 dBFS and, with `fire`, plays it.
 fn play_noise(t: &mut T, fire: bool) {
-    t.st.stimulus.level = Some(Dbfs(-20.0));
+    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
     t.key("Space");
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     if fire {
         t.key("Enter");
         t.conn(ConnEvent::Stimulus(StimEvent::Set { firing: true }));
-        assert_eq!(t.st.stimulus.phase, StimPhase::Firing);
+        assert_eq!(t.st.rig.stimulus.phase, StimPhase::Firing);
     }
 }
 
@@ -616,13 +616,13 @@ fn stopping_the_last_transfer_stops_the_stimulus() {
     play_noise(&mut t, true);
     let r = t.key("S");
     assert_eq!(meas_stop(&r), (STIM_TOO.into(), true));
-    assert_eq!(t.st.stimulus.phase, StimPhase::Stopping);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Stopping);
     t.conn(ConnEvent::Reply {
         what: STIM_TOO.into(),
         result: Ok(()),
     });
     t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
-    assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
     // One toast says both; the stop's own "stimulus stopped" would repeat it.
     assert_eq!(t.last_toast(), STIM_TOO);
     // The next operator stop says so again.
@@ -661,10 +661,10 @@ fn every_stop_path_of_a_transfer_stops_the_stimulus() {
             Some(p) => t.put(p),
             None => t.put_ir(),
         }
-        t.st.selected = Some(MeasId(1));
+        t.st.rig.selected = Some(MeasId(1));
         let r = match via {
             Via::Key => t.key("S"),
-            Via::Palette => t.st.update(Msg::Command(CommandId::StartStop), &t.keys),
+            Via::Palette => t.st.apply(Msg::Command(CommandId::StartStop), &t.keys),
         };
         assert_eq!(meas_stop(&r), (STIM_TOO.into(), true), "{focus:?}");
     }
@@ -677,10 +677,10 @@ fn another_running_transfer_keeps_the_stimulus() {
     s.measurements.push(meas(3, "Main R", transfer()));
     t.conn(mirror(s.clone()));
     t.put(PaneKind::Transfer);
-    t.st.selected = Some(MeasId(1));
+    t.st.rig.selected = Some(MeasId(1));
     play_noise(&mut t, true);
     assert_eq!(meas_stop(&t.key("S")), ("Main L stopped".into(), false));
-    assert_eq!(t.st.stimulus.phase, StimPhase::Firing);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Firing);
     // A stopped one does not count: with Main R stopped, Main L is the last running.
     s.measurements[2].running = false;
     t.conn(mirror(s));
@@ -694,7 +694,7 @@ fn stopping_a_spectrum_keeps_the_stimulus() {
     play_noise(&mut t, true);
     t.put(PaneKind::Spectrum);
     assert_eq!(meas_stop(&t.key("S")), ("Sub stopped".into(), false));
-    assert_eq!(t.st.stimulus.phase, StimPhase::Firing);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Firing);
 }
 
 #[test]
@@ -723,9 +723,9 @@ fn a_sweep_is_never_stopped_by_a_transfer_stop() {
     let mut t = T::new();
     t.put(PaneKind::Transfer);
     play_noise(&mut t, true);
-    t.st.sweep.run = Some(sweep_run(SweepStatus::Playing { repeat: 1 }).id);
+    t.st.rig.sweep.run = Some(sweep_run(SweepStatus::Playing { repeat: 1 }).id);
     assert_eq!(meas_stop(&t.key("S")), ("Main L stopped".into(), false));
-    assert_eq!(t.st.stimulus.phase, StimPhase::Firing);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Firing);
 }
 
 /// Arming, firing, stopping and an arm queued behind a stop never change the layout, the
@@ -750,7 +750,7 @@ fn the_stimulus_never_changes_the_layout() {
         };
         let before = seen(&t);
         let check = |t: &mut T, what: &str| assert_eq!(seen(t), before, "{keys:?}: {what}");
-        t.st.stimulus.level = Some(Dbfs(-20.0));
+        t.st.rig.stimulus.level = Some(Dbfs(-20.0));
         t.key("Space");
         check(&mut t, "arming");
         t.conn(ConnEvent::Stimulus(StimEvent::Armed));
@@ -767,7 +767,7 @@ fn the_stimulus_never_changes_the_layout() {
         t.key("Escape");
         check(&mut t, "stopping");
         t.key("Space");
-        assert!(t.st.stimulus.arm_after_stop);
+        assert!(t.st.rig.stimulus.arm_after_stop);
         check(&mut t, "an arm queued behind the stop");
         t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
         check(&mut t, "stopped, arming again");
@@ -807,7 +807,7 @@ fn deleting_the_last_transfer_stops_the_stimulus() {
     let mut t = T::new();
     t.put(PaneKind::Transfer);
     play_noise(&mut t, true);
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     t.key("Delete");
     assert!(
         matches!(t.st.overlay, Overlay::Delete(_)),
@@ -821,7 +821,7 @@ fn deleting_the_last_transfer_stops_the_stimulus() {
             true
         )
     );
-    assert_eq!(t.st.stimulus.phase, StimPhase::Stopping);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Stopping);
     t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
     assert_ne!(t.last_toast(), "stimulus stopped");
 
@@ -830,7 +830,7 @@ fn deleting_the_last_transfer_stops_the_stimulus() {
     t.conn(mirror(tree_state()));
     t.put(PaneKind::Transfer);
     play_noise(&mut t, false);
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     t.key("Delete");
     assert!(
         matches!(t.st.overlay, Overlay::Choose(_)),
@@ -850,7 +850,7 @@ fn deleting_the_last_transfer_stops_the_stimulus() {
 #[test]
 fn deleting_keeps_the_stimulus_when_a_stop_would() {
     let delete = |t: &mut T, meas: u32| {
-        t.st.update(Msg::SelectMeas(MeasId(meas)), &t.keys);
+        t.st.apply(Msg::SelectMeas(MeasId(meas)), &t.keys);
         t.key("Delete");
         meas_delete(&t.key("Delete"))
     };
@@ -883,7 +883,7 @@ fn deleting_keeps_the_stimulus_when_a_stop_would() {
     // A sweep running.
     let mut t = T::new();
     play_noise(&mut t, true);
-    t.st.sweep.run = Some(sweep_run(SweepStatus::Playing { repeat: 1 }).id);
+    t.st.rig.sweep.run = Some(sweep_run(SweepStatus::Playing { repeat: 1 }).id);
     assert_eq!(delete(&mut t, 1), ("Main L deleted".into(), false));
 }
 
@@ -910,7 +910,7 @@ fn delay_steps_need_the_live_curve() {
             .iter()
             .find(|m| m.config.name == "Main L")
             .map(|m| m.id);
-    t.st.hidden_meas.insert(main.expect("Main L"));
+    t.st.rig.hidden_meas.insert(main.expect("Main L"));
     assert!(t.key("Ctrl+.").is_empty());
     assert!(
         t.last_toast().starts_with("Main L is hidden"),

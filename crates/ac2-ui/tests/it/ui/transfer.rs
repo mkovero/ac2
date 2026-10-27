@@ -22,7 +22,7 @@ fn transfer_view_two_traces_and_banner() {
     });
     {
         let st = &h.state().state;
-        assert_eq!(st.selected, Some(MeasId(1)));
+        assert_eq!(st.rig.selected, Some(MeasId(1)));
         let s = ac2_ui::scenes::transfer(
             st,
             crate::common::pane(st, ac2_ui::state::PaneKind::Transfer),
@@ -199,7 +199,7 @@ fn alignment_view() {
     let mut h = harness(options(Some(&rig)));
     step_until(&mut h, "the alignment's frames", |a| {
         live_with(a, 5)
-            && a.state.data.as_ref().is_some_and(|d| {
+            && a.state.rig.data.as_ref().is_some_and(|d| {
                 d.latest
                     .get(&Topic::Data {
                         meas: MeasId(9),
@@ -261,7 +261,7 @@ fn math_average_legend_and_banner() {
     let mut h = harness(options(Some(&rig)));
     let has_average = |app: &App| {
         app.state.measurements().len() == 6
-            && app.state.data.as_ref().is_some_and(|d| {
+            && app.state.rig.data.as_ref().is_some_and(|d| {
                 d.latest
                     .get(&Topic::Data {
                         meas: MeasId(6),
@@ -275,7 +275,7 @@ fn math_average_legend_and_banner() {
     });
     // The transfer pane shows the average: its banner names the position left out.
     common::show_on(&mut h.state_mut().state, PaneKind::Transfer, MeasId(6));
-    h.state_mut().state.selected = Some(MeasId(6));
+    h.state_mut().state.rig.selected = Some(MeasId(6));
     {
         let st = &h.state().state;
         let s = ac2_ui::scenes::transfer(
@@ -352,7 +352,7 @@ fn spectrum_math() {
     let mut h = harness(options(Some(&rig)));
     step_until(&mut h, "the spectrum math's frames", |a| {
         live_with(a, 6)
-            && a.state.data.as_ref().is_some_and(|d| {
+            && a.state.rig.data.as_ref().is_some_and(|d| {
                 d.latest
                     .get(&Topic::Data {
                         meas: MeasId(7),
@@ -405,7 +405,7 @@ fn transfer_legend_many_curves() {
     let fake = ac2_client::fake::FakeDaemon::start(common::fake_options()).expect("fake daemon");
     let mut h = harness(options_at(Some(fake.endpoints())));
     step_until(&mut h, "synced", |a| {
-        a.state.mirror.as_ref().is_some_and(|m| m.synced())
+        a.state.rig.mirror.as_ref().is_some_and(|m| m.synced())
     });
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../ac2-traces/tests/fixtures/house_curve.txt");
@@ -423,13 +423,13 @@ fn transfer_legend_many_curves() {
         h.event(Event::Text(path.to_string_lossy().into_owned()));
         h.key_press(Key::Enter);
         step_until(&mut h, "one more curve", |a| {
-            a.state.traces.len() == n && a.state.overlay == Overlay::None
+            a.state.rig.traces.len() == n && a.state.overlay == Overlay::None
         });
     }
     // Filed under a transfer measurement: under Imported no pane would draw them.
     common::file_traces_under_main_l(&fake);
     step_until(&mut h, "every curve under Main L", |a| {
-        a.state.traces.values().all(|(d, _)| {
+        a.state.rig.traces.values().all(|(d, _)| {
             d.meta.edit.owner
                 == ac2_proto::model::TraceOwner::Meas {
                     meas: ac2_proto::units::MeasId(1),

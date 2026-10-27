@@ -53,7 +53,7 @@ fn owned_trace(s: &AppState, meas: MeasId) -> Option<TraceId> {
 
 /// `trace` selected (a click on its row; a click on the selected row unselects it).
 fn select(d: &mut Driver, trace: TraceId) {
-    if d.st.selected_trace != Some(trace) {
+    if d.st.rig.selected_trace != Some(trace) {
         d.send(Msg::SelectTrace(trace));
     }
 }
@@ -65,7 +65,7 @@ fn move_selected(d: &mut Driver, trace: TraceId, to: TraceOwner) -> R {
     let Overlay::Choose(c) = &mut d.st.overlay else {
         return Err(format!(
             "no move dialog: {:?}, selected {:?}, toasts {:?}",
-            d.st.overlay, d.st.selected_trace, d.st.toasts.list
+            d.st.overlay, d.st.rig.selected_trace, d.st.toasts.list
         )
         .into());
     };
@@ -88,7 +88,8 @@ fn capture(d: &mut Driver, meas: MeasId, slot: u8) -> R<TraceId> {
         stream: Stream::Spec,
     };
     d.until("a spectrum to capture", |s| {
-        s.data
+        s.rig
+            .data
             .as_ref()
             .is_some_and(|x| x.latest.get(&topic).is_some())
     })?;
@@ -263,7 +264,8 @@ fn a_transfer_pane_does_not_draw_imported_from_an_empty_daemon() -> R {
         stream: Stream::Tf,
     };
     d.until("a transfer frame to capture", |s| {
-        s.data
+        s.rig
+            .data
             .as_ref()
             .is_some_and(|x| x.latest.get(&topic).is_some())
     })?;
@@ -487,7 +489,7 @@ fn slow_the_distortion_pane_shows_its_own_sweep_from_an_empty_daemon() -> R {
         PaneKind::Transfer,
     )));
     select(&mut d, run_b);
-    assert_eq!(d.st.selected_trace, Some(run_b));
+    assert_eq!(d.st.rig.selected_trace, Some(run_b));
     assert_eq!(d.st.pane_meas(pane).map(|m| m.id), Some(sweep_a));
     assert_eq!(
         d.st.pane_sweep(pane).map(|(t, _)| t.meta.id),
@@ -568,10 +570,10 @@ fn a_chip_pick_in_own_panes_comes_back_with_their_row_from_an_empty_daemon() -> 
         [Some(s2), Some(s1)],
         "the pick: that pane alone"
     );
-    assert_eq!(d.st.selected, Some(s2), "a pick moves no selection");
+    assert_eq!(d.st.rig.selected, Some(s2), "a pick moves no selection");
     d.send(Msg::SelectMeas(s1));
     d.send(Msg::SelectMeas(s2));
-    assert_eq!(d.st.selected, Some(s2));
+    assert_eq!(d.st.rig.selected, Some(s2));
     assert_eq!(spectrum_panes(&d.st).len(), 2);
     assert_eq!(
         shown(&d.st),
@@ -614,12 +616,16 @@ fn picks_and_level_axes_come_back_to_a_restarted_app_from_an_empty_daemon() -> R
     d.key("G");
     d.key("G");
     d.send(Msg::PanePick(right, PaneMenuRow::Meas(s1)));
-    assert_eq!(d.st.selected, Some(s2), "the pick leaves the row selected");
+    assert_eq!(
+        d.st.rig.selected,
+        Some(s2),
+        "the pick leaves the row selected"
+    );
     let before = d.st.level_range(right).ok_or("level axis")?;
     d.key("Ctrl+I");
     let zoomed = d.st.level_range(right).ok_or("level axis")?;
     assert_ne!(zoomed, before, "the zoom");
-    assert_eq!(d.st.selected, Some(s2));
+    assert_eq!(d.st.rig.selected, Some(s2));
     d.until("Spectrum 2's layout on the daemon", |s| {
         s.meas(s2)
             .and_then(|m| m.layout.as_ref())
@@ -634,7 +640,7 @@ fn picks_and_level_axes_come_back_to_a_restarted_app_from_an_empty_daemon() -> R
         s.meas(s1).is_some() && s.meas(s2).is_some()
     })?;
     d.send(Msg::SelectMeas(s2));
-    assert_eq!(d.st.selected, Some(s2));
+    assert_eq!(d.st.rig.selected, Some(s2));
     assert_eq!(d.st.pane_layout(), saved, "Spectrum 2's panes, as left");
     let [left, right] = spectrum_panes(&d.st)[..] else {
         return Err(format!("{:?}", spectrum_panes(&d.st)).into());
@@ -643,7 +649,8 @@ fn picks_and_level_axes_come_back_to_a_restarted_app_from_an_empty_daemon() -> R
     assert_eq!(d.st.pane_meas(right).map(|m| m.id), Some(s1), "the pick");
     assert_eq!(d.st.level_range(right), Some(zoomed), "the zoom");
     d.until("Spectrum 1's spectrograph filling", |s| {
-        s.spectrographs
+        s.rig
+            .spectrographs
             .get(&s1)
             .is_some_and(|h| h.ring().iter().flatten().count() >= 10)
     })?;
@@ -652,7 +659,11 @@ fn picks_and_level_axes_come_back_to_a_restarted_app_from_an_empty_daemon() -> R
         Some(zoomed),
         "an operator's range is not refitted"
     );
-    assert_eq!(d.st.selected, Some(s2), "the selection stayed on the row");
+    assert_eq!(
+        d.st.rig.selected,
+        Some(s2),
+        "the selection stayed on the row"
+    );
     drop(d);
     drop(daemon);
     Ok(())

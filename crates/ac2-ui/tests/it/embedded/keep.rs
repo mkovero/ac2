@@ -145,7 +145,7 @@ fn until_kiosk(
     loop {
         desk.pump();
         for e in kiosk.conn.drain() {
-            kiosk.send(Msg::Conn(Box::new(e)));
+            kiosk.send(Msg::Conn(kiosk.st.active(), Box::new(e)));
             saved_kiosk(&kiosk.st).map_err(|e| format!("waiting for {what}: {e}"))?;
         }
         if cond(&kiosk.st) {
@@ -319,18 +319,20 @@ fn a_swapped_daemon_salvaged_keeps_the_kiosk_on_its_meter() -> R {
     let (mut desk, mut kiosk) = rig(&ep, &cli)?;
     let saved = saved_measurements(&kiosk.st);
     drop(cli);
-    let incarnation = kiosk.st.mirror.as_ref().and_then(|m| m.incarnation);
+    let incarnation = kiosk.st.rig.mirror.as_ref().and_then(|m| m.incarnation);
     handle.shutdown();
 
     let fresh = tempfile::tempdir()?;
     let (handle, _) = daemon(fresh.path(), &ep, false)?;
     until_kiosk(&mut desk, &mut kiosk, "the new daemon", |s| {
-        s.mirror
+        s.rig
+            .mirror
             .as_ref()
             .is_some_and(|m| m.synced() && m.incarnation != incarnation)
     })?;
     desk.until("the desk on the new daemon", |s| {
-        s.mirror
+        s.rig
+            .mirror
             .as_ref()
             .is_some_and(|m| m.synced() && m.incarnation != incarnation)
     })?;
@@ -365,12 +367,13 @@ fn a_restarted_daemon_keeps_the_kiosk_on_its_meter() -> R {
                 && x.autosave.saved_at.is_some()
         })
     })?;
-    let incarnation = kiosk.st.mirror.as_ref().and_then(|m| m.incarnation);
+    let incarnation = kiosk.st.rig.mirror.as_ref().and_then(|m| m.incarnation);
     handle.shutdown();
 
     let (handle, _) = daemon(dir.path(), &ep, true)?;
     until_kiosk(&mut desk, &mut kiosk, "the restarted daemon", |s| {
-        s.mirror
+        s.rig
+            .mirror
             .as_ref()
             .is_some_and(|m| m.synced() && m.incarnation != incarnation)
             && meas_named(s, SPL).is_some()
@@ -380,7 +383,8 @@ fn a_restarted_daemon_keeps_the_kiosk_on_its_meter() -> R {
         shown_kiosk(s).is_ok()
     })?;
     desk.until("the desk reconnected", |s| {
-        s.mirror
+        s.rig
+            .mirror
             .as_ref()
             .is_some_and(|m| m.synced() && m.incarnation != incarnation)
     })?;

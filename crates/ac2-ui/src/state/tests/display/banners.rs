@@ -6,7 +6,8 @@ use super::*;
 /// The newest frame of spectrum measurement `id`, aged `age_s` with the client's STALE flag.
 fn aged_spec(t: &T, id: u32, age_s: f64) -> ac2_client::TopicFrame {
     let mut f =
-        t.st.spectrum_frame(MeasId(id))
+        t.st.rig
+            .spectrum_frame(MeasId(id))
             .expect("spectrum frame")
             .clone();
     f.age = Some(age_s);
@@ -248,7 +249,7 @@ fn the_ir_pane_says_why_there_is_no_ir() {
             "stimulus off: Space arms, Enter starts it".into()
         )
     );
-    t.st.stimulus.level = Some(Dbfs(-20.0));
+    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
     t.key("Space");
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     assert_eq!(

@@ -16,7 +16,7 @@ impl AppState {
         let pick = |id: Option<MeasId>| id.and_then(|id| c.iter().find(|m| m.id == id).copied());
         let home = |m: &Measurement| PaneKind::for_kind(&m.config.kind) == kind;
         pick(own)
-            .or_else(|| pick(self.chosen).filter(|m| home(m)))
+            .or_else(|| pick(self.rig.chosen).filter(|m| home(m)))
             .or_else(|| c.iter().find(|m| home(m)).copied())
             .or_else(|| c.first().copied())
     }
@@ -264,7 +264,7 @@ impl AppState {
         if !self.layout.stack(p, &views) {
             return false;
         }
-        self.pending.pane_meas.remove(&p);
+        self.rig.pending.pane_meas.remove(&p);
         self.focus_pane(p);
         true
     }
@@ -276,7 +276,7 @@ impl AppState {
         let meas = if self.layout.kind(f) == PaneKind::Transfer {
             self.pane_meas(f)
         } else {
-            self.selected.and_then(|id| self.meas(id))
+            self.rig.selected.and_then(|id| self.meas(id))
         }
         .filter(|m| matches!(m.config.kind, MeasKind::Transfer { .. }))
         .map(|m| m.id);
@@ -360,12 +360,12 @@ impl AppState {
         if let Some(v) = self.layout.view_mut(p) {
             v.meas = v.meas.or(shown);
         }
-        let waiting = self.pending.pane_meas.get(&p).cloned();
+        let waiting = self.rig.pending.pane_meas.get(&p).cloned();
         self.layout.maximized = false;
         let new = self.layout.split_pane(p, axis, side);
         self.copy_levels(p, new);
         if let Some(n) = waiting {
-            self.pending.pane_meas.insert(new, n);
+            self.rig.pending.pane_meas.insert(new, n);
         }
         Some(new)
     }
@@ -420,7 +420,8 @@ impl AppState {
         if matches!(self.overlay, Overlay::PaneMenu(m) if m.pane == gone) {
             self.overlay = Overlay::None;
         }
-        self.pending
+        self.rig
+            .pending
             .pane_meas
             .retain(|id, _| self.layout.views.contains_key(id));
     }
@@ -538,7 +539,7 @@ impl AppState {
     /// Focuses pane `id` from the keyboard: it takes the keys; the selection stays on the
     /// row the operator chose.
     pub(in crate::state) fn focus_pane(&mut self, id: PaneId) {
-        self.input_pick = None;
+        self.rig.input_pick = None;
         self.layout.set_focus(id);
     }
 
@@ -568,10 +569,10 @@ impl AppState {
             }
             v.kind = kind;
         }
-        self.pending.pane_meas.remove(&id);
+        self.rig.pending.pane_meas.remove(&id);
         // The history goes with the last spectrograph shown.
         if !self.spectrograph_shown() {
-            self.spectrographs.clear();
+            self.rig.spectrographs.clear();
             self.view.spectrum.spectrograph.cursor_s = None;
         }
     }

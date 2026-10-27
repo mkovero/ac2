@@ -21,12 +21,12 @@ fn stimulus_requests(r: &[Request]) -> Vec<&Request> {
 
 /// Pink noise at −20 dBFS, playing.
 fn firing(t: &mut T) {
-    t.st.stimulus.level = Some(Dbfs(-20.0));
+    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
     t.key("Space");
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     t.key("Enter");
     t.conn(ConnEvent::Stimulus(StimEvent::Set { firing: true }));
-    assert_eq!(t.st.stimulus.phase, StimPhase::Firing);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Firing);
 }
 
 /// The windows, each with how it opens on a daemon that has what it needs.
@@ -85,7 +85,7 @@ fn with_window(w: Window) -> T {
     t.conn(leq_data(1, 100, 80.0, ac2_proto::frame::LeqFlags::NONE));
     firing(&mut t);
     let cmd = |t: &mut T, c: CommandId| {
-        t.st.update(Msg::Command(c), &t.keys);
+        t.st.apply(Msg::Command(c), &t.keys);
     };
     match w {
         Window::Help => {
@@ -109,7 +109,7 @@ fn with_window(w: Window) -> T {
             open_dialog(&mut t, backends(true));
         }
         Window::PaneMenu => {
-            t.st.update(Msg::PaneMenu(t.pane(PaneKind::Transfer)), &t.keys);
+            t.st.apply(Msg::PaneMenu(t.pane(PaneKind::Transfer)), &t.keys);
         }
         Window::NewMeas => cmd(&mut t, CommandId::NewMeasurement),
         Window::Calibrations => cmd(&mut t, CommandId::Calibrations),
@@ -173,7 +173,7 @@ fn with_window(w: Window) -> T {
 fn a_window_owns_the_arrows_and_esc_closes_it_without_touching_the_stimulus() {
     for w in WINDOWS {
         let mut t = with_window(w);
-        let level = t.st.stimulus.level;
+        let level = t.st.rig.stimulus.level;
         for k in [
             "Up",
             "Down",
@@ -188,13 +188,13 @@ fn a_window_owns_the_arrows_and_esc_closes_it_without_touching_the_stimulus() {
         ] {
             let r = t.key(k);
             assert!(stimulus_requests(&r).is_empty(), "{w:?} {k}: {r:?}");
-            assert_eq!(t.st.stimulus.level, level, "{w:?} {k}");
-            assert_eq!(t.st.stimulus.phase, StimPhase::Firing, "{w:?} {k}");
+            assert_eq!(t.st.rig.stimulus.level, level, "{w:?} {k}");
+            assert_eq!(t.st.rig.stimulus.phase, StimPhase::Firing, "{w:?} {k}");
         }
         assert_ne!(t.st.overlay, Overlay::None, "{w:?}: the keys closed it");
         let r = t.key("Esc");
         assert!(stimulus_requests(&r).is_empty(), "{w:?} Esc: {r:?}");
-        assert_eq!(t.st.stimulus.phase, StimPhase::Firing, "{w:?}");
+        assert_eq!(t.st.rig.stimulus.phase, StimPhase::Firing, "{w:?}");
         // A dialog over a view closes back to the view; the next Esc closes the view.
         if matches!(w, Window::Electrical | Window::Acoustic) {
             assert!(cal_view(&t).electrical.is_none() && cal_view(&t).acoustic.is_none());
@@ -216,7 +216,7 @@ fn the_stop_chord_stops_from_inside_every_window() {
         let before = std::mem::discriminant(&t.st.overlay);
         let r = t.key("Shift+Esc");
         assert!(matches!(r.as_slice(), [Request::StimStop]), "{w:?}: {r:?}");
-        assert_eq!(t.st.stimulus.phase, StimPhase::Stopping, "{w:?}");
+        assert_eq!(t.st.rig.stimulus.phase, StimPhase::Stopping, "{w:?}");
         // It stops; it does not close what is open.
         assert_eq!(std::mem::discriminant(&t.st.overlay), before, "{w:?}");
     }
@@ -241,7 +241,7 @@ fn space_and_enter_in_a_window_never_arm_or_fire() {
         t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
         let r = t.key("Space");
         assert!(stimulus_requests(&r).is_empty(), "{w:?}: {r:?}");
-        assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
+        assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
     }
     let mut t = with_window(Window::Help);
     t.key("Shift+Esc");
@@ -254,7 +254,7 @@ fn space_and_enter_in_a_window_never_arm_or_fire() {
     let r = t.key("Enter");
     assert!(stimulus_requests(&r).is_empty(), "{r:?}");
     assert_eq!(t.st.overlay, Overlay::None);
-    assert_eq!(t.st.stimulus.phase, StimPhase::Armed);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Armed);
 }
 
 #[test]
@@ -328,9 +328,9 @@ fn palette_and_lists_page_and_wheel() {
     assert_eq!(sel(&t), n - 1);
     t.key("Home");
     assert_eq!(sel(&t), 0);
-    t.st.update(Msg::Wheel { rows: 3 }, &t.keys);
+    t.st.apply(Msg::Wheel { rows: 3 }, &t.keys);
     assert_eq!(sel(&t), 3);
-    t.st.update(Msg::Wheel { rows: -10 }, &t.keys);
+    t.st.apply(Msg::Wheel { rows: -10 }, &t.keys);
     assert_eq!(sel(&t), 0);
 
     // The calibrations view: PageDown / End / Home move the focus without wrapping.
@@ -360,7 +360,7 @@ fn palette_and_lists_page_and_wheel() {
         ref o => panic!("{o:?}"),
     };
     let n = t.st.pane_menu_rows(pane).len();
-    t.st.update(Msg::Wheel { rows: n as i32 }, &t.keys);
+    t.st.apply(Msg::Wheel { rows: n as i32 }, &t.keys);
     assert_eq!(index(&t), n - 1);
 }
 
@@ -369,7 +369,7 @@ fn closing_the_sweep_dialog_leaves_the_stimulus_alone() {
     // The dialog makes a sweep measurement; it never arms. Armed (noise) behind it: Esc
     // closes it and the noise stays armed.
     let mut t = T::new();
-    t.st.stimulus.level = Some(Dbfs(-30.0));
+    t.st.rig.stimulus.level = Some(Dbfs(-30.0));
     t.key("Space");
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     t.type_key("Shift+S", "S");
@@ -377,17 +377,17 @@ fn closing_the_sweep_dialog_leaves_the_stimulus_alone() {
     assert_eq!(FormKind::Sweep.close_note(), None);
     assert!(t.key("Esc").is_empty());
     assert_eq!(t.st.overlay, Overlay::None);
-    assert_eq!(t.st.stimulus.phase, StimPhase::Armed);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Armed);
     // The Cancel button does the same.
     t.type_key("Shift+S", "S");
-    assert!(t.st.update(Msg::Form(FormMsg::Cancel), &t.keys).is_empty());
+    assert!(t.st.apply(Msg::Form(FormMsg::Cancel), &t.keys).is_empty());
     assert_eq!(t.st.overlay, Overlay::None);
 
     // Playing: closing the dialog leaves it playing; the stop chord stops it.
     let mut t = with_window(Window::Sweep);
     let r = t.key("Esc");
     assert!(stimulus_requests(&r).is_empty(), "{r:?}");
-    assert_eq!(t.st.stimulus.phase, StimPhase::Firing);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Firing);
     t.type_key("Shift+S", "S");
     let r = t.key("Shift+Esc");
     assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");

@@ -53,11 +53,15 @@ fn toasts_wrap_and_stack() {
     let mut h = harness(options(Some(&rig)));
     step_until(&mut h, "live frames", live);
     h.state_mut().state.toasts.list.clear();
+    let rig = h.state().state.active();
     let reply = |what: &str, result: Result<(), String>| {
-        ac2_ui::state::Msg::Conn(Box::new(ac2_ui::conn::ConnEvent::Reply {
-            what: what.into(),
-            result,
-        }))
+        ac2_ui::state::Msg::Conn(
+            rig,
+            Box::new(ac2_ui::conn::ConnEvent::Reply {
+                what: what.into(),
+                result,
+            }),
+        )
     };
     h.state_mut()
         .dispatch(reply("slot 1: Main L S1 captured", Ok(())));
@@ -379,7 +383,7 @@ fn stimulus_flow_against_the_fake_daemon() {
     assert_eq!(rig.fake.executions("gen.acquire"), 0);
     h.event(Event::Text("-24".into()));
     h.key_press(Key::Enter);
-    step_until(&mut h, "level", |a| a.state.stimulus.level.is_some());
+    step_until(&mut h, "level", |a| a.state.rig.stimulus.level.is_some());
     h.key_press(Key::Space);
     step_until(&mut h, "armed", |a| {
         a.state.daemon().is_some_and(|s| s.generator.armed)
@@ -418,7 +422,7 @@ fn the_stage_view_stays_the_pane_while_firing() {
     let rig = common::Rig::start();
     let mut h = harness(options(Some(&rig)));
     step_until(&mut h, "live frames", live);
-    h.state_mut().state.stimulus.level = Some(ac2_proto::units::Dbfs(-24.0));
+    h.state_mut().state.rig.stimulus.level = Some(ac2_proto::units::Dbfs(-24.0));
     h.key_press(Key::W);
     h.key_press(Key::W);
     step_until(&mut h, "the stage view", |a| {

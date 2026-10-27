@@ -33,7 +33,7 @@ fn stored_traces_and_target() {
     h.event(Event::Text(path.to_string_lossy().into_owned()));
     h.key_press(Key::Enter);
     step_until(&mut h, "three stored traces with data", |a| {
-        a.state.traces.len() == 3
+        a.state.rig.traces.len() == 3
     });
     // 2 hides slot 2, 2 again shows it.
     h.key_press(Key::Num2);
@@ -43,12 +43,17 @@ fn stored_traces_and_target() {
     h.key_press(Key::Num2);
     step_until(&mut h, "slot 2 shown", |a| {
         a.state.slots()[1].is_some_and(|t| t.edit.visible)
-            && a.state.traces.values().all(|(d, _)| d.meta.edit.visible)
+            && a.state
+                .rig
+                .traces
+                .values()
+                .all(|(d, _)| d.meta.edit.visible)
     });
     // An imported trace is drawn on no pane: the target moved under Main L (Shift+F2).
     let target = h
         .state()
         .state
+        .rig
         .traces
         .values()
         .find(|(d, _)| d.meta.edit.name == "house_curve")
@@ -71,7 +76,7 @@ fn stored_traces_and_target() {
     }
     h.key_press(Key::Enter);
     step_until(&mut h, "the target under Main L", |a| {
-        a.state.traces.get(&target).is_some_and(|(d, _)| {
+        a.state.rig.traces.get(&target).is_some_and(|(d, _)| {
             d.meta.edit.owner == ac2_proto::model::TraceOwner::Meas { meas: MeasId(1) }
         })
     });
@@ -85,7 +90,8 @@ fn stored_traces_and_target() {
         let st = &h.state().state;
         let mut compared = vec![Compared::Meas { meas: MeasId(1) }];
         compared.extend(
-            st.traces
+            st.rig
+                .traces
                 .values()
                 .map(|(d, _)| d.meta.clone())
                 .filter(|t| !t.edit.name.starts_with("Delay tower"))
@@ -142,17 +148,18 @@ fn trace_offset_spread() {
     step_until(&mut h, "slot 1", |a| a.state.slots()[0].is_some());
     h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
     step_until(&mut h, "both slots with data", |a| {
-        a.state.slots()[1].is_some() && a.state.traces.len() == 2
+        a.state.slots()[1].is_some() && a.state.rig.traces.len() == 2
     });
     let id = h.state().state.slots()[1].map(|t| t.id).expect("slot 2");
     h.key_press(Key::V);
     h.key_press(Key::V);
     step_until(&mut h, "slot 2 selected", |a| {
-        a.state.selected_trace == Some(id)
+        a.state.rig.selected_trace == Some(id)
     });
     h.key_press_modifiers(Modifiers::ALT | Modifiers::SHIFT, Key::ArrowUp);
     step_until(&mut h, "slot 2 spread", |a| {
         a.state
+            .rig
             .traces
             .get(&id)
             .is_some_and(|(d, _)| d.meta.edit.offset.0 == 3.0)
@@ -220,7 +227,7 @@ fn pane_measurement_chip_and_list() {
             && a.state.kind_meas(PaneKind::Transfer).map(|m| m.id) == Some(MeasId(2))
     });
     assert_eq!(
-        h.state().state.selected,
+        h.state().state.rig.selected,
         Some(MeasId(1)),
         "a pick selects nothing"
     );
@@ -255,18 +262,18 @@ fn slot_resmoothed() {
     step_until(&mut h, "live frames", live);
     h.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
     step_until(&mut h, "slot 1 with data", |a| {
-        a.state.slots()[0].is_some() && a.state.traces.len() == 1
+        a.state.slots()[0].is_some() && a.state.rig.traces.len() == 1
     });
     let id = h.state().state.slots()[0].map(|t| t.id).expect("slot 1");
     h.get_by_label("Main L S1\ncapture · slot 1 · 1/6 oct")
         .click();
     step_until(&mut h, "slot selected", |a| {
-        a.state.selected_trace == Some(id)
+        a.state.rig.selected_trace == Some(id)
     });
-    let before = h.state().state.traces[&id].0.mag_db.clone();
+    let before = h.state().state.rig.traces[&id].0.mag_db.clone();
     h.key_press(Key::K);
     step_until(&mut h, "re-smoothed data", |a| {
-        a.state.traces.get(&id).is_some_and(|(d, _)| {
+        a.state.rig.traces.get(&id).is_some_and(|(d, _)| {
             d.meta
                 .edit
                 .smoothing
@@ -274,7 +281,10 @@ fn slot_resmoothed() {
         })
     });
     let st = &h.state().state;
-    assert_ne!(st.traces[&id].0.mag_db, before, "served at the new setting");
+    assert_ne!(
+        st.rig.traces[&id].0.mag_db, before,
+        "served at the new setting"
+    );
     assert_eq!(
         st.smoothing_caption(crate::common::pane(st, PaneKind::Transfer))
             .as_deref(),
@@ -400,7 +410,7 @@ fn empty_session_hint() {
     let fake = ac2_client::fake::FakeDaemon::start(common::fake_options()).expect("fake daemon");
     let mut h = harness(options_at(Some(fake.endpoints())));
     step_until(&mut h, "synced, no session", |a| {
-        a.state.mirror.as_ref().is_some_and(|m| m.synced())
+        a.state.rig.mirror.as_ref().is_some_and(|m| m.synced())
             && a.state
                 .empty_hint(a.state.layout.focus, &a.keymap)
                 .is_some()
@@ -433,7 +443,7 @@ fn empty_session_hint() {
     h.event(Event::Text(path.to_string_lossy().into_owned()));
     h.key_press(Key::Enter);
     step_until(&mut h, "the target stored", |a| {
-        a.state.traces.len() == 1 && a.state.overlay == Overlay::None
+        a.state.rig.traces.len() == 1 && a.state.overlay == Overlay::None
     });
     let st = &h.state().state;
     assert!(!st.pane_shows_stored(st.layout.focus));
@@ -480,7 +490,7 @@ fn traces_list() {
     h.event(Event::Text(path.to_string_lossy().into_owned()));
     h.key_press(Key::Enter);
     step_until(&mut h, "three stored traces with data", |a| {
-        a.state.traces.len() == 3
+        a.state.rig.traces.len() == 3
     });
     // The dot hides slot 2; a click on the target's row selects it.
     h.get_by_label("Hide Delay tower S2").click();
@@ -522,11 +532,11 @@ fn measurement_hidden_and_delete_confirm() {
     h.key_press(Key::Tab);
     h.key_press(Key::Tab);
     step_until(&mut h, "delay tower", |a| {
-        a.state.selected == Some(MeasId(2))
+        a.state.rig.selected == Some(MeasId(2))
     });
     h.key_press(Key::A);
     step_until(&mut h, "delay tower hidden", |a| {
-        a.state.hidden_meas.contains(&MeasId(2))
+        a.state.rig.hidden_meas.contains(&MeasId(2))
     });
     let caption = h
         .state()
@@ -587,7 +597,7 @@ fn measurement_tree_and_delete_choices() {
     h.event(Event::Text(path.to_string_lossy().into_owned()));
     h.key_press(Key::Enter);
     step_until(&mut h, "four stored traces with data", |a| {
-        a.state.traces.len() == 4
+        a.state.rig.traces.len() == 4
     });
     let names: Vec<String> = h
         .state()
@@ -615,7 +625,7 @@ fn measurement_tree_and_delete_choices() {
     // received: Main L's was dropped while Delay tower was selected and comes back with
     // the next frame after the resubscription, so the picture waits for it.
     step_until(&mut h, "Main L's IR again", |a| {
-        a.state.data.as_ref().is_some_and(|d| {
+        a.state.rig.data.as_ref().is_some_and(|d| {
             d.latest
                 .get(&Topic::Data {
                     meas: MeasId(1),
@@ -662,7 +672,7 @@ fn built_in_target_curves() {
     snapshot(&mut h, "target_loudness_dialog");
     h.key_press(Key::Enter);
     step_until(&mut h, "the loudness shift stored", |a| {
-        a.state.traces.values().any(|(d, _)| {
+        a.state.rig.traces.values().any(|(d, _)| {
             d.meta.edit.name == "loudness 85 → 100 phon"
                 && matches!(
                     d.meta.source,
@@ -680,6 +690,7 @@ fn built_in_target_curves() {
     h.key_press(Key::Enter);
     step_until(&mut h, "flat stored", |a| {
         a.state
+            .rig
             .traces
             .values()
             .any(|(d, _)| d.meta.edit.name == "flat")

@@ -63,7 +63,8 @@ impl AppState {
     /// The daemon clock's offset from this machine's.
     pub fn clock_offset(&self) -> ClockOffset {
         ClockOffset(
-            self.mirror
+            self.rig
+                .mirror
                 .as_ref()
                 .and_then(|v| v.clock_offset_ns)
                 .map_or(0, |o| {
@@ -432,7 +433,7 @@ impl AppState {
                 Replacing::Open(&src_name)
             }
             Some(SessionStep::Quit) => Replacing::Quit {
-                kept: self.embedded_autosave == Some(true),
+                kept: self.rig.embedded_autosave == Some(true),
             },
             _ => Replacing::New,
         };
@@ -625,7 +626,7 @@ impl AppState {
     /// Quit (the Quit key, the window's close): with an embedded daemon and unsaved
     /// changes, asked first.
     pub(super) fn request_quit(&mut self) {
-        if self.embedded_autosave.is_some() && self.working().dirty {
+        if self.rig.embedded_autosave.is_some() && self.working().dirty {
             self.ask_unsaved(vec![SessionStep::Quit]);
         } else {
             self.quit = true;

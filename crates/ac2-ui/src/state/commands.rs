@@ -139,7 +139,7 @@ impl AppState {
         // Position 0 is the live measurement, the k-th trace is k + 1. A selected trace off
         // the cycle (hidden) steps from its place in the whole list.
         let n = ids.len() as i32 + 1;
-        let i = self.selected_trace.and_then(|s| {
+        let i = self.rig.selected_trace.and_then(|s| {
             if let Some(i) = ids.iter().position(|x| *x == s) {
                 return Some(i as i32 + 1);
             }
@@ -318,11 +318,11 @@ impl AppState {
 
             C::StimulusArm => self.space(false, keymap, out),
             C::StimulusTakeOver => self.space(true, keymap, out),
-            C::StimulusFire => match self.stimulus.phase {
-                StimPhase::Armed if self.sweep.plan.is_some() => self.fire_sweep(out),
+            C::StimulusFire => match self.rig.stimulus.phase {
+                StimPhase::Armed if self.rig.sweep.plan.is_some() => self.fire_sweep(out),
                 StimPhase::Armed => {
-                    if let Some(settings) = self.stimulus.settings() {
-                        self.stimulus.phase = StimPhase::FireRequested;
+                    if let Some(settings) = self.rig.stimulus.settings() {
+                        self.rig.stimulus.phase = StimPhase::FireRequested;
                         out.push(Request::StimSet(GeneratorDesired {
                             settings,
                             armed: true,
@@ -334,10 +334,10 @@ impl AppState {
                 _ => {}
             },
             C::StimulusStop | C::StopAnywhere => {
-                self.stimulus.arm_after_stop = false;
-                self.sweep.arm_after_stop = false;
+                self.rig.stimulus.arm_after_stop = false;
+                self.rig.sweep.arm_after_stop = false;
                 if self.stimulus_live() {
-                    self.stimulus.phase = StimPhase::Stopping;
+                    self.rig.stimulus.phase = StimPhase::Stopping;
                     out.push(Request::StimStop);
                 }
             }
@@ -347,6 +347,7 @@ impl AppState {
             C::LevelDownCoarse => self.step_level(-3.0, out),
             C::StimulusLevel => {
                 let text = self
+                    .rig
                     .stimulus
                     .level
                     .map(|l| format::fixed(l.0, 1).replace(format::MINUS, "-"))
@@ -402,11 +403,11 @@ impl AppState {
             }
             C::MaximisePane => self.cycle_layout(),
             C::NextInTree => {
-                self.input_pick = None;
+                self.rig.input_pick = None;
                 self.cycle_tree_row(1);
             }
             C::PrevInTree => {
-                self.input_pick = None;
+                self.rig.input_pick = None;
                 self.cycle_tree_row(-1);
             }
             C::LevelsReset => match self.reset_target() {
@@ -414,7 +415,7 @@ impl AppState {
                 None => self.warn("pick an Inputs row or focus a Programme pane to reset its max"),
             },
             C::LevelsResetAll => self.levels_reset(Vec::new(), out),
-            C::ProgrammePane => match self.input_pick.and_then(|c| self.row_meters(c)) {
+            C::ProgrammePane => match self.rig.input_pick.and_then(|c| self.row_meters(c)) {
                 Some(m) => self.open_programme(m),
                 None => self.warn("pick an Inputs row first: its meters open in a new pane"),
             },

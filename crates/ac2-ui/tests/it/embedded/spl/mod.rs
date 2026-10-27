@@ -41,6 +41,7 @@ pub(super) fn tiles(s: &AppState) -> Vec<ac2_scene::leq::LeqTile> {
         stream: Stream::Leq,
     };
     match s
+        .rig
         .data
         .as_ref()
         .and_then(|d| d.latest.get(&topic))
@@ -179,13 +180,13 @@ fn spl_weightings_from_the_keys_and_a_readable_number() -> R {
     let mut frames = std::collections::BTreeSet::new();
     while Instant::now() < end {
         d.pump();
-        if let Some(h) = d.st.spl_hold.get(&id)
+        if let Some(h) = d.st.rig.spl_hold.get(&id)
             && h.frame.meta.time_weighting == TimeWeighting::Slow
             && at.last() != Some(&h.at_ns)
         {
             at.push(h.at_ns);
         }
-        if let Some(f) = d.st.data.as_ref().and_then(|x| {
+        if let Some(f) = d.st.rig.data.as_ref().and_then(|x| {
             x.latest.get(&Topic::Data {
                 meas: id,
                 stream: Stream::Spl,

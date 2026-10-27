@@ -20,7 +20,7 @@
 //! - **S — Stimulus**: an output that feeds the speakers and the loopback.
 //!
 //! The session's inputs, outputs and loopback follow from the roles (and the rows put in
-//! the session with Space). Choices are remembered per device ([`UiPrefs::sessions`]).
+//! the session with Space). Choices are remembered per rig and device ([`UiPrefs::sessions`]).
 //! Outputs carry the rig's labels (`Main L`), kept by the daemon for every client; N on an
 //! output row names it.
 
@@ -37,7 +37,7 @@ use ac2_scene::format;
 use ac2_scene::meter::{input_name, output_name};
 
 use crate::forms::{parse_buffer, parse_rate};
-use crate::prefs::{DeviceRoles, KindPref, UiPrefs};
+use crate::prefs::{DeviceRoles, KindPref, RigPrefs, UiPrefs};
 
 mod detect;
 mod devices;

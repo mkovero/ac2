@@ -7,22 +7,18 @@ pub(super) mod select;
 use super::*;
 
 impl AppState {
-    /// The mirrored daemon state.
+    /// The active rig's mirrored daemon state ([`RigState::daemon`]).
     pub fn daemon(&self) -> Option<&State> {
-        self.mirror.as_ref().and_then(|m| m.state.as_deref())
+        self.rig.daemon()
     }
 
+    /// The active rig's measurements, by id.
     pub fn measurements(&self) -> Vec<&Measurement> {
-        let mut v: Vec<&Measurement> = self
-            .daemon()
-            .map(|s| s.measurements.iter().collect())
-            .unwrap_or_default();
-        v.sort_by_key(|m| m.id);
-        v
+        self.rig.measurements()
     }
 
     pub fn meas(&self, id: MeasId) -> Option<&Measurement> {
-        self.daemon()?.measurements.iter().find(|m| m.id == id)
+        self.rig.meas(id)
     }
 
     /// `meas.update` of `meas` to `config`, made on the configuration the mirror holds (the
@@ -39,12 +35,12 @@ impl AppState {
     }
 
     pub fn selected_meas(&self) -> Option<&Measurement> {
-        self.meas(self.selected?)
+        self.meas(self.rig.selected?)
     }
 
     /// Whether `m`'s live curves are hidden in this app.
     pub fn meas_hidden(&self, m: &Measurement) -> bool {
-        self.hidden_meas.contains(&m.id)
+        self.rig.hidden_meas.contains(&m.id)
     }
 
     /// The keys that act on "the selected curve" (Delete, A) act on the selected stored
@@ -56,7 +52,9 @@ impl AppState {
     /// The selection is the selected measurement's live-curve row, not its header (both
     /// act on the same curve; the list marks the one picked).
     pub fn live_row_selected(&self) -> bool {
-        self.selected_live.is_some() && self.selected_live == self.selected && !self.keys_on_trace()
+        self.rig.selected_live.is_some()
+            && self.rig.selected_live == self.rig.selected
+            && !self.keys_on_trace()
     }
 
     /// Measurements pane `p` can show, in list order.
@@ -115,7 +113,7 @@ impl AppState {
 
     /// The stored trace selected in the list, if it still exists.
     pub fn selected_trace_meta(&self) -> Option<&TraceMeta> {
-        let id = self.selected_trace?;
+        let id = self.rig.selected_trace?;
         self.daemon()?.traces.iter().find(|t| t.id == id)
     }
 
@@ -184,6 +182,7 @@ impl AppState {
                 let m = self.pane_meas(id)?;
                 let stream = m.config.kind.stream()?;
                 let applied = self
+                    .rig
                     .data
                     .as_ref()
                     .and_then(|d| d.latest.get(&Topic::Data { meas: m.id, stream }))
@@ -283,7 +282,7 @@ impl AppState {
     }
 
     pub fn edit(&self, id: MeasId) -> LiveEdit {
-        self.edits.get(&id).copied().unwrap_or_default()
+        self.rig.edits.get(&id).copied().unwrap_or_default()
     }
 
     /// Stored trace metadata as mirrored (edits, slots and visibility are the daemon's).
@@ -321,7 +320,7 @@ impl AppState {
             .into_iter()
             .map(|meta| ac2_scene::trace_list::TraceItem {
                 meta,
-                has_data: self.traces.contains_key(&meta.id),
+                has_data: self.rig.traces.contains_key(&meta.id),
                 color: colours.trace(meta.id),
                 eq: match meta.source {
                     ac2_proto::model::TraceSource::Eq { meas, set, .. } => self
@@ -335,7 +334,7 @@ impl AppState {
 
     /// The measurement tree beside the panes.
     pub fn tree_rows(&self) -> Vec<ac2_scene::meas_list::TreeRow> {
-        self.tree_rows_folded(&self.collapsed)
+        self.tree_rows_folded(&self.rig.collapsed)
     }
 
     /// Every measurement and math channel in the tree's order, folded groups included:
@@ -361,8 +360,8 @@ impl AppState {
             meas: self.meas_items(&colours),
             traces: self.trace_items(&colours),
             collapsed,
-            selected: self.selected,
-            selected_trace: self.selected_trace,
+            selected: self.rig.selected,
+            selected_trace: self.rig.selected_trace,
             keys_on_trace: self.keys_on_trace(),
             live_selected: self.live_row_selected(),
             sweep: self.daemon().and_then(|s| s.sweep.as_ref()),
@@ -418,7 +417,7 @@ impl AppState {
     /// The sidebar's rows of stored traces.
     pub fn trace_rows(&self) -> Vec<ac2_scene::trace_list::TraceRow> {
         let colours = self.curve_colours(&ac2_scene::theme::Theme::by_name(self.theme));
-        ac2_scene::trace_list::trace_rows(&self.trace_items(&colours), self.selected_trace)
+        ac2_scene::trace_list::trace_rows(&self.trace_items(&colours), self.rig.selected_trace)
     }
 
     /// The measurement list's rows, in list order: the selected one marked, as the one the
@@ -428,7 +427,7 @@ impl AppState {
         let colours = self.curve_colours(&ac2_scene::theme::Theme::by_name(self.theme));
         self.meas_items(&colours)
             .iter()
-            .map(|item| ac2_scene::meas_list::meas_row(item, self.selected, active))
+            .map(|item| ac2_scene::meas_list::meas_row(item, self.rig.selected, active))
             .collect()
     }
 
@@ -463,10 +462,10 @@ impl AppState {
     /// id from the connect would make another client's lease look like ours, or ours like
     /// another's).
     pub fn my_client_id(&self) -> Option<&ClientId> {
-        let ConnState::Connected { client_id, .. } = &self.conn else {
+        let ConnState::Connected { client_id, .. } = &self.rig.conn else {
             return None;
         };
-        match &self.mirror {
+        match &self.rig.mirror {
             Some(m) if m.incarnation.is_some() => m.client_id.as_ref(),
             _ => Some(client_id),
         }
@@ -585,7 +584,7 @@ impl AppState {
             return self.pane_sweep(pane).is_some();
         }
         let shown = self.pane_meas(pane);
-        self.traces.values().any(|(t, _)| {
+        self.rig.traces.values().any(|(t, _)| {
             self.on_pane(kind, &t.meta, shown) || self.trace_compared_on(kind, &t.meta, shown)
         })
     }
@@ -711,7 +710,7 @@ impl AppState {
 
     /// Whether pane `pane` draws a live curve now (one with a frame).
     fn pane_shows_live(&self, pane: PaneId) -> bool {
-        let Some(d) = self.data.as_ref() else {
+        let Some(d) = self.rig.data.as_ref() else {
             return false;
         };
         let kind = self.layout.kind(pane);
@@ -726,12 +725,12 @@ impl AppState {
     }
 
     pub fn connected(&self) -> bool {
-        matches!(self.conn, ConnState::Connected { .. })
+        matches!(self.rig.conn, ConnState::Connected { .. })
     }
 
     /// Keys go to the picked Inputs row's meters, else to the focused pane's scope.
     pub fn scope(&self) -> Scope {
-        if self.input_pick.is_some() {
+        if self.rig.input_pick.is_some() {
             Scope::Inputs
         } else {
             self.layout.focused().scope()
@@ -746,8 +745,9 @@ impl AppState {
     /// Some Leq or band Leq bars still ease to their newest frame at `now`.
     pub fn bars_easing(&self, now: std::time::Instant) -> bool {
         self.prefs.bar_ease
-            && self.bar_from.keys().any(|t| {
-                self.data
+            && self.rig.bar_from.keys().any(|t| {
+                self.rig
+                    .data
                     .as_ref()
                     .and_then(|d| d.latest.get(t))
                     .is_some_and(|tf| {
@@ -774,7 +774,7 @@ impl AppState {
     }
 
     pub fn stimulus_live(&self) -> bool {
-        self.stimulus.phase != StimPhase::Idle
+        self.rig.stimulus.phase != StimPhase::Idle
             || self
                 .daemon()
                 .is_some_and(|s| s.generator.armed || s.generator.firing)

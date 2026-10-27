@@ -97,7 +97,7 @@ fn programme_pane_of_a_pair() {
         .expect("the pair's row");
     h.get_by_label(&label).click();
     step_until(&mut h, "the pair's row picked", |a| {
-        a.state.input_pick == Some(2)
+        a.state.rig.input_pick == Some(2)
     });
     h.key_press(Key::P);
     step_until(&mut h, "a Programme pane", |a| {
@@ -176,8 +176,8 @@ fn programme_pane_of_a_pair() {
     snapshot_when(
         &mut h,
         "programme_pair",
-        |a| a.state.programme.rings.clear(),
-        |a| !a.state.programme.glowing(),
+        |a| a.state.rig.programme.rings.clear(),
+        |a| !a.state.rig.programme.glowing(),
     );
 
     // The layout keeps the pane and what it meters, through the preferences file.
@@ -207,8 +207,8 @@ fn programme_pane_of_a_pair() {
     snapshot_when(
         &mut h,
         "programme_pair_loudness",
-        |a| a.state.programme.rings.clear(),
-        |a| !a.state.programme.glowing(),
+        |a| a.state.rig.programme.rings.clear(),
+        |a| !a.state.rig.programme.glowing(),
     );
 }
 
@@ -283,7 +283,7 @@ fn loudness_plate_only_for_one_source() {
         })
     });
     // R on the focused pane, not on a picked row.
-    h.state_mut().state.input_pick = None;
+    h.state_mut().state.rig.input_pick = None;
     h.key_press(Key::R);
     step_until(&mut h, "the reset toast", |a| {
         a.state

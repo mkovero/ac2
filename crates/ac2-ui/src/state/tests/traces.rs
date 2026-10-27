@@ -7,7 +7,7 @@ fn panes_show_their_measurement_and_leave_the_selection() {
     let mut t = T::new();
     t.conn(mirror(four()));
     let shown = |t: &T, p: PaneKind| t.st.kind_meas(p).map(|m| m.id.0);
-    assert_eq!(t.st.selected, Some(MeasId(1)));
+    assert_eq!(t.st.rig.selected, Some(MeasId(1)));
     let ir = |t: &T| t.st.pane_meas(t.ir_pane()).map(|m| m.id.0);
     assert_eq!(shown(&t, PaneKind::Transfer), Some(1));
     assert_eq!(ir(&t), Some(1));
@@ -15,21 +15,21 @@ fn panes_show_their_measurement_and_leave_the_selection() {
     assert_eq!(shown(&t, PaneKind::Spl), None);
 
     // A click in a pane focuses it and selects nothing.
-    t.st.update(Msg::FocusPane(t.pane(PaneKind::Spectrum)), &t.keys);
+    t.st.apply(Msg::FocusPane(t.pane(PaneKind::Spectrum)), &t.keys);
     assert_eq!(t.focus_kind(), PaneKind::Spectrum);
-    assert_eq!(t.st.selected, Some(MeasId(1)));
+    assert_eq!(t.st.rig.selected, Some(MeasId(1)));
     // Its list offers the measurements of its kind: spectrum and RTA here. A pick shows
     // one there, the selection staying on its row.
     let sp = t.pane(PaneKind::Spectrum);
-    t.st.update(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(4))), &t.keys);
-    assert_eq!(t.st.selected, Some(MeasId(1)));
+    t.st.apply(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(4))), &t.keys);
+    assert_eq!(t.st.rig.selected, Some(MeasId(1)));
     assert_eq!(shown(&t, PaneKind::Spectrum), Some(4));
-    t.st.update(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(2))), &t.keys);
-    assert_eq!(t.st.selected, Some(MeasId(1)));
+    t.st.apply(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(2))), &t.keys);
+    assert_eq!(t.st.rig.selected, Some(MeasId(1)));
     // The transfer pane kept its own measurement.
-    t.st.update(Msg::FocusPane(t.pane(PaneKind::Transfer)), &t.keys);
-    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
-    assert_eq!(t.st.selected, Some(MeasId(3)));
+    t.st.apply(Msg::FocusPane(t.pane(PaneKind::Transfer)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(3)), &t.keys);
+    assert_eq!(t.st.rig.selected, Some(MeasId(3)));
     assert_eq!(shown(&t, PaneKind::Transfer), Some(3));
     assert_eq!(
         ir(&t),
@@ -39,11 +39,11 @@ fn panes_show_their_measurement_and_leave_the_selection() {
     // Focus by key selects nothing either.
     t.key("Alt+2");
     t.key("Alt+3");
-    assert_eq!(t.st.selected, Some(MeasId(3)));
+    assert_eq!(t.st.rig.selected, Some(MeasId(3)));
 
     // A list selection goes into the focused pane; the others keep theirs.
     t.key("Alt+2");
-    t.st.update(Msg::SelectMeas(MeasId(4)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(4)), &t.keys);
     assert_eq!(shown(&t, PaneKind::Spectrum), Some(4));
     assert_eq!(t.st.pane_meas(PaneId(1)).map(|m| m.id.0), Some(3));
 
@@ -56,8 +56,8 @@ fn panes_show_their_measurement_and_leave_the_selection() {
             .expect("listed")
     };
     let tf = PaneId(1);
-    t.st.update(Msg::FocusPane(tf), &t.keys);
-    t.st.update(Msg::PaneMenu(tf), &t.keys);
+    t.st.apply(Msg::FocusPane(tf), &t.keys);
+    t.st.apply(Msg::PaneMenu(tf), &t.keys);
     let at = row_of(&t, tf, 3);
     assert_eq!(
         t.st.overlay,
@@ -74,40 +74,40 @@ fn panes_show_their_measurement_and_leave_the_selection() {
     }
     t.key("Enter");
     assert_eq!(t.st.overlay, Overlay::None);
-    assert_eq!(t.st.selected, Some(MeasId(4)));
+    assert_eq!(t.st.rig.selected, Some(MeasId(4)));
     assert_eq!(shown(&t, PaneKind::Transfer), Some(1));
     // A click on the chip again closes the list; a pick by mouse shows it.
-    t.st.update(Msg::PaneMenu(t.pane(PaneKind::Spectrum)), &t.keys);
+    t.st.apply(Msg::PaneMenu(t.pane(PaneKind::Spectrum)), &t.keys);
     assert!(
         matches!(t.st.overlay, Overlay::PaneMenu(m) if m.pane == t.pane(PaneKind::Spectrum) && m.index == row_of(&t, m.pane, 4))
     );
-    t.st.update(Msg::PaneMenu(t.pane(PaneKind::Spectrum)), &t.keys);
+    t.st.apply(Msg::PaneMenu(t.pane(PaneKind::Spectrum)), &t.keys);
     assert_eq!(t.st.overlay, Overlay::None);
-    t.st.update(Msg::PaneMenu(t.pane(PaneKind::Spectrum)), &t.keys);
-    t.st.update(
+    t.st.apply(Msg::PaneMenu(t.pane(PaneKind::Spectrum)), &t.keys);
+    t.st.apply(
         Msg::PanePick(t.pane(PaneKind::Spectrum), PaneMenuRow::Meas(MeasId(2))),
         &t.keys,
     );
     assert_eq!(t.st.overlay, Overlay::None);
     assert_eq!(t.focus_kind(), PaneKind::Spectrum);
-    assert_eq!(t.st.selected, Some(MeasId(4)));
+    assert_eq!(t.st.rig.selected, Some(MeasId(4)));
     // A measurement the pane cannot draw turns it into the kind that does, and back.
     let sp = t.pane(PaneKind::Spectrum);
-    t.st.update(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(3))), &t.keys);
+    t.st.apply(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(3))), &t.keys);
     assert_eq!(t.st.layout.kind(sp), PaneKind::Transfer);
     assert_eq!(t.st.pane_meas(sp).map(|m| m.id.0), Some(3));
-    t.st.update(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(2))), &t.keys);
+    t.st.apply(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(2))), &t.keys);
     assert_eq!(t.st.layout.kind(sp), PaneKind::Spectrum);
     assert_eq!(shown(&t, PaneKind::Spectrum), Some(2));
     // Palette entry for the keyboard: the focused pane's list.
-    t.st.update(Msg::Command(CommandId::PaneMeasurement), &t.keys);
+    t.st.apply(Msg::Command(CommandId::PaneMeasurement), &t.keys);
     assert!(matches!(t.st.overlay, Overlay::PaneMenu(m) if m.pane == t.pane(PaneKind::Spectrum)));
     t.key("Esc");
     assert_eq!(t.st.overlay, Overlay::None);
     // No measurement of its kind: the list offers every measurement, then the kinds of pane
     // none of them needs (a sweep pane here), then the New measurement chooser.
     let spl = t.pane(PaneKind::Spl);
-    t.st.update(Msg::PaneMenu(spl), &t.keys);
+    t.st.apply(Msg::PaneMenu(spl), &t.keys);
     assert!(matches!(t.st.overlay, Overlay::PaneMenu(m) if m.pane == spl && m.index == 0));
     let mut want: Vec<PaneMenuRow> =
         t.st.tree_meas_order()
@@ -130,8 +130,8 @@ fn panes_show_their_measurement_and_leave_the_selection() {
     t.key("Esc");
 
     // A deleted measurement leaves its pane showing the next one that fits.
-    t.st.update(Msg::FocusPane(t.pane(PaneKind::Transfer)), &t.keys);
-    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
+    t.st.apply(Msg::FocusPane(t.pane(PaneKind::Transfer)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(3)), &t.keys);
     assert_eq!(shown(&t, PaneKind::Transfer), Some(3));
     let mut s = four();
     s.measurements.retain(|m| m.id != MeasId(3));
@@ -191,62 +191,62 @@ fn traces_are_selected_from_the_keyboard() {
     // V steps through the shown traces in that order, slotted or not (hidden skipped), then
     // back to the live measurement; it sends nothing.
     assert!(t.key("V").is_empty());
-    assert_eq!(t.st.selected_trace, Some(TraceId(10)));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(10)));
     assert!(t.last_toast().contains("slot 1 (t10) selected"));
     t.key("V");
-    assert_eq!(t.st.selected_trace, Some(TraceId(12)));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(12)));
     t.key("V");
-    assert_eq!(t.st.selected_trace, Some(TraceId(13)));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(13)));
     assert_eq!(t.last_toast(), "t13 selected");
     t.key("V");
-    assert_eq!(t.st.selected_trace, None);
+    assert_eq!(t.st.rig.selected_trace, None);
     assert!(t.last_toast().contains("live measurement"));
     // Shift+V goes the other way, from live to the last shown trace.
     t.key("Shift+V");
-    assert_eq!(t.st.selected_trace, Some(TraceId(13)));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(13)));
     // K then changes the selected trace, though it has no slot.
     assert_eq!(smoothing_set(&t.key("K")).0, "t13");
     t.key("Shift+V");
-    assert_eq!(t.st.selected_trace, Some(TraceId(12)));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(12)));
     // Alt+V reaches the hidden ones too.
     t.key("Alt+V");
-    assert_eq!(t.st.selected_trace, Some(TraceId(13)));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(13)));
     t.key("Alt+V");
-    assert_eq!(t.st.selected_trace, Some(TraceId(14)));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(14)));
     assert_eq!(t.last_toast(), "t14 (hidden) selected");
     t.key("Alt+Shift+V");
     t.key("Alt+Shift+V");
     t.key("Alt+Shift+V");
-    assert_eq!(t.st.selected_trace, Some(TraceId(11)));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(11)));
     // From a hidden trace, V and Shift+V go to the shown ones beside it.
     t.key("V");
-    assert_eq!(t.st.selected_trace, Some(TraceId(12)));
-    t.st.update(Msg::SelectTrace(TraceId(11)), &t.keys);
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(12)));
+    t.st.apply(Msg::SelectTrace(TraceId(11)), &t.keys);
     t.key("Shift+V");
-    assert_eq!(t.st.selected_trace, Some(TraceId(10)));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(10)));
     // The palette entry deselects.
-    t.st.update(Msg::Command(CommandId::SelectLive), &t.keys);
-    assert_eq!(t.st.selected_trace, None);
+    t.st.apply(Msg::Command(CommandId::SelectLive), &t.keys);
+    assert_eq!(t.st.rig.selected_trace, None);
     // Esc with a dialog open only closes it; with nothing open it only stops: End hands
     // the keys back to the live measurement.
     t.key("V");
     t.key("H");
     assert!(t.key("Esc").is_empty());
     assert_eq!(t.st.overlay, Overlay::None);
-    assert_eq!(t.st.selected_trace, Some(TraceId(10)));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(10)));
     t.key("Esc");
     assert_eq!(
-        t.st.selected_trace,
+        t.st.rig.selected_trace,
         Some(TraceId(10)),
         "Esc keeps the selection"
     );
     t.key("End");
-    assert_eq!(t.st.selected_trace, None);
+    assert_eq!(t.st.rig.selected_trace, None);
     assert_eq!(smoothing_set(&t.key("K")).0, "m1");
     // Tab steps to the next row of the list, a hidden trace's too (a click selects it).
     t.key("V");
     t.key("Tab");
-    assert_eq!(t.st.selected_trace, Some(TraceId(11)));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(11)));
 }
 
 #[test]
@@ -267,18 +267,18 @@ fn a_shows_and_hides_the_selected_trace_and_the_eye_any_trace() {
         stored(10, Some(1), 2),
         stored(13, None, 2),
     ]));
-    t.st.update(Msg::SelectTrace(TraceId(13)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(13)), &t.keys);
     let (id, edit, what) = trace_update(&t.key("A"));
     assert_eq!(id, TraceId(13));
     assert!(!edit.visible);
     assert_eq!(edit.slot, None);
     assert_eq!(what, "t13 hidden");
     // The eye in the list toggles any trace, selected or not, and selects nothing.
-    let (id, edit, what) = trace_update(&t.st.update(Msg::ToggleShown(TraceId(10)), &t.keys));
+    let (id, edit, what) = trace_update(&t.st.apply(Msg::ToggleShown(TraceId(10)), &t.keys));
     assert_eq!(id, TraceId(10));
     assert!(!edit.visible);
     assert_eq!(what, "slot 1 (t10) hidden");
-    assert_eq!(t.st.selected_trace, Some(TraceId(13)));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(13)));
     // The list says what each one is and which is selected.
     let rows = t.st.trace_rows();
     assert_eq!(
@@ -299,10 +299,10 @@ fn the_selected_trace_moves_to_a_slot() {
         stored(10, Some(1), 2),
         stored(13, None, 2),
     ]));
-    t.st.update(Msg::Command(CommandId::TraceSlot), &t.keys);
+    t.st.apply(Msg::Command(CommandId::TraceSlot), &t.keys);
     assert_eq!(t.st.overlay, Overlay::None, "nothing selected");
-    t.st.update(Msg::SelectTrace(TraceId(13)), &t.keys);
-    t.st.update(Msg::Command(CommandId::TraceSlot), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(13)), &t.keys);
+    t.st.apply(Msg::Command(CommandId::TraceSlot), &t.keys);
     assert!(matches!(
         &t.st.overlay,
         Overlay::Prompt(p) if p.kind == PromptKind::TraceSlot(TraceId(13)) && p.text.is_empty()
@@ -336,9 +336,9 @@ fn the_selected_trace_is_renamed() {
         stored(10, Some(1), 2),
         stored(13, None, 2),
     ]));
-    t.st.update(Msg::Command(CommandId::TraceRename), &t.keys);
+    t.st.apply(Msg::Command(CommandId::TraceRename), &t.keys);
     assert_eq!(t.st.overlay, Overlay::None, "nothing selected");
-    t.st.update(Msg::SelectTrace(TraceId(13)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(13)), &t.keys);
     t.key("F2");
     assert!(matches!(
         &t.st.overlay,
@@ -357,8 +357,8 @@ fn the_selected_trace_is_renamed() {
     ));
     t.key("Escape");
     // Double click on another row: selected, and its name asked for.
-    t.st.update(Msg::RenameTrace(TraceId(10)), &t.keys);
-    assert_eq!(t.st.selected_trace, Some(TraceId(10)));
+    t.st.apply(Msg::RenameTrace(TraceId(10)), &t.keys);
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(10)));
     assert!(matches!(
         &t.st.overlay,
         Overlay::Prompt(p) if p.kind == PromptKind::TraceRename(TraceId(10)) && p.text == "t10"
@@ -387,7 +387,7 @@ fn trace_keys_act_on_the_selected_trace() {
         sweep_meta(14),
     ]));
     // An unslotted capture: U, J, , . and E change it, not the live measurement.
-    t.st.update(Msg::SelectTrace(TraceId(13)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(13)), &t.keys);
     let (id, edit, what) = trace_update(&t.key("U"));
     assert_eq!((id, edit.polarity), (TraceId(13), Polarity::Inverted));
     assert_eq!(what, "t13: polarity inverted");
@@ -415,14 +415,14 @@ fn trace_keys_act_on_the_selected_trace() {
     assert_eq!(t.last_toast(), "phase reference: t13");
     assert_eq!(t.st.edit(MeasId(1)), LiveEdit::default(), "live untouched");
     // A sweep result too.
-    t.st.update(Msg::SelectTrace(TraceId(14)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(14)), &t.keys);
     assert_eq!(trace_update(&t.key("U")).0, TraceId(14));
     // A locked trace says so and sends nothing.
-    t.st.update(Msg::SelectTrace(TraceId(12)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(12)), &t.keys);
     assert!(t.key("U").is_empty());
     assert!(t.last_toast().contains("t12 is locked"));
     // A target curve has an offset but no phase.
-    t.st.update(Msg::SelectTrace(TraceId(15)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(15)), &t.keys);
     assert!(t.key("U").is_empty());
     assert!(t.last_toast().contains("no phase"));
     assert!(t.key("E").is_empty());
@@ -434,15 +434,15 @@ fn trace_keys_act_on_the_selected_trace() {
     ));
     t.key("Esc");
     // The caption names a selected target.
-    t.st.update(Msg::SelectTrace(TraceId(15)), &t.keys);
-    t.st.update(Msg::SelectTrace(TraceId(15)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(15)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(15)), &t.keys);
     assert_eq!(
         t.st.pane_caption(t.pane(PaneKind::Transfer)).as_deref(),
         Some("t15")
     );
     // A spectrum trace's row moves no pane: the focused transfer pane does not draw it, so
     // the keys act on the live measurement.
-    t.st.update(Msg::SelectTrace(TraceId(16)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(16)), &t.keys);
     assert_eq!(t.st.layout.focus_kind(), PaneKind::Transfer);
     assert!(t.key("U").is_empty());
     assert!(t.st.edit(MeasId(1)).inverted);
@@ -472,7 +472,7 @@ fn the_sweep_pane_follows_the_selection_and_selects() {
         "a capture selected: the sweep pane keeps its sweep"
     );
     t.key("V");
-    assert_eq!(t.st.selected_trace, Some(TraceId(14)));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(14)));
     assert_eq!(shown(&t), Some(14));
     // The transfer pane draws Main L's group, not Sweep 1's: its title does not name t14.
     assert_eq!(
@@ -481,23 +481,23 @@ fn the_sweep_pane_follows_the_selection_and_selects() {
     );
     // Back to live: the sweep pane keeps the sweep selected last.
     t.key("End");
-    assert_eq!(t.st.selected_trace, None);
+    assert_eq!(t.st.rig.selected_trace, None);
     assert_eq!(shown(&t), Some(14));
     // V on the sweep pane steps the sweep runs and selects them for the transfer pane.
     t.go(PaneKind::Distortion);
     assert_eq!(t.focus_kind(), PaneKind::Distortion);
     t.key("V");
     assert_eq!(shown(&t), Some(15));
-    assert_eq!(t.st.selected_trace, Some(TraceId(15)));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(15)));
     assert_eq!(t.last_toast(), "t15 selected");
     t.key("Shift+V");
-    assert_eq!(t.st.selected_trace, Some(TraceId(14)));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(14)));
     // U on the sweep pane is its unit; on the transfer pane it inverts the selected sweep.
     assert!(t.key("U").is_empty());
     t.key("Alt+1");
     assert_eq!(trace_update(&t.key("U")).0, TraceId(14));
     // A click on a sweep in the list does the same.
-    t.st.update(Msg::SelectTrace(TraceId(15)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(15)), &t.keys);
     assert_eq!(shown(&t), Some(15));
 }
 
@@ -505,14 +505,14 @@ fn the_sweep_pane_follows_the_selection_and_selects() {
 fn escape_stops_the_stimulus_and_keeps_the_selected_slot() {
     let mut t = T::new();
     t.conn(with_traces(vec![stored(10, Some(1), 2)]));
-    t.st.stimulus.level = Some(Dbfs(-20.0));
+    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
     t.key("Space");
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     t.key("V");
-    assert_eq!(t.st.selected_trace, Some(TraceId(10)));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(10)));
     let r = t.key("Esc");
     assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
-    assert_eq!(t.st.selected_trace, Some(TraceId(10)));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(10)));
 }
 
 #[test]
@@ -540,7 +540,7 @@ fn resmoothed_trace_data_keeps_its_smoothing_until_refetched() {
     m2.edit.smoothing = smoothing(SmoothingFraction::Sixth, SmoothingMode::Magnitude);
     m2.edit.name = "renamed".into();
     t.conn(with_traces(vec![m2.clone()]));
-    let held = &t.st.traces[&TraceId(10)].0.meta;
+    let held = &t.st.rig.traces[&TraceId(10)].0.meta;
     assert_eq!(held.edit.smoothing, None);
     assert_eq!(held.edit.name, "renamed");
     let fresh = Arc::new(TraceData {
@@ -552,7 +552,7 @@ fn resmoothed_trace_data_keeps_its_smoothing_until_refetched() {
         ir: None,
     });
     t.conn(ConnEvent::Trace(fresh, grid));
-    assert_eq!(t.st.traces[&TraceId(10)].0.meta, m2);
+    assert_eq!(t.st.rig.traces[&TraceId(10)].0.meta, m2);
 }
 
 #[test]
@@ -568,11 +568,11 @@ fn mic_curve_goes_on_the_selected_trace_from_the_palette() {
     s.mics = vec![mm1()];
     t.conn(mirror(s));
     // Nothing selected: refused with the way to select.
-    t.st.update(Msg::Command(CommandId::TraceMicCurve), &t.keys);
+    t.st.apply(Msg::Command(CommandId::TraceMicCurve), &t.keys);
     assert!(!matches!(&t.st.overlay, Overlay::Prompt(_)));
-    t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(10)), &t.keys);
     // Prefilled with the mic the trace was captured with.
-    t.st.update(Msg::Command(CommandId::TraceMicCurve), &t.keys);
+    t.st.apply(Msg::Command(CommandId::TraceMicCurve), &t.keys);
     assert!(matches!(
         &t.st.overlay,
         Overlay::Prompt(p) if p.kind == PromptKind::TraceMicCurve(TraceId(10))

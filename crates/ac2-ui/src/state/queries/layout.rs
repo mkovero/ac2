@@ -29,10 +29,10 @@ impl AppState {
             let f = self.layout.focus;
             self.set_pane_kind(f, kind);
         }
-        if self.pending.pane_meas.is_empty() {
+        if self.rig.pending.pane_meas.is_empty() {
             return;
         }
-        let pending = std::mem::take(&mut self.pending.pane_meas);
+        let pending = std::mem::take(&mut self.rig.pending.pane_meas);
         for (pane, name) in pending {
             // Given another measurement meanwhile: the pane's choice now.
             if self.layout.view(pane).is_none_or(|v| v.meas.is_some()) {
@@ -48,8 +48,8 @@ impl AppState {
                 // Gone for now (a session reopening, salvaged, a daemon restarting makes it
                 // again), or none made yet: it comes back. One the daemon never listed is
                 // not coming: the pane's usual choice is it, and nothing is saved for it.
-                if self.meas_seen.contains(&name) || self.measurements().is_empty() {
-                    self.pending.pane_meas.insert(pane, name);
+                if self.rig.meas_seen.contains(&name) || self.measurements().is_empty() {
+                    self.rig.pending.pane_meas.insert(pane, name);
                 }
                 continue;
             };
@@ -58,12 +58,13 @@ impl AppState {
             }
             // The focused pane's measurement is the selection, unless the operator chose
             // another since.
-            if self.layout.focus == pane && (self.selected.is_none() || self.selection_is_standin())
+            if self.layout.focus == pane
+                && (self.rig.selected.is_none() || self.selection_is_standin())
             {
                 self.select_on(pane, id);
                 // Still this app's pick: a viewer nobody touches neither takes this
                 // measurement's own panes nor gives it its own.
-                self.standin = Some(id);
+                self.rig.standin = Some(id);
             }
         }
     }
@@ -92,7 +93,7 @@ impl AppState {
                 .into_iter()
                 .filter_map(|id| {
                     let v = self.layout.view(id)?;
-                    let measurement = match (self.pending.pane_meas.get(&id), self.daemon()) {
+                    let measurement = match (self.rig.pending.pane_meas.get(&id), self.daemon()) {
                         (Some(n), _) => Some(n.clone()),
                         (None, None) => remembered(id),
                         // A pane following the selection keeps following it: what it
@@ -112,7 +113,7 @@ impl AppState {
                 })
                 .collect(),
         });
-        let hidden = self.remembered_names(&self.hidden_meas, &self.pending.hidden);
+        let hidden = self.remembered_names(&self.rig.hidden_meas, &self.rig.pending.hidden);
         crate::prefs::LayoutPrefs {
             panes,
             maximized: self.layout.maximized,
@@ -164,7 +165,7 @@ impl AppState {
     /// name no measurement has waits as a pane's remembered measurement does: while the
     /// daemon lists none, or once listed (it comes back with a session reopening).
     pub(in crate::state) fn restore_meas_choices(&mut self) {
-        if self.daemon().is_none() || self.pending.hidden.is_empty() {
+        if self.daemon().is_none() || self.rig.pending.hidden.is_empty() {
             return;
         }
         let ms: Vec<(MeasId, String)> = self
@@ -172,7 +173,7 @@ impl AppState {
             .iter()
             .map(|m| (m.id, m.config.name.clone()))
             .collect();
-        let seen = &self.meas_seen;
+        let seen = &self.rig.meas_seen;
         let resolve = |pending: &mut BTreeSet<String>, ids: &mut BTreeSet<MeasId>| {
             pending.retain(|name| {
                 let mut of_name = ms.iter().filter(|(_, n)| n == name).map(|(id, _)| *id);
@@ -186,7 +187,7 @@ impl AppState {
                 }
             });
         };
-        resolve(&mut self.pending.hidden, &mut self.hidden_meas);
+        resolve(&mut self.rig.pending.hidden, &mut self.rig.hidden_meas);
     }
 
     /// Saves the layout (with each pane's level axes), the IR axes and the legend with the
@@ -239,11 +240,11 @@ impl AppState {
             .filter(|s| s.session.open.is_some())
             .map(|s| s.session.epoch);
         if let Some(e) = epoch
-            && self.devices.is_none()
-            && self.devices_for != Some(e)
+            && self.rig.devices.is_none()
+            && self.rig.devices_for != Some(e)
             && self.connected()
         {
-            self.devices_for = Some(e);
+            self.rig.devices_for = Some(e);
             if !matches!(self.overlay, Overlay::Settings(_) | Overlay::Form(_)) {
                 out.push(Request::Devices);
             }
@@ -254,15 +255,16 @@ impl AppState {
             .filter(|r| r.active())
             .map(|r| (r.id, r.status.clone()));
         match run {
-            None => self.sweep.step_seen = None,
+            None => self.rig.sweep.step_seen = None,
             Some((id, status)) => {
                 let same = self
+                    .rig
                     .sweep
                     .step_seen
                     .as_ref()
                     .is_some_and(|(i, s, _)| *i == id && *s == status);
                 if !same {
-                    self.sweep.step_seen = Some((id, status, self.now_s));
+                    self.rig.sweep.step_seen = Some((id, status, self.now_s));
                 }
             }
         }
@@ -274,7 +276,7 @@ impl AppState {
     pub fn set_prefs(&mut self, prefs: UiPrefs) {
         self.view.spl.layout = prefs.leq;
         let l = &prefs.layout;
-        self.pending.pane_meas.clear();
+        self.rig.pending.pane_meas.clear();
         self.pane_levels.clear();
         self.level_set.clear();
         self.spectrum_hold.clear();
@@ -302,7 +304,7 @@ impl AppState {
                     if let Some(n) = &v.measurement
                         && self.layout.views.contains_key(&v.id)
                     {
-                        self.pending.pane_meas.insert(v.id, n.clone());
+                        self.rig.pending.pane_meas.insert(v.id, n.clone());
                     }
                 }
                 self.pane_auto = false;
@@ -321,8 +323,8 @@ impl AppState {
         prefs.legend.apply(&mut self.view.tf.legend);
         self.view.unresolved = prefs.resolution_marker;
         self.view.jump_prominence_db = prefs.jump_prominence_db;
-        self.hidden_meas.clear();
-        self.pending.hidden = l.hidden.clone();
+        self.rig.hidden_meas.clear();
+        self.rig.pending.hidden = l.hidden.clone();
         self.prefs = prefs;
         self.restore_meas_choices();
     }

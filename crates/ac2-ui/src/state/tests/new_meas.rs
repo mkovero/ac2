@@ -77,7 +77,7 @@ fn ctrl_m_lists_every_kind_with_its_own_key() {
     // The window owns the keys: Shift+M did nothing behind it.
     assert_eq!(chooser(&t).index, 0);
     t.key("Esc");
-    t.st.update(Msg::Command(CommandId::NewMath), &t.keys);
+    t.st.apply(Msg::Command(CommandId::NewMath), &t.keys);
     assert!(
         t.last_toast().starts_with(MATH_REFUSAL),
         "{}",
@@ -87,7 +87,7 @@ fn ctrl_m_lists_every_kind_with_its_own_key() {
     // A key bound to a kind shows; unbound, the row has none.
     let keys =
         Keymap::from_toml("[global]\nsweep_new = []\nmeas_new_rta = [\"Shift+F9\"]").expect("keys");
-    t.st.update(Msg::Command(CommandId::NewMeasurement), &keys);
+    t.st.apply(Msg::Command(CommandId::NewMeasurement), &keys);
     let l = labels(&t);
     assert!(l[2].ends_with("  ·  Shift+F9"), "{}", l[2]);
     assert!(!l[4].contains("Shift+S"), "{}", l[4]);
@@ -104,10 +104,10 @@ fn the_focused_pane_picks_the_kind_highlighted() {
         i
     };
     let sp = t.pane(PaneKind::Spectrum);
-    t.st.update(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(2))), &t.keys);
+    t.st.apply(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(2))), &t.keys);
     assert_eq!(at(&mut t), 1, "spectrum");
     t.conn(mirror(four()));
-    t.st.update(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(4))), &t.keys);
+    t.st.apply(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(4))), &t.keys);
     assert_eq!(at(&mut t), 2, "an RTA on the spectrum pane");
     t.go(PaneKind::Spl);
     assert_eq!(at(&mut t), 3, "SPL meter");
@@ -132,7 +132,7 @@ fn the_alignment_row_opens_the_aligned_math_dialog() {
         .expect("alignment row");
     t.key("Ctrl+M");
     assert_eq!(chooser(&t).choices[at].blocked, None);
-    t.st.update(Msg::Choose(Some(at)), &t.keys);
+    t.st.apply(Msg::Choose(Some(at)), &t.keys);
     let Overlay::Form(f) = &t.st.overlay else {
         panic!("{:?}", t.st.overlay);
     };
@@ -237,7 +237,7 @@ fn enter_opens_the_kinds_form_and_a_refused_kind_stays_listed() {
     t.key("Esc");
     // A click on a row takes it as Enter does.
     t.key("Ctrl+M");
-    t.st.update(Msg::Choose(Some(4)), &t.keys);
+    t.st.apply(Msg::Choose(Some(4)), &t.keys);
     assert!(matches!(&t.st.overlay, Overlay::Form(f) if f.kind == FormKind::Sweep));
     t.key("Esc");
     // The math row refused: the chooser stays and says why.
@@ -258,7 +258,7 @@ fn enter_opens_the_kinds_form_and_a_refused_kind_stays_listed() {
     t.conn(mirror(four()));
     t.key("Ctrl+M");
     assert_eq!(chooser(&t).choices[5].blocked, None);
-    t.st.update(Msg::Choose(Some(5)), &t.keys);
+    t.st.apply(Msg::Choose(Some(5)), &t.keys);
     assert!(matches!(&t.st.overlay, Overlay::Form(f) if f.kind == FormKind::Math));
 }
 
@@ -277,7 +277,7 @@ fn without_a_session_new_measurement_goes_through_the_sessions_dialog() {
         CommandId::NewSpl,
         CommandId::SweepNew,
     ] {
-        let r = t.st.update(Msg::Command(c), &t.keys);
+        let r = t.st.apply(Msg::Command(c), &t.keys);
         assert!(
             matches!(r.as_slice(), [Request::SessionList]),
             "{c:?}: {r:?}"
@@ -296,7 +296,7 @@ fn without_a_session_new_measurement_goes_through_the_sessions_dialog() {
             .iter()
             .position(|r| r.title == "New session")
             .expect("New session row");
-    let r = t.st.update(Msg::Sessions(SessionsMsg::Row(i)), &t.keys);
+    let r = t.st.apply(Msg::Sessions(SessionsMsg::Row(i)), &t.keys);
     assert!(
         matches!(r.as_slice(), [Request::Sessions(j)]
             if j.steps == [crate::sessions::SessionStep::New { discard: false }]),
@@ -340,7 +340,7 @@ fn the_audio_page_is_a_new_session_only_after_new() {
 fn the_pane_list_ends_in_new_measurement() {
     let mut t = T::new();
     let spl = t.pane(PaneKind::Spl);
-    t.st.update(Msg::PaneMenu(spl), &t.keys);
+    t.st.apply(Msg::PaneMenu(spl), &t.keys);
     let rows = t.st.pane_menu_rows(spl);
     let (last, text) = rows.last().expect("rows").clone();
     assert_eq!(last, PaneMenuRow::NewMeasurement);
@@ -382,7 +382,7 @@ fn a_new_meter_opens_in_its_own_pane() {
     let tf = t.st.layout.focus;
     let before = t.visible();
     t.key("Ctrl+M");
-    t.st.update(Msg::Choose(Some(3)), &t.keys);
+    t.st.apply(Msg::Choose(Some(3)), &t.keys);
     let r = t.key("Enter");
     let c = r
         .iter()
@@ -420,7 +420,7 @@ fn list_text(t: &T) -> Vec<String> {
 /// daemon listing it and answering the create.
 fn create(t: &mut T, i: usize, id: u32) -> MeasConfig {
     t.key("Ctrl+M");
-    t.st.update(Msg::Choose(Some(i)), &t.keys);
+    t.st.apply(Msg::Choose(Some(i)), &t.keys);
     let r = t.key("Enter");
     let c = match created(&r) {
         Some(c) => c.clone(),
@@ -445,7 +445,7 @@ fn a_new_spectrum_is_selected_and_unfolded() {
     s.measurements.clear();
     t.conn(mirror(s));
     let c = create(&mut t, 1, 1);
-    assert_eq!(t.st.selected, Some(MeasId(1)));
+    assert_eq!(t.st.rig.selected, Some(MeasId(1)));
     assert!(t.st.tree_reveal, "the list scrolls to the new row");
     let rows = t.st.tree_rows();
     assert_eq!(rows[0].mark, ac2_scene::meas_list::Mark::Active);
@@ -468,9 +468,11 @@ fn a_new_measurement_is_never_folded() {
     s.measurements.clear();
     t.conn(mirror(s));
     for (i, id) in [(0, 2), (1, 3), (2, 4), (3, 5), (4, 6)] {
-        t.st.collapsed.insert(TraceOwner::Meas { meas: MeasId(id) });
+        t.st.rig
+            .collapsed
+            .insert(TraceOwner::Meas { meas: MeasId(id) });
         let c = create(&mut t, i, id);
-        assert_eq!(t.st.selected, Some(MeasId(id)), "{c:?}");
+        assert_eq!(t.st.rig.selected, Some(MeasId(id)), "{c:?}");
         let row =
             t.st.tree_rows()
                 .into_iter()
@@ -493,11 +495,11 @@ fn a_new_measurement_is_never_folded() {
 fn a_gone_measurements_fold_is_forgotten() {
     let mut t = T::new();
     let sub = TraceOwner::Meas { meas: MeasId(2) };
-    t.st.update(Msg::ToggleGroup(sub), &t.keys);
-    t.st.update(Msg::ToggleGroup(TraceOwner::Imported), &t.keys);
+    t.st.apply(Msg::ToggleGroup(sub), &t.keys);
+    t.st.apply(Msg::ToggleGroup(TraceOwner::Imported), &t.keys);
     t.remirror(|s| s.measurements.retain(|m| m.id != MeasId(2)));
-    assert!(!t.st.collapsed.contains(&sub));
-    assert!(t.st.collapsed.contains(&TraceOwner::Imported));
+    assert!(!t.st.rig.collapsed.contains(&sub));
+    assert!(t.st.rig.collapsed.contains(&TraceOwner::Imported));
 }
 
 /// Tab steps the chooser's rows down, Shift+Tab up.

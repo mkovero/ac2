@@ -1,12 +1,39 @@
 use super::*;
 
+/// The rig the tests remember devices for.
+const RIG: RigId = RigId(0xa);
+
+/// A device is remembered per rig: two rigs' `jack:system` keep their own outputs and
+/// session choices, and a key that names no rig is dropped from the file.
+#[test]
+fn devices_are_remembered_per_rig() {
+    let other = RigId(0xb);
+    let mut p = UiPrefs::default();
+    p.outputs.insert((RIG, "jack:system".into()), vec![0]);
+    p.outputs.insert((other, "jack:system".into()), vec![3]);
+    let text = p.to_toml();
+    assert!(
+        text.contains("\"000000000000000a/jack:system\" = [1]"),
+        "{text}"
+    );
+    let back = UiPrefs::from_toml(&text).expect("parses");
+    assert_eq!(back.outputs_for(RIG, "jack:system"), Some(&[0u16][..]));
+    assert_eq!(back.outputs_for(other, "jack:system"), Some(&[3u16][..]));
+    let old = UiPrefs::from_toml(
+        "[stimulus_outputs]\n\"jack:system\" = [1]\n[sessions.\"jack/jack:system\"]\ninputs = [1]\n",
+    )
+    .expect("parses");
+    assert!(old.outputs.is_empty() && old.sessions.is_empty(), "{old:?}");
+    assert!(!old.to_toml().contains("jack:system"));
+}
+
 #[test]
 fn round_trip_is_one_based_in_the_file() {
     let mut p = UiPrefs::default();
-    p.outputs.insert("hw:UMC1820".into(), vec![0, 1]);
-    p.outputs.insert("fake:loop".into(), vec![3]);
+    p.outputs.insert((RIG, "hw:UMC1820".into()), vec![0, 1]);
+    p.outputs.insert((RIG, "fake:loop".into()), vec![3]);
     p.sessions.insert(
-        "coreaudio/hw:UMC1820".into(),
+        (RIG, "coreaudio/hw:UMC1820".into()),
         DeviceRoles {
             inputs: vec![0, 1, 2],
             outputs: 2,
@@ -32,7 +59,10 @@ fn round_trip_is_one_based_in_the_file() {
         },
     );
     let text = p.to_toml();
-    assert!(text.contains("\"hw:UMC1820\" = [1, 2]"), "{text}");
+    assert!(
+        text.contains("\"000000000000000a/hw:UMC1820\" = [1, 2]"),
+        "{text}"
+    );
     assert!(text.contains("reference = 1"), "{text}");
     assert!(text.contains("spare_inputs = 2"), "{text}");
     assert!(text.contains("mics = [2, 3]"), "{text}");
@@ -50,17 +80,23 @@ fn round_trip_is_one_based_in_the_file() {
 #[test]
 fn roles_without_kinds_keep_their_mics() {
     let p = UiPrefs::from_toml(
-        "[sessions.\"fake/x\"]\ninputs = [1, 2, 3]\nreference = 1\nmics = [2]\n",
+        "[sessions.\"000000000000000a/fake/x\"]\ninputs = [1, 2, 3]\nreference = 1\nmics = [2]\n",
     )
     .expect("parses");
-    let r = &p.sessions["fake/x"];
+    let r = &p.sessions[&(RIG, "fake/x".into())];
     assert_eq!(r.kind_of(0), KindPref::Line);
     assert_eq!(r.kind_of(1), KindPref::Mic);
     assert_eq!(r.kind_of(2), KindPref::Line);
     assert!(r.pairs.is_empty());
-    assert!(UiPrefs::from_toml("[sessions.\"fake/x\"]\nkinds = { \"1\" = \"aes\" }\n").is_err());
     assert!(
-        UiPrefs::from_toml("[sessions.\"fake/x\"]\npairs = [{ left = 0, right = 1 }]\n").is_err()
+        UiPrefs::from_toml("[sessions.\"000000000000000a/fake/x\"]\nkinds = { \"1\" = \"aes\" }\n")
+            .is_err()
+    );
+    assert!(
+        UiPrefs::from_toml(
+            "[sessions.\"000000000000000a/fake/x\"]\npairs = [{ left = 0, right = 1 }]\n"
+        )
+        .is_err()
     );
 }
 
@@ -195,7 +231,7 @@ fn key_hints_round_trip() {
     // On is the default and is not written.
     assert!(!p.to_toml().contains("key_hints"));
     p.key_hints = false;
-    p.outputs.insert("fake:loop".into(), vec![0]);
+    p.outputs.insert((RIG, "fake:loop".into()), vec![0]);
     let text = p.to_toml();
     assert!(text.contains("key_hints = false"), "{text}");
     assert_eq!(UiPrefs::from_toml(&text), Ok(p));
@@ -435,11 +471,14 @@ fn pane_views_default_and_keep_a_choice() {
 
 #[test]
 fn bad_files_are_reported() {
-    assert!(UiPrefs::from_toml("[stimulus_outputs]\nx = [0]\n").is_err());
-    assert!(UiPrefs::from_toml("[stimulus_outputs]\nx = []\n").is_err());
-    assert!(UiPrefs::from_toml("[sessions.\"fake/x\"]\nmics = [0]\n").is_err());
-    assert!(UiPrefs::from_toml("[sessions.\"fake/x\"]\nmic_names = { a = \"M\" }\n").is_err());
-    assert!(UiPrefs::from_toml("[sessions.\"fake/x\"]\ncolour = 1\n").is_err());
+    assert!(UiPrefs::from_toml("[stimulus_outputs]\n\"000000000000000a/x\" = [0]\n").is_err());
+    assert!(UiPrefs::from_toml("[stimulus_outputs]\n\"000000000000000a/x\" = []\n").is_err());
+    assert!(UiPrefs::from_toml("[sessions.\"000000000000000a/fake/x\"]\nmics = [0]\n").is_err());
+    assert!(
+        UiPrefs::from_toml("[sessions.\"000000000000000a/fake/x\"]\nmic_names = { a = \"M\" }\n")
+            .is_err()
+    );
+    assert!(UiPrefs::from_toml("[sessions.\"000000000000000a/fake/x\"]\ncolour = 1\n").is_err());
     assert!(UiPrefs::from_toml("[ir_levels]\ntransfer = [10.0, -10.0]\n").is_err());
     assert!(UiPrefs::from_toml("[ir_levels]\nsweep = [-10.0]\n").is_err());
     assert!(UiPrefs::from_toml("[ir_levels]\nphase = [-10.0, 10.0]\n").is_err());
@@ -594,7 +633,7 @@ fn load_and_atomic_save() {
     let path = dir.path().join("ac2").join("ui.toml");
     assert_eq!(UiPrefs::load(Some(&path)), (UiPrefs::default(), None));
     let mut p = UiPrefs::default();
-    p.outputs.insert("fake:loop".into(), vec![1]);
+    p.outputs.insert((RIG, "fake:loop".into()), vec![1]);
     p.save(&path).expect("save");
     assert_eq!(UiPrefs::load(Some(&path)), (p.clone(), None));
     // Only the file itself is left in the directory.

@@ -10,7 +10,7 @@ impl AppState {
     /// The wall time of SPL meter `meas`'s newest frame: the meter's clock, which its band
     /// log is stamped on (the daemon may run on another computer).
     pub(crate) fn meter_now(&self, meas: MeasId) -> Option<ac2_proto::units::WallNs> {
-        let d = self.data.as_ref()?;
+        let d = self.rig.data.as_ref()?;
         [Stream::Spl, Stream::Leq, Stream::BandLeq]
             .into_iter()
             .filter_map(|stream| d.latest.get(&Topic::Data { meas, stream }))

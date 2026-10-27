@@ -31,7 +31,7 @@ fn rig_page(t: &T) -> &crate::settings::RigPage {
 fn the_rig_page_sends_its_edits_on_the_rev_it_shows() {
     let mut t = T::new();
     t.conn(mirror(with_rig(7)));
-    t.st.update(Msg::OpenRig, &t.keys);
+    t.st.apply(Msg::OpenRig, &t.keys);
     assert_eq!(t.st.overlay.settings().map(|s| s.page), Some(Page::Rig));
     assert_eq!(rig_page(&t).focus, RigRow::Target);
     // A bad target says why and sends nothing.
@@ -46,7 +46,7 @@ fn the_rig_page_sends_its_edits_on_the_rev_it_shows() {
     );
     // Ctrl+A is not needed: Backspace clears what was typed.
     for _ in 0.."lights.local:9000".len() {
-        t.st.update(Msg::Backspace, &t.keys);
+        t.st.apply(Msg::Backspace, &t.keys);
     }
     t.text("10.0.0.5:9000");
     let r = t.key("Enter");
@@ -95,7 +95,7 @@ fn the_rig_page_sends_its_edits_on_the_rev_it_shows() {
 fn a_conflict_keeps_the_typed_target_on_the_newer_rev() {
     let mut t = T::new();
     t.conn(mirror(with_rig(3)));
-    t.st.update(Msg::OpenRig, &t.keys);
+    t.st.apply(Msg::OpenRig, &t.keys);
     t.text("10.0.0.5:9000");
     // Typed: a mirror change leaves the edit (and its base) alone.
     let mut s = with_rig(4);
@@ -140,7 +140,7 @@ fn a_conflict_keeps_the_typed_target_on_the_newer_rev() {
 fn a_conflict_on_monitor_at_start_reloads_the_page() {
     let mut t = T::new();
     t.conn(mirror(with_rig(3)));
-    t.st.update(Msg::OpenRig, &t.keys);
+    t.st.apply(Msg::OpenRig, &t.keys);
     t.key("ArrowDown");
     assert!(call(&t.key("ArrowRight")).is_some());
     t.conn(ConnEvent::Conflict {
@@ -163,7 +163,7 @@ fn a_conflict_on_apply_keeps_the_leq_page_and_its_edits() {
     t.conn(mirror(with_spl()));
     t.type_key("Shift+L", "L");
     let opened = t.st.overlay.leq().expect("test value").base_rev;
-    t.st.update(Msg::Leq(LeqMsg::Focus(Focus::Scope)), &t.keys);
+    t.st.apply(Msg::Leq(LeqMsg::Focus(Focus::Scope)), &t.keys);
     t.key("ArrowRight");
     assert!(t.st.overlay.leq().expect("test value").on_rig);
     // Elsewhere: the meter's configuration moves on.
@@ -248,7 +248,7 @@ fn the_limit_editor_sets_scope_and_cues_on_its_opening_rev() {
     t.type_key("Shift+L", "L");
     let opened = t.st.overlay.leq().expect("test value").base_rev;
     let leq = |t: &mut T, m: LeqMsg| {
-        t.st.update(Msg::Leq(m), &t.keys);
+        t.st.apply(Msg::Leq(m), &t.keys);
     };
     leq(&mut t, LeqMsg::Focus(Focus::Scope));
     t.key("ArrowRight");
@@ -278,7 +278,7 @@ fn the_limit_editor_sets_scope_and_cues_on_its_opening_rev() {
         Some("OSC cue of the meter: an OSC address starts with '/'")
     );
     for _ in 0.."amber".len() {
-        t.st.update(Msg::Backspace, &t.keys);
+        t.st.apply(Msg::Backspace, &t.keys);
     }
     // The meter's config moves on elsewhere meanwhile.
     let mut s = with_spl();
@@ -326,7 +326,7 @@ fn the_tree_lists_rig_meters_first_with_their_chip() {
         .find(|r| r.key == TreeKey::Meas(MeasId(4)))
         .expect("test value");
     assert_eq!(foh.chip, Some(CueState::Near));
-    t.st.update(Msg::OpenRig, &t.keys);
+    t.st.apply(Msg::OpenRig, &t.keys);
     assert_eq!(t.st.overlay.settings().map(|s| s.page), Some(Page::Rig));
 }
 
@@ -337,9 +337,9 @@ fn the_tree_lists_rig_meters_first_with_their_chip() {
 fn the_rig_page_sends_the_artnet_target_on_the_rev_it_shows() {
     let mut t = T::new();
     t.conn(mirror(with_rig(7)));
-    t.st.update(Msg::OpenRig, &t.keys);
+    t.st.apply(Msg::OpenRig, &t.keys);
     let focus = |t: &mut T, row| {
-        t.st.update(Msg::Settings(SettingsMsg::RigFocus(row)), &t.keys);
+        t.st.apply(Msg::Settings(SettingsMsg::RigFocus(row)), &t.keys);
     };
     focus(&mut t, RigRow::ArtnetTarget);
     t.text("node.local");
@@ -352,7 +352,7 @@ fn the_rig_page_sends_the_artnet_target_on_the_rev_it_shows() {
             .contains("IPv4 address")
     );
     for _ in 0.."node.local".len() {
-        t.st.update(Msg::Backspace, &t.keys);
+        t.st.apply(Msg::Backspace, &t.keys);
     }
     t.text("2.255.255.255");
     // No universe yet: Enter says to type one.
@@ -374,11 +374,11 @@ fn the_rig_page_sends_the_artnet_target_on_the_rev_it_shows() {
     // a 1.
     t.key("ArrowLeft");
     t.key("ArrowLeft");
-    t.st.update(Msg::Backspace, &t.keys);
-    t.st.update(Msg::Backspace, &t.keys);
+    t.st.apply(Msg::Backspace, &t.keys);
+    t.st.apply(Msg::Backspace, &t.keys);
     t.text("0");
     t.key("End");
-    t.st.update(Msg::Backspace, &t.keys);
+    t.st.apply(Msg::Backspace, &t.keys);
     t.text("1");
     assert_eq!(rig_page(&t).universe, "0.0.1");
     let r = t.key("Enter");
@@ -407,7 +407,7 @@ fn the_rig_page_sends_the_artnet_target_on_the_rev_it_shows() {
     // Emptied: off, whatever the universe says.
     focus(&mut t, RigRow::ArtnetTarget);
     for _ in 0.."2.255.255.255:6454".len() {
-        t.st.update(Msg::Backspace, &t.keys);
+        t.st.apply(Msg::Backspace, &t.keys);
     }
     let r = t.key("Enter");
     assert_eq!(
@@ -428,8 +428,8 @@ fn the_rig_page_sends_the_artnet_target_on_the_rev_it_shows() {
 fn the_rig_page_sends_a_dmx_test() {
     let mut t = T::new();
     t.conn(mirror(with_rig(7)));
-    t.st.update(Msg::OpenRig, &t.keys);
-    t.st.update(
+    t.st.apply(Msg::OpenRig, &t.keys);
+    t.st.apply(
         Msg::Settings(SettingsMsg::RigFocus(RigRow::DmxTest)),
         &t.keys,
     );
@@ -465,8 +465,8 @@ fn the_rig_page_sends_a_dmx_test() {
 fn a_conflict_keeps_the_typed_artnet_target() {
     let mut t = T::new();
     t.conn(mirror(with_rig(3)));
-    t.st.update(Msg::OpenRig, &t.keys);
-    t.st.update(
+    t.st.apply(Msg::OpenRig, &t.keys);
+    t.st.apply(
         Msg::Settings(SettingsMsg::RigFocus(RigRow::ArtnetTarget)),
         &t.keys,
     );
@@ -524,9 +524,9 @@ fn a_conflict_keeps_the_typed_artnet_target() {
 fn the_rig_page_sets_the_artnet_fade() {
     let mut t = T::new();
     t.conn(mirror(with_rig(7)));
-    t.st.update(Msg::OpenRig, &t.keys);
+    t.st.apply(Msg::OpenRig, &t.keys);
     assert_eq!(rig_page(&t).fade, "1", "the default a rig starts with");
-    t.st.update(
+    t.st.apply(
         Msg::Settings(SettingsMsg::RigFocus(RigRow::Universe)),
         &t.keys,
     );
@@ -542,7 +542,7 @@ fn the_rig_page_sets_the_artnet_fade() {
         Some("Art-Net fade 150 s is outside 0–60 s")
     );
     for _ in 0..3 {
-        t.st.update(Msg::Backspace, &t.keys);
+        t.st.apply(Msg::Backspace, &t.keys);
     }
     t.text("0.5");
     let r = t.key("Enter");
@@ -565,7 +565,7 @@ fn the_rig_page_sets_the_artnet_fade() {
     );
     // Emptied: off. Refused as stale, the empty row stays on the newer rev.
     for _ in 0..3 {
-        t.st.update(Msg::Backspace, &t.keys);
+        t.st.apply(Msg::Backspace, &t.keys);
     }
     let r = t.key("Enter");
     let Some((cmd, what)) = call(&r) else {
@@ -600,7 +600,7 @@ fn the_limit_editor_sends_dmx_cue_levels() {
     t.conn(mirror(with_spl()));
     t.type_key("Shift+L", "L");
     let opened = t.st.overlay.leq().expect("test value").base_rev;
-    t.st.update(Msg::Leq(LeqMsg::Focus(Focus::CueFold)), &t.keys);
+    t.st.apply(Msg::Leq(LeqMsg::Focus(Focus::CueFold)), &t.keys);
     t.key("ArrowRight");
     t.key("ArrowDown");
     t.text("/light/red 1");
@@ -623,7 +623,7 @@ fn the_limit_editor_sends_dmx_cue_levels() {
         Some("DMX cue of the meter: \"13=300\": the value is a number 0–255")
     );
     for _ in 0.."300".len() {
-        t.st.update(Msg::Backspace, &t.keys);
+        t.st.apply(Msg::Backspace, &t.keys);
     }
     t.text("0");
     // Tab: the next state's levels.
@@ -670,7 +670,7 @@ fn the_cue_fold_survives_apply_and_reopening() {
     t.type_key("Shift+L", "L");
     let shown = |t: &T| t.st.overlay.leq().expect("open").cues_shown;
     assert!(!shown(&t), "no cue set: folded");
-    t.st.update(Msg::Leq(LeqMsg::Focus(Focus::CueFold)), &t.keys);
+    t.st.apply(Msg::Leq(LeqMsg::Focus(Focus::CueFold)), &t.keys);
     t.key("ArrowRight");
     assert!(shown(&t));
     let r = t.key("Enter");
@@ -678,7 +678,7 @@ fn the_cue_fold_survives_apply_and_reopening() {
     assert!(t.st.overlay.leq().is_none(), "applied: the page closes");
     t.type_key("Shift+L", "L");
     assert!(shown(&t), "the unfold is kept across Apply");
-    t.st.update(Msg::Leq(LeqMsg::Focus(Focus::CueFold)), &t.keys);
+    t.st.apply(Msg::Leq(LeqMsg::Focus(Focus::CueFold)), &t.keys);
     t.key("ArrowLeft");
     t.key("Escape");
     assert!(t.st.overlay.leq().is_none(), "closed");
@@ -722,7 +722,7 @@ fn a_dmx_cue_line_is_edited_at_its_caret() {
     let mut t = T::new();
     t.conn(mirror(with_spl()));
     t.type_key("Shift+L", "L");
-    t.st.update(Msg::Leq(LeqMsg::Focus(Focus::CueFold)), &t.keys);
+    t.st.apply(Msg::Leq(LeqMsg::Focus(Focus::CueFold)), &t.keys);
     t.key("ArrowRight");
     t.key("ArrowDown");
     t.key("ArrowDown");
@@ -741,7 +741,7 @@ fn a_dmx_cue_line_is_edited_at_its_caret() {
         t.key("ArrowLeft");
     }
     assert_eq!(shown(&t), "12=255 13=0▏ 14=40");
-    t.st.update(Msg::Backspace, &t.keys);
+    t.st.apply(Msg::Backspace, &t.keys);
     t.text("128");
     assert_eq!(shown(&t), "12=255 13=128▏ 14=40");
     t.key("Home");
@@ -773,7 +773,7 @@ fn a_dmx_cue_line_is_edited_at_its_caret() {
 fn shift_tab_steps_back_on_the_rig_page() {
     let mut t = T::new();
     t.conn(mirror(with_rig(7)));
-    t.st.update(Msg::OpenRig, &t.keys);
+    t.st.apply(Msg::OpenRig, &t.keys);
     assert_eq!(rig_page(&t).focus, RigRow::Target);
     t.key("Tab");
     assert_ne!(rig_page(&t).focus, RigRow::Target);
@@ -789,8 +789,8 @@ fn the_rig_page_steps_the_programme_meters() {
     use ac2_proto::units::{Dbfs, Dbtp};
     let mut t = T::new();
     t.conn(mirror(with_rig(7)));
-    t.st.update(Msg::OpenRig, &t.keys);
-    t.st.update(
+    t.st.apply(Msg::OpenRig, &t.keys);
+    t.st.apply(
         Msg::Settings(SettingsMsg::RigFocus(RigRow::Ballistic)),
         &t.keys,
     );
@@ -856,8 +856,8 @@ fn the_rig_page_steps_the_loudness_target() {
     let mut s = with_rig(7);
     s.rig.levels.loudness_target = Lufs(-36.0);
     t.conn(mirror(s));
-    t.st.update(Msg::OpenRig, &t.keys);
-    t.st.update(
+    t.st.apply(Msg::OpenRig, &t.keys);
+    t.st.apply(
         Msg::Settings(SettingsMsg::RigFocus(RigRow::LoudnessTarget)),
         &t.keys,
     );

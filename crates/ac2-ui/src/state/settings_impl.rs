@@ -64,8 +64,8 @@ impl AppState {
         let labels = self.daemon().map(|s| s.outputs.clone()).unwrap_or_default();
         let mut session = SessionDialog::new(open.as_ref(), &setup);
         session.set_labels(&labels);
-        if let Some(d) = &self.devices {
-            session.set_backends(d.clone(), &self.prefs);
+        if let Some(d) = &self.rig.devices {
+            session.set_backends(d.clone(), self.prefs.of_rig(self.rig.id));
         }
         // The calibrations start on the input the selected measurement listens on.
         let on = self
@@ -76,7 +76,7 @@ impl AppState {
             .map_or_else(CalView::default, |s| CalView::new(s, on));
         let leq = self.kind_meas(PaneKind::Spl).cloned().and_then(|m| {
             let calibrated = self.leq_calibrated(m.id);
-            LeqDialog::new(&m, calibrated, self.leq.cues_shown)
+            LeqDialog::new(&m, calibrated, self.leq_panes.cues_shown)
         });
         let mut settings = Settings::new(page, session, cal, leq);
         settings.rig = RigPage::new(self.daemon().map(|s| &s.rig));
@@ -104,7 +104,7 @@ impl AppState {
             return;
         };
         if matches!(s.page, Page::Connection | Page::Recording)
-            && matches!(self.conn, super::ConnState::Connected { .. })
+            && matches!(self.rig.conn, super::ConnState::Connected { .. })
         {
             s.connection.asked_s = Some(self.now_s);
             out.push(Request::ServerInfo);
@@ -179,7 +179,7 @@ impl AppState {
     /// meter's current configuration. False when no such Apply is waiting, or another
     /// window is up.
     fn leq_conflict(&mut self, what: &str, out: &mut Vec<Request>) -> bool {
-        let Some((_, d)) = self.leq.sent.take_if(|(w, _)| w == what) else {
+        let Some((_, d)) = self.rig.leq.sent.take_if(|(w, _)| w == what) else {
             return false;
         };
         let Some(m) = self.meas(d.meas).cloned() else {
@@ -594,7 +594,7 @@ impl AppState {
             Key::ArrowLeft | Key::ArrowRight if d.edit.is_none() => {
                 let forward = chord.key == Key::ArrowRight;
                 if matches!(d.focus, Row::Input(_)) {
-                    let st = self.mirror.as_ref().and_then(|m| m.state.clone());
+                    let st = self.rig.mirror.as_ref().and_then(|m| m.state.clone());
                     let mics = st.as_ref().map(|s| s.mics.as_slice()).unwrap_or_default();
                     let live = st.as_ref().map(|s| s.inputs.as_slice()).unwrap_or_default();
                     if let Some(row) = d.step_curve(forward, mics, live) {
@@ -606,7 +606,7 @@ impl AppState {
                         });
                     }
                 } else {
-                    d.cycle(if forward { 1 } else { -1 }, &self.prefs);
+                    d.cycle(if forward { 1 } else { -1 }, self.prefs.of_rig(self.rig.id));
                 }
             }
             // Everything below types text while a text row or edit has the keyboard.
@@ -698,13 +698,18 @@ impl AppState {
         });
         d.notice = Some(format!("the stimulus plays on {names} (this app)"));
         if let Some(dev) = device {
-            self.prefs.outputs.insert(dev.clone(), ticked.clone());
+            self.prefs
+                .outputs
+                .insert((self.rig.id, dev.clone()), ticked.clone());
             self.prefs_dirty = true;
-            if self.stimulus.phase == StimPhase::Idle
-                || matches!(self.stimulus.phase, StimPhase::Armed | StimPhase::Firing)
+            if self.rig.stimulus.phase == StimPhase::Idle
+                || matches!(
+                    self.rig.stimulus.phase,
+                    StimPhase::Armed | StimPhase::Firing
+                )
             {
-                self.stimulus.outputs = ticked;
-                self.stim_device = Some(dev);
+                self.rig.stimulus.outputs = ticked;
+                self.rig.stim_device = Some(dev);
                 self.resend_stimulus(out);
             }
         }
@@ -927,7 +932,7 @@ impl AppState {
             }
             _ => return,
         };
-        self.advice.clear();
+        self.rig.advice.clear();
         self.prefs_dirty = true;
         self.toast(said);
     }

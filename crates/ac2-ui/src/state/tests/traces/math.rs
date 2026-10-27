@@ -41,7 +41,7 @@ fn slots_capture_and_replace() {
         }]
     ));
     // Spectrum measurements capture too.
-    t.st.selected = Some(MeasId(2));
+    t.st.rig.selected = Some(MeasId(2));
     let r = t.key("Ctrl+1");
     assert!(matches!(
         r.as_slice(),
@@ -231,7 +231,7 @@ fn math_channel_edit() {
         },
     ));
     t.conn(mirror(s));
-    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(3)), &t.keys);
     t.key("Ctrl+K");
     t.text("edit measurement");
     t.key("Enter");
@@ -267,7 +267,7 @@ fn math_channel_edit() {
 fn edit_meas_on_a_spectrum_changes_its_averaging_and_keeps_the_rest() {
     let mut t = T::new();
     t.conn(mirror(daemon_state()));
-    t.st.update(Msg::SelectMeas(MeasId(2)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(2)), &t.keys);
     t.key("Ctrl+K");
     t.text("edit measurement");
     t.key("Enter");
@@ -330,7 +330,7 @@ fn edit_meas_on_a_spectrum_changes_its_averaging_and_keeps_the_rest() {
 fn edit_meas_switches_a_spectrum_to_multi_resolution() {
     let mut t = T::new();
     t.conn(mirror(daemon_state()));
-    t.st.update(Msg::SelectMeas(MeasId(2)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(2)), &t.keys);
     t.key("Ctrl+K");
     t.text("edit measurement");
     t.key("Enter");
@@ -387,7 +387,7 @@ fn edit_meas_switches_a_spectrum_to_multi_resolution() {
 fn edit_meas_sets_a_fixed_spectrum_to_density() {
     let mut t = T::new();
     t.conn(mirror(daemon_state()));
-    t.st.update(Msg::SelectMeas(MeasId(2)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(2)), &t.keys);
     t.key("Ctrl+K");
     t.text("edit measurement");
     t.key("Enter");

@@ -60,13 +60,13 @@ fn input_meters_follow_the_dialog() {
         latest.frames.insert(f.topic.to_string().into(), f);
     }
     assert!(latest.get(&Topic::PreviewLevels).is_some());
-    t.st.data = Some(Arc::new(crate::conn::DataSnapshot {
+    t.st.rig.data = Some(Arc::new(crate::conn::DataSnapshot {
         latest,
         grids: Default::default(),
         drained: Instant::now(),
     }));
     // A measurement dialog shows the session's meters.
-    t.st.update(Msg::Command(CommandId::NewTransfer), &t.keys);
+    t.st.apply(Msg::Command(CommandId::NewTransfer), &t.keys);
     let m = t.st.input_meters();
     assert_eq!(m.len(), 2);
     assert_eq!(m[&0].text, "\u{2212}20.0");
@@ -174,7 +174,7 @@ fn sidebar_meters_name_every_session_input_by_role() {
         stale: false,
     };
     latest.frames.insert(f.topic.to_string().into(), f);
-    t.st.data = Some(Arc::new(crate::conn::DataSnapshot {
+    t.st.rig.data = Some(Arc::new(crate::conn::DataSnapshot {
         latest,
         grids: Default::default(),
         drained: Instant::now(),
@@ -208,7 +208,7 @@ fn session_meters_stay_subscribed_while_a_session_is_open() {
         r.iter().any(|x| matches!(x, Request::Meters(true))),
         "{r:?}"
     );
-    let r = t.st.update(Msg::Command(CommandId::NewTransfer), &t.keys);
+    let r = t.st.apply(Msg::Command(CommandId::NewTransfer), &t.keys);
     assert!(!r.iter().any(|x| matches!(x, Request::Meters(_))), "{r:?}");
     let r = t.key("Escape");
     assert!(!r.iter().any(|x| matches!(x, Request::Meters(_))), "{r:?}");
@@ -225,7 +225,7 @@ fn session_meters_stay_subscribed_while_a_session_is_open() {
 fn sweep_progress_strip_counts_steps_and_time_left() {
     let mut t = T::new();
     let tick = |t: &mut T, now_s: f64| {
-        t.st.update(Msg::Tick { now_s, dt_s: 0.02 }, &t.keys);
+        t.st.apply(Msg::Tick { now_s, dt_s: 0.02 }, &t.keys);
     };
     tick(&mut t, 10.0);
     assert_eq!(t.st.operation(), None);
@@ -258,7 +258,7 @@ fn sweep_progress_strip_counts_steps_and_time_left() {
     assert_eq!(p.remaining.as_deref(), Some("about 5 s left"));
 
     // Stop (the strip's button sends the same command as Esc).
-    let r = t.st.update(Msg::Command(CommandId::StimulusStop), &t.keys);
+    let r = t.st.apply(Msg::Command(CommandId::StimulusStop), &t.keys);
     assert!(r.iter().any(|x| matches!(x, Request::StimStop)), "{r:?}");
 
     run.status = SweepStatus::Analysing;
@@ -275,14 +275,14 @@ fn sweep_progress_strip_counts_steps_and_time_left() {
     s.sweep = Some(run);
     t.conn(mirror(s));
     assert_eq!(t.st.operation(), None);
-    assert_eq!(t.st.sweep.step_seen, None);
+    assert_eq!(t.st.rig.sweep.step_seen, None);
 }
 
 #[test]
 fn record_toggles_and_the_indicator_names_the_inputs() {
     let mut t = T::new();
     assert_eq!(t.st.recording_label(), None);
-    let r = t.st.update(Msg::Command(CommandId::Record), &t.keys);
+    let r = t.st.apply(Msg::Command(CommandId::Record), &t.keys);
     let [
         Request::Call {
             cmd: Command::RecStart { request },
@@ -321,7 +321,7 @@ fn record_toggles_and_the_indicator_names_the_inputs() {
         "{}",
         l.detail
     );
-    let r = t.st.update(Msg::Command(CommandId::Record), &t.keys);
+    let r = t.st.apply(Msg::Command(CommandId::Record), &t.keys);
     assert!(
         matches!(
             r.as_slice(),
@@ -336,13 +336,13 @@ fn record_toggles_and_the_indicator_names_the_inputs() {
     // No session, nothing recording: the toggle says how to open one.
     t.conn(mirror(no_session_state()));
     assert!(
-        t.st.update(Msg::Command(CommandId::Record), &t.keys)
+        t.st.apply(Msg::Command(CommandId::Record), &t.keys)
             .is_empty()
     );
     assert!(t.last_toast().contains("no audio I/O to record"));
 
     // Replay asks for the recording and plays it in real time.
-    t.st.update(Msg::Command(CommandId::ReplayRecording), &t.keys);
+    t.st.apply(Msg::Command(CommandId::ReplayRecording), &t.keys);
     t.text("rec-x");
     let r = t.key("Enter");
     assert!(
@@ -357,7 +357,7 @@ fn record_toggles_and_the_indicator_names_the_inputs() {
 #[test]
 fn close_session_and_delete_measurement() {
     let mut t = T::new();
-    let r = t.st.update(Msg::Command(CommandId::CloseSession), &t.keys);
+    let r = t.st.apply(Msg::Command(CommandId::CloseSession), &t.keys);
     assert!(
         matches!(
             r.as_slice(),
@@ -368,7 +368,7 @@ fn close_session_and_delete_measurement() {
         ),
         "{r:?}"
     );
-    t.st.update(Msg::Command(CommandId::DeleteSelected), &t.keys);
+    t.st.apply(Msg::Command(CommandId::DeleteSelected), &t.keys);
     let r = t.key("Delete");
     assert!(
         matches!(r.as_slice(), [Request::Call { cmd: Command::MeasDelete { meas: MeasId(1), traces: ac2_proto::model::OwnedTraces::Keep }, what }]
@@ -377,12 +377,12 @@ fn close_session_and_delete_measurement() {
     );
     t.conn(mirror(no_session_state()));
     assert!(
-        t.st.update(Msg::Command(CommandId::CloseSession), &t.keys)
+        t.st.apply(Msg::Command(CommandId::CloseSession), &t.keys)
             .is_empty()
     );
     assert!(t.last_toast().contains("no audio I/O"));
     assert!(
-        t.st.update(Msg::Command(CommandId::DeleteSelected), &t.keys)
+        t.st.apply(Msg::Command(CommandId::DeleteSelected), &t.keys)
             .is_empty()
     );
     assert_eq!(t.st.overlay, Overlay::None);
@@ -392,8 +392,8 @@ fn close_session_and_delete_measurement() {
 #[test]
 fn new_measurements_start_and_become_selected() {
     let mut t = T::new();
-    assert_eq!(t.st.selected, Some(MeasId(1)));
-    t.st.update(Msg::Command(CommandId::NewTransfer), &t.keys);
+    assert_eq!(t.st.rig.selected, Some(MeasId(1)));
+    t.st.apply(Msg::Command(CommandId::NewTransfer), &t.keys);
     assert_eq!(form(&t).kind, FormKind::Transfer);
     let r = t.key("Enter");
     let c = created(&r).expect("meas.create");
@@ -409,9 +409,9 @@ fn new_measurements_start_and_become_selected() {
     // Created: selected at once, kept while the mirror has not caught up, then confirmed.
     let m = meas(7, "Reference → Input 2", transfer());
     t.conn(ConnEvent::MeasCreated(Box::new(m.clone())));
-    assert_eq!(t.st.selected, Some(MeasId(7)));
+    assert_eq!(t.st.rig.selected, Some(MeasId(7)));
     t.conn(mirror(daemon_state()));
-    assert_eq!(t.st.selected, Some(MeasId(7)));
+    assert_eq!(t.st.rig.selected, Some(MeasId(7)));
     let mut s = daemon_state();
     let before = t.st.layout.panes();
     // Another client's measurement shows in the list only: the panes stay as they are.
@@ -420,7 +420,7 @@ fn new_measurements_start_and_become_selected() {
     assert_eq!(t.st.layout.panes(), before);
     s.measurements.push(m);
     t.conn(mirror(s.clone()));
-    assert_eq!(t.st.selected, Some(MeasId(7)));
+    assert_eq!(t.st.rig.selected, Some(MeasId(7)));
     // The new transfer measurement opens in the transfer stack, its three panes showing it,
     // the magnitude on top with the focus.
     let l = &t.st.layout;
@@ -449,10 +449,10 @@ fn new_measurements_start_and_become_selected() {
     assert_eq!(t.st.layout.panes().len(), before.len() + 2);
     // The selection is the operator's again: Tab moves on and a later mirror keeps it.
     t.key("Tab");
-    assert!(t.st.live_row_selected() || t.st.selected != Some(MeasId(7)));
-    let sel = (t.st.selected, t.st.live_row_selected());
+    assert!(t.st.live_row_selected() || t.st.rig.selected != Some(MeasId(7)));
+    let sel = (t.st.rig.selected, t.st.live_row_selected());
     t.conn(mirror(s));
-    assert_eq!((t.st.selected, t.st.live_row_selected()), sel);
+    assert_eq!((t.st.rig.selected, t.st.live_row_selected()), sel);
 
     // Spectrum, RTA and SPL meter dialogs make their kinds on the first non-reference input.
     for (cmd, want) in [
@@ -460,7 +460,7 @@ fn new_measurements_start_and_become_selected() {
         (CommandId::NewRta, "rta"),
         (CommandId::NewSpl, "spl"),
     ] {
-        t.st.update(Msg::Command(cmd), &t.keys);
+        t.st.apply(Msg::Command(cmd), &t.keys);
         let r = t.key("Enter");
         let c = created(&r).unwrap_or_else(|| panic!("{want}: {r:?}"));
         let kind = match &c.kind {
@@ -475,7 +475,7 @@ fn new_measurements_start_and_become_selected() {
     }
     // Inputs are picked by name among the captured ones: ←/→ walks them, stopping at the
     // ends.
-    t.st.update(Msg::Command(CommandId::NewSpl), &t.keys);
+    t.st.apply(Msg::Command(CommandId::NewSpl), &t.keys);
     assert_eq!(form(&t).channel(crate::forms::FieldId::Input), Some(1));
     assert_eq!(form(&t).fields[0].display(), "2 · Input 2");
     t.key("Right");
@@ -489,7 +489,7 @@ fn new_measurements_start_and_become_selected() {
 
     // No session: nothing to measure on; the Sessions dialog, where one is started.
     t.conn(mirror(no_session_state()));
-    let r = t.st.update(Msg::Command(CommandId::NewRta), &t.keys);
+    let r = t.st.apply(Msg::Command(CommandId::NewRta), &t.keys);
     assert!(matches!(r.as_slice(), [Request::SessionList]), "{r:?}");
     assert!(t.st.sessions_dialog().is_some(), "{:?}", t.st.overlay);
 }

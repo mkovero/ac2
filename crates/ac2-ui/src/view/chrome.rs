@@ -171,14 +171,14 @@ fn draw_item(ui: &mut egui::Ui, it: &Item, k: usize, rtl: bool) -> Option<Comman
 pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     let st = &app.state;
     let now = std::time::Instant::now();
-    let link_state = match &st.conn {
+    let link_state = match &st.rig.conn {
         ConnState::Connecting { target } => ac2_scene::chrome::Link::Connecting { target },
         ConnState::Failed { target, error } => ac2_scene::chrome::Link::Failed { target, error },
         ConnState::Connected { target, server, .. } => ac2_scene::chrome::Link::Connected {
             target,
             server,
-            responding: st.mirror.as_ref().is_some_and(|m| m.responding(now)),
-            synced: st.mirror.as_ref().is_some_and(|m| m.synced()),
+            responding: st.rig.mirror.as_ref().is_some_and(|m| m.responding(now)),
+            synced: st.rig.mirror.as_ref().is_some_and(|m| m.synced()),
         },
     };
     let link_line = ac2_scene::chrome::link_line(link_state);
@@ -419,7 +419,10 @@ fn stimulus(app: &App, ch: &Chrome) -> Vec<Item> {
     // A lit badge is a filled chip: banner fills with their own text colour.
     let firing = (ch.fault_fill, ch.on_fault_fill);
     let armed = (ch.warn_fill, ch.on_warn_fill);
-    let (badge, (fill, ink)) = match (generator.map(|g| (g.armed, g.firing)), st.stimulus.phase) {
+    let (badge, (fill, ink)) = match (
+        generator.map(|g| (g.armed, g.firing)),
+        st.rig.stimulus.phase,
+    ) {
         (Some((_, true)), _) => ("FIRING", firing),
         (Some((true, false)), StimPhase::FireRequested) => ("FIRE…", armed),
         (Some((true, false)), _) => ("ARMED", armed),
@@ -427,7 +430,7 @@ fn stimulus(app: &App, ch: &Chrome) -> Vec<Item> {
         (_, StimPhase::Stopping) => ("STOPPING…", (ch.dim, ch.panel)),
         _ => ("STIM OFF", (Color32::TRANSPARENT, ch.dim)),
     };
-    let level = st.stimulus.level.map_or_else(
+    let level = st.rig.stimulus.level.map_or_else(
         || "no level".to_string(),
         |l| format!("{} dBFS", format::signed(l.0, 1)),
     );
@@ -435,7 +438,7 @@ fn stimulus(app: &App, ch: &Chrome) -> Vec<Item> {
         .daemon()
         .and_then(|s| s.sweep.as_ref())
         .filter(|r| r.active());
-    let sweep = st.sweep.plan.is_some();
+    let sweep = st.rig.sweep.plan.is_some();
     // What the keys do next, as the focused view decides. With a window open the window
     // has Space, Enter and Esc; only the missing level is said then.
     let window = st.overlay != crate::state::Overlay::None;
@@ -471,7 +474,7 @@ fn stimulus(app: &App, ch: &Chrome) -> Vec<Item> {
                 RichText::new(format!(
                     "{prefix}{level} → {}",
                     ac2_scene::rig::stimulus_outputs(
-                        &st.stimulus.outputs,
+                        &st.rig.stimulus.outputs,
                         st.daemon()
                             .map(|s| s.outputs.as_slice())
                             .unwrap_or_default()
@@ -479,7 +482,7 @@ fn stimulus(app: &App, ch: &Chrome) -> Vec<Item> {
                 )),
                 RichText::new(format!(
                     "{prefix}{level} → out {}",
-                    outputs_text(&st.stimulus.outputs)
+                    outputs_text(&st.rig.stimulus.outputs)
                 )),
                 RichText::new(format!("{prefix}{level}")),
             ],

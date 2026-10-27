@@ -20,7 +20,7 @@ use ac2_scene::programme::{
 
 use crate::conn::{DataSnapshot, Request};
 use crate::keys::{CommandId, Scope};
-use crate::state::{AppState, PaneId, PaneKind};
+use crate::state::{AppState, Folding, PaneId, PaneKind, RigState};
 
 /// Bars a Programme pane shows at most (the wire's limit).
 pub const MAX_METERED: usize = PaneContent::MAX_INPUTS;
@@ -155,7 +155,7 @@ impl AppState {
 
     /// Whether a visible goniometer has embers still cooling: it redraws every frame.
     pub fn embers_glowing(&self) -> bool {
-        self.programme.glowing()
+        self.rig.programme.glowing()
     }
 
     /// The pairs the visible Programme panes show.
@@ -172,51 +172,13 @@ impl AppState {
         v
     }
 
-    /// Feeds the flying peaks from a new levels frame and the shown pairs' rings from a new
-    /// gonio frame, at display time `now_s`; drops the rings no visible pane shows.
-    pub(in crate::state) fn fold_programme(&mut self, d: &DataSnapshot) {
-        let now = self.now_s;
-        if let Some(tf) = d.latest.get(&Topic::SessionLevels)
-            && let FrameData::SessionLevels(f) = &tf.frame.data
-            && self.programme.levels_seq != Some(tf.frame.stamp.seq)
-        {
-            self.programme.levels_seq = Some(tf.frame.stamp.seq);
-            for (i, c) in f.meta.channels.iter().enumerate() {
-                let ppm = f.ppm.get(i).copied();
-                self.programme
-                    .flying
-                    .entry(*c)
-                    .or_default()
-                    .update(now, ppm);
-            }
-        }
-        let shown = self.programme_pairs_shown();
-        self.programme.rings.retain(|k, _| shown.contains(k));
-        let capacity = ac2_scene::gonio::ring_capacity(self.ember_cooling());
-        if let Some(tf) = d.latest.get(&Topic::SessionGonio)
-            && let FrameData::SessionGonio(g) = &tf.frame.data
-            && self.programme.gonio_seq != Some(tf.frame.stamp.seq)
-        {
-            self.programme.gonio_seq = Some(tf.frame.stamp.seq);
-            for p in &g.pairs {
-                if shown.contains(&(p.left, p.right)) {
-                    self.programme
-                        .rings
-                        .entry((p.left, p.right))
-                        .or_insert_with(|| EmberRing::new(capacity))
-                        .push_points(now, &p.points);
-                }
-            }
-        }
-    }
-
     /// Lets the embers that no longer show go (every frame tick), and sizes each ring to
     /// the decay and glow set now (Settings › Display or the programme meter form), so
     /// every ember lives its whole ramp.
     pub(in crate::state) fn retire_embers(&mut self) {
         let (now, cooling) = (self.now_s, self.ember_cooling());
         let capacity = ac2_scene::gonio::ring_capacity(cooling);
-        for r in self.programme.rings.values_mut() {
+        for r in self.rig.programme.rings.values_mut() {
             if r.capacity() != capacity {
                 r.set_capacity(capacity);
             }
@@ -256,6 +218,7 @@ impl AppState {
     pub fn programme_of(&self, metered: Metered) -> ProgrammePane {
         let st = self.daemon();
         let latest = self
+            .rig
             .data
             .as_ref()
             .and_then(|d| d.latest.get(&Topic::SessionLevels))
@@ -295,7 +258,12 @@ impl AppState {
                 clipped: frame
                     .and_then(|f| at.and_then(|i| f.clip.get(i)))
                     .is_some_and(|k| *k != ac2_proto::frame::ClipFlags::NONE),
-                flying_peak: self.programme.flying.get(&c).and_then(FlyingPeak::value),
+                flying_peak: self
+                    .rig
+                    .programme
+                    .flying
+                    .get(&c)
+                    .and_then(FlyingPeak::value),
                 offers_vu: match (st, device) {
                     (Some(s), Some(d)) => {
                         ac2_proto::cal::offers_vu(&s.inputs, &s.line_calibrations, d, c)
@@ -519,7 +487,7 @@ impl AppState {
 
     /// The inputs R resets: the picked Inputs row's, else the focused Programme pane's.
     pub(in crate::state) fn reset_target(&self) -> Option<Vec<u16>> {
-        match self.input_pick {
+        match self.rig.input_pick {
             Some(c) => self.row_meters(c).map(|m| m.inputs()),
             None => self
                 .layout
@@ -549,5 +517,45 @@ impl AppState {
             cmd: ac2_proto::Command::LevelsReset { channels },
             what,
         });
+    }
+}
+
+impl RigState {
+    /// Feeds the flying peaks from a new levels frame and the shown pairs' rings from a new
+    /// gonio frame, at display time `now_s`; drops the rings no visible pane shows.
+    pub(in crate::state) fn fold_programme(&mut self, d: &DataSnapshot, fold: &Folding) {
+        let now = fold.now_s;
+        if let Some(tf) = d.latest.get(&Topic::SessionLevels)
+            && let FrameData::SessionLevels(f) = &tf.frame.data
+            && self.programme.levels_seq != Some(tf.frame.stamp.seq)
+        {
+            self.programme.levels_seq = Some(tf.frame.stamp.seq);
+            for (i, c) in f.meta.channels.iter().enumerate() {
+                let ppm = f.ppm.get(i).copied();
+                self.programme
+                    .flying
+                    .entry(*c)
+                    .or_default()
+                    .update(now, ppm);
+            }
+        }
+        let shown = &fold.pairs_shown;
+        self.programme.rings.retain(|k, _| shown.contains(k));
+        let capacity = ac2_scene::gonio::ring_capacity(fold.cooling);
+        if let Some(tf) = d.latest.get(&Topic::SessionGonio)
+            && let FrameData::SessionGonio(g) = &tf.frame.data
+            && self.programme.gonio_seq != Some(tf.frame.stamp.seq)
+        {
+            self.programme.gonio_seq = Some(tf.frame.stamp.seq);
+            for p in &g.pairs {
+                if shown.contains(&(p.left, p.right)) {
+                    self.programme
+                        .rings
+                        .entry((p.left, p.right))
+                        .or_insert_with(|| EmberRing::new(capacity))
+                        .push_points(now, &p.points);
+                }
+            }
+        }
     }
 }

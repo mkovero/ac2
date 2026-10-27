@@ -45,7 +45,7 @@ impl AppState {
                             cmd: self.meas_update(meas, config),
                         },
                         None => {
-                            self.pane_on_create = Some(config.name.clone());
+                            self.rig.pane_on_create = Some(config.name.clone());
                             Request::CreateMeas { config }
                         }
                     };
@@ -105,13 +105,13 @@ impl AppState {
             },
             None => {
                 if transfer {
-                    self.stack_on_create = Some(config.name.clone());
+                    self.rig.stack_on_create = Some(config.name.clone());
                 } else if matches!(&config.kind, MeasKind::Math { config: m } if matches!(m.expr, ac2_proto::model::MathExpr::Align { .. }))
                 {
-                    self.align_on_create = Some(config.name.clone());
+                    self.rig.align_on_create = Some(config.name.clone());
                 } else if !matches!(config.kind, MeasKind::Math { .. }) {
                     // A math channel is drawn on the pane of what it computes from.
-                    self.pane_on_create = Some(config.name.clone());
+                    self.rig.pane_on_create = Some(config.name.clone());
                 }
                 Request::CreateMeas { config }
             }
@@ -128,7 +128,7 @@ impl AppState {
         out: &mut Vec<Request>,
     ) {
         use eframe::egui::Key;
-        let Some(st) = self.mirror.as_ref().and_then(|m| m.state.clone()) else {
+        let Some(st) = self.rig.mirror.as_ref().and_then(|m| m.state.clone()) else {
             self.overlay = Overlay::None;
             return;
         };
@@ -282,7 +282,7 @@ impl AppState {
     }
 
     pub(in crate::state) fn session_msg(&mut self, m: SessionMsg, out: &mut Vec<Request>) {
-        let level = self.stimulus.level;
+        let level = self.rig.stimulus.level;
         let ceiling = self.ceiling();
         let Overlay::Settings(s) = &mut self.overlay else {
             return;
@@ -308,7 +308,7 @@ impl AppState {
             SessionMsg::Cycle(r, step) => {
                 d.detect_cancel();
                 d.focus_row(r);
-                d.cycle(step, &self.prefs);
+                d.cycle(step, self.prefs.of_rig(self.rig.id));
             }
             SessionMsg::Toggle(r) => {
                 s.on_ceiling = false;
@@ -382,16 +382,20 @@ impl AppState {
             .backend
             .unwrap_or(ac2_proto::model::BackendKind::Fake);
         self.prefs.sessions.insert(
-            crate::prefs::UiPrefs::device_key(backend, &plan.device_id),
+            (
+                self.rig.id,
+                crate::prefs::UiPrefs::device_key(backend, &plan.device_id),
+            ),
             plan.roles.clone(),
         );
         if !plan.roles.stimulus.is_empty() {
-            self.prefs
-                .outputs
-                .insert(plan.output_device_id.clone(), plan.roles.stimulus.clone());
-            if self.stimulus.phase == StimPhase::Idle {
-                self.stimulus.outputs = plan.roles.stimulus.clone();
-                self.stim_device = Some(plan.output_device_id.clone());
+            self.prefs.outputs.insert(
+                (self.rig.id, plan.output_device_id.clone()),
+                plan.roles.stimulus.clone(),
+            );
+            if self.rig.stimulus.phase == StimPhase::Idle {
+                self.rig.stimulus.outputs = plan.roles.stimulus.clone();
+                self.rig.stim_device = Some(plan.output_device_id.clone());
             }
         }
         self.prefs_dirty = true;

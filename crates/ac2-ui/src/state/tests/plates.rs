@@ -20,7 +20,7 @@ fn layout_sent(r: &[Request]) -> Option<PaneLayout> {
 }
 
 fn plate(t: &mut T, m: PlateMsg) -> Vec<Request> {
-    t.st.update(Msg::Plate(m), &t.keys)
+    t.st.apply(Msg::Plate(m), &t.keys)
 }
 
 /// A plate dragged is sent with its measurement's panes once, when it rests; the drag and
@@ -28,7 +28,7 @@ fn plate(t: &mut T, m: PlateMsg) -> Vec<Request> {
 #[test]
 fn a_dragged_plate_is_kept_sent_once_and_one_undo_step() {
     let mut t = T::new();
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     let pane = t.st.layout.focus;
     t.tick(1.0);
     let steps = t.st.history.undo_len();
@@ -40,7 +40,7 @@ fn a_dragged_plate_is_kept_sent_once_and_one_undo_step() {
     assert!(layout_sent(&r).is_none(), "not while dragged: {r:?}");
     r.extend(plate(&mut t, PlateMsg::End));
     assert_eq!(plates(&t, pane).readout.at, Some([0.5, 0.6]));
-    r.extend(t.st.update(
+    r.extend(t.st.apply(
         Msg::Tick {
             now_s: 2.0,
             dt_s: 1.0,
@@ -179,7 +179,7 @@ fn a_legend_corner_keeps_the_text_size() {
 #[test]
 fn the_peak_list_is_a_plate_of_the_pane() {
     let mut t = T::new();
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     let pane = t.st.layout.focus;
     t.tick(1.0);
     let steps = t.st.history.undo_len();
@@ -203,7 +203,7 @@ fn the_peak_list_is_a_plate_of_the_pane() {
         },
     ));
     r.extend(plate(&mut t, PlateMsg::End));
-    r.extend(t.st.update(
+    r.extend(t.st.apply(
         Msg::Tick {
             now_s: 2.0,
             dt_s: 1.0,
@@ -291,7 +291,7 @@ fn the_loudness_plate_is_a_plate_of_the_programme_pane() {
 #[test]
 fn the_loudness_plate_is_sent_with_the_measurements_panes() {
     let mut t = T::new();
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     let pane = t.st.layout.focus;
     t.tick(1.0);
     let kind = PlateKind::Loudness;
@@ -305,7 +305,7 @@ fn the_loudness_plate_is_sent_with_the_measurements_panes() {
         },
     );
     r.extend(plate(&mut t, PlateMsg::End));
-    r.extend(t.st.update(
+    r.extend(t.st.apply(
         Msg::Tick {
             now_s: 2.0,
             dt_s: 1.0,

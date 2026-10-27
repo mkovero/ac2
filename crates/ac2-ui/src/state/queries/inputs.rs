@@ -8,6 +8,7 @@ impl AppState {
     pub fn operation(&self) -> Option<ac2_scene::progress::Progress> {
         let run = self.daemon()?.sweep.as_ref()?;
         let since = self
+            .rig
             .sweep
             .step_seen
             .as_ref()
@@ -30,6 +31,7 @@ impl AppState {
             self.input_meters()
         };
         let device_names = self
+            .rig
             .devices
             .iter()
             .flatten()
@@ -179,7 +181,7 @@ impl AppState {
         if before.0 != after.0 {
             out.push(Request::Meters(after.0));
         }
-        let renew = tick && self.now_s - self.preview_sent_s >= PREVIEW_RENEW_S;
+        let renew = tick && self.now_s - self.rig.preview_sent_s >= PREVIEW_RENEW_S;
         match (&before.1, &after.1) {
             (_, Some((backend, device))) if before.1 != after.1 || renew => {
                 let (inputs, pairs) = self
@@ -193,7 +195,7 @@ impl AppState {
                     inputs,
                     pairs,
                 });
-                self.preview_sent_s = self.now_s;
+                self.rig.preview_sent_s = self.now_s;
             }
             (Some(_), None) => out.push(Request::PreviewStop),
             _ => {}
@@ -207,7 +209,7 @@ impl AppState {
         use ac2_proto::FrameData;
         use ac2_proto::topic::Topic;
         let mut out = BTreeMap::new();
-        let Some(d) = &self.data else {
+        let Some(d) = &self.rig.data else {
             return out;
         };
         let from_preview = self.overlay.session().and_then(|s| s.preview_target());
@@ -251,6 +253,7 @@ impl AppState {
             return Vec::new();
         };
         let device_names = self
+            .rig
             .devices
             .iter()
             .flatten()
@@ -304,7 +307,8 @@ impl AppState {
     /// The open input device's channel names, as the backend reports them.
     fn input_channel_names(&self) -> Option<Vec<String>> {
         let o = self.open_session()?;
-        self.devices
+        self.rig
+            .devices
             .iter()
             .flatten()
             .filter(|b| b.kind == o.backend)

@@ -53,7 +53,7 @@ fn layout_calls(r: &[Request]) -> Vec<(MeasId, Option<PaneLayout>)> {
 }
 
 fn select(t: &mut T, id: u32) -> Vec<Request> {
-    t.st.update(Msg::SelectMeas(MeasId(id)), &t.keys)
+    t.st.apply(Msg::SelectMeas(MeasId(id)), &t.keys)
 }
 
 /// Selecting a measurement with its own panes puts them on screen, the focus in the pane
@@ -116,7 +116,7 @@ fn editing_panes_stores_them_on_the_selected_measurement() {
     assert_eq!(t.last_toast(), "Main L: 5 own panes");
     // No measurement selected: nothing is sent.
     let mut t = T::new();
-    t.st.selected = None;
+    t.st.rig.selected = None;
     let r = t.key("N");
     assert!(layout_calls(&r).is_empty(), "{r:?}");
 }
@@ -162,7 +162,7 @@ fn a_dragged_split_is_sent_when_it_rests() {
     select(&mut t, 1);
     t.tick(1.0);
     for ratio in [0.5, 0.55, 0.6] {
-        let r = t.st.update(
+        let r = t.st.apply(
             Msg::DragSplit {
                 path: vec![],
                 ratio,
@@ -171,7 +171,7 @@ fn a_dragged_split_is_sent_when_it_rests() {
         );
         assert!(layout_calls(&r).is_empty(), "{r:?}");
     }
-    let r = t.st.update(
+    let r = t.st.apply(
         Msg::Tick {
             now_s: 1.1,
             dt_s: 0.1,
@@ -179,7 +179,7 @@ fn a_dragged_split_is_sent_when_it_rests() {
         &t.keys,
     );
     assert!(layout_calls(&r).is_empty(), "{r:?}");
-    let r = t.st.update(
+    let r = t.st.apply(
         Msg::Tick {
             now_s: 2.0,
             dt_s: 0.9,
@@ -282,12 +282,12 @@ fn spectrum_2_layout(t: &T) -> Option<PaneLayout> {
 fn a_trace_compared_then_another_measurements_trace_chosen_leaves_its_layout() {
     let mut t = desk_on_twin_spectra();
     let mut sent = Vec::new();
-    sent.extend(t.st.update(Msg::SelectTrace(TraceId(13)), &t.keys));
+    sent.extend(t.st.apply(Msg::SelectTrace(TraceId(13)), &t.keys));
     sent.extend(t.key("C"));
     answer_layout_calls(&mut t, &sent);
     let before = t.st.pane_layout();
-    let r = t.st.update(Msg::SelectTrace(TraceId(14)), &t.keys);
-    assert_eq!(t.st.selected_trace, Some(TraceId(14)));
+    let r = t.st.apply(Msg::SelectTrace(TraceId(14)), &t.keys);
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(14)));
     assert!(layout_calls(&r).is_empty(), "a trace row: {r:?}");
     assert_eq!(t.st.pane_layout(), before, "a child row moves no pane");
     sent.extend(r);
@@ -315,7 +315,7 @@ fn edits_of_one_measurements_panes_leave_an_identical_layout_alone() {
         ("zoom", |t, _| t.key("Ctrl+I")),
         ("G", |t, _| t.key("G")),
         ("pick", |t, p| {
-            t.st.update(Msg::PanePick(p, PaneMenuRow::Meas(MeasId(4))), &t.keys)
+            t.st.apply(Msg::PanePick(p, PaneMenuRow::Meas(MeasId(4))), &t.keys)
         }),
     ];
     for (what, edit) in edits {
@@ -325,7 +325,7 @@ fn edits_of_one_measurements_panes_leave_an_identical_layout_alone() {
     }
     assert_eq!(spectrum_2_layout(&t), Some(three_spectrum()));
     assert_eq!(
-        t.st.selected,
+        t.st.rig.selected,
         Some(MeasId(3)),
         "the selection stays on the row"
     );
@@ -478,7 +478,7 @@ fn kiosk_on_its_meter(t: &T, what: &str) {
 fn a_viewer_keeps_its_pane_when_another_client_lays_out_its_measurement() {
     let mut t = kiosk(Some("FOH SPL"));
     kiosk_on_its_meter(&t, "connected");
-    assert_eq!(t.st.selected, Some(MeasId(1)));
+    assert_eq!(t.st.rig.selected, Some(MeasId(1)));
     let mut phase = three_transfer();
     if let PaneLayout::Split { b, .. } = &mut phase
         && let PaneLayout::Split { b, .. } = b.as_mut()
@@ -528,8 +528,12 @@ fn a_layout_received_for_a_measurement_picked_by_its_pane_waits_for_its_row() {
     let mut t = T::new();
     select(&mut t, 1);
     let sub = t.pane(PaneKind::Spectrum);
-    t.st.update(Msg::FocusPane(sub), &t.keys);
-    assert_eq!(t.st.selected, Some(MeasId(1)), "a click selects nothing");
+    t.st.apply(Msg::FocusPane(sub), &t.keys);
+    assert_eq!(
+        t.st.rig.selected,
+        Some(MeasId(1)),
+        "a click selects nothing"
+    );
     let grid = t.st.pane_layout();
     t.conn(mirror(with_layout(2, Some(two_transfer()))));
     assert_eq!(t.st.pane_layout(), grid, "Sub only shown by its pane");
@@ -561,7 +565,7 @@ fn a_chosen_measurement_back_after_a_restart_still_follows_its_layout() {
         2,
         Some("c1"),
     ));
-    assert_eq!(t.st.selected, Some(MeasId(1)));
+    assert_eq!(t.st.rig.selected, Some(MeasId(1)));
     let mut other = two_transfer();
     if let PaneLayout::Split { ratio, .. } = &mut other {
         *ratio = 0.25;
@@ -661,15 +665,15 @@ fn answer_layout_calls(t: &mut T, r: &[Request]) {
 fn a_chip_pick_into_another_measurements_panes_leaves_its_own_layout() {
     let mut t = desk_on_spectrum_2();
     let lower = *t.st.layout.root.reading_order().last().expect("a pane");
-    let r = t.st.update(Msg::FocusPane(lower), &t.keys);
+    let r = t.st.apply(Msg::FocusPane(lower), &t.keys);
     assert!(
         layout_calls(&r).is_empty(),
         "a click moves the focus: {r:?}"
     );
     let r =
-        t.st.update(Msg::PanePick(lower, PaneMenuRow::Meas(MeasId(1))), &t.keys);
+        t.st.apply(Msg::PanePick(lower, PaneMenuRow::Meas(MeasId(1))), &t.keys);
     assert_eq!(
-        t.st.selected,
+        t.st.rig.selected,
         Some(MeasId(4)),
         "the selection stays on the row"
     );
@@ -692,13 +696,17 @@ fn a_click_on_a_guest_pane_then_an_edit_leaves_its_own_layout() {
     let order = t.st.layout.root.reading_order();
     let lower = *order.last().expect("a pane");
     let r =
-        t.st.update(Msg::PanePick(lower, PaneMenuRow::Meas(MeasId(1))), &t.keys);
+        t.st.apply(Msg::PanePick(lower, PaneMenuRow::Meas(MeasId(1))), &t.keys);
     assert_eq!(layout_targets(&r), [MeasId(4)], "the pick: {r:?}");
     answer_layout_calls(&mut t, &r);
-    t.st.update(Msg::FocusPane(order[0]), &t.keys);
-    assert_eq!(t.st.selected, Some(MeasId(4)));
-    t.st.update(Msg::FocusPane(lower), &t.keys);
-    assert_eq!(t.st.selected, Some(MeasId(4)), "a click selects nothing");
+    t.st.apply(Msg::FocusPane(order[0]), &t.keys);
+    assert_eq!(t.st.rig.selected, Some(MeasId(4)));
+    t.st.apply(Msg::FocusPane(lower), &t.keys);
+    assert_eq!(
+        t.st.rig.selected,
+        Some(MeasId(4)),
+        "a click selects nothing"
+    );
     let r = t.key("G");
     assert_eq!(layout_targets(&r), [MeasId(4)], "{r:?}");
 }
@@ -763,7 +771,7 @@ fn guest_in_spectrograph_survives_the_rows(put: fn(&mut T, PaneId) -> Vec<Reques
     assert!(layout_calls(&r).is_empty(), "Spectrum 1's row: {r:?}");
     let r = select(&mut t, 4);
     assert!(layout_calls(&r).is_empty(), "Spectrum 2's row: {r:?}");
-    assert_eq!(t.st.selected, Some(s2));
+    assert_eq!(t.st.rig.selected, Some(s2));
     let mut picked = three_spectrum();
     picked.panes_mut()[1].content = Some(wire::PaneContent::Meas { meas: s1 });
     assert_eq!(
@@ -785,7 +793,7 @@ fn guest_in_spectrograph_survives_the_rows(put: fn(&mut T, PaneId) -> Vec<Reques
 #[test]
 fn a_chip_pick_in_own_panes_is_kept_by_their_row() {
     guest_in_spectrograph_survives_the_rows(|t, p| {
-        t.st.update(Msg::PanePick(p, PaneMenuRow::Meas(MeasId(3))), &t.keys)
+        t.st.apply(Msg::PanePick(p, PaneMenuRow::Meas(MeasId(3))), &t.keys)
     });
 }
 
@@ -794,11 +802,11 @@ fn a_chip_pick_in_own_panes_is_kept_by_their_row() {
 fn a_row_dropped_in_own_panes_is_kept_by_their_row() {
     guest_in_spectrograph_survives_the_rows(|t, p| {
         use ac2_scene::meas_list::TreeKey;
-        let mut r = t.st.update(
+        let mut r = t.st.apply(
             Msg::RowDrag(DragMsg::Start(TreeKey::Meas(MeasId(3)))),
             &t.keys,
         );
-        r.extend(t.st.update(
+        r.extend(t.st.apply(
             Msg::RowDrag(DragMsg::Over {
                 target: Some(DropTarget {
                     pane: p,
@@ -808,7 +816,7 @@ fn a_row_dropped_in_own_panes_is_kept_by_their_row() {
             }),
             &t.keys,
         ));
-        r.extend(t.st.update(Msg::RowDrag(DragMsg::Drop { compare: false }), &t.keys));
+        r.extend(t.st.apply(Msg::RowDrag(DragMsg::Drop { compare: false }), &t.keys));
         r
     });
 }
@@ -821,7 +829,7 @@ fn a_pick_turning_a_pane_into_another_kind_comes_back_with_the_row() {
     let mut t = desk_on_spectrum_2();
     let last = *t.st.layout.root.reading_order().last().expect("a pane");
     let r =
-        t.st.update(Msg::PanePick(last, PaneMenuRow::Meas(MeasId(1))), &t.keys);
+        t.st.apply(Msg::PanePick(last, PaneMenuRow::Meas(MeasId(1))), &t.keys);
     assert_eq!(layout_targets(&r), [MeasId(4)], "{r:?}");
     let stored = t.st.pane_layout();
     answer_layout_calls(&mut t, &r);
@@ -851,11 +859,15 @@ fn a_pick_in_the_middle_of_three_panes_changes_that_pane_alone() {
     let mut t = desk_on_spectrum_2();
     let order = t.st.layout.root.reading_order();
     let (s1, s2) = (MeasId(3), MeasId(4));
-    t.st.update(Msg::PanePick(order[1], PaneMenuRow::Meas(s1)), &t.keys);
+    t.st.apply(Msg::PanePick(order[1], PaneMenuRow::Meas(s1)), &t.keys);
     assert_eq!(shown(&t), [Some(s2), Some(s1), Some(s2)]);
-    assert_eq!(t.st.selected, Some(s2), "the selection stays on the row");
-    t.st.update(Msg::FocusPane(order[2]), &t.keys);
-    assert_eq!(t.st.selected, Some(s2), "a click selects nothing");
+    assert_eq!(
+        t.st.rig.selected,
+        Some(s2),
+        "the selection stays on the row"
+    );
+    t.st.apply(Msg::FocusPane(order[2]), &t.keys);
+    assert_eq!(t.st.rig.selected, Some(s2), "a click selects nothing");
     assert_eq!(shown(&t), [Some(s2), Some(s1), Some(s2)]);
 }
 
@@ -869,11 +881,11 @@ fn a_pane_key_acts_on_the_measurement_its_pane_shows() {
     t.connect(s);
     select(&mut t, 2);
     let order = t.st.layout.root.reading_order();
-    t.st.update(
+    t.st.apply(
         Msg::PanePick(order[0], PaneMenuRow::Meas(MeasId(5))),
         &t.keys,
     );
-    assert_eq!(t.st.selected, Some(MeasId(2)));
+    assert_eq!(t.st.rig.selected, Some(MeasId(2)));
     let finds = |r: &[Request]| -> Vec<MeasId> {
         r.iter()
             .filter_map(|r| match r {
@@ -882,9 +894,9 @@ fn a_pane_key_acts_on_the_measurement_its_pane_shows() {
             })
             .collect()
     };
-    t.st.update(Msg::FocusPane(order[0]), &t.keys);
+    t.st.apply(Msg::FocusPane(order[0]), &t.keys);
     assert_eq!(finds(&t.key("X")), [MeasId(5)], "the picked pane");
-    t.st.update(Msg::FocusPane(order[1]), &t.keys);
+    t.st.apply(Msg::FocusPane(order[1]), &t.keys);
     assert_eq!(finds(&t.key("X")), [MeasId(2)], "a pane following the row");
 }
 
@@ -907,7 +919,7 @@ fn a_layout_brings_its_level_ranges() {
         Some(ac2_scene::axis::Range::new(-30.0, 6.0))
     );
     assert_eq!(t.st.operator_levels(first).transfer, Some(saved));
-    t.st.update(Msg::FocusPane(first), &t.keys);
+    t.st.apply(Msg::FocusPane(first), &t.keys);
     let r = t.key("Ctrl+I");
     let calls = layout_calls(&r);
     assert_eq!(calls.len(), 1, "{r:?}");
@@ -945,7 +957,7 @@ fn picks_and_level_ranges_survive_a_reconnect_and_reach_a_fresh_app() {
     let middle = t.st.layout.root.reading_order()[1];
     let (s1, s2) = (MeasId(3), MeasId(4));
     let r =
-        t.st.update(Msg::PanePick(middle, PaneMenuRow::Meas(s1)), &t.keys);
+        t.st.apply(Msg::PanePick(middle, PaneMenuRow::Meas(s1)), &t.keys);
     answer_layout_calls(&mut t, &r);
     let r = t.key("Ctrl+I");
     assert_eq!(layout_targets(&r), [s2], "{r:?}");
@@ -974,7 +986,7 @@ fn picks_and_level_ranges_survive_a_reconnect_and_reach_a_fresh_app() {
         retry_in: std::time::Duration::from_secs(1),
     });
     t.connect(daemon());
-    assert_eq!(t.st.selected, Some(s2));
+    assert_eq!(t.st.rig.selected, Some(s2));
     assert_eq!(t.st.pane_layout(), stored, "after a reconnect");
     assert_eq!(shown(&t), [Some(s2), Some(s1), Some(s2)]);
     let mut u = T::fresh();

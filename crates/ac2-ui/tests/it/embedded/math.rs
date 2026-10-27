@@ -132,7 +132,7 @@ fn math_channels_from_an_empty_daemon() -> R {
 
     // Two positions of the same −6 dB path average to −6 dB (the level is still typed).
     d.key("Space");
-    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
     d.key("Enter");
     d.until("firing", |s| s.daemon().is_some_and(|d| d.generator.firing))?;
     d.tf_frames(avg, 240)?;
@@ -186,7 +186,7 @@ fn math_channels_from_an_empty_daemon() -> R {
             )
         });
         ratio
-            && s.data.as_ref().is_some_and(|x| {
+            && s.rig.data.as_ref().is_some_and(|x| {
                 x.latest.get(&topic).is_some_and(|f| match &f.frame.data {
                     FrameData::Tf(tf) => tf
                         .mag
@@ -229,7 +229,7 @@ fn math_channels_from_an_empty_daemon() -> R {
         what: "stopped".into(),
     });
     d.until("the ratio without its second operand", |s| {
-        s.data.as_ref().is_some_and(|x| {
+        s.rig.data.as_ref().is_some_and(|x| {
             x.latest.get(&topic).is_some_and(|f| match &f.frame.data {
                 FrameData::Tf(tf) => tf.meta.math.as_ref().is_some_and(|a| {
                     a.operands
@@ -321,7 +321,7 @@ fn spectrum_math_lands_on_the_spectrum_pane() -> R {
     )));
     // The level is still typed: Space arms, Enter fires.
     d.key("Space");
-    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
     d.key("Enter");
     d.until("firing", |s| s.daemon().is_some_and(|d| d.generator.firing))?;
     let topic = Topic::Data {
@@ -331,7 +331,7 @@ fn spectrum_math_lands_on_the_spectrum_pane() -> R {
     // Both spectra went in, on the spectrum stream (the levels are checked against
     // analytic values in the daemon's tests: here each operand is its own unaveraged FFT).
     d.until("the difference on the spectrum stream", |s| {
-        s.data.as_ref().is_some_and(|x| {
+        s.rig.data.as_ref().is_some_and(|x| {
             x.latest.get(&topic).is_some_and(|f| match &f.frame.data {
                 FrameData::Spec(sp) => {
                     sp.meta.math.as_ref().is_some_and(|m| m.included() == 2)

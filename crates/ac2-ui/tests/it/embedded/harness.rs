@@ -45,7 +45,9 @@ impl Driver {
     pub fn send(&mut self, m: Msg) {
         let mut reqs = self.st.update(m, &self.keys);
         reqs.extend(self.st.sync_link());
-        for r in reqs {
+        // The harness holds the one rig's link.
+        for (rig, r) in reqs {
+            assert_eq!(rig, self.st.active(), "{r:?} for another rig");
             self.conn.send(r);
         }
     }
@@ -57,7 +59,7 @@ impl Driver {
 
     pub fn pump(&mut self) {
         for e in self.conn.drain() {
-            self.send(Msg::Conn(Box::new(e)));
+            self.send(Msg::Conn(self.st.active(), Box::new(e)));
         }
     }
 
@@ -79,6 +81,7 @@ impl Driver {
                     .collect();
                 let mut held: Vec<String> = self
                     .st
+                    .rig
                     .data
                     .as_ref()
                     .map(|d| d.latest.frames.keys().map(|k| k.to_string()).collect())
@@ -104,7 +107,7 @@ impl Driver {
 
     pub fn synced(&mut self) -> R {
         self.until("sync", |s| {
-            s.connected() && s.mirror.as_ref().is_some_and(|m| m.synced())
+            s.connected() && s.rig.mirror.as_ref().is_some_and(|m| m.synced())
         })
     }
 
@@ -113,9 +116,9 @@ impl Driver {
         self.send(Msg::Command(CommandId::StimulusLevel));
         self.send(Msg::Text("-20".into()));
         self.key("Enter");
-        self.until("level", |s| s.stimulus.level.is_some())?;
+        self.until("level", |s| s.rig.stimulus.level.is_some())?;
         self.key("Space");
-        self.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+        self.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
         self.key("Enter");
         self.until("firing", |s| s.daemon().is_some_and(|d| d.generator.firing))
     }
@@ -128,7 +131,7 @@ impl Driver {
             stream: Stream::Tf,
         };
         self.until("the −6 dB path at 1 kHz", |s| {
-            s.data.as_ref().is_some_and(|d| {
+            s.rig.data.as_ref().is_some_and(|d| {
                 d.latest.get(&topic).is_some_and(|f| match &f.frame.data {
                     FrameData::Tf(tf) => tf
                         .mag
@@ -146,7 +149,7 @@ impl Driver {
     pub fn stop(&mut self) -> R {
         self.key("Escape");
         self.until("stopped", |s| {
-            s.stimulus.phase == StimPhase::Idle
+            s.rig.stimulus.phase == StimPhase::Idle
                 && s.daemon()
                     .is_some_and(|d| !d.generator.firing && !d.generator.armed)
         })
@@ -346,8 +349,8 @@ pub fn sweep_count(s: &AppState) -> usize {
 pub fn arm_new_sweep(d: &mut Driver, before: usize) -> R {
     d.until("the sweep measurement made, nothing armed", |s| {
         sweep_count(s) > before
-            && s.stimulus.phase == StimPhase::Idle
-            && s.sweep_meas().is_some_and(|m| Some(m.id) == s.selected)
+            && s.rig.stimulus.phase == StimPhase::Idle
+            && s.sweep_meas().is_some_and(|m| Some(m.id) == s.rig.selected)
     })?;
     d.key("Space");
     Ok(())
@@ -378,20 +381,21 @@ pub fn sweep_from_the_dialog(d: &mut Driver) -> R<ac2_proto::units::TraceId> {
     d.key("Enter");
     arm_new_sweep(d, sweeps_before)?;
     d.until("armed with the sweep", |s| {
-        s.stimulus.phase == StimPhase::Armed && s.daemon().is_some_and(|x| x.generator.armed)
+        s.rig.stimulus.phase == StimPhase::Armed && s.daemon().is_some_and(|x| x.generator.armed)
     })?;
     d.key("Enter");
     d.until("the sweep stored with its data", |s| {
-        s.sweep.run.is_none() && s.sweep_traces().len() == before + 1
+        s.rig.sweep.run.is_none() && s.sweep_traces().len() == before + 1
     })?;
     d.until("the stimulus off and the lease given back", |s| {
-        s.stimulus.phase == StimPhase::Idle
+        s.rig.stimulus.phase == StimPhase::Idle
             && s.daemon().is_some_and(|x| {
                 !x.generator.armed && !x.generator.firing && x.generator.owner.is_none()
             })
     })?;
     // The new result is the selection.
-    d.st.selected_trace
+    d.st.rig
+        .selected_trace
         .ok_or_else(|| "the new sweep is not selected".into())
 }
 

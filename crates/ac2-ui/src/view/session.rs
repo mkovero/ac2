@@ -148,6 +148,7 @@ fn channel_data(app: &App, d: &SessionDialog) -> ChannelData {
     let now = super::now();
     let offset = ac2_scene::time::ClockOffset(
         app.state
+            .rig
             .mirror
             .as_ref()
             .and_then(|m| m.clock_offset_ns)

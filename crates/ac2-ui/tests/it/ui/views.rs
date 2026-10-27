@@ -76,7 +76,7 @@ fn sweep_progress_strip() {
         "sweep_progress",
         |a| {
             let now = a.state.now_s;
-            if let Some(seen) = &mut a.state.sweep.step_seen {
+            if let Some(seen) = &mut a.state.rig.sweep.step_seen {
                 seen.2 = now;
             }
         },
@@ -195,6 +195,7 @@ fn top_bar_health_meter() {
     };
     step_until(&mut h, "the daemon's figures", |a| {
         a.state
+            .rig
             .mirror
             .as_ref()
             .and_then(|m| m.health.as_ref())
@@ -266,6 +267,7 @@ fn top_bar_marquee_scrolls_when_narrow() {
     };
     step_until(&mut h, "the daemon's figures", |a| {
         a.state
+            .rig
             .mirror
             .as_ref()
             .and_then(|m| m.health.as_ref())
@@ -483,7 +485,7 @@ fn spl_meter_big_and_stage() {
         a.state.kind_modes(ac2_ui::state::PaneKind::Spl).spl == ac2_scene::view::SplMode::Meter
             && a.state.layout.maximized
             && a.state.layout.focus_kind() == PaneKind::Spl
-            && a.state.spl_hold.contains_key(&MeasId(4))
+            && a.state.rig.spl_hold.contains_key(&MeasId(4))
     });
     // The group's toast expires on the wall clock: a slower rasterizer reaches the stage
     // view after it has gone, so neither picture shows it.
@@ -575,7 +577,7 @@ fn spectrograph() {
     );
     let def = {
         let st = &h.state().state;
-        let d = st.data.as_ref().expect("data");
+        let d = st.rig.data.as_ref().expect("data");
         let f = d
             .latest
             .get(&Topic::Data {
@@ -590,7 +592,7 @@ fn spectrograph() {
     };
     let pinned = sweep_history(&def);
     let same = |a: &App| {
-        a.state.spectrographs.get(&MeasId(3)).is_some_and(|x| {
+        a.state.rig.spectrographs.get(&MeasId(3)).is_some_and(|x| {
             x.ring()
                 .iter()
                 .zip(pinned.ring())
@@ -603,7 +605,7 @@ fn spectrograph() {
     };
     let pin = |a: &mut App| {
         let st = &mut a.state;
-        st.spectrographs.insert(MeasId(3), pinned.clone());
+        st.rig.spectrographs.insert(MeasId(3), pinned.clone());
         st.view.cursor_hz = Some(1000.0);
         st.view.spectrum.spectrograph.cursor_s = Some(8.0);
         st.toasts.list.clear();

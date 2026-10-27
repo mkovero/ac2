@@ -73,7 +73,7 @@ fn row(t: &T, title: &str) -> usize {
 }
 
 fn click(t: &mut T, m: SessionsMsg) -> Vec<Request> {
-    t.st.update(Msg::Sessions(m), &t.keys)
+    t.st.apply(Msg::Sessions(m), &t.keys)
 }
 
 #[test]
@@ -279,7 +279,7 @@ fn an_old_session_offers_its_traces() {
 #[test]
 fn quitting_an_embedded_daemon_with_unsaved_changes_asks() {
     let mut t = with_working(true, named("sat"));
-    t.st.embedded_autosave = Some(true);
+    t.st.rig.embedded_autosave = Some(true);
     t.key("Ctrl+Q");
     assert!(!t.st.quit);
     let (_, answers) = question(&t);
@@ -291,7 +291,7 @@ fn quitting_an_embedded_daemon_with_unsaved_changes_asks() {
 
     // Save, then quit once saved.
     let mut t = with_working(true, named("sat"));
-    t.st.embedded_autosave = Some(false);
+    t.st.rig.embedded_autosave = Some(false);
     assert!(!t.st.close_requested());
     let r = t.key("Enter");
     assert_eq!(
@@ -357,7 +357,7 @@ fn the_top_bar_label_and_the_palette() {
     let l = t.st.working_label(WallNs(0));
     assert_eq!(l.text, "sat · unsaved changes");
     let mut t = with_working(false, named("sat"));
-    let r = t.st.update(Msg::Command(CommandId::SessionSave), &t.keys);
+    let r = t.st.apply(Msg::Command(CommandId::SessionSave), &t.keys);
     assert_eq!(
         job(&r),
         [SessionStep::Save {

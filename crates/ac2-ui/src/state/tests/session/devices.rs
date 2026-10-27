@@ -8,7 +8,7 @@ use super::*;
 #[test]
 fn a_daemon_without_audio_opens_the_sessions_dialog_once() {
     let mut t = T::disconnected();
-    t.st.open_session_when_empty = true;
+    t.st.rig.open_session_when_empty = true;
     connected_to(&mut t, "embedded daemon (coreaudio)");
     let r = t.conn(mirror(no_session_state()));
     assert!(r.iter().any(|x| matches!(x, Request::SessionList)), "{r:?}");
@@ -26,7 +26,7 @@ fn a_daemon_without_audio_opens_the_sessions_dialog_once() {
     // A daemon that already has a session: no dialog; its input meters and the channel
     // names for them.
     let mut t = T::disconnected();
-    t.st.open_session_when_empty = true;
+    t.st.rig.open_session_when_empty = true;
     connected_to(&mut t, "embedded daemon (coreaudio)");
     let r = t.conn(mirror(daemon_state()));
     assert!(
@@ -34,7 +34,7 @@ fn a_daemon_without_audio_opens_the_sessions_dialog_once() {
         "{r:?}"
     );
     assert_eq!(t.st.overlay, Overlay::None);
-    assert!(!t.st.open_session_when_empty);
+    assert!(!t.st.rig.open_session_when_empty);
 }
 
 /// A session kept from before (an autosave restored, measurements listed, its audio not
@@ -43,13 +43,13 @@ fn a_daemon_without_audio_opens_the_sessions_dialog_once() {
 #[test]
 fn a_kept_session_without_audio_opens_no_sessions_dialog() {
     let mut t = T::disconnected();
-    t.st.open_session_when_empty = true;
+    t.st.rig.open_session_when_empty = true;
     connected_to(&mut t, "embedded daemon (coreaudio)");
     let mut kept = daemon_state();
     kept.session.open = None;
     t.conn(mirror(kept));
     assert_eq!(t.st.overlay, Overlay::None);
-    assert!(!t.st.open_session_when_empty);
+    assert!(!t.st.rig.open_session_when_empty);
     t.key("Ctrl+M");
     assert!(t.st.sessions_dialog().is_none(), "{:?}", t.st.overlay);
     assert!(
@@ -69,16 +69,18 @@ fn another_daemon_lists_its_own_devices() {
     t.key("Shift+O");
     t.conn(ConnEvent::Devices(Ok(real_backends())));
     assert!(dialog(&t).backends.is_some());
-    assert!(t.st.devices.is_some());
+    assert!(t.st.rig.devices.is_some());
 
     let r = t.conn(ConnEvent::Connected {
         target: "local daemon".into(),
         server: "ac2d test".into(),
         client_id: ClientId("c1".into()),
+        rig_id: RIG,
+        name: "test rig".into(),
     });
     assert!(r.iter().any(|x| matches!(x, Request::Devices)), "{r:?}");
     assert!(dialog(&t).backends.is_none());
-    assert!(t.st.devices.is_none());
+    assert!(t.st.rig.devices.is_none());
     t.conn(ConnEvent::Devices(Ok(backends(true))));
     assert_eq!(dialog(&t).backend_kind(), Some(BackendKind::Fake));
 
@@ -89,9 +91,11 @@ fn another_daemon_lists_its_own_devices() {
         target: "pupu".into(),
         server: "ac2d test".into(),
         client_id: ClientId("c1".into()),
+        rig_id: RIG,
+        name: "test rig".into(),
     });
     assert!(r.iter().any(|x| matches!(x, Request::Devices)), "{r:?}");
-    assert!(t.st.devices.is_none());
+    assert!(t.st.rig.devices.is_none());
 }
 
 /// Core Audio listing each direction as its own device: an output-only device
@@ -212,11 +216,11 @@ fn an_input_only_device_plays_on_another_output_device() {
     let roles =
         t.st.prefs
             .sessions
-            .get("coreaudio/USB mic")
+            .get(&(RIG, "coreaudio/USB mic".into()))
             .expect("remembered");
     assert_eq!(roles.output_device.as_deref(), Some("Speakers"));
     // The stimulus outputs belong to the device that plays them.
-    assert_eq!(t.st.prefs.outputs_for("Speakers"), Some(&[0][..]));
+    assert_eq!(t.st.prefs.outputs_for(RIG, "Speakers"), Some(&[0][..]));
 
     // Remembered: the next dialog comes back with the same output device.
     t.key("Escape");

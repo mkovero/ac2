@@ -38,7 +38,7 @@ fn delete_asks_then_deletes_the_selected_trace() {
     );
     t.key("Esc");
     // Asks first, naming it.
-    t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(10)), &t.keys);
     assert!(t.key("Delete").is_empty());
     let Overlay::Delete(p) = &t.st.overlay else {
         panic!("{:?}", t.st.overlay);
@@ -54,7 +54,7 @@ fn delete_asks_then_deletes_the_selected_trace() {
     assert!(t.key("Esc").is_empty());
     assert_eq!(t.st.overlay, Overlay::None);
     assert_eq!(
-        t.st.selected_trace,
+        t.st.rig.selected_trace,
         Some(TraceId(10)),
         "Esc closed the question only"
     );
@@ -69,7 +69,7 @@ fn delete_asks_then_deletes_the_selected_trace() {
     let (id, what) = deleted(&t.key("Delete")).expect("deleted");
     assert_eq!(id, TraceId(10));
     assert_eq!(what, "slot 1 (t10) deleted · t11 selected");
-    assert_eq!(t.st.selected_trace, Some(TraceId(11)));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(11)));
     assert_eq!(t.st.overlay, Overlay::None);
     // Enter, the stimulus's key, deletes nothing; Delete again does, past a hidden trace
     // to the next shown one.
@@ -83,34 +83,34 @@ fn delete_asks_then_deletes_the_selected_trace() {
     );
     // The last shown one: the selection goes back to the one before it.
     t.conn(with_traces(vec![stored(11, None, 2), stored(14, None, 2)]));
-    assert_eq!(t.st.selected_trace, Some(TraceId(14)));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(14)));
     t.key("Delete");
-    let (_, what) = deleted(&t.st.update(Msg::Delete(true), &t.keys)).expect("deleted");
+    let (_, what) = deleted(&t.st.apply(Msg::Delete(true), &t.keys)).expect("deleted");
     assert_eq!(what, "t14 deleted · t11 selected");
     // The only one, with Backspace twice (keyboards without Delete): back to the live
     // measurement.
     t.conn(with_traces(vec![stored(11, None, 2)]));
     t.key("Backspace");
-    let (_, what) = deleted(&t.st.update(Msg::Backspace, &t.keys)).expect("deleted");
+    let (_, what) = deleted(&t.st.apply(Msg::Backspace, &t.keys)).expect("deleted");
     assert_eq!(what, "t11 deleted · keys act on the live measurement");
-    assert_eq!(t.st.selected_trace, None);
+    assert_eq!(t.st.rig.selected_trace, None);
     // The mouse's Keep.
     t.conn(with_traces(vec![stored(11, None, 2)]));
-    t.st.update(Msg::SelectTrace(TraceId(11)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(11)), &t.keys);
     t.key("Delete");
-    assert!(t.st.update(Msg::Delete(false), &t.keys).is_empty());
+    assert!(t.st.apply(Msg::Delete(false), &t.keys).is_empty());
     assert_eq!(t.st.overlay, Overlay::None);
     // A locked trace refuses before asking.
     let mut locked = stored(15, None, 2);
     locked.edit.locked = true;
     t.conn(with_traces(vec![locked]));
-    t.st.update(Msg::SelectTrace(TraceId(15)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(15)), &t.keys);
     assert!(t.key("Delete").is_empty());
     assert_eq!(t.st.overlay, Overlay::None);
     assert_eq!(t.last_toast(), "t15 is locked: it is not deleted");
     // The palette's entry asks the same.
     t.conn(with_traces(vec![stored(11, None, 2)]));
-    t.st.update(Msg::SelectTrace(TraceId(11)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(11)), &t.keys);
     t.key("Ctrl+K");
     t.text("delete selected");
     t.key("Enter");
@@ -126,7 +126,7 @@ fn delete_asks_then_deletes_the_selected_trace() {
 fn delete_and_backspace_ask_then_delete_the_selected_measurement() {
     let mut t = T::new();
     t.conn(with_traces(vec![stored(10, Some(1), 2)]));
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     for key in ["Delete", "Backspace"] {
         assert!(t.key(key).is_empty(), "{key} only asks");
         let Overlay::Delete(p) = &t.st.overlay else {
@@ -169,7 +169,7 @@ fn delete_and_backspace_ask_then_delete_the_selected_measurement() {
         assert_eq!(t.st.overlay, Overlay::None);
     }
     // A stored trace selected after it: Backspace is about the trace.
-    t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(10)), &t.keys);
     t.key("Backspace");
     assert!(
         matches!(&t.st.overlay, Overlay::Delete(p) if p.target == DeleteTarget::Trace(TraceId(10))),
@@ -178,7 +178,7 @@ fn delete_and_backspace_ask_then_delete_the_selected_measurement() {
     );
     t.key("Esc");
     // Selecting the measurement again gives it the keys back.
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     t.key("Delete");
     assert!(
         matches!(&t.st.overlay, Overlay::Delete(p) if p.target == DeleteTarget::Meas(MeasId(1)))
@@ -208,7 +208,7 @@ fn deleting_a_math_operand_says_which_channel_uses_it() {
         },
     ));
     t.conn(mirror(s));
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     assert!(t.key("Backspace").is_empty());
     let Overlay::Delete(p) = &t.st.overlay else {
         panic!("{:?}", t.st.overlay);
@@ -229,9 +229,9 @@ fn deleting_a_math_operand_says_which_channel_uses_it() {
         assert_eq!(t.st.overlay, Overlay::None);
         t.key("Delete");
     }
-    assert!(t.st.update(Msg::Delete(true), &t.keys).is_empty());
+    assert!(t.st.apply(Msg::Delete(true), &t.keys).is_empty());
     // The math channel itself goes after a confirmation.
-    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(3)), &t.keys);
     t.key("Delete");
     assert_eq!(
         meas_deleted(&t.key("Delete")),
@@ -244,11 +244,11 @@ fn deleting_a_math_operand_says_which_channel_uses_it() {
 #[test]
 fn backspace_in_a_prompt_edits_its_text() {
     let mut t = T::new();
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     t.type_key("D", "d");
     t.text("12");
     assert!(t.key("Backspace").is_empty());
-    assert!(t.st.update(Msg::Backspace, &t.keys).is_empty());
+    assert!(t.st.apply(Msg::Backspace, &t.keys).is_empty());
     let Overlay::Prompt(p) = &t.st.overlay else {
         panic!("{:?}", t.st.overlay);
     };

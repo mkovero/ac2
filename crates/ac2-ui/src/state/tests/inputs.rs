@@ -5,14 +5,14 @@ use super::*;
 #[test]
 fn link_failure_clears_live_state() {
     let mut t = T::new();
-    t.st.stimulus.phase = StimPhase::Armed;
+    t.st.rig.stimulus.phase = StimPhase::Armed;
     t.conn(ConnEvent::Failed {
         target: "local daemon".into(),
         error: "not responding".into(),
         retry_in: std::time::Duration::from_secs(2),
     });
-    assert!(t.st.mirror.is_none());
-    assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
+    assert!(t.st.rig.mirror.is_none());
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
     assert!(!t.st.connected());
 }
 
@@ -28,7 +28,7 @@ fn finder_band_text() {
 #[test]
 fn level_change_during_arming_is_sent_once_armed() {
     let mut t = T::new();
-    t.st.stimulus.level = Some(Dbfs(-20.0));
+    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
     t.key("Space");
     // ↓ while the arm is in flight: nothing to send yet.
     assert!(t.key("Down").is_empty());
@@ -171,7 +171,7 @@ fn input_mics_prompt_sets_the_input_setup() {
         pair: None,
     }];
     t.conn(mirror(s));
-    let r = t.st.update(Msg::Command(CommandId::InputMics), &t.keys);
+    let r = t.st.apply(Msg::Command(CommandId::InputMics), &t.keys);
     assert!(r.is_empty());
     match &t.st.overlay {
         Overlay::Prompt(p) => {
@@ -181,7 +181,7 @@ fn input_mics_prompt_sets_the_input_setup() {
         o => panic!("{o:?}"),
     }
     for _ in 0..3 {
-        t.st.update(Msg::Backspace, &t.keys);
+        t.st.apply(Msg::Backspace, &t.keys);
     }
     t.text(", 3= ECM 8000 ");
     let r = t.key("Enter");
@@ -209,9 +209,9 @@ fn input_mics_prompt_sets_the_input_setup() {
         "{r:?}"
     );
     // Bad text keeps the prompt open with the reason.
-    t.st.update(Msg::Command(CommandId::InputMics), &t.keys);
+    t.st.apply(Msg::Command(CommandId::InputMics), &t.keys);
     for _ in 0..5 {
-        t.st.update(Msg::Backspace, &t.keys);
+        t.st.apply(Msg::Backspace, &t.keys);
     }
     t.text("M30");
     let r = t.key("Enter");
@@ -224,7 +224,7 @@ fn mic_curve_steps_through_the_selected_measurements_input() {
     let mut t = T::new();
     // Main L (transfer): its measurement input is 1 (shown as 2). No mic name: nothing to
     // choose from.
-    let r = t.st.update(Msg::Command(CommandId::MicCurve), &t.keys);
+    let r = t.st.apply(Msg::Command(CommandId::MicCurve), &t.keys);
     assert_eq!(inputs_call(&r), None);
     assert!(t.last_toast().contains("no mic name"), "{}", t.last_toast());
     let mut s = daemon_state();
@@ -247,7 +247,7 @@ fn mic_curve_steps_through_the_selected_measurements_input() {
     ] {
         s.inputs = vec![row(from.clone())];
         t.conn(mirror(s.clone()));
-        let r = t.st.update(Msg::Command(CommandId::MicCurve), &t.keys);
+        let r = t.st.apply(Msg::Command(CommandId::MicCurve), &t.keys);
         assert_eq!(inputs_call(&r), Some(vec![row(to.clone())]), "{from:?}");
     }
     // The palette's "Mic curve on input N…": a label of the mic, or off.
@@ -306,8 +306,8 @@ fn stimulus_outputs_are_remembered_per_device() {
     // First run: output 1, no outputs to remember (the layout is, with the measurements
     // the panes show).
     let mut t = T::new();
-    assert_eq!(t.st.stimulus.outputs, vec![0]);
-    assert!(t.st.stimulus.describe().ends_with("→ out 1"));
+    assert_eq!(t.st.rig.stimulus.outputs, vec![0]);
+    assert!(t.st.rig.stimulus.describe().ends_with("→ out 1"));
     assert!(t.st.prefs.outputs.is_empty());
     t.st.prefs_dirty = false;
     // Choosing outputs (S on an output in Settings › Audio I/O, opened on the
@@ -318,15 +318,15 @@ fn stimulus_outputs_are_remembered_per_device() {
         o.backend = BackendKind::Fake;
     }
     t.conn(mirror(s));
-    t.st.update(Msg::Command(CommandId::StimulusOutputs), &t.keys);
+    t.st.apply(Msg::Command(CommandId::StimulusOutputs), &t.keys);
     t.conn(ConnEvent::Devices(Ok(backends(true))));
     // No output ticked yet: the first one is focused; output 2 takes the stimulus.
     assert_eq!(dialog(&t).focus, Row::Output(0));
     t.key("Down");
     t.key("S");
-    assert_eq!(t.st.stimulus.outputs, vec![1]);
+    assert_eq!(t.st.rig.stimulus.outputs, vec![1]);
     assert!(t.st.prefs_dirty);
-    assert_eq!(t.st.prefs.outputs_for("fake:loop"), Some(&[1u16][..]));
+    assert_eq!(t.st.prefs.outputs_for(RIG, "fake:loop"), Some(&[1u16][..]));
     assert!(
         dialog(&t)
             .notice
@@ -339,9 +339,9 @@ fn stimulus_outputs_are_remembered_per_device() {
 
     // Another device: never used, so output 1; back on the first, its outputs return.
     t.conn(mirror(with_output_device("hw:UMC1820")));
-    assert_eq!(t.st.stimulus.outputs, vec![0]);
+    assert_eq!(t.st.rig.stimulus.outputs, vec![0]);
     t.conn(mirror(with_output_device("fake:loop")));
-    assert_eq!(t.st.stimulus.outputs, vec![1]);
+    assert_eq!(t.st.rig.stimulus.outputs, vec![1]);
 
     // A later run starts from the saved preferences.
     let mut t2 = T::disconnected();
@@ -350,24 +350,28 @@ fn stimulus_outputs_are_remembered_per_device() {
         target: "local daemon".into(),
         server: "ac2d test".into(),
         client_id: ClientId("c1".into()),
+        rig_id: RIG,
+        name: "test rig".into(),
     });
     t2.conn(mirror(daemon_state()));
-    assert_eq!(t2.st.stimulus.outputs, vec![1]);
+    assert_eq!(t2.st.rig.stimulus.outputs, vec![1]);
 }
 
 #[test]
 fn outputs_never_change_under_a_held_stimulus() {
     let mut t = T::new();
-    t.st.prefs.outputs.insert("hw:UMC1820".into(), vec![3]);
-    t.st.stimulus.level = Some(Dbfs(-20.0));
+    t.st.prefs
+        .outputs
+        .insert((RIG, "hw:UMC1820".into()), vec![3]);
+    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
     t.key("Space");
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     t.conn(mirror(with_output_device("hw:UMC1820")));
-    assert_eq!(t.st.stimulus.outputs, vec![0]);
+    assert_eq!(t.st.rig.stimulus.outputs, vec![0]);
     // Once stopped, the device's remembered outputs apply.
     t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
     t.conn(mirror(with_output_device("hw:UMC1820")));
-    assert_eq!(t.st.stimulus.outputs, vec![3]);
+    assert_eq!(t.st.rig.stimulus.outputs, vec![3]);
 }
 
 fn cal_delete(r: &[Request]) -> Option<CalKey> {
@@ -396,7 +400,7 @@ fn calibrations_are_deleted_from_the_palette() {
     }];
     t.conn(mirror(s));
     // Prefilled with the selected measurement's input and its mic.
-    t.st.update(Msg::Command(CommandId::CalDelete), &t.keys);
+    t.st.apply(Msg::Command(CommandId::CalDelete), &t.keys);
     assert!(matches!(
         &t.st.overlay,
         Overlay::Prompt(p) if p.kind == PromptKind::CalDelete && p.text == "2=M30"
@@ -447,7 +451,7 @@ fn finder_band_and_observation_are_the_operators_choice() {
     let mut t = T::new();
     t.key("Alt+1");
     assert_eq!(find_request(&t.key("X")), Some((FinderBand::Auto, None)));
-    t.st.update(Msg::Command(CommandId::FinderSub), &t.keys);
+    t.st.apply(Msg::Command(CommandId::FinderSub), &t.keys);
     assert!(t.last_toast().contains("sub band · auto observation"));
     assert_eq!(find_request(&t.key("X")), Some((FinderBand::Sub, None)));
     // The sub band observes 2, 4 or 8 s.
@@ -466,7 +470,7 @@ fn finder_band_and_observation_are_the_operators_choice() {
         Some((FinderBand::Sub, Some(Seconds(8.0))))
     );
     // Another band starts from its automatic observation.
-    t.st.update(Msg::Command(CommandId::FinderMid), &t.keys);
+    t.st.apply(Msg::Command(CommandId::FinderMid), &t.keys);
     assert_eq!(find_request(&t.key("X")), Some((FinderBand::Mid, None)));
     prompt_text(&mut t, CommandId::FinderObservation, "0,5");
     assert_eq!(
@@ -475,7 +479,7 @@ fn finder_band_and_observation_are_the_operators_choice() {
     );
     // Empty: automatic again; above 8 s is refused.
     prompt_text(&mut t, CommandId::FinderObservation, "");
-    assert_eq!(t.st.finder.observation, None);
+    assert_eq!(t.st.rig.finder.observation, None);
     prompt_text(&mut t, CommandId::FinderObservation, "9");
     assert!(matches!(&t.st.overlay, Overlay::Prompt(p) if p.error.is_some()));
     t.key("Escape");
@@ -498,8 +502,8 @@ fn finder_band_and_observation_are_the_operators_choice() {
     prompt_text(&mut t, CommandId::FinderObservation, "1");
     assert!(matches!(&t.st.overlay, Overlay::Prompt(p) if p.error.is_some()));
     t.key("Escape");
-    t.st.update(Msg::Command(CommandId::FinderAuto), &t.keys);
-    assert_eq!(t.st.finder, FinderChoice::default());
+    t.st.apply(Msg::Command(CommandId::FinderAuto), &t.keys);
+    assert_eq!(t.st.rig.finder, FinderChoice::default());
 }
 
 // ----- audio I/O and measurement dialogs ----------------------------------------------
@@ -520,7 +524,7 @@ fn input_setup_view_steps_curves_and_manages_the_library() {
     let mut t = T::new();
     t.conn(mirror(mm1_state(label("0°"))));
     // Main L (transfer, measuring input 2) is selected: Input setup opens on its input.
-    t.st.update(Msg::Command(CommandId::Calibrations), &t.keys);
+    t.st.apply(Msg::Command(CommandId::Calibrations), &t.keys);
     let st = t.st.daemon().cloned().expect("state");
     assert_eq!(
         cal_view(&t).focused(&st),
@@ -575,7 +579,7 @@ fn input_setup_view_steps_curves_and_manages_the_library() {
     // N: another mic name on the input drops the curve choice.
     t.type_key("N", "n");
     for _ in 0.."MM1 34804".len() {
-        t.st.update(Msg::Backspace, &t.keys);
+        t.st.apply(Msg::Backspace, &t.keys);
     }
     t.text("ECM 8000");
     let r = t.key("Enter");
@@ -603,7 +607,7 @@ fn input_setup_view_steps_curves_and_manages_the_library() {
     );
     t.type_key("R", "r");
     for _ in 0..3 {
-        t.st.update(Msg::Backspace, &t.keys);
+        t.st.apply(Msg::Backspace, &t.keys);
     }
     t.text("grazing");
     let r = t.key("Enter");
@@ -629,8 +633,8 @@ fn input_setup_view_steps_curves_and_manages_the_library() {
     ));
     // The sensitivity calibration; Backspace deletes as Delete does.
     t.key("ArrowDown");
-    t.st.update(Msg::Backspace, &t.keys);
-    let r = t.st.update(Msg::Backspace, &t.keys);
+    t.st.apply(Msg::Backspace, &t.keys);
+    let r = t.st.apply(Msg::Backspace, &t.keys);
     assert!(matches!(
         calls(&r).as_slice(),
         [Command::CalDelete { key: CalRef::Spl(key) }] if key.mic == "MM1 34804" && key.channel == 1
@@ -659,7 +663,7 @@ fn electrical_calibration_from_the_input_setup_view() {
         c.stated_sensitivity = Some(15.0);
     }
     t.conn(mirror(s));
-    t.st.update(Msg::Command(CommandId::Calibrations), &t.keys);
+    t.st.apply(Msg::Command(CommandId::Calibrations), &t.keys);
     let r = t.type_key("E", "e");
     assert!(r.is_empty());
     let d = cal_view(&t).electrical.clone().expect("the dialog");
@@ -689,7 +693,7 @@ fn electrical_calibration_from_the_input_setup_view() {
         other => panic!("{other:?}"),
     };
     // Backspace edits the field, it does not delete a calibration.
-    let r = t.st.update(Msg::Backspace, &t.keys);
+    let r = t.st.apply(Msg::Backspace, &t.keys);
     assert!(calls(&r).is_empty());
     t.text("V");
     // A refusal stays in the dialog; Enter again retries.
@@ -827,7 +831,7 @@ fn pane_keys_act_on_the_panes_own_measurement() {
     t.conn(mirror(s));
     // Picked on the SPL pane: the list puts it in the focused pane.
     t.key("Alt+4");
-    t.st.update(Msg::SelectMeas(MeasId(4)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(4)), &t.keys);
     t.key("Alt+1");
     let r = t.key("S");
     assert!(
@@ -852,7 +856,7 @@ fn pane_keys_act_on_the_panes_own_measurement() {
     }
     t.conn(mirror(s));
     t.key("Alt+4");
-    t.st.update(Msg::SelectMeas(MeasId(4)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(4)), &t.keys);
     t.key("Alt+1");
     let r = t.key("S");
     assert!(
@@ -882,7 +886,7 @@ fn line_calibration_from_the_calibrations_view() {
         pair: None,
     });
     t.conn(mirror(s.clone()));
-    t.st.update(Msg::Command(CommandId::Calibrations), &t.keys);
+    t.st.apply(Msg::Command(CommandId::Calibrations), &t.keys);
     t.key("Home");
     t.type_key("E", "e");
     let d = cal_view(&t).line.clone().expect("the line dialog");
@@ -919,7 +923,7 @@ fn line_calibration_from_the_calibrations_view() {
         stale: false,
     };
     latest.frames.insert(f.topic.to_string().into(), f);
-    t.st.data = Some(Arc::new(crate::conn::DataSnapshot {
+    t.st.rig.data = Some(Arc::new(crate::conn::DataSnapshot {
         latest,
         grids: Default::default(),
         drained: Instant::now(),

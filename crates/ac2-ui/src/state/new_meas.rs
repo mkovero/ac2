@@ -39,10 +39,10 @@ impl AppState {
     /// chooser says which kinds can be made from that state): a fresh session's first step
     /// is choosing what to measure; one with measurements, or a window open, asks nothing.
     pub(super) fn choose_first(&mut self) {
-        if !self.choose_when_open || self.open_session().is_none() {
+        if !self.rig.choose_when_open || self.open_session().is_none() {
             return;
         }
-        self.choose_when_open = false;
+        self.rig.choose_when_open = false;
         let none_yet = self.daemon().is_some_and(|s| s.measurements.is_empty());
         if none_yet && self.overlay == Overlay::None {
             let keymap = self.keys.clone();
@@ -202,7 +202,7 @@ impl AppState {
     pub(super) fn transfer_levels(&self) -> Vec<crate::math_dialog::Level> {
         use ac2_scene::grid::columns;
         let mut v = Vec::new();
-        if let Some(d) = self.data.as_ref() {
+        if let Some(d) = self.rig.data.as_ref() {
             for m in self.measurements() {
                 let Some(tf) = d.latest.get(&Topic::Data {
                     meas: m.id,
@@ -223,7 +223,7 @@ impl AppState {
                 });
             }
         }
-        for (t, g) in self.traces.values() {
+        for (t, g) in self.rig.traces.values() {
             v.push(crate::math_dialog::Level {
                 operand: Operand::Trace { trace: t.meta.id },
                 cols: columns(g),

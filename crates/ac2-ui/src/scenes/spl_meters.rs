@@ -30,7 +30,8 @@ fn spl_cal(
     now: Now,
 ) -> String {
     let offset = ClockOffset(
-        st.mirror
+        st.rig
+            .mirror
             .as_ref()
             .and_then(|v| v.clock_offset_ns)
             .map_or(0, |o| {
@@ -97,7 +98,7 @@ fn easing_from<'a>(st: &'a AppState, tf: &TopicFrame, now: Now) -> Option<(&'a F
         .instant
         .saturating_duration_since(tf.received)
         .as_secs_f64();
-    let from = st.bar_from.get(&tf.topic)?;
+    let from = st.rig.bar_from.get(&tf.topic)?;
     ac2_scene::bar_ease::easing(since).then_some((from.as_ref(), since))
 }
 
@@ -254,7 +255,7 @@ fn leq_view<'a>(
         cal: spl_cal(st, config.input, f.meta.cal, f.meta.mic_curve, now),
         cfg,
         tiles,
-        history: st.leq.history.get(&m.id).map(|(_, h)| h),
+        history: st.rig.leq.history.get(&m.id).map(|(_, h)| h),
         stale: match fresh {
             Freshness::Stale { age_s } => Some(format!("STALE {}", format::age(age_s))),
             Freshness::Stopped { .. } => Some("STOPPED".into()),
@@ -308,7 +309,7 @@ fn spl_readout_of<'a>(
     };
     st.daemon()?;
     // The number shows the held reading; the bar and the freshness follow the newest frame.
-    let held = st.spl_hold.get(&m.id).map_or(f, |h| &h.frame);
+    let held = st.rig.spl_hold.get(&m.id).map_or(f, |h| &h.frame);
     let cal = spl_cal(st, config.input, held.meta.cal, held.meta.mic_curve, now);
     // The statistics run from the newest frame's capture less its interval: the same instant
     // in every frame until the meter is reset.

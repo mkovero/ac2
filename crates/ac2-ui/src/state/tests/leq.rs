@@ -190,11 +190,11 @@ fn new_spl_log_asks_first() {
     );
     // The mouse: "Keep the current log" sends nothing, "Start a new log" sends it.
     t.key("Shift+R");
-    let r = t.st.update(Msg::NewLog(false), &t.keys);
+    let r = t.st.apply(Msg::NewLog(false), &t.keys);
     assert!(r.is_empty());
     assert_eq!(t.st.overlay, Overlay::None);
     t.key("Shift+R");
-    let r = t.st.update(Msg::NewLog(true), &t.keys);
+    let r = t.st.apply(Msg::NewLog(true), &t.keys);
     assert!(r.iter().any(|r| matches!(
         r,
         Request::Call {
@@ -227,13 +227,13 @@ fn leq_layout_keys_and_prefs() {
     t.key("G");
     assert_eq!(t.st.kind_modes(PaneKind::Spl).spl, SplMode::Meter);
     // Columns / tiles from the meter (the palette): the windows, as tiles, under the meter.
-    t.st.update(Msg::Command(CommandId::SplLeqStyle), &t.keys);
+    t.st.apply(Msg::Command(CommandId::SplLeqStyle), &t.keys);
     assert_eq!(t.st.kind_modes(PaneKind::Spl).spl, SplMode::MeterLeq);
     assert_eq!(t.st.view.spl.layout.style, LeqStyle::Tiles);
     assert!(t.st.prefs_dirty);
     assert_eq!(t.st.prefs.leq, t.st.view.spl.layout);
     t.st.prefs_dirty = false;
-    t.st.update(Msg::Command(CommandId::SplLeqHistory), &t.keys);
+    t.st.apply(Msg::Command(CommandId::SplLeqHistory), &t.keys);
     assert!(t.st.view.spl.layout.history);
     assert!(t.st.prefs_dirty);
     assert_eq!(
@@ -249,8 +249,8 @@ fn leq_layout_keys_and_prefs() {
     t.key("G");
     assert_eq!(t.st.kind_modes(PaneKind::Spl).spl, SplMode::Leq);
     assert_eq!(t.st.prefs.leq.style, LeqStyle::Tiles);
-    t.st.update(Msg::Command(CommandId::SplLeqStyle), &t.keys);
-    t.st.update(Msg::Command(CommandId::SplLeqHistory), &t.keys);
+    t.st.apply(Msg::Command(CommandId::SplLeqStyle), &t.keys);
+    t.st.apply(Msg::Command(CommandId::SplLeqHistory), &t.keys);
     assert_eq!(t.st.view.spl.layout, LeqLayout::default());
     // The layout is set once (Settings › Display, the palette): B and Shift+B leave it.
     t.key("B");
@@ -276,9 +276,9 @@ fn leq_layout_keys_and_prefs() {
     t.key("F11");
     assert!(t.st.stage_view());
     // Armed too: full screen stays the pane alone.
-    t.st.stimulus.phase = StimPhase::Armed;
+    t.st.rig.stimulus.phase = StimPhase::Armed;
     assert!(t.st.stage_view());
-    t.st.stimulus.phase = StimPhase::Idle;
+    t.st.rig.stimulus.phase = StimPhase::Idle;
     // The meter is full screen as well; W goes back to the split layout.
     t.key("G");
     assert!(t.st.stage_view());
@@ -297,12 +297,12 @@ fn leq_history_survives_a_resync() {
     let judged = LeqFlags::LIMIT.with(LeqFlags::JUDGED);
     t.conn(leq_data(1, 100, 98.0, judged));
     t.conn(leq_data(2, 101, 98.5, judged));
-    t.st.mirror = None;
+    t.st.rig.mirror = None;
     t.conn(leq_data(3, 102, 99.0, judged));
     t.conn(mirror(with_spl()));
     t.conn(leq_data(4, 103, 99.2, judged));
     let cfg = LeqConfig::default_windows();
-    let h = &t.st.leq.history[&MeasId(4)].1;
+    let h = &t.st.rig.leq.history[&MeasId(4)].1;
     let p = h.points(&cfg.windows[0]).expect("series");
     assert!(p.len() >= 3, "kept through the resync: {} points", p.len());
     assert_eq!(p[0].t, 100.0);
@@ -349,7 +349,7 @@ fn leq_history_and_alarm_toasts() {
     t.conn(leq_data(1, 100, 98.0, judged));
     t.conn(leq_data(2, 101, 99.5, judged.with(LeqFlags::OVER)));
     let cfg = LeqConfig::default_windows();
-    let h = &t.st.leq.history[&MeasId(4)].1;
+    let h = &t.st.rig.leq.history[&MeasId(4)].1;
     let p = h.points(&cfg.windows[0]).expect("series");
     assert_eq!(p.len(), 2);
     assert!(p[1].over && !p[0].over);
@@ -456,13 +456,13 @@ fn a_restarted_app_rebuilds_the_history_from_the_log() {
         ask: ask + 7,
         result: Ok(Box::new(b.clone())),
     });
-    assert!(!t.st.leq.history.contains_key(&meas), "stale: ignored");
+    assert!(!t.st.rig.leq.history.contains_key(&meas), "stale: ignored");
     t.conn(ConnEvent::LeqBackfill {
         meas,
         ask,
         result: Ok(Box::new(b)),
     });
-    let h = &t.st.leq.history[&meas].1;
+    let h = &t.st.rig.leq.history[&meas].1;
     let p = h.points(&cfg.windows[0]).expect("series");
     assert_eq!(p.len(), 600);
     assert_eq!(p[0].t, 401.0);
@@ -472,7 +472,7 @@ fn a_restarted_app_rebuilds_the_history_from_the_log() {
     let flags = ac2_proto::frame::LeqFlags::LIMIT;
     t.conn(leq_data(601, 1000, 80.0, flags));
     t.conn(leq_data(602, 1001, 80.0, flags));
-    let p = t.st.leq.history[&meas]
+    let p = t.st.rig.leq.history[&meas]
         .1
         .points(&cfg.windows[0])
         .expect("series");
@@ -507,12 +507,12 @@ fn a_new_log_or_new_windows_rebuild_the_history() {
     t.conn(mirror(s.clone()));
     t.conn(leq_data(600, 1000, 80.0, flags));
     t.conn(leq_data(601, 1001, 80.0, flags));
-    assert!(!t.st.leq.history[&MeasId(4)].1.is_empty());
+    assert!(!t.st.rig.leq.history[&MeasId(4)].1.is_empty());
     // Emptied by a new log.
     s.spl_logs[0].started_at = None;
     let r = t.conn(mirror(s.clone()));
     assert!(backfill_asked(&r).is_some());
-    assert!(t.st.leq.history[&MeasId(4)].1.is_empty(), "cleared");
+    assert!(t.st.rig.leq.history[&MeasId(4)].1.is_empty(), "cleared");
     // Its first rows: the frames say so, nothing more to ask.
     s.spl_logs[0].started_at = Some(WallNs(1_002_000_000_000));
     assert_eq!(backfill_asked(&t.conn(mirror(s.clone()))), None);
@@ -524,7 +524,7 @@ fn a_new_log_or_new_windows_rebuild_the_history() {
     // Another new log seen only in the frames (the entity's moment missed): fewer rows.
     let r = t.conn(leq_data_logged(604, 3, 1005, 60.0, flags));
     assert!(backfill_asked(&r).is_some());
-    let h = &t.st.leq.history[&MeasId(4)].1;
+    let h = &t.st.rig.leq.history[&MeasId(4)].1;
     let p = h
         .points(&LeqConfig::default_windows().windows[0])
         .expect("series");
@@ -548,6 +548,8 @@ fn a_reconnect_rebuilds_the_history_and_a_failure_is_shown() {
         target: "local daemon".into(),
         server: "ac2d test".into(),
         client_id: ClientId("c1".into()),
+        rig_id: RIG,
+        name: "test rig".into(),
     });
     let (meas, ask) = backfill_asked(&t.conn(mirror(with_spl()))).expect("asked again");
     t.conn(ConnEvent::LeqBackfill {
@@ -562,7 +564,7 @@ fn a_reconnect_rebuilds_the_history_and_a_failure_is_shown() {
 }
 
 /// An `spl` frame of meter 4 at `at_ms` (daemon clock) under `rev`.
-fn spl_data(seq: u64, at_ms: u64, level: f64, tw: TimeWeighting, rev: u64) -> ConnEvent {
+pub(super) fn spl_data(seq: u64, at_ms: u64, level: f64, tw: TimeWeighting, rev: u64) -> ConnEvent {
     use ac2_client::{Latest, TopicFrame};
     use ac2_proto::frame::{Frame, FrameData, SplFrame, SplMeta};
     let data = FrameData::Spl(SplFrame {
@@ -625,7 +627,7 @@ fn spl_update(r: &[Request]) -> Option<(SplConfig, String)> {
 fn spl_keys_cycle_the_weightings() {
     let mut t = T::new();
     assert!(
-        t.st.update(Msg::Command(CommandId::SplSlow), &t.keys)
+        t.st.apply(Msg::Command(CommandId::SplSlow), &t.keys)
             .is_empty()
     );
     assert!(
@@ -689,7 +691,7 @@ fn spl_keys_cycle_the_weightings() {
         (CommandId::SplA, "FOH SPL: LAF"),
     ] {
         t.key("Alt+1");
-        let r = t.st.update(Msg::Command(c), &t.keys);
+        let r = t.st.apply(Msg::Command(c), &t.keys);
         assert_eq!(spl_update(&r).map(|x| x.1).as_deref(), Some(want));
         assert_eq!(t.focus_kind(), PaneKind::Spl);
     }
@@ -711,7 +713,12 @@ fn spl_number_holds_for_the_display_period() {
         instant: Instant::now(),
         wall: WallNs(0),
     };
-    let held = |t: &T| t.st.spl_hold.get(&MeasId(4)).map(|h| h.frame.meta.level);
+    let held = |t: &T| {
+        t.st.rig
+            .spl_hold
+            .get(&MeasId(4))
+            .map(|h| h.frame.meta.level)
+    };
     let mut changes = Vec::new();
     let mut last = None;
     for k in 0..20u64 {

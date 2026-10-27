@@ -232,7 +232,7 @@ impl AppState {
     /// A: shows or hides the selected stored trace (the daemon keeps that), else the selected
     /// measurement's live curves in every pane (this app's display only: it keeps measuring).
     pub(super) fn toggle_selected(&mut self, keymap: &crate::keys::Keymap, out: &mut Vec<Request>) {
-        if let Some(id) = self.selected_trace.filter(|_| self.keys_on_trace()) {
+        if let Some(id) = self.rig.selected_trace.filter(|_| self.keys_on_trace()) {
             self.toggle_shown(id, out);
             return;
         }
@@ -248,7 +248,7 @@ impl AppState {
         let Some(name) = self.meas(id).map(|m| m.config.name.clone()) else {
             return;
         };
-        if self.hidden_meas.remove(&id) {
+        if self.rig.hidden_meas.remove(&id) {
             self.toast(format!("{name} shown"));
         } else {
             let key = keymap
@@ -262,7 +262,7 @@ impl AppState {
             self.toast(format!(
                 "{name} hidden: it keeps measuring · {key} shows it"
             ));
-            self.hidden_meas.insert(id);
+            self.rig.hidden_meas.insert(id);
         }
     }
 
@@ -296,12 +296,12 @@ impl AppState {
             TraceOwner::Imported => "Imported".to_owned(),
         };
         let any_shown = traces.iter().any(|t| t.edit.visible)
-            || live.iter().any(|id| !self.hidden_meas.contains(id));
+            || live.iter().any(|id| !self.rig.hidden_meas.contains(id));
         for id in &live {
             if any_shown {
-                self.hidden_meas.insert(*id);
+                self.rig.hidden_meas.insert(*id);
             } else {
-                self.hidden_meas.remove(id);
+                self.rig.hidden_meas.remove(id);
             }
         }
         for t in traces.into_iter().filter(|t| t.edit.visible == any_shown) {
@@ -389,7 +389,7 @@ impl AppState {
                     ac2_scene::meas_list::DELETE => OwnedTraces::Delete,
                     _ => return,
                 };
-                self.hidden_meas.remove(&meas);
+                self.rig.hidden_meas.remove(&meas);
                 let mut what = match traces {
                     OwnedTraces::Keep => {
                         format!("{} deleted; its traces are under Imported", c.label)
@@ -409,7 +409,7 @@ impl AppState {
                         .map_or_else(|| format!("measurement {meas}"), |m| m.config.name.clone()),
                     TraceOwner::Imported => "Imported".to_owned(),
                 };
-                self.collapsed.remove(&owner);
+                self.rig.collapsed.remove(&owner);
                 match what {
                     MoveWhat::Trace(id) => {
                         let Ok(t) = self.trace_meta(id) else {
@@ -564,7 +564,7 @@ impl AppState {
         match target {
             DeleteTarget::Trace(id) => self.delete_trace(id, label, out),
             DeleteTarget::Meas(meas) => {
-                self.hidden_meas.remove(&meas);
+                self.rig.hidden_meas.remove(&meas);
                 // It owns nothing (else the three-answer question was asked).
                 let mut what = format!("{label} deleted");
                 self.stimulus_with_deleted(meas, &mut what, out);

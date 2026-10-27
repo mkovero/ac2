@@ -118,14 +118,14 @@ impl AppState {
     /// The span a live strip of meter `meas` shows: its windows' span up to the newest
     /// second received.
     fn strip_live_span(&self, meas: MeasId, cfg: &LeqConfig) -> Option<(f64, f64)> {
-        let newest = self.leq.history.get(&meas)?.1.newest()?;
+        let newest = self.rig.leq.history.get(&meas)?.1.newest()?;
         Some((newest - ac2_scene::leq::history_span(cfg), newest))
     }
 
     /// The meter pane `pane`'s strip shows and the span it shows.
     pub(crate) fn strip_shown(&self, pane: PaneId) -> Option<(MeasId, LeqConfig, (f64, f64))> {
         let (meas, cfg) = self.strip_meter(pane)?;
-        let span = match self.leq.strips.get(&pane) {
+        let span = match self.leq_panes.strips.get(&pane) {
             Some(s) => *s,
             None => self.strip_live_span(meas, &cfg)?,
         };
@@ -138,7 +138,7 @@ impl AppState {
         if let Some(r) = self.leq_run(meas) {
             return Some((r.started_at.0 as f64 / 1e9, r.until.0 as f64 / 1e9));
         }
-        let h = &self.leq.history.get(&meas)?.1;
+        let h = &self.rig.leq.history.get(&meas)?.1;
         Some((h.oldest()?, h.newest()?))
     }
 
@@ -166,12 +166,12 @@ impl AppState {
             return;
         };
         let span = to - from;
-        let px = self.leq.strip_px;
+        let px = self.leq_panes.strip_px;
         match c {
             C::ZoomIn | C::ZoomOut => {
                 // About the cursor while it is on the strip, else the middle.
                 let about = self
-                    .leq
+                    .leq_panes
                     .cursor
                     .filter(|(p, t)| *p == pane && *t > from && *t < to)
                     .map_or((from + to) / 2.0, |(_, t)| t);
@@ -215,7 +215,7 @@ impl AppState {
                 to + span / 10.0,
                 out,
             ),
-            C::ResetView if self.leq.strips.remove(&pane).is_some() => {
+            C::ResetView if self.leq_panes.strips.remove(&pane).is_some() => {
                 self.toast("Leq history: live");
             }
             _ => {}
@@ -231,7 +231,7 @@ impl AppState {
     ) {
         match m {
             StripMsg::Hover(t) => {
-                self.leq.cursor = t.map(|t| (pane, t));
+                self.leq_panes.cursor = t.map(|t| (pane, t));
             }
             StripMsg::Zoom {
                 shown,
@@ -314,16 +314,16 @@ impl AppState {
         let span = (to - from).clamp(STRIP_MIN_S, widest * 1.05);
         // A little room before the log's first second shows where it starts.
         let to = to.min(hi).max(lo - 0.05 * span + span);
-        self.leq.strips.insert(pane, (to - span, to));
+        self.leq_panes.strips.insert(pane, (to - span, to));
         if width_px > 1.0 {
-            self.leq.strip_px = width_px;
+            self.leq_panes.strip_px = width_px;
         }
         self.want_span(pane, meas, out);
     }
 
     /// The step pane `pane`'s strip wants: about a point per pixel, on [`STEPS`].
     fn strip_step(&self, from: f64, to: f64) -> u32 {
-        let px = f64::from(self.leq.strip_px.clamp(100.0, RESOLUTION_PX));
+        let px = f64::from(self.leq_panes.strip_px.clamp(100.0, RESOLUTION_PX));
         step_for((to - from) / px)
     }
 
@@ -331,7 +331,7 @@ impl AppState {
     /// within the log, by the seconds received (a point a second, the newest hours) or by
     /// a span fetched at least as finely as the strip resolves.
     fn strip_need(&self, pane: PaneId, meas: MeasId) -> Option<(f64, f64, u32)> {
-        let (from, to) = *self.leq.strips.get(&pane)?;
+        let (from, to) = *self.leq_panes.strips.get(&pane)?;
         let (lo, hi) = self.log_extent(meas)?;
         let (from, to) = (from.max(lo), to.min(hi));
         if to <= from {
@@ -342,7 +342,8 @@ impl AppState {
 
     /// The fetched span that draws `[from, to]` at `step` or finer, the finest first.
     fn covering_span(&self, meas: MeasId, from: f64, to: f64, step: u32) -> Option<&LeqSpan> {
-        self.leq
+        self.rig
+            .leq
             .spans
             .get(&meas)?
             .iter()
@@ -352,7 +353,8 @@ impl AppState {
 
     /// Whether the seconds received hold `[from, ...]` of meter `meas`.
     fn live_covers(&self, meas: MeasId, from: f64) -> bool {
-        self.leq
+        self.rig
+            .leq
             .history
             .get(&meas)
             .and_then(|(_, h)| h.oldest())
@@ -368,7 +370,7 @@ impl AppState {
         if self.live_covers(meas, from) || self.covering_span(meas, from, to, step).is_some() {
             return;
         }
-        if let Some(p) = self.leq.span_pending
+        if let Some(p) = self.rig.leq.span_pending
             && p.meas == meas
             && p.step <= step
             && p.from <= from + f64::from(p.step)
@@ -384,9 +386,9 @@ impl AppState {
         let margin = (to - from).min(room);
         let a = ((from - margin).max(lo - s) / s).floor() * s;
         let b = ((to + margin).min(hi + s) / s).ceil() * s;
-        self.leq.span_ask += 1;
-        let ask = self.leq.span_ask;
-        self.leq.span_pending = Some(SpanAsk {
+        self.rig.leq.span_ask += 1;
+        let ask = self.rig.leq.span_ask;
+        self.rig.leq.span_pending = Some(SpanAsk {
             meas,
             from: a,
             to: b,
@@ -409,16 +411,16 @@ impl AppState {
         ask: u64,
         result: Result<Box<SplHistory>, String>,
     ) {
-        let asked = self.leq.span_pending.filter(|p| p.ask == ask);
+        let asked = self.rig.leq.span_pending.filter(|p| p.ask == ask);
         if asked.is_some() {
-            self.leq.span_pending = None;
+            self.rig.leq.span_pending = None;
         }
         match result {
             Ok(h) => {
                 let Some(a) = asked else {
                     return;
                 };
-                let spans = self.leq.spans.entry(meas).or_default();
+                let spans = self.rig.leq.spans.entry(meas).or_default();
                 spans.push(LeqSpan {
                     from: a.from,
                     to: a.to,
@@ -435,22 +437,17 @@ impl AppState {
         }
     }
 
-    /// A new log of meter `meas` (or new windows): its fetched spans are of the old one,
-    /// and the strips on it go back to live.
-    pub(in crate::state) fn forget_leq_spans(&mut self, meas: MeasId) {
-        self.leq.spans.remove(&meas);
-        if self.leq.span_pending.is_some_and(|p| p.meas == meas) {
-            self.leq.span_pending = None;
-        }
+    /// The strips on the active rig's meter `meas` go back to live.
+    pub(in crate::state) fn forget_leq_strips(&mut self, meas: MeasId) {
         let panes: Vec<PaneId> = self
-            .leq
+            .leq_panes
             .strips
             .keys()
             .copied()
             .filter(|p| self.strip_meter(*p).is_some_and(|(m, _)| m == meas))
             .collect();
         for p in panes {
-            self.leq.strips.remove(&p);
+            self.leq_panes.strips.remove(&p);
         }
     }
 
@@ -463,9 +460,18 @@ impl AppState {
         live_key: Option<String>,
     ) -> LeqStripView<'_> {
         let offset = |t: f64| self.local_zone.offset_s(WallNs((t.max(0.0) * 1e9) as u64));
-        let cursor = self.leq.cursor.filter(|(p, _)| *p == pane).map(|(_, t)| t);
-        let Some(&(from, to)) = self.leq.strips.get(&pane) else {
-            let newest = self.leq.history.get(&meas).and_then(|(_, h)| h.newest());
+        let cursor = self
+            .leq_panes
+            .cursor
+            .filter(|(p, _)| *p == pane)
+            .map(|(_, t)| t);
+        let Some(&(from, to)) = self.leq_panes.strips.get(&pane) else {
+            let newest = self
+                .rig
+                .leq
+                .history
+                .get(&meas)
+                .and_then(|(_, h)| h.newest());
             return LeqStripView {
                 span: StripSpan {
                     span: None,
@@ -487,11 +493,12 @@ impl AppState {
                 None => {
                     // Meanwhile the newest span fetched that reaches into it, if any.
                     let near = self
+                        .rig
                         .leq
                         .spans
                         .get(&meas)
                         .and_then(|v| v.iter().rev().find(|s| s.from < b && s.to > a));
-                    (near.map(|s| &s.points), self.leq.span_pending.is_some())
+                    (near.map(|s| &s.points), self.rig.leq.span_pending.is_some())
                 }
             },
             None => (None, false),
@@ -502,6 +509,16 @@ impl AppState {
             loading,
             cursor,
             live_key,
+        }
+    }
+}
+
+impl RigState {
+    /// A new log of meter `meas` (or new windows): its fetched spans are of the old one.
+    pub(in crate::state) fn forget_leq_spans(&mut self, meas: MeasId) {
+        self.leq.spans.remove(&meas);
+        if self.leq.span_pending.is_some_and(|p| p.meas == meas) {
+            self.leq.span_pending = None;
         }
     }
 }

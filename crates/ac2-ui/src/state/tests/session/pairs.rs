@@ -96,7 +96,7 @@ fn kinds_and_pairs_by_key() {
         name: Some("Main".into()),
     };
     assert_eq!(opened_pairs(&r), Some(std::slice::from_ref(&pair)));
-    let roles = &t.st.prefs.sessions["fake/fake:loop"];
+    let roles = &t.st.prefs.sessions[&(RIG, "fake/fake:loop".into())];
     assert_eq!(roles.kinds.get(&2), Some(&KindPref::Line));
     assert_eq!(roles.kinds.get(&3), Some(&KindPref::Line));
     assert_eq!(roles.pairs, vec![pair]);
@@ -104,7 +104,7 @@ fn kinds_and_pairs_by_key() {
 
 /// *pair* clicked on one input.
 fn click_pair(t: &mut T, i: usize) {
-    t.st.update(
+    t.st.apply(
         Msg::Session(SessionMsg::Role(Row::Input(i), RoleKey::Pair)),
         &t.keys,
     );
@@ -314,7 +314,7 @@ fn kinds_and_pairs_are_remembered_per_device() {
     };
     t.st.prefs
         .sessions
-        .insert("fake/fake:loop".into(), roles.clone());
+        .insert((RIG, "fake/fake:loop".into()), roles.clone());
     open_dialog(&mut t, backends(true));
     let d = dialog(&t);
     assert_eq!(d.inputs[2].kind_pref(), KindPref::Digital);
@@ -336,7 +336,9 @@ fn kinds_and_pairs_are_remembered_per_device() {
     ] {
         let mut roles = roles.clone();
         edit(&mut roles);
-        t.st.prefs.sessions.insert("fake/fake:loop".into(), roles);
+        t.st.prefs
+            .sessions
+            .insert((RIG, "fake/fake:loop".into()), roles);
         open_dialog(&mut t, backends(true));
         assert!(dialog(&t).pairs.is_empty());
         let r = t.key("Enter");

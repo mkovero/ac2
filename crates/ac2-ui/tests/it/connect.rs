@@ -141,7 +141,7 @@ fn connect_dialog_lists_rigs_and_starts_the_simulated_rig() {
     loop {
         h.step();
         let app = h.state();
-        if !app.connect_open() && matches!(app.state.conn, ConnState::Connected { .. }) {
+        if !app.connect_open() && matches!(app.state.rig.conn, ConnState::Connected { .. }) {
             break;
         }
         assert!(

@@ -23,8 +23,8 @@ impl AppState {
                     out.push(Request::FindDelay {
                         meas: m.id,
                         pick,
-                        band: self.finder.band,
-                        observation: self.finder.observation,
+                        band: self.rig.finder.band,
+                        observation: self.rig.finder.observation,
                     });
                 }
             }
@@ -84,7 +84,7 @@ impl AppState {
                 }
                 Ok(None) => {
                     if let Some(m) = self.need_tf() {
-                        let e = self.edits.entry(m.id).or_default();
+                        let e = self.rig.edits.entry(m.id).or_default();
                         e.inverted = !e.inverted;
                     }
                 }

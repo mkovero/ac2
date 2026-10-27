@@ -353,7 +353,7 @@ fn slow_electrical_calibration_from_the_app() -> R {
         stream: Stream::Leq,
     };
     d.until("the leq frame calibrated", |s| {
-        s.data.as_ref().is_some_and(|x| {
+        s.rig.data.as_ref().is_some_and(|x| {
             x.latest.get(&topic).is_some_and(|f| match &f.frame.data {
                 FrameData::Leq(l) => {
                     l.meta.scale == LevelScale::DbSpl

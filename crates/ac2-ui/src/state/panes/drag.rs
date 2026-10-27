@@ -288,7 +288,7 @@ impl AppState {
             v.meas = Some(meas);
         }
         if t.kind == TraceKind::Sweep {
-            self.sweep.shown = Some(id);
+            self.rig.sweep.shown = Some(id);
         }
     }
 

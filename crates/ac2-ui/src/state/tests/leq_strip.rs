@@ -71,7 +71,7 @@ fn keys_walk_the_strip_and_fetch_what_is_not_held() {
     let live = ac2_scene::leq::history_span(&cfg);
     // Zoomed out about the middle, the right edge stays at the newest second.
     let r = t.key("O");
-    let (from, to) = t.st.leq.strips[&pane];
+    let (from, to) = t.st.leq_panes.strips[&pane];
     assert_eq!(to, 50_000.0);
     assert!((to - from - (live * ZOOM_FACTOR).min(40_000.0 * 1.05)).abs() < 1e-6);
     // The newest 600 s are held, the rest is asked for, with room to pan.
@@ -95,17 +95,17 @@ fn keys_walk_the_strip_and_fetch_what_is_not_held() {
     assert!(!v.loading);
     assert_eq!(v.points.map(|p| p.step()), Some(step));
     // ← moves a tenth of the span back.
-    let before = t.st.leq.strips[&pane];
+    let before = t.st.leq_panes.strips[&pane];
     t.key("ArrowLeft");
-    let after = t.st.leq.strips[&pane];
+    let after = t.st.leq_panes.strips[&pane];
     assert!((before.0 - after.0 - (before.1 - before.0) / 10.0).abs() < 1e-6);
     // I zooms in again.
     t.key("I");
-    let z = t.st.leq.strips[&pane];
+    let z = t.st.leq_panes.strips[&pane];
     assert!(z.1 - z.0 < after.1 - after.0);
     // Home: live, said.
     t.key("Home");
-    assert!(!t.st.leq.strips.contains_key(&pane));
+    assert!(!t.st.leq_panes.strips.contains_key(&pane));
     assert_eq!(t.last_toast(), "Leq history: live");
     let v = t.st.strip_view(pane, MeasId(4), None);
     assert_eq!(v.span.span, None);
@@ -119,7 +119,7 @@ fn the_mouse_zooms_pans_and_reads_the_strip() {
     let shown = (49_000.0, 50_000.0);
     let m = |m| Msg::LeqStrip(pane, m);
     // Zoomed in ×2 about 49 800: that time stays where it was on the strip.
-    t.st.update(
+    t.st.apply(
         m(StripMsg::Zoom {
             shown,
             about: 49_800.0,
@@ -128,12 +128,12 @@ fn the_mouse_zooms_pans_and_reads_the_strip() {
         }),
         &t.keys,
     );
-    let (a, b) = t.st.leq.strips[&pane];
+    let (a, b) = t.st.leq_panes.strips[&pane];
     assert!((b - a - 500.0).abs() < 1e-6);
     assert!(((49_800.0 - a) / (b - a) - 0.8).abs() < 1e-6, "{a}..{b}");
-    assert_eq!(t.st.leq.strip_px, 800.0);
+    assert_eq!(t.st.leq_panes.strip_px, 800.0);
     // Dragged right by 50 s' worth (the content moves left): later; all of it received.
-    let r = t.st.update(
+    let r = t.st.apply(
         m(StripMsg::Pan {
             shown: (a, b),
             by: 50.0,
@@ -141,10 +141,10 @@ fn the_mouse_zooms_pans_and_reads_the_strip() {
         }),
         &t.keys,
     );
-    assert_eq!(t.st.leq.strips[&pane], (a + 50.0, b + 50.0));
+    assert_eq!(t.st.leq_panes.strips[&pane], (a + 50.0, b + 50.0));
     assert_eq!(span_asked(&r), None, "the newest 600 s are held");
     // Far into the future: the strip ends at the newest second.
-    t.st.update(
+    t.st.apply(
         m(StripMsg::Pan {
             shown: (a, b),
             by: 1e6,
@@ -152,10 +152,10 @@ fn the_mouse_zooms_pans_and_reads_the_strip() {
         }),
         &t.keys,
     );
-    assert_eq!(t.st.leq.strips[&pane].1, 50_000.0);
+    assert_eq!(t.st.leq_panes.strips[&pane].1, 50_000.0);
     // Far into the past: the log's first second stays on the strip, and that span is
     // asked for.
-    let r = t.st.update(
+    let r = t.st.apply(
         m(StripMsg::Pan {
             shown: (a, b),
             by: -1e6,
@@ -163,13 +163,13 @@ fn the_mouse_zooms_pans_and_reads_the_strip() {
         }),
         &t.keys,
     );
-    let (a, b) = t.st.leq.strips[&pane];
+    let (a, b) = t.st.leq_panes.strips[&pane];
     assert!(a < 10_000.0 && b > 10_000.0, "{a}..{b}");
     let (fa, fb, step, _) = span_asked(&r).expect("asked");
     assert!(fa <= 10_000.0 && fb >= b, "{fa}..{fb}");
     assert_eq!(step, 1, "500 s over 800 px: a point a second");
     // Never narrower than the shortest span.
-    t.st.update(
+    t.st.apply(
         m(StripMsg::Zoom {
             shown: (a, b),
             about: a,
@@ -178,14 +178,14 @@ fn the_mouse_zooms_pans_and_reads_the_strip() {
         }),
         &t.keys,
     );
-    let (a, b) = t.st.leq.strips[&pane];
+    let (a, b) = t.st.leq_panes.strips[&pane];
     assert!((b - a - STRIP_MIN_S).abs() < 1e-6);
     // The pointer on the strip, and off it.
-    t.st.update(m(StripMsg::Hover(Some(a + 5.0))), &t.keys);
-    assert_eq!(t.st.leq.cursor, Some((pane, a + 5.0)));
+    t.st.apply(m(StripMsg::Hover(Some(a + 5.0))), &t.keys);
+    assert_eq!(t.st.leq_panes.cursor, Some((pane, a + 5.0)));
     assert_eq!(t.st.strip_view(pane, MeasId(4), None).cursor, Some(a + 5.0));
-    t.st.update(m(StripMsg::Hover(None)), &t.keys);
-    assert_eq!(t.st.leq.cursor, None);
+    t.st.apply(m(StripMsg::Hover(None)), &t.keys);
+    assert_eq!(t.st.leq_panes.cursor, None);
 }
 
 /// A stale or failed fetch: a reply to an earlier ask is not kept; a failure is said once.
@@ -210,7 +210,7 @@ fn a_failed_span_fetch_is_said() {
         "{}",
         t.last_toast()
     );
-    assert!(t.st.leq.spans.is_empty());
+    assert!(t.st.rig.leq.spans.is_empty());
 }
 
 /// The export prompt's name: the meter's name made a file name, local date and time.
@@ -246,14 +246,14 @@ fn the_leq_export_name_is_dated_in_local_time() {
 fn the_leq_export_prompt_sends_the_export() {
     let mut t = T::new();
     t.st.local_zone = crate::scenes::LocalZone::Fixed { offset_s: 7200 };
-    t.st.update(Msg::Command(CommandId::SplLogExport), &t.keys);
+    t.st.apply(Msg::Command(CommandId::SplLogExport), &t.keys);
     assert!(
         t.last_toast().contains("no SPL meter"),
         "{}",
         t.last_toast()
     );
     t.conn(mirror(with_spl()));
-    t.st.update(Msg::Command(CommandId::SplLogExport), &t.keys);
+    t.st.apply(Msg::Command(CommandId::SplLogExport), &t.keys);
     let Overlay::Prompt(p) = &t.st.overlay else {
         panic!("{:?}", t.st.overlay)
     };
@@ -294,7 +294,7 @@ fn the_leq_export_prompt_sends_the_export() {
     let wrote = crate::conn::write_new_file(&to, b"x").expect("written");
     assert_eq!(std::fs::read(&wrote).expect("read"), b"x");
     // The previous log.
-    t.st.update(Msg::Command(CommandId::SplLogExportPrevious), &t.keys);
+    t.st.apply(Msg::Command(CommandId::SplLogExportPrevious), &t.keys);
     let Overlay::Prompt(p) = &t.st.overlay else {
         panic!()
     };

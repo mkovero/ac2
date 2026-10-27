@@ -54,24 +54,28 @@ fn transfer(id: u32, name: &str) -> Measurement {
 fn mirror(ms: Vec<Measurement>) -> Msg {
     let mut s = empty_state();
     s.measurements = ms;
-    Msg::Conn(Box::new(ConnEvent::Mirror(Arc::new(MirrorView {
-        client_id: Some(ClientId("pane-title".into())),
-        phase: Phase::Live,
-        incarnation: Some(DaemonIncarnation(1)),
-        session_epoch: Some(SessionEpoch(1)),
-        rev: Rev(1),
-        state: Some(Arc::new(s)),
-        last_ka: Some(Instant::now()),
-        connected: Instant::now(),
-        generator: None,
-        timing: None,
-        health: None,
-        ka_rev: Some(Rev(1)),
-        clock_offset_ns: Some(0),
-        snapshots: 1,
-        since_requests: 0,
-        incarnation_changes: 0,
-    }))))
+    // The app as started: its rig not connected, so not yet named by its hello.
+    Msg::Conn(
+        ac2_ui::state::UNKNOWN_RIG,
+        Box::new(ConnEvent::Mirror(Arc::new(MirrorView {
+            client_id: Some(ClientId("pane-title".into())),
+            phase: Phase::Live,
+            incarnation: Some(DaemonIncarnation(1)),
+            session_epoch: Some(SessionEpoch(1)),
+            rev: Rev(1),
+            state: Some(Arc::new(s)),
+            last_ka: Some(Instant::now()),
+            connected: Instant::now(),
+            generator: None,
+            timing: None,
+            health: None,
+            ka_rev: Some(Rev(1)),
+            clock_offset_ns: Some(0),
+            snapshots: 1,
+            since_requests: 0,
+            incarnation_changes: 0,
+        }))),
+    )
 }
 
 fn harness() -> Harness<'static, App> {

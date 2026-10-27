@@ -30,7 +30,7 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
     d.until("slot 1", |s| s.slots()[0].is_some())?;
     d.key("Ctrl+2");
     d.until("both captures with their data", |s| {
-        s.slots()[1].is_some() && s.traces.len() == 2
+        s.slots()[1].is_some() && s.rig.traces.len() == 2
     })?;
     let id = |s: &AppState, slot: usize| s.slots()[slot].map(|t| t.id);
     let (a, b) = (id(&d.st, 0).ok_or("slot 1")?, id(&d.st, 1).ok_or("slot 2")?);
@@ -72,10 +72,11 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
     // V to slot 2, Alt+Shift+↑: +3 dB, said in the legend.
     d.key("V");
     d.key("V");
-    assert_eq!(d.st.selected_trace, Some(b));
+    assert_eq!(d.st.rig.selected_trace, Some(b));
     d.key("Alt+Shift+Up");
     d.until("the offset held by the daemon", |s| {
-        s.traces
+        s.rig
+            .traces
             .get(&b)
             .is_some_and(|(t, _)| t.meta.edit.offset.0 == 3.0)
     })?;
@@ -185,23 +186,23 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
     // still selected, the focus keys leaving it: V steps round to slot 1.)
     d.key("Alt+1");
     for _ in 0..3 {
-        if d.st.selected_trace == Some(a) {
+        if d.st.rig.selected_trace == Some(a) {
             break;
         }
         d.key("V");
     }
-    assert_eq!(d.st.selected_trace, Some(a));
+    assert_eq!(d.st.rig.selected_trace, Some(a));
     d.key("Delete");
     assert!(
         matches!(&d.st.overlay, Overlay::Delete(p) if p.target == ac2_ui::state::DeleteTarget::Trace(a))
     );
     d.key("Delete");
-    assert_eq!(d.st.selected_trace, Some(b));
+    assert_eq!(d.st.rig.selected_trace, Some(b));
     d.until("slot 1 deleted", |s| {
         s.daemon()
             .is_some_and(|x| x.traces.iter().all(|t| t.id != a))
     })?;
-    assert!(!d.st.traces.contains_key(&a));
+    assert!(!d.st.rig.traces.contains_key(&a));
     assert_eq!(d.st.trace_rows().len(), 1);
 
     // Maximised: a measurement picked in the list brings up its pane.
@@ -246,7 +247,7 @@ fn a_hides_and_backspace_deletes_the_selected_measurement() -> R {
     let second = d.st.selected_meas().cloned().ok_or("second")?;
     // The level typed for the first is kept: arm and fire.
     d.key("Space");
-    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
     d.key("Enter");
     d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
     d.tf_frames(second.id, 240)?;
@@ -305,7 +306,7 @@ fn a_hides_and_backspace_deletes_the_selected_measurement() -> R {
     );
     // Hidden, it keeps running and its frames keep coming.
     let seq = |s: &AppState| {
-        s.data.as_ref().and_then(|x| {
+        s.rig.data.as_ref().and_then(|x| {
             x.latest
                 .get(&Topic::Data {
                     meas: first.id,
@@ -341,7 +342,7 @@ fn a_hides_and_backspace_deletes_the_selected_measurement() -> R {
     d.until("the first measurement gone", |s| {
         s.measurements().len() == 1 && s.meas(first.id).is_none()
     })?;
-    assert!(d.st.hidden_meas.is_empty());
+    assert!(d.st.rig.hidden_meas.is_empty());
     assert!(d.st.meas(second.id).is_some_and(|m| m.running));
     d.until("the other curve alone", |s| {
         names(s) == [second.config.name.clone()]
@@ -507,7 +508,7 @@ fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
     );
 
     d.key("V");
-    assert_eq!(d.st.selected_trace, Some(a));
+    assert_eq!(d.st.rig.selected_trace, Some(a));
     export(&mut d);
     let Overlay::Prompt(p) = &d.st.overlay else {
         return Err("the export prompt".into());

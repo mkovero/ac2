@@ -163,17 +163,17 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
         }
         other => panic!("{other:?}"),
     }
-    assert_eq!(t.st.stimulus.phase, StimPhase::FireRequested);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::FireRequested);
     t.conn(ConnEvent::Stimulus(StimEvent::SweepStarted(Box::new(
         sweep_run(SweepStatus::Playing { repeat: 1 }),
     ))));
-    assert_eq!(t.st.stimulus.phase, StimPhase::Firing);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Firing);
 
     // Recorded: the daemon has disarmed; the stimulus is off while the analysis runs.
     let mut s = sweep_state();
     s.sweep = Some(sweep_run(SweepStatus::Analysing));
     let r = t.conn(mirror(s.clone()));
-    assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
     assert!(!t.st.stimulus_live(), "STIM OFF while analysing");
     assert!(
         !r.iter().any(|x| matches!(x, Request::StimStop)),
@@ -187,15 +187,15 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
     assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
     assert!(t.shown(PaneKind::Distortion));
     assert_eq!(t.focus_kind(), PaneKind::Distortion);
-    assert!(t.st.sweep.plan.is_none());
-    assert_eq!(t.st.stimulus.signal, Signal::Pink);
+    assert!(t.st.rig.sweep.plan.is_none());
+    assert_eq!(t.st.rig.stimulus.signal, Signal::Pink);
     assert!(
         t.last_toast().contains("Space runs it again"),
         "{}",
         t.last_toast()
     );
     t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
-    assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
     assert!(!t.st.stimulus_live(), "STIM OFF after the sweep");
     assert!(
         t.last_toast().contains("Run 1 of Sweep 1 stored"),
@@ -209,13 +209,13 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
             .any(|x| matches!(x, Request::Sweep { .. } | Request::StimSet(_))),
         "{r:?}"
     );
-    assert_eq!(t.st.sweep.shown, Some(TraceId(7)));
+    assert_eq!(t.st.rig.sweep.shown, Some(TraceId(7)));
     let (d, g) = sweep_data(7);
     t.conn(ConnEvent::Trace(d, g));
     assert_eq!(t.st.kind_sweep().map(|(d, _)| d.meta.id), Some(TraceId(7)));
     // The sweep is drawn like a transfer function in the transfer pane too.
     assert_eq!(t.st.view.distortion.unit, DistortionUnit::Db);
-    t.st.update(Msg::Command(CommandId::DistortionUnit), &t.keys);
+    t.st.apply(Msg::Command(CommandId::DistortionUnit), &t.keys);
     assert_eq!(t.st.view.distortion.unit, DistortionUnit::Percent);
     // The pane's dB | % toggle: a click on either sets that unit (again: stays).
     for unit in [
@@ -223,7 +223,7 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
         DistortionUnit::Db,
         DistortionUnit::Percent,
     ] {
-        let r = t.st.update(Msg::DistortionUnit(unit), &t.keys);
+        let r = t.st.apply(Msg::DistortionUnit(unit), &t.keys);
         assert!(r.is_empty(), "display only: {r:?}");
         assert_eq!(t.st.view.distortion.unit, unit);
     }
@@ -376,13 +376,13 @@ fn the_sweep_dialog_offers_fine_lf_harmonics() {
 #[test]
 fn a_sweep_submitted_during_a_stop_arms_after_it() {
     let mut t = T::new();
-    t.st.stimulus.level = Some(Dbfs(-30.0));
+    t.st.rig.stimulus.level = Some(Dbfs(-30.0));
     let r = t.key("Space");
     assert!(matches!(r.as_slice(), [Request::StimArm { .. }]), "{r:?}");
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     let r = t.key("Esc");
     assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
-    assert_eq!(t.st.stimulus.phase, StimPhase::Stopping);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Stopping);
 
     t.conn(mirror(sweep_state()));
     t.go(PaneKind::Distortion);
@@ -391,7 +391,7 @@ fn a_sweep_submitted_during_a_stop_arms_after_it() {
         !r.iter().any(|x| matches!(x, Request::StimArm { .. })),
         "nothing armed into the lease being released: {r:?}"
     );
-    assert!(t.st.sweep.plan.is_some());
+    assert!(t.st.rig.sweep.plan.is_some());
     let r = t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
     let settings = r
         .iter()
@@ -402,7 +402,7 @@ fn a_sweep_submitted_during_a_stop_arms_after_it() {
         .unwrap_or_else(|| panic!("no arm after the stop: {r:?}"));
     assert!(matches!(settings.signal, Signal::Ess { .. }));
     assert_eq!(settings.level, Dbfs(-50.0));
-    assert_eq!(t.st.stimulus.phase, StimPhase::Arming);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Arming);
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     assert!(
         t.last_toast().contains("Enter plays the sweep"),
@@ -432,7 +432,7 @@ fn a_failed_sweep_says_why_and_disarms() {
         "{}",
         t.last_toast()
     );
-    assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
     assert!(!t.st.stimulus_live());
     // The sweep measurement stays, waiting for the next Space.
     assert_eq!(t.st.sweep_meas().map(|m| m.id), Some(MeasId(5)));
@@ -522,7 +522,7 @@ fn sweep_stored_as(t: &mut T, id: u32) -> SweepConfig {
     s.sweep = Some(sweep_run(SweepStatus::Done { trace: TraceId(id) }));
     t.conn(mirror(s));
     t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
-    assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
     request
 }
 
@@ -616,7 +616,7 @@ fn space_on_the_sweep_view_re_sweeps_with_the_same_parameters() {
     s.sweep = Some(sweep_run(SweepStatus::Done { trace: TraceId(8) }));
     let r = t.conn(mirror(s));
     assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
-    assert_eq!(t.st.selected_trace, Some(TraceId(8)));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(8)));
     // Space while that stop is on its way: the re-sweep arms once it has landed.
     assert!(t.key("Space").is_empty());
     let r = t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
@@ -633,7 +633,7 @@ fn space_on_the_sweep_view_re_sweeps_with_the_same_parameters() {
 #[test]
 fn space_on_the_sweep_view_without_a_sweep_opens_the_dialog() {
     let mut t = T::new();
-    t.st.stimulus.level = Some(Dbfs(-40.0));
+    t.st.rig.stimulus.level = Some(Dbfs(-40.0));
     t.go(PaneKind::Distortion);
     assert!(t.st.sweep_view(), "{:?}", t.st.layout.focus);
     assert_eq!(
@@ -713,7 +713,7 @@ fn space_on_the_live_views_drives_the_generator() {
         )),
         "{r:?}"
     );
-    assert!(t.st.sweep.plan.is_none());
+    assert!(t.st.rig.sweep.plan.is_none());
     let r = t.key("Enter");
     assert!(
         r.iter().any(|x| matches!(
@@ -742,7 +742,7 @@ fn g_steps_the_spectrum_panes_views() {
         t.st.kind_modes(PaneKind::Spectrum).spectrum,
         SpectrumMode::Split
     );
-    t.st.spectrographs.insert(
+    t.st.rig.spectrographs.insert(
         MeasId(2),
         ac2_scene::spectrograph::SpectrographHistory::new(30),
     );
@@ -751,7 +751,7 @@ fn g_steps_the_spectrum_panes_views() {
         t.st.kind_modes(PaneKind::Spectrum).spectrum,
         SpectrumMode::Spectrograph
     );
-    assert!(!t.st.spectrographs.is_empty(), "the history stays");
+    assert!(!t.st.rig.spectrographs.is_empty(), "the history stays");
     t.key("W");
     assert_eq!(t.visible(), [PaneKind::Spectrum]);
     let prefs = t.st.layout_prefs().panes.expect("a layout");
@@ -771,7 +771,7 @@ fn g_steps_the_spectrum_panes_views() {
         SpectrumMode::Spectrum
     );
     assert!(
-        t.st.spectrographs.is_empty(),
+        t.st.rig.spectrographs.is_empty(),
         "nothing kept for a hidden one"
     );
     // Shift+G walks the same chain back, wrapping at the spectrum.
@@ -783,7 +783,7 @@ fn g_steps_the_spectrum_panes_views() {
         t.key("Shift+G");
         assert_eq!(t.st.kind_modes(PaneKind::Spectrum).spectrum, want);
     }
-    assert!(t.st.spectrographs.is_empty(), "hidden again: dropped");
+    assert!(t.st.rig.spectrographs.is_empty(), "hidden again: dropped");
 
     // Remembered: a new app on these preferences opens on the spectrograph.
     let mut u = T::new();

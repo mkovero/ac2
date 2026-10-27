@@ -23,59 +23,50 @@ impl AppState {
     pub(super) fn conn_event(&mut self, e: ConnEvent, out: &mut Vec<Request>) {
         match e {
             ConnEvent::Connecting { target } => {
-                if !matches!(self.conn, ConnState::Failed { .. }) {
-                    self.conn = ConnState::Connecting { target };
+                if !matches!(self.rig.conn, ConnState::Failed { .. }) {
+                    self.rig.conn = ConnState::Connecting { target };
                 }
             }
             ConnEvent::Connected {
                 target,
                 server,
                 client_id,
+                rig_id,
+                name,
             } => {
-                self.conn = ConnState::Connected {
+                // A window opened before the hello acts on this rig, now named by it.
+                if self.window_rig == Some(self.rig.id) {
+                    self.window_rig = Some(rig_id);
+                }
+                self.rig.connected(ConnState::Connected {
                     target,
                     server,
                     client_id,
-                };
-                // A new connection holds no lease.
-                self.stimulus.phase = StimPhase::Idle;
-                self.stimulus.arm_after_stop = false;
-                // Nor has it rebuilt any history: the log may have moved on meanwhile.
-                self.leq.logs.clear();
-                self.forget_layout_calls();
-                // The devices listed were the last daemon's: another host has other ports,
-                // and opening with them would name channels this daemon may not have.
-                self.devices = None;
-                self.devices_for = None;
+                    rig_id,
+                    name,
+                });
                 if let Overlay::Settings(s) = &mut self.overlay {
                     s.session.backends = None;
                     out.push(Request::Devices);
                 }
             }
             ConnEvent::Failed { target, error, .. } => {
-                self.conn = ConnState::Failed { target, error };
                 // Whatever daemon answers next, its ids are its own: what is shown waits
                 // for its name.
                 let names = self.meas_names();
                 self.park_gone_meas(&names, |_| true);
-                self.forget_layout_calls();
-                self.pending.select = None;
-                self.pending.stack = None;
-                self.mirror = None;
-                self.data = None;
-                self.stimulus.phase = StimPhase::Idle;
-                self.stimulus.arm_after_stop = false;
+                self.rig.failed(target, error);
             }
             ConnEvent::Mirror(v) => {
                 let names = self.meas_names();
-                let incarnation = self.mirror.as_ref().and_then(|m| m.incarnation);
+                let incarnation = self.rig.mirror.as_ref().and_then(|m| m.incarnation);
                 // Another daemon (restarted, swapped in) numbers its measurements afresh: an
                 // id it has may be another measurement than the one shown.
                 let reborn = incarnation.is_some() && v.incarnation != incarnation;
                 let (was_stopped, was_firing) = self.daemon().map_or((true, false), |s| {
                     (s.session.stopped.is_some(), s.generator.firing)
                 });
-                self.mirror = Some(v);
+                self.rig.mirror = Some(v);
                 // A driver reset or clock change: the backend cut the output at once and the
                 // daemon disarmed the generator; say so when it happens, not only in the bar.
                 if !was_stopped
@@ -96,100 +87,79 @@ impl AppState {
                     .iter()
                     .map(|m| m.config.name.clone())
                     .collect();
-                self.meas_seen.extend(seen);
+                self.rig.meas_seen.extend(seen);
                 // The daemon disarmed the generator when the audio stopped; an arm queued
                 // behind a stop must not follow it into a session that is reopening.
-                if self.stimulus.arm_after_stop
+                if self.rig.stimulus.arm_after_stop
                     && self.daemon().is_some_and(|s| s.session.stopped.is_some())
                 {
-                    self.stimulus.arm_after_stop = false;
+                    self.rig.stimulus.arm_after_stop = false;
                     self.warn(
                         "not armed: the audio stopped; the daemon is reopening the audio I/O",
                     );
                 }
                 let ids: Vec<MeasId> = self.measurements().iter().map(|m| m.id).collect();
-                if let Some(p) = self.pending.select
+                if let Some(p) = self.rig.pending.select
                     && ids.contains(&p)
                 {
-                    self.selected = Some(p);
-                    self.chosen = Some(p);
-                    self.pending.select = None;
+                    self.rig.selected = Some(p);
+                    self.rig.chosen = Some(p);
+                    self.rig.pending.select = None;
                 }
-                if let Some(p) = self.pending.stack
+                if let Some(p) = self.rig.pending.stack
                     && ids.contains(&p)
                 {
-                    self.pending.stack = None;
+                    self.rig.pending.stack = None;
                     self.stack_created(p);
                 }
-                let waiting = self.pending.select.is_some() && self.pending.select == self.selected;
+                let waiting = self.rig.pending.select.is_some()
+                    && self.rig.pending.select == self.rig.selected;
                 // A measurement this app made, selected before the daemon lists it, stays.
-                let keep = if waiting { self.selected } else { None };
+                let keep = if waiting { self.rig.selected } else { None };
                 self.park_gone_meas(&names, |id| {
                     Some(id) != keep && (reborn || !ids.contains(&id))
                 });
-                if let Some(id) = self.lost_selection.as_ref().and_then(|n| {
+                if let Some(id) = self.rig.lost_selection.as_ref().and_then(|n| {
                     self.measurements()
                         .iter()
                         .find(|m| m.config.name == *n)
                         .map(|m| m.id)
                 }) {
-                    self.selected = Some(id);
-                    self.chosen = Some(id);
-                    self.standin = None;
-                    self.lost_selection = None;
-                    if std::mem::take(&mut self.lost_own_panes) {
-                        self.own_panes = Some(id);
+                    self.rig.selected = Some(id);
+                    self.rig.chosen = Some(id);
+                    self.rig.standin = None;
+                    self.rig.lost_selection = None;
+                    if std::mem::take(&mut self.rig.lost_own_panes) {
+                        self.rig.own_panes = Some(id);
                     }
                 }
-                if !waiting && self.selected.is_none() {
-                    self.selected = self
+                if !waiting && self.rig.selected.is_none() {
+                    self.rig.selected = self
                         .measurements()
                         .iter()
                         .find(|m| matches!(m.config.kind, MeasKind::Transfer { .. }))
                         .or(self.measurements().first())
                         .map(|m| m.id);
-                    self.chosen = self.selected;
-                    self.standin = self.selected;
+                    self.rig.chosen = self.rig.selected;
+                    self.rig.standin = self.rig.selected;
                 }
-                self.edits.retain(|k, _| ids.contains(k));
-                // A fold belongs to the measurement folded: one listed later under its id
-                // (a session loaded, a daemon numbering afresh) starts unfolded.
-                self.collapsed.retain(|g| match g {
-                    TraceOwner::Meas { meas } => {
-                        !reborn && (ids.contains(meas) || Some(*meas) == keep)
-                    }
-                    TraceOwner::Imported => true,
-                });
-                let metas: BTreeMap<TraceId, TraceMeta> = self
-                    .daemon()
-                    .map(|st| st.traces.iter().map(|t| (t.id, t.clone())).collect())
-                    .unwrap_or_default();
-                // Fetched data keeps its columns; its metadata follows the mirror (edits,
-                // visibility and slots change by event). The smoothing stays the one the
-                // columns were served with until the re-smoothed data arrives.
-                self.traces.retain(|k, _| metas.contains_key(k));
-                for (id, (data, _)) in &mut self.traces {
-                    if let Some(m) = metas.get(id) {
-                        follow_meta(data, m);
-                    }
-                }
-                if self.selected_trace.is_some_and(|t| !metas.contains_key(&t)) {
-                    self.selected_trace = None;
-                }
+                self.rig.keep_listed(reborn, keep);
                 if let Some(TraceKey::Stored(r)) = self.view.tf.phase_reference
-                    && !metas.contains_key(&r)
+                    && !self
+                        .daemon()
+                        .is_some_and(|st| st.traces.iter().any(|t| t.id == r))
                 {
                     self.view.tf.phase_reference = None;
                 }
-                self.follow_spectrum_starts();
+                self.rig.follow_spectrum_starts();
                 self.follow_output_device();
                 self.follow_settings();
                 self.follow_sweep(out);
                 self.follow_leq_alarms();
-                let data = self.data.clone();
+                let data = self.rig.data.clone();
                 self.follow_leq_logs(data.as_deref(), out);
-                if self.open_session_when_empty && self.connected() && self.daemon().is_some() {
-                    self.open_session_when_empty = false;
+                if self.rig.open_session_when_empty && self.connected() && self.daemon().is_some() {
+                    self.rig.open_session_when_empty = false;
                     // A session kept from before (autosave, a loaded file) is no fresh
                     // start: its hint names the audio page, nothing opens over it.
                     if self.nothing_kept() && self.overlay == Overlay::None {
@@ -200,12 +170,12 @@ impl AppState {
             }
             ConnEvent::Devices(r) => {
                 if let Ok(d) = &r {
-                    self.devices = Some(d.clone());
+                    self.rig.devices = Some(d.clone());
                 }
                 let names = self.session_input_names();
                 match (&mut self.overlay, r) {
                     (Overlay::Settings(s), Ok(d)) => {
-                        s.session.set_backends(d, &self.prefs);
+                        s.session.set_backends(d, self.prefs.of_rig(self.rig.id));
                         s.follow_focus_want();
                     }
                     (Overlay::Settings(s), Err(e)) => {
@@ -236,13 +206,13 @@ impl AppState {
                 if let Overlay::Settings(s) = &mut self.overlay {
                     s.session.detect_result(r);
                     // The detection closed the preview on the daemon: reopen it now.
-                    self.preview_sent_s = f64::NEG_INFINITY;
+                    self.rig.preview_sent_s = f64::NEG_INFINITY;
                 } else if let Err(e) = r {
                     self.fault(format!("detect loopback: {e}"));
                 }
             }
             ConnEvent::SessionOpened => {
-                self.choose_when_open = true;
+                self.rig.choose_when_open = true;
                 self.choose_first();
             }
             ConnEvent::LeqBackfill { meas, ask, result } => {
@@ -258,57 +228,40 @@ impl AppState {
             ConnEvent::SessionList(r) => self.session_list(r),
             ConnEvent::MeasCreated(m) => {
                 // Before it is selected: focusing a sweep pane selects what that pane shows.
-                if self.pane_on_create.as_ref() == Some(&m.config.name) {
-                    self.pane_on_create = None;
+                if self.rig.pane_on_create.as_ref() == Some(&m.config.name) {
+                    self.rig.pane_on_create = None;
                     self.open_created(m.id, PaneKind::for_kind(&m.config.kind));
                 }
-                if self.align_on_create.as_ref() == Some(&m.config.name) {
-                    self.align_on_create = None;
+                if self.rig.align_on_create.as_ref() == Some(&m.config.name) {
+                    self.rig.align_on_create = None;
                     self.open_alignment(m.id);
                 }
                 // Its header row is the selection, unfolded with its live curve under it,
                 // and the list scrolls to it.
-                self.selected = Some(m.id);
-                self.chosen = Some(m.id);
-                self.selected_trace = None;
-                self.selected_live = None;
-                self.collapsed.remove(&TraceOwner::Meas { meas: m.id });
+                self.rig.selected = Some(m.id);
+                self.rig.chosen = Some(m.id);
+                self.rig.selected_trace = None;
+                self.rig.selected_live = None;
+                self.rig.collapsed.remove(&TraceOwner::Meas { meas: m.id });
                 self.tree_reveal = true;
-                self.pending.select = Some(m.id);
+                self.rig.pending.select = Some(m.id);
                 // Made here, by the operator: as if its row were chosen, the panes on screen
                 // are its own from now (it has none yet to bring).
-                self.own_panes = Some(m.id);
-                if self.stack_on_create.as_ref() == Some(&m.config.name) {
-                    self.stack_on_create = None;
-                    self.pending.stack = Some(m.id);
+                self.rig.own_panes = Some(m.id);
+                if self.rig.stack_on_create.as_ref() == Some(&m.config.name) {
+                    self.rig.stack_on_create = None;
+                    self.rig.pending.stack = Some(m.id);
                 }
             }
             ConnEvent::Data(d) => {
-                self.fold_peaks(&d);
-                self.fold_peak_tracks(&d);
-                if self.spectrograph_shown() {
-                    self.fold_spectrographs(&d);
+                let fold = self.folding(true);
+                for meas in self.rig.fold_data(d, &fold, out) {
+                    self.forget_leq_strips(meas);
                 }
-                // A new log clears the history before its first frame goes in.
-                self.follow_leq_logs(Some(&d), out);
-                self.fold_leq(&d);
-                self.fold_spl(&d);
-                self.keep_bar_from(&d);
-                self.keep_spec_glide(&d);
-                self.fold_advice(&d);
-                self.fold_programme(&d);
-                self.data = Some(d);
                 self.fit_first_shows();
             }
-            ConnEvent::Trace(mut t, g) => {
-                if let Some(m) = self
-                    .daemon()
-                    .and_then(|s| s.traces.iter().find(|x| x.id == t.meta.id))
-                    .cloned()
-                {
-                    follow_meta(&mut t, &m);
-                }
-                self.traces.insert(t.meta.id, (t, g));
+            ConnEvent::Trace(t, g) => {
+                self.rig.keep_trace(t, g);
                 self.fit_new_sweep();
             }
             ConnEvent::Reply { what, result } if self.layout_reply(&what, &result, out) => {}
@@ -400,21 +353,21 @@ impl AppState {
     pub(super) fn stim_event(&mut self, s: StimEvent, out: &mut Vec<Request>) {
         match s {
             StimEvent::Armed => {
-                self.stimulus.phase = StimPhase::Armed;
-                if self.armed_with.take() != self.stimulus.settings() {
+                self.rig.stimulus.phase = StimPhase::Armed;
+                if self.rig.armed_with.take() != self.rig.stimulus.settings() {
                     self.resend_stimulus(out);
                 }
-                let d = self.stimulus.describe();
-                if self.sweep.plan.is_some() {
+                let d = self.rig.stimulus.describe();
+                if self.rig.sweep.plan.is_some() {
                     self.toast(format!("armed: {d} · Enter plays the sweep · Esc stops"));
                 } else {
                     self.toast(format!("armed: {d} · Enter fires · Esc stops"));
                 }
             }
             StimEvent::SweepStarted(run) => {
-                self.stimulus.phase = StimPhase::Firing;
-                self.sweep.run = Some(run.id);
-                self.sweep.seen = Some(run.status.clone());
+                self.rig.stimulus.phase = StimPhase::Firing;
+                self.rig.sweep.run = Some(run.id);
+                self.rig.sweep.seen = Some(run.status.clone());
                 self.toast(format!(
                     "sweep playing: {} × {} s · Esc stops (and discards it)",
                     run.repeats,
@@ -422,8 +375,8 @@ impl AppState {
                 ));
             }
             StimEvent::Set { firing } => {
-                if self.stimulus.phase != StimPhase::Stopping {
-                    self.stimulus.phase = if firing {
+                if self.rig.stimulus.phase != StimPhase::Stopping {
+                    self.rig.stimulus.phase = if firing {
                         StimPhase::Firing
                     } else {
                         StimPhase::Armed
@@ -431,17 +384,19 @@ impl AppState {
                 }
             }
             StimEvent::Stopped => {
-                self.stimulus.phase = StimPhase::Idle;
-                let announced = std::mem::take(&mut self.stimulus.stop_announced);
-                if std::mem::take(&mut self.stimulus.arm_after_stop) && !self.sweep.arm_after_stop {
+                self.rig.stimulus.phase = StimPhase::Idle;
+                let announced = std::mem::take(&mut self.rig.stimulus.stop_announced);
+                if std::mem::take(&mut self.rig.stimulus.arm_after_stop)
+                    && !self.rig.sweep.arm_after_stop
+                {
                     self.arm_after_stopped(out);
                 }
-                let releasing = std::mem::take(&mut self.sweep.releasing);
-                let pending = std::mem::take(&mut self.sweep.arm_after_stop);
-                match self.sweep.plan.take() {
+                let releasing = std::mem::take(&mut self.rig.sweep.releasing);
+                let pending = std::mem::take(&mut self.rig.sweep.arm_after_stop);
+                match self.rig.sweep.plan.take() {
                     Some(plan) if pending => self.arm_sweep(plan, false, out),
                     plan => {
-                        self.sweep.plan = plan;
+                        self.rig.sweep.plan = plan;
                         self.end_sweep_mode();
                         if !releasing && !announced {
                             self.toast("stimulus stopped");
@@ -450,22 +405,22 @@ impl AppState {
                 }
             }
             StimEvent::Lost(msg) => {
-                self.stimulus.phase = StimPhase::Idle;
-                self.stimulus.arm_after_stop = false;
-                self.stimulus.stop_announced = false;
-                self.sweep.releasing = false;
-                self.sweep.arm_after_stop = false;
+                self.rig.stimulus.phase = StimPhase::Idle;
+                self.rig.stimulus.arm_after_stop = false;
+                self.rig.stimulus.stop_announced = false;
+                self.rig.sweep.releasing = false;
+                self.rig.sweep.arm_after_stop = false;
                 self.end_sweep_mode();
                 self.fault(format!("stimulus lease lost: {msg}"));
             }
             StimEvent::Failed(msg) => {
-                self.sweep.releasing = false;
-                self.stimulus.arm_after_stop = false;
-                self.stimulus.stop_announced = false;
-                if std::mem::take(&mut self.sweep.arm_after_stop) {
+                self.rig.sweep.releasing = false;
+                self.rig.stimulus.arm_after_stop = false;
+                self.rig.stimulus.stop_announced = false;
+                if std::mem::take(&mut self.rig.sweep.arm_after_stop) {
                     self.end_sweep_mode();
                 }
-                self.stimulus.phase = match self.stimulus.phase {
+                self.rig.stimulus.phase = match self.rig.stimulus.phase {
                     StimPhase::Arming => StimPhase::Idle,
                     StimPhase::FireRequested => StimPhase::Armed,
                     // A failed stop leaves the truth to the mirror; the daemon's lease
@@ -477,7 +432,90 @@ impl AppState {
             }
         }
     }
+}
 
+impl AppState {
+    /// The name of each measurement the daemon's state holds now.
+    fn meas_names(&self) -> BTreeMap<MeasId, String> {
+        self.measurements()
+            .iter()
+            .map(|m| (m.id, m.config.name.clone()))
+            .collect()
+    }
+
+    /// Measurements `gone` from the daemon (`names`: what they were called): each pane that
+    /// showed one waits for one of that name to come back, and so does the selection (a
+    /// stand-in may take its place meanwhile). A session reopened, salvaged or a daemon
+    /// restarted takes them away for a moment and makes them again under the same names.
+    fn park_gone_meas(&mut self, names: &BTreeMap<MeasId, String>, gone: impl Fn(MeasId) -> bool) {
+        for (pane, v) in &mut self.layout.views {
+            if let Some(id) = v.meas.filter(|id| gone(*id)) {
+                v.meas = None;
+                if let Some(n) = names.get(&id) {
+                    self.rig.pending.pane_meas.insert(*pane, n.clone());
+                }
+            }
+        }
+        // Hidden ones wait by name as a pane's measurement does, unless one
+        // that stays has that name: it is another measurement, and the choice was not its.
+        let staying: BTreeSet<String> = self
+            .measurements()
+            .iter()
+            .filter(|m| !gone(m.id))
+            .map(|m| m.config.name.clone())
+            .collect();
+        let pending = &mut self.rig.pending.hidden;
+        self.rig.hidden_meas.retain(|id| {
+            if !gone(*id) {
+                return true;
+            }
+            if let Some(n) = names.get(id).filter(|n| !staying.contains(*n)) {
+                pending.insert(n.clone());
+            }
+            false
+        });
+        if let Some(id) = self.rig.selected.filter(|id| gone(*id)) {
+            // A stand-in going leaves the operator's choice waiting.
+            if self.rig.standin != Some(id)
+                && let Some(n) = names.get(&id)
+            {
+                self.rig.lost_selection = Some(n.clone());
+                self.rig.lost_own_panes = self.rig.own_panes == Some(id);
+            }
+            self.rig.selected = None;
+            self.rig.standin = None;
+        }
+        if self.rig.chosen.is_some_and(&gone) {
+            self.rig.chosen = None;
+        }
+        // Its panes stay on screen, nobody's own until a row is chosen.
+        if self.rig.own_panes.is_some_and(&gone) {
+            self.rig.own_panes = None;
+        }
+    }
+
+    /// The selection moved off the stand-in (the operator chose, this app made something),
+    /// or the operator chose the stand-in's row: the selection is theirs again.
+    pub(super) fn follow_standin(&mut self) {
+        if self.rig.own_panes_due
+            || self
+                .rig
+                .selected
+                .is_some_and(|s| Some(s) != self.rig.standin)
+        {
+            self.rig.standin = None;
+            self.rig.lost_selection = None;
+            self.rig.lost_own_panes = false;
+        }
+    }
+
+    /// The selection is one this app made by itself.
+    pub(super) fn selection_is_standin(&self) -> bool {
+        self.rig.selected.is_some() && self.rig.selected == self.rig.standin
+    }
+}
+
+impl RigState {
     /// Note the spectrum / RTA measurements that started since the last state: each fits
     /// the level axis on its first frame.
     pub(super) fn follow_spectrum_starts(&mut self) {
@@ -653,77 +691,132 @@ impl AppState {
 }
 
 impl AppState {
-    /// The name of each measurement the daemon's state holds now.
-    fn meas_names(&self) -> BTreeMap<MeasId, String> {
-        self.measurements()
-            .iter()
-            .map(|m| (m.id, m.config.name.clone()))
-            .collect()
+    /// An event from a rig in the background. No pane shows such a rig and no window acts
+    /// on it, so only what it keeps of its own daemon follows: its link, mirror, frames and
+    /// traces. Replies and the stimulus answer the operator's keys and windows, which act
+    /// on the active rig alone.
+    pub(super) fn background_event(&mut self, rig: RigId, e: ConnEvent) -> Vec<(RigId, Request)> {
+        let fold = self.folding(false);
+        let Some(r) = self.background.iter_mut().find(|r| r.id == rig) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        match e {
+            ConnEvent::Connecting { target } if !matches!(r.conn, ConnState::Failed { .. }) => {
+                r.conn = ConnState::Connecting { target };
+            }
+            ConnEvent::Connected {
+                target,
+                server,
+                client_id,
+                rig_id,
+                name,
+            } => r.connected(ConnState::Connected {
+                target,
+                server,
+                client_id,
+                rig_id,
+                name,
+            }),
+            ConnEvent::Failed { target, error, .. } => r.failed(target, error),
+            ConnEvent::Mirror(v) => {
+                let incarnation = r.mirror.as_ref().and_then(|m| m.incarnation);
+                let reborn = incarnation.is_some() && v.incarnation != incarnation;
+                r.mirror = Some(v);
+                let seen: Vec<String> = r
+                    .measurements()
+                    .iter()
+                    .map(|m| m.config.name.clone())
+                    .collect();
+                r.meas_seen.extend(seen);
+                r.keep_listed(reborn, None);
+                r.follow_spectrum_starts();
+                let data = r.data.clone();
+                // No strip looks back at a background rig's meter.
+                let _ = r.follow_leq_logs(data.as_deref(), &mut out);
+            }
+            ConnEvent::Data(d) => {
+                let _ = r.fold_data(d, &fold, &mut out);
+            }
+            ConnEvent::Trace(t, g) => r.keep_trace(t, g),
+            _ => {}
+        }
+        out.into_iter().map(|q| (rig, q)).collect()
+    }
+}
+
+impl RigState {
+    /// The link reached the daemon (`conn` is [`ConnState::Connected`]): the rig takes its
+    /// id and name, and drops what the last connection held.
+    pub(super) fn connected(&mut self, conn: ConnState) {
+        if let ConnState::Connected { rig_id, name, .. } = &conn {
+            self.id = *rig_id;
+            self.name.clone_from(name);
+        }
+        self.conn = conn;
+        // A new connection holds no lease.
+        self.stimulus.phase = StimPhase::Idle;
+        self.stimulus.arm_after_stop = false;
+        // Nor has it rebuilt any history: the log may have moved on meanwhile.
+        self.leq.logs.clear();
+        self.forget_layout_calls();
+        // The devices listed were the last daemon's: another host has other ports,
+        // and opening with them would name channels this daemon may not have.
+        self.devices = None;
+        self.devices_for = None;
     }
 
-    /// Measurements `gone` from the daemon (`names`: what they were called): each pane that
-    /// showed one waits for one of that name to come back, and so does the selection (a
-    /// stand-in may take its place meanwhile). A session reopened, salvaged or a daemon
-    /// restarted takes them away for a moment and makes them again under the same names.
-    fn park_gone_meas(&mut self, names: &BTreeMap<MeasId, String>, gone: impl Fn(MeasId) -> bool) {
-        for (pane, v) in &mut self.layout.views {
-            if let Some(id) = v.meas.filter(|id| gone(*id)) {
-                v.meas = None;
-                if let Some(n) = names.get(&id) {
-                    self.pending.pane_meas.insert(*pane, n.clone());
-                }
-            }
-        }
-        // Hidden ones wait by name as a pane's measurement does, unless one
-        // that stays has that name: it is another measurement, and the choice was not its.
-        let staying: BTreeSet<String> = self
-            .measurements()
-            .iter()
-            .filter(|m| !gone(m.id))
-            .map(|m| m.config.name.clone())
-            .collect();
-        let pending = &mut self.pending.hidden;
-        self.hidden_meas.retain(|id| {
-            if !gone(*id) {
-                return true;
-            }
-            if let Some(n) = names.get(id).filter(|n| !staying.contains(*n)) {
-                pending.insert(n.clone());
-            }
-            false
+    /// The link lost the daemon: nothing it mirrored or was asked holds any more.
+    pub(super) fn failed(&mut self, target: String, error: String) {
+        self.conn = ConnState::Failed { target, error };
+        self.forget_layout_calls();
+        self.pending.select = None;
+        self.pending.stack = None;
+        self.mirror = None;
+        self.data = None;
+        self.stimulus.phase = StimPhase::Idle;
+        self.stimulus.arm_after_stop = false;
+    }
+
+    /// Drops what is kept by an id the mirror no longer lists: live edits, folds, fetched
+    /// traces, the selected trace. `reborn`: another daemon numbers afresh, so no fold
+    /// carries over; `keep`: a measurement made here, not listed yet.
+    pub(super) fn keep_listed(&mut self, reborn: bool, keep: Option<MeasId>) {
+        let ids: Vec<MeasId> = self.measurements().iter().map(|m| m.id).collect();
+        self.edits.retain(|k, _| ids.contains(k));
+        // A fold belongs to the measurement folded: one listed later under its id
+        // (a session loaded, a daemon numbering afresh) starts unfolded.
+        self.collapsed.retain(|g| match g {
+            TraceOwner::Meas { meas } => !reborn && (ids.contains(meas) || Some(*meas) == keep),
+            TraceOwner::Imported => true,
         });
-        if let Some(id) = self.selected.filter(|id| gone(*id)) {
-            // A stand-in going leaves the operator's choice waiting.
-            if self.standin != Some(id)
-                && let Some(n) = names.get(&id)
-            {
-                self.lost_selection = Some(n.clone());
-                self.lost_own_panes = self.own_panes == Some(id);
+        let metas: BTreeMap<TraceId, TraceMeta> = self
+            .daemon()
+            .map(|st| st.traces.iter().map(|t| (t.id, t.clone())).collect())
+            .unwrap_or_default();
+        // Fetched data keeps its columns; its metadata follows the mirror (edits,
+        // visibility and slots change by event). The smoothing stays the one the
+        // columns were served with until the re-smoothed data arrives.
+        self.traces.retain(|k, _| metas.contains_key(k));
+        for (id, (data, _)) in &mut self.traces {
+            if let Some(m) = metas.get(id) {
+                follow_meta(data, m);
             }
-            self.selected = None;
-            self.standin = None;
         }
-        if self.chosen.is_some_and(&gone) {
-            self.chosen = None;
-        }
-        // Its panes stay on screen, nobody's own until a row is chosen.
-        if self.own_panes.is_some_and(&gone) {
-            self.own_panes = None;
+        if self.selected_trace.is_some_and(|t| !metas.contains_key(&t)) {
+            self.selected_trace = None;
         }
     }
 
-    /// The selection moved off the stand-in (the operator chose, this app made something),
-    /// or the operator chose the stand-in's row: the selection is theirs again.
-    pub(super) fn follow_standin(&mut self) {
-        if self.own_panes_due || self.selected.is_some_and(|s| Some(s) != self.standin) {
-            self.standin = None;
-            self.lost_selection = None;
-            self.lost_own_panes = false;
+    /// A stored trace's data fetched: kept, with the metadata the mirror holds for it.
+    pub(super) fn keep_trace(&mut self, mut t: Arc<TraceData>, g: Arc<GridDef>) {
+        if let Some(m) = self
+            .daemon()
+            .and_then(|s| s.traces.iter().find(|x| x.id == t.meta.id))
+            .cloned()
+        {
+            follow_meta(&mut t, &m);
         }
-    }
-
-    /// The selection is one this app made by itself.
-    pub(super) fn selection_is_standin(&self) -> bool {
-        self.selected.is_some() && self.selected == self.standin
+        self.traces.insert(t.meta.id, (t, g));
     }
 }

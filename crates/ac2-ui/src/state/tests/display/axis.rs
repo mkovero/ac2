@@ -28,7 +28,7 @@ fn level_axis_zooms_pans_fits_and_resets_per_pane() {
     assert_eq!(r(&t, PaneKind::Spectrum), Range::new(-130.0, -30.0));
     assert_eq!(r(&t, PaneKind::Transfer), before);
     // The mouse: Ctrl+wheel about the pointer, Shift+wheel pans.
-    t.st.update(
+    t.st.apply(
         Msg::LevelZoom {
             pane: t.st.layout.focus,
             about_db: Some(-80.0),
@@ -37,7 +37,7 @@ fn level_axis_zooms_pans_fits_and_resets_per_pane() {
         &t.keys,
     );
     assert_eq!(r(&t, PaneKind::Spectrum), Range::new(-105.0, -55.0));
-    t.st.update(
+    t.st.apply(
         Msg::LevelPan {
             pane: t.st.layout.focus,
             db: 5.0,
@@ -217,7 +217,7 @@ fn a_measurement_picked_on_a_pane_fits_its_first_frame() {
     t.key("Alt+2");
     t.key("Ctrl+I");
     let sp = t.pane(PaneKind::Spectrum);
-    t.st.update(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(4))), &t.keys);
+    t.st.apply(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(4))), &t.keys);
     let zoomed = t.st.level_range(sp);
     // Its first frame is the measurement's first show here, not the other's frame.
     spec_frame(&mut t, 2, vec![0.0, -10.0, -10.0, -10.0, 0.0]);
@@ -226,7 +226,7 @@ fn a_measurement_picked_on_a_pane_fits_its_first_frame() {
     spec_frame(&mut t, 4, other.clone());
     assert_eq!(t.st.level_range(sp), Some(fit_of(&other)));
     // And back: the first one frames again.
-    t.st.update(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(2))), &t.keys);
+    t.st.apply(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(2))), &t.keys);
     let back = vec![0.0, -90.0, -80.0, -70.0, 0.0];
     spec_frame(&mut t, 2, back.clone());
     assert_eq!(t.st.level_range(sp), Some(fit_of(&back)));
@@ -240,7 +240,7 @@ fn zooming_one_split_transfer_pane_leaves_the_other() {
     let mut t = T::new();
     t.st.pane_area = (1000.0, 600.0);
     let first = t.pane(PaneKind::Transfer);
-    t.st.update(Msg::FocusPane(first), &t.keys);
+    t.st.apply(Msg::FocusPane(first), &t.keys);
     let before = t.st.level_range(first).expect("level axis");
     t.key("N");
     let second = t.st.layout.focus;
@@ -254,7 +254,7 @@ fn zooming_one_split_transfer_pane_leaves_the_other() {
         "the first pane's axis moved"
     );
     // The wheel on the first pane is that pane's alone.
-    t.st.update(
+    t.st.apply(
         Msg::LevelZoom {
             pane: first,
             about_db: None,
@@ -283,11 +283,11 @@ fn split_panes_level_axes_are_remembered_each_with_its_pane() {
     let mut t = T::new();
     t.st.pane_area = (1000.0, 600.0);
     let first = t.pane(PaneKind::Transfer);
-    t.st.update(Msg::FocusPane(first), &t.keys);
+    t.st.apply(Msg::FocusPane(first), &t.keys);
     t.key("N");
     let second = t.st.layout.focus;
     t.key("Ctrl+I");
-    t.st.update(Msg::FocusPane(first), &t.keys);
+    t.st.apply(Msg::FocusPane(first), &t.keys);
     t.key("Ctrl+Up");
     let (a, b) = (t.st.level_range(first), t.st.level_range(second));
     assert_ne!(a, b);

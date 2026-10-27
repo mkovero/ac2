@@ -8,7 +8,7 @@ impl SessionDialog {
     /// Fills the backends from `session.devices` and selects one: the open session's, else
     /// the first usable real one, else the first usable (a daemon started on the simulated
     /// rig offers only that).
-    pub fn set_backends(&mut self, list: Vec<BackendInfo>, prefs: &UiPrefs) {
+    pub fn set_backends(&mut self, list: Vec<BackendInfo>, prefs: RigPrefs<'_>) {
         let usable =
             |b: &BackendInfo| b.availability == Availability::Available && !b.devices.is_empty();
         let open = self
@@ -237,7 +237,7 @@ impl SessionDialog {
 
     /// Builds the rows of the chosen device and applies its remembered roles: the
     /// preferences, else the open session (on this device), else defaults.
-    fn load_device(&mut self, prefs: &UiPrefs) {
+    fn load_device(&mut self, prefs: RigPrefs<'_>) {
         self.detect = None;
         self.notice = None;
         self.error = None;
@@ -267,8 +267,7 @@ impl SessionDialog {
         let kind = self.backend_kind().unwrap_or(BackendKind::Fake);
         let key = UiPrefs::device_key(kind, &d.id.0);
         let remembered = prefs
-            .sessions
-            .get(&key)
+            .roles_for(&key)
             .cloned()
             .or_else(|| self.roles_of_open_session());
         self.out_device = remembered
@@ -307,7 +306,7 @@ impl SessionDialog {
 
     /// Another output device was chosen: its rows, with the stimulus outputs last used on
     /// it (none on a device never used) and the session's output count clamped to it.
-    fn change_output(&mut self, to: OutputDevice, prefs: &UiPrefs) {
+    fn change_output(&mut self, to: OutputDevice, prefs: RigPrefs<'_>) {
         self.out_device = to;
         self.detect = None;
         self.notice = None;
@@ -423,7 +422,7 @@ impl SessionDialog {
 
     /// ←/→ on the backend or device row: the next or previous one, stopping at the ends like
     /// every dialog stepper (an end press changes nothing, so the device is not reloaded).
-    pub fn cycle(&mut self, d: i32, prefs: &UiPrefs) {
+    pub fn cycle(&mut self, d: i32, prefs: RigPrefs<'_>) {
         let step = |i: usize, n: usize| (i as i64 + i64::from(d)).clamp(0, n as i64 - 1) as usize;
         match self.focus {
             Row::Backend => {

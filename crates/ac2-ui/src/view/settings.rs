@@ -419,7 +419,7 @@ fn display_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &m
 
 fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Option<Msg>) {
     let st = &app.state;
-    let (target, state, server) = match &st.conn {
+    let (target, state, server) = match &st.rig.conn {
         ConnState::Connecting { target } => (target.as_str(), "connecting…", None),
         ConnState::Connected { target, server, .. } => {
             (target.as_str(), "connected", Some(server.as_str()))

@@ -128,7 +128,7 @@ impl AppState {
             layout: self.layout.clone(),
             fullscreen: self.fullscreen,
             panes_only: self.panes_only,
-            own_panes: self.own_panes,
+            own_panes: self.rig.own_panes,
         }
     }
 
@@ -200,7 +200,10 @@ impl AppState {
         let Some(edit) = self.edit_of(&w, ran) else {
             return;
         };
-        let owner = self.own_panes.filter(|o| self.history.stored.contains(o));
+        let owner = self
+            .rig
+            .own_panes
+            .filter(|o| self.history.stored.contains(o));
         self.history.push(Step {
             before: w.before,
             after,
@@ -253,9 +256,12 @@ impl AppState {
                         (true, false) => ScreenStep::Window,
                     }),
                     C::NextInTree | C::PrevInTree => {
-                        let item = match self.selected_trace {
+                        let item = match self.rig.selected_trace {
                             Some(t) => self.row_name(TreeKey::Trace(t)),
-                            None => self.selected.and_then(|m| self.row_name(TreeKey::Meas(m))),
+                            None => self
+                                .rig
+                                .selected
+                                .and_then(|m| self.row_name(TreeKey::Meas(m))),
                         };
                         put(item.unwrap_or_default(), focus)
                     }
@@ -303,7 +309,10 @@ impl AppState {
         if after.same_screen(&before) {
             return;
         }
-        let owner = self.own_panes.filter(|o| self.history.stored.contains(o));
+        let owner = self
+            .rig
+            .own_panes
+            .filter(|o| self.history.stored.contains(o));
         self.history.push(Step {
             before,
             after,
@@ -347,7 +356,8 @@ impl AppState {
                 v.meas = None;
             }
         }
-        self.pending
+        self.rig
+            .pending
             .pane_meas
             .retain(|p, _| self.layout.views.contains_key(p));
         if matches!(self.overlay, Overlay::PaneMenu(m) if !self.layout.views.contains_key(&m.pane))
@@ -356,12 +366,12 @@ impl AppState {
         }
         self.fullscreen = s.fullscreen;
         self.panes_only = s.panes_only;
-        self.own_panes = s.own_panes.filter(|m| ids.contains(m));
+        self.rig.own_panes = s.own_panes.filter(|m| ids.contains(m));
         if !self.spectrograph_shown() {
-            self.spectrographs.clear();
+            self.rig.spectrographs.clear();
             self.view.spectrum.spectrograph.cursor_s = None;
         }
-        if let Some(o) = owner.filter(|o| self.own_panes == Some(*o)) {
+        if let Some(o) = owner.filter(|o| self.rig.own_panes == Some(*o)) {
             self.store_layout(o, out);
         }
     }

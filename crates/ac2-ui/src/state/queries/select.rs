@@ -6,7 +6,7 @@ impl AppState {
     /// The trace selection alone, every pane keeping what it shows: a sweep selected is
     /// also what the sweep pane shows.
     pub(in crate::state) fn set_selected_trace(&mut self, id: Option<TraceId>) {
-        self.selected_trace = id;
+        self.rig.selected_trace = id;
         if let Some(id) = id
             && self.daemon().is_some_and(|s| {
                 s.traces
@@ -14,12 +14,12 @@ impl AppState {
                     .any(|t| t.id == id && t.kind == TraceKind::Sweep)
             })
         {
-            self.sweep.shown = Some(id);
+            self.rig.sweep.shown = Some(id);
         }
     }
 
     pub(in crate::state) fn set_finder(&mut self, f: FinderChoice) {
-        self.finder = f;
+        self.rig.finder = f;
         self.toast(format!("delay finder: {} · X finds", f.describe()));
     }
 
@@ -39,7 +39,7 @@ impl AppState {
         };
         let f = FinderChoice {
             observation,
-            ..self.finder
+            ..self.rig.finder
         };
         if let Some(o) = observation
             && f.sub_like()
@@ -112,14 +112,15 @@ impl AppState {
         let Some(dev) = dev else {
             return;
         };
-        if self.stim_device.as_ref() == Some(&dev) || self.stimulus.phase != StimPhase::Idle {
+        if self.rig.stim_device.as_ref() == Some(&dev) || self.rig.stimulus.phase != StimPhase::Idle
+        {
             return;
         }
-        self.stimulus.outputs = self
+        self.rig.stimulus.outputs = self
             .prefs
-            .outputs_for(&dev)
+            .outputs_for(self.rig.id, &dev)
             .map_or_else(|| vec![0], <[u16]>::to_vec);
-        self.stim_device = Some(dev);
+        self.rig.stim_device = Some(dev);
     }
 
     pub(in crate::state) fn need_meas(
@@ -268,10 +269,10 @@ impl AppState {
         // stays.
         if kind == PaneKind::Spectrum {
             if !self.spectrograph_shown() {
-                self.spectrographs.clear();
+                self.rig.spectrographs.clear();
                 self.view.spectrum.spectrograph.cursor_s = None;
-            } else if !before && let Some(d) = self.data.clone() {
-                self.fold_spectrographs(&d);
+            } else if !before && let Some(d) = self.rig.data.clone() {
+                self.rig.fold_spectrographs(&d);
             }
         }
     }
@@ -294,9 +295,9 @@ impl AppState {
                 if let Some(m) = self.meas(id) {
                     // A math channel's curve is its own row; a measurement's is its live row.
                     let live = ac2_scene::meas_list::has_live_curve(&m.config.kind);
-                    self.selected = Some(id);
-                    self.selected_trace = None;
-                    self.selected_live = live.then_some(id);
+                    self.rig.selected = Some(id);
+                    self.rig.selected_trace = None;
+                    self.rig.selected_live = live.then_some(id);
                 }
             }
         }
@@ -313,7 +314,7 @@ impl AppState {
         let f = self.layout.focus;
         self.set_pane_kind(f, kind);
         self.select_on(f, id);
-        self.own_panes_due = true;
+        self.rig.own_panes_due = true;
     }
 
     /// A measurement's live-curve row chosen (click, Tab): a child row, selected so the keys
@@ -323,9 +324,9 @@ impl AppState {
         if self.meas(id).is_none() {
             return;
         }
-        self.selected = Some(id);
-        self.selected_trace = None;
-        self.selected_live = Some(id);
+        self.rig.selected = Some(id);
+        self.rig.selected_trace = None;
+        self.rig.selected_live = Some(id);
     }
 
     /// A math channel's row chosen (click, Tab): a child row of its owner, selected so the
@@ -334,9 +335,9 @@ impl AppState {
         if self.meas(id).is_none() {
             return;
         }
-        self.selected = Some(id);
-        self.selected_trace = None;
-        self.selected_live = None;
+        self.rig.selected = Some(id);
+        self.rig.selected_trace = None;
+        self.rig.selected_live = None;
     }
 
     /// A stored trace's row chosen (click, Tab): a child row, the trace selected so the trace
@@ -390,10 +391,10 @@ impl AppState {
             self.warn("no measurements to step through");
             return;
         }
-        let at = match self.selected_trace {
+        let at = match self.rig.selected_trace {
             Some(t) => Some(Stop::Trace(t)),
-            None if self.live_row_selected() => self.selected.map(Stop::Live),
-            None => self.selected.map(Stop::Meas),
+            None if self.live_row_selected() => self.rig.selected.map(Stop::Live),
+            None => self.rig.selected.map(Stop::Meas),
         }
         .and_then(|s| {
             all.iter().position(|x| {
@@ -450,10 +451,10 @@ impl AppState {
         if self.layout.view(p).is_none() {
             return;
         }
-        self.selected = Some(id);
-        self.chosen = Some(id);
-        self.selected_trace = None;
-        self.selected_live = None;
+        self.rig.selected = Some(id);
+        self.rig.chosen = Some(id);
+        self.rig.selected_trace = None;
+        self.rig.selected_live = None;
         if let Some(v) = self.layout.view_mut(p) {
             v.meas = Some(id);
         }

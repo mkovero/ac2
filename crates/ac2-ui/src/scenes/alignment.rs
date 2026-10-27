@@ -72,7 +72,7 @@ pub fn alignment(
     }
     let grid = tf.and_then(|f| {
         let g = f.frame.stamp.grid_id?;
-        st.data.as_ref()?.grids.get(&g).map(|g| columns(g))
+        st.rig.data.as_ref()?.grids.get(&g).map(|g| columns(g))
     });
     let shown = tf.zip(grid).and_then(|(f, cols)| {
         let FrameData::Tf(t) = &f.frame.data else {

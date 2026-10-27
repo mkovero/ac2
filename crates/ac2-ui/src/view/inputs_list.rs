@@ -79,7 +79,7 @@ pub(super) fn inputs(app: &App, ui: &mut egui::Ui, ch: &Chrome) -> Option<Msg> {
     let row_w = ui.available_width();
     let mut msg = None;
     for r in &rows {
-        let picked = app.state.input_pick == Some(r.channel);
+        let picked = app.state.rig.input_pick == Some(r.channel);
         let Some(p) = app
             .state
             .row_meters(r.channel)

@@ -46,11 +46,32 @@ impl SpecGlide {
 }
 
 impl AppState {
+    /// Some live curve still glides to its newest frame at `now`.
+    pub fn spectrum_gliding(&self, now: Instant) -> bool {
+        self.prefs.spec_ease
+            && self.rig.spec_glide.iter().any(|(t, g)| {
+                self.rig
+                    .data
+                    .as_ref()
+                    .and_then(|d| d.latest.get(t))
+                    .is_some_and(|tf| {
+                        tf.frame.stamp.seq == g.to_seq
+                            && curve_ease::progress(
+                                now.saturating_duration_since(g.start).as_secs_f64(),
+                                g.duration_s,
+                            )
+                            .is_some()
+                    })
+            })
+    }
+}
+
+impl RigState {
     /// Starts each live curve's glide to a new frame from where it is drawn now. A frame
     /// from another session, daemon, configuration or grid is not the same curve moving: it
     /// is drawn as received.
-    pub(super) fn keep_spec_glide(&mut self, d: &DataSnapshot) {
-        if !self.prefs.spec_ease {
+    pub(super) fn keep_spec_glide(&mut self, d: &DataSnapshot, spec_ease: bool) {
+        if !spec_ease {
             self.spec_glide.clear();
             self.spec_pacing.clear();
             return;
@@ -114,23 +135,5 @@ impl AppState {
                 },
             );
         }
-    }
-
-    /// Some live curve still glides to its newest frame at `now`.
-    pub fn spectrum_gliding(&self, now: Instant) -> bool {
-        self.prefs.spec_ease
-            && self.spec_glide.iter().any(|(t, g)| {
-                self.data
-                    .as_ref()
-                    .and_then(|d| d.latest.get(t))
-                    .is_some_and(|tf| {
-                        tf.frame.stamp.seq == g.to_seq
-                            && curve_ease::progress(
-                                now.saturating_duration_since(g.start).as_secs_f64(),
-                                g.duration_s,
-                            )
-                            .is_some()
-                    })
-            })
     }
 }

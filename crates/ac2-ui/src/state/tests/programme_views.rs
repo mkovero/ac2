@@ -23,10 +23,10 @@ fn mode(t: &T, p: PaneId) -> M {
 
 /// P on the Inputs row of input `c`, the row left unpicked so the pane's keys act.
 fn open_row(t: &mut T, c: u16) {
-    t.st.update(Msg::InputPick(c), &t.keys);
+    t.st.apply(Msg::InputPick(c), &t.keys);
     t.key("P");
-    if t.st.input_pick.is_some() {
-        t.st.update(Msg::InputPick(c), &t.keys);
+    if t.st.rig.input_pick.is_some() {
+        t.st.apply(Msg::InputPick(c), &t.keys);
     }
 }
 
@@ -116,11 +116,11 @@ fn the_list_resets_the_view_and_the_edit_form_keeps_it() {
     open_row(&mut t, 2);
     let p = t.st.layout.focus;
     t.key("G");
-    t.st.update(Msg::Command(CommandId::EditMeas), &t.keys);
+    t.st.apply(Msg::Command(CommandId::EditMeas), &t.keys);
     t.key("Enter");
     assert_eq!(t.st.overlay, Overlay::None);
     assert_eq!(mode(&t, p), M::Goniometer, "the form keeps the view");
-    t.st.update(Msg::PanePick(p, PaneMenuRow::Meter(PAIR)), &t.keys);
+    t.st.apply(Msg::PanePick(p, PaneMenuRow::Meter(PAIR)), &t.keys);
     assert_eq!(mode(&t, p), M::Meters, "the list opens on the bars");
 }
 
@@ -131,7 +131,7 @@ fn the_forms_ember_decay_is_this_apps_setting() {
     let was = t.st.prefs.ember_decay_s;
     for (close, kept) in [("Escape", false), ("Enter", true)] {
         t.key("Ctrl+M");
-        t.st.update(Msg::Choose(Some(7)), &t.keys);
+        t.st.apply(Msg::Choose(Some(7)), &t.keys);
         let Overlay::Form(f) = &t.st.overlay else {
             panic!("no form: {:?}", t.st.overlay)
         };
@@ -160,7 +160,7 @@ fn the_forms_ember_glow_is_this_apps_setting() {
     let mut t = meter_t();
     for (close, want) in [("Escape", 1.0), ("Enter", 1.5)] {
         t.key("Ctrl+M");
-        t.st.update(Msg::Choose(Some(7)), &t.keys);
+        t.st.apply(Msg::Choose(Some(7)), &t.keys);
         let Overlay::Form(f) = &t.st.overlay else {
             panic!("no form: {:?}", t.st.overlay)
         };
@@ -186,17 +186,18 @@ fn a_rings_capacity_follows_the_decay() {
     let mut t = T::new();
     t.conn(mirror(rig_with_pair()));
     t.st.prefs.ember_decay_s = 0.4;
-    t.st.programme
+    t.st.rig
+        .programme
         .rings
         .insert((2, 3), EmberRing::new(ring_capacity(Cooling::default())));
     t.st.prefs.ember_decay_s = 2.0;
     t.tick(1.0);
     let cap = |decay, glow| ring_capacity(Cooling::new(decay, glow));
-    assert_eq!(t.st.programme.rings[&(2, 3)].capacity(), cap(2.0, 1.0));
+    assert_eq!(t.st.rig.programme.rings[&(2, 3)].capacity(), cap(2.0, 1.0));
     // A hotter glow lives longer: the ring grows for it too.
     t.st.prefs.ember_glow = 4.0;
     t.tick(1.0);
-    assert_eq!(t.st.programme.rings[&(2, 3)].capacity(), cap(2.0, 4.0));
+    assert_eq!(t.st.rig.programme.rings[&(2, 3)].capacity(), cap(2.0, 4.0));
 }
 
 /// The docked loudness plate's first drag starts where it was docked, at the size it was
@@ -229,13 +230,13 @@ fn a_docked_plate_floats_on_its_first_drag() {
         },
         PlateMsg::End,
     ] {
-        t.st.update(Msg::Plate(m), &t.keys);
+        t.st.apply(Msg::Plate(m), &t.keys);
     }
     let l = t.st.layout.view(pane).expect("pane").plates.loudness;
     assert_eq!((l.at, l.scale()), (Some([0.5, 0.4]), 2.0));
     assert_eq!(t.st.history.undo_len(), steps + 1);
-    t.st.update(Msg::Plate(PlateMsg::Reset { pane, kind }), &t.keys);
-    t.st.update(Msg::Plate(PlateMsg::End), &t.keys);
+    t.st.apply(Msg::Plate(PlateMsg::Reset { pane, kind }), &t.keys);
+    t.st.apply(Msg::Plate(PlateMsg::End), &t.keys);
     let l = t.st.layout.view(pane).expect("pane").plates.loudness;
     assert_eq!((l.at, l.scale()), (None, 1.0), "docked again");
 }

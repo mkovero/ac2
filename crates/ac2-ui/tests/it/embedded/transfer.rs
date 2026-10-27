@@ -20,10 +20,10 @@ fn windows_leave_the_stimulus_alone_and_the_stop_chord_stops_from_one() -> R {
     measure_from_empty(&mut d)?;
     // The level typed there stays: arm and fire.
     d.key("Space");
-    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
     d.key("Enter");
     d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
-    let level = d.st.stimulus.level;
+    let level = d.st.rig.stimulus.level;
     let playing = |s: &AppState| {
         s.daemon()
             .is_some_and(|x| x.generator.firing && x.generator.armed)
@@ -67,8 +67,8 @@ fn windows_leave_the_stimulus_alone_and_the_stop_chord_stops_from_one() -> R {
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(playing(&d.st), "the windows touched the stimulus");
-    assert_eq!(d.st.stimulus.level, level);
-    assert_eq!(d.st.stimulus.phase, StimPhase::Firing);
+    assert_eq!(d.st.rig.stimulus.level, level);
+    assert_eq!(d.st.rig.stimulus.phase, StimPhase::Firing);
 
     // The stop chord from inside a window: stopped, the window still open.
     d.key("H");
@@ -173,7 +173,7 @@ fn stopping_the_last_transfer_stops_the_noise_from_the_app() -> R {
     })?;
     d.key("Space");
     d.until("armed and its reminder", |s| {
-        s.stimulus.phase == StimPhase::Armed
+        s.rig.stimulus.phase == StimPhase::Armed
             && no_reference(s).as_deref() == Some("stimulus armed: Enter starts it")
     })?;
     d.key("Enter");
@@ -188,7 +188,7 @@ fn stopping_the_last_transfer_stops_the_noise_from_the_app() -> R {
     d.st.toasts.list.clear();
     d.key("S");
     d.until("the measurement and the noise stopped", |s| {
-        s.stimulus.phase == StimPhase::Idle
+        s.rig.stimulus.phase == StimPhase::Idle
             && s.meas(m.id).is_some_and(|x| !x.running)
             && s.daemon().is_some_and(|x| {
                 !x.generator.firing && !x.generator.armed && x.generator.owner.is_none()
@@ -227,7 +227,7 @@ fn the_ir_pane_zooms_pans_and_reads_from_the_mouse() -> R {
     d.key("Alt+3");
     // The level typed before is kept: Space arms, Enter fires.
     d.key("Space");
-    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
     d.key("Enter");
     d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
     // The rig's −6 dB path: an arrival of about 0.5 FS.
@@ -317,7 +317,7 @@ fn delay_nudges_from_the_keys_keep_the_curve() -> R {
     let m = d.st.selected_meas().cloned().ok_or("measurement")?;
     // The level typed there stays: arm and fire.
     d.key("Space");
-    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
     d.key("Enter");
     d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
     d.tf_frames(m.id, 240)?;
@@ -346,7 +346,7 @@ fn delay_nudges_from_the_keys_keep_the_curve() -> R {
         stream: Stream::Tf,
     };
     d.until("a frame at the new delay, 1 kHz still valid", |s| {
-        s.data.as_ref().is_some_and(|x| {
+        s.rig.data.as_ref().is_some_and(|x| {
             x.latest.get(&topic).is_some_and(|f| match &f.frame.data {
                 FrameData::Tf(tf) => {
                     (tf.meta.delay.0 - secs).abs() < 1e-12
@@ -473,7 +473,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     d.send(Msg::PanePick(f, ac2_ui::state::PaneMenuRow::Meas(m.id)));
     // The chip leaves the selection on the sweep; the measurement's row selects it.
     d.send(Msg::SelectMeas(m.id));
-    assert_eq!(d.st.selected, Some(m.id));
+    assert_eq!(d.st.rig.selected, Some(m.id));
     let running = |s: &AppState| {
         s.daemon()
             .is_some_and(|x| x.measurements.iter().any(|y| y.id == m.id && y.running))
@@ -487,7 +487,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     })?;
     // The level typed before stays: arm and fire.
     d.key("Space");
-    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
     d.key("Enter");
     d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
     d.tf_frames(m.id, 240)?;
@@ -501,8 +501,8 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
             .and_then(|x| x.traces.iter().find(|t| t.edit.slot == Some(1)))
             .map(|t| t.id)
             .ok_or("capture")?;
-    d.until("the capture's data", |s| s.traces.contains_key(&cap))?;
-    d.until("the run's data", |s| s.traces.contains_key(&run))?;
+    d.until("the capture's data", |s| s.rig.traces.contains_key(&cap))?;
+    d.until("the run's data", |s| s.rig.traces.contains_key(&run))?;
     let live = TraceKey::Live(m.id);
     let before = drawn_phase(&d.st, 240);
     let live_before = drawn_curve(&d.st, live);
@@ -529,7 +529,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     };
     let rate = f64::from(d.st.open_session().ok_or("session")?.sample_rate_hz);
     d.until("a frame at the new delay", |s| {
-        s.data.as_ref().is_some_and(|x| {
+        s.rig.data.as_ref().is_some_and(|x| {
             x.latest.get(&topic).is_some_and(|f| match &f.frame.data {
                 FrameData::Tf(tf) => (tf.meta.delay.0 - want / rate).abs() < 1e-9,
                 _ => false,
@@ -572,7 +572,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
         cap2.edit
     );
     d.until("the second capture's data", |s| {
-        s.traces.contains_key(&cap2.id)
+        s.rig.traces.contains_key(&cap2.id)
     })?;
     let with2 = drawn_phase(&d.st, 240);
     let off = wrap(phase_of(&with2, TraceKey::Stored(cap2.id)) - phase_of(&with2, live));
@@ -582,12 +582,12 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     );
     // The same direction as `.` on the stored capture: a 0.1 ms step leads by 36°.
     for _ in 0..6 {
-        if d.st.selected_trace == Some(cap) {
+        if d.st.rig.selected_trace == Some(cap) {
             break;
         }
         d.send(Msg::Command(CommandId::NextTrace));
     }
-    assert_eq!(d.st.selected_trace, Some(cap));
+    assert_eq!(d.st.rig.selected_trace, Some(cap));
     let pre = drawn_phase(&d.st, 240);
     let n0 =
         d.st.daemon()
@@ -615,7 +615,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     // The pane's chip gives it the sweep's group (V only selects the run), so the live curve
     // is compared onto it first.
     d.send(Msg::SelectMeas(m.id));
-    assert_eq!(d.st.selected_trace, None);
+    assert_eq!(d.st.rig.selected_trace, None);
     let sweep =
         d.st.trace_meta(run)
             .ok()
@@ -643,12 +643,12 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
         })
     })?;
     for _ in 0..8 {
-        if d.st.selected_trace == Some(run) {
+        if d.st.rig.selected_trace == Some(run) {
             break;
         }
         d.send(Msg::Command(CommandId::NextTrace));
     }
-    assert_eq!(d.st.selected_trace, Some(run));
+    assert_eq!(d.st.rig.selected_trace, Some(run));
     assert_eq!(
         d.st.kind_meas(PaneKind::Transfer).map(|x| x.id),
         Some(m.id),
@@ -657,7 +657,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     let tf = crate::common::pane(&d.st, PaneKind::Transfer);
     d.send(Msg::PanePick(tf, ac2_ui::state::PaneMenuRow::Meas(sweep)));
     assert_eq!(
-        d.st.selected_trace,
+        d.st.rig.selected_trace,
         Some(run),
         "the chip keeps the selection"
     );
@@ -672,7 +672,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
         d.key("Ctrl+,");
     }
     d.until("a frame back at the first delay", |s| {
-        s.data.as_ref().is_some_and(|x| {
+        s.rig.data.as_ref().is_some_and(|x| {
             x.latest.get(&topic).is_some_and(|f| match &f.frame.data {
                 FrameData::Tf(tf) => (tf.meta.delay.0 - a0 / rate).abs() < 1e-9,
                 _ => false,
@@ -744,7 +744,7 @@ fn a_typed_delay_moves_only_its_live_curve() -> R {
     }
     d.until("running", running)?;
     d.key("Space");
-    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
     d.key("Enter");
     d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
     d.tf_frames(m.id, 240)?;
@@ -758,7 +758,7 @@ fn a_typed_delay_moves_only_its_live_curve() -> R {
             .and_then(|x| x.traces.iter().find(|t| t.edit.slot == Some(1)))
             .map(|t| t.id)
             .ok_or("capture")?;
-    d.until("the capture's data", |s| s.traces.contains_key(&cap))?;
+    d.until("the capture's data", |s| s.rig.traces.contains_key(&cap))?;
     let live = TraceKey::Live(m.id);
     let delay = |s: &AppState| {
         s.daemon()
@@ -788,7 +788,7 @@ fn a_typed_delay_moves_only_its_live_curve() -> R {
         stream: Stream::Tf,
     };
     d.until("a frame at the typed delay", |s| {
-        s.data.as_ref().is_some_and(|x| {
+        s.rig.data.as_ref().is_some_and(|x| {
             x.latest.get(&topic).is_some_and(|f| match &f.frame.data {
                 FrameData::Tf(tf) => (tf.meta.delay.0 - want / rate).abs() < 1e-9,
                 _ => false,
@@ -821,12 +821,12 @@ fn a_typed_delay_moves_only_its_live_curve() -> R {
     // Plain `.` on the measurement steps the same one delay by 0.1 ms, through the daemon:
     // the live curve alone moves, by 0.1 ms worth of samples.
     d.send(Msg::Command(CommandId::SelectLive));
-    assert_eq!(d.st.selected_trace, None);
+    assert_eq!(d.st.rig.selected_trace, None);
     let step = 0.000_1 * rate;
     let want = st.applied_samples + step;
     d.key(".");
     d.until("a frame 0.1 ms later", |s| {
-        s.data.as_ref().is_some_and(|x| {
+        s.rig.data.as_ref().is_some_and(|x| {
             x.latest.get(&topic).is_some_and(|f| match &f.frame.data {
                 FrameData::Tf(tf) => (tf.meta.delay.0 - want / rate).abs() < 1e-9,
                 _ => false,

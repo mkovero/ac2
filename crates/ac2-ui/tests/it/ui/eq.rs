@@ -5,7 +5,7 @@ use super::*;
 
 fn has_prediction(app: &App) -> bool {
     live_with(app, 5)
-        && app.state.data.as_ref().is_some_and(|d| {
+        && app.state.rig.data.as_ref().is_some_and(|d| {
             d.latest
                 .get(&Topic::Data {
                     meas: MeasId(6),

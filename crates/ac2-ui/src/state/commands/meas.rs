@@ -131,7 +131,7 @@ impl AppState {
                             self.name_transfer(&mut f);
                         }
                         self.overlay = Overlay::Form(Box::new(f));
-                        if self.devices.is_none() {
+                        if self.rig.devices.is_none() {
                             // Channel names arrive with the device list.
                             out.push(Request::Devices);
                         }
@@ -229,8 +229,8 @@ impl AppState {
             C::MoveTrace => self.ask_move(),
             C::ToggleGroup => match self.selected_group() {
                 Some(g) => {
-                    if !self.collapsed.remove(&g) {
-                        self.collapsed.insert(g);
+                    if !self.rig.collapsed.remove(&g) {
+                        self.rig.collapsed.insert(g);
                     }
                 }
                 None => self.warn(self.select_meas_first()),
@@ -302,7 +302,7 @@ impl AppState {
                 });
             }
             C::FinderCustom => {
-                let text = match self.finder.band {
+                let text = match self.rig.finder.band {
                     FinderBand::Custom { lo_hz, hi_hz } => format!("{}-{}", lo_hz.0, hi_hz.0),
                     _ => String::new(),
                 };
@@ -310,6 +310,7 @@ impl AppState {
             }
             C::FinderObservation => {
                 let text = self
+                    .rig
                     .finder
                     .observation
                     .map(|o| o.0.to_string())

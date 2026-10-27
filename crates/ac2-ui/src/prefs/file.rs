@@ -39,10 +39,10 @@ struct File {
     theme: Option<ThemeFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     record_limit_min: Option<u32>,
-    /// One-based channels per device id.
+    /// One-based channels per `<rig id>/<device id>` ([`rig_key`]).
     #[serde(default)]
     stimulus_outputs: BTreeMap<String, Vec<u32>>,
-    /// Per `backend/device id`.
+    /// Per `<rig id>/<backend>/<device id>` ([`rig_key`]).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     sessions: BTreeMap<String, RolesFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -691,9 +691,21 @@ impl RolesFile {
 }
 
 impl UiPrefs {
-    /// The outputs remembered for `device`.
-    pub fn outputs_for(&self, device: &str) -> Option<&[u16]> {
-        self.outputs.get(device).map(Vec::as_slice)
+    /// The outputs remembered for `device` of `rig`.
+    pub fn outputs_for(&self, rig: RigId, device: &str) -> Option<&[u16]> {
+        self.outputs
+            .get(&(rig, device.to_owned()))
+            .map(Vec::as_slice)
+    }
+
+    /// The session dialog choices remembered for `key` ([`Self::device_key`]) of `rig`.
+    pub fn roles_for(&self, rig: RigId, key: &str) -> Option<&DeviceRoles> {
+        self.sessions.get(&(rig, key.to_owned()))
+    }
+
+    /// What is remembered for `rig`'s devices.
+    pub fn of_rig(&self, rig: RigId) -> RigPrefs<'_> {
+        RigPrefs { prefs: self, rig }
     }
 
     /// Key of a device in [`UiPrefs::sessions`]: `fake/fake:loop`, `coreaudio/hw:UMC1820`.
@@ -719,7 +731,9 @@ impl UiPrefs {
         for (device, chans) in f.stimulus_outputs {
             match zeros(&chans) {
                 Some(z) if !z.is_empty() => {
-                    outputs.insert(device, z);
+                    if let Some(k) = parse_rig_key(&device) {
+                        outputs.insert(k, z);
+                    }
                 }
                 _ => {
                     return Err(format!(
@@ -733,7 +747,9 @@ impl UiPrefs {
             let roles = r.parse().ok_or_else(|| {
                 format!("ui.toml: session choices of {device:?} must be channels from 1")
             })?;
-            sessions.insert(device, roles);
+            if let Some(k) = parse_rig_key(&device) {
+                sessions.insert(k, roles);
+            }
         }
         let leq = f.leq.map_or_else(LeqLayout::default, |l| LeqLayout {
             style: match l.style {
@@ -872,12 +888,12 @@ impl UiPrefs {
             stimulus_outputs: self
                 .outputs
                 .iter()
-                .map(|(d, o)| (d.clone(), ones(o)))
+                .map(|(k, o)| (rig_key(k), ones(o)))
                 .collect(),
             sessions: self
                 .sessions
                 .iter()
-                .map(|(d, r)| (d.clone(), RolesFile::from_roles(r)))
+                .map(|(k, r)| (rig_key(k), RolesFile::from_roles(r)))
                 .collect(),
             leq: (self.leq != LeqLayout::default()).then_some(LeqFile {
                 style: match self.leq.style {
@@ -931,4 +947,22 @@ impl UiPrefs {
         ac2_paths::write_private_atomic(path, self.to_toml().as_bytes())
             .map_err(|e| format!("cannot save {}: {e}", path.display()))
     }
+}
+
+/// The file's key of a device remembered for a rig: the rig's id (16 hex digits) and the
+/// device's key, `000000000000fa4e/jack:system`. Keys are strings in TOML.
+fn rig_key((rig, device): &(RigId, String)) -> String {
+    format!("{rig}/{device}")
+}
+
+/// A key written by [`rig_key`]. A key without a rig (written before devices were
+/// remembered per rig) names no rig's device, so it is dropped, and the next save leaves
+/// it out.
+fn parse_rig_key(key: &str) -> Option<(RigId, String)> {
+    let (rig, device) = key.split_once('/')?;
+    if rig.len() != 16 {
+        return None;
+    }
+    let id = u64::from_str_radix(rig, 16).ok().filter(|n| *n != 0)?;
+    Some((RigId(id), device.to_owned()))
 }

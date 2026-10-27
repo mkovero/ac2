@@ -69,7 +69,7 @@ fn to_field(t: &mut T, id: FieldId) {
 
 fn open_from_chooser(t: &mut T) {
     t.key("Ctrl+M");
-    t.st.update(Msg::Choose(Some(7)), &t.keys);
+    t.st.apply(Msg::Choose(Some(7)), &t.keys);
 }
 
 fn calls(r: &[Request]) -> Vec<(&Command, &str)> {
@@ -213,7 +213,7 @@ fn edit_on_a_programme_pane_changes_it_in_place() {
     t.key("Enter");
     let p = t.st.layout.focus;
     let panes = t.visible().len();
-    t.st.update(Msg::Command(CommandId::EditMeas), &t.keys);
+    t.st.apply(Msg::Command(CommandId::EditMeas), &t.keys);
     let f = dialog(&t);
     assert_eq!(f.kind, FormKind::ProgrammeEdit);
     assert_eq!(f.kind.verb(), "Apply");
@@ -297,7 +297,7 @@ fn without_inputs_it_says_why() {
         o.config.input_channels.clear();
     }
     t.conn(mirror(s));
-    t.st.update(Msg::Command(CommandId::EditMeas), &t.keys);
+    t.st.apply(Msg::Command(CommandId::EditMeas), &t.keys);
     assert_eq!(t.st.overlay, Overlay::None);
     assert_eq!(t.last_toast(), "no inputs in the session to meter");
 }

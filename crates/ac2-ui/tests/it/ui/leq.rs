@@ -185,7 +185,7 @@ fn leq_tiles_from_an_empty_daemon() {
     let mut h = harness(options_at(Some(fake.endpoints())));
     h.state_mut().state.local_zone = SHOW_ZONE;
     step_until(&mut h, "synced", |a| {
-        a.state.mirror.as_ref().is_some_and(|m| m.synced())
+        a.state.rig.mirror.as_ref().is_some_and(|m| m.synced())
     });
 
     // The session from its dialog.
@@ -438,13 +438,14 @@ fn leq_tiles_from_an_empty_daemon() {
         a.state.toasts.list.clear();
         a.state.local_zone = SHOW_ZONE;
         a.state
+            .rig
             .leq
             .history
             .insert(meas, (u64::MAX, history.clone()));
     };
     let first_is = move |over: bool| {
         move |a: &ac2_ui::App| {
-            a.state.data.as_ref().is_some_and(|d| {
+            a.state.rig.data.as_ref().is_some_and(|d| {
                 d.latest
                     .get(&Topic::Data {
                         meas,
@@ -497,12 +498,12 @@ fn leq_tiles_from_an_empty_daemon() {
     let looking_back = move |a: &mut ac2_ui::App| {
         pin(a);
         let pane = a.state.layout.focus;
-        a.state.leq.strips.insert(pane, (900.0, 2100.0));
-        a.state.leq.cursor = Some((pane, 1850.0));
+        a.state.leq_panes.strips.insert(pane, (900.0, 2100.0));
+        a.state.leq_panes.cursor = Some((pane, 1850.0));
     };
     snapshot_when(&mut h, "leq_tiles_history", looking_back, first_is(true));
-    h.state_mut().state.leq.strips.clear();
-    h.state_mut().state.leq.cursor = None;
+    h.state_mut().state.leq_panes.strips.clear();
+    h.state_mut().state.leq_panes.cursor = None;
 
     // Back under: the 1 min window plain again, the 30 min one near its limit.
     leq.set(leq_frame(
@@ -562,7 +563,7 @@ fn leq_tiles_from_an_empty_daemon() {
     h.key_press(Key::G);
     let held = move |a: &ac2_ui::App| {
         a.state.kind_modes(ac2_ui::state::PaneKind::Spl).spl == ac2_scene::view::SplMode::MeterLeq
-            && a.state.spl_hold.contains_key(&meas)
+            && a.state.rig.spl_hold.contains_key(&meas)
             && first_is(true)(a)
     };
     snapshot_when(&mut h, "spl_meter_leq_stage", pin, held);
@@ -632,10 +633,11 @@ fn leq_tiles_from_an_empty_daemon() {
     let peaked = move |a: &ac2_ui::App| {
         held(a)
             && a.state
+                .rig
                 .spl_hold
                 .get(&meas)
                 .is_some_and(|x| x.frame.meta.position.is_some())
-            && a.state.data.as_ref().is_some_and(|d| {
+            && a.state.rig.data.as_ref().is_some_and(|d| {
                 d.latest
                     .get(&Topic::Data {
                         meas,

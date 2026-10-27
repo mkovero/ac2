@@ -169,7 +169,7 @@ fn band_frame(meas: MeasId, calibrated_at: u64) -> ac2_proto::frame::BandLeqFram
 fn spl_meter_from_an_empty_daemon(h: &mut Harness<'_, App>) -> MeasId {
     use ac2_proto::model::MeasKind;
     step_until(h, "synced", |a| {
-        a.state.mirror.as_ref().is_some_and(|m| m.synced())
+        a.state.rig.mirror.as_ref().is_some_and(|m| m.synced())
     });
     h.key_press_modifiers(Modifiers::SHIFT, Key::O);
     step_until(h, "the session dialog with its devices", |a| {
@@ -361,7 +361,7 @@ fn slow_band_leq_from_an_empty_daemon() {
     h.key_press(Key::W);
     step_until(&mut h, "maximised", |a| a.state.layout.maximized);
     let has_frame = move |a: &ac2_ui::App| {
-        a.state.data.as_ref().is_some_and(|d| {
+        a.state.rig.data.as_ref().is_some_and(|d| {
             d.latest
                 .get(&Topic::Data {
                     meas,
@@ -603,7 +603,7 @@ fn a_single_band_window_with_plus_and_minus() {
         a.state.kind_modes(ac2_ui::state::PaneKind::Spl).spl == ac2_scene::view::SplMode::Bands
     });
     step_until(&mut h, "the band frame", move |a| {
-        a.state.data.as_ref().is_some_and(|d| {
+        a.state.rig.data.as_ref().is_some_and(|d| {
             d.latest
                 .get(&Topic::Data {
                     meas,

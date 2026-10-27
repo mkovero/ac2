@@ -13,7 +13,7 @@ use ac2_proto::frame::{ClipFlags, SessionLevelsFrame, ValidityMask};
 /// the session meters of inputs 0 (reference, `ref_peak` dBFS) and 1 (measurement,
 /// `meas_rms` dBFS RMS).
 fn feed(t: &mut T, now_s: f64, coh: f32, ref_peak: f32, meas_rms: f32) {
-    t.st.update(Msg::Tick { now_s, dt_s: 0.1 }, &t.keys);
+    t.st.apply(Msg::Tick { now_s, dt_s: 0.1 }, &t.keys);
     let mut latest = Latest::default();
     let mut f = ac2_proto::samples::tf_frame();
     if let FrameData::Tf(tf) = &mut f.data {
@@ -120,8 +120,8 @@ fn low_coherence_on_a_quiet_input_advises_raising_capped_by_the_max_level() {
     );
     // Off on the Display page: gone at once, and remembered.
     t.key("Ctrl+P");
-    t.st.update(Msg::Settings(SettingsMsg::Page(Page::Display)), &t.keys);
-    t.st.update(
+    t.st.apply(Msg::Settings(SettingsMsg::Page(Page::Display)), &t.keys);
+    t.st.apply(
         Msg::Settings(SettingsMsg::Display(crate::settings::DisplayRow::Advice, 1)),
         &t.keys,
     );
@@ -153,7 +153,7 @@ fn a_hot_reference_advises_lowering_and_clip_takes_over() {
 fn the_low_level_threshold_is_a_display_setting() {
     let mut t = T::new();
     t.go(PaneKind::Transfer);
-    t.st.update(
+    t.st.apply(
         Msg::Settings(SettingsMsg::Display(
             crate::settings::DisplayRow::AdviceLowLevel,
             -1,

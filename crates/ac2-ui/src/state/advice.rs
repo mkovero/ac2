@@ -10,10 +10,17 @@ use ac2_proto::topic::{Stream, Topic};
 use ac2_scene::advice::{Reading, Stimulus, pane_coherence};
 
 impl AppState {
+    /// The headroom advice to show for `m` on a transfer pane.
+    pub fn advice_of(&self, m: MeasId) -> Option<ac2_scene::advice::Advice> {
+        self.rig.advice.get(&m)?.shown()
+    }
+}
+
+impl RigState {
     /// One step of every running transfer measurement's advice with the newest data; the
     /// advice of a measurement that stopped or went away is dropped.
-    pub(super) fn fold_advice(&mut self, d: &DataSnapshot) {
-        let settings = self.prefs.advice;
+    pub(super) fn fold_advice(&mut self, d: &DataSnapshot, f: &Folding) {
+        let settings = f.advice;
         let meters = d
             .latest
             .get(&Topic::SessionLevels)
@@ -80,14 +87,9 @@ impl AppState {
         }
         self.advice
             .retain(|id, _| readings.iter().any(|(m, _)| m == id));
-        let now = self.now_s;
+        let now = f.now_s;
         for (id, r) in readings {
             self.advice.entry(id).or_default().step(now, &r, &settings);
         }
-    }
-
-    /// The headroom advice to show for `m` on a transfer pane.
-    pub fn advice_of(&self, m: MeasId) -> Option<ac2_scene::advice::Advice> {
-        self.advice.get(&m)?.shown()
     }
 }

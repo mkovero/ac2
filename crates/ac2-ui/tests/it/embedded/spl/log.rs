@@ -156,7 +156,7 @@ fn history_points(s: &AppState) -> Option<(MeasId, Vec<ac2_scene::leq::HistoryPo
     let MeasKind::Spl { config } = &m.config.kind else {
         return None;
     };
-    let (_, h) = s.leq.history.get(&m.id)?;
+    let (_, h) = s.rig.leq.history.get(&m.id)?;
     let p = h.points(config.leq.windows.first()?)?;
     Some((m.id, p.iter().copied().collect()))
 }
@@ -215,7 +215,7 @@ fn slow_a_restarted_app_shows_the_history_from_the_log() -> R {
     let quiet = history_points(&d.st).ok_or("history")?.1[1].leq;
     // The level typed before is kept: Space arms, Enter fires.
     d.key("Space");
-    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
     d.key("Enter");
     d.until("the 1 min window 10 dB up", |s| {
         history_points(s).is_some_and(|(_, p)| p.last().is_some_and(|x| x.leq > quiet + 10.0))
@@ -327,7 +327,14 @@ fn logged(s: &AppState) -> Option<u64> {
         meas: m.id,
         stream: Stream::Leq,
     };
-    match s.data.as_ref()?.latest.get(&topic).map(|f| &f.frame.data) {
+    match s
+        .rig
+        .data
+        .as_ref()?
+        .latest
+        .get(&topic)
+        .map(|f| &f.frame.data)
+    {
         Some(FrameData::Leq(f)) => Some(f.meta.logged),
         _ => None,
     }

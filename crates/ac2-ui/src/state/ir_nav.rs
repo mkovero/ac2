@@ -90,7 +90,7 @@ impl AppState {
     /// trace is what picks it, as it picks the sweep pane's run; with no such trace
     /// selected the view follows its measurement live.
     pub fn stored_ir(&self, shown: Option<&ac2_proto::model::Measurement>) -> Option<&TraceData> {
-        let (d, _) = self.traces.get(&self.selected_trace?)?;
+        let (d, _) = self.rig.traces.get(&self.rig.selected_trace?)?;
         (d.meta.kind == TraceKind::Transfer
             && d.ir.is_some()
             && (self.on_pane(PaneKind::Transfer, &d.meta, shown)

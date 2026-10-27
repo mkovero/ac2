@@ -76,9 +76,9 @@ fn rig() -> T {
 }
 
 fn drop(t: &mut T, dragged: TreeKey, onto: TreeKey) -> Vec<Request> {
-    let mut r = t.st.update(Msg::RowDrag(DragMsg::Start(dragged)), &t.keys);
-    r.extend(t.st.update(Msg::RowDrag(DragMsg::OverRow(Some(onto))), &t.keys));
-    r.extend(t.st.update(Msg::RowDrag(DragMsg::Drop { compare: false }), &t.keys));
+    let mut r = t.st.apply(Msg::RowDrag(DragMsg::Start(dragged)), &t.keys);
+    r.extend(t.st.apply(Msg::RowDrag(DragMsg::OverRow(Some(onto))), &t.keys));
+    r.extend(t.st.apply(Msg::RowDrag(DragMsg::Drop { compare: false }), &t.keys));
     r
 }
 
@@ -113,11 +113,11 @@ const MAIN_L: TraceOwner = TraceOwner::Meas { meas: MeasId(1) };
 fn a_curve_dropped_on_a_trace_opens_the_math_dialog_with_its_reading() {
     // A loudness shift acts on the curve: ×, named as the expression reads.
     let mut t = rig();
-    t.st.update(
+    t.st.apply(
         Msg::RowDrag(DragMsg::Start(TreeKey::Trace(TraceId(12)))),
         &t.keys,
     );
-    t.st.update(
+    t.st.apply(
         Msg::RowDrag(DragMsg::OverRow(Some(TreeKey::Trace(TraceId(10))))),
         &t.keys,
     );
@@ -125,7 +125,7 @@ fn a_curve_dropped_on_a_trace_opens_the_math_dialog_with_its_reading() {
         t.st.drag_label().as_deref(),
         Some("math channel: Main L S1 × loudness 85 → 100 phon")
     );
-    t.st.update(Msg::RowDrag(DragMsg::Drop { compare: false }), &t.keys);
+    t.st.apply(Msg::RowDrag(DragMsg::Drop { compare: false }), &t.keys);
     assert_eq!(
         made(&mut t),
         (
@@ -217,18 +217,18 @@ fn a_trace_dropped_across_measurements_is_listed_with_the_row_dropped_on() {
 #[test]
 fn a_drop_that_does_not_combine_says_why_and_opens_nothing() {
     let mut t = rig();
-    t.st.update(
+    t.st.apply(
         Msg::RowDrag(DragMsg::Start(TreeKey::Live(MeasId(2)))),
         &t.keys,
     );
-    t.st.update(
+    t.st.apply(
         Msg::RowDrag(DragMsg::OverRow(Some(TreeKey::Trace(TraceId(10))))),
         &t.keys,
     );
     let why = "Sub is a spectrum: it does not combine with Main L S1, a transfer function";
     assert_eq!(t.st.drag_label().as_deref(), Some(why));
     assert!(
-        t.st.update(Msg::RowDrag(DragMsg::Drop { compare: false }), &t.keys)
+        t.st.apply(Msg::RowDrag(DragMsg::Drop { compare: false }), &t.keys)
             .is_empty()
     );
     assert_eq!(t.st.overlay, Overlay::None);
@@ -248,14 +248,14 @@ fn a_drop_that_does_not_combine_says_why_and_opens_nothing() {
 #[test]
 fn an_eq_sets_row_opens_and_deletes_the_set() {
     let mut t = rig();
-    t.st.update(Msg::RenameTrace(TraceId(9)), &t.keys);
+    t.st.apply(Msg::RenameTrace(TraceId(9)), &t.keys);
     assert!(
         matches!(&t.st.overlay, Overlay::Eq(e) if e.meas == MeasId(1) && e.set == Some(EqSetId(1))),
         "{:?}",
         t.st.overlay
     );
     t.key("Esc");
-    t.st.update(Msg::SelectTrace(TraceId(9)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(9)), &t.keys);
     t.key("Alt+E");
     assert!(
         matches!(&t.st.overlay, Overlay::Eq(e) if e.set == Some(EqSetId(1))),
@@ -263,7 +263,7 @@ fn an_eq_sets_row_opens_and_deletes_the_set() {
         t.st.overlay
     );
     t.key("Esc");
-    t.st.update(Msg::SelectTrace(TraceId(9)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(9)), &t.keys);
     t.key("Delete");
     let Overlay::Delete(p) = &t.st.overlay else {
         panic!("{:?}", t.st.overlay);
@@ -289,7 +289,7 @@ fn an_eq_sets_row_opens_and_deletes_the_set() {
 #[test]
 fn the_math_dialog_offers_an_eq_set_as_b_only() {
     let mut t = rig();
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     t.key("Shift+M");
     let row = |t: &T, label: &str| match &t.st.overlay {
         Overlay::Form(f) => f

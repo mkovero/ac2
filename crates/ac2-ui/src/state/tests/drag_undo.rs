@@ -30,15 +30,15 @@ fn drop_on(
     edge: Option<Edge>,
     compare: bool,
 ) -> Vec<Request> {
-    let mut r = t.st.update(Msg::RowDrag(DragMsg::Start(item)), &t.keys);
-    r.extend(t.st.update(
+    let mut r = t.st.apply(Msg::RowDrag(DragMsg::Start(item)), &t.keys);
+    r.extend(t.st.apply(
         Msg::RowDrag(DragMsg::Over {
             target: Some(DropTarget { pane, edge }),
             compare,
         }),
         &t.keys,
     ));
-    r.extend(t.st.update(Msg::RowDrag(DragMsg::Drop { compare }), &t.keys));
+    r.extend(t.st.apply(Msg::RowDrag(DragMsg::Drop { compare }), &t.keys));
     r
 }
 
@@ -108,11 +108,11 @@ fn a_drop_changes_only_the_pane_under_it() {
     assert_eq!(t.st.layout.panes().len(), 4);
     // A stored trace or a live curve goes the same way: the IR pane shows Main R's group.
     // A drop selects nothing: the selection stays on its row.
-    let selected = (t.st.selected, t.st.selected_live);
+    let selected = (t.st.rig.selected, t.st.rig.selected_live);
     let ir = pane_n(&t, 3);
     drop_on(&mut t, TreeKey::Live(MeasId(5)), ir, None, false);
     assert_eq!(shows(&t, ir), Some(MeasId(5)));
-    assert_eq!((t.st.selected, t.st.selected_live), selected);
+    assert_eq!((t.st.rig.selected, t.st.rig.selected_live), selected);
     assert_eq!(
         t.st.layout.view(spl).map(|v| v.kind),
         Some(PaneKind::Spectrum)
@@ -222,13 +222,13 @@ fn an_edge_drop_splits_on_that_side() {
 fn the_drag_label_says_where_the_row_goes() {
     let mut t = desk();
     let spl = pane_n(&t, 4);
-    t.st.update(
+    t.st.apply(
         Msg::RowDrag(DragMsg::Start(TreeKey::Meas(MeasId(4)))),
         &t.keys,
     );
     assert_eq!(t.st.drag_label(), None, "not over a pane yet");
     let over = |t: &mut T, pane: PaneId, edge, compare| {
-        t.st.update(
+        t.st.apply(
             Msg::RowDrag(DragMsg::Over {
                 target: Some(DropTarget { pane, edge }),
                 compare,
@@ -256,11 +256,11 @@ fn esc_or_a_drop_off_the_panes_does_nothing() {
     let mut t = desk();
     let before = t.st.pane_snap();
     let spl = pane_n(&t, 4);
-    t.st.update(
+    t.st.apply(
         Msg::RowDrag(DragMsg::Start(TreeKey::Meas(MeasId(2)))),
         &t.keys,
     );
-    t.st.update(
+    t.st.apply(
         Msg::RowDrag(DragMsg::Over {
             target: Some(DropTarget {
                 pane: spl,
@@ -273,21 +273,21 @@ fn esc_or_a_drop_off_the_panes_does_nothing() {
     let r = t.key("Escape");
     assert!(r.is_empty(), "Esc only cancels the drag: {r:?}");
     assert!(t.st.drag_label().is_none());
-    t.st.update(Msg::RowDrag(DragMsg::Drop { compare: false }), &t.keys);
+    t.st.apply(Msg::RowDrag(DragMsg::Drop { compare: false }), &t.keys);
     assert_eq!(t.st.pane_snap(), before);
     assert!(!t.st.row_drag_held());
-    t.st.update(
+    t.st.apply(
         Msg::RowDrag(DragMsg::Start(TreeKey::Meas(MeasId(2)))),
         &t.keys,
     );
-    t.st.update(
+    t.st.apply(
         Msg::RowDrag(DragMsg::Over {
             target: None,
             compare: false,
         }),
         &t.keys,
     );
-    t.st.update(Msg::RowDrag(DragMsg::Drop { compare: false }), &t.keys);
+    t.st.apply(Msg::RowDrag(DragMsg::Drop { compare: false }), &t.keys);
     assert_eq!(t.st.pane_snap(), before);
     assert_eq!(t.st.history.undo_len(), 0);
 }
@@ -298,7 +298,7 @@ fn esc_or_a_drop_off_the_panes_does_nothing() {
 #[test]
 fn a_drop_is_never_the_dropped_measurements_layout() {
     let mut t = desk();
-    let r = t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    let r = t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     answer(&mut t, &r);
     let two = pane_n(&t, 2);
     let r = drop_on(&mut t, TreeKey::Meas(MeasId(4)), two, None, false);
@@ -309,7 +309,7 @@ fn a_drop_is_never_the_dropped_measurements_layout() {
     assert_eq!(layout_targets(&r), [MeasId(1)], "Main L's panes: {r:?}");
     answer(&mut t, &r);
     assert_eq!(
-        t.st.selected,
+        t.st.rig.selected,
         Some(MeasId(1)),
         "the selection stays on the row"
     );
@@ -339,7 +339,7 @@ fn a_shift_drop_compares() {
     let mut t = desk();
     let tf = pane_n(&t, 1);
     let view = t.st.layout.view(tf).copied();
-    t.st.update(Msg::FocusPane(pane_n(&t, 2)), &t.keys);
+    t.st.apply(Msg::FocusPane(pane_n(&t, 2)), &t.keys);
     let r = drop_on(&mut t, TreeKey::Meas(MeasId(5)), tf, None, true);
     t.answer(&r);
     assert_eq!(
@@ -427,7 +427,7 @@ fn undo_and_redo_round_trip_every_pane_edit() {
             "chip pick",
             Box::new(|t: &mut T| {
                 let p = pane_n(t, 2);
-                t.st.update(Msg::PanePick(p, PaneMenuRow::Meas(MeasId(4))), &t.keys);
+                t.st.apply(Msg::PanePick(p, PaneMenuRow::Meas(MeasId(4))), &t.keys);
             }),
         ),
         ("Tab", tab_to_meas("Tab")),
@@ -440,7 +440,7 @@ fn undo_and_redo_round_trip_every_pane_edit() {
             "split drag",
             Box::new(|t: &mut T| {
                 for ratio in [0.5, 0.45, 0.4] {
-                    t.st.update(
+                    t.st.apply(
                         Msg::DragSplit {
                             path: vec![],
                             ratio,
@@ -448,7 +448,7 @@ fn undo_and_redo_round_trip_every_pane_edit() {
                         &t.keys,
                     );
                 }
-                t.st.update(Msg::DragSplitEnd, &t.keys);
+                t.st.apply(Msg::DragSplitEnd, &t.keys);
             }),
         ),
         ("W", key("W")),
@@ -465,15 +465,15 @@ fn undo_and_redo_round_trip_every_pane_edit() {
                         x,
                         y: 0.5,
                     };
-                    t.st.update(Msg::Plate(m), &t.keys);
+                    t.st.apply(Msg::Plate(m), &t.keys);
                 }
                 let m = PlateMsg::Scale {
                     pane,
                     kind,
                     scale: 1.5,
                 };
-                t.st.update(Msg::Plate(m), &t.keys);
-                t.st.update(Msg::Plate(PlateMsg::End), &t.keys);
+                t.st.apply(Msg::Plate(m), &t.keys);
+                t.st.apply(Msg::Plate(PlateMsg::End), &t.keys);
             }),
         ),
     ];
@@ -513,7 +513,7 @@ fn undo_and_redo_say_what_they_did() {
     assert_eq!(t.last_toast(), "Undid: FOH SPL \u{2192} pane 2");
     t.key("Ctrl+Shift+Z");
     assert_eq!(t.last_toast(), "Redid: FOH SPL \u{2192} pane 2");
-    t.st.update(Msg::FocusPane(pane_n(&t, 1)), &t.keys);
+    t.st.apply(Msg::FocusPane(pane_n(&t, 1)), &t.keys);
     t.key("N");
     t.key("Ctrl+Z");
     t.key("Ctrl+Shift+Z");
@@ -527,7 +527,7 @@ fn undo_and_redo_say_what_they_did() {
 #[test]
 fn undo_restores_the_own_layout_of_the_chosen_measurement_only() {
     let mut t = desk();
-    let r = t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    let r = t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     answer(&mut t, &r);
     let before = t.st.pane_layout();
     let r = t.key("N");
@@ -544,8 +544,8 @@ fn undo_restores_the_own_layout_of_the_chosen_measurement_only() {
     // FOH SPL picked into pane 4 is a guest: the G after it, undone, goes to Main L.
     let four = pane_n(&t, 5);
     let r =
-        t.st.update(Msg::PanePick(four, PaneMenuRow::Meas(MeasId(4))), &t.keys);
-    assert_eq!(t.st.selected, Some(MeasId(1)));
+        t.st.apply(Msg::PanePick(four, PaneMenuRow::Meas(MeasId(4))), &t.keys);
+    assert_eq!(t.st.rig.selected, Some(MeasId(1)));
     assert_eq!(layout_targets(&r), [MeasId(1)], "the pick: {r:?}");
     answer(&mut t, &r);
     let r = t.key("G");

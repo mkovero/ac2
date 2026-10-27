@@ -82,10 +82,10 @@ fn settings_pages() {
         h.state_mut().state.toasts.list.clear();
         // The connection's id is the daemon's per-connection one: pinned for the picture.
         let pin = |a: &mut App| {
-            if let Some(m) = &a.state.mirror {
+            if let Some(m) = &a.state.rig.mirror {
                 let mut m = (**m).clone();
                 m.client_id = Some(ac2_proto::units::ClientId("ac2-ui test".into()));
-                a.state.mirror = Some(std::sync::Arc::new(m));
+                a.state.rig.mirror = Some(std::sync::Arc::new(m));
             }
         };
         snapshot_when(&mut h, name, pin, |a| {
@@ -323,12 +323,13 @@ fn spectrum_peak_tracking() {
     step_until(&mut h, "peaks tracked", |a| {
         peak(a) == Some(PeakMode::Track)
             && a.state
+                .rig
                 .peak_tracks
                 .get(&MeasId(3))
                 .is_some_and(|t| !t.1.peaks().is_empty())
     });
     assert!(
-        !h.state().state.peaks.contains_key(&MeasId(3)),
+        !h.state().state.rig.peaks.contains_key(&MeasId(3)),
         "tracking keeps no hold"
     );
     let scene = |h: &Harness<'_, App>| {

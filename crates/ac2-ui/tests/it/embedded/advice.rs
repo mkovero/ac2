@@ -62,9 +62,11 @@ fn a_quiet_stimulus_brings_raise_advice() -> R {
     }
     d.send(Msg::Text("-76".into()));
     d.key("Enter");
-    d.until("level", |s| s.stimulus.level.is_some_and(|l| l.0 == -76.0))?;
+    d.until("level", |s| {
+        s.rig.stimulus.level.is_some_and(|l| l.0 == -76.0)
+    })?;
     d.key("Space");
-    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
     d.key("Enter");
     d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
     // The app's clock runs on its frame ticks; the advice's hold times count on it.

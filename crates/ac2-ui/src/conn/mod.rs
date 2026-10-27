@@ -27,7 +27,7 @@ use ac2_proto::model::{
     TraceMicCurve, TraceSource,
 };
 use ac2_proto::topic::{Stream, Topic};
-use ac2_proto::units::{ClientId, MeasId, Seconds, TraceId};
+use ac2_proto::units::{ClientId, MeasId, RigId, Seconds, TraceId};
 use ac2_proto::{Command, GridDef, GridId, ReplyBody, Subscription};
 use tokio::sync::mpsc;
 
@@ -87,6 +87,9 @@ pub enum ConnEvent {
         target: String,
         server: String,
         client_id: ClientId,
+        /// The daemon's identity and display name, from its hello reply.
+        rig_id: RigId,
+        name: String,
     },
     Failed {
         target: String,
@@ -609,6 +612,8 @@ async fn run(target: Target, mut ctl: mpsc::UnboundedReceiver<Ctl>, out: Out) {
             target: target.describe.clone(),
             server: w.server,
             client_id: w.client_id,
+            rig_id: w.rig_id,
+            name: w.name,
         });
         match session(client, &mut ctl, &out, &mut wants).await {
             Next::Reconnect => continue,

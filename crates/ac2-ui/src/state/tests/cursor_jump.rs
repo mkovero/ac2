@@ -138,7 +138,7 @@ fn a_jump_needs_a_frequency_pane() {
             v.kind = PaneKind::Spl;
         }
     }
-    t.st.update(Msg::Command(CommandId::NextPeak), &t.keys.clone());
+    t.st.apply(Msg::Command(CommandId::NextPeak), &t.keys.clone());
     assert_eq!(t.st.view.cursor_hz, None);
     assert_eq!(t.last_toast(), ac2_scene::cursor_jump::NO_PANE);
 }

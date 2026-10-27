@@ -191,7 +191,7 @@ fn stored_trace_metadata_follows_the_mirror() {
     hidden.edit.visible = false;
     hidden.edit.slot = None;
     t.conn(with_traces(vec![hidden.clone()]));
-    assert_eq!(t.st.traces[&TraceId(9)].0.meta, hidden);
+    assert_eq!(t.st.rig.traces[&TraceId(9)].0.meta, hidden);
     t.conn(with_traces(vec![]));
-    assert!(t.st.traces.is_empty());
+    assert!(t.st.rig.traces.is_empty());
 }

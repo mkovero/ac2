@@ -204,7 +204,8 @@ fn slow_session_dialog_meters_return_every_round() -> R {
         })
     };
     let seq = |d: &Driver| {
-        d.st.data
+        d.st.rig
+            .data
             .as_ref()
             .and_then(|x| x.latest.get(&Topic::PreviewLevels))
             .map_or(0, |f| f.frame.stamp.seq)

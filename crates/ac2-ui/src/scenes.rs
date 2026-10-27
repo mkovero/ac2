@@ -47,7 +47,11 @@ pub struct Now {
 
 /// The frame of `meas`'s `stream`, if received.
 pub fn frame(st: &AppState, meas: MeasId, stream: Stream) -> Option<&TopicFrame> {
-    st.data.as_ref()?.latest.get(&Topic::Data { meas, stream })
+    st.rig
+        .data
+        .as_ref()?
+        .latest
+        .get(&Topic::Data { meas, stream })
 }
 
 /// Freshness of a received frame: its age, or STALE when the client says so (no new frame
@@ -96,9 +100,14 @@ pub fn status(
     tf_meas: Option<&Measurement>,
     now: Now,
 ) -> Status {
-    let daemon_silence_s = st.mirror.as_ref().and_then(|m| m.last_ka).map_or(0.0, |t| {
-        now.instant.saturating_duration_since(t).as_secs_f64()
-    });
+    let daemon_silence_s = st
+        .rig
+        .mirror
+        .as_ref()
+        .and_then(|m| m.last_ka)
+        .map_or(0.0, |t| {
+            now.instant.saturating_duration_since(t).as_secs_f64()
+        });
     // A stopped measurement raises no fault: nothing is due from it, and its last frame's
     // protection flags describe a signal that is no longer measured.
     let live: Vec<&TopicFrame> = shown.iter().copied().filter(|f| !stopped(st, f)).collect();
@@ -120,7 +129,7 @@ pub fn status(
         protection,
         frame_age_s,
         stale_after_s: newest.map(|n| n.1),
-        timing: st.mirror.as_ref().and_then(|m| m.timing),
+        timing: st.rig.mirror.as_ref().and_then(|m| m.timing),
         clock_drift_ppm: st
             .daemon()
             .and_then(|d| d.timing.drift)
@@ -160,7 +169,8 @@ pub fn log_not_saved(
 /// The daemon's offset estimate as the scene takes it.
 fn clock_offset(st: &AppState) -> ClockOffset {
     ClockOffset(
-        st.mirror
+        st.rig
+            .mirror
             .as_ref()
             .and_then(|v| v.clock_offset_ns)
             .map_or(0, |o| {
@@ -199,8 +209,9 @@ fn eq_prediction_note(st: &AppState, m: &Measurement) -> Option<String> {
     };
     let (meas, set, curve) = ac2_scene::eq::prediction(&config.expr)?;
     let set = st.meas(meas)?.eq.iter().find(|s| s.id == set)?;
-    let basis =
-        ac2_scene::eq::curve_basis(set, curve, |id| st.traces.get(&id).map(|(t, _)| &t.meta));
+    let basis = ac2_scene::eq::curve_basis(set, curve, |id| {
+        st.rig.traces.get(&id).map(|(t, _)| &t.meta)
+    });
     Some(ac2_scene::eq::basis_tag(&set.body.name, basis))
 }
 
@@ -316,7 +327,7 @@ pub fn transfer(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now:
         }
         transfer_scene(
             traces,
-            &st.tf_display,
+            &st.rig.tf_display,
             &status,
             &st.view_for(pane),
             theme,
@@ -338,7 +349,7 @@ pub fn transfer_jump(
     with_transfer(st, pane, &theme, |traces, _| {
         ac2_scene::tf::jump(
             traces,
-            &st.tf_display,
+            &st.rig.tf_display,
             &st.view_for(pane),
             shown,
             kind,
@@ -355,7 +366,7 @@ fn with_transfer<R>(
     theme: &Theme,
     f: impl FnOnce(&[TfTrace<'_>], &[LiveTf<'_>]) -> R,
 ) -> R {
-    let grids = st.data.as_ref().map(|d| &d.grids);
+    let grids = st.rig.data.as_ref().map(|d| &d.grids);
     let colours = st.curve_colours(theme);
     let pane_shows = st.pane_meas(pane);
     let mut live = Vec::new();
@@ -386,6 +397,7 @@ fn with_transfer<R>(
         });
     }
     let mut stored: Vec<(&Arc<ac2_proto::model::TraceData>, Arc<GridColumns>)> = st
+        .rig
         .traces
         .values()
         .filter(|(t, _)| {
@@ -454,7 +466,7 @@ fn with_transfer<R>(
     for (data, cols) in &stored {
         ranks.push(rank(ac2_scene::meas_list::group_of(&data.meta, &ms)));
         let mut t = TfTrace::stored(data, &cols.freqs, colours.trace(data.meta.id));
-        t.selected = st.selected_trace == Some(data.meta.id);
+        t.selected = st.rig.selected_trace == Some(data.meta.id);
         if let Some(tags) = eq_curve_tags(st, &data.meta) {
             t.note = Some(tags);
         }
@@ -462,7 +474,7 @@ fn with_transfer<R>(
         // A capture from an earlier epoch is not in this epoch's time base (decision 8a).
         if let (Some(epoch), Some(cur)) = (
             data.meta.source.shared_epoch(),
-            st.mirror.as_ref().and_then(|m| m.session_epoch),
+            st.rig.mirror.as_ref().and_then(|m| m.session_epoch),
         ) && epoch != cur
         {
             t.time_base = TimeBase::Independent;

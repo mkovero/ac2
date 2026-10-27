@@ -38,13 +38,13 @@ fn alignment_from_an_empty_daemon() -> R {
         s.daemon()
             .is_some_and(|x| x.traces.iter().any(|t| t.edit.slot == Some(1)))
     })?;
-    d.until("the capture's curve", |s| !s.traces.is_empty())?;
+    d.until("the capture's curve", |s| !s.rig.traces.is_empty())?;
     let panes = d.st.layout.views.len();
     // A live operand under NO REFERENCE is left out of math (its held average is no longer
     // what the system does), and `measure_from_empty` stopped the stimulus (its level is still
     // set): the live curve needs it playing again for the alignment to have both operands.
     d.key("Space");
-    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
     d.key("Enter");
     d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
 

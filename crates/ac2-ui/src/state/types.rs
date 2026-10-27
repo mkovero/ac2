@@ -203,6 +203,9 @@ pub enum ConnState {
         target: String,
         server: String,
         client_id: ClientId,
+        /// The daemon's identity and display name, from its hello reply.
+        rig_id: RigId,
+        name: String,
     },
     Failed {
         target: String,

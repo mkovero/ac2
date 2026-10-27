@@ -370,7 +370,7 @@ impl AppState {
         for pane in self.layout.root.leaves() {
             // A pane waiting for its remembered measurement shows a stand-in.
             if self.layout.kind(pane) != PaneKind::Spectrum
-                || self.pending.pane_meas.contains_key(&pane)
+                || self.rig.pending.pane_meas.contains_key(&pane)
             {
                 continue;
             }
@@ -416,10 +416,11 @@ impl AppState {
     /// (another source, another gain); a range the operator set stays.
     fn rearm_started_spectra(&mut self) {
         let arrived: Vec<_> = self
+            .rig
             .spectrum_fit
             .iter()
             .filter(|(id, shown)| {
-                self.spectrum_frame(**id).is_some_and(|f| {
+                self.rig.spectrum_frame(**id).is_some_and(|f| {
                     shown
                         .as_ref()
                         .is_none_or(|old| !std::sync::Arc::ptr_eq(old, &f.frame))
@@ -428,7 +429,7 @@ impl AppState {
             .map(|(id, _)| *id)
             .collect();
         for id in arrived {
-            self.spectrum_fit.remove(&id);
+            self.rig.spectrum_fit.remove(&id);
             let Some(name) = self.meas(id).map(|m| m.config.name.clone()) else {
                 continue;
             };
@@ -443,13 +444,13 @@ impl AppState {
     /// result often shows the new one off the plot. Only once per result: a zoom after it
     /// stays until the next sweep.
     pub(in crate::state) fn fit_new_sweep(&mut self) {
-        let Some(id) = self.sweep.fit else {
+        let Some(id) = self.rig.sweep.fit else {
             return;
         };
-        if !self.traces.contains_key(&id) {
+        if !self.rig.traces.contains_key(&id) {
             return;
         }
-        self.sweep.fit = None;
+        self.rig.sweep.fit = None;
         let shown = self.layout.root.leaves().into_iter().any(|p| {
             self.layout.kind(p) == PaneKind::Distortion
                 && self.pane_sweep(p).map(|(t, _)| t.meta.id) == Some(id)
@@ -475,7 +476,7 @@ impl AppState {
             );
         };
         let live = |stream: Stream, m: &Measurement| {
-            let d = self.data.as_ref()?;
+            let d = self.rig.data.as_ref()?;
             let f = d.latest.get(&Topic::Data { meas: m.id, stream })?;
             let g = d.grids.get(&f.frame.stamp.grid_id?)?;
             Some((f.frame.clone(), g.centres()))
@@ -499,7 +500,7 @@ impl AppState {
                         add(&freqs, level, self.meas_offset(m.id));
                     }
                 }
-                for (t, g) in self.traces.values() {
+                for (t, g) in self.rig.traces.values() {
                     if self.on_pane(kind, &t.meta, shown)
                         || self.trace_compared_on(kind, &t.meta, shown)
                     {

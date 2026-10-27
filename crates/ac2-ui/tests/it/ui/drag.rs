@@ -45,7 +45,7 @@ fn a_list_row_dragged_onto_the_lower_pane() {
     step_until(&mut h, "live frames", |a| {
         let st = &a.state;
         let have = |m: u32, s: Stream| {
-            st.data.as_ref().is_some_and(|d| {
+            st.rig.data.as_ref().is_some_and(|d| {
                 d.latest
                     .get(&Topic::Data {
                         meas: MeasId(m),
@@ -54,8 +54,8 @@ fn a_list_row_dragged_onto_the_lower_pane() {
                     .is_some()
             })
         };
-        matches!(st.conn, ConnState::Connected { .. })
-            && st.mirror.as_ref().is_some_and(|m| m.synced())
+        matches!(st.rig.conn, ConnState::Connected { .. })
+            && st.rig.mirror.as_ref().is_some_and(|m| m.synced())
             && st.measurements().len() == 4
             && have(1, Stream::Tf)
             && have(3, Stream::Spec)
@@ -104,7 +104,7 @@ fn a_list_row_dragged_onto_the_lower_pane() {
     assert_eq!(st.layout.view(panes[0].0).copied(), upper);
     // The SPL pane's frames, once it subscribes to them.
     step_until(&mut h, "the meter's frames", |a| {
-        a.state.data.as_ref().is_some_and(|d| {
+        a.state.rig.data.as_ref().is_some_and(|d| {
             d.latest
                 .get(&Topic::Data {
                     meas: MeasId(4),

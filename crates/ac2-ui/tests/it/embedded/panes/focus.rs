@@ -146,7 +146,7 @@ fn the_focused_pane_takes_any_pick_from_an_empty_daemon() -> R {
     // Tab on to the transfer measurement: its row brings its own panes (as its form laid
     // them out), the focus on its transfer pane.
     for _ in 0..d.st.tree_meas_order().len() {
-        if d.st.selected == Some(tf) {
+        if d.st.rig.selected == Some(tf) {
             break;
         }
         d.key("Tab");
@@ -224,9 +224,9 @@ fn tab_steps_through_the_measurements_from_an_empty_daemon() -> R {
     for (i, (id, live)) in steps.into_iter().enumerate() {
         d.key("Tab");
         let pane = order.iter().find(|(m, _)| *m == id).expect("listed").1;
-        assert_eq!(d.st.selected, Some(id), "Tab {i}");
+        assert_eq!(d.st.rig.selected, Some(id), "Tab {i}");
         assert_eq!(d.st.live_row_selected(), live, "Tab {i}");
-        assert_eq!(d.st.selected_trace, None);
+        assert_eq!(d.st.rig.selected_trace, None);
         assert_eq!(d.st.layout.focus, f, "Tab {i}");
         assert_eq!(d.st.layout.focus_kind(), pane, "Tab {i}");
         assert_eq!(d.st.pane_meas(f).map(|m| m.id), Some(id), "Tab {i}");
@@ -240,7 +240,7 @@ fn tab_steps_through_the_measurements_from_an_empty_daemon() -> R {
         (sp, false),
     ] {
         d.key("Shift+Tab");
-        assert_eq!(d.st.selected, Some(want));
+        assert_eq!(d.st.rig.selected, Some(want));
         assert_eq!(d.st.live_row_selected(), live);
     }
     assert_eq!(d.st.layout.focus_kind(), Spectrum);
@@ -288,7 +288,8 @@ fn a_child_row_moves_no_pane_from_an_empty_daemon() -> R {
         stream: Stream::Spec,
     };
     d.until("Spectrum 2's spectrum", |s| {
-        s.data
+        s.rig
+            .data
             .as_ref()
             .is_some_and(|x| x.latest.get(&topic).is_some())
     })?;
@@ -333,7 +334,7 @@ fn a_child_row_moves_no_pane_from_an_empty_daemon() -> R {
     let panes = d.st.pane_layout();
     d.send(Msg::SelectLive(s2));
     d.pump();
-    assert_eq!(d.st.selected_live, Some(s2));
+    assert_eq!(d.st.rig.selected_live, Some(s2));
     assert_eq!(shown(&d.st), before, "the live row");
     assert_eq!(d.st.layout.focus, b, "the focus stays on B");
     assert_eq!(d.st.pane_layout(), panes, "no pane changed");
@@ -341,7 +342,7 @@ fn a_child_row_moves_no_pane_from_an_empty_daemon() -> R {
     // Spectrum 2's stored trace row: the trace selected, nothing moves.
     d.send(Msg::SelectTrace(trace));
     d.pump();
-    assert_eq!(d.st.selected_trace, Some(trace));
+    assert_eq!(d.st.rig.selected_trace, Some(trace));
     assert_eq!(shown(&d.st), before, "the trace row");
     assert_eq!(d.st.layout.focus, b, "the focus stays on B");
     assert_eq!(d.st.pane_layout(), panes, "no pane changed");
@@ -359,7 +360,7 @@ fn a_child_row_moves_no_pane_from_an_empty_daemon() -> R {
 
     // Spectrum 2's header row: selected, its own panes on screen.
     d.send(Msg::SelectMeas(s2));
-    assert_eq!(d.st.selected, Some(s2));
+    assert_eq!(d.st.rig.selected, Some(s2));
     assert_eq!(
         Some(d.st.pane_layout()),
         d.st.meas(s2).and_then(|m| m.layout.clone()),
@@ -395,7 +396,7 @@ fn v_only_selects_from_an_empty_daemon() -> R {
     let second = d.st.selected_meas().map(|m| m.id).ok_or("second")?;
     // The level typed for the first is kept: arm and fire.
     d.key("Space");
-    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
     d.key("Enter");
     d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
     d.tf_frames(first, 240)?;
@@ -432,7 +433,7 @@ fn v_only_selects_from_an_empty_daemon() -> R {
             Some(first),
             "{key}: the transfer pane keeps the first"
         );
-        seen.extend(d.st.selected_trace);
+        seen.extend(d.st.rig.selected_trace);
     }
     assert!(seen.contains(&t1) && seen.contains(&t2), "{seen:?}");
     drop(d);

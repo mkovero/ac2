@@ -69,7 +69,7 @@ fn axes(t: &T, p: IrPane) -> IrAxes {
 }
 
 fn nav(t: &mut T, p: IrPane, m: IrNavMsg) {
-    t.st.update(Msg::IrNav(p, m), &t.keys);
+    t.st.apply(Msg::IrNav(p, m), &t.keys);
 }
 
 /// The IR pane: I / O and ←/→ move time, the wheel zooms about the pointer, a drag pans,
@@ -183,7 +183,7 @@ fn the_ir_cursor_reads_time_and_value() {
             .cursor
             .map(|c| c.text())
     };
-    t.st.update(Msg::Command(CommandId::ToggleCursor), &t.keys);
+    t.st.apply(Msg::Command(CommandId::ToggleCursor), &t.keys);
     assert_eq!(cursor(&t), Some(0.5));
     assert_eq!(reading(&t).as_deref(), Some("0.5 ms · 0 FS"));
     t.key("Shift+Left");
@@ -196,7 +196,7 @@ fn the_ir_cursor_reads_time_and_value() {
     assert_eq!(reading(&t).as_deref(), Some("1.5 ms · −6.0 dB"));
     // The frequency cursor is the transfer pane's own.
     assert_eq!(t.st.view.cursor_hz, None);
-    t.st.update(Msg::Command(CommandId::ToggleCursor), &t.keys);
+    t.st.apply(Msg::Command(CommandId::ToggleCursor), &t.keys);
     assert_eq!(cursor(&t), None);
     assert_eq!(reading(&t), None);
 }
@@ -228,7 +228,7 @@ fn the_sweep_ir_view_has_its_own_navigation() {
     assert!((r.span() - 199.0 / 1.5).abs() < 1e-9, "{r:?}");
     assert_eq!(t.st.nav.target, freq);
     assert_eq!(axes(&t, IrPane::Live), IrAxes::default());
-    t.st.update(Msg::Command(CommandId::ToggleCursor), &t.keys);
+    t.st.apply(Msg::Command(CommandId::ToggleCursor), &t.keys);
     let s = crate::scenes::sweep(
         &t.st,
         t.pane(PaneKind::Distortion),
@@ -259,7 +259,7 @@ fn the_distortion_cursor_reads_in_db_and_percent() {
     let mut t = T::new();
     sweep_with_ir(&mut t);
     t.go(PaneKind::Distortion);
-    t.st.update(Msg::CursorAt(Some(1000.0)), &t.keys);
+    t.st.apply(Msg::CursorAt(Some(1000.0)), &t.keys);
     let rows = |t: &T| {
         let s = crate::scenes::sweep(
             &t.st,
@@ -280,14 +280,14 @@ fn the_distortion_cursor_reads_in_db_and_percent() {
         r.contains(&("H2".to_owned(), "−40.0 dB".to_owned())),
         "{r:?}"
     );
-    t.st.update(Msg::Command(CommandId::DistortionUnit), &t.keys);
+    t.st.apply(Msg::Command(CommandId::DistortionUnit), &t.keys);
     let (_, r) = rows(&t);
     assert!(r.contains(&("H2".to_owned(), "1.00 %".to_owned())), "{r:?}");
     // 1 % under the pointer is −40 dB: zooming there keeps −40 dB where it was.
     let about = ac2_scene::distortion::db_of_percent(1.0);
     assert!((about + 40.0).abs() < 1e-9);
     let before = t.level(PaneKind::Distortion);
-    t.st.update(
+    t.st.apply(
         Msg::LevelZoom {
             pane: t.st.layout.lead(PaneKind::Distortion).expect("sweep pane"),
             about_db: Some(about),
@@ -463,7 +463,7 @@ fn the_transfer_ir_view_shows_the_selected_stored_ir() {
     // Navigation and the cursor act on the stored IR: its extent.
     let e = t.st.ir_extent(IrPane::Live).expect("extent");
     assert!((e.t0_ms + 32.0 / 48.0).abs() < 1e-9 && e.n == 64, "{e:?}");
-    t.st.update(Msg::Command(CommandId::ToggleCursor), &t.keys);
+    t.st.apply(Msg::Command(CommandId::ToggleCursor), &t.keys);
     // The cursor comes on at the stored IR's sample nearest its middle (the live one's is
     // 0.5 ms).
     let mid_ms = (-32.0 + 31.0) / 2.0 / 48.0;

@@ -351,7 +351,8 @@ pub enum Msg {
         rows: i32,
     },
     Command(CommandId),
-    Conn(Box<ConnEvent>),
+    /// What a rig's link reports, tagged with the rig (its id when the event was drained).
+    Conn(RigId, Box<ConnEvent>),
     /// Frame tick: `now_s` monotonic seconds, `dt_s` since the previous tick.
     Tick {
         now_s: f64,

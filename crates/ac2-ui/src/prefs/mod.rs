@@ -18,9 +18,9 @@
 //! record_limit_min = 90
 //!
 //! [stimulus_outputs]
-//! "hw:UMC1820" = [1, 2]
+//! "000000000000fa4e/hw:UMC1820" = [1, 2]
 //!
-//! [sessions."coreaudio/hw:UMC1820"]
+//! [sessions."000000000000fa4e/coreaudio/hw:UMC1820"]
 //! inputs = [1, 2, 3]
 //! outputs = 2
 //! reference = 1
@@ -90,6 +90,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+
+use ac2_proto::units::RigId;
 
 use ac2_proto::model::layout::{LayoutLevels, LevelRange};
 use ac2_scene::axis::Range;
@@ -276,13 +278,34 @@ impl WindowPrefs {
 /// Bounds of the SPL meter's display hold, ms.
 pub const SPL_HOLD_MS: std::ops::RangeInclusive<u32> = 100..=10_000;
 
+/// What the UI remembers for one rig's devices: the session dialog reads it for the rig
+/// it opened on.
+#[derive(Clone, Copy, Debug)]
+pub struct RigPrefs<'a> {
+    pub prefs: &'a UiPrefs,
+    pub rig: RigId,
+}
+
+impl RigPrefs<'_> {
+    /// The outputs remembered for `device`.
+    pub fn outputs_for(&self, device: &str) -> Option<&[u16]> {
+        self.prefs.outputs_for(self.rig, device)
+    }
+
+    /// The session dialog choices remembered for `key` ([`UiPrefs::device_key`]).
+    pub fn roles_for(&self, key: &str) -> Option<&DeviceRoles> {
+        self.prefs.roles_for(self.rig, key)
+    }
+}
+
 /// What the UI remembers.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiPrefs {
-    /// Zero-based stimulus outputs per output device id.
-    pub outputs: BTreeMap<String, Vec<u16>>,
-    /// Session dialog choices per `backend/device id` ([`UiPrefs::device_key`]).
-    pub sessions: BTreeMap<String, DeviceRoles>,
+    /// Zero-based stimulus outputs per rig and output device id: two rigs both have a
+    /// `jack:system`, wired to different speakers.
+    pub outputs: BTreeMap<(RigId, String), Vec<u16>>,
+    /// Session dialog choices per rig and `backend/device id` ([`UiPrefs::device_key`]).
+    pub sessions: BTreeMap<(RigId, String), DeviceRoles>,
     /// How the SPL pane lays the Leq windows out.
     pub leq: LeqLayout,
     /// The focused pane's line of its most used keys (on until the operator turns it off).

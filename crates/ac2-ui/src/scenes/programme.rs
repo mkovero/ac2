@@ -28,7 +28,7 @@ pub fn programme(
     let missing = (!missing.is_empty()).then(|| missing_text(&missing));
     let mut s = programme_scene(&p, style, size, missing.as_deref());
     if let (Some(square), Some(pair)) = (s.gonio, metered.pair())
-        && let Some(ring) = st.programme.rings.get(&pair)
+        && let Some(ring) = st.rig.programme.rings.get(&pair)
     {
         let points = ac2_plot::embers::ember_points(ring, st.now_s, st.ember_cooling(), square);
         if let Some(base) = s.scene.layers.first_mut() {

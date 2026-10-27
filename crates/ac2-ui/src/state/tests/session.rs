@@ -48,6 +48,8 @@ fn connected_to(t: &mut T, target: &str) {
         target: target.into(),
         server: "ac2d test".into(),
         client_id: ClientId("c1".into()),
+        rig_id: RIG,
+        name: "test rig".into(),
     });
 }
 
@@ -201,7 +203,7 @@ fn hints_name_the_keys_the_keymap_binds() {
     );
     t.key("Alt+9");
     assert_eq!(t.last_toast(), "no pane 9: 1 on screen (F6 splits)");
-    t.st.stimulus.level = None;
+    t.st.rig.stimulus.level = None;
     t.key("Up");
     assert_eq!(t.last_toast(), "no stimulus level yet: type one (F9)");
 }
@@ -210,10 +212,10 @@ fn hints_name_the_keys_the_keymap_binds() {
 fn arming_without_a_session_names_the_key() {
     let mut t = T::new();
     t.conn(mirror(no_session_state()));
-    t.st.stimulus.level = Some(Dbfs(-20.0));
+    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
     let r = t.key("Space");
     assert!(r.is_empty(), "{r:?}");
-    assert_eq!(t.st.stimulus.phase, StimPhase::Idle);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
     assert!(
         t.last_toast().contains(&format!(
             "press {} (or {} → Open audio I/O)",
@@ -306,11 +308,11 @@ fn session_dialog_opens_a_session_from_roles() {
     );
     assert_eq!(t.st.overlay, Overlay::None);
     // Remembered for the device, the stimulus follows the S output (K4).
-    let roles = &t.st.prefs.sessions["fake/fake:loop"];
+    let roles = &t.st.prefs.sessions[&(RIG, "fake/fake:loop".into())];
     assert_eq!(roles.reference, Some(0));
     assert_eq!(roles.mics, vec![1]);
     assert_eq!(roles.mic_names[&1], "M30 FOH");
-    assert_eq!(t.st.prefs.outputs["fake:loop"], vec![0]);
+    assert_eq!(t.st.prefs.outputs[&(RIG, "fake:loop".into())], vec![0]);
     assert!(t.st.prefs_dirty);
 }
 
@@ -376,7 +378,7 @@ fn mic_names_must_differ_and_the_mouse_assigns_roles() {
     // Unnamed channels read Input N.
     assert_eq!(dialog(&t).inputs[2].label(), "Input 3");
     for i in [1, 2] {
-        t.st.update(Msg::Session(SessionMsg::EditMic(Row::Input(i))), &t.keys);
+        t.st.apply(Msg::Session(SessionMsg::EditMic(Row::Input(i))), &t.keys);
         t.text("ECM");
         t.key("Enter");
     }
@@ -384,33 +386,33 @@ fn mic_names_must_differ_and_the_mouse_assigns_roles() {
     let e = dialog(&t).error.clone().unwrap_or_default();
     assert!(e.contains("Two mics are named \"ECM\""), "{e}");
     // The R chip of input 3 by mouse; N on the reference refuses a mic name.
-    t.st.update(
+    t.st.apply(
         Msg::Session(SessionMsg::Role(Row::Input(2), RoleKey::Reference)),
         &t.keys,
     );
     assert!(dialog(&t).inputs[2].reference);
     t.key("N");
     assert_eq!(dialog(&t).edit, None);
-    let r = t.st.update(Msg::Session(SessionMsg::Submit), &t.keys);
+    let r = t.st.apply(Msg::Session(SessionMsg::Submit), &t.keys);
     let (config, inputs) = opened(&r).expect("open");
     assert_eq!(config.loopback.map(|l| l.input), Some(2));
     assert_eq!(config.input_channels, vec![0, 1, 2]);
     assert_eq!(inputs[1].mic(), Some("ECM"));
     assert_eq!(inputs[2].mic(), None);
     // Cancel closes without touching the stimulus (Esc would stop it).
-    t.st.update(Msg::Command(CommandId::OpenSession), &t.keys);
-    t.st.stimulus.phase = StimPhase::Armed;
-    let r = t.st.update(Msg::Session(SessionMsg::Cancel), &t.keys);
+    t.st.apply(Msg::Command(CommandId::OpenSession), &t.keys);
+    t.st.rig.stimulus.phase = StimPhase::Armed;
+    let r = t.st.apply(Msg::Session(SessionMsg::Cancel), &t.keys);
     assert!(!r.iter().any(|x| matches!(x, Request::StimStop)), "{r:?}");
     assert_eq!(t.st.overlay, Overlay::None);
-    assert_eq!(t.st.stimulus.phase, StimPhase::Armed);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Armed);
 }
 
 #[test]
 fn roles_are_remembered_per_device() {
     let mut t = T::new();
     t.st.prefs.sessions.insert(
-        "fake/fake:loop".into(),
+        (RIG, "fake/fake:loop".into()),
         crate::prefs::DeviceRoles {
             inputs: vec![0, 2, 3],
             outputs: 2,
@@ -508,7 +510,7 @@ fn preview_renews_and_the_open_device_uses_the_session_meters() {
     let mut t = T::new();
     open_dialog(&mut t, backends(true));
     let tick = |t: &mut T, s: f64| {
-        t.st.update(
+        t.st.apply(
             Msg::Tick {
                 now_s: s,
                 dt_s: 0.1,
@@ -543,7 +545,7 @@ fn preview_renews_and_the_open_device_uses_the_session_meters() {
         o.backend = BackendKind::Fake;
     }
     t.conn(mirror(s));
-    t.st.update(Msg::Command(CommandId::OpenSession), &t.keys);
+    t.st.apply(Msg::Command(CommandId::OpenSession), &t.keys);
     let r = t.conn(ConnEvent::Devices(Ok(backends(true))));
     assert!(dialog(&t).is_open_device());
     assert!(previewed(&r).is_none(), "{r:?}");
@@ -556,10 +558,10 @@ fn preview_renews_and_the_open_device_uses_the_session_meters() {
 fn esc_closes_the_dialog_and_the_preview_and_leaves_the_stimulus() {
     let mut t = T::new();
     open_dialog(&mut t, backends(true));
-    t.st.stimulus.phase = StimPhase::Firing;
+    t.st.rig.stimulus.phase = StimPhase::Firing;
     let r = t.key("Escape");
     assert!(!r.iter().any(|x| matches!(x, Request::StimStop)), "{r:?}");
-    assert_eq!(t.st.stimulus.phase, StimPhase::Firing);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Firing);
     assert!(r.iter().any(|x| matches!(x, Request::PreviewStop)), "{r:?}");
     assert!(
         r.iter().any(|x| matches!(x, Request::Meters(false))),
@@ -598,7 +600,7 @@ fn detect_loopback_needs_a_stimulus_output_and_a_typed_level() {
     t.text("-3");
     assert!(t.key("Enter").is_empty());
     for _ in 0..2 {
-        t.st.update(Msg::Backspace, &t.keys);
+        t.st.apply(Msg::Backspace, &t.keys);
     }
     t.text("-30");
     let r = t.key("Enter");
@@ -638,7 +640,7 @@ fn detect_loopback_needs_a_stimulus_output_and_a_typed_level() {
         "{text}"
     );
     // A typed stimulus level is offered again for the next detection.
-    t.st.stimulus.level = Some(Dbfs(-24.0));
+    t.st.rig.stimulus.level = Some(Dbfs(-24.0));
     t.type_key("D", "d");
     assert_eq!(
         dialog(&t).detect.as_ref().map(|d| d.level.as_str()),
@@ -683,7 +685,7 @@ fn opening_on_an_empty_daemon_asks_what_to_measure() {
 #[test]
 fn session_dialog_errors() {
     let mut t = T::new();
-    t.st.update(Msg::Command(CommandId::OpenSession), &t.keys);
+    t.st.apply(Msg::Command(CommandId::OpenSession), &t.keys);
     t.conn(ConnEvent::Devices(Err("not connected".into())));
     assert!(
         dialog(&t)
@@ -695,7 +697,7 @@ fn session_dialog_errors() {
     // Not connected: no dialog.
     let mut t = T::disconnected();
     assert!(
-        t.st.update(Msg::Command(CommandId::OpenSession), &t.keys)
+        t.st.apply(Msg::Command(CommandId::OpenSession), &t.keys)
             .is_empty()
     );
     assert_eq!(t.st.overlay, Overlay::None);

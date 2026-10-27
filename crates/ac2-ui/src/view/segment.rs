@@ -122,6 +122,7 @@ pub(super) fn health_part(
     let st = &app.state;
     // A daemon that stopped answering has no current figures.
     let daemon = st
+        .rig
         .mirror
         .as_ref()
         .filter(|m| m.responding(now))

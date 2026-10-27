@@ -15,7 +15,7 @@ fn hints_of(t: &T, id: PaneId) -> Option<Vec<String>> {
 /// `t<id>` a stored trace.
 fn tab(t: &mut T, key: &str) -> String {
     t.key(key);
-    match (t.st.selected_trace, t.st.selected) {
+    match (t.st.rig.selected_trace, t.st.rig.selected) {
         (Some(tr), _) => format!("t{}", tr.0),
         (None, Some(m)) if t.st.live_row_selected() => format!("l{}", m.0),
         (None, Some(m)) => format!("m{}", m.0),
@@ -72,7 +72,7 @@ fn key_hints_follow_the_focused_pane() {
 
     // Off: no line anywhere, remembered, and the toast says how to bring it back.
     t.st.prefs_dirty = false;
-    t.st.update(Msg::Command(CommandId::KeyHints), &t.keys);
+    t.st.apply(Msg::Command(CommandId::KeyHints), &t.keys);
     assert!(!t.st.prefs.key_hints);
     assert!(t.st.prefs_dirty);
     assert!(t.last_toast().contains("the palette"), "{}", t.last_toast());
@@ -86,7 +86,7 @@ fn key_hints_follow_the_focused_pane() {
             .is_empty()
     );
     // The palette entry turns them back on.
-    t.st.update(Msg::Command(CommandId::KeyHints), &t.keys);
+    t.st.apply(Msg::Command(CommandId::KeyHints), &t.keys);
     assert!(t.st.prefs.key_hints);
     assert!(hint_texts(&t, PaneKind::Distortion).is_some());
     // The next start takes the remembered choice.
@@ -184,7 +184,7 @@ fn pane_caption_shortens_to_the_selected_trace() {
         t.st.pane_caption(t.pane(PaneKind::Transfer)).as_ref()
     );
     assert!(!v.iter().any(|c| c.contains("t10")), "{v:?}");
-    t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(10)), &t.keys);
     let v = t.st.pane_caption_variants(t.pane(PaneKind::Transfer));
     assert_eq!(
         v,
@@ -222,9 +222,9 @@ fn w_cycles_split_maximised_full_screen() {
     assert!(t.st.layout.maximized && t.st.fullscreen);
     assert!(t.st.stage_view(), "the transfer pane full screen");
     assert!(!t.st.key_hints_shown());
-    t.st.stimulus.phase = StimPhase::Armed;
+    t.st.rig.stimulus.phase = StimPhase::Armed;
     assert!(t.st.stage_view());
-    t.st.stimulus.phase = StimPhase::Idle;
+    t.st.rig.stimulus.phase = StimPhase::Idle;
     t.key("W");
     assert!(!t.st.layout.maximized && !t.st.fullscreen);
     // F11 in the split layout: the window full screen, the layout as it was.
@@ -258,7 +258,7 @@ fn f_cycles_window_full_screen_then_panes_only() {
     assert!(t.st.stage_view() && !t.st.key_hints_shown());
     assert_eq!(t.st.visible_tree(), t.st.layout.root, "every pane");
     // The lists are hidden, not gone: Tab still steps the selection.
-    t.st.selected = None;
+    t.st.rig.selected = None;
     assert_eq!(tab(&mut t, "Tab"), "m1");
     assert_eq!(tab(&mut t, "Tab"), "l1");
     // W inside: one pane, then all again, full screen throughout.
@@ -361,7 +361,7 @@ fn layout_is_remembered_and_restored() {
     let ir_mode = |t: &T| t.st.layout.view(t.ir_pane()).expect("view").modes.transfer;
     assert_eq!(ir_mode(&t), TransferView::Ir(IrMode::Log));
     t.key("Alt+4");
-    t.st.update(Msg::SelectMeas(MeasId(5)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(5)), &t.keys);
     assert_eq!(t.st.kind_meas(PaneKind::Spl).map(|m| m.id), Some(MeasId(5)));
     t.key("G");
     t.key("W");
@@ -390,7 +390,7 @@ fn layout_is_remembered_and_restored() {
     assert_eq!(ir_view.measurement, None);
     // Ticks change nothing and write nothing.
     t.st.prefs_dirty = false;
-    t.st.update(
+    t.st.apply(
         Msg::Tick {
             now_s: 5.0,
             dt_s: 0.1,
@@ -405,6 +405,8 @@ fn layout_is_remembered_and_restored() {
         target: "local daemon".into(),
         server: "ac2d test".into(),
         client_id: ClientId("c1".into()),
+        rig_id: RIG,
+        name: "test rig".into(),
     };
     let mut u = T::disconnected();
     u.st.set_prefs(prefs.clone());
@@ -412,7 +414,7 @@ fn layout_is_remembered_and_restored() {
     assert!(u.st.layout.maximized && u.st.fullscreen);
     assert_eq!(u.st.kind_modes(PaneKind::Spl).spl, SplMode::Meter);
     assert_eq!(ir_mode(&u), TransferView::Ir(IrMode::Log));
-    assert_eq!(u.st.stimulus.phase, StimPhase::Idle);
+    assert_eq!(u.st.rig.stimulus.phase, StimPhase::Idle);
     // Before the daemon's state, the remembered names stay as they were.
     assert_eq!(u.st.layout_prefs(), prefs.layout);
     u.conn(connected.clone());
@@ -478,7 +480,7 @@ fn the_link_receives_what_the_panes_draw() {
     let r = t.st.sync_link();
     assert!(
         r.iter()
-            .any(|r| matches!(r, Request::Topics(x) if *x == t.st.wanted_topics())),
+            .any(|r| matches!(r, (RIG, Request::Topics(x)) if *x == t.st.wanted_topics())),
         "{r:?}"
     );
     assert!(t.st.sync_link().is_empty(), "sent once");
@@ -503,7 +505,7 @@ fn the_link_receives_what_the_panes_draw() {
     assert!(
         t.st.sync_link()
             .iter()
-            .any(|r| matches!(r, Request::Topics(_)))
+            .any(|r| matches!(r, (RIG, Request::Topics(_))))
     );
     // The SPL pane alone: only the meter, and frames at its own rate.
     t.go(PaneKind::Spl);
@@ -535,7 +537,7 @@ fn session_dialog_notes_separate_clocks() {
         o.backend = BackendKind::Fake;
     }
     t.conn(mirror(s.clone()));
-    t.st.update(Msg::Command(CommandId::OpenSession), &t.keys);
+    t.st.apply(Msg::Command(CommandId::OpenSession), &t.keys);
     t.conn(ConnEvent::Devices(Ok(backends(true))));
     assert!(dialog(&t).is_open_device());
     assert_eq!(dialog(&t).clock_note(), None);
@@ -546,7 +548,7 @@ fn session_dialog_notes_separate_clocks() {
         o.clock = ClockRelation::Unknown;
     }
     t.conn(mirror(s));
-    t.st.update(Msg::Command(CommandId::OpenSession), &t.keys);
+    t.st.apply(Msg::Command(CommandId::OpenSession), &t.keys);
     let mut b = backends(true);
     b[0].devices[0].duplex_clock = ClockRelation::Unknown;
     t.conn(ConnEvent::Devices(Ok(b)));
@@ -564,8 +566,8 @@ fn session_dialog_notes_separate_clocks() {
 #[test]
 fn need_meas_names_the_keys_that_reach_a_measurement() {
     let mut t = T::new();
-    t.st.selected = None;
-    t.st.selected_trace = None;
+    t.st.rig.selected = None;
+    t.st.rig.selected_trace = None;
     assert!(
         t.st.need_meas(&[MeasKind::publishes_tf], "transfer")
             .is_none()
@@ -594,13 +596,13 @@ fn pane_caption_names_only_a_trace_the_pane_draws() {
     loud.edit.name = "loudness 85 → 100 phon".into();
     loud.kind = TraceKind::Target;
     t.conn(with_traces(vec![loud.clone()]));
-    t.st.update(Msg::SelectTrace(TraceId(12)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(12)), &t.keys);
     let v = t.st.pane_caption_variants(t.pane(PaneKind::Transfer));
     assert!(!v.iter().any(|c| c.contains("loudness")), "{v:?}");
     let mut t = T::new();
     loud.edit.owner = ac2_proto::model::TraceOwner::Meas { meas: MeasId(1) };
     t.conn(with_traces(vec![loud]));
-    t.st.update(Msg::SelectTrace(TraceId(12)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(12)), &t.keys);
     let v = t.st.pane_caption_variants(t.pane(PaneKind::Transfer));
     assert!(
         v.first()

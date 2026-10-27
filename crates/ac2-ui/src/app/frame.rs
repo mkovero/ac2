@@ -58,7 +58,12 @@ impl eframe::App for App {
         self.pump_link();
         // Ages keep counting between the link's snapshots.
         let now = Instant::now();
-        let daemon_health = self.state.mirror.as_ref().and_then(|m| m.health.as_ref());
+        let daemon_health = self
+            .state
+            .rig
+            .mirror
+            .as_ref()
+            .and_then(|m| m.health.as_ref());
         let remote_host = daemon_health
             .is_some_and(|h| !self.link_embedded && h.host != self.health.local_host());
         let xruns = daemon_health.and_then(|h| h.audio).map(|a| a.xruns);
@@ -66,10 +71,10 @@ impl eframe::App for App {
             self.health.frame(now, remote_host);
         }
         self.health.daemon_xruns(xruns, now);
-        if let Some(d) = &self.state.data
+        if let Some(d) = &self.state.rig.data
             && d.drained < now
         {
-            self.state.data = Some(Arc::new(d.aged(now)));
+            self.state.rig.data = Some(Arc::new(d.aged(now)));
         }
         let (clock, clock_wait) = ClockTexts::at(&self.state, now);
         if clock != self.clock {
@@ -103,10 +108,13 @@ impl eframe::App for App {
         if std::mem::take(&mut self.state.want_connect_dialog) {
             match &self.connect_setup {
                 Some(c) => self.connect = Some(c.dialog()),
-                None => self.dispatch(Msg::Conn(Box::new(crate::conn::ConnEvent::Reply {
-                    what: "connect dialog".into(),
-                    result: Err("not available in this window".into()),
-                }))),
+                None => self.dispatch(Msg::Conn(
+                    self.state.rig.id,
+                    Box::new(crate::conn::ConnEvent::Reply {
+                        what: "connect dialog".into(),
+                        result: Err("not available in this window".into()),
+                    }),
+                )),
             }
         }
         self.follow_window(&ctx);
@@ -131,10 +139,10 @@ impl eframe::App for App {
                 Ok(done) => (done, Ok(())),
                 Err(e) => ("export pane".to_string(), Err(e)),
             };
-            self.dispatch(Msg::Conn(Box::new(crate::conn::ConnEvent::Reply {
-                what,
-                result,
-            })));
+            self.dispatch(Msg::Conn(
+                self.state.rig.id,
+                Box::new(crate::conn::ConnEvent::Reply { what, result }),
+            ));
         }
         if let Some(d) = self.connect.as_mut()
             && let Some(choice) = d.show(&ctx, &theme::chrome(&t))
@@ -147,7 +155,7 @@ impl eframe::App for App {
             let dt = ctx.input(|i| i.predicted_dt);
             ctx.request_repaint_after(crate::pace::repaint_delay(w, dt));
         }
-        if self.conn.is_some() {
+        if self.state.rig.link.is_some() {
             ctx.request_repaint_after(SLOW_REFRESH);
         }
         if let Some(wait) = self.save_prefs(Instant::now()) {
@@ -206,7 +214,7 @@ impl App {
     /// `--smoke`: prints every device of the daemon's list once it arrives and quits, or
     /// gives up after [`SMOKE_LIMIT`]. The last line says which.
     fn smoke_step(&mut self, ctx: &egui::Context) {
-        let done = if let Some(backends) = &self.state.devices {
+        let done = if let Some(backends) = &self.state.rig.devices {
             for b in backends {
                 for d in &b.devices {
                     println!(
@@ -231,7 +239,7 @@ impl App {
             // whether that dialog lists devices) depends on the daemon's state, not on it.
             if !self.smoke_asked
                 && self.state.connected()
-                && let Some(c) = &self.conn
+                && let Some(c) = &self.state.rig.link
             {
                 self.smoke_asked = true;
                 c.send(crate::conn::Request::Devices);

@@ -155,7 +155,6 @@ pub struct App {
     pub keymap: Keymap,
     pub(crate) keymap_path: Option<std::path::PathBuf>,
     prefs_path: Option<std::path::PathBuf>,
-    conn: Option<Conn>,
     started: Instant,
     last_tick: Option<Instant>,
     /// When `ui.toml` was last written ([`PREFS_SAVE_INTERVAL`]).
@@ -196,8 +195,8 @@ pub struct App {
     passes: u64,
     /// The connect dialog, while open: the app has no link until the operator picks one.
     connect: Option<ConnectDialog>,
-    /// A daemon hosted in this process, chosen in the connect dialog. Declared after `conn`
-    /// so the link (and the stimulus it may hold) goes first.
+    /// A daemon hosted in this process, chosen in the connect dialog. Declared after `state`,
+    /// which holds the links, so a link (and the stimulus it may hold) goes first.
     embedded: Option<Embedded>,
     /// The window's size and position as last seen in a normal (not full-screen, not
     /// maximised) state: saved with the preferences on exit.
@@ -261,17 +260,21 @@ impl App {
             Conn::start(t, link_wake(ctx, Arc::clone(&pacer))).ok()
         });
         let mut state = AppState::new(opts.theme, describe);
+        state.rig.link = conn;
         state.set_prefs(opts.prefs);
-        state.open_session_when_empty = opts.open_session_dialog;
-        state.embedded_autosave = opts.embedded_autosave;
+        state.rig.open_session_when_empty = opts.open_session_dialog;
+        state.rig.embedded_autosave = opts.embedded_autosave;
         state.client_key = opts.client_key;
         state.update(Msg::Rasterizer(rasterizer), &opts.keymap);
         for n in opts.notices {
             state.update(
-                Msg::Conn(Box::new(crate::conn::ConnEvent::Reply {
-                    what: "startup".into(),
-                    result: Err(n),
-                })),
+                Msg::Conn(
+                    state.rig.id,
+                    Box::new(crate::conn::ConnEvent::Reply {
+                        what: "startup".into(),
+                        result: Err(n),
+                    }),
+                ),
                 &opts.keymap,
             );
         }
@@ -280,7 +283,6 @@ impl App {
             keymap: opts.keymap,
             keymap_path: opts.keymap_path,
             prefs_path: opts.prefs_path,
-            conn,
             started: opts.started,
             last_tick: None,
             prefs_saved: None,
@@ -380,7 +382,7 @@ impl App {
         let target = match choice {
             Choice::Target(t) => {
                 // Another daemon: if it has no audio I/O, the audio setup once.
-                self.state.open_session_when_empty = true;
+                self.state.rig.open_session_when_empty = true;
                 *t
             }
             Choice::Embedded(b) => match start_embedded(b) {
@@ -389,19 +391,20 @@ impl App {
                         config: e.client_config(dialog.client_name()),
                         describe: e.describe(),
                     };
-                    self.conn = None;
-                    self.state.embedded_autosave = Some(e.autosaves());
+                    self.state.rig.link = None;
+                    self.state.rig.embedded_autosave = Some(e.autosaves());
                     self.embedded = Some(e);
                     // Real audio: the operator picks the interface and channels. The
                     // simulated rig is already measuring.
-                    self.state.open_session_when_empty = b != EmbeddedBackend::Fake;
+                    self.state.rig.open_session_when_empty = b != EmbeddedBackend::Fake;
                     if b == EmbeddedBackend::Fake {
-                        self.dispatch(Msg::Conn(Box::new(crate::conn::ConnEvent::Reply {
-                            what: "simulated rig: audio I/O open, \"demo\" measuring · L types a \
-                                   level, Space arms, Enter fires"
+                        let reply = crate::conn::ConnEvent::Reply {
+                            what: "simulated rig: audio I/O open, \"demo\" measuring · L \
+                                       types a level, Space arms, Enter fires"
                                 .into(),
                             result: Ok(()),
-                        })));
+                        };
+                        self.dispatch(Msg::Conn(self.state.rig.id, Box::new(reply)));
                     }
                     t
                 }
@@ -412,14 +415,14 @@ impl App {
                 }
             },
         };
-        self.conn = None;
+        self.state.rig.link = None;
         let mut target = target;
         target.config.received_bytes = Arc::clone(&self.health.received);
         self.link_embedded = embedded_target(&target);
         self.daemon_addr = network_host(&target);
         match Conn::start(target, link_wake(ctx.clone(), Arc::clone(&self.pacer))) {
             Ok(c) => {
-                self.conn = Some(c);
+                self.state.rig.link = Some(c);
                 self.connect = None;
             }
             Err(e) => dialog_error(&mut self.connect, format!("link thread: {e}")),
@@ -468,8 +471,8 @@ impl App {
         let easing = self.state.bars_easing(Instant::now());
         let gliding = self.state.spectrum_gliding(Instant::now());
         let glowing = self.state.embers_glowing();
-        let data = self.state.data.clone();
-        let mirror = self.state.mirror.clone();
+        let data = self.state.rig.data.clone();
+        let mirror = self.state.rig.mirror.clone();
         let mut reqs = self.state.update(msg, &self.keymap);
         reqs.extend(self.state.sync_link());
         let panes = match what {
@@ -487,8 +490,8 @@ impl App {
                 panes
             }
             Touches::Toasts => Vec::new(),
-            Touches::Data => data_touches(data.as_deref(), self.state.data.as_deref()),
-            Touches::Mirror => match (&mirror, &self.state.mirror) {
+            Touches::Data => data_touches(data.as_deref(), self.state.rig.data.as_deref()),
+            Touches::Mirror => match (&mirror, &self.state.rig.mirror) {
                 (Some(a), Some(b)) if !crate::conn::mirror_differs(a, b) => Vec::new(),
                 _ => PaneKind::ALL.to_vec(),
             },
@@ -497,8 +500,8 @@ impl App {
             Touches::All => PaneKind::ALL.to_vec(),
         };
         self.touch(&panes);
-        if let Some(c) = &self.conn {
-            for r in reqs {
+        for (rig, r) in reqs {
+            if let Some(c) = self.state.find_rig(rig).and_then(|x| x.link.as_ref()) {
                 c.send(r);
             }
         }
@@ -546,23 +549,36 @@ impl App {
             // Still unsaved: written again later, said once per run of failures.
             Err(e) => {
                 if !std::mem::replace(&mut self.prefs_failing, true) {
-                    self.dispatch(Msg::Conn(Box::new(crate::conn::ConnEvent::Reply {
-                        what: "preferences".into(),
-                        result: Err(e),
-                    })));
+                    self.dispatch(Msg::Conn(
+                        self.state.rig.id,
+                        Box::new(crate::conn::ConnEvent::Reply {
+                            what: "preferences".into(),
+                            result: Err(e),
+                        }),
+                    ));
                 }
                 Some(PREFS_RETRY_INTERVAL)
             }
         }
     }
 
+    /// Feeds every rig's link events to the reducer, each tagged with its rig. The rig is
+    /// found by its place, not its id: its hello reply gives it its id.
     fn pump_link(&mut self) {
-        let events = self.conn.as_ref().map(Conn::drain).unwrap_or_default();
-        for e in events {
-            if matches!(e, crate::conn::ConnEvent::Data(_)) {
-                self.health.data_arrived();
+        for place in 0..self.state.rigs().count() {
+            let events = (self.state.rigs().nth(place))
+                .and_then(|r| r.link.as_ref())
+                .map(Conn::drain)
+                .unwrap_or_default();
+            for e in events {
+                if matches!(e, crate::conn::ConnEvent::Data(_)) {
+                    self.health.data_arrived();
+                }
+                let Some(rig) = self.state.rigs().nth(place).map(|r| r.id) else {
+                    break;
+                };
+                self.dispatch(Msg::Conn(rig, Box::new(e)));
             }
-            self.dispatch(Msg::Conn(Box::new(e)));
         }
     }
 
@@ -678,7 +694,7 @@ impl Touches {
             ) => Self::Toasts,
             Msg::Plate(_) | Msg::LegendScroll { .. } => Self::Plates,
             Msg::LeqStrip(..) => Self::Spl,
-            Msg::Conn(e) => match **e {
+            Msg::Conn(_, e) => match **e {
                 ConnEvent::Data(_) => Self::Data,
                 ConnEvent::Mirror(_) => Self::Mirror,
                 ConnEvent::LeqBackfill { .. } | ConnEvent::LeqSpan { .. } => Self::Spl,
@@ -764,7 +780,7 @@ impl ClockTexts {
             texts.push(age(a));
             changes.push((age_changes_in(a), age_step(a)));
         };
-        if let Some(d) = &st.data {
+        if let Some(d) = &st.rig.data {
             for f in d.latest.frames.values() {
                 let fresh = crate::scenes::freshness(st, f);
                 // Only a STALE tag counts its age; an audio-stopped curve says so without one.
@@ -783,7 +799,7 @@ impl ClockTexts {
                 (st.now_s / SLOW_REFRESH.as_secs_f64()).floor()
             ));
         }
-        if let Some(t) = st.mirror.as_ref().and_then(|m| m.last_ka) {
+        if let Some(t) = st.rig.mirror.as_ref().and_then(|m| m.last_ka) {
             let silence = now.saturating_duration_since(t).as_secs_f64();
             if silence > ac2_scene::time::DAEMON_SILENT_AFTER_S {
                 count(silence, &mut texts);

@@ -18,7 +18,8 @@ use std::time::{Duration, Instant};
 
 /// The streams of `meas` the app holds frames of now.
 fn streams_of(s: &AppState, meas: MeasId) -> Vec<Stream> {
-    s.data
+    s.rig
+        .data
         .as_ref()
         .map(|d| {
             d.latest
@@ -45,7 +46,7 @@ fn subscriptions_follow_the_panes_from_an_empty_daemon() -> R {
     let m = d.st.selected_meas().cloned().ok_or("measurement")?.id;
     // The level typed there stays: arm and fire.
     d.key("Space");
-    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
     d.key("Enter");
     d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
     let has = |s: &AppState, st: Stream| streams_of(s, m).contains(&st);
@@ -139,11 +140,12 @@ fn spectrograph_from_an_empty_daemon() -> R {
     );
     // The level typed for the transfer measurement is still set: arm and fire.
     d.key("Space");
-    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
     d.key("Enter");
     d.until("firing", |s| s.daemon().is_some_and(|d| d.generator.firing))?;
     let filled = |s: &AppState, n: usize| {
-        s.spectrographs
+        s.rig
+            .spectrographs
             .get(&sp)
             .is_some_and(|h| h.ring().iter().flatten().count() >= n)
     };
@@ -207,7 +209,10 @@ fn spectrograph_from_an_empty_daemon() -> R {
             .is_some_and(|m| s.display_of(m).spectrograph_span_s == 60)
     })?;
     d.until("a history of a minute", |s| {
-        s.spectrographs.get(&sp).is_some_and(|h| h.span_s() == 60)
+        s.rig
+            .spectrographs
+            .get(&sp)
+            .is_some_and(|h| h.span_s() == 60)
     })?;
     d.until("frames in the minute", |s| filled(s, 10))?;
     let s = ac2_ui::scenes::spectrograph(
@@ -278,7 +283,7 @@ fn spectrograph_from_an_empty_daemon() -> R {
         d.st.kind_modes(ac2_ui::state::PaneKind::Spectrum).spectrum,
         SpectrumMode::Spectrum
     );
-    assert!(d.st.spectrographs.is_empty());
+    assert!(d.st.rig.spectrographs.is_empty());
     drop(d);
     drop(daemon);
     Ok(())
@@ -311,7 +316,7 @@ fn record_and_replay_from_the_app() -> R {
 
     // The level typed for the first run stands: arm and fire.
     d.key("Space");
-    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
     d.key("Enter");
     d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
     d.key("Ctrl+K");
@@ -373,7 +378,7 @@ fn record_and_replay_from_the_app() -> R {
         stream: Stream::Tf,
     };
     d.until("the −6 dB path at 1 kHz from the recording", |s| {
-        s.data.as_ref().is_some_and(|x| {
+        s.rig.data.as_ref().is_some_and(|x| {
             x.latest.get(&topic).is_some_and(|f| {
                 f.frame.stamp.session_epoch == epoch
                     && match &f.frame.data {
@@ -463,7 +468,8 @@ fn two_spectrographs_side_by_side_from_an_empty_daemon() -> R {
     assert_eq!(captions(&d.st), ["Spectrum 1", "Spectrum 2"]);
     // Both histories fill, side by side (30 slots a second at 30 s).
     let filled = |s: &AppState, id: MeasId, n: usize| {
-        s.spectrographs
+        s.rig
+            .spectrographs
             .get(&id)
             .is_some_and(|h| h.ring().iter().flatten().count() >= n)
     };
@@ -507,8 +513,8 @@ fn two_spectrographs_side_by_side_from_an_empty_daemon() -> R {
                 d.key(key);
                 d.pump();
                 steps += 1;
-                if d.st.selected == Some(id)
-                    && d.st.selected_trace.is_none()
+                if d.st.rig.selected == Some(id)
+                    && d.st.rig.selected_trace.is_none()
                     && !d.st.live_row_selected()
                 {
                     break;

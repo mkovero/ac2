@@ -15,7 +15,7 @@ fn session_dialog() {
     let _meters = Meters::start(Arc::clone(&fake));
     let mut h = harness(options_at(Some(fake.endpoints())));
     step_until(&mut h, "synced", |a| {
-        a.state.mirror.as_ref().is_some_and(|m| m.synced())
+        a.state.rig.mirror.as_ref().is_some_and(|m| m.synced())
     });
     h.key_press_modifiers(Modifiers::SHIFT, Key::O);
     // This fake publishes preview frames unasked, and with a session open the meters are
@@ -257,7 +257,7 @@ fn sessions_dialog_save_as() {
     let fake = ac2_client::fake::FakeDaemon::start(common::fake_options()).expect("fake daemon");
     let mut h = harness(options_at(Some(fake.endpoints())));
     step_until(&mut h, "synced", |a| {
-        a.state.mirror.as_ref().is_some_and(|m| m.synced())
+        a.state.rig.mirror.as_ref().is_some_and(|m| m.synced())
     });
     h.key_press_modifiers(Modifiers::ALT, Key::S);
     step_until(&mut h, "the dialog, listed", |a| {
@@ -355,7 +355,7 @@ fn kinds_and_a_pair_from_the_session_dialog() {
     let _meters = Meters::start(Arc::clone(&fake));
     let mut h = harness(options_at(Some(fake.endpoints())));
     step_until(&mut h, "synced", |a| {
-        a.state.mirror.as_ref().is_some_and(|m| m.synced())
+        a.state.rig.mirror.as_ref().is_some_and(|m| m.synced())
     });
     h.key_press_modifiers(Modifiers::SHIFT, Key::O);
     step_until(&mut h, "dialog with devices and meters", |a| {

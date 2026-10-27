@@ -33,7 +33,7 @@ fn the_pane_export_prompt_hands_the_export_to_the_app() {
     t.conn(mirror(with_spl()));
     let pane = t.st.layout.focus;
     let meas = t.st.pane_meas(pane).map(|m| m.config.name.clone());
-    t.st.update(Msg::Command(CommandId::ExportPanePng), &t.keys);
+    t.st.apply(Msg::Command(CommandId::ExportPanePng), &t.keys);
     let Overlay::Prompt(p) = &t.st.overlay else {
         panic!("{:?}", t.st.overlay)
     };

@@ -73,9 +73,9 @@ fn smoothing_keys_step_the_pane_measurement() {
     assert!(t.key("K").is_empty());
     assert!(t.last_toast().contains("widest"), "{}", t.last_toast());
     // Palette entries set a step directly.
-    let r = t.st.update(Msg::Command(CommandId::SmoothOff), &t.keys);
+    let r = t.st.apply(Msg::Command(CommandId::SmoothOff), &t.keys);
     assert_eq!(smoothing_set(&r).1, None);
-    let r = t.st.update(Msg::Command(CommandId::Smooth24), &t.keys);
+    let r = t.st.apply(Msg::Command(CommandId::Smooth24), &t.keys);
     assert_eq!(
         smoothing_set(&r).1,
         smoothing(SmoothingFraction::TwentyFourth, SmoothingMode::Magnitude)
@@ -144,8 +144,8 @@ fn smoothing_keys_change_a_selected_slot() {
     slot.edit.owner = ac2_proto::model::TraceOwner::Meas { meas: MeasId(1) };
     t.conn(with_traces(vec![slot, spec, locked]));
     // A click on slot 3 selects it: K changes its trace, the caption says so.
-    t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
-    assert_eq!(t.st.selected_trace, Some(TraceId(10)));
+    t.st.apply(Msg::SelectTrace(TraceId(10)), &t.keys);
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(10)));
     assert_eq!(
         t.st.smoothing_caption(t.pane(PaneKind::Transfer))
             .as_deref(),
@@ -179,7 +179,7 @@ fn smoothing_keys_change_a_selected_slot() {
         other => panic!("{other:?}"),
     }
     // A spectrum slot is power-smoothed; its caption goes to the spectrum pane.
-    t.st.update(Msg::SelectTrace(TraceId(11)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(11)), &t.keys);
     assert_eq!(
         t.st.smoothing_caption(t.pane(PaneKind::Spectrum))
             .as_deref(),
@@ -198,21 +198,21 @@ fn smoothing_keys_change_a_selected_slot() {
         )
     );
     // A locked slot says so and sends nothing.
-    t.st.update(Msg::SelectTrace(TraceId(12)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(12)), &t.keys);
     assert!(t.key("K").is_empty());
     assert!(t.last_toast().contains("locked"));
     // A second click deselects; the keys act on the pane's measurement again.
-    t.st.update(Msg::SelectTrace(TraceId(12)), &t.keys);
-    assert_eq!(t.st.selected_trace, None);
+    t.st.apply(Msg::SelectTrace(TraceId(12)), &t.keys);
+    assert_eq!(t.st.rig.selected_trace, None);
     assert_eq!(smoothing_set(&t.key("K")).0, "m1");
     // A pane click keeps the slot selected; a measurement's row deselects it.
-    t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
-    t.st.update(Msg::FocusPane(t.pane(PaneKind::Transfer)), &t.keys);
-    assert_eq!(t.st.selected_trace, Some(TraceId(10)));
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
-    assert_eq!(t.st.selected_trace, None);
+    t.st.apply(Msg::SelectTrace(TraceId(10)), &t.keys);
+    t.st.apply(Msg::FocusPane(t.pane(PaneKind::Transfer)), &t.keys);
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(10)));
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
+    assert_eq!(t.st.rig.selected_trace, None);
     // A selected trace that goes away is forgotten.
-    t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(10)), &t.keys);
     t.conn(with_traces(vec![]));
-    assert_eq!(t.st.selected_trace, None);
+    assert_eq!(t.st.rig.selected_trace, None);
 }

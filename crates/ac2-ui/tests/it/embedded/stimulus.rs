@@ -176,7 +176,7 @@ fn slow_the_stimulus_follows_the_view_from_the_app() -> R {
     d.key("Enter");
     arm_new_sweep(&mut d, sweeps_before)?;
     d.until("armed with the sweep", |s| {
-        s.stimulus.phase == StimPhase::Armed
+        s.rig.stimulus.phase == StimPhase::Armed
     })?;
     d.key("Enter");
     let sweeps = |s: &AppState| {
@@ -190,8 +190,8 @@ fn slow_the_stimulus_follows_the_view_from_the_app() -> R {
     };
     d.until("the first sweep stored, the stimulus off", |s| {
         sweeps(s).len() == 1
-            && s.sweep.run.is_none()
-            && s.stimulus.phase == StimPhase::Idle
+            && s.rig.sweep.run.is_none()
+            && s.rig.stimulus.phase == StimPhase::Idle
             && s.daemon().is_some_and(|x| x.generator.owner.is_none())
     })?;
     assert_eq!(d.st.layout.focus_kind(), PaneKind::Distortion);
@@ -208,7 +208,7 @@ fn slow_the_stimulus_follows_the_view_from_the_app() -> R {
     d.key("Space");
     assert_eq!(d.st.overlay, Overlay::None);
     d.until("armed with the re-sweep", |s| {
-        s.stimulus.phase == StimPhase::Armed
+        s.rig.stimulus.phase == StimPhase::Armed
             && s.daemon().is_some_and(|x| {
                 x.generator.settings.as_ref().is_some_and(|g| {
                     matches!(g.signal, Signal::Ess { .. }) && (g.level.0 + 26.0).abs() < 1e-9
@@ -221,7 +221,7 @@ fn slow_the_stimulus_follows_the_view_from_the_app() -> R {
     );
     d.key("Enter");
     d.until("the second sweep stored", |s| {
-        sweeps(s).len() == 2 && s.sweep.run.is_none() && s.stimulus.phase == StimPhase::Idle
+        sweeps(s).len() == 2 && s.rig.sweep.run.is_none() && s.rig.stimulus.phase == StimPhase::Idle
     })?;
     let all = sweeps(&d.st);
     let settings = |src: &TraceSource| match src {
@@ -253,7 +253,7 @@ fn slow_the_stimulus_follows_the_view_from_the_app() -> R {
     // speaker and the loopback); the measurement gets signal.
     d.until("the lease given back", |s| {
         s.daemon().is_some_and(|x| x.generator.owner.is_none())
-            && s.stimulus.phase == StimPhase::Idle
+            && s.rig.stimulus.phase == StimPhase::Idle
     })?;
     d.key("Alt+1");
     assert_eq!(
@@ -262,7 +262,7 @@ fn slow_the_stimulus_follows_the_view_from_the_app() -> R {
     );
     d.key("Space");
     d.until("armed with the noise", |s| {
-        s.stimulus.phase == StimPhase::Armed
+        s.rig.stimulus.phase == StimPhase::Armed
     })?;
     assert_eq!(
         hint(&d.st).as_deref(),
@@ -339,7 +339,7 @@ fn settings_name_an_output_route_the_stimulus_and_set_the_max_level() -> R {
         |s| matches!(&s.overlay, Overlay::Choose(c) if c.purpose == ChoicePurpose::NewMeasurement),
     )?;
     d.key("Escape");
-    assert_eq!(d.st.stimulus.outputs, vec![1]);
+    assert_eq!(d.st.rig.stimulus.outputs, vec![1]);
     d.fire()?;
     let outputs =
         d.st.daemon()
@@ -378,7 +378,7 @@ fn settings_name_an_output_route_the_stimulus_and_set_the_max_level() -> R {
     d.send(Msg::Text("-40".into()));
     d.key("Enter");
     d.key("Space");
-    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
     d.key("Ctrl+P");
     d.send(Msg::Settings(ac2_ui::state::SettingsMsg::Ceiling));
     d.send(Msg::Text("-20".into()));
@@ -392,7 +392,7 @@ fn settings_name_an_output_route_the_stimulus_and_set_the_max_level() -> R {
     );
     d.key("Shift+Escape");
     d.until("disarmed", |s| {
-        s.stimulus.phase == StimPhase::Idle && s.daemon().is_some_and(|x| !x.generator.armed)
+        s.rig.stimulus.phase == StimPhase::Idle && s.daemon().is_some_and(|x| !x.generator.armed)
     })?;
     d.key("Enter");
     assert!(

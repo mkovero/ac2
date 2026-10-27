@@ -181,11 +181,11 @@ fn tree_dots_have_the_colours_of_their_curves() {
     }
     // Hidden: a ring of the same colour.
     let sub = curve("Sub");
-    t.st.update(Msg::ToggleMeasShown(MeasId(2)), &t.keys);
+    t.st.apply(Msg::ToggleMeasShown(MeasId(2)), &t.keys);
     let rows = t.st.tree_rows();
     let row = rows.iter().find(|r| r.name == "Sub (live)").expect("row");
     assert_eq!(row.dot, Some((sub, false)));
-    t.st.update(Msg::ToggleMeasShown(MeasId(6)), &t.keys);
+    t.st.apply(Msg::ToggleMeasShown(MeasId(6)), &t.keys);
     let rows = t.st.tree_rows();
     let row = rows.iter().find(|r| r.name == "pre ÷ post").expect("row");
     assert_eq!(row.dot.map(|d| d.1), Some(false));
@@ -222,11 +222,11 @@ fn the_tree_lists_what_each_measurement_owns_and_folds() {
     );
     // V steps through the traces in the tree's order.
     t.key("V");
-    assert_eq!(t.st.selected_trace, Some(TraceId(3)));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(3)));
     t.key("V");
-    assert_eq!(t.st.selected_trace, Some(TraceId(4)));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(4)));
     // Folding Main L hides its rows; its arrow (or the palette command) unfolds it.
-    t.st.update(
+    t.st.apply(
         Msg::ToggleGroup(TraceOwner::Meas { meas: MeasId(1) }),
         &t.keys,
     );
@@ -240,8 +240,8 @@ fn the_tree_lists_what_each_measurement_owns_and_folds() {
             "1083 94cm"
         ]
     );
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
-    t.st.update(Msg::Command(CommandId::ToggleGroup), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::Command(CommandId::ToggleGroup), &t.keys);
     assert_eq!(tree_names(&t).len(), 9);
 }
 
@@ -251,7 +251,7 @@ fn the_tree_lists_what_each_measurement_owns_and_folds() {
 fn shift_a_hides_a_measurement_with_everything_under_it() {
     let mut t = T::new();
     t.conn(mirror(tree_state()));
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     let r = t.key("Shift+A");
     let hidden: Vec<TraceId> = r
         .iter()
@@ -290,7 +290,7 @@ fn shift_a_hides_a_measurement_with_everything_under_it() {
 fn move_files_a_trace_under_another_measurement() {
     let mut t = T::new();
     t.conn(mirror(tree_state()));
-    t.st.update(Msg::SelectTrace(TraceId(5)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(5)), &t.keys);
     t.key("Shift+F2");
     let Overlay::Choose(c) = &t.st.overlay else {
         panic!("{:?}", t.st.overlay);
@@ -319,7 +319,7 @@ fn move_files_a_trace_under_another_measurement() {
     }
     assert_eq!(t.st.overlay, Overlay::None);
     // A math channel moves with `meas.update`.
-    t.st.update(Msg::SelectMeas(MeasId(6)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(6)), &t.keys);
     t.key("Shift+F2");
     t.key("Down");
     t.key("Down");
@@ -343,7 +343,7 @@ fn move_files_a_trace_under_another_measurement() {
 fn deleting_a_measurement_with_traces_asks_keep_delete_or_cancel() {
     let mut t = T::new();
     t.conn(mirror(tree_state()));
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     assert!(t.key("Delete").is_empty());
     let Overlay::Choose(c) = &t.st.overlay else {
         panic!("{:?}", t.st.overlay);
@@ -388,7 +388,7 @@ fn deleting_a_measurement_with_traces_asks_keep_delete_or_cancel() {
 fn a_new_math_channel_lives_under_the_selected_measurement() {
     let mut t = T::new();
     t.conn(mirror(tree_state()));
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     t.key("Shift+M");
     let Overlay::Form(f) = &t.st.overlay else {
         panic!("{:?}", t.st.overlay);
@@ -421,7 +421,7 @@ fn a_new_math_channel_lives_under_the_selected_measurement() {
 fn tab_steps_through_the_trees_rows() {
     let mut t = T::new();
     t.conn(mirror(tree_state()));
-    t.st.selected = None;
+    t.st.rig.selected = None;
     // Main L, its live curve, pre-EQ, post-EQ, pre ÷ post, Sub, its live curve, the
     // imported trace; then round again.
     let fwd: Vec<_> = (0..9).map(|_| tab(&mut t, "Tab")).collect();
@@ -432,9 +432,9 @@ fn tab_steps_through_the_trees_rows() {
 
     // Nothing selected: Shift+Tab starts at the last. (A click on the selected trace
     // deselects it.)
-    t.st.update(Msg::SelectTrace(TraceId(5)), &t.keys);
-    t.st.selected = None;
-    assert_eq!(t.st.selected_trace, None);
+    t.st.apply(Msg::SelectTrace(TraceId(5)), &t.keys);
+    t.st.rig.selected = None;
+    assert_eq!(t.st.rig.selected_trace, None);
     assert_eq!(tab(&mut t, "Shift+Tab"), "t5");
 
     // A measurement's row puts it on the focused pane, turning that into its kind, the
@@ -473,13 +473,13 @@ fn tab_steps_through_the_trees_rows() {
 fn tab_from_a_trace_goes_on_from_its_row() {
     let mut t = T::new();
     t.conn(mirror(tree_state()));
-    t.st.update(Msg::SelectTrace(TraceId(4)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(4)), &t.keys);
     assert_eq!(tab(&mut t, "Tab"), "m6");
-    t.st.update(Msg::SelectTrace(TraceId(3)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(3)), &t.keys);
     assert_eq!(tab(&mut t, "Shift+Tab"), "l1");
-    t.st.update(Msg::SelectTrace(TraceId(5)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(5)), &t.keys);
     assert_eq!(tab(&mut t, "Tab"), "m1");
-    t.st.update(Msg::SelectTrace(TraceId(5)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(5)), &t.keys);
     assert_eq!(tab(&mut t, "Shift+Tab"), "l2");
 }
 
@@ -490,11 +490,15 @@ fn tab_from_a_trace_goes_on_from_its_row() {
 fn tab_stops_on_live_curves_and_a_hides_them() {
     let mut t = T::new();
     t.conn(mirror(tree_state()));
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     assert!(!t.st.live_row_selected());
     assert_eq!(tab(&mut t, "Tab"), "l1");
     t.key("A");
-    assert!(t.st.hidden_meas.contains(&MeasId(1)), "{}", t.last_toast());
+    assert!(
+        t.st.rig.hidden_meas.contains(&MeasId(1)),
+        "{}",
+        t.last_toast()
+    );
     assert_eq!(tab(&mut t, "Tab"), "t3");
     assert_eq!(
         tab(&mut t, "Shift+Tab"),
@@ -502,21 +506,21 @@ fn tab_stops_on_live_curves_and_a_hides_them() {
         "a hidden live curve is still a stop"
     );
     t.key("A");
-    assert!(!t.st.hidden_meas.contains(&MeasId(1)));
+    assert!(!t.st.rig.hidden_meas.contains(&MeasId(1)));
 
     let pane = t.st.layout.focus;
-    t.st.update(Msg::SelectMeas(MeasId(2)), &t.keys);
-    t.st.update(
+    t.st.apply(Msg::SelectMeas(MeasId(2)), &t.keys);
+    t.st.apply(
         Msg::LegendPick(pane, ac2_scene::trace::TraceKey::Live(MeasId(1))),
         &t.keys,
     );
     assert!(t.st.live_row_selected());
     assert_eq!(tab(&mut t, "Tab"), "t3");
-    t.st.update(Msg::SelectLive(MeasId(2)), &t.keys);
+    t.st.apply(Msg::SelectLive(MeasId(2)), &t.keys);
     assert!(t.st.live_row_selected());
     assert_eq!(tab(&mut t, "Shift+Tab"), "m2");
-    t.st.update(Msg::SelectLive(MeasId(1)), &t.keys);
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectLive(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     assert!(!t.st.live_row_selected());
     assert_eq!(tab(&mut t, "Tab"), "l1");
 }
@@ -529,15 +533,15 @@ fn tab_skips_the_rows_of_folded_groups() {
     t.conn(mirror(tree_state()));
     let main = TraceOwner::Meas { meas: MeasId(1) };
     let sub = TraceOwner::Meas { meas: MeasId(2) };
-    t.st.collapsed.insert(main);
-    t.st.collapsed.insert(sub);
-    t.st.selected = Some(MeasId(1));
+    t.st.rig.collapsed.insert(main);
+    t.st.rig.collapsed.insert(sub);
+    t.st.rig.selected = Some(MeasId(1));
     let fwd: Vec<_> = (0..3).map(|_| tab(&mut t, "Tab")).collect();
     assert_eq!(fwd, ["m2", "t5", "m1"]);
-    assert!(t.st.collapsed.contains(&main) && t.st.collapsed.contains(&sub));
-    t.st.update(Msg::SelectTrace(TraceId(4)), &t.keys);
+    assert!(t.st.rig.collapsed.contains(&main) && t.st.rig.collapsed.contains(&sub));
+    t.st.apply(Msg::SelectTrace(TraceId(4)), &t.keys);
     assert_eq!(tab(&mut t, "Tab"), "m2");
-    t.st.update(Msg::SelectTrace(TraceId(4)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(4)), &t.keys);
     assert_eq!(tab(&mut t, "Shift+Tab"), "m1");
 }
 
@@ -548,9 +552,9 @@ fn tab_without_measurements_says_so() {
     let mut s = daemon_state();
     s.measurements.clear();
     t.conn(mirror(s));
-    t.st.selected = None;
+    t.st.rig.selected = None;
     t.key("Tab");
-    assert_eq!(t.st.selected, None);
+    assert_eq!(t.st.rig.selected, None);
     assert_eq!(t.last_toast(), "no measurements to step through");
 }
 

@@ -38,27 +38,27 @@ fn picking_a_measurement_puts_it_in_the_focused_pane() {
             }
         };
         // An RTA: the focused transfer pane turns into a spectrum / RTA pane.
-        t.st.update(Msg::SelectMeas(MeasId(4)), &t.keys);
+        t.st.apply(Msg::SelectMeas(MeasId(4)), &t.keys);
         shows(&t, PaneKind::Spectrum, 4);
         // A narrowband spectrum stays there, and the pane shows it.
-        t.st.update(Msg::SelectMeas(MeasId(2)), &t.keys);
+        t.st.apply(Msg::SelectMeas(MeasId(2)), &t.keys);
         shows(&t, PaneKind::Spectrum, 2);
         // A transfer measurement: back to a transfer pane.
-        t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
+        t.st.apply(Msg::SelectMeas(MeasId(3)), &t.keys);
         shows(&t, PaneKind::Transfer, 3);
         // An SPL meter: an SPL pane.
-        t.st.update(Msg::SelectMeas(MeasId(5)), &t.keys);
+        t.st.apply(Msg::SelectMeas(MeasId(5)), &t.keys);
         shows(&t, PaneKind::Spl, 5);
         // The IR view is a transfer pane's: a transfer measurement keeps the view.
         t.key("Alt+3");
         let ir = t.st.layout.focus;
-        t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+        t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
         assert_eq!(t.st.layout.focus, ir);
         assert!(t.st.layout.focused().shows_ir());
         assert_eq!(t.st.pane_meas(ir).map(|m| m.id), Some(MeasId(1)));
         // The pane's chip list picks for that pane.
         let sp = t.pane(PaneKind::Spectrum);
-        t.st.update(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(4))), &t.keys);
+        t.st.apply(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(4))), &t.keys);
         assert_eq!(t.st.layout.focus, sp);
         assert_eq!(t.st.pane_meas(sp).map(|m| m.id), Some(MeasId(4)));
     }
@@ -84,8 +84,8 @@ fn a_trace_row_click_or_tab_only_selects_maximised_or_not() {
         t.key("Alt+3");
         let layout = t.st.layout.clone();
         for id in [16, 13, 14, 16, 14] {
-            t.st.update(Msg::SelectTrace(TraceId(id)), &t.keys);
-            assert_eq!(t.st.selected_trace, Some(TraceId(id)));
+            t.st.apply(Msg::SelectTrace(TraceId(id)), &t.keys);
+            assert_eq!(t.st.rig.selected_trace, Some(TraceId(id)));
             assert_eq!(t.st.layout, layout, "click on t{id}, maximised {maximised}");
         }
         // Tab: every step that lands on a trace row leaves the layout as the step found it
@@ -94,7 +94,7 @@ fn a_trace_row_click_or_tab_only_selects_maximised_or_not() {
         for _ in 0..16 {
             let before = t.st.layout.clone();
             t.key("Tab");
-            if let Some(id) = t.st.selected_trace {
+            if let Some(id) = t.st.rig.selected_trace {
                 assert_eq!(
                     t.st.layout, before,
                     "Tab onto {id:?}, maximised {maximised}"
@@ -190,7 +190,7 @@ fn a_hides_and_shows_the_selected_measurement() {
     };
     assert_eq!(tf_names(&t), ["Main L"]);
     assert_eq!(spec_names(&t), ["Sub"]);
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     assert_eq!(row(&t, 1).mark, ac2_scene::meas_list::Mark::Active);
     assert!(t.key("A").is_empty(), "display only");
     assert_eq!(
@@ -232,7 +232,7 @@ fn a_hides_and_shows_the_selected_measurement() {
         ["Main L".to_owned()].into_iter().collect()
     );
     // The spectrum's measurement too.
-    t.st.update(Msg::SelectMeas(MeasId(2)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(2)), &t.keys);
     assert!(t.key("A").is_empty());
     assert!(spec_names(&t).is_empty());
     assert!(
@@ -240,7 +240,7 @@ fn a_hides_and_shows_the_selected_measurement() {
             .is_some_and(|c| c.starts_with("Sub hidden"))
     );
     // A stored trace selected after it: A is about the trace (the daemon keeps that).
-    t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(10)), &t.keys);
     assert_eq!(row(&t, 2).mark, ac2_scene::meas_list::Mark::Selected);
     let r = t.key("A");
     assert!(
@@ -248,11 +248,11 @@ fn a_hides_and_shows_the_selected_measurement() {
         "{r:?}"
     );
     // Back on the measurements: A shows them again.
-    t.st.update(Msg::SelectMeas(MeasId(2)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(2)), &t.keys);
     assert!(t.key("A").is_empty());
     assert_eq!(t.last_toast(), "Sub shown");
     assert_eq!(spec_names(&t), ["Sub"]);
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     t.key("A");
     assert_eq!(tf_names(&t), ["Main L"]);
     assert!(t.st.layout_prefs().hidden.is_empty());
@@ -264,7 +264,7 @@ fn a_hides_and_shows_the_selected_measurement() {
 #[test]
 fn hidden_measurements_are_remembered_by_name() {
     let mut t = T::new();
-    t.st.update(Msg::SelectMeas(MeasId(2)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(2)), &t.keys);
     t.key("A");
     let p = crate::prefs::UiPrefs {
         layout: t.st.layout_prefs(),
@@ -273,10 +273,10 @@ fn hidden_measurements_are_remembered_by_name() {
     let mut u = T::new();
     u.st.set_prefs(p);
     assert!(u.st.meas_hidden(u.st.meas(MeasId(2)).expect("Sub")));
-    u.st.update(Msg::SelectMeas(MeasId(2)), &u.keys);
+    u.st.apply(Msg::SelectMeas(MeasId(2)), &u.keys);
     u.key("Delete");
     assert!(meas_deleted(&u.key("Delete")).is_some());
-    assert!(u.st.hidden_meas.is_empty());
+    assert!(u.st.rig.hidden_meas.is_empty());
 }
 
 /// Sub and two transfer measurements both named Main (names may repeat).
@@ -295,7 +295,7 @@ fn two_mains() -> State {
 fn hiding_one_of_two_same_named_measurements_hides_only_it() {
     let mut t = T::new();
     t.conn(mirror(two_mains()));
-    t.st.update(Msg::ToggleMeasShown(MeasId(1)), &t.keys);
+    t.st.apply(Msg::ToggleMeasShown(MeasId(1)), &t.keys);
     let m = |t: &T, id| t.st.meas(MeasId(id)).cloned().expect("meas");
     assert!(t.st.meas_hidden(&m(&t, 1)));
     assert!(!t.st.meas_hidden(&m(&t, 3)), "hiding id 1 also hid id 3");
@@ -306,19 +306,19 @@ fn hiding_one_of_two_same_named_measurements_hides_only_it() {
 fn a_deleted_duplicates_choice_does_not_pass_to_the_other() {
     let mut t = T::new();
     t.conn(mirror(two_mains()));
-    t.st.update(Msg::ToggleMeasShown(MeasId(1)), &t.keys);
+    t.st.apply(Msg::ToggleMeasShown(MeasId(1)), &t.keys);
     let mut s = two_mains();
     s.measurements.retain(|m| m.id != MeasId(1));
     t.conn(mirror(s));
     assert!(!t.st.meas_hidden(t.st.meas(MeasId(3)).expect("Main")));
-    assert!(t.st.hidden_meas.is_empty());
+    assert!(t.st.rig.hidden_meas.is_empty());
 }
 
 /// A rename keeps the choice on the measurement; a new one under the old name starts shown.
 #[test]
 fn a_renamed_measurement_keeps_its_hidden_choice() {
     let mut t = T::new();
-    t.st.update(Msg::ToggleMeasShown(MeasId(1)), &t.keys);
+    t.st.apply(Msg::ToggleMeasShown(MeasId(1)), &t.keys);
     let mut s = daemon_state();
     s.measurements = vec![
         meas(1, "Main X", transfer()),
@@ -339,8 +339,8 @@ fn a_renamed_measurement_keeps_its_hidden_choice() {
 fn remembered_names_resolve_to_ids_and_a_shared_name_applies_to_none() {
     let mut t = T::new();
     t.conn(mirror(two_mains()));
-    t.st.update(Msg::ToggleMeasShown(MeasId(1)), &t.keys);
-    t.st.update(Msg::ToggleMeasShown(MeasId(2)), &t.keys);
+    t.st.apply(Msg::ToggleMeasShown(MeasId(1)), &t.keys);
+    t.st.apply(Msg::ToggleMeasShown(MeasId(2)), &t.keys);
     let kept = t.st.layout_prefs();
     assert_eq!(
         kept.hidden,
@@ -362,7 +362,7 @@ fn remembered_names_resolve_to_ids_and_a_shared_name_applies_to_none() {
     u.st.pane_auto = false;
     u.st.set_prefs(p);
     u.connect(two_mains());
-    assert_eq!(u.st.hidden_meas, [MeasId(2)].into());
+    assert_eq!(u.st.rig.hidden_meas, [MeasId(2)].into());
     // One Main deleted elsewhere: the other does not take the forgotten choice.
     let mut s = two_mains();
     s.measurements.retain(|m| m.id != MeasId(3));
@@ -375,9 +375,9 @@ fn remembered_names_resolve_to_ids_and_a_shared_name_applies_to_none() {
 #[test]
 fn a_hidden_measurement_stays_hidden_across_a_daemon_restart() {
     let mut t = T::new();
-    t.st.update(Msg::ToggleMeasShown(MeasId(2)), &t.keys);
+    t.st.apply(Msg::ToggleMeasShown(MeasId(2)), &t.keys);
     let mut s = daemon_state();
     s.measurements = vec![meas(7, "Sub", spectrum()), meas(8, "Main L", transfer())];
     t.conn(mirror_of(s, 2, Some("c1")));
-    assert_eq!(t.st.hidden_meas, [MeasId(7)].into());
+    assert_eq!(t.st.rig.hidden_meas, [MeasId(7)].into());
 }

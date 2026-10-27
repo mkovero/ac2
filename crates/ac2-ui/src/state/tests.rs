@@ -136,6 +136,23 @@ struct T {
     keys: Keymap,
 }
 
+/// The tests' daemon, as its hello reply names it.
+const RIG: RigId = RigId(0x7e57);
+
+impl AppState {
+    /// [`AppState::update`] in an app of one rig: every request it makes is for that rig.
+    fn apply(&mut self, msg: Msg, keys: &Keymap) -> Vec<Request> {
+        let active = self.active();
+        self.update(msg, keys)
+            .into_iter()
+            .map(|(rig, r)| {
+                assert_eq!(rig, active, "{r:?} for another rig");
+                r
+            })
+            .collect()
+    }
+}
+
 /// Four panes the way most tests want them: transfer across the top, spectrum, a transfer
 /// pane in its impulse-response view and SPL side by side below it; Alt+1..4 focus them in
 /// that order.
@@ -197,6 +214,8 @@ impl T {
             target: "local daemon".into(),
             server: "ac2d test".into(),
             client_id: ClientId("c1".into()),
+            rig_id: RIG,
+            name: "test rig".into(),
         });
         self.conn(mirror(state));
     }
@@ -230,7 +249,7 @@ impl T {
     fn show(&mut self, kind: PaneKind) {
         let f = self.st.layout.focus;
         self.st
-            .update(Msg::PanePick(f, PaneMenuRow::Kind(kind)), &self.keys);
+            .apply(Msg::PanePick(f, PaneMenuRow::Kind(kind)), &self.keys);
     }
 
     /// The focus set on the pane of `kind` without a message; with none, one added as
@@ -271,11 +290,11 @@ impl T {
     /// order split and the new half turned into it (so on the grid Alt+5 reaches it).
     fn go(&mut self, kind: PaneKind) {
         if let Some(id) = self.st.layout.lead(kind) {
-            self.st.update(Msg::FocusPane(id), &self.keys);
+            self.st.apply(Msg::FocusPane(id), &self.keys);
             return;
         }
         let last = *self.st.layout.root.reading_order().last().expect("a pane");
-        self.st.update(Msg::FocusPane(last), &self.keys);
+        self.st.apply(Msg::FocusPane(last), &self.keys);
         self.key("N");
         self.show(kind);
     }
@@ -288,23 +307,24 @@ impl T {
     }
 
     fn conn(&mut self, e: ConnEvent) -> Vec<Request> {
-        self.st.update(Msg::Conn(Box::new(e)), &self.keys)
+        self.st
+            .apply(Msg::Conn(self.st.active(), Box::new(e)), &self.keys)
     }
 
     fn key(&mut self, s: &str) -> Vec<Request> {
         let c = Chord::parse(s).expect(s);
-        self.st.update(Msg::Key(c), &self.keys)
+        self.st.apply(Msg::Key(c), &self.keys)
     }
 
     /// A key press followed by the text it types, as egui delivers it.
     fn type_key(&mut self, s: &str, text: &str) -> Vec<Request> {
         let mut r = self.key(s);
-        r.extend(self.st.update(Msg::Text(text.into()), &self.keys));
+        r.extend(self.st.apply(Msg::Text(text.into()), &self.keys));
         r
     }
 
     fn text(&mut self, s: &str) {
-        self.st.update(Msg::Text(s.into()), &self.keys);
+        self.st.apply(Msg::Text(s.into()), &self.keys);
     }
 
     fn last_toast(&self) -> &str {
@@ -514,7 +534,7 @@ fn sweep_measurement() -> Measurement {
 impl T {
     fn tick(&mut self, now_s: f64) {
         let keys = self.keys.clone();
-        self.st.update(Msg::Tick { now_s, dt_s: 0.016 }, &keys);
+        self.st.apply(Msg::Tick { now_s, dt_s: 0.016 }, &keys);
     }
 }
 
@@ -586,7 +606,7 @@ fn inserted(r: &[Request]) -> Option<DelayPick> {
 }
 
 fn prompt_text(t: &mut T, c: CommandId, text: &str) -> Vec<Request> {
-    t.st.update(Msg::Command(c), &t.keys);
+    t.st.apply(Msg::Command(c), &t.keys);
     if let Overlay::Prompt(p) = &mut t.st.overlay {
         p.text.clear();
     }
@@ -673,6 +693,8 @@ mod panes;
 mod meas_layout;
 
 mod rig;
+// Two rigs in one app: their ids collide, their state never mixes.
+mod rigs;
 
 mod settings_mirror;
 
@@ -686,7 +708,7 @@ mod plates;
 fn shift_c_steps_the_selected_measurements_colour() {
     use ac2_proto::model::ColourFamily;
     let mut t = T::new();
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     // Main L (1) has colour 1, Sub (2) colour 2: the next free one is colour 3.
     match t.key("Shift+C").as_slice() {
         [
@@ -703,7 +725,7 @@ fn shift_c_steps_the_selected_measurements_colour() {
     }
     match t
         .st
-        .update(Msg::Command(CommandId::PrevColour), &t.keys)
+        .apply(Msg::Command(CommandId::PrevColour), &t.keys)
         .as_slice()
     {
         [

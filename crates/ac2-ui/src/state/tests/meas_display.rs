@@ -85,7 +85,7 @@ fn on_sub(state: State) -> T {
     let mut t = T::new();
     t.conn(mirror(state));
     let p = t.pane(PaneKind::Spectrum);
-    t.st.update(Msg::PanePick(p, PaneMenuRow::Meas(MeasId(2))), &t.keys);
+    t.st.apply(Msg::PanePick(p, PaneMenuRow::Meas(MeasId(2))), &t.keys);
     spectra(&mut t, &[(2, -60.0), (9, -60.0)]);
     t
 }
@@ -133,7 +133,7 @@ fn a_compared_curve_keeps_its_own_offset() {
     assert!(row.0.contains("offset +6.0 dB"), "{row:?}");
     assert!(row.1.starts_with("\u{2212}54.0"), "{row:?}");
     // Picked in Sub's legend, Sub 2 takes the offset keys there; Sub keeps its own.
-    t.st.update(
+    t.st.apply(
         Msg::LegendPick(p, ac2_scene::trace::TraceKey::Live(MeasId(9))),
         &t.keys,
     );
@@ -154,7 +154,7 @@ fn a_compared_curve_keeps_its_own_offset() {
     assert_eq!(t.st.meas_offset(MeasId(9)), 7.0);
     assert_eq!(t.st.meas_offset(MeasId(2)), 0.0);
     // Its pane's own measurement picked again: the keys are Sub's.
-    t.st.update(
+    t.st.apply(
         Msg::LegendPick(p, ac2_scene::trace::TraceKey::Live(MeasId(2))),
         &t.keys,
     );
@@ -196,7 +196,7 @@ fn display_keys_change_only_the_panes_measurement() {
         );
     }
     let r =
-        t.st.update(Msg::Command(CommandId::SpectrographMagma), &t.keys);
+        t.st.apply(Msg::Command(CommandId::SpectrographMagma), &t.keys);
     t.answer(&r);
     assert_eq!(t.st.meas(MeasId(9)).cloned(), before, "Sub 2 untouched");
     let sub = t.st.meas(MeasId(2)).expect("Sub");
@@ -249,7 +249,7 @@ fn compared_curves_draw_in_compare_order_under_the_panes_own() {
 #[test]
 fn c_asks_which_measurement_first() {
     let mut t = on_sub(two_spectra(false));
-    t.st.update(Msg::SelectMeas(MeasId(9)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(9)), &t.keys);
     assert!(t.key("C").is_empty());
     let Overlay::Choose(c) = &t.st.overlay else {
         panic!("no chooser: {:?}", t.st.overlay);
@@ -275,7 +275,7 @@ fn c_asks_which_measurement_first() {
     t.answer(&r);
     t.key("Escape");
     let p = t.pane(PaneKind::Spectrum);
-    t.st.update(Msg::PanePick(p, PaneMenuRow::Meas(MeasId(2))), &t.keys);
+    t.st.apply(Msg::PanePick(p, PaneMenuRow::Meas(MeasId(2))), &t.keys);
     assert_eq!(
         drawn(&t)
             .iter()
@@ -309,7 +309,7 @@ fn tracking_draws_no_hold_and_a_new_hold_starts_afresh() {
     assert_eq!(mode(&t), Some(PeakMode::Track));
     spectra(&mut t, &[(2, -60.0)]);
     assert_eq!(hold(&t), None, "tracking draws no hold line");
-    assert!(!t.st.peaks.contains_key(&MeasId(2)), "nor keeps one");
+    assert!(!t.st.rig.peaks.contains_key(&MeasId(2)), "nor keeps one");
     t.key_answered("P");
     assert_eq!(mode(&t), Some(PeakMode::Off));
     t.key_answered("P");

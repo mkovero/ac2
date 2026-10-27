@@ -436,7 +436,7 @@ pub(super) fn navigate_strip(
     strip: Option<scenes::StripPlace>,
 ) {
     let Some(s) = strip else {
-        if app.state.leq.cursor.is_some_and(|(p, _)| p == id) {
+        if app.state.leq_panes.cursor.is_some_and(|(p, _)| p == id) {
             app.dispatch(Msg::LeqStrip(id, StripMsg::Hover(None)));
         }
         return;
@@ -472,7 +472,7 @@ pub(super) fn navigate_strip(
     let t = pos.map(t_at);
     if app
         .state
-        .leq
+        .leq_panes
         .cursor
         .filter(|(p, _)| *p == id)
         .map(|(_, t)| t)

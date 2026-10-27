@@ -109,20 +109,20 @@ fn the_rig_page_types_through_mirror_updates() {
     s.rig.osc_target = Some("10.0.0.9:9000".parse().expect("test value"));
     tick(&mut s, 0);
     t.conn(mirror(s.clone()));
-    t.st.update(Msg::OpenRig, &t.keys);
+    t.st.apply(Msg::OpenRig, &t.keys);
     t.key("ArrowDown");
     t.key("ArrowDown");
     assert_eq!(settings(&t).rig.focus, RigRow::Test);
     // The caret at the end of the default message: Backspace empties it, keys append.
     for _ in 0..settings(&t).rig.test.chars().count() {
-        t.st.update(Msg::Backspace, &t.keys);
+        t.st.apply(Msg::Backspace, &t.keys);
     }
     for (n, c) in "/fx/go 3".chars().enumerate() {
         t.text(&c.to_string());
         update_holds(&mut t, &mut s, n as u64 + 1);
     }
     assert_eq!(settings(&t).rig.test, "/fx/go 3");
-    t.st.update(Msg::Backspace, &t.keys);
+    t.st.apply(Msg::Backspace, &t.keys);
     update_holds(&mut t, &mut s, 20);
     t.text("4");
     let r = t.key("Enter");
@@ -171,7 +171,7 @@ fn the_rig_page_types_artnet_through_mirror_updates() {
     s.rig.artnet_target = ac2_scene::artnet::parse_target("10.0.0.9", "3").expect("test value");
     tick(&mut s, 0);
     t.conn(mirror(s.clone()));
-    t.st.update(Msg::OpenRig, &t.keys);
+    t.st.apply(Msg::OpenRig, &t.keys);
     let mut n = 1;
     for (row, typed) in [
         (RigRow::ArtnetTarget, "2.255.255.255"),
@@ -179,10 +179,10 @@ fn the_rig_page_types_artnet_through_mirror_updates() {
         (RigRow::Fade, "2.5"),
         (RigRow::DmxTest, "12=255 13=40"),
     ] {
-        t.st.update(Msg::Settings(SettingsMsg::RigFocus(row)), &t.keys);
+        t.st.apply(Msg::Settings(SettingsMsg::RigFocus(row)), &t.keys);
         // The rig's text with the caret at its end: emptied, then typed key by key.
         for _ in 0..64 {
-            t.st.update(Msg::Backspace, &t.keys);
+            t.st.apply(Msg::Backspace, &t.keys);
         }
         for c in typed.chars() {
             t.text(&c.to_string());
@@ -241,7 +241,7 @@ fn no_settings_page_resets_on_mirror_updates() {
     t.type_key("Shift+L", "L");
     let mut n = 1;
     for page in Page::ALL {
-        t.st.update(Msg::Settings(SettingsMsg::Page(page)), &t.keys);
+        t.st.apply(Msg::Settings(SettingsMsg::Page(page)), &t.keys);
         assert_eq!(settings(&t).page, page);
         t.key("ArrowDown");
         t.text("7");
@@ -252,14 +252,14 @@ fn no_settings_page_resets_on_mirror_updates() {
     }
     // The Rig monitor page's Art-Net rows, each with something typed; and the Art-Net
     // target changed elsewhere while the universe is typed leaves the typed rows alone.
-    t.st.update(Msg::Settings(SettingsMsg::Page(Page::Rig)), &t.keys);
+    t.st.apply(Msg::Settings(SettingsMsg::Page(Page::Rig)), &t.keys);
     for row in [
         RigRow::ArtnetTarget,
         RigRow::Universe,
         RigRow::Fade,
         RigRow::DmxTest,
     ] {
-        t.st.update(Msg::Settings(SettingsMsg::RigFocus(row)), &t.keys);
+        t.st.apply(Msg::Settings(SettingsMsg::RigFocus(row)), &t.keys);
         t.text("7");
         for _ in 0..3 {
             update_holds(&mut t, &mut s, n);

@@ -25,7 +25,7 @@ impl AppState {
         }
         let now = match edit {
             Some(p) => self.layout.view(p).and_then(|v| v.meters),
-            None => self.input_pick.and_then(|c| self.row_meters(c)),
+            None => self.rig.input_pick.and_then(|c| self.row_meters(c)),
         };
         let rig = self.daemon().map(|s| s.rig.levels).unwrap_or_default();
         Ok(crate::meter_dialog::form(
@@ -42,7 +42,7 @@ impl AppState {
         match self.meter_form(edit) {
             Ok(f) => {
                 self.overlay = Overlay::Form(Box::new(f));
-                if self.devices.is_none() {
+                if self.rig.devices.is_none() {
                     // Channel names arrive with the device list.
                     out.push(Request::Devices);
                 }

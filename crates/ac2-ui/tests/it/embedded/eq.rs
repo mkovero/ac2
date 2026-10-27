@@ -71,7 +71,7 @@ fn eq_editor_from_an_empty_daemon() -> R {
 
     // The level is still set from the first run: Space arms, Enter fires.
     d.key("Space");
-    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
     d.key("Enter");
     d.until("firing", |s| s.daemon().is_some_and(|d| d.generator.firing))?;
     d.key("Alt+E");

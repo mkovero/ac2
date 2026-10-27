@@ -41,7 +41,7 @@ pub fn spectrum_scale(st: &AppState, pane: PaneId) -> LevelScale {
             _ => {}
         }
     }
-    for (t, _) in st.traces.values() {
+    for (t, _) in st.rig.traces.values() {
         if !(st.on_pane(kind, &t.meta, shown) || st.trace_compared_on(kind, &t.meta, shown)) {
             continue;
         }
@@ -104,6 +104,7 @@ pub fn spectrograph(
     let empty = SpectrographHistory::new(display.spectrograph_span_s);
     let input = shown.map(|(m, stream)| {
         let history = st
+            .rig
             .spectrographs
             .get(&m.id)
             .filter(|h| h.span_s() == display.spectrograph_span_s)
@@ -137,7 +138,7 @@ pub(crate) fn with_spectrum<R>(
     now: Now,
     f: impl FnOnce(&[SpectrumTrace<'_>], &Status, &ac2_scene::ViewState) -> R,
 ) -> R {
-    let grids = st.data.as_ref().map(|d| &d.grids);
+    let grids = st.rig.data.as_ref().map(|d| &d.grids);
     struct Col<'a> {
         meas: &'a Measurement,
         tf: &'a TopicFrame,
@@ -190,7 +191,8 @@ pub(crate) fn with_spectrum<R>(
             if !st.prefs.spec_ease || !matches!(freshness(st, c.tf), Freshness::Fresh { .. }) {
                 return None;
             }
-            st.spec_glide
+            st.rig
+                .spec_glide
                 .get(&c.tf.topic)?
                 .drawn(&c.tf.frame, now.instant)
         })
@@ -221,13 +223,13 @@ pub(crate) fn with_spectrum<R>(
         let display = st.display_of(c.meas);
         t.style = display.style;
         if display.peak.holds() {
-            t.peak = st.peaks.get(&c.meas.id).map(|p| p.2.values());
+            t.peak = st.rig.peaks.get(&c.meas.id).map(|p| p.2.values());
         }
         // One curve's peaks: the pane's own measurement's (the first live curve without
         // one). Five marks per curve on several curves crowd the plot, and a list of
         // fifteen rows is no longer read at a glance.
         if display.peak.tracks() && Some(c.meas.id) == tracked {
-            t.tracked = st.peak_tracks.get(&c.meas.id).map(|p| p.1.peaks());
+            t.tracked = st.rig.peak_tracks.get(&c.meas.id).map(|p| p.1.peaks());
         }
         // Its own offset, compared into another measurement's pane too.
         t.offset_db = st.meas_offset(c.meas.id);
@@ -252,6 +254,7 @@ pub(crate) fn with_spectrum<R>(
         cols: Arc<GridColumns>,
     }
     let stored: Vec<Stored<'_>> = st
+        .rig
         .traces
         .values()
         .filter(|(t, _)| {
@@ -309,7 +312,7 @@ pub(crate) fn with_spectrum<R>(
             },
             freshness: None,
             offset_db: data.meta.edit.offset.0,
-            selected: st.selected_trace == Some(data.meta.id),
+            selected: st.rig.selected_trace == Some(data.meta.id),
             compared,
             bands: None,
             style: st.trace_display(&data.meta).style,

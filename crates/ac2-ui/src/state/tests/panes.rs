@@ -130,7 +130,7 @@ fn tab_puts_the_next_measurement_in_the_focused_pane() {
     t.key("N");
     t.key("N");
     // The meter in the focused pane: an SPL pane.
-    t.st.update(Msg::SelectMeas(MeasId(5)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(5)), &t.keys);
     let f = t.st.layout.focus;
     assert_eq!(t.focus_kind(), PaneKind::Spl);
     let before = others(&t);
@@ -143,7 +143,7 @@ fn tab_puts_the_next_measurement_in_the_focused_pane() {
     assert_eq!(t.st.layout.focus, f);
     assert_eq!(t.focus_kind(), PaneKind::Transfer);
     assert_eq!(t.st.pane_meas(f).map(|m| m.id), Some(next));
-    assert_eq!(t.st.selected, Some(next));
+    assert_eq!(t.st.rig.selected, Some(next));
     assert_eq!(others(&t), before);
     // Every measurement of the tree in turn, each in its kind of pane.
     for _ in 0..order.len() {
@@ -158,7 +158,7 @@ fn tab_puts_the_next_measurement_in_the_focused_pane() {
     for _ in 0..2 * order.len() {
         t.key("Shift+Tab");
         assert_eq!(others(&t), before);
-        if t.st.selected == Some(MeasId(5)) {
+        if t.st.rig.selected == Some(MeasId(5)) {
             break;
         }
     }
@@ -210,7 +210,7 @@ fn the_focused_pane_takes_a_measurement_of_any_kind() {
     assert!(matches!(shows(&t, b), Some(1 | 3)), "{:?}", shows(&t, b));
     assert_eq!(t.st.layout.views[&a], a_view);
     // A pick from the list.
-    t.st.update(Msg::SelectMeas(MeasId(2)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(2)), &t.keys);
     assert_eq!(kinds(&t), [PaneKind::Transfer, PaneKind::Spectrum]);
     assert_eq!((t.st.layout.focus, shows(&t, b)), (b, Some(2)));
     assert_eq!(t.st.layout.views[&a], a_view);
@@ -225,7 +225,7 @@ fn the_focused_pane_takes_a_measurement_of_any_kind() {
             })
             .collect();
     assert_eq!(rows, t.st.tree_meas_order());
-    t.st.update(Msg::PaneMenu(b), &t.keys);
+    t.st.apply(Msg::PaneMenu(b), &t.keys);
     let Overlay::PaneMenu(menu) = t.st.overlay else {
         panic!("{:?}", t.st.overlay);
     };
@@ -238,7 +238,7 @@ fn the_focused_pane_takes_a_measurement_of_any_kind() {
     t.key("Enter");
     assert_eq!(kinds(&t), [PaneKind::Transfer, PaneKind::Transfer]);
     assert_eq!((t.st.layout.focus, shows(&t, b)), (b, Some(3)));
-    assert_eq!(t.st.selected, Some(MeasId(2)), "a pick selects nothing");
+    assert_eq!(t.st.rig.selected, Some(MeasId(2)), "a pick selects nothing");
     assert_eq!(t.st.layout.views[&a], a_view);
 }
 
@@ -268,10 +268,10 @@ fn g_steps_the_transfer_views() {
             .is_some()
     };
     assert!(!overlay(&t));
-    t.st.update(Msg::Command(CommandId::CoherencePlacement), &t.keys);
+    t.st.apply(Msg::Command(CommandId::CoherencePlacement), &t.keys);
     assert_eq!(plots(&t), [P::Magnitude]);
     assert!(overlay(&t));
-    t.st.update(Msg::Command(CommandId::CoherencePlacement), &t.keys);
+    t.st.apply(Msg::Command(CommandId::CoherencePlacement), &t.keys);
     t.key("G");
     assert_eq!(view(&t), TransferView::Phase);
     assert_eq!(plots(&t), [P::Phase]);
@@ -321,10 +321,10 @@ fn transfer_stack_lays_out_magnitude_phase_coherence() {
     }
     t.conn(mirror(s));
     super::tf_group::tf_frames(&mut t, &[1, 3]);
-    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(3)), &t.keys);
     t.key("N");
     let (a, b) = (t.st.layout.panes()[0], t.st.layout.focus);
-    t.st.update(Msg::Command(CommandId::TransferStack), &t.keys);
+    t.st.apply(Msg::Command(CommandId::TransferStack), &t.keys);
     let l = &t.st.layout;
     let PaneNode::Split {
         axis: Axis::Row,
@@ -396,18 +396,18 @@ fn transfer_stack_lays_out_magnitude_phase_coherence() {
         assert!(!delay(&t, *id));
     }
     // Another measurement in the phase pane: no longer the column's, its own legend back.
-    t.st.update(Msg::FocusPane(lower[0]), &t.keys);
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::FocusPane(lower[0]), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     assert!(!t.st.stacked_under(lower[0]));
     assert!(
         !t.st.stacked_under(lower[1]),
         "under a pane of another measurement"
     );
     assert!(scene(&t, lower[0]).legend_box.is_some());
-    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(3)), &t.keys);
     assert!(t.st.stacked_under(lower[1]));
     // A phase view beside the stack (side by side) is a pane of its own.
-    t.st.update(Msg::FocusPane(a), &t.keys);
+    t.st.apply(Msg::FocusPane(a), &t.keys);
     t.key("G");
     assert_eq!(
         t.st.layout.view(a).map(|v| v.modes.transfer),
@@ -422,8 +422,8 @@ fn transfer_stack_lays_out_magnitude_phase_coherence() {
     // to stack.
     let mut u = empty();
     u.conn(mirror(four()));
-    u.st.update(Msg::SelectMeas(MeasId(4)), &u.keys);
-    u.st.update(Msg::Command(CommandId::TransferStack), &u.keys);
+    u.st.apply(Msg::SelectMeas(MeasId(4)), &u.keys);
+    u.st.apply(Msg::Command(CommandId::TransferStack), &u.keys);
     assert_eq!(u.st.layout.panes().len(), 1);
     assert!(
         u.last_toast().contains("no transfer measurement"),
@@ -440,16 +440,16 @@ fn two_transfer_panes_keep_their_measurements_and_views() {
     t.conn(mirror(four()));
     super::tf_group::tf_frames(&mut t, &[1, 3]);
     let a = t.st.layout.focus;
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     t.key("N");
     let b = t.st.layout.focus;
     assert_eq!((shows(&t, a), shows(&t, b)), (Some(1), Some(1)));
-    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(3)), &t.keys);
     assert_eq!((shows(&t, a), shows(&t, b)), (Some(1), Some(3)));
     t.key("Alt+1");
     assert_eq!((shows(&t, a), shows(&t, b)), (Some(1), Some(3)));
     assert_eq!(
-        t.st.selected,
+        t.st.rig.selected,
         Some(MeasId(3)),
         "a focus key selects nothing"
     );
@@ -492,7 +492,7 @@ fn two_transfer_panes_keep_their_measurements_and_views() {
             TransferView::Coherence
         )
     );
-    t.st.update(Msg::FocusPane(a), &t.keys);
+    t.st.apply(Msg::FocusPane(a), &t.keys);
     assert_eq!((shows(&t, b), shows(&t, c)), (Some(3), Some(3)));
 }
 
@@ -524,13 +524,13 @@ fn alt_numbers_focus_panes_in_reading_order() {
 fn the_layout_comes_back_from_ui_toml() {
     let mut t = empty();
     t.conn(mirror(four()));
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     t.key("N");
-    t.st.update(Msg::SelectMeas(MeasId(3)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(3)), &t.keys);
     // The second transfer pane on its phase view.
     t.key("G");
     t.key("N");
-    t.st.update(Msg::SelectMeas(MeasId(4)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(4)), &t.keys);
     t.key("G");
     let before: Vec<_> =
         t.st.layout
@@ -619,15 +619,15 @@ fn a_closed_pane_takes_its_list_and_picks_with_it() {
     t.conn(mirror(four()));
     t.key("N");
     let gone = t.st.layout.focus;
-    t.st.update(Msg::PaneMenu(gone), &t.keys);
+    t.st.apply(Msg::PaneMenu(gone), &t.keys);
     assert!(matches!(t.st.overlay, Overlay::PaneMenu(m) if m.pane == gone));
     // The menu keeps the keys: the close comes as the command.
-    t.st.update(Msg::Command(crate::keys::CommandId::ClosePane), &t.keys);
+    t.st.apply(Msg::Command(crate::keys::CommandId::ClosePane), &t.keys);
     assert!(t.st.layout.view(gone).is_none());
     assert!(matches!(t.st.overlay, Overlay::None), "{:?}", t.st.overlay);
-    let before = t.st.selected;
-    t.st.update(Msg::PanePick(gone, PaneMenuRow::Meas(MeasId(3))), &t.keys);
-    assert_eq!(t.st.selected, before);
+    let before = t.st.rig.selected;
+    t.st.apply(Msg::PanePick(gone, PaneMenuRow::Meas(MeasId(3))), &t.keys);
+    assert_eq!(t.st.rig.selected, before);
     assert_ne!(before, Some(MeasId(3)));
     assert!(t.st.layout.view(gone).is_none());
 }
@@ -852,7 +852,7 @@ fn resizing_keeps_nested_panes_readable() {
 #[test]
 fn a_dragged_gap_sets_the_ratio_within_the_limits() {
     let (mut t, a, _) = two();
-    t.st.update(
+    t.st.apply(
         Msg::DragSplit {
             path: vec![],
             ratio: 0.3,
@@ -860,7 +860,7 @@ fn a_dragged_gap_sets_the_ratio_within_the_limits() {
         &t.keys,
     );
     assert!(close(rects(&t)[&a], PaneRect::new(0.0, 0.0, 300.0, 600.0)));
-    t.st.update(
+    t.st.apply(
         Msg::DragSplit {
             path: vec![],
             ratio: 0.999,
@@ -869,7 +869,7 @@ fn a_dragged_gap_sets_the_ratio_within_the_limits() {
     );
     assert!(close(rects(&t)[&a], PaneRect::new(0.0, 0.0, 950.0, 600.0)));
     // A path to no split changes nothing.
-    t.st.update(
+    t.st.apply(
         Msg::DragSplit {
             path: vec![Side::B, Side::A],
             ratio: 0.5,
@@ -906,7 +906,7 @@ fn a_turned_and_resized_layout_comes_back_from_ui_toml() {
     t.key("Alt+Right");
     t.key("Alt+1");
     t.key("Alt+Left");
-    t.st.update(
+    t.st.apply(
         Msg::DragSplit {
             path: vec![Side::B],
             ratio: 0.25,
@@ -941,26 +941,26 @@ fn a_pane_click_keeps_a_selection_the_pane_shows() {
     t.conn(mirror(s));
     super::tf_group::tf_frames(&mut t, &[1, 3]);
     let a = t.st.layout.focus;
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
     t.key("N");
     let b = t.st.layout.focus;
-    t.st.update(Msg::PanePick(b, PaneMenuRow::Meas(MeasId(3))), &t.keys);
+    t.st.apply(Msg::PanePick(b, PaneMenuRow::Meas(MeasId(3))), &t.keys);
     assert_eq!((shows(&t, a), shows(&t, b)), (Some(1), Some(3)));
     t.key("Alt+1");
-    t.st.update(Msg::SelectTrace(TraceId(10)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(10)), &t.keys);
     // The keyboard takes the focus to the other pane; the capture stays selected.
     t.key("Alt+2");
-    assert_eq!(t.st.selected_trace, Some(TraceId(10)));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(10)));
     // A click on the capture's pane: focus there, the selection as it was.
-    t.st.update(Msg::FocusPane(a), &t.keys);
+    t.st.apply(Msg::FocusPane(a), &t.keys);
     assert_eq!(t.st.layout.focus, a);
-    assert_eq!(t.st.selected_trace, Some(TraceId(10)));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(10)));
     assert_eq!((shows(&t, a), shows(&t, b)), (Some(1), Some(3)));
     // A click on the pane of another measurement: the selection as it was too.
-    t.st.update(Msg::FocusPane(b), &t.keys);
+    t.st.apply(Msg::FocusPane(b), &t.keys);
     assert_eq!(t.st.layout.focus, b);
     assert_eq!(
-        (t.st.selected, t.st.selected_trace),
+        (t.st.rig.selected, t.st.rig.selected_trace),
         (Some(MeasId(1)), Some(TraceId(10)))
     );
     assert_eq!((shows(&t, a), shows(&t, b)), (Some(1), Some(3)));

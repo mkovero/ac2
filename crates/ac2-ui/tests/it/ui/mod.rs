@@ -110,7 +110,7 @@ fn step_until(h: &mut Harness<'_, App>, what: &str, cond: impl Fn(&App) -> bool)
     let t0 = Instant::now();
     // The sidebar's input labels take the device's channel names once the list arrives:
     // with a session open, a screenshot waits for it.
-    let named = |a: &App| a.state.open_session().is_none() || a.state.devices.is_some();
+    let named = |a: &App| a.state.open_session().is_none() || a.state.rig.devices.is_some();
     while !(cond(h.state()) && named(h.state())) {
         if t0.elapsed() > WAIT {
             let a = h.state();
@@ -123,7 +123,7 @@ fn step_until(h: &mut Harness<'_, App>, what: &str, cond: impl Fn(&App) -> bool)
                 .collect();
             panic!(
                 "timed out waiting for {what}; conn {:?}; overlay {:?}; stimulus {:?}; toasts {toasts:?}",
-                a.state.conn, a.state.overlay, a.state.stimulus.phase
+                a.state.rig.conn, a.state.overlay, a.state.rig.stimulus.phase
             );
         }
         h.step();
@@ -140,11 +140,11 @@ fn step_until(h: &mut Harness<'_, App>, what: &str, cond: impl Fn(&App) -> bool)
 /// would otherwise catch in whichever state a stalled thread left them.
 fn healthy(app: &App, now: Instant) -> bool {
     let st = &app.state;
-    let link = match &st.conn {
-        ConnState::Connected { .. } => st.mirror.as_ref().is_some_and(|m| m.responding(now)),
+    let link = match &st.rig.conn {
+        ConnState::Connected { .. } => st.rig.mirror.as_ref().is_some_and(|m| m.responding(now)),
         _ => true,
     };
-    let fresh = st.data.as_ref().is_none_or(|d| {
+    let fresh = st.rig.data.as_ref().is_none_or(|d| {
         d.latest
             .frames
             .values()
@@ -156,7 +156,7 @@ fn healthy(app: &App, now: Instant) -> bool {
 /// The topics [`healthy`] finds stale, for a failure to name.
 fn stale_topics(app: &App) -> Vec<String> {
     let st = &app.state;
-    st.data.as_ref().map_or_else(Vec::new, |d| {
+    st.rig.data.as_ref().map_or_else(Vec::new, |d| {
         d.latest
             .frames
             .iter()
@@ -223,9 +223,9 @@ fn live(app: &App) -> bool {
 /// [`live`] with `count` measurements listed.
 fn live_with(app: &App, count: usize) -> bool {
     let st = &app.state;
-    let synced = st.mirror.as_ref().is_some_and(|m| m.synced());
+    let synced = st.rig.mirror.as_ref().is_some_and(|m| m.synced());
     let have = |m: u32, s: Stream| {
-        st.data.as_ref().is_some_and(|d| {
+        st.rig.data.as_ref().is_some_and(|d| {
             d.latest
                 .get(&Topic::Data {
                     meas: MeasId(m),
@@ -239,7 +239,7 @@ fn live_with(app: &App, count: usize) -> bool {
                 })
         })
     };
-    matches!(st.conn, ConnState::Connected { .. })
+    matches!(st.rig.conn, ConnState::Connected { .. })
         && synced
         && st.measurements().len() == count
         && have(1, Stream::Tf)
@@ -437,7 +437,7 @@ fn tab_to(h: &mut Harness<'_, App>, id: MeasId) {
         h.key_press(Key::Tab);
         settle(h, 2);
         let s = &h.state().state;
-        if s.selected == Some(id) && s.selected_trace.is_none() {
+        if s.rig.selected == Some(id) && s.rig.selected_trace.is_none() {
             return;
         }
     }

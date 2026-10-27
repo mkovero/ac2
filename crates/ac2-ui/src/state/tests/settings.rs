@@ -57,16 +57,15 @@ fn spectrograph_colours_from_the_palette() {
     };
     assert_eq!(colours(&t), Colormap::Viridis);
     let r =
-        t.st.update(Msg::Command(CommandId::SpectrographMagma), &keys);
+        t.st.apply(Msg::Command(CommandId::SpectrographMagma), &keys);
     t.answer(&r);
     assert_eq!(colours(&t), Colormap::Magma);
     assert_eq!(t.last_toast(), "Sub: spectrograph colours: magma");
     let r =
-        t.st.update(Msg::Command(CommandId::SpectrographColours), &keys);
+        t.st.apply(Msg::Command(CommandId::SpectrographColours), &keys);
     t.answer(&r);
     assert_eq!(t.last_toast(), "Sub: spectrograph colours: inferno");
-    let r =
-        t.st.update(Msg::Command(CommandId::SpectrographGrey), &keys);
+    let r = t.st.apply(Msg::Command(CommandId::SpectrographGrey), &keys);
     t.answer(&r);
     assert_eq!(colours(&t), Colormap::Grey);
 }
@@ -78,10 +77,10 @@ fn the_old_dialog_keys_open_their_pages_and_ctrl_p_the_last_one() {
     assert_eq!(page(&t), Page::AudioIo);
     t.key("Escape");
     assert_eq!(t.st.overlay, Overlay::None);
-    t.st.update(Msg::Command(CommandId::InputSetup), &t.keys);
+    t.st.apply(Msg::Command(CommandId::InputSetup), &t.keys);
     assert_eq!(page(&t), Page::AudioIo);
     t.key("Escape");
-    t.st.update(Msg::Command(CommandId::Calibrations), &t.keys);
+    t.st.apply(Msg::Command(CommandId::Calibrations), &t.keys);
     assert_eq!(page(&t), Page::Calibration);
     t.key("Escape");
     // Ctrl+P opens the page last shown; Ctrl+PgDn / PgUp and Alt+digit move between pages.
@@ -107,7 +106,7 @@ fn the_old_dialog_keys_open_their_pages_and_ctrl_p_the_last_one() {
     t.key("Ctrl+Tab");
     assert_eq!(page(&t), Page::Rig);
     // The mouse picks a page too; Ctrl+P again closes the view.
-    t.st.update(Msg::Settings(SettingsMsg::Page(Page::Display)), &t.keys);
+    t.st.apply(Msg::Settings(SettingsMsg::Page(Page::Display)), &t.keys);
     assert_eq!(page(&t), Page::Display);
     t.key("Ctrl+P");
     assert_eq!(t.st.overlay, Overlay::None);
@@ -116,7 +115,7 @@ fn the_old_dialog_keys_open_their_pages_and_ctrl_p_the_last_one() {
 #[test]
 fn the_view_owns_the_keys_and_shift_esc_still_stops() {
     let mut t = T::new();
-    t.st.stimulus.level = Some(Dbfs(-20.0));
+    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
     t.key("Space");
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     t.key("Ctrl+P");
@@ -127,7 +126,7 @@ fn the_view_owns_the_keys_and_shift_esc_still_stops() {
                 .any(|x| matches!(x, Request::StimSet(_) | Request::StimStop)),
             "{k}: {r:?}"
         );
-        assert_eq!(t.st.stimulus.level, Some(Dbfs(-20.0)), "{k}");
+        assert_eq!(t.st.rig.stimulus.level, Some(Dbfs(-20.0)), "{k}");
     }
     assert!(t.st.overlay.settings().is_some());
     let r = t.key("Shift+Escape");
@@ -142,9 +141,9 @@ fn the_view_owns_the_keys_and_shift_esc_still_stops() {
 fn lowering_the_max_level_goes_out_at_once_a_raise_needs_the_word() {
     let mut t = T::new();
     t.conn(mirror(with_ceiling(-30.0, -10.0, false)));
-    t.st.update(Msg::Command(CommandId::InputSetup), &t.keys);
+    t.st.apply(Msg::Command(CommandId::InputSetup), &t.keys);
     // The max level row is below the channels: ↑ from the first channel wraps to it.
-    t.st.update(Msg::Settings(SettingsMsg::Ceiling), &t.keys);
+    t.st.apply(Msg::Settings(SettingsMsg::Ceiling), &t.keys);
     assert!(settings(&t).on_ceiling);
     // Typed text goes to the row, R / M / S do not act.
     t.type_key("Minus", "-");
@@ -163,8 +162,8 @@ fn lowering_the_max_level_goes_out_at_once_a_raise_needs_the_word() {
     );
     // A refused value stays for correcting; Backspace takes it back.
     assert_eq!(settings(&t).ceiling.text, "-6");
-    t.st.update(Msg::Backspace, &t.keys);
-    t.st.update(Msg::Backspace, &t.keys);
+    t.st.apply(Msg::Backspace, &t.keys);
+    t.st.apply(Msg::Backspace, &t.keys);
     // A raise: the confirmation first; Esc keeps the level and the view.
     t.text("-20");
     assert_eq!(ceiling_call(&t.key("Enter")), None);
@@ -190,7 +189,7 @@ fn lowering_the_max_level_goes_out_at_once_a_raise_needs_the_word() {
     );
     // Lowering is never refused for that.
     for _ in 0..3 {
-        t.st.update(Msg::Backspace, &t.keys);
+        t.st.apply(Msg::Backspace, &t.keys);
     }
     t.text("-35");
     assert_eq!(ceiling_call(&t.key("Enter")), Some((-35.0, false)));
@@ -199,7 +198,7 @@ fn lowering_the_max_level_goes_out_at_once_a_raise_needs_the_word() {
 #[test]
 fn an_output_is_named_for_every_client_on_enter() {
     let mut t = T::new();
-    t.st.update(Msg::Command(CommandId::StimulusOutputs), &t.keys);
+    t.st.apply(Msg::Command(CommandId::StimulusOutputs), &t.keys);
     t.conn(ConnEvent::Devices(Ok(backends(true))));
     assert_eq!(dialog(&t).focus, Row::Output(0));
     t.type_key("N", "n");
@@ -238,7 +237,7 @@ fn an_output_is_named_for_every_client_on_enter() {
     t.key("Up");
     t.type_key("N", "n");
     for _ in 0.."Main L".len() {
-        t.st.update(Msg::Backspace, &t.keys);
+        t.st.apply(Msg::Backspace, &t.keys);
     }
     let r = t.key("Enter");
     assert!(r.iter().any(|r| matches!(r,
@@ -253,7 +252,7 @@ fn display_page_changes_apply_at_once_and_are_remembered() {
     t.go(PaneKind::Distortion);
     t.key("Alt+1");
     t.key("Ctrl+P");
-    t.st.update(Msg::Settings(SettingsMsg::Page(Page::Display)), &t.keys);
+    t.st.apply(Msg::Settings(SettingsMsg::Page(Page::Display)), &t.keys);
     assert_eq!(page(&t), Page::Display);
     t.st.prefs_dirty = false;
     t.key("Right");
@@ -413,7 +412,7 @@ fn recording_limit_is_this_apps_and_the_record_key_uses_it() {
     t.key("Enter");
     assert_eq!(t.st.prefs.record_limit_min, Some(90));
     t.key("Escape");
-    let r = t.st.update(Msg::Command(CommandId::Record), &t.keys);
+    let r = t.st.apply(Msg::Command(CommandId::Record), &t.keys);
     let max = r.iter().find_map(|r| match r {
         Request::Call {
             cmd: Command::RecStart { request },
@@ -431,14 +430,14 @@ fn connection_page_asks_the_daemon_authorizes_and_revokes() {
     let r = t.key("Alt+6");
     assert!(r.iter().any(|r| matches!(r, Request::ServerInfo)), "{r:?}");
     // Asked again while the page is shown.
-    t.st.update(
+    t.st.apply(
         Msg::Tick {
             now_s: 1.0,
             dt_s: 1.0,
         },
         &t.keys,
     );
-    let r = t.st.update(
+    let r = t.st.apply(
         Msg::Tick {
             now_s: 2.5,
             dt_s: 1.5,
@@ -548,7 +547,7 @@ fn up_down_walk_device_channels_then_the_max_level() {
 fn commands_open_the_page_on_their_row() {
     use crate::session_dialog::Row;
     let mut t = T::new();
-    t.st.update(Msg::Command(CommandId::InputSetup), &t.keys);
+    t.st.apply(Msg::Command(CommandId::InputSetup), &t.keys);
     // The device's rows arrive after the page opens: the focus waits for them.
     assert_eq!(
         settings(&t).focus_want,
@@ -564,7 +563,7 @@ fn commands_open_the_page_on_their_row() {
     assert_eq!(page(&t), Page::AudioIo);
     assert_eq!(settings(&t).session.focus, Row::Device);
     t.key("Escape");
-    t.st.update(Msg::Command(CommandId::StimulusOutputs), &t.keys);
+    t.st.apply(Msg::Command(CommandId::StimulusOutputs), &t.keys);
     assert!(matches!(settings(&t).session.focus, Row::Output(_)));
 }
 
@@ -574,7 +573,7 @@ fn commands_open_the_page_on_their_row() {
 fn shift_tab_steps_back_on_the_settings_pages() {
     let mut t = T::new();
     t.key("Ctrl+P");
-    t.st.update(Msg::Settings(SettingsMsg::Page(Page::Display)), &t.keys);
+    t.st.apply(Msg::Settings(SettingsMsg::Page(Page::Display)), &t.keys);
     let first = settings(&t).display;
     t.key("Tab");
     t.key("Tab");
@@ -583,7 +582,7 @@ fn shift_tab_steps_back_on_the_settings_pages() {
     t.key("Shift+Tab");
     assert_eq!(settings(&t).display, first, "Display");
 
-    t.st.update(Msg::Settings(SettingsMsg::Page(Page::Recording)), &t.keys);
+    t.st.apply(Msg::Settings(SettingsMsg::Page(Page::Recording)), &t.keys);
     let first = settings(&t).recording.focus;
     t.key("Tab");
     assert_ne!(settings(&t).recording.focus, first);

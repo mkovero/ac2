@@ -111,12 +111,14 @@ impl AppState {
     /// The layout of measurement `id` as this app last has it: the edit waiting to be sent,
     /// else the last one sent that the daemon's copy has not shown yet, else that copy.
     fn own_layout(&self, id: MeasId) -> Option<PaneLayout> {
-        self.layout_queue
+        self.rig
+            .layout_queue
             .queued
             .get(&id)
             .cloned()
             .or_else(|| {
-                self.layout_queue
+                self.rig
+                    .layout_queue
                     .calls
                     .iter()
                     .rev()
@@ -128,8 +130,8 @@ impl AppState {
 
     pub(in crate::state) fn panes_watch(&self) -> PanesWatch {
         PanesWatch {
-            owner: self.own_panes,
-            theirs: self.meas_layout(self.own_panes),
+            owner: self.rig.own_panes,
+            theirs: self.meas_layout(self.rig.own_panes),
             panes: self.pane_layout(),
         }
     }
@@ -146,9 +148,9 @@ impl AppState {
         out: &mut Vec<Request>,
     ) {
         self.settle_layout_calls();
-        if std::mem::take(&mut self.own_panes_due) {
-            self.own_panes = self.selected;
-            let own = self.selected.and_then(|id| self.own_layout(id));
+        if std::mem::take(&mut self.rig.own_panes_due) {
+            self.rig.own_panes = self.rig.selected;
+            let own = self.rig.selected.and_then(|id| self.own_layout(id));
             if let Some(l) = own.filter(|l| *l != self.pane_layout()) {
                 self.show_layout(&l);
             }
@@ -157,7 +159,7 @@ impl AppState {
         // The panes are the own panes of the measurement whose row was chosen here; with
         // none chosen (a stand-in, the measurement a remembered pane shows) they are
         // nobody's. An edit is stored on that one measurement alone.
-        let Some(owner) = self.own_panes else {
+        let Some(owner) = self.rig.own_panes else {
             return;
         };
         if before.owner != Some(owner) {
@@ -166,7 +168,7 @@ impl AppState {
         if !conn && self.pane_layout() != before.panes {
             if drag {
                 self.history.stored.insert(owner);
-                self.layout_queue.due = Some((owner, self.now_s + DRAG_REST_S));
+                self.rig.layout_queue.due = Some((owner, self.now_s + DRAG_REST_S));
             } else {
                 self.store_layout(owner, out);
             }
@@ -178,25 +180,28 @@ impl AppState {
         }
         // This app's own, come back: on screen already, or older than the screen.
         if let Some(i) = self
+            .rig
             .layout_queue
             .calls
             .iter()
             .position(|c| c.meas == owner && Some(&c.layout) == theirs.as_ref())
         {
-            for c in self.layout_queue.calls.iter_mut().take(i + 1) {
+            for c in self.rig.layout_queue.calls.iter_mut().take(i + 1) {
                 if c.meas == owner {
                     c.applied = true;
                 }
             }
-            self.layout_queue
+            self.rig
+                .layout_queue
                 .calls
                 .retain(|c| !(c.answered && c.applied));
             return;
         }
         // While a call of this app's is unanswered, the daemon's copy is older than the
         // screen: the last call made wins.
-        if self.layout_queue.queued.contains_key(&owner)
+        if self.rig.layout_queue.queued.contains_key(&owner)
             || self
+                .rig
                 .layout_queue
                 .calls
                 .iter()
@@ -205,7 +210,7 @@ impl AppState {
             return;
         }
         // Another client's edit.
-        self.layout_queue.calls.retain(|c| c.meas != owner);
+        self.rig.layout_queue.calls.retain(|c| c.meas != owner);
         if let Some(l) = theirs.filter(|l| *l != self.pane_layout()) {
             self.show_layout(&l);
         }
@@ -215,8 +220,9 @@ impl AppState {
     /// shows (or a later one of this app's) are done once answered; the own panes' are
     /// settled as its copy changes, above.
     fn settle_layout_calls(&mut self) {
-        let own = self.own_panes;
+        let own = self.rig.own_panes;
         let shown: Vec<(MeasId, usize)> = self
+            .rig
             .layout_queue
             .calls
             .iter()
@@ -229,13 +235,14 @@ impl AppState {
             return;
         }
         for (meas, i) in shown {
-            for c in self.layout_queue.calls.iter_mut().take(i + 1) {
+            for c in self.rig.layout_queue.calls.iter_mut().take(i + 1) {
                 if c.meas == meas {
                     c.applied = true;
                 }
             }
         }
-        self.layout_queue
+        self.rig
+            .layout_queue
             .calls
             .retain(|c| !(c.answered && c.applied));
     }
@@ -243,6 +250,7 @@ impl AppState {
     /// A dragged split resting long enough: sent.
     pub(in crate::state) fn layout_drag_due(&mut self, out: &mut Vec<Request>) {
         if self
+            .rig
             .layout_queue
             .due
             .as_ref()
@@ -254,7 +262,7 @@ impl AppState {
 
     /// A dragged split sent now (before anything else changes the panes).
     pub(in crate::state) fn flush_layout_drag(&mut self, out: &mut Vec<Request>) {
-        if let Some((id, _)) = self.layout_queue.due.take() {
+        if let Some((id, _)) = self.rig.layout_queue.due.take() {
             self.store_layout(id, out);
         }
     }
@@ -265,20 +273,21 @@ impl AppState {
     /// not its own panes any more.
     pub(in crate::state) fn store_layout(&mut self, id: MeasId, out: &mut Vec<Request>) {
         if !self.panes_show(id) {
-            if self.own_panes == Some(id) {
-                self.own_panes = None;
+            if self.rig.own_panes == Some(id) {
+                self.rig.own_panes = None;
             }
             return;
         }
         self.history.stored.insert(id);
         let l = self.pane_layout();
         if self
+            .rig
             .layout_queue
             .calls
             .iter()
             .any(|c| c.meas == id && !c.answered)
         {
-            self.layout_queue.queued.insert(id, l);
+            self.rig.layout_queue.queued.insert(id, l);
             return;
         }
         self.send_layout(id, l, out);
@@ -296,7 +305,13 @@ impl AppState {
         let Some(m) = self.meas(id) else {
             return;
         };
-        let last_sent = self.layout_queue.calls.iter().rev().find(|c| c.meas == id);
+        let last_sent = self
+            .rig
+            .layout_queue
+            .calls
+            .iter()
+            .rev()
+            .find(|c| c.meas == id);
         if last_sent.map_or(m.layout.as_ref(), |c| Some(&c.layout)) == Some(&l) {
             return;
         }
@@ -306,7 +321,7 @@ impl AppState {
             m.config.name,
             ac2_scene::format::own_panes(l.panes().len())
         );
-        self.layout_queue.calls.push_back(LayoutCall {
+        self.rig.layout_queue.calls.push_back(LayoutCall {
             meas: id,
             what: what.clone(),
             first,
@@ -335,6 +350,7 @@ impl AppState {
         out: &mut Vec<Request>,
     ) -> bool {
         let Some(i) = self
+            .rig
             .layout_queue
             .calls
             .iter()
@@ -342,35 +358,28 @@ impl AppState {
         else {
             return false;
         };
-        let meas = self.layout_queue.calls[i].meas;
+        let meas = self.rig.layout_queue.calls[i].meas;
         match result {
             Ok(()) => {
-                let c = &mut self.layout_queue.calls[i];
+                let c = &mut self.rig.layout_queue.calls[i];
                 c.answered = true;
                 let first = c.first;
                 if c.applied {
-                    self.layout_queue.calls.remove(i);
+                    self.rig.layout_queue.calls.remove(i);
                 }
                 if first {
                     self.toast(what);
                 }
             }
             Err(e) => {
-                self.layout_queue.calls.remove(i);
+                self.rig.layout_queue.calls.remove(i);
                 self.fault(format!("{what}: {e}"));
             }
         }
-        if let Some(l) = self.layout_queue.queued.remove(&meas) {
+        if let Some(l) = self.rig.layout_queue.queued.remove(&meas) {
             self.send_layout(meas, l, out);
         }
         true
-    }
-
-    /// The link went down or came up: no answer to an earlier call comes.
-    pub(in crate::state) fn forget_layout_calls(&mut self) {
-        self.layout_queue.calls.clear();
-        self.layout_queue.queued.clear();
-        self.layout_queue.due = None;
     }
 
     /// Layout `l` on screen, each pane on the measurement it was picked for (one gone since,
@@ -391,7 +400,7 @@ impl AppState {
                 .meas
                 .filter(|id| self.meas(*id).is_some_and(|m| v.kind.shows(&m.config.kind)));
         }
-        let sel = self.chosen.and_then(|id| self.meas(id)).cloned();
+        let sel = self.rig.chosen.and_then(|id| self.meas(id)).cloned();
         let order = root.reading_order();
         // The operator's eyes stay where they are: the pane at the focused one's place, when
         // it is of the same kind.
@@ -440,14 +449,14 @@ impl AppState {
             self.set_operator_levels(id, &w);
         }
         self.pane_auto = false;
-        self.pending.pane_meas.clear();
+        self.rig.pending.pane_meas.clear();
         if matches!(self.overlay, Overlay::PaneMenu(m) if !self.layout.views.contains_key(&m.pane))
         {
             self.overlay = Overlay::None;
         }
         // The history goes with the last spectrograph shown.
         if !self.spectrograph_shown() {
-            self.spectrographs.clear();
+            self.rig.spectrographs.clear();
             self.view.spectrum.spectrograph.cursor_s = None;
         }
     }
@@ -590,6 +599,15 @@ fn ui_view(p: &wire::LayoutPane) -> View {
                 wire::PlotChrome::TracesOnly => PlotChrome::Bare,
             },
         },
+    }
+}
+
+impl RigState {
+    /// The link went down or came up: no answer to an earlier call comes.
+    pub(in crate::state) fn forget_layout_calls(&mut self) {
+        self.layout_queue.calls.clear();
+        self.layout_queue.queued.clear();
+        self.layout_queue.due = None;
     }
 }
 

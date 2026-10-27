@@ -209,7 +209,7 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
   input always reads dBFS of its full scale.
 - **Roles**: **R** *reference* (the loopback return, one input; a line or digital input, so
   **R** on a mic row drops the mic name); **S** *stimulus* (the outputs the stimulus plays
-  on; this app's choice, remembered per device; applied at once when the open session has
+  on; this app's choice, remembered per rig and device; applied at once when the open session has
   the output). **Space** puts a row in or out of the session.
 - **Pairs**: *pair* (or **Shift+P**) on one input picks it, *pair* on a second input makes
   the pair: the lower input is left, the higher right, and both go in the session. *pair*
@@ -262,7 +262,7 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
   reference asks for its stimulus output. A transfer or a sweep needs two inputs (a sweep
   also an output), and its *New measurement* row and key say so on audio I/O without them;
   a transfer's reference is picked in its form from the captured inputs, so an external
-  generator's or console's feed declared as an input serves too. Roles, kinds, pairs and mic names are remembered per device
+  generator's or console's feed declared as an input serves too. Roles, kinds, pairs and mic names are remembered per rig and device
   (`ui.toml`).
   On a daemon with no measurements yet, the session opening brings up the **New
   measurement** chooser (as **Ctrl+M** does): **Enter** on a kind opens its settings — the

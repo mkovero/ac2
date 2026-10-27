@@ -10,19 +10,7 @@ impl AppState {
     /// How measurement `m`'s curves draw: its own display, a math channel its owner's (as it
     /// takes its owner's colours), the defaults for anything else.
     pub fn display_of(&self, m: &Measurement) -> SpectrumDisplay {
-        if let Some(d) = m.config.kind.display() {
-            return *d;
-        }
-        if let MeasKind::Math { config } = &m.config.kind
-            && let Some(d) = config
-                .owner
-                .meas()
-                .and_then(|id| self.meas(id))
-                .and_then(|o| o.config.kind.display())
-        {
-            return *d;
-        }
-        SpectrumDisplay::default()
+        self.rig.display_of(m)
     }
 
     /// How stored trace `t` draws: as its owner measurement does.

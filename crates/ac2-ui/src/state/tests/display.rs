@@ -65,7 +65,7 @@ fn offset_steps_change_the_selected_trace() {
         locked,
         spec_meta(16),
     ]));
-    t.st.update(Msg::SelectTrace(TraceId(13)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(13)), &t.keys);
     let (id, edit, what) = trace_update(&t.key("Alt+Shift+Up"));
     assert_eq!((id, edit.offset), (TraceId(13), Db(3.0)));
     assert_eq!(what, "slot 2 (t13): offset +3.0 dB");
@@ -98,12 +98,16 @@ fn offset_steps_change_the_selected_trace() {
     assert_eq!(edit.offset, Db(-0.7));
 
     // Any kind of trace, from any pane: a spectrum capture with the transfer pane focused.
-    t.st.update(Msg::SelectTrace(TraceId(16)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(16)), &t.keys);
     let (id, edit, _) = trace_update(&t.key("Alt+Up"));
     assert_eq!((id, edit.offset), (TraceId(16), Db(1.0)));
     // J types it, in the spectrum pane too.
     t.key("Alt+2");
-    assert_eq!(t.st.selected_trace, Some(TraceId(16)), "drawn there: kept");
+    assert_eq!(
+        t.st.rig.selected_trace,
+        Some(TraceId(16)),
+        "drawn there: kept"
+    );
     t.type_key("J", "j");
     assert!(matches!(
         &t.st.overlay,
@@ -111,7 +115,7 @@ fn offset_steps_change_the_selected_trace() {
     ));
     t.key("Esc");
     // A locked trace says so and sends nothing.
-    t.st.update(Msg::SelectTrace(TraceId(12)), &t.keys);
+    t.st.apply(Msg::SelectTrace(TraceId(12)), &t.keys);
     assert!(t.key("Alt+Up").is_empty());
     assert!(
         t.last_toast().contains("t12 is locked"),
@@ -296,13 +300,14 @@ fn a_live_curve_glides_to_each_new_frame() {
     let t0 = Instant::now();
     spec_frame_at(&mut t, 3, vec![-60.0; 5], 1, t0);
     assert!(
-        t.st.spec_glide.is_empty(),
+        t.st.rig.spec_glide.is_empty(),
         "a first frame is drawn as received"
     );
     let t1 = t0 + ms(100);
     spec_frame_at(&mut t, 3, vec![-40.0; 5], 2, t1);
     let to =
-        t.st.data
+        t.st.rig
+            .data
             .as_ref()
             .expect("data")
             .latest
@@ -311,7 +316,7 @@ fn a_live_curve_glides_to_each_new_frame() {
             .next()
             .expect("frame")
             .clone();
-    let g = t.st.spec_glide[&to.topic].clone();
+    let g = t.st.rig.spec_glide[&to.topic].clone();
     assert_eq!(g.to_seq, 2);
     assert!((g.duration_s - 0.1).abs() < 1e-9);
     assert!(t.st.spectrum_gliding(t1 + ms(50)));
@@ -325,16 +330,16 @@ fn a_live_curve_glides_to_each_new_frame() {
     // A frame half way through the glide starts from the half-way curve.
     let t2 = t1 + ms(50);
     spec_frame_at(&mut t, 3, vec![-60.0; 5], 3, t2);
-    let g = t.st.spec_glide[&to.topic].clone();
+    let g = t.st.rig.spec_glide[&to.topic].clone();
     assert_eq!(&*g.from, &[-50.0; 5]);
     assert!((g.duration_s - 0.05).abs() < 1e-9);
     // The same levels again (a refresh) move nothing.
     spec_frame_at(&mut t, 3, vec![-60.0; 5], 4, t2 + ms(300));
-    assert!(t.st.spec_glide.is_empty());
+    assert!(t.st.rig.spec_glide.is_empty());
     // Off: every frame is drawn as received.
     t.st.prefs.spec_ease = false;
     spec_frame_at(&mut t, 3, vec![-30.0; 5], 5, t2 + ms(400));
-    assert!(t.st.spec_glide.is_empty());
+    assert!(t.st.rig.spec_glide.is_empty());
     assert!(!t.st.spectrum_gliding(t2 + ms(401)));
 }
 
@@ -382,7 +387,13 @@ fn live_curve_glides_are_paced_by_capture_time() {
         t0 + ms(167),
         WallNs(w0 + 2 * hop),
     );
-    let g = t.st.spec_glide.values().next().expect("gliding").clone();
+    let g =
+        t.st.rig
+            .spec_glide
+            .values()
+            .next()
+            .expect("gliding")
+            .clone();
     assert_eq!(g.to_seq, 3);
     // 85 ms of capture time, plus the 18 ms this frame came earlier than the one before.
     assert!((g.duration_s - 0.103).abs() < 1e-6, "{}", g.duration_s);

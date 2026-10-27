@@ -123,7 +123,7 @@ fn slow_leq_limits_go_over_and_recover_from_the_app() -> R {
 
     // The level typed before is kept: Space arms, Enter fires.
     d.key("Space");
-    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
     d.key("Enter");
     d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
     d.until("both tiles red", |s| {
@@ -182,7 +182,7 @@ fn slow_leq_limits_go_over_and_recover_from_the_app() -> R {
         ]
     );
     // The history holds the excursion: over-limit seconds, and ones after it that are not.
-    let (_, h) = d.st.leq.history.values().next().ok_or("history")?;
+    let (_, h) = d.st.rig.leq.history.values().next().ok_or("history")?;
     let m =
         d.st.measurements()
             .into_iter()
@@ -317,7 +317,7 @@ fn slow_a_peak_limit_and_the_position_correction_from_the_app() -> R {
             .count()
     };
     d.key("Space");
-    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
     d.key("Enter");
     d.until("LCpeak over", |s| {
         spl_log(s).is_some_and(|l| l.peaks.lcpeak.judgement == LeqJudgement::Over)
@@ -455,7 +455,7 @@ fn slow_filling_windows_go_red_only_when_their_budget_is_spent() -> R {
 
     // Loud: every window on course at once, amber, the value the Leq so far.
     d.key("Space");
-    d.until("armed", |s| s.stimulus.phase == StimPhase::Armed)?;
+    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
     d.key("Enter");
     d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
     let th = Theme::dark();

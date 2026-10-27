@@ -50,7 +50,7 @@ fn empty_embedded_daemon_sweeps_from_the_app() -> R {
     d.key("Enter");
     arm_new_sweep(&mut d, sweeps_before)?;
     d.until("armed with the sweep", |s| {
-        s.stimulus.phase == StimPhase::Armed
+        s.rig.stimulus.phase == StimPhase::Armed
             && s.daemon().is_some_and(|x| {
                 x.generator.armed
                     && x.generator
@@ -61,7 +61,7 @@ fn empty_embedded_daemon_sweeps_from_the_app() -> R {
     })?;
     d.key("Enter");
     d.until("the sweep stored and shown", |s| {
-        s.sweep.run.is_none()
+        s.rig.sweep.run.is_none()
             && s.layout.focus_kind() == PaneKind::Distortion
             && s.kind_sweep().is_some()
     })?;
@@ -153,13 +153,13 @@ fn empty_embedded_daemon_sweeps_from_the_app() -> R {
     // Shift+G: back to the response.
     d.key("Shift+G");
     d.until("the stimulus off and the lease given back", |s| {
-        s.stimulus.phase == StimPhase::Idle
+        s.rig.stimulus.phase == StimPhase::Idle
             && s.daemon().is_some_and(|x| {
                 !x.generator.armed && !x.generator.firing && x.generator.owner.is_none()
             })
     })?;
     assert!(!d.st.stimulus_live(), "STIM OFF");
-    assert!(d.st.sweep.plan.is_none());
+    assert!(d.st.rig.sweep.plan.is_none());
     drop(d);
     drop(daemon);
     Ok(())
@@ -222,11 +222,11 @@ fn slow_room_parameters_of_a_sweep_from_the_app() -> R {
     d.key("Enter");
     arm_new_sweep(&mut d, sweeps_before)?;
     d.until("armed with the sweep", |s| {
-        s.stimulus.phase == StimPhase::Armed && s.daemon().is_some_and(|x| x.generator.armed)
+        s.rig.stimulus.phase == StimPhase::Armed && s.daemon().is_some_and(|x| x.generator.armed)
     })?;
     d.key("Enter");
     d.until("the sweep stored and shown", |s| {
-        s.sweep.run.is_none()
+        s.rig.sweep.run.is_none()
             && s.layout.focus_kind() == PaneKind::Distortion
             && s.kind_sweep().is_some()
     })?;
@@ -329,7 +329,7 @@ fn input_meters_and_a_stopped_sweep_set_from_the_app() -> R {
     d.until("the input meters with names", |s| {
         let rows = s.session_inputs();
         rows.len() == 2
-            && s.devices.is_some()
+            && s.rig.devices.is_some()
             && rows.iter().all(|r| r.reading.state != MeterState::NoData)
     })?;
     let rows = d.st.session_inputs();
@@ -371,7 +371,7 @@ fn input_meters_and_a_stopped_sweep_set_from_the_app() -> R {
     d.key("Enter");
     arm_new_sweep(&mut d, sweeps_before)?;
     d.until("armed with the sweep", |s| {
-        s.stimulus.phase == StimPhase::Armed && s.daemon().is_some_and(|x| x.generator.armed)
+        s.rig.stimulus.phase == StimPhase::Armed && s.daemon().is_some_and(|x| x.generator.armed)
     })?;
     d.key("Enter");
     let step = |s: &AppState| s.operation().map(|p| p.step);
@@ -386,7 +386,8 @@ fn input_meters_and_a_stopped_sweep_set_from_the_app() -> R {
     );
     // The meters keep running during the sweep.
     let seq = |s: &AppState| {
-        s.data
+        s.rig
+            .data
             .as_ref()
             .and_then(|x| x.latest.get(&Topic::SessionLevels))
             .map_or(0, |f| f.frame.stamp.seq)
@@ -402,7 +403,7 @@ fn input_meters_and_a_stopped_sweep_set_from_the_app() -> R {
     // The app ends its sweep mode once it has seen the stop, which can be a step after the
     // daemon's state says so: wait for both.
     d.until("stopped and disarmed, the run discarded", |s| {
-        s.sweep.plan.is_none()
+        s.rig.sweep.plan.is_none()
             && s.operation().is_none()
             && s.daemon().is_some_and(|x| {
                 !x.generator.firing
@@ -419,7 +420,7 @@ fn input_meters_and_a_stopped_sweep_set_from_the_app() -> R {
             })
     })?;
     assert_eq!(d.st.operation(), None);
-    assert!(d.st.sweep.plan.is_none());
+    assert!(d.st.rig.sweep.plan.is_none());
     drop(d);
     drop(daemon);
     Ok(())
@@ -430,16 +431,17 @@ fn run_again(d: &mut Driver) -> R<ac2_proto::units::TraceId> {
     let before = d.st.sweep_traces().len();
     d.key("Space");
     d.until("armed with the sweep", |s| {
-        s.stimulus.phase == StimPhase::Armed
+        s.rig.stimulus.phase == StimPhase::Armed
     })?;
     d.key("Enter");
     d.until("the run stored, the stimulus off", |s| {
-        s.sweep.run.is_none()
+        s.rig.sweep.run.is_none()
             && s.sweep_traces().len() == before + 1
-            && s.stimulus.phase == StimPhase::Idle
+            && s.rig.stimulus.phase == StimPhase::Idle
             && s.daemon().is_some_and(|x| x.generator.owner.is_none())
     })?;
-    d.st.selected_trace
+    d.st.rig
+        .selected_trace
         .ok_or_else(|| "the new run is not selected".into())
 }
 
@@ -490,7 +492,7 @@ fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
     d.key("End");
     d.key("Alt+1");
     assert_eq!(d.st.layout.focus_kind(), PaneKind::Transfer);
-    assert_eq!(d.st.selected_trace, None);
+    assert_eq!(d.st.rig.selected_trace, None);
     let sweep_meas =
         d.st.trace_meta(first)
             .ok()
@@ -501,9 +503,9 @@ fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
         tf,
         ac2_ui::state::PaneMenuRow::Meas(sweep_meas),
     ));
-    assert_eq!(d.st.selected_trace, None);
+    assert_eq!(d.st.rig.selected_trace, None);
     d.key("V");
-    assert_eq!(d.st.selected_trace, Some(first));
+    assert_eq!(d.st.rig.selected_trace, Some(first));
     assert_eq!(shown(&d.st), Some(first));
     assert_eq!(
         d.st.pane_caption(crate::common::pane(&d.st, PaneKind::Transfer)),
@@ -530,7 +532,7 @@ fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
     };
     assert!(caption(&d.st).starts_with(&n1), "{}", caption(&d.st));
     d.key("V");
-    assert_eq!(d.st.selected_trace, Some(second));
+    assert_eq!(d.st.rig.selected_trace, Some(second));
     assert_eq!(shown(&d.st), Some(second));
     assert!(caption(&d.st).starts_with(&n2), "{}", caption(&d.st));
 
@@ -540,7 +542,8 @@ fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
         s.trace_rows()
             .iter()
             .any(|r| r.id == second && !r.shown && r.details[0].contains("hidden"))
-            && s.traces
+            && s.rig
+                .traces
                 .get(&second)
                 .is_some_and(|(t, _)| !t.meta.edit.visible)
     })?;
@@ -558,25 +561,25 @@ fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
     assert!(legend.contains(&n1), "{legend:?}");
     assert!(!legend.contains(&n2), "{legend:?}");
     d.key("V");
-    assert_eq!(d.st.selected_trace, None, "past the last shown: live");
+    assert_eq!(d.st.rig.selected_trace, None, "past the last shown: live");
     d.key("V");
-    assert_eq!(d.st.selected_trace, Some(first));
+    assert_eq!(d.st.rig.selected_trace, Some(first));
     d.key("V");
-    assert_eq!(d.st.selected_trace, None);
+    assert_eq!(d.st.rig.selected_trace, None);
     // Alt+V reaches it hidden; the sweep pane still shows what is selected.
     d.key("Alt+Shift+V");
-    assert_eq!(d.st.selected_trace, Some(second));
+    assert_eq!(d.st.rig.selected_trace, Some(second));
     assert_eq!(shown(&d.st), Some(second));
 
     // V on the sweep pane steps the sweep runs and selects them.
     d.key("Alt+5");
     assert_eq!(d.st.layout.focus_kind(), PaneKind::Distortion);
     d.key("V");
-    assert_eq!(d.st.selected_trace, Some(first));
+    assert_eq!(d.st.rig.selected_trace, Some(first));
     assert_eq!(shown(&d.st), Some(first));
     d.key("Alt+1");
     assert_eq!(
-        d.st.selected_trace,
+        d.st.rig.selected_trace,
         Some(first),
         "kept on the way to the transfer pane"
     );
@@ -686,7 +689,8 @@ fn slow_the_measurement_tree_from_an_empty_daemon() -> R {
     }
     d.key("Enter");
     d.until("the sweep measurement listed", |s| {
-        sweep_count(s) > sweeps_before && s.sweep_meas().is_some_and(|m| Some(m.id) == s.selected)
+        sweep_count(s) > sweeps_before
+            && s.sweep_meas().is_some_and(|m| Some(m.id) == s.rig.selected)
     })?;
     let sweep = d.st.sweep_meas().map(|m| m.id).ok_or("sweep measurement")?;
     std::thread::sleep(Duration::from_millis(300));
@@ -698,13 +702,13 @@ fn slow_the_measurement_tree_from_an_empty_daemon() -> R {
     for n in 1..=2 {
         d.key("Space");
         d.until("armed with the sweep", |s| {
-            s.stimulus.phase == StimPhase::Armed
+            s.rig.stimulus.phase == StimPhase::Armed
         })?;
         d.key("Enter");
         d.until("the run stored, the stimulus off", |s| {
             runs_of(s, sweep).len() == n
-                && s.sweep.run.is_none()
-                && s.stimulus.phase == StimPhase::Idle
+                && s.rig.sweep.run.is_none()
+                && s.rig.stimulus.phase == StimPhase::Idle
                 && s.daemon().is_some_and(|x| x.generator.owner.is_none())
         })?;
     }
@@ -764,7 +768,7 @@ fn a_new_sweep_opens_its_own_pane() -> R {
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     d.st.set_prefs(crate::common::grid_ui_prefs());
     measure_from_empty(&mut d)?;
-    let tf = d.st.selected.ok_or("the transfer measurement")?;
+    let tf = d.st.rig.selected.ok_or("the transfer measurement")?;
     // The transfer measurement given its own panes: the transfer pane grown a little.
     d.key("Alt+1");
     d.key("Alt+Right");
@@ -784,9 +788,10 @@ fn a_new_sweep_opens_its_own_pane() -> R {
     )?;
     d.key("Enter");
     d.until("the sweep measurement made and selected", |s| {
-        sweep_count(s) > sweeps_before && s.sweep_meas().is_some_and(|m| Some(m.id) == s.selected)
+        sweep_count(s) > sweeps_before
+            && s.sweep_meas().is_some_and(|m| Some(m.id) == s.rig.selected)
     })?;
-    let sweep = d.st.selected.ok_or("the sweep")?;
+    let sweep = d.st.rig.selected.ok_or("the sweep")?;
     // A pane more, the sweep's, focused; every pane there before keeps its kind.
     let after = crate::common::visible(&d.st);
     assert_eq!(after.len(), kinds.len() + 1, "{after:?}");

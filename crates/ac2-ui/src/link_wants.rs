@@ -11,10 +11,10 @@ use std::time::Duration;
 
 use ac2_proto::model::{MathDomain, MeasKind, PeakMode};
 use ac2_proto::topic::{Stream, Topic};
-use ac2_proto::units::MeasId;
+use ac2_proto::units::{MeasId, RigId};
 
 use crate::conn::{DISPLAY_PERIOD, Request};
-use crate::state::{AppState, PaneKind};
+use crate::state::{AppState, PaneKind, RigState};
 
 /// Display period when only the SPL pane is in view: its readout is held for at least a
 /// tenth of a second and its Leq windows move once a second, so faster shows nothing new.
@@ -28,7 +28,7 @@ pub struct Sent {
 }
 
 impl AppState {
-    /// The streams to receive now:
+    /// The streams the active rig should send now:
     /// - each transfer measurement's TF while a transfer pane draws its response, and the
     ///   IR and TF of the one a transfer pane in its IR view shows;
     /// - each spectrum / RTA while the spectrum pane is in view or peak hold or the
@@ -50,49 +50,8 @@ impl AppState {
             .filter(|id| self.layout.view(**id).is_some_and(|v| v.shows_ir()))
             .filter_map(|id| self.pane_meas(*id).map(|m| m.id))
             .collect();
-        let spectrum = shows(PaneKind::Spectrum)
-            || self
-                .measurements()
-                .iter()
-                .any(|m| self.display_of(m).peak != PeakMode::Off)
-            || self.spectrograph_shown();
-        let mut out = HashSet::new();
-        for m in self.measurements() {
-            let streams: &[Stream] = match &m.config.kind {
-                MeasKind::Transfer { .. } => {
-                    match (shows(PaneKind::Transfer), ir_of.contains(&m.id)) {
-                        (true, true) => &[Stream::Tf, Stream::Ir],
-                        (true, false) => &[Stream::Tf],
-                        // The IR view carries its transfer stream's banners (no reference, no
-                        // signal), which only the transfer frames say.
-                        (false, true) => &[Stream::Tf, Stream::Ir],
-                        (false, false) => &[],
-                    }
-                }
-                MeasKind::Spectrum { .. } if spectrum => &[Stream::Spec],
-                MeasKind::Rta { .. } if spectrum => &[Stream::Rta],
-                MeasKind::Spectrum { .. } | MeasKind::Rta { .. } => &[],
-                // The band frames only while the meter has a band meter: none come otherwise.
-                MeasKind::Spl { config } if config.bands.is_some() => {
-                    &[Stream::Spl, Stream::Leq, Stream::BandLeq]
-                }
-                MeasKind::Spl { .. } => &[Stream::Spl, Stream::Leq],
-                MeasKind::Math { config } => match config.domain {
-                    MathDomain::Transfer if shows(PaneKind::Transfer) => &[Stream::Tf],
-                    MathDomain::Spectrum if spectrum => &[Stream::Spec],
-                    MathDomain::Rta if spectrum => &[Stream::Rta],
-                    _ => &[],
-                },
-                // Its results are stored traces, fetched as traces.
-                MeasKind::Sweep { .. } => &[],
-            };
-            out.extend(
-                streams
-                    .iter()
-                    .map(|&stream| Topic::Data { meas: m.id, stream }),
-            );
-        }
-        out
+        let spectrum = shows(PaneKind::Spectrum) || self.spectrograph_shown();
+        topics_of(&self.rig, shows, &ir_of, spectrum)
     }
 
     /// How often new frames may reach the UI: [`DISPLAY_PERIOD`], or [`SPL_ONLY_PERIOD`]
@@ -105,21 +64,104 @@ impl AppState {
         }
     }
 
-    /// The requests that bring the link in line with [`Self::wanted_topics`] and
-    /// [`Self::display_period`]; nothing when it already is. The app calls it after every
-    /// message it feeds the reducer.
-    pub fn sync_link(&mut self) -> Vec<Request> {
+    /// The requests that bring each rig's link in line with what it should receive; nothing
+    /// for a link that already is. The active rig's follows the panes ([`Self::wanted_topics`],
+    /// [`Self::display_period`]); one in the background, which no pane shows, receives what
+    /// folds whether shown or not. The app calls it after every message it feeds the
+    /// reducer.
+    pub fn sync_link(&mut self) -> Vec<(RigId, Request)> {
         let mut out = Vec::new();
-        let topics = self.wanted_topics();
-        if self.link_wants.topics.as_ref() != Some(&topics) {
-            self.link_wants.topics = Some(topics.clone());
-            out.push(Request::Topics(topics));
-        }
-        let period = self.display_period();
-        if self.link_wants.period != Some(period) {
-            self.link_wants.period = Some(period);
-            out.push(Request::DisplayPeriod(period));
+        let (topics, period) = (self.wanted_topics(), self.display_period());
+        sync(&mut self.rig, topics, period, &mut out);
+        for r in &mut self.background {
+            let topics = topics_of(r, |_| false, &[], false);
+            // Peak holds fold every frame; SPL readings and Leq windows move slower.
+            let period = if topics.iter().any(|t| {
+                matches!(
+                    t,
+                    Topic::Data {
+                        stream: Stream::Spec | Stream::Rta,
+                        ..
+                    }
+                )
+            }) {
+                DISPLAY_PERIOD
+            } else {
+                SPL_ONLY_PERIOD
+            };
+            sync(r, topics, period, &mut out);
         }
         out
     }
+}
+
+/// The requests that bring `rig`'s link to `topics` at `period`.
+fn sync(
+    rig: &mut RigState,
+    topics: HashSet<Topic>,
+    period: Duration,
+    out: &mut Vec<(RigId, Request)>,
+) {
+    if rig.link_wants.topics.as_ref() != Some(&topics) {
+        rig.link_wants.topics = Some(topics.clone());
+        out.push((rig.id, Request::Topics(topics)));
+    }
+    if rig.link_wants.period != Some(period) {
+        rig.link_wants.period = Some(period);
+        out.push((rig.id, Request::DisplayPeriod(period)));
+    }
+}
+
+/// The streams `rig` should send: those of the measurements a pane draws (`shows` a pane
+/// kind outside an IR view, `ir_of` the measurements an IR view shows, `spectrum_shown` a
+/// spectrum pane or spectrograph), and those folded whether shown or not (a spectrum's
+/// peak hold, every SPL meter).
+fn topics_of(
+    rig: &RigState,
+    shows: impl Fn(PaneKind) -> bool,
+    ir_of: &[MeasId],
+    spectrum_shown: bool,
+) -> HashSet<Topic> {
+    let spectrum = spectrum_shown
+        || rig
+            .measurements()
+            .iter()
+            .any(|m| rig.display_of(m).peak != PeakMode::Off);
+    let mut out = HashSet::new();
+    for m in rig.measurements() {
+        let streams: &[Stream] = match &m.config.kind {
+            MeasKind::Transfer { .. } => {
+                match (shows(PaneKind::Transfer), ir_of.contains(&m.id)) {
+                    (true, true) => &[Stream::Tf, Stream::Ir],
+                    (true, false) => &[Stream::Tf],
+                    // The IR view carries its transfer stream's banners (no reference, no
+                    // signal), which only the transfer frames say.
+                    (false, true) => &[Stream::Tf, Stream::Ir],
+                    (false, false) => &[],
+                }
+            }
+            MeasKind::Spectrum { .. } if spectrum => &[Stream::Spec],
+            MeasKind::Rta { .. } if spectrum => &[Stream::Rta],
+            MeasKind::Spectrum { .. } | MeasKind::Rta { .. } => &[],
+            // The band frames only while the meter has a band meter: none come otherwise.
+            MeasKind::Spl { config } if config.bands.is_some() => {
+                &[Stream::Spl, Stream::Leq, Stream::BandLeq]
+            }
+            MeasKind::Spl { .. } => &[Stream::Spl, Stream::Leq],
+            MeasKind::Math { config } => match config.domain {
+                MathDomain::Transfer if shows(PaneKind::Transfer) => &[Stream::Tf],
+                MathDomain::Spectrum if spectrum => &[Stream::Spec],
+                MathDomain::Rta if spectrum => &[Stream::Rta],
+                _ => &[],
+            },
+            // Its results are stored traces, fetched as traces.
+            MeasKind::Sweep { .. } => &[],
+        };
+        out.extend(
+            streams
+                .iter()
+                .map(|&stream| Topic::Data { meas: m.id, stream }),
+        );
+    }
+    out
 }
