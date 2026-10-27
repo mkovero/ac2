@@ -369,3 +369,36 @@ fn a_lone_usb_mic_opens_without_reference_or_outputs() {
     assert_eq!(config.loopback, None);
     assert!(matches!(inputs[0].kind, InputKind::Mic { .. }));
 }
+
+/// Settings shows the devices listed before at once and asks the daemon again; an answer
+/// that lists the chosen device as it was keeps the rows the operator ticked meanwhile,
+/// while one whose device changed rebuilds them from the device.
+#[test]
+fn a_device_list_answer_after_an_edit_keeps_the_edit() {
+    let mut t = T::new();
+    open_dialog(&mut t, backends(true));
+    t.key("Escape");
+    let r = t.type_key("Shift+O", "O");
+    assert!(r.iter().any(|x| matches!(x, Request::Devices)), "{r:?}");
+    assert!(
+        dialog(&t).device_info().is_some(),
+        "the listed devices at once"
+    );
+    focus(&mut t, Row::Input(2));
+    t.key("Space");
+    t.key("M");
+    let ticked = |t: &T| {
+        let r = &dialog(t).inputs[2];
+        r.in_session && r.is_mic()
+    };
+    assert!(ticked(&t), "{:?}", dialog(&t).inputs[2]);
+
+    t.conn(ConnEvent::Devices(Ok(backends(true))));
+    assert!(ticked(&t), "{:?}", dialog(&t).inputs[2]);
+    assert_eq!(dialog(&t).focus, Row::Input(2));
+
+    // The device's channels changed meanwhile: its rows are built anew.
+    t.conn(ConnEvent::Devices(Ok(backends(false))));
+    assert_eq!(dialog(&t).inputs[2].device_name, None);
+    assert!(!ticked(&t), "{:?}", dialog(&t).inputs[2]);
+}

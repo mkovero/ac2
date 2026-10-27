@@ -11,6 +11,18 @@ impl SessionDialog {
     pub fn set_backends(&mut self, list: Vec<BackendInfo>, prefs: RigPrefs<'_>) {
         let usable =
             |b: &BackendInfo| b.availability == Availability::Available && !b.devices.is_empty();
+        // A fresh answer to the dialog's own ask (it shows the cached list at once) that
+        // still lists the chosen devices as they were says nothing new about their
+        // channels: the rows keep what the operator has ticked meanwhile.
+        if let Some((backend, device, out_device)) = self.same_devices_in(&list)
+            && usable(&list[backend])
+        {
+            self.backends = Some(list);
+            self.backend = backend;
+            self.device = device;
+            self.out_device = out_device;
+            return;
+        }
         let open = self
             .open
             .as_ref()
@@ -37,6 +49,24 @@ impl SessionDialog {
         self.load_device(prefs);
         // The channel rows are new: the focus belongs on one that exists.
         self.keep_focus();
+    }
+
+    /// Where `list` holds the chosen input and output devices exactly as listed now:
+    /// (backend, input device, output device) in `list`.
+    fn same_devices_in(&self, list: &[BackendInfo]) -> Option<(usize, usize, OutputDevice)> {
+        let kind = self.backend_kind()?;
+        let input = self.device_info()?;
+        let backend = list.iter().position(|b| b.kind == kind)?;
+        let devices = &list[backend].devices;
+        let device = devices.iter().position(|d| d == input)?;
+        let out_device = match self.out_device {
+            OutputDevice::SameAsInput => OutputDevice::SameAsInput,
+            OutputDevice::Other(_) => {
+                let output = self.output_info()?;
+                OutputDevice::Other(devices.iter().position(|d| d == output)?)
+            }
+        };
+        Some((backend, device, out_device))
     }
 
     pub fn backend_info(&self) -> Option<&BackendInfo> {
