@@ -34,7 +34,11 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   rig (PROTO 72, session format 36, rig file 8). Stage 1b landed: the app's state is split
   into one `RigState` per daemon (`AppState.rig` the active one, `background` the others;
   each owns its link, its events and requests carry its `RigId`, `ui.toml` remembers
-  devices per rig), still with one rig. Next: 1c, many rigs (*Stages*).
+  devices per rig), still with one rig. Stage 1c landed: Connect… (drop-down or palette)
+  adds a rig, the top-bar drop-down switches between them, `ui.toml` remembers the rigs and
+  connects them again at start, panes keep their rig across a switch (titles `pupu · …`,
+  *unreachable · retrying* / *not connected*), Shift+Esc stops every rig and quit releases
+  them all in parallel. Next: 1d, cross-rig panes (*Stages*).
 - Open hardware gates (1.0): duplex check and 1 h run on macOS (Windows: done in a VM,
   a real PC and the panel/unplug cases pending, `asio.md` §4c–d), keyboard-only speaker
   tuning per OS, clean install → first measurement < 2 min per OS, signing certificates.

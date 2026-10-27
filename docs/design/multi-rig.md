@@ -355,6 +355,25 @@ until it answers or is closed. Names come from the rig and are display only
      (`UiPrefs.rigs`) and reconnect at start, greyed tabs and panes (*unreachable · retrying*, *not connected*), arm line
      and banner naming the rig, Shift+Escape fanned out, quit stopping every rig in
      parallel, windows bound to their rig.
+     As built (1c): the active rig stays `AppState.rig`; the others are `background`,
+     each with a `slot` (its place, fixed for the run; links and requests are matched by
+     slot, since a hello can change a rig's id). A background rig's event is handled by
+     *visiting* it (swapped into `rig` for the one update), so every reply is applied as on
+     the active rig. `View.rig` (`PaneRig::Active | Rig(id)`) landed here rather than in
+     1d: a switch pins every pane with content to the rig it was showing, a pane's keys,
+     legend and zoom go to its rig, `pane_meas` and the queries never read a foreign pane's
+     id against the active mirror, foreign titles read `pupu · …`, and `meas.layout` keeps
+     only the rig's own panes (shown again beside the others). Decisions where the note
+     was silent: Connect… shows the new rig at once; a foreign pane's menu (or any window
+     opened while visiting) is refused with *switch to pupu to open that window*; only one
+     embedded daemon per app (*this computer is already a rig here*); the simulated rig
+     is never remembered; a rig reached twice (same id) is closed with *already
+     connected*; the drop-down sits innermost on the right of the top bar and opens from
+     the palette (*Rigs…*, *Connect a rig…*), no key chord; closing a rig stops and
+     releases its stimulus on a thread of its own, quitting closes every link against one
+     shared `QUIT_GRACE` deadline. Left for 1d: picker and drag across rigs, `rig` entries
+     in the prefs pane layout, `ThisRig` mapping at session load and save, pair panes
+     across rigs.
    - **1d — cross-rig panes**: `View.rig`, picker and drag across rigs, pane titles naming
      another rig, P1 storing only `ThisRig` panes, prefs `rig` entries and their resolution
      on reconnect, `ThisRig` mapped at session load and written at save, pair panes.

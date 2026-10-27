@@ -64,6 +64,34 @@ ac2 meas new rta --input 2 --name rta
 ac2 meas start main-l
 ```
 
+### Many rigs in one window
+
+One app can hold several rigs at once (a FOH rig and a delay-tower rig, each its own
+daemon). The top bar names the rig shown, after the session line: **pupu ▾**. Click it, or
+pick *Rigs…* in the palette (**Ctrl+K**), for the drop-down:
+
+- every rig held, the one shown first in its place; a rig whose daemon stopped answering is
+  greyed and reads *unreachable · retrying* (the app keeps reconnecting on its own);
+- *Connect a rig…* (also in the palette) opens the connect dialog: a rig it finds or one you
+  paired, an address typed in (`host` or `host:port`), or this computer. The rig joins
+  the ones held and is shown; the others stay connected and keep measuring;
+- *Close pupu* lets go of the rig shown (never the last one): its stimulus is stopped and
+  its hold released first.
+
+↑/↓ and **Enter** pick a row, **Esc** closes the drop-down. It is not there in full screen
+or the stage view, and it is greyed while a window is open: a window belongs to the rig it
+was opened on.
+
+The panes stay where they are when you switch: a pane showing another rig's measurement
+keeps showing it, its title starting with that rig's name (`pupu · Transfer 1`). Its
+window (pane menu, settings) opens only on its own rig: switch to it first. A pane of a rig
+that is down reads *pupu unreachable · retrying*; one of a closed rig reads *pupu not
+connected* and stays until you close or reuse it. A measurement's saved layout keeps only
+its own rig's panes.
+
+The rigs held are remembered and connected again at the next start. Settings ›
+Connection names the rig shown.
+
 ### Log files
 
 The app and a daemon started by hand log sessions opened, devices lost, capture
@@ -161,7 +189,8 @@ The daemon keeps the level across restarts. CLI: `ac2 gen ceiling`,
 
 #### Connection
 
-In network mode the page lists the clients the rig accepts (name, key fingerprint) and the
+The page names the rig shown (`Rig: pupu`) and its daemon, and *Connect a rig…* adds
+another ([Many rigs in one window](#many-rigs-in-one-window)). In network mode the page lists the clients the rig accepts (name, key fingerprint) and the
 keys it refused lately (fingerprint, address, how often, when).
 
 - **A** on a refused key, then a name, authorizes it; the client connects on its next retry.
@@ -527,8 +556,12 @@ accident:
 - nothing plays without a typed **level** (`L` in the app, `--level` in the CLI); there is
   no default;
 - **arm** (`Space`) and **fire** (`Enter`) are separate steps; **Esc** stops (with a window
-  open, Esc first closes it), **Shift+Esc** stops from anywhere, from any client. While
-  anything is armed or playing the top bar shows **■ Stop: Shift+Esc**. Space pressed while
+  open, Esc first closes it), **Shift+Esc** stops from anywhere, from any client, and
+  with several rigs held it stops every rig's stimulus, not only the one shown. While
+  anything is armed or playing the top bar shows **■ Stop: Shift+Esc**. With several rigs
+  the arm line and the level name the rig (`arm pupu's stimulus · Space`, `pupu: −24 dBFS`),
+  and a rig in the background still holding its stimulus shows *kettu's stimulus on*;
+  closing a rig or quitting the app stops and releases what each rig holds, all at once. Space pressed while
   a stop is finishing arms once it is done (Esc cancels that);
 - one client holds the stimulus at a time (a refreshed lease); if it disappears the daemon
   fades the output out within 1.5 s;
@@ -3387,6 +3420,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 
 | Command | `keys.toml` |
 |---|---|
+| Rigs… | `rigs` |
+| Connect a rig… | `connect_rig` |
 | Key hints | `key_hints` |
 | Warning toasts | `warning_toasts` |
 | Stimulus outputs… | `stimulus_outputs` |
