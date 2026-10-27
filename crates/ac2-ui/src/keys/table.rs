@@ -257,6 +257,8 @@ pub fn defaults() -> Vec<Binding> {
         (C::PrevView, S::Spl, sh(K::G)),
         (C::NextView, S::Distortion, k(K::G)),
         (C::PrevView, S::Distortion, sh(K::G)),
+        (C::NextView, S::Programme, k(K::G)),
+        (C::PrevView, S::Programme, sh(K::G)),
         // Shift+B, beside B (line / fill / bars): the spectrograph's history length.
         (C::SpectrographSpan, S::Spectrum, sh(K::B)),
         // R resets the meter's display; Shift+R, a step further, starts a new log (after a
@@ -391,6 +393,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                 &[
                     hint(C::LevelsReset, "reset", 90),
                     hint(C::LevelsResetAll, "reset all", 80),
+                    hint(C::NextView, "view", 70),
                     hint(C::PlotChrome, "grid", 60),
                     hint(C::MaximisePane, "maximise", 50),
                     hint(C::ClosePane, "close pane", 40),

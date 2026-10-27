@@ -522,14 +522,14 @@ fn turn_and_resize_are_the_same_everywhere() {
     }
 }
 
-/// G steps every plot pane's views forward and Shift+G back; Shift+B is the spectrograph's
-/// history length. The Programme pane has one view, and an Inputs row none.
+/// G steps every plot pane's views forward and Shift+G back, the Programme pane's meters and
+/// goniometer too; Shift+B is the spectrograph's history length. An Inputs row has no view.
 #[test]
 fn g_steps_the_views_of_every_pane() {
     let m = Keymap::default();
     let c = |s: &str| Chord::parse(s).expect(s);
     for scope in Scope::ALL {
-        let (g, shift_g) = if matches!(scope, Scope::Global | Scope::Programme | Scope::Inputs) {
+        let (g, shift_g) = if matches!(scope, Scope::Global | Scope::Inputs) {
             (None, None)
         } else {
             (Some(CommandId::NextView), Some(CommandId::PrevView))

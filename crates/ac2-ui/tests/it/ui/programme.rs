@@ -32,9 +32,13 @@ fn pair_rig() -> common::Rig {
     rig
 }
 
+/// The scene text of the focused pane (the meters P opens).
 fn programme_texts(h: &Harness<'_, App>) -> Vec<String> {
+    pane_texts(h, h.state().state.layout.focus)
+}
+
+fn pane_texts(h: &Harness<'_, App>, pane: ac2_ui::state::PaneId) -> Vec<String> {
     let st = &h.state().state;
-    let pane = common::pane(st, PaneKind::Programme);
     let scene = ac2_ui::scenes::programme(
         st,
         pane,
@@ -62,9 +66,10 @@ fn loudness(a: &App, pane: ac2_ui::state::PaneId) -> Option<LoudnessReadout> {
     a.state.programme_pane(pane)?.0.loudness
 }
 
-/// A click picks the pair's Inputs row, P meters it in a new Programme pane: the title says
+/// A click picks the pair's Inputs row, P meters it in two new Programme panes: the
+/// goniometer on the left, the meters on the right with the focus. The meters' title says
 /// the ballistic, the pair and the correlator window, the chip that the right side is too
-/// quiet to correlate. The pane outlives a save and load of the layout.
+/// quiet to correlate. Both panes and their views outlive a save and load of the layout.
 #[test]
 fn programme_pane_of_a_pair() {
     if !have_gpu("programme_pane_of_a_pair") {
@@ -98,15 +103,29 @@ fn programme_pane_of_a_pair() {
     step_until(&mut h, "a Programme pane", |a| {
         common::visible(&a.state).contains(&PaneKind::Programme)
     });
-    let pane = common::pane(&h.state().state, PaneKind::Programme);
-    assert_eq!(h.state().state.layout.focus, pane);
-    assert_eq!(h.state().state.pane_title(pane), "true peak · Main · 1 s");
+    let st = &h.state().state;
+    let panes: Vec<_> = st
+        .visible_panes()
+        .into_iter()
+        .filter(|p| st.layout.kind(*p) == PaneKind::Programme)
+        .collect();
+    let [gonio, pane] = panes[..] else {
+        panic!("two Programme panes: {panes:?}")
+    };
+    assert_eq!(st.layout.focus, pane);
+    assert_eq!(st.pane_title(pane), "true peak · Main · 1 s");
+    // The goniometer fills its pane: its axes, the correlation scale and the pair's chip,
+    // no bars.
     step_until(&mut h, "the chip gated", |a| {
         a.state
             .programme_pane(pane)
             .and_then(|(p, _)| p.pair)
             .is_some_and(|p| p.correlation.chip().text == "right quiet")
     });
+    assert_eq!(
+        pane_texts(&h, gonio),
+        ["L", "R", "correlation", "right quiet"]
+    );
     let texts = programme_texts(&h);
     // The bar reads the true peak in dBTP, its max too, and no second true-peak line.
     assert!(!texts.iter().any(|t| t.ends_with("dBFS")), "{texts:?}");
@@ -165,19 +184,22 @@ fn programme_pane_of_a_pair() {
     let mut prefs = h.state().state.prefs.clone();
     prefs.layout = h.state().state.layout_prefs();
     let read = ac2_ui::prefs::UiPrefs::from_toml(&prefs.to_toml()).expect("prefs read back");
-    let view = read
+    let saved: Vec<_> = read
         .layout
         .panes
         .as_ref()
         .expect("a layout")
         .views
         .iter()
-        .find(|v| v.kind == PaneKind::Programme)
-        .expect("the Programme pane saved");
-    assert_eq!(
-        view.meters,
-        Some(ac2_ui::state::Metered::Pair { left: 2, right: 3 })
-    );
+        .filter(|v| v.kind == PaneKind::Programme)
+        .map(|v| (v.meters, v.modes.programme))
+        .collect();
+    let pair = Some(ac2_ui::state::Metered::Pair { left: 2, right: 3 });
+    use ac2_scene::view::ProgrammeMode as M;
+    assert_eq!(saved.len(), 2, "{saved:?}");
+    for want in [(pair, M::Goniometer), (pair, M::Meters)] {
+        assert!(saved.contains(&want), "{saved:?}");
+    }
 
     // W gives the pane the window: room for the loudness plate beside the bars, which a
     // pane a quarter of the window wide docks above them or drops.
@@ -356,7 +378,7 @@ fn mom_loudness_reads_lufs_bars() {
     step_until(&mut h, "a Programme pane", |a| {
         common::visible(&a.state).contains(&PaneKind::Programme)
     });
-    let pane = common::pane(&h.state().state, PaneKind::Programme);
+    let pane = h.state().state.layout.focus;
     h.state_mut().dispatch(Msg::OpenRig);
     h.state_mut()
         .dispatch(Msg::Settings(SettingsMsg::RigFocus(RigRow::Ballistic)));
@@ -445,4 +467,103 @@ fn plate_boxes(
     )
     .expect("a Programme scene")
     .plates()
+}
+
+/// Two mics as a pair with the rig on Short loudness: a mic has no loudness source, so its
+/// Inputs row reads each side's true peak on a bar line of its own, with the pair's
+/// correlation under them; P opens the goniometer and the meters, the meters true-peak bars
+/// alone: no LUFS column, no loudness plate.
+#[test]
+fn a_mic_pair_on_short_loudness_reads_true_peak() {
+    use ac2_proto::model::{Ballistic, CurveChoice, InputKind, InputSetup, InputSetups, Pair};
+    use ac2_scene::programme::{ProgrammeBar, row_block};
+    use ac2_scene::view::ProgrammeMode as M;
+    if !have_gpu("a_mic_pair_on_short_loudness_reads_true_peak") {
+        return;
+    }
+    let rig = common::Rig::start();
+    {
+        let mut s = rig.fake.lock();
+        let mut inputs = s.state.inputs.clone();
+        inputs.retain(|i| i.channel != 2 && i.channel != 3);
+        inputs.extend([2, 3].map(|channel| InputSetup {
+            channel,
+            kind: InputKind::Mic {
+                mic: None,
+                curve: CurveChoice::Off,
+            },
+            pair: None,
+        }));
+        inputs.sort_by_key(|i| i.channel);
+        s.commit(ac2_proto::Change::Inputs(InputSetups {
+            inputs,
+            pairs: vec![Pair {
+                left: 2,
+                right: 3,
+                name: Some("Mics".into()),
+            }],
+        }));
+        let mut r = s.state.rig.clone();
+        r.levels.ballistic = Ballistic::ShortTerm;
+        s.commit(ac2_proto::Change::Rig(r));
+        s.meters = true;
+    }
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "the pair's levels on Short", |a| {
+        a.state
+            .daemon()
+            .is_some_and(|s| s.rig.levels.ballistic == Ballistic::ShortTerm)
+            && a.state.row_meters(2).is_some_and(|m| {
+                let p = a.state.programme_of(m);
+                p.pair.is_some() && p.inputs.iter().all(|i| i.max.is_some())
+            })
+    });
+    let st = &h.state().state;
+    let p = st.programme_of(st.row_meters(2).expect("the pair's row"));
+    let block = row_block(
+        &p.inputs,
+        p.ballistic,
+        p.pair.as_ref().map(|x| x.correlation),
+    );
+    let sides: Vec<_> = block.sides.iter().map(|s| s.mark).collect();
+    assert_eq!(sides, ["L", "R"]);
+    for s in &block.sides {
+        assert!(s.reading.text.contains("dBTP"), "{:?}", s.reading.text);
+    }
+    assert!(block.correlation.is_some(), "the pair's correlation");
+
+    h.state_mut().dispatch(ac2_ui::state::Msg::InputPick(2));
+    h.key_press(Key::P);
+    step_until(&mut h, "two Programme panes", |a| {
+        common::visible(&a.state)
+            .iter()
+            .filter(|k| **k == PaneKind::Programme)
+            .count()
+            == 2
+    });
+    let st = &h.state().state;
+    let pane = st.layout.focus;
+    let views: Vec<_> = st
+        .visible_panes()
+        .into_iter()
+        .filter(|p| st.layout.kind(*p) == PaneKind::Programme)
+        .map(|p| st.layout.view(p).expect("view").modes.programme)
+        .collect();
+    assert_eq!(views, [M::Goniometer, M::Meters]);
+    let (p, _) = st.programme_pane(pane).expect("the meters");
+    assert!(
+        p.bars
+            .iter()
+            .all(|b| matches!(b, ProgrammeBar::Peak { .. })),
+        "true-peak bars only: {:?}",
+        p.bars
+    );
+    assert_eq!(p.loudness, None, "no loudness plate");
+    let texts = programme_texts(&h);
+    assert!(
+        !texts.iter().any(|t| t.contains("LUFS")),
+        "no LUFS column: {}",
+        common::scene_texts_excerpt(&texts, common::TEXTS_SHOWN)
+    );
+    assert!(plate_boxes(&h, pane).is_empty(), "no plate to drag");
 }

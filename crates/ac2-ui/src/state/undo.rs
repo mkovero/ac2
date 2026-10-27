@@ -118,6 +118,8 @@ enum Watch {
     },
     /// A row of pane `p`'s list taken.
     Pick(PaneId),
+    /// The programme meter form's Enter: new panes, or (`Some`) that pane's pick.
+    MeterForm(Option<PaneId>),
 }
 
 impl AppState {
@@ -133,7 +135,22 @@ impl AppState {
     /// Before message `msg`: what to compare after it, for one that may be an edit.
     pub(super) fn undo_watch(&mut self, msg: &Msg) -> Option<UndoWatch> {
         let row = |st: &Self, k: TreeKey| st.row_name(k).unwrap_or_default();
+        // The form's submit runs no command, so it is told by the form it closes.
+        let meter_form = match &self.overlay {
+            Overlay::Form(f)
+                if matches!(f.kind, FormKind::Programme | FormKind::ProgrammeEdit)
+                    && match msg {
+                        Msg::Key(c) => c.key == eframe::egui::Key::Enter,
+                        Msg::Form(FormMsg::Submit) => true,
+                        _ => false,
+                    } =>
+            {
+                Some(f.meter.as_ref().and_then(|m| m.edit))
+            }
+            _ => None,
+        };
         let what = match msg {
+            _ if meter_form.is_some() => Watch::MeterForm(meter_form.flatten()),
             Msg::Key(_) | Msg::Command(_) => Watch::Command {
                 menu: match self.overlay {
                     Overlay::PaneMenu(m) => Some(m.pane),
@@ -207,10 +224,12 @@ impl AppState {
                 spot: spot.unwrap_or(DropSpot::Pane(focus)),
             },
             Watch::Pick(p) => self.pick_edit(*p),
+            Watch::MeterForm(Some(p)) => self.pick_edit(*p),
+            Watch::MeterForm(None) => PaneEdit::Split(was),
             Watch::Command { menu } => match ran {
                 None => self.pick_edit((*menu)?),
                 Some(c) => match c {
-                    C::SplitPane => PaneEdit::Split(was),
+                    C::SplitPane | C::ProgrammePane => PaneEdit::Split(was),
                     C::ClosePane => PaneEdit::Close(was),
                     C::TurnSplit => PaneEdit::Turn(was),
                     C::GrowPane | C::ShrinkPane => PaneEdit::Resize,

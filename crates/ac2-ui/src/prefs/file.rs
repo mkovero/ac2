@@ -394,6 +394,15 @@ pub(super) enum SplViewFile {
     Bands,
 }
 
+/// A Programme pane's view; absent (an app layout from before the views) reads Meters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum ProgrammeViewFile {
+    #[default]
+    Meters,
+    Goniometer,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum SpectrumViewFile {

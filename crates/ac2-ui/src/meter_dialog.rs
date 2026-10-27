@@ -26,6 +26,8 @@ pub struct MeterForm {
     over: Vec<f64>,
     gate: Vec<f64>,
     target: Vec<f64>,
+    /// The ember decay's options, seconds ([`crate::settings::ember_decay_steps`]).
+    ember: Vec<f32>,
     /// The rig's settings when the dialog opened: a field still at its value is not sent.
     pub opened: LevelsSettings,
     /// The Programme pane whose meters change in place; `None`: a new pane.
@@ -50,12 +52,14 @@ struct What {
 
 /// The dialog over the session's `pairs` and `inputs`, starting from `now` (an edited pane's
 /// meters; for a new pane what to start from, else the first pair, else the first input), and
-/// the rig's settings `rig`. `edit`: the pane it changes in place.
+/// the rig's settings `rig`, and this app's ember decay `ember_s`. `edit`: the pane it
+/// changes in place.
 pub fn form(
     pairs: Vec<((u16, u16), String)>,
     inputs: Vec<(u16, String)>,
     now: Option<Metered>,
     rig: LevelsSettings,
+    ember_s: f32,
     edit: Option<PaneId>,
 ) -> Form {
     let kind = match edit {
@@ -113,6 +117,7 @@ pub fn form(
             rig::TARGET_STEP_LU,
             LOUDNESS_TARGET_RANGE,
         ),
+        ember: crate::settings::ember_decay_steps(),
         pairs,
         inputs,
         opened: rig,
@@ -121,6 +126,7 @@ pub fn form(
     let mut f = Form::new(kind, Vec::new());
     f.fields = what_fields(&meter, &what);
     f.fields.extend(rig_fields(&meter, rig));
+    f.fields.push(ember_field(&meter.ember, ember_s));
     f.meter = Some(Box::new(meter));
     rehead(&mut f);
     f
@@ -245,7 +251,36 @@ fn rig_fields(m: &MeterForm, l: LevelsSettings) -> Vec<Field> {
     ]
 }
 
-/// The headings: what to meter over the first field, how it reads (the rig's) over the rig's.
+/// The goniometer's fade, the same setting as Settings › Display's: a stored value between
+/// steps shows as its nearest step.
+fn ember_field(all: &[f32], now: f32) -> Field {
+    let index = all
+        .iter()
+        .enumerate()
+        .min_by(|a, b| (a.1 - now).abs().total_cmp(&(b.1 - now).abs()))
+        .map_or(0, |(i, _)| i);
+    Field {
+        id: FieldId::EmberDecay,
+        label: words::EMBER_TITLE.to_owned(),
+        value: Value::Choice {
+            options: all
+                .iter()
+                .map(|s| crate::settings::ember_decay_text(*s))
+                .collect(),
+            index,
+        },
+        hint: words::EMBER_NOTE.to_owned(),
+    }
+}
+
+/// The ember decay the form shows, seconds.
+pub fn ember_decay(f: &Form) -> Option<f32> {
+    let m = f.meter.as_deref()?;
+    m.ember.get(f.choice_index(FieldId::EmberDecay)?).copied()
+}
+
+/// The headings: what to meter over the first field, how it reads (the rig's) over the rig's,
+/// and the display (this app's) over the ember decay.
 fn rehead(f: &mut Form) {
     let first = f.fields.first().map(|x| x.id);
     f.headings = first
@@ -257,6 +292,14 @@ fn rehead(f: &mut Form) {
                 "{} · Whose: {}",
                 words::HOW_HEADING,
                 crate::settings::THE_RIG
+            ),
+        )])
+        .chain([(
+            FieldId::EmberDecay,
+            format!(
+                "{} · Whose: {}",
+                words::DISPLAY_HEADING,
+                crate::settings::THIS_APP
             ),
         )])
         .collect();
@@ -342,7 +385,12 @@ pub(crate) fn cycle(f: &mut Form, d: i32) -> bool {
         }
         _ => return false,
     }
-    let rigs: Vec<Field> = f.fields.iter().filter(|x| is_rig(x.id)).cloned().collect();
+    let rigs: Vec<Field> = f
+        .fields
+        .iter()
+        .filter(|x| is_rig(x.id) || x.id == FieldId::EmberDecay)
+        .cloned()
+        .collect();
     f.fields = what_fields(&m, &w);
     f.fields.extend(rigs);
     if let Some(i) = f.fields.iter().position(|x| x.id == id) {

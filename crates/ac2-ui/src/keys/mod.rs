@@ -318,8 +318,8 @@ commands! {
     SpectrographCividis => "spectrograph_colours_cividis", "Colour map cividis", [Spectrum];
     SpectrographGrey => "spectrograph_colours_grey", "Colour map grey", [Spectrum];
 
-    NextView => "next_view", "Next view", [Transfer, Spectrum, Ir, Spl, Distortion];
-    PrevView => "prev_view", "Previous view", [Transfer, Spectrum, Ir, Spl, Distortion];
+    NextView => "next_view", "Next view", [Transfer, Spectrum, Ir, Spl, Distortion, Programme];
+    PrevView => "prev_view", "Previous view", [Transfer, Spectrum, Ir, Spl, Distortion, Programme];
 
     SplShowMeter => "spl_show_meter", "Meter view", [Spl];
     SplShowLeq => "spl_show_leq", "Leq view", [Spl];

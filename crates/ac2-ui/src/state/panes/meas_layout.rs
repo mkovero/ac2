@@ -515,7 +515,10 @@ fn wire_pane(v: &View, levels: wire::LayoutLevels) -> wire::LayoutPane {
             SweepMode::Ir(IrMode::Etc) => wire::SweepView::Etc,
             SweepMode::Room => wire::SweepView::Room,
         },
-        programme_view: wire::ProgrammeView::Meters,
+        programme_view: match m.programme {
+            ac2_scene::view::ProgrammeMode::Meters => wire::ProgrammeView::Meters,
+            ac2_scene::view::ProgrammeMode::Goniometer => wire::ProgrammeView::Goniometer,
+        },
         chrome: match m.chrome {
             PlotChrome::Full => wire::PlotChrome::Full,
             PlotChrome::NoGrid => wire::PlotChrome::NoGrid,
@@ -573,6 +576,10 @@ fn ui_view(p: &wire::LayoutPane) -> View {
                 wire::SweepView::Etc => SweepMode::Ir(IrMode::Etc),
                 wire::SweepView::Room => SweepMode::Room,
             },
+            programme: match p.programme_view {
+                wire::ProgrammeView::Meters => ac2_scene::view::ProgrammeMode::Meters,
+                wire::ProgrammeView::Goniometer => ac2_scene::view::ProgrammeMode::Goniometer,
+            },
             // Context, not part of what the measurement's layout shows: as a new pane.
             sweep_reference: true,
             chrome: match p.chrome {
@@ -581,5 +588,23 @@ fn ui_view(p: &wire::LayoutPane) -> View {
                 wire::PlotChrome::TracesOnly => PlotChrome::Bare,
             },
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::Metered;
+    use ac2_scene::view::ProgrammeMode;
+
+    /// A pair's goniometer pane goes out as such and comes back as one.
+    #[test]
+    fn a_goniometer_pane_round_trips() {
+        let mut v = View::of(PaneKind::Programme);
+        v.meters = Some(Metered::Pair { left: 2, right: 3 });
+        v.modes.programme = ProgrammeMode::Goniometer;
+        let p = wire_pane(&v, wire::LayoutLevels::default());
+        assert_eq!(p.programme_view, wire::ProgrammeView::Goniometer);
+        assert_eq!(ui_view(&p), v);
     }
 }

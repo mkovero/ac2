@@ -34,18 +34,27 @@ fn focus(f: &mut Form, id: FieldId) {
     f.focus_field(i);
 }
 
-const RIG_ROWS: [&str; 6] = [
+const RIG_ROWS: [&str; 8] = [
     "## How it reads · Whose: the rig — all clients",
     "Programme meters read: true peak",
     "Loudness target: −23 LUFS",
     "Correlation window: 1 s",
     "An over is above: 0.0 dBTP",
     "Correlation gate: −60 dBFS",
+    "## Display · Whose: this app",
+    "Ember decay: 0.4 s: a goniometer point fades out that long after it lands",
 ];
 
 #[test]
 fn a_new_meter_starts_on_the_first_pair_and_shows_the_rigs_settings() {
-    let f = form(main_pair(), inputs(), None, LevelsSettings::default(), None);
+    let f = form(
+        main_pair(),
+        inputs(),
+        None,
+        LevelsSettings::default(),
+        0.4,
+        None,
+    );
     assert_eq!(f.kind, FormKind::Programme);
     assert_eq!(f.kind.title(), "New programme meter");
     let mut want = vec![
@@ -65,7 +74,14 @@ fn a_new_meter_starts_on_the_first_pair_and_shows_the_rigs_settings() {
 
 #[test]
 fn inputs_are_picked_as_bars_by_name_each_once() {
-    let mut f = form(main_pair(), inputs(), None, LevelsSettings::default(), None);
+    let mut f = form(
+        main_pair(),
+        inputs(),
+        None,
+        LevelsSettings::default(),
+        0.4,
+        None,
+    );
     // From the pair to inputs: its sides are the first two bars, a third waits empty.
     f.cycle(1);
     assert_eq!(
@@ -119,7 +135,14 @@ fn inputs_are_picked_as_bars_by_name_each_once() {
 fn eight_bars_at_most() {
     let many: Vec<(u16, String)> = (0..10).map(|c| (c, format!("in {}", c + 1))).collect();
     let all = Metered::inputs_of(&[0, 1, 2, 3, 4, 5, 6, 7]).expect("eight");
-    let f = form(Vec::new(), many, Some(all), LevelsSettings::default(), None);
+    let f = form(
+        Vec::new(),
+        many,
+        Some(all),
+        LevelsSettings::default(),
+        0.4,
+        None,
+    );
     let bars = f
         .fields
         .iter()
@@ -131,7 +154,14 @@ fn eight_bars_at_most() {
 
 #[test]
 fn without_pairs_there_is_no_meter_field() {
-    let f = form(Vec::new(), inputs(), None, LevelsSettings::default(), None);
+    let f = form(
+        Vec::new(),
+        inputs(),
+        None,
+        LevelsSettings::default(),
+        0.4,
+        None,
+    );
     assert_eq!(
         rows(&f)[..3],
         ["## What to meter", "Input 1: MM1 (in 1)", "Input 2: none"]
@@ -149,7 +179,7 @@ fn an_edit_shows_what_the_pane_meters_and_the_rigs_odd_values() {
         loudness_target: ac2_proto::units::Lufs(-23.0),
     };
     let m = Metered::inputs_of(&[3, 0]).expect("two");
-    let f = form(main_pair(), inputs(), Some(m), rig, Some(PaneId(4)));
+    let f = form(main_pair(), inputs(), Some(m), rig, 0.4, Some(PaneId(4)));
     assert_eq!(f.kind.title(), "Edit programme meter");
     assert_eq!(f.kind.verb(), "Apply");
     assert_eq!(
@@ -166,6 +196,8 @@ fn an_edit_shows_what_the_pane_meters_and_the_rigs_odd_values() {
             "Correlation window: 0.3 s",
             "An over is above: −1.3 dBTP",
             "Correlation gate: −70 dBFS",
+            "## Display · Whose: this app",
+            "Ember decay: 0.4 s: a goniometer point fades out that long after it lands",
         ]
     );
     assert_eq!(levels(&f), Some(rig));
@@ -175,6 +207,7 @@ fn an_edit_shows_what_the_pane_meters_and_the_rigs_odd_values() {
         inputs(),
         Some(Metered::Pair { left: 2, right: 3 }),
         rig,
+        0.4,
         Some(PaneId(4)),
     );
     assert_eq!(metered(&p), Ok(Metered::Pair { left: 2, right: 3 }));
@@ -210,7 +243,32 @@ fn nothing_metered_is_said() {
         Vec::new(),
         None,
         LevelsSettings::default(),
+        0.4,
         None,
     );
     assert_eq!(metered(&f), Err("choose input 1".to_owned()));
+}
+
+/// The ember decay row lists each step once, in `f32` as the setting is kept: 0.4 and 2.0 s
+/// select their own entry, and a stored value between steps shows its nearest.
+#[test]
+fn the_ember_decay_row_lists_each_step_once() {
+    for (now, want) in [(0.4f32, 0.4f32), (2.0, 2.0), (0.43, 0.4)] {
+        let f = form(
+            main_pair(),
+            inputs(),
+            None,
+            LevelsSettings::default(),
+            now,
+            None,
+        );
+        let Some(Value::Choice { options, .. }) = f.field(FieldId::EmberDecay).map(|x| &x.value)
+        else {
+            panic!("the ember decay row");
+        };
+        assert_eq!(options.len(), 20);
+        let text = crate::settings::ember_decay_text(want);
+        assert_eq!(options.iter().filter(|o| **o == text).count(), 1, "{text}");
+        assert_eq!(ember_decay(&f), Some(want));
+    }
 }

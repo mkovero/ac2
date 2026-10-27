@@ -241,6 +241,15 @@ impl AppState {
         let before = self.spectrograph_shown();
         let bands = crate::scenes::has_band_meter(self);
         let aligned = crate::scenes::pane_alignment(self, self.layout.focus).is_some();
+        let has_pair = self
+            .layout
+            .view(self.layout.focus)
+            .and_then(|v| v.meters)
+            .is_some_and(|m| m.pair().is_some());
+        if kind == PaneKind::Programme && !has_pair {
+            self.warn("Programme: the goniometer needs a pair");
+            return;
+        }
         let m = self.modes_mut();
         match (kind, forward) {
             (PaneKind::Transfer, true) => m.transfer = m.transfer.next(aligned),
@@ -251,7 +260,8 @@ impl AppState {
             (PaneKind::Spl, false) => m.spl = m.spl.prev(bands),
             (PaneKind::Distortion, true) => m.sweep = m.sweep.next(),
             (PaneKind::Distortion, false) => m.sweep = m.sweep.prev(),
-            (PaneKind::Programme, _) => {}
+            (PaneKind::Programme, true) => m.programme = m.programme.next(has_pair),
+            (PaneKind::Programme, false) => m.programme = m.programme.prev(has_pair),
         }
         // The history starts with the view and goes with the last pane showing it: nothing
         // is kept for a hidden spectrograph; from the split to the spectrograph alone it

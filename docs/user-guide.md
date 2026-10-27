@@ -605,6 +605,7 @@ row onto a pane, or pick its measurement on the chip, to see it there.
 measurement or stored trace and press **C**: *Compare Main R with…* lists the measurements
 it can be drawn over, those on screen first (`· on screen`), a tick on the ones it is
 already compared into. **Enter** ticks or unticks a row, **Esc** closes. Its own group is
+| Programme | meters ↔ goniometer (a pair; *Programme: the goniometer needs a pair* otherwise) |
 not offered. From then on every pane showing that measurement draws it, tagged `cmp` in the
 legend (its tree row too), and no other pane does. A transfer curve is compared into a
 transfer measurement or a sweep, a spectrum or band set into a spectrum or RTA, a sweep run
@@ -3364,6 +3365,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Previous colour | `meas_colour_prev` |
 | Fold/unfold measurement | `toggle_group` |
 | Input setup… | `input_setup` |
+| `G` | Next view | `next_view` |
+| `Shift+G` | Previous view | `prev_view` |
 | Calibrations… | `calibrations` |
 | Set input mics… | `input_mics` |
 | Next mic curve | `mic_curve` |
@@ -3427,7 +3430,7 @@ The least used go first on a narrow pane; `G/Shift+G` steps the pane's views for
 | Transfer: impulse response view | `G/Shift+G` view · `I` zoom time · `Ctrl+I` zoom level · `Shift+Home` fit level · `Tab` next row · `Q` close pane · `W` maximise · `H` all keys |
 | SPL | `G/Shift+G` view · `Shift+F` F/S/I · `Z` A/C/Z · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
 | Sweep / distortion | `Shift+S` new sweep · `V` select trace · `G/Shift+G` view · `E` reference · `W` maximise · `Q` close pane · `H` all keys |
-| Programme | `R` reset · `Shift+R` reset all · `T` grid · `W` maximise · `Q` close pane · `H` all keys |
+| Programme | `R` reset · `Shift+R` reset all · `G/Shift+G` view · `T` grid · `W` maximise · `Q` close pane · `H` all keys |
 | Inputs list row | `R` reset · `Shift+R` reset all · `P` programme pane · `Tab` measurements · `H` all keys |
 
 <!-- keymap:end -->

@@ -17,6 +17,10 @@ pub const HOW_HEADING: &str = "How it reads";
 /// The heading over the app's own display settings: the Settings page's name, since the
 /// goniometer's fade is this app's and not the rig's.
 pub const DISPLAY_HEADING: &str = "Display";
+/// The ember decay row's label: Settings › Display's.
+pub const EMBER_TITLE: &str = "Ember decay";
+/// Under the ember decay row.
+pub const EMBER_NOTE: &str = "how long a goniometer point glows; also Settings › Display";
 
 /// The field that picks a pair or the inputs.
 pub const METER: &str = "Meter";

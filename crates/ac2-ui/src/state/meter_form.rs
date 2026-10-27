@@ -3,7 +3,7 @@
 //! Programme pane for that pane; and its Enter.
 
 use super::*;
-use crate::meter_dialog::{levels, metered, wanted};
+use crate::meter_dialog::{ember_decay, levels, metered, wanted};
 
 impl AppState {
     /// The session's pairs as the dialog offers them: each pair row of the Inputs list whose
@@ -33,6 +33,7 @@ impl AppState {
             inputs,
             now,
             rig,
+            self.prefs.ember_decay_s,
             edit,
         ))
     }
@@ -50,7 +51,8 @@ impl AppState {
         }
     }
 
-    /// Enter on the dialog: the rig's settings changed here go out as one `levels.set`, then
+    /// Enter on the dialog: the ember decay is this app's and set here; the rig's settings
+    /// changed here go out as one `levels.set`, then
     /// the meters open in a new pane beside the focused one, or change in the edited pane.
     pub(super) fn submit_meter(&mut self, out: &mut Vec<Request>) {
         let Overlay::Form(f) = &mut self.overlay else {
@@ -66,7 +68,13 @@ impl AppState {
         let Some((opened, edit)) = f.meter.as_ref().map(|x| (x.opened, x.edit)) else {
             return;
         };
+        let ember = ember_decay(f);
         self.overlay = Overlay::None;
+        // This app's, as on Settings › Display: one value, whichever page sets it.
+        if let Some(e) = ember.filter(|e| *e != self.prefs.ember_decay_s) {
+            self.prefs.ember_decay_s = e;
+            self.prefs_dirty = true;
+        }
         let rig = self.daemon().map(|s| s.rig.clone()).unwrap_or_default();
         if let Some((cmd, what)) = shown.and_then(|shown| {
             crate::settings::levels_set(rig.rev, rig.levels, wanted(opened, shown, rig.levels))

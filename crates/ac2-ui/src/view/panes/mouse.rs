@@ -123,6 +123,22 @@ pub(super) fn plates_mouse(
                     true,
                 ),
             };
+            if b.docked {
+                // A docked plate is sized by its pane: it floats where it stands at the scale
+                // it is drawn at, then takes the gesture, all in the drag's one undo step.
+                let [x, y] = b.position_for(b.rect.x, b.rect.y);
+                app.dispatch(Msg::Plate(PlateMsg::Move {
+                    pane: id,
+                    kind: d.kind,
+                    x,
+                    y,
+                }));
+                app.dispatch(Msg::Plate(PlateMsg::Scale {
+                    pane: id,
+                    kind: d.kind,
+                    scale: b.scale,
+                }));
+            }
             ui.ctx().set_cursor_icon(icon);
             let h = PlateHover { kind: d.kind, grip };
             if hover_now != Some(h) {

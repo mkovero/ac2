@@ -25,9 +25,6 @@ use crate::state::{AppState, PaneId, PaneKind};
 /// Bars a Programme pane shows at most (the wire's limit).
 pub const MAX_METERED: usize = PaneContent::MAX_INPUTS;
 
-/// Embers a pair's ring holds: 256 points a frame for about a second of frames.
-const RING_CAPACITY: usize = ac2_proto::frame::GONIO_POINTS * 32;
-
 /// What a Programme pane meters: up to [`MAX_METERED`] inputs side by side, or a stereo
 /// pair. Zero-based device inputs, as the session names them. A fixed array, so a pane's
 /// view stays a plain value.
@@ -195,6 +192,7 @@ impl AppState {
         }
         let shown = self.programme_pairs_shown();
         self.programme.rings.retain(|k, _| shown.contains(k));
+        let capacity = ac2_scene::gonio::ring_capacity(self.ember_decay_s());
         if let Some(tf) = d.latest.get(&Topic::SessionGonio)
             && let FrameData::SessionGonio(g) = &tf.frame.data
             && self.programme.gonio_seq != Some(tf.frame.stamp.seq)
@@ -205,17 +203,23 @@ impl AppState {
                     self.programme
                         .rings
                         .entry((p.left, p.right))
-                        .or_insert_with(|| EmberRing::new(RING_CAPACITY))
+                        .or_insert_with(|| EmberRing::new(capacity))
                         .push_points(now, &p.points);
                 }
             }
         }
     }
 
-    /// Lets the embers older than the decay go (every frame tick).
+    /// Lets the embers older than the decay go (every frame tick), and sizes each ring to
+    /// the decay set now (Settings › Display or the programme meter form), so every ember
+    /// lives its whole ramp.
     pub(in crate::state) fn retire_embers(&mut self) {
         let (now, decay) = (self.now_s, self.ember_decay_s());
+        let capacity = ac2_scene::gonio::ring_capacity(decay);
         for r in self.programme.rings.values_mut() {
+            if r.capacity() != capacity {
+                r.set_capacity(capacity);
+            }
             r.retire(now, decay);
         }
     }
@@ -242,7 +246,9 @@ impl AppState {
             .into_iter()
             .filter(|c| !captured.contains(c))
             .collect();
-        Some((self.programme_of(metered), missing))
+        let mut p = self.programme_of(metered);
+        p.view = v.modes.programme;
+        Some((p, missing))
     }
 
     /// What `metered` reads in the latest levels frame: each input's bar and readouts, the
@@ -464,21 +470,51 @@ impl AppState {
     }
 
     /// A Programme pane of `m` split off the focused pane (which keeps what it shows), with
-    /// the focus.
+    /// the focus; for a pair also its goniometer pane, split off the new pane to its left
+    /// (the meters on the right, as on a hardware meter).
     pub(in crate::state) fn open_programme(&mut self, m: Metered) {
-        let Some(new) = self.split_focused_pane() else {
+        use crate::state::panes::{Axis, Side};
+        use ac2_scene::view::ProgrammeMode;
+        let Some(meters) = self.split_focused_pane() else {
             let close = self.keys.reach(crate::keys::CommandId::ClosePane);
             self.warn(format!(
                 "no room to split the pane for the meters: {close} closes one to make room"
             ));
             return;
         };
-        self.set_pane_kind(new, PaneKind::Programme);
-        if let Some(v) = self.layout.view_mut(new) {
+        self.set_pane_kind(meters, PaneKind::Programme);
+        if let Some(v) = self.layout.view_mut(meters) {
             v.meas = None;
             v.meters = Some(m);
+            v.modes.programme = ProgrammeMode::Meters;
         }
-        self.focus_pane(new);
+        if m.pair().is_some() {
+            match self.split_pane_at(meters, Axis::Row, Side::A) {
+                Some(gonio) => {
+                    // Splitting fills both halves' measurement from what the pane showed:
+                    // neither Programme pane belongs to one.
+                    for p in [gonio, meters] {
+                        if let Some(v) = self.layout.view_mut(p) {
+                            v.meas = None;
+                        }
+                    }
+                    if let Some(v) = self.layout.view_mut(gonio) {
+                        v.modes.programme = ProgrammeMode::Goniometer;
+                    }
+                }
+                None => {
+                    let g = self
+                        .keys
+                        .chords(CommandId::NextView, Scope::Programme)
+                        .first()
+                        .map_or_else(|| self.keys.reach(CommandId::NextView), |k| k.label());
+                    self.warn(format!(
+                        "no room for the goniometer pane: {g} turns this pane to it"
+                    ));
+                }
+            }
+        }
+        self.focus_pane(meters);
     }
 
     /// The inputs R resets: the picked Inputs row's, else the focused Programme pane's.

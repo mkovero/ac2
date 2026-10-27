@@ -323,7 +323,7 @@ impl DisplayRow {
             DisplayRow::KeyHints => "Key hints",
             DisplayRow::WarningToasts => "Warning toasts",
             DisplayRow::SplHold => "SPL number holds",
-            DisplayRow::EmberDecay => "Ember decay",
+            DisplayRow::EmberDecay => ac2_scene::programme::form::EMBER_TITLE,
             DisplayRow::LeqStyle => "Leq windows",
             DisplayRow::LeqHistory => "Leq history strip",
             DisplayRow::LeqBars => "Leq bars",
@@ -371,6 +371,21 @@ const EMBER_STEP_S: f32 = 0.1;
 pub fn step_ember_decay(s: f32, d: i32) -> f32 {
     let steps = (ac2_scene::gonio::clamp_decay(s) / EMBER_STEP_S).round() + d.signum() as f32;
     ac2_scene::gonio::clamp_decay(steps * EMBER_STEP_S)
+}
+
+/// Every ember decay ←/→ reaches: the [`EMBER_STEP_S`] grid across
+/// [`ac2_scene::gonio::EMBER_DECAY_RANGE_S`], in `f32` as the setting is kept, so a stored
+/// step compares equal to its entry.
+pub fn ember_decay_steps() -> Vec<f32> {
+    let (lo, hi) = ac2_scene::gonio::EMBER_DECAY_RANGE_S;
+    let (first, last) = (
+        (lo / EMBER_STEP_S).round() as i32,
+        (hi / EMBER_STEP_S).round() as i32,
+    );
+    // The grid `step_ember_decay` rounds to: the same product, so the same `f32`.
+    (first..=last)
+        .map(|k| ac2_scene::gonio::clamp_decay(k as f32 * EMBER_STEP_S))
+        .collect()
 }
 
 /// `0.4 s: a point fades out that long after it lands`.

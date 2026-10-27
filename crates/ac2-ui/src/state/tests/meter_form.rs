@@ -6,7 +6,7 @@ use super::*;
 use crate::forms::{FieldId, Form, FormKind};
 
 /// Inputs 1–4 captured, 3 + 4 the pair *Main*; the rig reads Type I, on rev 7.
-fn rig_with_pair() -> State {
+pub(super) fn rig_with_pair() -> State {
     let mut s = daemon_state();
     if let Some(o) = &mut s.session.open {
         o.config.input_channels = vec![0, 1, 2, 3];
@@ -28,7 +28,7 @@ fn rig_with_pair() -> State {
     s
 }
 
-fn meter_t() -> T {
+pub(super) fn meter_t() -> T {
     let mut t = T::new();
     t.conn(mirror(rig_with_pair()));
     t.put(PaneKind::Transfer);
@@ -101,12 +101,18 @@ fn the_chooser_row_opens_the_form_with_the_rigs_settings() {
             "Correlation window: 1 s",
             "An over is above: 0.0 dBTP",
             "Correlation gate: −60 dBFS",
+            "Ember decay: 0.4 s: a goniometer point fades out that long after it lands",
         ]
+    );
+    assert_eq!(
+        f.heading(FieldId::EmberDecay),
+        Some("Display · Whose: this app")
     );
 }
 
-/// Enter on a pair: the pane opens beside the focused one, which keeps what it shows; the
-/// rig's settings left alone send nothing.
+/// Enter on a pair: its meters open beside the focused one, which keeps what it shows, with
+/// its goniometer pane on their left; the meters take the focus. The rig's settings left
+/// alone send nothing.
 #[test]
 fn a_pair_opens_in_a_pane_beside_the_focused_one() {
     let mut t = meter_t();
@@ -117,14 +123,29 @@ fn a_pair_opens_in_a_pane_beside_the_focused_one() {
     assert!(calls(&r).is_empty(), "{r:?}");
     assert_eq!(t.st.overlay, Overlay::None);
     assert_eq!(t.st.layout.kind(tf), PaneKind::Transfer);
-    assert_eq!(t.visible().len(), before + 1);
+    assert_eq!(t.visible().len(), before + 2);
     let p = t.st.layout.focus;
     assert_ne!(p, tf);
     assert_eq!(t.st.layout.kind(p), PaneKind::Programme);
+    let pair = Some(Metered::Pair { left: 2, right: 3 });
+    assert_eq!(t.st.layout.view(p).and_then(|v| v.meters), pair);
+    let programme: Vec<_> =
+        t.st.visible_panes()
+            .into_iter()
+            .filter(|id| t.st.layout.kind(*id) == PaneKind::Programme)
+            .collect();
+    assert_eq!(programme.len(), 2);
+    let views: Vec<_> = programme
+        .iter()
+        .map(|id| t.st.layout.view(*id).expect("view"))
+        .map(|v| (v.meters, v.modes.programme, v.meas))
+        .collect();
+    use ac2_scene::view::ProgrammeMode as M;
     assert_eq!(
-        t.st.layout.view(p).and_then(|v| v.meters),
-        Some(Metered::Pair { left: 2, right: 3 })
+        views,
+        [(pair, M::Goniometer, None), (pair, M::Meters, None)]
     );
+    assert_eq!(programme[1], p);
 }
 
 /// Inputs by name as bars, a mic among them: the pane meters them left to right.

@@ -209,7 +209,14 @@ impl CommandId {
             | C::SpectrographInferno
             | C::SpectrographCividis
             | C::SpectrographGrey => &["spectrograph", "waterfall", "colormap", "color"],
-            C::NextView | C::PrevView => &["spectrograph", "waterfall", "impulse", "IR"],
+            C::NextView | C::PrevView => &[
+                "spectrograph",
+                "waterfall",
+                "impulse",
+                "IR",
+                "meters",
+                "goniometer",
+            ],
             C::SplShowMeter => &["SPL", "level"],
             C::SplShowLeq => &["SPL", "history"],
             C::SplShowMeterLeq => &["SPL"],

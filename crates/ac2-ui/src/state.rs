@@ -654,7 +654,16 @@ impl AppState {
                     _ => self.pane_menu(p),
                 };
             }
-            Msg::PanePick(p, row) => self.pane_pick(p, row),
+            Msg::PanePick(p, row) => {
+                // The list turns this pane into meters: it opens on the bars even where an
+                // earlier G left it on the goniometer. The Edit form keeps the view.
+                if matches!(row, PaneMenuRow::Meter(_))
+                    && let Some(v) = self.layout.view_mut(p)
+                {
+                    v.modes.programme = ac2_scene::view::ProgrammeMode::Meters;
+                }
+                self.pane_pick(p, row)
+            }
             Msg::DragSplit { path, ratio } => self.drag_split(&path, ratio),
             // The drag's step was closed before the message, as any other message closes it.
             Msg::DragSplitEnd => {}

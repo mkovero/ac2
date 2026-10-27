@@ -247,6 +247,7 @@ fn two_panes() -> PanesPrefs {
                     spl: SplMode::Leq,
                     spectrum: SpectrumMode::Spectrograph,
                     sweep: SweepMode::Ir(IrMode::Etc),
+                    programme: ac2_scene::view::ProgrammeMode::Goniometer,
                     sweep_reference: false,
                     chrome: PlotChrome::Bare,
                 },
@@ -696,4 +697,27 @@ fn programme_pane_meters_round_trip() {
     let bad = text.replace("pair = [3, 4]", "pair = [0, 4]");
     let back = UiPrefs::from_toml(&bad).expect("parses");
     assert_eq!(back.layout.panes.expect("panes").views[1].meters, None);
+}
+
+/// A Programme pane's view round-trips; a stage-4 pane, saved before the views, has no key
+/// and reads back as one Meters pane (prefs carry no version to rewrite it by).
+#[test]
+fn the_programme_view_round_trips_and_defaults_to_meters() {
+    use ac2_scene::view::ProgrammeMode;
+    let mut p = UiPrefs::default();
+    let mut panes = two_panes();
+    panes.views[1].kind = PaneKind::Programme;
+    panes.views[1].modes.programme = ProgrammeMode::Goniometer;
+    p.layout.panes = Some(panes);
+    let text = p.to_toml();
+    assert!(text.contains("programme_view = \"goniometer\""), "{text}");
+    assert_eq!(UiPrefs::from_toml(&text).expect("parse"), p);
+    let old = text.replace("programme_view = \"goniometer\"\n", "");
+    assert!(!old.contains("programme_view = \"goniometer\""));
+    let back = UiPrefs::from_toml(&old).expect("parse");
+    let v = &back.layout.panes.expect("panes").views[1];
+    assert_eq!(
+        (v.kind, v.modes.programme),
+        (PaneKind::Programme, ProgrammeMode::Meters)
+    );
 }

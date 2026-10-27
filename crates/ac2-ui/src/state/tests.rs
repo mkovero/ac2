@@ -656,6 +656,7 @@ mod sweep;
 mod new_meas;
 
 mod meter_form;
+mod programme_views;
 
 mod leq;
 

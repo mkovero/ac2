@@ -201,6 +201,8 @@ pub enum FieldId {
     CorrelationWindow,
     OverThreshold,
     CorrelationGate,
+    /// The goniometer's fade: this app's (Settings › Display), not the rig's.
+    EmberDecay,
 }
 
 /// A field's value: typed text, one of a few options (←/→ pick), or an input of the session
