@@ -254,6 +254,12 @@ repo (`~/src/sys/pupu/`, installed on pupu):
    room noise ≈ −67 dBFS RMS. Journal: `journalctl --user -u jack-ac -u ff400-recover`.
 By hand, if the automation is off: `systemctl --user stop jack-ac`, `systemctl --user start
 ff400-recover` (it does steps 2–3).
+**A host boot** resets the FF400 the same way, and jack-ac opens it before anything writes the
+baseline (2026-10-27: the mic was dead for 4 min after a reboot while the session looked
+restored). `ff400-boot.service` (enabled, sys `pupu/systemd-user/`) runs after jack-ac is up:
+it stops jack-ac and runs `ff400-recover`, so expect one JACK gap of a few seconds at boot.
+ac2d is ordered after jack-ac only: `After=snd-fireface-ctl` made a cycle with that unit's
+`After=default.target`, and systemd dropped ac2d at boot.
 
 ## Phase 1 hardware run (2026-10-05)
 
