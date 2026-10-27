@@ -12,21 +12,24 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
 - CI on push is Linux only; macOS/Windows run before a release or on dispatch
   (`CLAUDE.md` *Rules*). Rigs run locally built binaries: `docs/rigs/pupu.md` *Deploy log*.
   A session format change on deploy is restored with `ac2 session salvage`.
-- Programme metering on the console feed, stages 1–4 landed: input kinds mic / line /
-  digital, stereo pairs, line calibration in dBu (`cal.line`, `session.inputs`); PPM
-  ballistics, true peak, overs, gated correlation, ember goniometer, `levels.set` /
-  `levels.reset`, the Programme pane and the Inputs list's readouts; BS.1770-5 / R128
-  loudness per line/digital source (momentary, short-term, integrated, LRA, max true peak;
-  EBU Tech 3341/3342 vectors) and `ac2 levels`; LUFS bars per source (Mom / Short loudness
-  ballistics, the rig's loudness target, −23 LUFS by default) and the loudness plate, moved and
-  sized like every plate, hidden by T (PROTO 69, session format 34, rig file 5). Design:
-  `docs/design/programme-meter.md`, V1–V6, §6.1 and §6.2.
+- Programme metering on the console feed, stages 1–5 landed: input kinds mic / line /
+  digital, stereo pairs (mic pairs too: true peak and correlation, no loudness), line
+  calibration in dBu (`cal.line`, `session.inputs`); PPM ballistics, true peak, overs, gated
+  correlation, ember goniometer (decay 0.1–2 s), `levels.set` / `levels.reset`; BS.1770-5 /
+  R128 loudness per line/digital source (EBU Tech 3341/3342 vectors) and `ac2 levels`; LUFS
+  bars and the loudness plate. A Programme pane shows **Meters** (true-peak block, LUFS block,
+  correlation strip) or **Goniometer** (square, fills the pane), G steps them, a pair opens
+  both panes (PROTO 71, session format 35, rig file 7). A session opens without a reference
+  or stimulus (SPL-only rigs). Design: `docs/design/programme-meter.md`, V1–V6, §6.1–§6.3.
 - Spare inputs on JACK: extra `ac2:in_K` ports after the physical inputs, never
   auto-connected, metered like any input once the operator routes a source into them; the
-  daemon re-makes those routes across its own reopens (PROTO 70, rig file 6). Docs:
-  `docs/user-guide.md` *Metering other JACK sources*.
-- Designed, not built: many rigs in one app (tabs, mixed panes, remote inputs, clocks across
-  PTP hosts): `docs/design/multi-rig.md`, decisions N1–N6.
+  daemon re-makes those routes across its own reopens. Docs: `docs/user-guide.md`
+  *Metering other JACK sources*.
+- The app paces its own frames (`crates/ac2-ui/src/pace.rs`, no vblank wait), so a blanked
+  or absent display no longer drops it to 1 fps (verified on ketunkolo; Pi GLES unverified).
+- **Next: many rigs in one app** (tabs, mixed panes, remote inputs, clocks across PTP hosts):
+  `docs/design/multi-rig.md`, decisions N1–N6, designed, not built. Start with its *Before
+  stage 1* section.
 - Open hardware gates (1.0): duplex check and 1 h run on macOS (Windows: done in a VM,
   a real PC and the panel/unplug cases pending, `asio.md` §4c–d), keyboard-only speaker
   tuning per OS, clean install → first measurement < 2 min per OS, signing certificates.

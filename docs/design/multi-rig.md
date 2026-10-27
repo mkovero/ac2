@@ -237,6 +237,28 @@ rig and are display only (`ac2-discovery` already trusts nothing).
 - Audio between daemons rides the LAN; a lost block is a marked gap, never interpolated.
 - No daemon plays a stimulus for another's measurement; the reference is never remote.
 
+## Before stage 1
+
+This note was written at PROTO 66 (2026-10-23). What landed since and touches it, to fold in
+before building (then a fresh design review, as every design here gets):
+
+- **Pane layout on the wire:** `LayoutPane` gained `programme_view` (Meters / Goniometer,
+  programme-meter.md §6.3); `PaneSource { RigRef, PaneContent }` wraps it with the rest.
+  A pair's programme meter opens two panes in one undo step (`state/programme_views` tests):
+  both panes belong to one rig.
+- **Per-connection state already reset on connect:** `ConnEvent::Connected` in
+  `crates/ac2-ui/src/state/link.rs` clears the device list (another daemon has other ports).
+  In the §1 split, the device list, input setup and session dialog are each rig's.
+- **Sessions without reference or stimulus** and **mic pairs** (`two_input_refusal` in
+  `crates/ac2-ui/src/state/new_meas.rs`): a rig may meter only, which a remote input (§3)
+  must not assume otherwise.
+- **JACK spare inputs** (`OpenSession.spare_ports`, rig file 6+): routes into a rig's spare
+  ports are that host's JACK graph, not something another rig can patch.
+- **Frame pacing** (`crates/ac2-ui/src/pace.rs`): one pacer per app, every rig's wake goes
+  through it.
+- Current versions: PROTO 71, session format 35, rig file 7 (`crates/ac2d/src/rig/v6.rs` is
+  the last upgrade step).
+
 ## Stages
 
 1. **Many rigs, tabs, mixed panes** — the `AppState` split and id namespacing (§1),
