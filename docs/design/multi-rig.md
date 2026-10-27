@@ -377,6 +377,31 @@ until it answers or is closed. Names come from the rig and are display only
    - **1d — cross-rig panes**: `View.rig`, picker and drag across rigs, pane titles naming
      another rig, P1 storing only `ThisRig` panes, prefs `rig` entries and their resolution
      on reconnect, `ThisRig` mapped at session load and written at save, pair panes.
+     As built (1d): no wire, session or rig-file change (no bump). The chip list reads
+     every connected rig's rows (`MenuRig`, refreshed between messages while a list is
+     open, each rig read by visiting it): a heading per rig (not a stop for ↑/↓), the rig
+     shown first, then the pane kinds and *New measurement…*; with one rig it is the list
+     of before. Another rig's rows name it (`PaneMenuRow::RigMeas(rig, meas)`,
+     `RigMeter(rig, metered)`), so a pick pins the pane to that rig whichever rig handles
+     the message; a pick of the shown rig's row, a kind, or a drop of a list row makes the
+     pane the shown rig's again. The list now opens on another rig's pane too (it lists
+     every rig). Drag stays the shown rig's route (the list is its tree). Layout prefs:
+     `[layout.panes.rig] { id, name }` for a pinned pane, absent for one following the rig
+     shown; its measurement name waits in `rig_pending` by rig id until that rig is held
+     (any slot, any address), then resolves on that rig as `park_gone_meas` does.
+     A stored layout (`meas.layout`, from a session) is read for the rig whose
+     measurement it is: `ThisRig` and `Rig` of that rig's own id are its panes, `Rig` of
+     another stays pinned there (its name kept for the title); the app still writes only
+     `ThisRig` panes, so nothing is ever written as `Rig { .. }` (P1 above). Pair panes
+     across rigs come from the list's per-rig meter rows. Decisions where the note was
+     silent: a newly connected rig gets no pane by itself; choosing a measurement row with
+     another rig's pane focused shows it in a pane of the rig shown (the focused-last of
+     its kind, else its first), else in a pane split off the focused one, so pinned panes
+     are never taken over; a new measurement's or meters' split pane is the shown rig's
+     even when split off another rig's pane; closing a rig parks its panes' measurements
+     by name (a daemon reached again may have restarted with other ids); a pin to the rig
+     shown is its own pane (`settle_pins`), which also covers a remembered rig shown before
+     its hello.
 
    Tests: namespacing is proven in the daemon-free reducer tests (`state/tests.rs`) feeding
    two rigs' mirrors with colliding `MeasId`s, topics and input numbers; the app's e2e tests

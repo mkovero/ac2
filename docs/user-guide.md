@@ -84,13 +84,31 @@ was opened on.
 
 The panes stay where they are when you switch: a pane showing another rig's measurement
 keeps showing it, its title starting with that rig's name (`pupu · Transfer 1`). Its
-window (pane menu, settings) opens only on its own rig: switch to it first. A pane of a rig
+windows (settings, edits) open only on its own rig: switch to it first. A pane of a rig
 that is down reads *pupu unreachable · retrying*; one of a closed rig reads *pupu not
-connected* and stays until you close or reuse it. A measurement's saved layout keeps only
-its own rig's panes.
+connected* and stays until you close or reuse it.
 
-The rigs held are remembered and connected again at the next start. Settings ›
-Connection names the rig shown.
+**Another rig's measurement in a pane.** The measurement list beside the panes is the rig
+shown's; a pane's chip list (click the chip, or palette *Choose pane measurement…*) lists
+every connected rig, each under a heading with its name, the rig shown first: its
+measurements, then its inputs and pairs to meter. Pick one of another rig and the pane
+shows it, by that rig's own numbering (two rigs both have a measurement 3; the pane shows
+the one picked), its title naming the rig. Picking a row of the rig shown, or dragging a row
+of the list onto the pane, makes it the shown rig's pane again. A pair picked from another
+rig's rows opens its meters there (**G** turns the pane to its goniometer).
+
+Choosing a measurement row in the list never takes another rig's pane: the measurement
+shows in a pane of the rig shown, or, with none on screen, in a new pane split off the
+focused one. A rig just connected therefore gets its panes when you choose its first row
+(or when its measurement brings its own). A measurement's saved layout keeps only its own
+rig's panes, so a session saved on one rig opens the same on any rig; the panes pinned to
+other rigs are the app's and stay where they are.
+
+The rigs held are remembered and connected again at the next start, and so is each pane
+set on another rig: it is kept by the rig's id, not its address, so the rig reached on
+another address (a new IP, network mode turned on) takes its panes back. Until it is
+connected the pane reads *pupu not connected*. A closed rig connected again shows its panes'
+measurements again, found by name. Settings › Connection names the rig shown.
 
 ### Log files
 
@@ -703,7 +721,8 @@ To put another measurement in a pane:
 
 - click the chip: every measurement in tree order, tagged with its kind, then the pane kinds
   no measurement needs yet. The pane turns into the kind picked; only it changes, and the
-  selection in the list stays where it was;
+  selection in the list stays where it was. With several rigs connected it lists every
+  rig's, under a heading per rig ([Many rigs](#many-rigs-in-one-window));
 - or drag a row of the measurement list onto the pane
   ([below](#dragging-a-row-onto-a-pane));
 - or palette *Choose pane measurement…*.

@@ -38,7 +38,12 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   adds a rig, the top-bar drop-down switches between them, `ui.toml` remembers the rigs and
   connects them again at start, panes keep their rig across a switch (titles `pupu · …`,
   *unreachable · retrying* / *not connected*), Shift+Esc stops every rig and quit releases
-  them all in parallel. Next: 1d, cross-rig panes (*Stages*).
+  them all in parallel. Stage 1d landed: a pane's chip list offers every connected rig's
+  measurements and meters under a heading per rig, a pick of another rig's pins the pane
+  to it, a list row chosen never takes another rig's pane, `ui.toml` keeps each pinned
+  pane's rig by id (resolved when that rig is held again, any address), and a stored
+  layout reads `ThisRig`/`Rig` panes for the rig it belongs to. Next: stage 2, clocks and
+  stimulus chips (*Stages*).
 - Open hardware gates (1.0): duplex check and 1 h run on macOS (Windows: done in a VM,
   a real PC and the panel/unplug cases pending, `asio.md` §4c–d), keyboard-only speaker
   tuning per OS, clean install → first measurement < 2 min per OS, signing certificates.
