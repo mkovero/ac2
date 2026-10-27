@@ -780,3 +780,47 @@ fn the_programme_view_round_trips_and_defaults_to_meters() {
         (PaneKind::Programme, ProgrammeMode::Meters)
     );
 }
+
+/// The rigs held are remembered with their ids, names and where each was reached; a rig
+/// whose id is not one a daemon has is dropped.
+#[test]
+fn rigs_round_trip() {
+    let p = UiPrefs {
+        rigs: vec![
+            RememberedRig {
+                id: RigId(0x9e9e),
+                name: "pupu".into(),
+                addr: RigAddr::Network {
+                    host: "pupu.local".into(),
+                    port: 47820,
+                    fingerprint: Some("1a2b-3c4d".into()),
+                },
+            },
+            RememberedRig {
+                id: RigId(0x7e57),
+                name: "laptop".into(),
+                addr: RigAddr::Embedded("jack".into()),
+            },
+            RememberedRig {
+                id: RigId(0x1),
+                name: "local".into(),
+                addr: RigAddr::Local,
+            },
+            RememberedRig {
+                id: RigId(0x2),
+                name: "lab".into(),
+                addr: RigAddr::Endpoints {
+                    ctrl: "tcp://lab:6000".into(),
+                    data: "tcp://lab:6001".into(),
+                },
+            },
+        ],
+        ..UiPrefs::default()
+    };
+    let text = p.to_toml();
+    assert!(text.contains("[[rigs]]"), "{text}");
+    assert!(text.contains("id = \"0000000000009e9e\""), "{text}");
+    assert_eq!(UiPrefs::from_toml(&text).expect("parses"), p);
+    let bad = "[[rigs]]\nid = \"0000000000000000\"\nname = \"x\"\nreach = \"local\"\n";
+    assert!(UiPrefs::from_toml(bad).expect("parses").rigs.is_empty());
+}

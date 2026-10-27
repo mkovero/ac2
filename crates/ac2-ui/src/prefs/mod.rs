@@ -298,9 +298,39 @@ impl RigPrefs<'_> {
     }
 }
 
+/// Where a remembered rig was reached: how the app reaches it again at its next start.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RigAddr {
+    /// The per-user local daemon (`ac2 daemon start`).
+    Local,
+    /// A daemon this app hosts, on the backend of this name (`jack`, `coreaudio`, `asio`).
+    Embedded(String),
+    /// A daemon at `host:port` over the network; `fingerprint` the server key this app
+    /// pinned for it, so a reconnect at start never talks to another key.
+    Network {
+        host: String,
+        port: u16,
+        fingerprint: Option<String>,
+    },
+    /// A daemon at given endpoints (`--ctrl`/`--data`), unencrypted.
+    Endpoints { ctrl: String, data: String },
+}
+
+/// A rig the app held when it last ran: connected again at start.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RememberedRig {
+    /// The daemon's id: a rig answering under another is another rig.
+    pub id: RigId,
+    /// Its name as it last said, for the drop-down until it answers.
+    pub name: String,
+    pub addr: RigAddr,
+}
+
 /// What the UI remembers.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiPrefs {
+    /// The rigs held when the app last ran, in the order they were added.
+    pub rigs: Vec<RememberedRig>,
     /// Zero-based stimulus outputs per rig and output device id: two rigs both have a
     /// `jack:system`, wired to different speakers.
     pub outputs: BTreeMap<(RigId, String), Vec<u16>>,
@@ -391,6 +421,7 @@ pub const RECORD_LIMIT_MIN: std::ops::RangeInclusive<u32> = 1..=480;
 impl Default for UiPrefs {
     fn default() -> Self {
         Self {
+            rigs: Vec::new(),
             outputs: BTreeMap::new(),
             sessions: BTreeMap::new(),
             leq: LeqLayout::default(),

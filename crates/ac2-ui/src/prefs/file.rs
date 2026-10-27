@@ -73,10 +73,94 @@ struct File {
     window: Option<WindowFile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     recent_sessions: Vec<RecentSession>,
+    /// The rigs held when the app last ran.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    rigs: Vec<RigFile>,
     /// Top-level keys this version does not know: logged and left out of the next save, so
     /// one stale or mistyped setting costs only itself, never the rest of the file.
     #[serde(flatten, skip_serializing)]
     unknown: BTreeMap<String, toml::Value>,
+}
+
+/// A remembered rig: its id as 16 hex digits (as in the per-rig keys), its name, and where
+/// it was reached.
+#[derive(Debug, Deserialize, Serialize)]
+struct RigFile {
+    id: String,
+    name: String,
+    #[serde(flatten)]
+    addr: RigAddrFile,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(tag = "reach", rename_all = "snake_case")]
+enum RigAddrFile {
+    Local,
+    Embedded {
+        backend: String,
+    },
+    Network {
+        host: String,
+        port: u16,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fingerprint: Option<String>,
+    },
+    Endpoints {
+        ctrl: String,
+        data: String,
+    },
+}
+
+impl RigFile {
+    fn of(r: &RememberedRig) -> Self {
+        Self {
+            id: r.id.to_string(),
+            name: r.name.clone(),
+            addr: match &r.addr {
+                RigAddr::Local => RigAddrFile::Local,
+                RigAddr::Embedded(b) => RigAddrFile::Embedded { backend: b.clone() },
+                RigAddr::Network {
+                    host,
+                    port,
+                    fingerprint,
+                } => RigAddrFile::Network {
+                    host: host.clone(),
+                    port: *port,
+                    fingerprint: fingerprint.clone(),
+                },
+                RigAddr::Endpoints { ctrl, data } => RigAddrFile::Endpoints {
+                    ctrl: ctrl.clone(),
+                    data: data.clone(),
+                },
+            },
+        }
+    }
+
+    /// The rig, unless its id is not one a daemon has (dropped, as an unknown key is).
+    fn rig(self) -> Option<RememberedRig> {
+        let id = Some(self.id.as_str())
+            .filter(|s| s.len() == 16)
+            .and_then(|s| u64::from_str_radix(s, 16).ok())
+            .filter(|n| *n != 0)?;
+        Some(RememberedRig {
+            id: RigId(id),
+            name: self.name,
+            addr: match self.addr {
+                RigAddrFile::Local => RigAddr::Local,
+                RigAddrFile::Embedded { backend } => RigAddr::Embedded(backend),
+                RigAddrFile::Network {
+                    host,
+                    port,
+                    fingerprint,
+                } => RigAddr::Network {
+                    host,
+                    port,
+                    fingerprint,
+                },
+                RigAddrFile::Endpoints { ctrl, data } => RigAddr::Endpoints { ctrl, data },
+            },
+        })
+    }
 }
 
 /// Legends per pane; only the transfer pane's moves.
@@ -793,7 +877,9 @@ impl UiPrefs {
             }
             None => None,
         };
+        let rigs = f.rigs.into_iter().filter_map(RigFile::rig).collect();
         Ok(Self {
+            rigs,
             outputs,
             sessions,
             leq,
@@ -855,6 +941,7 @@ impl UiPrefs {
     /// The file text.
     pub fn to_toml(&self) -> String {
         let f = File {
+            rigs: self.rigs.iter().map(RigFile::of).collect(),
             key_hints: (!self.key_hints).then_some(false),
             unknown: BTreeMap::new(),
             warning_toasts: (!self.warning_toasts).then_some(false),
