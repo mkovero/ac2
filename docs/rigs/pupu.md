@@ -243,7 +243,7 @@ is thinner and needs a careful seal. Both preamps 20 dB, phantom on.
   | 16 / 20 kHz | −0.7 / −6.2 | 0.45 / 4.0 |
 
   The Behringer's own response: about +1.3 dB below 300 Hz and a +8 dB peak at 10 kHz
-  relative to 1 kHz. Imported as its curve **"vs MM1"** (1/6 octave, smoothed over 1/3
+  relative to 1 kHz. Imported as its curve **"vs MM1 90°"** (mic pointing up like the MM1; valid for that orientation only; 1/6 octave, smoothed over 1/3
   octave, 0 dB at 1 kHz; 50 Hz–20 kHz; derived in this room, not a lab curve), active on in 2.
   With it the pink broadband difference fell from +1.6 / +1.2 / +1.6 (A / C / Z) to
   +0.5 / +0.4 / +0.3 dB. A rigid two-mic holder would tighten 0.4–6 kHz.
