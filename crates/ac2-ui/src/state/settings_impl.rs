@@ -465,6 +465,7 @@ impl AppState {
             DisplayRow::LeqStyle if d != 0 => self.toggle_leq_layout(false),
             DisplayRow::LeqHistory if d != 0 => self.toggle_leq_layout(true),
             DisplayRow::LeqBars if d != 0 => self.toggle_bar_ease(),
+            DisplayRow::LeqScale if d != 0 => self.toggle_shared_scale(),
             DisplayRow::SpectrumGlide if d != 0 => self.toggle_spec_ease(),
             DisplayRow::DistortionUnit if d != 0 => self.toggle_distortion_unit(),
             DisplayRow::Coherence if d != 0 => self.toggle_coherence_placement(),
@@ -874,6 +875,16 @@ impl AppState {
         self.toast(format!(
             "Leq bars {}",
             crate::settings::bar_ease_text(self.prefs.bar_ease)
+        ));
+    }
+
+    /// The Display page's Leq scale line; remembered in the prefs.
+    pub(super) fn toggle_shared_scale(&mut self) {
+        self.prefs.shared_scale = !self.prefs.shared_scale;
+        self.prefs_dirty = true;
+        self.toast(format!(
+            "Leq scale: {}",
+            crate::settings::shared_scale_text(self.prefs.shared_scale)
         ));
     }
 

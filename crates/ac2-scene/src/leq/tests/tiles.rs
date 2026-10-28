@@ -126,6 +126,7 @@ fn scene_lays_tiles_out_and_colours_them() {
         stage: false,
         chrome: crate::view::PlotChrome::Full,
         strip: Default::default(),
+        shared: None,
     };
     let th = Theme::dark();
     let s = leq_scene(&v, &Status::default(), &th, size(1200.0, 700.0));

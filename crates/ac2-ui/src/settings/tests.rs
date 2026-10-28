@@ -93,6 +93,7 @@ fn display_and_recording_texts() {
         warning_toasts: false,
         resolution_marker: false,
         bar_ease: false,
+        shared_scale: false,
         spec_ease: false,
         plate_background: ac2_scene::plate::PlateBackground::Solid,
     };
@@ -118,6 +119,7 @@ fn display_and_recording_texts() {
             "tiles",
             "hidden",
             "jump to each new reading",
+            "each SPL pane on its own scale",
             "the spectrum over its spectrograph",
             "jumps to each new frame",
             "the room parameters",

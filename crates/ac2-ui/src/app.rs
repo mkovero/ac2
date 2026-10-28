@@ -108,6 +108,9 @@ pub(crate) struct CachedScene {
     /// view moves this pane's plot edge too.
     pub freq_right: f32,
     pub theme: ThemeName,
+    /// The SPL panes' scales an SPL pane was drawn with ([`crate::state::AppState::spl_scales`]):
+    /// another pane's change of scale moves this one's columns too.
+    pub spl_scales: Vec<(ac2_proto::model::LevelScale, ac2_scene::axis::Range)>,
     pub scene: Arc<Scene>,
     /// The frequency axis mapping of the scene (TF / spectrum), for mouse navigation.
     pub x_axis: Option<ac2_scene::axis::Mapping>,

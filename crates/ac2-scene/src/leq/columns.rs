@@ -90,6 +90,25 @@ pub fn column_range(
     Range::new(top - FREE_SPAN_DB, top)
 }
 
+/// The bar scale every Leq-column pane on screen shares, so one level sits at one height in
+/// all of them: from the lowest bottom to the highest top of the panes' own scales
+/// (`panes`: each one's unit and [`column_range`]) in unit `scale`. Each own scale keeps its
+/// hysteresis, so their union moves only when one of them does. A pane in another unit
+/// (dBFS beside dB SPL) reads no comparable level and keeps its own. `None`: no pane in
+/// that unit.
+pub fn shared_range(panes: &[(LevelScale, Range)], scale: LevelScale) -> Option<Range> {
+    panes
+        .iter()
+        .filter(|(s, _)| *s == scale)
+        .map(|(_, r)| *r)
+        .reduce(union)
+}
+
+/// The scale spanning both `a` and `b`.
+pub fn union(a: Range, b: Range) -> Range {
+    Range::new(a.lo.min(b.lo), a.hi.max(b.hi))
+}
+
 /// One column as drawn.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LeqColumn {

@@ -682,6 +682,8 @@ mod leq;
 
 mod leq_strip;
 
+mod leq_scale;
+
 mod pane_export;
 
 mod layout;

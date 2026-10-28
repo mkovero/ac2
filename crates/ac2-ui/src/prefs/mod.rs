@@ -356,6 +356,9 @@ pub struct UiPrefs {
     /// The Leq and band Leq bars glide to each new reading (on until the operator turns it
     /// off); off, they jump to it as received.
     pub bar_ease: bool,
+    /// The SPL panes on screen draw their Leq columns on one scale, the union of each one's
+    /// own (on until the operator turns it off); off, each pane keeps its own.
+    pub shared_scale: bool,
     /// The live spectrum and RTA curves glide to each new frame (on until the operator
     /// turns it off); off, they jump to it as received.
     pub spec_ease: bool,
@@ -434,6 +437,7 @@ impl Default for UiPrefs {
             resolution_marker: true,
             plate_background: ac2_scene::plate::PlateBackground::SeeThrough,
             bar_ease: true,
+            shared_scale: true,
             spec_ease: true,
             jump_prominence_db: ac2_scene::cursor_jump::DEFAULT_PROMINENCE_DB,
             spl_hold_ms: None,

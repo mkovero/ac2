@@ -126,6 +126,7 @@ fn view<'a>(
         stage: false,
         chrome: crate::view::PlotChrome::Full,
         strip: Default::default(),
+        shared: None,
     }
 }
 

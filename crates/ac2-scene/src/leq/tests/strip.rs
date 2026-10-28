@@ -55,6 +55,7 @@ fn view<'a>(c: &'a LeqConfig, f: &LeqFrame, h: &'a LeqHistory) -> LeqView<'a> {
         stage: false,
         chrome: crate::view::PlotChrome::Full,
         strip: Default::default(),
+        shared: None,
     }
 }
 

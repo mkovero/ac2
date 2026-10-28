@@ -34,7 +34,7 @@ pub use ac2_proto::model::window_length as length;
 use caption::{Caption, caption, caption_left};
 pub use columns::{
     ABOVE_LIMIT_DB, BELOW_LIMIT_DB, Behind, FREE_SPAN_DB, LeqColumn, LeqColumns, NAME_RATIO,
-    VALUE_RATIO, ValueLabel, column_colors, column_range,
+    VALUE_RATIO, ValueLabel, column_colors, column_range, shared_range,
 };
 use draw::{columns, draw_history, draw_tile, tile_below};
 pub use history::{
@@ -135,6 +135,17 @@ pub struct LeqView<'a> {
     pub chrome: crate::view::PlotChrome,
     /// Where the history strip looks and the pointer over it.
     pub strip: LeqStripView<'a>,
+    /// The scale the Leq-column panes on screen share ([`shared_range`]); the columns span
+    /// it and their own ([`pane_range`]). `None`: their own alone.
+    pub shared: Option<Range>,
+}
+
+/// The columns' own scale of a pane showing `tiles` in unit `scale` ([`column_range`] on its
+/// judged limits and values, kept by its history while the levels allow).
+pub fn pane_range(tiles: &[LeqTile], scale: LevelScale, history: Option<&LeqHistory>) -> Range {
+    let limits: Vec<f64> = tiles.iter().filter_map(|t| t.limit_db).collect();
+    let values: Vec<f64> = tiles.iter().map(|t| t.leq_db).collect();
+    column_range(&limits, &values, scale, history.and_then(LeqHistory::range))
 }
 
 /// The Leq view as drawn.
@@ -261,14 +272,8 @@ pub(crate) fn leq_scene_under<T>(
             theme.text_dim,
         ));
     } else if v.layout.style == LeqStyle::Columns {
-        let limits: Vec<f64> = v.tiles.iter().filter_map(|t| t.limit_db).collect();
-        let values: Vec<f64> = v.tiles.iter().map(|t| t.leq_db).collect();
-        let range = column_range(
-            &limits,
-            &values,
-            v.scale,
-            v.history.and_then(LeqHistory::range),
-        );
+        let own = pane_range(&v.tiles, v.scale, v.history);
+        let range = v.shared.map_or(own, |s| columns::union(own, s));
         cols = Some(columns::draw_columns(
             &mut c,
             &v.tiles,

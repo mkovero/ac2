@@ -304,6 +304,14 @@ fn display_page_changes_apply_at_once_and_are_remembered() {
     t.key("Left");
     assert!(t.st.prefs.bar_ease);
     t.key("Down");
+    assert_eq!(settings(&t).display, DisplayRow::LeqScale);
+    assert!(t.st.prefs.shared_scale);
+    t.key("Right");
+    assert!(!t.st.prefs.shared_scale);
+    assert_eq!(t.last_toast(), "Leq scale: each SPL pane on its own scale");
+    t.key("Left");
+    assert!(t.st.prefs.shared_scale);
+    t.key("Down");
     t.key("Right");
     assert_eq!(
         t.st.kind_modes(PaneKind::Spectrum).spectrum,

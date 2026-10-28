@@ -271,7 +271,63 @@ fn leq_view<'a>(
         stage: st.stage_view(),
         chrome: st.pane_modes(pane).chrome,
         strip: st.strip_view(pane, m.id, live_key(keymap)),
+        shared: ac2_scene::leq::shared_range(&st.spl_scales, f.meta.scale),
     })
+}
+
+/// Pane `pane`'s own Leq-column scale with its unit, when it draws Leq columns (an SPL pane
+/// on the windows, alone or under the meter's number, as columns, with a `leq` frame).
+fn leq_columns_scale(
+    st: &AppState,
+    pane: PaneId,
+) -> Option<(ac2_proto::model::LevelScale, ac2_scene::axis::Range)> {
+    if st.layout.kind(pane) != crate::state::PaneKind::Spl
+        || !matches!(st.pane_modes(pane).spl, SplMode::Leq | SplMode::MeterLeq)
+        || st.view.spl.layout.style != ac2_scene::view::LeqStyle::Columns
+    {
+        return None;
+    }
+    let m = pane_meter(st, pane)?;
+    let FrameData::Leq(f) = &frame(st, m.id, Stream::Leq)?.frame.data else {
+        return None;
+    };
+    let MeasKind::Spl { config } = &m.config.kind else {
+        return None;
+    };
+    let history = st.rig.leq.history.get(&m.id).map(|(_, h)| h);
+    let tiles = leq_tiles(&config.leq, f);
+    let range = ac2_scene::leq::pane_range(&tiles, f.meta.scale, history);
+    Some((f.meta.scale, range))
+}
+
+/// Gathers the own Leq-column scale of every pane drawn now, a pane of another rig read
+/// with that rig swapped in ([`AppState::spl_scales`]): once a frame, before the panes are
+/// drawn, so each SPL pane's columns span the scale they share. None with the Display
+/// page's Leq scale off: each pane on its own.
+pub fn refresh_spl_scales(st: &mut AppState) {
+    let mut scales = Vec::new();
+    if !st.prefs.shared_scale {
+        st.spl_scales = scales;
+        return;
+    }
+    for p in st.visible_panes() {
+        let Some(v) = st.layout.view(p) else {
+            continue;
+        };
+        let rig = st.pane_rig(v);
+        if rig != st.active()
+            && !matches!(
+                st.find_rig(rig).map(|r| &r.conn),
+                Some(crate::state::ConnState::Connected { .. })
+            )
+        {
+            continue;
+        }
+        if let Some(s) = st.visit(rig, |st| leq_columns_scale(st, p)).flatten() {
+            scales.push(s);
+        }
+    }
+    st.spl_scales = scales;
 }
 
 /// The key that brings a history strip back to live, named.

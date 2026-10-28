@@ -214,6 +214,17 @@ fn jump_prominence_round_trip() {
 }
 
 #[test]
+fn shared_scale_round_trip() {
+    let mut p = UiPrefs::default();
+    assert!(p.shared_scale);
+    assert!(!p.to_toml().contains("shared_scale"));
+    p.shared_scale = false;
+    let text = p.to_toml();
+    assert!(text.contains("shared_scale = false"), "{text}");
+    assert_eq!(UiPrefs::from_toml(&text), Ok(p));
+}
+
+#[test]
 fn bar_ease_round_trip() {
     let mut p = UiPrefs::default();
     assert!(p.bar_ease);

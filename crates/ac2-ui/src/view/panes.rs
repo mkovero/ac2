@@ -100,6 +100,7 @@ fn scene_for(
         && c.size == size
         && c.freq_right == freq_right
         && c.theme == app.state.theme
+        && (pane != PaneKind::Spl || c.spl_scales == app.state.spl_scales)
     {
         let axes = Axes {
             x: c.x_axis,
@@ -248,6 +249,11 @@ fn scene_for(
             size,
             freq_right,
             theme: app.state.theme,
+            spl_scales: if pane == PaneKind::Spl {
+                app.state.spl_scales.clone()
+            } else {
+                Vec::new()
+            },
             scene: scene.clone(),
             x_axis: axes.x,
             y_level: axes.y_level,
@@ -283,6 +289,7 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
     // Numbered in reading order, as Alt+1 … 9 count them.
     let order = app.state.layout.panes();
     app.pane_rects = layout(&app.state, area);
+    scenes::refresh_spl_scales(&mut app.state);
     for (id, rect) in layout(&app.state, area) {
         // Each pane's widgets live under its own id and are clipped to its rectangle: two
         // panes of one kind draw the same controls, which must stay distinct widgets, and a

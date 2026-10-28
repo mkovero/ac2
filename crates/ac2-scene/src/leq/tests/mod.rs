@@ -195,6 +195,7 @@ fn columns_view<'a>(c: &'a LeqConfig, f: &LeqFrame, h: Option<&'a LeqHistory>) -
         stage: false,
         chrome: crate::view::PlotChrome::Full,
         strip: Default::default(),
+        shared: None,
     }
 }
 

@@ -164,6 +164,68 @@ fn free_scale_moves_in_steps_with_hysteresis() {
     assert_eq!(h.range().map(|r| r.hi), Some(0.0));
 }
 
+/// Leq-column panes side by side share one scale: the union of their own, in one unit.
+#[test]
+fn panes_on_screen_share_one_scale() {
+    let (spl, fs) = (LevelScale::DbSpl, LevelScale::Dbfs);
+    let judged_99 = column_range(&[99.0], &[], spl, None);
+    let judged_110 = column_range(&[110.0], &[], spl, None);
+    // Limits beside limits: from under the lower to over the higher.
+    let both = shared_range(&[(spl, judged_99), (spl, judged_110)], spl).expect("shared");
+    assert_eq!((both.lo, both.hi), (69.0, 116.0));
+    // Limits beside a free scale following 112 dB: the free one's top.
+    let free = column_range(&[], &[112.0], spl, None);
+    assert_eq!((free.lo, free.hi), (80.0, 120.0));
+    let mixed = shared_range(&[(spl, judged_99), (spl, free)], spl).expect("shared");
+    assert_eq!((mixed.lo, mixed.hi), (69.0, 120.0));
+    // A dBFS pane is no level beside dB SPL ones: it keeps its own, they theirs.
+    let raw = column_range(&[], &[-23.4], fs, None);
+    let panes = [(spl, judged_99), (fs, raw), (spl, judged_110)];
+    assert_eq!(shared_range(&panes, spl), Some(both));
+    assert_eq!(shared_range(&panes, fs), Some(raw));
+    assert_eq!(shared_range(&panes[..1], fs), None);
+
+    // One pane alone draws as without a shared scale.
+    let (c, f) = many(5, false, spl);
+    let draw =
+        |v: &LeqView<'_>| leq_scene(v, &Status::default(), &Theme::dark(), size(900.0, 600.0));
+    let alone = draw(&columns_view(&c, &f, None));
+    assert_eq!(cols(&alone).range, judged_99);
+    let own = pane_range(&leq_tiles(&c, &f), spl, None);
+    let v = LeqView {
+        shared: shared_range(&[(spl, own)], spl),
+        ..columns_view(&c, &f, None)
+    };
+    // Debug text, not `==`: an unmeasured window's NaN is never equal to itself.
+    assert_eq!(format!("{:?}", draw(&v)), format!("{alone:?}"));
+    // Beside a pane judged at 110 dB: both span 69…116 dB, their tracks one height, and a
+    // limit at 99 dB sits where the other pane's 99 dB is.
+    let (mut c2, f2) = many(5, false, spl);
+    for w in &mut c2.windows {
+        w.limit = Some(ac2_proto::units::DbSpl(110.0));
+    }
+    let own2 = pane_range(&leq_tiles(&c2, &f2), spl, None);
+    let shared = shared_range(&[(spl, own), (spl, own2)], spl);
+    let a = draw(&LeqView {
+        shared,
+        ..columns_view(&c, &f, None)
+    });
+    let b = draw(&LeqView {
+        shared,
+        ..columns_view(&c2, &f2, None)
+    });
+    assert_eq!(cols(&a).range, both);
+    assert_eq!(cols(&b).range, both);
+    let tracks = |s: &LeqScene| -> Vec<(f32, f32)> {
+        cols(s)
+            .columns
+            .iter()
+            .map(|x| (x.track.y, x.track.h))
+            .collect()
+    };
+    assert_eq!(tracks(&a), tracks(&b));
+}
+
 #[test]
 fn column_colours_follow_the_state() {
     for th in [Theme::dark(), Theme::light(), Theme::high_contrast()] {

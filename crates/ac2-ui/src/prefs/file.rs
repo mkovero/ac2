@@ -24,6 +24,9 @@ struct File {
     bar_ease: Option<bool>,
     /// Written only when off (the default is on).
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    shared_scale: Option<bool>,
+    /// Written only when off (the default is on).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     spec_ease: Option<bool>,
     /// Written only when not the default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -810,6 +813,7 @@ impl UiPrefs {
                 .plate_background
                 .map_or(PlateBackground::SeeThrough, PlateBackgroundFile::background),
             bar_ease: f.bar_ease.unwrap_or(true),
+            shared_scale: f.shared_scale.unwrap_or(true),
             spec_ease: f.spec_ease.unwrap_or(true),
             // A value no step reaches (hand-edited) is kept when it can be stood out by;
             // anything else is the default.
@@ -869,6 +873,7 @@ impl UiPrefs {
             plate_background: (self.plate_background != PlateBackground::SeeThrough)
                 .then(|| PlateBackgroundFile::of(self.plate_background)),
             bar_ease: (!self.bar_ease).then_some(false),
+            shared_scale: (!self.shared_scale).then_some(false),
             spec_ease: (!self.spec_ease).then_some(false),
             jump_prominence_db: (self.jump_prominence_db
                 != ac2_scene::cursor_jump::DEFAULT_PROMINENCE_DB)

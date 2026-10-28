@@ -283,11 +283,23 @@ pub(super) fn leq_data_logged(
     leq: f32,
     flags: ac2_proto::frame::LeqFlags,
 ) -> ConnEvent {
+    leq_data_of(MeasId(4), seq, logged, at_s, leq, flags)
+}
+
+/// A `leq` frame of meter `meas` with `seq`, of a log of `logged` rows.
+pub(super) fn leq_data_of(
+    meas: MeasId,
+    seq: u64,
+    logged: u64,
+    at_s: u64,
+    leq: f32,
+    flags: ac2_proto::frame::LeqFlags,
+) -> ConnEvent {
     use ac2_client::{Latest, TopicFrame};
     use ac2_proto::frame::{Frame, FrameData, LeqFrame, LeqMeta, LeqRun};
     let n = 5;
     let data = FrameData::Leq(Box::new(LeqFrame {
-        meas: MeasId(4),
+        meas,
         meta: LeqMeta {
             scale: LevelScale::DbSpl,
             cal: CalStatus::Verified {

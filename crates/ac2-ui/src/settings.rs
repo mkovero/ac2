@@ -278,6 +278,7 @@ pub enum DisplayRow {
     LeqStyle,
     LeqHistory,
     LeqBars,
+    LeqScale,
     SpectrumView,
     SpectrumGlide,
     SweepView,
@@ -294,7 +295,7 @@ pub enum DisplayRow {
 }
 
 impl DisplayRow {
-    pub const ALL: [DisplayRow; 22] = [
+    pub const ALL: [DisplayRow; 23] = [
         DisplayRow::Theme,
         DisplayRow::KeyHints,
         DisplayRow::WarningToasts,
@@ -304,6 +305,7 @@ impl DisplayRow {
         DisplayRow::LeqStyle,
         DisplayRow::LeqHistory,
         DisplayRow::LeqBars,
+        DisplayRow::LeqScale,
         DisplayRow::SpectrumView,
         DisplayRow::SpectrumGlide,
         DisplayRow::SweepView,
@@ -330,6 +332,7 @@ impl DisplayRow {
             DisplayRow::LeqStyle => "Leq windows",
             DisplayRow::LeqHistory => "Leq history strip",
             DisplayRow::LeqBars => "Leq bars",
+            DisplayRow::LeqScale => "Leq scale",
             DisplayRow::SpectrumView => "Spectrum pane shows",
             DisplayRow::SpectrumGlide => "Spectrum",
             DisplayRow::SweepView => "Sweep pane shows",
@@ -499,6 +502,15 @@ pub fn bar_ease_text(on: bool) -> &'static str {
     }
 }
 
+/// What the Leq scale setting says, on the Display page and in its toast.
+pub fn shared_scale_text(on: bool) -> &'static str {
+    if on {
+        "SPL panes on screen share one scale"
+    } else {
+        "each SPL pane on its own scale"
+    }
+}
+
 /// What the spectrum glide setting says, on the Display page and in its toast.
 pub fn spec_ease_text(on: bool) -> &'static str {
     if on {
@@ -515,6 +527,7 @@ pub struct DisplaySwitches {
     pub warning_toasts: bool,
     pub resolution_marker: bool,
     pub bar_ease: bool,
+    pub shared_scale: bool,
     pub spec_ease: bool,
     pub plate_background: ac2_scene::plate::PlateBackground,
 }
@@ -562,6 +575,7 @@ pub fn display_rows(
                     }
                 }
                 DisplayRow::LeqBars => bar_ease_text(switches.bar_ease).into(),
+                DisplayRow::LeqScale => shared_scale_text(switches.shared_scale).into(),
                 DisplayRow::SpectrumGlide => spec_ease_text(switches.spec_ease).into(),
                 DisplayRow::DistortionUnit => match views.distortion_unit {
                     DistortionUnit::Db => "dB re fundamental".into(),

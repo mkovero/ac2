@@ -188,7 +188,7 @@ once).
 | SPL / Leq | the SPL meter's Leq windows, limits and band meter ([below](#leq-windows-and-limits)) | **Shift+L** |
 | Recording | how long the record toggle records (this app); where the daemon records (the rig) | |
 | Rig monitor | where the rig's OSC cues and Art-Net universe go, whether it meters at start (the rig); how its programme meters read: *Programme meters read*, *Loudness target* (−23 LUFS by default, −36 … −5 in 1 LU steps; past either end the row says the range), *Correlation window*, *An over is above*, *Correlation gate* — **←/→** steps a value and sends each step ([Programme pane](#programme-pane)) | |
-| Display | theme, key hints, warning toasts, how long the SPL number holds, the goniometer's ember decay and glow, Leq windows / history strip / bars, what the spectrum and sweep panes show, spectrum glide, distortion unit, coherence placement, resolution marker, plate background (see-through / solid), level axes | |
+| Display | theme, key hints, warning toasts, how long the SPL number holds, the goniometer's ember decay and glow, Leq windows / history strip / bars / scale, what the spectrum and sweep panes show, spectrum glide, distortion unit, coherence placement, resolution marker, plate background (see-through / solid), level axes | |
 | Connection | the daemon, this client's id and key, reconnect, another daemon / pairing; the daemon's mode, mDNS name, authorized clients and refused keys | |
 
 #### System max level
@@ -2682,7 +2682,13 @@ filling, how much there is; **"offline for 1 min 20 s"** when part of the window
 the Leq nor spends or earns budget. Narrow columns shorten or drop lines.
 
 **One scale:** from 30 dB below the lowest limit to 6 dB above the highest; without limits
-or uncalibrated, a 40 dB range following the loudest window in 10 dB steps.
+or uncalibrated, a 40 dB range following the loudest window in 10 dB steps. SPL panes on
+screen side by side (another rig's too) share one scale, spanning each one's own, so one
+level sits at one height in all of them: `FOH SPL` judged at 100 dB beside `SPL 2` at
+110 dB both run 70…116 dB. A pane alone keeps its own; an uncalibrated (dBFS) pane never
+shares with calibrated ones. Band bars keep their own scale. Settings › Display › **Leq
+scale** › *each SPL pane on its own scale* turns sharing off (on by default;
+`shared_scale = false` in `ui.toml`).
 
 #### A window still filling: the budget
 
@@ -2723,6 +2729,8 @@ the time before.
 - Settings › Display › **Leq bars**: each column (and band bar) glides to a new reading over
   0.3 s; the number, colours and limit lines change at once. "jump to each new reading"
   turns it off.
+- Settings › Display › **Leq scale**: SPL panes on screen share one scale (see *One scale*
+  above); "each SPL pane on its own scale" turns it off.
 - **T** (as on a graph): the colours alone, without OK / NEAR / OVER, "stay ≤" or "limit"
   text; per pane, kept with the layout (see *Grid, labels and cursor (T)*).
 - **W**, then **W** or **F**: the **stage view**, nothing but the columns (in meter + Leq,

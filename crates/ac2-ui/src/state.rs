@@ -190,6 +190,10 @@ pub struct AppState {
     /// The size of the panes' area as last drawn (the view writes it): N splits the
     /// focused pane along its longer side.
     pub pane_area: (f32, f32),
+    /// The own Leq-column scale, with its unit, of each SPL pane drawn now
+    /// ([`crate::scenes::refresh_spl_scales`]): every one of them spans the union of those
+    /// in its unit, so one level sits at one height across them.
+    pub spl_scales: Vec<(ac2_proto::model::LevelScale, ac2_scene::axis::Range)>,
     /// Remembered between runs (stimulus outputs per device).
     pub prefs: UiPrefs,
     /// `prefs` changed since the app last saved them.
@@ -314,6 +318,7 @@ impl AppState {
             nav: FreqNav::new(FreqRange::default()),
             layout: Layout::default(),
             pane_area: DEFAULT_PANE_AREA,
+            spl_scales: Vec::new(),
             prefs: UiPrefs::default(),
             prefs_dirty: false,
             export_dir: std::env::home_dir(),
