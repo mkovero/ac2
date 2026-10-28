@@ -230,6 +230,23 @@ is thinner and needs a careful seal. Both preamps 20 dB, phantom on.
   sensitivity; a band comparison would show where. A 1 kHz sine read +4.3 dB: a single
   tone 8 cm apart sits on different room interference, so it says nothing about the mics.
   Background (A): MM1 42 dB, Behringer 44 dB.
+- **Band comparison and a derived curve:** both positions recorded (`ac2 rec`, 10 s pink + 8 s
+  background each, kept private on pupu as `bandcmp-*-a/b`), 1/3-octave levels with the
+  background removed, the MM1's 90° curve applied, Behringer − MM1 averaged over the two
+  positions (half their difference = the position's share):
+
+  | bands | mean | ± position |
+  |---|---|---|
+  | 50–315 Hz | +1.0 … +1.3 | ≤ 0.65 (≤ 0.2 below 250 Hz) |
+  | 400 Hz–5 kHz | −1.0 … +0.9 | 0.4 … 6.3: room interference, the averaging leaves ≈ ±1 dB |
+  | 6.3 / 8 / 10 / 12.5 kHz | +3.5 / +6.0 / +8.2 / +3.9 | 3.9 / 2.7 / 0.15 / 0.6 |
+  | 16 / 20 kHz | −0.7 / −6.2 | 0.45 / 4.0 |
+
+  The Behringer's own response: about +1.3 dB below 300 Hz and a +8 dB peak at 10 kHz
+  relative to 1 kHz. Imported as its curve **"vs MM1"** (1/6 octave, smoothed over 1/3
+  octave, 0 dB at 1 kHz; 50 Hz–20 kHz; derived in this room, not a lab curve), active on in 2.
+  With it the pink broadband difference fell from +1.6 / +1.2 / +1.6 (A / C / Z) to
+  +0.5 / +0.4 / +0.3 dB. A rigid two-mic holder would tighten 0.4–6 kHz.
 
 ## SPL log over 32 h (2026-10-04/05, `spl leq export`)
 
