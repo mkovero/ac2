@@ -1,7 +1,7 @@
 use ac2_proto::model::{MarkerKind, PlanSpec};
 use ac2_room::pattern::{
-    Preset, PresetError, PresetKind, Relaxed, SuggestError, Suggestion, min_spacing,
-    mirrored_pairs, quotas, suggest,
+    Broken, Preset, PresetError, PresetKind, Relaxed, SuggestError, Suggestion, breaks,
+    min_spacing, mirrored_pairs, quotas, suggest,
 };
 use ac2_room::plan::{contains, mirror_axes, wall_distance};
 
@@ -404,5 +404,47 @@ fn iso3382_keeps_the_floor_distance_or_names_the_zone() {
         !s.relaxed
             .iter()
             .any(|r| matches!(r, Relaxed::FloorDistance { .. }))
+    );
+}
+
+/// An operator's edits are checked rule by rule: a point dragged next to another breaks the
+/// spacing (and names it), one by the wall the wall distance, one out of the audience lies in
+/// no zone, a suggestion left as it is breaks nothing.
+#[test]
+fn edited_points_are_marked_with_the_rules_they_break() {
+    let plan = hall();
+    let preset = Preset::tuning();
+    let s = suggest(&plan, &[0], 6, &preset, 3).unwrap();
+    let mut pts: Vec<[f64; 3]> = s.points.iter().map(|p| p.at).collect();
+    assert!(breaks(&plan, &pts, &preset).iter().all(Vec::is_empty));
+
+    pts[1] = [pts[0][0] + 0.5, pts[0][1], pts[0][2]];
+    pts.push([0.4, 20.0, 1.2]);
+    pts.push([10.0, 2.0, 1.2]);
+    let b = breaks(&plan, &pts, &preset);
+    assert!(
+        b[1].iter()
+            .any(|r| matches!(r, Broken::Spacing { other: 0, .. }))
+    );
+    let wall = &b[pts.len() - 2];
+    assert!(
+        wall.iter()
+            .any(|r| matches!(r, Broken::Wall { got, .. } if (*got - 0.4).abs() < 1e-9)),
+        "{wall:?}"
+    );
+    assert_eq!(
+        wall.iter()
+            .find(|r| matches!(r, Broken::Wall { .. }))
+            .unwrap()
+            .text(|i| format!("P{}", i + 1)),
+        "0.4 m from a wall (rule 1.0 m)"
+    );
+    assert!(b[pts.len() - 1].contains(&Broken::OutsideZones));
+    assert_eq!(
+        b[1].iter()
+            .find(|r| matches!(r, Broken::Spacing { .. }))
+            .unwrap()
+            .text(|i| format!("P{}", i + 1)),
+        "0.5 m from P1 (spacing 2.0 m)"
     );
 }

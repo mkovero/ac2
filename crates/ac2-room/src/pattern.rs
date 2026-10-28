@@ -728,3 +728,142 @@ fn nudge(points: &mut [Position], valid: &[Vec<P>], spacing: f64, axes: &[Axis])
         }
     }
 }
+
+/// A rule one edited position breaks (the operator moved, added or kept it there).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Broken {
+    /// It lies in no zone of the plan (people are not there).
+    OutsideZones,
+    /// Another position is closer than the spacing.
+    Spacing {
+        /// The other position's index.
+        other: usize,
+        /// Their distance, metres.
+        got: f64,
+        /// The rule, metres.
+        wanted: f64,
+    },
+    /// Closer to a wall than the wall distance.
+    Wall {
+        /// Its distance to the nearest wall, metres.
+        got: f64,
+        /// The rule, metres.
+        wanted: f64,
+    },
+    /// Closer to a speaker than the speaker distance.
+    Speaker {
+        /// Its distance to the nearest speaker, metres.
+        got: f64,
+        /// The rule, metres.
+        wanted: f64,
+    },
+    /// Below the floor distance.
+    Floor {
+        /// Its height, metres.
+        got: f64,
+        /// The rule, metres.
+        wanted: f64,
+    },
+    /// It mirrors another position across a mirror axis of the room and its speakers.
+    Mirrored {
+        /// The other position's index.
+        other: usize,
+    },
+}
+
+impl Broken {
+    /// The text after a point's label: *spacing 1.4 m to P3 (rule 2.0 m)*; `label` names
+    /// another position by index.
+    pub fn text(&self, label: impl Fn(usize) -> String) -> String {
+        match self {
+            Self::OutsideZones => "outside every zone".to_owned(),
+            Self::Spacing { other, got, wanted } => {
+                format!("{got:.1} m from {} (spacing {wanted:.1} m)", label(*other))
+            }
+            Self::Wall { got, wanted } => {
+                format!("{got:.1} m from a wall (rule {wanted:.1} m)")
+            }
+            Self::Speaker { got, wanted } => {
+                format!("{got:.1} m from a speaker (rule {wanted:.1} m)")
+            }
+            Self::Floor { got, wanted } => {
+                format!("{got:.1} m above the floor (rule {wanted:.1} m)")
+            }
+            Self::Mirrored { other } => format!("mirrors {}", label(*other)),
+        }
+    }
+}
+
+/// The rules of `preset` each of `points` breaks, one list per point (empty: it keeps them
+/// all). The operator's edits are marked with these, never refused: they see the pillar or
+/// the lighting tower that the plan does not.
+pub fn breaks(plan: &PlanSpec, points: &[[f64; 3]], preset: &Preset) -> Vec<Vec<Broken>> {
+    let speakers: Vec<[f64; 3]> = plan
+        .markers
+        .iter()
+        .filter(|m| m.kind == MarkerKind::Speaker)
+        .map(|m| m.at)
+        .collect();
+    let axes = if preset.no_mirrored_pairs {
+        mirror_axes(plan)
+    } else {
+        Vec::new()
+    };
+    points
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            let xy = plan_xy(*p);
+            let mut out = Vec::new();
+            if !plan.zones.iter().any(|z| geom::inside(xy, &z.outline)) {
+                out.push(Broken::OutsideZones);
+            }
+            if let Some((other, got)) = points
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| *j != i)
+                .map(|(j, q)| (j, dist3(*p, *q)))
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                && got < preset.spacing - geom::EPS
+            {
+                out.push(Broken::Spacing {
+                    other,
+                    got,
+                    wanted: preset.spacing,
+                });
+            }
+            let wall = geom::dist_to_boundary(xy, &plan.outline);
+            if wall < preset.wall_distance - geom::EPS || !geom::inside(xy, &plan.outline) {
+                out.push(Broken::Wall {
+                    got: if geom::inside(xy, &plan.outline) {
+                        wall
+                    } else {
+                        0.0
+                    },
+                    wanted: preset.wall_distance,
+                });
+            }
+            if let Some(wanted) = preset.speaker_distance {
+                let got = speaker_distance(&speakers, xy, p[2]);
+                if got < wanted - geom::EPS {
+                    out.push(Broken::Speaker { got, wanted });
+                }
+            }
+            if let Some(wanted) = preset.floor_distance
+                && p[2] < wanted - geom::EPS
+            {
+                out.push(Broken::Floor { got: p[2], wanted });
+            }
+            if let Some(other) = points
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| *j != i)
+                .find(|(_, q)| axes.iter().any(|ax| mirrored(ax, xy, plan_xy(**q))))
+                .map(|(j, _)| j)
+            {
+                out.push(Broken::Mirrored { other });
+            }
+            out
+        })
+        .collect()
+}

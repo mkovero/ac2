@@ -182,6 +182,17 @@ pub struct FillRect {
     pub clip: Option<Rect>,
 }
 
+/// Filled polygon (a room plan's floor, a zone), any shape, concave included: the inside is
+/// what an even number of edges does not enclose (even-odd), so a simple polygon fills as
+/// drawn. Its edges are not anti-aliased: stroke a [`Polyline`] over it for a crisp outline.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FillPolygon {
+    /// Logical pixels, in order round the polygon (either orientation); closed implicitly.
+    pub points: Vec<[f32; 2]>,
+    pub color: Color,
+    pub clip: Option<Rect>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HAlign {
     Left,
@@ -335,12 +346,13 @@ pub struct Heatmap {
     pub data: Vec<Option<HeatmapColumn>>,
 }
 
-/// Primitives drawn in a fixed order: rects, heatmaps, bands, grids, polylines, points,
-/// labels. Anything that must cover text (a banner over the plot) goes into a later layer.
+/// Primitives drawn in a fixed order: rects, heatmaps, polygons, bands, grids, polylines,
+/// points, labels. Anything that must cover text (a banner over the plot) goes into a later layer.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Layer {
     pub rects: Vec<FillRect>,
     pub heatmaps: Vec<Heatmap>,
+    pub polygons: Vec<FillPolygon>,
     pub bands: Vec<Band>,
     pub grids: Vec<Grid>,
     pub polylines: Vec<Polyline>,

@@ -534,6 +534,21 @@ impl Renderer {
                     });
                 }
             }
+            for poly in &layer.polygons {
+                let clip = clip_of(&poly.clip);
+                let first = self.fills.len();
+                if !is_empty(&clip) {
+                    geometry::push_polygon(&mut self.fills, poly, &xf, clip);
+                }
+                push_cmd(
+                    &mut self.cmds,
+                    Kind::Fill,
+                    first,
+                    self.fills.len(),
+                    &clip,
+                    size,
+                );
+            }
             for b in &layer.bands {
                 let clip = clip_of(&b.clip);
                 let first = self.fills.len();

@@ -421,6 +421,61 @@ pub(crate) fn push_band(out: &mut Vec<FillInstance>, band: &Band, xf: &Xform, cl
     }
 }
 
+/// A polygon as vertical slabs: one between each pair of neighbouring vertex x positions,
+/// and in each slab a trapezoid per inside span (the edges crossing the slab, paired from
+/// the top, even-odd). Slabs share their sides exactly, so a translucent fill never blends
+/// twice at a seam; the outer sides get no ramp (the outline drawn over it is the edge).
+pub(crate) fn push_polygon(
+    out: &mut Vec<FillInstance>,
+    poly: &crate::scene::FillPolygon,
+    xf: &Xform,
+    clip: ClipPx,
+) {
+    if !positive(poly.color.a) || poly.points.len() < 3 {
+        return;
+    }
+    let pts: Vec<[f32; 2]> = poly.points.iter().map(|p| xf.point(*p)).collect();
+    if !pts.iter().all(|p| finite(*p)) {
+        return;
+    }
+    let color = pack_color(poly.color);
+    let mut xs: Vec<f32> = pts.iter().map(|p| p[0]).collect();
+    xs.sort_by(f32::total_cmp);
+    xs.dedup();
+    let n = pts.len();
+    let edges: Vec<([f32; 2], [f32; 2])> = (0..n)
+        .map(|i| (pts[i], pts[(i + 1) % n]))
+        .filter(|(a, b)| a[0] != b[0])
+        .map(|(a, b)| if a[0] < b[0] { (a, b) } else { (b, a) })
+        .collect();
+    let y_at =
+        |(a, b): &([f32; 2], [f32; 2]), x: f32| a[1] + (b[1] - a[1]) * (x - a[0]) / (b[0] - a[0]);
+    let mut spans: Vec<(f32, f32, f32)> = Vec::new();
+    for w in xs.windows(2) {
+        let (x0, x1) = (w[0], w[1]);
+        let xm = 0.5 * (x0 + x1);
+        spans.clear();
+        spans.extend(
+            edges
+                .iter()
+                .filter(|(a, b)| a[0] <= x0 && b[0] >= x1)
+                .map(|e| (y_at(e, xm), y_at(e, x0), y_at(e, x1))),
+        );
+        spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+        for pair in spans.chunks_exact(2) {
+            let (top, bottom) = (pair[0], pair[1]);
+            out.push(FillInstance {
+                x: [x0, x1],
+                top: [top.1, top.2],
+                bottom: [bottom.1, bottom.2],
+                clip,
+                color,
+                flags: 0,
+            });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -439,6 +494,69 @@ mod tests {
             stroke: Stroke::solid(Color::WHITE, width),
             clip: None,
         }
+    }
+
+    fn trapezoid_area(f: &FillInstance) -> f32 {
+        let h0 = f.bottom[0] - f.top[0];
+        let h1 = f.bottom[1] - f.top[1];
+        0.5 * (h0 + h1) * (f.x[1] - f.x[0])
+    }
+
+    fn polygon(points: Vec<[f32; 2]>) -> crate::scene::FillPolygon {
+        crate::scene::FillPolygon {
+            points,
+            color: Color::WHITE,
+            clip: None,
+        }
+    }
+
+    #[test]
+    fn polygons_fill_as_slabs_concave_included() {
+        let mut out = Vec::new();
+        // An L: 10 × 4 along the bottom, 4 × 10 up the left side (area 64), and a wedge.
+        let l = vec![
+            [0.0, 0.0],
+            [4.0, 0.0],
+            [4.0, 6.0],
+            [10.0, 6.0],
+            [10.0, 10.0],
+            [0.0, 10.0],
+        ];
+        push_polygon(&mut out, &polygon(l.clone()), &XF, CLIP);
+        let area: f32 = out.iter().map(trapezoid_area).sum();
+        assert!((area - 64.0).abs() < 1e-4, "{area}");
+        assert!(
+            out.iter()
+                .all(|f| f.top[0] <= f.bottom[0] && f.top[1] <= f.bottom[1])
+        );
+        // Clockwise or not, it fills the same.
+        let mut back = Vec::new();
+        push_polygon(
+            &mut back,
+            &polygon(l.into_iter().rev().collect()),
+            &XF,
+            CLIP,
+        );
+        assert_eq!(back.len(), out.len());
+        let mut wedge = Vec::new();
+        push_polygon(
+            &mut wedge,
+            &polygon(vec![[0.0, 0.0], [8.0, 2.0], [0.0, 4.0]]),
+            &XF,
+            CLIP,
+        );
+        let area: f32 = wedge.iter().map(trapezoid_area).sum();
+        assert!((area - 16.0).abs() < 1e-4, "{area}");
+        // Too few points, or a NaN, draw nothing.
+        let mut none = Vec::new();
+        push_polygon(&mut none, &polygon(vec![[0.0, 0.0], [1.0, 1.0]]), &XF, CLIP);
+        push_polygon(
+            &mut none,
+            &polygon(vec![[0.0, 0.0], [f32::NAN, 1.0], [1.0, 0.0]]),
+            &XF,
+            CLIP,
+        );
+        assert!(none.is_empty());
     }
 
     #[test]

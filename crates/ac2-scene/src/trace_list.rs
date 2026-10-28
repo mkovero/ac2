@@ -127,6 +127,8 @@ pub struct TraceRow {
     pub details: Vec<String>,
     /// Everything about the row in one sentence (the tooltip, and what a screen reader says).
     pub describe: String,
+    /// A redone or skipped walk point's capture: listed dimmed, out of the walk's average.
+    pub superseded: bool,
 }
 
 /// The smoothing a row names: `1/6 oct`, `1/6 oct mag only`; a spectrum has no phase, so
@@ -157,6 +159,14 @@ pub fn trace_rows(items: &[TraceItem<'_>], selected: Option<TraceId>) -> Vec<Tra
             let delay = format::trace_delay(t.edit.delay_nudge.0);
             let smooth = smoothing_text(t);
             let run = run_settings(t);
+            // A walk's capture: where it was taken, whether before ready, whether redone.
+            let walk: Vec<String> = t
+                .position
+                .iter()
+                .map(|p| format!("at {}", p.label))
+                .chain(t.captured_unsettled.then(|| "unsettled".to_owned()))
+                .chain(t.superseded.then(|| "superseded".to_owned()))
+                .collect();
             // An unmarked spectrum reads tone level (as on a measurement's row).
             let level = matches!(
                 t.kind,
@@ -172,6 +182,7 @@ pub fn trace_rows(items: &[TraceItem<'_>], selected: Option<TraceId>) -> Vec<Tra
                 v.extend(about.clone());
                 v.extend(level.clone());
                 v.extend(run.clone());
+                v.extend(walk.clone());
                 v.extend(slot.clone());
                 v.extend(hidden.clone());
                 if extra {
@@ -208,6 +219,7 @@ pub fn trace_rows(items: &[TraceItem<'_>], selected: Option<TraceId>) -> Vec<Tra
                 color: i.color,
                 details,
                 describe,
+                superseded: t.superseded,
             }
         })
         .collect()
@@ -665,5 +677,34 @@ mod tests {
                 .unwrap_or_default(),
             ["EQ · 1 section · bypassed", "EQ · 1 section", "EQ"]
         );
+    }
+
+    /// A walk's capture says where it was taken and whether before ready; a redone point's
+    /// old capture says it is superseded and its row is dimmed.
+    #[test]
+    fn walk_captures_name_their_point_and_superseded_ones_dim() {
+        let mut t = meta(5, "P3 · Main L", None, TraceKind::Transfer, captured());
+        t.position = Some(TracePosition {
+            label: "P3".into(),
+            at: [1.0, 2.0, 1.2],
+            plan: "Hall".into(),
+            walk: WalkId(1),
+        });
+        t.captured_unsettled = true;
+        fn item(t: &TraceMeta) -> TraceItem<'_> {
+            TraceItem {
+                meta: t,
+                has_data: true,
+                color: Color::WHITE,
+                eq: None,
+            }
+        }
+        let r = trace_rows(&[item(&t)], None).remove(0);
+        assert_eq!(r.details[0], "capture · at P3 · unsettled");
+        assert!(!r.superseded);
+        t.superseded = true;
+        let r = trace_rows(&[item(&t)], None).remove(0);
+        assert_eq!(r.details[0], "capture · at P3 · unsettled · superseded");
+        assert!(r.superseded);
     }
 }

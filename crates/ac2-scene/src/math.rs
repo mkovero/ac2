@@ -166,6 +166,9 @@ pub struct MathStatus {
     pub arrival: Option<String>,
     /// An alignment's suggestion ([`crate::align::legend_note`]), when its frame has one.
     pub align: Option<String>,
+    /// Operands in the result that a spatial walk captured before its measurement was
+    /// ready ([`Self::with_unsettled`]): they count, and the legend says so.
+    pub unsettled: usize,
 }
 
 impl MathStatus {
@@ -202,7 +205,14 @@ impl MathStatus {
                 }
                 _ => None,
             },
+            unsettled: 0,
         }
+    }
+
+    /// This status with `n` of its included operands captured unsettled by a walk.
+    pub fn with_unsettled(mut self, n: usize) -> Self {
+        self.unsettled = n;
+        self
     }
 
     /// This status with the operands' arrival difference ([`arrival_note`]) in its tag.
@@ -227,12 +237,18 @@ impl MathStatus {
         }
     }
 
-    /// `4 positions` when every operand is in, else `3 of 4 positions`.
+    /// `4 positions` when every operand is in, else `3 of 4 positions`; with walk captures
+    /// taken before ready, `8 positions · 2 unsettled`.
     pub fn count(&self) -> String {
-        if self.included == self.operands {
+        let n = if self.included == self.operands {
             format!("{} positions", self.operands)
         } else {
             format!("{} of {} positions", self.included, self.operands)
+        };
+        if self.unsettled == 0 {
+            n
+        } else {
+            format!("{n} · {} unsettled", self.unsettled)
         }
     }
 
@@ -362,6 +378,11 @@ mod tests {
         assert_eq!(s.tag(), "4 positions · power avg");
         assert_eq!(s.banner("Audience"), None);
         assert_eq!(s.expression, "average of Seat 1, Seat 2, Seat 3, Seat 4");
+        // A walk's captures taken before ready count, and the legend says how many.
+        assert_eq!(
+            s.with_unsettled(2).tag(),
+            "4 positions · 2 unsettled · power avg"
+        );
     }
 
     #[test]

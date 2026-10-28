@@ -80,6 +80,7 @@ pub mod trace_list;
 pub mod unit_text;
 pub mod unresolved;
 pub mod view;
+pub mod walk;
 
 pub use primitives::*;
 pub use theme::Theme;

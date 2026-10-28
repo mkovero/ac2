@@ -1,0 +1,437 @@
+use ac2_proto::model::{
+    Marker, MarkerKind, PlanSpec, PointState, WalkKind, WalkPoint, WalkState, ZoneSpec,
+};
+use ac2_proto::units::{MeasId, TraceId, WalkId};
+use ac2_room::pattern::{Broken, PresetKind, Relaxed};
+
+use super::setup::*;
+use super::*;
+use crate::primitives::Viewport;
+use crate::theme::Theme;
+use crate::view::{PlotChrome, Style};
+
+fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Vec<[f64; 2]> {
+    vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+}
+
+/// A 20 × 30 m hall, stage at y = 30, FOH at (10, 10) facing the stage (+y).
+fn hall() -> PlanSpec {
+    PlanSpec {
+        name: "Hall".into(),
+        outline: rect(0.0, 0.0, 20.0, 30.0),
+        ceiling: Some(10.0),
+        zones: vec![ZoneSpec {
+            name: "Stalls".into(),
+            outline: rect(0.0, 0.0, 20.0, 24.0),
+            ear_height: 1.2,
+            weight: None,
+            seats: None,
+        }],
+        markers: vec![Marker {
+            name: "FOH".into(),
+            kind: MarkerKind::Foh,
+            at: [10.0, 10.0, 0.0],
+            heading_deg: Some(90.0),
+        }],
+        surfaces: vec![],
+    }
+}
+
+fn walk(states: &[PointState], current: Option<u16>) -> WalkState {
+    WalkState {
+        id: WalkId(1),
+        name: "Mains".into(),
+        plan: "Hall".into(),
+        kind: WalkKind::LiveTransfer,
+        meas: vec![MeasId(1)],
+        points: states
+            .iter()
+            .enumerate()
+            .map(|(i, s)| WalkPoint {
+                label: format!("P{}", i + 1),
+                // P3 at 2.1 m left (−x facing +y) and 4.0 m back (−y) of FOH.
+                at: if i == 2 {
+                    [7.9, 6.0, 1.2]
+                } else {
+                    [2.0 + 2.0 * i as f64, 18.0, 1.2]
+                },
+                mic: None,
+                state: s.clone(),
+            })
+            .collect(),
+        current,
+        average: None,
+    }
+}
+
+fn pending(n: usize) -> Vec<PointState> {
+    vec![PointState::Pending; n]
+}
+
+fn captured(t: u32) -> PointState {
+    PointState::Captured {
+        traces: vec![TraceId(t)],
+    }
+}
+
+#[test]
+fn the_step_reads_from_foh_facing_the_stage() {
+    let w = walk(&pending(8), Some(2));
+    assert_eq!(
+        step_text(&w, Some(&hall())),
+        "Move mic to P3 · 2.1 m left, 4.0 m back from FOH"
+    );
+    // Without a FOH or speaker heading the readout says it is plan x/y.
+    let mut bare = hall();
+    bare.markers.clear();
+    assert_eq!(
+        step_text(&w, Some(&bare)),
+        "Move mic to P3 · x 7.9 m, y 6.0 m in plan (no FOH or speaker heading)"
+    );
+    let done = walk(&[captured(1), PointState::Skipped], None);
+    assert_eq!(
+        step_text(&done, Some(&hall())),
+        "every point is captured or skipped"
+    );
+}
+
+#[test]
+fn ready_states_read_as_the_note_says() {
+    assert_eq!(Ready::of(Some(0.6), false).text(), "settling · 60 %");
+    // One block short of full is not 100 %.
+    assert_eq!(Ready::of(Some(0.999), false).text(), "settling · 99 %");
+    assert_eq!(Ready::of(Some(1.0), false).text(), "ready");
+    // A pick waits for the operator, full or not.
+    assert_eq!(Ready::of(Some(1.0), true).text(), "arrival: pick one");
+    assert_eq!(Ready::of(Some(0.2), true), Ready::Pick);
+    assert_eq!(Ready::of(None, false).text(), "waiting for the measurement");
+}
+
+#[test]
+fn the_average_line_counts_positions_and_unsettled_captures() {
+    let mut states = pending(8);
+    states[0] = captured(1);
+    let w = walk(&states, Some(1));
+    assert_eq!(average_text(&w, None, 0), "NO AVERAGE · 1 OF 8 POSITIONS");
+    // A skipped point is no position.
+    states[1] = PointState::Skipped;
+    assert_eq!(
+        average_text(&walk(&states, Some(2)), None, 0),
+        "NO AVERAGE · 1 OF 7 POSITIONS"
+    );
+    let mut all = vec![captured(1); 8];
+    all[7] = captured(8);
+    let mut w = walk(&all, None);
+    w.average = Some(MeasId(9));
+    assert_eq!(
+        average_text(&w, Some("Mains · average"), 2),
+        "Mains · average · 8 positions · 2 unsettled"
+    );
+    assert_eq!(positions_text(8, 0), "8 positions");
+    assert_eq!(positions_text(1, 0), "1 position");
+    assert_eq!(walk_row(&w), "Mains · 8 of 8 captured · Hall");
+}
+
+#[test]
+fn dots_mark_the_current_point_and_the_next_one_faint() {
+    let mut states = pending(4);
+    states[0] = captured(1);
+    states[2] = PointState::Skipped;
+    let w = walk(&states, Some(1));
+    let d = walk_dots(&w);
+    let looks: Vec<(DotLook, bool, bool)> = d.iter().map(|d| (d.look, d.current, d.next)).collect();
+    assert_eq!(
+        looks,
+        [
+            (DotLook::Captured, false, false),
+            (DotLook::Pending, true, false),
+            (DotLook::Skipped, false, false),
+            (DotLook::Pending, false, true),
+        ]
+    );
+    // The next point wraps round past the end.
+    let w = walk(&pending(3), Some(2));
+    assert_eq!(next_point(&w), Some(0));
+}
+
+#[test]
+fn the_walk_pane_draws_its_lines_and_the_plan() {
+    let theme = Theme::dark();
+    let plan = hall();
+    let mut states = pending(8);
+    states[0] = captured(1);
+    let w = walk(&states, Some(2));
+    let p = WalkPane {
+        walk: &w,
+        plan: Some(&plan),
+        ready: Ready::Settling(0.6),
+        average: None,
+        unsettled: 0,
+    };
+    let s = walk_scene(
+        &p,
+        Style {
+            chrome: PlotChrome::Full,
+            theme: &theme,
+        },
+        Viewport {
+            width: 900.0,
+            height: 600.0,
+        },
+    );
+    let texts: Vec<&str> = s
+        .scene
+        .layers
+        .iter()
+        .flat_map(|l| l.labels.iter().map(|l| l.text.as_str()))
+        .collect();
+    for want in [
+        "Move mic to P3 · 2.1 m left, 4.0 m back from FOH",
+        "settling · 60 %",
+        "NO AVERAGE · 1 OF 8 POSITIONS",
+        "Stalls",
+        "FOH",
+        "P1",
+        "P8",
+    ] {
+        assert!(texts.contains(&want), "{want} not in {texts:?}");
+    }
+    assert!(
+        texts.iter().any(|t| t.ends_with(" m")),
+        "a scale bar: {texts:?}"
+    );
+    // The floor and the zone are filled polygons.
+    let polys: usize = s.scene.layers.iter().map(|l| l.polygons.len()).sum();
+    assert!(polys >= 2);
+    // The map puts plan points inside the plan area and reads them back.
+    let map = s.map.expect("a plan");
+    let px = map.to_px([10.0, 10.0]);
+    let back = map.to_m(px);
+    assert!((back[0] - 10.0).abs() < 1e-6 && (back[1] - 10.0).abs() < 1e-6);
+    // Plan y goes up the screen.
+    assert!(map.to_px([10.0, 20.0])[1] < px[1]);
+
+    let none = WalkPane { plan: None, ..p };
+    let s = walk_scene(
+        &none,
+        Style {
+            chrome: PlotChrome::Full,
+            theme: &theme,
+        },
+        Viewport {
+            width: 900.0,
+            height: 600.0,
+        },
+    );
+    assert!(s.map.is_none());
+}
+
+#[test]
+fn scale_bar_and_snap() {
+    assert_eq!(scale_bar(20.0, 120.0), (5.0, "5 m".to_owned()));
+    assert_eq!(scale_bar(200.0, 120.0), (0.5, "0.5 m".to_owned()));
+    assert_eq!(snap([1.234, -0.04]), [1.2, 0.0]);
+    assert_eq!(snap([2.25, 7.96]), [2.3, 8.0]);
+}
+
+fn input<'a>(
+    plan: Option<&'a PlanSpec>,
+    labels: &'a [String],
+    breaks: &'a [Vec<Broken>],
+    relaxed: &'a [Relaxed],
+) -> SetupInput<'a> {
+    SetupInput {
+        name: "Walk 1",
+        plan,
+        zone: None,
+        preset: PresetKind::Tuning,
+        reverb_s: 1.0,
+        n: 8,
+        default_n: Some(8),
+        seed: 3,
+        mic: Some("Main L"),
+        focus: SetupField::Pattern,
+        typed: None,
+        relaxed,
+        labels,
+        breaks,
+        error: None,
+    }
+}
+
+#[test]
+fn the_setup_names_its_rows_relaxed_rules_and_broken_points() {
+    let plan = hall();
+    let labels: Vec<String> = (1..=3).map(|i| format!("P{i}")).collect();
+    let breaks = vec![
+        vec![],
+        vec![Broken::Spacing {
+            other: 0,
+            got: 0.5,
+            wanted: 2.0,
+        }],
+        vec![],
+    ];
+    let relaxed = vec![Relaxed::Spacing {
+        wanted: 2.0,
+        got: 1.6,
+        n: 8,
+    }];
+    let v = setup_view(&input(Some(&plan), &labels, &breaks, &relaxed));
+    let rows: Vec<(String, String, bool)> = v
+        .rows
+        .iter()
+        .map(|r| (r.label.clone(), r.value.clone(), r.focused))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("name".into(), "Walk 1".into(), false),
+            ("plan".into(), "Hall · 1 zone".into(), false),
+            ("zones".into(), "all (Stalls)".into(), false),
+            ("preset".into(), "Tuning".into(), false),
+            ("positions".into(), "8".into(), false),
+            ("pattern".into(), "3".into(), true),
+            ("mic".into(), "Main L".into(), false),
+        ]
+    );
+    assert_eq!(
+        v.notes,
+        [
+            "relaxed: spacing 1.6 m: 8 positions do not fit at 2.0 m",
+            "P2: 0.5 m from P1 (spacing 2.0 m)",
+        ]
+    );
+    assert!(v.hint.contains("Enter starts the walk"));
+
+    // ISO 3382-1 adds its RT row; a zone without seats says the count is by hand.
+    let mut iso = input(Some(&plan), &labels, &breaks, &relaxed);
+    iso.preset = PresetKind::Iso3382;
+    iso.reverb_s = 1.25;
+    iso.default_n = None;
+    iso.focus = SetupField::Count;
+    iso.typed = Some("1");
+    let v = setup_view(&iso);
+    let labels_of: Vec<&str> = v.rows.iter().map(|r| r.label.as_str()).collect();
+    assert_eq!(
+        labels_of,
+        [
+            "name",
+            "plan",
+            "zones",
+            "preset",
+            "RT",
+            "positions",
+            "pattern",
+            "mic"
+        ]
+    );
+    assert_eq!(v.rows[3].value, "ISO 3382-1");
+    assert_eq!(v.rows[4].value, "1.3 s");
+    assert_eq!(v.rows[5].value, "1▏");
+
+    // On New plan…, Enter opens the editor.
+    let mut new = input(None, &labels, &[], &[]);
+    new.focus = SetupField::Plan;
+    let v = setup_view(&new);
+    assert_eq!(v.rows[1].value, NEW_PLAN);
+    assert!(v.hint.contains("Enter opens the plan editor"));
+}
+
+#[test]
+fn the_editor_lists_vertices_and_says_why_a_plan_is_refused() {
+    let mut plan = hall();
+    let v = editor_view(&EditorInput {
+        plan: &plan,
+        layer: Layer::Outline,
+        focus: EditorField::Row(1),
+        typed: None,
+        verdict: Ok(()),
+        row_error: None,
+    });
+    let rows: Vec<(&str, &str)> = v
+        .rows
+        .iter()
+        .map(|r| (r.label.as_str(), r.value.as_str()))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("name", "Hall"),
+            ("ceiling", "10.0 m"),
+            ("editing", "outline · 4 vertices"),
+            ("1", "0.0 0.0"),
+            ("2", "20.0 0.0"),
+            ("3", "20.0 30.0"),
+            ("4", "0.0 30.0"),
+        ]
+    );
+    assert!(v.rows[4].focused);
+    assert_eq!(v.verdict, "valid · Enter saves it to the plan library");
+
+    plan.ceiling = None;
+    let v = editor_view(&EditorInput {
+        plan: &plan,
+        layer: Layer::Markers,
+        focus: EditorField::Row(0),
+        typed: Some("10 9"),
+        verdict: Err("edge 1 crosses edge 3".into()),
+        row_error: None,
+    });
+    assert_eq!(v.rows[1].value, "none (outdoors)");
+    assert_eq!(v.rows[2].value, "markers · 1");
+    assert_eq!(v.rows[3].label, "FOH");
+    assert_eq!(v.rows[3].value, "10 9▏");
+    assert_eq!(v.verdict, "refused: edge 1 crosses edge 3");
+    assert!(v.refused);
+    let v = editor_view(&EditorInput {
+        plan: &plan,
+        layer: Layer::Markers,
+        focus: EditorField::Layer,
+        typed: None,
+        verdict: Ok(()),
+        row_error: None,
+    });
+    assert_eq!(v.rows[3].value, "FOH · 10.0 10.0 · heading 90°");
+    let v = editor_view(&EditorInput {
+        plan: &plan,
+        layer: Layer::Zone(0),
+        focus: EditorField::Layer,
+        typed: None,
+        verdict: Ok(()),
+        row_error: None,
+    });
+    assert_eq!(v.rows[2].value, "zone Stalls · 4 vertices");
+    assert_eq!(v.rows[3].value, "Stalls");
+    assert_eq!(v.rows[4].value, "1.2 m");
+}
+
+#[test]
+fn the_plan_view_of_an_empty_plan_has_a_scale() {
+    let theme = Theme::dark();
+    let empty = PlanSpec {
+        name: String::new(),
+        outline: vec![],
+        ceiling: None,
+        zones: vec![],
+        markers: vec![],
+        surfaces: vec![],
+    };
+    let pic = PlanPicture {
+        plan: &empty,
+        dots: vec![],
+        editing: Some(vec![]),
+    };
+    assert_eq!(pic.bounds(), None);
+    let (_, map) = plan_scene(
+        &pic,
+        Viewport {
+            width: 400.0,
+            height: 400.0,
+        },
+        &theme,
+    );
+    let o = map.to_px([0.0, 0.0]);
+    let far = map.to_px([EMPTY_PLAN_M, EMPTY_PLAN_M]);
+    assert!(o[0] < far[0] && o[1] > far[1]);
+}

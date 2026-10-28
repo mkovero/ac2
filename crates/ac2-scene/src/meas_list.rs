@@ -515,7 +515,8 @@ pub fn tree_rows(input: &TreeInput<'_>) -> Vec<TreeRow> {
                 name: r.name.clone(),
                 details: r.details.clone(),
                 collapsed: None,
-                hidden: !r.shown,
+                // A superseded walk capture is out of the average: dimmed as a hidden one.
+                hidden: !r.shown || r.superseded,
                 mark: if r.selected { Mark::Active } else { Mark::None },
                 dot: Some((r.color, r.shown)),
                 chip: None,

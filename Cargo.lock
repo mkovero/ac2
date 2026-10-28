@@ -153,6 +153,7 @@ name = "ac2-scene"
 version = "0.0.0"
 dependencies = [
  "ac2-proto",
+ "ac2-room",
 ]
 
 [[package]]
