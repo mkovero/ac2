@@ -1,255 +1,301 @@
 # Spatial walk: room plans, suggested mic positions, a guided average
 
-Status: design (2026-10-28). The operator wants three things: a spatial average of N mics made in
-one step; a walkthrough that suggests mic positions inside a room of any shape and follows the
-measurements through them; and a room model of that shape that can later be ray traced. The room
-model stays a separate crate that can grow without slowing the rest of ac2's development (§2).
+Status: design (2026-10-28), review round 2. The operator wants three things: a spatial average of
+N mics made in one step; a walkthrough that suggests mic positions inside a room of any shape and
+follows the measurements through them; and, later, ray tracing that room. The simulator stays out
+of ac2's way while it grows (§2).
 
 ## What exists
 
 - **Average of live transfers.** A math channel `expr: average` over transfer measurements
   (one per mic, each with its own reference): power, complex or coherence-weighted, every
   operand re-referred to one delay, left-out operands named (*AVERAGE · 3 OF 4 POSITIONS*)
-  ([math-channels.md](math-channels.md), [spatial-average.md](spatial-average.md)). It is made
-  with **Shift+M**, where the operator row starts on a ratio.
-- **Average of stored traces.** The same maths over captures (`Ctrl+1 … 9`) or sweep runs: a
-  math channel of traces or the one-shot `M` (`trace.average`).
+  ([math-channels.md](math-channels.md), [spatial-average.md](spatial-average.md)). Made with
+  **Shift+M**, whose operator row starts on ÷. At most `MathConfig::MAX_AVERAGE` = 16 operands.
+- **Average of stored traces.** The same maths over captures (`Ctrl+1 … 9`) or sweep runs (sweep
+  runs are transfer-domain operands): a math channel of traces, or the one-shot `M`
+  (`trace.average`).
 - **Sweep gate** (`--gate`), and ISO 3382-1 parameters from a sweep IR
-  ([room-metrics.md](room-metrics.md)). They are measured at one position; positions are the
-  operator's job (§ *Not offered* there).
-- **The New measurement chooser** has Alignment and Programme meter rows.
+  ([room-metrics.md](room-metrics.md)), one position at a time. A sweep reads one mic
+  (`SweepConfig::measurement_input`).
+- **The New measurement chooser** has Alignment and Programme meter rows
+  (`ac2-scene/src/new_meas.rs`, `ac2-ui/src/state/new_meas.rs`).
+- **What the wire says about averaging depth:** only per-column `ValidityMask::SETTLING` (no
+  averaged block yet). How full the MTW stages are (`Mtw::fill_s`) stays inside `ac2-core`.
 
-What is missing: the average needs too many keystrokes; nothing knows where a mic stood; nothing
-suggests where it should stand; and nothing has a room shape.
+Missing: the average takes too many keystrokes; nothing knows where a mic stood or suggests where
+it should stand; nothing has a room shape; nothing tells a client that a transfer has refilled
+since a reset.
 
 ## 1. Spatial average in one step (G1)
 
-A **Spatial average** row in the New measurement chooser. It needs no new key, because the chooser
-is already where a measurement is made. It opens the math dialog filled in:
+A **Spatial average** row in the New measurement chooser opens the math form filled in:
 - operator *average of several*, method **power**;
-- every **running** transfer measurement of the current session included (**←/→** leaves one
-  out, as now);
+- every transfer measurement of the current session, running or stopped (a stopped one is left
+  out as `stopped` until it is started, as in any average); **←/→** leaves one out, as now;
 - the name `Spatial average` (then `Spatial average 2`, …).
 
-**Enter** creates and starts it. With fewer than two running transfers the row is shown dimmed,
-with its reason (*needs two running transfer measurements*), and does not open. The change is
-UI only: it makes the same `meas.new` math request that Shift+M makes, so nothing on the wire
-changes.
+**Enter** sends the same `meas.create` the math form sends. The average opens in its own pane
+(a new measurement never takes over the focused one). With fewer than two transfer measurements
+the row is dimmed with its reason (*needs two transfer measurements*) and does not open. The
+change is UI only: no new key (the chooser is where measurements are made), no wire change.
 
-## 2. `ac2-room`: its own repository (G2)
+## 2. Where the code lives (G2)
 
-The plan geometry, the position patterns and later the acoustic simulation live in **`ac2-room`**.
-It has its **own git repository** (github.com/mkovero/ac2-room), is published to crates.io, and
-ac2 depends on it by version, as with `cahal`.
-- **Why a separate repository, not a workspace member:** in-tree, every `cargo nextest run
-  --workspace`, clippy pass and CI push would build and test the simulator; out of tree, ac2 builds
-  only what it depends on, and the simulator's growth (rayon, big tests, benchmarks) costs ac2 one
-  pinned version. Its CI, test tiers and release pace are its own.
-- **Features.** `default = []` is the plan and patterns module (`ac2_room::plan`,
-  `ac2_room::pattern`): pure, no I/O, `forbid(unsafe_code)`, no dependencies beyond `serde`.
-  `sim` adds the simulator (§7) and its dependencies. ac2 uses `default-features = false` and turns
-  on `sim` only in the stage that shows simulation results, in the crates that need it (`ac2d`).
-- **The boundary is data.** The plan types are plain serde structs that ac2-proto embeds. ac2 never
-  re-exports `ac2-room` internals. A plan in ac2's session files is ac2's own format, written from
-  those structs, so an `ac2-room` release that reorganises its internals does not move ac2's wire
-  format unless the plan structs change. A change to the plan structs is a `PROTO_VERSION` bump in
-  ac2, as for any wire change.
-- **While stages 2–3 are being built**, ac2 points at a git revision of `ac2-room` (a
-  `[patch.crates-io]` entry or a `git = …, rev = …` dependency). Each ac2 release pins a published
-  version.
+Two parts with different futures:
+
+- **`crates/ac2-room`**, a workspace member: plans, validation, position patterns (§3–§4).
+  Small, pure (no I/O, `forbid(unsafe_code)`, `serde` only), tested in the quick tier, and tied to
+  ac2's product. Changes to it go with the ac2 change that needs them.
+- **`ac2-roomsim`**, its own repository (github.com/mkovero/ac2-roomsim) and crates.io crate: the
+  simulator (§7). It has its own geometry input types and no dependency on any ac2 crate; `ac2d`
+  converts an ac2 plan into its input. Its growth (rayon, long tests, benchmarks, its own CI and
+  release pace) costs ac2 one pinned version, and its commits never move ac2's `main`, so a
+  parallel ac2 worker never re-tests because the simulator changed. It is created when stage 4
+  starts.
+
+**The wire is ac2's.** `ac2-proto` owns the plan's wire types (`PlanSpec`, `ZoneSpec`, `Marker`),
+under `deny_unknown_fields`, `WIRE_LOCK` and the Python fixtures, like every other wire type.
+`ac2-room` takes and returns them (it depends on `ac2-proto`'s model types only, as `ac2-traces`
+does). A plan change is a `PROTO_VERSION` bump like any wire change.
 
 ## 3. Room plans (G3)
 
-A **plan** is a floor polygon plus heights; the room is that polygon extruded (a prism). This is
-enough for halls, fan shapes, L-shaped bars and wedges, and it is what the ray tracer needs (§7).
-Raked floors and balconies are zones, not geometry.
+A **plan** is a floor polygon plus an optional ceiling; the room is that polygon extruded (a
+prism). It covers halls, fan shapes, L-shaped bars and wedges, and is what the simulator takes.
 
 ```
-Plan {
-  name, units: metres,
-  outline: Polygon,                 // simple polygon, CCW, ≥3 vertices, no self-intersection
-  ceiling: Height,                  // one height for the prism (a sloped ceiling: later, §9)
-  zones: Vec<Zone>,                 // where people are: stalls, balcony, VIP pit …
-  markers: Vec<Marker>,             // speakers, FOH, any named point
-  surfaces: Vec<SurfaceTag>,        // per outline edge + floor + ceiling: a material name (sim only)
+PlanSpec {
+  name,                             // metres throughout
+  outline: Vec<[f64; 2]>,           // simple polygon, CCW, ≥ 3 vertices
+  ceiling: Option<f64>,             // None: outdoors (no ceiling, no simulation)
+  zones: Vec<ZoneSpec>,             // where people are
+  markers: Vec<Marker>,
+  surfaces: Vec<SurfaceTag>,        // per outline edge + floor + ceiling: a material (simulation only)
 }
-Zone { name, outline: Polygon, ear_height: Height, weight: f32 }  // inside `outline` in plan view
-Marker { name, kind: Speaker | Foh | Point, at: (x, y, z), heading_deg: Option<f32> }
+ZoneSpec { name, outline: Vec<[f64; 2]>, ear_height: f64, weight: Option<f64> }  // weight None = area
+Marker   { name, kind: MarkerKind (speaker | foh | point), at: [f64; 3], heading_deg: Option<f64> }
 ```
 
-- **Coordinates** are metres in the plan's own frame. The walkthrough states every position
-  relative to a marker the operator picks (default the FOH marker, else the first speaker) and
-  that marker's heading: *P3 · 2.1 m left, 4.0 m back from FOH*. Without a heading it gives x/y in
-  plan coordinates and says so.
-- **Validation** (in `ac2-room`): the outline is simple and has non-zero area; every zone is a
-  simple polygon inside the outline in plan view (a balcony is a zone with a higher ear height);
-  every marker lies inside the outline and below the ceiling. A plan that fails is refused with
-  the reason (*edge 3 crosses edge 6*).
-- **Editing in the app.** A vertex table (type `x y` per row) and a plan view where a click adds a
-  vertex, snapped to 0.1 m, and a drag moves one. Both edit the same list. The plan view is an
-  `ac2-plot` primitive (lines, filled polygons, points, labels). Its text and the scale bar are
-  `ac2-scene` truth, tested headless.
-- **Where plans live.** On the daemon, like the mic library: a **plan library** in the daemon's
-  data directory (`plans/<name>.json`, atomic writes through `ac2-paths`), and a copy inside every
-  session that uses a plan, so a session opened on another rig carries its room. CLI:
+- **Coordinates for people are metres from FOH, facing the stage.** The FOH marker's heading is
+  the direction the operator faces at the desk; every position reads *2.1 m left, 4.0 m back from
+  FOH* as seen facing that way (back = away from the stage). Without a FOH marker with a heading,
+  positions read from the first speaker marker; without that, plan x/y, and the readout says so.
+  Pixels exist only inside the plan view.
+- **Validation:** the outline is simple with non-zero area; every zone is a simple polygon inside
+  the outline in plan view (a balcony is a zone with a higher ear height; what is under it is not
+  modelled, §9); every speaker marker lies inside the outline and below the ceiling; a FOH or
+  point marker may lie outside (a truck, an open side). z ≥ 0 for every marker. A plan that fails
+  is refused with the reason (*edge 3 crosses edge 6*).
+- **Editing in the app:** a vertex table (type `x y` per row) and a plan view where a click adds a
+  vertex, snapped to 0.1 m, and a drag moves one; both edit the same list. The plan view is an
+  `ac2-plot` primitive (lines, filled polygons, points, labels); its text and scale bar are
+  `ac2-scene` truth, tested headless. Keys: §5.
+- **Where plans live:** a **plan library** on the daemon, like the mic library
+  (`plans/<name>.json` in its data directory, atomic writes through `ac2-paths`), and a copy in
+  every session that uses one, so a session opened elsewhere carries its room. CLI:
   `ac2 plan new|list|show|import|export`.
 
 ## 4. Suggested positions (G4)
 
-`ac2_room::pattern::suggest(plan, zones, n, rules, seed) -> Vec<Point>`. It is deterministic for a
-seed, so the same plan and settings give the same points; **R** in the walk setup reshuffles (new
-seed).
+`ac2_room::pattern::suggest(plan, zones, n, preset, seed) -> Suggestion { points, relaxed }`.
+Deterministic for a seed; the walk setup's reshuffle makes a new seed.
 
-**Rules**, defaults after ISO 3382-1's guidance for measurement positions (all editable):
-- **minimum spacing** between positions: 2 m (about half a wavelength at the lowest band the
-  average is meant for), reduced automatically, and stated, when the zone cannot hold `n` points
-  at that spacing;
-- **distance from any wall** of the outline: ≥ 1 m;
-- **distance from every speaker marker**: ≥ `d_min = 2·√(V / (c·T))` when the operator gives a
-  reverberation time T (from a room-metrics measurement, or typed), otherwise ≥ 1 m. Closer
-  positions are dominated by the direct sound and under-represent the room;
-- **no two positions at the same distance from a speaker** (within 0.3 m) and **none on a mirror
-  axis** of the outline through a speaker (within 0.3 m): positions in the same symmetric spot see
-  the same modes and reflections, so they bias the average instead of sampling it;
-- **spread over the zones by weight** (default: weight = area).
+**Presets** (each rule editable):
 
-**Method.** Candidate points from a Poisson-disk sample of the zones at the spacing; candidates that
-break a rule are removed; then a farthest-point selection picks `n`, starting from the point
-nearest the zone's centroid. Rules that cannot all be met are relaxed in a fixed order (spacing
-first, then wall distance), and the walk setup names each one relaxed and by how much.
+| rule | **Tuning** (default) | **ISO 3382-1** (room parameters) |
+|---|---|---|
+| spacing between positions | ≥ 2 m (λ/2 at 86 Hz) | ≥ 2 m |
+| distance from walls | ≥ 1 m (λ/4 at 86 Hz) | ≥ 1 m from every reflecting surface |
+| distance from speakers | none: the front rows are seats too | ≥ `d_min = 2·√(V/(c·T))` with T given or measured |
+| mirrored pairs | none across a mirror axis of room + speakers | same |
+| `n` default | 8 | 6 / 8 / 10 for ≤ 500 / 1000 / 2000 seats (from the seat count) |
 
-**Two kinds of pattern:**
-- **Area** (default): the rules above over the chosen zones.
-- **Seat cluster**: `n` points within a sphere of radius r (default 0.3 m) around one marker. This
-  is the room-correction habit of measuring around one listening position. The spacing and
-  symmetry rules do not apply here, so the setup says the average is local to that seat.
+- **Why no mirrored pairs:** in a room symmetric about an axis through the speakers, two positions
+  mirrored across it see the same modes and reflections, so the second adds nothing to the average.
+  A position on the axis is fine. The test is pairs: no two points within 0.3 m of each other's
+  mirror image, for each mirror axis the outline and speaker markers share.
+- **The floor** is kept at the distance by ear height. A balcony soffit over a zone cannot be
+  represented in a prism (§9); the setup says so when a zone lies under a higher one.
+- **Why `d_min` only for room parameters:** it is the ISO rule for measuring the reverberant field
+  with an omnidirectional source, about twice the critical distance (roughly 11 m in a
+  10 000 m³ hall with T = 1 s, more for a directional PA). For tuning it would delete the front
+  half of the stalls.
 
-The operator may drag a point, delete one or add one. Points that break a rule after an edit are
-marked on the plan; they are not refused, because the operator can see the room and the plan
-cannot (a pillar, a lighting tower).
+**Method:** split `n` over the zones by weight (default area), at least one per zone with a
+non-zero quota. In each zone, place the points by a centroidal Voronoi relaxation (Lloyd) of the
+zone's area minus the wall margin, seeded from the seed. This spreads them evenly instead of
+pushing them to the edge, as a farthest-point pick would. Then check the rules and nudge points
+that break one. Rules that still fail are relaxed in a fixed order (spacing, then wall distance),
+and `relaxed` names each and by how much (*spacing 1.6 m: 8 positions do not fit at 2 m*).
+
+The operator may drag, delete or add points. A point that breaks a rule after an edit is marked on
+the plan, not refused: the operator sees the pillar or lighting tower that the plan does not.
+
+(A **seat cluster** pattern, points within about head size around one seat as in home room
+correction, is not offered here. Points that close are correlated below about 570 Hz, and the
+result holds for one seat only. It can be added later for control rooms.)
 
 ## 5. The walkthrough (G5)
 
-A **walk** belongs to one measurement setup: a list of mic inputs (one or more, §6), each with its
-transfer or sweep measurement, a plan, and a list of points.
+A **walk** is daemon state (a second client sees it; it survives an app restart). Within one
+session it names: a plan, the transfer or sweep measurements (one per mic), its points, and the
+math channel it feeds.
 
 ```
-Walk { id, plan, anchor: MarkerName, kind: LiveTransfer | Sweep,
-       meas: Vec<MeasId>,                       // one per mic, same kind
-       points: Vec<WalkPoint>, average: MeasId }  // the math channel it feeds
-WalkPoint { label: "P3", at: (x, y, z), mic: Option<MeasId>,
-            state: Pending | Captured { trace: TraceId } | Skipped }
+WalkState { id, name, plan: PlanName, kind: WalkKind (live_transfer | sweep),
+            meas: Vec<MeasId>, points: Vec<WalkPoint>, current: Option<u16>,
+            average: Option<MeasId> }
+WalkPoint { label: "P3", at: [f64; 3], mic: Option<MeasId>, state: PointState }
+PointState: pending | captured { traces: Vec<TraceId> } | skipped
 ```
 
-**Flow** (a dialog with its own key scope; Space/Enter stay stimulus keys everywhere):
-1. **Setup:** plan, zones, pattern, `n`, kind, mics. The plan view shows the suggested points.
-2. **Step:** *Move mic to P3* with the plan, the point highlighted, its coordinates from the
-   anchor, and the next point faint.
-   - **Live transfer:** the capture control enables when the measurement is **settled**: running,
-     no fault banner, average depth full, and coherence above its usual floor. Settled is the
-     daemon's existing state; the walk only reads it. It is a hint, not a gate: capture is
-     allowed earlier, and the trace is then marked *captured before settled*.
-   - **Sweep:** Enter fires it as now; the run, when complete and not refused, is the capture.
-   - A capture stores a trace under the measurement, with `TraceMeta.position: Option<Position>`
-     (label, x/y/z, plan name and walk id). The walk advances to the next pending point.
-3. **Redo** a captured point (its old trace is kept, marked superseded, and leaves the average),
-   **skip** one, or go **back**. Esc closes the dialog; the walk keeps its state and reopens
-   where it stopped.
-4. **Running average:** the walk's math channel averages its captured traces. It is created at
-   setup and gains each trace as it is captured, so the average builds as you walk. With fewer
-   than two captures it shows *NO AVERAGE · 1 OF 8 POSITIONS*, as any average does.
+**A walk is a pane, not a window.** It shows the plan, the current point highlighted with its
+readout (*Move mic to P3 · 2.1 m left, 4.0 m back from FOH*), the next point faint, and a state
+line. The keyboard stays with the panes, so the stimulus keys (**Space**, **Enter**, **Esc**) and
+a transfer pane's **R** work during the walk (an open window would own them, K9). Setup (plan,
+zones, preset, `n`, kind, mics) is a window that closes before the walk starts.
 
-**Wire.** A walk is daemon state (it must survive the app restarting and be visible to a second
-client): `walk.new|update|capture|skip|redo|delete`, `WalkState` in the session state, and a math
-operand kind `Operand::Walk(WalkId)` that expands to the walk's current captured traces. That is
-a `PROTO_VERSION` bump and a session-format bump.
+**Moving the mic resets the measurement.** When the walk moves to a point (advance, back, redo),
+the daemon resets every walk measurement's averaging (`meas.reset`) and finds its arrival again
+(the path length changed with the position). Otherwise the first capture at P3 would still hold
+P2's blocks. The operator never resets by hand.
+
+**Ready, a new wire fact.** `TfMeta.filled: f32` (0…1): how much of the slowest MTW stage's
+averaging time has passed since the last reset, the fraction `Mtw::fill_s` already computes.
+"Ready" at a point = `filled` = 1, no fault banner, and the delay found. The walk pane shows
+*settling · 60 %* until then. Capture is allowed earlier (the operator decides); the trace then
+records `captured_unsettled`.
+
+**Capture.** Live transfer: the capture key (below) sends `walk.capture`; the daemon captures
+every walk measurement of the step in one step (one `trace.capture` per measurement, milliseconds
+apart, each a settled average, which is harmless for a spatial average) and advances. Sweep: the
+sweep fires with **Enter** as always; a complete, unrefused run at the current point is that
+point's capture.
+
+New `TraceMeta` facts (facts, not `TraceEdit`): `position: Option<TracePosition>` (label, x/y/z,
+plan, walk id), `captured_unsettled: bool`, `superseded: bool` (a redone point's old trace, kept,
+listed dimmed, out of the average).
+
+**The running average** is an ordinary math channel. The daemon creates it at the walk's second
+capture (an average needs two operands) and updates its `of` (`meas.update`) on each capture,
+redo or skip, as it already restarts maths whose operands change. Before the second capture the
+walk pane shows *NO AVERAGE · 1 OF 8 POSITIONS* from walk state. `MAX_AVERAGE` rises from 16 to
+64 (positions × mics: ISO 3382-1 alone asks for 10 positions in a 2000-seat hall; the cost is one
+pass per column per operand).
+
+**Invariants:** a measurement, trace or math channel a walk names cannot be deleted while it does
+(the owners check). Deleting the walk keeps its traces.
+
+**Wire:** `walk.new|update|goto|capture|skip|redo|delete`, `WalkState` in the session state,
+`TfMeta.filled`, the three `TraceMeta` facts, the plan types and plan-library commands. A
+`PROTO_VERSION` bump and a session-format bump (`ac2-traces` `session::VERSION`).
+
+**Keys** (each ships with its hint-bar tip, key-table row and user-guide row):
+
+| key | scope | does |
+|---|---|---|
+| **Shift+W** | everywhere | *Spatial walk…*: the setup window; with a walk running, focuses its pane |
+| **Shift+W** | walk pane | capture here and go to the next point |
+| **.** / **,** | walk pane | next / previous point (moving there resets, as above) |
+| **Shift+R** | walk pane | redo the current point |
+| **Delete** | walk pane | skip the current point |
+| **G** | setup window | new pattern (new seed) |
+| click / drag | plan view | add / move a vertex or a point |
 
 ## 6. Several mics (G6)
 
-With M mics, each step places all M at once. The pattern's points are grouped into steps of M by
-a nearest-neighbour assignment from each mic's previous point, so cables move as little as
-possible. The operator may re-assign which mic stands where. A step's capture takes every mic's
-trace in the same block (live transfers: one `trace.capture` per measurement on the same request;
-sweeps: one sweep play recorded on every mic input, §8).
+With M mics each step places all M. Points are grouped into steps of M by a nearest-neighbour
+assignment from each mic's previous point, so cables move as little as possible; the operator may
+swap which mic stands where. One `walk.capture` captures all M (§5).
 
-## 7. Simulation (`ac2-room` feature `sim`, a later stage) (G7)
+## 7. Simulation (`ac2-roomsim`, stage 4) (G7)
 
-Geometric acoustics on the prism: **image sources** for the early reflections (up to order 3–4),
-**ray tracing** (stochastic, energy-based, per octave band) for the late tail.
+Geometric acoustics on the prism, per octave band: **image sources** for early reflections (to
+order 3–4), with a visibility test per image (Borish 1984), since an L-shaped or concave outline
+hides some images; **stochastic ray tracing** with scattering (Lambert) for the late tail; air
+absorption after ISO 9613-1, which dominates T at 2–8 kHz in large halls.
 
-What it can claim, and what it must refuse:
-- **Valid only above the Schroeder frequency** `f_S ≈ 2000·√(T/V)` and where surfaces are large
-  compared with the wavelength. Below `f_S` the room is modal and geometric acoustics is wrong, so
-  results below it are not drawn. The plot says *simulation not valid below 180 Hz (Schroeder)*,
-  in the faint-shade style of other validity hints.
-- **Absorption is unknown on site.** Materials come from a small built-in table (concrete, glass,
-  plaster, wood, curtain, audience) per octave band. The simulation can be **fitted**: scale the
-  absorption per band so the simulated T20 at the walk's positions matches the measured T20
-  (room-metrics). The fitted result says it was fitted and how far the fit misses. An unfitted
-  result says *absorption assumed*.
-- **Output** is always labelled *simulated*, is never a trace that a math channel averages with
-  measurements, and is never shown in a measurement's colour. Uses: predicted early-reflection
-  arrivals at a point overlaid on the measured ETC (which wall is that 7 ms reflection?), and a
-  direct-plus-early-energy map over the zones for a speaker marker. Speaker directivity starts as
-  omnidirectional, stated on the map; directivity data (a polar table import) comes later.
-
-The simulator runs in `ac2d` on a worker thread outside the audio path, with a time budget and a
-progress report. A plan change cancels a run.
+What it can claim, and what it refuses:
+- **Above the Schroeder frequency only,** `f_S ≈ 2000·√(T/V)` Hz. Below it the room is modal and
+  geometric acoustics is wrong; the plot shades that region (faint grey, dashed edge) with
+  *simulation not valid below 180 Hz*.
+- **Absorption is unknown on site.** Materials come from a small built-in table per octave band.
+  The simulation can be **fitted**: one absorption scale per band, chosen so the simulated T20 at
+  the walk's positions matches the measured T20. The simulated T20 is computed by ac2-core's own
+  room-metrics evaluation on the simulated IR, so like is compared with like. One scale per band
+  is identifiable; per-surface absorption is not, so after a fit *which wall* a reflection comes
+  from is geometry and holds, but *how loud* it is stays an assumption, and the overlay says so.
+  An unfitted result says *absorption assumed*.
+- **Output** is labelled *simulated*, is never a math-channel operand, and never takes a
+  measurement's colour. Uses: predicted reflection arrivals at a point over the measured ETC (which
+  wall made that 7 ms reflection), and a direct-plus-early-energy map over the zones per speaker
+  marker. Speakers are omnidirectional at first, stated on the map; directivity tables later.
+- Runs in `ac2d` on a worker thread outside the audio path, with a time budget and progress; a plan
+  change cancels the run. Outdoor plans (no ceiling) are not simulated.
 
 ## 8. One sweep, several mics (G8)
 
-A sweep measurement today has one `input`. Stage 3 makes it `inputs: Vec<InputId>` (one
-reference): one play records every listed input, giving one run per input, each its own trace
-under the measurement. Every input's own calibration and mic curve apply (a mic curve in use on an input applies to
-every measurement on it). The walk's sweep kind with M mics needs this. A wire and
-session-format change.
+`SweepConfig::measurement_input: u16` becomes `measurement_inputs: Vec<u16>` (one reference). One
+play records every listed input; the run path (`ac2d/src/control/sweeps.rs`) reads the reference
+plus each input, and each input's run is its own trace under the measurement, with
+`TraceSource::Sweep` naming its input. Each input's calibration and mic curve apply (a mic curve
+in use on an input applies to every measurement on it). Wire and session-format change.
 
 ## 9. Not offered
 
-- Arbitrary 3D geometry (sloped ceilings, balconies as solids, imported CAD). The prism is stage 4
-  at the earliest; a sloped ceiling is the first extension if the operator asks.
-- Wave-based simulation (FEM/BEM) for the modal range.
-- Choosing positions from measurements (adaptive sampling). The pattern is suggested before
-  measuring and the operator moves points.
+- 3D geometry beyond the prism: sloped ceilings, balcony soffits as surfaces, imported CAD. A
+  sloped ceiling is the first extension if asked.
+- Wave-based simulation (FEM/BEM) of the modal range.
+- Adaptive positions chosen from measurements.
 
 ## 10. Spread across positions (G9)
 
-With ≥ 3 captured positions, the average's plot can show the **spread per column**: the standard
-deviation of the positions' levels in dB, drawn as a faint band around the average (gentle plot
-hint style, toggle). It shows where the positions agree, which is where EQ helps every seat, and
-where they scatter, where EQ helps only some seats. With fewer than 3 positions the band is not
-drawn and the legend says *spread: too few positions*. The spread uses the same operands and
-columns as the average (left-out operands do not count).
+With ≥ 3 captured positions, the average's plot can show the **range across positions** per
+column, as a faint band (gentle plot hint style, toggle): below 6 positions the min–max envelope
+of the positions' levels in dB; from 6 on, the 10th–90th percentile. The legend says which
+(*range of 4 positions* / *10–90 % of 8 positions*). An envelope needs no centre, so it does not
+pretend to be spread around the power average. A column is left out of the band where any
+operand is below its coherence floor (the band would show noise, not seats). It shows where seats
+agree (EQ helps all of them) and where they scatter (EQ helps some). With fewer than 3 positions
+there is no band and the legend says *range: too few positions*.
+
+## 11. Room parameters over a walk (G10)
+
+A sweep walk gives ISO 3382-1 what it asks for: T20, EDT, C80 and D50 per band averaged over the
+positions (arithmetic mean per band, with the range), shown in the room-metrics table as *mean
+of 8 positions*. Stage 3.
 
 ## Stages
 
-1. **G1** Spatial average chooser row (UI only, no wire change).
-2. **`ac2-room` 0.1** (new repository): plan, validation, zones, markers, patterns, with tests.
-   **G3–G5** in ac2: plan library, plan editor, walk with one mic and live transfer.
-   PROTO and session-format bump.
-3. **G6, G8, G9**: several mics, multi-input sweeps, sweep walks, the spread band.
-4. **G7** `ac2-room` feature `sim`: image sources and ray tracing, T20 fit, reflection overlay,
+1. **G1** Spatial average chooser row (UI only).
+2. **G2–G5**: `crates/ac2-room` (plans, validation, presets, patterns), plan library and editor,
+   walk pane with one mic and live transfer, `TfMeta.filled`, reset on move. PROTO + session bump.
+3. **G6, G8, G9, G10**: several mics, multi-input sweeps, sweep walks, the range band, room
+   parameters over a walk.
+4. **G7**: `ac2-roomsim` repository; image sources, ray tracing, T20 fit, reflection overlay,
    coverage map.
 
 ## Tests
 
-- `ac2-room`: polygon validation (self-intersection, orientation, degenerate edges); pattern
-  determinism per seed; every rule holds on the suggested points, or the relaxation is reported;
-  a symmetric rectangle gets no mirrored pair; L-shapes and concave polygons keep every point
-  inside; rule relaxation order. `sim`: image sources in a shoebox against the analytic image
-  lattice; ray-traced T for a shoebox against Sabine/Eyring within a stated tolerance; energy
-  conservation for zero absorption.
-- `ac2d`: a walk over the fake backend: captures carry positions; redo removes a trace from the
-  average and keeps it stored; the math operand expands to the walk's captures; a session
-  round-trip keeps the walk and the plan.
-- `ac2-scene`: step text, coordinates from the anchor, relaxed-rule notices, *NO AVERAGE · 1 OF 8
-  POSITIONS*, the dimmed chooser row and its reason.
-- `ac2-ui`: an end-to-end walk from an empty daemon (fake backend), per the UX rule.
+- `ac2-room`: polygon validation (self-intersection, orientation, degenerate edges, outdoor plan);
+  determinism per seed; every rule holds on the suggestion or `relaxed` names it; a symmetric
+  rectangle with a centred speaker gets no mirrored pair; concave and L-shaped zones keep every
+  point inside; weights split `n` as stated; the relaxation order.
+- `ac2d` (fake backend): moving to a point resets each walk measurement and refinds its delay;
+  `filled` rises 0 → 1 over the slowest stage's time after a reset; captures carry positions;
+  redo supersedes and the average drops the old trace; the average appears at the second capture;
+  a walk's measurements and traces cannot be deleted; session round-trip keeps walk and plan.
+- `ac2-scene`: step text and readout from FOH, *settling · 60 %*, relaxed-rule notices,
+  *NO AVERAGE · 1 OF 8 POSITIONS*, the dimmed chooser row and its reason, range-band legend.
+- `ac2-ui`: an end-to-end walk from an empty daemon (fake backend).
+- `ac2-roomsim` (its own repository): image sources in a shoebox against the analytic image
+  lattice; visibility in an L-shape against hand-placed cases; T with diffuse reflections and
+  uniform absorption against Eyring within 5 %; air absorption against ISO 9613-1 tables.
 
-## Open (for the operator)
+## Decided
 
-1. Creating the `ac2-room` repository on GitHub and publishing it to crates.io: yes, under
-   `mkovero`?
-2. The anchor's coordinates: left/right and back from FOH facing the stage, as proposed, or plan
-   x/y always?
-3. Seat cluster's default radius (0.3 m) and whether it should be offered at all in stage 2.
+- 2026-10-28 operator: positions read in metres from FOH facing the stage; pixels stay in the
+  plan view.
+- 2026-10-28 operator: a separate repository for the room work. Its scope here is the simulator
+  (`ac2-roomsim`); the plan and pattern code is in-tree, because ac2's wire owns the plan types.
