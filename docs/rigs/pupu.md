@@ -108,6 +108,7 @@ Last few only; `git log` and `STATUS.md` have the rest. All three hosts unless n
 
 | ac2 | date | proto / session fmt | notable |
 |---|---|---|---|
+| 4011839b | 2026-10-28 | 72 / 36 | app only, ketunkolo and both kiosks: SPL panes on screen share one Leq column scale (union of their ranges; Settings › Display › Leq scale turns it off) — FOH SPL (LAFmax limit 115) beside SPL 2 (105) had read 50…120 vs 50…110. Daemons stay on fd502695 |
 | c2f3ac78 | 2026-10-27 | 72 / 36 | app only, ketunkolo and both kiosks: multi-rig stage 1d — a pane's list offers every connected rig's measurements and meters under rig headings, a pick pins the pane to that rig (`kettu · …`), ui.toml keeps the pin by rig id and finds the rig again at any address. Daemons stay on fd502695 |
 | 85d90436 | 2026-10-27 | 72 / 36 | app only, ketunkolo and both kiosks: input meters follow each rig through a switch (adding a second rig froze the meters of both: `Meters` went to the rig shown before). pupu rebooted once into a test kernel by another session; user units fixed after it (`ff400-boot.service`, ac2d ordering, see above). Daemons stay on fd502695 |
 | d2210d95 | 2026-10-27 | 72 / 36 | app only, ketunkolo and both kiosks (CM4 192.168.9.35, netboot Pi 4): multi-rig stage 1c — the app holds many rigs: a rig drop-down in the top bar (switch, *Connect a rig…*, close; also *Rigs…* in Ctrl+K), rigs remembered in ui.toml and reconnected at start, panes of another rig titled with its name, Shift+Esc stops every rig's stimulus. Both kiosks said hello to pupu. Daemons stay on fd502695 |
