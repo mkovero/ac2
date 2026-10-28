@@ -108,6 +108,7 @@ Last few only; `git log` and `STATUS.md` have the rest. All three hosts unless n
 
 | ac2 | date | proto / session fmt | notable |
 |---|---|---|---|
+| 2cc15360 | 2026-10-28 | 72 / 36 | app only, ketunkolo and both kiosks: a measurement row whose own layout has several panes brings them all out of W (one pane alone); before, only the focused pane showed until a split cleared W (SPL 2 report). Daemons stay on fd502695 |
 | 4011839b | 2026-10-28 | 72 / 36 | app only, ketunkolo and both kiosks: SPL panes on screen share one Leq column scale (union of their ranges; Settings › Display › Leq scale turns it off) — FOH SPL (LAFmax limit 115) beside SPL 2 (105) had read 50…120 vs 50…110. Daemons stay on fd502695 |
 | c2f3ac78 | 2026-10-27 | 72 / 36 | app only, ketunkolo and both kiosks: multi-rig stage 1d — a pane's list offers every connected rig's measurements and meters under rig headings, a pick pins the pane to that rig (`kettu · …`), ui.toml keeps the pin by rig id and finds the rig again at any address. Daemons stay on fd502695 |
 | 85d90436 | 2026-10-27 | 72 / 36 | app only, ketunkolo and both kiosks: input meters follow each rig through a switch (adding a second rig froze the meters of both: `Meters` went to the rig shown before). pupu rebooted once into a test kernel by another session; user units fixed after it (`ff400-boot.service`, ac2d ordering, see above). Daemons stay on fd502695 |
