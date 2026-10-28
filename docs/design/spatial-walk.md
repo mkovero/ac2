@@ -115,7 +115,7 @@ Deterministic for a seed; the walk setup's reshuffle makes a new seed.
 
 - **Why no mirrored pairs:** in a room symmetric about an axis through the speakers, two positions
   mirrored across it see the same modes and reflections, so the second adds nothing to the average.
-  A position on the axis is fine. The test is pairs: no two points within 0.3 m of each other's
+  A position on the axis is fine. The test is pairs: no two points within half the spacing (1 m at the default 2 m) of each other's
   mirror image, for each mirror axis the outline and speaker markers share.
 - **The floor** is kept at the distance by ear height. A balcony soffit over a zone cannot be
   represented in a prism (§9); the setup says so when a zone lies under a higher one.

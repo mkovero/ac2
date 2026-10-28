@@ -1,7 +1,7 @@
 use ac2_proto::model::{MarkerKind, PlanSpec};
 use ac2_room::pattern::{
     Broken, Preset, PresetError, PresetKind, Relaxed, SuggestError, Suggestion, breaks,
-    min_spacing, mirrored_pairs, quotas, suggest,
+    min_spacing, mirror_within, mirrored_pairs, quotas, suggest,
 };
 use ac2_room::plan::{contains, mirror_axes, wall_distance};
 
@@ -60,7 +60,11 @@ fn assert_rules_or_relaxed(plan: &PlanSpec, preset: &Preset, s: &Suggestion) {
         }
     }
     let pairs = if preset.no_mirrored_pairs {
-        mirrored_pairs(&s.points, &mirror_axes(plan))
+        mirrored_pairs(
+            &s.points,
+            &mirror_axes(plan),
+            mirror_within(min_spacing(&s.points).min(preset.spacing)),
+        )
     } else {
         0
     };
@@ -161,7 +165,11 @@ fn a_symmetric_rectangle_with_a_centred_speaker_gets_no_mirrored_pair() {
     for n in [2, 4, 6, 8] {
         for seed in 0..10 {
             let s = suggest(&p, &[0], n, &t, seed).unwrap();
-            assert_eq!(mirrored_pairs(&s.points, &axes), 0, "n {n} seed {seed}");
+            assert_eq!(
+                mirrored_pairs(&s.points, &axes, mirror_within(2.0)),
+                0,
+                "n {n} seed {seed}"
+            );
             assert!(s.relaxed.is_empty(), "n {n} seed {seed}: {:?}", s.relaxed);
         }
     }
@@ -172,7 +180,7 @@ fn a_symmetric_rectangle_with_a_centred_speaker_gets_no_mirrored_pair() {
     };
     let any = (0..10).any(|seed| {
         let s = suggest(&p, &[0], 8, &free, seed).unwrap();
-        mirrored_pairs(&s.points, &axes) > 0
+        mirrored_pairs(&s.points, &axes, mirror_within(2.0)) > 0
     });
     assert!(any, "the test room never produces a mirrored pair");
 }
@@ -259,7 +267,14 @@ fn spacing_is_relaxed_before_wall_distance() {
     p.zones = vec![zone("Room", rect(0.0, 0.0, 10.0, 10.0))];
     let t = Preset::tuning();
     let s = suggest(&p, &[0], 40, &t, 1).unwrap();
-    assert_eq!(s.relaxed.len(), 1, "{:?}", s.relaxed);
+    // Packed this tight, mirrored pairs cannot all be avoided; they are named last.
+    assert!(
+        s.relaxed[1..]
+            .iter()
+            .all(|r| matches!(r, Relaxed::MirroredPairs { .. })),
+        "{:?}",
+        s.relaxed
+    );
     let Relaxed::Spacing { got, wanted, n } = s.relaxed[0] else {
         panic!("{:?}", s.relaxed);
     };
@@ -291,7 +306,15 @@ fn wall_distance_is_relaxed_where_a_zone_has_no_room() {
             Relaxed::MirroredPairs { .. } => "mirror",
         })
         .collect();
-    assert_eq!(kinds, vec!["spacing", "wall"], "the order is fixed");
+    // Thirty positions along a corridor cannot all avoid mirror images; those come last.
+    let rules: Vec<&str> = kinds.iter().copied().filter(|k| *k != "mirror").collect();
+    assert_eq!(rules, vec!["spacing", "wall"], "the order is fixed");
+    assert!(
+        kinds
+            .iter()
+            .skip_while(|k| **k != "mirror")
+            .all(|k| *k == "mirror")
+    );
     let Relaxed::WallDistance { got, .. } = &s.relaxed[1] else {
         unreachable!()
     };

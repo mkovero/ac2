@@ -12,8 +12,12 @@ use crate::rng::SplitMix64;
 /// Speed of sound for the ISO 3382-1 source distance, m/s (20 °C).
 pub const SPEED_OF_SOUND: f64 = 343.0;
 
-/// Two points closer than this to each other's mirror image are a mirrored pair, metres.
-pub const MIRROR_PAIR: f64 = 0.3;
+/// How near two positions may come to each other's mirror image: half the spacing. Spacing is
+/// chosen so positions differ in the low-frequency field; a pair nearer than half of it to
+/// mirror images samples the same modes up to that frequency, so it counts as one position.
+pub fn mirror_within(spacing: f64) -> f64 {
+    spacing / 2.0
+}
 
 /// Which table column a preset came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -468,7 +472,9 @@ pub fn suggest(
     relaxed.extend(wall_relaxed);
     relaxed.extend(floor_relaxed);
     relaxed.extend(speaker_relaxed);
-    let pairs = mirrored_pairs(&points, &axes);
+    // A relaxed spacing relaxes the mirror test with it: positions packed closer than the
+    // spacing wanted cannot keep half of it from every mirror image.
+    let pairs = mirrored_pairs(&points, &axes, mirror_within(got.min(preset.spacing)));
     if pairs > 0 {
         relaxed.push(Relaxed::MirroredPairs { pairs });
     }
@@ -486,15 +492,15 @@ pub fn min_spacing(points: &[Position]) -> f64 {
     best
 }
 
-/// How many pairs of positions lie within [`MIRROR_PAIR`] of each other's mirror image across
-/// one of `axes`.
-pub fn mirrored_pairs(points: &[Position], axes: &[Axis]) -> usize {
+/// How many pairs of positions lie within `within` (see [`mirror_within`]) of each other's
+/// mirror image across one of `axes`.
+pub fn mirrored_pairs(points: &[Position], axes: &[Axis], within: f64) -> usize {
     let mut count = 0;
     for (i, a) in points.iter().enumerate() {
         for b in &points[i + 1..] {
             if axes
                 .iter()
-                .any(|ax| mirrored(ax, plan_xy(a.at), plan_xy(b.at)))
+                .any(|ax| mirrored(ax, plan_xy(a.at), plan_xy(b.at), within))
             {
                 count += 1;
             }
@@ -511,8 +517,8 @@ fn dist3(a: [f64; 3], b: [f64; 3]) -> f64 {
     ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
 }
 
-fn mirrored(axis: &Axis, a: P, b: P) -> bool {
-    geom::dist(axis.reflect(a), b) < MIRROR_PAIR
+fn mirrored(axis: &Axis, a: P, b: P, within: f64) -> bool {
+    geom::dist(axis.reflect(a), b) < within
 }
 
 /// Distance from plan point `p` at `ear_height` to the nearest speaker; infinite with none.
@@ -681,10 +687,12 @@ fn nudge(points: &mut [Position], valid: &[Vec<P>], spacing: f64, axes: &[Axis])
         r
     };
     let mirror_free = |points: &[Position], i: usize, p: P| {
-        points
-            .iter()
-            .enumerate()
-            .all(|(j, o)| j == i || axes.iter().all(|ax| !mirrored(ax, p, plan_xy(o.at))))
+        points.iter().enumerate().all(|(j, o)| {
+            j == i
+                || axes
+                    .iter()
+                    .all(|ax| !mirrored(ax, p, plan_xy(o.at), mirror_within(spacing)))
+        })
     };
     // Mirror-free beats mirrored; then more room; equal scores within a micrometre tie.
     let better =
@@ -858,7 +866,10 @@ pub fn breaks(plan: &PlanSpec, points: &[[f64; 3]], preset: &Preset) -> Vec<Vec<
                 .iter()
                 .enumerate()
                 .filter(|(j, _)| *j != i)
-                .find(|(_, q)| axes.iter().any(|ax| mirrored(ax, xy, plan_xy(**q))))
+                .find(|(_, q)| {
+                    axes.iter()
+                        .any(|ax| mirrored(ax, xy, plan_xy(**q), mirror_within(preset.spacing)))
+                })
                 .map(|(j, _)| j)
             {
                 out.push(Broken::Mirrored { other });
