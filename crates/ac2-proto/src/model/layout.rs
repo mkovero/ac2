@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::units::{MeasId, RigId};
+use crate::units::{MeasId, RigId, WalkId};
 
 /// The pane tree: a leaf is a pane, a split shares its rectangle between two subtrees.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -54,6 +54,8 @@ pub enum PaneContent {
     Inputs { inputs: Vec<u16> },
     /// A stereo pair: its two bars, correlation and goniometer.
     Pair { left: u16, right: u16 },
+    /// A spatial walk: its plan, points and step (a Walk pane's only content).
+    Walk { walk: WalkId },
 }
 
 impl PaneContent {
@@ -72,7 +74,7 @@ impl PaneContent {
     /// The inputs a Programme pane with this content meters, left to right.
     pub fn inputs(&self) -> Vec<u16> {
         match self {
-            Self::Meas { .. } => Vec::new(),
+            Self::Meas { .. } | Self::Walk { .. } => Vec::new(),
             Self::Inputs { inputs } => inputs.clone(),
             Self::Pair { left, right } => vec![*left, *right],
         }
@@ -82,7 +84,7 @@ impl PaneContent {
     /// [`Self::MAX_INPUTS`], one named twice, or a pair of one input.
     pub fn check(&self) -> Result<(), String> {
         match self {
-            Self::Meas { .. } => Ok(()),
+            Self::Meas { .. } | Self::Walk { .. } => Ok(()),
             Self::Inputs { inputs } if inputs.is_empty() => {
                 Err("a Programme pane names at least one input".into())
             }
@@ -268,6 +270,8 @@ pub enum PaneKind {
     Distortion,
     /// Programme meters of inputs or a stereo pair: PPM bars, correlation, goniometer.
     Programme,
+    /// A spatial walk: the plan, the current point and its readout, the step.
+    Walk,
 }
 
 /// The transfer pane's views.
@@ -368,7 +372,8 @@ impl PaneLayout {
     /// and 1 leaves one side no room, more than [`Self::MAX_PANES`] panes, a level range
     /// not finite with its top above its bottom (no axis can be drawn on it), and a plate
     /// placed outside 0 … 1 or with a text scale not finite and above 0, a Programme pane
-    /// without inputs (or another kind with them), content [`PaneContent::check`]
+    /// without inputs (or another kind with them), a Walk pane without its walk (or another
+    /// kind with one), content [`PaneContent::check`]
     /// refuses, a pane following the active tab ([`RigRef::Active`]: a layout is one
     /// daemon's, the active tab at load may be another's) and another rig's pane without
     /// content (this layout's own measurement is no other rig's).
@@ -396,8 +401,16 @@ impl PaneLayout {
         }
         for p in self.panes() {
             match (p.kind, &p.content) {
-                (PaneKind::Programme, None | Some(PaneContent::Meas { .. })) => {
+                (
+                    PaneKind::Programme,
+                    None | Some(PaneContent::Meas { .. } | PaneContent::Walk { .. }),
+                ) => {
                     return Err("a Programme pane names the inputs or the pair it meters".into());
+                }
+                (PaneKind::Walk, Some(PaneContent::Walk { .. })) => {}
+                (PaneKind::Walk, _) => return Err("a Walk pane names its walk".into()),
+                (_, Some(PaneContent::Walk { .. })) => {
+                    return Err("only a Walk pane shows a walk".into());
                 }
                 (
                     PaneKind::Transfer | PaneKind::Spectrum | PaneKind::Spl | PaneKind::Distortion,
@@ -493,6 +506,21 @@ mod tests {
         let p = PaneContent::Pair { left: 2, right: 3 };
         assert_eq!(p.inputs(), vec![2, 3]);
         assert_eq!(p.meas(), None);
+    }
+
+    #[test]
+    fn a_walk_pane_names_its_walk() {
+        let mut l = crate::samples::pane_layout();
+        l.panes_mut()[0].kind = PaneKind::Walk;
+        assert_eq!(l.check(), Err("a Walk pane names its walk".into()));
+        l.panes_mut()[0].content = Some(PaneContent::Meas { meas: MeasId(1) });
+        assert_eq!(l.check(), Err("a Walk pane names its walk".into()));
+        l.panes_mut()[0].content = Some(PaneContent::Walk { walk: WalkId(2) });
+        assert_eq!(l.check(), Ok(()));
+        l.panes_mut()[0].kind = PaneKind::Transfer;
+        assert_eq!(l.check(), Err("only a Walk pane shows a walk".into()));
+        assert_eq!(PaneContent::Walk { walk: WalkId(2) }.meas(), None);
+        assert!(PaneContent::Walk { walk: WalkId(2) }.inputs().is_empty());
     }
 
     #[test]

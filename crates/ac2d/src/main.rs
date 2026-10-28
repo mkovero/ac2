@@ -73,6 +73,10 @@ struct Args {
     /// ~/.config/ac2 on Linux); an unreadable file is never overwritten.
     #[arg(long, value_name = "PATH")]
     cal_store: Option<PathBuf>,
+    /// The plan library: one room plan per <name>.json (default: plans in the ac2 data
+    /// directory, ~/.local/share/ac2 on Linux).
+    #[arg(long, value_name = "DIR")]
+    plans: Option<PathBuf>,
     /// Where measurements and traces are autosaved (default: autosave in the ac2 data
     /// directory, ~/.local/share/ac2 on Linux); the previous manifest is kept as
     /// <DIR>/session.prev.json.
@@ -158,6 +162,7 @@ fn main() -> ExitCode {
     config.systemd_notify = true;
     config.advertise = advertise;
     config.cal_store = Some(args.cal_store.clone().unwrap_or_else(ac2_paths::cal_store));
+    config.plan_dir = Some(args.plans.clone().unwrap_or_else(ac2_paths::plan_dir));
     config.rig_settings = Some(
         args.settings
             .clone()

@@ -10,12 +10,12 @@ use crate::model::{
     CorrelationWindow, DelayPick, DelayReference, DeviceId, DmxSet, ElectricalConnection,
     ExportFormat, FinderBand, GeneratorDesired, ImportFormat, ImportRole, InputSetup, IrImport,
     MeasConfig, MicCurveId, MicLoading, OscMessage, OutputSetup, OwnedTraces, Pair, PaneLayout,
-    PreviewInput, RecordRequest, RecordingRef, ReplayPace, SessionConfig, SessionRef, SplLogWhich,
-    TargetCurve, TraceEdit, TraceOwner,
+    PlanSpec, PreviewInput, RecordRequest, RecordingRef, ReplayPace, SessionConfig, SessionRef,
+    SplLogWhich, TargetCurve, TraceEdit, TraceOwner, WalkKind, WalkPointSpec,
 };
 use crate::units::{
     Blob, Db, DbSpl, Dbfs, Dbtp, Hz, LeaseToken, Lufs, MeasId, MvPerPa, Rev, Seconds, TraceId,
-    TransferId, Volts,
+    TransferId, Volts, WalkId,
 };
 
 /// Every command. Wire: `{"op": "<group>.<name>", "args": {…}}`; `args` is absent for
@@ -779,6 +779,99 @@ pub enum Command {
         saved_as: Option<String>,
     },
 
+    // -- plan ---------------------------------------------------------------------------
+    /// Save a room plan to the plan library (`plans/<name>.json` in the daemon's data
+    /// directory), replacing the one of that name. Refused with the reason when the plan
+    /// does not validate (*edge 3 crosses edge 6*); the name is a file name (letters,
+    /// digits, ` `, `-`, `_`, `.`, not starting with `.`). Walks keep the session's copies.
+    #[serde(rename = "plan.save")]
+    PlanSave {
+        /// The plan.
+        plan: PlanSpec,
+    },
+    /// The plan library.
+    #[serde(rename = "plan.list")]
+    PlanList,
+    /// Delete a plan from the library; the session's copies (its walks' plans) stay.
+    #[serde(rename = "plan.delete")]
+    PlanDelete {
+        /// Plan name.
+        name: String,
+    },
+
+    // -- walk ---------------------------------------------------------------------------
+    /// Start a spatial walk through `points` of plan `plan` (the session's copy when it holds
+    /// one, else the library's, copied into the session). `meas` are the transfer
+    /// measurements that capture at each point, one per mic (one in this version). The walk
+    /// goes to its first point: every walk measurement's averages are reset and its delay
+    /// tracking turned on.
+    #[serde(rename = "walk.new")]
+    WalkNew {
+        /// Walk name.
+        name: String,
+        /// Plan name.
+        plan: String,
+        /// What a capture is.
+        kind: WalkKind,
+        /// The measurements capturing at each point.
+        meas: Vec<MeasId>,
+        /// The points, in walking order (at most [`crate::model::WalkState::MAX_POINTS`]).
+        points: Vec<WalkPointSpec>,
+    },
+    /// Rename a walk and edit its points, matched by label: a point kept keeps its state,
+    /// a new one is pending. A captured point keeps its place and cannot be removed (skip
+    /// or redo it first).
+    #[serde(rename = "walk.update")]
+    WalkUpdate {
+        /// The walk.
+        walk: WalkId,
+        /// New name.
+        name: String,
+        /// The points, in walking order.
+        points: Vec<WalkPointSpec>,
+    },
+    /// Go to point `point` (moving the mic restarts the walk's measurements).
+    #[serde(rename = "walk.goto")]
+    WalkGoto {
+        /// The walk.
+        walk: WalkId,
+        /// Point index.
+        point: u16,
+    },
+    /// Capture every walk measurement at the current point in one step, each trace named
+    /// *<point> · <mic>* and carrying its position, and go to the next pending point. Before
+    /// the measurement is ready (averages full, no delay move since they restarted, no
+    /// arrival to pick, no fault) the trace records `captured_unsettled`. The walk's average
+    /// is made at the second capture and follows every capture, redo and skip.
+    #[serde(rename = "walk.capture")]
+    WalkCapture {
+        /// The walk.
+        walk: WalkId,
+    },
+    /// Skip the current point (a captured one's traces become superseded, out of the
+    /// average) and go to the next pending point.
+    #[serde(rename = "walk.skip")]
+    WalkSkip {
+        /// The walk.
+        walk: WalkId,
+    },
+    /// Redo point `point`: its captures become superseded (kept, out of the average), it is
+    /// pending again, and the walk goes there.
+    #[serde(rename = "walk.redo")]
+    WalkRedo {
+        /// The walk.
+        walk: WalkId,
+        /// Point index.
+        point: u16,
+    },
+    /// Delete a walk. Its traces and its average stay, as ordinary traces and an ordinary
+    /// average of them.
+    #[serde(rename = "walk.delete")]
+    WalkDelete {
+        /// The walk.
+        walk: WalkId,
+    },
+
     // -- rec ----------------------------------------------------------------------------
     /// Record inputs of the open session to a raw capture file (f32 WAV / RF64 and a JSON
     /// sidecar) in the daemon's recording directory. One recording at a time; the reply is
@@ -918,6 +1011,16 @@ impl Command {
             Self::ServerInfo => "server.info",
             Self::ServerAuthorize { .. } => "server.authorize",
             Self::ServerRevoke { .. } => "server.revoke",
+            Self::PlanSave { .. } => "plan.save",
+            Self::PlanList => "plan.list",
+            Self::PlanDelete { .. } => "plan.delete",
+            Self::WalkNew { .. } => "walk.new",
+            Self::WalkUpdate { .. } => "walk.update",
+            Self::WalkGoto { .. } => "walk.goto",
+            Self::WalkCapture { .. } => "walk.capture",
+            Self::WalkSkip { .. } => "walk.skip",
+            Self::WalkRedo { .. } => "walk.redo",
+            Self::WalkDelete { .. } => "walk.delete",
         }
     }
 
@@ -951,6 +1054,7 @@ impl Command {
                 | Self::FileList
                 | Self::RecList
                 | Self::ServerInfo
+                | Self::PlanList
         )
     }
 

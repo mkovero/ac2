@@ -18,4 +18,6 @@ pub use eq::{eq_edits, eq_measurement};
 pub use events::events;
 pub use frames::{frames, stamp, tf_frame};
 pub use replies::{replies, reply, warnings};
-pub use state::{band_leq_config, recording_run, server_info, spl_config, spl_measurement, state};
+pub use state::{
+    band_leq_config, plan, recording_run, server_info, spl_config, spl_measurement, state, walk,
+};

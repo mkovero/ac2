@@ -155,6 +155,10 @@ impl Control {
                 maths.iter().chain(&eq_maths).copied().collect(),
             ),
         };
+        self.check_walk_meas_delete(meas, &gone_traces)?;
+        for &m in &gone_maths {
+            self.check_walk_meas_delete(m, &[])?;
+        }
         // A math channel that stays must not lose an operand.
         let staying = self.store.state().measurements.iter().filter(|m| {
             m.id != meas

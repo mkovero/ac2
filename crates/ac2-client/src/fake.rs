@@ -232,6 +232,9 @@ pub fn empty_state() -> State {
             recover: None,
         },
         rig: Rig::default(),
+        plans: vec![],
+        walks: vec![],
+        walk_plans: vec![],
     }
 }
 
@@ -639,6 +642,23 @@ impl Shared {
                 return Err(err(
                     ErrorCode::Unsupported,
                     "the fake evaluates no EQ: run ac2d on the fake backend",
+                ));
+            }
+            C::PlanSave { .. }
+            | C::PlanList
+            | C::PlanDelete { .. }
+            | C::WalkNew { .. }
+            | C::WalkUpdate { .. }
+            | C::WalkGoto { .. }
+            | C::WalkCapture { .. }
+            | C::WalkSkip { .. }
+            | C::WalkRedo { .. }
+            | C::WalkDelete { .. } => {
+                // Plans are validated and walks captured by the daemon (ac2-room, its
+                // measurements' averages).
+                return Err(err(
+                    ErrorCode::Unsupported,
+                    "the fake keeps no plans or walks: run ac2d on the fake backend",
                 ));
             }
             C::FileList => self.file_list()?,

@@ -440,6 +440,14 @@ pub struct TraceMeta {
     /// The EQ sets marked "in the console" when it was captured (one per marked set of its
     /// measurement): what of them its columns contain.
     pub eq_in: Vec<super::EqSnapshot>,
+    /// Where it was captured, for a walk's capture.
+    pub position: Option<super::TracePosition>,
+    /// A walk captured it before its measurement was ready (averages not full, the delay
+    /// moved since they restarted, an arrival to pick, or a fault): it still counts in the
+    /// walk's average, and the legend says so.
+    pub captured_unsettled: bool,
+    /// A redone or skipped walk point's capture: kept and listed, out of the walk's average.
+    pub superseded: bool,
 }
 
 /// A session saved by `file.save` (reply to `file.save` / `file.load`, rows of `file.list`).

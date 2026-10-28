@@ -185,6 +185,9 @@ impl Control {
                     mic_curve: None,
                     created_at: WallNs(wall_ns()),
                     eq_in: Vec::new(),
+                    position: None,
+                    captured_unsettled: false,
+                    superseded: false,
                 };
                 self.add_trace(t, grid, columns, None, None, None);
             }

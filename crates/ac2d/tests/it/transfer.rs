@@ -501,7 +501,7 @@ fn transfer_magnitude_delay_timing_and_ir() {
 
 /// Two arrivals 200 samples apart, the earlier 12.3 dB under the later: within 2 dB of the
 /// first-arrival threshold, so the finder leaves the pick to the operator (decision 1c).
-fn two_arrival_rig() -> ac2_audio::FakeBackend {
+pub(crate) fn two_arrival_rig() -> ac2_audio::FakeBackend {
     use ac2_audio::FakeConfig;
     use ac2_audio::fake::{FakeDrive, FakePath};
     let mut fir = vec![0.0; 201];

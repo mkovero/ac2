@@ -229,6 +229,8 @@ pub fn start_embedded_with(
     // simulated rig's stay in memory.
     config.cal_store = (backend != EmbeddedBackend::Fake).then(ac2_paths::cal_store);
     config.rig_settings = (backend != EmbeddedBackend::Fake).then(ac2_paths::rig_settings);
+    // Room plans belong to the machine, as a stand-alone `ac2d`'s do.
+    config.plan_dir = (backend != EmbeddedBackend::Fake).then(ac2_paths::plan_dir);
     // Real audio autosaves like `ac2d`, in a directory of its own so the two never share
     // one; the simulated rig's measurements stay in memory.
     config.autosave = (backend != EmbeddedBackend::Fake).then(|| ac2d::AutosaveConfig {

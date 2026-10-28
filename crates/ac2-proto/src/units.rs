@@ -146,6 +146,10 @@ id_type!(
     TraceId(u32)
 );
 id_type!(
+    /// A spatial walk, unique within the session.
+    WalkId(u32)
+);
+id_type!(
     /// An EQ set of a measurement, unique within the session.
     EqSetId(u32)
 );

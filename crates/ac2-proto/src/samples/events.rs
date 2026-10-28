@@ -90,5 +90,11 @@ pub fn events() -> Vec<Event> {
             73,
             Change::Measurement(Patch::Set(super::eq::eq_prediction())),
         ),
+        ev(80, Change::Plan(Patch::Set(plan()))),
+        ev(81, Change::Plan(Patch::Deleted("Club".into()))),
+        ev(82, Change::Walk(Patch::Set(walk()))),
+        ev(83, Change::Walk(Patch::Deleted(WalkId(2)))),
+        ev(84, Change::WalkPlan(Patch::Set(plan()))),
+        ev(85, Change::WalkPlan(Patch::Deleted("Club".into()))),
     ]
 }

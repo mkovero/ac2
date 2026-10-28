@@ -16,6 +16,10 @@ impl Control {
             self.saved_measurements(),
             self.store.state().traces.clone(),
             self.spl_log_ids(MeasScope::Session),
+            (
+                self.store.state().walks.clone(),
+                self.store.state().walk_plans.clone(),
+            ),
         )
     }
 

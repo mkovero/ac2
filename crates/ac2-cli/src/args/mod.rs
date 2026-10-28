@@ -14,6 +14,7 @@ mod osc;
 mod session;
 mod spl;
 mod trace;
+mod walk;
 
 pub use align::*;
 pub use artnet::*;
@@ -29,6 +30,7 @@ pub use osc::*;
 pub use session::*;
 pub use spl::*;
 pub use trace::*;
+pub use walk::*;
 
 use std::path::PathBuf;
 
@@ -158,6 +160,19 @@ pub enum Cmd {
         /// Action.
         #[command(subcommand)]
         cmd: TraceCmd,
+    },
+    /// Room plans in the daemon's plan library.
+    Plan {
+        /// Action.
+        #[command(subcommand)]
+        cmd: PlanCmd,
+    },
+    /// Spatial walks: one measurement captured at each position of a plan, averaged as it
+    /// goes.
+    Walk {
+        /// Action.
+        #[command(subcommand)]
+        cmd: WalkCmd,
     },
     /// Where the rig sends OSC cues, and a test message.
     Osc {

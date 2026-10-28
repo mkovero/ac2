@@ -291,6 +291,30 @@
   }
  },
  {
+  "kind": "plan",
+  "rev": 81,
+  "payload": {
+   "type": "deleted",
+   "value": "Club"
+  }
+ },
+ {
+  "kind": "walk",
+  "rev": 83,
+  "payload": {
+   "type": "deleted",
+   "value": 2
+  }
+ },
+ {
+  "kind": "walk_plan",
+  "rev": 85,
+  "payload": {
+   "type": "deleted",
+   "value": "Club"
+  }
+ },
+ {
   "kind": "trace",
   "rev": 46,
   "payload": {

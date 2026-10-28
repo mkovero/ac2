@@ -36,7 +36,7 @@ use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use ac2_proto::model::{StateFile, TraceMeta};
+use ac2_proto::model::{PlanSpec, StateFile, TraceMeta, WalkState};
 use ac2_proto::units::MeasId;
 use ac2_traces::session::{
     self, MANIFEST, PREV_MANIFEST, SavedMeasurement, SavedSplLogFile, Session as SessionData,
@@ -61,7 +61,14 @@ pub(crate) const RETRY: Duration = Duration::from_secs(10);
 /// What a write would put in the manifest: trace data never changes without its metadata
 /// being committed again, and an SPL log's file only grows until another log (another id)
 /// replaces it, so equal fingerprints mean equal autosaves.
-pub(crate) type Fingerprint = (Vec<SavedMeasurement>, Vec<TraceMeta>, Vec<(MeasId, u64)>);
+/// What a write holds: the measurements, the traces, the SPL logs' lengths, and the walks
+/// with their plans.
+pub(crate) type Fingerprint = (
+    Vec<SavedMeasurement>,
+    Vec<TraceMeta>,
+    Vec<(MeasId, u64)>,
+    (Vec<WalkState>, Vec<PlanSpec>),
+);
 
 /// `<dir><suffix>` beside `dir`.
 fn sibling(dir: &Path, prefix: &str, suffix: &str) -> PathBuf {

@@ -81,7 +81,7 @@ impl Metered {
     pub fn from_wire(c: &PaneContent) -> Option<Self> {
         c.check().ok()?;
         match c {
-            PaneContent::Meas { .. } => None,
+            PaneContent::Meas { .. } | PaneContent::Walk { .. } => None,
             PaneContent::Inputs { inputs } => Self::inputs_of(inputs),
             PaneContent::Pair { left, right } => Some(Self::Pair {
                 left: *left,

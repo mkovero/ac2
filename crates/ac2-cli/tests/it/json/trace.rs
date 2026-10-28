@@ -65,6 +65,9 @@ async fn trace_commands_json() -> R {
                 "at_sample": 48000
             },
             "eq_in": [],
+            "position": null,
+            "captured_unsettled": false,
+            "superseded": false,
             "grid_id": 0x79ec_3d16_ae0e_94d0u64,
             "delay": 0.01,
             "depth": { "type": "equal_confidence" },

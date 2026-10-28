@@ -146,6 +146,9 @@ pub(super) fn eq_trace_meta() -> TraceMeta {
         cal: CalState::Uncalibrated,
         mic: None,
         eq_in: Vec::new(),
+        position: None,
+        captured_unsettled: false,
+        superseded: false,
         ..trace_meta()
     }
 }

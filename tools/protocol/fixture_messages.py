@@ -756,6 +756,25 @@ def requests():
             },
         ),
         req(86, "levels.reset", {"channels": [0, 1]}),
+        req(88, "plan.list", mutation=False),
+        req(89, "plan.delete", {"name": "Club"}),
+        req(
+            90,
+            "walk.new",
+            {
+                "name": "Mains",
+                "plan": "Hall",
+                "kind": "live_transfer",
+                "meas": [1],
+                "points": [
+                    {"label": "P1", "at": [5.0, 12.0, 1.2]},
+                    {"label": "P2", "at": [12.5, 15.0, 1.2]},
+                ],
+            },
+        ),
+        req(92, "walk.goto", {"walk": 1, "point": 2}),
+        req(93, "walk.capture", {"walk": 1}),
+        req(95, "walk.redo", {"walk": 1, "point": 0}),
     ]
 
 
@@ -764,6 +783,9 @@ def events():
     return [
         {"kind": "measurement", "rev": 43, "payload": {"type": "set", "value": measurement()}},
         {"kind": "measurement", "rev": 44, "payload": {"type": "deleted", "value": 3}},
+        {"kind": "plan", "rev": 81, "payload": {"type": "deleted", "value": "Club"}},
+        {"kind": "walk", "rev": 83, "payload": {"type": "deleted", "value": 2}},
+        {"kind": "walk_plan", "rev": 85, "payload": {"type": "deleted", "value": "Club"}},
         {"kind": "trace", "rev": 46, "payload": {"type": "deleted", "value": 8}},
         {
             "kind": "calibration",

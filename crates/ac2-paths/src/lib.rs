@@ -130,6 +130,11 @@ pub fn app_autosave_dir() -> PathBuf {
     data_dir().join("autosave-app")
 }
 
+/// The daemon's plan library (room plans, `<name>.json` each): `<data>/plans`.
+pub fn plan_dir() -> PathBuf {
+    data_dir().join("plans")
+}
+
 /// The daemon's raw capture files (`<name>.wav` + `<name>.ac2rec.json`):
 /// `<data>/recordings`.
 pub fn recording_dir() -> PathBuf {

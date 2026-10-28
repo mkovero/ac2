@@ -34,6 +34,9 @@ pub struct Preset {
     pub spacing: f64,
     /// Least distance from a wall (outline edge) in plan view, metres.
     pub wall_distance: f64,
+    /// Least distance from the floor, metres: a zone's ear height is its positions' height,
+    /// so a zone below it is reported, not moved. `None`: no limit.
+    pub floor_distance: Option<f64>,
     /// Least distance from every speaker marker, metres, at ear height; `None`: no limit.
     pub speaker_distance: Option<f64>,
     /// No two positions mirrored across a mirror axis of the room and its speakers.
@@ -68,14 +71,17 @@ impl Preset {
             kind: PresetKind::Tuning,
             spacing: 2.0,
             wall_distance: 1.0,
+            floor_distance: None,
             speaker_distance: None,
             no_mirrored_pairs: true,
         }
     }
 
     /// ISO 3382-1: as tuning, plus the source distance `d_min = 2·√(V/(c·T))` (about twice the
-    /// critical distance), so the positions sample the reverberant field. `V` is the prism's
-    /// volume, `reverb_time_s` the reverberation time given or measured.
+    /// critical distance), so the positions sample the reverberant field, and 1 m from every
+    /// reflecting surface, the floor too (a mic nearer a surface sees its reflection as part
+    /// of the direct sound). `V` is the prism's volume, `reverb_time_s` the reverberation
+    /// time given or measured.
     pub fn iso3382(plan: &PlanSpec, reverb_time_s: f64) -> Result<Self, PresetError> {
         let ceiling = plan.ceiling.ok_or(PresetError::Outdoors)?;
         if !(reverb_time_s.is_finite() && reverb_time_s > 0.0) {
@@ -86,6 +92,7 @@ impl Preset {
             kind: PresetKind::Iso3382,
             spacing: 2.0,
             wall_distance: 1.0,
+            floor_distance: Some(1.0),
             speaker_distance: Some(2.0 * (volume / (SPEED_OF_SOUND * reverb_time_s)).sqrt()),
             no_mirrored_pairs: true,
         })
@@ -140,6 +147,15 @@ pub enum Relaxed {
         /// Zone name.
         zone: String,
     },
+    /// A zone's ear height is below the floor distance; its positions stand at `got`.
+    FloorDistance {
+        /// The rule, metres.
+        wanted: f64,
+        /// The zone's ear height, metres.
+        got: f64,
+        /// Zone name.
+        zone: String,
+    },
     /// A zone has no room at the speaker distance; its positions keep `got`.
     SpeakerDistance {
         /// The rule, metres.
@@ -167,6 +183,10 @@ impl fmt::Display for Relaxed {
                 f,
                 "wall distance {got:.1} m: zone {zone} has no room at {wanted:.1} m"
             ),
+            Self::FloorDistance { wanted, got, zone } => write!(
+                f,
+                "floor distance {got:.1} m: the ear height of zone {zone} is under {wanted:.1} m"
+            ),
             Self::SpeakerDistance { wanted, got, zone } => write!(
                 f,
                 "speaker distance {got:.1} m: zone {zone} has no room at {wanted:.1} m"
@@ -181,7 +201,7 @@ impl fmt::Display for Relaxed {
 }
 
 /// Suggested positions and the rules relaxed to place them, in the relaxation order: spacing,
-/// wall distance, speaker distance, mirrored pairs.
+/// wall distance, floor distance, speaker distance, mirrored pairs.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Suggestion {
     /// The positions, zone by zone in the order the zones were given.
@@ -303,7 +323,8 @@ struct Sample {
 /// the wall distance (or to a speaker than the speaker distance) are rejected, so concave
 /// zones need no inward offset. Points breaking spacing or mirrored-pair rules are then
 /// nudged to the nearest sample that keeps them. Rules that still fail are relaxed in order,
-/// spacing first, then wall distance, then speaker distance, and named in `relaxed`.
+/// spacing first, then wall distance, then speaker distance, and named in `relaxed`; a zone
+/// whose ear height is under the floor distance is named too (its height is the operator's).
 ///
 /// ```
 /// use ac2_proto::model::{PlanSpec, ZoneSpec};
@@ -375,6 +396,7 @@ pub fn suggest(
     };
     let mut rng = SplitMix64::new(seed);
     let mut wall_relaxed = Vec::new();
+    let mut floor_relaxed = Vec::new();
     let mut speaker_relaxed = Vec::new();
     // Per picked zone: its valid samples.
     let mut valid: Vec<Vec<P>> = Vec::with_capacity(zones.len());
@@ -388,6 +410,16 @@ pub fn suggest(
             wall_relaxed.push(Relaxed::WallDistance {
                 wanted: preset.wall_distance,
                 got: wall,
+                zone: name.clone(),
+            });
+        }
+        if let Some(wanted) = preset.floor_distance
+            && quota[slot] > 0
+            && zone.ear_height < wanted - geom::EPS
+        {
+            floor_relaxed.push(Relaxed::FloorDistance {
+                wanted,
+                got: zone.ear_height,
                 zone: name.clone(),
             });
         }
@@ -434,6 +466,7 @@ pub fn suggest(
         });
     }
     relaxed.extend(wall_relaxed);
+    relaxed.extend(floor_relaxed);
     relaxed.extend(speaker_relaxed);
     let pairs = mirrored_pairs(&points, &axes);
     if pairs > 0 {

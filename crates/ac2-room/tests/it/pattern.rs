@@ -286,6 +286,7 @@ fn wall_distance_is_relaxed_where_a_zone_has_no_room() {
         .map(|r| match r {
             Relaxed::Spacing { .. } => "spacing",
             Relaxed::WallDistance { .. } => "wall",
+            Relaxed::FloorDistance { .. } => "floor",
             Relaxed::SpeakerDistance { .. } => "speaker",
             Relaxed::MirroredPairs { .. } => "mirror",
         })
@@ -354,4 +355,54 @@ fn bad_requests_are_refused() {
         suggest(&q, &[0], 8, &t, 0),
         Err(SuggestError::Plan(_))
     ));
+}
+
+#[test]
+fn iso3382_keeps_the_floor_distance_or_names_the_zone() {
+    let mut p = hall();
+    p.zones
+        .push(zone("Floor seats", rect(2.0, 20.0, 8.0, 28.0)));
+    p.zones[0].outline = rect(0.0, 6.0, 20.0, 18.0);
+    p.zones[1].ear_height = 0.8;
+    let iso = Preset::iso3382(&p, 1.5).unwrap();
+    assert_eq!(iso.floor_distance, Some(1.0));
+    assert_eq!(Preset::tuning().floor_distance, None);
+    let s = suggest(&p, &[0, 1], 6, &iso, 3).unwrap();
+    let floor: Vec<&Relaxed> = s
+        .relaxed
+        .iter()
+        .filter(|r| matches!(r, Relaxed::FloorDistance { .. }))
+        .collect();
+    assert_eq!(
+        floor,
+        vec![&Relaxed::FloorDistance {
+            wanted: 1.0,
+            got: 0.8,
+            zone: "Floor seats".into()
+        }]
+    );
+    assert_eq!(
+        floor[0].to_string(),
+        "floor distance 0.8 m: the ear height of zone Floor seats is under 1.0 m"
+    );
+    // The points stand at the zone's ear height still.
+    assert!(
+        s.points
+            .iter()
+            .filter(|q| q.zone == 1)
+            .all(|q| q.at[2] == 0.8)
+    );
+    // Tuning has no floor rule; a zone given no positions is not named.
+    let t = suggest(&p, &[0, 1], 6, &Preset::tuning(), 3).unwrap();
+    assert!(
+        !t.relaxed
+            .iter()
+            .any(|r| matches!(r, Relaxed::FloorDistance { .. }))
+    );
+    let s = suggest(&p, &[0], 4, &iso, 3).unwrap();
+    assert!(
+        !s.relaxed
+            .iter()
+            .any(|r| matches!(r, Relaxed::FloorDistance { .. }))
+    );
 }

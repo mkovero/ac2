@@ -13,7 +13,7 @@ use ac2_proto::model::{
     AverageMethod, CalState, DelayReference, ExportFormat, ImportFormat, ImportRole, IrImport,
     MathConfig, MathExpr, MeasKind, Measurement, MicCurveId, MicCurveRef, MicState, NamedOperand,
     Operand, Smoothing, SmoothingMode, SweepData, TargetCurve, TraceEdit, TraceIr, TraceKind,
-    TraceMeta, TraceMicCurve, TraceOwner, TraceSource, TransferIr,
+    TraceMeta, TraceMicCurve, TraceOwner, TracePosition, TraceSource, TransferIr,
 };
 use ac2_proto::units::{Hz, MeasId, Seconds, TraceId, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, FrameData, GridDef, ProtoError, ReplyBody};
@@ -255,6 +255,7 @@ impl Control {
         meas: MeasId,
         name: String,
         slot: Option<u8>,
+        position: Option<TracePosition>,
     ) -> Result<ReplyBody, ProtoError> {
         meta::check_edit(&name, slot).map_err(|e| perr(ErrorCode::Invalid, e))?;
         let m = self.meas(meas)?.clone();
@@ -332,6 +333,7 @@ impl Control {
                 ));
             }
         };
+        let ready = settled(&m, &frame);
         let (cal, mic) = self.cal_and_mic(input);
         // A transfer function is a ratio of two inputs: no calibration applies to it.
         let cal = if kind == TraceKind::Transfer {
@@ -366,6 +368,9 @@ impl Control {
             mic_curve: None,
             created_at: WallNs(wall_ns()),
             eq_in: self.eq_in_live(meas),
+            captured_unsettled: position.is_some() && !ready,
+            position,
+            superseded: false,
         };
         let ir = ir
             .filter(|_| kind == TraceKind::Transfer)
@@ -477,6 +482,9 @@ impl Control {
             mic_curve: None,
             created_at: WallNs(wall_ns()),
             eq_in: self.eq_in_math(config),
+            position: None,
+            captured_unsettled: false,
+            superseded: false,
         };
         tracing::info!("trace {id} captured from math channel {}", m.id);
         Ok(self.add_trace(t, grid, columns, None, None, None))
@@ -525,6 +533,7 @@ impl Control {
             ));
         }
         self.check_trace_operand_delete(id)?;
+        self.check_walk_trace_delete(id)?;
         self.check_eq_trace_delete(id)?;
         self.traces.remove(id);
         let rev = self.commit(Change::Trace(Patch::Deleted(id)));
@@ -574,6 +583,9 @@ impl Control {
             mic_curve: None,
             created_at: WallNs(wall_ns()),
             eq_in: Vec::new(),
+            position: None,
+            captured_unsettled: false,
+            superseded: false,
         };
         Ok(self.add_trace(t, d.grid, d.columns, None, None, None))
     }
@@ -643,6 +655,9 @@ impl Control {
             mic_curve: None,
             created_at: WallNs(wall_ns()),
             eq_in: Vec::new(),
+            position: None,
+            captured_unsettled: false,
+            superseded: false,
         };
         tracing::info!("trace {id} imported ({} rows)", imp.rows);
         Ok(self.add_trace(t, imp.grid, imp.columns, imp.sweep, imp.ir, None))
@@ -674,6 +689,9 @@ impl Control {
             mic_curve: None,
             created_at: WallNs(wall_ns()),
             eq_in: Vec::new(),
+            position: None,
+            captured_unsettled: false,
+            superseded: false,
         };
         tracing::info!("trace {id}: target curve generated ({curve:?})");
         Ok(self.add_trace(t, grid, columns, None, None, None))
@@ -801,4 +819,17 @@ fn after_capture(
         }),
         k,
     )
+}
+
+/// Whether `frame` of `m` is a settled average: every stage full, no fault refusing its
+/// blocks, the delay unchanged since the averages restarted (a frame of an older config rev
+/// was averaged at another arrival) and no ambiguous arrival waiting for the operator's pick.
+fn settled(m: &Measurement, frame: &Frame) -> bool {
+    let FrameData::Tf(f) = &frame.data else {
+        return false;
+    };
+    f.meta.filled >= 1.0
+        && frame.stamp.protection.0 & OperandStatus::REFUSING.0 == 0
+        && frame.stamp.config_rev == m.config_rev
+        && !m.delay.as_ref().is_some_and(|d| d.awaiting_pick)
 }

@@ -75,6 +75,9 @@ impl Store {
                     recover: None,
                 },
                 rig: Rig::default(),
+                plans: Vec::new(),
+                walks: Vec::new(),
+                walk_plans: Vec::new(),
             },
             rev: Rev(0),
             replay: VecDeque::new(),
@@ -89,6 +92,12 @@ impl Store {
         self.state.mics = c.mics;
         self.state.inputs = c.inputs;
         self.state.pairs = c.pairs;
+        self
+    }
+
+    /// The initial state carries the plan library (rev 0, no events).
+    pub(crate) fn with_plans(mut self, plans: Vec<ac2_proto::model::PlanSpec>) -> Self {
+        self.state.plans = plans;
         self
     }
 
@@ -210,6 +219,9 @@ pub(crate) fn apply(s: &mut State, c: &Change) {
         Change::Recording(r) => s.recording = Some(r.clone()),
         Change::Working(w) => s.working = w.clone(),
         Change::Rig(r) => s.rig = r.clone(),
+        Change::Plan(p) => upsert(&mut s.plans, p, |p| p.name.clone()),
+        Change::Walk(p) => upsert(&mut s.walks, p, |w| w.id),
+        Change::WalkPlan(p) => upsert(&mut s.walk_plans, p, |p| p.name.clone()),
     }
 }
 

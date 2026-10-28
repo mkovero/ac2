@@ -263,6 +263,9 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
         })),
         Ok(ReplyBody::Recording(recording_run())),
         Ok(ReplyBody::Recordings(vec![recording_file()])),
+        Ok(ReplyBody::Plan(plan())),
+        Ok(ReplyBody::Plans(vec![plan()])),
+        Ok(ReplyBody::Walk(walk())),
         Ok(ReplyBody::Outputs(outputs())),
         Ok(ReplyBody::Server(server_info())),
         Ok(ReplyBody::Server(ServerInfo {

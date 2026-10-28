@@ -4,7 +4,9 @@
 use std::time::Instant;
 
 use ac2_proto::event::{Change, Patch};
-use ac2_proto::model::{ColourFamily, DelayState, GenAction, MeasKind, Measurement, SweepFailure};
+use ac2_proto::model::{
+    ColourFamily, DelayState, GenAction, MeasConfig, MeasKind, Measurement, SweepFailure,
+};
 use ac2_proto::units::{ClientId, Db, MeasId, Rev, Seconds};
 use ac2_proto::{Command, ErrorCode, ErrorDetail, ProtoError, ReplyBody, Welcome};
 
@@ -136,130 +138,8 @@ impl Control {
                 ack(self.commit(Change::Generator(g)))
             }
 
-            Command::MeasCreate { config } => {
-                validate_meas(&config)?;
-                self.spl_needs_mic(&config)?;
-                self.check_meas_owner(None, &config.kind)?;
-                let grid = self.grid_of(None, &config.kind)?;
-                let id = MeasId(self.next_meas);
-                self.next_meas += 1;
-                let grid_id = grid.map(|g| self.register_grid(g));
-                let delay = matches!(config.kind, MeasKind::Transfer { .. }).then(|| DelayState {
-                    applied: Seconds(0.0),
-                    applied_samples: 0.0,
-                    nudged: Seconds(0.0),
-                    nudged_samples: 0.0,
-                    tracking: false,
-                    awaiting_pick: false,
-                    last_finding: None,
-                });
-                let m = Measurement {
-                    id,
-                    config,
-                    config_rev: Rev(self.store.rev().0 + 1),
-                    running: false,
-                    delay,
-                    grid_id,
-                    colour: None,
-                    layout: None,
-                    compared: Vec::new(),
-                    offset: Db(0.0),
-                    eq: Vec::new(),
-                };
-                self.commit(Change::Measurement(Patch::Set(m.clone())));
-                self.ensure_spl_log(&m, None);
-                Ok(ReplyBody::Measurement(m))
-            }
-            Command::MeasUpdate { meas, base, config } => {
-                validate_meas(&config)?;
-                self.spl_needs_mic(&config)?;
-                let mut m = self.meas(meas)?.clone();
-                if base != m.config_rev {
-                    return Err(stale_meas(meas, m.config_rev));
-                }
-                self.check_meas_owner(Some(meas), &config.kind)?;
-                self.check_operand_update(meas, &config.kind)?;
-                self.check_eq_update(meas, &config.kind)?;
-                if owners::owner_only(&m.config, &config) {
-                    // Moving a math channel changes where it is listed, not what it
-                    // computes: its job and its frames' config rev go on.
-                    m.config = config;
-                    self.commit(Change::Measurement(Patch::Set(m.clone())));
-                    return Ok(ReplyBody::Measurement(m));
-                }
-                let grid = self.grid_of(Some(meas), &config.kind)?;
-                let old_leq = match &m.config.kind {
-                    MeasKind::Spl { config } => Some(config.leq.clone()),
-                    _ => None,
-                };
-                if let Some(spl) = spl_in_place(&m.config.kind, &config.kind) {
-                    m.config = config;
-                    m.config_rev = Rev(self.store.rev().0 + 1);
-                    if let Some(j) = self.jobs.get(&meas) {
-                        j.send(JobCmd::Spl {
-                            config: Box::new(spl),
-                            rev: m.config_rev,
-                        });
-                    }
-                    self.commit(Change::Measurement(Patch::Set(m.clone())));
-                    self.ensure_spl_log(&m, old_leq.as_ref());
-                    return Ok(ReplyBody::Measurement(m));
-                }
-                if display_only(&m.config.kind, &config.kind) {
-                    // Only how clients draw it changes: the job, its averages and the
-                    // config rev its frames carry go on.
-                    m.config = config;
-                    self.commit(Change::Measurement(Patch::Set(m.clone())));
-                    return Ok(ReplyBody::Measurement(m));
-                }
-                if let Some(change) = smoothing_only(&m.config.kind, &config.kind) {
-                    // Display smoothing changes in place: averaging goes on, and the next
-                    // frame carries the new setting under the new rev.
-                    m.config = config;
-                    m.config_rev = Rev(self.store.rev().0 + 1);
-                    if let Some(j) = self.jobs.get(&meas) {
-                        j.send(JobCmd::Smoothing {
-                            change,
-                            rev: m.config_rev,
-                        });
-                    }
-                    self.commit(Change::Measurement(Patch::Set(m.clone())));
-                    return Ok(ReplyBody::Measurement(m));
-                }
-                let was_transfer = matches!(m.config.kind, MeasKind::Transfer { .. });
-                let is_transfer = matches!(config.kind, MeasKind::Transfer { .. });
-                m.config = config;
-                m.config_rev = Rev(self.store.rev().0 + 1);
-                if !is_transfer {
-                    m.delay = None;
-                } else if !was_transfer {
-                    m.delay = Some(DelayState {
-                        applied: Seconds(0.0),
-                        applied_samples: 0.0,
-                        nudged: Seconds(0.0),
-                        nudged_samples: 0.0,
-                        tracking: false,
-                        awaiting_pick: false,
-                        last_finding: None,
-                    });
-                }
-                m.grid_id = grid.map(|g| self.register_grid(g));
-                // The log and the entity follow the new configuration before the job
-                // starts, so a restarted meter reports against its new windows; the
-                // measurement's own commit comes after, under the rev it names.
-                self.ensure_spl_log(&m, old_leq.as_ref());
-                m.config_rev = Rev(self.store.rev().0 + 1);
-                if m.running && self.session.is_some() {
-                    self.stop_job(meas);
-                    if let Some(g) = self.start_job(&m)? {
-                        m.grid_id = Some(self.register_grid(g));
-                    }
-                }
-                self.commit(Change::Measurement(Patch::Set(m.clone())));
-                // Its grid may have changed: the sets' curves follow it.
-                self.eq_refresh(meas);
-                Ok(ReplyBody::Measurement(m))
-            }
+            Command::MeasCreate { config } => self.meas_create(config).map(ReplyBody::Measurement),
+            Command::MeasUpdate { meas, base, config } => self.meas_update(meas, base, config),
             Command::MeasColour { meas, colour } => {
                 let mut m = self.meas(meas)?.clone();
                 if matches!(m.config.kind, MeasKind::Math { .. }) {
@@ -321,19 +201,7 @@ impl Control {
             }
             Command::MeasDelete { meas, traces } => self.meas_delete(meas, traces),
             Command::MeasEq { meas, edit } => self.meas_eq(client, meas, edit),
-            Command::MeasStart { meas } => {
-                let mut m = self.meas(meas)?.clone();
-                not_a_sweep(&m)?;
-                if !m.running
-                    && self.session.is_some()
-                    && let Some(g) = self.start_job(&m)?
-                {
-                    m.grid_id = Some(self.register_grid(g));
-                }
-                m.running = true;
-                self.commit(Change::Measurement(Patch::Set(m.clone())));
-                Ok(ReplyBody::Measurement(m))
-            }
+            Command::MeasStart { meas } => self.meas_start(meas).map(ReplyBody::Measurement),
             Command::MeasStop { meas } => {
                 let mut m = self.meas(meas)?.clone();
                 not_a_sweep(&m)?;
@@ -411,7 +279,9 @@ impl Control {
             }
 
             Command::TraceList => Ok(ReplyBody::Traces(self.store.state().traces.clone())),
-            Command::TraceCapture { meas, name, slot } => self.trace_capture(meas, name, slot),
+            Command::TraceCapture { meas, name, slot } => {
+                self.trace_capture(meas, name, slot, None)
+            }
             Command::TraceGet { trace } => self.trace_get(trace),
             Command::TraceUpdate { trace, edit } => self.trace_update(trace, edit),
             Command::TraceDelete { trace } => self.trace_delete(trace),
@@ -555,6 +425,171 @@ impl Control {
             Command::SessionReplay { recording, pace } => {
                 self.session_replay(client, &recording, pace)
             }
+            Command::PlanSave { plan } => self.plan_save(plan),
+            Command::PlanList => Ok(ReplyBody::Plans(self.store.state().plans.clone())),
+            Command::PlanDelete { name } => self.plan_delete(&name),
+            Command::WalkNew {
+                name,
+                plan,
+                kind,
+                meas,
+                points,
+            } => self.walk_new(name, plan, kind, meas, points),
+            Command::WalkUpdate { walk, name, points } => self.walk_update(walk, name, points),
+            Command::WalkGoto { walk, point } => self.walk_goto(walk, point),
+            Command::WalkCapture { walk } => self.walk_capture(walk),
+            Command::WalkSkip { walk } => self.walk_skip(walk),
+            Command::WalkRedo { walk, point } => self.walk_redo(walk, point),
+            Command::WalkDelete { walk } => self.walk_delete(walk),
         }
+    }
+
+    /// `meas.create`: the new measurement, stopped.
+    pub(super) fn meas_create(&mut self, config: MeasConfig) -> Result<Measurement, ProtoError> {
+        validate_meas(&config)?;
+        self.spl_needs_mic(&config)?;
+        self.check_meas_owner(None, &config.kind)?;
+        let grid = self.grid_of(None, &config.kind)?;
+        let id = MeasId(self.next_meas);
+        self.next_meas += 1;
+        let grid_id = grid.map(|g| self.register_grid(g));
+        let delay = matches!(config.kind, MeasKind::Transfer { .. }).then(|| DelayState {
+            applied: Seconds(0.0),
+            applied_samples: 0.0,
+            nudged: Seconds(0.0),
+            nudged_samples: 0.0,
+            tracking: false,
+            awaiting_pick: false,
+            last_finding: None,
+        });
+        let m = Measurement {
+            id,
+            config,
+            config_rev: Rev(self.store.rev().0 + 1),
+            running: false,
+            delay,
+            grid_id,
+            colour: None,
+            layout: None,
+            compared: Vec::new(),
+            offset: Db(0.0),
+            eq: Vec::new(),
+        };
+        self.commit(Change::Measurement(Patch::Set(m.clone())));
+        self.ensure_spl_log(&m, None);
+        Ok(m)
+    }
+
+    /// `meas.update`: the measurement with `config`, if `base` is its config rev.
+    pub(super) fn meas_update(
+        &mut self,
+        meas: MeasId,
+        base: Rev,
+        config: MeasConfig,
+    ) -> Result<ReplyBody, ProtoError> {
+        validate_meas(&config)?;
+        self.spl_needs_mic(&config)?;
+        let mut m = self.meas(meas)?.clone();
+        if base != m.config_rev {
+            return Err(stale_meas(meas, m.config_rev));
+        }
+        self.check_meas_owner(Some(meas), &config.kind)?;
+        self.check_operand_update(meas, &config.kind)?;
+        self.check_walk_meas_update(meas, &config.kind)?;
+        self.check_eq_update(meas, &config.kind)?;
+        if owners::owner_only(&m.config, &config) {
+            // Moving a math channel changes where it is listed, not what it
+            // computes: its job and its frames' config rev go on.
+            m.config = config;
+            self.commit(Change::Measurement(Patch::Set(m.clone())));
+            return Ok(ReplyBody::Measurement(m));
+        }
+        let grid = self.grid_of(Some(meas), &config.kind)?;
+        let old_leq = match &m.config.kind {
+            MeasKind::Spl { config } => Some(config.leq.clone()),
+            _ => None,
+        };
+        if let Some(spl) = spl_in_place(&m.config.kind, &config.kind) {
+            m.config = config;
+            m.config_rev = Rev(self.store.rev().0 + 1);
+            if let Some(j) = self.jobs.get(&meas) {
+                j.send(JobCmd::Spl {
+                    config: Box::new(spl),
+                    rev: m.config_rev,
+                });
+            }
+            self.commit(Change::Measurement(Patch::Set(m.clone())));
+            self.ensure_spl_log(&m, old_leq.as_ref());
+            return Ok(ReplyBody::Measurement(m));
+        }
+        if display_only(&m.config.kind, &config.kind) {
+            // Only how clients draw it changes: the job, its averages and the
+            // config rev its frames carry go on.
+            m.config = config;
+            self.commit(Change::Measurement(Patch::Set(m.clone())));
+            return Ok(ReplyBody::Measurement(m));
+        }
+        if let Some(change) = smoothing_only(&m.config.kind, &config.kind) {
+            // Display smoothing changes in place: averaging goes on, and the next
+            // frame carries the new setting under the new rev.
+            m.config = config;
+            m.config_rev = Rev(self.store.rev().0 + 1);
+            if let Some(j) = self.jobs.get(&meas) {
+                j.send(JobCmd::Smoothing {
+                    change,
+                    rev: m.config_rev,
+                });
+            }
+            self.commit(Change::Measurement(Patch::Set(m.clone())));
+            return Ok(ReplyBody::Measurement(m));
+        }
+        let was_transfer = matches!(m.config.kind, MeasKind::Transfer { .. });
+        let is_transfer = matches!(config.kind, MeasKind::Transfer { .. });
+        m.config = config;
+        m.config_rev = Rev(self.store.rev().0 + 1);
+        if !is_transfer {
+            m.delay = None;
+        } else if !was_transfer {
+            m.delay = Some(DelayState {
+                applied: Seconds(0.0),
+                applied_samples: 0.0,
+                nudged: Seconds(0.0),
+                nudged_samples: 0.0,
+                tracking: false,
+                awaiting_pick: false,
+                last_finding: None,
+            });
+        }
+        m.grid_id = grid.map(|g| self.register_grid(g));
+        // The log and the entity follow the new configuration before the job
+        // starts, so a restarted meter reports against its new windows; the
+        // measurement's own commit comes after, under the rev it names.
+        self.ensure_spl_log(&m, old_leq.as_ref());
+        m.config_rev = Rev(self.store.rev().0 + 1);
+        if m.running && self.session.is_some() {
+            self.stop_job(meas);
+            if let Some(g) = self.start_job(&m)? {
+                m.grid_id = Some(self.register_grid(g));
+            }
+        }
+        self.commit(Change::Measurement(Patch::Set(m.clone())));
+        // Its grid may have changed: the sets' curves follow it.
+        self.eq_refresh(meas);
+        Ok(ReplyBody::Measurement(m))
+    }
+
+    /// `meas.start`: its job runs while a session is open.
+    pub(super) fn meas_start(&mut self, meas: MeasId) -> Result<Measurement, ProtoError> {
+        let mut m = self.meas(meas)?.clone();
+        not_a_sweep(&m)?;
+        if !m.running
+            && self.session.is_some()
+            && let Some(g) = self.start_job(&m)?
+        {
+            m.grid_id = Some(self.register_grid(g));
+        }
+        m.running = true;
+        self.commit(Change::Measurement(Patch::Set(m.clone())));
+        Ok(m)
     }
 }

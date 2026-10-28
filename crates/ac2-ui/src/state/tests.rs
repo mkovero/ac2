@@ -470,6 +470,9 @@ fn stored(id: u32, slot: Option<u8>, epoch: u32) -> TraceMeta {
         mic_curve: None,
         created_at: WallNs(0),
         eq_in: Vec::new(),
+        position: None,
+        captured_unsettled: false,
+        superseded: false,
     }
 }
 

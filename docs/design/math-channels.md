@@ -30,7 +30,7 @@ daemon evaluates, with operands chosen by name.
 - `domain`: `transfer` | `spectrum` | `rta` — what the operands are, so what the result is and
   which stream it publishes (`tf`, `spec`, `rta`). The daemon checks every operand against
   it; clients read the pane and stream from it without looking the operands up.
-- `expr`: `binary {a, op, b}` or `average {of: 2 … 16, method}`.
+- `expr`: `binary {a, op, b}` or `average {of: 2 … 64, method}`.
 - `op`: `divide`, `multiply`, `add`, `subtract`.
 - operands: `meas {meas}` (a live measurement's current result) or `trace {trace}` (a stored
   trace's columns). A math channel is not an operand: capture it and use the trace (an
@@ -93,7 +93,7 @@ drawn on the level axis in the first operand's scale; the caption says `level di
 
 ## Average (the spatial average)
 
-2 … 16 operands (why and how the positions are combined: `spatial-average.md`); **power**
+2 … 64 operands (why and how the positions are combined: `spatial-average.md`); **power**
 (default) `|H| = sqrt(mean |hₖ|²)`, phase the argument of the complex mean; **complex**
 `mean hₖ` (what one point summing the arrivals would see); **coherence-weighted**, the complex
 mean weighted by `γ²/(1 − γ²)` (γ² capped at 0.999). Every operand re-referred to `τ_ref`

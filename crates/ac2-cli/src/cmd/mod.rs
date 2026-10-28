@@ -25,6 +25,7 @@ mod selftest;
 mod session;
 mod sessions;
 mod traces;
+mod walk;
 
 use std::time::Duration;
 
@@ -56,6 +57,8 @@ pub(crate) async fn dispatch(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliErro
         Cmd::Sweep { cmd } => ir::sweep(cli, cmd, out).await,
         Cmd::Rec { cmd } => rec::run(cli, cmd, out).await,
         Cmd::Trace { cmd } => traces::trace(cli, cmd, out).await,
+        Cmd::Plan { cmd } => walk::plan(cli, cmd, out).await,
+        Cmd::Walk { cmd } => walk::walk(cli, cmd, out).await,
         Cmd::Osc { cmd } => osc::osc(cli, cmd, out).await,
         Cmd::Artnet { cmd } => artnet::artnet(cli, cmd, out).await,
         Cmd::Levels { cmd } => levels::run(cli, cmd.as_ref(), out).await,

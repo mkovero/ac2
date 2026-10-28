@@ -1469,6 +1469,33 @@ legend counts: `Average of 4 · 4 positions · power avg`.
 One mic moved from seat to seat: capture each position (**Ctrl+1 … 9**) and average the
 captures the same way, or with **M**.
 
+#### Spatial walk (CLI)
+
+The daemon can lead the one-mic walk itself ([spatial-walk.md](design/spatial-walk.md)): a
+room **plan** (outline, ceiling, audience zones at ear height) in its plan library, positions
+suggested on it, and a **walk** that captures one transfer measurement at each position and
+averages the captures as it goes.
+
+```
+ac2 plan new Hall --width 20 --depth 30 --ceiling 9      # one zone 1 m in from the walls
+ac2 plan export Hall hall.json / ac2 plan import hall.json
+ac2 walk new Mains --plan Hall --meas Seat --points 8    # --preset iso3382 --rt 1.4
+ac2 walk status                                          # where the mic goes, what is captured
+ac2 walk capture                                         # P1 · <mic>, then on to the next point
+ac2 walk next | prev | skip | redo P3
+```
+
+Moving the mic (a new walk, **next**/**prev**, the advance after a capture or skip, a redo)
+restarts the measurement's averages and turns delay tracking on, so nothing of the carry is
+averaged. Capture when the curve has settled: a capture taken before (averages not yet full,
+the delay moved, an arrival to pick, a fault) is kept and marked *unsettled*. From the second
+capture the walk keeps a power average of its captures, *<walk> · average*, under the
+measurement; a redo or a skip keeps the old capture (superseded) and takes it out of the
+average. While the walk exists, its measurement, its captures and its average cannot be
+deleted; deleting the walk keeps them. One measurement (one mic) per walk for now; the walk
+and its plan are saved with the session. Plans live in the daemon's data directory
+(`plans/`, `ac2d --plans DIR`).
+
 #### Missing operands
 
 An operand that is stopped, settling, CLIP, NO REFERENCE, CHECK ROUTING, NO SIGNAL or

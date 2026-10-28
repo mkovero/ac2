@@ -614,6 +614,9 @@ fn ui_view(p: &wire::LayoutPane, this: RigId) -> View {
             wire::PaneKind::Spl => PaneKind::Spl,
             wire::PaneKind::Distortion => PaneKind::Distortion,
             wire::PaneKind::Programme => PaneKind::Programme,
+            // The app draws no walk pane yet: a walk's pane opens as an empty transfer pane,
+            // where its walk measurement's curve is picked like any other.
+            wire::PaneKind::Walk => PaneKind::Transfer,
         },
         meas: p.content.as_ref().and_then(wire::PaneContent::meas),
         meters: p

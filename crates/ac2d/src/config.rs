@@ -51,6 +51,8 @@ pub struct DaemonConfig {
     /// (`session.replay`); unfinished ones found there at start are finished as
     /// interrupted. `None`: this daemon does not record.
     pub recording_dir: Option<PathBuf>,
+    /// The plan library's directory (`plan.*`); `None` keeps plans in memory only.
+    pub plan_dir: Option<PathBuf>,
     /// The rig's name, told every client at hello and advertised in network mode; display
     /// only (default *ac2 on <hostname>*).
     pub name: String,
@@ -156,6 +158,7 @@ impl fmt::Debug for DaemonConfig {
             .field("cal_store", &self.cal_store)
             .field("autosave", &self.autosave)
             .field("recording_dir", &self.recording_dir)
+            .field("plan_dir", &self.plan_dir)
             .field("name", &self.name)
             .field("rig_id", &self.rig_id)
             .field("advertise", &self.advertise)
@@ -188,6 +191,7 @@ impl DaemonConfig {
             cal_store: None,
             autosave: None,
             recording_dir: None,
+            plan_dir: None,
             name: ac2_discovery::default_rig_name(),
             rig_id: RigIdSource::Ephemeral,
             advertise: None,

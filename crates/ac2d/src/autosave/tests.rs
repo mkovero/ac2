@@ -16,6 +16,8 @@ fn data(at: u64) -> SessionData {
         measurements: Vec::new(),
         spl_logs: Vec::new(),
         traces: Vec::new(),
+        walks: Vec::new(),
+        plans: Vec::new(),
     }
 }
 
@@ -539,7 +541,7 @@ fn debounce_waits_for_quiet_and_caps_the_wait() {
     let w = Writer::spawn(root.path().join("a"), tx).expect("writer");
     let mut a = Autosaver::new(root.path().join("a"), w);
     let t0 = Instant::now();
-    let fp: Fingerprint = (Vec::new(), Vec::new(), Vec::new());
+    let fp: Fingerprint = (Vec::new(), Vec::new(), Vec::new(), (Vec::new(), Vec::new()));
     assert!(a.due().is_none());
     assert!(a.changed(&fp, t0));
     assert_eq!(a.due(), Some(t0 + DEBOUNCE));
@@ -585,6 +587,7 @@ fn debounce_waits_for_quiet_and_caps_the_wait() {
         }],
         Vec::new(),
         Vec::new(),
+        (Vec::new(), Vec::new()),
     );
     assert!(a.changed(&other, t9));
     assert!(a.write(data(3), other, Vec::new()));

@@ -466,6 +466,7 @@ impl Daemon {
             cal_store: config.cal_store.clone(),
             autosave: config.autosave.clone(),
             recording_dir: config.recording_dir.clone(),
+            plan_dir: config.plan_dir.clone(),
             local_clock: config.local_clock,
             systemd_notify: config.systemd_notify,
             damaged: key_damage,

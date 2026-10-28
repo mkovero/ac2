@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 73`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 74`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -152,6 +152,16 @@ Lease column: **L** = `lease_token` required (Q6).
 | `cal.line` | `channel`, `volts: Volts` | `line_calibration` | |
 | `cal.list` | — | `calibrations` (`calibrations`, `line_calibrations`, `mics`) | |
 | `cal.delete` | `key: CalRef` (`type`: `spl` {device, channel, mic} \| `line` {device, channel}) | `ack` | |
+| `plan.save` | `plan: PlanSpec` | `plan` | |
+| `plan.list` | — | `plans` | non-mutating |
+| `plan.delete` | `name` | `ack` | |
+| `walk.new` | `name`, `plan` (name), `kind: live_transfer`, `meas: [MeasId]`, `points: [WalkPointSpec]` ({`label`, `at: [x, y, z]`}) | `walk` | |
+| `walk.update` | `walk: WalkId`, `name`, `points: [WalkPointSpec]` | `walk` | |
+| `walk.goto` | `walk`, `point: u16` | `walk` | |
+| `walk.capture` | `walk` | `walk` | |
+| `walk.skip` | `walk` | `walk` | |
+| `walk.redo` | `walk`, `point: u16` | `walk` | |
+| `walk.delete` | `walk` | `ack` | |
 | `spl.log_get` | `meas`, `log: SplLogWhich`, `from: u64`, `max: u32` | `spl_log_page` | |
 | `spl.log_new` | `meas` | `ack` | |
 | `spl.history_get` | `meas`, `span: HistorySpan` | `spl_history` | non-mutating |
@@ -387,14 +397,16 @@ column, ratio, a: PaneLayout, b: PaneLayout}` (`row`: `a` left; `column`: `a` on
 `transfer_view`, `spectrum_view`, `spl_view`, `sweep_view`, `programme_view`, `chrome`,
 `content`, `levels`, `plates`, `rig`}
 (snake_case enums, `ac2_proto::model::layout`): its kind (`transfer`, `spectrum`, `spl`,
-`distortion`, `programme`), the view of each kind it may be turned into (`programme_view`:
+`distortion`, `programme`, `walk`), the view of each kind it may be turned into (`programme_view`:
 `meters` or `goniometer`; a goniometer on a pane that meters no pair draws its meters), what it was picked
 to show (`content`: nil, being the measurement whose layout it is, or a tagged map
 `{type: meas, meas: MeasId}` — a pick of a measurement gone since shows the layout's own —,
 `{type: inputs, inputs: [u16, …]}` (one to eight zero-based device inputs a Programme pane
-meters) or `{type: pair, left: u16, right: u16}` (the stereo pair it meters); a layout
+meters) or `{type: pair, left: u16, right: u16}` (the stereo pair it meters) or `{type: walk, walk:
+WalkId}` (the spatial walk a Walk pane follows); a layout
 whose content names no input, more than eight, an input twice or a pair of one input, a
-Programme pane without inputs or another kind with them, is refused `invalid`)
+Programme pane without inputs or another kind with them, a Walk pane without its walk or
+another kind with one, is refused `invalid`)
 and the level axis ranges the operator set on it (`levels`: {`transfer`, `spectrum_dbfs`,
 `spectrum_spl`, `distortion`}, each {`lo`, `hi`} dB or nil, nil being framed by the client
 when the pane first shows a curve) and where its readout plates sit (`plates`: {`legend`,
@@ -536,7 +548,7 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   is the published grid (a transfer result's is known before it runs; a spectrum's is the
   display grid of its operands' FFT, its capture every bin).
   - `expr` (`MathExpr`, tagged by `type`): `binary` {`a`, `op`, `b`}, `average` {`of`:
-    2 … 16 distinct operands, `method` `power` \| `complex` \| `coherence_weighted`} or
+    2 … 64 distinct operands, `method` `power` \| `complex` \| `coherence_weighted`} or
     `align` {`a`, `b`, `band`: `AlignBand` {`lo`, `hi`} (Hz, 0 < `lo` < `hi`), `max_delay`
     (Seconds, 0 < … ≤ 1)}. An operand (`Operand`, tagged by `type`) is `meas` {`meas`},
     `trace` {`trace`} or `eq` {`meas`, `set`} (an EQ set: `B` of a transfer `multiply`
@@ -1177,6 +1189,51 @@ display edits and are never applied to the stored data.
   without one, or with one stored decimated (one point per several samples, longer than
   65536), is `invalid`.
 
+#### Spatial walks (`plan.*`, `walk.*`)
+
+`docs/design/spatial-walk.md`. A **plan** (`PlanSpec`: `name`, `outline` [[x, y]],
+`ceiling` m \| nil, `zones` [{`name`, `outline`, `ear_height`, `weight` \| nil, `seats` \|
+nil}], `markers` [{`name`, `kind` speaker \| foh \| point, `at` [x, y, z], `heading_deg` \|
+nil}], `surfaces` [{`surface`, `material`}]; metres) lives in the daemon's plan library,
+one `<name>.json` per plan in its data directory (`plans/`), mirrored as `State.plans`.
+
+- `plan.save` checks the plan (`ac2_room::plan::validate`: simple counter-clockwise
+  polygons, zones inside the outline, markers inside the room …) and replaces the one of
+  that name; `invalid` with the reason, or for a name that is no file name (letters,
+  digits, space, `-`, `_`, `.`, not starting with `.`); `refused` for a name another plan
+  holds in another case. `plan.delete` is `not_found` for a name the library lacks; the
+  session's copies stay.
+- `walk.new` starts a walk (`WalkState`: `id`, `name`, `plan`, `kind`, `meas`, `points`
+  [{`label`, `at`, `mic: MeasId | nil`, `state` {`type`: pending \| captured {traces} \|
+  skipped}}], `current: u16 | nil`, `average: MeasId | nil`) through 1 … 64 points (unique
+  non-empty labels, finite, `z` ≥ 0). The plan is the session's copy when it holds one, else
+  the library's, copied into `State.walk_plans` (so a library edit mid-walk changes
+  nothing). `meas` are session transfer measurements no other walk names; this version
+  takes exactly one (`unsupported` for more: several mics per walk are a later stage).
+- A **move** — `walk.new`, `walk.goto`, the advance after `walk.capture` or `walk.skip`,
+  `walk.redo` — resets every walk measurement's averaging (`meas.reset`) and turns its delay
+  tracking on.
+- `walk.capture` captures every walk measurement at the current point in one step
+  (all or none), each trace named `<label> · <mic>` (the input's mic, else the
+  measurement's name) with `position` set, and `captured_unsettled` when the frame was not
+  ready: `filled` < 1, a fault refusing its blocks, a delay change after the averages
+  restarted (an older config rev) or an arrival awaiting the operator's pick. It goes to
+  the next pending point after the current one (wrapping round), `current` nil when none
+  is left. `refused` at a captured point (redo it), `invalid` when `current` is nil.
+- `walk.skip` marks the current point skipped (a captured one's traces become
+  `superseded`); `walk.redo` makes a point pending again (its traces `superseded`) and goes
+  there. `walk.update` renames the walk and edits its points by label: a kept point keeps
+  its state (a captured one its position too); a captured point cannot be taken out
+  (`refused`).
+- The walk's **average** is a power-average math channel of the captured points' traces,
+  in point order, owned by the walk's first measurement and named `<walk> · average`: made
+  (and started) at the second capture, its `of` updated after every capture, skip and redo
+  (as `meas.update`, which restarts it), deleted when fewer than two captures are left.
+- While a walk names them, its measurements, its average and its points' traces cannot be
+  deleted, nor its measurements change kind (`refused`). `walk.delete` keeps the traces
+  and the average, which becomes an ordinary average of them; the plan copy goes with the
+  last walk walking it.
+
 #### Sweep runs (`sweep.run`)
 
 Design: `docs/design/sweep-distortion.md`. `sweep.run {lease_token, meas, name}` runs the
@@ -1573,7 +1630,7 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 `spl_log_page`, `spl_history`, `spl_band_log`,
 `snapshot`, `events`,
 `grid`, `session_file`, `sessions`, `transfer`, `chunk`, `salvage`, `sweep`, `recording`,
-`recordings`.
+`recordings`, `plan`, `plans`, `walk`.
 
 ### 3.4 Errors
 
@@ -1598,7 +1655,10 @@ AudioStopped | nil`; §4.1.1),
 `traces` (`TraceMeta`: `id`, `edit` {name, color, visible, locked, order, offset,
 polarity, delay_nudge, slot, smoothing, owner}, `kind`, `source` {captured | imported |
 math | average | sweep | eq}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_curve`, `created_at`,
-`eq_in` ([`EqSnapshot`]: the EQ sets marked in the console when captured);
+`eq_in` ([`EqSnapshot`]: the EQ sets marked in the console when captured), `position`
+(`TracePosition` | nil: a walk's capture names its point `label`, `at: [x, y, z]`, `plan`
+and `walk`), `captured_unsettled` (captured before the walk measurement was ready),
+`superseded` (a redone or skipped point's capture: kept, out of the walk's average);
 `kind` one of
 `transfer`, `target`, `spectrum`, `rta`, `sweep`), `generator` (`owner`,
 `armed`, `firing`, `settings`, `ceiling`, `ceiling_bound`, `last_action` {`action`: acquire
@@ -1617,7 +1677,10 @@ committed when the warning flips, the span first reaches the judged length or th
 `autosave` (`Autosave`: `state` {off | saved | pending | failed{reason}}, `saved_at: WallNs |
 nil`, `log_failures: [LogWriteFailure]`; see §7.3), `recording` (`RecordingRun` | nil: the latest recording, §3.2), `working`
 (`WorkingSession`: the working state's session and unsaved changes, §3.2 sessions), `rig`
-(`Rig`: rig settings, OSC and Art-Net sending and cue states, §3.2 *Rig monitor, OSC and Art-Net cues*).
+(`Rig`: rig settings, OSC and Art-Net sending and cue states, §3.2 *Rig monitor, OSC and Art-Net cues*),
+`plans` ([PlanSpec], the daemon's plan library, sorted by name; §3.2 *Spatial walks*),
+`walks` ([WalkState]) and `walk_plans` ([PlanSpec], the session's copies of the plans its
+walks walk).
 
 
 #### 4.1.1 Audio stopped and recovery
@@ -1659,9 +1722,10 @@ samples). Every later recovery reopens the configuration as it then stands.
 `state.snapshot` → `{state, rev, daemon_incarnation, session_epoch}`.
 
 An event is `{rev, kind, payload}`. `kind` is one of `session`, `measurement`, `trace`,
-`generator`, `calibration`, `line_calibration`, `mic`, `inputs`, `outputs`, `spl_log`, `timing`, `sweep`, `autosave`, `recording`, `working`. `payload` is the entity's
+`generator`, `calibration`, `line_calibration`, `mic`, `inputs`, `outputs`, `spl_log`, `timing`, `sweep`, `autosave`, `recording`, `working`, `plan`, `walk`, `walk_plan`. `payload` is the entity's
 full new value (`inputs`: {`inputs`, `pairs`}, both whole lists; `outputs`: the whole list); for keyed entities (`measurement`, `trace`,
-`calibration`, `line_calibration` (keyed by `LineCalKey`), `mic` (keyed by name), `spl_log`) it is `{type: "set", value: <entity>}` or `{type: "deleted", value: <key>}`.
+`calibration`, `line_calibration` (keyed by `LineCalKey`), `mic` (keyed by name), `spl_log`, `plan` and `walk_plan` (keyed by name), `walk` (keyed by
+`WalkId`)) it is `{type: "set", value: <entity>}` or `{type: "deleted", value: <key>}`.
 Applying an event is assignment. Events travel on the data socket as
 `[b"evt"][msgpack event]` and in `state.since` replies. Largest event: 1 MiB.
 
@@ -2008,11 +2072,12 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 <dir>/spl/<name>.bands.csv   its band log, when the meter's band meter logged (§7.4)
 ```
 
-`session.json`: `{format: "ac2-session", version: 28, saved_at, measurements:
+`session.json`: `{format: "ac2-session", version: 37, saved_at, measurements:
 [{id, config: MeasConfig, running, delay: {applied, nudged, tracking} | null, colour:
 ColourFamily | null, layout: PaneLayout | null}], spl_logs:
 [{meas, file, bands: file | null}], traces: [{meta: TraceMeta, grid: GridDef, file, mic_curve_points: [[Hz,
-dB]] | null}]}` (JSON, field names as in this document; `mic_curve_points` are the points of
+dB]] | null}], walks: [WalkState], plans: [PlanSpec]}` (JSON, field names as in this
+document; `plans` are the session's copies of the plans its walks walk; `mic_curve_points` are the points of
 `meta.mic_curve`, a curve applied after capture). A trace
 file is named by its trace id and a 64-bit FNV-1a hash of its content, so it never changes
 once written. A save writes the trace files that are not there yet, then replaces

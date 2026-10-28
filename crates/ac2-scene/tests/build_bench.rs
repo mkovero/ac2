@@ -198,6 +198,9 @@ fn stored(id: u32, freqs: &[f64]) -> TraceData {
             mic_curve: None,
             created_at: WallNs(0),
             eq_in: Vec::new(),
+            position: None,
+            captured_unsettled: false,
+            superseded: false,
         },
         mag_db: (0..n)
             .map(|i| ((i as f32) * 0.05 + id as f32).sin() * 6.0)

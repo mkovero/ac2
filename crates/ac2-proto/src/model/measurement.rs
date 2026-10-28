@@ -456,7 +456,7 @@ impl MathConfig {
     /// Fewest operands of an average, and fewest usable ones for it to show a value.
     pub const MIN_AVERAGE: usize = 2;
     /// Most operands of an average.
-    pub const MAX_AVERAGE: usize = 16;
+    pub const MAX_AVERAGE: usize = 64;
 
     /// `expr` in `domain` under `owner`, phase referred to the first operand, unsmoothed.
     pub fn of(owner: TraceOwner, domain: MathDomain, expr: MathExpr) -> Self {

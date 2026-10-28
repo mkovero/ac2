@@ -127,6 +127,12 @@ pub enum ReplyBody {
     Recording(RecordingRun),
     /// `rec.list`.
     Recordings(Vec<RecordingFile>),
+    /// `plan.save`: the plan as stored.
+    Plan(crate::model::PlanSpec),
+    /// `plan.list`: the plan library, by name.
+    Plans(Vec<crate::model::PlanSpec>),
+    /// `walk.new`, `walk.update`, `walk.goto`, `walk.capture`, `walk.skip`, `walk.redo`.
+    Walk(crate::model::WalkState),
 }
 
 /// A ctrl reply. `result` is msgpack `{"Ok": ReplyBody}` or `{"Err": ProtoError}`.

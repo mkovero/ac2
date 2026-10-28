@@ -144,6 +144,8 @@ impl Control {
                 Vec::new()
             },
             traces,
+            walks: self.store.state().walks.clone(),
+            plans: self.store.state().walk_plans.clone(),
         })
     }
 
@@ -447,6 +449,8 @@ impl Control {
         // as it was.
         self.prepare_load(&mut data)?;
         let mut grids = check_session(&data)?;
+        let ids: Vec<MeasId> = data.measurements.iter().map(|m| m.id).collect();
+        super::walks::check_walks(&data.walks, &data.plans, &ids)?;
 
         // Disarmed, no owner; a sweep run in progress is discarded.
         self.abort_sweep(SweepFailure::Stopped, "a session was loaded");
@@ -475,6 +479,7 @@ impl Control {
             self.drop_spl_log(id);
             self.commit(Change::Measurement(Patch::Deleted(id)));
         }
+        self.clear_walks();
         let old_traces: Vec<_> = self.store.state().traces.iter().map(|t| t.id).collect();
         for id in old_traces {
             self.commit(Change::Trace(Patch::Deleted(id)));
@@ -607,6 +612,7 @@ impl Control {
                 }
             }
         }
+        self.load_walks(data.walks, data.plans);
         self.prune_compared();
         Ok(epoch)
     }
@@ -871,6 +877,8 @@ impl Source {
                     measurements: Vec::new(),
                     spl_logs: Vec::new(),
                     traces: Vec::new(),
+                    walks: Vec::new(),
+                    plans: Vec::new(),
                 },
             )),
         }

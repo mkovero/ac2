@@ -9,10 +9,10 @@ use thiserror::Error;
 
 use crate::model::{
     Autosave, CalEntry, CalKey, Generator, InputSetups, LineCalEntry, LineCalKey, Measurement, Mic,
-    OutputSetup, RecordingRun, Rig, Session, SplLog, State, SweepRun, TimingStatus, TraceMeta,
-    WorkingSession,
+    OutputSetup, PlanSpec, RecordingRun, Rig, Session, SplLog, State, SweepRun, TimingStatus,
+    TraceMeta, WalkState, WorkingSession,
 };
-use crate::units::{DaemonIncarnation, MeasId, Rev, SessionEpoch, TraceId};
+use crate::units::{DaemonIncarnation, MeasId, Rev, SessionEpoch, TraceId, WalkId};
 
 /// Largest event message accepted, bytes.
 pub const MAX_EVENT_BYTES: usize = 1 << 20;
@@ -68,6 +68,12 @@ pub enum Change {
     Working(WorkingSession),
     /// Rig settings, OSC sending and cue states (never deleted).
     Rig(Rig),
+    /// A plan of the library, by name.
+    Plan(Patch<PlanSpec, String>),
+    /// A walk of the session.
+    Walk(Patch<WalkState, WalkId>),
+    /// The session's copy of a plan, by name.
+    WalkPlan(Patch<PlanSpec, String>),
 }
 
 /// One committed state change.
@@ -196,6 +202,27 @@ pub enum WireEvent {
         /// Payload.
         payload: Rig,
     },
+    /// [`Change::Plan`].
+    Plan {
+        /// Rev.
+        rev: Rev,
+        /// Payload.
+        payload: Patch<PlanSpec, String>,
+    },
+    /// [`Change::Walk`].
+    Walk {
+        /// Rev.
+        rev: Rev,
+        /// Payload.
+        payload: Patch<WalkState, WalkId>,
+    },
+    /// [`Change::WalkPlan`].
+    WalkPlan {
+        /// Rev.
+        rev: Rev,
+        /// Payload.
+        payload: Patch<PlanSpec, String>,
+    },
 }
 
 impl From<Event> for WireEvent {
@@ -218,6 +245,9 @@ impl From<Event> for WireEvent {
             Change::Recording(payload) => Self::Recording { rev, payload },
             Change::Working(payload) => Self::Working { rev, payload },
             Change::Rig(payload) => Self::Rig { rev, payload },
+            Change::Plan(payload) => Self::Plan { rev, payload },
+            Change::Walk(payload) => Self::Walk { rev, payload },
+            Change::WalkPlan(payload) => Self::WalkPlan { rev, payload },
         }
     }
 }
@@ -241,6 +271,9 @@ impl From<WireEvent> for Event {
             WireEvent::Recording { rev, payload } => (rev, Change::Recording(payload)),
             WireEvent::Working { rev, payload } => (rev, Change::Working(payload)),
             WireEvent::Rig { rev, payload } => (rev, Change::Rig(payload)),
+            WireEvent::Plan { rev, payload } => (rev, Change::Plan(payload)),
+            WireEvent::Walk { rev, payload } => (rev, Change::Walk(payload)),
+            WireEvent::WalkPlan { rev, payload } => (rev, Change::WalkPlan(payload)),
         };
         Event { rev, change }
     }
@@ -266,6 +299,9 @@ impl Change {
             Self::Recording(_) => "recording",
             Self::Working(_) => "working",
             Self::Rig(_) => "rig",
+            Self::Plan(_) => "plan",
+            Self::Walk(_) => "walk",
+            Self::WalkPlan(_) => "walk_plan",
         }
     }
 }

@@ -112,6 +112,8 @@ impl Shared {
                 })
                 .collect(),
             traces,
+            walks: self.state.walks.clone(),
+            plans: self.state.walk_plans.clone(),
         };
         let m = session::save(&dir, &s).map_err(session_err)?;
         self.working_clean(origin(r, &dir), m.saved_at);

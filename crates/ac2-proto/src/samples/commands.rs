@@ -412,6 +412,46 @@ pub fn commands() -> Vec<Command> {
         Command::LevelsReset {
             channels: vec![0, 1],
         },
+        Command::PlanSave { plan: plan() },
+        Command::PlanList,
+        Command::PlanDelete {
+            name: "Club".into(),
+        },
+        Command::WalkNew {
+            name: "Mains".into(),
+            plan: "Hall".into(),
+            kind: WalkKind::LiveTransfer,
+            meas: vec![MeasId(1)],
+            points: vec![
+                WalkPointSpec {
+                    label: "P1".into(),
+                    at: [5.0, 12.0, 1.2],
+                },
+                WalkPointSpec {
+                    label: "P2".into(),
+                    at: [12.5, 15.0, 1.2],
+                },
+            ],
+        },
+        Command::WalkUpdate {
+            walk: WalkId(1),
+            name: "Mains L".into(),
+            points: vec![WalkPointSpec {
+                label: "P1".into(),
+                at: [5.0, 12.0, 1.2],
+            }],
+        },
+        Command::WalkGoto {
+            walk: WalkId(1),
+            point: 2,
+        },
+        Command::WalkCapture { walk: WalkId(1) },
+        Command::WalkSkip { walk: WalkId(1) },
+        Command::WalkRedo {
+            walk: WalkId(1),
+            point: 0,
+        },
+        Command::WalkDelete { walk: WalkId(1) },
     ])
     .collect()
 }

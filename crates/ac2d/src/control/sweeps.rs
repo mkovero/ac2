@@ -424,6 +424,9 @@ impl Control {
             mic_curve: active.mic_curve.as_ref().map(|(m, _)| m.clone()),
             created_at: WallNs(wall_ns()),
             eq_in: self.eq_in_live(run.meas),
+            position: None,
+            captured_unsettled: false,
+            superseded: false,
         };
         tracing::info!(
             "sweep {} stored as trace {tid}: arrival {:.3} ms, reference {:+.1} dB{}",

@@ -53,7 +53,7 @@ impl Persist {
     pub(crate) fn untitled() -> Self {
         Self {
             origin: None,
-            saved_hash: hash_of(&[], &[]),
+            saved_hash: hash_of(&[], &[], &[], &[]),
             saved_at: None,
         }
     }
@@ -114,6 +114,8 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 fn hash_of(
     measurements: &[session::SavedMeasurement],
     traces: &[ac2_proto::model::TraceMeta],
+    walks: &[ac2_proto::model::WalkState],
+    plans: &[ac2_proto::model::PlanSpec],
 ) -> u64 {
     let ms: Vec<session::SavedMeasurement> = measurements
         .iter()
@@ -128,7 +130,7 @@ fn hash_of(
             m
         })
         .collect();
-    match serde_json::to_vec(&(ms, traces)) {
+    match serde_json::to_vec(&(ms, traces, walks, plans)) {
         Ok(b) => fnv1a(&b),
         // Unencodable content (a NaN) never matches a saved hash: shown as unsaved.
         Err(_) => u64::MAX,
@@ -188,7 +190,13 @@ impl Control {
 
     /// Hash of the working state's edited content now.
     pub(super) fn content_hash(&self) -> u64 {
-        hash_of(&self.saved_measurements(), &self.store.state().traces)
+        let st = self.store.state();
+        hash_of(
+            &self.saved_measurements(),
+            &st.traces,
+            &st.walks,
+            &st.walk_plans,
+        )
     }
 
     /// Recomputes `working` after a change to the measurements or traces.
@@ -694,7 +702,7 @@ mod tests {
 
     #[test]
     fn untitled_is_the_empty_hash_and_fixed() {
-        assert_eq!(Persist::untitled().saved_hash, hash_of(&[], &[]));
+        assert_eq!(Persist::untitled().saved_hash, hash_of(&[], &[], &[], &[]));
         // A fixed algorithm: a hash written before a restart compares after it.
         assert_eq!(fnv1a(b""), 0xcbf2_9ce4_8422_2325);
         assert_eq!(fnv1a(b"a"), 0xaf63_dc4c_8601_ec8c);

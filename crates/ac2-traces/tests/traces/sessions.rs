@@ -109,6 +109,8 @@ pub(super) fn session_sample() -> Session {
                 .collect(),
         }],
         traces: vec![a, b],
+        walks: vec![ac2_proto::samples::walk()],
+        plans: vec![ac2_proto::samples::plan()],
     }
 }
 
@@ -121,6 +123,8 @@ fn session_round_trip_and_generations() {
     let back = session::load(&dir).unwrap();
     assert_eq!(back.saved_at, s.saved_at);
     assert_eq!(back.measurements, s.measurements);
+    assert_eq!(back.walks, s.walks);
+    assert_eq!(back.plans, s.plans);
     assert_eq!(back.spl_logs.len(), 1);
     assert_eq!(back.spl_logs[0].info, s.spl_logs[0].info);
     assert_eq!(back.spl_logs[0].rows.len(), 3);

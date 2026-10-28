@@ -29,6 +29,7 @@ mod state;
 mod sweep;
 mod target;
 mod trace;
+mod walk;
 
 pub use align::*;
 pub use artnet::*;
@@ -55,3 +56,4 @@ pub use state::*;
 pub use sweep::*;
 pub use target::*;
 pub use trace::*;
+pub use walk::*;

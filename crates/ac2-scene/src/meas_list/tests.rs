@@ -296,6 +296,9 @@ pub(crate) fn trace(id: u32, name: &str, owner: TraceOwner, source: TraceSource)
         mic_curve: None,
         created_at: WallNs(0),
         eq_in: Vec::new(),
+        position: None,
+        captured_unsettled: false,
+        superseded: false,
     }
 }
 

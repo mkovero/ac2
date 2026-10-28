@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    CalEntry, Generator, InputSetup, LineCalEntry, Measurement, Mic, OutputSetup, Pair,
-    RecordingRun, Rig, Session, SplLog, SweepRun, TraceMeta, WorkingSession,
+    CalEntry, Generator, InputSetup, LineCalEntry, Measurement, Mic, OutputSetup, Pair, PlanSpec,
+    RecordingRun, Rig, Session, SplLog, SweepRun, TraceMeta, WalkState, WorkingSession,
 };
 use crate::units::{MeasId, SampleIndex, Samples, Seconds, WallNs};
 
@@ -118,6 +118,13 @@ pub struct State {
     pub recording: Option<RecordingRun>,
     /// Rig settings, OSC sending and cue states.
     pub rig: Rig,
+    /// The plan library (room plans by name), the daemon's and not the session's.
+    pub plans: Vec<PlanSpec>,
+    /// The session's spatial walks.
+    pub walks: Vec<WalkState>,
+    /// The session's copies of the plans its walks walk, by name: a session opened elsewhere
+    /// carries its rooms, and a library edit changes no walk.
+    pub walk_plans: Vec<PlanSpec>,
 }
 
 /// Autosave of the measurements and traces: the daemon writes them, in the session file

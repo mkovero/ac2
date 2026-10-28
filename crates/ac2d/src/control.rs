@@ -69,6 +69,7 @@ mod sweeps;
 mod traces;
 mod transfer;
 mod validate;
+mod walks;
 mod working;
 
 pub(crate) use artnet::check_addr as check_artnet_addr;
@@ -241,6 +242,8 @@ pub(crate) struct Setup {
     /// Where `rec.start` writes and `session.replay` finds recordings by name; `None`:
     /// this daemon does not record.
     pub(crate) recording_dir: Option<std::path::PathBuf>,
+    /// The plan library's directory; `None`: plans in memory only.
+    pub(crate) plan_dir: Option<std::path::PathBuf>,
     /// Local time of day for the band meters' day and night limits.
     pub(crate) local_clock: crate::config::LocalClock,
     pub(crate) systemd_notify: bool,
@@ -365,6 +368,7 @@ pub(crate) struct Control {
     traces: traces::TraceStore,
     sweep: Option<ActiveSweep>,
     next_sweep: u32,
+    next_walk: u32,
     autosave: Option<Autosaver>,
     /// Load the autosave when the control thread starts.
     restore: bool,
@@ -479,6 +483,12 @@ impl Control {
                 ..Default::default()
             })
             .with_calibrations(contents)
+            .with_plans(
+                s.plan_dir
+                    .as_deref()
+                    .map(walks::load_plans)
+                    .unwrap_or_default(),
+            )
             .with_autosave(Autosave {
                 state: status,
                 saved_at: None,
@@ -525,6 +535,7 @@ impl Control {
             traces: traces::TraceStore::default(),
             sweep: None,
             next_sweep: 1,
+            next_walk: 1,
             autosave,
             restore,
             logs: SplLogs {
@@ -776,7 +787,10 @@ impl Control {
     // -- plumbing --------------------------------------------------------------------------
 
     fn commit(&mut self, change: Change) -> Rev {
-        let saved = matches!(change, Change::Measurement(_) | Change::Trace(_));
+        let saved = matches!(
+            change,
+            Change::Measurement(_) | Change::Trace(_) | Change::Walk(_) | Change::WalkPlan(_)
+        );
         let levels = matches!(
             change,
             Change::Rig(_) | Change::Inputs(_) | Change::LineCalibration(_)

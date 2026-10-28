@@ -298,6 +298,8 @@ impl Control {
             measurements: saved.iter().map(RigMeter::saved).collect(),
             spl_logs,
             traces: Vec::new(),
+            walks: Vec::new(),
+            plans: Vec::new(),
         };
         // The logs a load would refuse are not read back; the meters start new ones.
         let mut grids = match super::files::check_session(&data) {
@@ -353,11 +355,14 @@ impl Control {
             measurements: self.rig_saved(),
             spl_logs: Vec::new(),
             traces: Vec::new(),
+            walks: Vec::new(),
+            plans: Vec::new(),
         };
         let fp = (
             self.rig_saved(),
             Vec::new(),
             self.spl_log_ids(MeasScope::Rig),
+            (Vec::new(), Vec::new()),
         );
         (data, fp)
     }
@@ -609,6 +614,19 @@ pub(super) fn remap_ids(
     }
     for l in &mut data.spl_logs {
         re(&mut l.info.meas);
+    }
+    for w in &mut data.walks {
+        for m in &mut w.meas {
+            re(m);
+        }
+        if let Some(a) = &mut w.average {
+            re(a);
+        }
+        for p in &mut w.points {
+            if let Some(m) = &mut p.mic {
+                re(m);
+            }
+        }
     }
     let mut moved: Vec<_> = map.into_iter().collect();
     moved.sort();

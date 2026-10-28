@@ -44,8 +44,8 @@ use std::path::{Path, PathBuf};
 
 use ac2_proto::GridDef;
 use ac2_proto::model::{
-    ColourFamily, Compared, ImportFormat, ImportRole, MeasConfig, PaneLayout, SplLogRow, TraceKind,
-    TraceMeta,
+    ColourFamily, Compared, ImportFormat, ImportRole, MeasConfig, PaneLayout, PlanSpec, SplLogRow,
+    TraceKind, TraceMeta, WalkState,
 };
 use ac2_proto::units::{Db, MeasId, Seconds, WallNs};
 use serde::{Deserialize, Serialize};
@@ -59,7 +59,7 @@ use ac2_proto::spl_log::{self, SplLogInfo};
 /// `format` of every manifest.
 pub const FORMAT: &str = "ac2-session";
 /// The one manifest version this build reads and writes.
-pub const VERSION: u32 = 36;
+pub const VERSION: u32 = 37;
 /// Manifest file name.
 pub const MANIFEST: &str = "session.json";
 /// The autosave's previous manifest, beside [`MANIFEST`].
@@ -147,6 +147,10 @@ pub struct Manifest {
     pub spl_logs: Vec<SavedSplLogFile>,
     /// Traces.
     pub traces: Vec<SavedTrace>,
+    /// Spatial walks.
+    pub walks: Vec<WalkState>,
+    /// The plans the walks walk (the session's copies).
+    pub plans: Vec<PlanSpec>,
 }
 
 /// One SPL meter's log in memory.
@@ -197,6 +201,10 @@ pub struct Session {
     pub spl_logs: Vec<SavedSplLog>,
     /// Traces with data.
     pub traces: Vec<StoredTrace>,
+    /// Spatial walks.
+    pub walks: Vec<WalkState>,
+    /// The plans the walks walk (the session's copies).
+    pub plans: Vec<PlanSpec>,
 }
 
 /// Session file failures.
@@ -404,6 +412,8 @@ fn save_into(dir: &Path, s: &Session, mode: &Mode<'_>) -> Result<Manifest, Sessi
         measurements: s.measurements.clone(),
         spl_logs: logs,
         traces: saved,
+        walks: s.walks.clone(),
+        plans: s.plans.clone(),
     };
     let json = serde_json::to_vec_pretty(&m).map_err(|e| SessionError::Corrupt {
         path: dir.join(MANIFEST),
@@ -760,6 +770,8 @@ fn load_inner(
             measurements: m.measurements,
             spl_logs,
             traces,
+            walks: m.walks,
+            plans: m.plans,
         },
         on_disk,
     ))

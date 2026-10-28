@@ -217,6 +217,8 @@ async fn a_long_log_in_pages_and_its_history() {
                 bands: Vec::new(),
             }],
             traces: Vec::new(),
+            walks: Vec::new(),
+            plans: Vec::new(),
         },
     )
     .unwrap();

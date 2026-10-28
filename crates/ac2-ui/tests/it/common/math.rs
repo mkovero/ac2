@@ -181,6 +181,9 @@ impl Rig {
                 mic_curve: None,
                 created_at: WallNs(0),
                 eq_in: Vec::new(),
+                position: None,
+                captured_unsettled: false,
+                superseded: false,
             };
             s.put_trace(curve, TF_GRID, ac2_traces::eq::columns(&h));
             let config = MathConfig::of(

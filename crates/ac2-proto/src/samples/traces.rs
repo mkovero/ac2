@@ -117,6 +117,9 @@ pub(super) fn trace_meta() -> TraceMeta {
         mic_curve: None,
         created_at: WallNs(1_790_000_000_000_000_000),
         eq_in: Vec::new(),
+        position: Some(super::state::trace_position()),
+        captured_unsettled: true,
+        superseded: false,
     }
 }
 

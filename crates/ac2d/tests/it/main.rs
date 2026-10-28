@@ -39,3 +39,4 @@ mod sweep;
 mod sync;
 mod traces;
 mod transfer;
+mod walk;

@@ -25,6 +25,7 @@ ac2-core = { path = "../ac2-core" }
 ac2-discovery = { path = "../ac2-discovery" }
 ac2-paths = { path = "../ac2-paths", features = ["log"] }
 ac2-proto = { path = "../ac2-proto" }
+ac2-room = { path = "../ac2-room" }
 ac2-traces = { path = "../ac2-traces" }
 ac2-zmq = { path = "../ac2-zmq" }
 chrono = { workspace = true, features = ["clock"] }

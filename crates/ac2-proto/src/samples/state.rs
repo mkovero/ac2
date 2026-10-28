@@ -506,6 +506,89 @@ pub fn state() -> State {
         }),
         working: working(),
         rig: rig(),
+        plans: vec![plan()],
+        walks: vec![walk()],
+        walk_plans: vec![plan()],
+    }
+}
+
+/// A room plan: a hall with its stalls, FOH and a speaker.
+pub fn plan() -> PlanSpec {
+    PlanSpec {
+        name: "Hall".into(),
+        outline: vec![[0.0, 0.0], [20.0, 0.0], [20.0, 30.0], [0.0, 30.0]],
+        ceiling: Some(9.5),
+        zones: vec![ZoneSpec {
+            name: "Stalls".into(),
+            outline: vec![[2.0, 8.0], [18.0, 8.0], [18.0, 28.0], [2.0, 28.0]],
+            ear_height: 1.2,
+            weight: None,
+            seats: Some(600),
+        }],
+        markers: vec![
+            Marker {
+                name: "FOH".into(),
+                kind: MarkerKind::Foh,
+                at: [10.0, 20.0, 1.5],
+                heading_deg: Some(-90.0),
+            },
+            Marker {
+                name: "Main L".into(),
+                kind: MarkerKind::Speaker,
+                at: [4.0, 1.0, 6.0],
+                heading_deg: Some(90.0),
+            },
+        ],
+        surfaces: vec![SurfaceTag {
+            surface: Surface::Wall { edge: 2 },
+            material: "brick".into(),
+        }],
+    }
+}
+
+/// A walk of measurement 1 through three points of [`plan`]: P1 captured, P2 skipped, at
+/// P3.
+pub fn walk() -> WalkState {
+    WalkState {
+        id: WalkId(1),
+        name: "Mains".into(),
+        plan: "Hall".into(),
+        kind: WalkKind::LiveTransfer,
+        meas: vec![MeasId(1)],
+        points: vec![
+            WalkPoint {
+                label: "P1".into(),
+                at: [5.0, 12.0, 1.2],
+                mic: Some(MeasId(1)),
+                state: PointState::Captured {
+                    traces: vec![TraceId(7)],
+                },
+            },
+            WalkPoint {
+                label: "P2".into(),
+                at: [12.5, 15.0, 1.2],
+                mic: None,
+                state: PointState::Skipped,
+            },
+            WalkPoint {
+                label: "P3".into(),
+                at: [8.0, 24.0, 1.2],
+                mic: None,
+                state: PointState::Pending,
+            },
+        ],
+        current: Some(2),
+        average: None,
+    }
+}
+
+/// Where [`walk`]'s first capture stood.
+pub fn trace_position() -> TracePosition {
+    TracePosition {
+        label: "P1".into(),
+        at: [5.0, 12.0, 1.2],
+        plan: "Hall".into(),
+        walk: WalkId(1),
     }
 }
 
