@@ -91,6 +91,7 @@ impl AppState {
         }
         let edit = f.edits();
         let transfer = f.kind == FormKind::Transfer && edit.is_none();
+        let own_pane = f.math.as_ref().is_some_and(|m| m.own_pane);
         let config = match f.meas_config(open.as_ref()) {
             Ok(c) => c,
             Err(e) => {
@@ -108,7 +109,9 @@ impl AppState {
                     self.rig.stack_on_create = Some(config.name.clone());
                 } else if matches!(&config.kind, MeasKind::Math { config: m } if matches!(m.expr, ac2_proto::model::MathExpr::Align { .. }))
                 {
-                    self.rig.align_on_create = Some(config.name.clone());
+                    self.rig.split_on_create = Some((config.name.clone(), TransferView::Alignment));
+                } else if own_pane {
+                    self.rig.split_on_create = Some((config.name.clone(), TransferView::Magnitude));
                 } else if !matches!(config.kind, MeasKind::Math { .. }) {
                     // A math channel is drawn on the pane of what it computes from.
                     self.rig.pane_on_create = Some(config.name.clone());

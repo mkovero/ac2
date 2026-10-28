@@ -39,12 +39,13 @@ fn a_fresh_session_asks_what_to_measure() -> R {
     d.until("the chooser", |s| chooser(s).is_some())?;
     let c = chooser(&d.st).ok_or("the chooser")?;
     assert_eq!(c.index, 0, "Transfer, on the transfer pane");
-    // The session is open by the time it asks: every kind can be made but math and
-    // alignment, which need two curves first; its inputs can be metered.
+    // The session is open by the time it asks: every kind can be made but math,
+    // alignment and the spatial average, which need two curves first; its inputs can be
+    // metered.
     let blocked: Vec<bool> = c.choices.iter().map(|x| x.blocked.is_some()).collect();
     assert_eq!(
         blocked,
-        [false, false, false, false, false, true, true, false]
+        [false, false, false, false, false, true, true, true, false]
     );
 
     d.key("Escape");
@@ -121,6 +122,7 @@ fn ctrl_m_makes_a_spectrum_from_an_empty_daemon() -> R {
             "Sweep",
             "Math channel",
             "Alignment",
+            "Spatial average",
             "Programme meter"
         ]
     );

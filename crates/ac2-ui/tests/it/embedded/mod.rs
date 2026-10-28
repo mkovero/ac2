@@ -19,6 +19,7 @@ mod keep;
 mod math;
 mod panes;
 mod session;
+mod spatial;
 mod spl;
 mod stimulus;
 mod sweep;

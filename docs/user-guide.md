@@ -42,9 +42,10 @@ inputs to capture. **Measurements** run on it: transfer functions (`tf`), spectr
 SPL meters and sweeps. In the app, every setting lives in **Settings** (**Ctrl+P**, the ⚙ in
 the top bar); **Shift+O** opens its Audio I/O page; **Ctrl+M** (*New measurement…*, also
 the last row of every pane's list) lists every kind — transfer, spectrum, RTA, SPL meter,
-sweep, math channel, alignment — with what each measures, and opens the chosen kind's settings
-(created, started and selected on **Enter**, in a pane of its own); a row it cannot make now
-says why. Its last row, *Programme meter*, makes no measurement: **Enter** opens its form
+sweep, math channel, alignment, spatial average — with what each measures, and opens the chosen
+kind's settings (created, started and selected on **Enter**, in a pane of its own); a row it
+cannot make now says why. *Spatial average* opens the math dialog filled in for
+[the average](#the-average-spatial-average) of every transfer measurement. Its last row, *Programme meter*, makes no measurement: **Enter** opens its form
 (the pair or inputs to meter, and the rig's programme-meter settings), whose **Enter** opens a
 [Programme pane](#programme-pane) beside the focused one; **Ctrl+M** on a Programme pane
 starts on that row. The palette (**Ctrl+K**) also has
@@ -1460,6 +1461,12 @@ positions ([spatial-average.md](design/spatial-average.md)). Make one transfer m
 per mic (same reference), then **Shift+M**, operator *average of several*: every curve of
 A's kind is listed and included (**←/→** leaves one out), with a method and smoothing. The
 legend counts: `Average of 4 · 4 positions · power avg`.
+
+In one step: **Ctrl+M**, *Spatial average* opens the same dialog on *average of several*,
+method power, every transfer measurement of the session included (a stopped one is left out
+until it starts; **←/→** leaves one out) and the name `Spatial average` (`Spatial average 2`,
+… when taken); **Enter** makes it in a pane of its own. With fewer than two transfer
+measurements the row is dimmed: *needs two transfer measurements*.
 
 - **power** (default): the level over the positions without cancellation; EQ against this.
 - **complex**: what one point summing the arrivals would hear (cancels where arrivals

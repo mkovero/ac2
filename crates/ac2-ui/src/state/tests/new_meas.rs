@@ -41,6 +41,8 @@ fn ctrl_m_lists_every_kind_with_its_own_key() {
             "Math channel — A ÷ × + − B of two curves, or the average of several  ·  Shift+M",
             "Alignment — delay and polarity of two systems in their overlap (sub + main, delay \
              tower)  ·  Alt+M",
+            "Spatial average — the power average of every transfer measurement (one per mic \
+             position)",
             "Programme meter — meters inputs live in a new pane (levels, correlation); adds no \
              measurement",
         ]
@@ -59,8 +61,13 @@ fn ctrl_m_lists_every_kind_with_its_own_key() {
         "{:?}",
         c.choices[6]
     );
+    // One transfer measurement: the spatial average row is dimmed with its reason.
     assert_eq!(
-        c.choices[7].blocked, None,
+        c.choices[7].blocked.as_deref(),
+        Some(ac2_scene::new_meas::SPATIAL_AVERAGE_NEEDS)
+    );
+    assert_eq!(
+        c.choices[8].blocked, None,
         "the session has inputs to meter"
     );
     // One transfer function and one spectrum: Shift+M would refuse, and the row says so.
@@ -116,7 +123,7 @@ fn the_focused_pane_picks_the_kind_highlighted() {
     t.go(PaneKind::Transfer);
     assert_eq!(at(&mut t), 0, "transfer");
     t.go(PaneKind::Programme);
-    assert_eq!(at(&mut t), 7, "the Programme meter");
+    assert_eq!(at(&mut t), 8, "the Programme meter");
 }
 
 /// The Alignment row opens what Alt+M opens: the math dialog, its operator on align.
@@ -152,6 +159,94 @@ fn the_alignment_row_opens_the_aligned_math_dialog() {
     assert_eq!(from_row, by_key);
 }
 
+/// The Spatial average row opens the math dialog filled in: the average of several, power,
+/// over every transfer measurement (a stopped one too), named past the names taken, the
+/// first position focused so ←/→ leaves it out; Enter sends that `meas.create`. With one
+/// transfer measurement the row is dimmed and Enter on it opens nothing.
+#[test]
+fn the_spatial_average_row_prefills_the_average_of_every_transfer() {
+    use ac2_proto::model::{AverageMethod, MathExpr, Operand};
+    use ac2_scene::new_meas::{NewKind, SPATIAL_AVERAGE_NEEDS};
+    let at = NewKind::ALL
+        .iter()
+        .position(|k| *k == NewKind::SpatialAverage)
+        .expect("spatial average row");
+
+    let mut t = T::new();
+    t.put(PaneKind::Transfer);
+    t.key("Ctrl+M");
+    assert_eq!(
+        chooser(&t).choices[at].blocked.as_deref(),
+        Some(SPATIAL_AVERAGE_NEEDS)
+    );
+    t.st.apply(Msg::Choose(Some(at)), &t.keys);
+    assert!(
+        !matches!(t.st.overlay, Overlay::Form(_)),
+        "{:?}",
+        t.st.overlay
+    );
+    t.key("Esc");
+
+    // Main L (1) and the delay tower (3, stopped), a spectrum, an RTA, and a channel
+    // already named Spatial average.
+    let mut s = four();
+    if let Some(m) = s.measurements.iter_mut().find(|m| m.id == MeasId(3)) {
+        m.running = false;
+    }
+    s.measurements.push(meas(5, "Spatial average", spectrum()));
+    t.conn(mirror(s));
+    t.key("Ctrl+M");
+    assert_eq!(chooser(&t).choices[at].blocked, None);
+    t.st.apply(Msg::Choose(Some(at)), &t.keys);
+    let f = form(&t);
+    assert_eq!(f.kind, FormKind::Math);
+    let rows: Vec<(String, String)> = f
+        .fields
+        .iter()
+        .map(|x| (x.label.clone(), x.display()))
+        .collect();
+    assert_eq!(rows[0], ("Operator".into(), "average of several".into()));
+    assert_eq!(rows[1], ("Main L (live)".into(), "in the average".into()));
+    assert_eq!(
+        rows[2],
+        ("Delay tower (live)".into(), "in the average".into())
+    );
+    assert_eq!(rows[3].0, "Method");
+    assert!(rows[3].1.starts_with("power"), "{rows:?}");
+    assert_eq!(
+        rows.last(),
+        Some(&("Name".into(), "Spatial average 2".into()))
+    );
+    assert_eq!(
+        f.fields[f.focus].label, "Main L (live)",
+        "the first position"
+    );
+
+    // ←/→ leaves the first position out; the name stays.
+    t.key("Right");
+    let f = form(&t);
+    assert_eq!(f.fields[1].display(), "left out");
+    assert_eq!(f.text(crate::forms::FieldId::Name), "Spatial average 2");
+    t.key("Left");
+
+    let r = t.key("Enter");
+    let c = created(&r).unwrap_or_else(|| panic!("{r:?}"));
+    assert_eq!(c.name, "Spatial average 2");
+    let MeasKind::Math { config } = &c.kind else {
+        panic!("{c:?}");
+    };
+    assert_eq!(
+        config.expr,
+        MathExpr::Average {
+            of: vec![
+                Operand::Meas { meas: MeasId(1) },
+                Operand::Meas { meas: MeasId(3) }
+            ],
+            method: AverageMethod::Power,
+        }
+    );
+}
+
 /// A session without inputs has nothing to meter: the row says so.
 #[test]
 fn the_meter_row_is_blocked_without_inputs() {
@@ -163,7 +258,7 @@ fn the_meter_row_is_blocked_without_inputs() {
     t.conn(mirror(s));
     t.key("Ctrl+M");
     assert_eq!(
-        chooser(&t).choices[7].blocked.as_deref(),
+        chooser(&t).choices[8].blocked.as_deref(),
         Some("no inputs in the session to meter")
     );
 }
@@ -365,7 +460,7 @@ fn empty_texts_name_the_chooser() {
             .as_deref(),
         Some(
             "No measurements — Ctrl+M → New measurement… (transfer, spectrum, RTA, SPL meter, \
-             sweep, math channel, alignment)"
+             sweep, math channel, alignment, spatial average)"
         )
     );
 }

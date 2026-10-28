@@ -190,6 +190,9 @@ pub struct MathForm {
     levels: Vec<Level>,
     /// The band the dialog last prefilled: while the rows still hold it, it follows A and B.
     auto_band: (String, String),
+    /// Made from the New measurement chooser's Spatial average row: the average opens in a
+    /// pane of its own, as every measurement made there does.
+    pub own_pane: bool,
 }
 
 /// What the rows currently say.
@@ -299,6 +302,7 @@ impl Form {
             mode: SmoothingMode::MagnitudePhase,
             levels: Vec::new(),
             auto_band: Default::default(),
+            own_pane: false,
         }));
         f.lay_out(picks, Some(FieldId::OperandA));
         Some(f)
@@ -337,6 +341,7 @@ impl Form {
             mode: SmoothingMode::MagnitudePhase,
             levels: Vec::new(),
             auto_band: Default::default(),
+            own_pane: false,
         }));
         // The operator focused: ←/→ changes the reading, Enter makes the channel as dropped.
         f.lay_out(picks, Some(FieldId::Operator));
@@ -411,9 +416,33 @@ impl Form {
                 .map_or(SmoothingMode::MagnitudePhase, |s| s.mode),
             levels: Vec::new(),
             auto_band: Default::default(),
+            own_pane: false,
         }));
         f.lay_out(picks, Some(FieldId::OperandA));
         Ok(f)
+    }
+
+    /// The Spatial average row's dialog: the operator on the average of several, power
+    /// method, over `of` (in candidate order, as the rows list them), named `name` until the
+    /// operator types another; the result opens in a pane of its own. The first position's
+    /// row is focused: ←/→ leaves it out.
+    pub fn choose_spatial_average(&mut self, of: &[Operand], name: &str) {
+        let Some(mut p) = self.picks() else {
+            return;
+        };
+        if let Some(m) = self.math.as_mut() {
+            m.own_pane = true;
+        }
+        p.domain = MathDomain::Transfer;
+        p.choice = Choice::Average;
+        p.a = of.first().copied();
+        p.b = None;
+        p.of = of.to_vec();
+        p.method = AverageMethod::Power;
+        p.reference = None;
+        p.name = name.to_owned();
+        let focus = p.a.map(FieldId::Member);
+        self.lay_out(p, focus);
     }
 
     /// What the math rows say now.

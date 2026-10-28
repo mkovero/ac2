@@ -69,7 +69,7 @@ fn to_field(t: &mut T, id: FieldId) {
 
 fn open_from_chooser(t: &mut T) {
     t.key("Ctrl+M");
-    t.st.apply(Msg::Choose(Some(7)), &t.keys);
+    t.st.apply(Msg::Choose(Some(8)), &t.keys);
 }
 
 fn calls(r: &[Request]) -> Vec<(&Command, &str)> {

@@ -14,6 +14,7 @@ pub enum NewKind {
     Sweep,
     Math,
     Alignment,
+    SpatialAverage,
     Programme,
 }
 
@@ -21,7 +22,7 @@ impl NewKind {
     /// The rows, top to bottom: the live two-channel measurement first, then one input's,
     /// then what is played and what is computed from the others; last the meter, which is
     /// not a measurement.
-    pub const ALL: [NewKind; 8] = [
+    pub const ALL: [NewKind; 9] = [
         NewKind::Transfer,
         NewKind::Spectrum,
         NewKind::Rta,
@@ -29,6 +30,7 @@ impl NewKind {
         NewKind::Sweep,
         NewKind::Math,
         NewKind::Alignment,
+        NewKind::SpatialAverage,
         NewKind::Programme,
     ];
 
@@ -42,6 +44,7 @@ impl NewKind {
             NewKind::Sweep => "Sweep",
             NewKind::Math => "Math channel",
             NewKind::Alignment => "Alignment",
+            NewKind::SpatialAverage => "Spatial average",
             NewKind::Programme => "Programme meter",
         }
     }
@@ -57,6 +60,9 @@ impl NewKind {
             NewKind::Math => "A ÷ × + − B of two curves, or the average of several",
             NewKind::Alignment => {
                 "delay and polarity of two systems in their overlap (sub + main, delay tower)"
+            }
+            NewKind::SpatialAverage => {
+                "the power average of every transfer measurement (one per mic position)"
             }
             NewKind::Programme => {
                 "meters inputs live in a new pane (levels, correlation); adds no measurement"
@@ -169,6 +175,23 @@ pub fn no_measurements(reach: &str) -> String {
     )
 }
 
+/// Why the Spatial average row cannot open: an average of one position is that position.
+pub const SPATIAL_AVERAGE_NEEDS: &str = "a spatial average needs two transfer measurements: \
+     make one per mic position first";
+
+/// The Spatial average row's name for the channel it makes: `Spatial average`, numbered
+/// ` 2`, ` 3` … past the measurement names already `taken`.
+pub fn spatial_average_name(taken: &[&str]) -> String {
+    let base = NewKind::SpatialAverage.name();
+    if !taken.contains(&base) {
+        return base.to_owned();
+    }
+    (2..)
+        .map(|i| format!("{base} {i}"))
+        .find(|c| !taken.contains(&c.as_str()))
+        .unwrap_or_else(|| base.to_owned())
+}
+
 /// A new transfer's default name: what it compares, `Reference → M30 FOH` (`mic`: the
 /// measurement input's name), numbered ` 2`, ` 3` … past the names already `taken`; `TF n`
 /// when the input has no name.
@@ -235,6 +258,8 @@ mod tests {
                 "Math channel — A ÷ × + − B of two curves, or the average of several",
                 "Alignment — delay and polarity of two systems in their overlap (sub + main, \
                  delay tower)  ·  Alt+M",
+                "Spatial average — the power average of every transfer measurement (one per mic \
+                 position)",
                 "Programme meter — meters inputs live in a new pane (levels, correlation); adds no \
                  measurement",
             ]
@@ -260,16 +285,43 @@ mod tests {
             Some("an alignment needs two transfer curves")
         );
         assert_eq!(
-            q.choices[7].blocked.as_deref(),
+            q.choices[8].blocked.as_deref(),
             Some("no inputs in the session to meter")
         );
         // The meter preselected but blocked: the first row that can be made.
         assert_eq!(q.default, 0);
         let open = new_choices(NewKind::Programme, |_| None, |_| None);
-        assert_eq!(open.default, 7);
+        assert_eq!(open.default, 8);
         assert_eq!(
             open.hint,
             "↑/↓ choose · Enter opens its settings · Esc cancels"
+        );
+    }
+
+    #[test]
+    fn the_spatial_average_row_is_dimmed_with_its_reason_and_numbers_its_name() {
+        let q = new_choices(
+            NewKind::Transfer,
+            |_| None,
+            |k| (k == NewKind::SpatialAverage).then(|| SPATIAL_AVERAGE_NEEDS.to_owned()),
+        );
+        let row = &q.choices[7];
+        assert!(row.label.starts_with("Spatial average — "), "{}", row.label);
+        assert_eq!(
+            row.blocked.as_deref(),
+            Some(
+                "a spatial average needs two transfer measurements: make one per mic position \
+                 first"
+            )
+        );
+        assert_eq!(spatial_average_name(&[]), "Spatial average");
+        assert_eq!(
+            spatial_average_name(&["Reference → M30 FOH", "Spatial average"]),
+            "Spatial average 2"
+        );
+        assert_eq!(
+            spatial_average_name(&["Spatial average", "Spatial average 2"]),
+            "Spatial average 3"
         );
     }
 
@@ -294,7 +346,7 @@ mod tests {
         assert_eq!(
             no_measurements("Ctrl+M"),
             "No measurements — Ctrl+M → New measurement… (transfer, spectrum, RTA, SPL meter, \
-             sweep, math channel, alignment)"
+             sweep, math channel, alignment, spatial average)"
         );
     }
 }

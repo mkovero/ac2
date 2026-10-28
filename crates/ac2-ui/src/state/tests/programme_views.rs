@@ -131,7 +131,7 @@ fn the_forms_ember_decay_is_this_apps_setting() {
     let was = t.st.prefs.ember_decay_s;
     for (close, kept) in [("Escape", false), ("Enter", true)] {
         t.key("Ctrl+M");
-        t.st.apply(Msg::Choose(Some(7)), &t.keys);
+        t.st.apply(Msg::Choose(Some(8)), &t.keys);
         let Overlay::Form(f) = &t.st.overlay else {
             panic!("no form: {:?}", t.st.overlay)
         };
@@ -160,7 +160,7 @@ fn the_forms_ember_glow_is_this_apps_setting() {
     let mut t = meter_t();
     for (close, want) in [("Escape", 1.0), ("Enter", 1.5)] {
         t.key("Ctrl+M");
-        t.st.apply(Msg::Choose(Some(7)), &t.keys);
+        t.st.apply(Msg::Choose(Some(8)), &t.keys);
         let Overlay::Form(f) = &t.st.overlay else {
             panic!("no form: {:?}", t.st.overlay)
         };

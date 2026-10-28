@@ -100,9 +100,9 @@ pub struct RigState {
     /// The name of a sweep, spectrum, RTA or SPL meter submitted from its form: its
     /// creation brings up a pane of its kind for it.
     pub(super) pane_on_create: Option<String>,
-    /// The name of an alignment submitted from the math dialog: its creation splits the
-    /// focused pane and the new half shows its alignment view.
-    pub(super) align_on_create: Option<String>,
+    /// The name of an alignment (or a spatial average) submitted from the math dialog, and
+    /// the view it opens in: its creation splits the focused pane and the new half shows it.
+    pub(super) split_on_create: Option<(String, TransferView)>,
     /// Open the Sessions dialog once the daemon's state shows no audio I/O (an embedded
     /// daemon on real audio starts without one): its New leads on to the audio setup.
     pub open_session_when_empty: bool,
@@ -225,7 +225,7 @@ impl RigState {
             pending: Pending::default(),
             stack_on_create: None,
             pane_on_create: None,
-            align_on_create: None,
+            split_on_create: None,
             open_session_when_empty: false,
             choose_when_open: false,
             devices: None,

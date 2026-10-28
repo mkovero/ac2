@@ -61,17 +61,21 @@ impl AppState {
     }
 
     /// A row of the chooser taken: that kind's own command opens its form; the meter's form
-    /// has no command of its own.
+    /// and the spatial average's prefilled math form have no command of their own.
     pub(super) fn new_measurement_pick(&mut self, i: usize, out: &mut Vec<Request>) {
         let Some(kind) = NewKind::ALL.get(i).copied() else {
             return;
         };
-        match kind_command(kind) {
-            Some(c) => {
+        match (kind, kind_command(kind)) {
+            (_, Some(c)) => {
                 let keymap = self.keys.clone();
                 self.command(c, &keymap, out);
             }
-            None => self.open_meter_form(None, out),
+            (NewKind::SpatialAverage, None) => match self.spatial_average_form() {
+                Ok(f) => self.overlay = Overlay::Form(Box::new(f)),
+                Err(why) => self.warn(why),
+            },
+            (_, None) => self.open_meter_form(None, out),
         }
     }
 
@@ -81,6 +85,7 @@ impl AppState {
         match k {
             NewKind::Math => self.math_form().err(),
             NewKind::Alignment => self.alignment_form().err(),
+            NewKind::SpatialAverage => self.spatial_average_form().err(),
             NewKind::Programme if self.open_session().is_none() => Some(format!(
                 "no audio I/O to meter: {}",
                 open_session_hint(keymap)
@@ -197,6 +202,37 @@ impl AppState {
         Ok(f)
     }
 
+    /// The math channel form on the average of several, power method, over every transfer
+    /// measurement of the session (running or stopped: the daemon leaves a stopped one out
+    /// until it starts), named `Spatial average` (numbered past the names taken); or why it
+    /// cannot open.
+    pub(super) fn spatial_average_form(&self) -> Result<Form, String> {
+        let owner = self
+            .selected_group()
+            .unwrap_or(ac2_proto::model::TraceOwner::Imported);
+        let candidates = self.math_candidates(Some(owner));
+        // In the rows' (candidate) order, as many as an average takes.
+        let of: Vec<Operand> = candidates
+            .iter()
+            .filter(|c| {
+                c.domain == ac2_proto::model::MathDomain::Transfer
+                    && matches!(c.operand, Operand::Meas { .. })
+            })
+            .map(|c| c.operand)
+            .take(ac2_proto::model::MathConfig::MAX_AVERAGE)
+            .collect();
+        let refused = || ac2_scene::new_meas::SPATIAL_AVERAGE_NEEDS.to_owned();
+        if of.len() < 2 {
+            return Err(refused());
+        }
+        let ms = self.measurements();
+        let taken: Vec<&str> = ms.iter().map(|m| m.config.name.as_str()).collect();
+        let name = ac2_scene::new_meas::spatial_average_name(&taken);
+        let mut f = Form::math(candidates, of.first().copied(), owner).ok_or_else(refused)?;
+        f.choose_spatial_average(&of, &name);
+        Ok(f)
+    }
+
     /// Every transfer curve's magnitude as drawn now, live and stored: what an alignment's
     /// band is prefilled from.
     pub(super) fn transfer_levels(&self) -> Vec<crate::math_dialog::Level> {
@@ -235,7 +271,8 @@ impl AppState {
 }
 
 /// The command that opens kind `k`'s form; `None` for the meter, whose own key (P) needs
-/// a picked Inputs row the chooser has not got: its form opens from the chooser alone.
+/// a picked Inputs row the chooser has not got, and for the spatial average, a math form
+/// filled in that only the chooser opens: their forms open from the chooser alone.
 fn kind_command(k: NewKind) -> Option<CommandId> {
     Some(match k {
         NewKind::Transfer => CommandId::NewTransfer,
@@ -245,6 +282,6 @@ fn kind_command(k: NewKind) -> Option<CommandId> {
         NewKind::Sweep => CommandId::SweepNew,
         NewKind::Math => CommandId::NewMath,
         NewKind::Alignment => CommandId::NewAlignment,
-        NewKind::Programme => return None,
+        NewKind::SpatialAverage | NewKind::Programme => return None,
     })
 }

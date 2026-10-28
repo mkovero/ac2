@@ -424,21 +424,26 @@ impl AppState {
         }
     }
 
-    /// A new alignment's own pane: the focused pane split, the new half showing the
-    /// alignment view of `meas` (the focused pane keeps what it shows).
-    pub(in crate::state) fn open_alignment(&mut self, meas: MeasId) {
+    /// A new alignment's (or spatial average's) own pane: the focused pane split, the new
+    /// half showing `meas` in transfer view `view` (the focused pane keeps what it shows).
+    pub(in crate::state) fn open_split(&mut self, meas: MeasId, view: TransferView) {
         let Some(new) = self.split_for_new() else {
-            let g = self.keys.label(CommandId::NextView, Scope::Transfer);
-            self.warn(format!(
-                "no room to split the pane for the alignment: {} on a transfer pane steps to its view",
-                g.as_deref().unwrap_or("Next view")
-            ));
+            let text = if view == TransferView::Alignment {
+                let g = self.keys.label(CommandId::NextView, Scope::Transfer);
+                format!(
+                    "no room to split the pane for the alignment: {} on a transfer pane steps to its view",
+                    g.as_deref().unwrap_or("Next view")
+                )
+            } else {
+                "no room to split a pane for it: the transfer pane's list shows it".to_owned()
+            };
+            self.warn(text);
             return;
         };
         self.set_pane_kind(new, PaneKind::Transfer);
         if let Some(v) = self.layout.view_mut(new) {
             v.meas = Some(meas);
-            v.modes.transfer = TransferView::Alignment;
+            v.modes.transfer = view;
         }
     }
 
