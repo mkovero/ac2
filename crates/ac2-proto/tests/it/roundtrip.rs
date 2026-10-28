@@ -622,3 +622,57 @@ fn codec_cost() {
         parts.iter().map(Vec::len).sum::<usize>()
     );
 }
+
+#[test]
+fn plan_types_roundtrip_and_refuse_unknown_fields() {
+    use ac2_proto::model::{Marker, MarkerKind, PlanSpec, Surface, SurfaceTag, ZoneSpec};
+    let plan = PlanSpec {
+        name: "Hall".into(),
+        outline: vec![[0.0, 0.0], [20.0, 0.0], [20.0, 30.0], [0.0, 30.0]],
+        ceiling: Some(9.5),
+        zones: vec![ZoneSpec {
+            name: "Stalls".into(),
+            outline: vec![[2.0, 8.0], [18.0, 8.0], [18.0, 28.0], [2.0, 28.0]],
+            ear_height: 1.2,
+            weight: None,
+            seats: Some(600),
+        }],
+        markers: vec![Marker {
+            name: "FOH".into(),
+            kind: MarkerKind::Foh,
+            at: [10.0, 20.0, 1.5],
+            heading_deg: Some(-90.0),
+        }],
+        surfaces: vec![
+            SurfaceTag {
+                surface: Surface::Wall { edge: 2 },
+                material: "brick".into(),
+            },
+            SurfaceTag {
+                surface: Surface::Ceiling,
+                material: "plaster".into(),
+            },
+        ],
+    };
+    let b = rmp_serde::to_vec_named(&plan).expect("plan encodes");
+    let back: PlanSpec = rmp_serde::from_slice(&b).expect("plan decodes");
+    assert_eq!(back, plan);
+
+    #[derive(serde::Serialize)]
+    struct ExtraMarker {
+        name: &'static str,
+        kind: &'static str,
+        at: [f64; 3],
+        heading_deg: Option<f64>,
+        surprise: bool,
+    }
+    let b = rmp_serde::to_vec_named(&ExtraMarker {
+        name: "x",
+        kind: "speaker",
+        at: [0.0; 3],
+        heading_deg: None,
+        surprise: true,
+    })
+    .expect("probe encodes");
+    assert!(rmp_serde::from_slice::<Marker>(&b).is_err());
+}
