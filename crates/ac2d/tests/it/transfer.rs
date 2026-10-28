@@ -861,3 +861,77 @@ fn a_retried_delay_find_runs_once() {
     assert_eq!(c.recv_raw(T).unwrap(), first);
     h.shutdown();
 }
+
+/// `filled` counts the averages up from 0 to 1 as blocks arrive, starts over at `meas.reset`
+/// and drops again when a delay step starts stages over.
+#[test]
+fn filled_rises_after_a_reset_and_a_delay_step_restarts_it() {
+    init_log();
+    let backend = manual_rig();
+    let h = Daemon::start(steady_config(backend.clone(), inproc("tf-filled"))).unwrap();
+    let (mut c, sub) = connect(&h, &[b"d/1/tf"]);
+    c.ok(Command::SessionOpen {
+        config: session(true),
+    });
+    let mut m = transfer("main");
+    if let MeasKind::Transfer { config } = &mut m.kind {
+        config.depth = DepthPolicy::FastLf {
+            max_settle_s: Seconds(0.5),
+        };
+    }
+    c.ok(Command::MeasCreate { config: m });
+    c.ok(Command::MeasStart { meas: MeasId(1) });
+    let tok = match c.ok(Command::GenAcquire { force: false }) {
+        ReplyBody::Lease(l) => l.lease_token,
+        other => panic!("{other:?}"),
+    };
+    c.ok(Command::GenSet {
+        lease_token: tok,
+        desired: GeneratorDesired {
+            settings: GeneratorSettings {
+                signal: Signal::Pink,
+                level: Dbfs(-20.0),
+                band: None,
+                outputs: vec![0],
+            },
+            armed: true,
+            firing: true,
+        },
+    });
+    let mut d = driver(&backend);
+    // Runs until `filled` reads 1, checking it never falls on the way; the readings seen.
+    let fill_up = |d: &mut FakeDriver, c: &mut Client, min_rev: u64| {
+        let mut seen = Vec::new();
+        for _ in 0..100 {
+            let f = run_tf(d, &sub, 0.1, min_rev);
+            let filled = tf(&f).meta.filled;
+            assert!((0.0..=1.0).contains(&filled), "{filled}");
+            if let Some(&last) = seen.last() {
+                assert!(filled >= last, "{seen:?} then {filled}");
+            }
+            seen.push(filled);
+            c.ok(Command::GenRefresh { lease_token: tok });
+            if filled == 1.0 {
+                return seen;
+            }
+        }
+        panic!("never filled: {seen:?}");
+    };
+    let first = fill_up(&mut d, &mut c, 0);
+    assert!(first.len() > 3 && first[0] < 0.5, "{first:?}");
+
+    c.ok(Command::MeasReset { meas: MeasId(1) });
+    let after_reset = fill_up(&mut d, &mut c, 0);
+    assert!(after_reset[0] < 0.5, "{after_reset:?}");
+
+    let rev = match c.ok(Command::DelaySet {
+        meas: MeasId(1),
+        delay: Seconds(0.05),
+    }) {
+        ReplyBody::Measurement(m) => m.config_rev.0,
+        other => panic!("{other:?}"),
+    };
+    let after_step = fill_up(&mut d, &mut c, rev);
+    assert!(after_step[0] < 1.0, "{after_step:?}");
+    h.shutdown();
+}

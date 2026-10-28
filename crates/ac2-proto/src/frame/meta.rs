@@ -36,6 +36,13 @@ pub struct TfMeta {
     /// Where the columns are finer than the analysis stage serving them resolves; `None`
     /// for a math channel.
     pub unresolved: Option<Unresolved>,
+    /// How full the averages behind this frame are, 0 to 1: the least full analysis stage's
+    /// accumulated blocks over the blocks it needs. Blocks, not elapsed time, so blocks that
+    /// protection refused add nothing and a measurement that never averaged never reads 1.
+    /// Columns turn valid with a single block, long before their averages settle, so a
+    /// client that waits for a settled average (a capture at a position) needs this.
+    /// For a math channel: the least of its included live operands (1 for a trace).
+    pub filled: f32,
 }
 
 /// What a math channel's frame combined.

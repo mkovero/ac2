@@ -105,6 +105,24 @@ impl Mtw {
             .collect()
     }
 
+    /// How full the averages are, 0 to 1: over the stages, the least of the blocks
+    /// accumulated since the stage's average last started over ÷ the blocks it needs to be
+    /// full ([`StageAveraging::full_blocks`]).
+    ///
+    /// Blocks, not elapsed time: a block that protection rejected adds nothing, so an
+    /// average that has not been fed never reads full. Whether the stage started over at a
+    /// restart (stream gap, delay change) or at an averaging reset only moves when its first
+    /// block arrives (`first_block_s` after a restart, one hop after a reset); the block
+    /// count to full is the same, so one ratio serves both. A `FastLf`-capped stage needs
+    /// only its capped depth. The least full stage is not necessarily the deepest: a delay
+    /// change can start over only some stages.
+    pub fn fill(&self) -> f64 {
+        self.stages
+            .iter()
+            .map(|s| (s.est.held() as f64 / s.averaging.full_blocks()).min(1.0))
+            .fold(1.0, f64::min)
+    }
+
     /// Model effective averages of stage `stage` once its average is full (FIFO) or in
     /// steady state (exponential), for a single bin.
     pub fn steady_eff_avg(&self, stage: usize) -> f64 {

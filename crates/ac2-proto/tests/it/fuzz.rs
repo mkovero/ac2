@@ -48,6 +48,7 @@ fn tf_strategy() -> impl Strategy<Value = Frame> {
                         mic_curve: eff,
                         math: None,
                         unresolved: None,
+                        filled: 1.0,
                     },
                     mag,
                     phase,

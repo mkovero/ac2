@@ -56,6 +56,7 @@ fn member(meas: u32, db: f32, arrival: f64, inserted: f64, prot: ProtectionFlags
                 mic_curve: false,
                 math: None,
                 unresolved: None,
+                filled: 1.0,
             },
             mag: vec![db; f.len()],
             phase,
@@ -160,6 +161,53 @@ fn power_average_leaves_out_refused_and_stopped_operands() {
     let m = f.meta.math.as_ref().expect("math metadata");
     assert_eq!(m.included(), 2);
     assert_eq!(m.phase, PhaseBasis::SharedTimeBase);
+}
+
+/// A live operand's result with its averages `filled` that full.
+fn filled(a: Answer, filled: f32) -> Answer {
+    let Answer::Result(mut f) = a else {
+        panic!("live operand");
+    };
+    let FrameData::Tf(t) = &mut f.data else {
+        panic!("transfer");
+    };
+    t.meta.filled = filled;
+    Answer::Result(f)
+}
+
+/// The result is as full as its least full included live operand: a refused operand does
+/// not hold it back, a stored operand counts as full, and with nothing included it is 0.
+#[test]
+fn filled_is_the_least_of_the_included_live_operands() {
+    let c = avg(&[1, 2, 3], AverageMethod::Power);
+    let answers = [
+        filled(flat(1, 0.0), 0.9),
+        filled(flat(2, 0.0), 0.4),
+        filled(member(3, 0.0, 0.0, 0.0, ProtectionFlags::NO_SIGNAL), 0.1),
+    ];
+    assert_eq!(run(&c, &[None; 3], &answers).meta.filled, 0.4);
+
+    let ratio = binary(
+        meas(1),
+        MathOp::Divide,
+        Operand::Trace { trace: TraceId(4) },
+    );
+    let live = [
+        filled(member(1, 0.0, 0.0, 0.0, ProtectionFlags::NONE), 0.3),
+        stored(0.0, 0.0, Some(EPOCH)),
+    ];
+    assert_eq!(run(&ratio, &[None; 2], &live).meta.filled, 0.3);
+    let full = [flat(1, 0.0), stored(0.0, 0.0, Some(EPOCH))];
+    assert_eq!(run(&ratio, &[None; 2], &full).meta.filled, 1.0);
+    let traces = binary(
+        Operand::Trace { trace: TraceId(4) },
+        MathOp::Divide,
+        Operand::Trace { trace: TraceId(5) },
+    );
+    let stored_only = [stored(1.0, 0.0, Some(EPOCH)), stored(0.0, 0.0, Some(EPOCH))];
+    assert_eq!(run(&traces, &[None; 2], &stored_only).meta.filled, 1.0);
+    let none = [Answer::Stopped, Answer::Stopped];
+    assert_eq!(run(&ratio, &[None; 2], &none).meta.filled, 0.0);
 }
 
 /// A weak reference only holds an operand's averaging: it stays in.

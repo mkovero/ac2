@@ -65,6 +65,7 @@ pub fn tf_frame() -> Frame {
                     mode: SmoothingMode::Magnitude,
                 }),
                 mic_curve: true,
+                filled: 0.625,
                 unresolved: Some(Unresolved {
                     resolution: Resolution::NinetySixth,
                     ranges: vec![

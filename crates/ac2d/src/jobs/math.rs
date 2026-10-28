@@ -352,6 +352,9 @@ struct Value {
     scale: Option<LevelScale>,
     level: Option<SpecLevel>,
     mic_curve: bool,
+    /// How full a live transfer's averages are (`TfMeta::filled`); 1 for a stored operand,
+    /// whose average is complete.
+    filled: f32,
     frame: Option<FrameData>,
 }
 
@@ -365,19 +368,24 @@ fn value(a: &Answer, f: Option<&Frame>, epoch: SessionEpoch) -> Option<Value> {
             scale: h.scale,
             level: h.level,
             mic_curve: h.mic_curve,
+            filled: 1.0,
             frame: None,
         });
     }
     let f = f?;
     let (_, columns) = capture_columns(&f.data)?;
+    let mut filled = 1.0;
     let (delay, validity, scale, level, mic_curve) = match &f.data {
-        FrameData::Tf(t) => (
-            t.meta.delay.0,
-            Some(t.validity.clone()),
-            None,
-            None,
-            t.meta.mic_curve,
-        ),
+        FrameData::Tf(t) => {
+            filled = t.meta.filled;
+            (
+                t.meta.delay.0,
+                Some(t.validity.clone()),
+                None,
+                None,
+                t.meta.mic_curve,
+            )
+        }
         FrameData::Spec(s) => (
             0.0,
             None,
@@ -402,6 +410,7 @@ fn value(a: &Answer, f: Option<&Frame>, epoch: SessionEpoch) -> Option<Value> {
         scale,
         level,
         mic_curve,
+        filled,
         frame: Some(f.data.clone()),
     })
 }
@@ -601,6 +610,13 @@ pub(crate) fn combine(
             .iter()
             .filter(|(k, _)| !(filter && *k == 1))
             .all(|(_, v)| v.mic_curve);
+    // The result is as settled as its least settled operand; with none included nothing
+    // has been averaged.
+    let filled = if included.is_empty() {
+        0.0
+    } else {
+        included.iter().map(|(_, v)| v.filled).fold(1.0, f32::min)
+    };
     let first_frame = included.iter().find_map(|(_, v)| v.frame.as_ref());
     let fixed_delay = match reference {
         CoreReference::Fixed(d) => d,
@@ -625,6 +641,7 @@ pub(crate) fn combine(
                 mic_curve,
                 math: state,
                 unresolved: None,
+                filled,
             },
             mag,
             phase: phase_deg.unwrap_or_else(nan),

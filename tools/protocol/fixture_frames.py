@@ -132,6 +132,7 @@ def tf_frame():
                 "resolution": "ninety_sixth",
                 "ranges": [{"lo": 31.25, "hi": 135.5}, {"lo": 1625.0, "hi": 3250.0}],
             },
+            "filled": 0.625,
         },
         [
             (arr("mag", "db"), [val(i, (3 * i - 600) / 100.0) for i in range(n)]),

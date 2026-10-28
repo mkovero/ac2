@@ -100,6 +100,17 @@ impl StageAveraging {
             StageAveraging::Exponential { alpha } => 3.0 / -(1.0 - alpha).ln(),
         }
     }
+
+    /// Blocks accumulated from an empty average until it is full: FIFO `blocks`;
+    /// exponential [`StageAveraging::settle_blocks`], when the start-up deficit of the
+    /// weight, (1 − α)ⁿ, has fallen to e⁻³. At least one: a single block fills an α = 1
+    /// average.
+    pub fn full_blocks(&self) -> f64 {
+        match *self {
+            StageAveraging::Fifo { blocks } => blocks.max(1) as f64,
+            StageAveraging::Exponential { .. } => self.settle_blocks().max(1.0),
+        }
+    }
 }
 
 /// Stationary white-noise model of the correlation between Hann-windowed DFT coefficients.

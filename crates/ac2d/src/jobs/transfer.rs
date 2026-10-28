@@ -423,6 +423,7 @@ impl Transfer {
                 mic_curve: self.corr.is_some(),
                 math: None,
                 unresolved: Some(self.unresolved.clone()),
+                filled: self.mtw.fill() as f32,
             },
             mag,
             phase,

@@ -11,6 +11,7 @@ use num_complex::Complex64;
 use std::f64::consts::PI;
 
 mod fast_lf;
+mod fill;
 mod golden;
 mod layout;
 mod loopback;

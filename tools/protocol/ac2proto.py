@@ -13,7 +13,7 @@ import zlib
 
 import msgpack
 
-PROTO_VERSION = 72
+PROTO_VERSION = 73
 MAX_HEADER_BYTES = 8192
 MAX_N = 1 << 16
 MAX_ARRAYS = 8
@@ -184,7 +184,8 @@ _GONIO_PAIR = [("left", None), ("right", None), ("gain_dbfs", None)]
 META = {
     "tf": [("delay", None), ("nudged", None), ("smoothing", ("opt", _SMOOTHING)), ("mic_curve", None),
            ("math", _MATH),
-           ("unresolved", ("opt", [("resolution", None), ("ranges", ("list", [("lo", None), ("hi", None)]))]))],
+           ("unresolved", ("opt", [("resolution", None), ("ranges", ("list", [("lo", None), ("hi", None)]))])),
+           ("filled", None)],
     "ir": [("sample_rate", None), ("t0", None), ("dt", None), ("inserted_delay", None)],
     "rta": [("fraction", None), ("weighting", None), ("scale", None), ("cal", _CAL), ("mic_curve", None),
             ("math", _MATH)],
