@@ -694,6 +694,8 @@ mod panes;
 
 mod meas_layout;
 
+mod own_panes;
+
 mod rig;
 // Two rigs in one app: their ids collide, their state never mixes.
 mod rigs;

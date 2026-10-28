@@ -782,7 +782,9 @@ only outlined while a later-selected trace has them.
 Full screen is the **stage view**: no top bar, lists, pane titles or key hints; a plot keeps
 a one-line caption naming the pane and measurement (the SPL meter and Leq windows name
 themselves). Arming, playing, stopping the stimulus or a running sweep change nothing on it;
-Esc and Shift+Esc stop as always.
+Esc and Shift+Esc stop as always. A measurement row with more than one pane of its own
+brings them all back (one pane alone again with **W**; in the stage view it stays the stage
+view, panes only); any other row's measurement shows in the pane alone.
 
 **F** (or **F11**) steps the window: windowed → window full screen (top bar and lists as
 before) → **panes only** (the stage view with every pane) → windowed. With one pane up (W),
@@ -811,7 +813,8 @@ A measurement can carry its own panes. Choose its row (click, **Tab**), then edi
 panes — split, close, change a pane's kind or view, **T**, drag a split, lay out the
 transfer stack, pick another measurement on a pane's chip or drop a row on it, zoom or pan
 a pane's level axis — and the layout is stored on that measurement. Choosing its row again
-brings its panes back; a measurement without a layout keeps the panes on screen. Only a
+brings its panes back, all of them even when one pane was alone on screen (**W**); a
+measurement without a layout keeps the panes on screen. Only a
 measurement row brings panes. A measurement picked into one of its panes is a guest there:
 the edit is stored on the measurement whose row was chosen, never on the guest, and never on
 any other measurement, even one whose panes happen to look the same. An edit after which no

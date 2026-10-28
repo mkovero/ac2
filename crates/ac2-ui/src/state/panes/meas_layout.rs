@@ -153,6 +153,13 @@ impl AppState {
         if std::mem::take(&mut self.rig.own_panes_due) {
             self.rig.own_panes = self.rig.selected;
             let own = self.rig.selected.and_then(|id| self.own_layout(id));
+            // The row asks for all of its panes: one alone (W) would hide the rest until
+            // something else lays the panes out again (N's split shows them all). The stage
+            // view stays one, with every pane.
+            if self.layout.maximized && own.as_ref().is_some_and(|l| l.panes().len() > 1) {
+                self.layout.maximized = false;
+                self.panes_only |= self.fullscreen;
+            }
             if let Some(l) = own.filter(|l| *l != self.pane_layout()) {
                 self.show_layout(&l);
             }

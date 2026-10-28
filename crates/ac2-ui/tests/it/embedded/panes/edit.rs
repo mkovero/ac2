@@ -205,15 +205,25 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
     assert!(!d.st.rig.traces.contains_key(&a));
     assert_eq!(d.st.trace_rows().len(), 1);
 
-    // Maximised: a measurement picked in the list brings up its pane.
+    // One pane alone (W): a measurement row brings all of its own panes (each has the four
+    // it was edited in), its own in focus; W after it shows that pane alone again.
+    let all = [
+        PaneKind::Transfer,
+        PaneKind::Spectrum,
+        PaneKind::Transfer,
+        PaneKind::Spl,
+    ];
     d.key("W");
     assert!(d.st.layout.maximized);
     d.send(Msg::SelectMeas(sp));
-    assert_eq!(crate::common::visible(&d.st), [PaneKind::Spectrum]);
+    assert_eq!(crate::common::visible(&d.st), all);
     assert_eq!(d.st.kind_meas(PaneKind::Spectrum).map(|m| m.id), Some(sp));
+    assert_eq!(d.st.layout.focus_kind(), PaneKind::Spectrum);
+    d.key("W");
+    assert_eq!(crate::common::visible(&d.st), [PaneKind::Spectrum]);
     d.send(Msg::SelectMeas(tf));
-    assert_eq!(crate::common::visible(&d.st), [PaneKind::Transfer]);
-    assert!(d.st.layout.maximized);
+    assert_eq!(crate::common::visible(&d.st), all);
+    assert_eq!(d.st.layout.focus_kind(), PaneKind::Transfer);
     drop(d);
     drop(daemon);
     Ok(())
