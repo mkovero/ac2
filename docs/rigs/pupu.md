@@ -17,7 +17,8 @@ what ac2 learned on it.
   session: reopen it (step 5 below).
   JACK port order can move (ADAT block before/after analog): check silently before emitting —
   captures 9–14 read exact digital zero when analog is first.
-- **Wiring (2026-10-28):** out 1 (AN1) → Genelec 1083 (two-way: woofer and tweeter); outs 5/6 →
+- **Wiring (2026-10-28):** out 2 (AN2) → Genelec 1083 (two-way: woofer and tweeter; on out 1 until
+  2026-10-28, older notes say out 1); outs 5/6 →
   cables → ins 7/8 (reference loopbacks; out 5 → in 7 is the session's); in 1 = measurement mic,
   beyerdynamic MM1 (449350, s/n 34804), **mounted at 90° (pointing up)** → use
   `~/src/ac/beyer/449350_34804_90Grad.txt`; in 2 = Behringer measurement mic "Vilppu behringer #3"
@@ -204,6 +205,32 @@ DMM 4.320 mV, ac2 −36.0 dBFS → 0 dBFS = 271.3 mV; with the data-sheet 15.0 m
 **0 dBFS = 119.1 dB SPL** on input 1 (±1 dB, labelled "electrical in-line, data sheet"). The tone
 was ≈ 83.2 dB SPL at the mic. Holds only at this preamp gain.
 
+## Acoustic calibration and mic comparison (2026-10-28)
+
+Operator's 1 kHz calibrator (94 / 104 / 114 dB steps) with a ½" fit for the Behringer; the MM1
+is thinner and needs a careful seal. Both preamps 20 dB, phantom on.
+
+- **in 2, Vilppu behringer #3** (`cal spl --input 2`): 94 → −25.3 dBFS (0 dBFS = 119.3 dB SPL),
+  104 → −15.4 (119.4), 114 → −5.4 (119.4); stored the 114 dB one, **0 dBFS = 119.4 dB SPL**.
+  Linear within 0.1 dB over 20 dB; in 2 clips at ≈ 119 dB SPL at this gain.
+- **in 1, MM1 34804, read only** (its electrical cal kept, 0 dBFS = 120.5): a loose fit read
+  94.2 / 109.3 / 117.4 for 94 / 104 / 114 (the seal changed per insertion: a smaller cavity reads
+  high); seated well, all three within ≈ 0.2 dB. The loaded-electrical calibration holds.
+- **Side by side** at 50 cm from the Genelec, 107 cm high, 8 cm apart, MM1 at 90° (up), no mic
+  curve in either SPL reading; pink at −50 dBFS on out 2, Leq 8 s, then the mics swapped:
+
+  | weighting | Behringer − MM1 | swapped | mean (position cancelled) |
+  |---|---|---|---|
+  | A | +1.6 | +3.2 | +2.4 |
+  | C | +1.2 | +2.2 | +1.7 |
+  | Z (background removed) | +1.6 | +3.1 | +2.4 |
+
+  The calibrator puts the two within 0.2 dB, so the ≈ 2 dB in the field is the mics'
+  responses (the MM1 grazing at 90° loses top end, the Behringer has no curve), not
+  sensitivity; a band comparison would show where. A 1 kHz sine read +4.3 dB: a single
+  tone 8 cm apart sits on different room interference, so it says nothing about the mics.
+  Background (A): MM1 42 dB, Behringer 44 dB.
+
 ## SPL log over 32 h (2026-10-04/05, `spl leq export`)
 
 FOH SPL (in 1, electrical cal), 115 995 rows, exported over the network in 0.5 s (10 MB CSV),
@@ -225,8 +252,8 @@ crosstalk elsewhere below −118 dBFS except the Xone's own L/R (−68 dB):
 
 | out | goes to | reads | gain |
 |---|---|---|---|
-| 1 | Genelec 1083 | — (never probed) | |
-| 2 | nothing since 2026-10-28 (was in 2, loopback reference: −47.6 dBFS, +2.4 dB) | — | |
+| 1 | nothing since 2026-10-28 (was the Genelec) | — | |
+| 2 | Genelec 1083 since 2026-10-28 (was in 2, loopback reference: −47.6 dBFS, +2.4 dB) | — | |
 | 3, 4 | nothing | — | |
 | 5 | in 7 (loopback reference since 2026-10-28; −60 dBFS sine → −65.8 dBTP ppm) | | |
 | 6 | in 8 (second loopback; the same) | | |
