@@ -1,6 +1,6 @@
 # Spatial walk: room plans, suggested mic positions, a guided average
 
-Status: design (2026-10-28), review round 2. The operator wants three things: a spatial average of
+Status: design (2026-10-28), review round 3. The operator wants three things: a spatial average of
 N mics made in one step; a walkthrough that suggests mic positions inside a room of any shape and
 follows the measurements through them; and, later, ray tracing that room. The simulator stays out
 of ac2's way while it grows (§2).
@@ -57,7 +57,9 @@ Two parts with different futures:
 **The wire is ac2's.** `ac2-proto` owns the plan's wire types (`PlanSpec`, `ZoneSpec`, `Marker`),
 under `deny_unknown_fields`, `WIRE_LOCK` and the Python fixtures, like every other wire type.
 `ac2-room` takes and returns them (it depends on `ac2-proto`'s model types only, as `ac2-traces`
-does). A plan change is a `PROTO_VERSION` bump like any wire change.
+does; `ac2-proto` depends on no ac2 crate, so there is no cycle). `ac2-scene` uses `ac2-room` for
+the plan editor's validation and the FOH-relative readout (it is geometry, not DSP; the ac2-ui
+no-DSP test does not forbid it). The crate map gains an `ac2-room` row. A plan change is a `PROTO_VERSION` bump like any wire change.
 
 ## 3. Room plans (G3)
 
@@ -73,7 +75,7 @@ PlanSpec {
   markers: Vec<Marker>,
   surfaces: Vec<SurfaceTag>,        // per outline edge + floor + ceiling: a material (simulation only)
 }
-ZoneSpec { name, outline: Vec<[f64; 2]>, ear_height: f64, weight: Option<f64> }  // weight None = area
+ZoneSpec { name, outline: Vec<[f64; 2]>, ear_height: f64, weight: Option<f64>, seats: Option<u32> }  // weight None = area
 Marker   { name, kind: MarkerKind (speaker | foh | point), at: [f64; 3], heading_deg: Option<f64> }
 ```
 
@@ -109,7 +111,7 @@ Deterministic for a seed; the walk setup's reshuffle makes a new seed.
 | distance from walls | ≥ 1 m (λ/4 at 86 Hz) | ≥ 1 m from every reflecting surface |
 | distance from speakers | none: the front rows are seats too | ≥ `d_min = 2·√(V/(c·T))` with T given or measured |
 | mirrored pairs | none across a mirror axis of room + speakers | same |
-| `n` default | 8 | 6 / 8 / 10 for ≤ 500 / 1000 / 2000 seats (from the seat count) |
+| `n` default | 8 | 6 / 8 / 10 for ≤ 500 / 1000 / 2000 seats (the zones' `seats`; asked when unset) |
 
 - **Why no mirrored pairs:** in a room symmetric about an axis through the speakers, two positions
   mirrored across it see the same modes and reflections, so the second adds nothing to the average.
@@ -123,8 +125,9 @@ Deterministic for a seed; the walk setup's reshuffle makes a new seed.
   half of the stalls.
 
 **Method:** split `n` over the zones by weight (default area), at least one per zone with a
-non-zero quota. In each zone, place the points by a centroidal Voronoi relaxation (Lloyd) of the
-zone's area minus the wall margin, seeded from the seed. This spreads them evenly instead of
+non-zero quota. In each zone, place the points by a centroidal Voronoi relaxation (Lloyd) over
+sample points of the zone, those closer to a wall than the margin rejected (the polygon is never
+offset inward, which self-intersects for concave shapes), seeded from the seed. This spreads them evenly instead of
 pushing them to the edge, as a farthest-point pick would. Then check the rules and nudge points
 that break one. Rules that still fail are relaxed in a fixed order (spacing, then wall distance),
 and `relaxed` names each and by how much (*spacing 1.6 m: 8 positions do not fit at 2 m*).
@@ -138,8 +141,10 @@ result holds for one seat only. It can be added later for control rooms.)
 
 ## 5. The walkthrough (G5)
 
-A **walk** is daemon state (a second client sees it; it survives an app restart). Within one
-session it names: a plan, the transfer or sweep measurements (one per mic), its points, and the
+A **walk** is daemon state (a second client sees it; it survives an app restart). A session may
+hold several walks (one per system tuned, say), each with its own pane. A walk reads the
+session's copy of its plan: a library edit mid-walk changes nothing, and points keep their `at`.
+It names: a plan, the transfer or sweep measurements (one per mic), its points, and the
 math channel it feeds.
 
 ```
@@ -156,16 +161,28 @@ line. The keyboard stays with the panes, so the stimulus keys (**Space**, **Ente
 a transfer pane's **R** work during the walk (an open window would own them, K9). Setup (plan,
 zones, preset, `n`, kind, mics) is a window that closes before the walk starts.
 
-**Moving the mic resets the measurement.** When the walk moves to a point (advance, back, redo),
-the daemon resets every walk measurement's averaging (`meas.reset`) and finds its arrival again
-(the path length changed with the position). Otherwise the first capture at P3 would still hold
-P2's blocks. The operator never resets by hand.
+**Moving the mic restarts the measurement, at placement, not at the key.** The operator presses
+next, picks up the mic, walks and places it; a reset at the key press would average the carry.
+So on a move (next, back, redo) the daemon resets every walk measurement's averaging
+(`meas.reset`) and turns on **delay tracking** for it (decision 3a, `DelayState.tracking`). While
+the mic travels, tracking follows the changing arrival; every tracking move restarts the MTW
+stages anyway (`set_delay`). The operator never resets by hand. Sweeps have no live averaging or
+tracking: the run at the point is the capture.
 
-**Ready, a new wire fact.** `TfMeta.filled: f32` (0…1): how much of the slowest MTW stage's
-averaging time has passed since the last reset, the fraction `Mtw::fill_s` already computes.
-"Ready" at a point = `filled` = 1, no fault banner, and the delay found. The walk pane shows
-*settling · 60 %* until then. Capture is allowed earlier (the operator decides); the trace then
-records `captured_unsettled`.
+**Ready, a new wire fact.** `TfMeta.filled: f32` (0…1), from a small `ac2-core` addition
+`Mtw::fill() -> f64`: over the stages, the least of *blocks accumulated since the stage last
+restarted ÷ blocks it needs to be full*. It counts blocks, not time, so protection-rejected blocks
+add nothing and a measurement that never averaged never reads full. A stage is full at its
+`fill_s` after a restart (discontinuity or delay change) or `settle_s` + one hop after an averaging
+reset, exponential stages at their `settle_blocks()`, and *FastLf*-capped stages at their capped
+length; the slowest stage is the one with the most blocks to go, not necessarily the deepest. A
+math channel's frame carries the least `filled` of its included live operands (1 for traces).
+
+*Ready* at a point = tracking has not moved the delay since the last restart, `filled` = 1, and no
+fault banner. The walk pane shows *settling · 60 %* until then, and *arrival: pick one* when the
+finder holds two near-equal arrivals (`awaiting_pick`, decision 1c), which waits for the operator's
+pick. Capture is allowed earlier (the operator decides); the trace then records
+`captured_unsettled`.
 
 **Capture.** Live transfer: the capture key (below) sends `walk.capture`; the daemon captures
 every walk measurement of the step in one step (one `trace.capture` per measurement, milliseconds
@@ -177,31 +194,46 @@ New `TraceMeta` facts (facts, not `TraceEdit`): `position: Option<TracePosition>
 plan, walk id), `captured_unsettled: bool`, `superseded: bool` (a redone point's old trace, kept,
 listed dimmed, out of the average).
 
-**The running average** is an ordinary math channel. The daemon creates it at the walk's second
+**The running average** is an ordinary math channel, owned by the walk's first measurement (a math
+channel's owner is never another math channel). The daemon creates it at the walk's second
 capture (an average needs two operands) and updates its `of` (`meas.update`) on each capture,
 redo or skip, as it already restarts maths whose operands change. Before the second capture the
 walk pane shows *NO AVERAGE · 1 OF 8 POSITIONS* from walk state. `MAX_AVERAGE` rises from 16 to
 64 (positions × mics: ISO 3382-1 alone asks for 10 positions in a 2000-seat hall; the cost is one
 pass per column per operand).
 
+Traces captured before ready count in the average and the legend says so (*8 positions · 2
+unsettled*), as it counts left-out ones. Captures are named by point and mic name (*P3 · Vilppu*),
+never by number.
+
 **Invariants:** a measurement, trace or math channel a walk names cannot be deleted while it does
-(the owners check). Deleting the walk keeps its traces.
+(the owners check). Deleting the walk keeps its traces, and its average stays as an ordinary
+average of them.
 
 **Wire:** `walk.new|update|goto|capture|skip|redo|delete`, `WalkState` in the session state,
-`TfMeta.filled`, the three `TraceMeta` facts, the plan types and plan-library commands. A
+`PaneKind::Walk` / `PaneContent::Walk`, `TfMeta.filled`, the three `TraceMeta` facts, the plan types and plan-library commands. A
 `PROTO_VERSION` bump and a session-format bump (`ac2-traces` `session::VERSION`).
 
-**Keys** (each ships with its hint-bar tip, key-table row and user-guide row):
+**Keys** (each ships with its hint-bar tip, key-table row and user-guide row; a new `Scope::Walk`
+in the key table and the keymap-doc generator). Pane-scope keys shadow global ones while the walk
+pane is focused, so the walk avoids keys whose meaning differs in a transfer pane on screen beside
+it (`.`/`,` nudge delay there) and global keys the operator expects (Delete):
 
 | key | scope | does |
 |---|---|---|
-| **Shift+W** | everywhere | *Spatial walk…*: the setup window; with a walk running, focuses its pane |
-| **Shift+W** | walk pane | capture here and go to the next point |
-| **.** / **,** | walk pane | next / previous point (moving there resets, as above) |
-| **Shift+R** | walk pane | redo the current point |
-| **Delete** | walk pane | skip the current point |
-| **G** | setup window | new pattern (new seed) |
+| **Shift+W** | everywhere | *Spatial walk…*: the window listing the session's walks, **New walk** first (as Shift+M / Shift+S open *New …*) |
+| **X** | walk pane | capture here (mark the point) and go to the next |
+| **PageDown** / **PageUp** | walk pane | next / previous point (moving there resets, above) |
+| **Shift+R** | walk pane | redo the current point (its tip says it resets the walk's measurements) |
+| **K** | walk pane | skip the current point |
+| **Space** / **Enter** | walk pane, kind `sweep` | arm / fire the walk's sweep measurement (the walk pane's measurement, as a sweep pane's) |
 | click / drag | plan view | add / move a vertex or a point |
+
+The setup window has no letter keys (K9: ↑/↓ rows, ←/→ choices, typed fields): the pattern is a
+row (*pattern 3*, **→** next seed).
+
+**Pane wire:** `PaneKind::Walk` and `PaneContent::Walk { walk }`, travelling in `meas.layout` and
+sessions like any pane; `check()` refuses a walk pane without its walk.
 
 ## 6. Several mics (G6)
 
@@ -264,7 +296,8 @@ there is no band and the legend says *range: too few positions*.
 
 A sweep walk gives ISO 3382-1 what it asks for: T20, EDT, C80 and D50 per band averaged over the
 positions (arithmetic mean per band, with the range), shown in the room-metrics table as *mean
-of 8 positions*. Stage 3.
+of 8 positions · 1 source* (ISO 3382-1 asks for at least two source positions; a PA walk has one,
+and the table says so). Stage 3.
 
 ## Stages
 
@@ -282,8 +315,10 @@ of 8 positions*. Stage 3.
   determinism per seed; every rule holds on the suggestion or `relaxed` names it; a symmetric
   rectangle with a centred speaker gets no mirrored pair; concave and L-shaped zones keep every
   point inside; weights split `n` as stated; the relaxation order.
-- `ac2d` (fake backend): moving to a point resets each walk measurement and refinds its delay;
-  `filled` rises 0 → 1 over the slowest stage's time after a reset; captures carry positions;
+- `ac2-core`: `Mtw::fill()` after a restart, an averaging reset and with rejected blocks (stays
+  below 1); FastLf capping.
+- `ac2d` (fake backend): moving to a point resets each walk measurement and turns tracking on;
+  a delay step mid-walk restarts `filled`; `awaiting_pick` reaches the walk pane; captures carry positions;
   redo supersedes and the average drops the old trace; the average appears at the second capture;
   a walk's measurements and traces cannot be deleted; session round-trip keeps walk and plan.
 - `ac2-scene`: step text and readout from FOH, *settling · 60 %*, relaxed-rule notices,
@@ -297,5 +332,6 @@ of 8 positions*. Stage 3.
 
 - 2026-10-28 operator: positions read in metres from FOH facing the stage; pixels stay in the
   plan view.
-- 2026-10-28 operator: a separate repository for the room work. Its scope here is the simulator
-  (`ac2-roomsim`); the plan and pattern code is in-tree, because ac2's wire owns the plan types.
+- 2026-10-28 operator: the simulator (ray tracing) in its own repository, `ac2-roomsim`; plans and
+  patterns in-tree as `crates/ac2-room`, since ac2's wire owns the plan types.
+- 2026-10-28 operator: the area pattern first; a seat cluster later.
