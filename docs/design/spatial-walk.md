@@ -1,6 +1,6 @@
 # Spatial walk: room plans, suggested mic positions, a guided average
 
-Status: design (2026-10-28), review round 3. The operator wants three things: a spatial average of
+Status: design (2026-10-28), reviewed in three rounds; stage 1 (G1) in progress. The operator wants three things: a spatial average of
 N mics made in one step; a walkthrough that suggests mic positions inside a room of any shape and
 follows the measurements through them; and, later, ray tracing that room. The simulator stays out
 of ac2's way while it grows (§2).
@@ -229,6 +229,8 @@ it (`.`/`,` nudge delay there) and global keys the operator expects (Delete):
 | **Space** / **Enter** | walk pane, kind `sweep` | arm / fire the walk's sweep measurement (the walk pane's measurement, as a sweep pane's) |
 | click / drag | plan view | add / move a vertex or a point |
 
+`keys.toml` chord parsing (`ac2-ui` `keys/chord.rs`) learns the names `PageUp` / `PageDown`.
+
 The setup window has no letter keys (K9: ↑/↓ rows, ←/→ choices, typed fields): the pattern is a
 row (*pattern 3*, **→** next seed).
 
@@ -263,6 +265,15 @@ What it can claim, and what it refuses:
   measurement's colour. Uses: predicted reflection arrivals at a point over the measured ETC (which
   wall made that 7 ms reflection), and a direct-plus-early-energy map over the zones per speaker
   marker. Speakers are omnidirectional at first, stated on the map; directivity tables later.
+- **Later, as ideas (operator 2026-10-28, from a game-engine / light ray-tracing angle):** GPU ray
+  casting (Vulkan ray queries through wgpu), since casting rays against triangles is the same loop
+  as light; a 3D view where walls are lit by the energy they reflect at a chosen band; an
+  animation of the wavefront and its reflections over time; and **auralization**, the simulated
+  IR convolved with programme to hear a change (curtains on the back wall). Auralization emits
+  sound only on the operator's explicit request at a typed level, under the global maximum and
+  with a fade-out, never from tests. Where sound is not light: every ray carries an arrival time,
+  energy is per octave band, and below the Schroeder frequency sound bends around objects instead
+  of casting shadows, so the GPU view has the same validity limit as the plots.
 - Runs in `ac2d` on a worker thread outside the audio path, with a time budget and progress; a plan
   change cancels the run. Outdoor plans (no ceiling) are not simulated.
 
