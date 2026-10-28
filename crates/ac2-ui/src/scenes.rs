@@ -28,6 +28,7 @@ mod alignment;
 mod programme;
 mod spectrum_pane;
 mod spl_meters;
+mod walk;
 pub use alignment::{alignment, is_alignment, pane_alignment};
 pub use programme::programme;
 #[cfg(test)]
@@ -37,6 +38,7 @@ pub use spl_meters::{
     LocalZone, StripPlace, band_leq, has_band_meter, leq, leq_keyed, leq_meter, meter_leq,
     refresh_spl_scales, spl, spl_pane, spl_placeholder,
 };
+pub use walk::walk;
 
 /// Inputs that come from the clock, passed in so the assembly stays testable.
 #[derive(Clone, Copy, Debug)]
@@ -237,12 +239,14 @@ fn math_status(st: &AppState, m: &Measurement, frame: &FrameData) -> Option<Math
         _ => None,
     }?;
     Some(
-        MathStatus::new(config, state, |o| st.operand_name(o)).with_arrival(
-            config,
-            state,
-            |o| st.operand_delay(o),
-            st.view.temperature_c,
-        ),
+        MathStatus::new(config, state, |o| st.operand_name(o))
+            .with_arrival(
+                config,
+                state,
+                |o| st.operand_delay(o),
+                st.view.temperature_c,
+            )
+            .with_unsettled(st.unsettled_operands(&config.expr.operands())),
     )
 }
 

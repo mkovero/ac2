@@ -287,6 +287,7 @@ impl AppState {
                             View {
                                 kind: v.kind,
                                 meas: None,
+                                walk: None,
                                 meters: v.meters,
                                 modes: v.modes,
                                 plates: v.plates,

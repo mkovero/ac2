@@ -61,7 +61,8 @@ fn data(meas: u32, stream: Stream) -> Topic {
 }
 
 /// Only the panes drawing a changed topic are rebuilt: new content, a STALE flip, a
-/// topic gone; a new `seq` with the same content rebuilds none. The input meters rebuild
+/// topic gone; a new `seq` with the same content rebuilds none (a transfer frame also
+/// rebuilds the walk panes, which read their readiness from it). The input meters rebuild
 /// only the Programme panes (the sidebar's meters are drawn every frame).
 #[test]
 fn new_frames_touch_the_panes_that_draw_them() {
@@ -88,7 +89,7 @@ fn new_frames_touch_the_panes_that_draw_them() {
     ]);
     assert_eq!(
         data_touches(Some(&old), Some(&tf_new)),
-        vec![PaneKind::Transfer]
+        vec![PaneKind::Transfer, PaneKind::Walk]
     );
     let spl_stale = snap(&[
         frame(tf, 1, -10.0, false),

@@ -231,6 +231,7 @@ impl AppState {
             ConnEvent::Sessions(o) => self.session_outcome(*o, out),
             ConnEvent::SessionProgress(t) => self.session_progress(t),
             ConnEvent::SessionList(r) => self.session_list(r),
+            ConnEvent::WalkCreated(w) => self.walk_created(*w),
             ConnEvent::MeasCreated(m) => {
                 // Before it is selected: focusing a sweep pane selects what that pane shows.
                 if self.rig.pane_on_create.as_ref() == Some(&m.config.name) {

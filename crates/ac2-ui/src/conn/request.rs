@@ -34,6 +34,7 @@ pub(super) fn request_name(r: &Request) -> String {
         Request::Meters(_) => "meters".into(),
         Request::DetectLoopback(_) => "detect loopback".into(),
         Request::CreateMeas { config } => format!("new measurement {}", config.name),
+        Request::NewWalk { name, .. } => format!("new walk {name}"),
         Request::LeqBackfill { .. } => "SPL history".into(),
         Request::LeqSpan { .. } => "SPL history span".into(),
         Request::ExportLeqLog { info, .. } => format!("export {} log", info.name),
@@ -272,6 +273,22 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
         Request::Preview { .. } | Request::PreviewStop | Request::Meters(_) => {}
         Request::DetectLoopback(d) => {
             let _ = stim.send(StimOp::Detect(d));
+        }
+        Request::NewWalk { cmd, name } => {
+            let (c, o) = (client.clone(), out.clone());
+            tokio::spawn(async move {
+                let made = c
+                    .call(cmd)
+                    .await
+                    .and_then(|r| expect_body!("walk.new", r, ReplyBody::Walk(w) => w));
+                o.send(match made {
+                    Ok(w) => ConnEvent::WalkCreated(Box::new(w)),
+                    Err(e) => ConnEvent::Reply {
+                        what: format!("new walk {name}"),
+                        result: Err(e.to_string()),
+                    },
+                });
+            });
         }
         Request::CreateMeas { config } => {
             let (c, o) = (client.clone(), out.clone());

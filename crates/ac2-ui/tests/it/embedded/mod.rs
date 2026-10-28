@@ -24,3 +24,4 @@ mod spl;
 mod stimulus;
 mod sweep;
 mod transfer;
+mod walk;

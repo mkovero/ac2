@@ -151,6 +151,10 @@ pub enum Overlay {
     Sessions(Box<crate::sessions::SessionsDialog>),
     /// The EQ what-if editor (Alt+E): the selected measurement's set, live.
     Eq(Box<crate::eq_editor::EqEditor>),
+    /// A new spatial walk's setup: plan, zones, rules, points ([`crate::walk_setup`]).
+    WalkSetup(Box<crate::walk_setup::WalkSetup>),
+    /// The room plan editor, opened from the walk setup and closing back to it.
+    PlanEditor(Box<crate::walk_setup::PlanEditor>),
 }
 
 impl Overlay {
@@ -169,7 +173,9 @@ impl Overlay {
             | Overlay::Prompt(_)
             | Overlay::Form(_)
             | Overlay::Settings(_)
-            | Overlay::Eq(_) => true,
+            | Overlay::Eq(_)
+            | Overlay::WalkSetup(_)
+            | Overlay::PlanEditor(_) => true,
             Overlay::Sessions(d) => matches!(d.page, crate::sessions::Page::Name(_)),
             _ => false,
         }
@@ -466,6 +472,8 @@ pub enum Msg {
     IrNav(ac2_scene::view::IrPane, IrNavMsg),
     /// The mouse on an SPL pane's Leq history strip.
     LeqStrip(PaneId, StripMsg),
+    /// The mouse on the plan view of the walk setup or the plan editor.
+    Plan(crate::walk_setup::PlanMsg),
 }
 
 /// What the mouse does on the Leq windows dialog.

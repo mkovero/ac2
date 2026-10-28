@@ -191,6 +191,7 @@ dependencies = [
  "ac2-paths",
  "ac2-plot",
  "ac2-proto",
+ "ac2-room",
  "ac2-scene",
  "ac2-traces",
  "ac2-zmq",

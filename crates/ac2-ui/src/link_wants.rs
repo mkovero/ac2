@@ -39,11 +39,15 @@ impl AppState {
     /// Per-measurement input levels are never drawn, so never received.
     pub fn wanted_topics(&self) -> HashSet<Topic> {
         let visible = self.own_visible_panes();
+        // A walk pane reads its measurement's readiness from the transfer frames.
         let shows = |p: PaneKind| {
             visible
                 .iter()
                 .filter_map(|id| self.layout.view(*id))
-                .any(|v| v.kind == p && !v.shows_ir())
+                .any(|v| {
+                    (v.kind == p || (p == PaneKind::Transfer && v.kind == PaneKind::Walk))
+                        && !v.shows_ir()
+                })
         };
         let ir_of: Vec<MeasId> = visible
             .iter()

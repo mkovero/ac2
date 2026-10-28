@@ -239,6 +239,7 @@ fn scene_for(
             plates = s.plates();
             (s.scene, Axes::default())
         }
+        PaneKind::Walk => (scenes::walk(st, id, theme, vp)?.scene, Axes::default()),
     };
     let scene = Arc::new(scene);
     app.scenes.insert(
@@ -275,6 +276,10 @@ fn placeholder(id: PaneId, app: &App) -> String {
         PaneKind::Transfer if modes.transfer.ir().is_some() => "no transfer measurement".into(),
         PaneKind::Spl => scenes::spl_placeholder(&app.state, id, &app.keymap),
         PaneKind::Programme => ac2_scene::programme::NO_METERS.to_owned(),
+        PaneKind::Walk => format!(
+            "no walk in this pane: {} opens one",
+            app.keymap.reach(crate::keys::CommandId::Walks)
+        ),
         _ => String::new(),
     }
 }

@@ -174,6 +174,8 @@ pub struct View {
     pub meas: Option<MeasId>,
     /// What a Programme pane meters; `None` on every other kind.
     pub meters: Option<crate::state::Metered>,
+    /// The walk a Walk pane shows; `None` on every other kind.
+    pub walk: Option<ac2_proto::units::WalkId>,
     pub modes: PaneModes,
     /// Where the operator dropped the plates over its plot, and their text size.
     pub plates: Plates,
@@ -187,6 +189,7 @@ impl View {
             kind,
             meas: None,
             meters: None,
+            walk: None,
             modes: PaneModes::default(),
             plates: Plates::default(),
             rig: PaneRig::Active,
@@ -195,7 +198,7 @@ impl View {
 
     /// Something was chosen for the pane (a measurement, meters): it shows its rig's ids.
     pub fn has_content(&self) -> bool {
-        self.meas.is_some() || self.meters.is_some()
+        self.meas.is_some() || self.meters.is_some() || self.walk.is_some()
     }
 
     /// A transfer pane in its IR view.

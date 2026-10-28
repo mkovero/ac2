@@ -56,6 +56,11 @@ pub enum ChoicePurpose {
     },
     /// A session of another format version: import its traces.
     Salvage { from: crate::sessions::Source },
+    /// The Spatial walk window: the first answer is *New walk…*, then `walks` in order,
+    /// each opening its pane.
+    Walks {
+        walks: Vec<ac2_proto::units::WalkId>,
+    },
     /// New measurement: the answer is a kind, in [`ac2_scene::new_meas::NewKind::ALL`]'s
     /// order; its form opens.
     NewMeasurement,
@@ -380,6 +385,7 @@ impl AppState {
             ChoicePurpose::Compare { .. } => self.compare_pick(c, i, out),
             ChoicePurpose::NewMeasurement => self.new_measurement_pick(i, out),
             ChoicePurpose::Target => self.target_pick(i, out),
+            ChoicePurpose::Walks { walks } => self.walks_pick(&walks, i),
             p @ (ChoicePurpose::Unsaved { .. }
             | ChoicePurpose::Replace { .. }
             | ChoicePurpose::Salvage { .. }) => self.session_answer(p, i, out),

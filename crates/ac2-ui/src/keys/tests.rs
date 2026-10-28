@@ -340,6 +340,10 @@ fn parse_and_label() {
         ("Alt+Left", "Alt+←"),
         ("Home", "Home"),
         ("Ctrl+Tab", "Ctrl+Tab"),
+        ("PageDown", "PageDown"),
+        ("pageup", "PageUp"),
+        ("PgDn", "PageDown"),
+        ("Shift+PageUp", "Shift+PageUp"),
     ] {
         let c = Chord::parse(s).expect(s);
         assert_eq!(c.label_in(LabelStyle::Pc), label, "{s}");
@@ -533,7 +537,8 @@ fn g_steps_the_views_of_every_pane() {
     let m = Keymap::default();
     let c = |s: &str| Chord::parse(s).expect(s);
     for scope in Scope::ALL {
-        let (g, shift_g) = if matches!(scope, Scope::Global | Scope::Inputs) {
+        // A walk pane has one view: G is free there (and means nothing).
+        let (g, shift_g) = if matches!(scope, Scope::Global | Scope::Inputs | Scope::Walk) {
             (None, None)
         } else {
             (Some(CommandId::NextView), Some(CommandId::PrevView))
@@ -681,5 +686,39 @@ fn palette_titles_are_terse_and_uniform() {
         (C::PhaseView, "Phase view"),
     ] {
         assert_eq!(c.title(), t);
+    }
+}
+
+/// The walk pane's keys (`docs/design/spatial-walk.md` §5): X captures, PageDown / PageUp
+/// step the points, Shift+R redoes, K skips, Shift+W opens the walks from anywhere; the
+/// stimulus keys keep their meaning in the pane, and none of its keys is a transfer pane's
+/// nudge or Delete.
+#[test]
+fn walk_keys_are_the_notes() {
+    let m = Keymap::default();
+    let c = |s: &str| Chord::parse(s).expect(s);
+    for (key, cmd) in [
+        ("X", CommandId::WalkCapture),
+        ("PageDown", CommandId::WalkNext),
+        ("PageUp", CommandId::WalkPrev),
+        ("Shift+R", CommandId::WalkRedo),
+        ("K", CommandId::WalkSkip),
+        ("Shift+W", CommandId::Walks),
+        ("Space", CommandId::StimulusArm),
+        ("Enter", CommandId::StimulusFire),
+        ("Esc", CommandId::StimulusStop),
+    ] {
+        assert_eq!(m.lookup(Scope::Walk, c(key)), Some(cmd), "{key}");
+    }
+    assert_eq!(
+        m.lookup(Scope::Transfer, c("Shift+W")),
+        Some(CommandId::Walks)
+    );
+    for key in [".", ",", "Delete"] {
+        let walk = m.lookup(Scope::Walk, c(key));
+        assert!(
+            walk.is_none() || walk == m.lookup(Scope::Global, c(key)),
+            "{key} means {walk:?} in the walk pane"
+        );
     }
 }

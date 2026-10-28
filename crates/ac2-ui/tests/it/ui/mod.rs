@@ -35,6 +35,7 @@ mod session;
 mod traces;
 mod transfer;
 mod views;
+mod walk;
 
 const SIZE: egui::Vec2 = egui::vec2(1280.0, 800.0);
 

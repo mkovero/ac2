@@ -17,6 +17,7 @@ mod segment;
 mod session;
 mod sessions;
 mod settings;
+mod walk;
 
 use ac2_scene::theme::Theme;
 use eframe::egui;

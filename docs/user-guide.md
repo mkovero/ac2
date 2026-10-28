@@ -1476,6 +1476,49 @@ measurements the row is dimmed: *needs two transfer measurements*.
 One mic moved from seat to seat: capture each position (**Ctrl+1 … 9**) and average the
 captures the same way, or with **M**.
 
+#### Spatial walk
+
+**Shift+W** opens the *Spatial walk* window: **New walk…** first, then every walk of the
+session (`Mains · 3 of 8 captured · Hall`); **Enter** on a walk opens its pane, on New walk…
+the setup window. Its rows: **name**, **plan** (a plan of the library, or *New plan…*),
+**zones** (every zone, or one alone), **preset** (*Tuning*, or *ISO 3382-1* with its **RT**
+row, the reverberation time its source distance needs), **positions** (the preset's count:
+8 for tuning, 6 / 8 / 10 by the zones' seats for ISO 3382-1), **pattern** (another
+arrangement of as many points) and **mic** (the transfer measurement that captures). **↑/↓**
+moves between rows, **←/→** changes a choice, a value is typed (no letter keys), **Enter**
+starts the walk, **Esc** closes. The plan beside the rows shows the suggested points; drag
+one to move it (snapped to 0.1 m), click to add one, right-click to delete. A rule the
+suggestion had to relax is named under the plan (*relaxed: spacing 1.6 m: 12 positions do
+not fit at 2.0 m*), and a point you moved where it breaks one is marked and named (*P3:
+0.5 m from P1 (spacing 2.0 m)*), not refused. The walk opens in a pane of its own beside the others.
+
+*New plan…* opens the **plan editor**: the outline as a table of vertices (type `x y` in
+metres per row, **Insert** adds a row, **Delete** removes one) and the plan view (a click adds
+a vertex, drag moves one); on the *editing* row **←/→** steps to each zone and to the
+markers, **Insert** there adds a zone (its name, ear height and vertices edited the same
+way). Markers are typed `x y heading` (degrees, counter-clockwise from +x), **←/→** on a
+marker row changes its kind (speaker, FOH, point); the first marker added is the FOH that
+positions are read from. Under the table the plan's verdict in words (*refused: edge 3
+crosses edge 6*); **Enter** saves a valid plan to the library and goes back to the setup with
+it chosen, **Esc** goes back without it.
+
+The **walk pane** shows the plan with every point (pending, captured filled, skipped dimmed),
+the mic's point ringed, the next one faint, and above it, large enough to read across the
+room, where the mic goes: *Move mic to P3 · 2.1 m left, 4.0 m back from FOH*. Under it whether
+the measurement is ready (*settling · 60 %*, *arrival: pick one*, *ready*) and the average
+(*NO AVERAGE · 1 OF 8 POSITIONS*, then *Mains · average · 8 positions · 2 unsettled*). Its keys:
+
+| Key | |
+|---|---|
+| **X** | capture here and go on to the next pending point |
+| **PageDown / PageUp** | the next / previous point (moving the mic restarts the averages) |
+| **Shift+R** | redo the point (the one the mic is at, else the last captured): its capture leaves the average, the walk's measurements restart there |
+| **K** | skip the point |
+| **Space / Enter** | the stimulus, as everywhere |
+
+Captures are named *P3 · <mic>* and list their position (*at P3*); a superseded capture is
+dimmed in the list, an unsettled one says so.
+
 #### Spatial walk (CLI)
 
 The daemon can lead the one-mic walk itself ([spatial-walk.md](design/spatial-walk.md)): a
@@ -3376,6 +3419,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Shift+F2` | Move trace… | `move_trace` |
 | `Shift+S` | New sweep… | `sweep_new` |
 | `Shift+L` | Leq settings… | `leq_windows` |
+| `Shift+W` | Spatial walk… | `walks` |
 
 #### Transfer function
 
@@ -3480,6 +3524,16 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Shift+R` | Reset every input | `levels_reset_all` |
 | `P` | Open a Programme pane | `programme_pane` |
 
+#### Spatial walk
+
+| Keys | Command | `keys.toml` |
+|---|---|---|
+| `X` | Capture here and go on | `walk_capture` |
+| `PageDown` | Next point | `walk_next` |
+| `PageUp` | Previous point | `walk_prev` |
+| `Shift+R` | Redo point and reset | `walk_redo` |
+| `K` | Skip point | `walk_skip` |
+
 #### Command palette only (`Ctrl+K`)
 
 | Command | `keys.toml` |
@@ -3579,6 +3633,7 @@ The least used go first on a narrow pane; `G/Shift+G` steps the pane's views for
 | Sweep / distortion | `Shift+S` new sweep · `V` select trace · `G/Shift+G` view · `E` reference · `W` maximise · `Q` close pane · `H` all keys |
 | Programme | `R` reset · `Shift+R` reset all · `G/Shift+G` view · `T` grid · `W` maximise · `Q` close pane · `H` all keys |
 | Inputs list row | `R` reset · `Shift+R` reset all · `P` programme pane · `Tab` measurements · `H` all keys |
+| Spatial walk | `X` capture here · `PageDown` next point · `PageUp` previous · `K` skip · `Shift+R` redo, resets the walk's measurements · `Space` stimulus · `W` maximise · `H` all keys |
 
 <!-- keymap:end -->
 

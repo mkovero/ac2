@@ -58,7 +58,11 @@ impl AppState {
             PaneKind::Distortion if v.modes.sweep == ac2_scene::view::SweepMode::Response => {
                 Some(FreqPlot::Distortion)
             }
-            PaneKind::Transfer | PaneKind::Distortion | PaneKind::Spl | PaneKind::Programme => None,
+            PaneKind::Transfer
+            | PaneKind::Distortion
+            | PaneKind::Spl
+            | PaneKind::Programme
+            | PaneKind::Walk => None,
         }
     }
 
@@ -608,6 +612,9 @@ impl AppState {
             if kind != PaneKind::Programme {
                 v.meters = None;
             }
+            if kind != PaneKind::Walk {
+                v.walk = None;
+            }
             v.kind = kind;
         }
         self.rig.pending.pane_meas.remove(&id);
@@ -636,8 +643,9 @@ impl AppState {
         v.extend(
             PaneKind::ALL
                 .into_iter()
-                // A Programme pane is offered by what it meters.
-                .filter(|k| *k != kind && *k != PaneKind::Programme)
+                // A Programme pane is offered by what it meters, a walk pane by its walk
+                // (the Spatial walk window).
+                .filter(|k| *k != kind && !matches!(k, PaneKind::Programme | PaneKind::Walk))
                 .filter(|k| !brought.contains(k))
                 .map(|k| (PaneMenuRow::Kind(k), format!("pane  {}", k.title()))),
         );

@@ -285,6 +285,17 @@ pub fn defaults() -> Vec<Binding> {
         // P(rogramme) on a picked Inputs row: its meters in a new pane. Not Enter, which
         // fires the stimulus in every keymap.
         (C::ProgrammePane, S::Inputs, k(K::P)),
+        // Shift+W, as Shift+M / Shift+S open a new math channel and a new sweep: the
+        // session's spatial walks, a new one first.
+        (C::Walks, S::Global, sh(K::W)),
+        // The walk pane's own keys avoid what a transfer pane beside it means by `.` / `,`
+        // (nudges) and the Delete everyone expects: X marks the spot, PageDown / PageUp page
+        // through the points, K skips, Shift+R (R a step further) redoes.
+        (C::WalkCapture, S::Walk, k(K::X)),
+        (C::WalkNext, S::Walk, k(K::PageDown)),
+        (C::WalkPrev, S::Walk, k(K::PageUp)),
+        (C::WalkRedo, S::Walk, sh(K::R)),
+        (C::WalkSkip, S::Walk, k(K::K)),
     ];
     v.extend(RESERVED.iter().map(|(c, id)| (*id, S::Global, *c)));
     v.into_iter()
@@ -397,6 +408,19 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::PlotChrome, "grid", 60),
                     hint(C::MaximisePane, "maximise", 50),
                     hint(C::ClosePane, "close pane", 40),
+                ]
+            }
+        }
+        Scope::Walk => {
+            const {
+                &[
+                    hint(C::WalkCapture, "capture here", 95),
+                    hint(C::WalkNext, "next point", 85),
+                    hint(C::WalkPrev, "previous", 60),
+                    hint(C::WalkSkip, "skip", 75),
+                    hint(C::WalkRedo, "redo, resets the walk's measurements", 70),
+                    hint(C::StimulusArm, "stimulus", 50),
+                    hint(C::MaximisePane, "maximise", 40),
                 ]
             }
         }

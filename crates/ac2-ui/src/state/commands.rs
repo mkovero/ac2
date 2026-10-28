@@ -426,6 +426,12 @@ impl AppState {
                 None => self.warn("pick an Inputs row first: its meters open in a new pane"),
             },
             C::PaneMeasurement => self.open_pane_menu(self.layout.focus),
+            C::Walks => self.open_walks(),
+            C::WalkCapture => self.walk_capture(out),
+            C::WalkNext => self.walk_step(1, out),
+            C::WalkPrev => self.walk_step(-1, out),
+            C::WalkRedo => self.walk_redo(out),
+            C::WalkSkip => self.walk_skip(out),
             // The sweep pane draws one run at a time: V steps through the runs, never onto a
             // curve the pane cannot draw.
             C::NextTrace if self.layout.focus_kind() == PaneKind::Distortion => {
@@ -746,6 +752,12 @@ fn needs_session(c: CommandId) -> bool {
     use CommandId as C;
     matches!(
         c,
-        C::NewMeasurement | C::NewTransfer | C::NewSpectrum | C::NewRta | C::NewSpl | C::SweepNew
+        C::NewMeasurement
+            | C::NewTransfer
+            | C::NewSpectrum
+            | C::NewRta
+            | C::NewSpl
+            | C::SweepNew
+            | C::Walks
     )
 }

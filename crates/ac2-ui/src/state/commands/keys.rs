@@ -39,6 +39,8 @@ impl AppState {
             Overlay::Settings(_) => self.settings_backspace(out),
             Overlay::Sessions(_) => self.sessions_backspace(),
             Overlay::Eq(_) => self.eq_backspace(out),
+            Overlay::WalkSetup(s) => s.backspace(),
+            Overlay::PlanEditor(e) => e.backspace(),
             Overlay::Delete(_) => self.delete(true, out),
             Overlay::NewLog(_) => self.new_log(false, out),
             Overlay::Prompt(p) => {
@@ -151,6 +153,14 @@ impl AppState {
             }
             Overlay::Eq(_) => {
                 self.eq_key(chord, swallow, keymap, out);
+                return;
+            }
+            Overlay::WalkSetup(_) => {
+                self.walk_setup_key(chord, out);
+                return;
+            }
+            Overlay::PlanEditor(_) => {
+                self.plan_editor_key(chord, out);
                 return;
             }
             // The key that asked confirms (Enter is the stimulus's: never a discard by reflex).
@@ -345,6 +355,11 @@ impl AppState {
             }
             // Esc cancels the mark question, not the editor.
             Overlay::Eq(e) if e.confirm_mark => e.confirm_mark = false,
+            // The plan editor closes back to the walk setup it opened from.
+            Overlay::PlanEditor(e) => {
+                let back = e.back.clone();
+                self.overlay = Overlay::WalkSetup(back);
+            }
             _ => self.overlay = Overlay::None,
         }
     }
@@ -367,6 +382,8 @@ impl AppState {
             Overlay::Settings(_) => self.settings_text(&t),
             Overlay::Sessions(_) => self.sessions_text(&t),
             Overlay::Eq(_) => self.eq_text(&t, out),
+            Overlay::WalkSetup(s) => s.type_text(&t),
+            Overlay::PlanEditor(e) => e.type_text(&t),
             Overlay::Prompt(p) => {
                 p.text.push_str(&t);
                 p.error = None;

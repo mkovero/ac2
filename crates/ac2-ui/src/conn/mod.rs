@@ -141,6 +141,8 @@ pub enum ConnEvent {
     SessionOpened,
     /// A measurement was created (and, unless a reply says otherwise, started).
     MeasCreated(Box<Measurement>),
+    /// `walk.new` answered with the walk.
+    WalkCreated(Box<ac2_proto::model::WalkState>),
     /// `server.info` (`what: None`), or a `server.*` change named `what`, answered with the
     /// daemon's server info or why not.
     Server {
@@ -281,6 +283,9 @@ pub enum Request {
     DetectLoopback(crate::session_dialog::DetectRequest),
     /// `meas.create` then `meas.start` (as `ac2 meas new --start`).
     CreateMeas { config: MeasConfig },
+    /// `walk.new` (a [`ac2_proto::Command::WalkNew`]); the walk comes back as
+    /// [`ConnEvent::WalkCreated`].
+    NewWalk { cmd: Command, name: String },
     /// `spl.history_get` of SPL meter `meas` over the history the strip keeps
     /// ([`ConnEvent::LeqBackfill`]).
     LeqBackfill { meas: MeasId, ask: u64 },

@@ -52,5 +52,6 @@ pub mod state;
 pub mod target_dialog;
 pub mod theme;
 mod view;
+pub mod walk_setup;
 
 pub use app::{App, AppOptions};

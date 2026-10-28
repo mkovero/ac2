@@ -41,10 +41,12 @@ pub enum Scope {
     Programme,
     /// A row of the Inputs list picked (clicked): its meters' keys.
     Inputs,
+    /// A spatial walk's pane in focus.
+    Walk,
 }
 
 impl Scope {
-    pub const ALL: [Scope; 8] = [
+    pub const ALL: [Scope; 9] = [
         Scope::Global,
         Scope::Transfer,
         Scope::Spectrum,
@@ -53,6 +55,7 @@ impl Scope {
         Scope::Distortion,
         Scope::Programme,
         Scope::Inputs,
+        Scope::Walk,
     ];
 
     pub fn name(self) -> &'static str {
@@ -65,6 +68,7 @@ impl Scope {
             Scope::Distortion => "distortion",
             Scope::Programme => "programme",
             Scope::Inputs => "inputs",
+            Scope::Walk => "walk",
         }
     }
 
@@ -78,6 +82,7 @@ impl Scope {
             Scope::Distortion => "Sweep / distortion",
             Scope::Programme => "Programme",
             Scope::Inputs => "Inputs list row",
+            Scope::Walk => "Spatial walk",
         }
     }
 
@@ -342,4 +347,11 @@ commands! {
     LevelsReset => "levels_reset", "Reset overs, max, loudness", [Programme, Inputs];
     LevelsResetAll => "levels_reset_all", "Reset every input", [Programme, Inputs];
     ProgrammePane => "programme_pane", "Open a Programme pane", [Inputs];
+
+    Walks => "walks", "Spatial walk…", [Global];
+    WalkCapture => "walk_capture", "Capture here and go on", [Walk];
+    WalkNext => "walk_next", "Next point", [Walk];
+    WalkPrev => "walk_prev", "Previous point", [Walk];
+    WalkRedo => "walk_redo", "Redo point and reset", [Walk];
+    WalkSkip => "walk_skip", "Skip point", [Walk];
 }

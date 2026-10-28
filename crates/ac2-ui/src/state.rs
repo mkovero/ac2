@@ -91,6 +91,7 @@ mod eq_impl;
 mod stimulus;
 mod text;
 mod undo;
+mod walk_impl;
 pub use panes::views::{
     DEFAULT_PANE_AREA, Layout, PaneMenuRow, PaneModes, PaneRig, PaneTemplate, TransferView, View,
 };
@@ -459,6 +460,7 @@ impl AppState {
             Msg::Settings(m) => self.settings_msg(m, out),
             Msg::IrNav(p, m) => self.ir_nav(p, m),
             Msg::LeqStrip(p, m) => self.leq_strip_msg(p, m, out),
+            Msg::Plan(m) => self.plan_msg(m),
             Msg::Tick { now_s, dt_s } => {
                 let held = (now_s - self.now_s).max(0.0);
                 self.now_s = now_s;

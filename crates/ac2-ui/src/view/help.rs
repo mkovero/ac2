@@ -641,13 +641,13 @@ mod tests {
 
     #[test]
     fn short_enough_to_read() {
-        // The help is a page of keys, not the whole table: the busiest pane stays under
-        // three screen columns of about thirty rows.
+        // The help is a page of keys, not the whole table: the busiest pane stays within
+        // three screen columns of 31 rows.
         crate::keys::set_label_style(crate::keys::LabelStyle::Pc);
         let k = Keymap::default();
         for scope in Scope::ALL {
             let n = help_rows(&k, scope).len();
-            assert!(n <= 90, "{scope:?}: {n} rows");
+            assert!(n <= 93, "{scope:?}: {n} rows");
         }
     }
 

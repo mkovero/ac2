@@ -555,6 +555,7 @@ fn wire_pane(v: &View, levels: wire::LayoutLevels) -> wire::LayoutPane {
             PaneKind::Spl => wire::PaneKind::Spl,
             PaneKind::Distortion => wire::PaneKind::Distortion,
             PaneKind::Programme => wire::PaneKind::Programme,
+            PaneKind::Walk => wire::PaneKind::Walk,
         },
         transfer_view: match m.transfer {
             TransferView::Magnitude => wire::TransferView::Magnitude,
@@ -592,9 +593,10 @@ fn wire_pane(v: &View, levels: wire::LayoutLevels) -> wire::LayoutPane {
             PlotChrome::NoGrid => wire::PlotChrome::NoGrid,
             PlotChrome::Bare => wire::PlotChrome::TracesOnly,
         },
-        content: match v.meters {
-            Some(m) => Some(m.wire()),
-            None => v.meas.map(|meas| wire::PaneContent::Meas { meas }),
+        content: match (v.kind, v.walk, v.meters) {
+            (PaneKind::Walk, Some(walk), _) => Some(wire::PaneContent::Walk { walk }),
+            (_, _, Some(m)) => Some(m.wire()),
+            _ => v.meas.map(|meas| wire::PaneContent::Meas { meas }),
         },
         levels,
         plates: super::plates::wire_plates(&v.plates),
@@ -614,11 +616,13 @@ fn ui_view(p: &wire::LayoutPane, this: RigId) -> View {
             wire::PaneKind::Spl => PaneKind::Spl,
             wire::PaneKind::Distortion => PaneKind::Distortion,
             wire::PaneKind::Programme => PaneKind::Programme,
-            // The app draws no walk pane yet: a walk's pane opens as an empty transfer pane,
-            // where its walk measurement's curve is picked like any other.
-            wire::PaneKind::Walk => PaneKind::Transfer,
+            wire::PaneKind::Walk => PaneKind::Walk,
         },
         meas: p.content.as_ref().and_then(wire::PaneContent::meas),
+        walk: match p.content {
+            Some(wire::PaneContent::Walk { walk }) => Some(walk),
+            _ => None,
+        },
         meters: p
             .content
             .as_ref()

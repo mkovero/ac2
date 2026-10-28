@@ -15,15 +15,19 @@ pub enum PaneKind {
     /// Programme meters of inputs or a stereo pair: PPM bars, correlation, goniometer. It
     /// shows no measurement: what it meters is its view's [`crate::state::Metered`].
     Programme,
+    /// A spatial walk: its plan, its points and where the mic goes next. It shows no
+    /// measurement: its walk is its view's [`crate::state::View::walk`].
+    Walk,
 }
 
 impl PaneKind {
-    pub const ALL: [PaneKind; 5] = [
+    pub const ALL: [PaneKind; 6] = [
         PaneKind::Transfer,
         PaneKind::Spectrum,
         PaneKind::Spl,
         PaneKind::Distortion,
         PaneKind::Programme,
+        PaneKind::Walk,
     ];
 
     pub fn scope(self) -> Scope {
@@ -33,6 +37,7 @@ impl PaneKind {
             PaneKind::Spl => Scope::Spl,
             PaneKind::Distortion => Scope::Distortion,
             PaneKind::Programme => Scope::Programme,
+            PaneKind::Walk => Scope::Walk,
         }
     }
 
@@ -43,6 +48,7 @@ impl PaneKind {
             PaneKind::Spl => "SPL",
             PaneKind::Distortion => "Sweep / distortion",
             PaneKind::Programme => "Programme",
+            PaneKind::Walk => ac2_scene::walk::PANE_TITLE,
         }
     }
 
@@ -56,7 +62,7 @@ impl PaneKind {
             PaneKind::Spl => matches!(k, MeasKind::Spl { .. }),
             // Sweep measurements: the pane shows their runs.
             PaneKind::Distortion => matches!(k, MeasKind::Sweep { .. }),
-            PaneKind::Programme => false,
+            PaneKind::Programme | PaneKind::Walk => false,
         }
     }
 
@@ -78,6 +84,7 @@ impl PaneKind {
             PaneKind::Spl => "SPL",
             PaneKind::Distortion => "sweep",
             PaneKind::Programme => "programme",
+            PaneKind::Walk => "walk",
         }
     }
 }

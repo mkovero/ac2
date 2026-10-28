@@ -10,7 +10,7 @@ impl AppState {
     /// now is listed with the reason its own command would give.
     pub(super) fn open_new_measurement(&mut self, p: PaneId, keymap: &Keymap) {
         let preselect = match self.layout.kind(p) {
-            PaneKind::Transfer => NewKind::Transfer,
+            PaneKind::Transfer | PaneKind::Walk => NewKind::Transfer,
             PaneKind::Spectrum => match self.pane_meas(p).map(|m| &m.config.kind) {
                 Some(MeasKind::Rta { .. }) => NewKind::Rta,
                 _ => NewKind::Spectrum,

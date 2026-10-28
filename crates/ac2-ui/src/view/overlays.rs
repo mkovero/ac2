@@ -28,6 +28,8 @@ pub(super) fn draw(app: &mut App, ctx: &egui::Context, ch: &Chrome, top: f32) {
         Overlay::Choose(_) => choose(app, ctx, ch),
         Overlay::Sessions(_) => super::sessions::sessions(app, ctx, ch),
         Overlay::Eq(_) => super::eq::eq(app, ctx, ch),
+        Overlay::WalkSetup(_) => super::walk::setup(app, ctx, ch),
+        Overlay::PlanEditor(_) => super::walk::editor(app, ctx, ch),
         // Drawn by its pane, under the title chip.
         Overlay::PaneMenu(_) => {}
         Overlay::RigMenu(_) => super::chrome::rig_menu(app, ctx, ch),

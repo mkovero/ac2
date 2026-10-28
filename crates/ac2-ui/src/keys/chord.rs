@@ -104,7 +104,7 @@ impl Chord {
         }
     }
 
-    /// Parses `Ctrl+K`, `Cmd+K`, `Shift+P`, `Alt+Left`, `Space`, `/`, `Up`, `F1`.
+    /// Parses `Ctrl+K`, `Cmd+K`, `Shift+P`, `Alt+Left`, `Space`, `/`, `Up`, `F1`, `PageDown`.
     pub fn parse(s: &str) -> Result<Self, String> {
         let mut c = Chord::key(Key::Space);
         // macOS labels (`⌘⇧P`) parse too, so every label reads back as its chord.
@@ -145,6 +145,8 @@ impl Chord {
             "left" | "←" => Key::ArrowLeft,
             "right" | "→" => Key::ArrowRight,
             "tab" => Key::Tab,
+            "pageup" | "pgup" => Key::PageUp,
+            "pagedown" | "pgdn" => Key::PageDown,
             _ => {
                 let k = if key.len() == 1 {
                     key.to_ascii_uppercase()
