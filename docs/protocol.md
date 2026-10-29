@@ -1234,7 +1234,7 @@ one `<name>.json` per plan in its data directory (`plans/`), mirrored as `State.
 - The walk's **average** is a power-average math channel of the captured points' traces,
   in point order, owned by the walk's first measurement and named `<walk> · average`: made
   (and started) at the second capture, its `of` updated after every capture, skip and redo
-  (as `meas.update`, which restarts it), deleted when fewer than two captures are left.
+  (as `meas.update`, which restarts it), kept (holding no average) when fewer than two captures are left.
 - While a walk names them, its measurements, its average and its points' traces cannot be
   deleted, nor its measurements change kind (`refused`). `walk.delete` keeps the traces
   and the average, which becomes an ordinary average of them; the plan copy goes with the
