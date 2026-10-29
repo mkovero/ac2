@@ -133,6 +133,7 @@ impl Control {
                 self.commit(Change::Measurement(Patch::Set(m)));
             }
         }
+        self.resume_walks();
         self.start_timing_job();
         self.start_session_levels();
     }

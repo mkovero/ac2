@@ -3,7 +3,8 @@
 //! A walk names its measurements, its captures and its average; the owners checks refuse
 //! deleting any of them while it does. Moving the mic (a walk's goto, the advance after a
 //! capture or skip, a redo) restarts every walk measurement's averaging and turns its delay
-//! tracking on, so the average at the new point holds nothing of the carry.
+//! tracking on, so the average at the new point holds nothing of the carry. A loaded walk's
+//! measurements get the same on their first run after the load.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -370,6 +371,9 @@ impl Control {
     /// `walk.delete`: the walk goes; its traces and its average stay.
     pub(super) fn walk_delete(&mut self, walk: WalkId) -> Result<ReplyBody, ProtoError> {
         let w = self.walk(walk)?.clone();
+        for id in &w.meas {
+            self.walk_resume.remove(id);
+        }
         let mut rev = self.commit(Change::Walk(Patch::Deleted(walk)));
         if !self.store.state().walks.iter().any(|o| o.plan == w.plan) {
             rev = self.commit(Change::WalkPlan(Patch::Deleted(w.plan.clone())));
@@ -487,20 +491,42 @@ impl Control {
     /// tracking follows the arrival from here.
     fn walk_moved(&mut self, w: &WalkState) {
         for &id in &w.meas {
-            let Ok(m) = self.meas(id) else {
-                continue;
-            };
-            let mut m = m.clone();
-            if let Some(j) = self.jobs.get(&id) {
-                j.send(JobCmd::Reset);
-                j.send(JobCmd::Track { enabled: true });
-            }
-            if let Some(d) = &mut m.delay
-                && !d.tracking
-            {
-                d.tracking = true;
-                self.commit(Change::Measurement(Patch::Set(m)));
-            }
+            self.restart_at_point(id);
+        }
+    }
+
+    /// One walk measurement starts over at the mic's point: its averaging restarts and its
+    /// delay tracking is on.
+    fn restart_at_point(&mut self, id: MeasId) {
+        self.walk_resume.remove(&id);
+        let Ok(m) = self.meas(id) else {
+            return;
+        };
+        let mut m = m.clone();
+        if let Some(j) = self.jobs.get(&id) {
+            j.send(JobCmd::Reset);
+            j.send(JobCmd::Track { enabled: true });
+        }
+        if let Some(d) = &mut m.delay
+            && !d.tracking
+        {
+            d.tracking = true;
+            self.commit(Change::Measurement(Patch::Set(m)));
+        }
+    }
+
+    /// A loaded walk's measurements that run now and have not since the load restart as on
+    /// a move: the mic has been placed again since the session was saved, so the saved
+    /// delay and average describe a placement that is gone. Called wherever jobs start.
+    pub(super) fn resume_walks(&mut self) {
+        let running: Vec<MeasId> = self
+            .walk_resume
+            .iter()
+            .copied()
+            .filter(|id| self.jobs.contains_key(id))
+            .collect();
+        for id in running {
+            self.restart_at_point(id);
         }
     }
 
@@ -642,12 +668,15 @@ impl Control {
             if w.average.is_some_and(|a| self.meas(a).is_err()) {
                 w.average = None;
             }
+            self.walk_resume.extend(w.meas.iter().copied());
             self.commit(Change::Walk(Patch::Set(w)));
         }
+        self.resume_walks();
     }
 
     /// Clears the walks and plan copies before a load replaces them.
     pub(super) fn clear_walks(&mut self) {
+        self.walk_resume.clear();
         let walks: Vec<WalkId> = self.store.state().walks.iter().map(|w| w.id).collect();
         for id in walks {
             self.commit(Change::Walk(Patch::Deleted(id)));

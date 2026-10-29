@@ -6,7 +6,7 @@
 //! and a single consumer gives serial commits and a total event order for free; an async
 //! runtime would add scheduling without adding concurrency that the state model allows.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
@@ -369,6 +369,9 @@ pub(crate) struct Control {
     sweep: Option<ActiveSweep>,
     next_sweep: u32,
     next_walk: u32,
+    /// Walk measurements of a loaded session whose first run still owes the restart a
+    /// move gives: their delay and average belong to the mic's placement when it was saved.
+    walk_resume: HashSet<MeasId>,
     autosave: Option<Autosaver>,
     /// Load the autosave when the control thread starts.
     restore: bool,
@@ -536,6 +539,7 @@ impl Control {
             sweep: None,
             next_sweep: 1,
             next_walk: 1,
+            walk_resume: HashSet::new(),
             autosave,
             restore,
             logs: SplLogs {

@@ -1,7 +1,7 @@
 //! Spatial walks on the fake rig: moving the mic restarts each walk measurement with
 //! tracking on, captures carry their positions and whether they were settled, the average
-//! follows captures, redos and skips, the owners checks hold, and a session keeps the walk
-//! and its plan.
+//! follows captures, redos and skips, the owners checks hold, a session keeps the walk
+//! and its plan, and a loaded walk restarts its measurements on their first run.
 #![allow(clippy::unwrap_used)]
 
 use crate::common;
@@ -25,6 +25,7 @@ struct Rig {
     sub: Sub,
     tok: LeaseToken,
     d: FakeDriver,
+    backend: FakeBackend,
     dir: tempfile::TempDir,
 }
 
@@ -76,6 +77,7 @@ fn rig(name: &str, backend: FakeBackend) -> Rig {
         sub,
         tok,
         d,
+        backend,
         dir,
     }
 }
@@ -557,6 +559,98 @@ fn a_session_round_trip_keeps_the_walk_and_its_plan() {
     let w = r.walk(Command::WalkSkip { walk: w.id });
     assert_eq!(w.points[2].state, PointState::Skipped);
     r.h.shutdown();
+}
+
+#[test]
+fn a_loaded_walk_restarts_its_measurements_on_their_first_run_only() {
+    let mut r = rig("walk-resume", manual_rig());
+    let w = r.new_walk(&["P1", "P2"]);
+    r.capture(w.id);
+    // Saved stopped and not tracking: the load alone must not restart anything.
+    r.c.ok(Command::MeasStop { meas: MeasId(1) });
+    r.c.ok(Command::DelayTrack {
+        meas: MeasId(1),
+        enabled: false,
+    });
+    r.c.ok(Command::FileSave {
+        session: SessionRef::Name {
+            name: "resumed".into(),
+        },
+        overwrite: false,
+    });
+    r.c.ok(Command::FileLoad {
+        session: SessionRef::Name {
+            name: "resumed".into(),
+        },
+        discard: true,
+    });
+    let m = r.meas(MeasId(1));
+    assert!(!m.running);
+    assert!(!m.delay.unwrap().tracking);
+    resume_audio(&mut r);
+
+    // The first run is a move: tracking on, the average starts empty.
+    match r.c.ok(Command::MeasStart { meas: MeasId(1) }) {
+        ReplyBody::Measurement(m) => assert!(m.delay.as_ref().unwrap().tracking, "{m:?}"),
+        other => panic!("{other:?}"),
+    }
+    let first = r.fill();
+    assert!(first < 0.5, "the first run restarts the averages: {first}");
+
+    // Once: a second start neither resets the full average nor turns tracking back on.
+    r.c.ok(Command::DelayTrack {
+        meas: MeasId(1),
+        enabled: false,
+    });
+    let rev = r.meas(MeasId(1)).config_rev.0;
+    r.c.ok(Command::MeasStart { meas: MeasId(1) });
+    assert!(!r.meas(MeasId(1)).delay.unwrap().tracking);
+    let again = filled(&r.frame(0.1, rev));
+    assert_eq!(again, 1.0, "a second start keeps the average");
+    r.c.ok(Command::MeasStop { meas: MeasId(1) });
+    r.c.ok(Command::MeasStart { meas: MeasId(1) });
+    assert!(!r.meas(MeasId(1)).delay.unwrap().tracking);
+
+    // Saved running, the load is its first run.
+    r.c.ok(Command::FileSave {
+        session: SessionRef::Name {
+            name: "resumed-running".into(),
+        },
+        overwrite: false,
+    });
+    r.c.ok(Command::FileLoad {
+        session: SessionRef::Name {
+            name: "resumed-running".into(),
+        },
+        discard: true,
+    });
+    let m = r.meas(MeasId(1));
+    assert!(m.running);
+    assert!(m.delay.unwrap().tracking);
+    r.shutdown();
+}
+
+/// After a load: the reopened stream's driver, and pink noise playing again (a load
+/// disarms the generator and ends the lease).
+fn resume_audio(r: &mut Rig) {
+    r.d = driver(&r.backend);
+    r.tok = match r.c.ok(Command::GenAcquire { force: false }) {
+        ReplyBody::Lease(l) => l.lease_token,
+        other => panic!("{other:?}"),
+    };
+    r.c.ok(Command::GenSet {
+        lease_token: r.tok,
+        desired: GeneratorDesired {
+            settings: GeneratorSettings {
+                signal: Signal::Pink,
+                level: Dbfs(-20.0),
+                band: None,
+                outputs: vec![0],
+            },
+            armed: true,
+            firing: true,
+        },
+    });
 }
 
 #[test]

@@ -166,7 +166,9 @@ next, picks up the mic, walks and places it; a reset at the key press would aver
 So on a move (next, back, redo) the daemon resets every walk measurement's averaging
 (`meas.reset`) and turns on **delay tracking** for it (decision 3a, `DelayState.tracking`). While
 the mic travels, tracking follows the changing arrival; every tracking move restarts the MTW
-stages anyway (`set_delay`). The operator never resets by hand. Sweeps have no live averaging or
+stages anyway (`set_delay`). The operator never resets by hand. A loaded walk gets the same on
+its measurements' first run after the load: the saved delay and average belong to the old
+placement (operator 2026-10-29). Sweeps have no live averaging or
 tracking: the run at the point is the capture.
 
 **Ready, a new wire fact.** `TfMeta.filled: f32` (0…1), from a small `ac2-core` addition

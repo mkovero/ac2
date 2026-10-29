@@ -591,6 +591,7 @@ impl Control {
         }
         m.running = true;
         self.commit(Change::Measurement(Patch::Set(m.clone())));
-        Ok(m)
+        self.resume_walks();
+        Ok(self.meas(meas)?.clone())
     }
 }
