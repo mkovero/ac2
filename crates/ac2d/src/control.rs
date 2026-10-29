@@ -69,7 +69,9 @@ mod sweeps;
 mod traces;
 mod transfer;
 mod validate;
+mod walk_mics;
 mod walk_steps;
+mod walk_sweep;
 mod walks;
 mod working;
 
@@ -318,6 +320,8 @@ struct ActiveSweep {
     epoch: SessionEpoch,
     /// One per measurement input, in the run's order.
     inputs: Vec<SweepInput>,
+    /// The walk the run records for, and where.
+    walk: Option<walk_sweep::WalkSweepAt>,
 }
 
 /// A measurement input of the sweep in progress, as its trace will carry it.
@@ -333,6 +337,8 @@ struct SweepInput {
         Box<ac2_proto::model::TraceMicCurve>,
         ac2_core::mic_curve::Correction,
     )>,
+    /// Where the input's mic stood, when the run records for a walk.
+    position: Option<ac2_proto::model::TracePosition>,
 }
 
 pub(crate) struct Control {

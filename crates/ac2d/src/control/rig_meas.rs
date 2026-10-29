@@ -616,14 +616,14 @@ pub(super) fn remap_ids(
         re(&mut l.info.meas);
     }
     for w in &mut data.walks {
-        for m in &mut w.meas {
-            re(m);
+        for m in &mut w.mics {
+            re(&mut m.meas);
         }
         if let Some(a) = &mut w.average {
             re(a);
         }
         for p in &mut w.points {
-            re(&mut p.mic);
+            re(&mut p.mic.meas);
         }
     }
     let mut moved: Vec<_> = map.into_iter().collect();

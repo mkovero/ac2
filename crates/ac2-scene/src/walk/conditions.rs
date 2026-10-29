@@ -6,9 +6,8 @@
 //! Every claim is a fact the captures recorded ([`CaptureContext`]): a condition the daemon
 //! does not record is never said to have changed or stayed.
 
-use ac2_proto::model::{CaptureContext, PointState, WalkState};
+use ac2_proto::model::{CaptureContext, PointState, WalkMic, WalkState};
 use ac2_proto::spl_log::civil_from_days;
-use ac2_proto::units::MeasId;
 use ac2_proto::units::WallNs;
 
 use crate::time::MONTHS;
@@ -88,7 +87,7 @@ fn differ(a: &CaptureContext, b: &CaptureContext, out: &mut Vec<Changed>) {
 /// The recorded conditions that differ between any two captures of one walk measurement in
 /// `contexts` (each with the measurement that captured it), each named once. Captures of
 /// different measurements are different mics by design, never a change.
-pub fn changed(contexts: &[(MeasId, &CaptureContext)]) -> Vec<Changed> {
+pub fn changed(contexts: &[(WalkMic, &CaptureContext)]) -> Vec<Changed> {
     let mut out = Vec::new();
     for (k, (meas, c)) in contexts.iter().enumerate() {
         if let Some((_, first)) = contexts[..k].iter().find(|(m, _)| m == meas) {
@@ -107,7 +106,7 @@ pub fn changed(contexts: &[(MeasId, &CaptureContext)]) -> Vec<Changed> {
 /// no day), so `P1–P4` says nothing of P3 when it was skipped. `today` is on the captures'
 /// (the daemon's) clock; `offset_s` gives the local UTC offset in force at a wall time.
 pub fn conditions_text(w: &WalkState, today: WallNs, offset_s: impl Fn(WallNs) -> i32) -> String {
-    let captured: Vec<(&str, MeasId, &CaptureContext)> = w
+    let captured: Vec<(&str, WalkMic, &CaptureContext)> = w
         .points
         .iter()
         .filter_map(|p| match &p.state {
@@ -149,7 +148,7 @@ pub fn conditions_text(w: &WalkState, today: WallNs, offset_s: impl Fn(WallNs) -
             .collect();
         parts.push(groups.join(", "));
     }
-    let contexts: Vec<(MeasId, &CaptureContext)> =
+    let contexts: Vec<(WalkMic, &CaptureContext)> =
         captured.iter().map(|&(_, m, c)| (m, c)).collect();
     let changes = changed(&contexts);
     if !changes.is_empty() && parts.is_empty() {

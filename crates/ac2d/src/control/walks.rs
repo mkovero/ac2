@@ -12,13 +12,13 @@ use std::path::Path;
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{
     CaptureContext, EqMark, MathConfig, MathDomain, MathExpr, MathReference, MeasConfig, MeasKind,
-    MeasScope, Operand, PlanSpec, PointState, TraceOwner, TracePosition, WalkKind, WalkPoint,
-    WalkPointSpec, WalkState,
+    MeasScope, Operand, PlanSpec, PointState, TraceMeta, TraceOwner, TracePosition, WalkKind,
+    WalkMic, WalkPoint, WalkPointSpec, WalkState,
 };
 use ac2_proto::units::{MeasId, Seconds, TraceId, WalkId};
 use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
 
-use super::{Control, walk_steps};
+use super::{Control, walk_steps, walk_sweep};
 use crate::jobs::JobCmd;
 use crate::util::perr;
 
@@ -97,61 +97,7 @@ impl Control {
         points: Vec<WalkPointSpec>,
     ) -> Result<ReplyBody, ProtoError> {
         check_walk_name(&name)?;
-        if meas.is_empty() || meas.len() > WalkState::MAX_MICS {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!(
-                    "a walk captures with 1 … {} measurements, one per mic",
-                    WalkState::MAX_MICS
-                ),
-            ));
-        }
-        if (1..meas.len()).any(|k| meas[..k].contains(&meas[k])) {
-            return Err(perr(
-                ErrorCode::Invalid,
-                "a walk names each measurement once: one per mic",
-            ));
-        }
-        let mut inputs: Vec<u16> = Vec::with_capacity(meas.len());
-        for &id in &meas {
-            let m = self.meas(id)?;
-            if !matches!(m.config.kind, MeasKind::Transfer { .. }) {
-                return Err(perr(
-                    ErrorCode::Invalid,
-                    format!(
-                        "{} is not a transfer measurement: a live walk captures transfers",
-                        m.config.name
-                    ),
-                ));
-            }
-            if m.config.scope != MeasScope::Session {
-                return Err(perr(
-                    ErrorCode::Invalid,
-                    format!("{} is a rig meter", m.config.name),
-                ));
-            }
-            // One mic stands at one point: two measurements of one input would capture the
-            // same mic at two places.
-            if let MeasKind::Transfer { config } = &m.config.kind {
-                if inputs.contains(&config.measurement_input) {
-                    return Err(perr(
-                        ErrorCode::Invalid,
-                        format!(
-                            "{} measures an input another of the walk's measurements does: \
-                             each mic needs its own input",
-                            m.config.name
-                        ),
-                    ));
-                }
-                inputs.push(config.measurement_input);
-            }
-            if let Some(w) = self.walk_of(id) {
-                return Err(perr(
-                    ErrorCode::Refused,
-                    format!("{} captures for the walk {} already", m.config.name, w.name),
-                ));
-            }
-        }
+        let mics = self.walk_mics(kind, &meas)?;
         check_points(&points)?;
         let copy = self.store.state().walk_plans.iter().any(|p| p.name == plan);
         if !copy {
@@ -169,7 +115,7 @@ impl Control {
         }
         let id = WalkId(self.next_walk);
         self.next_walk += 1;
-        let first = meas[0];
+        let first = mics[0];
         let mut w = WalkState {
             id,
             name,
@@ -185,11 +131,12 @@ impl Control {
                     state: PointState::Pending,
                 })
                 .collect(),
-            meas,
+            mics,
             step: Some(0),
             average: None,
+            room: None,
         };
-        walk_steps::regroup(&mut w.points, &w.meas);
+        walk_steps::regroup(&mut w.points, &w.mics);
         self.commit(Change::Walk(Patch::Set(w.clone())));
         self.walk_moved(&w);
         tracing::info!("walk {id} ({}) started", w.name);
@@ -206,6 +153,7 @@ impl Control {
         check_walk_name(&name)?;
         check_points(&points)?;
         let mut w = self.walk(walk)?.clone();
+        self.check_walk_idle(&w)?;
         if let Some(gone) = w.points.iter().find(|p| {
             matches!(p.state, PointState::Captured { .. })
                 && !points.iter().any(|s| s.label == p.label)
@@ -218,7 +166,7 @@ impl Control {
                 ),
             ));
         }
-        let standing = |w: &WalkState| -> Vec<(String, MeasId)> {
+        let standing = |w: &WalkState| -> Vec<(String, WalkMic)> {
             w.standing()
                 .into_iter()
                 .map(|i| (w.points[i].label.clone(), w.points[i].mic))
@@ -239,14 +187,14 @@ impl Control {
                     label: s.label,
                     at: s.at,
                     step: 0,
-                    mic: w.meas[0],
+                    mic: w.mics[0],
                     state: PointState::Pending,
                 },
             })
             .collect();
         w.name = name;
         w.points = new;
-        walk_steps::regroup(&mut w.points, &w.meas);
+        walk_steps::regroup(&mut w.points, &w.mics);
         // The mics stay where they stand when a step still holds one of their points.
         w.step = before
             .iter()
@@ -268,6 +216,7 @@ impl Control {
     /// `walk.goto`: the mics move to step `step`.
     pub(super) fn walk_goto(&mut self, walk: WalkId, step: u16) -> Result<ReplyBody, ProtoError> {
         let mut w = self.walk(walk)?.clone();
+        self.check_walk_idle(&w)?;
         if step >= w.steps() {
             return Err(perr(
                 ErrorCode::NotFound,
@@ -284,6 +233,9 @@ impl Control {
     /// the next step with a pending point.
     pub(super) fn walk_capture(&mut self, walk: WalkId) -> Result<ReplyBody, ProtoError> {
         let mut w = self.walk(walk)?.clone();
+        if w.kind == WalkKind::Sweep {
+            return Err(walk_sweep::sweep_capture_refusal(&w));
+        }
         let Some(step) = w.step else {
             return Err(perr(
                 ErrorCode::Invalid,
@@ -316,24 +268,8 @@ impl Control {
                 walk,
             };
             let traces: Vec<TraceId> = done.iter().map(|d| d.1).collect();
-            match self.trace_capture(p.mic, name, None, Some(position)) {
-                Ok(ReplyBody::Trace(t)) => {
-                    // The context is what the trace records, so the warning and the trace's
-                    // own metadata never disagree.
-                    let context = CaptureContext {
-                        at: t.created_at,
-                        mic: t.mic.clone(),
-                        eq_in: t
-                            .eq_in
-                            .iter()
-                            .map(|e| EqMark {
-                                set: e.set,
-                                rev: e.rev,
-                            })
-                            .collect(),
-                    };
-                    done.push((i, t.id, context));
-                }
+            match self.trace_capture(p.mic.meas, name, None, Some(position)) {
+                Ok(ReplyBody::Trace(t)) => done.push((i, t.id, capture_context(&t))),
                 Ok(_) => {
                     self.drop_captures(&traces);
                     return Err(perr(ErrorCode::Internal, "a capture answered no trace"));
@@ -350,7 +286,7 @@ impl Control {
         }
         w.step = walk_steps::next_step(&w, Some(step));
         self.commit(Change::Walk(Patch::Set(w.clone())));
-        let w = self.walk_average(walk)?;
+        let w = self.walk_results(walk)?;
         if w.step.is_some() {
             self.walk_moved(&w);
         }
@@ -361,6 +297,7 @@ impl Control {
     /// pending, on to the next step with a pending point.
     pub(super) fn walk_skip(&mut self, walk: WalkId, point: u16) -> Result<ReplyBody, ProtoError> {
         let mut w = self.walk(walk)?.clone();
+        self.check_walk_idle(&w)?;
         point_of(&w, point)?;
         let i = usize::from(point);
         if matches!(w.points[i].state, PointState::Skipped) {
@@ -381,7 +318,7 @@ impl Control {
             _ => false,
         };
         self.commit(Change::Walk(Patch::Set(w.clone())));
-        let w = self.walk_average(walk)?;
+        let w = self.walk_results(walk)?;
         if moved {
             self.walk_moved(&w);
         }
@@ -392,6 +329,7 @@ impl Control {
     /// step.
     pub(super) fn walk_redo(&mut self, walk: WalkId, point: u16) -> Result<ReplyBody, ProtoError> {
         let mut w = self.walk(walk)?.clone();
+        self.check_walk_idle(&w)?;
         point_of(&w, point)?;
         let i = usize::from(point);
         if let PointState::Captured { trace, .. } = &w.points[i].state {
@@ -400,7 +338,7 @@ impl Control {
         walk_steps::repend(&mut w, i);
         w.step = Some(w.points[i].step);
         self.commit(Change::Walk(Patch::Set(w.clone())));
-        let w = self.walk_average(walk)?;
+        let w = self.walk_results(walk)?;
         self.walk_moved(&w);
         Ok(ReplyBody::Walk(w))
     }
@@ -412,6 +350,7 @@ impl Control {
         points: &[u16],
     ) -> Result<ReplyBody, ProtoError> {
         let mut w = self.walk(walk)?.clone();
+        self.check_walk_idle(&w)?;
         walk_steps::swap(&mut w, points)?;
         self.commit(Change::Walk(Patch::Set(w.clone())));
         self.walk_moved(&w);
@@ -421,8 +360,9 @@ impl Control {
     /// `walk.delete`: the walk goes; its traces and its average stay.
     pub(super) fn walk_delete(&mut self, walk: WalkId) -> Result<ReplyBody, ProtoError> {
         let w = self.walk(walk)?.clone();
-        for id in &w.meas {
-            self.walk_resume.remove(id);
+        self.check_walk_idle(&w)?;
+        for id in w.meas() {
+            self.walk_resume.remove(&id);
         }
         let mut rev = self.commit(Change::Walk(Patch::Deleted(walk)));
         if !self.store.state().walks.iter().any(|o| o.plan == w.plan) {
@@ -435,12 +375,12 @@ impl Control {
     // -- invariants -------------------------------------------------------------------------
 
     /// The walk capturing with `meas`, if any.
-    fn walk_of(&self, meas: MeasId) -> Option<&WalkState> {
+    pub(super) fn walk_of(&self, meas: MeasId) -> Option<&WalkState> {
         self.store
             .state()
             .walks
             .iter()
-            .find(|w| w.meas.contains(&meas))
+            .find(|w| w.captures_with(meas))
     }
 
     /// The walk naming measurement `meas` (capturing with it or averaging into it).
@@ -449,7 +389,7 @@ impl Control {
             .state()
             .walks
             .iter()
-            .find(|w| w.meas.contains(&meas) || w.average == Some(meas))
+            .find(|w| w.captures_with(meas) || w.average == Some(meas))
     }
 
     /// The walk naming trace `trace` as a point's capture.
@@ -497,38 +437,9 @@ impl Control {
             .try_for_each(|&t| self.check_walk_trace_delete(t))
     }
 
-    /// Refuses turning a walk's measurement into another kind: the walk captures transfers
-    /// with it, and averages them into its average.
-    pub(super) fn check_walk_meas_update(
-        &self,
-        meas: MeasId,
-        new: &MeasKind,
-    ) -> Result<(), ProtoError> {
-        let Some(w) = self.walk_naming_meas(meas) else {
-            return Ok(());
-        };
-        let keeps = if w.average == Some(meas) {
-            matches!(new, MeasKind::Math { .. })
-        } else {
-            matches!(new, MeasKind::Transfer { .. })
-        };
-        if keeps {
-            Ok(())
-        } else {
-            Err(perr(
-                ErrorCode::Refused,
-                format!(
-                    "measurement {meas} belongs to the walk {}: it keeps its kind while the \
-                     walk names it",
-                    w.name
-                ),
-            ))
-        }
-    }
-
     // -- helpers ----------------------------------------------------------------------------
 
-    fn walk(&self, id: WalkId) -> Result<&WalkState, ProtoError> {
+    pub(super) fn walk(&self, id: WalkId) -> Result<&WalkState, ProtoError> {
         self.store
             .state()
             .walks
@@ -538,9 +449,13 @@ impl Control {
     }
 
     /// The mic is at a new point: each walk measurement's averaging restarts and its delay
-    /// tracking follows the arrival from here.
+    /// tracking follows the arrival from here. A sweep has neither: its run at the point is
+    /// the capture, and it finds its arrival in its own recording.
     fn walk_moved(&mut self, w: &WalkState) {
-        for &id in &w.meas {
+        if w.kind == WalkKind::Sweep {
+            return;
+        }
+        for id in w.meas() {
             self.restart_at_point(id);
         }
     }
@@ -580,17 +495,20 @@ impl Control {
         }
     }
 
-    /// *P3 · Vilppu*: the point and the mic (its input's mic name, else the measurement's).
-    fn capture_name(&self, label: &str, meas: MeasId) -> String {
-        let input = match self.meas(meas).map(|m| &m.config.kind) {
-            Ok(MeasKind::Transfer { config }) => Some(config.measurement_input),
-            _ => None,
+    /// *P3 · Vilppu*: the point and the mic (its input's mic name, else a live walk's
+    /// measurement's name, else a sweep walk's input name: its mics share the measurement).
+    pub(super) fn capture_name(&self, label: &str, mic: WalkMic) -> String {
+        let meas = mic.meas;
+        let sweep = self
+            .meas(meas)
+            .is_ok_and(|m| matches!(m.config.kind, MeasKind::Sweep { .. }));
+        let mic = match self.cal_and_mic(mic.input).1 {
+            Some(m) => m.name,
+            None if sweep => self.input_name(mic.input),
+            None => self
+                .meas(meas)
+                .map_or_else(|_| format!("measurement {meas}"), |m| m.config.name.clone()),
         };
-        let mic = input
-            .and_then(|i| self.cal_and_mic(i).1)
-            .map(|m| m.name)
-            .or_else(|| self.meas(meas).ok().map(|m| m.config.name.clone()))
-            .unwrap_or_else(|| format!("measurement {meas}"));
         format!("{label} · {mic}")
             .chars()
             .take(MAX_TRACE_NAME)
@@ -626,7 +544,7 @@ impl Control {
     /// operands updated (the math channel restarts with them). Once made it stays while redos
     /// and skips leave fewer than two captures, so the panes showing it keep it; its frames
     /// then say NO AVERAGE (`FEW_OPERANDS`). Returns the walk as it is after.
-    fn walk_average(&mut self, walk: WalkId) -> Result<WalkState, ProtoError> {
+    pub(super) fn walk_average(&mut self, walk: WalkId) -> Result<WalkState, ProtoError> {
         let mut w = self.walk(walk)?.clone();
         let of: Vec<Operand> = w
             .captured_traces()
@@ -638,7 +556,7 @@ impl Control {
             (None, false) => {}
             (None, true) => {
                 let owner = TraceOwner::Meas {
-                    meas: w.meas.first().copied().unwrap_or(MeasId(0)),
+                    meas: w.mics.first().map_or(MeasId(0), |m| m.meas),
                 };
                 let config = MeasConfig {
                     name: average_name(&w.name),
@@ -725,7 +643,10 @@ impl Control {
             if w.average.is_some_and(|a| self.meas(a).is_err()) {
                 w.average = None;
             }
-            self.walk_resume.extend(w.meas.iter().copied());
+            if w.kind == WalkKind::LiveTransfer {
+                self.walk_resume.extend(w.meas());
+            }
+            w.room = self.walk_room(&w);
             self.commit(Change::Walk(Patch::Set(w)));
         }
         self.resume_walks();
@@ -775,7 +696,12 @@ pub(super) fn check_walks(
                 w.id, w.plan
             )));
         }
-        if let Some(m) = w.meas.iter().chain(&w.average).find(|m| !meas.contains(m)) {
+        if let Some(m) = w
+            .meas()
+            .iter()
+            .chain(&w.average)
+            .find(|m| !meas.contains(m))
+        {
             return Err(bad(format!(
                 "walk {} names measurement {m}, which the session does not hold",
                 w.id
@@ -906,6 +832,23 @@ fn point_of(w: &WalkState, point: u16) -> Result<&WalkPoint, ProtoError> {
             format!("the walk {} has no point {point}", w.name),
         )
     })
+}
+
+/// What a capture was taken under: what its trace records, so the warning and the trace's
+/// own metadata never disagree.
+pub(super) fn capture_context(t: &TraceMeta) -> CaptureContext {
+    CaptureContext {
+        at: t.created_at,
+        mic: t.mic.clone(),
+        eq_in: t
+            .eq_in
+            .iter()
+            .map(|e| EqMark {
+                set: e.set,
+                rev: e.rev,
+            })
+            .collect(),
+    }
 }
 
 fn average_name(walk: &str) -> String {

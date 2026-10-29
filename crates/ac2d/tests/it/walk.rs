@@ -269,7 +269,7 @@ fn captures_carry_positions_and_a_delay_step_restarts_filled() {
     assert_eq!(context.at, t1.created_at);
     assert_eq!(context.mic, t1.mic);
     assert_eq!(context.eq_in.len(), t1.eq_in.len());
-    assert_eq!(w.points[0].mic, MeasId(1));
+    assert_eq!(w.points[0].mic.meas, MeasId(1));
     assert_eq!(w.average, None, "one capture is no average");
 
     // Settled this time; the second capture makes the average, under the walk's
@@ -406,7 +406,7 @@ fn two_mics_capture_a_step_at_a_time_and_swap_skip_redo_per_point() {
         points,
     });
     // Each mic walks its own side: the cables cross nowhere.
-    let plan: Vec<(u16, MeasId)> = w.points.iter().map(|p| (p.step, p.mic)).collect();
+    let plan: Vec<(u16, MeasId)> = w.points.iter().map(|p| (p.step, p.mic.meas)).collect();
     assert_eq!(
         plan,
         vec![(0, MeasId(1)), (0, m2), (1, m2), (1, MeasId(1)), (2, m2)]
@@ -441,8 +441,11 @@ fn two_mics_capture_a_step_at_a_time_and_swap_skip_redo_per_point() {
         walk: w.id,
         points: vec![2, 3],
     });
-    assert_eq!((w.points[2].mic, w.points[3].mic), (MeasId(1), m2));
-    assert_eq!(w.points[4].mic, MeasId(1));
+    assert_eq!(
+        (w.points[2].mic.meas, w.points[3].mic.meas),
+        (MeasId(1), m2)
+    );
+    assert_eq!(w.points[4].mic.meas, MeasId(1));
     let e =
         r.c.call(Command::WalkSwap {
             walk: w.id,
@@ -462,7 +465,7 @@ fn two_mics_capture_a_step_at_a_time_and_swap_skip_redo_per_point() {
     let w = r.capture(w.id);
     let t3 = captured(&w, 2);
     assert_eq!(r.trace(t3).edit.name, "P3 · main");
-    assert_eq!(w.points[2].mic, MeasId(1));
+    assert_eq!(w.points[2].mic.meas, MeasId(1));
     assert_eq!(w.step, Some(2));
     assert_eq!(r.average_of(&w), vec![t1, t2, t3]);
 

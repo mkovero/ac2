@@ -2,7 +2,9 @@
 //! the row in focus, the typed text, the points the suggestion placed and the operator moved.
 //! No key or egui here; the texts are `ac2_scene::walk::setup`'s, the rules `ac2_room`'s.
 
-use ac2_proto::model::{Marker, MarkerKind, PlanSpec, WalkPointSpec, WalkState, ZoneSpec};
+use ac2_proto::model::{
+    Marker, MarkerKind, PlanSpec, WalkKind, WalkPointSpec, WalkState, ZoneSpec,
+};
 use ac2_proto::units::MeasId;
 use ac2_room::pattern::{Broken, Preset, PresetKind, Relaxed, breaks, suggest};
 use ac2_scene::walk::setup::{EditorField, Layer, SetupField, editor_fields, setup_fields};
@@ -79,8 +81,11 @@ pub struct WalkSetup {
     /// The count asked for; `None`: the preset's default.
     pub n: Option<usize>,
     pub seed: u64,
-    /// The transfer measurements that capture, one per mic, in mic order.
+    /// The transfer measurements that capture, one per mic, in mic order; or a sweep walk's
+    /// one sweep measurement, whose inputs are the mics.
     pub mics: Vec<MeasId>,
+    /// What a capture is: the first mic row's choice is a transfer or a sweep.
+    pub kind: WalkKind,
     /// Whether another offered transfer could be added (on an input none chosen measures).
     pub add_mic: bool,
     pub focus: SetupField,
@@ -99,8 +104,19 @@ pub struct WalkSetup {
 
 impl WalkSetup {
     /// A setup over the first plan of `plans`, if any, and the first of `mics` (the session's
-    /// transfer measurements and the input each measures).
-    pub fn new(name: String, plans: &[PlanSpec], mics: &[(MeasId, u16)]) -> Self {
+    /// transfer measurements and the input each measures), else of `sweeps` (its sweep
+    /// measurements).
+    pub fn new(
+        name: String,
+        plans: &[PlanSpec],
+        mics: &[(MeasId, u16)],
+        sweeps: &[MeasId],
+    ) -> Self {
+        let (first, kind) = match (mics.first(), sweeps.first()) {
+            (Some(m), _) => (Some(m.0), WalkKind::LiveTransfer),
+            (None, Some(&m)) => (Some(m), WalkKind::Sweep),
+            (None, None) => (None, WalkKind::LiveTransfer),
+        };
         let mut s = Self {
             name,
             plan: plans.first().map(|p| p.name.clone()),
@@ -110,7 +126,8 @@ impl WalkSetup {
             reverb_s: DEFAULT_RT_S,
             n: None,
             seed: 1,
-            mics: mics.first().map(|m| m.0).into_iter().collect(),
+            mics: first.into_iter().collect(),
+            kind,
             add_mic: false,
             focus: SetupField::Plan,
             typed: None,
@@ -121,10 +138,17 @@ impl WalkSetup {
             drag: None,
             sent: false,
         };
-        s.add_mic = !s.mic_choices(s.mics.len(), mics).is_empty();
+        s.add_mic = s.can_add(mics);
         let plan = s.plan_in(plans).cloned();
         s.refresh(plan.as_ref());
         s
+    }
+
+    /// Whether a row to add another mic is offered: a live walk's, while a transfer on an
+    /// input of its own is left (a sweep walk's mics are its measurement's inputs).
+    fn can_add(&self, offered: &[(MeasId, u16)]) -> bool {
+        self.kind == WalkKind::LiveTransfer
+            && !self.mic_choices(self.mics.len(), offered).is_empty()
     }
 
     /// What mic row `k` may take: the offered transfers no other row chose, on an input no
@@ -232,9 +256,16 @@ impl WalkSetup {
     }
 
     /// ←/→ on the focused row. `plans` are the names offered, `mics` the transfer
-    /// measurements and their inputs; the caller brings the zone into range and refreshes
-    /// the suggestion.
-    pub fn change(&mut self, d: isize, plans: &[String], mics: &[(MeasId, u16)]) {
+    /// measurements and their inputs, `sweeps` the sweep measurements (the first mic row
+    /// offers them after the transfers: a sweep walk); the caller brings the zone into range
+    /// and refreshes the suggestion.
+    pub fn change(
+        &mut self,
+        d: isize,
+        plans: &[String],
+        mics: &[(MeasId, u16)],
+        sweeps: &[MeasId],
+    ) {
         self.typed = None;
         self.error = None;
         let cycle = |n: usize, i: usize| ((i as isize + d).rem_euclid(n as isize)) as usize;
@@ -281,23 +312,32 @@ impl WalkSetup {
             }
             SetupField::Mic(k) => {
                 let k = usize::from(k);
-                // The first mic is always one; a later row cycles through none as well,
-                // and none drops it and the rows after it.
+                // The first mic is always one, a transfer or a sweep; a later row cycles
+                // through none as well, and none drops it and the rows after it.
                 let mut choices: Vec<Option<MeasId>> =
                     self.mic_choices(k, mics).into_iter().map(Some).collect();
-                if k > 0 {
+                if k == 0 {
+                    choices.extend(sweeps.iter().copied().map(Some));
+                } else {
                     choices.insert(0, None);
                 }
                 if !choices.is_empty() {
                     let now = self.mics.get(k).copied();
                     let i = choices.iter().position(|c| *c == now).unwrap_or(0);
                     match choices[cycle(choices.len(), i)] {
-                        Some(m) if k < self.mics.len() => self.mics[k] = m,
+                        Some(m) if sweeps.contains(&m) => {
+                            self.kind = WalkKind::Sweep;
+                            self.mics = vec![m];
+                        }
+                        Some(m) if k < self.mics.len() => {
+                            self.kind = WalkKind::LiveTransfer;
+                            self.mics[k] = m;
+                        }
                         Some(m) => self.mics.push(m),
                         None => self.mics.truncate(k),
                     }
                 }
-                self.add_mic = !self.mic_choices(self.mics.len(), mics).is_empty();
+                self.add_mic = self.can_add(mics);
             }
         }
     }
@@ -875,6 +915,7 @@ mod tests {
             "Walk 1".into(),
             std::slice::from_ref(&plan),
             &[(MeasId(1), 1)],
+            &[],
         );
         assert_eq!(s.points.len(), 8);
         s.plan_msg(
@@ -909,7 +950,7 @@ mod tests {
 
     #[test]
     fn the_editor_builds_a_valid_plan() {
-        let back = WalkSetup::new("Walk 1".into(), &[], &[]);
+        let back = WalkSetup::new("Walk 1".into(), &[], &[], &[]);
         let mut e = PlanEditor::new("Room".into(), back);
         assert!(e.verdict().is_err());
         for (i, v) in ["0 0", "10 0", "10 8", "0 8"].iter().enumerate() {

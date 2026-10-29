@@ -129,7 +129,12 @@ pub(super) fn setup(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
         .mics
         .iter()
         .filter_map(|&m| st.meas(m))
-        .map(|m| m.config.name.clone())
+        .map(|m| match &m.config.kind {
+            ac2_proto::model::MeasKind::Sweep { config } => {
+                ac2_scene::walk::setup::sweep_mics(&m.config.name, config.measurement_inputs.len())
+            }
+            _ => m.config.name.clone(),
+        })
         .collect();
     let mic_names: Vec<&str> = mics.iter().map(String::as_str).collect();
     let v = setup_view(&SetupInput {

@@ -128,7 +128,8 @@ pub struct WalkNew {
     #[arg(long)]
     pub plan: String,
     /// The transfer measurements that capture, one per mic, each on its own input
-    /// (`--meas A --meas B` for two mics).
+    /// (`--meas A --meas B` for two mics); or one sweep measurement, whose measurement
+    /// inputs are the mics: a sweep walk, captured by `ac2 sweep run`.
     #[arg(long, value_name = "MEAS", required = true)]
     pub meas: Vec<MeasRef>,
     /// Which rules place the positions.

@@ -5,7 +5,7 @@ use super::*;
 use ac2_proto::Change;
 use ac2_proto::event::Patch;
 use ac2_proto::model::{
-    CaptureContext, EqMark, Marker, MarkerKind, PlanSpec, PointState, WalkKind, WalkPoint,
+    CaptureContext, EqMark, Marker, MarkerKind, PlanSpec, PointState, WalkKind, WalkMic, WalkPoint,
     WalkState, ZoneSpec,
 };
 use ac2_proto::units::{EqSetId, TraceId, WalkId, WallNs};
@@ -82,7 +82,10 @@ fn walk_rig() -> common::Rig {
             label: label.into(),
             at: [x, y, 1.2],
             step: label[1..].parse::<u16>().unwrap_or(1) - 1,
-            mic: MeasId(1),
+            mic: WalkMic {
+                meas: MeasId(1),
+                input: 1,
+            },
             state,
         };
         s.commit(Change::Plan(Patch::Set(hall())));
@@ -92,7 +95,10 @@ fn walk_rig() -> common::Rig {
             name: "Mains".into(),
             plan: "Hall".into(),
             kind: WalkKind::LiveTransfer,
-            meas: vec![MeasId(1)],
+            mics: vec![WalkMic {
+                meas: MeasId(1),
+                input: 1,
+            }],
             points: vec![
                 point("P1", 4.0, 9.0, captured(900, now - DAY_NS, 1)),
                 point("P2", 12.0, 7.0, PointState::Pending),
@@ -101,6 +107,7 @@ fn walk_rig() -> common::Rig {
             ],
             step: Some(1),
             average: None,
+            room: None,
         })));
     }
     rig

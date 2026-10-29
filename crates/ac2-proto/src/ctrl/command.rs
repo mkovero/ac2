@@ -803,12 +803,14 @@ pub enum Command {
 
     // -- walk ---------------------------------------------------------------------------
     /// Start a spatial walk through `points` of plan `plan` (the session's copy when it holds
-    /// one, else the library's, copied into the session). `meas` are the transfer
-    /// measurements that capture at the points, one per mic, each on its own measurement
-    /// input (at most [`crate::model::WalkState::MAX_MICS`]). The points are grouped into
-    /// steps that place every mic once, each step's mics carried least from the previous one
-    /// (`ac2_room::steps`). The walk goes to its first step: every walk measurement's
-    /// averages are reset and its delay tracking turned on.
+    /// one, else the library's, copied into the session). A live walk's `meas` are the
+    /// transfer measurements that capture at the points, one per mic, each on its own
+    /// measurement input; a sweep walk's `meas` is its one sweep measurement, whose
+    /// measurement inputs are the mics (at most [`crate::model::WalkState::MAX_MICS`] either
+    /// way). The points are grouped into steps that place every mic once, each step's mics
+    /// carried least from the previous one (`ac2_room::steps`). The walk goes to its first
+    /// step: a live walk's measurements' averages are reset and their delay tracking turned
+    /// on (a sweep has neither: its run at a step is the capture).
     #[serde(rename = "walk.new")]
     WalkNew {
         /// Walk name.
@@ -817,7 +819,8 @@ pub enum Command {
         plan: String,
         /// What a capture is.
         kind: WalkKind,
-        /// The measurements capturing at the points, in mic order.
+        /// The measurements capturing at the points: a live walk's in mic order, a sweep
+        /// walk's one.
         meas: Vec<MeasId>,
         /// The points, in walking order (at most [`crate::model::WalkState::MAX_POINTS`]).
         points: Vec<WalkPointSpec>,
@@ -847,7 +850,9 @@ pub enum Command {
     /// the next step with a pending point. Before a measurement is ready (averages full, no
     /// delay move since they restarted, no arrival to pick, no fault) its trace records
     /// `captured_unsettled`. The walk's average is made at the second capture and follows
-    /// every capture, redo and skip.
+    /// every capture, redo and skip. A sweep walk refuses it: its capture is a run of its
+    /// sweep measurement (`sweep.run`, under the stimulus lease), which records every
+    /// standing mic at its point.
     #[serde(rename = "walk.capture")]
     WalkCapture {
         /// The walk.

@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 76`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 77`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -1206,23 +1206,28 @@ one `<name>.json` per plan in its data directory (`plans/`), mirrored as `State.
   digits, space, `-`, `_`, `.`, not starting with `.`); `refused` for a name another plan
   holds in another case. `plan.delete` is `not_found` for a name the library lacks; the
   session's copies stay.
-- `walk.new` starts a walk (`WalkState`: `id`, `name`, `plan`, `kind`, `meas`, `points`
-  [{`label`, `at`, `step: u16`, `mic: MeasId`, `state` {`type`: pending \| captured {trace,
-  context} \| skipped}}], `step: u16 | nil`, `average: MeasId | nil`) through 1 … 64 points
-  (unique non-empty labels, finite, `z` ≥ 0). The plan is the session's copy when it holds
-  one, else the library's, copied into `State.walk_plans` (so a library edit mid-walk changes
-  nothing). `meas` are 1 … 8 session transfer measurements, one per mic, no other walk names
-  and each on its own measurement input (`invalid` otherwise).
+- `walk.new` starts a walk (`WalkState`: `id`, `name`, `plan`, `kind` live_transfer \|
+  sweep, `mics` [`WalkMic` {`meas`, `input`}], `points` [{`label`, `at`, `step: u16`, `mic:
+  WalkMic`, `state` {`type`: pending \| captured {trace, context} \| skipped}}], `step: u16 |
+  nil`, `average: MeasId | nil`, `room: WalkRoom | nil`) through 1 … 64 points (unique
+  non-empty labels, finite, `z` ≥ 0). The plan is the session's copy when it holds one, else
+  the library's, copied into `State.walk_plans` (so a library edit mid-walk changes
+  nothing). A **live** walk's `meas` are 1 … 8 session transfer measurements, one per mic,
+  each on its own measurement input: mic *k* is `{meas[k], its measurement_input}`. A
+  **sweep** walk's `meas` is one session sweep measurement with at most 8 measurement inputs:
+  its mics are `{meas, input}` for each of its `measurement_inputs`, in order. No other walk
+  may name a measurement (`invalid` otherwise, `refused` for one another walk names).
 - **Steps.** The daemon groups the points into steps that place every mic once
   (`ac2_room::steps::group`): one mic takes the points in walking order; with several, the
   first step puts mic *k* at the *k*-th point and each later step pairs the mics with the
   points left so the summed distance each is carried from its last point is least (fewer
   points than mics: the nearest mics go, the others sit out). A point's `step` and `mic`
-  say where it belongs and which measurement stands (or stood) there; the walk's `step` is
-  where the mics are: each stands at its pending point of that step.
+  say where it belongs and which mic stands (or stood) there; the walk's `step` is where
+  the mics are: each stands at its pending point of that step.
 - A **move** — `walk.new`, `walk.goto`, `walk.swap`, the advance after `walk.capture` or
-  `walk.skip`, `walk.redo` — resets every walk measurement's averaging (`meas.reset`) and
-  turns its delay tracking on.
+  `walk.skip`, `walk.redo` — resets a live walk's measurements' averaging (`meas.reset`)
+  and turns their delay tracking on. A sweep walk's move resets nothing: a sweep has no
+  running average or tracking, its run at the step is the capture.
 - `walk.capture` captures at every pending point of the current step in one step (all or
   none), each by its point's `mic`, each trace named `<label> · <mic>` (the input's mic,
   else the measurement's name) with `position` set, and `captured_unsettled` when the frame
@@ -1233,8 +1238,18 @@ one `<name>.json` per plan in its data directory (`plans/`), mirrored as `State.
   when `step` is nil. The point's `context` (`CaptureContext` {`at`, `mic: MicState | nil`,
   `eq_in: [EqMark {set, rev}]`}) records the same facts its trace records (`created_at`,
   `mic`, `eq_in`), so a client can say when a walk's captures were taken on different days
-  or, for one measurement, under another mic, mic curve or EQ. Calibration and generator
-  level are not recorded: a transfer is a ratio of two inputs, and both cancel out of it.
+  or, for one mic, under another mic, mic curve or EQ. Calibration and generator level are
+  not recorded: a transfer is a ratio of two inputs, and both cancel out of it. A sweep
+  walk refuses `walk.capture` (`refused`): its capture is a run of its sweep measurement.
+- **Sweep walk capture.** A `sweep.run` of a sweep walk's measurement while its mics stand
+  at a step records only the standing mics' inputs (its `measurement_inputs`), plays under
+  the lease and the ceiling as every run, names each trace `<label> · <mic>` (the input's
+  mic, else its name as a run names it) with `position` set, and once `done` captures each
+  standing point by its trace and goes to the next step with a pending point. A run that is
+  refused, fails or is aborted leaves the points pending. While the walk's run plays or is
+  analysed, `walk.goto`, `walk.skip`, `walk.redo`, `walk.swap`, `walk.update` and
+  `walk.delete` on it are `refused`: the run records the mics where they stood. A run of
+  the measurement with every point captured or skipped is an ordinary run.
 - `walk.goto` puts the mics at step `step` (`not_found` past the last). `walk.skip` marks
   one point skipped (a captured one's trace becomes `superseded`; `refused` when skipped
   already); when that leaves the current step nothing pending, the walk goes on to the next
@@ -1252,8 +1267,15 @@ one `<name>.json` per plan in its data directory (`plans/`), mirrored as `State.
   in point order, owned by the walk's first measurement and named `<walk> · average`: made
   (and started) at the second capture, its `of` updated after every capture, skip and redo
   (as `meas.update`, which restarts it), kept (holding no average) when fewer than two captures are left.
+- A sweep walk's **room** (`WalkRoom` {`positions`, `sources` (1), `broadband`, `octave`,
+  `third`: [`WalkRoomBand` {`centre: Hz | nil`, `edt`, `t20`, `c80`, `d50`:
+  `PositionMean` {`mean`, `min`, `max`, `n`} \| nil}]}, ISO 3382-1) is made from its
+  captures' room parameters after every capture, skip and redo: per band (matched by
+  mid-band frequency), the arithmetic mean, least and greatest over the positions that
+  give the parameter; `n` counts them (a position whose decay refuses it in the band is
+  left out), nil when none does. `positions` counts the captures carrying room parameters.
 - While a walk names them, its measurements, its average and its points' traces cannot be
-  deleted, nor its measurements change kind (`refused`). `walk.delete` keeps the traces
+  deleted, nor its measurements change kind or measurement inputs (its mics; `refused`). `walk.delete` keeps the traces
   and the average, which becomes an ordinary average of them; the plan copy goes with the
   last walk walking it.
 

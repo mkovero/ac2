@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::walk_setup::PlanMsg;
+use ac2_scene::walk::SweepAt;
 use ac2_scene::walk::setup::{EditorField, Layer, SetupField};
 
 fn hall() -> PlanSpec {
@@ -34,7 +35,10 @@ fn point(label: &str, x: f64, state: PointState) -> WalkPoint {
         at: [x, 6.0, 1.2],
         // One mic: a step per point, in walking order.
         step: (x / 4.0) as u16 - 1,
-        mic: MeasId(1),
+        mic: WalkMic {
+            meas: MeasId(1),
+            input: 1,
+        },
         state,
     }
 }
@@ -46,7 +50,10 @@ fn mains() -> WalkState {
         name: "Mains".into(),
         plan: "Hall".into(),
         kind: WalkKind::LiveTransfer,
-        meas: vec![MeasId(1)],
+        mics: vec![WalkMic {
+            meas: MeasId(1),
+            input: 1,
+        }],
         points: vec![
             point(
                 "P1",
@@ -65,6 +72,7 @@ fn mains() -> WalkState {
         ],
         step: Some(1),
         average: None,
+        room: None,
     }
 }
 
@@ -377,16 +385,20 @@ fn second_mic() -> Measurement {
 /// (Main L).
 fn two_mics() -> WalkState {
     let mut w = mains();
-    w.meas = vec![MeasId(1), MeasId(3)];
+    let mic = |m: u32| WalkMic {
+        meas: MeasId(m),
+        input: if m == 1 { 1 } else { 2 },
+    };
+    w.mics = vec![mic(1), mic(3)];
     w.points = vec![
         point("P1", 4.0, PointState::Pending),
         point("P2", 8.0, PointState::Pending),
         point("P3", 12.0, PointState::Pending),
         point("P4", 16.0, PointState::Pending),
     ];
-    for (p, (step, mic)) in w.points.iter_mut().zip([(0, 1), (0, 3), (1, 3), (1, 1)]) {
+    for (p, (step, mic_id)) in w.points.iter_mut().zip([(0, 1), (0, 3), (1, 3), (1, 1)]) {
         p.step = step;
-        p.mic = MeasId(mic);
+        p.mic = mic(mic_id);
     }
     w.step = Some(1);
     w
@@ -513,4 +525,94 @@ fn a_walk_pane_keeps_its_walk() {
     let p = t.st.layout.focus;
     t.st.set_pane_kind(p, PaneKind::Transfer);
     assert_eq!(t.st.layout.view(p).expect("the pane").walk, None);
+}
+
+/// Room: a sweep walk recording with Sweep 1 (on input 2), P1 and P2 at the first step's
+/// pending points, the lease this client's.
+fn sweep_walk() -> WalkState {
+    let mic = WalkMic {
+        meas: MeasId(5),
+        input: 1,
+    };
+    let mut w = mains();
+    w.id = WalkId(2);
+    w.name = "Room".into();
+    w.kind = WalkKind::Sweep;
+    w.mics = vec![mic];
+    w.points = vec![
+        point("P1", 4.0, PointState::Pending),
+        point("P2", 8.0, PointState::Pending),
+    ];
+    for p in &mut w.points {
+        p.mic = mic;
+    }
+    w.step = Some(0);
+    w
+}
+
+/// The setup offers the sweep measurement on the mic row: choosing it makes a sweep walk.
+/// On the sweep walk's pane X arms the walk's sweep, then plays it (`sweep.run`, under the
+/// lease and level path every sweep takes); the pane reads the run, not a readiness.
+#[test]
+fn a_sweep_walk_from_the_setup_to_its_run() {
+    let mut t = with_plan();
+    t.remirror(|s| {
+        s.measurements.push(super::sweep_measurement());
+        s.generator.owner = Some(ClientId("c1".into()));
+    });
+    t.key("Shift+W");
+    t.key("Enter");
+    let fields = setup(&t).fields();
+    assert_eq!(fields.last(), Some(&SetupField::Mic(0)));
+    for _ in 0..fields.len() {
+        t.key("Down");
+    }
+    assert_eq!(setup(&t).focus, SetupField::Mic(0));
+    t.key("Right");
+    let s = setup(&t);
+    assert_eq!(
+        (s.kind, s.mics.as_slice()),
+        (WalkKind::Sweep, &[MeasId(5)][..])
+    );
+    let r = t.key("Enter");
+    let [
+        Request::NewWalk {
+            cmd: Command::WalkNew { kind, meas, .. },
+            ..
+        },
+    ] = r.as_slice()
+    else {
+        panic!("{r:?}");
+    };
+    assert_eq!(
+        (*kind, meas.as_slice()),
+        (WalkKind::Sweep, &[MeasId(5)][..])
+    );
+    t.key("Esc");
+
+    t.remirror(|s| {
+        s.walk_plans = vec![hall()];
+        s.walks = vec![sweep_walk()];
+    });
+    t.st.open_walk_pane(WalkId(2));
+    let w = sweep_walk();
+    assert_eq!(t.st.walk_sweep_at(&w), Some(SweepAt::Idle));
+    assert_eq!(SweepAt::Idle.text(&["P1"]), "sweep plays at P1");
+    assert!(t.st.sweep_view(), "the sweep walk's pane is a sweep's");
+    let r = t.key("X");
+    assert!(
+        r.iter().any(|x| matches!(x, Request::StimArm { .. })),
+        "{r:?}"
+    );
+    assert!(
+        !calls(&r)
+            .iter()
+            .any(|(c, _)| matches!(c, Command::WalkCapture { .. }))
+    );
+    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
+    let r = t.key("X");
+    let [Request::Sweep { meas, .. }] = r.as_slice() else {
+        panic!("{r:?}");
+    };
+    assert_eq!(*meas, MeasId(5));
 }

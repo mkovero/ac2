@@ -1,6 +1,6 @@
 use ac2_proto::model::{
     CaptureContext, EqMark, Marker, MarkerKind, MicCurveRef, MicState, PlanSpec, PointState,
-    WalkKind, WalkPoint, WalkState, ZoneSpec,
+    WalkKind, WalkMic, WalkPoint, WalkState, ZoneSpec,
 };
 use ac2_proto::units::{EqSetId, Hz, MeasId, TraceId, WalkId, WallNs};
 use ac2_room::pattern::{Broken, PresetKind, Relaxed};
@@ -44,7 +44,7 @@ fn walk(states: &[PointState], current: Option<u16>) -> WalkState {
         name: "Mains".into(),
         plan: "Hall".into(),
         kind: WalkKind::LiveTransfer,
-        meas: vec![MeasId(1)],
+        mics: vec![mic(1)],
         points: states
             .iter()
             .enumerate()
@@ -57,12 +57,21 @@ fn walk(states: &[PointState], current: Option<u16>) -> WalkState {
                     [2.0 + 2.0 * i as f64, 18.0, 1.2]
                 },
                 step: i as u16,
-                mic: MeasId(1),
+                mic: mic(1),
                 state: s.clone(),
             })
             .collect(),
         step: current,
         average: None,
+        room: None,
+    }
+}
+
+/// Mic `m`: measurement `m` on input `m`.
+fn mic(m: u32) -> WalkMic {
+    WalkMic {
+        meas: MeasId(m),
+        input: m as u16,
     }
 }
 
@@ -206,11 +215,11 @@ fn dots_mark_the_current_point_and_the_next_one_faint() {
 /// (MM1) and P4 (Vilppu), step 2 at P5 (MM1).
 fn two_mics(states: &[PointState], step: Option<u16>) -> WalkState {
     let mut w = walk(states, step);
-    w.meas = vec![MeasId(1), MeasId(2)];
+    w.mics = vec![mic(1), mic(2)];
     let plan = [(0, 1), (0, 2), (1, 2), (1, 1), (2, 2)];
     for (p, &(s, m)) in w.points.iter_mut().zip(&plan) {
         p.step = s;
-        p.mic = MeasId(m);
+        p.mic = mic(m);
     }
     w
 }
@@ -291,6 +300,7 @@ fn the_slowest_mic_is_the_one_read() {
         unsettled: 0,
         bar_drawn: None,
         conditions: String::new(),
+        sweep: None,
     };
     assert_eq!(p.lines().ready, "settling · MM1");
     let ready = WalkPane {
@@ -334,6 +344,7 @@ fn the_walk_pane_draws_its_lines_and_the_plan() {
         unsettled: 0,
         bar_drawn: Some(0.5),
         conditions: "P1 yesterday, P2 today · EQ changed".into(),
+        sweep: None,
     };
     let s = walk_scene(
         &p,
@@ -755,4 +766,43 @@ fn each_recorded_change_is_named_once() {
         ),
         ""
     );
+}
+
+#[test]
+fn a_sweep_walk_reads_its_run_not_a_readiness() {
+    let mut w = two_mics(&pending(5), Some(0));
+    w.kind = WalkKind::Sweep;
+    let mics = names();
+    let p = WalkPane {
+        walk: &w,
+        plan: None,
+        ready: Ready::Waiting,
+        mics: &mics,
+        slowest: None,
+        average: None,
+        unsettled: 0,
+        bar_drawn: None,
+        conditions: String::new(),
+        sweep: Some(SweepAt::Idle),
+    };
+    assert_eq!(p.lines().ready, "sweep plays at P1, P2");
+    let at = |s: SweepAt| {
+        WalkPane {
+            sweep: Some(s),
+            ..p.clone()
+        }
+        .lines()
+        .ready
+    };
+    assert_eq!(
+        at(SweepAt::Playing { repeat: 2, of: 3 }),
+        "sweep playing · 2 of 3"
+    );
+    assert_eq!(at(SweepAt::Playing { repeat: 1, of: 1 }), "sweep playing");
+    assert_eq!(at(SweepAt::Analysing), "analysing the sweep");
+    assert_eq!(
+        at(SweepAt::Failed("a dropout".into())),
+        "sweep failed: a dropout · P1, P2 stay pending"
+    );
+    assert_eq!(p.lines().average, "NO AVERAGE · 0 OF 5 POSITIONS");
 }

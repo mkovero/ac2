@@ -4,9 +4,13 @@
 //! (`ac2_room::pattern`) and words what the walk holds.
 
 use ac2_client::{Client, expect_body};
-use ac2_proto::model::{PlanSpec, PointState, State, WalkKind, WalkPointSpec, WalkState, ZoneSpec};
+use ac2_proto::model::{
+    MeasKind, PlanSpec, PointState, State, WalkKind, WalkPointSpec, WalkState, ZoneSpec,
+};
+use ac2_proto::units::MeasId;
 use ac2_proto::{Command, ReplyBody};
 use ac2_room::pattern::{Preset, suggest};
+use ac2_scene::room::BandSet;
 
 use super::{connect, find_meas, state};
 use crate::CliError;
@@ -73,8 +77,15 @@ pub(crate) async fn walk(cli: &Cli, cmd: &WalkCmd, out: &mut Out<'_>) -> Result<
         WalkCmd::New(n) => new_walk(&c, &s, n, out).await?,
         WalkCmd::Status { walk } => find_walk(&s, walk.as_ref())?.clone(),
         WalkCmd::Capture { walk } => {
-            let walk = find_walk(&s, walk.as_ref())?.id;
-            walk_call(&c, Command::WalkCapture { walk }).await?
+            let w = find_walk(&s, walk.as_ref())?;
+            if w.kind == WalkKind::Sweep {
+                let m = w.mics.first().map_or(0, |m| m.meas.0);
+                return Err(CliError::Usage(format!(
+                    "the walk {} captures by running its sweep: ac2 sweep run {m}",
+                    w.name
+                )));
+            }
+            walk_call(&c, Command::WalkCapture { walk: w.id }).await?
         }
         WalkCmd::Next { walk } | WalkCmd::Prev { walk } => {
             let w = find_walk(&s, walk.as_ref())?;
@@ -130,11 +141,17 @@ async fn new_walk(
     n: &WalkNew,
     out: &mut Out<'_>,
 ) -> Result<WalkState, CliError> {
-    let meas = n
+    let found = n
         .meas
         .iter()
-        .map(|m| find_meas(s, m).map(|m| m.id))
+        .map(|m| find_meas(s, m))
         .collect::<Result<Vec<_>, _>>()?;
+    // One sweep measurement walks as a sweep walk (its inputs are the mics); transfers live.
+    let kind = match found.as_slice() {
+        [m] if matches!(m.config.kind, MeasKind::Sweep { .. }) => WalkKind::Sweep,
+        _ => WalkKind::LiveTransfer,
+    };
+    let meas: Vec<MeasId> = found.iter().map(|m| m.id).collect();
     let plan = s
         .walk_plans
         .iter()
@@ -182,7 +199,7 @@ async fn new_walk(
         Command::WalkNew {
             name: n.name.clone(),
             plan: plan.name.clone(),
-            kind: WalkKind::LiveTransfer,
+            kind,
             meas,
             points,
         },
@@ -359,8 +376,13 @@ fn walk_text(w: &WalkState, s: &State) -> String {
                 }
             }
         };
-        let mic = if w.meas.len() > 1 {
-            format!("  step {}  {}", p.step + 1, meas_name(p.mic))
+        let mic = if w.mics.len() > 1 {
+            format!(
+                "  step {}  {} in {}",
+                p.step + 1,
+                meas_name(p.mic.meas),
+                p.mic.input + 1
+            )
         } else {
             String::new()
         };
@@ -371,6 +393,9 @@ fn walk_text(w: &WalkState, s: &State) -> String {
     }
     if w.step.is_none() {
         t.push_str("every point captured or skipped\n");
+    }
+    if let Some(r) = &w.room {
+        t.push_str(&ac2_scene::room::walk_room_table(r, BandSet::Octave).text());
     }
     t
 }

@@ -105,6 +105,11 @@ impl TraceStore {
     pub(crate) fn get(&self, id: TraceId) -> Option<&(GridDef, Columns)> {
         self.data.get(&id)
     }
+
+    /// A sweep trace's distortion, impulse response and room parameters.
+    pub(crate) fn sweep(&self, id: TraceId) -> Option<&SweepData> {
+        self.sweeps.get(&id)
+    }
 }
 
 fn op_err(e: &OpError) -> ProtoError {

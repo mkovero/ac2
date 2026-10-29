@@ -507,7 +507,7 @@ pub fn state() -> State {
         working: working(),
         rig: rig(),
         plans: vec![plan()],
-        walks: vec![walk()],
+        walks: vec![walk(), sweep_walk()],
         walk_plans: vec![plan()],
     }
 }
@@ -554,13 +554,25 @@ pub fn walk() -> WalkState {
         name: "Mains".into(),
         plan: "Hall".into(),
         kind: WalkKind::LiveTransfer,
-        meas: vec![MeasId(1), MeasId(2)],
+        mics: vec![
+            WalkMic {
+                meas: MeasId(1),
+                input: 1,
+            },
+            WalkMic {
+                meas: MeasId(2),
+                input: 2,
+            },
+        ],
         points: vec![
             WalkPoint {
                 label: "P1".into(),
                 at: [5.0, 12.0, 1.2],
                 step: 0,
-                mic: MeasId(1),
+                mic: WalkMic {
+                    meas: MeasId(1),
+                    input: 1,
+                },
                 state: PointState::Captured {
                     trace: TraceId(7),
                     context: CaptureContext {
@@ -580,19 +592,91 @@ pub fn walk() -> WalkState {
                 label: "P2".into(),
                 at: [12.5, 15.0, 1.2],
                 step: 0,
-                mic: MeasId(2),
+                mic: WalkMic {
+                    meas: MeasId(2),
+                    input: 2,
+                },
                 state: PointState::Skipped,
             },
             WalkPoint {
                 label: "P3".into(),
                 at: [8.0, 24.0, 1.2],
                 step: 1,
-                mic: MeasId(1),
+                mic: WalkMic {
+                    meas: MeasId(1),
+                    input: 1,
+                },
                 state: PointState::Pending,
             },
         ],
         step: Some(1),
         average: None,
+        room: None,
+    }
+}
+
+/// A sweep walk of sweep measurement 4 recording inputs 2 and 3, both points of step 0
+/// captured and averaged; its room parameters over the two positions.
+pub fn sweep_walk() -> WalkState {
+    let mic = |input| WalkMic {
+        meas: MeasId(4),
+        input,
+    };
+    let captured = |trace, input| PointState::Captured {
+        trace: TraceId(trace),
+        context: CaptureContext {
+            at: WallNs(1_761_400_000_000_000_000),
+            mic: Some(MicState {
+                name: format!("M30 #{input}"),
+                curve: None,
+            }),
+            eq_in: Vec::new(),
+        },
+    };
+    let mean = |mean, min, max, n| Some(PositionMean { mean, min, max, n });
+    WalkState {
+        id: WalkId(2),
+        name: "Room".into(),
+        plan: "Hall".into(),
+        kind: WalkKind::Sweep,
+        mics: vec![mic(1), mic(2)],
+        points: vec![
+            WalkPoint {
+                label: "P1".into(),
+                at: [5.0, 12.0, 1.2],
+                step: 0,
+                mic: mic(1),
+                state: captured(11, 1),
+            },
+            WalkPoint {
+                label: "P2".into(),
+                at: [12.5, 15.0, 1.2],
+                step: 0,
+                mic: mic(2),
+                state: captured(12, 2),
+            },
+        ],
+        step: None,
+        average: Some(MeasId(5)),
+        room: Some(WalkRoom {
+            positions: 2,
+            sources: 1,
+            broadband: WalkRoomBand {
+                centre: None,
+                edt: mean(0.9, 0.85, 0.95, 2),
+                t20: mean(1.1, 1.05, 1.15, 2),
+                c80: mean(2.5, 2.0, 3.0, 2),
+                d50: mean(0.45, 0.4, 0.5, 2),
+            },
+            octave: vec![WalkRoomBand {
+                centre: Some(Hz(125.0)),
+                edt: mean(1.2, 1.2, 1.2, 1),
+                t20: None,
+                c80: mean(-1.0, -1.5, -0.5, 2),
+                d50: mean(0.3, 0.25, 0.35, 2),
+            }],
+            third: Vec::new(),
+        }),
     }
 }
 

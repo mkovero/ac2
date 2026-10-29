@@ -149,9 +149,10 @@ math channel it feeds.
 
 ```
 WalkState { id, name, plan: PlanName, kind: WalkKind (live_transfer | sweep),
-            meas: Vec<MeasId>, points: Vec<WalkPoint>, step: Option<u16>,
-            average: Option<MeasId> }
-WalkPoint { label: "P3", at: [f64; 3], step: u16, mic: MeasId, state: PointState }
+            mics: Vec<WalkMic>, points: Vec<WalkPoint>, step: Option<u16>,
+            average: Option<MeasId>, room: Option<WalkRoom> }
+WalkMic   { meas: MeasId, input: u16 }
+WalkPoint { label: "P3", at: [f64; 3], step: u16, mic: WalkMic, state: PointState }
 PointState: pending | captured { trace: TraceId, context: CaptureContext } | skipped
 ```
 
@@ -351,6 +352,37 @@ fails the whole run, naming the input, so a run never stands for fewer positions
 recorded. The dialog lists *Measurement 2, 3 …* rows below the first, one empty (*none*) row
 after the last pick; the CLI takes `--mic 1,3` / `--meas 1,3`.
 
+**Sweep walks** (*as built, PROTO 77, session format 40*):
+
+- **A mic is a `WalkMic {meas, input}`**, a measurement and the input it records the mic on,
+  for both kinds. A live walk has one per transfer measurement; a sweep walk names exactly one
+  sweep measurement and its `measurement_inputs` are the mics (`walk.new {kind: sweep, meas:
+  [m]}`; the daemon derives the mics, ≤ 8). One input is one mic in both kinds, so grouping,
+  swap, skip, redo and *captures differ* compare mics by equality and work unchanged. The other
+  model (a sweep measurement per mic) was not taken: it would play the stimulus once per mic
+  at a step, against G8's one play. While the walk names it, the measurement keeps its kind
+  and its inputs (`meas.update` refused).
+- **A capture is a run.** `walk.capture` refuses a sweep walk; its capture is an ordinary
+  `sweep.run` of its measurement, under the stimulus lease, armed, at the measurement's level
+  and the global maximum, faded on stop: the walk adds no play path. When a sweep walk's mics
+  stand at a step, the run records only the standing mics' inputs, names each trace
+  `<point> · <mic>` and gives it its `TracePosition`. When the run is `Done` the standing
+  points are captured by its traces in input order and the walk goes to the next step with a
+  pending point. A refused, failed or stopped run leaves the points pending; the pane shows
+  *sweep failed: … · P1, P2 stay pending* until the next run. While the walk's run plays or
+  analyses, the walk does not move (`walk.goto`/`skip`/`redo`/`swap`/`update`/`delete`
+  refused). A run with every point done records the measurement's inputs as an ordinary run.
+- **No reset, no tracking** at a move: a sweep's run starts from nothing, and its delay is
+  the reference's.
+- **The average** is the walk's power-average math channel over the sweep traces (transfer
+  domain), as for a live walk; the G9 band applies to it.
+- **UI.** The setup's first mic row cycles the session's transfers, then its sweeps (*Sweep 1
+  · sweep, 2 mics in one play*); choosing a sweep makes a sweep walk with no further mic rows.
+  On a sweep walk's pane **X** (the walk's capture key) arms the walk's sweep when nothing is
+  armed and plays it when it is armed, through the same arm/fire path as **Space**/**Enter**,
+  which also work there. The ready line reads the run: *sweep plays at P1, P2*, *sweep
+  playing · 1 of 2*, *analysing the sweep*.
+
 ## 9. Not offered
 
 - 3D geometry beyond the prism: sloped ceilings, balcony soffits as surfaces, imported CAD. A
@@ -384,7 +416,23 @@ average and level (spectrum, RTA) averages carry no band.
 A sweep walk gives ISO 3382-1 what it asks for: T20, EDT, C80 and D50 per band averaged over the
 positions (arithmetic mean per band, with the range), shown in the room-metrics table as *mean
 of 8 positions · 1 source* (ISO 3382-1 asks for at least two source positions; a PA walk has one,
-and the table says so). Stage 3.
+and the table says so).
+
+*As built (PROTO 77):* `WalkState.room: Option<WalkRoom>` is recomputed by the daemon after
+every capture, skip and redo and on load, from the room analysis of each captured sweep trace
+(`ac2d/src/control/walk_sweep.rs`; the mean and range are `ac2_core::room::positions::spread`).
+`WalkRoom {positions, sources: 1, broadband, octave, third}`; each `WalkRoomBand` holds, for
+EDT, T20, C80 and D50, a `PositionMean {mean, min, max, n}`. Bands are the union of the
+positions' band centres (agreeing within 1 %). A position whose decay does not give a
+parameter in a band (refused: too little range, too short) is left out of that band's mean,
+and `n` says how many it is of; no position giving it is no value. `ac2-scene`
+(`room::walk_room_table`) makes the table: a mean row per parameter with a *min–max* row under
+it, *1.40 (3)* where fewer positions than the walk's give it, caption *Room (ISO 3382-1) ·
+mean of 4 positions · 1 source · octave bands*, and the legend line *ISO 3382-1 asks for at
+least 2 source positions; this walk measured from 1*. A sweep pane's *Room* view of the
+walk's measurement shows it while no run of the measurement is selected (a selected run shows
+its own); `ac2 walk status` prints it. Only the four parameters ISO 3382-1 reports per position
+are averaged; T30 and C50 stay per run.
 
 ## Stages
 
@@ -408,6 +456,9 @@ and the table says so). Stage 3.
   a delay step mid-walk restarts `filled`; `awaiting_pick` reaches the walk pane; captures carry positions;
   redo supersedes and the average drops the old trace; the average appears at the second capture;
   a walk's measurements and traces cannot be deleted; session round-trip keeps walk and plan.
+  A two-mic sweep walk over two steps: a run per step records the standing mics' inputs at
+  their points (4 traces), a stopped run leaves the points pending, the average is the power
+  average of the four, the room means lie inside their range; a skip takes a position out.
 - `ac2-scene`: step text and readout from FOH, *settling · 60 %*, relaxed-rule notices,
   *NO AVERAGE · 1 OF 8 POSITIONS*, the dimmed chooser row and its reason, range-band legend.
 - `ac2-ui`: an end-to-end walk from an empty daemon (fake backend).

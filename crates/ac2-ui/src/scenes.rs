@@ -640,8 +640,16 @@ pub fn sweep(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now: No
     let shown = st.pane_sweep(pane);
     let pv = st.view_for(pane);
     if st.pane_modes(pane).sweep == ac2_scene::view::SweepMode::Room {
-        let room = shown.and_then(|(d, _)| d.sweep.as_ref()?.room.as_ref());
-        let name = shown.map(|(d, _)| d.meta.edit.name.as_str());
+        use ac2_scene::room::RoomShown;
+        let (room, name) = match st.pane_walk_room(pane) {
+            Some(w) => (w.room.as_ref().map(RoomShown::Walk), Some(w.name.as_str())),
+            None => (
+                shown
+                    .and_then(|(d, _)| d.sweep.as_ref()?.room.as_ref())
+                    .map(RoomShown::Run),
+                shown.map(|(d, _)| d.meta.edit.name.as_str()),
+            ),
+        };
         return SweepPane::Room(Box::new(ac2_scene::room::room_scene(
             room,
             name,

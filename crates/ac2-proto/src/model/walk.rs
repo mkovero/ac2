@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::MicState;
-use crate::units::{EqSetId, MeasId, TraceId, WalkId, WallNs};
+use crate::units::{EqSetId, Hz, MeasId, TraceId, WalkId, WallNs};
 
 /// A walk through a plan's measurement positions.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -20,9 +20,10 @@ pub struct WalkState {
     pub plan: String,
     /// What a capture at a point is.
     pub kind: WalkKind,
-    /// The measurements that capture at the points, one per mic, in mic order (at most
-    /// [`Self::MAX_MICS`]).
-    pub meas: Vec<MeasId>,
+    /// The mics, in mic order (at most [`Self::MAX_MICS`]): a live walk's are its transfer
+    /// measurements, one per mic, each with its measurement input; a sweep walk's are the
+    /// measurement inputs of its one sweep measurement, which records them all in one play.
+    pub mics: Vec<WalkMic>,
     /// The positions, in walking order.
     pub points: Vec<WalkPoint>,
     /// The step the mics are at ([`WalkPoint::step`]): each stands at its pending point of
@@ -30,6 +31,9 @@ pub struct WalkState {
     pub step: Option<u16>,
     /// The math channel averaging the captures, made at the second capture; `None` before.
     pub average: Option<MeasId>,
+    /// A sweep walk's room parameters over its captured positions (ISO 3382-1), `None`
+    /// for a live walk and before a capture carries room parameters.
+    pub room: Option<WalkRoom>,
 }
 
 impl WalkState {
@@ -80,14 +84,43 @@ impl WalkState {
         })
     }
 
-    /// The place of measurement `meas` among the walk's mics (its colour, its order);
-    /// past the last when the walk does not name it.
-    pub fn mic_index(&self, meas: MeasId) -> usize {
-        self.meas
+    /// The place of `mic` among the walk's mics (its colour, its order); past the last
+    /// when the walk has no such mic.
+    pub fn mic_index(&self, mic: WalkMic) -> usize {
+        self.mics
             .iter()
-            .position(|&m| m == meas)
-            .unwrap_or(self.meas.len())
+            .position(|&m| m == mic)
+            .unwrap_or(self.mics.len())
     }
+
+    /// The measurements the walk captures with, in mic order, each once (a sweep walk's
+    /// one).
+    pub fn meas(&self) -> Vec<MeasId> {
+        let mut v: Vec<MeasId> = Vec::with_capacity(self.mics.len());
+        for m in &self.mics {
+            if !v.contains(&m.meas) {
+                v.push(m.meas);
+            }
+        }
+        v
+    }
+
+    /// Whether the walk captures with measurement `meas`.
+    pub fn captures_with(&self, meas: MeasId) -> bool {
+        self.mics.iter().any(|m| m.meas == meas)
+    }
+}
+
+/// One mic of a walk: the measurement that captures with it and the measurement input it
+/// is on. Two mics of a walk never share an input (one input is one mic at one place); a
+/// sweep walk's mics share its sweep measurement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WalkMic {
+    /// The measurement.
+    pub meas: MeasId,
+    /// Its measurement input (0-based).
+    pub input: u16,
 }
 
 /// What a walk captures at each point.
@@ -96,6 +129,9 @@ impl WalkState {
 pub enum WalkKind {
     /// A settled live transfer of each walk measurement (`walk.capture`).
     LiveTransfer,
+    /// One run of the walk's sweep measurement (`sweep.run`), recording every standing
+    /// mic in one play: a trace per mic, with its impulse response and room parameters.
+    Sweep,
 }
 
 /// One position of a walk.
@@ -108,9 +144,9 @@ pub struct WalkPoint {
     pub at: [f64; 3],
     /// The step it belongs to: the walk places its mics a step at a time.
     pub step: u16,
-    /// The measurement whose mic stands here at its step: the grouping's choice, traded by
-    /// `walk.swap` while pending, the one that captured once captured.
-    pub mic: MeasId,
+    /// The mic that stands here at its step: the grouping's choice, traded by `walk.swap`
+    /// while pending, the one that captured once captured.
+    pub mic: WalkMic,
     /// What became of it.
     pub state: PointState,
 }
@@ -182,4 +218,52 @@ pub struct TracePosition {
     pub plan: String,
     /// The walk.
     pub walk: WalkId,
+}
+
+/// A sweep walk's room parameters over its positions (`docs/design/spatial-walk.md` §11):
+/// per band, the arithmetic mean of each parameter over the positions where it is given,
+/// with their least and greatest.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WalkRoom {
+    /// Captured positions carrying room parameters: what a band's count is out of.
+    pub positions: u16,
+    /// Source positions measured: a walk plays from one.
+    pub sources: u16,
+    /// The impulse response as captured (band: the sweep's).
+    pub broadband: WalkRoomBand,
+    /// Octave bands every position's parameters name.
+    pub octave: Vec<WalkRoomBand>,
+    /// One-third-octave bands every position's parameters name.
+    pub third: Vec<WalkRoomBand>,
+}
+
+/// One band's parameters over a walk's positions; `None`: no position gives it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WalkRoomBand {
+    /// Mid-band frequency; `None` = broadband.
+    pub centre: Option<Hz>,
+    /// Early decay time, seconds.
+    pub edt: Option<PositionMean>,
+    /// T20, seconds.
+    pub t20: Option<PositionMean>,
+    /// Clarity C80, dB.
+    pub c80: Option<PositionMean>,
+    /// Definition D50, ratio 0…1.
+    pub d50: Option<PositionMean>,
+}
+
+/// A parameter over the positions that give it.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PositionMean {
+    /// Arithmetic mean.
+    pub mean: f64,
+    /// Least.
+    pub min: f64,
+    /// Greatest.
+    pub max: f64,
+    /// How many positions give it (the others refuse it in this band).
+    pub n: u16,
 }

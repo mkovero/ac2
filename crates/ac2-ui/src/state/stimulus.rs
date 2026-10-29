@@ -63,10 +63,11 @@ impl AppState {
         self.resend_stimulus(out);
     }
 
-    /// The sweep view (the sweep pane focused, maximised or not): there the stimulus keys
-    /// re-sweep; on every other view they drive the generator for live measuring.
+    /// The sweep view (the sweep pane focused, maximised or not, or a sweep walk's pane):
+    /// there the stimulus keys re-sweep; on every other view they drive the generator for
+    /// live measuring.
     pub fn sweep_view(&self) -> bool {
-        self.layout.focus_kind() == PaneKind::Distortion
+        self.layout.focus_kind() == PaneKind::Distortion || self.focused_sweep_walk().is_some()
     }
 
     /// What the stimulus keys start next, for the top bar: armed, what Enter fires; idle,
@@ -257,25 +258,31 @@ impl AppState {
         self.arm(force, keymap, out);
     }
 
-    /// The sweep measurement Space on the sweep view runs: the focused sweep pane's (a pane
-    /// key acts on what its pane shows), else the selected measurement when it is one, else
+    /// The sweep measurement Space on the sweep view runs: the focused sweep walk's or sweep
+    /// pane's (a pane key acts on what its pane shows), else the selected measurement when it is one, else
     /// the owner of the selected (or shown) run, else the sweep pane's.
     pub fn sweep_meas(&self) -> Option<&Measurement> {
         let is = |m: &&Measurement| matches!(m.config.kind, MeasKind::Sweep { .. });
         let owner_of = |t: &TraceMeta| t.edit.owner.meas().and_then(|id| self.meas(id));
         let f = self.layout.focus;
-        (self.layout.kind(f) == PaneKind::Distortion)
-            .then(|| self.pane_meas(f))
-            .flatten()
-            .filter(is)
-            .or_else(|| self.selected_meas().filter(is))
-            .or_else(|| self.selected_trace_meta().and_then(owner_of).filter(is))
-            .or_else(|| {
-                self.kind_sweep()
-                    .and_then(|(t, _)| owner_of(&t.meta))
-                    .filter(is)
-            })
-            .or_else(|| self.kind_meas(PaneKind::Distortion))
+        let walk = self
+            .focused_sweep_walk()
+            .and_then(|w| w.mics.first())
+            .and_then(|m| self.meas(m.meas));
+        walk.or_else(|| {
+            (self.layout.kind(f) == PaneKind::Distortion)
+                .then(|| self.pane_meas(f))
+                .flatten()
+        })
+        .filter(is)
+        .or_else(|| self.selected_meas().filter(is))
+        .or_else(|| self.selected_trace_meta().and_then(owner_of).filter(is))
+        .or_else(|| {
+            self.kind_sweep()
+                .and_then(|(t, _)| owner_of(&t.meta))
+                .filter(is)
+        })
+        .or_else(|| self.kind_meas(PaneKind::Distortion))
     }
 
     pub(super) fn arm(&mut self, force: bool, keymap: &Keymap, out: &mut Vec<Request>) {

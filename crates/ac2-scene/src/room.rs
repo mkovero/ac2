@@ -7,7 +7,7 @@
 //! decay), and the legend says what each word means. A T30 whose decay is curved (more
 //! than 10 % above T20) carries a `*`.
 
-use ac2_proto::model::{RoomAcoustics, RoomBand, RoomRefusal, RoomValue};
+use ac2_proto::model::{RoomAcoustics, RoomBand, RoomRefusal, RoomValue, WalkRoom};
 
 use crate::canvas::{anchor, label, text_width};
 use crate::format;
@@ -148,8 +148,25 @@ pub struct RoomCell {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RoomRow {
     pub param: Param,
+    /// The least and greatest over a walk's positions, under the row of their mean
+    /// ([`walk_room_table`]).
+    pub spread: bool,
     pub cells: Vec<RoomCell>,
 }
+
+impl RoomRow {
+    /// The row's name: its parameter's, or `min–max` under it.
+    pub fn name(&self) -> &'static str {
+        if self.spread {
+            SPREAD_ROW
+        } else {
+            self.param.name()
+        }
+    }
+}
+
+/// The name of a row of a walk's least and greatest values.
+pub const SPREAD_ROW: &str = "  min–max";
 
 /// The table: band columns (broadband last), parameter rows, and the legend lines for the
 /// refusal words and marks that occur.
@@ -196,6 +213,7 @@ pub fn room_table(r: &RoomAcoustics, set: BandSet) -> RoomTable {
         .iter()
         .map(|&param| RoomRow {
             param,
+            spread: false,
             cells: bands.iter().map(|b| cell(param, b)).collect(),
         })
         .collect();
@@ -253,6 +271,7 @@ impl RoomTable {
                 .iter()
                 .map(|r| RoomRow {
                     param: r.param,
+                    spread: r.spread,
                     cells: keep.iter().map(|&i| r.cells[i].clone()).collect(),
                 })
                 .collect(),
@@ -289,8 +308,8 @@ impl RoomTable {
         for r in &self.rows {
             out.push_str(&format!(
                 "{}{}",
-                r.param.name(),
-                " ".repeat(name_w - r.param.name().chars().count())
+                r.name(),
+                " ".repeat(name_w.saturating_sub(r.name().chars().count()))
             ));
             for c in &r.cells {
                 out.push_str(&pad(&c.text, col_w));
@@ -399,7 +418,7 @@ pub fn table_layer_at(t: &RoomTable, rect: Rect, theme: &Theme, size: f32) -> La
     for r in &shown.rows {
         y += line;
         layer.labels.push(label(
-            r.param.name(),
+            r.name(),
             [rect.x, y],
             anchor(HAlign::Left, VAlign::Top),
             size,
@@ -463,10 +482,17 @@ pub fn no_sweep_results(new_sweep: &str) -> String {
     format!("no sweep results yet: {new_sweep} sets one up")
 }
 
-/// The room view of `room` (a sweep `name`'s parameters; `None`: says why there are none,
-/// `new_sweep` naming how to set a sweep up).
+/// What a room view shows: one run's parameters, or a walk's over its positions.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum RoomShown<'a> {
+    Run(&'a RoomAcoustics),
+    Walk(&'a WalkRoom),
+}
+
+/// The room view of `room` (a sweep's or a walk's parameters, `name` its name; `None`: says
+/// why there are none, `new_sweep` naming how to set a sweep up).
 pub fn room_scene(
-    room: Option<&RoomAcoustics>,
+    room: Option<RoomShown<'_>>,
     name: Option<&str>,
     new_sweep: &str,
     status: &crate::banner::Status,
@@ -485,7 +511,10 @@ pub fn room_scene(
         (size.height - top - MARGINS.top).max(1.0),
     );
     let table = room.map(|r| {
-        let mut t = room_table(r, BandSet::Octave);
+        let mut t = match r {
+            RoomShown::Run(r) => room_table(r, BandSet::Octave),
+            RoomShown::Walk(r) => walk_room_table(r, BandSet::Octave),
+        };
         if let Some(n) = name {
             t.caption = format!("{n} · {}", t.caption);
         }
@@ -543,6 +572,9 @@ pub fn room_scene(
         banners: strip.rows,
     }
 }
+
+mod walk;
+pub use walk::walk_room_table;
 
 #[cfg(test)]
 mod tests;

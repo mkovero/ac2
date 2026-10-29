@@ -161,6 +161,15 @@ pub fn notes(relaxed: &[Relaxed], labels: &[String], breaks: &[Vec<Broken>]) -> 
     v
 }
 
+/// The first mic row's value for a sweep measurement: *Sweep 1 · sweep, 2 mics in one
+/// play*: its measurement inputs are the walk's mics.
+pub fn sweep_mics(name: &str, inputs: usize) -> String {
+    format!(
+        "{name} · sweep, {inputs} mic{} in one play",
+        if inputs == 1 { "" } else { "s" }
+    )
+}
+
 pub fn setup_view(i: &SetupInput<'_>) -> SetupView {
     let mic_rows = i.mics.len() + usize::from(i.add_mic || i.mics.is_empty());
     let rows = setup_fields(i.preset, mic_rows)
@@ -207,7 +216,7 @@ pub fn setup_view(i: &SetupInput<'_>) -> SetupView {
                     SetupField::Pattern => i.seed.to_string(),
                     SetupField::Mic(k) => match i.mics.get(usize::from(k)) {
                         Some(m) => (*m).to_owned(),
-                        None if k == 0 => "no transfer measurement".to_owned(),
+                        None if k == 0 => "no transfer or sweep measurement".to_owned(),
                         None => "none · →: another mic".to_owned(),
                     },
                 },

@@ -427,7 +427,7 @@ impl AppState {
             },
             C::PaneMeasurement => self.open_pane_menu(self.layout.focus),
             C::Walks => self.open_walks(),
-            C::WalkCapture => self.walk_capture(out),
+            C::WalkCapture => self.walk_capture(keymap, out),
             C::WalkNext => self.walk_step(1, out),
             C::WalkPrev => self.walk_step(-1, out),
             C::WalkRedo => self.walk_redo(out),

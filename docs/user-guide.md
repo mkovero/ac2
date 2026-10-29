@@ -1498,7 +1498,8 @@ row, the reverberation time its source distance needs), **positions** (the prese
 8 for tuning, 6 / 8 / 10 by the zones' seats for ISO 3382-1), **pattern** (another
 arrangement of as many points) and **mic** (the transfer measurement that captures; a **mic
 2** row follows while another transfer measures an input of its own: **→** adds it, and so on
-up to eight, *none* drops it). **↑/↓**
+up to eight, *none* drops it; after the transfers the row offers the session's sweep
+measurements, *Sweep 1 · sweep, 2 mics in one play*, which make a **sweep walk**). **↑/↓**
 moves between rows, **←/→** changes a choice, a value is typed (no letter keys), **Enter**
 starts the walk, **Esc** closes. The plan beside the rows shows the suggested points; drag
 one to move it (snapped to 0.1 m), click to add one, right-click to delete. A rule the
@@ -1537,7 +1538,7 @@ The readiness line is the slowest mic's, named (*settling · MM1*), with its bar
 
 | Key | |
 |---|---|
-| **X** | capture where the mics stand (one trace per mic) and go on to the next step |
+| **X** | capture where the mics stand (one trace per mic) and go on to the next step; on a sweep walk, arm its sweep, then (armed) play it |
 | **PageDown / PageUp** | the next / previous step (moving the mics restarts the averages) |
 | **Shift+R** | redo a point (at the step the mics are at, else the last one captured): its capture leaves the average, the walk's measurements restart there; with several captures there, pick one or the whole step |
 | **K** | skip the point a mic stands at; with several mics, pick one or the whole step (the others stay) |
@@ -1546,6 +1547,22 @@ The readiness line is the slowest mic's, named (*settling · MM1*), with its bar
 
 Captures are named *P3 · <mic>* and list their position (*at P3*); a superseded capture is
 dimmed in the list, an unsettled one says so.
+
+A **sweep walk** records with one sweep measurement whose measurement inputs are the mics:
+one play at a step records every mic standing there. **X** arms the walk's sweep (as
+**Space** does on a sweep pane) and **X** again plays it (as **Enter**), at the measurement's
+level under the stimulus lease and the global maximum; **Esc** stops it. The step line reads
+the run instead of a readiness (*sweep plays at P1, P2*, *sweep playing · 1 of 2*,
+*analysing the sweep*); when the run is done each standing point is captured by its mic's
+trace and the walk goes on. A run that fails or is stopped leaves the points pending (*sweep
+failed: … · P1, P2 stay pending*); while it plays the walk does not move. Moving the mics
+restarts nothing: each run starts from nothing. The average is the power average of the sweep
+traces, with the range across positions. The sweep pane's *Room* view shows the walk's room
+parameters while no run of the measurement is selected: per band the mean of the positions'
+EDT, T20, C80 and D50 with a *min–max* row under each, *1.40 (3)* where only 3 positions give
+a value in the band (the others' decay does not), and the caption *mean of 4 positions · 1
+source*. ISO 3382-1 asks for at least two source positions; the legend says the walk measured
+from one.
 
 #### Spatial walk (CLI)
 
@@ -1563,7 +1580,15 @@ ac2 walk status                                          # where the mics go, wh
 ac2 walk capture                                         # P1 · <mic>, then on to the next step
 ac2 walk next | prev | skip [P3] | redo P3
 ac2 walk swap P3 P4                                      # the mics at P3 and P4 trade places
+ac2 walk new Room --plan Hall --meas "Sweep 1" --points 6 # a sweep walk: its inputs are the mics
+ac2 sweep run "Sweep 1"                                  # a sweep walk's capture at its step
 ```
+
+A **sweep walk** (one sweep measurement as `--meas`) captures by running its sweep: `ac2
+sweep run` records the mics standing at the step, each trace at its point, and the walk goes
+on when the run is done; `walk capture` refuses it, a failed run leaves the points pending,
+and no move resets anything. `walk status` prints the room parameters over the positions
+(mean and min–max per band).
 
 Moving the mic (a new walk, **next**/**prev**, the advance after a capture or skip, a redo)
 restarts the measurement's averages and turns delay tracking on, so nothing of the carry is

@@ -193,7 +193,7 @@ fn the_room_view_takes_the_pane_and_grows_to_fit() {
         height: 600.0,
     };
     let s = room_scene(
-        Some(&r),
+        Some(RoomShown::Run(&r)),
         Some("Sweep 1"),
         "Shift+S",
         &Status::default(),
@@ -223,7 +223,7 @@ fn the_room_view_takes_the_pane_and_grows_to_fit() {
     }
     // Small: the small font, outer bands dropped and said.
     let small = room_scene(
-        Some(&r),
+        Some(RoomShown::Run(&r)),
         Some("Sweep 1"),
         "Shift+S",
         &Status::default(),

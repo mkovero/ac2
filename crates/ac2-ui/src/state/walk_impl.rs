@@ -4,11 +4,11 @@
 
 use super::*;
 use crate::walk_setup::{PlanEditor, PlanMsg, WalkSetup};
-use ac2_proto::model::{Operand, PlanSpec, PointState, WalkKind, WalkState};
+use ac2_proto::model::{Operand, PlanSpec, PointState, WalkKind, WalkMic, WalkState};
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::WalkId;
-use ac2_scene::walk::Ready;
 use ac2_scene::walk::setup::SetupField;
+use ac2_scene::walk::{Ready, SweepAt};
 
 /// `Walk 3`, `Room 2`: the first numbered name not in `taken`.
 fn numbered(word: &str, taken: &[&str]) -> String {
@@ -59,22 +59,36 @@ impl AppState {
             .collect()
     }
 
+    /// The sweep measurements a sweep walk can record with: the session's, each recording
+    /// its measurement inputs (the walk's mics) in one play.
+    pub fn walk_sweeps(&self) -> Vec<MeasId> {
+        self.measurements()
+            .into_iter()
+            .filter(|m| matches!(m.config.kind, MeasKind::Sweep { .. }))
+            .map(|m| m.id)
+            .collect()
+    }
+
     /// The walk's mics by name, in its mic order: the mic on each measurement's input, else
     /// the measurement's name (as the daemon names the captures).
     pub fn walk_mic_names(&self, w: &WalkState) -> Vec<String> {
-        w.meas
+        w.mics
             .iter()
-            .map(|&id| {
-                let Some(m) = self.meas(id) else {
-                    return format!("measurement {id}");
+            .map(|mic| {
+                let Some(m) = self.meas(mic.meas) else {
+                    return format!("measurement {}", mic.meas);
                 };
-                let input = match &m.config.kind {
-                    MeasKind::Transfer { config } => Some(config.measurement_input),
-                    _ => None,
-                };
-                input
-                    .and_then(|i| self.input_setup(i).mic().map(str::to_owned))
-                    .unwrap_or_else(|| m.config.name.clone())
+                let mic_name = self.input_setup(mic.input).mic().map(str::to_owned);
+                match (w.kind, mic_name) {
+                    (_, Some(n)) => n,
+                    // A sweep walk's mics share its measurement: the input tells them apart.
+                    (WalkKind::Sweep, None) => self
+                        .session_input_names()
+                        .into_iter()
+                        .find(|(c, _)| *c == mic.input)
+                        .map_or_else(|| format!("Input {}", mic.input + 1), |(_, n)| n),
+                    (WalkKind::LiveTransfer, None) => m.config.name.clone(),
+                }
             })
             .collect()
     }
@@ -82,12 +96,52 @@ impl AppState {
     /// Whether the step may be captured now: the slowest of the mics standing at it, and
     /// which of the walk's mics that is.
     pub fn walk_ready(&self, w: &WalkState) -> (Ready, Option<usize>) {
-        let standing: Vec<MeasId> = w.standing().into_iter().map(|i| w.points[i].mic).collect();
-        let ready: Vec<Ready> = standing.iter().map(|&m| self.mic_ready(m)).collect();
+        if w.kind == WalkKind::Sweep {
+            return (Ready::Waiting, None);
+        }
+        let standing: Vec<WalkMic> = w.standing().into_iter().map(|i| w.points[i].mic).collect();
+        let ready: Vec<Ready> = standing.iter().map(|m| self.mic_ready(m.meas)).collect();
         match Ready::slowest(&ready) {
             Some(k) => (ready[k], Some(w.mic_index(standing[k]))),
             None => (Ready::Waiting, None),
         }
+    }
+
+    /// A sweep walk's run as its pane reads it, from the daemon's latest run of its sweep
+    /// measurement; `None` for a live walk.
+    pub fn walk_sweep_at(&self, w: &WalkState) -> Option<SweepAt> {
+        use ac2_proto::model::SweepStatus as S;
+        if w.kind != WalkKind::Sweep {
+            return None;
+        }
+        let run = self
+            .daemon()
+            .and_then(|s| s.sweep.as_ref())
+            .filter(|r| w.captures_with(r.meas));
+        Some(match run.map(|r| (&r.status, r.repeats)) {
+            Some((S::Playing { repeat }, of)) => SweepAt::Playing {
+                repeat: *repeat,
+                of,
+            },
+            Some((S::Analysing, _)) => SweepAt::Analysing,
+            Some((S::Failed { msg, .. }, _)) => SweepAt::Failed(msg.clone()),
+            Some((S::Done { .. }, _)) | None => SweepAt::Idle,
+        })
+    }
+
+    /// The walk whose room parameters sweep pane `pane`'s room view shows: a sweep walk
+    /// recording with the pane's measurement that holds room parameters, while no run of
+    /// that measurement is selected (a selected run shows its own).
+    pub fn pane_walk_room(&self, pane: PaneId) -> Option<&WalkState> {
+        let m = self.pane_meas(pane)?.id;
+        let w = self
+            .walks()
+            .iter()
+            .find(|w| w.kind == WalkKind::Sweep && w.captures_with(m) && w.room.is_some())?;
+        let own_run = self
+            .selected_trace_meta()
+            .is_some_and(|t| t.edit.owner.meas() == Some(m));
+        (!own_run).then_some(w)
     }
 
     /// Whether walk measurement `meas` may be captured now: its newest transfer frame's fill
@@ -137,6 +191,15 @@ impl AppState {
     }
 
     /// The walk the focused pane shows, or why none.
+    /// The sweep walk the focused pane shows, if it is one.
+    pub fn focused_sweep_walk(&self) -> Option<&WalkState> {
+        let v = self.layout.focused();
+        (v.kind == PaneKind::Walk)
+            .then(|| v.walk.and_then(|id| self.walk(id)))
+            .flatten()
+            .filter(|w| w.kind == WalkKind::Sweep)
+    }
+
     fn focused_walk(&self) -> Result<&WalkState, String> {
         let v = self.layout.focused();
         let open = self.keys.reach(CommandId::Walks);
@@ -198,7 +261,12 @@ impl AppState {
     pub(super) fn open_walk_setup(&mut self) {
         let taken: Vec<&str> = self.walks().iter().map(|w| w.name.as_str()).collect();
         let name = numbered("Walk", &taken);
-        let s = WalkSetup::new(name, &self.walk_plan_choices(), &self.walk_mics());
+        let s = WalkSetup::new(
+            name,
+            &self.walk_plan_choices(),
+            &self.walk_mics(),
+            &self.walk_sweeps(),
+        );
         self.overlay = Overlay::WalkSetup(Box::new(s));
     }
 
@@ -257,6 +325,7 @@ impl AppState {
         let plans = self.walk_plan_choices();
         let names: Vec<String> = plans.iter().map(|p| p.name.clone()).collect();
         let mics = self.walk_mics();
+        let sweeps = self.walk_sweeps();
         let Some(s) = self.setup() else {
             return;
         };
@@ -269,7 +338,7 @@ impl AppState {
                 if !s.commit(plan.as_ref()) {
                     return;
                 }
-                s.change(d, &names, &mics);
+                s.change(d, &names, &mics, &sweeps);
                 let plan = s.plan_in(&plans).cloned();
                 s.clamp_zone(plan.as_ref());
                 if !matches!(s.focus, SetupField::Mic(_) | SetupField::Name) {
@@ -303,7 +372,7 @@ impl AppState {
             return;
         };
         let refused = match (s.mics.is_empty(), s.points.is_empty()) {
-            (true, _) => Some("no transfer measurement to capture with: make one first"),
+            (true, _) => Some("no transfer or sweep measurement to capture with: make one first"),
             (_, true) => Some("no positions: add some on the plan"),
             _ => None,
         };
@@ -315,7 +384,7 @@ impl AppState {
         let cmd = Command::WalkNew {
             name: s.name.clone(),
             plan: plan.name.clone(),
-            kind: WalkKind::LiveTransfer,
+            kind: s.kind,
             meas: s.mics.clone(),
             points: s.point_specs(),
         };
@@ -392,8 +461,44 @@ impl AppState {
         }
     }
 
+    /// X on a sweep walk: its capture is a run of its sweep, through the stimulus path every
+    /// sweep takes (the lease, arming, the measurement's level under the ceiling): idle, X
+    /// arms it as Space does; armed with it, X plays it as Enter does.
+    fn walk_sweep(&mut self, keymap: &Keymap, out: &mut Vec<Request>) {
+        let meas = self
+            .focused_sweep_walk()
+            .and_then(|w| w.mics.first())
+            .map(|m| m.meas);
+        let armed_with_it = self.rig.stimulus.phase == StimPhase::Armed
+            && self.rig.sweep.plan.as_ref().map(|p| p.meas) == meas;
+        if armed_with_it {
+            self.fire_sweep(out);
+            return;
+        }
+        let x = self.keys.reach(CommandId::WalkCapture);
+        if self.rig.sweep.run.is_some()
+            || matches!(
+                self.rig.stimulus.phase,
+                StimPhase::Firing | StimPhase::FireRequested
+            )
+        {
+            self.warn(format!(
+                "the stimulus is playing: Esc stops it, then {x} arms the walk's sweep"
+            ));
+            return;
+        }
+        self.space_sweep(false, keymap, out);
+        if self.rig.stimulus.phase == StimPhase::Arming
+            && self.rig.sweep.plan.as_ref().map(|p| p.meas) == meas
+        {
+            self.toast(format!(
+                "arming the walk's sweep · {x} again plays it · Esc stops"
+            ));
+        }
+    }
+
     /// X: capture where the mics stand, go on to the next step with a pending point.
-    pub(super) fn walk_capture(&mut self, out: &mut Vec<Request>) {
+    pub(super) fn walk_capture(&mut self, keymap: &Keymap, out: &mut Vec<Request>) {
         if let Ok(w) = self.focused_walk()
             && w.standing().is_empty()
         {
@@ -404,6 +509,10 @@ impl AppState {
                 "this step is captured"
             };
             self.warn(format!("{}: {why} ({redo} redoes one)", w.name));
+            return;
+        }
+        if self.focused_sweep_walk().is_some() {
+            self.walk_sweep(keymap, out);
             return;
         }
         self.walk_call(out, |w| {

@@ -46,7 +46,7 @@ impl Control {
                 format!("{} is not a sweep measurement", m.config.name),
             ));
         };
-        let req: SweepConfig = config.clone();
+        let mut req: SweepConfig = config.clone();
         let meas_name = m.config.name.clone();
         let number = self.next_run_number(meas);
         let name = name.unwrap_or_else(|| format!("Run {number}"));
@@ -89,6 +89,12 @@ impl Control {
         let Some(rt) = self.session.as_ref() else {
             return Err(perr(ErrorCode::Refused, "no open session to play into"));
         };
+        // A sweep walk's run records the mics standing at its step, each trace named for its
+        // point and mic; another run each input, named for its input when there are several.
+        let walk = self.walk_sweep_plan(meas);
+        if let Some(p) = &walk {
+            req.measurement_inputs.clone_from(&p.inputs);
+        }
         req.check_inputs()
             .map_err(|e| perr(ErrorCode::Invalid, e.to_string()))?;
         let reference = req.reference_input;
@@ -106,12 +112,21 @@ impl Control {
             .iter()
             .map(|&m| idx(m, "measurement"))
             .collect::<Result<Vec<_>, _>>()?;
-        // Each input's trace is named for its input when the run makes several, so the
-        // names are checked before anything plays.
-        let names = self.sweep_trace_names(&name, &req.measurement_inputs);
+        // The names are checked before anything plays.
+        let (names, positions): (Vec<String>, Vec<Option<_>>) = match walk {
+            Some(ref p) => (
+                p.names.clone(),
+                p.positions.iter().cloned().map(Some).collect(),
+            ),
+            None => (
+                self.sweep_trace_names(&name, &req.measurement_inputs),
+                vec![None; req.measurement_inputs.len()],
+            ),
+        };
         for n in &names {
             meta::check_edit(n, None).map_err(|e| perr(ErrorCode::Invalid, e))?;
         }
+        let walk = walk.map(|p| p.at);
         if req.outputs.is_empty() {
             return Err(perr(ErrorCode::Invalid, "no output channels"));
         }
@@ -280,9 +295,10 @@ impl Control {
         let inputs = run
             .measurement_inputs
             .iter()
-            .zip(names)
-            .map(|(&input, name)| SweepInput {
+            .zip(names.into_iter().zip(positions))
+            .map(|(&input, (name, position))| SweepInput {
                 name,
+                position,
                 mic: self
                     .cal_and_mic(input)
                     .1
@@ -298,6 +314,7 @@ impl Control {
             job: Some(job),
             epoch: self.epoch(),
             inputs,
+            walk,
         });
         Ok(ReplyBody::Sweep(run))
     }
@@ -309,25 +326,27 @@ impl Control {
         if inputs.len() < 2 {
             return inputs.iter().map(|_| run.to_owned()).collect();
         }
+        inputs
+            .iter()
+            .map(|&i| format!("{run} · {}", self.input_name(i)))
+            .collect()
+    }
+
+    /// Input `i` by name: its mic, else the device's channel name, else `Input N`.
+    pub(super) fn input_name(&self, i: u16) -> String {
         let device = self
             .session
             .as_ref()
             .map_or_else(Vec::new, |rt| self.input_channel_names(rt));
-        inputs
-            .iter()
-            .map(|&i| {
-                let mic = ac2_proto::cal::input_setup(&self.store.state().inputs, i)
-                    .mic()
-                    .map(str::to_owned);
-                let named = [mic, device.get(usize::from(i)).cloned()]
-                    .into_iter()
-                    .flatten()
-                    .map(|s| s.trim().to_owned())
-                    .find(|s| !s.is_empty())
-                    .unwrap_or_else(|| format!("Input {}", i + 1));
-                format!("{run} · {named}")
-            })
-            .collect()
+        let mic = ac2_proto::cal::input_setup(&self.store.state().inputs, i)
+            .mic()
+            .map(str::to_owned);
+        [mic, device.get(usize::from(i)).cloned()]
+            .into_iter()
+            .flatten()
+            .map(|s| s.trim().to_owned())
+            .find(|s| !s.is_empty())
+            .unwrap_or_else(|| format!("Input {}", i + 1))
     }
 
     /// Ends the run in progress without a result: its recorder stops, its audio is
@@ -448,14 +467,19 @@ impl Control {
         let Some(active) = self.sweep.take() else {
             return;
         };
-        let traces = analyses
+        let traces: Vec<_> = analyses
             .iter()
             .zip(inputs.iter().zip(&active.inputs))
             .map(|(a, (&input, si))| self.store_sweep_trace(&active, a, input, si))
             .collect();
         let mut run = active.run;
-        run.status = SweepStatus::Done { traces };
+        run.status = SweepStatus::Done {
+            traces: traces.clone(),
+        };
         self.commit(Change::Sweep(run));
+        if let Some(at) = &active.walk {
+            self.walk_swept(at, &traces);
+        }
     }
 
     /// The trace of one measurement input of a finished run.
@@ -501,7 +525,7 @@ impl Control {
             mic_curve: si.mic_curve.as_ref().map(|(m, _)| m.clone()),
             created_at: WallNs(wall_ns()),
             eq_in: self.eq_in_live(run.meas),
-            position: None,
+            position: si.position.clone(),
             captured_unsettled: false,
             superseded: false,
         };

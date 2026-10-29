@@ -1,6 +1,6 @@
 //! The walk pane: its lines and plan from `ac2_scene::walk`, fed the walk, the session's copy
 //! of its plan, the measurement's readiness (its bar gliding as the meters' bars do), the
-//! average and what differs between the captures.
+//! average and what differs between the captures; a sweep walk's run instead of readiness.
 
 use ac2_scene::primitives::Viewport;
 use ac2_scene::theme::Theme;
@@ -37,10 +37,11 @@ pub fn walk(
         unsettled: st.unsettled_traces(&w.captured_traces()),
         // The bar is the slowest mic's, gliding as its own measurement fills.
         bar_drawn: slowest
-            .and_then(|k| w.meas.get(k))
-            .and_then(|&m| st.walk_bar_drawn(m, now.instant)),
+            .and_then(|k| w.mics.get(k))
+            .and_then(|m| st.walk_bar_drawn(m.meas, now.instant)),
         // The captures are stamped on the daemon's clock: today is read on it too.
         conditions: conditions_text(w, daemon_wall(st, now.wall), |t| st.local_zone.offset_s(t)),
+        sweep: st.walk_sweep_at(w),
     };
     let style = Style {
         chrome: view.chrome,

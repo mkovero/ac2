@@ -98,6 +98,40 @@ impl Ready {
     }
 }
 
+/// A sweep walk's run as its pane reads it: a sweep walk has no averages to settle, its run
+/// at a step is the capture.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SweepAt {
+    /// No run of the walk's sweep in progress: the next one plays where the mics stand.
+    Idle,
+    /// Playing sweep `repeat` of `of`.
+    Playing { repeat: u8, of: u8 },
+    /// Played; the analysis runs.
+    Analysing,
+    /// The last run failed (refused, dropped out, aborted): the points stay pending.
+    Failed(String),
+}
+
+impl SweepAt {
+    /// *sweep plays at P3, P4*, *sweep playing · 2 of 3*, *analysing the sweep*, *sweep
+    /// failed: … · P3 stays pending*; `at` the points the mics stand at.
+    pub fn text(&self, at: &[&str]) -> String {
+        match self {
+            Self::Idle => format!("sweep plays at {}", at.join(", ")),
+            Self::Playing { repeat, of } if *of > 1 => {
+                format!("sweep playing · {repeat} of {of}")
+            }
+            Self::Playing { .. } => "sweep playing".to_owned(),
+            Self::Analysing => "analysing the sweep".to_owned(),
+            Self::Failed(msg) => format!(
+                "sweep failed: {msg} · {} {} pending",
+                at.join(", "),
+                if at.len() == 1 { "stays" } else { "stay" }
+            ),
+        }
+    }
+}
+
 /// The step the walk goes to after the current one: the next step holding a pending point,
 /// wrapping round, as the daemon advances on a capture.
 pub fn next_step(w: &WalkState) -> Option<u16> {
@@ -112,9 +146,9 @@ pub fn next_step(w: &WalkState) -> Option<u16> {
 }
 
 /// A walk mic's name: its input's mic, else its measurement's name. `mics` are in the walk's
-/// mic order; a measurement it does not name reads as *mic*.
-fn mic_name<'a>(w: &WalkState, mics: &'a [String], meas: ac2_proto::units::MeasId) -> &'a str {
-    mics.get(w.mic_index(meas)).map_or("mic", String::as_str)
+/// mic order; a mic it does not have reads as *mic*.
+fn mic_name<'a>(w: &WalkState, mics: &'a [String], mic: ac2_proto::model::WalkMic) -> &'a str {
+    mics.get(w.mic_index(mic)).map_or("mic", String::as_str)
 }
 
 /// *the mic to P3* with one mic; with several, each by name: *Vilppu to P3, MM1 to P4*.
@@ -124,7 +158,7 @@ pub fn moves_text(w: &WalkState, points: &[usize], mics: &[String]) -> String {
         .iter()
         .filter_map(|&i| w.points.get(i))
         .map(|p| {
-            if w.meas.len() == 1 {
+            if w.mics.len() == 1 {
                 format!("the mic to {}", p.label)
             } else {
                 format!("{} to {}", mic_name(w, mics, p.mic), p.label)
@@ -143,7 +177,7 @@ pub fn step_text(w: &WalkState, plan: Option<&PlanSpec>, mics: &[String]) -> Str
         return "every point is captured or skipped".to_owned();
     };
     let who = |i: usize| {
-        if w.meas.len() == 1 {
+        if w.mics.len() == 1 {
             "mic"
         } else {
             mic_name(w, mics, w.points[i].mic)
@@ -287,6 +321,8 @@ pub struct WalkPane<'a> {
     pub bar_drawn: Option<f32>,
     /// [`conditions_text`] of the walk: what differs between its captures.
     pub conditions: String,
+    /// A sweep walk's run; `None` for a live walk.
+    pub sweep: Option<SweepAt>,
 }
 
 /// The walk pane's lines, top to bottom.
@@ -303,11 +339,20 @@ pub struct WalkLines {
 
 impl WalkPane<'_> {
     pub fn lines(&self) -> WalkLines {
-        let ready = match self.slowest.and_then(|k| self.mics.get(k)) {
-            Some(name) if self.walk.meas.len() > 1 && self.ready != Ready::Ready => {
+        let ready = match (&self.sweep, self.slowest.and_then(|k| self.mics.get(k))) {
+            (Some(s), _) => {
+                let at: Vec<&str> = self
+                    .walk
+                    .standing()
+                    .into_iter()
+                    .map(|i| self.walk.points[i].label.as_str())
+                    .collect();
+                s.text(&at)
+            }
+            (None, Some(name)) if self.walk.mics.len() > 1 && self.ready != Ready::Ready => {
                 format!("{} · {name}", self.ready.text())
             }
-            _ => self.ready.text(),
+            (None, _) => self.ready.text(),
         };
         WalkLines {
             step: step_text(self.walk, self.plan, self.mics),
@@ -366,6 +411,7 @@ pub fn walk_scene(p: &WalkPane<'_>, style: Style, size: Viewport) -> WalkScene {
         y += theme.font_size * 1.4;
     }
     let ready_colour = match p.ready {
+        _ if matches!(p.sweep, Some(SweepAt::Failed(_))) => theme.banner_warning.background,
         Ready::Ready => theme.level_ok,
         Ready::Pick => theme.banner_warning.background,
         Ready::Waiting | Ready::Settling(_) => theme.text_dim,

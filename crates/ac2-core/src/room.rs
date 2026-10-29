@@ -605,5 +605,7 @@ pub fn analyse(ir: &[f64], fs: f64, t0_s: f64, excited: (f64, f64)) -> RoomAnaly
     }
 }
 
+pub mod positions;
+
 #[cfg(test)]
 mod tests;
