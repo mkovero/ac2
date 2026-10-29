@@ -597,7 +597,9 @@ fn average(
 }
 
 mod align;
+mod range;
 pub use align::align;
+pub use range::range_band;
 
 #[cfg(test)]
 mod tests;

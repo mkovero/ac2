@@ -1818,7 +1818,7 @@ high byte of every difference. Neighbouring columns of a curve are close, so the
 is mostly 0x00 / 0xff and deflates to little.
 
 Which arrays use which encoding is fixed by name: `mag`, `phase`, `level` (rta, spec),
-`ir_etc` and the `align_*` arrays are `i16`; `coh` is `u16`; `ir_linear` is `bfp16`; bitmasks and
+`ir_etc`, the `align_*` arrays, `range_lo` and `range_hi` are `i16`; `coh` and `range_coh` are `u16`; `ir_linear` is `bfp16`; bitmasks and
 counts (`overs`) are `u32`; `gonio_x` and `gonio_y` are `i8`;
 everything else (meters, Leq and band Leq windows) is `f32`. Precision: `i16` is within
 0.005 dB or 0.005° of the value computed, `u16` within 5·10⁻⁵ of γ² — below the readouts
@@ -1876,7 +1876,7 @@ always `i8`).
 
 | kind | arrays (name: unit) | meta |
 |---|---|---|
-| `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask; an alignment's (all four or none) `align_phase_before`, `align_phase_after`: deg (A − B as measured and with the fit applied), `align_sum_before`, `align_sum_after`: db (the summation per column) | `delay`, `nudged` (Seconds: the part of `delay` `delay.nudge` steps added to the arrival; 0 for a math channel), `smoothing`, `mic_curve`, `math` (`MathState` \| nil: a math channel's operands, below), `unresolved` (`Unresolved` \| nil, §3.2 *Resolution*), `filled` (f32, 0…1: how full the averages are, counted in accumulated blocks of the least full analysis stage, so refused blocks add nothing; a math channel's is the least of its included live operands, 1 for traces) |
+| `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask; an alignment's (all four or none) `align_phase_before`, `align_phase_after`: deg (A − B as measured and with the fit applied), `align_sum_before`, `align_sum_after`: db (the summation per column); an average's range across positions (all three or none) `range_lo`, `range_hi`: db, `range_coh`: coherence | `delay`, `nudged` (Seconds: the part of `delay` `delay.nudge` steps added to the arrival; 0 for a math channel), `smoothing`, `mic_curve`, `math` (`MathState` \| nil: a math channel's operands, below), `unresolved` (`Unresolved` \| nil, §3.2 *Resolution*), `filled` (f32, 0…1: how full the averages are, counted in accumulated blocks of the least full analysis stage, so refused blocks add nothing; a math channel's is the least of its included live operands, 1 for traces) |
 | `ir` | `ir_linear`: full_scale, `ir_etc`: db (optional) | `sample_rate`, `t0`, `dt`, `inserted_delay`; point i at `t0 + i·dt` |
 | `rta` | `level`: dbfs or db_spl (band power), `validity`: bitmask | `fraction`, `weighting`, `scale`, `cal`, `mic_curve`, `math` (`MathState` \| nil) |
 | `spec` | `level`: dbfs or db_spl (tone level), dbfs_per_hz or db_spl_per_hz (density; §3.2 *Spectrum level*); smoothed when `smoothing` is set; NaN for no power; on a `log_bins` grid (`fixed`) or a `log` grid (`multi`, §3.2 *Spectrum resolution*): each column the highest level among its bins (tone) or their mean power (density) | `window`, `scale`, `level` (`SpecLevel`), `cal`, `mic_curve`, `smoothing`, `math` (`MathState` \| nil), `bands` (`SpecBands` \| nil) |
@@ -1942,7 +1942,16 @@ score is within 0.1 of the best — the band is too narrow to tell), `before`, `
 mean and minimum, before and after the suggestion) and `columns`. `AlignCandidate`:
 `delay` (Seconds ≥ 0), `delayed` (`a` \| `b`: the one to delay), `inverted` (its polarity
 flipped), `residual_deg` (weighted RMS of the remaining phase difference) and `score`
-(weighted mean cosine of it, −1 … 1). A spectrum math result's live frame gathers its bins into display columns like a
+(weighted mean cosine of it, −1 … 1). `range` (`RangeSpread` \| nil; a transfer average's,
+nil for every other expression and for level averages; `docs/design/spatial-walk.md` §10),
+tagged by `type`: `too_few` (fewer than 3 positions went in: no band), `envelope`
+{`positions`} (3 … 5: lowest to highest level per column) or `percentiles` {`positions`}
+(6 on: the 10th to 90th percentile, linear between order statistics at rank `p·(n − 1)`).
+Its frame's `range_lo` / `range_hi` arrays are the band's edges, dB, NaN where any included
+operand has no level or the average has none, display-smoothed as the curve is;
+`range_coh` is the lowest γ² among the included operands that have one (NaN: none has):
+a client leaves a column out of the band where that is below its coherence mask, as it
+would blank a single curve there. Live only: a capture of the average keeps no band. A spectrum math result's live frame gathers its bins into display columns like a
 spectrum's, each the highest value among its bins (a level difference: the largest in the
 column; the mean power for a density result, as a density spectrum's); its capture keeps
 every bin. Its `level` is its operands'.
@@ -1974,7 +1983,7 @@ not `JUDGED`, else `over`, `near` or `ok`.
 ### 5.6 Bounds (checked before decoding)
 
 In order: 2 or 3 parts; total ≤ 2 MiB; topic valid; header ≤ 8192 bytes; then after the
-bounded header parse: `v`, `n` ≤ 65536, ≤ 8 arrays, a payload part exactly when arrays are
+bounded header parse: `v`, `n` ≤ 65536, ≤ 12 arrays, a payload part exactly when arrays are
 listed, the payload inflating to exactly n × Σ element sizes plus one byte per `bfp16`
 array (inflation stops there: a
 payload that would inflate further is refused, so it cannot be a decompression bomb),

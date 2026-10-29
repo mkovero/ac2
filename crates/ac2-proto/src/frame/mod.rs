@@ -16,7 +16,7 @@ pub const MAX_HEADER_BYTES: usize = 8192;
 /// Largest `n` (columns / points / channels).
 pub const MAX_N: u32 = 1 << 16;
 /// Most arrays in one frame.
-pub const MAX_ARRAYS: usize = 8;
+pub const MAX_ARRAYS: usize = 12;
 /// Most parts of one frame: topic, header, payload.
 pub const MAX_PARTS: usize = 3;
 /// Largest whole frame (all parts), bytes.

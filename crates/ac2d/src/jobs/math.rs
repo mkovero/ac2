@@ -263,6 +263,10 @@ impl MathJob {
                 f.mag = sm.mag_db;
                 f.phase = sm.phase_deg.unwrap_or_default();
                 f.coh = sm.coherence.unwrap_or_default();
+                if let Some(r) = f.range.as_mut() {
+                    r.lo = smooth(std::mem::take(&mut r.lo), None, None).mag_db;
+                    r.hi = smooth(std::mem::take(&mut r.hi), None, None).mag_db;
+                }
                 FrameData::Tf(f)
             }
             FrameData::Spec(mut f) => {
@@ -583,6 +587,23 @@ pub(crate) fn combine(
             },
         })
         .collect();
+    // An average of transfers also says how far its positions spread, over the columns
+    // where the average itself has a value.
+    let (range, mut range_band) = match (&cfg.expr, cfg.domain) {
+        (MathExpr::Average { .. }, MathDomain::Transfer) => {
+            let (spread, band) = math::range_band(&inputs);
+            (Some(spread), band)
+        }
+        _ => (None, None),
+    };
+    if let Some(b) = range_band.as_mut() {
+        for (i, v) in validity.iter().enumerate() {
+            if *v != ValidityMask::NONE {
+                b.lo[i] = f32::NAN;
+                b.hi[i] = f32::NAN;
+            }
+        }
+    }
     let phase = result.as_ref().map_or(PhaseBasis::NoPhase, |r| r.phase);
     // An alignment without both operands still says so, with its view's curves empty.
     if align.is_none() && matches!(cfg.expr, MathExpr::Align { .. }) {
@@ -602,6 +623,7 @@ pub(crate) fn combine(
         operands: states,
         phase,
         align,
+        range,
     }));
     let nan = || vec![f32::NAN; n];
     // A filter is no measurement: the result's mic curve is its level's.
@@ -648,6 +670,7 @@ pub(crate) fn combine(
             coh: coh.unwrap_or_else(nan),
             validity,
             align: curves,
+            range: range_band,
         }),
         MathDomain::Spectrum => {
             let (window, cal) = match first_frame {

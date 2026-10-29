@@ -11,6 +11,7 @@ mod layout;
 mod mark;
 mod panes;
 mod plates;
+mod range_band;
 
 const SIZE: Viewport = Viewport {
     width: 960.0,
@@ -41,6 +42,7 @@ fn cols(n: usize) -> Cols {
 
 fn trace(c: &Cols, key: TraceKey, delay: f64) -> TfTrace<'_> {
     TfTrace {
+        range: None,
         key,
         name: match key {
             TraceKey::Live(m) => format!("m{}", m.0),

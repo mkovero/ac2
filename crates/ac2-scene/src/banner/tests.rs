@@ -543,6 +543,7 @@ fn math_average_banners() {
             of.clone(),
         );
         let a = MathState {
+            range: None,
             operands: of
                 .into_iter()
                 .zip(s)

@@ -357,6 +357,13 @@ fn display_page_changes_apply_at_once_and_are_remembered() {
     t.key("Left");
     assert!(t.st.view.unresolved && t.st.prefs.resolution_marker);
     t.key("Down");
+    assert_eq!(settings(&t).display, DisplayRow::RangeBand);
+    assert!(t.st.view.range_band);
+    t.key("Right");
+    assert!(!t.st.view.range_band && !t.st.prefs.range_band);
+    t.key("Left");
+    assert!(t.st.view.range_band && t.st.prefs.range_band);
+    t.key("Down");
     assert_eq!(settings(&t).display, DisplayRow::PlateBackground);
     let solid = ac2_scene::plate::PlateBackground::Solid;
     assert_eq!(

@@ -844,6 +844,9 @@ pub struct ViewState {
     /// Mark the frequency ranges a curve's analysis does not resolve at its grid
     /// ([`crate::unresolved`]).
     pub unresolved: bool,
+    /// Shade an average's range across positions behind its magnitude
+    /// ([`crate::range_band`]).
+    pub range_band: bool,
     /// Least right margin of a frequency plot, logical pixels: set by the pane layout (not
     /// the operator) to the widest margin among the panes stacked in this pane's column, so
     /// they all put one frequency at one x ([`crate::freq_column`]). 0 keeps the plot's own.
@@ -869,6 +872,7 @@ impl Default for ViewState {
             temperature_c: 20.0,
             chrome: PlotChrome::Full,
             unresolved: true,
+            range_band: true,
             freq_right: 0.0,
             plates: crate::plate::Plates::default(),
             plate_hover: None,
@@ -881,6 +885,12 @@ impl ViewState {
     /// drawn: they read as grid lines, so T takes them away with the grid.
     pub fn marks(&self) -> bool {
         self.unresolved && self.chrome.grid()
+    }
+
+    /// Whether an average's range band is drawn: a plot hint, so T takes it away with the
+    /// grid.
+    pub fn range_band_shown(&self) -> bool {
+        self.range_band && self.chrome.grid()
     }
 
     /// The axes of IR picture `p`.

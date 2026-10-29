@@ -131,6 +131,7 @@ pub fn tf_frame() -> Frame {
                             },
                         },
                     })),
+                    range: Some(RangeSpread::Percentiles { positions: 8 }),
                 })),
             },
             // On the wire's grids (hundredths of a dB and degree, ten-thousandths of γ²), so
@@ -162,6 +163,18 @@ pub fn tf_frame() -> Frame {
                 phase_after: (0..n).map(|i| val(i, (i % 21) as f32 - 10.0)).collect(),
                 sum_before: (0..n).map(|i| val(i, -((i % 60) as f32) / 2.0)).collect(),
                 sum_after: (0..n).map(|i| val(i, -((i % 5) as f32) / 4.0)).collect(),
+            }),
+            // NaN where a position is below the band's coherence or a column has no value.
+            range: Some(RangeBand {
+                lo: (0..n)
+                    .map(|i| val(i, (3 * i as i32 - 900) as f32 / 100.0))
+                    .collect(),
+                hi: (0..n)
+                    .map(|i| val(i, (3 * i as i32 - 300) as f32 / 100.0))
+                    .collect(),
+                coh: (0..n)
+                    .map(|i| val(i, ((i % 37) * 250) as f32 / 10_000.0))
+                    .collect(),
             }),
         }),
     }
@@ -225,6 +238,7 @@ pub fn frames() -> Vec<Frame> {
                     smoothing: Some(SmoothingFraction::Sixth),
                     level: SpecLevel::Density,
                     math: Some(Box::new(MathState {
+                        range: None,
                         operands: vec![
                             OperandState {
                                 operand: Operand::Meas { meas: MeasId(3) },

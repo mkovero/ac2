@@ -16,6 +16,9 @@ struct File {
     /// Written only when off (the default is on).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     resolution_marker: Option<bool>,
+    /// Written only when off (the default is on).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    range_band: Option<bool>,
     /// Written only when solid (the default is see-through).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     plate_background: Option<PlateBackgroundFile>,
@@ -812,6 +815,7 @@ impl UiPrefs {
             key_hints: f.key_hints.unwrap_or(true),
             warning_toasts: f.warning_toasts.unwrap_or(true),
             resolution_marker: f.resolution_marker.unwrap_or(true),
+            range_band: f.range_band.unwrap_or(true),
             plate_background: f
                 .plate_background
                 .map_or(PlateBackground::SeeThrough, PlateBackgroundFile::background),
@@ -873,6 +877,7 @@ impl UiPrefs {
             unknown: BTreeMap::new(),
             warning_toasts: (!self.warning_toasts).then_some(false),
             resolution_marker: (!self.resolution_marker).then_some(false),
+            range_band: (!self.range_band).then_some(false),
             plate_background: (self.plate_background != PlateBackground::SeeThrough)
                 .then(|| PlateBackgroundFile::of(self.plate_background)),
             bar_ease: (!self.bar_ease).then_some(false),

@@ -1476,6 +1476,18 @@ measurements the row is dimmed: *needs two transfer measurements*.
 One mic moved from seat to seat: capture each position (**Ctrl+1 … 9**) and average the
 captures the same way, or with **M**.
 
+**Range across positions.** From three positions on, a transfer average also shades how far
+its positions spread, per column, behind its magnitude (faint grey, dashed edges, like the
+resolution marker): below six positions from the lowest to the highest level, from six on the
+10th to the 90th percentile, so one stray seat does not set the edges. The legend says which:
+`range of 4 positions`, `10–90 % of 8 positions`; with two, `range: too few positions`. Where
+the band is narrow the seats agree and an EQ helps all of them; where it is wide they scatter
+and an EQ helps some. A column where any position's coherence is below the coherence mask
+(**B**) is left out, as a single curve would be blanked there; with the mask off every
+column where all positions have a level is in the band. The band is live: a capture of the average (**Ctrl+1 … 9**) keeps
+the curve only. **T** takes it away with the grid; Settings › Display › Range across
+positions turns it off (on by default).
+
 #### Spatial walk
 
 **Shift+W** opens the *Spatial walk* window: **New walk…** first, then every walk of the

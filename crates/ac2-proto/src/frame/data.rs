@@ -51,6 +51,9 @@ pub struct TfFrame {
     pub validity: Vec<ValidityMask>,
     /// An alignment math channel's view curves; `None` for every other transfer frame.
     pub align: Option<crate::model::AlignCurves>,
+    /// An average's range across positions ([`crate::frame::MathState::range`]); `None` for
+    /// every other transfer frame and below three positions.
+    pub range: Option<crate::model::RangeBand>,
 }
 
 /// IR frame.

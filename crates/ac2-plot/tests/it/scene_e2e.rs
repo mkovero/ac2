@@ -70,6 +70,7 @@ fn cols(gain_db: f32, tau: f64) -> Cols {
 
 fn trace<'a>(c: &'a Cols, meas: u32, color: usize, delay: f64) -> TfTrace<'a> {
     TfTrace {
+        range: None,
         key: TraceKey::Live(MeasId(meas)),
         name: format!("Meas {meas}"),
         color: Theme::dark().trace_color(color),
@@ -267,6 +268,77 @@ fn transfer_view_unresolved() {
         let img = render_on(gpu, &mut r, &s.scene, 1.0, theme.background);
         golden(&name, &img, TEXT);
     }
+}
+
+/// An average's range across 8 positions behind its magnitude: faint shade, dashed edges,
+/// a gap where one position is below the coherence mask (4–8 kHz) and below 60 Hz, where
+/// the curve itself is blanked.
+#[test]
+fn transfer_view_range_band() {
+    use ac2_proto::model::{RangeBand, RangeSpread};
+    let name = "transfer_view_range_band";
+    let Some(gpu) = gpu(name) else {
+        return;
+    };
+    let a = cols(0.0, 0.0);
+    let spread = |f: f64| 1.5 + 4.0 * (f / 8000.0).min(1.0) + 3.0 * (100.0 / f).min(1.0);
+    let band = RangeBand {
+        lo: a
+            .freqs
+            .iter()
+            .zip(&a.mag)
+            .map(|(f, m)| m - (0.7 * spread(*f)) as f32)
+            .collect(),
+        hi: a
+            .freqs
+            .iter()
+            .zip(&a.mag)
+            .map(|(f, m)| m + spread(*f) as f32)
+            .collect(),
+        coh: a
+            .freqs
+            .iter()
+            .zip(&a.coh)
+            .map(|(f, g)| {
+                if (4000.0..8000.0).contains(f) {
+                    0.3
+                } else {
+                    *g
+                }
+            })
+            .collect(),
+    };
+    let mut t = trace(&a, 1, 0, 0.010);
+    t.name = "Average of 8".into();
+    t.range = Some(ac2_scene::range_band::Source {
+        spread: RangeSpread::of(8),
+        band: Some(&band),
+    });
+    let mut view = ViewState {
+        cursor_hz: Some(1000.0),
+        ..ViewState::default()
+    };
+    view.tf.coherence.blank_below = Some(0.5);
+    let theme = Theme::dark();
+    let size = Viewport {
+        width: 560.0,
+        height: 360.0,
+    };
+    let s = ac2_scene::tf::transfer_scene(
+        std::slice::from_ref(&t),
+        &ac2_scene::trace::DisplayCache::default(),
+        &Status::default(),
+        &view,
+        &theme,
+        size,
+    );
+    assert_eq!(
+        s.legend[0].tags.last().map(String::as_str),
+        Some("10–90 % of 8 positions")
+    );
+    let mut r = renderer(gpu);
+    let img = render_on(gpu, &mut r, &s.scene, 1.0, theme.background);
+    golden(name, &img, TEXT);
 }
 
 /// A live multi-resolution spectrum at 96 kHz: a faint dashed line at each window change,

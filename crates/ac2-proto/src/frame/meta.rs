@@ -55,6 +55,9 @@ pub struct MathState {
     pub phase: PhaseBasis,
     /// An alignment's fit and its view's curves; `None` for every other expression.
     pub align: Option<Box<crate::model::AlignState>>,
+    /// An average's range across positions (its band in the transfer frame's range
+    /// arrays); `None` for every other expression and for level averages.
+    pub range: Option<crate::model::RangeSpread>,
 }
 
 impl MathState {

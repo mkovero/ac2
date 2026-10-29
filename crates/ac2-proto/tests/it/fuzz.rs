@@ -40,6 +40,7 @@ fn tf_strategy() -> impl Strategy<Value = Frame> {
             Frame {
                 stamp,
                 data: FrameData::Tf(TfFrame {
+                    range: None,
                     meas: MeasId(meas),
                     meta: TfMeta {
                         delay: Seconds(0.001),
@@ -311,8 +312,9 @@ proptest! {
         t.phase = vals.iter().map(|v| v.1).collect();
         t.coh = vals.iter().map(|v| v.2).collect();
         t.validity = vec![frame::ValidityMask::NONE; vals.len()];
-        // The alignment's curves are tested apart: these arrays are the grid's columns.
+        // The alignment's curves and the range band are tested apart: these arrays are the grid's columns.
         t.align = None;
+        t.range = None;
         let back = decode_frame(&parts_ref(&encode_frame(&f).expect("encodes"))).expect("decodes");
         let (mag, phase, coh) = tf_arrays(&back);
         for (i, (m, p, c)) in vals.iter().enumerate() {

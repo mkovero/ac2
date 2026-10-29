@@ -70,6 +70,15 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<Vec<u8>>, EncodeError> {
                     cols.push((desc(name, unit), Col::F(v)));
                 }
             }
+            if let Some(r) = &f.range {
+                for (name, unit, v) in [
+                    (ArrayName::RangeLo, Unit::Db, &r.lo),
+                    (ArrayName::RangeHi, Unit::Db, &r.hi),
+                    (ArrayName::RangeCoh, Unit::Coherence, &r.coh),
+                ] {
+                    cols.push((desc(name, unit), Col::F(v)));
+                }
+            }
             FrameMeta::Tf(f.meta.clone())
         }
         FrameData::Ir(f) => {

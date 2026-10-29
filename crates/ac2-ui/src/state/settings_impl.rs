@@ -470,6 +470,7 @@ impl AppState {
             DisplayRow::DistortionUnit if d != 0 => self.toggle_distortion_unit(),
             DisplayRow::Coherence if d != 0 => self.toggle_coherence_placement(),
             DisplayRow::ResolutionMarker if d != 0 => self.toggle_resolution_marker(),
+            DisplayRow::RangeBand if d != 0 => self.toggle_range_band(),
             DisplayRow::PlateBackground if d != 0 => self.toggle_plate_background(),
             DisplayRow::CursorJump if d != 0 => {
                 let db = ac2_scene::cursor_jump::step_prominence(self.view.jump_prominence_db, d);
@@ -896,6 +897,17 @@ impl AppState {
         self.toast(format!(
             "resolution marker {}",
             crate::settings::resolution_marker_text(self.view.unresolved)
+        ));
+    }
+
+    /// The Display page's Range across positions line; remembered in the prefs.
+    pub(super) fn toggle_range_band(&mut self) {
+        self.view.range_band = !self.view.range_band;
+        self.prefs.range_band = self.view.range_band;
+        self.prefs_dirty = true;
+        self.toast(format!(
+            "range across positions {}",
+            crate::settings::range_band_text(self.view.range_band)
         ));
     }
 

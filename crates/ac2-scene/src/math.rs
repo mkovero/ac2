@@ -354,6 +354,7 @@ mod tests {
             of.clone(),
         );
         let s = MathState {
+            range: None,
             operands: of
                 .into_iter()
                 .zip(statuses)
@@ -421,6 +422,7 @@ mod tests {
     #[test]
     fn binary_tags_and_banners() {
         let state = |b: OperandStatus, phase| MathState {
+            range: None,
             operands: vec![
                 OperandState {
                     operand: meas(1),
@@ -486,6 +488,7 @@ mod tests {
             },
         );
         let both = MathState {
+            range: None,
             operands: vec![
                 OperandState {
                     operand: meas(1),
@@ -518,6 +521,7 @@ mod tests {
             )
         };
         let state = |b, phase| MathState {
+            range: None,
             operands: [meas(1), b]
                 .into_iter()
                 .map(|operand| OperandState {

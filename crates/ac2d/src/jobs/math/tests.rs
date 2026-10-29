@@ -48,6 +48,7 @@ fn member(meas: u32, db: f32, arrival: f64, inserted: f64, prot: ProtectionFlags
             protection: prot,
         },
         data: FrameData::Tf(TfFrame {
+            range: None,
             meas: MeasId(meas),
             meta: TfMeta {
                 delay: Seconds(inserted),
@@ -506,4 +507,95 @@ fn a_live_operand_paces_the_result_by_its_own_results() {
     probes.set(MeasId(1), None);
     hand_off(&mut j, 12 * 256);
     assert_eq!(j.generation, first + 2);
+}
+
+fn range_of(f: &TfFrame) -> Option<ac2_proto::model::RangeSpread> {
+    f.meta.math.as_ref().and_then(|m| m.range)
+}
+
+/// Below six positions the band is the envelope of the operands' levels; from six on the
+/// 10th–90th percentile (linear between order statistics at rank p·(n − 1)). The coherence
+/// it carries is the lowest of the positions' (live 0.9, stored 0.5).
+#[test]
+fn range_band_envelope_then_percentiles() {
+    use ac2_proto::model::RangeSpread;
+    let f = run(
+        &avg(&[1, 2, 3, 4], AverageMethod::Power),
+        &[None; 4],
+        &[flat(1, 3.0), flat(2, -3.0), flat(3, 1.0), flat(4, 0.0)],
+    );
+    assert_eq!(range_of(&f), Some(RangeSpread::Envelope { positions: 4 }));
+    let b = f.range.as_ref().expect("a band");
+    assert!(b.lo.iter().all(|v| *v == -3.0) && b.hi.iter().all(|v| *v == 3.0));
+    assert!(b.coh.iter().all(|g| *g == 0.9));
+
+    // Sorted −8, −3, 0, 1, 2.5, 9: ranks 0.5 and 4.5 → −5.5 and 5.75 dB.
+    let mut c = avg(&[1, 2, 3, 4, 5], AverageMethod::Complex);
+    if let MathExpr::Average { of, .. } = &mut c.expr {
+        of.push(Operand::Trace { trace: TraceId(1) });
+    }
+    let f = run(
+        &c,
+        &[None; 6],
+        &[
+            flat(1, 1.0),
+            flat(2, -3.0),
+            flat(3, 9.0),
+            flat(4, -8.0),
+            flat(5, 2.5),
+            stored(0.0, 0.0, Some(EPOCH)),
+        ],
+    );
+    assert_eq!(
+        range_of(&f),
+        Some(RangeSpread::Percentiles { positions: 6 })
+    );
+    let b = f.range.as_ref().expect("a band");
+    assert!((b.lo[10] - -5.5).abs() < 1e-5 && (b.hi[10] - 5.75).abs() < 1e-5);
+    assert!(b.coh.iter().all(|g| *g == 0.5));
+}
+
+/// Two positions are an average but no range; a binary expression has neither.
+#[test]
+fn range_band_needs_three_positions() {
+    use ac2_proto::model::RangeSpread;
+    let f = run(
+        &avg(&[1, 2, 3], AverageMethod::Power),
+        &[None; 3],
+        &[
+            flat(1, 0.0),
+            flat(2, 1.0),
+            member(3, 40.0, 0.0, 0.0, ProtectionFlags::NO_SIGNAL),
+        ],
+    );
+    assert!(f.mag[0].is_finite());
+    assert_eq!(range_of(&f), Some(RangeSpread::TooFew));
+    assert!(f.range.is_none());
+    let f = run(
+        &binary(meas(1), MathOp::Divide, meas(2)),
+        &[None; 2],
+        &[flat(1, 0.0), flat(2, 1.0)],
+    );
+    assert_eq!(range_of(&f), None);
+    assert!(f.range.is_none());
+}
+
+/// A column where one position has no level is out of the band, as it is of the average.
+#[test]
+fn range_band_gap_follows_the_average() {
+    let mut b = flat(2, 0.0);
+    if let Answer::Result(fr) = &mut b
+        && let FrameData::Tf(tf) = &mut fr.data
+    {
+        tf.validity[0] = ValidityMask::SETTLING;
+        tf.mag[0] = f32::NAN;
+    }
+    let f = run(
+        &avg(&[1, 2, 3], AverageMethod::Power),
+        &[None; 3],
+        &[flat(1, 0.0), b, flat(3, 2.0)],
+    );
+    let r = f.range.as_ref().expect("a band");
+    assert!(r.lo[0].is_nan() && r.hi[0].is_nan());
+    assert_eq!((r.lo[1], r.hi[1]), (0.0, 2.0));
 }

@@ -87,6 +87,7 @@ impl Data {
 
     fn trace(&self, key: u32, time_base: TimeBase) -> TfTrace<'_> {
         TfTrace {
+            range: None,
             key: TraceKey::Live(MeasId(key)),
             name: format!("m{key}"),
             color: Color::WHITE,
@@ -390,6 +391,7 @@ fn unwrap_follows_a_long_delay() {
 fn live_frame(freqs: &[f64], tau: f64, applied: f64, nudged: f64) -> TfFrame {
     let n = freqs.len();
     TfFrame {
+        range: None,
         meas: MeasId(1),
         meta: ac2_proto::frame::TfMeta {
             delay: Seconds(applied),

@@ -52,7 +52,8 @@
       }
      ],
      "phase": "no_phase",
-     "align": null
+     "align": null,
+     "range": null
     },
     "bands": {
      "bands": [

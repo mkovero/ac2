@@ -60,6 +60,7 @@ pub mod plate;
 pub mod primitives;
 pub mod programme;
 pub mod progress;
+pub mod range_band;
 pub mod readout;
 pub mod recording;
 pub mod rig;

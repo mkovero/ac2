@@ -76,6 +76,7 @@ fn tf_frame(meas: u32, gain: f64, tau: f64, bump_hz: f64) -> TfFrame {
         .map(|f| (1.0 - (35.0 / f).powi(2)).clamp(0.05, 0.99) as f32)
         .collect();
     TfFrame {
+        range: None,
         meas: MeasId(meas),
         meta: TfMeta {
             delay: Seconds(0.0125),
@@ -591,6 +592,7 @@ impl Rig {
         }
         let mut f = tf_frame(6, -1.5, 0.0, 1300.0);
         f.meta.math = Some(Box::new(MathState {
+            range: None,
             operands: of
                 .into_iter()
                 .zip([
@@ -663,6 +665,7 @@ impl Rig {
             .map(|x| (2.0 * (x.max(20.0) / 1000.0).log2()).clamp(-6.0, 6.0) as f32)
             .collect();
         f.meta.math = Some(Box::new(MathState {
+            range: None,
             operands: [a, b]
                 .map(|operand| OperandState {
                     operand,

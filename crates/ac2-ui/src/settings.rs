@@ -285,6 +285,7 @@ pub enum DisplayRow {
     DistortionUnit,
     Coherence,
     ResolutionMarker,
+    RangeBand,
     PlateBackground,
     CursorJump,
     LevelAxes,
@@ -295,7 +296,7 @@ pub enum DisplayRow {
 }
 
 impl DisplayRow {
-    pub const ALL: [DisplayRow; 23] = [
+    pub const ALL: [DisplayRow; 24] = [
         DisplayRow::Theme,
         DisplayRow::KeyHints,
         DisplayRow::WarningToasts,
@@ -312,6 +313,7 @@ impl DisplayRow {
         DisplayRow::DistortionUnit,
         DisplayRow::Coherence,
         DisplayRow::ResolutionMarker,
+        DisplayRow::RangeBand,
         DisplayRow::PlateBackground,
         DisplayRow::CursorJump,
         DisplayRow::LevelAxes,
@@ -339,6 +341,7 @@ impl DisplayRow {
             DisplayRow::DistortionUnit => "Distortion in",
             DisplayRow::Coherence => "Coherence",
             DisplayRow::ResolutionMarker => "Resolution marker",
+            DisplayRow::RangeBand => "Range across positions",
             DisplayRow::PlateBackground => "Plate background",
             DisplayRow::CursorJump => "Peak / notch jumps",
             DisplayRow::LevelAxes => "Level axes",
@@ -474,6 +477,15 @@ pub fn warning_toasts_text(on: bool) -> &'static str {
     }
 }
 
+/// What the Range across positions setting says, on the Display page and in its toast.
+pub fn range_band_text(on: bool) -> &'static str {
+    if on {
+        "on: shades how far an average's positions spread"
+    } else {
+        "off"
+    }
+}
+
 /// What the Resolution marker setting says, on the Display page and in its toast.
 pub fn resolution_marker_text(on: bool) -> &'static str {
     if on {
@@ -526,6 +538,7 @@ pub struct DisplaySwitches {
     pub key_hints: bool,
     pub warning_toasts: bool,
     pub resolution_marker: bool,
+    pub range_band: bool,
     pub bar_ease: bool,
     pub shared_scale: bool,
     pub spec_ease: bool,
@@ -588,6 +601,7 @@ pub fn display_rows(
                 DisplayRow::ResolutionMarker => {
                     resolution_marker_text(switches.resolution_marker).into()
                 }
+                DisplayRow::RangeBand => range_band_text(switches.range_band).into(),
                 DisplayRow::PlateBackground => {
                     plate_background_text(switches.plate_background).into()
                 }

@@ -350,6 +350,9 @@ pub struct UiPrefs {
     /// The transfer and sweep panes shade the ranges a curve's analysis does not resolve
     /// at its grid (on until the operator turns it off).
     pub resolution_marker: bool,
+    /// The transfer pane shades an average's range across positions (on until the
+    /// operator turns it off).
+    pub range_band: bool,
     /// What shows through a plate the pointer is not on (see-through until the operator
     /// sets it solid).
     pub plate_background: ac2_scene::plate::PlateBackground,
@@ -435,6 +438,7 @@ impl Default for UiPrefs {
             key_hints: true,
             warning_toasts: true,
             resolution_marker: true,
+            range_band: true,
             plate_background: ac2_scene::plate::PlateBackground::SeeThrough,
             bar_ease: true,
             shared_scale: true,

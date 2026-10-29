@@ -16,7 +16,7 @@ import msgpack
 PROTO_VERSION = 76
 MAX_HEADER_BYTES = 8192
 MAX_N = 1 << 16
-MAX_ARRAYS = 8
+MAX_ARRAYS = 12
 MAX_PARTS = 3
 MAX_FRAME_BYTES = 2 << 20
 MAX_TOPIC_BYTES = 32
@@ -171,7 +171,9 @@ _ALIGN = ("opt", [("outcome", ("tagged", {
                                    "no_weight": []}))],
 }))])
 _MATH = ("opt", [("operands", ("list", [("operand", _OPERAND), ("status", _OPERAND_STATUS)])),
-                 ("phase", None), ("align", _ALIGN)])
+                 ("phase", None), ("align", _ALIGN),
+                 ("range", ("opt", ("tagged", {"too_few": [], "envelope": [("positions", None)],
+                                               "percentiles": [("positions", None)]})))])
 _POSITION = [("level", None), ("peak", None)]
 _PEAK = [("level", None), ("judgement", None)]
 _PAIR_LEVELS = [("left", None), ("right", None), ("correlation", None), ("quiet", None)]

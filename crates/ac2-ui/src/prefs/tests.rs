@@ -159,6 +159,17 @@ fn resolution_marker_round_trip() {
 }
 
 #[test]
+fn range_band_round_trip() {
+    let mut p = UiPrefs::default();
+    assert!(p.range_band);
+    assert!(!p.to_toml().contains("range_band"));
+    p.range_band = false;
+    let text = p.to_toml();
+    assert!(text.contains("range_band = false"), "{text}");
+    assert_eq!(UiPrefs::from_toml(&text), Ok(p));
+}
+
+#[test]
 fn plate_background_round_trip() {
     use ac2_scene::plate::PlateBackground;
     let mut p = UiPrefs::default();

@@ -415,6 +415,7 @@ impl Transfer {
             }
         };
         TfFrame {
+            range: None,
             meas: self.meas,
             meta: TfMeta {
                 delay: Seconds(self.delay_s),

@@ -56,6 +56,12 @@ pub enum ArrayName {
     AlignSumBefore,
     /// An alignment's summation with its fit applied.
     AlignSumAfter,
+    /// An average's range across positions, lower edge.
+    RangeLo,
+    /// An average's range across positions, upper edge.
+    RangeHi,
+    /// The lowest γ² among an average's positions.
+    RangeCoh,
     /// Validity bitmask.
     Validity,
     /// IR samples, linear.
@@ -185,10 +191,12 @@ pub(super) fn desc(name: ArrayName, unit: Unit) -> ArrayDesc {
             | ArrayName::AlignPhaseBefore
             | ArrayName::AlignPhaseAfter
             | ArrayName::AlignSumBefore
-            | ArrayName::AlignSumAfter,
+            | ArrayName::AlignSumAfter
+            | ArrayName::RangeLo
+            | ArrayName::RangeHi,
             _,
         ) => Elem::I16,
-        (ArrayName::Coh, _) => Elem::U16,
+        (ArrayName::Coh | ArrayName::RangeCoh, _) => Elem::U16,
         (ArrayName::IrLinear, _) => Elem::Bfp16,
         _ => Elem::F32,
     };

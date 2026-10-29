@@ -48,8 +48,10 @@ def arr(name, unit, elem=None):
     if elem is None:
         elem = {"mag": "i16", "phase": "i16", "level": "i16", "ir_etc": "i16", "coh": "u16", "ir_linear": "bfp16",
                 "gonio_x": "i8", "gonio_y": "i8", "overs": "u32"}.get(name, "f32")
-        if name.startswith("align_"):
+        if name.startswith("align_") or name in ("range_lo", "range_hi"):
             elem = "i16"
+        if name == "range_coh":
+            elem = "u16"
     return {"name": name, "unit": unit, "elem": elem}
 
 
@@ -127,6 +129,7 @@ def tf_frame():
                         },
                     }
                 },
+                "range": {"type": "percentiles", "positions": 8},
             },
             "unresolved": {
                 "resolution": "ninety_sixth",
@@ -146,6 +149,9 @@ def tf_frame():
             (arr("align_phase_after", "deg"), [val(i, float(i % 21) - 10.0) for i in range(n)]),
             (arr("align_sum_before", "db"), [val(i, -float(i % 60) / 2.0) for i in range(n)]),
             (arr("align_sum_after", "db"), [val(i, -float(i % 5) / 4.0) for i in range(n)]),
+            (arr("range_lo", "db"), [val(i, (3 * i - 900) / 100.0) for i in range(n)]),
+            (arr("range_hi", "db"), [val(i, (3 * i - 300) / 100.0) for i in range(n)]),
+            (arr("range_coh", "coherence"), [val(i, (i % 37) * 250 / 10000.0) for i in range(n)]),
         ],
     )
 
@@ -263,6 +269,7 @@ def frames():
                     ],
                     "phase": "no_phase",
                     "align": None,
+                    "range": None,
                 },
                 "bands": {
                     "bands": [

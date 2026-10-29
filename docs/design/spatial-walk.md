@@ -333,6 +333,16 @@ operand is below its coherence floor (the band would show noise, not seats). It 
 agree (EQ helps all of them) and where they scatter (EQ helps some). With fewer than 3 positions
 there is no band and the legend says *range: too few positions*.
 
+As built (PROTO 76): the math job computes the band for every transfer average, any method,
+live or stored operands (`ac2_traces::math::range_band`, quantiles linear at rank
+`p·(n − 1)`); `MathState.range` says what it spans, the frame's `range_lo` / `range_hi` /
+`range_coh` arrays carry it, display-smoothed as the curve. The coherence floor is the view's
+coherence mask (**B**), the threshold that blanks a single curve: `range_coh` is the lowest γ²
+among the positions and `ac2-scene` (`range_band`) drops a column below the mask (with the
+mask off, none). Drawn in the magnitude pane with the resolution marker's shade and dashed
+edge; T and Settings › Display › Range across positions hide it. Live only: captures of the
+average and level (spectrum, RTA) averages carry no band.
+
 ## 11. Room parameters over a walk (G10)
 
 A sweep walk gives ISO 3382-1 what it asks for: T20, EDT, C80 and D50 per band averaged over the

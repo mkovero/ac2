@@ -121,6 +121,9 @@ pub struct TfTrace<'a> {
     /// marker, [`crate::unresolved`]); `None`: not known (math channels, stored transfer
     /// curves).
     pub unresolved: Option<crate::unresolved::Source<'a>>,
+    /// An average's range across positions ([`crate::range_band`]); `None` for every other
+    /// curve.
+    pub range: Option<crate::range_band::Source<'a>>,
 }
 
 /// The legend tag of a compared curve, and the measurement tree's mark of a compared row.
@@ -167,6 +170,15 @@ impl<'a> TfTrace<'a> {
                 .map(|u| crate::unresolved::Source {
                     unresolved: u,
                     fill: crate::unresolved::Fill::Gaps,
+                }),
+            range: frame
+                .meta
+                .math
+                .as_ref()
+                .and_then(|m| m.range)
+                .map(|spread| crate::range_band::Source {
+                    spread,
+                    band: frame.range.as_ref(),
                 }),
         }
     }
@@ -233,6 +245,8 @@ impl<'a> TfTrace<'a> {
                     unresolved: u,
                     fill: crate::unresolved::Fill::Interpolated,
                 }),
+            // Stored captures keep no range (the band is live only).
+            range: None,
         }
     }
 }

@@ -495,6 +495,23 @@ pub fn transfer_scene(
         );
         crate::unresolved::draw(&mut c, plot, &xm, &marks, theme);
         let ym = y_axis.mapping;
+        if kind == TfPaneKind::Magnitude && view.range_band_shown() {
+            for (t, d) in traces.iter().zip(&shown) {
+                if let Some(band) = t.range.and_then(|r| r.band) {
+                    let edges = crate::range_band::edges(band, d.offset_db, &view.tf.coherence);
+                    let cols = visible_columns(&d.freqs, xm.range.lo, xm.range.hi);
+                    crate::range_band::draw(
+                        &mut c,
+                        plot,
+                        (&xm, &ym),
+                        &d.freqs,
+                        &edges,
+                        cols,
+                        theme,
+                    );
+                }
+            }
+        }
         if kind != TfPaneKind::Coherence {
             canvas::hline(&mut c, plot, ym.to_px(0.0), theme.zero_line);
         }
@@ -576,7 +593,18 @@ pub fn transfer_scene(
     let legend: Vec<LegendEntry> = shown
         .iter()
         .zip(&nudges)
-        .map(|(t, (n, s, c))| legend_entry(t, *n, *s, selected == Some(t.key), *c))
+        .zip(traces)
+        .map(|((t, (n, s, c)), src)| {
+            let mut e = legend_entry(t, *n, *s, selected == Some(t.key), *c);
+            if view.range_band
+                && let Some(r) = src.range
+            {
+                let tag = crate::range_band::legend_text(r.spread);
+                e.text = format!("{} · {tag}", e.text);
+                e.tags.push(tag);
+            }
+            e
+        })
         .collect();
     let mut cursor = view
         .cursor_hz

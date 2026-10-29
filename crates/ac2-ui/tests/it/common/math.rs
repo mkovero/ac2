@@ -85,6 +85,7 @@ impl Rig {
         let mut f = tf_frame(9, 0.0, 0.0, 90.0);
         f.coh = vec![f32::NAN; f.coh.len()];
         f.meta.math = Some(Box::new(MathState {
+            range: None,
             operands: [a, b]
                 .map(|operand| OperandState {
                     operand,

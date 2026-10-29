@@ -42,6 +42,21 @@ fn align_curves(a: &mut Arrays<'_>) -> Result<Option<crate::model::AlignCurves>,
     }
 }
 
+/// An average's range band: all three arrays or none.
+fn range_band(a: &mut Arrays<'_>) -> Result<Option<crate::model::RangeBand>, DecodeError> {
+    match [
+        a.opt_f32(ArrayName::RangeLo, Unit::Db)?,
+        a.opt_f32(ArrayName::RangeHi, Unit::Db)?,
+        a.opt_f32(ArrayName::RangeCoh, Unit::Coherence)?,
+    ] {
+        [None, None, None] => Ok(None),
+        [Some(lo), Some(hi), Some(coh)] => Ok(Some(crate::model::RangeBand { lo, hi, coh })),
+        _ => Err(DecodeError::Schema(
+            "tf: a range band's arrays come all three or none".into(),
+        )),
+    }
+}
+
 /// A goniometer frame: `n` is the pairs' points in turn, split back per pair.
 fn gonio(a: &mut Arrays<'_>, meta: super::GonioMeta, n: u32) -> Result<GonioFrame, DecodeError> {
     if meta.pairs.len() * GONIO_POINTS != n as usize {
@@ -279,6 +294,7 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
             coh: a.f32(ArrayName::Coh, Unit::Coherence)?,
             validity: a.mask(ArrayName::Validity)?,
             align: align_curves(&mut a)?,
+            range: range_band(&mut a)?,
         }),
         FrameMeta::Ir(meta) => FrameData::Ir(IrFrame {
             meas,
