@@ -4,7 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::units::{MeasId, TraceId, WalkId};
+use super::MicState;
+use crate::units::{EqSetId, MeasId, TraceId, WalkId, WallNs};
 
 /// A walk through a plan's measurement positions.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -42,7 +43,7 @@ impl WalkState {
         self.points
             .iter()
             .flat_map(|p| match &p.state {
-                PointState::Captured { traces } => traces.as_slice(),
+                PointState::Captured { traces, .. } => traces.as_slice(),
                 PointState::Pending | PointState::Skipped => &[],
             })
             .copied()
@@ -73,7 +74,7 @@ pub struct WalkPoint {
 }
 
 /// What became of a walk's point.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PointState {
     /// Not captured yet.
@@ -82,9 +83,47 @@ pub enum PointState {
     Captured {
         /// The captures.
         traces: Vec<TraceId>,
+        /// What they were taken under: a walk resumed another day, or after a change in
+        /// the chain, averages captures that differ in more than position.
+        context: CaptureContext,
     },
     /// Left out by the operator.
     Skipped,
+}
+
+/// When a point was captured and the facts of the measurement chain then that change a
+/// transfer's result. A transfer is a ratio of two inputs, so the input calibration and the
+/// generator level cancel out of it and are not recorded; the mic's correction curve and an
+/// EQ the operator marked "in the console" do not.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureContext {
+    /// When (daemon clock).
+    pub at: WallNs,
+    /// One per walk measurement, in the walk's measurement order.
+    pub chains: Vec<CaptureChain>,
+}
+
+/// One walk measurement's chain at a capture.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureChain {
+    /// The mic on its measurement input and the curve subtracted from its columns, as the
+    /// capture's trace records it; `None`: the input names no mic.
+    pub mic: Option<MicState>,
+    /// The measurement's EQ sets marked "in the console", by set and the revision marked:
+    /// what of them the capture contains.
+    pub eq_in: Vec<EqMark>,
+}
+
+/// An EQ set as marked "in the console": its revision then names its sections exactly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EqMark {
+    /// The set.
+    pub set: EqSetId,
+    /// Its revision when marked.
+    pub rev: u32,
 }
 
 /// A point as `walk.new` and `walk.update` give it.

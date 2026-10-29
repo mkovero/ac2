@@ -12,6 +12,7 @@ pub(super) fn tick_touches(
     navigating: bool,
     bars_easing: bool,
     spectrum_gliding: bool,
+    walk_bar_easing: bool,
 ) -> Vec<PaneKind> {
     let mut panes = Vec::new();
     // The frequency axis moves while navigation settles.
@@ -25,6 +26,10 @@ pub(super) fn tick_touches(
     // The live spectrum curves glide to their newest frame.
     if spectrum_gliding && !panes.contains(&PaneKind::Spectrum) {
         panes.push(PaneKind::Spectrum);
+    }
+    // A walk's readiness bar glides to its newest frame's fill.
+    if walk_bar_easing {
+        panes.push(PaneKind::Walk);
     }
     panes
 }

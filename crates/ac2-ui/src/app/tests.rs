@@ -107,19 +107,27 @@ fn new_frames_touch_the_panes_that_draw_them() {
 /// Leq bars easing after their once-a-second reading never hold the spectrum glide.
 #[test]
 fn a_tick_moves_every_pane_in_motion() {
-    assert!(tick_touches(false, false, false).is_empty());
+    assert!(tick_touches(false, false, false, false).is_empty());
     assert_eq!(
-        tick_touches(false, true, true),
+        tick_touches(false, true, true, false),
         vec![PaneKind::Spl, PaneKind::Spectrum]
     );
     assert_eq!(
-        tick_touches(true, true, true),
+        tick_touches(true, true, true, true),
         vec![
             PaneKind::Transfer,
             PaneKind::Spectrum,
             PaneKind::Distortion,
-            PaneKind::Spl
+            PaneKind::Spl,
+            PaneKind::Walk
         ]
     );
-    assert_eq!(tick_touches(false, false, true), vec![PaneKind::Spectrum]);
+    assert_eq!(
+        tick_touches(false, false, true, false),
+        vec![PaneKind::Spectrum]
+    );
+    assert_eq!(
+        tick_touches(false, false, false, true),
+        vec![PaneKind::Walk]
+    );
 }

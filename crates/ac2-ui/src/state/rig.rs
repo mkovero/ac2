@@ -45,6 +45,9 @@ pub struct RigState {
     pub spec_glide: HashMap<Topic, SpecGlide>,
     /// Per live spectrum or RTA topic, the capture times and arrivals that pace its glides.
     pub spec_pacing: HashMap<Topic, ac2_scene::curve_ease::Pacing>,
+    /// Per transfer topic, its walk readiness bar's glide to the newest frame's `filled`
+    /// ([`FillGlide`]).
+    pub fill_glide: HashMap<Topic, FillGlide>,
     /// Per running transfer measurement, its headroom advice over time
     /// ([`ac2_scene::advice::Hold`]).
     pub advice: HashMap<MeasId, ac2_scene::advice::Hold>,
@@ -204,6 +207,7 @@ impl RigState {
             bar_from: HashMap::new(),
             spec_glide: HashMap::new(),
             spec_pacing: HashMap::new(),
+            fill_glide: HashMap::new(),
             advice: HashMap::new(),
             traces: BTreeMap::new(),
             tf_display: Default::default(),
@@ -271,6 +275,7 @@ impl RigState {
         self.fold_spl(&d, fold);
         self.keep_bar_from(&d);
         self.keep_spec_glide(&d, fold.spec_ease);
+        self.keep_fill_glide(&d);
         self.fold_advice(&d, fold);
         self.fold_programme(&d, fold);
         self.data = Some(d);

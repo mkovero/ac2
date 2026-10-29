@@ -3,6 +3,7 @@
 //! the measurement is ready there, and how far the average has come; the *Spatial walk…*
 //! window's rows; the setup window's and the plan editor's rows ([`setup`]).
 
+pub mod conditions;
 pub mod plan_view;
 pub mod setup;
 #[cfg(test)]
@@ -11,9 +12,10 @@ mod tests;
 use ac2_proto::model::{PlanSpec, PointState, WalkState};
 
 use crate::canvas::{Canvas, anchor, cut_to, label};
-use crate::primitives::{HAlign, Rect, Scene, VAlign, Viewport};
+use crate::primitives::{FillRect, HAlign, Rect, Scene, VAlign, Viewport};
 use crate::view::Style;
 
+pub use conditions::{Changed, conditions_text};
 pub use plan_view::{
     DotLook, EMPTY_PLAN_M, PlanDot, PlanMap, PlanPicture, SNAP_M, plan_scene, scale_bar, snap,
 };
@@ -53,14 +55,25 @@ impl Ready {
         }
     }
 
-    /// *settling · 60 %*, *arrival: pick one*, *ready*. The percentage rounds down: a
-    /// stage one block short of full never reads 100 %.
+    /// *settling*, *arrival: pick one*, *ready*. How far settling has come is the bar
+    /// beside the word ([`Ready::bar`]), not a number: `filled` counts blocks, so a number
+    /// jumps in the stages' coarse steps.
     pub fn text(self) -> String {
         match self {
             Self::Waiting => "waiting for the measurement".to_owned(),
-            Self::Settling(f) => format!("settling · {:.0} %", (f * 100.0).floor()),
+            Self::Settling(_) => "settling".to_owned(),
             Self::Pick => "arrival: pick one".to_owned(),
             Self::Ready => "ready".to_owned(),
+        }
+    }
+
+    /// The readiness bar's fill (0…1) at the frame's value: full when ready, none while
+    /// there is nothing to fill (no frame, or an arrival to pick).
+    pub fn bar(self) -> Option<f32> {
+        match self {
+            Self::Settling(f) => Some(f.clamp(0.0, 1.0)),
+            Self::Ready => Some(1.0),
+            Self::Waiting | Self::Pick => None,
         }
     }
 }
@@ -170,6 +183,11 @@ pub struct WalkPane<'a> {
     pub average: Option<&'a str>,
     /// Captures in the average taken before ready.
     pub unsettled: usize,
+    /// The readiness bar as drawn now, gliding to [`Ready::bar`] as the level meters'
+    /// bars do (`crate::bar_ease`); `None`: drawn at the frame's value.
+    pub bar_drawn: Option<f32>,
+    /// [`conditions_text`] of the walk: what differs between its captures.
+    pub conditions: String,
 }
 
 /// The walk pane's lines, top to bottom.
@@ -178,6 +196,8 @@ pub struct WalkLines {
     pub step: String,
     pub ready: String,
     pub average: String,
+    /// What differs between the captures; empty when nothing recorded does.
+    pub conditions: String,
 }
 
 impl WalkPane<'_> {
@@ -190,6 +210,7 @@ impl WalkPane<'_> {
                 String::new()
             },
             average: average_text(self.walk, self.average, self.unsettled),
+            conditions: self.conditions.clone(),
         }
     }
 }
@@ -202,7 +223,11 @@ pub struct WalkScene {
     pub lines: WalkLines,
 }
 
-/// Builds the walk pane at `size`: its three lines at the top, the plan under them.
+/// Length of the readiness bar beside its word, px: a meter read at a glance, not a scale.
+const BAR_W: f32 = 160.0;
+
+/// Builds the walk pane at `size`: its lines at the top (the step, readiness with its bar,
+/// the average, what differs between the captures), the plan under them.
 pub fn walk_scene(p: &WalkPane<'_>, style: Style, size: Viewport) -> WalkScene {
     let theme = style.theme;
     let mut c = Canvas::new(size, theme);
@@ -227,6 +252,7 @@ pub fn walk_scene(p: &WalkPane<'_>, style: Style, size: Viewport) -> WalkScene {
         Ready::Pick => theme.banner_warning.background,
         Ready::Waiting | Ready::Settling(_) => theme.text_dim,
     };
+    let ready_w = 0.62 * theme.font_size * lines.ready.chars().count() as f32;
     c.overlay.labels.push(label(
         cut_to(&lines.ready, width, theme.font_size),
         [pad, y],
@@ -234,6 +260,29 @@ pub fn walk_scene(p: &WalkPane<'_>, style: Style, size: Viewport) -> WalkScene {
         theme.font_size,
         ready_colour,
     ));
+    if let Some(fill) = p.ready.bar().filter(|_| !lines.ready.is_empty()) {
+        let fill = p.bar_drawn.unwrap_or(fill).clamp(0.0, 1.0);
+        let x = pad + ready_w + theme.font_size;
+        let w = BAR_W.min(pad + width - x);
+        if w > 4.0 {
+            let h = theme.font_size * 0.6;
+            let top = y + (theme.font_size - h) / 2.0;
+            c.base.rects.push(FillRect {
+                rect: Rect::new(x, top, w, h),
+                color: theme.plot_background,
+                clip: None,
+            });
+            c.data.rects.push(FillRect {
+                rect: Rect::new(x, top, w * fill, h),
+                color: if matches!(p.ready, Ready::Ready) {
+                    theme.level_ok
+                } else {
+                    theme.text_dim
+                },
+                clip: None,
+            });
+        }
+    }
     y += theme.font_size * 1.5;
     c.overlay.labels.push(label(
         cut_to(&lines.average, width, theme.font_size),
@@ -247,6 +296,16 @@ pub fn walk_scene(p: &WalkPane<'_>, style: Style, size: Viewport) -> WalkScene {
         },
     ));
     y += theme.font_size * 1.6;
+    if !lines.conditions.is_empty() {
+        c.overlay.labels.push(label(
+            cut_to(&lines.conditions, width, theme.font_size),
+            [pad, y],
+            anchor(HAlign::Left, VAlign::Top),
+            theme.font_size,
+            theme.banner_warning.background,
+        ));
+        y += theme.font_size * 1.6;
+    }
     let rect = Rect::new(pad, y, width, (size.height - y - pad).max(1.0));
     let map = match p.plan {
         Some(plan) => {

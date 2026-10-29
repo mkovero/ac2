@@ -62,6 +62,8 @@ pub use panes::drag::{DragMsg, DropTarget, EDGE_SHARE, RowDrag, drop_target};
 mod advice;
 mod glide;
 pub use glide::SpecGlide;
+mod walk_bar;
+pub use walk_bar::FillGlide;
 mod leq;
 pub use leq::{LeqPanes, LeqUi};
 mod cross_rig;

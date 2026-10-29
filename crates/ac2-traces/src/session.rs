@@ -59,7 +59,7 @@ use ac2_proto::spl_log::{self, SplLogInfo};
 /// `format` of every manifest.
 pub const FORMAT: &str = "ac2-session";
 /// The one manifest version this build reads and writes.
-pub const VERSION: u32 = 37;
+pub const VERSION: u32 = 38;
 /// Manifest file name.
 pub const MANIFEST: &str = "session.json";
 /// The autosave's previous manifest, beside [`MANIFEST`].

@@ -31,7 +31,7 @@ pub fn age_s(at: WallNs, client_now: WallNs, offset: ClockOffset) -> f64 {
     (ns.max(0) as f64) / 1e9
 }
 
-const MONTHS: [&str; 12] = [
+pub(crate) const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 

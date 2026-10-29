@@ -239,7 +239,7 @@ fn scene_for(
             plates = s.plates();
             (s.scene, Axes::default())
         }
-        PaneKind::Walk => (scenes::walk(st, id, theme, vp)?.scene, Axes::default()),
+        PaneKind::Walk => (scenes::walk(st, id, theme, vp, now)?.scene, Axes::default()),
     };
     let scene = Arc::new(scene);
     app.scenes.insert(

@@ -1505,8 +1505,13 @@ it chosen, **Esc** goes back without it.
 The **walk pane** shows the plan with every point (pending, captured filled, skipped dimmed),
 the mic's point ringed, the next one faint, and above it, large enough to read across the
 room, where the mic goes: *Move mic to P3 · 2.1 m left, 4.0 m back from FOH*. Under it whether
-the measurement is ready (*settling · 60 %*, *arrival: pick one*, *ready*) and the average
-(*NO AVERAGE · 1 OF 8 POSITIONS*, then *Mains · average · 8 positions · 2 unsettled*). Its keys:
+the measurement is ready (*settling* with a bar that fills as the averages do and glides like
+the Leq bars, *arrival: pick one*, *ready* with the bar full) and the average (*NO AVERAGE · 1
+OF 8 POSITIONS*, then *Mains · average · 8 positions · 2 unsettled*). When the captures were
+not all taken under the same conditions — a walk resumed from a saved session another day, or
+another mic, mic curve or EQ marked in the console between captures — a warning line under the
+average says so, e.g. *P1–P4 yesterday, P5–P8 today · EQ changed*. It only warns: capture and
+the average go on as before. Its keys:
 
 | Key | |
 |---|---|

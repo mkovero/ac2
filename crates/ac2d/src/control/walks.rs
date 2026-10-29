@@ -10,10 +10,11 @@ use std::path::Path;
 
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{
-    MathConfig, MathDomain, MathExpr, MathReference, MeasConfig, MeasKind, MeasScope, Operand,
-    PlanSpec, PointState, TraceOwner, TracePosition, WalkKind, WalkPoint, WalkPointSpec, WalkState,
+    CaptureChain, CaptureContext, EqMark, MathConfig, MathDomain, MathExpr, MathReference,
+    MeasConfig, MeasKind, MeasScope, Operand, PlanSpec, PointState, TraceOwner, TracePosition,
+    WalkKind, WalkPoint, WalkPointSpec, WalkState,
 };
-use ac2_proto::units::{MeasId, Seconds, TraceId, WalkId};
+use ac2_proto::units::{MeasId, Seconds, TraceId, WalkId, WallNs};
 use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
 
 use super::Control;
@@ -269,6 +270,8 @@ impl Control {
         }
         let plan = w.plan.clone();
         let mut traces: Vec<TraceId> = Vec::with_capacity(w.meas.len());
+        let mut chains: Vec<CaptureChain> = Vec::with_capacity(w.meas.len());
+        let mut at_ns: Option<WallNs> = None;
         for &meas in &w.meas {
             let name = self.capture_name(&p.label, meas);
             let position = TracePosition {
@@ -278,7 +281,23 @@ impl Control {
                 walk,
             };
             match self.trace_capture(meas, name, None, Some(position)) {
-                Ok(ReplyBody::Trace(t)) => traces.push(t.id),
+                Ok(ReplyBody::Trace(t)) => {
+                    traces.push(t.id);
+                    // The context is what the traces record, so the warning and the
+                    // traces' own metadata never disagree.
+                    at_ns.get_or_insert(t.created_at);
+                    chains.push(CaptureChain {
+                        mic: t.mic.clone(),
+                        eq_in: t
+                            .eq_in
+                            .iter()
+                            .map(|e| EqMark {
+                                set: e.set,
+                                rev: e.rev,
+                            })
+                            .collect(),
+                    });
+                }
                 Ok(_) => {
                     self.drop_captures(&traces);
                     return Err(perr(ErrorCode::Internal, "a capture answered no trace"));
@@ -292,7 +311,11 @@ impl Control {
         }
         let i = usize::from(at);
         w.points[i].mic = w.meas.first().copied();
-        w.points[i].state = PointState::Captured { traces };
+        let context = CaptureContext {
+            at: at_ns.unwrap_or(WallNs(crate::util::wall_ns())),
+            chains,
+        };
+        w.points[i].state = PointState::Captured { traces, context };
         w.current = next_pending(&w.points, Some(at));
         self.commit(Change::Walk(Patch::Set(w.clone())));
         let w = self.walk_average(walk)?;
@@ -313,7 +336,7 @@ impl Control {
         };
         point_of(&w, at)?;
         let i = usize::from(at);
-        if let PointState::Captured { traces } = &w.points[i].state {
+        if let PointState::Captured { traces, .. } = &w.points[i].state {
             self.supersede(traces);
         }
         w.points[i].state = PointState::Skipped;
@@ -332,7 +355,7 @@ impl Control {
         let mut w = self.walk(walk)?.clone();
         point_of(&w, point)?;
         let i = usize::from(point);
-        if let PointState::Captured { traces } = &w.points[i].state {
+        if let PointState::Captured { traces, .. } = &w.points[i].state {
             self.supersede(traces);
         }
         w.points[i].state = PointState::Pending;
@@ -604,7 +627,7 @@ impl Control {
         for mut w in walks {
             self.next_walk = self.next_walk.max(w.id.0.saturating_add(1));
             for p in &mut w.points {
-                if let PointState::Captured { traces: t } = &p.state
+                if let PointState::Captured { traces: t, .. } = &p.state
                     && !t.iter().all(|t| traces.contains(t))
                 {
                     tracing::warn!(

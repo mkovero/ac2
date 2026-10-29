@@ -51,6 +51,10 @@ fn mains() -> WalkState {
                 4.0,
                 PointState::Captured {
                     traces: vec![TraceId(5)],
+                    context: ac2_proto::model::CaptureContext {
+                        at: ac2_proto::units::WallNs(0),
+                        chains: vec![],
+                    },
                 },
             ),
             point("P2", 8.0, PointState::Pending),

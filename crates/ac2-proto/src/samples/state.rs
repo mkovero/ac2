@@ -562,6 +562,19 @@ pub fn walk() -> WalkState {
                 mic: Some(MeasId(1)),
                 state: PointState::Captured {
                     traces: vec![TraceId(7)],
+                    context: CaptureContext {
+                        at: WallNs(1_761_400_000_000_000_000),
+                        chains: vec![CaptureChain {
+                            mic: Some(MicState {
+                                name: "Vilppu".into(),
+                                curve: None,
+                            }),
+                            eq_in: vec![EqMark {
+                                set: EqSetId(2),
+                                rev: 3,
+                            }],
+                        }],
+                    },
                 },
             },
             WalkPoint {

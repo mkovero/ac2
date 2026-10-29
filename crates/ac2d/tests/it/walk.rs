@@ -198,7 +198,7 @@ fn filled(f: &Frame) -> f32 {
 
 fn captured(w: &WalkState, i: usize) -> Vec<TraceId> {
     match &w.points[i].state {
-        PointState::Captured { traces } => traces.clone(),
+        PointState::Captured { traces, .. } => traces.clone(),
         other => panic!("{other:?}"),
     }
 }
@@ -259,6 +259,14 @@ fn captures_carry_positions_and_a_delay_step_restarts_filled() {
         })
     );
     assert!(!t1.superseded);
+    // The point records what its trace records of the chain, and when.
+    let PointState::Captured { context, .. } = &w.points[0].state else {
+        panic!("{w:?}");
+    };
+    assert_eq!(context.at, t1.created_at);
+    assert_eq!(context.chains.len(), 1);
+    assert_eq!(context.chains[0].mic, t1.mic);
+    assert_eq!(context.chains[0].eq_in.len(), t1.eq_in.len());
     assert_eq!(w.points[0].mic, Some(MeasId(1)));
     assert_eq!(w.average, None, "one capture is no average");
 

@@ -324,7 +324,7 @@ fn walk_text(w: &WalkState, s: &State) -> String {
         let state = match &p.state {
             PointState::Pending => "pending".to_owned(),
             PointState::Skipped => "skipped".to_owned(),
-            PointState::Captured { traces } => {
+            PointState::Captured { traces, .. } => {
                 let unsettled = traces
                     .iter()
                     .any(|t| s.traces.iter().any(|x| x.id == *t && x.captured_unsettled));

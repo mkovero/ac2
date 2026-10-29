@@ -589,6 +589,7 @@ impl App {
         let animating = self.state.animating();
         let easing = self.state.bars_easing(Instant::now());
         let gliding = self.state.spectrum_gliding(Instant::now());
+        let filling = self.state.walk_bar_easing(Instant::now());
         let glowing = self.state.embers_glowing();
         // The rig the message is from: its data and mirror say which panes change.
         let from = match &msg {
@@ -611,6 +612,7 @@ impl App {
                     animating || self.state.animating(),
                     easing || self.state.bars_easing(now),
                     gliding || self.state.spectrum_gliding(now),
+                    filling || self.state.walk_bar_easing(now),
                 );
                 // The embers cool between gonio frames.
                 if glowing || self.state.embers_glowing() {

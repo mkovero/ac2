@@ -5,9 +5,10 @@ use super::*;
 use ac2_proto::Change;
 use ac2_proto::event::Patch;
 use ac2_proto::model::{
-    Marker, MarkerKind, PlanSpec, PointState, WalkKind, WalkPoint, WalkState, ZoneSpec,
+    CaptureChain, CaptureContext, EqMark, Marker, MarkerKind, PlanSpec, PointState, WalkKind,
+    WalkPoint, WalkState, ZoneSpec,
 };
-use ac2_proto::units::{TraceId, WalkId};
+use ac2_proto::units::{EqSetId, TraceId, WalkId, WallNs};
 
 fn hall() -> PlanSpec {
     PlanSpec {
@@ -45,9 +46,37 @@ fn hall() -> PlanSpec {
     }
 }
 
-/// Mains on Main L (meas 1): P1 captured, the mic at P2, P3 and P4 pending.
+const DAY_NS: u64 = 86_400_000_000_000;
+
+/// The wall clock now: the pane reads the capture days against it.
+fn wall_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as u64)
+}
+
+/// A capture at `at` with EQ set 1 marked in the console at revision `rev`.
+fn captured(trace: u32, at: u64, rev: u32) -> PointState {
+    PointState::Captured {
+        traces: vec![TraceId(trace)],
+        context: CaptureContext {
+            at: WallNs(at),
+            chains: vec![CaptureChain {
+                mic: None,
+                eq_in: vec![EqMark {
+                    set: EqSetId(1),
+                    rev,
+                }],
+            }],
+        },
+    }
+}
+
+/// Mains on Main L (meas 1): P1 captured yesterday, the mic at P2, P3 pending, P4 captured
+/// today after the EQ changed.
 fn walk_rig() -> common::Rig {
     let rig = common::Rig::start();
+    let now = wall_now();
     {
         let mut s = rig.fake.lock();
         let point = |label: &str, x: f64, y: f64, state| WalkPoint {
@@ -65,17 +94,10 @@ fn walk_rig() -> common::Rig {
             kind: WalkKind::LiveTransfer,
             meas: vec![MeasId(1)],
             points: vec![
-                point(
-                    "P1",
-                    4.0,
-                    9.0,
-                    PointState::Captured {
-                        traces: vec![TraceId(900)],
-                    },
-                ),
+                point("P1", 4.0, 9.0, captured(900, now - DAY_NS, 1)),
                 point("P2", 12.0, 7.0, PointState::Pending),
                 point("P3", 16.0, 4.0, PointState::Pending),
-                point("P4", 7.0, 4.5, PointState::Pending),
+                point("P4", 7.0, 4.5, captured(901, now, 2)),
             ],
             current: Some(1),
             average: None,
@@ -94,6 +116,10 @@ fn walk_texts(h: &Harness<'_, App>) -> Vec<String> {
             width: 900.0,
             height: 600.0,
         },
+        ac2_ui::scenes::Now {
+            instant: std::time::Instant::now(),
+            wall: WallNs(wall_now()),
+        },
     )
     .expect("a walk scene");
     s.scene
@@ -104,7 +130,8 @@ fn walk_texts(h: &Harness<'_, App>) -> Vec<String> {
 }
 
 /// Shift+W, then the walk's row: its pane opens beside the others with the step read from
-/// FOH, whether the measurement is ready, and the average still to come.
+/// FOH, whether the measurement is ready, the average still to come, and the warning that
+/// the captures were taken on two days with the EQ changed between them.
 #[test]
 fn walk_pane_on_its_plan() {
     if !have_gpu("walk_pane_on_its_plan") {
@@ -132,7 +159,13 @@ fn walk_pane_on_its_plan() {
         "{texts:?}"
     );
     assert!(
-        texts.iter().any(|t| t == "NO AVERAGE · 1 OF 4 POSITIONS"),
+        texts.iter().any(|t| t == "NO AVERAGE · 2 OF 4 POSITIONS"),
+        "{texts:?}"
+    );
+    assert!(
+        texts
+            .iter()
+            .any(|t| t == "P1 yesterday, P4 today · EQ changed"),
         "{texts:?}"
     );
     snapshot(&mut h, "walk_pane");

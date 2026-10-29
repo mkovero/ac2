@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 74`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 75`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -1204,8 +1204,8 @@ one `<name>.json` per plan in its data directory (`plans/`), mirrored as `State.
   holds in another case. `plan.delete` is `not_found` for a name the library lacks; the
   session's copies stay.
 - `walk.new` starts a walk (`WalkState`: `id`, `name`, `plan`, `kind`, `meas`, `points`
-  [{`label`, `at`, `mic: MeasId | nil`, `state` {`type`: pending \| captured {traces} \|
-  skipped}}], `current: u16 | nil`, `average: MeasId | nil`) through 1 … 64 points (unique
+  [{`label`, `at`, `mic: MeasId | nil`, `state` {`type`: pending \| captured {traces,
+  context} \| skipped}}], `current: u16 | nil`, `average: MeasId | nil`) through 1 … 64 points (unique
   non-empty labels, finite, `z` ≥ 0). The plan is the session's copy when it holds one, else
   the library's, copied into `State.walk_plans` (so a library edit mid-walk changes
   nothing). `meas` are session transfer measurements no other walk names; this version
@@ -1219,7 +1219,13 @@ one `<name>.json` per plan in its data directory (`plans/`), mirrored as `State.
   ready: `filled` < 1, a fault refusing its blocks, a delay change after the averages
   restarted (an older config rev) or an arrival awaiting the operator's pick. It goes to
   the next pending point after the current one (wrapping round), `current` nil when none
-  is left. `refused` at a captured point (redo it), `invalid` when `current` is nil.
+  is left. `refused` at a captured point (redo it), `invalid` when `current` is nil. The
+  point's `context` (`CaptureContext`) records `at` (the first trace's `created_at`) and,
+  per walk measurement in `meas` order, a `CaptureChain` {`mic: MicState | nil`, `eq_in:
+  [EqMark {set, rev}]`}: the same facts the traces record (`mic`, `eq_in`), so a client can
+  say when a walk's captures were taken on different days or under another mic, mic curve or
+  EQ. Calibration and generator level are not recorded: a transfer is a ratio of two
+  inputs, and both cancel out of it.
 - `walk.skip` marks the current point skipped (a captured one's traces become
   `superseded`); `walk.redo` makes a point pending again (its traces `superseded`) and goes
   there. `walk.update` renames the walk and edits its points by label: a kept point keeps

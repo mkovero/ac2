@@ -152,7 +152,7 @@ WalkState { id, name, plan: PlanName, kind: WalkKind (live_transfer | sweep),
             meas: Vec<MeasId>, points: Vec<WalkPoint>, current: Option<u16>,
             average: Option<MeasId> }
 WalkPoint { label: "P3", at: [f64; 3], mic: Option<MeasId>, state: PointState }
-PointState: pending | captured { traces: Vec<TraceId> } | skipped
+PointState: pending | captured { traces: Vec<TraceId>, context: CaptureContext } | skipped
 ```
 
 **A walk is a pane, not a window.** It shows the plan, the current point highlighted with its
@@ -184,6 +184,12 @@ finder holds two near-equal arrivals (`awaiting_pick`, decision 1c), which waits
 pick. Capture is allowed earlier (the operator decides); the trace then records
 `captured_unsettled`.
 
+**The settling bar** (operator 2026-10-29). `filled` counts blocks, so a percentage jumps in the
+stages' coarse steps and flickers. The pane shows the word (*settling*, *ready*) and a short bar
+beside it that glides between frames exactly as the Leq bars do (`ac2_scene::bar_ease`, the same
+*Leq bars* setting turns it off): app-side display easing of a wire fact, no new DSP. No standard
+governs the indicator; it is a plain meter.
+
 **Capture.** Live transfer: the capture key (below) sends `walk.capture`; the daemon captures
 every walk measurement of the step in one step (one `trace.capture` per measurement, milliseconds
 apart, each a settled average, which is harmless for a spatial average) and advances. Sweep: the
@@ -203,6 +209,16 @@ reads *NO AVERAGE* until there are two again. A new average still needs two oper
 walk pane shows *NO AVERAGE · 1 OF 8 POSITIONS* from walk state. `MAX_AVERAGE` rises from 16 to
 64 (positions × mics: ISO 3382-1 alone asks for 10 positions in a 2000-seat hall; the cost is one
 pass per column per operand).
+
+**Captures that differ** (operator 2026-10-29). A walk resumed from a saved session another day,
+or after the chain changed, averages captures that differ in more than position. Each captured
+point records a `CaptureContext`: when (the first trace's `created_at`) and, per walk
+measurement, the mic and its correction curve and the EQ marked "in the console" (`EqMark` set +
+rev), the same facts the traces record. Calibration and generator level are not recorded: a
+transfer is a ratio of two inputs and both cancel out of it; ac2 knows no input gain. The pane
+then shows a warning line, never a refusal: the captured points grouped by local day, oldest
+first, then each recorded fact that differs (*P1–P4 yesterday, P5–P8 today · EQ changed*;
+*captures differ · mic curve changed* on one day). Only recorded facts are named.
 
 Traces captured before ready count in the average and the legend says so (*8 positions · 2
 unsettled*), as it counts left-out ones. Captures are named by point and mic name (*P3 · Vilppu*),

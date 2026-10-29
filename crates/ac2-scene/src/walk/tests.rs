@@ -1,7 +1,8 @@
 use ac2_proto::model::{
-    Marker, MarkerKind, PlanSpec, PointState, WalkKind, WalkPoint, WalkState, ZoneSpec,
+    CaptureChain, CaptureContext, EqMark, Marker, MarkerKind, MicCurveRef, MicState, PlanSpec,
+    PointState, WalkKind, WalkPoint, WalkState, ZoneSpec,
 };
-use ac2_proto::units::{MeasId, TraceId, WalkId};
+use ac2_proto::units::{EqSetId, Hz, MeasId, TraceId, WalkId, WallNs};
 use ac2_room::pattern::{Broken, PresetKind, Relaxed};
 
 use super::setup::*;
@@ -68,10 +69,51 @@ fn pending(n: usize) -> Vec<PointState> {
     vec![PointState::Pending; n]
 }
 
-fn captured(t: u32) -> PointState {
+/// 2026-10-29 12:00 UTC, the daemon's clock.
+const NOON: u64 = 1_793_275_200_000_000_000;
+const DAY: u64 = 86_400_000_000_000;
+
+fn chain(mic: Option<(&str, Option<&str>)>, eq: &[(u32, u32)]) -> CaptureChain {
+    CaptureChain {
+        mic: mic.map(|(name, hash)| MicState {
+            name: name.into(),
+            curve: hash.map(|h| MicCurveRef {
+                label: "0°".into(),
+                file_name: "mic.txt".into(),
+                content_hash: h.into(),
+                points: 100,
+                f_lo: Hz(20.0),
+                f_hi: Hz(20_000.0),
+                imported_at: WallNs(0),
+                stated_sensitivity: None,
+            }),
+        }),
+        eq_in: eq
+            .iter()
+            .map(|&(set, rev)| EqMark {
+                set: EqSetId(set),
+                rev,
+            })
+            .collect(),
+    }
+}
+
+fn captured_at(t: u32, at: u64, c: CaptureChain) -> PointState {
     PointState::Captured {
         traces: vec![TraceId(t)],
+        context: CaptureContext {
+            at: WallNs(at),
+            chains: vec![c],
+        },
     }
+}
+
+fn captured(t: u32) -> PointState {
+    captured_at(t, NOON, chain(Some(("Vilppu", Some("aa"))), &[]))
+}
+
+fn utc(_: WallNs) -> i32 {
+    0
 }
 
 #[test]
@@ -97,10 +139,14 @@ fn the_step_reads_from_foh_facing_the_stage() {
 
 #[test]
 fn ready_states_read_as_the_note_says() {
-    assert_eq!(Ready::of(Some(0.6), false).text(), "settling · 60 %");
-    // One block short of full is not 100 %.
-    assert_eq!(Ready::of(Some(0.999), false).text(), "settling · 99 %");
+    assert_eq!(Ready::of(Some(0.6), false).text(), "settling");
+    assert_eq!(Ready::of(Some(0.6), false).bar(), Some(0.6));
+    // One block short of full is not ready.
+    assert_eq!(Ready::of(Some(0.999), false).text(), "settling");
     assert_eq!(Ready::of(Some(1.0), false).text(), "ready");
+    assert_eq!(Ready::of(Some(1.0), false).bar(), Some(1.0));
+    assert_eq!(Ready::of(Some(0.2), true).bar(), None);
+    assert_eq!(Ready::of(None, false).bar(), None);
     // A pick waits for the operator, full or not.
     assert_eq!(Ready::of(Some(1.0), true).text(), "arrival: pick one");
     assert_eq!(Ready::of(Some(0.2), true), Ready::Pick);
@@ -167,6 +213,8 @@ fn the_walk_pane_draws_its_lines_and_the_plan() {
         ready: Ready::Settling(0.6),
         average: None,
         unsettled: 0,
+        bar_drawn: Some(0.5),
+        conditions: "P1 yesterday, P2 today · EQ changed".into(),
     };
     let s = walk_scene(
         &p,
@@ -187,8 +235,9 @@ fn the_walk_pane_draws_its_lines_and_the_plan() {
         .collect();
     for want in [
         "Move mic to P3 · 2.1 m left, 4.0 m back from FOH",
-        "settling · 60 %",
+        "settling",
         "NO AVERAGE · 1 OF 8 POSITIONS",
+        "P1 yesterday, P2 today · EQ changed",
         "Stalls",
         "FOH",
         "P1",
@@ -200,6 +249,19 @@ fn the_walk_pane_draws_its_lines_and_the_plan() {
         texts.iter().any(|t| t.ends_with(" m")),
         "a scale bar: {texts:?}"
     );
+    // The readiness bar: its track, and its fill at the drawn (gliding) value, not the
+    // frame's.
+    let bars: Vec<&crate::primitives::FillRect> = s.scene.layers[1].rects.iter().collect();
+    let track = s.scene.layers[0]
+        .rects
+        .iter()
+        .find(|r| r.color == theme.plot_background && r.rect.w == BAR_W)
+        .expect("a bar track");
+    let fill = bars
+        .iter()
+        .find(|r| r.rect.y == track.rect.y)
+        .expect("a bar fill");
+    assert!((fill.rect.w - 0.5 * BAR_W).abs() < 1e-3, "{fill:?}");
     // The floor and the zone are filled polygons.
     let polys: usize = s.scene.layers.iter().map(|l| l.polygons.len()).sum();
     assert!(polys >= 2);
@@ -434,4 +496,125 @@ fn the_plan_view_of_an_empty_plan_has_a_scale() {
     let o = map.to_px([0.0, 0.0]);
     let far = map.to_px([EMPTY_PLAN_M, EMPTY_PLAN_M]);
     assert!(o[0] < far[0] && o[1] > far[1]);
+}
+
+#[test]
+fn captures_of_one_day_and_chain_say_nothing() {
+    let mut states = pending(8);
+    states[0] = captured(1);
+    states[1] = captured(2);
+    let w = walk(&states, Some(2));
+    assert_eq!(conditions_text(&w, WallNs(NOON), utc), "");
+    // Nothing captured: nothing to compare.
+    assert_eq!(
+        conditions_text(&walk(&pending(3), Some(0)), WallNs(NOON), utc),
+        ""
+    );
+}
+
+#[test]
+fn a_resumed_walk_groups_its_points_by_day() {
+    let mic = || chain(Some(("Vilppu", Some("aa"))), &[(1, 4)]);
+    let mut states: Vec<PointState> = (0..8).map(|i| captured_at(i, NOON - DAY, mic())).collect();
+    for (i, s) in states.iter_mut().enumerate().skip(4) {
+        *s = captured_at(
+            i as u32,
+            NOON,
+            chain(Some(("Vilppu", Some("aa"))), &[(1, 5)]),
+        );
+    }
+    let w = walk(&states, None);
+    assert_eq!(
+        conditions_text(&w, WallNs(NOON), utc),
+        "P1–P4 yesterday, P5–P8 today · EQ changed"
+    );
+    // Older days read as dates, oldest first; a skipped point carries the run on, and a
+    // day's runs split by another day's are listed together.
+    let mut states = vec![
+        captured_at(1, NOON - 3 * DAY, mic()),
+        PointState::Skipped,
+        captured_at(3, NOON - 3 * DAY, mic()),
+        captured_at(4, NOON, mic()),
+        captured_at(5, NOON - 3 * DAY, mic()),
+        PointState::Pending,
+    ];
+    assert_eq!(
+        conditions_text(&walk(&states, Some(5)), WallNs(NOON), utc),
+        "P1–P3 + P5 26 Oct, P4 today"
+    );
+    // Another year names it.
+    states[0] = captured_at(1, NOON - 365 * DAY, mic());
+    assert!(
+        conditions_text(&walk(&states, Some(5)), WallNs(NOON), utc).starts_with("P1 29 Oct 2025, "),
+    );
+}
+
+#[test]
+fn the_day_is_the_local_one() {
+    // 23:30 UTC and 00:30 UTC the next day: one day three hours east of UTC, two at UTC.
+    let late = NOON + 11 * 3_600_000_000_000 + 1_800_000_000_000;
+    let early = late + 3_600_000_000_000;
+    let m = || chain(None, &[]);
+    let w = walk(
+        &[captured_at(1, late, m()), captured_at(2, early, m())],
+        None,
+    );
+    assert_eq!(conditions_text(&w, WallNs(early), |_| 3 * 3600), "");
+    assert_eq!(
+        conditions_text(&w, WallNs(early), utc),
+        "P1 yesterday, P2 today"
+    );
+}
+
+#[test]
+fn each_recorded_change_is_named_once() {
+    let w = |a: CaptureChain, b: CaptureChain, c: CaptureChain| {
+        walk(
+            &[
+                captured_at(1, NOON, a),
+                captured_at(2, NOON, b),
+                captured_at(3, NOON, c),
+            ],
+            None,
+        )
+    };
+    let v = |h: Option<&'static str>| Some(("Vilppu", h));
+    // Same day: the line says what it is about.
+    assert_eq!(
+        conditions_text(
+            &w(
+                chain(v(Some("aa")), &[]),
+                chain(v(Some("bb")), &[]),
+                chain(v(None), &[])
+            ),
+            WallNs(NOON),
+            utc
+        ),
+        "captures differ · mic curve changed"
+    );
+    assert_eq!(
+        conditions_text(
+            &w(
+                chain(v(Some("aa")), &[(1, 1)]),
+                chain(Some(("Behringer", Some("aa"))), &[(1, 1)]),
+                chain(None, &[(1, 2)]),
+            ),
+            WallNs(NOON),
+            utc
+        ),
+        "captures differ · mic changed · EQ changed"
+    );
+    // The order of the marks is no change; a re-import of the same curve file is none.
+    assert_eq!(
+        conditions_text(
+            &w(
+                chain(v(Some("aa")), &[(1, 1), (2, 3)]),
+                chain(v(Some("aa")), &[(2, 3), (1, 1)]),
+                chain(v(Some("aa")), &[(1, 1), (2, 3)]),
+            ),
+            WallNs(NOON),
+            utc
+        ),
+        ""
+    );
 }

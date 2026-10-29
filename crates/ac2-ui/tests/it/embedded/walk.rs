@@ -33,6 +33,10 @@ fn walk_texts(s: &AppState) -> Vec<String> {
             width: 900.0,
             height: 600.0,
         },
+        ac2_ui::scenes::Now {
+            instant: std::time::Instant::now(),
+            wall: ac2_proto::units::WallNs(1_793_275_200_000_000_000),
+        },
     )
     .map(|w| scene_texts(&w.scene))
     .unwrap_or_default()
