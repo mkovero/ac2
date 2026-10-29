@@ -222,8 +222,8 @@ pub(crate) fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
 /// outputs and rate, and the ceiling, are checked at every run).
 fn validate_sweep(c: &SweepConfig) -> Result<(), ProtoError> {
     let inv = |m: String| Err(perr(ErrorCode::Invalid, m));
-    if c.reference_input == c.measurement_input {
-        return inv("the reference and the measurement are the same input".into());
+    if let Err(e) = c.check_inputs() {
+        return inv(e.to_string());
     }
     if c.outputs.is_empty() {
         return inv("no output channels".into());

@@ -81,7 +81,8 @@ pub fn print_room(out: &mut Out<'_>, data: &TraceData, set: BandSet) -> Result<(
 /// A sweep's settings as typed (`meas new sweep`, `ir capture`).
 pub struct SweepFlags {
     pub reference: u16,
-    pub mic: u16,
+    /// Measurement inputs, each recorded into its own trace.
+    pub mics: Vec<u16>,
     pub outputs: Vec<u16>,
     pub level: Dbfs,
     pub from: Hz,
@@ -105,14 +106,11 @@ pub fn sweep_config(f: &SweepFlags) -> Result<SweepConfig, CliError> {
     if f.outputs.is_empty() {
         return Err(CliError::Usage("--out needs at least one channel".into()));
     }
-    if f.reference == f.mic {
-        return Err(CliError::Usage(
-            "the reference and the mic are the same input: the mic is the measurement".into(),
-        ));
-    }
+    ac2_proto::model::check_sweep_inputs(f.reference, &f.mics)
+        .map_err(|e| CliError::Usage(e.to_string()))?;
     Ok(SweepConfig {
         reference_input: f.reference,
-        measurement_input: f.mic,
+        measurement_inputs: f.mics.clone(),
         outputs: f.outputs.clone(),
         level: f.level,
         sweep: EssSpec::with_fades(f.from, f.to, f.duration),
@@ -124,12 +122,15 @@ pub fn sweep_config(f: &SweepFlags) -> Result<SweepConfig, CliError> {
     })
 }
 
-/// The settings `ir capture` runs with; `inputs` (reference, mic) are the typed ones or
+/// The settings `ir capture` runs with; `inputs` (reference, mics) are the typed ones or
 /// those of the `--meas` transfer measurement, resolved by the caller.
-pub fn request(a: &IrCaptureArgs, (reference, mic): (u16, u16)) -> Result<SweepConfig, CliError> {
+pub fn request(
+    a: &IrCaptureArgs,
+    (reference, mics): (u16, Vec<u16>),
+) -> Result<SweepConfig, CliError> {
     sweep_config(&SweepFlags {
         reference,
-        mic,
+        mics,
         outputs: a.outputs.0.clone(),
         level: a.level.0,
         from: a.from.0,
@@ -156,7 +157,7 @@ fn describe(r: &SweepConfig) -> String {
         r.repeats,
         ac2_scene::format::dbfs(r.level.0),
         channels_text(&r.outputs),
-        r.measurement_input + 1,
+        channels_text(&r.measurement_inputs),
         r.reference_input + 1,
         ac2_scene::format::resolution(r.resolution)
     )
@@ -217,9 +218,11 @@ fn check_runnable(st: &State, config: &SweepConfig) -> Result<(), CliError> {
 async fn capture(cli: &Cli, a: &IrCaptureArgs, out: &mut Out<'_>) -> Result<(), CliError> {
     let c = connect(cli, true).await?;
     let st = state(&c).await?;
-    let inputs = match (&a.meas, a.reference, a.mic) {
+    let inputs = match (&a.meas, a.reference, &a.mic) {
         (Some(m), _, _) => match &find_meas(&st, m)?.config.kind {
-            MeasKind::Transfer { config } => (config.reference_input, config.measurement_input),
+            MeasKind::Transfer { config } => {
+                (config.reference_input, vec![config.measurement_input])
+            }
             _ => {
                 return Err(CliError::Usage(format!(
                     "{} is not a transfer measurement",
@@ -227,7 +230,7 @@ async fn capture(cli: &Cli, a: &IrCaptureArgs, out: &mut Out<'_>) -> Result<(), 
                 )));
             }
         },
-        (None, Some(r), Some(m)) => (r.0, m.0),
+        (None, Some(r), Some(m)) => (r.0, m.0.clone()),
         _ => return Err(CliError::Usage("give --ref and --mic, or --meas".into())),
     };
     let config = request(a, inputs)?;
@@ -266,7 +269,8 @@ pub(crate) async fn sweep(cli: &Cli, cmd: &SweepCmd, out: &mut Out<'_>) -> Resul
 enum End {
     /// Quit before Enter: nothing played.
     Cancelled,
-    Stored(TraceId),
+    /// One trace per measurement input.
+    Stored(Vec<TraceId>),
 }
 
 async fn foreground(
@@ -384,7 +388,7 @@ async fn foreground(
                         "ANALYSING",
                         json!({ "run": id }),
                     ),
-                    SweepStatus::Done { trace } => break Ok(End::Stored(trace)),
+                    SweepStatus::Done { traces } => break Ok(End::Stored(traces)),
                     SweepStatus::Failed { reason, msg } => {
                         say(
                             out,
@@ -401,7 +405,7 @@ async fn foreground(
     };
     let end = lease.end().await;
     drop(term);
-    let trace = match outcome? {
+    let traces = match outcome? {
         End::Cancelled => {
             say(
                 out,
@@ -415,11 +419,13 @@ async fn foreground(
         End::Stored(t) => t,
     };
     end.map_err(CliError::from)?;
-    let data = c.call(Command::TraceGet { trace }).await?;
-    let data = expect_body!("trace.get", data, ReplyBody::TraceData(d) => d)?;
-    let grid = c.grid(data.meta.grid_id).await?;
-    let freqs = grid.centres();
-    print_summary(out, &data, &freqs);
+    for trace in traces {
+        let data = c.call(Command::TraceGet { trace }).await?;
+        let data = expect_body!("trace.get", data, ReplyBody::TraceData(d) => d)?;
+        let grid = c.grid(data.meta.grid_id).await?;
+        let freqs = grid.centres();
+        print_summary(out, &data, &freqs);
+    }
     Ok(())
 }
 
@@ -579,7 +585,7 @@ mod tests {
     fn args() -> IrCaptureArgs {
         IrCaptureArgs {
             reference: Some(Channel(1)),
-            mic: Some(Channel(0)),
+            mic: Some(Channels(vec![0])),
             meas: None,
             outputs: Channels(vec![0, 1]),
             level: LevelDbfs(Dbfs(-50.0)),
@@ -598,8 +604,11 @@ mod tests {
 
     #[test]
     fn the_request_carries_the_typed_values() {
-        let r = request(&args(), (1, 0)).expect("request");
-        assert_eq!((r.reference_input, r.measurement_input), (1, 0));
+        let r = request(&args(), (1, vec![0])).expect("request");
+        assert_eq!(
+            (r.reference_input, r.measurement_inputs.clone()),
+            (1, vec![0])
+        );
         assert_eq!(r.level, Dbfs(-50.0));
         assert_eq!(r.outputs, vec![0, 1]);
         assert_eq!(
@@ -612,7 +621,7 @@ mod tests {
         );
         let mut a = args();
         a.lf_harmonics = LfHarmonicsArg::Fine;
-        let r = request(&a, (1, 0)).expect("request");
+        let r = request(&a, (1, vec![0])).expect("request");
         assert_eq!(r.lf_harmonics, LfHarmonics::Fine);
         assert_eq!(
             describe(&r),
@@ -621,8 +630,13 @@ mod tests {
         );
         let mut a = args();
         a.from = Freq(Hz(30_000.0));
-        assert!(request(&a, (1, 0)).is_err());
-        assert!(request(&args(), (1, 1)).is_err());
+        assert!(request(&a, (1, vec![0])).is_err());
+        assert!(request(&args(), (1, vec![1])).is_err());
+        let r = request(&args(), (1, vec![0, 2])).expect("two mics");
+        assert_eq!(r.measurement_inputs, vec![0, 2]);
+        assert!(describe(&r).contains("in 1,3 re in 2"));
+        assert!(request(&args(), (1, vec![0, 1])).is_err());
+        assert!(request(&args(), (1, vec![])).is_err());
     }
 
     #[test]
@@ -715,14 +729,14 @@ mod tests {
         // The rig: out 1 → in 1 loopback, out 1 → in 2 through the distorting "speaker".
         let mut a = args();
         a.reference = Some(Channel(0));
-        a.mic = Some(Channel(1));
+        a.mic = Some(Channels(vec![1]));
         a.outputs = Channels(vec![0]);
         a.level = LevelDbfs(Dbfs(-20.0));
         a.from = Freq(Hz(100.0));
         a.to = Freq(Hz(5000.0));
         a.duration = Time(Seconds(1.0));
         a.name = Some("rig sweep".into());
-        let req = request(&a, (0, 1))?;
+        let req = request(&a, (0, vec![1]))?;
         let st = c.snapshot().await?.state;
         let meas = sweep_meas_for(&c, &st, &req).await?;
         assert_eq!(meas.config.name, "Sweep 1");
@@ -820,7 +834,7 @@ mod tests {
         // room parameters by name, as a table and as JSON.
         let mut a = args();
         a.reference = Some(Channel(0));
-        a.mic = Some(Channel(2));
+        a.mic = Some(Channels(vec![2]));
         a.outputs = Channels(vec![0]);
         a.level = LevelDbfs(Dbfs(-20.0));
         a.from = Freq(Hz(100.0));
@@ -828,7 +842,7 @@ mod tests {
         a.duration = Time(Seconds(1.0));
         a.tail = Some(Time(Seconds(2.0)));
         a.name = Some("hall".into());
-        let req = request(&a, (0, 2))?;
+        let req = request(&a, (0, vec![2]))?;
         assert_eq!(req.tail, Some(Seconds(2.0)));
         let st = c.snapshot().await?.state;
         let hall = sweep_meas_for(&c, &st, &req).await?;

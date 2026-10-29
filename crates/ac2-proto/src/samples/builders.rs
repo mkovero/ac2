@@ -160,7 +160,7 @@ pub(super) fn edit() -> TraceEdit {
 pub(super) fn sweep_config() -> SweepConfig {
     SweepConfig {
         reference_input: 1,
-        measurement_input: 0,
+        measurement_inputs: vec![0, 2],
         outputs: vec![0, 1],
         level: Dbfs(-50.0),
         sweep: sweep(),

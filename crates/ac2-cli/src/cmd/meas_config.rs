@@ -106,6 +106,12 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
         ))),
         None => Ok(()),
     };
+    let meas_inputs = || {
+        n.measurement
+            .as_ref()
+            .map(|c| c.0.clone())
+            .ok_or_else(|| CliError::Usage(format!("{:?} needs --meas", n.kind)))
+    };
     let sweep_only = [
         ("out", n.outputs.is_some()),
         (
@@ -184,7 +190,7 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
             MeasKind::Sweep {
                 config: super::ir::sweep_config(&super::ir::SweepFlags {
                     reference: need(n.reference, "ref")?,
-                    mic: need(n.measurement, "meas")?,
+                    mics: meas_inputs()?,
                     outputs: n
                         .outputs
                         .as_ref()
@@ -227,7 +233,14 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
             MeasKind::Transfer {
                 config: TransferConfig {
                     reference_input: need(n.reference, "ref")?,
-                    measurement_input: need(n.measurement, "meas")?,
+                    measurement_input: match meas_inputs()?.as_slice() {
+                        [one] => *one,
+                        _ => {
+                            return Err(CliError::Usage(
+                                "a tf measurement reads one --meas input".into(),
+                            ));
+                        }
+                    },
                     averaging: TfAveraging::Fifo { blocks: n.blocks },
                     resolution,
                     smoothing: n
@@ -255,7 +268,12 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
         }
         k => {
             refuse(n.reference, "ref")?;
-            refuse(n.measurement, "meas")?;
+            if n.measurement.is_some() {
+                return Err(CliError::Usage(format!(
+                    "--meas does not apply to {:?}",
+                    n.kind
+                )));
+            }
             let input = need(n.input, "input")?;
             if n.smooth_magnitude_only {
                 return Err(CliError::Usage(format!(

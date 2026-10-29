@@ -105,7 +105,10 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
     assert_eq!(c.name, "Sweep 1");
     assert_eq!(sc.level, Dbfs(-50.0));
     assert_eq!(sc.outputs, vec![0]);
-    assert_eq!((sc.reference_input, sc.measurement_input), (0, 1));
+    assert_eq!(
+        (sc.reference_input, sc.measurement_inputs.clone()),
+        (0, vec![1])
+    );
     assert_eq!(sc.repeats, 1);
     assert!(
         !r.iter().any(|x| matches!(x, Request::StimArm { .. })),
@@ -182,7 +185,9 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
     // Stored: the pane appears with it, focused. Nothing is armed again: the lease is given
     // back quietly and sweep mode ends; Shift+S sets up the next one.
     s.traces = vec![sweep_meta(7)];
-    s.sweep = Some(sweep_run(SweepStatus::Done { trace: TraceId(7) }));
+    s.sweep = Some(sweep_run(SweepStatus::Done {
+        traces: vec![TraceId(7)],
+    }));
     let r = t.conn(mirror(s));
     assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
     assert!(t.shown(PaneKind::Distortion));
@@ -330,9 +335,13 @@ fn the_sweep_dialog_offers_fine_lf_harmonics() {
         (&["standard".to_owned(), "fine".to_owned()][..], 0)
     );
     let pos = |f: &crate::forms::Form, id| f.fields.iter().position(|x| x.id == id).expect("field");
-    let (level, lf) = (pos(f, FieldId::Level), pos(f, FieldId::LfHarmonics));
-    // The reference has the focus: → picks the first input.
+    // The reference has the focus: → picks the first input (the measurement rows follow:
+    // an input taken as the reference is not offered as a further mic).
     t.key("Right");
+    let Overlay::Form(f) = &t.st.overlay else {
+        panic!("no dialog: {:?}", t.st.overlay);
+    };
+    let (level, lf) = (pos(f, FieldId::Level), pos(f, FieldId::LfHarmonics));
     for _ in 0..level {
         t.key("Down");
     }
@@ -519,7 +528,9 @@ fn sweep_stored_as(t: &mut T, id: u32) -> SweepConfig {
     ))));
     let mut s = sweep_state();
     s.traces = (7..=id).map(sweep_meta).collect();
-    s.sweep = Some(sweep_run(SweepStatus::Done { trace: TraceId(id) }));
+    s.sweep = Some(sweep_run(SweepStatus::Done {
+        traces: vec![TraceId(id)],
+    }));
     t.conn(mirror(s));
     t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
     assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
@@ -613,7 +624,9 @@ fn space_on_the_sweep_view_re_sweeps_with_the_same_parameters() {
     ))));
     let mut s = sweep_state();
     s.traces = vec![sweep_meta(7), sweep_meta(8)];
-    s.sweep = Some(sweep_run(SweepStatus::Done { trace: TraceId(8) }));
+    s.sweep = Some(sweep_run(SweepStatus::Done {
+        traces: vec![TraceId(8)],
+    }));
     let r = t.conn(mirror(s));
     assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
     assert_eq!(t.st.rig.selected_trace, Some(TraceId(8)));

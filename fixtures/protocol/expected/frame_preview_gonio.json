@@ -1,7 +1,7 @@
 {
  "topic": "preview/gonio",
  "header": {
-  "v": 75,
+  "v": 76,
   "kind": "preview_gonio",
   "seq": 1234,
   "audio_sample": 172800000,

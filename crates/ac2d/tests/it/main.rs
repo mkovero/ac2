@@ -36,6 +36,7 @@ mod server;
 mod sessions;
 mod stimulus;
 mod sweep;
+mod sweep_inputs;
 mod sync;
 mod traces;
 mod transfer;

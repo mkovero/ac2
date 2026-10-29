@@ -112,7 +112,9 @@ impl Shared {
                 "arm the stimulus first (gen.set armed)",
             ));
         }
-        let (reference, measurement) = (req.reference_input, req.measurement_input);
+        req.check_inputs()
+            .map_err(|e| err(ErrorCode::Invalid, e.to_string()))?;
+        let reference = req.reference_input;
         let (f1, f2) = (req.sweep.start.0, req.sweep.end.0);
         let ppo = req.resolution.ppo();
         let k = |f: f64| (f / 1000.0).log2() * f64::from(ppo);
@@ -130,7 +132,7 @@ impl Shared {
             owner: client.clone(),
             name: name.clone(),
             reference_input: reference,
-            measurement_input: measurement,
+            measurement_inputs: req.measurement_inputs.clone(),
             outputs: req.outputs.clone(),
             level,
             sweep: req.sweep,
@@ -145,34 +147,43 @@ impl Shared {
         };
         let started = run.clone();
         self.commit(Change::Sweep(run.clone()));
-        let (columns, sweep) = synthetic_sweep(&grid, f2, rate, req.repeats);
-        let tid = self.alloc_trace();
-        let mut meta = Self::new_meta(
-            tid,
-            name,
-            None,
-            TraceKind::Sweep,
-            TraceSource::Sweep {
-                meas,
-                meas_name: m.config.name.clone(),
-                run: id,
-                number,
-                epoch: self.state.session.epoch,
-                sweep: req.sweep,
-                level,
-                repeats: req.repeats,
-                lf_harmonics: req.lf_harmonics,
-                reference_input: reference,
-                measurement_input: measurement,
-            },
-            &grid,
-            sweep.info.arrival,
-        );
-        meta.mic = None;
-        meta.edit.owner = TraceOwner::Meas { meas };
-        self.add_trace(meta, grid, columns);
-        self.traces.sweeps.insert(tid, sweep);
-        run.status = SweepStatus::Done { trace: tid };
+        let several = req.measurement_inputs.len() > 1;
+        let mut traces = Vec::new();
+        for &measurement in &req.measurement_inputs {
+            let (columns, sweep) = synthetic_sweep(&grid, f2, rate, req.repeats);
+            let tid = self.alloc_trace();
+            let mut meta = Self::new_meta(
+                tid,
+                if several {
+                    format!("{name} · Input {}", measurement + 1)
+                } else {
+                    name.clone()
+                },
+                None,
+                TraceKind::Sweep,
+                TraceSource::Sweep {
+                    meas,
+                    meas_name: m.config.name.clone(),
+                    run: id,
+                    number,
+                    epoch: self.state.session.epoch,
+                    sweep: req.sweep,
+                    level,
+                    repeats: req.repeats,
+                    lf_harmonics: req.lf_harmonics,
+                    reference_input: reference,
+                    measurement_input: measurement,
+                },
+                &grid,
+                sweep.info.arrival,
+            );
+            meta.mic = None;
+            meta.edit.owner = TraceOwner::Meas { meas };
+            self.add_trace(meta, grid.clone(), columns);
+            self.traces.sweeps.insert(tid, sweep);
+            traces.push(tid);
+        }
+        run.status = SweepStatus::Done { traces };
         self.commit(Change::Sweep(run));
         // As the daemon: a sweep is one shot, the generator ends disarmed.
         self.state.generator.armed = false;

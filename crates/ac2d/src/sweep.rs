@@ -23,11 +23,12 @@ use crate::util::perr;
 /// seconds. A longer latency cuts the last sweep's silence and the analysis says so.
 pub(crate) const LEAD_S: f64 = 1.0;
 
-/// Both inputs of one run, sample-aligned.
+/// Every input of one run, sample-aligned: the reference and each measurement input, in the
+/// run's order.
 #[derive(Debug)]
 pub(crate) struct Recording {
     pub(crate) reference: Vec<f32>,
-    pub(crate) measurement: Vec<f32>,
+    pub(crate) measurements: Vec<Vec<f32>>,
 }
 
 /// The analysis setup of a request at `fs`.
@@ -219,13 +220,19 @@ pub(crate) fn room(a: &SweepAnalysis) -> RoomAcoustics {
     }
 }
 
-/// Runs the analysis of `rec`.
+/// Runs the analysis of each measurement input of `rec` against the shared reference, in
+/// the recording's order.
 pub(crate) fn analyse(
     spec: &SweepSpec,
     rec: &Recording,
     repeats: u8,
-) -> Result<SweepAnalysis, SweepError> {
+) -> Vec<Result<SweepAnalysis, SweepError>> {
     let r: Vec<f64> = rec.reference.iter().map(|v| f64::from(*v)).collect();
-    let m: Vec<f64> = rec.measurement.iter().map(|v| f64::from(*v)).collect();
-    ac2_core::sweep::analyse_recording(spec, &r, &m, usize::from(repeats))
+    rec.measurements
+        .iter()
+        .map(|m| {
+            let m: Vec<f64> = m.iter().map(|v| f64::from(*v)).collect();
+            ac2_core::sweep::analyse_recording(spec, &r, &m, usize::from(repeats))
+        })
+        .collect()
 }

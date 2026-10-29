@@ -189,6 +189,15 @@ pub fn meas_row(item: &MeasItem<'_>, selected: Option<MeasId>, active: bool) -> 
     }
 }
 
+/// What a finished sweep run stored, as its toast says it: `Run 3 stored`, or with several
+/// measurement inputs `Run 3 of Sweep 1 stored (2 traces, one per mic)`.
+pub fn sweep_stored(run: &str, traces: usize) -> String {
+    match traces {
+        0 | 1 => format!("{run} stored"),
+        n => format!("{run} stored ({n} traces, one per mic)"),
+    }
+}
+
 /// A sweep measurement's state: `playing 1/2`, `analysing`, `2 runs`, `no runs yet`.
 fn sweep_state(m: &Measurement, runs: usize, sweep: Option<&SweepRun>) -> String {
     match sweep.filter(|r| r.meas == m.id && r.active()) {
@@ -575,12 +584,15 @@ pub fn tree_rows(input: &TreeInput<'_>) -> Vec<TreeRow> {
         let header = match header_item {
             Some(item) => {
                 let m = item.meas;
+                // A run of several mics stores a trace per mic: count the runs.
                 let runs = owned
                     .iter()
-                    .filter(
-                        |t| matches!(&t.source, TraceSource::Sweep { meas, .. } if *meas == m.id),
-                    )
-                    .count();
+                    .filter_map(|t| match &t.source {
+                        TraceSource::Sweep { meas, number, .. } if *meas == m.id => Some(*number),
+                        _ => None,
+                    })
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len();
                 let mut detail = match &m.config.kind {
                     MeasKind::Sweep { .. } => sweep_state(m, runs, input.sweep),
                     _ => meas_row(item, input.selected, !input.keys_on_trace)

@@ -338,9 +338,10 @@ pub struct MeasNew {
     /// Reference input (tf, sweep).
     #[arg(long = "ref")]
     pub reference: Option<Channel>,
-    /// Measurement input (tf, sweep).
-    #[arg(long = "meas")]
-    pub measurement: Option<Channel>,
+    /// Measurement input (tf); a sweep's measurement inputs, e.g. `1,3` (each its own
+    /// trace).
+    #[arg(long = "meas", value_name = "INS")]
+    pub measurement: Option<Channels>,
     /// Sweep: outputs playing it, the speaker's and the loopback's, e.g. `1,2`.
     #[arg(long = "out", value_name = "OUTS")]
     pub outputs: Option<Channels>,

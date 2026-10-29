@@ -254,7 +254,7 @@ pub(crate) fn with_kind(id: u32, name: &str, kind: MeasKind, running: bool) -> M
 pub(crate) fn sweep_config() -> SweepConfig {
     SweepConfig {
         reference_input: 0,
-        measurement_input: 1,
+        measurement_inputs: vec![1],
         outputs: vec![0],
         level: Dbfs(-50.0),
         sweep: EssSpec::with_fades(Hz(20.0), Hz(20_000.0), Seconds(3.0)),
@@ -612,7 +612,7 @@ fn hidden_curves_read_hidden_and_a_sweep_says_it_plays() {
         owner: ClientId("ui".into()),
         name: "Run 3".into(),
         reference_input: 0,
-        measurement_input: 1,
+        measurement_inputs: vec![1],
         outputs: vec![0],
         level: Dbfs(-50.0),
         sweep: EssSpec::with_fades(Hz(20.0), Hz(20_000.0), Seconds(3.0)),
@@ -782,4 +782,39 @@ fn rows_of(r: &Rig, osc: &ac2_proto::model::Rig) -> Vec<TreeRow> {
         compared: Vec::new(),
         rig: Some(osc),
     })
+}
+
+/// A run of several mics stores a trace per mic: the measurement counts runs, not traces,
+/// and the toast says how many traces the run stored.
+#[test]
+fn a_run_of_two_mics_counts_once() {
+    let mut r = rig();
+    let mut far = run(2);
+    if let TraceSource::Sweep {
+        measurement_input, ..
+    } = &mut far
+    {
+        *measurement_input = 2;
+    }
+    r.traces.push(trace(
+        6,
+        "Run 2 · MM1 right",
+        TraceOwner::Meas { meas: MeasId(2) },
+        far,
+    ));
+    let none = BTreeSet::new();
+    let t = rows(&r, &none, None, None);
+    let header = t
+        .iter()
+        .find(|x| x.name == "SWEEP  Genelec 1 m")
+        .expect("sweep header");
+    assert_eq!(header.details[0], "2 runs");
+    assert_eq!(
+        sweep_stored("Run 2 of Genelec 1 m", 1),
+        "Run 2 of Genelec 1 m stored"
+    );
+    assert_eq!(
+        sweep_stored("Run 2 of Genelec 1 m", 2),
+        "Run 2 of Genelec 1 m stored (2 traces, one per mic)"
+    );
 }

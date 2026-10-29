@@ -246,6 +246,20 @@ impl Control {
 
     // -- backends, preview, loopback detection ----------------------------------------------
 
+    /// The open input device's channel names as its backend reports them (empty when it
+    /// reports none).
+    pub(super) fn input_channel_names(&self, rt: &Runtime) -> Vec<String> {
+        self.backend_for(Some(rt.open.backend))
+            .ok()
+            .and_then(|b| b.enumerate().ok())
+            .and_then(|devs| {
+                devs.into_iter()
+                    .find(|d| d.id.0 == rt.open.input_device.0)
+                    .and_then(|d| d.input.and_then(|i| i.channel_names))
+            })
+            .unwrap_or_default()
+    }
+
     /// The backend `kind` names; `None` = the default one.
     pub(super) fn backend_for(
         &self,

@@ -150,7 +150,7 @@ pub fn meas_kind(k: &MeasKind) -> String {
         }
         MeasKind::Sweep { config } => format!(
             "sweep in {} re in {}, {} – {}, {} s × {} at {} on out {}",
-            config.measurement_input + 1,
+            ac2_scene::unit_text::channels_text(&config.measurement_inputs),
             config.reference_input + 1,
             format::freq_readout(config.sweep.start.0),
             format::freq_readout(config.sweep.end.0),

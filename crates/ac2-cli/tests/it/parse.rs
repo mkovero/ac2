@@ -178,7 +178,7 @@ fn plan_examples_parse() {
     };
     assert_eq!(n.kind, MeasKindArg::Tf);
     assert_eq!(n.reference, Some(Channel(0)));
-    assert_eq!(n.measurement, Some(Channel(1)));
+    assert_eq!(n.measurement, Some(Channels(vec![1])));
 
     let c = ok(&["delay", "find", "main-l", "--insert"]);
     assert!(matches!(

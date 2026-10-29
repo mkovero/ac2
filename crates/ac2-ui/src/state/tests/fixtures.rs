@@ -120,7 +120,7 @@ pub(super) fn sweep_run(status: SweepStatus) -> SweepRun {
         owner: ClientId("c1".into()),
         name: "Run 1".into(),
         reference_input: 0,
-        measurement_input: 1,
+        measurement_inputs: vec![1],
         outputs: vec![0],
         level: Dbfs(-50.0),
         sweep: EssSpec::with_fades(Hz(20.0), Hz(20_000.0), Seconds(3.0)),

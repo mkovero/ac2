@@ -89,9 +89,10 @@ pub struct IrCaptureArgs {
         requires = "mic"
     )]
     pub reference: Option<Channel>,
-    /// Measurement (mic) input, e.g. `1`.
-    #[arg(long, value_name = "IN", requires = "reference")]
-    pub mic: Option<Channel>,
+    /// Measurement (mic) inputs, e.g. `1` or `1,3`: one play records each into its own
+    /// trace.
+    #[arg(long, value_name = "INS", requires = "reference")]
+    pub mic: Option<Channels>,
     /// Take both inputs from this transfer measurement instead.
     #[arg(long, value_name = "MEAS")]
     pub meas: Option<MeasRef>,

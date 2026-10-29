@@ -399,7 +399,10 @@ impl Form {
             resolution_field(Resolution::default()),
             Field::text(FieldId::Name, "Name", format!("Sweep {}", sweeps + 1), ""),
         ];
-        Self::new(FormKind::Sweep, fields)
+        let mut f = Self::new(FormKind::Sweep, fields);
+        let first: Vec<u16> = f.channel(FieldId::Measurement).into_iter().collect();
+        f.set_sweep_inputs(&first);
+        f
     }
 
     /// The dialog editing sweep measurement `m`: its settings as the fields. The name stays
@@ -413,7 +416,14 @@ impl Form {
         let MeasKind::Sweep { config: c } = &m.config.kind else {
             return Err(format!("{} is not a sweep measurement", m.config.name));
         };
-        let mut f = Self::sweep(open, 0, inputs, outputs, &[], Some(c.level));
+        // Inputs the session no longer captures stay listed, as for a transfer's.
+        let mut inputs = inputs.to_vec();
+        for &i in std::iter::once(&c.reference_input).chain(&c.measurement_inputs) {
+            if !inputs.iter().any(|(x, _)| *x == i) {
+                inputs.push((i, format!("In {} (not captured)", i + 1)));
+            }
+        }
+        let mut f = Self::sweep(open, 0, &inputs, outputs, &[], Some(c.level));
         f.kind = FormKind::SweepEdit;
         f.sweep_edit = Some(m.id);
         let nearest = |v: f64, opts: &[f64]| {
@@ -440,14 +450,6 @@ impl Form {
                     },
                 ) => {
                     *index = channels.iter().position(|x| *x == c.reference_input);
-                }
-                (
-                    FieldId::Measurement,
-                    Value::Channel {
-                        channels, index, ..
-                    },
-                ) => {
-                    *index = channels.iter().position(|x| *x == c.measurement_input);
                 }
                 (
                     FieldId::Output,
@@ -488,6 +490,7 @@ impl Form {
                 _ => {}
             }
         }
+        f.set_sweep_inputs(&c.measurement_inputs);
         Ok(f)
     }
 
@@ -518,13 +521,25 @@ impl Form {
             );
         }
         let reference = input(FieldId::Reference, "reference input")?;
-        let measurement = input(FieldId::Measurement, "measurement input")?;
-        if reference == measurement {
-            return Err(
-                "the reference and the measurement are the same input: pick the mic as the \
-                 measurement"
-                    .into(),
-            );
+        input(FieldId::Measurement, "measurement input")?;
+        let measurement = self.sweep_inputs();
+        for &m in &measurement {
+            if !captured.contains(&m) {
+                return Err(format!(
+                    "measurement input {} is not captured by the audio I/O",
+                    m + 1
+                ));
+            }
+        }
+        if let Err(e) = ac2_proto::model::check_sweep_inputs(reference, &measurement) {
+            return Err(match e {
+                ac2_proto::model::SweepInputsError::IsReference(_) => {
+                    "the reference and a measurement are the same input: pick the mic as the \
+                     measurement"
+                        .into()
+                }
+                e => e.to_string(),
+            });
         }
         let level = self.text(FieldId::Level).trim();
         if level.is_empty() {
@@ -579,7 +594,7 @@ impl Form {
             kind: MeasKind::Sweep {
                 config: SweepConfig {
                     reference_input: reference,
-                    measurement_input: measurement,
+                    measurement_inputs: measurement,
                     outputs,
                     level: Dbfs(level),
                     sweep: EssSpec::with_fades(Hz(from), Hz(to), Seconds(duration)),

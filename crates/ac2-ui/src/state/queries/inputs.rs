@@ -47,10 +47,13 @@ impl AppState {
             .and_then(|s| s.sweep.as_ref())
             .filter(|r| r.active());
         let uses: Vec<(u16, InputUse)> = match (run, self.selected_meas()) {
-            (Some(r), _) => vec![
-                (r.reference_input, InputUse::Reference),
-                (r.measurement_input, InputUse::Measurement),
-            ],
+            (Some(r), _) => std::iter::once((r.reference_input, InputUse::Reference))
+                .chain(
+                    r.measurement_inputs
+                        .iter()
+                        .map(|&i| (i, InputUse::Measurement)),
+                )
+                .collect(),
             (None, Some(m)) => match &m.config.kind {
                 MeasKind::Transfer { config } => vec![
                     (config.reference_input, InputUse::Reference),
@@ -59,10 +62,16 @@ impl AppState {
                 MeasKind::Spectrum { config } => vec![(config.input, InputUse::Measurement)],
                 MeasKind::Rta { config } => vec![(config.input, InputUse::Measurement)],
                 MeasKind::Spl { config } => vec![(config.input, InputUse::Measurement)],
-                MeasKind::Sweep { config } => vec![
-                    (config.reference_input, InputUse::Reference),
-                    (config.measurement_input, InputUse::Measurement),
-                ],
+                MeasKind::Sweep { config } => {
+                    std::iter::once((config.reference_input, InputUse::Reference))
+                        .chain(
+                            config
+                                .measurement_inputs
+                                .iter()
+                                .map(|&i| (i, InputUse::Measurement)),
+                        )
+                        .collect()
+                }
                 // Every live operand's inputs.
                 MeasKind::Math { config } => ms
                     .iter()

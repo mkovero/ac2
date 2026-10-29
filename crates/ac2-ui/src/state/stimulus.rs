@@ -482,8 +482,13 @@ impl AppState {
             SweepStatus::Analysing => {
                 self.toast("sweep recorded: analysing");
             }
-            SweepStatus::Done { trace } => {
+            SweepStatus::Done { traces } => {
                 self.rig.sweep.run = None;
+                // The first input's trace is shown; the others are listed beside it.
+                let Some(&trace) = traces.first() else {
+                    self.release_after_sweep(out);
+                    return;
+                };
                 // The new result is selected under its measurement: listed highlighted,
                 // named in the captions, and what the trace keys change.
                 self.rig.selected = Some(r.meas);
@@ -499,6 +504,8 @@ impl AppState {
                 let of = self
                     .meas(r.meas)
                     .map_or_else(String::new, |m| format!(" of {}", m.config.name));
+                let stored =
+                    ac2_scene::meas_list::sweep_stored(&format!("{}{of}", r.name), traces.len());
                 // A sweep pane on screen shows the result; the layout is otherwise the
                 // operator's, and the toast says where the result is.
                 match self.lead(PaneKind::Distortion) {
@@ -510,13 +517,11 @@ impl AppState {
                             .map_or_else(String::new, |k| format!("{k} impulse response, "));
                         let again = Chord::key(eframe::egui::Key::Space).label();
                         self.toast(format!(
-                            "{}{of} stored: {ir}{again} runs it again; dB / % in Settings › Display",
-                            r.name
+                            "{stored}: {ir}{again} runs it again; dB / % in Settings › Display"
                         ));
                     }
                     None => self.toast(format!(
-                        "{}{of} stored: {} to see it in the focused pane",
-                        r.name,
+                        "{stored}: {} to see it in the focused pane",
                         self.to_it()
                     )),
                 }

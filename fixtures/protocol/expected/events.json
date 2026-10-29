@@ -1040,7 +1040,10 @@
    "owner": "alice",
    "name": "1083 sweep",
    "reference_input": 1,
-   "measurement_input": 0,
+   "measurement_inputs": [
+    0,
+    2
+   ],
    "outputs": [
     0,
     1
@@ -1061,7 +1064,10 @@
    "resolution": "forty_eighth",
    "status": {
     "type": "done",
-    "trace": 9
+    "traces": [
+     9,
+     10
+    ]
    },
    "started_at": 1790000000000000000
   }
@@ -1080,7 +1086,10 @@
       "type": "sweep",
       "config": {
        "reference_input": 1,
-       "measurement_input": 0,
+       "measurement_inputs": [
+        0,
+        2
+       ],
        "outputs": [
         0,
         1

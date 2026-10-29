@@ -18,6 +18,7 @@ use ac2_proto::units::{Dbfs, Hz, MeasId, Seconds};
 
 mod build;
 mod options;
+mod sweep_inputs;
 
 use options::*;
 
@@ -195,6 +196,9 @@ pub enum FieldId {
     Metered,
     /// A Programme pane's input row `n` (zero-based) when it meters inputs.
     Bar(u8),
+    /// A sweep's measurement input `n` (one-based) after the first, [`FieldId::Measurement`]:
+    /// one play records every one into its own trace.
+    MoreMeasurement(u8),
     /// The rig's programme-meter settings ([`ac2_proto::model::LevelsSettings`]).
     Ballistic,
     LoudnessTarget,
@@ -299,6 +303,7 @@ impl Field {
             } => options.get(*i).cloned().unwrap_or_default(),
             Value::Channel { index: None, .. } => match self.id {
                 FieldId::Bar(n) if n > 0 => ac2_scene::programme::form::NO_BAR.to_owned(),
+                FieldId::MoreMeasurement(_) => sweep_inputs::NONE.to_owned(),
                 _ => format!("choose the {}", self.label.to_lowercase()),
             },
         }
@@ -470,7 +475,7 @@ impl Form {
     /// ←/→ on the focused choice or channel: the next or previous option, stopping at the
     /// ends. An unchosen channel takes the first option on →, the last on ←.
     pub fn cycle(&mut self, d: i32) {
-        if crate::meter_dialog::cycle(self, d) {
+        if crate::meter_dialog::cycle(self, d) || self.cycle_sweep_input(d) {
             return;
         }
         let Some(f) = self.fields.get_mut(self.focus) else {
@@ -501,6 +506,7 @@ impl Form {
         if self.math.is_some() {
             self.math_changed();
         }
+        self.reference_moved();
         crate::ir_import_dialog::rehint(self, self.focus);
         if let Some((i, r)) = self
             .choice_index(FieldId::FftSize)

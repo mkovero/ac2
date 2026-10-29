@@ -150,10 +150,11 @@ pub(crate) enum ControlMsg {
         id: SweepId,
         result: Box<Result<Recording, String>>,
     },
-    /// The analysis of sweep `id` finished.
+    /// The analysis of sweep `id` finished: one result per measurement input, in the run's
+    /// order.
     SweepAnalysed {
         id: SweepId,
-        result: Box<Result<SweepAnalysis, SweepError>>,
+        result: Vec<Result<SweepAnalysis, SweepError>>,
     },
     /// The autosave write finished: the time it was written, or why it failed.
     Autosaved { result: Box<Result<WallNs, String>> },
@@ -314,8 +315,16 @@ struct ActiveSweep {
     /// The recorder; gone once the recording is in.
     job: Option<JobHandle>,
     epoch: SessionEpoch,
-    /// The measurement input's mic, without a curve: the sweep analysis works on the raw
-    /// recordings, so no curve is in its columns.
+    /// One per measurement input, in the run's order.
+    inputs: Vec<SweepInput>,
+}
+
+/// A measurement input of the sweep in progress, as its trace will carry it.
+struct SweepInput {
+    /// The trace's name: the run's, with the input's name when the run has several.
+    name: String,
+    /// The input's mic, without a curve: the sweep analysis works on the raw recordings, so
+    /// no curve is in its columns.
     mic: Option<MicState>,
     /// The input's active mic curve, put on the trace after capture (as the live jobs on
     /// the input apply it), so the sweep reads what a live transfer of the input reads.
@@ -710,7 +719,7 @@ impl Control {
                 }) => self.tracked(meas, epoch, samples),
                 Ok(ControlMsg::SweepProgress { id, repeat }) => self.sweep_progress(id, repeat),
                 Ok(ControlMsg::SweepRecorded { id, result }) => self.sweep_recorded(id, *result),
-                Ok(ControlMsg::SweepAnalysed { id, result }) => self.sweep_analysed(id, *result),
+                Ok(ControlMsg::SweepAnalysed { id, result }) => self.sweep_analysed(id, result),
                 Ok(ControlMsg::Autosaved { result }) => self.autosaved(*result),
                 Ok(ControlMsg::LogWrite { meas, log, failure }) => {
                     self.log_write(meas, log, failure);

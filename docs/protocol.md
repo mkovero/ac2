@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 75`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 76`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -608,14 +608,16 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
     `refused`; `trace.mic_curve` on it restarts the channel with the corrected columns.
     `meas.reset` of a math channel is `invalid` (reset its operands).
 
-- **Sweep measurement** (`sweep`, `SweepConfig`: `reference_input`, `measurement_input`,
-  `outputs` ([u16], the speaker's and the loopback's), `level: Dbfs` (typed, no default),
+- **Sweep measurement** (`sweep`, `SweepConfig`: `reference_input`, `measurement_inputs`
+  ([u16], 1…16 mics recorded by the same play, each its own trace; none twice, none the
+  reference), `outputs` ([u16], the speaker's and the loopback's), `level: Dbfs` (typed, no default),
   `sweep: EssSpec`, `repeats` (1…8), `gate: Seconds | nil`, `tail: Seconds | nil`,
   `lf_harmonics: LfHarmonics`, `resolution: Resolution`; §3.2 *Sweep runs*). Settings
   only: it publishes no stream, `running` stays false, and `meas.start` / `meas.stop` /
   `meas.reset` of it are `invalid`. `sweep.run` plays it (below); each run is
   a stored `sweep` trace it owns. `meas.update` changes the settings for the next run.
-  `invalid` at create / update: equal inputs, outputs empty or repeated, repeats outside
+  `invalid` at create / update: no measurement input or more than 16, one listed twice or
+  equal to the reference, outputs empty or repeated, repeats outside
   1…8, a non-finite or positive level, a gate ≤ 0, a tail above 20 s, sweep parameters the
   generator refuses at the session's rate (checked again at every run, as are the
   session's inputs and outputs and the ceiling).
@@ -1265,19 +1267,25 @@ analysed band; responses are reported from `start`. `name` nil names the trace `
   sweep measurement, inputs not captured, outputs not in the session, sweep parameters the
   generator refuses at the session's rate.
 - The daemon routes the generator to `outputs`, plays `repeats` synchronised sweeps each
-  followed by its silence (`post_roll`, ≥ 1 s and ≥ `tail`), records both inputs, analyses on a job thread
-  and stores a trace of `kind: sweep` owned by the measurement (source `sweep` {`meas`,
+  followed by its silence (`post_roll`, ≥ 1 s and ≥ `tail`), records the reference and every
+  measurement input, analyses each against the reference on a job thread and stores one trace
+  of `kind: sweep` per measurement input, owned by the measurement (source `sweep` {`meas`,
   `meas_name`, `run`, `number` — one more than the highest run number of the measurement's
   stored runs —, `epoch`, `sweep`, `level`, `repeats`, `lf_harmonics`, `reference_input`,
-  `measurement_input`}, `delay` = the arrival). While it plays
+  `measurement_input` — the trace's own input}, `delay` = its arrival). The traces are named
+  the run's `name`; with several inputs each adds ` · ` and its input's name (the mic name,
+  else the device's channel name, else `Input N`). Each trace carries its own input's mic and
+  active mic curve (`mic`, `mic_curve`), as every measurement on that input does. One input's
+  refused analysis fails the whole run (`msg` names the input). While it plays
   the generator is `firing` with the sweep as its settings; once the recording is in it is
   disarmed (`last_action` `stop` by the daemon; the lease stays with its holder), so the next
   sweep or stimulus needs an explicit arm.
 - Progress and outcome are the `sweep` entity (§4.1), `SweepRun`: `id`, `meas`, `owner`,
   `name`,
-  `reference_input`, `measurement_input`, `outputs`, `level`, `sweep`, `sweep_duration`
+  `reference_input`, `measurement_inputs`, `outputs`, `level`, `sweep`, `sweep_duration`
   (actual, of each emitted sweep), `post_roll`, `repeats`, `gate`, `lf_harmonics`, `resolution`, `started_at`, `status` (`SweepStatus`, tagged by
-  `type`): `playing` {`repeat`, 1-based} → `analysing` → `done` {`trace`} or `failed`
+  `type`): `playing` {`repeat`, 1-based} → `analysing` → `done` {`traces`: one per measurement input, in
+  `measurement_inputs` order} or `failed`
   {`reason`, `msg`}. `SweepFailure`: `stopped` (`gen.stop`, `gen.release`, forced takeover),
   `lease_expired`, `session_closed`, `dropout` (audio lost while recording), `no_reference`
   (the reference carries no sweep), `analysis`. A failed run's audio is discarded.

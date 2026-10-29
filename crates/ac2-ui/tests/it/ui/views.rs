@@ -41,7 +41,7 @@ fn sweep_progress_strip() {
             owner: ClientId("other".into()),
             name: "Sweep 1".into(),
             reference_input: 0,
-            measurement_input: 1,
+            measurement_inputs: vec![1],
             outputs: vec![0, 1],
             level: Dbfs(-30.0),
             sweep: EssSpec::with_fades(Hz(20.0), Hz(20_000.0), Seconds(30.0)),

@@ -225,14 +225,18 @@ pub fn parse_session_ref(text: &str) -> Result<SessionRef, String> {
 }
 
 /// The input a measurement's mic curve belongs to (a transfer function's measurement
-/// input); a math channel has its operands', none of its own.
+/// input); a math channel has its operands', none of its own, and a sweep of several mics
+/// none either (each of its traces carries its own input's curve).
 pub fn meas_input(k: &MeasKind) -> Option<u16> {
     match k {
         MeasKind::Transfer { config } => Some(config.measurement_input),
         MeasKind::Spectrum { config } => Some(config.input),
         MeasKind::Rta { config } => Some(config.input),
         MeasKind::Spl { config } => Some(config.input),
-        MeasKind::Sweep { config } => Some(config.measurement_input),
+        MeasKind::Sweep { config } => match config.measurement_inputs.as_slice() {
+            [one] => Some(*one),
+            _ => None,
+        },
         MeasKind::Math { .. } => None,
     }
 }

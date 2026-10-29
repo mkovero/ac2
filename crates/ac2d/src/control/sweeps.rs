@@ -18,8 +18,8 @@ use super::{
     ActiveSweep, CalState, Change, ClientId, Control, ControlMsg, CoreBandLimit, CoreGenerator,
     CoreSignal, ErrorCode, GenAction, GeneratorConfig, GeneratorSettings, LeaseToken, LeasedSource,
     MeasKind, ProtoError, Recording, ReplyBody, Seconds, SweepAnalysis, SweepConfig, SweepError,
-    SweepFailure, SweepId, SweepRun, SweepStatus, SweepTrain, TraceKind, TraceMeta, TraceSource,
-    WallNs, block_index, dbfs_to_rms, gen_err, jobs, perr,
+    SweepFailure, SweepId, SweepInput, SweepRun, SweepStatus, SweepTrain, TraceKind, TraceMeta,
+    TraceSource, WallNs, block_index, dbfs_to_rms, gen_err, jobs, perr,
 };
 use crate::sweep;
 use crate::util::wall_ns;
@@ -89,13 +89,9 @@ impl Control {
         let Some(rt) = self.session.as_ref() else {
             return Err(perr(ErrorCode::Refused, "no open session to play into"));
         };
-        let (reference, measurement) = (req.reference_input, req.measurement_input);
-        if reference == measurement {
-            return Err(perr(
-                ErrorCode::Invalid,
-                "the reference and the measurement are the same input",
-            ));
-        }
+        req.check_inputs()
+            .map_err(|e| perr(ErrorCode::Invalid, e.to_string()))?;
+        let reference = req.reference_input;
         let idx = |input: u16, what: &str| {
             block_index(&rt.input_map, input).ok_or_else(|| {
                 perr(
@@ -104,10 +100,18 @@ impl Control {
                 )
             })
         };
-        let (ref_idx, mic_idx) = (
-            idx(reference, "reference")?,
-            idx(measurement, "measurement")?,
-        );
+        let ref_idx = idx(reference, "reference")?;
+        let mic_idx = req
+            .measurement_inputs
+            .iter()
+            .map(|&m| idx(m, "measurement"))
+            .collect::<Result<Vec<_>, _>>()?;
+        // Each input's trace is named for its input when the run makes several, so the
+        // names are checked before anything plays.
+        let names = self.sweep_trace_names(&name, &req.measurement_inputs);
+        for n in &names {
+            meta::check_edit(n, None).map_err(|e| perr(ErrorCode::Invalid, e))?;
+        }
         if req.outputs.is_empty() {
             return Err(perr(ErrorCode::Invalid, "no output channels"));
         }
@@ -241,7 +245,7 @@ impl Control {
             owner: client.clone(),
             name,
             reference_input: reference,
-            measurement_input: measurement,
+            measurement_inputs: req.measurement_inputs.clone(),
             outputs: req.outputs,
             level,
             sweep: req.sweep,
@@ -256,25 +260,36 @@ impl Control {
         };
         tracing::info!(
             target: "ac2d::audit",
-            "sweep {} by {}: {} × {:.2} s at {:.1} dBFS on out {:?}, input {} re {}",
+            "sweep {} by {}: {} × {:.2} s at {:.1} dBFS on out {:?}, inputs {:?} re {}",
             id.0,
             client.0,
             run.repeats,
             run.sweep_duration.0,
             level.0,
             run.outputs.iter().map(|o| o + 1).collect::<Vec<_>>(),
-            measurement + 1,
+            run.measurement_inputs
+                .iter()
+                .map(|i| i + 1)
+                .collect::<Vec<_>>(),
             reference + 1
         );
         self.commit(Change::Sweep(run.clone()));
-        // The sweep analysis works on the raw recordings: no curve is in its columns. The
-        // input's active curve still applies to everything measured through it, so the
+        // The sweep analysis works on the raw recordings: no curve is in its columns. Each
+        // input's active curve still applies to everything measured through it, so its
         // trace gets it after capture (a display edit, normalised as the live jobs do).
-        let mic = self
-            .cal_and_mic(measurement)
-            .1
-            .map(|m| ac2_proto::model::MicState { curve: None, ..m });
-        let mic_curve = self.input_after_capture(measurement);
+        let inputs = run
+            .measurement_inputs
+            .iter()
+            .zip(names)
+            .map(|(&input, name)| SweepInput {
+                name,
+                mic: self
+                    .cal_and_mic(input)
+                    .1
+                    .map(|m| ac2_proto::model::MicState { curve: None, ..m }),
+                mic_curve: self.input_after_capture(input),
+            })
+            .collect();
         self.sweep = Some(ActiveSweep {
             run: run.clone(),
             meas_name,
@@ -282,10 +297,37 @@ impl Control {
             spec,
             job: Some(job),
             epoch: self.epoch(),
-            mic,
-            mic_curve,
+            inputs,
         });
         Ok(ReplyBody::Sweep(run))
+    }
+
+    /// The name of each input's trace: the run's name alone for one input; with several,
+    /// the run's name and the input's (its mic, else the device's channel name, else
+    /// `Input N`), so the traces of one play tell their mics apart.
+    fn sweep_trace_names(&self, run: &str, inputs: &[u16]) -> Vec<String> {
+        if inputs.len() < 2 {
+            return inputs.iter().map(|_| run.to_owned()).collect();
+        }
+        let device = self
+            .session
+            .as_ref()
+            .map_or_else(Vec::new, |rt| self.input_channel_names(rt));
+        inputs
+            .iter()
+            .map(|&i| {
+                let mic = ac2_proto::cal::input_setup(&self.store.state().inputs, i)
+                    .mic()
+                    .map(str::to_owned);
+                let named = [mic, device.get(usize::from(i)).cloned()]
+                    .into_iter()
+                    .flatten()
+                    .map(|s| s.trim().to_owned())
+                    .find(|s| !s.is_empty())
+                    .unwrap_or_else(|| format!("Input {}", i + 1));
+                format!("{run} · {named}")
+            })
+            .collect()
     }
 
     /// Ends the run in progress without a result: its recorder stops, its audio is
@@ -358,10 +400,7 @@ impl Control {
             .name(format!("ac2d-sweep-analysis-{}", id.0))
             .spawn(move || {
                 let result = sweep::analyse(&spec, &rec, repeats);
-                let _ = to.send(ControlMsg::SweepAnalysed {
-                    id,
-                    result: Box::new(result),
-                });
+                let _ = to.send(ControlMsg::SweepAnalysed { id, result });
             });
         if let Err(e) = spawned {
             self.fail_sweep(
@@ -371,33 +410,71 @@ impl Control {
         }
     }
 
+    /// Stores one trace per measurement input. One input's refused analysis fails the whole
+    /// run, naming the input: a run that kept the other inputs would read as a complete set
+    /// of positions when it is not.
     pub(super) fn sweep_analysed(
         &mut self,
         id: SweepId,
-        result: Result<SweepAnalysis, SweepError>,
+        results: Vec<Result<SweepAnalysis, SweepError>>,
     ) {
-        if self.active(id).is_none() {
+        let Some(active) = self.active(id) else {
+            return;
+        };
+        let several = active.run.measurement_inputs.len() > 1;
+        let inputs = active.run.measurement_inputs.clone();
+        let mut analyses = Vec::with_capacity(results.len());
+        for (input, r) in inputs.iter().zip(results) {
+            match r {
+                Ok(a) => analyses.push(a),
+                Err(e) => {
+                    let msg = if several && !matches!(e, SweepError::NoReference { .. }) {
+                        format!("input {}: {e}", input + 1)
+                    } else {
+                        e.to_string()
+                    };
+                    self.fail_sweep(sweep::failure(&e), msg);
+                    return;
+                }
+            }
+        }
+        if analyses.len() != inputs.len() {
+            self.fail_sweep(
+                SweepFailure::Analysis,
+                "the analysis returned no result for every input".into(),
+            );
             return;
         }
-        let a = match result {
-            Ok(a) => a,
-            Err(e) => {
-                self.fail_sweep(sweep::failure(&e), e.to_string());
-                return;
-            }
-        };
         let Some(active) = self.sweep.take() else {
             return;
         };
+        let traces = analyses
+            .iter()
+            .zip(inputs.iter().zip(&active.inputs))
+            .map(|(a, (&input, si))| self.store_sweep_trace(&active, a, input, si))
+            .collect();
+        let mut run = active.run;
+        run.status = SweepStatus::Done { traces };
+        self.commit(Change::Sweep(run));
+    }
+
+    /// The trace of one measurement input of a finished run.
+    fn store_sweep_trace(
+        &mut self,
+        active: &ActiveSweep,
+        a: &SweepAnalysis,
+        input: u16,
+        si: &SweepInput,
+    ) -> ac2_proto::units::TraceId {
         let run = &active.run;
         let grid = sweep::grid(&active.spec);
-        let (columns, data) = sweep::trace_data(&a, run.resolution);
+        let (columns, data) = sweep::trace_data(a, run.resolution);
         let tid = self.traces.alloc();
         let t = TraceMeta {
             id: tid,
             edit: meta::new_edit(
                 tid,
-                run.name.clone(),
+                si.name.clone(),
                 None,
                 TraceOwner::Meas { meas: run.meas },
             ),
@@ -413,15 +490,15 @@ impl Control {
                 repeats: run.repeats,
                 lf_harmonics: run.lf_harmonics,
                 reference_input: run.reference_input,
-                measurement_input: run.measurement_input,
+                measurement_input: input,
             },
             grid_id: grid.id(),
             delay: Seconds(a.arrival_s),
             depth: None,
             // A ratio of two inputs: no calibration applies.
             cal: CalState::Uncalibrated,
-            mic: active.mic.clone(),
-            mic_curve: active.mic_curve.as_ref().map(|(m, _)| m.clone()),
+            mic: si.mic.clone(),
+            mic_curve: si.mic_curve.as_ref().map(|(m, _)| m.clone()),
             created_at: WallNs(wall_ns()),
             eq_in: self.eq_in_live(run.meas),
             position: None,
@@ -429,8 +506,9 @@ impl Control {
             superseded: false,
         };
         tracing::info!(
-            "sweep {} stored as trace {tid}: arrival {:.3} ms, reference {:+.1} dB{}",
+            "sweep {} input {} stored as trace {tid}: arrival {:.3} ms, reference {:+.1} dB{}",
             run.id.0,
+            input + 1,
             a.arrival_s * 1000.0,
             a.reference_db,
             if a.clipped { ", CLIPPED" } else { "" }
@@ -441,11 +519,9 @@ impl Control {
             columns,
             Some(data),
             None,
-            active.mic_curve.as_ref().map(|(_, k)| k.clone()),
+            si.mic_curve.as_ref().map(|(_, k)| k.clone()),
         );
-        let mut run = active.run;
-        run.status = SweepStatus::Done { trace: tid };
-        self.commit(Change::Sweep(run));
+        tid
     }
 
     fn fail_sweep(&mut self, reason: SweepFailure, msg: String) {

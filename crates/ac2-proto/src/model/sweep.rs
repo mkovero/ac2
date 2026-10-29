@@ -1,6 +1,7 @@
 //! Sweep measurements (runs, distortion, impulse response) and the room acoustics derived from them.
 
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use super::{EssSpec, Resolution, Unresolved};
 use crate::units::{ClientId, Db, Dbfs, Hz, MeasId, Seconds, SweepId, TraceId, WallNs};
@@ -11,8 +12,10 @@ use crate::units::{ClientId, Db, Dbfs, Hz, MeasId, Seconds, SweepId, TraceId, Wa
 pub struct SweepConfig {
     /// Reference input (the loopback), zero-based.
     pub reference_input: u16,
-    /// Measurement input (the mic), zero-based.
-    pub measurement_input: u16,
+    /// Measurement inputs (the mics), zero-based: one play records every one against the
+    /// same reference, and each makes its own trace. 1 … [`SweepConfig::MAX_INPUTS`], none
+    /// twice, none the reference ([`SweepConfig::check_inputs`]).
+    pub measurement_inputs: Vec<u16>,
     /// Output channels carrying the sweep (zero-based): the speaker's and the loopback's.
     pub outputs: Vec<u16>,
     /// RMS level of the sweep's constant-envelope part, typed by the operator (there is no
@@ -58,6 +61,52 @@ impl SweepConfig {
 
     /// Most repeats.
     pub const MAX_REPEATS: u8 = 8;
+
+    /// Most measurement inputs of one sweep: a spatial average takes at most as many
+    /// operands (`MathConfig::MAX_AVERAGE`).
+    pub const MAX_INPUTS: usize = 16;
+
+    /// The reference and measurement inputs make a run: at least one measurement input, at
+    /// most [`SweepConfig::MAX_INPUTS`], none listed twice and none the reference.
+    pub fn check_inputs(&self) -> Result<(), SweepInputsError> {
+        check_sweep_inputs(self.reference_input, &self.measurement_inputs)
+    }
+}
+
+/// [`SweepConfig::check_inputs`] on a reference and measurement inputs not yet in a config.
+pub fn check_sweep_inputs(reference: u16, inputs: &[u16]) -> Result<(), SweepInputsError> {
+    if inputs.is_empty() {
+        return Err(SweepInputsError::None);
+    }
+    if inputs.len() > SweepConfig::MAX_INPUTS {
+        return Err(SweepInputsError::TooMany(inputs.len()));
+    }
+    for (i, m) in inputs.iter().enumerate() {
+        if *m == reference {
+            return Err(SweepInputsError::IsReference(*m));
+        }
+        if inputs[..i].contains(m) {
+            return Err(SweepInputsError::Twice(*m));
+        }
+    }
+    Ok(())
+}
+
+/// Why a sweep's inputs make no run (inputs zero-based, shown 1-based).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum SweepInputsError {
+    /// No measurement input.
+    #[error("a sweep needs at least one measurement input")]
+    None,
+    /// More than [`SweepConfig::MAX_INPUTS`].
+    #[error("{0} measurement inputs: a sweep records at most {max}", max = SweepConfig::MAX_INPUTS)]
+    TooMany(usize),
+    /// A measurement input listed twice.
+    #[error("measurement input {} is listed twice", .0 + 1)]
+    Twice(u16),
+    /// A measurement input is the reference.
+    #[error("input {} is the reference: it cannot also be a measurement input", .0 + 1)]
+    IsReference(u16),
 }
 
 /// Why a sweep run ended without a result.
@@ -89,10 +138,10 @@ pub enum SweepStatus {
     },
     /// Recorded; the analysis runs.
     Analysing,
-    /// Stored as a sweep trace.
+    /// Stored: one sweep trace per measurement input.
     Done {
-        /// The trace.
-        trace: TraceId,
+        /// The traces, in the order of the run's `measurement_inputs`.
+        traces: Vec<TraceId>,
     },
     /// Ended without a result; its audio is discarded.
     Failed {
@@ -113,12 +162,13 @@ pub struct SweepRun {
     pub meas: MeasId,
     /// Client that started it.
     pub owner: ClientId,
-    /// Name of the trace it makes.
+    /// Name of the traces it makes: with several measurement inputs each trace's name adds
+    /// its input's name.
     pub name: String,
     /// Reference input.
     pub reference_input: u16,
-    /// Measurement input.
-    pub measurement_input: u16,
+    /// Measurement inputs, each recorded into its own trace.
+    pub measurement_inputs: Vec<u16>,
     /// Outputs playing it.
     pub outputs: Vec<u16>,
     /// Level.

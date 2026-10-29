@@ -586,7 +586,7 @@ fn sweep_reference_is_the_loopback_or_chosen() {
     f.cycle(-1);
     assert_eq!(f.channel(FieldId::Reference), Some(1));
     let p = swept(&f, &o).expect("plan");
-    assert_eq!((p.reference_input, p.measurement_input), (1, 2));
+    assert_eq!((p.reference_input, p.measurement_inputs), (1, vec![2]));
 
     let o = open(
         vec![0, 1, 2],
@@ -653,4 +653,121 @@ fn the_footer_names_only_the_keys_a_form_has() {
         f.keys_hint(),
         format!("{} · ←→ choose · Esc closes", f.kind.submit())
     );
+}
+
+/// Several mics on one sweep: once a mic is picked an empty row follows to add the next;
+/// a further row steps through `none` and the inputs no other row names (never the same
+/// input twice), dropping one closes the gap, and the measurement carries every pick in
+/// row order. The rows show the inputs by name.
+#[test]
+fn a_sweep_records_several_mics_picked_row_by_row() {
+    let o = open(
+        vec![0, 1, 2, 3],
+        Some(LoopbackRoute {
+            output: 1,
+            input: 0,
+        }),
+    );
+    let inputs: Vec<(u16, String)> = vec![
+        (0, "Loop".into()),
+        (1, "MM1 left".into()),
+        (2, "MM1 right".into()),
+        (3, "Spare".into()),
+    ];
+    let mut f = Form::sweep(Some(&o), 0, &inputs, &outs(), &[1], Some(Dbfs(-50.0)));
+    let rows = |f: &Form| -> Vec<(String, String)> {
+        f.fields
+            .iter()
+            .filter(|x| matches!(x.id, FieldId::Measurement | FieldId::MoreMeasurement(_)))
+            .map(|x| (x.label.clone(), x.display()))
+            .collect()
+    };
+    assert_eq!(
+        rows(&f),
+        [
+            ("Measurement".into(), "MM1 left".into()),
+            ("Measurement 2".into(), "none".into())
+        ]
+    );
+    assert_eq!(swept(&f, &o).expect("one mic").measurement_inputs, vec![1]);
+
+    // → on the empty row: the first input no other row and not the reference names.
+    focus(&mut f, FieldId::MoreMeasurement(2));
+    f.cycle(1);
+    assert_eq!(f.channel(FieldId::MoreMeasurement(2)), Some(2));
+    assert_eq!(
+        rows(&f),
+        [
+            ("Measurement".into(), "MM1 left".into()),
+            ("Measurement 2".into(), "MM1 right".into()),
+            ("Measurement 3".into(), "none".into())
+        ]
+    );
+    assert_eq!(f.fields[f.focus].id, FieldId::MoreMeasurement(2));
+    assert_eq!(
+        swept(&f, &o).expect("two mics").measurement_inputs,
+        vec![1, 2]
+    );
+    // Stepping on never lands on an input another row or the reference names, and stops
+    // at the end.
+    for _ in 0..4 {
+        f.cycle(1);
+        assert!(!matches!(
+            f.channel(FieldId::MoreMeasurement(2)),
+            Some(0 | 1)
+        ));
+    }
+    assert_eq!(f.channel(FieldId::MoreMeasurement(2)), Some(3));
+    // A reference moved onto a mic is refused at Enter in words.
+    assert!(f.set_channel(FieldId::Reference, 3));
+    let e = swept(&f, &o).expect_err("the reference as a mic");
+    assert!(e.contains("same input"), "{e}");
+    assert!(f.set_channel(FieldId::Reference, 0));
+    // ← to none drops the row; the gap closes.
+    f.cycle(-1);
+    focus(&mut f, FieldId::MoreMeasurement(2));
+    while f.channel(FieldId::MoreMeasurement(2)).is_some() {
+        f.cycle(-1);
+    }
+    assert_eq!(
+        rows(&f),
+        [
+            ("Measurement".into(), "MM1 left".into()),
+            ("Measurement 2".into(), "none".into())
+        ]
+    );
+
+    // Editing a several-mic sweep shows each of its mics on its own row.
+    let m = Measurement {
+        config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
+            name: "Two mics".into(),
+            kind: MeasKind::Sweep {
+                config: SweepConfig {
+                    measurement_inputs: vec![2, 1],
+                    ..swept(&f, &o).expect("plan")
+                },
+            },
+        },
+        id: MeasId(4),
+        config_rev: ac2_proto::units::Rev(1),
+        running: false,
+        delay: None,
+        grid_id: None,
+        colour: None,
+        layout: None,
+        compared: Vec::new(),
+        offset: ac2_proto::units::Db(0.0),
+        eq: Vec::new(),
+    };
+    let e = Form::edit_sweep(&m, Some(&o), &inputs, &outs()).expect("edit");
+    assert_eq!(
+        rows(&e),
+        [
+            ("Measurement".into(), "MM1 right".into()),
+            ("Measurement 2".into(), "MM1 left".into()),
+            ("Measurement 3".into(), "none".into())
+        ]
+    );
+    assert_eq!(swept(&e, &o).expect("plan").measurement_inputs, vec![2, 1]);
 }

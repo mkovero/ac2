@@ -2081,7 +2081,8 @@ dialog:
 | Field | Choices |
 |---|---|
 | reference | the session's loopback input; without a loopback mapping it reads "choose the reference" and nothing is made until one is picked |
-| mic, output | by name (the session's loopback output always plays too) |
+| measurement, output | by name (the session's loopback output always plays too) |
+| measurement 2, 3 … | further mics the same play records, each into its own trace: once a mic is picked an empty row (*none*) follows to add the next; **←/→** to *none* drops one. No input twice, none the reference; at most 16 |
 | **level** | typed, no default |
 | from, to | typed, 20 Hz and 20 kHz by default |
 | duration | 1 s quick look, 3 s default; 6 s and 12 s lower the noise floor |
@@ -2104,7 +2105,11 @@ dialog:
 4. After the run the stimulus is off and the lease given back; **Space**, **Enter** run it
    again.
 
-Runs are stored **under the measurement** as *Run 1*, *Run 2* … (F2 renames). *Edit
+Runs are stored **under the measurement** as *Run 1*, *Run 2* … (F2 renames). A run of
+several mics stores one trace per mic, named for its mic: *Run 1 · MM1 left*, *Run 1 · MM1
+right* (the mic name, else the device's channel name, else *Input 3*); each carries its own
+input's mic curve, so the traces are ready for a spatial average (**M**). One mic's refused
+analysis fails the whole run and the error names its input. *Edit
 measurement…* changes the settings for the next run. A run is a stored trace, drawn in the
 transfer pane like any capture.
 
@@ -2176,7 +2181,12 @@ ac2 meas new sweep --ref 2 --meas 1 --out 1,2 --level -50dbfs --name "Genelec 1 
      --lf-harmonics standard|fine]
 ac2 sweep run "Genelec 1 m"
 ac2 ir capture --ref 2 --mic 1 --out 1,2 --level -50dbfs    # same flags; --name names the run
+ac2 ir capture --ref 2 --mic 1,3,4 --out 1,2 --level -50dbfs # one play, a trace per mic
 ```
+
+- `--meas` of `meas new sweep` and `--mic` of `ir capture` take one input or a list
+  (`1,3,4`, `3-6`): one play records each into its own trace, and the summary prints per
+  trace.
 
 - `ac2 ir capture` runs the sweep measurement with exactly those settings, making one
   (`Sweep 1`, …) when there is none; the same command again is its next run.

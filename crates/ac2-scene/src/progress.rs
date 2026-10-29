@@ -88,7 +88,7 @@ mod tests {
             owner: ClientId("ui".into()),
             name: "Sweep 3".into(),
             reference_input: 0,
-            measurement_input: 1,
+            measurement_inputs: vec![1],
             outputs: vec![0],
             level: Dbfs(-20.0),
             sweep: EssSpec {
@@ -135,7 +135,12 @@ mod tests {
         assert_eq!(p.remaining, None);
 
         assert_eq!(
-            sweep(&run(SweepStatus::Done { trace: TraceId(4) }), 0.0),
+            sweep(
+                &run(SweepStatus::Done {
+                    traces: vec![TraceId(4)]
+                }),
+                0.0
+            ),
             None
         );
         assert_eq!(

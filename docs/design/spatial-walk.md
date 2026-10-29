@@ -17,7 +17,7 @@ of ac2's way while it grows (§2).
   (`trace.average`).
 - **Sweep gate** (`--gate`), and ISO 3382-1 parameters from a sweep IR
   ([room-metrics.md](room-metrics.md)), one position at a time. A sweep reads one mic
-  (`SweepConfig::measurement_input`).
+  (`SweepConfig::measurement_input`); several since G8 (§8).
 - **The New measurement chooser** has Alignment and Programme meter rows
   (`ac2-scene/src/new_meas.rs`, `ac2-ui/src/state/new_meas.rs`).
 - **What the wire says about averaging depth:** only per-column `ValidityMask::SETTLING` (no
@@ -304,6 +304,16 @@ play records every listed input; the run path (`ac2d/src/control/sweeps.rs`) rea
 plus each input, and each input's run is its own trace under the measurement, with
 `TraceSource::Sweep` naming its input. Each input's calibration and mic curve apply (a mic curve
 in use on an input applies to every measurement on it). Wire and session-format change.
+
+*As built (PROTO 76, session format 39):* `SweepConfig::check_inputs` refuses with a typed
+`SweepInputsError` (none, more than `MAX_INPUTS` = 16, one listed twice, one equal to the
+reference) at `meas.create`/`meas.update`, at every run, in the CLI and in the dialog. The
+recorder takes the reference and every input from one fan-out; the analysis thread runs each
+input against the shared reference and `SweepStatus::Done` carries `traces` in input order.
+Traces of a several-mic run are named `Run N · <input name>`; one input's refused analysis
+fails the whole run, naming the input, so a run never stands for fewer positions than it
+recorded. The dialog lists *Measurement 2, 3 …* rows below the first, one empty (*none*) row
+after the last pick; the CLI takes `--mic 1,3` / `--meas 1,3`.
 
 ## 9. Not offered
 

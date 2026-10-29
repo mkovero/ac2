@@ -224,16 +224,7 @@ impl Control {
             )
         })?;
 
-        let names = self
-            .backend_for(Some(rt.open.backend))
-            .ok()
-            .and_then(|b| b.enumerate().ok())
-            .and_then(|devs| {
-                devs.into_iter()
-                    .find(|d| d.id.0 == rt.open.input_device.0)
-                    .and_then(|d| d.input.and_then(|i| i.channel_names))
-            })
-            .unwrap_or_default();
+        let names = self.input_channel_names(rt);
         let st = self.store.state();
         let latest = rt.fanout.latest.load(std::sync::atomic::Ordering::Acquire);
         let sidecar = Sidecar {

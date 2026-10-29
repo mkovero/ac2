@@ -22,7 +22,7 @@ use ac2d::{Daemon, FAKE_RIG_DISTORTION};
 use common::*;
 
 const T: Duration = Duration::from_secs(10);
-const LEVEL: f64 = -20.0;
+pub(crate) const LEVEL: f64 = -20.0;
 
 fn distorting_rig() -> FakeBackend {
     FakeBackend::new(FakeConfig {
@@ -42,10 +42,10 @@ fn distorting_rig() -> FakeBackend {
     .unwrap()
 }
 
-fn request(level: f64) -> SweepConfig {
+pub(crate) fn request(level: f64) -> SweepConfig {
     SweepConfig {
         reference_input: 0,
-        measurement_input: 1,
+        measurement_inputs: vec![1],
         outputs: vec![0],
         level: Dbfs(level),
         sweep: EssSpec::with_fades(Hz(100.0), Hz(5000.0), Seconds(1.0)),
@@ -58,7 +58,7 @@ fn request(level: f64) -> SweepConfig {
 }
 
 /// A sweep measurement with `config`: created, never started.
-fn create(c: &mut Client, name: &str, config: SweepConfig) -> MeasId {
+pub(crate) fn create(c: &mut Client, name: &str, config: SweepConfig) -> MeasId {
     match c.ok(Command::MeasCreate {
         config: MeasConfig {
             scope: ac2_proto::model::MeasScope::Session,
@@ -74,7 +74,7 @@ fn create(c: &mut Client, name: &str, config: SweepConfig) -> MeasId {
     }
 }
 
-fn start(c: &mut Client, token: LeaseToken, meas: MeasId) -> SweepRun {
+pub(crate) fn start(c: &mut Client, token: LeaseToken, meas: MeasId) -> SweepRun {
     match c.ok(Command::SweepRun {
         lease_token: token,
         meas,
@@ -85,7 +85,7 @@ fn start(c: &mut Client, token: LeaseToken, meas: MeasId) -> SweepRun {
     }
 }
 
-fn arm(c: &mut Client, token: LeaseToken) {
+pub(crate) fn arm(c: &mut Client, token: LeaseToken) {
     c.ok(Command::GenSet {
         lease_token: token,
         desired: GeneratorDesired {
@@ -104,7 +104,7 @@ fn arm(c: &mut Client, token: LeaseToken) {
 }
 
 /// Runs device time in 0.25 s steps, refreshing the lease, until a sweep event matches.
-fn run_until(
+pub(crate) fn run_until(
     d: &mut FakeDriver,
     c: &mut Client,
     sub: &Sub,
@@ -255,9 +255,10 @@ fn slow_sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
             SweepStatus::Done { .. } | SweepStatus::Failed { .. }
         )
     });
-    let SweepStatus::Done { trace } = done.status else {
+    let SweepStatus::Done { traces } = done.status else {
         panic!("sweep failed: {:?}", done.status);
     };
+    let trace = traces[0];
     // A finished sweep leaves the generator disarmed, never re-armed with the state from
     // before it: the lease stays with its holder, and the next sweep needs an explicit arm.
     let st = match c.ok(Command::StateSnapshot) {
@@ -369,9 +370,10 @@ fn slow_sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
     let done = run_until(&mut d, &mut c, &sub, &ka, token, |r| {
         r.id == run1.id && !r.active()
     });
-    let SweepStatus::Done { trace: second } = done.status else {
+    let SweepStatus::Done { traces } = done.status else {
         panic!("sweep failed: {:?}", done.status);
     };
+    let second = traces[0];
     let st = match c.ok(Command::StateSnapshot) {
         ReplyBody::Snapshot(s) => s.state,
         other => panic!("{other:?}"),
@@ -525,7 +527,7 @@ fn a_sweep_in_a_hall_reads_its_reverberation_time() {
     };
     let req = SweepConfig {
         reference_input: 0,
-        measurement_input: 2,
+        measurement_inputs: vec![2],
         sweep: EssSpec::with_fades(Hz(100.0), Hz(10_000.0), Seconds(1.0)),
         tail: Some(Seconds(2.0)),
         lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
@@ -539,9 +541,10 @@ fn a_sweep_in_a_hall_reads_its_reverberation_time() {
     let done = run_until(&mut d, &mut c, &sub, &ka, token, |x| {
         x.id == r.id && !x.active()
     });
-    let SweepStatus::Done { trace } = done.status else {
+    let SweepStatus::Done { traces } = done.status else {
         panic!("sweep failed: {:?}", done.status);
     };
+    let trace = traces[0];
     let data = match c.ok(Command::TraceGet { trace }) {
         ReplyBody::TraceData(t) => *t,
         other => panic!("{other:?}"),
@@ -653,9 +656,10 @@ fn slow_fine_lf_harmonics_report_h2_below_20_hz() {
         let done = run_until(&mut d, &mut c, &sub, &ka, token, |x| {
             x.id == r.id && !x.active()
         });
-        let SweepStatus::Done { trace } = done.status else {
+        let SweepStatus::Done { traces } = done.status else {
             panic!("sweep failed: {:?}", done.status);
         };
+        let trace = traces[0];
         let data = match c.ok(Command::TraceGet { trace }) {
             ReplyBody::TraceData(t) => *t,
             other => panic!("{other:?}"),
@@ -699,7 +703,7 @@ fn slow_fine_lf_harmonics_report_h2_below_20_hz() {
 }
 
 /// The ac2 CSV's table: column name → values, in grid order.
-fn csv_columns(csv: &str) -> std::collections::BTreeMap<String, Vec<f64>> {
+pub(crate) fn csv_columns(csv: &str) -> std::collections::BTreeMap<String, Vec<f64>> {
     let mut lines = csv.lines().skip_while(|l| !l.starts_with("freq_hz,"));
     let names: Vec<String> = lines
         .next()
@@ -747,9 +751,10 @@ fn a_sweep_through_a_corrected_mic_applies_its_curve() {
     let done = run_until(&mut d, &mut c, &sub, &ka, token, |x| {
         x.id == r.id && !x.active()
     });
-    let SweepStatus::Done { trace } = done.status else {
+    let SweepStatus::Done { traces } = done.status else {
         panic!("sweep failed: {:?}", done.status);
     };
+    let trace = traces[0];
     let shown = match c.ok(Command::TraceGet { trace }) {
         ReplyBody::TraceData(t) => *t,
         other => panic!("{other:?}"),

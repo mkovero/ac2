@@ -192,7 +192,7 @@ pub(super) fn sweep_run() -> SweepRun {
         owner: ClientId("alice".into()),
         name: "1083 sweep".into(),
         reference_input: 1,
-        measurement_input: 0,
+        measurement_inputs: vec![0, 2],
         outputs: vec![0, 1],
         level: Dbfs(-50.0),
         sweep: sweep(),
@@ -202,7 +202,9 @@ pub(super) fn sweep_run() -> SweepRun {
         gate: None,
         lf_harmonics: LfHarmonics::Standard,
         resolution: Resolution::FortyEighth,
-        status: SweepStatus::Done { trace: TraceId(9) },
+        status: SweepStatus::Done {
+            traces: vec![TraceId(9), TraceId(10)],
+        },
         started_at: WallNs(1_790_000_000_000_000_000),
     }
 }

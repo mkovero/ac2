@@ -1,4 +1,4 @@
-//! Sweep recorder: the reference and measurement inputs of an `ir.capture` run, from the
+//! Sweep recorder: the reference and every measurement input of an `ir.capture` run, from the
 //! moment it is attached until the whole train of sweeps (and the silence after the last
 //! one) is in. It only records; the analysis runs on its own thread once the recording is
 //! handed to the control thread, so this job never holds up the fan-out.
@@ -19,7 +19,7 @@ use crate::sweep::Recording;
 pub(crate) struct Recorder {
     id: SweepId,
     ref_idx: usize,
-    mic_idx: usize,
+    mic_idx: Vec<usize>,
     /// Samples to record.
     total: usize,
     /// Samples before the first sweep can arrive at the latest (output → input latency).
@@ -28,7 +28,7 @@ pub(crate) struct Recorder {
     period: usize,
     repeats: u8,
     reference: Vec<f32>,
-    measurement: Vec<f32>,
+    measurements: Vec<Vec<f32>>,
     end: Option<u64>,
     reported: u8,
     done: bool,
@@ -40,13 +40,14 @@ impl Recorder {
     pub(crate) fn new(
         id: SweepId,
         ref_idx: usize,
-        mic_idx: usize,
+        mic_idx: Vec<usize>,
         total: usize,
         lead: usize,
         period: usize,
         repeats: u8,
         to: Sender<ControlMsg>,
     ) -> Self {
+        let measurements = mic_idx.iter().map(|_| Vec::with_capacity(total)).collect();
         Self {
             id,
             ref_idx,
@@ -56,7 +57,7 @@ impl Recorder {
             period: period.max(1),
             repeats,
             reference: Vec::with_capacity(total),
-            measurement: Vec::with_capacity(total),
+            measurements,
             end: None,
             reported: 0,
             done: false,
@@ -97,7 +98,9 @@ impl Analysis for Recorder {
         let want = self.total - self.reference.len();
         for frame in b.data.chunks(n).take(want) {
             self.reference.push(frame[self.ref_idx]);
-            self.measurement.push(frame[self.mic_idx]);
+            for (m, &i) in self.measurements.iter_mut().zip(&self.mic_idx) {
+                m.push(frame[i]);
+            }
         }
         let repeat = (self.reference.len().saturating_sub(self.lead) / self.period + 1)
             .min(usize::from(self.repeats));
@@ -112,7 +115,7 @@ impl Analysis for Recorder {
         if self.reference.len() >= self.total {
             let r = Recording {
                 reference: std::mem::take(&mut self.reference),
-                measurement: std::mem::take(&mut self.measurement),
+                measurements: std::mem::take(&mut self.measurements),
             };
             self.finish(Ok(r));
         }
@@ -145,9 +148,9 @@ mod tests {
     }
 
     #[test]
-    fn records_both_inputs_reports_progress_and_stops_at_the_length() {
+    fn records_every_input_reports_progress_and_stops_at_the_length() {
         let (tx, rx) = std::sync::mpsc::channel();
-        let mut r = Recorder::new(SweepId(1), 1, 0, 1000, 100, 400, 2, tx);
+        let mut r = Recorder::new(SweepId(1), 1, vec![0, 2], 1000, 100, 400, 2, tx);
         let mut s = 0;
         while s < 1500 {
             r.push(&block(s, 128, BlockFlags::NONE));
@@ -172,13 +175,16 @@ mod tests {
             .expect("ok");
         assert_eq!(rec.reference.len(), 1000);
         assert_eq!(rec.reference[999], -999.0);
-        assert_eq!(rec.measurement[999], 999.0);
+        assert_eq!(rec.measurements.len(), 2);
+        assert_eq!(rec.measurements[0][999], 999.0);
+        assert_eq!(rec.measurements[1].len(), 1000);
+        assert_eq!(rec.measurements[1][999], 0.5);
     }
 
     #[test]
     fn a_gap_ends_the_recording_as_a_dropout() {
         let (tx, rx) = std::sync::mpsc::channel();
-        let mut r = Recorder::new(SweepId(1), 0, 1, 1000, 100, 400, 1, tx);
+        let mut r = Recorder::new(SweepId(1), 0, vec![1], 1000, 100, 400, 1, tx);
         r.push(&block(0, 128, BlockFlags::NONE));
         r.push(&block(256, 128, BlockFlags::NONE));
         let failed = rx
