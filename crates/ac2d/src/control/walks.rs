@@ -13,7 +13,7 @@ use ac2_proto::model::{
     MathConfig, MathDomain, MathExpr, MathReference, MeasConfig, MeasKind, MeasScope, Operand,
     PlanSpec, PointState, TraceOwner, TracePosition, WalkKind, WalkPoint, WalkPointSpec, WalkState,
 };
-use ac2_proto::units::{MeasId, TraceId, WalkId};
+use ac2_proto::units::{MeasId, Seconds, TraceId, WalkId};
 use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
 
 use super::Control;
@@ -523,9 +523,10 @@ impl Control {
         }
     }
 
-    /// The walk's average made to average its captures now: made at the second capture,
-    /// its operands updated (the math channel restarts with them), deleted when fewer than
-    /// two captures are left. Returns the walk as it is after.
+    /// The walk's average made to average its captures now: made at the second capture, its
+    /// operands updated (the math channel restarts with them). Once made it stays while redos
+    /// and skips leave fewer than two captures, so the panes showing it keep it; its frames
+    /// then say NO AVERAGE (`FEW_OPERANDS`). Returns the walk as it is after.
     fn walk_average(&mut self, walk: WalkId) -> Result<WalkState, ProtoError> {
         let mut w = self.walk(walk)?.clone();
         let of: Vec<Operand> = w
@@ -552,15 +553,7 @@ impl Control {
                 w.average = Some(m.id);
                 self.commit(Change::Walk(Patch::Set(w.clone())));
             }
-            (Some(id), false) => {
-                w.average = None;
-                self.commit(Change::Walk(Patch::Set(w.clone())));
-                if self.meas(id).is_ok() {
-                    self.remove_meas(id);
-                    self.prune_compared();
-                }
-            }
-            (Some(id), true) => {
+            (Some(id), _) => {
                 let m = self.meas(id)?.clone();
                 let MeasKind::Math { config } = &m.config.kind else {
                     return Ok(w);
@@ -571,11 +564,21 @@ impl Control {
                 if *old != of {
                     let mut config = config.clone();
                     let method = *method;
-                    let reference = match config.reference {
-                        MathReference::Operand { operand } if !of.contains(&operand) => {
-                            MathReference::Operand { operand: of[0] }
+                    // With no capture left there is no operand to refer the phase to; the
+                    // next capture becomes the reference again.
+                    let reference = match (config.reference, of.first()) {
+                        (MathReference::Operand { operand }, Some(first))
+                            if !of.contains(&operand) =>
+                        {
+                            MathReference::Operand { operand: *first }
                         }
-                        r => r,
+                        (MathReference::Operand { .. }, None) => MathReference::Fixed {
+                            delay: Seconds(0.0),
+                        },
+                        (MathReference::Fixed { .. }, Some(first)) if old.is_empty() => {
+                            MathReference::Operand { operand: *first }
+                        }
+                        (r, _) => r,
                     };
                     config.expr = MathExpr::Average { of, method };
                     config.reference = reference;

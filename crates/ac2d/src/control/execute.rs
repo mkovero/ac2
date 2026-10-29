@@ -447,6 +447,7 @@ impl Control {
     /// `meas.create`: the new measurement, stopped.
     pub(super) fn meas_create(&mut self, config: MeasConfig) -> Result<Measurement, ProtoError> {
         validate_meas(&config)?;
+        super::maths::new_average_has_two(&config.kind)?;
         self.spl_needs_mic(&config)?;
         self.check_meas_owner(None, &config.kind)?;
         let grid = self.grid_of(None, &config.kind)?;

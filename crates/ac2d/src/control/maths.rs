@@ -33,6 +33,21 @@ const LEVEL_RATIO: &str = "spectra and RTA bands are levels: they take − (leve
     function (an imported impulse response, a captured transfer function)";
 
 /// Checks of a math channel's configuration that need no other entity.
+/// A new average starts with two operands: one curve is not an average. An existing one may
+/// shrink below that ([`validate`]).
+pub(super) fn new_average_has_two(kind: &MeasKind) -> Result<(), ProtoError> {
+    if let MeasKind::Math { config } = kind
+        && let MathExpr::Average { of, .. } = &config.expr
+        && of.len() < MathConfig::MIN_AVERAGE
+    {
+        return Err(invalid(format!(
+            "a new average has at least {} operands",
+            MathConfig::MIN_AVERAGE
+        )));
+    }
+    Ok(())
+}
+
 pub(super) fn validate(c: &MathConfig) -> Result<(), ProtoError> {
     let operands = c.expr.operands();
     // An EQ set is a filter a curve goes through: only ever the B of a transfer ×.
@@ -66,10 +81,12 @@ pub(super) fn validate(c: &MathConfig) -> Result<(), ProtoError> {
             }
         }
         MathExpr::Average { of, method } => {
-            if !(MathConfig::MIN_AVERAGE..=MathConfig::MAX_AVERAGE).contains(&of.len()) {
+            // Fewer than two are accepted here: an average once made keeps its channel (and
+            // the panes showing it) while a spatial walk's redos leave it fewer positions, and
+            // the job shows FEW_OPERANDS. A new one needs two (`new_average_has_two`).
+            if of.len() > MathConfig::MAX_AVERAGE {
                 return Err(invalid(format!(
-                    "an average has {} … {} operands",
-                    MathConfig::MIN_AVERAGE,
+                    "an average has at most {} operands",
                     MathConfig::MAX_AVERAGE
                 )));
             }
@@ -412,6 +429,15 @@ impl Control {
                 Some(_) => {}
             }
         }
+        // An average left without operands (a walk's redos) keeps the grid it had.
+        let grid = grid.or_else(|| {
+            operands
+                .is_empty()
+                .then(|| self.meas(own).ok()?.grid_id)
+                .flatten()
+                .and_then(|g| self.grids.get(&g).cloned())
+                .map(|g| (g, String::new()))
+        });
         let (grid, _) = grid.ok_or_else(|| invalid("a math channel needs operands"))?;
         let freqs = grid.centres();
         let mut stored = Vec::with_capacity(operands.len());

@@ -197,7 +197,9 @@ listed dimmed, out of the average).
 **The running average** is an ordinary math channel, owned by the walk's first measurement (a math
 channel's owner is never another math channel). The daemon creates it at the walk's second
 capture (an average needs two operands) and updates its `of` (`meas.update`) on each capture,
-redo or skip, as it already restarts maths whose operands change. Before the second capture the
+redo or skip, as it already restarts maths whose operands change. Once made it stays when redos
+and skips leave fewer than two captures (operator 2026-10-29): the panes showing it keep it, and it
+reads *NO AVERAGE* until there are two again. A new average still needs two operands (`meas.create`). Before the second capture the
 walk pane shows *NO AVERAGE · 1 OF 8 POSITIONS* from walk state. `MAX_AVERAGE` rises from 16 to
 64 (positions × mics: ISO 3382-1 alone asks for 10 positions in a 2000-seat hall; the cost is one
 pass per column per operand).

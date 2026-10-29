@@ -325,21 +325,29 @@ fn redo_and_skip_supersede_and_the_average_follows() {
     assert!(r.trace(t2).superseded);
     assert_eq!(r.average_of(&w), vec![t1b, t3]);
 
-    // Fewer than two captures are no average: it goes, the walk says so.
+    // Fewer than two captures: the average stays, with what is left, and says NO AVERAGE.
+    let avg = w.average;
     let w = r.walk(Command::WalkRedo {
         walk: w.id,
         point: 2,
     });
-    let avg = r.state().walks[0].average;
-    assert_eq!((w.average, avg), (None, None));
-    assert_eq!(
-        r.state()
-            .measurements
-            .iter()
-            .filter(|m| matches!(m.config.kind, MeasKind::Math { .. }))
-            .count(),
-        0
-    );
+    assert_eq!(w.average, avg, "the panes showing it keep it");
+    assert_eq!(r.average_of(&w), vec![t1b]);
+    let w = r.walk(Command::WalkRedo {
+        walk: w.id,
+        point: 0,
+    });
+    assert_eq!(w.average, avg);
+    assert!(r.average_of(&w).is_empty());
+    // The next captures fill the same average again.
+    r.walk(Command::WalkGoto {
+        walk: w.id,
+        point: 0,
+    });
+    let w = r.capture(w.id);
+    let w = r.capture(w.id);
+    assert_eq!(w.average, avg);
+    assert_eq!(r.average_of(&w).len(), 2);
     r.shutdown();
 }
 
