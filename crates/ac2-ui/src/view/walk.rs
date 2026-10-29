@@ -125,10 +125,13 @@ pub(super) fn setup(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
     let plan = s.plan_in(&plans).cloned();
     let labels = s.labels();
     let breaks = plan.as_ref().map(|p| s.breaks(p)).unwrap_or_default();
-    let mic = s
-        .mic
-        .and_then(|m| st.meas(m))
-        .map(|m| m.config.name.clone());
+    let mics: Vec<String> = s
+        .mics
+        .iter()
+        .filter_map(|&m| st.meas(m))
+        .map(|m| m.config.name.clone())
+        .collect();
+    let mic_names: Vec<&str> = mics.iter().map(String::as_str).collect();
     let v = setup_view(&SetupInput {
         name: &s.name,
         plan: plan.as_ref(),
@@ -139,7 +142,8 @@ pub(super) fn setup(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
         // A count typed answers what unset seats leave open.
         default_n: s.default_n.or(s.n),
         seed: s.seed,
-        mic: mic.as_deref(),
+        mics: &mic_names,
+        add_mic: s.add_mic,
         focus: s.focus,
         typed: s.typed.as_deref(),
         relaxed: &s.relaxed,
@@ -169,6 +173,7 @@ pub(super) fn setup(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                             current: s.drag == Some(i),
                             next: false,
                             broken: breaks.get(i).is_some_and(|b| !b.is_empty()),
+                            mic: 0,
                         })
                         .collect();
                     let pic = PlanPicture {
@@ -234,6 +239,7 @@ pub(super) fn editor(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                     current: focused_row == Some(i),
                     next: false,
                     broken: false,
+                    mic: 0,
                 })
                 .collect();
             let pic = PlanPicture {

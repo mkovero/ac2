@@ -119,23 +119,19 @@ async fn plans_and_a_walk_by_name() {
         .map(|p| p["label"].as_str().unwrap())
         .collect();
     assert_eq!(labels, ["P1", "P2", "P3", "P4"]);
-    assert_eq!(w["current"], 0);
+    assert_eq!(w["step"], 0);
     for p in w["points"].as_array().unwrap() {
         assert_eq!(p["at"][2], 1.2, "at the zone's ear height");
     }
 
-    assert_eq!(
-        ok(&ep, &["walk", "prev"]).await["current"],
-        3,
-        "wraps round"
-    );
-    assert_eq!(ok(&ep, &["walk", "next"]).await["current"], 0);
+    assert_eq!(ok(&ep, &["walk", "prev"]).await["step"], 3, "wraps round");
+    assert_eq!(ok(&ep, &["walk", "next"]).await["step"], 0);
     let w = ok(&ep, &["walk", "skip", "--walk", "Mains"]).await;
     assert_eq!(w["points"][0]["state"]["type"], "skipped");
-    assert_eq!(w["current"], 1);
+    assert_eq!(w["step"], 1);
     let w = ok(&ep, &["walk", "redo", "P1"]).await;
     assert_eq!(w["points"][0]["state"]["type"], "pending");
-    assert_eq!(w["current"], 0);
+    assert_eq!(w["step"], 0);
     assert_eq!(ok(&ep, &["walk", "status"]).await["name"], "Mains");
 
     // A point the walk lacks, and a measurement another walk captures with, are refused.

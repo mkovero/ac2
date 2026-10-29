@@ -848,7 +848,8 @@
     "plan": "Hall",
     "kind": "live_transfer",
     "meas": [
-     1
+     1,
+     2
     ],
     "points": [
      {
@@ -879,7 +880,7 @@
    "op": "walk.goto",
    "args": {
     "walk": 1,
-    "point": 2
+    "step": 1
    }
   },
   "expect_rev": 41
@@ -897,7 +898,34 @@
  },
  {
   "v": 76,
+  "id": 94,
+  "cmd": {
+   "op": "walk.skip",
+   "args": {
+    "walk": 1,
+    "point": 1
+   }
+  },
+  "expect_rev": 41
+ },
+ {
+  "v": 76,
   "id": 95,
+  "cmd": {
+   "op": "walk.swap",
+   "args": {
+    "walk": 1,
+    "points": [
+     2,
+     3
+    ]
+   }
+  },
+  "expect_rev": 41
+ },
+ {
+  "v": 76,
+  "id": 96,
   "cmd": {
    "op": "walk.redo",
    "args": {

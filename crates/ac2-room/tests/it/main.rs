@@ -5,6 +5,7 @@
 
 mod pattern;
 mod plan;
+mod steps;
 
 use ac2_proto::model::{Marker, MarkerKind, PlanSpec, ZoneSpec};
 

@@ -157,10 +157,11 @@ Lease column: **L** = `lease_token` required (Q6).
 | `plan.delete` | `name` | `ack` | |
 | `walk.new` | `name`, `plan` (name), `kind: live_transfer`, `meas: [MeasId]`, `points: [WalkPointSpec]` ({`label`, `at: [x, y, z]`}) | `walk` | |
 | `walk.update` | `walk: WalkId`, `name`, `points: [WalkPointSpec]` | `walk` | |
-| `walk.goto` | `walk`, `point: u16` | `walk` | |
+| `walk.goto` | `walk`, `step: u16` | `walk` | |
 | `walk.capture` | `walk` | `walk` | |
-| `walk.skip` | `walk` | `walk` | |
+| `walk.skip` | `walk`, `point: u16` | `walk` | |
 | `walk.redo` | `walk`, `point: u16` | `walk` | |
+| `walk.swap` | `walk`, `points: [u16]` | `walk` | |
 | `walk.delete` | `walk` | `ack` | |
 | `spl.log_get` | `meas`, `log: SplLogWhich`, `from: u64`, `max: u32` | `spl_log_page` | |
 | `spl.log_new` | `meas` | `ack` | |
@@ -1206,33 +1207,47 @@ one `<name>.json` per plan in its data directory (`plans/`), mirrored as `State.
   holds in another case. `plan.delete` is `not_found` for a name the library lacks; the
   session's copies stay.
 - `walk.new` starts a walk (`WalkState`: `id`, `name`, `plan`, `kind`, `meas`, `points`
-  [{`label`, `at`, `mic: MeasId | nil`, `state` {`type`: pending \| captured {traces,
-  context} \| skipped}}], `current: u16 | nil`, `average: MeasId | nil`) through 1 … 64 points (unique
-  non-empty labels, finite, `z` ≥ 0). The plan is the session's copy when it holds one, else
-  the library's, copied into `State.walk_plans` (so a library edit mid-walk changes
-  nothing). `meas` are session transfer measurements no other walk names; this version
-  takes exactly one (`unsupported` for more: several mics per walk are a later stage).
-- A **move** — `walk.new`, `walk.goto`, the advance after `walk.capture` or `walk.skip`,
-  `walk.redo` — resets every walk measurement's averaging (`meas.reset`) and turns its delay
-  tracking on.
-- `walk.capture` captures every walk measurement at the current point in one step
-  (all or none), each trace named `<label> · <mic>` (the input's mic, else the
-  measurement's name) with `position` set, and `captured_unsettled` when the frame was not
-  ready: `filled` < 1, a fault refusing its blocks, a delay change after the averages
-  restarted (an older config rev) or an arrival awaiting the operator's pick. It goes to
-  the next pending point after the current one (wrapping round), `current` nil when none
-  is left. `refused` at a captured point (redo it), `invalid` when `current` is nil. The
-  point's `context` (`CaptureContext`) records `at` (the first trace's `created_at`) and,
-  per walk measurement in `meas` order, a `CaptureChain` {`mic: MicState | nil`, `eq_in:
-  [EqMark {set, rev}]`}: the same facts the traces record (`mic`, `eq_in`), so a client can
-  say when a walk's captures were taken on different days or under another mic, mic curve or
-  EQ. Calibration and generator level are not recorded: a transfer is a ratio of two
-  inputs, and both cancel out of it.
-- `walk.skip` marks the current point skipped (a captured one's traces become
-  `superseded`); `walk.redo` makes a point pending again (its traces `superseded`) and goes
-  there. `walk.update` renames the walk and edits its points by label: a kept point keeps
-  its state (a captured one its position too); a captured point cannot be taken out
-  (`refused`).
+  [{`label`, `at`, `step: u16`, `mic: MeasId`, `state` {`type`: pending \| captured {trace,
+  context} \| skipped}}], `step: u16 | nil`, `average: MeasId | nil`) through 1 … 64 points
+  (unique non-empty labels, finite, `z` ≥ 0). The plan is the session's copy when it holds
+  one, else the library's, copied into `State.walk_plans` (so a library edit mid-walk changes
+  nothing). `meas` are 1 … 8 session transfer measurements, one per mic, no other walk names
+  and each on its own measurement input (`invalid` otherwise).
+- **Steps.** The daemon groups the points into steps that place every mic once
+  (`ac2_room::steps::group`): one mic takes the points in walking order; with several, the
+  first step puts mic *k* at the *k*-th point and each later step pairs the mics with the
+  points left so the summed distance each is carried from its last point is least (fewer
+  points than mics: the nearest mics go, the others sit out). A point's `step` and `mic`
+  say where it belongs and which measurement stands (or stood) there; the walk's `step` is
+  where the mics are: each stands at its pending point of that step.
+- A **move** — `walk.new`, `walk.goto`, `walk.swap`, the advance after `walk.capture` or
+  `walk.skip`, `walk.redo` — resets every walk measurement's averaging (`meas.reset`) and
+  turns its delay tracking on.
+- `walk.capture` captures at every pending point of the current step in one step (all or
+  none), each by its point's `mic`, each trace named `<label> · <mic>` (the input's mic,
+  else the measurement's name) with `position` set, and `captured_unsettled` when the frame
+  was not ready: `filled` < 1, a fault refusing its blocks, a delay change after the
+  averages restarted (an older config rev) or an arrival awaiting the operator's pick. It
+  goes to the next step with a pending point after the current one (wrapping round), `step`
+  nil when none is left. `refused` at a step with nothing pending (redo a point), `invalid`
+  when `step` is nil. The point's `context` (`CaptureContext` {`at`, `mic: MicState | nil`,
+  `eq_in: [EqMark {set, rev}]`}) records the same facts its trace records (`created_at`,
+  `mic`, `eq_in`), so a client can say when a walk's captures were taken on different days
+  or, for one measurement, under another mic, mic curve or EQ. Calibration and generator
+  level are not recorded: a transfer is a ratio of two inputs, and both cancel out of it.
+- `walk.goto` puts the mics at step `step` (`not_found` past the last). `walk.skip` marks
+  one point skipped (a captured one's trace becomes `superseded`; `refused` when skipped
+  already); when that leaves the current step nothing pending, the walk goes on to the next
+  step, else the other mics stay. `walk.redo` makes one point pending again (its trace
+  `superseded`) for the mic that captured it (for a mic its step leaves free when a swap
+  gave that mic another of the step's points) and goes to its step, where only the mics of
+  pending points stand. `walk.swap` moves the mics at `points` (two or more pending points
+  of the current step) round by one: each to the next listed point, the last to the first;
+  the same exchange applies to the pending points of later steps, so every mic walks on
+  from where it now stands (`refused` for a point not pending at the step). `walk.update`
+  renames the walk and edits its points by label, grouping them into steps again: a kept
+  point keeps its state (a captured one its position and mic too); a captured point cannot
+  be taken out (`refused`).
 - The walk's **average** is a power-average math channel of the captured points' traces,
   in point order, owned by the walk's first measurement and named `<walk> · average`: made
   (and started) at the second capture, its `of` updated after every capture, skip and redo

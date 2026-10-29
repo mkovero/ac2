@@ -765,16 +765,18 @@ def requests():
                 "name": "Mains",
                 "plan": "Hall",
                 "kind": "live_transfer",
-                "meas": [1],
+                "meas": [1, 2],
                 "points": [
                     {"label": "P1", "at": [5.0, 12.0, 1.2]},
                     {"label": "P2", "at": [12.5, 15.0, 1.2]},
                 ],
             },
         ),
-        req(92, "walk.goto", {"walk": 1, "point": 2}),
+        req(92, "walk.goto", {"walk": 1, "step": 1}),
         req(93, "walk.capture", {"walk": 1}),
-        req(95, "walk.redo", {"walk": 1, "point": 0}),
+        req(94, "walk.skip", {"walk": 1, "point": 1}),
+        req(95, "walk.swap", {"walk": 1, "points": [2, 3]}),
+        req(96, "walk.redo", {"walk": 1, "point": 0}),
     ]
 
 

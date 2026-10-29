@@ -69,6 +69,7 @@ mod sweeps;
 mod traces;
 mod transfer;
 mod validate;
+mod walk_steps;
 mod walks;
 mod working;
 

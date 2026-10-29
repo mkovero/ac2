@@ -653,6 +653,7 @@ impl Shared {
             | C::WalkCapture { .. }
             | C::WalkSkip { .. }
             | C::WalkRedo { .. }
+            | C::WalkSwap { .. }
             | C::WalkDelete { .. } => {
                 // Plans are validated and walks captured by the daemon (ac2-room, its
                 // measurements' averages).

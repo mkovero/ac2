@@ -118,6 +118,9 @@ pub struct PlanDot {
     pub next: bool,
     /// It breaks a rule of the walk's preset: marked, not refused.
     pub broken: bool,
+    /// The palette place of the ring when current or next: the walk mic standing or going
+    /// there (0 outside a walk).
+    pub mic: usize,
 }
 
 /// A plan and what is drawn on it.
@@ -311,7 +314,8 @@ pub(crate) fn draw_plan(
     }
 
     // The positions: captured filled, pending hollow, skipped small and grey; the current
-    // one large with a ring, the next one with a faint ring; a broken rule a warning ring.
+    // ones large with a ring in their mic's colour, the next ones with a faint ring; a broken
+    // rule a warning ring.
     for d in &pic.dots {
         let at = map.to_px(d.at);
         let (r, colour) = match d.look {
@@ -332,14 +336,14 @@ pub(crate) fn draw_plan(
         if d.current {
             c.overlay.polylines.push(line(
                 closed(ring(at, r + 6.0, 24)),
-                theme.traces[0],
+                theme.trace_color(d.mic),
                 2.5,
                 rect,
             ));
         } else if d.next {
             c.overlay.polylines.push(line(
                 closed(ring(at, r + 5.0, 24)),
-                theme.traces[0].with_alpha(0.35),
+                theme.trace_color(d.mic).with_alpha(0.35),
                 1.5,
                 rect,
             ));

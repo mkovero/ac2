@@ -436,10 +436,11 @@ impl Control {
                 points,
             } => self.walk_new(name, plan, kind, meas, points),
             Command::WalkUpdate { walk, name, points } => self.walk_update(walk, name, points),
-            Command::WalkGoto { walk, point } => self.walk_goto(walk, point),
+            Command::WalkGoto { walk, step } => self.walk_goto(walk, step),
             Command::WalkCapture { walk } => self.walk_capture(walk),
-            Command::WalkSkip { walk } => self.walk_skip(walk),
+            Command::WalkSkip { walk, point } => self.walk_skip(walk, point),
             Command::WalkRedo { walk, point } => self.walk_redo(walk, point),
+            Command::WalkSwap { walk, points } => self.walk_swap(walk, &points),
             Command::WalkDelete { walk } => self.walk_delete(walk),
         }
     }

@@ -689,8 +689,9 @@ fn palette_titles_are_terse_and_uniform() {
     }
 }
 
-/// The walk pane's keys (`docs/design/spatial-walk.md` §5): X captures, PageDown / PageUp
-/// step the points, Shift+R redoes, K skips, Shift+W opens the walks from anywhere; the
+/// The walk pane's keys (`docs/design/spatial-walk.md` §5, §6): X captures, PageDown / PageUp
+/// step through the steps, Shift+R redoes, K skips, M has the mics trade places, Shift+W
+/// opens the walks from anywhere; the
 /// stimulus keys keep their meaning in the pane, and none of its keys is a transfer pane's
 /// nudge or Delete.
 #[test]
@@ -703,6 +704,7 @@ fn walk_keys_are_the_notes() {
         ("PageUp", CommandId::WalkPrev),
         ("Shift+R", CommandId::WalkRedo),
         ("K", CommandId::WalkSkip),
+        ("M", CommandId::WalkSwap),
         ("Shift+W", CommandId::Walks),
         ("Space", CommandId::StimulusArm),
         ("Enter", CommandId::StimulusFire),

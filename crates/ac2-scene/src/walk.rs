@@ -76,33 +76,122 @@ impl Ready {
             Self::Waiting | Self::Pick => None,
         }
     }
+
+    /// How far from a capture: an arrival to pick waits for the operator, no frame waits for
+    /// the measurement, settling for its averages.
+    fn distance(self) -> (u8, f32) {
+        match self {
+            Self::Pick => (0, 0.0),
+            Self::Waiting => (1, 0.0),
+            Self::Settling(f) => (2, f),
+            Self::Ready => (3, 0.0),
+        }
+    }
+
+    /// Which of the mics standing at a step holds the capture back longest (the first of
+    /// equals): the one the pane reads, since a step is ready when its slowest mic is.
+    pub fn slowest(ready: &[Ready]) -> Option<usize> {
+        (0..ready.len()).min_by(|&a, &b| {
+            let (x, y) = (ready[a].distance(), ready[b].distance());
+            x.0.cmp(&y.0).then(x.1.total_cmp(&y.1))
+        })
+    }
 }
 
-/// The point the walk goes to after the current one: the next pending point, wrapping
-/// round, as the daemon advances on a capture.
-pub fn next_point(w: &WalkState) -> Option<usize> {
-    let n = w.points.len();
-    let cur = w.current.map(usize::from);
-    let start = cur.map_or(0, |c| c + 1);
-    (0..n)
-        .map(|k| (start + k) % n)
-        .find(|&i| matches!(w.points[i].state, PointState::Pending) && Some(i) != cur)
+/// The step the walk goes to after the current one: the next step holding a pending point,
+/// wrapping round, as the daemon advances on a capture.
+pub fn next_step(w: &WalkState) -> Option<u16> {
+    let n = w.steps();
+    let start = w.step.map_or(0, |c| c + 1);
+    (0..n).map(|k| (start + k) % n.max(1)).find(|&s| {
+        Some(s) != w.step
+            && w.points
+                .iter()
+                .any(|p| p.step == s && matches!(p.state, PointState::Pending))
+    })
 }
 
-/// *Move mic to P3 · 2.1 m left, 4.0 m back from FOH*; when every point is captured or
-/// skipped, that.
-pub fn step_text(w: &WalkState, plan: Option<&PlanSpec>) -> String {
-    let Some(p) = w.current.and_then(|i| w.points.get(usize::from(i))) else {
+/// A walk mic's name: its input's mic, else its measurement's name. `mics` are in the walk's
+/// mic order; a measurement it does not name reads as *mic*.
+fn mic_name<'a>(w: &WalkState, mics: &'a [String], meas: ac2_proto::units::MeasId) -> &'a str {
+    mics.get(w.mic_index(meas)).map_or("mic", String::as_str)
+}
+
+/// *the mic to P3* with one mic; with several, each by name: *Vilppu to P3, MM1 to P4*.
+/// `points` are indices into the walk's points, `mics` names its mics in its order.
+pub fn moves_text(w: &WalkState, points: &[usize], mics: &[String]) -> String {
+    let moves: Vec<String> = points
+        .iter()
+        .filter_map(|&i| w.points.get(i))
+        .map(|p| {
+            if w.meas.len() == 1 {
+                format!("the mic to {}", p.label)
+            } else {
+                format!("{} to {}", mic_name(w, mics, p.mic), p.label)
+            }
+        })
+        .collect();
+    moves.join(", ")
+}
+
+/// *Move mic to P3 · 2.1 m left, 4.0 m back from FOH* with one mic; with several, each by
+/// name (*Move Vilppu to P3, MM1 to P4*), the readout only when one of them moves; when
+/// every point is captured or skipped, that. `mics` names the walk's mics in its order.
+pub fn step_text(w: &WalkState, plan: Option<&PlanSpec>, mics: &[String]) -> String {
+    let standing = w.standing();
+    let Some(&first) = standing.first() else {
         return "every point is captured or skipped".to_owned();
     };
+    let who = |i: usize| {
+        if w.meas.len() == 1 {
+            "mic"
+        } else {
+            mic_name(w, mics, w.points[i].mic)
+        }
+    };
+    if standing.len() > 1 {
+        return format!("Move {}", moves_text(w, &standing, mics));
+    }
+    let p = &w.points[first];
     match plan {
         Some(plan) => format!(
-            "Move mic to {} · {}",
+            "Move {} to {} · {}",
+            who(first),
             p.label,
             ac2_room::plan::readout(plan, [p.at[0], p.at[1]])
         ),
-        None => format!("Move mic to {}", p.label),
+        None => format!("Move {} to {}", who(first), p.label),
     }
+}
+
+/// With several mics standing, one line each: *Vilppu → P3 · 2.1 m left, 4.0 m back from
+/// FOH*, with the mic's place in the walk (its colour on the plan). Empty with one: the step
+/// line carries its readout.
+pub fn target_lines(
+    w: &WalkState,
+    plan: Option<&PlanSpec>,
+    mics: &[String],
+) -> Vec<(usize, String)> {
+    let standing = w.standing();
+    if standing.len() < 2 {
+        return Vec::new();
+    }
+    standing
+        .into_iter()
+        .map(|i| {
+            let p = &w.points[i];
+            let name = mic_name(w, mics, p.mic);
+            let text = match plan {
+                Some(plan) => format!(
+                    "{name} → {} · {}",
+                    p.label,
+                    ac2_room::plan::readout(plan, [p.at[0], p.at[1]])
+                ),
+                None => format!("{name} → {}", p.label),
+            };
+            (w.mic_index(p.mic), text)
+        })
+        .collect()
 }
 
 /// How many of the walk's points are captured, and how many are not left out.
@@ -151,23 +240,28 @@ pub fn walk_row(w: &WalkState) -> String {
     format!("{} · {captured} of {total} captured · {}", w.name, w.plan)
 }
 
-/// The dots of a walk on its plan.
+/// The dots of a walk on its plan: where the mics stand now ringed in each mic's colour, the
+/// next step's points faintly so.
 pub fn walk_dots(w: &WalkState) -> Vec<PlanDot> {
-    let next = next_point(w);
+    let next = next_step(w);
+    let pending = |p: &ac2_proto::model::WalkPoint| matches!(p.state, PointState::Pending);
     w.points
         .iter()
-        .enumerate()
-        .map(|(i, p)| PlanDot {
-            label: p.label.clone(),
-            at: [p.at[0], p.at[1]],
-            look: match p.state {
-                PointState::Pending => DotLook::Pending,
-                PointState::Captured { .. } => DotLook::Captured,
-                PointState::Skipped => DotLook::Skipped,
-            },
-            current: w.current.map(usize::from) == Some(i),
-            next: next == Some(i) && w.current.map(usize::from) != Some(i),
-            broken: false,
+        .map(|p| {
+            let current = w.step == Some(p.step) && pending(p);
+            PlanDot {
+                label: p.label.clone(),
+                at: [p.at[0], p.at[1]],
+                look: match p.state {
+                    PointState::Pending => DotLook::Pending,
+                    PointState::Captured { .. } => DotLook::Captured,
+                    PointState::Skipped => DotLook::Skipped,
+                },
+                current,
+                next: !current && next == Some(p.step) && pending(p),
+                broken: false,
+                mic: w.mic_index(p.mic),
+            }
         })
         .collect()
 }
@@ -178,7 +272,12 @@ pub struct WalkPane<'a> {
     pub walk: &'a WalkState,
     /// The session's copy of its plan; `None` when the session lacks it.
     pub plan: Option<&'a PlanSpec>,
+    /// The readiness of the slowest mic standing ([`Ready::slowest`]).
     pub ready: Ready,
+    /// The walk's mics by name, in its mic order (input mic name, else measurement name).
+    pub mics: &'a [String],
+    /// With several mics, the one [`WalkPane::ready`] is of, when it is not ready.
+    pub slowest: Option<usize>,
     /// The average measurement's name, once there is one.
     pub average: Option<&'a str>,
     /// Captures in the average taken before ready.
@@ -194,6 +293,8 @@ pub struct WalkPane<'a> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct WalkLines {
     pub step: String,
+    /// With several mics standing, each one's target: its place in the walk and the line.
+    pub targets: Vec<(usize, String)>,
     pub ready: String,
     pub average: String,
     /// What differs between the captures; empty when nothing recorded does.
@@ -202,10 +303,17 @@ pub struct WalkLines {
 
 impl WalkPane<'_> {
     pub fn lines(&self) -> WalkLines {
+        let ready = match self.slowest.and_then(|k| self.mics.get(k)) {
+            Some(name) if self.walk.meas.len() > 1 && self.ready != Ready::Ready => {
+                format!("{} · {name}", self.ready.text())
+            }
+            _ => self.ready.text(),
+        };
         WalkLines {
-            step: step_text(self.walk, self.plan),
-            ready: if self.walk.current.is_some() {
-                self.ready.text()
+            step: step_text(self.walk, self.plan, self.mics),
+            targets: target_lines(self.walk, self.plan, self.mics),
+            ready: if self.walk.step.is_some() {
+                ready
             } else {
                 String::new()
             },
@@ -247,6 +355,16 @@ pub fn walk_scene(p: &WalkPane<'_>, style: Style, size: Viewport) -> WalkScene {
         theme.text,
     ));
     y += big * 1.4;
+    for (k, t) in &lines.targets {
+        c.overlay.labels.push(label(
+            cut_to(t, width, theme.font_size),
+            [pad, y],
+            anchor(HAlign::Left, VAlign::Top),
+            theme.font_size,
+            theme.trace_color(*k),
+        ));
+        y += theme.font_size * 1.4;
+    }
     let ready_colour = match p.ready {
         Ready::Ready => theme.level_ok,
         Ready::Pick => theme.banner_warning.background,

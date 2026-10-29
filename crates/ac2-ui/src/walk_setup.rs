@@ -79,7 +79,10 @@ pub struct WalkSetup {
     /// The count asked for; `None`: the preset's default.
     pub n: Option<usize>,
     pub seed: u64,
-    pub mic: Option<MeasId>,
+    /// The transfer measurements that capture, one per mic, in mic order.
+    pub mics: Vec<MeasId>,
+    /// Whether another offered transfer could be added (on an input none chosen measures).
+    pub add_mic: bool,
     pub focus: SetupField,
     pub typed: Option<String>,
     /// Why the typed text or the suggestion was refused.
@@ -95,8 +98,9 @@ pub struct WalkSetup {
 }
 
 impl WalkSetup {
-    /// A setup over the first plan of `plans`, if any, and the first of `mics`.
-    pub fn new(name: String, plans: &[PlanSpec], mics: &[MeasId]) -> Self {
+    /// A setup over the first plan of `plans`, if any, and the first of `mics` (the session's
+    /// transfer measurements and the input each measures).
+    pub fn new(name: String, plans: &[PlanSpec], mics: &[(MeasId, u16)]) -> Self {
         let mut s = Self {
             name,
             plan: plans.first().map(|p| p.name.clone()),
@@ -106,7 +110,8 @@ impl WalkSetup {
             reverb_s: DEFAULT_RT_S,
             n: None,
             seed: 1,
-            mic: mics.first().copied(),
+            mics: mics.first().map(|m| m.0).into_iter().collect(),
+            add_mic: false,
             focus: SetupField::Plan,
             typed: None,
             error: None,
@@ -116,9 +121,27 @@ impl WalkSetup {
             drag: None,
             sent: false,
         };
+        s.add_mic = !s.mic_choices(s.mics.len(), mics).is_empty();
         let plan = s.plan_in(plans).cloned();
         s.refresh(plan.as_ref());
         s
+    }
+
+    /// What mic row `k` may take: the offered transfers no other row chose, on an input no
+    /// other row measures (one mic stands at one point).
+    fn mic_choices(&self, k: usize, offered: &[(MeasId, u16)]) -> Vec<MeasId> {
+        let others: Vec<(MeasId, u16)> = self
+            .mics
+            .iter()
+            .enumerate()
+            .filter(|&(j, _)| j != k)
+            .filter_map(|(_, m)| offered.iter().find(|o| o.0 == *m).copied())
+            .collect();
+        offered
+            .iter()
+            .filter(|o| !others.iter().any(|x| x.0 == o.0 || x.1 == o.1))
+            .map(|o| o.0)
+            .collect()
     }
 
     /// The chosen plan among `plans` (the library and the session's copies), or the one
@@ -179,9 +202,10 @@ impl WalkSetup {
         }
     }
 
-    /// The rows shown.
+    /// The rows shown: a mic row per chosen mic, and one to add another while one is there.
     pub fn fields(&self) -> Vec<SetupField> {
-        setup_fields(self.preset)
+        let add = self.add_mic && self.mics.len() < WalkState::MAX_MICS;
+        setup_fields(self.preset, self.mics.len() + usize::from(add))
     }
 
     /// The labels of the points, in walking order.
@@ -208,8 +232,9 @@ impl WalkSetup {
     }
 
     /// ←/→ on the focused row. `plans` are the names offered, `mics` the transfer
-    /// measurements; the caller brings the zone into range and refreshes the suggestion.
-    pub fn change(&mut self, d: isize, plans: &[String], mics: &[MeasId]) {
+    /// measurements and their inputs; the caller brings the zone into range and refreshes
+    /// the suggestion.
+    pub fn change(&mut self, d: isize, plans: &[String], mics: &[(MeasId, u16)]) {
         self.typed = None;
         self.error = None;
         let cycle = |n: usize, i: usize| ((i as isize + d).rem_euclid(n as isize)) as usize;
@@ -254,14 +279,25 @@ impl WalkSetup {
             SetupField::Pattern => {
                 self.seed = (self.seed as i64 + d as i64).max(1) as u64;
             }
-            SetupField::Mic => {
-                if !mics.is_empty() {
-                    let i = self
-                        .mic
-                        .and_then(|m| mics.iter().position(|x| *x == m))
-                        .unwrap_or(0);
-                    self.mic = Some(mics[cycle(mics.len(), i)]);
+            SetupField::Mic(k) => {
+                let k = usize::from(k);
+                // The first mic is always one; a later row cycles through none as well,
+                // and none drops it and the rows after it.
+                let mut choices: Vec<Option<MeasId>> =
+                    self.mic_choices(k, mics).into_iter().map(Some).collect();
+                if k > 0 {
+                    choices.insert(0, None);
                 }
+                if !choices.is_empty() {
+                    let now = self.mics.get(k).copied();
+                    let i = choices.iter().position(|c| *c == now).unwrap_or(0);
+                    match choices[cycle(choices.len(), i)] {
+                        Some(m) if k < self.mics.len() => self.mics[k] = m,
+                        Some(m) => self.mics.push(m),
+                        None => self.mics.truncate(k),
+                    }
+                }
+                self.add_mic = !self.mic_choices(self.mics.len(), mics).is_empty();
             }
         }
     }
@@ -835,7 +871,11 @@ mod tests {
     #[test]
     fn a_setup_suggests_then_takes_edits() {
         let plan = hall();
-        let mut s = WalkSetup::new("Walk 1".into(), std::slice::from_ref(&plan), &[MeasId(1)]);
+        let mut s = WalkSetup::new(
+            "Walk 1".into(),
+            std::slice::from_ref(&plan),
+            &[(MeasId(1), 1)],
+        );
         assert_eq!(s.points.len(), 8);
         s.plan_msg(
             PlanMsg::Press {

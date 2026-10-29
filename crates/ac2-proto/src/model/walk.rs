@@ -20,13 +20,14 @@ pub struct WalkState {
     pub plan: String,
     /// What a capture at a point is.
     pub kind: WalkKind,
-    /// The measurements that capture at each point, one per mic.
+    /// The measurements that capture at the points, one per mic, in mic order (at most
+    /// [`Self::MAX_MICS`]).
     pub meas: Vec<MeasId>,
     /// The positions, in walking order.
     pub points: Vec<WalkPoint>,
-    /// The point the mic is at (index into `points`); `None`: every point is captured or
-    /// skipped.
-    pub current: Option<u16>,
+    /// The step the mics are at ([`WalkPoint::step`]): each stands at its pending point of
+    /// it. `None`: every point is captured or skipped.
+    pub step: Option<u16>,
     /// The math channel averaging the captures, made at the second capture; `None` before.
     pub average: Option<MeasId>,
 }
@@ -35,6 +36,8 @@ impl WalkState {
     /// Most points a walk holds: an average takes at most
     /// [`MathConfig::MAX_AVERAGE`](crate::model::MathConfig::MAX_AVERAGE) operands.
     pub const MAX_POINTS: usize = 64;
+    /// Most mics (measurements) of a walk: what one operator places at a step.
+    pub const MAX_MICS: usize = 8;
     /// Most characters of a walk's or a point's name.
     pub const MAX_NAME: usize = 64;
 
@@ -42,12 +45,48 @@ impl WalkState {
     pub fn captured_traces(&self) -> Vec<TraceId> {
         self.points
             .iter()
-            .flat_map(|p| match &p.state {
-                PointState::Captured { traces, .. } => traces.as_slice(),
-                PointState::Pending | PointState::Skipped => &[],
+            .filter_map(|p| match &p.state {
+                PointState::Captured { trace, .. } => Some(*trace),
+                PointState::Pending | PointState::Skipped => None,
             })
-            .copied()
             .collect()
+    }
+
+    /// How many steps the walk's points are grouped into.
+    pub fn steps(&self) -> u16 {
+        self.points
+            .iter()
+            .map(|p| p.step.saturating_add(1))
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// The points of step `step`, in mic order of their mics.
+    pub fn step_points(&self, step: u16) -> Vec<usize> {
+        let mut v: Vec<usize> = (0..self.points.len())
+            .filter(|&i| self.points[i].step == step)
+            .collect();
+        v.sort_by_key(|&i| self.mic_index(self.points[i].mic));
+        v
+    }
+
+    /// Where the mics stand now: the pending points of the current step, in mic order.
+    pub fn standing(&self) -> Vec<usize> {
+        self.step.map_or_else(Vec::new, |s| {
+            self.step_points(s)
+                .into_iter()
+                .filter(|&i| matches!(self.points[i].state, PointState::Pending))
+                .collect()
+        })
+    }
+
+    /// The place of measurement `meas` among the walk's mics (its colour, its order);
+    /// past the last when the walk does not name it.
+    pub fn mic_index(&self, meas: MeasId) -> usize {
+        self.meas
+            .iter()
+            .position(|&m| m == meas)
+            .unwrap_or(self.meas.len())
     }
 }
 
@@ -67,8 +106,11 @@ pub struct WalkPoint {
     pub label: String,
     /// Plan x, plan y, ear height; metres.
     pub at: [f64; 3],
-    /// The measurement whose mic stood here; `None` until the point is captured.
-    pub mic: Option<MeasId>,
+    /// The step it belongs to: the walk places its mics a step at a time.
+    pub step: u16,
+    /// The measurement whose mic stands here at its step: the grouping's choice, traded by
+    /// `walk.swap` while pending, the one that captured once captured.
+    pub mic: MeasId,
     /// What became of it.
     pub state: PointState,
 }
@@ -79,10 +121,10 @@ pub struct WalkPoint {
 pub enum PointState {
     /// Not captured yet.
     Pending,
-    /// Captured: one trace per walk measurement, in the walk's measurement order.
+    /// Captured by the point's mic.
     Captured {
-        /// The captures.
-        traces: Vec<TraceId>,
+        /// The capture.
+        trace: TraceId,
         /// What they were taken under: a walk resumed another day, or after a change in
         /// the chain, averages captures that differ in more than position.
         context: CaptureContext,
@@ -100,15 +142,7 @@ pub enum PointState {
 pub struct CaptureContext {
     /// When (daemon clock).
     pub at: WallNs,
-    /// One per walk measurement, in the walk's measurement order.
-    pub chains: Vec<CaptureChain>,
-}
-
-/// One walk measurement's chain at a capture.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CaptureChain {
-    /// The mic on its measurement input and the curve subtracted from its columns, as the
+    /// The mic on the measurement input and the curve subtracted from its columns, as the
     /// capture's trace records it; `None`: the input names no mic.
     pub mic: Option<MicState>,
     /// The measurement's EQ sets marked "in the console", by set and the revision marked:

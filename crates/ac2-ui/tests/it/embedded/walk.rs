@@ -138,7 +138,7 @@ fn spatial_walk_from_an_empty_daemon() -> R {
     d.key("X");
     d.until("P1 captured", |s| captured(s) == 1)?;
     d.until("on to P2", |s| {
-        s.walks().first().and_then(|w| w.current) == Some(1)
+        s.walks().first().and_then(|w| w.step) == Some(1)
     })?;
     d.key("X");
     d.until("the average", |s| {

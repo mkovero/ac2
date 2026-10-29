@@ -5,8 +5,8 @@ use super::*;
 use ac2_proto::Change;
 use ac2_proto::event::Patch;
 use ac2_proto::model::{
-    CaptureChain, CaptureContext, EqMark, Marker, MarkerKind, PlanSpec, PointState, WalkKind,
-    WalkPoint, WalkState, ZoneSpec,
+    CaptureContext, EqMark, Marker, MarkerKind, PlanSpec, PointState, WalkKind, WalkPoint,
+    WalkState, ZoneSpec,
 };
 use ac2_proto::units::{EqSetId, TraceId, WalkId, WallNs};
 
@@ -58,15 +58,13 @@ fn wall_now() -> u64 {
 /// A capture at `at` with EQ set 1 marked in the console at revision `rev`.
 fn captured(trace: u32, at: u64, rev: u32) -> PointState {
     PointState::Captured {
-        traces: vec![TraceId(trace)],
+        trace: TraceId(trace),
         context: CaptureContext {
             at: WallNs(at),
-            chains: vec![CaptureChain {
-                mic: None,
-                eq_in: vec![EqMark {
-                    set: EqSetId(1),
-                    rev,
-                }],
+            mic: None,
+            eq_in: vec![EqMark {
+                set: EqSetId(1),
+                rev,
             }],
         },
     }
@@ -79,10 +77,12 @@ fn walk_rig() -> common::Rig {
     let now = wall_now();
     {
         let mut s = rig.fake.lock();
+        // One mic: a step per point, in walking order.
         let point = |label: &str, x: f64, y: f64, state| WalkPoint {
             label: label.into(),
             at: [x, y, 1.2],
-            mic: None,
+            step: label[1..].parse::<u16>().unwrap_or(1) - 1,
+            mic: MeasId(1),
             state,
         };
         s.commit(Change::Plan(Patch::Set(hall())));
@@ -99,7 +99,7 @@ fn walk_rig() -> common::Rig {
                 point("P3", 16.0, 4.0, PointState::Pending),
                 point("P4", 7.0, 4.5, captured(901, now, 2)),
             ],
-            current: Some(1),
+            step: Some(1),
             average: None,
         })));
     }

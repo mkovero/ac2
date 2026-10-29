@@ -7,3 +7,4 @@ mod geom;
 pub mod pattern;
 pub mod plan;
 mod rng;
+pub mod steps;

@@ -623,9 +623,7 @@ pub(super) fn remap_ids(
             re(a);
         }
         for p in &mut w.points {
-            if let Some(m) = &mut p.mic {
-                re(m);
-            }
+            re(&mut p.mic);
         }
     }
     let mut moved: Vec<_> = map.into_iter().collect();

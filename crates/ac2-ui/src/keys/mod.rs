@@ -350,8 +350,9 @@ commands! {
 
     Walks => "walks", "Spatial walk…", [Global];
     WalkCapture => "walk_capture", "Capture here and go on", [Walk];
-    WalkNext => "walk_next", "Next point", [Walk];
-    WalkPrev => "walk_prev", "Previous point", [Walk];
+    WalkNext => "walk_next", "Next step", [Walk];
+    WalkPrev => "walk_prev", "Previous step", [Walk];
     WalkRedo => "walk_redo", "Redo point and reset", [Walk];
     WalkSkip => "walk_skip", "Skip point", [Walk];
+    WalkSwap => "walk_swap", "Mics trade places", [Walk];
 }

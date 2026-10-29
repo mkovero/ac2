@@ -296,6 +296,7 @@ pub fn defaults() -> Vec<Binding> {
         (C::WalkPrev, S::Walk, k(K::PageUp)),
         (C::WalkRedo, S::Walk, sh(K::R)),
         (C::WalkSkip, S::Walk, k(K::K)),
+        (C::WalkSwap, S::Walk, k(K::M)),
     ];
     v.extend(RESERVED.iter().map(|(c, id)| (*id, S::Global, *c)));
     v.into_iter()
@@ -415,10 +416,11 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
             const {
                 &[
                     hint(C::WalkCapture, "capture here", 95),
-                    hint(C::WalkNext, "next point", 85),
+                    hint(C::WalkNext, "next step", 85),
                     hint(C::WalkPrev, "previous", 60),
                     hint(C::WalkSkip, "skip", 75),
                     hint(C::WalkRedo, "redo, resets the walk's measurements", 70),
+                    hint(C::WalkSwap, "mics trade places", 65),
                     hint(C::StimulusArm, "stimulus", 50),
                     hint(C::MaximisePane, "maximise", 40),
                 ]

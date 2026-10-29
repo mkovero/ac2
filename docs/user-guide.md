@@ -1496,7 +1496,9 @@ the setup window. Its rows: **name**, **plan** (a plan of the library, or *New p
 **zones** (every zone, or one alone), **preset** (*Tuning*, or *ISO 3382-1* with its **RT**
 row, the reverberation time its source distance needs), **positions** (the preset's count:
 8 for tuning, 6 / 8 / 10 by the zones' seats for ISO 3382-1), **pattern** (another
-arrangement of as many points) and **mic** (the transfer measurement that captures). **↑/↓**
+arrangement of as many points) and **mic** (the transfer measurement that captures; a **mic
+2** row follows while another transfer measures an input of its own: **→** adds it, and so on
+up to eight, *none* drops it). **↑/↓**
 moves between rows, **←/→** changes a choice, a value is typed (no letter keys), **Enter**
 starts the walk, **Esc** closes. The plan beside the rows shows the suggested points; drag
 one to move it (snapped to 0.1 m), click to add one, right-click to delete. A rule the
@@ -1525,12 +1527,21 @@ another mic, mic curve or EQ marked in the console between captures — a warnin
 average says so, e.g. *P1–P4 yesterday, P5–P8 today · EQ changed*. It only warns: capture and
 the average go on as before. Its keys:
 
+With **several mics** the walk places them all at each step: the step line names each by its
+mic (*Move Vilppu to P3, MM1 to P4*), a line per mic under it gives its readout in the mic's
+colour, and on the plan each mic's point is ringed in that colour, the next step's faintly.
+The steps are grouped so the cables move least: after the first step (mic 1 at P1, mic 2 at
+P2 …) each step takes the points nearest to where the mics stood, paired so the summed carry
+is least; when fewer points are left than mics, the nearest mics go and the others sit out.
+The readiness line is the slowest mic's, named (*settling · MM1*), with its bar.
+
 | Key | |
 |---|---|
-| **X** | capture here and go on to the next pending point |
-| **PageDown / PageUp** | the next / previous point (moving the mic restarts the averages) |
-| **Shift+R** | redo the point (the one the mic is at, else the last captured): its capture leaves the average, the walk's measurements restart there |
-| **K** | skip the point |
+| **X** | capture where the mics stand (one trace per mic) and go on to the next step |
+| **PageDown / PageUp** | the next / previous step (moving the mics restarts the averages) |
+| **Shift+R** | redo a point (at the step the mics are at, else the last one captured): its capture leaves the average, the walk's measurements restart there; with several captures there, pick one or the whole step |
+| **K** | skip the point a mic stands at; with several mics, pick one or the whole step (the others stay) |
+| **M** | the mics trade places at this step (with three or more, each moves one on); later steps follow each mic from where it now stands |
 | **Space / Enter** | the stimulus, as everywhere |
 
 Captures are named *P3 · <mic>* and list their position (*at P3*); a superseded capture is
@@ -1538,18 +1549,20 @@ dimmed in the list, an unsettled one says so.
 
 #### Spatial walk (CLI)
 
-The daemon can lead the one-mic walk itself ([spatial-walk.md](design/spatial-walk.md)): a
-room **plan** (outline, ceiling, audience zones at ear height) in its plan library, positions
-suggested on it, and a **walk** that captures one transfer measurement at each position and
-averages the captures as it goes.
+The daemon can lead the walk itself ([spatial-walk.md](design/spatial-walk.md)): a room
+**plan** (outline, ceiling, audience zones at ear height) in its plan library, positions
+suggested on it, and a **walk** that captures its transfer measurements (one per mic) at the
+positions, a step at a time, and averages the captures as it goes.
 
 ```
 ac2 plan new Hall --width 20 --depth 30 --ceiling 9      # one zone 1 m in from the walls
 ac2 plan export Hall hall.json / ac2 plan import hall.json
 ac2 walk new Mains --plan Hall --meas Seat --points 8    # --preset iso3382 --rt 1.4
-ac2 walk status                                          # where the mic goes, what is captured
-ac2 walk capture                                         # P1 · <mic>, then on to the next point
-ac2 walk next | prev | skip | redo P3
+ac2 walk new Mains --plan Hall --meas L --meas R         # two mics, each on its own input
+ac2 walk status                                          # where the mics go, what is captured
+ac2 walk capture                                         # P1 · <mic>, then on to the next step
+ac2 walk next | prev | skip [P3] | redo P3
+ac2 walk swap P3 P4                                      # the mics at P3 and P4 trade places
 ```
 
 Moving the mic (a new walk, **next**/**prev**, the advance after a capture or skip, a redo)
@@ -1559,8 +1572,9 @@ the delay moved, an arrival to pick, a fault) is kept and marked *unsettled*. Fr
 capture the walk keeps a power average of its captures, *<walk> · average*, under the
 measurement; a redo or a skip keeps the old capture (superseded) and takes it out of the
 average. While the walk exists, its measurement, its captures and its average cannot be
-deleted; deleting the walk keeps them. One measurement (one mic) per walk for now; the walk
-and its plan are saved with the session. Plans live in the daemon's data directory
+deleted; deleting the walk keeps them. A walk takes up to eight measurements, each on its own
+input; **skip** without a point skips every point a mic stands at. The walk and its plan are
+saved with the session. Plans live in the daemon's data directory
 (`plans/`, `ac2d --plans DIR`).
 
 #### Missing operands
@@ -3556,10 +3570,11 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Keys | Command | `keys.toml` |
 |---|---|---|
 | `X` | Capture here and go on | `walk_capture` |
-| `PageDown` | Next point | `walk_next` |
-| `PageUp` | Previous point | `walk_prev` |
+| `PageDown` | Next step | `walk_next` |
+| `PageUp` | Previous step | `walk_prev` |
 | `Shift+R` | Redo point and reset | `walk_redo` |
 | `K` | Skip point | `walk_skip` |
+| `M` | Mics trade places | `walk_swap` |
 
 #### Command palette only (`Ctrl+K`)
 
@@ -3660,7 +3675,7 @@ The least used go first on a narrow pane; `G/Shift+G` steps the pane's views for
 | Sweep / distortion | `Shift+S` new sweep · `V` select trace · `G/Shift+G` view · `E` reference · `W` maximise · `Q` close pane · `H` all keys |
 | Programme | `R` reset · `Shift+R` reset all · `G/Shift+G` view · `T` grid · `W` maximise · `Q` close pane · `H` all keys |
 | Inputs list row | `R` reset · `Shift+R` reset all · `P` programme pane · `Tab` measurements · `H` all keys |
-| Spatial walk | `X` capture here · `PageDown` next point · `PageUp` previous · `K` skip · `Shift+R` redo, resets the walk's measurements · `Space` stimulus · `W` maximise · `H` all keys |
+| Spatial walk | `X` capture here · `PageDown` next step · `PageUp` previous · `K` skip · `Shift+R` redo, resets the walk's measurements · `M` mics trade places · `Space` stimulus · `W` maximise · `H` all keys |
 
 <!-- keymap:end -->
 

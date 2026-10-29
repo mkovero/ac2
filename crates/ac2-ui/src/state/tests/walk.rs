@@ -32,7 +32,9 @@ fn point(label: &str, x: f64, state: PointState) -> WalkPoint {
     WalkPoint {
         label: label.into(),
         at: [x, 6.0, 1.2],
-        mic: None,
+        // One mic: a step per point, in walking order.
+        step: (x / 4.0) as u16 - 1,
+        mic: MeasId(1),
         state,
     }
 }
@@ -50,17 +52,18 @@ fn mains() -> WalkState {
                 "P1",
                 4.0,
                 PointState::Captured {
-                    traces: vec![TraceId(5)],
+                    trace: TraceId(5),
                     context: ac2_proto::model::CaptureContext {
                         at: ac2_proto::units::WallNs(0),
-                        chains: vec![],
+                        mic: None,
+                        eq_in: vec![],
                     },
                 },
             ),
             point("P2", 8.0, PointState::Pending),
             point("P3", 12.0, PointState::Pending),
         ],
-        current: Some(1),
+        step: Some(1),
         average: None,
     }
 }
@@ -129,7 +132,7 @@ fn the_setup_window_follows_k9() {
     let s = setup(&t);
     assert_eq!(s.name, "Walk 1");
     assert_eq!(s.plan.as_deref(), Some("Hall"));
-    assert_eq!(s.mic, Some(MeasId(1)), "the session's transfer");
+    assert_eq!(s.mics, [MeasId(1)], "the session's transfer");
     assert_eq!(s.points.len(), 8, "tuning's default");
     assert_eq!(s.focus, SetupField::Plan);
     // Down to the preset; → is ISO 3382-1 (400 seats: 6 positions), whose RT row appears.
@@ -323,7 +326,7 @@ fn the_walk_pane_keys_drive_the_walk() {
         c,
         Command::WalkGoto {
             walk: WalkId(1),
-            point: 2
+            step: 2
         }
     );
     let (c, _) = only(t.key("PageUp"));
@@ -331,7 +334,7 @@ fn the_walk_pane_keys_drive_the_walk() {
         c,
         Command::WalkGoto {
             walk: WalkId(1),
-            point: 0
+            step: 0
         }
     );
     // The mic at a pending point: Shift+R redoes the last one captured before it.
@@ -345,11 +348,137 @@ fn the_walk_pane_keys_drive_the_walk() {
     );
     assert!(what.contains("out of the average"), "{what}");
     let (c, _) = only(t.key("K"));
-    assert_eq!(c, Command::WalkSkip { walk: WalkId(1) });
+    assert_eq!(
+        c,
+        Command::WalkSkip {
+            walk: WalkId(1),
+            point: 1
+        }
+    );
+    // One mic: no other to trade places with.
+    assert!(calls(&t.key("M")).is_empty());
+    assert!(t.last_toast().contains("no other"), "{}", t.last_toast());
     // Every point done: X says so and sends nothing.
-    t.remirror(|s| s.walks[0].current = None);
+    t.remirror(|s| s.walks[0].step = None);
     assert!(calls(&t.key("X")).is_empty());
     assert!(t.last_toast().contains("every point"), "{}", t.last_toast());
+}
+
+/// A transfer on input 2, the second mic.
+fn second_mic() -> Measurement {
+    let mut m = super::meas(3, "Main R", super::transfer());
+    if let MeasKind::Transfer { config } = &mut m.config.kind {
+        config.measurement_input = 2;
+    }
+    m
+}
+
+/// Two mics: Main L (1) and Main R (3); step 0 at P1 and P2, step 1 at P3 (Main R) and P4
+/// (Main L).
+fn two_mics() -> WalkState {
+    let mut w = mains();
+    w.meas = vec![MeasId(1), MeasId(3)];
+    w.points = vec![
+        point("P1", 4.0, PointState::Pending),
+        point("P2", 8.0, PointState::Pending),
+        point("P3", 12.0, PointState::Pending),
+        point("P4", 16.0, PointState::Pending),
+    ];
+    for (p, (step, mic)) in w.points.iter_mut().zip([(0, 1), (0, 3), (1, 3), (1, 1)]) {
+        p.step = step;
+        p.mic = MeasId(mic);
+    }
+    w.step = Some(1);
+    w
+}
+
+/// Two mics: the setup adds the second on its own input, X captures both, M has them trade
+/// places, K and Shift+R ask which point (the whole step first).
+#[test]
+fn a_walk_with_two_mics_from_the_keyboard() {
+    let mut t = with_plan();
+    t.remirror(|s| s.measurements.push(second_mic()));
+    t.key("Shift+W");
+    t.key("Enter");
+    // Down to the mic rows: one chosen, one to add the other transfer (on input 2).
+    let fields = setup(&t).fields();
+    assert_eq!(
+        &fields[fields.len() - 2..],
+        [SetupField::Mic(0), SetupField::Mic(1)]
+    );
+    for _ in 0..fields.len() {
+        t.key("Down");
+    }
+    assert_eq!(setup(&t).focus, SetupField::Mic(1));
+    t.key("Right");
+    assert_eq!(setup(&t).mics, [MeasId(1), MeasId(3)]);
+    assert_eq!(
+        setup(&t).fields().last(),
+        Some(&SetupField::Mic(1)),
+        "no third transfer to add"
+    );
+    let r = t.key("Enter");
+    let [
+        Request::NewWalk {
+            cmd: Command::WalkNew { meas, .. },
+            ..
+        },
+    ] = r.as_slice()
+    else {
+        panic!("{r:?}");
+    };
+    assert_eq!(meas, &vec![MeasId(1), MeasId(3)]);
+    t.key("Esc");
+
+    t.remirror(|s| {
+        s.walk_plans = vec![hall()];
+        s.walks = vec![two_mics()];
+    });
+    t.st.open_walk_pane(WalkId(1));
+    let only = |r: Vec<Request>| match calls(&r).as_slice() {
+        [(c, what)] => ((*c).clone(), (*what).to_owned()),
+        _ => panic!("{r:?}"),
+    };
+    let (c, what) = only(t.key("X"));
+    assert_eq!(c, Command::WalkCapture { walk: WalkId(1) });
+    assert_eq!(what, "Mains captured at P4, P3");
+    let (c, what) = only(t.key("M"));
+    assert_eq!(
+        c,
+        Command::WalkSwap {
+            walk: WalkId(1),
+            points: vec![3, 2]
+        }
+    );
+    assert_eq!(what, "Mains: move Main R to P4, Main L to P3");
+    // K: which point, the whole step first.
+    t.key("K");
+    let Overlay::Choose(c) = &t.st.overlay else {
+        panic!("{:?}", t.st.overlay);
+    };
+    let rows: Vec<&str> = c.choices.iter().map(|c| c.label.as_str()).collect();
+    assert_eq!(
+        rows,
+        ["the whole step: P4, P3", "P4 · Main L", "P3 · Main R"]
+    );
+    t.key("Down");
+    t.key("Down");
+    let (c, _) = only(t.key("Enter"));
+    assert_eq!(
+        c,
+        Command::WalkSkip {
+            walk: WalkId(1),
+            point: 2
+        }
+    );
+    // Esc closes the chooser, nothing sent.
+    t.key("K");
+    assert!(calls(&t.key("Esc")).is_empty());
+    assert_eq!(t.st.overlay, Overlay::None);
+    // The whole step: a skip per point.
+    t.key("K");
+    let r = t.key("Enter");
+    assert_eq!(calls(&r).len(), 2, "{r:?}");
 }
 
 /// A walk pane is stored with its walk and comes back with it; another kind drops it.

@@ -39,9 +39,10 @@ fn rig(name: &str, backend: FakeBackend) -> Rig {
     cfg.plan_dir = Some(dir.path().join("plans"));
     let h = Daemon::start(cfg).unwrap();
     let (mut c, sub) = connect(&h, &[b"d/1/tf"]);
-    c.ok(Command::SessionOpen {
-        config: session(true),
-    });
+    // A third input for a second mic.
+    let mut s = session(true);
+    s.input_channels = vec![0, 1, 2];
+    c.ok(Command::SessionOpen { config: s });
     let mut m = transfer("main");
     if let MeasKind::Transfer { config } = &mut m.kind {
         config.depth = DepthPolicy::FastLf {
@@ -198,9 +199,9 @@ fn filled(f: &Frame) -> f32 {
     }
 }
 
-fn captured(w: &WalkState, i: usize) -> Vec<TraceId> {
+fn captured(w: &WalkState, i: usize) -> TraceId {
     match &w.points[i].state {
-        PointState::Captured { traces, .. } => traces.clone(),
+        PointState::Captured { trace, .. } => *trace,
         other => panic!("{other:?}"),
     }
 }
@@ -212,21 +213,21 @@ fn moving_to_a_point_resets_each_walk_measurement_and_turns_tracking_on() {
     assert!(!r.meas(MeasId(1)).delay.unwrap().tracking);
 
     let w = r.new_walk(&["P1", "P2", "P3"]);
-    assert_eq!(w.current, Some(0));
+    assert_eq!(w.step, Some(0));
     assert!(r.meas(MeasId(1)).delay.unwrap().tracking);
     let first = r.fill();
     assert!(first < 0.5, "walk.new restarts the averages: {first}");
 
     r.walk(Command::WalkGoto {
         walk: w.id,
-        point: 2,
+        step: 2,
     });
     let first = r.fill();
     assert!(first < 0.5, "walk.goto restarts the averages: {first}");
 
     // The capture's advance is a move too.
     let w = r.walk(Command::WalkCapture { walk: w.id });
-    assert_eq!(w.current, Some(0), "on to the next pending point, wrapping");
+    assert_eq!(w.step, Some(0), "on to the next pending point, wrapping");
     let first = r.fill();
     assert!(first < 0.5, "the advance restarts the averages: {first}");
     r.shutdown();
@@ -248,7 +249,7 @@ fn captures_carry_positions_and_a_delay_step_restarts_filled() {
     let f = filled(&r.frame(0.1, rev));
     assert!(f < 1.0, "{f}");
     let w = r.walk(Command::WalkCapture { walk: w.id });
-    let t1 = r.trace(captured(&w, 0)[0]);
+    let t1 = r.trace(captured(&w, 0));
     assert!(t1.captured_unsettled);
     assert_eq!(t1.edit.name, "P1 · main");
     assert_eq!(
@@ -266,16 +267,15 @@ fn captures_carry_positions_and_a_delay_step_restarts_filled() {
         panic!("{w:?}");
     };
     assert_eq!(context.at, t1.created_at);
-    assert_eq!(context.chains.len(), 1);
-    assert_eq!(context.chains[0].mic, t1.mic);
-    assert_eq!(context.chains[0].eq_in.len(), t1.eq_in.len());
-    assert_eq!(w.points[0].mic, Some(MeasId(1)));
+    assert_eq!(context.mic, t1.mic);
+    assert_eq!(context.eq_in.len(), t1.eq_in.len());
+    assert_eq!(w.points[0].mic, MeasId(1));
     assert_eq!(w.average, None, "one capture is no average");
 
     // Settled this time; the second capture makes the average, under the walk's
     // measurement.
     let w = r.capture(w.id);
-    let t2 = r.trace(captured(&w, 1)[0]);
+    let t2 = r.trace(captured(&w, 1));
     assert!(!t2.captured_unsettled);
     assert_eq!(t2.position.as_ref().unwrap().label, "P2");
     assert_eq!(r.average_of(&w), vec![t1.id, t2.id]);
@@ -289,10 +289,10 @@ fn captures_carry_positions_and_a_delay_step_restarts_filled() {
     assert!(avg.running);
 
     // Capturing a captured point is refused; the walk is at P3.
-    assert_eq!(w.current, Some(2));
+    assert_eq!(w.step, Some(2));
     r.walk(Command::WalkGoto {
         walk: w.id,
-        point: 0,
+        step: 0,
     });
     let e = r.c.call(Command::WalkCapture { walk: w.id }).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
@@ -306,15 +306,15 @@ fn redo_and_skip_supersede_and_the_average_follows() {
     r.capture(w.id);
     r.capture(w.id);
     let w = r.capture(w.id);
-    assert_eq!(w.current, None, "every point captured");
-    let (t1, t2, t3) = (captured(&w, 0)[0], captured(&w, 1)[0], captured(&w, 2)[0]);
+    assert_eq!(w.step, None, "every point captured");
+    let (t1, t2, t3) = (captured(&w, 0), captured(&w, 1), captured(&w, 2));
     assert_eq!(r.average_of(&w), vec![t1, t2, t3]);
 
     let w = r.walk(Command::WalkRedo {
         walk: w.id,
         point: 0,
     });
-    assert_eq!(w.current, Some(0));
+    assert_eq!(w.step, Some(0));
     assert_eq!(w.points[0].state, PointState::Pending);
     assert!(r.trace(t1).superseded, "kept, superseded");
     assert_eq!(r.average_of(&w), vec![t2, t3]);
@@ -322,15 +322,14 @@ fn redo_and_skip_supersede_and_the_average_follows() {
     assert!(first < 0.5, "a redo is a move: {first}");
 
     let w = r.walk(Command::WalkCapture { walk: w.id });
-    let t1b = captured(&w, 0)[0];
+    let t1b = captured(&w, 0);
     assert_ne!(t1b, t1);
     assert_eq!(r.average_of(&w), vec![t1b, t2, t3], "in point order");
 
-    r.walk(Command::WalkGoto {
+    let w = r.walk(Command::WalkSkip {
         walk: w.id,
         point: 1,
     });
-    let w = r.walk(Command::WalkSkip { walk: w.id });
     assert_eq!(w.points[1].state, PointState::Skipped);
     assert!(r.trace(t2).superseded);
     assert_eq!(r.average_of(&w), vec![t1b, t3]);
@@ -352,7 +351,7 @@ fn redo_and_skip_supersede_and_the_average_follows() {
     // The next captures fill the same average again.
     r.walk(Command::WalkGoto {
         walk: w.id,
-        point: 0,
+        step: 0,
     });
     let w = r.capture(w.id);
     let w = r.capture(w.id);
@@ -361,12 +360,138 @@ fn redo_and_skip_supersede_and_the_average_follows() {
     r.shutdown();
 }
 
+/// The second mic: a transfer on input 2, running.
+fn second_mic(r: &mut Rig) -> MeasId {
+    let mut m = transfer("second");
+    if let MeasKind::Transfer { config } = &mut m.kind {
+        config.measurement_input = 2;
+    }
+    let id = match r.c.ok(Command::MeasCreate { config: m }) {
+        ReplyBody::Measurement(m) => m.id,
+        other => panic!("{other:?}"),
+    };
+    r.c.ok(Command::MeasStart { meas: id });
+    id
+}
+
+fn tracking(r: &mut Rig, meas: MeasId) -> bool {
+    r.meas(meas).delay.is_some_and(|d| d.tracking)
+}
+
+#[test]
+fn two_mics_capture_a_step_at_a_time_and_swap_skip_redo_per_point() {
+    let mut r = rig("walk-two-mics", manual_rig());
+    let m2 = second_mic(&mut r);
+    // P1 left and P2 right of the hall, then a row further back, then one more on the right.
+    let at = [
+        [2.0, 10.0],
+        [18.0, 10.0],
+        [16.0, 14.0],
+        [4.0, 14.0],
+        [17.0, 18.0],
+    ];
+    let points: Vec<WalkPointSpec> = at
+        .iter()
+        .enumerate()
+        .map(|(i, a)| WalkPointSpec {
+            label: format!("P{}", i + 1),
+            at: [a[0], a[1], 1.2],
+        })
+        .collect();
+    let w = r.walk(Command::WalkNew {
+        name: "Mains".into(),
+        plan: "Hall".into(),
+        kind: WalkKind::LiveTransfer,
+        meas: vec![MeasId(1), m2],
+        points,
+    });
+    // Each mic walks its own side: the cables cross nowhere.
+    let plan: Vec<(u16, MeasId)> = w.points.iter().map(|p| (p.step, p.mic)).collect();
+    assert_eq!(
+        plan,
+        vec![(0, MeasId(1)), (0, m2), (1, m2), (1, MeasId(1)), (2, m2)]
+    );
+    assert_eq!(w.step, Some(0));
+    assert_eq!(w.standing(), vec![0, 1]);
+    assert!(tracking(&mut r, MeasId(1)) && tracking(&mut r, m2));
+
+    // One capture, both mics: two traces at two points, and the average of them.
+    r.c.ok(Command::DelayTrack {
+        meas: m2,
+        enabled: false,
+    });
+    let w = r.capture(w.id);
+    let (t1, t2) = (captured(&w, 0), captured(&w, 1));
+    assert_eq!(r.trace(t1).edit.name, "P1 · main");
+    assert_eq!(r.trace(t2).edit.name, "P2 · second");
+    assert_eq!(r.trace(t2).position.unwrap().label, "P2");
+    assert_eq!(r.average_of(&w), vec![t1, t2]);
+    assert_eq!(w.step, Some(1));
+    // The move to the next step restarts both measurements, tracking on.
+    assert!(
+        tracking(&mut r, m2),
+        "the advance restarts every walk measurement"
+    );
+    let first = r.fill();
+    assert!(first < 0.5, "the advance restarts the averages: {first}");
+
+    // The mics trade places at P3 and P4; P5, planned from where the second mic stood at P3,
+    // goes to the mic that stands there now.
+    let w = r.walk(Command::WalkSwap {
+        walk: w.id,
+        points: vec![2, 3],
+    });
+    assert_eq!((w.points[2].mic, w.points[3].mic), (MeasId(1), m2));
+    assert_eq!(w.points[4].mic, MeasId(1));
+    let e =
+        r.c.call(Command::WalkSwap {
+            walk: w.id,
+            points: vec![0, 2],
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Refused, "P1 is captured: {e:?}");
+
+    // Skipping one point of a step leaves the other mic standing.
+    let w = r.walk(Command::WalkSkip {
+        walk: w.id,
+        point: 3,
+    });
+    assert_eq!(w.points[3].state, PointState::Skipped);
+    assert_eq!(w.step, Some(1));
+    assert_eq!(w.standing(), vec![2]);
+    let w = r.capture(w.id);
+    let t3 = captured(&w, 2);
+    assert_eq!(r.trace(t3).edit.name, "P3 · main");
+    assert_eq!(w.points[2].mic, MeasId(1));
+    assert_eq!(w.step, Some(2));
+    assert_eq!(r.average_of(&w), vec![t1, t2, t3]);
+
+    // Redoing one point goes back to its step with only its mic: the other's capture stays.
+    let w = r.walk(Command::WalkRedo {
+        walk: w.id,
+        point: 0,
+    });
+    assert_eq!(w.step, Some(0));
+    assert_eq!(w.standing(), vec![0]);
+    assert!(r.trace(t1).superseded);
+    assert_eq!(r.average_of(&w), vec![t2, t3]);
+    let w = r.capture(w.id);
+    let t1b = captured(&w, 0);
+    assert_eq!(w.step, Some(2), "on to the step still pending");
+    let w = r.capture(w.id);
+    assert_eq!(w.step, None);
+    let t5 = captured(&w, 4);
+    assert_eq!(r.trace(t5).edit.name, "P5 · main");
+    assert_eq!(r.average_of(&w), vec![t1b, t2, t3, t5]);
+    r.shutdown();
+}
+
 #[test]
 fn what_a_walk_names_cannot_be_deleted_and_its_delete_keeps_them() {
     let mut r = rig("walk-owners", manual_rig());
     let w = r.new_walk(&["P1", "P2"]);
     let w1 = r.capture(w.id);
-    let t1 = captured(&w1, 0)[0];
+    let t1 = captured(&w1, 0);
     // Before the average, only the walk names the first capture.
     let e = r.c.call(Command::TraceDelete { trace: t1 }).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
@@ -433,7 +558,11 @@ fn walk_new_refuses_what_it_cannot_walk() {
     let cases = [
         (
             new(vec![MeasId(1), MeasId(2)], "Hall", &["P1"]),
-            ErrorCode::Unsupported,
+            ErrorCode::Invalid,
+        ),
+        (
+            new(vec![MeasId(1), MeasId(1)], "Hall", &["P1"]),
+            ErrorCode::Invalid,
         ),
         (
             new(vec![MeasId(1)], "Nowhere", &["P1"]),
@@ -454,7 +583,7 @@ fn walk_new_refuses_what_it_cannot_walk() {
     let e =
         r.c.call(new(vec![MeasId(1), MeasId(2)], "Hall", &["P1"]))
             .unwrap_err();
-    assert!(e.msg.contains("stage 3"), "{}", e.msg);
+    assert!(e.msg.contains("its own input"), "{}", e.msg);
     assert!(r.state().walks.is_empty());
     r.shutdown();
 }
@@ -504,10 +633,10 @@ fn awaiting_pick_reaches_the_walk_pane_and_marks_the_capture_unsettled() {
         panic!("{:?}", m.layout);
     };
     assert_eq!(pane.content, Some(PaneContent::Walk { walk: w.id }));
-    assert_eq!(st.walks[0].current, Some(0));
+    assert_eq!(st.walks[0].step, Some(0));
 
     let w = r.capture(w.id);
-    assert!(r.trace(captured(&w, 0)[0]).captured_unsettled);
+    assert!(r.trace(captured(&w, 0)).captured_unsettled);
     r.shutdown();
 }
 
@@ -552,11 +681,11 @@ fn a_session_round_trip_keeps_the_walk_and_its_plan() {
     // The loaded average still averages the loaded captures, and the walk goes on from
     // where it was.
     let w = back.walks[0].clone();
-    assert_eq!(
-        r.average_of(&w),
-        [captured(&w, 0), captured(&w, 1)].concat()
-    );
-    let w = r.walk(Command::WalkSkip { walk: w.id });
+    assert_eq!(r.average_of(&w), vec![captured(&w, 0), captured(&w, 1)]);
+    let w = r.walk(Command::WalkSkip {
+        walk: w.id,
+        point: w.standing()[0] as u16,
+    });
     assert_eq!(w.points[2].state, PointState::Skipped);
     r.h.shutdown();
 }

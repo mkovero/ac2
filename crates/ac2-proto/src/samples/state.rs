@@ -546,33 +546,32 @@ pub fn plan() -> PlanSpec {
     }
 }
 
-/// A walk of measurement 1 through three points of [`plan`]: P1 captured, P2 skipped, at
-/// P3.
+/// A walk of measurements 1 and 2 (two mics) through three points of [`plan`]: step 0 put
+/// mic 1 at P1 (captured) and mic 2 at P2 (skipped); at step 1, mic 1 at P3.
 pub fn walk() -> WalkState {
     WalkState {
         id: WalkId(1),
         name: "Mains".into(),
         plan: "Hall".into(),
         kind: WalkKind::LiveTransfer,
-        meas: vec![MeasId(1)],
+        meas: vec![MeasId(1), MeasId(2)],
         points: vec![
             WalkPoint {
                 label: "P1".into(),
                 at: [5.0, 12.0, 1.2],
-                mic: Some(MeasId(1)),
+                step: 0,
+                mic: MeasId(1),
                 state: PointState::Captured {
-                    traces: vec![TraceId(7)],
+                    trace: TraceId(7),
                     context: CaptureContext {
                         at: WallNs(1_761_400_000_000_000_000),
-                        chains: vec![CaptureChain {
-                            mic: Some(MicState {
-                                name: "Vilppu".into(),
-                                curve: None,
-                            }),
-                            eq_in: vec![EqMark {
-                                set: EqSetId(2),
-                                rev: 3,
-                            }],
+                        mic: Some(MicState {
+                            name: "Vilppu".into(),
+                            curve: None,
+                        }),
+                        eq_in: vec![EqMark {
+                            set: EqSetId(2),
+                            rev: 3,
                         }],
                     },
                 },
@@ -580,17 +579,19 @@ pub fn walk() -> WalkState {
             WalkPoint {
                 label: "P2".into(),
                 at: [12.5, 15.0, 1.2],
-                mic: None,
+                step: 0,
+                mic: MeasId(2),
                 state: PointState::Skipped,
             },
             WalkPoint {
                 label: "P3".into(),
                 at: [8.0, 24.0, 1.2],
-                mic: None,
+                step: 1,
+                mic: MeasId(1),
                 state: PointState::Pending,
             },
         ],
-        current: Some(2),
+        step: Some(1),
         average: None,
     }
 }

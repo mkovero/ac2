@@ -6,8 +6,9 @@
 //! Every claim is a fact the captures recorded ([`CaptureContext`]): a condition the daemon
 //! does not record is never said to have changed or stayed.
 
-use ac2_proto::model::{CaptureChain, CaptureContext, PointState, WalkState};
+use ac2_proto::model::{CaptureContext, PointState, WalkState};
 use ac2_proto::spl_log::civil_from_days;
+use ac2_proto::units::MeasId;
 use ac2_proto::units::WallNs;
 
 use crate::time::MONTHS;
@@ -57,8 +58,8 @@ fn day_word(day: i64, today: i64) -> String {
     }
 }
 
-/// What differs between the chains of two captures.
-fn differ(a: &CaptureChain, b: &CaptureChain, out: &mut Vec<Changed>) {
+/// What differs between the chains of two captures of one walk measurement.
+fn differ(a: &CaptureContext, b: &CaptureContext, out: &mut Vec<Changed>) {
     match (&a.mic, &b.mic) {
         (Some(x), Some(y)) if x.name != y.name => out.push(Changed::Mic),
         (Some(x), Some(y)) => {
@@ -74,7 +75,7 @@ fn differ(a: &CaptureChain, b: &CaptureChain, out: &mut Vec<Changed>) {
         (None, None) => {}
         _ => out.push(Changed::Mic),
     }
-    let marks = |c: &CaptureChain| {
+    let marks = |c: &CaptureContext| {
         let mut m = c.eq_in.clone();
         m.sort();
         m
@@ -84,16 +85,14 @@ fn differ(a: &CaptureChain, b: &CaptureChain, out: &mut Vec<Changed>) {
     }
 }
 
-/// The recorded conditions that differ between any two of `contexts`, each named once.
-pub fn changed(contexts: &[&CaptureContext]) -> Vec<Changed> {
+/// The recorded conditions that differ between any two captures of one walk measurement in
+/// `contexts` (each with the measurement that captured it), each named once. Captures of
+/// different measurements are different mics by design, never a change.
+pub fn changed(contexts: &[(MeasId, &CaptureContext)]) -> Vec<Changed> {
     let mut out = Vec::new();
-    if let Some((first, rest)) = contexts.split_first() {
-        for c in rest {
-            // Chains pair by walk measurement; a walk keeps its measurements, so both
-            // captures hold the same number of them.
-            for (a, b) in first.chains.iter().zip(&c.chains) {
-                differ(a, b, &mut out);
-            }
+    for (k, (meas, c)) in contexts.iter().enumerate() {
+        if let Some((_, first)) = contexts[..k].iter().find(|(m, _)| m == meas) {
+            differ(first, c, &mut out);
         }
     }
     out.sort();
@@ -108,18 +107,18 @@ pub fn changed(contexts: &[&CaptureContext]) -> Vec<Changed> {
 /// no day), so `P1–P4` says nothing of P3 when it was skipped. `today` is on the captures'
 /// (the daemon's) clock; `offset_s` gives the local UTC offset in force at a wall time.
 pub fn conditions_text(w: &WalkState, today: WallNs, offset_s: impl Fn(WallNs) -> i32) -> String {
-    let captured: Vec<(&str, &CaptureContext)> = w
+    let captured: Vec<(&str, MeasId, &CaptureContext)> = w
         .points
         .iter()
         .filter_map(|p| match &p.state {
-            PointState::Captured { context, .. } => Some((p.label.as_str(), context)),
+            PointState::Captured { context, .. } => Some((p.label.as_str(), p.mic, context)),
             PointState::Pending | PointState::Skipped => None,
         })
         .collect();
     let mut parts: Vec<String> = Vec::new();
     // Runs of consecutive captures on one day: (day, first label, last label).
     let mut runs: Vec<(i64, &str, &str)> = Vec::new();
-    for &(label, c) in &captured {
+    for &(label, _, c) in &captured {
         let day = local_day(c.at, &offset_s);
         match runs.last_mut() {
             Some(r) if r.0 == day => r.2 = label,
@@ -150,7 +149,8 @@ pub fn conditions_text(w: &WalkState, today: WallNs, offset_s: impl Fn(WallNs) -
             .collect();
         parts.push(groups.join(", "));
     }
-    let contexts: Vec<&CaptureContext> = captured.iter().map(|&(_, c)| c).collect();
+    let contexts: Vec<(MeasId, &CaptureContext)> =
+        captured.iter().map(|&(_, m, c)| (m, c)).collect();
     let changes = changed(&contexts);
     if !changes.is_empty() && parts.is_empty() {
         // One day: the line still says what it is about.

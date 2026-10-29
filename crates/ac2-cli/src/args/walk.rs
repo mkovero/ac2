@@ -62,44 +62,57 @@ pub struct PlanNew {
 /// `walk …`. Without `--walk`, the session's only walk.
 #[derive(Debug, Subcommand)]
 pub enum WalkCmd {
-    /// Start a walk: positions suggested over a plan's zones, the measurement restarted
-    /// at the first.
+    /// Start a walk: positions suggested over a plan's zones and grouped into steps that
+    /// place every mic once, the measurements restarted at the first.
     New(WalkNew),
-    /// The walk's points, where the mic is, and what was captured.
+    /// The walk's points, where the mics are, and what was captured.
     Status {
         /// The walk, by id or name.
         #[arg(long)]
         walk: Option<MeasRef>,
     },
-    /// Capture at the current point and go on to the next pending one.
+    /// Capture where the mics stand and go on to the next step with a pending point.
     Capture {
         /// The walk, by id or name.
         #[arg(long)]
         walk: Option<MeasRef>,
     },
-    /// Go to the next point (the measurement restarts there).
+    /// Go to the next step (the measurements restart there).
     Next {
         /// The walk, by id or name.
         #[arg(long)]
         walk: Option<MeasRef>,
     },
-    /// Go back to the previous point.
+    /// Go back to the previous step.
     Prev {
         /// The walk, by id or name.
         #[arg(long)]
         walk: Option<MeasRef>,
     },
-    /// Leave the current point out and go on to the next pending one.
+    /// Leave a point out: the one named, else every point a mic stands at; the walk goes on
+    /// when its step has none left.
     Skip {
+        /// The point, by label (`P3`) or number (1 is the first).
+        point: Option<String>,
         /// The walk, by id or name.
         #[arg(long)]
         walk: Option<MeasRef>,
     },
-    /// Capture a point again: its old capture is kept, out of the average, and the mic
+    /// Capture a point again: its old capture is kept, out of the average, and its mic
     /// goes there.
     Redo {
         /// The point, by label (`P3`) or number (1 is the first).
         point: String,
+        /// The walk, by id or name.
+        #[arg(long)]
+        walk: Option<MeasRef>,
+    },
+    /// The mics standing at these points of the step move round by one: each to the next
+    /// point named, the last to the first (two points: they trade places).
+    Swap {
+        /// The points, by label (`P3`) or number (1 is the first); at least two.
+        #[arg(num_args = 2.., required = true)]
+        points: Vec<String>,
         /// The walk, by id or name.
         #[arg(long)]
         walk: Option<MeasRef>,
@@ -114,9 +127,10 @@ pub struct WalkNew {
     /// The plan to walk (from the library, or the session's copy).
     #[arg(long)]
     pub plan: String,
-    /// The transfer measurement that captures at each point.
-    #[arg(long, value_name = "MEAS")]
-    pub meas: MeasRef,
+    /// The transfer measurements that capture, one per mic, each on its own input
+    /// (`--meas A --meas B` for two mics).
+    #[arg(long, value_name = "MEAS", required = true)]
+    pub meas: Vec<MeasRef>,
     /// Which rules place the positions.
     #[arg(long, value_enum, default_value_t = PatternArg::Tuning)]
     pub preset: PatternArg,

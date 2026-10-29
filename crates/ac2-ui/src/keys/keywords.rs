@@ -21,6 +21,7 @@ impl CommandId {
             C::WalkNext | C::WalkPrev => &["spatial", "position", "point", "go"],
             C::WalkRedo => &["spatial", "again", "retake", "reset"],
             C::WalkSkip => &["spatial", "leave out", "position"],
+            C::WalkSwap => &["spatial", "swap", "exchange", "mic", "position"],
             C::Fullscreen => &["window"],
             C::KeyHints => &["shortcuts", "help"],
             C::WarningToasts => &["notifications", "messages"],

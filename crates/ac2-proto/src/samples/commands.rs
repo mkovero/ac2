@@ -421,7 +421,7 @@ pub fn commands() -> Vec<Command> {
             name: "Mains".into(),
             plan: "Hall".into(),
             kind: WalkKind::LiveTransfer,
-            meas: vec![MeasId(1)],
+            meas: vec![MeasId(1), MeasId(2)],
             points: vec![
                 WalkPointSpec {
                     label: "P1".into(),
@@ -443,10 +443,17 @@ pub fn commands() -> Vec<Command> {
         },
         Command::WalkGoto {
             walk: WalkId(1),
-            point: 2,
+            step: 1,
         },
         Command::WalkCapture { walk: WalkId(1) },
-        Command::WalkSkip { walk: WalkId(1) },
+        Command::WalkSkip {
+            walk: WalkId(1),
+            point: 1,
+        },
+        Command::WalkSwap {
+            walk: WalkId(1),
+            points: vec![2, 3],
+        },
         Command::WalkRedo {
             walk: WalkId(1),
             point: 0,

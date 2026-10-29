@@ -1,4 +1,5 @@
-//! `ac2 plan new|list|show|import|export` and `ac2 walk new|status|capture|next|prev|skip|redo`.
+//! `ac2 plan new|list|show|import|export` and
+//! `ac2 walk new|status|capture|next|prev|skip|redo|swap`.
 //! The daemon keeps the library and the walk; this suggests the positions
 //! (`ac2_room::pattern`) and words what the walk holds.
 
@@ -77,30 +78,45 @@ pub(crate) async fn walk(cli: &Cli, cmd: &WalkCmd, out: &mut Out<'_>) -> Result<
         }
         WalkCmd::Next { walk } | WalkCmd::Prev { walk } => {
             let w = find_walk(&s, walk.as_ref())?;
-            let n = w.points.len();
-            let point = match (cmd, w.current.map(usize::from)) {
+            let n = w.steps().max(1);
+            let step = match (cmd, w.step) {
                 (WalkCmd::Next { .. }, Some(i)) => (i + 1) % n,
                 (WalkCmd::Next { .. }, None) => 0,
                 (_, Some(i)) => (i + n - 1) % n,
                 (_, None) => n - 1,
             };
-            walk_call(
-                &c,
-                Command::WalkGoto {
-                    walk: w.id,
-                    point: index(point),
-                },
-            )
-            .await?
+            walk_call(&c, Command::WalkGoto { walk: w.id, step }).await?
         }
-        WalkCmd::Skip { walk } => {
-            let walk = find_walk(&s, walk.as_ref())?.id;
-            walk_call(&c, Command::WalkSkip { walk }).await?
+        WalkCmd::Skip { point, walk } => {
+            let w = find_walk(&s, walk.as_ref())?;
+            let points: Vec<u16> = match point {
+                Some(p) => vec![find_point(w, p)?],
+                None => w.standing().into_iter().map(index).collect(),
+            };
+            if points.is_empty() {
+                return Err(CliError::Usage(format!(
+                    "no mic stands anywhere in the walk {}: name the point",
+                    w.name
+                )));
+            }
+            let mut last = w.clone();
+            for point in points {
+                last = walk_call(&c, Command::WalkSkip { walk: w.id, point }).await?;
+            }
+            last
         }
         WalkCmd::Redo { point, walk } => {
             let w = find_walk(&s, walk.as_ref())?;
             let point = find_point(w, point)?;
             walk_call(&c, Command::WalkRedo { walk: w.id, point }).await?
+        }
+        WalkCmd::Swap { points, walk } => {
+            let w = find_walk(&s, walk.as_ref())?;
+            let points = points
+                .iter()
+                .map(|p| find_point(w, p))
+                .collect::<Result<_, _>>()?;
+            walk_call(&c, Command::WalkSwap { walk: w.id, points }).await?
         }
     };
     let s = state(&c).await?;
@@ -114,7 +130,11 @@ async fn new_walk(
     n: &WalkNew,
     out: &mut Out<'_>,
 ) -> Result<WalkState, CliError> {
-    let meas = find_meas(s, &n.meas)?.id;
+    let meas = n
+        .meas
+        .iter()
+        .map(|m| find_meas(s, m).map(|m| m.id))
+        .collect::<Result<Vec<_>, _>>()?;
     let plan = s
         .walk_plans
         .iter()
@@ -163,7 +183,7 @@ async fn new_walk(
             name: n.name.clone(),
             plan: plan.name.clone(),
             kind: WalkKind::LiveTransfer,
-            meas: vec![meas],
+            meas,
             points,
         },
     )
@@ -290,8 +310,8 @@ fn plan_text(p: &PlanSpec) -> String {
     t
 }
 
-/// The walk as the walk pane words it: *2 OF 8 POSITIONS*, the point the mic is at, each
-/// point's state.
+/// The walk as the walk pane words it: *2 OF 8 POSITIONS*, the points the mics are at, each
+/// point's state and (with several mics) the measurement standing or that stood there.
 fn walk_text(w: &WalkState, s: &State) -> String {
     let count = |f: fn(&PointState) -> bool| w.points.iter().filter(|p| f(&p.state)).count();
     let captured = count(|p| matches!(p, PointState::Captured { .. }));
@@ -303,6 +323,12 @@ fn walk_text(w: &WalkState, s: &State) -> String {
             || "no average".to_owned(),
             |m| format!("average: {}", m.config.name),
         );
+    let meas_name = |id| {
+        s.measurements
+            .iter()
+            .find(|m| m.id == id)
+            .map_or_else(|| format!("measurement {id}"), |m| m.config.name.clone())
+    };
     let mut t = format!(
         "{} (walk {}, plan {})  {captured} of {} positions{}  {average}\n",
         w.name,
@@ -315,19 +341,17 @@ fn walk_text(w: &WalkState, s: &State) -> String {
             String::new()
         }
     );
+    let standing = w.standing();
     for (i, p) in w.points.iter().enumerate() {
-        let here = if w.current == Some(index(i)) {
-            ">"
-        } else {
-            " "
-        };
+        let here = if standing.contains(&i) { ">" } else { " " };
         let state = match &p.state {
             PointState::Pending => "pending".to_owned(),
             PointState::Skipped => "skipped".to_owned(),
-            PointState::Captured { traces, .. } => {
-                let unsettled = traces
+            PointState::Captured { trace, .. } => {
+                let unsettled = s
+                    .traces
                     .iter()
-                    .any(|t| s.traces.iter().any(|x| x.id == *t && x.captured_unsettled));
+                    .any(|x| x.id == *trace && x.captured_unsettled);
                 if unsettled {
                     "captured, unsettled".to_owned()
                 } else {
@@ -335,12 +359,17 @@ fn walk_text(w: &WalkState, s: &State) -> String {
                 }
             }
         };
+        let mic = if w.meas.len() > 1 {
+            format!("  step {}  {}", p.step + 1, meas_name(p.mic))
+        } else {
+            String::new()
+        };
         t.push_str(&format!(
-            "{here} {:<6} ({:5.1}, {:5.1}, {:.2} m)  {state}\n",
+            "{here} {:<6} ({:5.1}, {:5.1}, {:.2} m)  {state}{mic}\n",
             p.label, p.at[0], p.at[1], p.at[2]
         ));
     }
-    if w.current.is_none() {
+    if w.step.is_none() {
         t.push_str("every point captured or skipped\n");
     }
     t

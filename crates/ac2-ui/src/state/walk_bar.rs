@@ -115,7 +115,7 @@ impl AppState {
     pub fn walk_bar_easing(&self, now: Instant) -> bool {
         self.walks()
             .iter()
-            .filter_map(|w| w.meas.first())
+            .flat_map(|w| &w.meas)
             .any(|&m| self.walk_bar_drawn(m, now).is_some())
     }
 }

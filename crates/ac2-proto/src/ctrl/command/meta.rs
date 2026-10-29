@@ -104,6 +104,7 @@ impl Command {
             Self::WalkCapture { .. } => "walk.capture",
             Self::WalkSkip { .. } => "walk.skip",
             Self::WalkRedo { .. } => "walk.redo",
+            Self::WalkSwap { .. } => "walk.swap",
             Self::WalkDelete { .. } => "walk.delete",
         }
     }

@@ -25,15 +25,19 @@ pub fn walk(
         .and_then(|m| st.meas(m))
         .map(|m| m.config.name.as_str());
     let view = st.view_for(pane);
+    let mics = st.walk_mic_names(w);
+    let (ready, slowest) = st.walk_ready(w);
     let p = WalkPane {
         walk: w,
         plan: st.walk_plan(w),
-        ready: st.walk_ready(w),
+        ready,
+        mics: &mics,
+        slowest,
         average,
         unsettled: st.unsettled_traces(&w.captured_traces()),
-        bar_drawn: w
-            .meas
-            .first()
+        // The bar is the slowest mic's, gliding as its own measurement fills.
+        bar_drawn: slowest
+            .and_then(|k| w.meas.get(k))
             .and_then(|&m| st.walk_bar_drawn(m, now.instant)),
         // The captures are stamped on the daemon's clock: today is read on it too.
         conditions: conditions_text(w, daemon_wall(st, now.wall), |t| st.local_zone.offset_s(t)),

@@ -432,6 +432,7 @@ impl AppState {
             C::WalkPrev => self.walk_step(-1, out),
             C::WalkRedo => self.walk_redo(out),
             C::WalkSkip => self.walk_skip(out),
+            C::WalkSwap => self.walk_swap(out),
             // The sweep pane draws one run at a time: V steps through the runs, never onto a
             // curve the pane cannot draw.
             C::NextTrace if self.layout.focus_kind() == PaneKind::Distortion => {

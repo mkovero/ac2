@@ -2,7 +2,7 @@
 //! typed fields, no letter keys), the rules the suggestion relaxed and the rules edited
 //! points break, in words.
 
-use ac2_proto::model::{MarkerKind, PlanSpec};
+use ac2_proto::model::{MarkerKind, PlanSpec, WalkState};
 use ac2_room::pattern::{Broken, PresetKind, Relaxed};
 
 /// The setup window's title.
@@ -25,7 +25,8 @@ pub enum SetupField {
     ReverbTime,
     Count,
     Pattern,
-    Mic,
+    /// The walk's k-th mic (a transfer measurement); past the chosen ones, a row to add one.
+    Mic(u8),
 }
 
 impl SetupField {
@@ -38,7 +39,7 @@ impl SetupField {
             Self::ReverbTime => "RT",
             Self::Count => "positions",
             Self::Pattern => "pattern",
-            Self::Mic => "mic",
+            Self::Mic(k) => MIC_ROWS.get(usize::from(k)).copied().unwrap_or("mic"),
         }
     }
 
@@ -48,8 +49,14 @@ impl SetupField {
     }
 }
 
-/// The setup window's rows for `preset`, top to bottom (the RT only for ISO 3382-1).
-pub fn setup_fields(preset: PresetKind) -> Vec<SetupField> {
+/// The mic rows' labels: a slot each, the mics themselves named in the values.
+const MIC_ROWS: [&str; WalkState::MAX_MICS] = [
+    "mic", "mic 2", "mic 3", "mic 4", "mic 5", "mic 6", "mic 7", "mic 8",
+];
+
+/// The setup window's rows for `preset`, top to bottom (the RT only for ISO 3382-1), with
+/// `mics` mic rows (at least one).
+pub fn setup_fields(preset: PresetKind, mics: usize) -> Vec<SetupField> {
     let mut v = vec![
         SetupField::Name,
         SetupField::Plan,
@@ -59,7 +66,9 @@ pub fn setup_fields(preset: PresetKind) -> Vec<SetupField> {
     if preset == PresetKind::Iso3382 {
         v.push(SetupField::ReverbTime);
     }
-    v.extend([SetupField::Count, SetupField::Pattern, SetupField::Mic]);
+    v.extend([SetupField::Count, SetupField::Pattern]);
+    let rows = mics.clamp(1, WalkState::MAX_MICS);
+    v.extend((0..rows).map(|k| SetupField::Mic(k as u8)));
     v
 }
 
@@ -94,8 +103,11 @@ pub struct SetupInput<'a> {
     /// is unset.
     pub default_n: Option<usize>,
     pub seed: u64,
-    /// The transfer measurement that captures, by name.
-    pub mic: Option<&'a str>,
+    /// The transfer measurements that capture, one per mic, by name.
+    pub mics: &'a [&'a str],
+    /// Whether a row to add a mic follows the chosen ones (another transfer on its own
+    /// input is there to add).
+    pub add_mic: bool,
     pub focus: SetupField,
     /// Text typed into the focused row, not yet taken.
     pub typed: Option<&'a str>,
@@ -150,7 +162,8 @@ pub fn notes(relaxed: &[Relaxed], labels: &[String], breaks: &[Vec<Broken>]) -> 
 }
 
 pub fn setup_view(i: &SetupInput<'_>) -> SetupView {
-    let rows = setup_fields(i.preset)
+    let mic_rows = i.mics.len() + usize::from(i.add_mic || i.mics.is_empty());
+    let rows = setup_fields(i.preset, mic_rows)
         .into_iter()
         .map(|f| {
             let focused = f == i.focus;
@@ -192,9 +205,11 @@ pub fn setup_view(i: &SetupInput<'_>) -> SetupView {
                         None => format!("{} (a zone's seats are unset)", i.n),
                     },
                     SetupField::Pattern => i.seed.to_string(),
-                    SetupField::Mic => i
-                        .mic
-                        .map_or_else(|| "no transfer measurement".to_owned(), str::to_owned),
+                    SetupField::Mic(k) => match i.mics.get(usize::from(k)) {
+                        Some(m) => (*m).to_owned(),
+                        None if k == 0 => "no transfer measurement".to_owned(),
+                        None => "none · →: another mic".to_owned(),
+                    },
                 },
             };
             Row {

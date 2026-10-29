@@ -61,6 +61,13 @@ pub enum ChoicePurpose {
     Walks {
         walks: Vec<ac2_proto::units::WalkId>,
     },
+    /// Which of a walk's points to redo (`redo`) or skip: each answer is the points in
+    /// `sets` at its place (the whole step first, then each point with its mic).
+    WalkPoints {
+        walk: ac2_proto::units::WalkId,
+        redo: bool,
+        sets: Vec<Vec<u16>>,
+    },
     /// New measurement: the answer is a kind, in [`ac2_scene::new_meas::NewKind::ALL`]'s
     /// order; its form opens.
     NewMeasurement,
@@ -386,6 +393,11 @@ impl AppState {
             ChoicePurpose::NewMeasurement => self.new_measurement_pick(i, out),
             ChoicePurpose::Target => self.target_pick(i, out),
             ChoicePurpose::Walks { walks } => self.walks_pick(&walks, i),
+            ChoicePurpose::WalkPoints { walk, redo, sets } => {
+                if let Some(points) = sets.get(i) {
+                    self.walk_point_sets(walk, points, redo, out);
+                }
+            }
             p @ (ChoicePurpose::Unsaved { .. }
             | ChoicePurpose::Replace { .. }
             | ChoicePurpose::Salvage { .. }) => self.session_answer(p, i, out),

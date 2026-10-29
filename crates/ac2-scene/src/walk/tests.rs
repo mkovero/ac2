@@ -1,6 +1,6 @@
 use ac2_proto::model::{
-    CaptureChain, CaptureContext, EqMark, Marker, MarkerKind, MicCurveRef, MicState, PlanSpec,
-    PointState, WalkKind, WalkPoint, WalkState, ZoneSpec,
+    CaptureContext, EqMark, Marker, MarkerKind, MicCurveRef, MicState, PlanSpec, PointState,
+    WalkKind, WalkPoint, WalkState, ZoneSpec,
 };
 use ac2_proto::units::{EqSetId, Hz, MeasId, TraceId, WalkId, WallNs};
 use ac2_room::pattern::{Broken, PresetKind, Relaxed};
@@ -56,11 +56,12 @@ fn walk(states: &[PointState], current: Option<u16>) -> WalkState {
                 } else {
                     [2.0 + 2.0 * i as f64, 18.0, 1.2]
                 },
-                mic: None,
+                step: i as u16,
+                mic: MeasId(1),
                 state: s.clone(),
             })
             .collect(),
-        current,
+        step: current,
         average: None,
     }
 }
@@ -73,8 +74,9 @@ fn pending(n: usize) -> Vec<PointState> {
 const NOON: u64 = 1_793_275_200_000_000_000;
 const DAY: u64 = 86_400_000_000_000;
 
-fn chain(mic: Option<(&str, Option<&str>)>, eq: &[(u32, u32)]) -> CaptureChain {
-    CaptureChain {
+fn chain(mic: Option<(&str, Option<&str>)>, eq: &[(u32, u32)]) -> CaptureContext {
+    CaptureContext {
+        at: WallNs(0),
         mic: mic.map(|(name, hash)| MicState {
             name: name.into(),
             curve: hash.map(|h| MicCurveRef {
@@ -98,12 +100,12 @@ fn chain(mic: Option<(&str, Option<&str>)>, eq: &[(u32, u32)]) -> CaptureChain {
     }
 }
 
-fn captured_at(t: u32, at: u64, c: CaptureChain) -> PointState {
+fn captured_at(t: u32, at: u64, c: CaptureContext) -> PointState {
     PointState::Captured {
-        traces: vec![TraceId(t)],
+        trace: TraceId(t),
         context: CaptureContext {
             at: WallNs(at),
-            chains: vec![c],
+            ..c
         },
     }
 }
@@ -120,19 +122,19 @@ fn utc(_: WallNs) -> i32 {
 fn the_step_reads_from_foh_facing_the_stage() {
     let w = walk(&pending(8), Some(2));
     assert_eq!(
-        step_text(&w, Some(&hall())),
+        step_text(&w, Some(&hall()), &[]),
         "Move mic to P3 · 2.1 m left, 4.0 m back from FOH"
     );
     // Without a FOH or speaker heading the readout says it is plan x/y.
     let mut bare = hall();
     bare.markers.clear();
     assert_eq!(
-        step_text(&w, Some(&bare)),
+        step_text(&w, Some(&bare), &[]),
         "Move mic to P3 · x 7.9 m, y 6.0 m in plan (no FOH or speaker heading)"
     );
     let done = walk(&[captured(1), PointState::Skipped], None);
     assert_eq!(
-        step_text(&done, Some(&hall())),
+        step_text(&done, Some(&hall()), &[]),
         "every point is captured or skipped"
     );
 }
@@ -195,9 +197,124 @@ fn dots_mark_the_current_point_and_the_next_one_faint() {
             (DotLook::Pending, false, true),
         ]
     );
-    // The next point wraps round past the end.
+    // The next step wraps round past the end.
     let w = walk(&pending(3), Some(2));
-    assert_eq!(next_point(&w), Some(0));
+    assert_eq!(next_step(&w), Some(0));
+}
+
+/// Two mics, Vilppu (1) and MM1 (2), over five points: step 0 at P1 and P2, step 1 at P3
+/// (MM1) and P4 (Vilppu), step 2 at P5 (MM1).
+fn two_mics(states: &[PointState], step: Option<u16>) -> WalkState {
+    let mut w = walk(states, step);
+    w.meas = vec![MeasId(1), MeasId(2)];
+    let plan = [(0, 1), (0, 2), (1, 2), (1, 1), (2, 2)];
+    for (p, &(s, m)) in w.points.iter_mut().zip(&plan) {
+        p.step = s;
+        p.mic = MeasId(m);
+    }
+    w
+}
+
+fn names() -> Vec<String> {
+    vec!["Vilppu".into(), "MM1".into()]
+}
+
+#[test]
+fn with_two_mics_the_step_names_each_mic_and_its_point() {
+    let w = two_mics(&pending(5), Some(1));
+    assert_eq!(
+        step_text(&w, Some(&hall()), &names()),
+        "Move Vilppu to P4, MM1 to P3"
+    );
+    let t = target_lines(&w, Some(&hall()), &names());
+    assert_eq!(t.len(), 2);
+    assert_eq!(t[0].0, 0);
+    assert!(t[0].1.starts_with("Vilppu → P4 · "), "{t:?}");
+    assert_eq!(
+        t[1],
+        (1, "MM1 → P3 · 2.1 m left, 4.0 m back from FOH".to_owned())
+    );
+    // One mic left to place at the step (the other's point captured): it alone, with its
+    // readout, and no target lines.
+    let mut states = pending(5);
+    states[3] = captured(1);
+    let w = two_mics(&states, Some(1));
+    assert_eq!(
+        step_text(&w, Some(&hall()), &names()),
+        "Move MM1 to P3 · 2.1 m left, 4.0 m back from FOH"
+    );
+    assert!(target_lines(&w, Some(&hall()), &names()).is_empty());
+}
+
+#[test]
+fn with_two_mics_the_plan_rings_each_mic_and_the_next_step() {
+    let mut states = pending(5);
+    states[0] = captured(1);
+    states[1] = captured(2);
+    let w = two_mics(&states, Some(1));
+    let d = walk_dots(&w);
+    let rings: Vec<(bool, bool, usize)> = d.iter().map(|d| (d.current, d.next, d.mic)).collect();
+    assert_eq!(
+        rings,
+        [
+            (false, false, 0),
+            (false, false, 1),
+            (true, false, 1),
+            (true, false, 0),
+            (false, true, 1),
+        ]
+    );
+}
+
+#[test]
+fn the_slowest_mic_is_the_one_read() {
+    assert_eq!(
+        Ready::slowest(&[Ready::Ready, Ready::Settling(0.4), Ready::Settling(0.7)]),
+        Some(1)
+    );
+    assert_eq!(
+        Ready::slowest(&[Ready::Settling(0.1), Ready::Pick]),
+        Some(1)
+    );
+    assert_eq!(Ready::slowest(&[Ready::Ready, Ready::Waiting]), Some(1));
+    assert_eq!(Ready::slowest(&[Ready::Ready, Ready::Ready]), Some(0));
+    assert_eq!(Ready::slowest(&[]), None);
+    let w = two_mics(&pending(5), Some(0));
+    let mics = names();
+    let p = WalkPane {
+        walk: &w,
+        plan: None,
+        ready: Ready::Settling(0.3),
+        mics: &mics,
+        slowest: Some(1),
+        average: None,
+        unsettled: 0,
+        bar_drawn: None,
+        conditions: String::new(),
+    };
+    assert_eq!(p.lines().ready, "settling · MM1");
+    let ready = WalkPane {
+        ready: Ready::Ready,
+        ..p.clone()
+    };
+    assert_eq!(ready.lines().ready, "ready");
+}
+
+#[test]
+fn a_mic_change_is_a_change_only_on_one_measurement() {
+    // P1 by Vilppu's measurement, P2 by MM1's: two mics by design, nothing differs.
+    let mut states = pending(5);
+    states[0] = captured_at(1, NOON, chain(Some(("Vilppu", None)), &[]));
+    states[1] = captured_at(2, NOON, chain(Some(("MM1", None)), &[]));
+    let w = two_mics(&states, Some(1));
+    assert_eq!(conditions_text(&w, WallNs(NOON), utc), "");
+    // P4 by Vilppu's measurement with another mic on its input: that is a change.
+    states[3] = captured_at(3, NOON, chain(Some(("Behringer", None)), &[]));
+    let w = two_mics(&states, Some(2));
+    assert_eq!(
+        conditions_text(&w, WallNs(NOON), utc),
+        "captures differ · mic changed"
+    );
 }
 
 #[test]
@@ -211,6 +328,8 @@ fn the_walk_pane_draws_its_lines_and_the_plan() {
         walk: &w,
         plan: Some(&plan),
         ready: Ready::Settling(0.6),
+        mics: &[],
+        slowest: None,
         average: None,
         unsettled: 0,
         bar_drawn: Some(0.5),
@@ -311,7 +430,8 @@ fn input<'a>(
         n: 8,
         default_n: Some(8),
         seed: 3,
-        mic: Some("Main L"),
+        mics: &["Main L"],
+        add_mic: false,
         focus: SetupField::Pattern,
         typed: None,
         relaxed,
@@ -391,6 +511,24 @@ fn the_setup_names_its_rows_relaxed_rules_and_broken_points() {
     assert_eq!(v.rows[3].value, "ISO 3382-1");
     assert_eq!(v.rows[4].value, "1.3 s");
     assert_eq!(v.rows[5].value, "1▏");
+
+    // Another transfer on its own input to add: a row to add it; two chosen, each a row.
+    let mut more = input(Some(&plan), &labels, &breaks, &relaxed);
+    more.add_mic = true;
+    let v = setup_view(&more);
+    let last = v.rows.last().expect("a setup row");
+    assert_eq!(
+        (last.label.as_str(), last.value.as_str()),
+        ("mic 2", "none · →: another mic")
+    );
+    more.mics = &["Main L", "Vilppu"];
+    more.add_mic = false;
+    let v = setup_view(&more);
+    let tail: Vec<(&str, &str)> = v.rows[v.rows.len() - 2..]
+        .iter()
+        .map(|r| (r.label.as_str(), r.value.as_str()))
+        .collect();
+    assert_eq!(tail, [("mic", "Main L"), ("mic 2", "Vilppu")]);
 
     // On New plan…, Enter opens the editor.
     let mut new = input(None, &labels, &[], &[]);
@@ -568,7 +706,7 @@ fn the_day_is_the_local_one() {
 
 #[test]
 fn each_recorded_change_is_named_once() {
-    let w = |a: CaptureChain, b: CaptureChain, c: CaptureChain| {
+    let w = |a: CaptureContext, b: CaptureContext, c: CaptureContext| {
         walk(
             &[
                 captured_at(1, NOON, a),

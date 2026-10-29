@@ -47,19 +47,53 @@ impl AppState {
         v
     }
 
-    /// The measurements a walk can capture: the session's live transfers.
-    pub fn walk_mics(&self) -> Vec<MeasId> {
+    /// The measurements a walk can capture: the session's live transfers, each with the
+    /// input it measures (a walk takes one mic per input).
+    pub fn walk_mics(&self) -> Vec<(MeasId, u16)> {
         self.measurements()
             .into_iter()
-            .filter(|m| matches!(m.config.kind, MeasKind::Transfer { .. }))
-            .map(|m| m.id)
+            .filter_map(|m| match &m.config.kind {
+                MeasKind::Transfer { config } => Some((m.id, config.measurement_input)),
+                _ => None,
+            })
             .collect()
     }
 
-    /// Whether the walk's measurement may be captured now: its newest transfer frame's fill
+    /// The walk's mics by name, in its mic order: the mic on each measurement's input, else
+    /// the measurement's name (as the daemon names the captures).
+    pub fn walk_mic_names(&self, w: &WalkState) -> Vec<String> {
+        w.meas
+            .iter()
+            .map(|&id| {
+                let Some(m) = self.meas(id) else {
+                    return format!("measurement {id}");
+                };
+                let input = match &m.config.kind {
+                    MeasKind::Transfer { config } => Some(config.measurement_input),
+                    _ => None,
+                };
+                input
+                    .and_then(|i| self.input_setup(i).mic().map(str::to_owned))
+                    .unwrap_or_else(|| m.config.name.clone())
+            })
+            .collect()
+    }
+
+    /// Whether the step may be captured now: the slowest of the mics standing at it, and
+    /// which of the walk's mics that is.
+    pub fn walk_ready(&self, w: &WalkState) -> (Ready, Option<usize>) {
+        let standing: Vec<MeasId> = w.standing().into_iter().map(|i| w.points[i].mic).collect();
+        let ready: Vec<Ready> = standing.iter().map(|&m| self.mic_ready(m)).collect();
+        match Ready::slowest(&ready) {
+            Some(k) => (ready[k], Some(w.mic_index(standing[k]))),
+            None => (Ready::Waiting, None),
+        }
+    }
+
+    /// Whether walk measurement `meas` may be captured now: its newest transfer frame's fill
     /// and its delay finder's pick.
-    pub fn walk_ready(&self, w: &WalkState) -> Ready {
-        let Some(m) = w.meas.first().and_then(|m| self.meas(*m)) else {
+    fn mic_ready(&self, meas: MeasId) -> Ready {
+        let Some(m) = self.meas(meas) else {
             return Ready::Waiting;
         };
         let filled = m
@@ -201,10 +235,11 @@ impl AppState {
             self.overlay = Overlay::None;
         }
         self.open_walk_pane(w.id);
-        let first = w
-            .current
-            .and_then(|i| w.points.get(usize::from(i)))
-            .map_or(String::new(), |p| format!(": move the mic to {}", p.label));
+        let names = self.walk_mic_names(&w);
+        let first = match w.standing().as_slice() {
+            [] => String::new(),
+            at => format!(": move {}", ac2_scene::walk::moves_text(&w, at, &names)),
+        };
         self.toast(format!("{} started{first}", w.name));
     }
 
@@ -237,7 +272,7 @@ impl AppState {
                 s.change(d, &names, &mics);
                 let plan = s.plan_in(&plans).cloned();
                 s.clamp_zone(plan.as_ref());
-                if !matches!(s.focus, SetupField::Mic | SetupField::Name) {
+                if !matches!(s.focus, SetupField::Mic(_) | SetupField::Name) {
                     s.refresh(plan.as_ref());
                 }
             }
@@ -267,8 +302,8 @@ impl AppState {
                 Overlay::PlanEditor(Box::new(PlanEditor::new(numbered("Room", &taken), back)));
             return;
         };
-        let refused = match (s.mic, s.points.is_empty()) {
-            (None, _) => Some("no transfer measurement to capture with: make one first"),
+        let refused = match (s.mics.is_empty(), s.points.is_empty()) {
+            (true, _) => Some("no transfer measurement to capture with: make one first"),
             (_, true) => Some("no positions: add some on the plan"),
             _ => None,
         };
@@ -281,7 +316,7 @@ impl AppState {
             name: s.name.clone(),
             plan: plan.name.clone(),
             kind: WalkKind::LiveTransfer,
-            meas: s.mic.into_iter().collect(),
+            meas: s.mics.clone(),
             points: s.point_specs(),
         };
         out.push(Request::NewWalk {
@@ -357,97 +392,212 @@ impl AppState {
         }
     }
 
-    /// X: capture here, go on to the next pending point.
+    /// X: capture where the mics stand, go on to the next step with a pending point.
     pub(super) fn walk_capture(&mut self, out: &mut Vec<Request>) {
         if let Ok(w) = self.focused_walk()
-            && w.current.is_none()
+            && w.standing().is_empty()
         {
             let redo = self.keys.reach(CommandId::WalkRedo);
-            self.warn(format!(
-                "{}: every point is captured or skipped ({redo} redoes one)",
-                w.name
-            ));
+            let why = if w.step.is_none() {
+                "every point is captured or skipped"
+            } else {
+                "this step is captured"
+            };
+            self.warn(format!("{}: {why} ({redo} redoes one)", w.name));
             return;
         }
         self.walk_call(out, |w| {
-            let at = w
-                .current
-                .and_then(|i| w.points.get(usize::from(i)))
-                .map_or(String::new(), |p| format!(" at {}", p.label));
+            let labels: Vec<&str> = w
+                .standing()
+                .into_iter()
+                .map(|i| w.points[i].label.as_str())
+                .collect();
             (
                 Command::WalkCapture { walk: w.id },
-                format!("{} captured{at}", w.name),
+                format!("{} captured at {}", w.name, labels.join(", ")),
             )
         });
     }
 
-    /// PageDown / PageUp: the next or previous point in walking order, wrapping round.
+    /// PageDown / PageUp: the next or previous step, wrapping round.
     pub(super) fn walk_step(&mut self, d: isize, out: &mut Vec<Request>) {
+        let names = self
+            .focused_walk()
+            .map(|w| self.walk_mic_names(w))
+            .unwrap_or_default();
         self.walk_call(out, |w| {
-            let n = w.points.len().max(1) as isize;
-            let from = w.current.map_or(if d > 0 { -1 } else { 0 }, |c| c as isize);
-            let to = (from + d).rem_euclid(n) as usize;
-            let label = w.points.get(to).map_or("", |p| p.label.as_str());
+            let n = w.steps().max(1) as isize;
+            let from = w.step.map_or(if d > 0 { -1 } else { 0 }, |c| c as isize);
+            let to = (from + d).rem_euclid(n) as u16;
+            let at = w.step_points(to);
             (
                 Command::WalkGoto {
                     walk: w.id,
-                    point: to as u16,
+                    step: to,
                 },
-                format!("{}: move the mic to {label}", w.name),
+                format!(
+                    "{}: move {}",
+                    w.name,
+                    ac2_scene::walk::moves_text(w, &at, &names)
+                ),
             )
         });
     }
 
-    /// Shift+R: redo the point the mic is at when it is captured, else the last one captured
-    /// before it; its captures leave the average.
+    /// Shift+R: redo at the step the mics are at when it holds a capture, else at the last
+    /// step before it that does; with several captures there, a chooser picks which.
     pub(super) fn walk_redo(&mut self, out: &mut Vec<Request>) {
         let target = self.focused_walk().map(|w| {
-            let n = w.points.len();
-            let cur = w.current.map(usize::from);
-            let captured = |i: usize| matches!(w.points[i].state, PointState::Captured { .. });
-            match cur {
-                Some(c) if captured(c) => Some(c),
-                _ => {
-                    let start = cur.unwrap_or(0) + n;
-                    (1..=n).map(|k| (start - k) % n).find(|&i| captured(i))
-                }
-            }
+            let captured = |s: u16| -> Vec<usize> {
+                w.step_points(s)
+                    .into_iter()
+                    .filter(|&i| matches!(w.points[i].state, PointState::Captured { .. }))
+                    .collect()
+            };
+            // Back from the step the mics are at (from the last when the walk is done).
+            let n = w.steps().max(1);
+            let start = w.step.unwrap_or(n - 1);
+            (0..n)
+                .map(|k| (start + n - k) % n)
+                .map(captured)
+                .find(|c| !c.is_empty())
+                .unwrap_or_default()
         });
         match target {
-            Ok(Some(point)) => self.walk_call(out, |w| {
-                (
-                    Command::WalkRedo {
-                        walk: w.id,
-                        point: point as u16,
-                    },
-                    format!(
-                        "{}: {} pending again, its capture out of the average",
-                        w.name, w.points[point].label
-                    ),
-                )
-            }),
-            Ok(None) => self.warn("no point is captured yet: nothing to redo"),
+            Ok(points) if points.is_empty() => {
+                self.warn("no point is captured yet: nothing to redo");
+            }
+            Ok(points) => self.walk_points(points, true, out),
             Err(e) => self.warn(e),
         }
     }
 
-    /// K: leave the current point out and go on.
+    /// K: leave out the point a mic stands at; with several mics standing, a chooser picks
+    /// which (or the whole step).
     pub(super) fn walk_skip(&mut self, out: &mut Vec<Request>) {
-        if let Ok(w) = self.focused_walk()
-            && w.current.is_none()
-        {
-            self.warn(format!("{}: no point to skip", w.name));
+        match self.focused_walk().map(WalkState::standing) {
+            Ok(points) if points.is_empty() => {
+                let name = self
+                    .focused_walk()
+                    .map(|w| w.name.clone())
+                    .unwrap_or_default();
+                self.warn(format!("{name}: no point to skip"));
+            }
+            Ok(points) => self.walk_points(points, false, out),
+            Err(e) => self.warn(e),
+        }
+    }
+
+    /// M: the mics standing at the step move round by one (two trade places).
+    pub(super) fn walk_swap(&mut self, out: &mut Vec<Request>) {
+        let names = self
+            .focused_walk()
+            .map(|w| self.walk_mic_names(w))
+            .unwrap_or_default();
+        match self.focused_walk().map(WalkState::standing) {
+            Ok(points) if points.len() < 2 => {
+                self.warn("one mic stands at this step: no other to trade places with");
+            }
+            Ok(points) => self.walk_call(out, |w| {
+                // As the daemon will place them: each mic one point on.
+                let mut after = w.clone();
+                let n = points.len();
+                for (k, &i) in points.iter().enumerate() {
+                    after.points[i].mic = w.points[points[(k + n - 1) % n]].mic;
+                }
+                (
+                    Command::WalkSwap {
+                        walk: w.id,
+                        points: points.iter().map(|&i| i as u16).collect(),
+                    },
+                    format!(
+                        "{}: move {}",
+                        w.name,
+                        ac2_scene::walk::moves_text(&after, &points, &names)
+                    ),
+                )
+            }),
+            Err(e) => self.warn(e),
+        }
+    }
+
+    /// Redo (`redo`) or skip `points` of the focused walk: one at once, several by a chooser
+    /// of each by point and mic, the whole step first.
+    fn walk_points(&mut self, points: Vec<usize>, redo: bool, out: &mut Vec<Request>) {
+        let Ok(w) = self.focused_walk() else {
+            return;
+        };
+        let walk = w.id;
+        if let [one] = points.as_slice() {
+            self.walk_point_sets(walk, &[*one as u16], redo, out);
             return;
         }
-        self.walk_call(out, |w| {
-            let at = w
-                .current
-                .and_then(|i| w.points.get(usize::from(i)))
-                .map_or(String::new(), |p| p.label.clone());
-            (
-                Command::WalkSkip { walk: w.id },
-                format!("{}: {at} skipped", w.name),
-            )
-        });
+        let names = self.walk_mic_names(w);
+        let row = |i: usize| {
+            let p = &w.points[i];
+            let name = names.get(w.mic_index(p.mic)).map_or("mic", String::as_str);
+            format!("{} · {name}", p.label)
+        };
+        let labels: Vec<&str> = points.iter().map(|&i| w.points[i].label.as_str()).collect();
+        let mut sets: Vec<Vec<u16>> = vec![points.iter().map(|&i| i as u16).collect()];
+        let mut choices = vec![ac2_scene::meas_list::Choice {
+            label: format!("the whole step: {}", labels.join(", ")),
+            blocked: None,
+        }];
+        for &i in &points {
+            sets.push(vec![i as u16]);
+            choices.push(ac2_scene::meas_list::Choice {
+                label: row(i),
+                blocked: None,
+            });
+        }
+        let title = if redo {
+            "Redo which point?"
+        } else {
+            "Skip which point?"
+        };
+        self.overlay = Overlay::Choose(Box::new(ChoicePrompt {
+            purpose: ChoicePurpose::WalkPoints { walk, redo, sets },
+            label: title.to_owned(),
+            title: title.to_owned(),
+            lines: Vec::new(),
+            choices,
+            owners: Vec::new(),
+            index: 0,
+            hint: "↑/↓ pick · Enter: that point · Esc closes".to_owned(),
+        }));
+    }
+
+    /// A chooser's answer, or a single point: redo or skip each of `points`.
+    pub(super) fn walk_point_sets(
+        &mut self,
+        walk: WalkId,
+        points: &[u16],
+        redo: bool,
+        out: &mut Vec<Request>,
+    ) {
+        let Some(w) = self.walk(walk) else {
+            return;
+        };
+        let name = w.name.clone();
+        let labels: Vec<String> = points
+            .iter()
+            .filter_map(|&i| w.points.get(usize::from(i)))
+            .map(|p| p.label.clone())
+            .collect();
+        for (&point, label) in points.iter().zip(&labels) {
+            let (cmd, what) = if redo {
+                (
+                    Command::WalkRedo { walk, point },
+                    format!("{name}: {label} pending again, its capture out of the average"),
+                )
+            } else {
+                (
+                    Command::WalkSkip { walk, point },
+                    format!("{name}: {label} skipped"),
+                )
+            };
+            self.call(out, cmd, what);
+        }
     }
 }

@@ -149,10 +149,10 @@ math channel it feeds.
 
 ```
 WalkState { id, name, plan: PlanName, kind: WalkKind (live_transfer | sweep),
-            meas: Vec<MeasId>, points: Vec<WalkPoint>, current: Option<u16>,
+            meas: Vec<MeasId>, points: Vec<WalkPoint>, step: Option<u16>,
             average: Option<MeasId> }
-WalkPoint { label: "P3", at: [f64; 3], mic: Option<MeasId>, state: PointState }
-PointState: pending | captured { traces: Vec<TraceId>, context: CaptureContext } | skipped
+WalkPoint { label: "P3", at: [f64; 3], step: u16, mic: MeasId, state: PointState }
+PointState: pending | captured { trace: TraceId, context: CaptureContext } | skipped
 ```
 
 **A walk is a pane, not a window.** It shows the plan, the current point highlighted with its
@@ -245,7 +245,8 @@ it (`.`/`,` nudge delay there) and global keys the operator expects (Delete):
 | **X** | walk pane | capture here (mark the point) and go to the next |
 | **PageDown** / **PageUp** | walk pane | next / previous point (moving there resets, above) |
 | **Shift+R** | walk pane | redo the current point (its tip says it resets the walk's measurements) |
-| **K** | walk pane | skip the current point |
+| **K** | walk pane | skip the current point (several mics: pick one, or the whole step) |
+| **M** | walk pane | the mics trade places at this step (§6) |
 | **Space** / **Enter** | walk pane, kind `sweep` | arm / fire the walk's sweep measurement (the walk pane's measurement, as a sweep pane's) |
 | click / drag | plan view | add / move a vertex or a point |
 
@@ -262,6 +263,41 @@ sessions like any pane; `check()` refuses a walk pane without its walk.
 With M mics each step places all M. Points are grouped into steps of M by a nearest-neighbour
 assignment from each mic's previous point, so cables move as little as possible; the operator may
 swap which mic stands where. One `walk.capture` captures all M (§5).
+
+As built (2026-10-29):
+
+- **Grouping** (`ac2_room::steps::group`, pure): one mic keeps the walking order, a step per
+  point. With M ≥ 2 the first step puts mic *k* at P*k* (the walk reads from P1); each later
+  step is the exact least-total-distance pairing (Hungarian, `steps::assign`) of the mics'
+  last points with the points left, on the floor plan. With fewer points left than mics, the
+  points are paired with the nearest mics and the others sit the step out (N = 5, M = 2: the
+  last step places one mic). Deterministic for the same points and M.
+- **State.** Each point carries its `step` and its `mic` (the measurement that stands there:
+  the grouping's choice while pending, the one that captured once captured); `WalkState.step`
+  is the step the mics are at, each at its pending point of it; `Captured` holds the one
+  trace of that mic and its `CaptureContext` (`at`, `mic`, `eq_in`). *Captures differ*
+  compares captures of the same measurement only: two mics are two mics by design.
+- **Mics** are 1 … 8 transfer measurements, each on its own measurement input (two
+  measurements of one input would be one mic at two points). The setup window adds them
+  with a *mic 2* … row (**→** adds the next transfer on an input of its own, *none* drops it).
+- **Swap** (`walk.swap {points}`, key **M**): the mics at two or more pending points of the
+  current step move round by one (two trade places; the key rotates every mic standing).
+  The same exchange applies to the pending points of later steps, since those were planned
+  from where each mic stood: whoever stands there now walks on. A swap is a move (§5 reset).
+- **Skip and redo are per point.** A point that cannot be measured (a pillar, a seat taken)
+  is one point, not a step: `walk.skip {point}` leaves it out and the other mics stay; the
+  walk advances only when the step has nothing pending. `walk.redo {point}` makes one point
+  pending for the mic that captured it and goes to its step, where only that mic stands (the
+  others' captures there stay). With several candidates the keys open a chooser: the whole
+  step first (a skip or redo per point), then each point by name (*P3 · Vilppu*). The CLI's
+  `walk skip` without a point skips every point a mic stands at.
+- **PageDown / PageUp** step through steps (`walk.goto {step}`), not points.
+- **The walk pane**: the step line names each mic (*Move Vilppu to P3, MM1 to P4*), a line
+  per mic in its colour gives its readout from FOH, and on the plan each standing point is
+  ringed in its mic's colour (`Theme::trace_color` by the mic's place), the next step's
+  faintly. One readiness bar, the **slowest** standing mic's (*settling · MM1*): a step is
+  capturable when its slowest mic is, so one bar answers the one question; a bar per mic
+  would make the operator find the minimum.
 
 ## 7. Simulation (`ac2-roomsim`, stage 4) (G7)
 
