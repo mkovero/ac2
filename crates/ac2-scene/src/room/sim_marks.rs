@@ -11,7 +11,7 @@ use ac2_room::plan::{WallSide, wall_side};
 use super::sim;
 use crate::canvas::{anchor, label, text_width};
 use crate::ir::IrScene;
-use crate::primitives::{Dash, HAlign, Polyline, Stroke, VAlign};
+use crate::primitives::{Dash, FillRect, HAlign, Polyline, Rect, Stroke, VAlign};
 use crate::theme::Theme;
 
 /// Reflections weaker than this, dB re the direct sound, are not marked: they are lost
@@ -156,9 +156,80 @@ pub fn overlay_legend(s: &SimState, source: &str) -> String {
     )
 }
 
+/// Gap between a mark's line and its name, and between neighbouring names, px.
+const LABEL_GAP: f32 = 4.0;
+
+/// Where each name goes: the strongest first, right of its line in the first row where it
+/// covers no name already placed, else left of it; `None` where neither fits.
+fn place_names(
+    marks: &[SimMark],
+    xs: &[Option<f32>],
+    plot: Rect,
+    top: f32,
+    fs: f32,
+) -> Vec<Option<Rect>> {
+    let mut order: Vec<usize> = (0..marks.len()).collect();
+    order.sort_by(|&a, &b| marks[b].level_db.total_cmp(&marks[a].level_db));
+    let row_h = 1.3 * fs;
+    let mut placed: Vec<Option<Rect>> = vec![None; marks.len()];
+    let mut taken: Vec<Rect> = Vec::new();
+    for i in order {
+        let (Some(x), m) = (xs[i], &marks[i]) else {
+            continue;
+        };
+        if m.level_db < LABEL_FLOOR_DB {
+            continue;
+        }
+        let w = text_width(&m.name, fs);
+        let spot = (0..LABEL_ROWS)
+            .flat_map(|row| [(row, x + LABEL_GAP), (row, x - LABEL_GAP - w)])
+            .map(|(row, x0)| Rect::new(x0, top + row as f32 * row_h, w, fs * 1.15))
+            .find(|r| {
+                r.x >= plot.x
+                    && r.right() <= plot.right()
+                    && taken.iter().all(|t| {
+                        r.right() + LABEL_GAP <= t.x
+                            || r.x >= t.right() + LABEL_GAP
+                            || r.bottom() <= t.y
+                            || r.y >= t.bottom()
+                    })
+            });
+        if let Some(r) = spot {
+            taken.push(r);
+            placed[i] = Some(r);
+        }
+    }
+    placed
+}
+
+/// The parts of a vertical line at `x` from `y0` to `y1` that pass no box of `boxes`: a name
+/// crossed by another reflection's line would read as cut.
+fn around(x: f32, y0: f32, y1: f32, boxes: &[Rect]) -> Vec<(f32, f32)> {
+    let mut cuts: Vec<(f32, f32)> = boxes
+        .iter()
+        .filter(|b| x >= b.x - 2.0 && x <= b.right() + 2.0)
+        .map(|b| (b.y - 2.0, b.bottom() + 2.0))
+        .collect();
+    cuts.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut out = Vec::new();
+    let mut y = y0;
+    for (a, b) in cuts {
+        if a > y {
+            out.push((y, a.min(y1)));
+        }
+        y = y.max(b);
+    }
+    if y < y1 {
+        out.push((y, y1));
+    }
+    out.retain(|(a, b)| b > a);
+    out
+}
+
 /// Draws `marks` on the IR scene `sc`: a faint dashed line per reflection in the plot, the
-/// strongest names (at least [`LABEL_FLOOR_DB`]) in rows where they do not overlap, the
-/// legend at the plot's bottom right. Stored in `sc.sim`.
+/// strongest names (at least [`LABEL_FLOOR_DB`]) beside their lines in rows where they cover
+/// no other name, on a backing that hides the response under them, every line broken where it would cross a name or the legend at the plot's
+/// bottom right. Stored in `sc.sim`.
 pub fn draw_marks(sc: &mut IrScene, marks: SimMarks, theme: &Theme) {
     let plot = sc.plot;
     let xm = sc.x_axis.mapping;
@@ -167,53 +238,59 @@ pub fn draw_marks(sc: &mut IrScene, marks: SimMarks, theme: &Theme) {
     let Some(layer) = sc.scene.layers.get_mut(2) else {
         return;
     };
-    let mut order: Vec<usize> = (0..marks.marks.len()).collect();
-    order.sort_by(|&a, &b| marks.marks[b].level_db.total_cmp(&marks.marks[a].level_db));
-    // Each row's labelled spans, so a name lands where it does not cover another.
-    let mut rows: Vec<Vec<(f32, f32)>> = vec![Vec::new(); LABEL_ROWS];
-    let top = plot.y + 0.3 * plot.h;
-    for &i in &order {
-        let m = &marks.marks[i];
-        let x = xm.to_px(m.t_ms);
-        if !(x > plot.x && x <= plot.right()) {
-            continue;
+    let xs: Vec<Option<f32>> = marks
+        .marks
+        .iter()
+        .map(|m| {
+            let x = xm.to_px(m.t_ms);
+            (x > plot.x && x <= plot.right()).then_some(x)
+        })
+        .collect();
+    let names = place_names(&marks.marks, &xs, plot, plot.y + 0.3 * plot.h, fs);
+    let legend_w = text_width(&marks.legend, fs);
+    let legend = Rect::new(
+        plot.right() - 6.0 - legend_w,
+        plot.bottom() - 4.0 - 1.15 * fs,
+        legend_w,
+        1.15 * fs,
+    );
+    let mut boxes: Vec<Rect> = names.iter().flatten().copied().collect();
+    boxes.push(legend);
+    for x in xs.iter().flatten() {
+        for (y0, y1) in around(*x, plot.y, plot.bottom(), &boxes) {
+            layer.polylines.push(Polyline {
+                points: vec![[*x, y0], [*x, y1]],
+                alpha: vec![],
+                stroke: Stroke {
+                    color: colour,
+                    width: 1.0,
+                    dash: Some(Dash {
+                        on: 2.0,
+                        off: 4.0,
+                        offset: 0.0,
+                    }),
+                },
+                clip: Some(plot),
+            });
         }
-        layer.polylines.push(Polyline {
-            points: vec![[x, plot.y], [x, plot.bottom()]],
-            alpha: vec![],
-            stroke: Stroke {
-                color: colour,
-                width: 1.0,
-                dash: Some(Dash {
-                    on: 2.0,
-                    off: 4.0,
-                    offset: 0.0,
-                }),
-            },
-            clip: Some(plot),
-        });
-        if m.level_db < LABEL_FLOOR_DB {
-            continue;
+    }
+    for (m, r) in marks.marks.iter().zip(&names) {
+        if let Some(r) = r {
+            // A backing in the plot's colour: the measured response under a name would
+            // otherwise run through its letters.
+            layer.rects.push(FillRect {
+                rect: Rect::new(r.x - 1.0, r.y - 1.0, r.w + 2.0, r.h + 2.0),
+                color: theme.background.with_alpha(0.85),
+                clip: Some(plot),
+            });
+            layer.labels.push(label(
+                m.name.clone(),
+                [r.x, r.y],
+                anchor(HAlign::Left, VAlign::Top),
+                fs,
+                colour,
+            ));
         }
-        let w = text_width(&m.name, fs) + 6.0;
-        let span = (x + 3.0, x + 3.0 + w);
-        if span.1 > plot.right() {
-            continue;
-        }
-        let Some(row) = rows
-            .iter()
-            .position(|r| r.iter().all(|&(a, b)| span.1 <= a || span.0 >= b))
-        else {
-            continue;
-        };
-        rows[row].push(span);
-        layer.labels.push(label(
-            m.name.clone(),
-            [span.0, top + row as f32 * 1.3 * fs],
-            anchor(HAlign::Left, VAlign::Top),
-            fs,
-            colour,
-        ));
     }
     layer.labels.push(label(
         marks.legend.clone(),

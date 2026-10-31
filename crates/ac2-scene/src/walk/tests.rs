@@ -897,3 +897,60 @@ fn the_walk_pane_draws_a_coverage_map_under_its_points_and_the_simulation_line()
     let lines = p.lines();
     assert_eq!(lines.coverage.len(), 2);
 }
+
+/// At a walk pane's width in a grid (about 500 px) the coverage legend wraps between its
+/// clauses: every clause reads whole, the validity limit above all, none cut with `…`.
+#[test]
+fn the_coverage_legend_wraps_whole_clauses_at_a_narrow_pane() {
+    let theme = Theme::dark();
+    let plan = hall();
+    let w = walk(&pending(4), Some(0));
+    let mut map = ac2_proto::samples::sim_map_state();
+    map.plan = plan.name.clone();
+    let mut other = map.sources[0].clone();
+    other.name = "Main R".into();
+    map.sources.push(other);
+    let p = WalkPane {
+        walk: &w,
+        plan: Some(&plan),
+        ready: Ready::Waiting,
+        mics: &[],
+        slowest: None,
+        average: None,
+        unsettled: 0,
+        bar_drawn: None,
+        conditions: String::new(),
+        sweep: None,
+        sim: None,
+        coverage: Some(&map),
+    };
+    let s = walk_scene(
+        &p,
+        Style {
+            chrome: PlotChrome::Full,
+            theme: &theme,
+        },
+        Viewport {
+            width: 500.0,
+            height: 600.0,
+        },
+    );
+    let texts: Vec<&str> = s
+        .scene
+        .layers
+        .iter()
+        .flat_map(|l| l.labels.iter().map(|l| l.text.as_str()))
+        .collect();
+    assert!(texts.iter().all(|t| !t.contains('…')), "{texts:?}");
+    let validity = crate::room::sim::validity_label(&map).expect("a Schroeder limit");
+    for clause in crate::room::sim::map_legend(&map)
+        .iter()
+        .flat_map(|l| l.split(" · "))
+    {
+        assert!(
+            texts.iter().any(|t| t.contains(clause)),
+            "{clause}: {texts:?}"
+        );
+    }
+    assert!(texts.iter().any(|t| t.contains(&validity)), "{texts:?}");
+}

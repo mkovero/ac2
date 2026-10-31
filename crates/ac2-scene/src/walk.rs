@@ -11,7 +11,7 @@ mod tests;
 
 use ac2_proto::model::{PlanSpec, PointState, WalkState};
 
-use crate::canvas::{Canvas, anchor, cut_to, label};
+use crate::canvas::{Canvas, anchor, cut_to, label, text_width};
 use crate::primitives::{FillRect, HAlign, Rect, Scene, VAlign, Viewport};
 use crate::view::Style;
 
@@ -393,8 +393,32 @@ pub struct WalkScene {
 /// Swatches of the coverage colour ramp before the legend's scale line, loudest first.
 const RAMP_STEPS: usize = 8;
 
-/// The coverage legend's lines from `y` (small, dim), the colour ramp leading the second
-/// (its scale); returns the `y` under them.
+/// `line` in lines no wider than `width` at font size `fs`, broken between its ` · `
+/// clauses so each reads whole (a validity limit cut short would be misread); a clause wider
+/// than the pane alone breaks between words.
+pub(crate) fn wrap_clauses(line: &str, width: f32, fs: f32) -> Vec<String> {
+    let measure = |t: &str| text_width(t, fs);
+    let mut out: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for clause in line.split(" · ") {
+        if !cur.is_empty() {
+            let joined = format!("{cur} · {clause}");
+            if measure(&joined) <= width {
+                cur = joined;
+                continue;
+            }
+            out.push(std::mem::take(&mut cur));
+        }
+        let mut pieces = crate::toast::wrap(clause, width, &measure);
+        cur = pieces.pop().unwrap_or_default();
+        out.extend(pieces);
+    }
+    out.push(cur);
+    out
+}
+
+/// The coverage legend's lines from `y` (small, dim), each wrapped to the pane between its
+/// clauses, the colour ramp leading the second (its scale); returns the `y` under them.
 fn coverage_legend(
     c: &mut Canvas,
     lines: &[String],
@@ -421,14 +445,17 @@ fn coverage_legend(
             }
             x += RAMP_STEPS as f32 * sw + 0.6 * fs;
         }
-        c.overlay.labels.push(label(
-            cut_to(line, width - (x - pad), fs),
-            [x, y],
-            anchor(HAlign::Left, VAlign::Top),
-            fs,
-            theme.text_dim,
-        ));
-        y += fs * 1.45;
+        // Continuation lines line up under the first's text, past the ramp.
+        for part in wrap_clauses(line, width - (x - pad), fs) {
+            c.overlay.labels.push(label(
+                part,
+                [x, y],
+                anchor(HAlign::Left, VAlign::Top),
+                fs,
+                theme.text_dim,
+            ));
+            y += fs * 1.45;
+        }
     }
     if !lines.is_empty() {
         y += fs * 0.3;

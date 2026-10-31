@@ -206,9 +206,11 @@ fn the_overlay_draws_dashed_marks_names_and_the_legend() {
     draw_marks(&mut sc, marks, &theme);
     let layer = &sc.scene.layers[2];
     let lines = &layer.polylines[before..];
-    assert_eq!(lines.len(), 2);
+    let mut xs: Vec<f32> = lines.iter().map(|l| l.points[0][0]).collect();
+    xs.dedup();
+    assert_eq!(xs.len(), 2);
     let x10 = sc.x_axis.mapping.to_px(10.0);
-    assert!((lines[0].points[0][0] - x10).abs() < 1e-3);
+    assert!((xs[0] - x10).abs() < 1e-3);
     assert!(lines.iter().all(|l| l.stroke.dash.is_some()));
     let texts: Vec<&str> = layer.labels.iter().map(|l| l.text.as_str()).collect();
     // −3 dB is named; −25 dB is under LABEL_FLOOR_DB: a line without a name.
@@ -221,4 +223,89 @@ fn the_overlay_draws_dashed_marks_names_and_the_legend() {
         "{texts:?}"
     );
     assert!(sc.sim.is_some());
+}
+
+/// Reflections a few ms apart: every name sits beside its own line, apart from its line by
+/// a gap, no two names overlap, and no line runs through a name.
+#[test]
+fn names_avoid_each_other_and_every_line() {
+    let theme = crate::theme::Theme::dark();
+    let frame = IrFrame {
+        meas: MeasId(1),
+        meta: IrMeta {
+            sample_rate: Hz(48_000.0),
+            t0: Seconds(-0.005),
+            dt: Seconds(0.0001),
+            inserted_delay: Seconds(0.0),
+        },
+        linear: (0..800).map(|i| if i == 50 { 1.0 } else { 0.01 }).collect(),
+        etc: None,
+    };
+    let view = ViewState::default();
+    let mut sc = crate::ir::ir_scene(
+        &frame,
+        theme.traces[0],
+        None,
+        &crate::ir::IrCtx {
+            status: &Status::default(),
+            view: &view,
+            axes: &view.ir.axes,
+            style: Style {
+                chrome: view.chrome,
+                theme: &theme,
+            },
+            size: Viewport {
+                width: 900.0,
+                height: 380.0,
+            },
+        },
+    );
+    let before = (
+        sc.scene.layers[2].polylines.len(),
+        sc.scene.layers[2].labels.len(),
+    );
+    let mut s = sim();
+    s.sources[0].receivers[0].arrivals = [
+        (0.0, 1.0, vec![]),
+        (4.2, 0.6, vec![Surface::Floor]),
+        (9.8, 0.3, vec![Surface::Wall { edge: 2 }]),
+        (14.5, 0.16, vec![Surface::Wall { edge: 3 }]),
+        (16.0, 0.06, vec![Surface::Ceiling]),
+        (23.0, 0.04, vec![Surface::Wall { edge: 1 }]),
+    ]
+    .into_iter()
+    .map(|(ms, r, p)| at(0.0375 + ms / 1000.0, r, p))
+    .collect();
+    let p = room();
+    let marks = reflection_marks(&s, Some(&p), &position()).unwrap();
+    draw_marks(&mut sc, marks, &theme);
+    let fs = theme.small_font_size;
+    let layer = &sc.scene.layers[2];
+    let names = &layer.labels[before.1..layer.labels.len() - 1];
+    assert_eq!(names.len(), 5, "every reflection above −20 dB is named");
+    let boxes: Vec<crate::primitives::Rect> = names
+        .iter()
+        .map(|l| {
+            crate::primitives::Rect::new(
+                l.pos[0],
+                l.pos[1],
+                crate::canvas::text_width(&l.text, fs),
+                fs * 1.15,
+            )
+        })
+        .collect();
+    for (i, a) in boxes.iter().enumerate() {
+        for b in &boxes[i + 1..] {
+            let apart =
+                a.right() <= b.x || b.right() <= a.x || a.bottom() <= b.y || b.bottom() <= a.y;
+            assert!(apart, "{a:?} overlaps {b:?}");
+        }
+    }
+    for l in &layer.polylines[before.0..] {
+        let (x, y0, y1) = (l.points[0][0], l.points[0][1], l.points[1][1]);
+        for b in &boxes {
+            let crosses = x >= b.x - 1.0 && x <= b.right() + 1.0 && y0 < b.bottom() && y1 > b.y;
+            assert!(!crosses, "a line at {x} crosses {b:?}");
+        }
+    }
 }
