@@ -465,6 +465,9 @@ pub fn commands() -> Vec<Command> {
         Command::SimFit {
             request: super::sim::sim_fit_request(),
         },
+        Command::SimMap {
+            request: super::sim::sim_map_request(),
+        },
         Command::SimCancel,
     ])
     .collect()

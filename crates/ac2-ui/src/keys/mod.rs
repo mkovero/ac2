@@ -355,4 +355,9 @@ commands! {
     WalkRedo => "walk_redo", "Redo point and reset", [Walk];
     WalkSkip => "walk_skip", "Skip point", [Walk];
     WalkSwap => "walk_swap", "Mics trade places", [Walk];
+
+    SimRun => "sim_run", "Simulate room", [Global];
+    SimFit => "sim_fit", "Fit simulation to walk", [Global];
+    SimMap => "sim_map", "Coverage map", [Global];
+    SimCancel => "sim_cancel", "Cancel simulation", [Global];
 }

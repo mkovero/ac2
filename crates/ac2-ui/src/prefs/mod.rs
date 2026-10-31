@@ -353,6 +353,9 @@ pub struct UiPrefs {
     /// The transfer pane shades an average's range across positions (on until the
     /// operator turns it off).
     pub range_band: bool,
+    /// Simulation results drawn over measured panes: reflections on an IR, a coverage map
+    /// under a walk's plan (on until the operator turns them off).
+    pub sim_hints: bool,
     /// What shows through a plate the pointer is not on (see-through until the operator
     /// sets it solid).
     pub plate_background: ac2_scene::plate::PlateBackground,
@@ -439,6 +442,7 @@ impl Default for UiPrefs {
             warning_toasts: true,
             resolution_marker: true,
             range_band: true,
+            sim_hints: true,
             plate_background: ac2_scene::plate::PlateBackground::SeeThrough,
             bar_ease: true,
             shared_scale: true,

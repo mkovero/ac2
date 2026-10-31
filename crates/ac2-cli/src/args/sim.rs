@@ -2,8 +2,8 @@
 
 use clap::{Args, Subcommand};
 
-use ac2_proto::model::{SimSettings, WalkPointSpec};
-use ac2_proto::units::Seconds;
+use ac2_proto::model::{SimMapRequest, SimSettings, WalkPointSpec};
+use ac2_proto::units::{Hz, Seconds};
 
 use super::MeasRef;
 
@@ -17,6 +17,9 @@ pub enum SimCmd {
     /// Fit the plan's absorption per octave band so the simulated T20 at a sweep walk's
     /// captured points matches the measured one.
     Fit(SimFitArgs),
+    /// A coverage map: the direct and early energy of the plan's speakers on a grid over its
+    /// zones (image sources only), dB re its loudest cell.
+    Map(SimMapArgs),
     /// The last simulation: its progress, or its result.
     Status,
     /// Stop the running simulation.
@@ -61,6 +64,48 @@ pub struct SimFitArgs {
     /// Start it and return; `ac2 sim status` shows how it goes.
     #[arg(long)]
     pub detach: bool,
+}
+
+/// `sim map`.
+#[derive(Debug, Args)]
+pub struct SimMapArgs {
+    /// The plan (the session's copy, else the library's).
+    #[arg(long)]
+    pub plan: String,
+    /// A speaker marker of the plan (repeatable; their energies add); every speaker when
+    /// left out.
+    #[arg(long = "source", value_name = "SPEAKER")]
+    pub sources: Vec<String>,
+    /// Grid spacing, metres.
+    #[arg(long, default_value_t = SimMapRequest::DEFAULT_SPACING_M)]
+    pub spacing: f64,
+    /// The octave band mapped, Hz (125 … 8000); every band summed when left out.
+    #[arg(long)]
+    pub band: Option<f64>,
+    /// Energy counted after the direct sound, milliseconds.
+    #[arg(long = "window-ms", default_value_t = SimMapRequest::DEFAULT_WINDOW_S * 1000.0)]
+    pub window_ms: f64,
+    /// Reflection order of the image sources.
+    #[arg(long, default_value_t = SimMapRequest::DEFAULT_IMAGE_ORDER,
+          value_parser = clap::value_parser!(u8).range(0..=i64::from(SimSettings::MAX_IMAGE_ORDER)))]
+    pub order: u8,
+    /// Start it and return; `ac2 sim status` shows how it goes.
+    #[arg(long)]
+    pub detach: bool,
+}
+
+impl SimMapArgs {
+    /// The request, with `sources` when none were named.
+    pub fn request(&self, sources: Vec<String>) -> SimMapRequest {
+        SimMapRequest {
+            plan: self.plan.clone(),
+            sources,
+            spacing: self.spacing,
+            band: self.band.map(Hz),
+            window: Seconds(self.window_ms / 1000.0),
+            image_order: self.order,
+        }
+    }
 }
 
 /// How a simulation runs.

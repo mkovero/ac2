@@ -360,6 +360,20 @@ pub struct Layer {
     pub labels: Vec<Label>,
 }
 
+impl Layer {
+    /// Appends `other`'s primitives after this layer's, kind by kind.
+    pub fn extend(&mut self, other: Layer) {
+        self.rects.extend(other.rects);
+        self.heatmaps.extend(other.heatmaps);
+        self.polygons.extend(other.polygons);
+        self.bands.extend(other.bands);
+        self.grids.extend(other.grids);
+        self.polylines.extend(other.polylines);
+        self.points.extend(other.points);
+        self.labels.extend(other.labels);
+    }
+}
+
 /// A frame's worth of drawing, in logical pixels.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Scene {

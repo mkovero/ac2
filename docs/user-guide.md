@@ -1564,6 +1564,29 @@ a value in the band (the others' decay does not), and the caption *mean of 4 pos
 source*. ISO 3382-1 asks for at least two source positions; the legend says the walk measured
 from one.
 
+**Room simulation.** With a walk pane focused (or a trace captured on a walk selected), the
+palette (**Ctrl+K**) offers *Simulate room* (every speaker marker of the walk's plan heard at
+the walk's points), *Fit simulation to walk* (a sweep walk: the absorption per octave band is
+fitted so the simulated T20 matches the measured; with several speakers it asks which one the
+walk measured), *Coverage map* (the direct and early energy of every speaker over the plan's
+zones on a 1 m grid) and *Cancel simulation*. The daemon simulates on a worker; the walk pane
+reads how far it is (*Simulation: simulating · ray tracing 40 %*), then what it assumed. Results
+are always labelled *simulated*, valid only above the Schroeder frequency the legends name, and
+never become traces or math operands.
+
+- On a sweep trace's **IR** view, the reflections the simulation predicts at the point the
+  trace was captured are faint dashed lines, the strongest named by the surfaces they bounced
+  off (*back wall*, *wall 3 → ceiling*), with the simulated direct sound put on the measured
+  one (*simulated · aligned on direct sound · absorption assumed*). Absorption that is assumed
+  or fitted per band makes *which wall* trustworthy and *how loud* an estimate.
+- The **coverage map** is drawn under the walk pane's plan as a faint heat layer, dB re the
+  loudest cell down to −40 dB; speakers add as power (no interference) and are omnidirectional.
+- The sweep pane's **Room** view shows the simulated room table under the measured one.
+
+**T** hides the overlay and the map with the other plot hints; Settings › Display › Simulation
+overlays turns them off (on by default). `ac2 sim run|fit|map|status|cancel` does the same from
+the CLI.
+
 #### Spatial walk (CLI)
 
 The daemon can lead the walk itself ([spatial-walk.md](design/spatial-walk.md)): a room
@@ -3686,6 +3709,10 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Export Leq log… | `spl_log_export` |
 | Export previous Leq log… | `spl_log_export_previous` |
 | Distortion unit | `distortion_unit` |
+| Simulate room | `sim_run` |
+| Fit simulation to walk | `sim_fit` |
+| Coverage map | `sim_map` |
+| Cancel simulation | `sim_cancel` |
 
 #### Key hint lines (Settings › Display › Key hints)
 

@@ -151,7 +151,7 @@ dependencies = [
 [[package]]
 name = "ac2-roomsim"
 version = "0.1.0"
-source = "git+https://github.com/mkovero/ac2-roomsim?rev=1b447f0852423bc429c6969cf34a80e1ff3f42bc#1b447f0852423bc429c6969cf34a80e1ff3f42bc"
+source = "git+https://github.com/mkovero/ac2-roomsim?rev=c000c2ee232e513503a234ba7b5e047c4599da83#c000c2ee232e513503a234ba7b5e047c4599da83"
 dependencies = [
  "rand_core 0.6.4",
  "rand_pcg",

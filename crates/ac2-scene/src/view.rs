@@ -847,6 +847,10 @@ pub struct ViewState {
     /// Shade an average's range across positions behind its magnitude
     /// ([`crate::range_band`]).
     pub range_band: bool,
+    /// Draw a room simulation over measurements: predicted reflections on a sweep's
+    /// impulse response, the coverage map under a walk's points
+    /// ([`crate::room::sim_marks`]).
+    pub sim_hints: bool,
     /// Least right margin of a frequency plot, logical pixels: set by the pane layout (not
     /// the operator) to the widest margin among the panes stacked in this pane's column, so
     /// they all put one frequency at one x ([`crate::freq_column`]). 0 keeps the plot's own.
@@ -873,6 +877,7 @@ impl Default for ViewState {
             chrome: PlotChrome::Full,
             unresolved: true,
             range_band: true,
+            sim_hints: true,
             freq_right: 0.0,
             plates: crate::plate::Plates::default(),
             plate_hover: None,
@@ -891,6 +896,12 @@ impl ViewState {
     /// grid.
     pub fn range_band_shown(&self) -> bool {
         self.range_band && self.chrome.grid()
+    }
+
+    /// Whether a simulation is drawn over measurements: a plot hint, so T takes it away
+    /// with the grid.
+    pub fn sim_shown(&self) -> bool {
+        self.sim_hints && self.chrome.grid()
     }
 
     /// The axes of IR picture `p`.

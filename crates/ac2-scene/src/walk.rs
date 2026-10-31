@@ -323,6 +323,11 @@ pub struct WalkPane<'a> {
     pub conditions: String,
     /// A sweep walk's run; `None` for a live walk.
     pub sweep: Option<SweepAt>,
+    /// The simulation line ([`crate::room::sim::status_line`]); `None` without one.
+    pub sim: Option<String>,
+    /// A finished coverage map of the walk's plan to draw under the points (shown while
+    /// the simulation hints are).
+    pub coverage: Option<&'a ac2_proto::model::SimState>,
 }
 
 /// The walk pane's lines, top to bottom.
@@ -335,6 +340,10 @@ pub struct WalkLines {
     pub average: String,
     /// What differs between the captures; empty when nothing recorded does.
     pub conditions: String,
+    /// Where the room simulation is; empty without one.
+    pub sim: String,
+    /// The coverage map's legend ([`crate::room::sim::map_legend`]); empty without one.
+    pub coverage: Vec<String>,
 }
 
 impl WalkPane<'_> {
@@ -364,6 +373,11 @@ impl WalkPane<'_> {
             },
             average: average_text(self.walk, self.average, self.unsettled),
             conditions: self.conditions.clone(),
+            sim: self.sim.clone().unwrap_or_default(),
+            coverage: self
+                .coverage
+                .map(crate::room::sim::map_legend)
+                .unwrap_or_default(),
         }
     }
 }
@@ -374,6 +388,52 @@ pub struct WalkScene {
     pub scene: Scene,
     pub map: Option<PlanMap>,
     pub lines: WalkLines,
+}
+
+/// Swatches of the coverage colour ramp before the legend's scale line, loudest first.
+const RAMP_STEPS: usize = 8;
+
+/// The coverage legend's lines from `y` (small, dim), the colour ramp leading the second
+/// (its scale); returns the `y` under them.
+fn coverage_legend(
+    c: &mut Canvas,
+    lines: &[String],
+    pad: f32,
+    mut y: f32,
+    width: f32,
+    theme: &crate::theme::Theme,
+) -> f32 {
+    let fs = theme.small_font_size;
+    for (i, line) in lines.iter().enumerate() {
+        let mut x = pad;
+        if i == 1 {
+            let sw = fs;
+            for k in 0..RAMP_STEPS {
+                let db = ac2_proto::model::SimMap::FLOOR_DB * k as f32 / (RAMP_STEPS - 1) as f32;
+                c.data.rects.push(FillRect {
+                    rect: Rect::new(x + k as f32 * sw, y + 0.1 * fs, sw, fs),
+                    color: crate::primitives::Color {
+                        a: 1.0,
+                        ..plan_view::heat(db)
+                    },
+                    clip: None,
+                });
+            }
+            x += RAMP_STEPS as f32 * sw + 0.6 * fs;
+        }
+        c.overlay.labels.push(label(
+            cut_to(line, width - (x - pad), fs),
+            [x, y],
+            anchor(HAlign::Left, VAlign::Top),
+            fs,
+            theme.text_dim,
+        ));
+        y += fs * 1.45;
+    }
+    if !lines.is_empty() {
+        y += fs * 0.3;
+    }
+    y
 }
 
 /// Length of the readiness bar beside its word, px: a meter read at a glance, not a scale.
@@ -470,6 +530,17 @@ pub fn walk_scene(p: &WalkPane<'_>, style: Style, size: Viewport) -> WalkScene {
         ));
         y += theme.font_size * 1.6;
     }
+    if !lines.sim.is_empty() {
+        c.overlay.labels.push(label(
+            cut_to(&lines.sim, width, theme.font_size),
+            [pad, y],
+            anchor(HAlign::Left, VAlign::Top),
+            theme.font_size,
+            theme.text_dim,
+        ));
+        y += theme.font_size * 1.5;
+    }
+    y = coverage_legend(&mut c, &lines.coverage, pad, y, width, theme);
     let rect = Rect::new(pad, y, width, (size.height - y - pad).max(1.0));
     let map = match p.plan {
         Some(plan) => {
@@ -477,6 +548,7 @@ pub fn walk_scene(p: &WalkPane<'_>, style: Style, size: Viewport) -> WalkScene {
                 plan,
                 dots: walk_dots(p.walk),
                 editing: None,
+                coverage: p.coverage.and_then(|s| s.map.as_ref()),
             };
             Some(plan_view::draw_plan(&mut c, &pic, rect, theme))
         }

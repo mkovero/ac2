@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     CalEntry, Generator, InputSetup, LineCalEntry, Measurement, Mic, OutputSetup, Pair, PlanSpec,
-    RecordingRun, Rig, Session, SimState, SplLog, SweepRun, TraceMeta, WalkState, WorkingSession,
+    RecordingRun, Rig, Session, SimFitKept, SimState, SplLog, SweepRun, TraceMeta, WalkState,
+    WorkingSession,
 };
 use crate::units::{MeasId, SampleIndex, Samples, Seconds, WallNs};
 
@@ -128,6 +129,11 @@ pub struct State {
     /// The latest room simulation, if any: simulated, not a trace, and not saved with the
     /// session (a rerun is cheap and a plan edit outdates it).
     pub sim: Option<SimState>,
+    /// The latest coverage map (`sim.map`), apart from [`Self::sim`] so a map and a run at
+    /// a walk's points are shown together; simulated, not saved with the session.
+    pub sim_map: Option<SimState>,
+    /// The absorption fit kept for later runs on its plan, if any.
+    pub sim_fit: Option<SimFitKept>,
 }
 
 /// Autosave of the measurements and traces: the daemon writes them, in the session file

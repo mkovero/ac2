@@ -171,12 +171,13 @@ fn a_run_reports_progress_and_its_t20_follows_eyring() {
     );
     let room = src.room.as_ref().unwrap();
     assert_eq!(room.positions, 2);
-    // 2–8 kHz: scattering makes the field nearly diffuse, where Eyring holds.
+    // 2–8 kHz: scattering makes the field nearly diffuse, where Eyring holds. With each
+    // band's response holding only that band's energy they agree within 4 % here.
     for b in 4..7 {
         let t20 = room.octave[b].t20.unwrap().mean;
         let eyring = done.eyring[b].0;
         assert!(
-            (t20 / eyring - 1.0).abs() < 0.08,
+            (t20 / eyring - 1.0).abs() < 0.05,
             "{} Hz: T20 {t20} against Eyring {eyring}",
             done.bands[b].0
         );
@@ -317,4 +318,65 @@ fn cancel_a_plan_change_and_a_session_close_stop_a_run() {
         request: request("Box", 1_000, 10.0),
     }));
     assert_eq!(wait(&r.sub, s.id, |s| !s.active()).status, SimStatus::Done);
+}
+
+#[test]
+fn a_coverage_map_is_the_states_map_and_too_fine_is_refused() {
+    let mut r = rig("sim-map");
+    let mut seated = panelled();
+    seated.name = "Seated".into();
+    seated.zones = vec![ZoneSpec {
+        name: "Floor".into(),
+        outline: vec![[2.0, 0.5], [9.0, 0.5], [9.0, 6.5], [2.0, 6.5]],
+        ear_height: 1.2,
+        weight: None,
+        seats: None,
+    }];
+    r.c.ok(Command::PlanSave { plan: seated });
+    let req = |plan: &str, spacing: f64| SimMapRequest {
+        plan: plan.into(),
+        sources: vec!["Main".into()],
+        spacing,
+        band: None,
+        window: Seconds(SimMapRequest::DEFAULT_WINDOW_S),
+        image_order: SimMapRequest::DEFAULT_IMAGE_ORDER,
+    };
+    assert_eq!(
+        refusal(r.c.call(Command::SimMap {
+            request: req("Box", 1.0)
+        })),
+        SimRefusal::NoZones
+    );
+    assert!(matches!(
+        refusal(r.c.call(Command::SimMap {
+            request: req("Seated", 0.1)
+        })),
+        SimRefusal::MapTooFine { max: 4096, .. }
+    ));
+    let e =
+        r.c.call(Command::SimMap {
+            request: SimMapRequest {
+                band: Some(Hz(1200.0)),
+                ..req("Seated", 1.0)
+            },
+        })
+        .expect_err("not a band");
+    assert_eq!(e.code, ErrorCode::Invalid);
+    let s = started(r.c.ok(Command::SimMap {
+        request: req("Seated", 1.0),
+    }));
+    assert_eq!(s.kind, SimKind::Map);
+    let done = wait(&r.sub, s.id, |s| !s.active());
+    assert_eq!(done.status, SimStatus::Done, "{:?}", done.status);
+    let m = done.map.as_ref().unwrap();
+    assert_eq!(m.cells.len(), 42);
+    assert!(m.cells.iter().any(|c| c.db == 0.0));
+    let st = match r.c.ok(Command::StateSnapshot) {
+        ReplyBody::Snapshot(s) => s.state,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(st.sim_map.as_ref(), Some(&done));
+    assert_eq!(st.sim, None, "a map leaves the run's place alone");
+    assert_eq!(st.sim_fit, None);
+    drop(r.h);
 }

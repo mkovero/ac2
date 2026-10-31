@@ -200,7 +200,7 @@ impl AppState {
             .filter(|w| w.kind == WalkKind::Sweep)
     }
 
-    fn focused_walk(&self) -> Result<&WalkState, String> {
+    pub(super) fn focused_walk(&self) -> Result<&WalkState, String> {
         let v = self.layout.focused();
         let open = self.keys.reach(CommandId::Walks);
         if v.kind != PaneKind::Walk {

@@ -3,7 +3,9 @@
 //! (*simulation not valid below 180 Hz*), its progress, and its room parameters as a table.
 //! A simulation is never a trace: these texts are its only face besides the plot overlays.
 
-use ac2_proto::model::{SimAbsorption, SimCancel, SimStage, SimState, SimStatus};
+use ac2_proto::model::{
+    SimAbsorption, SimCancel, SimFitKept, SimKind, SimMap, SimStage, SimState, SimStatus,
+};
 
 use super::{BandSet, RoomTable, walk};
 use crate::format;
@@ -117,14 +119,40 @@ pub fn room_table(s: &SimState, source: usize) -> Option<RoomTable> {
     let src = s.sources.get(source)?;
     let room = src.room.as_ref()?;
     let mut t = walk::means_table(room, BandSet::Octave, false);
+    bracket_modal(&mut t, s, room.octave.iter().map(|b| b.centre));
+    t.caption = format!(
+        "Room ({SIMULATED}) · {} · mean of {} receiver{} · octave bands",
+        src.name,
+        room.positions,
+        if room.positions == 1 { "" } else { "s" }
+    );
+    t.legend.extend(labels(s));
+    Some(t)
+}
+
+/// The room parameters `s` simulated at receiver `label` from its first source (the one a
+/// trace captured there is set beside), bands below the validity limit bracketed.
+pub fn receiver_table(s: &SimState, label: &str) -> Option<RoomTable> {
+    let src = s.sources.first()?;
+    let r = src.receivers.iter().find(|r| r.label == label)?;
+    let mut t = super::room_table(&r.room, BandSet::Octave);
+    bracket_modal(&mut t, s, r.room.octave.iter().map(|b| b.centre));
+    t.caption = format!("Room ({SIMULATED}) · {label} · {} · octave bands", src.name);
+    t.legend.retain(|l| !l.starts_with("ISO 3382-1"));
+    t.legend.extend(labels(s));
+    Some(t)
+}
+
+/// Brackets the cells of bands (centres `centres`, then broadband) reaching below `s`'s
+/// validity limit and says why in the legend.
+fn bracket_modal(
+    t: &mut RoomTable,
+    s: &SimState,
+    centres: impl Iterator<Item = Option<ac2_proto::units::Hz>>,
+) {
     let limit = s.valid_above.map_or(0.0, |f| f.0);
-    let below: Vec<bool> = room
-        .octave
-        .iter()
-        .map(|b| {
-            b.centre
-                .is_some_and(|c| c.0 / std::f64::consts::SQRT_2 < limit)
-        })
+    let below: Vec<bool> = centres
+        .map(|c| c.is_some_and(|c| c.0 / std::f64::consts::SQRT_2 < limit))
         .chain(std::iter::once(false))
         .collect();
     for row in &mut t.rows {
@@ -140,13 +168,94 @@ pub fn room_table(s: &SimState, source: usize) -> Option<RoomTable> {
             format::freq_rough(limit)
         ));
     }
-    t.caption = format!(
-        "Room ({SIMULATED}) · {} · mean of {} receiver{} · octave bands",
-        src.name,
-        room.positions,
-        if room.positions == 1 { "" } else { "s" }
+}
+
+/// A coverage map's legend: what it shows, then where it holds.
+/// *simulated direct + early energy (50 ms) · 1k Hz · omnidirectional source · absorption
+/// assumed*, *0 to −40 dB re the loudest cell · speakers add as power, no interference ·
+/// not valid below 180 Hz*.
+pub fn map_legend(s: &SimState) -> Vec<String> {
+    let Some(m) = &s.map else {
+        return Vec::new();
+    };
+    let band = m.band.map_or_else(
+        || "broadband".to_owned(),
+        |b| format!("{} Hz", format::freq_tick(b.0)),
     );
-    t.legend.extend(labels(s));
+    let mut first = format!(
+        "{SIMULATED} direct + early energy ({:.0} ms) · {band} · {} · {}",
+        m.window.0 * 1000.0,
+        source_label(s),
+        absorption_label(s)
+    );
+    if s.sources.len() > 1 {
+        first.push_str(&format!(" · {} speakers summed", s.sources.len()));
+    }
+    let mut second = format!(
+        "0 to {} dB re the loudest cell",
+        format::fixed(f64::from(SimMap::FLOOR_DB), 0)
+    );
+    if s.sources.len() > 1 {
+        second.push_str(" · speakers add as power, no interference");
+    }
+    if let Some(v) = validity_label(s) {
+        second.push_str(&format!(" · {v}"));
+    }
+    vec![first, second]
+}
+
+/// *812 cells of 1.0 m · median −6.1 dB, quietest −18.2 dB re the loudest*.
+pub fn map_summary(m: &SimMap) -> String {
+    let mut db: Vec<f32> = m.cells.iter().map(|c| c.db).collect();
+    db.sort_by(f32::total_cmp);
+    let median = db.get(db.len() / 2).copied().unwrap_or(0.0);
+    let least = db.first().copied().unwrap_or(0.0);
+    format!(
+        "{} cells of {:.1} m · median {} dB, quietest {} dB re the loudest",
+        m.cells.len(),
+        m.spacing,
+        format::signed(f64::from(median), 1),
+        format::signed(f64::from(least), 1)
+    )
+}
+
+/// The walk pane's simulation line for the newest of `sims` (a run or fit, a map) on the
+/// walk's plan, and the fit the daemon keeps: *Simulation: fitting · pass 2 · ray tracing
+/// 40 %*, *Coverage map: simulated · absorption assumed*, *Simulation: absorption fitted to
+/// 4 positions, kept for the next run*. `None` when neither concerns `plan`.
+pub fn status_line(
+    sims: &[Option<&SimState>],
+    fit: Option<&SimFitKept>,
+    plan: &str,
+) -> Option<String> {
+    let fit = fit.filter(|f| f.plan == plan);
+    let fit_words = |f: &SimFitKept| match &f.absorption {
+        SimAbsorption::Fitted { positions, .. } => format!(
+            "absorption fitted to {positions} position{}",
+            if *positions == 1 { "" } else { "s" }
+        ),
+        SimAbsorption::Assumed => "absorption assumed".to_owned(),
+    };
+    let newest = sims
+        .iter()
+        .flatten()
+        .filter(|s| s.plan == plan)
+        .max_by_key(|s| s.id.0);
+    let Some(s) = newest else {
+        return fit.map(|f| format!("Simulation: {}, kept for the next run", fit_words(f)));
+    };
+    let what = if s.kind == SimKind::Map {
+        "Coverage map"
+    } else {
+        "Simulation"
+    };
+    let mut t = format!("{what}: {}", status_text(s));
+    if s.status == SimStatus::Done {
+        t.push_str(&format!(" · {}", absorption_label(s)));
+        if let (SimAbsorption::Assumed, Some(f)) = (&s.absorption, fit) {
+            t.push_str(&format!(" · {}, kept for the next run", fit_words(f)));
+        }
+    }
     Some(t)
 }
 
@@ -247,5 +356,77 @@ mod tests {
             ]
         );
         assert!(room_table(&s, 1).is_none());
+    }
+
+    #[test]
+    fn a_coverage_map_says_what_it_shows_and_where_it_holds() {
+        use ac2_proto::samples::sim_map_state;
+        let mut s = sim_map_state();
+        s.absorption = SimAbsorption::Assumed;
+        s.valid_above = Some(Hz(183.0));
+        assert_eq!(
+            map_legend(&s),
+            [
+                "simulated direct + early energy (50 ms) · 1k Hz · omnidirectional source · \
+                 absorption assumed",
+                "0 to -40 dB re the loudest cell · simulation not valid below 180 Hz",
+            ]
+            .map(|l| l.replace('-', &format::MINUS.to_string()))
+        );
+        s.sources.push(s.sources[0].clone());
+        s.map.as_mut().unwrap().band = None;
+        let l = map_legend(&s);
+        assert!(
+            l[0].contains("broadband · omnidirectional sources"),
+            "{l:?}"
+        );
+        assert!(l[0].ends_with("2 speakers summed"), "{l:?}");
+        assert!(
+            l[1].contains("speakers add as power, no interference"),
+            "{l:?}"
+        );
+        assert_eq!(
+            map_summary(s.map.as_ref().unwrap()),
+            format!(
+                "3 cells of 1.0 m · median {m}1.5 dB, quietest {m}6.2 dB re the loudest",
+                m = format::MINUS
+            )
+        );
+        assert!(map_legend(&sim_state()).is_empty());
+    }
+
+    #[test]
+    fn the_walk_status_line_follows_the_newest_on_its_plan() {
+        use ac2_proto::samples::{sim_fit_kept, sim_map_state};
+        let run = sim_running();
+        let map = sim_map_state();
+        let fit = sim_fit_kept();
+        assert_eq!(
+            status_line(&[Some(&run)], None, "Hall").unwrap(),
+            "Simulation: simulating · ray tracing 20 %"
+        );
+        // The map (id 5) is newer than the run (id 4); the kept fit is named after an
+        // assumed result.
+        let mut assumed = map.clone();
+        assumed.absorption = SimAbsorption::Assumed;
+        assert_eq!(
+            status_line(&[Some(&run), Some(&assumed)], Some(&fit), "Hall").unwrap(),
+            "Coverage map: simulated · absorption assumed · absorption fitted to 4 positions, \
+             kept for the next run"
+        );
+        assert_eq!(
+            status_line(&[None, None], Some(&fit), "Hall").unwrap(),
+            "Simulation: absorption fitted to 4 positions, kept for the next run"
+        );
+        assert_eq!(status_line(&[Some(&run)], Some(&fit), "Club"), None);
+    }
+
+    #[test]
+    fn a_receivers_table_is_its_own_and_labelled_simulated() {
+        let s = sim_state();
+        let t = receiver_table(&s, "P1").unwrap();
+        assert_eq!(t.caption, "Room (simulated) · P1 · Main L · octave bands");
+        assert!(t.legend.iter().any(|l| l == "simulated"));
+        assert!(receiver_table(&s, "P9").is_none());
     }
 }

@@ -570,6 +570,22 @@ impl fmt::Display for Readout {
 /// without one, the first speaker marker with a heading (seen from the audience, facing it);
 /// without that, plan x/y.
 pub fn readout(plan: &PlanSpec, p: [f64; 2]) -> Readout {
+    let Some((origin, forward, from)) = facing(plan) else {
+        return Readout::Plan { x: p[0], y: p[1] };
+    };
+    let left_dir = [-forward[1], forward[0]];
+    let d = geom::sub(p, origin);
+    Readout::Relative {
+        left: geom::dot(d, left_dir),
+        back: -geom::dot(d, forward),
+        from,
+    }
+}
+
+/// Where positions are read from and the unit direction facing the stage: the first FOH
+/// marker with a heading; without one, the first speaker marker with a heading (seen from
+/// the audience, facing it); without that, `None`.
+pub fn facing(plan: &PlanSpec) -> Option<([f64; 2], [f64; 2], Reference)> {
     let with_heading = |kind: MarkerKind| {
         plan.markers
             .iter()
@@ -585,17 +601,54 @@ pub fn readout(plan: &PlanSpec, p: [f64; 2]) -> Readout {
             Reference::Speaker(m.name.clone()),
         )
     } else {
-        return Readout::Plan { x: p[0], y: p[1] };
+        return None;
     };
     let h = facing_deg.to_radians();
-    let forward = [h.cos(), h.sin()];
-    let left_dir = [-h.sin(), h.cos()];
-    let d = geom::sub(p, [origin.at[0], origin.at[1]]);
-    Readout::Relative {
-        left: geom::dot(d, left_dir),
-        back: -geom::dot(d, forward),
-        from,
+    Some(([origin.at[0], origin.at[1]], [h.cos(), h.sin()], from))
+}
+
+/// Which way a wall faces the room, as someone facing the stage sees it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WallSide {
+    /// Ahead, behind the stage.
+    Stage,
+    /// Behind.
+    Back,
+    /// To the left.
+    Left,
+    /// To the right.
+    Right,
+}
+
+/// The side of the room wall `edge` (outline edge, 0-based) stands on, by its outward
+/// normal against the direction facing the stage ([`facing`]), in quadrants of 90°; `None`
+/// without a FOH or speaker heading or for an edge the outline lacks. The outline runs
+/// counter-clockwise, so the outward normal of edge a → b is (b − a) turned clockwise.
+pub fn wall_side(plan: &PlanSpec, edge: usize) -> Option<WallSide> {
+    let (_, forward, _) = facing(plan)?;
+    let n = plan.outline.len();
+    if edge >= n {
+        return None;
     }
+    let (a, b) = (plan.outline[edge], plan.outline[(edge + 1) % n]);
+    let d = geom::sub(b, a);
+    let len = geom::dot(d, d).sqrt();
+    if len <= EPS {
+        return None;
+    }
+    let normal = [d[1] / len, -d[0] / len];
+    let ahead = geom::dot(normal, forward);
+    let left = geom::dot(normal, [-forward[1], forward[0]]);
+    let half = std::f64::consts::FRAC_1_SQRT_2;
+    Some(if ahead >= half {
+        WallSide::Stage
+    } else if ahead <= -half {
+        WallSide::Back
+    } else if left > 0.0 {
+        WallSide::Left
+    } else {
+        WallSide::Right
+    })
 }
 
 /// Distance from `p` to the nearest wall (outline edge), metres.

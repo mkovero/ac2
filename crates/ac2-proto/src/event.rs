@@ -9,8 +9,8 @@ use thiserror::Error;
 
 use crate::model::{
     Autosave, CalEntry, CalKey, Generator, InputSetups, LineCalEntry, LineCalKey, Measurement, Mic,
-    OutputSetup, PlanSpec, RecordingRun, Rig, Session, SimState, SplLog, State, SweepRun,
-    TimingStatus, TraceMeta, WalkState, WorkingSession,
+    OutputSetup, PlanSpec, RecordingRun, Rig, Session, SimFitKept, SimState, SplLog, State,
+    SweepRun, TimingStatus, TraceMeta, WalkState, WorkingSession,
 };
 use crate::units::{DaemonIncarnation, MeasId, Rev, SessionEpoch, TraceId, WalkId};
 
@@ -74,8 +74,11 @@ pub enum Change {
     Walk(Patch<WalkState, WalkId>),
     /// The session's copy of a plan, by name.
     WalkPlan(Patch<PlanSpec, String>),
-    /// The latest simulation (never deleted; a new run replaces it).
+    /// The latest simulation of its kind (never deleted; a new one replaces it): a map
+    /// ([`crate::model::SimKind::Map`]) is `State.sim_map`, a run or a fit `State.sim`.
     Sim(SimState),
+    /// The absorption fit kept for later runs (`None`: dropped).
+    SimFit(Option<SimFitKept>),
 }
 
 /// One committed state change.
@@ -232,6 +235,13 @@ pub enum WireEvent {
         /// Payload.
         payload: SimState,
     },
+    /// [`Change::SimFit`].
+    SimFit {
+        /// Rev.
+        rev: Rev,
+        /// Payload.
+        payload: Option<SimFitKept>,
+    },
 }
 
 impl From<Event> for WireEvent {
@@ -258,6 +268,7 @@ impl From<Event> for WireEvent {
             Change::Walk(payload) => Self::Walk { rev, payload },
             Change::WalkPlan(payload) => Self::WalkPlan { rev, payload },
             Change::Sim(payload) => Self::Sim { rev, payload },
+            Change::SimFit(payload) => Self::SimFit { rev, payload },
         }
     }
 }
@@ -285,6 +296,7 @@ impl From<WireEvent> for Event {
             WireEvent::Walk { rev, payload } => (rev, Change::Walk(payload)),
             WireEvent::WalkPlan { rev, payload } => (rev, Change::WalkPlan(payload)),
             WireEvent::Sim { rev, payload } => (rev, Change::Sim(payload)),
+            WireEvent::SimFit { rev, payload } => (rev, Change::SimFit(payload)),
         };
         Event { rev, change }
     }
@@ -314,6 +326,7 @@ impl Change {
             Self::Walk(_) => "walk",
             Self::WalkPlan(_) => "walk_plan",
             Self::Sim(_) => "sim",
+            Self::SimFit(_) => "sim_fit",
         }
     }
 }

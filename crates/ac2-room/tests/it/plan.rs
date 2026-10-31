@@ -1,6 +1,7 @@
 use ac2_proto::model::{MarkerKind, PlanSpec, Surface, SurfaceTag};
 use ac2_room::plan::{
-    PlanError, Polygon, Readout, Reference, check_polygon, mirror_axes, readout, validate,
+    PlanError, Polygon, Readout, Reference, WallSide, check_polygon, mirror_axes, readout,
+    validate, wall_side,
 };
 
 use crate::{hall, marker, rect, zone};
@@ -356,4 +357,38 @@ fn readout_falls_back_to_a_speaker_then_plan() {
         r.to_string(),
         "x 12.0 m, y 5.0 m in plan (no FOH or speaker heading)"
     );
+}
+
+#[test]
+fn walls_are_named_by_side_facing_the_stage() {
+    let mut p = hall();
+    p.outline = vec![[0.0, 0.0], [20.0, 0.0], [20.0, 30.0], [0.0, 30.0]];
+    p.markers = vec![marker(
+        "FOH",
+        MarkerKind::Foh,
+        [10.0, 20.0, 0.0],
+        Some(-90.0),
+    )];
+    // Facing −y: the wall at y = 0 is ahead, +x is left.
+    let sides: Vec<_> = (0..4).map(|e| wall_side(&p, e)).collect();
+    assert_eq!(
+        sides,
+        [
+            Some(WallSide::Stage),
+            Some(WallSide::Left),
+            Some(WallSide::Back),
+            Some(WallSide::Right)
+        ]
+    );
+    assert_eq!(wall_side(&p, 4), None);
+    // A speaker at the stage pointing at the audience reads the same.
+    p.markers = vec![marker(
+        "Main",
+        MarkerKind::Speaker,
+        [10.0, 1.0, 6.0],
+        Some(90.0),
+    )];
+    assert_eq!(wall_side(&p, 2), Some(WallSide::Back));
+    p.markers.clear();
+    assert_eq!(wall_side(&p, 0), None);
 }

@@ -348,13 +348,15 @@ run|fit|status|cancel`, texts in `ac2_scene::room::sim`.
   deletion of the plan (saving it unchanged does not), deletion of the fit's walk, and
   `session.close`. Results are not saved with the session: they are re-made in seconds from the
   plan, and a saved result would outlive the plan edit that invalidated it.
-- **Room parameters.** Per receiver, ac2-core's ISO 3382-1 evaluation of an impulse response
+- **Room parameters.** Per receiver, ac2-core's ISO 3382-1 evaluation of impulse responses
   synthesised from the arrivals and the late echogram (48 kHz). Each octave band is evaluated on
-  a response synthesised from that band's energy alone: the synthesis band-limits its noise with
-  gentle filters, so in one response the slow 125 Hz decay leaks into the 1 kHz filter and
-  outlasts the 1 kHz decay (it read 4.3 s against Eyring's 0.72 s). Broadband from the whole
-  response; no third-octave bands (the simulation has no finer detail than an octave). A
-  source's `room` is the receivers' mean, least and greatest, as a walk's.
+  its own response (`ReceiverResult::band_impulse_responses`), holding that band's energy only:
+  in one shared response the synthesis's gentle band filters let the slow 125 Hz decay leak into
+  the 1 kHz filter and outlast the 1 kHz decay. Per band the simulated T20 is within 4 % of
+  Eyring's at 2–8 kHz in a shoebox (the test's tolerance is 5 %); lower bands read longer, the
+  field there being less diffuse. Broadband from the whole response; no third-octave bands (the
+  simulation has no finer detail than an octave). A source's `room` is the receivers' mean,
+  least and greatest, as a walk's.
 - **Fit rule.** One scale per octave band on every surface's absorption. Start where Eyring's T
   (with air) equals the measured T20 (fixed-point iterations, no simulation). Then simulation
   passes with the request's fixed seed; after each, per band, a Newton step on log T against
@@ -373,7 +375,39 @@ run|fit|status|cancel`, texts in `ac2_scene::room::sim`.
   4 positions*; *simulation not valid below 180 Hz* (Schroeder, two digits); *omnidirectional
   source*. The simulated room table brackets bands reaching below the limit. A simulation is a
   `SimState`, a type of its own, never a trace: no math channel can name it.
-- **Part 2 (not yet):** the reflection overlay on the measured ETC, the coverage map, and the UI.
+
+**As built (stage 4b part 2: overlay, coverage map, UI).**
+- **Reflection overlay** (`ac2_scene::room::sim_marks`). On a sweep pane's IR / ETC view, a
+  finished `sim.run` or `sim.fit` of the trace's plan heard at the trace's position (its walk's
+  receivers, or a receiver of the same label within 5 cm) draws each arrival of its first source
+  at least −30 dB re the direct sound as a faint dashed line; those at least −20 dB are named by
+  their path in plan terms (*back wall*, *wall 3, left → ceiling*: a wall's side from the FOH or
+  speaker heading, by its number when another wall shares the side or the plan has no heading),
+  in three rows so neighbours do not cover each other. Time zero is the measured arrival, the
+  simulated direct sound put on it: the measured time base carries the system latency and the
+  speaker's delay, the simulation neither. Legend *simulated · aligned on direct sound ·
+  absorption assumed | fitted to N positions · Main L*.
+- **Coverage map** (`sim.map`, CLI `ac2 sim map`). Image sources only (default order 2): the
+  energy within a window (default 50 ms) of each cell's direct sound, one band or every band
+  summed, every source added as power. Cells are a square grid (default 1 m) over the zones'
+  bounding box, kept where the centre is in a zone (its ear height) and inside the room; at most
+  4096, a finer request refused `map_too_fine` with the count (estimated from the zones' area
+  first, so a 1 cm grid is never walked), a plan without zones `no_zones`. Values dB re the
+  loudest cell, floored at −40 dB. On the worker as a run (one at a time); its result is
+  `State.sim_map`, kept beside the last run's `State.sim` so a map does not hide the overlay.
+  Drawn under a walk pane's points on the plan as a faint heat layer, with a legend (ramp, *0 to
+  −40 dB re the loudest cell*, *speakers add as power, no interference*, the Schroeder note).
+- **Fit kept.** The fitted scale the daemon applies to later runs of the plan is mirrored as
+  `State.sim_fit` (plan, walk, absorption) so the app can say a run will use it; not saved with
+  the session, dropped with the plan or the walk.
+- **UI.** Palette commands *Simulate room* (every speaker at the focused walk's points),
+  *Fit simulation to walk* (a sweep walk; asks which speaker when the plan has several),
+  *Coverage map*, *Cancel simulation*; the walk is the focused walk pane's, else the selected
+  trace's. The walk pane shows a status line (*Simulation: simulating · ray tracing 40 %*,
+  *Coverage map: simulated · absorption fitted to 6 positions*). The sweep pane's Room view puts the
+  simulated table under the measured one at one font (the walk's mean, or the trace's
+  receiver). T hides the overlay and the map with the other plot hints; Settings › Display ›
+  Simulation overlays turns them off.
 
 ## 8. One sweep, several mics (G8)
 

@@ -709,6 +709,7 @@ mod drag_undo;
 
 mod plates;
 
+mod sim;
 mod walk;
 
 /// Shift+C steps the selected measurement's colour to one no other measurement has

@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 78`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 79`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -1284,8 +1284,9 @@ one `<name>.json` per plan in its data directory (`plans/`), mirrored as `State.
 `docs/design/spatial-walk.md` §7. The daemon simulates a plan with the `ac2-roomsim`
 engine (image sources for the early reflections, ray tracing for the late field, per
 octave band 125 Hz … 8 kHz) on a worker thread of its own. A simulation is not a
-measurement and makes no trace; its latest result is `State.sim` and is not saved with the
-session. One runs at a time.
+measurement and makes no trace; its latest run or fit is `State.sim`, its latest coverage
+map `State.sim_map` (a `sim` event carries either; its `kind` says which), neither saved with
+the session. One runs at a time (runs, fits and maps share the worker).
 
 - `sim.run` {`request`: `SimRequest` {`plan`, `sources` [speaker marker names], `receivers`
   {`type`: `walk` {`walk`} \| `points` {`points` [{`label`, `at`}]}}, `settings`}} simulates
@@ -1310,6 +1311,20 @@ session. One runs at a time.
   `outside` {`name`} (a source or receiver not inside the room), `empty`,
   `not_a_sweep_walk`, `no_measured_t20`, `busy` (one is running), and `invalid` for
   settings out of range.
+- `sim.map` {`request`: `SimMapRequest` {`plan`, `sources` [speaker marker names; their
+  energies add as power], `spacing` m (default 1.0), `band` Hz \| nil (a nominal octave
+  centre 125 … 8000; nil: every band summed, broadband), `window` s (0 … 0.5, default 0.05:
+  the direct sound and early reflections), `image_order` (0 … 4, default 2)}} maps the
+  direct and early energy over the plan's zones, image sources only (no ray tracing): a
+  grid of `spacing` squares over the zones' extent, a cell kept when its centre lies in a
+  zone (the first that holds it gives its ear height) and inside the room. The result is
+  `SimState.map`: `SimMap` {`spacing`, `origin` [x, y] (centre of column 0, row 0), `band`,
+  `window`, `cells` [`SimMapCell` {`col`, `row`, `db`}]} with `db` the cell's level re the
+  map's loudest cell, ≤ 0, floored at −40. At most 4096 cells: a finer spacing is refused
+  `map_too_fine` {`cells`, `max`}; no zone, or no cell centre in one, `no_zones`; `invalid`
+  for a band that is not an octave of the simulation, or a spacing or window out of range.
+  The kept fit applies as to `sim.run`. A map's `settings.rays_per_band` is 0 and its
+  `sources` carry no receivers.
 - `sim.cancel` stops the running simulation (`refused` when none runs) and replies `sim`
   with it `cancelled` {`why`: `operator`}. A run also stops `cancelled` when its plan changes
   or is deleted (`plan_changed`; saving it unchanged does not), when the fit's walk is
@@ -1317,7 +1332,9 @@ session. One runs at a time.
 - Progress: `sim` events with `status` `running` {`stage` `image_sources` \|
   `ray_tracing` \| `analysis`, `done`, `total`, `source` (index), `pass` (fit pass, 1-based; 0 for a run)}, at
   most five a second, then `done`, `cancelled` {`why`} or `failed` {`msg`}.
-- **`SimState`** {`id: SimId`, `plan`, `kind` {`type`: `run` \| `fit` {`walk`}}, `settings`,
+- **`SimState`** {`id: SimId`, `plan`, `kind` {`type`: `run` \| `fit` {`walk`} \| `map`},
+  `walk` (`WalkId` \| nil: the walk whose points are the receivers, for a run at a walk and a
+  fit), `settings`,
   `status`, `bands` [Hz] (nominal octave centres; every per-band list follows them),
   `absorption` {`type`: `assumed` \| `fitted` {`walk`, `positions`, `bands` [`SimFitBand`
   {`scale` \| nil (nil: assumed), `measured`, `simulated` (s \| nil), `converged`}]}},
@@ -1328,10 +1345,15 @@ session. One runs at a time.
   bands and broadband; no third-octave bands)}], `room`: `WalkRoom` \| nil (the mean over
   the receivers)}] (empty until done), `schroeder` Hz \| nil, `valid_above` Hz \| nil (below
   it the room is modal and the simulation not valid), `eyring` [s] (Eyring's T with air),
-  `rays_per_band` (traced, least over the sources), `budget_exhausted`, `lost_rays`}. The
+  `rays_per_band` (traced, least over the sources), `budget_exhausted`, `lost_rays`, `map`
+  (`SimMap` \| nil, a map's)}. The
   room parameters are ac2-core's evaluation of an impulse response synthesised from the
   arrivals and the late field, each band from that band's energy alone: like with like
   with a measured response.
+- **Kept fit:** the latest finished `sim.fit` is kept by the daemon for later runs and maps
+  of the identical plan and mirrored as `State.sim_fit`: `SimFitKept` {`plan`, `walk`,
+  `absorption` (`fitted`)} \| nil, carried by `sim_fit` events (nil: dropped, when its walk
+  is deleted or its plan changes or is deleted). Not saved with the session.
 
 #### Sweep runs (`sweep.run`)
 
@@ -1785,8 +1807,9 @@ nil`, `log_failures: [LogWriteFailure]`; see §7.3), `recording` (`RecordingRun`
 (`Rig`: rig settings, OSC and Art-Net sending and cue states, §3.2 *Rig monitor, OSC and Art-Net cues*),
 `plans` ([PlanSpec], the daemon's plan library, sorted by name; §3.2 *Spatial walks*),
 `walks` ([WalkState]), `walk_plans` ([PlanSpec], the session's copies of the plans its
-walks walk) and `sim` (`SimState` | nil: the latest room simulation, not saved with the
-session; §3.2 *Room simulation*).
+walks walk), `sim` (`SimState` | nil: the latest room simulation run or fit), `sim_map`
+(`SimState` | nil: the latest coverage map) and `sim_fit` (`SimFitKept` | nil: the
+absorption fit kept for later runs); none saved with the session (§3.2 *Room simulation*).
 
 
 #### 4.1.1 Audio stopped and recovery

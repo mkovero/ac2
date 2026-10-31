@@ -185,6 +185,7 @@ pub(super) fn setup(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                         plan,
                         dots,
                         editing: None,
+                        coverage: None,
                     };
                     msgs = plan_view(ui, app, &pic);
                 }
@@ -251,6 +252,7 @@ pub(super) fn editor(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
                 plan: &e.plan,
                 dots,
                 editing: (e.layer != Layer::Markers).then_some(points),
+                coverage: None,
             };
             msgs = plan_view(ui, app, &pic);
         });

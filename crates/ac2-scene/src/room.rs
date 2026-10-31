@@ -469,6 +469,8 @@ pub struct RoomScene {
     pub rect: Rect,
     /// Why there is no table (no sweep, or one without room parameters).
     pub note: Option<String>,
+    /// The simulated table under the measured one ([`room_scene_with_sim`]).
+    pub sim: Option<RoomTable>,
     pub strip: Rect,
     pub banners: Vec<crate::banner::BannerRow>,
 }
@@ -499,6 +501,24 @@ pub fn room_scene(
     theme: &Theme,
     size: crate::primitives::Viewport,
 ) -> RoomScene {
+    room_scene_with_sim(room, name, None, new_sweep, status, theme, size)
+}
+
+/// Space between the measured table and the simulated one under it, times their font.
+const SIM_GAP: f32 = 1.2;
+
+/// [`room_scene`] with a simulation's table (`sim`, [`sim::room_table`] /
+/// [`sim::receiver_table`]) under the measured one, both at one font so they compare cell
+/// by cell; without a measured table it is not drawn (there is nothing to compare).
+pub fn room_scene_with_sim(
+    room: Option<RoomShown<'_>>,
+    name: Option<&str>,
+    sim: Option<RoomTable>,
+    new_sweep: &str,
+    status: &crate::banner::Status,
+    theme: &Theme,
+    size: crate::primitives::Viewport,
+) -> RoomScene {
     use crate::canvas::{Canvas, MARGINS};
     let mut c = Canvas::new(size, theme);
     let w = (size.width - MARGINS.left - MARGINS.right).max(1.0);
@@ -520,18 +540,28 @@ pub fn room_scene(
         }
         t
     });
+    let sim = sim.filter(|_| table.is_some());
     let small = theme.small_font_size;
-    let font_size = table.as_ref().map_or(small, |t| {
+    let tables: Vec<&RoomTable> = table.iter().chain(sim.iter()).collect();
+    let font_size = if tables.is_empty() {
+        small
+    } else {
         let mut f = (theme.font_size * ROOM_FONT_MAX).floor();
+        let height = |f: f32| {
+            tables.iter().map(|t| table_height_at(t, f)).sum::<f32>()
+                + (tables.len() - 1) as f32 * SIM_GAP * f
+        };
         while f > small
-            && (table_height_at(t, f) > rect.h
-                || table_width_at(t, f) > rect.w
-                || t.legend.iter().any(|l| text_width(l, f * 0.8) > rect.w))
+            && (height(f) > rect.h
+                || tables.iter().any(|t| {
+                    table_width_at(t, f) > rect.w
+                        || t.legend.iter().any(|l| text_width(l, f * 0.8) > rect.w)
+                }))
         {
             f -= 0.5;
         }
         f.max(small)
-    });
+    };
     let note = match (&table, name) {
         (Some(_), _) => None,
         (None, Some(n)) => Some(format!(
@@ -539,10 +569,13 @@ pub fn room_scene(
         )),
         (None, None) => Some(no_sweep_results(new_sweep)),
     };
-    if let Some(t) = &table {
+    let mut y = rect.y;
+    for t in &tables {
         // The legend lines are long sentences: a smaller size than the numbers keeps them on
         // one line each at the sizes the numbers take.
-        let mut layer = table_layer_at(t, rect, theme, font_size);
+        let h = table_height_at(t, font_size);
+        let r = Rect::new(rect.x, y, rect.w, h.min(rect.bottom() - y).max(1.0));
+        let mut layer = table_layer_at(t, r, theme, font_size);
         if font_size > small {
             let legend_size = (font_size * 0.8).max(small);
             for l in &mut layer.labels {
@@ -551,7 +584,8 @@ pub fn room_scene(
                 }
             }
         }
-        c.data = layer;
+        c.data.extend(layer);
+        y += h + SIM_GAP * font_size;
     }
     if let Some(n) = &note {
         c.overlay.labels.push(label(
@@ -568,12 +602,14 @@ pub fn room_scene(
         font_size,
         rect,
         note,
+        sim,
         strip: strip.rect,
         banners: strip.rows,
     }
 }
 
 pub mod sim;
+pub mod sim_marks;
 mod walk;
 pub use walk::walk_room_table;
 

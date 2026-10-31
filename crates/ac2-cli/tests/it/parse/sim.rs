@@ -93,3 +93,49 @@ fn sim_grammar() {
         assert!(parse(bad).is_err(), "{bad:?}");
     }
 }
+
+#[test]
+fn sim_map_defaults_and_flags() {
+    let c = ok(&["sim", "map", "--plan", "Hall"]);
+    let Cmd::Sim {
+        cmd: SimCmd::Map(a),
+    } = c.cmd
+    else {
+        panic!("not sim map");
+    };
+    let r = a.request(vec!["Main L".into()]);
+    assert_eq!(r.spacing, 1.0);
+    assert_eq!(r.band, None);
+    assert_eq!(r.window, Seconds(0.05));
+    assert_eq!(r.image_order, 2);
+    let c = ok(&[
+        "sim",
+        "map",
+        "--plan",
+        "Hall",
+        "--source",
+        "Main L",
+        "--spacing",
+        "0.5",
+        "--band",
+        "1000",
+        "--window-ms",
+        "80",
+        "--order",
+        "3",
+        "--detach",
+    ]);
+    let Cmd::Sim {
+        cmd: SimCmd::Map(a),
+    } = c.cmd
+    else {
+        panic!("not sim map");
+    };
+    let r = a.request(a.sources.clone());
+    assert_eq!(r.sources, ["Main L"]);
+    assert_eq!(r.spacing, 0.5);
+    assert_eq!(r.band, Some(ac2_proto::units::Hz(1000.0)));
+    assert!((r.window.0 - 0.08).abs() < 1e-12);
+    assert_eq!(r.image_order, 3);
+    assert!(a.detach);
+}

@@ -301,6 +301,8 @@ fn the_slowest_mic_is_the_one_read() {
         bar_drawn: None,
         conditions: String::new(),
         sweep: None,
+        sim: None,
+        coverage: None,
     };
     assert_eq!(p.lines().ready, "settling · MM1");
     let ready = WalkPane {
@@ -345,6 +347,8 @@ fn the_walk_pane_draws_its_lines_and_the_plan() {
         bar_drawn: Some(0.5),
         conditions: "P1 yesterday, P2 today · EQ changed".into(),
         sweep: None,
+        sim: None,
+        coverage: None,
     };
     let s = walk_scene(
         &p,
@@ -632,6 +636,7 @@ fn the_plan_view_of_an_empty_plan_has_a_scale() {
         plan: &empty,
         dots: vec![],
         editing: Some(vec![]),
+        coverage: None,
     };
     assert_eq!(pic.bounds(), None);
     let (_, map) = plan_scene(
@@ -784,6 +789,8 @@ fn a_sweep_walk_reads_its_run_not_a_readiness() {
         bar_drawn: None,
         conditions: String::new(),
         sweep: Some(SweepAt::Idle),
+        sim: None,
+        coverage: None,
     };
     assert_eq!(p.lines().ready, "sweep plays at P1, P2");
     let at = |s: SweepAt| {
@@ -805,4 +812,88 @@ fn a_sweep_walk_reads_its_run_not_a_readiness() {
         "sweep failed: a dropout · P1, P2 stay pending"
     );
     assert_eq!(p.lines().average, "NO AVERAGE · 0 OF 5 POSITIONS");
+}
+
+#[test]
+fn the_walk_pane_draws_a_coverage_map_under_its_points_and_the_simulation_line() {
+    use ac2_proto::model::{SimMap, SimMapCell};
+    let theme = Theme::dark();
+    let plan = hall();
+    let w = walk(&pending(4), Some(0));
+    let mut map = ac2_proto::samples::sim_map_state();
+    map.plan = plan.name.clone();
+    map.map = Some(SimMap {
+        spacing: 2.0,
+        origin: [5.0, 5.0],
+        band: None,
+        window: ac2_proto::units::Seconds(0.05),
+        cells: vec![
+            SimMapCell {
+                col: 0,
+                row: 0,
+                db: 0.0,
+            },
+            SimMapCell {
+                col: 1,
+                row: 0,
+                db: -40.0,
+            },
+        ],
+    });
+    let p = WalkPane {
+        walk: &w,
+        plan: Some(&plan),
+        ready: Ready::Waiting,
+        mics: &[],
+        slowest: None,
+        average: None,
+        unsettled: 0,
+        bar_drawn: None,
+        conditions: String::new(),
+        sweep: None,
+        sim: Some("Coverage map: simulated · absorption assumed".into()),
+        coverage: Some(&map),
+    };
+    let s = walk_scene(
+        &p,
+        Style {
+            chrome: PlotChrome::Full,
+            theme: &theme,
+        },
+        Viewport {
+            width: 900.0,
+            height: 600.0,
+        },
+    );
+    let texts: Vec<&str> = s
+        .scene
+        .layers
+        .iter()
+        .flat_map(|l| l.labels.iter().map(|l| l.text.as_str()))
+        .collect();
+    assert!(texts.contains(&"Coverage map: simulated · absorption assumed"));
+    assert!(
+        texts
+            .iter()
+            .any(|t| t.starts_with("simulated direct + early energy (50 ms) · broadband")),
+        "{texts:?}"
+    );
+    assert!(texts.iter().any(|t| t.starts_with("0 to ")), "{texts:?}");
+    // Two cells, the loudest pale and the quietest dark, each a 2 m square at the map's
+    // scale, faint; under the points (the data layer's rects go first).
+    let m = s.map.expect("a map");
+    let cells: Vec<&crate::primitives::FillRect> = s.scene.layers[1]
+        .rects
+        .iter()
+        .filter(|r| r.color.a == plan_view::COVERAGE_ALPHA)
+        .collect();
+    assert_eq!(cells.len(), 2);
+    let side = (2.0 * m.px_per_m()) as f32;
+    assert!((cells[0].rect.w - side).abs() < 1e-3);
+    let tl = m.to_px([4.0, 6.0]);
+    assert!((cells[0].rect.x - tl[0]).abs() < 1e-3 && (cells[0].rect.y - tl[1]).abs() < 1e-3);
+    assert_eq!(cells[0].color, plan_view::heat(0.0));
+    assert!(cells[1].color.r + cells[1].color.g < cells[0].color.r + cells[0].color.g);
+    let lines = p.lines();
+    assert_eq!(lines.coverage.len(), 2);
 }

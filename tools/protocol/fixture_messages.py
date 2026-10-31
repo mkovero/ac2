@@ -813,7 +813,21 @@ def requests():
                 }
             },
         ),
-        req(100, "sim.cancel"),
+        req(
+            100,
+            "sim.map",
+            {
+                "request": {
+                    "plan": "Hall",
+                    "sources": ["Main L"],
+                    "spacing": 1.0,
+                    "band": 1000.0,
+                    "window": 0.05,
+                    "image_order": 2,
+                }
+            },
+        ),
+        req(101, "sim.cancel"),
     ]
 
 

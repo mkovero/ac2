@@ -19,7 +19,10 @@ pub use eq::{eq_edits, eq_measurement};
 pub use events::events;
 pub use frames::{frames, stamp, tf_frame};
 pub use replies::{replies, reply, warnings};
-pub use sim::{sim_fit_request, sim_request, sim_running, sim_state};
+pub use sim::{
+    sim_fit_kept, sim_fit_request, sim_map_request, sim_map_state, sim_request, sim_running,
+    sim_state,
+};
 pub use state::{
     band_leq_config, plan, recording_run, server_info, spl_config, spl_measurement, state, walk,
 };

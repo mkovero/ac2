@@ -26,6 +26,7 @@ use crate::state::{AppState, PaneId, PaneKind};
 
 mod alignment;
 mod programme;
+mod sim;
 mod spectrum_pane;
 mod spl_meters;
 mod walk;
@@ -641,7 +642,8 @@ pub fn sweep(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now: No
     let pv = st.view_for(pane);
     if st.pane_modes(pane).sweep == ac2_scene::view::SweepMode::Room {
         use ac2_scene::room::RoomShown;
-        let (room, name) = match st.pane_walk_room(pane) {
+        let walk = st.pane_walk_room(pane);
+        let (room, name) = match walk {
             Some(w) => (w.room.as_ref().map(RoomShown::Walk), Some(w.name.as_str())),
             None => (
                 shown
@@ -650,9 +652,14 @@ pub fn sweep(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now: No
                 shown.map(|(d, _)| d.meta.edit.name.as_str()),
             ),
         };
-        return SweepPane::Room(Box::new(ac2_scene::room::room_scene(
+        let simulated = pv
+            .sim_shown()
+            .then(|| sim::room(st, walk, shown.map(|(d, _)| &d.meta)))
+            .flatten();
+        return SweepPane::Room(Box::new(ac2_scene::room::room_scene_with_sim(
             room,
             name,
+            simulated,
             &st.new_sweep_key(),
             &status,
             theme,
@@ -663,7 +670,10 @@ pub fn sweep(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now: No
         && let Some((d, _)) = shown
     {
         let color = st.curve_colours(theme).trace(d.meta.id);
-        if let Some(s) = sweep_ir_scene(d, color, &status, &pv, theme, size) {
+        if let Some(mut s) = sweep_ir_scene(d, color, &status, &pv, theme, size) {
+            if pv.sim_shown() {
+                sim::reflections(st, &d.meta, &mut s, theme);
+            }
             return SweepPane::Ir(Box::new(s));
         }
     }

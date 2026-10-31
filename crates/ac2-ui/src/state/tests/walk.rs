@@ -7,7 +7,7 @@ use crate::walk_setup::PlanMsg;
 use ac2_scene::walk::SweepAt;
 use ac2_scene::walk::setup::{EditorField, Layer, SetupField};
 
-fn hall() -> PlanSpec {
+pub(super) fn hall() -> PlanSpec {
     PlanSpec {
         name: "Hall".into(),
         outline: vec![[0.0, 0.0], [20.0, 0.0], [20.0, 15.0], [0.0, 15.0]],
@@ -44,7 +44,7 @@ fn point(label: &str, x: f64, state: PointState) -> WalkPoint {
 }
 
 /// Mains: P1 captured, the mic at P2, P3 pending.
-fn mains() -> WalkState {
+pub(super) fn mains() -> WalkState {
     WalkState {
         id: WalkId(1),
         name: "Mains".into(),

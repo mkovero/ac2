@@ -12,7 +12,7 @@ use ac2_scene::room::sim;
 use super::walk::find_walk;
 use super::{connect, state};
 use crate::CliError;
-use crate::args::{Cli, SimCmd, SimFitArgs, SimRunArgs};
+use crate::args::{Cli, SimCmd, SimFitArgs, SimMapArgs, SimRunArgs};
 use crate::output::Out;
 use crate::watch::quit_signal;
 
@@ -20,6 +20,7 @@ pub(crate) async fn run(cli: &Cli, cmd: &SimCmd, out: &mut Out<'_>) -> Result<()
     let detach = match cmd {
         SimCmd::Run(a) => a.detach,
         SimCmd::Fit(a) => a.detach,
+        SimCmd::Map(a) => a.detach,
         SimCmd::Status | SimCmd::Cancel => true,
     };
     let c = connect(cli, !detach).await?;
@@ -33,9 +34,15 @@ pub(crate) async fn run(cli: &Cli, cmd: &SimCmd, out: &mut Out<'_>) -> Result<()
             let request = fit_request(&s, a)?;
             sim_call(&c, Command::SimFit { request }).await?
         }
-        SimCmd::Status => s
-            .sim
-            .clone()
+        SimCmd::Map(a) => {
+            let request = map_request(&s, a)?;
+            sim_call(&c, Command::SimMap { request }).await?
+        }
+        SimCmd::Status => [&s.sim, &s.sim_map]
+            .into_iter()
+            .flatten()
+            .max_by_key(|x| x.id.0)
+            .cloned()
             .ok_or_else(|| CliError::Usage("no simulation (ac2 sim run)".into()))?,
         SimCmd::Cancel => sim_call(&c, Command::SimCancel).await?,
     };
@@ -75,6 +82,22 @@ fn run_request(s: &State, a: &SimRunArgs) -> Result<SimRequest, CliError> {
         receivers,
         settings: a.settings.settings(),
     })
+}
+
+fn map_request(s: &State, a: &SimMapArgs) -> Result<ac2_proto::model::SimMapRequest, CliError> {
+    let plan = find_plan(s, &a.plan)?;
+    let sources = if a.sources.is_empty() {
+        speakers(plan)
+    } else {
+        a.sources.clone()
+    };
+    if sources.is_empty() {
+        return Err(CliError::Usage(format!(
+            "plan {} has no speaker marker to map",
+            plan.name
+        )));
+    }
+    Ok(a.request(sources))
 }
 
 fn fit_request(s: &State, a: &SimFitArgs) -> Result<SimFitRequest, CliError> {
@@ -157,8 +180,11 @@ async fn follow(c: &Client, s: SimState, out: &mut Out<'_>) -> Result<SimState, 
                     return Err(CliError::Refused("the connection to the daemon closed".into()));
                 }
                 let view = watch.borrow_and_update().clone();
-                if let Some(now) = view.state.as_ref().and_then(|st| st.sim.clone())
-                    && now.id == current.id
+                if let Some(now) = view
+                    .state
+                    .as_ref()
+                    .and_then(|st| [&st.sim, &st.sim_map].into_iter().flatten().find(|x| x.id == current.id))
+                    .cloned()
                 {
                     current = now;
                 }
@@ -173,6 +199,7 @@ pub(crate) fn sim_text(s: &SimState) -> String {
     let what = match &s.kind {
         ac2_proto::model::SimKind::Run => "run".to_owned(),
         ac2_proto::model::SimKind::Fit { walk } => format!("fit to walk {}", walk.0),
+        ac2_proto::model::SimKind::Map => "coverage map".to_owned(),
     };
     let mut t = format!(
         "simulation {} ({what}, plan {})  {}\n",
@@ -181,6 +208,15 @@ pub(crate) fn sim_text(s: &SimState) -> String {
         sim::status_text(s)
     );
     if s.active() || s.sources.is_empty() {
+        return t;
+    }
+    if let Some(m) = &s.map {
+        for line in sim::map_legend(s) {
+            t.push_str(&line);
+            t.push('\n');
+        }
+        t.push_str(&sim::map_summary(m));
+        t.push('\n');
         return t;
     }
     if let ac2_proto::model::SimAbsorption::Fitted { bands, .. } = &s.absorption {

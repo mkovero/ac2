@@ -2,11 +2,11 @@
 //! rectangle at one scale on both axes (a room keeps its shape), plan y up, with a scale bar.
 //! The mapping it returns is what the mouse reads metres back from.
 
-use ac2_proto::model::{MarkerKind, PlanSpec};
+use ac2_proto::model::{MarkerKind, PlanSpec, SimMap};
 
 use crate::canvas::{Canvas, anchor, label};
 use crate::primitives::{
-    Color, FillPolygon, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport,
+    Color, FillPolygon, FillRect, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport,
 };
 use crate::theme::Theme;
 
@@ -131,6 +131,33 @@ pub struct PlanPicture<'a> {
     /// The polygon being edited, drawn as a line through its vertices in order (closed
     /// from three), so an outline under construction reads before it validates.
     pub editing: Option<Vec<[f64; 2]>>,
+    /// A simulated coverage map drawn faintly over the zones, under everything else.
+    pub coverage: Option<&'a SimMap>,
+}
+
+/// Opacity of the coverage cells: the zones, markers and points stay readable through it.
+pub const COVERAGE_ALPHA: f32 = 0.5;
+
+/// The coverage colour of a cell at `db` re the loudest (0 … [`SimMap::FLOOR_DB`]): a dark
+/// violet through red and orange to pale yellow at the loudest, a ramp whose lightness rises
+/// steadily, so it reads in either theme and in grey. Not a measurement colour.
+pub fn heat(db: f32) -> Color {
+    const STOPS: [[f32; 3]; 4] = [
+        [0.18, 0.05, 0.33],
+        [0.55, 0.13, 0.42],
+        [0.90, 0.36, 0.17],
+        [0.99, 0.85, 0.40],
+    ];
+    let t = (1.0 - db / SimMap::FLOOR_DB).clamp(0.0, 1.0) * (STOPS.len() - 1) as f32;
+    let i = (t.floor() as usize).min(STOPS.len() - 2);
+    let f = t - i as f32;
+    let (a, b) = (STOPS[i], STOPS[i + 1]);
+    Color::rgba(
+        a[0] + (b[0] - a[0]) * f,
+        a[1] + (b[1] - a[1]) * f,
+        a[2] + (b[2] - a[2]) * f,
+        COVERAGE_ALPHA,
+    )
 }
 
 impl PlanPicture<'_> {
@@ -267,6 +294,22 @@ pub(crate) fn draw_plan(
             );
             l.clip = Some(rect);
             c.base.labels.push(l);
+        }
+    }
+    if let Some(m) = pic.coverage {
+        let w = (m.spacing * map.px_per_m()) as f32;
+        for cell in &m.cells {
+            let centre = [
+                m.origin[0] + f64::from(cell.col) * m.spacing,
+                m.origin[1] + f64::from(cell.row) * m.spacing,
+            ];
+            let tl = map.to_px([centre[0] - 0.5 * m.spacing, centre[1] + 0.5 * m.spacing]);
+            // The data layer: its rects go under its markers and dots, over the floor.
+            c.data.rects.push(FillRect {
+                rect: Rect::new(tl[0], tl[1], w, w),
+                color: heat(cell.db),
+                clip: Some(rect),
+            });
         }
     }
     if let Some(v) = &pic.editing {

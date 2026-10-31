@@ -28,7 +28,7 @@ ac2-proto = { path = "../ac2-proto" }
 ac2-room = { path = "../ac2-room" }
 # The room simulator (its own repository, no ac2 dependency); pinned to a commit until it is
 # published on crates.io.
-ac2-roomsim = { git = "https://github.com/mkovero/ac2-roomsim", rev = "1b447f0852423bc429c6969cf34a80e1ff3f42bc" }
+ac2-roomsim = { git = "https://github.com/mkovero/ac2-roomsim", rev = "c000c2ee232e513503a234ba7b5e047c4599da83" }
 ac2-traces = { path = "../ac2-traces" }
 ac2-zmq = { path = "../ac2-zmq" }
 chrono = { workspace = true, features = ["clock"] }

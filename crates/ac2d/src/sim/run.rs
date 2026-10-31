@@ -11,8 +11,8 @@ use ac2_proto::model::{
 };
 use ac2_proto::units::{Hz, Seconds};
 use ac2_roomsim::{
-    Absorption, Arrival, BAND_COUNT, Band, Control, Echogram, PerBand, Prism, Progress, Receiver,
-    ReceiverResult, SimConfig, SimError, Simulation, Source, Stage, simulate, synthesize_ir,
+    Absorption, BAND_COUNT, Band, Control, Echogram, PerBand, Prism, Progress, Receiver,
+    ReceiverResult, SimConfig, SimError, Simulation, Source, Stage, simulate,
 };
 use rayon::prelude::*;
 
@@ -41,6 +41,31 @@ pub(crate) struct Pass {
 }
 
 impl Pass {
+    /// What a map reports besides its grid: its sources (no receivers), and the room's
+    /// Schroeder frequency and Eyring times with the absorption it was mapped with.
+    pub(crate) fn of_map(job: &Job, scale: Option<PerBand>) -> Pass {
+        let scale = scale.unwrap_or([1.0; BAND_COUNT]);
+        let eyring = job.prism.eyring_t(&scale, true);
+        let t_mid = 0.5 * (eyring[Band::Hz500.index()] + eyring[Band::Hz1k.index()]);
+        Pass {
+            sources: job
+                .sources
+                .iter()
+                .map(|(name, at)| SimSource {
+                    name: name.clone(),
+                    at: *at,
+                    receivers: Vec::new(),
+                    room: None,
+                })
+                .collect(),
+            schroeder_hz: 2000.0 * (t_mid / job.prism.volume()).sqrt(),
+            eyring,
+            rays_per_band: 0,
+            budget_exhausted: false,
+            lost_rays: 0,
+        }
+    }
+
     /// `state` done with this pass's results and `absorption`.
     pub(crate) fn into_state(self, state: &SimState, absorption: SimAbsorption) -> SimState {
         SimState {
@@ -79,7 +104,7 @@ impl<'a> Reporter<'a> {
         }
     }
 
-    fn report(&mut self, stage: SimStage, done: u64, total: u64, source: usize) {
+    pub(crate) fn report(&mut self, stage: SimStage, done: u64, total: u64, source: usize) {
         let now = Instant::now();
         if self
             .last
@@ -212,41 +237,21 @@ fn receiver(label: &str, r: &ReceiverResult, seed: u64) -> Result<SimReceiver, S
 
 /// ISO 3382-1 parameters of the simulated impulse response, octave bands 125 Hz … 8 kHz (the
 /// simulator's) and broadband, by the code that evaluates a measured one: like with like.
-/// Each band is evaluated on an impulse response synthesised from that band's energy
-/// alone: the synthesis band-limits its noise with gentle filters, so in one response a
-/// slow 125 Hz decay leaks into the 1 kHz filter and outlasts the 1 kHz decay. One-third
-/// octave bands are left out: the simulation has no detail finer than an octave.
+/// Each band is evaluated on the simulator's impulse response of that band alone (its energy
+/// band-masked to its crossovers): an octave filter of ours over the whole response would
+/// let a slow 125 Hz decay through its skirt and outlast a fast 1 kHz one. One-third octave
+/// bands are left out: the simulation has no detail finer than an octave.
 pub(crate) fn room(r: &ReceiverResult, seed: u64) -> Result<RoomAcoustics, SimEnd> {
     let failed = |e: ac2_roomsim::IrError| SimEnd::Failed(e.to_string());
     let ir = r.impulse_response(IR_RATE, seed).map_err(failed)?;
+    let bands = r.band_impulse_responses(IR_RATE, seed).map_err(failed)?;
     let excited = (Band::Hz125.lower_hz() * 0.99, Band::Hz8k.upper_hz() * 1.01);
     let mut octave = Vec::with_capacity(BAND_COUNT);
     for b in Band::ALL {
-        let i = b.index();
-        let only = |e: &PerBand| {
-            let mut one = [0.0; BAND_COUNT];
-            one[i] = e[i];
-            one
-        };
-        let arrivals: Vec<Arrival> = r
-            .arrivals
-            .iter()
-            .map(|a| Arrival {
-                energy: only(&a.energy),
-                ..a.clone()
-            })
-            .collect();
-        let mut late = r.late.clone();
-        for (k, band) in late.bands.iter_mut().enumerate() {
-            if k != i {
-                band.fill(0.0);
-            }
-        }
-        let band_ir = synthesize_ir(&arrivals, &late, IR_RATE, seed).map_err(failed)?;
         let f = b.exact_hz();
         octave.extend(
             ac2_core::room::analyse_bands(
-                &band_ir,
+                &bands[b.index()],
                 IR_RATE,
                 0.0,
                 BandFraction::Octave,

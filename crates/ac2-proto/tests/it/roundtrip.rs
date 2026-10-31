@@ -130,7 +130,7 @@ fn every_event_roundtrips() {
             DataMessage::Event(e)
         );
     }
-    assert_eq!(kinds.len(), 20);
+    assert_eq!(kinds.len(), 21);
 }
 
 /// The input-meter kinds only travel on their own topics, with one channel per column.
@@ -710,6 +710,34 @@ fn the_largest_simulation_fits_in_an_event() {
     .expect("sample message");
     assert!(
         b.len() < event::MAX_EVENT_BYTES * 9 / 10,
+        "{} bytes of {}",
+        b.len(),
+        event::MAX_EVENT_BYTES
+    );
+}
+
+/// The largest coverage map (every cell of [`SimMapRequest::MAX_CELLS`] with a
+/// non-round level) fits in one event with room for the rest of a snapshot.
+#[test]
+fn the_largest_map_fits_in_an_event() {
+    use ac2_proto::model::*;
+    use ac2_proto::units::Rev;
+    let mut s = samples::sim_map_state();
+    let map = s.map.as_mut().expect("a map");
+    map.cells = (0..SimMapRequest::MAX_CELLS)
+        .map(|i| SimMapCell {
+            col: 1000 + (i % 64) as u16,
+            row: 1000 + (i / 64) as u16,
+            db: -12.345_678,
+        })
+        .collect();
+    let b = encode_event(&event::Event {
+        rev: Rev(1),
+        change: event::Change::Sim(s),
+    })
+    .expect("sample message");
+    assert!(
+        b.len() < event::MAX_EVENT_BYTES / 4,
         "{} bytes of {}",
         b.len(),
         event::MAX_EVENT_BYTES

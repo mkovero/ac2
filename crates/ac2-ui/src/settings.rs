@@ -286,6 +286,7 @@ pub enum DisplayRow {
     Coherence,
     ResolutionMarker,
     RangeBand,
+    SimHints,
     PlateBackground,
     CursorJump,
     LevelAxes,
@@ -296,7 +297,7 @@ pub enum DisplayRow {
 }
 
 impl DisplayRow {
-    pub const ALL: [DisplayRow; 24] = [
+    pub const ALL: [DisplayRow; 25] = [
         DisplayRow::Theme,
         DisplayRow::KeyHints,
         DisplayRow::WarningToasts,
@@ -314,6 +315,7 @@ impl DisplayRow {
         DisplayRow::Coherence,
         DisplayRow::ResolutionMarker,
         DisplayRow::RangeBand,
+        DisplayRow::SimHints,
         DisplayRow::PlateBackground,
         DisplayRow::CursorJump,
         DisplayRow::LevelAxes,
@@ -342,6 +344,7 @@ impl DisplayRow {
             DisplayRow::Coherence => "Coherence",
             DisplayRow::ResolutionMarker => "Resolution marker",
             DisplayRow::RangeBand => "Range across positions",
+            DisplayRow::SimHints => "Simulation overlays",
             DisplayRow::PlateBackground => "Plate background",
             DisplayRow::CursorJump => "Peak / notch jumps",
             DisplayRow::LevelAxes => "Level axes",
@@ -486,6 +489,15 @@ pub fn range_band_text(on: bool) -> &'static str {
     }
 }
 
+/// What the Simulation overlays setting says, on the Display page and in its toast.
+pub fn sim_hints_text(on: bool) -> &'static str {
+    if on {
+        "on: simulated reflections on IRs, coverage under walks"
+    } else {
+        "off"
+    }
+}
+
 /// What the Resolution marker setting says, on the Display page and in its toast.
 pub fn resolution_marker_text(on: bool) -> &'static str {
     if on {
@@ -539,6 +551,7 @@ pub struct DisplaySwitches {
     pub warning_toasts: bool,
     pub resolution_marker: bool,
     pub range_band: bool,
+    pub sim_hints: bool,
     pub bar_ease: bool,
     pub shared_scale: bool,
     pub spec_ease: bool,
@@ -602,6 +615,7 @@ pub fn display_rows(
                     resolution_marker_text(switches.resolution_marker).into()
                 }
                 DisplayRow::RangeBand => range_band_text(switches.range_band).into(),
+                DisplayRow::SimHints => sim_hints_text(switches.sim_hints).into(),
                 DisplayRow::PlateBackground => {
                     plate_background_text(switches.plate_background).into()
                 }

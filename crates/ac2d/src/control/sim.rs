@@ -6,8 +6,9 @@ use std::time::Duration;
 
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{
-    PlanSpec, PointState, SimAbsorption, SimCancel, SimFitRequest, SimKind, SimReceivers,
-    SimRefusal, SimRequest, SimSettings, SimStage, SimState, SimStatus, WalkKind,
+    PlanSpec, PointState, SimAbsorption, SimCancel, SimFitKept, SimFitRequest, SimKind,
+    SimMapRequest, SimReceivers, SimRefusal, SimRequest, SimSettings, SimStage, SimState,
+    SimStatus, WalkKind,
 };
 use ac2_proto::units::{SimId, WalkId};
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError, ReplyBody};
@@ -35,9 +36,17 @@ pub(super) struct ActiveSim {
 /// A fit kept for later runs on the same plan.
 pub(super) struct FitMemo {
     plan: PlanSpec,
+    /// Its plan is the library's (else the session's copy).
+    library: bool,
     walk: WalkId,
     scale: PerBand,
     absorption: SimAbsorption,
+}
+
+/// What a committed change does to the simulations ([`Control::sim_stopped_by`]).
+pub(super) struct SimStops {
+    cancel: Option<SimCancel>,
+    drop_fit: bool,
 }
 
 /// The simulation state of the control thread.
@@ -61,6 +70,14 @@ fn refused(reason: SimRefusal) -> ProtoError {
         SimRefusal::NotASweepWalk => "a live walk measured no decay: fit to a sweep walk".into(),
         SimRefusal::NoMeasuredT20 => "the walk measured no T20 in any octave band".into(),
         SimRefusal::Busy => "a simulation is running: cancel it first (sim.cancel)".into(),
+        SimRefusal::NoZones => {
+            "a coverage map needs a zone with a cell centre in it at this spacing".into()
+        }
+        SimRefusal::MapTooFine { cells, max } => {
+            format!(
+                "this spacing gives {cells} cells; a map holds at most {max}: ask a coarser one"
+            )
+        }
     };
     perr_detail(ErrorCode::Invalid, msg, ErrorDetail::Sim { reason })
 }
@@ -159,10 +176,7 @@ impl Control {
             .map(|p| plan::inside(&prism, &p.label, p.at).map(|at| (p.label.clone(), at)))
             .collect::<Result<Vec<_>, _>>()
             .map_err(refused)?;
-        let (scale, absorption) = match &self.sims.fit {
-            Some(f) if f.plan == plan => (Some(f.scale), f.absorption.clone()),
-            _ => (None, SimAbsorption::Assumed),
-        };
+        let (scale, absorption) = self.kept_fit(&plan);
         let job = Job {
             prism,
             sources,
@@ -174,6 +188,84 @@ impl Control {
             absorption: absorption.clone(),
         };
         self.sim_start(job, mode, plan, library, walk, SimKind::Run, absorption)
+    }
+
+    /// The fit kept for `plan` (its scale and absorption), else the table's (assumed).
+    fn kept_fit(&self, plan: &PlanSpec) -> (Option<PerBand>, SimAbsorption) {
+        match &self.sims.fit {
+            Some(f) if f.plan == *plan => (Some(f.scale), f.absorption.clone()),
+            _ => (None, SimAbsorption::Assumed),
+        }
+    }
+
+    /// `sim.map`.
+    pub(super) fn sim_map(&mut self, r: SimMapRequest) -> Result<ReplyBody, ProtoError> {
+        if self.sims.active.is_some() {
+            return Err(refused(SimRefusal::Busy));
+        }
+        if r.image_order > SimSettings::MAX_IMAGE_ORDER {
+            return Err(perr(
+                ErrorCode::Invalid,
+                format!("image order at most {}", SimSettings::MAX_IMAGE_ORDER),
+            ));
+        }
+        if !(r.spacing.is_finite() && r.spacing > 0.0) {
+            return Err(perr(ErrorCode::Invalid, "the spacing is a length > 0 m"));
+        }
+        if !(r.window.0.is_finite()
+            && r.window.0 > 0.0
+            && r.window.0 <= SimMapRequest::MAX_WINDOW_S)
+        {
+            return Err(perr(
+                ErrorCode::Invalid,
+                format!("the window lies in 0…{} s", SimMapRequest::MAX_WINDOW_S),
+            ));
+        }
+        let band = match r.band {
+            None => None,
+            Some(hz) => Some(sim::map::band_index(hz).ok_or_else(|| {
+                perr(
+                    ErrorCode::Invalid,
+                    format!("{} Hz is not an octave band of the simulation", hz.0),
+                )
+            })?),
+        };
+        let (plan, library) = self.sim_plan(&r.plan)?;
+        let prism = plan::prism(&plan).map_err(refused)?;
+        if r.sources.is_empty() {
+            return Err(refused(SimRefusal::Empty));
+        }
+        let sources = r
+            .sources
+            .iter()
+            .map(|n| plan::speaker(&plan, &prism, n).map(|at| (n.clone(), at)))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(refused)?;
+        let grid = sim::map::grid(&plan, &prism, r.spacing).map_err(refused)?;
+        let (scale, absorption) = self.kept_fit(&plan);
+        let settings = SimSettings {
+            image_order: r.image_order,
+            rays_per_band: 0,
+            ..SimSettings::default()
+        };
+        let mode = Mode::Map {
+            spec: Box::new(sim::map::MapSpec {
+                grid,
+                band,
+                band_hz: r.band,
+                window: r.window,
+                image_order: r.image_order,
+            }),
+            scale,
+            absorption: absorption.clone(),
+        };
+        let job = Job {
+            prism,
+            sources,
+            receivers: Vec::new(),
+            settings,
+        };
+        self.sim_start(job, mode, plan, library, None, SimKind::Map, absorption)
     }
 
     /// `sim.fit`.
@@ -244,6 +336,7 @@ impl Control {
             id,
             plan: plan.name.clone(),
             kind,
+            walk,
             settings: job.settings,
             status: SimStatus::Running {
                 stage: SimStage::ImageSources,
@@ -261,6 +354,7 @@ impl Control {
             rays_per_band: 0,
             budget_exhausted: false,
             lost_rays: 0,
+            map: None,
         };
         let worker = sim::spawn(id, job, mode, self.s.to_self.clone()).map_err(|e| {
             perr(
@@ -302,27 +396,48 @@ impl Control {
         Some(state)
     }
 
-    /// Why `change` stops the running simulation, if it does: its plan changed or went, or
-    /// the walk it is heard at was deleted. A deleted walk also drops a fit to it.
-    pub(super) fn sim_stopped_by(&mut self, change: &Change) -> Option<SimCancel> {
-        if let Change::Walk(Patch::Deleted(id)) = change
-            && self.sims.fit.as_ref().is_some_and(|f| f.walk == *id)
-        {
-            self.sims.fit = None;
-        }
-        let a = self.sims.active.as_ref()?;
-        let plan_moved = |library: bool, p: &Patch<PlanSpec, String>| {
-            library == a.library
-                && match p {
-                    Patch::Set(p) => p.name == a.plan.name && *p != a.plan,
-                    Patch::Deleted(n) => *n == a.plan.name,
-                }
+    /// What `change` does to the simulations: stops the running one when its plan changed
+    /// or went or the walk it is heard at was deleted; drops the kept fit when its walk was
+    /// deleted or its plan changed or went.
+    pub(super) fn sim_stopped_by(&mut self, change: &Change) -> SimStops {
+        let moved = |plan: &PlanSpec, library: bool, change: &Change| {
+            let p = match change {
+                Change::Plan(p) if library => p,
+                Change::WalkPlan(p) if !library => p,
+                _ => return false,
+            };
+            match p {
+                Patch::Set(p) => p.name == plan.name && p != plan,
+                Patch::Deleted(n) => *n == plan.name,
+            }
         };
-        match change {
-            Change::Plan(p) if plan_moved(true, p) => Some(SimCancel::PlanChanged),
-            Change::WalkPlan(p) if plan_moved(false, p) => Some(SimCancel::PlanChanged),
-            Change::Walk(Patch::Deleted(id)) if a.walk == Some(*id) => Some(SimCancel::WalkDeleted),
-            _ => None,
+        let drop_fit = self.sims.fit.as_ref().is_some_and(|f| {
+            moved(&f.plan, f.library, change)
+                || matches!(change, Change::Walk(Patch::Deleted(id)) if f.walk == *id)
+        });
+        let cancel = self.sims.active.as_ref().and_then(|a| {
+            if moved(&a.plan, a.library, change) {
+                Some(SimCancel::PlanChanged)
+            } else {
+                match change {
+                    Change::Walk(Patch::Deleted(id)) if a.walk == Some(*id) => {
+                        Some(SimCancel::WalkDeleted)
+                    }
+                    _ => None,
+                }
+            }
+        });
+        SimStops { cancel, drop_fit }
+    }
+
+    /// After the change [`Self::sim_stopped_by`] judged is committed: stop and drop.
+    pub(super) fn sim_after(&mut self, stops: SimStops) {
+        if let Some(why) = stops.cancel {
+            self.stop_sim(why);
+        }
+        if stops.drop_fit {
+            self.sims.fit = None;
+            self.commit(Change::SimFit(None));
         }
     }
 
@@ -348,12 +463,21 @@ impl Control {
                         if let (Some(scale), SimKind::Fit { walk }) = (done.fitted, a.state.kind) {
                             self.sims.fit = Some(FitMemo {
                                 plan: a.plan.clone(),
+                                library: a.library,
                                 walk,
                                 scale,
                                 absorption: done.absorption.clone(),
                             });
+                            self.commit(Change::SimFit(Some(SimFitKept {
+                                plan: a.plan.name.clone(),
+                                walk,
+                                absorption: done.absorption.clone(),
+                            })));
                         }
-                        done.pass.into_state(&a.state, done.absorption)
+                        SimState {
+                            map: done.map,
+                            ..done.pass.into_state(&a.state, done.absorption)
+                        }
                     }
                     Err(SimEnd::Cancelled) => SimState {
                         status: SimStatus::Cancelled {

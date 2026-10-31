@@ -41,6 +41,9 @@ pub struct IrScene {
     pub room: Option<crate::room::RoomTable>,
     /// The cursor's reading, when the cursor is on.
     pub cursor: Option<IrCursor>,
+    /// Simulated reflections marked over a sweep's measured response
+    /// ([`crate::room::sim_marks`]); `None` when none are drawn.
+    pub sim: Option<crate::room::sim_marks::SimMarks>,
 }
 
 /// What the IR cursor reads: the sample nearest its time, as the view draws it.
@@ -409,6 +412,7 @@ fn draw(
         banners: strip.rows,
         room: None,
         cursor,
+        sim: None,
     }
 }
 
@@ -534,6 +538,7 @@ pub fn missing_scene(
         banners: strip.rows,
         room: None,
         cursor: None,
+        sim: None,
     }
 }
 

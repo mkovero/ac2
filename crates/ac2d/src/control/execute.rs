@@ -444,6 +444,7 @@ impl Control {
             Command::WalkDelete { walk } => self.walk_delete(walk),
             Command::SimRun { request } => self.sim_run(request),
             Command::SimFit { request } => self.sim_fit(request),
+            Command::SimMap { request } => self.sim_map(request),
             Command::SimCancel => self.sim_cancel(),
         }
     }

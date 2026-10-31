@@ -338,6 +338,7 @@ impl AppState {
         prefs.legend.apply(&mut self.view.tf.legend);
         self.view.unresolved = prefs.resolution_marker;
         self.view.range_band = prefs.range_band;
+        self.view.sim_hints = prefs.sim_hints;
         self.view.jump_prominence_db = prefs.jump_prominence_db;
         self.rig.hidden_meas.clear();
         self.rig.pending.hidden = l.hidden.clone();

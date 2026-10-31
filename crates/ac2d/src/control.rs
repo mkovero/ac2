@@ -829,7 +829,7 @@ impl Control {
         );
         self.note_for_recording(&change);
         self.rig_meas_committing(&change);
-        let stops_sim = self.sim_stopped_by(&change);
+        let sim_stops = self.sim_stopped_by(&change);
         let ev = self.store.commit(change, Instant::now());
         if levels {
             self.sync_levels_policy();
@@ -842,9 +842,7 @@ impl Control {
             self.working_changed();
             self.autosave_changed();
         }
-        if let Some(why) = stops_sim {
-            self.stop_sim(why);
-        }
+        self.sim_after(sim_stops);
         ev.rev
     }
 

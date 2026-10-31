@@ -44,6 +44,7 @@ pub fn sim_state() -> SimState {
         id: SimId(3),
         plan: "Hall".into(),
         kind: SimKind::Fit { walk: WalkId(2) },
+        walk: Some(WalkId(2)),
         settings: SimSettings::default(),
         status: SimStatus::Done,
         bands: bands(),
@@ -102,6 +103,7 @@ pub fn sim_state() -> SimState {
         rays_per_band: 20_480,
         budget_exhausted: false,
         lost_rays: 2,
+        map: None,
     }
 }
 
@@ -125,5 +127,68 @@ pub fn sim_running() -> SimState {
         rays_per_band: 0,
         lost_rays: 0,
         ..sim_state()
+    }
+}
+
+/// A coverage map of the hall's speaker at the default spacing, 1 kHz.
+pub fn sim_map_request() -> SimMapRequest {
+    SimMapRequest {
+        plan: "Hall".into(),
+        sources: vec!["Main L".into()],
+        spacing: SimMapRequest::DEFAULT_SPACING_M,
+        band: Some(Hz(1000.0)),
+        window: Seconds(SimMapRequest::DEFAULT_WINDOW_S),
+        image_order: SimMapRequest::DEFAULT_IMAGE_ORDER,
+    }
+}
+
+/// A finished coverage map: three cells of a zone.
+pub fn sim_map_state() -> SimState {
+    SimState {
+        id: SimId(5),
+        kind: SimKind::Map,
+        walk: None,
+        absorption: SimAbsorption::Assumed,
+        sources: vec![SimSource {
+            name: "Main L".into(),
+            at: [10.0, 1.0, 4.0],
+            receivers: Vec::new(),
+            room: None,
+        }],
+        rays_per_band: 0,
+        lost_rays: 0,
+        map: Some(SimMap {
+            spacing: 1.0,
+            origin: [0.5, 4.5],
+            band: Some(Hz(1000.0)),
+            window: Seconds(0.05),
+            cells: vec![
+                SimMapCell {
+                    col: 0,
+                    row: 0,
+                    db: 0.0,
+                },
+                SimMapCell {
+                    col: 1,
+                    row: 0,
+                    db: -1.5,
+                },
+                SimMapCell {
+                    col: 1,
+                    row: 1,
+                    db: -6.25,
+                },
+            ],
+        }),
+        ..sim_state()
+    }
+}
+
+/// The fit kept from [`sim_state`].
+pub fn sim_fit_kept() -> SimFitKept {
+    SimFitKept {
+        plan: "Hall".into(),
+        walk: WalkId(2),
+        absorption: sim_state().absorption,
     }
 }

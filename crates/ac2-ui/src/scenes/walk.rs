@@ -2,7 +2,9 @@
 //! of its plan, the measurement's readiness (its bar gliding as the meters' bars do), the
 //! average and what differs between the captures; a sweep walk's run instead of readiness.
 
+use ac2_proto::model::SimStatus;
 use ac2_scene::primitives::Viewport;
+use ac2_scene::room::sim::status_line;
 use ac2_scene::theme::Theme;
 use ac2_scene::view::Style;
 use ac2_scene::walk::{WalkPane, WalkScene, conditions_text, walk_scene};
@@ -42,6 +44,17 @@ pub fn walk(
         // The captures are stamped on the daemon's clock: today is read on it too.
         conditions: conditions_text(w, daemon_wall(st, now.wall), |t| st.local_zone.offset_s(t)),
         sweep: st.walk_sweep_at(w),
+        sim: st.daemon().and_then(|s| {
+            status_line(
+                &[s.sim.as_ref(), s.sim_map.as_ref()],
+                s.sim_fit.as_ref(),
+                &w.plan,
+            )
+        }),
+        // Simulated, so drawn only while the simulation hints are (T, Settings).
+        coverage: st.daemon().and_then(|s| s.sim_map.as_ref()).filter(|m| {
+            view.sim_shown() && m.plan == w.plan && m.status == SimStatus::Done && m.map.is_some()
+        }),
     };
     let style = Style {
         chrome: view.chrome,

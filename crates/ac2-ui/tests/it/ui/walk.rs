@@ -178,6 +178,85 @@ fn walk_pane_on_its_plan() {
     snapshot(&mut h, "walk_pane");
 }
 
+/// A finished coverage map of the hall over its zone at 1 m: both speakers, falling with
+/// distance from them (a stand-in for the daemon's image sources).
+fn coverage() -> ac2_proto::model::SimState {
+    use ac2_proto::model::{SimKind, SimMap, SimMapCell};
+    let (cols, rows) = (16u16, 9u16);
+    let origin = [2.5, 2.5];
+    let energy = |c: u16, r: u16| {
+        let (x, y) = (origin[0] + f64::from(c), origin[1] + f64::from(r));
+        [6.0, 14.0]
+            .iter()
+            .map(|sx| 1.0 / ((x - sx).powi(2) + (14.0 - y).powi(2) + 3.0))
+            .sum::<f64>()
+    };
+    let loudest = (0..rows)
+        .flat_map(|r| (0..cols).map(move |c| (c, r)))
+        .map(|(c, r)| energy(c, r))
+        .fold(0.0, f64::max);
+    let cells = (0..rows)
+        .flat_map(|r| (0..cols).map(move |c| (c, r)))
+        .map(|(col, row)| SimMapCell {
+            col,
+            row,
+            db: (10.0 * (energy(col, row) / loudest).log10()) as f32,
+        })
+        .collect();
+    ac2_proto::model::SimState {
+        id: ac2_proto::units::SimId(7),
+        plan: "Hall".into(),
+        kind: SimKind::Map,
+        walk: None,
+        map: Some(SimMap {
+            spacing: 1.0,
+            origin,
+            band: None,
+            window: ac2_proto::units::Seconds(0.05),
+            cells,
+        }),
+        ..ac2_proto::samples::sim_map_state()
+    }
+}
+
+/// The walk pane with a coverage map of its plan: the map's cells as a faint heat layer
+/// under the points, its legend and validity note in the lines, the simulation line.
+#[test]
+fn walk_pane_with_coverage() {
+    if !have_gpu("walk_pane_with_coverage") {
+        return;
+    }
+    let rig = walk_rig();
+    rig.fake.lock().commit(Change::Sim(coverage()));
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "the walk and map mirrored", |a| {
+        live(a)
+            && !a.state.walks().is_empty()
+            && a.state.daemon().is_some_and(|s| s.sim_map.is_some())
+    });
+    h.key_press_modifiers(Modifiers::SHIFT, Key::W);
+    step_until(&mut h, "the Spatial walk window", |a| {
+        matches!(&a.state.overlay, Overlay::Choose(_))
+    });
+    h.key_press(Key::ArrowDown);
+    h.key_press(Key::Enter);
+    step_until(&mut h, "the walk pane", |a| {
+        a.state.layout.focus_kind() == PaneKind::Walk
+    });
+    let texts = walk_texts(&h);
+    assert!(
+        texts.iter().any(|t| t.starts_with("Coverage map: ")),
+        "{texts:?}"
+    );
+    assert!(
+        texts.iter().any(|t| t.contains("dB re the loudest cell")),
+        "{texts:?}"
+    );
+    h.state_mut().state.toasts.list.clear();
+    h.step();
+    snapshot(&mut h, "walk_pane_coverage");
+}
+
 /// Shift+W, *New walk…*: the setup window with its rows, the plan with the suggested points
 /// and the rules relaxed or broken named under it.
 #[test]

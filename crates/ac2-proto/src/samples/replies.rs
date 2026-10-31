@@ -302,6 +302,16 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
             }),
         }),
         Err(ProtoError {
+            code: ErrorCode::Invalid,
+            msg: "a 0.25 m map has 9000 cells; at most 4096".into(),
+            detail: Some(ErrorDetail::Sim {
+                reason: crate::model::SimRefusal::MapTooFine {
+                    cells: 9000,
+                    max: 4096,
+                },
+            }),
+        }),
+        Err(ProtoError {
             code: ErrorCode::ResyncRequired,
             msg: "gap expired".into(),
             detail: Some(ErrorDetail::Resync { oldest: Rev(100) }),

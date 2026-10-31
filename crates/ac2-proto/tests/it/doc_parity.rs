@@ -250,6 +250,22 @@ fn protocol_doc_names_everything() {
             "sim receiver field",
             names_of::<model::SimReceiver, _>(&Bogus { bogus_field: 0 }),
         ),
+        (
+            "sim kind",
+            names_of::<model::SimKind, _>(&Tagged { t: "no_such" }),
+        ),
+        (
+            "sim map request field",
+            names_of::<model::SimMapRequest, _>(&Bogus { bogus_field: 0 }),
+        ),
+        (
+            "sim map field",
+            names_of::<model::SimMap, _>(&Bogus { bogus_field: 0 }),
+        ),
+        (
+            "sim fit kept field",
+            names_of::<model::SimFitKept, _>(&Bogus { bogus_field: 0 }),
+        ),
     ] {
         check(group, &names, &doc, &mut missing);
     }

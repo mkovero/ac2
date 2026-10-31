@@ -78,6 +78,10 @@ fn every_command_is_reachable() {
         CommandId::LegendBottomRight,
         CommandId::LegendHide,
         CommandId::ImportTrace,
+        CommandId::SimRun,
+        CommandId::SimFit,
+        CommandId::SimMap,
+        CommandId::SimCancel,
         // Z's chooser offers each; the palette reaches them directly.
         CommandId::TargetFile,
         CommandId::TargetFlat,

@@ -79,6 +79,8 @@ impl Store {
                 walks: Vec::new(),
                 walk_plans: Vec::new(),
                 sim: None,
+                sim_map: None,
+                sim_fit: None,
             },
             rev: Rev(0),
             replay: VecDeque::new(),
@@ -223,7 +225,8 @@ pub(crate) fn apply(s: &mut State, c: &Change) {
         Change::Plan(p) => upsert(&mut s.plans, p, |p| p.name.clone()),
         Change::Walk(p) => upsert(&mut s.walks, p, |w| w.id),
         Change::WalkPlan(p) => upsert(&mut s.walk_plans, p, |p| p.name.clone()),
-        Change::Sim(r) => s.sim = Some(r.clone()),
+        Change::Sim(r) => s.set_sim(r.clone()),
+        Change::SimFit(f) => s.sim_fit.clone_from(f),
     }
 }
 

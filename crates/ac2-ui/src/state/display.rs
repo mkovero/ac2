@@ -68,6 +68,12 @@ pub enum ChoicePurpose {
         redo: bool,
         sets: Vec<Vec<u16>>,
     },
+    /// *Fit simulation to walk* on a plan with several speakers: the answer is the one in
+    /// `sources` the walk was measured from.
+    SimSource {
+        walk: ac2_proto::units::WalkId,
+        sources: Vec<String>,
+    },
     /// New measurement: the answer is a kind, in [`ac2_scene::new_meas::NewKind::ALL`]'s
     /// order; its form opens.
     NewMeasurement,
@@ -393,6 +399,11 @@ impl AppState {
             ChoicePurpose::NewMeasurement => self.new_measurement_pick(i, out),
             ChoicePurpose::Target => self.target_pick(i, out),
             ChoicePurpose::Walks { walks } => self.walks_pick(&walks, i),
+            ChoicePurpose::SimSource { walk, mut sources } => {
+                if i < sources.len() {
+                    self.sim_fit_from(walk, sources.swap_remove(i), out);
+                }
+            }
             ChoicePurpose::WalkPoints { walk, redo, sets } => {
                 if let Some(points) = sets.get(i) {
                     self.walk_point_sets(walk, points, redo, out);

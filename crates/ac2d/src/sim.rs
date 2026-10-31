@@ -3,6 +3,7 @@
 //! pool, progress and the result back to the control thread as messages.
 
 pub(crate) mod fit;
+pub(crate) mod map;
 pub(crate) mod plan;
 pub(crate) mod run;
 
@@ -14,7 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::time::Duration;
 
-use ac2_proto::model::{SimAbsorption, SimStatus};
+use ac2_proto::model::{SimAbsorption, SimMap, SimStatus};
 use ac2_proto::units::{SimId, WalkId};
 use ac2_roomsim::{Absorption, BAND_COUNT, PerBand};
 
@@ -34,6 +35,12 @@ pub(crate) enum Mode {
         positions: u16,
         measured: [Option<f64>; BAND_COUNT],
     },
+    /// A coverage map with `scale` (a fit kept) or the table.
+    Map {
+        spec: Box<map::MapSpec>,
+        scale: Option<PerBand>,
+        absorption: SimAbsorption,
+    },
 }
 
 /// A finished job.
@@ -42,6 +49,8 @@ pub(crate) struct Done {
     pub(crate) absorption: SimAbsorption,
     /// The fitted scale per band (a fit's), for later runs on the same plan.
     pub(crate) fitted: Option<PerBand>,
+    /// A map's grid.
+    pub(crate) map: Option<SimMap>,
 }
 
 /// What a worker tells the control thread.
@@ -122,6 +131,28 @@ pub(crate) fn work(
                 pass,
                 absorption,
                 fitted: None,
+                map: None,
+            })
+        }
+        Mode::Map {
+            spec,
+            scale,
+            absorption,
+        } => {
+            let mut progress = Reporter::new(send, 0);
+            let grid = map::map(
+                &job.prism,
+                &job.sources,
+                &spec,
+                scale,
+                cancel,
+                &mut progress,
+            )?;
+            Ok(Done {
+                pass: Pass::of_map(job, scale),
+                absorption,
+                fitted: None,
+                map: Some(grid),
             })
         }
         Mode::Fit {
@@ -134,6 +165,7 @@ pub(crate) fn work(
                 pass: f.pass,
                 absorption: f.absorption,
                 fitted: Some(f.scale),
+                map: None,
             })
         }
     }

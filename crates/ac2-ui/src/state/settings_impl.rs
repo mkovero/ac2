@@ -471,6 +471,7 @@ impl AppState {
             DisplayRow::Coherence if d != 0 => self.toggle_coherence_placement(),
             DisplayRow::ResolutionMarker if d != 0 => self.toggle_resolution_marker(),
             DisplayRow::RangeBand if d != 0 => self.toggle_range_band(),
+            DisplayRow::SimHints if d != 0 => self.toggle_sim_hints(),
             DisplayRow::PlateBackground if d != 0 => self.toggle_plate_background(),
             DisplayRow::CursorJump if d != 0 => {
                 let db = ac2_scene::cursor_jump::step_prominence(self.view.jump_prominence_db, d);

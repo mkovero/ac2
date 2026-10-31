@@ -108,6 +108,7 @@ impl Command {
             Self::WalkDelete { .. } => "walk.delete",
             Self::SimRun { .. } => "sim.run",
             Self::SimFit { .. } => "sim.fit",
+            Self::SimMap { .. } => "sim.map",
             Self::SimCancel => "sim.cancel",
         }
     }

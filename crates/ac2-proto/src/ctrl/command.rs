@@ -13,8 +13,8 @@ use crate::model::{
     ExportFormat, FinderBand, GeneratorDesired, ImportFormat, ImportRole, InputSetup, IrImport,
     MeasConfig, MicCurveId, MicLoading, OscMessage, OutputSetup, OwnedTraces, Pair, PaneLayout,
     PlanSpec, PreviewInput, RecordRequest, RecordingRef, ReplayPace, SessionConfig, SessionRef,
-    SimFitRequest, SimRequest, SplLogWhich, TargetCurve, TraceEdit, TraceOwner, WalkKind,
-    WalkPointSpec,
+    SimFitRequest, SimMapRequest, SimRequest, SplLogWhich, TargetCurve, TraceEdit, TraceOwner,
+    WalkKind, WalkPointSpec,
 };
 use crate::units::{
     Blob, Db, DbSpl, Dbfs, Dbtp, Hz, LeaseToken, Lufs, MeasId, MvPerPa, Rev, Seconds, TraceId,
@@ -914,6 +914,15 @@ pub enum Command {
     SimFit {
         /// What to fit.
         request: SimFitRequest,
+    },
+    /// Map the direct and early energy of the plan's speakers over its zones on a grid
+    /// (image sources only), on the same worker as `sim.run`; the reply is the started
+    /// state, its result `State.sim_map`. Refused with [`crate::ErrorDetail::Sim`] as
+    /// `sim.run` is, and `no_zones` / `map_too_fine`.
+    #[serde(rename = "sim.map")]
+    SimMap {
+        /// What to map.
+        request: SimMapRequest,
     },
     /// Stop the running simulation.
     #[serde(rename = "sim.cancel")]

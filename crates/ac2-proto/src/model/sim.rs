@@ -108,8 +108,11 @@ pub struct SimState {
     pub id: SimId,
     /// The plan simulated.
     pub plan: String,
-    /// A run or a fit.
+    /// A run, a fit or a coverage map.
     pub kind: SimKind,
+    /// The walk whose points are the receivers (a run at a walk, a fit); `None` for given
+    /// points and maps.
+    pub walk: Option<WalkId>,
     /// How it runs.
     pub settings: SimSettings,
     /// Where it is.
@@ -133,6 +136,20 @@ pub struct SimState {
     pub budget_exhausted: bool,
     /// Rays that slipped out of the room through rounding at an edge, over all bands.
     pub lost_rays: u64,
+    /// A coverage map's grid (`sim.map`), once done; `None` for runs and fits.
+    pub map: Option<SimMap>,
+}
+
+impl super::State {
+    /// Takes `s` as the latest simulation of its kind: a map is [`Self::sim_map`], a run
+    /// or a fit [`Self::sim`].
+    pub fn set_sim(&mut self, s: SimState) {
+        if s.kind == SimKind::Map {
+            self.sim_map = Some(s);
+        } else {
+            self.sim = Some(s);
+        }
+    }
 }
 
 impl SimState {
@@ -153,6 +170,8 @@ pub enum SimKind {
         /// The walk.
         walk: WalkId,
     },
+    /// `sim.map`: direct and early energy over the plan's zones.
+    Map,
 }
 
 /// Where a simulation is.
@@ -351,4 +370,103 @@ pub enum SimRefusal {
     NoMeasuredT20,
     /// A simulation is running (`sim.cancel` it first).
     Busy,
+    /// A coverage map needs a zone, and a cell centre inside one at the spacing asked.
+    NoZones,
+    /// A coverage map at this spacing has more cells inside the zones than one map holds:
+    /// ask a coarser spacing.
+    MapTooFine {
+        /// Cells the spacing gives.
+        cells: u32,
+        /// The most a map holds ([`SimMapRequest::MAX_CELLS`]).
+        max: u32,
+    },
+}
+
+/// What `sim.map` maps: the direct and early energy of the plan's speakers over its zones,
+/// image sources only (no ray tracing: the early window is specular reflections and the
+/// late field is the same everywhere to a first approximation).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SimMapRequest {
+    /// The plan, by name: the session's copy when it holds one, else the library's.
+    pub plan: String,
+    /// Speaker markers of the plan, by name, each an omnidirectional source; their
+    /// energies add (incoherently).
+    pub sources: Vec<String>,
+    /// Grid spacing, metres: cells are squares this wide, each read at its centre at its
+    /// zone's ear height.
+    pub spacing: f64,
+    /// The octave band mapped (a nominal centre of [`SimState::bands`]); `None`: every band
+    /// summed (broadband).
+    pub band: Option<Hz>,
+    /// Energy counted from the direct sound's arrival for this long: the direct sound and
+    /// the early reflections that add to it.
+    pub window: Seconds,
+    /// Highest image-source order, at most [`SimSettings::MAX_IMAGE_ORDER`].
+    pub image_order: u8,
+}
+
+impl SimMapRequest {
+    /// The spacing a map is asked at unless the operator says otherwise, metres: about a
+    /// seat's row, coarse enough for a hall to fit [`Self::MAX_CELLS`].
+    pub const DEFAULT_SPACING_M: f64 = 1.0;
+    /// The default window, seconds: the direct sound and the early reflections the ear
+    /// fuses with it.
+    pub const DEFAULT_WINDOW_S: f64 = 0.05;
+    /// The longest window accepted, seconds.
+    pub const MAX_WINDOW_S: f64 = 0.5;
+    /// The default image order: second-order paths are most of the energy within 50 ms in
+    /// a hall, and a map has thousands of receivers.
+    pub const DEFAULT_IMAGE_ORDER: u8 = 2;
+    /// The most cells of a map: what one state event carries with room to spare.
+    pub const MAX_CELLS: usize = 4096;
+}
+
+/// A coverage map: level per grid cell inside the plan's zones, relative to the map's
+/// loudest cell. Simulated: omnidirectional sources, the absorption of its state.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SimMap {
+    /// Cell width, metres.
+    pub spacing: f64,
+    /// Centre of cell column 0, row 0, plan metres; column `c`, row `r` is centred at
+    /// `origin + (c, r) · spacing`.
+    pub origin: [f64; 2],
+    /// The band mapped; `None`: broadband.
+    pub band: Option<Hz>,
+    /// The energy window after the direct sound.
+    pub window: Seconds,
+    /// The cells inside a zone, row by row.
+    pub cells: Vec<SimMapCell>,
+}
+
+impl SimMap {
+    /// The lowest level a cell reads, dB re the loudest: the map's colour scale ends there.
+    pub const FLOOR_DB: f32 = -40.0;
+}
+
+/// One cell of a coverage map.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SimMapCell {
+    /// Column.
+    pub col: u16,
+    /// Row.
+    pub row: u16,
+    /// Level, dB re the map's loudest cell (≤ 0, at least [`SimMap::FLOOR_DB`]).
+    pub db: f32,
+}
+
+/// The absorption fit the daemon keeps for later runs on the same plan (the latest
+/// `sim.fit` done), mirrored so a client shows it after a reconnect; dropped when its plan
+/// changes or its walk is deleted. Not saved with the session.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SimFitKept {
+    /// The plan it was fitted on.
+    pub plan: String,
+    /// The walk it was fitted to.
+    pub walk: WalkId,
+    /// The fit (always [`SimAbsorption::Fitted`]).
+    pub absorption: SimAbsorption,
 }
