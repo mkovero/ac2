@@ -96,5 +96,15 @@ pub fn events() -> Vec<Event> {
         ev(83, Change::Walk(Patch::Deleted(WalkId(2)))),
         ev(84, Change::WalkPlan(Patch::Set(plan()))),
         ev(85, Change::WalkPlan(Patch::Deleted("Club".into()))),
+        ev(86, Change::Sim(super::sim::sim_running())),
+        ev(
+            87,
+            Change::Sim(crate::model::SimState {
+                status: crate::model::SimStatus::Cancelled {
+                    why: crate::model::SimCancel::PlanChanged,
+                },
+                ..super::sim::sim_running()
+            }),
+        ),
     ]
 }

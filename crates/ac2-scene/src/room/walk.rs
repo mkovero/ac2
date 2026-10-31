@@ -74,6 +74,11 @@ fn spread_cell(p: Param, m: Option<PositionMean>) -> RoomCell {
 /// The table of a walk's `set` bands and broadband: a row of means per parameter and the
 /// positions' least and greatest under it.
 pub fn walk_room_table(r: &WalkRoom, set: BandSet) -> RoomTable {
+    means_table(r, set, true)
+}
+
+/// [`walk_room_table`], with the ISO 3382-1 source-count note when `iso_note`.
+pub(super) fn means_table(r: &WalkRoom, set: BandSet, iso_note: bool) -> RoomTable {
     let bands: Vec<&WalkRoomBand> = match set {
         BandSet::Octave => &r.octave,
         BandSet::Third => &r.third,
@@ -120,7 +125,7 @@ pub fn walk_room_table(r: &WalkRoom, set: BandSet) -> RoomTable {
             format::NO_VALUE
         ));
     }
-    if r.sources < ISO_SOURCES {
+    if iso_note && r.sources < ISO_SOURCES {
         legend.push(format!(
             "ISO 3382-1 asks for at least {ISO_SOURCES} source positions; this walk measured \
              from {}",
@@ -146,7 +151,7 @@ pub fn walk_room_table(r: &WalkRoom, set: BandSet) -> RoomTable {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use ac2_proto::units::Hz;
 
@@ -154,7 +159,7 @@ mod tests {
         Some(PositionMean { mean, min, max, n })
     }
 
-    fn walk_room() -> WalkRoom {
+    pub(in crate::room) fn walk_room() -> WalkRoom {
         WalkRoom {
             positions: 4,
             sources: 1,

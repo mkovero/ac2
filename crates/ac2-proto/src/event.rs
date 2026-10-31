@@ -9,8 +9,8 @@ use thiserror::Error;
 
 use crate::model::{
     Autosave, CalEntry, CalKey, Generator, InputSetups, LineCalEntry, LineCalKey, Measurement, Mic,
-    OutputSetup, PlanSpec, RecordingRun, Rig, Session, SplLog, State, SweepRun, TimingStatus,
-    TraceMeta, WalkState, WorkingSession,
+    OutputSetup, PlanSpec, RecordingRun, Rig, Session, SimState, SplLog, State, SweepRun,
+    TimingStatus, TraceMeta, WalkState, WorkingSession,
 };
 use crate::units::{DaemonIncarnation, MeasId, Rev, SessionEpoch, TraceId, WalkId};
 
@@ -74,6 +74,8 @@ pub enum Change {
     Walk(Patch<WalkState, WalkId>),
     /// The session's copy of a plan, by name.
     WalkPlan(Patch<PlanSpec, String>),
+    /// The latest simulation (never deleted; a new run replaces it).
+    Sim(SimState),
 }
 
 /// One committed state change.
@@ -223,6 +225,13 @@ pub enum WireEvent {
         /// Payload.
         payload: Patch<PlanSpec, String>,
     },
+    /// [`Change::Sim`].
+    Sim {
+        /// Rev.
+        rev: Rev,
+        /// Payload.
+        payload: SimState,
+    },
 }
 
 impl From<Event> for WireEvent {
@@ -248,6 +257,7 @@ impl From<Event> for WireEvent {
             Change::Plan(payload) => Self::Plan { rev, payload },
             Change::Walk(payload) => Self::Walk { rev, payload },
             Change::WalkPlan(payload) => Self::WalkPlan { rev, payload },
+            Change::Sim(payload) => Self::Sim { rev, payload },
         }
     }
 }
@@ -274,6 +284,7 @@ impl From<WireEvent> for Event {
             WireEvent::Plan { rev, payload } => (rev, Change::Plan(payload)),
             WireEvent::Walk { rev, payload } => (rev, Change::Walk(payload)),
             WireEvent::WalkPlan { rev, payload } => (rev, Change::WalkPlan(payload)),
+            WireEvent::Sim { rev, payload } => (rev, Change::Sim(payload)),
         };
         Event { rev, change }
     }
@@ -302,6 +313,7 @@ impl Change {
             Self::Plan(_) => "plan",
             Self::Walk(_) => "walk",
             Self::WalkPlan(_) => "walk_plan",
+            Self::Sim(_) => "sim",
         }
     }
 }

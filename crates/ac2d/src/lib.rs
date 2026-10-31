@@ -58,6 +58,7 @@ mod preview;
 mod rig;
 mod rig_id;
 mod session;
+mod sim;
 mod state;
 mod stimulus;
 mod sweep;

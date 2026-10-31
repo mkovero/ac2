@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 77`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 78`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -1279,6 +1279,60 @@ one `<name>.json` per plan in its data directory (`plans/`), mirrored as `State.
   and the average, which becomes an ordinary average of them; the plan copy goes with the
   last walk walking it.
 
+#### Room simulation (`sim.*`)
+
+`docs/design/spatial-walk.md` §7. The daemon simulates a plan with the `ac2-roomsim`
+engine (image sources for the early reflections, ray tracing for the late field, per
+octave band 125 Hz … 8 kHz) on a worker thread of its own. A simulation is not a
+measurement and makes no trace; its latest result is `State.sim` and is not saved with the
+session. One runs at a time.
+
+- `sim.run` {`request`: `SimRequest` {`plan`, `sources` [speaker marker names], `receivers`
+  {`type`: `walk` {`walk`} \| `points` {`points` [{`label`, `at`}]}}, `settings`}} simulates
+  every source at every receiver. `SimSettings` {`image_order` 0 … 4 (default 3),
+  `rays_per_band` 1 … 1 000 000 (default 20 000, per source), `budget` s > 0 … 600 (default
+  10; the ray tracing's wall time, shared by the sources), `seed` (default 0; the same seed
+  gives the same result)}. At most 64 receivers and 64 source × receiver results. The plan
+  is the session's copy when it holds one, else the library's. Surfaces carry their
+  `material` by the simulator's name; an untagged wall or ceiling is `plaster_on_masonry`,
+  an untagged floor `concrete`. Sources are omnidirectional points; air absorption at
+  20 °C, 50 % RH. When a `sim.fit` on an identical plan came before, the run uses its
+  fitted absorption (`absorption` `fitted`), else the table's (`assumed`).
+- `sim.fit` {`request`: `SimFitRequest` {`walk`, `source`, `settings`}} fits the plan's
+  absorption to a **sweep** walk's measured T20 (`WalkRoom`), its receivers the walk's
+  captured points: one scale per octave band on every surface's absorption, from the
+  Eyring scale, Newton steps on log T20 against log scale, fixed seed, stopping when every
+  fitted band is within 3 % or after 6 passes (`budget` per pass). A band the walk gives no
+  T20 keeps the table's absorption. `not_found` for an unknown walk.
+- Both reply `sim` with the started state (`status` running) and refuse `invalid` with
+  `detail` `sim` {`reason`: `SimRefusal`}: `outdoor` (no ceiling), `unknown_material`
+  {`surface`, `name`}, `plan` {`reason`} (does not validate), `no_speaker` {`name`},
+  `outside` {`name`} (a source or receiver not inside the room), `empty`,
+  `not_a_sweep_walk`, `no_measured_t20`, `busy` (one is running), and `invalid` for
+  settings out of range.
+- `sim.cancel` stops the running simulation (`refused` when none runs) and replies `sim`
+  with it `cancelled` {`why`: `operator`}. A run also stops `cancelled` when its plan changes
+  or is deleted (`plan_changed`; saving it unchanged does not), when the fit's walk is
+  deleted (`walk_deleted`) and at `session.close` (`session_closed`).
+- Progress: `sim` events with `status` `running` {`stage` `image_sources` \|
+  `ray_tracing` \| `analysis`, `done`, `total`, `source` (index), `pass` (fit pass, 1-based; 0 for a run)}, at
+  most five a second, then `done`, `cancelled` {`why`} or `failed` {`msg`}.
+- **`SimState`** {`id: SimId`, `plan`, `kind` {`type`: `run` \| `fit` {`walk`}}, `settings`,
+  `status`, `bands` [Hz] (nominal octave centres; every per-band list follows them),
+  `absorption` {`type`: `assumed` \| `fitted` {`walk`, `positions`, `bands` [`SimFitBand`
+  {`scale` \| nil (nil: assumed), `measured`, `simulated` (s \| nil), `converged`}]}},
+  `sources` [`SimSource` {`name`, `at`, `receivers` [`SimReceiver` {`label`, `at`,
+  `arrivals` [`SimArrival` {`time` s, `energy` [per band], `path` [surfaces, empty for the
+  direct sound]}] (the first 48 by time), `late` `SimEchogram` {`bin` s, `energy` [per band
+  [≤ 128 bins]]} (the ray-traced late energy), `room`: `RoomAcoustics` (ISO 3382-1, octave
+  bands and broadband; no third-octave bands)}], `room`: `WalkRoom` \| nil (the mean over
+  the receivers)}] (empty until done), `schroeder` Hz \| nil, `valid_above` Hz \| nil (below
+  it the room is modal and the simulation not valid), `eyring` [s] (Eyring's T with air),
+  `rays_per_band` (traced, least over the sources), `budget_exhausted`, `lost_rays`}. The
+  room parameters are ac2-core's evaluation of an impulse response synthesised from the
+  arrivals and the late field, each band from that band's energy alone: like with like
+  with a measured response.
+
 #### Sweep runs (`sweep.run`)
 
 Design: `docs/design/sweep-distortion.md`. `sweep.run {lease_token, meas, name}` runs the
@@ -1681,7 +1735,7 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 `spl_log_page`, `spl_history`, `spl_band_log`,
 `snapshot`, `events`,
 `grid`, `session_file`, `sessions`, `transfer`, `chunk`, `salvage`, `sweep`, `recording`,
-`recordings`, `plan`, `plans`, `walk`.
+`recordings`, `plan`, `plans`, `walk`, `sim`.
 
 ### 3.4 Errors
 
@@ -1693,7 +1747,7 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 `version` {daemon, client}, `resync` {oldest}, `import` {line, problem} (§3.2 traces),
 `session_version` {found, supported}, `unsaved_changes` {origin}, `session_exists` {name,
 saved_at} (§3.2 sessions), `mic_curve_file` {line, reason} and
-`cal_store` {path, reason} (§3.2 calibration).
+`cal_store` {path, reason} (§3.2 calibration), `sim` {reason} (§3.2 room simulation).
 
 ## 4. State and events
 
@@ -1730,8 +1784,9 @@ nil`, `log_failures: [LogWriteFailure]`; see §7.3), `recording` (`RecordingRun`
 (`WorkingSession`: the working state's session and unsaved changes, §3.2 sessions), `rig`
 (`Rig`: rig settings, OSC and Art-Net sending and cue states, §3.2 *Rig monitor, OSC and Art-Net cues*),
 `plans` ([PlanSpec], the daemon's plan library, sorted by name; §3.2 *Spatial walks*),
-`walks` ([WalkState]) and `walk_plans` ([PlanSpec], the session's copies of the plans its
-walks walk).
+`walks` ([WalkState]), `walk_plans` ([PlanSpec], the session's copies of the plans its
+walks walk) and `sim` (`SimState` | nil: the latest room simulation, not saved with the
+session; §3.2 *Room simulation*).
 
 
 #### 4.1.1 Audio stopped and recovery
@@ -1773,8 +1828,9 @@ samples). Every later recovery reopens the configuration as it then stands.
 `state.snapshot` → `{state, rev, daemon_incarnation, session_epoch}`.
 
 An event is `{rev, kind, payload}`. `kind` is one of `session`, `measurement`, `trace`,
-`generator`, `calibration`, `line_calibration`, `mic`, `inputs`, `outputs`, `spl_log`, `timing`, `sweep`, `autosave`, `recording`, `working`, `plan`, `walk`, `walk_plan`. `payload` is the entity's
-full new value (`inputs`: {`inputs`, `pairs`}, both whole lists; `outputs`: the whole list); for keyed entities (`measurement`, `trace`,
+`generator`, `calibration`, `line_calibration`, `mic`, `inputs`, `outputs`, `spl_log`, `timing`, `sweep`, `autosave`, `recording`, `working`, `plan`, `walk`, `walk_plan`, `sim`. `payload` is the entity's
+full new value (`inputs`: {`inputs`, `pairs`}, both whole lists; `outputs`: the whole list;
+`sim`: the `SimState`, which `State.sim` becomes); for keyed entities (`measurement`, `trace`,
 `calibration`, `line_calibration` (keyed by `LineCalKey`), `mic` (keyed by name), `spl_log`, `plan` and `walk_plan` (keyed by name), `walk` (keyed by
 `WalkId`)) it is `{type: "set", value: <entity>}` or `{type: "deleted", value: <key>}`.
 Applying an event is assignment. Events travel on the data socket as

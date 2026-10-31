@@ -191,7 +191,7 @@ fn room_value(m: Metric) -> RoomValue {
     }
 }
 
-fn room_band(b: &BandMetrics) -> RoomBand {
+pub(crate) fn room_band(b: &BandMetrics) -> RoomBand {
     RoomBand {
         centre: b.centre_hz.map(Hz),
         onset: Seconds(b.onset_s),

@@ -53,6 +53,11 @@ pub enum ErrorDetail {
         /// Version the client sent.
         client: u16,
     },
+    /// `invalid` from `sim.run` / `sim.fit`: why the simulation was refused.
+    Sim {
+        /// Why.
+        reason: crate::model::SimRefusal,
+    },
     /// `resync_required`: the oldest rev still replayable.
     Resync {
         /// Oldest replayable rev.

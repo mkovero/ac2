@@ -24,6 +24,7 @@ mod salvage;
 mod selftest;
 mod session;
 mod sessions;
+mod sim;
 mod traces;
 mod walk;
 
@@ -59,6 +60,7 @@ pub(crate) async fn dispatch(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliErro
         Cmd::Trace { cmd } => traces::trace(cli, cmd, out).await,
         Cmd::Plan { cmd } => walk::plan(cli, cmd, out).await,
         Cmd::Walk { cmd } => walk::walk(cli, cmd, out).await,
+        Cmd::Sim { cmd } => sim::run(cli, cmd, out).await,
         Cmd::Osc { cmd } => osc::osc(cli, cmd, out).await,
         Cmd::Artnet { cmd } => artnet::artnet(cli, cmd, out).await,
         Cmd::Levels { cmd } => levels::run(cli, cmd.as_ref(), out).await,

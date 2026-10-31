@@ -262,7 +262,7 @@ fn rectangle(n: &PlanNew) -> Result<PlanSpec, CliError> {
 }
 
 /// The walk `r` names, or the session's only one.
-fn find_walk<'s>(s: &'s State, r: Option<&MeasRef>) -> Result<&'s WalkState, CliError> {
+pub(crate) fn find_walk<'s>(s: &'s State, r: Option<&MeasRef>) -> Result<&'s WalkState, CliError> {
     match r {
         Some(r) => super::resolve(&s.walks, r, "walk", |w| w.id.0, |w| w.name.as_str()),
         None => match s.walks.as_slice() {

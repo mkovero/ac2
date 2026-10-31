@@ -261,6 +261,7 @@ pub fn body_name(b: &ReplyBody) -> &'static str {
         ReplyBody::Plan(_) => "plan",
         ReplyBody::Plans(_) => "plans",
         ReplyBody::Walk(_) => "walk",
+        ReplyBody::Sim(_) => "sim",
         ReplyBody::Calibration(_) => "calibration",
         ReplyBody::LineCalibration(_) => "line_calibration",
         ReplyBody::Mic(_) => "mic",

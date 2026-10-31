@@ -9,7 +9,9 @@
 use std::collections::BTreeSet;
 use std::process::Command;
 
-const DSP: [&str; 4] = ["ac2-core", "ac2-audio", "rustfft", "realfft"];
+/// The DSP, audio and room-simulation crates: the simulator's results reach the UI as
+/// `State.sim`, never by computing them.
+const DSP: [&str; 5] = ["ac2-core", "ac2-audio", "ac2-roomsim", "rustfft", "realfft"];
 
 fn tree(extra: &[&str]) -> BTreeSet<String> {
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());

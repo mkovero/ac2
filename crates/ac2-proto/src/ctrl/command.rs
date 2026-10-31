@@ -13,7 +13,8 @@ use crate::model::{
     ExportFormat, FinderBand, GeneratorDesired, ImportFormat, ImportRole, InputSetup, IrImport,
     MeasConfig, MicCurveId, MicLoading, OscMessage, OutputSetup, OwnedTraces, Pair, PaneLayout,
     PlanSpec, PreviewInput, RecordRequest, RecordingRef, ReplayPace, SessionConfig, SessionRef,
-    SplLogWhich, TargetCurve, TraceEdit, TraceOwner, WalkKind, WalkPointSpec,
+    SimFitRequest, SimRequest, SplLogWhich, TargetCurve, TraceEdit, TraceOwner, WalkKind,
+    WalkPointSpec,
 };
 use crate::units::{
     Blob, Db, DbSpl, Dbfs, Dbtp, Hz, LeaseToken, Lufs, MeasId, MvPerPa, Rev, Seconds, TraceId,
@@ -895,6 +896,28 @@ pub enum Command {
         /// The walk.
         walk: WalkId,
     },
+
+    // -- sim (docs/design/spatial-walk.md §7) ------------------------------------------------
+    /// Simulate the plan's speakers at the receivers on a worker; the reply is the started
+    /// [`crate::model::SimState`], its progress and results follow as `sim` events. Refused
+    /// with [`crate::ErrorDetail::Sim`] (an outdoor plan, an unknown material, a marker
+    /// outside, a run already going). A plan change, `sim.cancel` or a session close stops it.
+    #[serde(rename = "sim.run")]
+    SimRun {
+        /// What to simulate.
+        request: SimRequest,
+    },
+    /// Fit the absorption per band to a sweep walk's measured T20, then simulate at its
+    /// captured positions with it (`absorption fitted`); later runs on the unchanged plan
+    /// keep the fit.
+    #[serde(rename = "sim.fit")]
+    SimFit {
+        /// What to fit.
+        request: SimFitRequest,
+    },
+    /// Stop the running simulation.
+    #[serde(rename = "sim.cancel")]
+    SimCancel,
 
     // -- rec ----------------------------------------------------------------------------
     /// Record inputs of the open session to a raw capture file (f32 WAV / RF64 and a JSON

@@ -9,6 +9,7 @@ mod eq;
 mod events;
 mod frames;
 mod replies;
+mod sim;
 mod state;
 mod traces;
 
@@ -18,6 +19,7 @@ pub use eq::{eq_edits, eq_measurement};
 pub use events::events;
 pub use frames::{frames, stamp, tf_frame};
 pub use replies::{replies, reply, warnings};
+pub use sim::{sim_fit_request, sim_request, sim_running, sim_state};
 pub use state::{
     band_leq_config, plan, recording_run, server_info, spl_config, spl_measurement, state, walk,
 };

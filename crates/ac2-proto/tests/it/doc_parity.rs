@@ -219,6 +219,40 @@ fn protocol_doc_names_everything() {
         &doc,
         &mut missing,
     );
+    for (group, names) in [
+        (
+            "sim refusal",
+            names_of::<model::SimRefusal, _>(&Tagged { t: "no_such" }),
+        ),
+        (
+            "sim status",
+            names_of::<model::SimStatus, _>(&Tagged { t: "no_such" }),
+        ),
+        ("sim stage", names_of::<model::SimStage, _>(&"no_such")),
+        ("sim cancel", names_of::<model::SimCancel, _>(&"no_such")),
+        (
+            "sim absorption",
+            names_of::<model::SimAbsorption, _>(&Tagged { t: "no_such" }),
+        ),
+        (
+            "sim receivers",
+            names_of::<model::SimReceivers, _>(&Tagged { t: "no_such" }),
+        ),
+        (
+            "sim state field",
+            names_of::<model::SimState, _>(&Bogus { bogus_field: 0 }),
+        ),
+        (
+            "sim settings field",
+            names_of::<model::SimSettings, _>(&Bogus { bogus_field: 0 }),
+        ),
+        (
+            "sim receiver field",
+            names_of::<model::SimReceiver, _>(&Bogus { bogus_field: 0 }),
+        ),
+    ] {
+        check(group, &names, &doc, &mut missing);
+    }
     for (group, fields) in [
         (
             "leq window field",

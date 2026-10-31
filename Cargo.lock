@@ -149,6 +149,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ac2-roomsim"
+version = "0.1.0"
+source = "git+https://github.com/mkovero/ac2-roomsim?rev=1b447f0852423bc429c6969cf34a80e1ff3f42bc#1b447f0852423bc429c6969cf34a80e1ff3f42bc"
+dependencies = [
+ "rand_core 0.6.4",
+ "rand_pcg",
+ "rayon",
+]
+
+[[package]]
 name = "ac2-scene"
 version = "0.0.0"
 dependencies = [
@@ -235,6 +245,7 @@ dependencies = [
  "ac2-paths",
  "ac2-proto",
  "ac2-room",
+ "ac2-roomsim",
  "ac2-traces",
  "ac2-zmq",
  "chrono",
@@ -243,6 +254,7 @@ dependencies = [
  "getrandom 0.3.4",
  "jack",
  "num-complex",
+ "rayon",
  "rmp-serde",
  "rosc",
  "serde",
@@ -3571,7 +3583,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9ef1d0d795eb7d84685bca4f72f3649f064e6641543d3a8c415898726a57b41"
 dependencies = [
  "rand_chacha",
- "rand_core",
+ "rand_core 0.9.5",
 ]
 
 [[package]]
@@ -3581,8 +3593,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb"
 dependencies = [
  "ppv-lite86",
- "rand_core",
+ "rand_core 0.9.5",
 ]
+
+[[package]]
+name = "rand_core"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 
 [[package]]
 name = "rand_core"
@@ -3594,12 +3612,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand_pcg"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59cad018caf63deb318e5a4586d99a24424a364f40f1e5778c29aca23f4fc73e"
+dependencies = [
+ "rand_core 0.6.4",
+]
+
+[[package]]
 name = "rand_xorshift"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "513962919efc330f829edb2535844d1b912b0fbe2ca165d613e4e8788bb05a5a"
 dependencies = [
- "rand_core",
+ "rand_core 0.9.5",
 ]
 
 [[package]]

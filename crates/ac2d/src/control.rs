@@ -65,6 +65,7 @@ mod request;
 pub(crate) mod rig;
 mod rig_meas;
 mod session_ctl;
+mod sim;
 mod sweeps;
 mod traces;
 mod transfer;
@@ -82,6 +83,7 @@ use validate::{
     MAX_CAL_UNSETTLED_DB, MAX_DELAY_S, check_delay, check_find, delay_samples, gen_err,
     lease_required, mutation_conflict, not_found, static_grid, upsert_inputs,
 };
+pub(crate) use walk_sweep::walk_room;
 
 /// The authenticated peer of a network-mode (CURVE) connection, as the ZAP handler granted
 /// it at the handshake.
@@ -199,6 +201,11 @@ pub(crate) enum ControlMsg {
     RecoverInstalled {
         token: u64,
         result: Result<(), String>,
+    },
+    /// The simulation worker of run `id` reports progress or its end.
+    Sim {
+        id: ac2_proto::units::SimId,
+        msg: crate::sim::SimMsg,
     },
     /// Orderly shutdown.
     Shutdown,
@@ -408,6 +415,8 @@ pub(crate) struct Control {
     transfers: transfer::Transfers,
     /// File operations whose disk work runs on a worker, by token.
     file_jobs: file_jobs::FileJobs,
+    /// The room simulation running and the fit kept for later runs.
+    sims: sim::Sims,
 }
 
 /// The stimulus output: who may drive it, its gate, level and source, and the ceiling.
@@ -568,6 +577,7 @@ impl Control {
             replaced_working: None,
             transfers: transfer::Transfers::default(),
             file_jobs: file_jobs::FileJobs::default(),
+            sims: sim::Sims::default(),
             rig: RigState {
                 settings: rig,
                 meas: rigm,
@@ -753,6 +763,7 @@ impl Control {
                 Ok(ControlMsg::RecordingProgress { token }) => self.recording_progress(token),
                 Ok(ControlMsg::RecordingEnded { token }) => self.recording_ended(token),
                 Ok(ControlMsg::FileDone { token, done }) => self.file_done(token, *done),
+                Ok(ControlMsg::Sim { id, msg }) => self.sim_message(id, msg),
                 Ok(ControlMsg::RecoverInstalled { token, result }) => {
                     self.recover_installed(token, result);
                 }
@@ -790,6 +801,7 @@ impl Control {
         }
         self.osc_shutdown();
         self.abort_sweep(SweepFailure::Stopped, "the daemon is shutting down");
+        self.shutdown_sim();
         self.end_recording(ac2_proto::model::RecordingEnd::DaemonShutdown);
         self.close_preview();
         self.stop_output();
@@ -817,6 +829,7 @@ impl Control {
         );
         self.note_for_recording(&change);
         self.rig_meas_committing(&change);
+        let stops_sim = self.sim_stopped_by(&change);
         let ev = self.store.commit(change, Instant::now());
         if levels {
             self.sync_levels_policy();
@@ -828,6 +841,9 @@ impl Control {
         if saved {
             self.working_changed();
             self.autosave_changed();
+        }
+        if let Some(why) = stops_sim {
+            self.stop_sim(why);
         }
         ev.rev
     }

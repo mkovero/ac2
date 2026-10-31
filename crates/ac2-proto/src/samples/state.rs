@@ -509,6 +509,7 @@ pub fn state() -> State {
         plans: vec![plan()],
         walks: vec![walk(), sweep_walk()],
         walk_plans: vec![plan()],
+        sim: Some(super::sim::sim_state()),
     }
 }
 

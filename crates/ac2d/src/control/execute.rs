@@ -442,6 +442,9 @@ impl Control {
             Command::WalkRedo { walk, point } => self.walk_redo(walk, point),
             Command::WalkSwap { walk, points } => self.walk_swap(walk, &points),
             Command::WalkDelete { walk } => self.walk_delete(walk),
+            Command::SimRun { request } => self.sim_run(request),
+            Command::SimFit { request } => self.sim_fit(request),
+            Command::SimCancel => self.sim_cancel(),
         }
     }
 

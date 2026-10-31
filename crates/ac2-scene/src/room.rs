@@ -573,6 +573,7 @@ pub fn room_scene(
     }
 }
 
+pub mod sim;
 mod walk;
 pub use walk::walk_room_table;
 

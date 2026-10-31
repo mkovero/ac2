@@ -591,15 +591,20 @@ pub fn analyse_bands(
         .collect()
 }
 
+/// The parameters of the impulse response `ir` at `fs` as captured, without a band filter.
+/// `ir[0]` is at `t0_s` on the caller's time axis.
+pub fn analyse_broadband(ir: &[f64], fs: f64, t0_s: f64) -> BandMetrics {
+    let e: Vec<f64> = ir.iter().map(|v| v * v).collect();
+    band_metrics(ir, fs, t0_s, onset(&e, TRIGGER_DB), None)
+}
+
 /// Every parameter of the impulse response `ir` at `fs`: broadband, octave bands 63 Hz …
 /// 8 kHz and one-third-octave bands 50 Hz … 10 kHz, each band only where its edges lie
 /// inside the excited range `excited` (Hz). `ir[0]` is at `t0_s` on the caller's time axis
 /// (onsets and truncation points are reported on it).
 pub fn analyse(ir: &[f64], fs: f64, t0_s: f64, excited: (f64, f64)) -> RoomAnalysis {
-    let e: Vec<f64> = ir.iter().map(|v| v * v).collect();
-    let start = onset(&e, TRIGGER_DB);
     RoomAnalysis {
-        broadband: band_metrics(ir, fs, t0_s, start, None),
+        broadband: analyse_broadband(ir, fs, t0_s),
         octave: analyse_bands(ir, fs, t0_s, BandFraction::Octave, OCTAVE_SPAN_HZ, excited),
         third: analyse_bands(ir, fs, t0_s, BandFraction::Third, THIRD_SPAN_HZ, excited),
     }

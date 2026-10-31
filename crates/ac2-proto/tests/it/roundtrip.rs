@@ -130,7 +130,7 @@ fn every_event_roundtrips() {
             DataMessage::Event(e)
         );
     }
-    assert_eq!(kinds.len(), 19);
+    assert_eq!(kinds.len(), 20);
 }
 
 /// The input-meter kinds only travel on their own topics, with one channel per column.
@@ -675,4 +675,43 @@ fn plan_types_roundtrip_and_refuse_unknown_fields() {
     })
     .expect("probe encodes");
     assert!(rmp_serde::from_slice::<Marker>(&b).is_err());
+}
+
+/// The largest simulation a state holds (every result with its most arrivals, each four
+/// reflections deep, its most echogram bins, all seven octave bands) fits in one event,
+/// with room for the rest of a snapshot.
+#[test]
+fn the_largest_simulation_fits_in_an_event() {
+    use ac2_proto::model::*;
+    use ac2_proto::units::{Hz, Rev, Seconds};
+    let bands = 7;
+    let mut s = samples::sim_state();
+    s.bands = (0..bands).map(|i| Hz(125.0 * 2f64.powi(i))).collect();
+    let mut r = s.sources[0].receivers[0].clone();
+    r.arrivals = (0..SimReceiver::MAX_ARRIVALS)
+        .map(|i| SimArrival {
+            time: Seconds(0.012_345_678 * i as f64),
+            energy: vec![0.123_456_7; bands as usize],
+            path: (0..4).map(|e| Surface::Wall { edge: e + 10 }).collect(),
+        })
+        .collect();
+    r.late.energy = vec![vec![0.123_456_7; SimEchogram::MAX_BINS]; bands as usize];
+    let band = r.room.octave[0].clone();
+    r.room.octave = vec![band; bands as usize];
+    r.label = "P64 · balcony left".into();
+    s.sources = vec![SimSource {
+        receivers: vec![r; SimSettings::MAX_RESULTS],
+        ..s.sources[0].clone()
+    }];
+    let b = encode_event(&event::Event {
+        rev: Rev(1),
+        change: event::Change::Sim(s),
+    })
+    .expect("sample message");
+    assert!(
+        b.len() < event::MAX_EVENT_BYTES * 9 / 10,
+        "{} bytes of {}",
+        b.len(),
+        event::MAX_EVENT_BYTES
+    );
 }

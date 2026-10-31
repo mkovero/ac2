@@ -12,6 +12,7 @@ mod math;
 mod meas;
 mod osc;
 mod session;
+mod sim;
 mod spl;
 mod trace;
 mod walk;
@@ -28,6 +29,7 @@ pub use math::*;
 pub use meas::*;
 pub use osc::*;
 pub use session::*;
+pub use sim::*;
 pub use spl::*;
 pub use trace::*;
 pub use walk::*;
@@ -173,6 +175,13 @@ pub enum Cmd {
         /// Action.
         #[command(subcommand)]
         cmd: WalkCmd,
+    },
+    /// Room simulation of a plan: image sources and ray tracing, the room parameters at
+    /// each receiver, the absorption fitted to a sweep walk's T20.
+    Sim {
+        /// Action.
+        #[command(subcommand)]
+        cmd: SimCmd,
     },
     /// Where the rig sends OSC cues, and a test message.
     Osc {

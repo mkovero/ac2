@@ -334,6 +334,47 @@ What it can claim, and what it refuses:
 - Runs in `ac2d` on a worker thread outside the audio path, with a time budget and progress; a plan
   change cancels the run. Outdoor plans (no ceiling) are not simulated.
 
+**As built (stage 4b part 1: daemon, wire, text).** `ac2d` links `ac2-roomsim` (pinned git rev);
+`ac2-ui` does not link it itself (its default `embedded` feature hosts a daemon, which does).
+`sim.run` / `sim.fit` / `sim.cancel` (`docs/protocol.md` *Room simulation*), CLI `ac2 sim
+run|fit|status|cancel`, texts in `ac2_scene::room::sim`.
+- **Plan → prism.** The outline extruded to the ceiling; a surface's material by the simulator's
+  name, an untagged wall or ceiling *plaster on masonry*, an untagged floor *concrete*; an
+  unknown name is refused with its surface. Air at 20 °C, 50 % RH. Sources are the plan's
+  speaker markers, omnidirectional; receivers a walk's points or given points, each strictly
+  inside the room.
+- **Worker.** One run at a time on its own thread with its own rayon pool (half the cores, 1 … 8);
+  progress at most five times a second; the cancel flag is raised by `sim.cancel`, a change or
+  deletion of the plan (saving it unchanged does not), deletion of the fit's walk, and
+  `session.close`. Results are not saved with the session: they are re-made in seconds from the
+  plan, and a saved result would outlive the plan edit that invalidated it.
+- **Room parameters.** Per receiver, ac2-core's ISO 3382-1 evaluation of an impulse response
+  synthesised from the arrivals and the late echogram (48 kHz). Each octave band is evaluated on
+  a response synthesised from that band's energy alone: the synthesis band-limits its noise with
+  gentle filters, so in one response the slow 125 Hz decay leaks into the 1 kHz filter and
+  outlasts the 1 kHz decay (it read 4.3 s against Eyring's 0.72 s). Broadband from the whole
+  response; no third-octave bands (the simulation has no finer detail than an octave). A
+  source's `room` is the receivers' mean, least and greatest, as a walk's.
+- **Fit rule.** One scale per octave band on every surface's absorption. Start where Eyring's T
+  (with air) equals the measured T20 (fixed-point iterations, no simulation). Then simulation
+  passes with the request's fixed seed; after each, per band, a Newton step on log T against
+  log scale, `scale ← scale · (T_sim / T_meas)^(1/p)`: p = 1 first (T ∝ 1/absorption where the
+  surfaces dominate), then p from the last two passes, clamped to 0.2 … 1.5, because absorption
+  clipped at 1, the air's share and a field that is not diffuse make T follow the scale less
+  than inversely. Scale clamped to 0.05 … 20. Stop when every fitted band is within 3 % of the
+  measured T20 (about the spread between seats of one room) or after 6 passes; the last pass
+  is the result, a band outside the tolerance flagged `converged: false`. A band the walk gives
+  no T20 keeps the table's absorption (*assumed at … Hz*). The fit's scale is kept by the daemon
+  and applied to later `sim.run`s of an identical plan.
+- **Defaults.** Image order 3, 20 000 rays per band, 10 s budget, seed 0; limits order 4, 10⁶
+  rays, 600 s, 64 receivers, 64 source × receiver results, 48 arrivals and 128 late-energy bins
+  per result (the largest state fits the 1 MiB event).
+- **Labels** (`ac2_scene::room::sim`): *simulated*; *absorption assumed* or *absorption fitted to
+  4 positions*; *simulation not valid below 180 Hz* (Schroeder, two digits); *omnidirectional
+  source*. The simulated room table brackets bands reaching below the limit. A simulation is a
+  `SimState`, a type of its own, never a trace: no math channel can name it.
+- **Part 2 (not yet):** the reflection overlay on the measured ETC, the coverage map, and the UI.
+
 ## 8. One sweep, several mics (G8)
 
 `SweepConfig::measurement_input: u16` becomes `measurement_inputs: Vec<u16>` (one reference). One

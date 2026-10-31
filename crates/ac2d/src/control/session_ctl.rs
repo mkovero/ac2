@@ -141,6 +141,7 @@ impl Control {
     pub(super) fn session_close(&mut self, client: &ClientId) {
         self.abort_sweep(SweepFailure::SessionClosed, "the audio I/O closed");
         self.end_recording(ac2_proto::model::RecordingEnd::SessionClosed);
+        self.stop_sim(ac2_proto::model::SimCancel::SessionClosed);
         self.stop_all_jobs();
         let g = self.store.state().generator.clone();
         if g.armed || g.firing {

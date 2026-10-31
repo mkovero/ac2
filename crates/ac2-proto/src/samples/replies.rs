@@ -266,6 +266,7 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
         Ok(ReplyBody::Plan(plan())),
         Ok(ReplyBody::Plans(vec![plan()])),
         Ok(ReplyBody::Walk(walk())),
+        Ok(ReplyBody::Sim(super::sim::sim_running())),
         Ok(ReplyBody::Outputs(outputs())),
         Ok(ReplyBody::Server(server_info())),
         Ok(ReplyBody::Server(ServerInfo {
@@ -288,6 +289,16 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
             msg: "held by bob".into(),
             detail: Some(ErrorDetail::LeaseHeld {
                 owner: ClientId("bob".into()),
+            }),
+        }),
+        Err(ProtoError {
+            code: ErrorCode::Invalid,
+            msg: "the floor's material \"lino\" is not in the simulator's table".into(),
+            detail: Some(ErrorDetail::Sim {
+                reason: crate::model::SimRefusal::UnknownMaterial {
+                    surface: crate::model::Surface::Floor,
+                    name: "lino".into(),
+                },
             }),
         }),
         Err(ProtoError {

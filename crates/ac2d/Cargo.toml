@@ -26,6 +26,9 @@ ac2-discovery = { path = "../ac2-discovery" }
 ac2-paths = { path = "../ac2-paths", features = ["log"] }
 ac2-proto = { path = "../ac2-proto" }
 ac2-room = { path = "../ac2-room" }
+# The room simulator (its own repository, no ac2 dependency); pinned to a commit until it is
+# published on crates.io.
+ac2-roomsim = { git = "https://github.com/mkovero/ac2-roomsim", rev = "1b447f0852423bc429c6969cf34a80e1ff3f42bc" }
 ac2-traces = { path = "../ac2-traces" }
 ac2-zmq = { path = "../ac2-zmq" }
 chrono = { workspace = true, features = ["clock"] }
@@ -35,6 +38,8 @@ getrandom = { workspace = true }
 # OSC cues: encoding only; the socket is ours (non-blocking, never on the audio thread).
 rosc = "0.11"
 num-complex = { workspace = true }
+# The simulator's own thread pool, sized to leave cores for the audio path.
+rayon = "1.11"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["float_roundtrip"] }
 # Whole-host CPU use for the health meter (only its CPU figures are read).

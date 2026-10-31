@@ -777,6 +777,43 @@ def requests():
         req(94, "walk.skip", {"walk": 1, "point": 1}),
         req(95, "walk.swap", {"walk": 1, "points": [2, 3]}),
         req(96, "walk.redo", {"walk": 1, "point": 0}),
+        req(
+            98,
+            "sim.run",
+            {
+                "request": {
+                    "plan": "Hall",
+                    "sources": ["Main L"],
+                    "receivers": {
+                        "type": "points",
+                        "points": [{"label": "P1", "at": [5.0, 12.0, 1.2]}],
+                    },
+                    "settings": {
+                        "image_order": 3,
+                        "rays_per_band": 20000,
+                        "budget": 10.0,
+                        "seed": 0,
+                    },
+                }
+            },
+        ),
+        req(
+            99,
+            "sim.fit",
+            {
+                "request": {
+                    "walk": 2,
+                    "source": "Main L",
+                    "settings": {
+                        "image_order": 2,
+                        "rays_per_band": 5000,
+                        "budget": 2.5,
+                        "seed": 7,
+                    },
+                }
+            },
+        ),
+        req(100, "sim.cancel"),
     ]
 
 

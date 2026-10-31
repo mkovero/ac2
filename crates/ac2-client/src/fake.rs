@@ -235,6 +235,7 @@ pub fn empty_state() -> State {
         plans: vec![],
         walks: vec![],
         walk_plans: vec![],
+        sim: None,
     }
 }
 
@@ -660,6 +661,13 @@ impl Shared {
                 return Err(err(
                     ErrorCode::Unsupported,
                     "the fake keeps no plans or walks: run ac2d on the fake backend",
+                ));
+            }
+            C::SimRun { .. } | C::SimFit { .. } | C::SimCancel => {
+                // The simulator runs in the daemon only (ac2-roomsim is linked there).
+                return Err(err(
+                    ErrorCode::Unsupported,
+                    "the fake does not simulate rooms: run ac2d on the fake backend",
                 ));
             }
             C::FileList => self.file_list()?,

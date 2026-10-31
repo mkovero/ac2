@@ -141,7 +141,7 @@ impl Control {
 }
 
 /// The room parameters over `rooms` (one per position, a single source).
-pub(super) fn walk_room(rooms: &[&RoomAcoustics]) -> Option<WalkRoom> {
+pub(crate) fn walk_room(rooms: &[&RoomAcoustics]) -> Option<WalkRoom> {
     if rooms.is_empty() {
         return None;
     }

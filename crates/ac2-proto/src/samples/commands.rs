@@ -459,6 +459,13 @@ pub fn commands() -> Vec<Command> {
             point: 0,
         },
         Command::WalkDelete { walk: WalkId(1) },
+        Command::SimRun {
+            request: super::sim::sim_request(),
+        },
+        Command::SimFit {
+            request: super::sim::sim_fit_request(),
+        },
+        Command::SimCancel,
     ])
     .collect()
 }

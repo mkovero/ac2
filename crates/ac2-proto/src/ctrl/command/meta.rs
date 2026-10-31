@@ -106,6 +106,9 @@ impl Command {
             Self::WalkRedo { .. } => "walk.redo",
             Self::WalkSwap { .. } => "walk.swap",
             Self::WalkDelete { .. } => "walk.delete",
+            Self::SimRun { .. } => "sim.run",
+            Self::SimFit { .. } => "sim.fit",
+            Self::SimCancel => "sim.cancel",
         }
     }
 

@@ -133,6 +133,8 @@ pub enum ReplyBody {
     Plans(Vec<crate::model::PlanSpec>),
     /// `walk.new`, `walk.update`, `walk.goto`, `walk.capture`, `walk.skip`, `walk.redo`.
     Walk(crate::model::WalkState),
+    /// `sim.run`, `sim.fit`: the started simulation; `sim.cancel`: the stopped one.
+    Sim(crate::model::SimState),
 }
 
 /// A ctrl reply. `result` is msgpack `{"Ok": ReplyBody}` or `{"Err": ProtoError}`.

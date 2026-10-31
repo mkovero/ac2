@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     CalEntry, Generator, InputSetup, LineCalEntry, Measurement, Mic, OutputSetup, Pair, PlanSpec,
-    RecordingRun, Rig, Session, SplLog, SweepRun, TraceMeta, WalkState, WorkingSession,
+    RecordingRun, Rig, Session, SimState, SplLog, SweepRun, TraceMeta, WalkState, WorkingSession,
 };
 use crate::units::{MeasId, SampleIndex, Samples, Seconds, WallNs};
 
@@ -125,6 +125,9 @@ pub struct State {
     /// The session's copies of the plans its walks walk, by name: a session opened elsewhere
     /// carries its rooms, and a library edit changes no walk.
     pub walk_plans: Vec<PlanSpec>,
+    /// The latest room simulation, if any: simulated, not a trace, and not saved with the
+    /// session (a rerun is cheap and a plan edit outdates it).
+    pub sim: Option<SimState>,
 }
 
 /// Autosave of the measurements and traces: the daemon writes them, in the session file

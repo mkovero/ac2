@@ -149,3 +149,76 @@ async fn plans_and_a_walk_by_name() {
     assert!(text.contains("captures for the walk Mains"), "{text}");
     h.shutdown();
 }
+
+/// `sim run` at given points of a plan with a speaker: waits for the result, `sim status`
+/// shows it again, and a plan without a ceiling is refused by the daemon by name.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_simulation_of_a_plan() {
+    let backend = ac2d::backend(BackendChoice::Fake).unwrap();
+    let listen = Listen::Local {
+        ctrl: "tcp://127.0.0.1:0".into(),
+        data: "tcp://127.0.0.1:0".into(),
+    };
+    let h = Daemon::start(DaemonConfig::new(backend, listen, -10.0)).unwrap();
+    let ep = Endpoints {
+        ctrl: h.ctrl_endpoint().to_owned(),
+        data: h.data_endpoint().to_owned(),
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let mut room = ok(
+        &ep,
+        &[
+            "plan",
+            "new",
+            "Room",
+            "--width",
+            "8",
+            "--depth",
+            "6",
+            "--ceiling",
+            "3",
+        ],
+    )
+    .await;
+    room["name"] = "Room S".into();
+    room["markers"] = serde_json::json!([
+        { "name": "Main", "kind": "speaker", "at": [1.0, 3.0, 1.5], "heading_deg": null }
+    ]);
+    let file = tmp.path().join("room.json");
+    std::fs::write(&file, room.to_string()).unwrap();
+    ok(&ep, &["plan", "import", file.to_str().unwrap()]).await;
+
+    let s = ok(
+        &ep,
+        &[
+            "sim",
+            "run",
+            "--plan",
+            "Room S",
+            "--point",
+            "6,2,1.2",
+            "--point",
+            "Bar=7,5,1.2",
+            "--rays",
+            "2000",
+            "--order",
+            "1",
+        ],
+    )
+    .await;
+    assert_eq!(s["status"]["type"], "done", "{s}");
+    assert_eq!(s["absorption"]["type"], "assumed");
+    let labels: Vec<&str> = s["sources"][0]["receivers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["label"].as_str().unwrap())
+        .collect();
+    assert_eq!(labels, ["P1", "Bar"]);
+    assert_eq!(ok(&ep, &["sim", "status"]).await["id"], s["id"]);
+
+    let (code, text) = run(&ep, &["sim", "run", "--plan", "Room", "--point", "6,2,1.2"]).await;
+    assert_ne!(code, 0, "{text}");
+    assert!(text.contains("speaker"), "no speaker in the plan: {text}");
+    h.shutdown();
+}
