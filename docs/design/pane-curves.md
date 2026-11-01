@@ -3,9 +3,8 @@
 Status: design, not built. Operator decisions 2026-11-01: the pane's list (its title chip)
 picks individual curves — any connected rig's live curves and stored traces — and the
 "pane = its measurement's group" rule of P1 no longer holds for a pane, because a list that
-reaches into every rig's groups cannot also mean "this one group". Rigs on the same host are
-named by host and kind. Open operator decisions are marked **D1 … D5** with a
-recommendation.
+reaches into every rig's groups cannot also mean "this one group". Decisions D1 … D8 are at
+the end; all are settled.
 
 ## Why the current list misleads
 
@@ -15,31 +14,37 @@ measurement's whole group (live curve, math filed under it, its shown traces) pl
 compare list. A row reads as one curve and brings several; a stored trace cannot be picked at
 all (only dragged), and another rig's trace not even that. Besides that, the list as built:
 
-- lists every measurement whatever the pane draws (an SPL pane offers TF and FFT rows; a pick
-  turns the pane's kind), and the kinds of pane (`pane  Sweep / distortion`) and *New
-  measurement…* are appended after the last rig's rows, so they read as that rig's;
+- lists every measurement whatever the pane draws (an SPL pane offers transfer and spectrum
+  rows; a pick turns the pane's kind in one step), and the kinds of pane (`pane  Sweep /
+  distortion`) and *New measurement…* are appended after the last rig's rows, so they read
+  as that rig's;
 - names inputs by the backend's port (`capture_3 · line (in 3)`) although the session has a
   channel number, a kind and often a mic name for it;
-- lists a pair's sides again on their own (`programme_menu_rows`: "a pair's sides alone as
-  well"), so `MM1 34804` stands beside `MM1 34804 + Vilppu behringer #3` and, on a rig with
-  no names, `capture_1` beside `capture_1 + capture_2`;
-- tags rows `SPL`, `TF`, `FFT`, `meter`, `pane`: abbreviations the pane titles and the tree
-  do not all use for the same thing.
+- lists a pair's sides a second time on their own (`programme_menu_rows`: "a pair's sides
+  alone as well"), apart from the other single inputs, so `MM1 34804` stands beside `MM1
+  34804 + Vilppu behringer #3` and, on a rig with no names, `capture_1` beside `capture_1 +
+  capture_2`;
+- prefixes rows with the tree's kind tags `TF`, `FFT`, `RTA`, `SPL`, `MATH`, `SWEEP`
+  (`meas_list::kind_tag`) and with `meter` / `pane`, words the pane titles do not use.
 
 ## 1. What a pane holds
 
-A graph pane (Transfer, Spectrum / RTA, Sweep / distortion) holds an ordered list of
-**entries**; the first is the pane's **lead**:
+Every content reference names the rig whose id it is, because ids are per daemon
+(multi-rig.md §1); `LayoutPane.rig` goes and the rig moves into the content. `content`
+becomes required.
 
 ```rust
 pub enum PaneContent {
-    /// Graph panes: what is drawn, the lead first.
+    /// Graph panes (Transfer, Spectrum / RTA, Sweep / distortion): what is drawn, the lead
+    /// first. Empty: nothing picked (D6).
     Curves { entries: Vec<PaneEntry> },
     /// SPL panes: one meter (a meter is a number, read side by side, never overlaid).
     Meter { rig: RigRef, meas: MeasId },
-    Inputs { rig: RigRef, inputs: Vec<u16> },   // Programme, as today
-    Pair { rig: RigRef, left: u16, right: u16 }, // Programme, as today
-    Walk { walk: WalkId },                      // Walk pane, as today
+    /// Programme panes, as today.
+    Inputs { rig: RigRef, inputs: Vec<u16> },
+    Pair { rig: RigRef, left: u16, right: u16 },
+    /// The Walk pane.
+    Walk { rig: RigRef, walk: WalkId },
 }
 pub struct PaneEntry { pub rig: RigRef, pub what: EntryRef }
 pub enum EntryRef {
@@ -51,71 +56,110 @@ pub enum EntryRef {
     /// One stored trace.
     Trace { trace: TraceId },
 }
+pub enum RigRef {
+    /// Session files: the rig this session belongs to.
+    ThisRig,
+    /// Another rig, by its RigId; the name is for the operator while it is absent.
+    Rig { id: RigId, name: String },
+}
 ```
 
-- **The rig moves from the pane to the entry** (`LayoutPane.rig` goes): ids are per daemon
-  (multi-rig.md §1), so every reference carries the rig whose id it is. `RigRef` keeps its
-  meanings (`Active` in app prefs only, `ThisRig` in session files only, `Rig { id, name }`
-  pinned); `check()` refuses `Active` in `meas.layout` as today.
-- **The lead** names the pane (chip, title), owns its readouts (delay, coherence, the
-  sweep's distortion and IR views) and is what pane keys act on (S, B, P, the delay
-  finder). Pane keys never act on a non-lead entry; selecting it in the tree does.
-- **SPL, Programme and Walk panes keep one source.** The operator ruled SPL out of compare
-  (2026-10-17: "add new pane … drag another spl measurement there"); a goniometer is one
+- **`RigRef::Active` leaves the wire.** It is only meaningful in the app's layout prefs,
+  which have their own type (`PaneEntryFile`, `rig: Option<{ id, name }>`, absent = the
+  active rig); on the wire it existed only to be refused. With two variants there is
+  nothing to refuse in `check()`, and the rule "another rig's pane names what it shows"
+  goes too: `content` is always present.
+- **`content: None` is gone.** Today it meant "the measurement whose layout this is", and
+  `resolve_meas` (`state/panes/ops.rs`) filled an unpicked pane from the chosen row or the
+  first measurement of the pane's home kind. That stand-in is retired (D6): a pane draws
+  what it holds, and `Curves { entries: [] }` is the legal "nothing picked".
+- **The lead** (first entry) names the pane (chip, title), owns its readouts (delay,
+  coherence, the sweep's distortion and IR views) and is what pane keys act on (S, B, P, the
+  delay finder). **Make lead** is the one control for it: **Shift+Enter** on a ticked row of
+  the list (the palette offers the same) moves that entry first. Reordering the rest is not
+  offered — behind the lead, order only sets layering, which follows tick order — so the one
+  question that matters ("which curve do the keys act on?") has one control.
+- **SPL, Programme and Walk panes keep one source.** Operator 2026-10-17 on SPL: "add new
+  pane … drag another spl measurement there, there you have two meters"; a goniometer is one
   pair. Their pick is a radio choice, not a tick list.
-- Limits in `check()`: at most 16 entries (a legend past that no longer reads), no entry
-  twice, a `Group` and a `Live`/`Trace` of the same group together refused (the group
-  already draws it).
+- **Limit: 32 entries**, the same as a compare list (`Compared::MAX`), so salvage never
+  truncates a list that was legal; no entry twice; a `Live`/`Trace` already drawn by a
+  `Group` in the same pane is refused (the group draws it).
 
-**Starting content — never "everything".** A pane draws only its entries; nothing joins a
-pane of its own accord except through a `Group` entry (D1). A new measurement's own pane
-starts as `[Group(it)]`; a split starts with the focused pane's lead entry only (D3); a
-pane of a kind with nothing picked says *nothing picked — the chip picks*. That keeps the
-2026-10-09 complaint (every curve in every pane) out by construction.
+### What a pane starts with (D3, D6)
+
+A pane draws only its content; nothing joins it except through a `Group` entry (D1). That
+keeps the 2026-10-09 complaint (every curve in every pane) out by construction.
+
+| situation | the pane shows |
+|---|---|
+| a new measurement's own pane | `[Group(it)]` |
+| first launch, empty daemon | one pane, *nothing picked — the chip picks, Ctrl+M makes a measurement* |
+| a split of a pane with picks | the focused pane's lead only (D3) |
+| a split of an empty pane | nothing picked |
+| a list selection while a pane is empty | nothing changes: an empty pane does not follow the selection (D6) |
 
 ### Invariant: a pick waits, it is never replaced
 
-An entry naming something the app does not hold yet (its rig not connected or not synced,
-the id not yet in that rig's mirror) **waits**: it stays in the pane and in every stored
-layout, and its legend line says so (*FOH SPL · waiting for pupu*). It is never swapped for a
-fallback (the layout's owner, the selection), and a fallback shown meanwhile is never
-written back. An entry leaves a pane only by an untick, or when its rig, connected and
-synced, reports the id deleted (the daemon prunes deleted ids from stored entries, as it
-prunes compare lists today). Today's code breaks this: `LayoutPane.content`'s doc ("a pick
-of a measurement gone since shows the layout's own measurement"), P1's "a pick of a deleted
-measurement shows the owner", and `show_layout` (`meas_layout.rs`) filtering picks against
-the mirror — which is how SPL 2's FOH SPL pane was stored as SPL 2.
+A content reference naming something the app does not hold yet (its rig not connected or
+not synced, the id not yet in that rig's mirror) **waits**: it stays in the pane and in every
+stored layout, and the pane says so. It is never swapped for a stand-in (the layout's owner,
+the selection, the first fitting measurement), and a stand-in shown meanwhile is never
+written back. This holds for every content kind:
+
+| content | while waiting |
+|---|---|
+| `Curves` entry | its legend line: *TF 1 · waiting for pupu* (a name the prefs or layout kept), *a trace of pupu · waiting* (none) |
+| `Meter` | on the pane: *FOH SPL · waiting for pupu* |
+| `Inputs` / `Pair` | on each bar: *in 3 · waiting for pupu* |
+| `Walk` | on the pane: *walk 2 · waiting for pupu* |
+
+A reference leaves a pane only by an untick or pick, or when its rig, connected and synced,
+reports the id deleted: the daemon prunes its own ids from stored layouts (as it prunes
+compare lists today), and the **app** prunes another rig's entry from a layout it shows when
+that rig reports the id deleted, then stores the layout — an explicit prune, never a
+fallback.
+
+Today's code is held to this already for a measurement pick: branch `spl-pick` (3b6a01e9)
+keeps a pick the mirror does not list in `Pending::pane_ids` (`state/panes/meas_layout.rs`),
+`layout_of` stores the waiting id, `restore_pane_ids` puts it back when the measurement
+arrives, and a split keeps the wait. Stage 2 moves the waiting id from that side table into
+the entry itself: an `EntryRef` the mirror does not resolve *is* the waiting state, so
+there is no second place to forget. The stale doc on `LayoutPane.content` ("a pick of a
+measurement gone since shows the layout's own measurement") and P1's "a pick of a deleted
+measurement shows the owner" go with it.
 
 ## 2. How the rest fits
 
 - **Compare (C)** becomes per pane (D2): *Add to this pane…* opens the chip list in tick
   mode on the focused pane. The daemon's per-measurement compare list (`Compared`,
-  `meas.compare`) goes; salvage turns each measurement's list into `Live`/`Trace` entries of
-  the panes of its own layout that hold its `Group`. Draw order stays: lead on top, later
-  entries a layer further back and fainter (never below about half).
+  `meas.compare`) goes. Draw order stays: lead on top, later entries a layer further back
+  and fainter (never below about half).
 - **Hide (A / Shift+A) and slots 1–9** stay global and win everywhere (D4): a hidden entry
   stays listed in the pane's legend as *Slot 3 hidden — 3 shows it*, as a hidden lead does
   today.
 - **Math channels** are measurements: `Live { meas }` of a math channel picks it alone, its
   owner's `Group` brings it. Cross-rig math stays as multi-rig.md §6 says.
 - **Own layouts (P1).** Choosing a measurement's row still brings its panes, and editing
-  panes while it is chosen stores them on it. A stored pane keeps every entry, other rigs'
-  included, by `Rig { id, name }`, opaque to this daemon (D5); a pane whose entries are all
-  another rig's stays in the app's prefs only, as N2 says, so bringing a layout never
-  duplicates a pinned pane on screen.
-- **Layout prefs** (`ui.toml`): entries by rig id and name (measurement name; trace name and
-  id), resolved when the rig is back, as `park_gone_meas` does for measurements today.
-- **Undo**: each tick, untick, reorder or row pick is one pane edit in the app's history.
+  panes while it is chosen stores them on it. A stored pane keeps every reference, other
+  rigs' included, by `Rig { id, name }`, opaque to this daemon (D5); a pane whose references
+  are all another rig's stays in the app's prefs only, as N2 says, so bringing a layout
+  never duplicates a pinned pane on screen.
+- **Layout prefs** (`ui.toml`, `PaneEntryFile`): references by rig id and name (measurement
+  name; trace name and id), resolved when the rig is back, as `park_gone_meas` does for
+  measurements today.
+- **Undo**: each tick, untick, *Make lead* or pick is one pane edit in the app's history.
 - **Shared scale**: unchanged — same-kind panes on screen share one range (union).
 - **Colours across rigs**: two rigs can hand out the same family. In a pane mixing rigs the
   app gives a later entry the next free family for that pane only, and each other rig's
   legend line carries its rig name (`pupu · TF 1`), as pinned panes' chips do.
 
-## 3. The list
+## 3. The list (D7)
 
-One list for every pane kind, filtered to what the pane can draw; **Enter** ticks or unticks
-and the list stays open (a radio list closes on Enter), **Esc** closes. Ticks mark what the
-pane holds; the lead carries *lead* (palette *Make lead*).
+The list holds only what the focused pane's kind draws; changing the kind is its own step,
+**Turn into…**, a row after every rig that opens the kinds. This reverses today's one-step
+change (a transfer row picked on a spectrum pane turned it into a transfer pane): a pick
+never changes what kind of pane it lands in.
 
 ```
 pupu                                    ← rig heading (§4)
@@ -126,72 +170,101 @@ pupu                                    ← rig heading (§4)
     TF 2 · live + 1 trace
 ketunkolo · ac2d
     Spectrum 1 · live
-Inputs (pupu)                           ← Programme/SPL panes only
-    in 1 + 2 · MM1 34804 + Vilppu behringer #3 · pair
-    in 3 · line   in 4 · line   …
-    in 1–8 side by side
 ───────────────
-Turn into: Spectrum · Sweep / distortion · Programme
+Turn into…
 New measurement on pupu…   Ctrl+M
 ```
 
+On a Programme pane each rig's rows are its inputs instead:
+
+```
+pupu
+    in 1 + 2 · MM1 34804 + Vilppu behringer #3 · pair
+    in 1 · MM1 34804 · mic   in 2 · Vilppu behringer #3 · mic   in 3 · line   …
+    in 1–8 side by side
+```
+
+- **Graph panes tick, single-source panes choose.** Tick mode (Transfer, Spectrum / RTA,
+  Sweep / distortion): **Enter** ticks or unticks and the list stays open; hint bar
+  *↑/↓ · wheel · Enter ticks · Shift+Enter makes lead · Esc closes*. Radio mode (SPL,
+  Programme, Walk): **Enter** shows the row and closes; hint bar as today, *↑/↓ · wheel ·
+  Enter shows · Esc closes*.
+- **SPL panes list SPL measurements only**; inputs are not offered there (an input is
+  metered by a Programme pane; an SPL pane needs an SPL measurement's calibration and
+  weighting). **Programme panes are reached through inputs rows** (on a Programme pane, or by
+  dragging an input or pair row onto a pane), never through *Turn into…*, which lists
+  Transfer, Spectrum / RTA, Sweep / distortion and SPL.
 - Rows use the tree's words: the measurement's name, then what it brings (`live + 3
-  traces`); children by their tree labels. No kind tags: the list holds only what the pane
-  draws, so the kind is the pane's title. A row the pane cannot draw is absent, not greyed.
+  traces`); children by their tree labels. No kind tags and no `meter` / `pane` prefixes: the
+  list holds only what the pane draws, so the kind is the pane's title.
 - Inputs read as everywhere else: `in N`, then the mic name or the input's kind; a backend
-  port name never stands for a channel the session numbers. A pair's sides are not repeated
-  on their own: they are the plain `in 1`, `in 2` rows.
-- *Turn into* (pane kinds) and *New measurement…* sit under a rule after every rig, never
-  under a rig heading; *New measurement on <rig>…* names the rig it creates on (the shown
-  one).
+  port name never stands for a channel the session numbers. A pair's sides are listed once,
+  in channel order among the single inputs, not again beside the pair.
+- *Turn into…* and *New measurement…* sit under a rule after every rig, never under a rig
+  heading; *New measurement on <rig>…* names the rig it creates on (the shown one).
 - With one rig the headings go, as today.
 
-## 4. Same-host rigs named by host and kind
+## 4. Same-host rigs named by host and kind (D8)
 
 An app on ketunkolo with its own embedded daemon and ketunkolo's `ac2d` listed them as *this
-computer* and *ac2 on ketunkolo*: two names for one machine. Headings, the rig drop-down,
-pinned chips and the Connection page name a rig on the app's host as **`<host> · ac2d`**
-(reach local) and **`<host> · in this app`** (embedded); a network rig keeps the name it
-sends (`pupu`). `ac2d --name` set by the operator wins over the composed name. App only:
-the embedded daemon's `config.name` (`embedded.rs`) stops being the display name.
+computer* and *ac2 on ketunkolo*: two names for one machine. The app names a rig by how it
+reaches it, always: a locally reached rig is **`<this host> · ac2d`**, the embedded one
+**`<this host> · in this app`**; a network rig keeps the name its hello sends (`pupu`).
+Headings, the rig drop-down, pinned chips and the Connection page all use it. App only: the
+daemon's hello name, `ac2d --name` and the mDNS adverts are unchanged, and there is no
+`PROTO_VERSION` bump. Stage 0, built on branch `rig-names`.
 
 ## 5. Wire and files
 
-`PaneContent` changes shape and `LayoutPane.rig` moves into entries; `Compared` and
-`meas.compare` go: **`PROTO_VERSION` 79 → 80, session format 40 → 41, rig file bump** (meter
-layouts), `fixtures/protocol/WIRE_LOCK` regenerated. No serde defaults for old shapes;
-`session salvage` and the rig file upgrade map: `Meas { meas }` → `Curves [Group(meas)]`
-(`Meter` on an SPL pane), `content: None` → the owner's `Group`, the pane's `rig` onto each
-entry, each compare list onto entries as in §2.
+`PaneContent` changes shape, `LayoutPane.rig` moves into the content, `RigRef::Active`
+leaves the wire, and `Compared` / `meas.compare` go: **`PROTO_VERSION` 79 → 80, session
+format 40 → 41, rig file 8 → 9** (meter layouts; `rig/v8.rs` the upgrade step),
+`fixtures/protocol/WIRE_LOCK` regenerated. No serde defaults for old shapes; `session
+salvage` and the rig file step map:
+
+- `Meas { meas }` → `Curves [Group(meas)]` on a graph pane, `Meter { meas }` on an SPL pane;
+- `content: None` in a measurement's own layout → its owner's `Group` (`Meter` on an SPL
+  pane); `Inputs`, `Pair`, `Walk` take the pane's rig;
+- each pane's `rig` onto each of its references;
+- a measurement's compare list onto the panes of its own layout that hold its `Group`, as
+  `Live` / `Trace` entries after the `Group`, in the list's order (Group first, then
+  compares; 32 fits, nothing is cut);
+- a measurement with a compare list but **no layout** gets a one-pane layout of its home
+  kind holding `Group(it)` then its compares, so no comparison the operator set is lost.
 
 ## Stages
 
-Each stage lands alone and is tested through `ac2-scene` text (the list rows, legend lines,
-pane titles) and state tests in `ac2-ui`.
+Each stage lands alone, with its own user-guide rows, and is tested through `ac2-scene` text
+(the list rows, legend lines, pane titles, hint bars) and state tests in `ac2-ui`.
 
-0. **Rig names** (§4). App only.
-1. **List wording** (§3 without ticks): filter by pane kind, *Turn into* / *New measurement*
-   out of rig headings, input labels, no repeated pair sides, no kind tags. App only. The
-   §1 invariant lands here or before (the SPL 2 fix), on today's `Meas` content.
-2. **Entries on the wire** (§1, §5): `PaneContent::Curves`, per-entry rig, salvage, daemon
-   pruning of deleted ids, `check()` limits; panes draw entries; C opens tick mode; compare
-   lists go. PROTO / session / rig file bump.
+0. **Rig names** (§4). App only. Guide: the rig drop-down and Connection page names.
+1. **List wording** (§3 without ticks or children): filter by pane kind, *Turn into…*,
+   *New measurement on <rig>…* out of rig headings, input labels, pair sides listed once, no
+   kind tags or prefixes, SPL panes without inputs. App only. Guide: "Choosing what a pane
+   shows" (the list, *Turn into…*, the end of the one-step kind change). The wait invariant
+   is already in for measurement picks (`spl-pick`).
+2. **References on the wire** (§1, §5): `PaneContent` with per-reference rig, required
+   `content`, empty pane = nothing picked (D6, `resolve_meas` retired), salvage, pruning of
+   deleted ids by daemon and app, `check()` limits; panes draw entries; C opens tick mode;
+   compare lists go; the waiting id lives in the entry. PROTO / session / rig file bump.
+   Guide: Compare section rewritten as *Add to this pane…*, the empty pane. Decision table:
+   P1's pane-content clauses and N2's `Active` / content-less-pane clauses are replaced
+   here (P2 already records the decisions).
 3. **Tick list with children** (§3 in full): `Live`/`Trace` rows, cross-rig entries in one
-   pane, rig-tagged legend lines, colour families per pane. Then the user guide's "Choosing
-   what a pane shows" and Compare sections, and the P1 / N2 rows of `open-questions.md`.
+   pane, rig-tagged legend lines, colour families per pane, *Make lead*. Guide: the tick
+   list, *Make lead*, mixed-rig legends.
 
-## Operator decisions
+## Decisions (operator, 2026-11-01)
 
-- **D1 — Does a measurement row stay, and do new captures join?** Recommended: yes, as the
-  `Group` entry, which follows its group (a new capture or math channel appears in the
-  panes holding the group: capture-then-look stays one key). Individually ticked rows are
+- **D1** A measurement row stays, as the `Group` entry, which follows its group: a new
+  capture or math channel appears in the panes holding the group. Ticked single rows are
   fixed.
-- **D2 — Compare becomes per pane.** Recommended: yes; the per-measurement compare list
-  goes, salvaged into entries. Two lists for one idea would break "one control per concept".
-- **D3 — What a split starts with.** Recommended: the focused pane's lead only (not a copy
-  of all its entries, not empty).
-- **D4 — Hidden vs ticked.** Recommended: hide (A, slot keys) wins in every pane; a tick
-  never overrides it, the legend says how to show it.
-- **D5 — Mixed-rig panes in a measurement's own layout.** Recommended: stored whole, other
-  rigs' entries opaque by rig id (revises N2's "own layouts store only `ThisRig` panes" for
-  mixed panes; an all-other-rig pane stays prefs-only).
+- **D2** Compare is per pane; the per-measurement compare list goes, salvaged into entries.
+- **D3** A split starts with the focused pane's lead only.
+- **D4** Hide (A, slot keys) wins in every pane; the legend says how to show it.
+- **D5** A pane mixing rigs is stored whole in a measurement's own layout, other rigs'
+  references opaque by rig id; an all-other-rig pane stays prefs-only.
+- **D6** A pane with no pick shows *nothing picked* and does not follow the list selection.
+- **D7** The list shows only what the pane's kind draws; *Turn into…* changes the kind.
+- **D8** Rig names by reach: `<this host> · ac2d`, `<this host> · in this app`, network rigs
+  by their hello name; no override, no wire change.
