@@ -10,6 +10,7 @@ use crate::common;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use ac2_proto::model::layout::{PaneContent, PaneKind};
 use ac2_proto::model::*;
 use ac2_proto::units::*;
 use ac2_proto::{Command, ErrorCode, ReplyBody};
@@ -391,4 +392,94 @@ fn session_close_and_device_change_warn_of_rig_meters() {
     assert!(warned(&mut c, Command::SessionClose).is_empty());
     drop(c);
     h.shutdown();
+}
+
+/// Copies a saved session folder (flat: manifest, data files, subfolders of files).
+fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for e in std::fs::read_dir(from).unwrap() {
+        let e = e.unwrap();
+        let dest = to.join(e.file_name());
+        if e.file_type().unwrap().is_dir() {
+            copy_dir(&e.path(), &dest);
+        } else {
+            std::fs::copy(e.path(), dest).unwrap();
+        }
+    }
+}
+
+#[test]
+fn a_loaded_measurements_panes_and_compare_list_follow_its_new_number() {
+    // Rig X: its meter is 1, the session's A and B are 2 and 3; B's panes show the meter,
+    // A and B, and B compares A.
+    let dx = tempfile::tempdir().unwrap();
+    let (hx, _bx) = start("rig-meas-remap-x", dx.path());
+    let (mut c, _sub) = connect(&hx, &[]);
+    c.ok(Command::MeasCreate {
+        config: rig_meter("Stage"),
+    });
+    c.ok(Command::MeasCreate {
+        config: transfer("A"),
+    });
+    c.ok(Command::MeasCreate {
+        config: transfer("B"),
+    });
+    let mut layout = ac2_proto::samples::pane_layout();
+    let kinds = [PaneKind::Spl, PaneKind::Transfer, PaneKind::Transfer];
+    for ((p, id), kind) in layout.panes_mut().into_iter().zip([1, 2, 3]).zip(kinds) {
+        p.kind = kind;
+        p.content = Some(PaneContent::Meas { meas: MeasId(id) });
+    }
+    c.ok(Command::MeasLayout {
+        meas: MeasId(3),
+        layout: Some(layout),
+    });
+    c.ok(Command::MeasCompare {
+        meas: MeasId(3),
+        compared: vec![Compared::Meas { meas: MeasId(2) }],
+    });
+    save(&mut c, "s");
+    drop(c);
+    hx.shutdown();
+
+    // Rig Y holds meters 1 and 2: loading X's session moves A off 2 (to 4, past B's 3);
+    // B keeps 3. B's panes and compare list follow A, and the pane naming meter 1 (a rig
+    // meter, not in the file) still names it.
+    let dy = tempfile::tempdir().unwrap();
+    let (hy, _by) = start("rig-meas-remap-y", dy.path());
+    let (mut c, _sub) = connect(&hy, &[]);
+    c.ok(Command::MeasCreate {
+        config: rig_meter("Stage"),
+    });
+    c.ok(Command::MeasCreate {
+        config: rig_meter("Side"),
+    });
+    copy_dir(&dx.path().join("sessions/s"), &dy.path().join("sessions/s"));
+    load(&mut c, "s");
+    assert_eq!(
+        listed(&mut c),
+        vec![
+            (1, "Stage".into(), MeasScope::Rig),
+            (2, "Side".into(), MeasScope::Rig),
+            (3, "B".into(), MeasScope::Session),
+            (4, "A".into(), MeasScope::Session),
+        ]
+    );
+    let st = state(&mut c);
+    let b = st.measurements.iter().find(|m| m.id == MeasId(3)).unwrap();
+    let shown: Vec<_> = b
+        .layout
+        .as_ref()
+        .unwrap()
+        .panes()
+        .iter()
+        .map(|p| p.content.as_ref().and_then(PaneContent::meas))
+        .collect();
+    assert_eq!(
+        shown,
+        vec![Some(MeasId(1)), Some(MeasId(4)), Some(MeasId(3))]
+    );
+    assert_eq!(b.compared, vec![Compared::Meas { meas: MeasId(4) }]);
+    drop(c);
+    hy.shutdown();
 }

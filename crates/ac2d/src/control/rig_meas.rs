@@ -30,8 +30,9 @@ use std::path::Path;
 use std::time::Instant;
 
 use ac2_proto::event::{Change, Patch};
+use ac2_proto::model::layout::PaneContent;
 use ac2_proto::model::{
-    MathExpr, MeasKind, MeasScope, Measurement, Operand, Rig, SessionConfig, TraceOwner,
+    Compared, MathExpr, MeasKind, MeasScope, Measurement, Operand, Rig, SessionConfig, TraceOwner,
     TraceSource,
 };
 use ac2_proto::units::{Db, MeasId, Rev, WallNs};
@@ -589,7 +590,7 @@ pub(super) fn remap_ids(
             MathExpr::Average { of, .. } => of.iter_mut().collect(),
         };
         for o in ops {
-            if let Operand::Meas { meas } = o {
+            if let Operand::Meas { meas } | Operand::Eq { meas, .. } = o {
                 re(meas);
             }
         }
@@ -600,11 +601,26 @@ pub(super) fn remap_ids(
             owner(&mut config.owner);
             expr(&mut config.expr);
         }
+        // A pane or compare entry naming a moved measurement named it in the file, where
+        // no rig meter held that id; one naming an id the file has no measurement of names
+        // a rig meter of this rig and stays.
+        for p in m.layout.iter_mut().flat_map(|l| l.panes_mut()) {
+            if let Some(PaneContent::Meas { meas }) = &mut p.content {
+                re(meas);
+            }
+        }
+        for c in &mut m.compared {
+            if let Compared::Meas { meas } = c {
+                re(meas);
+            }
+        }
     }
     for t in &mut data.traces {
         owner(&mut t.meta.edit.owner);
         match &mut t.meta.source {
-            TraceSource::Captured { meas, .. } | TraceSource::Sweep { meas, .. } => re(meas),
+            TraceSource::Captured { meas, .. }
+            | TraceSource::Sweep { meas, .. }
+            | TraceSource::Eq { meas, .. } => re(meas),
             TraceSource::Math { meas, expr: e, .. } => {
                 re(meas);
                 expr(e);
