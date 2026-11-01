@@ -208,6 +208,10 @@ pub struct AppState {
     pub export_dir: Option<std::path::PathBuf>,
     /// Local time of day for wall times.
     pub local_zone: crate::scenes::LocalZone,
+    /// This machine's host name ([`ac2_discovery::local_host_label`]), naming the rigs on it:
+    /// a local `ac2d` and the daemon in this app are two rigs on one host, and read so.
+    /// Empty (tests): they go by their daemons' names.
+    pub local_host: String,
     /// This app's build as Settings › Connection shows it ([`crate::BUILD_ID`]; screenshot
     /// tests pin it, since it names the commit).
     pub build_id: String,
@@ -327,6 +331,7 @@ impl AppState {
             prefs_dirty: false,
             export_dir: std::env::home_dir(),
             local_zone: crate::scenes::LocalZone::System,
+            local_host: String::new(),
             build_id: crate::BUILD_ID.into(),
             overlay: Overlay::None,
             window_rig: None,

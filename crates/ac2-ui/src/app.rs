@@ -272,6 +272,7 @@ impl App {
             Conn::start(t, link_wake(ctx.clone(), Arc::clone(&pacer))).ok()
         });
         let mut state = AppState::new(opts.theme, describe);
+        state.local_host = ac2_discovery::local_host_label();
         state.rig.link = conn;
         state.rig.link_embedded = link_embedded;
         state.rig.daemon_addr = daemon_addr;
@@ -407,7 +408,10 @@ impl App {
             Choice::Target(t, addr) => (*t, addr, None),
             Choice::Embedded(b) => {
                 if self.embedded.is_some() {
-                    return Err("this computer is already a rig here".into());
+                    return Err(format!(
+                        "{} is already a rig here",
+                        ac2_scene::chrome::same_host_rig(&self.state.local_host, true)
+                    ));
                 }
                 let e = start_embedded(b).map_err(|e| format!("embedded daemon: {e}"))?;
                 let t = Target {

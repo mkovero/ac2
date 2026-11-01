@@ -73,11 +73,16 @@ impl AppState {
         }
     }
 
+    /// What rig `r` is called, everywhere it is named ([`label_of`]).
+    pub fn rig_label(&self, r: &RigState) -> String {
+        label_of(r, &self.local_host)
+    }
+
     /// The name rig `id` goes by: its daemon's, else where it is reached, else the name it
     /// had when closed.
     pub fn rig_name(&self, id: RigId) -> String {
         match self.find_rig(id) {
-            Some(r) => rig_label(r),
+            Some(r) => self.rig_label(r),
             None => self.rig_names.get(&id).cloned().unwrap_or_default(),
         }
     }
@@ -93,7 +98,7 @@ impl AppState {
                     || r.daemon()
                         .is_some_and(|s| s.generator.armed || s.generator.firing)
             })
-            .map(rig_label)
+            .map(|r| self.rig_label(r))
             .collect()
     }
 
@@ -217,7 +222,8 @@ impl AppState {
 
     /// The prefix of a notification about the rig in `rig` while another is shown.
     pub(super) fn notice_prefix(&self) -> Option<String> {
-        self.visiting.map(|_| format!("{}: ", rig_label(&self.rig)))
+        self.visiting
+            .map(|_| format!("{}: ", self.rig_label(&self.rig)))
     }
 
     /// The rig message `msg` is for: a link's own, a pane's for what is about that pane, the
@@ -287,7 +293,7 @@ impl AppState {
                     .into_iter()
                     .map(|q| (slot, q)),
             );
-            let name = rig_label(&self.rig);
+            let name = self.rig_label(&self.rig);
             if self.leave(v) && !conn {
                 self.warn(ac2_scene::chrome::rig_window_elsewhere(&name));
             }
@@ -367,7 +373,9 @@ impl AppState {
                 continue;
             };
             let r = self.background.remove(i);
-            self.warn(ac2_scene::chrome::rig_already_connected(&rig_label(&r)));
+            self.warn(ac2_scene::chrome::rig_already_connected(
+                &self.rig_label(&r),
+            ));
             self.closing.push(r);
         }
     }
@@ -445,7 +453,7 @@ impl AppState {
         };
         let r = self.background.remove(i);
         self.park_closed_rig(&r);
-        let name = rig_label(&r);
+        let name = self.rig_label(&r);
         self.rig_names.insert(id, name.clone());
         let before = self.prefs.rigs.len();
         self.prefs.rigs.retain(|p| p.id != id);
@@ -588,8 +596,16 @@ impl AppState {
     }
 }
 
-/// What a rig is called: its daemon's name, else where it is reached.
-pub fn rig_label(r: &RigState) -> String {
+/// What a rig is called. A rig on this host is named by the host and how the app reaches
+/// it (`kettu · ac2d`, `kettu · in this app`): its daemon's name cannot tell two daemons on
+/// one machine apart, nor a default name from one given. Any other rig: its daemon's name,
+/// else where it is reached.
+fn label_of(r: &RigState, host: &str) -> String {
+    let embedded = r.link_embedded || matches!(r.addr, Some(crate::prefs::RigAddr::Embedded(_)));
+    let local = matches!(r.addr, Some(crate::prefs::RigAddr::Local));
+    if !host.is_empty() && (embedded || local) {
+        return ac2_scene::chrome::same_host_rig(host, embedded);
+    }
     if !r.name.is_empty() {
         return r.name.clone();
     }

@@ -17,7 +17,7 @@ cripple the other rigs. The math is the daemon's; the app renders streams. Both 
 ## What the operator gets
 
 - **Connect…** adds a rig: browse (`_ac2._tcp`, network mode) or a typed address, paired per
-  rig as today. The embedded daemon is a rig like any other (*this computer*).
+  rig as today. The embedded daemon is a rig like any other (*<host> · in this app*).
 - **Rigs in the top bar**: a drop-down after the session line names the active rig and
   lists the others; a click switches. It is gone in the stage view and full screen like the
   rest of the top bar. There is **no tab-switch key** (operator, 2026-10-23): clicking is
@@ -92,7 +92,9 @@ The hello reply (`Welcome`, `ac2-proto/src/ctrl/reply.rs`) gains `rig_id: RigId`
 `name: String`. `DaemonConfig` gains `name: String` (default *ac2 on <hostname>*);
 `Advertise.name` is taken from it and `--name` no longer requires `--listen`; the app's
 embedded daemon sets *this computer* where it builds its `DaemonConfig`
-(`ac2-ui/src/embedded.rs`). `ac2 daemon` prints the name and id beside the server line, so
+(`ac2-ui/src/embedded.rs`). The app shows neither name for a rig on its own host: it heads
+the local daemon *<host> · ac2d* and the embedded one *<host> · in this app* (the hello
+name cannot tell a default from a given one, nor two daemons on one machine apart). `ac2 daemon` prints the name and id beside the server line, so
 an operator can read a rig's id on its host. `docs/protocol.md` §2 documents both fields. It is re-read
 on each connect and is display only. `FakeOptions` (`ac2-client/src/fake.rs`) gains both, so
 tests can start two distinguishable fake daemons (its `Welcome` is built in
@@ -366,7 +368,7 @@ until it answers or is closed. Names come from the rig and are display only
      only the rig's own panes (shown again beside the others). Decisions where the note
      was silent: Connect… shows the new rig at once; a foreign pane's menu (or any window
      opened while visiting) is refused with *switch to pupu to open that window*; only one
-     embedded daemon per app (*this computer is already a rig here*); the simulated rig
+     embedded daemon per app (*<host> · in this app is already a rig here*); the simulated rig
      is never remembered; a rig reached twice (same id) is closed with *already
      connected*; the drop-down sits innermost on the right of the top bar and opens from
      the palette (*Rigs…*, *Connect a rig…*), no key chord; closing a rig stops and

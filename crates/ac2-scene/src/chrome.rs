@@ -154,6 +154,14 @@ pub fn rig_already_connected(rig: &str) -> String {
     format!("{rig} is already connected")
 }
 
+/// A rig on this app's host, `host`: the daemon inside this app (`embedded`) or the
+/// host's own `ac2d`. Two daemons on one machine read as one machine, told apart by how the
+/// app reaches each.
+pub fn same_host_rig(host: &str, embedded: bool) -> String {
+    let kind = if embedded { "in this app" } else { "ac2d" };
+    format!("{host} · {kind}")
+}
+
 /// A rig closed.
 pub fn rig_closed(rig: &str) -> String {
     format!("{rig} closed")
@@ -165,6 +173,12 @@ pub const RIG_MENU_TIP: &str = "The rig shown: switch to another, connect a rig,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rigs_on_this_host_by_kind() {
+        assert_eq!(same_host_rig("kettu", false), "kettu · ac2d");
+        assert_eq!(same_host_rig("kettu", true), "kettu · in this app");
+    }
 
     #[test]
     fn link_lines_by_state() {

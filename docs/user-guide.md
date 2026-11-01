@@ -75,7 +75,10 @@ pick *Rigs…* in the palette (**Ctrl+K**), for the drop-down:
   greyed and reads *unreachable · retrying* (the app keeps reconnecting on its own);
 - *Connect a rig…* (also in the palette) opens the connect dialog: a rig it finds or one you
   paired, an address typed in (`host` or `host:port`), or this computer. The rig joins
-  the ones held and is shown; the others stay connected and keep measuring;
+  the ones held and is shown; the others stay connected and keep measuring. A rig on this
+  computer is named by its host and how the app reaches it: **ketunkolo · ac2d** for the
+  host's own daemon, **ketunkolo · in this app** for the one the app runs itself; a rig on
+  another host goes by the name its daemon gives (`pupu`);
 - *Close pupu* lets go of the rig shown (never the last one): its stimulus is stopped and
   its hold released first.
 

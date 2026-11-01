@@ -705,6 +705,8 @@ mod rig;
 // Two rigs in one app: their ids collide, their state never mixes.
 mod rigs;
 
+mod rig_names;
+
 mod settings_mirror;
 
 mod drag_undo;
