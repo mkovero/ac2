@@ -932,20 +932,20 @@ fn a_layout_brings_its_level_ranges() {
     assert!(panes[1..].iter().all(|p| p.levels.is_empty()));
 }
 
-/// A layout's pick of a measurement deleted since leaves that pane on the chosen one.
+/// A layout's pick of a measurement the mirror does not list shows the chosen one meanwhile.
 #[test]
 fn a_pick_of_a_deleted_measurement_falls_back_to_the_chosen_one() {
     let mut l = three_spectrum();
     l.panes_mut()[1].content = Some(wire::PaneContent::Meas { meas: MeasId(9) });
     let mut s = rig();
     let mut m = meas(4, "Spectrum 2", spectrum());
-    m.layout = Some(l);
+    m.layout = Some(l.clone());
     s.measurements.push(m);
     let mut t = T::fresh();
     t.connect(s);
     select(&mut t, 4);
     assert_eq!(shown(&t), [Some(MeasId(4)); 3]);
-    assert_eq!(t.st.pane_layout(), three_spectrum());
+    assert_eq!(t.st.pane_layout(), l, "the pane's pick still");
 }
 
 /// A pick and a level zoom in `Spectrum 2`'s panes travel with its layout: after a lost

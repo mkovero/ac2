@@ -5,6 +5,36 @@ use crate::state::*;
 impl AppState {
     // ----- reducer -----------------------------------------------------------------------
 
+    /// Each pane whose pick waits by id shows it once the mirror lists it (a pane of a kind
+    /// that cannot draw it drops it); one given something else, closed, or waiting by name
+    /// (that decides) no longer waits by id.
+    fn restore_pane_ids(&mut self) {
+        let waiting = std::mem::take(&mut self.rig.pending.pane_ids);
+        for (pane, id) in waiting {
+            let Some(v) = self.layout.view(pane).copied() else {
+                continue;
+            };
+            if v.meas.is_some() || !self.ours(&v) {
+                continue;
+            }
+            if self.rig.pending.pane_meas.contains_key(&pane) {
+                self.rig.pending.pane_ids.insert(pane, id);
+                continue;
+            }
+            match self.meas(id).map(|m| v.kind.shows(&m.config.kind)) {
+                Some(true) => {
+                    if let Some(v) = self.layout.view_mut(pane) {
+                        v.meas = Some(id);
+                    }
+                }
+                Some(false) => {}
+                None => {
+                    self.rig.pending.pane_ids.insert(pane, id);
+                }
+            }
+        }
+    }
+
     /// Once the daemon's state is known, each pane shows the measurement it showed when the
     /// app last ran (or before the daemon lost it), once one of that name (and kind) exists:
     /// meanwhile the pane's usual choice, quietly; a name the daemon never listed is dropped. With no layout remembered, the one pane shows the kind of the first
@@ -30,6 +60,7 @@ impl AppState {
             let f = self.layout.focus;
             self.set_pane_kind(f, kind);
         }
+        self.restore_pane_ids();
         if self.rig.pending.pane_meas.is_empty() {
             return;
         }

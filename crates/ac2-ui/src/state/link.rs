@@ -13,6 +13,12 @@ pub(crate) struct Pending {
     /// The measurement each pane showed when the app last ran, by name, until the daemon's
     /// state is known.
     pub(super) pane_meas: BTreeMap<PaneId, String>,
+    /// A pane's pick the mirror does not list: one a stored layout names (a rig meter
+    /// listed after the layout arrived, one set aside and made again under its id), or one
+    /// the same daemon took away for a while. It stays the pane's choice, stored with the
+    /// panes, until the mirror lists it or the operator gives the pane something else;
+    /// meanwhile the pane shows the chosen measurement, which is not its pick.
+    pub(super) pane_ids: BTreeMap<PaneId, MeasId>,
     /// Hidden measurements by name, waiting for the daemon to list one of that name: read
     /// from `ui.toml`, or a hidden one the daemon took away (a session reopening, a daemon
     /// restarting renumbers them).
@@ -59,7 +65,8 @@ impl AppState {
                 // Whatever daemon answers next, its ids are its own: what is shown waits
                 // for its name.
                 let names = self.meas_names();
-                self.park_gone_meas(&names, |_| true);
+                // The daemon reached next may be another, numbering afresh: names only.
+                self.park_gone_meas(&names, false, |_| true);
                 self.rig.failed(target, error);
             }
             ConnEvent::Mirror(v) => {
@@ -121,7 +128,7 @@ impl AppState {
                     && self.rig.pending.select == self.rig.selected;
                 // A measurement this app made, selected before the daemon lists it, stays.
                 let keep = if waiting { self.rig.selected } else { None };
-                self.park_gone_meas(&names, |id| {
+                self.park_gone_meas(&names, !reborn, |id| {
                     Some(id) != keep && (reborn || !ids.contains(&id))
                 });
                 if let Some(id) = self.rig.lost_selection.as_ref().and_then(|n| {
@@ -456,7 +463,13 @@ impl AppState {
     /// showed one waits for one of that name to come back, and so does the selection (a
     /// stand-in may take its place meanwhile). A session reopened, salvaged or a daemon
     /// restarted takes them away for a moment and makes them again under the same names.
-    fn park_gone_meas(&mut self, names: &BTreeMap<MeasId, String>, gone: impl Fn(MeasId) -> bool) {
+    /// `same_ids`: the daemon keeps numbering as before, so a gone id stays the pane's pick.
+    fn park_gone_meas(
+        &mut self,
+        names: &BTreeMap<MeasId, String>,
+        same_ids: bool,
+        gone: impl Fn(MeasId) -> bool,
+    ) {
         let (rig, tab) = (self.rig.id, self.active());
         for (pane, v) in &mut self.layout.views {
             // Another rig's pane names that rig's measurements.
@@ -471,6 +484,9 @@ impl AppState {
                 v.meas = None;
                 if let Some(n) = names.get(&id) {
                     self.rig.pending.pane_meas.insert(*pane, n.clone());
+                }
+                if same_ids {
+                    self.rig.pending.pane_ids.insert(*pane, id);
                 }
             }
         }

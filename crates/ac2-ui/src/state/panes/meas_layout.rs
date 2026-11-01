@@ -83,11 +83,15 @@ impl AppState {
     fn layout_of(&self, n: &PaneNode) -> PaneLayout {
         match n {
             PaneNode::Leaf(id) => {
-                let v = self
+                let mut v = self
                     .layout
                     .view(*id)
                     .copied()
                     .unwrap_or(View::of(PaneKind::Transfer));
+                // A pick waiting for the mirror is still the pane's: stored, not dropped.
+                if v.meas.is_none() && self.ours(&v) {
+                    v.meas = self.rig.pending.pane_ids.get(id).copied();
+                }
                 PaneLayout::Pane {
                     pane: Box::new(wire_pane(&v, self.operator_levels(*id))),
                 }
@@ -404,11 +408,20 @@ impl AppState {
         let mut views = BTreeMap::new();
         let mut levels = Vec::new();
         let root = self.install_node(l, &mut views, &mut levels);
-        // Another rig's pane names that rig's ids, which this rig's mirror cannot check.
-        for v in views.values_mut().filter(|v| v.rig == PaneRig::Active) {
-            v.meas = v
-                .meas
-                .filter(|id| self.meas(*id).is_some_and(|m| v.kind.shows(&m.config.kind)));
+        // Another rig's pane names that rig's ids, which this rig's mirror cannot check. A
+        // pick of a kind the pane does not draw is no pick; one the mirror does not list yet
+        // waits as the pane's choice, so that the next edit stores it, not the stand-in.
+        let mut waiting = BTreeMap::new();
+        for (p, v) in views.iter_mut().filter(|(_, v)| v.rig == PaneRig::Active) {
+            let Some(id) = v.meas else { continue };
+            match self.meas(id) {
+                Some(m) if v.kind.shows(&m.config.kind) => {}
+                Some(_) => v.meas = None,
+                None => {
+                    waiting.insert(*p, id);
+                    v.meas = None;
+                }
+            }
         }
         let sel = self.rig.chosen.and_then(|id| self.meas(id)).cloned();
         let order = root.reading_order();
@@ -447,6 +460,7 @@ impl AppState {
                 .values()
                 .any(|v| v.meas == Some(m.id) || (v.meas.is_none() && v.kind == home));
             if !shown
+                && !waiting.contains_key(&focus)
                 && let Some(v) = views.get_mut(&focus)
                 && v.kind.shows(&m.config.kind)
             {
@@ -461,6 +475,7 @@ impl AppState {
         }
         self.pane_auto = false;
         self.rig.pending.pane_meas.clear();
+        self.rig.pending.pane_ids = waiting;
         if matches!(self.overlay, Overlay::PaneMenu(m) if !self.layout.views.contains_key(&m.pane))
         {
             self.overlay = Overlay::None;

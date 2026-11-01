@@ -395,17 +395,25 @@ impl AppState {
             return None;
         }
         // Both halves keep showing what the pane did, whatever row is chosen later: an
-        // unchosen pane would follow it.
+        // unchosen pane would follow it. A pane whose pick waits for the mirror has both
+        // halves wait for it instead: the stand-in it shows meanwhile is not its choice.
+        let waiting = self.rig.pending.pane_meas.get(&p).cloned();
+        let waiting_id = self.rig.pending.pane_ids.get(&p).copied();
         let shown = self.pane_meas(p).map(|m| m.id);
-        if let Some(v) = self.layout.view_mut(p) {
+        if let Some(v) = self.layout.view_mut(p)
+            && waiting.is_none()
+            && waiting_id.is_none()
+        {
             v.meas = v.meas.or(shown);
         }
-        let waiting = self.rig.pending.pane_meas.get(&p).cloned();
         self.layout.maximized = false;
         let new = self.layout.split_pane(p, axis, side);
         self.copy_levels(p, new);
         if let Some(n) = waiting {
             self.rig.pending.pane_meas.insert(new, n);
+        }
+        if let Some(id) = waiting_id {
+            self.rig.pending.pane_ids.insert(new, id);
         }
         Some(new)
     }
@@ -618,6 +626,7 @@ impl AppState {
             v.kind = kind;
         }
         self.rig.pending.pane_meas.remove(&id);
+        self.rig.pending.pane_ids.remove(&id);
         // The history goes with the last spectrograph shown.
         if !self.spectrograph_shown() {
             self.rig.spectrographs.clear();
