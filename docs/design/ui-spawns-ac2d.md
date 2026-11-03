@@ -95,8 +95,8 @@ link shows disconnected with D9's toast and retries; B does not respawn on its o
 `--embedded` / `--backend` (`main.rs:51-57`) become `--backend NAME`: ensure local with
 `ac2d --backend NAME` (`fake` → the simulated rig instead). If the daemon reached is one
 already running, its backend (`session.devices`, the default listed first) is compared with
-NAME; a different one is refused (*ac2d on this computer runs on jack, not asio*), never
-used in its place. CI's FlexASIO smoke (`.github/workflows/ci.yml:265-286`) becomes
+NAME once the device list has arrived (no verdict before it); a different one is refused
+(*ac2d on this computer runs on jack, not asio*), never used in its place. CI's FlexASIO smoke (`.github/workflows/ci.yml:265-286`) becomes
 `ac2-ui --backend asio --no-discovery --smoke`.
 
 ## 3. The simulated rig is an ac2d on the fake backend (D6)
@@ -141,13 +141,20 @@ autosave flushed, rig logs finished. The app owns an `ac2d` only while it holds 
 `std::process::Child` and its stdin write end and `try_wait()` says running; a daemon found
 running, or a child that exited 3, is never stopped. Quit, in `main.rs:296-302`'s order:
 window closes → every link stops its stimulus and releases its lease (`close_all_links`,
-`app.rs:694-706`, `QUIT_GRACE` 1 s) → the write end is dropped → wait ≤ 10 s for exit (as
-`daemon.rs:314-320`), then `Child::kill` and a log line; all after the window is gone. An
-app crash on any OS closes the pipe as well, so the child stops in order with no
-`--owner-pid`, `pre_exec` or job object. `process_group(0)` (Unix) keeps a terminal's Ctrl-C
-on the app; the app quitting then ends the child. With D7 off, the child is spawned
-detached as `ac2 daemon start` does (`daemon.rs:208-224`: stdin null, `process_group(0)`;
-`DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`) and keeps running. `ac2 daemon stop` stays
+`app.rs:694-706`, `QUIT_GRACE` 1 s) → the write end is dropped → wait ≤ 10 s from that drop
+(as `daemon.rs:314-320`), then `Child::kill` and a log line; all after the window is gone.
+The kill is safe for the data: the autosave writes its files first and renames the manifest
+into place (`autosave.rs:15-19`), so a kill mid-write keeps the last good autosave and loses
+only the final one. An app crash on any OS closes the pipe as well, so the child stops in
+order with no `--owner-pid`, `pre_exec` or job object. A *hung* app (alive, not answering)
+keeps the pipe open and so the child too; accepted, as the operator ends a hung app and that
+closes the pipe. `process_group(0)` (Unix) keeps a terminal's Ctrl-C on the app; the app
+quitting then ends the child. On Windows both binaries are console-subsystem (no
+`windows_subsystem` attribute), so an owned child sharing the app's console would get its
+`CTRL_CLOSE_EVENT` and both be killed about 5 s later, before any orderly stop: the owned
+child is spawned with `CREATE_NO_WINDOW` (its own hidden console). With D7 off, the child is
+spawned detached as `ac2 daemon start` does (`daemon.rs:208-224`: stdin null,
+`process_group(0)`; `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`) and keeps running. `ac2 daemon stop` stays
 as it is: on Windows it already sends `GenStop` and `SessionClose` before `taskkill /F`
 (`daemon.rs:307-313`), so stimulus fades and the stream closes, though the autosave flush is
 skipped. The *unsaved changes* question (`AppOptions.embedded_autosave`, `app.rs:47-49`)
@@ -172,7 +179,7 @@ a unit-started app makes the child skip its log file while stderr is null. Lines
 | package | ac2d beside the app today | change |
 |---|---|---|
 | Linux tarball | yes, `bin/` (`packaging/linux/package.sh:42-45`) | `ac2d.service`: `SuccessExitStatus=3` |
-| Linux AppImage | **no**: only `usr/bin/ac2-ui` (`package.sh:76-82`) | add `usr/bin/ac2d`; header `:5` |
+| Linux AppImage | **no**: only `usr/bin/ac2-ui` (`package.sh:76-82`) | add `usr/bin/ac2d` (stage 2); header comment `:5` ("with its embedded daemon") in stage 3 |
 | macOS `.app` | **no**: `Contents/MacOS` has only `ac2-ui` (`packaging/macos/package.sh:37-38`); `ac2d` is in the DMG's `bin/` (`:43`) | also `Contents/MacOS/ac2d`, signed with `entitlements.plist` (audio input, hardened runtime) **before** the bundle (`:56-58`); `bin/ac2d` stays for CLI / launchd |
 | Windows MSI / zip | yes, `INSTALLFOLDER` (`packaging/windows/ac2.wxs:27-35`), zip `release.yml:228` | none |
 
@@ -231,7 +238,8 @@ start ac2-ui, which starts ac2d for you".
 - Spawn tests need the binary (`CARGO_BIN_EXE_ac2d`), so they live in `ac2d/tests/it/spawn.rs`:
   lock refusal (exit 3, log not rotated, pid file untouched); explicit endpoints write no
   lock or pid file; a stale socket after `kill -9` no longer blocks; stdin EOF ends the
-  daemon in order (autosave complete, rig logs finished); a fatal end exits 1;
+  daemon in order (autosave complete, rig logs finished); a kill mid-autosave-write leaves
+  a loadable autosave; a fatal end exits 1;
   `--ephemeral` writes nothing under temp `XDG_*` dirs; port 0 with `--print-endpoints`.
   The app's ownership rule (D8) and ensure-local outcomes (D4) are tested in `ac2-ui` with
   a stub child.
@@ -242,14 +250,24 @@ start ac2-ui, which starts ac2d for you".
 Each lands alone, quick tier green, with its user-guide rows.
 
 1. **ac2d** (daemon and CLI, no wire change): lock + pid file only on default local
-   endpoints, exit 3 before log rotation (D3); `--ephemeral`, `--print-endpoints`,
-   `--stop-on-stdin-eof`; fatal → exit 1; the CLI's `probe` a short-timeout hello;
-   `ac2d.service` `SuccessExitStatus=3`; `spawn.rs` tests.
+   endpoints (D3). The lock code does `create_dir_all(runtime_dir())` itself (0700 on Unix)
+   on every OS, then `File::try_lock`, the file held in `main` for the daemon's life;
+   `WouldBlock` → exit 3 before log rotation, any other error → exit 2 naming the path,
+   never running unlocked. `--ephemeral`, `--print-endpoints`, `--stop-on-stdin-eof` (its
+   help: for a parent holding a pipe; EOF within 1 s of start is logged at error level, as
+   that means stdin was never a pipe; `ac2 daemon start` never passes it); fatal → exit 1;
+   the CLI's `probe` a short-timeout hello; `ac2 daemon start` reads a child exit 3 as
+   *another ac2d is running for this user*; `ac2d.service` `SuccessExitStatus=3`;
+   `spawn.rs` tests.
 2. **Packaging**: `ac2d` in the AppImage and `Contents/MacOS` (nested signing), launchd
    comment; all-OS dispatch; a macOS tester checks TCC (§5).
 3. **The app spawns, the embedded daemon goes** (app only, one change): `spawn.rs`, D1, D2,
-   D4–D11, both Settings rows, dialog rows, `--backend`, the CI FlexASIO step, `embedded.rs`,
-   feature, lenient `rigs`, D12, host-name labels, tests to `ac2-e2e`, `no_dsp.rs`. Docs:
+   D4–D11 (the owned Windows child with `CREATE_NO_WINDOW`), both Settings rows, dialog
+   rows, `--backend`, the CI FlexASIO step, `embedded.rs`, feature, lenient `rigs`, D12,
+   host-name labels, tests to `ac2-e2e`, `no_dsp.rs`, the AppImage header comment. Deploy:
+   on hosts running `ac2d` as a service (ketunkolo), set *Start ac2d when none is running*
+   off before the first app start after the upgrade (docs/rigs/pupu.md gets the line at
+   deploy). Docs:
    user-guide (`:76-81, 146, 159-160, 233, 2343`), install.md (`:55` `pw-jack ac2-ui
    --embedded`, `:76` AppImage), protocol.md (`:49-55, 353`), sessions.md `:121-124`,
    settings.md `:102, 113`, multi-rig.md, asio.md `:232, 403, 480`, coreaudio.md `:246,
