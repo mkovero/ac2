@@ -1,6 +1,6 @@
-//! Remembered rigs in `ui.toml`: the `[[rigs]]` tables.
+//! Rigs in `ui.toml`: the `[[rigs]]` tables of remembered rigs, and rig ids as the file
+//! writes them.
 
-use super::file::parse_rig_id;
 use super::*;
 
 /// A remembered rig: its id as 16 hex digits (as in the per-rig keys), its name, and where
@@ -79,4 +79,27 @@ impl RigFile {
             },
         })
     }
+}
+
+/// The file's key of a device remembered for a rig: the rig's id (16 hex digits) and the
+/// device's key, `000000000000fa4e/jack:system`. Keys are strings in TOML.
+pub(super) fn rig_key((rig, device): &(RigId, String)) -> String {
+    format!("{rig}/{device}")
+}
+
+/// A key written by [`rig_key`]. A key without a rig (written before devices were
+/// remembered per rig) names no rig's device, so it is dropped, and the next save leaves
+/// it out.
+pub(super) fn parse_rig_key(key: &str) -> Option<(RigId, String)> {
+    let (rig, device) = key.split_once('/')?;
+    Some((parse_rig_id(rig)?, device.to_owned()))
+}
+
+/// A rig id as the file writes it, 16 hex digits; `None` for one no daemon has.
+pub(super) fn parse_rig_id(s: &str) -> Option<RigId> {
+    Some(s)
+        .filter(|s| s.len() == 16)
+        .and_then(|s| u64::from_str_radix(s, 16).ok())
+        .filter(|n| *n != 0)
+        .map(RigId)
 }

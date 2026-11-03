@@ -1,6 +1,7 @@
 //! The `[layout]` table: the pane tree and what each pane shows.
 
 use super::file::*;
+use super::rig_file::parse_rig_id;
 use super::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

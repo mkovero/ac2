@@ -414,6 +414,8 @@ pub enum Msg {
     OnRig(ac2_proto::units::RigId, Box<Msg>),
     /// A rig's heading in the measurement list clicked: that rig is shown.
     ShowRig(ac2_proto::units::RigId),
+    /// A rig's fold arrow in the measurement list clicked: its branch folds or unfolds.
+    FoldRig(ac2_proto::units::RigId),
     /// Mouse wheel / pinch on a frequency axis.
     Zoom {
         about_hz: f64,

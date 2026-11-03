@@ -328,12 +328,12 @@ pub(crate) fn run(number: u32) -> TraceSource {
 
 /// The operator's example: a transfer function with two captures and math made on it, a
 /// sweep measurement with two runs, an SPL meter, an imported file.
-struct Rig {
+pub(crate) struct Rig {
     meas: Vec<Measurement>,
     traces: Vec<TraceMeta>,
 }
 
-fn rig() -> Rig {
+pub(crate) fn rig() -> Rig {
     let main = TraceOwner::Meas { meas: MeasId(1) };
     let math = MathConfig::of(
         main,
@@ -385,7 +385,7 @@ fn rig() -> Rig {
     }
 }
 
-fn rows(
+pub(crate) fn rows(
     r: &Rig,
     collapsed: &BTreeSet<TraceOwner>,
     selected: Option<MeasId>,

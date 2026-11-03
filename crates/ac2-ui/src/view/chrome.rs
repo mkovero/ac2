@@ -824,9 +824,10 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         let rows = st.list_rows();
         let shown = st.active();
         let theme = ac2_scene::theme::Theme::by_name(st.theme);
-        if rows.is_empty() {
-            ui.label(RichText::new(st.empty_list_text()).color(ch.dim));
-        }
+        // The rig roots alone: nothing measured yet, unless a folded root hides it.
+        let listed = rows
+            .iter()
+            .any(|(_, r)| !matches!(r.key, TreeKey::RigName(_)));
         let drag = st.row_drag().map(|d| (d.item.row(), d.onto));
         let pointer = ui.ctx().pointer_latest_pos();
         for (rig, row) in &rows {
@@ -874,7 +875,10 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         {
             row_over = Some(Msg::RowDrag(DragMsg::OverRow(under)));
         }
-        if !rows.iter().any(|(_, r)| matches!(r.key, TreeKey::Trace(_))) && !rows.is_empty() {
+        if !listed && !st.rig_folded(shown) {
+            ui.label(RichText::new(st.empty_list_text()).color(ch.dim));
+        }
+        if !rows.iter().any(|(_, r)| matches!(r.key, TreeKey::Trace(_))) && listed {
             ui.label(
                 RichText::new(format!(
                     "{} captures the selected TF under it",

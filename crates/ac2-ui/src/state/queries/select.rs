@@ -391,8 +391,18 @@ impl AppState {
         // Every row, folded ones too, places a selection inside a folded group; the step
         // lands on the next row the list shows.
         let all = stops(self.tree_rows_folded(&std::collections::BTreeSet::new()));
-        let shown = stops(self.tree_rows());
+        // A folded rig lists none of its rows: the step goes on to the next rig that does.
+        let shown = if self.rig_folded(self.rig.id) {
+            Vec::new()
+        } else {
+            stops(self.tree_rows())
+        };
         if shown.is_empty() {
+            if let Some((r, key)) = self.other_rig_stop(d)
+                && self.step_onto_rig(r, key, out)
+            {
+                return;
+            }
             self.warn("no measurements to step through");
             return;
         }
@@ -423,18 +433,11 @@ impl AppState {
         // Tab walks the whole list, every rig's rows in list order: stepping past the shown
         // rig's last row lands on the next rig's first, through a rig switch. With a window
         // open the switch is refused, so the step stays on this rig's rows.
-        if wraps && let Some((r, key)) = self.other_rig_stop(d) {
-            self.switch_rig(r, out);
-            if self.rig.id == r {
-                let _ = stop(key).map(|s| match s {
-                    Stop::Meas(id) => self.select_meas_row(id),
-                    Stop::Math(id) => self.select_math_row(id),
-                    Stop::Live(id) => self.select_live_row(id),
-                    Stop::Trace(id) => self.select_trace_row(id),
-                });
-                self.tree_reveal = true;
-                return;
-            }
+        if wraps
+            && let Some((r, key)) = self.other_rig_stop(d)
+            && self.step_onto_rig(r, key, out)
+        {
+            return;
         }
         match next {
             Some(Stop::Meas(id)) => self.select_meas_row(id),
@@ -446,9 +449,33 @@ impl AppState {
         self.tree_reveal = true;
     }
 
+    /// Tab stepped past the rig shown onto row `key` of rig `r`: that rig is shown and the
+    /// row selected; false when the switch did not happen.
+    fn step_onto_rig(
+        &mut self,
+        r: RigId,
+        key: ac2_scene::meas_list::TreeKey,
+        out: &mut Vec<Request>,
+    ) -> bool {
+        use ac2_scene::meas_list::TreeKey;
+        self.switch_rig(r, out);
+        if self.rig.id != r {
+            return false;
+        }
+        match key {
+            TreeKey::Meas(id) => self.select_meas_row(id),
+            TreeKey::Math(id) => self.select_math_row(id),
+            TreeKey::Live(id) => self.select_live_row(id),
+            TreeKey::Trace(id) => self.select_trace_row(id),
+            TreeKey::Imported | TreeKey::Rig | TreeKey::Session | TreeKey::RigName(_) => {}
+        }
+        self.tree_reveal = true;
+        true
+    }
+
     /// The first row (`d` > 0) or last row of the next rig in list order that has a row to
-    /// step to, from its list as last read; None when no other rig has one or a switch could
-    /// not happen now.
+    /// step to (a folded rig lists none), from its list as last read; None when no other rig
+    /// has one or a switch could not happen now.
     fn other_rig_stop(&self, d: i32) -> Option<(RigId, ac2_scene::meas_list::TreeKey)> {
         if self.rig_lists.is_empty()
             || self.visiting.is_some()
@@ -461,6 +488,9 @@ impl AppState {
         let n = order.len() as i32;
         (1..n).find_map(|k| {
             let r = order[(at + d * k).rem_euclid(n) as usize];
+            if self.rig_folded(r) {
+                return None;
+            }
             let rows = &self.rig_lists.iter().find(|l| l.rig == r)?.rows;
             let mut keys = rows.iter().map(|row| row.key).filter(|k| !k.is_heading());
             let key = if d > 0 { keys.next() } else { keys.next_back() }?;

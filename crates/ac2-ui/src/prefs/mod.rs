@@ -347,6 +347,8 @@ pub struct RememberedRig {
 pub struct UiPrefs {
     /// The rigs held when the app last ran, in the order they were added.
     pub rigs: Vec<RememberedRig>,
+    /// Rigs whose branch of the measurement list is folded: only their heading is listed.
+    pub folded_rigs: BTreeSet<RigId>,
     /// Zero-based stimulus outputs per rig and output device id: two rigs both have a
     /// `jack:system`, wired to different speakers.
     pub outputs: BTreeMap<(RigId, String), Vec<u16>>,
@@ -447,6 +449,7 @@ impl Default for UiPrefs {
     fn default() -> Self {
         Self {
             rigs: Vec::new(),
+            folded_rigs: BTreeSet::new(),
             outputs: BTreeMap::new(),
             sessions: BTreeMap::new(),
             leq: LeqLayout::default(),

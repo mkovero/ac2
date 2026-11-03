@@ -540,6 +540,7 @@ impl AppState {
             Msg::RowDrag(m) => self.row_drag_msg(m, out),
             Msg::OnRig(_, m) => self.update_inner(*m, keymap, out),
             Msg::ShowRig(r) => self.switch_rig(r, out),
+            Msg::FoldRig(r) => self.toggle_rig_fold(r),
             Msg::Zoom { about_hz, factor } => {
                 let t = self.nav.target.zoom(about_hz, factor);
                 self.nav.set_target(t);

@@ -1,7 +1,7 @@
 //! The `ui.toml` file: its tables and how they read into and write from [`UiPrefs`].
 
 use super::layout::*;
-use super::rig_file::RigFile;
+use super::rig_file::{RigFile, parse_rig_id, parse_rig_key, rig_key};
 use super::*;
 use ac2_scene::plate::PlateBackground;
 
@@ -85,6 +85,9 @@ struct File {
     /// The rigs held when the app last ran.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     rigs: Vec<RigFile>,
+    /// Rigs whose branch of the measurement list is folded, by id (16 hex digits).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    folded_rigs: Vec<String>,
     /// Top-level keys this version does not know: logged and left out of the next save, so
     /// one stale or mistyped setting costs only itself, never the rest of the file.
     #[serde(flatten, skip_serializing)]
@@ -811,6 +814,11 @@ impl UiPrefs {
         let rigs = f.rigs.into_iter().filter_map(RigFile::rig).collect();
         Ok(Self {
             rigs,
+            folded_rigs: f
+                .folded_rigs
+                .iter()
+                .filter_map(|r| parse_rig_id(r))
+                .collect(),
             outputs,
             sessions,
             leq,
@@ -876,6 +884,7 @@ impl UiPrefs {
     pub fn to_toml(&self) -> String {
         let f = File {
             rigs: self.rigs.iter().map(RigFile::of).collect(),
+            folded_rigs: self.folded_rigs.iter().map(ToString::to_string).collect(),
             key_hints: (!self.key_hints).then_some(false),
             unknown: BTreeMap::new(),
             warning_toasts: (!self.warning_toasts).then_some(false),
@@ -971,27 +980,4 @@ impl UiPrefs {
         ac2_paths::write_private_atomic(path, self.to_toml().as_bytes())
             .map_err(|e| format!("cannot save {}: {e}", path.display()))
     }
-}
-
-/// The file's key of a device remembered for a rig: the rig's id (16 hex digits) and the
-/// device's key, `000000000000fa4e/jack:system`. Keys are strings in TOML.
-fn rig_key((rig, device): &(RigId, String)) -> String {
-    format!("{rig}/{device}")
-}
-
-/// A key written by [`rig_key`]. A key without a rig (written before devices were
-/// remembered per rig) names no rig's device, so it is dropped, and the next save leaves
-/// it out.
-fn parse_rig_key(key: &str) -> Option<(RigId, String)> {
-    let (rig, device) = key.split_once('/')?;
-    Some((parse_rig_id(rig)?, device.to_owned()))
-}
-
-/// A rig id as the file writes it, 16 hex digits; `None` for one no daemon has.
-pub(super) fn parse_rig_id(s: &str) -> Option<RigId> {
-    Some(s)
-        .filter(|s| s.len() == 16)
-        .and_then(|s| u64::from_str_radix(s, 16).ok())
-        .filter(|n| *n != 0)
-        .map(RigId)
 }

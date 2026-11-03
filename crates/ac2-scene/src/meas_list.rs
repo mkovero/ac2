@@ -233,8 +233,8 @@ pub enum TreeKey {
     Rig,
     /// The header of the session's measurements, under the rig group.
     Session,
-    /// With several rigs connected, the heading over one rig's part of the list, naming
-    /// it: a click shows that rig.
+    /// The root over everything one rig holds, naming the rig: a click shows that rig, its
+    /// arrow folds the rig's branch ([`crate::rig_tree`]).
     RigName(ac2_proto::units::RigId),
 }
 
@@ -252,7 +252,8 @@ impl TreeKey {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TreeRow {
     pub key: TreeKey,
-    /// 0: a group's header; 1: a row under it.
+    /// How far the row is indented: in [`tree_rows`] 0 for a group's header and 1 for a row
+    /// under it; [`crate::rig_tree::rig_branch`] puts both a level under their rig's root.
     pub depth: u8,
     /// The last row of its group (`└`, else `├`).
     pub last: bool,
@@ -711,30 +712,13 @@ fn rig_header(meters: usize, rig: Option<&Rig>) -> TreeRow {
     heading_row(TreeKey::Rig, crate::osc::RIG, details, describe)
 }
 
-/// The heading over rig `rig`'s part of the list, named `name` (`pupu`, `ketunkolo ·
-/// ac2d`); `shown`: the rig the drop-down shows, where new measurements go.
-pub fn rig_heading(rig: ac2_proto::units::RigId, name: &str, shown: bool) -> TreeRow {
-    let (detail, describe) = if shown {
-        (
-            "shown: new measurements and the keys go here",
-            format!("{name}: the rig shown; new measurements and the keys go to it"),
-        )
-    } else {
-        (
-            "click shows this rig; its rows drag onto panes",
-            format!("{name}: another rig; a click shows it, its rows drag onto panes as they are"),
-        )
-    };
-    heading_row(
-        TreeKey::RigName(rig),
-        name,
-        vec![detail.to_owned()],
-        describe,
-    )
-}
-
 /// A header that stands for no measurement: the rig's, the session's.
-fn heading_row(key: TreeKey, name: &str, details: Vec<String>, describe: String) -> TreeRow {
+pub(crate) fn heading_row(
+    key: TreeKey,
+    name: &str,
+    details: Vec<String>,
+    describe: String,
+) -> TreeRow {
     TreeRow {
         key,
         depth: 0,

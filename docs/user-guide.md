@@ -92,9 +92,10 @@ windows (settings, edits) open only on its own rig: switch to it first. A pane o
 that is down reads *pupu unreachable · retrying*; one of a closed rig reads *pupu not
 connected* and stays until you close or reuse it.
 
-**Another rig's measurement in a pane.** With more than one rig connected, the measurement
-list shows every connected rig, each under a heading with its name, in the drop-down's
-order. Drag a row of another rig onto a pane and the pane shows it, by that rig's own
+**Another rig's measurement in a pane.** The measurement list is rooted at every connected
+rig (one rig too), each rig's rows under a heading with its name, in the drop-down's order;
+the heading's arrow folds that rig's rows away
+([The measurement tree](#the-measurement-tree)). Drag a row of another rig onto a pane and the pane shows it, by that rig's own
 numbering (two rigs both have a measurement 3; the pane shows the one dragged), its title
 naming the rig; the rig shown stays as it is. Clicking a row of another rig (or reaching it
 with Enter or Tab) switches to that rig first, as the drop-down does, then acts as a click
@@ -1849,20 +1850,22 @@ trace in sessions, autosave and ac2 CSV exports.
 ## The measurement tree
 
 Beside the panes, one tree lists every measurement with what it owns
-([measurement-tree.md](design/measurement-tree.md)):
+([measurement-tree.md](design/measurement-tree.md)), rooted at the rig it lives on:
 
 ```
-TF  Main L            running
-  ├ Main L (live)
-  ├ pre-EQ            capture
-  ├ post-EQ           capture
-  └ pre ÷ post        math (live)
-SWEEP  Genelec 1 m    2 runs
-  ├ Run 1             sweep run · 3 s −50.0 dBFS
-  └ Run 2             sweep run · 3 s −50.0 dBFS
-SPL  FOH SPL          running
-Imported              1 trace
-  └ 1083 94cm         imported
+▾ pupu                  shown: new measurements and the keys go here
+  ▾ TF  Main L          running
+      ├ Main L (live)
+      ├ pre-EQ          capture
+      ├ post-EQ         capture
+      └ pre ÷ post      math (live)
+  ▾ SWEEP  Genelec 1 m  2 runs
+      ├ Run 1           sweep run · 3 s −50.0 dBFS
+      └ Run 2           sweep run · 3 s −50.0 dBFS
+  ▾ SPL  FOH SPL        running
+  ▾ Imported            1 trace
+      └ 1083 94cm       imported
+▸ ketunkolo · ac2d      4 measurements · 5 traces · folded
 ```
 
 | Item | Filed under |
@@ -1873,6 +1876,13 @@ Imported              1 trace
 | **average** (M) | with its inputs, when they share one |
 | **imports**, session traces of no measurement | **Imported**, listed last when it holds something |
 
+- Each connected rig is a root of the tree, even when it is the only one: its heading
+  (`pupu`, `ketunkolo · ac2d`) and under it everything that lives on that rig (its Rig
+  monitor meters, its Session measurements, its Imported group). The arrow before the
+  heading **folds** the rig's branch: only the heading stays, saying what it hides
+  (`6 measurements · 12 traces · folded`, counted as the Sessions dialog counts a
+  session). The fold is this app's, kept per rig in `ui.toml` across restarts. A click on
+  the heading itself switches to that rig, as before.
 - The arrow before a measurement **folds** it (palette *Fold / unfold the selected
   measurement in the list*).
 - A row's dot is its curve's colour (a ring when hidden): a click on it shows or hides the
@@ -1882,7 +1892,8 @@ Imported              1 trace
   ([Choosing what a pane shows](#choosing-what-a-pane-shows)); a click on the selected trace
   deselects it. A double click on a trace renames it.
 - **Tab** / **Shift+Tab** select the next / previous listed row, wrapping (hidden rows too;
-  the Imported header and folded rows skipped), as a click on it does. A selected live-curve
+  the Imported header and folded rows skipped, a folded rig's rows too), as a click on it
+  does. A selected live-curve
   row is marked and **A** hides that curve.
 - **Move to measurement…** (**Shift+F2**) files the selected stored trace or math channel
   under another measurement or Imported (**↑/↓**, **Enter**, **Esc**). Only where it is

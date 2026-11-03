@@ -1,8 +1,8 @@
-//! Panes and the measurement list across rigs: the list shows every connected rig's rows
-//! under its heading, any rig's row drags onto a pane, and a drop of another rig's sets the
-//! pane on that rig; pins stay right as rigs come and go (a pin to the rig shown is its own
-//! pane again, and measurement names wait by rig id for a rig not held); the layout prefs
-//! name each pinned pane's rig.
+//! Panes and the measurement list across rigs: the list is a tree rooted at each connected
+//! rig, the rig's rows under its heading (its branch folds), any rig's row drags onto a
+//! pane, and a drop of another rig's sets the pane on that rig; pins stay right as rigs come
+//! and go (a pin to the rig shown is its own pane again, and measurement names wait by rig
+//! id for a rig not held); the layout prefs name each pinned pane's rig.
 //!
 //! A pane is pinned by the rig's id, never by where it is reached: a rig reached on another
 //! address (a new IP, network mode turned on) is the same rig, and its panes come back.
@@ -10,6 +10,7 @@
 use super::*;
 use crate::state::panes::drag::RowDrop;
 use ac2_scene::meas_list::{Mark, TreeKey, TreeRow};
+use ac2_scene::rig_tree::{RigRoot, rig_branch};
 
 /// A rig not shown, as its part of the measurement list was last read: its rows, and what
 /// each draggable row needs of a pane. Read with the rig swapped in, so between messages.
@@ -65,30 +66,53 @@ impl AppState {
         }
     }
 
-    /// The measurement list as drawn: every connected rig's rows under its heading, in the
-    /// order the rigs were added (the drop-down's), each row with its rig. With one rig,
-    /// its rows alone.
+    /// The measurement list as drawn: a root per connected rig, in the order the rigs were
+    /// added (the drop-down's), and under it (unfolded) that rig's rows, each row with its
+    /// rig. One rig is a root too, so the list always says whose rows it lists; a lone rig
+    /// with no daemon yet has nothing to list.
     pub fn list_rows(&self) -> Vec<(RigId, TreeRow)> {
         let shown = self.active();
-        if self.rig_lists.is_empty() {
-            return self.tree_rows().into_iter().map(|r| (shown, r)).collect();
-        }
         let mut v = Vec::new();
         for r in self.rigs_in_order() {
             let rows = if r.id == shown {
+                if self.rig_lists.is_empty() && r.daemon().is_none() {
+                    continue;
+                }
                 self.tree_rows()
             } else if let Some(l) = self.rig_lists.iter().find(|l| l.rig == r.id) {
                 l.rows.clone()
             } else {
                 continue;
             };
-            v.push((
-                r.id,
-                ac2_scene::meas_list::rig_heading(r.id, &self.rig_label(r), r.id == shown),
-            ));
-            v.extend(rows.into_iter().map(|row| (r.id, row)));
+            let count = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
+            let (measurements, traces) = r.daemon().map_or((0, 0), |s| {
+                (count(s.measurements.len()), count(s.traces.len()))
+            });
+            let name = self.rig_label(r);
+            let root = RigRoot {
+                rig: r.id,
+                name: &name,
+                shown: r.id == shown,
+                folded: self.rig_folded(r.id),
+                measurements,
+                traces,
+            };
+            v.extend(rig_branch(&root, rows).into_iter().map(|row| (r.id, row)));
         }
         v
+    }
+
+    /// Rig `r`'s branch of the measurement list is folded.
+    pub fn rig_folded(&self, r: RigId) -> bool {
+        self.prefs.folded_rigs.contains(&r)
+    }
+
+    /// Folds or unfolds rig `r`'s branch of the list; remembered in the prefs by rig id.
+    pub(super) fn toggle_rig_fold(&mut self, r: RigId) {
+        if !self.prefs.folded_rigs.remove(&r) {
+            self.prefs.folded_rigs.insert(r);
+        }
+        self.prefs_dirty = true;
     }
 
     /// Another rig's row as a drop, from its list as last read.

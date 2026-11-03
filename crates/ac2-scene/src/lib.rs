@@ -64,6 +64,7 @@ pub mod range_band;
 pub mod readout;
 pub mod recording;
 pub mod rig;
+pub mod rig_tree;
 pub mod room;
 pub mod sessions;
 pub mod spectrograph;

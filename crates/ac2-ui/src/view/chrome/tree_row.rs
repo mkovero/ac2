@@ -51,15 +51,23 @@ pub(super) fn tree_row(
             Msg::OnRig(rig, Box::new(m))
         }
     };
-    let group = match row.key {
-        TreeKey::Meas(meas) => Some(TraceOwner::Meas { meas }),
-        TreeKey::Imported => Some(TraceOwner::Imported),
+    // What the row's fold arrow toggles: a measurement's or the imported group (on the
+    // row's rig), or the rig's whole branch (this app's own fold, no rig to show first).
+    let fold = match row.key {
+        TreeKey::Meas(meas) => Some(on_rig(Msg::ToggleGroup(TraceOwner::Meas { meas }))),
+        TreeKey::Imported => Some(on_rig(Msg::ToggleGroup(TraceOwner::Imported))),
+        TreeKey::RigName(r) => Some(Msg::FoldRig(r)),
         _ => None,
     };
+    // A header (a rig's, a group's) sits at its depth; a row under one has its tree line
+    // where its header's arrow is.
+    let under = !row.key.is_heading() && row.collapsed.is_none();
     let rect = ui
         .horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
-            if let (Some(folded), Some(g)) = (row.collapsed, group) {
+            let depth = f32::from(row.depth);
+            if let (Some(folded), Some(fold)) = (row.collapsed, fold) {
+                ui.add_space(INDENT * depth);
                 let what = if folded { "Unfold" } else { "Fold" };
                 let (rect, r) =
                     ui.allocate_exact_size(egui::vec2(EYE_W, 22.0), egui::Sense::click());
@@ -88,13 +96,13 @@ pub(super) fn tree_row(
                 ));
                 let r = r.on_hover_text(label);
                 if r.clicked() {
-                    click = Some(on_rig(Msg::ToggleGroup(g)));
+                    click = Some(fold);
                 }
-            } else if row.depth == 0 {
-                // A header with nothing to fold (the rig's, the session's).
-                ui.add_space(EYE_W);
+            } else if !under {
+                // A header with nothing to fold (the rig's monitor, the session's).
+                ui.add_space(INDENT * depth + EYE_W);
             } else {
-                ui.add_space(INDENT);
+                ui.add_space(INDENT * depth);
                 ui.label(
                     RichText::new(if row.last { "└" } else { "├" })
                         .color(ch.dim)
@@ -167,7 +175,7 @@ pub(super) fn tree_row(
             let mut job = egui::text::LayoutJob::default();
             let body = egui::TextStyle::Body.resolve(ui.style());
             let mut fmt = egui::TextFormat::simple(body, name_color);
-            if row.depth == 0 {
+            if !under {
                 fmt.font_id.size += 0.5;
             }
             job.append(&row.name, 0.0, fmt);

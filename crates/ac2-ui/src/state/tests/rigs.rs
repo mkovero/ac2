@@ -962,3 +962,5 @@ fn a_stored_pane_names_its_rig() {
     rigs_of(&t.st.pane_layout(), &mut out);
     assert_eq!(out, vec![wire::RigRef::ThisRig; 2]);
 }
+
+mod rig_fold;
