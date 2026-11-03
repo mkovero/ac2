@@ -92,7 +92,7 @@ jobs:
           img="$PWD/dist/ac2-ui-$VERSION-x86_64.AppImage" x=$(mktemp -d)
           (cd "$x" && "$img" --appimage-extract > /dev/null)
           "$x/squashfs-root/usr/bin/ac2d" --version
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-linux
           path: dist/*
@@ -163,7 +163,7 @@ jobs:
           "$d/bin/ac2" meas list
           "$d/bin/ac2" daemon stop
           hdiutil verify "dist/ac2-$VERSION-macos-universal.dmg"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-macos
           path: dist/*
@@ -292,7 +292,7 @@ jobs:
         run: tools/release/windows-asio.ps1 -Bin (Join-Path $env:ProgramFiles 'ac2') -LogDir asio-logs
       - name: Upload ASIO logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: asio-logs-windows
           path: asio-logs/
@@ -305,7 +305,7 @@ jobs:
           $p = Start-Process msiexec.exe -ArgumentList "/x `"$msi`" /qn /l*v msi-uninstall.log" -Wait -PassThru
           if ($p.ExitCode -ne 0) { Get-Content msi-uninstall.log -Tail 50; exit 1 }
           if (Test-Path "$dir\ac2.exe") { throw 'uninstall left ac2.exe behind' }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-windows
           path: dist/*
@@ -331,7 +331,7 @@ jobs:
           sha256sum * > SHA256SUMS
           cat SHA256SUMS
           ls -l
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-${{ env.VERSION }}
           path: dist/*
