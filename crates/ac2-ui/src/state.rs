@@ -94,6 +94,8 @@ mod stimulus;
 mod text;
 mod undo;
 mod walk_impl;
+pub use ac2_proto::model::layout::EntryRef;
+pub use panes::entries::{MAX_WITH, Pick, With};
 pub use panes::views::{
     DEFAULT_PANE_AREA, Layout, PaneModes, PaneRig, PaneTemplate, TransferView, View,
 };

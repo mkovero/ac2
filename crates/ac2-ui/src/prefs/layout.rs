@@ -82,14 +82,83 @@ impl MetersFile {
         let zero = |c: u32| c.checked_sub(1).and_then(|c| u16::try_from(c).ok());
         let content = match self {
             Self::Inputs(v) => ac2_proto::model::layout::PaneContent::Inputs {
+                rig: ac2_proto::model::layout::RigRef::ThisRig,
                 inputs: v.iter().map(|c| zero(*c)).collect::<Option<Vec<_>>>()?,
             },
             Self::Pair([l, r]) => ac2_proto::model::layout::PaneContent::Pair {
+                rig: ac2_proto::model::layout::RigRef::ThisRig,
                 left: zero(*l)?,
                 right: zero(*r)?,
             },
         };
         crate::state::Metered::from_wire(&content)
+    }
+}
+
+/// What an entry behind a graph pane's lead names.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum CurveKindFile {
+    Group,
+    Live,
+    Trace,
+}
+
+/// An entry behind a graph pane's lead: its kind and id, the name it had, its rig when
+/// another than the pane's.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CurveFile {
+    kind: CurveKindFile,
+    id: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rig: Option<PaneRigFile>,
+}
+
+impl CurveFile {
+    fn of(c: &CurvePrefs) -> Self {
+        use ac2_proto::model::layout::EntryRef;
+        let (kind, id) = match c.what {
+            EntryRef::Group { meas } => (CurveKindFile::Group, meas.0),
+            EntryRef::Live { meas } => (CurveKindFile::Live, meas.0),
+            EntryRef::Trace { trace } => (CurveKindFile::Trace, trace.0),
+        };
+        Self {
+            kind,
+            id,
+            name: c.name.clone(),
+            rig: c.rig.as_ref().map(|(id, name)| PaneRigFile {
+                id: id.to_string(),
+                name: name.clone(),
+            }),
+        }
+    }
+
+    /// `None` for an entry of a rig id no daemon has: it names nothing anyone can find.
+    fn parse(&self) -> Option<CurvePrefs> {
+        use ac2_proto::model::layout::EntryRef;
+        use ac2_proto::units::{MeasId, TraceId};
+        let rig = match &self.rig {
+            Some(r) => Some((parse_rig_id(&r.id)?, r.name.clone())),
+            None => None,
+        };
+        Some(CurvePrefs {
+            what: match self.kind {
+                CurveKindFile::Group => EntryRef::Group {
+                    meas: MeasId(self.id),
+                },
+                CurveKindFile::Live => EntryRef::Live {
+                    meas: MeasId(self.id),
+                },
+                CurveKindFile::Trace => EntryRef::Trace {
+                    trace: TraceId(self.id),
+                },
+            },
+            name: self.name.clone(),
+            rig,
+        })
     }
 }
 
@@ -110,6 +179,9 @@ struct PaneEntryFile {
     kind: PaneFile,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     measurement: Option<String>,
+    /// What a graph pane draws behind its lead, nearest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    curves: Vec<CurveFile>,
     /// A Programme pane's one-based inputs, or its pair.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     meters: Option<MetersFile>,
@@ -143,6 +215,7 @@ impl PaneEntryFile {
             id: p.id.0,
             kind: PaneFile::of(p.kind),
             measurement: p.measurement.clone(),
+            curves: p.curves.iter().map(CurveFile::of).collect(),
             meters: p.meters.as_ref().map(MetersFile::of),
             rig: p.rig.as_ref().map(|(id, name)| PaneRigFile {
                 id: id.to_string(),
@@ -191,6 +264,7 @@ impl PaneEntryFile {
             id: PaneId(self.id),
             kind: self.kind.pane(),
             measurement: self.measurement.clone(),
+            curves: self.curves.iter().filter_map(CurveFile::parse).collect(),
             meters: self.meters.as_ref().and_then(MetersFile::parse),
             // A rig id no daemon has pins to nothing: the pane follows the rig shown.
             rig: self

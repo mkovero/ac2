@@ -281,6 +281,7 @@ fn two_panes() -> PanesPrefs {
                 id: PaneId(1),
                 kind: PaneKind::Transfer,
                 measurement: Some("Main L".to_owned()),
+                curves: Vec::new(),
                 meters: None,
                 rig: None,
                 modes: PaneModes {
@@ -300,6 +301,7 @@ fn two_panes() -> PanesPrefs {
                 id: PaneId(2),
                 kind: PaneKind::Spl,
                 measurement: Some("FOH SPL".to_owned()),
+                curves: Vec::new(),
                 meters: None,
                 // Pinned to another rig: kept by its id, the name for when it is away.
                 rig: Some((ac2_proto::units::RigId(0x7075_7075), "pupu".to_owned())),

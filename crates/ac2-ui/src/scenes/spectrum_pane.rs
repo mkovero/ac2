@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use ac2_client::TopicFrame;
 use ac2_proto::FrameData;
-use ac2_proto::model::{Compared, LevelScale, Measurement, TraceKind};
+use ac2_proto::model::layout::EntryRef;
+use ac2_proto::model::{LevelScale, Measurement, TraceKind};
 use ac2_proto::units::MeasId;
 use ac2_scene::banner::Status;
 use ac2_scene::grid::{GridColumns, columns};
@@ -29,7 +30,7 @@ pub fn spectrum_scale(st: &AppState, pane: PaneId) -> LevelScale {
     let shown = st.pane_meas(pane);
     let mut scales = Vec::new();
     for m in st.measurements() {
-        if !(st.live_on_pane(kind, m, shown) || st.live_compared_on(kind, m, shown)) {
+        if !(st.live_on_pane(kind, m, shown) || st.live_compared_on(kind, m, pane)) {
             continue;
         }
         let Some(stream) = crate::state::spectrum_stream(m) else {
@@ -42,7 +43,7 @@ pub fn spectrum_scale(st: &AppState, pane: PaneId) -> LevelScale {
         }
     }
     for (t, _) in st.rig.traces.values() {
-        if !(st.on_pane(kind, &t.meta, shown) || st.trace_compared_on(kind, &t.meta, shown)) {
+        if !(st.on_pane(kind, &t.meta, shown) || st.trace_compared_on(kind, &t.meta, pane)) {
             continue;
         }
         match t.meta.kind {
@@ -149,7 +150,7 @@ pub(crate) fn with_spectrum<R>(
     let shown = st.pane_meas(pane);
     let mut cols = Vec::new();
     for (_, m) in pane_order(st, pane) {
-        if !(st.live_on_pane(kind, m, shown) || st.live_compared_on(kind, m, shown)) {
+        if !(st.live_on_pane(kind, m, shown) || st.live_compared_on(kind, m, pane)) {
             continue;
         }
         let Some(stream) = crate::state::spectrum_stream(m) else {
@@ -240,9 +241,9 @@ pub(crate) fn with_spectrum<R>(
         if t.quantity.is_narrow() {
             t.bin_hz = c.cols.bin_hz;
         }
-        t.compared = st.live_compared_on(kind, c.meas, shown);
+        t.compared = st.live_compared_on(kind, c.meas, pane);
         if t.compared {
-            t.layer = st.compare_layer(shown, Compared::Meas { meas: c.meas.id });
+            t.layer = st.compare_layer(pane, EntryRef::Live { meas: c.meas.id });
         }
         traces.push(t);
     }
@@ -258,7 +259,7 @@ pub(crate) fn with_spectrum<R>(
         .traces
         .values()
         .filter(|(t, _)| {
-            st.on_pane(kind, &t.meta, shown) || st.trace_compared_on(kind, &t.meta, shown)
+            st.on_pane(kind, &t.meta, shown) || st.trace_compared_on(kind, &t.meta, pane)
         })
         .filter_map(|(t, g)| {
             let (scale, q) = match t.meta.kind {
@@ -285,7 +286,7 @@ pub(crate) fn with_spectrum<R>(
         cols,
     } in &stored
     {
-        let compared = st.trace_compared_on(kind, &data.meta, shown);
+        let compared = st.trace_compared_on(kind, &data.meta, pane);
         traces.push(SpectrumTrace {
             key: TraceKey::Stored(data.meta.id),
             name: data.meta.edit.name.clone(),
@@ -318,8 +319,8 @@ pub(crate) fn with_spectrum<R>(
             style: st.trace_display(&data.meta).style,
             layer: if compared {
                 st.compare_layer(
-                    shown,
-                    Compared::Trace {
+                    pane,
+                    EntryRef::Trace {
                         trace: data.meta.id,
                     },
                 )

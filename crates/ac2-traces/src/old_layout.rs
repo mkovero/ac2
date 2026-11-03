@@ -14,9 +14,14 @@
 //!   `programme_view`, and a pair's pane drew both: session format 34 and rig settings
 //!   version 6 ([`programme_views`]). Every caller runs it after [`plates_add_loudness`].
 //! - Before a pane named the rig it shows a layout was one daemon's by being in its file:
-//!   session format 35 and rig settings version 7 ([`panes_this_rig`]). Runs last, on the
-//!   panes the earlier steps leave.
+//!   session format 35 and rig settings version 7 ([`panes_this_rig`]). Runs after the
+//!   steps above, on the panes they leave.
+//! - Before every pane reference named its rig a pane named one rig for all it showed, a
+//!   pane with no pick in a measurement's own layout showed that measurement, and a
+//!   measurement kept a compare list of curves its panes drew over its own: session format
+//!   40 and rig settings version 8 ([`panes_curves`]). Runs last.
 
+use ac2_proto::model::MeasKind;
 use ac2_proto::model::layout::PaneLayout;
 use serde_json::{Map, Value};
 
@@ -117,6 +122,167 @@ pub fn panes_this_rig(v: &mut Value) {
         Value::Array(items) => items.iter_mut().for_each(panes_this_rig),
         _ => {}
     }
+}
+
+/// The measurement whose own layout a tree is, for [`panes_curves`]: its id as the file
+/// has it and the pane kinds (`"transfer"`, `"spl"`, …) that draw it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayoutOwner {
+    /// Its id, as the file wrote it.
+    pub meas: Value,
+    /// The pane kinds that draw it.
+    pub draws: Vec<&'static str>,
+}
+
+impl LayoutOwner {
+    /// The owner of id `meas` (as the file wrote it) of kind `kind`.
+    pub fn of(meas: Value, kind: &MeasKind) -> Self {
+        Self {
+            meas,
+            draws: panes_drawing(kind),
+        }
+    }
+}
+
+/// The pane kinds (as a layout names them) that draw a measurement of kind `k`: the
+/// transfer pane its transfer curve or a sweep's runs, the spectrum pane its levels, the
+/// SPL pane a meter, the sweep pane a sweep.
+pub fn panes_drawing(k: &MeasKind) -> Vec<&'static str> {
+    let mut v = Vec::new();
+    if k.publishes_tf() || matches!(k, MeasKind::Sweep { .. }) {
+        v.push("transfer");
+    }
+    if k.publishes_levels() {
+        v.push("spectrum");
+    }
+    if matches!(k, MeasKind::Spl { .. }) {
+        v.push("spl");
+    }
+    if matches!(k, MeasKind::Sweep { .. }) {
+        v.push("distortion");
+    }
+    v
+}
+
+const GRAPH_PANES: [&str; 3] = ["transfer", "spectrum", "distortion"];
+
+fn tagged(kind: &str, fields: impl IntoIterator<Item = (&'static str, Value)>) -> Value {
+    let mut m = Map::new();
+    m.insert("type".into(), Value::from(kind));
+    m.extend(fields.into_iter().map(|(k, v)| (k.to_owned(), v)));
+    Value::Object(m)
+}
+
+fn this_rig() -> Value {
+    tagged("this_rig", [])
+}
+
+fn entry(rig: Value, what: Value) -> Value {
+    let mut m = Map::new();
+    m.insert("rig".into(), rig);
+    m.insert("what".into(), what);
+    Value::Object(m)
+}
+
+/// Rewrites every pane in the layout tree `v` from one rig per pane to a rig per reference:
+///
+/// - a measurement pick becomes the measurement's group on a graph pane, its meter on an
+///   SPL pane, nothing on any other (where no measurement was drawn);
+/// - no pick becomes `owner`'s group (its meter on an SPL pane) on a pane of a kind that
+///   draws it, else nothing: a pane with no pick in a measurement's own layout showed it;
+/// - inputs, a pair and a walk take the pane's rig;
+/// - the pane's `rig` goes onto each reference;
+/// - `compared`, the owner's old compare list, follows its group in every pane of this rig
+///   that draws that group, as single live curves and traces in the list's order.
+///
+/// Returns how many panes took the compare list: none means it is dropped, which the caller
+/// reports. A pane is an object holding both `kind` and `chrome`; anything else is walked
+/// through.
+pub fn panes_curves(v: &mut Value, owner: Option<&LayoutOwner>, compared: &[Value]) -> usize {
+    match v {
+        Value::Object(obj) if is_pane(obj) => pane_curves(obj, owner, compared),
+        Value::Object(obj) => obj
+            .values_mut()
+            .map(|c| panes_curves(c, owner, compared))
+            .sum(),
+        Value::Array(items) => items
+            .iter_mut()
+            .map(|c| panes_curves(c, owner, compared))
+            .sum(),
+        _ => 0,
+    }
+}
+
+fn pane_curves(
+    obj: &mut Map<String, Value>,
+    owner: Option<&LayoutOwner>,
+    compared: &[Value],
+) -> usize {
+    let rig = obj.remove("rig").unwrap_or_else(this_rig);
+    let kind = obj
+        .get("kind")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let content = obj.remove("content").filter(|c| !c.is_null());
+    let pick = |rig: Value, meas: Value| {
+        if kind == "spl" {
+            tagged("meter", [("rig", rig), ("meas", meas)])
+        } else if GRAPH_PANES.contains(&kind.as_str()) {
+            tagged(
+                "curves",
+                [(
+                    "entries",
+                    Value::Array(vec![entry(rig, tagged("group", [("meas", meas)]))]),
+                )],
+            )
+        } else {
+            tagged("nothing", [])
+        }
+    };
+    let content = match content {
+        None => match owner.filter(|o| o.draws.contains(&kind.as_str())) {
+            Some(o) => pick(this_rig(), o.meas.clone()),
+            None => tagged("nothing", []),
+        },
+        Some(Value::Object(mut c)) => match c.get("type").and_then(Value::as_str) {
+            Some("meas") => pick(rig, c.remove("meas").unwrap_or(Value::Null)),
+            Some("inputs" | "pair" | "walk") => {
+                c.insert("rig".into(), rig);
+                Value::Object(c)
+            }
+            // Not a shape this step knows: left for the reader to refuse and name.
+            _ => Value::Object(c),
+        },
+        Some(other) => other,
+    };
+    obj.insert("content".into(), content);
+    let Some(o) = owner else { return 0 };
+    if compared.is_empty() {
+        return 0;
+    }
+    let own_group = entry(this_rig(), tagged("group", [("meas", o.meas.clone())]));
+    let Some(Value::Array(entries)) = obj.get_mut("content").and_then(|c| c.get_mut("entries"))
+    else {
+        return 0;
+    };
+    if entries.first() != Some(&own_group) {
+        return 0;
+    }
+    for c in compared {
+        let what = match c.get("type").and_then(Value::as_str) {
+            Some("meas") => tagged("live", [("meas", c["meas"].clone())]),
+            Some("trace") => tagged("trace", [("trace", c["trace"].clone())]),
+            _ => continue,
+        };
+        let e = entry(this_rig(), what);
+        if !entries.contains(&e)
+            && entries.len() < ac2_proto::model::layout::PaneContent::MAX_ENTRIES
+        {
+            entries.push(e);
+        }
+    }
+    1
 }
 
 fn is_pane(obj: &Map<String, Value>) -> bool {
@@ -349,6 +515,7 @@ mod tests {
         let mut v = row(15, &[3, 9]);
         programme_views(&mut v);
         panes_this_rig(&mut v);
+        panes_curves(&mut v, None, &[]);
         assert_eq!(count_panes(&v), PaneLayout::MAX_PANES);
         let text = v.to_string();
         assert_eq!(text.matches("\"goniometer\"").count(), 1, "{text}");
@@ -370,6 +537,117 @@ mod tests {
         assert_eq!(
             v["b"]["pane"]["rig"], pinned,
             "a pane naming its rig keeps it"
+        );
+    }
+
+    fn pane40(kind: &str, content: Value, rig: Value) -> Value {
+        json!({"type": "pane", "pane": {"kind": kind, "chrome": "full",
+            "content": content, "rig": rig}})
+    }
+
+    fn group(meas: u64, rig: Value) -> Value {
+        json!({"type": "curves", "entries": [{"rig": rig, "what": {"type": "group", "meas": meas}}]})
+    }
+
+    #[test]
+    fn a_pick_names_its_rig_and_becomes_a_group_or_a_meter() {
+        let pinned = json!({"type": "rig", "id": 7, "name": "ketunkolo"});
+        let this = json!({"type": "this_rig"});
+        let meas = |m: u64| json!({"type": "meas", "meas": m});
+        let mut v = json!({"type": "split", "a": pane40("transfer", meas(3), this.clone()),
+            "b": {"type": "split",
+                "a": pane40("spl", meas(2), pinned.clone()),
+                "b": {"type": "split",
+                    "a": pane40("programme", json!({"type": "pair", "left": 0, "right": 1}),
+                        pinned.clone()),
+                    "b": pane40("walk", json!({"type": "walk", "walk": 4}), this.clone())}}});
+        assert_eq!(panes_curves(&mut v, None, &[]), 0);
+        assert_eq!(v["a"]["pane"]["content"], group(3, this.clone()));
+        assert_eq!(
+            v["b"]["a"]["pane"]["content"],
+            json!({"type": "meter", "rig": pinned.clone(), "meas": 2})
+        );
+        assert_eq!(
+            v["b"]["b"]["a"]["pane"]["content"],
+            json!({"type": "pair", "left": 0, "right": 1, "rig": pinned})
+        );
+        assert_eq!(
+            v["b"]["b"]["b"]["pane"]["content"],
+            json!({"type": "walk", "walk": 4, "rig": this})
+        );
+        assert!(
+            v["a"]["pane"].get("rig").is_none(),
+            "the pane's rig is gone"
+        );
+    }
+
+    #[test]
+    fn no_pick_is_the_owner_where_it_draws_and_nothing_elsewhere() {
+        let this = json!({"type": "this_rig"});
+        let spl = ac2_proto::model::MeasKind::Spl {
+            config: ac2_proto::model::SplConfig::on_input(
+                0,
+                ac2_proto::model::Weighting::A,
+                ac2_proto::model::TimeWeighting::Fast,
+            ),
+        };
+        let owner = LayoutOwner::of(json!(5), &spl);
+        assert_eq!(owner.draws, vec!["spl"]);
+        let mut v = json!({"type": "split", "a": pane40("spl", Value::Null, this.clone()),
+            "b": pane40("transfer", Value::Null, this.clone())});
+        panes_curves(&mut v, Some(&owner), &[]);
+        assert_eq!(
+            v["a"]["pane"]["content"],
+            json!({"type": "meter", "rig": this, "meas": 5})
+        );
+        assert_eq!(v["b"]["pane"]["content"], json!({"type": "nothing"}));
+    }
+
+    #[test]
+    fn a_compare_list_follows_its_group_in_the_owners_panes() {
+        let this = json!({"type": "this_rig"});
+        let pinned = json!({"type": "rig", "id": 7, "name": "ketunkolo"});
+        let spectrum = ac2_proto::model::MeasKind::Spectrum {
+            config: ac2_proto::model::SpectrumConfig::on_input(0),
+        };
+        let owner = LayoutOwner::of(json!(1), &spectrum);
+        assert_eq!(owner.draws, vec!["spectrum"]);
+        let compared = [
+            json!({"type": "meas", "meas": 2}),
+            json!({"type": "trace", "trace": 9}),
+        ];
+        let mut v = json!({"type": "split",
+            "a": pane40("spectrum", Value::Null, this.clone()),
+            "b": {"type": "split",
+                "a": pane40("spectrum", json!({"type": "meas", "meas": 3}), this.clone()),
+                "b": pane40("spectrum", json!({"type": "meas", "meas": 1}), pinned)}});
+        assert_eq!(panes_curves(&mut v, Some(&owner), &compared), 1);
+        assert_eq!(
+            v["a"]["pane"]["content"]["entries"],
+            json!([
+                {"rig": this, "what": {"type": "group", "meas": 1}},
+                {"rig": this, "what": {"type": "live", "meas": 2}},
+                {"rig": this, "what": {"type": "trace", "trace": 9}},
+            ])
+        );
+        // Another measurement's pane, and another rig's measurement 1, keep their group alone.
+        assert_eq!(
+            v["b"]["a"]["pane"]["content"]["entries"]
+                .as_array()
+                .map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(
+            v["b"]["b"]["pane"]["content"]["entries"]
+                .as_array()
+                .map(Vec::len),
+            Some(1)
+        );
+        let mut none = pane40("spectrum", json!({"type": "meas", "meas": 3}), this);
+        assert_eq!(
+            panes_curves(&mut none, Some(&owner), &compared),
+            0,
+            "no pane draws it"
         );
     }
 

@@ -369,6 +369,7 @@ impl Control {
             rev = self.commit(Change::WalkPlan(Patch::Deleted(w.plan.clone())));
         }
         tracing::info!("walk {walk} ({}) deleted; its traces stay", w.name);
+        let rev = self.prune_layouts().unwrap_or(rev);
         Ok(ReplyBody::Ack { rev })
     }
 

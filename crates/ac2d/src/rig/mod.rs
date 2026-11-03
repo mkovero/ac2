@@ -23,6 +23,7 @@ mod v4;
 mod v5;
 mod v6;
 mod v7;
+mod v8;
 
 use std::io;
 use std::net::SocketAddr;
@@ -75,7 +76,6 @@ impl RigMeter {
             delay: None,
             colour: self.colour,
             layout: self.layout.clone(),
-            compared: Vec::new(),
             offset: Db(0.0),
             eq: Vec::new(),
         }

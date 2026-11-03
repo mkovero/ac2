@@ -270,13 +270,15 @@ fn shown_math(
 /// one another transfer pane shows.
 pub fn focus_tf(st: &AppState) -> Option<&Measurement> {
     let live = |m: &&Measurement| m.config.kind.publishes_tf();
-    st.kind_meas(PaneKind::Transfer).filter(live).or_else(|| {
-        st.layout
-            .panes()
-            .into_iter()
-            .filter(|id| st.layout.kind(*id) == PaneKind::Transfer)
-            .find_map(|id| st.pane_meas(id).filter(live))
-    })
+    st.shown_of_kind(PaneKind::Transfer)
+        .filter(live)
+        .or_else(|| {
+            st.layout
+                .panes()
+                .into_iter()
+                .filter(|id| st.layout.kind(*id) == PaneKind::Transfer)
+                .find_map(|id| st.pane_meas(id).filter(live))
+        })
 }
 
 /// The measurement with a live transfer curve transfer pane `pane` shows (`None` while it
@@ -380,7 +382,7 @@ fn with_transfer<R>(
         // compared. A hidden measurement keeps its colour: showing it again brings back the
         // same curve.
         if !(st.live_on_pane(PaneKind::Transfer, m, pane_shows)
-            || st.live_compared_on(PaneKind::Transfer, m, pane_shows))
+            || st.live_compared_on(PaneKind::Transfer, m, pane))
         {
             continue;
         }
@@ -407,7 +409,7 @@ fn with_transfer<R>(
         .values()
         .filter(|(t, _)| {
             st.on_pane(PaneKind::Transfer, &t.meta, pane_shows)
-                || st.trace_compared_on(PaneKind::Transfer, &t.meta, pane_shows)
+                || st.trace_compared_on(PaneKind::Transfer, &t.meta, pane)
         })
         .map(|(t, g)| (t, columns(g)))
         .collect();
@@ -456,7 +458,7 @@ fn with_transfer<R>(
         };
         t.note = eq_prediction_note(st, l.meas)
             .or_else(|| math_status(st, l.meas, &l.tf.frame.data).map(|a| a.tag()));
-        t.compared = st.live_compared_on(PaneKind::Transfer, l.meas, pane_shows);
+        t.compared = st.live_compared_on(PaneKind::Transfer, l.meas, pane);
         // A ratio or cascade of operands without a shared time base has each operand's
         // own alignment in its phase, not a time base of this session.
         if f.meta
@@ -475,7 +477,7 @@ fn with_transfer<R>(
         if let Some(tags) = eq_curve_tags(st, &data.meta) {
             t.note = Some(tags);
         }
-        t.compared = st.trace_compared_on(PaneKind::Transfer, &data.meta, pane_shows);
+        t.compared = st.trace_compared_on(PaneKind::Transfer, &data.meta, pane);
         // A capture from an earlier epoch is not in this epoch's time base (decision 8a).
         if let (Some(epoch), Some(cur)) = (
             data.meta.source.shared_epoch(),
@@ -509,7 +511,7 @@ pub fn ir(
 ) -> Option<IrScene> {
     use ac2_scene::ir::{IrMissing, missing_scene, missing_text};
     let view = st.view_for(pane);
-    if let Some(d) = st.stored_ir(st.pane_meas(pane)) {
+    if let Some(d) = st.stored_ir(Some(pane)) {
         // A stored trace is no live stream: none of the measurement's banners apply to it.
         let status = status(st, &[], None, now);
         return ac2_scene::ir::stored_ir_scene(

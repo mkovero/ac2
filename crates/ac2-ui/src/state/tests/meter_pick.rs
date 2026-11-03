@@ -15,11 +15,17 @@ fn spl_pane(meas: u32) -> PaneLayout {
             sweep_view: wire::SweepView::Response,
             programme_view: wire::ProgrammeView::Meters,
             chrome: wire::PlotChrome::Full,
-            content: Some(wire::PaneContent::Meas { meas: MeasId(meas) }),
+            content: meter(meas),
             levels: wire::LayoutLevels::default(),
             plates: wire::LayoutPlates::default(),
-            rig: wire::RigRef::ThisRig,
         }),
+    }
+}
+
+fn meter(meas: u32) -> wire::PaneContent {
+    wire::PaneContent::Meter {
+        rig: wire::RigRef::ThisRig,
+        meas: MeasId(meas),
     }
 }
 
@@ -88,11 +94,7 @@ fn desk() -> T {
     let mut t = T::new();
     t.conn(mirror(daemon(true)));
     t.st.apply(Msg::SelectMeas(MeasId(5)), &t.keys);
-    assert_eq!(
-        t.st.pane_layout(),
-        crate::state::panes::meas_layout::owner_plain(&both_mics(), MeasId(5)),
-        "SPL 2's own panes"
-    );
+    assert_eq!(t.st.pane_layout(), both_mics(), "SPL 2's own panes");
     assert_eq!(shown(&t), [Some(MeasId(4)), Some(MeasId(5))]);
     t
 }
@@ -111,11 +113,7 @@ fn edit_keeps_the_pick(t: &mut T, what: &str) {
         "{what}: T is an edit of SPL 2's panes: {r:?}"
     );
     for l in l {
-        assert_eq!(
-            l.panes()[0].content,
-            Some(wire::PaneContent::Meas { meas: MeasId(4) }),
-            "{what}: {l:?}"
-        );
+        assert_eq!(l.panes()[0].content, meter(4), "{what}: {l:?}");
     }
 }
 
@@ -138,34 +136,28 @@ fn a_meter_pick_waits_for_a_meter_listed_after_the_row_is_chosen() {
     edit_keeps_the_pick(&mut t, "late meter");
 }
 
-/// `FOH SPL` goes away for a while (deleted and made again under its id) with the row
-/// chosen.
+/// `FOH SPL` deleted (its rig, synced, lists it no more): it leaves the pane, which says
+/// so, and an edit then stores the pane with nothing picked, as the daemon's own pruning
+/// does. One of that name made again takes the pane back.
 #[test]
-fn a_meter_pick_waits_while_its_meter_is_gone() {
+fn a_deleted_meter_leaves_its_pane_until_one_of_its_name_is_back() {
     let mut t = desk();
     t.conn(mirror(daemon(false)));
-    t.conn(mirror(daemon(true)));
-    edit_keeps_the_pick(&mut t, "meter gone a while");
-}
-
-/// An edit while `FOH SPL` is gone stores its pick, not the pane's stand-in.
-#[test]
-fn an_edit_while_the_meter_is_gone_keeps_its_pick() {
-    let mut t = desk();
-    t.conn(mirror(daemon(false)));
+    let first = t.st.layout.root.reading_order()[0];
+    assert_eq!(shown(&t), [None, Some(MeasId(5))]);
+    assert_eq!(
+        t.st.empty_hint(first, &t.keys).map(|h| h.text),
+        Some(ac2_scene::pane_edit::deleted_here("FOH SPL"))
+    );
     let r = t.key("T");
     let l = stored(&r);
     assert!(!l.is_empty(), "T is an edit of SPL 2's panes: {r:?}");
     for l in l {
-        assert_eq!(
-            l.panes()[0].content,
-            Some(wire::PaneContent::Meas { meas: MeasId(4) }),
-            "{l:?}"
-        );
+        assert_eq!(l.panes()[0].content, wire::PaneContent::Nothing, "{l:?}");
     }
     answer(&mut t, &r);
     t.conn(mirror(daemon(true)));
-    edit_keeps_the_pick(&mut t, "after an edit while gone");
+    edit_keeps_the_pick(&mut t, "made again");
 }
 
 /// A split of the waiting pane while `FOH SPL` is gone: both halves keep its pick, neither
@@ -181,7 +173,7 @@ fn a_split_while_the_meter_is_gone_keeps_its_pick_in_both_halves() {
     let l = stored(&r);
     let l = l.last().expect("the split stored");
     let picks: Vec<_> = l.panes().iter().map(|p| p.content.clone()).collect();
-    let foh = Some(wire::PaneContent::Meas { meas: MeasId(4) });
+    let foh = meter(4);
     assert_eq!(picks[..2], [foh.clone(), foh], "{l:?}");
     t.conn(mirror(daemon(true)));
     let mut now = shown(&t);

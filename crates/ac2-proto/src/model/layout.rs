@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::units::{MeasId, RigId, WalkId};
+use crate::units::{MeasId, RigId, TraceId, WalkId};
 
 /// The pane tree: a leaf is a pane, a split shares its rectangle between two subtrees.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -40,22 +40,62 @@ pub enum SplitAxis {
     Column,
 }
 
-/// What a pane was picked to show when it is not the measurement whose layout this is: a
-/// measurement (its chip, a row dropped on it), or, for a Programme pane, the inputs or the
-/// stereo pair it meters. Inputs are zero-based device input channels, as the session's
-/// `input_channels` names them; a pane of a session loaded on a device without them shows
-/// which are missing.
+/// What a pane shows. Every reference names the rig whose id it is, because ids are per
+/// daemon: a pane may draw this rig's curves beside another rig's. A pane with no pick holds
+/// [`PaneContent::Nothing`] and keeps its kind; it follows no selection.
+///
+/// Inputs are zero-based device input channels, as the session's `input_channels` names
+/// them; a pane of a session loaded on a device without them shows which are missing.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PaneContent {
-    /// A measurement; its id is the session's, kept by a save and a load.
-    Meas { meas: MeasId },
+    /// Nothing picked, on any pane kind.
+    Nothing,
+    /// A graph pane's curves (Transfer, Spectrum / RTA, Sweep / distortion), the lead first:
+    /// it names the pane and owns its readouts. At least one, at most
+    /// [`PaneContent::MAX_ENTRIES`].
+    Curves { entries: Vec<PaneEntry> },
+    /// An SPL pane's one meter: a meter is a number, read side by side, never overlaid.
+    Meter { rig: RigRef, meas: MeasId },
     /// Up to [`PaneContent::MAX_INPUTS`] inputs, metered side by side.
-    Inputs { inputs: Vec<u16> },
+    Inputs { rig: RigRef, inputs: Vec<u16> },
     /// A stereo pair: its two bars, correlation and goniometer.
-    Pair { left: u16, right: u16 },
+    Pair { rig: RigRef, left: u16, right: u16 },
     /// A spatial walk: its plan, points and step (a Walk pane's only content).
-    Walk { walk: WalkId },
+    Walk { rig: RigRef, walk: WalkId },
+}
+
+/// One curve reference of a graph pane, with the rig whose id it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PaneEntry {
+    /// Whose id `what` is.
+    pub rig: RigRef,
+    /// What is drawn.
+    pub what: EntryRef,
+}
+
+/// What a graph pane entry draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum EntryRef {
+    /// A measurement's group: its live curve, its math channels, its shown traces, what is
+    /// filed under it now and later.
+    Group { meas: MeasId },
+    /// One live curve: a measurement's or a math channel's.
+    Live { meas: MeasId },
+    /// One stored trace.
+    Trace { trace: TraceId },
+}
+
+impl EntryRef {
+    /// The measurement it names, if it names one.
+    pub fn meas(self) -> Option<MeasId> {
+        match self {
+            Self::Group { meas } | Self::Live { meas } => Some(meas),
+            Self::Trace { .. } => None,
+        }
+    }
 }
 
 impl PaneContent {
@@ -63,10 +103,24 @@ impl PaneContent {
     /// and a console feed is rarely wider.
     pub const MAX_INPUTS: usize = 8;
 
-    /// The measurement, when that is what the content is.
-    pub fn meas(&self) -> Option<MeasId> {
+    /// Entries a graph pane holds at most: a group and 32 more, the most a measurement's
+    /// compare list held, so that salvage never cuts a list that was legal.
+    pub const MAX_ENTRIES: usize = 33;
+
+    /// A graph pane drawing measurement `meas`'s group of this rig.
+    pub fn group(meas: MeasId) -> Self {
+        Self::Curves {
+            entries: vec![PaneEntry {
+                rig: RigRef::ThisRig,
+                what: EntryRef::Group { meas },
+            }],
+        }
+    }
+
+    /// The lead entry of a graph pane.
+    pub fn lead(&self) -> Option<&PaneEntry> {
         match self {
-            Self::Meas { meas } => Some(*meas),
+            Self::Curves { entries } => entries.first(),
             _ => None,
         }
     }
@@ -74,26 +128,69 @@ impl PaneContent {
     /// The inputs a Programme pane with this content meters, left to right.
     pub fn inputs(&self) -> Vec<u16> {
         match self {
-            Self::Meas { .. } | Self::Walk { .. } => Vec::new(),
-            Self::Inputs { inputs } => inputs.clone(),
-            Self::Pair { left, right } => vec![*left, *right],
+            Self::Inputs { inputs, .. } => inputs.clone(),
+            Self::Pair { left, right, .. } => vec![*left, *right],
+            Self::Nothing | Self::Curves { .. } | Self::Meter { .. } | Self::Walk { .. } => {
+                Vec::new()
+            }
+        }
+    }
+
+    /// Every rig reference it holds.
+    pub fn rigs(&self) -> Vec<&RigRef> {
+        match self {
+            Self::Nothing => Vec::new(),
+            Self::Curves { entries } => entries.iter().map(|e| &e.rig).collect(),
+            Self::Meter { rig, .. }
+            | Self::Inputs { rig, .. }
+            | Self::Pair { rig, .. }
+            | Self::Walk { rig, .. } => vec![rig],
+        }
+    }
+
+    /// Every rig reference it holds, to rewrite (renumbering, pruning).
+    pub fn refs_mut(&mut self) -> Vec<&mut RigRef> {
+        match self {
+            Self::Nothing => Vec::new(),
+            Self::Curves { entries } => entries.iter_mut().map(|e| &mut e.rig).collect(),
+            Self::Meter { rig, .. }
+            | Self::Inputs { rig, .. }
+            | Self::Pair { rig, .. }
+            | Self::Walk { rig, .. } => vec![rig],
         }
     }
 
     /// Why the content cannot be shown, if it cannot: no inputs, more than
-    /// [`Self::MAX_INPUTS`], one named twice, or a pair of one input.
+    /// [`Self::MAX_INPUTS`], one named twice, a pair of one input; no entries, more than
+    /// [`Self::MAX_ENTRIES`], one twice.
     pub fn check(&self) -> Result<(), String> {
         match self {
-            Self::Meas { .. } | Self::Walk { .. } => Ok(()),
-            Self::Inputs { inputs } if inputs.is_empty() => {
+            Self::Nothing | Self::Meter { .. } | Self::Walk { .. } => Ok(()),
+            Self::Curves { entries } if entries.is_empty() => {
+                Err("a pane with nothing picked holds nothing, not an empty list".into())
+            }
+            Self::Curves { entries } if entries.len() > Self::MAX_ENTRIES => Err(format!(
+                "a pane draws at most {} entries, not {}",
+                Self::MAX_ENTRIES,
+                entries.len()
+            )),
+            Self::Curves { entries } => {
+                for (i, e) in entries.iter().enumerate() {
+                    if entries[..i].contains(e) {
+                        return Err(format!("{:?} is in the pane twice", e.what));
+                    }
+                }
+                Ok(())
+            }
+            Self::Inputs { inputs, .. } if inputs.is_empty() => {
                 Err("a Programme pane names at least one input".into())
             }
-            Self::Inputs { inputs } if inputs.len() > Self::MAX_INPUTS => Err(format!(
+            Self::Inputs { inputs, .. } if inputs.len() > Self::MAX_INPUTS => Err(format!(
                 "a Programme pane shows at most {} inputs, not {}",
                 Self::MAX_INPUTS,
                 inputs.len()
             )),
-            Self::Inputs { inputs } => {
+            Self::Inputs { inputs, .. } => {
                 let mut seen = inputs.clone();
                 seen.sort_unstable();
                 seen.dedup();
@@ -102,7 +199,7 @@ impl PaneContent {
                 }
                 Ok(())
             }
-            Self::Pair { left, right } if left == right => Err(format!(
+            Self::Pair { left, right, .. } if left == right => Err(format!(
                 "a pair is two inputs, not input {} twice",
                 left + 1
             )),
@@ -129,11 +226,9 @@ pub struct LayoutPane {
     pub programme_view: ProgrammeView,
     /// How much of the plot besides the curves.
     pub chrome: PlotChrome,
-    /// What the pane was picked to show (its chip, a row dropped on it, a pair row); `None`:
-    /// the measurement whose layout this is. A pick of a measurement gone since shows the
-    /// layout's own measurement.
-    #[serde(default)]
-    pub content: Option<PaneContent>,
+    /// What the pane shows, each reference with its rig. A reference naming something its
+    /// rig does not hold (yet) waits: it is never swapped for a stand-in.
+    pub content: PaneContent,
     /// The level axis ranges the operator set on the pane (zoomed, panned, reset, fitted);
     /// one left `None` is framed by the client when the pane first shows a curve.
     #[serde(default)]
@@ -141,21 +236,15 @@ pub struct LayoutPane {
     /// Where the operator dropped the plates over the plot and their text size.
     #[serde(default)]
     pub plates: LayoutPlates,
-    /// Which rig the pane shows. Required: what a pane shows is one daemon's ids, so a
-    /// pane that does not say whose they are cannot be read right.
-    pub rig: RigRef,
 }
 
-/// The rig a pane shows. A session is one daemon's, so a measurement's layout (and a rig
-/// meter's) names [`RigRef::ThisRig`] or a pinned [`RigRef::Rig`], never
-/// [`RigRef::Active`]: the tab active when it is loaded may be another rig's, whose ids
-/// would be misread as this one's.
+/// The rig whose id a pane reference is. A layout is stored by one daemon (a measurement's,
+/// a rig meter's), so its own references name [`RigRef::ThisRig`]: the rig a client shows
+/// when it is loaded may be another, whose ids would be misread as this one's.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RigRef {
-    /// App prefs only: the pane follows the active tab.
-    Active,
-    /// Session files only: the rig the session belongs to, whatever tab is active at load.
+    /// The daemon storing the layout.
     ThisRig,
     /// A pinned rig, by its id (never the CURVE key, which a local rig lacks and a rig
     /// moving to network mode gains); the name is for the operator when it is absent.
@@ -274,6 +363,13 @@ pub enum PaneKind {
     Walk,
 }
 
+impl PaneKind {
+    /// A graph pane: it draws curves, several of them over each other.
+    pub fn draws_curves(self) -> bool {
+        matches!(self, Self::Transfer | Self::Spectrum | Self::Distortion)
+    }
+}
+
 /// The transfer pane's views.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -370,13 +466,12 @@ impl PaneLayout {
 
     /// Why the layout cannot be drawn, if it cannot: a split ratio not strictly between 0
     /// and 1 leaves one side no room, more than [`Self::MAX_PANES`] panes, a level range
-    /// not finite with its top above its bottom (no axis can be drawn on it), and a plate
-    /// placed outside 0 … 1 or with a text scale not finite and above 0, a Programme pane
-    /// without inputs (or another kind with them), a Walk pane without its walk (or another
-    /// kind with one), content [`PaneContent::check`]
-    /// refuses, a pane following the active tab ([`RigRef::Active`]: a layout is one
-    /// daemon's, the active tab at load may be another's) and another rig's pane without
-    /// content (this layout's own measurement is no other rig's).
+    /// not finite with its top above its bottom (no axis can be drawn on it), a plate
+    /// placed outside 0 … 1 or with a text scale not finite and above 0, content
+    /// [`PaneContent::check`] refuses, and content of another kind than the pane's:
+    /// [`PaneContent::Nothing`] on any pane, curves only on a Transfer, Spectrum / RTA or
+    /// Sweep / distortion pane, a meter only on an SPL pane, inputs or a pair only on a
+    /// Programme pane, a walk only on a Walk pane.
     pub fn check(&self) -> Result<(), String> {
         let n = self.panes().len();
         if n > Self::MAX_PANES {
@@ -400,38 +495,31 @@ impl PaneLayout {
             }
         }
         for p in self.panes() {
-            match (p.kind, &p.content) {
-                (
-                    PaneKind::Programme,
-                    None | Some(PaneContent::Meas { .. } | PaneContent::Walk { .. }),
-                ) => {
-                    return Err("a Programme pane names the inputs or the pair it meters".into());
+            let fits = match (&p.content, p.kind) {
+                (PaneContent::Nothing, _) => true,
+                (PaneContent::Curves { .. }, k) => k.draws_curves(),
+                (PaneContent::Meter { .. }, k) => k == PaneKind::Spl,
+                (PaneContent::Inputs { .. } | PaneContent::Pair { .. }, k) => {
+                    k == PaneKind::Programme
                 }
-                (PaneKind::Walk, Some(PaneContent::Walk { .. })) => {}
-                (PaneKind::Walk, _) => return Err("a Walk pane names its walk".into()),
-                (_, Some(PaneContent::Walk { .. })) => {
-                    return Err("only a Walk pane shows a walk".into());
+                (PaneContent::Walk { .. }, k) => k == PaneKind::Walk,
+            };
+            if !fits {
+                return Err(match &p.content {
+                    PaneContent::Curves { .. } => {
+                        "curves are drawn on a Transfer, Spectrum / RTA or Sweep / distortion \
+                         pane only"
+                    }
+                    PaneContent::Meter { .. } => "only an SPL pane shows a meter",
+                    PaneContent::Inputs { .. } | PaneContent::Pair { .. } => {
+                        "only a Programme pane meters inputs"
+                    }
+                    PaneContent::Walk { .. } => "only a Walk pane shows a walk",
+                    PaneContent::Nothing => unreachable!("nothing fits every pane"),
                 }
-                (
-                    PaneKind::Transfer | PaneKind::Spectrum | PaneKind::Spl | PaneKind::Distortion,
-                    Some(PaneContent::Inputs { .. } | PaneContent::Pair { .. }),
-                ) => return Err("only a Programme pane meters inputs".into()),
-                _ => {}
+                .into());
             }
-            match (&p.rig, &p.content) {
-                (RigRef::Active, _) => {
-                    return Err("a measurement's layout names its own rig or another, \
-                                never the active tab"
-                        .into());
-                }
-                (RigRef::Rig { .. }, None) => {
-                    return Err("another rig's pane names what it shows".into());
-                }
-                _ => {}
-            }
-            if let Some(c) = &p.content {
-                c.check()?;
-            }
+            p.content.check()?;
         }
         for (name, p) in self.panes().iter().flat_map(|p| p.plates.all()) {
             if p.at
@@ -450,6 +538,45 @@ impl PaneLayout {
             }
         }
         self.check_ratios()
+    }
+
+    /// Why the layout cannot be stored by the daemon holding it, given `group`, the
+    /// measurement whose group draws a curve of this rig (`None`: no group's): a [`EntryRef::Live`]
+    /// or [`EntryRef::Trace`] of this rig in a pane whose [`EntryRef::Group`] draws it already.
+    pub fn check_groups(&self, group: impl Fn(EntryRef) -> Option<MeasId>) -> Result<(), String> {
+        for p in self.panes() {
+            let PaneContent::Curves { entries } = &p.content else {
+                continue;
+            };
+            let groups: Vec<MeasId> = entries
+                .iter()
+                .filter(|e| e.rig == RigRef::ThisRig)
+                .filter_map(|e| match e.what {
+                    EntryRef::Group { meas } => Some(meas),
+                    _ => None,
+                })
+                .collect();
+            for e in entries.iter().filter(|e| e.rig == RigRef::ThisRig) {
+                if matches!(e.what, EntryRef::Group { .. }) {
+                    continue;
+                }
+                if let Some(g) = group(e.what).filter(|g| groups.contains(g)) {
+                    return Err(format!(
+                        "{:?} is drawn by the group of measurement {g} in the same pane",
+                        e.what
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Every reference of every pane, to read or rewrite.
+    pub fn contents_mut(&mut self) -> Vec<&mut PaneContent> {
+        self.panes_mut()
+            .into_iter()
+            .map(|p| &mut p.content)
+            .collect()
     }
 
     fn check_ratios(&self) -> Result<(), String> {
@@ -472,7 +599,7 @@ impl PaneLayout {
 mod tests {
     use super::*;
 
-    fn programme(content: Option<PaneContent>) -> PaneLayout {
+    fn programme(content: PaneContent) -> PaneLayout {
         let mut l = crate::samples::pane_layout();
         for p in l.panes_mut() {
             if p.kind == PaneKind::Programme {
@@ -482,71 +609,178 @@ mod tests {
         l
     }
 
+    fn this(what: EntryRef) -> PaneEntry {
+        PaneEntry {
+            rig: RigRef::ThisRig,
+            what,
+        }
+    }
+
     #[test]
     fn programme_content_is_checked() {
         assert_eq!(crate::samples::pane_layout().check(), Ok(()));
-        let inputs = |v: Vec<u16>| Some(PaneContent::Inputs { inputs: v });
+        let rig = RigRef::ThisRig;
+        let inputs = |v: Vec<u16>| PaneContent::Inputs {
+            rig: RigRef::ThisRig,
+            inputs: v,
+        };
         assert_eq!(programme(inputs(vec![0, 1, 2])).check(), Ok(()));
-        assert!(programme(None).check().is_err());
-        assert!(
-            programme(Some(PaneContent::Meas { meas: MeasId(1) }))
-                .check()
-                .is_err()
+        assert_eq!(programme(PaneContent::Nothing).check(), Ok(()));
+        assert_eq!(
+            programme(PaneContent::group(MeasId(1))).check(),
+            Err(
+                "curves are drawn on a Transfer, Spectrum / RTA or Sweep / distortion pane only"
+                    .into()
+            )
         );
         assert!(programme(inputs(vec![])).check().is_err());
         assert!(programme(inputs((0..9).collect())).check().is_err());
         assert!(programme(inputs(vec![1, 1])).check().is_err());
         assert_eq!(
-            programme(Some(PaneContent::Pair { left: 3, right: 3 })).check(),
+            programme(PaneContent::Pair {
+                rig: rig.clone(),
+                left: 3,
+                right: 3
+            })
+            .check(),
             Err("a pair is two inputs, not input 4 twice".into())
         );
         let mut l = crate::samples::pane_layout();
-        l.panes_mut()[0].content = Some(PaneContent::Pair { left: 0, right: 1 });
-        assert!(l.check().is_err(), "only a Programme pane meters inputs");
-        let p = PaneContent::Pair { left: 2, right: 3 };
+        l.panes_mut()[0].content = PaneContent::Pair {
+            rig: rig.clone(),
+            left: 0,
+            right: 1,
+        };
+        assert_eq!(l.check(), Err("only a Programme pane meters inputs".into()));
+        let p = PaneContent::Pair {
+            rig,
+            left: 2,
+            right: 3,
+        };
         assert_eq!(p.inputs(), vec![2, 3]);
-        assert_eq!(p.meas(), None);
+        assert_eq!(p.lead(), None);
     }
 
     #[test]
-    fn a_walk_pane_names_its_walk() {
+    fn each_content_goes_on_the_pane_kind_that_draws_it() {
         let mut l = crate::samples::pane_layout();
-        l.panes_mut()[0].kind = PaneKind::Walk;
-        assert_eq!(l.check(), Err("a Walk pane names its walk".into()));
-        l.panes_mut()[0].content = Some(PaneContent::Meas { meas: MeasId(1) });
-        assert_eq!(l.check(), Err("a Walk pane names its walk".into()));
-        l.panes_mut()[0].content = Some(PaneContent::Walk { walk: WalkId(2) });
-        assert_eq!(l.check(), Ok(()));
-        l.panes_mut()[0].kind = PaneKind::Transfer;
-        assert_eq!(l.check(), Err("only a Walk pane shows a walk".into()));
-        assert_eq!(PaneContent::Walk { walk: WalkId(2) }.meas(), None);
-        assert!(PaneContent::Walk { walk: WalkId(2) }.inputs().is_empty());
+        let walk = PaneContent::Walk {
+            rig: RigRef::ThisRig,
+            walk: WalkId(2),
+        };
+        let meter = PaneContent::Meter {
+            rig: RigRef::ThisRig,
+            meas: MeasId(1),
+        };
+        let cases = [
+            (PaneKind::Walk, walk.clone(), Ok(())),
+            (PaneKind::Walk, PaneContent::Nothing, Ok(())),
+            (
+                PaneKind::Transfer,
+                walk,
+                Err("only a Walk pane shows a walk"),
+            ),
+            (PaneKind::Spl, meter.clone(), Ok(())),
+            (PaneKind::Spl, PaneContent::Nothing, Ok(())),
+            (
+                PaneKind::Spectrum,
+                meter,
+                Err("only an SPL pane shows a meter"),
+            ),
+            (PaneKind::Distortion, PaneContent::group(MeasId(4)), Ok(())),
+            (PaneKind::Spectrum, PaneContent::group(MeasId(4)), Ok(())),
+            (
+                PaneKind::Spl,
+                PaneContent::group(MeasId(4)),
+                Err(
+                    "curves are drawn on a Transfer, Spectrum / RTA or Sweep / distortion pane only",
+                ),
+            ),
+        ];
+        for (kind, content, want) in cases {
+            let p = &mut l.panes_mut()[0];
+            p.kind = kind;
+            p.content = content.clone();
+            assert_eq!(
+                l.check(),
+                want.map_err(str::to_owned),
+                "{kind:?} with {content:?}"
+            );
+        }
     }
 
     #[test]
-    fn a_layout_never_follows_the_active_tab() {
-        let mut l = crate::samples::pane_layout();
-        l.panes_mut()[0].rig = RigRef::Active;
-        assert_eq!(
-            l.check(),
-            Err("a measurement's layout names its own rig or another, never the active tab".into())
-        );
-    }
-
-    #[test]
-    fn another_rigs_pane_names_what_it_shows() {
+    fn a_pane_holds_a_group_and_up_to_32_more_each_once() {
         let mut l = crate::samples::pane_layout();
         let p = &mut l.panes_mut()[0];
-        assert_eq!(p.content, None);
-        p.rig = RigRef::Rig {
-            id: RigId(7),
-            name: "ketunkolo".into(),
+        p.content = PaneContent::Curves { entries: vec![] };
+        assert_eq!(
+            l.check(),
+            Err("a pane with nothing picked holds nothing, not an empty list".into())
+        );
+        let mut entries = vec![this(EntryRef::Group { meas: MeasId(1) })];
+        entries.extend((0..32).map(|i| this(EntryRef::Trace { trace: TraceId(i) })));
+        l.panes_mut()[0].content = PaneContent::Curves {
+            entries: entries.clone(),
+        };
+        assert_eq!(l.check(), Ok(()));
+        entries.push(this(EntryRef::Live { meas: MeasId(9) }));
+        l.panes_mut()[0].content = PaneContent::Curves {
+            entries: entries.clone(),
         };
         assert_eq!(
             l.check(),
-            Err("another rig's pane names what it shows".into())
+            Err("a pane draws at most 33 entries, not 34".into())
         );
-        l.panes_mut()[0].content = Some(PaneContent::Meas { meas: MeasId(3) });
+        entries.truncate(3);
+        entries.push(this(EntryRef::Trace { trace: TraceId(1) }));
+        l.panes_mut()[0].content = PaneContent::Curves {
+            entries: entries.clone(),
+        };
+        assert_eq!(
+            l.check(),
+            Err("Trace { trace: TraceId(1) } is in the pane twice".into())
+        );
+        // The same id of another rig is another curve.
+        entries.pop();
+        entries.push(PaneEntry {
+            rig: RigRef::Rig {
+                id: RigId(7),
+                name: "ketunkolo".into(),
+            },
+            what: EntryRef::Trace { trace: TraceId(1) },
+        });
+        l.panes_mut()[0].content = PaneContent::Curves { entries };
         assert_eq!(l.check(), Ok(()));
+    }
+
+    #[test]
+    fn a_curve_its_group_draws_is_not_listed_again() {
+        let mut l = crate::samples::pane_layout();
+        let other = RigRef::Rig {
+            id: RigId(7),
+            name: "ketunkolo".into(),
+        };
+        l.panes_mut()[0].content = PaneContent::Curves {
+            entries: vec![
+                this(EntryRef::Group { meas: MeasId(1) }),
+                this(EntryRef::Trace { trace: TraceId(5) }),
+                PaneEntry {
+                    rig: other,
+                    what: EntryRef::Live { meas: MeasId(2) },
+                },
+            ],
+        };
+        // Trace 5 is filed under measurement 3, live 2 is another rig's.
+        let group = |w: EntryRef| match w {
+            EntryRef::Trace { .. } => Some(MeasId(3)),
+            _ => Some(MeasId(1)),
+        };
+        assert_eq!(l.check_groups(group), Ok(()));
+        let group = |_: EntryRef| Some(MeasId(1));
+        assert_eq!(
+            l.check_groups(group),
+            Err("Trace { trace: TraceId(5) } is drawn by the group of measurement 1 in the same pane".into())
+        );
     }
 }

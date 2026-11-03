@@ -294,7 +294,8 @@ pub struct TreeInput<'a> {
     pub live_selected: bool,
     /// The latest sweep run (a sweep measurement's header says it plays).
     pub sweep: Option<&'a SweepRun>,
-    /// Rows compared (live curves, math channels, stored traces): marked
+    /// Rows the focused pane draws behind its lead (measurements ticked in C, live curves,
+    /// math channels, stored traces): marked
     /// [`crate::trace::COMPARED`], as the legend tags their curves.
     pub compared: Vec<TreeKey>,
     /// The rig entity: which meters' cues are in which state, where cues go.
@@ -348,89 +349,96 @@ pub fn imported_hint(n: usize, move_key: Option<&str>) -> String {
     format!("{what} not on this pane — select it, then {how}")
 }
 
-/// What a compare toggle says: `Spectrum 2 compared into Spectrum 1 (cmp)`, or that it is
-/// off there. A hidden curve is compared but not drawn until shown.
-pub fn compare_toast(name: &str, target: &str, on: bool, shown: bool) -> String {
+/// What a tick in C's list says: `TF 2 drawn in this pane (cmp)`, or that it is not any
+/// more. A hidden curve is ticked but not drawn until shown.
+pub fn tick_toast(name: &str, on: bool, shown: bool) -> String {
     let tag = crate::trace::COMPARED;
     match (on, shown) {
-        (false, _) => format!("{name}: no longer compared into {target}"),
-        (true, true) => format!("{name} compared into {target} ({tag})"),
-        (true, false) => {
-            format!("{name} compared into {target} ({tag}) — hidden: A shows it")
-        }
+        (false, _) => format!("{name}: no longer drawn in this pane"),
+        (true, true) => format!("{name} drawn in this pane ({tag})"),
+        (true, false) => format!("{name} drawn in this pane ({tag}) \u{2014} hidden: A shows it"),
     }
 }
 
-/// A measurement C offers to compare a curve into.
+/// A measurement row of C's list: its name, what its group brings (`live + 3 traces`),
+/// whether the pane draws it and whether it is the pane's lead.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CompareTarget {
+pub struct TickRow {
     pub name: String,
-    /// A pane on screen shows it.
-    pub shown: bool,
-    /// The curve is compared into it already.
+    pub brings: String,
     pub on: bool,
+    pub lead: bool,
 }
 
-/// The question C asks: which measurement's panes draw the curve. A tick marks those it is
-/// compared into; Enter adds or removes the highlighted one and the list stays open.
+/// C's list over the focused graph pane: what can be drawn with its lead. A tick marks
+/// what the pane draws; Enter ticks or unticks the highlighted row and the list stays open.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CompareChoices {
-    /// `Compare Spectrum 2 with…`
+pub struct TickList {
     pub title: String,
     pub lines: Vec<String>,
-    /// One per target, in the order given (those on screen first).
+    /// One per row, in the order given (the lead first).
     pub choices: Vec<Choice>,
     pub hint: String,
 }
 
-/// Mark of a target the curve is compared into.
-pub const COMPARE_TICK: &str = "\u{2713}";
+/// Mark of a row the pane draws.
+pub const TICK: &str = "\u{2713}";
 
-/// The compare chooser for curve `name` over `targets` (on screen first).
-pub fn compare_choices(name: &str, targets: &[CompareTarget]) -> CompareChoices {
-    CompareChoices {
-        title: format!("Compare {name} with…"),
-        lines: vec![format!(
-            "{name} is drawn over the panes of each measurement ticked, under its own curves."
-        )],
-        choices: targets
+/// What C's list says on the pane titled `pane`, over `rows`.
+pub fn tick_list(pane: &str, rows: &[TickRow]) -> TickList {
+    TickList {
+        title: format!("Draw in {pane}"),
+        lines: vec![
+            "Each measurement ticked is drawn in this pane with what is filed under it; the lead, first, on top."
+                .to_owned(),
+        ],
+        choices: rows
             .iter()
-            .map(|t| Choice {
+            .map(|r| Choice {
                 label: format!(
-                    "{} {}{}",
-                    if t.on { COMPARE_TICK } else { " " },
-                    t.name,
-                    if t.shown { " · on screen" } else { "" }
+                    "{} {}{}{}",
+                    if r.on { TICK } else { " " },
+                    r.name,
+                    if r.brings.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" \u{b7} {}", r.brings)
+                    },
+                    if r.lead { " \u{b7} lead" } else { "" }
                 ),
                 blocked: None,
             })
             .collect(),
-        hint: "Enter adds or removes · Esc closes".to_owned(),
+        hint: TICK_HINT.to_owned(),
     }
 }
 
-/// What C says when no measurement's panes could draw curve `name` (`what`: `spectrum or
+/// The hint bar under C's list.
+pub const TICK_HINT: &str = "\u{2191}/\u{2193} \u{b7} wheel \u{b7} Enter ticks \u{b7} Esc closes";
+
+/// What a measurement brings to a pane, in the tree's words: `live + 3 traces`, `1 trace`.
+pub fn brings_words(live: bool, traces: usize) -> String {
+    let t = match traces {
+        0 => None,
+        1 => Some("1 trace".to_owned()),
+        n => Some(format!("{n} traces")),
+    };
+    match (live, t) {
+        (true, Some(t)) => format!("live + {t}"),
+        (true, None) => "live".to_owned(),
+        (false, Some(t)) => t,
+        (false, None) => String::new(),
+    }
+}
+
+/// What C says when no measurement of the kind a pane draws exists (`what`: `spectrum or
 /// RTA`, `transfer`, `sweep`).
-pub fn compare_no_target(name: &str, what: &str) -> String {
-    format!("{name}: no other {what} measurement to compare it with — make one first")
+pub fn tick_no_rows(what: &str) -> String {
+    format!("no {what} measurement to draw here \u{2014} make one first")
 }
 
-/// What C on a stored trace under Imported says: compare draws over a measurement's
-/// panes, and an import is no measurement's until moved under one.
-pub fn imported_compare_hint(name: &str, move_key: Option<&str>) -> String {
-    let how = move_key.map_or_else(
-        || "Move to measurement…".to_owned(),
-        |k| format!("Move to measurement… ({k})"),
-    );
-    format!("{name} is under Imported: it is no measurement's to compare — select it, then {how}")
-}
-
-/// What C on an SPL meter says: a meter is a number, compared by seeing two side by side.
-pub fn meter_compare_hint(name: &str) -> String {
-    format!(
-        "{name}: meters are not compared — add a pane and drag the meter onto it to see two side by side"
-    )
-}
+/// What C says on an SPL, Programme or Walk pane: it shows one source.
+pub const ONE_SOURCE: &str = "one source per pane: drag a row onto it";
 
 /// The groups in tree order: the measurements that are not math channels — the rig's
 /// first, then the session's, each by id — then the imported group.
@@ -667,6 +675,10 @@ pub fn tree_rows(input: &TreeInput<'_>) -> Vec<TreeRow> {
                 }
             }
         };
+        let mut header = header;
+        if input.compared.contains(&header.key) {
+            mark_compared(&mut header);
+        }
         let rig_group = header_item.is_some_and(|i| crate::osc::on_rig(i.meas));
         if rig_group && !rig_said {
             rig_said = true;

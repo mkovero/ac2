@@ -623,8 +623,8 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     );
 
     // The sweep run as the reference: the steps move the live curve against it, alone.
-    // The drop gives the pane the sweep's group (V only selects the run), so the live curve
-    // is compared onto it first.
+    // The drop gives the pane the sweep's group (V only selects the run); the live curve is
+    // ticked into that pane (C) after it.
     d.send(Msg::SelectMeas(m.id));
     assert_eq!(d.st.rig.selected_trace, None);
     let sweep =
@@ -632,27 +632,6 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
             .ok()
             .and_then(|t| t.edit.owner.meas())
             .ok_or("the run's sweep")?;
-    let sweep_name =
-        d.st.meas(sweep)
-            .map(|x| x.config.name.clone())
-            .ok_or("the sweep")?;
-    d.key("C");
-    let Overlay::Choose(c) = &mut d.st.overlay else {
-        return Err(format!("no compare chooser: {:?}", d.st.overlay).into());
-    };
-    c.index = c
-        .choices
-        .iter()
-        .position(|c| c.label.contains(&sweep_name))
-        .ok_or("the sweep among the targets")?;
-    d.key("Enter");
-    d.key("Escape");
-    d.until("the live curve compared into the sweep", |s| {
-        s.meas(sweep).is_some_and(|x| {
-            x.compared
-                .contains(&ac2_proto::model::Compared::Meas { meas: m.id })
-        })
-    })?;
     for _ in 0..8 {
         if d.st.rig.selected_trace == Some(run) {
             break;
@@ -671,6 +650,27 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
         d.st.rig.selected_trace,
         Some(run),
         "the drop keeps the selection"
+    );
+    let name =
+        d.st.meas(m.id)
+            .map(|x| x.config.name.clone())
+            .ok_or("the live")?;
+    d.send(Msg::FocusPane(tf));
+    d.key("C");
+    let Overlay::Choose(c) = &mut d.st.overlay else {
+        return Err(format!("no tick list: {:?}", d.st.overlay).into());
+    };
+    c.index = c
+        .choices
+        .iter()
+        .position(|c| c.label.contains(&name) && !c.label.contains("lead"))
+        .ok_or("the live measurement in the tick list")?;
+    d.key("Enter");
+    d.key("Escape");
+    assert!(
+        d.st.compared_into(tf)
+            .contains(&ac2_proto::model::layout::EntryRef::Group { meas: m.id }),
+        "the live curve ticked into the sweep's pane"
     );
     d.send(Msg::Command(CommandId::PhaseReference));
     let pre = drawn_phase(&d.st, 240);

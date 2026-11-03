@@ -3,7 +3,7 @@
 use std::io::{self, Write};
 
 use ac2_proto::GridDef;
-use ac2_proto::model::layout::PaneContent;
+use ac2_proto::model::layout::{EntryRef, PaneContent, PaneEntry, RigRef};
 use ac2_proto::model::{
     Autosave, AutosaveState, Availability, BackendInfo, CalEntry, CalState, CalStatus,
     ClockRelation, DelayReference, DepthPolicy, InputKind, LineCalEntry, MeasKind, Measurement,
@@ -11,7 +11,7 @@ use ac2_proto::model::{
     SmoothingFraction, SmoothingMode, State, TimingState, TimingStatus, TraceData, TraceMeta,
     TraceSource,
 };
-use ac2_proto::units::WallNs;
+use ac2_proto::units::{MeasId, WallNs};
 use ac2_scene::format;
 use comfy_table::{Table, presets};
 use serde::Serialize;
@@ -216,24 +216,8 @@ pub fn measurement(m: &Measurement) -> String {
         // Panes numbered in reading order, as the app numbers them.
         for (i, p) in l.panes().iter().enumerate() {
             let mut said = Vec::new();
-            match &p.content {
-                Some(PaneContent::Meas { meas }) if *meas != m.id => {
-                    said.push(format!("shows {meas}"));
-                }
-                Some(PaneContent::Inputs { inputs }) => said.push(format!(
-                    "meters inputs {}",
-                    inputs
-                        .iter()
-                        .map(|c| (u32::from(*c) + 1).to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )),
-                Some(PaneContent::Pair { left, right }) => said.push(format!(
-                    "meters the pair of inputs {}, {}",
-                    u32::from(*left) + 1,
-                    u32::from(*right) + 1
-                )),
-                _ => {}
+            if let Some(c) = pane_content(&p.content, m.id) {
+                said.push(c);
             }
             if !p.levels.is_empty() {
                 said.push("level axis set".to_owned());
@@ -261,10 +245,62 @@ pub fn measurement(m: &Measurement) -> String {
     if m.offset.0 != 0.0 {
         s.push_str(&format!("  offset {}", format::db_readout(m.offset.0)));
     }
-    if !m.compared.is_empty() {
-        s.push_str(&format!("  {} compared", m.compared.len()));
-    }
     s
+}
+
+/// What a pane of measurement `own`'s layout shows, as `ac2 meas list` words it: nothing
+/// for a pane drawing `own`'s group alone (its own pane), else what it holds.
+fn pane_content(c: &PaneContent, own: MeasId) -> Option<String> {
+    let rig = |r: &RigRef| match r {
+        RigRef::ThisRig => String::new(),
+        RigRef::Rig { name, .. } => format!(" of {name}"),
+    };
+    let entry = |e: &PaneEntry| {
+        let what = match e.what {
+            EntryRef::Group { meas } => format!("{meas}"),
+            EntryRef::Live { meas } => format!("live {meas}"),
+            EntryRef::Trace { trace } => format!("trace {trace}"),
+        };
+        format!("{what}{}", rig(&e.rig))
+    };
+    let inputs = |v: &[u16]| {
+        v.iter()
+            .map(|c| (u32::from(*c) + 1).to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    Some(match c {
+        PaneContent::Nothing => "nothing picked".to_owned(),
+        PaneContent::Curves { entries }
+            if entries.len() == 1
+                && entries[0].rig == RigRef::ThisRig
+                && entries[0].what == (EntryRef::Group { meas: own }) =>
+        {
+            return None;
+        }
+        PaneContent::Curves { entries } => format!(
+            "draws {}",
+            entries.iter().map(entry).collect::<Vec<_>>().join(", ")
+        ),
+        PaneContent::Meter { rig: r, meas } if *meas == own && *r == RigRef::ThisRig => {
+            return None;
+        }
+        PaneContent::Meter { rig: r, meas } => format!("shows meter {meas}{}", rig(r)),
+        PaneContent::Inputs { rig: r, inputs: v } => {
+            format!("meters inputs {}{}", inputs(v), rig(r))
+        }
+        PaneContent::Pair {
+            rig: r,
+            left,
+            right,
+        } => format!(
+            "meters the pair of inputs {}, {}{}",
+            u32::from(*left) + 1,
+            u32::from(*right) + 1,
+            rig(r)
+        ),
+        PaneContent::Walk { rig: r, walk } => format!("shows walk {walk}{}", rig(r)),
+    })
 }
 
 /// `yes` / `no`.

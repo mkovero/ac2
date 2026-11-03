@@ -30,9 +30,9 @@ use std::path::Path;
 use std::time::Instant;
 
 use ac2_proto::event::{Change, Patch};
-use ac2_proto::model::layout::PaneContent;
+use ac2_proto::model::layout::{EntryRef, PaneContent, RigRef};
 use ac2_proto::model::{
-    Compared, MathExpr, MeasKind, MeasScope, Measurement, Operand, Rig, SessionConfig, TraceOwner,
+    MathExpr, MeasKind, MeasScope, Measurement, Operand, Rig, SessionConfig, TraceOwner,
     TraceSource,
 };
 use ac2_proto::units::{Db, MeasId, Rev, WallNs};
@@ -102,7 +102,6 @@ pub(super) fn saved_of(m: &Measurement) -> SavedMeasurement {
         }),
         colour: m.colour,
         layout: m.layout.clone(),
-        compared: m.compared.clone(),
         offset: m.offset,
         eq: m.eq.clone(),
     }
@@ -328,7 +327,6 @@ impl Control {
                 grid_id,
                 colour: sm.colour,
                 layout: sm.layout,
-                compared: Vec::new(),
                 offset: Db(0.0),
                 eq: Vec::new(),
             };
@@ -601,17 +599,28 @@ pub(super) fn remap_ids(
             owner(&mut config.owner);
             expr(&mut config.expr);
         }
-        // A pane or compare entry naming a moved measurement named it in the file, where
-        // no rig meter held that id; one naming an id the file has no measurement of names
-        // a rig meter of this rig and stays.
-        for p in m.layout.iter_mut().flat_map(|l| l.panes_mut()) {
-            if let Some(PaneContent::Meas { meas }) = &mut p.content {
-                re(meas);
-            }
-        }
-        for c in &mut m.compared {
-            if let Compared::Meas { meas } = c {
-                re(meas);
+        // A pane reference of this rig naming a moved measurement named it in the file,
+        // where no rig meter held that id; one naming an id the file has no measurement of
+        // names a rig meter of this rig and stays. Another rig's references are that rig's
+        // ids, which this load does not move. Walks and traces keep their ids on a load.
+        for c in m.layout.iter_mut().flat_map(|l| l.contents_mut()) {
+            match c {
+                PaneContent::Curves { entries } => {
+                    for e in entries.iter_mut().filter(|e| e.rig == RigRef::ThisRig) {
+                        if let EntryRef::Group { meas } | EntryRef::Live { meas } = &mut e.what {
+                            re(meas);
+                        }
+                    }
+                }
+                PaneContent::Meter {
+                    rig: RigRef::ThisRig,
+                    meas,
+                } => re(meas),
+                PaneContent::Nothing
+                | PaneContent::Meter { .. }
+                | PaneContent::Inputs { .. }
+                | PaneContent::Pair { .. }
+                | PaneContent::Walk { .. } => {}
             }
         }
     }

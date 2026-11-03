@@ -39,7 +39,6 @@ fn meas(id: u32, name: &str, kind: MeasKind) -> Measurement {
         grid_id: None,
         colour: None,
         layout: None,
-        compared: Vec::new(),
         offset: ac2_proto::units::Db(0.0),
         eq: Vec::new(),
     }
@@ -423,7 +422,7 @@ impl T {
         self.conn(mirror(s));
     }
 
-    /// What the daemon makes of the measurement calls in `r` (display, offset, compare), as
+    /// What the daemon makes of the measurement calls in `r` (display, offset), as
     /// its mirror then shows: the success toast each names, as the reply brings it.
     fn answer(&mut self, r: &[Request]) {
         for r in r {
@@ -442,11 +441,6 @@ impl T {
                 Command::MeasOffset { meas, offset } => self.remirror(|s| {
                     if let Some(m) = s.measurements.iter_mut().find(|m| m.id == meas) {
                         m.offset = offset;
-                    }
-                }),
-                Command::MeasCompare { meas, compared } => self.remirror(|s| {
-                    if let Some(m) = s.measurements.iter_mut().find(|m| m.id == meas) {
-                        m.compared = compared;
                     }
                 }),
                 _ => continue,

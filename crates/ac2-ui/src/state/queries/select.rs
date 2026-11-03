@@ -489,8 +489,10 @@ impl AppState {
         let here = self.here();
         if let Some(v) = self.layout.view_mut(p) {
             v.meas = Some(id);
+            v.with.clear();
             v.rig = here;
         }
+        self.rig.pending.deleted.remove(&p);
     }
 
     /// Selects `id` as what pane `p` shows, and as the measurement panes with no pick of

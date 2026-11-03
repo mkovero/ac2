@@ -13,12 +13,13 @@ pub(crate) struct Pending {
     /// The measurement each pane showed when the app last ran, by name, until the daemon's
     /// state is known.
     pub(super) pane_meas: BTreeMap<PaneId, String>,
-    /// A pane's pick the mirror does not list: one a stored layout names (a rig meter
-    /// listed after the layout arrived, one set aside and made again under its id), or one
-    /// the same daemon took away for a while. It stays the pane's choice, stored with the
-    /// panes, until the mirror lists it or the operator gives the pane something else;
-    /// meanwhile the pane shows the chosen measurement, which is not its pick.
-    pub(super) pane_ids: BTreeMap<PaneId, MeasId>,
+    /// The name of what a pane showed until its rig reported it deleted: the pane says so
+    /// until it is given something else.
+    pub(super) deleted: BTreeMap<PaneId, String>,
+    /// Entries behind a pane's lead read from `ui.toml`, with the names they had: once the
+    /// daemon's state is known, each takes the id of what has its name now (a daemon
+    /// restarted numbers afresh), else keeps its id.
+    pub(super) with_names: BTreeMap<PaneId, Vec<(Pick, String)>>,
     /// Hidden measurements by name, waiting for the daemon to list one of that name: read
     /// from `ui.toml`, or a hidden one the daemon took away (a session reopening, a daemon
     /// restarting renumbers them).
@@ -66,7 +67,7 @@ impl AppState {
                 // for its name.
                 let names = self.meas_names();
                 // The daemon reached next may be another, numbering afresh: names only.
-                self.park_gone_meas(&names, false, |_| true);
+                self.park_gone_meas(&names, false, &BTreeSet::new(), |_| true);
                 self.rig.failed(target, error);
             }
             ConnEvent::Mirror(v) => {
@@ -78,7 +79,18 @@ impl AppState {
                 let (was_stopped, was_firing) = self.daemon().map_or((true, false), |s| {
                     (s.session.stopped.is_some(), s.generator.firing)
                 });
+                let traces_before: BTreeSet<TraceId> = self
+                    .daemon()
+                    .map(|s| s.traces.iter().map(|t| t.id).collect())
+                    .unwrap_or_default();
                 self.rig.mirror = Some(v);
+                let gone_traces: BTreeSet<TraceId> = match self.daemon() {
+                    Some(s) if !reborn => {
+                        let now: BTreeSet<TraceId> = s.traces.iter().map(|t| t.id).collect();
+                        traces_before.difference(&now).copied().collect()
+                    }
+                    _ => BTreeSet::new(),
+                };
                 // A driver reset or clock change: the backend cut the output at once and the
                 // daemon disarmed the generator; say so when it happens, not only in the bar.
                 if !was_stopped
@@ -128,7 +140,7 @@ impl AppState {
                     && self.rig.pending.select == self.rig.selected;
                 // A measurement this app made, selected before the daemon lists it, stays.
                 let keep = if waiting { self.rig.selected } else { None };
-                self.park_gone_meas(&names, !reborn, |id| {
+                self.park_gone_meas(&names, !reborn, &gone_traces, |id| {
                     Some(id) != keep && (reborn || !ids.contains(&id))
                 });
                 if let Some(id) = self.rig.lost_selection.as_ref().and_then(|n| {
@@ -459,15 +471,18 @@ impl AppState {
             .collect()
     }
 
-    /// Measurements `gone` from the daemon (`names`: what they were called): each pane that
-    /// showed one waits for one of that name to come back, and so does the selection (a
-    /// stand-in may take its place meanwhile). A session reopened, salvaged or a daemon
-    /// restarted takes them away for a moment and makes them again under the same names.
-    /// `same_ids`: the daemon keeps numbering as before, so a gone id stays the pane's pick.
+    /// Measurements `gone` from the daemon (`names`: what they were called). `same_ids`: the
+    /// daemon keeps numbering as before, so a gone id is one it deleted: it leaves every
+    /// pane of this rig, which says what was deleted, and a lead waits for one of its name
+    /// (a session reopened makes them again under new ids). Otherwise (a restart, another
+    /// daemon) each pane that showed one waits for one of that name, and the entries behind
+    /// a lead wait by id. A trace entry the daemon deleted (`gone_traces`) leaves too. The
+    /// selection waits by name too (a stand-in may take its place).
     fn park_gone_meas(
         &mut self,
         names: &BTreeMap<MeasId, String>,
         same_ids: bool,
+        gone_traces: &BTreeSet<TraceId>,
         gone: impl Fn(MeasId) -> bool,
     ) {
         let (rig, tab) = (self.rig.id, self.active());
@@ -480,13 +495,34 @@ impl AppState {
             if !ours {
                 continue;
             }
-            if let Some(id) = v.meas.filter(|id| gone(*id)) {
+            let lead = v.meas.filter(|id| gone(*id));
+            if let Some(id) = lead {
                 v.meas = None;
                 if let Some(n) = names.get(&id) {
                     self.rig.pending.pane_meas.insert(*pane, n.clone());
+                    if same_ids {
+                        self.rig.pending.deleted.insert(*pane, n.clone());
+                    }
                 }
-                if same_ids {
-                    self.rig.pending.pane_ids.insert(*pane, id);
+            }
+            if same_ids {
+                v.with.retain(|p| {
+                    p.rig.is_some()
+                        || match p.what {
+                            EntryRef::Group { meas } | EntryRef::Live { meas } => !gone(meas),
+                            EntryRef::Trace { trace } => !gone_traces.contains(&trace),
+                        }
+                });
+                if lead.is_some()
+                    && let Some(first) = v.with.as_slice().first().copied()
+                    && first.rig.is_none()
+                    && let EntryRef::Group { meas } = first.what
+                {
+                    // The next entry leads.
+                    v.with.take_first();
+                    v.meas = Some(meas);
+                    self.rig.pending.pane_meas.remove(pane);
+                    self.rig.pending.deleted.remove(pane);
                 }
             }
         }

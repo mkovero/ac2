@@ -27,7 +27,6 @@ pub(crate) fn tf(id: u32, name: &str) -> Measurement {
         grid_id: None,
         colour: None,
         layout: None,
-        compared: Vec::new(),
         offset: ac2_proto::units::Db(0.0),
         eq: Vec::new(),
     }
@@ -816,5 +815,53 @@ fn a_run_of_two_mics_counts_once() {
     assert_eq!(
         sweep_stored("Run 2 of Genelec 1 m", 2),
         "Run 2 of Genelec 1 m stored (2 traces, one per mic)"
+    );
+}
+
+/// C's list names each measurement with what it brings, the lead first and so marked.
+#[test]
+fn the_tick_list_reads_as_the_tree_with_the_lead_first() {
+    let rows = [
+        TickRow {
+            name: "TF 1".into(),
+            brings: brings_words(true, 3),
+            on: true,
+            lead: true,
+        },
+        TickRow {
+            name: "TF 2".into(),
+            brings: brings_words(true, 1),
+            on: false,
+            lead: false,
+        },
+        TickRow {
+            name: "Sweep 1".into(),
+            brings: brings_words(false, 2),
+            on: true,
+            lead: false,
+        },
+    ];
+    let l = tick_list("pane 1", &rows);
+    assert_eq!(l.title, "Draw in pane 1");
+    let labels: Vec<&str> = l.choices.iter().map(|c| c.label.as_str()).collect();
+    assert_eq!(
+        labels,
+        [
+            "\u{2713} TF 1 \u{b7} live + 3 traces \u{b7} lead",
+            "  TF 2 \u{b7} live + 1 trace",
+            "\u{2713} Sweep 1 \u{b7} 2 traces",
+        ]
+    );
+    assert_eq!(
+        l.hint,
+        "\u{2191}/\u{2193} \u{b7} wheel \u{b7} Enter ticks \u{b7} Esc closes"
+    );
+    assert_eq!(
+        tick_toast("TF 2", true, true),
+        "TF 2 drawn in this pane (cmp)"
+    );
+    assert_eq!(
+        tick_toast("TF 2", false, true),
+        "TF 2: no longer drawn in this pane"
     );
 }

@@ -10,7 +10,7 @@ use crate::common;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use ac2_proto::model::layout::{PaneContent, PaneKind};
+use ac2_proto::model::layout::{EntryRef, PaneContent, PaneEntry, PaneKind, RigRef};
 use ac2_proto::model::*;
 use ac2_proto::units::*;
 use ac2_proto::{Command, ErrorCode, ReplyBody};
@@ -409,9 +409,10 @@ fn copy_dir(from: &Path, to: &Path) {
 }
 
 #[test]
-fn a_loaded_measurements_panes_and_compare_list_follow_its_new_number() {
-    // Rig X: its meter is 1, the session's A and B are 2 and 3; B's panes show the meter,
-    // A and B, and B compares A.
+fn a_loaded_measurements_pane_references_follow_its_new_number() {
+    // Rig X: its meter is 1, the session's A and B are 2 and 3. B's panes draw A's group
+    // with B's, A's live curve beside another rig's measurement 2, meter 1, A as a meter
+    // (an SPL pane naming a moved id) and walk 1.
     let dx = tempfile::tempdir().unwrap();
     let (hx, _bx) = start("rig-meas-remap-x", dx.path());
     let (mut c, _sub) = connect(&hx, &[]);
@@ -424,27 +425,84 @@ fn a_loaded_measurements_panes_and_compare_list_follow_its_new_number() {
     c.ok(Command::MeasCreate {
         config: transfer("B"),
     });
-    let mut layout = ac2_proto::samples::pane_layout();
-    let kinds = [PaneKind::Spl, PaneKind::Transfer, PaneKind::Transfer];
-    for ((p, id), kind) in layout.panes_mut().into_iter().zip([1, 2, 3]).zip(kinds) {
+    let this = |what| PaneEntry {
+        rig: RigRef::ThisRig,
+        what,
+    };
+    let other = PaneEntry {
+        rig: RigRef::Rig {
+            id: ac2_proto::units::RigId(7),
+            name: "ketunkolo".into(),
+        },
+        what: EntryRef::Live { meas: MeasId(2) },
+    };
+    let contents = |a: u32, walk: PaneContent| {
+        vec![
+            (
+                PaneKind::Transfer,
+                PaneContent::Curves {
+                    entries: vec![
+                        this(EntryRef::Group { meas: MeasId(3) }),
+                        this(EntryRef::Group { meas: MeasId(a) }),
+                    ],
+                },
+            ),
+            (
+                PaneKind::Transfer,
+                PaneContent::Curves {
+                    entries: vec![this(EntryRef::Live { meas: MeasId(a) }), other.clone()],
+                },
+            ),
+            (
+                PaneKind::Spl,
+                PaneContent::Meter {
+                    rig: RigRef::ThisRig,
+                    meas: MeasId(1),
+                },
+            ),
+            (
+                PaneKind::Spl,
+                PaneContent::Meter {
+                    rig: RigRef::ThisRig,
+                    meas: MeasId(a),
+                },
+            ),
+            (PaneKind::Walk, walk),
+        ]
+    };
+    let mut layout = None::<PaneLayout>;
+    let walk = PaneContent::Walk {
+        rig: RigRef::ThisRig,
+        walk: ac2_proto::units::WalkId(2),
+    };
+    for (kind, content) in contents(2, walk) {
+        let mut p = ac2_proto::samples::pane_layout().panes()[0].clone();
         p.kind = kind;
-        p.content = Some(PaneContent::Meas { meas: MeasId(id) });
+        p.content = content;
+        let leaf = PaneLayout::Pane { pane: Box::new(p) };
+        layout = Some(match layout {
+            None => leaf,
+            Some(l) => PaneLayout::Split {
+                axis: ac2_proto::model::layout::SplitAxis::Row,
+                ratio: 0.5,
+                a: Box::new(l),
+                b: Box::new(leaf),
+            },
+        });
     }
     c.ok(Command::MeasLayout {
         meas: MeasId(3),
-        layout: Some(layout),
-    });
-    c.ok(Command::MeasCompare {
-        meas: MeasId(3),
-        compared: vec![Compared::Meas { meas: MeasId(2) }],
+        layout,
     });
     save(&mut c, "s");
     drop(c);
     hx.shutdown();
 
     // Rig Y holds meters 1 and 2: loading X's session moves A off 2 (to 4, past B's 3);
-    // B keeps 3. B's panes and compare list follow A, and the pane naming meter 1 (a rig
-    // meter, not in the file) still names it.
+    // B keeps 3. Every reference of this rig to A follows it; the one naming meter 1 (a
+    // rig meter, not in the file) still names it, and another rig's measurement 2 is that
+    // rig's id, untouched. Walk ids are not renumbered by a load; walk 2 is not in the
+    // session, so its pane is pruned to nothing.
     let dy = tempfile::tempdir().unwrap();
     let (hy, _by) = start("rig-meas-remap-y", dy.path());
     let (mut c, _sub) = connect(&hy, &[]);
@@ -467,19 +525,15 @@ fn a_loaded_measurements_panes_and_compare_list_follow_its_new_number() {
     );
     let st = state(&mut c);
     let b = st.measurements.iter().find(|m| m.id == MeasId(3)).unwrap();
-    let shown: Vec<_> = b
+    let shown: Vec<(PaneKind, PaneContent)> = b
         .layout
         .as_ref()
         .unwrap()
         .panes()
         .iter()
-        .map(|p| p.content.as_ref().and_then(PaneContent::meas))
+        .map(|p| (p.kind, p.content.clone()))
         .collect();
-    assert_eq!(
-        shown,
-        vec![Some(MeasId(1)), Some(MeasId(4)), Some(MeasId(3))]
-    );
-    assert_eq!(b.compared, vec![Compared::Meas { meas: MeasId(4) }]);
+    assert_eq!(shown, contents(4, PaneContent::Nothing));
     drop(c);
     hy.shutdown();
 }

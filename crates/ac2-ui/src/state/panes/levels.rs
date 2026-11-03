@@ -485,7 +485,7 @@ impl AppState {
         match self.layout.kind(pane) {
             kind @ (PaneKind::Transfer | PaneKind::Spectrum) => {
                 for m in self.measurements().into_iter().filter(|m| {
-                    self.live_on_pane(kind, m, shown) || self.live_compared_on(kind, m, shown)
+                    self.live_on_pane(kind, m, shown) || self.live_compared_on(kind, m, pane)
                 }) {
                     let Some(stream) = m.config.kind.stream() else {
                         continue;
@@ -502,7 +502,7 @@ impl AppState {
                 }
                 for (t, g) in self.rig.traces.values() {
                     if self.on_pane(kind, &t.meta, shown)
-                        || self.trace_compared_on(kind, &t.meta, shown)
+                        || self.trace_compared_on(kind, &t.meta, pane)
                     {
                         add(&g.centres(), &t.mag_db, t.meta.edit.offset.0);
                     }

@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 
 use ac2_proto::FrameData;
-use ac2_proto::model::layout::PaneContent;
+use ac2_proto::model::layout::{PaneContent, RigRef};
 use ac2_proto::topic::Topic;
 use ac2_scene::gonio::EmberRing;
 use ac2_scene::programme::loudness::{LoudnessFacts, NamedPair, plate_readout};
@@ -38,6 +38,7 @@ impl Metered {
     /// One to [`MAX_METERED`] distinct inputs; `None` otherwise.
     pub fn inputs_of(list: &[u16]) -> Option<Self> {
         let content = PaneContent::Inputs {
+            rig: RigRef::ThisRig,
             inputs: list.to_vec(),
         };
         content.check().ok()?;
@@ -64,12 +65,15 @@ impl Metered {
         }
     }
 
-    pub fn wire(&self) -> PaneContent {
+    /// As a layout's content naming rig `rig`'s inputs.
+    pub fn wire(&self, rig: RigRef) -> PaneContent {
         match self {
             Self::Inputs { .. } => PaneContent::Inputs {
+                rig,
                 inputs: self.inputs(),
             },
             Self::Pair { left, right } => PaneContent::Pair {
+                rig,
                 left: *left,
                 right: *right,
             },
@@ -81,9 +85,12 @@ impl Metered {
     pub fn from_wire(c: &PaneContent) -> Option<Self> {
         c.check().ok()?;
         match c {
-            PaneContent::Meas { .. } | PaneContent::Walk { .. } => None,
-            PaneContent::Inputs { inputs } => Self::inputs_of(inputs),
-            PaneContent::Pair { left, right } => Some(Self::Pair {
+            PaneContent::Nothing
+            | PaneContent::Curves { .. }
+            | PaneContent::Meter { .. }
+            | PaneContent::Walk { .. } => None,
+            PaneContent::Inputs { inputs, .. } => Self::inputs_of(inputs),
+            PaneContent::Pair { left, right, .. } => Some(Self::Pair {
                 left: *left,
                 right: *right,
             }),

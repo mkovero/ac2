@@ -223,25 +223,53 @@ impl Shared {
         self.traces.irs.remove(&id);
         self.traces.mic_curves.remove(&id);
         let rev = self.commit(Change::Trace(Patch::Deleted(id)));
-        let rev = self.prune_compared().unwrap_or(rev);
+        let rev = self.prune_layouts().unwrap_or(rev);
         Ok(ReplyBody::Ack { rev })
     }
 
-    /// Drops what is gone from every compare list, as the daemon does.
-    pub(super) fn prune_compared(&mut self) -> Option<Rev> {
-        let changed: Vec<Measurement> = self
-            .state
+    /// Drops this rig's references to what is gone from every stored layout, as the
+    /// daemon does: a graph pane left with no entry, or a meter or walk pane whose source
+    /// went, holds nothing.
+    pub(super) fn prune_layouts(&mut self) -> Option<Rev> {
+        use ac2_proto::model::layout::{EntryRef, PaneContent, RigRef};
+        let st = &self.state;
+        let meas = |id: MeasId| st.measurements.iter().any(|o| o.id == id);
+        let trace = |id: TraceId| st.traces.iter().any(|t| t.id == id);
+        let walk = |id: WalkId| st.walks.iter().any(|w| w.id == id);
+        let changed: Vec<Measurement> = st
             .measurements
             .iter()
             .filter_map(|m| {
-                let keep = |c: &Compared| match *c {
-                    Compared::Meas { meas } => self.state.measurements.iter().any(|o| o.id == meas),
-                    Compared::Trace { trace } => self.state.traces.iter().any(|t| t.id == trace),
-                };
                 let mut m = m.clone();
-                let n = m.compared.len();
-                m.compared.retain(keep);
-                (m.compared.len() != n).then_some(m)
+                let before = m.layout.clone();
+                for c in m.layout.iter_mut().flat_map(|l| l.contents_mut()) {
+                    let gone = match c {
+                        PaneContent::Curves { entries } => {
+                            entries.retain(|e| {
+                                e.rig != RigRef::ThisRig
+                                    || match e.what {
+                                        EntryRef::Group { meas: id }
+                                        | EntryRef::Live { meas: id } => meas(id),
+                                        EntryRef::Trace { trace: id } => trace(id),
+                                    }
+                            });
+                            entries.is_empty()
+                        }
+                        PaneContent::Meter {
+                            rig: RigRef::ThisRig,
+                            meas: id,
+                        } => !meas(*id),
+                        PaneContent::Walk {
+                            rig: RigRef::ThisRig,
+                            walk: id,
+                        } => !walk(*id),
+                        _ => false,
+                    };
+                    if gone {
+                        *c = PaneContent::Nothing;
+                    }
+                }
+                (m.layout != before).then_some(m)
             })
             .collect();
         let mut rev = None;

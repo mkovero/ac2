@@ -202,7 +202,6 @@ async fn a_long_log_in_pages_and_its_history() {
                 delay: None,
                 colour: None,
                 layout: None,
-                compared: Vec::new(),
                 offset: ac2_proto::units::Db(0.0),
                 eq: Vec::new(),
             }],

@@ -169,17 +169,11 @@ impl Control {
                 let mut m = self.meas(meas)?.clone();
                 if let Some(l) = &layout {
                     l.check().map_err(|e| perr(ErrorCode::Invalid, e))?;
+                    l.check_groups(|w| self.drawn_by_group(w))
+                        .map_err(|e| perr(ErrorCode::Invalid, e))?;
                 }
                 // Only what clients show changes: the job and its frames go on.
                 m.layout = layout;
-                self.commit(Change::Measurement(Patch::Set(m.clone())));
-                Ok(ReplyBody::Measurement(m))
-            }
-            Command::MeasCompare { meas, compared } => {
-                let mut m = self.meas(meas)?.clone();
-                self.check_compared(&m, &compared)?;
-                // Only what its panes draw changes: the job and its frames go on.
-                m.compared = compared;
                 self.commit(Change::Measurement(Patch::Set(m.clone())));
                 Ok(ReplyBody::Measurement(m))
             }
@@ -477,7 +471,6 @@ impl Control {
             grid_id,
             colour: None,
             layout: None,
-            compared: Vec::new(),
             offset: Db(0.0),
             eq: Vec::new(),
         };

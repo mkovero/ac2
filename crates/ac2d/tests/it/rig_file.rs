@@ -162,7 +162,7 @@ fn a_v1_file_loads_whole_and_round_trips() {
     assert_eq!(st.rig.levels, LevelsSettings::default());
     assert_eq!(st.rig.levels.loudness_target, Lufs(-23.0));
     let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 8);
+    assert_eq!(rj["version"], 9);
     assert_eq!(rj["levels"]["loudness_target"], json!(-23.0));
     assert_eq!(
         rj["monitor_session"],
@@ -307,17 +307,20 @@ fn a_v2_meter_layout_with_a_pick_reads_whole() {
     assert_eq!(picked[0].chrome, layout::PlotChrome::NoGrid);
     assert_eq!(
         picked[0].content,
-        Some(layout::PaneContent::Meas { meas: MeasId(1) })
+        layout::PaneContent::Meter {
+            rig: layout::RigRef::ThisRig,
+            meas: MeasId(1)
+        }
     );
     // A pane without plates keeps them all where the client puts them, the loudness
     // readout docked; the levels the file never had are the defaults, target included.
     assert_eq!(picked[0].plates, layout::LayoutPlates::default());
     assert_eq!(st.rig.levels, LevelsSettings::default());
     let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 8);
+    assert_eq!(rj["version"], 9);
     assert_eq!(
         rj["meters"][0]["layout"]["pane"]["content"],
-        json!({ "type": "meas", "meas": 1 })
+        json!({ "type": "meter", "rig": { "type": "this_rig" }, "meas": 1 })
     );
     assert_eq!(
         rj["meters"][0]["layout"]["pane"]["plates"]["loudness"],
@@ -374,7 +377,7 @@ fn a_v3_meter_layout_with_three_plates_reads_whole() {
     assert_eq!(st.rig.levels.ballistic, Ballistic::Type2, "kept");
     assert_eq!(st.rig.levels.loudness_target, Lufs(-23.0));
     let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 8);
+    assert_eq!(rj["version"], 9);
     assert_eq!(rj["meters"][0]["layout"]["pane"]["plates"]["peaks"], auto);
     assert_eq!(
         rj["meters"][0]["layout"]["pane"]["plates"]["loudness"],
@@ -429,7 +432,7 @@ fn a_v4_file_gains_the_loudness_target_and_plate() {
     assert_eq!(pane.plates.peaks.at, Some([0.25, 0.5]));
     assert_eq!(pane.plates.loudness, layout::LayoutPlate::default());
     let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 8);
+    assert_eq!(rj["version"], 9);
     assert_eq!(rj["levels"]["loudness_target"], json!(-23.0));
     assert_eq!(
         rj["meters"][0]["layout"]["pane"]["plates"]["loudness"],
@@ -460,7 +463,7 @@ fn a_v5_monitor_session_opens_no_spare_inputs() {
     );
     assert_rig_kept(&st, &s);
     let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 8);
+    assert_eq!(rj["version"], 9);
     assert_eq!(rj["monitor_session"]["spare_inputs"], json!(0));
     assert_eq!(
         rj["monitor_session"],
@@ -522,19 +525,23 @@ fn a_v6_pair_pane_becomes_a_goniometer_beside_its_meters() {
     for p in &panes[1..] {
         assert_eq!(
             p.content,
-            Some(layout::PaneContent::Pair { left: 2, right: 3 })
+            layout::PaneContent::Pair {
+                rig: layout::RigRef::ThisRig,
+                left: 2,
+                right: 3
+            }
         );
         assert_eq!(p.chrome, layout::PlotChrome::NoGrid);
     }
     let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 8);
+    assert_eq!(rj["version"], 9);
     assert_eq!(rj["meters"][0]["layout"]["b"]["type"], "split");
     drop(c);
     h.shutdown();
 }
 
 /// A version 7 file: its meters' panes name no rig, and every one of them showed this
-/// daemon's inputs, so each becomes `this_rig`.
+/// daemon's inputs, so each reference names this rig.
 #[test]
 fn a_v7_meter_layout_shows_this_rig() {
     let s = seeded();
@@ -574,17 +581,99 @@ fn a_v7_meter_layout_shows_this_rig() {
         .layout
         .as_ref()
         .expect("the meter's layout");
-    let panes = layout.panes();
-    assert_eq!(panes.len(), 2);
-    for p in &panes {
-        assert_eq!(p.rig, layout::RigRef::ThisRig);
-    }
-    let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 8);
+    let contents: Vec<_> = layout.panes().iter().map(|p| p.content.clone()).collect();
     assert_eq!(
-        rj["meters"][0]["layout"]["a"]["pane"]["rig"]["type"],
-        "this_rig"
+        contents,
+        vec![
+            layout::PaneContent::Meter {
+                rig: layout::RigRef::ThisRig,
+                meas: MeasId(1)
+            },
+            layout::PaneContent::Pair {
+                rig: layout::RigRef::ThisRig,
+                left: 0,
+                right: 1
+            },
+        ]
     );
+    let rj = rig_json(dir.path());
+    assert_eq!(rj["version"], 9);
+    drop(c);
+    h.shutdown();
+}
+
+/// A version 8 file: a meter pane with no pick showed the meter, now its own `meter`
+/// reference; a pane of another kind with no pick holds nothing; a pick of another rig
+/// keeps that rig on the reference. The old file is kept as `rig.json.v8`.
+#[test]
+fn a_v8_meter_layout_names_the_rig_per_reference() {
+    let s = seeded();
+    let auto = json!({ "at": null, "scale": 1.0 });
+    let pane = |kind: &str, content: Value, rig: Value| {
+        json!({ "type": "pane", "pane": {
+            "kind": kind, "transfer_view": "magnitude", "spectrum_view": "spectrum",
+            "spl_view": "leq", "sweep_view": "response", "programme_view": "meters",
+            "chrome": "full", "content": content,
+            "levels": { "transfer": null, "spectrum_dbfs": null, "spectrum_spl": null,
+                        "distortion": null },
+            "plates": { "legend": auto, "readout": auto, "mark": auto, "peaks": auto,
+                        "loudness": auto },
+            "rig": rig } })
+    };
+    let this = json!({ "type": "this_rig" });
+    let pinned = json!({ "type": "rig", "id": 7, "name": "ketunkolo" });
+    let layout = json!({ "type": "split", "axis": "row", "ratio": 0.5,
+        "a": pane("spl", Value::Null, this.clone()),
+        "b": { "type": "split", "axis": "column", "ratio": 0.5,
+            "a": pane("transfer", Value::Null, this),
+            "b": pane("spl", json!({ "type": "meas", "meas": 3 }), pinned) } });
+    let meter = json!({ "id": 1, "config": s.meter, "running": true, "colour": null,
+                        "layout": layout });
+    let dir = tempfile::tempdir().unwrap();
+    let mut v: Value =
+        serde_json::from_slice(&v2_with_meters(dir.path(), &s, json!([meter]))).unwrap();
+    v["version"] = json!(8);
+    let levels = serde_json::to_value(LevelsSettings::default()).unwrap();
+    v.as_object_mut().unwrap().insert("levels".into(), levels);
+    v["monitor_session"]["spare_inputs"] = json!(0);
+    std::fs::write(dir.path().join("rig.json"), serde_json::to_vec(&v).unwrap()).unwrap();
+    let h = start("rig-file-v8", dir.path());
+    let (mut c, _sub) = connect(&h, &[]);
+    let st = state(&mut c);
+    assert!(
+        st.rig.damaged_files.is_empty(),
+        "{:?}",
+        st.rig.damaged_files
+    );
+    let layout = st.measurements[0]
+        .layout
+        .as_ref()
+        .expect("the meter's layout");
+    let contents: Vec<_> = layout.panes().iter().map(|p| p.content.clone()).collect();
+    assert_eq!(
+        contents,
+        vec![
+            layout::PaneContent::Meter {
+                rig: layout::RigRef::ThisRig,
+                meas: MeasId(1)
+            },
+            layout::PaneContent::Nothing,
+            layout::PaneContent::Meter {
+                rig: layout::RigRef::Rig {
+                    id: ac2_proto::units::RigId(7),
+                    name: "ketunkolo".into()
+                },
+                meas: MeasId(3)
+            },
+        ]
+    );
+    assert!(
+        dir.path().join("rig.json.v8").exists(),
+        "the old file is kept"
+    );
+    let rj = rig_json(dir.path());
+    assert_eq!(rj["version"], 9);
+    assert!(rj["meters"][0]["layout"]["a"]["pane"].get("rig").is_none());
     drop(c);
     h.shutdown();
 }

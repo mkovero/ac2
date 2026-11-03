@@ -148,6 +148,7 @@ impl AppState {
         self.set_pane_kind(p, PaneKind::Programme);
         if let Some(v) = self.layout.view_mut(p) {
             v.meas = None;
+            v.with.clear();
             v.meters = Some(m);
             v.rig = if r == self.rig.id {
                 PaneRig::Active
@@ -162,6 +163,8 @@ impl AppState {
     fn forget_pane_waits(&mut self, p: PaneId) {
         for r in std::iter::once(&mut self.rig).chain(&mut self.background) {
             r.pending.pane_meas.remove(&p);
+            r.pending.deleted.remove(&p);
+            r.pending.with_names.remove(&p);
         }
         for w in self.rig_pending.values_mut() {
             w.remove(&p);
@@ -261,5 +264,49 @@ impl AppState {
             PaneRig::Active => None,
             PaneRig::Rig(r) => Some((r, self.rig_name(r))),
         }
+    }
+
+    /// What graph pane view `v` draws behind its lead, as the preferences keep it: each entry
+    /// by id with the name it has in its rig's mirror now (a measurement's, a trace's), else
+    /// the name it was remembered by.
+    pub(super) fn pane_pref_curves(&self, id: PaneId, v: &View) -> Vec<crate::prefs::CurvePrefs> {
+        let remembered = |what: EntryRef| {
+            self.prefs
+                .layout
+                .panes
+                .as_ref()
+                .and_then(|p| p.views.iter().find(|v| v.id == id))
+                .and_then(|v| v.curves.iter().find(|c| c.what == what))
+                .and_then(|c| c.name.clone())
+        };
+        let pane = self.pane_rig(v);
+        v.with
+            .as_slice()
+            .iter()
+            .map(|p| {
+                let rig = p.rig.unwrap_or(pane);
+                let r = self.find_rig(rig).filter(|r| r.daemon().is_some());
+                let now = r.and_then(|r| {
+                    let s = r.daemon()?;
+                    match p.what {
+                        EntryRef::Group { meas } | EntryRef::Live { meas } => s
+                            .measurements
+                            .iter()
+                            .find(|m| m.id == meas)
+                            .map(|m| m.config.name.clone()),
+                        EntryRef::Trace { trace } => s
+                            .traces
+                            .iter()
+                            .find(|t| t.id == trace)
+                            .map(|t| t.edit.name.clone()),
+                    }
+                });
+                crate::prefs::CurvePrefs {
+                    what: p.what,
+                    name: now.or_else(|| remembered(p.what)),
+                    rig: p.rig.map(|r| (r, self.rig_name(r))),
+                }
+            })
+            .collect()
     }
 }

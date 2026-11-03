@@ -1,7 +1,7 @@
 //! What a measurement keeps about how clients draw it: a spectrum's display settings
-//! (`meas.update` in place), its display offset (`meas.offset`) and the curves compared into
-//! its panes (`meas.compare`). None of it touches the job; all of it is saved in the
-//! session, and a deleted measurement or trace leaves every compare list.
+//! (`meas.update` in place), its display offset (`meas.offset`) and the curves each pane of
+//! its own layout draws (`meas.layout`). None of it touches the job; all of it is saved in
+//! the session, and a deleted measurement, trace or walk leaves every stored layout.
 #![allow(clippy::unwrap_used)]
 
 use crate::common;
@@ -50,6 +50,10 @@ fn meas_of(c: &mut Client, id: MeasId) -> Measurement {
 }
 
 fn import(c: &mut Client) -> TraceMeta {
+    import_under(c, TraceOwner::Imported)
+}
+
+fn import_under(c: &mut Client, owner: TraceOwner) -> TraceMeta {
     let name = "rew_export.txt";
     let content = std::fs::read(
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -63,7 +67,7 @@ fn import(c: &mut Client) -> TraceMeta {
         role: ImportRole::Trace,
         ir: None,
         content: Blob(content),
-        owner: ac2_proto::model::TraceOwner::Imported,
+        owner,
     }) {
         ReplyBody::Trace(t) => t,
         other => panic!("{other:?}"),
@@ -124,9 +128,10 @@ fn display_settings_keep_the_job_and_survive_a_reload() {
         meas: b.id,
         offset: Db(6.0),
     });
-    c.ok(Command::MeasCompare {
+    let drawn = curves(vec![group(a.id), live(b.id)]);
+    c.ok(Command::MeasLayout {
         meas: a.id,
-        compared: vec![Compared::Meas { meas: b.id }],
+        layout: Some(one_pane(layout::PaneKind::Spectrum, drawn.clone())),
     });
     assert_eq!(meas_of(c, b.id).config_rev, b.config_rev);
 
@@ -134,72 +139,136 @@ fn display_settings_keep_the_job_and_survive_a_reload() {
     let a = meas_of(c, a.id);
     let b = meas_of(c, b.id);
     assert_eq!(a.config.kind.display(), Some(&want));
-    assert_eq!(a.compared, [Compared::Meas { meas: b.id }]);
+    assert_eq!(
+        a.layout.map(|l| l.panes()[0].content.clone()),
+        Some(drawn),
+        "a pane's curves come back with the session"
+    );
     assert_eq!(b.offset, Db(6.0));
     assert_eq!(b.config.kind.display(), Some(&SpectrumDisplay::default()));
     h.shutdown();
 }
 
+fn entry(what: layout::EntryRef) -> layout::PaneEntry {
+    layout::PaneEntry {
+        rig: layout::RigRef::ThisRig,
+        what,
+    }
+}
+
+fn group(meas: MeasId) -> layout::PaneEntry {
+    entry(layout::EntryRef::Group { meas })
+}
+
+fn live(meas: MeasId) -> layout::PaneEntry {
+    entry(layout::EntryRef::Live { meas })
+}
+
+fn trace(trace: TraceId) -> layout::PaneEntry {
+    entry(layout::EntryRef::Trace { trace })
+}
+
+fn curves(entries: Vec<layout::PaneEntry>) -> layout::PaneContent {
+    layout::PaneContent::Curves { entries }
+}
+
+fn one_pane(kind: layout::PaneKind, content: layout::PaneContent) -> PaneLayout {
+    let mut l = ac2_proto::samples::pane_layout();
+    let mut p = l.panes_mut()[0].clone();
+    p.kind = kind;
+    p.content = content;
+    PaneLayout::Pane { pane: Box::new(p) }
+}
+
+fn content_of(c: &mut Client, id: MeasId) -> Vec<layout::PaneContent> {
+    meas_of(c, id)
+        .layout
+        .map(|l| l.panes().iter().map(|p| p.content.clone()).collect())
+        .unwrap_or_default()
+}
+
 #[test]
-fn compare_lists_refuse_bad_entries_and_lose_what_is_deleted() {
+fn pane_entries_refuse_what_their_group_draws_and_lose_what_is_deleted() {
     let dir = tempfile::tempdir().unwrap();
-    let h = start("meas-compare", dir.path());
+    let h = start("meas-pane-entries", dir.path());
     let (mut c, _sub) = connect(&h, &[]);
     let c = &mut c;
     let a = created(c, spectrum("A"));
     let b = created(c, spectrum("B"));
     let spl = created(c, spl("SPL", 1));
     let t = import(c);
-    let refused = |c: &mut Client, meas: MeasId, compared: Vec<Compared>| {
-        c.call(Command::MeasCompare { meas, compared })
-            .unwrap_err()
-            .code
+    let under_a = import_under(c, TraceOwner::Meas { meas: a.id });
+    let refused = |c: &mut Client, content: layout::PaneContent| {
+        c.call(Command::MeasLayout {
+            meas: a.id,
+            layout: Some(one_pane(layout::PaneKind::Spectrum, content)),
+        })
+        .unwrap_err()
     };
+    let e = refused(c, curves(vec![group(a.id), trace(under_a.id)]));
+    assert_eq!(e.code, ErrorCode::Invalid);
+    assert!(e.msg.contains("drawn by the group"), "{}", e.msg);
     assert_eq!(
-        refused(c, a.id, vec![Compared::Meas { meas: a.id }]),
+        refused(c, curves(vec![group(a.id), live(a.id)])).code,
         ErrorCode::Invalid,
-        "itself"
+        "its own live curve is the group's"
     );
     assert_eq!(
-        refused(
-            c,
-            a.id,
-            vec![Compared::Meas { meas: b.id }, Compared::Meas { meas: b.id }]
-        ),
+        refused(c, curves(vec![group(b.id), group(b.id)])).code,
         ErrorCode::Invalid,
         "twice"
     );
-    assert_eq!(
-        refused(c, a.id, vec![Compared::Meas { meas: MeasId(99) }]),
-        ErrorCode::NotFound
-    );
-    assert_eq!(
-        refused(c, a.id, vec![Compared::Trace { trace: TraceId(99) }]),
-        ErrorCode::NotFound
-    );
-    assert_eq!(
-        refused(c, spl.id, vec![Compared::Meas { meas: a.id }]),
-        ErrorCode::Invalid,
-        "an SPL meter draws no curve"
-    );
-    c.ok(Command::MeasCompare {
+    // Another rig's ids are its own: the same number is another curve.
+    let other = layout::PaneEntry {
+        rig: layout::RigRef::Rig {
+            id: RigId(7),
+            name: "ketunkolo".into(),
+        },
+        what: layout::EntryRef::Group { meas: b.id },
+    };
+    c.ok(Command::MeasLayout {
         meas: a.id,
-        compared: vec![
-            Compared::Trace { trace: t.id },
-            Compared::Meas { meas: b.id },
-        ],
+        layout: Some(one_pane(
+            layout::PaneKind::Spectrum,
+            curves(vec![group(a.id), trace(t.id), group(b.id), other.clone()]),
+        )),
     });
-    c.ok(Command::MeasCompare {
+    c.ok(Command::MeasLayout {
         meas: b.id,
-        compared: vec![Compared::Trace { trace: t.id }],
+        layout: Some(one_pane(
+            layout::PaneKind::Spectrum,
+            curves(vec![trace(t.id)]),
+        )),
+    });
+    c.ok(Command::MeasLayout {
+        meas: spl.id,
+        layout: Some(one_pane(
+            layout::PaneKind::Spl,
+            layout::PaneContent::Meter {
+                rig: layout::RigRef::ThisRig,
+                meas: b.id,
+            },
+        )),
     });
     c.ok(Command::TraceDelete { trace: t.id });
-    assert_eq!(meas_of(c, a.id).compared, [Compared::Meas { meas: b.id }]);
-    assert!(meas_of(c, b.id).compared.is_empty());
+    assert_eq!(
+        content_of(c, a.id),
+        [curves(vec![group(a.id), group(b.id), other.clone()])]
+    );
+    assert_eq!(
+        content_of(c, b.id),
+        [layout::PaneContent::Nothing],
+        "the last entry gone leaves nothing picked"
+    );
     c.ok(Command::MeasDelete {
         meas: b.id,
         traces: OwnedTraces::Delete,
     });
-    assert!(meas_of(c, a.id).compared.is_empty());
+    assert_eq!(
+        content_of(c, a.id),
+        [curves(vec![group(a.id), other])],
+        "another rig's reference is that rig's to prune"
+    );
+    assert_eq!(content_of(c, spl.id), [layout::PaneContent::Nothing]);
     h.shutdown();
 }

@@ -169,9 +169,13 @@ pub enum PaneRig {
 pub struct View {
     /// The kind of plot: the kind of the measurement put in it last (Tab, the list).
     pub kind: PaneKind,
-    /// The measurement picked for it (a row dropped on it, its own layout); `None`: nothing
-    /// picked, except in its owner's layout, where it reads as the owner.
+    /// Its lead: the measurement whose group a graph pane draws on top and whose name and
+    /// readouts it has, or the meter an SPL pane shows. An id the mirror does not list waits
+    /// here as the pane's pick; `None`: nothing picked (or, on a graph pane, a lead that is
+    /// one curve, first in `with`).
     pub meas: Option<MeasId>,
+    /// What a graph pane draws behind its lead, C's ticks; empty on every other kind.
+    pub with: With,
     /// What a Programme pane meters; `None` on every other kind.
     pub meters: Option<crate::state::Metered>,
     /// The walk a Walk pane shows; `None` on every other kind.
@@ -188,6 +192,7 @@ impl View {
         Self {
             kind,
             meas: None,
+            with: With::default(),
             meters: None,
             walk: None,
             modes: PaneModes::default(),
@@ -198,7 +203,7 @@ impl View {
 
     /// Something was chosen for the pane (a measurement, meters): it shows its rig's ids.
     pub fn has_content(&self) -> bool {
-        self.meas.is_some() || self.meters.is_some() || self.walk.is_some()
+        self.meas.is_some() || !self.with.is_empty() || self.meters.is_some() || self.walk.is_some()
     }
 
     /// A transfer pane in its IR view.

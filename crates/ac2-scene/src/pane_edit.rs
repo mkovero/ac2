@@ -51,6 +51,25 @@ pub fn drop_label(item: &str, spot: DropSpot, becomes: Option<&str>) -> String {
 /// what it shows.
 pub const NOTHING_PICKED: &str = "nothing picked \u{2014} drag a row of the list here";
 
+/// What an SPL command says when the SPL pane it acts on has nothing picked.
+pub const SPL_NOTHING_PICKED: &str = "nothing picked in the SPL pane \u{2014} drag a meter onto it";
+
+/// What an SPL command says when no SPL pane is on screen: it acts on the meter a pane
+/// shows.
+pub const NO_SPL_PANE: &str = "no SPL pane shows a meter \u{2014} drag one onto a pane";
+
+/// What a pane says after its rig deleted what it showed: the name, until the pane is
+/// given something else.
+pub fn deleted_here(name: &str) -> String {
+    format!("{name} deleted \u{2014} drag a row here")
+}
+
+/// What a pane says while what it was given is not listed by its rig yet (`what`: its
+/// name when known, else `measurement 4`).
+pub fn waiting_for(what: &str, rig: &str) -> String {
+    format!("{what} \u{b7} waiting for {rig}")
+}
+
 /// E on a Programme pane: what it meters is what was dropped on it.
 pub const PROGRAMME_EDIT: &str =
     "a Programme pane meters the Inputs row dropped on it: drag an input or a pair here";
@@ -201,6 +220,15 @@ mod tests {
         );
         assert_eq!(undid(&PaneEdit::Resize), "Undid: resize the panes");
         assert_eq!(NOTHING_TO_UNDO, "Nothing to undo");
+    }
+
+    #[test]
+    fn a_pane_says_what_it_lost_or_waits_for() {
+        assert_eq!(
+            deleted_here("FOH SPL"),
+            "FOH SPL deleted \u{2014} drag a row here"
+        );
+        assert_eq!(waiting_for("TF 1", "pupu"), "TF 1 \u{b7} waiting for pupu");
     }
 
     #[test]

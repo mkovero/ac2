@@ -163,7 +163,6 @@ async fn session_meas_delay_trace_flow() -> R {
             "grid_id": null,
             "colour": null,
             "layout": null,
-            "compared": [],
             "offset": 0.0
         })
     );

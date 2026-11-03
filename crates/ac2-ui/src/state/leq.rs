@@ -64,7 +64,7 @@ impl AppState {
     pub(super) fn spl_weightings(&mut self, c: CommandId, out: &mut Vec<Request>) {
         use CommandId as C;
         use ac2_proto::model::{TimeWeighting as T, Weighting as W};
-        let Some(mut m) = self.kind_meas(PaneKind::Spl).cloned() else {
+        let Some(mut m) = self.shown_of_kind(PaneKind::Spl).cloned() else {
             self.warn(self.no_spl_meter());
             return;
         };

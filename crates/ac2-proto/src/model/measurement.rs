@@ -685,28 +685,6 @@ impl ColourFamily {
     }
 }
 
-/// A curve compared into a measurement's panes (`meas.compare`): drawn there over the
-/// measurement's own group, never on another measurement's panes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-pub enum Compared {
-    /// A measurement's live curve, or a math channel.
-    Meas {
-        /// The measurement.
-        meas: MeasId,
-    },
-    /// A stored trace.
-    Trace {
-        /// The trace.
-        trace: TraceId,
-    },
-}
-
-impl Compared {
-    /// Most curves one measurement compares.
-    pub const MAX: usize = 32;
-}
-
 /// Measurement entity.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -729,10 +707,8 @@ pub struct Measurement {
     /// The panes a client shows while this measurement is selected (`meas.layout`);
     /// `None`: none of its own, a client keeps the panes it has.
     pub layout: Option<super::PaneLayout>,
-    /// Curves its panes draw compared (`meas.compare`), first compared first.
-    pub compared: Vec<Compared>,
     /// Display offset of its live curves (`meas.offset`), wherever they are drawn (in
-    /// another measurement's panes too, compared): display only, its frames carry the
+    /// another measurement's panes too): display only, its frames carry the
     /// measured levels. At most [`Measurement::OFFSET_MAX_DB`] either way.
     pub offset: Db,
     /// EQ what-if sets (`meas.eq`), transfer and sweep measurements only.

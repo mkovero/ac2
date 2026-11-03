@@ -16,10 +16,12 @@ fn split_spl(id: u32) -> PaneLayout {
             sweep_view: wire::SweepView::Response,
             programme_view: wire::ProgrammeView::Meters,
             chrome: wire::PlotChrome::Full,
-            content: Some(wire::PaneContent::Meas { meas: MeasId(id) }),
+            content: wire::PaneContent::Meter {
+                rig: wire::RigRef::ThisRig,
+                meas: MeasId(id),
+            },
             levels: wire::LayoutLevels::default(),
             plates: wire::LayoutPlates::default(),
-            rig: wire::RigRef::ThisRig,
         }),
     };
     PaneLayout::Split {
@@ -48,7 +50,7 @@ fn click(t: &mut T, id: u32) {
 
 /// `SPL 2`'s two panes are the layout, and both are drawn (beside `others` of another rig).
 fn both_shown_beside(t: &T, others: usize, what: &str) {
-    let shown = crate::state::panes::meas_layout::owner_plain(&split_spl(5), MeasId(5));
+    let shown = split_spl(5);
     assert_eq!(t.st.pane_layout(), shown, "{what}");
     let area = PaneRect::new(0.0, 0.0, 1000.0, 600.0);
     let drawn = t.st.pane_rects(area, 0.0).len();
@@ -191,10 +193,13 @@ fn field_layout(id: u32) -> PaneLayout {
                 sweep_view: wire::SweepView::Response,
                 programme_view,
                 chrome: wire::PlotChrome::Full,
-                content: Some(wire::PaneContent::Pair { left: 0, right: 1 }),
+                content: wire::PaneContent::Pair {
+                    rig: wire::RigRef::ThisRig,
+                    left: 0,
+                    right: 1,
+                },
                 levels: wire::LayoutLevels::default(),
                 plates: wire::LayoutPlates::default(),
-                rig: wire::RigRef::ThisRig,
             }),
         })
     };
@@ -228,7 +233,7 @@ fn the_field_layout_comes_back_whole() {
         click(&mut t, 4);
         t.key("W");
         click(&mut t, 5);
-        let shown = crate::state::panes::meas_layout::owner_plain(&field_layout(5), MeasId(5));
+        let shown = field_layout(5);
         assert_eq!(t.st.pane_layout(), shown, "behind {behind}");
         let area = PaneRect::new(0.0, 0.0, 1000.0, 600.0);
         assert_eq!(t.st.pane_rects(area, 0.0).len(), 3, "behind {behind}");

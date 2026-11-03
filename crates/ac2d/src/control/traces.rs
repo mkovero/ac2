@@ -542,7 +542,7 @@ impl Control {
         self.check_eq_trace_delete(id)?;
         self.traces.remove(id);
         let rev = self.commit(Change::Trace(Patch::Deleted(id)));
-        let rev = self.prune_compared().unwrap_or(rev);
+        let rev = self.prune_layouts().unwrap_or(rev);
         Ok(ReplyBody::Ack { rev })
     }
 

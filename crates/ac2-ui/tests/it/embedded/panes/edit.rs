@@ -267,20 +267,28 @@ fn a_hides_and_backspace_deletes_the_selected_measurement() -> R {
     d.key("Enter");
     d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
     d.tf_frames(second.id, 240)?;
-    // The transfer pane draws one measurement's group; each compared into the other (C,
-    // Enter on the one target) keeps both curves on it whichever measurement it follows.
-    d.key("C");
-    d.key("Enter");
-    d.key("Escape");
+    // The first's row chosen, its transfer pane draws its group; the second ticked into it
+    // (C, Enter on its row) draws behind it.
     d.send(Msg::SelectMeas(first.id));
+    let tp = crate::common::pane(&d.st, PaneKind::Transfer);
+    d.send(Msg::FocusPane(tp));
     d.key("C");
+    let Overlay::Choose(c) = &mut d.st.overlay else {
+        return Err(format!("no tick list: {:?}", d.st.overlay).into());
+    };
+    c.index = c
+        .choices
+        .iter()
+        .position(|c| !c.label.starts_with('✓'))
+        .ok_or("the other measurement in the tick list")?;
     d.key("Enter");
     d.key("Escape");
-    d.until("each compared into the other", |s| {
-        [first.id, second.id]
-            .iter()
-            .all(|id| s.meas(*id).is_some_and(|m| m.compared.len() == 1))
-    })?;
+    assert_eq!(
+        d.st.compared_into(tp).len(),
+        1,
+        "{:?}",
+        d.st.compared_into(tp)
+    );
 
     let theme = Theme::dark();
     let size = ac2_scene::primitives::Viewport {

@@ -88,7 +88,6 @@ fn spl_meas(id: u32, name: &str) -> Measurement {
         grid_id: None,
         colour: None,
         layout: None,
-        compared: Vec::new(),
         offset: ac2_proto::units::Db(0.0),
         eq: Vec::new(),
     }

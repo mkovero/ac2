@@ -211,11 +211,11 @@ impl AppState {
         let shown = self.pane_meas(id);
         // The IR view draws a stored trace only through its impulse response.
         if kind == PaneKind::Transfer && self.pane_modes(id).transfer.ir().is_some() {
-            return self.stored_ir(shown).map(|d| &d.meta);
+            return self.stored_ir(Some(id)).map(|d| &d.meta);
         }
         self.selected_trace_meta().filter(|t| {
             SmoothTarget::Trace((*t).clone()).pane() == kind
-                && (self.on_pane(kind, t, shown) || self.trace_compared_on(kind, t, shown))
+                && (self.on_pane(kind, t, shown) || self.trace_compared_on(kind, t, id))
         })
     }
 
@@ -526,9 +526,19 @@ impl AppState {
                 .find_map(|c| keymap.label(c, Scope::Global))
                 .unwrap_or_else(|| "Command palette".to_owned());
             ac2_scene::new_meas::no_measurements(&reach)
+        } else if let Some(name) = self.rig.pending.deleted.get(&pane).filter(|_| {
+            self.layout
+                .view(pane)
+                .is_some_and(|v| self.ours(v) && !v.has_content())
+        }) {
+            // Its name still waits, so one made again takes the pane back; until then the
+            // pane says why it emptied.
+            ac2_scene::pane_edit::deleted_here(name)
         } else if self.pane_unpicked(pane) {
             // An unpicked pane follows no selection: a row dropped on it is what it shows.
             ac2_scene::pane_edit::NOTHING_PICKED.to_owned()
+        } else if let Some(what) = self.pane_waits(pane) {
+            ac2_scene::pane_edit::waiting_for(&what, &self.rig_name(self.rig.id))
         } else if !self.pane_shows_stored(pane)
             && let n @ 1.. = self.imported_traces(kind)
         {
@@ -579,6 +589,17 @@ impl AppState {
         Some(EmptyHint { text, place })
     }
 
+    /// What pane `pane` of the rig in `rig` was given that the mirror does not list yet: the
+    /// name it was kept by, else its lead's id. `None` when its lead is listed or it has none.
+    pub fn pane_waits(&self, pane: PaneId) -> Option<String> {
+        let v = self.layout.view(pane).filter(|v| self.ours(v))?;
+        if let Some(n) = self.rig.pending.pane_meas.get(&pane) {
+            return Some(n.clone());
+        }
+        let id = v.meas?;
+        self.meas(id).is_none().then(|| format!("measurement {id}"))
+    }
+
     /// A measurement pane (a graph or an SPL meter) of the rig in `rig` with nothing picked
     /// and no pick waiting for the mirror: it shows nothing until a row is dropped on it.
     pub fn pane_unpicked(&self, pane: PaneId) -> bool {
@@ -588,9 +609,8 @@ impl AppState {
                     v.kind,
                     PaneKind::Transfer | PaneKind::Spectrum | PaneKind::Distortion | PaneKind::Spl
                 )
-                && v.meas.is_none()
-        }) && !self.rig.pending.pane_ids.contains_key(&pane)
-            && !self.rig.pending.pane_meas.contains_key(&pane)
+                && !v.has_content()
+        }) && !self.rig.pending.pane_meas.contains_key(&pane)
     }
 
     /// Whether pane `pane` draws any stored curve whose data has arrived: a shown capture,
@@ -602,7 +622,7 @@ impl AppState {
         }
         let shown = self.pane_meas(pane);
         self.rig.traces.values().any(|(t, _)| {
-            self.on_pane(kind, &t.meta, shown) || self.trace_compared_on(kind, &t.meta, shown)
+            self.on_pane(kind, &t.meta, shown) || self.trace_compared_on(kind, &t.meta, pane)
         })
     }
 
@@ -656,54 +676,49 @@ impl AppState {
             .is_some_and(|g| Some(g) == self.group_of_shown(shown))
     }
 
-    /// Whether a pane of kind `kind` showing `shown` draws `m`'s live curve for compare
-    /// only: compared into `shown` (C), not hidden, a curve the pane draws, and not of the
-    /// pane's group (drawn there anyway, once, unmarked).
-    pub fn live_compared_on(
-        &self,
-        kind: PaneKind,
-        m: &Measurement,
-        shown: Option<&Measurement>,
-    ) -> bool {
+    /// Whether pane `pane` (of kind `kind`) draws `m`'s live curve behind its lead: an
+    /// entry brings it (the curve, or its group), it is not hidden, it is a curve the pane
+    /// draws, and the lead's group does not draw it already (drawn there once, unmarked).
+    pub fn live_compared_on(&self, kind: PaneKind, m: &Measurement, pane: PaneId) -> bool {
+        let c = EntryRef::Live { meas: m.id };
         Self::live_drawn_in(m, kind)
             && !self.meas_hidden(m)
             && self
-                .compared_into(shown)
-                .contains(&ac2_proto::model::Compared::Meas { meas: m.id })
-            && !self.live_on_pane(kind, m, shown)
+                .compared_into(pane)
+                .iter()
+                .any(|e| self.entry_brings(*e, c))
+            && !self.live_on_pane(kind, m, self.pane_meas(pane))
     }
 
-    /// Whether a pane of kind `kind` showing `shown` draws stored trace `t` for compare
-    /// only: compared into `shown`, shown, of a kind the pane draws, filed under a measurement, and not
-    /// of the pane's group. An imported one is not drawn even compared: it is no
-    /// measurement's yet. The sweep pane's compared runs are [`Self::compared_sweeps`].
-    pub fn trace_compared_on(
-        &self,
-        kind: PaneKind,
-        t: &TraceMeta,
-        shown: Option<&Measurement>,
-    ) -> bool {
+    /// Whether pane `pane` (of kind `kind`) draws stored trace `t` behind its lead: an
+    /// entry brings it, it is shown, of a kind the pane draws, filed under a measurement,
+    /// and not of the lead's group. An imported one is not drawn: it is no measurement's
+    /// yet. The sweep pane's runs behind its own are [`Self::compared_sweeps`].
+    pub fn trace_compared_on(&self, kind: PaneKind, t: &TraceMeta, pane: PaneId) -> bool {
+        let c = EntryRef::Trace { trace: t.id };
         kind != PaneKind::Distortion
-            && self
-                .compared_into(shown)
-                .contains(&ac2_proto::model::Compared::Trace { trace: t.id })
             && kind_shown(t, kind)
             && ac2_scene::meas_list::group_of(t, &self.measurements()) != TraceOwner::Imported
-            && !self.on_pane(kind, t, shown)
+            && self
+                .compared_into(pane)
+                .iter()
+                .any(|e| self.entry_brings(*e, c))
+            && !self.on_pane(kind, t, self.pane_meas(pane))
     }
 
-    /// The tree rows compared (C) into the focused pane's measurement, for their mark.
+    /// The tree rows the focused pane draws behind its lead, for their mark: a ticked
+    /// measurement's row, a live curve's, a trace's.
     pub(super) fn compared_rows(&self) -> Vec<ac2_scene::meas_list::TreeKey> {
-        use ac2_proto::model::Compared;
         use ac2_scene::meas_list::TreeKey;
-        self.compared_into(self.pane_meas(self.layout.focus))
+        self.compared_into(self.layout.focus)
             .iter()
             .filter_map(|c| match *c {
-                Compared::Meas { meas } => self.meas(meas).map(|m| match m.config.kind {
+                EntryRef::Group { meas } => Some(TreeKey::Meas(meas)),
+                EntryRef::Live { meas } => self.meas(meas).map(|m| match m.config.kind {
                     MeasKind::Math { .. } => TreeKey::Math(meas),
                     _ => TreeKey::Live(meas),
                 }),
-                Compared::Trace { trace } => Some(TreeKey::Trace(trace)),
+                EntryRef::Trace { trace } => Some(TreeKey::Trace(trace)),
             })
             .collect()
     }
@@ -736,7 +751,7 @@ impl AppState {
             let Some(stream) = m.config.kind.stream() else {
                 return false;
             };
-            (self.live_on_pane(kind, m, shown) || self.live_compared_on(kind, m, shown))
+            (self.live_on_pane(kind, m, shown) || self.live_compared_on(kind, m, pane))
                 && d.latest.get(&Topic::Data { meas: m.id, stream }).is_some()
         })
     }

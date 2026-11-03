@@ -34,6 +34,13 @@ impl AppState {
             })
     }
 
+    /// The measurement "the `kind` pane" shows: the focused pane's when it is of that kind,
+    /// else that of the one of that kind focused last; never one picked for it. What acts on
+    /// what a pane shows (the SPL commands, the delay banner) follows it.
+    pub fn shown_of_kind(&self, kind: PaneKind) -> Option<&Measurement> {
+        self.lead(kind).and_then(|id| self.pane_meas(id))
+    }
+
     /// The view state pane `id` is drawn with: the shared one (the frequency axis, read
     /// across panes) with the pane's own modes and level axis, its frequency plot as wide
     /// as its column's ([`Self::column_right`]).
@@ -334,12 +341,11 @@ impl AppState {
     /// something; `None`: no room to split.
     pub(in crate::state) fn split_for_new(&mut self) -> Option<PaneId> {
         let f = self.layout.focus;
-        let waits = self.rig.pending.pane_ids.contains_key(&f)
-            || self.rig.pending.pane_meas.contains_key(&f);
+        let waits = self.rig.pending.pane_meas.contains_key(&f);
         let empty = self
             .layout
             .view(f)
-            .is_some_and(|v| !v.has_content() && v.rig == PaneRig::Active);
+            .is_some_and(|v| !v.has_content() && self.ours(v));
         if empty && !waits && self.visiting.is_none() {
             return Some(f);
         }
@@ -350,6 +356,7 @@ impl AppState {
         {
             v.rig = here;
             v.meas = None;
+            v.with.clear();
             v.meters = None;
         }
         Some(new)
@@ -391,18 +398,23 @@ impl AppState {
         if !self.can_split(p, axis) {
             return None;
         }
-        // Both halves show what the pane did: its pick, or nothing. A pane whose pick waits
-        // for the mirror has both halves wait for it.
+        // The new half starts with the pane's lead alone (what is drawn behind it is the
+        // operator's to tick again), or nothing. A lead that waits for the mirror has both
+        // halves wait for it.
         let waiting = self.rig.pending.pane_meas.get(&p).cloned();
-        let waiting_id = self.rig.pending.pane_ids.get(&p).copied();
         self.layout.maximized = false;
         let new = self.layout.split_pane(p, axis, side);
         self.copy_levels(p, new);
+        if let Some(v) = self.layout.view_mut(new) {
+            let lead = if v.meas.is_none() {
+                v.with.as_slice().first().copied()
+            } else {
+                None
+            };
+            v.with = With::of(lead.as_slice());
+        }
         if let Some(n) = waiting {
             self.rig.pending.pane_meas.insert(new, n);
-        }
-        if let Some(id) = waiting_id {
-            self.rig.pending.pane_ids.insert(new, id);
         }
         Some(new)
     }
@@ -604,6 +616,7 @@ impl AppState {
         if let Some(v) = self.layout.view_mut(id) {
             if v.kind != kind {
                 v.meas = None;
+                v.with.clear();
             }
             if kind != PaneKind::Programme {
                 v.meters = None;
@@ -614,7 +627,7 @@ impl AppState {
             v.kind = kind;
         }
         self.rig.pending.pane_meas.remove(&id);
-        self.rig.pending.pane_ids.remove(&id);
+        self.rig.pending.deleted.remove(&id);
         // The history goes with the last spectrograph shown.
         if !self.spectrograph_shown() {
             self.rig.spectrographs.clear();

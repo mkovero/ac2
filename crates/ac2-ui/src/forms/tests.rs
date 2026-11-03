@@ -210,7 +210,6 @@ fn spectrum_and_rta_dialogs_set_averaging_and_edit_keeps_the_rest() {
         grid_id: None,
         colour: None,
         layout: None,
-        compared: Vec::new(),
         offset: ac2_proto::units::Db(0.0),
         eq: Vec::new(),
     };
@@ -275,7 +274,6 @@ fn a_spectrums_fft_size_and_window_are_editable() {
         grid_id: None,
         colour: None,
         layout: None,
-        compared: Vec::new(),
         offset: ac2_proto::units::Db(0.0),
         eq: Vec::new(),
     };
@@ -479,7 +477,6 @@ fn resolution_in_the_transfer_and_sweep_dialogs() {
         grid_id: None,
         colour: None,
         layout: None,
-        compared: Vec::new(),
         offset: ac2_proto::units::Db(0.0),
         eq: Vec::new(),
     };
@@ -520,7 +517,6 @@ fn resolution_in_the_transfer_and_sweep_dialogs() {
         grid_id: None,
         colour: None,
         layout: None,
-        compared: Vec::new(),
         offset: ac2_proto::units::Db(0.0),
         eq: Vec::new(),
     };
@@ -756,7 +752,6 @@ fn a_sweep_records_several_mics_picked_row_by_row() {
         grid_id: None,
         colour: None,
         layout: None,
-        compared: Vec::new(),
         offset: ac2_proto::units::Db(0.0),
         eq: Vec::new(),
     };

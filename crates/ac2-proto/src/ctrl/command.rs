@@ -8,13 +8,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::grid::GridId;
 use crate::model::{
-    ArtnetTarget, AverageMethod, BackendKind, Ballistic, CalRef, ColourFamily, Compared,
-    CorrelationWindow, DelayPick, DelayReference, DeviceId, DmxSet, ElectricalConnection,
-    ExportFormat, FinderBand, GeneratorDesired, ImportFormat, ImportRole, InputSetup, IrImport,
-    MeasConfig, MicCurveId, MicLoading, OscMessage, OutputSetup, OwnedTraces, Pair, PaneLayout,
-    PlanSpec, PreviewInput, RecordRequest, RecordingRef, ReplayPace, SessionConfig, SessionRef,
-    SimFitRequest, SimMapRequest, SimRequest, SplLogWhich, TargetCurve, TraceEdit, TraceOwner,
-    WalkKind, WalkPointSpec,
+    ArtnetTarget, AverageMethod, BackendKind, Ballistic, CalRef, ColourFamily, CorrelationWindow,
+    DelayPick, DelayReference, DeviceId, DmxSet, ElectricalConnection, ExportFormat, FinderBand,
+    GeneratorDesired, ImportFormat, ImportRole, InputSetup, IrImport, MeasConfig, MicCurveId,
+    MicLoading, OscMessage, OutputSetup, OwnedTraces, Pair, PaneLayout, PlanSpec, PreviewInput,
+    RecordRequest, RecordingRef, ReplayPace, SessionConfig, SessionRef, SimFitRequest,
+    SimMapRequest, SimRequest, SplLogWhich, TargetCurve, TraceEdit, TraceOwner, WalkKind,
+    WalkPointSpec,
 };
 use crate::units::{
     Blob, Db, DbSpl, Dbfs, Dbtp, Hz, LeaseToken, Lufs, MeasId, MvPerPa, Rev, Seconds, TraceId,
@@ -285,16 +285,6 @@ pub enum Command {
         meas: MeasId,
         /// Layout, or `None` for none of its own.
         layout: Option<PaneLayout>,
-    },
-    /// Set the curves drawn compared into the measurement's panes, first compared first
-    /// (drawn above the later ones). Its job and config rev go on.
-    #[serde(rename = "meas.compare")]
-    MeasCompare {
-        /// Measurement whose panes draw them.
-        meas: MeasId,
-        /// Live curves, math channels and stored traces of other measurements, at most
-        /// [`Compared::MAX`].
-        compared: Vec<Compared>,
     },
     /// Set the display offset of the measurement's live curves, wherever they are drawn.
     /// Its job and config rev go on.

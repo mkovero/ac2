@@ -898,9 +898,13 @@ fn a_stored_pane_names_its_rig() {
     let pane = first(&base);
     let with = |rig: wire::RigRef, meas: u32| {
         let mut p = pane.clone();
-        p.rig = rig;
         p.kind = wire::PaneKind::Spectrum;
-        p.content = Some(wire::PaneContent::Meas { meas: MeasId(meas) });
+        p.content = wire::PaneContent::Curves {
+            entries: vec![wire::PaneEntry {
+                rig,
+                what: wire::EntryRef::Group { meas: MeasId(meas) },
+            }],
+        };
         wire::PaneLayout::Pane { pane: Box::new(p) }
     };
     let l = wire::PaneLayout::Split {
@@ -947,7 +951,7 @@ fn a_stored_pane_names_its_rig() {
     // Stored again, the rig's own layout holds its own panes alone, as `ThisRig`.
     fn rigs_of(l: &wire::PaneLayout, out: &mut Vec<wire::RigRef>) {
         match l {
-            wire::PaneLayout::Pane { pane } => out.push(pane.rig.clone()),
+            wire::PaneLayout::Pane { pane } => out.extend(pane.content.rigs().into_iter().cloned()),
             wire::PaneLayout::Split { a, b, .. } => {
                 rigs_of(a, out);
                 rigs_of(b, out);

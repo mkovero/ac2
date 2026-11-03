@@ -506,10 +506,12 @@ fn a_walk_pane_keeps_its_walk() {
             sweep_view: wire::SweepView::Response,
             programme_view: wire::ProgrammeView::Meters,
             chrome: wire::PlotChrome::Full,
-            content: Some(wire::PaneContent::Walk { walk: WalkId(1) }),
+            content: wire::PaneContent::Walk {
+                rig: wire::RigRef::ThisRig,
+                walk: WalkId(1),
+            },
             levels: wire::LayoutLevels::default(),
             plates: wire::LayoutPlates::default(),
-            rig: wire::RigRef::ThisRig,
         }),
     };
     let mut t = with_plan();

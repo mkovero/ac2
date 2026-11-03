@@ -127,7 +127,6 @@ fn rig_monitor_views() {
             grid_id: None,
             colour: None,
             layout: None,
-            compared: Vec::new(),
             offset: ac2_proto::units::Db(0.0),
             eq: Vec::new(),
         })));

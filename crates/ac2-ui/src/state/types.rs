@@ -52,6 +52,15 @@ impl PaneKind {
         }
     }
 
+    /// A graph pane: it draws curves, a lead and what is ticked behind it (C); the other
+    /// kinds show one source.
+    pub fn draws_curves(self) -> bool {
+        matches!(
+            self,
+            PaneKind::Transfer | PaneKind::Spectrum | PaneKind::Distortion
+        )
+    }
+
     /// Whether the pane shows measurements of kind `k`.
     pub fn shows(self, k: &MeasKind) -> bool {
         match self {

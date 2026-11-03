@@ -83,22 +83,18 @@ impl AppState {
     fn layout_of(&self, n: &PaneNode) -> PaneLayout {
         match n {
             PaneNode::Leaf(id) => {
-                let mut v = self
+                let v = self
                     .layout
                     .view(*id)
                     .copied()
                     .unwrap_or(View::of(PaneKind::Transfer));
-                // A pick waiting for the mirror is still the pane's: stored, not dropped.
-                if v.meas.is_none() && self.ours(&v) {
-                    v.meas = self.rig.pending.pane_ids.get(id).copied();
-                }
-                // The owner's own pane is stored as no pick, the form its layout reads as
-                // the owner: a brought layout compares equal to the stored one.
-                if self.ours(&v) && v.meas.is_some() && v.meas == self.rig.own_panes {
-                    v.meas = None;
-                }
+                let refs = WireRigs {
+                    this: self.rig.id,
+                    pane: self.pane_rig(&v),
+                    names: &self.rig_names,
+                };
                 PaneLayout::Pane {
-                    pane: Box::new(wire_pane(&v, self.operator_levels(*id))),
+                    pane: Box::new(wire_pane(&v, self.operator_levels(*id), &refs)),
                 }
             }
             PaneNode::Split { axis, ratio, a, b } => PaneLayout::Split {
@@ -234,13 +230,9 @@ impl AppState {
         }
     }
 
-    /// Layout `l` of the own panes' owner is what the panes show: an explicit pick of the
-    /// owner reads as the no pick it is stored as.
+    /// Layout `l` is what the panes show.
     fn on_screen(&self, l: &PaneLayout) -> bool {
-        match self.rig.own_panes {
-            Some(owner) => owner_plain(l, owner) == self.pane_layout(),
-            None => *l == self.pane_layout(),
-        }
+        *l == self.pane_layout()
     }
 
     /// Calls of measurements whose panes are not on screen whose layout the daemon's copy
@@ -422,26 +414,14 @@ impl AppState {
         let mut levels = Vec::new();
         let root = self.install_node(l, &mut views, &mut levels);
         let owner = self.rig.own_panes.and_then(|id| self.meas(id)).cloned();
-        if let Some(o) = &owner {
-            for v in views.values_mut().filter(|v| v.rig == PaneRig::Active) {
-                if !v.has_content() && v.kind.shows(&o.config.kind) {
-                    v.meas = Some(o.id);
-                }
-            }
-        }
-        // Another rig's pane names that rig's ids, which this rig's mirror cannot check. A
-        // pick of a kind the pane does not draw is no pick; one the mirror does not list yet
-        // waits as the pane's choice, so that the next edit stores it, not the stand-in.
-        let mut waiting = BTreeMap::new();
-        for (p, v) in views.iter_mut().filter(|(_, v)| v.rig == PaneRig::Active) {
-            let Some(id) = v.meas else { continue };
-            match self.meas(id) {
-                Some(m) if v.kind.shows(&m.config.kind) => {}
-                Some(_) => v.meas = None,
-                None => {
-                    waiting.insert(*p, id);
-                    v.meas = None;
-                }
+        // A pick of a kind the pane does not draw is no pick; one the mirror does not list
+        // yet waits in the pane as its choice, so that the next edit stores it. Another
+        // rig's pane names that rig's ids, which this rig's mirror cannot check.
+        for v in views.values_mut().filter(|v| v.rig == PaneRig::Active) {
+            if let Some(m) = v.meas.and_then(|id| self.meas(id))
+                && !v.kind.shows(&m.config.kind)
+            {
+                v.meas = None;
             }
         }
         let order = root.reading_order();
@@ -474,7 +454,7 @@ impl AppState {
         }
         self.pane_auto = false;
         self.rig.pending.pane_meas.clear();
-        self.rig.pending.pane_ids = waiting;
+        self.rig.pending.deleted.clear();
         // The history goes with the last spectrograph shown.
         if !self.spectrograph_shown() {
             self.rig.spectrographs.clear();
@@ -536,8 +516,10 @@ impl AppState {
         match l {
             PaneLayout::Pane { pane } => {
                 let id = self.layout.fresh_id();
-                if let wire::RigRef::Rig { id: r, name } = &pane.rig {
-                    self.rig_names.entry(*r).or_insert_with(|| name.clone());
+                for r in pane.content.rigs() {
+                    if let wire::RigRef::Rig { id: r, name } = r {
+                        self.rig_names.entry(*r).or_insert_with(|| name.clone());
+                    }
                 }
                 views.insert(id, ui_view(pane, self.rig.id));
                 levels.push((id, pane.levels));
@@ -556,7 +538,67 @@ impl AppState {
     }
 }
 
-fn wire_pane(v: &View, levels: wire::LayoutLevels) -> wire::LayoutPane {
+/// Whose ids a pane sent names: the rig whose measurement's layout it is (`this`, written
+/// `ThisRig`), the pane's own rig, and the names other rigs go by.
+pub(in crate::state) struct WireRigs<'a> {
+    pub this: RigId,
+    pub pane: RigId,
+    pub names: &'a BTreeMap<RigId, String>,
+}
+
+impl WireRigs<'_> {
+    fn of(&self, r: RigId) -> wire::RigRef {
+        if r == self.this {
+            wire::RigRef::ThisRig
+        } else {
+            wire::RigRef::Rig {
+                id: r,
+                name: self.names.get(&r).cloned().unwrap_or_else(|| r.to_string()),
+            }
+        }
+    }
+
+    fn pick(&self, p: &Pick) -> wire::PaneEntry {
+        wire::PaneEntry {
+            rig: self.of(p.rig.unwrap_or(self.pane)),
+            what: p.what,
+        }
+    }
+}
+
+/// What pane view `v` holds, as a layout's content.
+pub(in crate::state) fn wire_content(v: &View, refs: &WireRigs) -> wire::PaneContent {
+    let rig = refs.of(refs.pane);
+    match v.kind {
+        PaneKind::Walk => {
+            v.walk
+                .map_or(wire::PaneContent::Nothing, |walk| wire::PaneContent::Walk {
+                    rig,
+                    walk,
+                })
+        }
+        PaneKind::Programme => v.meters.map_or(wire::PaneContent::Nothing, |m| m.wire(rig)),
+        PaneKind::Spl => v.meas.map_or(wire::PaneContent::Nothing, |meas| {
+            wire::PaneContent::Meter { rig, meas }
+        }),
+        PaneKind::Transfer | PaneKind::Spectrum | PaneKind::Distortion => {
+            let entries: Vec<wire::PaneEntry> = v
+                .meas
+                .map(|meas| Pick::here(wire::EntryRef::Group { meas }))
+                .into_iter()
+                .chain(v.with.as_slice().iter().copied())
+                .map(|p| refs.pick(&p))
+                .collect();
+            if entries.is_empty() {
+                wire::PaneContent::Nothing
+            } else {
+                wire::PaneContent::Curves { entries }
+            }
+        }
+    }
+}
+
+fn wire_pane(v: &View, levels: wire::LayoutLevels, refs: &WireRigs) -> wire::LayoutPane {
     let m = &v.modes;
     wire::LayoutPane {
         kind: match v.kind {
@@ -603,15 +645,9 @@ fn wire_pane(v: &View, levels: wire::LayoutLevels) -> wire::LayoutPane {
             PlotChrome::NoGrid => wire::PlotChrome::NoGrid,
             PlotChrome::Bare => wire::PlotChrome::TracesOnly,
         },
-        content: match (v.kind, v.walk, v.meters) {
-            (PaneKind::Walk, Some(walk), _) => Some(wire::PaneContent::Walk { walk }),
-            (_, _, Some(m)) => Some(m.wire()),
-            _ => v.meas.map(|meas| wire::PaneContent::Meas { meas }),
-        },
+        content: wire_content(v, refs),
         levels,
         plates: super::plates::wire_plates(&v.plates),
-        // The one rig the app holds is the one whose measurement this layout is.
-        rig: wire::RigRef::ThisRig,
     }
 }
 
@@ -619,6 +655,7 @@ fn wire_pane(v: &View, levels: wire::LayoutLevels) -> wire::LayoutPane {
 /// layout it is): its own panes (`ThisRig`, or pinned to it by id) are that rig's, a pane
 /// pinned to another rig shows that rig's ids.
 fn ui_view(p: &wire::LayoutPane, this: RigId) -> View {
+    let (meas, with, lead_rig) = ui_content(&p.content, this);
     View {
         kind: match p.kind {
             wire::PaneKind::Transfer => PaneKind::Transfer,
@@ -628,24 +665,20 @@ fn ui_view(p: &wire::LayoutPane, this: RigId) -> View {
             wire::PaneKind::Programme => PaneKind::Programme,
             wire::PaneKind::Walk => PaneKind::Walk,
         },
-        meas: p.content.as_ref().and_then(wire::PaneContent::meas),
+        meas,
+        with,
         walk: match p.content {
-            Some(wire::PaneContent::Walk { walk }) => Some(walk),
+            wire::PaneContent::Walk { walk, .. } => Some(walk),
             _ => None,
         },
-        meters: p
-            .content
-            .as_ref()
-            .and_then(crate::state::Metered::from_wire),
+        meters: crate::state::Metered::from_wire(&p.content),
         plates: super::plates::ui_plates(&p.plates),
         // The rig whose measurement's layout this is, the one the reducer runs for, is
         // `Active` here; a pane given content while another rig is shown is set on it after
         // the message ([`AppState::set_pane_rigs`]).
-        rig: match &p.rig {
-            wire::RigRef::Rig { id, .. } if *id != this => PaneRig::Rig(*id),
-            wire::RigRef::Rig { .. } | wire::RigRef::ThisRig | wire::RigRef::Active => {
-                PaneRig::Active
-            }
+        rig: match lead_rig {
+            Some(id) if id != this => PaneRig::Rig(id),
+            _ => PaneRig::Active,
         },
         modes: PaneModes {
             transfer: match p.transfer_view {
@@ -690,33 +723,50 @@ fn ui_view(p: &wire::LayoutPane, this: RigId) -> View {
     }
 }
 
+/// Content `c` read for rig `this`: the lead (a graph pane's leading group, an SPL pane's
+/// meter), the entries behind it, and the rig of the lead (`None`: nothing picked). An
+/// entry of the lead's rig is the pane's own; another rig's keeps its rig.
+pub(in crate::state) fn ui_content(
+    c: &wire::PaneContent,
+    this: RigId,
+) -> (Option<MeasId>, With, Option<RigId>) {
+    let id = |r: &wire::RigRef| match r {
+        wire::RigRef::ThisRig => this,
+        wire::RigRef::Rig { id, .. } => *id,
+    };
+    match c {
+        wire::PaneContent::Nothing => (None, With::default(), None),
+        wire::PaneContent::Meter { rig, meas } => (Some(*meas), With::default(), Some(id(rig))),
+        wire::PaneContent::Inputs { rig, .. }
+        | wire::PaneContent::Pair { rig, .. }
+        | wire::PaneContent::Walk { rig, .. } => (None, With::default(), Some(id(rig))),
+        wire::PaneContent::Curves { entries } => {
+            let Some(first) = entries.first() else {
+                return (None, With::default(), None);
+            };
+            let lead = id(&first.rig);
+            let (meas, rest) = match first.what {
+                wire::EntryRef::Group { meas } => (Some(meas), &entries[1..]),
+                _ => (None, &entries[..]),
+            };
+            let picks: Vec<Pick> = rest
+                .iter()
+                .map(|e| Pick {
+                    rig: Some(id(&e.rig)).filter(|r| *r != lead),
+                    what: e.what,
+                })
+                .collect();
+            (meas, With::of(&picks), Some(lead))
+        }
+    }
+}
+
 impl RigState {
     /// The link went down or came up: no answer to an earlier call comes.
     pub(in crate::state) fn forget_layout_calls(&mut self) {
         self.layout_queue.calls.clear();
         self.layout_queue.queued.clear();
         self.layout_queue.due = None;
-    }
-}
-
-/// Layout `l` of `owner` with every pick of the owner on this rig written as no pick: on
-/// screen and when sent, a pane of a measurement's own layout showing it holds no pick.
-pub(in crate::state) fn owner_plain(l: &PaneLayout, owner: MeasId) -> PaneLayout {
-    match l {
-        PaneLayout::Pane { pane } => {
-            let mut p = pane.clone();
-            let mine = matches!(p.rig, wire::RigRef::ThisRig | wire::RigRef::Active);
-            if mine && p.content.as_ref().and_then(wire::PaneContent::meas) == Some(owner) {
-                p.content = None;
-            }
-            PaneLayout::Pane { pane: p }
-        }
-        PaneLayout::Split { axis, ratio, a, b } => PaneLayout::Split {
-            axis: *axis,
-            ratio: *ratio,
-            a: Box::new(owner_plain(a, owner)),
-            b: Box::new(owner_plain(b, owner)),
-        },
     }
 }
 
@@ -732,8 +782,48 @@ mod tests {
         let mut v = View::of(PaneKind::Programme);
         v.meters = Some(Metered::Pair { left: 2, right: 3 });
         v.modes.programme = ProgrammeMode::Goniometer;
-        let p = wire_pane(&v, wire::LayoutLevels::default());
+        let names = BTreeMap::new();
+        let refs = WireRigs {
+            this: RigId(1),
+            pane: RigId(1),
+            names: &names,
+        };
+        let p = wire_pane(&v, wire::LayoutLevels::default(), &refs);
         assert_eq!(p.programme_view, wire::ProgrammeView::Goniometer);
+        assert_eq!(ui_view(&p, RigId(1)), v);
+    }
+
+    /// A pane of curves goes out as its lead group and the entries behind it, another rig's
+    /// by id and name, and comes back as the same view.
+    #[test]
+    fn a_pane_of_curves_round_trips_with_another_rigs_entry() {
+        let mut v = View::of(PaneKind::Spectrum);
+        v.meas = Some(MeasId(3));
+        v.with.push(Pick::here(wire::EntryRef::Trace {
+            trace: ac2_proto::units::TraceId(9),
+        }));
+        v.with.push(Pick {
+            rig: Some(RigId(2)),
+            what: wire::EntryRef::Live { meas: MeasId(3) },
+        });
+        let names = BTreeMap::from([(RigId(2), "pupu".to_owned())]);
+        let refs = WireRigs {
+            this: RigId(1),
+            pane: RigId(1),
+            names: &names,
+        };
+        let p = wire_pane(&v, wire::LayoutLevels::default(), &refs);
+        let wire::PaneContent::Curves { entries } = &p.content else {
+            panic!("curves: {:?}", p.content);
+        };
+        assert_eq!(entries[0].rig, wire::RigRef::ThisRig);
+        assert_eq!(
+            entries[2].rig,
+            wire::RigRef::Rig {
+                id: RigId(2),
+                name: "pupu".into()
+            }
+        );
         assert_eq!(ui_view(&p, RigId(1)), v);
     }
 }

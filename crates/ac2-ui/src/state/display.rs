@@ -10,7 +10,7 @@ use ac2_proto::model::{
 use ac2_proto::units::{Db, MeasId, TraceId};
 use ac2_scene::format;
 
-use super::{AppState, Overlay, PaneKind, drawn_in, trace_label};
+use super::{AppState, Overlay, PaneKind, trace_label};
 use crate::conn::Request;
 
 /// What a delete confirmation would delete.
@@ -80,16 +80,12 @@ pub enum ChoicePurpose {
     /// A target curve: the answer is in [`ac2_scene::target_curve::TargetChoice::ALL`]'s
     /// order; a file prompt, a dialog, or (flat) the curve itself follows.
     Target,
-    /// Compare `item` with…: each answer is a measurement in `targets` whose panes draw it
-    /// (`on`) or not; taking one toggles it and the question stays.
+    /// C's tick list over graph pane `pane`: each answer is a measurement in `rows` (the
+    /// lead first) whose group the pane draws or not; taking one ticks or unticks it and
+    /// the list stays.
     Compare {
-        item: ac2_proto::model::Compared,
-        /// Its curve is shown (a hidden one is compared but not drawn until shown).
-        visible: bool,
-        targets: Vec<MeasId>,
-        /// A pane on screen shows the target.
-        shown: Vec<bool>,
-        on: Vec<bool>,
+        pane: super::PaneId,
+        rows: Vec<MeasId>,
     },
 }
 
@@ -165,10 +161,9 @@ impl AppState {
             PaneKind::Spectrum => PaneKind::Spectrum,
             _ => PaneKind::Transfer,
         };
-        let shown = self.pane_meas(self.layout.focus);
         if let Some(m) = self.selected_meas()
             && focus == pane
-            && self.live_compared_on(pane, m, shown)
+            && self.live_compared_on(pane, m, self.layout.focus)
         {
             return Some(OffsetTarget::Live(m.clone()));
         }
@@ -659,20 +654,4 @@ impl AppState {
             format!("{label} deleted{then}"),
         );
     }
-}
-
-/// The graph pane kinds that draw stored trace `t` when compared.
-pub(super) fn trace_compare_kinds(t: &TraceMeta) -> Vec<PaneKind> {
-    [PaneKind::Transfer, PaneKind::Spectrum, PaneKind::Distortion]
-        .into_iter()
-        .filter(|k| drawn_in(t, *k))
-        .collect()
-}
-
-/// The graph pane kinds that draw measurement `m`'s live curve when compared.
-pub(super) fn meas_compare_kinds(m: &Measurement) -> Vec<PaneKind> {
-    [PaneKind::Transfer, PaneKind::Spectrum]
-        .into_iter()
-        .filter(|k| AppState::live_drawn_in(m, *k))
-        .collect()
 }

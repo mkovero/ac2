@@ -133,7 +133,42 @@
        "sweep_view": "response",
        "programme_view": "meters",
        "chrome": "full",
-       "content": null,
+       "content": {
+        "type": "curves",
+        "entries": [
+         {
+          "rig": {
+           "type": "this_rig"
+          },
+          "what": {
+           "type": "group",
+           "meas": 1
+          }
+         },
+         {
+          "rig": {
+           "type": "rig",
+           "id": 1147797409030816545,
+           "name": "ketunkolo"
+          },
+          "what": {
+           "type": "trace",
+           "trace": 7
+          }
+         },
+         {
+          "rig": {
+           "type": "rig",
+           "id": 1147797409030816545,
+           "name": "ketunkolo"
+          },
+          "what": {
+           "type": "live",
+           "meas": 4
+          }
+         }
+        ]
+       },
        "levels": {
         "transfer": {
          "lo": -24.0,
@@ -167,9 +202,6 @@
          "at": null,
          "scale": 1.0
         }
-       },
-       "rig": {
-        "type": "this_rig"
        }
       }
      },
@@ -188,7 +220,12 @@
         "programme_view": "meters",
         "chrome": "no_grid",
         "content": {
-         "type": "meas",
+         "type": "meter",
+         "rig": {
+          "type": "rig",
+          "id": 1147797409030816545,
+          "name": "ketunkolo"
+         },
          "meas": 2
         },
         "levels": {
@@ -218,11 +255,6 @@
           "at": null,
           "scale": 1.0
          }
-        },
-        "rig": {
-         "type": "rig",
-         "id": 1147797409030816545,
-         "name": "ketunkolo"
         }
        }
       },
@@ -238,6 +270,9 @@
         "chrome": "full",
         "content": {
          "type": "pair",
+         "rig": {
+          "type": "this_rig"
+         },
          "left": 2,
          "right": 3
         },
@@ -268,15 +303,11 @@
           "at": null,
           "scale": 1.0
          }
-        },
-        "rig": {
-         "type": "this_rig"
         }
        }
       }
      }
     },
-    "compared": [],
     "offset": 0.0,
     "eq": []
    }
@@ -856,7 +887,6 @@
     "grid_id": null,
     "colour": null,
     "layout": null,
-    "compared": [],
     "offset": 0.0,
     "eq": []
    }
@@ -918,7 +948,6 @@
     "grid_id": 8785464140711761104,
     "colour": null,
     "layout": null,
-    "compared": [],
     "offset": 0.0,
     "eq": []
    }
@@ -1118,7 +1147,6 @@
      "type": "neutral"
     },
     "layout": null,
-    "compared": [],
     "offset": 0.0,
     "eq": []
    }
@@ -1279,7 +1307,6 @@
     "grid_id": 8785464140711761104,
     "colour": null,
     "layout": null,
-    "compared": [],
     "offset": 0.0,
     "eq": []
    }

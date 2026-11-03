@@ -4,10 +4,11 @@
 //! becomes of what a measurement owns.
 
 use ac2_proto::event::{Change, Patch};
+use ac2_proto::model::layout::{EntryRef, PaneContent, RigRef};
 use ac2_proto::model::{
-    Compared, MeasConfig, MeasKind, Measurement, Operand, OwnedTraces, TraceOwner, TraceSource,
+    MeasConfig, MeasKind, Measurement, Operand, OwnedTraces, TraceOwner, TraceSource,
 };
-use ac2_proto::units::{MeasId, TraceId};
+use ac2_proto::units::{MeasId, TraceId, WalkId};
 use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
 
 use super::Control;
@@ -247,70 +248,80 @@ impl Control {
             }
         );
         let rev = self.remove_meas(meas);
-        let rev = self.prune_compared().unwrap_or(rev);
+        let rev = self.prune_layouts().unwrap_or(rev);
         Ok(ReplyBody::Ack { rev })
     }
 
-    /// Refuses a compare list for `m` that names something gone, `m` itself, an entry
-    /// twice, or more than [`Compared::MAX`]; and any for an SPL meter, a number with no
-    /// curve to draw over.
-    pub(super) fn check_compared(
-        &self,
-        m: &Measurement,
-        compared: &[Compared],
-    ) -> Result<(), ProtoError> {
-        let inv = |msg: String| Err(perr(ErrorCode::Invalid, msg));
-        if matches!(m.config.kind, MeasKind::Spl { .. }) && !compared.is_empty() {
-            return inv(format!(
-                "{} is an SPL meter: nothing is compared into it",
-                m.config.name
-            ));
-        }
-        if compared.len() > Compared::MAX {
-            return inv(format!("at most {} compared curves", Compared::MAX));
-        }
+    /// The measurement whose group draws `what` of this rig, if a group draws it: a live
+    /// curve its own measurement's (a math channel's, its owner's), a stored trace the
+    /// measurement it is filed under.
+    pub(super) fn drawn_by_group(&self, what: EntryRef) -> Option<MeasId> {
         let st = self.store.state();
-        for (i, c) in compared.iter().enumerate() {
-            if compared[..i].contains(c) {
-                return inv(format!("{c:?} is listed twice"));
+        match what {
+            EntryRef::Group { .. } => None,
+            EntryRef::Live { meas } => {
+                let m = st.measurements.iter().find(|m| m.id == meas)?;
+                match &m.config.kind {
+                    MeasKind::Math { config } => config.owner.meas(),
+                    _ => Some(meas),
+                }
             }
-            match *c {
-                Compared::Meas { meas } if meas == m.id => {
-                    return inv(format!(
-                        "{} is drawn on its own panes already",
-                        m.config.name
-                    ));
-                }
-                Compared::Meas { meas } if !st.measurements.iter().any(|o| o.id == meas) => {
-                    return Err(perr(ErrorCode::NotFound, format!("no measurement {meas}")));
-                }
-                Compared::Trace { trace } if !st.traces.iter().any(|t| t.id == trace) => {
-                    return Err(perr(ErrorCode::NotFound, format!("no trace {trace}")));
-                }
-                _ => {}
+            EntryRef::Trace { trace } => {
+                st.traces.iter().find(|t| t.id == trace)?.edit.owner.meas()
             }
         }
-        Ok(())
     }
 
-    /// Drops from every measurement's compare list the measurements and traces that are
-    /// gone; the rev of the last change, if any.
-    pub(super) fn prune_compared(&mut self) -> Option<ac2_proto::units::Rev> {
+    /// Drops from every stored layout (rig meters' too) the references of this rig to
+    /// measurements, traces and walks that are gone; a graph pane left with no entry, or a
+    /// meter or walk pane whose source went, holds nothing. Never against a client's view:
+    /// another rig's references are that rig's to prune. The rev of the last change, if any.
+    pub(super) fn prune_layouts(&mut self) -> Option<ac2_proto::units::Rev> {
         let st = self.store.state();
+        let meas = |id: MeasId| st.measurements.iter().any(|o| o.id == id);
+        let trace = |id: TraceId| st.traces.iter().any(|t| t.id == id);
+        let walk = |id: WalkId| st.walks.iter().any(|w| w.id == id);
         let changed: Vec<Measurement> = st
             .measurements
             .iter()
             .filter_map(|m| {
-                let keep = |c: &Compared| match *c {
-                    Compared::Meas { meas } => st.measurements.iter().any(|o| o.id == meas),
-                    Compared::Trace { trace } => st.traces.iter().any(|t| t.id == trace),
-                };
-                if m.compared.iter().all(keep) {
-                    return None;
+                let mut l = m.layout.clone()?;
+                let mut pruned = false;
+                for c in l.contents_mut() {
+                    let gone = match c {
+                        PaneContent::Curves { entries } => {
+                            let before = entries.len();
+                            entries.retain(|e| {
+                                e.rig != RigRef::ThisRig
+                                    || match e.what {
+                                        EntryRef::Group { meas: id }
+                                        | EntryRef::Live { meas: id } => meas(id),
+                                        EntryRef::Trace { trace: id } => trace(id),
+                                    }
+                            });
+                            pruned |= entries.len() != before;
+                            entries.is_empty()
+                        }
+                        PaneContent::Meter {
+                            rig: RigRef::ThisRig,
+                            meas: id,
+                        } => !meas(*id),
+                        PaneContent::Walk {
+                            rig: RigRef::ThisRig,
+                            walk: id,
+                        } => !walk(*id),
+                        _ => false,
+                    };
+                    if gone {
+                        *c = PaneContent::Nothing;
+                        pruned = true;
+                    }
                 }
-                let mut m = m.clone();
-                m.compared.retain(keep);
-                Some(m)
+                pruned.then(|| {
+                    let mut m = m.clone();
+                    m.layout = Some(l);
+                    m
+                })
             })
             .collect();
         let mut rev = None;

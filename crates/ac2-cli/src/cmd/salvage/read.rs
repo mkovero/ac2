@@ -185,7 +185,6 @@ fn meas_keys() -> Vec<String> {
         delay: None,
         colour: None,
         layout: None,
-        compared: Vec::new(),
         offset: ac2_proto::units::Db(0.0),
         eq: Vec::new(),
     };
@@ -226,6 +225,18 @@ fn old_meas(v: &Value) -> Result<OldMeas, String> {
     let delay = optional("delay").and_then(|d| lenient::<SavedDelay>(d, None, "delay", &mut notes));
     let colour =
         optional("colour").and_then(|d| lenient::<ColourFamily>(d, None, "colour", &mut notes));
+    // The compare list of an older version follows the measurement's group in its own
+    // panes; with none to follow, it is dropped and said so.
+    let compared = obj
+        .get("compared")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let owner = obj
+        .get("id")
+        .cloned()
+        .map(|id| ac2_traces::old_layout::LayoutOwner::of(id, &config.kind));
+    let mut took = 0;
     let old_layout = optional("layout").map(|d| {
         let mut d = d.clone();
         ac2_traces::old_layout::pane_meas_to_content(&mut d);
@@ -233,14 +244,21 @@ fn old_meas(v: &Value) -> Result<OldMeas, String> {
         ac2_traces::old_layout::plates_add_loudness(&mut d);
         ac2_traces::old_layout::programme_views(&mut d);
         ac2_traces::old_layout::panes_this_rig(&mut d);
+        took = ac2_traces::old_layout::panes_curves(&mut d, owner.as_ref(), &compared);
         d
     });
+    if !compared.is_empty() && took == 0 {
+        notes.push(format!(
+            "its compare list ({} curve(s)) is dropped: no pane of its own draws it",
+            compared.len()
+        ));
+    }
     let layout = old_layout
         .as_ref()
         .and_then(|d| lenient::<PaneLayout>(d, None, "layout", &mut notes));
     let known = meas_keys();
     for (k, v) in obj {
-        if !known.contains(k) {
+        if !known.contains(k) && k != "compared" {
             notes.push(format!("`{k}` is not kept by this version: dropped ({v})"));
         }
     }
@@ -561,8 +579,9 @@ fn set(doc: &mut Value, ptr: &str, key: &str, v: Option<Value>) {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use ac2_proto::model::layout::{PaneContent, PlotChrome};
+    use ac2_proto::model::layout::{EntryRef, PaneContent, PaneEntry, PlotChrome, RigRef};
     use ac2_proto::model::{MeasKind, SpecLevel, SpecResolution, SplConfig, Window};
+    use ac2_proto::units::TraceId;
     use serde_json::json;
 
     fn spl() -> MeasConfig {
@@ -601,10 +620,10 @@ mod tests {
     }
 
     /// A layout saved before panes carried a pick and level ranges reads whole: each pane
-    /// follows its measurement, with no level range of the operator's.
+    /// shows its measurement, with no level range of the operator's.
     #[test]
     fn a_layout_of_format_27_reads_with_no_picks_or_levels() {
-        let pane = json!({ "kind": "spectrum", "transfer_view": "magnitude",
+        let pane = json!({ "kind": "spl", "transfer_view": "magnitude",
                            "spectrum_view": "spectrograph", "spl_view": "meter_leq",
                            "sweep_view": "response", "chrome": "full" });
         let v = json!({ "id": 7, "config": serde_json::to_value(spl()).unwrap(),
@@ -615,12 +634,16 @@ mod tests {
         let layout = m.layout.expect("the layout");
         let panes = layout.panes();
         assert_eq!(panes.len(), 1);
-        assert_eq!(panes[0].content, None);
+        let meter = PaneContent::Meter {
+            rig: RigRef::ThisRig,
+            meas: MeasId(7),
+        };
+        assert_eq!(panes[0].content, meter);
         assert!(panes[0].levels.is_empty());
     }
 
-    /// A layout of format 31 names a picked measurement as `meas`: the pick reads as today's
-    /// `content`, nothing is dropped.
+    /// A layout of format 31 names a picked measurement as `meas`: on an SPL pane the pick
+    /// reads as this rig's meter, nothing is dropped.
     #[test]
     fn a_layout_of_format_31_keeps_its_pick() {
         let pane = json!({ "kind": "spl", "transfer_view": "coherence",
@@ -637,7 +660,10 @@ mod tests {
         let panes = layout.panes();
         assert_eq!(
             panes[0].content,
-            Some(PaneContent::Meas { meas: MeasId(3) })
+            PaneContent::Meter {
+                rig: RigRef::ThisRig,
+                meas: MeasId(3)
+            }
         );
         assert_eq!(panes[0].chrome, PlotChrome::NoGrid);
     }
@@ -696,7 +722,7 @@ mod tests {
     /// goniometer pane beside the meters pane a pair now brings, nothing is dropped.
     #[test]
     fn a_layout_of_format_34_splits_a_pair_pane() {
-        use ac2_proto::model::layout::{PaneContent, ProgrammeView};
+        use ac2_proto::model::layout::ProgrammeView;
         let auto = json!({ "at": null, "scale": 1.0 });
         let pane = json!({ "kind": "programme", "transfer_view": "magnitude",
                            "spectrum_view": "spectrum", "spl_view": "meter_leq",
@@ -719,7 +745,84 @@ mod tests {
         assert_eq!(panes[1].programme_view, ProgrammeView::Meters);
         assert_eq!(panes[1].plates.loudness.at, Some([0.25, 0.75]));
         for p in panes {
-            assert_eq!(p.content, Some(PaneContent::Pair { left: 0, right: 1 }));
+            let want = PaneContent::Pair {
+                rig: RigRef::ThisRig,
+                left: 0,
+                right: 1,
+            };
+            assert_eq!(p.content, want);
+        }
+    }
+
+    fn format_40(layout: Option<serde_json::Value>, compared: serde_json::Value) -> OldMeas {
+        let rta = MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
+            name: "FOH RTA".into(),
+            kind: MeasKind::Rta {
+                config: ac2_proto::model::RtaConfig::on_input(
+                    2,
+                    ac2_proto::model::BandFraction::Third,
+                ),
+            },
+        };
+        let mut v = json!({ "id": 7, "config": serde_json::to_value(rta).unwrap(),
+                            "running": false, "delay": null, "colour": null,
+                            "compared": compared });
+        if let Some(l) = layout {
+            v["layout"] = l;
+        }
+        old_meas(&v).unwrap()
+    }
+
+    fn format_40_pane(kind: &str, content: serde_json::Value) -> serde_json::Value {
+        let auto = json!({ "at": null, "scale": 1.0 });
+        let pane = json!({ "kind": kind, "transfer_view": "magnitude",
+                           "spectrum_view": "spectrum", "spl_view": "meter_leq",
+                           "sweep_view": "response", "programme_view": "meters",
+                           "chrome": "full", "content": content,
+                           "rig": { "type": "this_rig" },
+                           "levels": { "transfer": null, "spectrum_dbfs": null,
+                                       "spectrum_spl": null, "distortion": null },
+                           "plates": { "legend": auto, "readout": auto, "mark": auto,
+                                       "peaks": auto, "loudness": auto } });
+        json!({ "type": "pane", "pane": pane })
+    }
+
+    /// A format-40 compare list follows the measurement's own group into the pane that
+    /// draws it: compared measurements as live entries, traces as trace entries, after the
+    /// group; nothing is said dropped.
+    #[test]
+    fn a_compare_list_of_format_40_joins_the_pane_of_its_measurement() {
+        let compared = json!([{ "type": "meas", "meas": 3 }, { "type": "trace", "trace": 9 }]);
+        let m = format_40(Some(format_40_pane("spectrum", json!(null))), compared);
+        assert!(m.notes.is_empty(), "{:?}", m.notes);
+        let layout = m.layout.expect("the layout");
+        let this = |what| PaneEntry {
+            rig: RigRef::ThisRig,
+            what,
+        };
+        assert_eq!(
+            layout.panes()[0].content,
+            PaneContent::Curves {
+                entries: vec![
+                    this(EntryRef::Group { meas: MeasId(7) }),
+                    this(EntryRef::Live { meas: MeasId(3) }),
+                    this(EntryRef::Trace { trace: TraceId(9) }),
+                ]
+            }
+        );
+    }
+
+    /// A compare list with no pane of its measurement to join, a layout of another pick or
+    /// none at all, is dropped and said so.
+    #[test]
+    fn a_compare_list_of_format_40_with_no_own_pane_is_dropped_and_named() {
+        let compared = json!([{ "type": "meas", "meas": 3 }]);
+        let picked = format_40_pane("spectrum", json!({ "type": "meas", "meas": 5 }));
+        for layout in [Some(picked), None] {
+            let m = format_40(layout, compared.clone());
+            assert_eq!(m.notes.len(), 1, "{:?}", m.notes);
+            assert!(m.notes[0].contains("compare list"), "{:?}", m.notes);
         }
     }
 

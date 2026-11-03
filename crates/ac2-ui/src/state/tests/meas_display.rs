@@ -1,9 +1,9 @@
 //! Reducer and scene tests of what the daemon keeps with a measurement about drawing it:
 //! a spectrum's style, peak hold and spectrograph (B, P, Shift+B, colours), its display
-//! offset, and the curves compared into its panes (C).
+//! offset; and what a pane draws behind its lead (C's ticks).
 
 use super::*;
-use ac2_proto::model::{Compared, SpectrumStyle};
+use ac2_proto::model::SpectrumStyle;
 use ac2_scene::primitives::Viewport;
 use ac2_scene::theme::Theme;
 
@@ -19,17 +19,14 @@ fn now() -> crate::scenes::Now {
     }
 }
 
-/// Sub (2) and "Sub 2" (9), two spectra; with `compared`, Sub 2 is compared into Sub.
-fn two_spectra(compared: bool) -> State {
+/// Sub (2) and "Sub 2" (9), two spectra.
+fn two_spectra() -> State {
     let mut s = daemon_state();
     let mut s2 = meas(9, "Sub 2", spectrum());
     if let Some(d) = s2.config.kind.display_mut() {
         d.style = SpectrumStyle::Line;
     }
     s.measurements.push(s2);
-    if compared {
-        s.measurements[0].compared = vec![Compared::Meas { meas: MeasId(9) }];
-    }
     s
 }
 
@@ -80,12 +77,18 @@ fn spectra(t: &mut T, frames: &[(u32, f32)]) {
     })));
 }
 
-/// The test grid on `state`, the spectrum pane showing Sub, frames of both spectra.
-fn on_sub(state: State) -> T {
+/// The test grid on `state`, the spectrum pane showing Sub with the groups of `with` ticked
+/// behind it, frames of both spectra.
+fn on_sub(state: State, with: &[u32]) -> T {
     let mut t = T::new();
     t.conn(mirror(state));
     let p = t.pane(PaneKind::Spectrum);
     t.drop_meas(p, MeasId(2));
+    let picks: Vec<Pick> = with
+        .iter()
+        .map(|m| Pick::here(EntryRef::Group { meas: MeasId(*m) }))
+        .collect();
+    t.st.layout.view_mut(p).expect("the pane").with = With::of(&picks);
     spectra(&mut t, &[(2, -60.0), (9, -60.0)]);
     t
 }
@@ -106,9 +109,9 @@ fn drawn(t: &T) -> Vec<(String, SpectrumStyle, u8, bool, f64)> {
 /// keys change it from that pane once it is picked in the legend.
 #[test]
 fn a_compared_curve_keeps_its_own_offset() {
-    let mut s = two_spectra(true);
+    let mut s = two_spectra();
     s.measurements[2].offset = Db(6.0);
-    let mut t = on_sub(s);
+    let mut t = on_sub(s, &[9]);
     let rows = drawn(&t);
     assert_eq!(
         rows.iter().map(|r| (r.0.as_str(), r.4)).collect::<Vec<_>>(),
@@ -178,7 +181,7 @@ fn a_compared_curve_keeps_its_own_offset() {
 /// compared there draws with its own measurement's style.
 #[test]
 fn display_keys_change_only_the_panes_measurement() {
-    let mut t = on_sub(two_spectra(true));
+    let mut t = on_sub(two_spectra(), &[9]);
     let before = t.st.meas(MeasId(9)).cloned();
     for k in ["B", "P", "Shift+B"] {
         let r = t.key_answered(k);
@@ -223,17 +226,13 @@ fn display_keys_change_only_the_panes_measurement() {
     );
 }
 
-/// The pane draws its own group first (on top), then the compared curves in compare
+/// The pane draws its lead's group first (on top), then what is ticked behind it in tick
 /// order, each a layer further back.
 #[test]
 fn compared_curves_draw_in_compare_order_under_the_panes_own() {
-    let mut s = two_spectra(false);
+    let mut s = two_spectra();
     s.measurements.push(meas(10, "Sub 3", spectrum()));
-    s.measurements[0].compared = vec![
-        Compared::Meas { meas: MeasId(10) },
-        Compared::Meas { meas: MeasId(9) },
-    ];
-    let mut t = on_sub(s);
+    let mut t = on_sub(s, &[10, 9]);
     spectra(&mut t, &[(2, -60.0), (9, -60.0), (10, -60.0)]);
     assert_eq!(
         drawn(&t)
@@ -244,39 +243,30 @@ fn compared_curves_draw_in_compare_order_under_the_panes_own() {
     );
 }
 
-/// C on a curve of another measurement asks where first: nothing is drawn compared until
-/// a measurement is ticked, and then only in that measurement's panes.
+/// C on the spectrum pane lists Sub (its lead) and Sub 2; nothing is drawn behind Sub
+/// until Sub 2 is ticked, and then only in this pane, with no daemon call.
 #[test]
-fn c_asks_which_measurement_first() {
-    let mut t = on_sub(two_spectra(false));
-    t.st.apply(Msg::SelectMeas(MeasId(9)), &t.keys);
-    t.drop_meas(t.pane(PaneKind::Spectrum), MeasId(9));
+fn c_ticks_into_the_focused_pane_only() {
+    let mut t = on_sub(two_spectra(), &[]);
+    let p = t.pane(PaneKind::Spectrum);
+    t.st.layout.set_focus(p);
     assert!(t.key("C").is_empty());
     let Overlay::Choose(c) = &t.st.overlay else {
         panic!("no chooser: {:?}", t.st.overlay);
     };
-    assert_eq!(c.title, "Compare Sub 2 with…");
-    // Its row dropped on the spectrum pane: Sub is on no pane now.
     let labels: Vec<&str> = c.choices.iter().map(|c| c.label.as_str()).collect();
-    assert_eq!(labels, ["  Sub"]);
-    assert_eq!(drawn(&t).len(), 1, "nothing compared yet");
-    let r = t.key("Enter");
     assert_eq!(
-        calls(&r)
-            .first()
-            .map(|(c, w)| ((*c).clone(), w.to_string())),
-        Some((
-            Command::MeasCompare {
-                meas: MeasId(2),
-                compared: vec![Compared::Meas { meas: MeasId(9) }],
-            },
-            "Sub 2 compared into Sub (cmp)".to_owned()
-        ))
+        labels,
+        [
+            "\u{2713} Sub \u{b7} live \u{b7} lead",
+            "  Sub 2 \u{b7} live"
+        ]
     );
-    t.answer(&r);
+    assert_eq!(drawn(&t).len(), 1, "nothing ticked yet");
+    t.key("Down");
+    assert!(t.key("Enter").is_empty());
+    assert_eq!(t.last_toast(), "Sub 2 drawn in this pane (cmp)");
     t.key("Escape");
-    let p = t.pane(PaneKind::Spectrum);
-    t.drop_meas(p, MeasId(2));
     assert_eq!(
         drawn(&t)
             .iter()
@@ -284,6 +274,13 @@ fn c_asks_which_measurement_first() {
             .collect::<Vec<_>>(),
         [("Sub", false), ("Sub 2", true)]
     );
+    // Another spectrum pane shows Sub alone.
+    let other = t.st.split_focused_pane().expect("room for a split");
+    let names =
+        crate::scenes::with_spectrum(&t.st, other, &Theme::dark(), now(), |traces, _, _| {
+            traces.iter().map(|c| c.name.clone()).collect::<Vec<_>>()
+        });
+    assert_eq!(names, ["Sub"], "a split starts with the lead alone");
 }
 
 /// P steps hold → tracking → off: the hold line is drawn only while the mode holds, tracking
@@ -291,7 +288,7 @@ fn c_asks_which_measurement_first() {
 #[test]
 fn tracking_draws_no_hold_and_a_new_hold_starts_afresh() {
     use ac2_proto::model::PeakMode;
-    let mut t = on_sub(two_spectra(false));
+    let mut t = on_sub(two_spectra(), &[]);
     let hold = |t: &T| -> Option<Vec<f32>> {
         let p = t.pane(PaneKind::Spectrum);
         crate::scenes::with_spectrum(&t.st, p, &Theme::dark(), now(), |traces, _, _| {

@@ -5,7 +5,7 @@ use ac2_proto::model::PaneLayout;
 use ac2_proto::model::layout as wire;
 
 /// Magnitude over phase, the way an operator lays out a transfer measurement.
-fn two_transfer() -> PaneLayout {
+fn two_transfer(owner: u32) -> PaneLayout {
     let pane = |transfer_view| PaneLayout::Pane {
         pane: Box::new(wire::LayoutPane {
             kind: wire::PaneKind::Transfer,
@@ -15,10 +15,9 @@ fn two_transfer() -> PaneLayout {
             sweep_view: wire::SweepView::Response,
             programme_view: wire::ProgrammeView::Meters,
             chrome: wire::PlotChrome::Full,
-            content: None,
+            content: wire::PaneContent::group(MeasId(owner)),
             levels: wire::LayoutLevels::default(),
             plates: wire::LayoutPlates::default(),
-            rig: wire::RigRef::ThisRig,
         }),
     };
     PaneLayout::Split {
@@ -63,11 +62,11 @@ fn selecting_a_measurement_brings_its_panes() {
     let mut t = T::new();
     assert!(layout_calls(&select(&mut t, 2)).is_empty());
     let grid = t.st.pane_layout();
-    t.conn(mirror(with_layout(1, Some(two_transfer()))));
+    t.conn(mirror(with_layout(1, Some(two_transfer(1)))));
     assert_eq!(t.st.pane_layout(), grid, "Sub selected: its panes stay");
     let r = select(&mut t, 1);
     assert!(layout_calls(&r).is_empty(), "{r:?}");
-    assert_eq!(t.st.pane_layout(), two_transfer());
+    assert_eq!(t.st.pane_layout(), two_transfer(1));
     assert_eq!(t.st.layout.focus_kind(), PaneKind::Transfer);
     assert_eq!(
         t.st.pane_meas(t.st.layout.focus).map(|m| m.id),
@@ -81,7 +80,7 @@ fn selecting_a_measurement_brings_its_panes() {
     assert_eq!(kinds, [wire::PaneKind::Transfer, wire::PaneKind::Transfer]);
     // Back to Main L: its own panes again.
     select(&mut t, 1);
-    assert_eq!(t.st.pane_layout(), two_transfer());
+    assert_eq!(t.st.pane_layout(), two_transfer(1));
 }
 
 /// An edit while a measurement is selected is sent once as its layout; the daemon's echo
@@ -127,18 +126,18 @@ fn editing_panes_stores_them_on_the_selected_measurement() {
 fn a_layout_received_for_the_selected_measurement_applies() {
     let mut t = T::new();
     select(&mut t, 1);
-    let r = t.conn(mirror(with_layout(1, Some(two_transfer()))));
+    let r = t.conn(mirror(with_layout(1, Some(two_transfer(1)))));
     assert!(layout_calls(&r).is_empty(), "{r:?}");
-    assert_eq!(t.st.pane_layout(), two_transfer());
+    assert_eq!(t.st.pane_layout(), two_transfer(1));
     // Received for a measurement not selected: the screen stays.
-    let mut other = two_transfer();
+    let mut other = two_transfer(1);
     if let PaneLayout::Split { ratio, .. } = &mut other {
         *ratio = 0.25;
     }
-    let mut s = with_layout(1, Some(two_transfer()));
+    let mut s = with_layout(1, Some(two_transfer(1)));
     s.measurements[0].layout = Some(other.clone());
     t.conn(mirror(s));
-    assert_eq!(t.st.pane_layout(), two_transfer());
+    assert_eq!(t.st.pane_layout(), two_transfer(1));
     // An edit in flight: the daemon's copy from before it does not undo it.
     let r = t.key("N");
     assert_eq!(layout_calls(&r).len(), 1);
@@ -236,8 +235,8 @@ fn quick_edits_go_one_call_at_a_time() {
     t.conn(mirror(with_layout(1, Some(screen.clone()))));
     assert_eq!(t.st.pane_layout(), screen);
     // Then another client's edit is shown.
-    t.conn(mirror(with_layout(1, Some(two_transfer()))));
-    assert_eq!(t.st.pane_layout(), two_transfer());
+    t.conn(mirror(with_layout(1, Some(two_transfer(1)))));
+    assert_eq!(t.st.pane_layout(), two_transfer(1));
 }
 
 /// The rig with `Spectrum 2` (4) beside `Spectrum 1` (3), both laid out as
@@ -245,9 +244,9 @@ fn quick_edits_go_one_call_at_a_time() {
 /// `Spectrum 2`); `Spectrum 1`'s row chosen.
 fn desk_on_twin_spectra() -> T {
     let mut s = rig();
-    s.measurements[2].layout = Some(three_spectrum());
+    s.measurements[2].layout = Some(three_spectrum(3));
     let mut m = meas(4, "Spectrum 2", spectrum());
-    m.layout = Some(three_spectrum());
+    m.layout = Some(three_spectrum(4));
     s.measurements.push(m);
     let trace = |id: u32, meas: u32| {
         let mut t = stored(id, None, 2);
@@ -264,7 +263,7 @@ fn desk_on_twin_spectra() -> T {
     select(&mut t, 3);
     assert_eq!(
         t.st.pane_layout(),
-        three_spectrum(),
+        three_spectrum(3),
         "Spectrum 1's own panes"
     );
     t
@@ -295,11 +294,11 @@ fn a_trace_compared_then_another_measurements_trace_chosen_leaves_its_layout() {
         !layout_targets(&sent).contains(&MeasId(4)),
         "nothing for Spectrum 2: {sent:?}"
     );
-    assert_eq!(spectrum_2_layout(&t), Some(three_spectrum()));
+    assert_eq!(spectrum_2_layout(&t), Some(three_spectrum(4)));
     select(&mut t, 4);
     assert_eq!(
         t.st.pane_layout(),
-        three_spectrum(),
+        three_spectrum(4),
         "Spectrum 2's own panes"
     );
 }
@@ -321,7 +320,7 @@ fn edits_of_one_measurements_panes_leave_an_identical_layout_alone() {
         assert_eq!(layout_targets(&r), [MeasId(3)], "{what}: {r:?}");
         answer_layout_calls(&mut t, &r);
     }
-    assert_eq!(spectrum_2_layout(&t), Some(three_spectrum()));
+    assert_eq!(spectrum_2_layout(&t), Some(three_spectrum(4)));
     assert_eq!(
         t.st.rig.selected,
         Some(MeasId(3)),
@@ -330,7 +329,7 @@ fn edits_of_one_measurements_panes_leave_an_identical_layout_alone() {
 }
 
 /// Another client's edit of the layout keeps each pane's pick, as the layout carries it; a
-/// layout with no picks has its panes follow the chosen measurement.
+/// layout of fewer panes shows what each of its panes names.
 #[test]
 fn another_clients_layout_carries_the_picks() {
     let three = |layout: Option<PaneLayout>| {
@@ -376,8 +375,9 @@ fn another_clients_layout_carries_the_picks() {
     t.conn(mirror(three(Some(l.clone()))));
     assert_eq!(t.st.pane_layout(), l, "another client's edit");
     assert_eq!(picks(&t), before, "each pane keeps its pick");
-    // No picks: the panes follow the chosen measurement.
-    let mut one = two_transfer();
+    // A layout of fewer panes: each still shows what it names.
+    let mut one = two_transfer(2);
+    one.panes_mut()[0].content = wire::PaneContent::Nothing;
     if let PaneLayout::Split { b, .. } = &mut one
         && let PaneLayout::Pane { pane } = b.as_mut()
     {
@@ -389,7 +389,7 @@ fn another_clients_layout_carries_the_picks() {
 }
 
 /// Magnitude, phase and coherence in three columns: `TF 1`'s own panes on the rig.
-fn three_transfer() -> PaneLayout {
+fn three_transfer(owner: u32) -> PaneLayout {
     let pane = |transfer_view| PaneLayout::Pane {
         pane: Box::new(wire::LayoutPane {
             kind: wire::PaneKind::Transfer,
@@ -399,10 +399,9 @@ fn three_transfer() -> PaneLayout {
             sweep_view: wire::SweepView::Response,
             programme_view: wire::ProgrammeView::Meters,
             chrome: wire::PlotChrome::TracesOnly,
-            content: None,
+            content: wire::PaneContent::group(MeasId(owner)),
             levels: wire::LayoutLevels::default(),
             plates: wire::LayoutPlates::default(),
-            rig: wire::RigRef::ThisRig,
         }),
     };
     PaneLayout::Split {
@@ -427,7 +426,7 @@ fn rig() -> State {
         meas(2, "TF 1", transfer()),
         meas(3, "Spectrum 1", spectrum()),
     ];
-    s.measurements[1].layout = Some(three_transfer());
+    s.measurements[1].layout = Some(three_transfer(2));
     s
 }
 
@@ -480,21 +479,21 @@ fn a_viewer_keeps_its_pane_when_another_client_lays_out_its_measurement() {
     let mut t = kiosk(Some("FOH SPL"));
     kiosk_on_its_meter(&t, "connected");
     assert_eq!(t.st.rig.selected, Some(MeasId(1)));
-    let mut phase = three_transfer();
+    let mut phase = three_transfer(2);
     if let PaneLayout::Split { b, .. } = &mut phase
         && let PaneLayout::Split { b, .. } = b.as_mut()
         && let PaneLayout::Pane { pane } = b.as_mut()
     {
         pane.transfer_view = wire::TransferView::Phase;
     }
-    for l in [phase, three_transfer()] {
+    for l in [phase, three_transfer(2)] {
         let r = t.conn(mirror(rig_with_spl_layout(l)));
         assert!(layout_calls(&r).is_empty(), "{r:?}");
         kiosk_on_its_meter(&t, "FOH SPL laid out elsewhere");
     }
     // TF 1's own panes changed elsewhere too: nothing to do with the kiosk.
-    let mut s = rig_with_spl_layout(three_transfer());
-    s.measurements[1].layout = Some(two_transfer());
+    let mut s = rig_with_spl_layout(three_transfer(2));
+    s.measurements[1].layout = Some(two_transfer(2));
     t.conn(mirror(s));
     kiosk_on_its_meter(&t, "TF 1 laid out elsewhere");
 }
@@ -515,7 +514,7 @@ fn g_on_a_viewer_gives_no_measurement_its_pane() {
         kiosk_on_its_meter(&t, "after G");
         // TF 1 laid out elsewhere afterwards still leaves the kiosk as it is.
         let mut s = rig();
-        s.measurements[1].layout = Some(two_transfer());
+        s.measurements[1].layout = Some(two_transfer(2));
         t.conn(mirror(s));
         kiosk_on_its_meter(&t, "TF 1 laid out elsewhere after G");
     }
@@ -536,11 +535,11 @@ fn a_layout_received_for_a_measurement_picked_by_its_pane_waits_for_its_row() {
         "a click selects nothing"
     );
     let grid = t.st.pane_layout();
-    t.conn(mirror(with_layout(2, Some(two_transfer()))));
+    t.conn(mirror(with_layout(2, Some(two_transfer(1)))));
     assert_eq!(t.st.pane_layout(), grid, "Sub only shown by its pane");
     select(&mut t, 2);
-    assert_eq!(t.st.pane_layout(), two_transfer(), "Sub's row chosen");
-    let mut other = two_transfer();
+    assert_eq!(t.st.pane_layout(), two_transfer(1), "Sub's row chosen");
+    let mut other = two_transfer(1);
     if let PaneLayout::Split { ratio, .. } = &mut other {
         *ratio = 0.25;
     }
@@ -557,17 +556,17 @@ fn a_layout_received_for_a_measurement_picked_by_its_pane_waits_for_its_row() {
 #[test]
 fn a_chosen_measurement_back_after_a_restart_still_follows_its_layout() {
     let mut t = T::new();
-    t.conn(mirror(with_layout(1, Some(two_transfer()))));
+    t.conn(mirror(with_layout(1, Some(two_transfer(1)))));
     select(&mut t, 1);
-    assert_eq!(t.st.pane_layout(), two_transfer());
+    assert_eq!(t.st.pane_layout(), two_transfer(1));
     // Another daemon: its ids are its own, the measurements come back by name.
     t.conn(mirror_of(
-        with_layout(1, Some(two_transfer())),
+        with_layout(1, Some(two_transfer(1))),
         2,
         Some("c1"),
     ));
     assert_eq!(t.st.rig.selected, Some(MeasId(1)));
-    let mut other = two_transfer();
+    let mut other = two_transfer(1);
     if let PaneLayout::Split { ratio, .. } = &mut other {
         *ratio = 0.25;
     }
@@ -584,7 +583,7 @@ fn desk_on_tf1() -> T {
     let mut t = T::fresh();
     t.connect(rig());
     select(&mut t, 2);
-    assert_eq!(t.st.pane_layout(), three_transfer(), "TF 1's own panes");
+    assert_eq!(t.st.pane_layout(), three_transfer(2), "TF 1's own panes");
     t
 }
 
@@ -595,7 +594,7 @@ fn layout_targets(r: &[Request]) -> Vec<MeasId> {
 
 /// Spectrum, spectrograph and spectrum in three columns: `Spectrum 2`'s own panes on the
 /// rig.
-fn three_spectrum() -> PaneLayout {
+fn three_spectrum(owner: u32) -> PaneLayout {
     let pane = |spectrum_view| PaneLayout::Pane {
         pane: Box::new(wire::LayoutPane {
             kind: wire::PaneKind::Spectrum,
@@ -605,10 +604,9 @@ fn three_spectrum() -> PaneLayout {
             sweep_view: wire::SweepView::Response,
             programme_view: wire::ProgrammeView::Meters,
             chrome: wire::PlotChrome::TracesOnly,
-            content: None,
+            content: wire::PaneContent::group(MeasId(owner)),
             levels: wire::LayoutLevels::default(),
             plates: wire::LayoutPlates::default(),
-            rig: wire::RigRef::ThisRig,
         }),
     };
     PaneLayout::Split {
@@ -628,14 +626,14 @@ fn three_spectrum() -> PaneLayout {
 fn desk_on_spectrum_2() -> T {
     let mut s = rig();
     let mut m = meas(4, "Spectrum 2", spectrum());
-    m.layout = Some(three_spectrum());
+    m.layout = Some(three_spectrum(4));
     s.measurements.push(m);
     let mut t = T::fresh();
     t.connect(s);
     select(&mut t, 4);
     assert_eq!(
         t.st.pane_layout(),
-        three_spectrum(),
+        three_spectrum(4),
         "Spectrum 2's own panes"
     );
     t
@@ -741,7 +739,7 @@ fn an_edit_with_no_pane_showing_the_measurement_is_not_its_layout() {
 #[test]
 fn panes_shared_with_a_measurement_none_of_them_shows_are_not_its_layout() {
     let mut t = T::fresh();
-    t.connect(rig_with_spl_layout(three_transfer()));
+    t.connect(rig_with_spl_layout(three_transfer(2)));
     select(&mut t, 2);
     let r = t.key("G");
     assert_eq!(layout_targets(&r), [MeasId(2)], "{r:?}");
@@ -773,8 +771,8 @@ fn guest_in_spectrograph_survives_the_rows(put: fn(&mut T, PaneId) -> Vec<Reques
     let r = select(&mut t, 4);
     assert!(layout_calls(&r).is_empty(), "Spectrum 2's row: {r:?}");
     assert_eq!(t.st.rig.selected, Some(s2));
-    let mut picked = three_spectrum();
-    picked.panes_mut()[1].content = Some(wire::PaneContent::Meas { meas: s1 });
+    let mut picked = three_spectrum(4);
+    picked.panes_mut()[1].content = wire::PaneContent::group(s1);
     assert_eq!(
         t.st.pane_layout(),
         picked,
@@ -820,7 +818,7 @@ fn a_pick_turning_a_pane_into_another_kind_comes_back_with_the_row() {
     t.conn(mirror(s));
     let r = select(&mut t, 2);
     assert!(layout_calls(&r).is_empty(), "TF 1's row: {r:?}");
-    assert_eq!(t.st.pane_layout(), three_transfer());
+    assert_eq!(t.st.pane_layout(), three_transfer(2));
     let r = select(&mut t, 4);
     assert!(layout_calls(&r).is_empty(), "Spectrum 2's row: {r:?}");
     assert_eq!(t.st.pane_layout(), stored);
@@ -881,7 +879,7 @@ fn a_pane_key_acts_on_the_measurement_its_pane_shows() {
 /// the pane's new range with the layout, the other panes still carrying none.
 #[test]
 fn a_layout_brings_its_level_ranges() {
-    let mut l = three_transfer();
+    let mut l = three_transfer(2);
     let saved = wire::LevelRange { lo: -30.0, hi: 6.0 };
     l.panes_mut()[0].levels.transfer = Some(saved);
     let mut s = rig();
@@ -913,8 +911,8 @@ fn a_layout_brings_its_level_ranges() {
 /// meanwhile (nothing stands in for it) and the layout keeps the pick.
 #[test]
 fn a_pick_of_a_measurement_not_listed_waits_with_nothing_in_for_it() {
-    let mut l = three_spectrum();
-    l.panes_mut()[1].content = Some(wire::PaneContent::Meas { meas: MeasId(9) });
+    let mut l = three_spectrum(4);
+    l.panes_mut()[1].content = wire::PaneContent::group(MeasId(9));
     let mut s = rig();
     let mut m = meas(4, "Spectrum 2", spectrum());
     m.layout = Some(l.clone());
@@ -941,10 +939,7 @@ fn picks_and_level_ranges_survive_a_reconnect_and_reach_a_fresh_app() {
     answer_layout_calls(&mut t, &r);
     let zoomed = t.st.level_range(middle);
     let stored = t.st.pane_layout();
-    assert_eq!(
-        stored.panes()[1].content,
-        Some(wire::PaneContent::Meas { meas: s1 })
-    );
+    assert_eq!(stored.panes()[1].content, wire::PaneContent::group(s1));
     assert!(
         stored.panes()[1].levels.spectrum_dbfs.is_some(),
         "{stored:?}"

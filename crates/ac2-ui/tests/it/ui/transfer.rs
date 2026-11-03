@@ -11,15 +11,11 @@ fn transfer_view_two_traces_and_banner() {
     let mut h = harness(options(Some(&rig)));
     step_until(&mut h, "live frames", live);
     // The pane draws Main L's group; Delay tower joins it compared (C), tagged `cmp`.
-    rig.compare_into(
-        1,
-        vec![ac2_proto::model::Compared::Meas { meas: MeasId(2) }],
+    crate::common::draw_in(
+        &mut h.state_mut().state,
+        ac2_ui::state::PaneKind::Transfer,
+        &[ac2_proto::model::layout::EntryRef::Group { meas: MeasId(2) }],
     );
-    step_until(&mut h, "Delay tower compared", |a| {
-        a.state
-            .meas(MeasId(1))
-            .is_some_and(|m| !m.compared.is_empty())
-    });
     {
         let st = &h.state().state;
         assert_eq!(st.rig.selected, Some(MeasId(1)));

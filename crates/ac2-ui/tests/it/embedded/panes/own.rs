@@ -11,7 +11,6 @@ use ac2_scene::primitives::Viewport;
 use ac2_scene::theme::Theme;
 use ac2_ui::embedded::{EmbeddedBackend, Setup, start_embedded_with};
 use ac2_ui::forms::FormKind;
-use ac2_ui::keys::Chord;
 use ac2_ui::keys::Keymap;
 use ac2_ui::state::{AppState, Msg, Overlay, PaneId, PaneKind};
 use std::time::Instant;
@@ -99,9 +98,10 @@ fn capture(d: &mut Driver, meas: MeasId, slot: u8) -> R<TraceId> {
 }
 
 /// From an empty daemon, two spectrum measurements side by side, a capture each: each pane
-/// draws its own measurement's curves only. C on the right one's capture asks where; ticked
-/// into the left one's measurement, the left pane draws it tagged `cmp`. Moved under Imported it is drawn on no pane (C refused, the
-/// pane's hint says it waits there); moved back it is drawn again.
+/// draws its own measurement's curves only. C on the left one lists both measurements;
+/// Spectrum 2 ticked, the left pane draws its curves tagged `cmp`. Its capture moved under
+/// Imported is drawn on no pane (the pane's hint says it waits there); moved back it is
+/// drawn again.
 #[test]
 fn two_spectra_each_draw_their_own_from_an_empty_daemon() -> R {
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
@@ -148,51 +148,41 @@ fn two_spectra_each_draw_their_own_from_an_empty_daemon() -> R {
         names(s, left) == [n1.clone(), l1.clone()] && names(s, right) == [n2.clone(), l2.clone()]
     })?;
 
-    // C on Spectrum 2's capture asks where to compare it, and nothing is drawn until a
-    // measurement is ticked; then Spectrum 1's pane draws it, tagged, and Spectrum 2's
-    // pane is as it was.
-    select(&mut d, t2);
+    // C on the left pane lists the measurements it can draw, its own first as the lead;
+    // nothing is drawn until one is ticked. Spectrum 2 ticked: the left pane draws its live
+    // curve and capture, tagged, and Spectrum 2's pane is as it was.
+    d.send(Msg::FocusPane(left));
     d.key("C");
-    let Overlay::Choose(c) = &d.st.overlay else {
-        return Err(format!("no chooser: {:?}", d.st.overlay).into());
+    let Overlay::Choose(c) = &mut d.st.overlay else {
+        return Err(format!("no tick list: {:?}", d.st.overlay).into());
     };
-    assert_eq!(c.title, format!("Compare {} with…", c.label));
-    assert_eq!(
-        c.choices
-            .iter()
-            .map(|c| c.label.clone())
-            .collect::<Vec<_>>(),
-        [format!("  {n1} · on screen")]
-    );
+    let labels: Vec<String> = c.choices.iter().map(|c| c.label.clone()).collect();
+    assert_eq!(labels.len(), 2, "{labels:?}");
+    assert!(labels[0].starts_with(&format!("✓ {n1}")), "{labels:?}");
+    assert!(labels[0].ends_with("· lead"), "{labels:?}");
+    assert!(labels[1].starts_with(&format!("  {n2}")), "{labels:?}");
+    c.index = 1;
     assert_eq!(names(&d.st, left), [n1.clone(), l1.clone()]);
     d.key("Enter");
-    d.until("the capture compared into Spectrum 1", |s| {
-        s.meas(s1).is_some_and(|m| !m.compared.is_empty())
-    })?;
     d.key("Escape");
-    d.drop_meas(left, s1);
-    let legend = spectrum_legend(&d.st, left);
-    assert!(
-        legend.iter().any(|e| e.starts_with(&format!("{l2} · cmp"))),
-        "{legend:?}"
-    );
-    assert!(
-        legend
-            .iter()
-            .all(|e| e.split(" · ").next() != Some(n2.as_str())),
-        "Spectrum 2's live curve not compared: {legend:?}"
-    );
+    d.until("Spectrum 2 drawn in the left pane", |s| {
+        let legend = spectrum_legend(s, left);
+        legend.iter().any(|e| e.starts_with(&format!("{l2} · cmp")))
+            && legend.iter().any(|e| e.starts_with(&format!("{n2} · cmp")))
+    })?;
     assert_eq!(names(&d.st, right), [n2.clone(), l2.clone()]);
     // Enter on its ticked row takes it out again.
-    select(&mut d, t2);
     d.key("C");
+    let Overlay::Choose(c) = &mut d.st.overlay else {
+        return Err(format!("no tick list: {:?}", d.st.overlay).into());
+    };
+    c.index = 1;
     d.key("Enter");
-    d.until("compare off", |s| {
-        s.meas(s1).is_some_and(|m| m.compared.is_empty())
-    })?;
     d.key("Escape");
+    assert_eq!(names(&d.st, left), [n1.clone(), l1.clone()]);
 
-    // Under Imported: on no pane, C refused, the hint says where it waits.
+    // Under Imported: on no pane, the hint says where it waits.
+    select(&mut d, t2);
     move_selected(&mut d, t2, TraceOwner::Imported)?;
     d.drop_meas(left, s1);
     d.drop_meas(right, s2);
@@ -203,24 +193,6 @@ fn two_spectra_each_draw_their_own_from_an_empty_daemon() -> R {
             names(&d.st, p)
         );
     }
-    select(&mut d, t2);
-    d.key("C");
-    assert_eq!(
-        d.st.overlay,
-        Overlay::None,
-        "an Imported trace is not compared"
-    );
-    // The key is named the platform's way (`⇧F2` on macOS).
-    let move_key = Chord::parse("Shift+F2")?.label();
-    assert!(
-        d.st.toasts.list
-            .iter()
-            .any(|t| t.text.ends_with(&format!(
-                "({l2}) is under Imported: it is no measurement's to compare — select it, then Move to measurement… ({move_key})"
-            ))),
-        "{:?}",
-        d.st.toasts.list
-    );
     d.drop_meas(right, s2);
     let hint =
         d.st.empty_hint(right, &d.keys)
@@ -641,12 +613,13 @@ fn picks_and_level_axes_come_back_to_a_restarted_app_from_an_empty_daemon() -> R
 }
 
 /// From an empty daemon, two spectra side by side: B on the left changes only Spectrum 1's
-/// style, the offset keys on the right only Spectrum 2's offset; Spectrum 2 compared into
-/// Spectrum 1 draws in the left pane at its own offset. A client connecting afresh finds
-/// the styles, the compare list and the offset kept by the daemon.
+/// style, the offset keys on the right only Spectrum 2's offset; Spectrum 2 ticked into the
+/// left pane (C) draws there at its own offset. A client connecting afresh finds the styles,
+/// the pane's entries (in Spectrum 1's own panes) and the offset kept by the daemon.
 #[test]
 fn display_settings_and_compare_lists_live_on_the_daemon_from_an_empty_daemon() -> R {
-    use ac2_proto::model::{Compared, SpectrumStyle};
+    use ac2_proto::model::SpectrumStyle;
+    use ac2_proto::model::layout::{EntryRef, PaneContent};
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     measure_from_empty(&mut d)?;
@@ -668,7 +641,7 @@ fn display_settings_and_compare_lists_live_on_the_daemon_from_an_empty_daemon() 
     };
     let name =
         |s: &AppState, m: MeasId| s.meas(m).map(|m| m.config.name.clone()).unwrap_or_default();
-    let (n1, n2) = (name(&d.st, s1), name(&d.st, s2));
+    let n2 = name(&d.st, s2);
     let before = style(&d.st, s2);
 
     d.send(Msg::FocusPane(left));
@@ -684,28 +657,35 @@ fn display_settings_and_compare_lists_live_on_the_daemon_from_an_empty_daemon() 
     d.until("Spectrum 2 offset +1 dB", |s| s.meas_offset(s2) == 1.0)?;
     assert_eq!(d.st.meas_offset(s1), 0.0);
 
-    d.send(Msg::SelectMeas(s2));
+    // C on the left pane, Spectrum 2 ticked: the left pane, part of Spectrum 1's own panes,
+    // stores it there.
+    d.send(Msg::FocusPane(left));
     d.key("C");
     let Overlay::Choose(c) = &mut d.st.overlay else {
-        return Err(format!("no chooser: {:?}", d.st.overlay).into());
+        return Err(format!("no tick list: {:?}", d.st.overlay).into());
     };
     c.index = c
         .choices
         .iter()
-        .position(|c| c.label.trim_start().starts_with(&n1))
-        .ok_or("Spectrum 1 among the targets")?;
+        .position(|c| c.label.trim_start().starts_with(&n2))
+        .ok_or("Spectrum 2 in the tick list")?;
     d.key("Enter");
     d.key("Escape");
-    let compared = vec![Compared::Meas { meas: s2 }];
-    d.until("Spectrum 2 compared into Spectrum 1", |s| {
-        s.meas(s1).is_some_and(|m| m.compared == compared)
-    })?;
+    let drawn = EntryRef::Group { meas: s2 };
+    let stored = |s: &AppState| {
+        s.meas(s1).and_then(|m| m.layout.clone()).is_some_and(|l| {
+            l.panes().iter().any(|p| match &p.content {
+                PaneContent::Curves { entries } => entries.iter().any(|e| e.what == drawn),
+                _ => false,
+            })
+        })
+    };
+    d.until("Spectrum 2 stored in Spectrum 1's pane", stored)?;
     let at_offset = |s: &AppState, p: PaneId| {
         spectrum_legend(s, p)
             .iter()
             .any(|e| e.starts_with(&n2) && e.contains("offset +1.0 dB"))
     };
-    d.drop_meas(left, s1);
     d.until("Spectrum 2 at +1 dB in Spectrum 1's pane", |s| {
         at_offset(s, left)
     })?;
@@ -715,14 +695,13 @@ fn display_settings_and_compare_lists_live_on_the_daemon_from_an_empty_daemon() 
     d.synced()?;
     assert_eq!(style(&d.st, s1), Some(SpectrumStyle::Line));
     assert_eq!(style(&d.st, s2), before);
-    assert_eq!(d.st.meas(s1).map(|m| m.compared.clone()), Some(compared));
+    assert!(stored(&d.st), "the pane's entries kept by the daemon");
     assert_eq!(d.st.meas_offset(s2), 1.0);
-    d.key("Alt+2");
+    d.send(Msg::SelectMeas(s1));
     let p = spectrum_panes(&d.st)
-        .first()
-        .copied()
-        .ok_or("a spectrum pane")?;
-    d.drop_meas(p, s1);
+        .into_iter()
+        .find(|p| d.st.compared_into(*p).contains(&drawn))
+        .ok_or("Spectrum 1's pane drawing Spectrum 2")?;
     d.until("Spectrum 2 at +1 dB after reconnecting", |s| {
         at_offset(s, p)
     })?;

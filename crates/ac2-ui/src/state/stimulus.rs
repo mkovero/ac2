@@ -659,32 +659,36 @@ impl AppState {
         self.sweep_shown_by(self.kind_meas(PaneKind::Distortion))
     }
 
-    /// The runs sweep pane `pane` draws over its own for compare (C), oldest first: compared
-    /// runs filed under a measurement other than the one it shows. An imported run is no
-    /// measurement's: it is not drawn until moved under one.
+    /// The runs sweep pane `pane` draws behind its own, nearest first: each run entry, and
+    /// the run each ticked sweep measurement's own sweep pane would draw. An imported run is
+    /// no measurement's: it is not drawn until moved under one.
     pub fn compared_sweeps(&self, pane: PaneId) -> Vec<(&TraceData, &GridDef)> {
         if self.layout.kind(pane) != PaneKind::Distortion {
             return Vec::new();
         }
         let own = self.pane_sweep(pane).map(|(t, _)| t.meta.id);
         let ms = self.measurements();
-        let compared = self.compared_into(self.pane_meas(pane));
-        let mut v: Vec<_> = self
-            .sweep_traces()
-            .into_iter()
-            .filter(|(t, _)| {
-                compared.contains(&ac2_proto::model::Compared::Trace { trace: t.meta.id })
-                    && Some(t.meta.id) != own
-                    && ac2_scene::meas_list::group_of(&t.meta, &ms)
-                        != ac2_proto::model::TraceOwner::Imported
-            })
-            .collect();
-        // First compared first: drawn above the later ones.
-        v.sort_by_key(|(t, _)| {
-            compared
-                .iter()
-                .position(|c| *c == ac2_proto::model::Compared::Trace { trace: t.meta.id })
-        });
+        let mut v: Vec<(&TraceData, &GridDef)> = Vec::new();
+        for e in self.compared_into(pane) {
+            let run = match e {
+                ac2_proto::model::layout::EntryRef::Trace { trace } => self
+                    .sweep_traces()
+                    .into_iter()
+                    .find(|(t, _)| t.meta.id == trace),
+                ac2_proto::model::layout::EntryRef::Group { meas } => {
+                    self.sweep_shown_by(self.meas(meas))
+                }
+                ac2_proto::model::layout::EntryRef::Live { .. } => None,
+            };
+            if let Some(r) = run
+                && Some(r.0.meta.id) != own
+                && ac2_scene::meas_list::group_of(&r.0.meta, &ms)
+                    != ac2_proto::model::TraceOwner::Imported
+                && !v.iter().any(|(t, _)| t.meta.id == r.0.meta.id)
+            {
+                v.push(r);
+            }
+        }
         v
     }
 

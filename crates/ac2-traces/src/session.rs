@@ -44,8 +44,8 @@ use std::path::{Path, PathBuf};
 
 use ac2_proto::GridDef;
 use ac2_proto::model::{
-    ColourFamily, Compared, ImportFormat, ImportRole, MeasConfig, PaneLayout, PlanSpec, SplLogRow,
-    TraceKind, TraceMeta, WalkState,
+    ColourFamily, ImportFormat, ImportRole, MeasConfig, PaneLayout, PlanSpec, SplLogRow, TraceKind,
+    TraceMeta, WalkState,
 };
 use ac2_proto::units::{Db, MeasId, Seconds, WallNs};
 use serde::{Deserialize, Serialize};
@@ -59,7 +59,7 @@ use ac2_proto::spl_log::{self, SplLogInfo};
 /// `format` of every manifest.
 pub const FORMAT: &str = "ac2-session";
 /// The one manifest version this build reads and writes.
-pub const VERSION: u32 = 40;
+pub const VERSION: u32 = 41;
 /// Manifest file name.
 pub const MANIFEST: &str = "session.json";
 /// The autosave's previous manifest, beside [`MANIFEST`].
@@ -84,8 +84,6 @@ pub struct SavedMeasurement {
     pub colour: Option<ColourFamily>,
     /// The panes clients show while it is selected; `None`: none of its own.
     pub layout: Option<PaneLayout>,
-    /// Curves its panes draw compared, first compared first.
-    pub compared: Vec<Compared>,
     /// Display offset of its live curves.
     pub offset: Db,
     /// EQ what-if sets (their filter curves are recomputed on load).

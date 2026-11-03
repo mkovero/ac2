@@ -604,10 +604,12 @@ fn awaiting_pick_reaches_the_walk_pane_and_marks_the_capture_unsettled() {
         sweep_view: SweepView::Response,
         programme_view: ProgrammeView::Meters,
         chrome: PlotChrome::Full,
-        content: Some(PaneContent::Walk { walk: w.id }),
+        content: PaneContent::Walk {
+            rig: RigRef::ThisRig,
+            walk: w.id,
+        },
         levels: LayoutLevels::default(),
         plates: LayoutPlates::default(),
-        rig: RigRef::ThisRig,
     };
     r.c.ok(Command::MeasLayout {
         meas: MeasId(1),
@@ -635,7 +637,13 @@ fn awaiting_pick_reaches_the_walk_pane_and_marks_the_capture_unsettled() {
     let Some(PaneLayout::Pane { pane }) = &m.layout else {
         panic!("{:?}", m.layout);
     };
-    assert_eq!(pane.content, Some(PaneContent::Walk { walk: w.id }));
+    assert_eq!(
+        pane.content,
+        PaneContent::Walk {
+            rig: RigRef::ThisRig,
+            walk: w.id
+        }
+    );
     assert_eq!(st.walks[0].step, Some(0));
 
     let w = r.capture(w.id);

@@ -58,7 +58,7 @@ pub fn export_path(text: &str, home: Option<&Path>) -> Result<PathBuf, String> {
 impl AppState {
     /// The export prompt for the focused (or only) SPL meter's current or previous log.
     pub(in crate::state) fn ask_leq_export(&mut self, previous: bool) {
-        let Some(m) = self.kind_meas(PaneKind::Spl).cloned() else {
+        let Some(m) = self.shown_of_kind(PaneKind::Spl).cloned() else {
             self.warn(self.no_spl_meter());
             return;
         };

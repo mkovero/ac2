@@ -67,7 +67,6 @@ impl Shared {
                     grid_id,
                     colour: None,
                     layout: None,
-                    compared: Vec::new(),
                     offset: Db(0.0),
                     eq: Vec::new(),
                 };
@@ -99,23 +98,10 @@ impl Shared {
             }
             C::MeasLayout { meas, layout } => {
                 let mut m = self.meas(meas)?;
-                m.layout = layout;
-                self.put_meas(m)
-            }
-            C::MeasCompare { meas, compared } => {
-                let mut m = self.meas(meas)?;
-                if compared.len() > Compared::MAX
-                    || compared.contains(&Compared::Meas { meas })
-                    || compared.iter().any(|c| match *c {
-                        Compared::Meas { meas } => self.meas(meas).is_err(),
-                        Compared::Trace { trace } => {
-                            !self.state.traces.iter().any(|t| t.id == trace)
-                        }
-                    })
-                {
-                    return Err(err(ErrorCode::Invalid, "no such compare list"));
+                if let Some(l) = &layout {
+                    l.check().map_err(|e| err(ErrorCode::Invalid, e))?;
                 }
-                m.compared = compared;
+                m.layout = layout;
                 self.put_meas(m)
             }
             C::MeasOffset { meas, offset } => {
@@ -173,7 +159,7 @@ impl Shared {
                     self.commit(Change::SplLog(Patch::Deleted(meas)));
                 }
                 let rev = self.commit(Change::Measurement(Patch::Deleted(meas)));
-                let rev = self.prune_compared().unwrap_or(rev);
+                let rev = self.prune_layouts().unwrap_or(rev);
                 ReplyBody::Ack { rev }
             }
             C::MeasStart { meas } => {

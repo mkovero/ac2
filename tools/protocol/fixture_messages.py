@@ -198,7 +198,6 @@ SPL_MEASUREMENT = {
     "grid_id": None,
     "colour": None,
     "layout": None,
-    "compared": [],
     "offset": 0.0,
     "eq": [],
 }
@@ -310,7 +309,6 @@ def _layout_pane(
     transfer_levels=None,
     readout=None,
     programme_view="meters",
-    rig=None,
 ):
     return {
         "kind": kind,
@@ -320,7 +318,7 @@ def _layout_pane(
         "sweep_view": "response",
         "programme_view": programme_view,
         "chrome": chrome,
-        "content": content,
+        "content": content or {"type": "nothing"},
         "levels": {
             "transfer": transfer_levels,
             "spectrum_dbfs": None,
@@ -334,14 +332,15 @@ def _layout_pane(
             "peaks": _plate(),
             "loudness": _plate(),
         },
-        "rig": rig or {"type": "this_rig"},
     }
 
 
+KETUNKOLO = {"type": "rig", "id": 0x0FEDCBA987654321, "name": "ketunkolo"}
+
 # samples::pane_layout(): a transfer pane (level axis zoomed, cursor values dragged to the
-# bottom-left at twice the text size) beside an SPL meter picked for measurement 2 over a
-# Programme pane metering the pair of inputs 3 and 4 in its goniometer view. The meter is
-# pinned to another rig; the other two show this session's.
+# bottom-left at twice the text size) drawing measurement 1's group, another rig's trace 7
+# and live curve 4, beside another rig's SPL meter 2 over a Programme pane metering the pair
+# of inputs 3 and 4 in its goniometer view.
 PANE_LAYOUT = {
     "type": "split",
     "axis": "row",
@@ -353,6 +352,14 @@ PANE_LAYOUT = {
             "phase",
             transfer_levels={"lo": -24.0, "hi": 12.0},
             readout=_plate([0.0, 1.0], 2.0),
+            content={
+                "type": "curves",
+                "entries": [
+                    {"rig": {"type": "this_rig"}, "what": {"type": "group", "meas": 1}},
+                    {"rig": KETUNKOLO, "what": {"type": "trace", "trace": 7}},
+                    {"rig": KETUNKOLO, "what": {"type": "live", "meas": 4}},
+                ],
+            },
         ),
     },
     "b": {
@@ -365,8 +372,7 @@ PANE_LAYOUT = {
                 "spl",
                 "magnitude",
                 "no_grid",
-                content={"type": "meas", "meas": 2},
-                rig={"type": "rig", "id": 0x0FEDCBA987654321, "name": "ketunkolo"},
+                content={"type": "meter", "rig": KETUNKOLO, "meas": 2},
             ),
         },
         "b": {
@@ -374,7 +380,7 @@ PANE_LAYOUT = {
             "pane": _layout_pane(
                 "programme",
                 "magnitude",
-                content={"type": "pair", "left": 2, "right": 3},
+                content={"type": "pair", "rig": {"type": "this_rig"}, "left": 2, "right": 3},
                 programme_view="goniometer",
             ),
         },
@@ -400,8 +406,7 @@ def measurement():
         "grid_id": p.grid_id(LOG_GRID),
         "colour": {"type": "hue", "index": 5},
         "layout": PANE_LAYOUT,
-        "compared": [],
-        "offset": 0.0,
+            "offset": 0.0,
         "eq": [],
     }
 
@@ -436,7 +441,6 @@ MATH_MEASUREMENT = {
     "grid_id": p.grid_id(LOG_GRID),
     "colour": None,
     "layout": None,
-    "compared": [],
     "offset": 0.0,
     "eq": [],
 }
@@ -497,7 +501,6 @@ SWEEP_MEASUREMENT = {
     "grid_id": None,
     "colour": {"type": "neutral"},
     "layout": None,
-    "compared": [],
     "offset": 0.0,
     "eq": [],
 }
@@ -742,9 +745,9 @@ def requests():
         ),
         req(78, "artnet.test", {"channels": dmx([(12, 255), (13, 40)])}),
         req(79, "artnet.fade", {"base": 38, "seconds": 2.5}),
-        req(82, "cal.line", {"channel": 4, "volts": 1.2277}),
+        req(81, "cal.line", {"channel": 4, "volts": 1.2277}),
         req(
-            85,
+            84,
             "levels.set",
             {
                 "base": 38,
@@ -755,11 +758,11 @@ def requests():
                 "loudness_target": -16.0,
             },
         ),
-        req(86, "levels.reset", {"channels": [0, 1]}),
-        req(88, "plan.list", mutation=False),
-        req(89, "plan.delete", {"name": "Club"}),
+        req(85, "levels.reset", {"channels": [0, 1]}),
+        req(87, "plan.list", mutation=False),
+        req(88, "plan.delete", {"name": "Club"}),
         req(
-            90,
+            89,
             "walk.new",
             {
                 "name": "Mains",
@@ -772,13 +775,13 @@ def requests():
                 ],
             },
         ),
-        req(92, "walk.goto", {"walk": 1, "step": 1}),
-        req(93, "walk.capture", {"walk": 1}),
-        req(94, "walk.skip", {"walk": 1, "point": 1}),
-        req(95, "walk.swap", {"walk": 1, "points": [2, 3]}),
-        req(96, "walk.redo", {"walk": 1, "point": 0}),
+        req(91, "walk.goto", {"walk": 1, "step": 1}),
+        req(92, "walk.capture", {"walk": 1}),
+        req(93, "walk.skip", {"walk": 1, "point": 1}),
+        req(94, "walk.swap", {"walk": 1, "points": [2, 3]}),
+        req(95, "walk.redo", {"walk": 1, "point": 0}),
         req(
-            98,
+            97,
             "sim.run",
             {
                 "request": {
@@ -798,7 +801,7 @@ def requests():
             },
         ),
         req(
-            99,
+            98,
             "sim.fit",
             {
                 "request": {
@@ -814,7 +817,7 @@ def requests():
             },
         ),
         req(
-            100,
+            99,
             "sim.map",
             {
                 "request": {
@@ -827,7 +830,7 @@ def requests():
                 }
             },
         ),
-        req(101, "sim.cancel"),
+        req(100, "sim.cancel"),
     ]
 
 

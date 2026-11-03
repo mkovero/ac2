@@ -10,6 +10,7 @@ fn two_panes() -> ac2_ui::prefs::UiPrefs {
         id: PaneId(n),
         kind,
         measurement: None,
+        curves: Vec::new(),
         meters: None,
         rig: None,
         modes: Default::default(),

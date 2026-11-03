@@ -84,17 +84,19 @@ impl AppState {
         }
     }
 
-    /// The stored trace a transfer IR view following `shown` draws instead of its live IR:
-    /// the selected trace, when it is a transfer trace captured with an impulse response
-    /// that a transfer pane showing `shown` draws (in its group, or compared). Selecting the
+    /// The stored trace transfer pane `pane`'s IR view draws instead of its live IR: the
+    /// selected trace, when it is a transfer trace captured with an impulse response that
+    /// the pane draws (in its group, or compared). Selecting the
     /// trace is what picks it, as it picks the sweep pane's run; with no such trace
     /// selected the view follows its measurement live.
-    pub fn stored_ir(&self, shown: Option<&ac2_proto::model::Measurement>) -> Option<&TraceData> {
+    pub fn stored_ir(&self, pane: Option<crate::state::PaneId>) -> Option<&TraceData> {
+        let pane = pane?;
+        let shown = self.pane_meas(pane);
         let (d, _) = self.rig.traces.get(&self.rig.selected_trace?)?;
         (d.meta.kind == TraceKind::Transfer
             && d.ir.is_some()
             && (self.on_pane(PaneKind::Transfer, &d.meta, shown)
-                || self.trace_compared_on(PaneKind::Transfer, &d.meta, shown)))
+                || self.trace_compared_on(PaneKind::Transfer, &d.meta, pane)))
         .then_some(d.as_ref())
     }
 
@@ -103,7 +105,12 @@ impl AppState {
         match p {
             IrPane::Live => {
                 let shown = self.live_ir_meas();
-                if let Some(d) = self.stored_ir(shown) {
+                let pane = if self.layout.focused().shows_ir() {
+                    Some(self.layout.focus)
+                } else {
+                    self.lead(PaneKind::Transfer)
+                };
+                if let Some(d) = self.stored_ir(pane) {
                     return ac2_scene::ir::stored_frame(d).map(Cow::Owned);
                 }
                 let m = shown?;

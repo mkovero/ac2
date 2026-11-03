@@ -174,9 +174,9 @@ pub(super) fn sweep_config() -> SweepConfig {
 
 /// A transfer pane beside an SPL meter over a Programme pane, the transfer one in its phase
 /// view with its level axis zoomed and its cursor values dragged to the bottom-left at twice
-/// the text size, the meter picked for measurement 2, the Programme pane metering the pair
-/// of inputs 3 and 4 in its goniometer view. The meter is pinned to another rig; the other
-/// two show this session's.
+/// the text size, drawing measurement 1's group with another rig's stored trace 7 and live
+/// curve 4; the meter is that rig's measurement 2, the Programme pane meters the pair of
+/// inputs 3 and 4 of this rig in its goniometer view.
 pub fn pane_layout() -> PaneLayout {
     use crate::model::layout::*;
     let pane = |kind, transfer_view| LayoutPane {
@@ -187,10 +187,13 @@ pub fn pane_layout() -> PaneLayout {
         sweep_view: SweepView::Response,
         programme_view: ProgrammeView::Meters,
         chrome: PlotChrome::Full,
-        content: None,
+        content: PaneContent::Nothing,
         levels: LayoutLevels::default(),
         plates: LayoutPlates::default(),
-        rig: RigRef::ThisRig,
+    };
+    let ketunkolo = || RigRef::Rig {
+        id: RigId(0x0fed_cba9_8765_4321),
+        name: "ketunkolo".into(),
     };
     PaneLayout::Split {
         axis: SplitAxis::Row,
@@ -211,6 +214,24 @@ pub fn pane_layout() -> PaneLayout {
                     },
                     ..LayoutPlates::default()
                 },
+                content: PaneContent::Curves {
+                    entries: vec![
+                        PaneEntry {
+                            rig: RigRef::ThisRig,
+                            what: EntryRef::Group { meas: MeasId(1) },
+                        },
+                        PaneEntry {
+                            rig: ketunkolo(),
+                            what: EntryRef::Trace {
+                                trace: crate::units::TraceId(7),
+                            },
+                        },
+                        PaneEntry {
+                            rig: ketunkolo(),
+                            what: EntryRef::Live { meas: MeasId(4) },
+                        },
+                    ],
+                },
                 ..pane(PaneKind::Transfer, TransferView::Phase)
             }),
         }),
@@ -220,17 +241,20 @@ pub fn pane_layout() -> PaneLayout {
             a: Box::new(PaneLayout::Pane {
                 pane: Box::new(LayoutPane {
                     chrome: PlotChrome::NoGrid,
-                    content: Some(PaneContent::Meas { meas: MeasId(2) }),
-                    rig: RigRef::Rig {
-                        id: RigId(0x0fed_cba9_8765_4321),
-                        name: "ketunkolo".into(),
+                    content: PaneContent::Meter {
+                        rig: ketunkolo(),
+                        meas: MeasId(2),
                     },
                     ..pane(PaneKind::Spl, TransferView::Magnitude)
                 }),
             }),
             b: Box::new(PaneLayout::Pane {
                 pane: Box::new(LayoutPane {
-                    content: Some(PaneContent::Pair { left: 2, right: 3 }),
+                    content: PaneContent::Pair {
+                        rig: RigRef::ThisRig,
+                        left: 2,
+                        right: 3,
+                    },
                     programme_view: ProgrammeView::Goniometer,
                     ..pane(PaneKind::Programme, TransferView::Magnitude)
                 }),
@@ -275,7 +299,6 @@ pub fn sweep_measurement() -> Measurement {
         grid_id: None,
         colour: Some(ColourFamily::Neutral),
         layout: None,
-        compared: Vec::new(),
         offset: Db(0.0),
         eq: Vec::new(),
     }
@@ -317,7 +340,6 @@ pub fn math_measurement() -> Measurement {
         grid_id: Some(log_grid().id()),
         colour: None,
         layout: None,
-        compared: Vec::new(),
         offset: Db(0.0),
         eq: Vec::new(),
     }
@@ -411,7 +433,6 @@ pub(super) fn measurement() -> Measurement {
         grid_id: Some(log_grid().id()),
         colour: Some(ColourFamily::Hue { index: 5 }),
         layout: Some(pane_layout()),
-        compared: Vec::new(),
         offset: Db(0.0),
         eq: Vec::new(),
     }
@@ -444,7 +465,6 @@ pub(super) fn spectrum_measurement() -> Measurement {
         grid_id: None,
         colour: None,
         layout: None,
-        compared: vec![crate::model::Compared::Meas { meas: MeasId(1) }],
         offset: Db(-6.5),
         eq: Vec::new(),
     }

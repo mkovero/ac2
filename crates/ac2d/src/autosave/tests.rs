@@ -44,7 +44,6 @@ fn meter() -> SavedMeasurement {
         delay: None,
         colour: None,
         layout: None,
-        compared: Vec::new(),
         offset: ac2_proto::units::Db(0.0),
         eq: Vec::new(),
     }
@@ -581,7 +580,6 @@ fn debounce_waits_for_quiet_and_caps_the_wait() {
             delay: None,
             colour: None,
             layout: None,
-            compared: Vec::new(),
             offset: ac2_proto::units::Db(0.0),
             eq: Vec::new(),
         }],

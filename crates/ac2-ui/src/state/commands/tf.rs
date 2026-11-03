@@ -216,7 +216,7 @@ impl AppState {
             }
             C::SplLogExport => self.ask_leq_export(false),
             C::SplLogExportPrevious => self.ask_leq_export(true),
-            C::SplNewLog => match self.kind_meas(PaneKind::Spl).cloned() {
+            C::SplNewLog => match self.shown_of_kind(PaneKind::Spl).cloned() {
                 Some(m) => {
                     let MeasKind::Spl { config } = &m.config.kind else {
                         return;
@@ -247,7 +247,7 @@ impl AppState {
             | C::SplA
             | C::SplC
             | C::SplZ => self.spl_weightings(c, out),
-            C::LeqWindows => match self.kind_meas(PaneKind::Spl) {
+            C::LeqWindows => match self.shown_of_kind(PaneKind::Spl) {
                 Some(_) => self.open_settings(Page::Leq, out),
                 None => self.warn(self.no_spl_meter()),
             },

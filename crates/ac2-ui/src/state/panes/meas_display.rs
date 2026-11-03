@@ -1,10 +1,11 @@
 //! What the daemon keeps with a measurement about how it is drawn: a spectrum's style, peak
-//! hold and spectrograph (B, P, Shift+B, colours), and the curves compared into its panes
-//! (C). Every client draws them the same, and a session restores them.
+//! hold and spectrograph (B, P, Shift+B, colours), which every client draws the same and
+//! a session restores; and what a graph pane draws behind its lead (C's tick list), kept
+//! in the pane.
 
 use crate::state::*;
-use ac2_proto::model::{Colormap, Compared, SpectrumDisplay};
-use ac2_scene::meas_list::{CompareTarget, compare_choices, compare_no_target, compare_toast};
+use ac2_proto::model::layout::EntryRef;
+use ac2_proto::model::{Colormap, SpectrumDisplay};
 
 impl AppState {
     /// How measurement `m`'s curves draw: its own display, a math channel its owner's (as it
@@ -121,167 +122,159 @@ impl AppState {
         );
     }
 
-    /// The curves compared into the panes of `shown`, first compared first. A pane showing
-    /// a math channel draws its owner's group, and so what is compared into its owner.
-    pub fn compared_into<'a>(&'a self, shown: Option<&'a Measurement>) -> &'a [Compared] {
-        let Some(m) = shown else {
-            return &[];
+    /// What graph pane `pane` draws behind its lead, of its own rig, nearest layer first
+    /// (another rig's entries are kept, drawn by no pane yet).
+    pub fn compared_into(&self, pane: PaneId) -> Vec<EntryRef> {
+        let Some(v) = self
+            .layout
+            .view(pane)
+            .filter(|v| self.ours(v) && v.kind.draws_curves())
+        else {
+            return Vec::new();
         };
-        match &m.config.kind {
-            MeasKind::Math { config } => config
-                .owner
-                .meas()
-                .and_then(|id| self.meas(id))
-                .map_or(&[], |o| o.compared.as_slice()),
-            _ => m.compared.as_slice(),
+        let mine = self.pane_rig(v);
+        v.with
+            .as_slice()
+            .iter()
+            .filter(|p| p.rig.is_none_or(|r| r == mine))
+            .map(|p| p.what)
+            .collect()
+    }
+
+    /// The group measurement `id` draws: its own, or a math channel's owner's.
+    fn group_meas(&self, id: MeasId) -> Option<MeasId> {
+        let m = self.meas(id)?;
+        ac2_scene::meas_list::meas_group(m, &self.measurements()).meas()
+    }
+
+    /// Whether entry `e` brings curve `c` (a live curve or a stored trace): the curve
+    /// itself, or a group it is filed under.
+    pub(in crate::state) fn entry_brings(&self, e: EntryRef, c: EntryRef) -> bool {
+        if e == c {
+            return true;
+        }
+        let EntryRef::Group { meas: g } = e else {
+            return false;
+        };
+        let group = self.group_meas(g);
+        match c {
+            EntryRef::Live { meas } => group.is_some() && self.group_meas(meas) == group,
+            EntryRef::Trace { trace } => self
+                .daemon()
+                .and_then(|s| s.traces.iter().find(|t| t.id == trace))
+                .is_some_and(|t| {
+                    ac2_scene::meas_list::group_of(t, &self.measurements()).meas() == group
+                        && group.is_some()
+                }),
+            EntryRef::Group { .. } => false,
         }
     }
 
-    /// Stacking layer of `c` on a pane showing `shown`: 1 for the first compared, 2 for the
-    /// next…; 0 for what is not compared there (the pane's own group).
-    pub fn compare_layer(&self, shown: Option<&Measurement>, c: Compared) -> u8 {
-        self.compared_into(shown)
+    /// Stacking layer of curve `c` on pane `pane`: 1 for what the first entry behind the
+    /// lead brings, 2 for the next…; 0 for what the lead's group draws.
+    pub fn compare_layer(&self, pane: PaneId, c: EntryRef) -> u8 {
+        self.compared_into(pane)
             .iter()
-            .position(|x| *x == c)
+            .position(|e| self.entry_brings(*e, c))
             .map_or(0, |i| u8::try_from(i + 1).unwrap_or(u8::MAX))
     }
 
-    /// The measurements a pane of one of `kinds` shows that are not of `group` (whose
-    /// panes draw the curve as their own): those on screen first, each in list order. A
-    /// math channel is no target: its panes draw its owner's group, compared into the owner.
-    fn compare_targets(&self, group: TraceOwner, kinds: &[PaneKind]) -> Vec<(MeasId, bool)> {
-        let on_screen: BTreeSet<MeasId> = self
-            .layout
-            .root
-            .leaves()
+    /// The measurements C lists on graph pane `pane`: its lead first, then every other
+    /// measurement of the pane's rig whose group the pane's kind draws, in list order. A
+    /// math channel comes with its owner's group.
+    fn tick_rows(&self, pane: PaneId) -> Vec<MeasId> {
+        let Some(v) = self.layout.view(pane) else {
+            return Vec::new();
+        };
+        let lead = v.meas.filter(|id| self.meas(*id).is_some());
+        lead.into_iter()
+            .chain(
+                self.measurements()
+                    .iter()
+                    .filter(|m| {
+                        Some(m.id) != lead
+                            && !matches!(m.config.kind, MeasKind::Math { .. })
+                            && v.kind.shows(&m.config.kind)
+                    })
+                    .map(|m| m.id),
+            )
+            .collect()
+    }
+
+    /// Whether pane `pane` draws measurement `id`'s group: its lead, or ticked behind it.
+    fn pane_ticks(&self, pane: PaneId, id: MeasId) -> bool {
+        self.layout.view(pane).is_some_and(|v| {
+            v.meas == Some(id) || v.with.contains(&Pick::here(EntryRef::Group { meas: id }))
+        })
+    }
+
+    /// What measurement `m`'s group brings to a pane of kind `kind`: its live curve, if the
+    /// pane draws it, and its shown traces of a kind the pane draws.
+    fn brings(&self, m: &Measurement, kind: PaneKind) -> String {
+        let ms = self.measurements();
+        let mine = TraceOwner::Meas { meas: m.id };
+        let traces = self
+            .stored_traces()
             .into_iter()
-            .filter_map(|p| self.pane_meas(p).map(|m| self.compare_owner(m)))
-            .collect();
-        let ms = self.measurements();
-        let mut v: Vec<(MeasId, bool)> = ms
-            .iter()
-            .filter(|m| {
-                !matches!(m.config.kind, MeasKind::Math { .. })
-                    && match PaneKind::for_kind(&m.config.kind) {
-                        // A sweep's runs are transfer functions: the transfer pane shows
-                        // its group as the sweep pane does.
-                        PaneKind::Distortion => kinds
-                            .iter()
-                            .any(|k| matches!(k, PaneKind::Distortion | PaneKind::Transfer)),
-                        k => kinds.contains(&k),
+            .filter(|t| {
+                ac2_scene::meas_list::group_of(t, &ms) == mine
+                    && if kind == PaneKind::Distortion {
+                        drawn_in(t, kind)
+                    } else {
+                        kind_shown(t, kind)
                     }
-                    && ac2_scene::meas_list::meas_group(m, &ms) != group
             })
-            .map(|m| (m.id, on_screen.contains(&m.id)))
-            .collect();
-        v.sort_by_key(|(_, shown)| !*shown);
-        v
+            .count();
+        ac2_scene::meas_list::brings_words(Self::live_drawn_in(m, kind), traces)
     }
 
-    /// The measurement whose compare list a pane showing `m` draws: `m`, or a math
-    /// channel's owner.
-    pub(in crate::state) fn compare_owner(&self, m: &Measurement) -> MeasId {
-        match &m.config.kind {
-            MeasKind::Math { config } => config.owner.meas().unwrap_or(m.id),
-            _ => m.id,
-        }
-    }
-
-    /// C: asks which measurement's panes draw the selected curve (a stored trace selected
-    /// last, else the selected measurement or math channel). An imported trace is no
-    /// measurement's, so it is not compared until moved under one; an SPL meter is a
-    /// number, compared by putting two side by side.
-    pub(in crate::state) fn open_compare(&mut self, keymap: &crate::keys::Keymap) {
-        let ms = self.measurements();
-        let (item, label, group, kinds, visible) =
-            if let Some(t) = self.selected_trace_meta().cloned() {
-                let label = trace_label(&t);
-                let group = ac2_scene::meas_list::group_of(&t, &ms);
-                if group == TraceOwner::Imported {
-                    let key = keymap
-                        .chords(
-                            crate::keys::CommandId::MoveTrace,
-                            crate::keys::Scope::Global,
-                        )
-                        .first()
-                        .map(|c| c.label());
-                    self.warn(ac2_scene::meas_list::imported_compare_hint(
-                        &label,
-                        key.as_deref(),
-                    ));
-                    return;
-                }
-                let kinds = display::trace_compare_kinds(&t);
-                (
-                    Compared::Trace { trace: t.id },
-                    label,
-                    group,
-                    kinds,
-                    t.edit.visible,
-                )
-            } else {
-                let Some(m) = self.selected_meas().cloned() else {
-                    self.warn(self.select_first("to compare"));
-                    return;
-                };
-                let name = m.config.name.clone();
-                if matches!(m.config.kind, MeasKind::Spl { .. }) {
-                    self.warn(ac2_scene::meas_list::meter_compare_hint(&name));
-                    return;
-                }
-                let kinds = display::meas_compare_kinds(&m);
-                if kinds.is_empty() {
-                    self.warn(format!(
-                        "{name}: no live curve to compare — select one of its runs or traces"
-                    ));
-                    return;
-                }
-                let group = ac2_scene::meas_list::meas_group(&m, &ms);
-                let visible = !self.meas_hidden(&m);
-                (Compared::Meas { meas: m.id }, name, group, kinds, visible)
-            };
-        let targets = self.compare_targets(group, &kinds);
-        if targets.is_empty() {
-            let what = kinds.first().map_or("graph", |k| k.what());
-            self.warn(compare_no_target(&label, what));
+    /// C: the tick list over the focused graph pane, what can be drawn with its lead. On an
+    /// SPL, Programme or Walk pane, which show one source, the hint bar says so.
+    pub(in crate::state) fn open_compare(&mut self, _keymap: &crate::keys::Keymap) {
+        let pane = self.layout.focus;
+        let Some(v) = self.layout.view(pane).copied() else {
+            return;
+        };
+        if !v.kind.draws_curves() {
+            self.warn(ac2_scene::meas_list::ONE_SOURCE);
             return;
         }
-        let on: Vec<bool> = targets
-            .iter()
-            .map(|(id, _)| self.meas(*id).is_some_and(|m| m.compared.contains(&item)))
-            .collect();
-        let purpose = ChoicePurpose::Compare {
-            item,
-            visible,
-            targets: targets.iter().map(|(id, _)| *id).collect(),
-            shown: targets.iter().map(|(_, s)| *s).collect(),
-            on,
-        };
-        self.overlay = Overlay::Choose(Box::new(self.compare_prompt(label, purpose, 0)));
+        if !self.ours(&v) {
+            let rig = self.rig_name(self.pane_rig(&v));
+            self.warn(format!(
+                "this pane shows {rig}: switch to it to tick what the pane draws"
+            ));
+            return;
+        }
+        let rows = self.tick_rows(pane);
+        if rows.is_empty() {
+            self.warn(ac2_scene::meas_list::tick_no_rows(v.kind.what()));
+            return;
+        }
+        self.overlay = Overlay::Choose(Box::new(self.tick_prompt(pane, rows, 0)));
     }
 
-    /// The chooser for `purpose` (a [`ChoicePurpose::Compare`]), `index` highlighted.
-    fn compare_prompt(&self, label: String, purpose: ChoicePurpose, index: usize) -> ChoicePrompt {
-        let rows: Vec<CompareTarget> = match &purpose {
-            ChoicePurpose::Compare {
-                targets, shown, on, ..
-            } => targets
-                .iter()
-                .zip(shown)
-                .zip(on)
-                .map(|((id, shown), on)| CompareTarget {
-                    name: self
-                        .meas(*id)
-                        .map_or_else(|| format!("measurement {id}"), |m| m.config.name.clone()),
-                    shown: *shown,
-                    on: *on,
-                })
-                .collect(),
-            _ => Vec::new(),
-        };
-        let q = compare_choices(&label, &rows);
+    /// C's list for pane `pane` over `rows`, `index` highlighted.
+    fn tick_prompt(&self, pane: PaneId, rows: Vec<MeasId>, index: usize) -> ChoicePrompt {
+        let kind = self.layout.kind(pane);
+        let lead = self.layout.view(pane).and_then(|v| v.meas);
+        let ticks: Vec<ac2_scene::meas_list::TickRow> = rows
+            .iter()
+            .map(|id| ac2_scene::meas_list::TickRow {
+                name: self
+                    .meas(*id)
+                    .map_or_else(|| format!("measurement {id}"), |m| m.config.name.clone()),
+                brings: self
+                    .meas(*id)
+                    .map_or_else(String::new, |m| self.brings(m, kind)),
+                on: self.pane_ticks(pane, *id),
+                lead: lead == Some(*id),
+            })
+            .collect();
+        let label = self.pane_title(pane);
+        let q = ac2_scene::meas_list::tick_list(&label, &ticks);
         ChoicePrompt {
-            purpose,
+            purpose: ChoicePurpose::Compare { pane, rows },
             label,
             title: q.title,
             lines: q.lines,
@@ -292,103 +285,109 @@ impl AppState {
         }
     }
 
-    /// Row `i` of the compare chooser taken: the curve is compared into that measurement,
-    /// or no longer; the chooser stays open with the row's tick changed.
+    /// Row `i` of C's list taken: its measurement is ticked into the pane or unticked; the
+    /// list stays open with the row's tick changed.
     pub(in crate::state) fn compare_pick(
         &mut self,
         c: ChoicePrompt,
         i: usize,
-        out: &mut Vec<Request>,
+        _out: &mut Vec<Request>,
     ) {
-        let ChoicePurpose::Compare {
-            item,
-            visible,
-            targets,
-            shown,
-            mut on,
-        } = c.purpose
-        else {
+        let ChoicePurpose::Compare { pane, rows } = c.purpose else {
             return;
         };
-        let (Some(&target), Some(was)) = (targets.get(i), on.get(i).copied()) else {
+        let Some(&id) = rows.get(i) else {
             return;
         };
-        on[i] = !was;
-        self.set_compared(target, item, !was, &c.label, visible, out);
-        let purpose = ChoicePurpose::Compare {
-            item,
-            visible,
-            targets,
-            shown,
-            on,
-        };
-        self.overlay = Overlay::Choose(Box::new(self.compare_prompt(c.label, purpose, i)));
-    }
-
-    /// Compares `item` (named `label`) into measurement `target`'s panes, last, or takes
-    /// it out; `visible`: its curve is shown (a hidden one is compared but not drawn).
-    pub(in crate::state) fn set_compared(
-        &mut self,
-        target: MeasId,
-        item: Compared,
-        on: bool,
-        label: &str,
-        visible: bool,
-        out: &mut Vec<Request>,
-    ) {
-        let Some(m) = self.meas(target) else {
-            return;
-        };
-        let mut compared = m.compared.clone();
-        compared.retain(|c| *c != item);
-        if on {
-            if compared.len() >= Compared::MAX {
-                self.warn(format!(
-                    "{}: at most {} curves are compared into one measurement",
-                    m.config.name,
-                    Compared::MAX
-                ));
-                return;
-            }
-            compared.push(item);
+        let on = !self.pane_ticks(pane, id);
+        if self.set_ticked(pane, id, on) {
+            let (name, shown) = self
+                .meas(id)
+                .map_or((format!("measurement {id}"), true), |m| {
+                    (m.config.name.clone(), !self.meas_hidden(m))
+                });
+            self.toast(ac2_scene::meas_list::tick_toast(&name, on, shown));
         }
-        let what = compare_toast(label, &m.config.name, on, visible);
-        self.call(
-            out,
-            Command::MeasCompare {
-                meas: target,
-                compared,
-            },
-            what,
-        );
+        self.overlay = Overlay::Choose(Box::new(self.tick_prompt(pane, rows, i)));
     }
 
-    /// Clear compare: the focused pane's measurement draws its own group alone again.
-    pub(in crate::state) fn clear_compare(&mut self, out: &mut Vec<Request>) {
-        let Some(m) = self
-            .pane_meas(self.layout.focus)
-            .map(|m| self.compare_owner(m))
-            .and_then(|id| self.meas(id))
-            .cloned()
-        else {
-            self.toast("nothing compared");
+    /// Measurement `id`'s group ticked into pane `pane` (`on`), behind its lead (or as the
+    /// lead of a pane with nothing picked), or unticked: unticking the lead makes the next
+    /// entry lead, unticking the last leaves nothing picked. What the group draws anyway
+    /// leaves the pane as a single entry. `false`: nothing changed (no room).
+    pub(in crate::state) fn set_ticked(&mut self, pane: PaneId, id: MeasId, on: bool) -> bool {
+        let group = EntryRef::Group { meas: id };
+        let brought: Vec<Pick> = self
+            .layout
+            .view(pane)
+            .map(|v| {
+                v.with
+                    .as_slice()
+                    .iter()
+                    .filter(|p| {
+                        p.rig.is_none() && self.entry_brings(group, p.what) && p.what != group
+                    })
+                    .copied()
+                    .collect()
+            })
+            .unwrap_or_default();
+        let Some(v) = self.layout.view_mut(pane) else {
+            return false;
+        };
+        if on {
+            if v.meas == Some(id) || v.with.contains(&Pick::here(group)) {
+                return false;
+            }
+            v.with.retain(|p| !brought.contains(p));
+            if v.meas.is_none() && v.with.is_empty() {
+                v.meas = Some(id);
+            } else if !v.with.push(Pick::here(group)) {
+                self.warn(format!(
+                    "a pane draws at most {} curves: untick one first",
+                    ac2_proto::model::layout::PaneContent::MAX_ENTRIES
+                ));
+                return false;
+            }
+        } else if v.meas == Some(id) {
+            v.meas = None;
+            if let Some(first) = v.with.as_slice().first().copied()
+                && first.rig.is_none()
+                && let EntryRef::Group { meas } = first.what
+            {
+                v.with.take_first();
+                v.meas = Some(meas);
+            }
+        } else {
+            v.with.retain(|p| *p != Pick::here(group));
+        }
+        self.rig.pending.pane_meas.remove(&pane);
+        self.rig.pending.deleted.remove(&pane);
+        true
+    }
+
+    /// Clear compare: the focused pane draws its lead alone again.
+    pub(in crate::state) fn clear_compare(&mut self, _out: &mut Vec<Request>) {
+        let pane = self.layout.focus;
+        let lead = self
+            .pane_meas(pane)
+            .map_or_else(|| "this pane".to_owned(), |m| m.config.name.clone());
+        let Some(v) = self.layout.view_mut(pane).filter(|v| v.kind.draws_curves()) else {
+            self.toast("nothing compared: the focused pane shows one source");
             return;
         };
-        let what = match m.compared.len() {
-            0 => {
-                self.toast(format!("{}: nothing compared", m.config.name));
-                return;
-            }
-            1 => format!("{}: compare cleared, 1 curve", m.config.name),
-            n => format!("{}: compare cleared, {n} curves", m.config.name),
+        let n = v.with.len();
+        let text = match n {
+            0 => format!("{lead}: nothing drawn behind it"),
+            1 => format!("{lead}: compare cleared, 1 curve"),
+            n => format!("{lead}: compare cleared, {n} curves"),
         };
-        self.call(
-            out,
-            Command::MeasCompare {
-                meas: m.id,
-                compared: Vec::new(),
-            },
-            what,
-        );
+        if v.meas.is_some() {
+            v.with.clear();
+        } else {
+            // A pane led by one curve keeps it.
+            let first = v.with.as_slice().first().copied();
+            v.with = With::of(first.as_slice());
+        }
+        self.toast(text);
     }
 }

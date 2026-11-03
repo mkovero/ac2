@@ -36,7 +36,6 @@ impl Command {
             Self::MeasCreate { .. } => "meas.create",
             Self::MeasUpdate { .. } => "meas.update",
             Self::MeasColour { .. } => "meas.colour",
-            Self::MeasCompare { .. } => "meas.compare",
             Self::MeasOffset { .. } => "meas.offset",
             Self::MeasLayout { .. } => "meas.layout",
             Self::MeasDelete { .. } => "meas.delete",

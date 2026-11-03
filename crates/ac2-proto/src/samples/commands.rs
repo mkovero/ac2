@@ -368,15 +368,6 @@ pub fn commands() -> Vec<Command> {
             base: Rev(38),
             seconds: Seconds(2.5),
         },
-        Command::MeasCompare {
-            meas: MeasId(4),
-            compared: vec![
-                crate::model::Compared::Meas { meas: MeasId(5) },
-                crate::model::Compared::Trace {
-                    trace: crate::units::TraceId(7),
-                },
-            ],
-        },
         Command::MeasOffset {
             meas: MeasId(4),
             offset: crate::units::Db(6.0),

@@ -221,6 +221,8 @@ pub struct PanePrefs {
     pub kind: PaneKind,
     /// The measurement it showed, by name.
     pub measurement: Option<String>,
+    /// What a graph pane drew behind its lead, nearest first.
+    pub curves: Vec<CurvePrefs>,
     /// What a Programme pane metered.
     pub meters: Option<crate::state::Metered>,
     /// The rig the pane was pinned to, by id (its name for the operator while it is not
@@ -232,6 +234,16 @@ pub struct PanePrefs {
     pub levels: LayoutLevels,
     /// Where its plates were dropped and their text size.
     pub plates: ac2_scene::plate::Plates,
+}
+
+/// An entry behind a graph pane's lead: what it names by its rig's id, with the name it had
+/// (a measurement's, a trace's) to find it by when the rig numbers afresh; `rig`: another
+/// rig's, by id and name, `None` the pane's own.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CurvePrefs {
+    pub what: ac2_proto::model::layout::EntryRef,
+    pub name: Option<String>,
+    pub rig: Option<(RigId, String)>,
 }
 
 /// The impulse-response views' dB axes (log / ETC), dB re peak: one for the transfer

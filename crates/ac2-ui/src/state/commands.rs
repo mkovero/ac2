@@ -177,7 +177,9 @@ impl AppState {
         if edit.visible
             && let Some(kind) = pane
             && !self.on_pane(kind, &shown, self.kind_meas(kind))
-            && !self.trace_compared_on(kind, &shown, self.kind_meas(kind))
+            && !self
+                .lead(kind)
+                .is_some_and(|p| self.trace_compared_on(kind, &shown, p))
         {
             let ms = self.measurements();
             what.push_str(&match ac2_scene::meas_list::group_of(&shown, &ms) {

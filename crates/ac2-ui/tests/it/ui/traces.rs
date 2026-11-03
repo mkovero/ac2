@@ -87,24 +87,19 @@ fn stored_traces_and_target() {
     // The pane shows Delay tower's group (N chose it): Main L, its capture and the target
     // join it compared (C).
     {
-        use ac2_proto::model::Compared;
-        let st = &h.state().state;
-        let mut compared = vec![Compared::Meas { meas: MeasId(1) }];
-        compared.extend(
+        use ac2_proto::model::layout::EntryRef;
+        let st = &mut h.state_mut().state;
+        let mut with = vec![EntryRef::Group { meas: MeasId(1) }];
+        with.extend(
             st.rig
                 .traces
                 .values()
                 .map(|(d, _)| d.meta.clone())
                 .filter(|t| !t.edit.name.starts_with("Delay tower"))
-                .map(|t| Compared::Trace { trace: t.id }),
+                .map(|t| EntryRef::Trace { trace: t.id }),
         );
-        rig.compare_into(2, compared);
+        crate::common::draw_in(st, ac2_ui::state::PaneKind::Transfer, &with);
     }
-    step_until(&mut h, "compared into Delay tower", |a| {
-        a.state
-            .meas(MeasId(2))
-            .is_some_and(|m| !m.compared.is_empty())
-    });
     {
         let st = &h.state().state;
         let s = ac2_ui::scenes::transfer(

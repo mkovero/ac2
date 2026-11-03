@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use ac2_client::{Client, expect_body};
-use ac2_proto::model::layout::PaneContent;
+use ac2_proto::model::layout::{EntryRef, PaneContent, RigRef};
 use ac2_proto::model::{
     ImportFormat, ImportRole, MathConfig, MathExpr, MathReference, MeasConfig, MeasKind, Operand,
     PaneLayout, TraceEdit, TraceKind, TraceOwner,
@@ -202,16 +202,21 @@ async fn restore(
             notes,
         });
     }
+    let old_ids: std::collections::HashSet<MeasId> = names.keys().copied().collect();
     for (i, id, mut l) in layouts {
-        // Each pane's pick names the measurement by its id in the old session; one not
-        // made again shows the layout's own measurement.
-        for p in l.panes_mut() {
-            if let Some(PaneContent::Meas { meas }) = &mut p.content {
-                match meas_ids.get(meas) {
-                    Some(new) => *meas = *new,
-                    None => p.content = None,
-                }
-            }
+        // Each reference of this rig names a measurement or trace by its id in the old
+        // session: one made again follows its new id, one not made again leaves the pane
+        // (a graph pane left with no entry, or a meter pane, holds nothing). An id the old
+        // session has no measurement of names a rig meter of the rig and stays. Another
+        // rig's references are that rig's ids.
+        let mut dropped = 0;
+        for c in l.contents_mut() {
+            dropped += remap_content(c, &meas_ids, &trace_ids, &old_ids);
+        }
+        if dropped > 0 {
+            items[i].notes.push(format!(
+                "{dropped} pane reference(s) to what was not restored dropped from its layout"
+            ));
         }
         if let Err(e) = c
             .call(Command::MeasLayout {
@@ -257,6 +262,59 @@ async fn restore(
         version: plan.version,
         items,
     })
+}
+
+/// Content `c` of a salvaged layout onto the ids things were made again under; how many
+/// references were dropped.
+fn remap_content(
+    c: &mut PaneContent,
+    meas_ids: &HashMap<MeasId, MeasId>,
+    trace_ids: &HashMap<TraceId, TraceId>,
+    old_ids: &std::collections::HashSet<MeasId>,
+) -> usize {
+    // `None`: an id of the old session not made again.
+    let meas = |m: MeasId| match meas_ids.get(&m) {
+        Some(new) => Some(*new),
+        None if old_ids.contains(&m) => None,
+        None => Some(m),
+    };
+    match c {
+        PaneContent::Curves { entries } => {
+            let before = entries.len();
+            entries.retain_mut(|e| {
+                if e.rig != RigRef::ThisRig {
+                    return true;
+                }
+                match &mut e.what {
+                    EntryRef::Group { meas: m } | EntryRef::Live { meas: m } => {
+                        meas(*m).map(|n| *m = n).is_some()
+                    }
+                    EntryRef::Trace { trace } => {
+                        trace_ids.get(trace).map(|n| *trace = *n).is_some()
+                    }
+                }
+            });
+            let dropped = before - entries.len();
+            if entries.is_empty() {
+                *c = PaneContent::Nothing;
+            }
+            dropped
+        }
+        PaneContent::Meter {
+            rig: RigRef::ThisRig,
+            meas: m,
+        } => match meas(*m) {
+            Some(n) => {
+                *m = n;
+                0
+            }
+            None => {
+                *c = PaneContent::Nothing;
+                1
+            }
+        },
+        _ => 0,
+    }
 }
 
 async fn restore_meas(

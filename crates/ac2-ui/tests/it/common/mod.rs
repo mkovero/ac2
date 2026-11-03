@@ -277,7 +277,6 @@ fn measurement(
         grid_id: grid.map(GridDef::id),
         colour: None,
         layout: None,
-        compared: Vec::new(),
         offset: ac2_proto::units::Db(0.0),
         eq: Vec::new(),
     }
@@ -543,21 +542,6 @@ impl Rig {
         *self.tf_protection.lock().unwrap() = flags;
     }
 
-    /// The curves compared into measurement `meas` (`meas.compare`, as the C chooser sets
-    /// them), first compared first.
-    pub fn compare_into(&self, meas: u32, compared: Vec<ac2_proto::model::Compared>) {
-        let mut s = self.fake.lock();
-        let mut m = s
-            .state
-            .measurements
-            .iter()
-            .find(|m| m.id == MeasId(meas))
-            .cloned()
-            .expect("the measurement");
-        m.compared = compared;
-        s.commit(Change::Measurement(Patch::Set(m)));
-    }
-
     /// Adds a third transfer position "Seat 3" (5, stopped) and "Audience" (6), a math
     /// channel: the power average of Main L, Delay tower and Seat 3, whose frames say Seat 3
     /// was left out (stopped): two of three positions averaged.
@@ -739,6 +723,7 @@ fn grid_of(row: &[ac2_ui::state::View]) -> ac2_ui::prefs::PanesPrefs {
             id: PaneId(n),
             kind: v.kind,
             measurement: None,
+            curves: Vec::new(),
             meters: v.meters,
             rig: None,
             modes: v.modes,
@@ -860,4 +845,17 @@ pub fn scene_texts_excerpt<S: AsRef<str>>(texts: &[S], n: usize) -> String {
     } else {
         format!("{shown:?} ({} texts)", texts.len())
     }
+}
+
+/// `with` drawn behind the lead of the first pane of `kind`, as C ticks them: the pane's own
+/// entries, kept on this screen.
+pub fn draw_in(
+    st: &mut ac2_ui::state::AppState,
+    kind: ac2_ui::state::PaneKind,
+    with: &[ac2_proto::model::layout::EntryRef],
+) {
+    use ac2_ui::state::{Pick, With};
+    let p = pane(st, kind);
+    let picks: Vec<Pick> = with.iter().map(|w| Pick::here(*w)).collect();
+    st.layout.view_mut(p).expect("the pane").with = With::of(&picks);
 }

@@ -578,7 +578,6 @@ impl Shared {
             | C::MeasUpdate { .. }
             | C::MeasColour { .. }
             | C::MeasLayout { .. }
-            | C::MeasCompare { .. }
             | C::MeasOffset { .. }
             | C::MeasDelete { .. }
             | C::MeasStart { .. }

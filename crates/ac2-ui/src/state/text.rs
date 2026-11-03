@@ -116,11 +116,24 @@ impl AppState {
     }
 
     /// What a command needing an SPL meter says without one.
+    /// What an SPL command says with no meter to act on: none made yet, an SPL pane with
+    /// nothing picked, or no SPL pane showing a meter (it acts on what a pane shows, never
+    /// on one it picks).
     pub(super) fn no_spl_meter(&self) -> String {
-        format!(
-            "no SPL meter: make one first ({})",
-            self.keys.reach(CommandId::NewSpl)
-        )
+        let any = self
+            .measurements()
+            .iter()
+            .any(|m| matches!(m.config.kind, MeasKind::Spl { .. }));
+        if !any {
+            return format!(
+                "no SPL meter: make one first ({})",
+                self.keys.reach(CommandId::NewSpl)
+            );
+        }
+        match self.lead(PaneKind::Spl) {
+            Some(_) => ac2_scene::pane_edit::SPL_NOTHING_PICKED.to_owned(),
+            None => ac2_scene::pane_edit::NO_SPL_PANE.to_owned(),
+        }
     }
 }
 

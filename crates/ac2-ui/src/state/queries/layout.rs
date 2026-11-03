@@ -5,36 +5,6 @@ use crate::state::*;
 impl AppState {
     // ----- reducer -----------------------------------------------------------------------
 
-    /// Each pane whose pick waits by id shows it once the mirror lists it (a pane of a kind
-    /// that cannot draw it drops it); one given something else, closed, or waiting by name
-    /// (that decides) no longer waits by id.
-    fn restore_pane_ids(&mut self) {
-        let waiting = std::mem::take(&mut self.rig.pending.pane_ids);
-        for (pane, id) in waiting {
-            let Some(v) = self.layout.view(pane).copied() else {
-                continue;
-            };
-            if v.meas.is_some() || !self.ours(&v) {
-                continue;
-            }
-            if self.rig.pending.pane_meas.contains_key(&pane) {
-                self.rig.pending.pane_ids.insert(pane, id);
-                continue;
-            }
-            match self.meas(id).map(|m| v.kind.shows(&m.config.kind)) {
-                Some(true) => {
-                    if let Some(v) = self.layout.view_mut(pane) {
-                        v.meas = Some(id);
-                    }
-                }
-                Some(false) => {}
-                None => {
-                    self.rig.pending.pane_ids.insert(pane, id);
-                }
-            }
-        }
-    }
-
     /// Once the daemon's state is known, each pane shows the measurement it showed when the
     /// app last ran (or before the daemon lost it), once one of that name (and kind) exists:
     /// meanwhile nothing; a name the daemon never listed is dropped. With no layout
@@ -69,7 +39,7 @@ impl AppState {
                 v.meas = Some(id);
             }
         }
-        self.restore_pane_ids();
+        self.restore_with_names();
         if self.rig.pending.pane_meas.is_empty() {
             return;
         }
@@ -101,6 +71,7 @@ impl AppState {
             if let Some(v) = self.layout.view_mut(pane) {
                 v.meas = Some(id);
             }
+            self.rig.pending.deleted.remove(&pane);
             // The focused pane's measurement is the selection, unless the operator chose
             // another since.
             if self.layout.focus == pane
@@ -110,6 +81,50 @@ impl AppState {
                 // Still this app's pick: a viewer nobody touches neither takes this
                 // measurement's own panes nor gives it its own.
                 self.rig.standin = Some(id);
+            }
+        }
+    }
+
+    /// Entries behind the leads read from `ui.toml` (the daemon's state is known): each
+    /// takes the id of what has its name now, else keeps the id it was stored with.
+    fn restore_with_names(&mut self) {
+        let named = std::mem::take(&mut self.rig.pending.with_names);
+        for (pane, list) in named {
+            let Some(v) = self.layout.view(pane).copied().filter(|v| self.ours(v)) else {
+                continue;
+            };
+            let now = |p: Pick, name: &str| -> Pick {
+                let what = match p.what {
+                    EntryRef::Group { .. } | EntryRef::Live { .. } => self
+                        .measurements()
+                        .iter()
+                        .find(|m| m.config.name == name)
+                        .map(|m| match p.what {
+                            EntryRef::Live { .. } => EntryRef::Live { meas: m.id },
+                            _ => EntryRef::Group { meas: m.id },
+                        }),
+                    EntryRef::Trace { .. } => self
+                        .stored_traces()
+                        .into_iter()
+                        .find(|t| t.edit.name == name)
+                        .map(|t| EntryRef::Trace { trace: t.id }),
+                };
+                Pick {
+                    what: what.unwrap_or(p.what),
+                    ..p
+                }
+            };
+            let picks: Vec<Pick> = v
+                .with
+                .as_slice()
+                .iter()
+                .map(|p| match list.iter().find(|(q, _)| q == p) {
+                    Some((_, name)) => now(*p, name),
+                    None => *p,
+                })
+                .collect();
+            if let Some(v) = self.layout.view_mut(pane) {
+                v.with = With::of(&picks);
             }
         }
     }
@@ -134,6 +149,7 @@ impl AppState {
                         id,
                         kind: v.kind,
                         measurement: self.pane_pref_meas(id, v),
+                        curves: self.pane_pref_curves(id, v),
                         meters: v.meters,
                         rig: self.pane_pref_rig(v),
                         modes: v.modes,
@@ -327,6 +343,15 @@ impl AppState {
                             View {
                                 kind: v.kind,
                                 meas: None,
+                                with: With::of(
+                                    &v.curves
+                                        .iter()
+                                        .map(|c| Pick {
+                                            rig: c.rig.as_ref().map(|(r, _)| *r),
+                                            what: c.what,
+                                        })
+                                        .collect::<Vec<_>>(),
+                                ),
                                 walk: None,
                                 meters: v.meters,
                                 modes: v.modes,
@@ -342,8 +367,21 @@ impl AppState {
                 self.layout = Layout::of(p.root.clone(), views, p.focus);
                 for v in &p.views {
                     self.set_operator_levels(v.id, &v.levels);
-                    if let Some((r, name)) = &v.rig {
+                    for (r, name) in v
+                        .rig
+                        .iter()
+                        .chain(v.curves.iter().filter_map(|c| c.rig.as_ref()))
+                    {
                         self.rig_names.entry(*r).or_insert_with(|| name.clone());
+                    }
+                    let named: Vec<(Pick, String)> = v
+                        .curves
+                        .iter()
+                        .filter(|c| c.rig.is_none())
+                        .filter_map(|c| Some((Pick::here(c.what), c.name.clone()?)))
+                        .collect();
+                    if !named.is_empty() && v.rig.is_none() {
+                        self.rig.pending.with_names.insert(v.id, named);
                     }
                     if let Some(n) = &v.measurement
                         && self.layout.views.contains_key(&v.id)
