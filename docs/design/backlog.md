@@ -134,7 +134,7 @@ Targets: laptops with integrated GPUs on battery, and a Pi 4 class daemon for SP
 - **ac2-ui `measurement_tree_and_delete_choices` on macOS CI**: the `measurement_delete_choices`
   snapshot differed by 14 573 px once (a680dcd); passed on rerun. The live curves behind the
   dialog are not pinned.
-- **ac2-ui `embedded::calibration::mic_curves_imported_and_switched_in_the_input_setup`**:
+- **ac2-e2e `calibration::mic_curves_imported_and_switched_in_the_input_setup`**:
   failed once on its first try in a full workspace run (passed on retry); 10/10 alone.
 - **macOS CI "ac2 on BlackHole (Core Audio)"**: `selftest duplex` failed once with
   `config_changed` count 1 (run 39364032668, 1ee6a366); BlackHole reported a configuration

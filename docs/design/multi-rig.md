@@ -17,7 +17,8 @@ cripple the other rigs. The math is the daemon's; the app renders streams. Both 
 ## What the operator gets
 
 - **Connect…** adds a rig: browse (`_ac2._tcp`, network mode) or a typed address, paired per
-  rig as today. The embedded daemon is a rig like any other (*<host> · in this app*).
+  rig as today. This computer's `ac2d` is a rig like any other (*<host>*; the app hosts no
+  daemon since [ui-spawns-ac2d.md](ui-spawns-ac2d.md)).
 - **Rigs in the top bar**: a drop-down after the session line names the active rig and
   lists the others; a click switches. It is gone in the stage view and full screen like the
   rest of the top bar. There is **no tab-switch key** (operator, 2026-10-23): clicking is
@@ -73,11 +74,10 @@ where a `Vec` index would borrow every rig at once. `AppState::active()` is the 
 keeps. It cannot be the CURVE key: a local (ipc) or embedded daemon runs without CURVE and
 has none (`server.key` is only loaded in network mode). The daemon loads it at every start,
 in every mode: `DaemonConfig.rig_id: RigIdSource::{File(PathBuf), Ephemeral}`. `ac2d` uses
-`ac2_paths::rig_id()` (`<config>/rig-id`, created if absent); the app's embedded real-audio
-daemon uses `ac2_paths::app_rig_id()`, separate from the system daemon's on the same
-machine as `app_autosave_dir()` is from `autosave_dir()` — both can be connected at once,
-and two rigs must never share an id; the embedded fake rig is `Ephemeral` (random per
-start; nothing of it persists, as its calibrations and rig settings do not). The id is
+`ac2_paths::rig_id()` (`<config>/rig-id`, created if absent); the app hosts no daemon of
+its own ([ui-spawns-ac2d.md](ui-spawns-ac2d.md)), so one machine's one `ac2d` per user has
+one id, and the simulated rig (`ac2d --ephemeral`) is `Ephemeral` (random per start;
+nothing of it persists, as its calibrations and rig settings do not). The id is
 stable across reconnects, address changes, renames and a move from local to network mode;
 pairing still keys on the CURVE key, and the Connection page shows that key's fingerprint as
 today.
@@ -90,11 +90,10 @@ a reconnecting app then sees a new rig, never a wrong one.
 
 The hello reply (`Welcome`, `ac2-proto/src/ctrl/reply.rs`) gains `rig_id: RigId` and
 `name: String`. `DaemonConfig` gains `name: String` (default *ac2 on <hostname>*);
-`Advertise.name` is taken from it and `--name` no longer requires `--listen`; the app's
-embedded daemon sets *this computer* where it builds its `DaemonConfig`
-(`ac2-ui/src/embedded.rs`). The app shows neither name for a rig on its own host: it heads
-the local daemon *<host> · ac2d* and the embedded one *<host> · in this app* (the hello
-name cannot tell a default from a given one, nor two daemons on one machine apart). `ac2 daemon` prints the name and id beside the server line, so
+`Advertise.name` is taken from it and `--name` no longer requires `--listen`. The app
+shows no hello name for the rig on its own host: it heads it *<host>* (ui-spawns-ac2d D10;
+the hello name cannot tell a default from a given one); the simulated rig reads its hello
+name *Simulated rig*. `ac2 daemon` prints the name and id beside the server line, so
 an operator can read a rig's id on its host. `docs/protocol.md` §2 documents both fields. It is re-read
 on each connect and is display only. `FakeOptions` (`ac2-client/src/fake.rs`) gains both, so
 tests can start two distinguishable fake daemons (its `Welcome` is built in
@@ -315,8 +314,9 @@ trace is today (decision 8b): the magnitude stands, the absolute time does not.
 
 Browse lists every rig on the network; each is connected and paired on its own, as today.
 The app remembers rigs by `RigId` in `ui.toml` (`UiPrefs.rigs`: id, name, last address, and
-the pinned CURVE key fingerprint in network mode) and reconnects them at start; the embedded
-rig is remembered by its `app-rig-id` and hosted again. A rig not found stays a greyed tab
+the pinned CURVE key fingerprint in network mode) and reconnects them at start; the simulated rig
+is never remembered, and an old `reach = "embedded"` entry is dropped on load
+(ui-spawns-ac2d D11). A rig not found stays a greyed tab
 until it answers or is closed. Names come from the rig and are display only
 (`ac2-discovery` already trusts nothing).
 
@@ -368,8 +368,8 @@ until it answers or is closed. Names come from the rig and are display only
      only the rig's own panes (shown again beside the others). Decisions where the note
      was silent: Connect… shows the new rig at once; a foreign pane's menu (or any window
      opened while visiting) is refused with *switch to pupu to open that window*; only one
-     embedded daemon per app (*<host> · in this app is already a rig here*); the simulated rig
-     is never remembered; a rig reached twice (same id) is closed with *already
+     simulated rig per app (*Simulated rig is already a rig here*; the embedded daemon this
+     once named is gone, ui-spawns-ac2d); the simulated rig is never remembered; a rig reached twice (same id) is closed with *already
      connected*; the drop-down sits innermost on the right of the top bar and opens from
      the palette (*Rigs…*, *Connect a rig…*), no key chord; closing a rig stops and
      releases its stimulus on a thread of its own, quitting closes every link against one

@@ -203,7 +203,8 @@ Phase numbers refer to §9. Phases 0–6 are the **1.0 release** (§9.1); phase 
 ### 4.1 Workspace
 One crate per concern: pure DSP (`ac2-core`) and pure display (`ac2-scene`) have no I/O;
 only `ac2-zmq` links libzmq; the daemon (`ac2d`) owns audio, jobs and state; the desktop app
-(`ac2-ui`) can host an embedded daemon (`--embedded`, local transports). The crate map with
+(`ac2-ui`) hosts no daemon: it starts the `ac2d` beside it when none is running
+([ui-spawns-ac2d.md](docs/design/ui-spawns-ac2d.md)). The crate map with
 each crate's role is in `CLAUDE.md`; golden vectors come from `tools/refgen`, protocol
 fixtures from `tools/protocol`.
 

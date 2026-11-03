@@ -243,7 +243,8 @@ for a device that is present (§12 Q4); a device that is not is `DeviceNotFound`
 changed there reaches a running stream through the rate listener (§4, a reset).
 
 **Selection.** `coreaudio` is the macOS backend of the daemon, CLI (`BackendArg::CoreAudio`)
-and the app's embedded daemon (§11b); `--backend cpal` is gone since (c).
+and the `ac2d` the app starts (§11b; the app hosts no daemon since
+[ui-spawns-ac2d.md](ui-spawns-ac2d.md)); `--backend cpal` is gone since (c).
 
 ## 4. Format and configuration
 
@@ -515,6 +516,10 @@ for (a)–(b) so BlackHole CI and a tester can compare them on one build.
 - `CLAUDE.md` crate map: a `cahal` row ("Core Audio HAL binding, macOS: devices,
   properties, listeners, one duplex IOProc with an exact index; no ac2 deps, MIT, to be
   split out"); `STATUS.md`.
+
+The file lists of (a)–(c) name `crates/ac2-ui/src/embedded.rs`, the app's in-process daemon
+then; it is gone since [ui-spawns-ac2d.md](ui-spawns-ac2d.md), and the app's `ac2d` takes the
+default backend as any `ac2d` does.
 
 **(b) Switch macOS to it.** No wire change. **Built**: also `IOProcStreamUsage` (§4) and
 Audio MIDI Setup as the control panel (§12 Q4); the BlackHole checks run on the default

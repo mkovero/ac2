@@ -64,4 +64,4 @@ case ":$PATH:" in
     *) echo "note: $bindir is not on PATH; add it, or run $bindir/ac2" ;;
 esac
 echo "start the daemon now and at login:  systemctl --user daemon-reload && systemctl --user enable --now ac2d"
-echo "or just open ac2 from the applications menu (it can host its own daemon)."
+echo "or just open ac2 from the applications menu (it starts ac2d itself when none is running)."

@@ -286,6 +286,11 @@ adverts are unchanged, and there is no `PROTO_VERSION` bump. Stage 0 (ec71a7cc) 
 local (ipc) and embedded; a rig reached over tcp on a loopback
 address keeps its hello name until a stage-0 follow-up names it too.
 
+Superseded in part: [ui-spawns-ac2d.md](ui-spawns-ac2d.md) D10 drops the suffix. The app
+hosts no daemon any more, so with one `ac2d` per user there is nothing on this host to tell
+apart: a locally reached rig reads just `<this host>` (`ketunkolo`), the simulated rig its
+hello name *Simulated rig*.
+
 ## 5. Wire and files
 
 `PaneContent` changes shape, `LayoutPane.rig` moves into the content, `RigRef::Active`
@@ -398,7 +403,8 @@ Each stage lands alone, with its own user-guide rows, and is tested through `ac2
   taking an empty (`Nothing`) focused pane of the shown rig turns it into its kind.
   (*Turn into…* went with the chip, D10.)
 - **D8** Rig names by reach: `<this host> · ac2d`, `<this host> · in this app`, network rigs
-  by their hello name; no override, no wire change.
+  by their hello name; no override, no wire change. The suffix is superseded by
+  ui-spawns-ac2d D10: a locally reached rig reads `<this host>`.
 - **D9** Clicking a list row selects; a measurement row with an own layout also brings its
   panes (P1); one without changes no pane.
 

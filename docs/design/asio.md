@@ -229,7 +229,7 @@ falls back to the numbered form the cpal host already uses.
   bound (`Delivery::Device`).
 
 **Selection.** `asio` is the Windows backend of the daemon, the CLI (`BackendArg::Asio`)
-and the app's embedded daemon; the tester guide is `testing/windows/README.md`.
+and the `ac2d` the app starts; the tester guide is `testing/windows/README.md`.
 
 ## 3a. As built
 
@@ -400,7 +400,7 @@ the sources (Rust 1.95 std, tokio 1.53, mio 1.2, winit 0.30.13):
 | ASIO host thread, open handshake (`asio_host/open.rs`) | `park_timeout` 100 ms, `sleep` 2 ms | + up to a tick on the park | fine (open time only) | — |
 
 `timeBeginPeriod` is process-wide and counted: the daemon (`ac2d::Handle`) and the app
-each hold one, and an embedded daemon in the app holds both. Windows 11 may ignore it for a
+each hold one in their own process. Windows 11 may ignore it for a
 process whose windows are all minimised or hidden. Then the app's own fetches slow down
 while nobody looks, and the capture still drains, since the ring holds 2 s and MMCSS
 covers the drain thread. MMCSS registration happens when the fan-out thread starts, never in
@@ -477,8 +477,9 @@ loading, `ASIOCreateBuffers`, `bufferSwitchTimeInfo`, messages.
   formats, so FlexASIO's sample-position behaviour is on record), and records a silent 30 s
   daemon session (no stop, no discontinuity, ≥ 90 % of the frames). Not yet run: it lands
   untested on Windows.
-- App: after the script, `ac2-ui --embedded --backend asio --smoke` hosts its daemon on
-  ASIO, waits for the device list and quits. The step passes when the app exits 0 within
+- App: after the script, `ac2-ui --backend asio --no-discovery --smoke` starts the `ac2d`
+  beside it on ASIO (`ac2d --backend asio`, stopped when the app quits), waits for the
+  device list and quits. The step passes when the app exits 0 within
   120 s, prints `smoke: ok`, and lists `FlexASIO` with inputs and outputs. It opens no
   session, so nothing plays.
 - Soak (dispatch only): `gh workflow run ci.yml --ref <branch> -f soak_minutes=60` runs the

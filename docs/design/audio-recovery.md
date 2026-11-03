@@ -122,7 +122,7 @@ epoch, generator disarmed, SPL log gap (`crates/ac2d/tests/it/recovery.rs`); van
 after the device returns; the device back in the middle of a 30 s wait → reopened within
 2.5 s, with no early attempt while it stays away; `ac2 status`
 (`crates/ac2-cli/tests/it/recovery_rig.rs`); the app's banner appears and clears without
-user action (`crates/ac2-ui/tests/it/embedded/stimulus.rs`).
+user action (`crates/ac2-e2e/tests/it/stimulus.rs`).
 
 ## Open
 

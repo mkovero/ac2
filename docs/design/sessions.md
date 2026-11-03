@@ -118,8 +118,8 @@ adds an entry to `moved()` in `salvage/read.rs` and a fixture under
   again); untitled, or a file another machine wrote, asks Save as. **Save as** names a
   session on the daemon; **Export…** chooses a folder and file name on this computer.
 - A refused open of an old-format session offers *Import its traces*.
-- The embedded daemon (real audio) autosaves like `ac2d`, in its own directory
-  (`<data>/autosave-app`, so a stand-alone `ac2d` on the same machine never shares it);
-  the simulated rig stays in memory. Quitting with an embedded daemon and unsaved changes
-  asks Save / Quit without saving / Cancel; the working state comes back at the next start
-  either way.
+- Every daemon the app reaches is an `ac2d` that autosaves itself, the one the app starts
+  included ([ui-spawns-ac2d.md](ui-spawns-ac2d.md)); the simulated rig (`ac2d --ephemeral`)
+  stays in memory. Quitting with unsaved changes on the simulated rig asks Save / Quit
+  without saving / Cancel, since the app stops it and they are lost; any other rig's working
+  state comes back from its autosave.

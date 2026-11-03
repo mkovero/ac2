@@ -52,7 +52,7 @@ them. JACK gives every port one clock, exact sample indices and the server's sho
   sudo pacman -S pipewire-jack            # Arch
   ```
   On Debian and Ubuntu the package does not replace the system libjack; either run the
-  daemon through it (`pw-jack ac2d`, `pw-jack ac2-ui --embedded`) or make it the system's
+  daemon through it (`pw-jack ac2d`, or `pw-jack ac2-ui`: the `ac2d` it starts inherits it) or make it the system's
   libjack once:
   `sudo cp /usr/share/doc/pipewire/examples/ld.so.conf.d/pipewire-jack-*.conf /etc/ld.so.conf.d/ && sudo ldconfig`.
 - **JACK2**: start the server on your interface before the daemon, e.g.
@@ -73,7 +73,7 @@ pipewire-jack … or start the daemon with `pw-jack ac2d`*, or *No JACK server: 
 (e.g. `jackd -d alsa`) or use PipeWire*. libjack is loaded at run time, so ac2 starts either
 way.
 
-**AppImage** (the desktop app only, with its embedded daemon):
+**AppImage** (the desktop app, with the `ac2d` it starts and stops with it):
 
 ```sh
 chmod +x ac2-ui-<version>-x86_64.AppImage

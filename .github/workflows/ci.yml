@@ -262,17 +262,18 @@ jobs:
           SOAK_MINUTES: ${{ inputs.soak_minutes || 0 }}
         run: tools/release/windows-asio.ps1 -Bin target/debug -LogDir virtual-audio-logs -SoakMinutes $env:SOAK_MINUTES
 
-      # The app on the same driver: ac2-ui hosting its daemon on ASIO comes up, receives the
-      # device list with FlexASIO in it, and quits on its own (`--smoke`). No session opens,
-      # so nothing plays. Runs after the step above, whose daemon has let the driver go.
-      - name: ac2-ui on FlexASIO (embedded daemon)
+      # The app on the same driver: ac2-ui starts the ac2d beside it on ASIO
+      # (`ac2d --backend asio`, stopped when the app quits), receives the device list with
+      # FlexASIO in it, and quits on its own (`--smoke`). No session opens, so nothing plays.
+      # Runs after the step above, whose daemon has stopped and let the driver go.
+      - name: ac2-ui on FlexASIO (ac2d started by the app)
         if: runner.os == 'Windows' && !cancelled()
         shell: pwsh
         run: |
           $log = 'virtual-audio-logs'
           New-Item -ItemType Directory -Force -Path $log | Out-Null
           $p = Start-Process -FilePath target/debug/ac2-ui.exe -PassThru -NoNewWindow `
-            -ArgumentList '--embedded', '--backend', 'asio', '--no-discovery', '--smoke' `
+            -ArgumentList '--backend', 'asio', '--no-discovery', '--smoke' `
             -RedirectStandardOutput "$log/ac2-ui.stdout.txt" -RedirectStandardError "$log/ac2-ui.stderr.txt"
           $null = $p.Handle
           if (-not $p.WaitForExit(120000)) {
@@ -282,6 +283,9 @@ jobs:
           $out = Get-Content "$log/ac2-ui.stdout.txt" -Raw
           Write-Host $out
           Get-Content "$log/ac2-ui.stderr.txt" -ErrorAction SilentlyContinue | Write-Host
+          # The daemon the app started logs on its own (ac2_paths::log_dir on Windows).
+          $daemonLog = Join-Path $env:LOCALAPPDATA 'ac2\logs\ac2d.log'
+          if (Test-Path $daemonLog) { Copy-Item $daemonLog "$log/ac2d-app.log"; Get-Content $daemonLog | Write-Host }
           if ($p.ExitCode -ne 0) { throw "ac2-ui exited $($p.ExitCode)" }
           if ($out -notmatch '(?m)^smoke: ok\r?$') { throw 'ac2-ui did not receive the device list' }
           if ($out -notmatch '(?m)^smoke: device Asio "FlexASIO": [1-9]\d* in, [1-9]\d* out') {

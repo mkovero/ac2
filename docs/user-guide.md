@@ -37,6 +37,19 @@ macOS (sockets in your runtime directory); on Windows it listens on `127.0.0.1:4
 without encryption, so any program on the same computer can reach it. Across the network it
 requires pairing ([install.md](install.md#remote-use-foh--stage)).
 
+**The app starts the daemon.** Started with no arguments, `ac2-ui` connects to this
+computer's `ac2d`, starting it first when none is running: always the `ac2d` installed beside
+the app, never another one on `PATH`. One `ac2d` runs per user; a second one (started by the
+app, `ac2 daemon start` or the user service) finds the first and exits, and the app connects
+to the one running. The app stops the `ac2d` it started when it quits; one started otherwise
+keeps running (both are [Settings › Connection](#connection) rows). `ac2-ui --remote <host>`
+and `--ctrl` / `--data` only connect, never start anything; `--backend NAME` starts
+`ac2d --backend NAME` (and refuses a running `ac2d` on another backend), `--backend fake` the
+simulated rig; `--connect` opens the connect dialog first. When the daemon cannot start, the
+connect dialog opens saying why and where its log is; one that stops while the app runs
+says so with its exit code and log, and the app keeps trying to reconnect rather than start
+another.
+
 A **session** is the open audio stream: one device, a sample rate, a buffer size and the
 inputs to capture. **Measurements** run on it: transfer functions (`tf`), spectrum, RTA,
 SPL meters and sweeps. In the app, every setting lives in **Settings** (**Ctrl+P**, the ⚙ in
@@ -73,12 +86,12 @@ pick *Rigs…* in the palette (**Ctrl+K**), for the drop-down:
 
 - every rig held, the one shown first in its place; a rig whose daemon stopped answering is
   greyed and reads *unreachable · retrying* (the app keeps reconnecting on its own);
-- *Connect a rig…* (also in the palette) opens the connect dialog: a rig it finds or one you
-  paired, an address typed in (`host` or `host:port`), or this computer. The rig joins
-  the ones held and is shown; the others stay connected and keep measuring. A rig on this
-  computer is named by its host and how the app reaches it: **ketunkolo · ac2d** for the
-  host's own daemon, **ketunkolo · in this app** for the one the app runs itself; a rig on
-  another host goes by the name its daemon gives (`pupu`);
+- *Connect a rig…* (also in the palette) opens the connect dialog: *This computer* (its
+  `ac2d`, started when none is running), *Simulated rig (no audio)*, a rig it finds or one
+  you paired, or an address typed in (`host` or `host:port`). The rig joins the ones held
+  and is shown; the others stay connected and keep measuring. The rig on this computer reads
+  its host name (**ketunkolo**), the simulated rig *Simulated rig* (one per app, never
+  remembered), a rig on another host the name its daemon gives (`pupu`);
 - *Close pupu* lets go of the rig shown (never the last one): its stimulus is stopped and
   its hold released first.
 
@@ -124,7 +137,8 @@ attach it to a bug report:
 |---|---|---|---|
 | directory | `~/.local/state/ac2` (`$XDG_STATE_HOME/ac2`) | `~/Library/Logs/ac2` (Console.app lists it) | `%LOCALAPPDATA%\ac2\logs` |
 
-`ac2-ui.log` is the app's (with the daemon it hosts), `ac2d.log` a standalone daemon's. Each
+`ac2-ui.log` is the app's, `ac2d.log` the daemon's (the app's own start of it too),
+`ac2d-sim.log` the simulated rig's. Each
 start moves the previous file to `ac2-ui.log.1` / `ac2d.log.1`, so a bad run survives one
 restart; a file that reaches 16 MiB during a run is moved there too and a fresh one started,
 so a weeks-long run keeps at most 32 MiB of log. A panic is logged with its thread and a
@@ -143,21 +157,22 @@ The backend is always named. Each platform has one real backend:
 | Linux | `jack` | a JACK2 server, or PipeWire through pipewire-jack; there is no ALSA backend. Rate and buffer are the server's. |
 | macOS | `coreaudio` | Core Audio, the HAL directly: one callback per device serves its inputs and outputs on one exact sample index, and the session states the device's latency. Two devices (a USB mic beside the built-in output) run one callback each, on two clocks; an aggregate device made in Audio MIDI Setup is one device. With no `--rate`, the device's current rate (a rate is set only when asked for, since other apps share it); with no `--buffer`, a short buffer of about 20 ms (1024 frames at 48 kHz, within what the device allows). Only the input streams a session's channels are on are read. |
 | Windows | `asio` | ASIO drivers, one device per installed driver, inputs and outputs on one clock. With no `--rate` / `--buffer`, the driver's current rate and preferred buffer. A device without its own ASIO driver goes through [FlexASIO](https://github.com/dechamps/FlexASIO); with no ASIO driver installed, the backend is listed as unavailable with that pointer. |
-| any | `fake` | a simulated rig for trying things out; never chosen for you |
+| any | `fake` | a simulated rig for trying things out (*Simulated rig* in the app's connect dialog, `ac2-ui --backend fake`); never chosen for you |
 
 **macOS: microphone access.** macOS lets a program read any audio input only once the
 user allows it, so ac2 asks before it opens an input (the first time Settings shows the
 input meters, usually). While the prompt goes unanswered, or once access is refused, ac2
 says so in words and nothing is opened: allow ac2 in **System Settings › Privacy & Security
-› Microphone**. macOS asks on behalf of the program that started ac2: the app for itself and
-the daemon it hosts, Terminal for `ac2d` or `ac2 selftest` run there. A daemon started by
+› Microphone**. macOS asks on behalf of the program that started ac2: the app for the `ac2d` it
+starts, Terminal for `ac2d` or `ac2 selftest` run there. A daemon started by
 launchd or over ssh gets no prompt; allow its app by hand first ([install.md](install.md)).
 
 Should a host still deliver audio in lumps, the daemon log says so once a minute (*audio
 arrives in bursts on …*) with the device and buffer to change.
 
-In the app's connect dialog, *Simulated rig* starts ready to measure (audio I/O open, a
-transfer measurement "demo" running); *This computer's audio* starts with no session.
+In the app's connect dialog, *Simulated rig (no audio)* starts ready to measure (audio I/O
+open, a transfer measurement "demo" running) and stops with the app; *This computer* reaches
+this computer's `ac2d` as it is (one the app starts has no session).
 Whenever the app connects to a daemon with no audio I/O open, the **Sessions** dialog
 (**Alt+S**) opens once; a daemon with audio open (a rig, the Pi kiosk) opens nothing. Its
 *New session* opens Settings on the Audio I/O page, headed *New session — Audio I/O*, with the
@@ -193,7 +208,7 @@ once).
 | Recording | how long the record toggle records (this app); where the daemon records (the rig) | |
 | Rig monitor | where the rig's OSC cues and Art-Net universe go, whether it meters at start (the rig); how its programme meters read: *Programme meters read*, *Loudness target* (−23 LUFS by default, −36 … −5 in 1 LU steps; past either end the row says the range), *Correlation window*, *An over is above*, *Correlation gate* — **←/→** steps a value and sends each step ([Programme pane](#programme-pane)) | |
 | Display | theme, key hints, warning toasts, how long the SPL number holds, the goniometer's ember decay and glow, Leq windows / history strip / bars / scale, what the spectrum and sweep panes show, spectrum glide, distortion unit, coherence placement, resolution marker, plate background (see-through / solid), level axes | |
-| Connection | the daemon, this client's id and key, reconnect, another daemon / pairing; the daemon's mode, mDNS name, authorized clients and refused keys | |
+| Connection | the daemon, whether the app starts and stops this computer's `ac2d`, this client's id and key, reconnect, another daemon / pairing; the daemon's mode, mDNS name, authorized clients and refused keys | |
 
 #### System max level
 
@@ -212,7 +227,19 @@ The daemon keeps the level across restarts. CLI: `ac2 gen ceiling`,
 #### Connection
 
 The page names the rig shown (`Rig: pupu`) and its daemon, and *Connect a rig…* adds
-another ([Many rigs in one window](#many-rigs-in-one-window)). In network mode the page lists the clients the rig accepts (name, key fingerprint) and the
+another ([Many rigs in one window](#many-rigs-in-one-window)). Two rows say how the app
+treats this computer's `ac2d` (**←/→** or **Enter** toggles; this app's, in `ui.toml`):
+
+- *Start ac2d when none is running* (on): reaching this computer starts the `ac2d`
+  installed beside the app when none answers. Off, the app only connects, for a host whose
+  daemon runs as a service.
+- *Stop ac2d when the app quits* (on): the `ac2d` this app started stops in order (stimulus
+  faded, autosave written) when the app quits or closes that rig; one started otherwise
+  keeps running. Off, the app starts `ac2d` to outlive it. A change applies from the next
+  start of `ac2d`. In the AppImage it is always on: the AppImage's files go away when the app
+  quits.
+
+In network mode the page lists the clients the rig accepts (name, key fingerprint) and the
 keys it refused lately (fingerprint, address, how often, when).
 
 - **A** on a refused key, then a name, authorizes it; the client connects on its next retry.
@@ -230,8 +257,8 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
 
 - **Backend** (**←/→**): every backend the daemon offers; one it cannot use now says why and
   what to do (*PipeWire is running but its JACK library isn't in use: install pipewire-jack …
-  or start the daemon with `pw-jack ac2d`*). The simulated rig only appears on a daemon
-  started on it.
+  or start the daemon with `pw-jack ac2d`*). `fake`, the simulated rig, only appears on a
+  daemon started on it (*Simulated rig* in the connect dialog, `ac2-ui --backend fake`).
 - **Input device** (**←/→**): the capture device, with *N in / M out · rate · buffer*. Output-only
   devices are not offered.
 - **Output device** (**←/→**): where the stimulus plays. It starts as *same device as the input*
@@ -292,11 +319,10 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
 - After the session line the top bar shows how the rig holds up:
   `CPU remote 23 % · local 41 % · DSP 14 % · 0 xruns · 14 Mbit/s · 30 fps`. **CPU** is the
   whole daemon host's use (every process, every core); with the daemon on another computer
-  it reads **remote** and **local** is this one's, and with the daemon on this computer (or
-  inside the app) a single `CPU 23 %`; **DSP** is the share of each buffer period ac2d's own
+  it reads **remote** and **local** is this one's, and with the daemon on this computer a
+  single `CPU 23 %`; **DSP** is the share of each buffer period ac2d's own
   audio callback takes (not the whole JACK graph's load); **xruns** count since the session
-  opened; the data rate is what this window receives from the daemon (left out with the
-  daemon inside the app); **fps** is shown while live data arrives — at most 60 on a GPU and
+  opened; the data rate is what this window receives from the daemon; **fps** is shown while live data arrives — at most 60 on a GPU and
   30 on a software renderer, since the app paces its own frames rather than wait for the
   display, which keeps it responsive with the screen off or unplugged. CPU past 85 %, DSP past
   70 %, a frame rate under a third of the data's and an xrun in the last 5 s show in the
@@ -1865,7 +1891,7 @@ Beside the panes, one tree lists every measurement with what it owns
   ▾ SPL  FOH SPL        running
   ▾ Imported            1 trace
       └ 1083 94cm       imported
-▸ ketunkolo · ac2d      4 measurements · 5 traces · folded
+▸ ketunkolo             4 measurements · 5 traces · folded
 ```
 
 | Item | Filed under |
@@ -1877,7 +1903,7 @@ Beside the panes, one tree lists every measurement with what it owns
 | **imports**, session traces of no measurement | **Imported**, listed last when it holds something |
 
 - Each connected rig is a root of the tree, even when it is the only one: its heading
-  (`pupu`, `ketunkolo · ac2d`) and under it everything that lives on that rig (its Rig
+  (`pupu`, `ketunkolo`) and under it everything that lives on that rig (its Rig
   monitor meters, its Session measurements, its Imported group). The arrow before the
   heading **folds** the rig's branch: only the heading stays, saying what it hides
   (`6 measurements · 12 traces · folded`, counted as the Sessions dialog counts a
@@ -2338,9 +2364,9 @@ Backspace goes up a folder; Esc goes back or closes.
 - **New** and **Open** ask **Save / Discard / Cancel** with unsaved changes (**Save as…** in
   place of Save when the work is untitled). Discarded changes stay recoverable until the
   next New or Open replaces something.
-- Quitting an app that hosts its own daemon asks **Save** (**Save as…**) / **Quit without
-  saving** / **Cancel**. Changes left unsaved come back from the autosave when the app starts
-  again; on the simulated rig, which keeps no autosave, they are lost.
+- Quitting with unsaved changes on the simulated rig asks **Save** (**Save as…**) / **Quit
+  without saving** / **Cancel**: the app stops the simulated rig, which keeps no autosave, so
+  changes left unsaved are lost. Any other rig's changes stay in its daemon's autosave.
 - **Save as** onto an existing session asks first (**Cancel** is the default).
 - An opened session comes up disarmed and keeps the open audio I/O.
 - A session of another format version is refused, naming the version, and the dialog offers
@@ -2393,12 +2419,11 @@ refuses one that is damaged, larger than 64 MiB, or unpacks to more than 512 MiB
 
 ### Autosave
 
-A stand-alone daemon (`ac2d`, `ac2 daemon start`, the user service) **autosaves** the same
+The daemon (`ac2d`, whether the app, `ac2 daemon start` or the user service started it) **autosaves** the same
 content 1.5 s after the last edit of a burst (at most 10 s after the first) and once more
 when it stops. On the next start it loads it as `session load` does — disarmed, no audio
 session (restored measurements wait for one), same session name and *unsaved changes* — and
-logs what was restored. The daemon inside the app autosaves to `autosave-app/`; a simulated
-rig does not.
+logs what was restored. A simulated rig does not.
 
 The top bar shows the state (`ac2 status` and `ac2 session status` print it too):
 *autosaved 5 min ago*, *saving…*, or *autosave failed: <reason>* in the warning colour

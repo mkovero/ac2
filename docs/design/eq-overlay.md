@@ -287,7 +287,7 @@ a `#` comment at the top of the file. Never approximated.
   −8 dB → both predict −2 dB more; an unmarked import predicts the whole set; a capture of a
   prediction keeps its values; session save/load recomputes the columns; refusals (f ≥ fs/2, LR order 3).
 - `ac2-cli` `tests/it/eq_rig.rs`: command shapes and refusals by message; import/export.
-- `ac2-ui` `tests/it/embedded/eq.rs`: Alt+E from an empty daemon, add a peaking section by keys,
+- `ac2-e2e` `tests/it/eq.rs`: Alt+E from an empty daemon, add a peaking section by keys,
   the scene's legend reads `Main L after EQ 1 · assumes none of it in` and `EQ 1`, B
   bypasses, P ticks a capture, M + M turns it into `no change`; one GPU snapshot
   `transfer_eq` for the final look.

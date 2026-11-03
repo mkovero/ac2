@@ -99,7 +99,7 @@ and the picture cannot disagree.
 - `ac2-plot` (`tests/it/render.rs`): scroll is a rotation, columns follow identity (replace,
   empty, fresh renderer equal), NaN transparent and release, time-up is the transpose, a
   pixel shows its highest cell; the golden `heatmap_scroll` is unchanged.
-- `ac2-ui`: `tests/it/embedded/panes/streams.rs` `spectrograph_from_an_empty_daemon` (session, spectrum
+- `ac2-e2e`: `tests/it/panes/streams.rs` `spectrograph_from_an_empty_daemon` (session, spectrum
   from the palette, G, the rig's noise fills it, cursor readout, C, the history length, stopped caption,
   G alone, W full size, level keys, G clears); GPU snapshots `tests/it/ui/views.rs` `spectrograph`
   and `spectrograph_alone` from a pinned 25 s sweep with a gap.

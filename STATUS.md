@@ -27,23 +27,26 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   *Metering other JACK sources*.
 - The app paces its own frames (`crates/ac2-ui/src/pace.rs`, no vblank wait), so a blanked
   or absent display no longer drops it to 1 fps (verified on ketunkolo; Pi GLES unverified).
-- **Next: many rigs in one app** (tabs, mixed panes, remote inputs, clocks across PTP hosts):
-  `docs/design/multi-rig.md`, decisions N1–N6. Stage 1a (wire and files) landed: a daemon
-  keeps its identity in `rig-id` (`app-rig-id` for the app's embedded daemon), the hello
-  carries `rig_id` and `name` (`ac2d --name` in every mode), every layout pane names its
-  rig (PROTO 72, session format 36, rig file 8). Stage 1b landed: the app's state is split
-  into one `RigState` per daemon (`AppState.rig` the active one, `background` the others;
-  each owns its link, its events and requests carry its `RigId`, `ui.toml` remembers
-  devices per rig), still with one rig. Stage 1c landed: Connect… (drop-down or palette)
-  adds a rig, the top-bar drop-down switches between them, `ui.toml` remembers the rigs and
-  connects them again at start, panes keep their rig across a switch (titles `pupu · …`,
-  *unreachable · retrying* / *not connected*), Shift+Esc stops every rig and quit releases
-  them all in parallel. Stage 1d landed: a pane's chip list offers every connected rig's
-  measurements and meters under a heading per rig, a pick of another rig's pins the pane
-  to it, a list row chosen never takes another rig's pane, `ui.toml` keeps each pinned
-  pane's rig by id (resolved when that rig is held again, any address), and a stored
-  layout reads `ThisRig`/`Rig` panes for the rig it belongs to. Next: stage 2, clocks and
-  stimulus chips (*Stages*).
+- The app hosts no daemon: it starts the `ac2d` beside it (stopped when it quits, Settings ›
+  Connection), one `ac2d` per user by a lock, the simulated rig a spawned
+  `ac2d --backend fake --ephemeral`; e2e tests with a daemon are the `ac2-e2e` crate. Design:
+  `docs/design/ui-spawns-ac2d.md` (N7); stage 2 (ac2d in the AppImage / app bundle) open.
+- **Next: many rigs in one app** (tabs, mixed panes, remote inputs, clocks across PTP
+  hosts): `docs/design/multi-rig.md`, decisions N1–N6. Stage 1a (wire and files) landed: a
+  daemon keeps its identity in `rig-id`, the hello carries `rig_id` and `name` (`ac2d
+  --name` in every mode), every layout pane names its rig (PROTO 72, session format 36, rig
+  file 8). Stage 1b landed: the app's state is split into one `RigState` per daemon
+  (`AppState.rig` the active one, `background` the others; each owns its link, its events
+  and requests carry its `RigId`, `ui.toml` remembers devices per rig), still with one rig.
+  Stage 1c landed: Connect… (drop-down or palette) adds a rig, the top-bar drop-down
+  switches between them, `ui.toml` remembers the rigs and connects them again at start,
+  panes keep their rig across a switch (titles `pupu · …`, *unreachable · retrying* / *not
+  connected*), Shift+Esc stops every rig and quit releases them all in parallel. Stage 1d
+  landed: a pane's chip list offers every connected rig's measurements and meters under a
+  heading per rig, a pick of another rig's pins the pane to it, a list row chosen never
+  takes another rig's pane, `ui.toml` keeps each pinned pane's rig by id (resolved when that
+  rig is held again, any address), and a stored layout reads `ThisRig`/`Rig` panes for the
+  rig it belongs to. Next: stage 2, clocks and stimulus chips (*Stages*).
 - Open hardware gates (1.0): duplex check and 1 h run on macOS (Windows: done in a VM,
   a real PC and the panel/unplug cases pending, `asio.md` §4c–d), keyboard-only speaker
   tuning per OS, clean install → first measurement < 2 min per OS, signing certificates.

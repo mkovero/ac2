@@ -2,7 +2,7 @@
 # Linux release artifacts from built binaries:
 #   ac2-<version>-linux-x86_64.tar.gz   ac2, ac2d, ac2-ui + desktop entry, icons, systemd
 #                                       user unit, install.sh, README, LICENSE, docs
-#   ac2-ui-<version>-x86_64.AppImage    the desktop app (with its embedded daemon)
+#   ac2-ui-<version>-x86_64.AppImage    the desktop app (with the ac2d it starts)
 #
 #   packaging/linux/package.sh <version> <dir with release binaries> <out dir>
 #

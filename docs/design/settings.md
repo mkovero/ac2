@@ -99,7 +99,7 @@ the channels, with *applies when the session opens (Enter)* until it is the open
 
 ## 4. Server features on the Connection page
 
-`server.info` reports the transport (`embedded`, `local {ctrl}`, `network {ctrl, data,
+`server.info` reports the transport (`embedded` for in-process test daemons only, `local {ctrl}`, `network {ctrl, data,
 server_key, fingerprint, advertised_as, authorized, refused}`) and the recording folder.
 In network mode the page lists the authorized clients (name, fingerprint) and the keys
 refused since the daemon started (fingerprint, address, count, age; at most 32, newest
@@ -110,8 +110,8 @@ replace the handshake check's keys (`AuthorizedHandle`); a revoked client's requ
 refused at once (its data socket keeps receiving until the connection drops — libzmq has no
 per-peer disconnect on ROUTER/XPUB). Nobody revokes their own key (it would lock that
 operator out). Any authorized client may do this: in network mode every paired client is
-equally trusted already (it can drive the stimulus). Local and embedded daemons have no
-keys (`unsupported`).
+equally trusted already (it can drive the stimulus). Local daemons have no keys
+(`unsupported`).
 
 This client's key (fingerprint and Z85, for a rig's operator to authorize) is read from the
 key directory, never created there: pairing in the connect dialog makes it. *Connect to

@@ -10,7 +10,8 @@
   (as in ac2d -h) and tcp://0.0.0.0.
   macOS asks for microphone access per app, and a daemon started by launchd cannot show
   that prompt. If its inputs stay silent, start ac2d from Terminal instead (macOS then asks
-  on Terminal's behalf), or let the app host its own daemon.
+  on Terminal's behalf), or unload this agent and let the app start ac2d (macOS then asks
+  on the app's behalf).
 -->
 <plist version="1.0">
 <dict>

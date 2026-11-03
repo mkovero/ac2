@@ -45,14 +45,13 @@ The first request on a connection is `hello`; its reply `welcome` carries `serve
 daemon-assigned id), `daemon_incarnation`, `session_epoch`, `rev`, `rig_id` and `name`.
 
 `rig_id` (u64, never 0) is the daemon's identity: random, made once and kept in a file
-(`rig-id` in the ac2 config directory, 16 lowercase hex digits and a newline; the app's
-embedded daemon on real audio keeps `app-rig-id` beside it), the same across reconnects,
+(`rig-id` in the ac2 config directory, 16 lowercase hex digits and a newline), the same across reconnects,
 restarts, renames, address changes and a move between local and network mode, in every
 mode. It is not the CURVE key, which a local daemon does not have. A file that cannot be
 read is set aside (`damaged_files`, kind `rig_id`) and a new id made, so a client sees a
-new rig, never takes it for another. An embedded simulated rig has a new id every start.
-`name` is the rig's name (`ac2d --name`, default `ac2 on <hostname>`; `this computer` for
-the app's embedded daemon), display only and read anew on each connect; a network-mode
+new rig, never takes it for another. An ephemeral daemon (`ac2d --ephemeral`, the app's
+simulated rig) has a new id every start.
+`name` is the rig's name (`ac2d --name`, default `ac2 on <hostname>`), display only and read anew on each connect; a network-mode
 daemon advertises it over mDNS.
 
 Frame headers carry `v` too; a frame at another version is refused.
@@ -350,7 +349,7 @@ level, dB SPL, as a trailing float)}; `OscArg` = {`type`: `int` \| `float` \| `s
 i32 \| f32 \| str}.
 
 **Server (`server.*`).** `server.info` → `ServerInfo`: `mode` (tagged by `type`):
-`embedded` (in an app's process) \| `local` {`ctrl`} (this machine only; the OS user is the
+`embedded` (in its client's process; only test daemons, the app spawns `ac2d`) \| `local` {`ctrl`} (this machine only; the OS user is the
 trust boundary, there are no client keys) \| `network` {`ctrl`, `data`, `server_key` (Z85),
 `fingerprint`, `advertised_as`: string | nil (the mDNS name), `authorized`:
 [`AuthorizedClient` {`name`, `key`, `fingerprint`}], `refused`: [`RefusedKey` {`key`:
@@ -1515,8 +1514,8 @@ with the autosave (§7.3).
 #### Raw capture files (`rec.*`, `session.replay`)
 
 Design: `docs/design/raw-capture.md`; file format §7.5. A daemon has a recording directory
-(`ac2d`: `recordings` in the data directory, `--recordings <dir>`); one without (an
-embedded or test daemon not given one) answers `rec.start` `unsupported`, `rec.list` with
+(`ac2d`: `recordings` in the data directory, `--recordings <dir>`); one without (`ac2d --ephemeral`,
+or an in-process test daemon not given one) answers `rec.start` `unsupported`, `rec.list` with
 nothing and `session.replay` by name `not_found`.
 
 `RecordRequest`: `inputs` ([u16] device inputs, each captured by the open session, in file

@@ -1,6 +1,6 @@
 # The app spawns ac2d: no daemon inside the app
 
-Status: design, not built. Operator decision 2026-11-03: "ui is ui and daemon is daemon".
+Status: built (stages 1 and 3; stage 2, packaging, separately). Operator decision 2026-11-03: "ui is ui and daemon is daemon".
 The app hosts no daemon in its process: it connects to this computer's `ac2d`, starts the
 bundled `ac2d` as a child when none serves, and by default stops that child when it quits.
 Decisions D1 … D12 are listed at the end.
@@ -40,23 +40,32 @@ names the expected path. Dev builds find `target/<profile>/ac2d` after `cargo bu
 unlinks an existing socket path before binding, so a second `ac2d` silently takes over
 `ctrl.sock` while the first keeps the interface (libzmq behaviour as read; stage 1 proves it
 with a test). On Windows the second fails on `127.0.0.1:47820` (`AddressInUse`), but only
-after rotating `ac2d.log` and opening audio. Fix: when (and only when) listening on
-`Listen::default_local()` (`ac2d/src/config.rs:331-336`), `ac2d` takes an exclusive
+after rotating `ac2d.log` and opening audio. Fix (stage 1): every `ac2d` except `--ephemeral` takes an exclusive
 `std::fs::File::try_lock` (stable on the pinned 1.95) on `runtime_dir()/ac2d.lock`
-(`ac2-client/src/endpoint.rs:86-99`), on every OS, before log, audio or sockets; held →
-exit code 3 (*another ac2d is running for this user*), no file touched. The pid file
-(`main.rs:191-197`) is written under the same condition; explicit `--ctrl/--data` or
-`--listen` writes neither (today every `ac2d` writes `runtime_dir()/ac2d.pid`, so a second
-daemon on other endpoints overwrites the real one's and `ac2 daemon stop` kills the wrong
-process). The app's child on default endpoints writes that pid file, so **`ac2 daemon stop`
-also stops the app's child** (the app sees it exit, D9).
+(`ac2-client/src/endpoint.rs`), on every OS, before log, audio or sockets, whatever it
+listens on: one daemon per user owns the shared cal store, `rig.json` and autosave. Held →
+exit code 3 (`ac2d::instance::exit::ANOTHER_RUNNING`, *another ac2d is running for this
+user*), no file touched; 2 is a setup error, 1 fatal. The holder writes the pid file and
+`runtime_dir()/ac2d.endpoints`: line 1 `ac2d: listening ctrl=… data=…` (the
+`--print-endpoints` line), line 2 `mode=local|network`. A wildcard `tcp://0.0.0.0:P` in it is
+dialled on loopback (`Endpoints::dialable`). `--ephemeral` (explicit `--ctrl/--data`
+required) takes no lock and writes neither file: the simulated rig and tests. The app's
+child writes the pid file, so **`ac2 daemon stop` also stops the app's child** (the app sees
+it exit, D9).
 
 **D4. Ensure local = spawn and connect at once; no running-probe.** The app spawns the
 bundled `ac2d` (no flags: platform backend, default local endpoints, `rig-id`, `autosave`,
 the shared cal store / `rig.json` / plans / rig logs / recordings) and starts the link to
 the default endpoints at the same time. The lock decides: the child serves, or exits 3 and
-the link reaches the winner (a service, a hand-started `ac2d`, another app's child) and the
-app does not own it (D8). The link's first attempt may miss a daemon still binding and
+the app reads `ac2d.endpoints` (polled up to 10 s: the winner writes it once bound) and
+reaches the winner (a service, a hand-started `ac2d`, another app's child); the app does not
+own it (D8). A winner on the default endpoints is already the link's target; on others the
+link is restarted there. A **network-mode winner** is not connected to: a client needs its
+pinned key, which the operator copies from that daemon (`ac2 daemon pair`), so the app opens
+the connect dialog with *another ac2d is running for this user, in network mode on …: pair
+with it, then connect to …* and the address typed in. Pairing from the app on its own would
+mean trusting the first key the port answers with; the existing pairing flow already does
+this right, so the app reports and prefills rather than growing a second one. The link's first attempt may miss a daemon still binding and
 retries (`RETRY_EVERY` 2 s, `conn/mod.rs:410-411`). No socket-file test decides anything:
 `local_daemon_running` (`connect.rs:176-190`, only the dialog's *running* detail now) and the
 CLI's `probe` (`daemon.rs:140-147`) become a short-timeout hello instead of a
@@ -111,7 +120,7 @@ The fake backend is in every `ac2d` build: `BackendChoice::Fake` has no feature 
   `ac2d-sim.log`. (`main.rs` today always sets `rig_id` to `File` and every store `Some`.)
 - Spawned on every OS as `ac2d --backend fake --ephemeral --name "Simulated rig"
   --ctrl tcp://127.0.0.1:0 --data tcp://127.0.0.1:0 --print-endpoints --stop-on-stdin-eof`:
-  explicit endpoints, so no lock or pid file (D3) and nothing on disk but its log; the child
+  `--ephemeral`, so no lock, pid or endpoints file (D3) and nothing on disk but its log; the child
   prints its bound endpoints as one stdout line (`ac2d: listening ctrl=… data=…`) that the
   app reads before connecting. Stage 1 checks that `Listen::Local` validation
   (`ac2d/src/config.rs:386-404`) accepts port 0.
@@ -236,21 +245,24 @@ start ac2-ui, which starts ac2d for you".
   instead would add the daemon and audio crates to every UI test build (dev-deps cannot be
   optional).
 - Spawn tests need the binary (`CARGO_BIN_EXE_ac2d`), so they live in `ac2d/tests/it/spawn.rs`:
-  lock refusal (exit 3, log not rotated, pid file untouched); explicit endpoints write no
+  lock refusal (exit 3, log not rotated, pid file untouched); `--ephemeral` writes no
   lock or pid file; a stale socket after `kill -9` no longer blocks; stdin EOF ends the
   daemon in order (autosave complete, rig logs finished); a kill mid-autosave-write leaves
   a loadable autosave; a fatal end exits 1;
   `--ephemeral` writes nothing under temp `XDG_*` dirs; port 0 with `--print-endpoints`.
   The app's ownership rule (D8) and ensure-local outcomes (D4) are tested in `ac2-ui` with
-  a stub child.
+  a stub child (`spawn/tests.rs`: the test binary re-run as the child). One `ac2-e2e` test
+  starts the simulated rig from the connect dialog with the built `ac2d` copied beside the
+  test binary (skipped when `ac2d` is not built or there is no GPU adapter).
 - Fake backend only (Audio safety).
 
 ## Stages
 
 Each lands alone, quick tier green, with its user-guide rows.
 
-1. **ac2d** (daemon and CLI, no wire change): lock + pid file only on default local
-   endpoints (D3). The lock code does `create_dir_all(runtime_dir())` itself (0700 on Unix)
+1. **ac2d** (daemon and CLI, no wire change), done: lock, pid file and `ac2d.endpoints` on
+   every `ac2d` but `--ephemeral` (D3). The lock code does `create_dir_all(runtime_dir())`
+   itself (0700 on Unix)
    on every OS, then `File::try_lock`, the file held in `main` for the daemon's life;
    `WouldBlock` → exit 3 before log rotation, any other error → exit 2 naming the path,
    never running unlocked. `--ephemeral`, `--print-endpoints`, `--stop-on-stdin-eof` (its
@@ -261,7 +273,8 @@ Each lands alone, quick tier green, with its user-guide rows.
    `spawn.rs` tests.
 2. **Packaging**: `ac2d` in the AppImage and `Contents/MacOS` (nested signing), launchd
    comment; all-OS dispatch; a macOS tester checks TCC (§5).
-3. **The app spawns, the embedded daemon goes** (app only, one change): `spawn.rs`, D1, D2,
+3. **The app spawns, the embedded daemon goes** (app only, one change), done: `spawn.rs`
+   (`ac2-ui/src/spawn.rs`, the children the app watches in `app/daemons.rs`), D1, D2,
    D4–D11 (the owned Windows child with `CREATE_NO_WINDOW`), both Settings rows, dialog
    rows, `--backend`, the CI FlexASIO step, `embedded.rs`, feature, lenient `rigs`, D12,
    host-name labels, tests to `ac2-e2e`, `no_dsp.rs`, the AppImage header comment. Deploy:
@@ -286,7 +299,7 @@ Each lands alone, quick tier green, with its user-guide rows.
 N7, in the multi-rig series: it settles which daemons the app holds and retires N1's
 embedded-daemon clause.
 
-| N7 | **ui is ui, daemon is daemon** ([ui-spawns-ac2d.md](ui-spawns-ac2d.md)). The app hosts no daemon: at start it spawns the `ac2d` beside its executable (never one on `PATH`) and connects at once; one `ac2d` per user is a lock on the default local endpoints, a loser exits 3 and the app reaches the winner without owning it. `--remote` / `--ctrl` never spawn. Settings › Connection: *Start ac2d when none is running* (default on; off on service hosts; `ac2d.service` has `SuccessExitStatus=3`) and *Stop ac2d when the app quits* (default on, forced on in the AppImage): the child then holds an inherited stdin pipe and stops in order (fade, autosave flush) when the app quits or dies; off, it is spawned detached and keeps running. An `ac2d` the app did not start is never stopped; `ac2 daemon stop` stops the app's child too. *Simulated rig* is a spawned `ac2d --backend fake --ephemeral` on loopback port 0, always stopped with the app. A local rig reads the host name (`ketunkolo`), superseding pane-curves D8's `· ac2d` suffix. `reach = "embedded"` rigs are dropped from `ui.toml` on load with a notice; `app-rig-id` / `autosave-app` unused. No wire change. Supersedes N1's embedded clause. (operator, 2026-11-03: "ui is ui and daemon is daemon") |
+| N7 | **ui is ui, daemon is daemon** ([ui-spawns-ac2d.md](ui-spawns-ac2d.md)). The app hosts no daemon: at start it spawns the `ac2d` beside its executable (never one on `PATH`) and connects at once; one `ac2d` per user is a lock every `ac2d` but `--ephemeral` takes; a loser exits 3 and the app reaches the winner named in `ac2d.endpoints` without owning it (a network-mode winner: the connect dialog says to pair with it, its address typed in). `--remote` / `--ctrl` never spawn. Settings › Connection: *Start ac2d when none is running* (default on; off on service hosts; `ac2d.service` has `SuccessExitStatus=3`) and *Stop ac2d when the app quits* (default on, forced on in the AppImage): the child then holds an inherited stdin pipe and stops in order (fade, autosave flush) when the app quits or dies; off, it is spawned detached and keeps running. An `ac2d` the app did not start is never stopped; `ac2 daemon stop` stops the app's child too. *Simulated rig* is a spawned `ac2d --backend fake --ephemeral` on loopback port 0, always stopped with the app. A local rig reads the host name (`ketunkolo`), superseding pane-curves D8's `· ac2d` suffix. `reach = "embedded"` rigs are dropped from `ui.toml` on load with a notice; `app-rig-id` / `autosave-app` unused. No wire change. Supersedes N1's embedded clause. (operator, 2026-11-03: "ui is ui and daemon is daemon") |
 
 ## Decisions (proposed under the operator's 2026-11-03 rule)
 
