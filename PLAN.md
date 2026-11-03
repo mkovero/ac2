@@ -191,7 +191,7 @@ Phase numbers refer to §9. Phases 0–6 are the **1.0 release** (§9.1); phase 
        │ ac2-scene (pure: data → display truth)   │
        │ ac2-client (typed, async)                │
        └──────────────┬───────────────────────────┘
-                      │  ZeroMQ: ROUTER/DEALER (ctrl) + XPUB/SUB (data, events)
+                      │  ZeroMQ: ROUTER/DEALER (ctrl) + ROUTER/DEALER (data, events; credit)
                       │  ipc:// / tcp:// / inproc://  ·  CURVE over network
               ┌───────┴────────┐
               │     ac2d       │  session, jobs, state, logging, discovery
@@ -234,8 +234,8 @@ audio callback ──► multichannel blocks {start_sample, frames, flags} ─�
                                          fan-out to jobs (one consumer per job)
                                                      │ results → per-topic latest slot
                                                      ▼
-                                     publisher: coalesce per topic ──► XPUB
-I/O thread ◄─► ROUTER/XPUB ── requests (mpsc) ──► control thread: serialized state commits;
+                                     publisher: coalesce per topic ──► data ROUTER
+I/O thread ◄─► ROUTER/ROUTER ── requests (mpsc) ──► control thread: serialized state commits;
     jobs controlled via channels; disk/archive work (file.*) on worker threads, committed
     when their result comes back (mpsc)
 generator ◄── atomics / lock-free param swap ◄── control (owner lease enforced, §6.5)
@@ -397,7 +397,7 @@ generator ◄── atomics / lock-free param swap ◄── control (owner leas
 | Socket | Daemon | Purpose |
 |---|---|---|
 | ctrl | ROUTER | async request/response with ids; slow handlers never block other clients |
-| data | XPUB | frames + state events, subscription-aware |
+| data | ROUTER | frames + state events, per-peer subscriptions and byte credit (docs/protocol.md §5.8) |
 
 Transports: `ipc://` (Linux/macOS), `tcp://127.0.0.1` (Windows) — an embedded daemon uses the same (private ipc dir / ephemeral loopback ports), since the client owns its own ZeroMQ context;
 `tcp://<iface>` only in network mode, which requires CURVE on **both** sockets.

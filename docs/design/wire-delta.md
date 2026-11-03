@@ -223,6 +223,28 @@ peer's dirty topics, one message each, the newest slot. A round is ≈ 11.6–12
 10.2 kB one frame back, 12.5 kB two back), so each topic runs at ≈ 19–22 frames/s, and the
 standing delay is at most window / rate = 64 kB / 250 kB/s ≈ 0.26 s.
 
+Built (PROTO 83, `ac2d/src/peers.rs`, `chain.rs`, `io.rs`; protocol §5.8). Where it
+differs from the items above:
+
+- `data.keyframe` left ctrl: with `subscribe`, `unsubscribe`, `window` and `credit` it is a
+  DEALER message (`ac2_proto::flow::DataUp`), since per-peer state is keyed by the data
+  connection, which ctrl cannot name, and on the DEALER it stays ordered with the credit.
+  The daemon answers with notices on `flow`: `resync_required` (item 6) and `rejoin` (a
+  peer dropped as stalled, 60 s silent with messages unacknowledged, that reads again).
+- Item 7: libzmq tells the writer what the connection took from its queue only every half
+  queue (`lwm = (hwm + 1) / 2`), so the writer may count half a queue too many. `SNDHWM` is
+  twice the outstanding bound, with the window clamped to 20 KiB … 256 KiB and every frame
+  charged at least 64 B: `2 × (256 KiB ÷ 64 + 1 + 256) = 8 706` messages, sized for the
+  largest window rather than the default.
+- Item 4: a peer whose topics are quiet would never be sent anything, so `EHOSTUNREACH`
+  would never come; such a peer is sent a keepalive each second whatever it subscribes to.
+- The delay bound is window ÷ rate plus one rotation round: a frame may wait in its slot
+  for its turn before it is sent. Measured on `wire_size` (starved peer, 64 KiB at
+  250 kB/s, tuning session with the IR view): median 0.27 s, p95 0.33 s, max ≈ 0.37 s; the
+  counted peer's 4.66 Mbit/s as before.
+- Credit batching: one `credit` per read burst, and mid-burst whenever half the window is
+  owed; the sync worker credits once per drain.
+
 ## Budget and tests (W11, W12)
 
 Payload Mbit/s for the `wire_size` tuning session (with / without the IR view), keyframes
@@ -244,7 +266,8 @@ after the first second is 7 % (14 frames per 0.5 s at 28.8/s).
 < `IR_FRAME_BUDGET`; keyframe share of `tf` after the first second < 10 %.
 `tuning_session_bytes` prints the split. Stage C adds a credit-starved peer (64 kB window
 drained at 250 kB/s) beside a fast one: the fast peer's totals unchanged, the slow one's
-delay ≤ 0.3 s, every topic still served.
+delay ≤ 0.3 s, every topic still served (built: median ≤ window ÷ rate, p95 ≤ (window +
+one rotation round) ÷ rate, see *Built* under W10).
 
 **W12. Tests.**
 
