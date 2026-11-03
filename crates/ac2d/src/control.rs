@@ -589,7 +589,7 @@ impl Control {
         }
     }
 
-    pub(crate) fn run(mut self, rx: &Receiver<ControlMsg>) {
+    pub(crate) fn run(mut self, rx: &Receiver<ControlMsg>) -> crate::Ended {
         self.sync_levels_policy();
         self.load_rig_meas();
         self.start_autosave();
@@ -601,7 +601,7 @@ impl Control {
         if let Some(e) = self.notify.ready() {
             tracing::warn!("systemd notification failed: {e}");
         }
-        loop {
+        let ended = loop {
             let now = Instant::now();
             if self
                 .autosave
@@ -769,13 +769,16 @@ impl Control {
                 }
                 Ok(ControlMsg::Fatal(why)) => {
                     tracing::error!("fatal: {why}");
-                    break;
+                    break crate::Ended::Fatal(why);
                 }
-                Ok(ControlMsg::Shutdown) | Err(RecvTimeoutError::Disconnected) => break,
+                Ok(ControlMsg::Shutdown) | Err(RecvTimeoutError::Disconnected) => {
+                    break crate::Ended::Stopped;
+                }
                 Err(RecvTimeoutError::Timeout) => {}
             }
-        }
+        };
         self.shutdown();
+        ended
     }
 
     /// A state file found damaged (logged already); clients see it with the next

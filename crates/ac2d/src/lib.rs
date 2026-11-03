@@ -47,6 +47,7 @@ mod detect;
 mod fanout;
 mod firewall;
 mod health;
+pub mod instance;
 mod io;
 mod jobs;
 pub mod keys;
@@ -160,7 +161,7 @@ pub struct Handle {
     ctx: Context,
     server_key: Option<PublicKey>,
     tx: Sender<ControlMsg>,
-    control: Option<JoinHandle<()>>,
+    control: Option<JoinHandle<Ended>>,
     io: Option<JoinHandle<()>>,
     advert: Option<ac2_discovery::Advertiser>,
     /// Held for the daemon's lifetime: frame hand-offs, publish gaps and job timers are all
@@ -176,6 +177,16 @@ impl fmt::Debug for Handle {
             .field("data", &self.data)
             .finish_non_exhaustive()
     }
+}
+
+/// How a daemon's run ended, as [`Handle::wait`] reports it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Ended {
+    /// An orderly stop: [`Stopper::stop`], [`Handle::shutdown`] or the handle dropped.
+    Stopped,
+    /// The daemon could not go on (its I/O thread failed, its control thread panicked):
+    /// why, as logged. A supervisor must be able to tell this from a stop it asked for.
+    Fatal(String),
 }
 
 /// Asks a running daemon to shut down; cheap to clone, usable from any thread (signal
@@ -235,9 +246,11 @@ impl Handle {
         Stopper(self.tx.clone())
     }
 
-    /// Blocks until the daemon has stopped (after [`Stopper::stop`] or a fatal error).
-    pub fn wait(mut self) {
-        self.join();
+    /// Blocks until the daemon has stopped (after [`Stopper::stop`] or a fatal error) and
+    /// says which it was.
+    #[must_use]
+    pub fn wait(mut self) -> Ended {
+        self.join()
     }
 
     /// Shuts the daemon down and waits for it.
@@ -246,17 +259,21 @@ impl Handle {
         self.join();
     }
 
-    fn join(&mut self) {
+    fn join(&mut self) -> Ended {
         // The advert lives as long as the daemon serves: only once control has stopped
         // does the goodbye go out, still before the sockets close, so browsers drop the rig
         // at once.
-        if let Some(t) = self.control.take() {
-            let _ = t.join();
-        }
+        let ended = match self.control.take() {
+            Some(t) => t
+                .join()
+                .unwrap_or_else(|_| Ended::Fatal("the control thread panicked".into())),
+            None => Ended::Stopped,
+        };
         self.advert = None;
         if let Some(t) = self.io.take() {
             let _ = t.join();
         }
+        ended
     }
 }
 
@@ -571,5 +588,41 @@ fn advertise(
             );
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    fn start(name: &str) -> Handle {
+        let listen = Listen::Inproc {
+            name: format!("{name}-{}", std::process::id()),
+        };
+        Daemon::start(DaemonConfig::new(
+            Arc::new(fake_rig().unwrap()),
+            listen,
+            -10.0,
+        ))
+        .unwrap()
+    }
+
+    /// No fake-backend run reaches the io thread's fatal paths (an internal message part
+    /// that cannot be made, a dead ZAP handler), so its message is sent here as the io
+    /// thread sends it: `wait` must tell it from a stop, which `ac2d` exits 1 on.
+    #[test]
+    fn a_fatal_end_is_not_a_stop() {
+        let h = start("fatal");
+        h.tx.send(ControlMsg::Fatal("the io thread failed".into()))
+            .unwrap();
+        assert_eq!(h.wait(), Ended::Fatal("the io thread failed".into()));
+    }
+
+    #[test]
+    fn a_stop_is_an_orderly_end() {
+        let h = start("stopped");
+        h.stopper().stop();
+        assert_eq!(h.wait(), Ended::Stopped);
     }
 }

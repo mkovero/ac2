@@ -16,6 +16,9 @@ Type=simple
 ExecStart=@BINDIR@/ac2d
 Restart=on-failure
 RestartSec=2
+# Exit 3: another ac2d already serves this user (one the app or `ac2 daemon start` began);
+# the unit ends inactive instead of restarting into the start limit.
+SuccessExitStatus=3
 # The audio callback thread asks for real-time priority; rtkit or limits.conf grant it.
 LimitRTPRIO=95
 LimitMEMLOCK=infinity

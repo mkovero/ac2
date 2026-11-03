@@ -156,7 +156,9 @@ There are three ways; pick one.
   the app.
 - **A per-user daemon** that the app and the CLI share: `systemctl --user enable --now ac2d`
   (Linux), or `ac2 daemon start` on any OS (`ac2 daemon stop` stops it). The app connects to
-  it automatically. It autosaves measurements and traces and restores them, disarmed, when it
+  it automatically. One runs per user: a second `ac2d` on the default endpoints exits with
+  code 3 (*another ac2d is running for this user*) and touches nothing; one given its own
+  `--ctrl/--data` is a separate daemon. It autosaves measurements and traces and restores them, disarmed, when it
   restarts; the top bar says *autosaved just now* (or why it failed). `ac2d --no-restore`
   starts empty, `--autosave <dir>` keeps the autosave elsewhere, `--no-autosave` keeps
   everything in memory only ([user guide](user-guide.md#autosave)).

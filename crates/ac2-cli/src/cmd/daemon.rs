@@ -136,15 +136,13 @@ pub(crate) async fn status(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError>
     Ok(())
 }
 
-/// A quick probe: hello with a short deadline.
+/// `ac2d`'s exit code when another `ac2d` already serves this user's default local
+/// endpoints (`ac2d::instance::exit::ANOTHER_RUNNING`).
+const EXIT_ANOTHER_RUNNING: i32 = 3;
+
+/// A quick probe: hello with a short deadline. Only an answer counts: a `ctrl.sock` left
+/// by a crashed daemon is still there, and a daemon may be up before its socket is seen.
 async fn probe(cli: &Cli) -> Option<Client> {
-    #[cfg(unix)]
-    if !ac2_client::endpoint::runtime_dir()
-        .join("ctrl.sock")
-        .exists()
-    {
-        return None;
-    }
     let (mut cfg, _) = target(cli).ok()?;
     cfg.mirror = false;
     cfg.retry = Retry {
@@ -227,21 +225,29 @@ async fn start(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
         .map_err(|e| CliError::Usage(format!("cannot start {}: {e}", exe.display())))?;
     let pid = child.id();
     let deadline = Instant::now() + Duration::from_secs(10);
+    // Set once the child lost the instance lock to a daemon that did not answer the probe
+    // above (one still starting, or hung): that one is waited for instead.
+    let mut lost_lock = false;
     let c = loop {
-        if let Ok(Some(st)) = child.try_wait() {
-            return Err(CliError::NotRunning(format!(
-                "{} exited at start ({st}); run it in a terminal to see why",
-                exe.display()
-            )));
+        if !lost_lock && let Ok(Some(st)) = child.try_wait() {
+            if st.code() != Some(EXIT_ANOTHER_RUNNING) {
+                return Err(CliError::NotRunning(format!(
+                    "{} exited at start ({st}); run it in a terminal to see why",
+                    exe.display()
+                )));
+            }
+            lost_lock = true;
         }
         if let Some(c) = probe(cli).await {
             break c;
         }
         if Instant::now() > deadline {
-            return Err(CliError::NotRunning(format!(
-                "{} (pid {pid}) did not answer within 10 s",
-                exe.display()
-            )));
+            return Err(CliError::NotRunning(if lost_lock {
+                "another ac2d is running for this user, but it did not answer within 10 s"
+                    .to_owned()
+            } else {
+                format!("{} (pid {pid}) did not answer within 10 s", exe.display())
+            }));
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
@@ -249,6 +255,17 @@ async fn start(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
     let session = expect_body!("session.status", r, ReplyBody::Session(s) => s)?;
     let st = super::state(&c).await?;
     let mut j = status_json(&c, &session, &st, true);
+    if lost_lock {
+        j["started"] = json!(false);
+        j["already_running"] = json!(true);
+        out.emit(&j, || {
+            format!(
+                "another ac2d is running for this user\n{}",
+                status_text(&c, &session, &st, true)
+            )
+        })?;
+        return Ok(());
+    }
     j["started"] = json!(true);
     j["pid"] = json!(pid);
     j["exe"] = json!(exe);
@@ -330,6 +347,14 @@ async fn stop(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exit_code_matches_the_daemon() {
+        assert_eq!(
+            EXIT_ANOTHER_RUNNING,
+            i32::from(ac2d::instance::exit::ANOTHER_RUNNING)
+        );
+    }
 
     #[test]
     fn build_ids() {

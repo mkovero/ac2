@@ -2446,6 +2446,7 @@ restarts, and `ac2 status` prints a `damaged` line for each file with what was d
 | `ac2d --no-restore` | starts empty |
 | `--autosave <dir>` | puts the autosave elsewhere (one daemon per directory) |
 | `--no-autosave` | keeps everything in memory only |
+| `--ephemeral` | keeps nothing (a simulated rig): no autosave, calibrations, rig settings, plans, rig logs or recordings, a new rig id each start; logs to `ac2d-sim.log` |
 
 ### Watchdogs under systemd
 

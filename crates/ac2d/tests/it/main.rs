@@ -35,6 +35,7 @@ mod rig_meas;
 mod server;
 mod sessions;
 mod sim;
+mod spawn;
 mod stimulus;
 mod sweep;
 mod sweep_inputs;

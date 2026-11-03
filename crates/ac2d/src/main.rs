@@ -1,21 +1,43 @@
 //! `ac2d`: the ac2 daemon.
 
+use std::io::Read;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use clap::Parser;
 
+use ac2d::instance::{Instance, LockError, exit};
 use ac2d::{
-    Advertise, AutosaveConfig, BackendChoice, Daemon, DaemonConfig, Listen, NetworkSecurity,
-    RigIdSource,
+    Advertise, AutosaveConfig, BackendChoice, Daemon, DaemonConfig, Ended, Listen, NetworkSecurity,
+    RigIdSource, Stopper,
 };
+
+/// Stores whose defaults live in the config and data dirs: `--ephemeral` keeps none.
+const STORES: [&str; 10] = [
+    "settings",
+    "rig_logs",
+    "cal_store",
+    "plans",
+    "autosave",
+    "no_restore",
+    "no_autosave",
+    "recordings",
+    "key_file",
+    "authorized",
+];
+
+/// A stdin that ends sooner than this after start was never a pipe a parent holds (a
+/// terminal's `</dev/null`, a service manager's null stdin): the flag was misused.
+const EARLY_EOF: Duration = Duration::from_secs(1);
 
 /// The ac2 daemon.
 ///
 /// With no options: local mode (ipc in the runtime dir; loopback TCP on Windows), on this
 /// platform's audio: JACK on Linux (JACK2, or PipeWire through pipewire-jack), Core Audio
-/// on macOS, ASIO on Windows.
+/// on macOS, ASIO on Windows. On those default endpoints one ac2d runs per user: a second
+/// exits with code 3 and touches nothing.
 #[derive(Debug, Parser)]
 #[command(
     name = "ac2d",
@@ -23,7 +45,11 @@ use ac2d::{
     version = concat!(env!("CARGO_PKG_VERSION"), " (build ", env!("AC2_BUILD_ID"), ")"),
     after_help = "Logging: RUST_LOG (default warn,ac2=info) to stderr; when not started by \
                   systemd (which keeps stderr in the journal) also to ac2d.log in the ac2 log \
-                  directory (~/.local/state/ac2 on Linux), the previous run's kept as ac2d.log.1."
+                  directory (~/.local/state/ac2 on Linux), the previous run's kept as ac2d.log.1 \
+                  (ac2d-sim.log with --ephemeral).\n\n\
+                  Exit codes: 0 stopped in order, 1 failed to start or ended on a fatal error, \
+                  2 unusable arguments or instance lock, 3 another ac2d is running for this user \
+                  (on the default local endpoints, which take a lock in the runtime directory)."
 )]
 struct Args {
     /// Audio backend: jack (Linux), coreaudio (macOS) or asio (Windows), the platform's
@@ -92,6 +118,19 @@ struct Args {
     /// ~/.local/share/ac2 on Linux).
     #[arg(long, value_name = "DIR")]
     recordings: Option<PathBuf>,
+    /// Keep nothing: a random rig id and no autosave, calibration store, rig settings,
+    /// plans, rig logs or recordings; nothing read or written in the ac2 config and data
+    /// directories (local mode only). Logs to ac2d-sim.log.
+    #[arg(long, conflicts_with_all = STORES, conflicts_with = "listen")]
+    ephemeral: bool,
+    /// Print the endpoints as bound on one stdout line, `ac2d: listening ctrl=… data=…`
+    /// (a `tcp://127.0.0.1:0` request shows its real port).
+    #[arg(long)]
+    print_endpoints: bool,
+    /// Stop in order when stdin reaches its end: for a parent holding a pipe on this
+    /// process's stdin, whose exit (or crash) closes it.
+    #[arg(long)]
+    stop_on_stdin_eof: bool,
 }
 
 /// `-50` or `-50dbfs`.
@@ -101,13 +140,39 @@ fn max_level(v: &str) -> Result<f64, String> {
 }
 
 fn main() -> ExitCode {
+    let started = Instant::now();
     let args = Args::parse();
+    let listen = match listen(&args) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("ac2d: {e}");
+            return ExitCode::from(exit::SETUP);
+        }
+    };
+    // First of all, so a second daemon leaves the log, the audio and the sockets alone.
+    let default_local = args.listen.is_none() && args.ctrl.is_none();
+    let mut instance = if default_local {
+        match Instance::lock(&ac2d::runtime_dir()) {
+            Ok(i) => Some(i),
+            Err(e @ LockError::Held(_)) => {
+                eprintln!("ac2d: {e}");
+                return ExitCode::from(exit::ANOTHER_RUNNING);
+            }
+            Err(e @ LockError::Io(..)) => {
+                eprintln!("ac2d: {e}");
+                return ExitCode::from(exit::SETUP);
+            }
+        }
+    } else {
+        None
+    };
     // systemd sets JOURNAL_STREAM when stderr goes to the journal, which already keeps and
     // rotates the log; a second copy on disk would only grow.
     let file_dir = std::env::var_os("JOURNAL_STREAM")
         .is_none()
         .then(ac2_paths::log_dir);
-    if let Some(path) = ac2_paths::log::init_in(file_dir.as_deref(), "ac2d") {
+    let log_name = if args.ephemeral { "ac2d-sim" } else { "ac2d" };
+    if let Some(path) = ac2_paths::log::init_in(file_dir.as_deref(), log_name) {
         tracing::info!(
             "ac2d {}: logging to {}",
             env!("CARGO_PKG_VERSION"),
@@ -120,10 +185,54 @@ fn main() -> ExitCode {
         Ok(b) => b,
         Err(e) => {
             eprintln!("ac2d: {e}");
-            return ExitCode::from(2);
+            return ExitCode::from(exit::SETUP);
         }
     };
-    let listen = match (&args.listen, &args.ctrl, &args.data) {
+    let config = config(&args, backends, listen);
+    let handle = match Daemon::start(config) {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("ac2d: {e}");
+            return ExitCode::from(exit::FATAL);
+        }
+    };
+    // `ac2 daemon stop` reads this and sends SIGTERM (taskkill on Windows).
+    if let Some(i) = &mut instance
+        && let Err(e) = i.write_pid()
+    {
+        tracing::warn!("cannot write {}: {e}", i.pid_file().display());
+    }
+    if args.print_endpoints {
+        println!(
+            "ac2d: listening ctrl={} data={}",
+            handle.ctrl_endpoint(),
+            handle.data_endpoint()
+        );
+    }
+    let stopper = handle.stopper();
+    // SIGINT, SIGTERM and SIGHUP (console close on Windows): orderly shutdown with fade-out.
+    let on_signal = stopper.clone();
+    if let Err(e) = ctrlc::set_handler(move || on_signal.stop()) {
+        tracing::warn!("no signal handler: {e}");
+    }
+    if args.stop_on_stdin_eof
+        && let Err(e) = stop_on_stdin_eof(stopper, started)
+    {
+        // Serving on would outlive the parent the flag ties this daemon to.
+        tracing::error!("cannot watch stdin: {e}");
+        handle.shutdown();
+        return ExitCode::from(exit::FATAL);
+    }
+    let ended = handle.wait();
+    drop(instance);
+    match ended {
+        Ended::Stopped => ExitCode::SUCCESS,
+        Ended::Fatal(_) => ExitCode::from(exit::FATAL),
+    }
+}
+
+fn listen(args: &Args) -> Result<Listen, String> {
+    match (&args.listen, &args.ctrl, &args.data) {
         (Some(l), None, None) => {
             let sec = NetworkSecurity {
                 server_key_file: args.key_file.clone().unwrap_or_else(ac2_paths::server_key),
@@ -132,24 +241,18 @@ fn main() -> ExitCode {
                     .clone()
                     .unwrap_or_else(ac2_paths::authorized_clients),
             };
-            match Listen::network(l, sec) {
-                Ok(l) => l,
-                Err(e) => {
-                    eprintln!("ac2d: {e}");
-                    return ExitCode::from(2);
-                }
-            }
+            Listen::network(l, sec).map_err(|e| e.to_string())
         }
-        (None, None, None) => Listen::default_local(),
-        (None, Some(c), Some(d)) => Listen::Local {
+        (None, None, None) => Ok(Listen::default_local()),
+        (None, Some(c), Some(d)) => Ok(Listen::Local {
             ctrl: c.clone(),
             data: d.clone(),
-        },
-        _ => {
-            eprintln!("ac2d: use either --listen, or both --ctrl and --data");
-            return ExitCode::from(2);
-        }
-    };
+        }),
+        _ => Err("use either --listen, or both --ctrl and --data".into()),
+    }
+}
+
+fn config(args: &Args, backends: Vec<Arc<dyn ac2_audio::Backend>>, listen: Listen) -> DaemonConfig {
     let advertise = (listen.is_network() && !args.no_mdns).then(|| Advertise {
         mdns: ac2_discovery::Options::default(),
     });
@@ -158,9 +261,13 @@ fn main() -> ExitCode {
     if let Some(name) = &args.name {
         config.name.clone_from(name);
     }
-    config.rig_id = RigIdSource::File(ac2_paths::rig_id());
     config.systemd_notify = true;
     config.advertise = advertise;
+    if args.ephemeral {
+        // `DaemonConfig::new` keeps nothing: an ephemeral id and every store off.
+        return config;
+    }
+    config.rig_id = RigIdSource::File(ac2_paths::rig_id());
     config.cal_store = Some(args.cal_store.clone().unwrap_or_else(ac2_paths::cal_store));
     config.plan_dir = Some(args.plans.clone().unwrap_or_else(ac2_paths::plan_dir));
     config.rig_settings = Some(
@@ -181,29 +288,36 @@ fn main() -> ExitCode {
             .clone()
             .unwrap_or_else(ac2_paths::recording_dir),
     );
-    let handle = match Daemon::start(config) {
-        Ok(h) => h,
-        Err(e) => {
-            eprintln!("ac2d: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    // `ac2 daemon stop` reads this and sends SIGTERM (taskkill on Windows).
-    let pid_file = ac2d::pid_file();
-    if let Err(e) =
-        ac2_paths::write_private_atomic(&pid_file, format!("{}\n", std::process::id()).as_bytes())
-    {
-        tracing::warn!("cannot write {}: {e}", pid_file.display());
-    }
-    let stopper = handle.stopper();
-    // SIGINT, SIGTERM and SIGHUP (console close on Windows): orderly shutdown with fade-out.
-    if let Err(e) = ctrlc::set_handler(move || stopper.stop()) {
-        tracing::warn!("no signal handler: {e}");
-    }
-    handle.wait();
-    if std::fs::read_to_string(&pid_file).is_ok_and(|s| s.trim() == std::process::id().to_string())
-    {
-        let _ = std::fs::remove_file(&pid_file);
-    }
-    ExitCode::SUCCESS
+    config
+}
+
+/// Reads stdin to its end on a thread of its own, then stops the daemon in order: the
+/// parent holding the pipe has let go or died.
+fn stop_on_stdin_eof(stopper: Stopper, started: Instant) -> std::io::Result<()> {
+    std::thread::Builder::new()
+        .name("ac2d-stdin".into())
+        .spawn(move || {
+            let mut buf = [0u8; 256];
+            let mut stdin = std::io::stdin().lock();
+            let why = loop {
+                match stdin.read(&mut buf) {
+                    Ok(0) => break "closed".to_owned(),
+                    Ok(_) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(e) => break format!("unreadable ({e})"),
+                }
+            };
+            let after = started.elapsed();
+            if after < EARLY_EOF {
+                tracing::error!(
+                    "stdin {why} {} ms after start: --stop-on-stdin-eof is for a parent \
+                     holding a pipe on stdin; stopping",
+                    after.as_millis()
+                );
+            } else {
+                tracing::info!("stdin {why}: stopping");
+            }
+            stopper.stop();
+        })
+        .map(drop)
 }
