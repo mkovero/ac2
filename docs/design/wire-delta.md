@@ -1,13 +1,13 @@
 # Wire delta: send only what changed
 
-Status: design (2026-11-03), not built. Operator: lean network protocols come first, "we are
-after all sending processed audio information over network with reasonably small sample and
-bitrates, shouldn't be rocket science"; send only what changed, as video codes inter frames.
-PROTO bumps are free pre-1.0; no interim fixes, no compatibility. Builds on
-[`wire-slim.md`](wire-slim.md) (16-bit codes, deflate) and implements
-[`flow-control.md`](flow-control.md) (credit pacing), which W1 needs. Revisits wire-slim's
-"Deltas against the previous frame" (`wire-slim.md:139`): it was right that deltas need
-keyframes and per-client state; this note supplies both. Decisions W1–W12 are listed at the end.
+Status: design (2026-11-03, review round 1), not built. Operator: lean network protocols come
+first, "we are after all sending processed audio information over network with reasonably
+small sample and bitrates, shouldn't be rocket science"; send only what changed, as video
+codes inter frames. Operator decisions: (a) build both, deltas first: stage A deltas over
+today's XPUB/SUB, then flow control ([`flow-control.md`](flow-control.md)) in the same round,
+before one deploy; (b) no per-kind rate caps: decision 2b stands; (c) PROTO bumps are free,
+no compatibility. Builds on [`wire-slim.md`](wire-slim.md) and revisits its "Deltas against
+the previous frame" (`wire-slim.md:139`). Decisions W1–W12 are listed at the end.
 
 ## Measured
 
@@ -29,10 +29,12 @@ Trials on the dump (exact deltas unless said; level-1 raw deflate per frame):
 | per frame, B | `tf` | `d/4/tf` | `ir` | `spec` 65 536 | `spec` 4 096 | `rta` |
 |---|---|---|---|---|---|---|
 | today's payload | 2 173 | 4 155 | 12 913 | 1 467 | 903 | 83 |
-| delta against the last frame | 1 201 | 2 808 | 10 202 | 1 354 | 879 | 62 |
-| delta, dead band ±0.02 dB, ±0.0005 γ², phase 0 | 1 162 | 2 636 | — | 1 354 | 880 | 62 |
-| delta, dead band ±0.05 dB, ±0.001 γ², phase 0 | 1 127 | 2 506 | — | 1 347 | 878 | 62 |
-| delta over two frames (half rate) | 1 641 | 3 371 | 12 485 | | 906 | |
+| delta against the previous frame | 1 201 | 2 808 | 10 202 | 1 354 | 879 | 62 |
+| chain + keyframe every 16 | 1 278 | 2 880 | | | | |
+| chain + keyframe every 32 | 1 249 | 2 842 | | | | |
+| delta against the last keyframe, K = 16 | 1 920 | 3 659 | | | | |
+| delta over two frames | 1 641 | 3 371 | 12 485 | | 906 | |
+| dead band ±0.02 dB, ±0.0005 γ², phase 0 | 1 162 | 2 636 | | 1 354 | 880 | 62 |
 | one deflate stream per topic | 1 389 | 3 308 | 10 527 | 1 440 | 893 | 61 |
 | delta + stream | 1 224 | 2 854 | | | | |
 
@@ -42,16 +44,16 @@ What these say:
   columns a deeper MTW stage serves repeat bit for bit until that stage hops: on `d/1/tf`
   ≈ 80 % of frames leave a column of the lowest stage unchanged, ≈ 60 % of the middle stage,
   ≈ 17 % of the full-rate stage. A real rig repeats them just as often.
-- **Spectra and the IR barely delta** (−3…−21 %): every frame is a fresh FFT or a fresh
-  inverse FFT, the noise floor new in every sample. Over two frames the IR's delta is as big
-  as the frame itself.
-- **A dead band buys 3–6 % on fake-rig noise**, whose frame-to-frame steps are well above
-  any honest band. A settled real curve steps by less; unmeasured (open question 1).
+- **Only a chain works.** A delta grows fast with distance (`tf`: 1 201 B one frame back,
+  1 923 B four back, 2 032 B sixteen back), so deltas against the last keyframe keep only
+  −12…−21 %. A chain against the previous frame with a keyframe every 16 keeps 92 % of the
+  chain's gain (972 → 895 B saved per `tf` frame), every 32 keeps 95 %.
+- **Spectra and the IR barely delta** (−3…−21 %): every frame is a fresh FFT or inverse FFT.
+- **A dead band buys 3–6 % on fake-rig noise**; a settled real curve is unmeasured.
 - **A persistent stream and a delta find the same redundancy**; together they gain nothing.
-  On small topics the stream's gain is the header repeating, which W2 removes outright.
-- **Headers are 115–297 B, of which ≈ 80 % never changes** within a topic: `tf` 185 B =
-  array descriptors 69, meta 69 (only `filled` moves), incarnation 9, grid 9, …; the
-  per-frame part (seq, audio sample, wall clock, protection, `filled`) is ≈ 25 B.
+- **Headers are 115–297 B, ≈ 85 % of it unchanged** within a topic: `tf` 185 B = array
+  descriptors 69, meta 69 (only `filled` moves), incarnation 9, grid 9, …; the per-frame part
+  (seq, audio sample, wall clock, protection, `filled`) is ≈ 25 B.
 
 ## Today's wire, as it bears on deltas
 
@@ -59,246 +61,224 @@ What these say:
   `encode_frame`), stateless per frame (`ac2-proto/src/frame/encode.rs:52-246`; header
   `:209-224`; one deflated payload part `:242`, level 1 `packing.rs:39`).
 - **Conflation**: the I/O thread keeps the newest encoded frame per topic and replaces an
-  unsent one (`ac2d/src/io.rs:274-292`), at most one per publish period. So `seq` (per topic,
-  `jobs/mod.rs:131`) is never contiguous on the wire: a delta must name its base.
-- **XPUB, `SNDHWM` 48** (`io.rs:85-99`, `lib.rs:308-309`, verbose subscriptions). A peer at
-  its high-water mark silently loses the newest message (`io.rs:362-369`); the daemon cannot
-  know which peer missed what. No back channel except subscription messages.
-- **Late joiner**: a subscription sends every matching slot at once (`io.rs:200-212`), on an
-  XPUB to *every* peer of that topic, not only the newcomer.
-- **Client**: drains the socket and decodes only the newest message per topic
-  (`ac2-client/src/data.rs:240-275`); STALE after 1 s without a new frame
-  (`data.rs:28-29`), drawn dimmed (`ac2-scene/src/theme.rs:68-69`, decision 2a).
-- **Captures are daemon-side**: Ctrl+1…9 sends `trace.capture` (`ac2-ui/src/conn/request.rs:450-468`)
-  and the daemon forms the trace from its f32 analysis (`wire-slim.md`, *What stays full
-  precision*). Peak hold and the spectrograph fold received frames in the app.
-- **Pacing**: `Pace` per topic (`jobs/mod.rs:160-235`): on a new result, on a protection
-  change, and every `REFRESH` 250 ms while unchanged. Only `spl` has a rate cap
-  (`jobs/spl.rs:278`); `tf`, `ir`, `spec`, `rta` go at the I/O thread's publish rate
-  (`transfer.rs:266-267`, `spectrum.rs:263`, `rta.rs:110`); the average at its operands'
-  pace (`jobs/math/pace.rs:1-19`).
+  unsent one (`ac2d/src/io.rs:274-292`). So `seq` (`jobs/mod.rs:131`) is never contiguous on
+  the wire: a delta names its base.
+- **XPUB, `SNDHWM` 48** (`io.rs:85-99`, `lib.rs:308-309`). A peer at its high-water mark
+  silently loses the newest message (`io.rs:362-369`); the daemon cannot know who missed what.
+- **Late joiner**: a subscription re-sends every matching slot (`io.rs:200-212`), on an XPUB
+  to every peer of that topic.
+- **Client**: decodes only the newest message per topic (`ac2-client/src/data.rs:240-275`);
+  STALE 1 s after `Kept.received` (`data.rs:28-29`, `:58`), drawn dimmed
+  (`ac2-scene/src/theme.rs:68-69`, decision 2a).
+- **Captures are daemon-side**: Ctrl+1…9 sends `trace.capture`
+  (`ac2-ui/src/conn/request.rs:450-468`), formed from the f32 analysis. Peak hold and the
+  spectrograph fold received frames in the app.
+- **Pacing**: `Pace` per topic (`jobs/mod.rs:160-235`): on a new result, a protection
+  change, and every `REFRESH` 250 ms while unchanged.
 
-## 1. Transport (W1)
+## Stage A: chain deltas over the XPUB (W1–W8)
 
-**W1. The data socket becomes ROUTER (daemon) / DEALER (client) with credit pacing,
-exactly as [`flow-control.md`](flow-control.md).** A delta is only as good as the daemon's
-knowledge of what each peer holds. Over a ROUTER the daemon itself decides, per peer, which
-frame goes; on a live TCP connection nothing queued is lost; credit keeps the queue at W ≈ 4,
-so `ROUTER_MANDATORY` never meets the high-water mark. The DEALER is the back channel the
-XPUB lacks: credit, join (the topic prefixes, sent again after every reconnect), resync.
-Keeping the XPUB would mean a slow peer's silent drops become constant gaps, each answered
-by a keyframe sent to all peers: the Wi-Fi kiosk would degrade everyone's wire. The ctrl
-ROUTER could carry a resync command, but it is another peer identity (mapping it to a data
-peer needs a binding) and queues behind replies; the data DEALER needs neither.
+**W1. One chain per topic, shared by all peers, built in the I/O thread at send time.** The
+base of a delta is the last frame of that topic actually handed to libzmq, so conflation
+(`io.rs:274-292`) never breaks the chain: a frame replaced in its slot was never a base. The
+job quantises to codes (half the encode cost, still on its thread) and hands codes to the
+I/O thread, which forms keyframe or delta and deflates. Cost at `roundtrip::codec_cost`
+(37 µs per `tf` encode, 165 µs per IR) for this session at today's rates: ≈ 11 ms per second,
+≈ 1 % of a Threadripper core, ≈ 2 % on pupu, 4–5 % on a CM4, once for all peers. If the
+I/O thread runs late, an encode worker beside it is the escape hatch, not the jobs.
 
-## 2. Frames: context, intra, delta (W2–W4)
+**W2. Two forms; header and payload in one part, the topic part stays.** A *keyframe* is
+today's full header and intra payload. A *delta* has a short header (positional msgpack,
+≈ 30 B): `v`, `seq`, `base` (absolute u64 `seq`), `audio_sample`, `capture_wall_ns`,
+`protection`, `crc`, and the kind's per-frame meta (`filled` for `tf`, the readings for
+`spl`; fixed per kind in `ac2-proto`, `META` in `tools/protocol` the same). Everything else
+(`kind`, incarnation, epoch, `config_rev`, `config_applied_at`, `grid_id`, `n`, `arrays`,
+static meta) is taken from the keyframe the chain started from. The topic stays the first
+part for SUB filtering; header and payload become one part, which saves one part's framing
+(CURVE ≈ 33 B, ZMTP 2–9 B, `wire-slim.md`): ≈ 0.09 Mbit/s for this session.
 
-**W2. A topic context per peer, then one-part frames.** On join, on resync and whenever a
-static field changes, the daemon sends the peer a `ctx` message for the topic: today's full
-header minus the per-frame fields (`v`, `kind`, incarnation, epoch, `config_rev`,
-`config_applied_at`, `grid_id`, `n`, `arrays`, the static meta) plus a `u16` handle and a
-`ctx_rev`. Every frame of the topic is then a single part: handle, short header, payload.
-Short header (positional msgpack, ≈ 25–35 B): `seq`, `base` (nil = intra, else the base
-`seq`'s distance back), `audio_sample`, `capture_wall_ns`, `protection`, `crc` (CRC-32 of
-the frame's codes after decoding), and the kind's *frame meta*: `filled` for `tf`, the
-readings for `spl`, nothing for most. Which meta fields are static is fixed per kind in
-`ac2-proto` (`HEADER`/`META` in `tools/protocol` the same); a change of a static one is a new
-context. The topic string stops travelling: the daemon filters per peer, so it is no longer
-a ZMQ prefix part. Under CURVE each part costs ≈ 33 B more (`wire-slim.md`), so one part
-instead of three also saves ≈ 65 B per frame on the wire, ≈ 0.18 Mbit/s for this session.
+**W3. Delta payload.** Per array: `i16`/`u16` codes minus the base's codes modulo 2¹⁶ (phase
+wrapped to ±18 000), 0 unchanged, the same low/high byte planes; `u32` bitmasks XOR the
+base; `bfp16` as a mantissa delta only when the base has the same exponent, otherwise that
+array intra inside the delta; `f32` (meters, Leq) intra. When the delta is not smaller than
+intra the frame goes as a keyframe, so spectra and most IR frames stay keyframes on their own.
 
-**W3. Payload intra or delta, chosen per frame by size.** Intra is today's payload. Delta is
-per array: `i16`/`u16` codes minus the base's codes modulo 2¹⁶ (phase wrapped to
-±18 000), 0 for unchanged, in the same low/high byte planes; `u32` bitmasks XOR the base;
-`bfp16` as a delta of mantissas only when the base has the same exponent, otherwise that
-array goes intra inside the delta; `f32` (meters, Leq) always intra: they are header-sized
-noise. The encoder sends the smaller of the two (as a video encoder picks an intra block), so
-spectra and the IR stay intra by themselves and no kind is special-cased.
+**W4. Keyframes:** every ≈ 0.5 s of wall time per topic; on a subscription, instead of today's
+slot re-send (`io.rs:200-212`); on a change of any static field or of the epoch; on
+`TAG_CLEAR`; when the base does not fit (another `n`, grid or array set); and on
+`Command::DataKeyframe { topic }` (`data.keyframe`, a serde variant on ctrl like
+`trace.capture`) from any client, at most one per topic per 250 ms whoever asks. Over the
+XPUB a keyframe goes to every peer of the topic: a join costs each of them one keyframe per
+matching topic (≈ 29 kB for this session, once). The interval is set by recovery: a client
+that lost a delta and could not ask still draws again within 0.5 s, half the STALE threshold,
+so a single loss never dims a pane. At ≈ 28 frames/s that is a keyframe every ≈ 14 frames:
+7 % of `tf` frames, 92–94 % of the chain's gain kept.
 
-**W4. Bases are frames the peer was sent; one encode per distinct base.** The I/O thread
-keeps per topic a ring of the last W (= the credit window) sent frames' codes, shared
-(`Arc`), and per peer the last `seq` it sent on the topic. A peer whose last `seq` is in the
-ring gets the delta from it, cached by (topic, base) so peers in step share one encode; any
-other peer gets intra. Encoding therefore moves out of `Emitter::send`: the job quantises to
-codes (half the cost, still on its thread) and the I/O thread deltas and deflates at send,
-the only place that knows the bases. Cost at today's `roundtrip::codec_cost` (≈ 37 µs per
-`tf` encode, 165 µs per IR): ≈ 1 % of a core per distinct base for this session, the IR at
-15/s (W9) included; pupu ≈ 2 %, a CM4 3–4 %. If profiling shows the I/O thread late, the
-encode goes to a worker beside it, not back to the jobs.
+**W5. CRC-32 over the decoded codes, keyframes included.** The arrays' codes in a fixed order
+defined in `ac2-proto` (the kind's array order, each as little-endian code bytes,
+`bfp16` with its exponent byte), not over the deflated bytes: it checks what the client will
+draw. The Python codec computes the same. It catches what no sequence check can (an encoder
+or decoder bug, a chain applied on a frame the client patched).
 
-## 3. Gaps and resync (W5, W6)
+**W6. The client applies frames in order, only on an exact base with a matching CRC.** It
+decodes every message (no more newest-only, `data.rs:240-275`; a delta decodes in about the
+17 µs a frame costs today). A delta whose `base` is not the `seq` it holds, or whose result
+fails `crc`, is refused: the client keeps the last applied frame and asks `data.keyframe`
+once per `REFRESH`. A refused frame never touches `Kept.received`, so STALE (1 s) dims the
+held curve if no keyframe comes: never a wrong curve, and an old one reads as old (decision
+2a, no-misreadable-verdicts). Blanking at once would throw away a true reading for a 50 ms
+hiccup and flicker the pane on every Wi-Fi drop; drawing a delta on the wrong base is the
+only way to show a plausible wrong curve, and the base and CRC checks rule it out.
+Recovery: the next keyframe, ≤ 0.5 s, or one RTT plus one frame after a request.
 
-**W5. A frame applies only onto its exact base; otherwise the client keeps what it has.**
-The client keeps, per topic, the last frame it applied (its codes and `seq`). A frame whose
-base is not that `seq`, whose `ctx_rev` is unknown, or whose result fails `crc` is not
-applied: the client sends `resync(topic)` on the DEALER and keeps showing the last applied
-frame. That frame is a true value with its true capture time, so the existing STALE rule
-(1 s after the last *applied* frame, `data.rs:28-29`) dims it if resync takes longer: never a
-wrong curve, and the operator sees an old one as old (decision 2a, no-misreadable-verdicts).
-Blanking at once would throw away a correct reading for a 50 ms hiccup and flicker the pane
-on every Wi-Fi retry; drawing a delta on the wrong base is the one thing that could show a
-plausible wrong curve, and the base check and CRC make that impossible. The client applies
-every frame in order (no more newest-only decoding, `data.rs:240-275`); decoding a delta costs
-what a decode costs today (≈ 17 µs for `tf`).
+**W7. Exact deltas; the dead band is deferred** until a replayed pupu capture shows ≥ 15 %
+(open question 1). When it comes, its rules: against the reconstructed reference only (a
+column moved by no more than the band goes as 0 and the reference keeps the old code, so a
+slow drift reaches the band and is sent); `mag`/`level` ±0.02 dB, `coh` ±0.0005; **phase 0**
+(±0.02° per column moves the group delay over 1/12 octave by ≈ 100 µs at 20 Hz against a
+0.01 ms readout); never across a coherence-mask threshold; NaN/∞ transitions and bitmask bits
+exact. Captures are daemon-side and unaffected.
 
-**W6. Keyframes: on join, context change, resync, or a base that left the ring; no
-interval.** The resync request is answered with the next frame of the topic as intra
-(ctx first if the client lacks it). Recovery = detection (the next frame, ≤ one period or
-the 250 ms refresh) + one RTT + one frame period: 50–100 ms on Wi-Fi. An interval could only
-beat that by being shorter than three frames, which spends nearly all of W3's gain; any
-longer interval recovers *slower* than the request. On TCP nothing is lost silently except on
-reconnect, which the client sees (unknown base or `ctx_rev`) and answers with a join; the CRC
-catches what no sequence check can (an encoder or decoder bug). The client re-sends a
-resync not answered within `REFRESH`. So the interval is "never", by recovery latency, and
-the lossy-link test (§8) holds the latency to it.
+**W8. Per-frame deflate, no persistent stream.** A stream finds the same redundancy as the
+chain (−40 % on `tf` against −45 %, nothing more together), and its small-topic gain is the
+header W2 shortens. It would add a 32 kB window and compressor state per topic (per peer in
+stage C) and the same gap problem, with no way to share encodes between peers.
 
-## 4. Dead band (W7)
+## Stage B: the range band (W9)
 
-**W7. Deltas are exact in the stages that land first; a dead band comes only if replayed
-real sessions show it pays (open question 1), and then on these rules:**
+**W9. `range_lo`/`range_hi` as `i16` offsets from the same column's `mag`, `range_coh` as
+`u8` hundredths** (`floor(γ² × 100)`, 255 = NaN). `range_coh` is only ever compared with the
+coherence mask (`ac2-scene/src/range_band.rs:44-57`); floor keeps that comparison exact for
+any threshold in hundredths (0.2996 reads 0.29 and stays masked at 0.3), and the mask steps
+stay app policy, not protocol. On the dump the average's intra payload falls 4 155 → ≈ 3 740 B
+and its delta 2 808 → 2 605 B (as mask steps it would be 3 330 / 2 488 B; not worth fixing the
+thresholds in the protocol).
 
-- *Physically honest only against the reconstructed reference.* A column whose code moved
-  by no more than the band is sent as 0 and the reference keeps the old code; a slow drift
-  therefore reaches the band, is sent, and is never lost. The ring (W4) then holds the chain
-  of reconstructed references, one chain per topic, so every peer still holds the same codes.
-- *Per quantity, below what any reading resolves:* `mag`/`level` ±2 codes (0.02 dB: a fifth
-  of the 0.1 dB readout, under a pixel at 0.03 dB/px on a 4K 60 dB plot); `coh` ±5 codes
-  (5·10⁻⁴, a twentieth of the 0.01 readout); **phase 0**: the group delay is the phase slope
-  over 1/12 octave, and ±0.02° per column moves it by ≈ 100 µs at 20 Hz against a 0.01 ms
-  readout (`wire-slim.md`, group-delay budget); ETC and IR 0 (their log view resolves less
-  than a code at the floor).
-- *Never across a threshold:* a `coh` change that crosses a `COHERENCE_MASKS` step
-  (`ac2-ui/src/state/msg.rs:297`: 0.3, 0.5, 0.7, 0.9) is always sent, so a masked column is
-  masked as the daemon's value would be; NaN and ±∞ transitions and every bitmask bit are
-  exact.
-- *Captures* are daemon-side already (f32 analysis), so they equal the daemon's value
-  exactly; the screen at the moment of capture is within the band of it. Peak hold and the
-  spectrograph fold received frames and so carry at most the band.
+## Stage C: flow control (W10)
 
-## 5. Compression context (W8)
+**W10. ROUTER (daemon) / DEALER (client) data socket with credit, as flow-control.md, with
+these settled before code:**
 
-**W8. Per-frame deflate, no persistent stream.** A stream finds the same inter-frame
-redundancy as W3 (−40 % on `tf` against −45 %, nothing more together), and its small-topic
-gain is the repeated header W2 removes. It would also make every frame depend on all earlier
-ones: the same gap problem as deltas, but with a 32 kB window and compressor state per peer
-per topic instead of a ring of codes per topic, and no sharing of encodes between peers
-(each peer's stream differs). Deflate stays level 1, raw, as today.
+1. **Credit in bytes.** The client states a window ≥ the largest frame (`IR_FRAME_BUDGET`
+   17 kB, `wire_size.rs:224`); default 64 kB; credits batched (flow-control.md, *Cost*).
+   Message credit caps throughput at W/RTT messages whatever their size: W = 4 at 50 ms is
+   80 messages/s for a session that sends 338, while one IR frame and one `spl` frame would
+   cost the same. Bytes cap it at window/RTT (64 kB / 50 ms ≈ 10 Mbit/s) and bound the delay
+   to window / link rate.
+2. **Credit returned on receipt, not on application.** A refused delta or an old-epoch frame
+   still consumed link; withholding its credit would starve the window.
+3. **Per (peer, topic): an `Arc` to the codes last sent to that peer**; its delta is taken
+   against exactly that, so a slow peer gets deltas over a longer distance, not intra. Encodes
+   are cached by (topic, base `seq`) within one send round, so peers in step share one. No
+   global ring: a slow peer's base would leave a ring of W and it would get only intra.
+   Memory: at most ≈ 0.6 MB per peer (40 topics of an IR's size), mostly `Arc`s shared with
+   peers in step. Stage A's chain becomes this per-peer base; keyframe triggers of W4 stay
+   (the 0.5 s interval per peer, join per peer only, `data.keyframe` per peer).
+4. **Peer lifecycle.** The client never sets a routing id (`socket.rs:388` exists, but a
+   fixed id lets a reconnect inherit stale bases): libzmq generates one per connection, so a
+   reconnect is a new peer whose first join gets keyframes. A gone peer is dropped by
+   `ROUTER_MANDATORY`: its first send fails `EHOSTUNREACH` (item 5). The connection itself
+   is closed by `PEER_LIVENESS` (`ac2d/src/lib.rs:102`; ≤ 8 s idle, 15 s unacknowledged).
+   The socket monitor (`ac2-zmq/src/monitor.rs:47`) reports a disconnect by endpoint, not
+   routing id, so it cannot name the peer; `ZMQ_ROUTER_NOTIFY` would, but it is a draft
+   option in libzmq 4.3 and not bound in `ac2-zmq/src/raw.rs`: not relied on. CURVE and ZAP
+   on the ROUTER as on ctrl (`ac2-zmq/src/zap.rs:290`, `curve_server_socket`).
+5. **`EHOSTUNREACH` means the peer is gone**: drop its state and subscriptions, log once.
+6. **Events and keepalives outside credit, in their own bound** (≤ 256 queued per peer;
+   past it the peer gets `resync_required`, as flow-control.md). Credit buys frames that a
+   newer one can replace; an event cannot be replaced or dropped, and a keepalive must reach
+   a starved peer, so neither may wait for a window that frames fill. They are small (4 `ka`
+   a second, events on change), so the bound costs no budget.
 
-## 6. Rate matched to what is drawn (W9)
+A kiosk on a starved link (2 Mbit/s, IR + `tf` + levels): the daemon rotates over the
+peer's dirty topics, one message each, the newest slot. A round is ≈ 11.6–12.9 kB (IR delta
+10.2 kB one frame back, 12.5 kB two back), so each topic runs at ≈ 19–22 frames/s, and the
+standing delay is at most window / rate = 64 kB / 250 kB/s ≈ 0.26 s.
 
-**W9. A fixed cap per kind, not per view; the link's own limit is credit (W1).**
+## Budget and tests (W11, W12)
 
-- `tf` and the average: at their analysis hop / operands' pace, as now. They are the
-  measurement; deltas (W3) already make the unchanged stages cost nothing.
-- `ir`: **15/s** (`ir_pace`, `transfer.rs:267`). The IR is the inverse FFT of the full-rate
-  stage's *averaged* response, which moves by about one block's share per hop; a picture at
-  15/s lags the stream by ≤ 67 ms, about one and a half of that stage's hops, and the
-  arrival readout depends on the average, not on frame rate. Its delta over two hops is as big as intra, so
-  this halves the IR: 3.0 → 1.5 Mbit/s.
-- `spec`: **30/s**, the spectrograph's slot rate (`ac2-scene/src/spectrograph.rs:44`): two
-  frames in one slot keep only their maximum, and a 4 096-point window (85 ms at 48 kHz)
-  overlaps the next frame by more than half anyway. Long FFTs stay below it on their own.
-- `rta`, meters, `spl`: unchanged (meter-like, 60/s and 20/s; 0.2 Mbit/s together).
-
-Per view (a small kiosk pane taking fewer frames) would need per-client rate negotiation,
-which the operator turned down (`wire-slim.md`, *Considered*); credit already gives a slow
-Wi-Fi peer exactly what it consumes, newest first, and with deltas a skipped frame costs it
-an intra only when its base fell out of the ring. This amends decision 2b ("up to 60 fps per
-topic") for `ir` and `spec`: needs the operator's yes (row below).
-
-## 7. The range band (W10)
-
-**W10. `range_lo`/`range_hi` as offsets from `mag`, `range_coh` as a mask step.**
-`range_coh` is only ever compared with the coherence mask (`ac2-scene/src/range_band.rs:44-57`),
-so it goes as a `u8` step: the number of `COHERENCE_MASKS` thresholds it meets, 255 for NaN;
-the thresholds move from `ac2-ui` into `ac2-proto` as protocol constants. `range_lo` and
-`range_hi` go as `i16` code differences from the same column's `mag` (NaN where either is).
-On the dump the band falls from 1.93 kB to 1.28 kB per intra frame (`d/4/tf` 4 048 → 3 395 B
-of payload) and the average's delta from 2.81 to 2.49 kB.
-
-## 8. Budget and tests (W11, W12)
-
-Expected for the `wire_size` tuning session, payload Mbit/s (with / without the IR view;
-headers of the short form estimated at 40 B with the handle):
+Payload Mbit/s for the `wire_size` tuning session (with / without the IR view), keyframes
+every 0.5 s (K ≈ 13–30 by topic rate) amortised, short header 40 B with the topic:
 
 | after stage | with IR | without | what moved |
 |---|---|---|---|
 | today | 6.39 | 3.39 | |
-| 1 ROUTER + credit | 6.39 | 3.39 | transport only |
-| 2 context + exact deltas | 4.46 | 2.10 | `tf` 2 360 → 1 240 B, headers 115–297 → ≈ 40 B, IR 13.0 → 10.2 kB |
-| 3 rates per kind | 3.47 | 1.98 | IR 15/s intra, `spec` 4 096 at 30/s |
-| 4 range band | 3.41 | 1.91 | `d/4/tf` 2 850 → 2 530 B |
-| 5 dead band (if it lands) | 3.34 | 1.85 | fake rig; real settled curves: to be measured |
+| A chain deltas over XPUB | 4.60 | 2.20 | `tf` 2 360 → 1 320 B, average 4 450 → 2 970 B, IR 13.0 → 10.4 kB |
+| B range band | 4.55 | 2.15 | average 2 970 → 2 770 B |
+| C flow control | 4.55 | 2.15 | the same, per peer; a slow peer takes what it consumes |
 
-Keyframes amortised: a join sends one intra per topic, ≈ 29 kB for the whole session, once;
-the test's 4 s run carries it as 0.06 Mbit/s. CURVE framing saved by W2 comes on top
-(≈ 0.18 Mbit/s).
+One part instead of two saves ≈ 0.09 Mbit/s of framing on top. The intra share of `tf` frames
+after the first second is 7 % (14 frames per 0.5 s at 28.8/s).
 
-**W11. `wire_size.rs` measures the scheme it budgets.** The test subscribes through a
-DEALER that grants credit as fast as it reads, and counts intra, delta and `ctx` messages
-apart. `slow_tuning_session_fits_a_remote_link` (`:368-401`): totals to < 2.4 Mbit/s without
-the IR view and < 4.0 with (from 4.0 / 7.2); per frame, intra `tf` < 3 000 B and IR
-< `IR_FRAME_BUDGET` (`:224`) stay, delta `tf` < 1 500 B, the average < 3 000 B; the share
-of intra frames after the first second < 5 % on `tf` (an intra storm is a bug, not a cost).
-`tuning_session_bytes` prints the split and the keyframe cost. A second case runs a
-credit-starved peer (one credit per 100 ms) beside a fast one: the fast peer's totals
-unchanged, the slow one never above its consumption.
+**W11. `wire_size.rs` measures the scheme it budgets.** It counts keyframes and deltas apart.
+`slow_tuning_session_fits_a_remote_link` (`:368-401`): < 5.0 Mbit/s with the IR view and
+< 2.4 without (from 7.2 / 4.0); per frame keyframe `tf` < 3 000 B, delta `tf` < 1 500 B, IR
+< `IR_FRAME_BUDGET`; keyframe share of `tf` after the first second < 10 %.
+`tuning_session_bytes` prints the split. Stage C adds a credit-starved peer (64 kB window
+drained at 250 kB/s) beside a fast one: the fast peer's totals unchanged, the slow one's
+delay ≤ 0.3 s, every topic still served.
 
 **W12. Tests.**
 
-- *Round trips* (`ac2-proto`): intra and delta of every kind re-encode to the same bytes;
+- *Round trips* (`ac2-proto`): keyframe and delta of every kind re-encode to the same bytes;
   delta(base → x) applied to base equals x's codes; `bfp16` exponent change; NaN/∞
-  transitions; a delta on the wrong base or a bad CRC refused without a panic; fuzzed short
-  headers within §5.6's bounds.
-- *Lossy link* (`ac2d` it, fake rig): a test DEALER drops N = 1, 3, 30 consecutive frames
-  of a topic, or every k-th, and reorders none (TCP cannot). Checks: every frame the lossy
-  client *holds* is bit-identical to the frame of the same `seq` on a lossless peer; a resync
-  is answered by intra within one RTT + one period (< 100 ms locally); STALE only past 1 s.
-  The same with a reconnect (DEALER dropped and reopened).
-- *Late joiner*: a second client joins mid-stream and draws its first curve from one intra,
-  while the first client receives no extra frame (today's XPUB re-sends to both).
-- *Python parity* (`tools/protocol`): ctx, intra and delta fixtures both ways; the Python
-  decoder applies a Rust-made delta chain and matches the codes; `WIRE_LOCK` per stage.
-- *App*: `ac2-scene` text of a pane while its topic resyncs (last curve, age; dimmed past
-  1 s), from an empty daemon (e2e).
+  transitions; CRC on keyframes and deltas; a delta on the wrong base or with a bad CRC
+  refused without a panic; fuzzed short headers within §5.6's bounds.
+- *Lossy link* (`ac2d` it, fake rig): a test subscriber drops N = 1, 3, 30 frames of a topic,
+  or every k-th. Every frame it *holds* is bit-identical to the frame of the same `seq` on a
+  lossless peer; it draws again within one keyframe interval, or within one RTT plus one
+  frame after `data.keyframe`; STALE only past 1 s; a second request inside 250 ms gets no
+  second keyframe. Stage C adds a reconnect (DEALER closed and reopened) and a dead peer.
+- *Late joiner*: a second client joins mid-stream and draws its first curve from one
+  keyframe; in stage A each existing peer receives exactly one keyframe per matching topic
+  for it, in stage C none.
+- *Python parity* (`tools/protocol`): keyframe and delta fixtures both ways, CRC included; the
+  Python decoder applies a Rust-made chain and matches the codes; `WIRE_LOCK` per stage.
+- *App*: `ac2-scene` text of a pane while its topic waits for a keyframe (last curve, its age;
+  dimmed past 1 s), from an empty daemon (e2e).
 
 ## Stages
 
-Each lands green on its own and bumps `PROTO_VERSION` with fixtures, `WIRE_LOCK`, the Python
-codec and `docs/protocol.md` §5 in the same change.
+Each lands green on its own with its own `PROTO_VERSION` bump, `WIRE_LOCK`, Python codec,
+fixtures and `docs/protocol.md` §5. All three land before one deploy (decision a).
 
-1. **ROUTER data socket + credit** (W1, flow-control.md): events and keepalives on the
-   DEALER too, join after reconnect, per-peer dirty set, `wire_size` through the DEALER.
-   Frames unchanged. The transport on every OS: dispatch the all-OS CI.
-2. **Context + intra/delta + CRC + resync** (W2–W6, W8, W11, W12), exact deltas.
-   Encoding to the I/O thread, the client applying in order, Python codec, lossy-link tests.
-3. **Rates per kind** (W9): two `Pace::new` arguments and their tests; needs 2b amended.
-4. **Range band** (W10): mask steps into `ac2-proto`, `range_band.rs` reads steps.
-5. **Dead band** (W7), only if open question 1 shows ≥ 15 % on real sessions.
+1. **A, chain deltas over the XPUB** (W1–W8, W11, W12): codes from the jobs, keyframe/delta
+   in the I/O thread, `data.keyframe`, client applying in order, lossy-link tests. Budget
+   4.60 / 2.20 Mbit/s.
+2. **B, range band** (W9): offsets and `u8` hundredths in proto, codec and `range_band.rs`.
+   Budget 4.55 / 2.15.
+3. **C, flow control** (W10): ROUTER/DEALER, byte credit, per-peer bases, lifecycle, events
+   bound, starved-peer test; all-OS CI (the transport on every OS). Budget the same, per peer.
 
 ## Open questions
 
-1. **Dead band on real curves.** Measure stage 2's deltas and W7's bands on a replayed pupu
-   capture (`session.replay`, private recordings stay local) with a settled Genelec transfer;
-   land stage 5 only past ≈ 15 %.
-2. **IR span.** The IR is 1.5 Mbit/s after stage 3, still the dearest topic; a decimated or
-   windowed span for a zoomed pane (`wire-slim.md`, *Left*) is a per-client request W1 makes
+1. **Dead band on real curves.** Measure stage A's deltas and W7's bands on a replayed pupu
+   capture (`session.replay`; private recordings stay local); land it only past ≈ 15 %.
+2. **IR span.** At ≈ 2.4 Mbit/s the IR is still the dearest topic; a decimated or windowed
+   span for a zoomed pane (`wire-slim.md`, *Left*) is a per-client request stage C makes
    possible. Worth it only if a kiosk shows the IR.
-3. **ac2-remote** (the Android viewer) decodes frames too: it needs ctx/delta/credit, or a
-   join flag `intra_only` that makes the daemon send it intra frames (its bandwidth only).
+3. **ac2-remote** (the Android viewer) decodes frames too. In stage A, updated to the new
+   version, it can apply keyframes and ignore deltas: two frames a second per topic, never a
+   wrong one. From stage C it goes dark until it implements the DEALER, join and credit.
 4. **Rice coding** of the deltas (`wire-slim.md`, *Considered*): deltas are mostly zero and
-   small; re-measure once stage 2 lands before reopening.
+   small; re-measure once stage A lands.
 
 ## Row for open-questions.md
 
-| W | Data frames: per-peer ROUTER/credit; context once, then intra or delta per frame by size, on an exact base with CRC; gap → keep the last applied frame (STALE rules) and resync, no keyframe interval; `ir` 15/s, `spec` 30/s (amends 2b). [wire-delta.md](wire-delta.md) |
+| W | Data frames: one delta chain per topic against the last frame sent (per peer once ROUTER/credit lands), keyframe every 0.5 s, on join and on request (`data.keyframe`); CRC-32 over codes; a client applies only on the exact base, else keeps the last applied frame (STALE rules); byte credit, events outside it. [wire-delta.md](wire-delta.md) |
 
-## Decisions (proposed)
+## Decisions
 
-W1 ROUTER/DEALER data socket with credit · W2 topic context, one-part frames, short header ·
-W3 intra or delta per frame by size · W4 bases are sent frames, ring of W, shared encodes,
-encoding in the I/O thread · W5 apply only on the exact base, keep the last applied frame,
-STALE unchanged · W6 keyframes on join/ctx/resync/ring miss, no interval · W7 exact deltas;
-dead band later, honest rules · W8 per-frame deflate · W9 `ir` 15/s, `spec` 30/s, credit
-for slow links · W10 range band as offsets and mask steps · W11 `wire_size` budgets ·
-W12 tests.
+Operator: (a) deltas first over the XPUB, flow control in the same round before one deploy;
+(b) no per-kind rate caps, 2b stands; (c) PROTO bumps free. Taken in review round 1: credit
+in bytes; no per-peer topic context, handle or `ctx_rev` (the keyframe is the context);
+`range_coh` as `u8` hundredths, no mask thresholds in `ac2-proto`; dead band deferred until a
+replayed pupu capture shows ≥ 15 %; no `intra_only` join flag.
+
+W1 one chain per topic in the I/O thread, base = last frame handed to libzmq · W2 keyframe
+and short-header delta, header and payload in one part · W3 delta payload, keyframe when not
+smaller · W4 keyframes every 0.5 s, on join, change, clear, misfit, rate-limited
+`data.keyframe` · W5 CRC-32 over codes · W6 apply only on the exact base, hold the last
+applied frame · W7 exact deltas, dead band deferred · W8 per-frame deflate · W9 range band
+offsets and `u8` hundredths · W10 ROUTER/DEALER, byte credit on receipt, per-peer bases,
+lifecycle, events bound · W11 `wire_size` budgets · W12 tests.
