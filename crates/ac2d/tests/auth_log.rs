@@ -82,12 +82,11 @@ fn refused_key_is_logged_once_per_key_and_address() {
             h.ctrl_endpoint(),
             Some(&curve(&stranger)),
         ));
-        subs.push(Sub::connect_with(
+        subs.push(Sub::knock(
             &ctx,
             h.data_endpoint(),
             &[b""],
             Some(&curve(&stranger)),
-            None,
         ));
     }
     let fp = stranger.public.fingerprint();

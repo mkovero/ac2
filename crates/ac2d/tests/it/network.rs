@@ -68,10 +68,10 @@ fn curve_authorized_ok_unauthorized_refused_on_both_sockets() {
             client: "stranger".into(),
         },
     );
-    intruder.send(&req);
-    let sub_bad = Sub::connect_with(&ctx, h.data_endpoint(), &[b""], Some(&bad), None);
+    intruder.offer(&req);
+    let sub_bad = Sub::knock(&ctx, h.data_endpoint(), &[b""], Some(&bad));
     // A plain (non-CURVE) client is refused too.
-    let plain = Sub::connect(&ctx, h.data_endpoint(), &[b""]);
+    let plain = Sub::knock(&ctx, h.data_endpoint(), &[b""], None);
     assert!(
         intruder.recv(Duration::from_millis(1500)).is_none(),
         "ctrl refused"

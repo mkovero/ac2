@@ -182,6 +182,23 @@ pub struct Client {
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Sends `frames` on a DEALER, waiting at most [`CALL_TIMEOUT`] for it to take them. A
+/// DEALER whose connection was refused may have no pipe left to queue on (a client that
+/// reads the server's ERROR before the connection drops does not reconnect), and a
+/// blocking send there never returns.
+fn send_within(sock: &Socket, frames: &[Vec<u8>], what: &str) {
+    let deadline = Instant::now() + CALL_TIMEOUT;
+    loop {
+        match sock.try_send(frames) {
+            Ok(()) => return,
+            Err(ac2_zmq::Error::WouldBlock) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            Err(e) => panic!("{what} not sent within {CALL_TIMEOUT:?}: {e}"),
+        }
+    }
+}
+
 impl Client {
     pub fn connect(ctx: &Context, endpoint: &str) -> Self {
         Self::connect_with(ctx, endpoint, None)
@@ -202,7 +219,13 @@ impl Client {
     }
 
     pub fn send(&self, req: &Request) {
-        self.sock.send(&[encode_request(req).unwrap()]).unwrap();
+        send_within(&self.sock, &[encode_request(req).unwrap()], req.cmd.name());
+    }
+
+    /// Sends `req` if the connection takes it now, for a client that may already be
+    /// refused; whether it went.
+    pub fn offer(&self, req: &Request) -> bool {
+        self.sock.try_send(&[encode_request(req).unwrap()]).is_ok()
     }
 
     pub fn recv(&self, timeout: Duration) -> Option<Reply> {
@@ -312,6 +335,32 @@ impl Sub {
         curve: Option<&CurveClient>,
         rcvhwm: Option<u32>,
     ) -> Self {
+        let s = Self::open(ctx, endpoint, curve, rcvhwm);
+        s.ask(prefixes, |m| s.up(m));
+        s
+    }
+
+    /// A peer the daemon is expected to refuse: its window and subscriptions go if the
+    /// connection takes them (queued while it is set up), and are dropped once it is gone.
+    pub fn knock(
+        ctx: &Context,
+        endpoint: &str,
+        prefixes: &[&[u8]],
+        curve: Option<&CurveClient>,
+    ) -> Self {
+        let s = Self::open(ctx, endpoint, curve, None);
+        s.ask(prefixes, |m| {
+            s.offer(m);
+        });
+        s
+    }
+
+    fn open(
+        ctx: &Context,
+        endpoint: &str,
+        curve: Option<&CurveClient>,
+        rcvhwm: Option<u32>,
+    ) -> Self {
         let sock = ctx.socket(SocketType::Dealer).unwrap();
         if let Some(c) = curve {
             sock.set_curve_client(c).unwrap();
@@ -320,31 +369,44 @@ impl Sub {
             sock.set_recv_hwm(h).unwrap();
         }
         sock.connect(endpoint).unwrap();
-        let s = Self {
+        Self {
             sock,
             held: Default::default(),
             subs: Default::default(),
             auto_credit: std::cell::Cell::new(true),
             owed: Default::default(),
             window: std::cell::Cell::new(DATA_WINDOW_DEFAULT),
-        };
-        s.up(DataUp::Window {
+        }
+    }
+
+    /// The default window and the subscriptions `prefixes` name, each sent by `send`.
+    fn ask(&self, prefixes: &[&[u8]], send: impl Fn(DataUp)) {
+        send(DataUp::Window {
             bytes: DATA_WINDOW_DEFAULT,
         });
         for p in prefixes {
-            if p.is_empty() {
-                everything().into_iter().for_each(|sub| s.subscribe(sub));
+            let subs = if p.is_empty() {
+                everything()
             } else {
-                s.subscribe(Subscription::parse_prefix(p).unwrap());
+                vec![Subscription::parse_prefix(p).unwrap()]
+            };
+            for sub in subs {
+                self.subs.borrow_mut().push(sub);
+                send(DataUp::Subscribe { sub });
             }
         }
-        s
     }
 
     /// Sends one request on the data DEALER.
     pub fn up(&self, msg: DataUp) {
         let b = encode_data_request(&DataRequest::new(msg)).unwrap();
-        self.sock.send(&[b]).unwrap();
+        send_within(&self.sock, &[b], "data request");
+    }
+
+    /// Sends one request if the connection takes it now; whether it went.
+    pub fn offer(&self, msg: DataUp) -> bool {
+        let b = encode_data_request(&DataRequest::new(msg)).unwrap();
+        self.sock.try_send(&[b]).is_ok()
     }
 
     pub fn subscribe(&self, sub: Subscription) {
