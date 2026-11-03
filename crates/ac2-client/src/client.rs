@@ -66,6 +66,11 @@ pub struct ClientConfig {
     /// connection is dead as far as this client is concerned and [`Client::await_dead`]
     /// resolves, whatever the kernel thinks of the TCP connection. [`DEAD_AFTER`] by default.
     pub dead_after: Duration,
+    /// Frame bytes the daemon may have in flight towards this client's data connection
+    /// before it waits for credit, which each [`Client::latest`] returns for what it read
+    /// ([`ac2_proto::flow::DATA_WINDOW_DEFAULT`] by default; the daemon clamps it). The
+    /// standing delay of a consumer slower than the daemon is this divided by its rate.
+    pub data_window: u32,
 }
 
 /// Default [`ClientConfig::dead_after`]: the application-level watchdog above the kernel's.
@@ -87,7 +92,8 @@ const RECONNECT_FIRST: Duration = Duration::from_millis(100);
 const RECONNECT_MAX: Duration = Duration::from_secs(2);
 /// Dead-peer detection towards the daemon (TCP only): a daemon host that vanished without
 /// closing the connection (power cut, network gone) leaves it open for as long as the
-/// kernel retransmits, and a SUB, which never sends, would not notice even then. With
+/// kernel retransmits, and a data connection that has nothing to send would not notice
+/// even then. With
 /// these an idle connection is probed after 5 s and closed after three unanswered probes,
 /// one with unacknowledged data after 15 s, and the reconnect loop takes over, so a daemon
 /// that comes back is reached again.
@@ -97,14 +103,16 @@ const DAEMON_LIVENESS: TcpLiveness = TcpLiveness {
     count: 3,
     max_unacked: Duration::from_secs(15),
 };
-/// Receive queue of the data SUB, in messages. It is drained whole on each `latest()`, so it
-/// must hold what arrives between two drains (a publish round of every subscribed topic);
-/// a smaller queue would stop libzmq reading the connection mid-round and push the backlog
-/// back into the daemon's queue, where it ages.
-const DATA_RCVHWM: u32 = 64;
+/// Receive queue of the data DEALER, in messages: what the daemon's credit lets be in
+/// flight (its own send queue is sized the same), so libzmq never stops reading the
+/// connection while the window is open and nothing in flight waits in the kernel instead.
+const DATA_RCVHWM: u32 = 2
+    * (ac2_proto::flow::DATA_WINDOW_MAX / ac2_proto::flow::FRAME_CHARGE_MIN
+        + 1
+        + ac2_proto::flow::EVENT_BOUND);
 
-/// The data SUB's `ZMQ_FD`, owned by libzmq: registered with the runtime for readiness only,
-/// never read or closed here.
+/// A data socket's `ZMQ_FD` (the DEALER's or its monitor's), owned by libzmq: registered
+/// with the runtime for readiness only, never read or closed here.
 #[cfg(unix)]
 #[derive(Debug)]
 struct NotifyFd(std::os::fd::RawFd);
@@ -141,6 +149,7 @@ impl ClientConfig {
             context: None,
             received_bytes: Arc::default(),
             dead_after: DEAD_AFTER,
+            data_window: ac2_proto::flow::DATA_WINDOW_DEFAULT,
         }
     }
 
@@ -305,11 +314,14 @@ struct Inner {
     core: Arc<CallCore>,
     welcome: Arc<Mutex<Welcome>>,
     view: watch::Receiver<Arc<MirrorView>>,
-    /// Registration of the data SUB's notification descriptor with the runtime, made on the
-    /// first [`Client::data_changed`]. Declared before `data` so it is deregistered before
-    /// the socket (and its descriptor) closes.
+    /// Registration of the data DEALER's notification descriptor with the runtime, made on
+    /// the first [`Client::data_changed`]. Declared before `data` so it is deregistered
+    /// before the socket (and its descriptor) closes.
     #[cfg(unix)]
     data_fd: std::sync::OnceLock<tokio::io::unix::AsyncFd<NotifyFd>>,
+    /// The same for the DEALER's monitor, whose new handshake a drain answers.
+    #[cfg(unix)]
+    mon_fd: std::sync::OnceLock<tokio::io::unix::AsyncFd<NotifyFd>>,
     data: Mutex<DataState>,
     grids: Mutex<HashMap<GridId, Arc<GridDef>>>,
     sync_task: JoinHandle<()>,
@@ -360,29 +372,41 @@ impl Client {
         }
         dealer.connect(&cfg.endpoints.ctrl)?;
 
-        // Q5 step 1: evt and ka are subscribed before anything else is asked.
-        let sync_sub = ctx.socket(SocketType::Sub)?;
-        liveness(&sync_sub)?;
+        // Q5 step 1: evt and ka are subscribed before anything else is asked. Events get a
+        // data connection of their own, read by the I/O thread, so that frames waiting to be
+        // drained never delay an event.
+        let sync = ctx.socket(SocketType::Dealer)?;
+        liveness(&sync)?;
         if let Some(c) = curve {
-            sync_sub.set_curve_client(c)?;
+            sync.set_curve_client(c)?;
         }
-        for s in Subscription::sync_set() {
-            sync_sub.subscribe(&s.prefix())?;
-        }
-        sync_sub.connect(&cfg.endpoints.data)?;
+        let sync_mon = sync.monitor()?;
+        sync.connect(&cfg.endpoints.data)?;
 
-        // Data frames get their own SUB so that a burst of frames never delays an event.
-        let data_sub = ctx.socket(SocketType::Sub)?;
-        liveness(&data_sub)?;
-        data_sub.set_recv_hwm(DATA_RCVHWM)?;
+        let data = ctx.socket(SocketType::Dealer)?;
+        liveness(&data)?;
+        data.set_recv_hwm(DATA_RCVHWM)?;
         if let Some(c) = curve {
-            data_sub.set_curve_client(c)?;
+            data.set_curve_client(c)?;
         }
-        data_sub.connect(&cfg.endpoints.data)?;
+        let data_mon = data.monitor()?;
+        data.connect(&cfg.endpoints.data)?;
+        let data_state = DataState::new(
+            data,
+            data_mon,
+            cfg.data_window,
+            Arc::clone(&cfg.received_bytes),
+        )?;
 
         let (sync_tx, sync_rx) = mpsc::unbounded_channel();
         let received = Arc::clone(&cfg.received_bytes);
-        let io = Io::start(&ctx, dealer, sync_sub, sync_tx, Arc::clone(&received))?;
+        let io = Io::start(
+            &ctx,
+            dealer,
+            crate::io::SyncSocket::new(sync, sync_mon, &Subscription::sync_set())?,
+            sync_tx,
+            received,
+        )?;
         let core = Arc::new(CallCore {
             io,
             // Random start: under CURVE two processes share one client id (the key name), and
@@ -408,7 +432,9 @@ impl Client {
             view: view_rx,
             #[cfg(unix)]
             data_fd: std::sync::OnceLock::new(),
-            data: Mutex::new(DataState::new(data_sub, received)),
+            #[cfg(unix)]
+            mon_fd: std::sync::OnceLock::new(),
+            data: Mutex::new(data_state),
             grids: Mutex::new(HashMap::new()),
             sync_task,
             name: cfg.name,
@@ -551,20 +577,21 @@ impl Client {
 
     // ----- data ------------------------------------------------------------------------
 
-    /// Subscribes the data socket to `sub` (reference counted per prefix).
+    /// Subscribes the data connection to `sub` (reference counted).
     pub fn subscribe(&self, sub: Subscription) -> Result<(), ClientError> {
-        self.lock_data()?.subscribe(&sub.prefix())
+        self.lock_data()?.subscribe(sub)
     }
 
     /// Undoes one [`Client::subscribe`] of `sub`; its kept frames are dropped when the last
-    /// subscription of the prefix goes.
+    /// subscription of it goes.
     pub fn unsubscribe(&self, sub: Subscription) -> Result<(), ClientError> {
-        self.lock_data()?.unsubscribe(&sub.prefix())
+        self.lock_data()?.unsubscribe(sub)
     }
 
-    /// The newest frame per topic, with age and STALE computed now. Only the newest
-    /// message per topic received since the previous call is decoded. Frames of an older
-    /// session epoch or another incarnation are discarded.
+    /// The newest frame per topic, with age and STALE computed now. Every message received
+    /// since the previous call is applied, and the values of the newest per topic built.
+    /// Frames of an older session epoch or another incarnation are discarded. Returns the
+    /// credit for what it read: a consumer that calls this rarely is sent less.
     pub fn latest(&self) -> Result<crate::data::Latest, ClientError> {
         let mut out = crate::data::Latest::default();
         self.latest_into(&mut out)?;
@@ -575,17 +602,8 @@ impl Client {
     /// across frames reuses its map, and its topic names are shared, never rebuilt.
     pub fn latest_into(&self, out: &mut crate::data::Latest) -> Result<(), ClientError> {
         let view = self.view();
-        let asks = {
-            let mut data = self.lock_data()?;
-            data.drain(&view, Instant::now(), wall_ns(), out)?;
-            data.take_asks()
-        };
-        // A chain that broke: its next frame as a keyframe. Not waited for; a lost request
-        // is asked again after `KEYFRAME_ASK_GAP` while deltas keep failing.
-        for topic in asks {
-            self.inner.core.send_nowait(Command::DataKeyframe { topic });
-        }
-        Ok(())
+        self.lock_data()?
+            .drain(&view, Instant::now(), wall_ns(), out)
     }
 
     /// Waits until a data frame is queued that [`Client::latest`] has not read yet (at once
@@ -603,22 +621,27 @@ impl Client {
     /// Nothing wakes in between: on Unix the runtime watches the data socket's descriptor,
     /// no thread of the client is involved. Cancellation-safe. Ages and STALE still need a
     /// refresh of their own while no frame arrives. Returns at once on a socket error, which
-    /// `latest` then reports.
+    /// `latest` then reports. Also returns on a new connection to the daemon, which only a
+    /// drain introduces (it states the subscriptions again), and on the keepalive the
+    /// daemon sends a connection nothing else went to for a second.
     pub async fn data_changed(&self) {
         #[cfg(unix)]
         loop {
-            // The descriptor only signals changes; the queue itself is checked first and
-            // after every wake.
-            let fd = match self.data_has_message() {
+            // The descriptors only signal changes; the queues themselves are checked first
+            // and after every wake.
+            let (fd, mon) = match self.data_has_message() {
                 Ok(true) | Err(_) => return,
-                Ok(false) => match self.data_notify_fd() {
-                    Ok(fd) => fd,
-                    Err(_) => return,
+                Ok(false) => match (self.data_notify_fd(false), self.data_notify_fd(true)) {
+                    (Ok(fd), Ok(mon)) => (fd, mon),
+                    _ => return,
                 },
             };
-            match fd.readable().await {
-                Ok(mut ready) => ready.clear_ready(),
-                Err(_) => return,
+            let woke = tokio::select! {
+                r = fd.readable() => r.map(|mut g| g.clear_ready()),
+                r = mon.readable() => r.map(|mut g| g.clear_ready()),
+            };
+            if woke.is_err() {
+                return;
             }
         }
         #[cfg(not(unix))]
@@ -636,26 +659,49 @@ impl Client {
     /// when `timeout` passed first. Holds the data lock while it waits.
     pub fn wait_data(&self, timeout: Duration) -> bool {
         self.lock_data()
-            .and_then(|d| Ok(d.socket().wait_readable(timeout)?))
+            .and_then(|d| {
+                let mut items = [
+                    ac2_zmq::PollItem::readable(d.socket()),
+                    ac2_zmq::PollItem::readable(d.monitor_socket()),
+                ];
+                Ok(ac2_zmq::poll(&mut items, Some(timeout))? > 0)
+            })
             .unwrap_or(true)
     }
 
     fn data_has_message(&self) -> Result<bool, ClientError> {
-        Ok(self.lock_data()?.socket().has_message()?)
+        let d = self.lock_data()?;
+        Ok(d.socket().has_message()? || d.monitor_socket().has_message()?)
     }
 
+    /// The data DEALER's descriptor, or its monitor's (`monitor`), registered once.
     #[cfg(unix)]
-    fn data_notify_fd(&self) -> Result<&tokio::io::unix::AsyncFd<NotifyFd>, ClientError> {
-        if let Some(fd) = self.inner.data_fd.get() {
+    fn data_notify_fd(
+        &self,
+        monitor: bool,
+    ) -> Result<&tokio::io::unix::AsyncFd<NotifyFd>, ClientError> {
+        let cell = if monitor {
+            &self.inner.mon_fd
+        } else {
+            &self.inner.data_fd
+        };
+        if let Some(fd) = cell.get() {
             return Ok(fd);
         }
-        let raw = self.lock_data()?.socket().notify_fd()?;
+        let raw = {
+            let d = self.lock_data()?;
+            if monitor {
+                d.monitor_socket().notify_fd()?
+            } else {
+                d.socket().notify_fd()?
+            }
+        };
         let fd =
             tokio::io::unix::AsyncFd::with_interest(NotifyFd(raw), tokio::io::Interest::READABLE)
                 .map_err(|e| ClientError::Invalid(format!("data socket descriptor: {e}")))?;
         // A concurrent first call may have registered it already; keep that one.
-        let _ = self.inner.data_fd.set(fd);
-        self.inner.data_fd.get().ok_or(ClientError::Closed)
+        let _ = cell.set(fd);
+        cell.get().ok_or(ClientError::Closed)
     }
 
     /// [`Client::latest`] plus the grid of every frame (fetched once per id).
@@ -753,6 +799,7 @@ async fn run_sync(
                 Some(SyncIn::Ka { stamp, meta, at, local_wall_ns }) => {
                     (mirror.on_ka(&stamp, *meta, at, local_wall_ns), true)
                 }
+                Some(SyncIn::Resync) => (mirror.on_resync_required(now), true),
             },
             _ = tick.tick(), if ticking => (mirror.on_tick(Instant::now()), false),
         };

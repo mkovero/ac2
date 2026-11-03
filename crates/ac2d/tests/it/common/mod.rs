@@ -1,4 +1,4 @@
-//! Test client for the daemon: a DEALER for ctrl, SUBs for data, and helpers to run the
+//! Test client for the daemon: a DEALER for ctrl, DEALERs for data, and helpers to run the
 //! fake audio device by hand.
 #![allow(dead_code, clippy::unwrap_used)]
 
@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use ac2_audio::fake::{FakeDrive, FakePath, Pace};
 use ac2_audio::{FakeBackend, FakeConfig, FakeDriver};
+use ac2_proto::flow::{DATA_WINDOW_DEFAULT, FLOW_TOPIC, frame_charge, outside_window};
 use ac2_proto::frame::{Frame, FrameData};
 use ac2_proto::model::{
     DeviceSelector, LoopbackRoute, MeasConfig, MeasKind, Resolution, SessionConfig, SplConfig,
@@ -15,8 +16,9 @@ use ac2_proto::model::{
 };
 use ac2_proto::units::{MeasId, RequestId, Rev};
 use ac2_proto::{
-    CodedFrame, Command, DataMessage, DecodeError, Event, ProtoError, Reply, ReplyBody, Request,
-    Topic, WireFrame, decode_data_message, decode_reply, decode_wire, encode_request,
+    CodedFrame, Command, DataMessage, DataRequest, DataUp, DecodeError, Event, FlowNotice,
+    ProtoError, Reply, ReplyBody, Request, Subscription, Topic, WireFrame, decode_data_message,
+    decode_reply, decode_wire, encode_data_request, encode_request,
 };
 use ac2_zmq::{Context, CurveClient, Socket, SocketType};
 use ac2d::{DaemonConfig, Handle, Listen};
@@ -277,10 +279,25 @@ pub async fn meas_update(
     c.call(Command::MeasUpdate { meas, base, config }).await
 }
 
-/// A data subscriber: applies each topic's deltas on the frame it holds, as a client does.
+/// A data peer: a DEALER on the data socket that subscribes, returns credit for what it
+/// reads (unless held), and applies each topic's deltas on the frame it holds, as a client
+/// does.
 pub struct Sub {
     pub sock: Socket,
     held: std::cell::RefCell<std::collections::HashMap<Topic, CodedFrame>>,
+    subs: std::cell::RefCell<Vec<Subscription>>,
+    /// Credit is returned after each message read.
+    pub auto_credit: std::cell::Cell<bool>,
+    /// Read and not yet credited: frame bytes (charged) and messages outside the window.
+    owed: std::cell::Cell<(u32, u32)>,
+    window: std::cell::Cell<u32>,
+}
+
+/// Every subscription, for a peer that asks for everything (the empty prefix).
+fn everything() -> Vec<Subscription> {
+    let mut v = vec![Subscription::AllData, Subscription::InputMeters];
+    v.extend([Topic::PreviewGonio, Topic::Timing, Topic::Evt, Topic::Ka].map(Subscription::Topic));
+    v
 }
 
 impl Sub {
@@ -295,35 +312,122 @@ impl Sub {
         curve: Option<&CurveClient>,
         rcvhwm: Option<u32>,
     ) -> Self {
-        let sock = ctx.socket(SocketType::Sub).unwrap();
+        let sock = ctx.socket(SocketType::Dealer).unwrap();
         if let Some(c) = curve {
             sock.set_curve_client(c).unwrap();
         }
         if let Some(h) = rcvhwm {
             sock.set_recv_hwm(h).unwrap();
         }
-        for p in prefixes {
-            sock.subscribe(p).unwrap();
-        }
         sock.connect(endpoint).unwrap();
-        Self {
+        let s = Self {
             sock,
             held: Default::default(),
+            subs: Default::default(),
+            auto_credit: std::cell::Cell::new(true),
+            owed: Default::default(),
+            window: std::cell::Cell::new(DATA_WINDOW_DEFAULT),
+        };
+        s.up(DataUp::Window {
+            bytes: DATA_WINDOW_DEFAULT,
+        });
+        for p in prefixes {
+            if p.is_empty() {
+                everything().into_iter().for_each(|sub| s.subscribe(sub));
+            } else {
+                s.subscribe(Subscription::parse_prefix(p).unwrap());
+            }
+        }
+        s
+    }
+
+    /// Sends one request on the data DEALER.
+    pub fn up(&self, msg: DataUp) {
+        let b = encode_data_request(&DataRequest::new(msg)).unwrap();
+        self.sock.send(&[b]).unwrap();
+    }
+
+    pub fn subscribe(&self, sub: Subscription) {
+        self.subs.borrow_mut().push(sub);
+        self.up(DataUp::Subscribe { sub });
+    }
+
+    pub fn unsubscribe(&self, sub: Subscription) {
+        self.subs.borrow_mut().retain(|s| *s != sub);
+        self.up(DataUp::Unsubscribe { sub });
+    }
+
+    pub fn set_window(&self, bytes: u32) {
+        self.window.set(bytes);
+        self.up(DataUp::Window { bytes });
+    }
+
+    pub fn keyframe(&self, topic: Topic) {
+        self.up(DataUp::Keyframe { topic });
+    }
+
+    /// Returns the credit for everything read so far.
+    pub fn credit(&self) {
+        let (bytes, events) = self.owed.replace((0, 0));
+        if bytes > 0 || events > 0 {
+            self.up(DataUp::Credit { bytes, events });
         }
     }
 
-    /// The next event or frame within `timeout`. A delta with no frame held, or (after
-    /// messages this subscriber's queue dropped) not on the one held, is skipped: the
-    /// topic's next keyframe brings it back.
+    /// Returns credit for part of what was read.
+    pub fn credit_some(&self, bytes: u32, events: u32) {
+        let (b, e) = self.owed.get();
+        let (bytes, events) = (bytes.min(b), events.min(e));
+        self.owed.set((b - bytes, e - events));
+        if bytes > 0 || events > 0 {
+            self.up(DataUp::Credit { bytes, events });
+        }
+    }
+
+    /// Bytes and outside-window messages read and not yet credited.
+    pub fn owed(&self) -> (u32, u32) {
+        self.owed.get()
+    }
+
+    /// The next message as received, its parts; counted for credit.
+    pub fn raw(&self, timeout: Duration) -> Option<Vec<Vec<u8>>> {
+        let m = self.sock.recv_timeout(timeout).unwrap()?;
+        let f = m.into_frames();
+        let (mut bytes, mut events) = self.owed.get();
+        if f.first().is_some_and(|t| outside_window(t)) {
+            events += 1;
+        } else {
+            bytes += frame_charge(f.iter().map(Vec::len).sum());
+        }
+        self.owed.set((bytes, events));
+        if self.auto_credit.get() {
+            self.credit();
+        }
+        Some(f)
+    }
+
+    /// The next event, notice or frame within `timeout`. A delta with no frame held, or not
+    /// on the one held, is skipped: the topic's next keyframe brings it back. A `rejoin`
+    /// notice is answered by stating the window and subscriptions again.
     pub fn next(&self, timeout: Duration) -> Option<DataMessage> {
         let deadline = Instant::now() + timeout;
         loop {
             // A zero timeout still takes what is queued.
             let left = deadline.saturating_duration_since(Instant::now());
-            let m = self.sock.recv_timeout(left).unwrap()?;
-            let parts: Vec<&[u8]> = m.frames().iter().map(Vec::as_slice).collect();
-            if parts.first().map(|t| Topic::parse(t)) == Some(Ok(Topic::Evt)) {
-                return Some(decode_data_message(&parts).unwrap());
+            let m = self.raw(left)?;
+            let parts: Vec<&[u8]> = m.iter().map(Vec::as_slice).collect();
+            let first = parts.first().copied().unwrap_or_default();
+            if first == FLOW_TOPIC || Topic::parse(first) == Ok(Topic::Evt) {
+                let msg = decode_data_message(&parts).unwrap();
+                if msg == DataMessage::Flow(FlowNotice::Rejoin) {
+                    self.up(DataUp::Window {
+                        bytes: self.window.get(),
+                    });
+                    for sub in self.subs.borrow().iter() {
+                        self.up(DataUp::Subscribe { sub: *sub });
+                    }
+                }
+                return Some(msg);
             }
             let w = decode_wire(&parts).unwrap();
             let topic = w.topic();

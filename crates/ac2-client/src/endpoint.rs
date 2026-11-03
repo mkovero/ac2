@@ -11,12 +11,12 @@ use std::str::FromStr;
 /// Default ctrl port (local Windows and remote); data is this + 1.
 pub const DEFAULT_PORT: u16 = 47_820;
 
-/// Ctrl (ROUTER) and data (XPUB) endpoints of one daemon.
+/// Ctrl (ROUTER) and data (ROUTER) endpoints of one daemon.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Endpoints {
     /// DEALER connects here.
     pub ctrl: String,
-    /// SUB connects here.
+    /// Two DEALERs connect here: one for events and keepalives, one for frames.
     pub data: String,
 }
 

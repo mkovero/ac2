@@ -9,6 +9,7 @@
 pub mod cal;
 pub mod ctrl;
 pub mod event;
+pub mod flow;
 pub mod frame;
 pub mod grid;
 pub mod model;
@@ -20,7 +21,7 @@ pub mod units;
 
 /// The one protocol version this build speaks. Peers on any other version are refused
 /// (`version_mismatch`); there is no negotiation and no fallback.
-pub const PROTO_VERSION: u16 = 82;
+pub const PROTO_VERSION: u16 = 83;
 
 pub use ctrl::{
     Command, CtrlError, Envelope, ErrorCode, ErrorDetail, ImportProblem, MicCurveFileReason,
@@ -28,6 +29,10 @@ pub use ctrl::{
     encode_reply, encode_request, peek_envelope,
 };
 pub use event::{Change, Event, EventError, Patch, StateSnapshot, decode_event, encode_event};
+pub use flow::{
+    DataRequest, DataUp, FlowNotice, decode_data_request, decode_notice, encode_data_request,
+    encode_notice,
+};
 pub use frame::{
     CodedFrame, DataMessage, DecodeError, DeltaFrame, EncodeError, Form, Frame, FrameData,
     FrameHeader, FrameKind, FrameStamp, WireFrame, decode_data_message, decode_frame, decode_wire,

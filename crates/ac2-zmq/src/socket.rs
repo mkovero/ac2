@@ -491,6 +491,13 @@ impl Socket {
     /// their content: each is shared ([`Part::share`]), so the caller keeps them (to send
     /// again, or to retry after [`Error::WouldBlock`], when nothing was queued).
     pub fn try_send_parts(&self, parts: &[Part]) -> Result<()> {
+        let refs: Vec<&Part> = parts.iter().collect();
+        self.try_send_shared(&refs)
+    }
+
+    /// [`Socket::try_send_parts`] of parts held apart (a routing id kept per peer, the
+    /// topic and body shared by every peer they go to).
+    pub fn try_send_shared(&self, parts: &[&Part]) -> Result<()> {
         let Some(last) = parts.len().checked_sub(1) else {
             return Err(Error::InvalidArgument("a message has at least one frame"));
         };

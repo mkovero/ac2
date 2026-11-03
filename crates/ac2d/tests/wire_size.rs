@@ -5,7 +5,9 @@
 //! frame. A realistic tuning session (three transfer functions and their average, three
 //! default spectra and a short one, an RTA, two SPL meters with band meters, the input
 //! meters), with and without a pane in its IR view, must fit a remote client's budget at
-//! 60 frames per second.
+//! 60 frames per second, and a credit-starved peer beside the counted one (a 64 kB window
+//! drained at 250 kB/s) changes nothing for it while its own delay stays the window over
+//! its rate.
 //!
 //! Its own binary: the CPU time it reports is the whole process's.
 #![allow(clippy::unwrap_used)]
@@ -13,8 +15,9 @@
 #[path = "it/common/mod.rs"]
 mod common;
 
-use std::collections::BTreeMap;
-use std::sync::Arc;
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use ac2_audio::fake::{FakeDrive, FakePath, Pace};
@@ -126,6 +129,72 @@ impl Count {
 /// Per topic.
 type Sizes = BTreeMap<String, Count>;
 
+/// When the counted peer received each (topic, `seq`).
+type Arrivals = Arc<Mutex<HashMap<(String, u64), Instant>>>;
+
+/// What the starved peer saw: its delay behind the counted peer per frame, and its topics.
+#[derive(Debug, Default)]
+struct Starved {
+    delays: Vec<Duration>,
+    topics: BTreeSet<String>,
+}
+
+/// Window and drain rate of the starved peer.
+const STARVED_WINDOW: u32 = 64 * 1024;
+const STARVED_RATE: f64 = 250_000.0;
+
+/// A peer on a link of [`STARVED_RATE`]: what it reads it holds in a queue and credits only
+/// as the link would have delivered it; a frame's delay is when it leaves that queue less
+/// when the counted peer received it.
+fn starved_peer(
+    ctx: &ac2_zmq::Context,
+    endpoint: &str,
+    prefixes: &[Vec<u8>],
+    arrivals: &Arrivals,
+    stop: &AtomicBool,
+) -> Starved {
+    let prefixes: Vec<&[u8]> = prefixes.iter().map(Vec::as_slice).collect();
+    let sub = Sub::connect(ctx, endpoint, &prefixes);
+    sub.set_window(STARVED_WINDOW);
+    sub.auto_credit.set(false);
+    let mut out = Starved::default();
+    let mut link: VecDeque<(u32, String, u64)> = VecDeque::new();
+    let (mut allowance, mut at) = (0.0f64, Instant::now());
+    let counting = Instant::now() + Duration::from_secs(1);
+    while !stop.load(Ordering::Relaxed) {
+        if let Some(m) = sub.raw(Duration::from_millis(2)) {
+            let parts: Vec<&[u8]> = m.iter().map(Vec::as_slice).collect();
+            match decode_wire(&parts) {
+                Ok(w) => {
+                    let bytes: usize = parts.iter().map(|p| p.len()).sum();
+                    let topic = String::from_utf8_lossy(parts[0]).into_owned();
+                    out.topics.insert(topic.clone());
+                    link.push_back((ac2_proto::flow::frame_charge(bytes), topic, w.seq()));
+                }
+                // Outside the window: credited at once.
+                Err(_) => sub.credit_some(0, u32::MAX),
+            }
+        }
+        allowance =
+            (allowance + STARVED_RATE * at.elapsed().as_secs_f64()).min(f64::from(STARVED_WINDOW));
+        at = Instant::now();
+        while let Some((charge, ..)) = link.front()
+            && f64::from(*charge) <= allowance
+        {
+            let (charge, topic, seq) = link.pop_front().unwrap();
+            allowance -= f64::from(charge);
+            sub.credit_some(charge, 0);
+            let fast = arrivals.lock().unwrap().get(&(topic, seq)).copied();
+            if let Some(t) = fast
+                && Instant::now() > counting
+            {
+                out.delays.push(Instant::now().saturating_duration_since(t));
+            }
+        }
+    }
+    out
+}
+
 /// What one run sets up and receives.
 struct Setup<'a> {
     meas: &'a [MeasConfig],
@@ -136,6 +205,8 @@ struct Setup<'a> {
     /// The subscriber's prefixes.
     prefixes: Vec<Vec<u8>>,
     fps: Option<u32>,
+    /// A starved peer with the same prefixes beside the counted one.
+    starved: bool,
 }
 
 fn run(meas: &[MeasConfig], seconds: f64) -> Sizes {
@@ -146,12 +217,14 @@ fn run(meas: &[MeasConfig], seconds: f64) -> Sizes {
             stimulus: false,
             prefixes: vec![b"d/".to_vec(), b"ka".to_vec()],
             fps: None,
+            starved: false,
         },
         seconds,
     )
+    .0
 }
 
-fn run_with(setup: &Setup<'_>, seconds: f64) -> Sizes {
+fn run_with(setup: &Setup<'_>, seconds: f64) -> (Sizes, Option<Starved>) {
     init_log();
     let mut config = DaemonConfig::new(Arc::new(noisy_rig()), local_tcp(), -10.0);
     if let Some(fps) = setup.fps {
@@ -192,21 +265,34 @@ fn run_with(setup: &Setup<'_>, seconds: f64) -> Sizes {
             },
         });
     }
+    let arrivals = Arrivals::default();
+    let stop = Arc::new(AtomicBool::new(false));
+    let starved = setup.starved.then(|| {
+        let (ctx, endpoint) = (h.context().clone(), h.data_endpoint().to_owned());
+        let (prefixes, arrivals, stop) = (setup.prefixes.clone(), arrivals.clone(), stop.clone());
+        std::thread::spawn(move || starved_peer(&ctx, &endpoint, &prefixes, &arrivals, &stop))
+    });
     // Let the averages fill before counting.
     std::thread::sleep(Duration::from_secs(2));
-    while sub.sock.recv_timeout(Duration::ZERO).unwrap().is_some() {}
+    while sub.raw(Duration::ZERO).is_some() {}
     let mut sizes = Sizes::new();
     // Every frame's parts, `[u32 count, (u32 len, bytes)…]` little-endian, appended to one
     // file per topic, for trying encodings offline.
     let dump = std::env::var_os("AC2_WIRE_DUMP").map(std::path::PathBuf::from);
     let (t0, c0) = (Instant::now(), cpu_s());
     while t0.elapsed() < Duration::from_secs_f64(seconds) {
-        let Some(m) = sub.sock.recv_timeout(Duration::from_millis(100)).unwrap() else {
+        let Some(m) = sub.raw(Duration::from_millis(100)) else {
             continue;
         };
-        let parts: Vec<&[u8]> = m.frames().iter().map(Vec::as_slice).collect();
+        let parts: Vec<&[u8]> = m.iter().map(Vec::as_slice).collect();
         if let Ok(w) = decode_wire(&parts) {
             let topic = String::from_utf8_lossy(parts[0]).into_owned();
+            if starved.is_some() {
+                arrivals
+                    .lock()
+                    .unwrap()
+                    .insert((topic.clone(), w.seq()), Instant::now());
+            }
             let bytes: usize = parts.iter().map(|p| p.len()).sum();
             if let Some(dir) = &dump {
                 use std::io::Write;
@@ -236,6 +322,8 @@ fn run_with(setup: &Setup<'_>, seconds: f64) -> Sizes {
         }
     }
     let (c1, elapsed) = (cpu_s(), t0.elapsed().as_secs_f64());
+    stop.store(true, Ordering::Relaxed);
+    let starved = starved.map(|t| t.join().unwrap());
     let (cpu, jobs) = ((c1.0 - c0.0) / elapsed, (c1.1 - c0.1) / elapsed);
     let (mut frames, mut bytes) = (0, 0);
     for (topic, c) in &sizes {
@@ -264,7 +352,20 @@ fn run_with(setup: &Setup<'_>, seconds: f64) -> Sizes {
         cpu * 100.0,
         jobs * 100.0
     );
-    sizes
+    if let Some(s) = &starved {
+        let mut d = s.delays.clone();
+        d.sort();
+        let at = |q: f64| d.get(((d.len() as f64 - 1.0) * q) as usize).copied();
+        eprintln!(
+            "starved peer: {} frames over {} topics, delay median {:?} p95 {:?} max {:?}",
+            d.len(),
+            s.topics.len(),
+            at(0.5),
+            at(0.95),
+            d.last()
+        );
+    }
+    (sizes, starved)
 }
 
 /// Bytes of one live IR frame (4 096 points, `ir_linear` and `ir_etc`): about 13 kB with a
@@ -392,7 +493,7 @@ fn ui_topics(ir_view: bool) -> Vec<Vec<u8>> {
     t.into_iter().map(String::into_bytes).collect()
 }
 
-fn session_sizes(fps: u32, seconds: f64, ir_view: bool) -> Sizes {
+fn session_sizes(fps: u32, seconds: f64, ir_view: bool, starved: bool) -> (Sizes, Option<Starved>) {
     let meas = tuning_session();
     run_with(
         &Setup {
@@ -401,6 +502,7 @@ fn session_sizes(fps: u32, seconds: f64, ir_view: bool) -> Sizes {
             stimulus: true,
             prefixes: ui_topics(ir_view),
             fps: Some(fps),
+            starved,
         },
         seconds,
     )
@@ -409,10 +511,39 @@ fn session_sizes(fps: u32, seconds: f64, ir_view: bool) -> Sizes {
 /// The tuning session at 60 frames per second stays far below what a Wi-Fi or VPN link
 /// carries, with each transfer function sent as a delta on the one before and a keyframe
 /// every half second (counting starts after the averages filled, past the first second).
+/// A credit-starved peer subscribes to the same topics: the counted peer's budgets hold
+/// beside it, and the starved one is served every topic, typically the window over its
+/// rate behind the counted one and at most one rotation round more.
 #[test]
 fn slow_tuning_session_fits_a_remote_link() {
     let seconds = 4.0;
-    let sizes = session_sizes(60, seconds, true);
+    let (sizes, starved) = session_sizes(60, seconds, true, true);
+    let starved = starved.unwrap();
+    let topics: BTreeSet<String> = sizes.keys().cloned().collect();
+    assert_eq!(
+        starved.topics, topics,
+        "the starved peer is served every topic"
+    );
+    let mut d = starved.delays.clone();
+    d.sort();
+    assert!(d.len() > 100, "the starved peer got {} frames", d.len());
+    // A credited frame waits on the link behind at most the window; before it was sent it
+    // waited in its slot for its turn, at most one round of the rotation (a frame of each
+    // topic). The slack is a busy machine's scheduling.
+    let secs = |bytes: f64| Duration::from_secs_f64(bytes / STARVED_RATE);
+    let slack = Duration::from_millis(50);
+    let round: u64 = sizes.values().map(Count::per_frame).sum();
+    let (median, p95) = (d[d.len() / 2], d[(d.len() - 1) * 95 / 100]);
+    let window = secs(f64::from(STARVED_WINDOW));
+    assert!(
+        median <= window + slack,
+        "the starved peer is {median:?} behind (median)"
+    );
+    let bound = secs(f64::from(STARVED_WINDOW) + round as f64) + slack;
+    assert!(
+        p95 <= bound,
+        "the starved peer is {p95:?} behind (p95), bound {bound:?}"
+    );
     let mbit = |ir: bool| {
         sizes
             .iter()
@@ -470,7 +601,7 @@ fn tuning_session_bytes() {
     for ir_view in [false, true] {
         for fps in [30, 60] {
             eprintln!("--- {fps} fps, IR view {ir_view}");
-            session_sizes(fps, 10.0, ir_view);
+            session_sizes(fps, 10.0, ir_view, true);
         }
     }
 }

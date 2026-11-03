@@ -7,7 +7,7 @@
 //! [`AuthorizedKeys`] — and the socket patterns ac2 relies on ([`drain_latest`],
 //! [`SubscriptionTracker`]).
 //!
-//! The daemon's I/O-thread architecture is not here: one thread owns ROUTER + XPUB and polls
+//! The daemon's I/O-thread architecture is not here: one thread owns the ctrl and data ROUTERs and polls
 //! them with an inproc PULL that other threads feed; that lives in `ac2d`.
 //!
 //! # Security rule

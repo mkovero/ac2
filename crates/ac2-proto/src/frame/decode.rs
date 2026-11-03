@@ -384,8 +384,22 @@ pub(super) fn to_frame(c: &CodedFrame) -> Result<Frame, DecodeError> {
     })
 }
 
-/// Decode anything received on the data socket: `evt` → event, otherwise a frame.
+/// Decode anything received on the data socket: `evt` → event, `flow` → notice, otherwise
+/// a frame.
 pub fn decode_data_message(parts: &[&[u8]]) -> Result<DataMessage, DecodeError> {
+    if parts.first() == Some(&crate::flow::FLOW_TOPIC) {
+        let [_, body] = parts else {
+            return Err(DecodeError::Parts(parts.len()));
+        };
+        return crate::flow::decode_notice(body)
+            .map(DataMessage::Flow)
+            .map_err(|e| match e {
+                crate::ctrl::CtrlError::VersionMismatch { ours, theirs } => {
+                    DecodeError::VersionMismatch { ours, theirs }
+                }
+                e => DecodeError::Header(e.to_string()),
+            });
+    }
     match parts.first().map(|t| Topic::parse(t)) {
         Some(Ok(Topic::Evt)) => {
             if parts.len() != 2 {

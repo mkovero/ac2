@@ -13,7 +13,7 @@ import zlib
 
 import msgpack
 
-PROTO_VERSION = 82
+PROTO_VERSION = 83
 MAX_HEADER_BYTES = 8192
 MAX_N = 1 << 16
 MAX_ARRAYS = 12
@@ -36,6 +36,65 @@ _METER_TOPICS = {
 
 class DecodeError(Exception):
     pass
+
+
+# --------------------------------------------------------------------------------------
+# Flow control on the data socket (§5.8): the client's DEALER messages, the daemon's
+# notices, what a frame costs of the window.
+
+FLOW_TOPIC = b"flow"
+DATA_WINDOW_DEFAULT = 64 * 1024
+DATA_WINDOW_MIN = 20 * 1024
+DATA_WINDOW_MAX = 256 * 1024
+FRAME_CHARGE_MIN = 64
+EVENT_BOUND = 256
+NOTICES = ("resync_required", "rejoin")
+_DATA_UP = {
+    "window": {"bytes"},
+    "subscribe": {"sub"},
+    "unsubscribe": {"sub"},
+    "keyframe": {"topic"},
+    "credit": {"bytes", "events"},
+}
+
+
+def frame_charge(nbytes: int) -> int:
+    """What a frame message of `nbytes` (every part) costs of the window."""
+    return max(nbytes, FRAME_CHARGE_MIN)
+
+
+def outside_window(topic: bytes) -> bool:
+    """An event, keepalive or notice: credited as a message, not by its bytes."""
+    return topic in (b"evt", b"ka", FLOW_TOPIC)
+
+
+def encode_data_request(msg: dict) -> bytes:
+    """One DEALER message, `{v, msg: {type, ...}}`."""
+    return msgpack.packb({"v": PROTO_VERSION, "msg": msg}, use_bin_type=True)
+
+
+def decode_data_request(b: bytes) -> dict:
+    r = msgpack.unpackb(b, raw=False)
+    if not isinstance(r, dict) or r.get("v") != PROTO_VERSION:
+        raise DecodeError("data request: version")
+    m = r.get("msg")
+    if set(r) != {"v", "msg"} or not isinstance(m, dict):
+        raise DecodeError("data request: shape")
+    t = m.get("type")
+    if t not in _DATA_UP or set(m) != _DATA_UP[t] | {"type"}:
+        raise DecodeError(f"data request: {t!r}")
+    return m
+
+
+def decode_notice(body: bytes) -> str:
+    """A notice's body (the part after `flow`): its type."""
+    r = msgpack.unpackb(body, raw=False)
+    if not isinstance(r, dict) or r.get("v") != PROTO_VERSION or set(r) != {"v", "msg"}:
+        raise DecodeError("notice: version or shape")
+    m = r["msg"]
+    if not isinstance(m, dict) or set(m) != {"type"} or m["type"] not in NOTICES:
+        raise DecodeError("notice: type")
+    return m["type"]
 
 
 # --------------------------------------------------------------------------------------

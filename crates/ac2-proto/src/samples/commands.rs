@@ -4,7 +4,6 @@ use super::builders::*;
 use super::state::*;
 use crate::ctrl::Command;
 use crate::model::*;
-use crate::topic::{Stream, Topic};
 use crate::units::*;
 
 /// One example of every [`Command`] variant.
@@ -461,12 +460,6 @@ pub fn commands() -> Vec<Command> {
             request: super::sim::sim_map_request(),
         },
         Command::SimCancel,
-        Command::DataKeyframe {
-            topic: Topic::Data {
-                meas: MeasId(1),
-                stream: Stream::Tf,
-            },
-        },
     ])
     .collect()
 }

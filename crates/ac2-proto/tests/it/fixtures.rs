@@ -101,6 +101,16 @@ fn rust_fixtures() -> Vec<(String, Vec<u8>)> {
         .map(|e| encode_event(e).expect("fixture"))
         .collect();
     out.push(("rust_events.bin".into(), container(&evts)));
+    let data: Vec<Vec<u8>> = samples::data_requests()
+        .iter()
+        .map(|r| encode_data_request(r).expect("fixture"))
+        .collect();
+    out.push(("rust_data_requests.bin".into(), container(&data)));
+    let notices: Vec<Vec<u8>> = samples::notices()
+        .into_iter()
+        .flat_map(|n| encode_notice(n).expect("fixture"))
+        .collect();
+    out.push(("rust_notices.bin".into(), container(&notices)));
     let grids: Vec<Vec<u8>> = samples::grids()
         .into_iter()
         .map(|g| {
@@ -201,6 +211,15 @@ fn python_events_decode_to_the_samples() {
         let want = evts.iter().find(|e| e.rev == got.rev).expect("fixture");
         assert_eq!(&got, want);
     }
+}
+
+#[test]
+fn python_data_requests_decode_to_the_samples() {
+    let got: Vec<DataRequest> = read_container("py_data_requests.bin")
+        .iter()
+        .map(|b| decode_data_request(b).expect("fixture"))
+        .collect();
+    assert_eq!(got, samples::data_requests());
 }
 
 /// The wire lock ties the encoded fixtures to `PROTO_VERSION`: any change to what goes on the

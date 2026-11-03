@@ -380,4 +380,6 @@ pub enum DataMessage {
     Frame(Frame),
     /// A state event (`evt`).
     Event(Event),
+    /// A flow-control notice to this connection (`flow`).
+    Flow(crate::flow::FlowNotice),
 }

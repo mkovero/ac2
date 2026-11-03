@@ -122,7 +122,7 @@ impl Rig {
                         seen.push(t);
                     }
                 }
-                None => {}
+                Some(DataMessage::Flow(_)) | None => {}
             }
         }
     }

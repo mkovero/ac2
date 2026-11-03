@@ -250,7 +250,7 @@ pub enum Listen {
     Local {
         /// Ctrl (ROUTER) endpoint.
         ctrl: String,
-        /// Data (XPUB) endpoint.
+        /// Data (ROUTER) endpoint.
         data: String,
     },
     /// Network mode: `tcp://` on any interface, CURVE on both sockets, every client
@@ -258,7 +258,7 @@ pub enum Listen {
     Network {
         /// Ctrl (ROUTER) endpoint.
         ctrl: String,
-        /// Data (XPUB) endpoint.
+        /// Data (ROUTER) endpoint.
         data: String,
         /// Key files.
         security: NetworkSecurity,

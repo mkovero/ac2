@@ -183,7 +183,22 @@ impl<'de> Deserialize<'de> for Topic {
     }
 }
 
-/// A ZMQ subscription, as a prefix.
+/// On the data socket a subscription goes as its prefix string.
+impl Serialize for Subscription {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let p = self.prefix();
+        s.serialize_str(std::str::from_utf8(&p).map_err(serde::ser::Error::custom)?)
+    }
+}
+
+impl<'de> Deserialize<'de> for Subscription {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Self::parse_prefix(s.as_bytes()).map_err(serde::de::Error::custom)
+    }
+}
+
+/// A data-socket subscription, as a prefix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Subscription {
     /// Every measurement stream (`d/`).
@@ -221,6 +236,27 @@ impl Subscription {
             (Self::Topic(t), other) => t == other,
             _ => false,
         }
+    }
+
+    /// The subscription whose [`Subscription::prefix`] is `b`: `d/`, `session/`,
+    /// `d/<meas>/` (canonical, as a topic spells it) or a whole topic.
+    pub fn parse_prefix(b: &[u8]) -> Result<Self, TopicError> {
+        match b {
+            b"d/" => return Ok(Self::AllData),
+            b"session/" => return Ok(Self::InputMeters),
+            _ => {}
+        }
+        if let Some(id) = b.strip_prefix(b"d/").and_then(|r| r.strip_suffix(b"/"))
+            && !id.contains(&b'/')
+        {
+            // The measurement id spelled as a topic spells it: parse a topic of it.
+            let mut t = b.to_vec();
+            t.extend_from_slice(b"tf");
+            if let Ok(Topic::Data { meas, .. }) = Topic::parse(&t) {
+                return Ok(Self::Meas(meas));
+            }
+        }
+        Topic::parse(b).map(Self::Topic)
     }
 
     /// The subscriptions a client needs before `state.snapshot` (Q5 step 1).
@@ -287,6 +323,28 @@ mod tests {
             b"",
         ] {
             assert!(Topic::parse(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn prefixes_parse_back() {
+        let subs = [
+            Subscription::AllData,
+            Subscription::InputMeters,
+            Subscription::Meas(MeasId(0)),
+            Subscription::Meas(MeasId(12)),
+            Subscription::Topic(Topic::Ka),
+            Subscription::Topic(Topic::SessionGonio),
+            Subscription::Topic(Topic::Data {
+                meas: MeasId(4),
+                stream: Stream::BandLeq,
+            }),
+        ];
+        for s in subs {
+            assert_eq!(Subscription::parse_prefix(&s.prefix()), Ok(s));
+        }
+        for bad in [&b"d/01/"[..], b"d//", b"d/1/x/", b"", b"session", b"d"] {
+            assert!(Subscription::parse_prefix(bad).is_err(), "{bad:?}");
         }
     }
 

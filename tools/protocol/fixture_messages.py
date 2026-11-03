@@ -831,8 +831,26 @@ def requests():
             },
         ),
         req(100, "sim.cancel"),
-        req(101, "data.keyframe", {"topic": "d/1/tf"}, mutation=False),
     ]
+
+
+def data_requests():
+    """samples::data_requests(), the messages a client sends on its data DEALER."""
+    return [
+        {"type": "window", "bytes": 65536},
+        {"type": "subscribe", "sub": "d/"},
+        {"type": "subscribe", "sub": "d/12/"},
+        {"type": "subscribe", "sub": "session/"},
+        {"type": "subscribe", "sub": "evt"},
+        {"type": "unsubscribe", "sub": "d/3/tf"},
+        {"type": "keyframe", "topic": "d/3/tf"},
+        {"type": "credit", "bytes": 9000, "events": 3},
+    ]
+
+
+def notices():
+    """samples::notices()."""
+    return ["resync_required", "rejoin"]
 
 
 def events():

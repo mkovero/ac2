@@ -61,6 +61,7 @@ from fixture_frames import (  # noqa: E402
 from fixture_messages import (  # noqa: E402
     arrival,
     BAND_LEQ_CONFIG,
+    data_requests,
     events,
     finding,
     FINLAND_545_BANDS,
@@ -69,6 +70,7 @@ from fixture_messages import (  # noqa: E402
     MATH_MEASUREMENT,
     MEAS_CONFIG,
     measurement,
+    notices,
     PANE_LAYOUT,
     req,
     requests,
@@ -100,6 +102,9 @@ def generate(out):
     _dump(os.path.join(exp, "requests.json"), requests())
     p.write_container(os.path.join(out, "py_events.bin"), [_pack(e) for e in events()])
     _dump(os.path.join(exp, "events.json"), events())
+    p.write_container(
+        os.path.join(out, "py_data_requests.bin"), [p.encode_data_request(m) for m in data_requests()]
+    )
     # Delta chains: the frames of Rust's chain, as Python's keyframe and deltas.
     for name in _chains():
         keys = _chain_keys(name)
@@ -237,6 +242,22 @@ def check():
             p.same(rust_evts[want["rev"]], want)
         except Exception as e:  # noqa: BLE001
             ok(False, f"event {want['rev']}: {e}")
+
+    # Flow control: Rust's data requests and notices.
+    try:
+        got = [p.decode_data_request(b) for b in p.read_container(os.path.join(FIX, "rust_data_requests.bin"))]
+        p.same(got, data_requests())
+        parts = p.read_container(os.path.join(FIX, "rust_notices.bin"))
+        ok(all(t == p.FLOW_TOPIC for t in parts[0::2]), "notice topics")
+        ok([p.decode_notice(b) for b in parts[1::2]] == notices(), "notices")
+    except Exception as e:  # noqa: BLE001
+        ok(False, f"flow: {e}")
+    for bad in ({"type": "window"}, {"type": "credit", "bytes": 1, "events": 0, "x": 1}, {"type": "open"}):
+        try:
+            p.decode_data_request(p.encode_data_request(bad))
+            ok(False, f"bad data request {bad} accepted")
+        except p.DecodeError:
+            pass
 
     # 4. Grid ids: Rust-encoded definitions hash to the same ids here.
     rust_grids = [p.msgpack.unpackb(b, raw=False) for b in p.read_container(os.path.join(FIX, "rust_grids.bin"))]

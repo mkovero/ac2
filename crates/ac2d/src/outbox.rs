@@ -8,8 +8,8 @@
 //!
 //! Frames do not go through the pipe: a job hands its quantised codes and header fields
 //! ([`CodedFrame`]) to the I/O thread through a [`FrameTx`] channel, and the pipe carries only
-//! a wake-up. The I/O thread forms keyframe or delta against what it last sent, so the
-//! encoding that depends on the wire's history happens where that history is.
+//! a wake-up. The I/O thread forms keyframe or delta against what it last sent to each peer,
+//! so the encoding that depends on the wire's history happens where that history is.
 
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 
@@ -18,12 +18,10 @@ use ac2_zmq::{Context, Error as ZmqError, Part, Socket, SocketType};
 
 /// Reply: `[R][routing id][reply]`.
 pub(crate) const TAG_REPLY: u8 = b'R';
-/// State event: `[E][event body]` → data socket `[evt][body]`.
+/// State event: `[E][event body]` → data socket `[evt][body]` to every peer receiving it.
 pub(crate) const TAG_EVENT: u8 = b'E';
 /// Frames are waiting in the [`FrameTx`] channel: `[F]`.
 pub(crate) const TAG_FRAME: u8 = b'F';
-/// The next frame of a topic goes as a keyframe (`data.keyframe`): `[Y][topic]`.
-pub(crate) const TAG_KEYFRAME: u8 = b'Y';
 /// Keepalive frame (a keyframe), sent at once: `[K][topic][body]`.
 pub(crate) const TAG_KA: u8 = b'K';
 /// Forget latest slots under a prefix: `[C][prefix]`.
@@ -95,11 +93,6 @@ impl Outbox {
             }
         }
         tracing::warn!("internal pipe full for 1 s; keepalive dropped");
-    }
-
-    /// The next frame of `topic` goes as a keyframe.
-    pub(crate) fn keyframe(&self, topic: &[u8]) {
-        self.send(TAG_KEYFRAME, &[topic]);
     }
 
     pub(crate) fn clear(&self, prefix: &[u8]) {

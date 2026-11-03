@@ -1,6 +1,6 @@
 //! An in-process fake daemon for tests (feature `test-support`).
 //!
-//! It speaks the real wire protocol over real sockets (ROUTER + XPUB on `tcp://127.0.0.1`),
+//! It speaks the real wire protocol over real sockets (two ROUTERs on `tcp://127.0.0.1`),
 //! built only from `ac2-proto` and `ac2-zmq`: hello, request-id dedup, `expect_rev`,
 //! serial commits with events on `evt`, a replay buffer with eviction, keepalives,
 //! `grid.get`, and the stimulus lease with expiry. Hooks let a test drop events, drop one
@@ -34,6 +34,8 @@ use crate::endpoint::Endpoints;
 
 #[path = "fake_cal.rs"]
 mod cal;
+#[path = "fake_data.rs"]
+mod data;
 #[path = "fake_files.rs"]
 mod files;
 #[path = "fake_generator.rs"]
@@ -182,6 +184,8 @@ pub struct Shared {
     next_id: u32,
     next_token: u128,
     ka_seq: u64,
+    /// Keyframe requests received on the data socket.
+    pub keyframe_asks: u32,
     opts: FakeOptions,
 }
 
@@ -379,6 +383,7 @@ impl Shared {
             next_id: 1,
             next_token: 0x1000,
             ka_seq: 0,
+            keyframe_asks: 0,
             opts,
         }
     }
@@ -593,8 +598,6 @@ impl Shared {
             | C::DelaySet { .. }
             | C::DelayNudge { .. }
             | C::DelayTrack { .. }) => self.meas_cmd(c)?,
-            // Every frame the fake publishes is a keyframe.
-            C::DataKeyframe { .. } => ReplyBody::Ack { rev: self.rev },
             C::TraceCapture { meas, name, slot } => self.trace_capture(meas, name, slot)?,
             C::TraceList => ReplyBody::Traces(self.state.traces.clone()),
             C::TraceGet { trace } => self.trace_get(trace)?,
@@ -745,12 +748,12 @@ impl FakeDaemon {
         let router = ctx.socket(SocketType::Router)?;
         router.set_router_mandatory(true)?;
         router.bind("tcp://127.0.0.1:*")?;
-        let xpub = ctx.socket(SocketType::XPub)?;
-        xpub.set_xpub_verbose(true)?;
-        xpub.bind("tcp://127.0.0.1:*")?;
+        let data = ctx.socket(SocketType::Router)?;
+        data.set_router_mandatory(true)?;
+        data.bind("tcp://127.0.0.1:*")?;
         let endpoints = Endpoints {
             ctrl: router.last_endpoint()?,
-            data: xpub.last_endpoint()?,
+            data: data.last_endpoint()?,
         };
         let shared = Arc::new(Mutex::new(Shared::new(opts.clone(), 0x5eed_0001)));
         let stop = Arc::new(AtomicBool::new(false));
@@ -760,7 +763,7 @@ impl FakeDaemon {
             .name("fake-ac2d".into())
             .spawn(move || {
                 let _ = ready_tx.send(());
-                run(router, xpub, s2, st2, opts.ka_interval);
+                run(router, data, s2, st2, opts.ka_interval);
             })
             .map_err(|e| ac2_zmq::Error::Spawn(e.to_string()))?;
         let _ = ready_rx.recv();
@@ -808,18 +811,22 @@ impl Drop for FakeDaemon {
 
 fn run(
     router: Socket,
-    xpub: Socket,
+    data: Socket,
     shared: Arc<Mutex<Shared>>,
     stop: Arc<AtomicBool>,
     ka_interval: Duration,
 ) {
     let mut next_ka = Instant::now();
+    let mut peers = data::DataPeers::default();
     while !stop.load(Ordering::Acquire) {
-        let mut items = [PollItem::readable(&router), PollItem::readable(&xpub)];
+        let mut items = [PollItem::readable(&router), PollItem::readable(&data)];
         if poll(&mut items, Some(Duration::from_millis(5))).is_err() {
             return;
         }
-        while let Ok(Some(_)) = xpub.try_recv() {}
+        let asks = peers.recv(&data);
+        if asks > 0 {
+            shared.lock().unwrap().keyframe_asks += asks;
+        }
         while let Ok(Some(m)) = router.try_recv() {
             let frames = m.into_frames();
             let [rid, body] = frames.as_slice() else {
@@ -860,7 +867,7 @@ fn run(
             }
         }
         for parts in std::mem::take(&mut s.outbox) {
-            let _ = xpub.send(&parts);
+            peers.send(&data, &parts);
         }
     }
 }

@@ -12,8 +12,8 @@
 //! - [`Client::acquire_lease`] returns a [`StimulusLease`] refreshed in the background and
 //!   released on drop.
 //!
-//! libzmq sockets are confined to one I/O thread per client (and the data SUB behind a
-//! mutex); no tokio file-descriptor integration is used.
+//! libzmq sockets are confined to one I/O thread per client (and the data DEALER behind a
+//! mutex, drained by its consumer, which so paces what the daemon sends it).
 
 mod client;
 pub mod data;

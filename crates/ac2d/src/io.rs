@@ -1,15 +1,16 @@
-//! The I/O thread: owns the ROUTER (ctrl) and XPUB (data) sockets and the inproc PULL that
-//! the rest of the daemon feeds, and polls the three with `zmq_poll`. No other thread touches
-//! a client-facing socket.
+//! The I/O thread: owns the two client-facing ROUTERs (ctrl and data) and the inproc PULL
+//! that the rest of the daemon feeds, and polls the three with `zmq_poll`. No other thread
+//! touches a client-facing socket.
 //!
-//! - ROUTER: each request is handed to the control thread with its routing id and ZAP user
-//!   id; replies come back through the PULL.
-//! - XPUB: subscription changes update the shared [`Interest`] set; a new subscription gets
-//!   a keyframe of the latest frame of every topic it covers at once (late joiners do not
-//!   wait). Events and keepalives are sent as they arrive; frames come from the jobs as codes
-//!   ([`crate::outbox::FrameTx`]) into per-topic latest slots, each sent at most at the
-//!   publish rate (bounded freshness, Q2), as a keyframe or a delta on the topic's chain
-//!   ([`crate::chain`]).
+//! - ctrl ROUTER: each request is handed to the control thread with its routing id and ZAP
+//!   user id; replies come back through the PULL.
+//! - data ROUTER: one peer per client connection ([`crate::peers`]): its subscriptions
+//!   update the shared [`Interest`], its credit paces what it is sent. Frames come from the
+//!   jobs as codes ([`crate::outbox::FrameTx`]) into per-topic latest slots; each peer is
+//!   sent the newest frame of each of its topics in turn, as its credit allows and each at
+//!   most at the publish rate (bounded freshness, Q2), as a keyframe or a delta on its own
+//!   chain ([`crate::chain`]). Events and keepalives go to every peer at once, outside
+//!   credit.
 //! - Network mode: the ZAP handler's status is checked every iteration; if it has exited,
 //!   both network sockets are closed (a CURVE server without a handler fails open) and the
 //!   daemon is told to shut down.
@@ -21,45 +22,66 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use ac2_proto::Topic;
-use ac2_zmq::{
-    Error as ZmqError, Message, Part, PollItem, SecureContext, Socket, SubscriptionTracker, poll,
-};
+use ac2_zmq::{Error as ZmqError, Message, Part, PollItem, SecureContext, Socket, poll};
 
 use crate::chain::Slot;
 use crate::control::{ControlMsg, CurvePeer};
-use crate::outbox::{
-    FrameRx, TAG_CLEAR, TAG_EVENT, TAG_FRAME, TAG_KA, TAG_KEYFRAME, TAG_REPLY, TAG_STOP,
-};
+use crate::outbox::{FrameRx, TAG_CLEAR, TAG_EVENT, TAG_FRAME, TAG_KA, TAG_REPLY, TAG_STOP};
+use crate::peers::{Outside, Peers};
 
 /// Topics with at least one subscriber, shared with jobs that compute optional derivations
-/// only when someone receives them.
+/// only when someone receives them: the subscription prefixes of every data peer, counted
+/// per peer holding them.
 #[derive(Debug, Default)]
-pub(crate) struct Interest(Mutex<SubscriptionTracker>);
+pub(crate) struct Interest(Mutex<HashMap<Vec<u8>, usize>>);
 
 impl Interest {
     pub(crate) fn wants(&self, topic: &[u8]) -> bool {
         self.0
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .wants(topic)
+            .keys()
+            .any(|p| topic.starts_with(p))
+    }
+
+    pub(crate) fn add(&self, prefix: &[u8]) {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .entry(prefix.to_vec())
+            .or_default() += 1;
+    }
+
+    pub(crate) fn remove(&self, prefix: &[u8]) {
+        let mut m = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(n) = m.get_mut(prefix) {
+            *n -= 1;
+            if *n == 0 {
+                m.remove(prefix);
+            }
+        }
     }
 
     #[cfg(test)]
     pub(crate) fn subscribe(&self, prefix: &[u8]) {
-        let ev = ac2_zmq::SubscriptionEvent::Subscribe(prefix.to_vec());
-        self.update(|t| t.apply_event(&ev));
+        self.add(prefix);
     }
 
     #[cfg(test)]
     pub(crate) fn unsubscribe(&self, prefix: &[u8]) {
-        let ev = ac2_zmq::SubscriptionEvent::Unsubscribe(prefix.to_vec());
-        self.update(|t| t.apply_event(&ev));
+        self.remove(prefix);
     }
 
-    fn update(&self, f: impl FnOnce(&mut SubscriptionTracker)) -> usize {
-        let mut t = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        f(&mut t);
-        t.prefixes().count()
+    /// Peers holding `prefix`.
+    #[cfg(test)]
+    pub(crate) fn count(&self, prefix: &[u8]) -> usize {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(prefix)
+            .copied()
+            .unwrap_or(0)
     }
 }
 
@@ -67,7 +89,7 @@ impl Interest {
 /// reach [`crate::Daemon::start`].
 pub(crate) struct IoSockets {
     pub(crate) router: Socket,
-    pub(crate) xpub: Socket,
+    pub(crate) data: Socket,
     pub(crate) pull: Socket,
     /// Frames from the jobs.
     pub(crate) frames: FrameRx,
@@ -80,24 +102,9 @@ const BATCH: usize = 256;
 
 /// Longest poll in network mode, so a dead ZAP handler is noticed within it.
 const ZAP_CHECK: Duration = Duration::from_millis(100);
-/// Longest poll in local mode with nothing held back: every input wakes the poll anyway.
+/// Longest poll in local mode with nothing held back: every input wakes the poll anyway, and
+/// a stalled peer is looked for this often.
 const IDLE_POLL: Duration = Duration::from_secs(1);
-
-/// Per-peer send queue of the data socket, in messages.
-///
-/// The latest slots already conflate per topic, so the queue only has to hold one burst:
-/// every slot a late joiner is sent at once, or one publish round of a full desk (about 40
-/// topics) plus events and keepalives. Within such a burst libzmq does not yet see what the
-/// peer has read, so a smaller queue would drop part of every round even for a fast local
-/// peer. Anything above one burst only adds latency for a peer slower than the publish rate
-/// (a Wi-Fi link): its queue stays full and every frame waits behind all the others, so the
-/// standing delay is this many frames divided by what the link carries per second.
-///
-/// Set once before the socket binds. It is never changed on the live socket: libzmq applies
-/// a new SNDHWM to existing pipes by sending commands to their peers, and such a command
-/// racing with a disconnecting peer's pipe teardown is a use-after-free in libzmq 4.3.5's
-/// I/O thread (it crashed the daemon at shutdown after a client with many subscriptions left).
-pub(crate) const DATA_SNDHWM: u32 = 48;
 
 pub(crate) fn spawn(
     sockets: IoSockets,
@@ -110,22 +117,56 @@ pub(crate) fn spawn(
         .spawn(move || run(sockets, &to_control, &interest, fps))
 }
 
+/// The newest frame per topic, and the order peers are served them in.
+#[derive(Debug, Default)]
+struct Slots {
+    map: HashMap<Topic, Slot>,
+    order: Vec<Topic>,
+    put: u64,
+}
+
+impl Slots {
+    /// Every frame queued into its topic's slot, replacing any frame still waiting there.
+    fn take(&mut self, frames: &FrameRx) {
+        while let Ok(f) = frames.try_recv() {
+            self.put += 1;
+            let topic = f.topic;
+            let slot = Slot {
+                frame: Arc::new(f),
+                put: self.put,
+            };
+            if self.map.insert(topic, slot).is_none() {
+                self.order.push(topic);
+            }
+        }
+    }
+
+    fn clear(&mut self, prefix: &[u8]) {
+        self.map.retain(|t, _| !t.to_bytes().starts_with(prefix));
+        let map = &self.map;
+        self.order.retain(|t| map.contains_key(t));
+    }
+}
+
 fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: u32) {
     let IoSockets {
         router,
-        xpub,
+        data,
         pull,
         frames,
         secure,
     } = s;
-    let mut net: Option<(Socket, Socket)> = Some((router, xpub));
+    let mut net: Option<(Socket, Socket)> = Some((router, data));
     let period = Duration::from_secs_f64(1.0 / f64::from(fps.max(1)));
-    // Shortest interval between two frames of one topic. Publishers pace themselves on a
-    // cadence (`crate::cadence`) that keeps the average rate by sending some frames early
-    // and never sends two within half a period, so this only stops a publisher that
-    // bursts. A frame held back here waits for a timer of its own, which the OS may defer.
+    // Shortest interval between two frames of one topic to one peer. Publishers pace
+    // themselves on a cadence (`crate::cadence`) that keeps the average rate by sending some
+    // frames early and never sends two within half a period, so this only stops a publisher
+    // that bursts. A frame held back here waits for a timer of its own, which the OS may
+    // defer.
     let min_gap = period / 2;
-    let mut slots: HashMap<Topic, Slot> = HashMap::new();
+    let mut slots = Slots::default();
+    let mut peers = Peers::default();
+    let mut due: Option<Instant> = None;
     let evt_topic = match Part::copy_from(b"evt") {
         Ok(p) => p,
         Err(e) => {
@@ -152,23 +193,16 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
         } else {
             IDLE_POLL
         };
-        let timeout = slots
-            .values()
-            .filter(|s| s.dirty())
-            .filter_map(|s| {
-                s.last_sent()
-                    .map(|t| (t + min_gap).saturating_duration_since(now))
-            })
-            .min()
-            .unwrap_or(idle)
+        let timeout = due
+            .map_or(idle, |t| t.saturating_duration_since(now))
             .min(idle);
 
-        let (r_ready, x_ready, p_ready) = {
+        let (r_ready, d_ready, p_ready) = {
             let mut items: Vec<PollItem<'_>> = Vec::with_capacity(3);
             items.push(PollItem::readable(&pull));
-            if let Some((r, x)) = &net {
+            if let Some((r, d)) = &net {
                 items.push(PollItem::readable(r));
-                items.push(PollItem::readable(x));
+                items.push(PollItem::readable(d));
             }
             if let Err(e) = poll(&mut items, Some(timeout)) {
                 tracing::error!("poll failed: {e}");
@@ -177,8 +211,8 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
             }
             let p = items[0].is_readable();
             let r = items.get(1).is_some_and(PollItem::is_readable);
-            let x = items.get(2).is_some_and(PollItem::is_readable);
-            (r, x, p)
+            let d = items.get(2).is_some_and(PollItem::is_readable);
+            (r, d, p)
         };
 
         if r_ready && let Some((router, _)) = &net {
@@ -194,24 +228,14 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
             }
         }
 
-        if x_ready && let Some((_, xpub)) = &net {
+        // Frames first: a subscription that arrives with them is served the newest.
+        slots.take(&frames);
+
+        if d_ready && let Some((_, data)) = &net {
+            let now = Instant::now();
             for _ in 0..BATCH {
-                match xpub.try_recv() {
-                    Ok(Some(m)) => {
-                        let Some(ev) = ac2_zmq::SubscriptionEvent::parse(&m) else {
-                            continue;
-                        };
-                        interest.update(|t| t.apply_event(&ev));
-                        if let ac2_zmq::SubscriptionEvent::Subscribe(prefix) = &ev {
-                            tracing::debug!("subscribe {:?}", String::from_utf8_lossy(prefix));
-                            let now = Instant::now();
-                            for (topic, slot) in &mut slots {
-                                if topic.to_bytes().starts_with(prefix) {
-                                    slot.send_key_now(xpub, now);
-                                }
-                            }
-                        }
-                    }
+                match data.try_recv() {
+                    Ok(Some(m)) => peers.request(data, m.into_frames(), interest, now),
                     Ok(None) => break,
                     Err(e) => {
                         tracing::warn!("data recv: {e}");
@@ -252,33 +276,30 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
                         }
                     }
                     TAG_EVENT => {
-                        if let (Some((_, xpub)), [body]) = (&net, msg.as_slice()) {
+                        if let (Some((_, data)), [body]) = (&net, msg.as_slice()) {
                             match (evt_topic.share(), body.share()) {
-                                (Ok(t), Ok(b)) => send_data(xpub, &[t, b]),
+                                (Ok(t), Ok(b)) => {
+                                    peers.outside(data, &[t, b], Outside::Event, interest)
+                                }
                                 (Err(e), _) | (_, Err(e)) => tracing::warn!("event not sent: {e}"),
                             }
                         }
                     }
                     TAG_KA => {
-                        if let Some((_, xpub)) = &net {
-                            send_data(xpub, &msg);
+                        if let Some((_, data)) = &net
+                            && msg.len() == 2
+                        {
+                            peers.outside(data, &msg, Outside::Ka, interest);
                         }
                     }
                     // The frames themselves wait in the channel, drained below.
                     TAG_FRAME => {}
-                    TAG_KEYFRAME => {
-                        if let [topic] = msg.as_slice()
-                            && let Ok(topic) = Topic::parse(topic)
-                            && let Some(slot) = slots.get_mut(&topic)
-                        {
-                            slot.ask_key(Instant::now());
-                        }
-                    }
                     TAG_CLEAR => {
                         if let [prefix] = msg.as_slice() {
                             // Frames queued before the clear go first, as they were sent.
-                            take_frames(&frames, &mut slots);
-                            slots.retain(|t, _| !t.to_bytes().starts_with(prefix));
+                            slots.take(&frames);
+                            slots.clear(prefix);
+                            peers.clear(prefix);
                         }
                     }
                     TAG_STOP => stop = true,
@@ -290,17 +311,11 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
         // Every frame queued, wake-up or not: a wake-up dropped on a full pipe had others
         // before it.
         let now = Instant::now();
-        take_frames(&frames, &mut slots);
-        if let Some((_, xpub)) = &net {
-            for slot in slots.values_mut() {
-                if slot.dirty()
-                    && slot
-                        .last_sent()
-                        .is_none_or(|t| now.duration_since(t) >= min_gap)
-                {
-                    slot.send(xpub, now);
-                }
-            }
+        slots.take(&frames);
+        due = None;
+        if let Some((_, data)) = &net {
+            peers.sweep(now, interest);
+            due = peers.serve(data, &slots.map, &slots.order, now, min_gap, interest);
         }
 
         if stop {
@@ -343,20 +358,4 @@ fn forward_request(m: Message, to_control: &Sender<ControlMsg>) {
         peer,
         payload,
     });
-}
-
-/// Every frame queued into its topic's slot, replacing any frame still waiting there.
-fn take_frames(frames: &FrameRx, slots: &mut HashMap<Topic, Slot>) {
-    while let Ok(f) = frames.try_recv() {
-        slots.entry(f.topic).or_default().put(f);
-    }
-}
-
-fn send_data(xpub: &Socket, parts: &[Part]) {
-    // XPUB never blocks: a peer at its high-water mark misses this message, and the next
-    // newer one per topic supersedes it.
-    match xpub.try_send_parts(parts) {
-        Ok(()) | Err(ZmqError::WouldBlock) => {}
-        Err(e) => tracing::warn!("data send: {e}"),
-    }
 }

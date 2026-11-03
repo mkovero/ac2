@@ -8,6 +8,7 @@ mod chains;
 mod commands;
 mod eq;
 mod events;
+mod flow;
 mod frames;
 mod replies;
 mod sim;
@@ -19,6 +20,7 @@ pub use chains::chains;
 pub use commands::commands;
 pub use eq::{eq_edits, eq_measurement};
 pub use events::events;
+pub use flow::{data_requests, notices};
 pub use frames::{frames, stamp, tf_frame};
 pub use replies::{replies, reply, warnings};
 pub use sim::{

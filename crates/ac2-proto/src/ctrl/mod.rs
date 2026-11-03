@@ -92,7 +92,7 @@ pub fn peek_envelope(b: &[u8]) -> Result<Envelope, CtrlError> {
     rmp_serde::from_slice(b).map_err(|e| CtrlError::Malformed(e.to_string()))
 }
 
-fn check_version(b: &[u8]) -> Result<(), CtrlError> {
+pub(crate) fn check_version(b: &[u8]) -> Result<(), CtrlError> {
     match peek_envelope(b)?.v {
         None => Err(CtrlError::MissingVersion),
         Some(v) if v != PROTO_VERSION => Err(CtrlError::VersionMismatch {

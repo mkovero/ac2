@@ -180,7 +180,7 @@ fn sub_tf(sub: &Sub, meas: MeasId) {
         meas,
         stream: Stream::Tf,
     };
-    sub.sock.subscribe(&topic.to_bytes()).unwrap();
+    sub.subscribe(ac2_proto::Subscription::Topic(topic));
 }
 
 impl Rig {

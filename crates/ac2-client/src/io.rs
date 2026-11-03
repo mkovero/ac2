@@ -1,10 +1,15 @@
-//! The client's I/O thread: the only owner of the ctrl DEALER and the sync SUB (`evt`, `ka`).
+//! The client's I/O thread: the only owner of the ctrl DEALER and the sync DEALER, the data
+//! connection subscribed to `evt` and `ka`.
 //!
 //! libzmq sockets are single-threaded, so async callers never touch them. They hand encoded
 //! requests to the thread through an inproc PUSH (behind a mutex) whose PULL end the thread
-//! polls together with the DEALER and the SUB. Replies are routed to the waiting caller by
-//! request id; `evt` and `ka` go to the sync task over an unbounded channel, because a lost
-//! event would desynchronise the mirror (they are small and paced by the daemon).
+//! polls together with the two DEALERs and the sync DEALER's monitor. Replies are routed to
+//! the waiting caller by request id; `evt` and `ka` go to the sync task over an unbounded
+//! channel, because a lost event would desynchronise the mirror (they are small and paced by
+//! the daemon). What the sync DEALER read is credited after every drain; a new handshake
+//! (a reconnect is a new connection to the daemon) or a `rejoin` states its subscriptions
+//! again, and `resync_required` (its events overflowed the daemon's bound) asks the sync
+//! task for a new snapshot.
 //!
 //! The thread sleeps in `zmq_poll` without a timeout: until a socket is readable it has
 //! nothing to do, and an idle client should not wake the CPU.
@@ -15,15 +20,51 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use ac2_proto::flow::{frame_charge, outside_window};
 use ac2_proto::frame::KaMeta;
 use ac2_proto::{
-    CtrlError, DataMessage, Event, FrameData, FrameStamp, Reply, decode_data_message, decode_reply,
-    peek_envelope,
+    CtrlError, DataMessage, DataUp, Event, FlowNotice, FrameData, FrameStamp, Reply, Subscription,
+    decode_data_message, decode_reply, peek_envelope,
 };
-use ac2_zmq::{Context, PollItem, Socket, SocketType, poll};
+use ac2_zmq::{Context, Monitor, PollItem, Socket, SocketType, poll};
 use tokio::sync::{mpsc, oneshot};
 
+use crate::data::{handshook, send_up};
 use crate::error::ClientError;
+
+/// The sync DEALER, its monitor and what it subscribes to.
+#[derive(Debug)]
+pub(crate) struct SyncSocket {
+    sock: Socket,
+    monitor: Monitor,
+    subs: Vec<Subscription>,
+}
+
+impl SyncSocket {
+    /// Over `sock`, a DEALER connected to the data endpoint; subscribes it to `subs`.
+    pub(crate) fn new(
+        sock: Socket,
+        monitor: Monitor,
+        subs: &[Subscription],
+    ) -> Result<Self, ClientError> {
+        let s = Self {
+            sock,
+            monitor,
+            subs: subs.to_vec(),
+        };
+        s.state()?;
+        Ok(s)
+    }
+
+    /// Every subscription, to a daemon that knows nothing of this connection. It carries
+    /// no frames, so the default window serves.
+    fn state(&self) -> Result<(), ClientError> {
+        for s in &self.subs {
+            send_up(&self.sock, DataUp::Subscribe { sub: *s })?;
+        }
+        Ok(())
+    }
+}
 
 /// What the sync task receives from the data socket.
 #[derive(Debug)]
@@ -39,6 +80,8 @@ pub(crate) enum SyncIn {
         at: Instant,
         local_wall_ns: i128,
     },
+    /// The daemon dropped events for this connection: a new snapshot is due.
+    Resync,
 }
 
 pub(crate) type ReplyTx = oneshot::Sender<Result<Reply, ClientError>>;
@@ -70,7 +113,7 @@ impl Io {
     pub(crate) fn start(
         ctx: &Context,
         dealer: Socket,
-        sync_sub: Socket,
+        sync: SyncSocket,
         sync_tx: mpsc::UnboundedSender<SyncIn>,
         received: Arc<AtomicU64>,
     ) -> Result<Self, ClientError> {
@@ -90,7 +133,7 @@ impl Io {
         let malformed = Arc::new(AtomicU64::new(0));
         let worker = Worker {
             dealer,
-            sub: sync_sub,
+            sync,
             pull,
             pending: pending.clone(),
             sync_tx,
@@ -141,7 +184,7 @@ impl Drop for Io {
 
 struct Worker {
     dealer: Socket,
-    sub: Socket,
+    sync: SyncSocket,
     pull: Socket,
     pending: Pending,
     sync_tx: mpsc::UnboundedSender<SyncIn>,
@@ -160,8 +203,9 @@ impl Worker {
         loop {
             let mut items = [
                 PollItem::readable(&self.dealer),
-                PollItem::readable(&self.sub),
+                PollItem::readable(&self.sync.sock),
                 PollItem::readable(&self.pull),
+                PollItem::readable(self.sync.monitor.socket()),
             ];
             match poll(&mut items, None) {
                 Ok(_) => {}
@@ -171,15 +215,19 @@ impl Worker {
                     continue;
                 }
             }
-            let (d, s, p) = (
+            let (d, s, p, m) = (
                 items[0].is_readable(),
                 items[1].is_readable(),
                 items[2].is_readable(),
+                items[3].is_readable(),
             );
             if d && self.drain_dealer().is_err() {
                 return;
             }
-            if s && self.drain_sub().is_err() {
+            if m && handshook(&self.sync.monitor) {
+                let _ = self.sync.state();
+            }
+            if s && self.drain_sync().is_err() {
                 return;
             }
             if p {
@@ -234,13 +282,26 @@ impl Worker {
         }
     }
 
-    fn drain_sub(&self) -> Result<(), ac2_zmq::Error> {
-        while let Some(m) = self.sub.try_recv()? {
+    fn drain_sync(&self) -> Result<(), ac2_zmq::Error> {
+        let (mut bytes, mut events) = (0u32, 0u32);
+        while let Some(m) = self.sync.sock.try_recv()? {
             self.count(m.frames());
             let at = Instant::now();
             let local_wall_ns = wall_ns();
             let parts: Vec<&[u8]> = m.frames().iter().map(Vec::as_slice).collect();
+            match parts.first() {
+                Some(t) if outside_window(t) => events = events.saturating_add(1),
+                _ => {
+                    let n: usize = parts.iter().map(|p| p.len()).sum();
+                    bytes = bytes.saturating_add(frame_charge(n));
+                }
+            }
             let msg = match decode_data_message(&parts) {
+                Ok(DataMessage::Flow(FlowNotice::Rejoin)) => {
+                    let _ = self.sync.state();
+                    continue;
+                }
+                Ok(DataMessage::Flow(FlowNotice::ResyncRequired)) => SyncIn::Resync,
                 Ok(DataMessage::Event(e)) => SyncIn::Event(Box::new(e)),
                 Ok(DataMessage::Frame(f)) => match f.data {
                     FrameData::Ka(meta) => SyncIn::Ka {
@@ -259,6 +320,10 @@ impl Worker {
             };
             // The sync task is gone only while the client shuts down.
             let _ = self.sync_tx.send(msg);
+        }
+        if bytes > 0 || events > 0 {
+            // A full queue means the connection is down; the next one is a new peer.
+            let _ = send_up(&self.sync.sock, DataUp::Credit { bytes, events });
         }
         Ok(())
     }

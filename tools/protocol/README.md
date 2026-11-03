@@ -46,5 +46,6 @@ one keyframe `[topic][header ++ payload]`; a chain file (`*_chain_<kind>.bin`) a
 and then deltas, each message's two parts in turn, and `rust_chain_<kind>_keys.bin` the
 same frames as keyframes (Python applies Rust's chain and builds its own from those
 keyframes, which Rust applies); `*_requests.bin`, `*_replies.bin`,
-`*_events.bin` and `rust_grids.bin` hold one msgpack message per part
-(`rust_grids.bin`: `{grid, grid_id}`).
+`*_events.bin`, `*_data_requests.bin` (a client's data DEALER messages, §5.8) and
+`rust_grids.bin` hold one msgpack message per part (`rust_grids.bin`: `{grid, grid_id}`);
+`rust_notices.bin` holds the flow notices, `[flow][body]` in turn.

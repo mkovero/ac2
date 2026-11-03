@@ -93,7 +93,7 @@ async fn a_broken_chain_keeps_the_last_frame_and_asks_once() -> R {
     })
     .await?;
     same_values(&c, &TF1, &tf[1])?;
-    assert_eq!(f.received("data.keyframe"), 0);
+    assert_eq!(f.lock().keyframe_asks, 0);
 
     // `tf[2]` is lost: the delta on it is refused, the frame before stays, a keyframe is
     // asked for.
@@ -106,7 +106,7 @@ async fn a_broken_chain_keeps_the_last_frame_and_asks_once() -> R {
     assert_eq!(shown(&c, &TF1).map(|(s, _)| s), Some(tf[1].stamp.seq));
     same_values(&c, &TF1, &tf[1])?;
     until("keyframe asked for", || async {
-        f.received("data.keyframe") == 1
+        f.lock().keyframe_asks == 1
     })
     .await?;
 
@@ -118,7 +118,7 @@ async fn a_broken_chain_keeps_the_last_frame_and_asks_once() -> R {
     .await?;
     if first_refusal.elapsed() < KEYFRAME_ASK_GAP - Duration::from_millis(50) {
         tokio::time::sleep(Duration::from_millis(50)).await;
-        assert_eq!(f.received("data.keyframe"), 1, "asked twice within the gap");
+        assert_eq!(f.lock().keyframe_asks, 1, "asked twice within the gap");
     }
 
     // No new frame: the kept frame goes STALE, never replaced by a wrong one.
@@ -162,7 +162,7 @@ async fn a_delta_before_any_keyframe_waits_for_it() -> R {
     let l = c.latest()?;
     assert!(l.get(&IR1).is_none());
     assert_eq!(l.refused_total, 0);
-    assert_eq!(f.received("data.keyframe"), 0);
+    assert_eq!(f.lock().keyframe_asks, 0);
 
     // Its keyframe, then a delta whose exponent changed.
     f.lock().publish_parts(encode_key(&ir[1])?);

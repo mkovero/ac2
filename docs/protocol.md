@@ -7,7 +7,9 @@ name or unit exists in the code but not here. Background: PLAN.md §6,
 `docs/design/q2-q5-q6-protocol.md`, `docs/design/spike-zmq-curve.md`.
 
 The protocol is transport-agnostic bytes. Under ZeroMQ, ctrl is DEALER ↔ ROUTER (one
-message frame per request or reply) and data is XPUB/SUB (multipart).
+message frame per request or reply) and data is DEALER ↔ ROUTER too: the client subscribes
+and returns credit on its data DEALER, the daemon sends multipart frames, events and
+keepalives to each connection as its credit allows (§5.8).
 
 ## 1. Encoding rules
 
@@ -29,7 +31,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 82`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 83`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -132,7 +134,6 @@ Lease column: **L** = `lease_token` required (Q6).
 | `delay.set` | `meas`, `delay: Seconds` | `measurement` | |
 | `delay.nudge` | `meas`, `by: Seconds` | `measurement` | |
 | `delay.track` | `meas`, `enabled` | `measurement` | |
-| `data.keyframe` | `topic: Topic` (a data topic) | `ack`; the topic's next frame goes as a keyframe (§5.2), unless one was asked for within the last 250 ms (whoever asked) | |
 | `trace.capture` | `meas`, `name`, `slot` (1…9 \| nil) | `trace` | |
 | `trace.list` | — | `traces` | |
 | `trace.get` | `trace` | `trace_data` | |
@@ -1861,14 +1862,18 @@ full new value (`inputs`: {`inputs`, `pairs`}, both whole lists; `outputs`: the 
 `calibration`, `line_calibration` (keyed by `LineCalKey`), `mic` (keyed by name), `spl_log`, `plan` and `walk_plan` (keyed by name), `walk` (keyed by
 `WalkId`)) it is `{type: "set", value: <entity>}` or `{type: "deleted", value: <key>}`.
 Applying an event is assignment. Events travel on the data socket as
-`[b"evt"][msgpack event]` and in `state.since` replies. Largest event: 1 MiB.
+`[b"evt"][msgpack event]` and in `state.since` replies. Largest event: 1 MiB. On the data
+socket they go outside the byte window, within a bound of their own (§5.8): past it a
+connection's events are dropped and it is sent `resync_required`.
 
 ### 4.3 Sync procedure (client)
 
-1. Subscribe to `evt` and `ka`; buffer events.
+1. On the data DEALER, state the window and subscribe to `evt` and `ka` (§5.8); buffer
+   events.
 2. Wait for the first `ka` (subscription is live).
 3. `state.snapshot` → rev R. Apply buffered events with rev > R in order, then live ones.
-4. Event with rev > last + 1 → `state.since(last)`; `resync_required` → back to 3.
+4. Event with rev > last + 1 → `state.since(last)`; the `resync_required` notice → back
+   to 3.
 5. `ka` with another `daemon_incarnation` → drop all state, back to 1.
 6. `ka.rev` ahead of the last applied event for > 1 s → `state.since`.
 
@@ -1894,7 +1899,7 @@ Replay buffer: last 1024 events or 60 s, whichever holds fewer.
 | `preview/gonio` | goniometer points of every pair of the previewed device |
 | `timing` | loopback timing monitor |
 | `evt` | state events (§4.2) |
-| `ka` | keepalive, every 250 ms |
+| `ka` | keepalive, every 250 ms to a connection subscribed to it; one a second to one that is not and was sent nothing else in that second |
 
 A measurement topic is formed and sent only while someone subscribes to it. `tf`, `ir`,
 `spec` and `rta` frames come when the result changes (at most at the daemon's publish rate);
@@ -1903,7 +1908,7 @@ none is lost between frames). An unchanged result (settled, gated, a long hop) i
 fresh header every 250 ms, so only a stream without audio goes STALE.
 
 `<meas>` is the decimal measurement id without sign or leading zeros; a topic has exactly
-one spelling. Prefixes: `d/` (all measurement streams), `d/<meas>/` (one measurement —
+one spelling. A subscription (§5.8) is one topic or one of the prefixes `d/` (all measurement streams), `d/<meas>/` (one measurement —
 the trailing slash keeps `d/1/` from matching `d/12/…`), `session/` (both input-meter
 topics and the session's goniometer; the preview's goniometer is under `preview/`, so a
 client metering alone does not receive its points). Longest topic: 32 bytes.
@@ -1957,20 +1962,22 @@ Neighbouring columns of a curve are close, so an intra high plane is mostly 0x00
 column a deeper analysis stage holds between its hops repeats bit for bit, so its delta is
 0. Both deflate to little.
 
-The daemon keeps one chain per topic, shared by every subscriber: the base of a delta is the
-last frame of the topic it sent. A frame goes as a keyframe when the topic has no base yet,
-on a new subscription (every subscriber of the topic receives it), on `data.keyframe`,
-after a send it could not complete, at least every 500 ms, when a static field differs
-from the base's (another `n`, grid, array set, epoch, config or metadata), and when the
-delta would not be smaller than the topic's last keyframe.
+The daemon keeps one chain per topic and connection: the base of a delta is the last frame
+of the topic it handed over for that connection. A connection that credit holds back
+(§5.8) receives a delta over the longer distance, from the frame it has to the newest;
+connections in step share one encode. A frame goes to a connection as a keyframe when it
+has no base of the topic yet (its subscription), on its `keyframe` request, after a send
+to it that could not complete, at least every 500 ms, when a static field differs from
+the base's (another `n`, grid, array set, epoch, config or metadata), and when the delta
+would not be smaller than the last keyframe of the topic it was sent. One connection's
+keyframes never go to another.
 
 A receiver applies each topic's frames in the order they arrive. A keyframe replaces the
 frame held. A delta applies only on the frame of `seq` `base` of its topic and only if the
 codes it makes match `crc`; any other delta is refused, never drawn, and the frame held
 stays (it reads as STALE once no new frame comes, §5.1). A receiver that held a frame of
-the topic and refuses a delta asks `data.keyframe` for it, at most once per 250 ms; one that
-holds none yet (a new subscription may see deltas before its keyframe) waits for the
-keyframe without asking. A delta never repairs a gap: its keyframe does, within 500 ms or a
+the topic and refuses a delta asks for a keyframe of it (`keyframe`, §5.8), at most once
+per 250 ms; one that holds none yet waits for the keyframe without asking. A delta never repairs a gap: its keyframe does, within 500 ms or a
 round trip after asking.
 
 Columns are in grid order. Invalid values are NaN; where the reason matters a `validity`
@@ -2195,6 +2202,60 @@ meters with band meters and the input meters is ≈ 2.0 Mbit/s at 30 fps and ≈
 60 fps (9.3 Mbit/s at 60 fps with f32 arrays, 3.2 with keyframes only); a pane in its IR
 view adds `ir` at ≈ 29 frames/s, ≈ 4.6 Mbit/s in all. Encoding and decoding a `tf` frame take ≈ 37
 and 17 µs on a desktop core.
+
+### 5.8 Flow control
+
+The data socket is a ROUTER on the daemon and one DEALER per client connection. The
+client never sets a routing id: libzmq gives every connection its own, so a reconnect is a
+new connection, whose subscriptions bring keyframes. Under CURVE the data ROUTER is
+authenticated by the same ZAP handler as ctrl.
+
+Client → daemon, one part, a msgpack map `{v, msg}` with `msg` tagged by `type`:
+
+| `type` | fields | meaning |
+|---|---|---|
+| `window` | `bytes: u32` | the frame bytes this connection takes in flight, clamped to 20 KiB … 256 KiB; 64 KiB until stated |
+| `subscribe` | `sub: string` | receive a topic or prefix (§5.1); its topics' newest frames come at once, as keyframes; repeating a held subscription changes nothing |
+| `unsubscribe` | `sub: string` | stop receiving it |
+| `keyframe` | `topic: Topic` | the next frame of the topic to this connection goes as a keyframe (a chain broke, §5.2); one request per 250 ms is honoured |
+| `credit` | `bytes: u32`, `events: u32` | read since the last credit: frame bytes, each frame at least 64, and messages outside the window |
+
+`v` ≠ the daemon's version: the message is dropped. A client sends `window` and its
+subscriptions when it connects and again after every reconnect (a completed handshake).
+
+Daemon → client: frames (§5.2), `[evt][event]`, `[ka][frame]` and notices
+`[flow][msgpack {v, msg: {type}}]`:
+
+| notice | meaning |
+|---|---|
+| `resync_required` | events were dropped past the event bound: take a new `state.snapshot` (§4.3) |
+| `rejoin` | the daemon holds nothing for this connection (it was dropped as stalled): send `window` and every subscription again |
+
+Credit:
+
+- **Frames** are charged their bytes, every part, at least 64. The daemon keeps at most
+  the window in flight to a connection; a frame larger than the window goes alone. A frame
+  that waits for credit is replaced by its topic's newer one, so credit buys the newest
+  frame of each topic, never a backlog: on a link of rate R a connection's standing delay
+  is at most window ÷ R, plus its turn in the rotation.
+- **Rotation.** A connection with credit is sent its topics with a new frame in turn,
+  one frame each, from where its last round stopped, each topic at most at the publish
+  rate.
+- **Events, keepalives, notices** go at once, outside the window: an event can be neither
+  replaced nor dropped, and a keepalive must reach a connection whose window frames fill.
+  At most 256 are unacknowledged per connection; past that its events are dropped and,
+  once it has room again, the first thing it is sent is `resync_required`.
+- **Credit on receipt.** A client credits every message it reads, frame or not, whether
+  or not it uses it (a refused delta consumed link all the same), at least once per read
+  burst and whenever half the window is owed.
+
+A connection is dropped (its subscriptions and chains with it) when a send to it fails
+because its connection is gone, or when it holds unacknowledged messages and has sent
+nothing for 60 s; one heard from again after that is sent `rejoin`. The data port is
+ctrl + 1 (§9).
+
+`ac2-remote` (the Android viewer) speaks the XPUB/SUB data socket of `PROTO_VERSION` 82 and
+earlier: against this version it shows nothing until it moves to a data DEALER.
 
 ## 6. Grids
 
@@ -2445,7 +2506,7 @@ A daemon in network mode (`ac2d --listen tcp://…`) advertises one DNS-SD servi
 |---|---|
 | service type | `_ac2._tcp.local.` |
 | instance name | the rig name (`ac2d --name`, default `ac2 on <hostname>`); dots and control characters replaced by `-`, at most 63 bytes |
-| port (SRV) | the ctrl (ROUTER) port; the data (XPUB) port is ctrl + 1 |
+| port (SRV) | the ctrl (ROUTER) port; the data (ROUTER) port is ctrl + 1 |
 | addresses | A / AAAA records of the listening interface (all interfaces for `0.0.0.0`) |
 
 TXT record (all values UTF-8 strings):

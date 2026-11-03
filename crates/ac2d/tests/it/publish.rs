@@ -1,30 +1,23 @@
-//! Bounded-freshness publishing (Q2): a stalled subscriber recovers to fresh frames within
-//! one drain plus one publish period; a late subscriber gets the latest slot at once.
+//! Bounded-freshness publishing (Q2): a stalled subscriber's backlog is bounded by its
+//! window, and it recovers to fresh frames within one drain plus one publish period; a late
+//! subscriber gets the latest slot at once.
 #![allow(clippy::unwrap_used)]
 
 use crate::common;
 
 use std::time::{Duration, Instant};
 
+use ac2_proto::flow::DATA_WINDOW_MIN;
 use ac2_proto::frame::FrameData;
 use ac2_proto::model::{MeasConfig, MeasKind, SpectrumConfig};
 use ac2_proto::units::MeasId;
-use ac2_proto::{Command, DataMessage, Stream, Topic, decode_data_message, decode_wire};
-use ac2_zmq::drain_latest;
+use ac2_proto::{Command, DataMessage};
 use ac2d::{Daemon, Listen};
 use common::*;
 
 const T: Duration = Duration::from_secs(5);
 /// Stalls a subscriber may take to show one recovery within the bounds.
 const ATTEMPTS: usize = 3;
-
-fn seq_of(m: &ac2_zmq::Message) -> Option<u64> {
-    let parts: Vec<&[u8]> = m.frames().iter().map(Vec::as_slice).collect();
-    if let Ok(DataMessage::Event(e)) = decode_data_message(&parts) {
-        return Some(e.rev.0);
-    }
-    decode_wire(&parts).ok().map(|w| w.seq())
-}
 
 fn stalled_subscriber_recovers(listen: Listen) {
     init_log();
@@ -38,8 +31,9 @@ fn stalled_subscriber_recovers(listen: Listen) {
     });
     c.ok(Command::MeasStart { meas: MeasId(1) });
 
-    // A subscriber with a tiny receive queue that stops reading.
+    // A subscriber with a tiny receive queue and the smallest window that stops reading.
     let sub = Sub::connect_with(h.context(), h.data_endpoint(), &[b"d/1/spl"], None, Some(2));
+    sub.set_window(DATA_WINDOW_MIN);
     let mut first = sub
         .frame(T, |f| matches!(f.data, FrameData::Spl(_)))
         .expect("first frame");
@@ -51,19 +45,20 @@ fn stalled_subscriber_recovers(listen: Listen) {
     for _ in 0..ATTEMPTS {
         std::thread::sleep(Duration::from_millis(1200));
 
-        // One drain discards the backlog …
+        // One drain reads the backlog, which the window bounds: the frames formed while
+        // the subscriber had no credit replaced each other in the daemon's slot …
         let t0 = Instant::now();
-        let d = drain_latest(&sub.sock, 10_000, seq_of).unwrap();
-        assert!(d.emptied);
-        assert_eq!(d.malformed, 0);
-        // The drain skipped deltas, so the chain held broke: a client asks for a keyframe.
-        c.ok(Command::DataKeyframe {
-            topic: Topic::Data {
-                meas: MeasId(1),
-                stream: Stream::Spl,
-            },
-        });
-        // … and the next publish period brings a fresh frame.
+        sub.auto_credit.set(false);
+        while sub.next(Duration::ZERO).is_some() {}
+        let backlog = sub.owed().0;
+        sub.auto_credit.set(true);
+        sub.credit();
+        assert!(
+            backlog <= DATA_WINDOW_MIN,
+            "{backlog} bytes queued past a {DATA_WINDOW_MIN} byte window"
+        );
+        // … and the next publish period brings a fresh frame, a delta on the frame the
+        // daemon last handed over for this peer.
         let fresh = sub.frame(Duration::from_millis(500), |f| {
             let age_ns = wall_now_ns().saturating_sub(f.stamp.capture_wall_ns.0);
             age_ns < 150_000_000

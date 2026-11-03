@@ -5,8 +5,9 @@
 //!
 //! ```text
 //!                 ┌──────────── ac2d-io ─────────────┐
-//!  clients ◄────► │ ROUTER (ctrl)   XPUB (data)       │ ◄── inproc PULL ◄── PUSH (control,
-//!                 │ latest slot per topic, rate limit │                     each job)
+//!  clients ◄────► │ ROUTER (ctrl)   ROUTER (data)     │ ◄── inproc PULL ◄── PUSH (control,
+//!                 │ latest slot per topic, per-peer   │                     each job)
+//!                 │ credit and delta chains           │
 //!                 └───────┬───────────────────────────┘
 //!                         │ requests (mpsc)
 //!                 ┌───────▼────── ac2d-control ──────┐
@@ -56,6 +57,7 @@ mod leq_history;
 mod leq_log;
 mod osc;
 mod outbox;
+mod peers;
 mod preview;
 mod rig;
 mod rig_id;
@@ -219,7 +221,7 @@ impl Handle {
         &self.ctrl
     }
 
-    /// The data (XPUB) endpoint as bound.
+    /// The data (ROUTER) endpoint as bound.
     pub fn data_endpoint(&self) -> &str {
         &self.data
     }
@@ -305,13 +307,21 @@ fn prepare_ipc(_endpoint: &str) -> Result<(), StartError> {
     Ok(())
 }
 
-fn data_socket_options(xpub: &Socket, network: bool) -> Result<(), StartError> {
-    xpub.set_xpub_verbose(true).map_err(zerr("XPUB_VERBOSE"))?;
-    xpub.set_send_hwm(io::DATA_SNDHWM).map_err(zerr("SNDHWM"))?;
-    xpub.set_tcp_liveness(Some(PEER_LIVENESS))
-        .map_err(zerr("XPUB liveness"))?;
+fn data_socket_options(data: &Socket, network: bool) -> Result<(), StartError> {
+    // A send to a vanished connection then fails `EHOSTUNREACH`, which is how a peer is
+    // known to be gone; a full queue fails `EAGAIN` instead of dropping silently.
+    data.set_router_mandatory(true)
+        .map_err(zerr("data ROUTER_MANDATORY"))?;
+    // Set once before the socket binds. It is never changed on the live socket: libzmq
+    // applies a new SNDHWM to existing pipes by sending commands to their peers, and such a
+    // command racing with a disconnecting peer's pipe teardown is a use-after-free in
+    // libzmq 4.3.5's I/O thread.
+    data.set_send_hwm(peers::DATA_SNDHWM)
+        .map_err(zerr("SNDHWM"))?;
+    data.set_tcp_liveness(Some(PEER_LIVENESS))
+        .map_err(zerr("data liveness"))?;
     if network {
-        xpub.set_send_buffer(Some(NETWORK_SNDBUF))
+        data.set_send_buffer(Some(NETWORK_SNDBUF))
             .map_err(zerr("SNDBUF"))?;
     }
     Ok(())
@@ -339,21 +349,25 @@ impl Daemon {
         let mut network_parts = None;
         let (rig_id, rig_id_damage) = rig_id::load(&config.rig_id);
         let mut key_damage: Vec<_> = rig_id_damage.into_iter().collect();
-        let (ctx, secure, router, xpub, server_key) = match &config.listen {
+        let (ctx, secure, router, data_sock, server_key) = match &config.listen {
             Listen::Inproc { name } => {
                 let ctx = Context::new().map_err(zerr("context"))?;
                 let router = ctx.socket(SocketType::Router).map_err(zerr("ROUTER"))?;
-                let xpub = ctx.socket(SocketType::XPub).map_err(zerr("XPUB"))?;
+                let data = ctx
+                    .socket(SocketType::Router)
+                    .map_err(zerr("data ROUTER"))?;
                 let _ = name;
-                (ctx, None, router, xpub, None)
+                (ctx, None, router, data, None)
             }
             Listen::Local { ctrl, data } => {
                 prepare_ipc(ctrl)?;
                 prepare_ipc(data)?;
                 let ctx = Context::new().map_err(zerr("context"))?;
                 let router = ctx.socket(SocketType::Router).map_err(zerr("ROUTER"))?;
-                let xpub = ctx.socket(SocketType::XPub).map_err(zerr("XPUB"))?;
-                (ctx, None, router, xpub, None)
+                let data = ctx
+                    .socket(SocketType::Router)
+                    .map_err(zerr("data ROUTER"))?;
+                (ctx, None, router, data, None)
             }
             Listen::Network { security, .. } => {
                 let (kp, d) = keys::load_or_create_server_keys(&security.server_key_file)
@@ -381,14 +395,14 @@ impl Daemon {
                 let router = sc
                     .curve_server_socket(SocketType::Router, &kp)
                     .map_err(zerr("CURVE ROUTER"))?;
-                let xpub = sc
-                    .curve_server_socket(SocketType::XPub, &kp)
-                    .map_err(zerr("CURVE XPUB"))?;
+                let data = sc
+                    .curve_server_socket(SocketType::Router, &kp)
+                    .map_err(zerr("CURVE data ROUTER"))?;
                 (
                     sc.context().clone(),
                     Some(sc),
                     router,
-                    xpub,
+                    data,
                     Some(kp.public),
                 )
             }
@@ -399,7 +413,7 @@ impl Daemon {
         router
             .set_tcp_liveness(Some(PEER_LIVENESS))
             .map_err(zerr("ROUTER liveness"))?;
-        data_socket_options(&xpub, network)?;
+        data_socket_options(&data_sock, network)?;
         let (ctrl_ep, data_ep) = match &config.listen {
             Listen::Inproc { name } => (
                 format!("inproc://{name}/ctrl"),
@@ -412,10 +426,11 @@ impl Daemon {
         router
             .bind(&ctrl_ep)
             .map_err(zerr(format!("bind {ctrl_ep}")))?;
-        xpub.bind(&data_ep)
+        data_sock
+            .bind(&data_ep)
             .map_err(zerr(format!("bind {data_ep}")))?;
         let ctrl = router.last_endpoint().unwrap_or(ctrl_ep);
-        let data = xpub.last_endpoint().unwrap_or(data_ep);
+        let data = data_sock.last_endpoint().unwrap_or(data_ep);
         if network {
             firewall::report(&ctrl, &data);
         }
@@ -450,7 +465,7 @@ impl Daemon {
         let io = io::spawn(
             IoSockets {
                 router,
-                xpub,
+                data: data_sock,
                 pull,
                 frames: frames_rx,
                 secure,
