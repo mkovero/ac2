@@ -164,6 +164,16 @@ stay app policy, not protocol. On the dump the average's intra payload falls 4 1
 and its delta 2 808 → 2 605 B (as mask steps it would be 3 330 / 2 488 B; not worth fixing the
 thresholds in the protocol).
 
+Built (PROTO 82): `range_lo`/`range_hi` are `i16_mag_offset` (the edge's `i16` code minus the
+`mag` code, modulo 2¹⁶, so every code pair is exact), `range_coh` is `u8`, the largest `k`
+with `k ÷ 100` as f32 ≤ γ² (a plain `floor(γ² × 100)` reads 0.29 as f32 back as 28). Its
+delta is the code minus the base's modulo 2⁸: a held column's γ² repeats, so the byte is 0.
+Measured on `wire_size` at 60 fps (whole frames, header included): the average's keyframe
+4 470 → ≈ 3 966 B, its delta ≈ 2 900 → ≈ 2 694–2 739 B; the trial's payload predictions
+(3 740 / 2 605 B) plus the ≈ 225 B keyframe header and ≈ 90 B delta header. Session 4.62 /
+2.18 Mbit/s with / without the IR view (stage A 4.7 / 2.2). Budget for the average:
+keyframe < 4 400 B, delta < 3 050 B.
+
 ## Stage C: flow control (W10)
 
 **W10. ROUTER (daemon) / DEALER (client) data socket with credit, as flow-control.md, with
