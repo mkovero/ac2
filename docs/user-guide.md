@@ -92,19 +92,18 @@ windows (settings, edits) open only on its own rig: switch to it first. A pane o
 that is down reads *pupu unreachable · retrying*; one of a closed rig reads *pupu not
 connected* and stays until you close or reuse it.
 
-**Another rig's measurement in a pane.** The measurement list beside the panes is the rig
-shown's; a pane's chip list (click the chip, or palette *Choose pane measurement…*) lists
-every connected rig, each under a heading with its name, the rig shown first: its
-measurements, then its inputs and pairs to meter. Pick one of another rig and the pane
-shows it, by that rig's own numbering (two rigs both have a measurement 3; the pane shows
-the one picked), its title naming the rig. Picking a row of the rig shown, or dragging a row
-of the list onto the pane, makes it the shown rig's pane again. A pair picked from another
-rig's rows opens its meters there (**G** turns the pane to its goniometer).
+**Another rig's measurement in a pane.** With more than one rig connected, the measurement
+list shows every connected rig, each under a heading with its name, in the drop-down's
+order. Drag a row of another rig onto a pane and the pane shows it, by that rig's own
+numbering (two rigs both have a measurement 3; the pane shows the one dragged), its title
+naming the rig; the rig shown stays as it is. Clicking a row of another rig (or reaching it
+with Enter or Tab) switches to that rig first, as the drop-down does, then acts as a click
+there; with a window open the switch is refused, and Tab skips the other rigs' rows. A click
+on a rig's heading switches to it. A row of another rig dropped on a row of this one (a math
+channel) is refused: *not combined: the two rows are of different rigs; math uses one rig's (pupu)*.
 
-Choosing a measurement row in the list never takes another rig's pane: the measurement
-shows in a pane of the rig shown, or, with none on screen, in a new pane split off the
-focused one. A rig just connected therefore gets its panes when you choose its first row
-(or when its measurement brings its own). A measurement's saved layout keeps only its own
+Choosing a measurement row never changes another rig's pane: a row with its own panes
+brings them, one without only selects. A measurement's saved layout keeps only its own
 rig's panes, so a session saved on one rig opens the same on any rig; the panes pinned to
 other rigs are the app's and stay where they are.
 
@@ -390,8 +389,9 @@ correlation means depends on how they are set up (a coincident XY pair reads hig
 AB pair low), and ac2 draws no conclusion from it.
 
 A click picks a row (outlined); then **R** clears its max, overs and loudness (a pair: both
-sides, and the pair's loudness), **Shift+R** those of every input, **P** meters it big in
-[Programme panes](#programme-pane) of its own (a pair: its meters and its goniometer). Tab, a click on a pane or on a list row leaves the pick.
+sides, and the pair's loudness), **Shift+R** those of every input. Drag a row onto a pane to
+meter it big there, in a [Programme pane](#programme-pane) (a pair opens on its goniometer;
+**G** steps to its meters). Tab, a click on a pane or on a list row leaves the pick.
 
 ### Programme pane
 
@@ -424,17 +424,16 @@ laid out and keyed like the measurement forms (**↑/↓** field, **←/→** ch
 its goniometer pane on their left; the meters take the focus, and one **Ctrl+Z** takes
 both away. With room for one pane only, the meters open alone and a toast says *no room for
 the goniometer pane: G turns this pane to it*. A session with no inputs lists the row with
-*no inputs in the session to meter*. *Edit measurement…* (the palette) on a focused
-Programme pane opens the same form, **Edit programme meter**, filled in with what the pane
-meters; **Enter** changes that pane in place and keeps its view.
+*no inputs in the session to meter*. **E** on a focused Programme pane says *a Programme
+pane meters the Inputs row dropped on it: drag an input or a pair here*.
 
-Two quicker routes stay: **P** on a picked Inputs row opens that row's panes (its pair's
-two, else the input's) beside the focused one, and a pane's own list (its title's ▾) offers
-*meter …* rows — every pair, every input alone, and the first eight inputs together — which
-turn that pane into meters (never adding a pane). The layout keeps each pane, its view and
+The quicker route: drag a row of the Inputs list onto a pane. In the middle it turns that
+pane into meters of the row (a pair: its goniometer; an input: its meters); on an edge it
+splits the pane and the new half meters it. The layout keeps each pane, its view and
 what it meters; a session without those inputs shows it empty with *inputs 3+4 not in this
-session*. A layout the app kept before the views opens a pair's pane as its meters: **G**,
-or **P** on the pair's row, brings the goniometer.
+session*. A Programme pane with nothing to meter reads *nothing picked — drag an input or a
+pair of the Inputs list here*. A layout the app kept before the views opens a pair's pane
+as its meters: **G** brings the goniometer.
 
 The title starts with what the bars read, then the target under a loudness ballistic, the
 pair and the correlator's window: *true peak · Main · 1 s*, *Short loudness · target −23 LUFS
@@ -674,16 +673,18 @@ draw it over the magnitude. A stopped measurement draws no live IR (its other
 views keep the last curve, tagged `stopped`); a selected capture's stored IR still shows.
 
 A command about a kind (an SPL view key, the sweep's views) goes to the pane of that kind
-focused last; with none on screen the focused pane turns into one. A new sweep made with
-**Shift+S** goes to the sweep pane focused last, else gets a pane of its own split off the
-focused one. A finished sweep opens no pane: the toast says to **Tab** to it.
+focused last; with none on screen no pane changes and a toast says so (*no SPL pane: drag FOH SPL onto
+one*). A new measurement opens in a pane of its own split
+off the focused one, never over a pane showing something; an empty focused pane takes it
+instead. With no room to split, no pane changes and a toast says *no room for a pane: drag
+TF 3 onto one*. A finished sweep opens no pane: the toast says to **Tab** to it.
 
 ### Choosing what a pane shows
 
-Each pane's title has a **chip** naming its measurement. Every pane draws that
-measurement's **group** as the measurement tree lists it, and nothing else of its own
+Each pane's title names its measurement in plain text (`2  TF 1`, cut short with … when the
+pane is narrow). Every pane draws that measurement's **group** as the measurement tree lists it, and nothing else of its own
 accord: its live curve (unless hidden), the math channels filed under it, and its shown
-stored traces of the kinds the pane draws. A math channel chosen on the chip draws its
+stored traces of the kinds the pane draws. A math channel dropped on a pane draws its
 owner's group. A stopped measurement keeps its last curve, tagged `stopped` in the legend
 and list; **S** starts it again. A pane never borrows another measurement's data: while its
 own has nothing to draw (hidden, stopped before its first frame, or not measured yet) it
@@ -691,7 +692,7 @@ says so (`Spectrum 2: no frames yet`, `FOH SPL hidden — A shows it`).
 
 | Pane | Draws |
 |---|---|
-| **Transfer** | the group's live transfer curve, math channels, captures, targets and sweep runs (a sweep measurement on the chip: its shown runs, no live curve) |
+| **Transfer** | the group's live transfer curve, math channels, captures, targets and sweep runs (a sweep measurement dropped on it: its shown runs, no live curve) |
 | **Spectrum / RTA** | the group's live spectrum or RTA, math channels and stored spectra / band sets; two spectrum measurements are two panes, each with its own curves |
 | **Sweep / distortion** | one run of its sweep measurement: the selected run when it is one of that sweep's, else the run of it picked last, else its newest; never another sweep's run |
 | **SPL** | its own meter only (no compare); to see two meters, add a pane and drag the other SPL measurement onto it |
@@ -699,7 +700,7 @@ says so (`Spectrum 2: no frames yet`, `FOH SPL hidden — A shows it`).
 **Imported** traces draw on no pane until moved under a measurement (select, **Move to
 measurement…**, **Shift+F2**); while shown traces of the kind a pane draws wait under
 Imported, that pane says so. A stored trace selected in the list changes no pane: drag its
-row onto a pane, or pick its measurement on the chip, to see it there.
+row onto a pane to see it there.
 
 **Compare (C)** draws a curve of another group in a measurement's panes. Select a
 measurement or stored trace and press **C**: *Compare Main R with…* lists the measurements
@@ -721,22 +722,16 @@ every list. A pane draws its own group on top, then the compared curves in that 
 layer further back: a fill or bar under every line, and a fill or bar drawn fainter the
 further back it is (never below about half), so the pane's own curves stay readable.
 
-To put another measurement in a pane:
-
-- click the chip: every measurement in tree order, tagged with its kind, then the pane kinds
-  no measurement needs yet. The pane turns into the kind picked; only it changes, and the
-  selection in the list stays where it was. With several rigs connected it lists every
-  rig's, under a heading per rig ([Many rigs](#many-rigs-in-one-window));
-- or drag a row of the measurement list onto the pane
-  ([below](#dragging-a-row-onto-a-pane));
-- or palette *Choose pane measurement…*.
+To put another measurement in a pane, drag its row of the list onto the pane
+([below](#dragging-a-row-onto-a-pane)): that is the one way to change what a pane shows. A
+pane nothing was dropped on reads *nothing picked — drag a row of the list here*; it never
+follows the selection.
 
 A row of the measurement list clicked (or reached with **Tab** / **Shift+Tab**):
 
-- a **measurement row** selects the measurement and shows it: its own panes when it has
-  them ([Layouts follow the measurement](#layouts-follow-the-measurement)), else in the
-  focused pane; panes no chip or drop has given a measurement show it too, when it is of
-  their kind;
+- a **measurement row** selects the measurement. One with its own panes brings them
+  ([Layouts follow the measurement](#layouts-follow-the-measurement)); one without changes
+  no pane;
 - a **child row** — a live curve, stored trace or math channel — only selects it, for the
   keys below; no pane changes. One no pane draws stays selected all the same.
 
@@ -744,7 +739,7 @@ Which measurement the keys act on:
 
 - A click inside a pane focuses it; the selection stays on the row chosen in the list.
 - Keys of a pane act on what that pane shows: **S** and **R** on the focused pane's
-  measurement (they say what to create when it shows none), **X** and the delay keys on the
+  measurement (they say what to drag there when it shows none), **X** and the delay keys on the
   focused transfer pane's measurement (on another pane: the selected one), **Space** on the
   sweep view on the focused sweep pane's sweep.
 - Keys of the selection (**A**, **C**, **K**, **Delete**, the offset, colour, capture
@@ -788,7 +783,7 @@ a one-line caption naming the pane and measurement (the SPL meter and Leq window
 themselves). Arming, playing, stopping the stimulus or a running sweep change nothing on it;
 Esc and Shift+Esc stop as always. A measurement row with more than one pane of its own
 brings them all back (one pane alone again with **W**; in the stage view it stays the stage
-view, panes only); any other row's measurement shows in the pane alone.
+view, panes only); any other row only selects.
 
 **F** (or **F11**) steps the window: windowed → window full screen (top bar and lists as
 before) → **panes only** (the stage view with every pane) → windowed. With one pane up (W),
@@ -796,8 +791,8 @@ the first **F** already gives the stage view and the next one returns to windowe
 focused one and stays full screen. The hidden lists still answer their keys (**Tab**,
 **V**), a click focuses a pane.
 
-With a pane maximised, a chip pick puts the measurement in that pane, turning it into the
-kind that shows it (a sweep stays on a transfer pane, which draws sweeps too); the layout
+With a pane maximised, a row dropped on it puts the measurement in that pane, turning it into
+the kind that shows it (a sweep stays on a transfer pane, which draws sweeps too); the layout
 stays maximised.
 
 #### The layout comes back
@@ -815,7 +810,7 @@ larger than the screen is shrunk to fit. On Wayland the system places the window
 
 A measurement can carry its own panes. Choose its row (click, **Tab**), then edit the
 panes — split, close, change a pane's kind or view, **T**, drag a split, lay out the
-transfer stack, pick another measurement on a pane's chip or drop a row on it, zoom or pan
+transfer stack, drop a row on a pane, zoom or pan
 a pane's level axis — and the layout is stored on that measurement. Choosing its row again
 brings its panes back, all of them even when one pane was alone on screen (**W**); a
 measurement without a layout keeps the panes on screen. Only a
@@ -826,10 +821,10 @@ pane shows that measurement is stored on nobody. The list says it: `· 3 own pan
 
 The layout lives in the session with the measurement: saved and opened with it, and shown
 by every app that selects it (another laptop, the kiosk), edits included. What travels is
-the split, each pane's kind and view, the measurement each pane was picked for (a pick of a
-measurement deleted since shows the layout's own measurement again) and the level ranges
-set on it by hand; the focus, **W**, **F** and the window stay per app. A pane given no
-measurement by a chip or a drop shows the measurement whose row was chosen. A level range
+the split, each pane's kind and view, the measurement each pane was given by a drop (one
+deleted since shows the layout's own measurement again) and the level ranges set on it by
+hand; the focus, **W**, **F** and the window stay per app. A pane of the layout given no
+measurement by a drop shows the measurement whose row was chosen. A level range
 not set by hand is not kept: a spectrum pane frames its first curve when its panes come
 back, as on first show; one set by hand stays until the pane shows another measurement.
 
@@ -838,25 +833,26 @@ measurement's own panes. Deleting a measurement deletes its layout; editing it k
 
 #### Dragging a row onto a pane
 
-Any row of the measurement list (a measurement, its live curve, a math channel, a stored
-trace) can be dragged onto a pane: hold the button and move a few pixels. A label beside
-the pointer says where it lands (`FOH SPL → pane 2`) and the target is shaded faintly with
-a dashed edge. Dropped in the middle of a pane, that pane shows the row as a pick from its
-chip would (a live curve or math channel: that measurement; a stored trace: its
-measurement, in the kind of pane that draws the trace), turning into the kind that draws
-it; focus moves there and no other pane changes. The selection in the list stays. A drop is
+This is how a pane is changed. Any row of the measurement list (a measurement, its live
+curve, a math channel, a stored trace, a row of another connected rig) and any row of the
+Inputs list (an input, a pair) can be dragged onto a pane: hold the button and move a few
+pixels. A label beside the pointer says where it lands (`FOH SPL → pane 2`, or
+`FOH SPL → pane 2, becomes SPL` when the pane turns into another kind) and the target is
+shaded faintly with a dashed edge. Dropped in the middle of a pane, that pane's content is
+replaced by the row (a live curve or math channel: that measurement; a stored trace: its
+measurement, in the kind of pane that draws the trace; an input: its Programme meters; a
+pair: its Programme pane on the goniometer), turning into the kind that draws it; focus
+moves there and no other pane changes. The selection in the list stays. A drop is
 a guest pick: it never brings the measurement's own panes, and the edit is stored on the
 measurement whose row was chosen, as in *Layouts follow the measurement*.
 
 Dropped within about the outer fifth of a pane (`FOH SPL → new pane below`), the pane splits
 on that side as **N** would and the new half shows the row. A pane too small for **N** to
-split takes a plain drop instead, and the label names the pane. **Shift** held on release
-compares the row into the pane's measurement, as ticking it in **C**'s list does, and the
-pane keeps what it shows (`Main R → compare in pane 2`); the row needs a curve of the kind
-the pane draws, an SPL pane draws no compared meters, a row of the pane's own group is drawn
-there already and an Imported trace is not compared, so anything else is refused with a
-toast that says why. Two SPL meters side by side: add a pane (**N**) and
-drop the other meter on it without **Shift**. **Esc** cancels the drag; a drop outside the panes does nothing.
+split takes a plain drop instead, and the label names the pane. To draw another curve over
+a pane's own, use **C** (Compare, above). Two SPL meters side by side: drop the other meter
+on a pane's edge. A row of another rig is shown by that rig's numbering and the pane is set
+on that rig ([Many rigs](#many-rigs-in-one-window)). **Esc** cancels the drag; a drop
+outside the panes does nothing.
 
 A row dropped onto **another row** of the list combines the two in a math channel: see
 [Dropping a row on another](#dropping-a-row-on-another).
@@ -865,7 +861,7 @@ A row dropped onto **another row** of the list combines the two in a math channe
 
 **Ctrl+Z** takes back the last change to the panes and **Ctrl+Shift+Z** does it again; the
 toast names it (`Undid: FOH SPL → pane 2`, `Redid: split pane 1`, `Nothing to undo`).
-Covered: drops and edge drops, **N** / **Shift+N**, **Q**, chip picks, measurement rows
+Covered: drops and edge drops, **N** / **Shift+N**, **Q**, measurement rows
 (click, **Tab** / **Shift+Tab**), **G** / **Shift+G**, **T**, a dragged split (one step per drag),
 **Alt+←/→**, **W**, **F** and the transfer stack. Daemon actions (start, stop, delete,
 capture, rename, delay, smoothing, compare lists, styles and offsets) are not undone. The
@@ -983,8 +979,8 @@ on the computer the app runs on, for a tuning report. It asks where, suggesting
 extension gets `.png`; the folder is made). The picture is the plot as shown: the same
 view, zoom, theme and **T** step, with its legend, axes, labels and cursor readouts, drawn
 by the same renderer as the screen at twice the pane's on-screen pixels (sharper in print;
-a very large pane is held to the GPU's texture limit). The pane's title strip (number,
-name, measurement chip) and its key-hint line are window chrome and are not in it. A toast
+a very large pane is held to the GPU's texture limit). The pane's title strip (number and
+name) and its key-hint line are window chrome and are not in it. A toast
 names the file and its size (`Transfer pane exported to … (2400×1300 px)`). The command
 line has no export: it has no renderer.
 
@@ -1258,7 +1254,7 @@ bar spans the pane's level axis, so the level-axis keys change the colours.
   receives; nothing is kept while it is hidden.
 
 **Two spectrographs side by side**: with the spectrum pane focused click `Spectrum 1`'s
-row; **N**; on the new half pick `Spectrum 2` from its chip (or click its live-curve row);
+row; **N**; drag `Spectrum 2`'s row onto the new half;
 **G G** on each half. Each half keeps its measurement and view.
 
 ### Resolution and the resolution marker
@@ -2192,7 +2188,7 @@ transfer pane like any capture.
 
 ### The Sweep / distortion pane
 
-It shows one run of the sweep measurement on its chip — the selected run when it is one of
+It shows one run of the sweep measurement dropped on it — the selected run when it is one of
 that sweep's, else its newest — the fundamental's response above, distortion below; runs
 compared (**C**) are drawn over it in their own colours and listed `Run 2 · cmp` in the
 legend. An order within the noise is drawn dashed
@@ -3373,9 +3369,10 @@ insert_delay = ["X", "Alt+D"]
 The sections follow the keyboard map: `[global]` (Everywhere), `[transfer]`, `[spectrum]`,
 `[ir]` (the impulse response view), `[spl]` and `[distortion]` (Sweep / distortion).
 
-A `keys.toml` that cannot be used (a conflict, an unknown key or command, a pane command on
-**H**, a change to **Shift+Esc**) is reported at start and the defaults are used until it is
-fixed.
+A `keys.toml` that cannot be used (a conflict, an unknown key, a pane command on **H**, a
+change to **Shift+Esc**) is reported at start and the defaults are used until it is fixed. A
+binding of a command this version does not have (one kept from an earlier version) is
+skipped and named at start; the rest of the file applies.
 
 #### Key hints
 
@@ -3383,7 +3380,7 @@ The focused pane shows a slim line under its plot with its most used keys (each 
 is listed at the end of the [keyboard map](#keyboard-map)). It shows the keys bound now
 (macOS: `⌘ ⌥ ⇧`); on a narrow pane the least used drop first, **H all keys** stays. Hovering
 over the line lists the keys with what each does; hovering over a clickable control (the
-**dB | %** toggle, **Stop**, a colour dot or row, a pane's chip) names its key. Settings ›
+**dB | %** toggle, **Stop**, a colour dot or row) names its key. Settings ›
 Display › Key hints (palette *Key hints*) turns it off (`key_hints = false` in
 `ui.toml`). The stage view never shows it.
 
@@ -3614,7 +3611,6 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 |---|---|---|
 | `R` | Reset overs, max, loudness | `levels_reset` |
 | `Shift+R` | Reset every input | `levels_reset_all` |
-| `P` | Open a Programme pane | `programme_pane` |
 
 #### Spatial walk
 
@@ -3638,7 +3634,6 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Stimulus outputs… | `stimulus_outputs` |
 | Take over stimulus | `stimulus_take_over` |
 | Transfer stack | `transfer_stack` |
-| Choose pane measurement… | `pane_measurement` |
 | Theme | `cycle_theme` |
 | Clear compare | `clear_compare` |
 | Move trace to slot… | `trace_slot` |
@@ -3729,7 +3724,7 @@ The least used go first on a narrow pane; `G/Shift+G` steps the pane's views for
 | SPL | `G/Shift+G` view · `Shift+F` F/S/I · `Z` A/C/Z · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
 | Sweep / distortion | `Shift+S` new sweep · `V` select trace · `G/Shift+G` view · `E` reference · `W` maximise · `Q` close pane · `H` all keys |
 | Programme | `R` reset · `Shift+R` reset all · `G/Shift+G` view · `T` grid · `W` maximise · `Q` close pane · `H` all keys |
-| Inputs list row | `R` reset · `Shift+R` reset all · `P` programme pane · `Tab` measurements · `H` all keys |
+| Inputs list row | `R` reset · `Shift+R` reset all · `Tab` measurements · `Shift+Tab` back · `H` all keys |
 | Spatial walk | `X` capture here · `PageDown` next step · `PageUp` previous · `K` skip · `Shift+R` redo, resets the walk's measurements · `M` mics trade places · `Space` stimulus · `W` maximise · `H` all keys |
 
 <!-- keymap:end -->
