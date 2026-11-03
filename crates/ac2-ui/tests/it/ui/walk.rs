@@ -254,7 +254,9 @@ fn walk_pane_with_coverage() {
     );
     h.state_mut().state.toasts.list.clear();
     h.step();
-    snapshot(&mut h, "walk_pane_coverage");
+    // The coverage map is a smoothly shaded field: another rasterizer samples it a shade
+    // apart across its whole area, and past the threshold in more pixels than a few edges.
+    dense_snapshot(&mut h, "walk_pane_coverage");
 }
 
 /// Shift+W, *New walk…*: the setup window with its rows, the plan with the suggested points
