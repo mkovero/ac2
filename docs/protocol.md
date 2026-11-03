@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 81`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 82`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -1946,7 +1946,8 @@ base. The payload inflates to exactly the codes' size, per array:
 
 | elem | keyframe (intra) | delta |
 |---|---|---|
-| `i16`, `u16` | each code minus the previous column's (the first minus 0), modulo 2¹⁶, as two planes: the low byte of every difference, then the high byte of every difference | each code minus the base's code of the same column, modulo 2¹⁶, as the two planes, not differenced between columns |
+| `i16`, `i16_mag_offset`, `u16` | each code minus the previous column's (the first minus 0), modulo 2¹⁶, as two planes: the low byte of every difference, then the high byte of every difference | each code minus the base's code of the same column, modulo 2¹⁶, as the two planes, not differenced between columns |
+| `u8` | each code minus the previous column's (the first minus 0), modulo 2⁸ | each code minus the base's code of the same column, modulo 2⁸ (a held column's γ² repeats, so its byte is 0; NaN in or out is one more byte) |
 | `i16` in `deg` | as `i16` | the short way round: (x − b + 18 000) mod 36 000 − 18 000 when both codes are angles (in [−18 000, 18 000)); the NaN code (0x8000) when x is NaN; x − b modulo 2¹⁶ when b is NaN. A frame whose angle array holds any other code goes as a keyframe |
 | `bfp16` | the exponent byte, then the mantissas as `i16` intra | the exponent byte, then the mantissas as an `i16` delta if the exponent equals the base's, else as `i16` intra |
 | `u32` | as they are | each code XOR the base's |
@@ -1983,11 +1984,14 @@ Element encodings (`elem`), all little-endian:
 | `u32` | 4 | unsigned (bitmasks) |
 | `i16` | 2 | hundredths of the unit, `round(x × 100)` rounding halves up, clamped to ±32 766; −32 768 = NaN, −32 767 = −∞, 32 767 = +∞. Degrees are wrapped on the hundredths to [−18 000, 18 000), so a phase is in [−180°, 180°) and ±∞ degrees is NaN. Decoded as code ÷ 100 |
 | `u16` | 2 | ten-thousandths, `round(x × 10 000)` rounding halves up, clamped to 0 … 10 000; 65 535 = NaN; any other code above 10 000 refuses the frame. Decoded as code ÷ 10 000 |
+| `i16_mag_offset` | 2 | an `i16` code minus the `i16` code of the same column's `mag`, modulo 2¹⁶ (as signed: the edge's hundredths of dB from the curve); decoded by adding the `mag` code back, modulo 2¹⁶, then as `i16`. Exact for every pair of codes, NaN and ±∞ included |
+| `u8` | 1 | γ² in hundredths rounded down: the largest `k` in 0 … 100 with `k ÷ 100` (as f32) ≤ x, 0 below 0, 100 above 1; 255 = NaN; any other code above 100 refuses the frame. Decoded as code ÷ 100 in f32. A coherence mask in hundredths compares the same on it as on x (0.2996 reads 0.29, below a mask at 0.3); rounding to nearest would lift it over the mask |
 | `i8` | 1 | signed; the goniometer's coordinates, −127 … 127 of the pair's auto gain |
 | `bfp16` | 2 (+ 1 per array) | block floating point: the array's bytes start with one signed exponent byte `e`, then one `i16` mantissa per element, `round(x × 2^−e)` rounding halves up, clamped to ±32 766, with the `i16` codes of NaN and ±∞. `e` is the smallest integer in [−128, 113] for which every finite \|x\| × 2^−e ≤ 32 765 (from `frexp(peak) = (m, k)`: `k − 14` if `m × 2^15 > 32 765`, else `k − 15`), 0 when no element is finite and non-zero; an exponent above 113 refuses the frame. Decoded as mantissa × 2^e rounded to f32 |
 
 Which arrays use which encoding is fixed by name: `mag`, `phase`, `level` (rta, spec),
-`ir_etc`, the `align_*` arrays, `range_lo` and `range_hi` are `i16`; `coh` and `range_coh` are `u16`; `ir_linear` is `bfp16`; bitmasks and
+`ir_etc` and the `align_*` arrays are `i16`; `range_lo` and `range_hi` are `i16_mag_offset`;
+`coh` is `u16`; `range_coh` is `u8`; `ir_linear` is `bfp16`; bitmasks and
 counts (`overs`) are `u32`; `gonio_x` and `gonio_y` are `i8`;
 everything else (meters, Leq and band Leq windows) is `f32`. Precision: `i16` is within
 0.005 dB or 0.005° of the value computed, `u16` within 5·10⁻⁵ of γ² — below the readouts
@@ -2038,7 +2042,7 @@ layout as code.
 | `meta` | {kind: […]} | per-kind metadata (§5.4), fields in the order listed there |
 | `crc` | u32 | CRC-32 of the frame's codes (§5.2) |
 
-`elem` is `f32`, `u32`, `i16`, `u16`, `i8` or `bfp16` (§5.2), fixed per array name. `unit` is one of `db`, `dbfs`, `dbtp` (dB true peak), `db_spl`, `dbfs_per_hz`, `db_spl_per_hz` (a spectrum density), `deg`, `coherence`
+`elem` is `f32`, `u32`, `i16`, `i16_mag_offset`, `u16`, `u8`, `i8` or `bfp16` (§5.2), fixed per array name. `unit` is one of `db`, `dbfs`, `dbtp` (dB true peak), `db_spl`, `dbfs_per_hz`, `db_spl_per_hz` (a spectrum density), `deg`, `coherence`
 (γ², 0…1), `full_scale` (linear, full scale = 1), `seconds`, `bitmask` (always
 `u32`), `count` (an event count, always `u32`), `gonio_unit` (a goniometer coordinate,
 always `i8`).
@@ -2119,8 +2123,10 @@ tagged by `type`: `too_few` (fewer than 3 positions went in: no band), `envelope
 {`positions`} (3 … 5: lowest to highest level per column) or `percentiles` {`positions`}
 (6 on: the 10th to 90th percentile, linear between order statistics at rank `p·(n − 1)`).
 Its frame's `range_lo` / `range_hi` arrays are the band's edges, dB, NaN where any included
-operand has no level or the average has none, display-smoothed as the curve is;
-`range_coh` is the lowest γ² among the included operands that have one (NaN: none has):
+operand has no level or the average has none, display-smoothed as the curve is, coded as
+offsets from the same column's `mag` (`i16_mag_offset`, §5.2);
+`range_coh` is the lowest γ² among the included operands that have one (NaN: none has), in
+hundredths rounded down (`u8`):
 a client leaves a column out of the band where that is below its coherence mask, as it
 would blank a single curve there. Live only: a capture of the average keeps no band. A spectrum math result's live frame gathers its bins into display columns like a
 spectrum's, each the highest value among its bins (a level difference: the largest in the
@@ -2171,7 +2177,7 @@ than most real curves); bytes include topic, header and payload, not the transpo
 | frame | as f32 arrays | keyframe | delta |
 |---|---|---|---|
 | `tf`, 480 columns | 7 863 B | ≈ 2 400 B (header ≈ 180 B) | ≈ 1 250 B |
-| `tf` power average with its range band | | ≈ 4 470 B | ≈ 2 900 B |
+| `tf` power average with its range band | | ≈ 3 970 B | ≈ 2 720 B |
 | `spec`, 65 536 points (897 columns) | 3 696 B | ≈ 1 590 B | ≈ 1 430 B |
 | `spec`, 4 096 points (513 columns) | 2 161 B | ≈ 1 025 B | ≈ 930 B |
 | `rta`, 1/3 octave (30 bands) | 368 B | ≈ 218 B | ≈ 116 B |
@@ -2185,7 +2191,7 @@ rate), a math channel's whenever an operand changes (up to the publish rate), a 
 re-sent every 0.25 s of audio while nothing changes. About 7 % of a `tf` stream's frames go
 as keyframes. A session of three transfer functions
 and their average, three default spectra and a 4 096-point one, a 1/3-octave RTA, two SPL
-meters with band meters and the input meters is ≈ 2.1 Mbit/s at 30 fps and ≈ 2.2 Mbit/s at
+meters with band meters and the input meters is ≈ 2.0 Mbit/s at 30 fps and ≈ 2.2 Mbit/s at
 60 fps (9.3 Mbit/s at 60 fps with f32 arrays, 3.2 with keyframes only); a pane in its IR
 view adds `ir` at ≈ 29 frames/s, ≈ 4.6 Mbit/s in all. Encoding and decoding a `tf` frame take ≈ 37
 and 17 µs on a desktop core.

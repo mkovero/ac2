@@ -12,6 +12,17 @@
 //!   meter reads nothing below −300 dB), NaN and ±∞ have codes of their own.
 //! - `u16`: coherence γ² in ten-thousandths (0 … 10 000), at most 5·10⁻⁵ off; its readout
 //!   shows hundredths. NaN has a code of its own; other codes above 10 000 are refused.
+//! - `i16_mag_offset`: an `i16` code minus the same column's `mag` code, wrapping in 16 bits:
+//!   the same precision as `i16`, and exact for every pair of codes (NaN and ±∞ included),
+//!   since adding the `mag` code back is the inverse in that ring. An average's range band
+//!   lies a few dB around its curve, so its offsets are small numbers even where the levels
+//!   are not.
+//! - `u8`: γ² in hundredths rounded down (0 … 100), 255 = NaN; other codes are refused. A
+//!   range band's coherence is only compared with a coherence mask, whose steps are
+//!   hundredths: the code is the largest `k` whose value `k / 100` (as `f32`) is at most γ²,
+//!   so `value < t` holds for exactly the values a mask at `t = j / 100` blanks (0.2996
+//!   reads 0.29 and stays below 0.3). Rounding to nearest would lift it to 0.30 and unmask
+//!   it.
 //!
 //! - `bfp16`: block floating point, for the linear IR: one exponent `e` per array and a
 //!   16-bit mantissa per sample, value = mantissa · 2^e, with `e` the smallest that puts the
@@ -37,7 +48,13 @@
 //! step), low bytes then high bytes, not differenced between neighbours: a column of a
 //! deeper analysis stage repeats bit for bit until that stage hops, and its 0 stays 0. A
 //! `bfp16` array is a mantissa delta only on the base's exponent, otherwise intra. Bitmasks
-//! XOR the base's; `f32` and `i8` arrays go intra in both forms.
+//! XOR the base's; `f32` and `i8` arrays go intra in both forms. A `u8` array goes as its
+//! codes minus the base's (wrapping in 8 bits): a column a deeper analysis stage holds keeps
+//! its γ², so its code repeats and its difference is 0, which deflate takes to almost
+//! nothing; the codes as they are would cost a literal per column even where nothing moved.
+//! Wrapping makes the difference a bijection on all 256 codes, so NaN (255) going in or out
+//! is one more byte and exact. The goniometer's `i8` points, in contrast, are fresh every
+//! frame and gain nothing from a difference.
 //!
 //! `f32` and `u32` arrays (meters, Leq windows, bitmasks) go as they are,
 //! little-endian: they are small or must stay exact, and deflate still takes out runs such
@@ -61,6 +78,10 @@ const I16_MAX_FINITE: f64 = (i16::MAX - 1) as f64;
 pub(crate) const U16_NAN: u16 = u16::MAX;
 /// `u16` code of 1.
 pub(crate) const U16_ONE: u16 = 10_000;
+/// `u8` code of NaN.
+pub(crate) const U8_NAN: u8 = u8::MAX;
+/// `u8` code of 1.
+pub(crate) const U8_ONE: u8 = 100;
 
 /// Smallest `bfp16` exponent: one byte, and 2^−128 is far below any IR sample.
 const BFP_EXP_MIN: i32 = -128;
@@ -78,8 +99,8 @@ const I16_PER_UNIT: f64 = 100.0;
 fn elem_size(e: Elem) -> usize {
     match e {
         Elem::F32 | Elem::U32 => 4,
-        Elem::I16 | Elem::U16 | Elem::Bfp16 => 2,
-        Elem::I8 => 1,
+        Elem::I16 | Elem::I16MagOffset | Elem::U16 | Elem::Bfp16 => 2,
+        Elem::I8 | Elem::U8 => 1,
     }
 }
 
@@ -194,6 +215,76 @@ pub(crate) fn from_u16(q: u16) -> Option<f32> {
     }
 }
 
+/// `u8` code of a coherence: the largest `k` in 0 … 100 with [`from_u8`]`(k) ≤ x` (0 below
+/// 0, 100 above 1), so a comparison with a mask in hundredths reads the same on the code as
+/// on `x`.
+pub(crate) fn to_u8(x: f64) -> u8 {
+    if x.is_nan() {
+        return U8_NAN;
+    }
+    let mut q = (x * f64::from(U8_ONE))
+        .floor()
+        .clamp(0.0, f64::from(U8_ONE)) as u8;
+    // The product is within 10⁻¹⁴ of x · 100 and each step's f32 within 10⁻⁸ of k / 100, so
+    // the floor is at most one code off the f32 steps either way.
+    if q < U8_ONE && f64::from(u8_value(q + 1)) <= x {
+        q += 1;
+    } else if q > 0 && f64::from(u8_value(q)) > x {
+        q -= 1;
+    }
+    q
+}
+
+/// `k / 100` as the nearest `f32`.
+fn u8_value(q: u8) -> f32 {
+    f32::from(q) / f32::from(U8_ONE)
+}
+
+/// Value of a `u8` code; `None` for an undefined code.
+pub(crate) fn from_u8(q: u8) -> Option<f32> {
+    match q {
+        U8_NAN => Some(f32::NAN),
+        q if q <= U8_ONE => Some(u8_value(q)),
+        _ => None,
+    }
+}
+
+/// The `i16_mag_offset` codes of an array of `i16` codes `arr`: each minus `mag`'s code of
+/// the same column (both little-endian, same length), wrapping.
+pub(crate) fn to_mag_offsets(arr: &mut [u8], mag: &[u8]) {
+    for (a, m) in arr.chunks_exact_mut(2).zip(mag.chunks_exact(2)) {
+        let q = u16::from_le_bytes([a[0], a[1]]).wrapping_sub(u16::from_le_bytes([m[0], m[1]]));
+        a.copy_from_slice(&q.to_le_bytes());
+    }
+}
+
+/// Inverse of [`to_mag_offsets`]: the `i16` codes of offsets `arr` on `mag`.
+pub(crate) fn from_mag_offsets(arr: &mut [u8], mag: &[u8]) {
+    for (a, m) in arr.chunks_exact_mut(2).zip(mag.chunks_exact(2)) {
+        let q = u16::from_le_bytes([a[0], a[1]]).wrapping_add(u16::from_le_bytes([m[0], m[1]]));
+        a.copy_from_slice(&q.to_le_bytes());
+    }
+}
+
+/// Appends 8-bit codes as neighbour differences (wrapping).
+fn put_planes8(out: &mut Vec<u8>, codes: &[u8]) {
+    let mut prev = 0u8;
+    out.extend(codes.iter().map(|q| {
+        let d = q.wrapping_sub(prev);
+        prev = *q;
+        d
+    }));
+}
+
+/// The 8-bit codes of [`put_planes8`] bytes.
+fn get_planes8(out: &mut Vec<u8>, b: &[u8]) {
+    let mut prev = 0u8;
+    out.extend(b.iter().map(|d| {
+        prev = prev.wrapping_add(*d);
+        prev
+    }));
+}
+
 /// Appends 16-bit codes as neighbour differences, low-byte plane then high-byte plane.
 fn put_planes(out: &mut Vec<u8>, codes: impl Iterator<Item = u16> + Clone) {
     let deltas = codes.scan(0u16, |prev, q| {
@@ -238,11 +329,12 @@ fn get_raw_planes(b: &[u8]) -> impl Iterator<Item = u16> + '_ {
     lo.iter().zip(hi).map(|(l, h)| u16::from_le_bytes([*l, *h]))
 }
 
-/// Appends a float array's codes in `elem` (`F32`, `I16`, `U16` or `Bfp16`); `deg` wraps an
-/// `I16` array.
+/// Appends a float array's codes in `elem` (`F32`, `I16`, `U16`, `U8` or `Bfp16`); `deg`
+/// wraps an `I16` array. An `I16MagOffset` array is appended as its `i16` codes, which
+/// [`to_mag_offsets`] then takes relative to the frame's `mag`.
 pub(crate) fn put_f32(out: &mut Vec<u8>, elem: Elem, deg: bool, v: &[f32]) {
     match elem {
-        Elem::I16 => put_le16(
+        Elem::I16 | Elem::I16MagOffset => put_le16(
             out,
             v.iter().map(|x| {
                 let x = f64::from(*x);
@@ -250,6 +342,7 @@ pub(crate) fn put_f32(out: &mut Vec<u8>, elem: Elem, deg: bool, v: &[f32]) {
             }),
         ),
         Elem::U16 => put_le16(out, v.iter().map(|x| to_u16(f64::from(*x)))),
+        Elem::U8 => out.extend(v.iter().map(|x| to_u8(f64::from(*x)))),
         Elem::Bfp16 => {
             let e = bfp_exponent(v);
             out.push(e as i8 as u8);
@@ -292,11 +385,13 @@ pub(crate) fn put_u32(out: &mut Vec<u8>, v: &[u32]) {
 }
 
 /// A float array from its codes in `elem`; `None` if a code or exponent is undefined. `b`
-/// holds exactly the array (its length was checked against [`array_size`]).
+/// holds exactly the array (its length was checked against [`array_size`]); an
+/// `I16MagOffset` array as its `i16` codes ([`from_mag_offsets`]).
 pub(crate) fn get_f32(b: &[u8], elem: Elem) -> Option<Vec<f32>> {
     match elem {
-        Elem::I16 => Some(le16(b).map(|q| from_i16(q as i16)).collect()),
+        Elem::I16 | Elem::I16MagOffset => Some(le16(b).map(|q| from_i16(q as i16)).collect()),
         Elem::U16 => le16(b).map(from_u16).collect(),
+        Elem::U8 => b.iter().map(|q| from_u8(*q)).collect(),
         Elem::Bfp16 => {
             let (&e, m) = b.split_first()?;
             let e = i32::from(e as i8);
@@ -322,7 +417,8 @@ pub(crate) fn get_u32(b: &[u8]) -> Vec<u32> {
 /// Appends one array's codes in its intra (keyframe) form.
 pub(crate) fn put_intra(out: &mut Vec<u8>, elem: Elem, codes: &[u8]) {
     match elem {
-        Elem::I16 | Elem::U16 => put_planes(out, le16(codes)),
+        Elem::I16 | Elem::I16MagOffset | Elem::U16 => put_planes(out, le16(codes)),
+        Elem::U8 => put_planes8(out, codes),
         Elem::Bfp16 => {
             if let Some((e, m)) = codes.split_first() {
                 out.push(*e);
@@ -336,7 +432,8 @@ pub(crate) fn put_intra(out: &mut Vec<u8>, elem: Elem, codes: &[u8]) {
 /// Appends one array's codes from its intra form `wire` (exactly the array's size).
 pub(crate) fn get_intra(out: &mut Vec<u8>, elem: Elem, wire: &[u8]) {
     match elem {
-        Elem::I16 | Elem::U16 => put_le16(out, get_planes(wire)),
+        Elem::I16 | Elem::I16MagOffset | Elem::U16 => put_le16(out, get_planes(wire)),
+        Elem::U8 => get_planes8(out, wire),
         Elem::Bfp16 => {
             if let Some((e, m)) = wire.split_first() {
                 out.push(*e);
@@ -409,12 +506,15 @@ pub(crate) fn put_delta(
             }
             put_raw_planes(out, d.into_iter());
         }
-        Elem::I16 | Elem::U16 => {
+        Elem::I16 | Elem::I16MagOffset | Elem::U16 => {
             put_raw_planes(
                 out,
                 le16(codes).zip(le16(base)).map(|(x, b)| x.wrapping_sub(b)),
             );
         }
+        // Differences, not the codes as they are: a held column's γ² repeats, so its code
+        // minus the base's is 0 (see the module docs); mod 256 it is a bijection, NaN too.
+        Elem::U8 => out.extend(codes.iter().zip(base).map(|(x, b)| x.wrapping_sub(*b))),
         Elem::Bfp16 => {
             if let (Some((e, m)), Some((be, bm))) = (codes.split_first(), base.split_first()) {
                 out.push(*e);
@@ -445,12 +545,13 @@ pub(crate) fn get_delta(out: &mut Vec<u8>, elem: Elem, deg: bool, wire: &[u8], b
                 .zip(le16(base))
                 .map(|(d, b)| angle_apply(d, b as i16)),
         ),
-        Elem::I16 | Elem::U16 => put_le16(
+        Elem::I16 | Elem::I16MagOffset | Elem::U16 => put_le16(
             out,
             get_raw_planes(wire)
                 .zip(le16(base))
                 .map(|(d, b)| b.wrapping_add(d)),
         ),
+        Elem::U8 => out.extend(wire.iter().zip(base).map(|(d, b)| b.wrapping_add(*d))),
         Elem::Bfp16 => {
             if let (Some((e, m)), Some((be, bm))) = (wire.split_first(), base.split_first()) {
                 out.push(*e);
@@ -519,6 +620,43 @@ mod tests {
         assert_eq!(from_u16(U16_ONE), Some(1.0));
         assert_eq!(from_u16(U16_ONE + 1), None);
         assert!(from_u16(U16_NAN).is_some_and(f32::is_nan));
+    }
+
+    #[test]
+    fn u8_codes_round_down_onto_the_f32_hundredths() {
+        assert_eq!(to_u8(f64::NAN), U8_NAN);
+        assert_eq!(to_u8(1.2), U8_ONE);
+        assert_eq!(to_u8(-0.1), 0);
+        assert_eq!(to_u8(f64::INFINITY), U8_ONE);
+        assert_eq!(to_u8(f64::NEG_INFINITY), 0);
+        assert_eq!(to_u8(f64::from(0.2996f32)), 29);
+        assert_eq!(to_u8(f64::from(0.3f32)), 30);
+        assert_eq!(from_u8(U8_ONE + 1), None);
+        assert_eq!(from_u8(U8_NAN - 1), None);
+        assert!(from_u8(U8_NAN).is_some_and(f32::is_nan));
+        // Every code's value re-encodes to itself, though 0.29 as f32 is below 0.29 (a plain
+        // floor of x · 100 would read 28), and the f32 just below a step reads one lower.
+        for q in 0..=U8_ONE {
+            let v = from_u8(q).expect("defined");
+            assert_eq!(to_u8(f64::from(v)), q, "{q}");
+            if q > 0 {
+                assert_eq!(to_u8(f64::from(v.next_down())), q - 1, "{q}");
+            }
+        }
+    }
+
+    #[test]
+    fn mag_offsets_invert_for_every_code() {
+        let codes = [i16::MIN, i16::MIN + 1, -32_766, -1, 0, 1, 32_766, i16::MAX];
+        for m in codes {
+            for x in codes {
+                let mut a = x.to_le_bytes();
+                let mag = m.to_le_bytes();
+                to_mag_offsets(&mut a, &mag);
+                from_mag_offsets(&mut a, &mag);
+                assert_eq!(i16::from_le_bytes(a), x);
+            }
+        }
     }
 
     #[test]

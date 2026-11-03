@@ -434,9 +434,10 @@ fn slow_tuning_session_fits_a_remote_link() {
     for (topic, c) in &sizes {
         if topic.ends_with("/tf") {
             // The average (`d/4/tf`) also carries its operands' range band (`range_lo`,
-            // `range_hi`, `range_coh`): ≈ 4.5 kB as a keyframe, ≈ 2.9 kB as a delta.
+            // `range_hi` as offsets from `mag`, `range_coh` in hundredths): ≈ 3 970 B as a
+            // keyframe, ≈ 2 740 B as a delta at most; the budget is ≈ 10 % over that.
             let (key, delta) = if topic == "d/4/tf" {
-                (5_000, 3_300)
+                (4_400, 3_050)
             } else {
                 (3_000, 1_500)
             };

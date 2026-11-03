@@ -48,10 +48,12 @@ def arr(name, unit, elem=None):
     if elem is None:
         elem = {"mag": "i16", "phase": "i16", "level": "i16", "ir_etc": "i16", "coh": "u16", "ir_linear": "bfp16",
                 "gonio_x": "i8", "gonio_y": "i8", "overs": "u32"}.get(name, "f32")
-        if name.startswith("align_") or name in ("range_lo", "range_hi"):
+        if name.startswith("align_"):
             elem = "i16"
+        if name in ("range_lo", "range_hi"):
+            elem = "i16_mag_offset"
         if name == "range_coh":
-            elem = "u16"
+            elem = "u8"
     return {"name": name, "unit": unit, "elem": elem}
 
 

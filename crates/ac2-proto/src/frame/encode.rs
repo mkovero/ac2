@@ -12,6 +12,8 @@ use super::{
 
 enum Col<'a> {
     F(&'a [f32]),
+    /// Values coded relative to the same column's `mag`, the second slice.
+    OnMag(&'a [f32], &'a [f32]),
     U(Vec<u32>),
     I(Vec<i8>),
 }
@@ -74,13 +76,10 @@ pub(super) fn quantise(frame: &Frame) -> Result<CodedFrame, EncodeError> {
                 }
             }
             if let Some(r) = &f.range {
-                for (name, unit, v) in [
-                    (ArrayName::RangeLo, Unit::Db, &r.lo),
-                    (ArrayName::RangeHi, Unit::Db, &r.hi),
-                    (ArrayName::RangeCoh, Unit::Coherence, &r.coh),
-                ] {
-                    cols.push((desc(name, unit), Col::F(v)));
+                for (name, v) in [(ArrayName::RangeLo, &r.lo), (ArrayName::RangeHi, &r.hi)] {
+                    cols.push((desc(name, Unit::Db), Col::OnMag(v, &f.mag)));
                 }
+                cols.push((desc(ArrayName::RangeCoh, Unit::Coherence), Col::F(&r.coh)));
             }
             FrameMeta::Tf(f.meta.clone())
         }
@@ -186,7 +185,7 @@ pub(super) fn quantise(frame: &Frame) -> Result<CodedFrame, EncodeError> {
 
     let n = match cols.first() {
         None => 0,
-        Some((_, Col::F(v))) => v.len(),
+        Some((_, Col::F(v) | Col::OnMag(v, _))) => v.len(),
         Some((_, Col::U(v))) => v.len(),
         Some((_, Col::I(v))) => v.len(),
     };
@@ -195,7 +194,7 @@ pub(super) fn quantise(frame: &Frame) -> Result<CodedFrame, EncodeError> {
     }
     for (d, c) in &cols {
         let got = match c {
-            Col::F(v) => v.len(),
+            Col::F(v) | Col::OnMag(v, _) => v.len(),
             Col::U(v) => v.len(),
             Col::I(v) => v.len(),
         };
@@ -212,6 +211,13 @@ pub(super) fn quantise(frame: &Frame) -> Result<CodedFrame, EncodeError> {
     for (d, c) in &cols {
         match c {
             Col::F(v) => packing::put_f32(&mut codes, d.elem, d.unit == Unit::Deg, v),
+            Col::OnMag(v, mag) => {
+                let at = codes.len();
+                packing::put_f32(&mut codes, d.elem, false, v);
+                let mut m = Vec::with_capacity(2 * mag.len());
+                packing::put_f32(&mut m, super::Elem::I16, false, mag);
+                packing::to_mag_offsets(&mut codes[at..], &m);
+            }
             Col::U(v) => packing::put_u32(&mut codes, v),
             Col::I(v) => packing::put_i8(&mut codes, v),
         }

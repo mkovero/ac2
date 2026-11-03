@@ -40,11 +40,14 @@ fn align_curves(a: &mut Arrays<'_>) -> Result<Option<crate::model::AlignCurves>,
     }
 }
 
-/// An average's range band: all three arrays or none.
-fn range_band(a: &mut Arrays<'_>) -> Result<Option<crate::model::RangeBand>, DecodeError> {
+/// An average's range band: all three arrays or none; its edges on `mag`'s codes.
+fn range_band(
+    a: &mut Arrays<'_>,
+    mag: &[u8],
+) -> Result<Option<crate::model::RangeBand>, DecodeError> {
     match [
-        a.opt_f32(ArrayName::RangeLo, Unit::Db)?,
-        a.opt_f32(ArrayName::RangeHi, Unit::Db)?,
+        a.opt_f32_on_mag(ArrayName::RangeLo, mag)?,
+        a.opt_f32_on_mag(ArrayName::RangeHi, mag)?,
         a.opt_f32(ArrayName::RangeCoh, Unit::Coherence)?,
     ] {
         [None, None, None] => Ok(None),
@@ -126,6 +129,29 @@ impl<'a> Arrays<'a> {
         self.find(name, unit)?
             .map(|b| packing::get_f32(b, elem).ok_or(DecodeError::UndefinedCode(name)))
             .transpose()
+    }
+
+    /// An `i16_mag_offset` array in dB, on `mag`'s codes (the same length: every array is
+    /// `n` elements).
+    fn opt_f32_on_mag(
+        &mut self,
+        name: ArrayName,
+        mag: &[u8],
+    ) -> Result<Option<Vec<f32>>, DecodeError> {
+        let elem = desc(name, Unit::Db).elem;
+        self.find(name, Unit::Db)?
+            .map(|b| {
+                let mut codes = b.to_vec();
+                packing::from_mag_offsets(&mut codes, mag);
+                packing::get_f32(&codes, elem).ok_or(DecodeError::UndefinedCode(name))
+            })
+            .transpose()
+    }
+
+    /// The codes of `name`'s array, not marked used.
+    fn codes(&self, name: ArrayName) -> Option<&'a [u8]> {
+        let i = self.descs.iter().position(|d| d.name == name)?;
+        Some(self.parts[i])
     }
 
     fn mask<T: MaskBits>(&mut self, name: ArrayName) -> Result<Vec<T>, DecodeError> {
@@ -232,16 +258,18 @@ pub(super) fn to_frame(c: &CodedFrame) -> Result<Frame, DecodeError> {
             .collect(),
         used: vec![false; h.arrays.len()],
     };
+    let mag_codes = a.codes(ArrayName::Mag).unwrap_or_default();
     let data = match h.meta.clone() {
         FrameMeta::Tf(meta) => FrameData::Tf(TfFrame {
             meas,
             meta,
+            // `mag` is checked first, so its codes under the range band are `i16`.
             mag: a.f32(ArrayName::Mag, Unit::Db)?,
             phase: a.f32(ArrayName::Phase, Unit::Deg)?,
             coh: a.f32(ArrayName::Coh, Unit::Coherence)?,
             validity: a.mask(ArrayName::Validity)?,
             align: align_curves(&mut a)?,
-            range: range_band(&mut a)?,
+            range: range_band(&mut a, mag_codes)?,
         }),
         FrameMeta::Ir(meta) => FrameData::Ir(IrFrame {
             meas,

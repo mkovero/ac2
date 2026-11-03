@@ -13,7 +13,7 @@ import zlib
 
 import msgpack
 
-PROTO_VERSION = 81
+PROTO_VERSION = 82
 MAX_HEADER_BYTES = 8192
 MAX_N = 1 << 16
 MAX_ARRAYS = 12
@@ -306,7 +306,7 @@ def named(t, x):
 # --------------------------------------------------------------------------------------
 # Frames
 
-_ELEM_SIZE = {"f32": 4, "u32": 4, "i16": 2, "u16": 2, "bfp16": 2, "i8": 1}
+_ELEM_SIZE = {"f32": 4, "u32": 4, "i16": 2, "i16_mag_offset": 2, "u16": 2, "u8": 1, "bfp16": 2, "i8": 1}
 BFP_EXP_MIN, BFP_EXP_MAX, BFP_PEAK = -128, 113, 32765.0
 
 
@@ -383,6 +383,36 @@ def from_u16(q: int) -> float:
     return q / U16_ONE
 
 
+U8_NAN, U8_ONE = 255, 100
+
+
+def _u8_value(q: int) -> float:
+    """q / 100 as the nearest f32 (the Rust decoder divides in f32)."""
+    return _f32(q / U8_ONE)
+
+
+def to_u8(x: float) -> int:
+    """The largest q in 0..100 whose value is at most x (as f32): hundredths rounded down,
+    so a mask in hundredths compares the same on the code as on x."""
+    if math.isnan(x):
+        return U8_NAN
+    x = _f32(x)
+    q = max(0, min(U8_ONE, math.floor(x * U8_ONE))) if math.isfinite(x) else (U8_ONE if x > 0 else 0)
+    if q < U8_ONE and _u8_value(q + 1) <= x:
+        q += 1
+    elif q > 0 and _u8_value(q) > x:
+        q -= 1
+    return q
+
+
+def from_u8(q: int) -> float:
+    if q == U8_NAN:
+        return math.nan
+    if q > U8_ONE:
+        raise DecodeError(f"undefined coherence code {q}")
+    return _u8_value(q)
+
+
 def wire_value(desc: dict, v, array=None):
     """What `v` decodes to after a trip over the wire in `desc`'s element encoding; a
     `bfp16` value needs its whole `array` for the exponent."""
@@ -390,10 +420,12 @@ def wire_value(desc: dict, v, array=None):
     if e == "bfp16":
         x = bfp_exponent([_f32(a) for a in array])
         return from_bfp(_code_i16(math.ldexp(_f32(v), -x)), x)
-    if e == "i16":
+    if e in ("i16", "i16_mag_offset"):
         return from_i16(to_i16(v, desc["unit"] == "deg"))
     if e == "u16":
         return from_u16(to_u16(v))
+    if e == "u8":
+        return from_u8(to_u8(v))
     if e == "f32":
         return struct.unpack("<f", struct.pack("<f", v))[0]
     return v
@@ -434,12 +466,15 @@ def _unraw_planes(b: bytes) -> list:
 
 
 def _codes(desc: dict, values: list) -> bytes:
-    """One array's codes: little-endian, a `bfp16` array's exponent byte first."""
+    """One array's codes: little-endian, a `bfp16` array's exponent byte first; an
+    `i16_mag_offset` array as its `i16` codes (`coded` takes them relative to `mag`)."""
     e = desc["elem"]
-    if e == "i16":
+    if e in ("i16", "i16_mag_offset"):
         return _le16([to_i16(v, desc["unit"] == "deg") & 0xFFFF for v in values])
     if e == "u16":
         return _le16([to_u16(v) for v in values])
+    if e == "u8":
+        return bytes(to_u8(v) for v in values)
     if e == "bfp16":
         values = [_f32(v) for v in values]
         x = bfp_exponent(values)
@@ -450,10 +485,12 @@ def _codes(desc: dict, values: list) -> bytes:
 def _values(desc: dict, b: bytes) -> list:
     e = desc["elem"]
     s16 = lambda q: q - 0x10000 if q >= 0x8000 else q  # noqa: E731
-    if e == "i16":
+    if e in ("i16", "i16_mag_offset"):
         return [from_i16(s16(q)) for q in _unle16(b)]
     if e == "u16":
         return [from_u16(q) for q in _unle16(b)]
+    if e == "u8":
+        return [from_u8(q) for q in b]
     if e == "bfp16":
         if not b:
             raise DecodeError("bfp16 array without its exponent")
@@ -468,8 +505,10 @@ def _values(desc: dict, b: bytes) -> list:
 def _intra(desc: dict, c: bytes) -> bytes:
     """Keyframe form of one array's codes."""
     e = desc["elem"]
-    if e in ("i16", "u16"):
+    if e in ("i16", "i16_mag_offset", "u16"):
         return _planes(_unle16(c))
+    if e == "u8":
+        return bytes((q - p) & 0xFF for p, q in zip(b"\0" + c, c))
     if e == "bfp16":
         return c[:1] + _planes(_unle16(c[1:]))
     return c
@@ -477,8 +516,14 @@ def _intra(desc: dict, c: bytes) -> bytes:
 
 def _unintra(desc: dict, w: bytes) -> bytes:
     e = desc["elem"]
-    if e in ("i16", "u16"):
+    if e in ("i16", "i16_mag_offset", "u16"):
         return _le16(_unplanes(w))
+    if e == "u8":
+        prev, out = 0, bytearray()
+        for d in w:
+            prev = (prev + d) & 0xFF
+            out.append(prev)
+        return bytes(out)
     if e == "bfp16":
         return w[:1] + _le16(_unplanes(w[1:]))
     return w
@@ -521,8 +566,10 @@ def _delta(desc: dict, c: bytes, base: bytes):
     if e == "i16" and desc["unit"] == "deg":
         d = [_angle_delta(_signed(x), _signed(b)) for x, b in zip(_unle16(c), _unle16(base))]
         return None if None in d else _raw_planes(d)
-    if e in ("i16", "u16"):
+    if e in ("i16", "i16_mag_offset", "u16"):
         return _raw_planes([(x - b) & 0xFFFF for x, b in zip(_unle16(c), _unle16(base))])
+    if e == "u8":
+        return bytes((x - b) & 0xFF for x, b in zip(c, base))
     if e == "bfp16":
         if c[:1] == base[:1]:
             return c[:1] + _raw_planes([(x - b) & 0xFFFF
@@ -537,8 +584,10 @@ def _undelta(desc: dict, w: bytes, base: bytes) -> bytes:
     e = desc["elem"]
     if e == "i16" and desc["unit"] == "deg":
         return _le16([_angle_apply(d, _signed(b)) for d, b in zip(_unraw_planes(w), _unle16(base))])
-    if e in ("i16", "u16"):
+    if e in ("i16", "i16_mag_offset", "u16"):
         return _le16([(b + d) & 0xFFFF for d, b in zip(_unraw_planes(w), _unle16(base))])
+    if e == "u8":
+        return bytes((b + d) & 0xFF for d, b in zip(w, base))
     if e == "bfp16":
         if w[:1] == base[:1]:
             return w[:1] + _le16([(b + d) & 0xFFFF
@@ -577,14 +626,27 @@ def _split(descs: list, n: int, b: bytes) -> list:
 def coded(topic: str, header: dict, arrays: list) -> dict:
     """A frame as codes: `header` the named keyframe header without `form` and `crc`,
     `arrays` value lists in the order of header["arrays"]."""
-    codes = b"".join(_codes(d, v) for d, v in zip(header["arrays"], arrays, strict=True))
-    return {"topic": topic, "header": header, "codes": codes}
+    parts = [_codes(d, v) for d, v in zip(header["arrays"], arrays, strict=True)]
+    _on_mag(header["arrays"], parts, -1)
+    return {"topic": topic, "header": header, "codes": b"".join(parts)}
+
+
+def _on_mag(descs: list, parts: list, sign: int):
+    """`i16_mag_offset` arrays relative to `mag`'s codes (sign -1) or back (+1), in place."""
+    mag = next((p for d, p in zip(descs, parts) if d["name"] == "mag"), None)
+    for i, d in enumerate(descs):
+        if d["elem"] == "i16_mag_offset":
+            if mag is None:
+                raise DecodeError(f"{d['name']} needs a mag array")
+            parts[i] = _le16([(x + sign * m) & 0xFFFF for x, m in zip(_unle16(parts[i]), _unle16(mag))])
 
 
 def values(c: dict) -> dict:
     """The arrays of coded frame `c`, by name."""
     h = c["header"]
-    return {d["name"]: _values(d, b) for d, b in zip(h["arrays"], _split(h["arrays"], h["n"], c["codes"]))}
+    parts = _split(h["arrays"], h["n"], c["codes"])
+    _on_mag(h["arrays"], parts, 1)
+    return {d["name"]: _values(d, b) for d, b in zip(h["arrays"], parts)}
 
 
 def _body(header: list, payload: bytes) -> bytes:

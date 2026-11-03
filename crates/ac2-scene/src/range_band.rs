@@ -6,6 +6,11 @@
 //! A column where any position's γ² is below the view's coherence mask is left out: there
 //! the band would be the spread of noise, not of seats. That is the threshold that blanks a
 //! single curve, so the band never runs where its own positions would show a gap.
+//!
+//! The wire carries that γ² in hundredths rounded down (`docs/protocol.md` §5.3): the mask's
+//! steps are hundredths, and `k / 100` as `f32` orders like `k`, so `γ² < mask` on the
+//! received value blanks exactly the columns it would on the daemon's (0.2996 arrives as
+//! 0.29, below a mask at 0.3).
 
 use ac2_proto::model::{RangeBand, RangeSpread};
 
@@ -132,5 +137,52 @@ mod tests {
         // A position below the mask: out. No coherence known: kept, as a curve is.
         assert!(e[1].0.is_nan() && e[1].1.is_nan());
         assert_eq!(e[2], (-1.0, 1.0));
+    }
+
+    /// The band as it arrives: γ² in hundredths rounded down still masks exactly where the
+    /// daemon's value would, at every mask step in hundredths.
+    #[test]
+    fn coherence_mask_is_exact_after_the_wire() {
+        use ac2_proto::frame::{FrameData, decode_frame, encode_frame};
+        let mut f = ac2_proto::samples::tf_frame();
+        let FrameData::Tf(tf) = &mut f.data else {
+            panic!("a tf frame")
+        };
+        let coh = [0.2996f32, 0.3, 0.30004, 0.0999, 1.0, 0.0];
+        let mut band = tf.range.clone().expect("the sample has a band");
+        for (i, g) in coh.iter().enumerate() {
+            band.lo[10 + i] = -3.0;
+            band.hi[10 + i] = 3.0;
+            band.coh[10 + i] = *g;
+        }
+        tf.range = Some(band);
+        let parts = encode_frame(&f).expect("encodes");
+        let refs: Vec<&[u8]> = parts.iter().map(Vec::as_slice).collect();
+        let FrameData::Tf(got) = decode_frame(&refs).expect("decodes").data else {
+            panic!("a tf frame")
+        };
+        let got = got.range.expect("a band");
+        assert_eq!(got.coh[10..16], [0.29, 0.3, 0.3, 0.09, 1.0, 0.0]);
+        let band = RangeBand {
+            lo: got.lo[10..16].to_vec(),
+            hi: got.hi[10..16].to_vec(),
+            coh: got.coh[10..16].to_vec(),
+        };
+        let at = |th: f32| {
+            let style = CoherenceStyle {
+                blank_below: Some(th),
+                ..CoherenceStyle::default()
+            };
+            edges(&band, 0.0, &style)
+                .iter()
+                .map(|e| e.0.is_nan())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(at(0.3), [true, false, false, true, false, true]);
+        for k in 0..=100u8 {
+            let th = f32::from(k) / 100.0;
+            let want: Vec<bool> = coh.iter().map(|g| *g < th).collect();
+            assert_eq!(at(th), want, "mask {th}");
+        }
     }
 }

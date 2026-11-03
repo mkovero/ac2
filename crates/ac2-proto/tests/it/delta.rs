@@ -89,13 +89,29 @@ fn every_kind_deltas() {
         for d in &base.arrays {
             let k = match d.elem {
                 Elem::F32 | Elem::U32 => 4,
-                Elem::I16 | Elem::U16 | Elem::Bfp16 => 2,
-                Elem::I8 => 1,
+                Elem::I16 | Elem::I16MagOffset | Elem::U16 | Elem::Bfp16 => 2,
+                Elem::I8 | Elem::U8 => 1,
             } * base.n as usize
                 + usize::from(d.elem == Elem::Bfp16);
             let codes = &mut x.codes[at..at + k];
             match d.elem {
                 // Any `i16` code decodes; an angle array is kept to angles by its delta.
+                Elem::I16MagOffset => {
+                    for c in codes.chunks_exact_mut(2) {
+                        let q = i16::from_le_bytes([c[0], c[1]]).wrapping_sub(5);
+                        c.copy_from_slice(&q.to_le_bytes());
+                    }
+                }
+                // Hundredths stay hundredths; NaN (255) stays.
+                Elem::U8 => {
+                    for c in codes.iter_mut() {
+                        *c = match *c {
+                            100 => 99,
+                            255 => 255,
+                            q => q + 1,
+                        };
+                    }
+                }
                 Elem::I16 if d.unit != frame::Unit::Deg => {
                     for c in codes.chunks_exact_mut(2) {
                         let q = i16::from_le_bytes([c[0], c[1]]).wrapping_add(3);
@@ -269,7 +285,12 @@ fn tf(n_mag: Vec<(f32, f32)>, phase: Vec<(f32, f32)>, coh: Vec<(f32, f32)>, firs
             coh: pick(&coh),
             validity: vec![ValidityMask(u32::from(!first)); n_mag.len()],
             align: None,
-            range: None,
+            // Any edges on any curve: the offsets from `mag` wrap, NaN and ±∞ included.
+            range: Some(model::RangeBand {
+                lo: pick(&phase),
+                hi: pick(&n_mag).iter().map(|x| x - 3.0).collect(),
+                coh: pick(&coh),
+            }),
         }),
     }
 }
@@ -293,6 +314,10 @@ proptest! {
         let got = wire(&d).apply(Some(&a)).expect("applies");
         prop_assert_eq!(&got.codes, &b.codes);
         prop_assert_eq!(got.stamp, b.stamp);
+        // Its values quantise to the same codes again: every encoding, the range band's
+        // offsets and floored hundredths too, is idempotent.
+        let again = coded(&got.to_frame().expect("values"));
+        prop_assert_eq!(&again.codes, &b.codes);
     }
 
     /// Short headers: `v` and the delta form, then anything.

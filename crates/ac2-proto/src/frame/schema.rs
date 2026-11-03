@@ -162,6 +162,15 @@ pub enum Elem {
     Bfp16,
     /// Signed 8-bit. The goniometer's quantised coordinates.
     I8,
+    /// `i16` hundredths as offsets from the same column's `mag` code (wrapping), then as
+    /// neighbour differences in byte planes. An average's range band: its edges sit a few dB
+    /// from the curve, so the offsets are small where the absolute levels are not, and a
+    /// column whose edges move with the curve keeps its offset.
+    I16MagOffset,
+    /// Hundredths, unsigned 8-bit (0 … 100) rounded down, 255 = NaN; as neighbour
+    /// differences. The lowest γ² of an average's positions, which a display only compares
+    /// with a coherence mask in hundredths.
+    U8,
 }
 
 /// Describes one array part.
@@ -191,12 +200,12 @@ pub(super) fn desc(name: ArrayName, unit: Unit) -> ArrayDesc {
             | ArrayName::AlignPhaseBefore
             | ArrayName::AlignPhaseAfter
             | ArrayName::AlignSumBefore
-            | ArrayName::AlignSumAfter
-            | ArrayName::RangeLo
-            | ArrayName::RangeHi,
+            | ArrayName::AlignSumAfter,
             _,
         ) => Elem::I16,
-        (ArrayName::Coh | ArrayName::RangeCoh, _) => Elem::U16,
+        (ArrayName::RangeLo | ArrayName::RangeHi, _) => Elem::I16MagOffset,
+        (ArrayName::Coh, _) => Elem::U16,
+        (ArrayName::RangeCoh, _) => Elem::U8,
         (ArrayName::IrLinear, _) => Elem::Bfp16,
         _ => Elem::F32,
     };
