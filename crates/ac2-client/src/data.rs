@@ -1,12 +1,18 @@
 //! Data subscriptions and the latest-frame view (Q2).
 //!
 //! The data SUB is never read frame by frame. [`DataState::drain`] reads everything queued
-//! (until EAGAIN, bounded) without copying it and keeps the newest message per topic: frames
-//! of one topic arrive in publish order over the one connection, so that is the last one
-//! read. Only those are decoded; superseded messages never are. Malformed frames are
-//! counted, frames of older session epochs or another daemon incarnation discarded. Because
-//! a publisher drops the *newest* messages for a stalled subscriber, only a drain gets back
-//! to fresh data in one pass.
+//! (until EAGAIN, bounded) and applies it in order: frames of one topic arrive in publish
+//! order over the one connection, each a keyframe or a delta on the frame before it. A
+//! delta applies only on the exact frame it names as its base and only if the result
+//! matches its CRC; otherwise it is refused, the last applied frame is kept, and a
+//! `data.keyframe` is asked for at most once per [`KEYFRAME_ASK_GAP`]. A refused frame never
+//! counts as new, so the kept frame turns STALE (and is drawn dimmed) if no keyframe comes:
+//! never a curve built on the wrong base, and an old one reads as old. A delta with no frame
+//! held yet (a new subscription sees deltas before its keyframe) waits for that keyframe
+//! without asking. Values are built only for the newest frame per topic of a drain.
+//! Malformed frames are counted, frames of older session epochs or another daemon
+//! incarnation discarded. Because a publisher drops the *newest* messages for a stalled
+//! subscriber, only a drain gets back to fresh data in one pass.
 //!
 //! A consumer can sleep until data is queued instead of polling: see
 //! [`crate::Client::data_changed`] and [`crate::Client::wait_data`].
@@ -17,9 +23,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use ac2_proto::frame::MAX_PARTS;
+use ac2_proto::frame::{FrameStamp, MAX_PARTS};
 use ac2_proto::units::{DaemonIncarnation, SessionEpoch};
-use ac2_proto::{Frame, GridId, Topic, decode_frame};
+use ac2_proto::{CodedFrame, Frame, GridId, Topic, WireFrame, decode_wire};
 use ac2_zmq::{Part, Socket};
 
 use crate::error::ClientError;
@@ -49,13 +55,24 @@ pub fn is_stale(t: &Topic, responding: bool, since_new: Duration, age: Option<f6
 /// Most messages read by one drain; bounds the time spent when the publisher outpaces us.
 pub const DRAIN_LIMIT: usize = 4096;
 
+/// Shortest interval between two `data.keyframe` requests for one topic: the daemon's
+/// refresh interval, so a receiver asks at most as often as an unchanged result is re-sent.
+pub const KEYFRAME_ASK_GAP: Duration = Duration::from_millis(250);
+
 #[derive(Debug, Clone)]
 struct Kept {
     /// Topic text, made once per topic and shared with every [`Latest`] built from it.
     name: Arc<str>,
-    frame: Arc<Frame>,
-    /// When this seq first arrived.
+    /// The frame applied last, as codes: the base of the next delta.
+    coded: CodedFrame,
+    /// Its values; `None` until the first applied frame has been built.
+    frame: Option<Arc<Frame>>,
+    /// Applied since its values were last built.
+    fresh: bool,
+    /// When a newer `seq` than the one before was last applied.
     received: Instant,
+    /// When a keyframe was last asked for.
+    asked_at: Option<Instant>,
 }
 
 /// Owner of the data SUB, the subscriptions and the decoded frames.
@@ -66,11 +83,11 @@ pub(crate) struct DataState {
     kept: HashMap<Topic, Kept>,
     malformed: u64,
     discarded: u64,
+    refused: u64,
     /// Bytes received from the daemon ([`ClientConfig::received_bytes`](crate::ClientConfig)).
     received: Arc<AtomicU64>,
-    /// Newest undecoded message per topic during a drain. Keys persist once seen, so a
-    /// steady-state drain allocates nothing here.
-    newest: HashMap<Box<[u8]>, Option<Vec<Part>>>,
+    /// Topics whose chain broke: a `data.keyframe` is due ([`DataState::take_asks`]).
+    asks: Vec<Topic>,
 }
 
 /// The newest frame of one topic.
@@ -103,6 +120,9 @@ pub struct Latest {
     pub malformed_total: u64,
     /// Frames of an older epoch or another incarnation discarded since the client started.
     pub discarded_total: u64,
+    /// Deltas refused since the client started: not on the frame held, or not matching
+    /// their CRC.
+    pub refused_total: u64,
     /// The daemon's keepalives arrive.
     pub responding: bool,
 }
@@ -147,9 +167,8 @@ impl Latest {
     }
 }
 
-fn current(f: &Frame, inc: Option<DaemonIncarnation>, epoch: Option<SessionEpoch>) -> bool {
-    inc.is_none_or(|i| f.stamp.daemon_incarnation == i)
-        && epoch.is_none_or(|e| f.stamp.session_epoch >= e)
+fn current(s: &FrameStamp, inc: Option<DaemonIncarnation>, epoch: Option<SessionEpoch>) -> bool {
+    inc.is_none_or(|i| s.daemon_incarnation == i) && epoch.is_none_or(|e| s.session_epoch >= e)
 }
 
 /// Frame age in seconds at local wall time `now_wall_ns`, given the `daemon − local` offset.
@@ -159,7 +178,7 @@ pub fn frame_age(f: &Frame, now_wall_ns: i128, offset_ns: Option<i128>) -> Optio
     Some(age_ns as f64 / 1e9)
 }
 
-fn decode(parts: &[Part]) -> Option<Frame> {
+fn decode(parts: &[Part]) -> Option<WireFrame> {
     let mut refs: [&[u8]; MAX_PARTS] = [&[]; MAX_PARTS];
     if parts.len() > refs.len() {
         return None;
@@ -167,7 +186,15 @@ fn decode(parts: &[Part]) -> Option<Frame> {
     for (r, p) in refs.iter_mut().zip(parts) {
         *r = p;
     }
-    decode_frame(&refs[..parts.len()]).ok()
+    decode_wire(&refs[..parts.len()]).ok()
+}
+
+/// Whether a keyframe of stamp `s` replaces the frame held (`held`): a newer `seq`, or
+/// another incarnation or epoch.
+fn newer(s: &FrameStamp, held: &FrameStamp) -> bool {
+    s.daemon_incarnation != held.daemon_incarnation
+        || s.session_epoch != held.session_epoch
+        || s.seq > held.seq
 }
 
 impl DataState {
@@ -179,7 +206,75 @@ impl DataState {
             kept: HashMap::new(),
             malformed: 0,
             discarded: 0,
-            newest: HashMap::new(),
+            refused: 0,
+            asks: Vec::new(),
+        }
+    }
+
+    /// Topics a `data.keyframe` is due for, since the last call.
+    pub(crate) fn take_asks(&mut self) -> Vec<Topic> {
+        std::mem::take(&mut self.asks)
+    }
+
+    /// One message, in order: a keyframe replaces the frame held, a delta applies on it.
+    fn apply(&mut self, w: WireFrame, view: &MirrorView, now: Instant) {
+        let topic = w.topic();
+        match w {
+            WireFrame::Key(k) => {
+                if !current(&k.stamp, view.incarnation, view.session_epoch) {
+                    self.discarded += 1;
+                    return;
+                }
+                match self.kept.get_mut(&topic) {
+                    Some(kp) => {
+                        let bump = newer(&k.stamp, &kp.coded.stamp);
+                        // The same frame again (a subscriber joined): nothing new to draw.
+                        if bump || k.stamp.seq == kp.coded.stamp.seq {
+                            kp.coded = k;
+                            kp.fresh |= bump;
+                            if bump {
+                                kp.received = now;
+                            }
+                        }
+                    }
+                    None => {
+                        self.kept.insert(
+                            topic,
+                            Kept {
+                                name: Arc::from(topic.to_string()),
+                                coded: k,
+                                frame: None,
+                                fresh: true,
+                                received: now,
+                                asked_at: None,
+                            },
+                        );
+                    }
+                }
+            }
+            WireFrame::Delta(d) => {
+                // No frame held yet: the keyframe the subscription brings is on its way.
+                let Some(kp) = self.kept.get_mut(&topic) else {
+                    return;
+                };
+                match d.apply(&kp.coded) {
+                    Ok(c) => {
+                        kp.coded = c;
+                        kp.fresh = true;
+                        kp.received = now;
+                    }
+                    Err(_) => {
+                        self.refused += 1;
+                        if kp
+                            .asked_at
+                            .is_none_or(|t| now.saturating_duration_since(t) >= KEYFRAME_ASK_GAP)
+                        {
+                            kp.asked_at = Some(now);
+                            self.asks.push(topic);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -213,12 +308,11 @@ impl DataState {
         self.sub.unsubscribe(prefix)?;
         let prefixes = &self.prefixes;
         self.kept.retain(|t, _| subscribed(prefixes, &t.to_bytes()));
-        self.newest.retain(|t, _| subscribed(prefixes, t));
         Ok(())
     }
 
-    /// Drains the SUB into `out`: decodes the newest message per topic, and recomputes age
-    /// and STALE of every kept frame at `now`. `out` is updated in place, so a caller that
+    /// Drains the SUB into `out`: applies every message in order, builds the values of the
+    /// newest frame per topic, and recomputes age and STALE of every kept frame at `now`. `out` is updated in place, so a caller that
     /// keeps it reuses its map and topic names.
     pub(crate) fn drain(
         &mut self,
@@ -244,61 +338,37 @@ impl DataState {
             if !subscribed(&self.prefixes, topic) {
                 continue;
             }
-            match self.newest.get_mut(&**topic) {
-                Some(slot) => *slot = Some(parts),
-                None => {
-                    self.newest.insert(Box::from(&**topic), Some(parts));
-                }
+            match decode(&parts) {
+                Some(w) => self.apply(w, view, now),
+                None => self.malformed += 1,
             }
         }
 
-        for parts in self.newest.values_mut().filter_map(Option::take) {
-            let Some(f) = decode(&parts) else {
-                self.malformed += 1;
-                continue;
-            };
-            if !current(&f, inc, epoch) {
-                self.discarded += 1;
-                continue;
-            }
-            let topic = f.topic();
-            match self.kept.get_mut(&topic) {
-                Some(k) => {
-                    let newer = k.frame.stamp.daemon_incarnation != f.stamp.daemon_incarnation
-                        || k.frame.stamp.session_epoch != f.stamp.session_epoch
-                        || f.stamp.seq > k.frame.stamp.seq;
-                    if newer {
-                        k.frame = Arc::new(f);
-                        k.received = now;
-                    }
-                }
-                None => {
-                    self.kept.insert(
-                        topic,
-                        Kept {
-                            name: Arc::from(topic.to_string()),
-                            frame: Arc::new(f),
-                            received: now,
-                        },
-                    );
-                }
+        // Values only for the newest frame of each topic.
+        for kp in self.kept.values_mut().filter(|k| k.fresh) {
+            kp.fresh = false;
+            match kp.coded.to_frame() {
+                Ok(f) => kp.frame = Some(Arc::new(f)),
+                Err(_) => self.malformed += 1,
             }
         }
 
         // Kept frames from an older epoch or another incarnation go too.
         let before = self.kept.len();
-        self.kept.retain(|_, k| current(&k.frame, inc, epoch));
+        self.kept.retain(|_, k| current(&k.coded.stamp, inc, epoch));
         self.discarded += (before - self.kept.len()) as u64;
 
         let responding = view.responding(now);
-        out.frames.retain(|_, tf| self.kept.contains_key(&tf.topic));
+        out.frames
+            .retain(|_, tf| self.kept.get(&tf.topic).is_some_and(|k| k.frame.is_some()));
         for (topic, k) in &self.kept {
+            let Some(frame) = &k.frame else { continue };
             let since_new = now.saturating_duration_since(k.received);
-            let age = frame_age(&k.frame, now_wall_ns, view.clock_offset_ns);
+            let age = frame_age(frame, now_wall_ns, view.clock_offset_ns);
             let stale = is_stale(topic, responding, since_new, age);
             let tf = TopicFrame {
                 topic: *topic,
-                frame: k.frame.clone(),
+                frame: frame.clone(),
                 received: k.received,
                 since_new,
                 age,
@@ -314,6 +384,7 @@ impl DataState {
         out.read = read;
         out.malformed_total = self.malformed;
         out.discarded_total = self.discarded;
+        out.refused_total = self.refused;
         out.responding = responding;
         Ok(())
     }

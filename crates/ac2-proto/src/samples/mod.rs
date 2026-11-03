@@ -4,6 +4,7 @@
 //! fixtures (`tools/protocol/fixtures.py` builds the same frames in Python).
 
 mod builders;
+mod chains;
 mod commands;
 mod eq;
 mod events;
@@ -14,6 +15,7 @@ mod state;
 mod traces;
 
 pub use builders::{grids, log_grid, math_measurement, pane_layout, sweep_measurement, working};
+pub use chains::chains;
 pub use commands::commands;
 pub use eq::{eq_edits, eq_measurement};
 pub use events::events;

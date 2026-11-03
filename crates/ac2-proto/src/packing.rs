@@ -1,5 +1,6 @@
-//! Array payload of a data frame: each array in its element encoding, concatenated in the
-//! header's order, then deflated (RFC 1951, raw) into one part.
+//! Array payload of a data frame: each array quantised to its element encoding's codes,
+//! concatenated in the header's order; on the wire the codes go as a keyframe's intra form or
+//! as a delta against the frame before, then deflated (RFC 1951, raw).
 //!
 //! Precision budget of the 16-bit encodings, against what a display shows of them:
 //!
@@ -24,9 +25,19 @@
 //!   small integers that deflate well, unlike the full mantissas of a float of any width.
 //!   The exponent is in [−128, 113]: 32 766 · 2^113 is still a finite f32.
 //!
-//! A 16-bit array goes out as the differences between neighbouring columns (wrapping), low
-//! bytes first, then high bytes: neighbouring columns of a curve are close, so most high
-//! bytes are 0 or 0xff and deflate takes them to almost nothing.
+//! The codes of an array are little-endian, a `bfp16` array's exponent byte first: the form
+//! the CRC of a frame covers.
+//!
+//! Intra (keyframe): a 16-bit array goes out as the differences between neighbouring columns
+//! (wrapping), low bytes first, then high bytes: neighbouring columns of a curve are close,
+//! so most high bytes are 0 or 0xff and deflate takes them to almost nothing.
+//!
+//! Delta: a 16-bit array goes out as its codes minus the base frame's codes of the same
+//! column (wrapping; an angle wrapped to ±180°, so a phase crossing the wrap moves by a small
+//! step), low bytes then high bytes, not differenced between neighbours: a column of a
+//! deeper analysis stage repeats bit for bit until that stage hops, and its 0 stays 0. A
+//! `bfp16` array is a mantissa delta only on the base's exponent, otherwise intra. Bitmasks
+//! XOR the base's; `f32` and `i8` arrays go intra in both forms.
 //!
 //! `f32` and `u32` arrays (meters, Leq windows, bitmasks) go as they are,
 //! little-endian: they are small or must stay exact, and deflate still takes out runs such
@@ -203,22 +214,47 @@ fn get_planes(b: &[u8]) -> impl Iterator<Item = u16> + '_ {
     })
 }
 
-/// Appends a float array in `elem` (`F32`, `I16` or `U16`); `deg` wraps an `I16` array.
+/// Appends 16-bit codes little-endian.
+fn put_le16(out: &mut Vec<u8>, codes: impl Iterator<Item = u16>) {
+    for q in codes {
+        out.extend_from_slice(&q.to_le_bytes());
+    }
+}
+
+/// The 16-bit codes of little-endian code bytes.
+fn le16(b: &[u8]) -> impl Iterator<Item = u16> + Clone + '_ {
+    b.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]]))
+}
+
+/// Appends 16-bit values as a low-byte plane then a high-byte plane, not differenced.
+fn put_raw_planes(out: &mut Vec<u8>, v: impl Iterator<Item = u16> + Clone) {
+    out.extend(v.clone().map(|d| d.to_le_bytes()[0]));
+    out.extend(v.map(|d| d.to_le_bytes()[1]));
+}
+
+/// The 16-bit values of [`put_raw_planes`] bytes.
+fn get_raw_planes(b: &[u8]) -> impl Iterator<Item = u16> + '_ {
+    let (lo, hi) = b.split_at(b.len() / 2);
+    lo.iter().zip(hi).map(|(l, h)| u16::from_le_bytes([*l, *h]))
+}
+
+/// Appends a float array's codes in `elem` (`F32`, `I16`, `U16` or `Bfp16`); `deg` wraps an
+/// `I16` array.
 pub(crate) fn put_f32(out: &mut Vec<u8>, elem: Elem, deg: bool, v: &[f32]) {
     match elem {
-        Elem::I16 => put_planes(
+        Elem::I16 => put_le16(
             out,
             v.iter().map(|x| {
                 let x = f64::from(*x);
                 (if deg { deg_to_i16(x) } else { to_i16(x) }) as u16
             }),
         ),
-        Elem::U16 => put_planes(out, v.iter().map(|x| to_u16(f64::from(*x)))),
+        Elem::U16 => put_le16(out, v.iter().map(|x| to_u16(f64::from(*x)))),
         Elem::Bfp16 => {
             let e = bfp_exponent(v);
             out.push(e as i8 as u8);
             let down = 2f64.powi(-e);
-            put_planes(out, v.iter().map(|x| to_bfp(*x, down) as u16));
+            put_le16(out, v.iter().map(|x| to_bfp(*x, down) as u16));
         }
         Elem::F32 | Elem::U32 => {
             if cfg!(target_endian = "little") {
@@ -255,17 +291,17 @@ pub(crate) fn put_u32(out: &mut Vec<u8>, v: &[u32]) {
     }
 }
 
-/// A float array from its bytes in `elem`; `None` if a code or exponent is undefined. `b`
+/// A float array from its codes in `elem`; `None` if a code or exponent is undefined. `b`
 /// holds exactly the array (its length was checked against [`array_size`]).
 pub(crate) fn get_f32(b: &[u8], elem: Elem) -> Option<Vec<f32>> {
     match elem {
-        Elem::I16 => Some(get_planes(b).map(|q| from_i16(q as i16)).collect()),
-        Elem::U16 => get_planes(b).map(from_u16).collect(),
+        Elem::I16 => Some(le16(b).map(|q| from_i16(q as i16)).collect()),
+        Elem::U16 => le16(b).map(from_u16).collect(),
         Elem::Bfp16 => {
             let (&e, m) = b.split_first()?;
             let e = i32::from(e as i8);
             let up = 2f64.powi(e);
-            (e <= BFP_EXP_MAX).then(|| get_planes(m).map(|q| from_bfp(q as i16, up)).collect())
+            (e <= BFP_EXP_MAX).then(|| le16(m).map(|q| from_bfp(q as i16, up)).collect())
         }
         Elem::F32 | Elem::U32 => Some(
             b.chunks_exact(4)
@@ -281,6 +317,158 @@ pub(crate) fn get_u32(b: &[u8]) -> Vec<u32> {
     b.chunks_exact(4)
         .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
         .collect()
+}
+
+/// Appends one array's codes in its intra (keyframe) form.
+pub(crate) fn put_intra(out: &mut Vec<u8>, elem: Elem, codes: &[u8]) {
+    match elem {
+        Elem::I16 | Elem::U16 => put_planes(out, le16(codes)),
+        Elem::Bfp16 => {
+            if let Some((e, m)) = codes.split_first() {
+                out.push(*e);
+                put_planes(out, le16(m));
+            }
+        }
+        Elem::F32 | Elem::U32 | Elem::I8 => out.extend_from_slice(codes),
+    }
+}
+
+/// Appends one array's codes from its intra form `wire` (exactly the array's size).
+pub(crate) fn get_intra(out: &mut Vec<u8>, elem: Elem, wire: &[u8]) {
+    match elem {
+        Elem::I16 | Elem::U16 => put_le16(out, get_planes(wire)),
+        Elem::Bfp16 => {
+            if let Some((e, m)) = wire.split_first() {
+                out.push(*e);
+                put_le16(out, get_planes(m));
+            }
+        }
+        Elem::F32 | Elem::U32 | Elem::I8 => out.extend_from_slice(wire),
+    }
+}
+
+/// Half a turn and a turn in `i16` hundredths of a degree.
+const DEG_HALF: i32 = 18_000;
+const DEG_TURN: i32 = 36_000;
+
+/// Whether an `i16` code is an angle [`deg_to_i16`] can produce (not NaN).
+fn is_angle(q: i16) -> bool {
+    (-DEG_HALF..DEG_HALF).contains(&i32::from(q))
+}
+
+/// Delta of an angle code `x` against `b`: the short way round when both are angles, the
+/// NaN code when `x` becomes NaN, the plain wrapping difference from a NaN base. `None`:
+/// `x` is no code an angle array holds.
+fn angle_delta(x: i16, b: i16) -> Option<u16> {
+    if !is_angle(b) {
+        return Some((x as u16).wrapping_sub(b as u16));
+    }
+    if x == I16_NAN {
+        return Some(I16_NAN as u16);
+    }
+    if !is_angle(x) {
+        return None;
+    }
+    let d = (i32::from(x) - i32::from(b) + DEG_HALF).rem_euclid(DEG_TURN) - DEG_HALF;
+    Some(d as i16 as u16)
+}
+
+/// Inverse of [`angle_delta`].
+fn angle_apply(d: u16, b: i16) -> u16 {
+    if !is_angle(b) {
+        return (b as u16).wrapping_add(d);
+    }
+    let d = d as i16;
+    if d == I16_NAN {
+        return I16_NAN as u16;
+    }
+    ((i32::from(b) + i32::from(d) + DEG_HALF).rem_euclid(DEG_TURN) - DEG_HALF) as i16 as u16
+}
+
+/// Appends one array's codes as a delta against the base's codes of the same array (same
+/// size). `false`: an angle array holds a code no angle has, so it goes in a keyframe.
+pub(crate) fn put_delta(
+    out: &mut Vec<u8>,
+    elem: Elem,
+    deg: bool,
+    codes: &[u8],
+    base: &[u8],
+) -> bool {
+    match elem {
+        Elem::I16 if deg => {
+            let start = out.len();
+            let mut d = Vec::with_capacity(codes.len() / 2);
+            for (x, b) in le16(codes).zip(le16(base)) {
+                match angle_delta(x as i16, b as i16) {
+                    Some(v) => d.push(v),
+                    None => {
+                        out.truncate(start);
+                        return false;
+                    }
+                }
+            }
+            put_raw_planes(out, d.into_iter());
+        }
+        Elem::I16 | Elem::U16 => {
+            put_raw_planes(
+                out,
+                le16(codes).zip(le16(base)).map(|(x, b)| x.wrapping_sub(b)),
+            );
+        }
+        Elem::Bfp16 => {
+            if let (Some((e, m)), Some((be, bm))) = (codes.split_first(), base.split_first()) {
+                out.push(*e);
+                if e == be {
+                    put_raw_planes(out, le16(m).zip(le16(bm)).map(|(x, b)| x.wrapping_sub(b)));
+                } else {
+                    put_planes(out, le16(m));
+                }
+            }
+        }
+        Elem::U32 => {
+            for (x, b) in codes.chunks_exact(4).zip(base.chunks_exact(4)) {
+                out.extend(x.iter().zip(b).map(|(x, b)| x ^ b));
+            }
+        }
+        Elem::F32 | Elem::I8 => out.extend_from_slice(codes),
+    }
+    true
+}
+
+/// Appends one array's codes from its delta form `wire` and the base's codes (both exactly
+/// the array's size).
+pub(crate) fn get_delta(out: &mut Vec<u8>, elem: Elem, deg: bool, wire: &[u8], base: &[u8]) {
+    match elem {
+        Elem::I16 if deg => put_le16(
+            out,
+            get_raw_planes(wire)
+                .zip(le16(base))
+                .map(|(d, b)| angle_apply(d, b as i16)),
+        ),
+        Elem::I16 | Elem::U16 => put_le16(
+            out,
+            get_raw_planes(wire)
+                .zip(le16(base))
+                .map(|(d, b)| b.wrapping_add(d)),
+        ),
+        Elem::Bfp16 => {
+            if let (Some((e, m)), Some((be, bm))) = (wire.split_first(), base.split_first()) {
+                out.push(*e);
+                if e == be {
+                    put_le16(
+                        out,
+                        get_raw_planes(m)
+                            .zip(le16(bm))
+                            .map(|(d, b)| b.wrapping_add(d)),
+                    );
+                } else {
+                    put_le16(out, get_planes(m));
+                }
+            }
+        }
+        Elem::U32 => out.extend(wire.iter().zip(base).map(|(x, b)| x ^ b)),
+        Elem::F32 | Elem::I8 => out.extend_from_slice(wire),
+    }
 }
 
 /// Deflates the concatenated arrays into the payload part.

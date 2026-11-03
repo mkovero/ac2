@@ -17,6 +17,7 @@ rmp-serde = { workspace = true }
 bytemuck = "1.25"
 thiserror = { workspace = true }
 miniz_oxide = "0.9"
+crc32fast = "1.5"
 
 [dev-dependencies]
 proptest = { workspace = true }

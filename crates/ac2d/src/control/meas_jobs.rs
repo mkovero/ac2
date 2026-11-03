@@ -40,6 +40,7 @@ impl Control {
             seqs: Arc::clone(&self.seqs),
             interest: Arc::clone(&self.s.interest),
             fps: self.s.fps,
+            frames: self.s.frames.clone(),
         }
     }
 

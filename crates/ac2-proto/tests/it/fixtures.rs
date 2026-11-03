@@ -4,6 +4,11 @@
 //!   `AC2_UPDATE_FIXTURES=1 cargo test -p ac2-proto --test it fixtures::`, then run
 //!   `tools/protocol/fixtures.py check` so Python decodes them.
 //! - `py_*.bin` are written by Python; they must decode here to exactly the samples.
+//! - `rust_chain_<name>.bin` is a delta chain (`samples::chains`): a keyframe, then deltas,
+//!   each message's two parts in turn; `rust_chain_<name>_keys.bin` the same frames as
+//!   keyframes. Python applies the chain and must get the keyframes' values;
+//!   `py_chain_<name>.bin` is Python's chain of those frames, which must apply here to the
+//!   samples' codes.
 //!
 //! Container: u32 LE part count, then per part u32 LE length + bytes.
 
@@ -64,6 +69,20 @@ fn rust_fixtures() -> Vec<(String, Vec<u8>)> {
     for f in samples::frames() {
         let name = format!("rust_frame_{}.bin", kind_name(f.data.kind()));
         out.push((name, container(&encode_frame(&f).expect("fixture"))));
+    }
+    for (name, frames) in samples::chains() {
+        let c: Vec<CodedFrame> = frames
+            .iter()
+            .map(|f| CodedFrame::from_frame(f).expect("fixture"))
+            .collect();
+        let mut chain = encode_key(&c[0]).expect("fixture");
+        let mut keys = chain.clone();
+        for w in c.windows(2) {
+            chain.extend(encode_delta(&w[1], &w[0]).expect("fixture").expect("fits"));
+            keys.extend(encode_key(&w[1]).expect("fixture"));
+        }
+        out.push((format!("rust_chain_{name}.bin"), container(&chain)));
+        out.push((format!("rust_chain_{name}_keys.bin"), container(&keys)));
     }
     let reqs: Vec<Vec<u8>> = samples::commands()
         .into_iter()
@@ -126,6 +145,37 @@ fn python_frames_decode_to_the_samples() {
             encode_frame(&f).expect("fixture"),
             "{name}"
         );
+    }
+}
+
+#[test]
+fn python_chains_apply_to_the_samples() {
+    for (name, frames) in samples::chains() {
+        let file = format!("py_chain_{name}.bin");
+        let parts = read_container(&file);
+        assert_eq!(parts.len(), 2 * frames.len(), "{file}");
+        let mut held: Option<CodedFrame> = None;
+        for (msg, f) in parts.chunks(2).zip(&frames) {
+            let refs: Vec<&[u8]> = msg.iter().map(Vec::as_slice).collect();
+            let w = decode_wire(&refs).unwrap_or_else(|e| panic!("{file}: {e}"));
+            assert_eq!(
+                matches!(w, WireFrame::Key(_)),
+                held.is_none(),
+                "{file}: a keyframe, then deltas"
+            );
+            let got = w
+                .apply(held.as_ref())
+                .unwrap_or_else(|e| panic!("{file}: {e}"));
+            let want = CodedFrame::from_frame(f).expect("fixture");
+            assert_eq!(got.codes, want.codes, "{file}");
+            assert_eq!(got.stamp, want.stamp, "{file}");
+            assert_eq!(
+                encode_key(&got).expect("fixture"),
+                encode_key(&want).expect("fixture"),
+                "{file}"
+            );
+            held = Some(got);
+        }
     }
 }
 

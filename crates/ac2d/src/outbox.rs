@@ -5,16 +5,26 @@
 //! Ordering: messages from one PUSH socket arrive in order. Control sends events, replies
 //! and keepalives through the same socket, so an event always reaches the data socket before
 //! the reply to the command that caused it and before a keepalive carrying its rev.
+//!
+//! Frames do not go through the pipe: a job hands its quantised codes and header fields
+//! ([`CodedFrame`]) to the I/O thread through a [`FrameTx`] channel, and the pipe carries only
+//! a wake-up. The I/O thread forms keyframe or delta against what it last sent, so the
+//! encoding that depends on the wire's history happens where that history is.
 
+use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
+
+use ac2_proto::CodedFrame;
 use ac2_zmq::{Context, Error as ZmqError, Part, Socket, SocketType};
 
 /// Reply: `[R][routing id][reply]`.
 pub(crate) const TAG_REPLY: u8 = b'R';
 /// State event: `[E][event body]` → data socket `[evt][body]`.
 pub(crate) const TAG_EVENT: u8 = b'E';
-/// Frame: `[F][topic][header][arrays…]` → latest slot of its topic.
+/// Frames are waiting in the [`FrameTx`] channel: `[F]`.
 pub(crate) const TAG_FRAME: u8 = b'F';
-/// Keepalive frame, sent at once: `[K][topic][header]`.
+/// The next frame of a topic goes as a keyframe (`data.keyframe`): `[Y][topic]`.
+pub(crate) const TAG_KEYFRAME: u8 = b'Y';
+/// Keepalive frame (a keyframe), sent at once: `[K][topic][body]`.
 pub(crate) const TAG_KA: u8 = b'K';
 /// Forget latest slots under a prefix: `[C][prefix]`.
 pub(crate) const TAG_CLEAR: u8 = b'C';
@@ -87,6 +97,11 @@ impl Outbox {
         tracing::warn!("internal pipe full for 1 s; keepalive dropped");
     }
 
+    /// The next frame of `topic` goes as a keyframe.
+    pub(crate) fn keyframe(&self, topic: &[u8]) {
+        self.send(TAG_KEYFRAME, &[topic]);
+    }
+
     pub(crate) fn clear(&self, prefix: &[u8]) {
         self.send(TAG_CLEAR, &[prefix]);
     }
@@ -95,19 +110,41 @@ impl Outbox {
         self.send(TAG_STOP, &[]);
     }
 
-    /// Queues a frame without blocking. A full pipe drops it: frames are latest-wins and the
-    /// next one supersedes it.
-    pub(crate) fn frame(&self, parts: Vec<Vec<u8>>) -> bool {
-        let Some(parts) = tagged(TAG_FRAME, parts) else {
-            return false;
-        };
-        match self.sock.try_send_parts(&parts) {
+    /// Wakes the I/O thread for frames queued on a [`FrameTx`]. Never blocks: a full pipe
+    /// already holds wake-ups, and the I/O thread drains the whole channel on each.
+    pub(crate) fn wake(&self) {
+        match self.sock.try_send(&[&[TAG_FRAME][..]]) {
+            Ok(()) | Err(ZmqError::WouldBlock) => {}
+            Err(e) => tracing::warn!("internal pipe wake failed: {e}"),
+        }
+    }
+}
+
+/// Frames waiting for the I/O thread, across every job: a backlog only adds latency, as
+/// each topic's newest frame supersedes the ones before.
+const FRAME_QUEUE: usize = 1024;
+
+/// A job's end of the frame channel to the I/O thread.
+#[derive(Debug, Clone)]
+pub(crate) struct FrameTx(SyncSender<CodedFrame>);
+
+/// The I/O thread's end.
+pub(crate) type FrameRx = Receiver<CodedFrame>;
+
+/// A new frame channel.
+pub(crate) fn frame_channel() -> (FrameTx, FrameRx) {
+    let (tx, rx) = sync_channel(FRAME_QUEUE);
+    (FrameTx(tx), rx)
+}
+
+impl FrameTx {
+    /// Queues a frame without blocking; `false` if the channel is full or closed (frames
+    /// are latest-wins, the next one supersedes it).
+    pub(crate) fn send(&self, f: CodedFrame) -> bool {
+        match self.0.try_send(f) {
             Ok(()) => true,
-            Err(ZmqError::WouldBlock) => false,
-            Err(e) => {
-                tracing::warn!("internal pipe frame send failed: {e}");
-                false
-            }
+            Err(TrySendError::Full(_)) => false,
+            Err(TrySendError::Disconnected(_)) => false,
         }
     }
 }

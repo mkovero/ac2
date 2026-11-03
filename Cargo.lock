@@ -152,6 +152,7 @@ name = "ac2-proto"
 version = "0.0.0"
 dependencies = [
  "bytemuck",
+ "crc32fast",
  "miniz_oxide 0.9.1",
  "proptest",
  "rmp-serde",

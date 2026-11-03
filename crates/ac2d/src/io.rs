@@ -5,9 +5,11 @@
 //! - ROUTER: each request is handed to the control thread with its routing id and ZAP user
 //!   id; replies come back through the PULL.
 //! - XPUB: subscription changes update the shared [`Interest`] set; a new subscription gets
-//!   the latest slot of every topic it covers at once (late joiners do not wait). Events and
-//!   keepalives are sent as they arrive; frames go through per-topic latest slots, each sent
-//!   at most at the publish rate (bounded freshness, Q2).
+//!   a keyframe of the latest frame of every topic it covers at once (late joiners do not
+//!   wait). Events and keepalives are sent as they arrive; frames come from the jobs as codes
+//!   ([`crate::outbox::FrameTx`]) into per-topic latest slots, each sent at most at the
+//!   publish rate (bounded freshness, Q2), as a keyframe or a delta on the topic's chain
+//!   ([`crate::chain`]).
 //! - Network mode: the ZAP handler's status is checked every iteration; if it has exited,
 //!   both network sockets are closed (a CURVE server without a handler fails open) and the
 //!   daemon is told to shut down.
@@ -18,12 +20,16 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use ac2_proto::Topic;
 use ac2_zmq::{
     Error as ZmqError, Message, Part, PollItem, SecureContext, Socket, SubscriptionTracker, poll,
 };
 
+use crate::chain::Slot;
 use crate::control::{ControlMsg, CurvePeer};
-use crate::outbox::{TAG_CLEAR, TAG_EVENT, TAG_FRAME, TAG_KA, TAG_REPLY, TAG_STOP};
+use crate::outbox::{
+    FrameRx, TAG_CLEAR, TAG_EVENT, TAG_FRAME, TAG_KA, TAG_KEYFRAME, TAG_REPLY, TAG_STOP,
+};
 
 /// Topics with at least one subscriber, shared with jobs that compute optional derivations
 /// only when someone receives them.
@@ -63,15 +69,10 @@ pub(crate) struct IoSockets {
     pub(crate) router: Socket,
     pub(crate) xpub: Socket,
     pub(crate) pull: Socket,
+    /// Frames from the jobs.
+    pub(crate) frames: FrameRx,
     /// Network mode: the context whose ZAP handler authenticates both sockets.
     pub(crate) secure: Option<SecureContext>,
-}
-
-struct Slot {
-    /// Shared with libzmq, never copied: every send of the slot adds a reference.
-    parts: Vec<Part>,
-    dirty: bool,
-    last_sent: Option<Instant>,
 }
 
 /// Most messages taken from one socket per poll round, so no source starves the others.
@@ -114,6 +115,7 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
         router,
         xpub,
         pull,
+        frames,
         secure,
     } = s;
     let mut net: Option<(Socket, Socket)> = Some((router, xpub));
@@ -123,7 +125,7 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
     // and never sends two within half a period, so this only stops a publisher that
     // bursts. A frame held back here waits for a timer of its own, which the OS may defer.
     let min_gap = period / 2;
-    let mut slots: HashMap<Vec<u8>, Slot> = HashMap::new();
+    let mut slots: HashMap<Topic, Slot> = HashMap::new();
     let evt_topic = match Part::copy_from(b"evt") {
         Ok(p) => p,
         Err(e) => {
@@ -152,9 +154,9 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
         };
         let timeout = slots
             .values()
-            .filter(|s| s.dirty)
+            .filter(|s| s.dirty())
             .filter_map(|s| {
-                s.last_sent
+                s.last_sent()
                     .map(|t| (t + min_gap).saturating_duration_since(now))
             })
             .min()
@@ -204,10 +206,8 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
                             tracing::debug!("subscribe {:?}", String::from_utf8_lossy(prefix));
                             let now = Instant::now();
                             for (topic, slot) in &mut slots {
-                                if topic.starts_with(prefix) {
-                                    send_data(xpub, &slot.parts);
-                                    slot.dirty = false;
-                                    slot.last_sent = Some(now);
+                                if topic.to_bytes().starts_with(prefix) {
+                                    slot.send_key_now(xpub, now);
                                 }
                             }
                         }
@@ -224,7 +224,7 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
         let mut stop = false;
         if p_ready {
             for _ in 0..(4 * BATCH) {
-                let mut frames = match pull.try_recv_parts() {
+                let mut msg = match pull.try_recv_parts() {
                     Ok(Some(m)) => m,
                     Ok(None) => break,
                     Err(e) => {
@@ -232,17 +232,17 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
                         break;
                     }
                 };
-                if frames.is_empty() || frames[0].len() != 1 {
+                if msg.is_empty() || msg[0].len() != 1 {
                     continue;
                 }
-                let tag = frames.remove(0)[0];
+                let tag = msg.remove(0)[0];
                 match tag {
                     TAG_REPLY => {
                         // [routing id, reply]
                         if let Some((router, _)) = &net
-                            && frames.len() == 2
+                            && msg.len() == 2
                         {
-                            match router.try_send_parts(&frames) {
+                            match router.try_send_parts(&msg) {
                                 Ok(()) => {}
                                 Err(ZmqError::HostUnreachable) => {
                                     tracing::debug!("reply to a departed client dropped");
@@ -252,7 +252,7 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
                         }
                     }
                     TAG_EVENT => {
-                        if let (Some((_, xpub)), [body]) = (&net, frames.as_slice()) {
+                        if let (Some((_, xpub)), [body]) = (&net, msg.as_slice()) {
                             match (evt_topic.share(), body.share()) {
                                 (Ok(t), Ok(b)) => send_data(xpub, &[t, b]),
                                 (Err(e), _) | (_, Err(e)) => tracing::warn!("event not sent: {e}"),
@@ -261,39 +261,24 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
                     }
                     TAG_KA => {
                         if let Some((_, xpub)) = &net {
-                            send_data(xpub, &frames);
+                            send_data(xpub, &msg);
                         }
                     }
-                    TAG_FRAME => {
-                        if frames.len() < 2 {
-                            continue;
-                        }
-                        let now = Instant::now();
-                        // Topics repeat every frame; the key is allocated only the first
-                        // time a topic is seen.
-                        let slot = match slots.get_mut(&*frames[0]) {
-                            Some(slot) => slot,
-                            None => slots.entry(frames[0].to_vec()).or_insert(Slot {
-                                parts: Vec::new(),
-                                dirty: false,
-                                last_sent: None,
-                            }),
-                        };
-                        slot.parts = frames;
-                        slot.dirty = true;
-                        if let Some((_, xpub)) = &net
-                            && slot
-                                .last_sent
-                                .is_none_or(|t| now.duration_since(t) >= min_gap)
+                    // The frames themselves wait in the channel, drained below.
+                    TAG_FRAME => {}
+                    TAG_KEYFRAME => {
+                        if let [topic] = msg.as_slice()
+                            && let Ok(topic) = Topic::parse(topic)
+                            && let Some(slot) = slots.get_mut(&topic)
                         {
-                            send_data(xpub, &slot.parts);
-                            slot.dirty = false;
-                            slot.last_sent = Some(now);
+                            slot.ask_key(Instant::now());
                         }
                     }
                     TAG_CLEAR => {
-                        if let [prefix] = frames.as_slice() {
-                            slots.retain(|t, _| !t.starts_with(prefix));
+                        if let [prefix] = msg.as_slice() {
+                            // Frames queued before the clear go first, as they were sent.
+                            take_frames(&frames, &mut slots);
+                            slots.retain(|t, _| !t.to_bytes().starts_with(prefix));
                         }
                     }
                     TAG_STOP => stop = true,
@@ -302,17 +287,18 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
             }
         }
 
+        // Every frame queued, wake-up or not: a wake-up dropped on a full pipe had others
+        // before it.
         let now = Instant::now();
+        take_frames(&frames, &mut slots);
         if let Some((_, xpub)) = &net {
             for slot in slots.values_mut() {
-                if slot.dirty
+                if slot.dirty()
                     && slot
-                        .last_sent
+                        .last_sent()
                         .is_none_or(|t| now.duration_since(t) >= min_gap)
                 {
-                    send_data(xpub, &slot.parts);
-                    slot.dirty = false;
-                    slot.last_sent = Some(now);
+                    slot.send(xpub, now);
                 }
             }
         }
@@ -357,6 +343,13 @@ fn forward_request(m: Message, to_control: &Sender<ControlMsg>) {
         peer,
         payload,
     });
+}
+
+/// Every frame queued into its topic's slot, replacing any frame still waiting there.
+fn take_frames(frames: &FrameRx, slots: &mut HashMap<Topic, Slot>) {
+    while let Ok(f) = frames.try_recv() {
+        slots.entry(f.topic).or_default().put(f);
+    }
 }
 
 fn send_data(xpub: &Socket, parts: &[Part]) {

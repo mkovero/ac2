@@ -15,8 +15,8 @@ use ac2_proto::model::{
 };
 use ac2_proto::units::{MeasId, RequestId, Rev};
 use ac2_proto::{
-    Command, DataMessage, Event, ProtoError, Reply, ReplyBody, Request, decode_data_message,
-    decode_reply, encode_request,
+    CodedFrame, Command, DataMessage, DecodeError, Event, ProtoError, Reply, ReplyBody, Request,
+    Topic, WireFrame, decode_data_message, decode_reply, decode_wire, encode_request,
 };
 use ac2_zmq::{Context, CurveClient, Socket, SocketType};
 use ac2d::{DaemonConfig, Handle, Listen};
@@ -277,9 +277,10 @@ pub async fn meas_update(
     c.call(Command::MeasUpdate { meas, base, config }).await
 }
 
-/// A data subscriber.
+/// A data subscriber: applies each topic's deltas on the frame it holds, as a client does.
 pub struct Sub {
     pub sock: Socket,
+    held: std::cell::RefCell<std::collections::HashMap<Topic, CodedFrame>>,
 }
 
 impl Sub {
@@ -305,13 +306,40 @@ impl Sub {
             sock.subscribe(p).unwrap();
         }
         sock.connect(endpoint).unwrap();
-        Self { sock }
+        Self {
+            sock,
+            held: Default::default(),
+        }
     }
 
+    /// The next event or frame within `timeout`. A delta with no frame held, or (after
+    /// messages this subscriber's queue dropped) not on the one held, is skipped: the
+    /// topic's next keyframe brings it back.
     pub fn next(&self, timeout: Duration) -> Option<DataMessage> {
-        let m = self.sock.recv_timeout(timeout).unwrap()?;
-        let parts: Vec<&[u8]> = m.frames().iter().map(Vec::as_slice).collect();
-        Some(decode_data_message(&parts).unwrap())
+        let deadline = Instant::now() + timeout;
+        loop {
+            // A zero timeout still takes what is queued.
+            let left = deadline.saturating_duration_since(Instant::now());
+            let m = self.sock.recv_timeout(left).unwrap()?;
+            let parts: Vec<&[u8]> = m.frames().iter().map(Vec::as_slice).collect();
+            if parts.first().map(|t| Topic::parse(t)) == Some(Ok(Topic::Evt)) {
+                return Some(decode_data_message(&parts).unwrap());
+            }
+            let w = decode_wire(&parts).unwrap();
+            let topic = w.topic();
+            let mut held = self.held.borrow_mut();
+            let applied = match w {
+                WireFrame::Key(k) => k,
+                d @ WireFrame::Delta(_) => match d.apply(held.get(&topic)) {
+                    Ok(c) => c,
+                    Err(DecodeError::NoBase | DecodeError::WrongBase { .. }) => continue,
+                    Err(e) => panic!("{topic}: {e}"),
+                },
+            };
+            let f = applied.to_frame().unwrap();
+            held.insert(topic, applied);
+            return Some(DataMessage::Frame(f));
+        }
     }
 
     /// First frame matching `pred` within `timeout`.

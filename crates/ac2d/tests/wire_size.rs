@@ -24,7 +24,7 @@ use ac2_proto::model::{
     MeasConfig, MeasKind, Operand, RtaConfig, SessionConfig, Signal, SpectrumConfig, TraceOwner,
 };
 use ac2_proto::units::{Dbfs, MeasId};
-use ac2_proto::{Command, DataMessage, ReplyBody, decode_data_message};
+use ac2_proto::{Command, ReplyBody, WireFrame, decode_wire};
 use ac2d::{Daemon, DaemonConfig};
 use common::*;
 
@@ -86,8 +86,45 @@ fn cpu_s() -> (f64, f64) {
     (process, jobs)
 }
 
-/// Per topic: frames and bytes (every part, as the subscriber receives them).
-type Sizes = BTreeMap<String, (u64, u64)>;
+/// A topic's keyframes and deltas: frames and bytes (every part, as the subscriber receives
+/// them).
+#[derive(Debug, Default, Clone, Copy)]
+struct Count {
+    keys: u64,
+    key_bytes: u64,
+    deltas: u64,
+    delta_bytes: u64,
+}
+
+impl Count {
+    fn frames(&self) -> u64 {
+        self.keys + self.deltas
+    }
+
+    fn bytes(&self) -> u64 {
+        self.key_bytes + self.delta_bytes
+    }
+
+    fn per_frame(&self) -> u64 {
+        self.bytes() / self.frames().max(1)
+    }
+
+    fn per_key(&self) -> u64 {
+        self.key_bytes / self.keys.max(1)
+    }
+
+    fn per_delta(&self) -> u64 {
+        self.delta_bytes / self.deltas.max(1)
+    }
+
+    /// Share of the frames that went as keyframes.
+    fn key_share(&self) -> f64 {
+        self.keys as f64 / self.frames().max(1) as f64
+    }
+}
+
+/// Per topic.
+type Sizes = BTreeMap<String, Count>;
 
 /// What one run sets up and receives.
 struct Setup<'a> {
@@ -168,7 +205,7 @@ fn run_with(setup: &Setup<'_>, seconds: f64) -> Sizes {
             continue;
         };
         let parts: Vec<&[u8]> = m.frames().iter().map(Vec::as_slice).collect();
-        if let Ok(DataMessage::Frame(_)) = decode_data_message(&parts) {
+        if let Ok(w) = decode_wire(&parts) {
             let topic = String::from_utf8_lossy(parts[0]).into_owned();
             let bytes: usize = parts.iter().map(|p| p.len()).sum();
             if let Some(dir) = &dump {
@@ -186,22 +223,33 @@ fn run_with(setup: &Setup<'_>, seconds: f64) -> Sizes {
                 }
             }
             let e = sizes.entry(topic).or_default();
-            e.0 += 1;
-            e.1 += bytes as u64;
+            match w {
+                WireFrame::Key(_) => {
+                    e.keys += 1;
+                    e.key_bytes += bytes as u64;
+                }
+                WireFrame::Delta(_) => {
+                    e.deltas += 1;
+                    e.delta_bytes += bytes as u64;
+                }
+            }
         }
     }
     let (c1, elapsed) = (cpu_s(), t0.elapsed().as_secs_f64());
     let (cpu, jobs) = ((c1.0 - c0.0) / elapsed, (c1.1 - c0.1) / elapsed);
     let (mut frames, mut bytes) = (0, 0);
-    for (topic, (n, b)) in &sizes {
+    for (topic, c) in &sizes {
         eprintln!(
-            "{topic:>16}: {:>8.0} B/frame {:>5.1} frames/s {:>9.0} B/s",
-            *b as f64 / *n as f64,
-            *n as f64 / seconds,
-            *b as f64 / seconds
+            "{topic:>16}: {:>8} B/frame {:>5.1} frames/s {:>9.0} B/s; keyframes {:>4.1} % at {:>6} B, deltas {:>6} B",
+            c.per_frame(),
+            c.frames() as f64 / seconds,
+            c.bytes() as f64 / seconds,
+            c.key_share() * 100.0,
+            c.per_key(),
+            c.per_delta(),
         );
-        frames += n;
-        bytes += b;
+        frames += c.frames();
+        bytes += c.bytes();
     }
     eprintln!(
         "{:>16}: {:>8.0} B/frame {:>5.1} frames/s {:>9.0} B/s = {:.2} Mbit/s (payload)",
@@ -250,12 +298,10 @@ fn slow_live_streams_stay_display_sized() {
         ],
         3.0,
     );
-    let (n, b) = sizes["d/2/spec"];
-    let per_frame = b / n;
-    assert!(per_frame < 16_000, "spectrum frame {per_frame} B");
-    let (n, b) = sizes["d/1/ir"];
-    let per_frame = b / n;
-    assert!(per_frame < IR_FRAME_BUDGET, "ir frame {per_frame} B");
+    let per_frame = sizes["d/2/spec"].per_key();
+    assert!(per_frame < 16_000, "spectrum keyframe {per_frame} B");
+    let per_frame = sizes["d/1/ir"].per_key();
+    assert!(per_frame < IR_FRAME_BUDGET, "ir keyframe {per_frame} B");
 }
 
 /// Daemon CPU for one default spectrum alone, printed (`--ignored --nocapture`).
@@ -361,9 +407,8 @@ fn session_sizes(fps: u32, seconds: f64, ir_view: bool) -> Sizes {
 }
 
 /// The tuning session at 60 frames per second stays far below what a Wi-Fi or VPN link
-/// carries (about 3.3 Mbit/s on the fake rig, where noisy high bands make the transfer
-/// functions dear; it was 9.3 with f32 arrays), and about 6.2 with a pane in its IR view
-/// (8.8 with the linear IR in f32).
+/// carries, with each transfer function sent as a delta on the one before and a keyframe
+/// every half second (counting starts after the averages filled, past the first second).
 #[test]
 fn slow_tuning_session_fits_a_remote_link() {
     let seconds = 4.0;
@@ -372,7 +417,7 @@ fn slow_tuning_session_fits_a_remote_link() {
         sizes
             .iter()
             .filter(|(topic, _)| ir || !topic.ends_with("/ir"))
-            .map(|(_, (_, b))| *b as f64)
+            .map(|(_, c)| c.bytes() as f64)
             .sum::<f64>()
             * 8.0
             / seconds
@@ -380,22 +425,38 @@ fn slow_tuning_session_fits_a_remote_link() {
     };
     // The session without the IR topic is what the app takes with no IR view: subscribing
     // one more topic changes no other.
-    assert!(mbit(false) < 4.0, "{:.2} Mbit/s", mbit(false));
+    assert!(mbit(false) < 2.4, "{:.2} Mbit/s", mbit(false));
     assert!(
-        mbit(true) < 7.2,
+        mbit(true) < 5.0,
         "{:.2} Mbit/s with the IR view",
         mbit(true)
     );
-    for (topic, (n, b)) in &sizes {
-        let per_frame = b / n;
+    for (topic, c) in &sizes {
         if topic.ends_with("/tf") {
-            assert!(per_frame < 3_000, "{topic}: {per_frame} B");
+            // The average (`d/4/tf`) also carries its operands' range band (`range_lo`,
+            // `range_hi`, `range_coh`): ≈ 4.5 kB as a keyframe, ≈ 2.9 kB as a delta.
+            let (key, delta) = if topic == "d/4/tf" {
+                (5_000, 3_300)
+            } else {
+                (3_000, 1_500)
+            };
+            assert!(c.per_key() < key, "{topic}: keyframe {} B", c.per_key());
+            assert!(c.per_delta() < delta, "{topic}: delta {} B", c.per_delta());
+            assert!(
+                c.key_share() < 0.10,
+                "{topic}: {:.1} % keyframes",
+                c.key_share() * 100.0
+            );
         }
         if topic.ends_with("/spec") {
-            assert!(per_frame < 2_000, "{topic}: {per_frame} B");
+            assert!(c.per_frame() < 2_000, "{topic}: {} B", c.per_frame());
         }
         if topic.ends_with("/ir") {
-            assert!(per_frame < IR_FRAME_BUDGET, "{topic}: {per_frame} B");
+            assert!(
+                c.per_frame() < IR_FRAME_BUDGET,
+                "{topic}: {} B",
+                c.per_frame()
+            );
         }
     }
 }

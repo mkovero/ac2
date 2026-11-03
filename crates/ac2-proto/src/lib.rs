@@ -2,7 +2,8 @@
 //! the protocol version. Transport-agnostic: bytes in, bytes out; no socket code here.
 //!
 //! Normative description: `docs/protocol.md`. Every ctrl and event message is msgpack with
-//! named fields; data frames are `[topic][msgpack header][deflated arrays]`.
+//! named fields; data frames are `[topic][msgpack header ++ deflated arrays]`, keyframes and
+//! deltas against the frame before.
 #![forbid(unsafe_code)]
 
 pub mod cal;
@@ -19,7 +20,7 @@ pub mod units;
 
 /// The one protocol version this build speaks. Peers on any other version are refused
 /// (`version_mismatch`); there is no negotiation and no fallback.
-pub const PROTO_VERSION: u16 = 80;
+pub const PROTO_VERSION: u16 = 81;
 
 pub use ctrl::{
     Command, CtrlError, Envelope, ErrorCode, ErrorDetail, ImportProblem, MicCurveFileReason,
@@ -28,8 +29,9 @@ pub use ctrl::{
 };
 pub use event::{Change, Event, EventError, Patch, StateSnapshot, decode_event, encode_event};
 pub use frame::{
-    DataMessage, DecodeError, EncodeError, Frame, FrameData, FrameHeader, FrameKind, FrameStamp,
-    decode_data_message, decode_frame, encode_event_message, encode_frame,
+    CodedFrame, DataMessage, DecodeError, DeltaFrame, EncodeError, Form, Frame, FrameData,
+    FrameHeader, FrameKind, FrameStamp, WireFrame, decode_data_message, decode_frame, decode_wire,
+    encode_delta, encode_event_message, encode_frame, encode_key,
 };
 pub use grid::{BinColumns, GridDef, GridId};
 pub use topic::{Stream, Subscription, Topic};

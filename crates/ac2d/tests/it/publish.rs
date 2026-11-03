@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use ac2_proto::frame::FrameData;
 use ac2_proto::model::{MeasConfig, MeasKind, SpectrumConfig};
 use ac2_proto::units::MeasId;
-use ac2_proto::{Command, DataMessage, decode_data_message};
+use ac2_proto::{Command, DataMessage, Stream, Topic, decode_data_message, decode_wire};
 use ac2_zmq::drain_latest;
 use ac2d::{Daemon, Listen};
 use common::*;
@@ -20,10 +20,10 @@ const ATTEMPTS: usize = 3;
 
 fn seq_of(m: &ac2_zmq::Message) -> Option<u64> {
     let parts: Vec<&[u8]> = m.frames().iter().map(Vec::as_slice).collect();
-    match decode_data_message(&parts).ok()? {
-        DataMessage::Frame(f) => Some(f.stamp.seq),
-        DataMessage::Event(e) => Some(e.rev.0),
+    if let Ok(DataMessage::Event(e)) = decode_data_message(&parts) {
+        return Some(e.rev.0);
     }
+    decode_wire(&parts).ok().map(|w| w.seq())
 }
 
 fn stalled_subscriber_recovers(listen: Listen) {
@@ -56,6 +56,13 @@ fn stalled_subscriber_recovers(listen: Listen) {
         let d = drain_latest(&sub.sock, 10_000, seq_of).unwrap();
         assert!(d.emptied);
         assert_eq!(d.malformed, 0);
+        // The drain skipped deltas, so the chain held broke: a client asks for a keyframe.
+        c.ok(Command::DataKeyframe {
+            topic: Topic::Data {
+                meas: MeasId(1),
+                stream: Stream::Spl,
+            },
+        });
         // … and the next publish period brings a fresh frame.
         let fresh = sub.frame(Duration::from_millis(500), |f| {
             let age_ns = wall_now_ns().saturating_sub(f.stamp.capture_wall_ns.0);

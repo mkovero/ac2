@@ -197,6 +197,32 @@ fn decode_parts(parts: &[Vec<u8>]) -> Result<Frame, DecodeError> {
     decode_frame(&refs)
 }
 
+/// `[topic, body]` as `[topic, header, payload]` (no payload without arrays), so a test can
+/// change one of them.
+pub fn split(parts: &[Vec<u8>]) -> Vec<Vec<u8>> {
+    use serde::Deserialize as _;
+    let body = &parts[1];
+    let mut de = rmp_serde::Deserializer::new(std::io::Cursor::new(body.as_slice()));
+    serde::de::IgnoredAny::deserialize(&mut de).expect("header");
+    let at = de.position() as usize;
+    let mut v = vec![parts[0].clone(), body[..at].to_vec()];
+    if at < body.len() {
+        v.push(body[at..].to_vec());
+    }
+    v
+}
+
+/// [`split`] undone.
+pub fn join(p: &[Vec<u8>]) -> Vec<Vec<u8>> {
+    vec![p[0].clone(), p[1..].concat()]
+}
+
+/// The keyframe of `c`, decoded: a frame whose codes a test changed, under a CRC that
+/// matches them.
+fn decode_coded(c: &CodedFrame) -> Result<Frame, DecodeError> {
+    decode_parts(&encode_key(c).expect("encodes"))
+}
+
 #[test]
 fn every_frame_kind_roundtrips() {
     let mut kinds = BTreeSet::new();
@@ -212,7 +238,9 @@ fn every_frame_kind_roundtrips() {
 
 #[test]
 fn tf_frame_size() {
-    let parts = bytes_of(&samples::tf_frame());
+    let whole = bytes_of(&samples::tf_frame());
+    assert_eq!(whole.len(), 2);
+    let parts = split(&whole);
     let total: usize = parts.iter().map(Vec::len).sum();
     assert_eq!(parts.len(), 3);
     assert!(parts[1].len() < MAX_HEADER_BYTES);
@@ -296,98 +324,104 @@ fn misaligned_payload_decodes() {
 
 #[test]
 fn malformed_frames_are_refused() {
-    let good = bytes_of(&samples::tf_frame());
+    let whole = bytes_of(&samples::tf_frame());
+    let good = split(&whole);
+    let dec = |p: &[Vec<u8>]| decode_parts(&join(p));
     let mut p = good.clone();
     p[2].pop();
-    assert!(matches!(decode_parts(&p), Err(DecodeError::Payload { .. })));
+    assert!(matches!(dec(&p), Err(DecodeError::Payload { .. })));
     let mut p = good.clone();
     p[2] = vec![0xff; 64];
-    assert!(matches!(decode_parts(&p), Err(DecodeError::Payload { .. })));
+    assert!(matches!(dec(&p), Err(DecodeError::Payload { .. })));
     // A payload that inflates to more than the arrays take is refused, not truncated.
     let mut p = good.clone();
     p[2] = miniz_oxide::deflate::compress_to_vec(&vec![0; 480 * 10 + 1], 1);
-    assert!(matches!(decode_parts(&p), Err(DecodeError::Payload { .. })));
+    assert!(matches!(dec(&p), Err(DecodeError::Payload { .. })));
     let mut p = good.clone();
     p.pop();
-    assert!(matches!(
-        decode_parts(&p),
-        Err(DecodeError::ArrayCount { .. })
-    ));
+    assert!(matches!(dec(&p), Err(DecodeError::ArrayCount { .. })));
     let mut p = good.clone();
     p[0] = b"d/1/rta".to_vec();
-    assert_eq!(decode_parts(&p), Err(DecodeError::KindMismatch));
+    assert_eq!(dec(&p), Err(DecodeError::KindMismatch));
+    // A header running past the bound: `v`, the form, then a string longer than the rest.
     let mut p = good.clone();
-    p[1] = vec![0x80; MAX_HEADER_BYTES + 1];
-    assert!(matches!(
-        decode_parts(&p),
-        Err(DecodeError::HeaderTooLarge(_))
-    ));
-    // The payload of the tf sample: mag, phase (i16), coh (u16), validity (u32).
+    p[1] = vec![
+        0xdc,
+        0x00,
+        0x10,
+        PROTO_VERSION as u8,
+        0x00,
+        0xda,
+        0x30,
+        0x00,
+    ];
+    p[1].resize(MAX_HEADER_BYTES + 100, b'a');
+    assert!(matches!(dec(&p), Err(DecodeError::HeaderTooLarge(_))));
+    // Changed codes under the old CRC.
     let raw = miniz_oxide::inflate::decompress_to_vec(&good[2]).expect("payload");
-    let (coh, validity) = (480 * 4..480 * 6, 480 * 6..);
     let mut bad = raw.clone();
-    bad[validity].fill(0xff);
+    bad[0] ^= 1;
     let mut p = good.clone();
     p[2] = miniz_oxide::deflate::compress_to_vec(&bad, 1);
+    assert!(matches!(dec(&p), Err(DecodeError::Crc { .. })));
+    // The codes of the tf sample: mag, phase (i16), coh (u16), validity (u32).
+    let coded = CodedFrame::from_frame(&samples::tf_frame()).expect("quantises");
+    let (coh, validity) = (480 * 4..480 * 6, 480 * 6..);
+    let mut c = coded.clone();
+    c.codes[validity].fill(0xff);
     assert_eq!(
-        decode_parts(&p),
+        decode_coded(&c),
         Err(DecodeError::UnknownBits(frame::ArrayName::Validity))
     );
-    // Coherence codes above 10 000 (other than NaN's) are undefined. The array is
-    // neighbour differences: a first difference of 10 001 is the code 10 001.
-    let mut bad = raw.clone();
-    bad[coh.clone()].fill(0);
-    bad[coh.start] = 0x11;
-    bad[coh.start + 480] = 0x27;
-    let mut p = good.clone();
-    p[2] = miniz_oxide::deflate::compress_to_vec(&bad, 1);
+    // Coherence codes above 10 000 (other than NaN's) are undefined.
+    let mut c = coded.clone();
+    c.codes[coh.start..coh.start + 2].copy_from_slice(&10_001u16.to_le_bytes());
     assert_eq!(
-        decode_parts(&p),
+        decode_coded(&c),
         Err(DecodeError::UndefinedCode(frame::ArrayName::Coh))
     );
-    let mut p = good.clone();
+    let mut p = whole.clone();
     p.push(Vec::new());
-    assert!(matches!(decode_parts(&p), Err(DecodeError::Parts(4))));
+    assert!(matches!(decode_parts(&p), Err(DecodeError::Parts(3))));
     assert!(matches!(
-        decode_parts(&good[..1]),
+        decode_parts(&whole[..1]),
         Err(DecodeError::Parts(1))
     ));
 }
 
-/// The IR sample's payload: `ir_linear` (`bfp16`: exponent byte, 6 mantissas), `ir_etc`.
+/// The IR sample's codes: `ir_linear` (`bfp16`: exponent byte, 6 mantissas), `ir_etc`.
 #[test]
 fn malformed_ir_payloads_are_refused() {
-    let good = bytes_of(
-        &samples::frames()
-            .into_iter()
-            .find(|f| matches!(f.data, FrameData::Ir(_)))
-            .expect("an ir sample"),
-    );
-    let raw = miniz_oxide::inflate::decompress_to_vec(&good[2]).expect("payload");
-    assert_eq!(raw.len(), 1 + 6 * 2 + 6 * 2);
+    let ir = samples::frames()
+        .into_iter()
+        .find(|f| matches!(f.data, FrameData::Ir(_)))
+        .expect("an ir sample");
+    let coded = CodedFrame::from_frame(&ir).expect("quantises");
+    assert_eq!(coded.codes.len(), 1 + 6 * 2 + 6 * 2);
     // 1.0 is the peak: 2^14 · 2^−14.
-    assert_eq!(raw[0] as i8, -14);
+    assert_eq!(coded.codes[0] as i8, -14);
     // Exponents above 113 would decode to ∞.
     for e in [114u8, 127] {
-        let mut bad = raw.clone();
-        bad[0] = e;
-        let mut p = good.clone();
-        p[2] = miniz_oxide::deflate::compress_to_vec(&bad, 1);
+        let mut c = coded.clone();
+        c.codes[0] = e;
         assert_eq!(
-            decode_parts(&p),
+            decode_coded(&c),
             Err(DecodeError::UndefinedCode(frame::ArrayName::IrLinear))
         );
     }
     // The lowest exponent is a valid one.
-    let mut low = raw.clone();
-    low[0] = (-128i8) as u8;
-    let mut p = good.clone();
-    p[2] = miniz_oxide::deflate::compress_to_vec(&low, 1);
-    assert!(decode_parts(&p).is_ok());
+    let mut c = coded.clone();
+    c.codes[0] = (-128i8) as u8;
+    assert!(decode_coded(&c).is_ok());
     // Without its exponent byte the payload is one byte short.
+    let good = split(&bytes_of(&ir));
+    let raw = miniz_oxide::inflate::decompress_to_vec(&good[2]).expect("payload");
     let mut p = good.clone();
     p[2] = miniz_oxide::deflate::compress_to_vec(&raw[1..], 1);
-    assert!(matches!(decode_parts(&p), Err(DecodeError::Payload { .. })));
+    assert!(matches!(
+        decode_parts(&join(&p)),
+        Err(DecodeError::Payload { .. })
+    ));
 }
 
 #[test]
@@ -501,10 +535,10 @@ fn version_mismatch_is_a_typed_refusal() {
 
     // A frame header at another version.
     let mut parts = bytes_of(&samples::frames().pop().expect("sample message"));
-    // `v` is the first element of the header array: fixarray marker, positive fixint.
-    assert_eq!(parts[1][0] & 0xf0, 0x90);
-    assert_eq!(u16::from(parts[1][1]), PROTO_VERSION);
-    parts[1][1] = (PROTO_VERSION + 1) as u8;
+    // `v` is the first element of the header array: array 16 marker, positive fixint.
+    assert_eq!(parts[1][..3], [0xdc, 0x00, 0x10]);
+    assert_eq!(u16::from(parts[1][3]), PROTO_VERSION);
+    parts[1][3] = (PROTO_VERSION + 1) as u8;
     assert!(matches!(
         decode_parts(&parts),
         Err(DecodeError::VersionMismatch { .. })

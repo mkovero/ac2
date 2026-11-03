@@ -25,7 +25,7 @@ use ac2_zmq::Context;
 use crate::cadence::Cadence;
 use crate::fanout::{Batch, Block, JobFeed, Queue};
 use crate::io::Interest;
-use crate::outbox::Outbox;
+use crate::outbox::{FrameTx, Outbox};
 
 pub(crate) mod finder;
 mod loudness;
@@ -66,6 +66,8 @@ pub(crate) struct JobEnv {
     pub(crate) seqs: Arc<Seqs>,
     pub(crate) interest: Arc<Interest>,
     pub(crate) fps: u32,
+    /// Where frames go to the I/O thread.
+    pub(crate) frames: FrameTx,
 }
 
 /// The measurement a job runs: its id, its configuration at `config_rev`, and the session
@@ -125,12 +127,19 @@ impl Emitter {
         }
     }
 
-    /// Publishes `data`; `false` if it did not reach the I/O thread (pipe full).
+    /// Publishes `data`, quantised here and encoded by the I/O thread; `false` if it did
+    /// not reach the I/O thread (channel full).
     pub(crate) fn send(&self, s: StampArgs, data: FrameData) -> bool {
         let topic = data.topic();
         let frame = self.frame(s, self.env.seqs.next(topic), data);
-        match ac2_proto::encode_frame(&frame) {
-            Ok(parts) => self.outbox.frame(parts),
+        match ac2_proto::CodedFrame::from_frame(&frame) {
+            Ok(coded) => {
+                let sent = self.env.frames.send(coded);
+                if sent {
+                    self.outbox.wake();
+                }
+                sent
+            }
             Err(e) => {
                 tracing::error!("{topic}: frame not encodable: {e}");
                 false

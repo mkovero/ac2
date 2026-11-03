@@ -1,6 +1,5 @@
-//! Frame decoding, every size validated before parsing.
+//! A frame's codes back to its values, against the kind's schema.
 
-use crate::PROTO_VERSION;
 use crate::event::decode_event;
 use crate::packing::{self, array_size};
 use crate::topic::{Stream, Topic};
@@ -9,9 +8,8 @@ use crate::units::MeasId;
 use super::flags::MaskBits;
 use super::schema::{desc, level_unit, spec_unit};
 use super::{
-    ArrayDesc, ArrayName, BandLeqFrame, DataMessage, DecodeError, Frame, FrameData, FrameHeader,
-    FrameKind, FrameMeta, FrameStamp, GONIO_POINTS, GonioFrame, GonioPair, IrFrame, LeqFrame,
-    LevelsFrame, MAX_ARRAYS, MAX_FRAME_BYTES, MAX_HEADER_BYTES, MAX_N, MAX_PARTS,
+    ArrayDesc, ArrayName, BandLeqFrame, CodedFrame, DataMessage, DecodeError, Frame, FrameData,
+    FrameKind, FrameMeta, GONIO_POINTS, GonioFrame, GonioPair, IrFrame, LeqFrame, LevelsFrame,
     PreviewLevelsFrame, RtaFrame, SessionLevelsFrame, SpecFrame, SplFrame, TfFrame, Unit,
 };
 
@@ -169,7 +167,7 @@ impl<'a> Arrays<'a> {
     }
 }
 
-fn stream_kind(s: Stream) -> FrameKind {
+pub(super) fn stream_kind(s: Stream) -> FrameKind {
     match s {
         Stream::Tf => FrameKind::Tf,
         Stream::Ir => FrameKind::Ir,
@@ -182,76 +180,9 @@ fn stream_kind(s: Stream) -> FrameKind {
     }
 }
 
-/// `v`, the first element of a header array: after the array marker (fixarray, array 16 or
-/// array 32), a positive fixint, uint 8 or uint 16. `None` if the bytes are not that.
-fn header_version(h: &[u8]) -> Option<u16> {
-    let skip = match *h.first()? {
-        0x90..=0x9f => 1,
-        0xdc => 3,
-        0xdd => 5,
-        _ => return None,
-    };
-    let v = h.get(skip..)?;
-    match *v.first()? {
-        x @ 0x00..=0x7f => Some(u16::from(x)),
-        0xcc => v.get(1).map(|x| u16::from(*x)),
-        0xcd => Some(u16::from_be_bytes([*v.get(1)?, *v.get(2)?])),
-        _ => None,
-    }
-}
-
-/// Decode a data frame from its parts. Sizes are validated before anything is parsed.
-pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
-    if parts.len() < 2 || parts.len() > MAX_PARTS {
-        return Err(DecodeError::Parts(parts.len()));
-    }
-    let total = parts.iter().fold(0usize, |a, p| a.saturating_add(p.len()));
-    if total > MAX_FRAME_BYTES {
-        return Err(DecodeError::TooLarge(total));
-    }
-    let topic = Topic::parse(parts[0])?;
-    if parts[1].len() > MAX_HEADER_BYTES {
-        return Err(DecodeError::HeaderTooLarge(parts[1].len()));
-    }
-    // The version comes first and is read on its own: another version may lay the rest of
-    // the header out differently, and must be refused as such, not as malformed.
-    if let Some(theirs) = header_version(parts[1])
-        && theirs != PROTO_VERSION
-    {
-        return Err(DecodeError::VersionMismatch {
-            ours: PROTO_VERSION,
-            theirs,
-        });
-    }
-    let h: FrameHeader =
-        rmp_serde::from_slice(parts[1]).map_err(|e| DecodeError::Header(e.to_string()))?;
-    if h.v != PROTO_VERSION {
-        return Err(DecodeError::VersionMismatch {
-            ours: PROTO_VERSION,
-            theirs: h.v,
-        });
-    }
-    if h.n > MAX_N {
-        return Err(DecodeError::TooManyElements(h.n));
-    }
-    let payload = parts.get(2);
-    if h.arrays.len() > MAX_ARRAYS || h.arrays.is_empty() != payload.is_none() {
-        return Err(DecodeError::ArrayCount {
-            listed: h.arrays.len(),
-            parts: parts.len(),
-        });
-    }
-    let sizes: Vec<usize> = h
-        .arrays
-        .iter()
-        .map(|d| array_size(d.elem, h.n as usize))
-        .collect();
-    let expected = sizes.iter().sum();
-    let raw = match payload {
-        Some(p) => packing::inflate(p, expected).ok_or(DecodeError::Payload { expected })?,
-        None => Vec::new(),
-    };
-    let topic_kind = match topic {
+/// The kind a topic carries; `None` for `evt`.
+pub(super) fn topic_kind(topic: Topic) -> Option<FrameKind> {
+    Some(match topic {
         Topic::Data { stream, .. } => stream_kind(stream),
         Topic::SessionLevels => FrameKind::SessionLevels,
         Topic::PreviewLevels => FrameKind::PreviewLevels,
@@ -259,20 +190,36 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
         Topic::PreviewGonio => FrameKind::PreviewGonio,
         Topic::Timing => FrameKind::Timing,
         Topic::Ka => FrameKind::Ka,
-        Topic::Evt => return Err(DecodeError::KindMismatch),
-    };
-    if h.kind != topic_kind || h.meta.kind() != h.kind {
+        Topic::Evt => return None,
+    })
+}
+
+/// The values of a frame from its codes. The codes' size was checked against `n` and the
+/// array descriptors when they were inflated or applied.
+pub(super) fn to_frame(c: &CodedFrame) -> Result<Frame, DecodeError> {
+    let topic = c.topic;
+    if topic_kind(topic) != Some(c.meta.kind()) {
         return Err(DecodeError::KindMismatch);
     }
-    if !h.protection.is_known() {
+    if !c.stamp.protection.is_known() {
         return Err(DecodeError::Schema("undefined protection bits".into()));
     }
-
+    let sizes: Vec<usize> = c
+        .arrays
+        .iter()
+        .map(|d| array_size(d.elem, c.n as usize))
+        .collect();
+    if sizes.iter().sum::<usize>() != c.codes.len() {
+        return Err(DecodeError::Payload {
+            expected: sizes.iter().sum(),
+        });
+    }
+    let h = c;
     let meas = match topic {
         Topic::Data { meas, .. } => meas,
         _ => MeasId(0),
     };
-    let mut rest = raw.as_slice();
+    let mut rest = c.codes.as_slice();
     let mut a = Arrays {
         descs: &h.arrays,
         parts: sizes
@@ -285,7 +232,7 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
             .collect(),
         used: vec![false; h.arrays.len()],
     };
-    let data = match h.meta {
+    let data = match h.meta.clone() {
         FrameMeta::Tf(meta) => FrameData::Tf(TfFrame {
             meas,
             meta,
@@ -404,17 +351,7 @@ pub fn decode_frame(parts: &[&[u8]]) -> Result<Frame, DecodeError> {
     };
     a.finish()?;
     Ok(Frame {
-        stamp: FrameStamp {
-            seq: h.seq,
-            audio_sample: h.audio_sample,
-            session_epoch: h.session_epoch,
-            daemon_incarnation: h.daemon_incarnation,
-            config_rev: h.config_rev,
-            config_applied_at: h.config_applied_at,
-            capture_wall_ns: h.capture_wall_ns,
-            grid_id: h.grid_id,
-            protection: h.protection,
-        },
+        stamp: c.stamp,
         data,
     })
 }
@@ -428,6 +365,6 @@ pub fn decode_data_message(parts: &[&[u8]]) -> Result<DataMessage, DecodeError> 
             }
             Ok(DataMessage::Event(decode_event(parts[1])?))
         }
-        _ => decode_frame(parts).map(DataMessage::Frame),
+        _ => super::wire::decode_frame(parts).map(DataMessage::Frame),
     }
 }

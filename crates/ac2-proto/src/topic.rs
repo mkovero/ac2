@@ -169,6 +169,20 @@ impl fmt::Display for Topic {
     }
 }
 
+/// On the ctrl socket a topic goes as its string, the one spelling the data socket uses.
+impl Serialize for Topic {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for Topic {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        Self::parse(s.as_bytes()).map_err(serde::de::Error::custom)
+    }
+}
+
 /// A ZMQ subscription, as a prefix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Subscription {

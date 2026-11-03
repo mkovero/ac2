@@ -38,6 +38,7 @@ mod backend;
 mod burst;
 mod cadence;
 mod calstore;
+mod chain;
 pub mod config;
 mod control;
 mod conv;
@@ -445,11 +446,13 @@ impl Daemon {
         let fps = config.publish_fps.max(1);
         let interest = Arc::new(Interest::default());
         let (tx, rx) = std::sync::mpsc::channel();
+        let (frames, frames_rx) = outbox::frame_channel();
         let io = io::spawn(
             IoSockets {
                 router,
                 xpub,
                 pull,
+                frames: frames_rx,
                 secure,
             },
             tx.clone(),
@@ -477,6 +480,7 @@ impl Daemon {
             endpoint: pull_ep,
             interest,
             fps,
+            frames,
             outbox,
             to_self: tx.clone(),
             session_dir: config.session_dir.clone(),

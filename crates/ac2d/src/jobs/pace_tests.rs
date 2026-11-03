@@ -23,12 +23,15 @@ use super::{Analysis, Emitter, Flush, JobCmd, JobEnv, JobMsg, REFRESH, Seqs, Sta
 use crate::calstore::InputCal;
 use crate::fanout::Block;
 use crate::io::Interest;
+use crate::outbox::{FrameRx, frame_channel};
 
 const FS: u32 = 48_000;
 const BLOCK: u32 = 256;
 
 pub(super) struct Rig {
-    pull: Socket,
+    /// Keeps the wake-ups' end of the pipe bound.
+    _pull: Socket,
+    frames: FrameRx,
     env: JobEnv,
     pub(super) em: Emitter,
     _ctx: Context,
@@ -40,6 +43,7 @@ impl Rig {
         let endpoint = format!("inproc://pace-{name}");
         let pull = ctx.socket(SocketType::Pull).expect("pull");
         pull.bind(&endpoint).expect("bind");
+        let (tx, frames) = frame_channel();
         let env = JobEnv {
             ctx: ctx.clone(),
             endpoint,
@@ -48,10 +52,12 @@ impl Rig {
             seqs: Arc::new(Seqs::default()),
             interest: Arc::new(Interest::default()),
             fps: 60,
+            frames: tx,
         };
         let em = Emitter::connect(env.clone()).expect("emitter");
         Self {
-            pull,
+            _pull: pull,
+            frames,
             env,
             em,
             _ctx: ctx,
@@ -69,13 +75,8 @@ impl Rig {
     /// Frames that reached the I/O end since the last call.
     pub(super) fn frames(&self) -> Vec<Frame> {
         let mut out = Vec::new();
-        while let Some(m) = self
-            .pull
-            .recv_timeout(Duration::from_millis(20))
-            .expect("recv")
-        {
-            let parts: Vec<&[u8]> = m.frames().iter().map(Vec::as_slice).collect();
-            out.push(ac2_proto::decode_frame(&parts[1..]).expect("frame"));
+        while let Ok(f) = self.frames.recv_timeout(Duration::from_millis(20)) {
+            out.push(f.to_frame().expect("frame"));
         }
         out
     }

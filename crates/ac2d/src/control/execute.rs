@@ -380,6 +380,10 @@ impl Control {
                     ErrorDetail::Resync { oldest },
                 )),
             },
+            Command::DataKeyframe { topic } => {
+                self.s.outbox.keyframe(&topic.to_bytes());
+                ack(self.store.rev())
+            }
             Command::GridGet { grid_id } => self
                 .grids
                 .get(&grid_id)

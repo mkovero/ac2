@@ -48,6 +48,7 @@ impl Command {
             Self::DelaySet { .. } => "delay.set",
             Self::DelayNudge { .. } => "delay.nudge",
             Self::DelayTrack { .. } => "delay.track",
+            Self::DataKeyframe { .. } => "data.keyframe",
             Self::TraceCapture { .. } => "trace.capture",
             Self::TraceList => "trace.list",
             Self::TraceGet { .. } => "trace.get",
@@ -130,6 +131,7 @@ impl Command {
                 | Self::StateSnapshot
                 | Self::StateSince { .. }
                 | Self::GridGet { .. }
+                | Self::DataKeyframe { .. }
                 | Self::DelayFind { .. }
                 | Self::FileUploadBegin { .. }
                 | Self::FileUploadChunk { .. }

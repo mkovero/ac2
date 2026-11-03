@@ -100,11 +100,41 @@ def generate(out):
     _dump(os.path.join(exp, "requests.json"), requests())
     p.write_container(os.path.join(out, "py_events.bin"), [_pack(e) for e in events()])
     _dump(os.path.join(exp, "events.json"), events())
+    # Delta chains: the frames of Rust's chain, as Python's keyframe and deltas.
+    for name in _chains():
+        keys = _chain_keys(name)
+        parts = p.encode_key(keys[0])
+        for base, c in zip(keys, keys[1:]):
+            d = p.encode_delta(c, base)
+            if d is None:
+                raise SystemExit(f"chain {name}: a frame that does not fit its base")
+            parts += d
+        p.write_container(os.path.join(out, f"py_chain_{name}.bin"), parts)
     grids = [LOG_GRID, BAND_GRID, LIN_GRID, LOG_BINS_GRID]
     _dump(
         os.path.join(exp, "grids.json"),
         [{"grid": g, "grid_id": p.grid_id(g)} for g in grids],
     )
+
+
+def _chains():
+    pre, suf = "rust_chain_", "_keys.bin"
+    return sorted(f[len(pre) : -len(suf)] for f in os.listdir(FIX) if f.startswith(pre) and f.endswith(suf))
+
+
+def _messages(path):
+    parts = p.read_container(path)
+    return [parts[i : i + 2] for i in range(0, len(parts), 2)]
+
+
+def _chain_keys(name):
+    out = []
+    for m in _messages(os.path.join(FIX, f"rust_chain_{name}_keys.bin")):
+        form, c = p.decode_wire(m)
+        if form != "key":
+            raise p.DecodeError(f"chain {name}: a delta among the keyframes")
+        out.append(c)
+    return out
 
 
 def _dump(path, obj):
@@ -149,6 +179,37 @@ def check():
         except Exception as e:  # noqa: BLE001
             ok(False, f"rust_frame_{name}: {e}")
 
+    # 2b. Rust's delta chains apply here to the frames of its keyframes; a delta on another
+    # frame than its base, or whose result misses its CRC, is refused.
+    for name in _chains():
+        try:
+            keys = _chain_keys(name)
+            msgs = _messages(os.path.join(FIX, f"rust_chain_{name}.bin"))
+            ok(len(msgs) == len(keys), f"chain {name}: {len(msgs)} messages")
+            held = None
+            for i, m in enumerate(msgs):
+                form, x = p.decode_wire(m)
+                ok((form == "key") == (i == 0), f"chain {name} {i}: {form}")
+                held = x if form == "key" else p.apply(x, held)
+                ok(held["codes"] == keys[i]["codes"], f"chain {name} {i}: codes")
+                p.same(held["header"], keys[i]["header"])
+                p.same(p.values(held), p.values(keys[i]))
+            # The first delta: on the frame after its base, or on its base with one code
+            # changed (the last: never a `bfp16` exponent, which a delta may not use).
+            _, d = p.decode_wire(msgs[1])
+            bad = [(keys[1], "wrong base")]
+            if keys[0]["codes"]:
+                c = keys[0]["codes"]
+                bad.append(({**keys[0], "codes": c[:-1] + bytes([c[-1] ^ 1])}, "patched base"))
+            for base, what in bad:
+                try:
+                    p.apply(d, base)
+                    ok(False, f"chain {name}: delta on a {what} accepted")
+                except p.DecodeError:
+                    pass
+        except Exception as e:  # noqa: BLE001
+            ok(False, f"rust_chain_{name}: {e}")
+
     # 3. Rust-encoded ctrl and event messages.
     rust_reqs = [p.msgpack.unpackb(b, raw=False) for b in p.read_container(os.path.join(FIX, "rust_requests.bin"))]
     by_id = {r["id"]: r for r in rust_reqs}
@@ -188,19 +249,19 @@ def check():
 
     # 5. The Python decoder refuses malformed frames without crashing.
     parts = p.read_container(os.path.join(FIX, "rust_frame_tf.bin"))
-    for bad in (parts[:1], parts[:-1], parts[:2] + [parts[2][:-1]], parts + [b""]):
+    body = parts[1]
+    for bad in (parts[:1], [parts[0], body[:-1]], [parts[0], body[:20]], [parts[0], body + b"\0"],
+                parts + [b""], [parts[0], body[:3] + b"\x07" + body[4:]]):
         try:
             p.decode_frame(bad)
             ok(False, "malformed frame accepted")
         except p.DecodeError:
             pass
     # A `bfp16` exponent above 113 would decode to infinity: refused.
-    parts = p.read_container(os.path.join(FIX, "rust_frame_ir.bin"))
-    raw = bytearray(zlib.decompressobj(-15).decompress(parts[2]))
-    raw[0] = 114
-    c = zlib.compressobj(1, zlib.DEFLATED, -15)
+    _, ir = p.decode_wire(p.read_container(os.path.join(FIX, "rust_frame_ir.bin")))
+    ir["codes"] = bytes([114]) + ir["codes"][1:]
     try:
-        p.decode_frame(parts[:2] + [c.compress(bytes(raw)) + c.flush()])
+        p.decode_frame(p.encode_key(ir))
         ok(False, "bfp16 exponent 114 accepted")
     except p.DecodeError:
         pass

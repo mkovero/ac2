@@ -13,13 +13,13 @@ use ac2_proto::{
     samples,
 };
 
-type R<T = ()> = Result<T, Box<dyn std::error::Error>>;
+pub(crate) type R<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
 /// A ceiling, not an expectation: waits end on their condition, normally within a second;
 /// a run sharing the machine with builds can stall a process for several.
-const DEADLINE: Duration = Duration::from_secs(30);
+pub(crate) const DEADLINE: Duration = Duration::from_secs(30);
 
-async fn until<F, Fut>(what: &str, mut f: F) -> R
+pub(crate) async fn until<F, Fut>(what: &str, mut f: F) -> R
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = bool>,
@@ -34,11 +34,11 @@ where
     Err(format!("timed out waiting for {what}").into())
 }
 
-fn fake() -> R<FakeDaemon> {
+pub(crate) fn fake() -> R<FakeDaemon> {
     Ok(FakeDaemon::start(FakeOptions::default())?)
 }
 
-async fn connect(f: &FakeDaemon) -> R<Client> {
+pub(crate) async fn connect(f: &FakeDaemon) -> R<Client> {
     Ok(Client::connect(ClientConfig::new(f.endpoints(), "ac2-client-test")).await?)
 }
 

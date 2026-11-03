@@ -7,6 +7,7 @@ mod autosave;
 mod band_leq;
 mod calibration;
 mod ceiling;
+mod chain;
 mod client;
 mod common;
 mod dedup;

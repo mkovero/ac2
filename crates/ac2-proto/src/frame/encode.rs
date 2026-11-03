@@ -1,6 +1,5 @@
-//! Frame encoding.
+//! Frame quantisation: a frame's arrays to their wire codes.
 
-use crate::PROTO_VERSION;
 use crate::event::{Event, encode_event};
 use crate::packing::{self, array_size};
 use crate::topic::Topic;
@@ -8,8 +7,7 @@ use crate::topic::Topic;
 use super::flags::MaskBits;
 use super::schema::{desc, level_unit, spec_unit};
 use super::{
-    ArrayDesc, ArrayName, EncodeError, Frame, FrameData, FrameHeader, FrameMeta, MAX_HEADER_BYTES,
-    MAX_N, MAX_PARTS, Unit,
+    ArrayDesc, ArrayName, CodedFrame, EncodeError, Frame, FrameData, FrameMeta, MAX_N, Unit,
 };
 
 enum Col<'a> {
@@ -48,8 +46,13 @@ fn mask_slice<T: MaskBits>(v: &[T]) -> Vec<u32> {
     v.iter().map(T::to_u32).collect()
 }
 
-/// Encode a frame into its parts `[topic, header]` or `[topic, header, payload]`.
+/// Encode a frame as a keyframe: its parts `[topic, body]`.
 pub fn encode_frame(frame: &Frame) -> Result<Vec<Vec<u8>>, EncodeError> {
+    super::wire::encode_key(&quantise(frame)?)
+}
+
+/// A frame's arrays quantised to their codes, in the kind's array order.
+pub(super) fn quantise(frame: &Frame) -> Result<CodedFrame, EncodeError> {
     let mut cols: Vec<(ArrayDesc, Col<'_>)> = Vec::new();
     let meta = match &frame.data {
         FrameData::Tf(f) => {
@@ -205,43 +208,22 @@ pub fn encode_frame(frame: &Frame) -> Result<Vec<Vec<u8>>, EncodeError> {
         }
     }
 
-    let s = &frame.stamp;
-    let header = FrameHeader {
-        v: PROTO_VERSION,
-        kind: frame.data.kind(),
-        seq: s.seq,
-        audio_sample: s.audio_sample,
-        session_epoch: s.session_epoch,
-        daemon_incarnation: s.daemon_incarnation,
-        config_rev: s.config_rev,
-        config_applied_at: s.config_applied_at,
-        capture_wall_ns: s.capture_wall_ns,
-        grid_id: s.grid_id,
-        protection: s.protection,
+    let mut codes = Vec::with_capacity(cols.iter().map(|(d, _)| array_size(d.elem, n)).sum());
+    for (d, c) in &cols {
+        match c {
+            Col::F(v) => packing::put_f32(&mut codes, d.elem, d.unit == Unit::Deg, v),
+            Col::U(v) => packing::put_u32(&mut codes, v),
+            Col::I(v) => packing::put_i8(&mut codes, v),
+        }
+    }
+    Ok(CodedFrame {
+        topic: frame.topic(),
+        stamp: frame.stamp,
         n: n as u32,
         arrays: cols.iter().map(|(d, _)| *d).collect(),
         meta,
-    };
-    let hb = rmp_serde::to_vec(&header).map_err(|e| EncodeError::Msgpack(e.to_string()))?;
-    if hb.len() > MAX_HEADER_BYTES {
-        return Err(EncodeError::HeaderTooLarge(hb.len()));
-    }
-
-    let mut parts = Vec::with_capacity(MAX_PARTS);
-    parts.push(frame.topic().to_bytes());
-    parts.push(hb);
-    if !cols.is_empty() {
-        let mut raw = Vec::with_capacity(cols.iter().map(|(d, _)| array_size(d.elem, n)).sum());
-        for (d, c) in &cols {
-            match c {
-                Col::F(v) => packing::put_f32(&mut raw, d.elem, d.unit == Unit::Deg, v),
-                Col::U(v) => packing::put_u32(&mut raw, v),
-                Col::I(v) => packing::put_i8(&mut raw, v),
-            }
-        }
-        parts.push(packing::deflate(&raw));
-    }
-    Ok(parts)
+        codes,
+    })
 }
 
 /// Encode an event as data-socket parts `[evt, body]`.

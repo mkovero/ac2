@@ -379,6 +379,17 @@ pub enum Command {
         enabled: bool,
     },
 
+    // -- data ---------------------------------------------------------------------------
+    /// Ask for a keyframe of a data topic: a receiver whose delta chain broke (a lost
+    /// frame). The next frame of the topic goes as a keyframe, to every subscriber; at most
+    /// one request per topic per 250 ms is honoured, whoever asks. A topic with no new frame
+    /// sends nothing.
+    #[serde(rename = "data.keyframe")]
+    DataKeyframe {
+        /// Topic.
+        topic: crate::topic::Topic,
+    },
+
     // -- trace --------------------------------------------------------------------------
     /// Capture the live result into a trace.
     #[serde(rename = "trace.capture")]

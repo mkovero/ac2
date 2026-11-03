@@ -35,14 +35,14 @@ pub enum DecodeError {
     /// `n` above [`MAX_N`](super::MAX_N).
     #[error("n = {0} exceeds the limit")]
     TooManyElements(u32),
-    /// More arrays than [`MAX_ARRAYS`](super::MAX_ARRAYS), or a payload part without arrays or arrays
-    /// without one.
-    #[error("header lists {listed} arrays, frame has {parts} parts")]
+    /// More arrays than [`MAX_ARRAYS`](super::MAX_ARRAYS), or payload bytes without arrays
+    /// or arrays without them.
+    #[error("header lists {listed} arrays, frame has {payload} payload bytes")]
     ArrayCount {
         /// In the header.
         listed: usize,
-        /// Parts present.
-        parts: usize,
+        /// Payload bytes after the header.
+        payload: usize,
     },
     /// The payload is not deflate data of exactly the size `n` and the arrays' element
     /// encodings make.
@@ -63,6 +63,25 @@ pub enum DecodeError {
     /// A bitmask has undefined bits.
     #[error("undefined bits in {0:?}")]
     UnknownBits(ArrayName),
+    /// A delta, decoded where only a keyframe can be: it needs the frame before it.
+    #[error("a delta needs its base frame")]
+    NoBase,
+    /// A delta on another frame than the one held.
+    #[error("delta on seq {base}, the frame held is seq {held}")]
+    WrongBase {
+        /// `seq` of the frame held.
+        held: u64,
+        /// `seq` the delta applies on.
+        base: u64,
+    },
+    /// The codes do not match the frame's CRC.
+    #[error("crc {got:#010x}, the frame says {expected:#010x}")]
+    Crc {
+        /// In the header.
+        expected: u32,
+        /// Of the codes.
+        got: u32,
+    },
     /// Event body malformed.
     #[error(transparent)]
     Event(#[from] EventError),

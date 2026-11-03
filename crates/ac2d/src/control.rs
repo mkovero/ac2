@@ -241,6 +241,8 @@ pub(crate) struct Setup {
     pub(crate) endpoint: String,
     pub(crate) interest: Arc<Interest>,
     pub(crate) fps: u32,
+    /// Frames from the jobs to the I/O thread.
+    pub(crate) frames: crate::outbox::FrameTx,
     pub(crate) outbox: Outbox,
     pub(crate) to_self: Sender<ControlMsg>,
     /// Session directory for `file.*` by name.

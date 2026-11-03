@@ -439,6 +439,11 @@ impl Shared {
         }
     }
 
+    /// Publishes a message as it is (a delta from `encode_delta`, or a damaged frame).
+    pub fn publish_parts(&mut self, parts: Vec<Vec<u8>>) {
+        self.outbox.push(parts);
+    }
+
     /// Simulates a restart: new incarnation, fresh state, empty replay and dedup, no lease.
     pub fn restart(&mut self, incarnation: u64) {
         let opts = self.opts.clone();
@@ -588,6 +593,8 @@ impl Shared {
             | C::DelaySet { .. }
             | C::DelayNudge { .. }
             | C::DelayTrack { .. }) => self.meas_cmd(c)?,
+            // Every frame the fake publishes is a keyframe.
+            C::DataKeyframe { .. } => ReplyBody::Ack { rev: self.rev },
             C::TraceCapture { meas, name, slot } => self.trace_capture(meas, name, slot)?,
             C::TraceList => ReplyBody::Traces(self.state.traces.clone()),
             C::TraceGet { trace } => self.trace_get(trace)?,

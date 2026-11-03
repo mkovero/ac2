@@ -575,8 +575,17 @@ impl Client {
     /// across frames reuses its map, and its topic names are shared, never rebuilt.
     pub fn latest_into(&self, out: &mut crate::data::Latest) -> Result<(), ClientError> {
         let view = self.view();
-        self.lock_data()?
-            .drain(&view, Instant::now(), wall_ns(), out)
+        let asks = {
+            let mut data = self.lock_data()?;
+            data.drain(&view, Instant::now(), wall_ns(), out)?;
+            data.take_asks()
+        };
+        // A chain that broke: its next frame as a keyframe. Not waited for; a lost request
+        // is asked again after `KEYFRAME_ASK_GAP` while deltas keep failing.
+        for topic in asks {
+            self.inner.core.send_nowait(Command::DataKeyframe { topic });
+        }
+        Ok(())
     }
 
     /// Waits until a data frame is queued that [`Client::latest`] has not read yet (at once

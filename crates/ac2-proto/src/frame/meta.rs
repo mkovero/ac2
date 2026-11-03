@@ -628,14 +628,17 @@ impl FrameMeta {
     }
 }
 
-/// The msgpack header part: a msgpack array of these fields in this order (positional, as
-/// are the per-kind metadata structs inside it; enum variants keep their names). A frame
-/// goes out tens of times a second with a payload often smaller than its field names.
+/// A keyframe's header: a msgpack array of these fields in this order (positional, as
+/// are the per-kind metadata structs inside it; enum variants keep their names), followed in
+/// the same part by the deflated intra payload. A frame goes out tens of times a second with
+/// a payload often smaller than its field names.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FrameHeader {
     /// Protocol version.
     pub v: u16,
+    /// [`Form::Key`](super::Form::Key).
+    pub form: super::Form,
     /// Kind; equals the topic's stream and the `meta` key.
     pub kind: FrameKind,
     /// Per-topic sequence number.
@@ -662,4 +665,6 @@ pub struct FrameHeader {
     pub arrays: Vec<ArrayDesc>,
     /// Per-kind metadata.
     pub meta: FrameMeta,
+    /// CRC-32 of the arrays' codes (`crate::packing`), in `arrays` order.
+    pub crc: u32,
 }

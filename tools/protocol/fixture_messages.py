@@ -831,6 +831,7 @@ def requests():
             },
         ),
         req(100, "sim.cancel"),
+        req(101, "data.keyframe", {"topic": "d/1/tf"}, mutation=False),
     ]
 
 

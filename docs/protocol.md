@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 80`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 81`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -132,6 +132,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `delay.set` | `meas`, `delay: Seconds` | `measurement` | |
 | `delay.nudge` | `meas`, `by: Seconds` | `measurement` | |
 | `delay.track` | `meas`, `enabled` | `measurement` | |
+| `data.keyframe` | `topic: Topic` (a data topic) | `ack`; the topic's next frame goes as a keyframe (§5.2), unless one was asked for within the last 250 ms (whoever asked) | |
 | `trace.capture` | `meas`, `name`, `slot` (1…9 \| nil) | `trace` | |
 | `trace.list` | — | `traces` | |
 | `trace.get` | `trace` | `trace_data` | |
@@ -1911,11 +1912,65 @@ client metering alone does not receive its points). Longest topic: 32 bytes.
 
 ```
 part 0   topic (UTF-8)
-part 1   header (msgpack array, ≤ 8192 bytes)
-part 2   payload, only when the header lists arrays: the arrays in the header's order,
-         each n elements in its `elem` encoding, concatenated and deflated (RFC 1951,
-         raw: no zlib or gzip wrapper)
+part 1   body: the msgpack header (≤ 8192 bytes), then, only when the frame has
+         arrays, the payload in the same part: deflated (RFC 1951, raw: no zlib or
+         gzip wrapper), up to the end of the part
 ```
+
+A frame goes in one of two forms, the header's second element (`form`):
+
+- **Keyframe** (`form` 0): the full header (§5.3) and the payload in its intra form. It
+  needs nothing before it.
+- **Delta** (`form` 1): a short header and the payload against the topic's frame of `seq`
+  `base`, the frame the receiver applied last. It inherits from that frame everything the
+  short header does not carry: kind, incarnation, epoch, `config_rev`, `config_applied_at`,
+  `grid_id`, `n`, the arrays and the metadata but for the kind's per-frame fields.
+
+| delta field | type | meaning |
+|---|---|---|
+| `v` | u16 | protocol version |
+| `form` | u8 | 1 |
+| `seq` | u64 | this frame's |
+| `base` | u64 | `seq` of the frame it applies on |
+| `audio_sample` | u64 | as §5.3 |
+| `capture_wall_ns` | u64 | as §5.3 |
+| `protection` | u32 | as §5.3 |
+| `crc` | u32 | CRC of the frame's codes (below) |
+| `meta` | […] \| nil | the per-frame metadata: `tf` [filled], `spl` [level, lmax, lmin, leq, lpeak, duration]; nil for every other kind |
+
+The **codes** of a frame are its arrays quantised to their `elem` encoding (below),
+concatenated in the header's array order, each code little-endian, a `bfp16` array's
+exponent byte first. `crc` is the CRC-32 of the codes (IEEE 802.3, reflected, as zlib's
+`crc32`): a keyframe's is checked as it is decoded, a delta's on the codes it makes of its
+base. The payload inflates to exactly the codes' size, per array:
+
+| elem | keyframe (intra) | delta |
+|---|---|---|
+| `i16`, `u16` | each code minus the previous column's (the first minus 0), modulo 2¹⁶, as two planes: the low byte of every difference, then the high byte of every difference | each code minus the base's code of the same column, modulo 2¹⁶, as the two planes, not differenced between columns |
+| `i16` in `deg` | as `i16` | the short way round: (x − b + 18 000) mod 36 000 − 18 000 when both codes are angles (in [−18 000, 18 000)); the NaN code (0x8000) when x is NaN; x − b modulo 2¹⁶ when b is NaN. A frame whose angle array holds any other code goes as a keyframe |
+| `bfp16` | the exponent byte, then the mantissas as `i16` intra | the exponent byte, then the mantissas as an `i16` delta if the exponent equals the base's, else as `i16` intra |
+| `u32` | as they are | each code XOR the base's |
+| `f32`, `i8` | as they are | as they are |
+
+Neighbouring columns of a curve are close, so an intra high plane is mostly 0x00 / 0xff; a
+column a deeper analysis stage holds between its hops repeats bit for bit, so its delta is
+0. Both deflate to little.
+
+The daemon keeps one chain per topic, shared by every subscriber: the base of a delta is the
+last frame of the topic it sent. A frame goes as a keyframe when the topic has no base yet,
+on a new subscription (every subscriber of the topic receives it), on `data.keyframe`,
+after a send it could not complete, at least every 500 ms, when a static field differs
+from the base's (another `n`, grid, array set, epoch, config or metadata), and when the
+delta would not be smaller than the topic's last keyframe.
+
+A receiver applies each topic's frames in the order they arrive. A keyframe replaces the
+frame held. A delta applies only on the frame of `seq` `base` of its topic and only if the
+codes it makes match `crc`; any other delta is refused, never drawn, and the frame held
+stays (it reads as STALE once no new frame comes, §5.1). A receiver that held a frame of
+the topic and refuses a delta asks `data.keyframe` for it, at most once per 250 ms; one that
+holds none yet (a new subscription may see deltas before its keyframe) waits for the
+keyframe without asking. A delta never repairs a gap: its keyframe does, within 500 ms or a
+round trip after asking.
 
 Columns are in grid order. Invalid values are NaN; where the reason matters a `validity`
 bitmask array says why.
@@ -1930,11 +1985,6 @@ Element encodings (`elem`), all little-endian:
 | `u16` | 2 | ten-thousandths, `round(x × 10 000)` rounding halves up, clamped to 0 … 10 000; 65 535 = NaN; any other code above 10 000 refuses the frame. Decoded as code ÷ 10 000 |
 | `i8` | 1 | signed; the goniometer's coordinates, −127 … 127 of the pair's auto gain |
 | `bfp16` | 2 (+ 1 per array) | block floating point: the array's bytes start with one signed exponent byte `e`, then one `i16` mantissa per element, `round(x × 2^−e)` rounding halves up, clamped to ±32 766, with the `i16` codes of NaN and ±∞. `e` is the smallest integer in [−128, 113] for which every finite \|x\| × 2^−e ≤ 32 765 (from `frexp(peak) = (m, k)`: `k − 14` if `m × 2^15 > 32 765`, else `k − 15`), 0 when no element is finite and non-zero; an exponent above 113 refuses the frame. Decoded as mantissa × 2^e rounded to f32 |
-
-An `i16`, `u16` or `bfp16` array (after its exponent byte) goes as the differences of each
-code from the previous column's (the first from 0), modulo 2¹⁶, as two planes: the low byte of every difference, then the
-high byte of every difference. Neighbouring columns of a curve are close, so the high plane
-is mostly 0x00 / 0xff and deflates to little.
 
 Which arrays use which encoding is fixed by name: `mag`, `phase`, `level` (rta, spec),
 `ir_etc`, the `align_*` arrays, `range_lo` and `range_hi` are `i16`; `coh` and `range_coh` are `u16`; `ir_linear` is `bfp16`; bitmasks and
@@ -1951,8 +2001,8 @@ f32, never from frames (design: `docs/design/wire-slim.md`).
 
 ### 5.3 Header fields
 
-The header is an array of these fields in this order; `v` comes first so a frame of another
-version is recognised as such before the rest is read. Every struct inside it (array
+The keyframe header is an array of these fields in this order; `v` comes first so a frame
+of another version is recognised as such before the rest is read, and `form` second. Every struct inside it (array
 descriptors, the per-kind metadata of §5.4 and the types they hold) is likewise an array of
 its fields in the order listed; an enum with data is an array of its `type` name followed by
 its fields (`["verified", calibrated_at, ["acoustic", calibrator_level]]`); the `meta` key
@@ -1972,8 +2022,9 @@ layout as code.
 | field | type | meaning |
 |---|---|---|
 | `v` | u16 | protocol version |
+| `form` | u8 | 0 (a keyframe; §5.2) |
 | `kind` | FrameKind | `tf`, `ir`, `rta`, `spec`, `spl`, `leq`, `band_leq`, `levels`, `session_levels`, `preview_levels`, `session_gonio`, `preview_gonio`, `timing`, `ka`; equals the topic and the `meta` key |
-| `seq` | u64 | per topic per incarnation; clients keep the max per topic when draining |
+| `seq` | u64 | per topic per incarnation, increasing; not contiguous (a frame replaced before it was sent never goes), so a delta names its base's |
 | `audio_sample` | u64 | session sample index (origin = session open) of the newest sample in the frame |
 | `session_epoch` | u32 | frames from older epochs are discarded |
 | `daemon_incarnation` | u64 | random per daemon start |
@@ -1983,8 +2034,9 @@ layout as code.
 | `grid_id` | u64 \| nil | column grid (`tf`, `rta`, `spec`); nil otherwise |
 | `protection` | u32 | protection bitmask (§5.5) |
 | `n` | u32 | elements per array, ≤ 65536 |
-| `arrays` | [[`name`, `unit`, `elem`]] | one descriptor per array part, in part order |
+| `arrays` | [[`name`, `unit`, `elem`]] | one descriptor per array, in payload order |
 | `meta` | {kind: […]} | per-kind metadata (§5.4), fields in the order listed there |
+| `crc` | u32 | CRC-32 of the frame's codes (§5.2) |
 
 `elem` is `f32`, `u32`, `i16`, `u16`, `i8` or `bfp16` (§5.2), fixed per array name. `unit` is one of `db`, `dbfs`, `dbtp` (dB true peak), `db_spl`, `dbfs_per_hz`, `db_spl_per_hz` (a spectrum density), `deg`, `coherence`
 (γ², 0…1), `full_scale` (linear, full scale = 1), `seconds`, `bitmask` (always
@@ -2101,38 +2153,41 @@ not `JUDGED`, else `over`, `near` or `ok`.
 
 ### 5.6 Bounds (checked before decoding)
 
-In order: 2 or 3 parts; total ≤ 2 MiB; topic valid; header ≤ 8192 bytes; then after the
-bounded header parse: `v`, `n` ≤ 65536, ≤ 12 arrays, a payload part exactly when arrays are
-listed, the payload inflating to exactly n × Σ element sizes plus one byte per `bfp16`
+In order: 2 parts; total ≤ 2 MiB; topic valid; `v` and `form` (read on their own); the
+header parsed from at most its first 8192 bytes (≤ 8192 bytes); then for a keyframe: `n` ≤ 65536, ≤ 12 arrays, payload bytes after the header exactly when arrays
+are listed, the payload inflating to exactly n × Σ element sizes plus one byte per `bfp16`
 array (inflation stops there: a
 payload that would inflate further is refused, so it cannot be a decompression bomb),
 `kind` = topic = `meta` key, then the per-kind array schema (each array's `elem` as fixed by
-its name), undefined `u16` codes, `bfp16` exponents and bitmask bits.
-A malformed frame is dropped and counted by the client; decoders never panic.
+its name), `crc`, undefined `u16` codes, `bfp16` exponents and bitmask bits. A delta's
+payload is sized by its base: applied, it inflates to exactly the base's codes' size, then
+`crc`. A malformed frame is dropped and counted by the client; decoders never panic.
 
 ### 5.7 Sizes
 
 Measured on the fake rig (`crates/ac2d/tests/wire_size.rs`, noisy high bands, so dearer
 than most real curves); bytes include topic, header and payload, not the transport:
 
-| frame | as f32 arrays | as sent |
-|---|---|---|
-| `tf`, 480 columns | 7 863 B | ≈ 2 400 B (header ≈ 180 B) |
-| `spec`, 65 536 points (897 columns) | 3 696 B | ≈ 1 580 B |
-| `spec`, 4 096 points (513 columns) | 2 161 B | ≈ 1 010 B |
-| `rta`, 1/3 octave (30 bands) | 368 B | ≈ 210 B |
-| `band_leq` (11 windows), `leq` (5) | 988 B, 467 B | ≈ 870 B, 370 B |
-| `ir`, 4 096 points (`ir_linear`, `ir_etc`) | 32 896 B | ≈ 13 000 B |
-| `spl` (no arrays) | 138 B | 138 B |
+| frame | as f32 arrays | keyframe | delta |
+|---|---|---|---|
+| `tf`, 480 columns | 7 863 B | ≈ 2 400 B (header ≈ 180 B) | ≈ 1 250 B |
+| `tf` power average with its range band | | ≈ 4 470 B | ≈ 2 900 B |
+| `spec`, 65 536 points (897 columns) | 3 696 B | ≈ 1 590 B | ≈ 1 430 B |
+| `spec`, 4 096 points (513 columns) | 2 161 B | ≈ 1 025 B | ≈ 930 B |
+| `rta`, 1/3 octave (30 bands) | 368 B | ≈ 218 B | ≈ 116 B |
+| `band_leq` (11 windows), `leq` (5) | 988 B, 467 B | ≈ 832 B, 379 B | |
+| `ir`, 4 096 points (`ir_linear`, `ir_etc`) | 32 896 B | ≈ 13 050 B | ≈ 10 400 B |
+| `spl` (no arrays) | 138 B | ≈ 141 B | ≈ 85 B |
 
 A `tf` stream goes out at its analysis hop (≈ 26 frames/s at 48 kHz, whatever the publish
 rate), a math channel's whenever an operand changes (up to the publish rate), a default
 `spec` with each new spectrum (every `n/8` samples: ≈ 6 per second at 65 536 points),
-re-sent every 0.25 s of audio while nothing changes. A session of three transfer functions
+re-sent every 0.25 s of audio while nothing changes. About 7 % of a `tf` stream's frames go
+as keyframes. A session of three transfer functions
 and their average, three default spectra and a 4 096-point one, a 1/3-octave RTA, two SPL
-meters with band meters and the input meters is ≈ 2.7 Mbit/s at 30 fps and ≈ 3.2 Mbit/s at
-60 fps (9.3 Mbit/s at 60 fps with f32 arrays); a pane in its IR view adds `ir` at ≈ 29
-frames/s, ≈ 6.2 Mbit/s in all. Encoding and decoding a `tf` frame take ≈ 37
+meters with band meters and the input meters is ≈ 2.1 Mbit/s at 30 fps and ≈ 2.2 Mbit/s at
+60 fps (9.3 Mbit/s at 60 fps with f32 arrays, 3.2 with keyframes only); a pane in its IR
+view adds `ir` at ≈ 29 frames/s, ≈ 4.6 Mbit/s in all. Encoding and decoding a `tf` frame take ≈ 37
 and 17 µs on a desktop core.
 
 ## 6. Grids
