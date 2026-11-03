@@ -27,6 +27,22 @@ pub(super) struct Daemons {
     at_exit: Option<spawn::AtExit>,
     /// Why `--smoke` fails, when a daemon did not start or was refused.
     pub(super) smoke_failure: Option<String>,
+    /// The `ac2d` to start in place of the one beside the app ([`App::use_ac2d`]).
+    exe: Option<std::path::PathBuf>,
+}
+
+/// An app dropped without closing its window (a test harness, a panic unwinding) still
+/// stops what it owns and waits for it: a child left running would hold its executable and
+/// its sockets past the app.
+impl Drop for Daemons {
+    fn drop(&mut self) {
+        let owned: Vec<Spawned> = std::mem::take(&mut self.children)
+            .into_iter()
+            .map(|c| c.child)
+            .filter(Spawned::owned)
+            .collect();
+        spawn::stop_all(owned);
+    }
 }
 
 #[derive(Debug)]
@@ -46,10 +62,9 @@ struct Wanted {
 
 impl Daemons {
     pub(super) fn new(at_exit: Option<spawn::AtExit>) -> Self {
-        Self {
-            at_exit,
-            ..Self::default()
-        }
+        let mut d = Self::default();
+        d.at_exit = at_exit;
+        d
     }
 
     /// The owned child of the rig in `slot`, given up to be stopped after its link. A
@@ -78,6 +93,19 @@ impl Daemons {
 }
 
 impl App {
+    /// Starts `exe` wherever the app would start the `ac2d` beside it: for a test whose own
+    /// binary has no `ac2d` beside it.
+    pub fn use_ac2d(&mut self, exe: std::path::PathBuf) {
+        self.daemons.exe = Some(exe);
+    }
+
+    fn ac2d(&self) -> Result<std::path::PathBuf, String> {
+        match &self.daemons.exe {
+            Some(p) => Ok(p.clone()),
+            None => spawn::find_ac2d(),
+        }
+    }
+
     fn client_name(&self) -> String {
         self.connect_setup
             .as_ref()
@@ -94,7 +122,7 @@ impl App {
     ) -> Result<Target, String> {
         let prefs = self.state.prefs.daemon;
         if prefs.start_local {
-            let exe = spawn::find_ac2d()?;
+            let exe = self.ac2d()?;
             let owned = prefs.stop_on_quit || spawn::stop_forced();
             let child = spawn::spawn_local(&exe, backend, owned)?;
             self.daemons.children.push(Watched {
@@ -127,7 +155,7 @@ impl App {
         {
             return Err("Simulated rig is already a rig here".into());
         }
-        let exe = spawn::find_ac2d()?;
+        let exe = self.ac2d()?;
         let (child, endpoints) = spawn::spawn_simulated(&exe)?;
         let config = ClientConfig::new(endpoints, self.client_name());
         if let Err(e) = crate::sim::set_up_demo(config.clone()) {

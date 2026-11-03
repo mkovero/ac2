@@ -28,30 +28,33 @@ fn have_gpu(test: &str) -> bool {
     }
 }
 
-/// The `ac2d` the app finds beside its executable, put beside this test binary: the build's
-/// own (`target/<profile>/ac2d`, a level above the test binaries). `false` when it was not
-/// built.
-fn ac2d_beside_the_test(test: &str) -> bool {
+/// The build's own `ac2d` (`target/<profile>/ac2d`, a level above the test binaries), which
+/// the app is told to start in place of the one beside it. Run where it was built, never
+/// copied: a copy beside the test binary would be written while another run's `ac2d` may
+/// still run from it, which Windows refuses. `None` when it was not built.
+fn built_ac2d(test: &str) -> Option<std::path::PathBuf> {
     let exe = std::env::current_exe().unwrap_or_else(|e| panic!("{e}"));
     let name = ac2_ui::spawn::exe_name();
     let built = exe
         .parent()
         .and_then(|deps| deps.parent())
-        .map(|profile| profile.join(&name));
-    let Some(built) = built.filter(|p| p.is_file()) else {
+        .map(|profile| profile.join(&name))
+        .filter(|p| p.is_file());
+    if built.is_none() {
         eprintln!("SKIP {test}: no {name} built (cargo build -p ac2d)");
-        return false;
-    };
-    std::fs::copy(&built, ac2_ui::spawn::beside(&exe)).unwrap_or_else(|e| panic!("{e}"));
-    true
+    }
+    built
 }
 
 #[test]
 fn the_simulated_rig_is_an_ac2d_the_app_starts() {
     let test = "the_simulated_rig_is_an_ac2d_the_app_starts";
-    if !have_gpu(test) || !ac2d_beside_the_test(test) {
+    if !have_gpu(test) {
         return;
     }
+    let Some(ac2d) = built_ac2d(test) else {
+        return;
+    };
     let tmp = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
     let d = ConnectDialog::new(KeyDir::new(tmp.path()), "ac2-e2e test", false, None);
     let opts = AppOptions {
@@ -81,6 +84,7 @@ fn the_simulated_rig_is_an_ac2d_the_app_starts() {
         .build_eframe(move |cc| {
             let mut app = App::new(cc, opts);
             app.health_measured = false;
+            app.use_ac2d(ac2d);
             if let Some(d) = dialog.take() {
                 app.open_connect(d);
             }
@@ -118,4 +122,7 @@ fn the_simulated_rig_is_an_ac2d_the_app_starts() {
     // Another rig each run: never remembered.
     assert_eq!(app.state.rig.addr, None);
     assert!(app.state.rig.quit_loses);
+    // The app goes without its window closing: the ac2d it owns still stops, and is waited
+    // for, before the harness is gone.
+    drop(h);
 }
