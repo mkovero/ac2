@@ -171,9 +171,121 @@ impl FromStr for RemoteAddr {
     }
 }
 
+/// The endpoints file the daemon holding the instance lock writes beside it in
+/// [`runtime_dir`] (`ac2d::instance::endpoints_file`): a starter whose `ac2d` exited because
+/// another runs finds that one here, wherever it listens.
+pub fn endpoints_file() -> PathBuf {
+    runtime_dir().join("ac2d.endpoints")
+}
+
+/// The line `ac2d --print-endpoints` prints and the endpoints file starts with.
+const LISTENING: &str = "ac2d: listening ctrl=";
+
+/// The endpoints of an `ac2d: listening ctrl=… data=…` line, as bound.
+pub fn parse_listening(line: &str) -> Option<Endpoints> {
+    let (ctrl, data) = line
+        .trim_end()
+        .strip_prefix(LISTENING)?
+        .split_once(" data=")?;
+    (!ctrl.is_empty() && !data.is_empty() && !data.contains(' ')).then(|| Endpoints {
+        ctrl: ctrl.to_owned(),
+        data: data.to_owned(),
+    })
+}
+
+/// The daemon holding the instance lock, as its endpoints file says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LockHolder {
+    /// It serves without authentication (ipc or loopback): reachable as is, its endpoints
+    /// made dialable ([`Endpoints::dialable`]).
+    Local(Endpoints),
+    /// It serves with CURVE: a client needs its pinned key, so it is a network rig.
+    Network(Endpoints),
+}
+
+impl LockHolder {
+    /// The endpoints file's text (see [`endpoints_file`]); `None` when it is not one.
+    pub fn parse(text: &str) -> Option<Self> {
+        let mut lines = text.lines();
+        let ep = parse_listening(lines.next()?)?.dialable();
+        match lines.next()?.trim_end() {
+            "mode=local" => Some(Self::Local(ep)),
+            "mode=network" => Some(Self::Network(ep)),
+            _ => None,
+        }
+    }
+
+    /// Reads [`endpoints_file`]; `None` while there is none (the holder is still binding)
+    /// or it does not parse.
+    pub fn read() -> Option<Self> {
+        Self::parse(&std::fs::read_to_string(endpoints_file()).ok()?)
+    }
+}
+
+impl Endpoints {
+    /// Endpoints a client can connect to: a wildcard bind (`tcp://0.0.0.0:P`, `tcp://[::]:P`,
+    /// `tcp://*:P`) names no address to dial, so it is reached on loopback.
+    pub fn dialable(self) -> Self {
+        let dial = |ep: String| {
+            for (any, lo) in [
+                ("tcp://0.0.0.0:", "tcp://127.0.0.1:"),
+                ("tcp://*:", "tcp://127.0.0.1:"),
+                ("tcp://[::]:", "tcp://[::1]:"),
+            ] {
+                if let Some(port) = ep.strip_prefix(any) {
+                    return format!("{lo}{port}");
+                }
+            }
+            ep
+        };
+        Self {
+            ctrl: dial(self.ctrl),
+            data: dial(self.data),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_lock_holders_endpoints_file() {
+        let ep = |c: &str, d: &str| Endpoints {
+            ctrl: c.into(),
+            data: d.into(),
+        };
+        assert_eq!(
+            LockHolder::parse(
+                "ac2d: listening ctrl=ipc:///run/ac2/ctrl.sock data=ipc:///run/ac2/data.sock\nmode=local\n"
+            ),
+            Some(LockHolder::Local(ep(
+                "ipc:///run/ac2/ctrl.sock",
+                "ipc:///run/ac2/data.sock"
+            )))
+        );
+        assert_eq!(
+            LockHolder::parse(
+                "ac2d: listening ctrl=tcp://0.0.0.0:47820 data=tcp://0.0.0.0:47821\nmode=network\n"
+            ),
+            Some(LockHolder::Network(ep(
+                "tcp://127.0.0.1:47820",
+                "tcp://127.0.0.1:47821"
+            )))
+        );
+        assert_eq!(
+            parse_listening("ac2d: listening ctrl=tcp://[::]:5 data=tcp://[::]:6")
+                .map(Endpoints::dialable),
+            Some(ep("tcp://[::1]:5", "tcp://[::1]:6"))
+        );
+        // Torn or foreign text names no daemon.
+        assert_eq!(
+            LockHolder::parse("ac2d: listening ctrl=tcp://1.2.3.4:5\n"),
+            None
+        );
+        assert_eq!(LockHolder::parse("ac2d: listening ctrl=a data=b\n"), None);
+        assert_eq!(LockHolder::parse("mode=local\n"), None);
+    }
 
     #[test]
     fn firewall_hint_only_for_other_hosts() {

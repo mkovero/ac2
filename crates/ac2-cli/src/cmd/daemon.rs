@@ -140,23 +140,13 @@ pub(crate) async fn status(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError>
 /// lock (`ac2d::instance::exit::ANOTHER_RUNNING`).
 const EXIT_ANOTHER_RUNNING: i32 = 3;
 
-/// Where the lock holder says it listens (`ac2d::instance::endpoints_file`).
-fn endpoints_file() -> PathBuf {
-    ac2_client::endpoint::runtime_dir().join("ac2d.endpoints")
-}
-
 /// The lock holder's ctrl endpoint when it serves in network mode, which the default
 /// local target never reaches.
 fn network_winner() -> Option<String> {
-    let text = std::fs::read_to_string(endpoints_file()).ok()?;
-    let mut lines = text.lines();
-    let ctrl = lines
-        .next()?
-        .strip_prefix("ac2d: listening ctrl=")?
-        .split(' ')
-        .next()?
-        .to_owned();
-    (lines.next()? == "mode=network").then_some(ctrl)
+    match ac2_client::endpoint::LockHolder::read()? {
+        ac2_client::endpoint::LockHolder::Network(ep) => Some(ep.ctrl),
+        ac2_client::endpoint::LockHolder::Local(_) => None,
+    }
 }
 
 /// A quick probe: hello with a short deadline. Only an answer counts: a `ctrl.sock` left
@@ -379,7 +369,18 @@ mod tests {
             EXIT_ANOTHER_RUNNING,
             i32::from(ac2d::instance::exit::ANOTHER_RUNNING)
         );
-        assert_eq!(endpoints_file(), ac2d::instance::endpoints_file());
+        assert_eq!(
+            ac2_client::endpoint::endpoints_file(),
+            ac2d::instance::endpoints_file()
+        );
+        // The app and this CLI read the line the daemon writes.
+        assert_eq!(
+            ac2_client::endpoint::parse_listening(&ac2d::instance::listening_line("a", "b")),
+            Some(ac2_client::Endpoints {
+                ctrl: "a".into(),
+                data: "b".into()
+            })
+        );
     }
 
     #[test]
