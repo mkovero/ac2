@@ -483,9 +483,12 @@ fn ephemeral_writes_nothing_but_its_log() {
 }
 
 /// A hard kill at instants around the debounced write (traces first, then the manifest
-/// renamed into place) leaves an autosave that loads, with at least the edits of the write
-/// before. The write takes milliseconds, so the kills sample the window rather than
-/// promise to land inside it.
+/// renamed into place) leaves an autosave the next daemon restores, with at least the edits
+/// of the write before. Between the current manifest becoming the previous one and the new
+/// one landing there is no current manifest, and the restore takes the previous; so the
+/// check is what a restart restores, not a read of the current manifest alone. The write
+/// takes milliseconds, so the kills sample the window rather than promise to land inside
+/// it.
 #[test]
 fn slow_a_kill_around_the_autosave_write_leaves_a_loadable_autosave() {
     for offset_ms in [0u64, 5, 10, 20, 40] {
@@ -502,12 +505,21 @@ fn slow_a_kill_around_the_autosave_write_leaves_a_loadable_autosave() {
         }
         std::thread::sleep(DEBOUNCE + Duration::from_millis(offset_ms));
         d.kill();
-        let saved = ac2_traces::session::load(&home.autosave())
-            .unwrap_or_else(|e| panic!("killed {offset_ms} ms into the write: {e}"));
+        drop(c);
+        let mut p = home.ac2d_with_stores();
+        p.args(["--ctrl", ANY_PORT, "--data", ANY_PORT]);
+        let (_next, ctrl, _) = Daemon::spawn_printing(p);
+        let mut c = Client::connect(&Context::new().unwrap(), &ctrl);
+        let ReplyBody::Snapshot(snap) = c.ok(Command::StateSnapshot) else {
+            panic!("no snapshot");
+        };
+        // A cut write is not damage: nothing is set aside.
+        let damaged = &snap.state.rig.damaged_files;
+        assert!(damaged.is_empty(), "killed {offset_ms} ms in: {damaged:?}");
+        let traces = snap.state.traces.len();
         assert!(
-            matches!(saved.traces.len(), 1 | 5),
-            "killed {offset_ms} ms into the write: {} traces",
-            saved.traces.len()
+            matches!(traces, 1 | 5),
+            "killed {offset_ms} ms into the write: {traces} traces restored"
         );
     }
 }
