@@ -57,6 +57,7 @@ impl eframe::App for App {
             dt_s: dt,
         });
         self.pump_link();
+        self.watch_daemons(&ctx);
         // Ages keep counting between the link's snapshots.
         let now = Instant::now();
         let daemon_health = self
@@ -65,8 +66,7 @@ impl eframe::App for App {
             .mirror
             .as_ref()
             .and_then(|m| m.health.as_ref());
-        let remote_host = daemon_health
-            .is_some_and(|h| !self.state.rig.link_embedded && h.host != self.health.local_host());
+        let remote_host = daemon_health.is_some_and(|h| h.host != self.health.local_host());
         let xruns = daemon_health.and_then(|h| h.audio).map(|a| a.xruns);
         if self.health_measured {
             self.health.frame(now, remote_host);
@@ -102,8 +102,8 @@ impl eframe::App for App {
                 }
             });
         }
-        // The window's close button: with unsaved changes on an embedded daemon the
-        // question comes first.
+        // The window's close button: with unsaved changes on a daemon the app stops and that
+        // keeps nothing (the simulated rig), the question comes first.
         if ctx.input(|i| i.viewport().close_requested()) && !self.state.close_requested() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         }
@@ -227,7 +227,10 @@ impl App {
     /// `--smoke`: prints every device of the daemon's list once it arrives and quits, or
     /// gives up after [`SMOKE_LIMIT`]. The last line says which.
     fn smoke_step(&mut self, ctx: &egui::Context) {
-        let done = if let Some(backends) = &self.state.rig.devices {
+        let done = if let Some(e) = self.daemons.smoke_failure.take() {
+            println!("smoke: failed: {e}");
+            true
+        } else if let Some(backends) = &self.state.rig.devices {
             for b in backends {
                 for d in &b.devices {
                     println!(

@@ -826,11 +826,6 @@ fn rigs_round_trip() {
                 },
             },
             RememberedRig {
-                id: RigId(0x7e57),
-                name: "laptop".into(),
-                addr: RigAddr::Embedded("jack".into()),
-            },
-            RememberedRig {
                 id: RigId(0x1),
                 name: "local".into(),
                 addr: RigAddr::Local,
@@ -852,4 +847,52 @@ fn rigs_round_trip() {
     assert_eq!(UiPrefs::from_toml(&text).expect("parses"), p);
     let bad = "[[rigs]]\nid = \"0000000000000000\"\nname = \"x\"\nreach = \"local\"\n";
     assert!(UiPrefs::from_toml(bad).expect("parses").rigs.is_empty());
+}
+
+/// A rig the app hosted itself is dropped, and said so; a damaged entry costs only itself,
+/// and the rest of the file (the other rigs, the theme) stays.
+#[test]
+fn a_rig_inside_the_app_is_dropped_entry_by_entry() {
+    let text = "theme = \"light\"\n\
+        [[rigs]]\nid = \"0000000000007e57\"\nname = \"laptop\"\nreach = \"embedded\"\nbackend = \"jack\"\n\
+        [[rigs]]\nid = \"0000000000000002\"\nname = \"bad\"\nreach = \"network\"\n\
+        [[rigs]]\nid = \"0000000000000001\"\nname = \"local\"\nreach = \"local\"\n";
+    let p = UiPrefs::from_toml(text).expect("parses");
+    assert!(p.app_daemon_dropped);
+    assert_eq!(p.theme, Some(ac2_scene::theme::ThemeName::Light));
+    assert_eq!(
+        p.rigs,
+        [RememberedRig {
+            id: RigId(0x1),
+            name: "local".into(),
+            addr: RigAddr::Local,
+        }]
+    );
+    let saved = p.to_toml();
+    assert!(!saved.contains("embedded"), "{saved}");
+    assert!(
+        !UiPrefs::from_toml(&saved)
+            .expect("parses")
+            .app_daemon_dropped
+    );
+}
+
+/// Starting and stopping `ac2d` are on unless turned off, and only an off one is written.
+#[test]
+fn daemon_choices_round_trip() {
+    assert_eq!(UiPrefs::default().daemon, DaemonPrefs::default());
+    assert!(!UiPrefs::default().to_toml().contains("[daemon]"));
+    for (start_local, stop_on_quit) in [(false, true), (true, false), (false, false)] {
+        let p = UiPrefs {
+            daemon: DaemonPrefs {
+                start_local,
+                stop_on_quit,
+            },
+            ..UiPrefs::default()
+        };
+        let text = p.to_toml();
+        assert!(text.contains("[daemon]"), "{text}");
+        assert!(!text.contains("= true"), "{text}");
+        assert_eq!(UiPrefs::from_toml(&text).expect("parses"), p);
+    }
 }

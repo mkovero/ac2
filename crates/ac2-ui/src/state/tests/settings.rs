@@ -473,7 +473,7 @@ fn connection_page_asks_the_daemon_authorizes_and_revokes() {
         result: Ok(info.clone()),
     });
     let lines = settings(&t).connection.lines();
-    assert_eq!(lines[2], ConnLine::Authorized("laptop".into()));
+    assert_eq!(lines[4], ConnLine::Authorized("laptop".into()));
     // Enter on Reconnect; Enter on Connect… asks the app for the connect dialog.
     assert!(
         t.key("Enter")
@@ -483,6 +483,19 @@ fn connection_page_asks_the_daemon_authorizes_and_revokes() {
     t.key("Down");
     t.key("Enter");
     assert!(t.st.want_connect_dialog);
+    // The ac2d rows flip with the arrows, saved with the prefs.
+    t.key("Down");
+    assert!(t.st.prefs.daemon.start_local);
+    t.key("Right");
+    assert!(!t.st.prefs.daemon.start_local);
+    assert!(t.st.prefs_dirty);
+    t.key("Left");
+    assert!(t.st.prefs.daemon.start_local);
+    t.key("Down");
+    if !crate::spawn::stop_forced() {
+        t.key("Enter");
+        assert!(!t.st.prefs.daemon.stop_on_quit);
+    }
     // Delete twice revokes the focused client.
     t.key("Down");
     assert!(t.key("Delete").is_empty());

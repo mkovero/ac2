@@ -52,6 +52,7 @@ use crate::settings::{FocusWant, Page, Settings};
 mod display;
 pub use display::{ChoicePrompt, ChoicePurpose, DeletePrompt, DeleteTarget, MoveWhat};
 pub use panes::levels::{LEVEL_ZOOM_FACTOR, PaneLevels};
+mod settings_conn;
 mod settings_impl;
 pub use settings_impl::SettingsMsg;
 mod ir_nav;
@@ -209,8 +210,7 @@ pub struct AppState {
     /// Local time of day for wall times.
     pub local_zone: crate::scenes::LocalZone,
     /// This machine's host name ([`ac2_discovery::local_host_label`]), naming the rigs on it:
-    /// a local `ac2d` and the daemon in this app are two rigs on one host, and read so.
-    /// Empty (tests): they go by their daemons' names.
+    /// this computer's `ac2d` reads as the host. Empty (tests): it goes by its daemon's name.
     pub local_host: String,
     /// This app's build as Settings › Connection shows it ([`crate::BUILD_ID`]; screenshot
     /// tests pin it, since it names the commit).
@@ -573,7 +573,7 @@ impl AppState {
     }
 
     /// Something failed: a command, the link, the stimulus.
-    fn fault(&mut self, text: impl Into<String>) {
+    pub fn fault(&mut self, text: impl Into<String>) {
         self.notify(Severity::Fault, text.into(), Muted::Never);
     }
 

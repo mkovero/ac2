@@ -116,7 +116,7 @@ pub(crate) struct RigStore {
 }
 
 impl RigStore {
-    /// Settings kept in memory only (tests, embedded daemons without a config directory).
+    /// Settings kept in memory only (tests, ephemeral daemons).
     pub(crate) fn memory() -> Self {
         Self {
             path: None,

@@ -10,7 +10,7 @@ use ac2_proto::units::RigId;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RigRoot<'a> {
     pub rig: RigId,
-    /// As the drop-down names it: `pupu`, `ketunkolo · ac2d`, `ketunkolo · in this app`.
+    /// As the drop-down names it: `pupu`, `ketunkolo`.
     pub name: &'a str,
     /// The rig the drop-down shows, where new measurements and the keys go.
     pub shown: bool,
@@ -109,10 +109,7 @@ mod tests {
     fn each_rig_is_a_root_and_a_folded_one_says_what_it_hides() {
         let r = rig();
         let none = BTreeSet::new();
-        let mut list = rig_branch(
-            &root("ketunkolo · ac2d", true, false),
-            rows(&r, &none, None, None),
-        );
+        let mut list = rig_branch(&root("ketunkolo", true, false), rows(&r, &none, None, None));
         list.extend(rig_branch(
             &root("pupu", false, true),
             rows(&r, &none, None, None),
@@ -120,7 +117,7 @@ mod tests {
         assert_eq!(
             text(&list),
             [
-                "▾ ketunkolo · ac2d · shown: new measurements and the keys go here",
+                "▾ ketunkolo · shown: new measurements and the keys go here",
                 "  ▾ TF  Main L · running",
                 "    ├ Main L (live) · live",
                 "    ├ pre-EQ · capture",

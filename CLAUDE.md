@@ -44,7 +44,8 @@ app runs). Profiles in `.config/nextest.toml`:
 | `ac2-paths` | platform config / data dirs, atomic writes (daemon and UI) |
 | `ac2-scene` | pure display truth: every displayed number/string, tested headless |
 | `ac2-plot` | wgpu renderer for scenes; places pixels, never computes values |
-| `ac2-ui` | desktop app (`ac2-ui` binary): reducer, scoped key table, dialogs, can host an embedded daemon; its own code uses no DSP (`tests/it/no_dsp.rs`) |
+| `ac2-ui` | desktop app (`ac2-ui` binary): reducer, scoped key table, dialogs; starts the `ac2d` beside it (`spawn.rs`), links no daemon or audio crate; its own code uses no DSP (`tests/it/no_dsp.rs`) |
+| `ac2-e2e` | tests only: the app driven against an in-process fake-backend `ac2d` (`sim_daemon`), and the simulated rig spawned from the built `ac2d` |
 | `ac2-testkit` | golden vectors from `tools/refgen`, tolerance compare; golden images (feature `image`) |
 | `packaging/` | per-OS packaging scripts and icon, run by `.github/workflows/release.yml` |
 | `testing/` | per-platform tester guides; release binaries beside them are git-ignored |
@@ -77,8 +78,8 @@ What an agent reads stays in its context for the rest of the session; keep reads
 - Iterate with `cargo nextest run -p <crate> <filter>`; quick tier before commit/push (see *Tests*).
   Long commands run in the background (notified on exit) — no `until`/`sleep` polling loops.
 - UI changes: assert the `ac2-scene` text first; view a snapshot PNG only for the final look.
-- UI-only tests without the daemon (no ac2d/DSP/audio build):
-  `cargo nextest run -p ac2-ui --no-default-features -E 'test(/^ui::/)'`.
+- UI-only tests (`ac2-ui` builds no ac2d/audio; e2e tests with a daemon are `-p ac2-e2e`):
+  `cargo nextest run -p ac2-ui -E 'test(/^ui::/)'`.
 - Delegation: one task per agent with the files and functions named in the brief; the agent
   ends when the task is done. Unrelated follow-ups go to a fresh agent, not via SendMessage.
 

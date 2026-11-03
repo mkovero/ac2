@@ -18,7 +18,6 @@ fn on_pupu(pupu: &common::Rig, keys: &std::path::Path) -> Harness<'static, App> 
     opts.connect = Some(ac2_ui::app::ConnectSetup {
         key_dir: keys.to_path_buf(),
         client_name: "ac2-ui test".into(),
-        backends: vec![],
         discovery: false,
     });
     let mut h = harness(opts);

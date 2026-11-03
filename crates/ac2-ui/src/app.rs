@@ -14,7 +14,6 @@ use ac2_proto::topic::Topic;
 
 use crate::conn::{Conn, Target};
 use crate::connect::{Choice, ConnectDialog};
-use crate::embedded::{Embedded, EmbeddedBackend, start_embedded};
 use crate::keys::{Chord, Keymap};
 use crate::state::{AppState, Msg, Overlay, PaneKind};
 use crate::{theme, view};
@@ -25,6 +24,12 @@ pub struct AppOptions {
     pub target: Option<Target>,
     /// Where `target` is, to remember the rig it reaches (`None`: not remembered).
     pub target_addr: Option<crate::prefs::RigAddr>,
+    /// The first rig, when not `target`: this computer's `ac2d` (started if none serves) or
+    /// the simulated rig.
+    pub start: Option<Choice>,
+    /// Where the `ac2d` children still running go when the window closes, stopped by the
+    /// caller after the window is gone; `None`: stopped as the window closes.
+    pub at_exit: Option<crate::spawn::AtExit>,
     pub theme: ThemeName,
     pub keymap: Keymap,
     /// Where the keymap came from, for the help overlay.
@@ -33,7 +38,7 @@ pub struct AppOptions {
     pub prefs: crate::prefs::UiPrefs,
     /// Where changed preferences are saved; `None` keeps them in memory (tests).
     pub prefs_path: Option<std::path::PathBuf>,
-    /// Shown once as an error toast (bad `keys.toml`, embedded daemon unavailable…).
+    /// Shown once as an error toast (bad `keys.toml`, …).
     pub notices: Vec<String>,
     /// Process start, for the startup measurement.
     pub started: Instant,
@@ -41,12 +46,9 @@ pub struct AppOptions {
     pub bench_startup: bool,
     /// Print the daemon's device list once it arrives and quit (`--smoke`).
     pub smoke: bool,
-    /// Open the Sessions dialog once connected if the daemon has no audio I/O (an
-    /// embedded daemon on real audio starts without one); its New leads to the audio setup.
+    /// Open the Sessions dialog once connected if the daemon has no audio I/O (one just
+    /// started has none); its New leads to the audio setup.
     pub open_session_dialog: bool,
-    /// The app hosts its daemon (`Some(true)`: that daemon autosaves): quitting with
-    /// unsaved changes asks first.
-    pub embedded_autosave: Option<bool>,
     /// This client's key, shown on the Connection page of Settings.
     pub client_key: Option<crate::settings::ClientKey>,
     /// What the connect dialog needs, so Settings can open it again; `None`: it cannot.
@@ -62,7 +64,6 @@ pub struct AppOptions {
 pub struct ConnectSetup {
     pub key_dir: std::path::PathBuf,
     pub client_name: String,
-    pub backends: Vec<EmbeddedBackend>,
     /// Browse the network for rigs.
     pub discovery: bool,
 }
@@ -74,7 +75,6 @@ impl ConnectSetup {
         ConnectDialog::new(
             ac2_client::KeyDir::new(self.key_dir.clone()),
             self.client_name.clone(),
-            self.backends.clone(),
             crate::connect::local_daemon_running(),
             self.discovery.then_some(&mdns),
         )
@@ -200,9 +200,8 @@ pub struct App {
     passes: u64,
     /// The connect dialog, while open: the app has no link until the operator picks one.
     connect: Option<ConnectDialog>,
-    /// A daemon hosted in this process, chosen in the connect dialog. Declared after `state`,
-    /// which holds the links, so a link (and the stimulus it may hold) goes first.
-    embedded: Option<Embedded>,
+    /// The `ac2d` processes this app started.
+    daemons: daemons::Daemons,
     /// The window's size and position as last seen in a normal (not full-screen, not
     /// maximised) state: saved with the preferences on exit.
     window: Option<crate::prefs::WindowPrefs>,
@@ -218,8 +217,6 @@ pub struct App {
     /// off and feed [`App::health`] figures at chosen instants: measured ones move run to
     /// run.
     pub health_measured: bool,
-    /// The rig whose link reaches `embedded`.
-    embedded_slot: Option<u32>,
     /// Where the top bar's rigs drop-down was last drawn: its list opens under it.
     pub(crate) rig_menu_at: Option<egui::Rect>,
     /// Messages sent while a pane of a rig in the background is drawn (with that rig swapped
@@ -264,9 +261,8 @@ impl App {
             .as_ref()
             .map_or_else(|| "no daemon".to_string(), |t| t.describe.clone());
         let health = crate::health::LocalHealth::new();
-        let link_embedded = opts.target.as_ref().is_some_and(embedded_target);
         let daemon_addr = opts.target.as_ref().and_then(network_host);
-        let started_target = opts.target.is_some();
+        let started_target = opts.target.is_some() || opts.start.is_some();
         let conn = opts.target.and_then(|mut t| {
             t.config.received_bytes = Arc::clone(&health.received);
             Conn::start(t, link_wake(ctx.clone(), Arc::clone(&pacer))).ok()
@@ -274,14 +270,14 @@ impl App {
         let mut state = AppState::new(opts.theme, describe);
         state.local_host = ac2_discovery::local_host_label();
         state.rig.link = conn;
-        state.rig.link_embedded = link_embedded;
         state.rig.daemon_addr = daemon_addr;
-        let target_addr = opts.target_addr.clone();
+        let target_addr = opts.target_addr.clone().or_else(|| {
+            matches!(opts.start, Some(Choice::Local { .. })).then_some(crate::prefs::RigAddr::Local)
+        });
         state.rig.addr = target_addr.clone();
         let remembered = opts.prefs.rigs.clone();
         state.set_prefs(opts.prefs);
         state.rig.open_session_when_empty = opts.open_session_dialog;
-        state.rig.embedded_autosave = opts.embedded_autosave;
         state.client_key = opts.client_key;
         state.update(Msg::Rasterizer(rasterizer), &opts.keymap);
         for n in opts.notices {
@@ -323,14 +319,13 @@ impl App {
             plots,
             passes: 0,
             connect: None,
-            embedded: None,
+            daemons: daemons::Daemons::new(opts.at_exit),
             window: None,
             window_checked: false,
             connect_setup: opts.connect,
             pacer,
             health,
             health_measured: true,
-            embedded_slot: None,
             rig_menu_at: None,
             deferred: Vec::new(),
             in_visit: false,
@@ -338,6 +333,9 @@ impl App {
             marquee: crate::marquee::Marquee::default(),
         };
         app.reconnect(&ctx, remembered, started_target, target_addr.as_ref());
+        if let Some(choice) = opts.start {
+            app.start_first(&ctx, choice);
+        }
         app
     }
 
@@ -397,59 +395,50 @@ impl App {
         ));
     }
 
-    /// Starts the link of the rig in slot `slot` to `choice` (an embedded daemon started
-    /// for it first).
+    /// Starts the link of the rig in slot `slot` to `choice` (this computer's `ac2d` or the
+    /// simulated rig started for it first).
     fn start_rig(&mut self, ctx: &egui::Context, slot: u32, choice: Choice) -> Result<(), String> {
-        let client_name = self
-            .connect_setup
-            .as_ref()
-            .map_or_else(|| "ac2-ui".to_owned(), |c| c.client_name.clone());
-        let (mut target, addr, embedded) = match choice {
-            Choice::Target(t, addr) => (*t, addr, None),
-            Choice::Embedded(b) => {
-                if self.embedded.is_some() {
-                    return Err(format!(
-                        "{} is already a rig here",
-                        ac2_scene::chrome::same_host_rig(&self.state.local_host, true)
-                    ));
-                }
-                let e = start_embedded(b).map_err(|e| format!("embedded daemon: {e}"))?;
-                let t = Target {
-                    config: e.client_config(client_name),
-                    describe: e.describe(),
-                };
-                // The simulated rig is another rig each run: never remembered.
-                let addr = (b != EmbeddedBackend::Fake)
-                    .then(|| crate::prefs::RigAddr::Embedded(b.name().to_owned()));
-                (t, addr, Some((e, b)))
-            }
+        let (mut target, addr, simulated) = match choice {
+            Choice::Target(t, addr) => (*t, addr, false),
+            Choice::Local { backend } => (
+                self.start_local(slot, backend)?,
+                Some(crate::prefs::RigAddr::Local),
+                false,
+            ),
+            // Another rig each run: never remembered.
+            Choice::Simulated => (self.start_simulated(slot)?, None, true),
         };
         target.config.received_bytes = Arc::clone(&self.health.received);
-        let link_embedded = embedded_target(&target);
         let daemon_addr = network_host(&target);
         let describe = target.describe.clone();
         let c = Conn::start(target, link_wake(ctx.clone(), Arc::clone(&self.pacer)))
             .map_err(|e| format!("link thread: {e}"))?;
-        let fake = embedded
-            .as_ref()
-            .is_some_and(|(_, b)| *b == EmbeddedBackend::Fake);
         let Some(r) = self.state.rig_in_slot_mut(slot) else {
             return Ok(());
         };
         r.link = Some(c);
-        r.link_embedded = link_embedded;
         r.daemon_addr = daemon_addr;
         r.addr = addr;
         r.conn = crate::state::ConnState::Connecting { target: describe };
         // A daemon without audio I/O: the audio setup once. The simulated rig is already
-        // measuring.
-        r.open_session_when_empty = !fake;
-        if let Some((e, _)) = embedded {
-            r.embedded_autosave = Some(e.autosaves());
-            self.embedded = Some(e);
-            self.embedded_slot = Some(slot);
-        }
+        // measuring, and keeps nothing once the app stops it.
+        r.open_session_when_empty = !simulated;
+        r.quit_loses = simulated;
         Ok(())
+    }
+
+    /// The first rig (`AppOptions::start`): one that cannot start opens the connect dialog
+    /// with the reason, never a silent switch to another daemon.
+    fn start_first(&mut self, ctx: &egui::Context, choice: Choice) {
+        let slot = if self.state.rig.link.is_none() {
+            self.state.rig.slot
+        } else {
+            self.state.add_rig(String::new(), None, None)
+        };
+        if let Err(e) = self.start_rig(ctx, slot, choice) {
+            tracing::error!("ac2-ui: {e}");
+            self.daemon_failed(slot, e);
+        }
     }
 
     /// Follows the window's geometry, and once, makes a restored window fit its screen
@@ -515,7 +504,7 @@ impl App {
         if self.connect.is_none() {
             return;
         }
-        let fake = matches!(choice, Choice::Embedded(EmbeddedBackend::Fake));
+        let fake = matches!(choice, Choice::Simulated);
         let first = self.state.rigs().all(|r| r.link.is_none());
         let slot = if first {
             self.state.rig.slot
@@ -646,21 +635,18 @@ impl App {
 
     /// Closes the links of the rigs the reducer closed, each on its own thread: the link
     /// stops the stimulus it holds and releases its lease (within [`crate::conn::QUIT_GRACE`])
-    /// while the window goes on. An embedded daemon goes after its link.
+    /// while the window goes on. An `ac2d` the app owns for the rig stops after its link.
     fn close_rigs(&mut self) {
         for mut r in std::mem::take(&mut self.state.closing) {
-            let embedded = (self.embedded_slot == Some(r.slot))
-                .then(|| {
-                    self.embedded_slot = None;
-                    self.embedded.take()
-                })
-                .flatten();
+            let daemon = self.daemons.release(r.slot);
             let link = r.link.take();
             self.closers.push(std::thread::spawn(move || {
                 if let Some(c) = link {
                     c.close();
                 }
-                drop(embedded);
+                if let Some(d) = daemon {
+                    d.release().finish_in_time();
+                }
             }));
         }
         self.closers.retain(|t| !t.is_finished());
@@ -690,7 +676,8 @@ impl App {
     }
 
     /// Every link closed at once on the way out, the stimulus each holds stopped in
-    /// parallel within one [`crate::conn::QUIT_GRACE`]; then the embedded daemon.
+    /// parallel within one [`crate::conn::QUIT_GRACE`]; then the `ac2d` children the app
+    /// owns, handed over to stop once the window is gone.
     pub(crate) fn close_all_links(&mut self) {
         let mut links = Vec::new();
         for slot in self.state.rigs().map(|r| r.slot).collect::<Vec<_>>() {
@@ -702,7 +689,7 @@ impl App {
         for t in self.closers.drain(..) {
             let _ = t.join();
         }
-        self.embedded = None;
+        self.daemons.at_exit();
     }
 
     /// Writes `ui.toml` when a preference changed, at most once per
@@ -924,12 +911,6 @@ fn link_wake(ctx: egui::Context, pacer: Arc<crate::pace::Pacer>) -> crate::conn:
     Arc::new(move || pacer.request(&ctx))
 }
 
-/// Whether `t` reaches a daemon inside this process: an `inproc://` daemon is reachable
-/// only through the context it shares.
-fn embedded_target(t: &Target) -> bool {
-    t.config.context.is_some()
-}
-
 /// The host of `t`'s TCP endpoint (`tcp://host:port`, IPv6 in brackets).
 fn network_host(t: &Target) -> Option<String> {
     let rest = t.config.endpoints.ctrl.strip_prefix("tcp://")?;
@@ -963,6 +944,7 @@ pub(crate) fn install_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
+mod daemons;
 mod frame;
 mod touches;
 use touches::{Touches, data_touches, tick_touches};

@@ -432,9 +432,7 @@ impl AppState {
                 src_name = from.name();
                 Replacing::Open(&src_name)
             }
-            Some(SessionStep::Quit) => Replacing::Quit {
-                kept: self.rig.embedded_autosave == Some(true),
-            },
+            Some(SessionStep::Quit) => Replacing::Quit,
             _ => Replacing::New,
         };
         let q = text::unsaved_question(&w, replacing);
@@ -623,10 +621,10 @@ impl AppState {
         }
     }
 
-    /// Quit (the Quit key, the window's close): with an embedded daemon and unsaved
-    /// changes, asked first.
+    /// Quit (the Quit key, the window's close): with unsaved changes on a daemon the app
+    /// stops and that keeps nothing (the simulated rig), asked first.
     pub(super) fn request_quit(&mut self) {
-        if self.rig.embedded_autosave.is_some() && self.working().dirty {
+        if self.rig.quit_loses && self.working().dirty {
             self.ask_unsaved(vec![SessionStep::Quit]);
         } else {
             self.quit = true;

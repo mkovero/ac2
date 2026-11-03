@@ -40,8 +40,6 @@ pub struct UiFrames {
 pub struct HealthInputs<'a> {
     /// The daemon's figures from its latest keepalive.
     pub daemon: Option<&'a DaemonHealth>,
-    /// The daemon runs inside this process: no network between, and the same host.
-    pub embedded: bool,
     /// This machine's host name.
     pub local_host: &'a str,
     /// The network address the link reaches the daemon at; `None` on a local transport.
@@ -213,7 +211,7 @@ pub fn health_line(i: &HealthInputs) -> Option<HealthLine> {
     let daemon = i.daemon;
     // Two CPU figures only when the daemon runs on another machine: the same host's twice
     // would say the same thing.
-    let remote = daemon.is_some_and(|d| !i.embedded && d.host != i.local_host);
+    let remote = daemon.is_some_and(|d| d.host != i.local_host);
     let local_cpu = i.local_cpu.filter(|_| remote);
 
     if let Some(d) = daemon {
@@ -276,8 +274,6 @@ pub fn health_line(i: &HealthInputs) -> Option<HealthLine> {
                     Some(a) if a != d.host => format!("remote = {} ({a})", d.host),
                     _ => format!("remote = {}", d.host),
                 }
-            } else if i.embedded {
-                format!("{} (this computer, daemon in this app)", d.host)
             } else {
                 format!("{} (this computer)", d.host)
             };
@@ -293,7 +289,7 @@ pub fn health_line(i: &HealthInputs) -> Option<HealthLine> {
         ));
     }
     // Only while the daemon answers: a rate without a link is a zero that says nothing.
-    if let Some(r) = i.received_per_s.filter(|_| !i.embedded && daemon.is_some()) {
+    if let Some(r) = i.received_per_s.filter(|_| daemon.is_some()) {
         let unit = rate_unit(r, i.rate_unit);
         parts.push(HealthPart {
             label: String::new(),
@@ -364,7 +360,6 @@ mod tests {
     fn inputs<'a>(d: Option<&'a DaemonHealth>, local_host: &'a str) -> HealthInputs<'a> {
         HealthInputs {
             daemon: d,
-            embedded: false,
             local_host,
             daemon_addr: None,
             local_cpu: None,
@@ -419,18 +414,9 @@ mod tests {
     }
 
     #[test]
-    fn an_embedded_daemon_shows_one_cpu_and_no_network() {
+    fn a_daemon_on_this_computer_shows_one_cpu() {
         let d = daemon("ketunkolo", Some(0.23), Some(audio(Some(0.14), 2)));
-        let i = HealthInputs {
-            embedded: true,
-            local_cpu: Some(0.41),
-            received_per_s: Some(5e3),
-            ..inputs(Some(&d), "ketunkolo")
-        };
-        let l = health_line(&i).expect("figures");
-        assert_eq!(l.text(), "CPU 23 % · DSP 14 % · 2 xruns");
-        assert!(l.detail.contains("daemon in this app"), "{}", l.detail);
-        // A local daemon on the same host is not counted twice either.
+        // The same host's CPU is not counted twice.
         let i = HealthInputs {
             local_cpu: Some(0.41),
             ..inputs(Some(&d), "ketunkolo")

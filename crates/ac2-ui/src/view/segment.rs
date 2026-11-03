@@ -130,7 +130,6 @@ pub(super) fn health_part(
     let wanted_fps = 1.0 / st.display_period().as_secs_f64();
     let inputs = app.health.inputs(
         daemon,
-        app.state.rig.link_embedded,
         app.state.rig.daemon_addr.as_deref(),
         wanted_fps,
         now,
@@ -277,7 +276,6 @@ mod tests {
         };
         let i = HealthInputs {
             daemon: Some(&d),
-            embedded: false,
             local_host: "ketunkolo",
             daemon_addr: Some("192.168.9.27"),
             local_cpu: Some(local),

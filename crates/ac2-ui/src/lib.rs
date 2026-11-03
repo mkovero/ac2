@@ -25,7 +25,7 @@ pub mod caret;
 pub mod conn;
 pub mod connect;
 pub mod electrical_dialog;
-pub mod embedded;
+
 pub mod eq_editor;
 pub mod forms;
 pub mod gpu;
@@ -48,6 +48,8 @@ pub mod scenes;
 pub mod session_dialog;
 pub mod sessions;
 pub mod settings;
+pub mod sim;
+pub mod spawn;
 pub mod state;
 pub mod target_dialog;
 pub mod theme;

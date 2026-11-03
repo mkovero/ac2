@@ -601,15 +601,12 @@ impl AppState {
     }
 }
 
-/// What a rig is called. A rig on this host is named by the host and how the app reaches
-/// it (`kettu · ac2d`, `kettu · in this app`): its daemon's name cannot tell two daemons on
-/// one machine apart, nor a default name from one given. Any other rig: its daemon's name,
-/// else where it is reached.
+/// What a rig is called. This computer's `ac2d` is named by the host (`kettu`): one runs per
+/// user, and its own name cannot tell a default from one given. Any other rig: its daemon's
+/// name, else where it is reached.
 fn label_of(r: &RigState, host: &str) -> String {
-    let embedded = r.link_embedded || matches!(r.addr, Some(crate::prefs::RigAddr::Embedded(_)));
-    let local = matches!(r.addr, Some(crate::prefs::RigAddr::Local));
-    if !host.is_empty() && (embedded || local) {
-        return ac2_scene::chrome::same_host_rig(host, embedded);
+    if !host.is_empty() && matches!(r.addr, Some(crate::prefs::RigAddr::Local)) {
+        return host.to_owned();
     }
     if !r.name.is_empty() {
         return r.name.clone();

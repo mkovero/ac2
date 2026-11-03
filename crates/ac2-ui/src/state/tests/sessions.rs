@@ -277,9 +277,9 @@ fn an_old_session_offers_its_traces() {
 }
 
 #[test]
-fn quitting_an_embedded_daemon_with_unsaved_changes_asks() {
+fn quitting_the_simulated_rig_with_unsaved_changes_asks() {
     let mut t = with_working(true, named("sat"));
-    t.st.rig.embedded_autosave = Some(true);
+    t.st.rig.quit_loses = true;
     t.key("Ctrl+Q");
     assert!(!t.st.quit);
     let (_, answers) = question(&t);
@@ -291,7 +291,7 @@ fn quitting_an_embedded_daemon_with_unsaved_changes_asks() {
 
     // Save, then quit once saved.
     let mut t = with_working(true, named("sat"));
-    t.st.rig.embedded_autosave = Some(false);
+    t.st.rig.quit_loses = true;
     assert!(!t.st.close_requested());
     let r = t.key("Enter");
     assert_eq!(

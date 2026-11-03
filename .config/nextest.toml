@@ -44,7 +44,7 @@ priority = 50
 # so the only remedy in the test is a second try; nextest reports every retried pass as
 # FLAKY, so a test that needs it often still shows.
 [[profile.default.overrides]]
-filter = "binary_id(ac2-ui::it) & test(/^embedded::/)"
+filter = "binary_id(ac2-e2e::it) & not test(/^connect::/)"
 retries = 1
 
 [profile.full]

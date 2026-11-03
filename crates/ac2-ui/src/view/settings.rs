@@ -9,7 +9,7 @@ use crate::app::App;
 use crate::keys::{Chord, CommandId, LabelStyle, STOP_ANYWHERE};
 use crate::settings::{
     ConnLine, DisplayRow, Page, RecordingRow, Settings, conn_line_text, display_rows, link_lines,
-    recording_rows,
+    recording_rows, start_local_text, stop_on_quit_text,
 };
 use crate::state::{ConnState, Msg, Overlay, SettingsMsg};
 use crate::theme::Chrome;
@@ -460,8 +460,25 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
     };
     ui.add_space(4.0);
     for (i, l) in lines.iter().enumerate() {
-        if matches!(l, ConnLine::Reconnect | ConnLine::ConnectOther) {
-            row(ui, i, conn_line_text(l, info), ch.text);
+        match l {
+            ConnLine::Reconnect | ConnLine::ConnectOther => {
+                row(ui, i, conn_line_text(l, info), ch.text);
+            }
+            ConnLine::StartLocal => {
+                row(
+                    ui,
+                    i,
+                    start_local_text(st.prefs.daemon.start_local),
+                    ch.text,
+                );
+            }
+            ConnLine::StopOnQuit => row(
+                ui,
+                i,
+                stop_on_quit_text(st.prefs.daemon.stop_on_quit, crate::spawn::stop_forced()),
+                ch.text,
+            ),
+            _ => {}
         }
     }
     section(ui, "Server", crate::settings::THE_RIG, ch);

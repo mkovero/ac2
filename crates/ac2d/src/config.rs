@@ -65,7 +65,7 @@ pub struct DaemonConfig {
     pub local_clock: LocalClock,
     /// Tell systemd when the daemon serves, ping its watchdog from the control loop and say
     /// when it stops (`ac2_paths::notify`; nothing without `NOTIFY_SOCKET`). Only the `ac2d`
-    /// program: a daemon embedded in the UI must not ping for the UI's unit.
+    /// program: a daemon run inside another process (a test) must not ping for its unit.
     pub systemd_notify: bool,
 }
 
@@ -121,9 +121,8 @@ pub struct AutosaveConfig {
 /// Where a daemon's [`RigId`](ac2_proto::units::RigId) comes from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RigIdSource {
-    /// Kept in this file (`ac2_paths::rig_id`, or `ac2_paths::app_rig_id` for the app's
-    /// embedded daemon on real audio, so the two on one machine never share an id): made
-    /// if absent, set aside and made anew if unreadable.
+    /// Kept in this file (`ac2_paths::rig_id`): made if absent, set aside and made anew if
+    /// unreadable.
     File(PathBuf),
     /// Random per start: a daemon of which nothing persists (the simulated rig, tests).
     Ephemeral,
@@ -240,8 +239,8 @@ impl Default for DedupLimits {
 /// Transports.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Listen {
-    /// In-process only (`inproc://<name>/ctrl`, `…/data`), for an embedded daemon. Clients
-    /// must use [`crate::Handle::context`].
+    /// In-process only (`inproc://<name>/ctrl`, `…/data`), for a daemon inside a test.
+    /// Clients must use [`crate::Handle::context`].
     Inproc {
         /// Unique name within the process.
         name: String,

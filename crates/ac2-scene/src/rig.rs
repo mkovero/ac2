@@ -132,9 +132,9 @@ pub fn stimulus_outputs(channels: &[u16], labels: &[OutputSetup]) -> String {
 /// How the daemon serves clients, in lines.
 pub fn server_lines(s: &ServerInfo) -> Vec<String> {
     let mut v = match &s.mode {
-        ServerMode::Embedded => vec![
-            "Embedded: the daemon runs inside this app; no other client can connect.".to_owned(),
-        ],
+        ServerMode::Embedded => {
+            vec!["In-process: no client outside its program can connect.".to_owned()]
+        }
         ServerMode::Local { ctrl } => vec![
             format!("Local only: {ctrl}"),
             "Clients on this computer under the same user connect without keys.".to_owned(),
@@ -301,7 +301,7 @@ mod tests {
                 recording_dir: None,
             }),
             vec![
-                "Embedded: the daemon runs inside this app; no other client can connect.",
+                "In-process: no client outside its program can connect.",
                 "Recordings: this daemon does not record",
             ]
         );

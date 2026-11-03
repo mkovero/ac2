@@ -33,7 +33,7 @@ mod connection;
 mod rig;
 pub use connection::{
     ClientKey, ConnAction, ConnEdit, ConnLine, ConnectionPage, SERVER_INFO_EVERY_S, conn_line_text,
-    conn_lines, link_lines,
+    conn_lines, link_lines, start_local_text, stop_on_quit_text,
 };
 pub use rig::{RigPage, RigRow, levels_set};
 
@@ -141,8 +141,8 @@ impl Page {
             Page::Recording => "↑↓ move · type minutes, Enter applies · Esc closes",
             Page::Display => "↑↓ move · ←→ change · Enter resets the level axes · Esc closes",
             Page::Connection => {
-                "↑↓ move · Enter acts on the line · A authorizes a refused key (type its name) · \
-                 Delete revokes a client (twice) · Esc closes"
+                "↑↓ move · Enter acts on the line · ←→ or Enter on the ac2d rows · A authorizes a \
+                 refused key (type its name) · Delete revokes a client (twice) · Esc closes"
             }
             Page::Rig => {
                 "↑↓ Tab move · type a target or a test, ←→ Home End move the caret, Delete \

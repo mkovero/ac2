@@ -55,7 +55,7 @@ pub struct Notifier {
 }
 
 impl Notifier {
-    /// One that never sends (tests, an embedded daemon, every OS but Linux).
+    /// One that never sends (tests, a daemon inside a test, every OS but Linux).
     pub fn disabled() -> Self {
         Self::default()
     }

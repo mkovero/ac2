@@ -13,8 +13,8 @@ use crate::keys::{Chord, CommandId, Keymap, Scope};
 use crate::leq_dialog::{Focus, LeqDialog};
 use crate::session_dialog::{Edit, RoleKey, Row, SessionDialog};
 use crate::settings::{
-    ConnAction, DisplayRow, Page, RecordingRow, RigPage, RigRow, SERVER_INFO_EVERY_S, Settings,
-    step_hold, step_theme,
+    DisplayRow, Page, RecordingRow, RigPage, RigRow, SERVER_INFO_EVERY_S, Settings, step_hold,
+    step_theme,
 };
 
 /// What the mouse does on the Settings view (the hosted pages keep their own messages).
@@ -495,59 +495,6 @@ impl AppState {
                 self.toast("every pane's level axis is back at its default");
             }
             _ => {}
-        }
-    }
-
-    fn connection_key(&mut self, chord: Chord, swallow: Option<char>, out: &mut Vec<Request>) {
-        let Overlay::Settings(s) = &mut self.overlay else {
-            return;
-        };
-        let plain = !(chord.command || chord.alt);
-        let p = &mut s.connection;
-        let action = match chord.key {
-            Key::ArrowUp => {
-                p.move_focus(-1);
-                None
-            }
-            Key::Tab if chord.shift => {
-                p.move_focus(-1);
-                None
-            }
-            Key::ArrowDown | Key::Tab => {
-                p.move_focus(1);
-                None
-            }
-            Key::Enter => p.enter(),
-            _ if p.typing() => {
-                self.swallow_text = swallow;
-                None
-            }
-            Key::A if plain => {
-                if p.start_authorize() {
-                    self.swallow_text = typed_char(&chord);
-                }
-                None
-            }
-            Key::Delete | Key::Backspace => p.delete(),
-            _ => None,
-        };
-        if let Some(a) = action {
-            self.connection_action(a, out);
-        }
-    }
-
-    fn connection_action(&mut self, a: ConnAction, out: &mut Vec<Request>) {
-        match a {
-            ConnAction::Reconnect => out.push(Request::Reconnect),
-            ConnAction::ConnectOther => self.want_connect_dialog = true,
-            ConnAction::Authorize { name, key } => out.push(Request::ServerCall {
-                what: format!("client {name} authorized"),
-                cmd: Command::ServerAuthorize { name, key },
-            }),
-            ConnAction::Revoke(name) => out.push(Request::ServerCall {
-                what: format!("client {name} revoked"),
-                cmd: Command::ServerRevoke { name },
-            }),
         }
     }
 

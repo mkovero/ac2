@@ -1,4 +1,5 @@
-//! The connect dialog: choose the local daemon, an embedded one, or a rig found over mDNS.
+//! The connect dialog: choose this computer's `ac2d`, the simulated rig, or a rig found over
+//! mDNS.
 //!
 //! Discovered rigs are only names until paired. A rig is selectable when a pinned key has
 //! the fingerprint it advertises; the link then connects with that pinned key and CURVE
@@ -13,7 +14,6 @@ use ac2_zmq::PublicKey;
 use eframe::egui;
 
 use crate::conn::Target;
-use crate::embedded::EmbeddedBackend;
 use crate::prefs::RigAddr;
 use crate::theme::Chrome;
 
@@ -23,17 +23,24 @@ pub enum Choice {
     /// A daemon to connect to as is, and where it is, to reach it again at the next start
     /// (`None`: not to be remembered).
     Target(Box<Target>, Option<RigAddr>),
-    /// Host a daemon in this process.
-    Embedded(EmbeddedBackend),
+    /// This computer's `ac2d`: connected at once and, unless one runs (and Settings ›
+    /// Connection allows), started; on `backend` when named (`ac2-ui --backend`), and a
+    /// running one on another refused.
+    Local {
+        backend: Option<ac2_proto::model::BackendKind>,
+    },
+    /// The simulated rig: an `ac2d` on the fake backend that keeps nothing, started for this
+    /// app and stopped with it.
+    Simulated,
 }
 
 /// One row of the dialog.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Entry {
-    /// The per-user local daemon (`ac2 daemon start`).
+    /// This computer's `ac2d`, started when chosen if none runs.
     Local { running: bool },
-    /// An embedded daemon on a backend.
-    Embedded(EmbeddedBackend),
+    /// The simulated rig.
+    Simulated,
     /// A discovered rig and how it relates to the pinned keys.
     Rig { rig: Box<Rig>, status: PinStatus },
 }
@@ -42,7 +49,7 @@ impl Entry {
     /// Connectable now.
     pub fn enabled(&self) -> bool {
         match self {
-            Entry::Local { .. } | Entry::Embedded(_) => true,
+            Entry::Local { .. } | Entry::Simulated => true,
             Entry::Rig { rig, status } => {
                 matches!(status, PinStatus::Paired { .. })
                     && rig.advert.proto == ac2_proto::PROTO_VERSION
@@ -52,13 +59,8 @@ impl Entry {
 
     pub fn title(&self) -> String {
         match self {
-            Entry::Local { .. } => "Local daemon".into(),
-            Entry::Embedded(EmbeddedBackend::CoreAudio) => {
-                "This computer's audio (Core Audio)".into()
-            }
-            Entry::Embedded(EmbeddedBackend::Jack) => "This computer's audio (JACK)".into(),
-            Entry::Embedded(EmbeddedBackend::Asio) => "This computer's audio (ASIO)".into(),
-            Entry::Embedded(EmbeddedBackend::Fake) => "Simulated rig (no audio)".into(),
+            Entry::Local { .. } => "This computer".into(),
+            Entry::Simulated => "Simulated rig (no audio)".into(),
             Entry::Rig { rig, .. } => rig.advert.name.clone(),
         }
     }
@@ -66,22 +68,11 @@ impl Entry {
     pub fn detail(&self) -> String {
         match self {
             Entry::Local { running: true } => "ac2d is running for this user".into(),
-            Entry::Local { running: false } => {
-                "not running; start it with `ac2 daemon start`".into()
-            }
-            Entry::Embedded(EmbeddedBackend::Fake) => {
-                "a daemon in this app with a built-in loopback + speaker model, for trying ac2"
+            Entry::Local { running: false } => "not running; starts when chosen".into(),
+            Entry::Simulated => {
+                "an ac2d with a built-in loopback + speaker model, for trying ac2; stops with \
+                 the app"
                     .into()
-            }
-            Entry::Embedded(EmbeddedBackend::Jack) => {
-                "a daemon inside this app on JACK (JACK2 or PipeWire's); closes with the window"
-                    .into()
-            }
-            Entry::Embedded(EmbeddedBackend::Asio) => {
-                "a daemon inside this app on ASIO drivers; closes with the window".into()
-            }
-            Entry::Embedded(EmbeddedBackend::CoreAudio) => {
-                "a daemon inside this app on Core Audio; closes with the window".into()
             }
             Entry::Rig { rig, status } => {
                 let mut s = format!(
@@ -120,7 +111,7 @@ pub enum PairOutcome {
     Refused(String),
 }
 
-/// The connection to a rig at `addr`, as remembered: the local daemon, an embedded one, or
+/// The connection to a rig at `addr`, as remembered: this computer's `ac2d`, or
 /// a daemon over the network with its pinned key (the one with the remembered fingerprint
 /// when there is one, so a reconnect never talks to another key). Endpoints are as given.
 pub fn reach(key_dir: &KeyDir, client_name: &str, addr: &RigAddr) -> Result<Choice, String> {
@@ -131,13 +122,7 @@ pub fn reach(key_dir: &KeyDir, client_name: &str, addr: &RigAddr) -> Result<Choi
         ))
     };
     match addr {
-        RigAddr::Local => target(
-            ClientConfig::local(client_name.to_owned()),
-            "local daemon".into(),
-        ),
-        RigAddr::Embedded(b) => EmbeddedBackend::from_name(b)
-            .map(Choice::Embedded)
-            .ok_or_else(|| format!("no embedded backend `{b}` in this build")),
+        RigAddr::Local => Ok(Choice::Local { backend: None }),
         RigAddr::Endpoints { ctrl, data } => {
             let endpoints = Endpoints {
                 ctrl: ctrl.clone(),
@@ -173,25 +158,28 @@ pub fn reach(key_dir: &KeyDir, client_name: &str, addr: &RigAddr) -> Result<Choi
     }
 }
 
-/// Whether the local daemon looks up: its socket file (Unix) or its ctrl port (Windows).
+/// Whether this computer's `ac2d` answers a hello within a moment. Only an answer counts: a
+/// socket file left by a crashed daemon is still there.
 pub fn local_daemon_running() -> bool {
-    #[cfg(unix)]
-    {
-        ac2_client::endpoint::runtime_dir()
-            .join("ctrl.sock")
-            .exists()
-    }
-    #[cfg(not(unix))]
-    {
-        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], ac2_client::endpoint::DEFAULT_PORT));
-        std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(150)).is_ok()
-    }
+    let mut config = ClientConfig::local("ac2-ui probe");
+    config.mirror = false;
+    config.retry = ac2_client::Retry {
+        timeout: std::time::Duration::from_millis(300),
+        retries: 1,
+    };
+    let probe = move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .is_ok_and(|rt| rt.block_on(ac2_client::Client::connect(config)).is_ok())
+    };
+    // Its own thread: the caller may be inside a runtime.
+    std::thread::spawn(probe).join().unwrap_or(false)
 }
 
 pub struct ConnectDialog {
     key_dir: KeyDir,
     client_name: String,
-    backends: Vec<EmbeddedBackend>,
     local_running: bool,
     browser: Option<Browser>,
     pub browse_error: Option<String>,
@@ -199,7 +187,7 @@ pub struct ConnectDialog {
     pub selected: usize,
     /// Pairing form: the rig instance it is open for, the key text, the last outcome.
     pair: Option<(String, String, Option<PairOutcome>)>,
-    /// Shown under the list (embedded start failed, …).
+    /// Shown under the list (ac2d did not start, …).
     pub error: Option<String>,
     /// This app's build, at the foot ([`crate::BUILD_ID`]; screenshot tests pin it).
     pub build_id: String,
@@ -225,7 +213,6 @@ impl ConnectDialog {
     pub fn new(
         key_dir: KeyDir,
         client_name: impl Into<String>,
-        backends: Vec<EmbeddedBackend>,
         local_running: bool,
         mdns: Option<&Options>,
     ) -> Self {
@@ -234,18 +221,15 @@ impl ConnectDialog {
             Some(Err(e)) => (None, Some(e.to_string())),
             None => (None, None),
         };
-        let selected = usize::from(!local_running && !backends.is_empty());
         Self {
             key_dir,
             client_name: client_name.into(),
-            backends,
             local_running,
             browser,
             browse_error,
             table: RigTable::default(),
-            // Preselect what works without further steps: the running local daemon, else
-            // this computer's audio in an embedded daemon.
-            selected,
+            // This computer: its ac2d, running or started when chosen.
+            selected: 0,
             pair: None,
             error: None,
             build_id: crate::BUILD_ID.into(),
@@ -294,7 +278,7 @@ impl ConnectDialog {
         let mut v = vec![Entry::Local {
             running: self.local_running,
         }];
-        v.extend(self.backends.iter().copied().map(Entry::Embedded));
+        v.push(Entry::Simulated);
         for r in self.table.rigs() {
             let host = r.connect_host();
             let status = self
@@ -312,8 +296,8 @@ impl ConnectDialog {
     /// The connection for `e`, or why it cannot be used.
     pub fn choice(&self, e: &Entry) -> Result<Choice, String> {
         match e {
-            Entry::Local { .. } => reach(&self.key_dir, &self.client_name, &RigAddr::Local),
-            Entry::Embedded(b) => Ok(Choice::Embedded(*b)),
+            Entry::Local { .. } => Ok(Choice::Local { backend: None }),
+            Entry::Simulated => Ok(Choice::Simulated),
             Entry::Rig { rig, status } => {
                 let PinStatus::Paired { key, .. } = status else {
                     return Err(format!("{} is not paired", rig.advert.name));
@@ -583,13 +567,7 @@ mod tests {
     }
 
     fn dialog(dir: &std::path::Path) -> ConnectDialog {
-        ConnectDialog::new(
-            KeyDir::new(dir),
-            "test",
-            vec![EmbeddedBackend::Fake],
-            false,
-            None,
-        )
+        ConnectDialog::new(KeyDir::new(dir), "test", false, None)
     }
 
     #[test]

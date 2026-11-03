@@ -1,0 +1,33 @@
+[package]
+name = "ac2-e2e"
+description = "End-to-end tests of the ac2 app against real daemons on the simulated rig."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+# The app and a daemon in one test process: the app never links the daemon itself
+# (`ac2-ui/tests/it/no_dsp.rs`), so its end-to-end tests live here.
+[dependencies]
+ac2-client = { path = "../ac2-client" }
+ac2-ui = { path = "../ac2-ui" }
+ac2d = { path = "../ac2d" }
+
+[dev-dependencies]
+ac2-client = { path = "../ac2-client", features = ["test-support"] }
+ac2-plot = { path = "../ac2-plot" }
+ac2-proto = { path = "../ac2-proto" }
+ac2-scene = { path = "../ac2-scene" }
+# Test oracle only, as in ac2-ui's tests (the shared fake rig smooths as the daemon would).
+ac2-core = { path = "../ac2-core" }
+ac2-traces = { path = "../ac2-traces" }
+eframe = { version = "0.36.2", default-features = false, features = ["default_fonts", "wayland", "wgpu", "x11"] }
+egui_kittest = { version = "0.36.2", features = ["eframe", "snapshot", "wgpu"] }
+num-complex = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "sync", "time", "macros"] }

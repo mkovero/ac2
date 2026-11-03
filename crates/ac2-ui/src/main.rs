@@ -4,10 +4,10 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use ac2_client::{ClientConfig, Endpoints, KeyDir, RemoteAddr};
+use ac2_proto::model::BackendKind;
 use ac2_scene::theme::ThemeName;
 use ac2_ui::conn::Target;
-use ac2_ui::connect::ConnectDialog;
-use ac2_ui::embedded::{Embedded, EmbeddedBackend, start_embedded};
+use ac2_ui::connect::{Choice, ConnectDialog};
 use ac2_ui::keys::{Keymap, config_path};
 use ac2_ui::prefs::RigAddr;
 use ac2_ui::prefs::UiPrefs;
@@ -39,21 +39,23 @@ enum ThemeArg {
 #[derive(Debug, Parser)]
 #[command(name = "ac2-ui", version)]
 struct Args {
-    /// Connect to a remote daemon over CURVE: `host` or `host:port`.
-    #[arg(long, value_name = "HOST[:PORT]", conflicts_with_all = ["ctrl", "embedded"])]
+    /// Connect to a remote daemon over CURVE: `host` or `host:port`. Starts no ac2d.
+    #[arg(long, value_name = "HOST[:PORT]", conflicts_with_all = ["ctrl", "backend"])]
     remote: Option<RemoteAddr>,
-    /// Explicit ctrl endpoint (with --data), e.g. `tcp://127.0.0.1:47820`.
-    #[arg(long, requires = "data", value_name = "ENDPOINT")]
+    /// Explicit ctrl endpoint (with --data), e.g. `tcp://127.0.0.1:47820`. Starts no ac2d.
+    #[arg(
+        long,
+        requires = "data",
+        value_name = "ENDPOINT",
+        conflicts_with = "backend"
+    )]
     ctrl: Option<String>,
     /// Explicit data endpoint (with --ctrl).
     #[arg(long, requires = "ctrl", value_name = "ENDPOINT")]
     data: Option<String>,
-    /// Host an embedded daemon instead of connecting to one.
-    #[arg(long, conflicts_with = "ctrl")]
-    embedded: bool,
-    /// Audio backend of the embedded daemon: this platform's audio (jack on Linux,
-    /// coreaudio on macOS, asio on Windows) unless named; fake only when named here.
-    #[arg(long, value_enum, requires = "embedded")]
+    /// This computer's ac2d on this backend: started as `ac2d --backend NAME` unless one
+    /// runs, and one running on another backend refused. `fake`: the simulated rig.
+    #[arg(long, value_enum)]
     backend: Option<BackendArg>,
     /// Key directory for CURVE (default: the per-user ac2 config dir).
     #[arg(long, value_name = "DIR")]
@@ -65,9 +67,9 @@ struct Args {
     /// Theme for this run (default: the one last chosen in Settings › Display, else dark).
     #[arg(long, value_enum)]
     theme: Option<ThemeArg>,
-    /// Open the connect dialog (local daemon, embedded, or a rig found on the network). Also
-    /// opens on its own when no target is given and no local daemon is running.
-    #[arg(long, conflicts_with_all = ["remote", "ctrl", "embedded"])]
+    /// Open the connect dialog (this computer, the simulated rig, or a rig found on the
+    /// network) instead of connecting at start.
+    #[arg(long, conflicts_with_all = ["remote", "ctrl", "backend"])]
     connect: bool,
     /// Do not browse the network for rigs in the connect dialog.
     #[arg(long)]
@@ -76,118 +78,98 @@ struct Args {
     #[arg(long)]
     bench_startup: bool,
     /// Wait for the daemon's device list, print it ("smoke: ok" last) and exit; a link
-    /// that brings none within a minute prints "smoke: failed". For scripted checks.
+    /// that brings none within a minute, or a daemon that did not start, prints "smoke:
+    /// failed". For scripted checks.
     #[arg(long)]
     smoke: bool,
 }
 
 const NAME: &str = concat!("ac2-ui ", env!("CARGO_PKG_VERSION"));
 
-fn target(
-    a: &Args,
-    embedded: &mut Option<Embedded>,
-    notices: &mut Vec<String>,
-) -> Result<(Target, Option<RigAddr>), String> {
+/// The daemon named by `--remote` or `--ctrl/--data`, if any.
+fn target(a: &Args) -> Option<Result<(Target, RigAddr), String>> {
     if let Some(r) = &a.remote {
         let kd = KeyDir::new(
             a.key_dir
                 .clone()
                 .unwrap_or_else(ac2_client::keys::default_key_dir),
         );
-        let curve = kd.curve_client(&r.host).map_err(|e| e.to_string())?;
-        let mut config = ClientConfig::new(Endpoints::remote(r), NAME);
-        let addr = RigAddr::Network {
-            host: r.host.clone(),
-            port: r.port,
-            fingerprint: Some(curve.server_key.fingerprint()),
-        };
-        config.curve = Some(curve);
-        return Ok((
-            Target {
-                config,
-                describe: format!("daemon at {r}"),
-            },
-            Some(addr),
-        ));
+        return Some(
+            kd.curve_client(&r.host)
+                .map_err(|e| e.to_string())
+                .map(|curve| {
+                    let mut config = ClientConfig::new(Endpoints::remote(r), NAME);
+                    let addr = RigAddr::Network {
+                        host: r.host.clone(),
+                        port: r.port,
+                        fingerprint: Some(curve.server_key.fingerprint()),
+                    };
+                    config.curve = Some(curve);
+                    let t = Target {
+                        config,
+                        describe: format!("daemon at {r}"),
+                    };
+                    (t, addr)
+                }),
+        );
     }
-    if let (Some(c), Some(d)) = (&a.ctrl, &a.data) {
-        return Ok((
-            Target {
-                config: ClientConfig::new(
-                    Endpoints {
-                        ctrl: c.clone(),
-                        data: d.clone(),
-                    },
-                    NAME,
-                ),
-                describe: format!("daemon at {c}"),
-            },
-            Some(RigAddr::Endpoints {
-                ctrl: c.clone(),
-                data: d.clone(),
-            }),
-        ));
-    }
-    if a.embedded {
-        let backend = match a.backend {
-            None => EmbeddedBackend::platform(),
-            Some(BackendArg::CoreAudio) => EmbeddedBackend::CoreAudio,
-            Some(BackendArg::Jack) => EmbeddedBackend::Jack,
-            Some(BackendArg::Asio) => EmbeddedBackend::Asio,
-            Some(BackendArg::Fake) => EmbeddedBackend::Fake,
-        };
-        // An embedded daemon that cannot start is an error, never a silent switch to
-        // another daemon (the operator asked for this one, on this backend).
-        let e = start_embedded(backend).map_err(|e| format!("embedded daemon: {e}"))?;
-        let t = Target {
-            config: e.client_config(NAME),
-            describe: e.describe(),
-        };
-        notices.push(format!("{} running in this process", e.describe()));
-        *embedded = Some(e);
-        // The simulated rig is another rig each run: never remembered.
-        let addr = (backend != EmbeddedBackend::Fake)
-            .then(|| RigAddr::Embedded(backend.name().to_owned()));
-        return Ok((t, addr));
-    }
-    Ok((
+    let (c, d) = (a.ctrl.as_ref()?, a.data.as_ref()?);
+    Some(Ok((
         Target {
-            config: ClientConfig::local(NAME),
-            describe: "local daemon".into(),
+            config: ClientConfig::new(
+                Endpoints {
+                    ctrl: c.clone(),
+                    data: d.clone(),
+                },
+                NAME,
+            ),
+            describe: format!("daemon at {c}"),
         },
-        Some(RigAddr::Local),
-    ))
+        RigAddr::Endpoints {
+            ctrl: c.clone(),
+            data: d.clone(),
+        },
+    )))
 }
 
-fn embedded_backends() -> Vec<EmbeddedBackend> {
-    if !cfg!(feature = "embedded") {
-        return Vec::new();
+/// `--backend`: this computer's ac2d on it, or the simulated rig.
+fn backend_choice(b: BackendArg) -> Choice {
+    let kind = match b {
+        BackendArg::CoreAudio => BackendKind::CoreAudio,
+        BackendArg::Jack => BackendKind::Jack,
+        BackendArg::Asio => BackendKind::Asio,
+        BackendArg::Fake => return Choice::Simulated,
+    };
+    Choice::Local {
+        backend: Some(kind),
     }
-    vec![EmbeddedBackend::platform(), EmbeddedBackend::Fake]
 }
 
 fn main() -> ExitCode {
     let started = Instant::now();
     let args = Args::parse();
     let _timer = fine_timer::begin();
-    // A GUI launch has no terminal, so the file is what a tester can send back; the embedded
-    // daemon logs through the same subscriber.
+    // A GUI launch has no terminal, so the file is what a tester can send back; the daemon
+    // logs to its own file (`ac2d.log`).
     if let Some(path) = ac2_paths::log::init("ac2-ui") {
         tracing::info!("{NAME}: logging to {}", path.display());
     }
     ac2_paths::log::install_panic_hook("ac2-ui");
     let mut notices = Vec::new();
-    // Lives until the window closes; dropping it shuts the daemon down.
-    let mut embedded = None;
-    let explicit = args.remote.is_some() || args.ctrl.is_some() || args.embedded;
-    let local_running = ac2_ui::connect::local_daemon_running();
     let prefs_path = ac2_paths::ui_prefs();
     let (prefs, err) = UiPrefs::load(Some(&prefs_path));
     notices.extend(err);
-    // The rigs held last time are connected again (by the app); no dialog, no local daemon
-    // in their place.
-    let remembered = !explicit && !args.connect && !prefs.rigs.is_empty();
-    let dialog = (args.connect || (!explicit && !local_running && !remembered)).then(|| {
+    if prefs.app_daemon_dropped {
+        notices
+            .push("the app's own daemon is gone; this computer's ac2d is connected instead".into());
+    }
+    let named = target(&args);
+    // The rigs held last time are connected again (by the app); this computer's ac2d among
+    // them when it was.
+    let remembered =
+        named.is_none() && args.backend.is_none() && !args.connect && !prefs.rigs.is_empty();
+    let local_remembered = prefs.rigs.iter().any(|r| r.addr == RigAddr::Local);
+    let dialog = args.connect.then(|| {
         let kd = KeyDir::new(
             args.key_dir
                 .clone()
@@ -197,23 +179,29 @@ fn main() -> ExitCode {
         ConnectDialog::new(
             kd,
             NAME,
-            embedded_backends(),
-            local_running,
+            ac2_ui::connect::local_daemon_running(),
             (!args.no_discovery).then_some(&mdns),
         )
     });
-    let target = if dialog.is_some() || remembered {
-        None
-    } else {
-        match target(&args, &mut embedded, &mut notices) {
-            Ok(t) => Some(t),
-            // The window opens anyway, saying why it is not connected: a program that
-            // exits here is restarted into the same error by its unit.
-            Err(e) => {
-                tracing::error!("ac2-ui: {e}");
-                notices.push(e);
-                None
+    let mut start = None;
+    let target = match named {
+        Some(Ok(t)) => Some(t),
+        // The window opens anyway, saying why it is not connected: a program that exits
+        // here is restarted into the same error by its unit.
+        Some(Err(e)) => {
+            tracing::error!("ac2-ui: {e}");
+            notices.push(e);
+            None
+        }
+        None => {
+            if let Some(b) = args.backend {
+                start = Some(backend_choice(b));
+            } else if !args.connect
+                && (!remembered || (prefs.app_daemon_dropped && !local_remembered))
+            {
+                start = Some(Choice::Local { backend: None });
             }
+            None
         }
     };
     let keymap_path = Some(args.keys.clone().unwrap_or_else(config_path));
@@ -238,9 +226,12 @@ fn main() -> ExitCode {
             key: kp.public.to_z85(),
         });
     let (target, target_addr) = target.unzip();
+    let at_exit = ac2_ui::spawn::AtExit::default();
     let opts = AppOptions {
         target,
-        target_addr: target_addr.flatten(),
+        target_addr,
+        start,
+        at_exit: Some(at_exit.clone()),
         theme,
         keymap,
         keymap_path,
@@ -250,17 +241,14 @@ fn main() -> ExitCode {
         started,
         bench_startup: args.bench_startup,
         smoke: args.smoke,
-        // A daemon without an audio I/O (an embedded one on real audio always starts
-        // so) lands on the Sessions dialog once; one with audio open (a rig, a kiosk) does not.
-        // The simulated rig starts measuring.
-        open_session_dialog: !(embedded.is_some()
-            && matches!(args.backend, Some(BackendArg::Fake))),
-        embedded_autosave: embedded.as_ref().map(Embedded::autosaves),
+        // A daemon without an audio I/O (one just started has none) lands on the Sessions
+        // dialog once; one with audio open (a rig, a kiosk) does not. The simulated rig
+        // starts measuring.
+        open_session_dialog: true,
         client_key,
         connect: Some(ac2_ui::app::ConnectSetup {
             key_dir,
             client_name: NAME.into(),
-            backends: embedded_backends(),
             discovery: !args.no_discovery,
         }),
         rasterizer: None,
@@ -298,8 +286,9 @@ fn main() -> ExitCode {
             Ok(Box::new(app))
         }),
     );
-    // The app (and its link, which stops our stimulus) is gone; now the daemon.
-    drop(embedded);
+    // The window and the links (which stop our stimulus) are gone; now the ac2d children
+    // this app owns.
+    at_exit.stop();
     match r {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
@@ -315,7 +304,7 @@ fn main() -> ExitCode {
 /// tick. The link's display clock (33 ms) and the client's data poll (8 ms) are tokio
 /// timers, which wait in the I/O completion port with a millisecond timeout and so on that
 /// tick: frames would be fetched 33 to 47 ms apart, unevenly, and each up to 16 ms late.
-/// An embedded daemon asks the same; a remote or local one does not cover this process.
+/// A daemon asks the same for its own process, which does not cover this one.
 mod fine_timer {
     #[cfg(windows)]
     pub(crate) struct Guard(bool);

@@ -1,21 +1,18 @@
-//! The connect dialog: lists the local daemon, embedded daemons and discovered rigs (only a
-//! paired rig is connectable), and choosing the simulated rig starts an embedded daemon and
-//! connects to it. Same GPU requirements as `tests/it/ui.rs`.
+//! The connect dialog: lists this computer, the simulated rig and discovered rigs (only a
+//! paired rig is connectable). Choosing the simulated rig starts an `ac2d`: that is
+//! `ac2-e2e`'s. Same GPU requirements as `tests/it/ui.rs`.
 
 use std::net::IpAddr;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use ac2_client::KeyDir;
 use ac2_discovery::{Rig, Update};
 use ac2_scene::theme::ThemeName;
 use ac2_ui::connect::ConnectDialog;
-use ac2_ui::embedded::EmbeddedBackend;
 use ac2_ui::keys::Keymap;
-use ac2_ui::state::ConnState;
 use ac2_ui::{App, AppOptions};
 use ac2_zmq::PublicKey;
 use eframe::egui;
-use egui_kittest::kittest::Queryable;
 use egui_kittest::{Harness, SnapshotOptions};
 
 fn have_gpu(test: &str) -> bool {
@@ -71,7 +68,8 @@ fn harness(dialog: ConnectDialog) -> Harness<'static, App> {
         bench_startup: false,
         smoke: false,
         open_session_dialog: false,
-        embedded_autosave: None,
+        start: None,
+        at_exit: None,
         client_key: None,
         connect: None,
         rasterizer: Some(ac2_plot::Rasterizer::Gpu),
@@ -92,7 +90,7 @@ fn harness(dialog: ConnectDialog) -> Harness<'static, App> {
 }
 
 #[test]
-fn connect_dialog_lists_rigs_and_starts_the_simulated_rig() {
+fn connect_dialog_lists_rigs() {
     if !have_gpu("connect_dialog") {
         return;
     }
@@ -104,13 +102,7 @@ fn connect_dialog_lists_rigs_and_starts_the_simulated_rig() {
     kd.ensure_client_keypair().unwrap_or_else(|e| panic!("{e}"));
     kd.pin_server("10.0.0.20", paired)
         .unwrap_or_else(|e| panic!("{e}"));
-    let mut d = ConnectDialog::new(
-        kd,
-        "ac2-ui test",
-        vec![EmbeddedBackend::CoreAudio, EmbeddedBackend::Fake],
-        false,
-        None,
-    );
+    let mut d = ConnectDialog::new(kd, "ac2-ui test", false, None);
     d.build_id = "0.0.0+test".into();
     d.table.apply(Update::Resolved(rig(
         "FOH rack",
@@ -134,21 +126,4 @@ fn connect_dialog_lists_rigs_and_starts_the_simulated_rig() {
             .threshold(1.0)
             .max_failed_pixels(egui_kittest::OsThreshold::new(0).macos(16)),
     );
-
-    h.get_by_label("Simulated rig (no audio)").click();
-    h.step();
-    h.get_by_label("Connect").click();
-    let t0 = Instant::now();
-    loop {
-        h.step();
-        let app = h.state();
-        if !app.connect_open() && matches!(app.state.rig.conn, ConnState::Connected { .. }) {
-            break;
-        }
-        assert!(
-            t0.elapsed() < Duration::from_secs(15),
-            "embedded fake daemon did not connect"
-        );
-        std::thread::sleep(Duration::from_millis(10));
-    }
 }

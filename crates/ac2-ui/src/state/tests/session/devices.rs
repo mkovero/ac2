@@ -9,7 +9,7 @@ use super::*;
 fn a_daemon_without_audio_opens_the_sessions_dialog_once() {
     let mut t = T::disconnected();
     t.st.rig.open_session_when_empty = true;
-    connected_to(&mut t, "embedded daemon (coreaudio)");
+    connected_to(&mut t, "local daemon");
     let r = t.conn(mirror(no_session_state()));
     assert!(r.iter().any(|x| matches!(x, Request::SessionList)), "{r:?}");
     assert!(t.st.sessions_dialog().is_some(), "{:?}", t.st.overlay);
@@ -27,7 +27,7 @@ fn a_daemon_without_audio_opens_the_sessions_dialog_once() {
     // names for them.
     let mut t = T::disconnected();
     t.st.rig.open_session_when_empty = true;
-    connected_to(&mut t, "embedded daemon (coreaudio)");
+    connected_to(&mut t, "local daemon");
     let r = t.conn(mirror(daemon_state()));
     assert!(
         matches!(r.as_slice(), [Request::Meters(true), Request::Devices]),
@@ -44,7 +44,7 @@ fn a_daemon_without_audio_opens_the_sessions_dialog_once() {
 fn a_kept_session_without_audio_opens_no_sessions_dialog() {
     let mut t = T::disconnected();
     t.st.rig.open_session_when_empty = true;
-    connected_to(&mut t, "embedded daemon (coreaudio)");
+    connected_to(&mut t, "local daemon");
     let mut kept = daemon_state();
     kept.session.open = None;
     t.conn(mirror(kept));

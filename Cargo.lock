@@ -95,6 +95,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "ac2-e2e"
+version = "0.0.0"
+dependencies = [
+ "ac2-client",
+ "ac2-core",
+ "ac2-plot",
+ "ac2-proto",
+ "ac2-scene",
+ "ac2-traces",
+ "ac2-ui",
+ "ac2d",
+ "eframe",
+ "egui_kittest",
+ "num-complex",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "ac2-jack-dut"
 version = "0.0.0"
 dependencies = [
@@ -205,7 +224,6 @@ dependencies = [
  "ac2-scene",
  "ac2-traces",
  "ac2-zmq",
- "ac2d",
  "chrono",
  "clap",
  "eframe",

@@ -317,10 +317,9 @@ impl RigPrefs<'_> {
 /// Where a remembered rig was reached: how the app reaches it again at its next start.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RigAddr {
-    /// The per-user local daemon (`ac2 daemon start`).
+    /// This computer's `ac2d` for this user: reached on its default endpoints, started by
+    /// the app when none serves (Settings › Connection).
     Local,
-    /// A daemon this app hosts, on the backend of this name (`jack`, `coreaudio`, `asio`).
-    Embedded(String),
     /// A daemon at `host:port` over the network; `fingerprint` the server key this app
     /// pinned for it, so a reconnect at start never talks to another key.
     Network {
@@ -412,6 +411,32 @@ pub struct UiPrefs {
     /// Session files and folders on this machine the app opened or exported, most recent
     /// first, at most [`MAX_RECENT_SESSIONS`].
     pub recent_sessions: Vec<RecentSession>,
+    /// Starting and stopping this computer's `ac2d` (Settings › Connection).
+    pub daemon: DaemonPrefs,
+    /// The file remembered a rig hosted inside the app, which the app no longer has: read,
+    /// never written (the next save leaves it out).
+    pub app_daemon_dropped: bool,
+}
+
+/// Whether the app starts this computer's `ac2d` and stops the one it started.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DaemonPrefs {
+    /// Start `ac2d` when none is running (on until the operator turns it off: hosts that
+    /// run it as a service).
+    pub start_local: bool,
+    /// Stop the `ac2d` this app started when the app quits (on until the operator turns it
+    /// off). Read at each start of one; the AppImage forces it on
+    /// ([`crate::spawn::stop_forced`]).
+    pub stop_on_quit: bool,
+}
+
+impl Default for DaemonPrefs {
+    fn default() -> Self {
+        Self {
+            start_local: true,
+            stop_on_quit: true,
+        }
+    }
 }
 
 /// How many session files the recents keep.
@@ -474,6 +499,8 @@ impl Default for UiPrefs {
             record_limit_min: None,
             legend: LegendPrefs::default(),
             recent_sessions: Vec::new(),
+            daemon: DaemonPrefs::default(),
+            app_daemon_dropped: false,
         }
     }
 }

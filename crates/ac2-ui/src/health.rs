@@ -168,14 +168,12 @@ impl LocalHealth {
     pub fn inputs<'a>(
         &'a self,
         daemon: Option<&'a DaemonHealth>,
-        embedded: bool,
         daemon_addr: Option<&'a str>,
         wanted_fps: f64,
         now: Instant,
     ) -> HealthInputs<'a> {
         HealthInputs {
             daemon,
-            embedded,
             local_host: &self.local_host,
             daemon_addr,
             rate_unit: self.rate_unit,
@@ -209,7 +207,7 @@ mod tests {
         h.data_arrived();
         frame_at(&mut h, 5000);
         let f = h
-            .inputs(None, false, None, 30.0, t0)
+            .inputs(None, None, 30.0, t0)
             .frames
             .expect("a window ended");
         assert!(!f.streaming && f.fps < 1.0);
@@ -218,7 +216,7 @@ mod tests {
             frame_at(&mut h, 5000 + i * 34);
         }
         let f = h
-            .inputs(None, false, None, 30.0, t0)
+            .inputs(None, None, 30.0, t0)
             .frames
             .expect("a window ended");
         assert!(f.streaming, "{f:?}");
@@ -232,7 +230,7 @@ mod tests {
         let t0 = h.window_start;
         h.received.fetch_add(2_000_000, Ordering::Relaxed);
         h.frame(t0 + Duration::from_secs(2), false);
-        let r = h.inputs(None, false, None, 30.0, t0).received_per_s;
+        let r = h.inputs(None, None, 30.0, t0).received_per_s;
         assert_eq!(r, Some(1_000_000.0));
     }
 
@@ -242,13 +240,13 @@ mod tests {
         let t0 = Instant::now();
         h.daemon_xruns(Some(4), t0);
         assert_eq!(
-            h.inputs(None, false, None, 30.0, t0).since_xrun_s,
+            h.inputs(None, None, 30.0, t0).since_xrun_s,
             None,
             "seen, not risen"
         );
         h.daemon_xruns(Some(5), t0 + Duration::from_secs(1));
         let since = h
-            .inputs(None, false, None, 30.0, t0 + Duration::from_secs(3))
+            .inputs(None, None, 30.0, t0 + Duration::from_secs(3))
             .since_xrun_s;
         assert_eq!(since, Some(2.0));
         h.daemon_xruns(Some(0), t0 + Duration::from_secs(4));

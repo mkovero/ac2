@@ -96,12 +96,6 @@ pub fn rig_id() -> PathBuf {
     config_dir().join("rig-id")
 }
 
-/// The identity of the app's embedded daemon (real audio): `<config>/app-rig-id`, apart
-/// from a stand-alone daemon's on the same machine, as both can be connected at once.
-pub fn app_rig_id() -> PathBuf {
-    config_dir().join("app-rig-id")
-}
-
 /// The daemon's rig settings (system max level, output labels): `<config>/rig.json`.
 pub fn rig_settings() -> PathBuf {
     config_dir().join("rig.json")
@@ -122,12 +116,6 @@ pub fn session_dir() -> PathBuf {
 /// `autosave.prev` beside it): `<data>/autosave`.
 pub fn autosave_dir() -> PathBuf {
     data_dir().join("autosave")
-}
-
-/// The autosave of the app's embedded daemon (real audio): `<data>/autosave-app`, apart
-/// from a stand-alone daemon's on the same machine.
-pub fn app_autosave_dir() -> PathBuf {
-    data_dir().join("autosave-app")
 }
 
 /// The daemon's plan library (room plans, `<name>.json` each): `<data>/plans`.

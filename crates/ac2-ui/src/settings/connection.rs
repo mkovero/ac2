@@ -11,6 +11,10 @@ pub enum ConnLine {
     /// Add a rig (another daemon, or pair with one) in the connect dialog: the rigs held
     /// stay.
     ConnectOther,
+    /// *Start ac2d when none is running* (←/→ or Enter).
+    StartLocal,
+    /// *Stop ac2d when the app quits* (←/→ or Enter).
+    StopOnQuit,
     /// An authorized client, by name.
     Authorized(String),
     /// A refused key (Z85), or a refused peer without CURVE (`None`).
@@ -24,6 +28,8 @@ pub enum ConnLine {
 pub enum ConnAction {
     Reconnect,
     ConnectOther,
+    ToggleStartLocal,
+    ToggleStopOnQuit,
     Authorize { name: String, key: String },
     Revoke(String),
 }
@@ -58,7 +64,12 @@ pub const SERVER_INFO_EVERY_S: f64 = 2.0;
 
 /// The page's lines for `server` (the actions, then the network mode's keys).
 pub fn conn_lines(server: Option<&ServerInfo>) -> Vec<ConnLine> {
-    let mut v = vec![ConnLine::Reconnect, ConnLine::ConnectOther];
+    let mut v = vec![
+        ConnLine::Reconnect,
+        ConnLine::ConnectOther,
+        ConnLine::StartLocal,
+        ConnLine::StopOnQuit,
+    ];
     if let Some(ServerInfo {
         mode:
             ServerMode::Network {
@@ -157,6 +168,7 @@ impl ConnectionPage {
         match self.focused()? {
             ConnLine::Reconnect => Some(ConnAction::Reconnect),
             ConnLine::ConnectOther => Some(ConnAction::ConnectOther),
+            ConnLine::StartLocal | ConnLine::StopOnQuit => self.toggle(),
             ConnLine::AddKey => {
                 self.edit = Some((ConnEdit::NameAndKey, String::new()));
                 None
@@ -169,6 +181,15 @@ impl ConnectionPage {
                 self.notice = Some("Delete twice revokes this client's key".into());
                 None
             }
+        }
+    }
+
+    /// ←/→ (or Enter) on an `ac2d` row: its choice flipped; nothing elsewhere.
+    pub fn toggle(&mut self) -> Option<ConnAction> {
+        match self.focused()? {
+            ConnLine::StartLocal => Some(ConnAction::ToggleStartLocal),
+            ConnLine::StopOnQuit => Some(ConnAction::ToggleStopOnQuit),
+            _ => None,
         }
     }
 
@@ -277,14 +298,38 @@ pub fn link_lines(
             "This client's key: fingerprint {} · {} (what a rig's operator authorizes)",
             k.fingerprint, k.key
         ),
-        None => "This client has no key yet: pairing with a rig (connect dialog) makes one; local \
-                 and embedded daemons need none"
+        None => "This client has no key yet: pairing with a rig (connect dialog) makes one; this \
+                 computer's ac2d needs none"
             .into(),
     });
     v
 }
 
-/// The Connection page's action lines.
+/// The *Start ac2d when none is running* row.
+pub fn start_local_text(on: bool) -> String {
+    if on {
+        "Start ac2d when none is running: on (←→)".into()
+    } else {
+        "Start ac2d when none is running: off: the app only connects, as to a service (←→)".into()
+    }
+}
+
+/// The *Stop ac2d when the app quits* row; `forced` inside an AppImage.
+pub fn stop_on_quit_text(on: bool, forced: bool) -> String {
+    if forced {
+        return "Stop ac2d when the app quits: always on: the AppImage's files go away when the \
+                app quits"
+            .into();
+    }
+    let state = if on { "on" } else { "off" };
+    format!(
+        "Stop ac2d when the app quits: {state} · the ac2d this app started; one started \
+         otherwise keeps running · from the next start of ac2d (←→)"
+    )
+}
+
+/// The Connection page's action lines (the `ac2d` rows: [`start_local_text`],
+/// [`stop_on_quit_text`]).
 pub fn conn_line_text(l: &ConnLine, server: Option<&ServerInfo>) -> String {
     match l {
         ConnLine::Reconnect => "Reconnect now (Enter)".into(),
@@ -300,7 +345,7 @@ pub fn conn_line_text(l: &ConnLine, server: Option<&ServerInfo>) -> String {
                 _ => None,
             })
             .unwrap_or_else(|| name.clone()),
-        ConnLine::Refused(..) => String::new(),
+        ConnLine::Refused(..) | ConnLine::StartLocal | ConnLine::StopOnQuit => String::new(),
         ConnLine::AddKey => "Authorize a client by its key… (Enter)".into(),
     }
 }

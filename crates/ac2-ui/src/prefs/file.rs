@@ -1,7 +1,7 @@
 //! The `ui.toml` file: its tables and how they read into and write from [`UiPrefs`].
 
 use super::layout::*;
-use super::rig_file::{RigFile, parse_rig_id, parse_rig_key, rig_key};
+use super::rig_file::{DaemonFile, RigFile, RigsFile, parse_rig_id, parse_rig_key, rig_key};
 use super::*;
 use ac2_scene::plate::PlateBackground;
 
@@ -82,9 +82,11 @@ struct File {
     window: Option<WindowFile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     recent_sessions: Vec<RecentSession>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    daemon: Option<DaemonFile>,
     /// The rigs held when the app last ran.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    rigs: Vec<RigFile>,
+    #[serde(default, skip_serializing_if = "RigsFile::is_empty")]
+    rigs: RigsFile,
     /// Rigs whose branch of the measurement list is folded, by id (16 hex digits).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     folded_rigs: Vec<String>,
@@ -811,9 +813,12 @@ impl UiPrefs {
             }
             None => None,
         };
-        let rigs = f.rigs.into_iter().filter_map(RigFile::rig).collect();
+        let app_daemon_dropped = f.rigs.app_daemon > 0;
+        let rigs = f.rigs.rigs.into_iter().filter_map(RigFile::rig).collect();
         Ok(Self {
             rigs,
+            app_daemon_dropped,
+            daemon: DaemonFile::parse(f.daemon.as_ref()),
             folded_rigs: f
                 .folded_rigs
                 .iter()
@@ -883,7 +888,11 @@ impl UiPrefs {
     /// The file text.
     pub fn to_toml(&self) -> String {
         let f = File {
-            rigs: self.rigs.iter().map(RigFile::of).collect(),
+            rigs: RigsFile {
+                rigs: self.rigs.iter().map(RigFile::of).collect(),
+                app_daemon: 0,
+            },
+            daemon: DaemonFile::of(self.daemon),
             folded_rigs: self.folded_rigs.iter().map(ToString::to_string).collect(),
             key_hints: (!self.key_hints).then_some(false),
             unknown: BTreeMap::new(),

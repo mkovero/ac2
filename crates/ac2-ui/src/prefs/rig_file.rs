@@ -1,5 +1,5 @@
-//! Rigs in `ui.toml`: the `[[rigs]]` tables of remembered rigs, and rig ids as the file
-//! writes them.
+//! Rigs in `ui.toml`: the `[[rigs]]` tables of remembered rigs, the `[daemon]` table, and
+//! rig ids as the file writes them.
 
 use super::*;
 
@@ -17,9 +17,6 @@ pub(super) struct RigFile {
 #[serde(tag = "reach", rename_all = "snake_case")]
 enum RigAddrFile {
     Local,
-    Embedded {
-        backend: String,
-    },
     Network {
         host: String,
         port: u16,
@@ -39,7 +36,6 @@ impl RigFile {
             name: r.name.clone(),
             addr: match &r.addr {
                 RigAddr::Local => RigAddrFile::Local,
-                RigAddr::Embedded(b) => RigAddrFile::Embedded { backend: b.clone() },
                 RigAddr::Network {
                     host,
                     port,
@@ -65,7 +61,6 @@ impl RigFile {
             name: self.name,
             addr: match self.addr {
                 RigAddrFile::Local => RigAddr::Local,
-                RigAddrFile::Embedded { backend } => RigAddr::Embedded(backend),
                 RigAddrFile::Network {
                     host,
                     port,
@@ -77,6 +72,74 @@ impl RigFile {
                 },
                 RigAddrFile::Endpoints { ctrl, data } => RigAddr::Endpoints { ctrl, data },
             },
+        })
+    }
+}
+
+/// The `[[rigs]]` list, read entry by entry: one entry that does not parse costs only
+/// itself, never the whole file (set aside as damaged). A rig the app hosted itself
+/// (`reach = "embedded"`, a daemon inside the app, which it no longer has) is counted, so the
+/// app can say this computer's `ac2d` takes its place.
+#[derive(Debug, Default)]
+pub(super) struct RigsFile {
+    pub(super) rigs: Vec<RigFile>,
+    /// `reach = "embedded"` entries dropped.
+    pub(super) app_daemon: usize,
+}
+
+impl RigsFile {
+    pub(super) fn is_empty(&self) -> bool {
+        self.rigs.is_empty()
+    }
+}
+
+impl Serialize for RigsFile {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        self.rigs.serialize(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for RigsFile {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let mut out = Self::default();
+        for v in Vec::<toml::Value>::deserialize(d)? {
+            if v.get("reach").and_then(toml::Value::as_str) == Some("embedded") {
+                tracing::warn!("ui.toml: a rig hosted inside the app dropped: the app has none");
+                out.app_daemon += 1;
+                continue;
+            }
+            match RigFile::deserialize(v) {
+                Ok(r) => out.rigs.push(r),
+                Err(e) => tracing::warn!("ui.toml: a remembered rig dropped: {e}"),
+            }
+        }
+        Ok(out)
+    }
+}
+
+/// `[daemon]`: each choice written only when off (the default is on).
+#[derive(Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct DaemonFile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    start_local: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    stop_on_quit: Option<bool>,
+}
+
+impl DaemonFile {
+    pub(super) fn parse(f: Option<&Self>) -> DaemonPrefs {
+        let d = DaemonPrefs::default();
+        f.map_or(d, |f| DaemonPrefs {
+            start_local: f.start_local.unwrap_or(d.start_local),
+            stop_on_quit: f.stop_on_quit.unwrap_or(d.stop_on_quit),
+        })
+    }
+
+    pub(super) fn of(p: DaemonPrefs) -> Option<Self> {
+        (p != DaemonPrefs::default()).then_some(Self {
+            start_local: (!p.start_local).then_some(false),
+            stop_on_quit: (!p.stop_on_quit).then_some(false),
         })
     }
 }

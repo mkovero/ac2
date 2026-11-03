@@ -1,10 +1,6 @@
 //! The UI computes no measurement values. Checked on the resolved dependency graph
-//! (`cargo tree`, normal and build edges), so a transitive path is caught too:
-//!
-//! - Without the `embedded` feature the binary does not even link the DSP, audio or
-//!   daemon crates.
-//! - With it (the default), `ac2d` is the only way in: the daemon hosted in-process links
-//!   them, but the UI itself depends on none of them directly, so its code cannot use them.
+//! (`cargo tree`, normal and build edges), so a transitive path is caught too: the app does
+//! not even link the DSP, audio or daemon crates; it starts `ac2d` as a process.
 
 use std::collections::BTreeSet;
 use std::process::Command;
@@ -49,25 +45,10 @@ fn tree(extra: &[&str]) -> BTreeSet<String> {
 
 #[test]
 fn ui_does_not_link_dsp() {
-    let names = tree(&["--no-default-features"]);
+    let names = tree(&[]);
     // The display math comes from the scene layer.
     assert!(names.contains("ac2-scene"));
     for f in DSP.iter().chain(&["ac2d"]) {
-        assert!(
-            !names.contains(*f),
-            "ac2-ui without `embedded` depends on {f}"
-        );
-    }
-}
-
-#[test]
-fn only_the_embedded_daemon_brings_dsp_in() {
-    let direct = tree(&["--depth", "1"]);
-    assert!(
-        direct.contains("ac2d"),
-        "the default build embeds the daemon"
-    );
-    for f in DSP {
-        assert!(!direct.contains(f), "ac2-ui depends on {f} directly");
+        assert!(!names.contains(*f), "ac2-ui depends on {f}");
     }
 }

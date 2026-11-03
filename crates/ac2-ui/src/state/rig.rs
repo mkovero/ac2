@@ -25,8 +25,6 @@ pub struct RigState {
     /// Where the app reached this rig, remembered with it (`None`: not to be remembered, as
     /// a fake daemon, which is another rig each run).
     pub addr: Option<crate::prefs::RigAddr>,
-    /// The link reaches a daemon inside this process: no network between, the same host.
-    pub link_embedded: bool,
     /// The host the link reaches the daemon at over the network; `None` on a local link.
     pub daemon_addr: Option<String>,
     /// The daemon said hello as a rig this app already holds: the app closes this link.
@@ -89,9 +87,9 @@ pub struct RigState {
     pub(super) stim_device: Option<String>,
     /// Band and observation X / Shift+X run the finder with.
     pub finder: FinderChoice,
-    /// The app hosts its daemon (`None`: it connects to one); `Some(true)`: that daemon
-    /// autosaves. Quitting with unsaved changes then asks first.
-    pub embedded_autosave: Option<bool>,
+    /// The app stops this rig's daemon when it quits and that daemon keeps nothing (the
+    /// simulated rig): quitting with unsaved changes asks first.
+    pub quit_loses: bool,
     /// Settings sent with the arm in flight; a change made before the arm is confirmed is
     /// sent once it is.
     pub(super) armed_with: Option<GeneratorSettings>,
@@ -106,8 +104,8 @@ pub struct RigState {
     /// The name of an alignment (or a spatial average) submitted from the math dialog, and
     /// the view it opens in: its creation splits the focused pane and the new half shows it.
     pub(super) split_on_create: Option<(String, TransferView)>,
-    /// Open the Sessions dialog once the daemon's state shows no audio I/O (an embedded
-    /// daemon on real audio starts without one): its New leads on to the audio setup.
+    /// Open the Sessions dialog once the daemon's state shows no audio I/O (one just started
+    /// has none): its New leads on to the audio setup.
     pub open_session_when_empty: bool,
     /// The session dialog's session opened: ask what to measure ([`Self::choose_first`])
     /// once the daemon's state shows it open.
@@ -197,7 +195,6 @@ impl RigState {
             name: String::new(),
             link: None,
             addr: None,
-            link_embedded: false,
             daemon_addr: None,
             duplicate: false,
             phase_reference: None,
@@ -224,7 +221,7 @@ impl RigState {
             sweep: SweepUi::default(),
             stim_device: None,
             finder: FinderChoice::default(),
-            embedded_autosave: None,
+            quit_loses: false,
             armed_with: None,
             pending: Pending::default(),
             stack_on_create: None,
