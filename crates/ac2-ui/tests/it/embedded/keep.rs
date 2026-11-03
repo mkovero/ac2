@@ -165,6 +165,8 @@ fn desk_edits_tf(desk: &mut Driver, kiosk: &mut Driver) -> R {
     let tf = meas_named(&desk.st, TF).ok_or("TF 1 on the desk")?;
     let before = desk.st.meas(tf).and_then(|m| m.layout.clone());
     desk.send(Msg::SelectMeas(tf));
+    let f = desk.st.layout.focus;
+    desk.drop_meas(f, tf);
     desk.key("N");
     let edited = desk.st.pane_layout();
     assert_ne!(Some(&edited), before.as_ref());
@@ -214,7 +216,10 @@ fn rig(ep: &Endpoints, cli: &Cli) -> R<(Driver, Driver)> {
     })?;
     let tf = meas_named(&desk.st, TF).ok_or("TF 1")?;
     assert!(spl.id < tf, "FOH SPL first");
+    // Selected and dropped on the focused pane: the panes split there are its own.
     desk.send(Msg::SelectMeas(tf));
+    let f = desk.st.layout.focus;
+    desk.drop_meas(f, tf);
     desk.key("N");
     desk.key("N");
     desk.until("TF 1's own panes", |s| {
@@ -408,6 +413,8 @@ fn a_desk_laying_out_the_kiosk_meter_keeps_the_kiosk_on_its_meter() -> R {
     let (mut desk, mut kiosk) = rig(&ep, &cli)?;
     let spl = meas_named(&desk.st, SPL).ok_or("FOH SPL on the desk")?;
     desk.send(Msg::SelectMeas(spl));
+    let f = desk.st.layout.focus;
+    desk.drop_meas(f, spl);
     for key in ["N", "G"] {
         desk.key(key);
         let edited = desk.st.pane_layout();

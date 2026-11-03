@@ -282,9 +282,6 @@ pub fn defaults() -> Vec<Binding> {
         (C::LevelsResetAll, S::Programme, sh(K::R)),
         (C::LevelsReset, S::Inputs, k(K::R)),
         (C::LevelsResetAll, S::Inputs, sh(K::R)),
-        // P(rogramme) on a picked Inputs row: its meters in a new pane. Not Enter, which
-        // fires the stimulus in every keymap.
-        (C::ProgrammePane, S::Inputs, k(K::P)),
         // Shift+W, as Shift+M / Shift+S open a new math channel and a new sweep: the
         // session's spatial walks, a new one first.
         (C::Walks, S::Global, sh(K::W)),
@@ -431,8 +428,8 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                 &[
                     hint(C::LevelsReset, "reset", 90),
                     hint(C::LevelsResetAll, "reset all", 80),
-                    hint(C::ProgrammePane, "programme pane", 85),
                     hint(C::NextInTree, "measurements", 60),
+                    hint(C::PrevInTree, "back", 50),
                 ]
             }
         }

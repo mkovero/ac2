@@ -37,7 +37,7 @@ pub(super) fn meter_t() -> T {
 
 fn dialog(t: &T) -> &Form {
     match &t.st.overlay {
-        Overlay::Form(f) if matches!(f.kind, FormKind::Programme | FormKind::ProgrammeEdit) => f,
+        Overlay::Form(f) if matches!(f.kind, FormKind::Programme) => f,
         other => panic!("no programme meter dialog: {other:?}"),
     }
 }
@@ -204,37 +204,6 @@ fn a_changed_rig_setting_is_sent_as_levels_set() {
     assert_eq!(t.st.layout.kind(t.st.layout.focus), PaneKind::Programme);
 }
 
-/// *Edit measurement…* on a focused Programme pane: the form filled in with what it meters;
-/// Enter changes that pane in place.
-#[test]
-fn edit_on_a_programme_pane_changes_it_in_place() {
-    let mut t = meter_t();
-    open_from_chooser(&mut t);
-    t.key("Enter");
-    let p = t.st.layout.focus;
-    let panes = t.visible().len();
-    t.st.apply(Msg::Command(CommandId::EditMeas), &t.keys);
-    let f = dialog(&t);
-    assert_eq!(f.kind, FormKind::ProgrammeEdit);
-    assert_eq!(f.kind.verb(), "Apply");
-    assert_eq!(rows(&t)[0], "Meter: Main · line · pair (in 3, 4)");
-    t.key("ArrowRight");
-    to_field(&mut t, FieldId::Bar(1));
-    // ← past inputs 2 and 1 (input 3 is in row 1): none.
-    for _ in 0..3 {
-        t.key("ArrowLeft");
-    }
-    assert_eq!(rows(&t)[1..3], ["Input 1: 3 · Input 3", "Input 2: none"]);
-    t.key("Enter");
-    assert_eq!(t.st.overlay, Overlay::None);
-    assert_eq!(t.st.layout.focus, p);
-    assert_eq!(t.visible().len(), panes, "no pane added");
-    assert_eq!(
-        t.st.layout.view(p).and_then(|v| v.meters),
-        Metered::inputs_of(&[2])
-    );
-}
-
 /// The form's *Loudness target* row steps 1 LU and goes out on Enter as the target alone.
 #[test]
 fn the_loudness_target_is_sent_as_levels_set() {
@@ -284,20 +253,4 @@ fn esc_only_closes() {
     assert_eq!(t.st.overlay, Overlay::None);
     assert_eq!(t.visible(), before);
     assert_eq!(t.st.layout.focus, tf);
-}
-
-/// No inputs captured: the chooser's row says why, and so does Edit on a Programme pane.
-#[test]
-fn without_inputs_it_says_why() {
-    let mut t = meter_t();
-    open_from_chooser(&mut t);
-    t.key("Enter");
-    let mut s = rig_with_pair();
-    if let Some(o) = &mut s.session.open {
-        o.config.input_channels.clear();
-    }
-    t.conn(mirror(s));
-    t.st.apply(Msg::Command(CommandId::EditMeas), &t.keys);
-    assert_eq!(t.st.overlay, Overlay::None);
-    assert_eq!(t.last_toast(), "no inputs in the session to meter");
 }

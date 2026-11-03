@@ -269,7 +269,8 @@ fn a_restart_comes_back_to_the_same_pane() -> R {
             .iter()
             .any(|m| matches!(m.config.kind, MeasKind::Spl { .. }))
     })?;
-    d.key("Alt+4");
+    // The new meter opened in its own pane beside the focused one, focused.
+    assert_eq!(d.st.layout.focus_kind(), PaneKind::Spl);
     d.key("W");
     assert!(d.st.layout.maximized);
     assert!(d.st.prefs_dirty);

@@ -102,7 +102,7 @@ impl AppState {
         // The pane keeps its view: the Leq windows do not follow the meter's weightings, so
         // switching to the meter would read as the windows having changed. The daemon's
         // reply names the new metric either way.
-        self.focus_kind(PaneKind::Spl);
+        self.focus_lead(PaneKind::Spl);
         let cmd = self.meas_update(m.id, m.config);
         self.call(out, cmd, what);
     }
@@ -203,9 +203,10 @@ impl AppState {
                 d.notice = None;
                 self.rig.leq.sent = Some((what.clone(), Box::new(d.clone())));
                 self.overlay = Overlay::None;
-                self.focus_kind(PaneKind::Spl);
-                let m = self.modes_mut();
-                m.spl = m.spl.with_leq();
+                if self.focus_lead(PaneKind::Spl) {
+                    let m = self.modes_mut();
+                    m.spl = m.spl.with_leq();
+                }
                 self.call(out, cmd, what);
             }
             Err(e) => d.error = Some(e),

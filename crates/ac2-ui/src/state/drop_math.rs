@@ -86,7 +86,7 @@ impl AppState {
                     group: ac2_scene::meas_list::group_of(&t, &ms),
                 })
             }
-            TreeKey::Imported | TreeKey::Rig | TreeKey::Session => None,
+            TreeKey::Imported | TreeKey::Rig | TreeKey::Session | TreeKey::RigName(_) => None,
         }
     }
 

@@ -1,10 +1,10 @@
 //! A measurement's own panes (`meas.layout`): choosing a measurement's row in the list
 //! puts its panes on screen; one without keeps the panes there are. Nothing else moves the
 //! panes as a whole: a child row (live curve, math channel, stored trace) only selects, a
-//! click in a pane only focuses it, and a chip pick or a row dropped on a pane changes that
-//! pane alone. Editing the panes (N, Q, a pane's kind or view, T, a split dragged, the
-//! transfer stack, a pick, a level axis zoomed or panned) gives the measurement whose row
-//! was chosen that layout, and every client that selects it shows the same. A measurement
+//! click in a pane only focuses it, and a row dropped on a pane changes that pane alone.
+//! Editing the panes (N, Q, a pane's kind or view, T, a split dragged, the transfer stack, a
+//! drop, a level axis zoomed or panned) gives the measurement whose row was chosen that
+//! layout, and every client that selects it shows the same. A measurement
 //! picked into one of its panes is a guest there: the edit is still the chosen one's, never
 //! the guest's own layout, and never any other measurement's: two measurements whose
 //! layouts happen to be alike are still two layouts. Panes none of which shows the
@@ -92,6 +92,11 @@ impl AppState {
                 if v.meas.is_none() && self.ours(&v) {
                     v.meas = self.rig.pending.pane_ids.get(id).copied();
                 }
+                // The owner's own pane is stored as no pick, the form its layout reads as
+                // the owner: a brought layout compares equal to the stored one.
+                if self.ours(&v) && v.meas.is_some() && v.meas == self.rig.own_panes {
+                    v.meas = None;
+                }
                 PaneLayout::Pane {
                     pane: Box::new(wire_pane(&v, self.operator_levels(*id))),
                 }
@@ -164,7 +169,7 @@ impl AppState {
                 self.layout.maximized = false;
                 self.panes_only |= self.fullscreen;
             }
-            if let Some(l) = own.filter(|l| *l != self.pane_layout()) {
+            if let Some(l) = own.filter(|l| !self.on_screen(l)) {
                 self.show_layout(&l);
             }
             return;
@@ -224,8 +229,17 @@ impl AppState {
         }
         // Another client's edit.
         self.rig.layout_queue.calls.retain(|c| c.meas != owner);
-        if let Some(l) = theirs.filter(|l| *l != self.pane_layout()) {
+        if let Some(l) = theirs.filter(|l| !self.on_screen(l)) {
             self.show_layout(&l);
+        }
+    }
+
+    /// Layout `l` of the own panes' owner is what the panes show: an explicit pick of the
+    /// owner reads as the no pick it is stored as.
+    fn on_screen(&self, l: &PaneLayout) -> bool {
+        match self.rig.own_panes {
+            Some(owner) => owner_plain(l, owner) == self.pane_layout(),
+            None => *l == self.pane_layout(),
         }
     }
 
@@ -395,12 +409,11 @@ impl AppState {
         true
     }
 
-    /// Layout `l` on screen, each pane on the measurement it was picked for (one gone since,
-    /// or of a kind the pane no longer draws, leaves it on the chosen measurement) and on the
-    /// level ranges the operator set. The focus stays at its place when the pane there is
-    /// of the same kind; else it goes to a pane picked for the chosen measurement, else to
-    /// a pane that shows it, else to the first of its kind. With no pane showing it, the
-    /// focused pane does, as its row puts it there.
+    /// Layout `l` of the own panes' owner on screen, each pane on the measurement it was
+    /// picked for (one of a kind the pane no longer draws leaves it with nothing; a pane with
+    /// no pick is the owner's, as the layout is stored) and on the level ranges the operator
+    /// set. The focus stays at its place when the pane there is of the same kind; else it
+    /// goes to a pane showing the owner, else to the first pane.
     pub(in crate::state) fn show_layout(&mut self, l: &PaneLayout) {
         if l.check().is_err() {
             return;
@@ -408,6 +421,14 @@ impl AppState {
         let mut views = BTreeMap::new();
         let mut levels = Vec::new();
         let root = self.install_node(l, &mut views, &mut levels);
+        let owner = self.rig.own_panes.and_then(|id| self.meas(id)).cloned();
+        if let Some(o) = &owner {
+            for v in views.values_mut().filter(|v| v.rig == PaneRig::Active) {
+                if !v.has_content() && v.kind.shows(&o.config.kind) {
+                    v.meas = Some(o.id);
+                }
+            }
+        }
         // Another rig's pane names that rig's ids, which this rig's mirror cannot check. A
         // pick of a kind the pane does not draw is no pick; one the mirror does not list yet
         // waits as the pane's choice, so that the next edit stores it, not the stand-in.
@@ -423,7 +444,6 @@ impl AppState {
                 }
             }
         }
-        let sel = self.rig.chosen.and_then(|id| self.meas(id)).cloned();
         let order = root.reading_order();
         // The operator's eyes stay where they are: the pane at the focused one's place, when
         // it is of the same kind.
@@ -439,34 +459,13 @@ impl AppState {
             .copied();
         let focus = kept
             .or_else(|| {
-                sel.as_ref().and_then(|m| {
-                    let home = PaneKind::for_kind(&m.config.kind);
-                    let find = |f: &dyn Fn(&View) -> bool| {
-                        order
-                            .iter()
-                            .find(|id| views.get(*id).is_some_and(|v: &View| f(v)))
-                            .copied()
-                    };
-                    find(&|v| v.meas == Some(m.id))
-                        .or_else(|| find(&|v| v.meas.is_none() && v.kind == home))
-                        .or_else(|| find(&|v| v.kind == home))
-                        .or_else(|| find(&|v| v.kind.shows(&m.config.kind)))
-                })
+                let o = owner.as_ref()?.id;
+                order
+                    .iter()
+                    .find(|id| views.get(*id).is_some_and(|v: &View| v.meas == Some(o)))
+                    .copied()
             })
             .unwrap_or(order[0]);
-        if let Some(m) = &sel {
-            let home = PaneKind::for_kind(&m.config.kind);
-            let shown = views
-                .values()
-                .any(|v| v.meas == Some(m.id) || (v.meas.is_none() && v.kind == home));
-            if !shown
-                && !waiting.contains_key(&focus)
-                && let Some(v) = views.get_mut(&focus)
-                && v.kind.shows(&m.config.kind)
-            {
-                v.meas = Some(m.id);
-            }
-        }
         let (root, views) = self.beside_other_rigs(root, views);
         self.layout.install(root, views, focus);
         self.prune_levels();
@@ -476,10 +475,6 @@ impl AppState {
         self.pane_auto = false;
         self.rig.pending.pane_meas.clear();
         self.rig.pending.pane_ids = waiting;
-        if matches!(self.overlay, Overlay::PaneMenu(m) if !self.layout.views.contains_key(&m.pane))
-        {
-            self.overlay = Overlay::None;
-        }
         // The history goes with the last spectrograph shown.
         if !self.spectrograph_shown() {
             self.rig.spectrographs.clear();
@@ -701,6 +696,27 @@ impl RigState {
         self.layout_queue.calls.clear();
         self.layout_queue.queued.clear();
         self.layout_queue.due = None;
+    }
+}
+
+/// Layout `l` of `owner` with every pick of the owner on this rig written as no pick: on
+/// screen and when sent, a pane of a measurement's own layout showing it holds no pick.
+pub(in crate::state) fn owner_plain(l: &PaneLayout, owner: MeasId) -> PaneLayout {
+    match l {
+        PaneLayout::Pane { pane } => {
+            let mut p = pane.clone();
+            let mine = matches!(p.rig, wire::RigRef::ThisRig | wire::RigRef::Active);
+            if mine && p.content.as_ref().and_then(wire::PaneContent::meas) == Some(owner) {
+                p.content = None;
+            }
+            PaneLayout::Pane { pane: p }
+        }
+        PaneLayout::Split { axis, ratio, a, b } => PaneLayout::Split {
+            axis: *axis,
+            ratio: *ratio,
+            a: Box::new(owner_plain(a, owner)),
+            b: Box::new(owner_plain(b, owner)),
+        },
     }
 }
 

@@ -75,7 +75,7 @@ impl AppState {
                 Ok(f) => self.overlay = Overlay::Form(Box::new(f)),
                 Err(why) => self.warn(why),
             },
-            (_, None) => self.open_meter_form(None, out),
+            (_, None) => self.open_meter_form(out),
         }
     }
 
@@ -90,7 +90,7 @@ impl AppState {
                 "no audio I/O to meter: {}",
                 open_session_hint(keymap)
             )),
-            NewKind::Programme => self.meter_form(None).err(),
+            NewKind::Programme => self.meter_form().err(),
             NewKind::Transfer | NewKind::Sweep if self.open_session().is_some() => {
                 self.two_input_refusal(k == NewKind::Sweep, keymap)
             }

@@ -44,6 +44,11 @@ fn subscriptions_follow_the_panes_from_an_empty_daemon() -> R {
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     measure_from_empty(&mut d)?;
     let m = d.st.selected_meas().cloned().ok_or("measurement")?.id;
+    // The measurement dropped on the IR pane too.
+    d.key("Alt+3");
+    let f = d.st.layout.focus;
+    d.drop_meas(f, m);
+    d.key("Alt+1");
     // The level typed there stays: arm and fire.
     d.key("Space");
     d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
@@ -397,17 +402,19 @@ fn record_and_replay_from_the_app() -> R {
 }
 
 /// The operator's case from an empty daemon: two spectrum measurements on two inputs, the
-/// spectrum pane split (N), Spectrum 2 picked on the new half from its title chip, both
+/// spectrum pane showing Spectrum 1 split (N), Spectrum 2 dropped on the new half, both
 /// halves stepped (G) to the spectrograph alone. Left Spectrum 1's spectrograph, right
 /// Spectrum 2's, both filling; and so they stay while the focus moves between them, the
 /// list's rows are clicked and Tab / Shift+Tab step through every row and back.
 #[test]
 fn two_spectrographs_side_by_side_from_an_empty_daemon() -> R {
-    use ac2_ui::state::PaneMenuRow;
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     // No transfer measurement: its own panes would come with its row on the Tab round.
     session_from_empty(&mut d)?;
+    // Spectrum 1 made with the empty spectrum pane focused takes it; Spectrum 2 opens
+    // beside it, a pane the helper closes, so the split below is the only other one.
+    d.key("Alt+2");
     let s1 = new_spectrum(&mut d, false)?;
     let s2 = new_spectrum(&mut d, true)?;
     let of = |s: &AppState, id: MeasId| {
@@ -423,13 +430,11 @@ fn two_spectrographs_side_by_side_from_an_empty_daemon() -> R {
 
     // The spectrum pane shows Spectrum 1; N splits it side by side.
     d.key("Alt+2");
-    d.send(Msg::SelectMeas(s1));
+    assert_eq!(d.st.pane_meas(d.st.layout.focus).map(|m| m.id), Some(s1));
     d.key("N");
     let right = d.st.layout.focus;
-    // The new half's chip: Spectrum 2.
-    d.send(Msg::PaneMenu(right));
-    assert!(matches!(d.st.overlay, Overlay::PaneMenu(_)));
-    d.send(Msg::PanePick(right, PaneMenuRow::Meas(s2)));
+    // Spectrum 2's row dropped on the new half.
+    d.drop_meas(right, s2);
     let shown = |s: &AppState| -> Vec<(Option<MeasId>, SpectrumMode)> {
         spectrum_panes(s)
             .into_iter()

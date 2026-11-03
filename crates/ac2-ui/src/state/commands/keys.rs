@@ -15,16 +15,6 @@ impl AppState {
                 let m = *m;
                 self.rig_menu_wheel(m, rows);
             }
-            Overlay::PaneMenu(m) => {
-                let mut m = *m;
-                let list = self.pane_menu_rows(m.pane);
-                let n = list.len();
-                if n > 0 {
-                    let to = (m.index as i64 + i64::from(rows)).clamp(0, n as i64 - 1) as usize;
-                    m.index = land(&list, to, rows.signum().into());
-                    self.overlay = Overlay::PaneMenu(m);
-                }
-            }
             _ => {}
         }
     }
@@ -255,50 +245,6 @@ impl AppState {
             Overlay::RigMenu(menu) => {
                 let menu = *menu;
                 self.rig_menu_key(menu, chord, out);
-                return;
-            }
-            Overlay::PaneMenu(menu) => {
-                let mut menu = *menu;
-                let list = self.pane_menu_rows(menu.pane);
-                let n = list.len();
-                match chord.key {
-                    Key::ArrowDown | Key::ArrowUp if n > 0 => {
-                        // A rig's heading is stepped over, wrapping as the rows do.
-                        let d = if chord.key == Key::ArrowDown {
-                            1
-                        } else {
-                            n - 1
-                        };
-                        let mut i = (menu.index + d) % n;
-                        for _ in 0..n {
-                            if list[i].0.pickable() {
-                                break;
-                            }
-                            i = (i + d) % n;
-                        }
-                        menu.index = i;
-                        self.overlay = Overlay::PaneMenu(menu);
-                    }
-                    Key::Home | Key::PageUp => {
-                        menu.index = land(&list, 0, 1);
-                        self.overlay = Overlay::PaneMenu(menu);
-                    }
-                    Key::End | Key::PageDown => {
-                        menu.index = land(&list, n.saturating_sub(1), -1);
-                        self.overlay = Overlay::PaneMenu(menu);
-                    }
-                    Key::Enter => {
-                        self.overlay = Overlay::None;
-                        let row = self
-                            .pane_menu_rows(menu.pane)
-                            .get(menu.index)
-                            .map(|(r, _)| *r);
-                        if let Some(row) = row {
-                            self.pane_pick(menu.pane, row);
-                        }
-                    }
-                    _ => {}
-                }
                 return;
             }
             Overlay::None => {}
@@ -644,31 +590,4 @@ impl AppState {
             }
         }
     }
-}
-
-/// The row of a pane's list nearest `at` a pick can land on, looking in direction `d` first
-/// (a rig's heading names the rig, it is no row to take).
-fn land(rows: &[(PaneMenuRow, String)], at: usize, d: i64) -> usize {
-    let ok = |i: usize| rows.get(i).is_some_and(|(r, _)| r.pickable());
-    let step = |i: usize, d: i64| {
-        usize::try_from(i as i64 + d)
-            .ok()
-            .filter(|i| *i < rows.len())
-    };
-    let d = if d < 0 { -1 } else { 1 };
-    let mut i = Some(at);
-    while let Some(x) = i {
-        if ok(x) {
-            return x;
-        }
-        i = step(x, d);
-    }
-    let mut i = step(at, -d);
-    while let Some(x) = i {
-        if ok(x) {
-            return x;
-        }
-        i = step(x, -d);
-    }
-    at
 }

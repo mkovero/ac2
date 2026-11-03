@@ -233,12 +233,18 @@ pub enum TreeKey {
     Rig,
     /// The header of the session's measurements, under the rig group.
     Session,
+    /// With several rigs connected, the heading over one rig's part of the list, naming
+    /// it: a click shows that rig.
+    RigName(ac2_proto::units::RigId),
 }
 
 impl TreeKey {
     /// A header that stands for no measurement or curve: nothing to select, drag or show.
     pub fn is_heading(self) -> bool {
-        matches!(self, TreeKey::Imported | TreeKey::Rig | TreeKey::Session)
+        matches!(
+            self,
+            TreeKey::Imported | TreeKey::Rig | TreeKey::Session | TreeKey::RigName(_)
+        )
     }
 }
 
@@ -691,6 +697,28 @@ fn rig_header(meters: usize, rig: Option<&Rig>) -> TreeRow {
         crate::osc::status_line(&rig)
     );
     heading_row(TreeKey::Rig, crate::osc::RIG, details, describe)
+}
+
+/// The heading over rig `rig`'s part of the list, named `name` (`pupu`, `ketunkolo ·
+/// ac2d`); `shown`: the rig the drop-down shows, where new measurements go.
+pub fn rig_heading(rig: ac2_proto::units::RigId, name: &str, shown: bool) -> TreeRow {
+    let (detail, describe) = if shown {
+        (
+            "shown: new measurements and the keys go here",
+            format!("{name}: the rig shown; new measurements and the keys go to it"),
+        )
+    } else {
+        (
+            "click shows this rig; its rows drag onto panes",
+            format!("{name}: another rig; a click shows it, its rows drag onto panes as they are"),
+        )
+    };
+    heading_row(
+        TreeKey::RigName(rig),
+        name,
+        vec![detail.to_owned()],
+        describe,
+    )
 }
 
 /// A header that stands for no measurement: the rig's, the session's.

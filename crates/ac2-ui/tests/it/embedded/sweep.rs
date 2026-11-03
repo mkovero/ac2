@@ -486,7 +486,7 @@ fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
         ]
     );
 
-    // Live again, the transfer pane focused and given the sweep by its chip (V only
+    // Live again, the transfer pane focused and given the sweep by a drop (V only
     // selects): V selects the first sweep, then the second; the sweep pane shows whichever
     // is selected.
     d.key("End");
@@ -499,10 +499,7 @@ fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
             .and_then(|t| t.edit.owner.meas())
             .ok_or("the run's sweep")?;
     let tf = crate::common::pane(&d.st, PaneKind::Transfer);
-    d.send(Msg::PanePick(
-        tf,
-        ac2_ui::state::PaneMenuRow::Meas(sweep_meas),
-    ));
+    d.drop_meas(tf, sweep_meas);
     assert_eq!(d.st.rig.selected_trace, None);
     d.key("V");
     assert_eq!(d.st.rig.selected_trace, Some(first));

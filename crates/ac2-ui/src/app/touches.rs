@@ -65,7 +65,7 @@ impl Touches {
             | Msg::Rasterizer(_)
             | Msg::RowDrag(
                 crate::state::DragMsg::Start(_)
-                | crate::state::DragMsg::Over { .. }
+                | crate::state::DragMsg::Over(_)
                 | crate::state::DragMsg::OverRow(_),
             ) => Self::Toasts,
             Msg::Plate(_) | Msg::LegendScroll { .. } => Self::Plates,

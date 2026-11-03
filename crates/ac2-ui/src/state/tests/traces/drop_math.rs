@@ -75,10 +75,16 @@ fn rig() -> T {
     t
 }
 
+/// Row `key` of the test rig as a drag.
+fn row(key: TreeKey) -> DragItem {
+    DragItem::Row { rig: RIG, key }
+}
+
 fn drop(t: &mut T, dragged: TreeKey, onto: TreeKey) -> Vec<Request> {
-    let mut r = t.st.apply(Msg::RowDrag(DragMsg::Start(dragged)), &t.keys);
-    r.extend(t.st.apply(Msg::RowDrag(DragMsg::OverRow(Some(onto))), &t.keys));
-    r.extend(t.st.apply(Msg::RowDrag(DragMsg::Drop { compare: false }), &t.keys));
+    let mut r =
+        t.st.apply(Msg::RowDrag(DragMsg::Start(row(dragged))), &t.keys);
+    r.extend(t.st.apply(Msg::RowDrag(DragMsg::OverRow(Some((RIG, onto)))), &t.keys));
+    r.extend(t.st.apply(Msg::RowDrag(DragMsg::Drop), &t.keys));
     r
 }
 
@@ -114,18 +120,18 @@ fn a_curve_dropped_on_a_trace_opens_the_math_dialog_with_its_reading() {
     // A loudness shift acts on the curve: ×, named as the expression reads.
     let mut t = rig();
     t.st.apply(
-        Msg::RowDrag(DragMsg::Start(TreeKey::Trace(TraceId(12)))),
+        Msg::RowDrag(DragMsg::Start(row(TreeKey::Trace(TraceId(12))))),
         &t.keys,
     );
     t.st.apply(
-        Msg::RowDrag(DragMsg::OverRow(Some(TreeKey::Trace(TraceId(10))))),
+        Msg::RowDrag(DragMsg::OverRow(Some((RIG, TreeKey::Trace(TraceId(10)))))),
         &t.keys,
     );
     assert_eq!(
         t.st.drag_label().as_deref(),
         Some("math channel: Main L S1 × loudness 85 → 100 phon")
     );
-    t.st.apply(Msg::RowDrag(DragMsg::Drop { compare: false }), &t.keys);
+    t.st.apply(Msg::RowDrag(DragMsg::Drop), &t.keys);
     assert_eq!(
         made(&mut t),
         (
@@ -218,19 +224,16 @@ fn a_trace_dropped_across_measurements_is_listed_with_the_row_dropped_on() {
 fn a_drop_that_does_not_combine_says_why_and_opens_nothing() {
     let mut t = rig();
     t.st.apply(
-        Msg::RowDrag(DragMsg::Start(TreeKey::Live(MeasId(2)))),
+        Msg::RowDrag(DragMsg::Start(row(TreeKey::Live(MeasId(2))))),
         &t.keys,
     );
     t.st.apply(
-        Msg::RowDrag(DragMsg::OverRow(Some(TreeKey::Trace(TraceId(10))))),
+        Msg::RowDrag(DragMsg::OverRow(Some((RIG, TreeKey::Trace(TraceId(10)))))),
         &t.keys,
     );
     let why = "Sub is a spectrum: it does not combine with Main L S1, a transfer function";
     assert_eq!(t.st.drag_label().as_deref(), Some(why));
-    assert!(
-        t.st.apply(Msg::RowDrag(DragMsg::Drop { compare: false }), &t.keys)
-            .is_empty()
-    );
+    assert!(t.st.apply(Msg::RowDrag(DragMsg::Drop), &t.keys).is_empty());
     assert_eq!(t.st.overlay, Overlay::None);
     assert_eq!(t.last_toast(), why);
     // An EQ set has nothing to filter in another EQ set.

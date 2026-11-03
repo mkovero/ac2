@@ -130,16 +130,8 @@ pub fn new_choices(
     }
 }
 
-/// The chooser's title, and the palette entry and the pane list's row that open it.
+/// The chooser's title, and the palette entry that opens it.
 pub const TITLE: &str = "New measurement";
-
-/// The pane list's last row: `New measurement…  Ctrl+M`.
-pub fn menu_row(key: Option<&str>) -> String {
-    match key {
-        Some(k) => format!("{TITLE}…  {k}"),
-        None => format!("{TITLE}…"),
-    }
-}
 
 /// The measurement list with nothing in it: how to make the first one (`reach`: the
 /// chooser's key, or its palette entry).
@@ -333,7 +325,6 @@ mod tests {
             |k| (k == NewKind::Math).then(|| "no".to_owned()),
         );
         assert_eq!(q.default, 0);
-        assert_eq!(menu_row(Some("Ctrl+M")), "New measurement…  Ctrl+M");
         assert_eq!(empty_list("Ctrl+M"), "none — Ctrl+M: New measurement…");
         assert_eq!(
             last_pane_stays(Some("N"), "Ctrl+M"),

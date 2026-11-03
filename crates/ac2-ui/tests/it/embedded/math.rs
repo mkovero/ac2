@@ -299,7 +299,12 @@ fn spectrum_math_lands_on_the_spectrum_pane() -> R {
                 == n
         })?;
     }
-    d.key("Alt+2");
+    // Spectrum 2 opened in its own pane, focused: the dialog's first operand.
+    assert_eq!(
+        d.st.pane_meas(d.st.layout.focus)
+            .map(|m| m.config.name.clone()),
+        Some("Spectrum 2".into())
+    );
     d.key("Shift+M");
     let Overlay::Form(f) = &d.st.overlay else {
         return Err(format!("{:?}", d.st.overlay).into());

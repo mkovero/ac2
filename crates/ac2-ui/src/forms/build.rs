@@ -256,8 +256,7 @@ impl Form {
             | FormKind::IrImport
             | FormKind::TargetTilt
             | FormKind::TargetLoudness
-            | FormKind::Programme
-            | FormKind::ProgrammeEdit => Vec::new(),
+            | FormKind::Programme => Vec::new(),
             FormKind::Transfer => vec![
                 Field::channel(
                     FieldId::Reference,
@@ -645,7 +644,7 @@ impl Form {
         let kind = match self.kind {
             FormKind::Sweep | FormKind::SweepEdit => return Err("a sweep dialog".into()),
             FormKind::IrImport => return Err("an import dialog".into()),
-            FormKind::Programme | FormKind::ProgrammeEdit => {
+            FormKind::Programme => {
                 return Err("a programme meter dialog".into());
             }
             FormKind::TargetTilt | FormKind::TargetLoudness => {

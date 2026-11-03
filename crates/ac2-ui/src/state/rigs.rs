@@ -19,16 +19,6 @@ pub(crate) struct Visit {
     window_rig: Option<RigId>,
 }
 
-impl Visit {
-    /// The pane list open on the shown rig, if one is.
-    pub(crate) fn pane_menu(&self) -> Option<PaneMenu> {
-        match self.overlay {
-            Overlay::PaneMenu(m) => Some(m),
-            _ => None,
-        }
-    }
-}
-
 impl AppState {
     /// The rig shown (the drop-down's): the one keys and windows act on.
     pub fn active(&self) -> RigId {
@@ -241,7 +231,7 @@ impl AppState {
             !s.contains(&Scope::Global) && !s.contains(&Scope::Inputs)
         };
         match msg {
-            Msg::Conn(r, _) => *r,
+            Msg::Conn(r, _) | Msg::OnRig(r, _) => *r,
             Msg::LegendPick(p, _) | Msg::LeqStrip(p, _) => pane(*p),
             Msg::LevelZoom { pane: p, .. } | Msg::LevelPan { pane: p, .. } => pane(*p),
             Msg::IrNav(..) | Msg::SpectrographCursor { .. } if free => focused,
@@ -259,6 +249,21 @@ impl AppState {
 
     /// One message in; the requests it makes out, each for the rig whose link sends it.
     pub fn update(&mut self, msg: Msg, keymap: &Keymap) -> Vec<(RigId, Request)> {
+        // A row of another rig's part of the list: that rig shown first, as the drop-down
+        // shows it (refused with a window open), then the row as a click there. Folding
+        // another rig's group is that rig's alone: it shows no other rig.
+        let msg = match msg {
+            Msg::OnRig(r, m) if r == self.rig.id => *m,
+            Msg::OnRig(r, m) if !matches!(*m, Msg::ToggleGroup(_)) => {
+                let mut out = self.update(Msg::ShowRig(r), keymap);
+                if self.rig.id == r {
+                    out.extend(self.update(*m, keymap));
+                }
+                return out;
+            }
+            m => m,
+        };
+        let tick = matches!(msg, Msg::Tick { .. });
         let stop_all = match &msg {
             Msg::Key(c) => *c == STOP_ANYWHERE,
             Msg::Command(c) => *c == CommandId::StopAnywhere,
@@ -317,8 +322,8 @@ impl AppState {
         self.follow_rig_ids(&ids);
         self.close_duplicates();
         self.settle_pins();
-        if !self.menu_rigs.is_empty() || matches!(self.overlay, Overlay::PaneMenu(_)) {
-            self.refresh_menu_rigs();
+        if !tick {
+            self.refresh_rig_lists();
         }
         out.into_iter()
             .filter_map(|(s, q)| self.rig_in_slot(s).map(|r| (r.id, q)))

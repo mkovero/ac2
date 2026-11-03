@@ -16,8 +16,8 @@ use crate::keys::{CommandId, Scope};
 use crate::plot::{self, PlotSlot};
 use crate::scenes;
 use crate::state::{
-    Axis, DragMsg, HintPlace, IrNavMsg, Msg, Overlay, PaneId, PaneKind, PaneMenuRow, PaneRect,
-    PlateMsg, StripMsg, TransferView, drop_target,
+    Axis, DragMsg, HintPlace, IrNavMsg, Msg, PaneId, PaneKind, PaneRect, PlateMsg, StripMsg,
+    TransferView, drop_target,
 };
 use crate::theme::Chrome;
 
@@ -274,6 +274,9 @@ fn placeholder(id: PaneId, app: &App) -> String {
     let modes = app.state.pane_modes(id);
     match app.state.layout.kind(id) {
         PaneKind::Transfer if modes.transfer.ir().is_some() => "no transfer measurement".into(),
+        // An unpicked pane's hint box says what to do; the same words under it would only
+        // be cut off by the pane's edges.
+        PaneKind::Spl if app.state.pane_unpicked(id) => String::new(),
         PaneKind::Spl => scenes::spl_placeholder(&app.state, id, &app.keymap),
         PaneKind::Programme => ac2_scene::programme::NO_METERS.to_owned(),
         PaneKind::Walk => format!(
@@ -462,13 +465,6 @@ fn pane(
     painter.rect_stroke(rect, 4.0, stroke, egui::StrokeKind::Inside);
     let title = egui::Rect::from_min_size(rect.min, egui::vec2(rect.width(), TITLE_H));
     let n = order.iter().position(|p| *p == id).unwrap_or(0) + 1;
-    let label = painter.text(
-        title.left_center() + egui::vec2(8.0, 0.0),
-        egui::Align2::LEFT_CENTER,
-        format!("{n}  {pane_title}"),
-        egui::FontId::proportional(12.0),
-        if focused { ch.text } else { ch.dim },
-    );
     let style = crate::keys::label_style();
     let line = app.state.key_hint_line(&app.keymap, id, style);
     // The hint line takes its strip off the plot's bottom: it never covers a curve.
@@ -484,16 +480,32 @@ fn pane(
     );
     // After the pane's own response, so a hover or click there is theirs.
     let all = app.state.pane_hints(&app.keymap, id, style);
-    let name_rect =
-        egui::Rect::from_min_max(title.min, egui::pos2(label.right() + 4.0, title.max.y));
+    let left = title.left() + 8.0;
+    let mut right = title.right() - 8.0;
+    if pane == PaneKind::Distortion
+        && app.state.pane_modes(id).sweep == ac2_scene::view::SweepMode::Response
+        && let Some(l) = unit_toggle(app, ui, title, left + TITLE_MIN_W, ch)
+    {
+        right = l - 10.0;
+    }
+    // The title names the pane and what it shows, as plain text: what a pane shows changes
+    // by a row dropped on it, never from its title.
+    let heading = format!("{n}  {}", app.state.pane_heading(id));
+    let has_caption = !app.state.pane_caption_variants(id).is_empty();
+    let label = title_text(
+        ui,
+        &heading,
+        title,
+        left,
+        title_budget(right - left, has_caption),
+        if focused { ch.text } else { ch.dim },
+    );
     let name = ui.interact(
-        name_rect,
+        label,
         ui.id().with(("pane-title", id.0)),
         egui::Sense::hover(),
     );
-    name.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Label, true, format!("{n}  {pane_title}"))
-    });
+    name.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &heading));
     // No tooltip on the name: it would open over the top of the plot (where the legend
     // sits) whenever the pointer crosses the title; the hint line carries it instead.
     if let Some(items) = &line {
@@ -512,25 +524,7 @@ fn pane(
         });
         line.on_hover_ui(|ui| hints_tooltip(ui, &app.keymap, pane, pane_title, &all, ch));
     }
-    let mut x = label.right() + 10.0;
-    let mut right = title.right() - 8.0;
-    // The unit toggle keeps its place beside the shortest chip; the chip takes what is left.
-    let chip_reserve = if app.state.pane_meas(id).is_some() {
-        CHIP_MIN_W + 10.0
-    } else {
-        0.0
-    };
-    if pane == PaneKind::Distortion
-        && app.state.pane_modes(id).sweep == ac2_scene::view::SweepMode::Response
-        && let Some(left) = unit_toggle(app, ui, title, x + chip_reserve, ch)
-    {
-        right = left - 10.0;
-    }
-    let has_caption = !app.state.pane_caption_variants(id).is_empty();
-    let chip_max = chip_budget(right - x, has_caption);
-    if let Some(chip) = title_chip(app, ui, id, title, x, chip_max, ch) {
-        x = chip.right() + 10.0;
-    }
+    let x = label.right() + 10.0;
     let caption_end = caption(app, ui, id, title, x, right, ch);
     if plot_rect.width() < 8.0 || plot_rect.height() < 8.0 {
         return;
@@ -636,19 +630,13 @@ fn split_gaps(app: &mut App, ui: &egui::Ui, area: egui::Rect) {
 
 /// A list row dragged over the panes: the pane (or the half of it a drop near its side
 /// splits off) shaded faintly with a dashed edge, as the resolution marker shades a range,
-/// and a label by the pointer naming where the row goes. Dropped on release, Shift held
-/// comparing; off the panes, nothing happens.
+/// and a label by the pointer naming where the row goes (and the kind the pane becomes).
+/// Dropped on release; off the panes, nothing happens.
 pub(super) fn row_drag(app: &mut App, ctx: &egui::Context, theme: &Theme, ch: &Chrome) {
     if !app.state.row_drag_held() {
         return;
     }
-    let (pos, down, shift) = ctx.input(|i| {
-        (
-            i.pointer.latest_pos(),
-            i.pointer.primary_down(),
-            i.modifiers.shift,
-        )
-    });
+    let (pos, down) = ctx.input(|i| (i.pointer.latest_pos(), i.pointer.primary_down()));
     let over = if app.state.window_over_panes() {
         None
     } else {
@@ -660,18 +648,11 @@ pub(super) fn row_drag(app: &mut App, ctx: &egui::Context, theme: &Theme, ch: &C
         pos.and_then(|p| drop_target(&rects, p.x, p.y))
     };
     if !down {
-        app.dispatch(Msg::RowDrag(DragMsg::Drop { compare: shift }));
+        app.dispatch(Msg::RowDrag(DragMsg::Drop));
         return;
     }
-    if app
-        .state
-        .row_drag()
-        .is_some_and(|d| d.over != over || d.compare != shift)
-    {
-        app.dispatch(Msg::RowDrag(DragMsg::Over {
-            target: over,
-            compare: shift,
-        }));
+    if app.state.row_drag().is_some_and(|d| d.over != over) {
+        app.dispatch(Msg::RowDrag(DragMsg::Over(over)));
     }
     if app.state.row_drag().is_none() {
         return;

@@ -48,7 +48,8 @@ fn click(t: &mut T, id: u32) {
 
 /// `SPL 2`'s two panes are the layout, and both are drawn (beside `others` of another rig).
 fn both_shown_beside(t: &T, others: usize, what: &str) {
-    assert_eq!(t.st.pane_layout(), split_spl(5), "{what}");
+    let shown = crate::state::panes::meas_layout::owner_plain(&split_spl(5), MeasId(5));
+    assert_eq!(t.st.pane_layout(), shown, "{what}");
     let area = PaneRect::new(0.0, 0.0, 1000.0, 600.0);
     let drawn = t.st.pane_rects(area, 0.0).len();
     assert_eq!(drawn, 2 + others, "{what}: one pane alone");
@@ -117,7 +118,12 @@ const PUPU: RigId = RigId(0x9e9e);
 /// This computer's rig shown (the test daemon with `FOH SPL`), pupu connected in the
 /// background with `SPL 2` split.
 fn pupu_behind() -> T {
-    let mut t = T::new();
+    // The grid's panes left unpicked: a pane showing something would stay pinned to the
+    // first rig when pupu is shown.
+    let mut t = T::fresh();
+    t.st.layout = grid();
+    t.st.pane_auto = false;
+    t.connect(daemon_state());
     t.conn(mirror(with_spl()));
     let slot = t.st.add_rig("pupu".into(), None, None);
     to(
@@ -144,6 +150,7 @@ fn to(t: &mut T, rig: RigId, e: ConnEvent) -> Vec<(RigId, Request)> {
 fn a_meter_row_brings_its_split_panes_on_the_rig_switched_to() {
     let mut t = pupu_behind();
     click(&mut t, 4);
+    t.drop_meas(t.st.layout.focus, MeasId(4));
     t.st.update(Msg::RigPick(RigRow::Rig(PUPU)), &t.keys);
     assert_eq!(t.st.rig.id, PUPU);
     click(&mut t, 4);
@@ -221,7 +228,8 @@ fn the_field_layout_comes_back_whole() {
         click(&mut t, 4);
         t.key("W");
         click(&mut t, 5);
-        assert_eq!(t.st.pane_layout(), field_layout(5), "behind {behind}");
+        let shown = crate::state::panes::meas_layout::owner_plain(&field_layout(5), MeasId(5));
+        assert_eq!(t.st.pane_layout(), shown, "behind {behind}");
         let area = PaneRect::new(0.0, 0.0, 1000.0, 600.0);
         assert_eq!(t.st.pane_rects(area, 0.0).len(), 3, "behind {behind}");
     }

@@ -134,8 +134,6 @@ pub enum Overlay {
     Form(Box<Form>),
     /// The Settings view: every setting, a page per area ([`crate::settings`]).
     Settings(Box<Settings>),
-    /// A pane's measurement list, opened from its title chip.
-    PaneMenu(PaneMenu),
     /// The rigs drop-down of the top bar.
     RigMenu(RigMenu),
     /// The confirmation before a new SPL log.
@@ -372,19 +370,18 @@ pub enum Msg {
     DismissToast(u64),
     /// What rasterises the window, known once its adapter is chosen.
     Rasterizer(ac2_plot::Rasterizer),
-    /// A measurement's row clicked in the list: selected, and its own panes on screen (or
-    /// the focused pane shows it).
+    /// A measurement's row clicked in the list: selected, and its own panes on screen when
+    /// it has them (no pane changes otherwise).
     SelectMeas(MeasId),
     /// The rig group's header in the list: the Rig monitor settings.
     OpenRig,
-    /// A measurement's live-curve row clicked in the list: a child row, shown by the
-    /// focused pane alone, the live row marked as what the keys act on.
+    /// A measurement's live-curve row clicked in the list: a child row, selected, the live
+    /// row marked as what the keys act on; no pane changes.
     SelectLive(MeasId),
-    /// A math channel's row clicked in the list: a child row, shown by the focused pane
-    /// alone.
+    /// A math channel's row clicked in the list: a child row, selected; no pane changes.
     SelectMath(MeasId),
-    /// A stored trace clicked in the list: selected, so the trace keys act on it, and its
-    /// measurement shown by the focused pane alone (again: deselected).
+    /// A stored trace clicked in the list: selected, so the trace keys act on it; no pane
+    /// changes.
     SelectTrace(TraceId),
     /// A stored trace's eye in the list: shown / hidden.
     ToggleShown(TraceId),
@@ -401,13 +398,8 @@ pub enum Msg {
     /// A row of the Inputs list clicked (by its input, a pair by its left): picked, so its
     /// meter keys act on it (again: unpicked).
     InputPick(u16),
-    /// The pane title chip: opens (or closes) the pane's list.
-    PaneMenu(PaneId),
     /// A row of the rigs drop-down clicked.
     RigPick(RigRow),
-    /// A row picked from a pane's list: the pane shows that measurement (selected), or
-    /// turns into that kind of pane.
-    PanePick(PaneId, PaneMenuRow),
     /// The gap of the split at `path` dragged: the split takes `ratio`, within its limits.
     DragSplit {
         path: Vec<Side>,
@@ -417,6 +409,11 @@ pub enum Msg {
     DragSplitEnd,
     /// A row of the measurement list dragged onto the panes.
     RowDrag(super::DragMsg),
+    /// A row of rig `.0`'s part of the measurement list: that rig is shown first (a row of
+    /// the rig shown is just the message).
+    OnRig(ac2_proto::units::RigId, Box<Msg>),
+    /// A rig's heading in the measurement list clicked: that rig is shown.
+    ShowRig(ac2_proto::units::RigId),
     /// Mouse wheel / pinch on a frequency axis.
     Zoom {
         about_hz: f64,

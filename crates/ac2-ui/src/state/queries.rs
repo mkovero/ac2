@@ -526,6 +526,9 @@ impl AppState {
                 .find_map(|c| keymap.label(c, Scope::Global))
                 .unwrap_or_else(|| "Command palette".to_owned());
             ac2_scene::new_meas::no_measurements(&reach)
+        } else if self.pane_unpicked(pane) {
+            // An unpicked pane follows no selection: a row dropped on it is what it shows.
+            ac2_scene::pane_edit::NOTHING_PICKED.to_owned()
         } else if !self.pane_shows_stored(pane)
             && let n @ 1.. = self.imported_traces(kind)
         {
@@ -574,6 +577,20 @@ impl AppState {
             HintPlace::Centre
         };
         Some(EmptyHint { text, place })
+    }
+
+    /// A measurement pane (a graph or an SPL meter) of the rig in `rig` with nothing picked
+    /// and no pick waiting for the mirror: it shows nothing until a row is dropped on it.
+    pub fn pane_unpicked(&self, pane: PaneId) -> bool {
+        self.layout.view(pane).is_some_and(|v| {
+            self.ours(v)
+                && matches!(
+                    v.kind,
+                    PaneKind::Transfer | PaneKind::Spectrum | PaneKind::Distortion | PaneKind::Spl
+                )
+                && v.meas.is_none()
+        }) && !self.rig.pending.pane_ids.contains_key(&pane)
+            && !self.rig.pending.pane_meas.contains_key(&pane)
     }
 
     /// Whether pane `pane` draws any stored curve whose data has arrived: a shown capture,
@@ -767,10 +784,7 @@ impl AppState {
     /// A window drawn over the panes (behind a backdrop) is open: it owns the keyboard and
     /// the mouse. The delay candidates and a pane's measurement list stay out of the way.
     pub fn window_over_panes(&self) -> bool {
-        !matches!(
-            self.overlay,
-            Overlay::None | Overlay::DelayPick(_) | Overlay::PaneMenu(_)
-        )
+        !matches!(self.overlay, Overlay::None | Overlay::DelayPick(_))
     }
 
     pub fn stimulus_live(&self) -> bool {

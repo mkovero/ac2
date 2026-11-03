@@ -123,16 +123,14 @@ pub(super) struct UndoWatch {
 
 enum Watch {
     /// A key or palette command: which one ran says what it was.
-    Command { menu: Option<PaneId> },
+    Command,
     /// A list row chosen (click, drop): `item` went to the focused pane, or to `spot`.
     Row {
         item: String,
         spot: Option<DropSpot>,
     },
-    /// A row of pane `p`'s list taken.
-    Pick(PaneId),
-    /// The programme meter form's Enter: new panes, or (`Some`) that pane's pick.
-    MeterForm(Option<PaneId>),
+    /// The programme meter form's Enter: new panes.
+    MeterForm,
 }
 
 impl AppState {
@@ -150,27 +148,15 @@ impl AppState {
     pub(super) fn undo_watch(&mut self, msg: &Msg) -> Option<UndoWatch> {
         let row = |st: &Self, k: TreeKey| st.row_name(k).unwrap_or_default();
         // The form's submit runs no command, so it is told by the form it closes.
-        let meter_form = match &self.overlay {
-            Overlay::Form(f)
-                if matches!(f.kind, FormKind::Programme | FormKind::ProgrammeEdit)
-                    && match msg {
-                        Msg::Key(c) => c.key == eframe::egui::Key::Enter,
-                        Msg::Form(FormMsg::Submit) => true,
-                        _ => false,
-                    } =>
-            {
-                Some(f.meter.as_ref().and_then(|m| m.edit))
-            }
-            _ => None,
-        };
+        let meter_form = matches!(&self.overlay, Overlay::Form(f) if f.kind == FormKind::Programme)
+            && match msg {
+                Msg::Key(c) => c.key == eframe::egui::Key::Enter,
+                Msg::Form(FormMsg::Submit) => true,
+                _ => false,
+            };
         let what = match msg {
-            _ if meter_form.is_some() => Watch::MeterForm(meter_form.flatten()),
-            Msg::Key(_) | Msg::Command(_) => Watch::Command {
-                menu: match self.overlay {
-                    Overlay::PaneMenu(m) => Some(m.pane),
-                    _ => None,
-                },
-            },
+            _ if meter_form => Watch::MeterForm,
+            Msg::Key(_) | Msg::Command(_) => Watch::Command,
             Msg::SelectMeas(id) => Watch::Row {
                 item: row(self, TreeKey::Meas(*id)),
                 spot: None,
@@ -187,12 +173,11 @@ impl AppState {
                 item: row(self, TreeKey::Trace(*id)),
                 spot: None,
             },
-            Msg::PanePick(p, _) => Watch::Pick(*p),
-            Msg::RowDrag(DragMsg::Drop { compare }) => {
+            Msg::RowDrag(DragMsg::Drop) => {
                 let d = self.row_drag()?;
-                let spot = self.drop_spot(d.over?, *compare)?;
+                let spot = self.drop_spot(d.over?)?;
                 Watch::Row {
-                    item: row(self, d.item),
+                    item: self.drag_item_name(d.item),
                     spot: Some(spot),
                 }
             }
@@ -240,13 +225,11 @@ impl AppState {
                 item: item.clone(),
                 spot: spot.unwrap_or(DropSpot::Pane(focus)),
             },
-            Watch::Pick(p) => self.pick_edit(*p),
-            Watch::MeterForm(Some(p)) => self.pick_edit(*p),
-            Watch::MeterForm(None) => PaneEdit::Split(was),
-            Watch::Command { menu } => match ran {
-                None => self.pick_edit((*menu)?),
+            Watch::MeterForm => PaneEdit::Split(was),
+            Watch::Command => match ran {
+                None => return None,
                 Some(c) => match c {
-                    C::SplitPane | C::ProgrammePane => PaneEdit::Split(was),
+                    C::SplitPane => PaneEdit::Split(was),
                     C::ClosePane => PaneEdit::Close(was),
                     C::TurnSplit => PaneEdit::Turn(was),
                     C::GrowPane | C::ShrinkPane => PaneEdit::Resize,
@@ -283,19 +266,6 @@ impl AppState {
                 },
             },
         })
-    }
-
-    /// A pick from pane `p`'s list: the measurement it shows now, or its new kind.
-    fn pick_edit(&self, p: PaneId) -> PaneEdit {
-        let item = match self.layout.view(p).and_then(|v| v.meas) {
-            Some(_) => self.pane_meas(p).map(|m| m.config.name.clone()),
-            None => None,
-        }
-        .unwrap_or_else(|| self.layout.kind(p).title().to_owned());
-        PaneEdit::Put {
-            item,
-            spot: DropSpot::Pane(self.pane_number(p)),
-        }
     }
 
     /// The first step of a split or plate dragged (`msg`): the panes before it.
@@ -380,10 +350,6 @@ impl AppState {
             .pending
             .pane_meas
             .retain(|p, _| self.layout.views.contains_key(p));
-        if matches!(self.overlay, Overlay::PaneMenu(m) if !self.layout.views.contains_key(&m.pane))
-        {
-            self.overlay = Overlay::None;
-        }
         self.fullscreen = s.fullscreen;
         self.panes_only = s.panes_only;
         // Another rig's measurement is no owner here: its ids name nothing on this rig.

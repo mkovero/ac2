@@ -32,6 +32,21 @@ fn pair_rig() -> common::Rig {
     rig
 }
 
+/// Input row `channel` dragged onto the focused pane's right edge: a Programme pane
+/// beside it metering that row (a pair's on its goniometer), as the mouse would.
+fn drop_input(h: &mut Harness<'_, App>, channel: u16) {
+    use ac2_ui::state::{DragItem, DragMsg, DropTarget, Msg};
+    let a = h.state_mut();
+    let pane = a.state.layout.focus;
+    a.dispatch(Msg::RowDrag(DragMsg::Start(DragItem::Input(channel))));
+    a.dispatch(Msg::RowDrag(DragMsg::Over(Some(DropTarget {
+        pane,
+        edge: Some(ac2_scene::pane_edit::Edge::Right),
+    }))));
+    a.dispatch(Msg::RowDrag(DragMsg::Drop));
+    h.step();
+}
+
 /// The scene text of the focused pane (the meters P opens).
 fn programme_texts(h: &Harness<'_, App>) -> Vec<String> {
     pane_texts(h, h.state().state.layout.focus)
@@ -66,8 +81,8 @@ fn loudness(a: &App, pane: ac2_ui::state::PaneId) -> Option<LoudnessReadout> {
     a.state.programme_pane(pane)?.0.loudness
 }
 
-/// A click picks the pair's Inputs row, P meters it in two new Programme panes: the
-/// goniometer on the left, the meters on the right with the focus. The meters' title says
+/// A click picks the pair's Inputs row, dropped twice it meters the pair in two new
+/// Programme panes: the goniometer on the left, the meters (G) on the right with the focus. The meters' title says
 /// the ballistic, the pair and the correlator window, the chip that the right side is too
 /// quiet to correlate. Both panes and their views outlive a save and load of the layout.
 #[test]
@@ -99,19 +114,26 @@ fn programme_pane_of_a_pair() {
     step_until(&mut h, "the pair's row picked", |a| {
         a.state.rig.input_pick == Some(2)
     });
-    h.key_press(Key::P);
+    // Dropped beside the focused pane: the goniometer; dropped again beside that and
+    // stepped (G): the meters, with the focus.
+    drop_input(&mut h, 2);
     step_until(&mut h, "a Programme pane", |a| {
         common::visible(&a.state).contains(&PaneKind::Programme)
     });
+    let gonio = h.state().state.layout.focus;
+    drop_input(&mut h, 2);
+    h.key_press(Key::G);
+    h.step();
     let st = &h.state().state;
     let panes: Vec<_> = st
         .visible_panes()
         .into_iter()
         .filter(|p| st.layout.kind(*p) == PaneKind::Programme)
         .collect();
-    let [gonio, pane] = panes[..] else {
+    let [left, pane] = panes[..] else {
         panic!("two Programme panes: {panes:?}")
     };
+    assert_eq!(left, gonio);
     assert_eq!(st.layout.focus, pane);
     assert_eq!(st.pane_title(pane), "true peak · Main · 1 s");
     // The goniometer fills its pane: its axes, the correlation scale and the pair's chip,
@@ -265,7 +287,7 @@ fn loudness_plate_only_for_one_source() {
         })
     });
     h.state_mut().dispatch(ac2_ui::state::Msg::InputPick(1));
-    h.key_press(Key::P);
+    drop_input(&mut h, 1);
     step_until(&mut h, "a Programme pane", |a| {
         common::visible(&a.state).contains(&PaneKind::Programme)
     });
@@ -374,7 +396,10 @@ fn mom_loudness_reads_lufs_bars() {
         })
     });
     h.state_mut().dispatch(Msg::InputPick(2));
-    h.key_press(Key::P);
+    // The pair opens on its goniometer: G steps it to the meters.
+    drop_input(&mut h, 2);
+    h.key_press(Key::G);
+    h.step();
     step_until(&mut h, "a Programme pane", |a| {
         common::visible(&a.state).contains(&PaneKind::Programme)
     });
@@ -533,7 +558,10 @@ fn a_mic_pair_on_short_loudness_reads_true_peak() {
     assert!(block.correlation.is_some(), "the pair's correlation");
 
     h.state_mut().dispatch(ac2_ui::state::Msg::InputPick(2));
-    h.key_press(Key::P);
+    drop_input(&mut h, 2);
+    drop_input(&mut h, 2);
+    h.key_press(Key::G);
+    h.step();
     step_until(&mut h, "two Programme panes", |a| {
         common::visible(&a.state)
             .iter()

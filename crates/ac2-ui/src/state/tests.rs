@@ -134,6 +134,10 @@ fn mirror_of(state: State, incarnation: u64, me: Option<&str>) -> ConnEvent {
 struct T {
     st: AppState,
     keys: Keymap,
+    /// Each mirror received fills the panes nothing was dropped on ([`T::pick_panes`]): the
+    /// panes most tests read stand for a layout the operator filled. Off for the tests of
+    /// what an unpicked pane does.
+    fill: bool,
 }
 
 /// The tests' daemon, as its hello reply names it.
@@ -195,8 +199,51 @@ impl T {
         let mut t = Self::fresh();
         t.st.layout = grid();
         t.st.pane_auto = false;
+        t.fill = true;
         t.connect(daemon_state());
         t
+    }
+
+    /// Every pane with nothing picked given a measurement it draws, as a layout the operator
+    /// filled by dropping rows (not while a measurement's own panes are on screen): the selected measurement where the pane draws it, else the
+    /// first in the list it draws.
+    fn pick_panes(&mut self) {
+        // A measurement's own panes on screen are its layout as stored, not the operator's.
+        if self.st.rig.own_panes.is_some() {
+            return;
+        }
+        for p in self.st.layout.root.leaves() {
+            self.pick_pane(p);
+        }
+    }
+
+    /// [`T::pick_panes`] for pane `p` alone.
+    fn pick_pane(&mut self, p: PaneId) {
+        let Some(v) = self.st.layout.view(p) else {
+            return;
+        };
+        if v.meas.is_some()
+            || v.rig != PaneRig::Active
+            || matches!(v.kind, PaneKind::Programme | PaneKind::Walk)
+        {
+            return;
+        }
+        let kind = v.kind;
+        let ms = self.st.measurements();
+        let id = self
+            .st
+            .rig
+            .selected
+            .filter(|id| ms.iter().any(|m| m.id == *id && kind.shows(&m.config.kind)))
+            .or_else(|| {
+                self.st
+                    .tree_meas_order()
+                    .into_iter()
+                    .find(|id| ms.iter().any(|m| m.id == *id && kind.shows(&m.config.kind)))
+            });
+        if let (Some(id), Some(v)) = (id, self.st.layout.view_mut(p)) {
+            v.meas = Some(id);
+        }
     }
 
     /// The app as first started, with no layout saved, before a daemon is known.
@@ -206,6 +253,7 @@ impl T {
         Self {
             st: AppState::default(),
             keys: Keymap::default(),
+            fill: false,
         }
     }
 
@@ -245,11 +293,41 @@ impl T {
         self.st.layout.focus_kind()
     }
 
-    /// The focused pane turned into `kind` through its menu.
+    /// The focused pane turned into `kind`, given a measurement of that kind as
+    /// [`T::pick_pane`] does (a row of that kind dropped on it).
     fn show(&mut self, kind: PaneKind) {
         let f = self.st.layout.focus;
-        self.st
-            .apply(Msg::PanePick(f, PaneMenuRow::Kind(kind)), &self.keys);
+        self.st.set_pane_kind(f, kind);
+        self.pick_pane(f);
+    }
+
+    /// `item` dragged and dropped on pane `pane` (near `edge`), as the pointer does it.
+    fn drag_drop(
+        &mut self,
+        item: DragItem,
+        pane: PaneId,
+        edge: Option<ac2_scene::pane_edit::Edge>,
+    ) -> Vec<Request> {
+        let mut r = self
+            .st
+            .apply(Msg::RowDrag(DragMsg::Start(item)), &self.keys);
+        r.extend(self.st.apply(
+            Msg::RowDrag(DragMsg::Over(Some(DropTarget { pane, edge }))),
+            &self.keys,
+        ));
+        r.extend(self.st.apply(Msg::RowDrag(DragMsg::Drop), &self.keys));
+        r
+    }
+
+    /// Row `key` of the shown rig's list dropped in the middle of pane `pane`.
+    fn drop_row(&mut self, pane: PaneId, key: ac2_scene::meas_list::TreeKey) -> Vec<Request> {
+        let rig = self.st.active();
+        self.drag_drop(DragItem::Row { rig, key }, pane, None)
+    }
+
+    /// Measurement `id`'s row dropped in the middle of pane `pane`.
+    fn drop_meas(&mut self, pane: PaneId, id: MeasId) -> Vec<Request> {
+        self.drop_row(pane, ac2_scene::meas_list::TreeKey::Meas(id))
     }
 
     /// The focus set on the pane of `kind` without a message; with none, one added as
@@ -303,12 +381,19 @@ impl T {
         let mut t = Self::fresh();
         t.st.layout = grid();
         t.st.pane_auto = false;
+        t.fill = true;
         t
     }
 
     fn conn(&mut self, e: ConnEvent) -> Vec<Request> {
-        self.st
-            .apply(Msg::Conn(self.st.active(), Box::new(e)), &self.keys)
+        let mirrored = matches!(e, ConnEvent::Mirror(_));
+        let r = self
+            .st
+            .apply(Msg::Conn(self.st.active(), Box::new(e)), &self.keys);
+        if mirrored && self.fill {
+            self.pick_panes();
+        }
+        r
     }
 
     fn key(&mut self, s: &str) -> Vec<Request> {

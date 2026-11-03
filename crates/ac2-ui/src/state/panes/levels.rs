@@ -368,7 +368,7 @@ impl AppState {
     pub(in crate::state) fn fit_first_shows(&mut self) {
         self.rearm_started_spectra();
         for pane in self.layout.root.leaves() {
-            // A pane waiting for its remembered measurement shows a stand-in.
+            // A pane waiting for its remembered measurement has nothing to frame yet.
             if self.layout.kind(pane) != PaneKind::Spectrum
                 || self.rig.pending.pane_meas.contains_key(&pane)
             {

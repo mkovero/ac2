@@ -6,7 +6,7 @@ use super::*;
 use ac2_proto::units::{Dbfs, RigId};
 use ac2_ui::connect::Choice;
 use ac2_ui::prefs::RigAddr;
-use ac2_ui::state::{PaneMenuRow, PaneRig};
+use ac2_ui::state::PaneRig;
 
 const PUPU: RigId = RigId(0x7075_7075);
 const KETTU: RigId = RigId(0x6b65_7474);
@@ -26,10 +26,11 @@ fn on_pupu(pupu: &common::Rig, keys: &std::path::Path) -> Harness<'static, App> 
     h
 }
 
-/// Connect a rig… from the palette, the dialog's choice `kettu` at its endpoints. The
-/// watchdog gives up on a silent link after `dead_after`.
+/// Connect a rig… from the palette, the dialog's choice `kettu` at its endpoints, shown once
+/// its mirror is in step (the panes keep pupu's measurements, pinned to it by the switch).
+/// The watchdog gives up on a silent link after `dead_after`.
 fn connect_kettu(h: &mut Harness<'_, App>, kettu: &common::Rig, dead_after: Duration) {
-    connect_kettu_until(h, kettu, dead_after, live);
+    connect_kettu_until(h, kettu, dead_after, synced);
 }
 
 /// The mirror is in step with the daemon: what a rig with no pane of its own on screen
@@ -248,39 +249,22 @@ fn the_inputs_meter_the_rig_shown() {
     });
 }
 
-/// The focused pane's list opened from the palette (*Choose pane measurement…*).
-fn open_pane_list(h: &mut Harness<'_, App>) {
-    h.key_press_modifiers(Modifiers::COMMAND, Key::K);
-    h.event(Event::Text("choose pane measurement".into()));
-    step_until(h, "palette typed", |a| {
-        matches!(&a.state.overlay, Overlay::Palette(_))
-    });
-    h.key_press(Key::Enter);
-    step_until(h, "the pane's list", |a| {
-        matches!(a.state.overlay, Overlay::PaneMenu(_))
-    });
-}
-
-/// ↓ in the open pane list until `row` is highlighted, then Enter.
-fn take_row(h: &mut Harness<'_, App>, row: PaneMenuRow) {
-    let at = |a: &App| {
-        let Overlay::PaneMenu(m) = a.state.overlay else {
-            return None;
-        };
-        Some((m.index, a.state.pane_menu_rows(m.pane)))
-    };
-    h.key_press(Key::Home);
-    for _ in 0..40 {
-        h.step();
-        let (i, rows) = at(h.state()).expect("the list open");
-        if rows.get(i).map(|(r, _)| *r) == Some(row) {
-            h.key_press(Key::Enter);
-            step_until(h, "the list closed", |a| a.state.overlay == Overlay::None);
-            return;
-        }
-        h.key_press(Key::ArrowDown);
-    }
-    panic!("{row:?} not in the list: {:?}", at(h.state()));
+/// Kettu's measurement 3's row of the list dragged onto the middle of pane `p`.
+fn drop_kettus(h: &mut Harness<'_, App>, p: ac2_ui::state::PaneId) {
+    use ac2_scene::meas_list::TreeKey;
+    use ac2_ui::state::{DragItem, DragMsg, DropTarget, Msg};
+    let key = TreeKey::Meas(MeasId(3));
+    let a = h.state_mut();
+    a.dispatch(Msg::RowDrag(DragMsg::Start(DragItem::Row {
+        rig: KETTU,
+        key,
+    })));
+    a.dispatch(Msg::RowDrag(DragMsg::Over(Some(DropTarget {
+        pane: p,
+        edge: None,
+    }))));
+    a.dispatch(Msg::RowDrag(DragMsg::Drop));
+    h.step();
 }
 
 /// Kettu's spectrum measurement goes by another name than pupu's of the same id.
@@ -298,11 +282,12 @@ fn rename_kettu_fft(kettu: &common::Rig) {
     s.commit(Change::Measurement(Patch::Set(m)));
 }
 
-/// Pupu shown; kettu's spectrum picked from the pane's list, under kettu's heading: the pane
-/// shows kettu's measurement 3 (not pupu's of that id), titled with kettu's name.
+/// Pupu shown; the list shows kettu's rows under kettu's heading, and kettu's spectrum
+/// dragged onto a pane shows kettu's measurement 3 there (not pupu's of that id), titled with
+/// kettu's name, pupu still shown.
 #[test]
-fn another_rigs_measurement_picked_into_a_pane() {
-    if !have_gpu("another_rigs_measurement_picked_into_a_pane") {
+fn another_rigs_measurement_dropped_into_a_pane() {
+    if !have_gpu("another_rigs_measurement_dropped_into_a_pane") {
         return;
     }
     let keys = tempfile::tempdir().expect("key directory");
@@ -316,17 +301,30 @@ fn another_rigs_measurement_picked_into_a_pane() {
         a.state.active() == PUPU && live(a)
     });
     let p = h.state().state.layout.focus;
-    open_pane_list(&mut h);
+    step_until(&mut h, "kettu's rows listed", |a| {
+        a.state
+            .list_rows()
+            .iter()
+            .any(|(r, row)| *r == KETTU && row.name.contains("Kettu FFT"))
+    });
     h.step();
     // Each rig's heading over its rows, kettu's measurement by its own name.
-    assert!(h.query_by_label("kettu").is_some(), "kettu's heading");
     assert!(
-        h.query_by_label_contains("Kettu FFT").is_some(),
+        h.query_all(egui_kittest::kittest::By::new().label_contains("kettu"))
+            .next()
+            .is_some(),
+        "kettu's heading"
+    );
+    assert!(
+        h.query_all(egui_kittest::kittest::By::new().label_contains("Kettu FFT"))
+            .next()
+            .is_some(),
         "kettu's measurement listed"
     );
     h.state_mut().state.toasts.list.clear();
-    snapshot(&mut h, "pane_list_two_rigs");
-    take_row(&mut h, PaneMenuRow::RigMeas(KETTU, MeasId(3)));
+    snapshot(&mut h, "list_two_rigs");
+    drop_kettus(&mut h, p);
+    assert_eq!(h.state().state.active(), PUPU, "the rig shown stays");
     let v = *h.state().state.layout.view(p).expect("pane");
     assert_eq!((v.rig, v.meas), (PaneRig::Rig(KETTU), Some(MeasId(3))));
     assert_eq!(v.kind, PaneKind::Spectrum);
@@ -357,9 +355,14 @@ fn a_session_with_its_own_panes_loads_on_either_rig() {
     step_until(&mut h, "pupu shown", |a| {
         a.state.active() == PUPU && live(a)
     });
-    // Mic 1 FFT chosen on pupu and its panes edited: its layout is stored on pupu.
+    // Mic 1 FFT chosen on pupu and its panes edited (a split, it dropped on the new half):
+    // its layout is stored on pupu.
     tab_to(&mut h, MeasId(3));
+    let sp = common::pane(&h.state().state, PaneKind::Spectrum);
+    h.state_mut().dispatch(ac2_ui::state::Msg::FocusPane(sp));
     h.key_press(Key::N);
+    settle(&mut h, 2);
+    drop_on_kind(&mut h, PaneKind::Spectrum, MeasId(3));
     let stored = |fake: &ac2_client::fake::FakeDaemon| {
         fake.lock()
             .state
@@ -453,8 +456,10 @@ fn a_pin_finds_its_rig_on_another_address() {
         a.state.active() == PUPU && live(a)
     });
     let p = h.state().state.layout.focus;
-    open_pane_list(&mut h);
-    take_row(&mut h, PaneMenuRow::RigMeas(KETTU, MeasId(3)));
+    step_until(&mut h, "kettu's rows listed", |a| {
+        a.state.list_rows().iter().any(|(r, _)| *r == KETTU)
+    });
+    drop_kettus(&mut h, p);
     // Kettu shown and closed from the drop-down (its last row).
     open_rig_menu(&mut h);
     h.key_press(Key::Home);

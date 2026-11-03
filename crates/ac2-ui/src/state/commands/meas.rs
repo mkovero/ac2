@@ -149,10 +149,10 @@ impl AppState {
             C::NewMeasurement => self.open_new_measurement(self.layout.focus, keymap),
             C::NextColour | C::PrevColour => self.step_colour(c == C::NextColour, out),
             C::EditMeas => {
-                // A focused Programme pane: what it meters, edited in place. It shows no
-                // measurement, so the selection is not what the operator is pointing at.
+                // A focused Programme pane shows no measurement, so the selection is not what
+                // the operator is pointing at; what it meters changes by a row dropped on it.
                 if self.layout.focus_kind() == PaneKind::Programme {
-                    self.open_meter_form(Some(self.layout.focus), out);
+                    self.warn(ac2_scene::pane_edit::PROGRAMME_EDIT);
                     return;
                 }
                 // A sweep measurement selected (or the sweep pane's) edits its settings.

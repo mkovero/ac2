@@ -4,7 +4,9 @@ use ac2_proto::model::TraceOwner;
 use ac2_scene::meas_list::{Mark, TreeKey, TreeRow};
 use eframe::egui::{self, Color32, RichText};
 
-use crate::state::{DragMsg, Msg};
+use ac2_proto::units::RigId;
+
+use crate::state::{DragItem, DragMsg, Msg};
 use crate::theme::Chrome;
 
 /// The tooltips of the tree's rows, with the keys that do the same.
@@ -22,15 +24,18 @@ const INDENT: f32 = 14.0;
 
 /// How far (points) the pointer moves with the button held on a row before the row is
 /// dragged: a click that wobbles a little stays a click.
-const ROW_DRAG_START: f32 = 6.0;
+pub(crate) const ROW_DRAG_START: f32 = 6.0;
 
 /// One row of the measurement tree: a header (its fold arrow, its tag and name over its
 /// state) or a row under it (its tree line, its dot when it has a curve to show or hide,
 /// its name over what it is). `reveal`: the tree scrolls the row into view. Pressed and
-/// moved, a row other than Imported's starts a drag onto the panes or another row (unless
-/// one is `dragging` already). Returns the message and where the row was drawn.
+/// moved, a row other than a heading starts a drag onto the panes or another row (unless
+/// one is `dragging` already). The row is rig `rig`'s: a click on a row of a rig other than
+/// `shown` shows that rig first. Returns the message and where the row was drawn.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn tree_row(
     ui: &mut egui::Ui,
+    (rig, shown): (RigId, RigId),
     row: &TreeRow,
     tips: &RowTips,
     ch: &Chrome,
@@ -39,6 +44,13 @@ pub(super) fn tree_row(
     dragging: bool,
 ) -> (Option<Msg>, egui::Rect) {
     let mut click = None;
+    let on_rig = |m: Msg| {
+        if rig == shown {
+            m
+        } else {
+            Msg::OnRig(rig, Box::new(m))
+        }
+    };
     let group = match row.key {
         TreeKey::Meas(meas) => Some(TraceOwner::Meas { meas }),
         TreeKey::Imported => Some(TraceOwner::Imported),
@@ -76,7 +88,7 @@ pub(super) fn tree_row(
                 ));
                 let r = r.on_hover_text(label);
                 if r.clicked() {
-                    click = Some(Msg::ToggleGroup(g));
+                    click = Some(on_rig(Msg::ToggleGroup(g)));
                 }
             } else if row.depth == 0 {
                 // A header with nothing to fold (the rig's, the session's).
@@ -118,13 +130,17 @@ pub(super) fn tree_row(
                     tips.eye
                 );
                 if eye.on_hover_text(tip).clicked() {
-                    click = Some(match row.key {
+                    click = Some(on_rig(match row.key {
                         TreeKey::Trace(id) => Msg::ToggleShown(id),
                         TreeKey::Live(id) | TreeKey::Math(id) => Msg::ToggleMeasShown(id),
-                        TreeKey::Meas(_) | TreeKey::Imported | TreeKey::Rig | TreeKey::Session => {
+                        TreeKey::Meas(_)
+                        | TreeKey::Imported
+                        | TreeKey::Rig
+                        | TreeKey::Session
+                        | TreeKey::RigName(_) => {
                             return;
                         }
-                    });
+                    }));
                 }
             }
             // The longest detail line that fits beside the name, measured as drawn.
@@ -194,23 +210,27 @@ pub(super) fn tree_row(
                     .map_or(0.0, |(a, b)| a.distance(b))
             });
             if draggable && !dragging && r.dragged() && moved >= ROW_DRAG_START {
-                click = Some(Msg::RowDrag(DragMsg::Start(row.key)));
+                click = Some(Msg::RowDrag(DragMsg::Start(DragItem::Row {
+                    rig,
+                    key: row.key,
+                })));
             }
             // A double click's second click also reads as a click: check it first, or it would
             // deselect the row the first click selected.
             if let TreeKey::Trace(id) = row.key
                 && r.double_clicked()
             {
-                click = Some(Msg::RenameTrace(id));
+                click = Some(on_rig(Msg::RenameTrace(id)));
             } else if r.clicked() {
                 click = Some(match row.key {
-                    TreeKey::Meas(id) => Msg::SelectMeas(id),
-                    TreeKey::Math(id) => Msg::SelectMath(id),
-                    TreeKey::Live(id) => Msg::SelectLive(id),
-                    TreeKey::Trace(id) => Msg::SelectTrace(id),
-                    TreeKey::Imported => Msg::ToggleGroup(TraceOwner::Imported),
-                    TreeKey::Rig => Msg::OpenRig,
-                    TreeKey::Session => return,
+                    TreeKey::Meas(id) => on_rig(Msg::SelectMeas(id)),
+                    TreeKey::Math(id) => on_rig(Msg::SelectMath(id)),
+                    TreeKey::Live(id) => on_rig(Msg::SelectLive(id)),
+                    TreeKey::Trace(id) => on_rig(Msg::SelectTrace(id)),
+                    TreeKey::Imported => on_rig(Msg::ToggleGroup(TraceOwner::Imported)),
+                    TreeKey::Rig => on_rig(Msg::OpenRig),
+                    TreeKey::RigName(r) if r != shown => Msg::ShowRig(r),
+                    TreeKey::Session | TreeKey::RigName(_) => return,
                 });
             }
         })

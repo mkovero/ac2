@@ -52,6 +52,26 @@ impl Driver {
         }
     }
 
+    /// Row `key` of the shown rig's list dragged and dropped on pane `pane` (near `edge`),
+    /// as the pointer does it.
+    pub fn drop_row(
+        &mut self,
+        key: ac2_scene::meas_list::TreeKey,
+        pane: ac2_ui::state::PaneId,
+        edge: Option<ac2_scene::pane_edit::Edge>,
+    ) {
+        use ac2_ui::state::{DragItem, DragMsg, DropTarget};
+        let rig = self.st.active();
+        self.send(Msg::RowDrag(DragMsg::Start(DragItem::Row { rig, key })));
+        self.send(Msg::RowDrag(DragMsg::Over(Some(DropTarget { pane, edge }))));
+        self.send(Msg::RowDrag(DragMsg::Drop));
+    }
+
+    /// Measurement `id`'s row dropped in the middle of pane `pane`.
+    pub fn drop_meas(&mut self, pane: ac2_ui::state::PaneId, id: MeasId) {
+        self.drop_row(ac2_scene::meas_list::TreeKey::Meas(id), pane, None);
+    }
+
     pub fn key(&mut self, chord: &str) {
         let c = Chord::parse(chord).unwrap_or_else(|e| panic!("{e}"));
         self.send(Msg::Key(c));

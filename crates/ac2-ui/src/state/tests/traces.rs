@@ -2,141 +2,72 @@
 
 use super::*;
 
+/// A pane shows what is dropped on it, turning into the kind that draws it; a click in a
+/// pane, a focus key or a measurement row without its own panes changes no pane, and the
+/// selection stays on the row chosen.
 #[test]
-fn panes_show_their_measurement_and_leave_the_selection() {
+fn panes_show_what_is_dropped_and_leave_the_selection() {
     let mut t = T::new();
     t.conn(mirror(four()));
-    let shown = |t: &T, p: PaneKind| t.st.kind_meas(p).map(|m| m.id.0);
-    assert_eq!(t.st.rig.selected, Some(MeasId(1)));
-    let ir = |t: &T| t.st.pane_meas(t.ir_pane()).map(|m| m.id.0);
-    assert_eq!(shown(&t, PaneKind::Transfer), Some(1));
-    assert_eq!(ir(&t), Some(1));
-    assert_eq!(shown(&t, PaneKind::Spectrum), Some(2));
-    assert_eq!(shown(&t, PaneKind::Spl), None);
+    t.fill = false;
+    let picks = |t: &T| -> Vec<Option<u32>> {
+        t.st.visible_panes()
+            .into_iter()
+            .map(|p| t.st.pane_meas(p).map(|m| m.id.0))
+            .collect()
+    };
+    let selected = t.st.rig.selected;
 
     // A click in a pane focuses it and selects nothing.
-    t.st.apply(Msg::FocusPane(t.pane(PaneKind::Spectrum)), &t.keys);
-    assert_eq!(t.focus_kind(), PaneKind::Spectrum);
-    assert_eq!(t.st.rig.selected, Some(MeasId(1)));
-    // Its list offers the measurements of its kind: spectrum and RTA here. A pick shows
-    // one there, the selection staying on its row.
     let sp = t.pane(PaneKind::Spectrum);
-    t.st.apply(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(4))), &t.keys);
-    assert_eq!(t.st.rig.selected, Some(MeasId(1)));
-    assert_eq!(shown(&t, PaneKind::Spectrum), Some(4));
-    t.st.apply(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(2))), &t.keys);
-    assert_eq!(t.st.rig.selected, Some(MeasId(1)));
-    // The transfer pane kept its own measurement.
+    t.st.apply(Msg::FocusPane(sp), &t.keys);
+    assert_eq!(t.focus_kind(), PaneKind::Spectrum);
+    assert_eq!(t.st.rig.selected, selected);
+    // A drop shows the row there, the selection staying on its row.
+    t.drop_meas(sp, MeasId(4));
+    assert_eq!(t.st.rig.selected, selected);
+    assert_eq!(t.st.pane_meas(sp).map(|m| m.id.0), Some(4));
+    t.drop_meas(sp, MeasId(2));
+    assert_eq!(t.st.pane_meas(sp).map(|m| m.id.0), Some(2));
+
+    // A measurement row without its own panes selects and changes no pane.
+    let before = picks(&t);
     t.st.apply(Msg::FocusPane(t.pane(PaneKind::Transfer)), &t.keys);
     t.st.apply(Msg::SelectMeas(MeasId(3)), &t.keys);
     assert_eq!(t.st.rig.selected, Some(MeasId(3)));
-    assert_eq!(shown(&t, PaneKind::Transfer), Some(3));
-    assert_eq!(
-        ir(&t),
-        Some(3),
-        "an unchosen IR view follows the chosen row"
-    );
+    assert_eq!(picks(&t), before, "a row click changes no pane");
     // Focus by key selects nothing either.
     t.key("Alt+2");
     t.key("Alt+3");
     assert_eq!(t.st.rig.selected, Some(MeasId(3)));
+    assert_eq!(picks(&t), before);
 
-    // A list selection goes into the focused pane; the others keep theirs.
-    t.key("Alt+2");
-    t.st.apply(Msg::SelectMeas(MeasId(4)), &t.keys);
-    assert_eq!(shown(&t, PaneKind::Spectrum), Some(4));
-    assert_eq!(t.st.pane_meas(PaneId(1)).map(|m| m.id.0), Some(3));
-
-    // The title chip: the pane's list (every measurement, in the tree's order) with what it
-    // shows highlighted; the arrows and Enter show another.
-    let row_of = |t: &T, p: PaneId, id: u32| {
-        t.st.pane_menu_rows(p)
-            .iter()
-            .position(|(r, _)| *r == PaneMenuRow::Meas(MeasId(id)))
-            .expect("listed")
-    };
-    let tf = PaneId(1);
-    t.st.apply(Msg::FocusPane(tf), &t.keys);
-    t.st.apply(Msg::PaneMenu(tf), &t.keys);
-    let at = row_of(&t, tf, 3);
-    assert_eq!(
-        t.st.overlay,
-        Overlay::PaneMenu(PaneMenu {
-            pane: tf,
-            index: at
-        })
-    );
-    // Keys other than the list's do nothing while it is open.
-    assert!(t.key("X").is_empty());
-    let to = row_of(&t, tf, 1);
-    for _ in 0..at.abs_diff(to) {
-        t.key(if to < at { "Up" } else { "Down" });
-    }
-    t.key("Enter");
-    assert_eq!(t.st.overlay, Overlay::None);
-    assert_eq!(t.st.rig.selected, Some(MeasId(4)));
-    assert_eq!(shown(&t, PaneKind::Transfer), Some(1));
-    // A click on the chip again closes the list; a pick by mouse shows it.
-    t.st.apply(Msg::PaneMenu(t.pane(PaneKind::Spectrum)), &t.keys);
-    assert!(
-        matches!(t.st.overlay, Overlay::PaneMenu(m) if m.pane == t.pane(PaneKind::Spectrum) && m.index == row_of(&t, m.pane, 4))
-    );
-    t.st.apply(Msg::PaneMenu(t.pane(PaneKind::Spectrum)), &t.keys);
-    assert_eq!(t.st.overlay, Overlay::None);
-    t.st.apply(Msg::PaneMenu(t.pane(PaneKind::Spectrum)), &t.keys);
-    t.st.apply(
-        Msg::PanePick(t.pane(PaneKind::Spectrum), PaneMenuRow::Meas(MeasId(2))),
-        &t.keys,
-    );
-    assert_eq!(t.st.overlay, Overlay::None);
-    assert_eq!(t.focus_kind(), PaneKind::Spectrum);
-    assert_eq!(t.st.rig.selected, Some(MeasId(4)));
     // A measurement the pane cannot draw turns it into the kind that does, and back.
-    let sp = t.pane(PaneKind::Spectrum);
-    t.st.apply(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(3))), &t.keys);
+    t.drop_meas(sp, MeasId(3));
     assert_eq!(t.st.layout.kind(sp), PaneKind::Transfer);
     assert_eq!(t.st.pane_meas(sp).map(|m| m.id.0), Some(3));
-    t.st.apply(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(2))), &t.keys);
+    t.drop_meas(sp, MeasId(2));
     assert_eq!(t.st.layout.kind(sp), PaneKind::Spectrum);
-    assert_eq!(shown(&t, PaneKind::Spectrum), Some(2));
-    // Palette entry for the keyboard: the focused pane's list.
-    t.st.apply(Msg::Command(CommandId::PaneMeasurement), &t.keys);
-    assert!(matches!(t.st.overlay, Overlay::PaneMenu(m) if m.pane == t.pane(PaneKind::Spectrum)));
-    t.key("Esc");
-    assert_eq!(t.st.overlay, Overlay::None);
-    // No measurement of its kind: the list offers every measurement, then the kinds of pane
-    // none of them needs (a sweep pane here), then the New measurement chooser.
-    let spl = t.pane(PaneKind::Spl);
-    t.st.apply(Msg::PaneMenu(spl), &t.keys);
-    assert!(matches!(t.st.overlay, Overlay::PaneMenu(m) if m.pane == spl && m.index == 0));
-    let mut want: Vec<PaneMenuRow> =
-        t.st.tree_meas_order()
-            .into_iter()
-            .map(PaneMenuRow::Meas)
-            .collect();
-    want.push(PaneMenuRow::Kind(PaneKind::Distortion));
-    want.push(PaneMenuRow::NewMeasurement);
-    let rows: Vec<PaneMenuRow> =
-        t.st.pane_menu_rows(spl)
-            .into_iter()
-            .map(|(r, _)| r)
-            .collect();
-    // The Programme rows (each input, then both side by side) come before New measurement.
-    let meters =
-        |c: &[u16]| PaneMenuRow::Meter(crate::state::Metered::inputs_of(c).expect("meters"));
-    let at = want.len() - 1;
-    want.splice(at..at, [meters(&[0]), meters(&[1]), meters(&[0, 1])]);
-    assert_eq!(rows, want);
-    t.key("Esc");
+    assert_eq!(t.st.pane_meas(sp).map(|m| m.id.0), Some(2));
 
-    // A deleted measurement leaves its pane showing the next one that fits.
-    t.st.apply(Msg::FocusPane(t.pane(PaneKind::Transfer)), &t.keys);
-    t.st.apply(Msg::SelectMeas(MeasId(3)), &t.keys);
-    assert_eq!(shown(&t, PaneKind::Transfer), Some(3));
+    // A pane nothing was dropped on shows nothing and says how it gets something.
+    let spl = t.pane(PaneKind::Spl);
+    if let Some(v) = t.st.layout.view_mut(spl) {
+        v.meas = None;
+    }
+    assert_eq!(t.st.pane_meas(spl).map(|m| m.id.0), None);
+    assert_eq!(
+        crate::scenes::spl_placeholder(&t.st, spl, &t.keys),
+        ac2_scene::pane_edit::NOTHING_PICKED
+    );
+
+    // A deleted measurement leaves its pane with nothing: nothing stands in for it.
+    let tf = t.pane(PaneKind::Transfer);
+    t.drop_meas(tf, MeasId(3));
     let mut s = four();
     s.measurements.retain(|m| m.id != MeasId(3));
     t.conn(mirror(s));
-    assert_eq!(shown(&t, PaneKind::Transfer), Some(1));
+    assert_eq!(t.st.pane_meas(tf).map(|m| m.id.0), None);
 }
 
 /// The smoothing a request sets, and on what.
@@ -462,7 +393,11 @@ fn the_sweep_pane_follows_the_selection_and_selects() {
         t.conn(ConnEvent::Trace(d, g));
     }
     let shown = |t: &T| t.st.kind_sweep().map(|(d, _)| d.meta.id.0);
-    // Nothing chosen: the newest.
+    // No sweep pane and no sweep measurement selected: no sweep to show.
+    assert_eq!(shown(&t), None);
+    // A sweep pane given the sweep measurement, no run chosen: the newest.
+    t.go(PaneKind::Distortion);
+    t.go(PaneKind::Transfer);
     assert_eq!(shown(&t), Some(15));
     // V in the transfer pane: slot 1, then the first sweep, which the sweep pane shows.
     t.key("V");

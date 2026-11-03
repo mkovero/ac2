@@ -1,6 +1,6 @@
 //! A pane's title strip in the accessibility tree, without a GPU: per-pane widgets stay
-//! distinct after a split, and a long measurement name's chip stays inside its pane with the
-//! whole name as its label.
+//! distinct after a split, and a long measurement name's title stays inside its pane with
+//! the whole name as its label.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -107,9 +107,9 @@ fn harness() -> Harness<'static, App> {
         })
 }
 
-/// The chips naming `name` in the panes (the measurement list's row sits left of them).
-fn chips(h: &Harness<'static, App>, name: &str, panes_left: f32) -> Vec<egui::Rect> {
-    h.query_all(By::new().label(name))
+/// The pane titles naming `name` (the measurement list's row sits left of them).
+fn titles(h: &Harness<'static, App>, name: &str, panes_left: f32) -> Vec<egui::Rect> {
+    h.query_all(By::new().label_contains(name))
         .map(|n| n.rect())
         .filter(|r| r.min.x > panes_left)
         .collect()
@@ -135,33 +135,36 @@ fn split_sweep_panes_have_their_own_unit_controls() {
 }
 
 #[test]
-fn long_name_chip_stays_in_its_pane() {
+fn long_name_title_stays_in_its_pane() {
     let mut h = harness();
     let name = "Long measurement name ".repeat(20);
     let name = name.trim_end();
     h.state_mut().dispatch(mirror(vec![transfer(1, name)]));
-    h.state_mut().dispatch(Msg::SelectMeas(MeasId(1)));
+    let p = h.state().state.layout.focus;
+    if let Some(v) = h.state_mut().state.layout.view_mut(p) {
+        v.meas = Some(MeasId(1));
+    }
     for _ in 0..4 {
         h.step();
     }
-    let one = chips(&h, name, 230.0);
+    let one = titles(&h, name, 230.0);
     assert_eq!(
         one.len(),
         1,
-        "the chip, labelled with the whole name: {one:?}"
+        "the title, labelled with the whole name: {one:?}"
     );
-    assert!(one[0].max.x <= W, "chip past the window: {:?}", one[0]);
+    assert!(one[0].max.x <= W, "title past the window: {:?}", one[0]);
 
-    // Split side by side: each pane's chip ends inside its own pane, before the next starts.
+    // Split side by side: each pane's title ends inside its own pane, before the next starts.
     h.state_mut().state.layout.focus = h.state().state.layout.panes()[0];
     h.state_mut().dispatch(Msg::Command(CommandId::SplitPane));
     for _ in 0..4 {
         h.step();
     }
-    let mut two = chips(&h, name, 230.0);
+    let mut two = titles(&h, name, 230.0);
     assert_eq!(two.len(), 2, "{two:?}");
     two.sort_by(|a, b| a.min.x.total_cmp(&b.min.x));
     assert!(two[0].min.y == two[1].min.y, "panes side by side: {two:?}");
-    assert!(two[0].max.x < two[1].min.x, "chips overlap: {two:?}");
-    assert!(two[1].max.x <= W, "chip past the window: {:?}", two[1]);
+    assert!(two[0].max.x < two[1].min.x, "titles overlap: {two:?}");
+    assert!(two[1].max.x <= W, "title past the window: {:?}", two[1]);
 }

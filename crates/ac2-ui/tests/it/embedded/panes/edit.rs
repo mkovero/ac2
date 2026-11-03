@@ -205,25 +205,31 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
     assert!(!d.st.rig.traces.contains_key(&a));
     assert_eq!(d.st.trace_rows().len(), 1);
 
-    // One pane alone (W): a measurement row brings all of its own panes (each has the four
-    // it was edited in), its own in focus; W after it shows that pane alone again.
-    let all = [
-        PaneKind::Transfer,
-        PaneKind::Spectrum,
-        PaneKind::Transfer,
-        PaneKind::Spl,
-    ];
+    // One pane alone (W): a measurement row brings all of its own panes (each has the ones
+    // it was edited in); W on its spectrum pane shows that pane alone again.
+    let all = crate::common::visible(&d.st);
     d.key("W");
     assert!(d.st.layout.maximized);
     d.send(Msg::SelectMeas(sp));
     assert_eq!(crate::common::visible(&d.st), all);
     assert_eq!(d.st.kind_meas(PaneKind::Spectrum).map(|m| m.id), Some(sp));
-    assert_eq!(d.st.layout.focus_kind(), PaneKind::Spectrum);
+    let spane = crate::common::pane(&d.st, PaneKind::Spectrum);
+    d.send(Msg::FocusPane(spane));
     d.key("W");
     assert_eq!(crate::common::visible(&d.st), [PaneKind::Spectrum]);
+    // The transfer's own panes: the grid it was laid out in, without the pane the spectrum
+    // opened beside it later.
     d.send(Msg::SelectMeas(tf));
-    assert_eq!(crate::common::visible(&d.st), all);
-    assert_eq!(d.st.layout.focus_kind(), PaneKind::Transfer);
+    assert_eq!(
+        crate::common::visible(&d.st),
+        [
+            PaneKind::Transfer,
+            PaneKind::Spectrum,
+            PaneKind::Transfer,
+            PaneKind::Spl
+        ]
+    );
+    assert_eq!(d.st.kind_meas(PaneKind::Transfer).map(|m| m.id), Some(tf));
     drop(d);
     drop(daemon);
     Ok(())
@@ -354,6 +360,10 @@ fn a_hides_and_backspace_deletes_the_selected_measurement() -> R {
     })?;
     assert!(d.st.rig.hidden_meas.is_empty());
     assert!(d.st.meas(second.id).is_some_and(|m| m.running));
+    // A pane never stands in another measurement for a deleted one: the other's row
+    // dropped on the transfer pane shows it alone.
+    let tp = crate::common::pane(&d.st, ac2_ui::state::PaneKind::Transfer);
+    d.drop_meas(tp, second.id);
     d.until("the other curve alone", |s| {
         names(s) == [second.config.name.clone()]
     })?;

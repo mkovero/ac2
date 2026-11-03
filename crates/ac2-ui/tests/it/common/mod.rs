@@ -774,6 +774,22 @@ pub fn grid_ui_prefs() -> ac2_ui::prefs::UiPrefs {
     p
 }
 
+/// `p` with each pane given what the operator would have dropped on it from the fake
+/// rig's list: its measurement of the pane's kind, by name as the preferences keep it.
+/// A pane follows no selection, so a picture of the fake rig needs its panes filled.
+pub fn fake_rig_picks(mut p: ac2_ui::prefs::PanesPrefs) -> ac2_ui::prefs::PanesPrefs {
+    use ac2_ui::state::PaneKind;
+    for v in &mut p.views {
+        v.measurement = match v.kind {
+            PaneKind::Transfer => Some("Main L".into()),
+            PaneKind::Spectrum => Some("Mic 1 FFT".into()),
+            PaneKind::Spl => Some("FOH SPL".into()),
+            _ => None,
+        };
+    }
+    p
+}
+
 /// [`grid_with_sweep_prefs`] in a fresh app's preferences: a sweep from the dialog lands
 /// on its own pane (Alt+5) and the transfer pane stays Alt+1.
 pub fn grid_with_sweep_ui_prefs() -> ac2_ui::prefs::UiPrefs {

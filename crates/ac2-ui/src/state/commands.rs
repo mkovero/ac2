@@ -11,21 +11,6 @@ use super::*;
 use ac2_scene::primitives::Colormap;
 
 impl AppState {
-    /// The list of pane `p` opens, what it shows highlighted (else the first row a pick
-    /// can land on).
-    pub(super) fn open_pane_menu(&mut self, p: PaneId) {
-        self.overlay = Overlay::PaneMenu(PaneMenu { pane: p, index: 0 });
-        self.refresh_menu_rigs();
-        let rows = self.pane_menu_rows(p);
-        let shown = self.pane_menu_shown(p);
-        let index = rows
-            .iter()
-            .position(|(r, _)| Some(*r) == shown)
-            .or_else(|| rows.iter().position(|(r, _)| r.pickable()))
-            .unwrap_or(0);
-        self.overlay = Overlay::PaneMenu(PaneMenu { pane: p, index });
-    }
-
     /// Sets the smoothing of what the smoothing keys act on (`step`: +1 coarser / -1 finer
     /// through [`SMOOTHING_STEPS`]; `to`: an explicit setting instead).
     pub(super) fn smooth(
@@ -113,7 +98,7 @@ impl AppState {
     /// or not), with the live measurement as the stop between the last and the first;
     /// `hidden` (Alt) steps through the hidden ones too. It only selects, as a click on the
     /// trace's row does: no pane moves or changes what it shows (a pane is given a curve by
-    /// its chip or a row dragged onto it), so the trace keys may act on a trace no pane draws.
+    /// a row dragged onto it), so the trace keys may act on a trace no pane draws.
     pub(super) fn cycle_trace(&mut self, d: i32, hidden: bool) {
         let ids: Vec<TraceId> = self
             .trace_list()
@@ -410,22 +395,17 @@ impl AppState {
             C::MaximisePane => self.cycle_layout(),
             C::NextInTree => {
                 self.rig.input_pick = None;
-                self.cycle_tree_row(1);
+                self.cycle_tree_row(1, out);
             }
             C::PrevInTree => {
                 self.rig.input_pick = None;
-                self.cycle_tree_row(-1);
+                self.cycle_tree_row(-1, out);
             }
             C::LevelsReset => match self.reset_target() {
                 Some(channels) => self.levels_reset(channels, out),
                 None => self.warn("pick an Inputs row or focus a Programme pane to reset its max"),
             },
             C::LevelsResetAll => self.levels_reset(Vec::new(), out),
-            C::ProgrammePane => match self.rig.input_pick.and_then(|c| self.row_meters(c)) {
-                Some(m) => self.open_programme(m),
-                None => self.warn("pick an Inputs row first: its meters open in a new pane"),
-            },
-            C::PaneMeasurement => self.open_pane_menu(self.layout.focus),
             C::Walks => self.open_walks(),
             C::WalkCapture => self.walk_capture(keymap, out),
             C::WalkNext => self.walk_step(1, out),

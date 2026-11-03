@@ -1,7 +1,7 @@
 //! Focus: the key hints follow the focused pane, it takes any pick and child row, and Tab
 //! steps through the measurements.
 
-use super::{hint_line, new_spectrum, spectrum_panes};
+use super::{hint_line, new_spectrum};
 use crate::embedded::harness::{Driver, NAME, R, first_transfer, measure_from_empty};
 use ac2_proto::model::MeasKind;
 use ac2_proto::topic::{Stream, Topic};
@@ -44,13 +44,12 @@ fn key_hints_follow_the_panes_from_an_empty_daemon() -> R {
     d.key("Alt+4");
     let spl = hint_line(&d.st);
     assert_eq!(spl.first().map(String::as_str), Some("G/Shift+G view"));
-    // A fifth pane, turned into the sweep pane from its list.
+    // A fifth pane, made a sweep pane (no sweep measurement here to drop on it).
     d.key("N");
     let f = d.st.layout.focus;
-    d.send(Msg::PanePick(
-        f,
-        ac2_ui::state::PaneMenuRow::Kind(ac2_ui::state::PaneKind::Distortion),
-    ));
+    if let Some(v) = d.st.layout.view_mut(f) {
+        *v = ac2_ui::state::View::of(ac2_ui::state::PaneKind::Distortion);
+    }
     assert_eq!(
         d.st.layout.focus_kind(),
         ac2_ui::state::PaneKind::Distortion
@@ -87,11 +86,12 @@ fn key_hints_follow_the_panes_from_an_empty_daemon() -> R {
     Ok(())
 }
 
-/// From an empty daemon: a transfer measurement and a spectrum; what is picked goes to the
-/// focused pane whatever its kind, the focus staying and every other pane as it was.
+/// From an empty daemon: a transfer measurement and a spectrum; the spectrum opens beside
+/// the focused pane, a row click only selects, and a row dropped on a pane turns it into
+/// the row's kind, every other pane as it was.
 #[test]
-fn the_focused_pane_takes_any_pick_from_an_empty_daemon() -> R {
-    use ac2_ui::state::PaneKind::{Spectrum, Spl, Transfer};
+fn a_row_dropped_on_a_pane_turns_it_into_its_kind_from_an_empty_daemon() -> R {
+    use ac2_ui::state::PaneKind::{Spectrum, Transfer};
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     d.synced()?;
@@ -124,51 +124,43 @@ fn the_focused_pane_takes_any_pick_from_an_empty_daemon() -> R {
             .find(|m| matches!(m.config.kind, MeasKind::Spectrum { .. }))
             .map(|m| m.id)
             .ok_or("spectrum")?;
-    // Picked with the transfer pane focused: it lands there.
-    d.key("Alt+1");
+    // The spectrum opened beside the focused transfer pane, never over it.
+    let opened = crate::common::visible(&d.st);
+    assert_eq!(opened.iter().filter(|k| **k == Spectrum).count(), 2);
+    assert_eq!(d.st.pane_meas(d.st.layout.focus).map(|m| m.id), Some(sp));
+    // A row click selects; the transfer's row brings the panes its form laid out.
     d.send(Msg::SelectMeas(tf));
-    assert_eq!(
-        crate::common::visible(&d.st),
-        [Transfer, Spectrum, Transfer, Spl]
-    );
+    assert_eq!(d.st.rig.selected, Some(tf));
+    assert!(d.st.meas(tf).is_some_and(|m| m.layout.is_some()));
+    let before = crate::common::visible(&d.st);
 
-    // The second transfer pane focused: the spectrum picked from the list turns it into a
-    // spectrum pane, the transfer pane before it unchanged.
-    d.key("Alt+3");
-    let f = d.st.layout.focus;
-    d.send(Msg::SelectMeas(sp));
-    assert_eq!(
-        crate::common::visible(&d.st),
-        [Transfer, Spectrum, Spectrum, Spl]
-    );
-    assert_eq!(d.st.layout.focus, f);
-    assert_eq!(d.st.pane_meas(f).map(|m| m.id), Some(sp));
-    // Tab on to the transfer measurement: its row brings its own panes (as its form laid
-    // them out), the focus on its transfer pane.
-    for _ in 0..d.st.tree_meas_order().len() {
-        if d.st.rig.selected == Some(tf) {
-            break;
-        }
-        d.key("Tab");
-    }
-    assert_eq!(
-        crate::common::visible(&d.st),
-        [Transfer, Spectrum, Transfer, Spl]
-    );
-    let f = d.st.layout.focus;
-    assert_eq!(d.st.layout.kind(f), Transfer);
-    assert_eq!(d.st.pane_meas(f).map(|m| m.id), Some(tf));
+    // The spectrum's row dropped on the IR transfer pane turns it into a spectrum pane
+    // showing it, the panes before it unchanged.
+    let ir = *d
+        .st
+        .visible_panes()
+        .iter()
+        .filter(|p| d.st.layout.kind(**p) == Transfer)
+        .nth(1)
+        .ok_or("a second transfer pane")?;
+    d.drop_meas(ir, sp);
+    assert_eq!(d.st.layout.kind(ir), Spectrum);
+    assert_eq!(d.st.pane_meas(ir).map(|m| m.id), Some(sp));
+    assert_eq!(d.st.layout.focus, ir);
+    // And the transfer's row dropped back: a transfer pane showing it.
+    d.drop_meas(ir, tf);
+    assert_eq!(crate::common::visible(&d.st), before);
+    assert_eq!(d.st.pane_meas(ir).map(|m| m.id), Some(tf));
     drop(d);
     drop(daemon);
     Ok(())
 }
 
 /// From an empty daemon: a transfer measurement, a spectrum and an SPL meter made from the
-/// app; Tab / Shift+Tab select them in the tree's order, wrapping, and the focused pane
-/// shows each, turning into its kind.
+/// app; Tab / Shift+Tab select them in the tree's order, wrapping; a row with panes of its
+/// own brings them, any other changes no pane.
 #[test]
 fn tab_steps_through_the_measurements_from_an_empty_daemon() -> R {
-    use ac2_ui::state::PaneKind::{Spectrum, Spl, Transfer};
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     measure_from_empty(&mut d)?;
@@ -205,11 +197,17 @@ fn tab_steps_through_the_measurements_from_an_empty_daemon() -> R {
     let sp = id_of(&d.st, |k| matches!(k, MeasKind::Spectrum { .. }))?;
     let spl = id_of(&d.st, |k| matches!(k, MeasKind::Spl { .. }))?;
     // The tree lists the measurements in the order they were made.
-    let order = [(tf, Transfer), (sp, Spectrum), (spl, Spl)];
     assert_eq!(d.st.tree_meas_order(), [tf, sp, spl]);
 
     d.send(Msg::SelectMeas(tf));
-    let f = d.st.layout.focus;
+    // What each pane on screen is and shows.
+    let shows = |s: &AppState| -> Vec<_> {
+        s.visible_panes()
+            .into_iter()
+            .map(|p| (s.layout.kind(p), s.pane_meas(p).map(|m| m.id)))
+            .collect()
+    };
+    let panes = shows(&d.st);
     // A transfer or spectrum measurement is two stops, its header and its live curve; the
     // SPL meter, with no live curve row, one.
     let steps = [
@@ -221,15 +219,17 @@ fn tab_steps_through_the_measurements_from_an_empty_daemon() -> R {
         (tf, true),
         (sp, false),
     ];
+    // A row with panes of its own brings them; any other changes no pane.
+    let mut panes = panes;
     for (i, (id, live)) in steps.into_iter().enumerate() {
         d.key("Tab");
-        let pane = order.iter().find(|(m, _)| *m == id).expect("listed").1;
         assert_eq!(d.st.rig.selected, Some(id), "Tab {i}");
         assert_eq!(d.st.live_row_selected(), live, "Tab {i}");
         assert_eq!(d.st.rig.selected_trace, None);
-        assert_eq!(d.st.layout.focus, f, "Tab {i}");
-        assert_eq!(d.st.layout.focus_kind(), pane, "Tab {i}");
-        assert_eq!(d.st.pane_meas(f).map(|m| m.id), Some(id), "Tab {i}");
+        if !live && d.st.meas(id).is_some_and(|m| m.layout.is_some()) {
+            panes = shows(&d.st);
+        }
+        assert_eq!(shows(&d.st), panes, "Tab {i}");
     }
     // On the spectrum now; back round once, by the SPL meter.
     for (want, live) in [
@@ -243,7 +243,6 @@ fn tab_steps_through_the_measurements_from_an_empty_daemon() -> R {
         assert_eq!(d.st.rig.selected, Some(want));
         assert_eq!(d.st.live_row_selected(), live);
     }
-    assert_eq!(d.st.layout.focus_kind(), Spectrum);
     drop(d);
     drop(daemon);
     Ok(())
@@ -253,36 +252,29 @@ fn tab_steps_through_the_measurements_from_an_empty_daemon() -> R {
 /// daemon: Spectrum 1 on both halves of a split spectrum pane (the left one its
 /// spectrograph), Spectrum 2 with a capture and panes of its own. Pane B (the right half)
 /// clicked, then Spectrum 2's live row: no pane changes, the focus stays on B. Then
-/// Spectrum 2's stored trace row: the same, the trace selected. A pane gets Spectrum 2 from
-/// its chip; Spectrum 2's header row brings its own panes.
+/// Spectrum 2's stored trace row: the same, the trace selected.
 #[test]
 fn a_child_row_moves_no_pane_from_an_empty_daemon() -> R {
-    use ac2_ui::state::PaneMenuRow;
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     measure_from_empty(&mut d)?;
     let s1 = new_spectrum(&mut d, false)?;
     let s2 = new_spectrum(&mut d, true)?;
-    let shown = |s: &AppState| -> Vec<(Option<MeasId>, SpectrumMode)> {
-        spectrum_panes(s)
-            .into_iter()
-            .map(|(m, v, _)| (m, v))
-            .collect()
-    };
-    let half = |s: &AppState, i: usize| {
-        s.visible_panes()
-            .into_iter()
-            .filter(|p| s.layout.kind(*p) == ac2_ui::state::PaneKind::Spectrum)
-            .nth(i)
-    };
-    // Spectrum 1 split side by side (its own panes now).
+    // Spectrum 1 dropped on the spectrum pane, split side by side: halves A and B.
     d.key("Alt+2");
-    d.send(Msg::SelectMeas(s1));
+    let a = d.st.layout.focus;
+    d.drop_meas(a, s1);
     d.key("N");
     let b = d.st.layout.focus;
+    let shown = |s: &AppState| -> Vec<(Option<MeasId>, SpectrumMode)> {
+        [a, b]
+            .into_iter()
+            .map(|p| (s.pane_meas(p).map(|m| m.id), s.pane_modes(p).spectrum))
+            .collect()
+    };
     // Spectrum 2 on B: captured (with its row chosen: a capture is of the selected
     // measurement), and given panes of its own (B to its spectrum + spectrograph and back).
-    d.send(Msg::PanePick(b, PaneMenuRow::Meas(s2)));
+    d.drop_meas(b, s2);
     let topic = Topic::Data {
         meas: s2,
         stream: Stream::Spec,
@@ -318,8 +310,7 @@ fn a_child_row_moves_no_pane_from_an_empty_daemon() -> R {
         s.meas(s2).is_some_and(|m| m.layout.is_some())
     })?;
     // B back on Spectrum 1; A (the left half) stepped to its spectrograph.
-    d.send(Msg::PanePick(b, PaneMenuRow::Meas(s1)));
-    let a = half(&d.st, 0).ok_or("pane A")?;
+    d.drop_meas(b, s1);
     d.send(Msg::FocusPane(a));
     d.key("G");
     d.key("G");
@@ -329,7 +320,6 @@ fn a_child_row_moves_no_pane_from_an_empty_daemon() -> R {
     ];
     assert_eq!(shown(&d.st), before);
     // Pane B clicked, then Spectrum 2's live row: nothing moves.
-    let b = half(&d.st, 1).ok_or("pane B")?;
     d.send(Msg::FocusPane(b));
     let panes = d.st.pane_layout();
     d.send(Msg::SelectLive(s2));
@@ -347,25 +337,25 @@ fn a_child_row_moves_no_pane_from_an_empty_daemon() -> R {
     assert_eq!(d.st.layout.focus, b, "the focus stays on B");
     assert_eq!(d.st.pane_layout(), panes, "no pane changed");
 
-    // B's chip puts Spectrum 2 there.
-    d.send(Msg::PanePick(b, PaneMenuRow::Meas(s2)));
+    // Spectrum 2 dropped on B.
+    d.drop_meas(b, s2);
     assert_eq!(
         shown(&d.st),
         [
             (Some(s1), SpectrumMode::Spectrograph),
             (Some(s2), SpectrumMode::Spectrum),
         ],
-        "the chip"
+        "the drop"
     );
 
     // Spectrum 2's header row: selected, its own panes on screen.
     d.send(Msg::SelectMeas(s2));
     assert_eq!(d.st.rig.selected, Some(s2));
-    assert_eq!(
-        Some(d.st.pane_layout()),
-        d.st.meas(s2).and_then(|m| m.layout.clone()),
-        "the header row brings its panes"
-    );
+    // The panes on screen are Spectrum 2's own, as the daemon keeps them once the drop's
+    // edit has landed.
+    d.until("the header row brings its panes", |s| {
+        Some(s.pane_layout()) == s.meas(s2).and_then(|m| m.layout.clone())
+    })?;
     drop(d);
     drop(daemon);
     Ok(())
@@ -378,7 +368,7 @@ fn a_child_row_moves_no_pane_from_an_empty_daemon() -> R {
 #[test]
 fn v_only_selects_from_an_empty_daemon() -> R {
     use ac2_proto::model::TraceOwner;
-    use ac2_ui::state::{PaneKind, PaneMenuRow, StimPhase};
+    use ac2_ui::state::{PaneKind, StimPhase};
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     measure_from_empty(&mut d)?;
@@ -416,9 +406,9 @@ fn v_only_selects_from_an_empty_daemon() -> R {
     }
     let t1 = owned(&d.st, first).ok_or("first's capture")?;
     let t2 = owned(&d.st, second).ok_or("second's capture")?;
-    // The transfer pane given the first by its chip.
+    // The transfer pane given the first by a drop.
     let tf = crate::common::pane(&d.st, PaneKind::Transfer);
-    d.send(Msg::PanePick(tf, PaneMenuRow::Meas(first)));
+    d.drop_meas(tf, first);
     d.pump();
     let layout = d.st.layout.clone();
     let panes = d.st.pane_layout();

@@ -361,7 +361,7 @@ fn layout_is_remembered_and_restored() {
     let ir_mode = |t: &T| t.st.layout.view(t.ir_pane()).expect("view").modes.transfer;
     assert_eq!(ir_mode(&t), TransferView::Ir(IrMode::Log));
     t.key("Alt+4");
-    t.st.apply(Msg::SelectMeas(MeasId(5)), &t.keys);
+    t.drop_meas(t.st.layout.focus, MeasId(5));
     assert_eq!(t.st.kind_meas(PaneKind::Spl).map(|m| m.id), Some(MeasId(5)));
     t.key("G");
     t.key("W");
@@ -385,9 +385,12 @@ fn layout_is_remembered_and_restored() {
         view(PaneKind::Spl).measurement.as_deref(),
         Some("Stage SPL")
     );
-    // Both transfer panes follow the selection: no measurement of their own.
-    assert_eq!(view(PaneKind::Transfer).measurement, None);
-    assert_eq!(ir_view.measurement, None);
+    // Both transfer panes keep what was dropped on them, by name.
+    assert_eq!(
+        view(PaneKind::Transfer).measurement.as_deref(),
+        Some("Main L")
+    );
+    assert_eq!(ir_view.measurement.as_deref(), Some("Main L"));
     // Ticks change nothing and write nothing.
     t.st.prefs_dirty = false;
     t.st.apply(

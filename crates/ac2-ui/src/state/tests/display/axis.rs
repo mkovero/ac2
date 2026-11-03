@@ -217,7 +217,7 @@ fn a_measurement_picked_on_a_pane_fits_its_first_frame() {
     t.key("Alt+2");
     t.key("Ctrl+I");
     let sp = t.pane(PaneKind::Spectrum);
-    t.st.apply(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(4))), &t.keys);
+    t.drop_meas(sp, MeasId(4));
     let zoomed = t.st.level_range(sp);
     // Its first frame is the measurement's first show here, not the other's frame.
     spec_frame(&mut t, 2, vec![0.0, -10.0, -10.0, -10.0, 0.0]);
@@ -226,7 +226,7 @@ fn a_measurement_picked_on_a_pane_fits_its_first_frame() {
     spec_frame(&mut t, 4, other.clone());
     assert_eq!(t.st.level_range(sp), Some(fit_of(&other)));
     // And back: the first one frames again.
-    t.st.apply(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(2))), &t.keys);
+    t.drop_meas(sp, MeasId(2));
     let back = vec![0.0, -90.0, -80.0, -70.0, 0.0];
     spec_frame(&mut t, 2, back.clone());
     assert_eq!(t.st.level_range(sp), Some(fit_of(&back)));

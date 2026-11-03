@@ -16,7 +16,7 @@ fn two_panes() -> ac2_ui::prefs::UiPrefs {
         levels: Default::default(),
         plates: Default::default(),
     };
-    p.layout.panes = Some(ac2_ui::prefs::PanesPrefs {
+    p.layout.panes = Some(common::fake_rig_picks(ac2_ui::prefs::PanesPrefs {
         root: PaneNode::Split {
             axis: Axis::Column,
             ratio: 0.5,
@@ -25,12 +25,12 @@ fn two_panes() -> ac2_ui::prefs::UiPrefs {
         },
         focus: PaneId(1),
         views: vec![pane(1, PaneKind::Transfer), pane(2, PaneKind::Spectrum)],
-    });
+    }));
     p
 }
 
 /// `FOH SPL`'s row dragged onto the lower pane: mid-drag the pane is shaded with a dashed
-/// edge and the label by the pointer says `FOH SPL → pane 2`; dropped, the lower pane is
+/// edge and the label by the pointer says `FOH SPL → pane 2, becomes SPL`; dropped, the lower pane is
 /// an SPL pane showing it, focused, and the upper pane is as it was.
 #[test]
 fn a_list_row_dragged_onto_the_lower_pane() {
@@ -90,7 +90,7 @@ fn a_list_row_dragged_onto_the_lower_pane() {
     }
     assert_eq!(
         h.state().state.drag_label().as_deref(),
-        Some("FOH SPL \u{2192} pane 2")
+        Some("FOH SPL \u{2192} pane 2, becomes SPL")
     );
     assert_eq!(h.state().state.drop_highlight(), Some((lower, None)));
     h.state_mut().state.toasts.list.clear();

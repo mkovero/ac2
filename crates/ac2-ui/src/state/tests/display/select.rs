@@ -1,13 +1,13 @@
-//! Reducer tests of selection: which pane a picked measurement or trace brings up, and
+//! Reducer tests of selection and drops: what a row dropped or selected changes, and
 //! hiding and showing the selected measurement.
 
 use super::*;
 
-/// Picking a measurement in the list puts it in the focused pane, which turns into the kind
-/// of pane the measurement belongs in, maximised or not; every other pane keeps what it
+/// A measurement's row dropped on the focused pane puts it there, the pane turning into the
+/// kind of pane the measurement belongs in, maximised or not; every other pane keeps what it
 /// shows.
 #[test]
-fn picking_a_measurement_puts_it_in_the_focused_pane() {
+fn a_row_dropped_on_the_focused_pane_turns_it_into_its_kind() {
     for maximised in [true, false] {
         let mut t = T::new();
         let mut s = four();
@@ -38,35 +38,35 @@ fn picking_a_measurement_puts_it_in_the_focused_pane() {
             }
         };
         // An RTA: the focused transfer pane turns into a spectrum / RTA pane.
-        t.st.apply(Msg::SelectMeas(MeasId(4)), &t.keys);
+        t.drop_meas(t.st.layout.focus, MeasId(4));
         shows(&t, PaneKind::Spectrum, 4);
         // A narrowband spectrum stays there, and the pane shows it.
-        t.st.apply(Msg::SelectMeas(MeasId(2)), &t.keys);
+        t.drop_meas(t.st.layout.focus, MeasId(2));
         shows(&t, PaneKind::Spectrum, 2);
         // A transfer measurement: back to a transfer pane.
-        t.st.apply(Msg::SelectMeas(MeasId(3)), &t.keys);
+        t.drop_meas(t.st.layout.focus, MeasId(3));
         shows(&t, PaneKind::Transfer, 3);
         // An SPL meter: an SPL pane.
-        t.st.apply(Msg::SelectMeas(MeasId(5)), &t.keys);
+        t.drop_meas(t.st.layout.focus, MeasId(5));
         shows(&t, PaneKind::Spl, 5);
         // The IR view is a transfer pane's: a transfer measurement keeps the view.
         t.key("Alt+3");
         let ir = t.st.layout.focus;
-        t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
+        t.drop_meas(t.st.layout.focus, MeasId(1));
         assert_eq!(t.st.layout.focus, ir);
         assert!(t.st.layout.focused().shows_ir());
         assert_eq!(t.st.pane_meas(ir).map(|m| m.id), Some(MeasId(1)));
-        // The pane's chip list picks for that pane.
+        // A drop on another pane picks for that pane and focuses it.
         let sp = t.pane(PaneKind::Spectrum);
-        t.st.apply(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(4))), &t.keys);
+        t.drop_meas(sp, MeasId(4));
         assert_eq!(t.st.layout.focus, sp);
         assert_eq!(t.st.pane_meas(sp).map(|m| m.id), Some(MeasId(4)));
     }
 }
 
 /// A stored trace's row chosen, by a click or by Tab, only selects, maximised or split: the
-/// layout stays as it was, no refocus and no pane turning into the trace's kind (the pane
-/// chip picker and a drop are what put a trace in a pane).
+/// layout stays as it was, no refocus and no pane turning into the trace's kind (a drop is
+/// what puts a trace in a pane).
 #[test]
 fn a_trace_row_click_or_tab_only_selects_maximised_or_not() {
     for maximised in [true, false] {
@@ -216,13 +216,6 @@ fn a_hides_and_shows_the_selected_measurement() {
             .last()
             .map(String::as_str),
         Some("Main L hidden")
-    );
-    assert_eq!(
-        t.st.pane_menu_rows(t.pane(PaneKind::Transfer))[0],
-        (
-            PaneMenuRow::Meas(MeasId(1)),
-            "TF  Main L · hidden".to_owned()
-        )
     );
     let ir = crate::scenes::ir(&t.st, t.ir_pane(), &t.keys, &theme, SIZE, now()).expect("scene");
     assert_eq!(ir.note.as_deref(), Some("Main L hidden — A shows it"));

@@ -147,12 +147,21 @@ fn ctrl_m_makes_a_spectrum_from_an_empty_daemon() -> R {
             .find(|m| matches!(m.config.kind, MeasKind::Spectrum { .. }))
             .map(|m| m.id)
             .ok_or("spectrum")?;
-    // On the spectrum pane already there; the transfer pane still shows its measurement.
-    assert_eq!(crate::common::visible(&d.st), panes);
+    // In a pane of its own beside the focused transfer pane, never over it, nor over the
+    // spectrum pane already there: the transfer pane still shows its measurement.
+    assert_eq!(crate::common::visible(&d.st).len(), panes.len() + 1);
     assert_eq!(d.st.layout.kind(tf), PaneKind::Transfer);
     assert_eq!(d.st.pane_meas(tf).map(|m| m.id), shown);
-    assert!(
-        spectrum_panes(&d.st).iter().any(|(m, _, _)| *m == Some(sp)),
+    let f = d.st.layout.focus;
+    assert_ne!(f, tf);
+    assert_eq!(d.st.layout.kind(f), PaneKind::Spectrum);
+    assert_eq!(d.st.pane_meas(f).map(|m| m.id), Some(sp));
+    assert_eq!(
+        spectrum_panes(&d.st)
+            .iter()
+            .filter(|(m, _, _)| *m == Some(sp))
+            .count(),
+        1,
         "{:?}",
         spectrum_panes(&d.st)
     );
@@ -168,19 +177,6 @@ fn ctrl_m_makes_a_spectrum_from_an_empty_daemon() -> R {
     d.key("Escape");
     assert_eq!(d.st.overlay, Overlay::None);
 
-    // The SPL pane's list ends in New measurement…, which opens the chooser on SPL meter.
-    let spl = d.st.layout.lead(PaneKind::Spl).ok_or("SPL pane")?;
-    d.send(Msg::PaneMenu(spl));
-    let rows = d.st.pane_menu_rows(spl);
-    assert_eq!(
-        rows.last().map(|(_, t)| t.clone()),
-        Some(format!("New measurement…  {key}"))
-    );
-    d.key("End");
-    d.key("Enter");
-    assert_eq!(chooser(&d.st).map(|c| c.index), Some(3));
-    d.key("Escape");
-    assert_eq!(d.st.overlay, Overlay::None);
     drop(d);
     drop(daemon);
     Ok(())

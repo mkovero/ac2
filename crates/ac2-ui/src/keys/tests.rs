@@ -108,7 +108,6 @@ fn every_command_is_reachable() {
         CommandId::FinderSub,
         CommandId::FinderCustom,
         CommandId::FinderObservation,
-        CommandId::PaneMeasurement,
         CommandId::TransferStack,
         CommandId::SplFast,
         CommandId::SplSlow,
@@ -412,7 +411,6 @@ fn toml_errors() {
         ("[global]\nhelp = \"Shift+Esc\"", "reserved"),
         ("[spectrum]\ninsert_delay = \"Shift+Q\"", "does nothing"),
         ("[nowhere]\nhelp = \"Shift+Q\"", "unknown scope"),
-        ("[global]\nfly = \"Shift+Q\"", "unknown command"),
         ("[global]\nhelp = \"Ctrl+Nope\"", "unknown key"),
         ("[global]\nhelp = 3", "keys.toml"),
         // H is help in every pane: a pane's command on H conflicts with it there.
@@ -425,6 +423,18 @@ fn toml_errors() {
     // A global override must not collide with any scope's binding either.
     let e = Keymap::from_toml("[global]\nzoom_in = \"X\"").expect_err("conflict");
     assert!(e.contains("transfer"), "{e}");
+}
+
+/// A binding of a command the app no longer has (a `keys.toml` from an earlier version) is
+/// skipped with a note; the rest of the file still applies.
+#[test]
+fn an_unknown_command_is_skipped_with_a_note() {
+    let (m, skipped) =
+        Keymap::from_toml_noting("[global]\npane_measurement = \"Shift+Q\"\nhelp = [\"H\", \"/\"]")
+            .expect("the rest applies");
+    assert_eq!(skipped.len(), 1, "{skipped:?}");
+    assert!(skipped[0].contains("pane_measurement"), "{skipped:?}");
+    assert!(m.label(CommandId::Help, Scope::Global).is_some());
 }
 
 #[test]

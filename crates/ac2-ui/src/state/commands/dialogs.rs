@@ -55,7 +55,7 @@ impl AppState {
                     // once made: the panes changed now would be stored as the selected
                     // measurement's own.
                     if edit.is_some() {
-                        self.focus_kind(PaneKind::Distortion);
+                        self.focus_lead(PaneKind::Distortion);
                     }
                 }
                 Err(e) => f.error = Some(e),
@@ -65,7 +65,7 @@ impl AppState {
         let Overlay::Form(f) = &mut self.overlay else {
             return;
         };
-        if matches!(f.kind, FormKind::Programme | FormKind::ProgrammeEdit) {
+        if matches!(f.kind, FormKind::Programme) {
             self.submit_meter(out);
             return;
         }

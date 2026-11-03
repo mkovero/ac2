@@ -17,6 +17,7 @@ fn stored_traces_and_target() {
     h.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
     step_until(&mut h, "slot 1", |a| a.state.slots()[0].is_some());
     tab_to(&mut h, MeasId(2));
+    drop_on_kind(&mut h, PaneKind::Transfer, MeasId(2));
     h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
     step_until(&mut h, "slot 2", |a| a.state.slots()[1].is_some());
     // Z: a target curve from a file, the chooser's first row.
@@ -198,38 +199,41 @@ fn trace_offset_spread() {
     snapshot(&mut h, "trace_offset_spread");
 }
 
-/// The transfer pane's title chip names the measurement it shows; a click opens the list of
-/// transfer measurements and a pick switches the pane (and the selection) to it.
+/// The transfer pane's title names the measurement it shows in plain text; Delay tower's
+/// row dropped on the pane switches it there, the selection staying where it was.
 #[test]
-fn pane_measurement_chip_and_list() {
-    if !have_gpu("pane_measurement_chip_and_list") {
+fn pane_title_and_a_drop() {
+    if !have_gpu("pane_title_and_a_drop") {
         return;
     }
     let rig = common::Rig::start();
     let mut h = harness(options(Some(&rig)));
     step_until(&mut h, "live frames", live);
-    // The transfer pane's chip (the IR pane's names the same measurement, drawn after it).
-    h.get_all_by_label("Main L")
-        .next()
-        .expect("transfer pane chip")
-        .click();
-    step_until(
-        &mut h,
-        "list",
-        |a| matches!(a.state.overlay, Overlay::PaneMenu(m) if m.pane == crate::common::pane(&a.state, PaneKind::Transfer)),
+    let tf = crate::common::pane(&h.state().state, PaneKind::Transfer);
+    assert!(
+        h.query_by_label("1  Transfer · Main L").is_some(),
+        "the transfer pane's title"
     );
-    h.state_mut().state.toasts.list.clear();
-    h.step();
-    snapshot(&mut h, "pane_measurement_list");
-    h.get_by_label("TF  Delay tower").click();
+    {
+        use ac2_scene::meas_list::TreeKey;
+        use ac2_ui::state::{DragItem, DragMsg, DropTarget, Msg};
+        let a = h.state_mut();
+        let rig = a.state.active();
+        let key = TreeKey::Meas(MeasId(2));
+        a.dispatch(Msg::RowDrag(DragMsg::Start(DragItem::Row { rig, key })));
+        a.dispatch(Msg::RowDrag(DragMsg::Over(Some(DropTarget {
+            pane: tf,
+            edge: None,
+        }))));
+        a.dispatch(Msg::RowDrag(DragMsg::Drop));
+    }
     step_until(&mut h, "delay tower shown", |a| {
-        a.state.overlay == Overlay::None
-            && a.state.kind_meas(PaneKind::Transfer).map(|m| m.id) == Some(MeasId(2))
+        a.state.pane_meas(tf).map(|m| m.id) == Some(MeasId(2))
     });
     assert_eq!(
         h.state().state.rig.selected,
         Some(MeasId(1)),
-        "a pick selects nothing"
+        "a drop selects nothing"
     );
     // The pane now leads with it: first legend row, IR of it.
     let st = &h.state().state;
@@ -474,6 +478,7 @@ fn traces_list() {
     h.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
     step_until(&mut h, "slot 1", |a| a.state.slots()[0].is_some());
     tab_to(&mut h, MeasId(2));
+    drop_on_kind(&mut h, PaneKind::Transfer, MeasId(2));
     h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
     step_until(&mut h, "slot 2", |a| a.state.slots()[1].is_some());
     // Z, then the chooser's first row: a target curve from a file.
@@ -534,6 +539,7 @@ fn measurement_hidden_and_delete_confirm() {
     step_until(&mut h, "delay tower", |a| {
         a.state.rig.selected == Some(MeasId(2))
     });
+    drop_on_kind(&mut h, PaneKind::Transfer, MeasId(2));
     h.key_press(Key::A);
     step_until(&mut h, "delay tower hidden", |a| {
         a.state.rig.hidden_meas.contains(&MeasId(2))
@@ -581,6 +587,7 @@ fn measurement_tree_and_delete_choices() {
     h.key_press_modifiers(Modifiers::COMMAND, Key::Num2);
     step_until(&mut h, "slot 2", |a| a.state.slots()[1].is_some());
     tab_to(&mut h, MeasId(2));
+    drop_on_kind(&mut h, PaneKind::Transfer, MeasId(2));
     h.key_press_modifiers(Modifiers::COMMAND, Key::Num3);
     step_until(&mut h, "slot 3", |a| a.state.slots()[2].is_some());
     // Z, then the chooser's first row: a target curve from a file.

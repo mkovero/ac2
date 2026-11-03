@@ -210,14 +210,6 @@ pub enum RigRow {
     Close(RigId),
 }
 
-/// The measurement list a pane's title chip opens: the pane's compatible measurements, one
-/// highlighted (Up/Down move, Enter shows it, Esc closes).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PaneMenu {
-    pub pane: PaneId,
-    pub index: usize,
-}
-
 /// Link status as shown in the top bar.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ConnState {

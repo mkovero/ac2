@@ -54,8 +54,6 @@ pub enum FormKind {
     TargetLoudness,
     /// A new Programme pane ([`crate::meter_dialog`]).
     Programme,
-    /// What a Programme pane meters, edited in place.
-    ProgrammeEdit,
 }
 
 impl FormKind {
@@ -76,7 +74,6 @@ impl FormKind {
             FormKind::TargetTilt => ac2_scene::target_curve::tilt::TITLE,
             FormKind::TargetLoudness => ac2_scene::target_curve::loudness::TITLE,
             FormKind::Programme => ac2_scene::programme::form::NEW_TITLE,
-            FormKind::ProgrammeEdit => ac2_scene::programme::form::EDIT_TITLE,
         }
     }
 
@@ -89,7 +86,6 @@ impl FormKind {
             FormKind::IrImport => "Enter imports it as a transfer trace",
             FormKind::TargetTilt | FormKind::TargetLoudness => ac2_scene::target_curve::SUBMIT,
             FormKind::Programme => ac2_scene::programme::form::NEW_SUBMIT,
-            FormKind::ProgrammeEdit => ac2_scene::programme::form::EDIT_SUBMIT,
             FormKind::MathEdit
             | FormKind::SweepEdit
             | FormKind::SpectrumEdit
@@ -116,8 +112,7 @@ impl FormKind {
             | FormKind::SweepEdit
             | FormKind::SpectrumEdit
             | FormKind::RtaEdit
-            | FormKind::TransferEdit
-            | FormKind::ProgrammeEdit => "Apply",
+            | FormKind::TransferEdit => "Apply",
             _ => "Create and start",
         }
     }

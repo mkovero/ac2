@@ -196,21 +196,23 @@ impl AppState {
             C::PeakHold => self.step_peak_mode(out),
             C::SpectrographSpan => self.step_spectrograph_span(out),
             C::SplShowMeter | C::SplShowLeq | C::SplShowMeterLeq | C::SplShowBands => {
-                self.focus_kind(PaneKind::Spl);
-                let m = self.modes_mut();
-                m.spl = match c {
-                    C::SplShowMeter => SplMode::Meter,
-                    C::SplShowLeq => SplMode::Leq,
-                    C::SplShowMeterLeq => SplMode::MeterLeq,
-                    _ => SplMode::Bands,
-                };
+                if self.focus_kind(PaneKind::Spl) {
+                    let m = self.modes_mut();
+                    m.spl = match c {
+                        C::SplShowMeter => SplMode::Meter,
+                        C::SplShowLeq => SplMode::Leq,
+                        C::SplShowMeterLeq => SplMode::MeterLeq,
+                        _ => SplMode::Bands,
+                    };
+                }
             }
             // Either shows the windows (a layout change is about them) and is remembered.
             C::SplLeqStyle | C::SplLeqHistory => {
                 self.toggle_leq_layout(c == C::SplLeqHistory);
-                self.focus_kind(PaneKind::Spl);
-                let m = self.modes_mut();
-                m.spl = m.spl.with_leq();
+                if self.focus_kind(PaneKind::Spl) {
+                    let m = self.modes_mut();
+                    m.spl = m.spl.with_leq();
+                }
             }
             C::SplLogExport => self.ask_leq_export(false),
             C::SplLogExportPrevious => self.ask_leq_export(true),

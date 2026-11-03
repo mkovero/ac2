@@ -109,7 +109,7 @@ fn spl_weightings_from_the_keys_and_a_readable_number() -> R {
             .iter()
             .any(|m| matches!(m.config.kind, MeasKind::Spl { .. }) && m.running)
     })?;
-    d.key("Alt+4");
+    // The new meter opened in its own pane beside the focused one, focused.
     assert_eq!(d.st.layout.focus_kind(), PaneKind::Spl);
     let config = |s: &AppState| {
         s.measurements()
@@ -241,7 +241,7 @@ fn spl_pane_shows_meter_and_leq_from_an_empty_daemon() -> R {
             .iter()
             .any(|m| matches!(m.config.kind, MeasKind::Spl { .. }) && m.running)
     })?;
-    d.key("Alt+4");
+    // The new meter opened in its own pane beside the focused one, focused.
     assert_eq!(d.st.layout.focus_kind(), PaneKind::Spl);
     assert_eq!(
         d.st.kind_modes(ac2_ui::state::PaneKind::Spl).spl,

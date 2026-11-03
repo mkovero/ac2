@@ -672,8 +672,8 @@ fn space_on_the_sweep_view_without_a_sweep_opens_the_dialog() {
 fn space_on_the_live_views_drives_the_generator() {
     let mut t = T::new();
     sweep_once(&mut t);
-    for (key, pane) in [("Alt+1", PaneKind::Transfer), ("Alt+2", PaneKind::Spectrum)] {
-        t.key(key);
+    for pane in [PaneKind::Transfer, PaneKind::Spectrum] {
+        t.go(pane);
         assert_eq!(t.focus_kind(), pane);
         assert_eq!(
             next_hint(&t).as_deref(),

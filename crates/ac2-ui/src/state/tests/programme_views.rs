@@ -1,7 +1,7 @@
-//! Reducer tests of the Programme pane's two views: P on a pair's Inputs row opens its
-//! meters and its goniometer as two panes, G steps a pair's pane between them, the pane
-//! list and the Edit form leave or reset the view, the docked plate floats on its first
-//! drag, and the ember rings follow the decay set.
+//! Reducer tests of the Programme pane's two views: an Inputs row dragged onto a pane meters
+//! it there (a pair on its goniometer), the form opens a pair as two panes, G steps a pair's
+//! pane between them, the docked plate floats on its first drag, and the ember rings follow
+//! the decay set.
 
 use super::meter_form::{meter_t, rig_with_pair};
 use super::*;
@@ -21,48 +21,41 @@ fn mode(t: &T, p: PaneId) -> M {
     t.st.layout.view(p).expect("pane").modes.programme
 }
 
-/// P on the Inputs row of input `c`, the row left unpicked so the pane's keys act.
+/// The Inputs row of input `c` dropped on the focused pane's right edge: a pane of its own.
 fn open_row(t: &mut T, c: u16) {
-    t.st.apply(Msg::InputPick(c), &t.keys);
-    t.key("P");
-    if t.st.rig.input_pick.is_some() {
-        t.st.apply(Msg::InputPick(c), &t.keys);
-    }
+    let f = t.st.layout.focus;
+    t.drag_drop(
+        DragItem::Input(c),
+        f,
+        Some(ac2_scene::pane_edit::Edge::Right),
+    );
 }
 
-/// P on a pair's row: the goniometer pane on the left, the meters on the right with the
-/// focus, neither holding a measurement; one Ctrl+Z takes both away.
+/// A pair's row dropped on an edge: one new pane on its goniometer with the focus, holding
+/// no measurement; one Ctrl+Z takes it away.
 #[test]
-fn p_on_a_pair_opens_two_panes_one_undo_step() {
+fn a_pair_dropped_on_an_edge_opens_its_goniometer_one_undo_step() {
     let mut t = meter_t();
     let before = t.st.visible_panes();
     open_row(&mut t, 2);
     let p = programme_panes(&t);
-    assert_eq!(p.len(), 2, "{:?}", t.visible());
-    let views: Vec<_> = p
-        .iter()
-        .map(|id| t.st.layout.view(*id).expect("view"))
-        .map(|v| (v.meters, v.modes.programme, v.meas))
-        .collect();
+    assert_eq!(p.len(), 1, "{:?}", t.visible());
+    let v = t.st.layout.view(p[0]).expect("view");
     assert_eq!(
-        views,
-        [
-            (Some(PAIR), M::Goniometer, None),
-            (Some(PAIR), M::Meters, None)
-        ]
+        (v.meters, v.modes.programme, v.meas),
+        (Some(PAIR), M::Goniometer, None)
     );
-    assert_eq!(t.st.layout.focus, p[1]);
+    assert_eq!(t.st.layout.focus, p[0]);
     t.key("Ctrl+Z");
     assert_eq!(t.st.visible_panes(), before);
 }
 
-/// G on a pair's pane steps meters ↔ goniometer, Shift+G back; each step is one undo step.
+/// G on a pair's pane steps goniometer ↔ meters, Shift+G back; each step is one undo step.
 #[test]
 fn g_steps_a_pairs_pane_between_its_views() {
     let mut t = meter_t();
     open_row(&mut t, 2);
     let p = t.st.layout.focus;
-    t.key("G");
     assert_eq!(mode(&t, p), M::Goniometer);
     t.key("G");
     assert_eq!(mode(&t, p), M::Meters);
@@ -99,7 +92,9 @@ fn no_room_for_the_goniometer_opens_the_meters_alone() {
                 .expect("room");
         t.st.layout.set_focus(p);
     }
-    open_row(&mut t, 2);
+    t.key("Ctrl+M");
+    t.st.apply(Msg::Choose(Some(8)), &t.keys);
+    t.key("Enter");
     let p = programme_panes(&t);
     assert_eq!(p.len(), 1, "{:?}", t.visible());
     assert_eq!(mode(&t, p[0]), M::Meters);
@@ -109,19 +104,21 @@ fn no_room_for_the_goniometer_opens_the_meters_alone() {
     );
 }
 
-/// The pane list's meter row puts the bars back; the Edit form keeps the view it found.
+/// The pair's Inputs row dropped on a pane opens it on the goniometer, an input's row on its
+/// meters; E on a Programme pane changes nothing and says what does.
 #[test]
-fn the_list_resets_the_view_and_the_edit_form_keeps_it() {
+fn an_inputs_row_dropped_opens_its_view_and_e_says_drag() {
     let mut t = meter_t();
     open_row(&mut t, 2);
     let p = t.st.layout.focus;
     t.key("G");
     t.st.apply(Msg::Command(CommandId::EditMeas), &t.keys);
-    t.key("Enter");
-    assert_eq!(t.st.overlay, Overlay::None);
-    assert_eq!(mode(&t, p), M::Goniometer, "the form keeps the view");
-    t.st.apply(Msg::PanePick(p, PaneMenuRow::Meter(PAIR)), &t.keys);
-    assert_eq!(mode(&t, p), M::Meters, "the list opens on the bars");
+    assert_eq!(t.st.overlay, Overlay::None, "no form");
+    assert_eq!(t.last_toast(), ac2_scene::pane_edit::PROGRAMME_EDIT);
+    t.drag_drop(DragItem::Input(4), p, None);
+    assert_eq!(mode(&t, p), M::Meters, "an input opens on its bars");
+    t.drag_drop(DragItem::Input(2), p, None);
+    assert_eq!(mode(&t, p), M::Goniometer, "a pair opens on its goniometer");
 }
 
 /// The form's Ember decay row: Enter keeps the value in this app's settings, Esc leaves it.

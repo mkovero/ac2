@@ -10,7 +10,7 @@ use eframe::egui::{self, RichText};
 
 use crate::app::App;
 use crate::keys::{CommandId, Scope};
-use crate::state::Msg;
+use crate::state::{DragItem, DragMsg, Msg};
 use crate::theme::Chrome;
 
 /// A bar line's height, logical pixels.
@@ -18,9 +18,12 @@ const BAR_H: f32 = 10.0;
 /// The narrowest a bar gets in a narrow sidebar: below it the fill no longer reads.
 const BAR_MIN_W: f32 = 24.0;
 
+use super::chrome::ROW_DRAG_START;
+
 /// Every input of the open session, metered all the time: the operator sees what reaches
 /// the mic and the reference before and during any measurement. A click picks a row for
-/// the Inputs keys (reset its max, open it in a Programme pane): the message it makes.
+/// the Inputs keys (reset its max); a row dragged onto a pane meters it there: the message
+/// it makes.
 pub(super) fn inputs(app: &App, ui: &mut egui::Ui, ch: &Chrome) -> Option<Msg> {
     let rows = app.state.session_inputs();
     if rows.is_empty() {
@@ -41,10 +44,9 @@ pub(super) fn inputs(app: &App, ui: &mut egui::Ui, ch: &Chrome) -> Option<Msg> {
             .unwrap_or_default(),
     );
     let mut tip = format!(
-        "Click picks a row · {} resets its max, overs and loudness · {} meters it in a new \
-         Programme pane",
+        "Click picks a row · {} resets its max, overs and loudness · drag a row onto a pane \
+         to meter it there (a pair on its goniometer)",
         key(CommandId::LevelsReset),
-        key(CommandId::ProgrammePane)
     );
     if rig.is_loudness() {
         tip = format!("{tip} · {INPUTS_LOUDNESS_TIP}");
@@ -148,7 +150,17 @@ pub(super) fn inputs(app: &App, ui: &mut egui::Ui, ch: &Chrome) -> Option<Msg> {
             );
         }
         let id = ui.id().with(("input-row", r.channel));
-        if ui.interact(rect, id, egui::Sense::click()).clicked() {
+        let resp = ui.interact(rect, id, egui::Sense::click_and_drag());
+        // Pressed and moved a few points, a row drags onto a pane: the pane meters it.
+        let moved = ui.input(|i| {
+            i.pointer
+                .press_origin()
+                .zip(i.pointer.latest_pos())
+                .map_or(0.0, |(a, b)| a.distance(b))
+        });
+        if !app.state.row_drag_held() && resp.dragged() && moved >= ROW_DRAG_START {
+            msg = Some(Msg::RowDrag(DragMsg::Start(DragItem::Input(r.channel))));
+        } else if resp.clicked() {
             msg = Some(Msg::InputPick(r.channel));
         }
         ui.add_space(2.0);

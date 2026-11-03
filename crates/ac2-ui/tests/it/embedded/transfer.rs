@@ -109,7 +109,14 @@ fn simulated_rig_starts_measuring() -> R {
         &m.config.kind,
         MeasKind::Transfer { config } if (config.reference_input, config.measurement_input) == (0, 1)
     ));
-    assert_eq!(d.st.empty_hint(d.st.layout.focus, &d.keys), None);
+    // No pane follows the selection: the focused pane waits for a row dropped on it.
+    let f = d.st.layout.focus;
+    assert_eq!(
+        d.st.empty_hint(f, &d.keys).map(|h| h.text).as_deref(),
+        Some(ac2_scene::pane_edit::NOTHING_PICKED)
+    );
+    d.drop_meas(f, m.id);
+    assert_eq!(d.st.empty_hint(f, &d.keys), None);
 
     d.fire()?;
     d.tf_frames(m.id, 240)?;
@@ -224,7 +231,11 @@ fn the_ir_pane_zooms_pans_and_reads_from_the_mouse() -> R {
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     measure_from_empty(&mut d)?;
+    // The transfer measurement dropped on the IR pane.
+    let tf = d.st.selected_meas().map(|m| m.id).ok_or("the transfer")?;
     d.key("Alt+3");
+    let f = d.st.layout.focus;
+    d.drop_meas(f, tf);
     // The level typed before is kept: Space arms, Enter fires.
     d.key("Space");
     d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
@@ -470,8 +481,8 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     let run = sweep_from_the_dialog(&mut d)?;
     d.key("Alt+1");
     let f = d.st.layout.focus;
-    d.send(Msg::PanePick(f, ac2_ui::state::PaneMenuRow::Meas(m.id)));
-    // The chip leaves the selection on the sweep; the measurement's row selects it.
+    d.drop_meas(f, m.id);
+    // The drop leaves the selection on the sweep; the measurement's row selects it.
     d.send(Msg::SelectMeas(m.id));
     assert_eq!(d.st.rig.selected, Some(m.id));
     let running = |s: &AppState| {
@@ -612,7 +623,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     );
 
     // The sweep run as the reference: the steps move the live curve against it, alone.
-    // The pane's chip gives it the sweep's group (V only selects the run), so the live curve
+    // The drop gives the pane the sweep's group (V only selects the run), so the live curve
     // is compared onto it first.
     d.send(Msg::SelectMeas(m.id));
     assert_eq!(d.st.rig.selected_trace, None);
@@ -655,11 +666,11 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
         "V moved no pane"
     );
     let tf = crate::common::pane(&d.st, PaneKind::Transfer);
-    d.send(Msg::PanePick(tf, ac2_ui::state::PaneMenuRow::Meas(sweep)));
+    d.drop_meas(tf, sweep);
     assert_eq!(
         d.st.rig.selected_trace,
         Some(run),
-        "the chip keeps the selection"
+        "the drop keeps the selection"
     );
     d.send(Msg::Command(CommandId::PhaseReference));
     let pre = drawn_phase(&d.st, 240);
@@ -700,7 +711,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     // Stopped: no live curve to move, so the keys change nothing and say why. The pane was
     // given the sweep; its list puts the measurement back first.
     let tf = crate::common::pane(&d.st, PaneKind::Transfer);
-    d.send(Msg::PanePick(tf, ac2_ui::state::PaneMenuRow::Meas(m.id)));
+    d.drop_meas(tf, m.id);
     assert_eq!(d.st.kind_meas(PaneKind::Transfer).map(|x| x.id), Some(m.id));
     d.send(Msg::Command(CommandId::StartStop));
     d.until("stopped", |s| {

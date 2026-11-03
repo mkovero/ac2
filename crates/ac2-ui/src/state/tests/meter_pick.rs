@@ -88,7 +88,11 @@ fn desk() -> T {
     let mut t = T::new();
     t.conn(mirror(daemon(true)));
     t.st.apply(Msg::SelectMeas(MeasId(5)), &t.keys);
-    assert_eq!(t.st.pane_layout(), both_mics(), "SPL 2's own panes");
+    assert_eq!(
+        t.st.pane_layout(),
+        crate::state::panes::meas_layout::owner_plain(&both_mics(), MeasId(5)),
+        "SPL 2's own panes"
+    );
     assert_eq!(shown(&t), [Some(MeasId(4)), Some(MeasId(5))]);
     t
 }

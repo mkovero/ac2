@@ -71,7 +71,11 @@ fn options_at(endpoints: Option<ac2_client::Endpoints>) -> AppOptions {
         theme: ThemeName::Dark,
         keymap: Keymap::default(),
         keymap_path: Some("~/.config/ac2/keys.toml".into()),
-        prefs: common::grid_ui_prefs(),
+        prefs: {
+            let mut p = common::grid_ui_prefs();
+            p.layout.panes = p.layout.panes.map(common::fake_rig_picks);
+            p
+        },
         prefs_path: None,
         notices: vec![],
         started: Instant::now(),
@@ -431,6 +435,24 @@ fn palette(h: &mut Harness<'_, App>, what: &str) {
     });
     h.key_press(Key::Enter);
     step_until(h, "palette closed", |a| a.state.overlay == Overlay::None);
+}
+
+/// Measurement `id`'s row dropped in the middle of the pane of `kind` focused last, as the
+/// mouse would: what a pane shows is what was dropped on it, never the selection.
+fn drop_on_kind(h: &mut Harness<'_, App>, kind: PaneKind, id: MeasId) {
+    use ac2_scene::meas_list::TreeKey;
+    use ac2_ui::state::{DragItem, DragMsg, DropTarget, Msg};
+    let a = h.state_mut();
+    let pane = common::pane(&a.state, kind);
+    let rig = a.state.active();
+    let key = TreeKey::Meas(id);
+    a.dispatch(Msg::RowDrag(DragMsg::Start(DragItem::Row { rig, key })));
+    a.dispatch(Msg::RowDrag(DragMsg::Over(Some(DropTarget {
+        pane,
+        edge: None,
+    }))));
+    a.dispatch(Msg::RowDrag(DragMsg::Drop));
+    settle(h, 2);
 }
 
 /// Tab until the list's row of measurement `id` is selected: the stored traces listed

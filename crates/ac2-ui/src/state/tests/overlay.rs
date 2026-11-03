@@ -39,7 +39,6 @@ enum Window {
     Form,
     Sweep,
     Session,
-    PaneMenu,
     NewMeas,
     Calibrations,
     Electrical,
@@ -50,7 +49,7 @@ enum Window {
     DeleteMeas,
 }
 
-const WINDOWS: [Window; 16] = [
+const WINDOWS: [Window; 15] = [
     Window::Help,
     Window::Palette,
     Window::Prompt,
@@ -58,7 +57,6 @@ const WINDOWS: [Window; 16] = [
     Window::Form,
     Window::Sweep,
     Window::Session,
-    Window::PaneMenu,
     Window::NewMeas,
     Window::Calibrations,
     Window::Electrical,
@@ -108,9 +106,6 @@ fn with_window(w: Window) -> T {
         Window::Session => {
             open_dialog(&mut t, backends(true));
         }
-        Window::PaneMenu => {
-            t.st.apply(Msg::PaneMenu(t.pane(PaneKind::Transfer)), &t.keys);
-        }
         Window::NewMeas => cmd(&mut t, CommandId::NewMeasurement),
         Window::Calibrations => cmd(&mut t, CommandId::Calibrations),
         Window::Electrical => {
@@ -145,7 +140,6 @@ fn with_window(w: Window) -> T {
             | (Window::Prompt, Overlay::Prompt(_))
             | (Window::DelayPick, Overlay::DelayPick(_))
             | (Window::Form | Window::Sweep, Overlay::Form(_))
-            | (Window::PaneMenu, Overlay::PaneMenu(_))
             | (Window::NewMeas, Overlay::Choose(_))
             | (
                 Window::Session
@@ -346,22 +340,6 @@ fn palette_and_lists_page_and_wheel() {
     assert_eq!(cal_view(&t).focus, 0);
     t.key("PageUp");
     assert_eq!(cal_view(&t).focus, 0);
-
-    // A pane's measurement list follows the wheel.
-    let mut t = with_window(Window::PaneMenu);
-    let index = |t: &T| match t.st.overlay {
-        Overlay::PaneMenu(m) => m.index,
-        ref o => panic!("{o:?}"),
-    };
-    t.key("Home");
-    assert_eq!(index(&t), 0);
-    let pane = match t.st.overlay {
-        Overlay::PaneMenu(m) => m.pane,
-        ref o => panic!("{o:?}"),
-    };
-    let n = t.st.pane_menu_rows(pane).len();
-    t.st.apply(Msg::Wheel { rows: n as i32 }, &t.keys);
-    assert_eq!(index(&t), n - 1);
 }
 
 #[test]

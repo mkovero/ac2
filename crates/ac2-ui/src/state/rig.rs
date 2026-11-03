@@ -155,9 +155,9 @@ pub struct RigState {
     /// The lost selection's own panes were on screen: they follow it when it comes back.
     pub(super) lost_own_panes: bool,
     /// The measurement whose row was chosen last (or that this app selected by itself, a
-    /// measurement made, a sweep just run): a pane with no pick of its own shows it. A child
-    /// row, a chip pick or a click in a pane never moves it, so they change no pane but the
-    /// one picked.
+    /// measurement made, a sweep just run): its own panes are the ones on screen, and pane
+    /// edits are its layout's. A child row, a row dropped on a pane or a click in a pane
+    /// never moves it.
     pub(super) chosen: Option<MeasId>,
     /// Names of the measurements the daemon has listed since this app started: a pane
     /// remembered on one of them waits for it to come back.

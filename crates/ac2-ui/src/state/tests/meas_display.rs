@@ -85,7 +85,7 @@ fn on_sub(state: State) -> T {
     let mut t = T::new();
     t.conn(mirror(state));
     let p = t.pane(PaneKind::Spectrum);
-    t.st.apply(Msg::PanePick(p, PaneMenuRow::Meas(MeasId(2))), &t.keys);
+    t.drop_meas(p, MeasId(2));
     spectra(&mut t, &[(2, -60.0), (9, -60.0)]);
     t
 }
@@ -250,12 +250,13 @@ fn compared_curves_draw_in_compare_order_under_the_panes_own() {
 fn c_asks_which_measurement_first() {
     let mut t = on_sub(two_spectra(false));
     t.st.apply(Msg::SelectMeas(MeasId(9)), &t.keys);
+    t.drop_meas(t.pane(PaneKind::Spectrum), MeasId(9));
     assert!(t.key("C").is_empty());
     let Overlay::Choose(c) = &t.st.overlay else {
         panic!("no chooser: {:?}", t.st.overlay);
     };
     assert_eq!(c.title, "Compare Sub 2 with…");
-    // Its row chosen put Sub 2 on the spectrum pane: Sub is on no pane now.
+    // Its row dropped on the spectrum pane: Sub is on no pane now.
     let labels: Vec<&str> = c.choices.iter().map(|c| c.label.as_str()).collect();
     assert_eq!(labels, ["  Sub"]);
     assert_eq!(drawn(&t).len(), 1, "nothing compared yet");
@@ -275,7 +276,7 @@ fn c_asks_which_measurement_first() {
     t.answer(&r);
     t.key("Escape");
     let p = t.pane(PaneKind::Spectrum);
-    t.st.apply(Msg::PanePick(p, PaneMenuRow::Meas(MeasId(2))), &t.keys);
+    t.drop_meas(p, MeasId(2));
     assert_eq!(
         drawn(&t)
             .iter()

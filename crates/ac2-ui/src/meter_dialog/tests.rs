@@ -55,7 +55,6 @@ fn a_new_meter_starts_on_the_first_pair_and_shows_the_rigs_settings() {
         None,
         LevelsSettings::default(),
         Cooling::default(),
-        None,
     );
     assert_eq!(f.kind, FormKind::Programme);
     assert_eq!(f.kind.title(), "New programme meter");
@@ -82,7 +81,6 @@ fn inputs_are_picked_as_bars_by_name_each_once() {
         None,
         LevelsSettings::default(),
         Cooling::default(),
-        None,
     );
     // From the pair to inputs: its sides are the first two bars, a third waits empty.
     f.cycle(1);
@@ -143,7 +141,6 @@ fn eight_bars_at_most() {
         Some(all),
         LevelsSettings::default(),
         Cooling::default(),
-        None,
     );
     let bars = f
         .fields
@@ -162,7 +159,6 @@ fn without_pairs_there_is_no_meter_field() {
         None,
         LevelsSettings::default(),
         Cooling::default(),
-        None,
     );
     assert_eq!(
         rows(&f)[..3],
@@ -172,7 +168,7 @@ fn without_pairs_there_is_no_meter_field() {
 }
 
 #[test]
-fn an_edit_shows_what_the_pane_meters_and_the_rigs_odd_values() {
+fn a_metered_set_given_fills_the_rows_and_the_rigs_odd_values() {
     let rig = LevelsSettings {
         ballistic: Ballistic::Type2,
         correlation_window: CorrelationWindow::Short,
@@ -181,16 +177,8 @@ fn an_edit_shows_what_the_pane_meters_and_the_rigs_odd_values() {
         loudness_target: ac2_proto::units::Lufs(-23.0),
     };
     let m = Metered::inputs_of(&[3, 0]).expect("two");
-    let f = form(
-        main_pair(),
-        inputs(),
-        Some(m),
-        rig,
-        Cooling::default(),
-        Some(PaneId(4)),
-    );
-    assert_eq!(f.kind.title(), "Edit programme meter");
-    assert_eq!(f.kind.verb(), "Apply");
+    let f = form(main_pair(), inputs(), Some(m), rig, Cooling::default());
+    assert_eq!(f.kind.title(), "New programme meter");
     assert_eq!(
         rows(&f),
         [
@@ -218,7 +206,6 @@ fn an_edit_shows_what_the_pane_meters_and_the_rigs_odd_values() {
         Some(Metered::Pair { left: 2, right: 3 }),
         rig,
         Cooling::default(),
-        Some(PaneId(4)),
     );
     assert_eq!(metered(&p), Ok(Metered::Pair { left: 2, right: 3 }));
 }
@@ -254,7 +241,6 @@ fn nothing_metered_is_said() {
         None,
         LevelsSettings::default(),
         Cooling::default(),
-        None,
     );
     assert_eq!(metered(&f), Err("choose input 1".to_owned()));
 }
@@ -270,7 +256,6 @@ fn the_ember_decay_row_lists_each_step_once() {
             None,
             LevelsSettings::default(),
             Cooling::new(now, 1.0),
-            None,
         );
         let Some(Value::Choice { options, .. }) = f.field(FieldId::EmberDecay).map(|x| &x.value)
         else {
@@ -294,7 +279,6 @@ fn the_ember_glow_row_lists_the_ladder() {
             None,
             LevelsSettings::default(),
             Cooling::new(0.4, now),
-            None,
         );
         let Some(Value::Choice { options, .. }) = f.field(FieldId::EmberGlow).map(|x| &x.value)
         else {

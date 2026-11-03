@@ -58,7 +58,7 @@ mod ir_nav;
 pub use ir_nav::IrNavMsg;
 mod band_transfer;
 mod commands;
-pub use panes::drag::{DragMsg, DropTarget, EDGE_SHARE, RowDrag, drop_target};
+pub use panes::drag::{DragItem, DragMsg, DropTarget, EDGE_SHARE, RowDrag, RowDrop, drop_target};
 mod advice;
 mod glide;
 pub use glide::SpecGlide;
@@ -67,7 +67,6 @@ pub use walk_bar::FillGlide;
 mod leq;
 pub use leq::{LeqPanes, LeqUi};
 mod cross_rig;
-pub(crate) use cross_rig::MenuRig;
 mod rig;
 mod rigs;
 pub use leq::export::{EXPORT_DIR, export_path, leq_export_name};
@@ -96,7 +95,7 @@ mod text;
 mod undo;
 mod walk_impl;
 pub use panes::views::{
-    DEFAULT_PANE_AREA, Layout, PaneMenuRow, PaneModes, PaneRig, PaneTemplate, TransferView, View,
+    DEFAULT_PANE_AREA, Layout, PaneModes, PaneRig, PaneTemplate, TransferView, View,
 };
 pub use panes::{Axis, PaneId, PaneNode, PaneRect, Side, SplitGap};
 pub use text::{
@@ -110,7 +109,7 @@ mod types;
 pub(crate) use types::STIMULUS_STOPPED_TOO;
 use types::trace_mic_request;
 pub use types::{
-    ConnState, FinderChoice, LiveEdit, MAX_OBSERVATION_S, PaneKind, PaneMenu, RigMenu, RigRow,
+    ConnState, FinderChoice, LiveEdit, MAX_OBSERVATION_S, PaneKind, RigMenu, RigRow,
     SMOOTHING_STEPS, SUB_OBSERVATIONS_S, SmoothTarget, Smoothable, StimPhase, Stimulus,
     outputs_text, parse_curve, parse_input_curve, spectrum_smoothing,
 };
@@ -182,10 +181,9 @@ pub struct AppState {
     /// it in the layout prefs, or a rig closed): the rig takes them once it is held again
     /// under that id, wherever it is reached.
     pub(crate) rig_pending: BTreeMap<RigId, BTreeMap<PaneId, String>>,
-    /// The pane list's rows of each connected rig, while a pane's list is open: the list
-    /// offers every rig's measurements and meters, and another rig's are read with that rig
-    /// swapped in ([`AppState::refresh_menu_rigs`]).
-    pub(crate) menu_rigs: Vec<MenuRig>,
+    /// The measurement list's part of each connected rig not shown, read with that rig
+    /// swapped in after each message ([`AppState::refresh_rig_lists`]).
+    pub(crate) rig_lists: Vec<cross_rig::RigList>,
     pub theme: ThemeName,
     /// What the scene builders get; `view.freq` follows `nav`.
     pub view: ViewState,
@@ -319,7 +317,6 @@ impl AppState {
             closing: Vec::new(),
             rig_names: BTreeMap::new(),
             rig_pending: BTreeMap::new(),
-            menu_rigs: Vec::new(),
             leq_panes: LeqPanes::default(),
             theme,
             view: ViewState::default(),
@@ -358,6 +355,7 @@ impl AppState {
             level_set: BTreeSet::new(),
             keys: Keymap::default(),
             row_drag: None,
+            rig_lists: Vec::new(),
             history: undo::History::default(),
             undoing: false,
             ran_command: None,
@@ -389,8 +387,6 @@ impl AppState {
                 | Msg::SelectLive(_)
                 | Msg::SelectMath(_)
                 | Msg::SelectTrace(_)
-                | Msg::PaneMenu(_)
-                | Msg::PanePick(..)
                 | Msg::OpenRig
         ) {
             self.rig.input_pick = None;
@@ -536,25 +532,12 @@ impl AppState {
             }
             Msg::LegendPick(p, key) => self.legend_pick(p, key),
             Msg::RigPick(row) => self.rig_pick(row, out),
-            // Any pane's list, another rig's pane's too: the list offers every rig's.
-            Msg::PaneMenu(p) => match self.overlay {
-                Overlay::PaneMenu(m) if m.pane == p => self.overlay = Overlay::None,
-                _ => self.open_pane_menu(p),
-            },
-            Msg::PanePick(p, row) => {
-                // The list turns this pane into meters: it opens on the bars even where an
-                // earlier G left it on the goniometer. The Edit form keeps the view.
-                if matches!(row, PaneMenuRow::Meter(_) | PaneMenuRow::RigMeter(..))
-                    && let Some(v) = self.layout.view_mut(p)
-                {
-                    v.modes.programme = ac2_scene::view::ProgrammeMode::Meters;
-                }
-                self.pane_pick(p, row)
-            }
             Msg::DragSplit { path, ratio } => self.drag_split(&path, ratio),
             // The drag's step was closed before the message, as any other message closes it.
             Msg::DragSplitEnd => {}
             Msg::RowDrag(m) => self.row_drag_msg(m, out),
+            Msg::OnRig(_, m) => self.update_inner(*m, keymap, out),
+            Msg::ShowRig(r) => self.switch_rig(r, out),
             Msg::Zoom { about_hz, factor } => {
                 let t = self.nav.target.zoom(about_hz, factor);
                 self.nav.set_target(t);

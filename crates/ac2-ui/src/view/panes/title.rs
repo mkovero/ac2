@@ -1,107 +1,45 @@
-//! A pane's title strip: the measurement chip, caption, key-hint line, unit toggle,
-//! measurement list and first-run hints.
+//! A pane's title strip: its plain-text title, caption, key-hint line, unit toggle and
+//! first-run hints.
 
 use super::*;
 
-/// The narrowest a measurement chip is drawn: its ▾ and a few letters of the name.
-pub(super) const CHIP_MIN_W: f32 = 56.0;
+/// The narrowest a title is drawn: its number and a few letters, cut short by `…`.
+pub(super) const TITLE_MIN_W: f32 = 56.0;
 
-/// The chip's padding around its name: the left inset and the ▾ on the right.
-const CHIP_PAD: f32 = 24.0;
-
-/// What a chip leaves of the title for a caption to follow it: a few letters and `…`, so
-/// the title still shows that a trace is selected.
+/// What a title leaves for a caption to follow it: a few letters and `…`, so the title
+/// still shows that a trace is selected.
 const CAPTION_MIN_W: f32 = 32.0;
 
-/// The widest the chip may be in `room` (from its left edge to where the title's required
+/// The widest the title may be in `room` (from its left edge to where the title's required
 /// controls begin): all of it, or with a caption to follow, all but the caption's least.
-pub(super) fn chip_budget(room: f32, has_caption: bool) -> f32 {
+pub(super) fn title_budget(room: f32, has_caption: bool) -> f32 {
     let budget = if has_caption {
         room - CAPTION_MIN_W
     } else {
         room
     };
-    budget.max(CHIP_MIN_W)
+    budget.max(TITLE_MIN_W)
 }
 
-/// The chip in a pane's title naming the measurement the pane shows (a click opens the list
-/// of measurements it can show), at most `max_w` wide with its name cut short by `…` beyond
-/// that (the tooltip and accessible label keep the whole name); where it was drawn.
-pub(super) fn title_chip(
-    app: &mut App,
+/// A pane's title `text` from `left`, at most `max_w` wide, cut short by `…` beyond that
+/// (its accessible label keeps the whole text); where it was drawn.
+pub(super) fn title_text(
     ui: &egui::Ui,
-    id: PaneId,
+    text: &str,
     title: egui::Rect,
-    x: f32,
+    left: f32,
     max_w: f32,
-    ch: &Chrome,
-) -> Option<egui::Rect> {
-    let st = &app.state;
-    let m = st.pane_meas(id)?;
+    color: egui::Color32,
+) -> egui::Rect {
     let font = egui::FontId::proportional(12.0);
     let painter = ui.painter();
-    let mut job = egui::text::LayoutJob::simple_singleline(m.config.name.clone(), font, ch.text);
-    job.wrap = egui::text::TextWrapping::truncate_at_width((max_w - CHIP_PAD).max(0.0));
+    let mut job = egui::text::LayoutJob::simple_singleline(text.to_owned(), font, color);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(max_w.max(0.0));
     let galley = painter.layout_job(job);
-    let r = egui::Rect::from_min_size(
-        egui::pos2(x, title.min.y + 2.0),
-        egui::vec2(galley.size().x + CHIP_PAD, TITLE_H - 3.0),
-    );
-    let chip = ui.interact(r, ui.id().with(("pane-chip", id.0)), egui::Sense::click());
-    let name = m.config.name.clone();
-    chip.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
-    let next = app
-        .keymap
-        .first_chord(CommandId::NextInTree, Scope::Global)
-        .map(|c| c.label());
-    let chip = chip.on_hover_text(match next {
-        Some(k) => {
-            format!("{name}: click to choose what this pane shows · {k} steps through the list")
-        }
-        None => format!("{name}: click to choose what this pane shows"),
-    });
-    let open = matches!(st.overlay, Overlay::PaneMenu(pm) if pm.pane == id);
-    let fill = if open || chip.hovered() {
-        ch.focus.gamma_multiply(0.35)
-    } else {
-        ch.panel
-    };
-    painter.rect_filled(r, 3.0, fill);
-    painter.rect_stroke(
-        r,
-        3.0,
-        egui::Stroke::new(1.0, ch.border),
-        egui::StrokeKind::Inside,
-    );
-    let gh = galley.size().y;
-    painter.galley(
-        egui::pos2(r.min.x + 7.0, r.center().y - gh / 2.0),
-        galley,
-        ch.text,
-    );
-    // A small ▾, drawn: it opens a list.
-    let (cx, cy) = (r.max.x - 9.0, r.center().y);
-    painter.add(egui::Shape::convex_polygon(
-        vec![
-            egui::pos2(cx - 3.5, cy - 1.5),
-            egui::pos2(cx + 3.5, cy - 1.5),
-            egui::pos2(cx, cy + 2.5),
-        ],
-        ch.dim,
-        egui::Stroke::NONE,
-    ));
-    if chip.clicked() {
-        app.dispatch(Msg::PaneMenu(id));
-    }
-    pane_menu(
-        app,
-        ui,
-        id,
-        r.left_bottom() + egui::vec2(0.0, 2.0),
-        &chip,
-        ch,
-    );
-    Some(r)
+    let size = galley.size();
+    let at = egui::pos2(left, title.center().y - size.y / 2.0);
+    painter.galley(at, galley, color);
+    egui::Rect::from_min_size(at, size)
 }
 
 /// The pane's caption (the selected stored trace, smoothing, mic curve) between `left` and
@@ -340,64 +278,6 @@ pub(super) fn unit_toggle(
         app.dispatch(Msg::DistortionUnit(u));
     }
     Some(left)
-}
-
-/// The open measurement list of `pane`, under its chip.
-pub(super) fn pane_menu(
-    app: &mut App,
-    ui: &egui::Ui,
-    pane: PaneId,
-    at: egui::Pos2,
-    chip: &egui::Response,
-    ch: &Chrome,
-) {
-    let Overlay::PaneMenu(menu) = app.state.overlay else {
-        return;
-    };
-    if menu.pane != pane {
-        return;
-    }
-    let rows: Vec<(PaneMenuRow, String)> = app.state.pane_menu_rows(pane);
-    let mut picked = None;
-    let area = egui::Area::new(ui.id().with(("pane-menu", pane.0)))
-        .order(egui::Order::Foreground)
-        .fixed_pos(at)
-        .show(ui.ctx(), |ui| {
-            super::super::overlays::card(ch)
-                .inner_margin(egui::Margin::same(6))
-                .show(ui, |ui| {
-                    ui.set_min_width(200.0);
-                    for (i, (id, text)) in rows.iter().enumerate() {
-                        if !id.pickable() {
-                            // A rig's heading over its rows: a name, not a row to take.
-                            ui.add_space(if i == 0 { 0.0 } else { 4.0 });
-                            ui.label(egui::RichText::new(text.as_str()).small().color(ch.dim));
-                            continue;
-                        }
-                        let b = egui::Button::selectable(i == menu.index, text.as_str());
-                        if ui.add(b).clicked() {
-                            picked = Some(*id);
-                        }
-                    }
-                    ui.label(
-                        egui::RichText::new("↑/↓ · wheel · Enter shows · Esc closes")
-                            .small()
-                            .color(ch.dim),
-                    );
-                });
-        });
-    let wheel = area
-        .response
-        .contains_pointer()
-        .then(|| super::super::overlays::wheel_rows(ui.ctx()))
-        .flatten();
-    if let Some(row) = picked {
-        app.dispatch(Msg::PanePick(pane, row));
-    } else if let Some(rows) = wheel {
-        app.dispatch(Msg::Wheel { rows });
-    } else if area.response.clicked_elsewhere() && !chip.clicked() {
-        app.dispatch(Msg::PaneMenu(pane));
-    }
 }
 
 /// First-run guidance over the (empty) transfer plot: what to do to get a measurement.

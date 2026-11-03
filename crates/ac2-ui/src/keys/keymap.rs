@@ -43,6 +43,14 @@ impl Keymap {
 
     /// Defaults with the overrides in `toml` applied, validated.
     pub fn from_toml(toml: &str) -> Result<Self, String> {
+        Self::from_toml_noting(toml).map(|(m, _)| m)
+    }
+
+    /// [`Self::from_toml`], and what it skipped: a binding of a command no longer in the
+    /// app (a `keys.toml` written for an earlier version) is left out with a note, the rest
+    /// of the file still applies.
+    pub fn from_toml_noting(toml: &str) -> Result<(Self, Vec<String>), String> {
+        let mut skipped = Vec::new();
         let table: BTreeMap<String, BTreeMap<String, ChordList>> =
             toml::from_str(toml).map_err(|e| format!("keys.toml: {e}"))?;
         let mut bindings = defaults();
@@ -50,9 +58,12 @@ impl Keymap {
             let scope = Scope::parse(&scope_name)
                 .ok_or_else(|| format!("keys.toml: unknown scope [{scope_name}]"))?;
             for (cmd_name, list) in cmds {
-                let command = CommandId::from_name(&cmd_name).ok_or_else(|| {
-                    format!("keys.toml: unknown command {cmd_name:?} in [{scope_name}]")
-                })?;
+                let Some(command) = CommandId::from_name(&cmd_name) else {
+                    skipped.push(format!(
+                        "keys.toml: unknown command {cmd_name:?} in [{scope_name}] skipped"
+                    ));
+                    continue;
+                };
                 if !command.scopes().contains(&scope) {
                     return Err(format!(
                         "keys.toml: {cmd_name} does nothing in [{scope_name}] (valid: {})",
@@ -81,7 +92,7 @@ impl Keymap {
         }
         let map = Self { bindings };
         map.validate()?;
-        Ok(map)
+        Ok((map, skipped))
     }
 
     /// Loads `path`; a missing file means defaults. On error the defaults are returned with
@@ -91,8 +102,9 @@ impl Keymap {
             return (Self::default(), None);
         };
         match std::fs::read_to_string(path) {
-            Ok(s) => match Self::from_toml(&s) {
-                Ok(m) => (m, None),
+            Ok(s) => match Self::from_toml_noting(&s) {
+                Ok((m, skipped)) if skipped.is_empty() => (m, None),
+                Ok((m, skipped)) => (m, Some(skipped.join("; "))),
                 Err(e) => (Self::default(), Some(format!("{e}; using default keys"))),
             },
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (Self::default(), None),

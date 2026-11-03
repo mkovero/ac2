@@ -175,7 +175,8 @@ pub fn spl_placeholder(st: &AppState, pane: PaneId, keymap: &crate::keys::Keymap
         .pane_meas(pane)
         .filter(|m| matches!(m.config.kind, MeasKind::Spl { .. }))
     else {
-        return "no SPL meter".to_owned();
+        // A pane with no meter picked follows no selection: a row dropped on it is its meter.
+        return ac2_scene::pane_edit::NOTHING_PICKED.to_owned();
     };
     let mode = st.pane_modes(pane).spl;
     let has = |stream| frame(st, m.id, stream).is_some();

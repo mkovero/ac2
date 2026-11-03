@@ -30,53 +30,48 @@ pub enum DropSpot {
     Pane(usize),
     /// A pane split off on that side shows it.
     NewPane(Edge),
-    /// Drawn compared over pane `n`, which keeps what it shows.
-    Compare(usize),
 }
 
 /// The label beside the pointer while a row is dragged, and the name of the drop after:
-/// `FOH SPL → pane 2`, `FOH SPL → new pane below`, `FOH SPL → compare in pane 2`.
-pub fn drop_label(item: &str, spot: DropSpot) -> String {
-    match spot {
+/// `FOH SPL → pane 2`, `FOH SPL → new pane below`. `becomes`: the kind of pane (its title)
+/// pane `n` turns into to draw the row, said before release because the drop changes it:
+/// `FOH SPL → pane 2, becomes SPL`.
+pub fn drop_label(item: &str, spot: DropSpot, becomes: Option<&str>) -> String {
+    let to = match spot {
         DropSpot::Pane(n) => format!("{item} \u{2192} pane {n}"),
         DropSpot::NewPane(e) => format!("{item} \u{2192} {}", e.new_pane()),
-        DropSpot::Compare(n) => format!("{item} \u{2192} compare in pane {n}"),
+    };
+    match becomes {
+        Some(k) => format!("{to}, becomes {k}"),
+        None => to,
     }
 }
 
-/// Why a row dropped with Shift is not compared.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CompareRefusal {
-    /// Pane `pane` is an SPL pane: a meter is a number, not a curve to overlay; two meters
-    /// are compared side by side, each on a pane of its own.
-    MeterPane { pane: usize },
-    /// The item has no curve of the kind the pane draws (`what`: `transfer`, `spectrum or
-    /// RTA`, `sweep`).
-    NoCurve { what: &'static str },
-    /// The item is a stored trace under Imported: it belongs to no measurement, so no pane
-    /// draws it until it is moved under one.
-    Imported,
-    /// The item is of the measurement the pane shows: drawn there anyway.
-    OwnGroup,
+/// What a pane with nothing picked says: it follows no selection, a row dropped on it is
+/// what it shows.
+pub const NOTHING_PICKED: &str = "nothing picked \u{2014} drag a row of the list here";
+
+/// E on a Programme pane: what it meters is what was dropped on it.
+pub const PROGRAMME_EDIT: &str =
+    "a Programme pane meters the Inputs row dropped on it: drag an input or a pair here";
+
+/// A new measurement made with no room for a pane of its own: `drag TF 3 onto one`.
+pub fn no_room_for_pane(name: &str) -> String {
+    format!("no room for a pane: drag {name} onto one")
 }
 
-/// The toast of a refused Shift-drop: `FOH SPL not compared: pane 2 shows SPL; meters are
-/// compared side by side — drop it without Shift on a pane of its own`.
-pub fn compare_refused(item: &str, why: CompareRefusal) -> String {
-    match why {
-        CompareRefusal::MeterPane { pane } => format!(
-            "{item} not compared: pane {pane} shows SPL; meters are compared side by side — drop it without Shift on a pane of its own"
-        ),
-        CompareRefusal::NoCurve { what } => {
-            format!("{item} not compared: it has no {what} curve to draw over the pane")
-        }
-        CompareRefusal::Imported => {
-            format!("{item} not compared: it is under Imported — Move to measurement… first")
-        }
-        CompareRefusal::OwnGroup => {
-            format!("{item} not compared: the pane draws it already, as its own")
-        }
+/// A command about a kind of pane none on screen is: `no SPL pane: drag FOH SPL onto one`,
+/// or with nothing of that kind selected, which kind to select.
+pub fn no_pane_of(kind: &str, name: Option<&str>) -> String {
+    match name {
+        Some(n) => format!("no {kind} pane: drag {n} onto one"),
+        None => format!("no {kind} pane: drag a {kind} measurement onto one"),
     }
+}
+
+/// A row dropped onto a row of another rig: math combines one rig's measurements.
+pub fn cross_rig_math_refused(rig: &str) -> String {
+    format!("not combined: the two rows are of different rigs; math uses one rig's ({rig})")
 }
 
 /// How W or F left the screen.
@@ -99,7 +94,7 @@ pub enum ScreenStep {
 /// One edit of the panes that undo takes back (and redo does again).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PaneEdit {
-    /// A row dropped on the panes, a chip or row pick: `item` went to `spot`.
+    /// A row dropped on the panes, or a row's own panes brought: `item` went to `spot`.
     Put { item: String, spot: DropSpot },
     /// N: pane `n` split.
     Split(usize),
@@ -125,7 +120,7 @@ impl PaneEdit {
     /// The edit in a few words: `FOH SPL → pane 2`, `split pane 1`.
     pub fn describe(&self) -> String {
         match self {
-            PaneEdit::Put { item, spot } => drop_label(item, *spot),
+            PaneEdit::Put { item, spot } => drop_label(item, *spot, None),
             PaneEdit::Split(n) => format!("split pane {n}"),
             PaneEdit::Turn(n) => format!("turn the split of pane {n}"),
             PaneEdit::Close(n) => format!("close pane {n}"),
@@ -166,24 +161,24 @@ mod tests {
     #[test]
     fn drag_labels_name_the_item_and_where_it_lands() {
         assert_eq!(
-            drop_label("FOH SPL", DropSpot::Pane(2)),
+            drop_label("FOH SPL", DropSpot::Pane(2), None),
             "FOH SPL \u{2192} pane 2"
         );
         assert_eq!(
-            drop_label("FOH SPL", DropSpot::NewPane(Edge::Bottom)),
+            drop_label("FOH SPL", DropSpot::NewPane(Edge::Bottom), None),
             "FOH SPL \u{2192} new pane below"
         );
         assert_eq!(
-            drop_label("FOH SPL", DropSpot::NewPane(Edge::Top)),
+            drop_label("FOH SPL", DropSpot::NewPane(Edge::Top), None),
             "FOH SPL \u{2192} new pane above"
         );
         assert_eq!(
-            drop_label("Main L", DropSpot::NewPane(Edge::Left)),
+            drop_label("Main L", DropSpot::NewPane(Edge::Left), None),
             "Main L \u{2192} new pane on the left"
         );
         assert_eq!(
-            drop_label("FOH SPL", DropSpot::Compare(2)),
-            "FOH SPL \u{2192} compare in pane 2"
+            drop_label("FOH SPL", DropSpot::Pane(2), Some("SPL")),
+            "FOH SPL \u{2192} pane 2, becomes SPL"
         );
     }
 
@@ -209,18 +204,18 @@ mod tests {
     }
 
     #[test]
-    fn a_refused_compare_says_why() {
+    fn an_empty_pane_says_how_it_gets_something() {
         assert_eq!(
-            compare_refused("FOH SPL", CompareRefusal::MeterPane { pane: 2 }),
-            "FOH SPL not compared: pane 2 shows SPL; meters are compared side by side — drop it without Shift on a pane of its own"
+            NOTHING_PICKED,
+            "nothing picked \u{2014} drag a row of the list here"
         );
         assert_eq!(
-            compare_refused("FOH SPL", CompareRefusal::NoCurve { what: "transfer" }),
-            "FOH SPL not compared: it has no transfer curve to draw over the pane"
+            no_pane_of("SPL", Some("FOH SPL")),
+            "no SPL pane: drag FOH SPL onto one"
         );
         assert_eq!(
-            compare_refused("1083 94cm", CompareRefusal::Imported),
-            "1083 94cm not compared: it is under Imported — Move to measurement… first"
+            no_room_for_pane("TF 3"),
+            "no room for a pane: drag TF 3 onto one"
         );
     }
 }

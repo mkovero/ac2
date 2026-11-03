@@ -3,12 +3,10 @@
 //! a loudness ballistic the pane's bars follow from them by source, a pair reading one bar.
 
 pub const NEW_TITLE: &str = "New programme meter";
-pub const EDIT_TITLE: &str = "Edit programme meter";
 
 /// What Enter does in each.
 pub const NEW_SUBMIT: &str =
     "Enter opens it beside the focused one: meters, and a goniometer pane for a pair";
-pub const EDIT_SUBMIT: &str = "Enter applies to this pane";
 
 /// The heading over what the pane meters: the pane's own.
 pub const WHAT_HEADING: &str = "What to meter";

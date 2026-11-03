@@ -62,7 +62,6 @@ impl Section {
             | C::StimulusTakeOver => Section::Stimulus,
             C::NextInTree
             | C::PrevInTree
-            | C::PaneMeasurement
             | C::NextTrace
             | C::PrevTrace
             | C::NextAnyTrace

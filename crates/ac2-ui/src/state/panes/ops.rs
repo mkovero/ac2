@@ -6,23 +6,15 @@ use crate::state::*;
 use ac2_scene::freq_column::{FreqPlot, natural_right};
 
 impl AppState {
-    /// Measurement `own` among those pane kind `kind` can show; else the one whose row was
-    /// chosen when its home is that kind's; else the first whose home it is, else the first
-    /// it can show.
-    /// Unchosen, a pane leads with its own kind: the transfer pane shows a sweep's runs only
-    /// once picked for it, a live curve before that.
+    /// Measurement `own` when pane kind `kind` can show it. An unpicked pane shows nothing:
+    /// it never stands in the selection or the first of a kind, so what a pane shows is only
+    /// ever what was put there.
     fn resolve_meas(&self, kind: PaneKind, own: Option<MeasId>) -> Option<&Measurement> {
-        let c = self.pane_candidates(kind);
-        let pick = |id: Option<MeasId>| id.and_then(|id| c.iter().find(|m| m.id == id).copied());
-        let home = |m: &Measurement| PaneKind::for_kind(&m.config.kind) == kind;
-        pick(own)
-            .or_else(|| pick(self.rig.chosen).filter(|m| home(m)))
-            .or_else(|| c.iter().find(|m| home(m)).copied())
-            .or_else(|| c.first().copied())
+        let own = self.meas(own?)?;
+        kind.shows(&own.config.kind).then_some(own)
     }
 
-    /// The measurement pane `id` shows: its own choice, else the one whose row was chosen if
-    /// it fits, else the first that fits.
+    /// The measurement pane `id` shows: its pick, if it can draw it.
     /// None for a pane of another rig: its ids are that rig's.
     pub fn pane_meas(&self, id: PaneId) -> Option<&Measurement> {
         let v = self.layout.view(id).filter(|v| self.ours(v))?;
@@ -31,12 +23,15 @@ impl AppState {
 
     /// The measurement "the `kind` pane" shows, for what is about a kind rather than one pane
     /// (an SPL command, the delay banner): the focused pane's when it is of that kind, else
-    /// the one of that kind focused last; with none on screen, what one would show.
+    /// the one of that kind focused last; with none showing one, the selected measurement
+    /// when it is of that kind, else none (the caller says what to select).
     pub fn kind_meas(&self, kind: PaneKind) -> Option<&Measurement> {
-        match self.lead(kind) {
-            Some(id) => self.pane_meas(id),
-            None => self.resolve_meas(kind, None),
-        }
+        self.lead(kind)
+            .and_then(|id| self.pane_meas(id))
+            .or_else(|| {
+                self.selected_meas()
+                    .filter(|m| PaneKind::for_kind(&m.config.kind) == kind)
+            })
     }
 
     /// The view state pane `id` is drawn with: the shared one (the frequency axis, read
@@ -272,14 +267,20 @@ impl AppState {
         true
     }
 
-    /// The transfer stack laid out for the focused transfer pane's measurement; on another
-    /// pane, the focused pane turns into it for the selected transfer measurement.
+    /// The transfer stack laid out for the focused transfer pane's measurement; on an empty
+    /// pane, for the selected transfer measurement. A pane showing something else keeps it:
+    /// what a pane shows changes by a row dropped on it.
     pub(in crate::state) fn transfer_stack(&mut self) {
         let f = self.layout.focus;
         let meas = if self.layout.kind(f) == PaneKind::Transfer {
             self.pane_meas(f)
-        } else {
+        } else if self.layout.view(f).is_some_and(|v| !v.has_content()) {
             self.rig.selected.and_then(|id| self.meas(id))
+        } else {
+            self.warn(
+                "the stack lays out a transfer pane: focus one, or drag a transfer row onto a pane",
+            );
+            return;
         }
         .filter(|m| matches!(m.config.kind, MeasKind::Transfer { .. }))
         .map(|m| m.id);
@@ -294,30 +295,12 @@ impl AppState {
         }
     }
 
-    /// A transfer measurement this app created: the pane that shows it now (the focused
-    /// transfer pane, else the transfer pane worked in last) lays it out in the transfer
-    /// stack. With no transfer pane, a pane of its own split off the focused one as N
-    /// splits it holds the stack (or, too small for one, the transfer view alone), so the
-    /// panes already there keep their kinds; only a pane too small to split turns into it.
+    /// A transfer measurement this app created: its own pane ([`Self::own_pane_for_new`])
+    /// holds the transfer stack (or, too small for one, the transfer view alone).
     pub(in crate::state) fn stack_created(&mut self, meas: MeasId) {
-        let p = match self.layout.focus_kind() {
-            PaneKind::Transfer if self.pane_ours(self.layout.focus) => self.layout.focus,
-            _ => match self.lead(PaneKind::Transfer) {
-                Some(p) => p,
-                None => match self.split_for_new() {
-                    Some(new) => {
-                        self.set_pane_kind(new, PaneKind::Transfer);
-                        if let Some(v) = self.layout.view_mut(new) {
-                            v.meas = Some(meas);
-                        }
-                        self.focus_pane(new);
-                        new
-                    }
-                    None => self.layout.focus,
-                },
-            },
-        };
-        self.apply_template(PaneTemplate::TransferStack, p, meas);
+        if let Some(p) = self.own_pane_for_new(meas, PaneKind::Transfer) {
+            self.apply_template(PaneTemplate::TransferStack, p, meas);
+        }
     }
 
     /// N: the focused pane split in two along its longer side; the new half shows the
@@ -345,9 +328,21 @@ impl AppState {
     }
 
     /// A pane of its own for something new of the rig in `rig` (a measurement made, meters
-    /// opened): N's split of the focused pane, the new half set on that rig with nothing
-    /// chosen yet, whichever rig the focused pane shows.
+    /// opened): the focused pane when it shows nothing (an empty pane is room, no split
+    /// needed), else N's split of the focused pane, the new half set on that rig with
+    /// nothing chosen yet, whichever rig the focused pane shows. Never a pane that shows
+    /// something; `None`: no room to split.
     pub(in crate::state) fn split_for_new(&mut self) -> Option<PaneId> {
+        let f = self.layout.focus;
+        let waits = self.rig.pending.pane_ids.contains_key(&f)
+            || self.rig.pending.pane_meas.contains_key(&f);
+        let empty = self
+            .layout
+            .view(f)
+            .is_some_and(|v| !v.has_content() && v.rig == PaneRig::Active);
+        if empty && !waits && self.visiting.is_none() {
+            return Some(f);
+        }
         let new = self.split_focused_pane()?;
         let here = self.here();
         if let Some(v) = self.layout.view_mut(new)
@@ -360,25 +355,27 @@ impl AppState {
         Some(new)
     }
 
-    /// The pane a measurement row chosen in the list shows its measurement in: the focused
-    /// pane when it is the rig's own, else the rig's pane of `kind` worked in last, else its
-    /// first pane; with none on screen, a pane of its own split off the focused one. Another
-    /// rig's panes stay as they are.
-    pub(in crate::state) fn own_pane_for(&mut self, kind: PaneKind) -> PaneId {
-        let f = self.layout.focus;
-        if self.pane_ours(f) {
-            return f;
+    /// A measurement this app created, on a pane of its own ([`Self::split_for_new`]) of
+    /// `kind`, focused: the pane. No room to split: no pane changes and a warning says how
+    /// to show it.
+    pub(in crate::state) fn own_pane_for_new(
+        &mut self,
+        meas: MeasId,
+        kind: PaneKind,
+    ) -> Option<PaneId> {
+        let Some(p) = self.split_for_new() else {
+            let name = self
+                .meas(meas)
+                .map_or_else(String::new, |m| m.config.name.clone());
+            self.warn(ac2_scene::pane_edit::no_room_for_pane(&name));
+            return None;
+        };
+        self.set_pane_kind(p, kind);
+        if let Some(v) = self.layout.view_mut(p) {
+            v.meas = Some(meas);
         }
-        let ours = self
-            .lead(kind)
-            .or_else(|| self.layout.panes().into_iter().find(|p| self.pane_ours(*p)));
-        match ours.or_else(|| self.split_for_new()) {
-            Some(p) => {
-                self.layout.set_focus(p);
-                p
-            }
-            None => f,
-        }
+        self.focus_pane(p);
+        Some(p)
     }
 
     /// Pane `p` split in halves along `axis`, the new half on `side` (`A`: left or top),
@@ -394,18 +391,10 @@ impl AppState {
         if !self.can_split(p, axis) {
             return None;
         }
-        // Both halves keep showing what the pane did, whatever row is chosen later: an
-        // unchosen pane would follow it. A pane whose pick waits for the mirror has both
-        // halves wait for it instead: the stand-in it shows meanwhile is not its choice.
+        // Both halves show what the pane did: its pick, or nothing. A pane whose pick waits
+        // for the mirror has both halves wait for it.
         let waiting = self.rig.pending.pane_meas.get(&p).cloned();
         let waiting_id = self.rig.pending.pane_ids.get(&p).copied();
-        let shown = self.pane_meas(p).map(|m| m.id);
-        if let Some(v) = self.layout.view_mut(p)
-            && waiting.is_none()
-            && waiting_id.is_none()
-        {
-            v.meas = v.meas.or(shown);
-        }
         self.layout.maximized = false;
         let new = self.layout.split_pane(p, axis, side);
         self.copy_levels(p, new);
@@ -418,26 +407,14 @@ impl AppState {
         Some(new)
     }
 
-    /// A measurement this app created, shown on the pane of its kind worked in last; with
-    /// none, on a pane of its own split off the focused one as N splits it, so the panes
-    /// already there keep their kinds. A sweep's pane takes the focus, as its runs are armed
-    /// there: with no room to split, the focused pane turns into it.
+    /// A measurement this app created, on a pane of its own ([`Self::own_pane_for_new`]):
+    /// never over a pane that shows something.
     pub(in crate::state) fn open_created(&mut self, meas: MeasId, kind: PaneKind) {
-        if self.lead(kind).is_none()
-            && let Some(new) = self.split_for_new()
-        {
-            self.set_pane_kind(new, kind);
-            if let Some(v) = self.layout.view_mut(new) {
-                v.meas = Some(meas);
-            }
-        }
-        if kind == PaneKind::Distortion {
-            self.focus_kind(kind);
-        }
+        self.own_pane_for_new(meas, kind);
     }
 
-    /// A new alignment's (or spatial average's) own pane: the focused pane split, the new
-    /// half showing `meas` in transfer view `view` (the focused pane keeps what it shows).
+    /// A new alignment's (or spatial average's) own pane ([`Self::split_for_new`]), showing
+    /// `meas` in transfer view `view` (the focused pane, unless empty, keeps what it shows).
     pub(in crate::state) fn open_split(&mut self, meas: MeasId, view: TransferView) {
         let Some(new) = self.split_for_new() else {
             let text = if view == TransferView::Alignment {
@@ -447,7 +424,10 @@ impl AppState {
                     g.as_deref().unwrap_or("Next view")
                 )
             } else {
-                "no room to split a pane for it: the transfer pane's list shows it".to_owned()
+                let name = self
+                    .meas(meas)
+                    .map_or_else(String::new, |m| m.config.name.clone());
+                ac2_scene::pane_edit::no_room_for_pane(&name)
             };
             self.warn(text);
             return;
@@ -457,21 +437,18 @@ impl AppState {
             v.meas = Some(meas);
             v.modes.transfer = view;
         }
+        self.focus_pane(new);
     }
 
     /// Q: the focused pane closed, its neighbour taking its place and the focus; the
     /// last pane stays.
     pub(in crate::state) fn close_pane(&mut self) {
-        let gone = self.layout.focus;
         if !self.layout.close_focused() {
             let split = self.keys.label(CommandId::SplitPane, Scope::Global);
             let text =
                 ac2_scene::new_meas::last_pane_stays(split.as_deref(), &self.new_meas_reach());
             self.warn(text);
             return;
-        }
-        if matches!(self.overlay, Overlay::PaneMenu(m) if m.pane == gone) {
-            self.overlay = Overlay::None;
         }
         self.rig
             .pending
@@ -596,22 +573,33 @@ impl AppState {
         self.layout.set_focus(id);
     }
 
-    /// Brings up a pane of kind `p` (a command about that kind: the sweep's views, the SPL
-    /// modes): the one of that kind on screen worked in last, else the focused pane turns
-    /// into one.
-    pub(in crate::state) fn focus_kind(&mut self, p: PaneKind) {
-        let id = match self.lead(p) {
-            Some(id) => id,
-            None => {
-                let f = self.layout.focus;
-                self.set_pane_kind(f, p);
-                f
+    /// Brings up the pane of kind `p` a command is about (the sweep's views, the SPL modes):
+    /// the one of that kind on screen worked in last. With none, no pane turns into one:
+    /// the hint says which row to drag onto a pane, and `false`.
+    pub(in crate::state) fn focus_kind(&mut self, p: PaneKind) -> bool {
+        match self.focus_lead(p) {
+            true => true,
+            false => {
+                let name = self
+                    .selected_meas()
+                    .filter(|m| PaneKind::for_kind(&m.config.kind) == p)
+                    .map(|m| m.config.name.clone());
+                self.warn(ac2_scene::pane_edit::no_pane_of(p.title(), name.as_deref()));
+                false
             }
-        };
-        self.focus_pane(id);
+        }
     }
 
-    /// Pane `id` turns into a pane of kind `kind`, following the selection.
+    /// [`Self::focus_kind`] without the hint: for what acts whether a pane shows it or not.
+    pub(in crate::state) fn focus_lead(&mut self, p: PaneKind) -> bool {
+        let lead = self.lead(p);
+        if let Some(id) = lead {
+            self.focus_pane(id);
+        }
+        lead.is_some()
+    }
+
+    /// Pane `id` turns into a pane of kind `kind`, with nothing picked when the kind changes.
     pub(in crate::state) fn set_pane_kind(&mut self, id: PaneId, kind: PaneKind) {
         if let Some(v) = self.layout.view_mut(id) {
             if v.kind != kind {
@@ -631,118 +619,6 @@ impl AppState {
         if !self.spectrograph_shown() {
             self.rig.spectrographs.clear();
             self.view.spectrum.spectrograph.cursor_s = None;
-        }
-    }
-
-    /// The rows of pane `id`'s list: every measurement in the tree's order (the pane turns
-    /// into the kind a picked one needs), then the kinds of pane no measurement brings, so
-    /// a pane can still be readied for a measurement not yet made; last, the New
-    /// measurement chooser, where a list of what exists is looked in for what does not.
-    /// With several rigs connected, each rig's measurements and meters come under a
-    /// heading naming it, the rig shown first ([`Self::refresh_menu_rigs`]).
-    pub fn pane_menu_rows(&self, id: PaneId) -> Vec<(PaneMenuRow, String)> {
-        let kind = self.layout.kind(id);
-        let (mut v, meters, brought) = if self.menu_rigs.is_empty() {
-            let own = self.own_menu_rows();
-            (own.meas, own.meters, own.brought)
-        } else {
-            let (v, brought) = self.every_rig_menu_rows();
-            (v, Vec::new(), brought)
-        };
-        v.extend(
-            PaneKind::ALL
-                .into_iter()
-                // A Programme pane is offered by what it meters, a walk pane by its walk
-                // (the Spatial walk window).
-                .filter(|k| *k != kind && !matches!(k, PaneKind::Programme | PaneKind::Walk))
-                .filter(|k| !brought.contains(k))
-                .map(|k| (PaneMenuRow::Kind(k), format!("pane  {}", k.title()))),
-        );
-        v.extend(meters);
-        let key = self.keys.label(CommandId::NewMeasurement, Scope::Global);
-        v.push((
-            PaneMenuRow::NewMeasurement,
-            ac2_scene::new_meas::menu_row(key.as_deref()),
-        ));
-        v
-    }
-
-    /// The rig in `rig`'s rows of a pane's list: its measurements in the tree's order, what
-    /// it can meter, and the kinds of pane its measurements bring.
-    pub(in crate::state) fn own_menu_rows(&self) -> MenuRig {
-        let meas: Vec<&Measurement> = self
-            .tree_meas_order()
-            .into_iter()
-            .filter_map(|m| self.meas(m))
-            .collect();
-        let v: Vec<(PaneMenuRow, String)> = meas
-            .iter()
-            .map(|m| {
-                let hidden = if self.meas_hidden(m) {
-                    " · hidden"
-                } else {
-                    ""
-                };
-                (
-                    PaneMenuRow::Meas(m.id),
-                    format!(
-                        "{}  {}{hidden}",
-                        ac2_scene::meas_list::kind_tag(&m.config.kind),
-                        m.config.name
-                    ),
-                )
-            })
-            .collect();
-        let brought = PaneKind::ALL
-            .into_iter()
-            .filter(|k| meas.iter().any(|m| k.shows(&m.config.kind)))
-            .collect();
-        MenuRig {
-            rig: self.rig.id,
-            meas: v,
-            meters: self.programme_menu_rows(),
-            brought,
-        }
-    }
-
-    /// A row of pane `id`'s list taken: it shows that measurement (selected), or turns into
-    /// that kind of pane.
-    pub(in crate::state) fn pane_pick(&mut self, id: PaneId, row: PaneMenuRow) {
-        if matches!(self.overlay, Overlay::PaneMenu(_)) {
-            self.overlay = Overlay::None;
-        }
-        match row {
-            PaneMenuRow::Meas(m) => self.pane_show(id, m),
-            // A kind or the shown rig's meters: the pane is the shown rig's from then on.
-            PaneMenuRow::Kind(k) => {
-                self.set_pane_kind(id, k);
-                if let Some(v) = self.layout.view_mut(id)
-                    && v.rig != PaneRig::Active
-                {
-                    v.rig = PaneRig::Active;
-                    v.meas = None;
-                    v.meters = None;
-                }
-                self.focus_pane(id);
-            }
-            PaneMenuRow::Meter(m) => {
-                self.set_pane_kind(id, PaneKind::Programme);
-                if let Some(v) = self.layout.view_mut(id) {
-                    v.meters = Some(m);
-                    v.rig = PaneRig::Active;
-                }
-                self.focus_pane(id);
-            }
-            PaneMenuRow::NewMeasurement => {
-                // The pane whose list it was is the one the chooser's guess is about, and
-                // the one the new measurement's pane splits off.
-                self.focus_pane(id);
-                let keymap = self.keys.clone();
-                self.open_new_measurement(id, &keymap);
-            }
-            PaneMenuRow::Heading(_) => {}
-            PaneMenuRow::RigMeas(r, m) => self.pane_show_from(id, r, m),
-            PaneMenuRow::RigMeter(r, m) => self.pane_meter_from(id, r, m),
         }
     }
 }

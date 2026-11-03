@@ -12,7 +12,7 @@ use ac2_proto::units::{Dbfs, Dbtp, Lufs};
 use ac2_scene::programme::{form as words, rig};
 
 use crate::forms::{Field, FieldId, Form, FormKind, Value};
-use crate::state::{MAX_METERED, Metered, PaneId};
+use crate::state::{MAX_METERED, Metered};
 
 /// The dialog's own state beside its fields.
 #[derive(Clone, Debug, PartialEq)]
@@ -32,8 +32,6 @@ pub struct MeterForm {
     glow: Vec<f32>,
     /// The rig's settings when the dialog opened: a field still at its value is not sent.
     pub opened: LevelsSettings,
-    /// The Programme pane whose meters change in place; `None`: a new pane.
-    pub edit: Option<PaneId>,
 }
 
 impl MeterForm {
@@ -52,22 +50,17 @@ struct What {
     bars: Vec<Option<u16>>,
 }
 
-/// The dialog over the session's `pairs` and `inputs`, starting from `now` (an edited pane's
-/// meters; for a new pane what to start from, else the first pair, else the first input), and
-/// the rig's settings `rig`, and how this app's embers cool `embers` (decay and glow).
-/// `edit`: the pane it changes in place.
+/// The dialog over the session's `pairs` and `inputs`, starting from `now` (what to start
+/// from, else the first pair, else the first input), and the rig's settings `rig`, and how
+/// this app's embers cool `embers` (decay and glow).
 pub fn form(
     pairs: Vec<((u16, u16), String)>,
     inputs: Vec<(u16, String)>,
     now: Option<Metered>,
     rig: LevelsSettings,
     embers: ac2_scene::gonio::Cooling,
-    edit: Option<PaneId>,
 ) -> Form {
-    let kind = match edit {
-        Some(_) => FormKind::ProgrammeEdit,
-        None => FormKind::Programme,
-    };
+    let kind = FormKind::Programme;
     let captured = |c: &u16| inputs.iter().any(|(x, _)| x == c);
     let what = match now {
         Some(Metered::Pair { left, right }) => {
@@ -124,7 +117,6 @@ pub fn form(
         pairs,
         inputs,
         opened: rig,
-        edit,
     };
     let mut f = Form::new(kind, Vec::new());
     f.fields = what_fields(&meter, &what);

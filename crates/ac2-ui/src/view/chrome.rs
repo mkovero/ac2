@@ -15,6 +15,7 @@ use crate::theme::Chrome;
 use super::segment::{Part, SEGMENT_MIN_W, draw_segment, health_part, segment_width};
 
 mod tree_row;
+pub(super) use tree_row::ROW_DRAG_START;
 use tree_row::{RowTips, tree_row};
 
 fn dot(ui: &mut egui::Ui, c: Color32) {
@@ -22,7 +23,7 @@ fn dot(ui: &mut egui::Ui, c: Color32) {
     ui.painter().circle_filled(r.center(), 4.5, c);
 }
 
-/// A small ▾ after an item that opens a list, as on a pane's chip; drawn, since the UI
+/// A small ▾ after an item that opens a list, as on the rig drop-down; drawn, since the UI
 /// font has no such glyph.
 fn chevron(ui: &mut egui::Ui, c: Color32) {
     let (r, _) = ui.allocate_exact_size(egui::vec2(BAR_DOT, 10.0), egui::Sense::hover());
@@ -820,21 +821,24 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
             }
         });
         ui.add_space(4.0);
-        let rows = st.tree_rows();
+        let rows = st.list_rows();
+        let shown = st.active();
         let theme = ac2_scene::theme::Theme::by_name(st.theme);
         if rows.is_empty() {
             ui.label(RichText::new(st.empty_list_text()).color(ch.dim));
         }
-        let drag = st.row_drag().map(|d| (d.item, d.onto));
+        let drag = st.row_drag().map(|d| (d.item.row(), d.onto));
         let pointer = ui.ctx().pointer_latest_pos();
-        for row in &rows {
+        for (rig, row) in &rows {
+            let (rig, here) = (*rig, (*rig, row.key));
             let reveal = reveal
                 && row.mark == Mark::Active
                 && matches!(
                     row.key,
                     TreeKey::Meas(_) | TreeKey::Live(_) | TreeKey::Math(_)
                 );
-            let (m, rect) = tree_row(ui, row, &tips, ch, &theme, reveal, dragging);
+            let reveal = reveal && rig == shown;
+            let (m, rect) = tree_row(ui, (rig, shown), row, &tips, ch, &theme, reveal, dragging);
             if let Some(m) = m {
                 msg = Some(m);
             }
@@ -842,12 +846,12 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
             // shaded as a pane a drop would take is.
             if let Some((item, onto)) = drag {
                 if pointer.is_some_and(|p| rect.contains(p))
-                    && row.key != item
+                    && item.is_some_and(|i| i != here)
                     && !row.key.is_heading()
                 {
-                    under = Some(row.key);
+                    under = Some(here);
                 }
-                if onto == Some(row.key) {
+                if onto == Some(here) {
                     let r = rect.expand(1.0);
                     let painter = ui.painter();
                     painter.rect_filled(r, 3.0, crate::theme::c32(theme.unresolved_shade));
@@ -870,7 +874,7 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         {
             row_over = Some(Msg::RowDrag(DragMsg::OverRow(under)));
         }
-        if !rows.iter().any(|r| matches!(r.key, TreeKey::Trace(_))) && !rows.is_empty() {
+        if !rows.iter().any(|(_, r)| matches!(r.key, TreeKey::Trace(_))) && !rows.is_empty() {
             ui.label(
                 RichText::new(format!(
                     "{} captures the selected TF under it",

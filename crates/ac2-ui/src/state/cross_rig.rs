@@ -1,35 +1,33 @@
-//! Panes across rigs: a pane's list offers every connected rig's measurements and meters,
-//! and a pick of another rig's sets the pane on that rig; pins stay right as rigs come and
-//! go (a pin to the rig shown is its own pane again, and measurement names wait by rig id
-//! for a rig not held); the layout prefs name each pinned pane's rig.
+//! Panes and the measurement list across rigs: the list shows every connected rig's rows
+//! under its heading, any rig's row drags onto a pane, and a drop of another rig's sets the
+//! pane on that rig; pins stay right as rigs come and go (a pin to the rig shown is its own
+//! pane again, and measurement names wait by rig id for a rig not held); the layout prefs
+//! name each pinned pane's rig.
 //!
 //! A pane is pinned by the rig's id, never by where it is reached: a rig reached on another
 //! address (a new IP, network mode turned on) is the same rig, and its panes come back.
 
 use super::*;
+use crate::state::panes::drag::RowDrop;
+use ac2_scene::meas_list::{Mark, TreeKey, TreeRow};
 
-/// One rig's rows of a pane's list.
+/// A rig not shown, as its part of the measurement list was last read: its rows, and what
+/// each draggable row needs of a pane. Read with the rig swapped in, so between messages.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct MenuRig {
+pub(crate) struct RigList {
     pub(crate) rig: RigId,
-    /// Its measurements, in its tree's order.
-    pub(crate) meas: Vec<(PaneMenuRow, String)>,
-    /// What it can meter: its session's pairs and inputs.
-    pub(crate) meters: Vec<(PaneMenuRow, String)>,
-    /// The kinds of pane its measurements bring.
-    pub(crate) brought: Vec<PaneKind>,
+    pub(crate) rows: Vec<TreeRow>,
+    pub(crate) drops: Vec<(TreeKey, RowDrop)>,
 }
 
 impl AppState {
-    /// Reads each connected rig's rows for the pane list open, the rig shown first; none
-    /// with one rig or no list open. A rig is read with it swapped in, so only between
-    /// messages.
-    pub(super) fn refresh_menu_rigs(&mut self) {
+    /// Reads each connected rig not shown's part of the list; none with one rig.
+    pub(super) fn refresh_rig_lists(&mut self) {
         if self.visiting.is_some() {
             return;
         }
-        if !self.many_rigs() || !matches!(self.overlay, Overlay::PaneMenu(_)) {
-            self.menu_rigs.clear();
+        if !self.many_rigs() {
+            self.rig_lists.clear();
             return;
         }
         let shown = self.rig.id;
@@ -40,61 +38,84 @@ impl AppState {
             .filter(|r| matches!(r.conn, ConnState::Connected { .. }))
             .map(|r| r.id)
             .collect();
-        let mut v = vec![self.own_menu_rows()];
-        for id in others {
-            if let Some(m) = self.visit(id, |st| st.own_menu_rows()) {
-                v.push(m);
-            }
-        }
-        self.menu_rigs = v;
-    }
-
-    /// The rows of every connected rig, each under its heading, and the kinds of pane the
-    /// shown rig's measurements bring. Another rig's rows name it, so a pick sets the pane on
-    /// that rig whichever rig handles the pick.
-    pub(super) fn every_rig_menu_rows(&self) -> (Vec<(PaneMenuRow, String)>, Vec<PaneKind>) {
-        let shown = self.active();
         let mut v = Vec::new();
-        let mut brought = Vec::new();
-        for m in &self.menu_rigs {
-            v.push((PaneMenuRow::Heading(m.rig), self.rig_name(m.rig)));
-            let tag = |r: PaneMenuRow| match r {
-                _ if m.rig == shown => r,
-                PaneMenuRow::Meas(x) => PaneMenuRow::RigMeas(m.rig, x),
-                PaneMenuRow::Meter(x) => PaneMenuRow::RigMeter(m.rig, x),
-                other => other,
-            };
-            v.extend(
-                m.meas
-                    .iter()
-                    .chain(&m.meters)
-                    .map(|(r, t)| (tag(*r), t.clone())),
-            );
-            if m.rig == shown {
-                brought.clone_from(&m.brought);
+        for id in others {
+            if let Some(l) = self.visit(id, |st| st.own_rig_list()) {
+                v.push(l);
             }
         }
-        (v, brought)
+        self.rig_lists = v;
     }
 
-    /// The row of pane `p`'s list that is what it shows: the shown rig's measurement, or
-    /// another rig's measurement or meters it is set on.
-    pub(super) fn pane_menu_shown(&self, p: PaneId) -> Option<PaneMenuRow> {
-        let v = self.layout.view(p)?;
-        match v.rig {
-            PaneRig::Active => self.pane_meas(p).map(|m| PaneMenuRow::Meas(m.id)),
-            PaneRig::Rig(r) => v
-                .meas
-                .map(|m| PaneMenuRow::RigMeas(r, m))
-                .or_else(|| v.meters.map(|m| PaneMenuRow::RigMeter(r, m))),
+    /// The rig in `rig`'s part of the list: its rows (no row marked: the keys act on the
+    /// shown rig's selection) and what its rows need of a pane.
+    fn own_rig_list(&self) -> RigList {
+        let mut rows = self.tree_rows();
+        for r in &mut rows {
+            r.mark = Mark::None;
+        }
+        let drops = rows
+            .iter()
+            .filter_map(|r| Some((r.key, self.row_drop(r.key)?)))
+            .collect();
+        RigList {
+            rig: self.rig.id,
+            rows,
+            drops,
         }
     }
 
-    /// Pane `p` shows measurement `m` of rig `r`, a rig not shown: as a pick of the shown
-    /// rig's, with that rig swapped in, and the pane is set on it.
-    pub(super) fn pane_show_from(&mut self, p: PaneId, r: RigId, m: MeasId) {
+    /// The measurement list as drawn: every connected rig's rows under its heading, in the
+    /// order the rigs were added (the drop-down's), each row with its rig. With one rig,
+    /// its rows alone.
+    pub fn list_rows(&self) -> Vec<(RigId, TreeRow)> {
+        let shown = self.active();
+        if self.rig_lists.is_empty() {
+            return self.tree_rows().into_iter().map(|r| (shown, r)).collect();
+        }
+        let mut v = Vec::new();
+        for r in self.rigs_in_order() {
+            let rows = if r.id == shown {
+                self.tree_rows()
+            } else if let Some(l) = self.rig_lists.iter().find(|l| l.rig == r.id) {
+                l.rows.clone()
+            } else {
+                continue;
+            };
+            v.push((
+                r.id,
+                ac2_scene::meas_list::rig_heading(r.id, &self.rig_label(r), r.id == shown),
+            ));
+            v.extend(rows.into_iter().map(|row| (r.id, row)));
+        }
+        v
+    }
+
+    /// Another rig's row as a drop, from its list as last read.
+    pub(super) fn other_row_drop(&self, rig: RigId, key: TreeKey) -> Option<RowDrop> {
+        self.rig_lists
+            .iter()
+            .find(|l| l.rig == rig)?
+            .drops
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, d)| d.clone())
+    }
+
+    /// Pane `p` shows row `key` of rig `r`, a rig not shown: as a drop of the shown rig's,
+    /// with that rig swapped in, and the pane is set on it.
+    pub(super) fn pane_row_from(&mut self, p: PaneId, r: RigId, key: TreeKey) {
+        let id = match key {
+            TreeKey::Meas(id) | TreeKey::Live(id) | TreeKey::Math(id) => Some(id),
+            TreeKey::Trace(_) => None,
+            TreeKey::Imported | TreeKey::Rig | TreeKey::Session | TreeKey::RigName(_) => return,
+        };
         if r == self.rig.id {
-            self.pane_show(p, m);
+            match (id, key) {
+                (Some(m), _) => self.pane_show(p, m),
+                (None, TreeKey::Trace(t)) => self.pane_show_trace(p, t),
+                _ => {}
+            }
             return;
         }
         if self.visiting.is_some() {
@@ -103,8 +124,12 @@ impl AppState {
         self.forget_pane_waits(p);
         let shown = self
             .visit(r, |st| {
-                st.pane_show(p, m);
-                st.layout.view(p).is_some_and(|v| v.meas == Some(m))
+                match (id, key) {
+                    (Some(m), _) => st.pane_show(p, m),
+                    (None, TreeKey::Trace(t)) => st.pane_show_trace(p, t),
+                    _ => {}
+                }
+                st.layout.view(p).is_some_and(|v| v.meas.is_some())
             })
             .unwrap_or(false);
         if shown && let Some(v) = self.layout.view_mut(p) {

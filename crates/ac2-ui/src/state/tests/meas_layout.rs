@@ -73,12 +73,12 @@ fn selecting_a_measurement_brings_its_panes() {
         t.st.pane_meas(t.st.layout.focus).map(|m| m.id),
         Some(MeasId(1))
     );
-    // Sub has none of its own: the screen keeps Main L's panes, the focused one turned
-    // into a spectrum pane to show it (as selecting always does), and that is no edit.
+    // Sub has none of its own: the screen keeps Main L's panes as they are, and that is no
+    // edit.
     let r = select(&mut t, 2);
     assert!(layout_calls(&r).is_empty(), "{r:?}");
     let kinds: Vec<_> = t.st.pane_layout().panes().iter().map(|p| p.kind).collect();
-    assert_eq!(kinds, [wire::PaneKind::Spectrum, wire::PaneKind::Transfer]);
+    assert_eq!(kinds, [wire::PaneKind::Transfer, wire::PaneKind::Transfer]);
     // Back to Main L: its own panes again.
     select(&mut t, 1);
     assert_eq!(t.st.pane_layout(), two_transfer());
@@ -314,9 +314,7 @@ fn edits_of_one_measurements_panes_leave_an_identical_layout_alone() {
     let edits: [(&str, Edit); 3] = [
         ("zoom", |t, _| t.key("Ctrl+I")),
         ("G", |t, _| t.key("G")),
-        ("pick", |t, p| {
-            t.st.apply(Msg::PanePick(p, PaneMenuRow::Meas(MeasId(4))), &t.keys)
-        }),
+        ("pick", |t, p| t.drop_meas(p, MeasId(4))),
     ];
     for (what, edit) in edits {
         let r = edit(&mut t, graph);
@@ -343,7 +341,10 @@ fn another_clients_layout_carries_the_picks() {
     let mut t = T::new();
     t.conn(mirror(three(None)));
     select(&mut t, 2);
-    t.key("N");
+    let r = t.drop_meas(t.st.layout.focus, MeasId(2));
+    answer_layout_calls(&mut t, &r);
+    let r = t.key("N");
+    answer_layout_calls(&mut t, &r);
     // Sub on both halves: the new one picked for Sub 2.
     let b = t.st.layout.focus;
     t.st.layout.view_mut(b).expect("pane").meas = Some(MeasId(3));
@@ -499,11 +500,11 @@ fn a_viewer_keeps_its_pane_when_another_client_lays_out_its_measurement() {
 }
 
 /// G on the kiosk (its touch panel) steps the SPL pane's view and nothing else: the
-/// measurement it selected by itself (the remembered pane's, or the stand-in `TF 1` when no
-/// pane remembers one) is not given the kiosk's pane as its own panes.
+/// measurement it selected by itself (the remembered pane's) is not given the kiosk's pane
+/// as its own panes.
 #[test]
 fn g_on_a_viewer_gives_no_measurement_its_pane() {
-    for remembered in [Some("FOH SPL"), None] {
+    for remembered in [Some("FOH SPL")] {
         let mut t = kiosk(remembered);
         let before = t.st.pane_layout();
         for _ in 0..3 {
@@ -670,8 +671,7 @@ fn a_chip_pick_into_another_measurements_panes_leaves_its_own_layout() {
         layout_calls(&r).is_empty(),
         "a click moves the focus: {r:?}"
     );
-    let r =
-        t.st.apply(Msg::PanePick(lower, PaneMenuRow::Meas(MeasId(1))), &t.keys);
+    let r = t.drop_meas(lower, MeasId(1));
     assert_eq!(
         t.st.rig.selected,
         Some(MeasId(4)),
@@ -695,8 +695,7 @@ fn a_click_on_a_guest_pane_then_an_edit_leaves_its_own_layout() {
     let mut t = desk_on_spectrum_2();
     let order = t.st.layout.root.reading_order();
     let lower = *order.last().expect("a pane");
-    let r =
-        t.st.apply(Msg::PanePick(lower, PaneMenuRow::Meas(MeasId(1))), &t.keys);
+    let r = t.drop_meas(lower, MeasId(1));
     assert_eq!(layout_targets(&r), [MeasId(4)], "the pick: {r:?}");
     answer_layout_calls(&mut t, &r);
     t.st.apply(Msg::FocusPane(order[0]), &t.keys);
@@ -711,13 +710,15 @@ fn a_click_on_a_guest_pane_then_an_edit_leaves_its_own_layout() {
     assert_eq!(layout_targets(&r), [MeasId(4)], "{r:?}");
 }
 
-/// `FOH SPL`'s row chosen (it has no panes of its own: the focused pane turns into an SPL
-/// pane), then that pane closed: no pane shows `FOH SPL` any more, so an edit is not its
-/// layout — nothing is sent, and its own panes have ended.
+/// `FOH SPL`'s row chosen and dropped on the focused pane (an SPL pane now), then that pane
+/// closed: no pane shows `FOH SPL` any more, so an edit is not its layout — nothing is
+/// sent, and its own panes have ended.
 #[test]
 fn an_edit_with_no_pane_showing_the_measurement_is_not_its_layout() {
     let mut t = desk_on_tf1();
     select(&mut t, 1);
+    let r = t.drop_meas(t.st.layout.focus, MeasId(1));
+    answer_layout_calls(&mut t, &r);
     assert_eq!(t.st.layout.focus_kind(), PaneKind::Spl);
     let r = t.key("Q");
     assert!(layout_calls(&r).is_empty(), "Q: {r:?}");
@@ -792,33 +793,13 @@ fn guest_in_spectrograph_survives_the_rows(put: fn(&mut T, PaneId) -> Vec<Reques
 /// The operator's sequence: a chip pick on the spectrograph of `Spectrum 2`'s own panes.
 #[test]
 fn a_chip_pick_in_own_panes_is_kept_by_their_row() {
-    guest_in_spectrograph_survives_the_rows(|t, p| {
-        t.st.apply(Msg::PanePick(p, PaneMenuRow::Meas(MeasId(3))), &t.keys)
-    });
+    guest_in_spectrograph_survives_the_rows(|t, p| t.drop_meas(p, MeasId(3)));
 }
 
 /// The same with `Spectrum 1`'s row dragged onto the spectrograph.
 #[test]
 fn a_row_dropped_in_own_panes_is_kept_by_their_row() {
-    guest_in_spectrograph_survives_the_rows(|t, p| {
-        use ac2_scene::meas_list::TreeKey;
-        let mut r = t.st.apply(
-            Msg::RowDrag(DragMsg::Start(TreeKey::Meas(MeasId(3)))),
-            &t.keys,
-        );
-        r.extend(t.st.apply(
-            Msg::RowDrag(DragMsg::Over {
-                target: Some(DropTarget {
-                    pane: p,
-                    edge: None,
-                }),
-                compare: false,
-            }),
-            &t.keys,
-        ));
-        r.extend(t.st.apply(Msg::RowDrag(DragMsg::Drop { compare: false }), &t.keys));
-        r
-    });
+    guest_in_spectrograph_survives_the_rows(|t, p| t.drop_meas(p, MeasId(3)));
 }
 
 /// `FOH SPL` picked on the last pane of `Spectrum 2`'s own panes turns it into an SPL pane,
@@ -828,8 +809,7 @@ fn a_row_dropped_in_own_panes_is_kept_by_their_row() {
 fn a_pick_turning_a_pane_into_another_kind_comes_back_with_the_row() {
     let mut t = desk_on_spectrum_2();
     let last = *t.st.layout.root.reading_order().last().expect("a pane");
-    let r =
-        t.st.apply(Msg::PanePick(last, PaneMenuRow::Meas(MeasId(1))), &t.keys);
+    let r = t.drop_meas(last, MeasId(1));
     assert_eq!(layout_targets(&r), [MeasId(4)], "{r:?}");
     let stored = t.st.pane_layout();
     answer_layout_calls(&mut t, &r);
@@ -859,7 +839,7 @@ fn a_pick_in_the_middle_of_three_panes_changes_that_pane_alone() {
     let mut t = desk_on_spectrum_2();
     let order = t.st.layout.root.reading_order();
     let (s1, s2) = (MeasId(3), MeasId(4));
-    t.st.apply(Msg::PanePick(order[1], PaneMenuRow::Meas(s1)), &t.keys);
+    t.drop_meas(order[1], s1);
     assert_eq!(shown(&t), [Some(s2), Some(s1), Some(s2)]);
     assert_eq!(
         t.st.rig.selected,
@@ -881,10 +861,7 @@ fn a_pane_key_acts_on_the_measurement_its_pane_shows() {
     t.connect(s);
     select(&mut t, 2);
     let order = t.st.layout.root.reading_order();
-    t.st.apply(
-        Msg::PanePick(order[0], PaneMenuRow::Meas(MeasId(5))),
-        &t.keys,
-    );
+    t.drop_meas(order[0], MeasId(5));
     assert_eq!(t.st.rig.selected, Some(MeasId(2)));
     let finds = |r: &[Request]| -> Vec<MeasId> {
         r.iter()
@@ -932,9 +909,10 @@ fn a_layout_brings_its_level_ranges() {
     assert!(panes[1..].iter().all(|p| p.levels.is_empty()));
 }
 
-/// A layout's pick of a measurement the mirror does not list shows the chosen one meanwhile.
+/// A layout's pick of a measurement the mirror does not list waits: its pane shows nothing
+/// meanwhile (nothing stands in for it) and the layout keeps the pick.
 #[test]
-fn a_pick_of_a_deleted_measurement_falls_back_to_the_chosen_one() {
+fn a_pick_of_a_measurement_not_listed_waits_with_nothing_in_for_it() {
     let mut l = three_spectrum();
     l.panes_mut()[1].content = Some(wire::PaneContent::Meas { meas: MeasId(9) });
     let mut s = rig();
@@ -944,7 +922,7 @@ fn a_pick_of_a_deleted_measurement_falls_back_to_the_chosen_one() {
     let mut t = T::fresh();
     t.connect(s);
     select(&mut t, 4);
-    assert_eq!(shown(&t), [Some(MeasId(4)); 3]);
+    assert_eq!(shown(&t), [Some(MeasId(4)), None, Some(MeasId(4))]);
     assert_eq!(t.st.pane_layout(), l, "the pane's pick still");
 }
 
@@ -956,8 +934,7 @@ fn picks_and_level_ranges_survive_a_reconnect_and_reach_a_fresh_app() {
     let mut t = desk_on_spectrum_2();
     let middle = t.st.layout.root.reading_order()[1];
     let (s1, s2) = (MeasId(3), MeasId(4));
-    let r =
-        t.st.apply(Msg::PanePick(middle, PaneMenuRow::Meas(s1)), &t.keys);
+    let r = t.drop_meas(middle, s1);
     answer_layout_calls(&mut t, &r);
     let r = t.key("Ctrl+I");
     assert_eq!(layout_targets(&r), [s2], "{r:?}");

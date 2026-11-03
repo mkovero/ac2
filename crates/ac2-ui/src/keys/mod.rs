@@ -166,7 +166,6 @@ commands! {
     Redo => "redo", "Redo pane change", [Global];
     NextInTree => "next_in_tree", "Next list row", [Global];
     PrevInTree => "prev_in_tree", "Previous list row", [Global];
-    PaneMeasurement => "pane_measurement", "Choose pane measurement…", [Global];
     CycleTheme => "cycle_theme", "Theme", [Global];
     PlotChrome => "plot_chrome", "Plot chrome", [Global];
     ZoomIn => "zoom_in", "Zoom in", [Global];
@@ -346,7 +345,6 @@ commands! {
 
     LevelsReset => "levels_reset", "Reset overs, max, loudness", [Programme, Inputs];
     LevelsResetAll => "levels_reset_all", "Reset every input", [Programme, Inputs];
-    ProgrammePane => "programme_pane", "Open a Programme pane", [Inputs];
 
     Walks => "walks", "Spatial walk…", [Global];
     WalkCapture => "walk_capture", "Capture here and go on", [Walk];

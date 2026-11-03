@@ -7,14 +7,13 @@ use crate::embedded::harness::{Driver, NAME, R, measure_from_empty, scene_texts}
 use ac2_proto::model::{MeasKind, TraceOwner};
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{MeasId, TraceId};
-use ac2_scene::meas_list::TreeKey;
 use ac2_scene::primitives::Viewport;
 use ac2_scene::theme::Theme;
 use ac2_ui::embedded::{EmbeddedBackend, Setup, start_embedded_with};
 use ac2_ui::forms::FormKind;
 use ac2_ui::keys::Chord;
 use ac2_ui::keys::Keymap;
-use ac2_ui::state::{AppState, DragMsg, DropTarget, Msg, Overlay, PaneId, PaneKind, PaneMenuRow};
+use ac2_ui::state::{AppState, Msg, Overlay, PaneId, PaneKind};
 use std::time::Instant;
 
 const SIZE: Viewport = Viewport {
@@ -113,9 +112,11 @@ fn two_spectra_each_draw_their_own_from_an_empty_daemon() -> R {
     // Spectrum 1 on the spectrum pane, split: Spectrum 2 on the right half.
     d.key("Alt+2");
     d.send(Msg::SelectMeas(s1));
+    let f = d.st.layout.focus;
+    d.drop_meas(f, s1);
     d.key("N");
     let right = d.st.layout.focus;
-    d.send(Msg::PanePick(right, PaneMenuRow::Meas(s2)));
+    d.drop_meas(right, s2);
     let [left, r] = spectrum_panes(&d.st)[..] else {
         return Err(format!("{:?}", spectrum_panes(&d.st)).into());
     };
@@ -128,8 +129,8 @@ fn two_spectra_each_draw_their_own_from_an_empty_daemon() -> R {
     let t1 = capture(&mut d, s1, 1)?;
     d.send(Msg::FocusPane(right));
     let t2 = capture(&mut d, s2, 2)?;
-    d.send(Msg::PanePick(left, PaneMenuRow::Meas(s1)));
-    d.send(Msg::PanePick(right, PaneMenuRow::Meas(s2)));
+    d.drop_meas(left, s1);
+    d.drop_meas(right, s2);
     let label = |s: &AppState, t: TraceId| {
         s.trace_meta(t)
             .map(|m| m.edit.name.clone())
@@ -169,7 +170,7 @@ fn two_spectra_each_draw_their_own_from_an_empty_daemon() -> R {
         s.meas(s1).is_some_and(|m| !m.compared.is_empty())
     })?;
     d.key("Escape");
-    d.send(Msg::PanePick(left, PaneMenuRow::Meas(s1)));
+    d.drop_meas(left, s1);
     let legend = spectrum_legend(&d.st, left);
     assert!(
         legend.iter().any(|e| e.starts_with(&format!("{l2} · cmp"))),
@@ -193,8 +194,8 @@ fn two_spectra_each_draw_their_own_from_an_empty_daemon() -> R {
 
     // Under Imported: on no pane, C refused, the hint says where it waits.
     move_selected(&mut d, t2, TraceOwner::Imported)?;
-    d.send(Msg::PanePick(left, PaneMenuRow::Meas(s1)));
-    d.send(Msg::PanePick(right, PaneMenuRow::Meas(s2)));
+    d.drop_meas(left, s1);
+    d.drop_meas(right, s2);
     for p in [left, right] {
         assert!(
             !names(&d.st, p).contains(&l2),
@@ -220,7 +221,7 @@ fn two_spectra_each_draw_their_own_from_an_empty_daemon() -> R {
         "{:?}",
         d.st.toasts.list
     );
-    d.send(Msg::PanePick(right, PaneMenuRow::Meas(s2)));
+    d.drop_meas(right, s2);
     let hint =
         d.st.empty_hint(right, &d.keys)
             .map(|h| h.text)
@@ -232,7 +233,7 @@ fn two_spectra_each_draw_their_own_from_an_empty_daemon() -> R {
 
     // Moved back under Spectrum 2: its pane draws it again.
     move_selected(&mut d, t2, TraceOwner::Meas { meas: s2 })?;
-    d.send(Msg::PanePick(right, PaneMenuRow::Meas(s2)));
+    d.drop_meas(right, s2);
     d.until("the capture on its pane again", |s| {
         names(s, right).contains(&l2)
     })?;
@@ -347,6 +348,7 @@ fn second_mic(d: &mut Driver) -> R {
 /// one (in 3, [`second_mic`]).
 fn new_spl(d: &mut Driver, other: bool) -> R<MeasId> {
     let before: Vec<MeasId> = d.st.measurements().iter().map(|m| m.id).collect();
+    let panes = d.st.visible_panes().len();
     d.key("Ctrl+K");
     d.send(Msg::Text("new spl".into()));
     d.key("Enter");
@@ -363,11 +365,14 @@ fn new_spl(d: &mut Driver, other: bool) -> R<MeasId> {
             !before.contains(&m.id) && matches!(m.config.kind, MeasKind::Spl { .. }) && m.running
         })
     })?;
-    d.st.measurements()
-        .iter()
-        .find(|m| !before.contains(&m.id))
-        .map(|m| m.id)
-        .ok_or_else(|| "the new SPL meter".into())
+    let id =
+        d.st.measurements()
+            .iter()
+            .find(|m| !before.contains(&m.id))
+            .map(|m| m.id)
+            .ok_or("the new SPL meter")?;
+    super::close_opened_pane(d, panes, id);
+    Ok(id)
 }
 
 /// The texts SPL pane `pane` draws, or its placeholder when it draws nothing.
@@ -395,10 +400,14 @@ fn two_spl_meters_side_by_side_by_drag_from_an_empty_daemon() -> R {
     let (n1, n2) = (name(&d.st, m1), name(&d.st, m2));
     assert_ne!(n1, n2);
     let has = |t: &[String], n: &str| t.iter().any(|l| l.contains(n));
-    d.key("Alt+4");
-    let pane = d.st.layout.focus;
-    assert_eq!(d.st.layout.kind(pane), PaneKind::Spl);
-    d.send(Msg::PanePick(pane, PaneMenuRow::Meas(m1)));
+    // The grid's own SPL pane, nothing dropped on it yet (each new meter opened its own).
+    let pane = *d
+        .st
+        .visible_panes()
+        .iter()
+        .find(|p| d.st.layout.kind(**p) == PaneKind::Spl && d.st.pane_meas(**p).is_none())
+        .ok_or("the empty SPL pane")?;
+    d.drop_meas(pane, m1);
     d.until("meter 1 reading on its pane", |s| {
         let t = spl_texts(s, pane);
         has(&t, &n1) && !has(&t, &n2)
@@ -435,21 +444,13 @@ fn two_spl_meters_side_by_side_by_drag_from_an_empty_daemon() -> R {
     d.key("S");
     d.until("meter 1 running", |s| s.meas(m1).is_some_and(|m| m.running))?;
 
-    // A new pane beside it, meter 2 dropped on it (no Shift): both read side by side.
+    // A new pane beside it, meter 2 dropped on it: both read side by side.
     d.send(Msg::FocusPane(pane));
     d.key("N");
     let other = d.st.layout.focus;
     assert_ne!(other, pane);
     assert_eq!(d.st.layout.kind(other), PaneKind::Spl);
-    d.send(Msg::RowDrag(DragMsg::Start(TreeKey::Meas(m2))));
-    d.send(Msg::RowDrag(DragMsg::Over {
-        target: Some(DropTarget {
-            pane: other,
-            edge: None,
-        }),
-        compare: false,
-    }));
-    d.send(Msg::RowDrag(DragMsg::Drop { compare: false }));
+    d.drop_meas(other, m2);
     d.until("each pane its own meter", |s| {
         s.pane_meas(pane).map(|m| m.id) == Some(m1)
             && s.pane_meas(other).map(|m| m.id) == Some(m2)
@@ -465,8 +466,7 @@ fn two_spl_meters_side_by_side_by_drag_from_an_empty_daemon() -> R {
 }
 
 /// From an empty daemon, two sweep measurements with a run each: the sweep pane shows its
-/// own sweep's run even with the other's selected, and a Shift-drop (compare) of the other
-/// run overlays it, listed `· cmp` in the legend.
+/// own sweep's run even with the other's selected.
 #[test]
 fn slow_the_distortion_pane_shows_its_own_sweep_from_an_empty_daemon() -> R {
     use crate::embedded::harness::sweep_from_the_dialog;
@@ -481,7 +481,7 @@ fn slow_the_distortion_pane_shows_its_own_sweep_from_an_empty_daemon() -> R {
     assert_ne!(sweep_a, sweep_b);
     let pane = crate::common::pane(&d.st, PaneKind::Distortion);
     d.send(Msg::FocusPane(pane));
-    d.send(Msg::PanePick(pane, PaneMenuRow::Meas(sweep_a)));
+    d.drop_meas(pane, sweep_a);
     // Sweep B's run selected with the transfer pane focused (a child row moves no pane):
     // the sweep pane keeps sweep A.
     d.send(Msg::FocusPane(crate::common::pane(
@@ -498,50 +498,17 @@ fn slow_the_distortion_pane_shows_its_own_sweep_from_an_empty_daemon() -> R {
     );
     assert!(d.st.compared_sweeps(pane).is_empty());
 
-    // Sweep B's run Shift-dropped on the pane: compared over sweep A's run.
-    d.send(Msg::RowDrag(DragMsg::Start(TreeKey::Trace(run_b))));
-    d.send(Msg::RowDrag(DragMsg::Over {
-        target: Some(DropTarget { pane, edge: None }),
-        compare: true,
-    }));
-    d.send(Msg::RowDrag(DragMsg::Drop { compare: true }));
-    assert_eq!(
-        d.st.pane_meas(pane).map(|m| m.id),
-        Some(sweep_a),
-        "the pane keeps sweep A"
-    );
-    // The compared list lives on sweep A on the daemon: the pane draws run B once the
-    // daemon's answer is mirrored.
-    d.until("run B compared into sweep A", |s| {
-        s.meas(sweep_a)
-            .is_some_and(|m| m.compared == [ac2_proto::model::Compared::Trace { trace: run_b }])
-            && s.compared_sweeps(pane)
-                .iter()
-                .map(|(t, _)| t.meta.id)
-                .eq([run_b])
-    })?;
-    let name_b = d.st.trace_meta(run_b).map(|m| m.edit.name.clone())?;
-    let ac2_ui::scenes::SweepPane::Distortion(x) =
-        ac2_ui::scenes::sweep(&d.st, pane, &Theme::dark(), SIZE, now())
-    else {
-        return Err("not the distortion view".into());
-    };
-    let legend: Vec<&str> = x.legend.iter().map(|e| e.name.as_str()).collect();
-    assert!(
-        legend.contains(&format!("{name_b} · cmp").as_str()),
-        "{legend:?}"
-    );
     drop(d);
     drop(daemon);
     Ok(())
 }
 
 /// From an empty daemon: `Spectrum 2`'s row chosen and its spectrum pane split, so it has
-/// panes of its own with two spectrum panes; `Spectrum 1` picked on the right one's chip. `Spectrum 1`'s row, then
+/// panes of its own with two spectrum panes; `Spectrum 1` dropped on the right one. `Spectrum 1`'s row, then
 /// `Spectrum 2`'s again: its panes come back with the right one still on `Spectrum 1`, and
 /// `Spectrum 1` was never given them.
 #[test]
-fn a_chip_pick_in_own_panes_comes_back_with_their_row_from_an_empty_daemon() -> R {
+fn a_drop_in_own_panes_comes_back_with_their_row_from_an_empty_daemon() -> R {
     let daemon = start_embedded_with(EmbeddedBackend::Fake, Setup::Empty)?;
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     measure_from_empty(&mut d)?;
@@ -549,6 +516,8 @@ fn a_chip_pick_in_own_panes_comes_back_with_their_row_from_an_empty_daemon() -> 
     let s2 = new_spectrum(&mut d, true)?;
     d.key("Alt+2");
     d.send(Msg::SelectMeas(s2));
+    let f = d.st.layout.focus;
+    d.drop_meas(f, s2);
     d.key("N");
     d.until("Spectrum 2's own panes", |s| {
         s.meas(s2)
@@ -558,7 +527,7 @@ fn a_chip_pick_in_own_panes_comes_back_with_their_row_from_an_empty_daemon() -> 
     let [_, right] = spectrum_panes(&d.st)[..] else {
         return Err(format!("{:?}", spectrum_panes(&d.st)).into());
     };
-    d.send(Msg::PanePick(right, PaneMenuRow::Meas(s1)));
+    d.drop_meas(right, s1);
     let shown = |s: &AppState| -> Vec<Option<MeasId>> {
         spectrum_panes(s)
             .into_iter()
@@ -608,6 +577,8 @@ fn picks_and_level_axes_come_back_to_a_restarted_app_from_an_empty_daemon() -> R
     let s2 = new_spectrum(&mut d, true)?;
     d.key("Alt+2");
     d.send(Msg::SelectMeas(s2));
+    let f = d.st.layout.focus;
+    d.drop_meas(f, s2);
     d.key("N");
     let [_, right] = spectrum_panes(&d.st)[..] else {
         return Err(format!("{:?}", spectrum_panes(&d.st)).into());
@@ -615,7 +586,7 @@ fn picks_and_level_axes_come_back_to_a_restarted_app_from_an_empty_daemon() -> R
     d.send(Msg::FocusPane(right));
     d.key("G");
     d.key("G");
-    d.send(Msg::PanePick(right, PaneMenuRow::Meas(s1)));
+    d.drop_meas(right, s1);
     assert_eq!(
         d.st.rig.selected,
         Some(s2),
@@ -683,9 +654,11 @@ fn display_settings_and_compare_lists_live_on_the_daemon_from_an_empty_daemon() 
     let s2 = new_spectrum(&mut d, true)?;
     d.key("Alt+2");
     d.send(Msg::SelectMeas(s1));
+    let f = d.st.layout.focus;
+    d.drop_meas(f, s1);
     d.key("N");
     let right = d.st.layout.focus;
-    d.send(Msg::PanePick(right, PaneMenuRow::Meas(s2)));
+    d.drop_meas(right, s2);
     let [left, _] = spectrum_panes(&d.st)[..] else {
         return Err(format!("{:?}", spectrum_panes(&d.st)).into());
     };
@@ -699,7 +672,7 @@ fn display_settings_and_compare_lists_live_on_the_daemon_from_an_empty_daemon() 
     let before = style(&d.st, s2);
 
     d.send(Msg::FocusPane(left));
-    d.send(Msg::PanePick(left, PaneMenuRow::Meas(s1)));
+    d.drop_meas(left, s1);
     d.key("B");
     d.until("Spectrum 1 drawn as a line", |s| {
         style(s, s1) == Some(SpectrumStyle::Line)
@@ -732,7 +705,7 @@ fn display_settings_and_compare_lists_live_on_the_daemon_from_an_empty_daemon() 
             .iter()
             .any(|e| e.starts_with(&n2) && e.contains("offset +1.0 dB"))
     };
-    d.send(Msg::PanePick(left, PaneMenuRow::Meas(s1)));
+    d.drop_meas(left, s1);
     d.until("Spectrum 2 at +1 dB in Spectrum 1's pane", |s| {
         at_offset(s, left)
     })?;
@@ -749,7 +722,7 @@ fn display_settings_and_compare_lists_live_on_the_daemon_from_an_empty_daemon() 
         .first()
         .copied()
         .ok_or("a spectrum pane")?;
-    d.send(Msg::PanePick(p, PaneMenuRow::Meas(s1)));
+    d.drop_meas(p, s1);
     d.until("Spectrum 2 at +1 dB after reconnecting", |s| {
         at_offset(s, p)
     })?;

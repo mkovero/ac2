@@ -309,22 +309,22 @@ impl AppState {
     }
 
     /// A measurement's row in the tree chosen (click, Enter, Tab): selected, and its own
-    /// panes on screen when it has them; else the focused pane shows it, turning into the
-    /// kind of pane that measurement belongs in. The operator's eyes are on the focused
-    /// pane: the measurement goes where they look, and every other pane keeps what it shows.
+    /// panes on screen when it has them. Without, no pane changes: what a pane shows
+    /// changes by a row dropped on it, so a click never takes over a pane.
     pub(in crate::state) fn select_meas_row(&mut self, id: MeasId) {
-        let Some(kind) = self.meas(id).map(|m| PaneKind::for_kind(&m.config.kind)) else {
+        if self.meas(id).is_none() {
             return;
-        };
-        let f = self.own_pane_for(kind);
-        self.set_pane_kind(f, kind);
-        self.select_on(f, id);
+        }
+        self.rig.selected = Some(id);
+        self.rig.chosen = Some(id);
+        self.rig.selected_trace = None;
+        self.rig.selected_live = None;
         self.rig.own_panes_due = true;
     }
 
     /// A measurement's live-curve row chosen (click, Tab): a child row, selected so the keys
     /// act on the live curve, as a click on its legend row makes it. No pane changes: a pane
-    /// is given a curve by its chip or a row dragged onto it.
+    /// is given a curve by a row dragged onto it.
     pub(in crate::state) fn select_live_row(&mut self, id: MeasId) {
         if self.meas(id).is_none() {
             return;
@@ -363,7 +363,7 @@ impl AppState {
     /// rows: the live curve is selected as a click on its row (or legend row) selects it.
     /// A measurement row is chosen as a click on it is; a stored trace row selects the
     /// trace as a click does, no pane changing.
-    pub(in crate::state) fn cycle_tree_row(&mut self, d: i32) {
+    pub(in crate::state) fn cycle_tree_row(&mut self, d: i32, out: &mut Vec<Request>) {
         use ac2_scene::meas_list::TreeKey;
         #[derive(Clone, Copy, PartialEq)]
         enum Stop {
@@ -377,7 +377,7 @@ impl AppState {
             TreeKey::Math(id) => Some(Stop::Math(id)),
             TreeKey::Live(id) => Some(Stop::Live(id)),
             TreeKey::Trace(id) => Some(Stop::Trace(id)),
-            TreeKey::Imported | TreeKey::Rig | TreeKey::Session => None,
+            TreeKey::Imported | TreeKey::Rig | TreeKey::Session | TreeKey::RigName(_) => None,
         };
         let stops = |rows: Vec<ac2_scene::meas_list::TreeRow>| {
             let mut v: Vec<Stop> = Vec::new();
@@ -407,13 +407,35 @@ impl AppState {
             })
         });
         let n = all.len() as i32;
-        let next = match at {
+        let (next, wraps) = match at {
             Some(i) => (1..=n)
-                .map(|k| all[(i as i32 + d * k).rem_euclid(n) as usize])
-                .find(|s| shown.contains(s)),
-            None if d > 0 => shown.first().copied(),
-            None => shown.last().copied(),
+                .map(|k| {
+                    (
+                        i as i32 + d * k,
+                        all[(i as i32 + d * k).rem_euclid(n) as usize],
+                    )
+                })
+                .find(|(_, s)| shown.contains(s))
+                .map_or((None, false), |(j, s)| (Some(s), !(0..n).contains(&j))),
+            None if d > 0 => (shown.first().copied(), false),
+            None => (shown.last().copied(), false),
         };
+        // Tab walks the whole list, every rig's rows in list order: stepping past the shown
+        // rig's last row lands on the next rig's first, through a rig switch. With a window
+        // open the switch is refused, so the step stays on this rig's rows.
+        if wraps && let Some((r, key)) = self.other_rig_stop(d) {
+            self.switch_rig(r, out);
+            if self.rig.id == r {
+                let _ = stop(key).map(|s| match s {
+                    Stop::Meas(id) => self.select_meas_row(id),
+                    Stop::Math(id) => self.select_math_row(id),
+                    Stop::Live(id) => self.select_live_row(id),
+                    Stop::Trace(id) => self.select_trace_row(id),
+                });
+                self.tree_reveal = true;
+                return;
+            }
+        }
         match next {
             Some(Stop::Meas(id)) => self.select_meas_row(id),
             Some(Stop::Math(id)) => self.select_math_row(id),
@@ -424,15 +446,34 @@ impl AppState {
         self.tree_reveal = true;
     }
 
-    /// Pane `p` shows `id` (its chip, a row dropped on it) and gets the focus; nothing
+    /// The first row (`d` > 0) or last row of the next rig in list order that has a row to
+    /// step to, from its list as last read; None when no other rig has one or a switch could
+    /// not happen now.
+    fn other_rig_stop(&self, d: i32) -> Option<(RigId, ac2_scene::meas_list::TreeKey)> {
+        if self.rig_lists.is_empty()
+            || self.visiting.is_some()
+            || !matches!(self.overlay, Overlay::None | Overlay::RigMenu(_))
+        {
+            return None;
+        }
+        let order: Vec<RigId> = self.rigs_in_order().iter().map(|r| r.id).collect();
+        let at = order.iter().position(|r| *r == self.rig.id)? as i32;
+        let n = order.len() as i32;
+        (1..n).find_map(|k| {
+            let r = order[(at + d * k).rem_euclid(n) as usize];
+            let rows = &self.rig_lists.iter().find(|l| l.rig == r)?.rows;
+            let mut keys = rows.iter().map(|row| row.key).filter(|k| !k.is_heading());
+            let key = if d > 0 { keys.next() } else { keys.next_back() }?;
+            Some((r, key))
+        })
+    }
+
+    /// Pane `p` shows `id` (a row dropped on it) and gets the focus; nothing
     /// else changes: no other pane, and not the selection, which stays on the row the
     /// operator chose. A pane that cannot draw it turns into the kind of pane it belongs in;
     /// one that can keeps its kind (a sweep picked on the transfer pane has its runs drawn
     /// there, as the pane's own measurement).
     pub(in crate::state) fn pane_show(&mut self, p: PaneId, id: MeasId) {
-        if matches!(self.overlay, Overlay::PaneMenu(_)) {
-            self.overlay = Overlay::None;
-        }
         let Some(m) = self.meas(id) else {
             return;
         };

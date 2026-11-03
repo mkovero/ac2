@@ -1,6 +1,5 @@
 //! The pane tree: the operator splits the screen into panes (N), closes them (Q) and picks
-//! what each one shows (Tab and the list put a measurement in the focused pane, the title
-//! chip, G for the pane's views). A pane's content is a [`View`]: a kind, the measurement it
+//! what each one shows (a row of the list dragged onto it, G for the pane's views). A pane's content is a [`View`]: a kind, the measurement it
 //! shows and the kind's display modes. The layout on screen is kept in `ui.toml`; its
 //! arrangement and views are also a measurement's own when edited while it is selected
 //! (`state/panes/meas_layout.rs`).

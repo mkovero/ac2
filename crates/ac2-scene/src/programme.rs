@@ -490,14 +490,10 @@ pub fn missing_text(inputs: &[u16]) -> String {
     }
 }
 
-/// A Programme pane that names nothing to meter (a layout from elsewhere): its list picks
-/// the inputs.
-pub const NO_METERS: &str = "no inputs chosen: the pane's list picks a pair or inputs";
-
-/// A Programme row of a pane's list: `meter  Main L + Main R`, `meter  inputs 1–8`.
-pub fn menu_row(what: &str) -> String {
-    format!("meter  {what}")
-}
+/// A Programme pane that names nothing to meter (a layout from elsewhere): an Inputs row
+/// dropped on it picks the inputs.
+pub const NO_METERS: &str =
+    "nothing picked \u{2014} drag an input or a pair of the Inputs list here";
 
 /// What a Programme row of several inputs is called: `inputs 1, 2, 5`.
 pub fn inputs_text(inputs: &[u16]) -> String {

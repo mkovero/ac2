@@ -1,6 +1,6 @@
 //! The programme meter dialog ([`crate::meter_dialog`]): opened by the New measurement
-//! chooser's Programme meter row for a new pane, and by *Edit measurement…* on a focused
-//! Programme pane for that pane; and its Enter.
+//! chooser's Programme meter row for a new pane; and its Enter. What an existing Programme
+//! pane meters changes only by an Inputs row dragged onto it.
 
 use super::*;
 use crate::meter_dialog::{ember_decay, ember_glow, levels, metered, wanted};
@@ -16,17 +16,13 @@ impl AppState {
             .collect()
     }
 
-    /// The dialog for a new pane (`edit`: `None`; it starts from the picked Inputs row) or
-    /// for pane `edit`'s meters; or why it cannot open.
-    pub(super) fn meter_form(&self, edit: Option<PaneId>) -> Result<Form, String> {
+    /// The dialog for a new pane, starting from the picked Inputs row; or why it cannot open.
+    pub(super) fn meter_form(&self) -> Result<Form, String> {
         let inputs = self.session_input_names();
         if inputs.is_empty() {
             return Err(ac2_scene::programme::form::NO_INPUTS.to_owned());
         }
-        let now = match edit {
-            Some(p) => self.layout.view(p).and_then(|v| v.meters),
-            None => self.rig.input_pick.and_then(|c| self.row_meters(c)),
-        };
+        let now = self.rig.input_pick.and_then(|c| self.row_meters(c));
         let rig = self.daemon().map(|s| s.rig.levels).unwrap_or_default();
         Ok(crate::meter_dialog::form(
             self.meter_pairs(),
@@ -34,12 +30,11 @@ impl AppState {
             now,
             rig,
             self.ember_cooling(),
-            edit,
         ))
     }
 
-    pub(super) fn open_meter_form(&mut self, edit: Option<PaneId>, out: &mut Vec<Request>) {
-        match self.meter_form(edit) {
+    pub(super) fn open_meter_form(&mut self, out: &mut Vec<Request>) {
+        match self.meter_form() {
             Ok(f) => {
                 self.overlay = Overlay::Form(Box::new(f));
                 if self.rig.devices.is_none() {
@@ -53,7 +48,7 @@ impl AppState {
 
     /// Enter on the dialog: the ember decay and glow are this app's and set here; the rig's settings
     /// changed here go out as one `levels.set`, then
-    /// the meters open in a new pane beside the focused one, or change in the edited pane.
+    /// the meters open in a new pane beside the focused one.
     pub(super) fn submit_meter(&mut self, out: &mut Vec<Request>) {
         let Overlay::Form(f) = &mut self.overlay else {
             return;
@@ -65,7 +60,7 @@ impl AppState {
                 return;
             }
         };
-        let Some((opened, edit)) = f.meter.as_ref().map(|x| (x.opened, x.edit)) else {
+        let Some(opened) = f.meter.as_ref().map(|x| x.opened) else {
             return;
         };
         let (ember, glow) = (ember_decay(f), ember_glow(f));
@@ -85,9 +80,6 @@ impl AppState {
         }) {
             self.call(out, cmd, what);
         }
-        match edit {
-            Some(p) => self.pane_pick(p, PaneMenuRow::Meter(m)),
-            None => self.open_programme(m),
-        }
+        self.open_programme(m);
     }
 }

@@ -1,6 +1,6 @@
 //! Reducer tests of the New measurement chooser (Ctrl+M): its rows, the kind it guesses
-//! from the focused pane, the kinds it refuses and why, the pane list's way in, and the
-//! pane a measurement made through it opens in.
+//! from the focused pane, the kinds it refuses and why, and the pane a measurement made
+//! through it opens in.
 
 use super::*;
 use crate::forms::FormKind;
@@ -111,10 +111,10 @@ fn the_focused_pane_picks_the_kind_highlighted() {
         i
     };
     let sp = t.pane(PaneKind::Spectrum);
-    t.st.apply(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(2))), &t.keys);
+    t.drop_meas(sp, MeasId(2));
     assert_eq!(at(&mut t), 1, "spectrum");
     t.conn(mirror(four()));
-    t.st.apply(Msg::PanePick(sp, PaneMenuRow::Meas(MeasId(4))), &t.keys);
+    t.drop_meas(sp, MeasId(4));
     assert_eq!(at(&mut t), 2, "an RTA on the spectrum pane");
     t.go(PaneKind::Spl);
     assert_eq!(at(&mut t), 3, "SPL meter");
@@ -432,22 +432,6 @@ fn the_audio_page_is_a_new_session_only_after_new() {
 }
 
 #[test]
-fn the_pane_list_ends_in_new_measurement() {
-    let mut t = T::new();
-    let spl = t.pane(PaneKind::Spl);
-    t.st.apply(Msg::PaneMenu(spl), &t.keys);
-    let rows = t.st.pane_menu_rows(spl);
-    let (last, text) = rows.last().expect("rows").clone();
-    assert_eq!(last, PaneMenuRow::NewMeasurement);
-    assert_eq!(text, "New measurement…  Ctrl+M");
-    t.key("End");
-    t.key("Enter");
-    // The list's pane is the one the chooser guesses from.
-    assert_eq!(chooser(&t).index, 3);
-    assert_eq!(t.st.layout.focus, spl);
-}
-
-#[test]
 fn empty_texts_name_the_chooser() {
     let mut t = T::new();
     assert_eq!(t.st.empty_list_text(), "none — Ctrl+M: New measurement…");
@@ -493,6 +477,74 @@ fn a_new_meter_opens_in_its_own_pane() {
     let spl = t.pane(PaneKind::Spl);
     assert_ne!(spl, tf);
     assert_eq!(t.st.layout.view(spl).and_then(|v| v.meas), Some(MeasId(9)));
+}
+
+/// The SPL meter row of the chooser made on the daemon as measurement 9.
+fn create_meter(t: &mut T) {
+    t.key("Ctrl+M");
+    t.st.apply(Msg::Choose(Some(3)), &t.keys);
+    let r = t.key("Enter");
+    let c = created(&r).expect("meas.create").clone();
+    t.conn(ConnEvent::MeasCreated(Box::new(meas(
+        9,
+        &c.name,
+        c.kind.clone(),
+    ))));
+}
+
+/// A focused pane that shows nothing is room enough: the new meter takes it, no split.
+#[test]
+fn a_new_meter_takes_the_empty_focused_pane() {
+    let mut t = T::new();
+    t.put(PaneKind::Transfer);
+    let f = t.st.layout.focus;
+    if let Some(v) = t.st.layout.view_mut(f) {
+        v.meas = None;
+    }
+    let before = t.visible().len();
+    create_meter(&mut t);
+    assert_eq!(t.visible().len(), before);
+    assert_eq!(t.st.layout.focus, f);
+    assert_eq!(t.st.layout.kind(f), PaneKind::Spl);
+    assert_eq!(t.st.layout.view(f).and_then(|v| v.meas), Some(MeasId(9)));
+}
+
+/// With no room to split the focused pane, which shows something, the new meter opens in
+/// no pane: a warning says to drag it onto one, and no pane changes.
+#[test]
+fn with_no_room_a_new_meter_says_to_drag_it() {
+    let mut t = T::new();
+    t.put(PaneKind::Transfer);
+    for _ in 0..16 {
+        t.key("N");
+    }
+    let f = t.st.layout.focus;
+    t.drop_meas(f, MeasId(1));
+    let layout = t.st.pane_layout();
+    create_meter(&mut t);
+    assert_eq!(t.st.pane_layout(), layout);
+    let name = t.st.meas(MeasId(9)).map(|m| m.config.name.clone());
+    assert_eq!(
+        t.last_toast(),
+        ac2_scene::pane_edit::no_room_for_pane(name.as_deref().unwrap_or_default())
+    );
+}
+
+/// A command about the SPL pane with none on screen turns no pane into one: it says which
+/// row to drag.
+#[test]
+fn a_kind_command_with_no_pane_says_what_to_drag() {
+    let mut t = T::new();
+    t.go(PaneKind::Spl);
+    t.key("Q");
+    assert!(!t.shown(PaneKind::Spl));
+    let before = t.visible();
+    t.st.apply(Msg::Command(crate::keys::CommandId::SplShowMeter), &t.keys);
+    assert_eq!(t.visible(), before);
+    assert_eq!(
+        t.last_toast(),
+        ac2_scene::pane_edit::no_pane_of("SPL", None)
+    );
 }
 
 /// The list as text: each row's name and first detail, child rows under their header.

@@ -37,8 +37,9 @@ impl AppState {
 
     /// Once the daemon's state is known, each pane shows the measurement it showed when the
     /// app last ran (or before the daemon lost it), once one of that name (and kind) exists:
-    /// meanwhile the pane's usual choice, quietly; a name the daemon never listed is dropped. With no layout remembered, the one pane shows the kind of the first
-    /// measurement (a transfer pane while there is none).
+    /// meanwhile nothing; a name the daemon never listed is dropped. With no layout
+    /// remembered, the one pane is given the rig's first measurement once, as a pick of its
+    /// own (an empty daemon leaves it empty, for the first measurement made to take).
     pub(in crate::state) fn restore_pane_meas(&mut self) {
         // A layout the operator changed is theirs from then on.
         let fresh = Layout::default();
@@ -48,17 +49,25 @@ impl AppState {
         if self.daemon().is_none() {
             return;
         }
-        // The first pane shows what the daemon measures: the kind of its first measurement.
+        // The first pane shows what the daemon measures: its first measurement, picked.
+        // Not while a measurement made here is on its way: that one takes the pane.
+        let making = self.rig.pane_on_create.is_some()
+            || self.rig.split_on_create.is_some()
+            || self.rig.pending.stack.is_some();
         if self.pane_auto
+            && !making
             && self.pane_ours(self.layout.focus)
-            && let Some(kind) = self
+            && let Some((id, kind)) = self
                 .measurements()
                 .first()
-                .map(|m| PaneKind::for_kind(&m.config.kind))
+                .map(|m| (m.id, PaneKind::for_kind(&m.config.kind)))
         {
             self.pane_auto = false;
             let f = self.layout.focus;
             self.set_pane_kind(f, kind);
+            if let Some(v) = self.layout.view_mut(f) {
+                v.meas = Some(id);
+            }
         }
         self.restore_pane_ids();
         if self.rig.pending.pane_meas.is_empty() {

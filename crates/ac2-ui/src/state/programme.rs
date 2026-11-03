@@ -159,6 +159,25 @@ impl AppState {
         }
     }
 
+    /// A pane's title as its strip shows it: [`Self::pane_title`] and the measurement it
+    /// shows (`SPL · FOH SPL`, `pupu · Transfer · TF 1`); a pane with nothing picked is
+    /// named by its kind alone.
+    pub fn pane_heading(&self, id: PaneId) -> String {
+        let title = self.pane_title(id);
+        let name = self.layout.view(id).and_then(|v| {
+            if self.ours(v) {
+                return self.pane_meas(id).map(|m| m.config.name.clone());
+            }
+            let r = self.find_rig(self.pane_rig(v))?;
+            let m = r.meas(v.meas?)?;
+            v.kind.shows(&m.config.kind).then(|| m.config.name.clone())
+        });
+        match name {
+            Some(n) => format!("{title} \u{b7} {n}"),
+            None => title,
+        }
+    }
+
     /// Whether a visible goniometer has embers still cooling: it redraws every frame.
     pub fn embers_glowing(&self) -> bool {
         self.rig.programme.glowing()
@@ -394,53 +413,15 @@ impl AppState {
         }
     }
 
-    /// The Programme rows of a pane's list: each pair, each input alone, then the first
-    /// eight inputs side by side.
-    pub fn programme_menu_rows(&self) -> Vec<(crate::state::PaneMenuRow, String)> {
-        use crate::state::PaneMenuRow;
-        use ac2_scene::programme::{inputs_text, menu_row};
-        let Some(o) = self.open_session() else {
-            return Vec::new();
-        };
-        let rows = self.session_inputs();
-        let mut v: Vec<(PaneMenuRow, String)> = rows
-            .iter()
-            .filter_map(|r| {
-                Some((
-                    PaneMenuRow::Meter(self.row_meters(r.channel)?),
-                    menu_row(&r.label),
-                ))
-            })
-            .collect();
-        // A pair's sides alone as well: a row lists the pair, not its right input.
-        for r in rows.iter().filter(|r| r.right.is_some()) {
-            for c in [Some(r.channel), r.right.as_ref().map(|x| x.0)]
-                .into_iter()
-                .flatten()
-            {
-                if let Some(m) = Metered::inputs_of(&[c]) {
-                    let name = self
-                        .session_input_labels()
-                        .into_iter()
-                        .find(|(x, _)| *x == c)
-                        .map_or_else(|| inputs_text(&[c]), |(_, n)| n);
-                    v.push((PaneMenuRow::Meter(m), menu_row(&name)));
-                }
-            }
-        }
-        let all: Vec<u16> = o
-            .config
-            .input_channels
-            .iter()
-            .copied()
-            .take(MAX_METERED)
-            .collect();
-        if all.len() > 1
-            && let Some(m) = Metered::inputs_of(&all)
-        {
-            v.push((PaneMenuRow::Meter(m), menu_row(&inputs_text(&all))));
-        }
-        v
+    /// What an Inputs row that meters `m` is called (its name in the list), for a drag label.
+    pub(in crate::state) fn metered_name(&self, m: Metered) -> String {
+        self.session_inputs()
+            .into_iter()
+            .find(|r| self.row_meters(r.channel) == Some(m))
+            .map_or_else(
+                || ac2_scene::programme::inputs_text(&m.inputs()),
+                |r| r.label,
+            )
     }
 
     /// A Programme pane of `m` split off the focused pane (which keeps what it shows), with

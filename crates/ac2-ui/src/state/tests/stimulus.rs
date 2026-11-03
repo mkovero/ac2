@@ -566,9 +566,10 @@ fn delay_toasts_name_the_step_the_delay_and_its_offset_from_the_arrival() {
 #[test]
 fn transfer_commands_need_a_transfer_measurement() {
     let mut t = T::new();
-    // The spectrum picked in the list: the spectrum pane takes the keys, and a transfer
-    // command from the palette says what it needs.
+    // The spectrum picked in the list and dropped on the focused pane: the spectrum pane
+    // takes the keys, and a transfer command from the palette says what it needs.
     t.st.apply(Msg::SelectMeas(MeasId(2)), &t.keys);
+    t.drop_meas(t.st.layout.focus, MeasId(2));
     assert_eq!(t.st.rig.selected, Some(MeasId(2)));
     assert_eq!(t.focus_kind(), PaneKind::Spectrum);
     assert!(t.key("X").is_empty());

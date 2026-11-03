@@ -5,7 +5,7 @@ use ac2_proto::model::{MathExpr, MathOp, MeasKind, Operand, TraceKind, TraceOwne
 use ac2_scene::meas_list::TreeKey;
 use ac2_ui::embedded::{EmbeddedBackend, Setup, start_embedded_with};
 use ac2_ui::forms::FormKind;
-use ac2_ui::state::{DragMsg, Msg, Overlay};
+use ac2_ui::state::{DragItem, DragMsg, Msg, Overlay};
 
 /// From an empty daemon: a capture of the first transfer measurement, then Z's loudness
 /// shift, which is listed under that measurement (not Imported); the shift's row dropped
@@ -59,16 +59,21 @@ fn a_loudness_shift_dropped_on_a_capture_makes_its_math_channel() -> R {
         "listed with the measurement it was made on"
     );
 
-    d.send(Msg::RowDrag(DragMsg::Start(TreeKey::Trace(loud.id))));
-    d.send(Msg::RowDrag(DragMsg::OverRow(Some(TreeKey::Trace(
-        capture.id,
+    let rig = d.st.active();
+    d.send(Msg::RowDrag(DragMsg::Start(DragItem::Row {
+        rig,
+        key: TreeKey::Trace(loud.id),
+    })));
+    d.send(Msg::RowDrag(DragMsg::OverRow(Some((
+        rig,
+        TreeKey::Trace(capture.id),
     )))));
     let name = format!("{} × {loud_name}", capture.edit.name);
     assert_eq!(
         d.st.drag_label().as_deref(),
         Some(format!("math channel: {name}").as_str())
     );
-    d.send(Msg::RowDrag(DragMsg::Drop { compare: false }));
+    d.send(Msg::RowDrag(DragMsg::Drop));
     assert!(
         matches!(&d.st.overlay, Overlay::Form(f) if f.kind == FormKind::Math),
         "{:?}",

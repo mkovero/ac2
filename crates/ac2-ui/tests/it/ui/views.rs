@@ -19,16 +19,16 @@ fn sweep_progress_strip() {
     let rig = common::Rig::start();
     let mut h = harness(options(Some(&rig)));
     step_until(&mut h, "live frames", live);
-    // The pane's measurement chip, in its title row (the tree has rows of that name too).
+    // The pane's title naming its measurement (the tree has rows of that name too).
     let title = |h: &Harness<'_, App>| {
         use egui_kittest::kittest::By;
-        h.query_all(By::new().label("Main L"))
+        h.query_all(By::new().label_contains(" · Main L"))
             .map(|n| n.rect())
             .filter(|r| r.min.x > 230.0)
             .fold(egui::Rect::NOTHING, |a, r| a.union(r))
     };
     let before = title(&h);
-    assert!(before.is_positive(), "no measurement chip in the pane");
+    assert!(before.is_positive(), "no measurement title in the pane");
     {
         let mut s = rig.fake.lock();
         let mut g = s.state.generator.clone();
@@ -413,7 +413,7 @@ fn key_hints() {
         }));
     }
     let mut opts = options(Some(&rig));
-    opts.prefs.layout.panes = Some(common::grid_with_sweep_prefs());
+    opts.prefs.layout.panes = Some(common::fake_rig_picks(common::grid_with_sweep_prefs()));
     let mut h = harness(opts);
     step_until(&mut h, "live frames with the mic", |a| {
         live(a) && a.state.daemon().is_some_and(|s| !s.mics.is_empty())

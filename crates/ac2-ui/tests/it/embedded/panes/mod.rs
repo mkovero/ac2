@@ -34,6 +34,7 @@ pub(super) fn hint_line(s: &AppState) -> Vec<String> {
 /// session's other one: its id once it runs.
 pub(super) fn new_spectrum(d: &mut Driver, other: bool) -> R<MeasId> {
     let before: Vec<MeasId> = d.st.measurements().iter().map(|m| m.id).collect();
+    let panes = d.st.visible_panes().len();
     d.key("Ctrl+K");
     d.send(Msg::Text("new spectrum".into()));
     d.key("Enter");
@@ -54,11 +55,25 @@ pub(super) fn new_spectrum(d: &mut Driver, other: bool) -> R<MeasId> {
                 && m.running
         })
     })?;
-    d.st.measurements()
-        .iter()
-        .find(|m| !before.contains(&m.id))
-        .map(|m| m.id)
-        .ok_or_else(|| "the new spectrum".into())
+    let id =
+        d.st.measurements()
+            .iter()
+            .find(|m| !before.contains(&m.id))
+            .map(|m| m.id)
+            .ok_or("the new spectrum")?;
+    close_opened_pane(d, panes, id);
+    Ok(id)
+}
+
+/// The pane new measurement `id` opened beside the focused one, closed (Q): the tests lay
+/// out the grid's own panes by dropping rows on them, so a new measurement that found no
+/// empty pane to take leaves the grid as it was.
+pub(super) fn close_opened_pane(d: &mut Driver, panes: usize, id: MeasId) {
+    if d.st.visible_panes().len() > panes
+        && d.st.pane_meas(d.st.layout.focus).map(|m| m.id) == Some(id)
+    {
+        d.key("Q");
+    }
 }
 
 /// The spectrum panes in reading order: the measurement each shows, its view, and the
