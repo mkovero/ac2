@@ -75,7 +75,11 @@ chmod +x "$tools/appimagetool"
 
 app="$work/ac2.AppDir"
 mkdir -p "$app/usr/bin" "$app/usr/share/applications" "$app/usr/share/icons/hicolor/256x256/apps"
-install -m 0755 "$d/bin/ac2-ui" "$app/usr/bin/ac2-ui"
+# The app starts ac2d from beside its own executable only (never from PATH: pre-1.0 the wire
+# has no compatibility across versions), so the daemon ships in the same directory.
+for b in ac2-ui ac2d; do
+    install -m 0755 "$d/bin/$b" "$app/usr/bin/$b"
+done
 install -m 0644 "$root/packaging/linux/ac2.desktop" "$app/usr/share/applications/ac2.desktop"
 install -m 0644 "$root/packaging/linux/ac2.desktop" "$app/ac2.desktop"
 install -m 0644 "$root/packaging/icon/generated/ac2-256.png" "$app/usr/share/icons/hicolor/256x256/apps/ac2.png"

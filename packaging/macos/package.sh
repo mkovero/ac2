@@ -35,7 +35,12 @@ done
 
 app="$stage/ac2.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-install -m 0755 "$work/ac2-ui" "$app/Contents/MacOS/ac2-ui"
+# The app starts ac2d from beside its own executable only (never from PATH: pre-1.0 the wire
+# has no compatibility across versions). A helper in Contents/MacOS is expected to count as
+# the app for microphone access. bin/ac2d below stays for the CLI and the launchd agent.
+for b in ac2-ui ac2d; do
+    install -m 0755 "$work/$b" "$app/Contents/MacOS/$b"
+done
 sed "s|@VERSION@|$version|g" "$root/packaging/macos/Info.plist" > "$app/Contents/Info.plist"
 plutil -lint "$app/Contents/Info.plist"
 install -m 0644 "$root/packaging/icon/generated/ac2.icns" "$app/Contents/Resources/ac2.icns"
@@ -53,7 +58,9 @@ else
     sign=(codesign --force --sign -)
     echo "no MACOS_SIGN_IDENTITY: ad-hoc signature (unsigned release)"
 fi
-"${sign[@]}" "$stage/bin/ac2" "$stage/bin/ac2d"
+# Nested code first: signing the bundle seals Contents/MacOS, so a helper signed afterwards
+# would break the bundle's signature.
+"${sign[@]}" "$stage/bin/ac2" "$stage/bin/ac2d" "$app/Contents/MacOS/ac2d"
 "${sign[@]}" "$app"
 codesign --verify --strict --verbose=2 "$app"
 

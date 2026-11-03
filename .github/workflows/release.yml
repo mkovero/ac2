@@ -88,6 +88,10 @@ jobs:
         run: |
           tools/release/first-measurement.sh "dist/ac2-$VERSION-linux-x86_64.tar.gz"
           APPIMAGE_EXTRACT_AND_RUN=1 "dist/ac2-ui-$VERSION-x86_64.AppImage" --version
+          # The app starts the ac2d beside its own executable: it must be in the image.
+          img="$PWD/dist/ac2-ui-$VERSION-x86_64.AppImage" x=$(mktemp -d)
+          (cd "$x" && "$img" --appimage-extract > /dev/null)
+          "$x/squashfs-root/usr/bin/ac2d" --version
       - uses: actions/upload-artifact@v4
         with:
           name: dist-linux
@@ -146,6 +150,9 @@ jobs:
           d="$t/ac2-$VERSION-macos-universal"
           lipo -archs "$d/ac2.app/Contents/MacOS/ac2-ui"
           "$d/ac2.app/Contents/MacOS/ac2-ui" --version
+          lipo -archs "$d/ac2.app/Contents/MacOS/ac2d"
+          "$d/ac2.app/Contents/MacOS/ac2d" --version
+          codesign --verify --strict --verbose=2 "$d/ac2.app/Contents/MacOS/ac2d"
           export AC2_RUNTIME_DIR="$t/run" AC2_CONFIG_DIR="$t/config"
           "$d/bin/ac2d" --version
           "$d/bin/ac2d" --backend fake > "$t/ac2d.log" 2>&1 &
