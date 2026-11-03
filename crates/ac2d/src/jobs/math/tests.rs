@@ -509,6 +509,84 @@ fn a_live_operand_paces_the_result_by_its_own_results() {
     assert_eq!(j.generation, first + 2);
 }
 
+/// Three running operands at `period` samples, out of step (`phase` each), and a job
+/// averaging them, handed off every 256 samples for `blocks` blocks; `stalls_at`: operand 3
+/// forms no result from that sample on. The new results formed here, with the sample of each.
+fn paced(period: u64, phase: [u64; 3], blocks: u64, stalls_at: u64) -> Vec<u64> {
+    let probes = Arc::new(Probes::default());
+    let counters: Vec<Arc<AtomicU64>> = (1..=3)
+        .map(|m| {
+            let (p, results) = probe();
+            probes.set(MeasId(m), Some(p));
+            results
+        })
+        .collect();
+    let mut j = job(
+        avg(&[1, 2, 3], AverageMethod::Power),
+        vec![None, None, None],
+        Arc::clone(&probes),
+    );
+    let mut formed = Vec::new();
+    for b in 0..blocks {
+        let end = (b + 1) * 256;
+        for (k, c) in counters.iter().enumerate() {
+            let until = if k == 2 { end.min(stalls_at) } else { end };
+            c.store(until.saturating_sub(phase[k]) / period, Ordering::Release);
+        }
+        let before = j.generation;
+        hand_off(&mut j, b * 256);
+        if j.generation != before {
+            formed.push(end);
+        }
+    }
+    formed
+}
+
+#[test]
+fn live_operands_out_of_step_form_results_at_their_own_rate() {
+    // Three operands at 1 715 samples (28 results/s at 48 kHz), a third of that apart: about
+    // one result here per operand period, not three.
+    let period = 1_715;
+    let blocks = 48_000 / 256 * 4;
+    let formed = paced(period, [0, 571, 1_143], blocks, u64::MAX);
+    let periods = blocks * 256 / period;
+    let n = formed.len() as u64;
+    assert!(
+        n >= periods - 2 && n <= periods + 2,
+        "{n} results in {periods} periods"
+    );
+    // The newest operand result goes in within one operand period (plus a hand-off).
+    for w in formed.windows(2).skip(2) {
+        assert!(w[1] - w[0] <= period + 256, "{} samples apart", w[1] - w[0]);
+    }
+}
+
+#[test]
+fn a_stalled_operand_does_not_hold_the_result() {
+    // Operand 3 stops forming results after a second but keeps running: the other two still
+    // make one result each operand period.
+    let period = 1_715;
+    let blocks = 48_000 / 256 * 3;
+    let formed = paced(period, [0, 571, 1_143], blocks, 48_000);
+    let late: Vec<_> = formed
+        .iter()
+        .filter(|t| **t > 48_000 + 2 * period)
+        .collect();
+    let periods = (blocks * 256 - 48_000 - 2 * period) / period;
+    let n = late.len() as u64;
+    assert!(
+        n >= periods - 2 && n <= periods + 2,
+        "{n} results in {periods} periods"
+    );
+    for w in late.windows(2) {
+        assert!(
+            *w[1] - *w[0] <= 2 * period + 256,
+            "{} samples apart",
+            *w[1] - *w[0]
+        );
+    }
+}
+
 fn range_of(f: &TfFrame) -> Option<ac2_proto::model::RangeSpread> {
     f.meta.math.as_ref().and_then(|m| m.range)
 }

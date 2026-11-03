@@ -110,9 +110,10 @@ pub(crate) struct MathJob {
     end: Option<u64>,
     wall: u64,
     generation: u64,
-    /// The live operands' result generations (and which of them run) when the job last
-    /// looked: a new result forms only when this changes.
-    operands_seen: Option<u64>,
+    /// When the live operands' results make a new result here ([`pace::ResultPace`]).
+    result_pace: pace::ResultPace,
+    /// Each operand's state as [`pace::ResultPace::observe`] takes it, kept to reuse.
+    operand_states: Vec<Option<Option<u64>>>,
     pace: Pace,
     /// Newest inserted delay seen per operand: the reference while that operand is left out.
     seen_delay: Vec<Option<f64>>,
@@ -148,28 +149,23 @@ impl MathJob {
             end: None,
             wall: 0,
             generation: 0,
-            operands_seen: None,
+            result_pace: pace::ResultPace::default(),
+            operand_states: Vec::new(),
             pace: Pace::new(Duration::ZERO),
             seen_delay,
         }
     }
 
-    /// One value for the live operands' state: each running one's result generation, in
-    /// expression order, and which are not running. Stored operands never change it.
-    fn operands_state(&self) -> u64 {
-        self.cfg.expr.operands().iter().zip(&self.stored).fold(
-            0xcbf2_9ce4_8422_2325,
-            |h, (o, s)| {
-                let v = match (o, s) {
-                    (Operand::Meas { meas }, None) => self
-                        .probes
-                        .get(*meas)
-                        .map_or(0, |p| p.results().wrapping_add(1)),
-                    _ => 0,
-                };
-                (h ^ v).wrapping_mul(0x0100_0000_01b3)
-            },
-        )
+    /// Each operand's state for [`pace::ResultPace::observe`], in expression order: a live
+    /// one's result count while it runs. Stored operands never change.
+    fn read_operand_states(&mut self) {
+        self.operand_states.clear();
+        for (o, s) in self.cfg.expr.operands().iter().zip(&self.stored) {
+            self.operand_states.push(match (o, s) {
+                (Operand::Meas { meas }, None) => Some(self.probes.get(*meas).map(|p| p.results())),
+                _ => None,
+            });
+        }
     }
 
     /// Every operand's current result: all requests to live operands go out first, so they
@@ -745,10 +741,12 @@ impl Analysis for MathJob {
         }
         // The result changes only with a live operand's: a channel of stored traces is the
         // same until a command changes it (the pace refreshes it for the client), and one of
-        // live operands forms a new result when one of them has, not on every hand-off.
-        let state = self.operands_state();
-        if self.operands_seen != Some(state) {
-            self.operands_seen = Some(state);
+        // live operands forms a new result at their rate ([`pace`]), not on every hand-off.
+        self.read_operand_states();
+        if self
+            .result_pace
+            .observe(b.end_sample(), &self.operand_states)
+        {
             self.generation += 1;
         }
         self.end = Some(b.end_sample());
@@ -810,5 +808,6 @@ impl Analysis for MathJob {
     }
 }
 
+mod pace;
 #[cfg(test)]
 mod tests;
