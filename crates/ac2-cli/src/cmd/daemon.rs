@@ -136,9 +136,28 @@ pub(crate) async fn status(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError>
     Ok(())
 }
 
-/// `ac2d`'s exit code when another `ac2d` already serves this user's default local
-/// endpoints (`ac2d::instance::exit::ANOTHER_RUNNING`).
+/// `ac2d`'s exit code when another `ac2d` already runs for this user, holding the instance
+/// lock (`ac2d::instance::exit::ANOTHER_RUNNING`).
 const EXIT_ANOTHER_RUNNING: i32 = 3;
+
+/// Where the lock holder says it listens (`ac2d::instance::endpoints_file`).
+fn endpoints_file() -> PathBuf {
+    ac2_client::endpoint::runtime_dir().join("ac2d.endpoints")
+}
+
+/// The lock holder's ctrl endpoint when it serves in network mode, which the default
+/// local target never reaches.
+fn network_winner() -> Option<String> {
+    let text = std::fs::read_to_string(endpoints_file()).ok()?;
+    let mut lines = text.lines();
+    let ctrl = lines
+        .next()?
+        .strip_prefix("ac2d: listening ctrl=")?
+        .split(' ')
+        .next()?
+        .to_owned();
+    (lines.next()? == "mode=network").then_some(ctrl)
+}
 
 /// A quick probe: hello with a short deadline. Only an answer counts: a `ctrl.sock` left
 /// by a crashed daemon is still there, and a daemon may be up before its socket is seen.
@@ -234,6 +253,12 @@ async fn start(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
                 return Err(CliError::NotRunning(format!(
                     "{} exited at start ({st}); run it in a terminal to see why",
                     exe.display()
+                )));
+            }
+            if let Some(ctrl) = network_winner() {
+                return Err(CliError::NotRunning(format!(
+                    "another ac2d is running for this user, in network mode on {ctrl}; \
+                     reach it with --remote"
                 )));
             }
             lost_lock = true;
@@ -349,11 +374,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn exit_code_matches_the_daemon() {
+    fn exit_code_and_endpoints_file_match_the_daemon() {
         assert_eq!(
             EXIT_ANOTHER_RUNNING,
             i32::from(ac2d::instance::exit::ANOTHER_RUNNING)
         );
+        assert_eq!(endpoints_file(), ac2d::instance::endpoints_file());
     }
 
     #[test]

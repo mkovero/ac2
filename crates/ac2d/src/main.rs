@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use clap::Parser;
 
-use ac2d::instance::{Instance, LockError, exit};
+use ac2d::instance::{Instance, LockError, Mode, exit};
 use ac2d::{
     Advertise, AutosaveConfig, BackendChoice, Daemon, DaemonConfig, Ended, Listen, NetworkSecurity,
     RigIdSource, Stopper,
@@ -36,8 +36,8 @@ const EARLY_EOF: Duration = Duration::from_secs(1);
 ///
 /// With no options: local mode (ipc in the runtime dir; loopback TCP on Windows), on this
 /// platform's audio: JACK on Linux (JACK2, or PipeWire through pipewire-jack), Core Audio
-/// on macOS, ASIO on Windows. On those default endpoints one ac2d runs per user: a second
-/// exits with code 3 and touches nothing.
+/// on macOS, ASIO on Windows. One ac2d runs per user, whatever its endpoints (an
+/// --ephemeral one aside): a second exits with code 3 and touches nothing.
 #[derive(Debug, Parser)]
 #[command(
     name = "ac2d",
@@ -49,7 +49,7 @@ const EARLY_EOF: Duration = Duration::from_secs(1);
                   (ac2d-sim.log with --ephemeral).\n\n\
                   Exit codes: 0 stopped in order, 1 failed to start or ended on a fatal error, \
                   2 unusable arguments or instance lock, 3 another ac2d is running for this user \
-                  (on the default local endpoints, which take a lock in the runtime directory)."
+                  (the lock is ac2d.lock in the runtime directory; --ephemeral takes none)."
 )]
 struct Args {
     /// Audio backend: jack (Linux), coreaudio (macOS) or asio (Windows), the platform's
@@ -120,8 +120,9 @@ struct Args {
     recordings: Option<PathBuf>,
     /// Keep nothing: a random rig id and no autosave, calibration store, rig settings,
     /// plans, rig logs or recordings; nothing read or written in the ac2 config and data
-    /// directories (local mode only). Logs to ac2d-sim.log.
-    #[arg(long, conflicts_with_all = STORES, conflicts_with = "listen")]
+    /// directories. Holds no audio interface or store of the user's, so it takes no
+    /// instance lock: it needs its own --ctrl/--data. Logs to ac2d-sim.log.
+    #[arg(long, conflicts_with_all = STORES, conflicts_with = "listen", requires = "ctrl")]
     ephemeral: bool,
     /// Print the endpoints as bound on one stdout line, `ac2d: listening ctrl=… data=…`
     /// (a `tcp://127.0.0.1:0` request shows its real port).
@@ -149,9 +150,12 @@ fn main() -> ExitCode {
             return ExitCode::from(exit::SETUP);
         }
     };
-    // First of all, so a second daemon leaves the log, the audio and the sockets alone.
-    let default_local = args.listen.is_none() && args.ctrl.is_none();
-    let mut instance = if default_local {
+    // First of all, so a second daemon leaves the log, the audio, the stores and the
+    // sockets alone. What the lock guards is the user's audio interface and stores, which
+    // every daemon but an ephemeral one uses whatever endpoints it listens on.
+    let mut instance = if args.ephemeral {
+        None
+    } else {
         match Instance::lock(&ac2d::runtime_dir()) {
             Ok(i) => Some(i),
             Err(e @ LockError::Held(_)) => {
@@ -163,8 +167,6 @@ fn main() -> ExitCode {
                 return ExitCode::from(exit::SETUP);
             }
         }
-    } else {
-        None
     };
     // systemd sets JOURNAL_STREAM when stderr goes to the journal, which already keeps and
     // rotates the log; a second copy on disk would only grow.
@@ -197,16 +199,24 @@ fn main() -> ExitCode {
         }
     };
     // `ac2 daemon stop` reads this and sends SIGTERM (taskkill on Windows).
-    if let Some(i) = &mut instance
-        && let Err(e) = i.write_pid()
-    {
-        tracing::warn!("cannot write {}: {e}", i.pid_file().display());
+    // Beside it, where this daemon listens, for a starter whose own child lost the lock.
+    if let Some(i) = &mut instance {
+        if let Err(e) = i.write_pid() {
+            tracing::warn!("cannot write {}: {e}", i.pid_file().display());
+        }
+        let mode = if handle.server_public_key().is_some() {
+            Mode::Network
+        } else {
+            Mode::Local
+        };
+        if let Err(e) = i.write_endpoints(handle.ctrl_endpoint(), handle.data_endpoint(), mode) {
+            tracing::warn!("cannot write {}: {e}", i.endpoints_file().display());
+        }
     }
     if args.print_endpoints {
         println!(
-            "ac2d: listening ctrl={} data={}",
-            handle.ctrl_endpoint(),
-            handle.data_endpoint()
+            "{}",
+            ac2d::instance::listening_line(handle.ctrl_endpoint(), handle.data_endpoint())
         );
     }
     let stopper = handle.stopper();

@@ -1,6 +1,6 @@
-//! The `ac2d` binary as a process a parent starts: one per user on the default local
-//! endpoints (an instance lock; a second exits 3 and touches nothing), explicit endpoints
-//! that are another daemon by intent, `--print-endpoints`, `--stop-on-stdin-eof` (the
+//! The `ac2d` binary as a process a parent starts: one per user whatever its endpoints
+//! (an instance lock; a second exits 3 and touches nothing), an `--ephemeral` one beside
+//! it, `--print-endpoints`, `--stop-on-stdin-eof` (the
 //! parent's pipe closing stops it in order), `--ephemeral` (nothing kept), and a hard kill
 //! that neither blocks the next start nor costs the last good autosave.
 //!
@@ -25,7 +25,7 @@ use common::Client;
 const T: Duration = Duration::from_secs(10);
 /// The daemon's wait after the last edit of a burst before it writes the autosave.
 const DEBOUNCE: Duration = Duration::from_millis(1500);
-/// Loopback TCP on a free port: explicit endpoints, so no lock and no pid file.
+/// Loopback TCP on a free port, so runs never meet on the default endpoints.
 const ANY_PORT: &str = "tcp://127.0.0.1:0";
 
 /// A private home for one daemon run: every directory the daemon may touch.
@@ -218,7 +218,7 @@ fn ipc_ctrl(home: &Home) -> String {
     format!("ipc://{}", home.runtime().join("ctrl.sock").display())
 }
 
-/// A held instance lock: the daemon on the default endpoints exits 3 at once, before it
+/// A held instance lock: a daemon exits 3 at once, before it
 /// rotates the log, writes the pid file or binds a socket.
 #[test]
 fn a_held_lock_refuses_a_second_daemon() {
@@ -297,10 +297,11 @@ fn a_hard_killed_daemon_does_not_block_the_next() {
     assert!(!pid_file.exists());
 }
 
-/// Explicit endpoints are another daemon by intent: it serves with the lock held by
-/// someone else and creates neither a lock nor a pid file (the runtime dir stays absent).
+/// The lock guards the user's audio and stores, not the endpoints: a daemon on explicit
+/// endpoints takes it and writes its pid and endpoints beside it, a second one on other
+/// endpoints exits 3, and an `--ephemeral` one (keeping nothing) serves beside it.
 #[test]
-fn explicit_endpoints_take_no_lock_and_write_no_pid_file() {
+fn explicit_endpoints_still_lock_and_ephemeral_never_does() {
     let home = Home::new();
     let explicit = || {
         let mut p = home.ac2d_with_stores();
@@ -308,14 +309,78 @@ fn explicit_endpoints_take_no_lock_and_write_no_pid_file() {
         p
     };
     let ctx = Context::new().unwrap();
-    let (_alone, ctrl, _) = Daemon::spawn_printing(explicit());
+    let (first, ctrl, data) = Daemon::spawn_printing(explicit());
     assert!(answers(&ctx, &ctrl));
-    assert!(!home.runtime().exists(), "{:?}", home.files());
+    let pid = format!("{}\n", first.child.id());
+    assert_eq!(read(&home.runtime().join("ac2d.pid")), pid);
+    assert_eq!(
+        read(&home.runtime().join("ac2d.endpoints")),
+        format!("ac2d: listening ctrl={ctrl} data={data}\nmode=local\n")
+    );
 
-    let _held = Instance::lock(&home.runtime()).unwrap();
-    let (_beside, ctrl, _) = Daemon::spawn_printing(explicit());
+    let mut second = Daemon::spawn(explicit());
+    assert_eq!(
+        second.wait(T).code(),
+        Some(i32::from(exit::ANOTHER_RUNNING))
+    );
+
+    let mut p = home.ac2d();
+    p.args(["--ephemeral", "--ctrl", ANY_PORT, "--data", ANY_PORT]);
+    let (_sim, sim_ctrl, _) = Daemon::spawn_printing(p);
+    assert!(answers(&ctx, &sim_ctrl));
     assert!(answers(&ctx, &ctrl));
-    assert!(!home.runtime().join("ac2d.pid").exists());
+    assert_eq!(read(&home.runtime().join("ac2d.pid")), pid);
+}
+
+/// An ephemeral daemon takes no lock, so it must not take over the default endpoints
+/// either: without its own `--ctrl/--data` it is refused as a usage error.
+#[test]
+fn ephemeral_needs_its_own_endpoints() {
+    let home = Home::new();
+    let mut p = home.ac2d();
+    p.arg("--ephemeral");
+    let mut d = Daemon::spawn(p);
+    assert_eq!(d.wait(T).code(), Some(i32::from(exit::SETUP)));
+    assert!(!home.runtime().exists());
+}
+
+/// A free loopback port whose successor is free too (network mode puts data on port + 1
+/// and refuses port 0).
+fn free_port_pair() -> u16 {
+    loop {
+        let a = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = a.local_addr().unwrap().port();
+        if port < u16::MAX && std::net::TcpListener::bind(("127.0.0.1", port + 1)).is_ok() {
+            return port;
+        }
+    }
+}
+
+/// A network-mode daemon (a stage machine's service) holds the lock too, and says in the
+/// endpoints file that it is CURVE: a second daemon on the default local endpoints, as an
+/// app on that host would start, exits 3 instead of opening the same interface.
+#[test]
+fn network_mode_locks() {
+    let home = Home::new();
+    let port = free_port_pair();
+    let mut p = home.ac2d_with_stores();
+    p.args(["--listen", &format!("tcp://127.0.0.1:{port}"), "--no-mdns"])
+        .arg("--key-file")
+        .arg(home.path("config/server.key"))
+        .arg("--authorized")
+        .arg(home.path("config/authorized_clients"));
+    let (net, ctrl, data) = Daemon::spawn_printing(p);
+    assert_eq!(ctrl, format!("tcp://127.0.0.1:{port}"));
+    assert_eq!(
+        read(&home.runtime().join("ac2d.endpoints")),
+        format!("ac2d: listening ctrl={ctrl} data={data}\nmode=network\n")
+    );
+    assert_eq!(
+        read(&home.runtime().join("ac2d.pid")),
+        format!("{}\n", net.child.id())
+    );
+    let mut local = Daemon::spawn(home.ac2d_with_stores());
+    assert_eq!(local.wait(T).code(), Some(i32::from(exit::ANOTHER_RUNNING)));
 }
 
 /// `tcp://127.0.0.1:0` passes local-mode validation and `--print-endpoints` reports the

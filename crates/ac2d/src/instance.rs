@@ -7,8 +7,14 @@
 //! socket alone (the file survives a crash), so the daemon on the default endpoints holds an
 //! exclusive lock on [`lock_file`] for its whole life, taken before anything else: the OS
 //! drops it with the process however that ends, so a crashed daemon never blocks the next.
-//! Explicit endpoints (`--ctrl/--data`, `--listen`) are another daemon by intent and take
-//! neither the lock nor the pid file.
+//! What the lock guards is the user's audio interface and stores (`rig.json`, the
+//! calibrations, the autosave), which a daemon uses whatever endpoints it listens on, so
+//! every daemon takes it but an `--ephemeral` one, which keeps none of them.
+//!
+//! The holder writes its pid ([`crate::pid_file`]) and where it listens
+//! ([`endpoints_file`]) beside the lock: a starter whose child exited
+//! [`exit::ANOTHER_RUNNING`] learns there where the winner is, which need not be the
+//! default local endpoints (a network-mode service).
 
 use std::fmt;
 use std::fs::{File, OpenOptions, TryLockError};
@@ -22,8 +28,8 @@ pub mod exit {
     pub const FATAL: u8 = 1;
     /// The arguments, a store path or the instance lock could not be used.
     pub const SETUP: u8 = 2;
-    /// Another `ac2d` already serves this user's default local endpoints; nothing was
-    /// touched. `packaging/linux/ac2d.service` counts it as success, so a unit that loses
+    /// Another `ac2d` already runs for this user (it holds the instance lock); nothing
+    /// was touched. `packaging/linux/ac2d.service` counts it as success, so a unit that loses
     /// the lock ends inactive instead of restarting into systemd's start limit.
     pub const ANOTHER_RUNNING: u8 = 3;
 }
@@ -34,6 +40,38 @@ pub fn lock_file() -> PathBuf {
 }
 
 const LOCK_FILE: &str = "ac2d.lock";
+const ENDPOINTS_FILE: &str = "ac2d.endpoints";
+
+/// The endpoints file of the daemon holding the lock, in [`crate::runtime_dir`]:
+/// [`listening_line`], then `mode=local` or `mode=network` (CURVE: a client needs the
+/// server key and to be paired). A wildcard interface (`tcp://0.0.0.0:…`) is reached on a
+/// loopback address.
+pub fn endpoints_file() -> PathBuf {
+    crate::runtime_dir().join(ENDPOINTS_FILE)
+}
+
+/// The line `--print-endpoints` prints and [`endpoints_file`] starts with.
+pub fn listening_line(ctrl: &str, data: &str) -> String {
+    format!("ac2d: listening ctrl={ctrl} data={data}")
+}
+
+/// How the lock holder's endpoints are reached.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    /// No authentication: ipc or loopback TCP.
+    Local,
+    /// CURVE on TCP.
+    Network,
+}
+
+impl Mode {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Network => "network",
+        }
+    }
+}
 
 /// Why the instance lock was not taken.
 #[derive(Debug)]
@@ -66,6 +104,8 @@ pub struct Instance {
     _lock: File,
     pid_file: PathBuf,
     pid_written: bool,
+    endpoints_file: PathBuf,
+    endpoints_written: bool,
 }
 
 impl Instance {
@@ -94,6 +134,8 @@ impl Instance {
                 _lock: file,
                 pid_file: dir.join("ac2d.pid"),
                 pid_written: false,
+                endpoints_file: dir.join(ENDPOINTS_FILE),
+                endpoints_written: false,
             }),
             Err(TryLockError::WouldBlock) => Err(LockError::Held(path)),
             Err(TryLockError::Error(e)) => Err(LockError::Io(path, e)),
@@ -114,6 +156,19 @@ impl Instance {
     pub fn pid_file(&self) -> &Path {
         &self.pid_file
     }
+
+    /// Writes the endpoints file beside the lock (see [`endpoints_file`]).
+    pub fn write_endpoints(&mut self, ctrl: &str, data: &str, mode: Mode) -> io::Result<()> {
+        let text = format!("{}\nmode={}\n", listening_line(ctrl, data), mode.name());
+        ac2_paths::write_private_atomic(&self.endpoints_file, text.as_bytes())?;
+        self.endpoints_written = true;
+        Ok(())
+    }
+
+    /// The endpoints file beside the lock.
+    pub fn endpoints_file(&self) -> &Path {
+        &self.endpoints_file
+    }
 }
 
 impl Drop for Instance {
@@ -121,6 +176,9 @@ impl Drop for Instance {
         // Removed while the lock is still held, so it never names a successor's pid.
         if self.pid_written {
             let _ = std::fs::remove_file(&self.pid_file);
+        }
+        if self.endpoints_written {
+            let _ = std::fs::remove_file(&self.endpoints_file);
         }
     }
 }
