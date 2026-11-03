@@ -77,8 +77,8 @@ fn slow_run_clock_and_a_new_log_from_the_app() -> R {
             .iter()
             .any(|m| matches!(m.config.kind, MeasKind::Spl { .. }) && m.running)
     })?;
-    // G: the windows; the run (clock, start, total, offline) only with the history on.
-    d.key("Alt+4");
+    // The new meter opened in its own pane beside the focused one, focused. G: the
+    // windows; the run (clock, start, total, offline) only with the history on.
     assert_eq!(d.st.layout.focus_kind(), PaneKind::Spl);
     if !d
         .st
@@ -228,11 +228,13 @@ fn slow_a_restarted_app_shows_the_history_from_the_log() -> R {
     let (meas, before) = history_points(&d.st).ok_or("history")?;
     drop(d);
 
-    // The app again, from nothing: the strip holds the seconds before it started.
+    // The app again, from nothing: its SPL pane shows nothing until the meter's row is
+    // dropped on it; then the strip holds the seconds before it started.
     let mut d = Driver::connect(ep.clone(), &daemon.describe())?;
     d.synced()?;
     d.key("Alt+4");
     assert_eq!(d.st.layout.focus_kind(), PaneKind::Spl);
+    d.drop_meas(crate::common::pane(&d.st, PaneKind::Spl), meas);
     if !d
         .st
         .kind_modes(ac2_ui::state::PaneKind::Spl)

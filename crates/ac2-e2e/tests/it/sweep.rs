@@ -453,11 +453,13 @@ fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
     use ac2_ui::state::PaneKind;
     let daemon = sim_daemon(Setup::Empty)?;
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    // A sweep pane of its own beside the transfer pane: the dialog's sweep goes there
-    // (Alt+5) and leaves the transfer pane (Alt+1) as it is.
+    // The dialog's sweep opens its own pane beside the focused transfer pane, focused, and
+    // leaves the transfer pane (Alt+1) as it is.
     d.st.set_prefs(crate::common::grid_with_sweep_ui_prefs());
     measure_from_empty(&mut d)?;
     let first = sweep_from_the_dialog(&mut d)?;
+    assert_eq!(d.st.layout.focus_kind(), PaneKind::Distortion);
+    let sweep_pane = d.st.layout.focus;
     let second = run_again(&mut d)?;
     assert_ne!(first, second);
     let shown = |s: &AppState| s.kind_sweep().map(|(t, _)| t.meta.id);
@@ -569,8 +571,14 @@ fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
     assert_eq!(shown(&d.st), Some(second));
 
     // V on the sweep pane steps the sweep runs and selects them.
-    d.key("Alt+5");
-    assert_eq!(d.st.layout.focus_kind(), PaneKind::Distortion);
+    let n =
+        d.st.layout
+            .panes()
+            .iter()
+            .position(|p| *p == sweep_pane)
+            .ok_or("the sweep's pane")?;
+    d.key(&format!("Alt+{}", n + 1));
+    assert_eq!(d.st.layout.focus, sweep_pane);
     d.key("V");
     assert_eq!(d.st.rig.selected_trace, Some(first));
     assert_eq!(shown(&d.st), Some(first));
