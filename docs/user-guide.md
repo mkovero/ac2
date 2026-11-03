@@ -695,37 +695,42 @@ says so (`Spectrum 2: no frames yet`, `FOH SPL hidden — A shows it`).
 | **Transfer** | the group's live transfer curve, math channels, captures, targets and sweep runs (a sweep measurement dropped on it: its shown runs, no live curve) |
 | **Spectrum / RTA** | the group's live spectrum or RTA, math channels and stored spectra / band sets; two spectrum measurements are two panes, each with its own curves |
 | **Sweep / distortion** | one run of its sweep measurement: the selected run when it is one of that sweep's, else the run of it picked last, else its newest; never another sweep's run |
-| **SPL** | its own meter only (no compare); to see two meters, add a pane and drag the other SPL measurement onto it |
+| **SPL** | its one meter (no compare); to see two meters, add a pane and drag the other SPL measurement onto it |
 
 **Imported** traces draw on no pane until moved under a measurement (select, **Move to
 measurement…**, **Shift+F2**); while shown traces of the kind a pane draws wait under
 Imported, that pane says so. A stored trace selected in the list changes no pane: drag its
 row onto a pane to see it there.
 
-**Compare (C)** draws a curve of another group in a measurement's panes. Select a
-measurement or stored trace and press **C**: *Compare Main R with…* lists the measurements
-it can be drawn over, those on screen first (`· on screen`), a tick on the ones it is
-already compared into. **Enter** ticks or unticks a row, **Esc** closes. Its own group is
-not offered. From then on every pane showing that measurement draws it, tagged `cmp` in the
-legend (its tree row too), and no other pane does. A transfer curve is compared into a
-transfer measurement or a sweep, a spectrum or band set into a spectrum or RTA, a sweep run
-into a transfer measurement or over another sweep's run (its fundamental and harmonics in
-the run's own colour). Palette *Clear compare* empties the focused pane's measurement's
-list. An Imported trace is not compared: **C** says to move it under a measurement first.
-SPL meters are neither compared nor compared into: a meter is a number, read side by side.
-Compare is display only: **M**, math operands and the phase reference use the group's own
-curves.
+**Compare (C)** chooses what the focused pane draws. On a transfer, spectrum / RTA or sweep
+pane **C** opens *Draw in Transfer* (the pane's title): the measurements of the pane's kind, the pane's
+lead first, each with what its group brings and a tick on those the pane draws
+(`✓ Main L · live + 3 traces · lead`, `  Main R · live + 1 trace`). **Enter** ticks or unticks a
+row and the list stays open; **Esc** closes. A ticked measurement's group (its live curve, math
+channels and shown traces, and what is filed under it later) is drawn behind the lead, tagged
+`cmp` in the legend and on its tree row, in this pane only. A pane with nothing picked takes the
+first measurement ticked as its lead; unticking the lead makes the next ticked one lead, and
+unticking the last leaves the pane empty. A sweep ticked over a sweep pane draws its shown run
+over the pane's run (its fundamental and harmonics in the run's own colour). Palette *Clear
+compare* takes everything but the lead out of the focused pane. On an SPL, Programme or Walk
+pane **C** says *one source per pane: drag a row onto it*: a meter is a number, read side by
+side. Compare is display only: **M**, math operands and the phase reference use the lead's
+group.
 
-Each measurement keeps its compare list on the daemon, in order, first compared first: every
-app connected draws the same, a session saves it, and a deleted measurement or trace leaves
-every list. A pane draws its own group on top, then the compared curves in that order, each a
-layer further back: a fill or bar under every line, and a fill or bar drawn fainter the
-further back it is (never below about half), so the pane's own curves stay readable.
+What a pane draws is the pane's: kept in `ui.toml` with the pane, and stored with a
+measurement's own panes when the pane is one of them ([Layouts follow the
+measurement](#layouts-follow-the-measurement)), so every app that chooses that row draws the
+same. A deleted measurement or trace leaves every pane that drew it; a pane it led reads
+*Main R deleted — drag a row here* and takes it back if a measurement of that name comes
+back. The lead is drawn on top, then the ticked curves in order, each a layer further back: a
+fill or bar under every line, and a fill or bar drawn fainter the further back it is (never
+below about half), so the lead stays readable.
 
 To put another measurement in a pane, drag its row of the list onto the pane
 ([below](#dragging-a-row-onto-a-pane)): that is the one way to change what a pane shows. A
 pane nothing was dropped on reads *nothing picked — drag a row of the list here*; it never
-follows the selection.
+follows the selection. An empty focused pane is where a new measurement goes: made from the
+palette or the chooser, it shows there instead of taking a new pane.
 
 A row of the measurement list clicked (or reached with **Tab** / **Shift+Tab**):
 
@@ -821,15 +826,15 @@ pane shows that measurement is stored on nobody. The list says it: `· 3 own pan
 
 The layout lives in the session with the measurement: saved and opened with it, and shown
 by every app that selects it (another laptop, the kiosk), edits included. What travels is
-the split, each pane's kind and view, the measurement each pane was given by a drop (one
-deleted since shows the layout's own measurement again) and the level ranges set on it by
-hand; the focus, **W**, **F** and the window stay per app. A pane of the layout given no
-measurement by a drop shows the measurement whose row was chosen. A level range
+the split, each pane's kind and view, what each pane draws (its lead and what **C** ticked, a
+meter, inputs or a walk, each with the rig it is on; one deleted since leaves the pane) and the
+level ranges set on it by hand; the focus, **W**, **F** and the window stay per app. A level range
 not set by hand is not kept: a spectrum pane frames its first curve when its panes come
 back, as on first show; one set by hand stays until the pane shows another measurement.
 
-`ac2 meas list` has a `layout` column; `ac2 meas layout clear <meas>` removes a
-measurement's own panes. Deleting a measurement deletes its layout; editing it keeps it.
+`ac2 meas list` has a `layout` column: per pane, what it draws when that is more than the
+measurement's own group (`pane 2 draws 3, trace 9`, `nothing picked`, `shows meter 1 of
+pupu`); `ac2 meas layout clear <meas>` removes a measurement's own panes. Deleting a measurement deletes its layout; editing it keeps it.
 
 #### Dragging a row onto a pane
 
@@ -864,7 +869,7 @@ toast names it (`Undid: FOH SPL → pane 2`, `Redid: split pane 1`, `Nothing to 
 Covered: drops and edge drops, **N** / **Shift+N**, **Q**, measurement rows
 (click, **Tab** / **Shift+Tab**), **G** / **Shift+G**, **T**, a dragged split (one step per drag),
 **Alt+←/→**, **W**, **F** and the transfer stack. Daemon actions (start, stop, delete,
-capture, rename, delay, smoothing, compare lists, styles and offsets) are not undone. The
+capture, rename, delay, smoothing, styles and offsets) are not undone; what **C** ticks is a pane change. The
 history keeps 50 steps per app instance, is not saved, and a new change drops whatever was
 undone after it.
 
@@ -1116,8 +1121,8 @@ of each bin since it was turned on, drawn as a thin line over the curve.
 The style, the peak mode and the spectrograph's history and colours belong to the
 measurement, not the app or the pane: **B**, **P**, **Shift+B** and the colour maps change
 the spectrum pane's measurement and say so (`Spectrum 1: fill`). The daemon keeps them, so
-every connected app draws it alike and a session restores them; a curve compared into
-another measurement's pane, and each stored trace, draws with its own measurement's style.
+every connected app draws it alike and a session restores them; a curve ticked into another
+measurement's pane, and each stored trace, draws with its own measurement's style.
 The pane's own view (**G**) and plot chrome (**T**) stay the pane's: they are about the space
 on this screen, and two panes on one measurement may well want a spectrograph in one and the
 plain spectrum in the other.
@@ -1838,7 +1843,7 @@ at the trace's inserted delay), unless there was none (no reference). **Select**
 and the IR view draws its IR in the trace's colour, labelled as its legend row:
 `t = 0 at inserted delay 12.50 ms · 4.29 m @ 20 °C · pre-EQ`. It goes back to the live IR
 when the trace is deselected or has no IR (an average, a math capture, a text import). Only
-a trace of the pane's group, or one compared (**C**), is picked up. The IR travels with the
+a trace drawn in the pane (its lead's group, or one ticked in with **C**) is picked up. The IR travels with the
 trace in sessions, autosave and ac2 CSV exports.
 
 ## The measurement tree
@@ -1956,8 +1961,7 @@ The selected curve is the selected stored trace (any kind), else a live curve co
 into the focused pane once picked there (legend or list), else the focused pane's
 measurement. A trace's offset is part of its record (`ac2 trace list`, sessions, exports); a
 live measurement's is kept with the measurement on the daemon (`ac2 meas set <meas> --offset
-6`, sessions), levels as measured: the curve keeps it wherever it is drawn, compared into
-another measurement's pane too. The plot says it beside the curve
+6`, sessions), levels as measured: the curve keeps it in every pane that draws it. The plot says it beside the curve
 (`Main L S2 · Δt 0.00 ms · +3.0 dB`, `Main L S2 · offset +3.0 dB`), so a spread is never read
 as a level difference. A locked trace keeps its offset.
 
@@ -1978,15 +1982,14 @@ as a level difference. A locked trace keeps its offset.
 
 - A run selected in the list or with **V** is the one the **Sweep / distortion** pane of
   its sweep measurement shows; **V** / **Shift+V** on that pane step through that sweep's
-  runs and select them. A finished sweep is selected. **C** on another run draws it over
-  the pane's run, tagged `cmp`.
+  runs and select them. A finished sweep is selected. Another sweep ticked in with **C**
+  draws its shown run over the pane's run, tagged `cmp`.
 - Overlays are drawn relative to the selected trace's measured delay, so relative arrival
   between traces stays visible.
 - A click (or **Shift+T**, palette *Comparison cursor*) puts the comparison cursor, synchronised
   across panes; **Shift+←/→** move it.
-- **C** compares the selected trace or measurement into the measurement you choose; its
-  panes draw it whatever its group (not an Imported trace: move it under a measurement
-  first).
+- **C** on a pane ticks other measurements into it: their groups draw behind its lead
+  (an Imported trace draws nowhere: move it under a measurement first).
 - **M** averages the shown stored traces of the transfer pane's group (power; complex and
   coherence-weighted in the palette). For ÷ × + −, **Shift+M** with the trace selected
   starts with it as A.
@@ -2189,8 +2192,8 @@ transfer pane like any capture.
 ### The Sweep / distortion pane
 
 It shows one run of the sweep measurement dropped on it — the selected run when it is one of
-that sweep's, else its newest — the fundamental's response above, distortion below; runs
-compared (**C**) are drawn over it in their own colours and listed `Run 2 · cmp` in the
+that sweep's, else its newest — the fundamental's response above, distortion below; the shown runs of
+sweeps ticked in (**C**) are drawn over it in their own colours and listed `Run 2 · cmp` in the
 legend. An order within the noise is drawn dashed
 at its own floor; the shading is the noise under every order's floor. A distortion value is
 shown only where it is at least 6 dB above the noise in its window; elsewhere it reads
@@ -2355,7 +2358,9 @@ sets its old autosave aside as `autosave.vN` and starts empty. `ac2 session salv
 or .ac2session file>`, where that path is readable, rebuilds it on top of what is there:
 
 - each measurement with its name, kind, settings, colour, own pane layout, and a transfer's
-  delay and tracking;
+  delay and tracking; a compare list of an older version joins the pane of that
+  measurement's own layout that drew its group (named in the summary when it has none to
+  join), and pane references to what was not restored are dropped;
 - each stored trace with its name, colour, slot, offset, polarity, nudge, smoothing and
   lock, under its measurement; math channels on the restored items;
 - measurements that were running are started when the open audio I/O captures their

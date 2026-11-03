@@ -156,15 +156,10 @@ prune, never a fallback. Pruning the last entry of `Curves`, or a deleted `Meter
 daemon stores no names for it). `Inputs` and `Pair` are channel numbers, not ids: nobody
 prunes them; a channel the session lacks reads *not in this session* on its bar.
 
-Today's code is held to this already for a measurement pick (988257b1, on this note's
-branch): it keeps a pick the mirror does not list in `Pending::pane_ids`
-(`state/panes/meas_layout.rs`),
-`layout_of` stores the waiting id, `restore_pane_ids` puts it back when the measurement
-arrives, and a split keeps the wait. Stage 2 moves the waiting id from that side table into
-the entry itself: an `EntryRef` the mirror does not resolve *is* the waiting state, so
-there is no second place to forget. The stale doc on `LayoutPane.content` ("a pick of a
-measurement gone since shows the layout's own measurement") and P1's "a pick of a deleted
-measurement shows the owner" go with it.
+Stage 1 held a measurement pick to this with a side table (`Pending::pane_ids`); stage 2
+moved the waiting id into the entry itself: an `EntryRef` the mirror does not resolve *is*
+the waiting state, so there is no second place to forget. A pane whose lead was deleted
+keeps the name in `Pending::deleted` for its *deleted* text while the name waits.
 
 ## 2. How the rest fits
 
@@ -365,7 +360,7 @@ Each stage lands alone, with its own user-guide rows, and is tested through `ac2
    Shift+drop rows, the Inputs list (drag, P), the key table and hint bars; *Dragging a row
    onto a pane* becomes the section for changing a pane. Decision table: P2 rewritten. The
    wait invariant is already in for measurement picks (988257b1).
-2. **References on the wire** (§1, §5): `PaneContent` with per-reference rig, required
+2. **References on the wire** (§1, §5) — **done** (PROTO 80, session format 41, rig file 9): `PaneContent` with per-reference rig, required
    `content`, `PaneContent::Nothing` (D6, `resolve_meas` retired), salvage, `remap_ids`
    extended to every `ThisRig` reference (entries, `Meter`, `Walk`) and skipping
    `Rig { .. }` ones, another daemon's ids — tested by loading a session numbered from 1

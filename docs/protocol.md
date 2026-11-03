@@ -29,7 +29,7 @@ message frame per request or reply) and data is XPUB/SUB (multipart).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 79`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 80`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -122,7 +122,6 @@ Lease column: **L** = `lease_token` required (Q6).
 | `meas.update` | `meas`, `base: Rev` (the `config_rev` the edit was made on), `config` | `measurement` | |
 | `meas.colour` | `meas`, `colour: ColourFamily \| nil` | `measurement` | |
 | `meas.layout` | `meas`, `layout: PaneLayout \| nil` | `measurement` | |
-| `meas.compare` | `meas`, `compared: [Compared]` | `measurement` | |
 | `meas.offset` | `meas`, `offset: Db` | `measurement` | |
 | `meas.eq` | `meas`, `edit: EqEdit` | `measurement` | |
 | `meas.delete` | `meas`, `traces: keep \| delete` (what becomes of the traces and math channels it owns) | `ack` | |
@@ -396,19 +395,12 @@ A `PaneLayout` is a tree: `{type: pane, pane: LayoutPane}` or `{type: split, axi
 column, ratio, a: PaneLayout, b: PaneLayout}` (`row`: `a` left; `column`: `a` on top;
 `ratio`: the share `a` takes, strictly between 0 and 1). `LayoutPane` is {`kind`,
 `transfer_view`, `spectrum_view`, `spl_view`, `sweep_view`, `programme_view`, `chrome`,
-`content`, `levels`, `plates`, `rig`}
+`content`, `levels`, `plates`}
 (snake_case enums, `ac2_proto::model::layout`): its kind (`transfer`, `spectrum`, `spl`,
 `distortion`, `programme`, `walk`), the view of each kind it may be turned into (`programme_view`:
-`meters` or `goniometer`; a goniometer on a pane that meters no pair draws its meters), what it was picked
-to show (`content`: nil, being the measurement whose layout it is, or a tagged map
-`{type: meas, meas: MeasId}` — a pick of a measurement gone since shows the layout's own —,
-`{type: inputs, inputs: [u16, …]}` (one to eight zero-based device inputs a Programme pane
-meters) or `{type: pair, left: u16, right: u16}` (the stereo pair it meters) or `{type: walk, walk:
-WalkId}` (the spatial walk a Walk pane follows); a layout
-whose content names no input, more than eight, an input twice or a pair of one input, a
-Programme pane without inputs or another kind with them, a Walk pane without its walk or
-another kind with one, is refused `invalid`)
-and the level axis ranges the operator set on it (`levels`: {`transfer`, `spectrum_dbfs`,
+`meters` or `goniometer`; a goniometer on a pane that meters no pair draws its meters), what it
+shows (`content`, required, a tagged map, each reference carrying the rig whose id it is), the
+level axis ranges the operator set on it (`levels`: {`transfer`, `spectrum_dbfs`,
 `spectrum_spl`, `distortion`}, each {`lo`, `hi`} dB or nil, nil being framed by the client
 when the pane first shows a curve) and where its readout plates sit (`plates`: {`legend`,
 `readout`, `mark`, `peaks`, `loudness`}, each {`at`, `scale`}, all five required; a pane kind
@@ -417,31 +409,43 @@ readout, docked beside or above the bars and sized from the room it gets while `
 (its `scale` then only sizes it once floated): `at` nil for the client's own placement or
 [x, y], each in 0 … 1, the plate's top-left corner as a fraction of the room the plot leaves
 around the plate, so a dropped plate stays inside its plot at any pane size; `scale` the
-plate's text size, 1 being the theme's; missing = all nil at 1) and the rig it shows
-(`rig`, required: `{type: this_rig}`, the daemon whose measurement this is, or `{type: rig,
-id: RigId, name}`, a pane pinned to another rig, whose `content` is that daemon's ids, kept
-opaque here and resolved by the client; `{type: active}`, following a client's active
-tab, is refused `invalid` in a layout, and so is a `rig` pane without `content`, since the
-layout's own measurement is no other rig's). The focused pane, a
-maximised or full-screen pane and the window are each client's. `invalid` for a ratio out
-of range, for more than 16 panes, for a level range not finite with `hi` above `lo` and for
-a plate `at` outside 0 … 1 or a `scale` not finite and positive; a session file's layout
-that is any of these is dropped on load.
+plate's text size, 1 being the theme's; missing = all nil at 1).
 
-`meas.compare` sets the curves drawn compared into the measurement's panes, first compared
-first (drawn above the later ones, under the measurement's own curves): `Compared` is
-`{type: meas, meas}` (another measurement's live curve or a math channel) or `{type: trace,
-trace}` (a stored trace). It is `Measurement.compared`, kept in sessions and the autosave;
-the job, its averages and `config_rev` are untouched. Every client draws the same list; a
-pane showing a math channel draws its owner's. `invalid` for an SPL meter, more than 32
-entries, an entry twice or the measurement itself; `not_found` for an entry naming no
-measurement or trace. Deleting a measurement or a trace drops it from every list (one
-more `measurement` change per list it was in); a session file's list is cut to what
-`meas.compare` takes and pruned of what is gone on load.
+`PaneContent` is one of:
+
+| `type` | fields | on |
+|---|---|---|
+| `nothing` | — | any pane: nothing picked |
+| `curves` | `entries: [PaneEntry]`, 1 … 33, the lead first | `transfer`, `spectrum`, `distortion` |
+| `meter` | `rig`, `meas` | `spl`: its one meter |
+| `inputs` | `rig`, `inputs: [u16]`, 1 … 8 zero-based device inputs | `programme` |
+| `pair` | `rig`, `left: u16`, `right: u16` | `programme`: the stereo pair it meters |
+| `walk` | `rig`, `walk: WalkId` | `walk` |
+
+A `PaneEntry` is {`rig`, `what`}; `what` is `{type: group, meas}` (a measurement's group: its
+live curve, its math channels, its shown traces, what is filed under it now and later),
+`{type: live, meas}` (one live curve, a measurement's or a math channel's) or `{type: trace,
+trace}` (one stored trace). The lead names the pane and owns its readouts; the entries after
+it are drawn behind it, nearest first, tagged as compared. `rig` is `{type: this_rig}`, the
+daemon storing the layout, or `{type: rig, id: RigId, name}`, another rig by its id (never
+its CURVE key), whose ids are that daemon's, kept opaque here and resolved by the client;
+`name` is for the operator while that rig is absent.
+
+`invalid` for a ratio out of range, for more than 16 panes, for a level range not finite
+with `hi` above `lo`, for a plate `at` outside 0 … 1 or a `scale` not finite and positive,
+for content on a pane of another kind (the table's last column), for `curves` with no entry,
+more than 33 or one twice, for inputs none, more than eight or one twice, for a pair of one
+input, and for a `live` or `trace` entry of this rig that a `group` entry in the same pane
+already draws (the trace filed under that measurement, its live curve or a math channel it
+owns). Ids of this rig are not looked up when stored: deleting a measurement, a trace or a
+walk takes its entries out of every layout (an emptied pane becomes `nothing`; one more
+`measurement` change per layout it was in), and so does loading a session. Another rig's
+entries are kept as they are. The focused pane, a maximised or full-screen pane and the
+window are each client's; a session file's layout that is not valid is dropped on load.
 
 `meas.offset` sets the display offset of the measurement's live curves, in dB: display
-only (its frames carry the measured levels), drawn wherever the curve is, compared into
-another measurement's panes too. It is `Measurement.offset`, kept in sessions and the
+only (its frames carry the measured levels), drawn in every pane that
+draws the curve. It is `Measurement.offset`, kept in sessions and the
 autosave; the job, its averages and `config_rev` are untouched. `invalid` unless finite and
 within ±200 dB; a session file's that is not is 0 on load.
 
@@ -1778,7 +1782,7 @@ saved_at} (§3.2 sessions), `mic_curve_file` {line, reason} and
 The mirrored `State` holds: `session` (`epoch`, `open: OpenSession | nil`, `stopped:
 AudioStopped | nil`; §4.1.1),
 `measurements` (`id`, `config`, `config_rev`, `running`, `delay`, `grid_id`, `colour`,
-`layout`, `compared`, `offset`, `eq`),
+`layout`, `offset`, `eq`),
 `traces` (`TraceMeta`: `id`, `edit` {name, color, visible, locked, order, offset,
 polarity, delay_nudge, slot, smoothing, owner}, `kind`, `source` {captured | imported |
 math | average | sweep | eq}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_curve`, `created_at`,
