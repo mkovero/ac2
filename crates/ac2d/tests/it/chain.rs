@@ -232,12 +232,17 @@ fn slow_a_throttled_peer_gets_its_own_deltas_of_the_fast_ones_frames() {
     let mut held: Vec<CodedFrame> = Vec::new();
     let (mut deltas, mut long_deltas) = (0u32, 0u32);
     let mut last_slow: Option<u64> = None;
-    // Bytes of credit the slow link has returned and not yet spent.
-    const RATE: f64 = 12_000.0;
-    let (mut allowance, mut credited) = (0.0f64, Instant::now());
+    // Bytes of credit the slow link has returned and not yet spent: a third of what the
+    // topic sends (as the fast peer receives it), so the link is slow against the topic on
+    // any machine, whatever rate its transfer function runs at there. A link that idles
+    // banks no more than this.
+    const BANKED: f64 = 4_000.0;
+    let mut allowance = 0.0f64;
     let t0 = Instant::now();
     while t0.elapsed() < Duration::from_secs(4) {
         while let Some(m) = recv(&fast, Duration::ZERO) {
+            let charge = ac2_proto::flow::frame_charge(m.iter().map(Vec::len).sum());
+            allowance = (allowance + f64::from(charge) / 3.0).min(BANKED);
             if let Got::Key(c) | Got::Delta(c) = f.take(&refs(&m)) {
                 fast_frames.insert(c.stamp.seq, c);
             }
@@ -256,8 +261,6 @@ fn slow_a_throttled_peer_gets_its_own_deltas_of_the_fast_ones_frames() {
             }
             last_slow = held.last().map(|c| c.stamp.seq);
         }
-        allowance = (allowance + RATE * credited.elapsed().as_secs_f64()).min(4_000.0);
-        credited = Instant::now();
         let give = slow.owed().0.min(allowance as u32);
         allowance -= f64::from(give);
         slow.credit_some(give, u32::MAX);
@@ -278,15 +281,26 @@ fn slow_a_throttled_peer_gets_its_own_deltas_of_the_fast_ones_frames() {
                 .unwrap_or_else(|| panic!("seq {seq} not on the fast peer")),
         );
     }
+    let (first, end) = (
+        *fast_frames.first_key_value().unwrap().0,
+        *fast_frames.last_key_value().unwrap().0,
+    );
+    let sent = end - first + 1;
     eprintln!(
-        "fast {} frames, slow {} ({deltas} deltas, {long_deltas} skipping frames)",
+        "fast {} of {sent} frames, slow {} ({deltas} deltas, {long_deltas} skipping frames)",
         fast_frames.len(),
         held.len()
     );
-    // The transfer function runs at ≈ 28 frames a second here.
+    // How many frames the topic sends depends on the machine (the job emits once per
+    // hand-off, and a busy machine hands off more blocks at a time), so the fast peer is
+    // measured against the `seq`s the topic sent while it listened. Frames that come closer
+    // together than the shortest interval between a topic's frames are merged for every
+    // peer, a few on a busy machine. A peer paced by the slow link gets a third of the
+    // bytes, so about a third of the frames (its deltas span more, its window starts full);
+    // the fast one must get twice that.
     assert!(
-        fast_frames.len() > 80,
-        "the fast peer had {}",
+        fast_frames.len() as u64 * 3 > sent * 2,
+        "the fast peer had {} of the {sent} frames sent",
         fast_frames.len()
     );
     assert!(
