@@ -42,7 +42,9 @@ Credit-based pacing on a ROUTER data socket.
   when credit returns it receives the newest frame of each topic, never a backlog.
 - **Bound.** At most W messages are in flight per peer, so the standing delay is
   `W × frame size / link rate` regardless of the publish rate, and fast peers are never
-  held back by slow ones. `SNDHWM` stays as a safety net above W.
+  held back by slow ones. With byte credit ([`wire-delta.md`](wire-delta.md) W10) `SNDHWM` is
+  sized to hold the whole window (window ÷ smallest frame + the event bound), so libzmq never
+  drops a credited frame; `EAGAIN` on a data send is a bug, logged as one.
 - **Events.** Events must not be lost. They are queued per peer (bounded; a peer that
   falls further behind than the bound is told `resync_required` through its next
   keepalive and resynchronises with a snapshot, as after a gap today).
