@@ -2,7 +2,6 @@
 //! of the focused pane highlighted, the chosen kind's form, and the new measurement in a
 //! pane of its kind, never in place of the focused one.
 
-use super::spectrum_panes;
 use crate::harness::{Driver, NAME, R, measure_from_empty};
 use ac2_e2e::{Setup, sim_daemon};
 use ac2_proto::model::MeasKind;
@@ -147,26 +146,17 @@ fn ctrl_m_makes_a_spectrum_from_an_empty_daemon() -> R {
             .find(|m| matches!(m.config.kind, MeasKind::Spectrum { .. }))
             .map(|m| m.id)
             .ok_or("spectrum")?;
-    // In a pane of its own beside the focused transfer pane, never over it, nor over the
-    // spectrum pane already there: the transfer pane still shows its measurement.
-    assert_eq!(crate::common::visible(&d.st).len(), panes.len() + 1);
-    assert_eq!(d.st.layout.kind(tf), PaneKind::Transfer);
-    assert_eq!(d.st.pane_meas(tf).map(|m| m.id), shown);
+    // On a screen of its own: one spectrum pane showing it, focused.
+    assert_eq!(crate::common::visible(&d.st), [PaneKind::Spectrum]);
     let f = d.st.layout.focus;
-    assert_ne!(f, tf);
-    assert_eq!(d.st.layout.kind(f), PaneKind::Spectrum);
     assert_eq!(d.st.pane_meas(f).map(|m| m.id), Some(sp));
-    assert_eq!(
-        spectrum_panes(&d.st)
-            .iter()
-            .filter(|(m, _, _)| *m == Some(sp))
-            .count(),
-        1,
-        "{:?}",
-        spectrum_panes(&d.st)
-    );
+    // The transfer measurement's row brings its own panes back, its pane showing it.
+    let tf_meas = shown.ok_or("the transfer measurement")?;
+    d.send(Msg::SelectMeas(tf_meas));
+    assert_eq!(crate::common::visible(&d.st), panes);
 
     // The spectrum pane focused: Spectrum highlighted; Esc closes.
+    d.send(Msg::SelectMeas(sp));
     let spane =
         d.st.layout
             .lead(PaneKind::Spectrum)

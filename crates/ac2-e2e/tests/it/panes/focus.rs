@@ -124,9 +124,8 @@ fn a_row_dropped_on_a_pane_turns_it_into_its_kind_from_an_empty_daemon() -> R {
             .find(|m| matches!(m.config.kind, MeasKind::Spectrum { .. }))
             .map(|m| m.id)
             .ok_or("spectrum")?;
-    // The spectrum opened beside the focused transfer pane, never over it.
-    let opened = crate::common::visible(&d.st);
-    assert_eq!(opened.iter().filter(|k| **k == Spectrum).count(), 2);
+    // The spectrum opened on a screen of its own.
+    assert_eq!(crate::common::visible(&d.st), [Spectrum]);
     assert_eq!(d.st.pane_meas(d.st.layout.focus).map(|m| m.id), Some(sp));
     // A row click selects; the transfer's row brings the panes its form laid out.
     d.send(Msg::SelectMeas(tf));
@@ -186,6 +185,10 @@ fn tab_steps_through_the_measurements_from_an_empty_daemon() -> R {
             s.measurements().iter().any(|m| is(&m.config.kind))
         })?;
     }
+    // Each opened on a screen of its own, stored as its own panes.
+    d.until("each measurement's own panes stored", |s| {
+        s.measurements().iter().all(|m| m.layout.is_some())
+    })?;
     let id_of = |s: &AppState, is: fn(&MeasKind) -> bool| {
         s.measurements()
             .iter()
@@ -260,12 +263,13 @@ fn a_child_row_moves_no_pane_from_an_empty_daemon() -> R {
     measure_from_empty(&mut d)?;
     let s1 = new_spectrum(&mut d, false)?;
     let s2 = new_spectrum(&mut d, true)?;
-    // Spectrum 1 dropped on the spectrum pane, split side by side: halves A and B.
-    d.key("Alt+2");
+    // Spectrum 2's own screen (its one spectrum pane): Spectrum 1 dropped on it, split
+    // side by side: halves A and B.
+    d.send(Msg::SelectMeas(s2));
     let a = d.st.layout.focus;
-    d.drop_meas(a, s1);
     d.key("N");
     let b = d.st.layout.focus;
+    d.drop_meas(a, s1);
     let shown = |s: &AppState| -> Vec<(Option<MeasId>, SpectrumMode)> {
         [a, b]
             .into_iter()
@@ -284,6 +288,9 @@ fn a_child_row_moves_no_pane_from_an_empty_daemon() -> R {
             .data
             .as_ref()
             .is_some_and(|x| x.latest.get(&topic).is_some())
+    })?;
+    d.until("the split stored as Spectrum 2's own panes", |s| {
+        s.meas(s2).and_then(|m| m.layout.as_ref()) == Some(&s.pane_layout())
     })?;
     d.send(Msg::SelectMeas(s2));
     assert_eq!(d.st.layout.focus, b, "Spectrum 2's row: B keeps the focus");

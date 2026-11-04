@@ -10,6 +10,9 @@ pub(crate) struct Pending {
     pub(super) select: Option<MeasId>,
     /// That measurement, created: stacked once the mirror lists it.
     pub(super) stack: Option<MeasId>,
+    /// That measurement, opened on a screen of its own: the screen stored as its own panes
+    /// once the mirror lists it, so its row brings them back before any edit.
+    pub(super) own_layout: Option<MeasId>,
     /// The measurement each pane showed when the app last ran, by name, until the daemon's
     /// state is known.
     pub(super) pane_meas: BTreeMap<PaneId, String>,
@@ -136,6 +139,14 @@ impl AppState {
                     self.rig.pending.stack = None;
                     self.stack_created(p);
                 }
+                if let Some(p) = self.rig.pending.own_layout
+                    && ids.contains(&p)
+                {
+                    self.rig.pending.own_layout = None;
+                    if self.rig.own_panes == Some(p) {
+                        self.store_layout(p, out);
+                    }
+                }
                 let waiting = self.rig.pending.select.is_some()
                     && self.rig.pending.select == self.rig.selected;
                 // A measurement this app made, selected before the daemon lists it, stays.
@@ -252,10 +263,10 @@ impl AppState {
             ConnEvent::SessionList(r) => self.session_list(r),
             ConnEvent::WalkCreated(w) => self.walk_created(*w),
             ConnEvent::MeasCreated(m) => {
-                // A new measurement opens on a screen of its own: the panes on screen stay
-                // the layout of the one they belong to (a split still being dragged is
-                // stored there first), never become the new one's. Before it is selected:
-                // focusing a sweep pane selects what that pane shows.
+                // A new measurement opens on a screen of its own ([`Self::open_new`]): the
+                // panes on screen stay the layout of the one they belong to (a split still
+                // being dragged is stored there first). Before it is selected: focusing a
+                // sweep pane selects what that pane shows.
                 let mine = |n: &Option<String>| n.as_ref() == Some(&m.config.name);
                 let split = self
                     .rig
@@ -270,7 +281,8 @@ impl AppState {
                         Some(_) => PaneKind::Transfer,
                         None => PaneKind::for_kind(&m.config.kind),
                     };
-                    self.fresh_screen_for_new(m.id, kind, split.unwrap_or_default());
+                    self.open_new(m.id, kind, split.unwrap_or_default(), stack);
+                    self.rig.pending.own_layout = Some(m.id);
                 }
                 // Its header row is the selection, unfolded with its live curve under it,
                 // and the list scrolls to it.

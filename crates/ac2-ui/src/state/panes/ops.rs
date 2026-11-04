@@ -423,6 +423,34 @@ impl AppState {
         Some(new)
     }
 
+    /// A measurement this app created, opened: on a screen of its own
+    /// ([`Self::fresh_screen_for_new`]) when any pane shows something or the panes are a
+    /// measurement's own; on panes that show nothing and are nobody's (an app just started,
+    /// the operator's empty grid) there is nothing of another's to carry, so it takes a pane
+    /// of them ([`Self::own_pane_for_new`]; a transfer's, once listed, by its stack).
+    pub(in crate::state) fn open_new(
+        &mut self,
+        meas: MeasId,
+        kind: PaneKind,
+        view: TransferView,
+        stack: bool,
+    ) {
+        let blank =
+            self.rig.own_panes.is_none() && self.layout.views.values().all(|v| !v.has_content());
+        if !blank {
+            self.fresh_screen_for_new(meas, kind, view);
+            return;
+        }
+        if stack {
+            return;
+        }
+        if let Some(p) = self.own_pane_for_new(meas, kind)
+            && let Some(v) = self.layout.view_mut(p)
+        {
+            v.modes.transfer = view;
+        }
+    }
+
     /// The screen a measurement this app created opens on: one pane of `kind` over the
     /// whole area, showing `meas` in transfer view `view`, with the focus. The panes it
     /// replaces stay the layout of the measurement they belonged to (its row brings them

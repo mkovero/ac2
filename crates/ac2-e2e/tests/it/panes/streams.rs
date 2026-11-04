@@ -404,8 +404,10 @@ fn record_and_replay_from_the_app() -> R {
 /// The operator's case from an empty daemon: two spectrum measurements on two inputs, the
 /// spectrum pane showing Spectrum 1 split (N), Spectrum 2 dropped on the new half, both
 /// halves stepped (G) to the spectrograph alone. Left Spectrum 1's spectrograph, right
-/// Spectrum 2's, both filling; and so they stay while the focus moves between them, the
-/// list's rows are clicked and Tab / Shift+Tab step through every row and back.
+/// Spectrum 2's, both filling; and so they stay while the focus moves between them. The
+/// split is Spectrum 1's own panes: Spectrum 2's row brings the screen it opened on,
+/// Spectrum 1's (clicked, or reached by Tab / Shift+Tab round every row) brings the split
+/// back, both still spectrographs.
 #[test]
 fn two_spectrographs_side_by_side_from_an_empty_daemon() -> R {
     let daemon = sim_daemon(Setup::Empty)?;
@@ -491,25 +493,29 @@ fn two_spectrographs_side_by_side_from_an_empty_daemon() -> R {
             .filter(|p| s.layout.kind(*p) == ac2_ui::state::PaneKind::Spectrum)
             .nth(i)
     };
-    for (i, id) in [(1, s2), (0, s1), (1, s2), (0, s1)] {
+    for i in [1, 0, 1, 0] {
         let p = half(&d.st, i).ok_or("a half")?;
         d.send(Msg::FocusPane(p));
         assert_eq!(shown(&d.st), both, "half {i} clicked");
-        d.send(Msg::SelectMeas(id));
-        assert_eq!(shown(&d.st), both, "{id:?}'s row clicked on half {i}");
-        d.pump();
-        assert_eq!(
-            shown(&d.st),
-            both,
-            "{id:?}'s row clicked on half {i}, pumped"
-        );
     }
+    d.send(Msg::SelectMeas(s1));
+    d.pump();
+    assert_eq!(shown(&d.st), both, "Spectrum 1's row: its own panes");
+    d.send(Msg::SelectMeas(s2));
+    assert_eq!(
+        crate::common::visible(&d.st),
+        [ac2_ui::state::PaneKind::Spectrum],
+        "Spectrum 2's row: the screen it opened on"
+    );
+    d.send(Msg::SelectMeas(s1));
+    d.pump();
+    assert_eq!(shown(&d.st), both, "Spectrum 1's row again");
 
-    // Tab through every row and round to the half's own measurement again, then Shift+Tab
-    // round the other way, on each half: the other half never moves, and back on its own
-    // measurement the half is its spectrograph again.
+    // Tab through every row and round to Spectrum 1 again, then Shift+Tab round the other
+    // way, from each half: back on Spectrum 1 its split is on screen as it was, both halves
+    // spectrographs.
     let rows = d.st.tree_rows().len() + 1;
-    for (i, id) in [(1, s2), (0, s1)] {
+    for (i, id) in [(1, s1), (0, s1)] {
         for key in ["Tab", "Shift+Tab"] {
             let p = half(&d.st, i).ok_or("a half")?;
             d.send(Msg::FocusPane(p));
@@ -530,10 +536,11 @@ fn two_spectrographs_side_by_side_from_an_empty_daemon() -> R {
             assert_eq!(captions(&d.st), ["Spectrum 1", "Spectrum 2"]);
         }
     }
-    assert!(
-        filled(&d.st, s1, 30) && filled(&d.st, s2, 30),
-        "the histories stay"
-    );
+    // Spectrum 2's own screen shows its spectrum, not its spectrograph, so its history
+    // starts again once the split is back.
+    d.until("both spectrographs filling again", |s| {
+        filled(s, s1, 30) && filled(s, s2, 30)
+    })?;
     drop(d);
     drop(daemon);
     Ok(())

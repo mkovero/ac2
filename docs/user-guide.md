@@ -702,9 +702,12 @@ A command about a kind (an SPL view key, the sweep's views) goes to the pane of 
 focused last; with none on screen no pane changes and a toast says so (*no SPL pane: drag FOH SPL onto
 one*). A new measurement made in the app opens on a screen of its own: one pane of its
 kind showing it (a transfer: the transfer stack; an alignment: the alignment view), with
-the focus. The panes on screen before stay the own panes of the measurement whose row was
-chosen, and its row brings them back; none of them becomes the new measurement's. A
-finished sweep opens no pane: the toast says to **Tab** to it.
+the focus, stored as its own panes so its row brings it back. The panes on screen before
+stay the own panes of the measurement whose row was chosen, and its row brings them back;
+none of them becomes the new measurement's. Only on panes that show nothing and are no
+measurement's (an app just started, an empty grid) there is nothing to keep apart: the new
+measurement takes the focused empty pane, and that screen becomes its own. A finished sweep
+opens no pane: the toast says to **Tab** to it.
 
 ### Choosing what a pane shows
 

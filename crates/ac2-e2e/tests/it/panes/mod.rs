@@ -35,6 +35,7 @@ pub(super) fn hint_line(s: &AppState) -> Vec<String> {
 pub(super) fn new_spectrum(d: &mut Driver, other: bool) -> R<MeasId> {
     let before: Vec<MeasId> = d.st.measurements().iter().map(|m| m.id).collect();
     let panes = d.st.visible_panes().len();
+    let prev = d.st.rig.selected;
     d.key("Ctrl+K");
     d.send(Msg::Text("new spectrum".into()));
     d.key("Enter");
@@ -61,18 +62,20 @@ pub(super) fn new_spectrum(d: &mut Driver, other: bool) -> R<MeasId> {
             .find(|m| !before.contains(&m.id))
             .map(|m| m.id)
             .ok_or("the new spectrum")?;
-    close_opened_pane(d, panes, id);
+    close_opened_pane(d, panes, id, prev);
     Ok(id)
 }
 
-/// The pane new measurement `id` opened beside the focused one, closed (Q): the tests lay
-/// out the grid's own panes by dropping rows on them, so a new measurement that found no
-/// empty pane to take leaves the grid as it was.
-pub(super) fn close_opened_pane(d: &mut Driver, panes: usize, id: MeasId) {
-    if d.st.visible_panes().len() > panes
+/// The screen new measurement `id` opened on left for the panes before, brought back by
+/// the row of `prev` (the measurement selected before it was made, whose own panes they
+/// were): the tests lay out the grid's panes by dropping rows on them. A measurement that
+/// took an empty pane of a blank screen changed no screen.
+pub(super) fn close_opened_pane(d: &mut Driver, panes: usize, id: MeasId, prev: Option<MeasId>) {
+    if d.st.visible_panes().len() != panes
         && d.st.pane_meas(d.st.layout.focus).map(|m| m.id) == Some(id)
+        && let Some(prev) = prev
     {
-        d.key("Q");
+        d.send(Msg::SelectMeas(prev));
     }
 }
 

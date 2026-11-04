@@ -482,6 +482,20 @@ fn a_new_meter_opens_on_a_screen_of_its_own() {
     assert_eq!(t.st.layout.kind(f), PaneKind::Spl);
     assert_eq!(t.st.layout.view(f).and_then(|v| v.meas), Some(MeasId(9)));
     assert_eq!(t.st.rig.own_panes, Some(MeasId(9)));
+    // Listed, its screen is stored as its own panes: its row brings it back.
+    let mut s = daemon_state();
+    s.measurements.push(meas(9, &c.name, c.kind.clone()));
+    let r = t.conn(mirror(s));
+    assert!(
+        r.iter().any(|x| matches!(
+            x,
+            Request::Call {
+                cmd: Command::MeasLayout { meas, layout: Some(_) },
+                ..
+            } if *meas == MeasId(9)
+        )),
+        "{r:?}"
+    );
 }
 
 /// A command about the SPL pane with none on screen turns no pane into one: it says which

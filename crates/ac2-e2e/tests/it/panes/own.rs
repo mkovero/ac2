@@ -91,7 +91,8 @@ fn capture(d: &mut Driver, meas: MeasId, slot: u8) -> R<TraceId> {
             .as_ref()
             .is_some_and(|x| x.latest.get(&topic).is_some())
     })?;
-    d.send(Msg::SelectMeas(meas));
+    // Its live row: selects it for the capture and changes no pane.
+    d.send(Msg::SelectLive(meas));
     d.key(&format!("Ctrl+{slot}"));
     d.until("the capture", |s| owned_trace(s, meas).is_some())?;
     owned_trace(&d.st, meas).ok_or_else(|| "the capture".into())
@@ -321,6 +322,7 @@ fn second_mic(d: &mut Driver) -> R {
 fn new_spl(d: &mut Driver, other: bool) -> R<MeasId> {
     let before: Vec<MeasId> = d.st.measurements().iter().map(|m| m.id).collect();
     let panes = d.st.visible_panes().len();
+    let prev = d.st.rig.selected;
     d.key("Ctrl+K");
     d.send(Msg::Text("new spl".into()));
     d.key("Enter");
@@ -343,7 +345,7 @@ fn new_spl(d: &mut Driver, other: bool) -> R<MeasId> {
             .find(|m| !before.contains(&m.id))
             .map(|m| m.id)
             .ok_or("the new SPL meter")?;
-    super::close_opened_pane(d, panes, id);
+    super::close_opened_pane(d, panes, id, prev);
     Ok(id)
 }
 
@@ -372,14 +374,11 @@ fn two_spl_meters_side_by_side_by_drag_from_an_empty_daemon() -> R {
     let (n1, n2) = (name(&d.st, m1), name(&d.st, m2));
     assert_ne!(n1, n2);
     let has = |t: &[String], n: &str| t.iter().any(|l| l.contains(n));
-    // The grid's own SPL pane, nothing dropped on it yet (each new meter opened its own).
-    let pane = *d
-        .st
-        .visible_panes()
-        .iter()
-        .find(|p| d.st.layout.kind(**p) == PaneKind::Spl && d.st.pane_meas(**p).is_none())
-        .ok_or("the empty SPL pane")?;
-    d.drop_meas(pane, m1);
+    // Meter 1's row: the screen it opened on, its one SPL pane.
+    d.send(Msg::SelectMeas(m1));
+    let pane = d.st.layout.focus;
+    assert_eq!(d.st.layout.kind(pane), PaneKind::Spl);
+    assert_eq!(d.st.pane_meas(pane).map(|m| m.id), Some(m1));
     d.until("meter 1 reading on its pane", |s| {
         let t = spl_texts(s, pane);
         has(&t, &n1) && !has(&t, &n2)
@@ -521,14 +520,13 @@ fn a_drop_in_own_panes_comes_back_with_their_row_from_an_empty_daemon() -> R {
         [Some(s2), Some(s1)],
         "the right pane keeps the pick"
     );
-    assert_eq!(
-        spectrum_panes(&d.st).get(1),
-        Some(&d.st.layout.focus),
-        "the focus stays on the right one"
-    );
+    // Spectrum 1's row brought its own screen in between (it opened on one), so the
+    // focus is placed as any screen brought back places it, not kept on the right one.
     assert!(
-        d.st.meas(s1).is_some_and(|m| m.layout.is_none()),
-        "Spectrum 1 has no panes of its own"
+        d.st.meas(s1)
+            .and_then(|m| m.layout.as_ref())
+            .is_some_and(|l| l.panes().len() == 1),
+        "Spectrum 1 keeps the one pane it opened on"
     );
     drop(d);
     drop(daemon);

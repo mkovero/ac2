@@ -39,7 +39,6 @@ fn alignment_from_an_empty_daemon() -> R {
             .is_some_and(|x| x.traces.iter().any(|t| t.edit.slot == Some(1)))
     })?;
     d.until("the capture's curve", |s| !s.rig.traces.is_empty())?;
-    let panes = d.st.layout.views.len();
     // A live operand under NO REFERENCE is left out of math (its held average is no longer
     // what the system does), and `measure_from_empty` stopped the stimulus (its level is still
     // set): the live curve needs it playing again for the alignment to have both operands.
@@ -72,7 +71,7 @@ fn alignment_from_an_empty_daemon() -> R {
                     if matches!(config.expr, MathExpr::Align { .. }))
         })
     })?;
-    assert_eq!(d.st.layout.views.len(), panes + 1, "a pane of its own");
+    assert_eq!(d.st.layout.views.len(), 1, "a screen of its own");
     let v = d.st.layout.view(d.st.layout.focus).ok_or("focused pane")?;
     assert_eq!(
         (v.kind, v.modes.transfer),

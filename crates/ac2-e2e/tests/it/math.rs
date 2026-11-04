@@ -374,6 +374,15 @@ fn spectrum_math_lands_on_the_spectrum_pane() -> R {
         "{}",
         spec.caption
     );
+    // No transfer pane draws it: the transfer measurement's own panes, brought back by
+    // its row (the math opened on a screen of its own).
+    let tf_meas =
+        d.st.measurements()
+            .iter()
+            .find(|m| matches!(m.config.kind, MeasKind::Transfer { .. }))
+            .map(|m| m.id)
+            .ok_or("the transfer measurement")?;
+    d.send(Msg::SelectMeas(tf_meas));
     let tf = ac2_ui::scenes::transfer(
         &d.st,
         crate::common::pane(&d.st, ac2_ui::state::PaneKind::Transfer),

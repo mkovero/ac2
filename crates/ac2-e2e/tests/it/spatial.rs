@@ -27,7 +27,7 @@ fn transfers(s: &AppState) -> Vec<ac2_proto::units::MeasId> {
 /// From an empty daemon: with one transfer measurement the Spatial average row is dimmed
 /// with its reason; a second made from the chooser's Transfer row; then the Spatial average
 /// row opens the math dialog on the power average of both, named `Spatial average`, and
-/// Enter makes it in a pane of its own, the transfer pane still showing what it showed.
+/// Enter makes it on a screen of its own, one transfer pane showing it.
 #[test]
 fn spatial_average_from_an_empty_daemon() -> R {
     let daemon = sim_daemon(Setup::Empty)?;
@@ -60,10 +60,7 @@ fn spatial_average_from_an_empty_daemon() -> R {
     let both = transfers(&d.st);
 
     d.key("Alt+1");
-    let tf = d.st.layout.focus;
-    assert_eq!(d.st.layout.kind(tf), PaneKind::Transfer);
-    let shown = d.st.pane_meas(tf).map(|m| m.id);
-    let panes = d.st.layout.views.len();
+    assert_eq!(d.st.layout.focus_kind(), PaneKind::Transfer);
     d.key("Ctrl+M");
     let c = chooser(&d.st).ok_or("the chooser")?;
     assert_eq!(c.choices[row].blocked, None);
@@ -118,12 +115,7 @@ fn spatial_average_from_an_empty_daemon() -> R {
             .map(|m| Operand::Meas { meas: *m })
             .collect::<Vec<_>>()
     );
-    d.until("a pane of its own", |s| s.layout.views.len() == panes + 1)?;
-    assert_eq!(
-        d.st.pane_meas(tf).map(|m| m.id),
-        shown,
-        "the transfer pane kept"
-    );
+    d.until("a screen of its own", |s| s.layout.views.len() == 1)?;
     let v = d.st.layout.view(d.st.layout.focus).ok_or("focused pane")?;
     assert_eq!(v.kind, PaneKind::Transfer);
     assert_eq!(v.meas, Some(avg.id));
