@@ -112,8 +112,7 @@ impl AppState {
                     self.rig.split_on_create = Some((config.name.clone(), TransferView::Alignment));
                 } else if own_pane {
                     self.rig.split_on_create = Some((config.name.clone(), TransferView::Magnitude));
-                } else if !matches!(config.kind, MeasKind::Math { .. }) {
-                    // A math channel is drawn on the pane of what it computes from.
+                } else {
                     self.rig.pane_on_create = Some(config.name.clone());
                 }
                 Request::CreateMeas { config }

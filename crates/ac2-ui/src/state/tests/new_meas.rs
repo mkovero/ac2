@@ -449,85 +449,39 @@ fn empty_texts_name_the_chooser() {
     );
 }
 
-/// A kind with no pane on screen gets one split off the focused pane; the focused pane
-/// keeps what it shows.
+/// A new measurement opens on a screen of its own: one pane of its kind showing it, the
+/// focus there; the panes on screen before stay the layout of the measurement they
+/// belonged to, none of them is stored as the new one's.
 #[test]
-fn a_new_meter_opens_in_its_own_pane() {
+fn a_new_meter_opens_on_a_screen_of_its_own() {
     let mut t = T::new();
-    t.go(PaneKind::Spl);
-    t.key("Q");
-    assert!(!t.shown(PaneKind::Spl));
     t.put(PaneKind::Transfer);
-    let tf = t.st.layout.focus;
-    let before = t.visible();
-    t.key("Ctrl+M");
-    t.st.apply(Msg::Choose(Some(3)), &t.keys);
-    let r = t.key("Enter");
-    let c = r
-        .iter()
-        .find_map(|x| match x {
-            Request::CreateMeas { config } => Some(config.clone()),
-            _ => None,
-        })
-        .expect("meas.create");
-    let m = meas(9, &c.name, c.kind.clone());
-    t.conn(ConnEvent::MeasCreated(Box::new(m)));
-    assert_eq!(t.st.layout.kind(tf), PaneKind::Transfer);
-    assert_eq!(t.visible().len(), before.len() + 1);
-    let spl = t.pane(PaneKind::Spl);
-    assert_ne!(spl, tf);
-    assert_eq!(t.st.layout.view(spl).and_then(|v| v.meas), Some(MeasId(9)));
-}
-
-/// The SPL meter row of the chooser made on the daemon as measurement 9.
-fn create_meter(t: &mut T) {
+    t.key("N");
+    assert!(t.visible().len() > 1);
     t.key("Ctrl+M");
     t.st.apply(Msg::Choose(Some(3)), &t.keys);
     let r = t.key("Enter");
     let c = created(&r).expect("meas.create").clone();
-    t.conn(ConnEvent::MeasCreated(Box::new(meas(
+    let r = t.conn(ConnEvent::MeasCreated(Box::new(meas(
         9,
         &c.name,
         c.kind.clone(),
     ))));
-}
-
-/// A focused pane that shows nothing is room enough: the new meter takes it, no split.
-#[test]
-fn a_new_meter_takes_the_empty_focused_pane() {
-    let mut t = T::new();
-    t.put(PaneKind::Transfer);
+    assert!(
+        !r.iter().any(|x| matches!(
+            x,
+            Request::Call {
+                cmd: Command::MeasLayout { meas, .. },
+                ..
+            } if *meas != MeasId(9)
+        )),
+        "{r:?}"
+    );
+    assert_eq!(t.visible().len(), 1);
     let f = t.st.layout.focus;
-    if let Some(v) = t.st.layout.view_mut(f) {
-        v.meas = None;
-    }
-    let before = t.visible().len();
-    create_meter(&mut t);
-    assert_eq!(t.visible().len(), before);
-    assert_eq!(t.st.layout.focus, f);
     assert_eq!(t.st.layout.kind(f), PaneKind::Spl);
     assert_eq!(t.st.layout.view(f).and_then(|v| v.meas), Some(MeasId(9)));
-}
-
-/// With no room to split the focused pane, which shows something, the new meter opens in
-/// no pane: a warning says to drag it onto one, and no pane changes.
-#[test]
-fn with_no_room_a_new_meter_says_to_drag_it() {
-    let mut t = T::new();
-    t.put(PaneKind::Transfer);
-    for _ in 0..16 {
-        t.key("N");
-    }
-    let f = t.st.layout.focus;
-    t.drop_meas(f, MeasId(1));
-    let layout = t.st.pane_layout();
-    create_meter(&mut t);
-    assert_eq!(t.st.pane_layout(), layout);
-    let name = t.st.meas(MeasId(9)).map(|m| m.config.name.clone());
-    assert_eq!(
-        t.last_toast(),
-        ac2_scene::pane_edit::no_room_for_pane(name.as_deref().unwrap_or_default())
-    );
+    assert_eq!(t.st.rig.own_panes, Some(MeasId(9)));
 }
 
 /// A command about the SPL pane with none on screen turns no pane into one: it says which

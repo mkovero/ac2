@@ -429,8 +429,8 @@ fn edit_meas_sets_a_fixed_spectrum_to_density() {
 }
 
 /// Alt+M: the math dialog with its operator on align, A what the pane shows; the band is
-/// asked (no curves drawn yet), and Enter makes the alignment. Made, it opens in a pane
-/// split off the focused one, which keeps what it shows.
+/// asked (no curves drawn yet), and Enter makes the alignment. Made, it opens on a screen
+/// of its own, its one pane in the alignment view.
 #[test]
 fn alignment_by_alt_m_opens_its_own_pane() {
     use crate::forms::{FieldId, FormKind};
@@ -438,8 +438,6 @@ fn alignment_by_alt_m_opens_its_own_pane() {
     use ac2_proto::units::{Hz, Seconds};
     let mut t = T::new();
     t.conn(with_traces(vec![stored(4, Some(2), 2)]));
-    let focused = t.st.layout.focus;
-    let before = t.visible().len();
     t.key("Alt+M");
     assert!(matches!(&t.st.overlay, Overlay::Form(f) if f.kind == FormKind::Math));
     let f = form(&t);
@@ -480,14 +478,10 @@ fn alignment_by_alt_m_opens_its_own_pane() {
         &c.name,
         c.kind.clone(),
     ))));
-    assert_eq!(t.visible().len(), before + 1);
-    let new = t.st.layout.focus;
-    assert_ne!(new, focused);
-    let v = t.st.layout.view(new).expect("its pane");
+    assert_eq!(t.visible().len(), 1);
+    let v = t.st.layout.view(t.st.layout.focus).expect("its pane");
     assert_eq!(
         (v.kind, v.meas, v.modes.transfer),
         (PaneKind::Transfer, Some(MeasId(9)), TransferView::Alignment)
     );
-    let old = t.st.layout.view(focused).expect("the focused pane");
-    assert_eq!(old.modes.transfer, TransferView::Magnitude);
 }

@@ -98,11 +98,11 @@ pub struct RigState {
     /// The name of a transfer measurement submitted from its form: its creation lays it
     /// out in the transfer stack.
     pub(super) stack_on_create: Option<String>,
-    /// The name of a sweep, spectrum, RTA or SPL meter submitted from its form: its
-    /// creation brings up a pane of its kind for it.
+    /// The name of a measurement submitted from its form: its creation opens a screen of
+    /// its own, one pane of its kind.
     pub(super) pane_on_create: Option<String>,
     /// The name of an alignment (or a spatial average) submitted from the math dialog, and
-    /// the view it opens in: its creation splits the focused pane and the new half shows it.
+    /// the view its screen of its own opens in.
     pub(super) split_on_create: Option<(String, TransferView)>,
     /// Open the Sessions dialog once the daemon's state shows no audio I/O (one just started
     /// has none): its New leads on to the audio setup.

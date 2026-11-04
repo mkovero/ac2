@@ -421,9 +421,8 @@ fn new_measurements_start_and_become_selected() {
     s.measurements.push(m);
     t.conn(mirror(s.clone()));
     assert_eq!(t.st.rig.selected, Some(MeasId(7)));
-    // The new transfer measurement opens in the transfer stack beside the focused pane
-    // (never over a pane showing something), its three panes showing it, the magnitude on
-    // top with the focus.
+    // The new transfer measurement opens on a screen of its own, the transfer stack: three
+    // panes showing it, the magnitude on top with the focus, nothing of the panes before.
     let l = &t.st.layout;
     let stack: Vec<_> = l
         .panes()
@@ -442,12 +441,12 @@ fn new_measurements_start_and_become_selected() {
             (PaneKind::Transfer, TransferView::Coherence, Some(MeasId(7))),
         ]
     );
-    assert_eq!(l.panes().len(), before.len() + 3);
+    assert_eq!(l.panes().len(), 3);
     assert_eq!(t.st.pane_meas(l.focus).map(|m| m.id), Some(MeasId(7)));
     assert_eq!(l.focused().modes.transfer, TransferView::Magnitude);
     // Laid out once: a later mirror leaves the panes as the operator arranges them.
     t.conn(mirror(s.clone()));
-    assert_eq!(t.st.layout.panes().len(), before.len() + 3);
+    assert_eq!(t.st.layout.panes().len(), 3);
     // The selection is the operator's again: Tab moves on and a later mirror keeps it.
     t.key("Tab");
     assert!(t.st.live_row_selected() || t.st.rig.selected != Some(MeasId(7)));

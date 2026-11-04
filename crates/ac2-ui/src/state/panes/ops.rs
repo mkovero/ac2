@@ -302,10 +302,14 @@ impl AppState {
         }
     }
 
-    /// A transfer measurement this app created: its own pane ([`Self::own_pane_for_new`])
-    /// holds the transfer stack (or, too small for one, the transfer view alone).
+    /// A transfer measurement this app created, once listed: the pane its screen opened with
+    /// (else a pane of its own, [`Self::own_pane_for_new`]) holds the transfer stack (or,
+    /// too small for one, the transfer view alone).
     pub(in crate::state) fn stack_created(&mut self, meas: MeasId) {
-        if let Some(p) = self.own_pane_for_new(meas, PaneKind::Transfer) {
+        let shown = self
+            .layout
+            .lead_of(PaneKind::Transfer, |v| v.meas == Some(meas));
+        if let Some(p) = shown.or_else(|| self.own_pane_for_new(meas, PaneKind::Transfer)) {
             self.apply_template(PaneTemplate::TransferStack, p, meas);
         }
     }
@@ -419,37 +423,26 @@ impl AppState {
         Some(new)
     }
 
-    /// A measurement this app created, on a pane of its own ([`Self::own_pane_for_new`]):
-    /// never over a pane that shows something.
-    pub(in crate::state) fn open_created(&mut self, meas: MeasId, kind: PaneKind) {
-        self.own_pane_for_new(meas, kind);
-    }
-
-    /// A new alignment's (or spatial average's) own pane ([`Self::split_for_new`]), showing
-    /// `meas` in transfer view `view` (the focused pane, unless empty, keeps what it shows).
-    pub(in crate::state) fn open_split(&mut self, meas: MeasId, view: TransferView) {
-        let Some(new) = self.split_for_new() else {
-            let text = if view == TransferView::Alignment {
-                let g = self.keys.label(CommandId::NextView, Scope::Transfer);
-                format!(
-                    "no room to split the pane for the alignment: {} on a transfer pane steps to its view",
-                    g.as_deref().unwrap_or("Next view")
-                )
-            } else {
-                let name = self
-                    .meas(meas)
-                    .map_or_else(String::new, |m| m.config.name.clone());
-                ac2_scene::pane_edit::no_room_for_pane(&name)
-            };
-            self.warn(text);
-            return;
-        };
-        self.set_pane_kind(new, PaneKind::Transfer);
-        if let Some(v) = self.layout.view_mut(new) {
-            v.meas = Some(meas);
-            v.modes.transfer = view;
-        }
-        self.focus_pane(new);
+    /// The screen a measurement this app created opens on: one pane of `kind` over the
+    /// whole area, showing `meas` in transfer view `view`, with the focus. The panes it
+    /// replaces stay the layout of the measurement they belonged to (its row brings them
+    /// back), so the new one starts with only its own pane, nothing of another's.
+    pub(in crate::state) fn fresh_screen_for_new(
+        &mut self,
+        meas: MeasId,
+        kind: PaneKind,
+        view: TransferView,
+    ) {
+        let id = self.layout.fresh_id();
+        let mut v = View::of(kind);
+        v.meas = Some(meas);
+        v.rig = self.here();
+        v.modes.transfer = view;
+        self.layout
+            .install(PaneNode::Leaf(id), BTreeMap::from([(id, v)]), id);
+        self.layout.maximized = false;
+        self.rig.pending.pane_meas.clear();
+        self.focus_pane(id);
     }
 
     /// Q: the focused pane closed, its neighbour taking its place and the focus; the

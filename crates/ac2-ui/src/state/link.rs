@@ -252,17 +252,25 @@ impl AppState {
             ConnEvent::SessionList(r) => self.session_list(r),
             ConnEvent::WalkCreated(w) => self.walk_created(*w),
             ConnEvent::MeasCreated(m) => {
-                // Before it is selected: focusing a sweep pane selects what that pane shows.
-                if self.rig.pane_on_create.as_ref() == Some(&m.config.name) {
-                    self.rig.pane_on_create = None;
-                    self.open_created(m.id, PaneKind::for_kind(&m.config.kind));
-                }
-                if let Some((_, view)) = self
+                // A new measurement opens on a screen of its own: the panes on screen stay
+                // the layout of the one they belong to (a split still being dragged is
+                // stored there first), never become the new one's. Before it is selected:
+                // focusing a sweep pane selects what that pane shows.
+                let mine = |n: &Option<String>| n.as_ref() == Some(&m.config.name);
+                let split = self
                     .rig
                     .split_on_create
                     .take_if(|(name, _)| *name == m.config.name)
-                {
-                    self.open_split(m.id, view);
+                    .map(|(_, view)| view);
+                let stack = mine(&self.rig.stack_on_create);
+                if mine(&self.rig.pane_on_create) || split.is_some() || stack {
+                    self.rig.pane_on_create = None;
+                    self.flush_layout_drag(out);
+                    let kind = match split {
+                        Some(_) => PaneKind::Transfer,
+                        None => PaneKind::for_kind(&m.config.kind),
+                    };
+                    self.fresh_screen_for_new(m.id, kind, split.unwrap_or_default());
                 }
                 // Its header row is the selection, unfolded with its live curve under it,
                 // and the list scrolls to it.
@@ -273,8 +281,8 @@ impl AppState {
                 self.rig.collapsed.remove(&TraceOwner::Meas { meas: m.id });
                 self.tree_reveal = true;
                 self.rig.pending.select = Some(m.id);
-                // Made here, by the operator: as if its row were chosen, the panes on screen
-                // are its own from now (it has none yet to bring).
+                // Made here, by the operator: as if its row were chosen, the screen it opened
+                // on is its own.
                 self.rig.own_panes = Some(m.id);
                 if self.rig.stack_on_create.as_ref() == Some(&m.config.name) {
                     self.rig.stack_on_create = None;

@@ -99,8 +99,8 @@ one period away; a band outside the data is `no fit`.
   20 dB of their own peak (`ac2_scene::align::overlap`, over the curves the app already
   draws), and empty when there is no such region. Enter creates and starts it; *Edit
   measurement…* reopens it.
-- A new alignment opens its own pane: the focused pane is split and the new half shows the
-  owner's **alignment view** (never taking over the focused pane).
+- A new alignment opens on a screen of its own, one pane on the **alignment view**; the
+  panes before stay with the measurement they belong to.
 - **Alignment view** (a transfer-pane view; **G** steps to it only when the pane's group
   has an alignment, so other panes cycle as before): top, the
   phase difference A − B before (faint) and after the suggested alignment, ±180°; bottom,

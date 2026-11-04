@@ -661,9 +661,8 @@ Each is its own view of the pane (**G** steps them).
   measurement). They are ordinary panes afterwards. The frequency axis is shared, so the
   three read down one column; the top pane carries the legend and NO DELAY ESTIMATE banner,
   fault banners (clipping, STALE, audio stopped) show in each.
-- A **new transfer measurement** made in the app opens as a transfer stack in place of the
-  focused transfer pane (else the transfer pane worked in last; with none on screen, split
-  off the focused pane). Measurements from another client, the CLI or a restored session
+- A **new transfer measurement** made in the app opens on a screen of its own, laid out as
+  the transfer stack. Measurements from another client, the CLI or a restored session
   leave the panes alone.
 
 ### Panes: split, close, change what one shows
@@ -701,10 +700,11 @@ views keep the last curve, tagged `stopped`); a selected capture's stored IR sti
 
 A command about a kind (an SPL view key, the sweep's views) goes to the pane of that kind
 focused last; with none on screen no pane changes and a toast says so (*no SPL pane: drag FOH SPL onto
-one*). A new measurement opens in a pane of its own split
-off the focused one, never over a pane showing something; an empty focused pane takes it
-instead. With no room to split, no pane changes and a toast says *no room for a pane: drag
-TF 3 onto one*. A finished sweep opens no pane: the toast says to **Tab** to it.
+one*). A new measurement made in the app opens on a screen of its own: one pane of its
+kind showing it (a transfer: the transfer stack; an alignment: the alignment view), with
+the focus. The panes on screen before stay the own panes of the measurement whose row was
+chosen, and its row brings them back; none of them becomes the new measurement's. A
+finished sweep opens no pane: the toast says to **Tab** to it.
 
 ### Choosing what a pane shows
 
@@ -1690,8 +1690,8 @@ dialog with the operator **↔ aligned**: **A** and **B** are any two transfer t
 base; **Overlap from / to** (Hz) is the band to fit; **Max delay** (default 50 ms) the
 longest delay looked at. The band is never assumed: it is prefilled with where both curves
 are alike (within 6 dB of each other and 20 dB of their own peak, *where both curves are
-alike: check it*), or left empty to type. **Enter** creates it and opens its own pane, split
-from the focused one, on the **alignment view**. The **Ctrl+M** chooser's *Alignment* row
+alike: check it*), or left empty to type. **Enter** creates it and opens it on a screen of
+its own, on the **alignment view**. The **Ctrl+M** chooser's *Alignment* row
 opens the same dialog, or says why it cannot (fewer than two transfer curves).
 
 The daemon fits the delay over the band, weighting each frequency by `|A|·|B|` and the lower
@@ -2208,10 +2208,9 @@ dialog:
 **←/→** step a choice and stop at the ends; a text field's text is selected on focus
 (**Ctrl+A** selects again), so typing replaces it.
 
-1. **Enter** makes the measurement and **plays nothing**. It shows on the sweep pane worked
-   in last; with none on screen, a pane of its own is split off the focused pane (as **N**
-   splits it) and other panes keep what they show. Only a pane too small to split turns into
-   the sweep pane. The sweep pane gets the focus.
+1. **Enter** makes the measurement and **plays nothing**. It opens on a screen of its own,
+   one sweep pane with the focus; the panes before stay with the measurement they belong
+   to.
 2. **Space** on the sweep pane arms a run with its settings, with the safety of any
    stimulus (typed level, the rig's maximum, the lease).
 3. **Enter** plays it; **Esc** stops and discards it.

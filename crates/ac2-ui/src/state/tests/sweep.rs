@@ -115,16 +115,13 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
         "creating it arms nothing: {r:?}"
     );
     assert_eq!(t.st.overlay, Overlay::None);
-    // Its pane comes with it, once made: with no sweep pane on screen, one of its own split
-    // off the focused pane, which keeps its kind.
-    let (panes, focused) = (t.st.layout.panes(), t.st.layout.focus);
+    // Its pane comes with it, once made: a screen of its own, the one sweep pane.
     assert_eq!(t.focus_kind(), PaneKind::Transfer);
     // Listed, it waits; Space on the sweep pane arms its run.
     assert_eq!(c.kind, sweep_measurement().config.kind);
     t.conn(ConnEvent::MeasCreated(Box::new(sweep_measurement())));
     assert_eq!(t.focus_kind(), PaneKind::Distortion);
-    assert_eq!(t.st.layout.panes().len(), panes.len() + 1);
-    assert_eq!(t.st.layout.kind(focused), PaneKind::Transfer);
+    assert_eq!(t.st.layout.panes().len(), 1);
     t.conn(mirror(sweep_state()));
     assert_eq!(t.st.sweep_meas().map(|m| m.id), Some(MeasId(5)));
     let r = t.key("Space");
@@ -266,11 +263,6 @@ fn sweep_from_the_dialog_to_the_distortion_pane() {
     assert_eq!(sweep(&t), SweepMode::Ir(IrMode::Linear));
     t.key("G");
     assert_eq!(sweep(&t), SweepMode::Ir(IrMode::Log));
-    assert_eq!(
-        t.st.layout.view(t.ir_pane()).expect("view").modes.transfer,
-        TransferView::Ir(IrMode::Linear),
-        "the transfer pane's IR view's own"
-    );
     t.key("Shift+I");
     assert_eq!(sweep(&t), SweepMode::Response);
 
@@ -687,7 +679,7 @@ fn space_on_the_live_views_drives_the_generator() {
         next_hint(&t).as_deref(),
         Some("Space arms: pink −50 dBFS → out 1")
     );
-    t.key("Alt+1");
+    t.go(PaneKind::Transfer);
     let r = t.key("Space");
     match r.as_slice() {
         [Request::StimArm { settings, .. }] => {
@@ -717,7 +709,7 @@ fn space_on_the_live_views_drives_the_generator() {
         Some("Enter fires: sweep Sweep 1 · 3 s −50 dBFS")
     );
     // And back: Space on the transfer view makes it the noise again; Enter fires the noise.
-    t.key("Alt+1");
+    t.go(PaneKind::Transfer);
     let r = t.key("Space");
     assert!(
         r.iter().any(|x| matches!(
