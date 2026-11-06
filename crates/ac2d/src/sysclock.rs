@@ -10,9 +10,12 @@
 use ac2_proto::model::SystemClock;
 
 /// `STA_UNSYNC` of the `adjtimex` status word (`<linux/timex.h>`).
+// Only Linux reads the word; the mapping stays built (and tested) everywhere.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 const STA_UNSYNC: i32 = 0x0040;
 
 /// The status for an `adjtimex` status word and `maxerror` (µs).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) fn from_status(status: i32, maxerror_us: i64) -> SystemClock {
     let maxerror_us = u32::try_from(maxerror_us.max(0)).unwrap_or(u32::MAX);
     if status & STA_UNSYNC != 0 {
