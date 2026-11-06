@@ -453,13 +453,17 @@ fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
     use ac2_ui::state::PaneKind;
     let daemon = sim_daemon(Setup::Empty)?;
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    // The dialog's sweep opens its own pane beside the focused transfer pane, focused, and
-    // leaves the transfer pane (Alt+1) as it is.
+    // The dialog's sweep opens on a screen of its own, its one pane focused; the transfer
+    // measurement's grid stays its own, with a sweep pane at Alt+5.
     d.st.set_prefs(crate::common::grid_with_sweep_ui_prefs());
     measure_from_empty(&mut d)?;
+    let tf_meas = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
     let first = sweep_from_the_dialog(&mut d)?;
-    assert_eq!(d.st.layout.focus_kind(), PaneKind::Distortion);
-    let sweep_pane = d.st.layout.focus;
+    assert_eq!(
+        crate::common::visible(&d.st),
+        [PaneKind::Distortion],
+        "the sweep's own screen"
+    );
     let second = run_again(&mut d)?;
     assert_ne!(first, second);
     let shown = |s: &AppState| s.kind_sweep().map(|(t, _)| t.meta.id);
@@ -488,18 +492,22 @@ fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
         ]
     );
 
-    // Live again, the transfer pane focused and given the sweep by a drop (V only
+    // Live again on the transfer measurement's grid (its row brings it back), the sweep
+    // dropped on its sweep pane and on the transfer pane, which is focused (V only
     // selects): V selects the first sweep, then the second; the sweep pane shows whichever
     // is selected.
-    d.key("End");
-    d.key("Alt+1");
-    assert_eq!(d.st.layout.focus_kind(), PaneKind::Transfer);
-    assert_eq!(d.st.rig.selected_trace, None);
     let sweep_meas =
         d.st.trace_meta(first)
             .ok()
             .and_then(|t| t.edit.owner.meas())
             .ok_or("the run's sweep")?;
+    d.key("End");
+    d.send(Msg::SelectMeas(tf_meas));
+    let sweep_pane = crate::common::pane(&d.st, PaneKind::Distortion);
+    d.drop_meas(sweep_pane, sweep_meas);
+    d.key("Alt+1");
+    assert_eq!(d.st.layout.focus_kind(), PaneKind::Transfer);
+    assert_eq!(d.st.rig.selected_trace, None);
     let tf = crate::common::pane(&d.st, PaneKind::Transfer);
     d.drop_meas(tf, sweep_meas);
     assert_eq!(d.st.rig.selected_trace, None);

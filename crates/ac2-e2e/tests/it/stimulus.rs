@@ -149,8 +149,8 @@ fn slow_the_stimulus_follows_the_view_from_the_app() -> R {
     use ac2_ui::state::PaneKind;
     let daemon = sim_daemon(Setup::Empty)?;
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    // A sweep pane of its own beside the transfer pane: the dialog's sweep goes there
-    // (Alt+5) and leaves the transfer pane (Alt+1) as it is.
+    // The dialog's sweep opens on a screen of its own; the transfer measurement's row
+    // brings its grid back, the transfer pane at Alt+1.
     d.st.set_prefs(crate::common::grid_with_sweep_ui_prefs());
     measure_from_empty(&mut d)?;
     let meas = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
@@ -255,7 +255,9 @@ fn slow_the_stimulus_follows_the_view_from_the_app() -> R {
         s.daemon().is_some_and(|x| x.generator.owner.is_none())
             && s.rig.stimulus.phase == StimPhase::Idle
     })?;
+    d.send(Msg::SelectMeas(meas));
     d.key("Alt+1");
+    assert_eq!(d.st.layout.focus_kind(), PaneKind::Transfer);
     assert_eq!(
         hint(&d.st).as_deref(),
         Some("Space arms: pink −26 dBFS → out 2, 1")

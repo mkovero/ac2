@@ -436,8 +436,9 @@ fn two_spl_meters_side_by_side_by_drag_from_an_empty_daemon() -> R {
     Ok(())
 }
 
-/// From an empty daemon, two sweep measurements with a run each: the sweep pane shows its
-/// own sweep's run even with the other's selected.
+/// From an empty daemon, two sweep measurements with a run each, sweep A dropped on the
+/// transfer measurement's sweep pane: that pane shows its own sweep's run even with the
+/// other's selected.
 #[test]
 fn slow_the_distortion_pane_shows_its_own_sweep_from_an_empty_daemon() -> R {
     use crate::harness::sweep_from_the_dialog;
@@ -445,11 +446,15 @@ fn slow_the_distortion_pane_shows_its_own_sweep_from_an_empty_daemon() -> R {
     let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
     d.st.set_prefs(crate::common::grid_with_sweep_ui_prefs());
     measure_from_empty(&mut d)?;
+    let tf = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
     let run_a = sweep_from_the_dialog(&mut d)?;
     let sweep_a = d.st.sweep_meas().map(|m| m.id).ok_or("sweep A")?;
     let run_b = sweep_from_the_dialog(&mut d)?;
     let sweep_b = d.st.sweep_meas().map(|m| m.id).ok_or("sweep B")?;
     assert_ne!(sweep_a, sweep_b);
+    // Each sweep opened on a screen of its own: the transfer measurement's row brings back
+    // its grid, whose sweep pane is given sweep A by a drop.
+    d.send(Msg::SelectMeas(tf));
     let pane = crate::common::pane(&d.st, PaneKind::Distortion);
     d.send(Msg::FocusPane(pane));
     d.drop_meas(pane, sweep_a);
