@@ -413,6 +413,36 @@ until it answers or is closed. Names come from the rig and are display only
 2. **Clock reporting and stimulus chips** — daemon state gains the clock lines of §4
    (`PROTO_VERSION` bump), Connection page shows them, `ac2 status` prints them; other-rig
    stimulus chips in the top bar.
+   As built (2, PROTO 84): `State.clocks` (`Clocks { system, capture }`, event kind
+   `clocks`). `system` is `Synced { maxerror_us }` / `Unsynced { maxerror_us }` from a
+   read-only `adjtimex` (modes 0) on Linux — `STA_UNSYNC` alone decides, the bound is the
+   kernel's figure unchanged — and `NotStated` on macOS and Windows or when the call fails;
+   the control thread reads it every 5 s (the first read goes into the initial state, so a
+   fresh daemon is still at rev 0). `capture` is the capture device's
+   `SampleClock`: the fan-out keeps a point per 50 ms of audio of the backend's block stamp
+   (`capture_ns`, else `callback_ns`: the arrival stamp of the fan-out is quantised by the
+   hand-off, the backend's carries only the callback's jitter) against the sample index,
+   and fits the last 60 s with the line selftest already used (moved to
+   `ac2_core::clock_rate`, segments pooled across breaks); it reads every 5 s of audio and
+   says `Measuring` until the segments span 54 s. Committed when anything changes, so a
+   Linux rig commits about every 5 s (the bound moves). On a PTP-disciplined host the
+   bound reads looser than the discipline daemon's own offset (pupu ±3.0 ms, ketunkolo
+   ±0.5 ms against offsets of about 1 µs) and is shown as it is. Text in
+   `ac2_scene::clock`: Settings › Connection gets a *Clocks* section with a line per
+   connected rig (`pupu · clock: +6 ppm · system clock synced, OS bound ±3.0 ms`, the rig
+   named only when there are several); `ac2 status` prints `sample clock …` and `system
+   clock …` lines and `clocks` in its JSON. The stimulus chips replace stage 1's single
+   *kettu's stimulus on* item: one per rig not shown that is armed or playing, beside the
+   stop. Decisions where the note was silent: only the capture device is measured (every
+   measurement is timed on it; the output's relation to it is the loopback drift); ppm
+   shown whole (a minute's fit is good to a fraction of a ppm, the crystal tolerance is
+   tens); a replay's clock is `Synthetic` (*none (a replayed recording)*) since its stamps
+   are its sample index; the bound reads in µs under 0.1 ms, ms to 1 decimal under 1 s, s
+   above; an armed rig's chip reads *kettu armed −24 dBFS*, a playing one
+   *▶ kettu −24 dBFS*, and another client's stimulus on a background rig gets a chip too,
+   with *· held by alice* (sound from a rig not shown is never silent, whoever holds it);
+   chips have no click and no key. The fake backend gained `host_clock_ppm` (stamps only)
+   for the daemon test.
 3. **Remote inputs** — after the timestamp and latency study; redesigned then on the list
    in §3.
 

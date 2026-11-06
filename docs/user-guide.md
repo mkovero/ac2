@@ -242,6 +242,21 @@ treats this computer's `ac2d` (**←/→** or **Enter** toggles; this app's, in 
 In network mode the page lists the clients the rig accepts (name, key fingerprint) and the
 keys it refused lately (fingerprint, address, how often, when).
 
+*Clocks* gives a line per connected rig (named when there are several), what its daemon
+measures and what its OS says, nothing more:
+`clock: +6 ppm · system clock synced, OS bound ±3.0 ms`.
+
+- **+6 ppm** — the rig's audio device clock against its computer's clock, over the last
+  minute of audio (positive: the device runs fast). For the first minute after the audio
+  opens it reads *measuring…*; with no audio open, *no audio open*; a replayed recording has
+  no device clock (*none (a replayed recording)*).
+- **system clock synced / unsynced** — as the operating system states it (Linux; macOS and
+  Windows state nothing: *not stated by the OS*). *OS bound ±3.0 ms* is the kernel's own
+  bound on the clock's error, which grows between updates of the time service: a loose
+  upper bound, not the clock's actual offset, and no claim about PTP or NTP.
+
+`ac2 status` prints the same as `sample clock` and `system clock` lines.
+
 - **A** on a refused key, then a name, authorizes it; the client connects on its next retry.
 - *Authorize a client by its key…* takes a name and the key `ac2 auth show` prints.
 - **Delete** twice revokes a client: its requests are refused at once. You cannot revoke
@@ -608,7 +623,9 @@ accident:
   with several rigs held it stops every rig's stimulus, not only the one shown. While
   anything is armed or playing the top bar shows **■ Stop: Shift+Esc**. With several rigs
   the arm line and the level name the rig (`arm pupu's stimulus · Space`, `pupu: −24 dBFS`),
-  and a rig in the background still holding its stimulus shows *kettu's stimulus on*;
+  and every rig in the background whose stimulus is armed or playing has a chip in the top
+  bar beside the stop: **▶ kettu −24 dBFS** playing, *kettu armed −24 dBFS* armed, with
+  *· held by alice* when another client holds it;
   closing a rig or quitting the app stops and releases what each rig holds, all at once. Space pressed while
   a stop is finishing arms once it is done (Esc cancels that);
 - one client holds the stimulus at a time (a refreshed lease); if it disappears the daemon
