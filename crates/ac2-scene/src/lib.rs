@@ -31,6 +31,7 @@ pub mod cal;
 pub mod cal_notice;
 mod canvas;
 pub mod chrome;
+pub mod clock;
 pub mod comb;
 pub mod cursor_jump;
 pub mod curve_ease;

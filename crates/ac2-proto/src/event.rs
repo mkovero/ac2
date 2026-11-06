@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::model::{
-    Autosave, CalEntry, CalKey, Generator, InputSetups, LineCalEntry, LineCalKey, Measurement, Mic,
-    OutputSetup, PlanSpec, RecordingRun, Rig, Session, SimFitKept, SimState, SplLog, State,
-    SweepRun, TimingStatus, TraceMeta, WalkState, WorkingSession,
+    Autosave, CalEntry, CalKey, Clocks, Generator, InputSetups, LineCalEntry, LineCalKey,
+    Measurement, Mic, OutputSetup, PlanSpec, RecordingRun, Rig, Session, SimFitKept, SimState,
+    SplLog, State, SweepRun, TimingStatus, TraceMeta, WalkState, WorkingSession,
 };
 use crate::units::{DaemonIncarnation, MeasId, Rev, SessionEpoch, TraceId, WalkId};
 
@@ -58,6 +58,8 @@ pub enum Change {
     SplLog(Patch<SplLog, MeasId>),
     /// Timing monitor state.
     Timing(TimingStatus),
+    /// The host's clocks (never deleted).
+    Clocks(Clocks),
     /// The latest sweep run (never deleted; a new run replaces it).
     Sweep(SweepRun),
     /// Autosave status (never deleted).
@@ -172,6 +174,13 @@ pub enum WireEvent {
         /// Payload.
         payload: TimingStatus,
     },
+    /// [`Change::Clocks`].
+    Clocks {
+        /// Rev.
+        rev: Rev,
+        /// Payload.
+        payload: Clocks,
+    },
     /// [`Change::Sweep`].
     Sweep {
         /// Rev.
@@ -259,6 +268,7 @@ impl From<Event> for WireEvent {
             Change::Outputs(payload) => Self::Outputs { rev, payload },
             Change::SplLog(payload) => Self::SplLog { rev, payload },
             Change::Timing(payload) => Self::Timing { rev, payload },
+            Change::Clocks(payload) => Self::Clocks { rev, payload },
             Change::Sweep(payload) => Self::Sweep { rev, payload },
             Change::Autosave(payload) => Self::Autosave { rev, payload },
             Change::Recording(payload) => Self::Recording { rev, payload },
@@ -287,6 +297,7 @@ impl From<WireEvent> for Event {
             WireEvent::Outputs { rev, payload } => (rev, Change::Outputs(payload)),
             WireEvent::SplLog { rev, payload } => (rev, Change::SplLog(payload)),
             WireEvent::Timing { rev, payload } => (rev, Change::Timing(payload)),
+            WireEvent::Clocks { rev, payload } => (rev, Change::Clocks(payload)),
             WireEvent::Sweep { rev, payload } => (rev, Change::Sweep(payload)),
             WireEvent::Autosave { rev, payload } => (rev, Change::Autosave(payload)),
             WireEvent::Recording { rev, payload } => (rev, Change::Recording(payload)),
@@ -317,6 +328,7 @@ impl Change {
             Self::Outputs(_) => "outputs",
             Self::SplLog(_) => "spl_log",
             Self::Timing(_) => "timing",
+            Self::Clocks(_) => "clocks",
             Self::Sweep(_) => "sweep",
             Self::Autosave(_) => "autosave",
             Self::Recording(_) => "recording",

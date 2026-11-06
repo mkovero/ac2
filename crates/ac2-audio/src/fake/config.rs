@@ -208,6 +208,10 @@ pub struct FakeConfig {
     pub paths: Vec<FakePath>,
     /// DAC clock error relative to the ADC, ppm; positive = DAC fast.
     pub drift_ppm: f64,
+    /// Device clock error against the host clock, ppm; positive = the device fast. Only the
+    /// host stamps of blocks and output ticks see it (a frame advances them
+    /// `1e9 / (rate · (1 + ppm·1e-6))` ns); the device is paced at its nominal rate.
+    pub host_clock_ppm: f64,
     /// Scripted faults.
     pub faults: Vec<FakeFault>,
     /// Raw frame counter of the first block (to exercise the 32-bit wrap).
@@ -238,6 +242,7 @@ impl Default for FakeConfig {
             input_noise_rms: 0.0,
             paths: Vec::new(),
             drift_ppm: 0.0,
+            host_clock_ppm: 0.0,
             faults: Vec::new(),
             counter_origin: 0,
             stop_after_blocks: None,
@@ -311,6 +316,9 @@ impl FakeConfig {
         if !(self.drift_ppm.is_finite() && self.drift_ppm.abs() < 1e5) {
             return Err(FakeConfigError::BadNumber("drift_ppm"));
         }
+        if !(self.host_clock_ppm.is_finite() && self.host_clock_ppm.abs() < 1e5) {
+            return Err(FakeConfigError::BadNumber("host_clock_ppm"));
+        }
         if !ok(self.drift_horizon_seconds) {
             return Err(FakeConfigError::BadNumber("drift_horizon_seconds"));
         }
@@ -363,6 +371,16 @@ impl FakeConfig {
 
     pub(super) fn ns(&self, frames: u64) -> u64 {
         (u128::from(frames) * 1_000_000_000 / u128::from(self.sample_rate)) as u64
+    }
+
+    /// Host time `frames` after the stream's start, by the host clock the device's runs
+    /// [`Self::host_clock_ppm`] against.
+    pub(super) fn host_ns(&self, frames: u64) -> u64 {
+        if self.host_clock_ppm == 0.0 {
+            return self.ns(frames);
+        }
+        let rate = f64::from(self.sample_rate) * (1.0 + self.host_clock_ppm * 1e-6);
+        (frames as f64 / rate * 1e9) as u64
     }
 }
 

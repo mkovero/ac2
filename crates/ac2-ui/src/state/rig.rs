@@ -284,6 +284,17 @@ impl RigState {
         self.mirror.as_ref().and_then(|m| m.state.as_deref())
     }
 
+    /// This connection's identity on the rig ([`AppState::my_client_id`]).
+    pub fn client_id(&self) -> Option<&ClientId> {
+        let ConnState::Connected { client_id, .. } = &self.conn else {
+            return None;
+        };
+        match &self.mirror {
+            Some(m) if m.incarnation.is_some() => m.client_id.as_ref(),
+            _ => Some(client_id),
+        }
+    }
+
     /// The daemon's measurements, by id.
     pub fn measurements(&self) -> Vec<&Measurement> {
         let mut v: Vec<&Measurement> = self

@@ -540,6 +540,13 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
             }
         }
     }
+    let clocks = st.clock_lines();
+    if !clocks.is_empty() {
+        section(ui, "Clocks", "", ch);
+        for l in clocks {
+            ui.label(RichText::new(l).color(ch.text));
+        }
+    }
     if let (Some(label), Some((_, text))) = (p.edit_label(), &p.edit) {
         ui.add_space(6.0);
         ui.horizontal(|ui| {

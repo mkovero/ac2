@@ -28,5 +28,6 @@ pub use sim::{
     sim_state,
 };
 pub use state::{
-    band_leq_config, plan, recording_run, server_info, spl_config, spl_measurement, state, walk,
+    band_leq_config, clocks, plan, recording_run, server_info, spl_config, spl_measurement, state,
+    walk,
 };

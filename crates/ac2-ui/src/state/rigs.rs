@@ -77,18 +77,50 @@ impl AppState {
         }
     }
 
-    /// The rigs not shown whose stimulus is armed or playing (by their mirror), by name.
-    pub fn live_elsewhere(&self) -> Vec<String> {
+    /// The rigs not shown whose stimulus is armed or playing (by their mirror, or on its
+    /// way by this app's request), each with its level and who holds it.
+    pub fn live_elsewhere(&self) -> Vec<ac2_scene::stimulus::Elsewhere> {
         let shown = self.active();
         self.rigs_in_order()
             .into_iter()
             .filter(|r| r.id != shown)
-            .filter(|r| {
-                r.stimulus.phase != StimPhase::Idle
-                    || r.daemon()
-                        .is_some_and(|s| s.generator.armed || s.generator.firing)
+            .filter_map(|r| {
+                let g = r.daemon().map(|s| &s.generator);
+                let live =
+                    r.stimulus.phase != StimPhase::Idle || g.is_some_and(|g| g.armed || g.firing);
+                live.then(|| ac2_scene::stimulus::Elsewhere {
+                    rig: self.rig_label(r),
+                    // The mirrored generator is the truth; without one, this app's phase.
+                    firing: g.map_or(r.stimulus.phase == StimPhase::Firing, |g| g.firing),
+                    // The rig's generator is the truth once it has settings; before, the
+                    // level this app is arming with.
+                    level: g
+                        .and_then(|g| g.settings.as_ref())
+                        .map(|s| s.level)
+                        .or(r.stimulus.level),
+                    holder: g
+                        .and_then(|g| g.owner.as_ref())
+                        .filter(|o| Some(*o) != r.client_id())
+                        .map(|o| o.0.clone()),
+                })
             })
-            .map(|r| self.rig_label(r))
+            .collect()
+    }
+
+    /// The Connection page's clock line of every connected rig: one rig's alone, more each
+    /// named.
+    pub fn clock_lines(&self) -> Vec<String> {
+        let many = self.many_rigs();
+        self.rigs_in_order()
+            .into_iter()
+            .filter_map(|r| r.daemon().map(|s| (r, &s.clocks)))
+            .map(|(r, c)| {
+                if many {
+                    ac2_scene::clock::rig_clock_line(&self.rig_label(r), c)
+                } else {
+                    ac2_scene::clock::clock_line(c)
+                }
+            })
             .collect()
     }
 

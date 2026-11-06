@@ -46,6 +46,10 @@ serde_json = { workspace = true, features = ["float_roundtrip"] }
 sysinfo = { workspace = true, features = ["system"] }
 tracing = { workspace = true }
 
+# The system clock's status (adjtimex, read-only; src/sysclock.rs).
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { workspace = true }
+
 [dev-dependencies]
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 ac2-client = { path = "../ac2-client" }

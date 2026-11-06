@@ -31,7 +31,7 @@ keepalives to each connection as its credit allows (§5.8).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 83`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 84`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -1805,7 +1805,18 @@ meter: `meas`, `started_at`, `windows`, `peaks`, `alarms`; §3.2), `timing` (`Ti
 `drift` (`Drift` | nil: `ppm` output-vs-input clock drift from the loopback offset's slope,
 `span` s regressed, `warning` true when output and input are on different clocks, `at`
 WallNs of the newest window; kept after the stimulus stops and for the rest of the session;
-committed when the warning flips, the span first reaches the judged length or the shown value changes: 1 ppm, 0.1 ppm below 10 ppm while warning), `internal_reference`), `sweep` (`SweepRun` | nil: the latest `sweep.run` run),
+committed when the warning flips, the span first reaches the judged length or the shown value changes: 1 ppm, 0.1 ppm below 10 ppm while warning), `internal_reference`), `clocks` (`Clocks`, what the host can say about its
+clocks and nothing inferred from them: `system` {synced{maxerror_us} | unsynced{maxerror_us} |
+not_stated} — the system clock as the OS states it (Linux: `adjtimex` read with no mode bits,
+`STA_UNSYNC` clear or set; `maxerror_us` the kernel's error bound, which grows by 500 µs a
+second between the discipline daemon's updates, never the clock's offset; macOS and Windows
+state nothing), read every 5 s; `capture` (`DeviceClock` | nil while no audio I/O is open:
+`device`, `rate` {measuring | measured{ppm, span} | synthetic}) — the capture device's sample
+clock against the system clock, a least-squares fit of the backend's block stamps against
+their sample index over the last 60 s of audio (segments pooled across gaps), `ppm` positive
+when the device runs fast; `measuring` until the fit spans 54 s, `synthetic` for a replay,
+whose stamps are its sample index; read every 5 s of audio; committed when either changes),
+`sweep` (`SweepRun` | nil: the latest `sweep.run` run),
 `autosave` (`Autosave`: `state` {off | saved | pending | failed{reason}}, `saved_at: WallNs |
 nil`, `log_failures: [LogWriteFailure]`; see §7.3), `recording` (`RecordingRun` | nil: the latest recording, §3.2), `working`
 (`WorkingSession`: the working state's session and unsaved changes, §3.2 sessions), `rig`
@@ -1856,7 +1867,7 @@ samples). Every later recovery reopens the configuration as it then stands.
 `state.snapshot` → `{state, rev, daemon_incarnation, session_epoch}`.
 
 An event is `{rev, kind, payload}`. `kind` is one of `session`, `measurement`, `trace`,
-`generator`, `calibration`, `line_calibration`, `mic`, `inputs`, `outputs`, `spl_log`, `timing`, `sweep`, `autosave`, `recording`, `working`, `plan`, `walk`, `walk_plan`, `sim`. `payload` is the entity's
+`generator`, `calibration`, `line_calibration`, `mic`, `inputs`, `outputs`, `spl_log`, `timing`, `clocks`, `sweep`, `autosave`, `recording`, `working`, `plan`, `walk`, `walk_plan`, `sim`. `payload` is the entity's
 full new value (`inputs`: {`inputs`, `pairs`}, both whole lists; `outputs`: the whole list;
 `sim`: the `SimState`, which `State.sim` becomes); for keyed entities (`measurement`, `trace`,
 `calibration`, `line_calibration` (keyed by `LineCalKey`), `mic` (keyed by name), `spl_log`, `plan` and `walk_plan` (keyed by name), `walk` (keyed by

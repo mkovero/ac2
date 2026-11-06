@@ -9,6 +9,7 @@ mod calibration;
 mod ceiling;
 mod chain;
 mod client;
+mod clocks;
 mod common;
 mod dedup;
 mod devices;

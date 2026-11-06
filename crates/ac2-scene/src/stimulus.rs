@@ -180,16 +180,33 @@ pub fn rig_hint(rig: &str, next: Next, what: &Stimulus, level_key: &str) -> (Str
     }
 }
 
-/// The stimulus of rigs not shown is armed or playing: the top bar says whose, beside the
-/// stop that stops every rig's.
-pub fn live_elsewhere(rigs: &[String]) -> String {
-    format!(
-        "{} stimulus on",
-        rigs.iter()
-            .map(|r| format!("{r}'s"))
-            .collect::<Vec<_>>()
-            .join(", ")
-    )
+/// The stimulus of a rig not shown, armed or playing: sound from a system the operator is
+/// not looking at is never silent in the UI.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Elsewhere {
+    /// The rig, by name.
+    pub rig: String,
+    /// Playing (else armed).
+    pub firing: bool,
+    /// Its level, as the rig's generator has it.
+    pub level: Option<Dbfs>,
+    /// Who holds its lease when not this app.
+    pub holder: Option<String>,
+}
+
+/// The top bar's chip for `e`, beside the stop that stops every rig's: `▶ pupu −20 dBFS`,
+/// `pupu armed −20 dBFS`, `▶ pupu −20 dBFS · held by alice`.
+pub fn elsewhere_chip(e: &Elsewhere) -> String {
+    let level = level_text(e.level);
+    let mut s = if e.firing {
+        format!("▶ {} {level}", e.rig)
+    } else {
+        format!("{} armed {level}", e.rig)
+    };
+    if let Some(h) = &e.holder {
+        s.push_str(&format!(" · held by {h}"));
+    }
+    s
 }
 
 /// The stop's tip with more than one rig: it stops them all.
@@ -204,6 +221,28 @@ pub fn stop_every_rig_tip(stop: &str) -> String {
 mod tests {
     use super::*;
     use ac2_proto::units::Hz;
+
+    #[test]
+    fn a_chip_names_the_rig_its_state_and_level() {
+        let e = |firing, level: Option<f64>, holder: Option<&str>| Elsewhere {
+            rig: "pupu".into(),
+            firing,
+            level: level.map(Dbfs),
+            holder: holder.map(Into::into),
+        };
+        assert_eq!(
+            elsewhere_chip(&e(true, Some(-20.0), None)),
+            "▶ pupu −20 dBFS"
+        );
+        assert_eq!(
+            elsewhere_chip(&e(false, Some(-12.5), None)),
+            "pupu armed −12.5 dBFS"
+        );
+        assert_eq!(
+            elsewhere_chip(&e(true, None, Some("alice"))),
+            "▶ pupu no level · held by alice"
+        );
+    }
 
     fn pink(level: Option<f64>) -> Stimulus {
         Stimulus::Generator {

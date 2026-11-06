@@ -109,5 +109,29 @@ pub fn events() -> Vec<Event> {
         ev(88, Change::Sim(super::sim::sim_map_state())),
         ev(89, Change::SimFit(Some(super::sim::sim_fit_kept()))),
         ev(90, Change::SimFit(None)),
+        ev(91, Change::Clocks(clocks())),
+        ev(
+            92,
+            Change::Clocks(Clocks {
+                system: SystemClock::Unsynced {
+                    maxerror_us: 16_000_000,
+                },
+                capture: Some(DeviceClock {
+                    device: DeviceId("system".into()),
+                    rate: SampleClock::Measuring,
+                }),
+            }),
+        ),
+        ev(
+            93,
+            Change::Clocks(Clocks {
+                system: SystemClock::NotStated,
+                capture: Some(DeviceClock {
+                    device: DeviceId("soundcheck.wav".into()),
+                    rate: SampleClock::Synthetic,
+                }),
+            }),
+        ),
+        ev(94, Change::Clocks(Clocks::default())),
     ]
 }

@@ -21,6 +21,7 @@ use std::time::{Duration, Instant};
 
 use ac2_audio::timer::{Sleeper, Waker};
 use ac2_audio::{BlockFlags, Delivery, DuplexStream};
+use ac2_core::clock_rate::RateWindow;
 use ac2_proto::model::StopCause;
 use ac2_proto::units::{Rev, SessionEpoch, WallNs};
 
@@ -48,6 +49,9 @@ pub(crate) struct Block {
     pub(crate) flags: BlockFlags,
     /// Daemon wall clock when the fan-out received the block (Unix ns).
     pub(crate) wall_ns: u64,
+    /// The backend's host-clock stamp of the block: when its first frame was sampled where
+    /// the backend estimates it, else when its callback ran.
+    pub(crate) host_ns: u64,
     /// Interleaved samples.
     pub(crate) data: Vec<f32>,
     /// Per block channel.
@@ -71,6 +75,7 @@ impl Block {
             channels,
             flags,
             wall_ns,
+            host_ns: wall_ns,
             data,
             stats: Vec::new(),
         };
@@ -160,6 +165,7 @@ pub(crate) fn pop_block_into(stream: &mut DuplexStream, reuse: Option<Block>) ->
             channels: 0,
             flags: BlockFlags::NONE,
             wall_ns: 0,
+            host_ns: 0,
             data: Vec::with_capacity(a.len() + b.len()),
             stats: Vec::new(),
         });
@@ -168,6 +174,7 @@ pub(crate) fn pop_block_into(stream: &mut DuplexStream, reuse: Option<Block>) ->
         block.channels = h.channels;
         block.flags = h.flags;
         block.wall_ns = wall_ns();
+        block.host_ns = h.capture_ns.unwrap_or(h.callback_ns);
         block.data.clear();
         block.data.extend_from_slice(a);
         block.data.extend_from_slice(b);
@@ -227,6 +234,12 @@ pub(crate) struct Fanout {
     /// One past the newest captured sample.
     pub(crate) latest: Arc<AtomicU64>,
 }
+
+/// The capture clock is measured over the last minute of stamps (`docs/design/multi-rig.md`
+/// §4), a point kept per 50 ms of audio, and read every 5 s of audio.
+const CLOCK_WINDOW_S: f64 = 60.0;
+const CLOCK_STEP_S: f64 = 0.05;
+const CLOCK_EVERY_S: f64 = 5.0;
 
 /// Time to wait for the final fade-out before tearing the stream down regardless.
 const STOP_TIMEOUT: Duration = Duration::from_millis(300);
@@ -529,6 +542,13 @@ fn run(
     // stream that never delivers is stopped too.
     let mut last_audio = (Instant::now(), wall_ns());
     let mut stop_reported = false;
+    // A lossless stream is a replay, whose stamps are its sample index: no clock to measure.
+    let mut clock = cfg.lossless.is_none().then(|| {
+        (
+            RateWindow::new(cfg.rate, CLOCK_WINDOW_S, CLOCK_STEP_S),
+            0u64,
+        )
+    });
     loop {
         // Control messages wake the thread at once; otherwise it sleeps until the next
         // hand-off.
@@ -608,12 +628,30 @@ fn run(
             if block.flags.breaks_continuity() {
                 gaps.observe(now, block.start_sample, block.flags);
             }
+            if let Some((w, _)) = &mut clock {
+                w.push(
+                    block.start_sample,
+                    block.host_ns,
+                    block.flags.breaks_continuity(),
+                );
+            }
             batch.push(block);
         }
         gaps.flush(now);
         if let Some(b) = batch.last() {
             latest.store(b.end_sample(), Ordering::Release);
             last_audio = (now, b.wall_ns);
+            // Read by audio time, so the reading keeps pace with the audio however the
+            // stream is stepped.
+            if let Some((w, next)) = &mut clock
+                && b.end_sample() >= *next
+            {
+                *next = b.end_sample() + (CLOCK_EVERY_S * cfg.rate) as u64;
+                let _ = to_control.send(ControlMsg::SampleClock {
+                    epoch: cfg.epoch,
+                    rate: w.rate(),
+                });
+            }
         }
         stamp_arrivals(&mut batch, cfg.rate);
         for block in &batch {

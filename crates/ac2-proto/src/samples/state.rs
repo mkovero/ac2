@@ -195,6 +195,20 @@ pub(super) fn recording_file() -> RecordingFile {
     }
 }
 
+/// A host whose capture clock has been measured, its system clock synced.
+pub fn clocks() -> Clocks {
+    Clocks {
+        system: SystemClock::Synced { maxerror_us: 3027 },
+        capture: Some(DeviceClock {
+            device: DeviceId("system".into()),
+            rate: SampleClock::Measured {
+                ppm: 6.25,
+                span: Seconds(59.5),
+            },
+        }),
+    }
+}
+
 pub(super) fn timing() -> TimingStatus {
     TimingStatus {
         epoch: 3,
@@ -492,6 +506,7 @@ pub fn state() -> State {
         outputs: outputs(),
         spl_logs: vec![spl_log()],
         timing: timing(),
+        clocks: clocks(),
         sweep: Some(sweep_run()),
         autosave: Autosave {
             state: AutosaveState::Saved,

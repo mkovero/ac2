@@ -502,7 +502,8 @@ fn stop_anywhere_stops_every_rig() {
     t.st.background
         .iter_mut()
         .for_each(|r| r.stimulus.phase = StimPhase::Firing);
-    assert_eq!(t.st.live_elsewhere(), vec!["pupu".to_string()]);
+    let live: Vec<String> = t.st.live_elsewhere().into_iter().map(|e| e.rig).collect();
+    assert_eq!(live, vec!["pupu".to_string()]);
     let r = t.st.update(Msg::Key(STOP_ANYWHERE), &t.keys);
     let stops: Vec<RigId> = r
         .iter()
@@ -963,4 +964,5 @@ fn a_stored_pane_names_its_rig() {
     assert_eq!(out, vec![wire::RigRef::ThisRig; 2]);
 }
 
+mod rig_clocks;
 mod rig_fold;

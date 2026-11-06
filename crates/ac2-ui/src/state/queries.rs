@@ -462,13 +462,7 @@ impl AppState {
     /// id from the connect would make another client's lease look like ours, or ours like
     /// another's).
     pub fn my_client_id(&self) -> Option<&ClientId> {
-        let ConnState::Connected { client_id, .. } = &self.rig.conn else {
-            return None;
-        };
-        match &self.rig.mirror {
-            Some(m) if m.incarnation.is_some() => m.client_id.as_ref(),
-            _ => Some(client_id),
-        }
+        self.rig.client_id()
     }
 
     /// The daemon's open audio I/O.

@@ -272,6 +272,7 @@ dependencies = [
  "ctrlc",
  "getrandom 0.3.4",
  "jack",
+ "libc",
  "num-complex",
  "rayon",
  "rmp-serde",

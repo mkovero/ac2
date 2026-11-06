@@ -48,6 +48,7 @@ use crate::util::perr;
 mod artnet;
 mod autosave;
 mod cal;
+mod clocks;
 mod eq;
 mod execute;
 mod file_jobs;
@@ -120,6 +121,12 @@ pub(crate) enum ControlMsg {
     Probed {
         token: u64,
         presence: ac2_audio::Presence,
+    },
+    /// The fan-out of `epoch` measured the capture clock against the system clock (`None`:
+    /// under a window of stamps yet).
+    SampleClock {
+        epoch: SessionEpoch,
+        rate: Option<ac2_core::clock_rate::ClockRate>,
     },
     /// The timing monitor of `epoch` changed state.
     Timing {
@@ -385,6 +392,8 @@ pub(crate) struct Control {
     pending_finds: HashMap<u64, PendingFind>,
     next_token: u64,
     next_ka: Instant,
+    /// The clocks entity's sources.
+    clocks: clocks::ClockWatch,
     /// systemd's readiness and watchdog, pinged from this loop's keepalive tick so that a
     /// stuck loop stops the pings and gets the daemon restarted.
     notify: ac2_paths::notify::Notifier,
@@ -524,6 +533,7 @@ impl Control {
                 saved_at: None,
                 log_failures: Vec::new(),
             });
+        let store_system = store.state().clocks.system;
         let dedup = Dedup::new(s.dedup);
         let rigm = rig_meas::RigMeas::new(&saved, s.rig_logs.as_deref());
         Self {
@@ -556,6 +566,7 @@ impl Control {
             pending_finds: HashMap::new(),
             next_token: 1,
             next_ka: Instant::now(),
+            clocks: clocks::ClockWatch::new(store_system),
             damaged,
             notify: if s.systemd_notify {
                 ac2_paths::notify::Notifier::from_env()
@@ -639,6 +650,7 @@ impl Control {
                 self.start_probe();
             }
             self.rig_tick(now);
+            self.clocks_tick(now);
             if self.preview.as_ref().is_some_and(|p| p.deadline <= now) {
                 tracing::info!("preview not renewed: closing it");
                 self.close_preview();
@@ -646,7 +658,7 @@ impl Control {
             self.osc_sync();
             self.osc_tick(now);
             self.artnet_tick(now);
-            let mut wake = self.next_ka;
+            let mut wake = self.next_ka.min(self.clocks_due());
             if let Some(t) = self.osc_wake() {
                 wake = wake.min(t);
             }
@@ -705,6 +717,7 @@ impl Control {
                 }) => self.audio_stopped(epoch, since, cause),
                 Ok(ControlMsg::Reopened { token, result }) => self.reopened(token, *result),
                 Ok(ControlMsg::Probed { token, presence }) => self.probed(token, presence),
+                Ok(ControlMsg::SampleClock { epoch, rate }) => self.sample_clock(epoch, rate),
                 Ok(ControlMsg::Timing { epoch, status }) => {
                     if self.session.as_ref().is_some_and(|r| r.epoch == epoch)
                         && self.store.state().timing != status

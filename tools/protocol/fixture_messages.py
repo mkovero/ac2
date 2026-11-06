@@ -895,6 +895,34 @@ def events():
         {"kind": "spl_log", "rev": 52, "payload": {"type": "set", "value": SPL_LOG}},
         {"kind": "timing", "rev": 54, "payload": TIMING_STATUS},
         {
+            "kind": "clocks",
+            "rev": 91,
+            "payload": {
+                "system": {"type": "synced", "maxerror_us": 3027},
+                "capture": {
+                    "device": "system",
+                    "rate": {"type": "measured", "ppm": 6.25, "span": 59.5},
+                },
+            },
+        },
+        {
+            "kind": "clocks",
+            "rev": 92,
+            "payload": {
+                "system": {"type": "unsynced", "maxerror_us": 16000000},
+                "capture": {"device": "system", "rate": {"type": "measuring"}},
+            },
+        },
+        {
+            "kind": "clocks",
+            "rev": 93,
+            "payload": {
+                "system": {"type": "not_stated"},
+                "capture": {"device": "soundcheck.wav", "rate": {"type": "synthetic"}},
+            },
+        },
+        {"kind": "clocks", "rev": 94, "payload": {"system": {"type": "not_stated"}, "capture": None}},
+        {
             "kind": "sweep",
             "rev": 55,
             "payload": {

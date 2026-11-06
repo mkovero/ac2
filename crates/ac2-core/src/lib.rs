@@ -10,6 +10,7 @@ pub mod window;
 pub mod align;
 pub mod average;
 pub mod band_leq;
+pub mod clock_rate;
 pub mod delay;
 pub mod eq;
 pub mod generator;

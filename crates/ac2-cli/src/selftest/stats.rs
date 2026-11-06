@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 
 use ac2_audio::{BlockFlags, BlockHeader, OutputTick};
+use ac2_core::clock_rate::{self as core, RateFit};
 use serde::Serialize;
 
 /// Spread of an interval or lag, µs.
@@ -58,66 +59,6 @@ impl Accum {
     }
 }
 
-/// Least-squares line of host time against sample index, pooled over contiguous segments.
-///
-/// A device clock that runs at its nominal rate advances `1e9 / rate` ns per sample. Each
-/// segment is fitted about its own mean, so an index gap of unknown or estimated size moves
-/// no point off the line; only the slopes within segments are pooled.
-#[derive(Clone, Copy, Debug, Default)]
-struct RateFit {
-    /// Index and time of the current segment's first point (the origin of its sums).
-    origin: Option<(u64, u64)>,
-    n: f64,
-    sx: f64,
-    sy: f64,
-    sxx: f64,
-    sxy: f64,
-    /// Centred sums of closed segments.
-    total_sxx: f64,
-    total_sxy: f64,
-    /// Samples spanned by all segments.
-    span_samples: f64,
-    seg_last_x: f64,
-}
-
-impl RateFit {
-    fn add(&mut self, sample: u64, ns: u64, breaks: bool) {
-        if breaks {
-            self.close();
-        }
-        let (s0, t0) = *self.origin.get_or_insert((sample, ns));
-        let x = sample.wrapping_sub(s0) as i64 as f64;
-        let y = ns.wrapping_sub(t0) as i64 as f64;
-        self.n += 1.0;
-        self.sx += x;
-        self.sy += y;
-        self.sxx += x * x;
-        self.sxy += x * y;
-        self.seg_last_x = x;
-    }
-
-    fn close(&mut self) {
-        if self.n >= 2.0 {
-            self.total_sxx += self.sxx - self.sx * self.sx / self.n;
-            self.total_sxy += self.sxy - self.sx * self.sy / self.n;
-            self.span_samples += self.seg_last_x;
-        }
-        *self = Self {
-            total_sxx: self.total_sxx,
-            total_sxy: self.total_sxy,
-            span_samples: self.span_samples,
-            ..Self::default()
-        };
-    }
-
-    /// Measured rate, Hz, and the samples it spans; `None` without two points in a segment.
-    fn rate(mut self) -> Option<(f64, f64)> {
-        self.close();
-        (self.total_sxx > 0.0 && self.total_sxy > 0.0)
-            .then(|| (1e9 * self.total_sxx / self.total_sxy, self.span_samples))
-    }
-}
-
 /// A device clock measured against the host clock.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct ClockRate {
@@ -131,10 +72,10 @@ pub struct ClockRate {
 
 impl ClockRate {
     fn from_fit(fit: RateFit, nominal: f64) -> Option<Self> {
-        fit.rate().map(|(hz, span)| Self {
-            hz,
-            ppm: (hz / nominal - 1.0) * 1e6,
-            span_s: span / nominal,
+        core::ClockRate::from_fit(fit, nominal).map(|r| Self {
+            hz: r.hz,
+            ppm: r.ppm,
+            span_s: r.span_s,
         })
     }
 }

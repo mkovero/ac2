@@ -165,7 +165,8 @@ fn a_rig_down_and_back() {
     assert!(h.query_by_label(&away).is_none(), "kettu's panes are back");
 }
 
-/// Each rig armed in turn; Shift+Esc on pupu stops both, kettu's too.
+/// Each rig armed in turn, kettu fired: shown pupu's top bar carries kettu's chip; Shift+Esc
+/// on pupu stops both, kettu's too.
 #[test]
 fn shift_esc_stops_every_rig() {
     if !have_gpu("shift_esc_stops_every_rig") {
@@ -182,12 +183,28 @@ fn shift_esc_stops_every_rig() {
         step_until(h, "armed", |_| fake.lock().state.generator.armed);
     };
     arm(&mut h, &kettu.fake);
+    h.key_press(Key::Enter);
+    step_until(&mut h, "kettu firing", |_| {
+        kettu.fake.lock().state.generator.firing
+    });
     pick_first_rig(&mut h);
     step_until(&mut h, "pupu shown", |a| {
         a.state.active() == PUPU && live(a)
     });
     arm(&mut h, &pupu.fake);
     assert!(kettu.fake.lock().state.generator.armed, "kettu still armed");
+    // Kettu plays out of sight: the top bar says so beside pupu's own badge.
+    let chip = "▶ kettu −24 dBFS";
+    step_until(&mut h, "kettu's chip", |a| {
+        a.state
+            .live_elsewhere()
+            .iter()
+            .map(ac2_scene::stimulus::elsewhere_chip)
+            .any(|c| c == chip)
+    });
+    h.state_mut().state.toasts.list.clear();
+    snapshot(&mut h, "rig_stimulus_chip");
+    assert!(h.query_by_label(chip).is_some(), "the chip is drawn");
     h.key_press_modifiers(Modifiers::SHIFT, Key::Escape);
     let stopped = |fake: &ac2_client::fake::FakeDaemon| {
         let s = fake.lock();

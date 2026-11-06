@@ -88,6 +88,9 @@ async fn slow_status_shows_the_clock_domain_and_the_drift() {
         ),
         "{before}"
     );
+    // A session just opened has no minute of stamps: no figure for its clock yet.
+    assert!(before.contains("\nsample clock measuring…\n"), "{before}");
+    assert!(before.contains("\nsystem clock "), "{before}");
 
     let lease = c
         .acquire_lease(false, OnDrop::StopAndRelease)

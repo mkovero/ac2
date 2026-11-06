@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use ac2_proto::event::{Change, Event, Patch, StateSnapshot};
 use ac2_proto::model::{
-    Autosave, AutosaveState, Generator, Rig, Session, State, TimingState, TimingStatus,
+    Autosave, AutosaveState, Clocks, Generator, Rig, Session, State, TimingState, TimingStatus,
     WorkingSession,
 };
 use ac2_proto::units::{DaemonIncarnation, Dbfs, Rev, SessionEpoch};
@@ -60,6 +60,12 @@ impl Store {
                     last_lock: None,
                     drift: None,
                     internal_reference: false,
+                },
+                // Read before the first rev, so a fresh daemon is at rev 0 with the system
+                // clock already stated.
+                clocks: Clocks {
+                    system: crate::sysclock::read(),
+                    capture: None,
                 },
                 sweep: None,
                 autosave: Autosave {
@@ -217,6 +223,7 @@ pub(crate) fn apply(s: &mut State, c: &Change) {
         Change::Outputs(o) => s.outputs = o.clone(),
         Change::SplLog(p) => upsert(&mut s.spl_logs, p, |l| l.meas),
         Change::Timing(t) => s.timing = *t,
+        Change::Clocks(c) => s.clocks = c.clone(),
         Change::Sweep(r) => s.sweep = Some(r.clone()),
         Change::Autosave(a) => s.autosave = a.clone(),
         Change::Recording(r) => s.recording = Some(r.clone()),

@@ -665,14 +665,15 @@ fn stimulus(app: &App, ch: &Chrome) -> Vec<Item> {
             )
         });
         v.push(it);
-        if !elsewhere.is_empty() {
+        // A chip per rig not shown that is armed or playing, the stop beside them.
+        for e in &elsewhere {
             v.push(
                 Item::new(
                     96,
                     vec![
-                        RichText::new(ac2_scene::stimulus::live_elsewhere(&elsewhere))
+                        RichText::new(ac2_scene::stimulus::elsewhere_chip(e))
                             .strong()
-                            .color(ch.fault),
+                            .color(if e.firing { ch.fault } else { ch.warn }),
                     ],
                 )
                 .kept(),

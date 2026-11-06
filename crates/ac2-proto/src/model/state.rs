@@ -3,9 +3,9 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    CalEntry, Generator, InputSetup, LineCalEntry, Measurement, Mic, OutputSetup, Pair, PlanSpec,
-    RecordingRun, Rig, Session, SimFitKept, SimState, SplLog, SweepRun, TraceMeta, WalkState,
-    WorkingSession,
+    CalEntry, Clocks, Generator, InputSetup, LineCalEntry, Measurement, Mic, OutputSetup, Pair,
+    PlanSpec, RecordingRun, Rig, Session, SimFitKept, SimState, SplLog, SweepRun, TraceMeta,
+    WalkState, WorkingSession,
 };
 use crate::units::{MeasId, SampleIndex, Samples, Seconds, WallNs};
 
@@ -109,6 +109,9 @@ pub struct State {
     pub spl_logs: Vec<SplLog>,
     /// Timing.
     pub timing: TimingStatus,
+    /// The host's clocks: the capture device's against the system clock, and the system
+    /// clock's status as the OS states it.
+    pub clocks: Clocks,
     /// The latest sweep run, if any.
     pub sweep: Option<SweepRun>,
     /// Autosave of the measurements and traces.

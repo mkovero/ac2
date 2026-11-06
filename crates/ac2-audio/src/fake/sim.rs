@@ -243,9 +243,9 @@ impl Sim {
             "output index is device time"
         );
         flags |= self.latch.take();
-        let capture_ns = self.cfg.ns(start);
-        let callback_ns = self.cfg.ns(start + u64::from(frames));
-        let playback_ns = callback_ns + self.cfg.ns(u64::from(frames));
+        let capture_ns = self.cfg.host_ns(start);
+        let callback_ns = self.cfg.host_ns(start + u64::from(frames));
+        let playback_ns = callback_ns + self.cfg.host_ns(u64::from(frames));
 
         let out_ch = self.stream_outputs;
         let out_buf = &mut self.out_buf;

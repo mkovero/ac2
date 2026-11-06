@@ -222,6 +222,7 @@ pub fn empty_state() -> State {
             drift: None,
             internal_reference: false,
         },
+        clocks: ac2_proto::model::Clocks::default(),
         sweep: None,
         autosave: Autosave {
             state: AutosaveState::Off,

@@ -57,6 +57,7 @@ fn status_json(
         "rev": w.rev,
         "session": session,
         "timing": st.timing,
+        "clocks": st.clocks,
         "autosave": st.autosave,
         "inputs": output::inputs_json(st),
     })
@@ -105,6 +106,10 @@ fn status_text(
     if let Some(c) = output::clock(session, &st.timing) {
         s.push('\n');
         s.push_str(&c);
+    }
+    for l in ac2_scene::clock::status_lines(&st.clocks) {
+        s.push('\n');
+        s.push_str(&l);
     }
     s.push('\n');
     s.push_str(&output::autosave(&st.autosave, crate::watch::now_wall()));
