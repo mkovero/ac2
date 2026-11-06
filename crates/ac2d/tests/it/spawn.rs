@@ -132,19 +132,38 @@ impl Daemon {
     }
 
     /// Spawns with `--print-endpoints` and reads the line: (ctrl, data).
-    fn spawn_printing(mut p: Process) -> (Self, String, String) {
-        p.arg("--print-endpoints").stdout(Stdio::piped());
+    fn spawn_printing(p: Process) -> (Self, String, String) {
+        Self::try_spawn_printing(p).unwrap_or_else(|(st, err)| {
+            panic!("ac2d ended before the endpoints line: {st}, stderr: {err}")
+        })
+    }
+
+    /// [`Self::spawn_printing`], or how the daemon ended (status, stderr) when it exits
+    /// before printing the line, as when a port chosen ahead of it was taken meanwhile.
+    fn try_spawn_printing(mut p: Process) -> Result<(Self, String, String), (ExitStatus, String)> {
+        p.arg("--print-endpoints")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         let mut d = Self::spawn(p);
+        let mut stderr = d.child.stderr.take().unwrap();
         let mut line = String::new();
         BufReader::new(d.child.stdout.take().unwrap())
             .read_line(&mut line)
             .unwrap();
+        if line.is_empty() {
+            let st = d.wait(T);
+            let mut err = String::new();
+            std::io::Read::read_to_string(&mut stderr, &mut err).unwrap();
+            return Err((st, err));
+        }
+        // Drained so the daemon's later log lines never fill the pipe and block it.
+        std::thread::spawn(move || std::io::copy(&mut stderr, &mut std::io::sink()));
         let rest = line
             .trim_end()
             .strip_prefix("ac2d: listening ctrl=")
             .unwrap_or_else(|| panic!("not the endpoints line: {line:?}"));
         let (ctrl, data) = rest.split_once(" data=").unwrap();
-        (d, ctrl.to_owned(), data.to_owned())
+        Ok((d, ctrl.to_owned(), data.to_owned()))
     }
 
     /// Waits up to `limit` for the process to end.
@@ -362,14 +381,29 @@ fn free_port_pair() -> u16 {
 #[test]
 fn network_mode_locks() {
     let home = Home::new();
-    let port = free_port_pair();
-    let mut p = home.ac2d_with_stores();
-    p.args(["--listen", &format!("tcp://127.0.0.1:{port}"), "--no-mdns"])
-        .arg("--key-file")
-        .arg(home.path("config/server.key"))
-        .arg("--authorized")
-        .arg(home.path("config/authorized_clients"));
-    let (net, ctrl, data) = Daemon::spawn_printing(p);
+    // The pair is free when chosen but not held: another process's outgoing connection
+    // may take one of the two before the daemon binds (the OS hands ephemeral ports from
+    // the same range), so a daemon that could not bind is retried on a fresh pair.
+    let mut tries = 0;
+    let (net, ctrl, data, port) = loop {
+        let port = free_port_pair();
+        let mut p = home.ac2d_with_stores();
+        p.args(["--listen", &format!("tcp://127.0.0.1:{port}"), "--no-mdns"])
+            .arg("--key-file")
+            .arg(home.path("config/server.key"))
+            .arg("--authorized")
+            .arg(home.path("config/authorized_clients"));
+        match Daemon::try_spawn_printing(p) {
+            Ok((d, ctrl, data)) => break (d, ctrl, data, port),
+            Err((st, err)) => {
+                tries += 1;
+                assert!(
+                    tries < 5 && st.code() == Some(i32::from(exit::FATAL)),
+                    "ac2d on port {port} ended: {st}, stderr: {err}"
+                );
+            }
+        }
+    };
     assert_eq!(ctrl, format!("tcp://127.0.0.1:{port}"));
     assert_eq!(
         read(&home.runtime().join("ac2d.endpoints")),
