@@ -67,6 +67,10 @@ async fn slow_leq_set_watch_and_export() {
     let dir = tempfile::tempdir().unwrap();
     let mut cfg = DaemonConfig::new(backend, listen, -10.0);
     cfg.cal_store = Some(dir.path().join("calibrations.json"));
+    // The tone's lease is held across many CLI runs; a slow runner can stall the client's
+    // refresher past the 1.5 s expiry (the tone fades out, the 5 s Leq falls), and the
+    // lease is not under test here.
+    cfg.lease_expiry = Duration::from_secs(60);
     let h = Daemon::start(cfg).unwrap();
     let ep = Endpoints {
         ctrl: h.ctrl_endpoint().to_owned(),
