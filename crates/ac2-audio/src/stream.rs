@@ -15,6 +15,7 @@ use crate::output::{
     OutputRenderer, OutputShared, OutputState, OutputStats, OutputTick, RendererConfig,
     RendererParts,
 };
+use crate::stamp::StampClock;
 
 /// Keeps a backend's stream objects alive; dropping it stops the callbacks.
 pub(crate) trait StreamGuard: Send {}
@@ -148,6 +149,7 @@ pub struct DuplexStream {
     drain: Duration,
     guard: Option<Box<dyn StreamGuard>>,
     patch: Option<Arc<dyn GraphPatch>>,
+    stamp_clock: Option<Arc<dyn StampClock>>,
 }
 
 impl fmt::Debug for DuplexStream {
@@ -175,7 +177,22 @@ impl DuplexStream {
             drain: parts.drain,
             guard: Some(parts.guard),
             patch: parts.patch,
+            stamp_clock: None,
         }
+    }
+
+    /// Gives the stream the clock its blocks are stamped on (a backend that can read it,
+    /// on an OS with a disciplined clock to read it against).
+    pub(crate) fn set_stamp_clock(&mut self, clock: Arc<dyn StampClock>) {
+        self.stamp_clock = Some(clock);
+    }
+
+    /// The clock this stream's blocks are stamped on, readable beside the host's
+    /// disciplined clock; `None` where the backend cannot read it or the OS has no
+    /// disciplined monotonic clock (block stamps are then on an undisciplined clock, or
+    /// one nothing here can tell apart from it).
+    pub fn stamp_clock(&self) -> Option<Arc<dyn StampClock>> {
+        self.stamp_clock.clone()
     }
 
     /// Replaces the stream guard (a backend that starts its driver after building the

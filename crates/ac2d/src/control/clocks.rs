@@ -1,12 +1,11 @@
 //! The clocks entity (`docs/design/multi-rig.md` §4): the capture clock's rate, measured by
-//! the fan-out, beside the system clock's status, read here.
+//! the fan-out ([`crate::capture_clock`]), beside the system clock's status, read here.
 
 use std::time::{Duration, Instant};
 
-use ac2_core::clock_rate::ClockRate;
 use ac2_proto::Change;
 use ac2_proto::model::{Clocks, DeviceClock, SampleClock, SystemClock};
-use ac2_proto::units::{Seconds, SessionEpoch};
+use ac2_proto::units::SessionEpoch;
 
 use super::Control;
 
@@ -21,7 +20,7 @@ pub(super) struct ClockWatch {
     system: SystemClock,
     next_system: Instant,
     /// The newest reading of the capture clock, with the stream it is of.
-    sample: Option<(SessionEpoch, Option<ClockRate>)>,
+    sample: Option<(SessionEpoch, SampleClock)>,
 }
 
 impl ClockWatch {
@@ -36,20 +35,9 @@ impl ClockWatch {
     }
 }
 
-/// The capture clock's entry for a reading (`None`: under a window of stamps yet).
-pub(super) fn sample_clock(rate: Option<ClockRate>) -> SampleClock {
-    match rate {
-        None => SampleClock::Measuring,
-        Some(r) => SampleClock::Measured {
-            ppm: r.ppm,
-            span: Seconds(r.span_s),
-        },
-    }
-}
-
 impl Control {
     /// The fan-out of `epoch` measured the capture clock.
-    pub(super) fn sample_clock(&mut self, epoch: SessionEpoch, rate: Option<ClockRate>) {
+    pub(super) fn sample_clock(&mut self, epoch: SessionEpoch, rate: SampleClock) {
         self.clocks.sample = Some((epoch, rate));
     }
 
@@ -70,7 +58,7 @@ impl Control {
                 SampleClock::Synthetic
             } else {
                 match self.clocks.sample {
-                    Some((e, rate)) if e == r.epoch => sample_clock(rate),
+                    Some((e, rate)) if e == r.epoch => rate,
                     _ => SampleClock::Measuring,
                 }
             },

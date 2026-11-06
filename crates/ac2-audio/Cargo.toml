@@ -22,6 +22,8 @@ thiserror = { workspace = true }
 # for jack, so building needs JACK's development package. No ALSA: nothing links libasound.
 [target.'cfg(target_os = "linux")'.dependencies]
 jack = { workspace = true }
+# CLOCK_MONOTONIC, the disciplined clock JACK's stamp clock is read against (src/stamp.rs).
+libc = { workspace = true }
 log = { workspace = true }
 
 # Windows: ASIO is the only backend. ASIO drivers over COM directly, without the Steinberg

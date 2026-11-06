@@ -901,7 +901,7 @@ def events():
                 "system": {"type": "synced", "maxerror_us": 3027},
                 "capture": {
                     "device": "system",
-                    "rate": {"type": "measured", "ppm": 6.25, "span": 59.5},
+                    "rate": {"type": "measured", "ppm": 6.25, "span": 59.5, "against": "system_clock"},
                 },
             },
         },

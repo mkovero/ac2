@@ -1,18 +1,30 @@
 //! A rig's clocks as the Connection page and `ac2 status` say them
-//! (`docs/design/multi-rig.md` §4): the capture clock against the system clock, and the
-//! system clock as the OS states it. Nothing is inferred: the OS's bound is said as its
-//! bound, never as a "PTP" or "NTP" label, and no figure is shown before a minute of audio.
+//! (`docs/design/multi-rig.md` §4): the capture clock against the clock it was measured
+//! against, and the system clock as the OS states it. Nothing is inferred: the OS's bound
+//! is said as its bound, never as a "PTP" or "NTP" label, and no figure is shown before a
+//! minute of audio.
 
-use ac2_proto::model::{Clocks, DeviceClock, SampleClock, SystemClock};
+use ac2_proto::model::{ClockBasis, Clocks, DeviceClock, SampleClock, SystemClock};
 
 use crate::format;
 
-/// The capture clock: `+6 ppm`, `measuring…`, `no audio open`.
-pub fn sample_clock_text(c: Option<&DeviceClock>) -> String {
+/// The capture clock: `+6 ppm against the system clock`, `measuring…`, `no audio open`.
+///
+/// A figure is said against the system clock only when it was measured against the
+/// disciplined clock and the OS says that clock is synchronised; unsynced (or not stated),
+/// the system clock follows nothing but the crystal, so the figure is against this
+/// computer's own clock, as one measured against the crystal directly is.
+pub fn sample_clock_text(c: Option<&DeviceClock>, system: &SystemClock) -> String {
     match c.map(|c| c.rate) {
         None => "no audio open".into(),
         Some(SampleClock::Measuring) => "measuring…".into(),
-        Some(SampleClock::Measured { ppm, .. }) => format!("{} ppm", format::signed(ppm, 0)),
+        Some(SampleClock::Measured { ppm, against, .. }) => {
+            let basis = match (against, system) {
+                (ClockBasis::SystemClock, SystemClock::Synced { .. }) => "the system clock",
+                _ => "this computer's own clock",
+            };
+            format!("{} ppm against {basis}", format::signed(ppm, 0))
+        }
         Some(SampleClock::Synthetic) => "none (a replayed recording)".into(),
     }
 }
@@ -28,11 +40,12 @@ pub fn system_clock_text(s: &SystemClock) -> String {
     }
 }
 
-/// The Connection page's line: `clock: +6 ppm · system clock synced, OS bound ±3.0 ms`.
+/// The Connection page's line:
+/// `clock: +6 ppm against the system clock · system clock synced, OS bound ±3.0 ms`.
 pub fn clock_line(c: &Clocks) -> String {
     format!(
         "clock: {} · system clock {}",
-        sample_clock_text(c.capture.as_ref()),
+        sample_clock_text(c.capture.as_ref(), &c.system),
         system_clock_text(&c.system)
     )
 }
@@ -44,12 +57,10 @@ pub fn rig_clock_line(rig: &str, c: &Clocks) -> String {
 
 /// `ac2 status`'s two lines, under its 13-column labels.
 pub fn status_lines(c: &Clocks) -> [String; 2] {
+    let text = sample_clock_text(c.capture.as_ref(), &c.system);
     let sample = match c.capture.as_ref().map(|c| c.rate) {
-        Some(SampleClock::Measured { .. }) => format!(
-            "{} against the system clock (last minute)",
-            sample_clock_text(c.capture.as_ref())
-        ),
-        _ => sample_clock_text(c.capture.as_ref()),
+        Some(SampleClock::Measured { .. }) => format!("{text} (last minute)"),
+        _ => text,
     };
     [
         format!("sample clock {sample}"),
@@ -86,6 +97,15 @@ mod tests {
         Some(SampleClock::Measured {
             ppm,
             span: Seconds(59.9),
+            against: ClockBasis::SystemClock,
+        })
+    }
+
+    fn on_crystal(ppm: f64) -> Option<SampleClock> {
+        Some(SampleClock::Measured {
+            ppm,
+            span: Seconds(59.9),
+            against: ClockBasis::HostCrystal,
         })
     }
 
@@ -94,14 +114,14 @@ mod tests {
         let synced = SystemClock::Synced { maxerror_us: 3027 };
         assert_eq!(
             clock_line(&clocks(measured(6.3), synced)),
-            "clock: +6 ppm · system clock synced, OS bound ±3.0 ms"
+            "clock: +6 ppm against the system clock · system clock synced, OS bound ±3.0 ms"
         );
         assert_eq!(
             clock_line(&clocks(
                 measured(-8.25),
                 SystemClock::Synced { maxerror_us: 504 }
             )),
-            "clock: −8 ppm · system clock synced, OS bound ±0.5 ms"
+            "clock: −8 ppm against the system clock · system clock synced, OS bound ±0.5 ms"
         );
         assert_eq!(
             clock_line(&clocks(
@@ -125,7 +145,37 @@ mod tests {
         );
         assert_eq!(
             rig_clock_line("pupu", &clocks(measured(0.2), synced)),
-            "pupu · clock: 0 ppm · system clock synced, OS bound ±3.0 ms"
+            "pupu · clock: 0 ppm against the system clock · system clock synced, OS bound ±3.0 ms"
+        );
+    }
+
+    /// Measured against the crystal, or against a system clock the OS says follows
+    /// nothing: never said as the system clock's.
+    #[test]
+    fn a_figure_off_a_synced_clock_is_against_the_computers_own() {
+        assert_eq!(
+            clock_line(&clocks(on_crystal(8.2), SystemClock::NotStated)),
+            "clock: +8 ppm against this computer's own clock · system clock not stated by the OS"
+        );
+        assert_eq!(
+            clock_line(&clocks(
+                on_crystal(8.2),
+                SystemClock::Synced { maxerror_us: 504 }
+            )),
+            "clock: +8 ppm against this computer's own clock · system clock synced, OS bound ±0.5 ms"
+        );
+        let unsynced = clocks(
+            measured(5.6),
+            SystemClock::Unsynced {
+                maxerror_us: 16_000_000,
+            },
+        );
+        assert_eq!(
+            status_lines(&unsynced),
+            [
+                "sample clock +6 ppm against this computer's own clock (last minute)".to_string(),
+                "system clock unsynced, OS bound ±16.0 s".to_string(),
+            ]
         );
     }
 

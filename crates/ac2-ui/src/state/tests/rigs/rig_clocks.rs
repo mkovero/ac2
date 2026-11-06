@@ -3,7 +3,7 @@
 
 use super::*;
 use ac2_proto::model::{
-    Clocks, DeviceClock, DeviceId, GeneratorSettings, SampleClock, Signal, SystemClock,
+    ClockBasis, Clocks, DeviceClock, DeviceId, GeneratorSettings, SampleClock, Signal, SystemClock,
 };
 use ac2_proto::units::{Dbfs, Seconds};
 
@@ -79,6 +79,7 @@ fn the_connection_page_says_each_rigs_clock() {
             rate: SampleClock::Measured {
                 ppm: 6.2,
                 span: Seconds(59.9),
+                against: ClockBasis::SystemClock,
             },
         }),
     };
@@ -87,7 +88,7 @@ fn the_connection_page_says_each_rigs_clock() {
     assert_eq!(lines.len(), 2, "{lines:?}");
     assert_eq!(
         lines[1],
-        "pupu · clock: +6 ppm · system clock synced, OS bound ±3.0 ms"
+        "pupu · clock: +6 ppm against the system clock · system clock synced, OS bound ±3.0 ms"
     );
     assert!(
         lines[0].ends_with("clock: no audio open · system clock not stated by the OS"),

@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::backend::DuplexRequest;
 use crate::block::{BlockProducer, BlockStamp};
@@ -113,6 +114,8 @@ pub(super) struct Sim {
     drift_ratio: Option<f64>,
     sinc: Box<[f32]>,
     stats: FakeStats,
+    /// Device frames simulated so far, for the stream's stamp clock.
+    now_frames: Arc<AtomicU64>,
 }
 
 impl std::fmt::Debug for Sim {
@@ -211,6 +214,7 @@ impl Sim {
                 Box::new([])
             },
             stats: FakeStats::default(),
+            now_frames: Arc::new(AtomicU64::new(0)),
             cfg,
         }
     }
@@ -286,7 +290,18 @@ impl Sim {
         );
         self.raw_counter = self.raw_counter.wrapping_add(frames);
         self.stats.blocks += 1;
+        self.now_frames
+            .store(self.stats.device_frames, Ordering::Release);
         self.load.finish(started, frames);
+    }
+
+    /// The stream's stamp clock: the host crystal and the disciplined clock at the newest
+    /// simulated frame.
+    pub(super) fn stamp_clock(&self) -> FakeStampClock {
+        FakeStampClock {
+            cfg: self.cfg.clone(),
+            now_frames: Arc::clone(&self.now_frames),
+        }
     }
 
     /// Frames that pass while no callback runs: the DAC plays silence, the ADC's samples
@@ -439,5 +454,31 @@ impl Sim {
             acc += (noise_rms * self.paths[p].rng.gaussian()) as f32;
         }
         acc
+    }
+}
+
+/// A fake stream's stamp clock: simulated time is the device's frame count, the crystal
+/// and the disciplined clock read at it.
+pub(super) struct FakeStampClock {
+    cfg: FakeConfig,
+    now_frames: Arc<AtomicU64>,
+}
+
+impl std::fmt::Debug for FakeStampClock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FakeStampClock")
+            .field("audio_clock_ppm", &self.cfg.audio_clock_ppm)
+            .field("host_crystal_ppm", &self.cfg.host_crystal_ppm)
+            .finish_non_exhaustive()
+    }
+}
+
+impl crate::stamp::StampClock for FakeStampClock {
+    fn pair(&self) -> Option<crate::stamp::ClockPair> {
+        let frames = self.now_frames.load(Ordering::Acquire);
+        Some(crate::stamp::ClockPair {
+            stamp_ns: self.cfg.host_ns(frames),
+            disciplined_ns: self.cfg.true_ns(frames),
+        })
     }
 }

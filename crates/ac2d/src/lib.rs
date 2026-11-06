@@ -39,6 +39,7 @@ mod backend;
 mod burst;
 mod cadence;
 mod calstore;
+mod capture_clock;
 mod chain;
 pub mod config;
 mod control;

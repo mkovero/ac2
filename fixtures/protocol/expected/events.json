@@ -1073,7 +1073,8 @@
     "rate": {
      "type": "measured",
      "ppm": 6.25,
-     "span": 59.5
+     "span": 59.5,
+     "against": "system_clock"
     }
    }
   }

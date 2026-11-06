@@ -4,6 +4,12 @@
 //! [`RateFit`] is a least-squares line over every point it is given (a whole run);
 //! [`RateWindow`] keeps the points of the last stretch of audio and fits those, so its
 //! reading follows a clock that changes (temperature, a host clock being disciplined).
+//!
+//! A backend stamps blocks on its own host clock, which need not be the disciplined one
+//! (JACK2 on Linux stamps on `CLOCK_MONOTONIC_RAW`, the bare crystal). The same window fed
+//! pairs of reads (disciplined time as the index at 1 GHz nominal, stamp-clock time as the
+//! stamp) measures the disciplined clock against the stamp clock, and
+//! [`ClockRate::against`] takes that rate out of the device's.
 
 use std::collections::VecDeque;
 
@@ -89,6 +95,20 @@ impl ClockRate {
             ppm: (hz / nominal - 1.0) * 1e6,
             span_s: span / nominal,
         })
+    }
+
+    /// This rate, measured against a stamp clock, re-expressed against a `reference` clock
+    /// whose own rate was measured against the same stamp clock (`reference.ppm`: positive
+    /// when the reference runs fast against it). Rates on one time base divide: the device
+    /// advances `(1 + d)` samples per nominal stamp-clock second and the reference
+    /// `(1 + r)` seconds, so per reference second it advances `(1 + d) / (1 + r)`.
+    pub fn against(self, reference: ClockRate) -> Self {
+        let r = 1.0 + reference.ppm * 1e-6;
+        Self {
+            hz: self.hz / r,
+            ppm: ((1.0 + self.ppm * 1e-6) / r - 1.0) * 1e6,
+            span_s: self.span_s,
+        }
     }
 }
 
@@ -225,6 +245,57 @@ mod tests {
         }
         let r = w.rate().expect("pooled segments span the window");
         assert!((r.ppm - 3.0).abs() < 0.1, "{r:?}");
+    }
+
+    /// Pairs of reads of a reference clock (index, ns at 1 GHz nominal) and a stamp clock
+    /// the reference runs `ppm` fast against, one per `every_s`, with read jitter
+    /// ±`jitter_ns`.
+    fn pairs(w: &mut RateWindow, seconds: f64, ppm: f64, every_s: f64, jitter_ns: f64) {
+        let n = (seconds / every_s) as u64;
+        for i in 0..n {
+            let reference = (i as f64 * every_s * 1e9) as u64 + 5_000_000_000;
+            let h = (i ^ 0x9e37_79b9_7f4a_7c15).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            let u = (h >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0;
+            let stamp = (reference as f64 / (1.0 + ppm * 1e-6) + u * jitter_ns) as u64;
+            w.push(reference, stamp, false);
+        }
+    }
+
+    #[test]
+    fn pairs_of_reads_measure_the_reference_against_the_stamp_clock() {
+        let mut w = RateWindow::new(1e9, 60.0, 0.25);
+        pairs(&mut w, 70.0, 8.16, 0.05, 2_000.0);
+        let r = w.rate().expect("a full window");
+        assert!((r.ppm - 8.16).abs() < 0.02, "{r:?}");
+    }
+
+    #[test]
+    fn a_rate_against_the_stamp_clock_reads_against_the_reference() {
+        let at = |ppm| ClockRate {
+            hz: 48_000.0 * (1.0 + ppm * 1e-6),
+            ppm,
+            span_s: 59.9,
+        };
+        let reference = |ppm| ClockRate {
+            hz: 1e9 * (1.0 + ppm * 1e-6),
+            ppm,
+            span_s: 60.0,
+        };
+        // A device locked to true time on a host whose stamp clock (the crystal) runs
+        // 8.2 ppm slow: +8.2 against the crystal, the disciplined clock +8.2 against it too.
+        let device = (1.0 + 0.0) / (1.0 - 8.2e-6) - 1.0;
+        let disc = 1.0 / (1.0 - 8.2e-6) - 1.0;
+        let r = at(device * 1e6).against(reference(disc * 1e6));
+        assert!(r.ppm.abs() < 1e-6, "{r:?}");
+        assert!((r.hz - 48_000.0).abs() < 1e-6, "{r:?}");
+        assert_eq!(r.span_s, 59.9);
+        // A device 5.6 ppm fast on a host whose crystal runs 0.64 ppm fast.
+        let device = (1.0 + 5.6e-6) / (1.0 + 0.64e-6) - 1.0;
+        let disc = 1.0 / (1.0 + 0.64e-6) - 1.0;
+        let r = at(device * 1e6).against(reference(disc * 1e6));
+        assert!((r.ppm - 5.6).abs() < 1e-6, "{r:?}");
+        // A stamp clock that is the reference changes nothing.
+        assert!((at(3.0).against(reference(0.0)).ppm - 3.0).abs() < 1e-9);
     }
 
     #[test]

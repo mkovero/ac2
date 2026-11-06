@@ -169,10 +169,25 @@ fn page(
     ui.add_space(8.0);
     // Audio I/O ends in what Enter does, kept in view below the scrolling settings.
     let opens = s.page == Page::AudioIo && s.session.backends.is_some();
-    let footer_h = if opens { 44.0 + 46.0 } else { 44.0 };
+    // The scrolling part takes what the header left, less the footer as it will lay out
+    // (the separator, its spacing and the keys line, wrapped): a fixed allowance for either
+    // clipped the last line behind the separator while room was left below the keys.
+    let keys = s.page.keys();
+    let keys_h = ui
+        .painter()
+        .layout(
+            keys.to_owned(),
+            egui::TextStyle::Small.resolve(ui.style()),
+            ch.dim,
+            body.width(),
+        )
+        .size()
+        .y;
+    let gap = ui.spacing().item_spacing.y;
+    let footer_h = SEPARATOR_H + 2.0 * gap + keys_h + if opens { 46.0 } else { 0.0 };
     egui::ScrollArea::both()
         .id_salt(("ac2-settings-page", s.page.index()))
-        .max_height((body.height() - 70.0 - footer_h).max(120.0))
+        .max_height((ui.available_height() - footer_h).max(120.0))
         .auto_shrink([false, false])
         .show(ui, |ui| match s.page {
             Page::AudioIo => io_page(app, ui, s, ch, msg),
@@ -220,9 +235,12 @@ fn page(
             *msg = Some(Msg::Session(m));
         }
     }
-    ui.separator();
-    ui.label(RichText::new(s.page.keys()).small().color(ch.dim));
+    ui.add(egui::Separator::default().spacing(SEPARATOR_H));
+    ui.label(RichText::new(keys).small().color(ch.dim));
 }
+
+/// Height the footer's separator takes (egui's default separator spacing).
+const SEPARATOR_H: f32 = 6.0;
 
 /// A section title with whose its settings are (`whose` empty: the page header's).
 pub(super) fn section(ui: &mut egui::Ui, title: &str, whose: &str, ch: &Chrome) {

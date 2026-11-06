@@ -568,7 +568,10 @@ impl Backend for JackBackend {
         // playback latency.
         let drain =
             std::time::Duration::from_nanos(frames_to_ns(2 * frames + play_lat.max) + 10_000_000);
-        Ok(DuplexStream::new(StreamParts {
+        let stamps = JackStampClock {
+            client: Arc::downgrade(&active),
+        };
+        let mut stream = DuplexStream::new(StreamParts {
             negotiated,
             capture: plumbing.consumer,
             output: plumbing.output,
@@ -576,7 +579,31 @@ impl Backend for JackBackend {
             drain,
             guard: Box::new(active),
             patch: Some(Arc::new(patch)),
-        }))
+        });
+        stream.set_stamp_clock(Arc::new(stamps));
+        Ok(stream)
+    }
+}
+
+/// JACK's clock (`jack_get_time`), which the process callback's stamps and the engine's
+/// cycle times are on: read through the stream's own client, whatever clock source the
+/// JACK library was built with (JACK2: `CLOCK_MONOTONIC_RAW`; PipeWire's: `CLOCK_MONOTONIC`).
+/// Held weakly, like [`JackPatch`].
+struct JackStampClock {
+    client: Weak<Active>,
+}
+
+impl std::fmt::Debug for JackStampClock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("JackStampClock")
+    }
+}
+
+impl crate::stamp::StampClock for JackStampClock {
+    fn pair(&self) -> Option<crate::stamp::ClockPair> {
+        let active = self.client.upgrade()?;
+        let c = active.as_client();
+        crate::stamp::pair_with_monotonic(|| c.time() * 1000)
     }
 }
 

@@ -122,11 +122,10 @@ pub(crate) enum ControlMsg {
         token: u64,
         presence: ac2_audio::Presence,
     },
-    /// The fan-out of `epoch` measured the capture clock against the system clock (`None`:
-    /// under a window of stamps yet).
+    /// The fan-out of `epoch` measured the capture clock.
     SampleClock {
         epoch: SessionEpoch,
-        rate: Option<ac2_core::clock_rate::ClockRate>,
+        rate: ac2_proto::model::SampleClock,
     },
     /// The timing monitor of `epoch` changed state.
     Timing {

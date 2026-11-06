@@ -208,10 +208,16 @@ pub struct FakeConfig {
     pub paths: Vec<FakePath>,
     /// DAC clock error relative to the ADC, ppm; positive = DAC fast.
     pub drift_ppm: f64,
-    /// Device clock error against the host clock, ppm; positive = the device fast. Only the
-    /// host stamps of blocks and output ticks see it (a frame advances them
-    /// `1e9 / (rate · (1 + ppm·1e-6))` ns); the device is paced at its nominal rate.
-    pub host_clock_ppm: f64,
+    /// Device clock error against true time (what the host's disciplined clock keeps),
+    /// ppm; positive = the device fast. Only host stamps see it (a frame takes
+    /// `1e9 / (rate · (1 + ppm·1e-6))` ns of true time); the device is paced at its
+    /// nominal rate.
+    pub audio_clock_ppm: f64,
+    /// Error of the clock the host stamps blocks on (its undisciplined crystal) against true
+    /// time, ppm; positive = the crystal fast. Block and output-tick stamps are on it; the
+    /// stream's [`StampClock`](crate::StampClock) pairs it with the simulated disciplined
+    /// clock, which keeps true time.
+    pub host_crystal_ppm: f64,
     /// Scripted faults.
     pub faults: Vec<FakeFault>,
     /// Raw frame counter of the first block (to exercise the 32-bit wrap).
@@ -242,7 +248,8 @@ impl Default for FakeConfig {
             input_noise_rms: 0.0,
             paths: Vec::new(),
             drift_ppm: 0.0,
-            host_clock_ppm: 0.0,
+            audio_clock_ppm: 0.0,
+            host_crystal_ppm: 0.0,
             faults: Vec::new(),
             counter_origin: 0,
             stop_after_blocks: None,
@@ -316,8 +323,11 @@ impl FakeConfig {
         if !(self.drift_ppm.is_finite() && self.drift_ppm.abs() < 1e5) {
             return Err(FakeConfigError::BadNumber("drift_ppm"));
         }
-        if !(self.host_clock_ppm.is_finite() && self.host_clock_ppm.abs() < 1e5) {
-            return Err(FakeConfigError::BadNumber("host_clock_ppm"));
+        if !(self.audio_clock_ppm.is_finite() && self.audio_clock_ppm.abs() < 1e5) {
+            return Err(FakeConfigError::BadNumber("audio_clock_ppm"));
+        }
+        if !(self.host_crystal_ppm.is_finite() && self.host_crystal_ppm.abs() < 1e5) {
+            return Err(FakeConfigError::BadNumber("host_crystal_ppm"));
         }
         if !ok(self.drift_horizon_seconds) {
             return Err(FakeConfigError::BadNumber("drift_horizon_seconds"));
@@ -373,14 +383,23 @@ impl FakeConfig {
         (u128::from(frames) * 1_000_000_000 / u128::from(self.sample_rate)) as u64
     }
 
-    /// Host time `frames` after the stream's start, by the host clock the device's runs
-    /// [`Self::host_clock_ppm`] against.
-    pub(super) fn host_ns(&self, frames: u64) -> u64 {
-        if self.host_clock_ppm == 0.0 {
+    /// True time `frames` after the stream's start: the device runs
+    /// [`Self::audio_clock_ppm`] fast against it.
+    pub(super) fn true_ns(&self, frames: u64) -> u64 {
+        if self.audio_clock_ppm == 0.0 {
             return self.ns(frames);
         }
-        let rate = f64::from(self.sample_rate) * (1.0 + self.host_clock_ppm * 1e-6);
+        let rate = f64::from(self.sample_rate) * (1.0 + self.audio_clock_ppm * 1e-6);
         (frames as f64 / rate * 1e9) as u64
+    }
+
+    /// Host stamp-clock time `frames` after the stream's start: true time on a crystal
+    /// [`Self::host_crystal_ppm`] fast.
+    pub(super) fn host_ns(&self, frames: u64) -> u64 {
+        if self.host_crystal_ppm == 0.0 {
+            return self.true_ns(frames);
+        }
+        (self.true_ns(frames) as f64 * (1.0 + self.host_crystal_ppm * 1e-6)) as u64
     }
 }
 

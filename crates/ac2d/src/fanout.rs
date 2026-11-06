@@ -21,11 +21,11 @@ use std::time::{Duration, Instant};
 
 use ac2_audio::timer::{Sleeper, Waker};
 use ac2_audio::{BlockFlags, Delivery, DuplexStream};
-use ac2_core::clock_rate::RateWindow;
 use ac2_proto::model::StopCause;
 use ac2_proto::units::{Rev, SessionEpoch, WallNs};
 
 use crate::burst::BurstDetector;
+use crate::capture_clock::CaptureClock;
 use crate::control::ControlMsg;
 use crate::jobs::meters::{SessionLevels, meter_period};
 use crate::jobs::programme::Programme;
@@ -236,9 +236,7 @@ pub(crate) struct Fanout {
 }
 
 /// The capture clock is measured over the last minute of stamps (`docs/design/multi-rig.md`
-/// §4), a point kept per 50 ms of audio, and read every 5 s of audio.
-const CLOCK_WINDOW_S: f64 = 60.0;
-const CLOCK_STEP_S: f64 = 0.05;
+/// §4, [`CaptureClock`]) and read every 5 s of audio.
 const CLOCK_EVERY_S: f64 = 5.0;
 
 /// Time to wait for the final fade-out before tearing the stream down regardless.
@@ -543,12 +541,10 @@ fn run(
     let mut last_audio = (Instant::now(), wall_ns());
     let mut stop_reported = false;
     // A lossless stream is a replay, whose stamps are its sample index: no clock to measure.
-    let mut clock = cfg.lossless.is_none().then(|| {
-        (
-            RateWindow::new(cfg.rate, CLOCK_WINDOW_S, CLOCK_STEP_S),
-            0u64,
-        )
-    });
+    let mut clock = cfg
+        .lossless
+        .is_none()
+        .then(|| (CaptureClock::new(cfg.rate, stream.stamp_clock()), 0u64));
     loop {
         // Control messages wake the thread at once; otherwise it sleeps until the next
         // hand-off.
@@ -629,7 +625,7 @@ fn run(
                 gaps.observe(now, block.start_sample, block.flags);
             }
             if let Some((w, _)) = &mut clock {
-                w.push(
+                w.block(
                     block.start_sample,
                     block.host_ns,
                     block.flags.breaks_continuity(),
@@ -638,6 +634,9 @@ fn run(
             batch.push(block);
         }
         gaps.flush(now);
+        if let Some((w, _)) = &mut clock {
+            w.pair();
+        }
         if let Some(b) = batch.last() {
             latest.store(b.end_sample(), Ordering::Release);
             last_audio = (now, b.wall_ns);
@@ -649,7 +648,7 @@ fn run(
                 *next = b.end_sample() + (CLOCK_EVERY_S * cfg.rate) as u64;
                 let _ = to_control.send(ControlMsg::SampleClock {
                     epoch: cfg.epoch,
-                    rate: w.rate(),
+                    rate: w.reading(),
                 });
             }
         }

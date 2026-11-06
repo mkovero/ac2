@@ -31,7 +31,7 @@ keepalives to each connection as its credit allows (§5.8).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 84`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 85`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -1811,10 +1811,14 @@ not_stated} — the system clock as the OS states it (Linux: `adjtimex` read wit
 `STA_UNSYNC` clear or set; `maxerror_us` the kernel's error bound, which grows by 500 µs a
 second between the discipline daemon's updates, never the clock's offset; macOS and Windows
 state nothing), read every 5 s; `capture` (`DeviceClock` | nil while no audio I/O is open:
-`device`, `rate` {measuring | measured{ppm, span} | synthetic}) — the capture device's sample
-clock against the system clock, a least-squares fit of the backend's block stamps against
-their sample index over the last 60 s of audio (segments pooled across gaps), `ppm` positive
-when the device runs fast; `measuring` until the fit spans 54 s, `synthetic` for a replay,
+`device`, `rate` {measuring | measured{ppm, span, against} | synthetic}) — the capture
+device's sample clock, a least-squares fit of the backend's block stamps against their
+sample index over the last 60 s of audio (segments pooled across gaps), `ppm` positive when
+the device runs fast against `against`: `system_clock` when the backend's stamp clock was
+read beside the disciplined monotonic clock (Linux `CLOCK_MONOTONIC`) over the same minute
+and its rate taken out, `host_crystal` when it could not be (macOS host time, the Windows
+performance counter: the figure includes that clock's own error); `measuring` until the
+fit (and the stamp clock's, for `system_clock`) spans 54 s, `synthetic` for a replay,
 whose stamps are its sample index; read every 5 s of audio; committed when either changes),
 `sweep` (`SweepRun` | nil: the latest `sweep.run` run),
 `autosave` (`Autosave`: `state` {off | saved | pending | failed{reason}}, `saved_at: WallNs |

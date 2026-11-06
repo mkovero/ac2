@@ -43,6 +43,7 @@ pub mod level;
 mod load;
 pub mod output;
 pub mod replay;
+pub mod stamp;
 pub mod stream;
 pub mod timer;
 
@@ -84,4 +85,5 @@ pub use level::{Gain, LevelError, MaxLevel};
 pub use load::{LoadTotals, StreamHealth};
 pub use output::{FADE_SECONDS, OutputSource, OutputState, OutputStats, OutputTick};
 pub use replay::{FrameSource, OpenSource, ReplayBackend, ReplayConfig, ReplayMark, ReplaySpeed};
+pub use stamp::{ClockPair, StampClock};
 pub use stream::{DuplexStream, GraphPatch, PatchLink, PatchState, SpareLink, StopOutcome};

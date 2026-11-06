@@ -204,6 +204,7 @@ pub fn clocks() -> Clocks {
             rate: SampleClock::Measured {
                 ppm: 6.25,
                 span: Seconds(59.5),
+                against: ClockBasis::SystemClock,
             },
         }),
     }

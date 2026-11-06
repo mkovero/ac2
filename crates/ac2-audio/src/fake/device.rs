@@ -212,7 +212,7 @@ impl FakeBackend {
             plumbing.renderer,
             Arc::clone(&plumbing.events),
         );
-        let stream = DuplexStream::new(StreamParts {
+        let mut stream = DuplexStream::new(StreamParts {
             negotiated,
             capture: plumbing.consumer,
             output: plumbing.output,
@@ -222,6 +222,7 @@ impl FakeBackend {
             guard: Box::new(()),
             patch: None,
         });
+        stream.set_stamp_clock(Arc::new(sim.stamp_clock()));
         Ok((stream, FakeDriver { sim: Box::new(sim) }))
     }
 }
