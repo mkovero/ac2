@@ -244,12 +244,17 @@ keys it refused lately (fingerprint, address, how often, when).
 
 *Clocks* gives a line per connected rig (named when there are several), what its daemon
 measures and what its OS says, nothing more:
-`clock: +6 ppm · system clock synced, OS bound ±3.0 ms`.
+`clock: +6 ppm against the system clock · system clock synced, OS bound ±3.0 ms`.
 
-- **+6 ppm** — the rig's audio device clock against its computer's clock, over the last
-  minute of audio (positive: the device runs fast). For the first minute after the audio
-  opens it reads *measuring…*; with no audio open, *no audio open*; a replayed recording has
-  no device clock (*none (a replayed recording)*).
+- **+6 ppm against the system clock** — the rig's audio device clock against its computer's
+  synchronised system clock, over the last minute of audio (positive: the device runs
+  fast). The audio driver times the audio on its own clock, often the computer's bare
+  crystal; on Linux ac2 reads that clock beside the system clock and takes its error out.
+  Where it cannot (macOS, Windows), or while the system clock is unsynced, the figure reads
+  *against this computer's own clock*: it then includes that clock's own error of a few
+  ppm. For the first minute after the audio opens it reads *measuring…*; with no audio open,
+  *no audio open*; a replayed recording has no device clock (*none (a replayed
+  recording)*).
 - **system clock synced / unsynced** — as the operating system states it (Linux; macOS and
   Windows state nothing: *not stated by the OS*). *OS bound ±3.0 ms* is the kernel's own
   bound on the clock's error, which grows between updates of the time service: a loose

@@ -294,8 +294,11 @@ Each daemon reports in its state, per device clock, what it can measure and what
 says, and infers nothing:
 
 - the sample clock's rate against the system clock as a deviation in ppm (`+6 ppm`), from
-  the block wall stamps over the last minute — the rig monitor already speaks ppm, and
-  `48 000.3 Hz` beside it would be the same number twice;
+  the block stamps over the last minute — the rig monitor already speaks ppm, and
+  `48 000.3 Hz` beside it would be the same number twice — with the clock it is against
+  stated: the backend stamps on its own clock, which may be the bare crystal, so the figure
+  is said against the system clock only where that clock was read beside it and the OS
+  says the system clock is synchronised, and otherwise against the computer's own clock;
 - the system clock's own status **as the OS states it**: on Linux the `adjtimex` status
   word (`STA_UNSYNC` clear or set) and its `maxerror` estimate; on macOS and Windows *not
   stated*. `maxerror` grows between updates (about 500 µs per second until the discipline
@@ -303,7 +306,8 @@ says, and infers nothing:
   turned into a "PTP" or "NTP" label. What a PTP-disciplined host actually reports is read
   on pupu and ketunkolo before the Connection page promises any figure.
 
-The Connection page shows per rig *clock: +6 ppm · system clock synced, OS bound ±0.4 ms*
+The Connection page shows per rig *clock: +6 ppm against the system clock · system clock
+synced, OS bound ±0.4 ms*
 and, once a remote stream exists (stage 3), per pair of rigs the measured relation of their
 capture streams. A cross-rig measurement's delay readout states its basis in words; when a
 host's clock is unsynced, or no backend timestamp has been validated for it, the delay is
@@ -429,7 +433,7 @@ until it answers or is closed. Names come from the rig and are display only
    bound reads looser than the discipline daemon's own offset (pupu ±3.0 ms, ketunkolo
    ±0.5 ms against offsets of about 1 µs) and is shown as it is. Text in
    `ac2_scene::clock`: Settings › Connection gets a *Clocks* section with a line per
-   connected rig (`pupu · clock: +6 ppm · system clock synced, OS bound ±3.0 ms`, the rig
+   connected rig (`pupu · clock: +6 ppm against the system clock · system clock synced, OS bound ±3.0 ms`, the rig
    named only when there are several); `ac2 status` prints `sample clock …` and `system
    clock …` lines and `clocks` in its JSON. The stimulus chips replace stage 1's single
    *kettu's stimulus on* item: one per rig not shown that is armed or playing, beside the
@@ -441,8 +445,34 @@ until it answers or is closed. Names come from the rig and are display only
    above; an armed rig's chip reads *kettu armed −24 dBFS*, a playing one
    *▶ kettu −24 dBFS*, and another client's stimulus on a background rig gets a chip too,
    with *· held by alice* (sound from a rig not shown is never silent, whoever holds it);
-   chips have no click and no key. The fake backend gained `host_clock_ppm` (stamps only)
-   for the daemon test.
+   chips have no click and no key.
+   The basis (PROTO 85): the block stamps are on the backend's own clock, and on ketunkolo
+   (JACK2 1.9.22, clocksource tsc, chrony) `jack_get_time()` runs at `CLOCK_MONOTONIC_RAW`'s
+   rate — two 30 s runs read jack − RAW +0.26 / −0.16 ppm, jack − MONOTONIC −7.91 / −8.31,
+   MONOTONIC − RAW +8.16 — so the PROTO 84 figure was the device against the undisciplined
+   crystal: ketunkolo's Babyface Pro, clocked over ADAT from the same reference as the time
+   service, read +8 (the crystal's −8.2 showing through), pupu's free-running FF400 +5
+   where the kernel's frequency correction of −0.64 puts it at ≈ +5.6. Now a stream that
+   can read its stamp clock beside the disciplined one carries an `ac2_audio::StampClock`:
+   JACK reads `jack_get_time` through the stream's own client (whatever clock the library
+   was built on: JACK2's `CLOCK_MONOTONIC_RAW`, PipeWire's `CLOCK_MONOTONIC`) between two
+   `CLOCK_MONOTONIC` reads (rejected when they lie over 20 µs apart, a preemption); the
+   fake reads its simulated crystal beside simulated true time. The fan-out
+   (`ac2d::capture_clock`) pairs at every hand-off into a second 60 s window, a pair per
+   250 ms of disciplined time, fitted with the same line (the disciplined clock's rate
+   against the stamp clock), and divides it out of the device's rate
+   (`ClockRate::against`); `Measured` carries `against: system_clock` then, and stays
+   `Measuring` until both windows span 54 s. Core Audio (host time) and ASIO (the
+   performance counter) stamp on undisciplined clocks and neither OS has a disciplined
+   monotonic clock to pair them with (the disciplined time scale there is the wall clock,
+   which steps; pairing against it with step rejection was left out as untestable here),
+   so they carry none and say `against: host_crystal`. Text: *+6 ppm against the system
+   clock* only for `system_clock` while the system clock is `Synced`; `host_crystal`, or a
+   system clock unsynced or not stated (it then follows only the crystal), reads *+8 ppm
+   against this computer's own clock*. Nothing about what disciplines the system clock is
+   assumed. The fake backend has `audio_clock_ppm` (the device against true time) and
+   `host_crystal_ppm` (the stamp clock against true time) for the daemon tests, which
+   reproduce both rigs.
 3. **Remote inputs** — after the timestamp and latency study; redesigned then on the list
    in §3.
 

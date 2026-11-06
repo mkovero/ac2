@@ -47,8 +47,9 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   takes another rig's pane, `ui.toml` keeps each pinned pane's rig by id (resolved when that
   rig is held again, any address), and a stored layout reads `ThisRig`/`Rig` panes for the
   rig it belongs to. Stage 2 landed (PROTO 84): the daemon's `clocks` entity (capture clock
-  ppm against the system clock over the last minute, the system clock as `adjtimex` states
-  it, *not stated* off Linux), shown per rig on Settings › Connection and by `ac2 status`,
+  ppm over the last minute, against the disciplined system clock where the backend's stamp
+  clock can be read beside it — JACK on Linux, PROTO 85 — else against the computer's own
+  clock; the system clock as `adjtimex` states it, *not stated* off Linux), shown per rig on Settings › Connection and by `ac2 status`,
   and a top-bar chip per background rig whose stimulus is armed or playing
   (`▶ kettu −24 dBFS`). Next: stage 3, remote inputs, after the timestamp study.
 - Open hardware gates (1.0): duplex check and 1 h run on macOS (Windows: done in a VM,
