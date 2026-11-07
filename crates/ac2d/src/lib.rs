@@ -60,6 +60,7 @@ mod osc;
 mod outbox;
 mod peers;
 mod preview;
+mod refusals;
 mod rig;
 mod rig_id;
 mod session;

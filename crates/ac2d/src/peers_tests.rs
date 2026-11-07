@@ -89,6 +89,7 @@ impl Rig {
         while let Some(m) = self.router.recv_timeout(Duration::from_millis(5)).unwrap() {
             self.peers.request(
                 &self.router,
+                None,
                 m.into_frames(),
                 &self.interest,
                 Instant::now(),

@@ -32,7 +32,9 @@ use ac2_proto::{DataUp, FlowNotice, Subscription, Topic, decode_data_request, en
 use ac2_zmq::{Error as ZmqError, Part, Socket};
 
 use crate::chain::{Chain, Encoded, Encodes, Slot};
+use crate::control::CurvePeer;
 use crate::io::Interest;
+use crate::refusals::Refusals;
 use crate::util::hex;
 
 /// Send queue of the data ROUTER per peer, in messages: twice what credit and the event
@@ -291,6 +293,8 @@ impl Peer {
 pub(crate) struct Peers {
     map: HashMap<Vec<u8>, Peer>,
     encodes: Encodes,
+    /// Undecodable requests already warned about.
+    refusals: Refusals,
 }
 
 fn subscribe(interest: &Interest, s: &Subscription) {
@@ -303,10 +307,11 @@ impl Peers {
         self.map.len()
     }
 
-    /// One message from a peer: `[routing id][request]`.
+    /// One message from a peer: `[routing id][request]`, from `client` when it passed CURVE.
     pub(crate) fn request(
         &mut self,
         sock: &Socket,
+        client: Option<&CurvePeer>,
         frames: Vec<Vec<u8>>,
         interest: &Interest,
         now: Instant,
@@ -321,7 +326,13 @@ impl Peers {
         let req = match decode_data_request(body) {
             Ok(r) => r,
             Err(e) => {
-                tracing::warn!("data request from peer {} dropped: {e}", hex(rid));
+                let why = e.to_string();
+                let who = client.map_or("a local client", |c| c.name.as_str());
+                if self.refusals.first(client.map(|c| c.key), &why) {
+                    tracing::warn!("data request from {who} dropped: {why} (repeats at debug)");
+                } else {
+                    tracing::debug!("data request from {who} ({}) dropped: {why}", hex(rid));
+                }
                 return;
             }
         };

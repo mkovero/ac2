@@ -393,6 +393,8 @@ pub(crate) struct Control {
     next_ka: Instant,
     /// The clocks entity's sources.
     clocks: clocks::ClockWatch,
+    /// Refused requests already warned about.
+    refusals: crate::refusals::Refusals,
     /// systemd's readiness and watchdog, pinged from this loop's keepalive tick so that a
     /// stuck loop stops the pings and gets the daemon restarted.
     notify: ac2_paths::notify::Notifier,
@@ -566,6 +568,7 @@ impl Control {
             next_token: 1,
             next_ka: Instant::now(),
             clocks: clocks::ClockWatch::new(store_system),
+            refusals: crate::refusals::Refusals::default(),
             damaged,
             notify: if s.systemd_notify {
                 ac2_paths::notify::Notifier::from_env()

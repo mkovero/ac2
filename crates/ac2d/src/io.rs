@@ -235,7 +235,16 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
             let now = Instant::now();
             for _ in 0..BATCH {
                 match data.try_recv() {
-                    Ok(Some(m)) => peers.request(data, m.into_frames(), interest, now),
+                    Ok(Some(m)) => {
+                        let client = m
+                            .user_id()
+                            .zip(m.client_key())
+                            .map(|(name, key)| CurvePeer {
+                                name: name.to_owned(),
+                                key,
+                            });
+                        peers.request(data, client.as_ref(), m.into_frames(), interest, now);
+                    }
                     Ok(None) => break,
                     Err(e) => {
                         tracing::warn!("data recv: {e}");

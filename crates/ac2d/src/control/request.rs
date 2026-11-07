@@ -83,7 +83,18 @@ impl Control {
         };
         let id = env.id.unwrap_or(RequestId(0));
         if env.v != Some(PROTO_VERSION) {
-            tracing::warn!("refused a client at protocol version {:?}", env.v);
+            let why = match env.v {
+                Some(v) => format!("protocol version {v}"),
+                None => "no protocol version".to_owned(),
+            };
+            let who = peer.as_ref().map_or("a local client", |p| p.name.as_str());
+            if self.refusals.first(peer.as_ref().map(|p| p.key), &why) {
+                tracing::warn!(
+                    "refused {who} at {why}, this build speaks {PROTO_VERSION} (repeats at debug)"
+                );
+            } else {
+                tracing::debug!("refused {who} at {why}");
+            }
             self.send_reply(routing_id, &Reply::version_refusal(id, env.v));
             return;
         }
