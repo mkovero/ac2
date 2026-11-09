@@ -201,6 +201,28 @@ Cross-correlation gives the difference of the two interfaces' stamp errors and t
 | Ratio wander of a free-running rig (phase A, before the lock) | converter tracking bandwidth for rigs not on the Orion, stated |
 | Network p99.9 + one block | the stated *remote inputs add N ms* |
 
+### First target: a transfer function over a remote stream
+
+Operator 2026-11-09: the first use is a live transfer function where one of the two channels,
+the reference or the measurement, arrives as a remote stream. That is the easy target:
+- **The delay finder absorbs the offset.** A transfer function's delay is found by correlating
+  reference and measurement, so an unknown but *constant* cross-rig offset only adds to the
+  found delay. Q3/Q7 (the absolute map) is not needed. The delay readout then says it includes
+  the cross-rig offset, unless B2 has measured it.
+- **What it needs:**
+  - **an exact ratio**, from the Orion lock (B1) or a tracked converter for a free-running rig
+    (Q2): any drift tilts the phase and smears averaging (`multi-device.md` §7);
+  - **an offset that stays put** within a session: no slips (B1), no stream re-anchoring;
+    a jump is handled like the delay finder's own re-lock;
+  - **a buffer** that covers the network (Q6).
+- **What changes in `multi-rig.md` §3:** it says the reference is never remote. That holds for
+  the *timing monitor's* loopback, which must return on the same converter as its output. A
+  transfer function's reference channel may come from another rig, with the stimulus's own
+  loopback still watched on the rig that plays it.
+
+So phase A (ratio, stability) plus B1 (lock, no slips) plus C (network) are enough for the first
+stage 3 build. B2 and the stamp path's value only matter for a delay stated in absolute terms.
+
 ## 7. Write-up
 
 The results go into `multi-device.md` §7 as measured tables, with the methods above:
