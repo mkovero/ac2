@@ -150,8 +150,18 @@ fn a_rig_down_and_back() {
     // Pupu shown, with kettu's panes beside its own.
     pick_first_rig(&mut h);
     step_until(&mut h, "pupu shown", |a| a.state.active() == PUPU);
+    h.state_mut().state.toasts.list.clear();
     kettu.fake.lock().ka_paused = true;
-    step_until(&mut h, "kettu down", |a| !connected(a, KETTU));
+    // The link reconnects on its own at once, so on a slow runner every frame can land while
+    // it is up again: its keepalive toast is the drop's lasting trace.
+    step_until(&mut h, "kettu down", |a| {
+        !connected(a, KETTU)
+            || a.state
+                .toasts
+                .list
+                .iter()
+                .any(|t| t.text.starts_with("kettu:") && t.text.contains("no keepalive"))
+    });
     let away = ac2_scene::chrome::rig_pane_unreachable("kettu");
     // The link reconnects on its own and the paused keepalives drop it again: whenever it
     // is down as a frame is drawn, kettu's panes say so.
