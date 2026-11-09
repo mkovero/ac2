@@ -220,6 +220,18 @@ the reference or the measurement, arrives as a remote stream. That is the easy t
   transfer function's reference channel may come from another rig, with the stimulus's own
   loopback still watched on the rig that plays it.
 
+- **A rig at another site** (operator 2026-11-09): no shared cable, so each site disciplines
+  its own interface from GNSS, through a GNSS-disciplined word clock generator or a local PTP
+  grandmaster. That is how AES67/ST 2110 remote production keeps sites in one time base without
+  carrying PTP over the WAN. Both rigs then read 0 ppm in stage 2's clock line, so the ratio is
+  exact as with the Orion, and the offset is the delay finder's again.
+- **Buffering follows AES67/Dante, not a new design.** The receiver plays a block in at its
+  timestamp plus a fixed **link offset**, Dante's receiver latency setting. A block arriving
+  late is a marked gap, counted, never stretched. The offset is fixed for a session: moving it
+  shifts every delay, and the transfer function would re-lock. Phase C only picks the default
+  link offset for a LAN, and the figure the Audio & I/O page states. A WAN rig gets a larger
+  setting, chosen by the operator.
+
 So phase A (ratio, stability) plus B1 (lock, no slips) plus C (network) are enough for the first
 stage 3 build. B2 and the stamp path's value only matter for a delay stated in absolute terms.
 
