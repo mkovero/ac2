@@ -17,20 +17,21 @@ design promises a number.
 | Q2 | How does the rate ratio between two rigs move over an hour? | the converter's ratio tracking (§5 of `multi-device.md` gives the model) |
 | Q3 | What is the offset between a stamp and the instant the ADC sampled, per interface, rate, buffer size and input type? Does the backend's reported latency cover it? | whether stamps alone can give a cross-rig delay |
 | Q4 | Is that offset the same after a stream restart, a jackd restart and a reboot? | per-interface constant, or measured on each open |
-| Q5 | How far is each host's disciplined clock from the true second? | the host term of the stamp path |
+| Q5 | How do the two hosts' disciplined clocks differ, and how steady is that? (Absolute error only as chrony reports it; nothing here measures the true second.) | the host term of the stamp path |
 | Q6 | How do block-sized messages arrive over the existing data connection under normal load? | the buffer delay (*remote inputs add N ms*) |
 | Q7 | Measured directly: how does B's sample index map onto A's, from one channel captured by both? | the reference every other path is judged against |
 
 ## 2. Error budget
 
 The stage 3 offset can come from three sources, with different budgets. Target: **±10 µs**
-(3.6° at 1 kHz, 36° at 10 kHz; half a sample at 48 kHz is 10.4 µs).
+(3.6° at 1 kHz, 36° at 10 kHz; half a sample at 48 kHz, the slower rig, is 10.4 µs; at 96 kHz
+half a sample is 5.2 µs).
 
 | Term | Path | Expected | Measured by |
 |---|---|---|---|
 | Stamp residual after the line fit | stamps | µs on USB; larger on pupu, where FireWire iso cycles quantise period timing at 125 µs before JACK's DLL | phase A, Q1 |
 | ADC-to-stamp constant (converter group delay + whatever the reported latency misses) | stamps | tens of samples, rate dependent; RME manuals state AD latency per rate | phase B, Q3 |
-| Host clock vs true second | stamps | **tens to hundreds of µs.** Both hosts run *software-timestamped* PTP: ketunkolo over a veth on a bridge, pupu unicast across a router (~0.5 ms path, asymmetry unmeasured). The ±10 µs target does not survive this term. | phase B, Q5 (composite) |
+| Host clocks against each other | stamps | **tens to hundreds of µs.** Both hosts run *software-timestamped* PTP: ketunkolo over a veth on a bridge, pupu unicast across a router (~0.5 ms path, asymmetry unmeasured). The ±10 µs target does not survive this term. | phase B, as a cross-host composite; absolute error only as chrony self-reports |
 | Network arrival jitter | all | ms; adds latency, not offset error | phase C, Q6 |
 | Shared digital channel into both rigs | Orion ADAT | exact: an integer number of samples | phase B, Q7 |
 
@@ -53,7 +54,7 @@ this estimate.
   (`flow-control.md`); `multi-rig.md` §3 still says PUB and is corrected when stage 3 is
   redesigned.
 - Ground truth (`~/src/sys/aika.md`): **aika**, GNSS time server with an AR-40A rubidium, PTP
-  grandmaster of both hosts, u-blox ZED-F9T 1PPS. ketunkolo's Babyface Pro (96 kHz) is clocked
+  grandmaster of both hosts, u-blox ZED-F9T 1PPS (not used: no PPS to the rigs, §5 phase B). ketunkolo's Babyface Pro (96 kHz) is clocked
   over ADAT from the same reference (≈0 ppm). pupu's FF400 (48 kHz) is free-running (≈ +5.6 ppm).
 
 ## 4. Standards: what they answer and what they don't
@@ -79,7 +80,7 @@ whether its ratio and its offset are *known* or *tracked*:
 | Offset from | Ratio | What stage 3 can state |
 |---|---|---|
 | A shared channel (one Orion source on both rigs' ADAT inputs) | exact (both locked to the Orion) | sample-accurate delay; the target is reachable |
-| Stamps + disciplined host clocks | locked: exact rational; free-running: tracked from stamps | delay within the measured budget of §2, stated with it |
+| Stamps + disciplined host clocks | locked: exact rational (a fixed 2:1 decimator/interpolator, not an ASRC); free-running: tracked from stamps | delay within the measured budget of §2, stated with it |
 | Neither | tracked | *offset unknown*: magnitude only, phase marked (`multi-rig.md` §4) |
 
 If Q4 shows the USB latency moves per open (Babyface-class devices can shift by USB frames on
@@ -88,7 +89,9 @@ must build.
 
 ## 5. Phases
 
-Nothing in this study emits sound from ac2. One tool covers phases A and B.
+Nothing in this study emits sound from ac2. One tool covers phases A and B. Two optional
+checks put an electrical signal on an interface output through other tools; the operator runs
+them: a `jack_iodelay` round trip per rig, and the analog-input constant at the end of phase B.
 
 ### Tool: `ac2 selftest stamps [--keep <channel>]` (build first)
 Capture-only, no daemon: opens the backend as an extra JACK client beside the running daemon
@@ -98,8 +101,10 @@ and refuses outputs (the same rule as `selftest duplex`). Per block it writes:
   stamp uses max, which biases it when the range is not degenerate);
 - paired CLOCK_MONOTONIC and CLOCK_REALTIME reads with the bracket width.
 
-With `--keep`: that channel's samples are written beside the CSV (f32 WAV with the block
-index), for phase B's cross-correlation. Every 10 s, a side log of `chronyc tracking` and
+With `--keep`: that channel's samples are written beside the CSV unmodified (f32 WAV, which
+holds 24-bit samples exactly, with the block index), for phase B's comparison. The CSV header
+records the input's TotalMix state (gain, EQ, dynamics), so that a failed bit match can be
+explained. Every 10 s, a side log of `chronyc tracking` and
 `pmc TIME_STATUS_NP`. Analysis in Python under `tools/experiments/timing/` (like `q1/`); CSVs
 and recordings from the rigs stay private.
 
@@ -116,29 +121,47 @@ Operator decision 2026-11-09: no PPS run to the rigs (possible, but a lot of wor
 **Antelope Orion 32HD** is the master clock: it takes the rubidium in and already clocks
 ketunkolo's Babyface over ADAT. It gives pupu's FF400 word clock too.
 
-- **B1: lock.** FF400 on word clock from the Orion. Stage 2's clock line on pupu must then read
-  ≈ 0 ppm like ketunkolo's: the first check, already in the app. The ratio between the rigs is
-  then exact (1 : 2 for 48 : 96 kHz). The logger repeats phase A locked (Q1 again, Q2 must be 0).
-- **B2: the offset (Q7), without emitting.** Word clock fixes the ratio only; which sample of
-  A goes with which sample of B is still an unknown constant per open. If the FF400 takes the
-  Orion over **ADAT** instead of (or as well as) word clock, the Orion can route one source
-  to both ADAT outputs. Both rigs then capture identical samples, even an unconnected input's
-  own noise floor, so no sound is played. Cross-correlating the two captures gives the map
-  exactly: an integer in samples, since both converters' paths are digital from the Orion on.
-  That requires the Orion's rate to suit both rigs (ADAT at 96 kHz is S/MUX, half the
-  channels), an operator question (§8).
+- **B1: lock.** FF400 clock source **ADAT In**, from an Orion ADAT output. The ADAT frame
+  clock is 48 kHz whatever the Orion runs at, so it sidesteps the question of whether the
+  Orion's word clock out follows its 96 kHz and whether the FF400 at 48 kHz accepts a 2× word
+  clock. Word clock stays the alternative, verified in the FF400 and Orion manuals before
+  cabling.
+  - Stage 2's clock line on pupu must then read ≈ 0 ppm like ketunkolo's: the first check,
+    already in the app.
+  - The ratio between the rigs is then exact, 1 : 2, so the stage 3 converter is a fixed
+    decimator/interpolator.
+  - The logger repeats phase A locked. With the sample clock at 0 ppm against the rubidium,
+    each stamp line against REALTIME becomes a µs-class reading of that host's chrony wander
+    against the rubidium.
+  - With both rigs locked, the stability of the stamp path's cross-rig composite over an hour
+    and across restarts (the Q4 verdict) needs no shared channel. Only its value needs B2.
+- **B2: the offset (Q7), without emitting.** The lock fixes the ratio only: which sample of A
+  goes with which sample of B is still an unknown constant per open.
+  - The Orion routes one source to both ADAT outputs; even an unconnected input's own noise
+    floor will do, so nothing is played. Both rigs then capture identical samples.
+  - With the Orion at 96 kHz, ADAT carries each channel as S/MUX: two 48 kHz slots, even and
+    odd samples. ketunkolo at 96 kHz reads x[m]. The FF400 at 48 kHz reads the pair as two
+    plain channels a[n] = x[2n + p] and b[n] = x[2n + 1 + p]. The map is still exact:
+    `pupu_a[n] = ket[2n + d]`, an integer d plus a parity.
+  - The analysis converts both captures to integers and searches integer lags for **bit
+    equality**, not float cross-correlation. Equality proves the map. A mismatch means
+    something touches the samples (TotalMix gain/EQ in the record path, dither, a rate
+    converter), and that is a finding in itself.
 - **B3: the stamp path (Q3–Q5 composite).** With B2's exact map as truth, each rig's
-  stamp-derived REALTIME for the shared sample minus the other's is the stamp path's
-  cross-rig error: stamps, ADC-to-stamp constants and both hosts' clock errors together.
-  It's measured at both buffer sizes and again after a stream restart, a jackd restart and a
-  reboot (Q4).
-- **Priors:** the RME manuals' AD latency per rate. A single `jack_iodelay` round trip per rig
-  checks `cap_lat`; it emits a test signal into the loopback, so the operator runs it.
+  stamp-derived REALTIME for the shared sample minus the other's is the stamp path's cross-rig
+  error: stamps, ADAT receive constants and the difference of the hosts' clock errors
+  together. It's measured at both buffer sizes and again after a stream restart, a jackd
+  restart and a reboot (Q4).
+- **Priors:** the RME manuals' AD latency per rate. The operator-run `jack_iodelay` (above)
+  checks `cap_lat`.
 
-What it does not give: each interface's absolute ADC latency against the true second (that
-needs the PPS). Stage 3 needs only the cross-rig map, so B2 is enough for stage 3. An analog
-input on a rig adds its own AD delay, a constant measurable once against the same shared
-channel when that input is used.
+What it does not give:
+- **Absolute latency.** Each interface's absolute ADC latency against the true second needs the
+  PPS. Stage 3 needs only the cross-rig map, so B2 is enough.
+- **Analog inputs.** B3 holds for the ADAT input. An analog input on the same interface differs
+  by (ADC group delay − ADAT receive delay), a per-interface, per-rate constant. It comes from
+  the RME manual, or from an operator-run electrical loop: an Orion analog output into the
+  rig's line input, with the same source on ADAT.
 
 ### Phase C: network (agent-run, no audio)
 A small binary against `ac2-zmq` streams block-sized messages of zeros at the real rate (48 k
@@ -181,8 +204,9 @@ goes through the design review loop before any build.
 Answered 2026-11-09: no PPS to the rigs; the Orion 32HD (rubidium in, ketunkolo's ADAT master)
 gives pupu's FF400 word clock.
 
-1. Can the FF400 also take an ADAT stream from the Orion, with one Orion source routed to both
-   rigs' ADAT inputs? What rate does the Orion run at: does pupu move to 96 kHz, or does the
-   Orion feed each rig at its own rate?
+1. Can the FF400 take an ADAT stream from a free Orion ADAT output and clock from it (ADAT In
+   as clock source), with one Orion source routed to both rigs' ADAT inputs? That one cable
+   gives both the lock and the shared channel, and the rates stay as they are (the Orion at
+   96 kHz reaches pupu as S/MUX).
 2. Stage 3's stream (unchanged question, restated): ac2's own sample stream over the data wire
    it already has, borrowing AES67's time model, rather than real AES67 RTP: agree?
