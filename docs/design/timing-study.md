@@ -245,6 +245,43 @@ The results go into `multi-device.md` §7 as measured tables, with the methods a
 `multi-rig.md` §3 is then rewritten from them, PUB corrected to the data wire as built. Stage 3
 goes through the design review loop before any build.
 
+## 7b. Results so far
+
+**Phase A, run 1 (2026-11-09 07:34–08:34 UTC, concurrent, daemons running, a14a94e0).** Both
+rigs 96 kHz; pupu 256 frames (FF400, free-running), ketunkolo 128 frames (Babyface Pro on
+the Orion). No gaps, no xruns, one stretch each. Both jackd stamp on CLOCK_MONOTONIC_RAW
+(stamp − RAW median −0.6 µs).
+
+| | pupu | ketunkolo |
+|---|---|---|
+| sample clock vs stamp clock (RAW), 1 h line | +4.885 ppm | +8.323 ppm |
+| CLOCK_MONOTONIC vs RAW (pairs) | −0.694 ppm | +8.322 ppm |
+| **sample clock vs disciplined clock** | **+5.58 ppm** | **+0.001 ppm** |
+| stamp residual about the 1 h line: σ / p99 / max | 16.7 / 41 / 172 µs | 13.7 / 31 / 39 µs |
+| rate in 60 s windows vs RAW: sd / peak-to-peak | 0.14 / 0.60 ppm | 0.07 / 0.31 ppm |
+| pair map RAW→REALTIME scatter | 13.0 µs | 8.4 µs |
+
+Ratio pupu / ketunkolo against REALTIME, 60 s windows: **+5.45 ppm mean, 0.40 ppm sd, trend
+−0.13 ppm/h**.
+
+What it says:
+- **The lock is real at the ppb level.** Over an hour, ketunkolo's Babyface on the Orion reads
+  +0.001 ppm against a clock that chrony disciplines from aika over software PTP: the rubidium
+  seen twice, once through ADAT and once through the network. Stage 2's 0 ppm line is right,
+  and a host's disciplined clock is a good *rate* reference when averaged over an hour.
+- **The stamp path cannot place a sample.** About 15 µs σ, p99 30–40 µs and a 172 µs spike on
+  pupu's FireWire. That is several samples at 96 kHz (one sample is 10.4 µs), as §2 predicted.
+  A cross-rig offset from stamps is a stated bound in tens of µs, never sample-accurate.
+- **Tracking a free-running rig from stamps is coarse.** Minute-by-minute the ratio moves
+  0.4 ppm sd: 24 µs of slide per minute, 86° per minute at 10 kHz, mostly host clock noise
+  rather than the FF400. A free-running remote rig would need its ratio from the audio itself
+  (the delay finder's drift line, `multi-device.md` §5) or a long average. **Locking to one
+  reference (the Orion, GNSS per site) is the way**, which is what the operator chose.
+- pupu's FF400 is a steady +5.4 to +5.6 ppm, drifting 0.13 ppm/h: a slow crystal.
+
+Not yet done: the second buffer size on each rig (it changes jackd's period under the running
+daemon and app, so the operator times it), B1 (FF400 on the Orion's word clock), phase C.
+
 ## 8. Operator decisions
 
 2026-11-09:
