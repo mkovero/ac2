@@ -286,7 +286,7 @@ ac2's own, over the connection it already secures, and touches no jackd.
 
 Precondition for designing stage 3 further: a timestamp and latency study on pupu and
 ketunkolo (backend timestamp against loopback, over an hour, both hosts), written up in
-`multi-device.md` §7 (input-vs-input, designed never built) which this stage would build.
+`multi-device.md` §7 (input-vs-input, designed never built) which this stage would build. The study's plan is `timing-study.md`.
 
 ## 4. Clocks across hosts (N4)
 
