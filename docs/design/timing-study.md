@@ -135,6 +135,19 @@ ketunkolo's Babyface over ADAT. It gives pupu's FF400 word clock too.
     against the rubidium.
   - With both rigs locked, the stability of the stamp path's cross-rig composite over an hour
     and across restarts (the Q4 verdict) needs no shared channel. Only its value needs B2.
+- **What "locked" means here.** The reference does not clock the converter directly: the
+  interface's own PLL (RME's SteadyClock on the units that have it; check the FF400 manual)
+  is disciplined by the word clock or ADAT edges and makes the sample clock. Locked, the PLL
+  tracks the reference's frequency with a bounded phase error: no long-term drift, a
+  short-term wander inside the loop's bandwidth, and an arbitrary phase between word clock
+  edge and sample index set at each lock. B1 checks what each part means for stage 3:
+  - **No slips:** over an hour the locked rig's rate against REALTIME stays at 0 ppm within
+    the host clock's noise (ketunkolo already reads 0 / 0 ppm).
+  - **Wander:** sub-sample, below what the stamp path can see; only B2 could resolve it.
+    A µs-class wander would show up as the cross-rig composite moving.
+  - **Losing the reference:** the PLL holds over, and the interface falls back to its internal
+    clock. Pull the word clock for a minute once: stage 2's clock line should leave 0 ppm, and
+    stage 3 must notice the same and stop treating the ratio as exact.
 - **B2: the offset (Q7), without emitting.** The lock fixes the ratio only: which sample of A
   goes with which sample of B is still an unknown constant per open.
   - The Orion routes one source to both ADAT outputs; even an unconnected input's own noise
