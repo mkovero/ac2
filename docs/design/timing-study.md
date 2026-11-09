@@ -199,14 +199,18 @@ The results go into `multi-device.md` §7 as measured tables, with the methods a
 `multi-rig.md` §3 is then rewritten from them, PUB corrected to the data wire as built. Stage 3
 goes through the design review loop before any build.
 
-## 8. Questions for the operator
+## 8. Operator decisions
 
-Answered 2026-11-09: no PPS to the rigs; the Orion 32HD (rubidium in, ketunkolo's ADAT master)
-gives pupu's FF400 word clock.
-
-1. Can the FF400 take an ADAT stream from a free Orion ADAT output and clock from it (ADAT In
-   as clock source), with one Orion source routed to both rigs' ADAT inputs? That one cable
-   gives both the lock and the shared channel, and the rates stay as they are (the Orion at
-   96 kHz reaches pupu as S/MUX).
-2. Stage 3's stream (unchanged question, restated): ac2's own sample stream over the data wire
-   it already has, borrowing AES67's time model, rather than real AES67 RTP: agree?
+2026-11-09:
+- **No PPS to the rigs.** Possible, but a lot of work.
+- **The Orion 32HD clocks pupu.** It takes the rubidium in, clocks ketunkolo's Babyface over
+  ADAT, and can give pupu's FF400 word clock easily.
+- **Word clock first.** ADAT from the Orion to the FF400 is possible in theory, but there are
+  no spare fibres. So phase B1 uses word clock (rates checked in the FF400 and Orion manuals
+  before cabling).
+- **B2 (shared ADAT channel) only if no other option** gives the cross-rig map. Until then
+  the stamp path (B3) stands without an exact truth: its stability across restarts (B1's yield)
+  is measured, its absolute value is not.
+- **Stage 3's stream is ac2's own,** over the data wire it already has, using the AES67 time
+  model: sample index plus its instant, played in at a fixed link offset. Real AES67 support
+  is the future direction (send and receive), not stage 3.
