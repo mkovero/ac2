@@ -24,8 +24,8 @@ design promises a number.
 ## 2. Error budget
 
 The stage 3 offset can come from three sources, with different budgets. Target: **±10 µs**
-(3.6° at 1 kHz, 36° at 10 kHz; half a sample at 48 kHz, the slower rig, is 10.4 µs; at 96 kHz
-half a sample is 5.2 µs).
+(3.6° at 1 kHz, 36° at 10 kHz; half a sample at 48 kHz is 10.4 µs; both rigs run 96 kHz,
+where half a sample is 5.2 µs).
 
 | Term | Path | Expected | Measured by |
 |---|---|---|---|
@@ -55,7 +55,7 @@ this estimate.
   redesigned.
 - Ground truth (`~/src/sys/aika.md`): **aika**, GNSS time server with an AR-40A rubidium, PTP
   grandmaster of both hosts, u-blox ZED-F9T 1PPS (not used: no PPS to the rigs, §5 phase B). ketunkolo's Babyface Pro (96 kHz) is clocked
-  over ADAT from the same reference (≈0 ppm). pupu's FF400 (48 kHz) is free-running (≈ +5.6 ppm).
+  over ADAT from the same reference (≈0 ppm). pupu's FF400 (96 kHz/256, read from the logger 2026-11-09) is free-running (≈ +5.6 ppm).
 
 ## 4. Standards: what they answer and what they don't
 
@@ -80,7 +80,7 @@ whether its ratio and its offset are *known* or *tracked*:
 | Offset from | Ratio | What stage 3 can state |
 |---|---|---|
 | A shared channel (one Orion source on both rigs' ADAT inputs) | exact (both locked to the Orion) | sample-accurate delay; the target is reachable |
-| Stamps + disciplined host clocks | locked: exact rational (a fixed 2:1 decimator/interpolator, not an ASRC); free-running: tracked from stamps | delay within the measured budget of §2, stated with it |
+| Stamps + disciplined host clocks | locked: exact (1 : 1 at the rigs' common 96 kHz; a fixed rational converter at different rates, never an ASRC); free-running: tracked from stamps | delay within the measured budget of §2, stated with it |
 | Neither | tracked | *offset unknown*: magnitude only, phase marked (`multi-rig.md` §4) |
 
 If Q4 shows the USB latency moves per open (Babyface-class devices can shift by USB frames on
@@ -109,7 +109,7 @@ explained. Every 10 s, a side log of `chronyc tracking` and
 and recordings from the rigs stay private.
 
 ### Phase A: stamps alone (agent-run now, both hosts, 1 h each)
-The logger without `--keep`, at each rig's settings (pupu 48 k/FF400, ketunkolo 96 k/128),
+The logger without `--keep`, at each rig's settings (pupu 96 k/256, ketunkolo 96 k/128),
 then one other buffer size each.
 - **Answers:** Q1 (residual on the raw stamp clock; REALTIME is slewed by chrony and would read
   as wander) and Q2 across hosts (both runs concurrent, ratio from the stamp lines mapped to
@@ -122,13 +122,12 @@ Operator decision 2026-11-09: no PPS run to the rigs (possible, but a lot of wor
 ketunkolo's Babyface over ADAT. It gives pupu's FF400 word clock too.
 
 - **B1: lock.** FF400 clock source **ADAT In**, from an Orion ADAT output. The ADAT frame
-  clock is 48 kHz whatever the Orion runs at, so it sidesteps the question of whether the
-  Orion's word clock out follows its 96 kHz and whether the FF400 at 48 kHz accepts a 2× word
-  clock. Word clock stays the alternative, verified in the FF400 and Orion manuals before
+  clock is 48 kHz whatever the Orion runs at (96 kHz is S/MUX on ADAT), so it sidesteps the
+  question of which word clock rate the Orion sends. Word clock stays the alternative, verified in the FF400 and Orion manuals before
   cabling.
   - Stage 2's clock line on pupu must then read ≈ 0 ppm like ketunkolo's: the first check,
     already in the app.
-  - The ratio between the rigs is then exact, 1 : 2, so the stage 3 converter is a fixed
+  - The ratio between the rigs is then exact, 1 : 1 at 96 kHz, so the stage 3 converter is a fixed
     decimator/interpolator.
   - The logger repeats phase A locked. With the sample clock at 0 ppm against the rubidium,
     each stamp line against REALTIME becomes a µs-class reading of that host's chrony wander
@@ -153,9 +152,9 @@ ketunkolo's Babyface over ADAT. It gives pupu's FF400 word clock too.
   - The Orion routes one source to both ADAT outputs; even an unconnected input's own noise
     floor will do, so nothing is played. Both rigs then capture identical samples.
   - With the Orion at 96 kHz, ADAT carries each channel as S/MUX: two 48 kHz slots, even and
-    odd samples. ketunkolo at 96 kHz reads x[m]. The FF400 at 48 kHz reads the pair as two
-    plain channels a[n] = x[2n + p] and b[n] = x[2n + 1 + p]. The map is still exact:
-    `pupu_a[n] = ket[2n + d]`, an integer d plus a parity.
+    odd samples. Both rigs run 96 kHz and read x[m] back from the pair, so the map is
+    `pupu[n] = ket[n + d]`, an integer d. (A rig at 48 kHz would read the pair as two plain
+    channels a[n] = x[2n + p], b[n] = x[2n + 1 + p]: still exact, `a[n] = ket[2n + d]`.)
   - The analysis converts both captures to integers and searches integer lags for **bit
     equality**, not float cross-correlation. Equality proves the map. A mismatch means
     something touches the samples (TotalMix gain/EQ in the record path, dither, a rate
@@ -177,8 +176,8 @@ What it does not give:
   rig's line input, with the same source on ADAT.
 
 ### Phase C: network (agent-run, no audio)
-A small binary against `ac2-zmq` streams block-sized messages of zeros at the real rate (48 k
-mono f32 = 1.5 Mbit/s), daemon host to daemon host, over CURVE ROUTER/DEALER with credit, for
+A small binary against `ac2-zmq` streams block-sized messages of zeros at the real rate (96 k
+mono f32 = 3.1 Mbit/s), daemon host to daemon host, over CURVE ROUTER/DEALER with credit, for
 1 h while the app runs as usual.
 - **Logs:** send and arrival instants and credit stalls.
 - **Answers:** Q6 (p50/p99/p99.9/max). The buffer delay is the bound plus one block.
