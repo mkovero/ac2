@@ -71,7 +71,7 @@ pub struct ClockRate {
 }
 
 impl ClockRate {
-    fn from_fit(fit: RateFit, nominal: f64) -> Option<Self> {
+    pub(super) fn from_fit(fit: RateFit, nominal: f64) -> Option<Self> {
         core::ClockRate::from_fit(fit, nominal).map(|r| Self {
             hz: r.hz,
             ppm: r.ppm,

@@ -85,5 +85,7 @@ pub use level::{Gain, LevelError, MaxLevel};
 pub use load::{LoadTotals, StreamHealth};
 pub use output::{FADE_SECONDS, OutputSource, OutputState, OutputStats, OutputTick};
 pub use replay::{FrameSource, OpenSource, ReplayBackend, ReplayConfig, ReplayMark, ReplaySpeed};
-pub use stamp::{ClockPair, StampClock};
+#[cfg(target_os = "linux")]
+pub use stamp::bracket_host_clocks;
+pub use stamp::{ClockPair, HostClocks, StampClock};
 pub use stream::{DuplexStream, GraphPatch, PatchLink, PatchState, SpareLink, StopOutcome};

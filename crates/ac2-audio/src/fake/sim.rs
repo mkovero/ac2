@@ -481,4 +481,8 @@ impl crate::stamp::StampClock for FakeStampClock {
             disciplined_ns: self.cfg.true_ns(frames),
         })
     }
+
+    fn now_ns(&self) -> Option<u64> {
+        Some(self.cfg.host_ns(self.now_frames.load(Ordering::Acquire)))
+    }
 }

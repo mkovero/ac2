@@ -11,7 +11,7 @@ use ac2_audio::{
 };
 
 use super::devsel;
-use crate::args::{BackendArg, Cli, SelftestCmd, SelftestDuplex};
+use crate::args::{BackendArg, Cli, SelftestCapture, SelftestCmd, SelftestDuplex};
 use crate::output::Out;
 use crate::selftest::{self, DuplexReport, DuplexSpec, Emit, SetupError, Spread};
 use crate::watch::quit_signal;
@@ -20,6 +20,7 @@ use crate::{BUILD_ID, CliError};
 pub(crate) async fn run(_cli: &Cli, cmd: &SelftestCmd, out: &mut Out<'_>) -> Result<(), CliError> {
     match cmd {
         SelftestCmd::Duplex(a) => duplex(a, out).await,
+        SelftestCmd::Stamps(a) => super::selftest_stamps::stamps(a, out).await,
     }
 }
 
@@ -37,12 +38,18 @@ fn fake() -> Result<FakeBackend, CliError> {
     .map_err(|e| CliError::Usage(e.to_string()))
 }
 
-fn backend(b: BackendArg) -> Result<Arc<dyn Backend>, CliError> {
+/// `b`; on JACK a client named `client` (JACK makes it unique when one of that name runs).
+pub(super) fn backend(b: BackendArg, client: &str) -> Result<Arc<dyn Backend>, CliError> {
+    #[cfg(not(target_os = "linux"))]
+    let _ = client;
     match b {
         BackendArg::Fake => Ok(Arc::new(fake()?)),
         #[cfg(target_os = "linux")]
         BackendArg::Jack => Ok(Arc::new(ac2_audio::JackBackend::new(
-            ac2_audio::JackConfig::default(),
+            ac2_audio::JackConfig {
+                client_name: client.into(),
+                ..ac2_audio::JackConfig::default()
+            },
         ))),
         #[cfg(target_os = "macos")]
         BackendArg::CoreAudio => Ok(Arc::new(ac2_audio::CoreAudioBackend::new())),
@@ -75,19 +82,32 @@ fn backend(b: BackendArg) -> Result<Arc<dyn Backend>, CliError> {
     }
 }
 
-/// Device selection and channel defaults from what the backend lists.
-fn spec(a: &SelftestDuplex, devices: &[DeviceCaps]) -> Result<DuplexSpec, CliError> {
+/// The capture side chosen from what the backend lists.
+pub(super) struct CaptureChoice<'a> {
+    pub(super) device: Option<&'a DeviceCaps>,
+    pub(super) selector: DeviceSelector,
+    pub(super) input_map: Vec<u16>,
+    pub(super) rate: Option<u32>,
+    pub(super) buffer: Option<u32>,
+}
+
+fn selector(name: &Option<String>, dev: Option<&DeviceCaps>) -> DeviceSelector {
+    match (name, dev) {
+        (Some(_), Some(d)) => DeviceSelector::Id(d.id.clone()),
+        _ => DeviceSelector::Default,
+    }
+}
+
+/// Capture device, inputs, rate and buffer from the arguments and the device listing.
+pub(super) fn capture<'a>(
+    a: &SelftestCapture,
+    devices: &'a [DeviceCaps],
+) -> Result<CaptureChoice<'a>, CliError> {
     let listed: Vec<&DeviceCaps> = devices.iter().collect();
     let input = match &a.device {
         Some(n) => Some(devsel::named(&listed, n, Direction::Input)?),
         None => devsel::default_for(&listed, Direction::Input)
             .or_else(|| devices.iter().find(|d| d.input.is_some())),
-    };
-    let output = match &a.out_device {
-        Some(n) => Some(devsel::named(&listed, n, Direction::Output)?),
-        None => input
-            .filter(|d| d.output.is_some())
-            .or_else(|| devsel::default_for(&listed, Direction::Output)),
     };
     let input_map = match (&a.inputs, input.and_then(|d| d.input.as_ref())) {
         (Some(c), _) => c.0.clone(),
@@ -97,15 +117,6 @@ fn spec(a: &SelftestDuplex, devices: &[DeviceCaps]) -> Result<DuplexSpec, CliErr
                 "no input device found to default to: name the inputs with --in".into(),
             ));
         }
-    };
-    let output_channels = a.outputs.unwrap_or_else(|| {
-        output
-            .and_then(|d| d.output.as_ref())
-            .map_or(0, |c| c.max_channels.min(2))
-    });
-    let selector = |name: &Option<String>, dev: Option<&DeviceCaps>| match (name, dev) {
-        (Some(_), Some(d)) => DeviceSelector::Id(d.id.clone()),
-        _ => DeviceSelector::Default,
     };
     let rate = match a.rate {
         Some(f) if f.0.0.fract() == 0.0 && f.0.0 > 0.0 && f.0.0 <= f64::from(u32::MAX) => {
@@ -128,25 +139,53 @@ fn spec(a: &SelftestDuplex, devices: &[DeviceCaps]) -> Result<DuplexSpec, CliErr
         ),
         None => None,
     };
-    Ok(DuplexSpec {
-        input_device: selector(&a.device, input),
-        output_device: selector(&a.out_device, output),
+    Ok(CaptureChoice {
+        device: input,
+        selector: selector(&a.device, input),
         input_map,
-        output_channels,
-        sample_rate: rate,
-        buffer_frames: buffer,
+        rate,
+        buffer,
     })
 }
 
-async fn duplex(a: &SelftestDuplex, out: &mut Out<'_>) -> Result<(), CliError> {
-    let backend = backend(a.backend)?;
-    let devices = {
-        let b = Arc::clone(&backend);
-        tokio::task::spawn_blocking(move || b.enumerate())
-            .await
-            .map_err(|e| CliError::Io(std::io::Error::other(e)))?
-            .map_err(|e| CliError::Usage(format!("cannot list devices: {e}")))?
+/// Device selection and channel defaults from what the backend lists.
+fn spec(a: &SelftestDuplex, devices: &[DeviceCaps]) -> Result<DuplexSpec, CliError> {
+    let c = capture(&a.capture, devices)?;
+    let listed: Vec<&DeviceCaps> = devices.iter().collect();
+    let output = match &a.out_device {
+        Some(n) => Some(devsel::named(&listed, n, Direction::Output)?),
+        None => c
+            .device
+            .filter(|d| d.output.is_some())
+            .or_else(|| devsel::default_for(&listed, Direction::Output)),
     };
+    let output_channels = a.outputs.unwrap_or_else(|| {
+        output
+            .and_then(|d| d.output.as_ref())
+            .map_or(0, |c| c.max_channels.min(2))
+    });
+    Ok(DuplexSpec {
+        input_device: c.selector,
+        output_device: selector(&a.out_device, output),
+        input_map: c.input_map,
+        output_channels,
+        sample_rate: c.rate,
+        buffer_frames: c.buffer,
+    })
+}
+
+/// The backend's device listing, off the async runtime (a driver may block).
+pub(super) async fn enumerate(backend: &Arc<dyn Backend>) -> Result<Vec<DeviceCaps>, CliError> {
+    let b = Arc::clone(backend);
+    tokio::task::spawn_blocking(move || b.enumerate())
+        .await
+        .map_err(|e| CliError::Io(std::io::Error::other(e)))?
+        .map_err(|e| CliError::Usage(format!("cannot list devices: {e}")))
+}
+
+async fn duplex(a: &SelftestDuplex, out: &mut Out<'_>) -> Result<(), CliError> {
+    let backend = backend(a.capture.backend, "ac2")?;
+    let devices = enumerate(&backend).await?;
     let spec = spec(a, &devices)?;
     let emit = match (a.emit, a.loopback_out, a.loopback_in) {
         (Some(level), Some(o), Some(i)) => Some(Emit {

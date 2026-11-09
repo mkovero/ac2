@@ -14,3 +14,4 @@ Prototypes and parameter studies behind design decisions; not built or run by CI
 | `q1/tracking.py` | tracking rule over consecutive windows through the finder |
 | `q1/check_fixtures.py` | runs the prototype over the committed `delay_finder_*` golden sets, as the Rust acceptance test does |
 | `q1/results/` | committed outputs of the runs above |
+| `timing/` | clock study (`docs/design/timing-study.md`): `ac2 selftest stamps` runs and their analysis; rig results stay private |

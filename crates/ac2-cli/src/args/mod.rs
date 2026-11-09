@@ -262,34 +262,64 @@ pub enum SelftestCmd {
     /// `--emit` and a loopback cable it also measures output→input timing and drift. Stop
     /// the daemon first if it holds the device.
     Duplex(SelftestDuplex),
+    /// Capture-only timestamp log for the clock study: opens no outputs, runs for
+    /// `--minutes` (Ctrl-C ends early), and writes every block's index and stamps, paired
+    /// reads of the stamp clock against the host clocks, and the stream's metadata into
+    /// `--out`. On JACK it runs as its own client beside a running daemon.
+    Stamps(SelftestStamps),
 }
 
-/// `selftest duplex`.
+/// The capture side of a self-test stream: backend, device, inputs, rate, buffer.
 #[derive(Debug, Args)]
-pub struct SelftestDuplex {
+pub struct SelftestCapture {
     /// Backend (no default: `fake` only when asked for).
     #[arg(long, value_enum)]
     pub backend: BackendArg,
     /// Capture device id or name (default: the system's default input).
     #[arg(long)]
     pub device: Option<String>,
-    /// Playback device id or name, when it is another device than the capture one.
-    /// Default: the capture device when it has outputs, else the system's default output.
-    #[arg(long, value_name = "ID|NAME")]
-    pub out_device: Option<String>,
     /// Input channels to capture, e.g. `1-8` (default: every input of the device).
     #[arg(long = "in", value_name = "CHANNELS")]
     pub inputs: Option<Channels>,
-    /// Output channels to open (default: up to 2). They play silence unless `--emit`
-    /// routes the stimulus to the loopback output.
-    #[arg(long = "outputs", value_name = "N")]
-    pub outputs: Option<u16>,
     /// Sample rate, e.g. `48khz` (default: device default).
     #[arg(long)]
     pub rate: Option<Freq>,
     /// Buffer size, e.g. `256samples` (default: the backend's choice).
     #[arg(long)]
     pub buffer: Option<SampleCount>,
+}
+
+/// `selftest stamps`.
+#[derive(Debug, Args)]
+pub struct SelftestStamps {
+    /// Stream to log.
+    #[command(flatten)]
+    pub capture: SelftestCapture,
+    /// How long to run, minutes (fractions allowed).
+    #[arg(long, value_name = "N")]
+    pub minutes: f64,
+    /// Directory for the log files; created if missing, refused if it already holds a log.
+    #[arg(long, value_name = "DIR")]
+    pub out: PathBuf,
+    /// Also keep this input's samples, unmodified, as an f32 WAV (it must be captured).
+    #[arg(long, value_name = "CHANNEL")]
+    pub keep: Option<Channel>,
+}
+
+/// `selftest duplex`.
+#[derive(Debug, Args)]
+pub struct SelftestDuplex {
+    /// Stream to check.
+    #[command(flatten)]
+    pub capture: SelftestCapture,
+    /// Playback device id or name, when it is another device than the capture one.
+    /// Default: the capture device when it has outputs, else the system's default output.
+    #[arg(long, value_name = "ID|NAME")]
+    pub out_device: Option<String>,
+    /// Output channels to open (default: up to 2). They play silence unless `--emit`
+    /// routes the stimulus to the loopback output.
+    #[arg(long = "outputs", value_name = "N")]
+    pub outputs: Option<u16>,
     /// How long to run, e.g. `60s`.
     #[arg(long, default_value = "30s")]
     pub duration: Time,

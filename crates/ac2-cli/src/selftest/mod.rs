@@ -12,6 +12,7 @@
 //! that ceiling, fades on every start and stop, and a stop that waits for the fade-out.
 
 mod loopback;
+pub mod stamps;
 mod stats;
 
 use std::sync::atomic::{AtomicBool, Ordering};
