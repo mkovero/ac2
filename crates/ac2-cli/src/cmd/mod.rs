@@ -22,6 +22,7 @@ mod readouts;
 mod rec;
 mod salvage;
 mod selftest;
+mod selftest_net;
 mod selftest_stamps;
 mod session;
 mod sessions;

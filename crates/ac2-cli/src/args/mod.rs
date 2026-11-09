@@ -267,6 +267,45 @@ pub enum SelftestCmd {
     /// reads of the stamp clock against the host clocks, and the stream's metadata into
     /// `--out`. On JACK it runs as its own client beside a running daemon.
     Stamps(SelftestStamps),
+    /// Network timing between two hosts for the clock study, no audio: block-sized messages
+    /// of zeros at an audio block rate over the data wire's transport (CURVE, ROUTER on the
+    /// listening side, DEALER on the connecting side, byte credit). The receiver logs every
+    /// arrival into `--out` and ends with the one-way spread and a suggested link offset.
+    Net(SelftestNet),
+}
+
+/// `selftest net`.
+#[derive(Debug, Args)]
+#[command(group(clap::ArgGroup::new("link").required(true).args(["listen", "connect"])))]
+pub struct SelftestNet {
+    /// Bind here and wait for the other host, e.g. `0.0.0.0:47990`; prints the key the
+    /// other host passes as `--server-key` and writes it to `<out>/server.key`.
+    #[arg(long, value_name = "ADDR:PORT")]
+    pub listen: Option<String>,
+    /// Connect to the listening host, e.g. `192.168.9.25:47990`.
+    #[arg(long, value_name = "HOST:PORT", requires = "server_key")]
+    pub connect: Option<String>,
+    /// The listener's public key, as it printed it (Z85).
+    #[arg(long, value_name = "Z85", requires = "connect")]
+    pub server_key: Option<String>,
+    /// Which way the blocks go from this host (independent of who listens).
+    #[arg(long, value_enum)]
+    pub role: crate::selftest::net::Role,
+    /// How long to stream, minutes (fractions allowed); give both hosts the same.
+    #[arg(long, value_name = "N")]
+    pub minutes: f64,
+    /// Directory for the log files; created if missing, refused if it already holds a run.
+    #[arg(long, value_name = "DIR")]
+    pub out: PathBuf,
+    /// Block rate is rate ÷ frames per second (the sender's apply; the receiver adopts them).
+    #[arg(long, default_value_t = 96_000, value_name = "HZ")]
+    pub rate: u32,
+    /// Frames per block.
+    #[arg(long, default_value_t = 256, value_name = "N")]
+    pub frames: u32,
+    /// Channels per frame, f32 zeros each.
+    #[arg(long, default_value_t = 1, value_name = "N")]
+    pub channels: u32,
 }
 
 /// The capture side of a self-test stream: backend, device, inputs, rate, buffer.

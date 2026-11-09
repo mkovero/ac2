@@ -21,6 +21,7 @@ pub(crate) async fn run(_cli: &Cli, cmd: &SelftestCmd, out: &mut Out<'_>) -> Res
     match cmd {
         SelftestCmd::Duplex(a) => duplex(a, out).await,
         SelftestCmd::Stamps(a) => super::selftest_stamps::stamps(a, out).await,
+        SelftestCmd::Net(a) => super::selftest_net::net(a, out).await,
     }
 }
 
