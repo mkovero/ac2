@@ -279,8 +279,34 @@ What it says:
   reference (the Orion, GNSS per site) is the way**, which is what the operator chose.
 - pupu's FF400 is a steady +5.4 to +5.6 ppm, drifting 0.13 ppm/h: a slow crystal.
 
-Not yet done: the second buffer size on each rig (it changes jackd's period under the running
-daemon and app, so the operator times it), B1 (FF400 on the Orion's word clock), phase C.
+**Phase C (2026-11-09 09:13–10:13 UTC, 74ddce3e).** Both directions at once over CURVE
+ROUTER/DEALER with the 64 KiB credit window, 96 kHz × 256 frames × 1 ch (1067 B every
+2.67 ms), daemons and the app running as usual. ketunkolo listened (pupu's firewall opens
+only ac2's ports).
+
+| | pupu → ketunkolo | ketunkolo → pupu |
+|---|---|---|
+| blocks, missing, reordered | 1 350 000, 0, 0 | 1 350 000, 0, 0 |
+| one-way above its floor: p50 / p99 / p99.9 | 0.23 / 0.47 / 0.89 ms | 0.28 / 0.67 / 1.28 ms |
+| blocks > 2 ms late | 112 | 225 |
+| largest | 267 ms | 240 ms |
+| credit stalls (sender) | 4 | 4 |
+
+- **Normal running:** sub-millisecond, nothing lost. A link offset of **4 ms** (p99.9 + one
+  block) covers it.
+- **One event in the hour** made every block over 5 ms: at 10:12:14 UTC both directions
+  stalled 240–267 ms *at once*. In the same 0.1 s, pupu's ptp4l logged `timed out while polling
+  for tx timestamp … a driver bug likely causes it` on enp2s0f0 (tg3), went FAULTY for 16 s,
+  and then recovered. It is the only such line in pupu's journal for 7 days. A transmit stall
+  in pupu's NIC driver fits both directions stopping together (pupu's ACKs stall too). EEE is
+  enabled but inactive on that link.
+- **Consequence for the buffer policy:** a LAN link offset of a few ms holds through normal
+  running. A host stall like this one is longer than any sensible offset, so it becomes a
+  marked gap, which is the AES67/Dante behaviour too. Riding through it would take a ~300 ms
+  offset. The operator chooses: the default stays small, and the setting is stated.
+
+Not yet done: B1 (FF400 on the Orion's word clock, then a word clock pull test). The second
+buffer size per rig was skipped (operator, 2026-11-09).
 
 ## 8. Operator decisions
 
