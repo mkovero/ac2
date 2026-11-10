@@ -281,6 +281,35 @@ mod tests {
         assert!(text.contains("sent             900 blocks"), "{text}");
     }
 
+    #[test]
+    fn a_server_key_starting_with_a_hyphen_is_the_value() {
+        let key = "-/abcdefghijklmnopqrstuvwxyz0123456789AB";
+        let cli = Cli::try_parse_from([
+            "ac2",
+            "selftest",
+            "net",
+            "--connect",
+            "127.0.0.1:1",
+            "--server-key",
+            key,
+            "--role",
+            "send",
+            "--minutes",
+            "1",
+            "--out",
+            "x",
+        ])
+        .expect("parses");
+        let crate::args::Cmd::Selftest {
+            cmd: crate::args::SelftestCmd::Net(a),
+            ..
+        } = cli.cmd
+        else {
+            panic!("not selftest net");
+        };
+        assert_eq!(a.server_key.as_deref(), Some(key));
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn a_block_larger_than_the_window_is_refused() {
         let tmp = tempfile::tempdir().expect("tmp");

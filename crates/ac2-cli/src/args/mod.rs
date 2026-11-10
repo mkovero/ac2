@@ -285,8 +285,14 @@ pub struct SelftestNet {
     /// Connect to the listening host, e.g. `192.168.9.25:47990`.
     #[arg(long, value_name = "HOST:PORT", requires = "server_key")]
     pub connect: Option<String>,
-    /// The listener's public key, as it printed it (Z85).
-    #[arg(long, value_name = "Z85", requires = "connect")]
+    /// The listener's public key, as it printed it (Z85). Z85 includes `-`, so a key may
+    /// start with one; it is still read as the value.
+    #[arg(
+        long,
+        value_name = "Z85",
+        requires = "connect",
+        allow_hyphen_values = true
+    )]
     pub server_key: Option<String>,
     /// Which way the blocks go from this host (independent of who listens).
     #[arg(long, value_enum)]
