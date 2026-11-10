@@ -400,10 +400,26 @@ stepped down once (a blanking stall) would stay degraded for months.
    code on the CM4 doing instanced quads, vertex-stage `textureLoad`, Max into a half-res
    Rg8 target and the composite, on GL and on v3dv Vulkan. Go / no-go plus frame times at
    1080p for the default and the worst camera; its numbers replace the Pi column above.
-2. **v1a**: wire (view, camera, ice, validation), skyline, camera, scene, axes; renderer
-   encoder API, the offscreen spike target and composite at full and half resolution, floor;
-   Settings quality; keys, mouse, hints, user guide; goldens for Full, Lite and Bare (Full
-   and Lite without bloom until v1b), the GL CI run.
+2. **v1a** (done, branch `spectrograph-3d`): wire (view, camera, ice, validation), skyline,
+   camera, scene, axes; renderer encoder API, the offscreen spike target and composite at
+   full and half resolution, floor; Settings quality; keys, mouse, hints, user guide; goldens
+   for Full, Lite and Bare (Full and Lite without bloom until v1b), the GL CI run. Where it
+   differs from the text above:
+   - **Ring, not scroll**: the level texture is a ring indexed by `newest` and `phase` (row
+     `j` at `z = (j + phase) · depth / rows`), so a new bucket uploads one row, not the
+     texture. `Skyline3d` carries `newest` instead of `scroll`.
+   - **Spike target encoding**: R the level, G `sqrt(brightness · coverage)` (more of the 8
+     bits for the dim far rows); the composite reads R nearest (a filtered level is a level
+     no spike has) and G bilinear, squared back. Coverage is a box filter across a fractional
+     width, the quad half a pixel wider each side: no snapping to whole pixels.
+   - **Floor band** under the spikes drawn in the base layer, before the composite.
+   - **Fitted distance** fits every corner of the box (floor and top) in x and y, not only
+     the floor's front corners: at high pitch the far top edge bound otherwise.
+   - **Colour maps** moved from `ac2-ui` to `ac2-scene` (`colormap`), so the skyline's LUT
+     and the 2D spectrograph's come from one table.
+   - **Bloom** (with the 0.25 brightness threshold) is v1b; no `SkylineGlow` primitive yet.
+   - The skyline goldens are their own test binary (`ac2-plot --test skyline`), run on GL in
+   CI and by gate 0 on the CM4 with `WGPU_BACKEND=gl` or `vulkan`.
 3. **v1b**: bloom; goldens re-blessed with it. 1a and 1b ship together in one deploy: v1 is
    "pretty and fast" together.
 4. Later, not planned: a cursor frequency line on the floor (no value), moving the orbit
@@ -428,5 +444,5 @@ stepped down once (a blanking stall) would stay degraded for months.
    a frame every 0.17 s) smears kicks and hats into the bass and tonal layer; the 3D view
    reads transients only on a short FFT (8192 points: ~47 frames/s, every slot filled),
    where the max per 0.3 s bucket keeps them from flickering.
-7. **For the operator: Settings › 3D quality** (Auto / Full / Lite / Bare) is one more
-   Settings row; keep it, or Auto only with the tier fixed by adapter?
+7. **Settings › 3D quality** (Auto / Full / Lite / Bare): decided, the operator keeps the
+   row; Auto stays the default and names the tier it picked.

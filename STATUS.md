@@ -31,6 +31,12 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   Connection), one `ac2d` per user by a lock, the simulated rig a spawned
   `ac2d --backend fake --ephemeral`; e2e tests with a daemon are the `ac2-e2e` crate. Design:
   `docs/design/ui-spawns-ac2d.md` (N7); stage 2 (ac2d in the AppImage / app bundle) open.
+- **3D spectrograph** (`docs/design/spectrograph-3d.md`): v1a on branch `spectrograph-3d`
+  (PROTO 86, session format 42, rig file 10): a fourth spectrum view (G) drawing the
+  spectrograph's history as a skyline of spikes, camera on ←/→, PageUp/PageDown, I/O, Home
+  and the mouse, the *ice* colour map, Settings › Display › 3D quality. Skyline goldens are
+  their own test binary (`ac2-plot --test skyline`, GL in CI). Next: v1b bloom, then gate 0
+  on the CM4 (frame times on GL and v3dv); 1a and 1b deploy together.
 - **Next: many rigs in one app** (tabs, mixed panes, remote inputs, clocks across PTP
   hosts): `docs/design/multi-rig.md`, decisions N1–N6. Stage 1a (wire and files) landed: a
   daemon keeps its identity in `rig-id`, the hello carries `rig_id` and `name` (`ac2d
