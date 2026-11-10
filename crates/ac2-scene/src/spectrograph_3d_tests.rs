@@ -537,7 +537,7 @@ fn scene_3d(
     } else {
         SkylineTier::Full
     };
-    scene_3d_as(b, view, camera, tier, forced, Colormap::Ice)
+    scene_3d_as(b, view, camera, tier, forced, Colormap::Ice, 1.0)
 }
 
 fn scene_3d_as(
@@ -547,6 +547,7 @@ fn scene_3d_as(
     tier: SkylineTier,
     forced: bool,
     colours: Colormap,
+    axes: f32,
 ) -> Spectrograph3dScene {
     let input = Spectrograph3dInput {
         history: &b.h,
@@ -559,6 +560,7 @@ fn scene_3d_as(
         camera: Pose::from(camera),
         tier,
         tier_forced: forced,
+        axes,
     };
     spectrograph_3d_scene(
         &[],
@@ -643,6 +645,7 @@ fn labels_stay_whole_inside_the_field() {
                 }),
                 tier: SkylineTier::Full,
                 tier_forced: false,
+                axes: 1.0,
             };
             let s = spectrograph_3d_scene(
                 &[],
@@ -795,7 +798,8 @@ fn the_glow_follows_the_ceiling_and_precedes_the_labels() {
     assert_eq!(glows.len(), 1);
     assert_eq!(glows[0].id, skylines(&s.scene)[0].id);
     assert_eq!(glows[0].gain, GLOW_ICE);
-    // One layer: glows draw after its polylines (the ceiling) and before its labels.
+    // Glows draw after the ceiling in its layer; the labels and their plates in a later
+    // layer, never bloomed.
     let l = s
         .scene
         .layers
@@ -806,10 +810,14 @@ fn the_glow_follows_the_ceiling_and_precedes_the_labels() {
         l.polylines.iter().any(|p| p.stroke.dash.is_some()),
         "ceiling"
     );
-    assert!(l.labels.iter().any(|t| t.text == "1k"), "labels");
     let sky = s.scene.layers.iter().position(|l| !l.skylines.is_empty());
     let glow = s.scene.layers.iter().position(|l| !l.glows.is_empty());
-    assert!(sky <= glow);
+    let labels = s
+        .scene
+        .layers
+        .iter()
+        .position(|l| l.labels.iter().any(|t| t.text == "1k"));
+    assert!(sky <= glow && glow < labels);
 }
 
 #[test]
@@ -817,7 +825,7 @@ fn the_glow_by_tier_and_colour_map() {
     let view = ViewState::default();
     let glows = |tier, colours| {
         let b = pink_room(30, tier);
-        let s = scene_3d_as(&b, &view, SpectrumCamera::DEFAULT, tier, true, colours);
+        let s = scene_3d_as(&b, &view, SpectrumCamera::DEFAULT, tier, true, colours, 1.0);
         s.scene
             .layers
             .iter()
@@ -924,6 +932,7 @@ fn heights_follow_the_range_and_offset() {
         camera: Pose::from(SpectrumCamera::DEFAULT),
         tier: SkylineTier::Full,
         tier_forced: false,
+        axes: 1.0,
     };
     let s = spectrograph_3d_scene(
         &[],
@@ -942,4 +951,215 @@ fn heights_follow_the_range_and_offset() {
     // The offset moves the levels up, so the range in stored levels moves down.
     assert_eq!(skylines(&s.scene)[0].range, [-66.0, -16.0]);
     assert!(s.caption.starts_with("Main L · offset"), "{}", s.caption);
+}
+
+#[test]
+fn the_axes_fade_with_hover_and_hold_after_a_touch() {
+    let mut r = AxesReveal::default();
+    // Hidden at rest.
+    assert_eq!(r.alpha(10.0), 0.0);
+    assert_eq!(r.next_change(10.0), None);
+    // Shown on hover, after a short fade in.
+    r.hover(true, 10.0);
+    assert_eq!(r.next_change(10.0), Some(0.0));
+    assert!(r.alpha(10.0 + AXES_FADE_IN_S / 2.0) > 0.0);
+    assert!(r.alpha(10.0 + AXES_FADE_IN_S / 2.0) < 1.0);
+    assert_eq!(r.alpha(10.0 + AXES_FADE_IN_S), 1.0);
+    assert_eq!(r.alpha(100.0), 1.0, "for as long as the pointer stays");
+    assert_eq!(r.next_change(100.0), None);
+    // Gone a fade after the pointer leaves.
+    r.hover(false, 100.0);
+    assert!(r.alpha(100.0 + AXES_FADE_OUT_S / 2.0) > 0.0);
+    assert_eq!(r.alpha(100.0 + AXES_FADE_OUT_S), 0.0);
+    assert_eq!(r.next_change(100.0 + AXES_FADE_OUT_S), None);
+
+    // A touch shows them for the hold, then they fade.
+    let mut r = AxesReveal::default();
+    r.poke(20.0);
+    assert_eq!(r.alpha(20.0 + AXES_FADE_IN_S), 1.0);
+    let held = 20.0 + AXES_HOLD_S - 0.5;
+    assert_eq!(r.alpha(held), 1.0);
+    let wait = r.next_change(held).expect("fades later");
+    assert!((wait - 0.5).abs() < 1e-9, "{wait}");
+    let fading = 20.0 + AXES_HOLD_S + AXES_FADE_OUT_S / 2.0;
+    assert!(r.alpha(fading) > 0.0 && r.alpha(fading) < 1.0);
+    assert_eq!(r.next_change(fading), Some(0.0));
+    assert_eq!(r.alpha(20.0 + AXES_HOLD_S + AXES_FADE_OUT_S), 0.0);
+    assert_eq!(r.next_change(20.0 + AXES_HOLD_S + AXES_FADE_OUT_S), None);
+
+    // A second touch while fading out carries on from where the axes are: no jump.
+    let mut r = AxesReveal::default();
+    r.poke(0.0);
+    let t = AXES_HOLD_S + AXES_FADE_OUT_S / 2.0;
+    let before = r.alpha(t);
+    r.poke(t);
+    assert!((r.alpha(t) - before).abs() < 1e-6);
+    assert_eq!(r.alpha(t + AXES_FADE_IN_S), 1.0);
+    // A touch while already shown keeps them shown, and restarts the hold.
+    r.poke(t + 1.0);
+    assert_eq!(r.alpha(t + 1.0), 1.0);
+    assert_eq!(r.alpha(t + 1.0 + AXES_HOLD_S - 0.01), 1.0);
+}
+
+#[test]
+fn axes_at_rest_leave_the_skyline_band_and_caption() {
+    let b = pink_room(30, SkylineTier::Full);
+    let view = ViewState::default();
+    let cam = SpectrumCamera::DEFAULT;
+    let shown = scene_3d_as(&b, &view, cam, SkylineTier::Full, false, Colormap::Ice, 1.0);
+    let rest = scene_3d_as(&b, &view, cam, SkylineTier::Full, false, Colormap::Ice, 0.0);
+    let half = scene_3d_as(&b, &view, cam, SkylineTier::Full, false, Colormap::Ice, 0.5);
+    let lines = |s: &Spectrograph3dScene| -> usize {
+        s.scene.layers.iter().map(|l| l.polylines.len()).sum()
+    };
+    let texts = |s: &Spectrograph3dScene| -> Vec<String> {
+        s.scene
+            .layers
+            .iter()
+            .flat_map(|l| &l.labels)
+            .map(|l| l.text.clone())
+            .collect()
+    };
+    // At rest: no labels, grid, post or ceiling; the now line, spikes and caption stay.
+    assert!(rest.labels.is_empty());
+    assert_eq!(lines(&rest), 1, "the now line alone");
+    assert_eq!(skylines(&rest.scene).len(), 1);
+    assert!(!rest.caption.is_empty());
+    assert_eq!(texts(&rest), vec![rest.caption.clone()]);
+    assert!(!shown.labels.is_empty());
+    assert!(lines(&shown) > 1);
+    // Half shown: the same labels in the same places, fainter.
+    assert_eq!(half.labels, shown.labels);
+    let alpha_of = |s: &Spectrograph3dScene, t: &str| {
+        s.scene
+            .layers
+            .iter()
+            .flat_map(|l| &l.labels)
+            .find(|l| l.text == t)
+            .map(|l| l.color.a)
+    };
+    let a1 = alpha_of(&shown, "1k").expect("1k shown");
+    let a2 = alpha_of(&half, "1k").expect("1k half");
+    assert!((a2 - a1 * 0.5).abs() < 1e-6);
+    // T traces-only never shows them, even hovered.
+    let bare_view = ViewState {
+        chrome: PlotChrome::Bare,
+        ..ViewState::default()
+    };
+    let bare = scene_3d_as(
+        &b,
+        &bare_view,
+        cam,
+        SkylineTier::Full,
+        false,
+        Colormap::Ice,
+        1.0,
+    );
+    assert!(bare.labels.is_empty());
+    assert_eq!(lines(&bare), 1);
+}
+
+#[test]
+fn labels_stand_on_faint_plates() {
+    let b = pink_room(30, SkylineTier::Full);
+    let s = scene_3d(&b, &ViewState::default(), SpectrumCamera::DEFAULT, false);
+    let layer = s
+        .scene
+        .layers
+        .iter()
+        .find(|l| l.labels.iter().any(|t| t.text == "1k"))
+        .expect("labels");
+    let plates: Vec<_> = layer
+        .polygons
+        .iter()
+        .filter(|p| p.color.a > 0.0 && p.color.a < 1.0)
+        .collect();
+    assert_eq!(plates.len(), s.labels.len(), "one plate a label");
+    for p in &plates {
+        assert!(p.color.a <= PLATE_ALPHA);
+        assert!(p.points.len() >= 8, "rounded");
+    }
+}
+
+#[test]
+fn the_box_fits_at_zoom_zero_from_every_angle() {
+    let lim = 1.0 - FIT_MARGIN + 1e-6;
+    for aspect in [0.8, 1.0, 1.78, 3.0] {
+        for yaw in (-80..=80).step_by(5) {
+            for pitch in (2..=75).step_by(4) {
+                let pose = Pose {
+                    yaw_deg: f64::from(yaw),
+                    pitch_deg: f64::from(pitch),
+                    zoom_step: 0.0,
+                };
+                let vp = view_proj(pose, aspect);
+                for p in box_corners() {
+                    let n = vp.ndc(p).expect("in front of the eye");
+                    assert!(
+                        n[0].abs() <= lim && n[1].abs() <= lim,
+                        "{p:?} at yaw {yaw} pitch {pitch} aspect {aspect}: {n:?}"
+                    );
+                }
+            }
+        }
+    }
+    // The orbit the app review shot: the front floor corner is in the picture.
+    let vp = view_proj(
+        Pose {
+            yaw_deg: -35.0,
+            pitch_deg: 30.0,
+            zoom_step: 0.0,
+        },
+        1.78,
+    );
+    for x in [-FLOOR_HALF_W, FLOOR_HALF_W] {
+        let n = vp.ndc([x, 0.0, 0.0]).expect("front corner");
+        assert!(n[1] >= -1.0 + FIT_MARGIN - 1e-6, "{n:?}");
+    }
+}
+
+#[test]
+fn the_fit_moves_smoothly_through_an_orbit() {
+    // A camera easing through yaw and pitch dollies with the fit: no step between angles
+    // a frame apart.
+    let d = |yaw: f64, pitch: f64| {
+        eye_distance(
+            Pose {
+                yaw_deg: yaw,
+                pitch_deg: pitch,
+                zoom_step: 0.0,
+            },
+            1.78,
+        )
+    };
+    for pitch in [2.0, 8.0, 30.0, 75.0] {
+        let mut prev = d(-80.0, pitch);
+        let mut yaw = -80.0;
+        while yaw < 80.0 {
+            yaw += 0.1;
+            let now = d(yaw, pitch);
+            assert!((now - prev).abs() < 0.01 * prev, "yaw {yaw} pitch {pitch}");
+            prev = now;
+        }
+    }
+    let mut prev = d(-35.0, 2.0);
+    let mut pitch = 2.0;
+    while pitch < 75.0 {
+        pitch += 0.1;
+        let now = d(-35.0, pitch);
+        assert!((now - prev).abs() < 0.01 * prev, "pitch {pitch}");
+        prev = now;
+    }
+    // Zoom steps scale from the angle's own fit.
+    let pose = Pose {
+        yaw_deg: -35.0,
+        pitch_deg: 30.0,
+        zoom_step: 0.0,
+    };
+    let near = Pose {
+        zoom_step: 2.0,
+        ..pose
+    };
+    let r = eye_distance(near, 1.78) / fitted_distance(pose, 1.78);
+    assert!((r - 2f64.powf(-0.25)).abs() < 1e-9);
 }

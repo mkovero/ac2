@@ -131,12 +131,15 @@ pub fn spectrograph(
 
 /// The spectrum pane's 3D spectrograph of its measurement: `skyline` (kept by the caller
 /// across frames, so a new frame only folds in) is brought up to the history first.
-/// `tier` is how it is drawn and whether Settings forced it.
+/// `tier` is how it is drawn and whether Settings forced it; `axes` how much its axis
+/// decorations show (an export: 1).
+#[allow(clippy::too_many_arguments)]
 pub fn spectrograph_3d(
     st: &AppState,
     pane: PaneId,
     skyline: &mut Skyline,
     tier: (SkylineTier, bool),
+    axes: f32,
     theme: &Theme,
     size: Viewport,
     now: Now,
@@ -174,6 +177,7 @@ pub fn spectrograph_3d(
             camera: st.drawn_camera(pane),
             tier: tier.0,
             tier_forced: tier.1,
+            axes,
         }
     });
     with_spectrum(st, pane, theme, now, |traces, status, view| {

@@ -108,6 +108,8 @@ pub(crate) struct CachedScene {
     /// view moves this pane's plot edge too.
     pub freq_right: f32,
     pub theme: ThemeName,
+    /// How much a 3D spectrograph's axes showed ([`crate::state::AppState::axes3d_alpha`]).
+    pub axes3d: f32,
     /// The SPL panes' scales an SPL pane was drawn with ([`crate::state::AppState::spl_scales`]):
     /// another pane's change of scale moves this one's columns too.
     pub spl_scales: Vec<(ac2_proto::model::LevelScale, ac2_scene::axis::Range)>,

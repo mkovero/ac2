@@ -258,7 +258,12 @@ const CAMERA: [(CommandId, &str); 3] = [
     (CommandId::ZoomIn, "Dolly in/out"),
     (CommandId::ResetView, "Reset camera"),
 ];
-const CAMERA_MOUSE: [(&str, &str); 2] = [("Drag", "Orbit and tilt"), ("Wheel\nPinch", "Dolly")];
+const CAMERA_MOUSE: [(&str, &str); 3] = [
+    ("Drag", "Orbit and tilt"),
+    ("Wheel\nPinch", "Dolly"),
+    // The axes cover the skyline, so they come on demand; a touch screen has no hover.
+    ("Hover\nTouch", "Show the axes"),
+];
 
 /// The widest key text the help's key column holds (`Alt+Shift+V`).
 const KEY_COLUMN_CHARS: usize = 11;

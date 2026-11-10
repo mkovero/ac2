@@ -636,11 +636,15 @@ fn parity_renders() {
             .collect();
         data.push(None);
         for (cname, yaw, pitch) in [("default", 0.0, 8.0), ("tilted", 25.0, 30.0)] {
-            let d0 = spectrograph_3d::fitted_distance(aspect);
-            let pose = Pose {
+            let at = Pose {
                 yaw_deg: yaw,
                 pitch_deg: pitch,
+                zoom_step: 0.0,
+            };
+            let d0 = spectrograph_3d::fitted_distance(at, aspect);
+            let pose = Pose {
                 zoom_step: -spectrograph_3d::ZOOM_STEPS_PER_OCTAVE * (2.6 / d0).log2(),
+                ..at
             };
             let vp = spectrograph_3d::view_proj(pose, aspect);
             for (vname, colormap, range) in [
@@ -865,6 +869,7 @@ fn bench_frame_cost() {
                     camera: Pose::from(*cam),
                     tier,
                     tier_forced: false,
+                    axes: 1.0,
                 };
                 let sc = spectrograph_3d_scene(
                     &[],

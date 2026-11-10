@@ -308,6 +308,7 @@ fn spectrograph_from_an_empty_daemon() -> R {
         pane,
         &mut skyline,
         (ac2_scene::primitives::SkylineTier::Full, false),
+        d.st.axes3d_alpha(pane),
         &theme,
         size,
         now(),
@@ -329,6 +330,8 @@ fn spectrograph_from_an_empty_daemon() -> R {
     let freq = d.st.view.freq;
     d.key("ArrowLeft");
     assert_eq!(d.st.view.freq, freq);
+    // The camera move brings the axes in for a while.
+    assert!(d.st.axes3d_wait().is_some(), "the axes fade in");
     d.until("the orbited camera on the daemon", |s| {
         s.measurements().iter().any(|m| {
             m.layout

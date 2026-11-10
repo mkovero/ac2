@@ -242,6 +242,8 @@ impl AppState {
     /// The operator set pane `pane`'s level axis: it is kept with the panes, and a spectrum
     /// pane keeps it until it shows another measurement.
     fn hold_level(&mut self, pane: PaneId) {
+        // A 3D view's heights are this range: its scale shows while it changes.
+        self.poke_axes3d(pane);
         let scale = crate::scenes::spectrum_scale(self, pane);
         if let Some(s) = LevelSlot::of(self.layout.kind(pane), scale) {
             self.level_set.insert((pane, s));

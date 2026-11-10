@@ -1331,6 +1331,12 @@ per frequency and moment, as tall as its level. **G** once more is the spectrum 
 | **S**, **R**, **Shift+B**, **J** | start/stop, reset average, history span, offset, as in 2D |
 | **Ctrl+I / O**, **Ctrl+↑ / ↓**, **Shift+Home** | the level range: it sets the heights |
 
+- **Axes on demand**: the frequency, time and height labels, the floor grid and the
+  ceiling line cover the skyline, so at rest the view is the spikes on their floor and the
+  caption. The axes show while the pointer is over the view or for a few seconds after a
+  touch, a click, a camera move or a level-range change, fading in and out. **T** still
+  sets which of them show; *traces only* keeps them hidden even then. An exported PNG
+  always has them.
 - **Mouse**: drag orbits and tilts, the wheel or a pinch dollies; Ctrl+wheel and
   Shift+wheel still zoom and pan the level range. The camera is kept with the pane and the
   measurement's layout. The cursor keys (Shift+←/→, Shift+T) and **C** do nothing here:

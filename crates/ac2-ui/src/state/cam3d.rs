@@ -19,6 +19,11 @@ pub enum Cam3dMsg {
     Release,
     /// Wheel notches or a pinch: `steps` zoom steps (positive in).
     Dolly { steps: i32 },
+    /// The pointer came over the view (`true`) or left it: the axes show while it is there.
+    Hover(bool),
+    /// A touch or click on the view: the axes show for a few seconds (a kiosk's touch
+    /// screen has no hover).
+    Touch,
 }
 
 /// The camera drawn while it moves: springs towards the stored camera, or the pointer's
@@ -123,8 +128,43 @@ impl AppState {
         }
     }
 
+    /// How much pane `pane`'s 3D axes show now, 0 … 1.
+    pub fn axes3d_alpha(&self, pane: PaneId) -> f32 {
+        self.axes3d.get(&pane).map_or(0.0, |r| r.alpha(self.now_s))
+    }
+
+    /// Whether the pointer is over pane `pane`'s 3D view, as last reported.
+    pub fn axes3d_hovered(&self, pane: PaneId) -> bool {
+        self.axes3d.get(&pane).is_some_and(|r| r.hovered())
+    }
+
+    /// When some 3D view's axes next change: `Some(0.0)` while one fades, `Some(wait)`
+    /// while one holds before fading out, `None` when all rest.
+    pub fn axes3d_wait(&self) -> Option<f64> {
+        self.axes3d
+            .values()
+            .filter_map(|r| r.next_change(self.now_s))
+            .min_by(f64::total_cmp)
+    }
+
+    /// Something the operator did on pane `pane` (its camera, its level range): its 3D
+    /// axes show for a while, so the change reads against them.
+    pub(super) fn poke_axes3d(&mut self, pane: PaneId) {
+        if self
+            .layout
+            .view(pane)
+            .is_some_and(|v| v.shows_3d(self.three_d()))
+        {
+            let now = self.now_s;
+            self.axes3d.entry(pane).or_default().poke(now);
+        }
+    }
+
     pub(super) fn cam3d_key(&mut self, pane: PaneId, c: CommandId) {
         use CommandId as C;
+        if is_nav(c) {
+            self.poke_axes3d(pane);
+        }
         let now = self.stored_camera(pane);
         let next = match c {
             C::PanLeft => spectrograph_3d::step(now, -1, 0, 0),
@@ -150,7 +190,15 @@ impl AppState {
         {
             return;
         }
+        // Anything but the pointer's coming and going is an interaction: the axes hold.
+        let now = self.now_s;
+        let reveal = self.axes3d.entry(pane).or_default();
         match m {
+            Cam3dMsg::Hover(on) => reveal.hover(on, now),
+            _ => reveal.poke(now),
+        }
+        match m {
+            Cam3dMsg::Hover(_) | Cam3dMsg::Touch => {}
             Cam3dMsg::Drag { dx, dy } => {
                 let from = self.drawn_camera(pane);
                 let to = spectrograph_3d::drag(from, dx, dy);

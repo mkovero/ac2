@@ -180,6 +180,11 @@ impl eframe::App for App {
                 ctx.request_repaint_after(t - now);
             }
         }
+        // A 3D view's axes hold after a touch, then fade (`animating` while they fade):
+        // wake for the fade, no sooner. egui keeps the earliest of the requested repaints.
+        if let Some(wait) = self.state.axes3d_wait().filter(|w| *w > 0.0) {
+            ctx.request_repaint_after(Duration::from_secs_f64(wait));
+        }
         if self.state.animating()
             || self.state.bars_easing(Instant::now())
             || self.state.spectrum_gliding(Instant::now())

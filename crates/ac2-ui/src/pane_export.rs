@@ -91,6 +91,8 @@ impl crate::App {
                 req.pane,
                 &mut ac2_scene::spectrograph_3d::Skyline::default(),
                 (ac2_scene::primitives::SkylineTier::Full, false),
+                // An export is a documented picture: its axes are read, not revealed.
+                1.0,
                 &st.scene_theme(),
                 ac2_scene::primitives::Viewport {
                     width: size[0],

@@ -165,6 +165,21 @@ the rect, thinned where they would overlap.
   number reads as another). The height scale's numbers stand outside the post; when the
   field would cut one there (a small pane), all of them stand inside it, so the scale reads
   on one side. The 7 % fit margin leaves a 1080p pane room for them outside.
+- **On demand.** The labels, the height scale, the floor grid and the ceiling line cover
+  the skyline, so at rest they are hidden: the view is the spikes, the floor band and the
+  caption. They show while the pointer is over the pane, and for 3 s after a touch or click
+  on it (a kiosk's touch screen has no hover; a press or release there counts), a camera
+  change (key, drag, wheel, pinch, Home) or a level-range change; they fade in over 0.15 s
+  and out over 0.25 s. The scene decides: `AxesReveal` keeps the hover and the last
+  interaction with the alpha and time of the last event, so the alpha is a ramp in time
+  between events (a second touch while fading carries on from where it is); the UI
+  reports the events and draws with `alpha(now)`. It repaints while a fade runs, wakes
+  once when a hold ends, and is idle otherwise. No key: **T** still picks what shows, and
+  *TracesOnly* keeps it hidden on hover. An exported PNG shows the axes whole: an export
+  is a documented picture, read rather than revealed.
+- **Plates.** Each label stands on a faint dark rounded plate (the field's colour at 55 %)
+  drawn over the spikes and their bloom, so a number over a bright spike still reads; the
+  text pipeline has no halo.
 - **T** (plot chrome): *Full* — faint floor grid (decade lines front to back, time ticks
   across), labels, height scale, ceiling line; *NoGrid* — the same without the floor grid;
   *TracesOnly* — spikes and the floor band only.
@@ -259,13 +274,17 @@ Orbit around a fixed target at the floor's centre, 0.15 up; vertical FOV 35°; n
 |---|---|---|---|---|
 | yaw | 0° (frequency left → right) | ±80° | 15° | 0.3°/px drag x |
 | pitch | 8° | 2° – 75° | 5° | 0.2°/px drag y |
-| distance | d₀: the box's corners fit with 7 % margin at the pane's aspect, centred up and down | see below | 2 zoom steps | wheel / pinch: 1 step a notch |
+| distance | d₀: the box's corners fit with 7 % margin at the pane's aspect and the pose's angles, centred up and down | see below | 2 zoom steps | wheel / pinch: 1 step a notch |
 
 - **Centred up and down** by an off-axis lens shift: with the target on the floor's middle a
   low camera puts the box high in the plot, a dead band under the floor; the shift (from
   the box's corners at the pose's zoom-0 distance, at most half the plot) slides the frame
   so the box's top and bottom sit equally far from the plot's edges. The pose and its
   perspective are unchanged, and a dolly scales about the same point.
+- **Fitted per angle**: d₀ is found for the pose's own yaw and pitch, not once at the
+  default, so a steep or turned camera (yaw −35°, pitch 30°) keeps the front floor corner
+  in the picture at zoom 0. Each corner's fit distance is continuous in the angles, so a
+  camera easing through an orbit dollies smoothly with the fit; no pop.
 - **Zoom is a dolly** in steps, distance `d₀ · 2^(−step/8)` (≈ 9 % a step), step −8 … +4.
   Moving the camera keeps the perspective cue (near spikes larger) that conveys depth when
   nothing hides anything; a narrowed FOV from afar flattens the skyline into a strip.
@@ -516,7 +535,10 @@ stepped down once (a blanking stall) would stay degraded for months.
    in the light theme and in a small pane. Now the frame is centred (*Camera and
    controls*), the fit margin is 7 %, and labels are never cut (*Axes and level
    reference*); the unit stands clear of the top tick. Goldens re-blessed on lavapipe;
-   llvmpipe GL within tolerance.
+   llvmpipe GL within tolerance. A second look: the axes were not pretty over the
+   skyline, so they come on demand (hover, or 3 s after a touch or a change) and the
+   labels stand on faint plates; the zoom-0 distance is fitted per angle (the orbit shot
+   cut the front floor corner). The orbit golden re-blessed for the new fit.
 
 5. Later, not planned: a cursor frequency line on the floor (no value), moving the orbit
    target, the peak-hold line as a ghost row.

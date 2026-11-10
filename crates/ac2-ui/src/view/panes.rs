@@ -108,6 +108,7 @@ fn scene_for(
         && c.size == size
         && c.freq_right == freq_right
         && c.theme == app.state.theme
+        && c.axes3d == app.state.axes3d_alpha(id)
         && (pane != PaneKind::Spl || c.spl_scales == app.state.spl_scales)
     {
         let axes = Axes {
@@ -180,7 +181,8 @@ fn scene_for(
                 && let Some(tier) = st.prefs.quality_3d.tier(st.auto_tier) =>
         {
             let sky = app.skylines.entry(id).or_default();
-            let s = scenes::spectrograph_3d(st, id, sky, tier, theme, vp, now);
+            let axes = st.axes3d_alpha(id);
+            let s = scenes::spectrograph_3d(st, id, sky, tier, axes, theme, vp, now);
             (s.scene, Axes::default())
         }
         PaneKind::Spectrum if view.modes.spectrum.spectrograph() => {
@@ -266,6 +268,7 @@ fn scene_for(
             size,
             freq_right,
             theme: app.state.theme,
+            axes3d: app.state.axes3d_alpha(id),
             spl_scales: if pane == PaneKind::Spl {
                 app.state.spl_scales.clone()
             } else {

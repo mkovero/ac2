@@ -557,18 +557,26 @@ fn box_y_extent(pose: Pose, distance: f64, aspect: f64) -> Option<(f64, f64)> {
         })
 }
 
-/// The distance at zoom step 0 for a plot of aspect `aspect`: from the default angles every
+/// The distance at zoom step 0 for `pose`'s angles in a plot of aspect `aspect`: every
 /// corner of the box at full height fits with a 7 % margin, the box centred up and down
-/// ([`lens_shift`]), so the front edge's tall spikes are never cut at the sides.
-pub fn fitted_distance(aspect: f64) -> f64 {
-    let pose = Pose::from(SpectrumCamera::DEFAULT);
+/// ([`lens_shift`]), so the front edge's tall spikes are never cut at the sides and a
+/// steep or turned camera keeps the near floor corner in the picture. Fitted per angle, not
+/// once at the default: from above and aside the box's projected outline is another shape.
+/// The fit is continuous in the angles (each corner's distance to fit is), so a camera
+/// easing through an orbit dollies smoothly with it.
+pub fn fitted_distance(pose: Pose, aspect: f64) -> f64 {
+    let pose = pose.clamped();
     let lim = 1.0 - FIT_MARGIN;
     let fits = |d: f64| {
         let vp = view_proj_at(pose, d, aspect, 0.0);
         box_corners()
             .iter()
             .all(|p| vp.ndc(*p).is_some_and(|n| n[0].abs() <= lim))
-            && box_y_extent(pose, d, aspect).is_some_and(|(lo, hi)| hi - lo <= 2.0 * lim)
+            && box_y_extent(pose, d, aspect).is_some_and(|(lo, hi)| {
+                // The lens shift centres the box but moves it at most half the plot.
+                let shift = (-(lo + hi) / 2.0).clamp(-SHIFT_MAX, SHIFT_MAX);
+                lo + shift >= -lim && hi + shift <= lim
+            })
     };
     let (mut lo, mut hi) = (0.1, 100.0);
     for _ in 0..60 {
@@ -581,6 +589,9 @@ pub fn fitted_distance(aspect: f64) -> f64 {
     }
     hi
 }
+
+/// The lens shift's bound, in NDC: half the plot.
+const SHIFT_MAX: f64 = 0.5;
 
 /// The lens shift that centres the box up and down in the plot for `pose`'s angles: a low
 /// camera sees the floor as a thin strip under tall spikes, and with the orbit target in
@@ -595,14 +606,16 @@ pub fn lens_shift(pose: Pose, aspect: f64) -> f64 {
         },
         aspect,
     );
-    box_y_extent(pose, d, aspect).map_or(0.0, |(lo, hi)| (-(lo + hi) / 2.0).clamp(-0.5, 0.5))
+    box_y_extent(pose, d, aspect).map_or(0.0, |(lo, hi)| {
+        (-(lo + hi) / 2.0).clamp(-SHIFT_MAX, SHIFT_MAX)
+    })
 }
 
 /// The eye's distance from the target: the dolly's, never inside the grown box. The stored
 /// zoom step is left as set; only the distance drawn is held off.
 pub fn eye_distance(pose: Pose, aspect: f64) -> f64 {
     let pose = pose.clamped();
-    let dolly = fitted_distance(aspect) * 2f64.powf(-pose.zoom_step / ZOOM_STEPS_PER_OCTAVE);
+    let dolly = fitted_distance(pose, aspect) * 2f64.powf(-pose.zoom_step / ZOOM_STEPS_PER_OCTAVE);
     dolly.max(exit_distance(pose.towards_eye()) + EYE_CLEARANCE)
 }
 
@@ -697,6 +710,106 @@ pub fn auto_tier(a: &AdapterFacts) -> Option<SkylineTier> {
 }
 
 // ---------------------------------------------------------------------------------------
+// Axes on demand.
+
+/// How long the axes stay after a touch, click, camera move or level-range change, s:
+/// long enough to read a number off the height scale once the hand is off the screen.
+pub const AXES_HOLD_S: f64 = 3.0;
+/// Fade in, s: quick, so the scale answers the pointer at once.
+pub const AXES_FADE_IN_S: f64 = 0.15;
+/// Fade out, s: a little slower, so the axes leave without a flash.
+pub const AXES_FADE_OUT_S: f64 = 0.25;
+
+/// When the 3D view's axis decorations (labels, height scale, floor grid, ceiling line)
+/// show. They cover the skyline, so they come on demand: while the pointer is over the
+/// view, and for [`AXES_HOLD_S`] after an interaction (a kiosk's touch screen has no
+/// hover). The UI reports the events with their times; [`AxesReveal::alpha`] says how much
+/// they show at any later time.
+///
+/// The fade is a ramp at a fixed rate towards on or off, kept as the alpha and time of the
+/// last event, so the alpha is a pure function of time between events: a second touch
+/// while the axes fade in or out carries on from where they are, never jumps.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct AxesReveal {
+    hovered: bool,
+    /// The last interaction's time, s.
+    poke_s: Option<f64>,
+    /// The alpha at the last event, and when that was.
+    alpha0: f64,
+    t0_s: f64,
+}
+
+impl AxesReveal {
+    /// The pointer came over the view (`true`) or left it, at `now_s`.
+    pub fn hover(&mut self, on: bool, now_s: f64) {
+        if on != self.hovered {
+            self.rebase(now_s);
+            self.hovered = on;
+        }
+    }
+
+    /// A touch, click, camera change or level-range change at `now_s`.
+    pub fn poke(&mut self, now_s: f64) {
+        self.rebase(now_s);
+        self.poke_s = Some(now_s);
+    }
+
+    pub fn hovered(&self) -> bool {
+        self.hovered
+    }
+
+    fn rebase(&mut self, now_s: f64) {
+        self.alpha0 = self.ramp(now_s);
+        self.t0_s = now_s;
+    }
+
+    /// When the axes turn off: never while hovered; else at the end of the hold.
+    fn off_at(&self) -> f64 {
+        if self.hovered {
+            f64::INFINITY
+        } else {
+            self.poke_s
+                .map_or(self.t0_s, |p| (p + AXES_HOLD_S).max(self.t0_s))
+        }
+    }
+
+    /// The linear ramp: up from the last event until the off time, then down.
+    fn ramp(&self, now_s: f64) -> f64 {
+        let t = now_s.max(self.t0_s);
+        let off = self.off_at();
+        let up = (t.min(off) - self.t0_s) / AXES_FADE_IN_S;
+        let peak = (self.alpha0 + up).min(1.0);
+        if t <= off {
+            peak
+        } else {
+            (peak - (t - off) / AXES_FADE_OUT_S).max(0.0)
+        }
+    }
+
+    /// How much the axes show at `now_s`, 0 … 1, eased at both ends.
+    pub fn alpha(&self, now_s: f64) -> f32 {
+        let a = self.ramp(now_s);
+        (a * a * (3.0 - 2.0 * a)) as f32
+    }
+
+    /// Whether the alpha still changes after `now_s`, and when: `Some(0.0)` while it fades,
+    /// `Some(wait)` while it holds before fading out, `None` at rest.
+    pub fn next_change(&self, now_s: f64) -> Option<f64> {
+        let a = self.ramp(now_s);
+        let off = self.off_at();
+        if now_s < off {
+            if a < 1.0 {
+                Some(0.0)
+            } else {
+                off.is_finite().then_some(off - now_s)
+            }
+        } else {
+            (a > 0.0).then_some(0.0)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
 // The scene.
 
 /// What the 3D spectrograph shows: the history of the pane's measurement, its skyline and
@@ -717,6 +830,9 @@ pub struct Spectrograph3dInput<'a> {
     pub tier: SkylineTier,
     /// The tier was set in Settings, not chosen by the adapter.
     pub tier_forced: bool,
+    /// How much the axis decorations show, 0 … 1 ([`AxesReveal::alpha`]); what the tier
+    /// in `view.chrome` would show, faded. An exported picture shows them whole (1).
+    pub axes: f32,
 }
 
 /// Which axis a label belongs to.
@@ -844,6 +960,34 @@ fn label_box(l: &Label) -> Rect {
     Rect::new(x, y, w, h)
 }
 
+/// How much of the field a label's plate hides: enough to dim a spike behind the text, not
+/// so much that the plate reads as a box.
+pub const PLATE_ALPHA: f32 = 0.55;
+
+/// A rounded plate around `b`, tightened to the text: [`label_box`] is generous across.
+fn plate(b: Rect) -> Vec<[f32; 2]> {
+    const R: f32 = 3.0;
+    const SEGS: usize = 4;
+    let inset = (b.w * 0.06).min(4.0);
+    let (x0, x1) = (b.x + inset - 2.0, b.right() - inset + 2.0);
+    let (y0, y1) = (b.y, b.bottom());
+    let r = R.min((x1 - x0) / 2.0).min((y1 - y0) / 2.0);
+    let corners = [
+        (x1 - r, y0 + r, -90.0f32),
+        (x1 - r, y1 - r, 0.0),
+        (x0 + r, y1 - r, 90.0),
+        (x0 + r, y0 + r, 180.0),
+    ];
+    let mut out = Vec::with_capacity(4 * (SEGS + 1));
+    for (cx, cy, a0) in corners {
+        for i in 0..=SEGS {
+            let a = (a0 + 90.0 * i as f32 / SEGS as f32).to_radians();
+            out.push([cx + r * a.cos(), cy + r * a.sin()]);
+        }
+    }
+    out
+}
+
 /// Labels kept where they do not overlap one kept before them, in the order given.
 fn thin(candidates: Vec<(AxisLabel, Label)>, plot: Rect, out: &mut Vec<(AxisLabel, Label)>) {
     const GAP: f32 = 6.0;
@@ -879,7 +1023,14 @@ pub fn spectrograph_3d_scene(
     theme: &Theme,
     size: Viewport,
 ) -> Spectrograph3dScene {
-    let chrome = view.chrome;
+    // The axes come on demand: at rest the view is the skyline alone, as T's traces-only
+    // tier draws it; while shown they fade as a whole, each part what the tier would show.
+    let axes = sg.map_or(1.0, |s| s.axes.clamp(0.0, 1.0));
+    let chrome = if axes > 0.0 {
+        view.chrome
+    } else {
+        PlotChrome::Bare
+    };
     let right = crate::freq_column::right(RIGHT_MARGIN, view);
     let mut c0 = Canvas::new(size, theme);
     let plot_w = (size.width - MARGINS.left - right).max(1.0);
@@ -953,7 +1104,7 @@ pub fn spectrograph_3d_scene(
             })
     };
 
-    let grid_stroke = Stroke::solid(dark.grid_major.color.with_alpha(0.5), 1.0);
+    let grid_stroke = Stroke::solid(dark.grid_major.color.with_alpha(0.5 * axes), 1.0);
     let mut cands = Vec::new();
     let small = theme.small_font_size;
     if let Some((lo, hi)) = span_hz {
@@ -1066,7 +1217,7 @@ pub fn spectrograph_3d_scene(
     cands.sort_by_key(|(a, _)| a.axis != LabelAxis::Time);
     // The height scale: a post at the front corner nearer the eye, floor to range top.
     let ceiling_stroke = Stroke {
-        color: dark.text_dim.with_alpha(0.45),
+        color: dark.text_dim.with_alpha(0.45 * axes),
         width: 1.0,
         dash: Some(Dash {
             on: 4.0,
@@ -1074,7 +1225,7 @@ pub fn spectrograph_3d_scene(
             offset: 0.0,
         }),
     };
-    let post_stroke = Stroke::solid(dark.axis_text.with_alpha(0.7), 1.0);
+    let post_stroke = Stroke::solid(dark.axis_text.with_alpha(0.7 * axes), 1.0);
     let unit = sg
         .and_then(|s| s.history.unit())
         .map_or(String::new(), str::to_string);
@@ -1308,10 +1459,22 @@ pub fn spectrograph_3d_scene(
         cands
     };
     let axis_labels = labels.iter().map(|(a, _)| a.clone()).collect();
-    c.data.labels.extend(labels.into_iter().map(|(_, mut l)| {
-        l.clip = Some(plot);
-        l
-    }));
+    // Over the spikes and their bloom (the overlay draws after both): each label on a
+    // faint dark plate, so a number over a bright spike still reads.
+    for (_, l) in &labels {
+        c.overlay.polygons.push(FillPolygon {
+            points: plate(label_box(l)),
+            color: FIELD.with_alpha(PLATE_ALPHA * axes),
+            clip: Some(plot),
+        });
+    }
+    c.overlay
+        .labels
+        .extend(labels.into_iter().map(|(_, mut l)| {
+            l.clip = Some(plot);
+            l.color = l.color.with_alpha(axes);
+            l
+        }));
     layers.extend(c.into_scene(size).layers.into_iter().take(3));
     Spectrograph3dScene {
         scene: Scene {

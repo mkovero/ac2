@@ -191,3 +191,60 @@ fn mouse_on_a_2d_pane_is_ignored() {
     t.st.apply(Msg::Cam3d(pane, Cam3dMsg::Release), &t.keys);
     assert_eq!(camera(&t), SpectrumCamera::DEFAULT);
 }
+
+fn at(t: &mut T, now_s: f64) {
+    t.st.apply(Msg::Tick { now_s, dt_s: 0.0 }, &t.keys);
+}
+
+/// The axes come on demand: hidden at rest, shown while hovered, held a few seconds after a
+/// touch, a camera key or a level-range change, and the UI keeps drawing only while they
+/// fade.
+#[test]
+fn the_axes_show_on_hover_and_after_an_interaction() {
+    use ac2_scene::spectrograph_3d::{AXES_FADE_IN_S, AXES_FADE_OUT_S, AXES_HOLD_S};
+    let mut t = on_3d();
+    let p = t.st.layout.focus;
+    at(&mut t, 10.0);
+    assert_eq!(t.st.axes3d_alpha(p), 0.0);
+    assert!(!t.st.animating());
+    assert_eq!(t.st.axes3d_wait(), None);
+
+    t.st.apply(Msg::Cam3d(p, Cam3dMsg::Hover(true)), &t.keys);
+    assert!(t.st.animating(), "fading in");
+    at(&mut t, 10.0 + AXES_FADE_IN_S);
+    assert_eq!(t.st.axes3d_alpha(p), 1.0);
+    assert!(!t.st.animating(), "shown and still: no redraws");
+    t.st.apply(Msg::Cam3d(p, Cam3dMsg::Hover(false)), &t.keys);
+    at(&mut t, 11.0 + AXES_FADE_OUT_S);
+    assert_eq!(t.st.axes3d_alpha(p), 0.0);
+
+    // A touch holds them, waking once for the fade.
+    at(&mut t, 20.0);
+    t.st.apply(Msg::Cam3d(p, Cam3dMsg::Touch), &t.keys);
+    at(&mut t, 21.0);
+    assert_eq!(t.st.axes3d_alpha(p), 1.0);
+    assert!(!t.st.animating());
+    let wait = t.st.axes3d_wait().expect("fades later");
+    assert!((wait - (AXES_HOLD_S - 1.0)).abs() < 1e-9);
+    at(&mut t, 20.0 + AXES_HOLD_S + AXES_FADE_OUT_S / 2.0);
+    assert!(t.st.animating(), "fading out");
+    at(&mut t, 20.0 + AXES_HOLD_S + AXES_FADE_OUT_S);
+    assert_eq!(t.st.axes3d_alpha(p), 0.0);
+    assert_eq!(t.st.axes3d_wait(), None);
+
+    // A camera key and a level-range change show them too.
+    let mut now = 100.0;
+    for key in ["ArrowLeft", "PageUp", "I", "Home", "Ctrl+ArrowUp"] {
+        at(&mut t, now);
+        assert_eq!(t.st.axes3d_alpha(p), 0.0, "{key}");
+        t.key(key);
+        at(&mut t, now + 1.0);
+        assert_eq!(t.st.axes3d_alpha(p), 1.0, "{key}");
+        now += 10.0;
+    }
+    // So does the mouse's dolly.
+    at(&mut t, now);
+    t.st.apply(Msg::Cam3d(p, Cam3dMsg::Dolly { steps: -1 }), &t.keys);
+    at(&mut t, now + 1.0);
+    assert_eq!(t.st.axes3d_alpha(p), 1.0);
+}

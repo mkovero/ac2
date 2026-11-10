@@ -202,6 +202,7 @@ pub(super) fn navigate(
     legend: LegendTook,
 ) {
     let pane = app.state.layout.kind(id);
+    reveal_3d(app, ui, resp, id);
     // A window over the panes owns the mouse: its wheel scrolls the window, never zooms a
     // plot behind it.
     if app.state.window_over_panes() {
@@ -350,6 +351,28 @@ pub(super) fn navigate(
                 factor: f64::from((scroll / 200.0).exp()),
             });
         }
+    }
+}
+
+/// A 3D spectrograph's axes show while the pointer is over it and for a while after a
+/// touch or click there. A touch screen reports no hover between touches, so a press or a
+/// release on the view counts as a touch; a window over the panes hides the view's hover.
+fn reveal_3d(app: &mut App, ui: &egui::Ui, resp: &egui::Response, id: PaneId) {
+    if !app
+        .state
+        .layout
+        .view(id)
+        .is_some_and(|v| v.shows_3d(app.state.three_d()))
+    {
+        return;
+    }
+    let over = resp.hovered() && !app.state.window_over_panes();
+    if over != app.state.axes3d_hovered(id) {
+        app.dispatch(Msg::Cam3d(id, crate::state::Cam3dMsg::Hover(over)));
+    }
+    let pressed = ui.input(|i| i.pointer.any_pressed() || i.pointer.any_released());
+    if over && (pressed || resp.clicked()) {
+        app.dispatch(Msg::Cam3d(id, crate::state::Cam3dMsg::Touch));
     }
 }
 
