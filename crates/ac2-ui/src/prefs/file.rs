@@ -433,6 +433,8 @@ pub(super) enum SpectrumViewFile {
     Spectrum,
     SpectrumSpectrograph,
     Spectrograph,
+    #[serde(rename = "spectrograph_3d")]
+    Spectrograph3d,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

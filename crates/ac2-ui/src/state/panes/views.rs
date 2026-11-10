@@ -114,6 +114,8 @@ impl PaneTemplate {
 pub struct PaneModes {
     pub transfer: TransferView,
     pub spectrum: SpectrumMode,
+    /// Where the 3D spectrograph is seen from; kept while the pane shows another view.
+    pub spectrum_camera: ac2_proto::model::layout::SpectrumCamera,
     pub spl: SplMode,
     pub sweep: SweepMode,
     /// A Programme pane's view; a pane without a pair draws Meters whatever it holds.
@@ -129,6 +131,7 @@ impl Default for PaneModes {
         Self {
             transfer: TransferView::Magnitude,
             spectrum: SpectrumMode::Spectrum,
+            spectrum_camera: ac2_proto::model::layout::SpectrumCamera::DEFAULT,
             spl: SplMode::MeterLeq,
             sweep: SweepMode::Response,
             programme: ac2_scene::view::ProgrammeMode::Meters,

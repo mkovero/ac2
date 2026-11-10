@@ -308,7 +308,12 @@ fn two_panes() -> PanesPrefs {
                 modes: PaneModes {
                     transfer: TransferView::Coherence,
                     spl: SplMode::Leq,
-                    spectrum: SpectrumMode::Spectrograph,
+                    spectrum: SpectrumMode::Spectrograph3d,
+                    spectrum_camera: ac2_proto::model::layout::SpectrumCamera {
+                        yaw_deg: -45,
+                        pitch_deg: 30,
+                        zoom_step: -3,
+                    },
                     sweep: SweepMode::Ir(IrMode::Etc),
                     programme: ac2_scene::view::ProgrammeMode::Goniometer,
                     sweep_reference: false,
@@ -360,7 +365,8 @@ fn layout_window_and_hold_round_trip() {
         "[layout.panes.rig]",
         "id = \"0000000070757075\"",
         "spl_view = \"leq\"",
-        "spectrum_view = \"spectrograph\"",
+        "spectrum_view = \"spectrograph_3d\"",
+        "yaw_deg = -45",
         "transfer_view = \"ir_log\"",
         "sweep_view = \"etc\"",
         "sweep_reference = false",

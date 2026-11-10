@@ -5,7 +5,7 @@
 //! sRGB. Cividis is the same degree-6 least-squares fit, made here to matplotlib's cividis
 //! table (`lib/matplotlib/_cm_listed.py`, CC0; Nuñez, Anderton & Renslow 2018). All four
 //! are perceptually uniform in lightness and readable with the common colour-vision
-//! deficiencies, which is why spectrographs use them. Grey is computed directly.
+//! deficiencies, which is why spectrographs use them. Grey and ice are computed directly.
 
 use crate::scene::Colormap;
 
@@ -168,6 +168,24 @@ const CIVIDIS: [[f64; 3]; 7] = [
 /// exist to avoid.
 const GREY_TOP: f64 = 0.8;
 
+/// Ice's stops, display-encoded sRGB at 0, ½ and 1: deep blue, steel blue, pale ice. Each
+/// is lighter than the one before, so the map stays monotonic in lightness; the top stops
+/// short of white as grey's does.
+const ICE: [[f64; 3]; 3] = [
+    [0x0B as f64 / 255.0, 0x1A as f64 / 255.0, 0x2B as f64 / 255.0],
+    [0x2D as f64 / 255.0, 0x6F as f64 / 255.0, 0xA8 as f64 / 255.0],
+    [0xCF as f64 / 255.0, 0xE8 as f64 / 255.0, 0xFF as f64 / 255.0],
+];
+
+fn ice(t: f64) -> [f64; 3] {
+    let (a, b, u) = if t < 0.5 {
+        (ICE[0], ICE[1], t * 2.0)
+    } else {
+        (ICE[1], ICE[2], t * 2.0 - 1.0)
+    };
+    [0, 1, 2].map(|i| a[i] + (b[i] - a[i]) * u)
+}
+
 fn poly(c: &[[f64; 3]; 7], t: f64) -> [f64; 3] {
     let mut out = [0.0; 3];
     for (ch, o) in out.iter_mut().enumerate() {
@@ -187,6 +205,7 @@ pub fn lut(map: Colormap) -> [[u8; 4]; LUT_SIZE] {
         // Linear in the encoded value: sRGB's encoding is close to perceived lightness, so
         // equal steps in level look like equal steps in grey.
         Colormap::Grey => [GREY_TOP * t; 3],
+        Colormap::Ice => ice(t),
     };
     let mut out = [[0u8; 4]; LUT_SIZE];
     for (i, e) in out.iter_mut().enumerate() {
@@ -261,6 +280,15 @@ mod tests {
         assert_eq!(l[0], [0, 0, 0, 255]);
         assert_eq!(l[LUT_SIZE - 1], [204, 204, 204, 255]);
         assert!(l.iter().all(|c| c[0] == c[1] && c[1] == c[2]));
+    }
+
+    #[test]
+    fn ice_runs_through_its_stops() {
+        let l = lut(Colormap::Ice);
+        assert_eq!(l[0], [0x0B, 0x1A, 0x2B, 255]);
+        assert_eq!(l[LUT_SIZE - 1], [0xCF, 0xE8, 0xFF, 255]);
+        let mid = l[LUT_SIZE / 2];
+        assert!((i32::from(mid[2]) - 0xA8).abs() <= 2, "{mid:?}");
     }
 
     #[test]

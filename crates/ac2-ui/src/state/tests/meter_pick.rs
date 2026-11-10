@@ -11,6 +11,7 @@ fn spl_pane(meas: u32) -> PaneLayout {
             kind: wire::PaneKind::Spl,
             transfer_view: wire::TransferView::Magnitude,
             spectrum_view: wire::SpectrumView::Spectrum,
+            spectrum_camera: ac2_proto::model::layout::SpectrumCamera::DEFAULT,
             spl_view: wire::SplView::MeterLeq,
             sweep_view: wire::SweepView::Response,
             programme_view: wire::ProgrammeView::Meters,

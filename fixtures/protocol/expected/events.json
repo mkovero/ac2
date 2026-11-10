@@ -128,7 +128,12 @@
       "pane": {
        "kind": "transfer",
        "transfer_view": "phase",
-       "spectrum_view": "spectrograph",
+       "spectrum_view": "spectrograph_3d",
+       "spectrum_camera": {
+        "yaw_deg": -30,
+        "pitch_deg": 20,
+        "zoom_step": 2
+       },
        "spl_view": "meter_leq",
        "sweep_view": "response",
        "programme_view": "meters",
@@ -214,7 +219,12 @@
        "pane": {
         "kind": "spl",
         "transfer_view": "magnitude",
-        "spectrum_view": "spectrograph",
+        "spectrum_view": "spectrograph_3d",
+        "spectrum_camera": {
+         "yaw_deg": -30,
+         "pitch_deg": 20,
+         "zoom_step": 2
+        },
         "spl_view": "meter_leq",
         "sweep_view": "response",
         "programme_view": "meters",
@@ -263,7 +273,12 @@
        "pane": {
         "kind": "programme",
         "transfer_view": "magnitude",
-        "spectrum_view": "spectrograph",
+        "spectrum_view": "spectrograph_3d",
+        "spectrum_camera": {
+         "yaw_deg": -30,
+         "pitch_deg": 20,
+         "zoom_step": 2
+        },
         "spl_view": "meter_leq",
         "sweep_view": "response",
         "programme_view": "goniometer",

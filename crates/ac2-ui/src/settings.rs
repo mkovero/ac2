@@ -447,6 +447,7 @@ pub fn spectrum_view_name(m: SpectrumMode) -> &'static str {
         SpectrumMode::Spectrum => "the spectrum",
         SpectrumMode::Split => "the spectrum over its spectrograph",
         SpectrumMode::Spectrograph => "the spectrograph",
+        SpectrumMode::Spectrograph3d => "the 3D spectrograph",
     }
 }
 

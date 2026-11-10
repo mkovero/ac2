@@ -10,7 +10,7 @@
 //! measurement: a field a session measurement gains (compare picks, display offsets, the
 //! transfer delay) never changes this file. A change to [`RigMeter`] or to a section's
 //! shape bumps [`VERSION`], and each previous version is read by its own module
-//! ([`super::v1`] … [`super::v8`]).
+//! ([`super::v1`] … [`super::v9`]).
 
 use std::net::SocketAddr;
 
@@ -26,7 +26,7 @@ use serde_json::{Map, Value};
 use super::{RigMeter, RigSettings};
 
 pub(super) const FORMAT: &str = "ac2-rig-settings";
-pub(super) const VERSION: u32 = 9;
+pub(super) const VERSION: u32 = 10;
 
 /// The file as written: every section always present (`null` for none), so that a key
 /// missing on read is damage, not a default.
@@ -171,7 +171,8 @@ pub(super) fn read(text: &[u8]) -> Result<Read, String> {
             5 => super::v5::upgrade(&mut obj),
             6 => super::v6::upgrade(&mut obj),
             7 => super::v7::upgrade(&mut obj),
-            _ => super::v8::upgrade(&mut obj),
+            8 => super::v8::upgrade(&mut obj),
+            _ => super::v9::upgrade(&mut obj),
         }
     }
     let mut r = Reader {

@@ -57,7 +57,7 @@ pub fn commands() -> Vec<Command> {
                             style: crate::model::SpectrumStyle::Fill,
                             peak: crate::model::PeakMode::Track,
                             spectrograph_span_s: 60,
-                            spectrograph_colours: crate::model::Colormap::Magma,
+                            spectrograph_colours: crate::model::Colormap::Ice,
                         },
                     },
                 },

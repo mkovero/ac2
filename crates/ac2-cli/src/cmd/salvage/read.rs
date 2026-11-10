@@ -245,6 +245,7 @@ fn old_meas(v: &Value) -> Result<OldMeas, String> {
         ac2_traces::old_layout::programme_views(&mut d);
         ac2_traces::old_layout::panes_this_rig(&mut d);
         took = ac2_traces::old_layout::panes_curves(&mut d, owner.as_ref(), &compared);
+        ac2_traces::old_layout::panes_spectrum_camera(&mut d);
         d
     });
     if !compared.is_empty() && took == 0 {

@@ -19,7 +19,10 @@
 //! - Before every pane reference named its rig a pane named one rig for all it showed, a
 //!   pane with no pick in a measurement's own layout showed that measurement, and a
 //!   measurement kept a compare list of curves its panes drew over its own: session format
-//!   40 and rig settings version 8 ([`panes_curves`]). Runs last.
+//!   40 and rig settings version 8 ([`panes_curves`]).
+//! - Before the spectrum pane had a 3D spectrograph a pane carried no `spectrum_camera`:
+//!   session format 41 and rig settings version 9 ([`panes_spectrum_camera`]). Independent
+//!   of the steps above; runs after them.
 
 use ac2_proto::model::MeasKind;
 use ac2_proto::model::layout::PaneLayout;
@@ -285,6 +288,22 @@ fn pane_curves(
     1
 }
 
+/// Gives every pane in the layout tree `v` without a `spectrum_camera` the default one: a
+/// pane saved before the 3D spectrograph never showed it, so it has never been framed.
+pub fn panes_spectrum_camera(v: &mut Value) {
+    match v {
+        Value::Object(obj) if is_pane(obj) => {
+            obj.entry("spectrum_camera").or_insert_with(|| {
+                serde_json::to_value(ac2_proto::model::layout::SpectrumCamera::DEFAULT)
+                    .unwrap_or(Value::Null)
+            });
+        }
+        Value::Object(obj) => obj.values_mut().for_each(panes_spectrum_camera),
+        Value::Array(items) => items.iter_mut().for_each(panes_spectrum_camera),
+        _ => {}
+    }
+}
+
 fn is_pane(obj: &Map<String, Value>) -> bool {
     obj.contains_key("kind") && obj.contains_key("chrome")
 }
@@ -516,6 +535,7 @@ mod tests {
         programme_views(&mut v);
         panes_this_rig(&mut v);
         panes_curves(&mut v, None, &[]);
+        panes_spectrum_camera(&mut v);
         assert_eq!(count_panes(&v), PaneLayout::MAX_PANES);
         let text = v.to_string();
         assert_eq!(text.matches("\"goniometer\"").count(), 1, "{text}");
@@ -667,5 +687,22 @@ mod tests {
             }
         }
         v
+    }
+
+    #[test]
+    fn every_pane_gets_the_default_camera_and_keeps_its_own() {
+        let mut v = json!({"type": "split", "a":
+            {"type": "pane", "pane": {"kind": "spectrum", "chrome": "full"}},
+            "b": {"type": "pane", "pane": {"kind": "spectrum", "chrome": "full",
+                "spectrum_camera": {"yaw_deg": 10, "pitch_deg": 20, "zoom_step": 1}}}});
+        panes_spectrum_camera(&mut v);
+        assert_eq!(
+            v["a"]["pane"]["spectrum_camera"],
+            json!({"yaw_deg": 0, "pitch_deg": 8, "zoom_step": 0})
+        );
+        assert_eq!(
+            v["b"]["pane"]["spectrum_camera"],
+            json!({"yaw_deg": 10, "pitch_deg": 20, "zoom_step": 1})
+        );
     }
 }

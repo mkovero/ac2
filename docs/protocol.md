@@ -31,7 +31,7 @@ keepalives to each connection as its credit allows (§5.8).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 85`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 86`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -395,11 +395,15 @@ layout it receives for the measurement it has selected on screen and never sends
 A `PaneLayout` is a tree: `{type: pane, pane: LayoutPane}` or `{type: split, axis: row |
 column, ratio, a: PaneLayout, b: PaneLayout}` (`row`: `a` left; `column`: `a` on top;
 `ratio`: the share `a` takes, strictly between 0 and 1). `LayoutPane` is {`kind`,
-`transfer_view`, `spectrum_view`, `spl_view`, `sweep_view`, `programme_view`, `chrome`,
-`content`, `levels`, `plates`}
+`transfer_view`, `spectrum_view`, `spectrum_camera`, `spl_view`, `sweep_view`,
+`programme_view`, `chrome`, `content`, `levels`, `plates`}
 (snake_case enums, `ac2_proto::model::layout`): its kind (`transfer`, `spectrum`, `spl`,
-`distortion`, `programme`, `walk`), the view of each kind it may be turned into (`programme_view`:
-`meters` or `goniometer`; a goniometer on a pane that meters no pair draws its meters), what it
+`distortion`, `programme`, `walk`), the view of each kind it may be turned into (`spectrum_view`:
+`spectrum`, `spectrum_spectrograph`, `spectrograph` or `spectrograph_3d`; `programme_view`:
+`meters` or `goniometer`; a goniometer on a pane that meters no pair draws its meters), where
+its 3D spectrograph is seen from (`spectrum_camera`, required: {`yaw_deg` i8 within ±80,
+`pitch_deg` u8 within 2 … 75, `zoom_step` i8 within −8 … 4}; a camera outside a range is
+refused with `invalid`, never clamped), what it
 shows (`content`, required, a tagged map, each reference carrying the rig whose id it is), the
 level axis ranges the operator set on it (`levels`: {`transfer`, `spectrum_dbfs`,
 `spectrum_spl`, `distortion`}, each {`lo`, `hi`} dB or nil, nil being framed by the client
@@ -530,7 +534,7 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   `hold` \| `track`: clients draw a peak-hold curve they keep themselves, and with `track`
   also mark and list the curve's highest peaks, found by themselves), `spectrograph_span_s` (u32: 10 \| 30 \| 60
   \| 120, `invalid` otherwise) and `spectrograph_colours` (`Colormap`: `viridis` \| `magma`
-  \| `inferno` \| `cividis` \| `grey`). A configuration that differs only in `display`
+  \| `inferno` \| `cividis` \| `grey` \| `ice`). A configuration that differs only in `display`
   (and the name) changes nothing the daemon computes: the job, its averages and the
   measurement's `config_rev` stay as they are. A math channel on the spectrum pane draws
   with its owner's display.

@@ -3,6 +3,7 @@
 use super::file::*;
 use super::rig_file::parse_rig_id;
 use super::*;
+use ac2_proto::model::layout::SpectrumCamera;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -195,6 +196,9 @@ struct PaneEntryFile {
     spl_view: SplViewFile,
     #[serde(default)]
     spectrum_view: SpectrumViewFile,
+    /// The 3D spectrograph's camera; absent: the default one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    spectrum_camera: Option<ac2_proto::model::layout::SpectrumCamera>,
     #[serde(default)]
     sweep_view: SweepViewFile,
     #[serde(default)]
@@ -241,7 +245,10 @@ impl PaneEntryFile {
                 SpectrumMode::Spectrum => SpectrumViewFile::Spectrum,
                 SpectrumMode::Split => SpectrumViewFile::SpectrumSpectrograph,
                 SpectrumMode::Spectrograph => SpectrumViewFile::Spectrograph,
+                SpectrumMode::Spectrograph3d => SpectrumViewFile::Spectrograph3d,
             },
+            spectrum_camera: (m.spectrum_camera != SpectrumCamera::DEFAULT)
+                .then_some(m.spectrum_camera),
             sweep_view: match m.sweep {
                 SweepMode::Response => SweepViewFile::Response,
                 SweepMode::Ir(IrMode::Linear) => SweepViewFile::IrLinear,
@@ -292,7 +299,14 @@ impl PaneEntryFile {
                     SpectrumViewFile::Spectrum => SpectrumMode::Spectrum,
                     SpectrumViewFile::SpectrumSpectrograph => SpectrumMode::Split,
                     SpectrumViewFile::Spectrograph => SpectrumMode::Spectrograph,
+                    SpectrumViewFile::Spectrograph3d => SpectrumMode::Spectrograph3d,
                 },
+                // A camera edited out of range in the file frames the default view: the
+                // file is this machine's own preference, not another client's request.
+                spectrum_camera: self
+                    .spectrum_camera
+                    .filter(|c| c.check().is_ok())
+                    .unwrap_or_default(),
                 sweep: match self.sweep_view {
                     SweepViewFile::Response => SweepMode::Response,
                     SweepViewFile::IrLinear => SweepMode::Ir(IrMode::Linear),

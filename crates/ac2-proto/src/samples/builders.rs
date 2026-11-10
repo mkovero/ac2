@@ -176,13 +176,19 @@ pub(super) fn sweep_config() -> SweepConfig {
 /// view with its level axis zoomed and its cursor values dragged to the bottom-left at twice
 /// the text size, drawing measurement 1's group with another rig's stored trace 7 and live
 /// curve 4; the meter is that rig's measurement 2, the Programme pane meters the pair of
-/// inputs 3 and 4 of this rig in its goniometer view.
+/// inputs 3 and 4 of this rig in its goniometer view. Every pane's spectrum view is the
+/// 3D spectrograph, seen from the left and above.
 pub fn pane_layout() -> PaneLayout {
     use crate::model::layout::*;
     let pane = |kind, transfer_view| LayoutPane {
         kind,
         transfer_view,
-        spectrum_view: SpectrumView::Spectrograph,
+        spectrum_view: SpectrumView::Spectrograph3d,
+        spectrum_camera: SpectrumCamera {
+            yaw_deg: -30,
+            pitch_deg: 20,
+            zoom_step: 2,
+        },
         spl_view: SplView::MeterLeq,
         sweep_view: SweepView::Response,
         programme_view: ProgrammeView::Meters,

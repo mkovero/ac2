@@ -622,7 +622,9 @@ fn wire_pane(v: &View, levels: wire::LayoutLevels, refs: &WireRigs) -> wire::Lay
             SpectrumMode::Spectrum => wire::SpectrumView::Spectrum,
             SpectrumMode::Split => wire::SpectrumView::SpectrumSpectrograph,
             SpectrumMode::Spectrograph => wire::SpectrumView::Spectrograph,
+            SpectrumMode::Spectrograph3d => wire::SpectrumView::Spectrograph3d,
         },
+        spectrum_camera: m.spectrum_camera,
         spl_view: match m.spl {
             SplMode::Meter => wire::SplView::Meter,
             SplMode::Leq => wire::SplView::Leq,
@@ -694,7 +696,9 @@ fn ui_view(p: &wire::LayoutPane, this: RigId) -> View {
                 wire::SpectrumView::Spectrum => SpectrumMode::Spectrum,
                 wire::SpectrumView::SpectrumSpectrograph => SpectrumMode::Split,
                 wire::SpectrumView::Spectrograph => SpectrumMode::Spectrograph,
+                wire::SpectrumView::Spectrograph3d => SpectrumMode::Spectrograph3d,
             },
+            spectrum_camera: p.spectrum_camera,
             spl: match p.spl_view {
                 wire::SplView::Meter => SplMode::Meter,
                 wire::SplView::Leq => SplMode::Leq,

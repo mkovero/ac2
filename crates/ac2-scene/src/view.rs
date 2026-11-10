@@ -411,6 +411,9 @@ pub enum SpectrumMode {
     Split,
     /// The spectrograph alone, the whole pane (full screen with W / F11).
     Spectrograph,
+    /// The 3D spectrograph: level as height, the whole pane, the pane's measurement only
+    /// ([`crate::spectrograph_3d`]).
+    Spectrograph3d,
 }
 
 impl SpectrumMode {
@@ -423,6 +426,7 @@ impl SpectrumMode {
             Self::Spectrum => Self::Split,
             Self::Split => Self::Spectrograph,
             Self::Spectrograph => Self::Spectrum,
+            Self::Spectrograph3d => Self::Spectrum,
         }
     }
 
@@ -432,6 +436,7 @@ impl SpectrumMode {
             Self::Spectrum => Self::Spectrograph,
             Self::Split => Self::Spectrum,
             Self::Spectrograph => Self::Split,
+            Self::Spectrograph3d => Self::Spectrograph,
         }
     }
 

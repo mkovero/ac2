@@ -313,7 +313,8 @@ def _layout_pane(
     return {
         "kind": kind,
         "transfer_view": transfer_view,
-        "spectrum_view": "spectrograph",
+        "spectrum_view": "spectrograph_3d",
+        "spectrum_camera": {"yaw_deg": -30, "pitch_deg": 20, "zoom_step": 2},
         "spl_view": "meter_leq",
         "sweep_view": "response",
         "programme_view": programme_view,

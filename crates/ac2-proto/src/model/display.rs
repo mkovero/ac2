@@ -52,16 +52,19 @@ pub enum Colormap {
     Cividis,
     /// Black to light grey; stops short of white, which glares in a dark room.
     Grey,
+    /// Deep blue through steel blue to pale ice; stops short of white as grey does.
+    Ice,
 }
 
 impl Colormap {
     /// In the order ←/→ and the palette step through them.
-    pub const ALL: [Colormap; 5] = [
+    pub const ALL: [Colormap; 6] = [
         Colormap::Viridis,
         Colormap::Magma,
         Colormap::Inferno,
         Colormap::Cividis,
         Colormap::Grey,
+        Colormap::Ice,
     ];
 
     /// What the settings, the palette and the toasts call it.
@@ -72,6 +75,7 @@ impl Colormap {
             Colormap::Inferno => "inferno",
             Colormap::Cividis => "cividis",
             Colormap::Grey => "grey",
+            Colormap::Ice => "ice",
         }
     }
 

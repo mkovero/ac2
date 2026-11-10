@@ -218,6 +218,9 @@ pub struct LayoutPane {
     pub transfer_view: TransferView,
     /// The spectrum pane's view.
     pub spectrum_view: SpectrumView,
+    /// Where the spectrum pane's 3D spectrograph is seen from: a view of the pane, kept
+    /// while the pane shows another view.
+    pub spectrum_camera: SpectrumCamera,
     /// The SPL pane's view.
     pub spl_view: SplView,
     /// The sweep pane's view.
@@ -391,6 +394,72 @@ pub enum SpectrumView {
     Spectrum,
     SpectrumSpectrograph,
     Spectrograph,
+    /// Level as height over frequency and time (`docs/design/spectrograph-3d.md`).
+    #[serde(rename = "spectrograph_3d")]
+    Spectrograph3d,
+}
+
+/// The 3D spectrograph's camera, orbiting the floor's centre: whole degrees and zoom
+/// steps, so a stored camera reads back equal and an unchanged one is not sent again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpectrumCamera {
+    /// Around the vertical axis, degrees; 0 looks along the time axis, positive from the
+    /// right.
+    pub yaw_deg: i8,
+    /// Above the floor, degrees.
+    pub pitch_deg: u8,
+    /// Dolly steps from the fitted distance; positive is closer.
+    pub zoom_step: i8,
+}
+
+impl SpectrumCamera {
+    /// Past 90° frequency would read right to left; 80 leaves the axis readable.
+    pub const YAW_MAX_DEG: i8 = 80;
+    /// Edge-on spikes vanish below the low limit; top-down is the 2D view.
+    pub const PITCH_DEG: std::ops::RangeInclusive<u8> = 2..=75;
+    pub const ZOOM_STEPS: std::ops::RangeInclusive<i8> = -8..=4;
+
+    /// Frequency left to right, seen from just above the floor.
+    pub const DEFAULT: Self = Self {
+        yaw_deg: 0,
+        pitch_deg: 8,
+        zoom_step: 0,
+    };
+
+    /// Why the camera is not one a pane may hold: each field within its range.
+    pub fn check(&self) -> Result<(), String> {
+        if self.yaw_deg.unsigned_abs() > Self::YAW_MAX_DEG.unsigned_abs() {
+            return Err(format!(
+                "a 3D spectrograph's yaw is within ±{}°, not {}°",
+                Self::YAW_MAX_DEG,
+                self.yaw_deg
+            ));
+        }
+        if !Self::PITCH_DEG.contains(&self.pitch_deg) {
+            return Err(format!(
+                "a 3D spectrograph's pitch is within {} … {}°, not {}°",
+                Self::PITCH_DEG.start(),
+                Self::PITCH_DEG.end(),
+                self.pitch_deg
+            ));
+        }
+        if !Self::ZOOM_STEPS.contains(&self.zoom_step) {
+            return Err(format!(
+                "a 3D spectrograph's zoom step is within {} … {}, not {}",
+                Self::ZOOM_STEPS.start(),
+                Self::ZOOM_STEPS.end(),
+                self.zoom_step
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Default for SpectrumCamera {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
 }
 
 /// The SPL pane's views.
@@ -471,7 +540,9 @@ impl PaneLayout {
     /// [`PaneContent::check`] refuses, and content of another kind than the pane's:
     /// [`PaneContent::Nothing`] on any pane, curves only on a Transfer, Spectrum / RTA or
     /// Sweep / distortion pane, a meter only on an SPL pane, inputs or a pair only on a
-    /// Programme pane, a walk only on a Walk pane.
+    /// Programme pane, a walk only on a Walk pane, and a 3D spectrograph camera outside
+    /// [`SpectrumCamera::check`]'s ranges (refused, never clamped: it came from another
+    /// client or a file).
     pub fn check(&self) -> Result<(), String> {
         let n = self.panes().len();
         if n > Self::MAX_PANES {
@@ -495,6 +566,7 @@ impl PaneLayout {
             }
         }
         for p in self.panes() {
+            p.spectrum_camera.check()?;
             let fits = match (&p.content, p.kind) {
                 (PaneContent::Nothing, _) => true,
                 (PaneContent::Curves { .. }, k) => k.draws_curves(),
@@ -781,6 +853,60 @@ mod tests {
         assert_eq!(
             l.check_groups(group),
             Err("Trace { trace: TraceId(5) } is drawn by the group of measurement 1 in the same pane".into())
+        );
+    }
+
+    #[test]
+    fn a_camera_outside_its_ranges_is_refused_not_clamped() {
+        let with = |c: SpectrumCamera| {
+            let mut l = crate::samples::pane_layout();
+            l.panes_mut()[0].spectrum_camera = c;
+            l.check()
+        };
+        let d = SpectrumCamera::DEFAULT;
+        for ok in [
+            d,
+            SpectrumCamera { yaw_deg: -80, ..d },
+            SpectrumCamera { yaw_deg: 80, ..d },
+            SpectrumCamera { pitch_deg: 2, ..d },
+            SpectrumCamera { pitch_deg: 75, ..d },
+            SpectrumCamera { zoom_step: -8, ..d },
+            SpectrumCamera { zoom_step: 4, ..d },
+        ] {
+            assert_eq!(with(ok), Ok(()), "{ok:?}");
+        }
+        for bad in [
+            SpectrumCamera { yaw_deg: -81, ..d },
+            SpectrumCamera { yaw_deg: 81, ..d },
+            SpectrumCamera {
+                yaw_deg: i8::MIN,
+                ..d
+            },
+            SpectrumCamera { pitch_deg: 1, ..d },
+            SpectrumCamera { pitch_deg: 76, ..d },
+            SpectrumCamera { zoom_step: -9, ..d },
+            SpectrumCamera { zoom_step: 5, ..d },
+        ] {
+            assert!(with(bad).is_err(), "{bad:?}");
+        }
+        let mut l = crate::samples::pane_layout();
+        l.panes_mut()[0].spectrum_camera = SpectrumCamera { pitch_deg: 90, ..d };
+        let before = l.clone();
+        assert!(l.check().is_err());
+        assert_eq!(l, before);
+    }
+
+    #[test]
+    fn a_camera_round_trips_exactly() {
+        let c = SpectrumCamera {
+            yaw_deg: -35,
+            pitch_deg: 17,
+            zoom_step: -6,
+        };
+        let raw = rmp_serde::to_vec_named(&c).expect("msgpack");
+        assert_eq!(
+            rmp_serde::from_slice::<SpectrumCamera>(&raw).expect("read"),
+            c
         );
     }
 }

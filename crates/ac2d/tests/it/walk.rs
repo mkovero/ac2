@@ -600,6 +600,7 @@ fn awaiting_pick_reaches_the_walk_pane_and_marks_the_capture_unsettled() {
         kind: PaneKind::Walk,
         transfer_view: TransferView::Magnitude,
         spectrum_view: SpectrumView::Spectrograph,
+        spectrum_camera: ac2_proto::model::layout::SpectrumCamera::DEFAULT,
         spl_view: SplView::MeterLeq,
         sweep_view: SweepView::Response,
         programme_view: ProgrammeView::Meters,
