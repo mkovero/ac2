@@ -4,13 +4,20 @@
 //!
 //! The history is display state kept by the UI between frames, like [`PeakHold`]: the
 //! frames' columns resampled once, when they arrive, onto an even log-frequency grid of
-//! [`ROWS_PER_OCTAVE`], and placed by their capture time on a time grid of
+//! [`ROWS_PER_OCTAVE`], and placed by the audio time they end at (the session's sample
+//! clock, `audio_sample ÷ rate`) on a time grid of
 //! [`SLOTS_PER_S`] slots a second over the history length ([`slots`]): the slot is as
 //! long at every length, so a spectrum that updates about 30 times a second keeps a row
 //! per update over two minutes as over ten seconds. A frame stands for the time since the previous one, so a
 //! long FFT that updates a few times a second fills its slots, and so does a run of frames
 //! the link left out because they drew the same. Time without frames (the stream went
 //! STALE, the measurement stopped) is a gap, never the last spectrum smeared across it.
+//! The sample clock spaces the frames as the audio did; a capture time on the wall clock
+//! would add the daemon's hand-off jitter to their spacing.
+//!
+//! The picture scrolls on the display's clock, not frame by frame
+//! ([`crate::scroll_clock`]): [`SpectrographHistory::lead_slots`] is how far past
+//! their places the slots are drawn at a moment between frames.
 //!
 //! The renderer keeps the history's columns on the GPU and uploads only the slots a new
 //! frame wrote ([`crate::primitives::Heatmap`]); zoom, pan and the level range change the
@@ -23,7 +30,6 @@ use std::sync::Arc;
 use ac2_proto::GridId;
 use ac2_proto::frame::ValidityMask;
 use ac2_proto::model::{LevelScale, SpecLevel};
-use ac2_proto::units::WallNs;
 
 use crate::axis::{self, Axis, Range, TickKind};
 use crate::banner::Status;
@@ -42,6 +48,12 @@ use crate::view::{FREQ_LIMIT_HI, FREQ_LIMIT_LO, SpectrumMode, ViewState};
 /// Time slots a second: one per 33 ms, the period frames are published at over the
 /// network, and about the update rate of a spectrum of up to 4096 points at 48 kHz.
 pub const SLOTS_PER_S: u32 = 30;
+/// How far the time axis may stand from the end of the newest slot, slots
+/// ([`SpectrographHistory::lead_slots`]): back to the newest slot's start, and on past it
+/// while the next frame is due, which the axis's own reach bounds
+/// ([`crate::scroll_clock::ScrollClock::reach_s`]); this bound only keeps a picture of a
+/// slow stream from standing far from its data (a quarter second at 30 slots a second).
+pub const LEAD_SLOTS: (f64, f64) = (-1.0, 8.0);
 /// At most this many slots, whatever the history length: the 4096 texels a Pi 4 class GPU
 /// allows per texture side (the ring is one texture). A longer history has longer slots.
 pub const MAX_SLOTS: usize = 4096;
@@ -147,9 +159,10 @@ impl RowMap {
 #[derive(Clone, Copy, Debug)]
 pub struct SpectrographFrame<'a> {
     pub seq: u64,
-    /// Capture time on the daemon's clock: frames are placed by when they were measured,
-    /// not by when the link delivered them.
-    pub at: WallNs,
+    /// The audio time the frame ends at, ns on the session's sample clock
+    /// (`audio_sample ÷ rate`): frames are placed by when they were measured, not by when
+    /// the link delivered them.
+    pub at_ns: u64,
     pub grid: GridId,
     /// Band edges of the grid's columns ([`GridDef::edges`](ac2_proto::GridDef::edges)).
     pub edges: &'a [(f64, f64)],
@@ -171,7 +184,7 @@ pub struct SpectrographHistory {
     spec_level: Option<SpecLevel>,
     map: Option<Arc<RowMap>>,
     ring: Vec<Option<HeatmapColumn>>,
-    /// Absolute slot (capture time / slot length) of the newest frame.
+    /// Absolute slot (audio time / slot length) of the newest frame.
     newest: Option<u64>,
     last_seq: Option<u64>,
     /// The stream had a break (stale, stopped) since the newest frame.
@@ -285,7 +298,7 @@ impl SpectrographHistory {
         self.revision
     }
 
-    /// Absolute slot (capture time ÷ slot length) of the newest frame.
+    /// Absolute slot (audio time ÷ slot length) of the newest frame.
     pub fn newest_slot(&self) -> Option<u64> {
         self.newest
     }
@@ -330,7 +343,7 @@ impl SpectrographHistory {
             return false;
         };
         let col = map.resample(f.level, f.validity);
-        let slot = f.at.0 / self.slot_ns;
+        let slot = f.at_ns / self.slot_ns;
         let n = self.ring.len() as u64;
         let at = |a: u64| (a % n) as usize;
         match self.newest {
@@ -369,6 +382,20 @@ impl SpectrographHistory {
         true
     }
 
+    /// How far past the end of the newest slot the time axis stands at audio time `at_s`
+    /// ([`crate::scroll_clock::ScrollClock::position_s`]), in slots, within
+    /// [`LEAD_SLOTS`]: the picture scrolls on by it, its top edge (the 3D view's front
+    /// edge) standing at `at_s`. Negative while the axis is inside the newest slot (its
+    /// later part is not drawn yet); positive while the next frame is due, the newest
+    /// column then standing in for the time since, as the slots between two frames do once
+    /// the next one is in. 0 without frames or a position (drawn at their places).
+    pub fn lead_slots(&self, at_s: Option<f64>) -> f64 {
+        let (Some(n), Some(at)) = (self.newest, at_s.filter(|a| a.is_finite())) else {
+            return 0.0;
+        };
+        (at / self.slot_s() - (n + 1) as f64).clamp(LEAD_SLOTS.0, LEAD_SLOTS.1)
+    }
+
     /// The level at `hz`, `before_s` seconds before the newest frame; `None` outside the
     /// history or where there is no value.
     pub fn value_at(&self, hz: f64, before_s: f64) -> Option<f32> {
@@ -401,6 +428,9 @@ pub struct SpectrographInput<'a> {
     pub freshness: Option<Freshness>,
     /// The measurement's colour map ([`ac2_proto::model::SpectrumDisplay`]).
     pub colours: crate::primitives::Colormap,
+    /// How far past the newest slot the time axis stands
+    /// ([`SpectrographHistory::lead_slots`]); 0 draws the slots at their places.
+    pub lead_slots: f64,
 }
 
 /// Cursor values in the spectrograph.
@@ -594,6 +624,7 @@ pub fn spectrograph_scene(
             rows: BAR_STEPS as u32,
             axes: HeatmapAxes::TimeAcross,
             scroll: 0,
+            lead: 0.0,
             range: [range.lo as f32, range.hi as f32],
             colormap,
             opacity: 1.0,
@@ -653,6 +684,7 @@ pub fn spectrograph_scene(
                         rows: rows.rows() as u32,
                         axes: HeatmapAxes::TimeUp,
                         scroll: s.history.scroll(),
+                        lead: s.lead_slots as f32,
                         // The colours are those of the displayed (offset) level.
                         range: [(range.lo - off) as f32, (range.hi - off) as f32],
                         colormap,

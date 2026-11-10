@@ -712,7 +712,7 @@ fn bench_frame_cost() {
     use ac2_proto::GridDef;
     use ac2_proto::frame::ValidityMask;
     use ac2_proto::model::LevelScale;
-    use ac2_proto::units::{Hz, WallNs};
+    use ac2_proto::units::Hz;
     use ac2_scene::Viewport;
     use ac2_scene::axis::Range;
     use ac2_scene::banner::Status;
@@ -798,7 +798,7 @@ fn bench_frame_cost() {
             .collect();
         hist.push(&SpectrographFrame {
             seq,
-            at: WallNs(T0 + slot * SLOT_NS + SLOT_NS / 2),
+            at_ns: T0 + slot * SLOT_NS + SLOT_NS / 2,
             grid: grid_id,
             edges: &edges,
             scale: LevelScale::Dbfs,
@@ -871,7 +871,7 @@ fn bench_frame_cost() {
                     tier,
                     tier_forced: false,
                     axes: 1.0,
-                    lag_slots: 0.0,
+                    lead_slots: 0.0,
                 };
                 let sc = spectrograph_3d_scene(
                     &[],

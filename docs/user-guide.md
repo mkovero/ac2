@@ -1203,12 +1203,14 @@ bin: zoom into one for finer detail.
 
 A long FFT updates every eighth of its window (about 6/s at 65 536 points; more overlap adds
 work but no information); a short FFT steps by 1024 samples at 48 kHz (about 47/s; the step
-scales with the rate), or by half its window when that is shorter. The curve **glides** to each new spectrum
-over the time between them (30–200 ms); the cursor, peak hold and captures use the newest
-spectrum itself, and stale, stopped or reconfigured measurements are drawn as they are.
-Settings › Display › Spectrum "jumps to each new frame" turns gliding off (RTAs too, and
-the 3D spectrograph's rows, which otherwise glide back between frames the same way and
-stand still when the frames stop).
+scales with the rate), or by half its window when that is shorter. A new spectrum shows the
+display frame it arrives; one that updates slower than 30 a second **glides** in over that one
+display frame; the cursor, peak hold and captures use the newest spectrum itself, and stale,
+stopped or reconfigured measurements are drawn as they are. The spectrographs (flat and 3D)
+scroll on the display's clock, the same distance every display frame, with the newest
+spectrum in as it arrives; when the frames stop they stand still. Settings › Display ›
+Spectrum "jumps to each new frame" turns both off (RTAs too): each frame is drawn where it
+lands.
 
 **B** steps the curves through three styles: **line**, **fill** (the same line over a faint
 area in the trace colour down to the bottom of the plot) and **bars**. Bars show band power,

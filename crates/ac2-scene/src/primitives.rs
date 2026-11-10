@@ -337,6 +337,11 @@ pub struct Heatmap {
     /// Ring column drawn first (left edge, or bottom edge for [`HeatmapAxes::TimeUp`]);
     /// scrolling advances this.
     pub scroll: u32,
+    /// How many columns past the end of the newest column the time axis stands: the
+    /// picture scrolls on by the fraction between frames, so it moves evenly however
+    /// unevenly frames come. Past the newest column the time is drawn with it; negative,
+    /// part of the newest column is past the edge. 0: columns at their places.
+    pub lead: f32,
     /// Values mapped to the first and last colormap entry; values outside clamp.
     pub range: [f32; 2],
     pub colormap: Colormap,
@@ -417,10 +422,11 @@ pub struct Skyline3d {
     pub rows: u32,
     /// Ring position of the newest row; the row `j` places before it is `j` rows older.
     pub newest: u32,
-    /// How far the rows have glided back from their places: the newest row's fill
-    /// fraction, in (0, 1]. Row `j` (0 = newest) stands at `z = (j + phase) · world[1] /
-    /// rows`, so rows move back continuously as the newest fills and a new one starts at
-    /// the front.
+    /// How far back the newest row stands, in rows, in [0,
+    /// [`crate::spectrograph_3d::MAX_PHASE`]]: the newest row's fill fraction at rest, more
+    /// or less as the time axis scrolls on between frames. Row `j` (0 = newest) stands at
+    /// `z = (j + phase) · world[1] / rows`, so rows move back continuously as time passes
+    /// and a new one starts at the front.
     pub phase: f32,
     /// World to clip space for `rect` (column-major; clip `z` in 0 … `w`).
     pub view_proj: [[f32; 4]; 4],

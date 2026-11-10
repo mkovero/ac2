@@ -18,7 +18,10 @@ struct Heatmap {
     scroll: u32,
     // 1: columns run bottom to top and rows left to right.
     time_up: u32,
-    _pad: u32,
+    // Columns the time axis stands past the end of the newest column: the picture
+    // scrolls on by it between frames, the newest column standing in for the time past
+    // its end; negative, the newest column's later part is past the edge.
+    lead: f32,
 }
 
 const MAX_TAPS: u32 = 4u;
@@ -75,11 +78,12 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let vc = (hm.rect.w - p.y) / size.y;
     var cs: vec2<u32>;
     var rs: vec2<u32>;
+    let shift = hm.lead / f32(hm.columns);
     if (hm.time_up != 0u) {
-        cs = cells(v0, v1, vc, hm.columns);
+        cs = cells(v0 + shift, v1 + shift, vc + shift, hm.columns);
         rs = cells(u0, u1, uc, hm.rows);
     } else {
-        cs = cells(u0, u1, uc, hm.columns);
+        cs = cells(u0 + shift, u1 + shift, uc + shift, hm.columns);
         rs = cells(v0, v1, vc, hm.rows);
     }
     let ct = min(cs.y, MAX_TAPS);

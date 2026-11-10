@@ -65,8 +65,7 @@ pub use panes::drag::{DragItem, DragMsg, DropTarget, EDGE_SHARE, RowDrag, RowDro
 mod advice;
 mod glide;
 pub use glide::SpecGlide;
-mod row_glide;
-pub use row_glide::RowGlide;
+mod scroll;
 mod walk_bar;
 pub use walk_bar::FillGlide;
 mod leq;

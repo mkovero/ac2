@@ -327,7 +327,7 @@ fn spectrograph_3d_view_with_a_full_history() {
         let l = level(i);
         h.push(&SpectrographFrame {
             seq,
-            at: WallNs(t0 + i * slot_ns + slot_ns / 2),
+            at_ns: t0 + i * slot_ns + slot_ns / 2,
             grid: g.id(),
             edges: &edges,
             scale: LevelScale::Dbfs,
@@ -357,7 +357,7 @@ fn spectrograph_3d_view_with_a_full_history() {
     });
     let theme = Theme::dark();
     let view = ViewState::default();
-    let input = |lag_slots: f64| Spectrograph3dInput {
+    let input = |lead_slots: f64| Spectrograph3dInput {
         key: TraceKey::Live(MeasId(1)),
         history: &h,
         skyline: &sky,
@@ -370,7 +370,7 @@ fn spectrograph_3d_view_with_a_full_history() {
         tier: SkylineTier::Full,
         tier_forced: false,
         axes: 1.0,
-        lag_slots,
+        lead_slots,
     };
     let scene = time(50, || {
         std::hint::black_box(spectrograph_3d_scene(

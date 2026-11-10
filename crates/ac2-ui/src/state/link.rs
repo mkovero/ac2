@@ -636,8 +636,9 @@ impl RigState {
 
     /// Folds the newest spectrum / RTA frames into the spectrograph histories. A stream
     /// that is STALE, or whose measurement is not running, marks a break: the time until
-    /// its next frame is a gap in the picture. With `ease`, each history's 3D rows glide to
-    /// where a frame moves them ([`RowGlide`]).
+    /// its next frame is a gap in the picture. Frames are placed by their audio time
+    /// (`audio_sample ÷` the session's rate); with `ease`, each history's time axis follows
+    /// them on the display's clock ([`super::scroll`]).
     pub(super) fn fold_spectrographs(&mut self, d: &DataSnapshot, ease: bool) {
         use ac2_proto::FrameData;
         use ac2_scene::spectrograph::{SpectrographFrame, SpectrographHistory};
@@ -651,12 +652,19 @@ impl RigState {
             .retain(|id, h| running.get(id).is_some_and(|(_, s)| h.span_s() == *s));
         if ease {
             let kept = &self.spectrographs;
-            self.row_glide.retain(|id, _| kept.contains_key(id));
-            self.row_pacing.retain(|id, _| kept.contains_key(id));
+            self.scroll.retain(|id, _| kept.contains_key(id));
         } else {
-            self.row_glide.clear();
-            self.row_pacing.clear();
+            self.scroll.clear();
         }
+        // Without an open session there is no sample clock to place frames on.
+        let Some(rate) = self
+            .daemon()
+            .and_then(|s| s.session.open.as_ref())
+            .map(|o| f64::from(o.sample_rate_hz))
+            .filter(|r| *r > 0.0)
+        else {
+            return;
+        };
         for tf in d.latest.frames.values() {
             let (meas, scale, spec_level, level, validity) = match &tf.frame.data {
                 FrameData::Spec(f) => (f.meas, f.meta.scale, Some(f.meta.level), &f.level, None),
@@ -689,10 +697,10 @@ impl RigState {
                 continue;
             }
             let cols = ac2_scene::grid::columns(def);
-            let before = super::row_glide::mark(h);
+            let audio_s = tf.frame.stamp.audio_sample.0 as f64 / rate;
             let moved = h.push(&SpectrographFrame {
                 seq: tf.frame.stamp.seq,
-                at: tf.frame.stamp.capture_wall_ns,
+                at_ns: (audio_s * 1e9) as u64,
                 grid,
                 edges: &cols.edges,
                 scale,
@@ -701,8 +709,7 @@ impl RigState {
                 validity,
             });
             if ease && moved {
-                let wall = tf.frame.stamp.capture_wall_ns.0;
-                self.keep_row_glide(meas, before, d.drained, wall);
+                self.keep_scroll(meas, d.drained, audio_s);
             }
         }
     }

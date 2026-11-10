@@ -229,6 +229,7 @@ fn heatmap_with(
         rows,
         axes,
         scroll,
+        lead: 0.0,
         range: [0.0, 31.0],
         colormap: Colormap::Viridis,
         opacity: 1.0,

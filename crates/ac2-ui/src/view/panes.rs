@@ -214,7 +214,7 @@ fn build_scene(
                 *kept = (of, Default::default());
             }
             let sky = &mut kept.1;
-            let motion = (st.axes3d_alpha(id), st.row_lag(id, now.instant));
+            let motion = (st.axes3d_alpha(id), st.scroll_lead(id, now.instant));
             let s = scenes::spectrograph_3d(st, id, sky, tier, motion, theme, vp, now);
             // No legend here: the caption, naming the measurement, picks its points.
             legend_hits.extend(s.caption_hit);

@@ -83,16 +83,12 @@ pub struct RigState {
     /// Per Leq and band Leq topic, the frame the newest one replaced: the bars ease from it
     /// ([`ac2_scene::bar_ease`]).
     pub bar_from: HashMap<Topic, Arc<ac2_proto::Frame>>,
-    /// Per live spectrum or RTA topic, the glide of its curve to the newest frame
+    /// Per live spectrum or RTA topic, the ease of its curve to a slow newest frame
     /// ([`ac2_scene::curve_ease`]).
     pub spec_glide: HashMap<Topic, SpecGlide>,
-    /// Per live spectrum or RTA topic, the capture times and arrivals that pace its glides.
-    pub spec_pacing: HashMap<Topic, ac2_scene::curve_ease::Pacing>,
-    /// Per measurement, its 3D spectrograph rows' glide to the newest slot.
-    pub row_glide: BTreeMap<MeasId, RowGlide>,
-    /// Per measurement, the capture times and arrivals of the frames that moved its
-    /// history on, which pace the rows' glides.
-    pub row_pacing: BTreeMap<MeasId, ac2_scene::curve_ease::Pacing>,
+    /// Per measurement, the display-clock time axis its spectrograph scrolls on
+    /// ([`ac2_scene::scroll_clock`]).
+    pub scroll: BTreeMap<MeasId, ac2_scene::scroll_clock::ScrollClock>,
     /// Per transfer topic, its walk readiness bar's glide to the newest frame's `filled`
     /// ([`FillGlide`]).
     pub fill_glide: HashMap<Topic, FillGlide>,
@@ -259,9 +255,7 @@ impl RigState {
             data: None,
             bar_from: HashMap::new(),
             spec_glide: HashMap::new(),
-            spec_pacing: HashMap::new(),
-            row_glide: BTreeMap::new(),
-            row_pacing: BTreeMap::new(),
+            scroll: BTreeMap::new(),
             fill_glide: HashMap::new(),
             advice: HashMap::new(),
             traces: BTreeMap::new(),

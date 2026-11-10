@@ -68,6 +68,7 @@ pub mod recording;
 pub mod rig;
 pub mod rig_tree;
 pub mod room;
+pub mod scroll_clock;
 pub mod sessions;
 pub mod spectrograph;
 pub mod spectrograph_3d;

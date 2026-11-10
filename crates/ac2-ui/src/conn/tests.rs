@@ -144,31 +144,27 @@ fn ages_count_between_snapshots() {
 }
 
 /// Frames arriving between drains are drained on arrival, not held to the next tick of
-/// the display period; drains stay at least half a period apart.
+/// the display period nor to a floor after the last drain: only the gather for the frames
+/// handed on with them.
 #[test]
-fn frames_are_drained_on_arrival_at_most_twice_a_period() {
+fn frames_are_drained_on_arrival() {
     let t0 = tokio::time::Instant::now();
     let ms = |v: u64| Duration::from_millis(v);
     let mut c = PollClock::new(t0);
     c.polled(t0, true, false, DISPLAY_PERIOD);
     assert!(c.watch, "an active link watches for frames");
     assert_eq!(c.next, t0 + DISPLAY_PERIOD);
-    // A frame 2 ms after a drain waits only for the half-period floor.
-    c.arrived(DISPLAY_PERIOD);
+    // A frame 2 ms after a drain is drained a gather later, not half a period on.
+    c.arrived(t0 + ms(2));
     assert!(!c.watch, "no second wake before the drain");
-    assert_eq!(c.next, t0 + DISPLAY_PERIOD / 2);
-    // One 20 ms after the drain goes at once.
-    let t1 = t0 + ms(40);
-    c.polled(t1, true, false, DISPLAY_PERIOD);
-    c.arrived(DISPLAY_PERIOD);
-    assert!(c.next <= t1 + ms(20));
+    assert_eq!(c.next, t0 + ms(2) + GATHER);
     // Idle: the frame cuts the idle wait short the same way.
-    let t2 = t1 + ms(100);
+    let t2 = t0 + ms(100);
     c.polled(t2, false, false, DISPLAY_PERIOD);
     assert_eq!(c.next, t2 + IDLE_POLL);
     assert!(c.watch);
-    c.arrived(DISPLAY_PERIOD);
-    assert_eq!(c.next, t2 + DISPLAY_PERIOD / 2);
+    c.arrived(t2 + ms(5));
+    assert_eq!(c.next, t2 + ms(5) + GATHER);
 }
 
 /// A UI that is not drawing is polled at the idle period only, frames or not.

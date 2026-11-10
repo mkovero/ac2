@@ -23,7 +23,8 @@ struct Uniform {
     scroll: u32,
     /// 1 when time runs bottom to top ([`HeatmapAxes::TimeUp`]).
     time_up: u32,
-    _pad: u32,
+    /// [`Heatmap::lead`].
+    lead: f32,
 }
 
 #[derive(Debug)]
@@ -269,7 +270,7 @@ impl Heatmaps {
             rows: h.rows,
             scroll: h.scroll % h.columns,
             time_up: u32::from(h.axes == HeatmapAxes::TimeUp),
-            _pad: 0,
+            lead: if h.lead.is_finite() { h.lead } else { 0.0 },
         };
         queue.write_buffer(&ring.uniform, 0, bytemuck::bytes_of(&uniform));
         Ok(())

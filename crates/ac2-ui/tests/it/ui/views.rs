@@ -533,7 +533,7 @@ fn sweep_history(def: &ac2_proto::GridDef) -> ac2_scene::spectrograph::Spectrogr
             .collect();
         h.push(&SpectrographFrame {
             seq: i + 1,
-            at: ac2_proto::units::WallNs(t0 + i * 1_000_000_000 / 30),
+            at_ns: t0 + i * 1_000_000_000 / 30,
             grid: def.id(),
             edges: &edges,
             scale: ac2_proto::model::LevelScale::Dbfs,

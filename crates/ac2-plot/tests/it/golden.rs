@@ -390,6 +390,7 @@ fn heatmap(scroll: u32, data: Vec<Option<HeatmapColumn>>) -> Heatmap {
         rows: HM_ROWS,
         axes: HeatmapAxes::TimeAcross,
         scroll,
+        lead: 0.0,
         range: [-60.0, -10.0],
         colormap: Colormap::Viridis,
         opacity: 1.0,

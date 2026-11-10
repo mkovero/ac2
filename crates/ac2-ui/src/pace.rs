@@ -5,6 +5,12 @@
 //! renderer can. Frames asked this way start at least one interval apart, counted from the
 //! last frame's start, so a frame's own drawing time is inside the interval rather than
 //! added to it. Input is not paced: egui repaints at once for a key or pointer event.
+//!
+//! New data may start a frame sooner, half an interval after the last
+//! ([`Pacer::request_data`]): the daemon's frames come on their own 60 Hz clock, which
+//! beats against the pacer's, and held to the next full interval each would wait 8 ms on
+//! average (up to a whole frame) before it is drawn. Frames then follow the data's clock
+//! rather than their own; two data frames still never draw closer than half an interval.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -44,10 +50,18 @@ impl Pacer {
 
     /// How long from `now` until the next paced frame may start.
     pub fn wait(&self, now: Instant) -> Duration {
+        self.wait_for(now, self.interval)
+    }
+
+    /// How long from `now` until a frame for new data may start.
+    pub fn data_wait(&self, now: Instant) -> Duration {
+        self.wait_for(now, self.interval / 2)
+    }
+
+    fn wait_for(&self, now: Instant, gap: Duration) -> Duration {
         match self.last_start_ns.load(Ordering::Relaxed) {
             u64::MAX => Duration::ZERO,
-            ns => (self.epoch + Duration::from_nanos(ns) + self.interval)
-                .saturating_duration_since(now),
+            ns => (self.epoch + Duration::from_nanos(ns) + gap).saturating_duration_since(now),
         }
     }
 
@@ -56,6 +70,20 @@ impl Pacer {
         let early = ctx.input(|i| i.predicted_dt);
         ctx.request_repaint_after(repaint_delay(self.wait(Instant::now()), early));
     }
+
+    /// Asks egui for a frame for new data: as soon as half an interval since the last
+    /// frame's start allows.
+    pub fn request_data(&self, ctx: &egui::Context) {
+        let early = ctx.input(|i| i.predicted_dt);
+        ctx.request_repaint_after(repaint_delay(self.data_wait(Instant::now()), early));
+    }
+}
+
+/// Wakes the UI for what the link reports: a frame as soon as the pacer allows new data
+/// one ([`Pacer::request_data`]). egui keeps the earliest pending request, so the data
+/// frames arriving before it join that one frame instead of each drawing their own.
+pub fn link_wake(ctx: egui::Context, pacer: Arc<Pacer>) -> crate::conn::Wake {
+    Arc::new(move || pacer.request_data(&ctx))
 }
 
 /// The delay to hand `request_repaint_after` for a frame `wait` from now. egui takes its
@@ -90,6 +118,18 @@ mod tests {
         assert_eq!(p.wait(t0 + 16 * MS), Duration::ZERO);
         // A frame that took longer than the interval: the next one at once.
         assert_eq!(p.wait(t0 + 40 * MS), Duration::ZERO);
+    }
+
+    /// New data starts a frame half an interval after the last, not a whole one.
+    #[test]
+    fn data_frames_wait_half_an_interval() {
+        let p = Pacer::new(16 * MS);
+        let t0 = Instant::now();
+        assert_eq!(p.data_wait(t0), Duration::ZERO);
+        p.frame_started(t0);
+        assert_eq!(p.data_wait(t0 + 2 * MS), 6 * MS);
+        assert_eq!(p.data_wait(t0 + 8 * MS), Duration::ZERO);
+        assert_eq!(p.wait(t0 + 8 * MS), 8 * MS);
     }
 
     /// egui's own subtraction of the predicted frame time is undone, so the frame lands

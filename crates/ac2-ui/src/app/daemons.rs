@@ -287,7 +287,7 @@ impl App {
         let describe = format!("daemon at {}", ep.ctrl);
         let mut config = ClientConfig::new(ep, self.client_name());
         config.received_bytes = Arc::clone(&self.health.received);
-        let wake = link_wake(ctx.clone(), Arc::clone(&self.pacer));
+        let wake = crate::pace::link_wake(ctx.clone(), Arc::clone(&self.pacer));
         let c = match Conn::start(
             Target {
                 config,

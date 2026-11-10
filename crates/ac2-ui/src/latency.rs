@@ -519,19 +519,18 @@ impl Log {
                     let last = self.slots.insert(pane.0, n);
                     d.slot_advance = last.map(|l| n as i64 - l as i64);
                 }
-                if view == View::Spectrum3d {
-                    let lag = st.row_lag(pane, now);
-                    d.row_lag_slots = Some(lag);
-                    d.glide_lag_ns = lag * h.slot_s() * 1e9;
-                    d.glide_k = st.rig.row_glide.get(&m.id).and_then(|g| {
-                        (Some(g.to_slot) == newest).then(|| {
-                            ac2_scene::curve_ease::progress(
-                                now.saturating_duration_since(g.start).as_secs_f64(),
-                                g.duration_s,
-                            )
-                            .unwrap_or(1.0)
-                        })
-                    });
+                // Where the time axis stands against the newest slot's end: short of it
+                // (positive) or past it while the next frame is due (negative). The glide
+                // lag is how far the axis trails the newest frame's audio, 0 once past it
+                // (the newest content is drawn either way).
+                let lead = st.scroll_lead(pane, now);
+                d.row_lag_slots = Some(-lead);
+                if st.prefs.spec_ease
+                    && let (Some(c), Some(n)) = (st.rig.scroll.get(&m.id), newest)
+                    && let Some(newest_s) = c.newest_s()
+                {
+                    let at_s = ((n + 1) as f64 + lead) * h.slot_s();
+                    d.glide_lag_ns = ((newest_s - at_s) * 1e9).max(0.0);
                 }
             }
             _ => {}

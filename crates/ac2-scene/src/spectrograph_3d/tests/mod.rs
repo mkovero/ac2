@@ -7,7 +7,7 @@ use ac2_proto::GridDef;
 use ac2_proto::GridId;
 use ac2_proto::frame::ValidityMask;
 use ac2_proto::model::LevelScale;
-use ac2_proto::units::{Hz, WallNs};
+use ac2_proto::units::Hz;
 
 /// Frames one slot apart.
 const SLOT_NS: u64 = 1_000_000_000 / 30;
@@ -55,13 +55,29 @@ impl Feed {
         self.seq += 1;
         h.push(&SpectrographFrame {
             seq: self.seq,
-            at: WallNs(T0 + slot * SLOT_NS + SLOT_NS / 2),
+            at_ns: T0 + slot * SLOT_NS + SLOT_NS / 2,
             grid: self.grid,
             edges: &self.edges,
             scale: LevelScale::Dbfs,
             spec_level: None,
             level,
             validity,
+        });
+    }
+
+    /// A frame ending at audio time `at_ns`.
+    fn push_at(&mut self, h: &mut SpectrographHistory, at_ns: u64, level: f32) {
+        self.seq += 1;
+        let l = vec![level; self.edges.len()];
+        h.push(&SpectrographFrame {
+            seq: self.seq,
+            at_ns,
+            grid: self.grid,
+            edges: &self.edges,
+            scale: LevelScale::Dbfs,
+            spec_level: None,
+            level: &l,
+            validity: None,
         });
     }
 
@@ -363,17 +379,14 @@ fn an_update_without_a_new_frame_keeps_every_row() {
 }
 
 /// A row's z in rows from the front edge as drawn, by its ring position.
-fn drawn_z(s: &Skyline, d: &DrawnRows, pos: usize) -> Option<f64> {
+fn drawn_z(s: &Skyline, d: &DrawnRows, pos: usize) -> f64 {
     let len = s.rows();
-    if d.unborn == Some(pos) {
-        return None;
-    }
     let j = (d.newest + len - pos) % len;
-    Some(j as f64 + f64::from(d.phase))
+    j as f64 + f64::from(d.phase)
 }
 
 #[test]
-fn rows_glide_back_continuously_across_a_new_row() {
+fn rows_move_back_continuously_across_a_new_row() {
     let mut h = SpectrographHistory::new(10);
     let mut f = Feed::new(&log_bins());
     let mut s = Skyline::default();
@@ -385,41 +398,85 @@ fn rows_glide_back_continuously_across_a_new_row() {
     let row2 = s.newest();
     let before = s.drawn(0.0);
     assert!((before.phase - 2.0 / 3.0).abs() < 1e-6);
-    assert!((drawn_z(&s, &before, row2).expect("drawn") - 2.0 / 3.0).abs() < 1e-6);
-    // Three slots in one frame: row 3 starts, two slots filled.
-    f.push(&mut h, 10, -20.0);
+    assert!((drawn_z(&s, &before, row2) - 2.0 / 3.0).abs() < 1e-6);
+    // The axis runs on past slot 7 while the next frame is due: row 2 moves back.
+    let waiting = s.drawn(1.5);
+    assert!((drawn_z(&s, &waiting, row2) - 7.0 / 6.0).abs() < 1e-6);
+    // The next frame lands in slot 9: row 3 starts, in front of row 2. Drawn where the axis
+    // stood, row 2 stays put and row 3 stands half a slot behind the front edge.
+    f.push(&mut h, 9, -20.0);
     s.update(&h, full_range(), SkylineTier::Full);
     let row3 = s.newest();
     assert_ne!(row3, row2);
-    // At the glide's start (3 slots short) the rows stand where they were: row 2 still at
-    // the front, row 3 not yet drawn.
-    let start = s.drawn(3.0);
-    assert_eq!(start.unborn, Some(row3));
-    assert!((drawn_z(&s, &start, row2).expect("drawn") - 2.0 / 3.0).abs() < 1e-6);
-    assert_eq!(start.front, 0.0);
-    // Two slots short, row 3 is born at the front edge and row 2 has moved one slot back.
-    let born = s.drawn(2.0);
-    assert_eq!(born.unborn, None);
-    assert!(drawn_z(&s, &born, row3).expect("drawn").abs() < 1e-6);
-    assert!((drawn_z(&s, &born, row2).expect("drawn") - 1.0).abs() < 1e-6);
-    // Every lag in between moves row 2 back steadily, never back and forth.
-    let mut last = 0.0;
+    let after = s.drawn(-0.5);
+    assert!((drawn_z(&s, &after, row2) - 7.0 / 6.0).abs() < 1e-6);
+    assert!((drawn_z(&s, &after, row3) - 1.0 / 6.0).abs() < 1e-6);
+    // Every lead moves the rows back steadily, never back and forth.
+    let mut last = f64::NEG_INFINITY;
     for i in 0..=30 {
-        let lag = 3.0 - 3.0 * f64::from(i) / 30.0;
-        let z = drawn_z(&s, &s.drawn(lag), row2).expect("drawn");
-        assert!(z >= last - 1e-6, "lag {lag}: {z} after {last}");
+        let lead = -1.0 + 3.0 * f64::from(i) / 30.0;
+        let z = drawn_z(&s, &s.drawn(lead), row2);
+        assert!(z >= last - 1e-6, "lead {lead}: {z} after {last}");
         last = z;
     }
-    // At rest: the data's own phase.
-    let rest = s.drawn(0.0);
-    assert_eq!(
-        (rest.newest, rest.phase, rest.unborn),
-        (row3, s.phase(), None)
-    );
-    assert_eq!(rest.front, s.phase());
-    // A lag of more than a row is held to one: no row is drawn in front of the floor.
-    let far = s.drawn(50.0);
-    assert!(far.phase > 0.0 && far.phase <= 1.0, "{far:?}");
+    // No row is drawn in front of the floor, and a stalled stream waits.
+    assert_eq!(s.drawn(-50.0).phase, 0.0);
+    assert_eq!(f64::from(s.drawn(50.0).phase), MAX_PHASE);
+}
+
+/// Frames every 1/60 s carrying whole 1024-sample blocks at 96 kHz (audio steps of 10.7,
+/// 21.3, 32 and 42.7 ms), drawn at 60 frames a second: the rows move back the same
+/// distance every display frame, half a slot, and the frame just in is always drawn.
+#[test]
+fn rows_move_evenly_per_display_frame_under_uneven_audio_steps() {
+    use crate::scroll_clock::ScrollClock;
+    use std::time::{Duration, Instant};
+    const FRAME_S: f64 = 1.0 / 60.0;
+    const BLOCK_S: f64 = 1024.0 / 96_000.0;
+    let mut h = SpectrographHistory::new(10);
+    let mut f = Feed::new(&log_bins());
+    let mut s = Skyline::default();
+    let mut clock = ScrollClock::default();
+    let t0 = Instant::now();
+    let a0 = T0 as f64 / 1e9;
+    let mut steps = std::collections::BTreeSet::<i64>::new();
+    let mut prev: Option<f64> = None;
+    let mut positions = Vec::new();
+    for i in 0..600u64 {
+        let t = i as f64 * FRAME_S;
+        // The analysis finishes 5–25 ms before each hand-off, in whole blocks.
+        let u = ((i * 7) % 16) as f64 / 15.0 * 0.020;
+        let audio = ((t - 0.005 - u) / BLOCK_S).floor() * BLOCK_S;
+        if let Some(p) = prev {
+            steps.insert(((audio - p) / BLOCK_S).round() as i64);
+        }
+        prev = Some(audio);
+        let audio_s = a0 + audio;
+        let at = t0 + Duration::from_secs_f64(t);
+        f.push_at(&mut h, (audio_s * 1e9).round() as u64, -20.0);
+        clock.observe(at, audio_s);
+        s.update(&h, full_range(), SkylineTier::Full);
+        // Drawn 4 ms after the frame arrived.
+        let lead = h.lead_slots(clock.position_s(at + Duration::from_millis(4)));
+        let d = s.drawn(lead);
+        let n = h.newest_slot().expect("frames");
+        let k = s.bucket_slots() as f64;
+        // Where the front edge stands, in slots: the newest row's start plus its phase.
+        let edge = (n as f64 / k).floor() * k + f64::from(d.phase) * k;
+        assert!(lead > -1.0, "frame {i}: the newest slot is drawn ({lead})");
+        if i > 60 {
+            positions.push(edge);
+        }
+    }
+    assert!(steps.len() >= 3, "uneven audio steps: {steps:?}");
+    let slot_s = h.slot_s();
+    for w in positions.windows(2) {
+        let adv = w[1] - w[0];
+        assert!(
+            (adv - FRAME_S / slot_s).abs() < 1e-3,
+            "{adv} slots per display frame"
+        );
+    }
 }
 
 #[test]

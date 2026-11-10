@@ -6,9 +6,8 @@
 //! only the newest, so a UI that stops drawing (minimised, occluded) never piles up
 //! snapshots; replies and other events queue in order. The thread wakes the UI
 //! (`request_repaint`) only for what changes the picture: new frame content, a stale or
-//! liveness flip, a mirror change beyond a keepalive, a reply. Frames are drained when they
-//! arrive, at most twice per display period ([`PollClock`]), and polled slower when idle or
-//! when the UI is not drawing. Ages between pushes are the UI's to count
+//! liveness flip, a mirror change beyond a keepalive, a reply. Frames are drained as they
+//! arrive ([`PollClock`]), and polled slower when idle or when the UI is not drawing. Ages between pushes are the UI's to count
 //! ([`DataSnapshot::aged`]).
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
@@ -829,7 +828,7 @@ async fn session(
                 clock.polled(tokio::time::Instant::now(), active, out.ui_behind(), wants.period);
             },
             () = client.data_changed(), if clock.watch => {
-                clock.arrived(wants.period);
+                clock.arrived(tokio::time::Instant::now());
             },
         }
     };

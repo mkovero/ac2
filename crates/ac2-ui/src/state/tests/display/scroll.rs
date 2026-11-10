@@ -1,14 +1,12 @@
-//! Reducer tests of the 3D spectrograph's rows gliding back between frames.
+//! Reducer tests of the spectrographs scrolling on the display's clock between frames.
 
 use super::*;
 use std::time::Duration;
 
-/// History slot length of the default 30 s history, ns (900 slots).
-const SLOT_NS: u64 = 33_333_333;
-/// Frames 100 ms apart: three slots each.
-const HOP_NS: u64 = 3 * SLOT_NS + 1;
+/// Frames 100 ms of audio apart at the fixtures' 48 kHz: three slots each.
+const HOP: u64 = 4_800;
 
-/// A spectrum frame of Sub (2) captured `i` hops after the first, drained at `drained`.
+/// A spectrum frame of Sub (2) ending `i` hops after the first, drained at `drained`.
 fn frame(t: &mut T, i: u64, drained: Instant) {
     use ac2_client::{Latest, TopicFrame};
     use ac2_proto::Frame;
@@ -33,10 +31,10 @@ fn frame(t: &mut T, i: u64, drained: Instant) {
         level: vec![-60.0, -40.0, -20.0, -30.0, -60.0],
     });
     // Mid-slot, so each hop moves the newest slot exactly three on.
-    let wall = 53_700_000_000 * SLOT_NS + SLOT_NS / 2 + i * HOP_NS;
+    let audio = 48_000 * 3600 + 800 + i * HOP;
     let stamp = ac2_proto::frame::FrameStamp {
         seq: 100 + i,
-        capture_wall_ns: ac2_proto::units::WallNs(wall),
+        audio_sample: ac2_proto::units::SampleIndex(audio),
         ..ac2_proto::samples::stamp(Some(grid.clone()))
     };
     let f = TopicFrame {
@@ -66,10 +64,11 @@ fn three_d(t: &mut T) -> PaneId {
     p
 }
 
-/// Each frame moves the newest slot three on; the rows take the time until the next frame
-/// to get there, then stand still: the pacer runs only while they move.
+/// Frames every 100 ms of audio arriving 100 ms apart: between frames the time axis runs
+/// on at the display's pace, the same distance every display frame, up to the next frame's
+/// due time, where a stalled stream waits and the pacer stops.
 #[test]
-fn the_3d_rows_glide_to_each_frame_and_stand_still_once_there() {
+fn the_spectrograph_scrolls_evenly_and_waits_when_frames_stop() {
     let mut t = T::new();
     let p = three_d(&mut t);
     let t0 = Instant::now();
@@ -78,29 +77,35 @@ fn the_3d_rows_glide_to_each_frame_and_stand_still_once_there() {
         frame(&mut t, u64::from(i), t0 + hop * i);
     }
     let at = t0 + hop * 4;
-    let start = t.st.row_lag(p, at);
-    assert!((start - 3.0).abs() < 1e-6, "{start}");
-    assert!(t.st.rows_gliding(at));
+    // As the newest frame arrives the axis stands at its audio: half a slot into its slot
+    // (to within the slot length's rounding to whole ns, an hour into the session).
+    let start = t.st.scroll_lead(p, at);
+    assert!((start + 0.5).abs() < 5e-3, "{start}");
+    assert!(t.st.spectrographs_scrolling(at));
+    // Half a slot per display frame of 1/60 s.
     let mut last = start;
-    for ms in [20, 40, 60, 80] {
-        let lag = t.st.row_lag(p, at + Duration::from_millis(ms));
-        assert!(lag < last && lag > 0.0, "{ms} ms: {lag} after {last}");
-        last = lag;
+    for f in 1..=5u32 {
+        let lead = t.st.scroll_lead(p, at + Duration::from_micros(16_667) * f);
+        assert!(
+            (lead - last - 0.5).abs() < 1e-3,
+            "frame {f}: {lead} after {last}"
+        );
+        last = lead;
     }
-    // About the time between frames later the rows are there and stay.
+    // Past the next frame's due time the axis waits, and so does the pacer.
     let end = at + hop + Duration::from_millis(1);
-    assert_eq!(t.st.row_lag(p, end), 0.0);
-    assert!(!t.st.rows_gliding(end));
-    // The next frame mid-glide carries on from where the rows are drawn.
-    let mid = at + Duration::from_millis(50);
-    let drawn = t.st.row_lag(p, mid);
-    frame(&mut t, 5, mid);
-    assert!((t.st.row_lag(p, mid) - (drawn + 3.0)).abs() < 1e-6);
+    assert!((t.st.scroll_lead(p, end) - 2.5).abs() < 5e-3);
+    assert!(!t.st.spectrographs_scrolling(end));
+    // The next frame, on time, finds the axis where it would have been: no jump.
+    let next = at + hop;
+    let before = t.st.scroll_lead(p, next);
+    frame(&mut t, 5, next);
+    assert!((t.st.scroll_lead(p, next) - (before - 3.0)).abs() < 1e-6);
 }
 
 /// Settings › Display "jumps to each new frame": the rows stand where the data puts them.
 #[test]
-fn without_the_glide_the_3d_rows_jump() {
+fn without_the_scroll_the_rows_jump() {
     let mut t = T::new();
     let p = three_d(&mut t);
     t.st.prefs.spec_ease = false;
@@ -108,15 +113,15 @@ fn without_the_glide_the_3d_rows_jump() {
     for i in 0..3u32 {
         frame(&mut t, u64::from(i), t0 + Duration::from_millis(100) * i);
     }
-    let at = t0 + Duration::from_millis(200);
-    assert_eq!(t.st.row_lag(p, at), 0.0);
-    assert!(!t.st.rows_gliding(at));
-    assert!(t.st.rig.row_glide.is_empty());
+    let at = t0 + Duration::from_millis(250);
+    assert_eq!(t.st.scroll_lead(p, at), 0.0);
+    assert!(!t.st.spectrographs_scrolling(at));
+    assert!(t.st.rig.scroll.is_empty());
 }
 
-/// A 2D view of the same measurement does not run the pacer for the rows.
+/// The flat spectrograph scrolls on the same clock as the 3D view.
 #[test]
-fn rows_glide_only_on_a_3d_view() {
+fn the_flat_spectrograph_scrolls_too() {
     let mut t = T::new();
     let p = t.pane(PaneKind::Spectrum);
     if let Some(v) = t.st.layout.view_mut(p) {
@@ -126,5 +131,12 @@ fn rows_glide_only_on_a_3d_view() {
     for i in 0..3u32 {
         frame(&mut t, u64::from(i), t0 + Duration::from_millis(100) * i);
     }
-    assert!(!t.st.rows_gliding(t0 + Duration::from_millis(200)));
+    let at = t0 + Duration::from_millis(220);
+    assert!(t.st.spectrographs_scrolling(at));
+    assert!((t.st.scroll_lead(p, at) - 0.1).abs() < 5e-3);
+    // A plain spectrum view has no time axis to scroll.
+    if let Some(v) = t.st.layout.view_mut(p) {
+        v.modes.spectrum = ac2_scene::view::SpectrumMode::Spectrum;
+    }
+    assert!(!t.st.spectrographs_scrolling(at));
 }

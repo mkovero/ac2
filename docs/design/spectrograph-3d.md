@@ -129,17 +129,18 @@ Constants in `ac2-scene::spectrograph_3d`:
 - **Field.** The plot rect is always #05080C, in the light theme too, and the labels and
   caption inside it use the dark theme's text colours: light added to a white
   field is invisible.
-- **Motion.** Rows glide back: at rest the phase is the newest bucket's fill fraction
-  (slots filled ÷ slots per bucket), from the data. A frame moves it on by one slot or more
-  at once, which drawn as received steps the floor back at the frame rate; so the rows glide
-  there from where the previous frame put them over the time until the next frame
-  (`Skyline::drawn`, paced as the 2D curve's glide: capture times, 30–200 ms). The UI passes
-  how many slots the rows are still short (`lag_slots`); the scene keeps no clock. Once the
-  glide ends the phase is the data's again, so a stalled stream stands still, and the pacer
-  runs only while a 3D view glides. Where a glide reaches back past the newest bucket's
-  start, that bucket is not drawn until the rows reach it (the one before it is the front
-  row), so no row stands in front of the floor; a lag is held to one bucket. Settings ›
-  Display "jumps to each new frame" turns it off with the 2D glide. Heights are the data as
+- **Motion.** Rows scroll back on the display's clock: at rest the phase is the newest
+  bucket's fill fraction (slots filled ÷ slots per bucket), from the data. Frames carry
+  whole analysis blocks, so the audio they add steps unevenly (10.7–42.7 ms at 96 kHz), and
+  drawn as received the floor judders. The UI keeps a `ScrollClock` per measurement
+  (`ac2_scene::scroll_clock`): the time axis is `now − offset` in session audio time, the
+  offset the earliest recent arrival, so the newest frame shows the pass it arrives and the
+  axis moves the same distance every display frame. It passes how many slots the axis
+  stands past the newest slot (`lead_slots`, −1…8); `Skyline::drawn` adds it to the phase,
+  the newest row stretching to cover the lead; the flat heatmap shifts its time axis by the
+  same lead in the shader. Past the frames' spread and one hop the axis waits, so a stalled
+  stream stands still, and the pacer runs only while one scrolls. Settings › Display
+  "jumps to each new frame" turns it off with the 2D glide. Heights are the data as
   received, never interpolated.
 
 Spike PNGs (not committed, session scratchpad `look/`): round 1 `sheet_pink.png`,
@@ -483,8 +484,9 @@ stepped down once (a blanking stall) would stay degraded for months.
   keys, 3D quality does not step); scope, hint line; ←/→, PgUp/PgDn, I/O, Home move
   the camera and leave the frequency axis; inert commands; equal defaults in both scopes;
   drag, wheel, pinch messages; camera sent on release only; Esc does not touch it; the rows
-  glide to each frame and stand still once there, the pacer only for a 3D view, not with
-  "jumps to each new frame" (`state/tests/display/row_glide.rs`).
+  scroll evenly per display frame under uneven audio steps and wait when frames stop, the
+  pacer only while one scrolls, not with "jumps to each new frame"
+  (`state/tests/display/scroll.rs`).
 - `ac2-e2e`: `spectrograph_3d_from_an_empty_daemon` (session, spectrum from the palette, G ×3,
   the fake rig's noise fills the skyline, camera keys, the camera survives a second client
   choosing the measurement, T, ice from the palette, G back); GPU snapshot `spectrograph_3d`

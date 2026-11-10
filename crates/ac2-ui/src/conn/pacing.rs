@@ -131,15 +131,18 @@ pub(super) fn meter_period(prev: &ac2_proto::Frame, new: &ac2_proto::Frame) -> O
 /// Frames of different topics arrive on their own schedules (meters at 30 Hz, a long
 /// spectrum every 85 ms or so). Draining only on a timer of the display period holds each
 /// frame for up to a period, so evenly spaced frames reach the screen 32–133 ms apart and
-/// the display stutters. Draining on arrival keeps their spacing; half a display period
-/// between drains still bounds how often the UI is fed, and gathers frames of several
-/// topics landing together into one drain.
+/// the display stutters. A frame is drained as it arrives, [`GATHER`] later so the frames
+/// of every topic the daemon hands on together go in one drain: any longer hold is that
+/// much more delay between the sound and the picture. How often the UI draws is the
+/// pacer's to bound ([`crate::pace::Pacer`]), not the drain's.
+/// How long a drain waits after a frame's arrival for the frames the daemon handed on with
+/// it (one hand-off sends every topic within a fraction of a millisecond).
+pub(super) const GATHER: Duration = Duration::from_millis(1);
+
 #[derive(Debug)]
 pub(super) struct PollClock {
     /// When the next drain runs.
     pub(super) next: tokio::time::Instant,
-    /// When the last drain ran.
-    pub(super) last: tokio::time::Instant,
     /// A frame arriving brings the next drain forward. Off between an arrival and the drain
     /// it brings (the client signals for as long as frames wait), and while the UI is not
     /// drawing, which is polled at [`IDLE_POLL`] only.
@@ -150,7 +153,6 @@ impl PollClock {
     pub(super) fn new(now: tokio::time::Instant) -> Self {
         Self {
             next: now,
-            last: now,
             watch: false,
         }
     }
@@ -165,15 +167,14 @@ impl PollClock {
         behind: bool,
         period: Duration,
     ) {
-        self.last = now;
         self.next = now + if active && !behind { period } else { IDLE_POLL };
         self.watch = !behind;
     }
 
-    /// A frame arrived: drain now, or half a display period after the last drain.
-    pub(super) fn arrived(&mut self, period: Duration) {
+    /// A frame arrived at `now`: drain it once the frames handed on with it are in.
+    pub(super) fn arrived(&mut self, now: tokio::time::Instant) {
         self.watch = false;
-        self.next = self.next.min(self.last + period / 2);
+        self.next = self.next.min(now + GATHER);
     }
 
     /// Drain at once (a new stream's first frame).

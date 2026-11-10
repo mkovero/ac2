@@ -311,48 +311,33 @@ impl Skyline {
     }
 
     /// The newest row's fill fraction (slots filled ÷ slots per row), in (0, 1]: how far
-    /// the rows have glided back once they reach their places. From the data, so a stalled
-    /// stream stands still.
+    /// back the rows stand when the time axis is at the end of the newest slot. From the
+    /// data, so a stalled stream stands still.
     pub fn phase(&self) -> f32 {
         self.newest
             .map_or(1.0, |n| ((n % self.k) + 1) as f32 / self.k as f32)
     }
 
-    /// Where the rows are drawn while they glide back to their places, still `lag_slots`
-    /// history slots short of them (0: at their places, [`Self::phase`]). Frames bring the
-    /// rows' advance in steps of whole slots, several at once at a slow frame rate; drawn
-    /// as received they jump back at each frame, which the eye reads as a stutter, so the
-    /// UI moves them over the time between frames instead.
+    /// Where the rows are drawn with the time axis `lead_slots` history slots past the end
+    /// of the newest slot ([`SpectrographHistory::lead_slots`]; 0: at their places,
+    /// [`Self::phase`]). The axis runs on the display's clock
+    /// ([`crate::scroll_clock`]), so the rows move back the same distance every display
+    /// frame however unevenly frames bring the audio; drawn at their places they would
+    /// jump back by whole slots at each frame, which the eye reads as a stutter.
     ///
-    /// A lag reaching back past the newest row's start would stand that row in front of the
-    /// floor's front edge: until the glide reaches it, it is not drawn, and the row before
-    /// it is the front one. The lag is held to one row: a longer step is no glide but a
-    /// jump (a stream resumed after a stall), and the rows take it at once.
-    pub fn drawn(&self, lag_slots: f64) -> DrawnRows {
-        let newest = self.newest();
-        let phase = f64::from(self.phase());
-        let lag = if lag_slots.is_finite() {
-            lag_slots.max(0.0)
+    /// Inside the newest slot the newest row stands nearer the front edge, at most to it;
+    /// past the slot, while the next frame is due, further back than one row, the strip in
+    /// front of it the time the next frame will fill.
+    pub fn drawn(&self, lead_slots: f64) -> DrawnRows {
+        let lead = if lead_slots.is_finite() {
+            lead_slots
         } else {
             0.0
         };
-        let p = (phase - lag / self.k.max(1) as f64).max(phase - 1.0);
-        let len = self.ring.len();
-        if p >= 0.0 || len < 2 {
-            let phase = p.max(0.0) as f32;
-            DrawnRows {
-                newest,
-                phase,
-                front: phase,
-                unborn: None,
-            }
-        } else {
-            DrawnRows {
-                newest: (newest + len - 1) % len,
-                phase: (p + 1.0) as f32,
-                front: 0.0,
-                unborn: Some(newest),
-            }
+        let p = f64::from(self.phase()) + lead / self.k.max(1) as f64;
+        DrawnRows {
+            newest: self.newest(),
+            phase: p.clamp(0.0, MAX_PHASE) as f32,
         }
     }
 
@@ -379,17 +364,18 @@ impl Skyline {
     }
 }
 
-/// The rows as drawn at one moment of their glide ([`Skyline::drawn`]).
+/// Farthest back the front row is drawn, rows ([`Skyline::drawn`]): a row and the
+/// [`crate::spectrograph::LEAD_SLOTS`] a stalled stream waits at, at one slot per row.
+pub const MAX_PHASE: f64 = 1.0 + crate::spectrograph::LEAD_SLOTS.1;
+
+/// The rows as drawn at one moment of the scroll ([`Skyline::drawn`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DrawnRows {
-    /// Ring position of the front row.
+    /// Ring position of the front (newest) row.
     pub newest: usize,
-    /// How far the front row stands back, in rows, in [0, 1]: the renderer's phase.
+    /// How far the front row stands back, in rows, in [0, [`MAX_PHASE`]]: the renderer's
+    /// phase.
     pub phase: f32,
-    /// How far the newest row stands back, in rows (0 while it is not yet drawn).
-    pub front: f32,
-    /// The newest row's ring position while the glide has not yet reached it: not drawn.
-    pub unborn: Option<usize>,
 }
 
 /// History rows `[first, end)` per column for `cols` log-spaced columns over the key's

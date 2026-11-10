@@ -498,7 +498,9 @@ impl Skylines {
             ],
             world: [s.world[0], s.world[1], s.world[2], 0.0],
             range: s.range,
-            phase: s.phase.clamp(0.0, 1.0),
+            phase: s
+                .phase
+                .clamp(0.0, ac2_scene::spectrograph_3d::MAX_PHASE as f32),
             cols: s.cols,
             rows: s.rows,
             newest: s.newest,

@@ -283,7 +283,7 @@ impl App {
         let started_target = opts.target.is_some() || opts.start.is_some();
         let conn = opts.target.and_then(|mut t| {
             t.config.received_bytes = Arc::clone(&health.received);
-            Conn::start(t, link_wake(ctx.clone(), Arc::clone(&pacer))).ok()
+            Conn::start(t, crate::pace::link_wake(ctx.clone(), Arc::clone(&pacer))).ok()
         });
         let mut state = AppState::new(opts.theme, describe);
         if let Some(rs) = &cc.wgpu_render_state {
@@ -443,8 +443,11 @@ impl App {
         target.config.received_bytes = Arc::clone(&self.health.received);
         let daemon_addr = network_host(&target);
         let describe = target.describe.clone();
-        let c = Conn::start(target, link_wake(ctx.clone(), Arc::clone(&self.pacer)))
-            .map_err(|e| format!("link thread: {e}"))?;
+        let c = Conn::start(
+            target,
+            crate::pace::link_wake(ctx.clone(), Arc::clone(&self.pacer)),
+        )
+        .map_err(|e| format!("link thread: {e}"))?;
         let Some(r) = self.state.rig_in_slot_mut(slot) else {
             return Ok(());
         };
@@ -613,10 +616,10 @@ impl App {
         let what = Touches::of(&msg);
         let animating = self.state.animating();
         let easing = self.state.bars_easing(Instant::now());
-        // A level axis easing to its content, or a 3D view's rows gliding back, moves the
+        // A level axis easing to its content, or a spectrograph scrolling, moves the
         // spectrum panes as a glide does.
         let spectrum_moving = |st: &AppState, now: Instant| {
-            st.spectrum_gliding(now) || st.levels_following() || st.rows_gliding(now)
+            st.spectrum_gliding(now) || st.levels_following() || st.spectrographs_scrolling(now)
         };
         let gliding = spectrum_moving(&self.state, Instant::now());
         let filling = self.state.walk_bar_easing(Instant::now());
@@ -947,13 +950,6 @@ const SLOW_REFRESH: Duration = Duration::from_secs(10);
 const PREFS_SAVE_INTERVAL: Duration = Duration::from_secs(1);
 /// How often `ui.toml` is tried again after a failed write (a full or read-only disk).
 const PREFS_RETRY_INTERVAL: Duration = Duration::from_secs(30);
-
-/// Wakes the UI for what the link reports: one paced frame. egui keeps the earliest pending
-/// request, so the data frames arriving before it join that one frame instead of each
-/// drawing their own, and a stream of them draws at most once per interval.
-fn link_wake(ctx: egui::Context, pacer: Arc<crate::pace::Pacer>) -> crate::conn::Wake {
-    Arc::new(move || pacer.request(&ctx))
-}
 
 /// The host of `t`'s TCP endpoint (`tcp://host:port`, IPv6 in brackets).
 fn network_host(t: &Target) -> Option<String> {

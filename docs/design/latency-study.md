@@ -181,9 +181,9 @@ this host's wall clock mapped from MONO by a pair read at each pass start, excep
 | `read_ns`, `read_wall_ns` | A0: when the link's drain read it (`TopicFrame::received`) |
 | `snapshot_ns`, `apply_ns` | A1: when the link's snapshot carrying it was drained, and when the reducer applied that snapshot (empty for a frame applied before the log started) |
 | `prepare_ns`, `submit_ns`, `submit_wall_ns` | A4 as far as the app can see: a probe paint callback on the topmost layer stamps egui-wgpu's prepare (before the surface acquire) and its paint (after the acquire, the frame's last; `queue.submit` and `present` follow with no app code between). Present timing itself is not observable: wgpu 30 reports nothing after `present()`, and eframe owns the surface. A FIFO wait happens in the acquire, between the two stamps; under Immediate `present` returns at once. A5 (vblank) and the GPU's completion are not logged |
-| `glide_k` | how far the glide to this frame has got, 0–1 (1: ended); 2D from `SpecGlide`, 3D from `RowGlide`; empty with no glide |
-| `drawn_capture_wall_ns`, `glide_lag_ms` | the *effective capture time* the drawn curve or rows stand for, and how far it trails `capture_wall_ns`. 2D: `from + k (to − from)` (`SpecGlide::from_capture_ns`); 3D: the row lag in slots × the slot length |
-| `row_lag_slots`, `newest_slot`, `slot_advance` | H5: the 3D rows' lag behind their places, the slot the newest row is in (also for the 2D spectrograph) and how many slots it moved since the pane was last drawn |
+| `glide_k` | how far the 2D curve's ease into this frame has got, 0–1 (1: ended; `SpecGlide`, slow curves only); empty with no ease and for spectrographs |
+| `drawn_capture_wall_ns`, `glide_lag_ms` | the *effective capture time* the drawn curve or rows stand for, and how far it trails `capture_wall_ns`. 2D: `from + k (to − from)` (`SpecGlide::from_capture_ns`); spectrographs: how far the scroll's time axis stands behind the newest frame's audio, 0 once at or past it |
+| `row_lag_slots`, `newest_slot`, `slot_advance` | H5: the spectrograph rows' lag behind their places in slots (minus the scroll's lead: negative while the axis runs past the newest slot), the slot the newest row is in and how many slots it moved since the pane was last drawn |
 
 `tools/latency/summarize.py FILE` (stdlib, run with `-I`) prints p50/p95/max of
 capture→read, read→apply, apply→build, build→present (to `submit_ns`), the glide lag,
@@ -330,3 +330,43 @@ Read:
   drain period (H4), then another ≈ 9 ms waiting for the next UI pass.
 - The 3D scroll steps at 30/s (H5): visible judder at 60 frames/s.
 - Not measured: compositor + TV after present (H2), and the DSP window (H1, per band).
+
+## 8. Changes (2026-11-10)
+
+- **Glide (H3).** A curve that updates at the display rate (frames ≤ 33 ms apart) shows each
+  frame the pass it arrives; a slower one eases in over one display frame (`curve_ease::EASE_S`,
+  1/60 s), no longer over the time to the next frame (30–200 ms). The glide's added lag goes
+  from 26 ms p50 / 45 p95 / 151 max to 0 for live curves and at most one display frame for
+  slow ones.
+- **Spectrograph scroll (H5).** Rows no longer glide frame to frame. The flat and 3D
+  spectrographs scroll on the display's clock (`ac2_scene::scroll_clock::ScrollClock`): the
+  time axis is `now − offset` in session audio time (`audio_sample ÷ rate`), the offset the
+  earliest arrival over the last 120 frames, changing at most 0.05 s per second. The axis is at or past the
+  newest frame when it arrives and moves the same distance every display frame, whatever
+  audio the frames carry (10.7–42.7 ms steps at 96 kHz). Between frames it runs up to the
+  arrivals' spread plus one hop past the newest audio, the newest column stretched over that
+  lead (`lead_slots`, the 3D phase and the heatmap shader's `lead`), then waits. Slots are
+  placed by audio time, not wall time.
+- **Link drain (H4).** The link task reads within 1 ms of a frame's arrival (`PollClock`
+  gathers 1 ms after the first arrival, not on a fixed period), and an arriving frame wakes the
+  UI (`pace::link_wake`): the pass runs once half a display interval has passed since the last
+  one (`pace::data_wait`), so a new frame draws next pass rather than after the idle tick.
+- **Present (H2).** Kept Immediate (AutoNoVsync), frame latency 2. Fifo would block the
+  acquire for a second when the TV stops vblanks (the blanking freeze fixed in 7420be47).
+  Present-to-glass is still unmeasured.
+
+Local check, not ketunkolo: Xvfb + llvmpipe, fake backend at 48 kHz, one multi-res 1/12
+spectrum in the flat spectrograph, 60 s each, release builds of 8e3e2381 and this change.
+
+| | before | after |
+|---|---|---|
+| capture → read p50 / p95 / max | 10.8 / 20.0 / 24.5 ms | 7.7 / 11.8 / 17.7 ms |
+| read → apply p50 / p95 / max | 8.1 / 17.3 / 19.8 ms | 5.1 / 15.7 / 22.7 ms |
+| capture → present p50 / p95 / max | 20.7 / 33.9 / 41.1 ms | 14.1 / 23.8 / 29.9 ms |
+| pass interval p50 | 33.8 ms | 17.0 ms |
+| frames shown | 1843 | 3553 |
+| CPU per frame p50 | 2.9 ms | 4.4 ms |
+
+The flat spectrograph had no glide before, so this run shows the link and pacing gains only;
+on ketunkolo's 3D view the glide lag (25.6 ms p50, 151 max) is gone on top. The rerun on
+ketunkolo with `--latency-log` is the acceptance (§5).

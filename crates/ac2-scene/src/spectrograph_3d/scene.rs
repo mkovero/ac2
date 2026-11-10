@@ -25,9 +25,10 @@ pub struct Spectrograph3dInput<'a> {
     /// How much the axis decorations show, 0 … 1 ([`AxesReveal::alpha`]); what the tier
     /// in `view.chrome` would show, faded. An exported picture shows them whole (1).
     pub axes: f32,
-    /// How many history slots the rows are still short of their places as they glide back
-    /// ([`Skyline::drawn`]); 0 at rest, and in an exported picture.
-    pub lag_slots: f64,
+    /// How many history slots past the end of the newest slot the time axis stands
+    /// ([`Skyline::drawn`], [`SpectrographHistory::lead_slots`]); 0 draws the rows at
+    /// their places (scroll off, an exported picture).
+    pub lead_slots: f64,
 }
 
 /// Which axis a label belongs to.
@@ -570,11 +571,8 @@ pub fn spectrograph_3d_scene(
                 message = Some(format!("{}: no frames yet", s.name));
             } else {
                 let off = s.offset_db;
-                let drawn = sk.drawn(s.lag_slots);
-                let mut data = sk.ring().to_vec();
-                if let Some(u) = drawn.unborn {
-                    data[u] = None;
-                }
+                let drawn = sk.drawn(s.lead_slots);
+                let data = sk.ring().to_vec();
                 c.data.skylines.push(Skyline3d {
                     id: SKYLINE_ID,
                     rect: plot,
@@ -622,7 +620,7 @@ pub fn spectrograph_3d_scene(
                         &mut c,
                         &pj,
                         s.skyline,
-                        f64::from(s.skyline.drawn(s.lag_slots).front),
+                        f64::from(s.skyline.drawn(s.lead_slots).phase),
                         peaks,
                         t.offset_db,
                         crate::spectrum::value_unit(t.scale, t.quantity),

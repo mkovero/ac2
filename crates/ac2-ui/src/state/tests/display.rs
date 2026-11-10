@@ -290,13 +290,14 @@ fn spec_frame_captured(
     })));
 }
 
-/// A live curve glides from the drawn levels to each new frame over about the time since
-/// the frame before, picks up mid-glide from where it is drawn, and jumps when the operator
-/// turns the glide off.
+/// A live curve slower than the display eases into each new frame over one display frame
+/// from where it is drawn, and jumps when the operator turns the ease off. One display frame after a frame is applied, the curve drawn is that frame.
 #[test]
-fn a_live_curve_glides_to_each_new_frame() {
+fn a_slow_live_curve_eases_into_each_frame_over_one_display_frame() {
+    use ac2_scene::curve_ease::EASE_S;
     let mut t = T::new();
     let ms = |v: u64| std::time::Duration::from_millis(v);
+    let ease = std::time::Duration::from_secs_f64(EASE_S);
     let t0 = Instant::now();
     spec_frame_at(&mut t, 3, vec![-60.0; 5], 1, t0);
     assert!(
@@ -318,21 +319,21 @@ fn a_live_curve_glides_to_each_new_frame() {
             .clone();
     let g = t.st.rig.spec_glide[&to.topic].clone();
     assert_eq!(g.to_seq, 2);
-    assert!((g.duration_s - 0.1).abs() < 1e-9);
-    assert!(t.st.spectrum_gliding(t1 + ms(50)));
-    assert!(!t.st.spectrum_gliding(t1 + ms(100)));
-    assert_eq!(g.drawn(&to.frame, t1 + ms(50)), Some(vec![-50.0; 5]));
+    assert_eq!(g.duration_s, EASE_S);
+    assert!(t.st.spectrum_gliding(t1 + ease / 2));
+    assert!(!t.st.spectrum_gliding(t1 + ease));
+    let half = g.drawn(&to.frame, t1 + ease / 2).expect("easing");
+    assert!(half.iter().all(|v| (v + 50.0).abs() < 1e-3), "{half:?}");
     assert_eq!(
-        g.drawn(&to.frame, t1 + ms(100)),
+        g.drawn(&to.frame, t1 + ease),
         None,
-        "arrived: the frame itself"
+        "one display frame on: the frame itself"
     );
-    // A frame half way through the glide starts from the half-way curve.
+    // The next slow frame eases from where the curve is drawn: the frame before.
     let t2 = t1 + ms(50);
     spec_frame_at(&mut t, 3, vec![-60.0; 5], 3, t2);
     let g = t.st.rig.spec_glide[&to.topic].clone();
-    assert_eq!(&*g.from, &[-50.0; 5]);
-    assert!((g.duration_s - 0.05).abs() < 1e-9);
+    assert_eq!(&*g.from, &[-40.0; 5]);
     // The same levels again (a refresh) move nothing.
     spec_frame_at(&mut t, 3, vec![-60.0; 5], 4, t2 + ms(300));
     assert!(t.st.rig.spec_glide.is_empty());
@@ -341,6 +342,24 @@ fn a_live_curve_glides_to_each_new_frame() {
     spec_frame_at(&mut t, 3, vec![-30.0; 5], 5, t2 + ms(400));
     assert!(t.st.rig.spec_glide.is_empty());
     assert!(!t.st.spectrum_gliding(t2 + ms(401)));
+}
+
+/// Frames at the display's rate are drawn the pass they are applied: no ease, no lag.
+#[test]
+fn a_live_curve_at_the_display_rate_shows_each_frame_at_once() {
+    let mut t = T::new();
+    let t0 = Instant::now();
+    let frame = std::time::Duration::from_micros(16_667);
+    for i in 0..10u32 {
+        let at = t0 + frame * i;
+        spec_frame_at(&mut t, 3, vec![-60.0 + i as f32; 5], 1 + u64::from(i), at);
+        assert!(t.st.rig.spec_glide.is_empty(), "frame {i} eases");
+        assert!(!t.st.spectrum_gliding(at));
+    }
+    // Frames 21 ms apart (the hand-off's jitter) still come at the display's rate.
+    let t1 = t0 + frame * 9 + std::time::Duration::from_millis(21);
+    spec_frame_at(&mut t, 3, vec![-20.0; 5], 20, t1);
+    assert!(t.st.rig.spec_glide.is_empty());
 }
 
 /// The state with measurement `id` running or stopped.
@@ -364,39 +383,6 @@ fn meas_deleted(r: &[Request]) -> Option<(MeasId, String)> {
         ] => Some((*meas, what.clone())),
         _ => None,
     }
-}
-
-/// Frames captured 85 ms apart that arrive 100 ms and then 67 ms apart (a long FFT's hop
-/// beating against the daemon's hand-offs) glide by their capture times: the glide to the
-/// early frame lasts until the latest seen arrival would have brought it, not 67 ms.
-#[test]
-fn live_curve_glides_are_paced_by_capture_time() {
-    use ac2_proto::units::WallNs;
-    let mut t = T::new();
-    let ms = |v: u64| std::time::Duration::from_millis(v);
-    let t0 = Instant::now();
-    let w0 = 1_700_000_000_000_000_000u64;
-    let hop = 85_000_000u64;
-    spec_frame_captured(&mut t, 3, vec![-60.0; 5], 1, t0, WallNs(w0));
-    spec_frame_captured(&mut t, 3, vec![-50.0; 5], 2, t0 + ms(100), WallNs(w0 + hop));
-    spec_frame_captured(
-        &mut t,
-        3,
-        vec![-40.0; 5],
-        3,
-        t0 + ms(167),
-        WallNs(w0 + 2 * hop),
-    );
-    let g =
-        t.st.rig
-            .spec_glide
-            .values()
-            .next()
-            .expect("gliding")
-            .clone();
-    assert_eq!(g.to_seq, 3);
-    // 85 ms of capture time, plus the 18 ms this frame came earlier than the one before.
-    assert!((g.duration_s - 0.103).abs() < 1e-6, "{}", g.duration_s);
 }
 
 mod axis;
@@ -439,7 +425,7 @@ mod banners;
 
 mod advice;
 
-mod row_glide;
+mod scroll;
 
 /// The colour families take OKLCH searches to make: a picture reuses the theme's, made once,
 /// and a theme change makes the new theme's.

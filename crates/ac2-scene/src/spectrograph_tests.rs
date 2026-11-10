@@ -56,7 +56,7 @@ impl Feed {
         self.seq += 1;
         h.push(&SpectrographFrame {
             seq: self.seq,
-            at: WallNs(at_ns),
+            at_ns,
             grid: self.grid,
             edges: &self.edges,
             scale,
@@ -143,7 +143,7 @@ fn frames_scroll_through_a_bounded_ring() {
     let level = vec![99.0; f.edges.len()];
     assert!(!h.push(&SpectrographFrame {
         seq: f.seq,
-        at: WallNs(T0),
+        at_ns: T0,
         grid: f.grid,
         edges: &f.edges,
         scale: LevelScale::Dbfs,
@@ -240,6 +240,7 @@ fn scene_coloured(
         offset_db: 0.0,
         freshness: None,
         colours,
+        lead_slots: 0.0,
     };
     spectrograph_scene(
         &[],
@@ -378,6 +379,7 @@ fn stale_dims_offset_shifts_and_empty_says_so() {
             offset_db: off,
             freshness: fr,
             colours: Default::default(),
+            lead_slots: 0.0,
         };
         spectrograph_scene(&[], &Status::default(), Some(&s), &view, &theme, size)
     };
@@ -440,6 +442,7 @@ fn the_spectrum_part_keeps_its_legend_unit_and_selection() {
         offset_db: 0.0,
         freshness: None,
         colours: Default::default(),
+        lead_slots: 0.0,
     };
     let theme = Theme::dark();
     let s = spectrograph_scene(
@@ -543,6 +546,7 @@ fn the_spectrograph_alone_takes_the_pane() {
         offset_db: 0.0,
         freshness: Some(Freshness::AudioStopped { age_s: 4.8 }),
         colours: Default::default(),
+        lead_slots: 0.0,
     };
     view.cursor_hz = None;
     let status = Status {
@@ -707,7 +711,7 @@ fn a_density_reads_per_hertz_and_a_level_change_starts_over() {
     let l = vec![-90.0f32; f.edges.len()];
     let frame = |seq: u64, at: u64, spec_level| SpectrographFrame {
         seq,
-        at: WallNs(at),
+        at_ns: at,
         grid: f.grid,
         edges: &f.edges,
         scale: LevelScale::Dbfs,

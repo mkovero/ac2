@@ -1,5 +1,6 @@
-//! The live spectrum and RTA curves glide from one frame to the next
-//! ([`ac2_scene::curve_ease`]): what each glides from, and where it has got to.
+//! A live spectrum or RTA curve slower than the display eases into its newest frame over
+//! one display frame ([`ac2_scene::curve_ease`]): what it eases from, and where it has
+//! got to. Frames at the display's rate are drawn as received.
 
 use super::*;
 
@@ -7,7 +8,7 @@ use std::time::Instant;
 
 use ac2_scene::curve_ease;
 
-/// A live curve's glide to its newest frame.
+/// A live curve's ease into its newest frame.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SpecGlide {
     /// `seq` of the frame it glides to; a glide to any other frame is over.
@@ -16,8 +17,7 @@ pub struct SpecGlide {
     pub from: Arc<[f32]>,
     /// When the frame was taken.
     pub start: Instant,
-    /// How long it lasts, s: about the time since the frame before
-    /// ([`curve_ease::Pacing`]).
+    /// How long it lasts, s ([`curve_ease::EASE_S`]).
     pub duration_s: f64,
     /// The capture time `from` stands for, ns on the daemon's wall clock: the frame before's
     /// `capture_wall_ns`, or part way past it when a glide was cut short. A curve drawn `k`
@@ -72,7 +72,7 @@ impl SpecGlide {
 }
 
 impl AppState {
-    /// Some live curve still glides to its newest frame at `now`.
+    /// Some live curve still eases into its newest frame at `now`.
     pub fn spectrum_gliding(&self, now: Instant) -> bool {
         self.prefs.spec_ease
             && self.rig.spec_glide.iter().any(|(t, g)| {
@@ -93,25 +93,23 @@ impl AppState {
 }
 
 impl RigState {
-    /// Starts each live curve's glide to a new frame from where it is drawn now. A frame
-    /// from another session, daemon, configuration or grid is not the same curve moving: it
-    /// is drawn as received.
+    /// Starts each live curve's ease into a new frame from where it is drawn now, when the
+    /// frame came slower than the display ([`curve_ease::eases`]); a faster one is drawn as
+    /// received. A frame from another session, daemon, configuration or grid is not the
+    /// same curve moving: it is drawn as received.
     pub(super) fn keep_spec_glide(&mut self, d: &DataSnapshot, spec_ease: bool) {
         if !spec_ease {
             self.spec_glide.clear();
-            self.spec_pacing.clear();
             return;
         }
         let old = self.data.as_deref();
         self.spec_glide.retain(|t, _| d.latest.get(t).is_some());
-        self.spec_pacing.retain(|t, _| d.latest.get(t).is_some());
         for tf in d.latest.frames.values() {
             let Some(to) = levels(&tf.frame.data) else {
                 continue;
             };
             let Some(prev) = old.and_then(|o| o.latest.get(&tf.topic)) else {
                 self.spec_glide.remove(&tf.topic);
-                self.spec_pacing.remove(&tf.topic);
                 continue;
             };
             let (a, b) = (&prev.frame.stamp, &tf.frame.stamp);
@@ -122,14 +120,14 @@ impl RigState {
                 && a.daemon_incarnation == b.daemon_incarnation
                 && a.config_rev == b.config_rev
                 && a.grid_id == b.grid_id;
+            let slow = curve_ease::eases(tf.received.saturating_duration_since(prev.received));
             let Some(prev_levels) =
-                levels(&prev.frame.data).filter(|p| same && p.len() == to.len())
+                levels(&prev.frame.data).filter(|p| same && slow && p.len() == to.len())
             else {
                 self.spec_glide.remove(&tf.topic);
-                self.spec_pacing.remove(&tf.topic);
                 continue;
             };
-            // Mid-glide, the curve moves on from where it is drawn, so it never jumps.
+            // Mid-ease, the curve moves on from where it is drawn, so it never jumps.
             let from_capture_ns = self
                 .spec_glide
                 .get(&tf.topic)
@@ -146,24 +144,13 @@ impl RigState {
                 self.spec_glide.remove(&tf.topic);
                 continue;
             }
-            // A refresh carries the newest capture time, not its result's: it never gets
-            // here (same levels), so it does not upset the pacing.
-            let duration_s = self
-                .spec_pacing
-                .entry(tf.topic)
-                .or_default()
-                .glide_s(d.drained, b.capture_wall_ns.0)
-                .unwrap_or_else(|| {
-                    let interval = tf.received.saturating_duration_since(prev.received);
-                    curve_ease::duration_s(interval.as_secs_f64())
-                });
             self.spec_glide.insert(
                 tf.topic,
                 SpecGlide {
                     to_seq: b.seq,
                     from: from.into(),
                     start: d.drained,
-                    duration_s,
+                    duration_s: curve_ease::EASE_S,
                     from_capture_ns,
                 },
             );
