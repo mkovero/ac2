@@ -102,6 +102,18 @@ impl eframe::App for App {
                 }
             });
         }
+        // A button up ends a hold on a pane wherever it came up: the pane's own pointer check
+        // runs only while the pane is drawn and no window is over the panes, and a hold left
+        // behind would keep its level axis still for good.
+        if let Some(p) = self.held_pane
+            && !ctx.input(|i| i.pointer.any_down())
+        {
+            self.held_pane = None;
+            self.dispatch(Msg::PanePointer {
+                pane: p,
+                held: false,
+            });
+        }
         // The window's close button: with unsaved changes on a daemon the app stops and that
         // keeps nothing (the simulated rig), the question comes first.
         if ctx.input(|i| i.viewport().close_requested()) && !self.state.close_requested() {

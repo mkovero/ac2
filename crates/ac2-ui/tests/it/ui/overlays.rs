@@ -512,3 +512,42 @@ fn startup_first_frame() {
     // device or file wait) takes the bound out at once.
     assert!(app < Duration::from_secs(1), "{app:?}");
 }
+
+/// A button pressed on the spectrum pane and released while a window is over the panes (the
+/// pane's own pointer check is not run then) still ends the hold on its level axis.
+#[test]
+fn a_release_under_a_window_ends_the_pane_hold() {
+    if !have_gpu("a_release_under_a_window_ends_the_pane_hold") {
+        return;
+    }
+    let rig = common::Rig::start();
+    let mut h = harness(options(Some(&rig)));
+    step_until(&mut h, "live frames", live);
+    let (p, rect) = h
+        .state()
+        .pane_rects
+        .iter()
+        .copied()
+        .find(|(p, _)| h.state().state.layout.kind(*p) == PaneKind::Spectrum)
+        .expect("a spectrum pane");
+    let at = rect.center();
+    let button = |pressed| Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    h.event(Event::PointerMoved(at));
+    settle(&mut h, 2);
+    h.event(button(true));
+    settle(&mut h, 2);
+    assert!(
+        h.state().state.level_held(p),
+        "held while the button is down"
+    );
+    h.key_press(Key::H);
+    step_until(&mut h, "help", |a| a.state.overlay == Overlay::Help);
+    h.event(button(false));
+    settle(&mut h, 3);
+    assert!(!h.state().state.level_held(p), "released under the window");
+}

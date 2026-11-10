@@ -459,3 +459,34 @@ fn a_down_puts_the_maximum_at_or_below_its_target() {
     assert!(-63.0 <= m.to.hi - TOP_PAD * m.to.span(), "{:?}", m.to);
     assert!(-63.0 + nice(r.span() / 8.0) > m.to.hi - TOP_PAD * m.to.span());
 }
+
+/// A widened range ends on its own grid lines (`nice(span / 8)`, the step a later shift
+/// moves by and the labels step by), holds the content, and holds its extent in at most
+/// [`WIDEN_TO`] of it, for content anywhere in the usual levels.
+#[test]
+fn a_widened_range_ends_on_its_own_grid() {
+    let on = |x: f64, step: f64| ((x / step).round() * step - x).abs() < 1e-6;
+    let mut checked = 0;
+    for top10 in -1400..=200 {
+        for extent10 in (5..=1500).step_by(7) {
+            let top = f64::from(top10) / 10.0;
+            let floor = top - f64::from(extent10) / 10.0;
+            let r = widened(floor, top).expect("finite");
+            if r.lo <= crate::view::LEVEL_LIMIT_LO || r.hi >= crate::view::LEVEL_LIMIT_HI {
+                continue;
+            }
+            let step = nice(r.span() / 8.0);
+            assert!(
+                on(r.lo, step) && on(r.hi, step),
+                "{floor} – {top}: {r:?}, step {step}"
+            );
+            assert!(r.lo <= floor && r.hi >= top, "{floor} – {top}: {r:?}");
+            assert!(
+                top - floor <= WIDEN_TO * r.span() + 1e-9,
+                "{floor} – {top}: {r:?}"
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 100_000);
+}

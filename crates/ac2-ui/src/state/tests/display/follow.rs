@@ -319,7 +319,8 @@ fn a_second_pane_joining_refits_the_group_over_both() {
     let (_, b) = two_panes(&mut t);
     t.drop_meas(b, MeasId(4));
     c.frame(&mut t, &[(2, -60.0), (4, -30.0)]);
-    c.frame(&mut t, &[(2, -60.0), (4, -30.0)]);
+    // The keys that split the pane hold the group's framing for a while.
+    c.run(&mut t, HANDS_OFF_S, &[(2, -60.0), (4, -30.0)]);
     let both =
         ac2_scene::view::level::fit([-100.0, -80.0, -60.0, -70.0, -50.0, -30.0]).expect("finite");
     assert_eq!(range(&t, a), both);
@@ -544,4 +545,135 @@ fn a_step_in_the_3d_view_moves_the_skyline_heights() {
     settle(&mut c, &mut t, &[(2, -10.0)]);
     assert_eq!(range(&t, p), Range::new(-60.0, 0.0));
     assert_eq!(heights(&t), [-60.0, 0.0]);
+}
+
+/// Two panes of one unit, `a` showing Sub (2) and `b` Sub 2 (4), framed as a group: the
+/// split's hands-off time waited out.
+fn two_panes_apart(t: &mut T, c: &mut Clock, content: &[(u32, f32)]) -> (PaneId, PaneId) {
+    let mut s = daemon_state();
+    s.measurements.push(meas(4, "Sub 2", spectrum()));
+    t.conn(mirror(s));
+    c.frame(t, content);
+    let (a, b) = two_panes(t);
+    t.drop_meas(b, MeasId(4));
+    c.run(t, HANDS_OFF_S + 1.0, content);
+    (a, b)
+}
+
+/// A member joining while the operator works on the group's panes frames the group only
+/// once the hands-off time is over: no member's range moves under the operator's hand, and
+/// the framing waits, it is not dropped.
+#[test]
+fn a_group_frame_waits_out_the_hands_off_time() {
+    let mut t = T::new();
+    let mut s = daemon_state();
+    s.measurements.push(meas(4, "Sub 2", spectrum()));
+    t.conn(mirror(s));
+    let mut c = Clock::new();
+    let both_meas = [(2, -60.0), (4, -30.0)];
+    c.frame(&mut t, &both_meas);
+    let a = sp(&t);
+    let own = range(&t, a);
+    let (_, b) = two_panes(&mut t);
+    t.drop_meas(b, MeasId(4));
+    c.run(&mut t, HANDS_OFF_S - 2.0, &both_meas);
+    assert_eq!(range(&t, a), own, "a held still while worked on");
+    c.run(&mut t, 3.0, &both_meas);
+    let both =
+        ac2_scene::view::level::fit([-100.0, -80.0, -60.0, -70.0, -50.0, -30.0]).expect("finite");
+    assert_eq!(range(&t, a), both, "framed once hands off");
+    assert_eq!(range(&t, b), both);
+}
+
+/// Shift+Home on one member while a button is held on the other: the group frames when the
+/// button comes up, not before.
+#[test]
+fn an_operator_fit_waits_for_a_held_member() {
+    let mut t = T::new();
+    let mut c = Clock::new();
+    let both_meas = [(2, -60.0), (4, -30.0)];
+    let (a, b) = two_panes_apart(&mut t, &mut c, &both_meas);
+    let group = range(&t, a);
+    c.run(&mut t, 2.0, &[(2, -60.0), (4, -80.0)]);
+    t.st.apply(
+        Msg::PanePointer {
+            pane: a,
+            held: true,
+        },
+        &t.keys,
+    );
+    t.st.apply(Msg::FocusPane(b), &t.keys);
+    t.key("Shift+Home");
+    c.run(&mut t, 2.0, &[(2, -60.0), (4, -80.0)]);
+    assert_eq!(range(&t, a), group, "held");
+    t.st.apply(
+        Msg::PanePointer {
+            pane: a,
+            held: false,
+        },
+        &t.keys,
+    );
+    c.frame(&mut t, &[(2, -60.0), (4, -80.0)]);
+    let fit =
+        ac2_scene::view::level::fit([-100.0, -80.0, -60.0, -120.0, -100.0, -80.0]).expect("finite");
+    assert_eq!(range(&t, a), fit);
+    assert_eq!(range(&t, b), fit);
+}
+
+/// A member whose measurement stopped sending holds no top: the group follows the members
+/// still live, down when they lie low for the slow window.
+#[test]
+fn a_stopped_member_does_not_hold_the_group_up() {
+    let mut t = T::new();
+    let mut c = Clock::new();
+    let (a, b) = two_panes_apart(&mut t, &mut c, &[(2, -150.0), (4, 0.0)]);
+    let group = range(&t, a);
+    assert_eq!(range(&t, b), group);
+    c.run(&mut t, 300.0, &[(2, -150.0)]);
+    assert!(
+        range(&t, a).hi < group.hi,
+        "{:?} from {group:?}",
+        range(&t, a)
+    );
+    assert_eq!(range(&t, b), range(&t, a));
+}
+
+/// A curve gone from the frames for a moment (a reconnect) and back from a restarted daemon:
+/// the history before it is another signal's and decides nothing.
+#[test]
+fn a_restart_across_a_gap_in_the_frames_clears_the_history() {
+    let mut t = T::new();
+    let mut c = Clock::new();
+    c.frame(&mut t, &[(2, -30.0)]);
+    let p = sp(&t);
+    let fit = range(&t, p);
+    c.run(&mut t, 2.5, &[(2, -10.0)]);
+    c.frame(&mut t, &[]);
+    c.incarnation += 1;
+    c.run(&mut t, 2.5, &[(2, -10.0)]);
+    assert_eq!(range(&t, p), fit, "the old history moved it");
+    c.run(&mut t, 1.0, &[(2, -10.0)]);
+    settle(&mut c, &mut t, &[(2, -10.0)]);
+    assert_eq!(range(&t, p), Range::new(-60.0, 0.0));
+}
+
+/// With following off no frame is read for it; turned on, the follower starts from what
+/// arrives from then on.
+#[test]
+fn following_turned_on_starts_from_its_own_frames() {
+    let mut t = T::new();
+    t.st.prefs.level_follow = false;
+    let mut c = Clock::new();
+    c.frame(&mut t, &[(2, -30.0)]);
+    let p = sp(&t);
+    let fit = range(&t, p);
+    c.run(&mut t, 10.0, &[(2, -10.0)]);
+    assert!(!t.st.follow_fed(), "fed while off");
+    t.st.prefs.level_follow = true;
+    c.run(&mut t, 2.5, &[(2, -10.0)]);
+    assert!(t.st.follow_fed());
+    assert_eq!(range(&t, p), fit, "the frames before moved it");
+    c.run(&mut t, 1.0, &[(2, -10.0)]);
+    settle(&mut c, &mut t, &[(2, -10.0)]);
+    assert_eq!(range(&t, p), Range::new(-60.0, 0.0));
 }

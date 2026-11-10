@@ -14,7 +14,7 @@ use ac2_proto::frame::ValidityMask;
 use ac2_proto::model::LevelScale;
 use ac2_proto::units::{DaemonIncarnation, MeasId, SessionEpoch};
 use ac2_scene::axis::Range;
-use ac2_scene::view::follow::{EASE_S, Ease, Follow, HANDS_OFF_S, SHADE_S, Sample};
+use ac2_scene::view::follow::{EASE_S, Ease, Follow, HANDS_OFF_S, MAX_GAP_S, SHADE_S, Sample};
 use ac2_scene::view::level;
 
 use super::levels::LevelSlot;
@@ -26,14 +26,46 @@ pub const DOUBLE_TAP_S: f64 = 0.4;
 /// … and this close in place, logical px: a fingertip drifts further than a mouse.
 pub const DOUBLE_TAP_PX: f32 = 24.0;
 
+/// Why a pane's group frames again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::state) enum Refit {
+    /// The operator framed the pane (Shift+Home, a double-tap): the group frames with it at
+    /// once, that being the input.
+    Fit,
+    /// The pane shows a new signal (another measurement, a new run): its history clears,
+    /// and the group frames over all its members once no one works on them.
+    NewSignal,
+}
+
+/// A group frame asked for, waiting for its tick.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Asked {
+    /// The history so far is another signal's.
+    clear: bool,
+    /// The operator's own fit: only a pointer held on a member holds it.
+    operator: bool,
+}
+
+impl Asked {
+    fn with(self, o: Self) -> Self {
+        Self {
+            clear: self.clear || o.clear,
+            operator: self.operator || o.operator,
+        }
+    }
+}
+
 /// What a pane's live curves last gave the follower.
 #[derive(Clone, Debug, PartialEq)]
 struct Feed {
     scale: LevelScale,
-    /// Per live curve, the signal history its frames belong to and the newest frame taken.
+    /// Per live curve, the signal history its frames belong to and the newest frame taken;
+    /// kept while the curve is away (a reconnect), so a restarted rig's frames are told
+    /// from the old ones when it is back.
     curves: BTreeMap<MeasId, (SessionEpoch, DaemonIncarnation, u64)>,
     sample: Option<Sample>,
-    /// When the newest frame arrived (the app's clock).
+    /// When the newest frame arrived (the app's clock, set by the tick that comes before
+    /// each drain of the links).
     at: f64,
     /// A frame not yet given to the follower.
     fresh: bool,
@@ -78,8 +110,8 @@ pub(in crate::state) struct LevelFollow {
     input: BTreeMap<PaneId, f64>,
     /// Panes a pointer button is down on.
     held: BTreeSet<PaneId>,
-    /// Panes whose group frames again on the next tick (`true`: its history clears too).
-    refit: BTreeMap<PaneId, bool>,
+    /// Panes whose group frames again on the next tick, and how.
+    refit: BTreeMap<PaneId, Asked>,
     tap: Option<Tap>,
     /// The last tap was the second of a double-tap.
     double: bool,
@@ -123,6 +155,12 @@ impl AppState {
     /// now takes its live curves' newest frames, its own and compared ones, as drawn. Stored
     /// traces never drift and the peak hold only rises: neither counts.
     pub(in crate::state) fn feed_follow(&mut self) {
+        if !self.prefs.level_follow {
+            // Nothing follows: no feed is read, and none is left to start from when
+            // following is turned on again.
+            self.level_follow.feeds.clear();
+            return;
+        }
         for pane in self.own_visible_panes() {
             if self.layout.kind(pane) != PaneKind::Spectrum {
                 self.level_follow.feeds.remove(&pane);
@@ -169,8 +207,8 @@ impl AppState {
                 reset: false,
             });
             let mut fresh = false;
-            for (id, (epoch, inc, seq)) in &curves {
-                match feed.curves.get(id) {
+            for (id, (epoch, inc, seq)) in curves {
+                match feed.curves.insert(id, (epoch, inc, seq)) {
                     Some((e, i, _)) if (e, i) != (epoch, inc) => {
                         feed.reset = true;
                         fresh = true;
@@ -179,7 +217,6 @@ impl AppState {
                     _ => fresh = true,
                 }
             }
-            feed.curves = curves;
             if feed.scale != scale {
                 // Another unit is another slot: its history is its own.
                 feed.scale = scale;
@@ -193,11 +230,15 @@ impl AppState {
         }
     }
 
-    /// Pane `pane` was framed for what it shows (`clear`: a new signal: another measurement,
-    /// a new run): its group frames again over all its members on the next tick.
-    pub(in crate::state) fn follow_refit(&mut self, pane: PaneId, clear: bool) {
+    /// Pane `pane` was framed for what it shows (`why`): its group frames again over all
+    /// its members.
+    pub(in crate::state) fn follow_refit(&mut self, pane: PaneId, why: Refit) {
+        let a = Asked {
+            clear: why == Refit::NewSignal,
+            operator: why == Refit::Fit,
+        };
         let r = self.level_follow.refit.entry(pane).or_default();
-        *r |= clear;
+        *r = r.with(a);
     }
 
     /// The pane message `msg` is the operator's input on: `Some(None)` the focused one (a
@@ -234,6 +275,17 @@ impl AppState {
         } else {
             self.level_follow.held.remove(&pane);
         }
+    }
+
+    /// Some pane's frames are read for the follower.
+    #[cfg(test)]
+    pub(in crate::state) fn follow_fed(&self) -> bool {
+        !self.level_follow.feeds.is_empty()
+    }
+
+    /// A pointer button is down on pane `pane`: its level axis holds still.
+    pub fn level_held(&self, pane: PaneId) -> bool {
+        self.level_follow.held.contains(&pane)
     }
 
     /// A tap (a click) on pane `pane`'s plot at `x`, `y` (logical px), outside its legend
@@ -325,6 +377,10 @@ impl AppState {
         let kinds: BTreeMap<PaneId, PaneKind> =
             visible.iter().map(|p| (*p, self.layout.kind(*p))).collect();
         let lf = &mut self.level_follow;
+        if !self.prefs.level_follow {
+            lf.feeds.clear();
+            lf.refit.clear();
+        }
         lf.feeds
             .retain(|p, _| kinds.get(p).is_some_and(|k| *k == PaneKind::Spectrum));
         lf.input.retain(|_, t| now - *t < HANDS_OFF_S);
@@ -362,7 +418,7 @@ impl AppState {
         &mut self,
         key: Key,
         members: &[PaneId],
-        refit: &BTreeMap<PaneId, bool>,
+        refit: &BTreeMap<PaneId, Asked>,
         now: f64,
     ) {
         let scale = if key.spl {
@@ -371,25 +427,45 @@ impl AppState {
             LevelScale::Dbfs
         };
         let lf = &mut self.level_follow;
+        let held = members.iter().any(|p| lf.held.contains(p));
+        let hands_off = held
+            || members
+                .iter()
+                .any(|p| lf.input.get(p).is_some_and(|t| now - t < HANDS_OFF_S));
         let f = lf.followers.entry(key).or_default();
         let joined = members.iter().any(|p| !f.members.contains(p));
         let asked = members
             .iter()
             .filter_map(|p| refit.get(p))
             .copied()
-            .reduce(|a, b| a || b);
+            .reduce(Asked::with);
+        // The history is cleared at once: it is no move, and frames of the new signal
+        // count from now even while the range waits.
         if members
             .iter()
             .any(|p| lf.feeds.get(p).is_some_and(|x| x.reset))
-            || asked == Some(true)
+            || asked.is_some_and(|a| a.clear)
         {
             f.follow.clear();
         }
         f.members = members.iter().copied().collect();
         // One range for the group: framed over all its members when one joins (a second
         // pane on screen, a pane turned automatic) or a member was framed; a pane alone keeps
-        // the range its own first show framed.
-        if members.len() > 1 && (joined || asked.is_some()) {
+        // the range its own first show framed. Framing moves every member, so it waits while
+        // the operator works on one, as a follow move does; the operator's own fit is that
+        // input, and waits only for a button held on a member.
+        let group = members.len() > 1 && (joined || asked.is_some());
+        let operator = asked.is_some_and(|a| a.operator);
+        if group && (if operator { held } else { hands_off }) {
+            let pending = Asked {
+                clear: false,
+                operator,
+            };
+            for p in members {
+                let r = lf.refit.entry(*p).or_default();
+                *r = r.with(pending);
+            }
+        } else if group {
             let values: Vec<f64> = members
                 .iter()
                 .flat_map(|p| self.level_values_of(*p))
@@ -408,16 +484,19 @@ impl AppState {
             f.follow.moved(now);
         }
         let lf = &mut self.level_follow;
-        let fresh: Vec<&Feed> = members.iter().filter_map(|p| lf.feeds.get(p)).collect();
-        let sample = fresh.iter().filter_map(|x| x.sample).reduce(Sample::with);
-        let at = fresh
+        let feeds: Vec<&Feed> = members.iter().filter_map(|p| lf.feeds.get(p)).collect();
+        // A member whose curves stopped arriving is no level now: a stopped one must not
+        // hold the group's top. Members of other rigs arrive apart, so recent, not this tick.
+        let sample = feeds
+            .iter()
+            .filter(|x| now - x.at <= MAX_GAP_S)
+            .filter_map(|x| x.sample)
+            .reduce(Sample::with);
+        let at = feeds
             .iter()
             .filter(|x| x.fresh)
             .map(|x| x.at)
             .reduce(f64::max);
-        let hands_off = members
-            .iter()
-            .any(|p| lf.held.contains(p) || lf.input.get(p).is_some_and(|t| now - t < HANDS_OFF_S));
         let f = lf.followers.entry(key).or_default();
         if let (Some(s), Some(at)) = (sample, at) {
             f.follow.push(at, s);

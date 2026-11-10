@@ -276,7 +276,7 @@ impl AppState {
         self.hold_level_as(pane, !follows);
         self.change_level(pane, |_| fit);
         if follows {
-            self.follow_refit(pane, false);
+            self.follow_refit(pane, super::follow::Refit::Fit);
         }
     }
 
@@ -423,7 +423,7 @@ impl AppState {
             self.change_level(pane, |_| fit);
             self.spectrum_hold.insert(pane, SpectrumHold { shown });
             // Another measurement, or a new run of it: a new signal history.
-            self.follow_refit(pane, true);
+            self.follow_refit(pane, super::follow::Refit::NewSignal);
         }
     }
 

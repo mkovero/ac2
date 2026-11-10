@@ -180,9 +180,13 @@ read with its rig swapped in):
 - **The group range** is `level::fit` over the union of the members' values. It is fitted
   again when a member joins (a pane shows a curve, or turns Auto), on Shift+Home or a
   double-tap on any member, and on a rearm of any member's measurement; a member leaving
-  keeps the range.
+  keeps the range. Framing moves every member, so it waits out the hands-off time like a
+  move; Shift+Home or the double-tap is itself the input and waits only for a button held
+  on a member.
 - **Following:** the group's top per frame is the maximum of its members' tops (each the
-  max over its curves); one ring, one decision, one range written to every member.
+  max over its curves), over the members whose frames still arrive (newest within the
+  longest gap a window holds): a stopped one holds no top. One ring, one decision, one
+  range written to every member.
 - **Hands off** on one member holds the whole group.
 - Operator panes are out of the group. The group lives under the Display toggle of the
   shared Leq scale (`UiPrefs::shared_scale`), widened to same-kind panes; off, each pane

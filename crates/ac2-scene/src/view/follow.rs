@@ -107,7 +107,7 @@ pub struct Move {
 }
 
 /// The frames of one followed range, by arrival time, and when it last moved.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default)]
 pub struct Follow {
     ring: VecDeque<(f64, Sample)>,
     /// The first frame of the run of frames up to the newest, none more than [`MAX_GAP_S`]
@@ -116,6 +116,9 @@ pub struct Follow {
     moved_at: Option<f64>,
     /// When the slow rules last looked: they read minutes, so once a second is enough.
     slow_at: Option<f64>,
+    /// The values a rule takes a quantile of, kept between ticks: a decision runs every
+    /// frame drawn, and its window holds minutes of frames.
+    scratch: Vec<f64>,
 }
 
 impl Follow {
@@ -153,11 +156,12 @@ impl Follow {
         self.ring.is_empty()
     }
 
-    /// The frames of the last `w` seconds up to the newest, when they cover it: the newest no
-    /// older than [`MAX_GAP_S`] at `now`, none more than that apart, the run reaching back `w`
-    /// from no earlier than `after`. A stalled stream counts no time: the window ends on its
-    /// newest frame. `None` when they do not cover it: the decision waits.
-    fn window(&self, now: f64, w: f64, after: Option<f64>) -> Option<Vec<Sample>> {
+    /// How many of the newest frames are the last `w` seconds up to the newest, when they
+    /// cover it: the newest no older than [`MAX_GAP_S`] at `now`, none more than that apart,
+    /// the run reaching back `w` from no earlier than `after`. A stalled stream counts no
+    /// time: the window ends on its newest frame. `None` when they do not cover it: the
+    /// decision waits.
+    fn window(&self, now: f64, w: f64, after: Option<f64>) -> Option<usize> {
         // Frame times are sums of float steps: a window that ends on a frame covers it.
         const EPS: f64 = 1e-9;
         let (last, _) = *self.ring.back()?;
@@ -171,9 +175,23 @@ impl Follow {
                 .iter()
                 .rev()
                 .take_while(|(t, _)| *t >= from - EPS)
-                .map(|(_, s)| *s)
-                .collect(),
+                .count(),
         )
+    }
+
+    /// The newest `n` frames, newest first.
+    fn newest(&self, n: usize) -> impl Iterator<Item = Sample> + '_ {
+        self.ring.iter().rev().take(n).map(|(_, s)| *s)
+    }
+
+    /// The `q` quantile of `f` over the newest `n` frames.
+    fn quantile_of(&mut self, n: usize, q: f64, f: impl Fn(Sample) -> f64) -> f64 {
+        let mut v = std::mem::take(&mut self.scratch);
+        v.clear();
+        v.extend(self.newest(n).map(f));
+        let x = quantile(&mut v, q);
+        self.scratch = v;
+        x
     }
 
     /// Whether range `r` should move at `now`, and where to; a move counts as made (call it
@@ -198,29 +216,32 @@ impl Follow {
         Some(m)
     }
 
-    fn up(&self, now: f64, r: Range) -> Option<Move> {
-        let w = self.window(now, UP_WINDOW_S, self.moved_at)?;
-        let mut tops: Vec<f64> = w.iter().map(|s| s.top).collect();
-        if quantile(&mut tops, UP_QUANTILE) <= r.hi {
+    fn up(&mut self, now: f64, r: Range) -> Option<Move> {
+        let n = self.window(now, UP_WINDOW_S, self.moved_at)?;
+        if self.quantile_of(n, UP_QUANTILE, |s| s.top) <= r.hi {
             return None;
         }
-        let max = tops.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let max = self
+            .newest(n)
+            .map(|s| s.top)
+            .fold(f64::NEG_INFINITY, f64::max);
         Some(Move {
             to: shift(r, max, false),
             why: Why::Up,
         })
     }
 
-    fn slow(&self, now: f64, r: Range) -> Option<Move> {
+    fn slow(&mut self, now: f64, r: Range) -> Option<Move> {
         if self.moved_at.is_some_and(|t| now - t < LOCKOUT_S) {
             return None;
         }
-        let w = self.window(now, SLOW_WINDOW_S, None)?;
-        let max = w.iter().map(|s| s.top).fold(f64::NEG_INFINITY, f64::max);
-        let mut extents: Vec<f64> = w.iter().map(|s| s.top - s.floor).collect();
-        if quantile(&mut extents, 0.5) > WIDEN_AT * r.span() {
-            let mut floors: Vec<f64> = w.iter().map(|s| s.floor).collect();
-            let to = widened(quantile(&mut floors, 0.5), max)?;
+        let n = self.window(now, SLOW_WINDOW_S, None)?;
+        let max = self
+            .newest(n)
+            .map(|s| s.top)
+            .fold(f64::NEG_INFINITY, f64::max);
+        if self.quantile_of(n, 0.5, |s| s.top - s.floor) > WIDEN_AT * r.span() {
+            let to = widened(self.quantile_of(n, 0.5, |s| s.floor), max)?;
             // The follower never narrows: an idle mic's floor is no reason to zoom in.
             if to.span() > r.span() {
                 return Some(Move {
@@ -252,18 +273,36 @@ fn shift(r: Range, max: f64, down: bool) -> Range {
 }
 
 /// The range that frames content from `floor` to `top` with that extent filling at most
-/// [`WIDEN_TO`] of it: [`level::fit`] of the two, widened downward.
+/// [`WIDEN_TO`] of it: [`level::fit`] of the two, widened downward. Its edges lie on its own
+/// grid, `nice(span / 8)`, which [`shift`] and the axis labels step by: a span rounded out to
+/// whole steps can reach the next 1-2-5 step's range, so the step is chosen with the span.
 fn widened(floor: f64, top: f64) -> Option<Range> {
+    // Edges are sums of float steps: one a hair off a grid line is on it.
+    const EPS: f64 = 1e-9;
     let fit = level::fit([floor, top])?;
     let extent = top - floor;
-    if extent <= WIDEN_TO * fit.span() {
-        return Some(fit);
+    let wanted = fit.span().max(extent / WIDEN_TO);
+    let same = |a: f64, b: f64| (a / b - 1.0).abs() < EPS;
+    let mut step = nice(wanted / 8.0);
+    // Each round only a coarser step: the rounds end within a few.
+    for _ in 0..8 {
+        let hi = (fit.hi / step - EPS).ceil() * step;
+        // The bottom edge holds the fit's bottom and the wanted span under the top.
+        let need = fit.lo.min(hi - wanted);
+        let mut n = ((hi - (need / step + EPS).floor() * step) / step).round();
+        if n > 8.0 && hi - 8.0 * step <= need + EPS {
+            n = 8.0;
+        }
+        while nice(n * step / 8.0) < step * (1.0 - EPS) {
+            n += 1.0;
+        }
+        let own = nice(n * step / 8.0);
+        if same(own, step) {
+            return Some(level::clamp(Range::new(hi - n * step, hi)));
+        }
+        step = own;
     }
-    let span = extent / WIDEN_TO;
-    let step = nice(span / 8.0);
-    let hi = (fit.hi / step).ceil() * step;
-    let lo = ((hi - span) / step).floor() * step;
-    Some(level::clamp(Range::new(lo, hi)))
+    Some(fit)
 }
 
 /// The `q` quantile of ascending `v` (non-empty), the nearest rank.
