@@ -292,6 +292,12 @@ only ac2's ports).
 | largest | 267 ms | 240 ms |
 | credit stalls (sender) | 4 | 4 |
 
+- **The hosts' system clocks agree within tens of µs.** Each direction's smallest one-way time
+  per minute holds the transit plus or minus the offset between the two system clocks, so half
+  their difference is the offset: ketunkolo − pupu **−11 µs mean, 9 µs sd, −38 to +7 µs** over
+  the 60 minutes (smallest transit 179 µs; an asymmetric path would bias it by at most that).
+  Anchoring remote audio on system time (`remote-inputs.md` §4) is therefore off by tens of
+  µs on this LAN, against milliseconds of link offset.
 - **Normal running:** sub-millisecond, nothing lost. A link offset of **4 ms** (p99.9 + one
   block) covers it.
 - **One event in the hour** made every block over 5 ms: at 10:12:14 UTC both directions
@@ -335,7 +341,9 @@ Word clock pull (2026-11-10 19:19–19:27 UTC, replugged 19:22:43, pupu, 8 min l
 | word clock pulled (`WDClk: none`, still `Word` configured) | ≥ 182 s | +5.568 ppm | 15.2 µs |
 | replugged (`none` → `lock` → `sync` within 1 s) | 291 s | −0.054 ppm | 14.7 µs |
 
-No gap, no xrun, no FF400 reset, jackd untouched at the pull and the replug.
+No gap, no xrun, no FF400 reset, jackd untouched at the pull and the replug. In 20 s windows
+the rate read +4.1 to +6.8 ppm pulled and −0.9 to +3.2 ppm after the relock (twelve windows;
+20 s is short against the stamp noise), so a lock verdict needs a longer window than 20 s.
 
 What it says:
 - **Both rigs follow the rubidium.** With both locked, the ratio between them is 1 : 1 within

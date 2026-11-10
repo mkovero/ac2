@@ -235,6 +235,9 @@ name, so the layout survives and says what is missing.
 
 ## 3. Remote inputs (N3, stage 3)
 
+The design is `remote-inputs.md` (reviewed 2026-11-10); this section is the earlier list it
+replaces, kept as the summary.
+
 A rig's session includes a mic or line input of another rig by subscribing to it: daemon A
 asks daemon B for channel `c` and B streams its capture of `c` to A. The reference is the
 session's `LoopbackRoute` on A's own device and is never remote (the loopback is a loopback
