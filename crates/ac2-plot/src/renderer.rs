@@ -100,6 +100,7 @@ enum Draw {
     Points { first: u32, end: u32, blend: Blend },
     Heatmap(HeatmapId),
     Skyline(SkylineId),
+    Glow(SkylineId),
     Text(usize),
 }
 
@@ -150,9 +151,7 @@ pub struct RenderShared {
     fill: wgpu::RenderPipeline,
     heatmap: wgpu::RenderPipeline,
     skyline_layouts: skyline::Layouts,
-    /// Spikes into the Rg8 spike target, and that target composited over the plot.
-    skyline_spikes: wgpu::RenderPipeline,
-    skyline_composite: wgpu::RenderPipeline,
+    skyline: SkylinePipelines,
     /// The same point shader under source-over and additive blending.
     points_alpha: wgpu::RenderPipeline,
     points_add: wgpu::RenderPipeline,
@@ -267,6 +266,18 @@ fn pipeline(
     })
 }
 
+/// The skyline's pipelines: spikes into the Rg8 spike target and that target composited
+/// over the plot (Max); the bloom source into its quarter-res target (Add), the two blur
+/// passes, and the bloom added over the plot.
+struct SkylinePipelines {
+    spikes: wgpu::RenderPipeline,
+    composite: wgpu::RenderPipeline,
+    bloom_source: wgpu::RenderPipeline,
+    blur_h: wgpu::RenderPipeline,
+    blur_v: wgpu::RenderPipeline,
+    glow: wgpu::RenderPipeline,
+}
+
 /// Max on colour and alpha, `One`/`One`: overlapping spikes keep the loudest level and the
 /// brightest light, never their sum, so a dense slab keeps its shape.
 const MAX: wgpu::BlendComponent = wgpu::BlendComponent {
@@ -282,19 +293,29 @@ fn skyline_pipelines(
     globals: &wgpu::BindGroupLayout,
     layouts: &skyline::Layouts,
     module: &wgpu::ShaderModule,
-) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
-    let make = |label, layout: &wgpu::BindGroupLayout, vs, fs, target, ms, mask| {
+) -> SkylinePipelines {
+    struct Spec<'a> {
+        label: &'a str,
+        layout: &'a wgpu::BindGroupLayout,
+        vs: &'a str,
+        fs: &'a str,
+        target: wgpu::TextureFormat,
+        multisample: wgpu::MultisampleState,
+        blend: Option<wgpu::BlendState>,
+        mask: wgpu::ColorWrites,
+    }
+    let make = |p: Spec<'_>| {
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some(label),
-            bind_group_layouts: &[Some(globals), Some(layout)],
+            label: Some(p.label),
+            bind_group_layouts: &[Some(globals), Some(p.layout)],
             immediate_size: 0,
         });
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some(label),
+            label: Some(p.label),
             layout: Some(&pl),
             vertex: wgpu::VertexState {
                 module,
-                entry_point: Some(vs),
+                entry_point: Some(p.vs),
                 compilation_options: Default::default(),
                 buffers: &[],
             },
@@ -303,44 +324,83 @@ fn skyline_pipelines(
                 ..Default::default()
             },
             depth_stencil: None,
-            multisample: ms,
+            multisample: p.multisample,
             fragment: Some(wgpu::FragmentState {
                 module,
-                entry_point: Some(fs),
+                entry_point: Some(p.fs),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: target,
-                    blend: Some(wgpu::BlendState {
-                        color: MAX,
-                        alpha: MAX,
-                    }),
-                    write_mask: mask,
+                    format: p.target,
+                    blend: p.blend,
+                    write_mask: p.mask,
                 })],
             }),
             multiview_mask: None,
             cache: None,
         })
     };
-    let spikes = make(
-        "ac2-plot skyline spikes",
-        &layouts.spike,
-        "vs_spike",
-        "fs_spike",
-        skyline::SPIKE_FORMAT,
-        wgpu::MultisampleState::default(),
-        wgpu::ColorWrites::RED | wgpu::ColorWrites::GREEN,
-    );
-    // Max of the field and the spike colour; the host target's alpha is left as it was.
-    let composite = make(
-        "ac2-plot skyline composite",
-        &layouts.composite,
-        "vs_comp",
-        "fs_comp",
-        format,
-        multisample,
-        wgpu::ColorWrites::COLOR,
-    );
-    (spikes, composite)
+    let max = Some(wgpu::BlendState {
+        color: MAX,
+        alpha: MAX,
+    });
+    let one = wgpu::MultisampleState::default();
+    let blur = |label, fs| Spec {
+        label,
+        layout: &layouts.bloom,
+        vs: "vs_full",
+        fs,
+        target: skyline::BLOOM_FORMAT,
+        multisample: one,
+        blend: None,
+        mask: wgpu::ColorWrites::ALL,
+    };
+    SkylinePipelines {
+        spikes: make(Spec {
+            label: "ac2-plot skyline spikes",
+            layout: &layouts.spike,
+            vs: "vs_spike",
+            fs: "fs_spike",
+            target: skyline::SPIKE_FORMAT,
+            multisample: one,
+            blend: max,
+            mask: wgpu::ColorWrites::RED | wgpu::ColorWrites::GREEN,
+        }),
+        // Max of the field and the spike colour; the host target's alpha is left as it was.
+        composite: make(Spec {
+            label: "ac2-plot skyline composite",
+            layout: &layouts.composite,
+            vs: "vs_comp",
+            fs: "fs_comp",
+            target: format,
+            multisample,
+            blend: max,
+            mask: wgpu::ColorWrites::COLOR,
+        }),
+        // Summed, not max: where many rows stand together the glow is denser.
+        bloom_source: make(Spec {
+            label: "ac2-plot skyline bloom source",
+            layout: &layouts.bloom_source,
+            vs: "vs_bloom",
+            fs: "fs_bloom",
+            target: skyline::BLOOM_FORMAT,
+            multisample: one,
+            blend: Some(ADDITIVE),
+            mask: wgpu::ColorWrites::COLOR,
+        }),
+        blur_h: make(blur("ac2-plot skyline blur across", "fs_blur_h")),
+        blur_v: make(blur("ac2-plot skyline blur down", "fs_blur_v")),
+        // Light added over the plot; the host target's alpha is left as it was.
+        glow: make(Spec {
+            label: "ac2-plot skyline glow",
+            layout: &layouts.bloom,
+            vs: "vs_comp",
+            fs: "fs_glow",
+            target: format,
+            multisample,
+            blend: Some(ADDITIVE),
+            mask: wgpu::ColorWrites::COLOR,
+        }),
+    }
 }
 
 const SEGMENT_ATTRS: [wgpu::VertexAttribute; 10] = wgpu::vertex_attr_array![
@@ -475,7 +535,7 @@ impl RenderShared {
             "ac2-plot skyline.wgsl",
             include_str!("shaders/skyline.wgsl"),
         );
-        let (skyline_spikes, skyline_composite) = skyline_pipelines(
+        let skyline = skyline_pipelines(
             device,
             format,
             multisample,
@@ -494,8 +554,7 @@ impl RenderShared {
             fill,
             heatmap,
             skyline_layouts,
-            skyline_spikes,
-            skyline_composite,
+            skyline,
             points_alpha,
             points_add,
             glyphs: glyphon::Cache::new(device),
@@ -565,9 +624,9 @@ impl Renderer {
 
     /// Converts `scene` to instances and uploads them, heatmap columns, skyline rows and
     /// text, and records the passes that draw into the renderer's own targets (a skyline's
-    /// spikes) into `encoder`, which the caller submits before the pass [`Self::paint`]
-    /// records into. Steady state reuses every CPU and GPU buffer; only growth or new
-    /// heatmaps and skylines allocate.
+    /// spikes, its bloom and the bloom's blur) into `encoder`, which the caller submits
+    /// before the pass [`Self::paint`] records into. Steady state reuses every CPU and GPU
+    /// buffer; only growth or new heatmaps and skylines allocate.
     pub fn prepare(
         &mut self,
         device: &wgpu::Device,
@@ -654,11 +713,14 @@ impl Renderer {
                     queue,
                     encoder,
                     &mut self.luts,
-                    (
-                        &self.shared.skyline_layouts,
-                        &self.shared.skyline_spikes,
-                        &self.globals_bg,
-                    ),
+                    skyline::Passes {
+                        layouts: &self.shared.skyline_layouts,
+                        spikes: &self.shared.skyline.spikes,
+                        bloom_source: &self.shared.skyline.bloom_source,
+                        blur_h: &self.shared.skyline.blur_h,
+                        blur_v: &self.shared.skyline.blur_v,
+                        globals: &self.globals_bg,
+                    },
                     sk,
                     xf.rect(&sk.rect),
                     clip,
@@ -749,6 +811,15 @@ impl Renderer {
                     &clip,
                     size,
                 );
+            }
+            for g in &layer.glows {
+                self.skylines.set_glow(queue, g.id, g.gain)?;
+                if let Some(scissor) = scissor_of(&clip_of(&g.clip), size) {
+                    self.cmds.push(Cmd {
+                        draw: Draw::Glow(g.id),
+                        scissor,
+                    });
+                }
             }
             let visible = |l: &&crate::scene::Label| {
                 !l.text.is_empty()
@@ -848,7 +919,16 @@ impl Renderer {
                     let Some(bg) = self.skylines.composite_bind_group(id) else {
                         continue;
                     };
-                    pass.set_pipeline(&self.shared.skyline_composite);
+                    pass.set_pipeline(&self.shared.skyline.composite);
+                    pass.set_bind_group(0, &self.globals_bg, &[]);
+                    pass.set_bind_group(1, bg, &[]);
+                    pass.draw(0..4, 0..1);
+                }
+                Draw::Glow(id) => {
+                    let Some(bg) = self.skylines.glow_bind_group(id) else {
+                        continue;
+                    };
+                    pass.set_pipeline(&self.shared.skyline.glow);
                     pass.set_bind_group(0, &self.globals_bg, &[]);
                     pass.set_bind_group(1, bg, &[]);
                     pass.draw(0..4, 0..1);

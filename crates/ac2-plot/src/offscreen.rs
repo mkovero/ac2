@@ -56,10 +56,16 @@ impl Gpu {
     /// is forced with `AC2_GPU_FALLBACK=1`. Limits are downlevel defaults so the renderer is
     /// exercised under the same limits as GL/llvmpipe and WARP.
     pub fn new() -> Result<Self, GpuError> {
-        pollster::block_on(Self::new_async())
+        pollster::block_on(Self::new_async(wgpu::Features::empty()))
     }
 
-    async fn new_async() -> Result<Self, GpuError> {
+    /// As [`Self::new`], with those of `wanted` the adapter has (e.g. timestamp queries for
+    /// a frame-cost bench); `device.features()` says which were granted.
+    pub fn with_features(wanted: wgpu::Features) -> Result<Self, GpuError> {
+        pollster::block_on(Self::new_async(wanted))
+    }
+
+    async fn new_async(wanted: wgpu::Features) -> Result<Self, GpuError> {
         let instance =
             wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
         let forced_fallback = std::env::var(FALLBACK_ENV).is_ok_and(|v| v == "1");
@@ -87,6 +93,7 @@ impl Gpu {
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("ac2-plot headless"),
+                required_features: adapter.features() & wanted,
                 required_limits: limits,
                 ..Default::default()
             })

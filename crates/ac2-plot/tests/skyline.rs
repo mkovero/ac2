@@ -1,5 +1,6 @@
 //! The 3D spectrograph's renderer: spike placement, max blending, coverage, upload by
-//! identity and the goldens.
+//! identity, the bloom and the goldens; with `AC2_SKYLINE_BENCH=1`, the frame cost per tier
+//! (`bench_frame_cost`).
 //!
 //! A test binary of its own so it runs alone against a chosen backend: CI runs it again with
 //! `WGPU_BACKEND=gl` (llvmpipe, the WebGL2-class limits a Pi's GLES gets), and the CM4 gate
@@ -12,12 +13,13 @@ mod common;
 use std::sync::Arc;
 
 use ac2_plot::{
-    Color, Colormap, FillRect, HeatmapColumn, Layer, Rect, Skyline3d, SkylineId, SkylineLook,
-    SkylineTier,
+    Color, Colormap, FillRect, HeatmapColumn, Layer, PrepareError, Rect, Skyline3d, SkylineGlow,
+    SkylineId, SkylineLook, SkylineTier,
 };
 use ac2_proto::model::layout::SpectrumCamera;
 use ac2_scene::spectrograph_3d::{
     self, FIELD, FLOOR_DEPTH, FLOOR_HALF_W, LITE_WIDTH_PX, LOOK, MAX_HEIGHT, Pose, ViewProj,
+    glow_gain,
 };
 use ac2_testkit::image::{Image, ImageTolerance};
 use common::{golden, gpu, render_on, renderer, scene};
@@ -54,6 +56,8 @@ struct Sky {
     range: [f32; 2],
     phase: f32,
     look: SkylineLook,
+    /// Adds the bloom, as the scene does for a tier that has it.
+    glow: bool,
 }
 
 impl Sky {
@@ -68,6 +72,7 @@ impl Sky {
             range: [-100.0, 0.0],
             phase: 1.0,
             look: LOOK,
+            glow: false,
         }
     }
 
@@ -104,6 +109,13 @@ impl Sky {
             });
         }
         l.skylines.push(self.primitive());
+        if self.glow && self.tier.bloom_taps().is_some() {
+            l.glows.push(SkylineGlow {
+                id: SkylineId(1),
+                clip: Some(Rect::new(0.0, 0.0, W, H)),
+                gain: glow_gain(self.colormap),
+            });
+        }
         scene(W, H, vec![l])
     }
 }
@@ -308,7 +320,8 @@ fn the_host_alpha_is_left_as_it_was() {
     let Some(gpu) = gpu("the_host_alpha_is_left_as_it_was") else {
         return;
     };
-    let s = Sky::new(16, 8, pink_room(16, 8));
+    let mut s = Sky::new(16, 8, pink_room(16, 8));
+    s.glow = true;
     let bg = Color::rgba(0.0, 0.0, 0.0, 0.5);
     let img = render_on(gpu, &mut renderer(gpu), &s.scene(false), 1.0, bg);
     let a = img.pixel(0, 0)[3];
@@ -333,6 +346,7 @@ fn ring_rows_follow_identity() {
     let (cols, rows) = (32, 16);
     let base = pink_room(cols, rows);
     let mut s = Sky::new(cols, rows, base.clone());
+    s.glow = true;
     render_on(gpu, &mut r, &s.scene(false), 1.0, Color::BLACK);
     let mut changed = base.clone();
     changed[3] = base[9].clone();
@@ -353,6 +367,7 @@ fn an_empty_ring_draws_nothing() {
     };
     let mut s = Sky::new(8, 4, vec![None; 4]);
     s.range = [-80.0, 0.0];
+    s.glow = true;
     let blank = render_on(gpu, &mut renderer(gpu), &s.scene(true), 1.0, Color::BLACK);
     // Every level at or below the range's bottom: no spike either.
     s.data = ring(vec![
@@ -379,6 +394,59 @@ fn an_empty_ring_draws_nothing() {
             }
         }
     }
+}
+
+#[test]
+fn the_glow_spreads_the_tips_light_and_only_adds() {
+    let Some(_) = gpu("the_glow_spreads_the_tips_light_and_only_adds") else {
+        return;
+    };
+    // One spike alone is under one LSB of bloom: the glow is of rows standing together.
+    let mut s = sky_for(SkylineTier::Full, tonal);
+    s.glow = false;
+    let sharp = draw(&s);
+    s.glow = true;
+    let glow = draw(&s);
+    let mut beside = 0;
+    for y in 0..H as u32 {
+        for x in 0..W as u32 {
+            let (a, b) = (sharp.pixel(x, y), glow.pixel(x, y));
+            assert!(
+                (0..3).all(|c| b[c] >= a[c].saturating_sub(1)),
+                "({x},{y}) darkened"
+            );
+            if !lit(a) && lit(b) {
+                beside += 1;
+            }
+        }
+    }
+    assert!(
+        beside > 50,
+        "the glow lights {beside} pixels the spikes leave dark"
+    );
+}
+
+#[test]
+fn no_glow_on_bare_and_a_glow_needs_its_skyline() {
+    let Some(gpu) = gpu("no_glow_on_bare_and_a_glow_needs_its_skyline") else {
+        return;
+    };
+    let mut s = sky_for(SkylineTier::Bare, pink_room);
+    s.glow = false;
+    let mut sc = s.scene(true);
+    sc.layers[0].glows.push(SkylineGlow {
+        id: SkylineId(1),
+        clip: None,
+        gain: 0.6,
+    });
+    let target = ac2_plot::FrameTarget::full([W as u32, H as u32], 1.0);
+    let mut r = renderer(gpu);
+    let mut enc = common::encoder(gpu);
+    let e = r.prepare(&gpu.device, &gpu.queue, &mut enc, &sc, &target);
+    assert!(matches!(e, Err(PrepareError::Skyline { .. })), "{e:?}");
+    sc.layers[0].skylines.clear();
+    let e = r.prepare(&gpu.device, &gpu.queue, &mut enc, &sc, &target);
+    assert!(matches!(e, Err(PrepareError::Skyline { .. })), "{e:?}");
 }
 
 /// Synthetic data for a ring of `cols` × `rows`.
@@ -491,6 +559,7 @@ fn sky_for(tier: SkylineTier, data: Ring) -> Sky {
     let mut s = Sky::new(cols, rows, data(cols, rows));
     s.tier = tier;
     s.phase = 0.4;
+    s.glow = true;
     if tier != SkylineTier::Full {
         s.look.width_px = LITE_WIDTH_PX;
     }
@@ -535,7 +604,8 @@ fn skyline_goldens() {
 
 /// Renders histories exported from the look emulator (`AC2_SKYLINE_PARITY=<dir>` holding
 /// `<case>.f32`: rows × 192 levels, newest first) at 960×540 from the emulator's cameras
-/// (default and tilted, eye 2.6 from the target), to set beside its pictures. Skipped
+/// (default and tilted, eye 2.6 from the target), Full tier with its bloom (without it when
+/// `AC2_SKYLINE_PARITY_NO_GLOW` is set), to set beside its pictures. Skipped
 /// without the variable: a tool for look work, not a check.
 #[test]
 fn parity_renders() {
@@ -546,6 +616,7 @@ fn parity_renders() {
         return;
     };
     let dir = std::path::PathBuf::from(dir);
+    let glow = std::env::var_os("AC2_SKYLINE_PARITY_NO_GLOW").is_none();
     let (w, h) = (960.0f32, 540.0f32);
     let aspect = f64::from(w / h);
     let cols = 192u32;
@@ -602,6 +673,13 @@ fn parity_renders() {
                     look: LOOK,
                     data: data.clone(),
                 });
+                if glow {
+                    l.glows.push(SkylineGlow {
+                        id: SkylineId(1),
+                        clip: Some(rect),
+                        gain: glow_gain(colormap),
+                    });
+                }
                 let img = render_on(
                     gpu,
                     &mut renderer(gpu),
@@ -614,4 +692,293 @@ fn parity_renders() {
             }
         }
     }
+}
+
+// ---- frame cost -------------------------------------------------------------------------
+
+/// Frame cost per tier on this machine's adapter, printed as a table: a 1920×1080 pane of
+/// the whole 3D view (fold, scene, labels, floor, spikes, bloom) over a 30 s history with
+/// every spike near full height (the fill worst case), at the default camera and at the
+/// clamp corners at the closest zoom (the worst of them reported). CPU is the frame's work
+/// up to the submit; GPU is timestamp queries around the frame's passes where the adapter
+/// has them, else the wall time from submit to idle. Run with `AC2_SKYLINE_BENCH=1` (and
+/// `--nocapture` to see the table); optimised builds give the meaningful CPU numbers.
+#[test]
+fn bench_frame_cost() {
+    use ac2_plot::{FrameTarget, Gpu, RenderShared, Renderer, offscreen::OFFSCREEN_FORMAT, wgpu};
+    use ac2_proto::GridDef;
+    use ac2_proto::frame::ValidityMask;
+    use ac2_proto::model::LevelScale;
+    use ac2_proto::units::{Hz, WallNs};
+    use ac2_scene::Viewport;
+    use ac2_scene::axis::Range;
+    use ac2_scene::banner::Status;
+    use ac2_scene::spectrograph::{SpectrographFrame, SpectrographHistory};
+    use ac2_scene::spectrograph_3d::{Skyline, Spectrograph3dInput, spectrograph_3d_scene};
+    use ac2_scene::theme::Theme;
+    use ac2_scene::view::ViewState;
+    use std::time::{Duration, Instant};
+
+    if std::env::var_os("AC2_SKYLINE_BENCH").is_none() {
+        return;
+    }
+    let gpu = Gpu::with_features(wgpu::Features::TIMESTAMP_QUERY).expect("adapter");
+    let stamps = gpu
+        .device
+        .features()
+        .contains(wgpu::Features::TIMESTAMP_QUERY);
+    println!(
+        "adapter: {}; GPU time by {}",
+        gpu.describe(),
+        if stamps {
+            "timestamp queries"
+        } else {
+            "wall time, submit to idle"
+        }
+    );
+    let (w, h) = (1920u32, 1080u32);
+    let shared = RenderShared::new(
+        &gpu.device,
+        OFFSCREEN_FORMAT,
+        wgpu::MultisampleState::default(),
+    );
+    let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("bench"),
+        size: wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: OFFSCREEN_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+    let queries = stamps.then(|| {
+        let set = gpu.device.create_query_set(&wgpu::QuerySetDescriptor {
+            label: Some("bench"),
+            ty: wgpu::QueryType::Timestamp,
+            count: 2,
+        });
+        let buf = |usage| {
+            gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("bench"),
+                size: 16,
+                usage,
+                mapped_at_creation: false,
+            })
+        };
+        (
+            set,
+            buf(wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC),
+            buf(wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST),
+        )
+    });
+    let period = f64::from(gpu.queue.get_timestamp_period());
+
+    let grid = GridDef::LogBins {
+        fs: Hz(48_000.0),
+        n: 65_536,
+        ppo: 96,
+    };
+    let (edges, grid_id) = (grid.edges(), grid.id());
+    const SLOT_NS: u64 = 1_000_000_000 / 30;
+    const T0: u64 = 1_000 * 1_000_000_000;
+    let mut seq = 0u64;
+    let mut push = |hist: &mut SpectrographHistory, slot: u64| {
+        seq += 1;
+        let level: Vec<f32> = (0..edges.len() as u32)
+            .map(|i| -1.0 + 0.5 * jitter(i, slot as u32, 7))
+            .collect();
+        hist.push(&SpectrographFrame {
+            seq,
+            at: WallNs(T0 + slot * SLOT_NS + SLOT_NS / 2),
+            grid: grid_id,
+            edges: &edges,
+            scale: LevelScale::Dbfs,
+            spec_level: None,
+            level: &level,
+            validity: None::<&[ValidityMask]>,
+        });
+    };
+    let freq = Range::new(20.0, 20_000.0);
+    let size = Viewport {
+        width: w as f32,
+        height: h as f32,
+    };
+    let median = |mut v: Vec<Duration>| {
+        v.sort();
+        v[v.len() / 2]
+    };
+    let ms = |d: Duration| d.as_secs_f64() * 1e3;
+    let warm = 5;
+    let frames: usize = std::env::var("AC2_SKYLINE_BENCH_FRAMES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(30);
+    let mut cams = vec![("default", SpectrumCamera::DEFAULT)];
+    let z = *SpectrumCamera::ZOOM_STEPS.end();
+    for yaw in [-SpectrumCamera::YAW_MAX_DEG, 0, SpectrumCamera::YAW_MAX_DEG] {
+        for pitch in [
+            *SpectrumCamera::PITCH_DEG.start(),
+            *SpectrumCamera::PITCH_DEG.end(),
+        ] {
+            cams.push((
+                "corner",
+                SpectrumCamera {
+                    yaw_deg: yaw,
+                    pitch_deg: pitch,
+                    zoom_step: z,
+                },
+            ));
+        }
+    }
+    println!("tier  camera                 CPU ms  GPU ms   (median of {frames} frames)");
+    for tier in [SkylineTier::Full, SkylineTier::Lite, SkylineTier::Bare] {
+        let mut hist = SpectrographHistory::new(30);
+        let mut slot = 0u64;
+        for _ in 0..hist.slots() {
+            push(&mut hist, slot);
+            slot += 1;
+        }
+        let mut sky = Skyline::default();
+        sky.update(&hist, freq, tier);
+        let mut r = Renderer::new(&gpu.device, &gpu.queue, &shared);
+        let mut worst: Option<(String, f64, f64)> = None;
+        for (name, cam) in &cams {
+            let (mut cpu, mut gpu_t) = (Vec::new(), Vec::new());
+            for i in 0..warm + frames {
+                let t0 = Instant::now();
+                push(&mut hist, slot);
+                slot += 1;
+                sky.update(&hist, freq, tier);
+                let input = Spectrograph3dInput {
+                    history: &hist,
+                    skyline: &sky,
+                    name: "Main L".into(),
+                    range: Range::new(-100.0, 0.0),
+                    offset_db: 0.0,
+                    freshness: None,
+                    colours: Colormap::Ice,
+                    camera: Pose::from(*cam),
+                    tier,
+                    tier_forced: false,
+                };
+                let sc = spectrograph_3d_scene(
+                    &[],
+                    &Status::default(),
+                    Some(&input),
+                    &ViewState::default(),
+                    &Theme::dark(),
+                    size,
+                )
+                .scene;
+                let mut enc = gpu
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+                let pass =
+                    |enc: &mut wgpu::CommandEncoder, load, index: (Option<u32>, Option<u32>)| {
+                        enc.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: Some("bench"),
+                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                                view: &view,
+                                depth_slice: None,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load,
+                                    store: wgpu::StoreOp::Store,
+                                },
+                            })],
+                            depth_stencil_attachment: None,
+                            timestamp_writes: queries.as_ref().map(|(set, _, _)| {
+                                wgpu::RenderPassTimestampWrites {
+                                    query_set: set,
+                                    beginning_of_pass_write_index: index.0,
+                                    end_of_pass_write_index: index.1,
+                                }
+                            }),
+                            occlusion_query_set: None,
+                            multiview_mask: None,
+                        })
+                        .forget_lifetime()
+                    };
+                drop(pass(
+                    &mut enc,
+                    wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    (Some(0), None),
+                ));
+                r.prepare(
+                    &gpu.device,
+                    &gpu.queue,
+                    &mut enc,
+                    &sc,
+                    &FrameTarget::full([w, h], 1.0),
+                )
+                .expect("prepare");
+                {
+                    let mut p = pass(&mut enc, wgpu::LoadOp::Load, (None, Some(1)));
+                    r.paint(&mut p).expect("paint");
+                }
+                if let Some((set, resolve, read)) = &queries {
+                    enc.resolve_query_set(set, 0..2, resolve, 0);
+                    enc.copy_buffer_to_buffer(resolve, 0, read, 0, 16);
+                }
+                gpu.queue.submit([enc.finish()]);
+                let t1 = Instant::now();
+                let wall = if let Some((_, _, read)) = &queries {
+                    read.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+                    gpu.device
+                        .poll(wgpu::PollType::wait_indefinitely())
+                        .expect("poll");
+                    let t = {
+                        let v = read.slice(..).get_mapped_range().expect("mapped");
+                        let t = stamps_of(&v);
+                        Duration::from_nanos((t[1].saturating_sub(t[0]) as f64 * period) as u64)
+                    };
+                    read.unmap();
+                    t
+                } else {
+                    gpu.device
+                        .poll(wgpu::PollType::wait_indefinitely())
+                        .expect("poll");
+                    t1.elapsed()
+                };
+                if i >= warm {
+                    cpu.push(t1 - t0);
+                    gpu_t.push(wall);
+                }
+            }
+            let (c, g) = (ms(median(cpu)), ms(median(gpu_t)));
+            let label = format!("{name} {}/{}/{}", cam.yaw_deg, cam.pitch_deg, cam.zoom_step);
+            if *name == "default" {
+                println!("{:5} {label:22} {c:6.2}  {g:6.2}", tier_name(tier));
+            } else if worst.as_ref().is_none_or(|w| g > w.2) {
+                worst = Some((label, c, g));
+            }
+        }
+        if let Some((label, c, g)) = worst {
+            println!(
+                "{:5} {:22} {c:6.2}  {g:6.2}",
+                tier_name(tier),
+                format!("worst {label}")
+            );
+        }
+    }
+}
+
+fn tier_name(t: SkylineTier) -> &'static str {
+    match t {
+        SkylineTier::Full => "Full",
+        SkylineTier::Lite => "Lite",
+        SkylineTier::Bare => "Bare",
+    }
+}
+
+/// The two timestamps of a mapped query result.
+fn stamps_of(b: &[u8]) -> [u64; 2] {
+    let at = |i: usize| u64::from_ne_bytes(b[i * 8..i * 8 + 8].try_into().expect("8 bytes"));
+    [at(0), at(1)]
 }
