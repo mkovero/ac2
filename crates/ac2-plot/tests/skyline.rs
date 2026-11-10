@@ -65,7 +65,7 @@ impl Sky {
             tier: SkylineTier::Full,
             colormap: Colormap::Ice,
             cam: SpectrumCamera::DEFAULT,
-            range: [-80.0, 0.0],
+            range: [-100.0, 0.0],
             phase: 1.0,
             look: LOOK,
         }
@@ -258,8 +258,9 @@ fn a_spike_narrower_than_a_pixel_dims_and_keeps_its_hue() {
     };
     let (t1, t4) = (total(&one), total(&thin));
     let ratio = t4[1] as f64 / t1[1] as f64;
+    // Light goes as the width plus the filter's half pixel: (0.4 + ½) / (1 + ½) = 0.6.
     assert!(
-        (0.25..0.6).contains(&ratio),
+        (0.45..0.75).contains(&ratio),
         "a 0.4 px spike gives {ratio:.2} of a 1 px one's light"
     );
     // Same level, same hue: the channels keep their proportions.
@@ -351,6 +352,7 @@ fn an_empty_ring_draws_nothing() {
         return;
     };
     let mut s = Sky::new(8, 4, vec![None; 4]);
+    s.range = [-80.0, 0.0];
     let blank = render_on(gpu, &mut renderer(gpu), &s.scene(true), 1.0, Color::BLACK);
     // Every level at or below the range's bottom: no spike either.
     s.data = ring(vec![
@@ -451,7 +453,8 @@ fn rta_pink(cols: u32, rows: u32) -> Vec<Option<HeatmapColumn>> {
     )
 }
 
-/// Three steady tones over a low noise floor, the middle one stopping half way back.
+/// Six tones over a low noise floor, each a few columns wide and swelling by ±6 dB over
+/// time, as the look emulator's tonal case: ridges, not walls.
 fn tonal(cols: u32, rows: u32) -> Vec<Option<HeatmapColumn>> {
     ring(
         (0..rows)
@@ -459,12 +462,20 @@ fn tonal(cols: u32, rows: u32) -> Vec<Option<HeatmapColumn>> {
                 (0..cols)
                     .map(|c| {
                         let f = freq(c, cols);
-                        let mut l = -72.0 + 3.0 * jitter(c, j, 3);
-                        let tone =
-                            |at: f32, level: f32| level + 60.0 * (gauss_oct(f, at, 0.02) - 1.0);
-                        l = l.max(tone(100.0, -12.0)).max(tone(5000.0, -30.0));
-                        if j < rows / 2 {
-                            l = l.max(tone(1000.0, -20.0));
+                        // Noise smoothed over four rows, about 2 dB rms.
+                        let noise: f32 = (0..4).map(|k| jitter(c, j + k, 3)).sum::<f32>() * 0.6;
+                        let mut l = -88.0 + noise;
+                        for (at, level) in [
+                            (250.0f32, -12.0f32),
+                            (630.0, -6.0),
+                            (1000.0, -3.0),
+                            (1600.0, -9.0),
+                            (3150.0, -18.0),
+                            (125.0, -24.0),
+                        ] {
+                            let k = (f / at).log2() * 19.0;
+                            let swell = 6.0 * (j as f32 / 9.0 + at).sin();
+                            l = l.max(level + swell - 3.0 * k * k);
                         }
                         l
                     })
@@ -513,11 +524,94 @@ fn skyline_goldens() {
         v.colormap = Colormap::Viridis;
         golden_of(&format!("skyline_{case}_viridis_full"), &v);
     }
-    // A level range narrowed around the noise turns the slab into terrain.
+    // A level range narrowed with its top kept at 0 turns the slab into terrain.
     let mut narrow = sky_for(SkylineTier::Full, pink_room);
-    narrow.range = [-45.0, 0.0];
+    narrow.range = [-60.0, 0.0];
     golden_of("skyline_pink_room_narrow", &narrow);
     let mut orbit = sky_for(SkylineTier::Full, pink_room);
     orbit.cam = camera(-35, 30);
     golden_of("skyline_pink_room_orbit", &orbit);
+}
+
+/// Renders histories exported from the look emulator (`AC2_SKYLINE_PARITY=<dir>` holding
+/// `<case>.f32`: rows × 192 levels, newest first) at 960×540 from the emulator's cameras
+/// (default and tilted, eye 2.6 from the target), to set beside its pictures. Skipped
+/// without the variable: a tool for look work, not a check.
+#[test]
+fn parity_renders() {
+    let Some(dir) = std::env::var_os("AC2_SKYLINE_PARITY") else {
+        return;
+    };
+    let Some(gpu) = gpu("parity_renders") else {
+        return;
+    };
+    let dir = std::path::PathBuf::from(dir);
+    let (w, h) = (960.0f32, 540.0f32);
+    let aspect = f64::from(w / h);
+    let cols = 192u32;
+    for (case, full, narrow) in [
+        ("pink-room", [-100.0, 0.0], [-60.0, 0.0]),
+        ("rta-pink", [-100.0, 0.0], [-45.0, -5.0]),
+        ("tonal", [-100.0, 0.0], [-100.0, 0.0]),
+    ] {
+        let bytes = std::fs::read(dir.join(format!("{case}.f32"))).expect("exported history");
+        let levels: Vec<f32> = bytes
+            .chunks_exact(4)
+            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .collect();
+        let rows = (levels.len() / cols as usize) as u32 + 1;
+        let mut data: Vec<Option<HeatmapColumn>> = levels
+            .chunks_exact(cols as usize)
+            .map(|r| Some(Arc::from(r)))
+            .collect();
+        data.push(None);
+        for (cname, yaw, pitch) in [("default", 0.0, 8.0), ("tilted", 25.0, 30.0)] {
+            let d0 = spectrograph_3d::fitted_distance(aspect);
+            let pose = Pose {
+                yaw_deg: yaw,
+                pitch_deg: pitch,
+                zoom_step: -spectrograph_3d::ZOOM_STEPS_PER_OCTAVE * (2.6 / d0).log2(),
+            };
+            let vp = spectrograph_3d::view_proj(pose, aspect);
+            for (vname, colormap, range) in [
+                ("ice", Colormap::Ice, full),
+                ("viridis", Colormap::Viridis, full),
+                ("ice_narrow", Colormap::Ice, narrow),
+            ] {
+                let rect = Rect::new(0.0, 0.0, w, h);
+                let mut l = Layer::default();
+                l.rects.push(FillRect {
+                    rect,
+                    color: FIELD,
+                    clip: None,
+                });
+                l.skylines.push(Skyline3d {
+                    id: SkylineId(1),
+                    rect,
+                    clip: Some(rect),
+                    cols,
+                    rows,
+                    newest: 0,
+                    phase: 1e-3,
+                    view_proj: vp.gpu(),
+                    eye: vp.eye.map(|v| v as f32),
+                    world: [FLOOR_HALF_W as f32, FLOOR_DEPTH as f32, MAX_HEIGHT as f32],
+                    range,
+                    colormap,
+                    tier: SkylineTier::Full,
+                    look: LOOK,
+                    data: data.clone(),
+                });
+                let img = render_on(
+                    gpu,
+                    &mut renderer(gpu),
+                    &scene(w, h, vec![l]),
+                    1.0,
+                    Color::BLACK,
+                );
+                img.save_png(&dir.join(format!("real_{case}_{cname}_{vname}.png")))
+                    .expect("written");
+            }
+        }
+    }
 }

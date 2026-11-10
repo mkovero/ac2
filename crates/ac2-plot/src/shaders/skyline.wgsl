@@ -12,6 +12,7 @@ struct Sky {
     // Plot rect and clip in the host target's physical pixels.
     rect: vec4<f32>,
     clip: vec4<f32>,
+    // The eye; w: the floor's nearest depth along the view (its nearest corner's clip w).
     eye: vec4<f32>,
     // Floor half width, depth, full height.
     world: vec4<f32>,
@@ -126,26 +127,33 @@ fn vs_spike(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) ->
     out.len = len;
     out.width = width;
     out.level = n;
+    // Depth fade from the floor's nearest point, not from the eye: the front row is at full
+    // light whatever the dolly, and only the depth the floor spans dims the back.
     out.light = (sky.level_floor + (1.0 - sky.level_floor) * n)
         * exp(-sky.age_fade * z / depth)
-        * exp(-sky.eye_fade * distance(sky.eye.xyz, foot));
+        * exp(-sky.eye_fade * max(f.z - sky.eye.w, 0.0));
     return out;
 }
 
 @fragment
 fn fs_spike(in: SpikeOut) -> @location(0) vec4<f32> {
-    // The pixel's share of the spike's width: a box filter across the axis.
-    let w = in.width * 0.5;
+    // The pixel's share of the spike's width, a box filter across the axis, with the spike a
+    // quarter pixel wider each side: a rasterizer lighting every pixel a spike touches
+    // (what the look was tuned on) lights about width + ½ pixels a row, and this keeps that
+    // light while staying smooth as the spike moves across pixels.
+    let w = in.width * 0.5 + 0.25;
     let cover = clamp(min(in.across + 0.5, w) - max(in.across - 0.5, -w), 0.0, 1.0);
     if (cover <= 0.0) {
         discard;
     }
     let t = clamp(in.along / max(in.len, 1e-4), 0.0, 1.0);
     var body = sky.foot + (1.0 - sky.foot) * pow(t, sky.body_pow);
+    // The tip cap is brighter than the body's top, and clips only after the light: a dim far
+    // or low spike still gets its bright tip.
     if (in.len - in.along <= sky.tip_px * sky.down) {
-        body = min(body * sky.tip_gain, 1.0);
+        body = sky.tip_gain;
     }
-    return vec4<f32>(in.level, sqrt(body * in.light * cover), 0.0, 0.0);
+    return vec4<f32>(in.level, sqrt(min(body * in.light, 1.0) * cover), 0.0, 0.0);
 }
 
 // ---- composite --------------------------------------------------------------------------

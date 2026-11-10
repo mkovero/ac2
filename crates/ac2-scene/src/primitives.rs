@@ -376,7 +376,7 @@ pub struct SkylineLook {
     /// Intensity of a spike at the bottom of the level range; 1 at the top.
     pub level_floor: f32,
     /// Brightness falls as `exp(-age_fade · age / depth)` with age along the floor and
-    /// `exp(-eye_fade · distance)` from the eye.
+    /// `exp(-eye_fade · depth)` with depth along the view beyond the floor's nearest point.
     pub age_fade: f32,
     pub eye_fade: f32,
     /// Spike width as a share of the projected column pitch, clamped to `width_px`

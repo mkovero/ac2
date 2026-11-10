@@ -317,7 +317,12 @@ impl Skylines {
             view_proj: s.view_proj,
             rect,
             clip,
-            eye: [s.eye[0], s.eye[1], s.eye[2], 0.0],
+            eye: [
+                s.eye[0],
+                s.eye[1],
+                s.eye[2],
+                nearest_depth(&s.view_proj, s.world),
+            ],
             world: [s.world[0], s.world[1], s.world[2], 0.0],
             range: s.range,
             phase: s.phase.clamp(0.0, 1.0),
@@ -460,6 +465,16 @@ fn write_rows(queue: &wgpu::Queue, texture: &wgpu::Texture, cols: u32, first: u3
             depth_or_array_layers: 1,
         },
     );
+}
+
+/// The floor's nearest depth along the view: the least clip `w` of its corners (`w` is linear
+/// in the point, so a corner holds the floor's least).
+fn nearest_depth(vp: &[[f32; 4]; 4], world: [f32; 3]) -> f32 {
+    let w = |x: f32, z: f32| vp[0][3] * x + vp[2][3] * z + vp[3][3];
+    let (hw, d) = (world[0], world[1]);
+    [w(-hw, 0.0), w(hw, 0.0), w(-hw, d), w(hw, d)]
+        .into_iter()
+        .fold(f32::INFINITY, f32::min)
 }
 
 #[cfg(test)]

@@ -411,7 +411,13 @@ stepped down once (a blanking stall) would stay degraded for months.
    - **Spike target encoding**: R the level, G `sqrt(brightness · coverage)` (more of the 8
      bits for the dim far rows); the composite reads R nearest (a filtered level is a level
      no spike has) and G bilinear, squared back. Coverage is a box filter across a fractional
-     width, the quad half a pixel wider each side: no snapping to whole pixels.
+     width a quarter pixel wider each side: no snapping to whole pixels, and about
+     width + ½ pixels of light a row, as the emulator's lit-every-touched-pixel spikes the
+     look was tuned on.
+   - **Read as the emulator does** (parity pass at 960×540 against `look.py` without bloom,
+     within ~10 % mean brightness): `d` in the depth fade is the depth along the view beyond
+     the floor's nearest corner, not the distance from the eye (that dimmed the front row to
+     ~40 %); the tip cap is 1.5× of the light and clips at 1 after it, not before.
    - **Floor band** under the spikes drawn in the base layer, before the composite.
    - **Fitted distance** fits every corner of the box (floor and top) in x and y, not only
      the floor's front corners: at high pitch the far top edge bound otherwise.
