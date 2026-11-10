@@ -95,7 +95,12 @@ impl Control {
     }
 
     pub(super) fn mic_input(&self, channel: u16, what: &str) -> Result<(), ProtoError> {
-        let kind = cal::input_kind(&self.store.state().inputs, channel);
+        let kind = if ac2_proto::model::remote_slot(channel).is_some() {
+            self.remote_input_kind(channel)
+                .unwrap_or_else(|| cal::input_kind(&[], channel))
+        } else {
+            cal::input_kind(&self.store.state().inputs, channel)
+        };
         if matches!(kind, InputKind::Mic { .. }) {
             return Ok(());
         }
@@ -178,6 +183,8 @@ impl Control {
 
     /// The open session's capture device, with `input` captured by it.
     fn cal_target(&self, input: u16) -> Result<ac2_proto::model::DeviceId, ProtoError> {
+        // A remote input's calibration is its own rig's: set there, read here.
+        self.not_remote(input)?;
         let n = nth(input);
         let Some(rt) = self.session.as_ref() else {
             return Err(perr(
@@ -793,6 +800,9 @@ impl Control {
         pairs: Vec<Pair>,
     ) -> Result<ReplyBody, ProtoError> {
         self.cal.check()?;
+        for r in &rows {
+            self.not_remote(r.channel)?;
+        }
         let st = self.store.state();
         for (i, r) in rows.iter().enumerate() {
             let n = nth(r.channel);

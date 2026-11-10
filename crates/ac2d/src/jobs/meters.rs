@@ -24,6 +24,8 @@ pub(crate) fn meter_period() -> Duration {
 
 pub(crate) struct SessionLevels {
     levels: LevelsMeter,
+    /// The remote inputs' meters, from the joined feed (its columns after the local ones).
+    remote: Option<LevelsMeter>,
     programme: Programme,
     config_rev: Rev,
     wall: u64,
@@ -35,6 +37,7 @@ impl SessionLevels {
     /// ahead of its slot a frame may go, so a wakeup just before a slot takes it.
     pub(crate) fn new(
         input_map: &[u16],
+        remote: &[u16],
         sample_rate: u32,
         config_rev: Rev,
         early: Duration,
@@ -46,6 +49,14 @@ impl SessionLevels {
                 input_map.to_vec(),
                 sample_rate,
             ),
+            remote: (!remote.is_empty()).then(|| {
+                let n = input_map.len();
+                LevelsMeter::new(
+                    (n..n + remote.len()).collect(),
+                    remote.to_vec(),
+                    sample_rate,
+                )
+            }),
             programme,
             config_rev,
             wall: 0,
@@ -57,6 +68,13 @@ impl SessionLevels {
         self.levels.push(b);
         self.programme.push(b);
         self.wall = b.wall_ns;
+    }
+
+    /// A block of the joined feed.
+    pub(crate) fn push_remote(&mut self, b: &Block) {
+        if let Some(r) = &mut self.remote {
+            r.push(b);
+        }
     }
 
     /// Publishes a frame if one is due.
@@ -79,13 +97,26 @@ impl SessionLevels {
             return;
         };
         let gonio = e.wants(Topic::SessionGonio);
-        let r = self.programme.take(gonio);
+        let mut r = self.programme.take(gonio);
+        let (mut channels, mut peak, mut rms, mut clip) = (meta.channels, peak, rms, clip);
+        // The programme meters run on the local inputs; a remote input's ballistic, true
+        // peak and maximum read its sample peak, the one figure its block statistics give.
+        if let Some(m) = self.remote.as_mut().and_then(LevelsMeter::take_meters) {
+            channels.extend(m.meta.channels);
+            r.ppm.extend(&m.peak);
+            r.true_peak.extend(&m.peak);
+            r.max.extend(&m.peak);
+            r.overs.extend(std::iter::repeat_n(0, m.peak.len()));
+            peak.extend(m.peak);
+            rms.extend(m.rms);
+            clip.extend(m.clip);
+        }
         if e.wants(Topic::SessionLevels) {
             e.send(
                 stamp,
                 FrameData::SessionLevels(SessionLevelsFrame {
                     meta: SessionLevelsMeta {
-                        channels: meta.channels,
+                        channels,
                         ballistic: r.ballistic,
                         pair_levels: r.pair_levels,
                         loudness: r.loudness,

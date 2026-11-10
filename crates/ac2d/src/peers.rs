@@ -14,13 +14,19 @@
 //!   nothing else went to it for [`KA_IDLE`]: a send is what tells the daemon a peer is
 //!   gone, since a send to a vanished connection fails `EHOSTUNREACH` (`ROUTER_MANDATORY`),
 //!   and a connection whose topics are quiet would otherwise never be sent anything.
+//! - **Audio** (`audio/<channel>`, served only to another rig's daemon) is a stream, not a
+//!   latest value: a frame waiting for credit queues behind the ones before it instead of
+//!   replacing them, up to the peer's window, the oldest dropped and counted past that.
+//!   Queued audio goes before the rotation, so a remote input's samples arrive in order and
+//!   on time while credit lasts. An app is never served audio, and a rig is served nothing
+//!   else.
 //! - **Lifecycle.** A peer is born with its first message. libzmq gives every connection a
 //!   routing id of its own, so a reconnect is a new peer, whose subscriptions bring
 //!   keyframes. A peer is dropped when a send to it fails `EHOSTUNREACH`, or when it holds
 //!   unacknowledged messages and has said nothing for [`STALLED_AFTER`]; one heard from
 //!   again after that is told to `rejoin`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -29,7 +35,7 @@ use ac2_proto::flow::{
     frame_charge,
 };
 use ac2_proto::{DataUp, FlowNotice, Subscription, Topic, decode_data_request, encode_notice};
-use ac2_zmq::{Error as ZmqError, Part, Socket};
+use ac2_zmq::{Error as ZmqError, Part, PublicKey, Socket};
 
 use crate::chain::{Chain, Encoded, Encodes, Slot};
 use crate::control::CurvePeer;
@@ -85,6 +91,20 @@ struct Peer {
     heard: Instant,
     /// When anything was last handed to libzmq for it.
     last_out: Option<Instant>,
+    /// The CURVE key it connected with; `None` on a local connection.
+    key: Option<PublicKey>,
+    /// Another rig's daemon: served audio and keepalives, nothing else.
+    rig: bool,
+    /// Audio frames waiting for credit, oldest first, and their charge.
+    audio: VecDeque<Rc<Vec<Part>>>,
+    audio_queued: u64,
+    /// Audio frames dropped because the queue was full.
+    audio_dropped: u64,
+}
+
+/// Charge of an audio frame on the wire.
+fn audio_charge(parts: &[Part]) -> u64 {
+    u64::from(frame_charge(parts.iter().map(|p| p.len()).sum()))
 }
 
 /// Sends `[rid][topic][body]` without blocking.
@@ -96,7 +116,7 @@ fn send(sock: &Socket, rid: &Part, parts: &[Part]) -> Result<(), ZmqError> {
 }
 
 impl Peer {
-    fn new(rid: &[u8], now: Instant) -> Result<Self, ZmqError> {
+    fn new(rid: &[u8], now: Instant, key: Option<PublicKey>, rig: bool) -> Result<Self, ZmqError> {
         Ok(Self {
             rid: Part::copy_from(rid)?,
             window: DATA_WINDOW_DEFAULT,
@@ -110,7 +130,71 @@ impl Peer {
             resync_owed: false,
             heard: now,
             last_out: None,
+            key,
+            rig,
+            audio: VecDeque::new(),
+            audio_queued: 0,
+            audio_dropped: 0,
         })
+    }
+
+    /// Queues an audio frame, dropping the oldest past the window, then sends what credit
+    /// allows.
+    fn audio(&mut self, sock: &Socket, frame: &Rc<Vec<Part>>) -> Result<(), Gone> {
+        let charge = audio_charge(frame);
+        while !self.audio.is_empty() && self.audio_queued + charge > u64::from(self.window) {
+            if let Some(old) = self.audio.pop_front() {
+                self.audio_queued -= audio_charge(&old);
+                self.audio_dropped += 1;
+                if self.audio_dropped.is_power_of_two() {
+                    tracing::warn!(
+                        "rig peer {} reads audio too slowly: {} frame(s) dropped",
+                        self.name(),
+                        self.audio_dropped
+                    );
+                }
+            }
+        }
+        self.audio.push_back(Rc::clone(frame));
+        self.audio_queued += charge;
+        self.flush_audio(sock)
+    }
+
+    /// Sends queued audio while credit lasts; a frame larger than the window goes alone.
+    fn flush_audio(&mut self, sock: &Socket) -> Result<(), Gone> {
+        while let Some(front) = self.audio.front() {
+            let charge = audio_charge(front);
+            if self.in_flight > 0 && self.in_flight + charge > u64::from(self.window) {
+                return Ok(());
+            }
+            let parts: Vec<&Part> = std::iter::once(&self.rid).chain(front.iter()).collect();
+            match sock.try_send_shared(&parts) {
+                Ok(()) => {
+                    self.in_flight += charge;
+                    self.last_out = Some(Instant::now());
+                }
+                Err(ZmqError::HostUnreachable) => return Err(Gone),
+                Err(ZmqError::WouldBlock) => {
+                    tracing::error!(
+                        "bug: data socket refused credited audio to peer {}",
+                        self.name()
+                    );
+                    return Ok(());
+                }
+                Err(e) => tracing::warn!("audio send to peer {}: {e}", self.name()),
+            }
+            self.audio_queued -= charge;
+            self.audio.pop_front();
+        }
+        Ok(())
+    }
+
+    /// Whether this peer may hold `sub`: audio only for a rig, everything else only for an
+    /// app; keepalives for both.
+    fn may_subscribe(&self, sub: &Subscription) -> bool {
+        let audio = matches!(sub, Subscription::Topic(Topic::Audio { .. }));
+        let ka = *sub == Subscription::Topic(Topic::Ka);
+        ka || audio == self.rig
     }
 
     fn wants(&self, t: &Topic) -> bool {
@@ -219,6 +303,7 @@ impl Peer {
         encodes: &mut Encodes,
         due: &mut Option<Instant>,
     ) -> Result<(), Gone> {
+        self.flush_audio(sock)?;
         let n = order.len();
         if self.blocked || n == 0 {
             return Ok(());
@@ -307,7 +392,8 @@ impl Peers {
         self.map.len()
     }
 
-    /// One message from a peer: `[routing id][request]`, from `client` when it passed CURVE.
+    /// One message from a peer: `[routing id][request]`, from `client` when it passed CURVE;
+    /// `is_rig` tells, for a new peer, whether its name was admitted as another rig.
     pub(crate) fn request(
         &mut self,
         sock: &Socket,
@@ -315,6 +401,7 @@ impl Peers {
         frames: Vec<Vec<u8>>,
         interest: &Interest,
         now: Instant,
+        is_rig: impl FnOnce(&str) -> bool,
     ) {
         let [rid, body] = frames.as_slice() else {
             tracing::warn!(
@@ -338,7 +425,8 @@ impl Peers {
         };
         let known = self.map.contains_key(rid.as_slice());
         if !known {
-            match Peer::new(rid, now) {
+            let rig = client.is_some_and(|c| is_rig(&c.name));
+            match Peer::new(rid, now, client.map(|c| c.key), rig) {
                 Ok(p) => {
                     tracing::debug!("data peer {} joined", hex(rid));
                     // Every peer is sent keepalives, whatever it subscribes to.
@@ -365,7 +453,19 @@ impl Peers {
                 p.blocked = false;
             }
             DataUp::Subscribe { sub } => {
-                if !p.subs.contains(&sub) {
+                if !p.may_subscribe(&sub) {
+                    let who = client.map_or("a local client", |c| c.name.as_str());
+                    if self
+                        .refusals
+                        .first(client.map(|c| c.key), "subscription not served")
+                    {
+                        tracing::warn!(
+                            "{who} may not subscribe {:?}: audio goes only to another rig, \
+                             and a rig is sent only audio (repeats at debug)",
+                            sub
+                        );
+                    }
+                } else if !p.subs.contains(&sub) {
                     tracing::debug!("peer {} subscribes {:?}", p.name(), sub);
                     subscribe(interest, &sub);
                     p.subs.push(sub);
@@ -388,7 +488,7 @@ impl Peers {
                 p.in_flight = p.in_flight.saturating_sub(u64::from(bytes));
                 p.events_out = p.events_out.saturating_sub(events);
                 p.blocked = false;
-                gone = p.flush_resync(sock).is_err();
+                gone = p.flush_resync(sock).is_err() || p.flush_audio(sock).is_err();
             }
         }
         if rejoin && !gone {
@@ -416,6 +516,46 @@ impl Peers {
         for rid in gone {
             self.drop_peer(&rid, interest, "its connection is gone");
         }
+    }
+
+    /// An audio frame, `[topic][header][samples]`, queued to every peer subscribed to it.
+    pub(crate) fn audio(
+        &mut self,
+        sock: &Socket,
+        topic: Topic,
+        parts: Vec<Part>,
+        interest: &Interest,
+    ) {
+        let frame = Rc::new(parts);
+        let gone: Vec<Vec<u8>> = self
+            .map
+            .iter_mut()
+            .filter(|(_, p)| p.rig && p.wants(&topic))
+            .filter_map(|(rid, p)| p.audio(sock, &frame).err().map(|_| rid.clone()))
+            .collect();
+        for rid in gone {
+            self.drop_peer(&rid, interest, "its connection is gone");
+        }
+    }
+
+    /// Drops every peer connected with `key`, whose authorization was just withdrawn: a
+    /// revoked rig must stop receiving audio now, not at its next handshake.
+    pub(crate) fn drop_key(&mut self, key: &PublicKey, interest: &Interest) {
+        let rids: Vec<Vec<u8>> = self
+            .map
+            .iter()
+            .filter(|(_, p)| p.key.as_ref() == Some(key))
+            .map(|(rid, _)| rid.clone())
+            .collect();
+        for rid in rids {
+            self.drop_peer(&rid, interest, "its key was revoked");
+        }
+    }
+
+    /// Audio frames dropped for slow readers, over every peer now connected.
+    #[cfg(test)]
+    pub(crate) fn audio_dropped(&self) -> u64 {
+        self.map.values().map(|p| p.audio_dropped).sum()
     }
 
     /// One send round over every peer. Returns when a frame held back by the shortest

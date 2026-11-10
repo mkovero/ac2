@@ -135,6 +135,8 @@ pub fn session(loopback: bool) -> SessionConfig {
             output: 0,
             input: 0,
         }),
+        remote_inputs: Vec::new(),
+        link_offset: None,
     }
 }
 

@@ -4,7 +4,7 @@
 use std::time::{Duration, Instant};
 
 use ac2_proto::Change;
-use ac2_proto::model::{Clocks, DeviceClock, SampleClock, SystemClock};
+use ac2_proto::model::{Clocks, DeviceClock, SampleClock, StampMap, SystemClock};
 use ac2_proto::units::SessionEpoch;
 
 use super::Control;
@@ -19,8 +19,9 @@ pub(super) const SYSTEM_EVERY: Duration = Duration::from_secs(5);
 pub(super) struct ClockWatch {
     system: SystemClock,
     next_system: Instant,
-    /// The newest reading of the capture clock, with the stream it is of.
-    sample: Option<(SessionEpoch, SampleClock)>,
+    /// The newest reading of the capture clock and its stamp map, with the stream they are
+    /// of.
+    sample: Option<(SessionEpoch, SampleClock, Option<StampMap>)>,
 }
 
 impl ClockWatch {
@@ -37,8 +38,13 @@ impl ClockWatch {
 
 impl Control {
     /// The fan-out of `epoch` measured the capture clock.
-    pub(super) fn sample_clock(&mut self, epoch: SessionEpoch, rate: SampleClock) {
-        self.clocks.sample = Some((epoch, rate));
+    pub(super) fn sample_clock(
+        &mut self,
+        epoch: SessionEpoch,
+        rate: SampleClock,
+        map: Option<StampMap>,
+    ) {
+        self.clocks.sample = Some((epoch, rate, map));
     }
 
     /// When the system clock is read next.
@@ -49,7 +55,7 @@ impl Control {
     /// Reads the system clock when due, and commits the clocks when they changed.
     pub(super) fn clocks_tick(&mut self, now: Instant) {
         if now >= self.clocks.next_system {
-            self.clocks.system = crate::sysclock::read();
+            self.clocks.system = self.s.system_clock.read();
             self.clocks.next_system = now + SYSTEM_EVERY;
         }
         let capture = self.session.as_ref().map(|r| DeviceClock {
@@ -58,7 +64,7 @@ impl Control {
                 SampleClock::Synthetic
             } else {
                 match self.clocks.sample {
-                    Some((e, rate)) if e == r.epoch => rate,
+                    Some((e, rate, _)) if e == r.epoch => rate,
                     _ => SampleClock::Measuring,
                 }
             },
@@ -66,6 +72,10 @@ impl Control {
         let c = Clocks {
             system: self.clocks.system,
             capture,
+            stamp_map: match (&self.session, self.clocks.sample) {
+                (Some(r), Some((e, _, map))) if e == r.epoch && r.open.replay.is_none() => map,
+                _ => None,
+            },
         };
         if self.store.state().clocks != c {
             self.commit(Change::Clocks(c));

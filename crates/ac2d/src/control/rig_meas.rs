@@ -168,6 +168,7 @@ impl Control {
             artnet_target: self.store.state().rig.artnet_target,
             artnet_fade: self.store.state().rig.artnet_fade,
             levels: self.store.state().rig.levels,
+            peers: self.store.state().remote.peers.clone(),
         }
     }
 
@@ -300,6 +301,7 @@ impl Control {
             traces: Vec::new(),
             walks: Vec::new(),
             plans: Vec::new(),
+            remote_inputs: Vec::new(),
         };
         // The logs a load would refuse are not read back; the meters start new ones.
         let mut grids = match super::files::check_session(&data) {
@@ -356,6 +358,7 @@ impl Control {
             traces: Vec::new(),
             walks: Vec::new(),
             plans: Vec::new(),
+            remote_inputs: Vec::new(),
         };
         let fp = (
             self.rig_saved(),

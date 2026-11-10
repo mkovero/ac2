@@ -62,6 +62,7 @@ mod osc;
 mod owners;
 mod recording;
 mod recovery;
+mod remote;
 mod request;
 pub(crate) mod rig;
 mod rig_meas;
@@ -79,6 +80,7 @@ mod working;
 
 pub(crate) use artnet::check_addr as check_artnet_addr;
 pub(crate) use osc::{Judged, has_cue};
+pub(crate) use remote::check_peers;
 pub(crate) use validate::validate_meas;
 use validate::{
     MAX_CAL_UNSETTLED_DB, MAX_DELAY_S, check_delay, check_find, delay_samples, gen_err,
@@ -126,7 +128,10 @@ pub(crate) enum ControlMsg {
     SampleClock {
         epoch: SessionEpoch,
         rate: ac2_proto::model::SampleClock,
+        stamp_map: Option<ac2_proto::model::StampMap>,
     },
+    /// A link to another rig, or the joined feed, reports.
+    Remote(crate::remote::RemoteMsg),
     /// The timing monitor of `epoch` changed state.
     Timing {
         epoch: SessionEpoch,
@@ -265,6 +270,7 @@ pub(crate) struct Setup {
     pub(crate) plan_dir: Option<std::path::PathBuf>,
     /// Local time of day for the band meters' day and night limits.
     pub(crate) local_clock: crate::config::LocalClock,
+    pub(crate) system_clock: crate::config::SystemClockSource,
     pub(crate) systemd_notify: bool,
     /// State files found damaged before the control thread started (the server keys).
     pub(crate) damaged: Vec<crate::damage::Damage>,
@@ -429,6 +435,8 @@ pub(crate) struct Control {
     file_jobs: file_jobs::FileJobs,
     /// The room simulation running and the fit kept for later runs.
     sims: sim::Sims,
+    /// The links to the paired rigs and what they report.
+    remote: remote::RemoteCtl,
 }
 
 /// The stimulus output: who may drive it, its gate, level and source, and the ceiling.
@@ -534,7 +542,6 @@ impl Control {
                 saved_at: None,
                 log_failures: Vec::new(),
             });
-        let store_system = store.state().clocks.system;
         let dedup = Dedup::new(s.dedup);
         let rigm = rig_meas::RigMeas::new(&saved, s.rig_logs.as_deref());
         Self {
@@ -567,7 +574,7 @@ impl Control {
             pending_finds: HashMap::new(),
             next_token: 1,
             next_ka: Instant::now(),
-            clocks: clocks::ClockWatch::new(store_system),
+            clocks: clocks::ClockWatch::new(s.system_clock.read()),
             refusals: crate::refusals::Refusals::default(),
             damaged,
             notify: if s.systemd_notify {
@@ -593,6 +600,7 @@ impl Control {
             transfers: transfer::Transfers::default(),
             file_jobs: file_jobs::FileJobs::default(),
             sims: sim::Sims::default(),
+            remote: remote::RemoteCtl::new(saved.peers.clone()),
             rig: RigState {
                 settings: rig,
                 meas: rigm,
@@ -608,6 +616,7 @@ impl Control {
         self.sync_levels_policy();
         self.load_rig_meas();
         self.start_autosave();
+        self.remote_start();
         self.start_rig_monitor();
         self.recover_recordings();
         self.publish_damage();
@@ -653,6 +662,7 @@ impl Control {
             }
             self.rig_tick(now);
             self.clocks_tick(now);
+            self.remote_sync();
             if self.preview.as_ref().is_some_and(|p| p.deadline <= now) {
                 tracing::info!("preview not renewed: closing it");
                 self.close_preview();
@@ -719,7 +729,12 @@ impl Control {
                 }) => self.audio_stopped(epoch, since, cause),
                 Ok(ControlMsg::Reopened { token, result }) => self.reopened(token, *result),
                 Ok(ControlMsg::Probed { token, presence }) => self.probed(token, presence),
-                Ok(ControlMsg::SampleClock { epoch, rate }) => self.sample_clock(epoch, rate),
+                Ok(ControlMsg::SampleClock {
+                    epoch,
+                    rate,
+                    stamp_map,
+                }) => self.sample_clock(epoch, rate, stamp_map),
+                Ok(ControlMsg::Remote(m)) => self.remote_msg(m),
                 Ok(ControlMsg::Timing { epoch, status }) => {
                     if self.session.as_ref().is_some_and(|r| r.epoch == epoch)
                         && self.store.state().timing != status

@@ -106,6 +106,11 @@ impl Control {
             Command::ServerInfo => Ok(ReplyBody::Server(self.server_info())),
             Command::ServerAuthorize { name, key } => self.server_authorize(client, &name, &key),
             Command::ServerRevoke { name } => self.server_revoke(client, &name),
+            Command::AuthAdmitRig { key, rig_id, name } => {
+                self.admit_rig(client, &name, &key, rig_id)
+            }
+            Command::RigPeers { peers } => self.set_rig_peers(peers),
+            Command::SourceState => Ok(ReplyBody::SourceState(Box::new(self.source_state()))),
             Command::RigMonitorStart { base, on } => self.rig_monitor_start(base, on),
             Command::OscTarget { base, addr } => self.osc_target(base, addr),
             Command::OscTest { msg } => self.osc_test(&msg),

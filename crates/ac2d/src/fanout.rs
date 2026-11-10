@@ -30,6 +30,8 @@ use crate::control::ControlMsg;
 use crate::jobs::meters::{SessionLevels, meter_period};
 use crate::jobs::programme::Programme;
 use crate::jobs::{Emitter, JobEnv, JobMsg};
+use crate::remote::join::Joiner;
+use crate::remote::tap::SourceTap;
 use crate::util::wall_ns;
 
 /// Sum of squares and peak magnitude of one channel of one block.
@@ -52,6 +54,11 @@ pub(crate) struct Block {
     /// The backend's host-clock stamp of the block: when its first frame was sampled where
     /// the backend estimates it, else when its callback ran.
     pub(crate) host_ns: u64,
+    /// `host_ns` is the backend's capture stamp, not the callback's time.
+    pub(crate) capture_stamp: bool,
+    /// A remote input's audio slipped by this many samples at this block (the joined feed,
+    /// `crate::remote::join`); 0 elsewhere.
+    pub(crate) slip: i64,
     /// Interleaved samples.
     pub(crate) data: Vec<f32>,
     /// Per block channel.
@@ -76,6 +83,8 @@ impl Block {
             flags,
             wall_ns,
             host_ns: wall_ns,
+            capture_stamp: false,
+            slip: 0,
             data,
             stats: Vec::new(),
         };
@@ -95,7 +104,7 @@ impl Block {
     }
 
     /// One pass over the interleaved samples, all channels at once.
-    fn compute_stats(&mut self) {
+    pub(crate) fn compute_stats(&mut self) {
         let n = usize::from(self.channels).max(1);
         self.stats.clear();
         self.stats.resize(n, ChanStats::default());
@@ -166,6 +175,8 @@ pub(crate) fn pop_block_into(stream: &mut DuplexStream, reuse: Option<Block>) ->
             flags: BlockFlags::NONE,
             wall_ns: 0,
             host_ns: 0,
+            capture_stamp: false,
+            slip: 0,
             data: Vec::with_capacity(a.len() + b.len()),
             stats: Vec::new(),
         });
@@ -175,6 +186,8 @@ pub(crate) fn pop_block_into(stream: &mut DuplexStream, reuse: Option<Block>) ->
         block.flags = h.flags;
         block.wall_ns = wall_ns();
         block.host_ns = h.capture_ns.unwrap_or(h.callback_ns);
+        block.capture_stamp = h.capture_ns.is_some();
+        block.slip = 0;
         block.data.clear();
         block.data.extend_from_slice(a);
         block.data.extend_from_slice(b);
@@ -210,6 +223,12 @@ pub(crate) struct JobFeed {
 
 pub(crate) enum FanoutMsg {
     Attach(u64, JobFeed),
+    /// A job reading a remote input: it is fed the joined feed.
+    AttachJoined(u64, JobFeed),
+    /// Serve the captured channels to other rigs (`None`: stop).
+    Tap(Option<Box<SourceTap>>),
+    /// Join the remote inputs into the session's blocks (`None`: no remote input).
+    Join(Option<Box<Joiner>>),
     /// Run this once every message sent before it is handled.
     Then(Box<dyn FnOnce() + Send>),
     Detach(u64),
@@ -218,6 +237,8 @@ pub(crate) enum FanoutMsg {
     Levels {
         env: JobEnv,
         input_map: Vec<u16>,
+        /// Session channels of the remote inputs, metered from the joined feed.
+        remote: Vec<u16>,
         config_rev: Rev,
         programme: Box<Programme>,
     },
@@ -359,6 +380,7 @@ impl Fanout {
             rate,
             sample_rate: n.sample_rate,
             handoff: handoff_period(fps, block_period),
+            block_period,
             lossless: lossless.then(|| u64::from(n.buffer_frames.unwrap_or(4096).max(1))),
             stall_after: stall_after(n.delivery, block_period),
         };
@@ -391,6 +413,18 @@ impl Fanout {
         self.send(FanoutMsg::Attach(id, feed));
     }
 
+    pub(crate) fn attach_joined(&self, id: u64, feed: JobFeed) {
+        self.send(FanoutMsg::AttachJoined(id, feed));
+    }
+
+    pub(crate) fn tap(&self, tap: Option<SourceTap>) {
+        self.send(FanoutMsg::Tap(tap.map(Box::new)));
+    }
+
+    pub(crate) fn join(&self, joiner: Option<Joiner>) {
+        self.send(FanoutMsg::Join(joiner.map(Box::new)));
+    }
+
     pub(crate) fn detach(&self, id: u64) {
         self.send(FanoutMsg::Detach(id));
     }
@@ -406,12 +440,14 @@ impl Fanout {
         &self,
         env: JobEnv,
         input_map: Vec<u16>,
+        remote: Vec<u16>,
         config_rev: Rev,
         programme: Programme,
     ) {
         self.send(FanoutMsg::Levels {
             env,
             input_map,
+            remote,
             config_rev,
             programme: Box::new(programme),
         });
@@ -466,6 +502,8 @@ struct Config {
     rate: f64,
     sample_rate: u32,
     handoff: Duration,
+    /// The device period, when the backend states one.
+    block_period: Option<Duration>,
     /// Lossless: the largest block the stream delivers, frames.
     lossless: Option<u64>,
     /// No block for this long means the stream stopped ([`stall_after`]).
@@ -527,6 +565,9 @@ fn run(
     mut bursts: BurstDetector,
 ) {
     let mut jobs: BTreeMap<u64, JobFeed> = BTreeMap::new();
+    let mut joined_jobs: BTreeMap<u64, JobFeed> = BTreeMap::new();
+    let mut tap: Option<Box<SourceTap>> = None;
+    let mut joiner: Option<Box<Joiner>> = None;
     let mut ms: Vec<(f64, f64)> = vec![(0.0, 0.0); meters.ms.len()];
     let mut levels: Option<(SessionLevels, Emitter)> = None;
     let mut gaps = Discontinuities::default();
@@ -553,19 +594,27 @@ fn run(
                 FanoutMsg::Attach(id, feed) => {
                     jobs.insert(id, feed);
                 }
+                FanoutMsg::AttachJoined(id, feed) => {
+                    joined_jobs.insert(id, feed);
+                }
+                FanoutMsg::Tap(t) => tap = t,
+                FanoutMsg::Join(j) => joiner = j,
                 FanoutMsg::Detach(id) => {
                     jobs.remove(&id);
+                    joined_jobs.remove(&id);
                 }
                 FanoutMsg::Then(f) => f(),
                 FanoutMsg::Levels {
                     env,
                     input_map,
+                    remote,
                     config_rev,
                     programme,
                 } => match Emitter::connect(env) {
                     Ok(em) => {
                         let l = SessionLevels::new(
                             &input_map,
+                            &remote,
                             cfg.sample_rate,
                             config_rev,
                             meter_early,
@@ -583,11 +632,17 @@ fn run(
             }
         }
         let now = Instant::now();
-        next += cfg.handoff;
+        // Audio for another rig, and a remote input waiting on this rig's blocks, each add
+        // a hand-off to the latency: they go every device period instead.
+        let handoff = match cfg.block_period {
+            Some(p) if joiner.is_some() || tap.as_ref().is_some_and(|t| t.active()) => p,
+            _ => cfg.handoff,
+        };
+        next += handoff;
         if next <= now {
             // Overslept (a loaded machine): start a new schedule rather than catching up
             // with a run of back-to-back hand-offs.
-            next = now + cfg.handoff;
+            next = now + handoff;
         }
 
         pool.reclaim();
@@ -649,6 +704,7 @@ fn run(
                 let _ = to_control.send(ControlMsg::SampleClock {
                     epoch: cfg.epoch,
                     rate: w.reading(),
+                    stamp_map: w.stamp_line().map(crate::conv::stamp_map),
                 });
             }
         }
@@ -659,28 +715,29 @@ fn run(
                 l.push(block);
             }
         }
+        if let Some(t) = &mut tap
+            && t.active()
+        {
+            batch.iter().for_each(|b| t.send(b));
+        }
+        if let Some(j) = &mut joiner {
+            let line = clock.as_ref().and_then(|(w, _)| w.stamp_line());
+            let joined = j.push(&batch, line, now);
+            for b in &joined {
+                if let Some((l, _)) = &mut levels {
+                    l.push_remote(b);
+                }
+            }
+            let n: u64 = joined.iter().map(|b| u64::from(b.frames)).sum();
+            if !joined.is_empty() {
+                deliver(&mut joined_jobs, &Arc::new(joined), n, queue_limit);
+            }
+        }
         if batch.is_empty() || jobs.is_empty() {
             pool.give_back(batch);
         } else {
             let batch: Batch = Arc::new(batch);
-            jobs.retain(|id, feed| {
-                let q = feed.queue.frames.load(Ordering::Acquire);
-                if q > 0 && q + frames > consumer_limit(&feed.queue, queue_limit) {
-                    // The job is behind; it sees the gap and restarts.
-                    return true;
-                }
-                let queued = feed.queue.frames.fetch_add(frames, Ordering::SeqCst) + frames;
-                if feed.tx.send(JobMsg::Blocks(Arc::clone(&batch))).is_ok() {
-                    let wake_at = feed.queue.wake_at.load(Ordering::SeqCst);
-                    if wake_at != 0 && queued >= wake_at {
-                        feed.thread.unpark();
-                    }
-                    true
-                } else {
-                    tracing::debug!("job {id} detached");
-                    false
-                }
-            });
+            deliver(&mut jobs, &batch, frames, queue_limit);
             pool.hand_out(batch);
         }
         if let Some((l, em)) = &mut levels {
@@ -729,6 +786,28 @@ fn run(
             });
         }
     }
+}
+
+/// Hands `batch` (`frames` long) to every job with room for it; drops the jobs gone.
+fn deliver(jobs: &mut BTreeMap<u64, JobFeed>, batch: &Batch, frames: u64, queue_limit: u64) {
+    jobs.retain(|id, feed| {
+        let q = feed.queue.frames.load(Ordering::Acquire);
+        if q > 0 && q + frames > consumer_limit(&feed.queue, queue_limit) {
+            // The job is behind; it sees the gap and restarts.
+            return true;
+        }
+        let queued = feed.queue.frames.fetch_add(frames, Ordering::SeqCst) + frames;
+        if feed.tx.send(JobMsg::Blocks(Arc::clone(batch))).is_ok() {
+            let wake_at = feed.queue.wake_at.load(Ordering::SeqCst);
+            if wake_at != 0 && queued >= wake_at {
+                feed.thread.unpark();
+            }
+            true
+        } else {
+            tracing::debug!("job {id} detached");
+            false
+        }
+    });
 }
 
 /// Frames `queue`'s consumer may have queued.

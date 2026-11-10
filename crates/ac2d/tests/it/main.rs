@@ -31,6 +31,7 @@ mod power_cut;
 mod publish;
 mod recording;
 mod recovery;
+mod remote_inputs;
 mod remote_stimulus;
 mod rig_file;
 mod rig_meas;

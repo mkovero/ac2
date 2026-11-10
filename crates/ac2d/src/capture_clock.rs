@@ -9,6 +9,7 @@
 use std::sync::Arc;
 
 use ac2_audio::StampClock;
+use ac2_core::clock_map::{MapWindow, StampLine};
 use ac2_core::clock_rate::{ClockRate, RateWindow};
 use ac2_proto::model::{ClockBasis, SampleClock};
 use ac2_proto::units::Seconds;
@@ -26,7 +27,13 @@ const NS_PER_S: f64 = 1e9;
 pub(crate) struct CaptureClock {
     audio: RateWindow,
     stamps: Option<(Arc<dyn StampClock>, RateWindow)>,
+    /// The stamp clock against the system clock (`CLOCK_REALTIME`), the time two hosts
+    /// share: another rig puts this rig's capture stamps on it.
+    system: MapWindow,
 }
+
+/// The system map is given once its pairs span this much.
+const MAP_MIN_SPAN_S: f64 = 2.0;
 
 impl CaptureClock {
     /// For a stream at `rate` Hz whose stamp clock is `stamps` (`None`: it cannot be read
@@ -35,6 +42,7 @@ impl CaptureClock {
         Self {
             audio: RateWindow::new(rate, WINDOW_S, STEP_S),
             stamps: stamps.map(|c| (c, RateWindow::new(NS_PER_S, WINDOW_S, PAIR_STEP_S))),
+            system: MapWindow::new(WINDOW_S, PAIR_STEP_S, MAP_MIN_SPAN_S),
         }
     }
 
@@ -46,11 +54,19 @@ impl CaptureClock {
     /// Reads the stamp clock beside the disciplined one (the window keeps one pair per
     /// step, so this is called freely).
     pub(crate) fn pair(&mut self) {
-        if let Some((clock, w)) = &mut self.stamps
-            && let Some(p) = clock.pair()
-        {
-            w.push(p.disciplined_ns, p.stamp_ns, false);
+        if let Some((clock, w)) = &mut self.stamps {
+            if let Some(p) = clock.pair() {
+                w.push(p.disciplined_ns, p.stamp_ns, false);
+            }
+            if let Some(p) = clock.system_pair() {
+                self.system.push(p.stamp_ns, p.system_ns);
+            }
         }
+    }
+
+    /// The stamp clock on the system clock, once fitted.
+    pub(crate) fn stamp_line(&self) -> Option<StampLine> {
+        self.system.line()
     }
 
     /// The reading now.

@@ -26,7 +26,9 @@ use ac2_zmq::{Error as ZmqError, Message, Part, PollItem, SecureContext, Socket,
 
 use crate::chain::Slot;
 use crate::control::{ControlMsg, CurvePeer};
-use crate::outbox::{FrameRx, TAG_CLEAR, TAG_EVENT, TAG_FRAME, TAG_KA, TAG_REPLY, TAG_STOP};
+use crate::outbox::{
+    FrameRx, TAG_AUDIO, TAG_CLEAR, TAG_EVENT, TAG_FRAME, TAG_KA, TAG_REPLY, TAG_REVOKE, TAG_STOP,
+};
 use crate::peers::{Outside, Peers};
 
 /// Topics with at least one subscriber, shared with jobs that compute optional derivations
@@ -42,6 +44,15 @@ impl Interest {
             .unwrap_or_else(PoisonError::into_inner)
             .keys()
             .any(|p| topic.starts_with(p))
+    }
+
+    /// Whether any subscription lies under `prefix` (`audio/`: is any channel streamed).
+    pub(crate) fn any_under(&self, prefix: &[u8]) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .keys()
+            .any(|p| p.starts_with(prefix))
     }
 
     pub(crate) fn add(&self, prefix: &[u8]) {
@@ -243,7 +254,19 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
                                 name: name.to_owned(),
                                 key,
                             });
-                        peers.request(data, client.as_ref(), m.into_frames(), interest, now);
+                        let is_rig = |name: &str| {
+                            secure
+                                .as_ref()
+                                .is_some_and(|sc| sc.authorized().rig_of(name).is_some())
+                        };
+                        peers.request(
+                            data,
+                            client.as_ref(),
+                            m.into_frames(),
+                            interest,
+                            now,
+                            is_rig,
+                        );
                     }
                     Ok(None) => break,
                     Err(e) => {
@@ -303,6 +326,21 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
                     }
                     // The frames themselves wait in the channel, drained below.
                     TAG_FRAME => {}
+                    TAG_AUDIO => {
+                        if let Some((_, data)) = &net
+                            && msg.len() == 3
+                            && let Ok(topic) = Topic::parse(&msg[0])
+                        {
+                            peers.audio(data, topic, msg, interest);
+                        }
+                    }
+                    TAG_REVOKE => {
+                        if let [key] = msg.as_slice()
+                            && let Ok(k) = <[u8; 32]>::try_from(&key[..])
+                        {
+                            peers.drop_key(&ac2_zmq::PublicKey::from_bytes(k), interest);
+                        }
+                    }
                     TAG_CLEAR => {
                         if let [prefix] = msg.as_slice() {
                             // Frames queued before the clear go first, as they were sent.

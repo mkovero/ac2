@@ -17,6 +17,7 @@
 
 mod file;
 mod v1;
+mod v10;
 mod v2;
 mod v3;
 mod v4;
@@ -32,7 +33,7 @@ use std::path::{Path, PathBuf};
 
 use ac2_proto::model::{
     ArtnetFade, ArtnetTarget, ColourFamily, LevelsSettings, MeasConfig, Measurement, OutputSetup,
-    PaneLayout, SessionConfig, StateFile,
+    PaneLayout, RigPeer, SessionConfig, StateFile,
 };
 use ac2_proto::units::{Db, MeasId};
 use ac2_proto::{ErrorCode, ProtoError};
@@ -104,6 +105,8 @@ pub(crate) struct RigSettings {
     pub(crate) artnet_fade: ArtnetFade,
     /// The programme meters: ballistic, correlation window, over threshold, gate.
     pub(crate) levels: LevelsSettings,
+    /// The rigs this one may take audio from (`rig.peers`).
+    pub(crate) peers: Vec<RigPeer>,
 }
 
 /// Where the rig settings live.

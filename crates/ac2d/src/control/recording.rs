@@ -152,6 +152,12 @@ impl Control {
                     format!("input {} listed twice", input + 1),
                 ));
             }
+            if ac2_proto::model::remote_slot(input).is_some() {
+                return Err(perr(
+                    ErrorCode::Refused,
+                    "a remote input is not recorded yet: record it on its own rig",
+                ));
+            }
             cols.push(block_index(&rt.input_map, input).ok_or_else(|| {
                 perr(
                     ErrorCode::Invalid,
@@ -629,6 +635,8 @@ impl Control {
             sample_rate_hz: Some(s.audio.sample_rate),
             buffer_frames: Some(block),
             loopback: None,
+            remote_inputs: Vec::new(),
+            link_offset: None,
         };
         let replay = ReplayInfo {
             name: name.clone(),

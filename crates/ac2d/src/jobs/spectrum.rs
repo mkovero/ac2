@@ -477,7 +477,7 @@ impl Analysis for Spectrum {
     fn push(&mut self, b: &Block) {
         self.applied_at.get_or_insert(b.start_sample);
         if self.end.is_some_and(|e| e != b.start_sample)
-            || (self.end.is_some() && b.flags.breaks_continuity())
+            || (self.end.is_some() && b.flags.restarts_averages())
         {
             self.reset_average();
         }

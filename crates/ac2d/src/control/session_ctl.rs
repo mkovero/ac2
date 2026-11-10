@@ -42,6 +42,7 @@ impl Control {
         replay: Option<ac2_proto::model::ReplayInfo>,
     ) -> Result<Session, ProtoError> {
         session::validate(&config)?;
+        self.check_remote_inputs(&config)?;
         let backend = self.backend_for(config.backend)?;
         // The preview may hold the very device the session is about to open.
         self.close_preview();
@@ -98,6 +99,7 @@ impl Control {
         if let Some(rt) = &self.session {
             rt.gen_handle.set_max_level(self.s.max_level);
         }
+        self.remote_attach();
         let Some(fs) = self.session.as_ref().map(|r| f64::from(r.sample_rate)) else {
             return;
         };

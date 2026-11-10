@@ -126,6 +126,24 @@ impl Control {
             );
             return;
         }
+        // A rig admitted to take this rig's inputs says hello and reads the source state;
+        // it is no operator and never drives this rig.
+        if let Some(CurvePeer { name, .. }) = &peer
+            && self.s.server.is_rig(name)
+            && !matches!(req.cmd, Command::Hello { .. } | Command::SourceState)
+        {
+            self.send_reply(
+                routing_id,
+                &Reply::new(
+                    id,
+                    Err(perr(
+                        ErrorCode::Refused,
+                        format!("{name:?} is admitted as a rig: it may only take inputs"),
+                    )),
+                ),
+            );
+            return;
+        }
         let client =
             ClientId(peer.map_or_else(|| format!("local-{}", hex(routing_id)), |p| p.name));
         // Reserved before anything executes, the asynchronous branches below included: a

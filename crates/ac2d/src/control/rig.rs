@@ -14,7 +14,7 @@ use ac2_proto::model::{
     AuthorizedClient, GenAction, OutputSetup, RefusedKey, ServerInfo, ServerMode, SweepFailure,
     check_output_label,
 };
-use ac2_proto::units::{ClientId, Dbfs, WallNs};
+use ac2_proto::units::{ClientId, Dbfs, RigId, WallNs};
 use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
 use ac2_zmq::{AuthorizedHandle, PublicKey};
 
@@ -41,6 +41,9 @@ pub(crate) struct NetworkSetup {
     pub(crate) ctrl: String,
     pub(crate) data: String,
     pub(crate) server_key: PublicKey,
+    /// The server keypair: this rig connects to the rigs it takes inputs from with it, so
+    /// the key they admitted is the one the app saw on this rig.
+    pub(crate) keys: ac2_zmq::KeyPair,
     /// The keys the handshake check uses.
     pub(crate) authorized: AuthorizedHandle,
     /// Where they are kept.
@@ -57,6 +60,14 @@ impl ServerSetup {
     pub(crate) fn revoked(&self, name: &str, key: &PublicKey) -> bool {
         match self {
             Self::Network(n) => n.authorized.get().get(name) != Some(key),
+            _ => false,
+        }
+    }
+
+    /// Whether `name` is admitted as a rig rather than an app.
+    pub(crate) fn is_rig(&self, name: &str) -> bool {
+        match self {
+            Self::Network(n) => n.authorized.get().rig_of(name).is_some(),
             _ => false,
         }
     }
@@ -216,16 +227,17 @@ impl Control {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .clone(),
-                authorized: n
-                    .authorized
-                    .get()
-                    .iter()
-                    .map(|(name, k)| AuthorizedClient {
-                        name: name.to_owned(),
-                        key: k.to_z85(),
-                        fingerprint: k.fingerprint(),
-                    })
-                    .collect(),
+                authorized: {
+                    let keys = n.authorized.get();
+                    keys.iter()
+                        .map(|(name, k)| AuthorizedClient {
+                            name: name.to_owned(),
+                            key: k.to_z85(),
+                            fingerprint: k.fingerprint(),
+                            rig: keys.rig_of(name).map(RigId),
+                        })
+                        .collect()
+                },
                 refused: n
                     .refused
                     .snapshot()
@@ -257,6 +269,30 @@ impl Control {
         name: &str,
         key: &str,
     ) -> Result<ReplyBody, ProtoError> {
+        self.admit(client, name, key, None)
+    }
+
+    /// `auth.admit_rig`: the other rig's key, admitted to take this rig's inputs only.
+    pub(super) fn admit_rig(
+        &mut self,
+        client: &ClientId,
+        name: &str,
+        key: &str,
+        rig: RigId,
+    ) -> Result<ReplyBody, ProtoError> {
+        if rig == self.s.rig_id {
+            return Err(perr(ErrorCode::Invalid, "that is this rig's own identity"));
+        }
+        self.admit(client, name, key, Some(rig))
+    }
+
+    fn admit(
+        &mut self,
+        client: &ClientId,
+        name: &str,
+        key: &str,
+        rig: Option<RigId>,
+    ) -> Result<ReplyBody, ProtoError> {
         let ServerSetup::Network(n) = &self.s.server else {
             return Err(network_only());
         };
@@ -267,8 +303,14 @@ impl Control {
             )
         })?;
         let mut keys = n.authorized.get();
-        keys.insert(name, key)
-            .map_err(|e| perr(ErrorCode::Invalid, e.to_string()))?;
+        // A name given again replaces its key and kind: its old connections are dropped
+        // below, as a revoke would.
+        let old = keys.remove(name);
+        match rig {
+            Some(r) => keys.insert_rig(name, key, r.0),
+            None => keys.insert(name, key),
+        }
+        .map_err(|e| perr(ErrorCode::Invalid, e.to_string()))?;
         keys.save(&n.authorized_file).map_err(|e| {
             perr(
                 ErrorCode::Internal,
@@ -277,9 +319,15 @@ impl Control {
         })?;
         n.authorized.set(keys);
         n.refused.forget(&key);
+        if let Some(o) = old
+            && o != key
+        {
+            self.s.outbox.revoke(o.as_bytes());
+        }
+        let kind = if rig.is_some() { "rig" } else { "client" };
         tracing::warn!(
             target: "ac2d::audit",
-            "client {name:?} (fingerprint {}) authorized by {}",
+            "{kind} {name:?} (fingerprint {}) authorized by {}",
             key.fingerprint(),
             client.0
         );
@@ -316,6 +364,8 @@ impl Control {
             )
         })?;
         n.authorized.set(keys);
+        // Its data connection, audio included, ends now rather than at its next request.
+        self.s.outbox.revoke(key.as_bytes());
         self.dedup.forget(&ClientId(name.to_owned()));
         tracing::warn!(
             target: "ac2d::audit",

@@ -31,6 +31,9 @@ struct Rig {
     put: u64,
     frame: Frame,
     topic: Topic,
+    /// Who the next requests come from, and whether that name was admitted as a rig.
+    client: Option<CurvePeer>,
+    rig: bool,
 }
 
 fn up(sock: &Socket, msg: DataUp) {
@@ -63,6 +66,8 @@ impl Rig {
             put: 0,
             frame,
             topic,
+            client: None,
+            rig: false,
         }
     }
 
@@ -87,12 +92,14 @@ impl Rig {
     /// Takes the peers' requests.
     fn pump(&mut self) {
         while let Some(m) = self.router.recv_timeout(Duration::from_millis(5)).unwrap() {
+            let rig = self.rig;
             self.peers.request(
                 &self.router,
-                None,
+                self.client.as_ref(),
                 m.into_frames(),
                 &self.interest,
                 Instant::now(),
+                |_| rig,
             );
         }
     }
@@ -296,4 +303,160 @@ fn send_queue_holds_twice_what_credit_lets_out() {
     let outstanding = DATA_WINDOW_MAX / FRAME_CHARGE_MIN + 1 + EVENT_BOUND;
     let lwm = DATA_SNDHWM.div_ceil(2);
     assert!(outstanding + lwm - 1 < DATA_SNDHWM);
+}
+
+/// An audio frame of `frames` samples starting at `start`.
+fn audio_parts(channel: u16, start: u64, frames: u32) -> (Topic, Vec<Part>) {
+    use ac2_proto::frame::{AudioFlags, AudioHeader, encode_audio};
+    let h = AudioHeader {
+        v: ac2_proto::PROTO_VERSION,
+        start_sample: start,
+        frames,
+        flags: AudioFlags::NONE,
+        capture_ns: Some(start * 1000),
+        rate: 48_000,
+        incarnation: ac2_proto::model::StreamIncarnation {
+            daemon: ac2_proto::units::DaemonIncarnation(1),
+            epoch: ac2_proto::units::SessionEpoch(1),
+        },
+    };
+    let samples = vec![0.25f32; frames as usize];
+    let parts = encode_audio(channel, &h, &samples).unwrap();
+    (
+        Topic::Audio { channel },
+        parts.iter().map(|b| part(b)).collect(),
+    )
+}
+
+/// A rig subscribed to audio that reads nothing: frames past its window queue in order
+/// rather than replace one another, the oldest dropped and counted once the queue holds a
+/// window; credit then brings the queued ones, oldest first, with no gap among them.
+#[test]
+fn audio_queues_under_a_credit_stall_and_drops_the_oldest() {
+    let mut r = Rig::new();
+    r.client = Some(CurvePeer {
+        name: "pupu".into(),
+        key: ac2_zmq::KeyPair::generate().unwrap().public,
+    });
+    r.rig = true;
+    let d = r.ctx.socket(SocketType::Dealer).unwrap();
+    d.set_linger(Some(Duration::ZERO)).unwrap();
+    d.connect(&r.endpoint).unwrap();
+    up(
+        &d,
+        DataUp::Window {
+            bytes: DATA_WINDOW_MIN,
+        },
+    );
+    let sub = Subscription::Topic(Topic::Audio { channel: 2 });
+    up(&d, DataUp::Subscribe { sub });
+    // A rig asking for a curve topic is not served it.
+    up(
+        &d,
+        DataUp::Subscribe {
+            sub: Subscription::Topic(r.topic),
+        },
+    );
+    r.pump_until(|r| r.interest.count(b"audio/2") == 1);
+    assert_eq!(r.interest.count(&r.topic.to_bytes()), 0);
+
+    // 1 KiB frames: the window holds about 20 in flight and 20 queued.
+    let n = 100u64;
+    for i in 0..n {
+        let (t, parts) = audio_parts(2, i * 256, 256);
+        r.peers.audio(&r.router, t, parts, &r.interest);
+    }
+    let dropped = r.peers.audio_dropped();
+    assert!(dropped > 0, "nothing dropped");
+    let mut starts = Vec::new();
+    let mut owed = 0u32;
+    while let Some(m) = d.recv_timeout(Duration::from_millis(100)).unwrap() {
+        let f = m.into_frames();
+        owed += frame_charge(f.iter().map(Vec::len).sum());
+        let parts: Vec<&[u8]> = f.iter().map(Vec::as_slice).collect();
+        starts.push(
+            ac2_proto::frame::decode_audio(&parts)
+                .unwrap()
+                .header
+                .start_sample,
+        );
+    }
+    let in_flight = starts.len() as u64;
+    up(
+        &d,
+        DataUp::Credit {
+            bytes: owed,
+            events: 0,
+        },
+    );
+    r.pump();
+    while let Some(m) = d.recv_timeout(Duration::from_millis(100)).unwrap() {
+        let f = m.into_frames();
+        let parts: Vec<&[u8]> = f.iter().map(Vec::as_slice).collect();
+        starts.push(
+            ac2_proto::frame::decode_audio(&parts)
+                .unwrap()
+                .header
+                .start_sample,
+        );
+    }
+    assert_eq!(
+        starts.len() as u64 + dropped,
+        n,
+        "every frame sent or counted"
+    );
+    // The first window went at once; the queue kept the newest, in order.
+    let (first, queued) = starts.split_at(in_flight as usize);
+    assert!(first.windows(2).all(|w| w[1] == w[0] + 256));
+    assert!(queued.windows(2).all(|w| w[1] == w[0] + 256));
+    assert_eq!(*queued.last().unwrap(), (n - 1) * 256);
+}
+
+/// An app's subscription to audio is not taken: audio goes only to another rig.
+#[test]
+fn an_app_is_never_served_audio() {
+    let mut r = Rig::new();
+    let d = r.dealer(DATA_WINDOW_DEFAULT);
+    let sub = Subscription::Topic(Topic::Audio { channel: 0 });
+    up(&d, DataUp::Subscribe { sub });
+    up(
+        &d,
+        DataUp::Subscribe {
+            sub: Subscription::Topic(Topic::Ka),
+        },
+    );
+    r.pump_until(|r| r.interest.count(b"ka") >= 2);
+    assert_eq!(r.interest.count(b"audio/0"), 0);
+    let (t, parts) = audio_parts(0, 0, 64);
+    r.peers.audio(&r.router, t, parts, &r.interest);
+    assert!(
+        d.recv_timeout(Duration::from_millis(100))
+            .unwrap()
+            .is_none()
+    );
+}
+
+/// Revoking a key drops its connection at once, subscriptions and all.
+#[test]
+fn a_revoked_key_is_dropped_at_once() {
+    let mut r = Rig::new();
+    let key = ac2_zmq::KeyPair::generate().unwrap().public;
+    r.client = Some(CurvePeer {
+        name: "pupu".into(),
+        key,
+    });
+    r.rig = true;
+    let d = r.ctx.socket(SocketType::Dealer).unwrap();
+    d.set_linger(Some(Duration::ZERO)).unwrap();
+    d.connect(&r.endpoint).unwrap();
+    up(
+        &d,
+        DataUp::Subscribe {
+            sub: Subscription::Topic(Topic::Audio { channel: 1 }),
+        },
+    );
+    r.pump_until(|r| r.interest.count(b"audio/1") == 1);
+    r.peers.drop_key(&key, &r.interest);
+    assert_eq!(r.peers.len(), 0);
+    assert_eq!(r.interest.count(b"audio/1"), 0);
 }

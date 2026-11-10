@@ -66,7 +66,9 @@ impl Store {
                 clocks: Clocks {
                     system: crate::sysclock::read(),
                     capture: None,
+                    stamp_map: None,
                 },
+                remote: Default::default(),
                 sweep: None,
                 autosave: Autosave {
                     state: AutosaveState::Off,
@@ -224,6 +226,7 @@ pub(crate) fn apply(s: &mut State, c: &Change) {
         Change::SplLog(p) => upsert(&mut s.spl_logs, p, |l| l.meas),
         Change::Timing(t) => s.timing = *t,
         Change::Clocks(c) => s.clocks = c.clone(),
+        Change::Remote(r) => s.remote = r.clone(),
         Change::Sweep(r) => s.sweep = Some(r.clone()),
         Change::Autosave(a) => s.autosave = a.clone(),
         Change::Recording(r) => s.recording = Some(r.clone()),

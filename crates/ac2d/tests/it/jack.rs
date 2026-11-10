@@ -164,6 +164,8 @@ fn chosen_outputs_reach_playback_and_connections_survive_routing() {
             sample_rate_hz: None,
             buffer_frames: None,
             loopback: None,
+            remote_inputs: Vec::new(),
+            link_offset: None,
         },
     }) else {
         panic!("session");
@@ -262,6 +264,8 @@ fn spare_input_sources_survive_a_reopen() {
                 sample_rate_hz: None,
                 buffer_frames: None,
                 loopback: None,
+                remote_inputs: Vec::new(),
+                link_offset: None,
             },
         }) else {
             panic!("session");

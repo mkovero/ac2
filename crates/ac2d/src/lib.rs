@@ -61,6 +61,7 @@ mod outbox;
 mod peers;
 mod preview;
 mod refusals;
+mod remote;
 mod rig;
 mod rig_id;
 mod session;
@@ -82,7 +83,8 @@ use ac2_zmq::{Context, PublicKey, SecureContext, Socket, SocketType, TcpLiveness
 
 pub use config::{
     Advertise, AutosaveConfig, DEFAULT_PORT, DaemonConfig, DedupLimits, Listen, ListenError,
-    LocalClock, NetworkSecurity, ReplayLimits, RigIdSource, pid_file, runtime_dir,
+    LocalClock, NetworkSecurity, ReplayLimits, RigIdSource, SystemClockSource, pid_file,
+    runtime_dir,
 };
 
 pub use backend::{
@@ -350,6 +352,7 @@ impl Daemon {
 
         // Network mode: what `server.*` reports and changes while the daemon runs.
         let mut network_parts = None;
+        let mut keypair: Option<ac2_zmq::KeyPair> = None;
         let (rig_id, rig_id_damage) = rig_id::load(&config.rig_id);
         let mut key_damage: Vec<_> = rig_id_damage.into_iter().collect();
         let (ctx, secure, router, data_sock, server_key) = match &config.listen {
@@ -390,6 +393,7 @@ impl Daemon {
                 let refused = log.refused();
                 let sc = SecureContext::new(ZAP_DOMAIN, authorized, move |d| log.record(d))
                     .map_err(zerr("ZAP handler"))?;
+                keypair = Some(kp.clone());
                 network_parts = Some((
                     sc.authorized_handle(),
                     security.authorized_clients_file.clone(),
@@ -445,12 +449,13 @@ impl Daemon {
         let outbox = Outbox::connect(&ctx, &pull_ep, 100_000).map_err(zerr("internal pipe"))?;
 
         let advertised_as = Arc::new(std::sync::Mutex::new(None));
-        let server = match (&config.listen, network_parts, server_key) {
+        let server = match (&config.listen, network_parts, keypair) {
             (Listen::Network { .. }, Some((authorized, authorized_file, refused)), Some(key)) => {
                 control::rig::ServerSetup::Network(Box::new(control::rig::NetworkSetup {
                     ctrl: ctrl.clone(),
                     data: data.clone(),
-                    server_key: key,
+                    server_key: key.public,
+                    keys: key,
                     authorized,
                     authorized_file,
                     refused,
@@ -508,6 +513,7 @@ impl Daemon {
             recording_dir: config.recording_dir.clone(),
             plan_dir: config.plan_dir.clone(),
             local_clock: config.local_clock,
+            system_clock: config.system_clock,
             systemd_notify: config.systemd_notify,
             damaged: key_damage,
         });

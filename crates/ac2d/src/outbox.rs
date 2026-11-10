@@ -28,6 +28,10 @@ pub(crate) const TAG_KA: u8 = b'K';
 pub(crate) const TAG_CLEAR: u8 = b'C';
 /// Stop the I/O thread: `[X]`.
 pub(crate) const TAG_STOP: u8 = b'X';
+/// `[tag][topic][header][samples]`: one block of a captured channel for the rigs taking it.
+pub(crate) const TAG_AUDIO: u8 = b'A';
+/// `[tag][key]`: a client key was revoked; its data connections end now.
+pub(crate) const TAG_REVOKE: u8 = b'V';
 
 /// One thread's PUSH end.
 #[derive(Debug)]
@@ -93,6 +97,19 @@ impl Outbox {
             }
         }
         tracing::warn!("internal pipe full for 1 s; keepalive dropped");
+    }
+
+    /// An audio frame for the I/O thread, never blocking: the fan-out sends it, and a
+    /// full pipe means the I/O thread stopped draining. `false` when not queued.
+    pub(crate) fn audio(&self, parts: Vec<Vec<u8>>) -> bool {
+        let Some(parts) = tagged(TAG_AUDIO, parts) else {
+            return false;
+        };
+        self.sock.try_send_parts(&parts).is_ok()
+    }
+
+    pub(crate) fn revoke(&self, key: &[u8]) {
+        self.send(TAG_REVOKE, &[key]);
     }
 
     pub(crate) fn clear(&self, prefix: &[u8]) {

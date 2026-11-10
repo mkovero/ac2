@@ -18,6 +18,7 @@ fn data(at: u64) -> SessionData {
         traces: Vec::new(),
         walks: Vec::new(),
         plans: Vec::new(),
+        remote_inputs: Vec::new(),
     }
 }
 

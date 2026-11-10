@@ -162,8 +162,10 @@ fn a_v1_file_loads_whole_and_round_trips() {
     assert_eq!(st.rig.levels, LevelsSettings::default());
     assert_eq!(st.rig.levels.loudness_target, Lufs(-23.0));
     let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 10);
+    assert_eq!(rj["version"], 11);
     assert_eq!(rj["levels"]["loudness_target"], json!(-23.0));
+    // Files before version 11 paired with no rig.
+    assert_eq!(rj["peers"], json!([]));
     assert_eq!(
         rj["monitor_session"],
         serde_json::to_value(&s.monitor).unwrap()
@@ -317,7 +319,7 @@ fn a_v2_meter_layout_with_a_pick_reads_whole() {
     assert_eq!(picked[0].plates, layout::LayoutPlates::default());
     assert_eq!(st.rig.levels, LevelsSettings::default());
     let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 10);
+    assert_eq!(rj["version"], 11);
     assert_eq!(
         rj["meters"][0]["layout"]["pane"]["content"],
         json!({ "type": "meter", "rig": { "type": "this_rig" }, "meas": 1 })
@@ -377,7 +379,7 @@ fn a_v3_meter_layout_with_three_plates_reads_whole() {
     assert_eq!(st.rig.levels.ballistic, Ballistic::Type2, "kept");
     assert_eq!(st.rig.levels.loudness_target, Lufs(-23.0));
     let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 10);
+    assert_eq!(rj["version"], 11);
     assert_eq!(rj["meters"][0]["layout"]["pane"]["plates"]["peaks"], auto);
     assert_eq!(
         rj["meters"][0]["layout"]["pane"]["plates"]["loudness"],
@@ -432,7 +434,7 @@ fn a_v4_file_gains_the_loudness_target_and_plate() {
     assert_eq!(pane.plates.peaks.at, Some([0.25, 0.5]));
     assert_eq!(pane.plates.loudness, layout::LayoutPlate::default());
     let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 10);
+    assert_eq!(rj["version"], 11);
     assert_eq!(rj["levels"]["loudness_target"], json!(-23.0));
     assert_eq!(
         rj["meters"][0]["layout"]["pane"]["plates"]["loudness"],
@@ -463,7 +465,7 @@ fn a_v5_monitor_session_opens_no_spare_inputs() {
     );
     assert_rig_kept(&st, &s);
     let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 10);
+    assert_eq!(rj["version"], 11);
     assert_eq!(rj["monitor_session"]["spare_inputs"], json!(0));
     assert_eq!(
         rj["monitor_session"],
@@ -534,7 +536,7 @@ fn a_v6_pair_pane_becomes_a_goniometer_beside_its_meters() {
         assert_eq!(p.chrome, layout::PlotChrome::NoGrid);
     }
     let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 10);
+    assert_eq!(rj["version"], 11);
     assert_eq!(rj["meters"][0]["layout"]["b"]["type"], "split");
     drop(c);
     h.shutdown();
@@ -597,7 +599,7 @@ fn a_v7_meter_layout_shows_this_rig() {
         ]
     );
     let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 10);
+    assert_eq!(rj["version"], 11);
     drop(c);
     h.shutdown();
 }
@@ -672,7 +674,7 @@ fn a_v8_meter_layout_names_the_rig_per_reference() {
         "the old file is kept"
     );
     let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 10);
+    assert_eq!(rj["version"], 11);
     assert!(rj["meters"][0]["layout"]["a"]["pane"].get("rig").is_none());
     drop(c);
     h.shutdown();
@@ -728,7 +730,7 @@ fn a_v9_meter_layout_gains_the_default_camera() {
         "the old file is kept"
     );
     let rj = rig_json(dir.path());
-    assert_eq!(rj["version"], 10);
+    assert_eq!(rj["version"], 11);
     assert_eq!(
         rj["meters"][0]["layout"]["b"]["pane"]["spectrum_camera"],
         json!({ "yaw_deg": 0, "pitch_deg": 8, "zoom_step": 0 })

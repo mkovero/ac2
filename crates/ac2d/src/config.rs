@@ -67,6 +67,29 @@ pub struct DaemonConfig {
     /// when it stops (`ac2_paths::notify`; nothing without `NOTIFY_SOCKET`). Only the `ac2d`
     /// program: a daemon run inside another process (a test) must not ping for its unit.
     pub systemd_notify: bool,
+    /// Where the system clock's status comes from.
+    pub system_clock: SystemClockSource,
+}
+
+/// Where the daemon reads its system clock's status (`docs/design/multi-rig.md` §4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SystemClockSource {
+    /// What the OS states (`adjtimex` on Linux, nothing elsewhere).
+    #[default]
+    Os,
+    /// A status stated by whoever started the daemon: a test of a rig whose clock is synced
+    /// or not, whatever the machine running it says.
+    Stated(ac2_proto::model::SystemClock),
+}
+
+impl SystemClockSource {
+    /// The status now.
+    pub(crate) fn read(self) -> ac2_proto::model::SystemClock {
+        match self {
+            Self::Os => crate::sysclock::read(),
+            Self::Stated(c) => c,
+        }
+    }
 }
 
 /// How the daemon tells the local time of day from its wall clock: the band meter's day
@@ -162,6 +185,7 @@ impl fmt::Debug for DaemonConfig {
             .field("rig_id", &self.rig_id)
             .field("advertise", &self.advertise)
             .field("local_clock", &self.local_clock)
+            .field("system_clock", &self.system_clock)
             .field("systemd_notify", &self.systemd_notify)
             .finish()
     }
@@ -196,6 +220,7 @@ impl DaemonConfig {
             advertise: None,
             local_clock: LocalClock::Host,
             systemd_notify: false,
+            system_clock: SystemClockSource::Os,
         }
     }
 }

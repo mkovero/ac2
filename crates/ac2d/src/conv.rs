@@ -494,3 +494,12 @@ pub(crate) fn band_transfer(t: &pm::BandTransferSet) -> core::band_leq::Transfer
         P::Missing => T::Missing,
     }))
 }
+
+/// A stamp clock's line on the system clock, as the wire states it.
+pub(crate) fn stamp_map(l: ac2_core::clock_map::StampLine) -> pm::StampMap {
+    pm::StampMap {
+        epoch_stamp_ns: l.epoch_stamp_ns,
+        system_ns: l.system_ns,
+        ppm: l.ppm,
+    }
+}

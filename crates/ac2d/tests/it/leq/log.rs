@@ -218,6 +218,7 @@ async fn a_long_log_in_pages_and_its_history() {
             traces: Vec::new(),
             walks: Vec::new(),
             plans: Vec::new(),
+            remote_inputs: Vec::new(),
         },
     )
     .unwrap();

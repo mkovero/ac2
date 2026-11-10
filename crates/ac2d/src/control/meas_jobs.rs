@@ -46,6 +46,9 @@ impl Control {
 
     /// The calibration and mic curve a job on `input` of the open session uses (Q7 §3).
     pub(super) fn input_cal(&self, rt: &Runtime, input: u16) -> InputCal {
+        if ac2_proto::model::remote_slot(input).is_some() {
+            return self.remote_input_cal(input);
+        }
         calstore::resolve(self.store.state(), &self.cal, &rt.open.input_device, input)
     }
 
@@ -100,8 +103,14 @@ impl Control {
             return Ok(None);
         };
         let fs = rt.sample_rate;
+        let joined = self.job_map(
+            rt,
+            &super::remote::kind_inputs(&m.config.kind),
+            matches!(m.config.kind, MeasKind::Transfer { .. }),
+        )?;
+        let map = joined.as_deref().unwrap_or(&rt.input_map);
         let idx = |input: u16| {
-            block_index(&rt.input_map, input).ok_or_else(|| {
+            block_index(map, input).ok_or_else(|| {
                 perr(
                     ErrorCode::Invalid,
                     format!("input {} is not captured by the session", input + 1),
@@ -203,7 +212,11 @@ impl Control {
             analysis,
         )
         .map_err(|e| perr(ErrorCode::Internal, format!("cannot start job: {e}")))?;
-        rt.fanout.attach(fid, tx);
+        if joined.is_some() {
+            rt.fanout.attach_joined(fid, tx);
+        } else {
+            rt.fanout.attach(fid, tx);
+        }
         self.probes.set(m.id, handle.probe().filter(|_| probed));
         if let Some(old) = self.jobs.insert(m.id, handle)
             && let Some(rt) = &self.session
@@ -273,6 +286,7 @@ impl Control {
         rt.fanout.start_levels(
             self.job_env(rt),
             rt.input_map.clone(),
+            Self::remote_channels(rt),
             self.store.rev(),
             programme,
         );

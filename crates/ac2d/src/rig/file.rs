@@ -10,13 +10,13 @@
 //! measurement: a field a session measurement gains (compare picks, display offsets, the
 //! transfer delay) never changes this file. A change to [`RigMeter`] or to a section's
 //! shape bumps [`VERSION`], and each previous version is read by its own module
-//! ([`super::v1`] … [`super::v9`]).
+//! ([`super::v1`] … [`super::v10`]).
 
 use std::net::SocketAddr;
 
 use ac2_proto::model::{
     ArtnetFade, ArtnetTarget, ColourFamily, LevelsSettings, MeasConfig, MeasKind, MeasScope,
-    OutputSetup, PaneLayout, SessionConfig,
+    OutputSetup, PaneLayout, RigPeer, SessionConfig,
 };
 use ac2_proto::units::MeasId;
 use serde::Serialize;
@@ -26,7 +26,7 @@ use serde_json::{Map, Value};
 use super::{RigMeter, RigSettings};
 
 pub(super) const FORMAT: &str = "ac2-rig-settings";
-pub(super) const VERSION: u32 = 10;
+pub(super) const VERSION: u32 = 11;
 
 /// The file as written: every section always present (`null` for none), so that a key
 /// missing on read is damage, not a default.
@@ -43,6 +43,7 @@ struct Out<'a> {
     artnet_target: Option<ArtnetTarget>,
     artnet_fade: ArtnetFade,
     levels: LevelsSettings,
+    peers: &'a [RigPeer],
 }
 
 /// `s` as the file's bytes.
@@ -59,6 +60,7 @@ pub(super) fn write(s: &RigSettings) -> serde_json::Result<Vec<u8>> {
         artnet_target: s.artnet_target,
         artnet_fade: s.artnet_fade,
         levels: s.levels,
+        peers: &s.peers,
     })
 }
 
@@ -74,6 +76,7 @@ pub(super) struct Sections {
     pub(super) artnet_target: Option<Option<ArtnetTarget>>,
     pub(super) artnet_fade: Option<ArtnetFade>,
     pub(super) levels: Option<LevelsSettings>,
+    pub(super) peers: Option<Vec<RigPeer>>,
 }
 
 impl Sections {
@@ -89,6 +92,7 @@ impl Sections {
             artnet_target: self.artnet_target.or(other.artnet_target),
             artnet_fade: self.artnet_fade.or(other.artnet_fade),
             levels: self.levels.or(other.levels),
+            peers: self.peers.or(other.peers),
         }
     }
 
@@ -104,6 +108,7 @@ impl Sections {
             ("artnet_target", self.artnet_target.is_none()),
             ("artnet_fade", self.artnet_fade.is_none()),
             ("levels", self.levels.is_none()),
+            ("peers", self.peers.is_none()),
         ]
         .into_iter()
         .filter_map(|(k, unread)| unread.then_some(k))
@@ -125,6 +130,7 @@ impl Sections {
             artnet_target: self.artnet_target.flatten(),
             artnet_fade: self.artnet_fade.unwrap_or_default(),
             levels: self.levels.unwrap_or_default(),
+            peers: self.peers.unwrap_or_default(),
         }
     }
 }
@@ -172,7 +178,8 @@ pub(super) fn read(text: &[u8]) -> Result<Read, String> {
             6 => super::v6::upgrade(&mut obj),
             7 => super::v7::upgrade(&mut obj),
             8 => super::v8::upgrade(&mut obj),
-            _ => super::v9::upgrade(&mut obj),
+            9 => super::v9::upgrade(&mut obj),
+            _ => super::v10::upgrade(&mut obj),
         }
     }
     let mut r = Reader {
@@ -196,6 +203,7 @@ pub(super) fn read(text: &[u8]) -> Result<Read, String> {
         }),
         artnet_fade: r.section("artnet_fade", |_| Ok(())),
         levels: r.section("levels", |l: &LevelsSettings| l.check()),
+        peers: r.section("peers", |p: &Vec<RigPeer>| crate::control::check_peers(p)),
     };
     let mut lost = r.lost;
     lost.extend(

@@ -146,6 +146,11 @@ impl Control {
             traces,
             walks: self.store.state().walks.clone(),
             plans: self.store.state().walk_plans.clone(),
+            remote_inputs: self
+                .session
+                .as_ref()
+                .map(|rt| rt.open.config.remote_inputs.clone())
+                .unwrap_or_default(),
         })
     }
 
@@ -867,6 +872,7 @@ impl Source {
                     traces: Vec::new(),
                     walks: Vec::new(),
                     plans: Vec::new(),
+                    remote_inputs: Vec::new(),
                 },
             )),
         }
