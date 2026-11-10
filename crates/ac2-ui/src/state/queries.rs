@@ -765,7 +765,7 @@ impl AppState {
 
     /// Navigation still moving: the UI keeps repainting until it settles.
     pub fn animating(&self) -> bool {
-        !self.nav.settled()
+        !self.nav.settled() || self.cam3d.is_some()
     }
 
     /// Some Leq or band Leq bars still ease to their newest frame at `now`.

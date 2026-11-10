@@ -207,7 +207,7 @@ once).
 | SPL / Leq | the SPL meter's Leq windows, limits and band meter ([below](#leq-windows-and-limits)) | **Shift+L** |
 | Recording | how long the record toggle records (this app); where the daemon records (the rig) | |
 | Rig monitor | where the rig's OSC cues and Art-Net universe go, whether it meters at start (the rig); how its programme meters read: *Programme meters read*, *Loudness target* (−23 LUFS by default, −36 … −5 in 1 LU steps; past either end the row says the range), *Correlation window*, *An over is above*, *Correlation gate* — **←/→** steps a value and sends each step ([Programme pane](#programme-pane)) | |
-| Display | theme, key hints, warning toasts, how long the SPL number holds, the goniometer's ember decay and glow, Leq windows / history strip / bars / scale, what the spectrum and sweep panes show, spectrum glide, distortion unit, coherence placement, resolution marker, plate background (see-through / solid), level axes | |
+| Display | theme, key hints, warning toasts, how long the SPL number holds, the goniometer's ember decay and glow, Leq windows / history strip / bars / scale, what the spectrum and sweep panes show, spectrum glide, 3D quality, distortion unit, coherence placement, resolution marker, plate background (see-through / solid), level axes | |
 | Connection | the daemon, whether the app starts and stops this computer's `ac2d`, this client's id and key, reconnect, another daemon / pairing; the daemon's mode, mDNS name, authorized clients and refused keys | |
 
 #### System max level
@@ -1313,6 +1313,42 @@ bar spans the pane's level axis, so the level-axis keys change the colours.
 **Two spectrographs side by side**: with the spectrum pane focused click `Spectrum 1`'s
 row; **N**; drag `Spectrum 2`'s row onto the new half;
 **G G** on each half. Each half keeps its measurement and view.
+
+### 3D spectrograph
+
+One more **G** after the spectrograph alone shows the same history as a **3D spectrograph**
+([spectrograph-3d.md](design/spectrograph-3d.md)): frequency across the floor on the
+spectrum's span, time receding into the distance with the newest row at the front, a spike
+per frequency and moment, as tall as its level. **G** once more is the spectrum again;
+**Shift+G** walks back.
+
+| Key | In the 3D view |
+|---|---|
+| **← / →** | orbit the camera left / right (15° a step, ±80°) |
+| **PageUp / PageDown** | tilt up / down (5° a step, 2° … 75°) |
+| **I / O** | dolly in / out |
+| **Home** | reset the camera (frequency left to right, just above the floor) |
+| **S**, **R**, **Shift+B**, **J** | start/stop, reset average, history span, offset, as in 2D |
+| **Ctrl+I / O**, **Ctrl+↑ / ↓**, **Shift+Home** | the level range: it sets the heights |
+
+- **Mouse**: drag orbits and tilts, the wheel or a pinch dollies; Ctrl+wheel and
+  Shift+wheel still zoom and pan the level range. The camera is kept with the pane and the
+  measurement's layout. The cursor keys (Shift+←/→, Shift+T) and **C** do nothing here:
+  there is no cursor and no compared curve in 3D.
+- **Colour** is the loudest spike along the line of sight, so a tall peak behind a low row
+  still shows its colour. Read levels from the heights against the level ticks, or go one
+  **G** back to the 2D spectrograph and its cursor. The *ice* colour map (palette
+  *Colour map ice*) is made for this view; every map works in both.
+- **Narrowing the level range** (Ctrl+I) turns the slab of noise into terrain. For music keep
+  the top near 0, e.g. −60 … 0, never −80 … −20: hot masters reach −5 … 0 dBFS per bin and a
+  low top clamps them flat.
+- **The frequency span** follows the spectrum's: change it in another pane, or one **G**
+  back, zoom, then **G** again.
+- **Settings › Display › 3D quality**: *Auto* (by the GPU; the row says which it picked),
+  *Full*, *Lite* (fewer, coarser spikes at half resolution, for the Pi) or *Bare*. A forced
+  tier is named in the caption; an exported PNG is always Full.
+- `keys.toml` rebinds are per section: the 3D view's keys are in `[spectrograph_3d]`, and a
+  key rebound in `[spectrum]` is not carried into it.
 
 ### Resolution and the resolution marker
 
@@ -3689,6 +3725,19 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `K` | Skip point | `walk_skip` |
 | `M` | Mics trade places | `walk_swap` |
 
+#### Spectrum / RTA: 3D spectrograph
+
+| Keys | Command | `keys.toml` |
+|---|---|---|
+| `R` | Reset averaging | `reset_average` |
+| `S` | Start/stop | `start_stop` |
+| `J` | Set offset… | `offset` |
+| `Shift+B` | Spectrograph span | `spectrograph_span` |
+| `PageUp` | Tilt up | `tilt_up` |
+| `PageDown` | Tilt down | `tilt_down` |
+| `G` | Next view | `next_view` |
+| `Shift+G` | Previous view | `prev_view` |
+
 #### Command palette only (`Ctrl+K`)
 
 | Command | `keys.toml` |
@@ -3764,6 +3813,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Colour map inferno | `spectrograph_colours_inferno` |
 | Colour map cividis | `spectrograph_colours_cividis` |
 | Colour map grey | `spectrograph_colours_grey` |
+| Colour map ice | `spectrograph_colours_ice` |
 | Meter view | `spl_show_meter` |
 | Leq view | `spl_show_leq` |
 | Meter + Leq view | `spl_show_meter_leq` |
@@ -3792,6 +3842,7 @@ The least used go first on a narrow pane; `G/Shift+G` steps the pane's views for
 | Programme | `R` reset · `Shift+R` reset all · `G/Shift+G` view · `T` grid · `W` maximise · `Q` close pane · `H` all keys |
 | Inputs list row | `R` reset · `Shift+R` reset all · `Tab` measurements · `Shift+Tab` back · `H` all keys |
 | Spatial walk | `X` capture here · `PageDown` next step · `PageUp` previous · `K` skip · `Shift+R` redo, resets the walk's measurements · `M` mics trade places · `Space` stimulus · `W` maximise · `H` all keys |
+| Spectrum / RTA: 3D spectrograph | `←/→` orbit · `PageUp/PageDown` tilt · `I/O` zoom · `Home` reset camera · `G/Shift+G` view · `S` start/stop · `Shift+B` span · `W` maximise · `H` all keys |
 
 <!-- keymap:end -->
 

@@ -233,9 +233,12 @@ impl CommandId {
             | C::SpectrographMagma
             | C::SpectrographInferno
             | C::SpectrographCividis
-            | C::SpectrographGrey => &["spectrograph", "waterfall", "colormap", "color"],
+            | C::SpectrographGrey
+            | C::SpectrographIce => &["spectrograph", "waterfall", "colormap", "color", "3d"],
+            C::TiltUp | C::TiltDown => &["3d", "camera", "pitch", "angle", "spectrograph"],
             C::NextView | C::PrevView => &[
                 "spectrograph",
+                "3d",
                 "waterfall",
                 "impulse",
                 "IR",

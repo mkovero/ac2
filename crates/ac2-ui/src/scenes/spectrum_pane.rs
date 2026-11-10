@@ -9,9 +9,13 @@ use ac2_proto::model::{LevelScale, Measurement, TraceKind};
 use ac2_proto::units::MeasId;
 use ac2_scene::banner::Status;
 use ac2_scene::grid::{GridColumns, columns};
+use ac2_scene::primitives::SkylineTier;
 use ac2_scene::primitives::Viewport;
 use ac2_scene::spectrograph::{
     SpectrographHistory, SpectrographInput, SpectrographScene, spectrograph_scene,
+};
+use ac2_scene::spectrograph_3d::{
+    Skyline, Spectrograph3dInput, Spectrograph3dScene, spectrograph_3d_scene,
 };
 use ac2_scene::spectrum::{Quantity, SpectrumScene, SpectrumTrace, spectrum_scene};
 use ac2_scene::theme::Theme;
@@ -122,6 +126,58 @@ pub fn spectrograph(
     });
     with_spectrum(st, pane, theme, now, |traces, status, view| {
         spectrograph_scene(traces, status, input.as_ref(), view, theme, size)
+    })
+}
+
+/// The spectrum pane's 3D spectrograph of its measurement: `skyline` (kept by the caller
+/// across frames, so a new frame only folds in) is brought up to the history first.
+/// `tier` is how it is drawn and whether Settings forced it.
+pub fn spectrograph_3d(
+    st: &AppState,
+    pane: PaneId,
+    skyline: &mut Skyline,
+    tier: (SkylineTier, bool),
+    theme: &Theme,
+    size: Viewport,
+    now: Now,
+) -> Spectrograph3dScene {
+    let shown = st.pane_meas(pane).and_then(|m| {
+        if st.meas_hidden(m) {
+            return None;
+        }
+        let stream = crate::state::spectrum_stream(m)?;
+        Some((m, stream))
+    });
+    let display = shown.map(|(m, _)| st.display_of(m)).unwrap_or_default();
+    let empty = SpectrographHistory::new(display.spectrograph_span_s);
+    let view = st.view_for(pane);
+    let history = shown
+        .and_then(|(m, _)| st.rig.spectrographs.get(&m.id))
+        .filter(|h| h.span_s() == display.spectrograph_span_s)
+        .unwrap_or(&empty);
+    skyline.update(
+        history,
+        ac2_scene::axis::Range::new(view.freq.lo, view.freq.hi),
+        tier.0,
+    );
+    let skyline = &*skyline;
+    let input = shown.map(|(m, stream)| {
+        let scale = history.scale().unwrap_or_else(|| spectrum_scale(st, pane));
+        Spectrograph3dInput {
+            history,
+            skyline,
+            name: m.config.name.clone(),
+            range: view.spectrum.range(scale),
+            offset_db: st.meas_offset(m.id),
+            freshness: frame(st, m.id, stream).map(|tf| freshness(st, tf)),
+            colours: display.spectrograph_colours,
+            camera: st.drawn_camera(pane),
+            tier: tier.0,
+            tier_forced: tier.1,
+        }
+    });
+    with_spectrum(st, pane, theme, now, |traces, status, view| {
+        spectrograph_3d_scene(traces, status, input.as_ref(), view, theme, size)
     })
 }
 

@@ -42,9 +42,9 @@ pub fn line(keymap: &Keymap, scope: Scope, style: LabelStyle) -> Vec<KeyHint> {
         .filter_map(|h| {
             let chord = keymap.first_chord(h.command, scope)?;
             let mut keys = chord.label_in(style);
-            // The view keys are one pair, forward and back: one hint names both.
-            if h.command == CommandId::NextView
-                && let Some(back) = keymap.first_chord(CommandId::PrevView, scope)
+            // The view keys are one pair, forward and back: one hint names both. So are the
+            // 3D camera's, where one direction alone reads as a key that only turns one way.
+            if let Some(back) = partner(h.command, scope).and_then(|p| keymap.first_chord(p, scope))
             {
                 keys = format!("{keys}/{}", back.label_in(style));
             }
@@ -65,6 +65,18 @@ pub fn line(keymap: &Keymap, scope: Scope, style: LabelStyle) -> Vec<KeyHint> {
         });
     }
     v
+}
+
+/// The command whose key a hint for `c` names with its own.
+fn partner(c: CommandId, scope: Scope) -> Option<CommandId> {
+    use CommandId as C;
+    match (c, scope) {
+        (C::NextView, _) => Some(C::PrevView),
+        (C::PanLeft, Scope::Spectrograph3d) => Some(C::PanRight),
+        (C::TiltUp, Scope::Spectrograph3d) => Some(C::TiltDown),
+        (C::ZoomIn, Scope::Spectrograph3d) => Some(C::ZoomOut),
+        _ => None,
+    }
 }
 
 /// Which items stay so that their widths plus a separator between each two fit in
@@ -166,6 +178,20 @@ mod tests {
                 "E reference",
                 "W maximise",
                 "Q close pane",
+                "H all keys"
+            ]
+        );
+        assert_eq!(
+            pc(Scope::Spectrograph3d),
+            [
+                "←/→ orbit",
+                "PageUp/PageDown tilt",
+                "I/O zoom",
+                "Home reset camera",
+                "G/Shift+G view",
+                "S start/stop",
+                "Shift+B span",
+                "W maximise",
                 "H all keys"
             ]
         );

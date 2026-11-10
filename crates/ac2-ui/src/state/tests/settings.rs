@@ -332,6 +332,18 @@ fn display_page_changes_apply_at_once_and_are_remembered() {
     t.key("Left");
     assert!(t.st.prefs.spec_ease);
     t.key("Down");
+    assert_eq!(settings(&t).display, DisplayRow::Quality3d);
+    t.key("Right");
+    assert_eq!(
+        t.st.prefs.quality_3d,
+        ac2_scene::spectrograph_3d::Quality::Full
+    );
+    t.key("Left");
+    assert_eq!(
+        t.st.prefs.quality_3d,
+        ac2_scene::spectrograph_3d::Quality::Auto
+    );
+    t.key("Down");
     t.key("Right");
     assert_eq!(
         t.st.kind_modes(PaneKind::Distortion).sweep,

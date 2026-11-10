@@ -1,5 +1,5 @@
-//! Streams: subscriptions follow the panes, the spectrograph (one and two side by side), and
-//! record and replay.
+//! Streams: subscriptions follow the panes, the spectrograph (one and two side by side, and
+//! in 3D), and record and replay.
 
 use super::{hint_line, new_spectrum, spectrum_panes};
 use crate::harness::{Driver, NAME, R, measure_from_empty, session_from_empty};
@@ -282,6 +282,60 @@ fn spectrograph_from_an_empty_daemon() -> R {
     d.key("Ctrl+I");
     assert_ne!(crate::common::spectrum_level(&d.st), before);
     d.key("W");
+    // G: the same history in 3D, with the camera's keys.
+    d.key("G");
+    assert_eq!(
+        d.st.kind_modes(ac2_ui::state::PaneKind::Spectrum).spectrum,
+        SpectrumMode::Spectrograph3d
+    );
+    assert!(filled(&d.st, 10));
+    let pane = crate::common::pane(&d.st, ac2_ui::state::PaneKind::Spectrum);
+    // The stage view (maximised, full screen) shows no hint line; the pane's hints are its
+    // title's tooltip.
+    let hints: Vec<String> =
+        d.st.pane_hints(
+            &ac2_ui::keys::Keymap::default(),
+            pane,
+            ac2_ui::keys::LabelStyle::Pc,
+        )
+        .iter()
+        .map(ac2_ui::hints::KeyHint::text)
+        .collect();
+    assert!(hints.iter().any(|h| h == "←/→ orbit"), "{hints:?}");
+    let mut skyline = ac2_scene::spectrograph_3d::Skyline::default();
+    let three_d = ac2_ui::scenes::spectrograph_3d(
+        &d.st,
+        pane,
+        &mut skyline,
+        (ac2_scene::primitives::SkylineTier::Full, false),
+        &theme,
+        size,
+        now(),
+    );
+    assert_eq!(three_d.message, None);
+    assert!(three_d.caption.starts_with(&name), "{}", three_d.caption);
+    let sky = three_d
+        .scene
+        .layers
+        .iter()
+        .flat_map(|l| &l.skylines)
+        .next()
+        .ok_or("the skyline in the scene")?;
+    // Its heights span the pane's level axis, as the 2D colours do.
+    let r = crate::common::spectrum_level(&d.st);
+    assert_eq!(sky.range, [r.lo as f32, r.hi as f32]);
+    // ← orbits the camera, kept with the measurement's panes on the daemon; the frequency
+    // axis stays where it was.
+    let freq = d.st.view.freq;
+    d.key("ArrowLeft");
+    assert_eq!(d.st.view.freq, freq);
+    d.until("the orbited camera on the daemon", |s| {
+        s.measurements().iter().any(|m| {
+            m.layout
+                .as_ref()
+                .is_some_and(|l| l.panes().iter().any(|p| p.spectrum_camera.yaw_deg == -15))
+        })
+    })?;
     // G again hides it and nothing is kept.
     d.key("G");
     assert_eq!(

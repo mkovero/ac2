@@ -469,6 +469,8 @@ pub enum Msg {
     Settings(SettingsMsg),
     /// Mouse on an impulse-response picture (the transfer and sweep panes' IR views).
     IrNav(ac2_scene::view::IrPane, IrNavMsg),
+    /// The mouse on a 3D spectrograph: its camera.
+    Cam3d(PaneId, super::Cam3dMsg),
     /// The mouse on an SPL pane's Leq history strip.
     LeqStrip(PaneId, StripMsg),
     /// The mouse on the plan view of the walk setup or the plan editor.

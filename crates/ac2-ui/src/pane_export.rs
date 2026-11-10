@@ -81,7 +81,29 @@ impl crate::App {
             .ok_or("that pane has drawn no plot yet")?;
         let background = self.theme().plot_background;
         let size = [cached.size.x, cached.size.y];
-        let [w, h] = write_png(rs, &cached.scene, size, ppp, background, &req.path)?;
+        // The 3D spectrograph exports at the full tier whatever this machine draws: an
+        // exported picture is the same on every machine.
+        let full;
+        let scene = if cached.view.shows_3d() {
+            let st = &self.state;
+            full = crate::scenes::spectrograph_3d(
+                st,
+                req.pane,
+                &mut ac2_scene::spectrograph_3d::Skyline::default(),
+                (ac2_scene::primitives::SkylineTier::Full, false),
+                &st.scene_theme(),
+                ac2_scene::primitives::Viewport {
+                    width: size[0],
+                    height: size[1],
+                },
+                crate::view::now(),
+            )
+            .scene;
+            &full
+        } else {
+            &*cached.scene
+        };
+        let [w, h] = write_png(rs, scene, size, ppp, background, &req.path)?;
         Ok(format!(
             "{} pane exported to {} ({w}×{h} px)",
             cached.view.title(),

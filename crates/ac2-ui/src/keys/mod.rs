@@ -43,10 +43,12 @@ pub enum Scope {
     Inputs,
     /// A spatial walk's pane in focus.
     Walk,
+    /// A spectrum pane in its 3D spectrograph view: camera keys.
+    Spectrograph3d,
 }
 
 impl Scope {
-    pub const ALL: [Scope; 9] = [
+    pub const ALL: [Scope; 10] = [
         Scope::Global,
         Scope::Transfer,
         Scope::Spectrum,
@@ -56,6 +58,7 @@ impl Scope {
         Scope::Programme,
         Scope::Inputs,
         Scope::Walk,
+        Scope::Spectrograph3d,
     ];
 
     pub fn name(self) -> &'static str {
@@ -69,6 +72,7 @@ impl Scope {
             Scope::Programme => "programme",
             Scope::Inputs => "inputs",
             Scope::Walk => "walk",
+            Scope::Spectrograph3d => "spectrograph_3d",
         }
     }
 
@@ -83,6 +87,7 @@ impl Scope {
             Scope::Programme => "Programme",
             Scope::Inputs => "Inputs list row",
             Scope::Walk => "Spatial walk",
+            Scope::Spectrograph3d => "Spectrum / RTA: 3D spectrograph",
         }
     }
 
@@ -259,8 +264,8 @@ commands! {
     SplC => "spl_c", "C weighting", [Global];
     SplZ => "spl_z", "Z weighting", [Global];
 
-    ResetAverage => "reset_average", "Reset averaging", [Transfer, Spectrum, Spl];
-    StartStop => "start_stop", "Start/stop", [Transfer, Spectrum, Ir, Spl];
+    ResetAverage => "reset_average", "Reset averaging", [Transfer, Spectrum, Spl, Spectrograph3d];
+    StartStop => "start_stop", "Start/stop", [Transfer, Spectrum, Ir, Spl, Spectrograph3d];
 
     InsertDelay => "insert_delay", "Find first arrival", [Transfer];
     EqEditor => "eq_editor", "EQ…", [Transfer];
@@ -278,7 +283,7 @@ commands! {
     FinderCustom => "finder_custom", "Finder band custom…", [Transfer];
     FinderObservation => "finder_observation", "Finder observation…", [Transfer];
     Invert => "invert", "Invert polarity", [Transfer];
-    Offset => "offset", "Set offset…", [Transfer, Spectrum];
+    Offset => "offset", "Set offset…", [Transfer, Spectrum, Spectrograph3d];
     NudgeEarlier => "nudge_earlier", "Delay −0.1 ms", [Transfer];
     NudgeLater => "nudge_later", "Delay +0.1 ms", [Transfer];
     PhaseReference => "phase_reference", "Set phase reference", [Transfer];
@@ -316,16 +321,19 @@ commands! {
 
     SpectrumStyle => "spectrum_style", "Spectrum style", [Spectrum];
     PeakHold => "peak_hold", "Peaks", [Spectrum];
-    SpectrographSpan => "spectrograph_span", "Spectrograph span", [Spectrum];
-    SpectrographColours => "spectrograph_colours", "Next colour map", [Spectrum];
-    SpectrographViridis => "spectrograph_colours_viridis", "Colour map viridis", [Spectrum];
-    SpectrographMagma => "spectrograph_colours_magma", "Colour map magma", [Spectrum];
-    SpectrographInferno => "spectrograph_colours_inferno", "Colour map inferno", [Spectrum];
-    SpectrographCividis => "spectrograph_colours_cividis", "Colour map cividis", [Spectrum];
-    SpectrographGrey => "spectrograph_colours_grey", "Colour map grey", [Spectrum];
+    SpectrographSpan => "spectrograph_span", "Spectrograph span", [Spectrum, Spectrograph3d];
+    SpectrographColours => "spectrograph_colours", "Next colour map", [Spectrum, Spectrograph3d];
+    SpectrographViridis => "spectrograph_colours_viridis", "Colour map viridis", [Spectrum, Spectrograph3d];
+    SpectrographMagma => "spectrograph_colours_magma", "Colour map magma", [Spectrum, Spectrograph3d];
+    SpectrographInferno => "spectrograph_colours_inferno", "Colour map inferno", [Spectrum, Spectrograph3d];
+    SpectrographCividis => "spectrograph_colours_cividis", "Colour map cividis", [Spectrum, Spectrograph3d];
+    SpectrographGrey => "spectrograph_colours_grey", "Colour map grey", [Spectrum, Spectrograph3d];
+    SpectrographIce => "spectrograph_colours_ice", "Colour map ice", [Spectrum, Spectrograph3d];
+    TiltUp => "tilt_up", "Tilt up", [Spectrograph3d];
+    TiltDown => "tilt_down", "Tilt down", [Spectrograph3d];
 
-    NextView => "next_view", "Next view", [Transfer, Spectrum, Ir, Spl, Distortion, Programme];
-    PrevView => "prev_view", "Previous view", [Transfer, Spectrum, Ir, Spl, Distortion, Programme];
+    NextView => "next_view", "Next view", [Transfer, Spectrum, Ir, Spl, Distortion, Programme, Spectrograph3d];
+    PrevView => "prev_view", "Previous view", [Transfer, Spectrum, Ir, Spl, Distortion, Programme, Spectrograph3d];
 
     SplShowMeter => "spl_show_meter", "Meter view", [Spl];
     SplShowLeq => "spl_show_leq", "Leq view", [Spl];

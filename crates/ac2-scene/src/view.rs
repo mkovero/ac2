@@ -417,15 +417,16 @@ pub enum SpectrumMode {
 }
 
 impl SpectrumMode {
-    /// G: spectrum → spectrum + spectrograph → spectrograph → spectrum. The spectrograph
-    /// first comes in beside the curve it is made of, so its history (kept only while it is
-    /// shown) builds while the spectrum is still in view; it then takes the whole pane
-    /// with its history, and the last step back hides it.
+    /// G: spectrum → spectrum + spectrograph → spectrograph → 3D → spectrum. The
+    /// spectrograph first comes in beside the curve it is made of, so its history (kept only
+    /// while it is shown) builds while the spectrum is still in view; it then takes the
+    /// whole pane with its history, stands up in 3D on the same history, and the last step
+    /// back hides it.
     pub fn next(self) -> Self {
         match self {
             Self::Spectrum => Self::Split,
             Self::Split => Self::Spectrograph,
-            Self::Spectrograph => Self::Spectrum,
+            Self::Spectrograph => Self::Spectrograph3d,
             Self::Spectrograph3d => Self::Spectrum,
         }
     }
@@ -433,7 +434,7 @@ impl SpectrumMode {
     /// Shift+G: [`Self::next`] backwards.
     pub fn prev(self) -> Self {
         match self {
-            Self::Spectrum => Self::Spectrograph,
+            Self::Spectrum => Self::Spectrograph3d,
             Self::Split => Self::Spectrum,
             Self::Spectrograph => Self::Split,
             Self::Spectrograph3d => Self::Spectrograph,

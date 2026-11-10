@@ -97,6 +97,8 @@ fn display_and_recording_texts() {
         bar_ease: false,
         shared_scale: false,
         spec_ease: false,
+        quality_3d: ac2_scene::spectrograph_3d::Quality::Auto,
+        auto_tier: ac2_scene::primitives::SkylineTier::Lite,
         plate_background: ac2_scene::plate::PlateBackground::Solid,
     };
     let rows = display_rows(
@@ -124,6 +126,7 @@ fn display_and_recording_texts() {
             "each SPL pane on its own scale",
             "the spectrum over its spectrograph",
             "jumps to each new frame",
+            "by the GPU (lite here)",
             "the room parameters",
             "% of fundamental",
             "over the magnitude",

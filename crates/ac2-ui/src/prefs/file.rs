@@ -4,6 +4,7 @@ use super::layout::*;
 use super::rig_file::{DaemonFile, RigFile, RigsFile, parse_rig_id, parse_rig_key, rig_key};
 use super::*;
 use ac2_scene::plate::PlateBackground;
+use ac2_scene::spectrograph_3d::Quality;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct File {
@@ -33,6 +34,9 @@ struct File {
     /// Written only when off (the default is on).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     spec_ease: Option<bool>,
+    /// Written only when set (the default is by the GPU).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    quality_3d: Option<Quality3dFile>,
     /// Written only when not the default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     jump_prominence_db: Option<f64>,
@@ -135,6 +139,33 @@ impl LegendFile {
         l.hidden.then_some(LegendsFile {
             transfer: Some(Self { hidden: Some(true) }),
         })
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum Quality3dFile {
+    Full,
+    Lite,
+    Bare,
+}
+
+impl Quality3dFile {
+    fn quality(self) -> Quality {
+        match self {
+            Self::Full => Quality::Full,
+            Self::Lite => Quality::Lite,
+            Self::Bare => Quality::Bare,
+        }
+    }
+
+    fn of(q: Quality) -> Option<Self> {
+        match q {
+            Quality::Auto => None,
+            Quality::Full => Some(Self::Full),
+            Quality::Lite => Some(Self::Lite),
+            Quality::Bare => Some(Self::Bare),
+        }
     }
 }
 
@@ -840,6 +871,7 @@ impl UiPrefs {
             bar_ease: f.bar_ease.unwrap_or(true),
             shared_scale: f.shared_scale.unwrap_or(true),
             spec_ease: f.spec_ease.unwrap_or(true),
+            quality_3d: f.quality_3d.map_or(Quality::Auto, Quality3dFile::quality),
             // A value no step reaches (hand-edited) is kept when it can be stood out by;
             // anything else is the default.
             jump_prominence_db: f
@@ -907,6 +939,7 @@ impl UiPrefs {
             bar_ease: (!self.bar_ease).then_some(false),
             shared_scale: (!self.shared_scale).then_some(false),
             spec_ease: (!self.spec_ease).then_some(false),
+            quality_3d: Quality3dFile::of(self.quality_3d),
             jump_prominence_db: (self.jump_prominence_db
                 != ac2_scene::cursor_jump::DEFAULT_PROMINENCE_DB)
                 .then_some(self.jump_prominence_db),

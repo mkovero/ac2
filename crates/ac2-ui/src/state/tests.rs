@@ -707,6 +707,8 @@ mod overlay;
 
 mod ir_nav_tests;
 
+mod cam3d;
+
 mod settings;
 
 mod eq_edits;

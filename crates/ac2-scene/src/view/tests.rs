@@ -111,10 +111,15 @@ fn view_chains_wrap_both_ways() {
         SpectrumMode::Spectrum,
         SpectrumMode::Split,
         SpectrumMode::Spectrograph,
+        SpectrumMode::Spectrograph3d,
     ] {
         assert_eq!(m.next().prev(), m);
     }
-    assert_eq!(SpectrumMode::Spectrum.prev(), SpectrumMode::Spectrograph);
+    assert_eq!(
+        SpectrumMode::Spectrograph.next(),
+        SpectrumMode::Spectrograph3d
+    );
+    assert_eq!(SpectrumMode::Spectrum.prev(), SpectrumMode::Spectrograph3d);
     for bands in [false, true] {
         let modes: &[SplMode] = if bands {
             &[

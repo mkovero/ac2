@@ -298,6 +298,12 @@ pub(super) fn navigate(
             });
         }
     }
+    // The 3D spectrograph: after the level range's Ctrl / Shift+wheel (it sets the
+    // heights), before the frequency axis, whose gestures move the camera here.
+    if app.state.layout.view(id).is_some_and(|v| v.shows_3d()) {
+        navigate_3d(app, ui, resp, id);
+        return;
+    }
     let Some(m) = axes.x else {
         return;
     };
@@ -339,6 +345,64 @@ pub(super) fn navigate(
                 factor: f64::from((scroll / 200.0).exp()),
             });
         }
+    }
+}
+
+/// Wheel scroll that makes one zoom step: a mouse notch.
+const WHEEL_PX_PER_STEP: f32 = 50.0;
+
+/// The mouse on a 3D spectrograph: a drag orbits and tilts (stored on release), the plain
+/// wheel and a touch pinch dolly a zoom step at a time, a click only focuses.
+fn navigate_3d(app: &mut App, ui: &egui::Ui, resp: &egui::Response, id: PaneId) {
+    use crate::state::Cam3dMsg;
+    if resp.dragged() {
+        let d = resp.drag_delta();
+        if d != egui::Vec2::ZERO {
+            app.dispatch(Msg::Cam3d(
+                id,
+                Cam3dMsg::Drag {
+                    dx: f64::from(d.x),
+                    dy: f64::from(d.y),
+                },
+            ));
+        }
+    }
+    if resp.drag_stopped() {
+        app.dispatch(Msg::Cam3d(id, Cam3dMsg::Release));
+    }
+    if !resp.hovered() {
+        app.cam3d_wheel = 0.0;
+        return;
+    }
+    let (scroll, pinch) = ui.input(|i| {
+        let plain = !i.modifiers.command && !i.modifiers.shift;
+        (
+            if plain { i.smooth_scroll_delta.y } else { 0.0 },
+            // Ctrl+wheel arrives as a zoom too: that one is the level range's.
+            if i.modifiers.command {
+                1.0
+            } else {
+                i.zoom_delta()
+            },
+        )
+    });
+    // A pinch's factor in zoom steps: a step is 2^(1/8) of distance.
+    let pinch_px = 8.0 * pinch.log2() * WHEEL_PX_PER_STEP;
+    app.cam3d_wheel += scroll
+        + if pinch.is_finite() && pinch > 0.0 {
+            pinch_px
+        } else {
+            0.0
+        };
+    let steps = (app.cam3d_wheel / WHEEL_PX_PER_STEP).trunc();
+    if steps != 0.0 {
+        app.cam3d_wheel -= steps * WHEEL_PX_PER_STEP;
+        app.dispatch(Msg::Cam3d(
+            id,
+            Cam3dMsg::Dolly {
+                steps: steps as i32,
+            },
+        ));
     }
 }
 

@@ -467,6 +467,7 @@ impl AppState {
             DisplayRow::LeqBars if d != 0 => self.toggle_bar_ease(),
             DisplayRow::LeqScale if d != 0 => self.toggle_shared_scale(),
             DisplayRow::SpectrumGlide if d != 0 => self.toggle_spec_ease(),
+            DisplayRow::Quality3d if d != 0 => self.step_quality_3d(d),
             DisplayRow::DistortionUnit if d != 0 => self.toggle_distortion_unit(),
             DisplayRow::Coherence if d != 0 => self.toggle_coherence_placement(),
             DisplayRow::ResolutionMarker if d != 0 => self.toggle_resolution_marker(),
@@ -861,6 +862,16 @@ impl AppState {
 
     /// The Display page's Plate background line, for every plate of every pane; remembered
     /// in the prefs.
+    /// The Display page's 3D quality: auto → full → lite → bare; remembered in the prefs.
+    pub(super) fn step_quality_3d(&mut self, d: i32) {
+        self.prefs.quality_3d = self.prefs.quality_3d.step(d.signum());
+        self.prefs_dirty = true;
+        self.toast(format!(
+            "3D quality {}",
+            crate::settings::quality_3d_text(self.prefs.quality_3d, self.auto_tier)
+        ));
+    }
+
     pub(super) fn toggle_plate_background(&mut self) {
         self.prefs.plate_background = self.prefs.plate_background.toggled();
         self.prefs_dirty = true;

@@ -224,11 +224,19 @@ impl View {
         }
     }
 
+    /// A spectrum pane in its 3D spectrograph view.
+    pub fn shows_3d(&self) -> bool {
+        self.kind == PaneKind::Spectrum
+            && self.modes.spectrum == ac2_scene::view::SpectrumMode::Spectrograph3d
+    }
+
     /// The keys that act while this view has the focus: an IR has its own (time axis, IR
-    /// mode), the kind's otherwise.
+    /// mode), the 3D spectrograph its own (camera), the kind's otherwise.
     pub fn scope(&self) -> Scope {
         if self.shows_ir() {
             Scope::Ir
+        } else if self.shows_3d() {
+            Scope::Spectrograph3d
         } else {
             self.kind.scope()
         }

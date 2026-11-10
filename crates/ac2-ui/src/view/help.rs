@@ -211,7 +211,7 @@ const DIGITS: [Key; 9] = [
 
 /// Opposite steps shown on one row (`↑/↓ Stimulus level ±1 dB`) when their keys fit the
 /// key column side by side.
-const PAIRS: [(CommandId, CommandId, &str); 17] = {
+const PAIRS: [(CommandId, CommandId, &str); 18] = {
     use CommandId as C;
     [
         (C::LevelUp, C::LevelDown, "Stimulus level ±1 dB"),
@@ -233,6 +233,7 @@ const PAIRS: [(CommandId, CommandId, &str); 17] = {
         (C::LevelPanUp, C::LevelPanDown, "Pan level up/down"),
         (C::NextTrace, C::PrevTrace, "Next/previous trace"),
         (C::NextView, C::PrevView, "Next/previous view"),
+        (C::TiltUp, C::TiltDown, "Tilt up/down"),
         (C::SmoothCoarser, C::SmoothFiner, "Smoothing coarser/finer"),
         (
             C::ToggleSelected,
@@ -250,6 +251,15 @@ const PLATE_MOUSE: [(&str, &str); 1] = [(
     "Move it; its corner: text size; double-click: back",
 )];
 
+/// What the frequency axis's keys and gestures do in the 3D spectrograph: they move the
+/// camera. Listed under its pane's keys with the keys they are bound to.
+const CAMERA: [(CommandId, &str); 3] = [
+    (CommandId::PanLeft, "Orbit left/right"),
+    (CommandId::ZoomIn, "Dolly in/out"),
+    (CommandId::ResetView, "Reset camera"),
+];
+const CAMERA_MOUSE: [(&str, &str); 2] = [("Drag", "Orbit and tilt"), ("Wheel\nPinch", "Dolly")];
+
 /// The widest key text the help's key column holds (`Alt+Shift+V`).
 const KEY_COLUMN_CHARS: usize = 11;
 
@@ -263,6 +273,28 @@ pub(crate) fn help_rows(keymap: &Keymap, active: Scope) -> Vec<HelpRow> {
             rows.extend(pane);
             if matches!(active, Scope::Transfer | Scope::Spectrum) {
                 rows.extend(PLATE_MOUSE.iter().map(|(keys, title)| HelpRow::Bind {
+                    keys: (*keys).into(),
+                    title: (*title).into(),
+                }));
+            }
+            if active == Scope::Spectrograph3d {
+                for (c, title) in CAMERA {
+                    let keep = |x: CommandId| {
+                        x == c
+                            || (c == CommandId::PanLeft && x == CommandId::PanRight)
+                            || (c == CommandId::ZoomIn && x == CommandId::ZoomOut)
+                    };
+                    rows.extend(scope_rows(keymap, Scope::Global, keep).into_iter().map(
+                        |r| match r {
+                            HelpRow::Bind { keys, .. } => HelpRow::Bind {
+                                keys,
+                                title: title.into(),
+                            },
+                            h => h,
+                        },
+                    ));
+                }
+                rows.extend(CAMERA_MOUSE.iter().map(|(keys, title)| HelpRow::Bind {
                     keys: (*keys).into(),
                     title: (*title).into(),
                 }));

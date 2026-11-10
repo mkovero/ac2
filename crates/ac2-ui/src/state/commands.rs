@@ -488,6 +488,7 @@ impl AppState {
             C::SpectrographInferno => self.spectrograph_colours(Ok(Colormap::Inferno), out),
             C::SpectrographCividis => self.spectrograph_colours(Ok(Colormap::Cividis), out),
             C::SpectrographGrey => self.spectrograph_colours(Ok(Colormap::Grey), out),
+            C::SpectrographIce => self.spectrograph_colours(Ok(Colormap::Ice), out),
             C::PlotChrome => {
                 let title = self.layout.focused().title();
                 let kind = self.layout.focus_kind();
@@ -506,6 +507,14 @@ impl AppState {
                     self.leq_strip_key(p, c, out);
                 }
             }
+            // The 3D spectrograph moves its camera with the frequency axis's keys.
+            c if cam3d::is_nav(c) && self.cam3d_target().is_some() => {
+                if let Some(p) = self.cam3d_target() {
+                    self.cam3d_key(p, c);
+                }
+            }
+            // Tilt means something only in the 3D view; its scope alone binds it.
+            C::TiltUp | C::TiltDown => {}
             // An IR picture navigates its time and value axes with the same keys.
             c if ir_nav::is_nav(c) && self.ir_target().is_some() => {
                 if let Some(p) = self.ir_target() {

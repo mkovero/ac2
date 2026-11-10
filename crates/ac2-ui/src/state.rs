@@ -55,7 +55,9 @@ pub use panes::levels::{LEVEL_ZOOM_FACTOR, PaneLevels};
 mod settings_conn;
 mod settings_impl;
 pub use settings_impl::SettingsMsg;
+mod cam3d;
 mod ir_nav;
+pub use cam3d::Cam3dMsg;
 pub use ir_nav::IrNavMsg;
 mod band_transfer;
 mod commands;
@@ -191,6 +193,11 @@ pub struct AppState {
     /// What the scene builders get; `view.freq` follows `nav`.
     pub view: ViewState,
     pub nav: FreqNav,
+    /// The 3D spectrograph's camera while it eases or is dragged.
+    cam3d: Option<cam3d::CamNav>,
+    /// The 3D spectrograph's tier on this machine's GPU (Settings › 3D quality may override
+    /// it); set by the app from the adapter.
+    pub auto_tier: ac2_scene::primitives::SkylineTier,
     pub layout: Layout,
     /// The size of the panes' area as last drawn (the view writes it): N splits the
     /// focused pane along its longer side.
@@ -323,6 +330,8 @@ impl AppState {
             theme,
             view: ViewState::default(),
             nav: FreqNav::new(FreqRange::default()),
+            cam3d: None,
+            auto_tier: ac2_scene::primitives::SkylineTier::Full,
             layout: Layout::default(),
             pane_area: DEFAULT_PANE_AREA,
             spl_scales: Vec::new(),
@@ -465,6 +474,7 @@ impl AppState {
             Msg::Leq(m) => self.leq_msg(m, out),
             Msg::Settings(m) => self.settings_msg(m, out),
             Msg::IrNav(p, m) => self.ir_nav(p, m),
+            Msg::Cam3d(p, m) => self.cam3d_msg(p, m),
             Msg::LeqStrip(p, m) => self.leq_strip_msg(p, m, out),
             Msg::Plan(m) => self.plan_msg(m),
             Msg::Tick { now_s, dt_s } => {
@@ -472,6 +482,7 @@ impl AppState {
                 self.now_s = now_s;
                 self.nav.step(dt_s);
                 self.view.freq = self.nav.current();
+                self.step_cam3d(dt_s);
                 if self.toasts.held {
                     for t in &mut self.toasts.list {
                         t.until_s += held;

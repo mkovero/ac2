@@ -294,6 +294,17 @@ pub fn defaults() -> Vec<Binding> {
         (C::WalkRedo, S::Walk, sh(K::R)),
         (C::WalkSkip, S::Walk, k(K::K)),
         (C::WalkSwap, S::Walk, k(K::M)),
+        // The 3D spectrograph's own section: what acts on its measurement or view keeps the
+        // spectrum's keys; PageUp / PageDown tilt (↑/↓ are the stimulus level, and
+        // Ctrl / Alt+↑/↓ the level range and offset, which set the heights here too).
+        (C::StartStop, S::Spectrograph3d, k(K::S)),
+        (C::ResetAverage, S::Spectrograph3d, k(K::R)),
+        (C::NextView, S::Spectrograph3d, k(K::G)),
+        (C::PrevView, S::Spectrograph3d, sh(K::G)),
+        (C::SpectrographSpan, S::Spectrograph3d, sh(K::B)),
+        (C::Offset, S::Spectrograph3d, k(K::J)),
+        (C::TiltUp, S::Spectrograph3d, k(K::PageUp)),
+        (C::TiltDown, S::Spectrograph3d, k(K::PageDown)),
     ];
     v.extend(RESERVED.iter().map(|(c, id)| (*id, S::Global, *c)));
     v.into_iter()
@@ -406,6 +417,20 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::PlotChrome, "grid", 60),
                     hint(C::MaximisePane, "maximise", 50),
                     hint(C::ClosePane, "close pane", 40),
+                ]
+            }
+        }
+        Scope::Spectrograph3d => {
+            const {
+                &[
+                    hint(C::PanLeft, "orbit", 95),
+                    hint(C::TiltUp, "tilt", 90),
+                    hint(C::ZoomIn, "zoom", 85),
+                    hint(C::ResetView, "reset camera", 70),
+                    hint(C::NextView, "view", 80),
+                    hint(C::StartStop, "start/stop", 75),
+                    hint(C::SpectrographSpan, "span", 60),
+                    hint(C::MaximisePane, "maximise", 40),
                 ]
             }
         }

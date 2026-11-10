@@ -731,7 +731,7 @@ fn space_on_the_live_views_drives_the_generator() {
 }
 
 /// G in the spectrum pane steps its views: spectrum → spectrum + spectrograph →
-/// spectrograph → spectrum. The history is kept from the split to the spectrograph alone and
+/// spectrograph → 3D spectrograph → spectrum. The history is kept from the split to the spectrograph alone and
 /// dropped with it; the view is remembered.
 #[test]
 fn g_steps_the_spectrum_panes_views() {
@@ -773,6 +773,11 @@ fn g_steps_the_spectrum_panes_views() {
     t.key("G");
     assert_eq!(
         t.st.kind_modes(PaneKind::Spectrum).spectrum,
+        SpectrumMode::Spectrograph3d
+    );
+    t.key("G");
+    assert_eq!(
+        t.st.kind_modes(PaneKind::Spectrum).spectrum,
         SpectrumMode::Spectrum
     );
     assert!(
@@ -781,6 +786,7 @@ fn g_steps_the_spectrum_panes_views() {
     );
     // Shift+G walks the same chain back, wrapping at the spectrum.
     for want in [
+        SpectrumMode::Spectrograph3d,
         SpectrumMode::Spectrograph,
         SpectrumMode::Split,
         SpectrumMode::Spectrum,

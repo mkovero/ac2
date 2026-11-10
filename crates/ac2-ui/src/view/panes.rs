@@ -94,8 +94,15 @@ fn scene_for(
     let view = app.state.layout.view(id)?.to_owned();
     let pane = view.kind;
     let freq_right = app.state.column_right(id);
+    // The skyline is kept only while its pane shows it; it is rebuilt from the history on
+    // the way back.
+    if !view.shows_3d() {
+        app.skylines.remove(&id);
+    }
     if let Some(c) = app.scenes.get(&id)
         && c.view == view
+        // A moving camera is drawn from the state's pose, not the stored one in `view`.
+        && !(view.shows_3d() && app.state.animating())
         && c.generation == app.pane_generation(pane)
         && c.size == size
         && c.freq_right == freq_right
@@ -166,6 +173,12 @@ fn scene_for(
                     strip: None,
                 },
             )
+        }
+        PaneKind::Spectrum if view.shows_3d() => {
+            let tier = st.prefs.quality_3d.tier(st.auto_tier);
+            let sky = app.skylines.entry(id).or_default();
+            let s = scenes::spectrograph_3d(st, id, sky, tier, theme, vp, now);
+            (s.scene, Axes::default())
         }
         PaneKind::Spectrum if view.modes.spectrum.spectrograph() => {
             let s = scenes::spectrograph(st, id, theme, vp, now);

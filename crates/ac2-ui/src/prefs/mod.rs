@@ -381,6 +381,8 @@ pub struct UiPrefs {
     /// The live spectrum and RTA curves glide to each new frame (on until the operator
     /// turns it off); off, they jump to it as received.
     pub spec_ease: bool,
+    /// How the 3D spectrograph is drawn on this machine: by the GPU (auto) or as set.
+    pub quality_3d: ac2_scene::spectrograph_3d::Quality,
     /// How far a peak or notch must stand out for the cursor to jump to it, dB
     /// (`ac2_scene::cursor_jump`).
     pub jump_prominence_db: f64,
@@ -484,6 +486,7 @@ impl Default for UiPrefs {
             range_band: true,
             sim_hints: true,
             plate_background: ac2_scene::plate::PlateBackground::SeeThrough,
+            quality_3d: ac2_scene::spectrograph_3d::Quality::Auto,
             bar_ease: true,
             shared_scale: true,
             spec_ease: true,

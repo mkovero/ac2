@@ -264,7 +264,7 @@ impl AppState {
         };
         match msg {
             Msg::Conn(r, _) | Msg::OnRig(r, _) => *r,
-            Msg::LegendPick(p, _) | Msg::LeqStrip(p, _) => pane(*p),
+            Msg::LegendPick(p, _) | Msg::LeqStrip(p, _) | Msg::Cam3d(p, _) => pane(*p),
             Msg::LevelZoom { pane: p, .. } | Msg::LevelPan { pane: p, .. } => pane(*p),
             Msg::IrNav(..) | Msg::SpectrographCursor { .. } if free => focused,
             Msg::Command(c) if free && pane_command(*c) => focused,

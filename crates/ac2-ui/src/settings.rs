@@ -281,6 +281,7 @@ pub enum DisplayRow {
     LeqScale,
     SpectrumView,
     SpectrumGlide,
+    Quality3d,
     SweepView,
     DistortionUnit,
     Coherence,
@@ -297,7 +298,7 @@ pub enum DisplayRow {
 }
 
 impl DisplayRow {
-    pub const ALL: [DisplayRow; 25] = [
+    pub const ALL: [DisplayRow; 26] = [
         DisplayRow::Theme,
         DisplayRow::KeyHints,
         DisplayRow::WarningToasts,
@@ -310,6 +311,7 @@ impl DisplayRow {
         DisplayRow::LeqScale,
         DisplayRow::SpectrumView,
         DisplayRow::SpectrumGlide,
+        DisplayRow::Quality3d,
         DisplayRow::SweepView,
         DisplayRow::DistortionUnit,
         DisplayRow::Coherence,
@@ -339,6 +341,7 @@ impl DisplayRow {
             DisplayRow::LeqScale => "Leq scale",
             DisplayRow::SpectrumView => "Spectrum pane shows",
             DisplayRow::SpectrumGlide => "Spectrum",
+            DisplayRow::Quality3d => "3D quality",
             DisplayRow::SweepView => "Sweep pane shows",
             DisplayRow::DistortionUnit => "Distortion in",
             DisplayRow::Coherence => "Coherence",
@@ -545,6 +548,26 @@ pub fn spec_ease_text(on: bool) -> &'static str {
     }
 }
 
+/// What the 3D quality setting says, on the Display page and in its toast: by the GPU
+/// (naming what it chose here) or as set.
+pub fn quality_3d_text(
+    q: ac2_scene::spectrograph_3d::Quality,
+    auto: ac2_scene::primitives::SkylineTier,
+) -> String {
+    use ac2_scene::spectrograph_3d::{Quality, tier_name};
+    let what = |t| match t {
+        ac2_scene::primitives::SkylineTier::Full => "full: finest grid, full-resolution spikes",
+        ac2_scene::primitives::SkylineTier::Lite => "lite: coarser grid, half-resolution spikes",
+        ac2_scene::primitives::SkylineTier::Bare => "bare: as lite, never a glow",
+    };
+    match q {
+        Quality::Auto => format!("by the GPU ({} here)", tier_name(auto)),
+        Quality::Full => what(ac2_scene::primitives::SkylineTier::Full).into(),
+        Quality::Lite => what(ac2_scene::primitives::SkylineTier::Lite).into(),
+        Quality::Bare => what(ac2_scene::primitives::SkylineTier::Bare).into(),
+    }
+}
+
 /// The Display page's on / off lines.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DisplaySwitches {
@@ -556,6 +579,9 @@ pub struct DisplaySwitches {
     pub bar_ease: bool,
     pub shared_scale: bool,
     pub spec_ease: bool,
+    pub quality_3d: ac2_scene::spectrograph_3d::Quality,
+    /// The tier the GPU gets when the quality is auto.
+    pub auto_tier: ac2_scene::primitives::SkylineTier,
     pub plate_background: ac2_scene::plate::PlateBackground,
 }
 
@@ -604,6 +630,7 @@ pub fn display_rows(
                 DisplayRow::LeqBars => bar_ease_text(switches.bar_ease).into(),
                 DisplayRow::LeqScale => shared_scale_text(switches.shared_scale).into(),
                 DisplayRow::SpectrumGlide => spec_ease_text(switches.spec_ease).into(),
+                DisplayRow::Quality3d => quality_3d_text(switches.quality_3d, switches.auto_tier),
                 DisplayRow::DistortionUnit => match views.distortion_unit {
                     DistortionUnit::Db => "dB re fundamental".into(),
                     DistortionUnit::Percent => "% of fundamental".into(),

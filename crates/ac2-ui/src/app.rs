@@ -184,6 +184,10 @@ pub struct App {
     /// The time-driven texts the panes were last built with ([`ClockTexts`]).
     clock: ClockTexts,
     pub(crate) scenes: HashMap<crate::state::PaneId, CachedScene>,
+    /// The 3D spectrograph's skyline of each pane showing it, folded as frames arrive.
+    pub(crate) skylines: HashMap<crate::state::PaneId, ac2_scene::spectrograph_3d::Skyline>,
+    /// Wheel scroll over a 3D spectrograph not yet a whole zoom step, logical pixels.
+    pub(crate) cam3d_wheel: f32,
     pub(crate) plate_drag: Option<PlateDrag>,
     /// Where each pane's plates and their grips were last drawn, on screen.
     pub(crate) plate_screen: Vec<(
@@ -268,6 +272,16 @@ impl App {
             Conn::start(t, link_wake(ctx.clone(), Arc::clone(&pacer))).ok()
         });
         let mut state = AppState::new(opts.theme, describe);
+        if let Some(rs) = &cc.wgpu_render_state {
+            let info = rs.adapter.get_info();
+            state.auto_tier =
+                ac2_scene::spectrograph_3d::auto_tier(&ac2_scene::spectrograph_3d::AdapterFacts {
+                    software: ac2_plot::classify_info(&info) == ac2_plot::Rasterizer::Software,
+                    name: info.name.clone(),
+                    max_texture_2d: rs.device.limits().max_texture_dimension_2d,
+                    integrated: info.device_type == ac2_plot::wgpu::DeviceType::IntegratedGpu,
+                });
+        }
         state.local_host = ac2_discovery::local_host_label();
         state.rig.link = conn;
         state.rig.daemon_addr = daemon_addr;
@@ -312,6 +326,8 @@ impl App {
             pane_generations: HashMap::new(),
             clock: ClockTexts::default(),
             scenes: HashMap::new(),
+            skylines: HashMap::new(),
+            cam3d_wheel: 0.0,
             plate_drag: None,
             plate_screen: Vec::new(),
             legend_wheel: 0.0,

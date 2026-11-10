@@ -140,6 +140,7 @@ fn every_command_is_reachable() {
         CommandId::SpectrographInferno,
         CommandId::SpectrographCividis,
         CommandId::SpectrographGrey,
+        CommandId::SpectrographIce,
         // Once a show: the palette's "export leq".
         CommandId::SplLogExport,
         CommandId::SplLogExportPrevious,
@@ -565,13 +566,14 @@ fn g_steps_the_views_of_every_pane() {
         Some(CommandId::SpectrographSpan)
     );
     assert_eq!(m.lookup(Scope::Global, c("Shift+B")), None);
-    // One binding of Shift+B anywhere: no scope's own key is shadowed.
-    let n = m
+    // Shift+B only where a spectrograph is: no other scope's own key is shadowed.
+    let scopes: Vec<Scope> = m
         .bindings()
         .iter()
         .filter(|b| b.chord == c("Shift+B"))
-        .count();
-    assert_eq!(n, 1);
+        .map(|b| b.scope)
+        .collect();
+    assert_eq!(scopes, [Scope::Spectrum, Scope::Spectrograph3d]);
 }
 
 #[test]
@@ -736,5 +738,26 @@ fn walk_keys_are_the_notes() {
             walk.is_none() || walk == m.lookup(Scope::Global, c(key)),
             "{key} means {walk:?} in the walk pane"
         );
+    }
+}
+
+/// The 3D spectrograph is the spectrum pane in another view: a command bound in both scopes
+/// answers to the same default key, so a view change never moves a key under the hand.
+#[test]
+fn the_3d_view_keeps_the_spectrum_panes_keys() {
+    let m = Keymap::default();
+    for b in m
+        .bindings()
+        .iter()
+        .filter(|b| b.scope == Scope::Spectrograph3d)
+    {
+        if let Some(two_d) = m.first_chord(b.command, Scope::Spectrum) {
+            assert_eq!(
+                m.first_chord(b.command, Scope::Spectrograph3d),
+                Some(two_d),
+                "{:?}",
+                b.command
+            );
+        }
     }
 }
