@@ -84,8 +84,30 @@ struct Axes {
     strip: Option<scenes::StripPlace>,
 }
 
-/// Scene for `pane` at `size`, from the cache when nothing changed.
+/// Scene for `pane` at `size` ([`build_scene`]), noted in the `--latency-log` when on.
 fn scene_for(
+    app: &mut App,
+    id: PaneId,
+    size: egui::Vec2,
+    theme: &Theme,
+) -> Option<(Arc<ac2_plot::Scene>, Axes)> {
+    if !app.latency.is_on() {
+        return build_scene(app, id, size, theme);
+    }
+    let cached = app.scenes.get(&id).map(|c| Arc::as_ptr(&c.scene));
+    let t0 = std::time::Instant::now();
+    let r = build_scene(app, id, size, theme);
+    let t1 = std::time::Instant::now();
+    if let Some((scene, _)) = &r {
+        let built = cached != Some(Arc::as_ptr(scene));
+        let view = crate::latency::View::of(&app.state, id);
+        app.latency.pane(&app.state, id, view, built, t0, t1);
+    }
+    r
+}
+
+/// Scene for `pane` at `size`, from the cache when nothing changed.
+fn build_scene(
     app: &mut App,
     id: PaneId,
     size: egui::Vec2,

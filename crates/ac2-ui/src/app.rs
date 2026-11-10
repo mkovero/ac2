@@ -243,6 +243,8 @@ pub struct App {
     closers: Vec<std::thread::JoinHandle<()>>,
     /// The top bar's session and health line, scrolling when it is wider than its room.
     pub marquee: crate::marquee::Marquee,
+    /// `--latency-log`: off unless asked for.
+    pub(crate) latency: crate::latency::Latency,
 }
 
 impl std::fmt::Debug for App {
@@ -360,6 +362,7 @@ impl App {
             in_visit: false,
             closers: Vec::new(),
             marquee: crate::marquee::Marquee::default(),
+            latency: crate::latency::Latency::off(),
         };
         app.reconnect(&ctx, remembered, started_target, target_addr.as_ref());
         if let Some(choice) = opts.start {
@@ -780,6 +783,12 @@ impl App {
         }
     }
 
+    /// Starts (or with [`crate::latency::Latency::off`] stops) the `--latency-log`; the one
+    /// it replaces is closed, its file complete.
+    pub fn set_latency_log(&mut self, log: crate::latency::Latency) {
+        self.latency = log;
+    }
+
     /// Feeds every rig's link events to the reducer, each tagged with its rig. The rig is
     /// found by its place, not its id: its hello reply gives it its id.
     fn pump_link(&mut self) {
@@ -791,8 +800,9 @@ impl App {
                 .map(Conn::drain)
                 .unwrap_or_default();
             for e in events {
-                if matches!(e, crate::conn::ConnEvent::Data(_)) {
+                if let crate::conn::ConnEvent::Data(d) = &e {
                     self.health.data_arrived();
+                    self.latency.applied(slot, d);
                 }
                 let Some(rig) = self.state.rig_in_slot(slot).map(|r| r.id) else {
                     break;

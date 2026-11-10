@@ -148,6 +148,13 @@ restarts it: [Watchdogs](#watchdogs-under-systemd)). A daemon under systemd (`sy
 `RUST_LOG=debug` for everything); `AC2_LOG_DIR` moves the files. The app's notifications are
 not in the file; *Notifications…* (Shift+E) lists them ([Notifications](#notifications)).
 
+**Latency log.** `ac2-ui --latency-log FILE` (off by default) writes a CSV row per pane per
+presented frame: for the newest data frame each spectrum pane shows, when it was captured
+(the daemon's `capture_wall_ns`), read by the link, applied, drawn and submitted to the GPU,
+and how far the drawn curve or 3D rows trail it; also each pass's panes, build times and the
+resolved present mode. `python3 -I tools/latency/summarize.py FILE` prints per-stage
+p50/p95/max. Columns: [latency study §2](design/latency-study.md#2-instrumentation-plan).
+
 ### Audio backends
 
 The backend is always named. Each platform has one real backend:

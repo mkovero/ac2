@@ -156,6 +156,40 @@ by the least one-way delay); and, when it matters, `ac2 selftest net` in both di
 5 min, giving offset = (d_ab − d_ba)/2 and the error ≤ RTT/2 from the minima. Ratio: pupu runs
 +5.6 ppm, i.e. 0.34 ms over a 1 h run against WALL. Intervals within a host use MONO and need no correction.
 
+### 2a. App side as built (`ac2-ui --latency-log FILE`)
+
+One CSV file (not the per-site files above), `#` comment lines first: the log's start on the
+wall clock, the adapter, and the present mode, requested (`AutoNoVsync`) and resolved by
+wgpu's rule against what the surface offers (read on Vulkan through a second, at once dropped
+surface on the window; GL is FIFO only; other backends say `unknown`). Then one row per pane
+drawn per pass (A2+A3+A4), or one row with an empty `pane` for a pass that drew none. Off,
+each site is one `Option` check; on, rows are fixed-size records in preallocated buffers,
+handed about once a second to a writer thread that formats them. A pass's rows are completed
+by the next pass, which knows the probe stamps of the one before.
+
+`*_ns` columns are MONO ns since the log started; `*_wall_ns` are ns since the Unix epoch,
+this host's wall clock mapped from MONO by a pair read at each pass start, except
+`capture_wall_ns` (the daemon's).
+
+| column | what |
+|---|---|
+| `pass`, `pass_start_ns`, `ui_end_ns` | A2: the `ui()` pass, its start and end |
+| `frame_cpu_ms` | eframe's CPU time for that frame (`IntegrationInfo::cpu_usage`: build, tessellate, paint, without the surface waits); empty where eframe gives none |
+| `panes_drawn` | every view drawn that pass, `+`-joined (`spectrum`, `spectrograph`, `spectrum_3d`, `transfer`, `spl`, …) |
+| `pane`, `view`, `scene`, `build_ms`, `scene_ns` | A3: the pane, what it drew, `built` or `cached` (the cache holds while the picture is the newest frames'), the time taken, when the scene was ready |
+| `topic`, `incarnation`, `seq`, `audio_sample`, `capture_wall_ns` | the newest data frame on a spectrum pane (empty on other panes): the join key and the wire stamps |
+| `read_ns`, `read_wall_ns` | A0: when the link's drain read it (`TopicFrame::received`) |
+| `snapshot_ns`, `apply_ns` | A1: when the link's snapshot carrying it was drained, and when the reducer applied that snapshot (empty for a frame applied before the log started) |
+| `prepare_ns`, `submit_ns`, `submit_wall_ns` | A4 as far as the app can see: a probe paint callback on the topmost layer stamps egui-wgpu's prepare (before the surface acquire) and its paint (after the acquire, the frame's last; `queue.submit` and `present` follow with no app code between). Present timing itself is not observable: wgpu 30 reports nothing after `present()`, and eframe owns the surface. A FIFO wait happens in the acquire, between the two stamps; under Immediate `present` returns at once. A5 (vblank) and the GPU's completion are not logged |
+| `glide_k` | how far the glide to this frame has got, 0–1 (1: ended); 2D from `SpecGlide`, 3D from `RowGlide`; empty with no glide |
+| `drawn_capture_wall_ns`, `glide_lag_ms` | the *effective capture time* the drawn curve or rows stand for, and how far it trails `capture_wall_ns`. 2D: `from + k (to − from)` (`SpecGlide::from_capture_ns`); 3D: the row lag in slots × the slot length |
+| `row_lag_slots`, `newest_slot`, `slot_advance` | H5: the 3D rows' lag behind their places, the slot the newest row is in (also for the 2D spectrograph) and how many slots it moved since the pane was last drawn |
+
+`tools/latency/summarize.py FILE` (stdlib, run with `-I`) prints p50/p95/max of
+capture→read, read→apply, apply→build, build→present (to `submit_ns`), the glide lag,
+capture→present and capture→present as seen (plus the glide lag), the pass interval and
+CPU, build times per view, and the 3D slot-advance histogram.
+
 ## 3. Measurement protocol
 
 No run emits sound on real hardware. Agents never pass `--emit`. Synthetic signals enter as

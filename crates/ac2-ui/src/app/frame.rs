@@ -8,6 +8,7 @@ impl eframe::App for App {
     /// did, whenever it changed).
     fn on_exit(&mut self) {
         self.close_all_links();
+        self.latency.close();
         if self.window.is_some() && self.window != self.state.prefs.window {
             self.state.prefs.window = self.window;
             self.state.prefs_dirty = true;
@@ -25,6 +26,7 @@ impl eframe::App for App {
         let ctx = ui.ctx().clone();
         self.pacer.frame_started(Instant::now());
         self.passes += 1;
+        self.latency.pass_start(self.passes, frame.info().cpu_usage);
         if self.startup.first_ui.is_none() {
             self.startup.first_ui = Some(self.started.elapsed());
         } else if self.startup.first_frame.is_none() {
@@ -153,6 +155,7 @@ impl eframe::App for App {
             self.applied_theme = Some(self.state.theme);
         }
         view::draw(self, ui, &t);
+        self.latency.pass_end(&ctx, self.plots);
         // After the panes, so the export is the scene this pass drew.
         if let Some(req) = self.state.pane_export.take() {
             let result = self.export_pane(frame.wgpu_render_state(), ctx.pixels_per_point(), &req);

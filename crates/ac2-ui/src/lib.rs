@@ -33,6 +33,7 @@ pub mod health;
 pub mod hints;
 pub mod ir_import_dialog;
 pub mod keys;
+pub mod latency;
 pub mod leq_dialog;
 pub mod line_dialog;
 pub mod link_wants;

@@ -19,6 +19,11 @@ pub struct SpecGlide {
     /// How long it lasts, s: about the time since the frame before
     /// ([`curve_ease::Pacing`]).
     pub duration_s: f64,
+    /// The capture time `from` stands for, ns on the daemon's wall clock: the frame before's
+    /// `capture_wall_ns`, or part way past it when a glide was cut short. A curve drawn `k`
+    /// of the way stands for `from + k (to − from)` in time as in level, which is how far
+    /// the picture trails the newest frame.
+    pub from_capture_ns: f64,
 }
 
 /// A live spectrum or RTA frame's levels, dB per column.
@@ -42,6 +47,27 @@ impl SpecGlide {
             self.duration_s,
         )?;
         Some(curve_ease::eased(&self.from, levels(&to.data)?, k))
+    }
+
+    /// How far the glide to `to` has got at `now`, 0–1; `None` when `to` is another frame.
+    /// An ended glide is 1: the curve is drawn as received.
+    pub fn progress(&self, to: &ac2_proto::FrameStamp, now: Instant) -> Option<f64> {
+        (to.seq == self.to_seq).then(|| {
+            curve_ease::progress(
+                now.saturating_duration_since(self.start).as_secs_f64(),
+                self.duration_s,
+            )
+            .unwrap_or(1.0)
+        })
+    }
+
+    /// The capture time the curve drawn at `now` stands for, ns on the daemon's wall clock
+    /// ([`Self::from_capture_ns`]); `to`'s own when the glide is to another frame.
+    pub fn drawn_capture_ns(&self, to: &ac2_proto::FrameStamp, now: Instant) -> f64 {
+        let at = to.capture_wall_ns.0 as f64;
+        self.progress(to, now).map_or(at, |k| {
+            self.from_capture_ns + k * (at - self.from_capture_ns)
+        })
     }
 }
 
@@ -104,6 +130,12 @@ impl RigState {
                 continue;
             };
             // Mid-glide, the curve moves on from where it is drawn, so it never jumps.
+            let from_capture_ns = self
+                .spec_glide
+                .get(&tf.topic)
+                .map_or(a.capture_wall_ns.0 as f64, |g| {
+                    g.drawn_capture_ns(a, d.drained)
+                });
             let from = self
                 .spec_glide
                 .get(&tf.topic)
@@ -132,6 +164,7 @@ impl RigState {
                     from: from.into(),
                     start: d.drained,
                     duration_s,
+                    from_capture_ns,
                 },
             );
         }

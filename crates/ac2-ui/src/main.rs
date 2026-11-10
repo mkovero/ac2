@@ -82,6 +82,11 @@ struct Args {
     /// failed". For scripted checks.
     #[arg(long)]
     smoke: bool,
+    /// Write a CSV row per pane per presented frame to FILE: when the newest data frame it
+    /// shows was captured, read, applied, drawn and submitted, and how far the drawn curve
+    /// trails it (`tools/latency/summarize.py` reads it). Off by default.
+    #[arg(long, value_name = "FILE")]
+    latency_log: Option<std::path::PathBuf>,
 }
 
 const NAME: &str = concat!("ac2-ui ", env!("CARGO_PKG_VERSION"));
@@ -275,6 +280,7 @@ fn main() -> ExitCode {
         wgpu_options: ac2_ui::gpu::wgpu_options(),
         ..Default::default()
     };
+    let latency_log = args.latency_log.clone();
     let r = eframe::run_native(
         "ac2",
         native,
@@ -282,6 +288,12 @@ fn main() -> ExitCode {
             let mut app = App::new(cc, opts);
             if let Some(d) = dialog {
                 app.open_connect(d);
+            }
+            if let Some(path) = latency_log {
+                match ac2_ui::latency::Latency::create(&path, &render_notes(cc)) {
+                    Ok(l) => app.set_latency_log(l),
+                    Err(e) => tracing::error!("ac2-ui: latency log {}: {e}", path.display()),
+                }
             }
             Ok(Box::new(app))
         }),
@@ -296,6 +308,74 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// The latency log's notes on what draws the window: adapter, backend and present mode.
+fn render_notes(cc: &eframe::CreationContext<'_>) -> Vec<String> {
+    use ac2_plot::wgpu::PresentMode;
+    let Some(rs) = &cc.wgpu_render_state else {
+        return vec!["renderer: not wgpu".into()];
+    };
+    let info = rs.adapter.get_info();
+    let requested = ac2_ui::gpu::PRESENT_MODE;
+    let (resolved, how) = match surface_present_modes(cc, rs) {
+        // wgpu's rule for AutoNoVsync, against what the surface offers.
+        Some(modes) => (
+            [
+                PresentMode::Immediate,
+                PresentMode::Mailbox,
+                PresentMode::Fifo,
+            ]
+            .into_iter()
+            .find(|m| modes.contains(m))
+            .map_or_else(|| "unknown".into(), |m| format!("{m:?}")),
+            format!("surface offers {modes:?}"),
+        ),
+        None if info.backend == ac2_plot::wgpu::Backend::Gl => {
+            ("Fifo".into(), "GL surfaces offer FIFO only".into())
+        }
+        None => (
+            "unknown".into(),
+            "surface not probed on this backend".into(),
+        ),
+    };
+    vec![
+        format!(
+            "adapter: {} ({:?}, {}, {})",
+            info.name, info.backend, info.driver, info.driver_info
+        ),
+        format!(
+            "present_mode: requested {requested:?}, resolved {resolved} ({how}); \
+             frame latency {:?}",
+            ac2_ui::gpu::wgpu_options()
+                .surface
+                .desired_maximum_frame_latency
+        ),
+        "present timing: submit_ns is stamped as egui-wgpu paints the frame's last \
+         callback, after the surface acquire and just before queue.submit and present; \
+         wgpu reports nothing after present"
+            .into(),
+    ]
+}
+
+/// What the window's surface offers, read through a second surface on the same window,
+/// dropped at once. Vulkan only: a second surface is an ordinary object there, while a
+/// GL or Metal one would take over the window's own.
+#[allow(unsafe_code)]
+fn surface_present_modes(
+    cc: &eframe::CreationContext<'_>,
+    rs: &egui_wgpu::RenderState,
+) -> Option<Vec<ac2_plot::wgpu::PresentMode>> {
+    use ac2_plot::wgpu;
+    if rs.adapter.get_info().backend != wgpu::Backend::Vulkan {
+        return None;
+    }
+    // SAFETY: the display and window are the live window's, which outlives this function;
+    // the surface made from them is dropped before it returns.
+    let target = unsafe { wgpu::SurfaceTargetUnsafe::from_display_and_window(cc, cc) }.ok()?;
+    // SAFETY: as above.
+    let surface = unsafe { rs.instance.create_surface_unsafe(target) }.ok()?;
+    Some(surface.get_capabilities(&rs.adapter).present_modes)
 }
 
 /// Millisecond timer resolution for the app's lifetime (Windows; elsewhere nothing).
