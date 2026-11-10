@@ -128,6 +128,8 @@ impl SessionDialog {
             sample_rate_hz: rate,
             buffer_frames: buffer,
             loopback,
+            remote_inputs: Vec::new(),
+            link_offset: None,
         };
         let roles = DeviceRoles {
             outputs: self.out_count,

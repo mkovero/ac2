@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::DeviceId;
+use super::{DeviceId, StampMap};
 use crate::units::Seconds;
 
 /// The host's clocks.
@@ -15,6 +15,10 @@ pub struct Clocks {
     /// The capture device's sample clock (every measurement is timed on it); `None` while
     /// no audio I/O is open.
     pub capture: Option<DeviceClock>,
+    /// The capture stream's stamp clock on the system clock, refitted with the capture
+    /// clock's reading; `None` while no stream whose stamp clock can be read beside the
+    /// system clock is open.
+    pub stamp_map: Option<StampMap>,
 }
 
 /// A device's sample clock.
@@ -86,6 +90,7 @@ impl Default for Clocks {
         Self {
             system: SystemClock::NotStated,
             capture: None,
+            stamp_map: None,
         }
     }
 }

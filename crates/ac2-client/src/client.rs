@@ -283,6 +283,7 @@ pub fn body_name(b: &ReplyBody) -> &'static str {
         ReplyBody::Inputs(_) => "inputs",
         ReplyBody::Outputs(_) => "outputs",
         ReplyBody::Server(_) => "server",
+        ReplyBody::SourceState(_) => "source_state",
         ReplyBody::SplLogPage(_) => "spl_log_page",
         ReplyBody::SplHistory(_) => "spl_history",
         ReplyBody::SplBandLog(_) => "spl_band_log",

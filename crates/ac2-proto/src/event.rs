@@ -9,8 +9,8 @@ use thiserror::Error;
 
 use crate::model::{
     Autosave, CalEntry, CalKey, Clocks, Generator, InputSetups, LineCalEntry, LineCalKey,
-    Measurement, Mic, OutputSetup, PlanSpec, RecordingRun, Rig, Session, SimFitKept, SimState,
-    SplLog, State, SweepRun, TimingStatus, TraceMeta, WalkState, WorkingSession,
+    Measurement, Mic, OutputSetup, PlanSpec, RecordingRun, RemoteState, Rig, Session, SimFitKept,
+    SimState, SplLog, State, SweepRun, TimingStatus, TraceMeta, WalkState, WorkingSession,
 };
 use crate::units::{DaemonIncarnation, MeasId, Rev, SessionEpoch, TraceId, WalkId};
 
@@ -60,6 +60,8 @@ pub enum Change {
     Timing(TimingStatus),
     /// The host's clocks (never deleted).
     Clocks(Clocks),
+    /// Remote inputs: the paired rigs, the session's remote rigs and inputs (never deleted).
+    Remote(RemoteState),
     /// The latest sweep run (never deleted; a new run replaces it).
     Sweep(SweepRun),
     /// Autosave status (never deleted).
@@ -181,6 +183,13 @@ pub enum WireEvent {
         /// Payload.
         payload: Clocks,
     },
+    /// [`Change::Remote`].
+    Remote {
+        /// Rev.
+        rev: Rev,
+        /// Payload.
+        payload: RemoteState,
+    },
     /// [`Change::Sweep`].
     Sweep {
         /// Rev.
@@ -269,6 +278,7 @@ impl From<Event> for WireEvent {
             Change::SplLog(payload) => Self::SplLog { rev, payload },
             Change::Timing(payload) => Self::Timing { rev, payload },
             Change::Clocks(payload) => Self::Clocks { rev, payload },
+            Change::Remote(payload) => Self::Remote { rev, payload },
             Change::Sweep(payload) => Self::Sweep { rev, payload },
             Change::Autosave(payload) => Self::Autosave { rev, payload },
             Change::Recording(payload) => Self::Recording { rev, payload },
@@ -298,6 +308,7 @@ impl From<WireEvent> for Event {
             WireEvent::SplLog { rev, payload } => (rev, Change::SplLog(payload)),
             WireEvent::Timing { rev, payload } => (rev, Change::Timing(payload)),
             WireEvent::Clocks { rev, payload } => (rev, Change::Clocks(payload)),
+            WireEvent::Remote { rev, payload } => (rev, Change::Remote(payload)),
             WireEvent::Sweep { rev, payload } => (rev, Change::Sweep(payload)),
             WireEvent::Autosave { rev, payload } => (rev, Change::Autosave(payload)),
             WireEvent::Recording { rev, payload } => (rev, Change::Recording(payload)),
@@ -329,6 +340,7 @@ impl Change {
             Self::SplLog(_) => "spl_log",
             Self::Timing(_) => "timing",
             Self::Clocks(_) => "clocks",
+            Self::Remote(_) => "remote",
             Self::Sweep(_) => "sweep",
             Self::Autosave(_) => "autosave",
             Self::Recording(_) => "recording",

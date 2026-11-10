@@ -90,6 +90,7 @@ mod tests {
                 device: DeviceId("system".into()),
                 rate,
             }),
+            stamp_map: None,
         }
     }
 

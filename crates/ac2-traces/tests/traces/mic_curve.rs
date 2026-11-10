@@ -76,6 +76,7 @@ fn mic_curve_on_a_stored_trace_is_a_display_edit() {
             traces: vec![t.clone()],
             walks: vec![],
             plans: vec![],
+            remote_inputs: vec![],
         },
     )
     .unwrap();

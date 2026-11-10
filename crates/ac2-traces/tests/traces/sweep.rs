@@ -237,6 +237,7 @@ fn sweep_csv_and_session_round_trip() {
         traces: vec![t.clone()],
         walks: vec![],
         plans: vec![],
+        remote_inputs: vec![],
     };
     session::save(&dir, &sess).unwrap();
     let files: Vec<_> = std::fs::read_dir(dir.join("traces")).unwrap().collect();
@@ -351,6 +352,7 @@ fn transfer_ir_csv_and_session_round_trip() {
         traces: vec![t.clone(), without.clone()],
         walks: vec![],
         plans: vec![],
+        remote_inputs: vec![],
     };
     session::save(&dir, &sess).unwrap();
     let back = session::load(&dir).unwrap();

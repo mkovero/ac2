@@ -14,7 +14,7 @@ pub fn commands() -> Vec<Command> {
         },
         Command::SessionDevices,
         Command::SessionOpen {
-            config: session_config(),
+            config: super::builders::remote_session_config(),
         },
         Command::SessionClose,
         Command::SessionStatus,
@@ -279,6 +279,15 @@ pub fn commands() -> Vec<Command> {
         Command::ServerRevoke {
             name: "laptop".into(),
         },
+        Command::AuthAdmitRig {
+            key: "D:)Q[IlAW!ahhC2ac:9*A}h:p?([4%wOTJ%JR%cs".into(),
+            rig_id: crate::units::RigId(0x7075_7075),
+            name: "pupu".into(),
+        },
+        Command::RigPeers {
+            peers: vec![super::remote::rig_peer()],
+        },
+        Command::SourceState,
         Command::SplBandTransfer {
             meas: MeasId(4),
             foh: BandLevelSource::Log {

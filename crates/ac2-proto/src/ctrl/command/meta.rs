@@ -94,6 +94,9 @@ impl Command {
             Self::ServerInfo => "server.info",
             Self::ServerAuthorize { .. } => "server.authorize",
             Self::ServerRevoke { .. } => "server.revoke",
+            Self::AuthAdmitRig { .. } => "auth.admit_rig",
+            Self::RigPeers { .. } => "rig.peers",
+            Self::SourceState => "source.state",
             Self::PlanSave { .. } => "plan.save",
             Self::PlanList => "plan.list",
             Self::PlanDelete { .. } => "plan.delete",
@@ -142,6 +145,7 @@ impl Command {
                 | Self::FileList
                 | Self::RecList
                 | Self::ServerInfo
+                | Self::SourceState
                 | Self::PlanList
         )
     }

@@ -389,6 +389,8 @@ impl Rig {
                             output: 1,
                             input: 0,
                         }),
+                        remote_inputs: Vec::new(),
+                        link_offset: None,
                     },
                     backend: BackendKind::Fake,
                     input_device: DeviceId("fake:loop".into()),

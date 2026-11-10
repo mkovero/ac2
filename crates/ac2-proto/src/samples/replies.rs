@@ -269,6 +269,9 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
         Ok(ReplyBody::Sim(super::sim::sim_running())),
         Ok(ReplyBody::Outputs(outputs())),
         Ok(ReplyBody::Server(server_info())),
+        Ok(ReplyBody::SourceState(Box::new(
+            super::remote::source_state(),
+        ))),
         Ok(ReplyBody::Server(ServerInfo {
             mode: ServerMode::Local {
                 ctrl: "ipc:///run/user/1000/ac2/ctrl.sock".into(),

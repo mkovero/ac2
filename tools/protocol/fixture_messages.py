@@ -14,6 +14,17 @@ from fixture_frames import (
 
 TOKEN = bytes.fromhex("0123456789abcdeffedcba9876543210")
 
+# ketunkolo as pupu knows it (`samples::remote`).
+KETUNKOLO = 0x6B657475_6E6B6F6C
+KETUNKOLO_INPUT = {"slot": 0, "rig": KETUNKOLO, "rig_name": "ketunkolo", "channel": 0}
+KETUNKOLO_PEER = {
+    "rig": KETUNKOLO,
+    "name": "ketunkolo",
+    "ctrl": "tcp://192.168.9.20:47820",
+    "data": "tcp://192.168.9.20:47821",
+    "key": "rq:rM>}U?@Lns47E1%kR.o@n%FcmmsL/@{H8]yf7",
+}
+
 
 def req(idx, op, args=None, mutation=True):
     cmd = {"op": op}
@@ -519,12 +530,14 @@ def requests():
                     "backend": "coreaudio",
                     "input_device": {"type": "id", "id": "hw:UMC1820"},
                     "output_device": {"type": "default"},
-                    "input_channels": [0, 1, 2],
+                    "input_channels": [0, 1, 2, 0x8000],
                     "spare_inputs": 0,
                     "output_channels": 2,
                     "sample_rate_hz": 48000,
                     "buffer_frames": None,
                     "loopback": {"output": 1, "input": 0},
+                    "remote_inputs": [KETUNKOLO_INPUT],
+                    "link_offset": 0.02,
                 }
             },
         ),
@@ -685,6 +698,13 @@ def requests():
         req(59, "server.revoke", {"name": "laptop"}),
         req(
             60,
+            "auth.admit_rig",
+            {"key": "D:)Q[IlAW!ahhC2ac:9*A}h:p?([4%wOTJ%JR%cs", "rig_id": 0x70757075, "name": "pupu"},
+        ),
+        req(61, "rig.peers", {"peers": [KETUNKOLO_PEER]}),
+        req(62, "source.state", mutation=False),
+        req(
+            63,
             "spl.band_transfer",
             {
                 "meas": 4,
@@ -703,7 +723,7 @@ def requests():
             },
         ),
         req(
-            61,
+            64,
             "spl.band_log_get",
             {
                 "meas": 4,
@@ -713,42 +733,42 @@ def requests():
             },
             mutation=False,
         ),
-        req(62, "meas.colour", {"meas": 3, "colour": {"type": "hue", "index": 2}}),
-        req(63, "file.new", {"discard": False}),
+        req(65, "meas.colour", {"meas": 3, "colour": {"type": "hue", "index": 2}}),
+        req(66, "file.new", {"discard": False}),
         req(
-            67,
+            70,
             "file.upload_chunk",
             {"transfer": 3, "offset": 1048576, "data": bytes([0x1F, 0x8B, 0x08, 0x00])},
             mutation=False,
         ),
         req(
-            71,
+            74,
             "file.download_end",
             {"transfer": 4, "saved_as": "/run/media/foh/STICK/friday show.ac2session"},
         ),
         req(
-            73,
+            76,
             "session.control_panel",
             {"backend": "asio", "device": "Fireface USB"},
             mutation=False,
         ),
-        req(74, "osc.target", {"base": 38, "addr": "[fe80::1]:9000"}),
+        req(77, "osc.target", {"base": 38, "addr": "[fe80::1]:9000"}),
         req(
-            75,
+            78,
             "osc.test",
             {"msg": osc_message("/light/red", [{"type": "int", "value": 1}], True)},
         ),
-        req(76, "rig.monitor_start", {"base": 38, "on": True}),
+        req(79, "rig.monitor_start", {"base": 38, "on": True}),
         req(
-            77,
+            80,
             "artnet.target",
             {"base": 38, "target": {"addr": "2.255.255.255:6454", "universe": 18}},
         ),
-        req(78, "artnet.test", {"channels": dmx([(12, 255), (13, 40)])}),
-        req(79, "artnet.fade", {"base": 38, "seconds": 2.5}),
-        req(81, "cal.line", {"channel": 4, "volts": 1.2277}),
+        req(81, "artnet.test", {"channels": dmx([(12, 255), (13, 40)])}),
+        req(82, "artnet.fade", {"base": 38, "seconds": 2.5}),
+        req(84, "cal.line", {"channel": 4, "volts": 1.2277}),
         req(
-            84,
+            87,
             "levels.set",
             {
                 "base": 38,
@@ -759,11 +779,11 @@ def requests():
                 "loudness_target": -16.0,
             },
         ),
-        req(85, "levels.reset", {"channels": [0, 1]}),
-        req(87, "plan.list", mutation=False),
-        req(88, "plan.delete", {"name": "Club"}),
+        req(88, "levels.reset", {"channels": [0, 1]}),
+        req(90, "plan.list", mutation=False),
+        req(91, "plan.delete", {"name": "Club"}),
         req(
-            89,
+            92,
             "walk.new",
             {
                 "name": "Mains",
@@ -776,13 +796,13 @@ def requests():
                 ],
             },
         ),
-        req(91, "walk.goto", {"walk": 1, "step": 1}),
-        req(92, "walk.capture", {"walk": 1}),
-        req(93, "walk.skip", {"walk": 1, "point": 1}),
-        req(94, "walk.swap", {"walk": 1, "points": [2, 3]}),
-        req(95, "walk.redo", {"walk": 1, "point": 0}),
+        req(94, "walk.goto", {"walk": 1, "step": 1}),
+        req(95, "walk.capture", {"walk": 1}),
+        req(96, "walk.skip", {"walk": 1, "point": 1}),
+        req(97, "walk.swap", {"walk": 1, "points": [2, 3]}),
+        req(98, "walk.redo", {"walk": 1, "point": 0}),
         req(
-            97,
+            100,
             "sim.run",
             {
                 "request": {
@@ -802,7 +822,7 @@ def requests():
             },
         ),
         req(
-            98,
+            101,
             "sim.fit",
             {
                 "request": {
@@ -818,7 +838,7 @@ def requests():
             },
         ),
         req(
-            99,
+            102,
             "sim.map",
             {
                 "request": {
@@ -831,7 +851,7 @@ def requests():
                 }
             },
         ),
-        req(100, "sim.cancel"),
+        req(103, "sim.cancel"),
     ]
 
 
@@ -904,6 +924,7 @@ def events():
                     "device": "system",
                     "rate": {"type": "measured", "ppm": 6.25, "span": 59.5, "against": "system_clock"},
                 },
+                "stamp_map": None,
             },
         },
         {
@@ -912,6 +933,7 @@ def events():
             "payload": {
                 "system": {"type": "unsynced", "maxerror_us": 16000000},
                 "capture": {"device": "system", "rate": {"type": "measuring"}},
+                "stamp_map": None,
             },
         },
         {
@@ -920,9 +942,10 @@ def events():
             "payload": {
                 "system": {"type": "not_stated"},
                 "capture": {"device": "soundcheck.wav", "rate": {"type": "synthetic"}},
+                "stamp_map": None,
             },
         },
-        {"kind": "clocks", "rev": 94, "payload": {"system": {"type": "not_stated"}, "capture": None}},
+        {"kind": "clocks", "rev": 94, "payload": {"system": {"type": "not_stated"}, "capture": None, "stamp_map": None}},
         {
             "kind": "sweep",
             "rev": 55,

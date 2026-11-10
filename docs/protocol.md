@@ -31,7 +31,7 @@ keepalives to each connection as its credit allows (§5.8).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 86`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 87`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -191,6 +191,9 @@ Lease column: **L** = `lease_token` required (Q6).
 | `server.info` | — | `server` | |
 | `server.authorize` | `name`, `key` (Z85) | `server` | |
 | `server.revoke` | `name` | `server` | |
+| `auth.admit_rig` | `key` (Z85), `rig_id: RigId`, `name` | `server` | |
+| `rig.peers` | `peers: [RigPeer]` | `ack` | |
+| `source.state` | — | `source_state` | non-mutating; with `hello`, the only command an admitted rig may send |
 
 Rules (Q6): `firing` requires `armed`; arming does not emit. `gen.set` carries the full
 desired state and refreshes the lease. Refresh at least every 0.5 s; expiry 1.5 s after
@@ -354,7 +357,7 @@ i32 \| f32 \| str}.
 `embedded` (in its client's process; only test daemons, the app spawns `ac2d`) \| `local` {`ctrl`} (this machine only; the OS user is the
 trust boundary, there are no client keys) \| `network` {`ctrl`, `data`, `server_key` (Z85),
 `fingerprint`, `advertised_as`: string | nil (the mDNS name), `authorized`:
-[`AuthorizedClient` {`name`, `key`, `fingerprint`}], `refused`: [`RefusedKey` {`key`:
+[`AuthorizedClient` {`name`, `key`, `fingerprint`, `rig`: RigId \| nil}], `refused`: [`RefusedKey` {`key`:
 string | nil (nil: not CURVE), `fingerprint`: string | nil, `address`, `count`, `last_at`:
 WallNs}], newest first, at most 32}; `recording_dir`: string | nil (where `rec.start`
 records on the daemon host). `server.authorize` adds `key` under `name` to the
@@ -368,6 +371,26 @@ without whitespace; `invalid` for a duplicate name or key, a malformed key, revo
 unknown name (`not_found`) or the requesting client's own name (`refused`: that would lock
 the operator out). Any authorized client may use them: every authorized client is equally
 trusted.
+
+**Remote inputs (`auth.admit_rig`, `rig.peers`, `source.state`).** A rig takes another rig's
+inputs over a link of its own: it connects to the other rig's ctrl and data endpoints under
+CURVE with its own server key pair as the client key. The other rig must first admit that
+key with `auth.admit_rig` {`key`, `rig_id`, `name`}: an authorized-clients entry marked as
+a rig (`AuthorizedClient.rig` = the admitted rig's id; nil for an operator's client).
+Admitting a name already present replaces its entry; a replaced or `server.revoke`d key's
+requests are refused and its audio stopped at once. The rig's own id is `invalid`. An
+admitted rig may send `hello` and `source.state` and nothing else (`refused`), and is sent
+only `audio/<channel>` frames (§5.1). `source.state` → `SourceState` {`rig`, `name`,
+`clocks` (`Clocks`, with its `stamp_map`), `session`: `SourceSession` \| nil
+{`incarnation` (`StreamIncarnation` {`daemon`, `epoch`}), `sample_rate_hz`,
+`buffer_frames`, `replaying`, `capture_stamps` (whether its backend stamps capture
+times), `inputs`: [`SourceInput` {`channel`, `setup`: `InputSetup` \| nil,
+`cal_status`, `calibration`: `CalEntry` \| nil, `curve`: `SourceCurve` \| nil
+{`reference`: `MicCurveRef`, `freq`: [f64], `gain_db`: [f64]}}]}}: all of the session an
+admitted rig sees. `rig.peers` sets the rigs this rig takes inputs from: [`RigPeer`
+{`rig`, `name`, `ctrl`, `data`, `key` (the other rig's server key, Z85)}], the whole list,
+kept in the rig settings; the links follow at once. Outside network mode a rig has no key,
+so its links stay `not_networked`.
 
 The stream carries every output of the session: arming routes the generator to
 `settings.outputs` without reopening the stream (same session epoch; running measurements,
@@ -933,7 +956,16 @@ zero-based; spare inputs listed like any other), `spare_inputs` (u16: spare inpu
 session opens; input channels from the device's `max_channels` up to `max_channels +
 spare_inputs` may then be captured; more than `spare_channels`, or a channel past them,
 is `unsupported`), `output_channels` (u16, a count), `sample_rate_hz`, `buffer_frames`,
-`loopback` ({`output`, `input`} \| nil). `OpenSession` adds `backend` (the one used),
+`loopback` ({`output`, `input`} \| nil), `remote_inputs` ([`RemoteInput` {`slot`, `rig`,
+`rig_name`, `channel` (the other rig's device input)}]: each is input channel
+`REMOTE_BASE + slot`, `REMOTE_BASE` = `0x8000`, listed in `input_channels` like a local
+one; at least one local input is required, the loopback input must be local, slots and
+rig/channel pairs are unique, an input of this rig is `invalid` ("that input is on this
+rig"), a remote rig at another rate or replaying is `refused`), `link_offset` (s \| nil:
+how long the joined feed waits for remote audio; nil = two remote periods, one of this
+rig's and 2 ms, at most 0.5 s). A remote input carries the session's measurements like a
+local one, except a transfer function across rigs (`refused` until the clocks between
+rigs are measured), recording and calibration (both on the rig the input is on). `OpenSession` adds `backend` (the one used),
 `input_device`, `output_device`, `sample_rate_hz`, `buffer_frames`, `clock`, `opened_at`,
 `replay` (`ReplayInfo` \| nil: the recording a replay session plays, §3.2 raw capture
 files), `clock_source` (string \| nil: the clock source the device ran on when opened,
@@ -1762,7 +1794,7 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 `{type, value}` with `type` one of: `ack` (`{rev}`), `welcome`, `backends`, `preview`,
 `loopback_detection`, `session`,
 `lease`, `generator`, `measurement`, `delay_finding`, `trace`, `traces`, `trace_data`,
-`export`, `calibration`, `calibrations`, `mic`, `inputs`, `outputs`, `server`,
+`export`, `calibration`, `calibrations`, `mic`, `inputs`, `outputs`, `server`, `source_state`,
 `spl_log_page`, `spl_history`, `spl_band_log`,
 `snapshot`, `events`,
 `grid`, `session_file`, `sessions`, `transfer`, `chunk`, `salvage`, `sweep`, `recording`,
@@ -1823,7 +1855,26 @@ read beside the disciplined monotonic clock (Linux `CLOCK_MONOTONIC`) over the s
 and its rate taken out, `host_crystal` when it could not be (macOS host time, the Windows
 performance counter: the figure includes that clock's own error); `measuring` until the
 fit (and the stamp clock's, for `system_clock`) spans 54 s, `synthetic` for a replay,
-whose stamps are its sample index; read every 5 s of audio; committed when either changes),
+whose stamps are its sample index; read every 5 s of audio; `stamp_map` (`StampMap` \| nil
+{`epoch_stamp_ns`, `system_ns`, `ppm`}: the capture stream's stamp clock on the system
+clock, `system = system_ns + (stamp − epoch_stamp_ns)·(1 + ppm·10⁻⁶)`; nil while no stream
+whose stamp clock can be read beside the system clock is open); committed when any changes),
+`remote` (`RemoteState`: `peers` ([RigPeer], as `rig.peers` set them), `rigs`
+([`RemoteRig` {`rig`, `name`, `link` {not_paired | not_networked | connecting | up |
+unreachable{since} | not_admitted | key_changed | other_rig{found}}, `clock`: `PeerClock`
+{`relation` {measuring | agree | not_locked{reason: cross_rate{ppm, over} |
+own_clock{rig, ppm}} | cant_tell{reason: system_clock_unsynced{rig} |
+system_clock_not_stated{rig} | not_against_system_clock{rig} | no_capture_stamps |
+clocks_disagree{by} | no_audio}}, `ppm`, `span`, `last_change`}, `bytes_per_s`, `window`
+(frames the link may have in flight)}], one per rig the session's remote inputs are on),
+`inputs` ([`RemoteInputStatus` {`slot`, `audio` {waiting | on_this_rig | no_session |
+not_captured | replaying | rate_mismatch{theirs, ours} | starting | streaming}, `anchor`
+(nil | system_time | arrival{reason: system_clock | no_capture_stamps | no_stamp_map |
+clocks_disagree{by}}: how remote samples are placed against this rig's), `late_frames`,
+`late_frames_hour`, `slips`, `last_slip` (samples, signed), `arrival_margin` (s),
+`setup`, `cal_status`, `calibration`, `curve` (the source rig's, as it states them)}]),
+`link_offset` (s \| nil, the offset in use); committed when any of it changes; the clock
+relation is reported only, never corrected for),
 `sweep` (`SweepRun` | nil: the latest `sweep.run` run),
 `autosave` (`Autosave`: `state` {off | saved | pending | failed{reason}}, `saved_at: WallNs |
 nil`, `log_failures: [LogWriteFailure]`; see §7.3), `recording` (`RecordingRun` | nil: the latest recording, §3.2), `working`
@@ -1875,7 +1926,7 @@ samples). Every later recovery reopens the configuration as it then stands.
 `state.snapshot` → `{state, rev, daemon_incarnation, session_epoch}`.
 
 An event is `{rev, kind, payload}`. `kind` is one of `session`, `measurement`, `trace`,
-`generator`, `calibration`, `line_calibration`, `mic`, `inputs`, `outputs`, `spl_log`, `timing`, `clocks`, `sweep`, `autosave`, `recording`, `working`, `plan`, `walk`, `walk_plan`, `sim`. `payload` is the entity's
+`generator`, `calibration`, `line_calibration`, `mic`, `inputs`, `outputs`, `spl_log`, `timing`, `clocks`, `remote`, `sweep`, `autosave`, `recording`, `working`, `plan`, `walk`, `walk_plan`, `sim`. `payload` is the entity's
 full new value (`inputs`: {`inputs`, `pairs`}, both whole lists; `outputs`: the whole list;
 `sim`: the `SimState`, which `State.sim` becomes); for keyed entities (`measurement`, `trace`,
 `calibration`, `line_calibration` (keyed by `LineCalKey`), `mic` (keyed by name), `spl_log`, `plan` and `walk_plan` (keyed by name), `walk` (keyed by
@@ -1918,6 +1969,7 @@ Replay buffer: last 1024 events or 60 s, whichever holds fewer.
 | `preview/gonio` | goniometer points of every pair of the previewed device |
 | `timing` | loopback timing monitor |
 | `evt` | state events (§4.2) |
+| `audio/<channel>` | raw capture of device input `<channel>`, to admitted rigs only (below) |
 | `ka` | keepalive, every 250 ms to a connection subscribed to it; one a second to one that is not and was sent nothing else in that second |
 
 A measurement topic is formed and sent only while someone subscribes to it. `tf`, `ir`,
@@ -1931,6 +1983,16 @@ one spelling. A subscription (§5.8) is one topic or one of the prefixes `d/` (a
 the trailing slash keeps `d/1/` from matching `d/12/…`), `session/` (both input-meter
 topics and the session's goniometer; the preview's goniometer is under `preview/`, so a
 client metering alone does not receive its points). Longest topic: 32 bytes.
+
+An `audio/<channel>` frame is three parts, `[topic][msgpack header][f32 LE samples]`, one
+per device block of that channel, never deflated: the header is {`v`, `start_sample` (the
+source rig's sample index of the first frame), `frames` (≤ 65536), `flags` (u8: `xrun` 1,
+the source's backend reported an xrun before the block; `gap` 2, the block does not
+continue the one before on the source rig), `capture_ns` (u64 \| nil: the capture stamp
+of the first frame on the source's stamp clock, which its `clocks.stamp_map` puts on
+system time), `rate`, `incarnation` (`StreamIncarnation`)}. Only connections whose key
+was admitted as a rig receive them, each from a queue of its own, so a slow rig never
+holds back the others; anyone else subscribing to `audio/` receives nothing.
 
 ### 5.2 Layout
 

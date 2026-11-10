@@ -172,7 +172,11 @@ impl Shared {
                 }
                 ReplyBody::Ack { rev: self.rev }
             }
-            C::ServerAuthorize { .. } | C::ServerRevoke { .. } => {
+            C::ServerAuthorize { .. }
+            | C::ServerRevoke { .. }
+            | C::AuthAdmitRig { .. }
+            | C::RigPeers { .. }
+            | C::SourceState => {
                 return Err(err(
                     ErrorCode::Unsupported,
                     "the fake daemon is not in network mode",

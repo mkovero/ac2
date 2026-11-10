@@ -10,6 +10,7 @@ mod eq;
 mod events;
 mod flow;
 mod frames;
+mod remote;
 mod replies;
 mod sim;
 mod state;
@@ -22,6 +23,7 @@ pub use eq::{eq_edits, eq_measurement};
 pub use events::events;
 pub use flow::{data_requests, notices};
 pub use frames::{frames, stamp, tf_frame};
+pub use remote::{remote_state, source_state};
 pub use replies::{replies, reply, warnings};
 pub use sim::{
     sim_fit_kept, sim_fit_request, sim_map_request, sim_map_state, sim_request, sim_running,

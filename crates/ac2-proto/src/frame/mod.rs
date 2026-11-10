@@ -18,6 +18,7 @@ pub const MAX_PARTS: usize = 2;
 /// Largest whole frame (all parts), bytes.
 pub const MAX_FRAME_BYTES: usize = 2 << 20;
 
+mod audio;
 mod coded;
 mod data;
 mod decode;
@@ -28,6 +29,9 @@ mod meta;
 mod schema;
 mod wire;
 
+pub use audio::{
+    AudioFlags, AudioFrame, AudioHeader, MAX_AUDIO_FRAMES, decode_audio, encode_audio,
+};
 pub use coded::CodedFrame;
 pub use data::{
     BandLeqFrame, DataMessage, Frame, FrameData, FrameStamp, GONIO_POINTS, GonioFrame, GonioPair,

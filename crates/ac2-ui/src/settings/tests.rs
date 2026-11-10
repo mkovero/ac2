@@ -179,9 +179,10 @@ fn connection_lines_authorize_and_revoke() {
     assert_eq!(lines[2], ConnLine::StartLocal);
     assert_eq!(lines[3], ConnLine::StopOnQuit);
     assert_eq!(lines[4], ConnLine::Authorized("laptop".into()));
-    assert!(matches!(&lines[5], ConnLine::Refused(Some(_), a) if a == "192.168.1.40"));
-    assert!(matches!(&lines[6], ConnLine::Refused(None, _)));
-    assert_eq!(lines[7], ConnLine::AddKey);
+    assert_eq!(lines[5], ConnLine::Authorized("pupu".into()));
+    assert!(matches!(&lines[6], ConnLine::Refused(Some(_), a) if a == "192.168.1.40"));
+    assert!(matches!(&lines[7], ConnLine::Refused(None, _)));
+    assert_eq!(lines[8], ConnLine::AddKey);
     assert_eq!(p.enter(), Some(ConnAction::Reconnect));
     assert_eq!(p.toggle(), None);
 
@@ -204,7 +205,7 @@ fn connection_lines_authorize_and_revoke() {
     assert_eq!(p.delete(), Some(ConnAction::Revoke("laptop".into())));
 
     // A refused key: a name, then Enter authorizes it.
-    p.focus = 5;
+    p.focus = 6;
     assert!(p.start_authorize());
     p.type_text("tablet");
     let key = "D:)Q[IlAW!ahhC2ac:9*A}h:p?([4%wOTJ%JR%cs".to_owned();
@@ -216,11 +217,11 @@ fn connection_lines_authorize_and_revoke() {
         })
     );
     // A peer without CURVE has nothing to authorize.
-    p.focus = 6;
+    p.focus = 7;
     assert!(!p.start_authorize());
 
     // By hand: name and key.
-    p.focus = 7;
+    p.focus = 8;
     assert_eq!(p.enter(), None);
     p.type_text("phone");
     assert_eq!(p.enter(), None);

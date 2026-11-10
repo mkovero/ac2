@@ -1,6 +1,6 @@
 [
  {
-  "v": 86,
+  "v": 87,
   "id": 0,
   "cmd": {
    "op": "hello",
@@ -11,7 +11,7 @@
   "expect_rev": null
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 2,
   "cmd": {
    "op": "session.open",
@@ -28,7 +28,8 @@
      "input_channels": [
       0,
       1,
-      2
+      2,
+      32768
      ],
      "spare_inputs": 0,
      "output_channels": 2,
@@ -37,14 +38,23 @@
      "loopback": {
       "output": 1,
       "input": 0
-     }
+     },
+     "remote_inputs": [
+      {
+       "slot": 0,
+       "rig": 7738719582418595692,
+       "rig_name": "ketunkolo",
+       "channel": 0
+      }
+     ],
+     "link_offset": 0.02
     }
    }
   },
   "expect_rev": 41
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 6,
   "cmd": {
    "op": "gen.set",
@@ -77,7 +87,7 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 9,
   "cmd": {
    "op": "gen.stop"
@@ -85,7 +95,7 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 10,
   "cmd": {
    "op": "meas.create",
@@ -119,7 +129,7 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 16,
   "cmd": {
    "op": "delay.find",
@@ -134,7 +144,7 @@
   "expect_rev": null
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 17,
   "cmd": {
    "op": "delay.insert",
@@ -149,7 +159,7 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 26,
   "cmd": {
    "op": "trace.import",
@@ -178,7 +188,7 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 29,
   "cmd": {
    "op": "cal.curve_import",
@@ -195,7 +205,7 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 31,
   "cmd": {
    "op": "spl.log_get",
@@ -209,7 +219,7 @@
   "expect_rev": null
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 32,
   "cmd": {
    "op": "sweep.run",
@@ -224,7 +234,7 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 39,
   "cmd": {
    "op": "session.inputs",
@@ -298,7 +308,7 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 40,
   "cmd": {
    "op": "cal.delete",
@@ -313,7 +323,7 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 41,
   "cmd": {
    "op": "session.preview",
@@ -346,7 +356,7 @@
   "expect_rev": null
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 42,
   "cmd": {
    "op": "session.preview_stop"
@@ -354,7 +364,7 @@
   "expect_rev": null
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 43,
   "cmd": {
    "op": "session.detect_loopback",
@@ -372,7 +382,7 @@
   "expect_rev": null
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 44,
   "cmd": {
    "op": "trace.mic_curve",
@@ -387,7 +397,7 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 46,
   "cmd": {
    "op": "cal.curve_delete",
@@ -401,7 +411,7 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 47,
   "cmd": {
    "op": "spl.log_new",
@@ -412,7 +422,7 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 48,
   "cmd": {
    "op": "cal.spl_electrical",
@@ -434,7 +444,7 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 49,
   "cmd": {
    "op": "spl.history_get",
@@ -451,7 +461,7 @@
   "expect_rev": null
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 50,
   "cmd": {
    "op": "delay.nudge",
@@ -463,7 +473,7 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 51,
   "cmd": {
    "op": "rec.start",
@@ -482,7 +492,7 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 53,
   "cmd": {
    "op": "rec.list"
@@ -490,7 +500,7 @@
   "expect_rev": null
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 54,
   "cmd": {
    "op": "session.replay",
@@ -505,7 +515,7 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 55,
   "cmd": {
    "op": "gen.ceiling",
@@ -517,7 +527,7 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 56,
   "cmd": {
    "op": "session.outputs",
@@ -537,7 +547,7 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 57,
   "cmd": {
    "op": "server.info"
@@ -545,7 +555,7 @@
   "expect_rev": null
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 59,
   "cmd": {
    "op": "server.revoke",
@@ -556,8 +566,48 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
+  "v": 87,
   "id": 60,
+  "cmd": {
+   "op": "auth.admit_rig",
+   "args": {
+    "key": "D:)Q[IlAW!ahhC2ac:9*A}h:p?([4%wOTJ%JR%cs",
+    "rig_id": 1886744693,
+    "name": "pupu"
+   }
+  },
+  "expect_rev": 41
+ },
+ {
+  "v": 87,
+  "id": 61,
+  "cmd": {
+   "op": "rig.peers",
+   "args": {
+    "peers": [
+     {
+      "rig": 7738719582418595692,
+      "name": "ketunkolo",
+      "ctrl": "tcp://192.168.9.20:47820",
+      "data": "tcp://192.168.9.20:47821",
+      "key": "rq:rM>}U?@Lns47E1%kR.o@n%FcmmsL/@{H8]yf7"
+     }
+    ]
+   }
+  },
+  "expect_rev": 41
+ },
+ {
+  "v": 87,
+  "id": 62,
+  "cmd": {
+   "op": "source.state"
+  },
+  "expect_rev": null
+ },
+ {
+  "v": 87,
+  "id": 63,
   "cmd": {
    "op": "spl.band_transfer",
    "args": {
@@ -608,8 +658,8 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
-  "id": 61,
+  "v": 87,
+  "id": 64,
   "cmd": {
    "op": "spl.band_log_get",
    "args": {
@@ -622,8 +672,8 @@
   "expect_rev": null
  },
  {
-  "v": 86,
-  "id": 62,
+  "v": 87,
+  "id": 65,
   "cmd": {
    "op": "meas.colour",
    "args": {
@@ -637,8 +687,8 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
-  "id": 63,
+  "v": 87,
+  "id": 66,
   "cmd": {
    "op": "file.new",
    "args": {
@@ -648,8 +698,8 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
-  "id": 67,
+  "v": 87,
+  "id": 70,
   "cmd": {
    "op": "file.upload_chunk",
    "args": {
@@ -663,8 +713,8 @@
   "expect_rev": null
  },
  {
-  "v": 86,
-  "id": 71,
+  "v": 87,
+  "id": 74,
   "cmd": {
    "op": "file.download_end",
    "args": {
@@ -675,8 +725,8 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
-  "id": 73,
+  "v": 87,
+  "id": 76,
   "cmd": {
    "op": "session.control_panel",
    "args": {
@@ -687,8 +737,8 @@
   "expect_rev": null
  },
  {
-  "v": 86,
-  "id": 74,
+  "v": 87,
+  "id": 77,
   "cmd": {
    "op": "osc.target",
    "args": {
@@ -699,8 +749,8 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
-  "id": 75,
+  "v": 87,
+  "id": 78,
   "cmd": {
    "op": "osc.test",
    "args": {
@@ -719,8 +769,8 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
-  "id": 76,
+  "v": 87,
+  "id": 79,
   "cmd": {
    "op": "rig.monitor_start",
    "args": {
@@ -731,8 +781,8 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
-  "id": 77,
+  "v": 87,
+  "id": 80,
   "cmd": {
    "op": "artnet.target",
    "args": {
@@ -746,8 +796,8 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
-  "id": 78,
+  "v": 87,
+  "id": 81,
   "cmd": {
    "op": "artnet.test",
    "args": {
@@ -766,8 +816,8 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
-  "id": 79,
+  "v": 87,
+  "id": 82,
   "cmd": {
    "op": "artnet.fade",
    "args": {
@@ -778,8 +828,8 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
-  "id": 81,
+  "v": 87,
+  "id": 84,
   "cmd": {
    "op": "cal.line",
    "args": {
@@ -790,8 +840,8 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
-  "id": 84,
+  "v": 87,
+  "id": 87,
   "cmd": {
    "op": "levels.set",
    "args": {
@@ -806,8 +856,8 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
-  "id": 85,
+  "v": 87,
+  "id": 88,
   "cmd": {
    "op": "levels.reset",
    "args": {
@@ -820,16 +870,16 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
-  "id": 87,
+  "v": 87,
+  "id": 90,
   "cmd": {
    "op": "plan.list"
   },
   "expect_rev": null
  },
  {
-  "v": 86,
-  "id": 88,
+  "v": 87,
+  "id": 91,
   "cmd": {
    "op": "plan.delete",
    "args": {
@@ -839,8 +889,8 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
-  "id": 89,
+  "v": 87,
+  "id": 92,
   "cmd": {
    "op": "walk.new",
    "args": {
@@ -874,8 +924,8 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
-  "id": 91,
+  "v": 87,
+  "id": 94,
   "cmd": {
    "op": "walk.goto",
    "args": {
@@ -886,8 +936,8 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
-  "id": 92,
+  "v": 87,
+  "id": 95,
   "cmd": {
    "op": "walk.capture",
    "args": {
@@ -897,8 +947,8 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
-  "id": 93,
+  "v": 87,
+  "id": 96,
   "cmd": {
    "op": "walk.skip",
    "args": {
@@ -909,8 +959,8 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
-  "id": 94,
+  "v": 87,
+  "id": 97,
   "cmd": {
    "op": "walk.swap",
    "args": {
@@ -924,8 +974,8 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
-  "id": 95,
+  "v": 87,
+  "id": 98,
   "cmd": {
    "op": "walk.redo",
    "args": {
@@ -936,8 +986,8 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
-  "id": 97,
+  "v": 87,
+  "id": 100,
   "cmd": {
    "op": "sim.run",
    "args": {
@@ -971,8 +1021,8 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
-  "id": 98,
+  "v": 87,
+  "id": 101,
   "cmd": {
    "op": "sim.fit",
    "args": {
@@ -991,8 +1041,8 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
-  "id": 99,
+  "v": 87,
+  "id": 102,
   "cmd": {
    "op": "sim.map",
    "args": {
@@ -1011,8 +1061,8 @@
   "expect_rev": 41
  },
  {
-  "v": 86,
-  "id": 100,
+  "v": 87,
+  "id": 103,
   "cmd": {
    "op": "sim.cancel"
   },

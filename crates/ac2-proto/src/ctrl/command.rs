@@ -12,13 +12,13 @@ use crate::model::{
     DelayPick, DelayReference, DeviceId, DmxSet, ElectricalConnection, ExportFormat, FinderBand,
     GeneratorDesired, ImportFormat, ImportRole, InputSetup, IrImport, MeasConfig, MicCurveId,
     MicLoading, OscMessage, OutputSetup, OwnedTraces, Pair, PaneLayout, PlanSpec, PreviewInput,
-    RecordRequest, RecordingRef, ReplayPace, SessionConfig, SessionRef, SimFitRequest,
+    RecordRequest, RecordingRef, ReplayPace, RigPeer, SessionConfig, SessionRef, SimFitRequest,
     SimMapRequest, SimRequest, SplLogWhich, TargetCurve, TraceEdit, TraceOwner, WalkKind,
     WalkPointSpec,
 };
 use crate::units::{
-    Blob, Db, DbSpl, Dbfs, Dbtp, Hz, LeaseToken, Lufs, MeasId, MvPerPa, Rev, Seconds, TraceId,
-    TransferId, Volts, WalkId,
+    Blob, Db, DbSpl, Dbfs, Dbtp, Hz, LeaseToken, Lufs, MeasId, MvPerPa, Rev, RigId, Seconds,
+    TraceId, TransferId, Volts, WalkId,
 };
 
 /// Every command. Wire: `{"op": "<group>.<name>", "args": {…}}`; `args` is absent for
@@ -953,6 +953,30 @@ pub enum Command {
         /// The authorized name.
         name: String,
     },
+    /// Admit another rig's key as a rig (network mode): it may then take this rig's captured
+    /// inputs (`audio/` topics) and read `source.state`, and nothing else. The operator's app,
+    /// authorized on both rigs, gives this rig the other's key. Removed with `server.revoke`
+    /// under `name`, which ends its stream at once.
+    #[serde(rename = "auth.admit_rig")]
+    AuthAdmitRig {
+        /// The other rig's server public key (Z85, 40 characters): it connects with it.
+        key: String,
+        /// The other rig's identity.
+        rig_id: RigId,
+        /// The name its connections carry (1 … 64 characters, no spaces).
+        name: String,
+    },
+    /// The rigs this rig may take inputs from, each with the address and key the app
+    /// pinned for it; replaces the list (kept in the rig settings file).
+    #[serde(rename = "rig.peers")]
+    RigPeers {
+        /// The paired rigs.
+        peers: Vec<RigPeer>,
+    },
+    /// What a rig taking this rig's inputs may know: its clocks with the stamp map, and its
+    /// session's rate and captured inputs with their setup and calibration.
+    #[serde(rename = "source.state")]
+    SourceState,
     /// Open a session that plays a recording instead of a device (new epoch): its inputs
     /// are the recorded ones under their device numbers, it has no outputs, and the running
     /// measurements analyse it as they would the device. A replay never reopens itself: it

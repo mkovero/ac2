@@ -120,6 +120,7 @@ pub fn events() -> Vec<Event> {
                     device: DeviceId("system".into()),
                     rate: SampleClock::Measuring,
                 }),
+                stamp_map: None,
             }),
         ),
         ev(
@@ -130,8 +131,12 @@ pub fn events() -> Vec<Event> {
                     device: DeviceId("soundcheck.wav".into()),
                     rate: SampleClock::Synthetic,
                 }),
+                stamp_map: None,
             }),
         ),
         ev(94, Change::Clocks(Clocks::default())),
+        ev(95, Change::Clocks(super::remote::source_clocks())),
+        ev(96, Change::Remote(super::remote::remote_state())),
+        ev(97, Change::Remote(Default::default())),
     ]
 }

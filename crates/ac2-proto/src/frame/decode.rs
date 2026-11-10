@@ -216,7 +216,8 @@ pub(super) fn topic_kind(topic: Topic) -> Option<FrameKind> {
         Topic::PreviewGonio => FrameKind::PreviewGonio,
         Topic::Timing => FrameKind::Timing,
         Topic::Ka => FrameKind::Ka,
-        Topic::Evt => return None,
+        // Raw capture has its own format (`super::audio`).
+        Topic::Evt | Topic::Audio { .. } => return None,
     })
 }
 

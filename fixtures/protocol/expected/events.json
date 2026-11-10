@@ -1091,7 +1091,8 @@
      "span": 59.5,
      "against": "system_clock"
     }
-   }
+   },
+   "stamp_map": null
   }
  },
  {
@@ -1107,7 +1108,8 @@
     "rate": {
      "type": "measuring"
     }
-   }
+   },
+   "stamp_map": null
   }
  },
  {
@@ -1122,7 +1124,8 @@
     "rate": {
      "type": "synthetic"
     }
-   }
+   },
+   "stamp_map": null
   }
  },
  {
@@ -1132,7 +1135,8 @@
    "system": {
     "type": "not_stated"
    },
-   "capture": null
+   "capture": null,
+   "stamp_map": null
   }
  },
  {

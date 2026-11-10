@@ -2,7 +2,7 @@
 //!
 //! Topic strings: `d/<meas>/<stream>` (measurement streams), `session/levels` and
 //! `session/preview` (input meters of the session and of a device preview), `timing`,
-//! `evt`, `ka`.
+//! `evt`, `ka`, and `audio/<channel>` (raw capture, rig to rig).
 //! `<meas>` is the decimal [`MeasId`] without sign or leading zeros, so every topic has
 //! exactly one spelling and ZMQ prefix matching on `d/<meas>/` selects one measurement.
 
@@ -104,6 +104,12 @@ pub enum Topic {
     Evt,
     /// `ka`: keepalive.
     Ka,
+    /// `audio/<channel>`: raw capture of one device input channel, one frame per device
+    /// block, served only to a rig admitted to this one.
+    Audio {
+        /// Device input channel (zero-based).
+        channel: u16,
+    },
 }
 
 /// A topic that does not parse.
@@ -133,6 +139,17 @@ impl Topic {
             "evt" => return Ok(Self::Evt),
             "ka" => return Ok(Self::Ka),
             _ => {}
+        }
+        if let Some(ch) = s.strip_prefix("audio/") {
+            let canonical = !ch.is_empty()
+                && ch.bytes().all(|c| c.is_ascii_digit())
+                && (ch == "0" || !ch.starts_with('0'));
+            let channel = ch
+                .parse::<u16>()
+                .ok()
+                .filter(|_| canonical)
+                .ok_or_else(err)?;
+            return Ok(Self::Audio { channel });
         }
         let mut it = s.split('/');
         let (Some("d"), Some(id), Some(kind), None) = (it.next(), it.next(), it.next(), it.next())
@@ -165,6 +182,7 @@ impl fmt::Display for Topic {
             Self::Timing => f.write_str("timing"),
             Self::Evt => f.write_str("evt"),
             Self::Ka => f.write_str("ka"),
+            Self::Audio { channel } => write!(f, "audio/{channel}"),
         }
     }
 }
@@ -293,8 +311,13 @@ mod tests {
             Topic::PreviewLevels,
             Topic::SessionGonio,
             Topic::PreviewGonio,
+            Topic::Audio { channel: 0 },
+            Topic::Audio { channel: u16::MAX },
         ] {
             assert_eq!(Topic::parse(&t.to_bytes()), Ok(t));
+        }
+        for bad in ["audio/", "audio/01", "audio/65536", "audio/x", "audio/1/2"] {
+            assert!(Topic::parse(bad.as_bytes()).is_err(), "{bad}");
         }
         assert!(!Subscription::InputMeters.matches(&Topic::PreviewGonio));
         for t in [

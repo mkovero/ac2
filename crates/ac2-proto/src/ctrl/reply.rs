@@ -9,7 +9,8 @@ use crate::grid::GridDef;
 use crate::model::{
     BackendInfo, CalEntry, DelayFinding, Generator, InputSetups, Lease, LineCalEntry,
     LoopbackDetection, Measurement, Mic, OutputSetup, Preview, RecordingFile, RecordingRun,
-    ServerInfo, Session, SessionFile, SplHistory, SplLogPage, SweepRun, TraceData, TraceMeta,
+    ServerInfo, Session, SessionFile, SourceState, SplHistory, SplLogPage, SweepRun, TraceData,
+    TraceMeta,
 };
 use crate::units::{Blob, ClientId, DaemonIncarnation, RequestId, Rev, RigId, SessionEpoch};
 
@@ -99,8 +100,10 @@ pub enum ReplyBody {
     Inputs(InputSetups),
     /// `session.outputs`: every output label.
     Outputs(Vec<OutputSetup>),
-    /// `server.info`, `server.authorize`, `server.revoke`.
+    /// `server.info`, `server.authorize`, `server.revoke`, `auth.admit_rig`.
     Server(ServerInfo),
+    /// `source.state`.
+    SourceState(Box<SourceState>),
     /// `spl.log_get`.
     SplLogPage(SplLogPage),
     /// `spl.history_get`.

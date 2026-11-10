@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::ReplayInfo;
+use super::{RemoteInput, ReplayInfo};
 use crate::units::{Db, Dbfs, Samples, Seconds, SessionEpoch, WallNs};
 
 /// Audio backend implementation.
@@ -176,7 +176,7 @@ pub struct LoopbackRoute {
 }
 
 /// Arguments of `session.open`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionConfig {
     /// Backend the devices belong to; `None` = the daemon's default backend (the one it was
@@ -201,10 +201,18 @@ pub struct SessionConfig {
     pub buffer_frames: Option<u32>,
     /// Reference loopback; `None` = no internal reference (decision 3b).
     pub loopback: Option<LoopbackRoute>,
+    /// Inputs of other rigs captured into this session; each is listed in
+    /// `input_channels` as its session channel ([`RemoteInput::session_channel`]).
+    pub remote_inputs: Vec<RemoteInput>,
+    /// How long audio that meets a remote input waits for it; `None` = the least that
+    /// works (two of the source's periods, one of this rig's and 2 ms of network), and a
+    /// value below that least is raised to it. Used only while `remote_inputs` is not
+    /// empty.
+    pub link_offset: Option<Seconds>,
 }
 
 /// An open session.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OpenSession {
     /// Requested configuration.
@@ -316,7 +324,7 @@ pub struct DriverChange {
 }
 
 /// Session entity.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Session {
     /// Current epoch.

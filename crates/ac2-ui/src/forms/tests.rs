@@ -19,6 +19,8 @@ fn open(inputs: Vec<u16>, loopback: Option<LoopbackRoute>) -> OpenSession {
             sample_rate_hz: None,
             buffer_frames: None,
             loopback,
+            remote_inputs: Vec::new(),
+            link_offset: None,
         },
         backend: BackendKind::Fake,
         input_device: DeviceId("card".into()),

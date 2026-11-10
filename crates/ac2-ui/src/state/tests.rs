@@ -87,6 +87,8 @@ fn daemon_state() -> State {
             sample_rate_hz: Some(48_000),
             buffer_frames: Some(256),
             loopback: None,
+            remote_inputs: Vec::new(),
+            link_offset: None,
         },
         backend: BackendKind::CoreAudio,
         input_device: DeviceId("fake:loop".into()),

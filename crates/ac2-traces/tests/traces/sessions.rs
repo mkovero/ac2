@@ -109,6 +109,12 @@ pub(super) fn session_sample() -> Session {
         traces: vec![a, b],
         walks: vec![ac2_proto::samples::walk()],
         plans: vec![ac2_proto::samples::plan()],
+        remote_inputs: vec![ac2_proto::model::RemoteInput {
+            slot: 0,
+            rig: ac2_proto::units::RigId(0x0123_4567_89ab_cdef),
+            rig_name: "pupu".into(),
+            channel: 2,
+        }],
     }
 }
 

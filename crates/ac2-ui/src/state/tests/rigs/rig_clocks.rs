@@ -64,6 +64,7 @@ fn the_connection_page_says_each_rigs_clock() {
                 device: DeviceId("fake:loop".into()),
                 rate: SampleClock::Measuring,
             }),
+            stamp_map: None,
         }
     });
     assert_eq!(
@@ -82,6 +83,7 @@ fn the_connection_page_says_each_rigs_clock() {
                 against: ClockBasis::SystemClock,
             },
         }),
+        stamp_map: None,
     };
     to(&mut t, PUPU, mirror(s));
     let lines = t.st.clock_lines();

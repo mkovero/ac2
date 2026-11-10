@@ -4,10 +4,10 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     CalEntry, Clocks, Generator, InputSetup, LineCalEntry, Measurement, Mic, OutputSetup, Pair,
-    PlanSpec, RecordingRun, Rig, Session, SimFitKept, SimState, SplLog, SweepRun, TraceMeta,
-    WalkState, WorkingSession,
+    PlanSpec, RecordingRun, RemoteState, Rig, Session, SimFitKept, SimState, SplLog, SweepRun,
+    TraceMeta, WalkState, WorkingSession,
 };
-use crate::units::{MeasId, SampleIndex, Samples, Seconds, WallNs};
+use crate::units::{MeasId, RigId, SampleIndex, Samples, Seconds, WallNs};
 
 /// Loopback timing monitor state (Q3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -112,6 +112,9 @@ pub struct State {
     /// The host's clocks: the capture device's against the system clock, and the system
     /// clock's status as the OS states it.
     pub clocks: Clocks,
+    /// Remote inputs: the rigs paired with this one, and the session's remote rigs and
+    /// inputs as this rig runs them.
+    pub remote: RemoteState,
     /// The latest sweep run, if any.
     pub sweep: Option<SweepRun>,
     /// Autosave of the measurements and traces.
@@ -250,6 +253,8 @@ pub struct AuthorizedClient {
     pub key: String,
     /// Fingerprint of the key.
     pub fingerprint: String,
+    /// The rig it is, for a key admitted as a rig (`auth.admit_rig`); `None` for an app.
+    pub rig: Option<RigId>,
 }
 
 /// A client key the daemon refused.

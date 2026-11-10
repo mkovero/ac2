@@ -223,6 +223,7 @@ pub fn empty_state() -> State {
             internal_reference: false,
         },
         clocks: ac2_proto::model::Clocks::default(),
+        remote: ac2_proto::model::RemoteState::default(),
         sweep: None,
         autosave: Autosave {
             state: AutosaveState::Off,
@@ -569,6 +570,9 @@ impl Shared {
             | C::ServerInfo
             | C::ServerAuthorize { .. }
             | C::ServerRevoke { .. }
+            | C::AuthAdmitRig { .. }
+            | C::RigPeers { .. }
+            | C::SourceState
             | C::SessionReplay { .. }
             | C::SessionInputs { .. }
             | C::SessionControlPanel { .. }) => self.session_cmd(client, c)?,

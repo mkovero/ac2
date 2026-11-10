@@ -403,6 +403,8 @@ mod tests {
                 sample_rate_hz: Some(rate),
                 buffer_frames: Some(frames),
                 loopback: None,
+                remote_inputs: Vec::new(),
+                link_offset: None,
             },
             backend: BackendKind::Asio,
             input_device: DeviceId("Fireface USB".into()),

@@ -44,8 +44,8 @@ use std::path::{Path, PathBuf};
 
 use ac2_proto::GridDef;
 use ac2_proto::model::{
-    ColourFamily, ImportFormat, ImportRole, MeasConfig, PaneLayout, PlanSpec, SplLogRow, TraceKind,
-    TraceMeta, WalkState,
+    ColourFamily, ImportFormat, ImportRole, MeasConfig, PaneLayout, PlanSpec, RemoteInput,
+    SplLogRow, TraceKind, TraceMeta, WalkState,
 };
 use ac2_proto::units::{Db, MeasId, Seconds, WallNs};
 use serde::{Deserialize, Serialize};
@@ -59,7 +59,7 @@ use ac2_proto::spl_log::{self, SplLogInfo};
 /// `format` of every manifest.
 pub const FORMAT: &str = "ac2-session";
 /// The one manifest version this build reads and writes.
-pub const VERSION: u32 = 42;
+pub const VERSION: u32 = 43;
 /// Manifest file name.
 pub const MANIFEST: &str = "session.json";
 /// The autosave's previous manifest, beside [`MANIFEST`].
@@ -149,6 +149,9 @@ pub struct Manifest {
     pub walks: Vec<WalkState>,
     /// The plans the walks walk (the session's copies).
     pub plans: Vec<PlanSpec>,
+    /// The other rigs' inputs the session took, by slot: a measurement on session channel
+    /// `REMOTE_BASE + slot` read that rig's channel.
+    pub remote_inputs: Vec<RemoteInput>,
 }
 
 /// One SPL meter's log in memory.
@@ -203,6 +206,9 @@ pub struct Session {
     pub walks: Vec<WalkState>,
     /// The plans the walks walk (the session's copies).
     pub plans: Vec<PlanSpec>,
+    /// The other rigs' inputs the session took, by slot: a measurement on session channel
+    /// `REMOTE_BASE + slot` read that rig's channel.
+    pub remote_inputs: Vec<RemoteInput>,
 }
 
 /// Session file failures.
@@ -412,6 +418,7 @@ fn save_into(dir: &Path, s: &Session, mode: &Mode<'_>) -> Result<Manifest, Sessi
         traces: saved,
         walks: s.walks.clone(),
         plans: s.plans.clone(),
+        remote_inputs: s.remote_inputs.clone(),
     };
     let json = serde_json::to_vec_pretty(&m).map_err(|e| SessionError::Corrupt {
         path: dir.join(MANIFEST),
@@ -770,6 +777,7 @@ fn load_inner(
             traces,
             walks: m.walks,
             plans: m.plans,
+            remote_inputs: m.remote_inputs,
         },
         on_disk,
     ))

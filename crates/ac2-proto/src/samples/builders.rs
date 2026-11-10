@@ -56,7 +56,19 @@ pub(super) fn session_config() -> SessionConfig {
             output: 1,
             input: 0,
         }),
+        remote_inputs: Vec::new(),
+        link_offset: None,
     }
+}
+
+/// A session taking one input of another rig.
+pub(super) fn remote_session_config() -> SessionConfig {
+    let r = super::remote::remote_input();
+    let mut c = session_config();
+    c.input_channels.push(r.session_channel());
+    c.remote_inputs = vec![r];
+    c.link_offset = Some(crate::units::Seconds(0.02));
+    c
 }
 
 pub(super) fn settings() -> GeneratorSettings {

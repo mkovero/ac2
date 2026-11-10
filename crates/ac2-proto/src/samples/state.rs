@@ -14,11 +14,20 @@ pub fn server_info() -> ServerInfo {
             server_key: "rq:rM>}U?@Lns47E1%kR.o@n%FcmmsL/@{H8]yf7".into(),
             fingerprint: "SHA256:3f1c 9a2e 77b0 51d4".into(),
             advertised_as: Some("foh-rig".into()),
-            authorized: vec![AuthorizedClient {
-                name: "laptop".into(),
-                key: "Yne@$w-vo<fVvi]a<NY6T1ed:M$fCG*[IaLV{hID".into(),
-                fingerprint: "SHA256:b2aa 0c3d 9e41 7f60".into(),
-            }],
+            authorized: vec![
+                AuthorizedClient {
+                    name: "laptop".into(),
+                    key: "Yne@$w-vo<fVvi]a<NY6T1ed:M$fCG*[IaLV{hID".into(),
+                    fingerprint: "SHA256:b2aa 0c3d 9e41 7f60".into(),
+                    rig: None,
+                },
+                AuthorizedClient {
+                    name: "pupu".into(),
+                    key: "JTKVSB%%)wK0E.X)V>+}o?pNmC{O&4W4b!Ni{Lh6".into(),
+                    fingerprint: "SHA256:7c41 e08a 5f22 b913".into(),
+                    rig: Some(crate::units::RigId(0x7075_7075)),
+                },
+            ],
             refused: vec![
                 RefusedKey {
                     key: Some("D:)Q[IlAW!ahhC2ac:9*A}h:p?([4%wOTJ%JR%cs".into()),
@@ -207,6 +216,7 @@ pub fn clocks() -> Clocks {
                 against: ClockBasis::SystemClock,
             },
         }),
+        stamp_map: None,
     }
 }
 
@@ -508,6 +518,7 @@ pub fn state() -> State {
         spl_logs: vec![spl_log()],
         timing: timing(),
         clocks: clocks(),
+        remote: super::remote::remote_state(),
         sweep: Some(sweep_run()),
         autosave: Autosave {
             state: AutosaveState::Saved,
