@@ -64,9 +64,13 @@ Constants in `ac2-scene::spectrograph_3d`:
 - **Spike.** A camera-facing vertical quad from the floor to its height. Width 35 % of the
   projected column pitch, between 1 and 3 device px (thinner aliases into shimmer as rows
   scroll; wider costs fill and stops reading as a spike); Lite: 1–2 px of its half-res
-  target. Brightness along the spike rises steeply from 0.05 at the foot to 1.0 at the tip
-  (`0.05 + 0.95·t^3.5`), and a fixed 2.5 px cap at the tip is 1.5× (clamped at 1): thin
-  bright tips over faint bodies, as in the reference. Round 2 compared this with the round-1
+  target. Its coverage is a box filter across a width a quarter pixel wider each side than
+  the spike (no snapping to whole pixels): about width + ½ px of light a row, as a
+  rasterizer lighting every pixel a spike touches gives. Brightness along the spike rises
+  steeply from 0.05 at the foot to 1.0 at the tip (`0.05 + 0.95·t^3.5`), and a fixed
+  2.5 px cap at the tip is 1.5× of the spike's light, clipped at 1 after that light (a dim
+  far or low spike still gets its bright tip): thin bright tips over faint bodies, as in
+  the reference. Round 2 compared this with the round-1
   constants (foot 0.25, `t²`, top 6 % bright): the new ones keep a slab of pink noise from
   reading as a solid wall and make the tips of a tonal case the brightest thing on screen.
   Round 3 (programme material) kept them: a tip gain of 1.25 or 1.0 dulled the tips into the
@@ -84,18 +88,24 @@ Constants in `ac2-scene::spectrograph_3d`:
   drops the bed to near-floor grass with the bass line and tonal partials standing out.
   Narrowing must keep the top near 0: hot masters reach −5…0 dBFS per bin, and a top at
   −20 clamps them into a flat white ceiling.
-- **Depth.** Brightness × `exp(−2.0·age/1.2)` (the back row at 13 %) × `exp(−0.35·d)` from
-  the eye. Round 3 tried 3.0 and 3.5: at the default camera they barely change the picture,
+- **Depth.** Brightness × `exp(−2.0·age/1.2)` (the back row at 13 %) × `exp(−0.35·d)`,
+  `d` the depth along the view beyond the floor's nearest point (its nearest corner's clip
+  `w`), not the distance from the eye: the front row keeps full light at any dolly. Round 3 tried 3.0 and 3.5: at the default camera they barely change the picture,
   tilted they hide the older half of a 30 s span, so 2.0 stays. Depth changes the G channel
   only: a level keeps its hue at any depth, not its lightness. No claim that a colour reads
   the same as in 2D; the level reference is the height scale and the ceiling line (*Axes*).
 - **Floor band.** One additive floor quad, brightest along the front edge (0.12 of
   `LUT(0.5)`), fading with the depth curve, plus a 1 px "now" line at 0.35.
-- **Bloom.** The spikes again, coloured `LUT(n) · max(0, brightness − 0.25) / 0.75`, into a
-  quarter-resolution Rgba8Unorm target cleared to 0, additive at gain
-  0.12 (coverage-scaled where a spike is under 1 quarter-res px), blurred by a separable
-  9-tap Gaussian (σ = 2 quarter-res px, ≈ 8 px full size), added over the pane at 0.6 (ice)
-  or 0.35 (colour maps, so hues stay legible). Rgba8 drops far, dim rows below one LSB from
+- **Bloom.** The spikes again, coloured `LUT(n) · max(0, brightness − 0.25) / 0.75`, drawn
+  straight into a quarter-resolution (of the pane, every tier) Rgba8Unorm target cleared
+  to 0, additive (One/One) at gain 0.12. Each quarter-res pixel covers four pane pixels
+  along the spike, so the fragment averages the light at those four (the 2.5 px tip cap
+  falls within one) and scales by its coverage across, the spike's own width plus the same
+  quarter pane pixel each side: a spike under one quarter-res pixel wide adds its share.
+  Then a separable Gaussian (σ = 2 quarter-res px, ≈ 8 px full size, cut at ±4 and
+  normalised): Full 9 point taps; Lite 5 bilinear fetches, each pair of taps read where the
+  filter weighs them as the kernel does, so Lite's glow is Full's; Bare none. Added over
+  the pane (bilinear upscale) at 0.6 (ice) or 0.35 (colour maps, so hues stay legible). Rgba8 drops far, dim rows below one LSB from
   the bloom; acceptable, they are the haze's edge and still drawn sharp. Float targets would
   need extensions the GLES downlevel limits do not promise. The threshold (round 3): on
   programme material at the default camera, the rows stacked ~1 px apart summed the dim
@@ -203,9 +213,10 @@ so the renderer's upload-by-identity applies: two rows (newest, oldest; 1.5 kB) 
 `ac2-scene` (display truth, headless): the skyline, the camera (angles, distance, clamps,
 steps, eye-outside-box), the view-projection matrix, heights from the level range and the
 measurement's offset, labels (text, projected place, culling), ceiling line, chrome level,
-caption, the tier. New primitives `Skyline3d { id, ring, scroll, phase, cols, rows,
-view_proj, range, colours, bloom_gain, tier }` and `SkylineGlow { id, gain }` (the bloom
-composite of the skyline with that id).
+caption, the tier. New primitives `Skyline3d { id, rect, clip, cols, rows, newest, phase,
+view_proj, eye, world, range, colormap, tier, look }` (`look`: the spike and bloom-source
+constants) and `SkylineGlow { id, clip, gain }` (the bloom composite of the skyline with
+that id; the scene adds one only for a tier with bloom).
 
 **Draw order** is fixed and follows `Layer`'s (`primitives.rs`: rects, heatmaps, polygons,
 bands, grids, polylines, points, labels). `Layer` gains `skylines` after `heatmaps` and
@@ -346,6 +357,25 @@ pass over the pane (two with bloom); Rg8 writes half the bytes of Rgba8.
 | GPU at worst clamp corner | ≤ 6 ms | ≤ 20 ms (30 fps still holds with egui) |
 | upload | 1.5 kB | 1 kB |
 
+**Measured** (v1b, `bench_frame_cost`: the whole view at a 1920×1080 pane, every spike near
+full height, 30 s history, median of 30 frames, release build). The development desktop has
+no hardware GPU, so its adapter is Mesa's software rasterizer: GPU times are a CPU
+rasterizer's and say nothing against the GPU budgets above; they rank the tiers (the bloom
+costs about two thirds of Bare's GPU time there, the full-resolution target three times
+Lite's). CPU is the frame's work up to the submit (fold, scene, labels, prepare, encode).
+Worst corner: the worst of yaw ±80/0 × pitch 2/75 at the closest zoom.
+
+| tier, lavapipe (Vulkan), timestamp queries | CPU default | GPU default | CPU worst | GPU worst |
+|---|---|---|---|---|
+| Full | 0.37 ms | 200 ms | 0.42 ms | 235 ms (−80/2/4) |
+| Lite | 0.37 ms | 61 ms | 0.44 ms | 77 ms (−80/2/4) |
+| Bare | 0.41 ms | 37 ms | 0.44 ms | 45 ms (−80/2/4) |
+
+On llvmpipe GL the driver rasterizes inside the submit, so CPU ≈ GPU there (Full 156 / 225
+ms, Lite 46 / 53, Bare 25 / 40, default / worst). The CPU column is over the 0.3 ms budget
+by a tenth on this machine: the scene with labels at 1080p. The CM4 run (gate 0) fills the
+Pi column.
+
 **Tier choice (v1)**: *Auto* picks by adapter, never by backend — the Pi runs GLES 3.1 or
 v3dv Vulkan (`ac2-ui/src/gpu.rs`): `Rasterizer::Software` → Bare; adapter name containing
 `V3D` (either backend), or `max_texture_dimension_2d` ≤ 4096, or another integrated GPU that
@@ -381,6 +411,9 @@ stepped down once (a blanking stall) would stay degraded for months.
   not saturate), `skyline_rta_pink` and `skyline_tonal`, ice and viridis, Full, Lite and Bare,
   320×200, blessed on lavapipe at the line tolerance (24 / 0.2 %: blur float math differs at
   edges like AA does); `render_to_image` output includes bloom and is Full whatever tier.
+  The glow only adds and lights pixels beside the tips; a glow on Bare, or without its
+  skyline, is refused. `bench_frame_cost` (`AC2_SKYLINE_BENCH=1`) prints CPU and GPU time
+  per tier (*Performance*).
 - **GL in CI**: the skyline render tests also run with `WGPU_BACKEND=gl` (llvmpipe, which
   gets the WebGL2-class limits): vertex-stage `textureLoad` of R32Float, instancing, Max
   into Rg8Unorm (the two-spike test) are exercised on the backend the Pi uses.
@@ -423,11 +456,27 @@ stepped down once (a blanking stall) would stay degraded for months.
      the floor's front corners: at high pitch the far top edge bound otherwise.
    - **Colour maps** moved from `ac2-ui` to `ac2-scene` (`colormap`), so the skyline's LUT
      and the 2D spectrograph's come from one table.
-   - **Bloom** (with the 0.25 brightness threshold) is v1b; no `SkylineGlow` primitive yet.
    - The skyline goldens are their own test binary (`ac2-plot --test skyline`), run on GL in
    CI and by gate 0 on the CM4 with `WGPU_BACKEND=gl` or `vulkan`.
-3. **v1b**: bloom; goldens re-blessed with it. 1a and 1b ship together in one deploy: v1 is
-   "pretty and fast" together.
+3. **v1b** (done, branch `spectrograph-3d`): bloom as *The look* has it, `SkylineGlow` in
+   the scene's data layer after the ceiling line and before the axis labels (the floor band
+   and floor grid are in the base layer under the spikes, as in v1a); goldens re-blessed
+   with it (Bare unchanged), on lavapipe and llvmpipe GL. 1a and 1b ship together in one
+   deploy: v1 is "pretty and fast" together. Where it differs from the text above:
+   - **Source drawn at quarter resolution**, not drawn full size and box-reduced: the
+     fragment averages the light at the four pane pixels it spans along the spike and takes
+     its coverage across, which is that mean for a vertical spike at a quarter of the fill.
+   - **Lite's 5 taps are Full's kernel** in bilinear fetches (*The look*), not a narrower
+     blur: the glow looks the same on every tier that has one.
+   - **Bloom targets are a quarter of the pane on Lite too**, not of its half-res spike
+     target.
+   - **Parity with bloom** (960×540, `look.py` with the 0.25 threshold, sheets
+     `sheet_default_bloom.png`, `sheet_tilted_bloom.png` beside v1a's): the glow sits on the
+     tips and on the dense bass at the default camera, nothing milky. The bloom adds about
+     0.8 of the emulator's (mean 0.2–2.9 of 255 per pixel against 0.2–3.4) because the
+     spikes it is made of are the ~10 % dimmer ones of v1a's parity; gain left at 0.12.
+     Pixels at 255 in the real picture are under 0.6 % (the emulator: 1.1 %).
+
 4. Later, not planned: a cursor frequency line on the floor (no value), moving the orbit
    target, the peak-hold line as a ghost row.
 
