@@ -19,6 +19,17 @@ pub struct ClockPair {
     pub disciplined_ns: u64,
 }
 
+/// One read of a stream's stamp clock with the host's system time (`CLOCK_REALTIME`, UTC)
+/// read around it. System time is the one clock two hosts disciplined from one source
+/// share, so a block's capture stamp put on it can be compared with another host's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SystemPair {
+    /// Now on the clock the stream's blocks are stamped on, ns.
+    pub stamp_ns: u64,
+    /// Now on the system clock, ns since the Unix epoch.
+    pub system_ns: u64,
+}
+
 /// A stream's stamp clock, readable beside the host's disciplined clock. A stream has one
 /// only where its backend can read the clock it stamps on and the OS has a disciplined
 /// monotonic clock to read it against.
@@ -31,6 +42,10 @@ pub trait StampClock: Send + Sync + fmt::Debug {
     /// brackets the read with host clocks of its own choosing (see `bracket_host_clocks`)
     /// takes this rather than the disciplined pair.
     fn now_ns(&self) -> Option<u64>;
+
+    /// The stamp clock and the system clock now; `None` when this read is no good (the
+    /// stream is gone, or the thread was preempted between the reads).
+    fn system_pair(&self) -> Option<SystemPair>;
 }
 
 /// The longest the two disciplined reads around a stamp-clock read may lie apart. Read
@@ -104,6 +119,20 @@ pub fn bracket_host_clocks(clock: &dyn StampClock) -> Option<HostClocks> {
     })
 }
 
+/// `stamp_now` read between two reads of `CLOCK_REALTIME`, paired with their midpoint; `None`
+/// when the reads lie too far apart to say when the stamp clock was read (or the system
+/// clock stepped back between them).
+#[cfg(target_os = "linux")]
+pub(crate) fn pair_with_realtime(stamp_now: impl FnOnce() -> Option<u64>) -> Option<SystemPair> {
+    let before = clock_ns(libc::CLOCK_REALTIME);
+    let stamp_ns = stamp_now()?;
+    let after = clock_ns(libc::CLOCK_REALTIME);
+    (after >= before && after - before <= MAX_BRACKET_NS).then_some(SystemPair {
+        stamp_ns,
+        system_ns: before + (after - before) / 2,
+    })
+}
+
 /// `stamp_now` read between two reads of `CLOCK_MONOTONIC`, paired with their midpoint.
 #[cfg(target_os = "linux")]
 pub(crate) fn pair_with_monotonic(stamp_now: impl FnOnce() -> u64) -> Option<ClockPair> {
@@ -142,6 +171,9 @@ mod tests {
         }
         fn now_ns(&self) -> Option<u64> {
             Some(clock_ns(libc::CLOCK_MONOTONIC_RAW))
+        }
+        fn system_pair(&self) -> Option<SystemPair> {
+            pair_with_realtime(|| self.now_ns())
         }
     }
 

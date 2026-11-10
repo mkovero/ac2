@@ -609,6 +609,12 @@ impl crate::stamp::StampClock for JackStampClock {
     fn now_ns(&self) -> Option<u64> {
         Some(self.client.upgrade()?.as_client().time() * 1000)
     }
+
+    fn system_pair(&self) -> Option<crate::stamp::SystemPair> {
+        let active = self.client.upgrade()?;
+        let c = active.as_client();
+        crate::stamp::pair_with_realtime(|| Some(c.time() * 1000))
+    }
 }
 
 type Active = jack::AsyncClient<Notifications, Process>;

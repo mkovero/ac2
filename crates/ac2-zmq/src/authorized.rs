@@ -17,6 +17,8 @@
 //!   `User-Id`, i.e. the authenticated client identity the daemon binds leases and audit
 //!   entries to.
 //! - `key`: the client's 40-character Z85 CURVE public key.
+//! - An optional third field `rig=<16 hex digits>` marks the key as another rig's daemon
+//!   (its rig id), admitted to take audio rather than to control: `pupu <key> rig=00000000706f7075`.
 //! - Names and keys are unique. Any malformed line rejects the whole file (with its line
 //!   number): a half-read list must never silently drop a key or authorize a wrong one.
 //!
@@ -102,6 +104,8 @@ fn valid_name(name: &str) -> bool {
 pub struct AuthorizedKeys {
     by_name: BTreeMap<String, PublicKey>,
     by_key: BTreeMap<PublicKey, String>,
+    /// Names admitted as another rig's daemon, with that rig's id.
+    rigs: BTreeMap<String, u64>,
 }
 
 impl AuthorizedKeys {
@@ -128,11 +132,29 @@ impl AuthorizedKeys {
         Ok(())
     }
 
+    /// Adds `key` under `name` as the daemon of rig `rig_id`.
+    pub fn insert_rig(
+        &mut self,
+        name: &str,
+        key: PublicKey,
+        rig_id: u64,
+    ) -> Result<(), KeyStoreError> {
+        self.insert(name, key)?;
+        self.rigs.insert(name.to_owned(), rig_id);
+        Ok(())
+    }
+
     /// Removes `name`; returns its key if it was listed.
     pub fn remove(&mut self, name: &str) -> Option<PublicKey> {
         let key = self.by_name.remove(name)?;
         self.by_key.remove(&key);
+        self.rigs.remove(name);
         Some(key)
+    }
+
+    /// The rig id `name` was admitted as; `None` = an app (or not listed).
+    pub fn rig_of(&self, name: &str) -> Option<u64> {
+        self.rigs.get(name).copied()
     }
 
     /// The key listed under `name`.
@@ -174,14 +196,29 @@ impl AuthorizedKeys {
                 continue;
             }
             let mut fields = line.split_ascii_whitespace();
-            let (Some(name), Some(key), None) = (fields.next(), fields.next(), fields.next())
+            let (Some(name), Some(key), kind, None) =
+                (fields.next(), fields.next(), fields.next(), fields.next())
             else {
-                return Err(parse_err("expected `<name> <Z85 public key>`".to_owned()));
+                return Err(parse_err(
+                    "expected `<name> <Z85 public key> [rig=<rig id>]`".to_owned(),
+                ));
             };
             let key = PublicKey::from_z85(key)
                 .map_err(|_| parse_err(format!("{name}: not a 40-character Z85 key")))?;
-            keys.insert(name, key)
-                .map_err(|e| parse_err(e.to_string()))?;
+            match kind {
+                None => keys.insert(name, key),
+                Some(kind) => {
+                    let rig = kind
+                        .strip_prefix("rig=")
+                        .filter(|h| h.len() == 16)
+                        .and_then(|h| u64::from_str_radix(h, 16).ok())
+                        .ok_or_else(|| {
+                            parse_err(format!("{name}: expected `rig=<16 hex digits>`"))
+                        })?;
+                    keys.insert_rig(name, key, rig)
+                }
+            }
+            .map_err(|e| parse_err(e.to_string()))?;
         }
         Ok(keys)
     }
@@ -193,6 +230,9 @@ impl AuthorizedKeys {
             out.push_str(name);
             out.push(' ');
             out.push_str(&key.to_z85());
+            if let Some(rig) = self.rig_of(name) {
+                out.push_str(&format!(" rig={rig:016x}"));
+            }
             out.push('\n');
         }
         out
@@ -273,6 +313,27 @@ mod tests {
         assert_eq!(back.get("laptop"), Some(&a));
         assert_eq!(back.remove("laptop"), Some(a));
         assert_eq!(back.name_of(&a), None);
+        Ok(())
+    }
+
+    #[test]
+    fn a_rig_keeps_its_kind_through_the_file() -> Result<(), KeyStoreError> {
+        let (a, r) = (key(), key());
+        let mut keys = AuthorizedKeys::new();
+        keys.insert("laptop", a)?;
+        keys.insert_rig("pupu", r, 0x706f_7075)?;
+        let text = keys.to_text();
+        assert!(text.contains(" rig=00000000706f7075\n"), "{text}");
+        let mut back = AuthorizedKeys::parse(&text)?;
+        assert_eq!(back, keys);
+        assert_eq!(back.rig_of("pupu"), Some(0x706f_7075));
+        assert_eq!(back.rig_of("laptop"), None);
+        back.remove("pupu");
+        assert_eq!(back.rig_of("pupu"), None);
+        let bad = format!("pupu {} rig=12", r.to_z85());
+        assert!(AuthorizedKeys::parse(&bad).is_err());
+        let bad = format!("pupu {} app", r.to_z85());
+        assert!(AuthorizedKeys::parse(&bad).is_err());
         Ok(())
     }
 

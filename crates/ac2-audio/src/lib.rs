@@ -87,5 +87,5 @@ pub use output::{FADE_SECONDS, OutputSource, OutputState, OutputStats, OutputTic
 pub use replay::{FrameSource, OpenSource, ReplayBackend, ReplayConfig, ReplayMark, ReplaySpeed};
 #[cfg(target_os = "linux")]
 pub use stamp::bracket_host_clocks;
-pub use stamp::{ClockPair, HostClocks, StampClock};
+pub use stamp::{ClockPair, HostClocks, StampClock, SystemPair};
 pub use stream::{DuplexStream, GraphPatch, PatchLink, PatchState, SpareLink, StopOutcome};

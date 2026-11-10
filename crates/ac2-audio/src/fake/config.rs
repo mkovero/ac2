@@ -218,6 +218,9 @@ pub struct FakeConfig {
     /// stream's [`StampClock`](crate::StampClock) pairs it with the simulated disciplined
     /// clock, which keeps true time.
     pub host_crystal_ppm: f64,
+    /// Error of the host's system clock against true time, ns; positive = ahead. Two fake
+    /// rigs with different offsets are two hosts whose disciplined clocks disagree.
+    pub system_offset_ns: i64,
     /// Scripted faults.
     pub faults: Vec<FakeFault>,
     /// Raw frame counter of the first block (to exercise the 32-bit wrap).
@@ -250,6 +253,7 @@ impl Default for FakeConfig {
             drift_ppm: 0.0,
             audio_clock_ppm: 0.0,
             host_crystal_ppm: 0.0,
+            system_offset_ns: 0,
             faults: Vec::new(),
             counter_origin: 0,
             stop_after_blocks: None,

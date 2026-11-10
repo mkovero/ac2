@@ -116,6 +116,8 @@ pub(super) struct Sim {
     stats: FakeStats,
     /// Device frames simulated so far, for the stream's stamp clock.
     now_frames: Arc<AtomicU64>,
+    /// The system time at frame 0, ns since the Unix epoch.
+    system_origin_ns: u64,
 }
 
 impl std::fmt::Debug for Sim {
@@ -215,6 +217,7 @@ impl Sim {
             },
             stats: FakeStats::default(),
             now_frames: Arc::new(AtomicU64::new(0)),
+            system_origin_ns: system_now_ns(),
             cfg,
         }
     }
@@ -301,6 +304,7 @@ impl Sim {
         FakeStampClock {
             cfg: self.cfg.clone(),
             now_frames: Arc::clone(&self.now_frames),
+            system_origin_ns: self.system_origin_ns,
         }
     }
 
@@ -462,6 +466,16 @@ impl Sim {
 pub(super) struct FakeStampClock {
     cfg: FakeConfig,
     now_frames: Arc<AtomicU64>,
+    /// The host's system time at the stream's first frame, ns since the Unix epoch.
+    system_origin_ns: u64,
+}
+
+/// The real system time, ns since the Unix epoch: where a fake stream's simulated system
+/// clock starts, so two fake rigs started together read about the same time.
+fn system_now_ns() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_nanos()).unwrap_or(u64::MAX))
 }
 
 impl std::fmt::Debug for FakeStampClock {
@@ -484,5 +498,18 @@ impl crate::stamp::StampClock for FakeStampClock {
 
     fn now_ns(&self) -> Option<u64> {
         Some(self.cfg.host_ns(self.now_frames.load(Ordering::Acquire)))
+    }
+
+    fn system_pair(&self) -> Option<crate::stamp::SystemPair> {
+        let frames = self.now_frames.load(Ordering::Acquire);
+        // The simulated system clock keeps true time, offset by the host's stated error.
+        let system = self
+            .system_origin_ns
+            .saturating_add(self.cfg.true_ns(frames))
+            .saturating_add_signed(self.cfg.system_offset_ns);
+        Some(crate::stamp::SystemPair {
+            stamp_ns: self.cfg.host_ns(frames),
+            system_ns: system,
+        })
     }
 }

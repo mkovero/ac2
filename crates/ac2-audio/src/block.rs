@@ -43,19 +43,29 @@ impl BlockFlags {
     /// The size of the gap is estimated from host timestamps, not read from an exact frame
     /// counter. Only set together with [`BlockFlags::DISCONTINUITY`].
     pub const GAP_ESTIMATED: Self = Self(1 << 5);
+    /// Samples of a remote input (another rig's, merged into this rig's blocks) are missing
+    /// from this block: late, lost or slipped. The rig's own samples continue and the map
+    /// between the two rigs' sample indices has not moved (a slip carries its own count),
+    /// so averages over the remote input restart but a delay found between it and another
+    /// input stands.
+    pub const REMOTE_GAP: Self = Self(1 << 6);
 
     /// Every bit after which samples must not be treated as contiguous with the previous
     /// block.
     pub const BREAKS_CONTINUITY: Self =
         Self(Self::XRUN.0 | Self::DISCONTINUITY.0 | Self::OVERFLOW.0 | Self::CONFIG_CHANGE.0);
 
-    const NAMES: [(Self, &'static str); 6] = [
+    /// Every bit after which averages over the block's channels restart.
+    pub const RESTARTS_AVERAGES: Self = Self(Self::BREAKS_CONTINUITY.0 | Self::REMOTE_GAP.0);
+
+    const NAMES: [(Self, &'static str); 7] = [
         (Self::FIRST, "FIRST"),
         (Self::XRUN, "XRUN"),
         (Self::DISCONTINUITY, "DISCONTINUITY"),
         (Self::OVERFLOW, "OVERFLOW"),
         (Self::CONFIG_CHANGE, "CONFIG_CHANGE"),
         (Self::GAP_ESTIMATED, "GAP_ESTIMATED"),
+        (Self::REMOTE_GAP, "REMOTE_GAP"),
     ];
 
     /// Raw bits, for wire formats.
@@ -65,7 +75,7 @@ impl BlockFlags {
 
     /// Flags from raw bits; unknown bits are dropped.
     pub const fn from_bits_truncate(bits: u32) -> Self {
-        Self(bits & 0x3f)
+        Self(bits & 0x7f)
     }
 
     /// True when every bit of `other` is set.
@@ -86,6 +96,11 @@ impl BlockFlags {
     /// True when this block must not be spliced onto the previous one.
     pub const fn breaks_continuity(self) -> bool {
         self.intersects(Self::BREAKS_CONTINUITY)
+    }
+
+    /// True when averages over this block's channels restart before it.
+    pub const fn restarts_averages(self) -> bool {
+        self.intersects(Self::RESTARTS_AVERAGES)
     }
 }
 
