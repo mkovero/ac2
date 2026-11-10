@@ -1295,9 +1295,10 @@ axis, time down with the newest at the top, level as colour (viridis by default)
 bar spans the pane's level axis, so the level-axis keys change the colours.
 
 - The palette (`spectrograph colours`, `magma`, …) picks the colour map of the pane's
-  measurement: viridis, magma, inferno, cividis or grey. Magma, inferno and grey stay dark
-  for most of their range, easier on the eyes in a dark room; all five are perceptual
-  (brighter is always louder) and colour-blind safe. The measurement keeps it (`ac2 meas set
+  measurement: viridis, magma, inferno, cividis, grey or ice. Magma, inferno and grey stay
+  dark for most of their range, easier on the eyes in a dark room; ice (deep blue to pale
+  blue) is made for the 3D view; all six are perceptual (brighter is always louder) and
+  colour-blind safe. The measurement keeps it (`ac2 meas set
   <meas> --colours magma`), and the colour bar follows it.
 - **Shift+B** steps the measurement's history 10, 30 (default), 60, 120 s (`ac2 meas set
   <meas> --span 60`); every length keeps a row per 33 ms. It starts afresh at each length
