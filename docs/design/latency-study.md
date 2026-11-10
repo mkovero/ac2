@@ -370,3 +370,17 @@ spectrum in the flat spectrograph, 60 s each, release builds of 8e3e2381 and thi
 The flat spectrograph had no glide before, so this run shows the link and pacing gains only;
 on ketunkolo's 3D view the glide lag (25.6 ms p50, 151 max) is gone on top. The rerun on
 ketunkolo with `--latency-log` is the acceptance (§5).
+
+### ketunkolo after ceaf5d2d (3D view, 180 s, live music)
+
+| stage | before p50 / p95 / max | after p50 / p95 / max |
+|---|---|---|
+| capture → app link read | 16.4 / 25.9 / 40.1 | 9.8 / 14.9 / 30.3 ms |
+| read → reducer apply | 8.8 / 16.3 / 47.6 | 0.7 / 8.3 / 12.9 ms |
+| capture → present (newest) | 25.5 / 38.0 / 52.9 | 12.8 / 21.9 / 38.8 ms |
+| glide lag | 25.6 / 45.2 / 151 | 0 / 0 / 0 ms |
+| **capture → present, as drawn** | **53.4 / 63.9 / 169** | **14.6 / 29.8 / 50.6 ms** |
+
+Pass interval p50 9.3 ms (data passes plus display passes under Immediate), CPU 0.7 ms per
+pass. Left: the daemon's 60 Hz hand-off (≈ 8 ms mean of capture → read) waits for multi-rig
+stage 3a's per-period hand-off; present → glass (compositor + TV) is not measured.
