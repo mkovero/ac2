@@ -404,6 +404,14 @@ fn the_default_camera_frames_the_floor() {
                 "{p:?} at {aspect}: {n:?}"
             );
         }
+        // Centred up and down: no dead band under a low camera's floor.
+        let ys: Vec<f64> = box_corners()
+            .iter()
+            .map(|p| vp.ndc(*p).expect("in front")[1])
+            .collect();
+        let lo = ys.iter().copied().fold(f64::INFINITY, f64::min);
+        let hi = ys.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        assert!((lo + hi).abs() < 1e-9, "{lo} … {hi} at {aspect}");
         // Frequency reads left to right; the newest row is nearer than the oldest.
         let l = vp.ndc([-1.0, 0.0, 0.0]).expect("left");
         let r = vp.ndc([1.0, 0.0, 0.0]).expect("right");
@@ -605,6 +613,100 @@ fn labels_read_frequency_time_and_level() {
     };
     assert!(x("100") < x("1k") && x("1k") < x("10k"));
     assert!(s.time_right);
+}
+
+/// No label is cut by the field's edge, at any pane size or camera, and the height scale's
+/// numbers stand on one side of its post.
+#[test]
+fn labels_stay_whole_inside_the_field() {
+    let b = pink_room(30, SkylineTier::Full);
+    let view = ViewState::default();
+    for (w, h) in [
+        (1570.0, 950.0),
+        (1200.0, 600.0),
+        (730.0, 430.0),
+        (420.0, 300.0),
+    ] {
+        for (yaw, pitch) in [(0, 8), (-35, 30), (80, 2), (-80, 75)] {
+            let input = Spectrograph3dInput {
+                history: &b.h,
+                skyline: &b.s,
+                name: "Main L".into(),
+                range: Range::new(-100.0, 0.0),
+                offset_db: 0.0,
+                freshness: None,
+                colours: Colormap::Ice,
+                camera: Pose::from(SpectrumCamera {
+                    yaw_deg: yaw,
+                    pitch_deg: pitch,
+                    zoom_step: 0,
+                }),
+                tier: SkylineTier::Full,
+                tier_forced: false,
+            };
+            let s = spectrograph_3d_scene(
+                &[],
+                &Status::default(),
+                Some(&input),
+                &view,
+                &Theme::dark(),
+                Viewport {
+                    width: w,
+                    height: h,
+                },
+            );
+            let drawn: Vec<&Label> = s
+                .scene
+                .layers
+                .iter()
+                .flat_map(|l| &l.labels)
+                .filter(|l| s.labels.iter().any(|a| a.pos == l.pos && a.text == l.text))
+                .collect();
+            assert_eq!(drawn.len(), s.labels.len(), "{w}×{h} {yaw}/{pitch}");
+            for l in &drawn {
+                let r = label_box(l);
+                assert!(
+                    r.x >= s.plot.x
+                        && r.right() <= s.plot.right()
+                        && r.y >= s.plot.y
+                        && r.bottom() <= s.plot.bottom(),
+                    "{:?} at {w}×{h} {yaw}/{pitch}: {r:?} outside {:?}",
+                    l.text,
+                    s.plot
+                );
+            }
+            let sides: Vec<HAlign> = s
+                .labels
+                .iter()
+                .filter(|a| a.axis == LabelAxis::Level)
+                .filter_map(|a| drawn.iter().find(|l| l.pos == a.pos).map(|l| l.anchor.h))
+                .collect();
+            assert!(
+                sides.windows(2).all(|p| p[0] == p[1]),
+                "{w}×{h} {yaw}/{pitch}: {sides:?}"
+            );
+            // A 1080p pane at the default camera: the numbers outside the post (right of
+            // its unit), the scale whole up to the range's top.
+            if w > 1500.0 && yaw == 0 {
+                let unit_x = s
+                    .labels
+                    .iter()
+                    .find(|a| a.axis == LabelAxis::Unit)
+                    .map(|a| a.pos[0])
+                    .expect("unit");
+                assert_eq!(sides.first(), Some(&HAlign::Left));
+                assert!(
+                    s.labels
+                        .iter()
+                        .filter(|a| a.axis == LabelAxis::Level)
+                        .all(|a| a.pos[0] > unit_x),
+                    "{:?}",
+                    s.labels
+                );
+                assert!(texts(&s, LabelAxis::Level).contains(&"0"));
+            }
+        }
+    }
 }
 
 #[test]

@@ -90,8 +90,9 @@ pub const TARGET: V3 = [0.0, 0.15, FLOOR_DEPTH / 2.0];
 pub const FOV_Y_DEG: f64 = 35.0;
 pub const NEAR: f64 = 0.05;
 pub const FAR: f64 = 20.0;
-/// Margin left around the floor's front corners by the fitted distance.
-const FIT_MARGIN: f64 = 0.05;
+/// Margin left around the box's corners by the fitted distance, of the plot's half-width:
+/// on a full-screen pane the height scale's numbers then fit outside its post.
+const FIT_MARGIN: f64 = 0.07;
 /// The eye stays at least this far outside the skyline's box.
 pub const EYE_CLEARANCE: f64 = 0.15;
 /// Zoom steps per doubling of the distance: about 9 % a step.
@@ -520,7 +521,9 @@ impl ViewProj {
     }
 }
 
-fn view_proj_at(pose: Pose, distance: f64, aspect: f64) -> ViewProj {
+/// `shift` moves the picture up the plot by that much of its half-height (an off-axis
+/// lens: the pose and its perspective stay, only the frame slides).
+fn view_proj_at(pose: Pose, distance: f64, aspect: f64, shift: f64) -> ViewProj {
     let eye = add(TARGET, scale(pose.towards_eye(), distance));
     let f = normalize(sub(TARGET, eye));
     // Right-handed world seen with +x to the right of the screen when looking along +z:
@@ -534,7 +537,7 @@ fn view_proj_at(pose: Pose, distance: f64, aspect: f64) -> ViewProj {
     ViewProj {
         m: [
             row(r, fx, 0.0),
-            row(u, fy, 0.0),
+            row(add(scale(u, fy), scale(f, shift)), 1.0, 0.0),
             row(f, d, -NEAR * d),
             row(f, 1.0, 0.0),
         ],
@@ -542,18 +545,30 @@ fn view_proj_at(pose: Pose, distance: f64, aspect: f64) -> ViewProj {
     }
 }
 
+/// The box's lowest and highest corner in NDC y at `distance`, unshifted; `None` when a
+/// corner is behind the near plane.
+fn box_y_extent(pose: Pose, distance: f64, aspect: f64) -> Option<(f64, f64)> {
+    let vp = view_proj_at(pose, distance, aspect, 0.0);
+    box_corners()
+        .iter()
+        .try_fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| {
+            let n = vp.ndc(*p)?;
+            Some((lo.min(n[1]), hi.max(n[1])))
+        })
+}
+
 /// The distance at zoom step 0 for a plot of aspect `aspect`: from the default angles every
-/// corner of the box at full height fits with a 5 % margin, so the front edge's tall spikes
-/// are never cut at the sides.
+/// corner of the box at full height fits with a 7 % margin, the box centred up and down
+/// ([`lens_shift`]), so the front edge's tall spikes are never cut at the sides.
 pub fn fitted_distance(aspect: f64) -> f64 {
     let pose = Pose::from(SpectrumCamera::DEFAULT);
     let lim = 1.0 - FIT_MARGIN;
     let fits = |d: f64| {
-        let vp = view_proj_at(pose, d, aspect);
-        box_corners().iter().all(|p| {
-            vp.ndc(*p)
-                .is_some_and(|n| n[0].abs() <= lim && n[1].abs() <= lim)
-        })
+        let vp = view_proj_at(pose, d, aspect, 0.0);
+        box_corners()
+            .iter()
+            .all(|p| vp.ndc(*p).is_some_and(|n| n[0].abs() <= lim))
+            && box_y_extent(pose, d, aspect).is_some_and(|(lo, hi)| hi - lo <= 2.0 * lim)
     };
     let (mut lo, mut hi) = (0.1, 100.0);
     for _ in 0..60 {
@@ -567,6 +582,22 @@ pub fn fitted_distance(aspect: f64) -> f64 {
     hi
 }
 
+/// The lens shift that centres the box up and down in the plot for `pose`'s angles: a low
+/// camera sees the floor as a thin strip under tall spikes, and with the orbit target in
+/// the middle of the floor the picture would sit high, a dead band under it. Taken at the
+/// zoom-0 distance, so a dolly scales the picture about the same point.
+pub fn lens_shift(pose: Pose, aspect: f64) -> f64 {
+    let pose = pose.clamped();
+    let d = eye_distance(
+        Pose {
+            zoom_step: 0.0,
+            ..pose
+        },
+        aspect,
+    );
+    box_y_extent(pose, d, aspect).map_or(0.0, |(lo, hi)| (-(lo + hi) / 2.0).clamp(-0.5, 0.5))
+}
+
 /// The eye's distance from the target: the dolly's, never inside the grown box. The stored
 /// zoom step is left as set; only the distance drawn is held off.
 pub fn eye_distance(pose: Pose, aspect: f64) -> f64 {
@@ -578,7 +609,12 @@ pub fn eye_distance(pose: Pose, aspect: f64) -> f64 {
 /// The camera's view-projection for a plot of aspect `aspect`.
 pub fn view_proj(pose: Pose, aspect: f64) -> ViewProj {
     let pose = pose.clamped();
-    view_proj_at(pose, eye_distance(pose, aspect), aspect)
+    view_proj_at(
+        pose,
+        eye_distance(pose, aspect),
+        aspect,
+        lens_shift(pose, aspect),
+    )
 }
 
 /// Whether `eye` is outside the skyline's box grown by `margin`.
@@ -809,17 +845,23 @@ fn label_box(l: &Label) -> Rect {
 }
 
 /// Labels kept where they do not overlap one kept before them, in the order given.
-fn thin(candidates: Vec<(AxisLabel, Label)>, out: &mut Vec<(AxisLabel, Label)>) {
+fn thin(candidates: Vec<(AxisLabel, Label)>, plot: Rect, out: &mut Vec<(AxisLabel, Label)>) {
     const GAP: f32 = 6.0;
     for c in candidates {
         let b = label_box(&c.1);
-        let clear = out.iter().all(|(_, k)| {
-            let o = label_box(k);
-            b.right() + GAP <= o.x
-                || o.right() + GAP <= b.x
-                || b.bottom() + 1.0 <= o.y
-                || o.bottom() + 1.0 <= b.y
-        });
+        // A label the field would cut is not drawn: half a number reads as another one.
+        let whole = b.x >= plot.x
+            && b.right() <= plot.right()
+            && b.y >= plot.y
+            && b.bottom() <= plot.bottom();
+        let clear = whole
+            && out.iter().all(|(_, k)| {
+                let o = label_box(k);
+                b.right() + GAP <= o.x
+                    || o.right() + GAP <= b.x
+                    || b.bottom() + 1.0 <= o.y
+                    || o.bottom() + 1.0 <= b.y
+            });
         if clear {
             out.push(c);
         }
@@ -1058,12 +1100,7 @@ pub fn spectrograph_3d_scene(
         }
         let post = pj.length([side_x, 0.0, 0.0], [side_x, MAX_HEIGHT, 0.0]);
         let lax = axis::linear_axis(range, 0.0, post.max(1.0), &unit);
-        let (h, dx) = if time_right {
-            (HAlign::Left, 5.0)
-        } else {
-            (HAlign::Right, -5.0)
-        };
-        let mut level = Vec::new();
+        let mut ticks = Vec::new();
         for t in lax.ticks.iter().filter(|t| t.label.is_some()) {
             let y = MAX_HEIGHT * (t.value - range.lo) / range.span();
             // A tick on the floor would sit on the time axis's "now"; the floor reads the
@@ -1083,14 +1120,32 @@ pub fn spectrograph_3d_scene(
                 stroke: post_stroke,
                 clip: Some(plot),
             });
-            let text = t.label.clone().unwrap_or_default();
-            let l = label(
-                text.clone(),
-                [q[0] + dx, q[1]],
+            ticks.push((p, q, t.label.clone().unwrap_or_default()));
+        }
+        // The numbers stand outside the post, past its ticks; where the field's edge would
+        // cut one, all of them stand inside it instead, so the scale reads on one side.
+        let place = |inward: bool, p: [f32; 2], q: [f32; 2], text: &str| {
+            let (h, x) = match (time_right, inward) {
+                (true, false) => (HAlign::Left, q[0] + 5.0),
+                (false, false) => (HAlign::Right, q[0] - 5.0),
+                (true, true) => (HAlign::Right, p[0] - 5.0),
+                (false, true) => (HAlign::Left, p[0] + 5.0),
+            };
+            label(
+                text.to_string(),
+                [x, q[1]],
                 anchor(h, VAlign::Center),
                 small,
                 dark.axis_text,
-            );
+            )
+        };
+        let inward = ticks.iter().any(|(p, q, text)| {
+            let b = label_box(&place(false, *p, *q, text));
+            b.x < plot.x || b.right() > plot.right()
+        });
+        let mut level = Vec::new();
+        for (p, q, text) in ticks {
+            let l = place(inward, p, q, &text);
             if pj.inside(p) {
                 level.push((
                     AxisLabel {
@@ -1106,9 +1161,10 @@ pub fn spectrograph_3d_scene(
             && pj.inside(p)
             && !unit.is_empty()
         {
+            // High enough that the top tick's number, centred on the post's top, clears it.
             let l = label(
                 unit.clone(),
-                [p[0], p[1] - 6.0],
+                [p[0], p[1] - 9.0],
                 anchor(HAlign::Center, VAlign::Bottom),
                 small,
                 dark.text_dim,
@@ -1127,14 +1183,14 @@ pub fn spectrograph_3d_scene(
         }
         // The level scale's own labels first: its unit and ticks read the heights.
         let mut kept = Vec::new();
-        thin(level, &mut kept);
-        thin(cands, &mut kept);
+        thin(level, plot, &mut kept);
+        thin(cands, plot, &mut kept);
         cands = kept;
     } else if !chrome.labels() {
         cands.clear();
     } else {
         let mut kept = Vec::new();
-        thin(cands, &mut kept);
+        thin(cands, plot, &mut kept);
         cands = kept;
     }
 

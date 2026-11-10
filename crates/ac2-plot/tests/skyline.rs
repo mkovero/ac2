@@ -3,8 +3,7 @@
 //! (`bench_frame_cost`).
 //!
 //! A test binary of its own so it runs alone against a chosen backend: CI runs it again with
-//! `WGPU_BACKEND=gl` (llvmpipe, the WebGL2-class limits a Pi's GLES gets), and the CM4 gate
-//! runs it on the Pi with `WGPU_BACKEND=gl` and `WGPU_BACKEND=vulkan`:
+//! `WGPU_BACKEND=gl` (llvmpipe, the WebGL2-class limits a GLES adapter gets):
 //! `cargo nextest run -p ac2-plot --test skyline`.
 
 #[path = "it/common/mod.rs"]

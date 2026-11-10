@@ -161,6 +161,10 @@ the rect, thinned where they would overlap.
   length) and the unit (`dBFS`, `dB SPL`) at its top — and a **ceiling line** at the range top
   along the back edge, faint grey and dashed (the gentle plot-hint style). Heights are the
   level; no colour bar in 3D: colour there is lightness × depth, not a scale to read.
+- **No label is cut** by the field's edge: one that would not fit whole is dropped (half a
+  number reads as another). The height scale's numbers stand outside the post; when the
+  field would cut one there (a small pane), all of them stand inside it, so the scale reads
+  on one side. The 7 % fit margin leaves a 1080p pane room for them outside.
 - **T** (plot chrome): *Full* — faint floor grid (decade lines front to back, time ticks
   across), labels, height scale, ceiling line; *NoGrid* — the same without the floor grid;
   *TracesOnly* — spikes and the floor band only.
@@ -255,8 +259,13 @@ Orbit around a fixed target at the floor's centre, 0.15 up; vertical FOV 35°; n
 |---|---|---|---|---|
 | yaw | 0° (frequency left → right) | ±80° | 15° | 0.3°/px drag x |
 | pitch | 8° | 2° – 75° | 5° | 0.2°/px drag y |
-| distance | d₀: the floor's front corners fit with 5 % margin at the pane's aspect | see below | 2 zoom steps | wheel / pinch: 1 step a notch |
+| distance | d₀: the box's corners fit with 7 % margin at the pane's aspect, centred up and down | see below | 2 zoom steps | wheel / pinch: 1 step a notch |
 
+- **Centred up and down** by an off-axis lens shift: with the target on the floor's middle a
+  low camera puts the box high in the plot, a dead band under the floor; the shift (from
+  the box's corners at the pose's zoom-0 distance, at most half the plot) slides the frame
+  so the box's top and bottom sit equally far from the plot's edges. The pose and its
+  perspective are unchanged, and a dolly scales about the same point.
 - **Zoom is a dolly** in steps, distance `d₀ · 2^(−step/8)` (≈ 9 % a step), step −8 … +4.
   Moving the camera keeps the perspective cue (near spikes larger) that conveys depth when
   nothing hides anything; a narrowed FOV from afar flattens the skyline into a strip.
@@ -422,7 +431,8 @@ stepped down once (a blanking stall) would stay degraded for months.
   closest zoom × narrow and very wide aspects), stored step unchanged by the clamp; floor corners inside the
   rect at the default; label texts, sides by yaw, culling, thinning at ±80°; height scale
   ticks and unit; T levels; ceiling line; draw order within the layer; caption cell size
-  from k and tier name when forced; phase per data frame; Auto tier for software, none for V3D on GL and on Vulkan,
+  from k and tier name when forced; phase per data frame; box centred up and down at the default; labels whole inside the field at every pane size
+  and camera, the level numbers on one side; Auto tier for software, none for V3D on GL and on Vulkan,
   4096-limit integrated, Apple, discrete; override wins.
 - `ac2-plot` (`tests/it/render.rs`, `golden.rs`): a single spike lands at the pixel the scene
   projects; max blending (two overlapping spikes give the brighter, not the sum, and the
@@ -437,7 +447,10 @@ stepped down once (a blanking stall) would stay degraded for months.
 - **GL in CI**: the skyline render tests also run with `WGPU_BACKEND=gl` (llvmpipe, which
   gets the WebGL2-class limits): vertex-stage `textureLoad` of R32Float, instancing, Max
   into Rg8Unorm (the two-spike test) are exercised on GL as well as Vulkan.
-- `ac2-ui`: G / Shift+G through four views; scope, hint line; ←/→, PgUp/PgDn, I/O, Home move
+- `ac2-scene` (`spectrograph_tests.rs`): the 3D view asked of the 2D scene (a GPU without
+  it) is the spectrograph alone with *3D needs a faster GPU* in its caption.
+- `ac2-ui`: G / Shift+G through four views, three on a GPU without the 3D view (no camera
+  keys, 3D quality does not step); scope, hint line; ←/→, PgUp/PgDn, I/O, Home move
   the camera and leave the frequency axis; inert commands; equal defaults in both scopes;
   drag, wheel, pinch messages; camera sent on release only; Esc does not touch it.
 - `ac2-e2e`: `spectrograph_3d_from_an_empty_daemon` (session, spectrum from the palette, G ×3,
@@ -471,7 +484,8 @@ stepped down once (a blanking stall) would stay degraded for months.
      ~40 %); the tip cap is 1.5× of the light and clips at 1 after it, not before.
    - **Floor band** under the spikes drawn in the base layer, before the composite.
    - **Fitted distance** fits every corner of the box (floor and top) in x and y, not only
-     the floor's front corners: at high pitch the far top edge bound otherwise.
+     the floor's front corners: at high pitch the far top edge bound otherwise. (Since the
+     app review below: 7 % margin and the box centred by a lens shift.)
    - **Colour maps** moved from `ac2-ui` to `ac2-scene` (`colormap`), so the skyline's LUT
      and the 2D spectrograph's come from one table.
    - The skyline goldens are their own test binary (`ac2-plot --test skyline`), run on GL in
@@ -495,7 +509,16 @@ stepped down once (a blanking stall) would stay degraded for months.
      spikes it is made of are the ~10 % dimmer ones of v1a's parity; gain left at 0.12.
      Pixels at 255 in the real picture are under 0.6 % (the emulator: 1.1 %).
 
-4. Later, not planned: a cursor frequency line on the floor (no value), moving the orbit
+4. **App review** (1920×1080 app screenshots against the fake rig, a pinned synthetic 30 s
+   history shaped as a raw 8192-point FFT of pink noise through a room, per-bin chi-square
+   spread, with tones): the box sat high with a dead band under the floor at the default
+   camera, and the height scale's numbers were cut by the field's right edge (`−1C`), worst
+   in the light theme and in a small pane. Now the frame is centred (*Camera and
+   controls*), the fit margin is 7 %, and labels are never cut (*Axes and level
+   reference*); the unit stands clear of the top tick. Goldens re-blessed on lavapipe;
+   llvmpipe GL within tolerance.
+
+5. Later, not planned: a cursor frequency line on the floor (no value), moving the orbit
    target, the peak-hold line as a ghost row.
 
 ## Open questions (with recommendations)
