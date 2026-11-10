@@ -410,6 +410,24 @@ fn the_default_camera_frames_the_floor() {
         assert!(l[0] < -0.5 && r[0] > 0.5);
         assert!(vp.clip([0.0, 0.0, 0.0])[3] < vp.clip([0.0, 0.0, FLOOR_DEPTH])[3]);
     }
+    // The camera's right is world +x at every yaw and pitch: 20 Hz on the left, never
+    // mirrored.
+    for yaw in [-80, -40, 0, 40, 80] {
+        for pitch in [2, 8, 75] {
+            let vp = view_proj(
+                Pose::from(SpectrumCamera {
+                    yaw_deg: yaw,
+                    pitch_deg: pitch,
+                    zoom_step: 0,
+                }),
+                1.78,
+            );
+            let mid = FLOOR_DEPTH / 2.0;
+            let l = vp.ndc([-0.1, 0.0, mid]).expect("left");
+            let r = vp.ndc([0.1, 0.0, mid]).expect("right");
+            assert!(l[0] < r[0], "yaw {yaw} pitch {pitch}: {l:?} {r:?}");
+        }
+    }
     // Zooming in brings the eye closer.
     let a = eye_distance(Pose::from(SpectrumCamera::DEFAULT), 1.78);
     let b = eye_distance(

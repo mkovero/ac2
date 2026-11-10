@@ -401,7 +401,9 @@ pub struct Skyline3d {
     /// Ring position of the newest row; the row `j` places before it is `j` rows older.
     pub newest: u32,
     /// How far the rows have glided back from their places: the newest row's fill
-    /// fraction, in (0, 1].
+    /// fraction, in (0, 1]. Row `j` (0 = newest) stands at `z = (j + phase) · world[1] /
+    /// rows`, so rows move back continuously as the newest fills and a new one starts at
+    /// the front.
     pub phase: f32,
     /// World to clip space for `rect` (column-major; clip `z` in 0 … `w`).
     pub view_proj: [[f32; 4]; 4],
