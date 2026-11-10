@@ -17,11 +17,12 @@ use crate::selftest::{self, DuplexReport, DuplexSpec, Emit, SetupError, Spread};
 use crate::watch::quit_signal;
 use crate::{BUILD_ID, CliError};
 
-pub(crate) async fn run(_cli: &Cli, cmd: &SelftestCmd, out: &mut Out<'_>) -> Result<(), CliError> {
+pub(crate) async fn run(cli: &Cli, cmd: &SelftestCmd, out: &mut Out<'_>) -> Result<(), CliError> {
     match cmd {
         SelftestCmd::Duplex(a) => duplex(a, out).await,
         SelftestCmd::Stamps(a) => super::selftest_stamps::stamps(a, out).await,
         SelftestCmd::Net(a) => super::selftest_net::net(a, out).await,
+        SelftestCmd::Frames(a) => super::selftest_frames::frames(cli, a, out).await,
     }
 }
 

@@ -223,7 +223,8 @@ pub enum Cmd {
         #[command(subcommand)]
         cmd: StateCmd,
     },
-    /// Hardware checks that run in this process on an audio backend, without a daemon.
+    /// Hardware checks that run in this process on an audio backend, without a daemon; and
+    /// `frames`, the delivery of a running daemon's frames to this client.
     Selftest {
         /// Check.
         #[command(subcommand)]
@@ -272,6 +273,22 @@ pub enum SelftestCmd {
     /// listening side, DEALER on the connecting side, byte credit). The receiver logs every
     /// arrival into `--out` and ends with the one-way spread and a suggested link offset.
     Net(SelftestNet),
+    /// Frame delivery of one measurement's live stream from a running daemon (`--remote`
+    /// for another host's): subscribes as the app does and records every frame's arrival
+    /// spacing, age, seq gaps, hop and size. Read-only: no sound, no state change.
+    Frames(SelftestFrames),
+}
+
+/// `selftest frames`.
+#[derive(Debug, Args)]
+pub struct SelftestFrames {
+    /// Measurement name or id; its curve or reading stream is followed (`spec`, `rta`,
+    /// `tf`, `spl`).
+    #[arg(long, value_name = "NAME|ID")]
+    pub meas: MeasRef,
+    /// How long to record, seconds (Ctrl-C ends early).
+    #[arg(long, default_value_t = 30.0, value_name = "N")]
+    pub seconds: f64,
 }
 
 /// `selftest net`.

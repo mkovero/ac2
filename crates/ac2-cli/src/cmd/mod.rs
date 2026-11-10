@@ -22,6 +22,7 @@ mod readouts;
 mod rec;
 mod salvage;
 mod selftest;
+mod selftest_frames;
 mod selftest_net;
 mod selftest_stamps;
 mod session;
@@ -116,8 +117,16 @@ pub(crate) fn is_local(cli: &Cli) -> bool {
 
 /// Connects; `mirror` turns on state mirroring (live views only).
 pub(crate) async fn connect(cli: &Cli, mirror: bool) -> Result<Client, CliError> {
+    connect_with(cli, |cfg| cfg.mirror = mirror).await
+}
+
+/// Connects with the settings `adjust` makes on the target's.
+pub(crate) async fn connect_with(
+    cli: &Cli,
+    adjust: impl FnOnce(&mut ClientConfig),
+) -> Result<Client, CliError> {
     let (mut cfg, what) = target(cli)?;
-    cfg.mirror = mirror;
+    adjust(&mut cfg);
     #[cfg(unix)]
     if is_local(cli) {
         // An ipc connect to a missing socket file would just wait; say so at once.

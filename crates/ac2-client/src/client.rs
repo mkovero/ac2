@@ -71,6 +71,10 @@ pub struct ClientConfig {
     /// ([`ac2_proto::flow::DATA_WINDOW_DEFAULT`] by default; the daemon clamps it). The
     /// standing delay of a consumer slower than the daemon is this divided by its rate.
     pub data_window: u32,
+    /// Log every data frame each drain reads into [`crate::Latest::arrivals`] (diagnostics:
+    /// arrival spacing, age, size per frame). Off by default: the log costs a clock read
+    /// and an entry per frame.
+    pub record_arrivals: bool,
 }
 
 /// Default [`ClientConfig::dead_after`]: the application-level watchdog above the kernel's.
@@ -150,6 +154,7 @@ impl ClientConfig {
             received_bytes: Arc::default(),
             dead_after: DEAD_AFTER,
             data_window: ac2_proto::flow::DATA_WINDOW_DEFAULT,
+            record_arrivals: false,
         }
     }
 
@@ -396,6 +401,7 @@ impl Client {
             data_mon,
             cfg.data_window,
             Arc::clone(&cfg.received_bytes),
+            cfg.record_arrivals,
         )?;
 
         let (sync_tx, sync_rx) = mpsc::unbounded_channel();

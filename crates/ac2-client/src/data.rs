@@ -102,6 +102,29 @@ pub(crate) struct DataState {
     owed: (u32, u32),
     /// Topics whose chain broke: a keyframe request is due.
     asks: Vec<Topic>,
+    /// Log every data frame read ([`crate::ClientConfig::record_arrivals`]).
+    record: bool,
+}
+
+/// One data frame as a drain read it ([`crate::ClientConfig::record_arrivals`]).
+#[derive(Debug, Clone)]
+pub struct Arrival {
+    /// Topic.
+    pub topic: Topic,
+    /// The frame's `seq`.
+    pub seq: u64,
+    /// A keyframe, not a delta.
+    pub keyframe: bool,
+    /// Stamp of the frame it became; `None` when it was not applied (a delta on another
+    /// base or failing its CRC, a frame of an older epoch or incarnation, a delta before
+    /// the first keyframe).
+    pub stamp: Option<FrameStamp>,
+    /// Message bytes, all parts, as ZeroMQ delivered them (no CURVE or TCP overhead).
+    pub bytes: usize,
+    /// When the drain read it (local monotonic clock).
+    pub at: Instant,
+    /// The same instant on the local wall clock, ns since the Unix epoch.
+    pub wall_ns: i128,
 }
 
 /// The newest frame of one topic.
@@ -139,6 +162,9 @@ pub struct Latest {
     pub refused_total: u64,
     /// The daemon's keepalives arrive.
     pub responding: bool,
+    /// Every data frame this drain read, in order; empty unless
+    /// [`crate::ClientConfig::record_arrivals`].
+    pub arrivals: Vec<Arrival>,
 }
 
 /// Topic text without a heap allocation (every topic is far shorter than the buffer).
@@ -239,6 +265,7 @@ impl DataState {
         monitor: Monitor,
         window: u32,
         received: Arc<AtomicU64>,
+        record: bool,
     ) -> Result<Self, ClientError> {
         send_up(&sock, DataUp::Window { bytes: window })?;
         Ok(Self {
@@ -253,6 +280,7 @@ impl DataState {
             refused: 0,
             owed: (0, 0),
             asks: Vec::new(),
+            record,
         })
     }
 
@@ -279,14 +307,16 @@ impl DataState {
     }
 
     /// One message, in order: a keyframe replaces the frame held, a delta applies on it.
-    fn apply(&mut self, w: WireFrame, view: &MirrorView, now: Instant) {
+    /// Returns the stamp of the frame held after it, if it was applied.
+    fn apply(&mut self, w: WireFrame, view: &MirrorView, now: Instant) -> Option<FrameStamp> {
         let topic = w.topic();
         match w {
             WireFrame::Key(k) => {
                 if !current(&k.stamp, view.incarnation, view.session_epoch) {
                     self.discarded += 1;
-                    return;
+                    return None;
                 }
+                let stamp = k.stamp;
                 match self.kept.get_mut(&topic) {
                     Some(kp) => {
                         let bump = newer(&k.stamp, &kp.coded.stamp);
@@ -297,7 +327,9 @@ impl DataState {
                             if bump {
                                 kp.received = now;
                             }
+                            return Some(stamp);
                         }
+                        None
                     }
                     None => {
                         self.kept.insert(
@@ -311,19 +343,19 @@ impl DataState {
                                 asked_at: None,
                             },
                         );
+                        Some(stamp)
                     }
                 }
             }
             WireFrame::Delta(d) => {
                 // No frame held yet: the keyframe the subscription brings is on its way.
-                let Some(kp) = self.kept.get_mut(&topic) else {
-                    return;
-                };
+                let kp = self.kept.get_mut(&topic)?;
                 match d.apply(&kp.coded) {
                     Ok(c) => {
                         kp.coded = c;
                         kp.fresh = true;
                         kp.received = now;
+                        Some(kp.coded.stamp)
                     }
                     Err(_) => {
                         self.refused += 1;
@@ -334,6 +366,7 @@ impl DataState {
                             kp.asked_at = Some(now);
                             self.asks.push(topic);
                         }
+                        None
                     }
                 }
             }
@@ -396,6 +429,7 @@ impl DataState {
             self.restate()?;
         }
         let mut read = 0;
+        out.arrivals.clear();
         while read < DRAIN_LIMIT {
             let Some(parts) = self.sock.try_recv_parts()? else {
                 break;
@@ -427,7 +461,25 @@ impl DataState {
                 _ => continue,
             }
             match decode(&parts) {
-                Some(w) => self.apply(w, view, now),
+                Some(w) if self.record => {
+                    // Each frame's own read time: a drain can hold several.
+                    let (at, wall_ns) = (Instant::now(), crate::io::wall_ns());
+                    let (topic, keyframe) = (w.topic(), matches!(w, WireFrame::Key(_)));
+                    let seq = w.seq();
+                    let stamp = self.apply(w, view, now);
+                    out.arrivals.push(Arrival {
+                        topic,
+                        seq,
+                        keyframe,
+                        stamp,
+                        bytes,
+                        at,
+                        wall_ns,
+                    });
+                }
+                Some(w) => {
+                    self.apply(w, view, now);
+                }
                 None => self.malformed += 1,
             }
         }
