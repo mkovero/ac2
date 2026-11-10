@@ -290,8 +290,8 @@ impl Control {
         }
     }
 
-    /// Refuses a session whose remote inputs cannot be: an input of this rig, or one its rig
-    /// is known not to give.
+    /// Refuses a session the operator opens whose remote inputs cannot be: an input of this
+    /// rig, or one its rig is known not to give.
     pub(super) fn check_remote_inputs(&self, cfg: &SessionConfig) -> Result<(), ProtoError> {
         for r in &cfg.remote_inputs {
             if r.rig == self.s.rig_id {

@@ -30,6 +30,10 @@ impl Control {
                 "a recording is played with session.replay",
             ));
         }
+        // Refused when the operator opens the session only: one the daemon reopens on its
+        // own (monitor at start, after a power cut) keeps its remote inputs, and the joiner
+        // reports why one gives no audio.
+        self.check_remote_inputs(&config)?;
         self.open_session(client, config, None)
             .map(ReplyBody::Session)
     }
@@ -42,7 +46,6 @@ impl Control {
         replay: Option<ac2_proto::model::ReplayInfo>,
     ) -> Result<Session, ProtoError> {
         session::validate(&config)?;
-        self.check_remote_inputs(&config)?;
         let backend = self.backend_for(config.backend)?;
         // The preview may hold the very device the session is about to open.
         self.close_preview();

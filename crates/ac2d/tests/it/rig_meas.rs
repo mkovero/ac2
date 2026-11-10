@@ -26,6 +26,7 @@ fn start(name: &str, dir: &Path) -> (Handle, ac2_audio::FakeBackend) {
     cfg.lease_expiry = Duration::from_secs(60);
     cfg.session_dir = dir.join("sessions");
     cfg.rig_settings = Some(dir.join("rig.json"));
+    cfg.rig_id = ac2d::config::RigIdSource::File(dir.join("rig-id"));
     cfg.rig_logs = Some(dir.join("rig-logs"));
     cfg.autosave = Some(AutosaveConfig {
         dir: dir.join("autosave"),
@@ -321,6 +322,66 @@ fn monitor_at_start_meters_with_no_client() {
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
     drop((c, sub, d));
+    h.shutdown();
+}
+
+/// The monitor at start reopens a recorded session whose remote input could not be added
+/// now (here: it names this very rig): an add-time refusal is for the operator, so the
+/// audio opens with the input marked rather than retrying for ever with no meter up.
+#[test]
+fn monitor_at_start_keeps_a_remote_input_it_could_not_add() {
+    let dir = tempfile::tempdir().unwrap();
+    let (h, _backend) = start("rig-meas-monitor-remote-1", dir.path());
+    let (mut c, _sub) = connect(&h, &[]);
+    let ReplyBody::Welcome(w) = c.ok(Command::Hello {
+        client: "test".into(),
+    }) else {
+        panic!("welcome");
+    };
+    c.ok(Command::MeasCreate {
+        config: rig_meter("Stage"),
+    });
+    let rev = state(&mut c).rig.rev;
+    c.ok(Command::RigMonitorStart {
+        base: rev,
+        on: true,
+    });
+    c.ok(Command::SessionOpen {
+        config: SessionConfig {
+            input_channels: vec![0, 1, REMOTE_BASE],
+            remote_inputs: vec![RemoteInput {
+                slot: 0,
+                rig: RigId(w.rig_id.0 ^ 1),
+                rig_name: "elsewhere".into(),
+                channel: 0,
+            }],
+            ..session(false)
+        },
+    });
+    drop(c);
+    h.shutdown();
+    // The recorded input now names this rig, as a session copied between rigs would.
+    let mut rig = rig_json(dir.path());
+    rig["monitor_session"]["remote_inputs"][0]["rig"] = serde_json::to_value(w.rig_id).unwrap();
+    std::fs::write(
+        dir.path().join("rig.json"),
+        serde_json::to_vec(&rig).unwrap(),
+    )
+    .unwrap();
+
+    let (h, _backend) = start("rig-meas-monitor-remote-2", dir.path());
+    let (mut c, _sub) = connect(&h, &[]);
+    let st = state(&mut c);
+    let open = st
+        .session
+        .open
+        .expect("the monitor at start opened the audio");
+    assert_eq!(open.config.remote_inputs.len(), 1);
+    assert_eq!(
+        st.remote.inputs.first().map(|i| i.audio),
+        Some(RemoteAudio::OnThisRig)
+    );
+    drop(c);
     h.shutdown();
 }
 
