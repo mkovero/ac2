@@ -308,7 +308,7 @@ fn display_page_changes_apply_at_once_and_are_remembered() {
     assert!(t.st.prefs.shared_scale);
     t.key("Right");
     assert!(!t.st.prefs.shared_scale);
-    assert_eq!(t.last_toast(), "Leq scale: each SPL pane on its own scale");
+    assert_eq!(t.last_toast(), "Shared scale: each pane on its own");
     t.key("Left");
     assert!(t.st.prefs.shared_scale);
     t.key("Down");

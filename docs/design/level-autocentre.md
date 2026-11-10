@@ -1,6 +1,6 @@
 # Level axis follows the content
 
-Status: draft, review round 1 applied. Operator request: the spectrum pane's level axis
+Status: implemented (`ac2-scene` `view/follow.rs`, `ac2-ui` `state/panes/follow.rs`). Operator request: the spectrum pane's level axis
 re-centres on what it shows, gently and only when the picture needs it, because a kiosk
 (touch, no keyboard) cannot fix a range that no longer fits.
 
@@ -165,6 +165,11 @@ touch panel drifts further. The pane keeps its own detector: two clicks within 0
 from before it is restored on the second, so a kiosk is left with no stray cursor. The 3D
 view the same; its camera keeps Home.
 
+**Every view of the spectrum pane follows**, the 3D spectrograph included: its heights are
+the pane's range, so a move eases the skyline's heights with it. A double-tap on the 3D view
+is a tap, not an orbit (an orbit needs a drag), and makes the slot Auto; an orbit, tilt or
+dolly is pointer or key input on the pane and starts the hands-off time like any other.
+
 ## Panes on one scale
 
 Same-unit Auto spectrum panes on screen follow as one group with **one range**, so
@@ -228,7 +233,7 @@ pane's axis for the history's scale), its height post and ceiling line labelled.
   once (no second widen in 10 min); a follow move never narrows.
 - **Coverage gap:** frames 0.3 s apart decide; a 3 s hole in the window holds the decision.
 
-`ac2-ui` reducer (`state/tests/display/axis.rs`):
+`ac2-ui` reducer (`state/tests/display/follow.rs`):
 
 - **Manual override:** a pan makes the slot Operator; a later step does not move it;
   Shift+Home fits, makes it Auto, the next step moves it.
@@ -248,6 +253,9 @@ pane's axis for the history's scale), its height post and ceiling line labelled.
   row does nothing of the kind. The 0.4 s / 24 px rule is checked by hand on the CM4 kiosk
   panel before it ships.
 - **Setting off:** nothing moves; Shift+Home and double-tap make the slot Operator as today.
+- **Frequency zoom:** the same move as unzoomed.
+- **Daemon incarnation change:** the old history moves nothing.
+- **3D view:** a step moves the range and the skyline's heights span the moved range.
 
 ## Open questions (with recommendations)
 

@@ -958,6 +958,36 @@ one for the transfer panes' IR views, one for the sweep panes'.
 - The spectrum pane keeps one range per scale (**dBFS** uncalibrated, **dB SPL**
   calibrated), so a calibration never leaves the curves off a dBFS-sized axis.
 
+#### The level axis follows the content
+
+A spectrum pane's range the app framed (*automatic*) moves with what the pane shows, so a
+show that gets louder, a band that starts or a quiet room after it stays on the axis without
+a hand on the keys. Settings › Display › *Level axis follows* turns it off (on by default);
+off, an automatic range stays where it was framed.
+
+- **Up quickly**: once the loudest part of the curves (20 Hz – 20 kHz, offsets included,
+  live and compared curves alike) sits above the top for most of 3 s, the axis steps up so
+  it has a fifth of the range to spare. **Down slowly**: only after 4 minutes in which it
+  never came near the top, and at most once a minute, so a pause between songs moves
+  nothing. A range that cannot hold the content (a spectrum spread over more than 80 % of
+  it for 4 minutes) widens downward; it never narrows by itself.
+- Every move lands on the axis's own grid and glides there in under a second; the level
+  labels' gutter shades grey while it does, so a moved axis is never mistaken for a level
+  change. A move changes nothing in `ui.toml` or the layout.
+- **Hands off**: nothing moves while a pointer is down on the pane or for 30 s after a key
+  or a touch on it; what was due happens after.
+- **A range set by hand never follows** (zoom, pan, **Ctrl+Home**). **Shift+Home** fits
+  the axis and makes it automatic again; a **double-tap** (two taps within 0.4 s, 24 px) on
+  the plot does the same for the level axis alone, frequency and cursor left as they were,
+  on a touch panel where there is no keyboard. Taps on legend rows and plates are not
+  counted.
+- **Several panes** of one unit (dBFS or dB SPL) on screen share one following range under
+  Settings › Display › *Shared scale*, framed over all of them when one joins, on
+  **Shift+Home** or a double-tap on any of them, and when a run restarts. Hands on one of
+  them holds the move for all.
+- A kiosk (no keyboard) keeps its panels readable this way: leave its spectrum ranges
+  automatic, and a double-tap brings a pane back after someone zoomed it.
+
 #### Grid, labels and cursor (T)
 
 **T** steps the focused pane's plot: grid, labels and cursor → no grid or marks → traces
@@ -1331,6 +1361,7 @@ per frequency and moment, as tall as its level. **G** once more is the spectrum 
 | **Home** | reset the camera (frequency left to right, just above the floor) |
 | **S**, **R**, **Shift+B**, **J** | start/stop, reset average, history span, offset, as in 2D |
 | **Ctrl+I / O**, **Ctrl+↑ / ↓**, **Shift+Home** | the level range: it sets the heights |
+| double-tap | fit the level range and let it follow again |
 
 - **Axes on demand**: the frequency, time and height labels, the floor grid and the
   ceiling line cover the skyline, so at rest the view is the spikes on their floor and the
@@ -1346,6 +1377,9 @@ per frequency and moment, as tall as its level. **G** once more is the spectrum 
   still shows its colour. Read levels from the heights against the level ticks, or go one
   **G** back to the 2D spectrograph and its cursor. The *ice* colour map (palette
   *Colour map ice*) is made for this view; every map works in both.
+- **The level range follows** the content here as in 2D (*The level axis follows the
+  content* above): the spikes' heights glide with a move. An orbit, tilt or dolly counts as
+  a hand on the pane, and a double-tap on the view fits the range and makes it automatic.
 - **Narrowing the level range** (Ctrl+I) turns the slab of noise into terrain. For music keep
   the top near 0, e.g. −60 … 0, never −80 … −20: hot masters reach −5 … 0 dBFS per bin and a
   low top clamps them flat.
@@ -2967,9 +3001,10 @@ or uncalibrated, a 40 dB range following the loudest window in 10 dB steps. SPL 
 screen side by side (another rig's too) share one scale, spanning each one's own, so one
 level sits at one height in all of them: `FOH SPL` judged at 100 dB beside `SPL 2` at
 110 dB both run 70…116 dB. A pane alone keeps its own; an uncalibrated (dBFS) pane never
-shares with calibrated ones. Band bars keep their own scale. Settings › Display › **Leq
-scale** › *each SPL pane on its own scale* turns sharing off (on by default;
-`shared_scale = false` in `ui.toml`).
+shares with calibrated ones. Band bars keep their own scale. Settings › Display › **Shared
+scale** › *each pane on its own* turns sharing off (on by default; `shared_scale = false` in
+`ui.toml`); the same line groups spectrum panes whose level axis follows the content (see
+*The level axis follows the content*).
 
 #### A window still filling: the budget
 
@@ -3010,8 +3045,8 @@ the time before.
 - Settings › Display › **Leq bars**: each column (and band bar) glides to a new reading over
   0.3 s; the number, colours and limit lines change at once. "jump to each new reading"
   turns it off.
-- Settings › Display › **Leq scale**: SPL panes on screen share one scale (see *One scale*
-  above); "each SPL pane on its own scale" turns it off.
+- Settings › Display › **Shared scale**: SPL panes on screen share one scale (see *One
+  scale* above); "each pane on its own" turns it off.
 - **T** (as on a graph): the colours alone, without OK / NEAR / OVER, "stay ≤" or "limit"
   text; per pane, kept with the layout (see *Grid, labels and cursor (T)*).
 - **W**, then **W** or **F**: the **stage view**, nothing but the columns (in meter + Leq,

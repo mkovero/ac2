@@ -401,6 +401,8 @@ fn live_curve_glides_are_paced_by_capture_time() {
 
 mod axis;
 
+mod follow;
+
 mod delete;
 
 /// B steps the spectrum pane's measurement's style line → fill → bars → line.

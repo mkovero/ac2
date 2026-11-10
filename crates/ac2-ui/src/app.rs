@@ -190,6 +190,8 @@ pub struct App {
     pub(crate) skylines: HashMap<crate::state::PaneId, ac2_scene::spectrograph_3d::Skyline>,
     /// Wheel scroll over a 3D spectrograph not yet a whole zoom step, logical pixels.
     pub(crate) cam3d_wheel: f32,
+    /// The pane a pointer button is down on, as last told to the reducer.
+    pub(crate) held_pane: Option<crate::state::PaneId>,
     pub(crate) plate_drag: Option<PlateDrag>,
     /// Where each pane's plates and their grips were last drawn, on screen.
     pub(crate) plate_screen: Vec<(
@@ -330,6 +332,7 @@ impl App {
             scenes: HashMap::new(),
             skylines: HashMap::new(),
             cam3d_wheel: 0.0,
+            held_pane: None,
             plate_drag: None,
             plate_screen: Vec::new(),
             legend_wheel: 0.0,
@@ -599,7 +602,8 @@ impl App {
         let what = Touches::of(&msg);
         let animating = self.state.animating();
         let easing = self.state.bars_easing(Instant::now());
-        let gliding = self.state.spectrum_gliding(Instant::now());
+        // A level axis easing to its content moves the spectrum panes as a glide does.
+        let gliding = self.state.spectrum_gliding(Instant::now()) || self.state.levels_following();
         let filling = self.state.walk_bar_easing(Instant::now());
         let glowing = self.state.embers_glowing();
         // The rig the message is from: its data and mirror say which panes change.
@@ -622,7 +626,7 @@ impl App {
                 let mut panes = tick_touches(
                     animating || self.state.animating(),
                     easing || self.state.bars_easing(now),
-                    gliding || self.state.spectrum_gliding(now),
+                    gliding || self.state.spectrum_gliding(now) || self.state.levels_following(),
                     filling || self.state.walk_bar_easing(now),
                 );
                 // The embers cool between gonio frames.

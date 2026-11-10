@@ -304,7 +304,7 @@ fn leq_columns_scale(
 /// Gathers the own Leq-column scale of every pane drawn now, a pane of another rig read
 /// with that rig swapped in ([`AppState::spl_scales`]): once a frame, before the panes are
 /// drawn, so each SPL pane's columns span the scale they share. None with the Display
-/// page's Leq scale off: each pane on its own.
+/// page's shared scale off: each pane on its own.
 pub fn refresh_spl_scales(st: &mut AppState) {
     let mut scales = Vec::new();
     if !st.prefs.shared_scale {

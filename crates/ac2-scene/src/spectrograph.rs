@@ -552,6 +552,17 @@ pub fn spectrograph_scene(
         .and_then(|s| s.history.unit())
         .map_or(String::new(), str::to_string);
     let bar_axis = axis::linear_axis(range, bar.bottom(), bar.y, &unit);
+    crate::canvas::follow_shade(
+        &mut c,
+        Rect::new(
+            bar.right(),
+            bar.y,
+            (size.width - bar.right()).max(0.0),
+            bar.h,
+        ),
+        view.spectrum.follow_shade,
+        theme,
+    );
     if range.is_valid() {
         let values: HeatmapColumn = (0..BAR_STEPS)
             .map(|i| (range.lo + range.span() * (i as f64 + 0.5) / BAR_STEPS as f64) as f32)

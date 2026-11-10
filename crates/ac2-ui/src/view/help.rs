@@ -251,6 +251,10 @@ const PLATE_MOUSE: [(&str, &str); 1] = [(
     "Move it; its corner: text size; double-click: back",
 )];
 
+/// A double-tap (or double click) on a plot fits its level axis, as Shift+Home does: the
+/// gesture a touch-only kiosk has for it. A spectrum's axis then follows its content again.
+const LEVEL_TAP: (&str, &str) = ("Double-tap", "Fit level (a spectrum follows again)");
+
 /// What the frequency axis's keys and gestures do in the 3D spectrograph: they move the
 /// camera. Listed under its pane's keys with the keys they are bound to.
 const CAMERA: [(CommandId, &str); 3] = [
@@ -281,6 +285,15 @@ pub(crate) fn help_rows(keymap: &Keymap, active: Scope) -> Vec<HelpRow> {
                     keys: (*keys).into(),
                     title: (*title).into(),
                 }));
+            }
+            if matches!(
+                active,
+                Scope::Transfer | Scope::Spectrum | Scope::Spectrograph3d
+            ) {
+                rows.push(HelpRow::Bind {
+                    keys: LEVEL_TAP.0.into(),
+                    title: LEVEL_TAP.1.into(),
+                });
             }
             if active == Scope::Spectrograph3d {
                 for (c, title) in CAMERA {
@@ -641,8 +654,13 @@ mod tests {
         assert!(b.contains(&("Space", "Arm stimulus")));
         // The plates' mouse gestures under the pane's keys.
         assert!(b.contains(&PLATE_MOUSE[0]));
+        // The kiosk's level fit: a double-tap on the plot.
+        assert!(b.contains(&LEVEL_TAP));
         let ir = help_rows(&Keymap::default(), Scope::Ir);
         assert!(!binds(&ir).contains(&PLATE_MOUSE[0]));
+        assert!(!binds(&ir).contains(&LEVEL_TAP));
+        let three_d = help_rows(&Keymap::default(), Scope::Spectrograph3d);
+        assert!(binds(&three_d).contains(&LEVEL_TAP));
     }
 
     #[test]

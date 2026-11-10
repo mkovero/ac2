@@ -466,6 +466,7 @@ impl AppState {
             DisplayRow::LeqHistory if d != 0 => self.toggle_leq_layout(true),
             DisplayRow::LeqBars if d != 0 => self.toggle_bar_ease(),
             DisplayRow::LeqScale if d != 0 => self.toggle_shared_scale(),
+            DisplayRow::LevelFollow if d != 0 => self.toggle_level_follow(),
             DisplayRow::SpectrumGlide if d != 0 => self.toggle_spec_ease(),
             DisplayRow::Quality3d if d != 0 => self.step_quality_3d(d),
             DisplayRow::DistortionUnit if d != 0 => self.toggle_distortion_unit(),
@@ -828,13 +829,23 @@ impl AppState {
         ));
     }
 
-    /// The Display page's Leq scale line; remembered in the prefs.
+    /// The Display page's shared scale line; remembered in the prefs.
     pub(super) fn toggle_shared_scale(&mut self) {
         self.prefs.shared_scale = !self.prefs.shared_scale;
         self.prefs_dirty = true;
         self.toast(format!(
-            "Leq scale: {}",
+            "Shared scale: {}",
             crate::settings::shared_scale_text(self.prefs.shared_scale)
+        ));
+    }
+
+    /// The Display page's level follow line; remembered in the prefs.
+    pub(super) fn toggle_level_follow(&mut self) {
+        self.prefs.level_follow = !self.prefs.level_follow;
+        self.prefs_dirty = true;
+        self.toast(format!(
+            "Level axis follows {}",
+            crate::settings::level_follow_text(self.prefs.level_follow)
         ));
     }
 

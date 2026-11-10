@@ -99,7 +99,7 @@ impl LevelSlot {
     ];
 
     /// The range a pane of `kind` draws on in `scale`; the SPL pane has none.
-    fn of(kind: PaneKind, scale: LevelScale) -> Option<Self> {
+    pub(in crate::state) fn of(kind: PaneKind, scale: LevelScale) -> Option<Self> {
         match kind {
             PaneKind::Transfer => Some(Self::Transfer),
             PaneKind::Spectrum => Some(match scale {
@@ -111,7 +111,7 @@ impl LevelSlot {
         }
     }
 
-    fn get(self, l: &PaneLevels) -> Range {
+    pub(in crate::state) fn get(self, l: &PaneLevels) -> Range {
         match self {
             Self::Transfer => l.transfer,
             Self::SpectrumDbfs => l.spectrum_dbfs,
@@ -120,7 +120,7 @@ impl LevelSlot {
         }
     }
 
-    fn set(self, l: &mut PaneLevels, r: Range) {
+    pub(in crate::state) fn set(self, l: &mut PaneLevels, r: Range) {
         match self {
             Self::Transfer => l.transfer = r,
             Self::SpectrumDbfs => l.spectrum_dbfs = r,
@@ -139,13 +139,13 @@ impl LevelSlot {
     }
 }
 
-/// A spectrum pane's level axis was framed automatically, or set by the operator
-/// (`operator`), while the pane showed `shown`: it is left as it is until the pane shows
-/// something else.
+/// A spectrum pane's level axis was framed, or set by the operator, while the pane showed
+/// `shown`: it is left as it is until the pane shows something else. Whether the operator
+/// set it is its slot's alone to say (`level_set`): one flag, so a layout received without a
+/// range makes the pane's range automatic for a restarted run and the follower alike.
 #[derive(Clone, Debug, PartialEq)]
 pub(in crate::state) struct SpectrumHold {
     shown: SpectrumShown,
-    operator: bool,
 }
 
 /// What a spectrum pane's level axis is framed for: the measurement it shows, by name (the
@@ -242,23 +242,42 @@ impl AppState {
     /// The operator set pane `pane`'s level axis: it is kept with the panes, and a spectrum
     /// pane keeps it until it shows another measurement.
     fn hold_level(&mut self, pane: PaneId) {
+        self.hold_level_as(pane, true);
+    }
+
+    /// Pane `pane`'s level axis is framed for what it shows now and kept so until it shows
+    /// something else; `operator`: as a range the operator set (kept with the panes, never
+    /// followed), else automatic.
+    fn hold_level_as(&mut self, pane: PaneId, operator: bool) {
         // A 3D view's heights are this range: its scale shows while it changes.
         self.poke_axes3d(pane);
         let scale = crate::scenes::spectrum_scale(self, pane);
         if let Some(s) = LevelSlot::of(self.layout.kind(pane), scale) {
-            self.level_set.insert((pane, s));
+            if operator {
+                self.level_set.insert((pane, s));
+            } else {
+                self.level_set.remove(&(pane, s));
+            }
         }
         if self.layout.kind(pane) != PaneKind::Spectrum {
             return;
         }
         let shown = self.spectrum_shown(pane);
-        self.spectrum_hold.insert(
-            pane,
-            SpectrumHold {
-                shown,
-                operator: true,
-            },
-        );
+        self.spectrum_hold.insert(pane, SpectrumHold { shown });
+    }
+
+    /// Pane `pane`'s level axis frames `fit`, as Shift+Home and a double-tap do. A spectrum
+    /// pane whose axis follows its content stays automatic: a fit means "frame what is
+    /// shown", which following keeps doing, and a stored snapshot of it would freeze the
+    /// very thing asked to track; its group frames again with it. Otherwise the fit is the
+    /// operator's range.
+    pub(in crate::state) fn fit_level(&mut self, pane: PaneId, fit: Range) {
+        let follows = self.prefs.level_follow && self.layout.kind(pane) == PaneKind::Spectrum;
+        self.hold_level_as(pane, !follows);
+        self.change_level(pane, |_| fit);
+        if follows {
+            self.follow_refit(pane, false);
+        }
     }
 
     /// Every pane's level axis is back at its default by the operator's hand: kept so.
@@ -270,18 +289,24 @@ impl AppState {
 
     // ----- reducer -----------------------------------------------------------------------
 
-    /// The pane the level keys act on (the focused one), or why not.
-    fn level_target(&mut self) -> Option<PaneId> {
-        let f = self.layout.focused();
-        // The level axis is the magnitude's: the transfer pane's phase, coherence and IR
-        // views do not draw it.
-        let has = match f.kind {
-            PaneKind::Distortion => f.modes.sweep == ac2_scene::view::SweepMode::Response,
-            PaneKind::Transfer => f.modes.transfer == crate::state::TransferView::Magnitude,
+    /// Pane `pane` draws a level axis now. The level axis is the magnitude's: the transfer
+    /// pane's phase, coherence and IR views do not draw it.
+    pub(in crate::state) fn draws_level_axis(&self, pane: PaneId) -> bool {
+        let Some(v) = self.layout.view(pane) else {
+            return false;
+        };
+        match v.kind {
+            PaneKind::Distortion => v.modes.sweep == ac2_scene::view::SweepMode::Response,
+            PaneKind::Transfer => v.modes.transfer == crate::state::TransferView::Magnitude,
             PaneKind::Spectrum => true,
             PaneKind::Spl | PaneKind::Programme | PaneKind::Walk => false,
-        };
-        if !has {
+        }
+    }
+
+    /// The pane the level keys act on (the focused one), or why not.
+    fn level_target(&mut self) -> Option<PaneId> {
+        if !self.draws_level_axis(self.layout.focus) {
+            let f = self.layout.focused();
             let what = match f.kind {
                 PaneKind::Transfer => format!("{} ({})", f.title(), f.modes.transfer.label()),
                 _ => f.title().to_owned(),
@@ -330,8 +355,7 @@ impl AppState {
             }
             C::LevelFit => match level::fit(self.level_values(p)) {
                 Some(fit) => {
-                    self.hold_level(p);
-                    self.change_level(p, |_| fit);
+                    self.fit_level(p, fit);
                     self.toast(format!(
                         "{}: level {} … {} dB",
                         kind.title(),
@@ -387,13 +411,7 @@ impl AppState {
             // measurement, or in ui.toml) shows its first curve on it: that range is the
             // operator's, framed for this curve already.
             if hold.is_none() && set {
-                self.spectrum_hold.insert(
-                    pane,
-                    SpectrumHold {
-                        shown,
-                        operator: true,
-                    },
-                );
+                self.spectrum_hold.insert(pane, SpectrumHold { shown });
                 continue;
             }
             let Some(fit) = level::fit(self.level_values(pane)) else {
@@ -403,13 +421,9 @@ impl AppState {
                 self.level_set.remove(&(pane, s));
             }
             self.change_level(pane, |_| fit);
-            self.spectrum_hold.insert(
-                pane,
-                SpectrumHold {
-                    shown,
-                    operator: false,
-                },
-            );
+            self.spectrum_hold.insert(pane, SpectrumHold { shown });
+            // Another measurement, or a new run of it: a new signal history.
+            self.follow_refit(pane, true);
         }
     }
 
@@ -435,8 +449,20 @@ impl AppState {
             let Some(name) = self.meas(id).map(|m| m.config.name.clone()) else {
                 continue;
             };
-            self.spectrum_hold
-                .retain(|_, h| h.operator || h.shown.0.as_ref() != Some(&name));
+            let set = &self.level_set;
+            let rearmed: Vec<PaneId> = self
+                .spectrum_hold
+                .iter()
+                .filter(|(p, h)| {
+                    h.shown.0.as_ref() == Some(&name)
+                        && LevelSlot::of(PaneKind::Spectrum, h.shown.1)
+                            .is_none_or(|s| !set.contains(&(**p, s)))
+                })
+                .map(|(p, _)| *p)
+                .collect();
+            for p in rearmed {
+                self.spectrum_hold.remove(&p);
+            }
         }
     }
 
@@ -465,7 +491,7 @@ impl AppState {
 
     /// Every level pane `pane` draws in the shown frequency range, as drawn (offsets
     /// included).
-    fn level_values(&self, pane: PaneId) -> Vec<f64> {
+    pub(in crate::state) fn level_values(&self, pane: PaneId) -> Vec<f64> {
         let (lo, hi) = (self.view.freq.lo, self.view.freq.hi);
         let mut v = Vec::new();
         let mut add = |freqs: &[f64], vals: &[f32], offset: f64| {

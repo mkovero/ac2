@@ -138,6 +138,19 @@ pub(crate) fn pane_frame(
     pane_frame_at(c, plot, x, y, x_labels, title, at, style);
 }
 
+/// A level axis's gutter `gutter` in the gentle plot hints' grey, `shade` (0 to 1) of it:
+/// the axis just moved to follow the content. No accent and nothing near the clip colours:
+/// the axis numbers are the truth, the shade only says they just changed.
+pub(crate) fn follow_shade(c: &mut Canvas, gutter: Rect, shade: f32, theme: &Theme) {
+    if shade > 0.0 && gutter.w > 0.0 && gutter.h > 0.0 {
+        c.base.rects.push(FillRect {
+            rect: gutter,
+            color: theme.unresolved_shade.with_alpha(shade.min(1.0)),
+            clip: None,
+        });
+    }
+}
+
 /// [`pane_frame`] with the title's top-left at `title_at`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn pane_frame_at(

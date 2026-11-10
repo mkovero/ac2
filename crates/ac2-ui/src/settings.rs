@@ -291,6 +291,7 @@ pub enum DisplayRow {
     PlateBackground,
     CursorJump,
     LevelAxes,
+    LevelFollow,
     Advice,
     AdviceRefHeadroom,
     AdviceLowCoherence,
@@ -298,7 +299,7 @@ pub enum DisplayRow {
 }
 
 impl DisplayRow {
-    pub const ALL: [DisplayRow; 26] = [
+    pub const ALL: [DisplayRow; 27] = [
         DisplayRow::Theme,
         DisplayRow::KeyHints,
         DisplayRow::WarningToasts,
@@ -321,6 +322,7 @@ impl DisplayRow {
         DisplayRow::PlateBackground,
         DisplayRow::CursorJump,
         DisplayRow::LevelAxes,
+        DisplayRow::LevelFollow,
         DisplayRow::Advice,
         DisplayRow::AdviceRefHeadroom,
         DisplayRow::AdviceLowCoherence,
@@ -338,7 +340,7 @@ impl DisplayRow {
             DisplayRow::LeqStyle => "Leq windows",
             DisplayRow::LeqHistory => "Leq history strip",
             DisplayRow::LeqBars => "Leq bars",
-            DisplayRow::LeqScale => "Leq scale",
+            DisplayRow::LeqScale => "Shared scale",
             DisplayRow::SpectrumView => "Spectrum pane shows",
             DisplayRow::SpectrumGlide => "Spectrum",
             DisplayRow::Quality3d => "3D quality",
@@ -351,6 +353,7 @@ impl DisplayRow {
             DisplayRow::PlateBackground => "Plate background",
             DisplayRow::CursorJump => "Peak / notch jumps",
             DisplayRow::LevelAxes => "Level axes",
+            DisplayRow::LevelFollow => "Level axis follows",
             DisplayRow::Advice => "Headroom advice",
             DisplayRow::AdviceRefHeadroom => "Advise lowering at",
             DisplayRow::AdviceLowCoherence => "Advise raising at",
@@ -530,12 +533,22 @@ pub fn bar_ease_text(on: bool) -> &'static str {
     }
 }
 
-/// What the Leq scale setting says, on the Display page and in its toast.
+/// What the shared scale setting says, on the Display page and in its toast: the SPL panes'
+/// Leq columns, and the spectrum panes whose level axis follows the content, per unit.
 pub fn shared_scale_text(on: bool) -> &'static str {
     if on {
-        "SPL panes on screen share one scale"
+        "SPL panes and following spectrum panes on screen share one per unit"
     } else {
-        "each SPL pane on its own scale"
+        "each pane on its own"
+    }
+}
+
+/// What the level follow setting says, on the Display page and in its toast.
+pub fn level_follow_text(on: bool) -> &'static str {
+    if on {
+        "the content: a spectrum's automatic range moves with it (a fit re-arms it)"
+    } else {
+        "nothing: a spectrum's range stays where it was framed"
     }
 }
 
@@ -585,6 +598,7 @@ pub struct DisplaySwitches {
     pub sim_hints: bool,
     pub bar_ease: bool,
     pub shared_scale: bool,
+    pub level_follow: bool,
     pub spec_ease: bool,
     pub quality_3d: ac2_scene::spectrograph_3d::Quality,
     /// The tier the GPU gets when the quality is auto.
@@ -662,6 +676,7 @@ pub fn display_rows(
                 DisplayRow::LevelAxes => {
                     "each pane's as last left · Enter resets them to the defaults".into()
                 }
+                DisplayRow::LevelFollow => level_follow_text(switches.level_follow).into(),
                 DisplayRow::Advice => ac2_scene::advice::on_text(advice.on).into(),
                 DisplayRow::AdviceRefHeadroom => {
                     ac2_scene::advice::ref_headroom_text(advice.ref_headroom_db)

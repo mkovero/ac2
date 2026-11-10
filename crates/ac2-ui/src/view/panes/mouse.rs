@@ -208,6 +208,7 @@ pub(super) fn navigate(
     if app.state.window_over_panes() {
         return;
     }
+    pointer_on(app, ui, resp, id);
     // A click (not a drag: that moves the plate) on a legend row selects that row's curve.
     let row_at = |app: &App, pos: Option<egui::Pos2>| {
         let p = pos? - plot_rect.min.to_vec2();
@@ -226,6 +227,24 @@ pub(super) fn navigate(
     {
         app.dispatch(Msg::LegendPick(id, key));
         return;
+    }
+    // A tap on the plot (not on a legend row or a plate); the second of two close together
+    // fits the level axis and is that alone: no focus, no cursor. The 3D view's taps too:
+    // a tap is no drag, so it never orbits.
+    if legend == LegendTook::Nothing
+        && axes.ir.is_none()
+        && app.state.level_range(id).is_some()
+        && resp.clicked()
+        && let Some(p) = resp.interact_pointer_pos()
+    {
+        app.dispatch(Msg::PaneTap {
+            pane: id,
+            x: p.x,
+            y: p.y,
+        });
+        if app.state.tap_was_double() {
+            return;
+        }
     }
     if resp.clicked() || resp.drag_started() {
         app.dispatch(Msg::FocusPane(id));
@@ -351,6 +370,32 @@ pub(super) fn navigate(
                 factor: f64::from((scroll / 200.0).exp()),
             });
         }
+    }
+}
+
+/// The operator works on pane `id` while a pointer button is down on it and when the wheel
+/// turns over it: the reducer holds the pane's level axis still for that (a follow move
+/// waits; it is not dropped).
+fn pointer_on(app: &mut App, ui: &egui::Ui, resp: &egui::Response, id: PaneId) {
+    let down = resp.is_pointer_button_down_on();
+    let was = app.held_pane == Some(id);
+    let wheel = resp.hovered()
+        && ui.input(|i| i.smooth_scroll_delta != egui::Vec2::ZERO || i.zoom_delta() != 1.0);
+    if down != was {
+        app.held_pane = if down {
+            Some(id)
+        } else {
+            app.held_pane.filter(|p| *p != id)
+        };
+        app.dispatch(Msg::PanePointer {
+            pane: id,
+            held: down,
+        });
+    } else if wheel {
+        app.dispatch(Msg::PanePointer {
+            pane: id,
+            held: down,
+        });
     }
 }
 

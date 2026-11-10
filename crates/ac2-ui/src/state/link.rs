@@ -307,6 +307,7 @@ impl AppState {
                     self.forget_leq_strips(meas);
                 }
                 self.fit_first_shows();
+                self.feed_follow();
             }
             ConnEvent::Trace(t, g) => {
                 self.rig.keep_trace(t, g);

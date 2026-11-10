@@ -394,6 +394,7 @@ fn display_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &m
             sim_hints: st.view.sim_hints,
             bar_ease: st.prefs.bar_ease,
             shared_scale: st.prefs.shared_scale,
+            level_follow: st.prefs.level_follow,
             spec_ease: st.prefs.spec_ease,
             quality_3d: st.prefs.quality_3d,
             auto_tier: st.auto_tier,

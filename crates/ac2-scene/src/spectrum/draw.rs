@@ -144,6 +144,12 @@ pub(crate) fn spectrum_scene_in(
             theme,
         },
     );
+    canvas::follow_shade(
+        &mut c,
+        Rect::new(0.0, plot.y, plot.x, plot.h),
+        view.spectrum.follow_shade,
+        theme,
+    );
     c.base.labels.push(label(
         caption.clone(),
         [plot.right() - 6.0, plot.y + 4.0],

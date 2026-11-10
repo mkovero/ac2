@@ -94,6 +94,7 @@ impl AppState {
         self.pane_levels(id).apply(&mut v);
         let modes = self.pane_modes(id);
         v.spectrum.mode = modes.spectrum;
+        v.spectrum.follow_shade = self.follow_shade(id);
         v.ir.mode = match self.layout.kind(id) {
             PaneKind::Distortion => modes.ir(IrPane::Sweep),
             _ => modes.ir(IrPane::Live),

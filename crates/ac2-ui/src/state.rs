@@ -254,6 +254,8 @@ pub struct AppState {
     /// Spectrum panes whose level axis is framed for what they show, or set by the operator:
     /// a pane not here frames its next frame.
     spectrum_hold: BTreeMap<PaneId, panes::levels::SpectrumHold>,
+    /// The spectrum panes' level axes following their content.
+    level_follow: panes::follow::LevelFollow,
     /// No layout was remembered: the one pane takes the kind of the first measurement once
     /// the daemon's state is known.
     pane_auto: bool,
@@ -359,6 +361,7 @@ impl AppState {
             pane_auto: true,
             pane_levels: BTreeMap::new(),
             spectrum_hold: BTreeMap::new(),
+            level_follow: Default::default(),
             client_key: None,
             want_connect_dialog: false,
             pane_export: None,
@@ -424,7 +427,11 @@ impl AppState {
         self.ran_command = None;
         self.undoing = false;
         let contents = self.pane_contents();
+        let worked_on = self.worked_on(&msg);
         self.update_inner(msg, keymap, &mut out);
+        if let Some(p) = worked_on {
+            self.pane_input(p.unwrap_or(self.layout.focus));
+        }
         self.set_pane_rigs(&contents);
         self.window_rig = match self.overlay {
             Overlay::None => None,
@@ -486,6 +493,7 @@ impl AppState {
                 self.nav.step(dt_s);
                 self.view.freq = self.nav.current();
                 self.step_cam3d(dt_s);
+                self.step_follow();
                 if self.toasts.held {
                     for t in &mut self.toasts.list {
                         t.until_s += held;
@@ -543,6 +551,8 @@ impl AppState {
             // A click in a pane gives it the keyboard; the selection stays on the row the
             // operator chose (the pane's keys act on what it shows).
             Msg::FocusPane(p) => self.layout.set_focus(p),
+            Msg::PaneTap { pane, x, y } => self.pane_tap(pane, x, y),
+            Msg::PanePointer { pane, held } => self.pane_pointer(pane, held),
             Msg::InputPick(c) => {
                 self.rig.input_pick = (self.rig.input_pick != Some(c)).then_some(c);
             }

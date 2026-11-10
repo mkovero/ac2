@@ -136,6 +136,8 @@ pub fn pan_step(r: Range) -> f64 {
     nice(r.span() / 10.0)
 }
 
+pub mod follow;
+
 /// Navigation of a vertical dB axis (transfer magnitude, spectrum level, distortion, the IR
 /// views' log and ETC levels): zoom about a level, pan by dB, frame the shown data. The axis
 /// keeps its tick rules ([`crate::axis::linear_ticks`]), which label any range from a tenth
@@ -398,6 +400,9 @@ pub struct SpectrumView {
     /// What the pane shows: the spectrum, the spectrograph or both.
     pub mode: SpectrumMode,
     pub spectrograph: SpectrographView,
+    /// The level axis just moved to follow the content: its gutter's shade, 0 (none) to 1,
+    /// fading out after the move ([`follow::Ease::shade`]).
+    pub follow_shade: f32,
 }
 
 /// What the spectrum pane shows.
@@ -483,6 +488,7 @@ impl Default for SpectrumView {
             level_spl: Range::new(20.0, 120.0),
             mode: SpectrumMode::Spectrum,
             spectrograph: SpectrographView::default(),
+            follow_shade: 0.0,
         }
     }
 }

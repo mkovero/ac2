@@ -74,7 +74,7 @@ fn spl_panes_side_by_side_share_the_leq_scale() {
     };
     assert_eq!(tracks(&a), tracks(&b));
 
-    // Settings › Display › Leq scale off: each pane on its own scale.
+    // Settings › Display › Shared scale off: each pane on its own scale.
     t.st.prefs.shared_scale = false;
     crate::scenes::refresh_spl_scales(&mut t.st);
     let (a, b) = (columns_of(&t, foh), columns_of(&t, other));

@@ -377,8 +377,12 @@ pub struct UiPrefs {
     /// off); off, they jump to it as received.
     pub bar_ease: bool,
     /// The SPL panes on screen draw their Leq columns on one scale, the union of each one's
-    /// own (on until the operator turns it off); off, each pane keeps its own.
+    /// own, and same-unit spectrum panes whose level axis follows their content follow on
+    /// one range (on until the operator turns it off); off, each pane keeps its own.
     pub shared_scale: bool,
+    /// A spectrum pane's automatic level axis follows its content (on until the operator
+    /// turns it off); off, it stays where it was framed.
+    pub level_follow: bool,
     /// The live spectrum and RTA curves glide to each new frame (on until the operator
     /// turns it off); off, they jump to it as received.
     pub spec_ease: bool,
@@ -490,6 +494,7 @@ impl Default for UiPrefs {
             quality_3d: ac2_scene::spectrograph_3d::Quality::Auto,
             bar_ease: true,
             shared_scale: true,
+            level_follow: true,
             spec_ease: true,
             jump_prominence_db: ac2_scene::cursor_jump::DEFAULT_PROMINENCE_DB,
             spl_hold_ms: None,
