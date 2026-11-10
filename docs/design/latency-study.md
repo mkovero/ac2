@@ -303,3 +303,30 @@ Operator items resolved from the host: ketunkolo is Xorg + xfwm4 with its compos
 (`use_compositing` true, `vblank_mode` auto, `unredirect_overlays` true) driving a 1600 × 900 mm
 HDMI panel (a TV) at 1920 × 1080 60 Hz. Both spectra run with no averaging. H2 stays open on
 the TV's game mode and whether the maximised (not full-screen) app window is unredirected.
+
+### App on ketunkolo, 3D view, 180 s (`--latency-log`, 8e3e2381)
+
+RTX 2070 Vulkan, present mode resolved Immediate (AutoNoVsync; Fifo offered), frame latency 2,
+xfwm4 compositor on. 10 625 passes, 9 819 data frames shown.
+
+| stage | p50 | p95 | max |
+|---|---|---|---|
+| capture → app link read | 16.4 | 25.9 | 40.1 ms |
+| read → reducer apply | 8.8 | 16.3 | 47.6 ms |
+| apply → scene build | 0.2 | 0.3 | 1.1 ms |
+| build → submit/present | 0.2 | 0.3 | 2.1 ms |
+| capture → present (newest frame) | 25.5 | 38.0 | 52.9 ms |
+| glide lag (drawn behind newest) | 25.6 | 45.2 | 151 ms |
+| **capture → present, as drawn** | **53.4** | **63.9** | **169 ms** |
+
+Pass interval 16.9 ms p50 (max 114), CPU 0.8 ms per frame, 3D build 0.11 ms. Slot advance per
+frame: 0 slots 49.6 %, 1 slot 50.3 %, ≥ 2 rare: the 3D scroll moves every other frame (30
+slots/s at 60 frames/s).
+
+Read:
+- Rendering is not the cost (< 1 ms build + submit).
+- **Glide doubles what is seen** (H3): +26 ms p50, +45 ms p95, 151 ms worst.
+- The app reads the link 8 ms later than `selftest frames` does (16.4 vs 8.2 ms p50): the link
+  drain period (H4), then another ≈ 9 ms waiting for the next UI pass.
+- The 3D scroll steps at 30/s (H5): visible judder at 60 frames/s.
+- Not measured: compositor + TV after present (H2), and the DSP window (H1, per band).
