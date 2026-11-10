@@ -76,8 +76,9 @@ and compared traces and only the shown band, both wrong here:
 
 Asymmetric, because a clipped curve is wrong now and a low one is only less legible:
 
-- **Up, fast:** the median of the pane top over the last **3 s** above `hi`. No lockout
-  beyond needing 3 s of frames since the previous move.
+- **Up, fast:** the 80th percentile of the pane top over the last **3 s** above `hi`
+  (a fifth of the frames clipped). No lockout beyond needing 3 s of frames since the
+  previous move.
 - **Down, slow:** the maximum of the pane top over the last **240 s** below
   `lo + 0.35·span`, and at least **60 s** since the previous move. A song gap, a speech
   break or a quiet verse never lasts that long; an idle mic does.
@@ -100,7 +101,21 @@ column, 10 frames/s, no averaging, so noisier than ac2's curves). Six 50 s comme
 (−5 … −14 dBFS rms) loop into 3-minute songs at ±4 dB, gaps of pink room noise about 70 dB
 below. The pane starts on `level::fit` of its first frame. Ten seeds each:
 
-SIM_TABLE
+| scenario (ten seeds) | moves, mean (max) | clipped s, mean (max) | longest clipped run |
+|---|---|---|---|
+| show: 1 h of 3-min songs, 30–60 s gaps | 0.6 (1), never down | 0.8 (3.3) | 0.6 s |
+| show, pane fitted on the silent room first | 1.5 (3), all up in the first minute | 1.2 (2.2) | 0.8 s |
+| tone 40 / 60 dB over a pink floor, 10 min after a fit | 0 | 0 | 0 |
+| tone appearing after a fit on the floor | 1.2 (2) | 1.1 (2.7) | 1.1 s |
+| music, +20 dB for 10 min, then −30 dB for 10 min | 1.3 (2) | 1.7 (5.6) | 0.8 s |
+| idle mic 20 min between music | 2.2 (3): one down, one up | 1.1 (2.9) | 0.8 s |
+| pink noise rising 1 dB/min for 20 min | 1.7 (2) | 8.1 (8.4) | 0.4 s |
+
+Tuning on the same runs: the up quantile at the median left 25 s an hour clipped (max 70 s,
+in runs under a second) on the show; 0.67 left 3.4 s; 0.8 the figures above, with no more
+moves. A 5 s up window clipped more for the same moves. A 0.15 target pad clipped the noise
+drift twice as long as 0.2. The pink-drift clipped seconds are single noise columns of
+unaveraged frames above the top for under half a second; averaged curves do less.
 
 The first draft's rule (95th percentile top, 20 s squash window, 30 s lockout) made 31–36
 moves an hour on the same show: a down in every gap, an up at every song.
@@ -158,7 +173,8 @@ pane's axis for the history's scale), its height post and ceiling line labelled.
 `ac2-scene` (pure `Follow`, scripted frames with arrival times):
 
 - **Tone over floor:** 1 kHz 40 dB over pink, fitted: no move in 10 min.
-- **Show:** an hour of 3-min songs, 30–60 s gaps: no down move, no clipped run over 2 s.
+- **Show:** an hour of 3-min songs, 30–60 s gaps: no down move, at most one up, no clipped
+  run over 2 s, under 10 s clipped in all.
 - **Level step** +20 dB: one move up within 3 s, top within one step of the target.
 - **Idle mic** 20 min: one down after 240 s; music back: one up.
 - **Narrowband vs RTA** on one pink noise: each lands within one step of its target.
