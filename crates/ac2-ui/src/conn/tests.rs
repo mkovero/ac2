@@ -185,3 +185,22 @@ fn same_picture_ignores_seq_and_time_only() {
     Arc::make_mut(&mut b.frame).stamp.protection = ac2_proto::frame::ProtectionFlags::CLIP;
     assert!(!same_picture(&a.frame, &b.frame));
 }
+
+/// A remote input's unmetered true peak (NaN) in every frame is no change to draw.
+#[test]
+fn same_picture_takes_a_meters_nan_for_itself() {
+    let nan = |seq| {
+        let mut f = frame(TF, seq);
+        if let FrameData::SessionLevels(l) = &mut Arc::make_mut(&mut f.frame).data {
+            l.true_peak = vec![f32::NAN];
+            l.max = vec![f32::NAN];
+        }
+        f
+    };
+    let (a, mut b) = (nan(1), nan(2));
+    assert!(same_picture(&a.frame, &b.frame));
+    if let FrameData::SessionLevels(l) = &mut Arc::make_mut(&mut b.frame).data {
+        l.rms = vec![f32::NAN];
+    }
+    assert!(!same_picture(&a.frame, &b.frame));
+}

@@ -274,7 +274,8 @@ impl AppState {
         };
         let input_of = |c: u16| {
             let at = frame.and_then(|f| f.meta.channels.iter().position(|x| *x == c));
-            let col = |v: &[f32]| at.and_then(|i| v.get(i).copied());
+            // NaN: not metered (a remote input's true peak), or no reading this interval.
+            let col = |v: &[f32]| at.and_then(|i| v.get(i).copied()).filter(|v| !v.is_nan());
             let device = st
                 .and_then(|s| s.session.open.as_ref())
                 .map(|o| &o.input_device);
@@ -525,7 +526,7 @@ impl RigState {
         {
             self.programme.levels_seq = Some(tf.frame.stamp.seq);
             for (i, c) in f.meta.channels.iter().enumerate() {
-                let ppm = f.ppm.get(i).copied();
+                let ppm = f.ppm.get(i).copied().filter(|v| !v.is_nan());
                 self.programme
                     .flying
                     .entry(*c)

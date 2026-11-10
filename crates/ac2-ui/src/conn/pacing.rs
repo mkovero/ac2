@@ -74,6 +74,53 @@ fn health_shown(v: &MirrorView) -> Option<HealthShown<'_>> {
     })
 }
 
+/// Equal frame bodies, a meter's NaN (no reading, or not metered) equal to itself: a remote
+/// input's true peak is NaN in every levels frame and must not wake the UI each time.
+fn same_data(a: &ac2_proto::FrameData, b: &ac2_proto::FrameData) -> bool {
+    use ac2_proto::FrameData;
+    use ac2_proto::frame::{LevelsFrame, SessionLevelsFrame};
+    let bits = |x: &[f32], y: &[f32]| {
+        x.len() == y.len() && x.iter().zip(y).all(|(p, q)| p.to_bits() == q.to_bits())
+    };
+    match (a, b) {
+        (FrameData::SessionLevels(x), FrameData::SessionLevels(y)) => {
+            let SessionLevelsFrame {
+                meta,
+                peak,
+                rms,
+                clip,
+                ppm,
+                true_peak,
+                max,
+                overs,
+            } = x;
+            *meta == y.meta
+                && *clip == y.clip
+                && *overs == y.overs
+                && bits(peak, &y.peak)
+                && bits(rms, &y.rms)
+                && bits(ppm, &y.ppm)
+                && bits(true_peak, &y.true_peak)
+                && bits(max, &y.max)
+        }
+        (FrameData::Levels(x), FrameData::Levels(y)) => {
+            let LevelsFrame {
+                meas,
+                meta,
+                peak,
+                rms,
+                clip,
+            } = x;
+            *meas == y.meas
+                && *meta == y.meta
+                && *clip == y.clip
+                && bits(peak, &y.peak)
+                && bits(rms, &y.rms)
+        }
+        _ => a == b,
+    }
+}
+
 /// Whether two frames of a topic draw the same: equal content, protection, grid and
 /// configuration. A meter in steady silence sends such frames; showing them changes no
 /// pixel.
@@ -81,7 +128,7 @@ pub fn same_picture(a: &ac2_proto::Frame, b: &ac2_proto::Frame) -> bool {
     a.stamp.protection == b.stamp.protection
         && a.stamp.grid_id == b.stamp.grid_id
         && a.stamp.config_rev == b.stamp.config_rev
-        && a.data == b.data
+        && same_data(&a.data, &b.data)
 }
 
 /// Input meters with a moving bar (an input with signal, or a change of state) redraw at

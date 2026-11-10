@@ -65,9 +65,13 @@ impl MeterReading {
         }
     }
 
-    /// From a frame's peak and RMS (dBFS; −∞ for digital silence) and clip state
-    /// (`clipped` = in this interval or held).
+    /// From a frame's peak and RMS (dBFS; −∞ for digital silence, NaN for no reading: a
+    /// remote input whose samples went missing) and clip state (`clipped` = in this
+    /// interval or held).
     pub fn new(peak_dbfs: f32, rms_dbfs: f32, clipped: bool) -> Self {
+        if peak_dbfs.is_nan() && rms_dbfs.is_nan() {
+            return Self::none();
+        }
         let (peak, rms) = (f64::from(peak_dbfs), f64::from(rms_dbfs));
         let state = if clipped {
             MeterState::Clip
@@ -287,6 +291,11 @@ mod tests {
         );
         assert_eq!(MeterReading::new(3.0, 0.5, false).rms_fill, 1.0);
         assert_eq!(MeterReading::none().state, MeterState::NoData);
+        // A remote input whose audio went missing has no reading, not silence.
+        assert_eq!(
+            MeterReading::new(f32::NAN, f32::NAN, false),
+            MeterReading::none()
+        );
     }
 
     #[test]
