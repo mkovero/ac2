@@ -14,7 +14,8 @@
 //!   a block is due one link offset after it arrives.
 //!
 //! A local block is released once this rig has captured a link offset past its end, with
-//! whatever remote samples are there; a missing one is a gap (`REMOTE_GAP`). Audio that
+//! whatever remote samples are there; a missing one is a gap, marked on that input's column
+//! only (`ColumnMarks`), so a job reading another input carries on. Audio that
 //! keeps arriving after it was needed for a second runs the ring dry, and audio that lands
 //! more than a link offset ahead of the present runs it over: either slips k back to half
 //! the link offset of slack, by a known number of samples.
@@ -25,7 +26,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 
-use ac2_audio::BlockFlags;
 use ac2_core::clock_map::StampLine;
 use ac2_core::clock_rate::{ClockRate, RateWindow};
 use ac2_proto::frame::{AudioFlags, AudioFrame};
@@ -38,13 +38,17 @@ use crate::control::ControlMsg;
 use crate::fanout::Block;
 
 use super::link::LinkFrame;
-use super::{InputReport, RemoteMsg, RigReport};
+use super::{ColumnMarks, InputReport, RemoteMsg, RigReport};
 
 /// Without stamp maps yet (a source's map needs a few seconds of pairs), the anchor waits
 /// this long for them before it settles for arrival.
 const MAP_WAIT: Duration = Duration::from_secs(10);
 /// Audio arriving after it was needed for this long: the ring ran dry.
 const DRY_AFTER: Duration = Duration::from_secs(1);
+/// Audio placed further back than the link offset may only have waited in a queue (transit
+/// only ever adds age): fresher frames are waited for this long before the two system
+/// clocks are taken to disagree.
+const ANCHOR_WAIT: Duration = Duration::from_secs(1);
 /// The joiner reports to the control thread once a second.
 const REPORT_EVERY: Duration = Duration::from_secs(1);
 /// Late frames are counted over the last hour, arrival margins over the last minute.
@@ -104,13 +108,17 @@ struct InputState {
     k: Option<i64>,
     anchor: Option<Anchor>,
     incarnation: Option<StreamIncarnation>,
-    /// When the first frame of this run came, for the stamp-map wait.
+    /// When the first frame of this run came, for the stamp-map and anchor waits.
     first: Option<Instant>,
+    /// The least age, samples, a frame of this run was placed at by system time while that
+    /// put it further back than the link offset.
+    least_age: Option<i64>,
     /// Samples at local indices `ring_start..`; NaN where none arrived.
     ring: VecDeque<f32>,
     ring_start: u64,
     late: u64,
-    late_at: VecDeque<Instant>,
+    /// Late frames per second: (that second's first, count).
+    late_at: VecDeque<(Instant, u32)>,
     /// Since when every frame arrived late.
     late_run: Option<Instant>,
     slips: u32,
@@ -126,6 +134,7 @@ impl InputState {
         self.k = None;
         self.anchor = None;
         self.first = None;
+        self.least_age = None;
         self.ring.clear();
         self.late_run = None;
     }
@@ -204,6 +213,7 @@ impl Joiner {
                 anchor: None,
                 incarnation: None,
                 first: None,
+                least_age: None,
                 ring: VecDeque::new(),
                 ring_start: 0,
                 late: 0,
@@ -277,7 +287,7 @@ impl Joiner {
                 wall_ns: b.wall_ns,
                 host_ns: b.host_ns,
                 capture_stamp: b.capture_stamp,
-                slip: 0,
+                marks: ColumnMarks::default(),
                 data: b.data.clone(),
                 stats: Vec::new(),
             });
@@ -357,8 +367,9 @@ impl Joiner {
                 .as_ref()
                 .is_some_and(|s| matches!(s.clocks.system, SystemClock::Synced { .. }));
         let local = h.capture_ns.and_then(|c| self.local_of(r, c, line));
-        let (link, latest, released) = (self.link, self.latest, self.released.unwrap_or(0));
+        let (link, latest) = (self.link, self.latest);
         let period = u64::from(self.period);
+        let has_source = self.rigs[r].source.is_some();
         let mut restarted = false;
         for i in self
             .inputs
@@ -388,6 +399,12 @@ impl Joiner {
                 i.restart();
             }
             let end = h.start_sample + u64::from(h.frames);
+            // Anchored before the source's state is read, the anchor could never become
+            // system time; before this rig's first block, against no present at all.
+            let Some(released) = self.released.filter(|_| has_source) else {
+                i.audio = RemoteAudio::Starting;
+                continue;
+            };
             if i.k.is_none() {
                 let first = *i.first.get_or_insert(now);
                 let anchor = match (h.capture_ns, local, synced) {
@@ -418,14 +435,30 @@ impl Joiner {
                     // How long before now this block's end was captured, by system time:
                     // between none (less one hand-off of this rig) and the link offset.
                     let age = latest as i64 - (end as i64 + ks);
-                    if age >= -(period as i64) && age <= link as i64 {
-                        k = ks;
+                    // How far outside that span: at least this far apart are the clocks
+                    // (positive: the source's ahead, its audio placed in the future).
+                    let outside = if age < -(period as i64) {
+                        Some(-age - period as i64)
+                    } else if age > link as i64 {
+                        let least = i.least_age.map_or(age, |a| a.min(age));
+                        i.least_age = Some(least);
+                        if now.duration_since(first) < ANCHOR_WAIT {
+                            i.audio = RemoteAudio::Starting;
+                            continue;
+                        }
+                        (least > link as i64).then(|| -(least - link as i64))
                     } else {
-                        anchor = Anchor::Arrival {
-                            reason: ArrivalReason::ClocksDisagree {
-                                by: Seconds(-(age as f64) / self.rate),
-                            },
-                        };
+                        None
+                    };
+                    match outside {
+                        None => k = ks,
+                        Some(by) => {
+                            anchor = Anchor::Arrival {
+                                reason: ArrivalReason::ClocksDisagree {
+                                    by: Seconds(by as f64 / self.rate),
+                                },
+                            };
+                        }
                     }
                 }
                 self.rigs[r].disagree = match anchor {
@@ -501,35 +534,33 @@ impl Joiner {
         let width = n + self.inputs.len();
         let frames = b.frames as usize;
         let mut data = Vec::with_capacity(frames * width);
-        let mut gap = false;
+        let mut marks = ColumnMarks::default();
+        let column = |slot: usize| u16::try_from(n + slot).unwrap_or(u16::MAX);
         for f in 0..frames {
             data.extend_from_slice(&b.data[f * n..(f + 1) * n]);
             let at = b.start_sample + f as u64;
-            for i in &self.inputs {
+            for (s, i) in self.inputs.iter().enumerate() {
                 match i.sample(at) {
                     Some(v) => data.push(v),
                     None => {
-                        gap = true;
+                        marks.gap(column(s), f as u32);
                         data.push(0.0);
                     }
                 }
             }
         }
         let end = b.end_sample();
-        let mut slip = 0;
-        for i in &mut self.inputs {
+        for (s, i) in self.inputs.iter_mut().enumerate() {
             i.release_to(end);
-            slip += std::mem::take(&mut i.pending_slip);
+            let slip = std::mem::take(&mut i.pending_slip);
+            if slip != 0 {
+                marks.slip(column(s), slip);
+            }
         }
         self.released = Some(end);
-        let mut flags = b.flags;
-        if gap {
-            flags |= BlockFlags::REMOTE_GAP;
-        }
         let mut j = Block {
             channels: u16::try_from(width).unwrap_or(u16::MAX),
-            flags,
-            slip,
+            marks,
             data,
             stats: Vec::new(),
             ..b
@@ -546,7 +577,7 @@ impl Joiner {
                 while i
                     .late_at
                     .front()
-                    .is_some_and(|t| now.duration_since(*t) > LATE_WINDOW)
+                    .is_some_and(|(t, _)| now.duration_since(*t) > LATE_WINDOW)
                 {
                     i.late_at.pop_front();
                 }
@@ -562,7 +593,7 @@ impl Joiner {
                     audio: i.audio,
                     anchor: i.anchor,
                     late_frames: i.late,
-                    late_frames_hour: u32::try_from(i.late_at.len()).unwrap_or(u32::MAX),
+                    late_frames_hour: i.late_at.iter().map(|(_, n)| *n).sum(),
                     slips: i.slips,
                     last_slip: i.last_slip,
                     arrival_margin: i
@@ -624,7 +655,10 @@ fn source_fault(source: Option<&SourceState>, channel: u16, ours: u32) -> Option
 
 fn late(i: &mut InputState, now: Instant) {
     i.late += 1;
-    i.late_at.push_back(now);
+    match i.late_at.back_mut() {
+        Some((t, n)) if now.duration_since(*t) < Duration::from_secs(1) => *n += 1,
+        _ => i.late_at.push_back((now, 1)),
+    }
     i.late_run.get_or_insert(now);
 }
 

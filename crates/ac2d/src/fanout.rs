@@ -30,6 +30,7 @@ use crate::control::ControlMsg;
 use crate::jobs::meters::{SessionLevels, meter_period};
 use crate::jobs::programme::Programme;
 use crate::jobs::{Emitter, JobEnv, JobMsg};
+use crate::remote::ColumnMarks;
 use crate::remote::join::Joiner;
 use crate::remote::tap::SourceTap;
 use crate::util::wall_ns;
@@ -56,9 +57,8 @@ pub(crate) struct Block {
     pub(crate) host_ns: u64,
     /// `host_ns` is the backend's capture stamp, not the callback's time.
     pub(crate) capture_stamp: bool,
-    /// A remote input's audio slipped by this many samples at this block (the joined feed,
-    /// `crate::remote::join`); 0 elsewhere.
-    pub(crate) slip: i64,
+    /// The joined feed's marks on its remote columns (`crate::remote::join`).
+    pub(crate) marks: ColumnMarks,
     /// Interleaved samples.
     pub(crate) data: Vec<f32>,
     /// Per block channel.
@@ -84,7 +84,7 @@ impl Block {
             wall_ns,
             host_ns: wall_ns,
             capture_stamp: false,
-            slip: 0,
+            marks: ColumnMarks::default(),
             data,
             stats: Vec::new(),
         };
@@ -94,6 +94,13 @@ impl Block {
 
     pub(crate) fn end_sample(&self) -> u64 {
         self.start_sample + u64::from(self.frames)
+    }
+
+    /// Whether averages over block channels `columns` restart before this block: its
+    /// samples do not continue the previous block's, or a remote column among them has a
+    /// gap or a slip.
+    pub(crate) fn restarts_averages(&self, columns: &[usize]) -> bool {
+        self.flags.breaks_continuity() || columns.iter().any(|&c| self.marks.breaks(c))
     }
 
     /// Copies block channel `ch` into `out`.
@@ -176,7 +183,7 @@ pub(crate) fn pop_block_into(stream: &mut DuplexStream, reuse: Option<Block>) ->
             wall_ns: 0,
             host_ns: 0,
             capture_stamp: false,
-            slip: 0,
+            marks: ColumnMarks::default(),
             data: Vec::with_capacity(a.len() + b.len()),
             stats: Vec::new(),
         });
@@ -187,7 +194,7 @@ pub(crate) fn pop_block_into(stream: &mut DuplexStream, reuse: Option<Block>) ->
         block.wall_ns = wall_ns();
         block.host_ns = h.capture_ns.unwrap_or(h.callback_ns);
         block.capture_stamp = h.capture_ns.is_some();
-        block.slip = 0;
+        block.marks.clear();
         block.data.clear();
         block.data.extend_from_slice(a);
         block.data.extend_from_slice(b);

@@ -702,6 +702,9 @@ pub(crate) struct LevelsMeter {
     frames: u64,
     sample_rate: f64,
     clipped: Vec<bool>,
+    /// A remote sample of the meter's column went missing this interval: the zeros standing
+    /// in for it are no signal, so the interval has no reading.
+    missing: Vec<bool>,
     hold_until: Vec<u64>,
     hold: u64,
     end: u64,
@@ -718,6 +721,7 @@ impl LevelsMeter {
             frames: 0,
             sample_rate: f64::from(sample_rate),
             clipped: vec![false; n],
+            missing: vec![false; n],
             hold_until: vec![0; n],
             // A clip indicator stays lit for a second so a single clipped block is seen.
             hold: u64::from(sample_rate),
@@ -729,6 +733,12 @@ impl LevelsMeter {
         let frames = f64::from(b.frames.max(1));
         let alpha = 1.0 - (-frames / (METER_RMS_TAU_S * self.sample_rate)).exp();
         for (m, &ch) in self.idx.iter().enumerate() {
+            if !b.marks.gaps(ch).is_empty() {
+                // The RMS integrates from the next whole block rather than through zeros.
+                self.missing[m] = true;
+                self.ms[m] = None;
+                continue;
+            }
             let st = b.stats.get(ch).copied().unwrap_or_default();
             let p = self.peak[m].max(st.peak);
             self.peak[m] = p;
@@ -778,6 +788,7 @@ impl LevelsMeter {
     fn reset_interval(&mut self) {
         self.peak.fill(0.0);
         self.clipped.fill(false);
+        self.missing.fill(false);
         self.frames = 0;
     }
 
@@ -796,9 +807,15 @@ impl LevelsMeter {
         let mut rms = Vec::with_capacity(n);
         let mut clip = Vec::with_capacity(n);
         for m in 0..n {
-            peak.push((20.0 * f64::from(self.peak[m]).log10()) as f32);
-            let r = self.ms[m].unwrap_or(0.0).sqrt();
-            rms.push(ac2_core::spectrum::rms_dbfs(r) as f32);
+            if std::mem::take(&mut self.missing[m]) {
+                // NaN, not −∞: −∞ is digital silence, a reading.
+                peak.push(f32::NAN);
+                rms.push(f32::NAN);
+            } else {
+                peak.push((20.0 * f64::from(self.peak[m]).log10()) as f32);
+                let r = self.ms[m].unwrap_or(0.0).sqrt();
+                rms.push(ac2_core::spectrum::rms_dbfs(r) as f32);
+            }
             let mut c = ClipFlags::NONE;
             if self.clipped[m] {
                 c = c.with(ClipFlags::CLIP);

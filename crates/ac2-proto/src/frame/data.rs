@@ -166,9 +166,10 @@ pub struct LevelsFrame {
     pub meas: MeasId,
     /// Channels.
     pub meta: LevelsMeta,
-    /// Peak per channel, dBFS (sample peak).
+    /// Peak per channel, dBFS (sample peak); NaN: no reading (a remote input whose samples
+    /// went missing this interval), where −∞ is digital silence.
     pub peak: Vec<f32>,
-    /// RMS per channel, dBFS.
+    /// RMS per channel, dBFS; NaN as for `peak`.
     pub rms: Vec<f32>,
     /// Clip state per channel.
     pub clip: Vec<ClipFlags>,
@@ -182,9 +183,10 @@ pub struct LevelsFrame {
 pub struct SessionLevelsFrame {
     /// Channels, the ballistic in force and the pairs' correlation.
     pub meta: SessionLevelsMeta,
-    /// Peak per channel, dBFS (sample peak).
+    /// Peak per channel, dBFS (sample peak); NaN: no reading (a remote input whose samples
+    /// went missing this interval), where −∞ is digital silence.
     pub peak: Vec<f32>,
-    /// RMS per channel, dBFS.
+    /// RMS per channel, dBFS; NaN as for `peak`.
     pub rms: Vec<f32>,
     /// Clip state per channel.
     pub clip: Vec<ClipFlags>,
@@ -192,15 +194,18 @@ pub struct SessionLevelsFrame {
     /// RMS-scaled mean for VU); where VU is chosen but not offered on the input
     /// ([`crate::cal::offers_vu`]) the true peak, so a rig setting never blanks a bar. Under
     /// a loudness ballistic ([`Ballistic::is_loudness`]) each input's true peak, dBTP: the
-    /// loudness is per source, in `meta.loudness`.
+    /// loudness is per source, in `meta.loudness`. A remote input's is its sample peak, the
+    /// one peak its block statistics give.
     ///
     /// [`Ballistic::is_loudness`]: crate::model::Ballistic::is_loudness
     pub ppm: Vec<f32>,
-    /// True peak per channel this frame, dBTP.
+    /// True peak per channel this frame, dBTP; NaN where not metered (a remote input: its
+    /// block statistics give the sample peak only).
     pub true_peak: Vec<f32>,
     /// Highest `ppm` reading of the chosen ballistic since the last `levels.reset` (held per
     /// ballistic, so a ballistic change never splices one type's maximum onto another's);
-    /// under a loudness ballistic the true-peak hold.
+    /// under a loudness ballistic the true-peak hold. NaN where not metered, as for
+    /// `true_peak`.
     pub max: Vec<f32>,
     /// Over events (true peak above the rig's threshold, counted once until it fell 1 dB
     /// below) since the last `levels.reset`.

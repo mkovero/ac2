@@ -453,7 +453,9 @@ impl Analysis for Transfer {
 
     fn push(&mut self, b: &Block) {
         let contiguous = self.end == Some(b.start_sample);
-        if self.end.is_some() && (!contiguous || b.flags.restarts_averages()) {
+        if self.end.is_some()
+            && (!contiguous || b.restarts_averages(&[self.ref_idx, self.meas_idx]))
+        {
             if contiguous {
                 // An xrun or overflow can leave the counter contiguous while audio was lost;
                 // the block grid must restart all the same.

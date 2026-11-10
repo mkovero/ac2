@@ -296,7 +296,7 @@ pub enum ArrivalReason {
     /// A stamp map is not fitted yet.
     NoStampMap,
     /// Placed on system time its audio would fall outside the link offset of its arrival:
-    /// the two system clocks disagree by about this much (positive: the source's ahead).
+    /// the two system clocks disagree by at least this much (positive: the source's ahead).
     ClocksDisagree {
         /// The disagreement.
         by: Seconds,
@@ -383,7 +383,8 @@ pub enum CantTellReason {
     NoCaptureStamps,
     /// The two system clocks disagree by more than the link offset allows.
     ClocksDisagree {
-        /// By about this much (positive: the source's ahead).
+        /// By at least this much, how far outside the link offset the audio fell
+        /// (positive: the source's ahead).
         by: Seconds,
     },
     /// No audio from the remote rig.

@@ -1,5 +1,7 @@
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 
+use ac2_audio::BlockFlags;
+
 use ac2_proto::PROTO_VERSION;
 use ac2_proto::frame::AudioHeader;
 use ac2_proto::model::{CalStatus, Clocks, SourceInput, SourceSession, StampMap};
@@ -67,15 +69,29 @@ struct Rig {
 }
 
 impl Rig {
+    /// A joiner whose one remote input's rig has stated its source.
     fn new(stamps: bool) -> Self {
+        let r = Self::bare(stamps, &[3]);
+        r.link
+            .try_send(LinkFrame::Source(source(0)))
+            .expect("queued");
+        r
+    }
+
+    /// A joiner over remote `channels` of one rig, nothing read from it yet.
+    fn bare(stamps: bool, channels: &[u16]) -> Self {
         let (link, rx) = sync_channel(1024);
         let (to_control, control) = std::sync::mpsc::channel();
         let joiner = Joiner::new(JoinSetup {
-            inputs: vec![JoinInput {
-                slot: 0,
-                rig: RigId(2),
-                channel: 3,
-            }],
+            inputs: channels
+                .iter()
+                .enumerate()
+                .map(|(slot, &channel)| JoinInput {
+                    slot: slot as u16,
+                    rig: RigId(2),
+                    channel,
+                })
+                .collect(),
             rigs: vec![(RigId(2), rx)],
             local_columns: 1,
             rate: RATE,
@@ -96,10 +112,14 @@ impl Rig {
 
     /// The remote frame captured at local sample `local`, `AHEAD` samples later on its rig.
     fn send(&self, local: u64, rate: u32) {
+        self.send_on(3, local, rate);
+    }
+
+    fn send_on(&self, channel: u16, local: u64, rate: u32) {
         let start = local + AHEAD;
         self.link
             .try_send(LinkFrame::Audio(AudioFrame {
-                channel: 3,
+                channel,
                 header: AudioHeader {
                     v: PROTO_VERSION,
                     start_sample: start,
@@ -150,11 +170,7 @@ impl Rig {
 fn assert_joined(blocks: &[Block]) {
     for b in blocks {
         assert_eq!(b.channels, 2);
-        assert!(
-            !b.flags.contains(BlockFlags::REMOTE_GAP),
-            "gap at {}",
-            b.start_sample
-        );
+        assert!(b.marks.get(1).is_none(), "gap at {}", b.start_sample);
         for f in 0..b.frames as usize {
             let at = b.start_sample + f as u64;
             assert_eq!(b.data[2 * f], 0.25);
@@ -260,7 +276,7 @@ fn missing_audio_is_a_remote_gap_and_late_audio_is_counted() {
     }
     let gaps: Vec<u64> = out
         .iter()
-        .filter(|b| b.flags.contains(BlockFlags::REMOTE_GAP))
+        .filter(|b| !b.marks.gaps(1).is_empty())
         .map(|b| b.start_sample)
         .collect();
     assert_eq!(gaps, (10..15).map(|i| i * 64).collect::<Vec<_>>());
@@ -287,7 +303,11 @@ fn audio_far_ahead_of_the_present_slips_by_a_known_count() {
         r.send(at, RATE);
         out.extend(r.push(t0));
     }
-    let slips: Vec<i64> = out.iter().map(|b| b.slip).filter(|&s| s != 0).collect();
+    let slips: Vec<i64> = out
+        .iter()
+        .filter_map(|b| b.marks.get(1).map(|m| m.slip))
+        .filter(|&s| s != 0)
+        .collect();
     assert_eq!(slips.len(), 1, "{slips:?}");
     r.push(t0 + Duration::from_secs(2));
     let (inputs, _) = r.last_report().expect("reported");
@@ -319,4 +339,161 @@ fn a_source_at_another_rate_or_replaying_gives_no_audio() {
     r.push(t0 + Duration::from_secs(3));
     let (inputs, _) = r.last_report().expect("reported");
     assert_eq!(inputs[0].audio, RemoteAudio::Replaying);
+}
+
+/// One input's missing audio marks its own column only: a job reading the other input, or
+/// this rig's, carries on.
+#[test]
+fn a_gap_marks_only_the_input_it_is_in() {
+    let mut s = source(0);
+    if let Some(ss) = &mut s.session {
+        let first = ss.inputs[0].clone();
+        ss.inputs.push(SourceInput {
+            channel: 4,
+            ..first
+        });
+    }
+    let mut r = Rig::bare(false, &[3, 4]);
+    r.link.try_send(LinkFrame::Source(s)).expect("queued");
+    let t0 = Instant::now();
+    let mut out = Vec::new();
+    for i in 0..30 {
+        let at = r.next;
+        r.send_on(3, at, RATE);
+        // Channel 4 misses blocks 10 … 14.
+        if !(10..15).contains(&i) {
+            r.send_on(4, at, RATE);
+        }
+        out.extend(r.push(t0));
+    }
+    let gapped: Vec<u64> = out
+        .iter()
+        .filter(|b| b.restarts_averages(&[2]))
+        .map(|b| b.start_sample)
+        .collect();
+    assert_eq!(gapped, (10..15).map(|i| i * 64).collect::<Vec<_>>());
+    assert!(out.iter().all(|b| !b.restarts_averages(&[0, 1])));
+    // The missing samples are whole-block runs on column 2.
+    let b = out
+        .iter()
+        .find(|b| b.start_sample == 640)
+        .expect("block 10");
+    assert_eq!(b.marks.gaps(2).to_vec(), vec![0..BLOCK]);
+}
+
+/// Audio that keeps arriving after it was needed for a second runs the ring dry: the map
+/// slips once, marked on that input's column with its count, and the audio lands again.
+#[test]
+fn audio_late_for_a_second_slips_the_map_once() {
+    let mut r = Rig::new(false);
+    r.next = 100_000;
+    let t0 = Instant::now();
+    let mut out = Vec::new();
+    for _ in 0..10 {
+        let at = r.next;
+        r.send(at, RATE);
+        out.extend(r.push(t0));
+    }
+    // The source falls 1000 samples behind: every frame now comes after its release.
+    for j in 0..60u64 {
+        let at = r.next - 1000;
+        r.send(at, RATE);
+        out.extend(r.push(t0 + Duration::from_millis(25 * j)));
+    }
+    let slips: Vec<i64> = out
+        .iter()
+        .filter_map(|b| b.marks.get(1).map(|m| m.slip))
+        .filter(|&s| s != 0)
+        .collect();
+    assert_eq!(slips.len(), 1, "{slips:?}");
+    assert!(slips[0] > 1000 - LINK as i64, "{slips:?}");
+    // After the slip the audio is on time: the newest blocks are whole.
+    assert!(out.iter().rev().take(5).all(|b| b.marks.get(1).is_none()));
+    r.push(t0 + Duration::from_secs(3));
+    let (inputs, _) = r.last_report().expect("reported");
+    assert_eq!(inputs[0].slips, 1);
+    assert_eq!(inputs[0].last_slip, Some(slips[0]));
+    assert!(inputs[0].late_frames > 30);
+    assert_eq!(u64::from(inputs[0].late_frames_hour), inputs[0].late_frames);
+}
+
+/// Audio before the source's state is read waits for it, so the anchor can still be system
+/// time rather than settling for arrival.
+#[test]
+fn audio_before_the_source_state_waits_to_anchor() {
+    let mut r = Rig::bare(true, &[3]);
+    let t0 = Instant::now();
+    for _ in 0..10 {
+        let at = r.next;
+        r.send(at, RATE);
+        r.push(t0);
+    }
+    r.push(t0 + Duration::from_secs(1));
+    let (inputs, _) = r.last_report().expect("reported");
+    assert_eq!(inputs[0].audio, RemoteAudio::Starting);
+    assert_eq!(inputs[0].anchor, None);
+
+    r.link
+        .try_send(LinkFrame::Source(source(0)))
+        .expect("queued");
+    let mut out = Vec::new();
+    for _ in 0..20 {
+        let at = r.next;
+        r.send(at, RATE);
+        out.extend(r.push(t0 + Duration::from_secs(1)));
+    }
+    r.push(t0 + Duration::from_secs(3));
+    let (inputs, _) = r.last_report().expect("reported");
+    assert_eq!(inputs[0].anchor, Some(Anchor::SystemTime));
+    assert_joined(&out[out.len() - 5..]);
+}
+
+/// Audio before this rig's first block is not anchored against an empty present (which
+/// would put it a whole session index away): the frames after the first block anchor.
+#[test]
+fn audio_before_the_first_local_block_waits_to_anchor() {
+    let mut r = Rig::new(false);
+    r.next = 100_000;
+    let t0 = Instant::now();
+    r.send(r.next, RATE);
+    let line = StampLine {
+        epoch_stamp_ns: 0,
+        system_ns: 0,
+        ppm: 0.0,
+    };
+    assert!(r.joiner.push(&[], Some(line), t0).is_empty());
+    let mut out = Vec::new();
+    for j in 0..60u64 {
+        let at = r.next;
+        r.send(at, RATE);
+        out.extend(r.push(t0 + Duration::from_millis(25 * j)));
+    }
+    r.push(t0 + Duration::from_secs(3));
+    let (inputs, _) = r.last_report().expect("reported");
+    assert_eq!(inputs[0].slips, 0);
+    assert_joined(&out);
+}
+
+/// A first frame that waited in a queue is placed far back by system time although the
+/// clocks agree: the fresh frames after it anchor on system time.
+#[test]
+fn a_stale_first_frame_is_no_clock_disagreement() {
+    let mut r = Rig::new(true);
+    r.next = 100_000;
+    let t0 = Instant::now();
+    for _ in 0..20 {
+        r.push(t0);
+    }
+    // Captured half a second ago, it arrives only now.
+    r.send(r.next - u64::from(RATE) / 2, RATE);
+    r.push(t0);
+    for _ in 0..10 {
+        let at = r.next;
+        r.send(at, RATE);
+        r.push(t0 + Duration::from_millis(100));
+    }
+    r.push(t0 + Duration::from_secs(2));
+    let (inputs, rigs) = r.last_report().expect("reported");
+    assert_eq!(inputs[0].anchor, Some(Anchor::SystemTime));
+    assert_eq!(rigs[0].disagree, None);
 }

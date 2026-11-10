@@ -3,6 +3,7 @@
 //! session side keeps a link to each paired rig ([`link`]), joins the remote samples into
 //! its own blocks ([`join`]) and judges the clocks between the rigs ([`peer_clock`]).
 
+use std::ops::Range;
 use std::time::Duration;
 
 use ac2_proto::model::{Anchor, RemoteAudio, RemoteLink, SourceState};
@@ -35,6 +36,72 @@ pub(crate) struct RemoteRun {
     /// Session channel per column of the joined feed: this rig's inputs, then the remote
     /// inputs in `remote_inputs` order; empty without remote inputs.
     pub(crate) joined_map: Vec<u16>,
+}
+
+/// What the joined feed marks on one remote column of a block.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ColumnMark {
+    pub(crate) column: u16,
+    /// Frames of the block (from its start) whose remote sample never arrived: late, lost
+    /// or slipped. They hold zeros so the block stays rectangular; they are no signal.
+    pub(crate) gaps: Vec<Range<u32>>,
+    /// The input's map moved by this many samples at this block (a slip); 0: it did not.
+    pub(crate) slip: i64,
+}
+
+/// The marks of a block's remote columns; empty on device blocks and wherever every remote
+/// sample arrived. Per column, so a job reading a whole input never pays for another
+/// input's gap.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ColumnMarks(Vec<ColumnMark>);
+
+impl ColumnMarks {
+    pub(crate) fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    pub(crate) fn get(&self, column: usize) -> Option<&ColumnMark> {
+        self.0.iter().find(|m| usize::from(m.column) == column)
+    }
+
+    fn get_mut(&mut self, column: u16) -> &mut ColumnMark {
+        match self.0.iter().position(|m| m.column == column) {
+            Some(i) => &mut self.0[i],
+            None => {
+                self.0.push(ColumnMark {
+                    column,
+                    ..ColumnMark::default()
+                });
+                let last = self.0.len() - 1;
+                &mut self.0[last]
+            }
+        }
+    }
+
+    /// Marks frame `frame` of `column` missing; frames come in order.
+    pub(crate) fn gap(&mut self, column: u16, frame: u32) {
+        let gaps = &mut self.get_mut(column).gaps;
+        match gaps.last_mut() {
+            Some(r) if r.end == frame => r.end += 1,
+            _ => gaps.push(frame..frame + 1),
+        }
+    }
+
+    pub(crate) fn slip(&mut self, column: u16, by: i64) {
+        self.get_mut(column).slip += by;
+    }
+
+    /// The missing frames of `column`.
+    pub(crate) fn gaps(&self, column: usize) -> &[Range<u32>] {
+        self.get(column).map_or(&[], |m| &m.gaps)
+    }
+
+    /// Whether averages over `column` restart at this block: a sample of it is missing or
+    /// its map moved.
+    pub(crate) fn breaks(&self, column: usize) -> bool {
+        self.get(column)
+            .is_some_and(|m| !m.gaps.is_empty() || m.slip != 0)
+    }
 }
 
 /// A remote input's figures, as the joiner reports them.

@@ -99,14 +99,16 @@ impl SessionLevels {
         let gonio = e.wants(Topic::SessionGonio);
         let mut r = self.programme.take(gonio);
         let (mut channels, mut peak, mut rms, mut clip) = (meta.channels, peak, rms, clip);
-        // The programme meters run on the local inputs; a remote input's ballistic, true
-        // peak and maximum read its sample peak, the one figure its block statistics give.
+        // The programme meters run on the local inputs; a remote input's ballistic reads its
+        // sample peak, the one peak its block statistics give. Its true peak and maximum
+        // are not metered: a sample peak would read low as either.
         if let Some(m) = self.remote.as_mut().and_then(LevelsMeter::take_meters) {
+            let n = m.peak.len();
             channels.extend(m.meta.channels);
             r.ppm.extend(&m.peak);
-            r.true_peak.extend(&m.peak);
-            r.max.extend(&m.peak);
-            r.overs.extend(std::iter::repeat_n(0, m.peak.len()));
+            r.true_peak.extend(std::iter::repeat_n(f32::NAN, n));
+            r.max.extend(std::iter::repeat_n(f32::NAN, n));
+            r.overs.extend(std::iter::repeat_n(0, n));
             peak.extend(m.peak);
             rms.extend(m.rms);
             clip.extend(m.clip);

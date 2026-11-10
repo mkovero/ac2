@@ -8,6 +8,8 @@
 //! the meter: the log and the windows carry on through it.
 
 mod bands;
+#[cfg(test)]
+mod gap_tests;
 
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
@@ -323,18 +325,38 @@ impl Spl {
         l.next = b.start_sample;
         l.next_wall = block_wall;
         let done = &mut l.done;
-        match band {
-            // The band filters take the meter's mic-curve corrected signal before its
-            // frequency weighting: band limits are on unweighted levels.
-            Some(bm) => {
-                let (integ, bdone) = (&mut bm.integ, &mut bm.done);
-                meter.process_tapped(
-                    &self.buf,
-                    |s| done.push(s),
-                    |x| integ.process(x, |s| bdone.push(s)),
-                );
+        // A remote input's missing samples are lost samples like a local gap's: the zeros
+        // standing in for them would integrate as silence and read the level low.
+        let frames = self.buf.len();
+        let gaps = b.marks.gaps(self.idx).iter().map(|g| {
+            let (a, z) = (g.start as usize, g.end as usize);
+            a.min(frames)..z.min(frames)
+        });
+        let mut at = 0;
+        for g in gaps.chain(std::iter::once(frames..frames)) {
+            let whole = &self.buf[at..g.start.max(at)];
+            match band.as_mut() {
+                // The band filters take the meter's mic-curve corrected signal before its
+                // frequency weighting: band limits are on unweighted levels.
+                Some(bm) => {
+                    let (integ, bdone) = (&mut bm.integ, &mut bm.done);
+                    meter.process_tapped(
+                        whole,
+                        |s| done.push(s),
+                        |x| integ.process(x, |s| bdone.push(s)),
+                    );
+                }
+                None => meter.process(whole, |s| done.push(s)),
             }
-            None => meter.process(&self.buf, |s| done.push(s)),
+            let lost = g.len() as u64;
+            if lost > 0 {
+                meter.skip(lost, |s| done.push(s));
+                if let Some(bm) = band.as_mut() {
+                    let bdone = &mut bm.done;
+                    bm.integ.skip(lost, |s| bdone.push(s));
+                }
+            }
+            at = g.end.max(at);
         }
         l.next = b.end_sample();
         l.next_wall = b.wall_ns;

@@ -141,16 +141,18 @@ Rig A (the session's rig) is a client of B's daemon over B's CURVE data wire
   thread (never the callback).
 - **Flags for remote audio.** Today every continuity flag (`XRUN`, `DISCONTINUITY`,
   `OVERFLOW`, `CONFIG_CHANGE`) restarts both a transfer function's averages and its delay
-  finder (`jobs/transfer.rs`). The joined feed adds `REMOTE_GAP` (outside
-  `BREAKS_CONTINUITY`: averages restart, the finder keeps its delay, since k has not moved)
-  and a slip event carrying its signed sample count (averages restart, the held delay shifts
-  by exactly that count). Jobs that read no remote channel never see either.
+  finder (`jobs/transfer.rs`). The joined feed adds per-column marks: a remote column's
+  missing frames (averages restart, the finder keeps its delay, since k has not moved) and
+  its slip with the signed sample count (averages restart, the held delay shifts by exactly
+  that count). A job restarts only for a column it reads; the missing frames hold zeros, which
+  meters and SPL count as lost time, never as silence (a meter over one reads no value). Jobs
+  that read no remote channel never see either.
 - **Two feeds.** Jobs that read no remote channel, the session meters of local inputs and the
   timing monitor see the device blocks as today. Jobs that read a remote channel (and
   recordings that include one) get the **joined feed**: A's device blocks held back by the
   link offset, with the remote channels' samples merged in at the same sample index and their
-  block statistics computed at merge. A gap or a missing remote block flags the joined block
-  as a gap. Remote inputs' meters come from the joined feed.
+  block statistics computed at merge. A gap or a missing remote block marks that input's
+  column of the joined block. Remote inputs' meters come from the joined feed.
 
 ### 2.3 Trust between rigs
 
