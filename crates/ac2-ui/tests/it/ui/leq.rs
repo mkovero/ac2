@@ -437,11 +437,22 @@ fn leq_tiles_from_an_empty_daemon() {
     let pin = |a: &mut ac2_ui::App| {
         a.state.toasts.list.clear();
         a.state.local_zone = SHOW_ZONE;
+        // Past any frame of this daemon: the live frames leave the pinned history alone.
+        let last = a
+            .state
+            .rig
+            .mirror
+            .as_ref()
+            .and_then(|m| m.incarnation)
+            .map(|incarnation| ac2_ui::state::FoldedAt {
+                incarnation,
+                seq: u64::MAX,
+            });
         a.state
             .rig
             .leq
             .history
-            .insert(meas, (u64::MAX, history.clone()));
+            .insert(meas, (last, history.clone()));
     };
     let first_is = move |over: bool| {
         move |a: &ac2_ui::App| {

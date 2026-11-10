@@ -7,6 +7,51 @@ use super::*;
 /// id at random and never 0.
 pub const UNKNOWN_RIG: RigId = RigId(0);
 
+/// The newest frame of one topic a fold took in. A daemon numbers each topic's frames
+/// (`seq`) for as long as it runs, from 1: a frame of another incarnation (the daemon
+/// restarted, or another one answers at the address) starts a count of its own, however
+/// small its `seq`, and is never an old frame. A link that drops and reaches the same
+/// daemon again finds its count going on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FoldedAt {
+    pub incarnation: ac2_proto::units::DaemonIncarnation,
+    pub seq: u64,
+}
+
+/// What a frame is to a fold over its topic.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NextFrame {
+    /// Folded in already, or older than what was.
+    Seen,
+    /// The next of the stream folded so far.
+    Newer,
+    /// The first frame, or the first of another incarnation.
+    Afresh,
+}
+
+impl FoldedAt {
+    pub fn of(s: &ac2_proto::frame::FrameStamp) -> Self {
+        Self {
+            incarnation: s.daemon_incarnation,
+            seq: s.seq,
+        }
+    }
+
+    /// What frame `s` is to a fold that last took `last` (`None`: none yet).
+    pub fn next(last: Option<Self>, s: &ac2_proto::frame::FrameStamp) -> NextFrame {
+        match last {
+            Some(l) if l.incarnation == s.daemon_incarnation => {
+                if s.seq > l.seq {
+                    NextFrame::Newer
+                } else {
+                    NextFrame::Seen
+                }
+            }
+            _ => NextFrame::Afresh,
+        }
+    }
+}
+
 /// One daemon (a rig) as this app holds it. A daemon numbers its measurements, traces,
 /// inputs and topics on its own, so two rigs' ids collide: everything keyed by them lives
 /// here, never beside another rig's.
@@ -72,12 +117,12 @@ pub struct RigState {
     /// Groups of the measurement tree folded in this app (their rows not listed).
     pub collapsed: BTreeSet<ac2_proto::model::TraceOwner>,
     pub edits: BTreeMap<MeasId, LiveEdit>,
-    /// Peak hold per spectrum / RTA measurement, with the last folded-in `seq` and capture
-    /// time.
-    pub peaks: BTreeMap<MeasId, (u64, u64, PeakHold)>,
-    /// Tracked peaks per spectrum / RTA measurement, with the last folded-in `seq`, kept
+    /// Peak hold per spectrum / RTA measurement, with the last frame folded in and its
+    /// capture time.
+    pub peaks: BTreeMap<MeasId, (Option<FoldedAt>, u64, PeakHold)>,
+    /// Tracked peaks per spectrum / RTA measurement, with the last frame folded in, kept
     /// while peak tracking is on.
-    pub peak_tracks: BTreeMap<MeasId, (u64, ac2_scene::spectrum::peaks::PeakTracker)>,
+    pub peak_tracks: BTreeMap<MeasId, (Option<FoldedAt>, ac2_scene::spectrum::peaks::PeakTracker)>,
     /// Spectrograph history per spectrum / RTA measurement, kept while the spectrograph is
     /// shown.
     pub spectrographs: BTreeMap<MeasId, ac2_scene::spectrograph::SpectrographHistory>,

@@ -714,18 +714,26 @@ impl RigState {
             if !held.contains(&meas) {
                 continue;
             }
-            let seq = tf.frame.stamp.seq;
-            let at = tf.frame.stamp.capture_wall_ns.0;
+            let stamp = &tf.frame.stamp;
+            let at = stamp.capture_wall_ns.0;
             let e = self
                 .peaks
                 .entry(meas)
-                .or_insert_with(|| (0, at, PeakHold::new(0.0)));
-            if e.2.values().is_empty() || seq > e.0 {
-                let dt = (at.saturating_sub(e.1)) as f32 / 1e9;
-                e.2.update(level, validity, dt);
-                e.0 = seq;
-                e.1 = at;
+                .or_insert_with(|| (None, at, PeakHold::new(0.0)));
+            match FoldedAt::next(e.0, stamp) {
+                NextFrame::Seen => continue,
+                NextFrame::Newer => {}
+                // Another daemon's measurement under this id may be another one, and its
+                // clock says nothing of the time since the held frame.
+                NextFrame::Afresh => {
+                    e.1 = at;
+                    e.2 = PeakHold::new(0.0);
+                }
             }
+            let dt = (at.saturating_sub(e.1)) as f32 / 1e9;
+            e.2.update(level, validity, dt);
+            e.0 = Some(FoldedAt::of(stamp));
+            e.1 = at;
         }
     }
 
@@ -762,10 +770,12 @@ impl RigState {
             let Some(grid) = tf.frame.stamp.grid_id.and_then(|g| d.grids.get(&g)) else {
                 continue;
             };
-            let seq = tf.frame.stamp.seq;
             let e = self.peak_tracks.entry(meas).or_default();
-            if e.0 != 0 && seq <= e.0 {
-                continue;
+            match FoldedAt::next(e.0, &tf.frame.stamp) {
+                NextFrame::Seen => continue,
+                NextFrame::Newer => {}
+                // Another daemon's measurement under this id may be another one.
+                NextFrame::Afresh => e.1.reset(),
             }
             let cols = ac2_scene::grid::columns(grid);
             e.1.update(&find_peaks(&PeakInput {
@@ -775,7 +785,7 @@ impl RigState {
                 unresolved,
                 narrow,
             }));
-            e.0 = seq;
+            e.0 = Some(FoldedAt::of(&tf.frame.stamp));
         }
     }
 }

@@ -11,8 +11,8 @@ use super::*;
 #[derive(Clone, Debug, Default)]
 pub struct LeqUi {
     /// Each SPL meter's Leq windows over time, from the `leq` frames received (with the
-    /// last `seq` folded in) over the history rebuilt from the meter's log.
-    pub history: BTreeMap<MeasId, (u64, ac2_scene::leq::LeqHistory)>,
+    /// last frame folded in) over the history rebuilt from the meter's log.
+    pub history: BTreeMap<MeasId, (Option<FoldedAt>, ac2_scene::leq::LeqHistory)>,
     /// Spans of each meter's log fetched for strips looking back, oldest first.
     pub spans: BTreeMap<MeasId, Vec<strip::LeqSpan>>,
     /// The span fetch under way.
@@ -367,11 +367,13 @@ impl RigState {
             let Some(cfg) = cfgs.get(&f.meas) else {
                 continue;
             };
-            let seq = tf.frame.stamp.seq;
+            let stamp = &tf.frame.stamp;
             let e = self.leq.history.entry(f.meas).or_default();
-            if seq > e.0 {
-                e.0 = seq;
-                e.1.push(cfg, f, tf.frame.stamp.capture_wall_ns.0 as f64 / 1e9);
+            // A restarted daemon's frames go on the same history: it is on the daemon's
+            // wall clock, and what the new daemon's log holds is rebuilt under it.
+            if FoldedAt::next(e.0, stamp) != NextFrame::Seen {
+                e.0 = Some(FoldedAt::of(stamp));
+                e.1.push(cfg, f, stamp.capture_wall_ns.0 as f64 / 1e9);
             }
         }
     }

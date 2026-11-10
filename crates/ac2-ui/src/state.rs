@@ -74,7 +74,7 @@ pub use leq::export::{EXPORT_DIR, export_path, leq_export_name};
 pub use leq::strip::{LeqSpan, STRIP_MIN_S, StripMsg};
 pub use panes::pane_export::{PaneExport, pane_export_name};
 use rig::Folding;
-pub use rig::{RigState, UNKNOWN_RIG};
+pub use rig::{FoldedAt, NextFrame, RigState, UNKNOWN_RIG};
 mod link;
 use link::Pending;
 use panes::meas_layout::LayoutQueue;

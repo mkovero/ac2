@@ -308,6 +308,40 @@ fn leq_history_survives_a_resync() {
     assert_eq!(p[0].t, 100.0);
 }
 
+/// The frames of `ev` as daemon `incarnation` numbers them.
+fn of_incarnation(ev: ConnEvent, incarnation: u64) -> ConnEvent {
+    let ConnEvent::Data(d) = ev else {
+        panic!("a data snapshot");
+    };
+    let mut d = (*d).clone();
+    for f in d.latest.frames.values_mut() {
+        let mut frame = (*f.frame).clone();
+        frame.stamp.daemon_incarnation = DaemonIncarnation(incarnation);
+        f.frame = Arc::new(frame);
+    }
+    ConnEvent::Data(Arc::new(d))
+}
+
+/// The daemon restarted while the app stayed up: its `leq` frames number afresh from 1,
+/// and the history goes on taking them rather than waiting for `seq` to pass the old
+/// daemon's.
+#[test]
+fn leq_history_follows_a_restarted_daemon() {
+    use ac2_proto::frame::LeqFlags;
+    let mut t = T::new();
+    t.conn(mirror_of(with_spl(), 1, Some("c1")));
+    let judged = LeqFlags::LIMIT.with(LeqFlags::JUDGED);
+    t.conn(of_incarnation(leq_data(900_000, 100, 98.0, judged), 1));
+    t.conn(of_incarnation(leq_data(900_001, 101, 98.5, judged), 1));
+    t.conn(mirror_of(with_spl(), 2, Some("c1")));
+    t.conn(of_incarnation(leq_data(1, 200, 99.0, judged), 2));
+    t.conn(of_incarnation(leq_data(2, 201, 99.2, judged), 2));
+    let cfg = LeqConfig::default_windows();
+    let h = &t.st.rig.leq.history[&MeasId(4)].1;
+    let p = h.points(&cfg.windows[0]).expect("series");
+    assert_eq!(p.back().map(|p| p.t), Some(201.0), "{p:?}");
+}
+
 /// Each new `leq` frame goes into the meter's history once; a window going over or coming
 /// back is a toast, alarms that were there before the app connected are not.
 #[test]

@@ -32,6 +32,14 @@ fn two_spectra() -> State {
 
 /// Live spectra of `meas`, each at its level, in one snapshot.
 fn spectra(t: &mut T, frames: &[(u32, f32)]) {
+    let stamp = ac2_proto::samples::stamp(None);
+    let frames: Vec<(u32, Vec<f32>)> = frames.iter().map(|(m, l)| (*m, vec![*l; 5])).collect();
+    spectra_of(t, &frames, stamp.seq, stamp.daemon_incarnation);
+}
+
+/// Live spectra of `meas`, each with its column levels, numbered `seq` by daemon
+/// `incarnation`, in one snapshot.
+fn spectra_of(t: &mut T, frames: &[(u32, Vec<f32>)], seq: u64, incarnation: DaemonIncarnation) {
     use ac2_client::{Latest, TopicFrame};
     use ac2_proto::frame::{SpecFrame, SpecMeta};
     use ac2_proto::{Frame, FrameData};
@@ -53,14 +61,14 @@ fn spectra(t: &mut T, frames: &[(u32, f32)]) {
                 math: None,
                 bands: None,
             },
-            level: vec![*level; 5],
+            level: level.clone(),
         });
+        let mut stamp = ac2_proto::samples::stamp(Some(grid.clone()));
+        stamp.seq = seq;
+        stamp.daemon_incarnation = incarnation;
         let f = TopicFrame {
             topic: data.topic(),
-            frame: Arc::new(Frame {
-                stamp: ac2_proto::samples::stamp(Some(grid.clone())),
-                data,
-            }),
+            frame: Arc::new(Frame { stamp, data }),
             received: Instant::now(),
             since_new: std::time::Duration::ZERO,
             age: Some(0.0),
@@ -314,4 +322,91 @@ fn tracking_draws_no_hold_and_a_new_hold_starts_afresh() {
     assert_eq!(mode(&t), Some(PeakMode::Hold));
     spectra(&mut t, &[(2, -60.0)]);
     assert_eq!(hold(&t), Some(vec![-60.0; 5]), "a fresh hold");
+}
+
+/// The daemon restarted (another incarnation) while the app stayed up: its frames number
+/// afresh from 1, far below the `seq` the old daemon reached. The hold and the tracked peaks
+/// start again from the new daemon's frames instead of waiting for `seq` to catch up.
+#[test]
+fn hold_and_tracks_start_afresh_after_a_daemon_restart() {
+    use ac2_proto::model::PeakMode;
+    let mut t = on_sub(two_spectra(), &[]);
+    let hold = |t: &T| -> Option<Vec<f32>> {
+        let p = t.pane(PaneKind::Spectrum);
+        crate::scenes::with_spectrum(&t.st, p, &Theme::dark(), now(), |traces, _, _| {
+            traces
+                .iter()
+                .find(|c| c.name == "Sub")
+                .and_then(|c| c.peak.map(<[f32]>::to_vec))
+        })
+    };
+    let old = DaemonIncarnation(1);
+    let new = DaemonIncarnation(2);
+    let flat = |l: f32| vec![(2, vec![l; 5])];
+    t.key_answered("P");
+    assert_eq!(
+        t.st.meas(MeasId(2)).map(|m| t.st.display_of(m).peak),
+        Some(PeakMode::Hold)
+    );
+    spectra_of(&mut t, &flat(-40.0), 3_000_000, old);
+    assert_eq!(hold(&t), Some(vec![-40.0; 5]));
+    let held = t.st.daemon().expect("mirrored").clone();
+    let restart = |t: &mut T, held: &State, incarnation: u64| {
+        t.conn(ConnEvent::Failed {
+            target: "tcp://pupu".into(),
+            error: "gone".into(),
+            retry_in: std::time::Duration::from_secs(1),
+        });
+        t.conn(ConnEvent::Connected {
+            target: "tcp://pupu".into(),
+            server: "ac2d test".into(),
+            client_id: ClientId("c1".into()),
+            rig_id: t.st.rig.id,
+            name: "test rig".into(),
+        });
+        t.conn(mirror_of(held.clone(), incarnation, Some("c1")));
+    };
+    // A brief loss of the same daemon: its numbering goes on and the hold is kept.
+    restart(&mut t, &held, 1);
+    spectra_of(&mut t, &flat(-60.0), 3_000_001, old);
+    assert_eq!(
+        hold(&t),
+        Some(vec![-40.0; 5]),
+        "the same daemon keeps the hold"
+    );
+    // Another incarnation: a fresh hold from its first frame, then folding on.
+    restart(&mut t, &held, 2);
+    spectra_of(&mut t, &flat(-50.0), 1, new);
+    assert_eq!(hold(&t), Some(vec![-50.0; 5]), "a fresh hold");
+    spectra_of(&mut t, &flat(-45.0), 2, new);
+    assert_eq!(hold(&t), Some(vec![-45.0; 5]), "folding on");
+
+    // Tracking follows the new daemon's frames too.
+    t.key_answered("P");
+    assert_eq!(
+        t.st.meas(MeasId(2)).map(|m| t.st.display_of(m).peak),
+        Some(PeakMode::Track)
+    );
+    let held = t.st.daemon().expect("mirrored").clone();
+    let tracked = |t: &T| -> Vec<f64> {
+        t.st.rig
+            .peak_tracks
+            .get(&MeasId(2))
+            .map_or(vec![], |p| p.1.peaks().iter().map(|p| p.freq_hz).collect())
+    };
+    let bump = |at: usize| {
+        let mut l = vec![-80.0; 5];
+        l[at] = -20.0;
+        vec![(2, l)]
+    };
+    spectra_of(&mut t, &bump(1), 5_000, new);
+    let before = tracked(&t);
+    assert!(!before.is_empty(), "a peak tracked");
+    restart(&mut t, &held, 3);
+    spectra_of(&mut t, &bump(3), 3, DaemonIncarnation(3));
+    let after = tracked(&t);
+    assert!(
+        !after.is_empty() && after != before,
+        "{before:?} → {after:?}"
+    );
 }
