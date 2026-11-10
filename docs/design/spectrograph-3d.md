@@ -69,25 +69,41 @@ Constants in `ac2-scene::spectrograph_3d`:
   bright tips over faint bodies, as in the reference. Round 2 compared this with the round-1
   constants (foot 0.25, `t²`, top 6 % bright): the new ones keep a slab of pink noise from
   reading as a solid wall and make the tips of a tonal case the brightest thing on screen.
+  Round 3 (programme material) kept them: a tip gain of 1.25 or 1.0 dulled the tips into the
+  bodies, and a higher foot (0.1, `t³`) only greys them. At the default camera the body of a
+  tall spike reads lit even so, because the tips of the rows behind it land on it (rows ~1 px
+  apart); that is the history standing behind the newest row, not the body's own light.
 - **Level to light.** Normalised level `n` (0 at the bottom of the level range, 1 at the
   top, clamped; `n = 0` draws nothing) sets height `0.7·n`, colour `LUT(n)` and intensity
   `0.3 + 0.7·n`, so the grass is dim as well as low. Height is the level, nothing else: no
   automatic range, no exaggeration. Pink noise over a 100 dB range is a slab of near-equal
   spikes; the level range keys (Ctrl+I/O, Ctrl+↑/↓) narrowed to ~40 dB around it turn the
-  slab into terrain (modes, comb, the crossover dip) — the user guide says so.
+  slab into terrain (modes, comb, the crossover dip) — the user guide says so. Programme
+  material is the same story: a mastered track's bins sit around −70…−5 dBFS (tone level,
+  65 536-point default), so on −100…0 they form a plateau at mid height; about **−60…0**
+  drops the bed to near-floor grass with the bass line and tonal partials standing out.
+  Narrowing must keep the top near 0: hot masters reach −5…0 dBFS per bin, and a top at
+  −20 clamps them into a flat white ceiling.
 - **Depth.** Brightness × `exp(−2.0·age/1.2)` (the back row at 13 %) × `exp(−0.35·d)` from
-  the eye. Depth changes the G channel only: a level keeps its hue at any depth, not its
-  lightness. No claim that a colour reads the same as in 2D; the level reference is the
-  height scale and the ceiling line (*Axes*).
+  the eye. Round 3 tried 3.0 and 3.5: at the default camera they barely change the picture,
+  tilted they hide the older half of a 30 s span, so 2.0 stays. Depth changes the G channel
+  only: a level keeps its hue at any depth, not its lightness. No claim that a colour reads
+  the same as in 2D; the level reference is the height scale and the ceiling line (*Axes*).
 - **Floor band.** One additive floor quad, brightest along the front edge (0.12 of
   `LUT(0.5)`), fading with the depth curve, plus a 1 px "now" line at 0.35.
-- **Bloom.** The spikes again, coloured `LUT(n) · brightness`, into a quarter-resolution
-  Rgba8Unorm target cleared to 0, additive at gain
+- **Bloom.** The spikes again, coloured `LUT(n) · max(0, brightness − 0.25) / 0.75`, into a
+  quarter-resolution Rgba8Unorm target cleared to 0, additive at gain
   0.12 (coverage-scaled where a spike is under 1 quarter-res px), blurred by a separable
   9-tap Gaussian (σ = 2 quarter-res px, ≈ 8 px full size), added over the pane at 0.6 (ice)
   or 0.35 (colour maps, so hues stay legible). Rgba8 drops far, dim rows below one LSB from
   the bloom; acceptable, they are the haze's edge and still drawn sharp. Float targets would
-  need extensions the GLES downlevel limits do not promise.
+  need extensions the GLES downlevel limits do not promise. The threshold (round 3): on
+  programme material at the default camera, the rows stacked ~1 px apart summed the dim
+  bodies of a loud low end past 1.0 in the 8-bit bloom target (0.3 % of its pixels at a
+  65 536-point FFT, 1 % at 8192), a flat milky blob over the bass with no shape. Dropping
+  the light under 0.25 leaves under 0.005 % of source pixels at 1.0 on all six clips while
+  the tips, the bright part, still glow; tilted, where the rows stand apart, it changes
+  nothing visible.
 - **Blend space.** The max is taken on level and brightness, before any encoding. The
   spike composite is blended with Max into egui's target over the dark field (max of the
   field and the spike colour), the bloom composite with Add; both with
@@ -110,8 +126,14 @@ Spike PNGs (not committed, session scratchpad `look/`): round 1 `sheet_pink.png`
 `sheet_tonal.png`, `sheet_max_vs_sumbloom.png`; round 2 `sheet_r2_default.png`,
 `sheet_r2_tilted.png` (old vs new constants, ice and viridis, full and narrow level range ×
 pink-room, RTA-pink, tonal). No local raw capture existed to run through it; the constants
-are to be retuned on a rig recording before goldens are blessed. The script stays out of the
-tree; its three cases become goldens (*Tests*).
+were checked on programme material in round 3 (`look-tune-own/sheets/`): six 50 s excerpts
+of electrical programme (ambient/neoclassical, acid techno, dense guitars, acoustic jazz,
+house, drum and bass) through an ac2-like history (65 536-point Hann, tone dBFS, display hop,
+96 rows/oct, 30 slots/s) and the Full-tier skyline at 30 s, default and tilted cameras,
+−100…0 and −60…0, ice and viridis (`final_default.png`, `final_tilted.png`,
+`final_default_fft8k.png`, `strip_acid_*.png`). Only the bloom threshold changed. A room-mic
+recording of pink noise through a PA is still welcome before goldens are blessed. The
+scripts stay out of the tree; round 2's three cases become goldens (*Tests*).
 
 ## Axes and level reference
 
@@ -398,8 +420,13 @@ stepped down once (a blanking stall) would stay degraded for months.
 4. **Newest row at the front or the back?** Front: crisp and nearest, history recedes.
 5. **Double-click / double-tap to reset the camera?** Not in v1 (Home); revisit on the touch
    kiosk.
-6. **Look constants** (foot 0.05, `t^3.5`, 2.5 px tip cap, bloom source gain 0.12) were set
-   on synthetic data: retune on a real rig recording (pink noise and programme) before the
-   goldens are blessed.
+6. **Look constants** (foot 0.05, `t^3.5`, 2.5 px tip cap at 1.5×, depth `exp(−2.0·age/1.2)`,
+   bloom source gain 0.12 above a 0.25 brightness threshold): set on synthetic data and
+   tuned on programme material (six electrical music excerpts, *The look*); only the bloom
+   threshold changed. Still open: a room-mic recording of pink noise through a PA before the
+   goldens are blessed. Programme also showed that the 65 536-point default (1.37 s window,
+   a frame every 0.17 s) smears kicks and hats into the bass and tonal layer; the 3D view
+   reads transients only on a short FFT (8192 points: ~47 frames/s, every slot filled),
+   where the max per 0.3 s bucket keeps them from flickering.
 7. **For the operator: Settings › 3D quality** (Auto / Full / Lite / Bare) is one more
    Settings row; keep it, or Auto only with the tier fixed by adapter?
