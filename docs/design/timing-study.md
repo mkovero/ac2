@@ -121,7 +121,7 @@ Operator decision 2026-11-09: no PPS run to the rigs (possible, but a lot of wor
 **Antelope Orion 32HD** is the master clock: it takes the rubidium in and already clocks
 ketunkolo's Babyface over ADAT. It gives pupu's FF400 word clock too.
 
-- **B1: lock.** FF400 clock source **ADAT In**, from an Orion ADAT output. The ADAT frame
+- **B1: lock.** (As run: word clock, §8; results in §7b.) FF400 clock source **ADAT In**, from an Orion ADAT output. The ADAT frame
   clock is 48 kHz whatever the Orion runs at (96 kHz is S/MUX on ADAT), so it sidesteps the
   question of which word clock rate the Orion sends. Word clock stays the alternative, verified in the FF400 and Orion manuals before
   cabling.
@@ -305,8 +305,57 @@ only ac2's ports).
   marked gap, which is the AES67/Dante behaviour too. Riding through it would take a ~300 ms
   offset. The operator chooses: the default stays small, and the setting is stated.
 
-Not yet done: B1 (FF400 on the Orion's word clock, then a word clock pull test). The second
-buffer size per rig was skipped (operator, 2026-11-09).
+**Phase B1 (2026-11-10, logger 74ddce3e, daemons running).** The operator cabled the Orion's
+word clock to pupu's FF400. Cabling alone left it on its own clock: the FF400 saw the word clock
+(`WDClk: sync` in `/proc/asound/card0/firewire/`) but kept `Clock configuration: 96000 Internal`,
+and stage 2's line still read +5 ppm. Setting ALSA control `primary-clock-source` to
+`Word-clock` switched it with no xrun, and the line read +1 ppm (whole ppm) a minute later. A
+reboot or an FF400 reset brings it back up on Internal, so pupu's `ff400-recover` (boot and
+reset) now writes the clock source (sys repo `pupu/`).
+
+Locked hour, concurrent (18:06–19:06 UTC). ketunkolo's ADAT connector was loose for the first
+695 s: the Babyface ran −228 ppm against its stamps with 30 ms residuals, then 6 xruns as it
+relocked. Its numbers are the 2905 s after that.
+
+| | pupu (word clock) | ketunkolo (ADAT, after relock) |
+|---|---|---|
+| sample clock vs stamp clock (RAW) | −0.707 ppm | +8.206 ppm |
+| CLOCK_MONOTONIC vs RAW (pairs) | −0.708 ppm | +8.215 ppm |
+| **sample clock vs disciplined clock** | **+0.001 ppm** | **−0.009 ppm** |
+| stamp residual σ | 17.4 µs | 16.4 µs |
+
+Ratio pupu / ketunkolo against REALTIME over the 48 clean minutes, 60 s windows: **+0.0025 ppm
+mean**, 0.34 ppm sd (host clock noise, as in phase A). Over those 48 minutes that is about 7 µs
+of relative slide, below what the stamps resolve.
+
+Word clock pull (2026-11-10 19:19–19:27 UTC, replugged 19:22:43, pupu, 8 min log, `/proc` polled each second):
+
+| | duration | sample clock vs disciplined | stamp residual σ |
+|---|---|---|---|
+| word clock pulled (`WDClk: none`, still `Word` configured) | ≥ 182 s | +5.568 ppm | 15.2 µs |
+| replugged (`none` → `lock` → `sync` within 1 s) | 291 s | −0.054 ppm | 14.7 µs |
+
+No gap, no xrun, no FF400 reset, jackd untouched at the pull and the replug.
+
+What it says:
+- **Both rigs follow the rubidium.** With both locked, the ratio between them is 1 : 1 within
+  what an hour can show (a few ppb). The stage 3 converter for these two rigs is a fixed one,
+  with no tracking.
+- **The cabling must be checked, not assumed.** A word clock that is present but not
+  selected looks fine in the hardware and runs at the crystal's +5.6 ppm. Stage 2's clock line
+  caught it, which is the check stage 3 relies on.
+- **Losing the reference is silent at the audio level.** The FF400 falls back to its crystal
+  (+5.57 ppm, the free-running value) with no gap or xrun, and relocks within a second when
+  the cable returns. The phase does not come back: the ≥ 182 s at +5.57 ppm moved pupu about
+  1 ms against ketunkolo, and that offset stays after the relock. So stage 3 must watch the
+  lock (stage 2's line leaving 0 ppm, or the driver's sync state) and re-measure the offset
+  after any loss. A delay finder running on the stream does that anyway.
+- **A flaky link is worse than a pulled one.** ketunkolo's loose ADAT ran −228 ppm for 11 min
+  before it settled: not a clean fallback but a PLL chasing a broken reference. Stage 3 treats
+  any rig whose clock line is off 0 ppm as unlocked, whatever the cause.
+
+The second buffer size per rig was skipped (operator, 2026-11-09). B2 (shared channel) and B3
+(stamp path value) stay open; §6 says what the first target needs without them.
 
 ## 8. Operator decisions
 
