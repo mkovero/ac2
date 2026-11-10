@@ -47,6 +47,7 @@ fn scene_3d_as(
     axes: f32,
 ) -> Spectrograph3dScene {
     let input = Spectrograph3dInput {
+        key: crate::trace::TraceKey::Live(ac2_proto::units::MeasId(1)),
         history: &b.h,
         skyline: &b.s,
         name: "Main L".into(),
@@ -128,6 +129,7 @@ fn labels_stay_whole_inside_the_field() {
     ] {
         for (yaw, pitch) in [(0, 8), (-35, 30), (80, 2), (-80, 75)] {
             let input = Spectrograph3dInput {
+                key: crate::trace::TraceKey::Live(ac2_proto::units::MeasId(1)),
                 history: &b.h,
                 skyline: &b.s,
                 name: "Main L".into(),
@@ -419,6 +421,7 @@ fn the_floor_band_fades_with_depth() {
 fn heights_follow_the_range_and_offset() {
     let b = pink_room(30, SkylineTier::Full);
     let input = Spectrograph3dInput {
+        key: crate::trace::TraceKey::Live(ac2_proto::units::MeasId(1)),
         history: &b.h,
         skyline: &b.s,
         name: "Main L".into(),

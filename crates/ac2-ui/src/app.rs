@@ -110,6 +110,9 @@ pub(crate) struct CachedScene {
     pub theme: ThemeName,
     /// How much a 3D spectrograph's axes showed ([`crate::state::AppState::axes3d_alpha`]).
     pub axes3d: f32,
+    /// The pane's peak points pick ([`crate::state::AppState::peak_points_of`]): a click
+    /// on a legend row redraws the pane even while nothing else changes.
+    pub peak_points: Option<ac2_scene::trace::TraceKey>,
     /// The SPL panes' scales an SPL pane was drawn with ([`crate::state::AppState::spl_scales`]):
     /// another pane's change of scale moves this one's columns too.
     pub spl_scales: Vec<(ac2_proto::model::LevelScale, ac2_scene::axis::Range)>,

@@ -329,6 +329,8 @@ impl AppState {
         let l = &prefs.layout;
         self.rig.pending.pane_meas.clear();
         self.rig_pending.clear();
+        // Stored ids may name other content here: no pick carries over.
+        self.peak_points.clear();
         self.pane_levels.clear();
         self.level_set.clear();
         self.spectrum_hold.clear();

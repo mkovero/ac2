@@ -233,6 +233,7 @@ fn scene_coloured(
     colours: Colormap,
 ) -> SpectrographScene {
     let input = SpectrographInput {
+        key: crate::trace::TraceKey::Live(ac2_proto::units::MeasId(1)),
         history: h,
         name: "Main".into(),
         range: Range::new(-100.0, 0.0),
@@ -370,6 +371,7 @@ fn stale_dims_offset_shifts_and_empty_says_so() {
     let view = ViewState::default();
     let input = |h: &SpectrographHistory, off: f64, fr: Option<Freshness>| {
         let s = SpectrographInput {
+            key: crate::trace::TraceKey::Live(ac2_proto::units::MeasId(1)),
             history: h,
             name: "Sub".into(),
             range: Range::new(-90.0, -10.0),
@@ -431,6 +433,7 @@ fn the_spectrum_part_keeps_its_legend_unit_and_selection() {
     let traces = [trace(1, "Main L S1", false), trace(2, "Main L S2", true)];
     let h = SpectrographHistory::new(30);
     let input = SpectrographInput {
+        key: crate::trace::TraceKey::Live(ac2_proto::units::MeasId(1)),
         history: &h,
         name: "Main".into(),
         range: Range::new(-100.0, 0.0),
@@ -533,6 +536,7 @@ fn the_spectrograph_alone_takes_the_pane() {
         layer: 0,
     };
     let input = SpectrographInput {
+        key: crate::trace::TraceKey::Live(ac2_proto::units::MeasId(1)),
         history: &h,
         name: "Main".into(),
         range: Range::new(-100.0, 0.0),
@@ -812,4 +816,33 @@ fn the_3d_view_on_a_gpu_without_it_is_the_spectrograph_with_a_note() {
     );
     assert_eq!(none.caption, NO_3D);
     assert!(shown(&none).contains(&NO_3D.to_string()));
+}
+
+/// Alone, the caption's row picks the measurement's peak points and shows the pick's cue
+/// (no points: there is no level axis to put them on); in the split it is inert, the
+/// legend above picks.
+#[test]
+fn the_caption_alone_picks_and_the_split_leaves_it_to_the_legend() {
+    let mut h = SpectrographHistory::new(30);
+    let mut f = Feed::new(&log_bins());
+    f.push(&mut h, T0, -40.0);
+    let key = crate::trace::TraceKey::Live(ac2_proto::units::MeasId(1));
+    let mut view = ViewState {
+        peak_points: Some(crate::view::PeakPoints {
+            key,
+            list: false,
+            named: false,
+        }),
+        ..ViewState::default()
+    };
+    view.spectrum.mode = SpectrumMode::Spectrograph;
+    let s = scene_of(&h, &view);
+    let hit = s.caption_hit.expect("a hit");
+    assert_eq!(hit.key, key);
+    assert_eq!((hit.rect.x, hit.rect.w), (s.plot.x, s.plot.w));
+    assert!((hit.rect.bottom() - s.plot.y).abs() < 1e-3);
+    assert_eq!(s.picked_cue, Some(key));
+    view.spectrum.mode = SpectrumMode::Split;
+    let s = scene_of(&h, &view);
+    assert_eq!((s.caption_hit, s.picked_cue), (None, None));
 }

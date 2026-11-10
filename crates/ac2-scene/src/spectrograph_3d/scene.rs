@@ -6,6 +6,8 @@ use super::*;
 /// how to see it.
 #[derive(Clone, Debug)]
 pub struct Spectrograph3dInput<'a> {
+    /// The measurement's live curve: what a click on the caption picks.
+    pub key: TraceKey,
     pub history: &'a SpectrographHistory,
     /// Updated for this history, the pane's frequency span and `tier`.
     pub skyline: &'a Skyline,
@@ -55,6 +57,13 @@ pub struct Spectrograph3dScene {
     /// The time axis's side: `true` right.
     pub time_right: bool,
     pub view_proj: ViewProj,
+    /// The picked measurement's peak points on the newest row (loudest first).
+    pub points: Vec<super::PeakPoint3d>,
+    /// The caption's row, full width: a click there picks the measurement's peak points.
+    /// `None` without a caption.
+    pub caption_hit: Option<crate::legend::LegendHit>,
+    /// The caption carries the pick's cue: its measurement is the pane's pick.
+    pub picked_cue: Option<TraceKey>,
 }
 
 /// Floor x of frequency `hz` over `lo … hi`.
@@ -76,11 +85,11 @@ impl Projector {
         ]
     }
 
-    fn point(&self, p: V3) -> Option<[f32; 2]> {
+    pub(super) fn point(&self, p: V3) -> Option<[f32; 2]> {
         self.vp.ndc(p).map(|n| self.px(n))
     }
 
-    fn inside(&self, p: [f32; 2]) -> bool {
+    pub(super) fn inside(&self, p: [f32; 2]) -> bool {
         p[0] >= self.plot.x
             && p[0] <= self.plot.right()
             && p[1] >= self.plot.y
@@ -155,7 +164,7 @@ pub(super) fn label_box(l: &Label) -> Rect {
 pub const PLATE_ALPHA: f32 = 0.55;
 
 /// A rounded plate around `b`, tightened to the text: [`label_box`] is generous across.
-pub(super) fn plate(b: Rect) -> Vec<[f32; 2]> {
+pub(crate) fn plate(b: Rect) -> Vec<[f32; 2]> {
     const R: f32 = 3.0;
     const SEGS: usize = 4;
     let inset = (b.w * 0.06).min(4.0);
@@ -179,11 +188,7 @@ pub(super) fn plate(b: Rect) -> Vec<[f32; 2]> {
 }
 
 /// Labels kept where they do not overlap one kept before them, in the order given.
-pub(super) fn thin(
-    candidates: Vec<(AxisLabel, Label)>,
-    plot: Rect,
-    out: &mut Vec<(AxisLabel, Label)>,
-) {
+pub(super) fn thin<T>(candidates: Vec<(T, Label)>, plot: Rect, out: &mut Vec<(T, Label)>) {
     const GAP: f32 = 6.0;
     for c in candidates {
         let b = label_box(&c.1);
@@ -596,6 +601,30 @@ pub fn spectrograph_3d_scene(
             }
         }
     }
+    // Points come from a deliberate click and are few: they show at rest too, reading the
+    // pane's own tier, not the bare one the hidden axes force; traces only hides them.
+    let points = match (sg, view.peak_points) {
+        (Some(s), Some(p)) if message.is_none() && p.key == s.key && view.chrome.peak_marks() => {
+            traces
+                .iter()
+                .find(|t| t.key == s.key)
+                .and_then(|t| Some((t, t.tracked?)))
+                .map_or_else(Vec::new, |(t, peaks)| {
+                    super::points::peak_points(
+                        &mut c,
+                        &pj,
+                        s.skyline,
+                        peaks,
+                        t.offset_db,
+                        crate::spectrum::value_unit(t.scale, t.quantity),
+                        range,
+                        plot,
+                        small,
+                    )
+                })
+        }
+        _ => Vec::new(),
+    };
     let cell = sg.and_then(|s| cell_text(s.skyline));
     let tier = sg
         .filter(|s| s.tier_forced)
@@ -622,10 +651,29 @@ pub fn spectrograph_3d_scene(
     }
     let own = with_tail(&caption);
     forms.extend([own.clone(), caption.clone(), String::new()]);
+    let picked_cue = sg
+        .map(|s| s.key)
+        .filter(|k| !caption.is_empty() && view.peak_points.is_some_and(|p| p.key == *k));
+    let cue_w = if picked_cue.is_some() {
+        crate::legend::CUE_ROOM
+    } else {
+        0.0
+    };
     let shown = forms
         .into_iter()
-        .find(|c| canvas::text_width(c, small) <= plot.w)
+        .find(|c| canvas::text_width(c, small) <= plot.w - cue_w)
         .unwrap_or_default();
+    let cue_color = traces
+        .iter()
+        .find(|t| picked_cue == Some(t.key))
+        .map_or(theme.text_dim, |t| t.color);
+    let caption_hit = crate::legend::caption_hit(
+        sg.map(|s| s.key).filter(|_| !caption.is_empty()),
+        plot,
+        CAPTION_H,
+        picked_cue.map(|_| cue_color),
+        &mut c.overlay,
+    );
     let caption = if caption.is_empty() {
         caption
     } else {
@@ -633,7 +681,7 @@ pub fn spectrograph_3d_scene(
     };
     c.overlay.labels.push(label(
         shown,
-        [plot.x, plot.y - 3.0],
+        [plot.x + cue_w, plot.y - 3.0],
         anchor(HAlign::Left, VAlign::Bottom),
         small,
         theme.text_dim,
@@ -682,6 +730,9 @@ pub fn spectrograph_3d_scene(
         labels: axis_labels,
         time_right,
         view_proj: vp,
+        points,
+        caption_hit,
+        picked_cue,
     }
 }
 

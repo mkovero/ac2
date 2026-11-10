@@ -91,12 +91,13 @@ fn the_list_names_peaks_dips_and_the_comb() {
 }
 
 #[test]
-fn plot_chrome_off_leaves_the_marks() {
+fn traces_only_hides_the_marks() {
     let c = comb_cols();
     let s = scene(&c, &view(PlotChrome::Bare), &DisplayCache::default());
     assert_eq!(s.extremes_list, None);
     let e = s.extremes.expect("still tracked");
     assert_eq!((e.max.len(), e.min.len()), (5, 5));
+    assert!(e.max.iter().chain(&e.min).all(|r| r.mark.is_none()));
     let overlay = &s.scene.layers[2];
     assert_eq!(
         overlay
@@ -104,7 +105,7 @@ fn plot_chrome_off_leaves_the_marks() {
             .iter()
             .filter(|p| p.points.len() == 4)
             .count(),
-        10
+        0
     );
     assert!(
         overlay
@@ -136,4 +137,50 @@ fn blanked_columns_hold_no_dip_and_off_tracks_nothing() {
     v.tf.extremes = false;
     let s = scene(&c, &v, &cache);
     assert!(s.extremes.is_none() && s.extremes_list.is_none());
+}
+
+/// Min / max follows the curve picked in the legend, else the pane's own; the picked row's
+/// cue shows only while min / max is on, since the pick then changes nothing.
+#[test]
+fn min_max_follows_the_pick_and_its_cue_needs_min_max() {
+    let c = comb_cols();
+    let (own, other) = (TraceKey::Live(MeasId(1)), TraceKey::Live(MeasId(2)));
+    let traces = [trace(&c, own, 0.0), trace(&c, other, 0.0)];
+    let cache = DisplayCache::default();
+    let mut v = view(PlotChrome::Full);
+    let s = transfer_scene(
+        &traces,
+        &cache,
+        &Status::default(),
+        &v,
+        &Theme::dark(),
+        SIZE,
+    );
+    assert_eq!(s.extremes.map(|e| e.key), Some(own));
+    assert_eq!(s.picked_cue, None);
+    v.peak_points = Some(crate::view::PeakPoints {
+        key: other,
+        list: false,
+        named: true,
+    });
+    let s = transfer_scene(
+        &traces,
+        &cache,
+        &Status::default(),
+        &v,
+        &Theme::dark(),
+        SIZE,
+    );
+    assert_eq!(s.extremes.map(|e| e.key), Some(other));
+    assert_eq!(s.picked_cue, Some(other));
+    v.tf.extremes = false;
+    let s = transfer_scene(
+        &traces,
+        &cache,
+        &Status::default(),
+        &v,
+        &Theme::dark(),
+        SIZE,
+    );
+    assert_eq!(s.picked_cue, None);
 }

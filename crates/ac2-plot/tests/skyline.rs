@@ -859,6 +859,7 @@ fn bench_frame_cost() {
                 slot += 1;
                 sky.update(&hist, freq, tier);
                 let input = Spectrograph3dInput {
+                    key: ac2_scene::trace::TraceKey::Live(ac2_proto::units::MeasId(1)),
                     history: &hist,
                     skyline: &sky,
                     name: "Main L".into(),

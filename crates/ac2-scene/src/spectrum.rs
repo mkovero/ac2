@@ -33,6 +33,7 @@ mod draw;
 mod legend;
 mod mark;
 pub mod peaks;
+mod points;
 mod units;
 pub use draw::spectrum_scene;
 pub(crate) use draw::spectrum_scene_in;
@@ -42,6 +43,7 @@ use legend::{
     legend_layout, unit_forms,
 };
 pub use mark::jump;
+pub use points::PeakLabel;
 pub use units::{
     BinWidth, cal_caption, density_unit_help, fraction_label, level_unit, level_unit_forms,
     narrow_unit_help, quantity_note, tone_unit_help, value_unit, weighting_label, window_label,
@@ -100,8 +102,9 @@ pub struct SpectrumTrace<'a> {
     pub validity: Option<&'a [ValidityMask]>,
     /// Peak-hold values, column-aligned ([`PeakHold`]).
     pub peak: Option<&'a [f32]>,
-    /// Tracked peaks ([`peaks::PeakTracker`]), loudest first; `Some` while its
-    /// measurement's peak mode tracks, and then marked and listed.
+    /// Tracked peaks ([`peaks::PeakTracker`]), loudest first; `Some` on the one curve of
+    /// the pane whose peaks show: the picked one ([`ViewState::peak_points`]), labelled or
+    /// listed as it says, else the pane's own while its peak mode tracks, ranked and listed.
     pub tracked: Option<&'a [peaks::Peak]>,
     pub scale: LevelScale,
     pub quantity: Quantity,
@@ -403,7 +406,7 @@ pub struct PeakRow {
     /// `1  1.00 kHz  −32.0 dBFS`.
     pub text: String,
     /// The box drawn around the point on the curve; `None` off the plot (zoomed past it),
-    /// when only the list names it.
+    /// when only the list names it, and at *traces only*, when nothing marks it.
     pub mark: Option<Rect>,
 }
 
@@ -429,11 +432,16 @@ pub struct SpectrumScene {
     pub mark: Option<crate::readout::MarkReadout>,
     /// Tracked peaks, per tracked curve; empty unless peak tracking is on.
     pub peaks: Vec<SpectrumPeaks>,
-    /// The peak list as drawn on its plate; `None` with no tracked peaks or while plot
-    /// chrome is off (T), when only the marks stay.
+    /// The peak list as drawn on its plate; `None` with no listed peaks, or at *traces
+    /// only* (T), which hides every peak mark.
     pub peak_list: Option<String>,
     /// The peak list's plate, when the list is drawn.
     pub peaks_box: Option<crate::plate::PlateBox>,
+    /// The picked curve's peak points as labelled (loudest first; a label that would
+    /// overlap a louder one's is left out, its box stays).
+    pub peak_labels: Vec<PeakLabel>,
+    /// The legend entry drawn with the pick's cue: the picked curve's, when it has a row.
+    pub picked_cue: Option<TraceKey>,
     /// One entry per curve, in drawing order: name, colour and tags (`stopped`,
     /// `STALE 3.2 s`, `offset +3.0 dB`). Drawn in rows above the plot, never over a curve.
     pub legend: Vec<LegendEntry>,

@@ -33,15 +33,32 @@ pub struct Comb {
 /// Size of a mark's triangle, logical pixels: as wide as the spectrum's boxes.
 const MARK: f32 = 4.5;
 
-/// The curve min / max tracking follows: the selected one when shown, else the first of
-/// the pane's own (not compared), else the first. One curve, so the marks and the list stay
-/// one statement.
+/// The curve the cursor's mark and jumps follow: the selected one when shown, else the
+/// first of the pane's own (not compared), else the first.
 pub(super) fn tracked(traces: &[TfTrace<'_>]) -> Option<usize> {
     traces
         .iter()
         .position(|t| t.selected)
-        .or_else(|| traces.iter().position(|t| !t.compared))
+        .or_else(|| own(traces))
+}
+
+/// The first of the pane's own curves (not compared), else the first.
+fn own(traces: &[TfTrace<'_>]) -> Option<usize> {
+    traces
+        .iter()
+        .position(|t| !t.compared)
         .or_else(|| (!traces.is_empty()).then_some(0))
+}
+
+/// The curve min / max tracking follows: the one picked in the legend (`picked`) when
+/// shown, else the pane's own ([`own`]). One curve, so the marks and the list stay one
+/// statement; the pick, as on the spectrum, so on both pane kinds the marks follow the
+/// curve picked in the legend.
+pub(super) fn extremes_curve(traces: &[TfTrace<'_>], picked: Option<TraceKey>) -> Option<usize> {
+    traces
+        .iter()
+        .position(|t| Some(t.key) == picked)
+        .or_else(|| own(traces))
 }
 
 /// Finds, tracks and marks the extremes of the tracked curve's displayed magnitude (smoothed
@@ -55,11 +72,12 @@ pub(super) fn extremes(
     plot: Rect,
     xm: &crate::axis::Mapping,
     ym: &crate::axis::Mapping,
-    ranks: bool,
+    marks: bool,
+    picked: Option<TraceKey>,
     temp_c: f64,
     theme: &Theme,
 ) -> Option<TfExtremes> {
-    let d = shown.get(tracked(traces)?)?;
+    let d = shown.get(extremes_curve(traces, picked)?)?;
     // The displayed magnitude is NaN wherever the curve is not drawn (invalid or
     // coherence-blanked columns), so no mark lands on what is not shown.
     let max = find_extremes(&d.freqs, &d.magnitude_db, Extreme::Max, true);
@@ -85,7 +103,9 @@ pub(super) fn extremes(
                     && x <= plot.right()
                     && y >= plot.y
                     && y <= plot.bottom();
-                let mark = inside.then(|| Rect::new(x - MARK, y - MARK, 2.0 * MARK, 2.0 * MARK));
+                // At traces only the peaks are still tracked (their order holds), not marked.
+                let mark = (inside && marks)
+                    .then(|| Rect::new(x - MARK, y - MARK, 2.0 * MARK, 2.0 * MARK));
                 if let Some(m) = mark {
                     // ▲ on a peak, ▼ on a dip: the point of the triangle says which way the
                     // curve turns there.
@@ -99,7 +119,7 @@ pub(super) fn extremes(
                         stroke: Stroke::solid(color, 1.5),
                         clip: Some(plot),
                     });
-                    if ranks {
+                    if marks {
                         let (ry, v) = match dir {
                             Extreme::Max => (m.y - 2.0, VAlign::Bottom),
                             Extreme::Min => (m.bottom() + 2.0, VAlign::Top),

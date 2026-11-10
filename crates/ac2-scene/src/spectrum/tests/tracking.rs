@@ -95,7 +95,7 @@ fn tracked_peaks_are_listed_under_the_cursor_and_marked() {
 }
 
 #[test]
-fn plot_chrome_off_leaves_only_the_marks() {
+fn traces_only_hides_every_peak_mark() {
     let g = third_octaves();
     let (f, e) = (g.centres(), g.edges());
     let level = levels(&f);
@@ -115,13 +115,14 @@ fn plot_chrome_off_leaves_only_the_marks() {
     assert!(s.cursor.is_none());
     assert_eq!(s.peaks[0].rows.len(), 3);
     let overlay = &s.scene.layers[2];
-    // Three closed boxes, no rank numbers and no list.
+    // Still tracked, but no box, rank number or list: the traces alone.
+    assert!(s.peaks[0].rows.iter().all(|r| r.mark.is_none()));
     let boxes = overlay
         .polylines
         .iter()
         .filter(|p| p.points.len() == 5)
         .count();
-    assert_eq!(boxes, 3);
+    assert_eq!(boxes, 0);
     assert!(
         overlay
             .labels

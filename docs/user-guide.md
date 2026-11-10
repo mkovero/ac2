@@ -990,11 +990,11 @@ off, an automatic range stays where it was framed.
 
 #### Grid, labels and cursor (T)
 
-**T** steps the focused pane's plot: grid, labels and cursor → no grid or marks → traces
-only (no grid, labels or cursor; for screenshots; the legend stays) → full. The marks are
+**T** steps the focused pane's plot: grid, labels and cursor → no grid or resolution marks →
+traces only (no grid, labels, cursor or peak marks; for screenshots; the legend stays) → full. The marks are
 the grey resolution marker and a multi-resolution spectrum's window changes (`171 ms`,
 `85 ms` …): they go with the grid, and come back with it. A toast names the step
-(`Transfer: no grid or marks`). Axis ranges and cursor keys keep working in every step. The step
+(`Transfer: no grid or resolution marks`). Axis ranges and cursor keys keep working in every step. The step
 belongs to the pane (kept when **Tab** changes its measurement, copied by a split) and
 covers the spectrograph, the Leq history strip and the sweep's IR too. On the SPL pane the
 step past full also takes the limit text: OK / NEAR / OVER, "stay ≤ … dB SPL" and "limit … dB SPL"
@@ -1110,7 +1110,8 @@ full opacity (black on the dark theme) inside its hairline border, to read at a 
 or over a busy plot (saved in `ui.toml`). The peak list, placed by the pane, hangs under
 the cursor values on the plot's right side (at the top while those are dragged elsewhere,
 in the bottom-right corner if they were dropped on its place); dragged, it keeps its
-place as the other plates do, while its boxes stay on the curve. A dragged cursor-values plate names each curve beside its values, since it
+place as the other plates do, while its boxes stay on the curve (until **T** to traces
+only, which hides them with the list). A dragged cursor-values plate names each curve beside its values, since it
 no longer sits on the legend's rows; the frequency is its first line. Each pane keeps its
 own plates, with the measurement's panes (so in the session, like the level ranges) or in
 `ui.toml` with the window's panes. A move or a size is one **Ctrl+Z** step. The list of
@@ -1175,7 +1176,15 @@ unit.
 It names every curve the pane draws (live spectra and RTAs, then shown captures) with its
 colour and tags (`stopped`, `STALE 3.2 s`, `offset +3.0 dB`), in rows above the plot so it
 never covers a curve; a narrow pane drops tags first, then shows `+2 more`. A click selects
-the curve (**A** hides it).
+the curve and shows its **peak points**, its five peaks with frequency and level. A click on
+the picked row clears them (**A** hides the curve). The picked row carries a small hollow
+box on its swatch and is never folded into `+N more`. A tap does the same on a kiosk.
+
+Peak points belong to the pane and this app: two panes on one measurement pick apart,
+nothing is sent to the daemon or saved, and **Ctrl+Z** does not undo a pick. A pick goes
+when its curve leaves the pane (unticked with **C**, hidden with **A**, another row dropped
+on the pane, the pane closed or pinned to another rig, the daemon restarted) and does not
+come back by itself; a reconnect to the same daemon keeps it.
 
 #### How a live spectrum is drawn
 
@@ -1232,8 +1241,19 @@ the two beside it (within a fraction of a bin of a tone between bins); an RTA pe
 its band's centre. The level is the curve's own at that column, what the cursor reads. Gaps,
 invalid columns and a multi-resolution spectrum's unresolved columns hold no peak. Marks do
 not hop: a marked peak keeps its place unless a rival beats it by more than 3 dB, and keeps
-its row unless the one below beats it by more than 1 dB. **T** to traces only takes the list's
-plate and the rank numbers away; the boxes stay on the curve.
+its row unless the one below beats it by more than 1 dB.
+
+**Peak points** ([the spectrum legend](#the-spectrum-legend)) need no **P**: a click on a
+legend row shows the curve's five peaks by the same rules, each box labelled `1.00 kHz
+−32.0 dBFS` (the quantity note only on a pane mixing quantities). Labels that would touch
+keep the louder peak's; one the plot's top would cut goes below its box. **P** stays the
+switch for the list and the ranks: while the pane's own measurement tracks (else the first
+live curve's), the list and ranks go to the picked curve, the list naming it when it is not
+the pane's own, and its labels give way to the list. With nothing picked tracking marks the
+pane's own curve as above. A stopped curve shows the points of its newest frame; before any
+data there are none. A capture of a multi-resolution spectrum gets peak points across its
+whole range (it keeps no unresolved ranges); its live curve skips the unresolved ones.
+**T** to traces only hides every peak mark: boxes, ranks, labels and the list.
 
 #### Fixed or multi-resolution
 
@@ -1334,6 +1354,9 @@ bar spans the pane's level axis, so the level-axis keys change the colours.
   <meas> --span 60`); every length keeps a row per 33 ms. It starts afresh at each length
   and when the spectrograph comes into view.
 - A click puts the cursor: `1.00 kHz · 4.2 s ago · −32.0 dBFS`.
+- With the spectrograph alone, a click or tap on its caption (the measurement's name above
+  the plot) picks the measurement's **peak points**, as a legend row does; again clears
+  them. With the spectrum beside it, the spectrum's legend picks.
 - Time without frames (STALE, stopped) is a gap, never the last spectrum stretched. Where a
   pixel covers several frames or frequencies it shows the highest level, so short events
   and narrow tones are never lost.
@@ -1373,6 +1396,12 @@ per frequency and moment, as tall as its level. **G** once more is the spectrum 
   Shift+wheel still zoom and pan the level range. The camera is kept with the pane and the
   measurement's layout. The cursor keys (Shift+←/→, Shift+T) and **C** do nothing here:
   there is no cursor and no compared curve in 3D.
+- **Peak points**: a click or tap on the caption picks the measurement, as its legend row
+  does in 2D (a hollow box on the caption shows it); again clears them. Its five peaks
+  stand as boxes on the front (newest) row, each labelled with frequency and level on a
+  plate; a peak higher than its cell's spike sits on the spike's top, its label keeping the
+  peak's level. They show at rest, without the axes; *traces only* hides them. **P** alone
+  draws nothing here: the list and ranks are 2D's.
 - **Colour** is the loudest spike along the line of sight, so a tall peak behind a low row
   still shows its colour. Read levels from the heights against the level ticks, or go one
   **G** back to the 2D spectrograph and its cursor. The *ice* colour map (palette
@@ -1503,8 +1532,9 @@ They are this app's settings (`ui.toml`, `[advice]`).
 ### Min / max tracking on the transfer function
 
 **P** on a transfer pane turns min / max tracking on or off. It marks the five highest
-peaks (▲) and the five deepest dips (▼) of one curve's magnitude (the selected curve, else
-the pane's own) and lists them on a plate in a bottom corner of the magnitude view, clear
+peaks (▲) and the five deepest dips (▼) of one curve's magnitude (the curve picked by a
+click on its legend row, else the pane's own; the picked row carries a hollow box while min /
+max is on, and a click there while it is off only selects) and lists them on a plate in a bottom corner of the magnitude view, clear
 of the legend and the cursor values: `max` and `min`, each row rank, frequency and dB. It
 reads the magnitude as drawn: smoothed, with its offset, without coherence-blanked or
 invalid columns. Peaks and dips follow the spectrum's rules (6 dB prominence, 1/6 octave
@@ -1515,7 +1545,7 @@ list ends with the spacing, the delay it implies and the extra path it stands fo
 session's air temperature: `comb Δf 1.00 kHz · 1.00 ms · 0.34 m @ 20 °C`. An
 uneven set shows nothing. The cursor mark reads the same comb from a chosen pair of notches
 and asks for less: one third notch one spacing beyond the pair
-([Cursor jumps and the mark](#cursor-jumps-and-the-mark-altp-altn-altd)). **T** to traces only takes the list away and keeps the marks.
+([Cursor jumps and the mark](#cursor-jumps-and-the-mark-altp-altn-altd)). **T** to traces only takes the list and the marks away.
 
 ### Math channels
 

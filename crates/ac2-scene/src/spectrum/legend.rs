@@ -134,46 +134,60 @@ fn flow(texts: &[String], width: f32, font: f32) -> Vec<(usize, f32, String)> {
 
 /// The legend laid out in at most `max_rows` rows `width` wide: every entry in full when
 /// that fits, else names only, else the names that fit and `+N more` closing the last row.
-/// Items are (entry index or `None` for the `+N more` note, row, x, text).
+/// The `picked` entry is never left out: when some are, it goes first, so its row (and the
+/// only way a touch screen has to clear its points) stays in sight. Items are (entry index
+/// or `None` for the `+N more` note, row, x, text).
 pub(super) fn legend_layout(
     entries: &[LegendEntry],
     width: f32,
     max_rows: usize,
     font: f32,
+    picked: Option<usize>,
 ) -> Vec<(Option<usize>, usize, f32, String)> {
     if entries.is_empty() || max_rows == 0 {
         return Vec::new();
     }
     let rows = |f: &[(usize, f32, String)]| f.last().map_or(0, |l| l.0 + 1);
-    let indexed = |f: Vec<(usize, f32, String)>| {
+    let indexed = |f: Vec<(usize, f32, String)>, order: &[usize]| {
         f.into_iter()
-            .enumerate()
-            .map(|(i, (r, x, t))| (Some(i), r, x, t))
+            .zip(order)
+            .map(|((r, x, t), i)| (Some(*i), r, x, t))
             .collect()
     };
+    let natural: Vec<usize> = (0..entries.len()).collect();
     let full: Vec<String> = entries.iter().map(|e| e.text.clone()).collect();
     let f = flow(&full, width, font);
     if rows(&f) <= max_rows {
-        return indexed(f);
+        return indexed(f, &natural);
     }
     let names: Vec<String> = entries.iter().map(|e| e.name.clone()).collect();
     let f = flow(&names, width, font);
     if rows(&f) <= max_rows {
-        return indexed(f);
+        return indexed(f, &natural);
     }
+    let order: Vec<usize> = match picked.filter(|p| *p < entries.len()) {
+        Some(p) => std::iter::once(p)
+            .chain(natural.iter().copied().filter(|i| *i != p))
+            .collect(),
+        None => natural,
+    };
+    let names: Vec<String> = order.iter().map(|i| entries[*i].name.clone()).collect();
+    let f = flow(&names, width, font);
     let mut kept: Vec<(usize, f32, String)> = f
         .into_iter()
         .take_while(|(r, _, _)| *r < max_rows)
         .collect();
-    // Room on the last row for the note of what is left out.
+    // Room on the last row for the note of what is left out; the picked entry, first,
+    // stays even when the note then overruns the row.
+    let least = usize::from(picked.is_some());
     loop {
         let more = format!("+{} more", entries.len() - kept.len());
         let end = kept
             .last()
             .map_or(0.0, |(_, x, t)| x + entry_width(t, font) + ENTRY_GAP);
         let last_row = kept.last().map_or(0, |k| k.0);
-        if kept.is_empty() || end + text_width(&more, font) <= width {
-            let mut out: Vec<_> = indexed(kept);
+        if kept.len() <= least || end + text_width(&more, font) <= width {
+            let mut out: Vec<_> = indexed(kept, &order);
             out.push((None, last_row, end, more));
             return out;
         }

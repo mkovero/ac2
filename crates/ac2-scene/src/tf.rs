@@ -103,6 +103,9 @@ pub struct TfScene {
     pub legend_box: Option<LegendBox>,
     /// Where each shown legend row is, for a click to select its curve.
     pub legend_hits: Vec<crate::legend::LegendHit>,
+    /// The legend row drawn with the pick's cue ([`ViewState::peak_points`]): only while
+    /// min / max is on.
+    pub picked_cue: Option<TraceKey>,
     pub cursor: Option<CursorReadout>,
     /// The cursor values' plate.
     pub readout_box: Option<crate::plate::PlateBox>,
@@ -625,6 +628,12 @@ pub fn transfer_scene(
             readout::delay_readout(r.delay.0, view.temperature_c)
         )
     });
+    // The pick only chooses min / max's curve: with min / max off a cue would change
+    // nothing, and read as a fault.
+    let picked_cue = view
+        .peak_points
+        .map(|p| p.key)
+        .filter(|k| view.tf.extremes && legend.iter().any(|e| e.key == *k));
     let mut legend_box = None;
     let mut readout_box = None;
     if let Some(&(_, top)) = panes_at.first() {
@@ -648,6 +657,7 @@ pub fn transfer_scene(
                     color: trace_stroke(t, e.selected, theme).color,
                     dim: e.stale,
                     selected: e.selected,
+                    picked: Some(e.key) == picked_cue,
                 })
                 .collect();
             let hover = view
@@ -709,7 +719,8 @@ pub fn transfer_scene(
             p.plot,
             &xm,
             &p.y_axis.mapping,
-            view.chrome.peak_list(),
+            view.chrome.peak_marks(),
+            view.peak_points.map(|p| p.key),
             view.temperature_c,
             theme,
         ),
@@ -722,7 +733,7 @@ pub fn transfer_scene(
     };
     let extremes_list = extremes
         .as_ref()
-        .filter(|e| view.chrome.peak_list() && !(e.max.is_empty() && e.min.is_empty()))
+        .filter(|e| view.chrome.peak_marks() && !(e.max.is_empty() && e.min.is_empty()))
         .zip(mag)
         .map(|(e, p)| {
             let text = extremes::list_text(e, shown.len() > 1);
@@ -749,6 +760,7 @@ pub fn transfer_scene(
         legend,
         legend_box,
         legend_hits,
+        picked_cue,
         cursor,
         readout_box,
         mark,

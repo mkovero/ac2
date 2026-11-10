@@ -781,7 +781,8 @@ impl PlotChrome {
     pub fn name(self) -> &'static str {
         match self {
             Self::Full => "grid, labels and cursor",
-            Self::NoGrid => "no grid or marks",
+            // "Marks" alone would read as covering peak points, which stay at this step.
+            Self::NoGrid => "no grid or resolution marks",
             Self::Bare => "traces only",
         }
     }
@@ -800,9 +801,11 @@ impl PlotChrome {
         self != Self::Bare
     }
 
-    /// The spectrum's peak list and the rank beside each mark; the marks themselves are on
-    /// the curve and stay with it, like the traces.
-    pub fn peak_list(self) -> bool {
+    /// Every peak mark: the spectrum's peak list, its boxes, ranks and peak point labels,
+    /// and the transfer pane's min / max marks and list. They go together at *traces
+    /// only*, so the same key does the same thing to the same kind of mark; *no grid*
+    /// keeps them, since they are values like the axis labels.
+    pub fn peak_marks(self) -> bool {
         self != Self::Bare
     }
 
@@ -875,6 +878,20 @@ pub struct ViewState {
     pub plates: crate::plate::Plates,
     /// The plate under the pointer in the pane being drawn (lit, its grip shown bright).
     pub plate_hover: Option<crate::plate::PlateHover>,
+    /// The curve a legend (or caption) click picked in the pane being drawn: its peaks show
+    /// as peak points; `None`: no pick, the pane's own curve is the tracked one.
+    pub peak_points: Option<PeakPoints>,
+}
+
+/// A pane's picked curve ([`ViewState::peak_points`]) and how its peaks show.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PeakPoints {
+    pub key: crate::trace::TraceKey,
+    /// The pane's own measurement tracks (P): the peaks are ranked and listed, as the own
+    /// curve's would be, instead of labelled one by one.
+    pub list: bool,
+    /// The curve is not the pane's own: a list of it says whose it is.
+    pub named: bool,
 }
 
 impl Default for ViewState {
@@ -897,6 +914,7 @@ impl Default for ViewState {
             freq_right: 0.0,
             plates: crate::plate::Plates::default(),
             plate_hover: None,
+            peak_points: None,
         }
     }
 }

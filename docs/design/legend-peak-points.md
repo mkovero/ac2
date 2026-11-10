@@ -1,5 +1,9 @@
 # Peak points from the legend
 
+Status: implemented (`ac2_scene::spectrum::points`, `ac2_scene::spectrograph_3d::points`,
+`ac2-ui` `state/peak_points.rs`); off the wire, no PROTO bump. Where the build differs from
+this note, see *As built* at the end.
+
 A click on a curve's legend row shows that curve's **peak points**: its five peaks, each
 with frequency and level, on the spectrum pane and in every G view of it, the 3D
 spectrograph included. **T** to traces only hides them along with every other peak mark,
@@ -286,3 +290,32 @@ No new key, so the key tables and hint lines are unchanged.
   again: clear". In `Scope::Spectrograph3d` and for the flat spectrograph, "Click caption:
   peak points".
 - `docs/design/spectrograph-3d.md`: its "No cursor" paragraph and P row point here.
+
+## As built
+
+Where the implementation differs from the text above, and why:
+- **Cue.** The hollow box is drawn centred on the legend row's swatch (and before a
+  caption's text, which shifts right to make room), not in extra width beside it: a legend
+  row keeps its width, so a pick never changes which entries fit before `+N more`.
+- **2D plates.** A point's label sits on the plot background colour at the axis plates'
+  alpha with the theme's text colour, not on the 3D field's dark plate: in a light theme a
+  dark plate with dark text would not read. The 3D view keeps the dark plate and the dark
+  theme's text, since its field is dark in every theme.
+- **3D points** show only when the pick is the pane's own measurement (the caption's); the
+  3D view draws no compared curve, so another pick has nothing to stand on.
+- **Transfer.** The pick chooses min / max's curve only; the mark readout and the cursor
+  jumps (Alt+P/N/D) still follow the selection, as before.
+- **Daemon run.** A pick stores the daemon incarnation it was made under and is dropped
+  when the rig's mirror names another, instead of on `keep_listed`'s `reborn` (which it covers): a
+  restarted daemon is usually reached after the link went down, and then the mirror arrives
+  with no previous incarnation to compare, so `reborn` is false. While a rig's link is down
+  (no mirror) membership is unknown and the pick waits, which is how a reconnect to the same
+  daemon keeps it.
+- **Help.** The caption row reads "Click caption: Spectrograph peak points; again: clear",
+  so its title differs from the legend row's in the spectrum scope, which lists both (that
+  scope covers the flat spectrograph).
+- **Test files.** The scene tests live in `spectrum/tests/points.rs` and
+  `spectrograph_3d/tests/points.rs`; the reducer tests in
+  `state/tests/meas_display/peak_points.rs` and `state/tests/rigs/rig_peak_points.rs`; the
+  e2e test in `ac2-e2e` `panes/peak_points.rs` fires the simulated rig's pink noise so the
+  spectra have peaks to label.

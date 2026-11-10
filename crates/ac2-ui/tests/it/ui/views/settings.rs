@@ -375,7 +375,8 @@ fn spectrum_peak_tracking() {
     assert_eq!(s.peak_list, None);
     assert!(s.plates().is_empty(), "no plate under T");
     assert!(s.cursor.is_none());
-    assert!(s.peaks[0].rows[0].mark.is_some(), "the box stays");
+    // Traces only: the traces alone, no peak mark of any kind.
+    assert!(s.peaks[0].rows[0].mark.is_none(), "no box");
     h.state_mut().state.toasts.list.clear();
     snapshot(&mut h, "spectrum_peak_tracking_bare");
 }

@@ -35,7 +35,9 @@ pub(crate) fn spectrum_scene_in(
     let free = size.height - strip.rect.bottom() - MARGINS.top - MARGINS.bottom;
     let max_rows =
         ((free * LEGEND_SHARE / LEGEND_ROW).floor().max(0.0) as usize).min(LEGEND_MAX_ROWS);
-    let placed = legend_layout(&legend, plot_w, max_rows, font);
+    let pick = view.peak_points;
+    let picked = pick.and_then(|p| traces.iter().position(|t| t.key == p.key));
+    let placed = legend_layout(&legend, plot_w, max_rows, font, picked);
     let legend_rows = placed.iter().map(|p| p.1 + 1).max().unwrap_or(0);
     let legend_rect = Rect::new(
         MARGINS.left,
@@ -50,6 +52,7 @@ pub(crate) fn spectrum_scene_in(
     );
     let mut legend_shown = Vec::with_capacity(placed.len());
     let mut legend_hits = Vec::with_capacity(placed.len());
+    let mut picked_cue = None;
     for (i, row, x, text) in placed {
         let y = legend_rect.y + (row as f32 + 0.5) * LEGEND_ROW;
         let x = legend_rect.x + x;
@@ -78,6 +81,10 @@ pub(crate) fn spectrum_scene_in(
                     None,
                     theme,
                 );
+                if i == picked {
+                    crate::legend::pick_cue(&mut c.overlay, x + SWATCH_W / 2.0, y, color, None);
+                    picked_cue = Some(e.key);
+                }
                 (
                     x + SWATCH_W + SWATCH_GAP,
                     if e.stale { theme.text_dim } else { theme.text },
@@ -405,8 +412,15 @@ pub(crate) fn spectrum_scene_in(
             s,
         ));
     }
-    let peaks = tracked_peaks(traces, &xm, &ym, plot);
-    let list_on = view.chrome.peak_list();
+    let marks_on = view.chrome.peak_marks();
+    let peaks = tracked_peaks(traces, &xm, &ym, plot, marks_on);
+    // The picked curve's peaks are labelled one by one unless its pane's own mode tracks,
+    // when they are ranked and listed as the own curve's would be.
+    let labelled = |t: &SpectrumTrace<'_>| pick.is_some_and(|p| p.key == t.key && !p.list);
+    let mixed = traces
+        .first()
+        .is_some_and(|f| traces.iter().any(|t| t.quantity != f.quantity));
+    let mut to_label = Vec::new();
     for (t, p) in traces.iter().filter(|t| t.tracked.is_some()).zip(&peaks) {
         let color = t
             .color
@@ -425,9 +439,10 @@ pub(crate) fn spectrum_scene_in(
                 stroke: Stroke::solid(color, 1.5),
                 clip: Some(plot),
             });
-            // The rank ties a mark to its row; with the list gone (T) it would point at
-            // nothing.
-            if list_on {
+            if labelled(t) {
+                to_label.push((m, points::point_text(r, t, mixed)));
+            } else {
+                // The rank ties a mark to its row in the list.
                 c.overlay.labels.push(label(
                     (k + 1).to_string(),
                     [m.x + m.w / 2.0, m.y - 2.0],
@@ -438,16 +453,22 @@ pub(crate) fn spectrum_scene_in(
             }
         }
     }
-    let several = peaks.len() > 1;
-    let peak_list = (list_on && peaks.iter().any(|p| !p.rows.is_empty())).then(|| {
+    let peak_labels = points::label_marks(&mut c, &to_label, plot, theme);
+    let listed: Vec<(&SpectrumTrace<'_>, &SpectrumPeaks)> = traces
+        .iter()
+        .filter(|t| t.tracked.is_some())
+        .zip(&peaks)
+        .filter(|(t, p)| !labelled(t) && !p.rows.is_empty())
+        .collect();
+    let several = listed.len() > 1;
+    let peak_list = (marks_on && !listed.is_empty()).then(|| {
         let mut lines = Vec::new();
-        for (t, p) in traces.iter().filter(|t| t.tracked.is_some()).zip(&peaks) {
-            if p.rows.is_empty() {
-                continue;
-            }
+        for (t, p) in &listed {
             // A curve's name heads its rows when the list could be read against another
-            // curve's, or its levels are spread by an offset.
-            if several || t.offset_db != 0.0 {
+            // curve's, its levels are spread by an offset, or it is not the curve the eye
+            // expects (a picked curve not the pane's own).
+            let named = pick.is_some_and(|k| k.key == t.key && k.named);
+            if several || t.offset_db != 0.0 || named {
                 lines.push(p.name.clone());
             }
             lines.extend(p.rows.iter().map(|r| r.text.clone()));
@@ -478,6 +499,8 @@ pub(crate) fn spectrum_scene_in(
         peaks,
         peak_list,
         peaks_box,
+        peak_labels,
+        picked_cue,
         legend,
         legend_shown,
         legend_rect,
@@ -555,12 +578,13 @@ const MARK_HALF: f32 = 4.0;
 
 /// Each tracked curve's peaks, in [`SpectrumTrace::tracked`] order: a row per peak with
 /// its displayed level (offset included, as the cursor reads) and its box where it is on
-/// the plot.
+/// the plot, while `marks` (T) draws peak marks at all.
 fn tracked_peaks(
     traces: &[SpectrumTrace<'_>],
     xm: &crate::axis::Mapping,
     ym: &crate::axis::Mapping,
     plot: Rect,
+    marks: bool,
 ) -> Vec<SpectrumPeaks> {
     traces
         .iter()
@@ -572,7 +596,8 @@ fn tracked_peaks(
                 .map(|(k, p)| {
                     let level = p.level + t.offset_db;
                     let (x, y) = (xm.to_px(p.freq_hz), ym.to_px(level));
-                    let inside = x.is_finite()
+                    let inside = marks
+                        && x.is_finite()
                         && y.is_finite()
                         && x >= plot.x
                         && x <= plot.right()

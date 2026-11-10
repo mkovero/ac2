@@ -121,8 +121,11 @@ pub struct RigState {
     /// capture time.
     pub peaks: BTreeMap<MeasId, (Option<FoldedAt>, u64, PeakHold)>,
     /// Tracked peaks per spectrum / RTA measurement, with the last frame folded in, kept
-    /// while peak tracking is on.
+    /// while peak tracking is on or a pane picked its curve.
     pub peak_tracks: BTreeMap<MeasId, (Option<FoldedAt>, ac2_scene::spectrum::peaks::PeakTracker)>,
+    /// The peaks of stored spectra a pane picked, found once per data: a stored trace is
+    /// fixed.
+    pub trace_peaks: BTreeMap<TraceId, Vec<ac2_scene::spectrum::peaks::Peak>>,
     /// Spectrograph history per spectrum / RTA measurement, kept while the spectrograph is
     /// shown.
     pub spectrographs: BTreeMap<MeasId, ac2_scene::spectrograph::SpectrographHistory>,
@@ -223,6 +226,9 @@ pub(super) struct Folding {
     pub pairs_shown: Vec<(u16, u16)>,
     /// A spectrum pane shows a spectrograph: only then are histories kept.
     pub spectrograph_shown: bool,
+    /// Measurements whose live curve a pane picked ([`AppState::peak_points_of`]): their
+    /// peaks are tracked whatever their mode.
+    pub peak_picked: BTreeSet<MeasId>,
 }
 
 impl RigState {
@@ -261,6 +267,7 @@ impl RigState {
             edits: BTreeMap::new(),
             peaks: BTreeMap::new(),
             peak_tracks: BTreeMap::new(),
+            trace_peaks: BTreeMap::new(),
             spectrographs: BTreeMap::new(),
             stimulus: Stimulus::default(),
             sweep: SweepUi::default(),
@@ -307,7 +314,7 @@ impl RigState {
         out: &mut Vec<Request>,
     ) -> Vec<MeasId> {
         self.fold_peaks(&d);
-        self.fold_peak_tracks(&d);
+        self.fold_peak_tracks(&d, &fold.peak_picked);
         if fold.spectrograph_shown {
             self.fold_spectrographs(&d);
         }
@@ -385,6 +392,7 @@ impl AppState {
             cooling: self.ember_cooling(),
             pairs_shown: self.programme_pairs_shown(),
             spectrograph_shown: self.spectrograph_shown(),
+            peak_picked: self.peak_picked(),
         }
     }
 }

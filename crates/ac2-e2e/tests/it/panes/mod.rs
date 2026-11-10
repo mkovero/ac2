@@ -4,6 +4,7 @@ mod edit;
 mod focus;
 mod new_meas;
 mod own;
+mod peak_points;
 mod streams;
 
 use super::harness::{Driver, R};

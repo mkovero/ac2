@@ -256,6 +256,51 @@ pub(crate) struct RowStyle {
     pub color: Color,
     pub dim: bool,
     pub selected: bool,
+    /// The row's curve is the pane's pick: its swatch carries the peak's box ([`pick_cue`]).
+    pub picked: bool,
+}
+
+/// Half the side of the pick's cue: the peak box's own size, so the row reads as "this
+/// curve's peaks are the boxes on the plot".
+const CUE_HALF: f32 = 4.0;
+
+/// Room a caption gives its cue before its text.
+pub(crate) const CUE_ROOM: f32 = 2.0 * CUE_HALF + 6.0;
+
+/// The hit of a spectrograph's caption, the row of `h` above `plot` across its full width,
+/// for a click that picks `key`'s peak points (`None`: no caption, no hit); with `cue` (the
+/// curve's colour) it carries the pick's cue at its start.
+pub(crate) fn caption_hit(
+    key: Option<TraceKey>,
+    plot: Rect,
+    h: f32,
+    cue: Option<Color>,
+    layer: &mut Layer,
+) -> Option<LegendHit> {
+    let key = key?;
+    let rect = Rect::new(plot.x, plot.y - h, plot.w, h);
+    if let Some(color) = cue {
+        pick_cue(
+            layer,
+            plot.x + CUE_HALF + 1.0,
+            plot.y - h / 2.0,
+            color,
+            None,
+        );
+    }
+    Some(LegendHit { key, rect })
+}
+
+/// The cue of a picked legend row (or caption): a peak's box in the curve's colour, centred
+/// at `x`, `y` on the row's swatch, so it needs no room of its own and moves no text.
+pub(crate) fn pick_cue(layer: &mut Layer, x: f32, y: f32, color: Color, clip: Option<Rect>) {
+    let (x0, y0, x1, y1) = (x - CUE_HALF, y - CUE_HALF, x + CUE_HALF, y + CUE_HALF);
+    layer.polylines.push(crate::primitives::Polyline {
+        points: vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]],
+        alpha: vec![],
+        stroke: crate::primitives::Stroke::solid(color, 1.5),
+        clip,
+    });
 }
 
 /// Draws `b` with `styles` (one per row of the whole legend, not only the shown ones);
@@ -293,6 +338,15 @@ pub(crate) fn draw(
             Some(clip),
             theme,
         );
+        if st.picked {
+            pick_cue(
+                layer,
+                x0 + 1.0 + SWATCH_W * s / 2.0,
+                *y,
+                st.color,
+                Some(clip),
+            );
+        }
         let color = if st.dim { theme.text_dim } else { theme.text };
         text(layer, t, x0 + (SWATCH_W + SWATCH_GAP) * s, *y, color);
     }

@@ -109,6 +109,7 @@ fn scene_for(
         && c.freq_right == freq_right
         && c.theme == app.state.theme
         && c.axes3d == app.state.axes3d_alpha(id)
+        && c.peak_points == app.state.peak_points_of(id)
         && (pane != PaneKind::Spl || c.spl_scales == app.state.spl_scales)
     {
         let axes = Axes {
@@ -183,10 +184,13 @@ fn scene_for(
             let sky = app.skylines.entry(id).or_default();
             let axes = st.axes3d_alpha(id);
             let s = scenes::spectrograph_3d(st, id, sky, tier, axes, theme, vp, now);
+            // No legend here: the caption, naming the measurement, picks its points.
+            legend_hits.extend(s.caption_hit);
             (s.scene, Axes::default())
         }
         PaneKind::Spectrum if view.modes.spectrum.spectrograph() => {
             let s = scenes::spectrograph(st, id, theme, vp, now);
+            legend_hits.extend(s.caption_hit);
             if let Some(sp) = &s.spectrum {
                 plates = sp.plates();
                 legend_hits = sp.legend_hits.clone();
@@ -269,6 +273,7 @@ fn scene_for(
             freq_right,
             theme: app.state.theme,
             axes3d: app.state.axes3d_alpha(id),
+            peak_points: app.state.peak_points_of(id),
             spl_scales: if pane == PaneKind::Spl {
                 app.state.spl_scales.clone()
             } else {

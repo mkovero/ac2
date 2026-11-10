@@ -379,6 +379,8 @@ impl SpectrographHistory {
 /// What the spectrograph shows: the history of the pane's measurement and how to read it.
 #[derive(Clone, Debug)]
 pub struct SpectrographInput<'a> {
+    /// The measurement's live curve: what a click on the caption (shown alone) picks.
+    pub key: crate::trace::TraceKey,
     pub history: &'a SpectrographHistory,
     pub name: String,
     /// The level range the colours span (the pane's level axis for the history's scale).
@@ -427,6 +429,12 @@ pub struct SpectrographScene {
     /// Where the marked multi-resolution spectrum's windows change, drawn across the
     /// history too: its rows above a line update more often than those below.
     pub stitches: Vec<crate::stitch::Stitch>,
+    /// Shown alone, the caption's row, full width: a click there picks the measurement's
+    /// peak points (no level axis here to put them on; the cue says it is picked). `None`
+    /// without a caption, and in the split, whose legend above already picks.
+    pub caption_hit: Option<crate::legend::LegendHit>,
+    /// The caption carries the pick's cue.
+    pub picked_cue: Option<crate::trace::TraceKey>,
 }
 
 /// The caption's last words when a layout names the 3D view on a GPU without it.
@@ -692,6 +700,7 @@ pub fn spectrograph_scene(
             caption = full.clone();
         }
     }
+    let captioned = !own.is_empty();
     forms.extend([caption.clone(), own, String::new()]);
     // The note stays on every shortened form: it tells why the layout's 3D view is flat.
     if no_3d {
@@ -708,16 +717,35 @@ pub fn spectrograph_scene(
     }
     // The cursor readout wins the line above the plot when both do not fit; the caption
     // gives up its details first, its name last.
+    let picked_cue = sg
+        .map(|s| s.key)
+        .filter(|k| alone && captioned && view.peak_points.is_some_and(|p| p.key == *k));
+    let cue_w = if picked_cue.is_some() {
+        crate::legend::CUE_ROOM
+    } else {
+        0.0
+    };
     let room = cursor.as_ref().map_or(plot.w, |cur| {
         plot.w - canvas::text_width(&cur.text, theme.small_font_size) - 12.0
-    });
+    }) - cue_w;
+    let cue_color = traces
+        .iter()
+        .find(|t| picked_cue == Some(t.key))
+        .map_or(theme.text_dim, |t| t.color);
+    let caption_hit = crate::legend::caption_hit(
+        sg.map(|s| s.key).filter(|_| alone && captioned),
+        plot,
+        CAPTION_H,
+        picked_cue.map(|_| cue_color),
+        &mut c.overlay,
+    );
     let shown_caption = forms
         .into_iter()
         .find(|c| canvas::text_width(c, theme.small_font_size) <= room)
         .unwrap_or_default();
     c.base.labels.push(label(
         shown_caption,
-        [plot.x, plot.y - 3.0],
+        [plot.x + cue_w, plot.y - 3.0],
         anchor(HAlign::Left, VAlign::Bottom),
         theme.small_font_size,
         theme.text_dim,
@@ -773,6 +801,8 @@ pub fn spectrograph_scene(
         cursor,
         message,
         stitches,
+        caption_hit,
+        picked_cue,
     }
 }
 

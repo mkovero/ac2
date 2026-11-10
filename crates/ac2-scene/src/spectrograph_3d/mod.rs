@@ -26,13 +26,16 @@ use crate::spectrograph::SpectrographHistory;
 use crate::spectrum::{SpectrumTrace, offset_note};
 use crate::theme::Theme;
 use crate::time::Freshness;
+use crate::trace::TraceKey;
 use crate::view::{PlotChrome, ViewState};
 
 type V3 = [f64; 3];
 
 mod camera;
+mod points;
 mod scene;
 pub use camera::*;
+pub use points::PeakPoint3d;
 pub use scene::*;
 
 /// Floor half-width (frequency, x in −W … W): wider than deep keeps ten octaves readable

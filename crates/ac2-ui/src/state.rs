@@ -86,6 +86,8 @@ pub use programme::{MAX_METERED, Metered, ProgrammeUi, ballistic};
 mod meter_form;
 mod new_meas;
 mod panes;
+mod peak_points;
+pub use peak_points::PeakPick;
 mod queries;
 pub(crate) mod sessions_impl;
 mod target;
@@ -197,6 +199,9 @@ pub struct AppState {
     cam3d: Option<cam3d::CamNav>,
     /// When each 3D spectrograph's axes show: hover and the last interaction.
     axes3d: HashMap<PaneId, ac2_scene::spectrograph_3d::AxesReveal>,
+    /// Each pane's peak points pick ([`AppState::peak_points_of`]): app-local and unsaved,
+    /// kept apart from the layout, which is stored and rebuilt.
+    peak_points: HashMap<PaneId, PeakPick>,
     /// The 3D spectrograph's tier on this machine's GPU (Settings › 3D quality may override
     /// it); set by the app from the adapter. `None`: the GPU has no 3D view.
     pub auto_tier: Option<ac2_scene::primitives::SkylineTier>,
@@ -336,6 +341,7 @@ impl AppState {
             nav: FreqNav::new(FreqRange::default()),
             cam3d: None,
             axes3d: HashMap::new(),
+            peak_points: HashMap::new(),
             auto_tier: Some(ac2_scene::primitives::SkylineTier::Full),
             layout: Layout::default(),
             pane_area: DEFAULT_PANE_AREA,

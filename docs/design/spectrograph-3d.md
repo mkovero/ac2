@@ -30,7 +30,9 @@ wire. Never "waterfall": in acoustics that is a cumulative spectral decay plot.
 
 No cursor and no readout: which spike, at what depth, a pointer is over is ambiguous in a
 perspective without hidden lines, and a value that could belong to the row in front or
-behind is a misreadable readout. The 2D view, one G back, reads values.
+behind is a misreadable readout. The 2D view, one G back, reads values. The one value read
+here is a picked curve's **peak points**, placed on the front row where no depth is in
+doubt: a caption click picks them ([legend-peak-points.md](legend-peak-points.md)).
 
 ## The look
 
@@ -325,7 +327,7 @@ The spectrum scope's commands in the 3D scope:
 | start_stop (S), reset_average (R), next/prev_view (G, Shift+G), spectrograph_span (Shift+B) | bound, same keys | act on the measurement or the view |
 | offset (J), colour maps (palette) | in the palette and help, J bound | the offset moves the heights; the map colours them |
 | smooth_coarser/finer (K, Shift+K), smoothing presets | inert, unbound | the history is built from unsmoothed frames |
-| spectrum_style (B), peak_hold (P), next/prev peak and notch (Alt+P/N), cursor_mark / clear_mark (Alt+D) | inert, unbound | they act on the curve or the cursor, not drawn here |
+| spectrum_style (B), peak_hold (P), next/prev peak and notch (Alt+P/N), cursor_mark / clear_mark (Alt+D) | inert, unbound | they act on the curve or the cursor, not drawn here; peak points come from a caption click, not P ([legend-peak-points.md](legend-peak-points.md)) |
 | global Shift+←/→ (cursor), C (compare), Shift+T | inert, intercepted | no cursor and no compared curves in 3D |
 
 Commands bound in both scopes keep the same default keys (a test checks it). `keys.toml`
