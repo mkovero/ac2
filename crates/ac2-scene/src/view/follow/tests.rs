@@ -39,7 +39,7 @@ struct Sim {
 impl Sim {
     /// A pane framed on its first frame, as a first show is.
     fn fitted(first: Sample) -> Self {
-        Self::on(level::fit([first.floor, first.top]).expect("finite"))
+        Self::on(fit([first.floor, first.top]).expect("finite"))
     }
 
     fn on(r: Range) -> Self {
@@ -198,7 +198,7 @@ fn a_tone_over_a_pink_floor_stays_put_for_ten_minutes() {
             .collect()
     };
     let first = frame(&mut rng);
-    let mut sim = Sim::on(level::fit(first.iter().copied()).expect("finite"));
+    let mut sim = Sim::on(fit(first.iter().copied()).expect("finite"));
     for _ in 0..6000 {
         let v = frame(&mut rng);
         sim.frame(Sample::of([(&freqs[..], &v[..])]).expect("columns"));
@@ -231,7 +231,7 @@ fn narrowband_and_rta_pink_noise_each_land_on_their_target() {
             freqs.iter().map(|f| level(rng, *f) + gain).collect()
         };
         let first = frame(&mut rng, 0.0);
-        let mut sim = Sim::on(level::fit(first.iter().copied()).expect("finite"));
+        let mut sim = Sim::on(fit(first.iter().copied()).expect("finite"));
         let mut tops = Vec::new();
         for i in 0..600 {
             let v = frame(&mut rng, if i < 100 { 0.0 } else { 20.0 });
@@ -414,8 +414,9 @@ fn an_ease_is_monotonic_keeps_its_span_and_ends_on_the_grid() {
 }
 
 /// Fitted on a flat −110 dBFS floor (the fit's narrowest span), then music: up at once onto
-/// the music, then one widen once the slow window holds it; never a second in ten minutes,
-/// and no move narrows.
+/// the music (on so narrow a span its peaks may come within [`UP_AT`] once more), then one
+/// widen once the slow window holds it; nothing after that in ten minutes, and no move
+/// narrows.
 #[test]
 fn a_floor_fitted_pane_moves_up_then_widens_once() {
     let flat = Sample {
@@ -427,8 +428,12 @@ fn a_floor_fitted_pane_moves_up_then_widens_once() {
     for _ in 0..6000 {
         sim.frame(music(&mut rng, -12.0));
     }
-    assert_eq!(sim.whys(), vec![Why::Up, Why::Widen], "{:?}", sim.moves);
-    let mut span = level::fit([-110.0, -110.0]).expect("fit").span();
+    let whys = sim.whys();
+    assert_eq!(whys.first(), Some(&Why::Up), "{:?}", sim.moves);
+    assert_eq!(whys.last(), Some(&Why::Widen), "{:?}", sim.moves);
+    let ups = whys.iter().filter(|w| **w == Why::Up).count();
+    assert!(ups <= 2 && whys.len() == ups + 1, "{:?}", sim.moves);
+    let mut span = fit([-110.0, -110.0]).expect("fit").span();
     for (_, _, r) in &sim.moves {
         assert!(r.span() >= span, "{:?}", sim.moves);
         span = r.span();
@@ -489,4 +494,64 @@ fn a_widened_range_ends_on_its_own_grid() {
         }
     }
     assert!(checked > 100_000);
+}
+
+/// The up rule reads the window's maximum against [`UP_AT`] under the top: a peak just
+/// under that line moves nothing, one just over it moves the axis up at once, and the move
+/// leaves the maximum [`TOP_PAD`] under the new top or lower, within a step of it.
+#[test]
+fn up_moves_once_the_maximum_nears_the_top_and_leaves_its_headroom() {
+    let r = Range::new(-80.0, 0.0);
+    let line = r.hi - UP_AT * r.span();
+    let run = |top: f64| {
+        let mut f = Follow::default();
+        let mut t = 0.0;
+        while t < UP_WINDOW_S + 1.0 {
+            t += DT;
+            // One frame in thirty reaches `top`: a single peak is enough.
+            let s = Sample {
+                top: if (t / DT).round() as i64 % 30 == 0 {
+                    top
+                } else {
+                    -40.0
+                },
+                floor: -70.0,
+            };
+            f.push(t, s);
+            if let Some(m) = f.decide(t, r) {
+                return Some(m);
+            }
+        }
+        None
+    };
+    assert_eq!(run(line - 0.5), None);
+    let m = run(line + 0.5).expect("a move");
+    assert_eq!(m.why, Why::Up);
+    let target = m.to.hi - TOP_PAD * m.to.span();
+    assert!(line + 0.5 <= target, "{:?}", m.to);
+    assert!(line + 0.5 + nice(r.span() / 8.0) > target, "{:?}", m.to);
+}
+
+/// A fit leaves [`TOP_PAD`] of its span above the content's maximum, ends on its own grid,
+/// and holds the content: a first show or Shift+Home never sits the curves at [`UP_AT`].
+#[test]
+fn a_fit_leaves_the_headroom_on_its_own_grid() {
+    let on = |x: f64, step: f64| ((x / step).round() * step - x).abs() < 1e-6;
+    for top10 in (-1300..=100).step_by(3) {
+        for extent10 in (0..=1200).step_by(11) {
+            let top = f64::from(top10) / 10.0;
+            let floor = top - f64::from(extent10) / 10.0;
+            let r = fit([floor, (floor + top) / 2.0, top]).expect("finite");
+            if r.hi >= crate::view::LEVEL_LIMIT_HI || r.lo <= crate::view::LEVEL_LIMIT_LO {
+                continue;
+            }
+            let step = nice(r.span() / 8.0);
+            assert!(on(r.lo, step) && on(r.hi, step), "{floor} … {top}: {r:?}");
+            assert!(r.lo <= floor, "{floor} … {top}: {r:?}");
+            assert!(
+                top <= r.hi - TOP_PAD * r.span() + 1e-6,
+                "{floor} … {top}: {r:?}"
+            );
+        }
+    }
 }

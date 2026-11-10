@@ -41,7 +41,6 @@ from it.
 | follow move | — | untouched → Auto: `operator_levels` and the layout unchanged, nothing sent, nothing written |
 | zoom, pan, wheel, Ctrl+Home | set → Operator, layout sent | same |
 | **Shift+Home** | set → Operator (`hold_level`), layout sent | **changed:** fit, then cleared → **Auto**; the layout is sent once *without* that range. With following off: as today |
-| double-tap (touch) | — | as Shift+Home, no toast. With following off: as today's Shift+Home |
 | layout restored / own layout on row choice | per range: set if present, else cleared | same |
 | layout from another client | applied only while this app chose that row (`meas_layout.rs` header); set if it carries a range, else cleared | same, and now a rearm agrees with it. A kiosk's pinned pane never takes another client's layout, so it is never paused this way |
 
@@ -51,9 +50,10 @@ snapshot of it would freeze the very thing the operator asked to track. With fol
 Shift+Home stores it as today: no regression for a desk that turned following off. Ctrl+Home
 (reset to the default) stays Operator: a chosen range, not a framing.
 
-**Kiosk line** (for the ac2pi README in the sys repo): a range set by hand over VNC is
-Operator and stays until a double-tap on the plot; the double-tap makes it Auto, which
-`ui.toml` keeps, so the kiosk follows from then on, across reboots.
+**Kiosk line** (for the ac2pi README in the sys repo): leave a kiosk's spectrum ranges
+Auto (the default) and they follow; a range set by hand over VNC is Operator and stays until
+Shift+Home over VNC makes it Auto, which `ui.toml` keeps, across reboots. There is no touch
+gesture for it: following is a setting, on by default, not an action.
 
 ## The content statistic
 
@@ -86,9 +86,10 @@ and compared traces and only the shown band, both wrong here:
 
 Asymmetric, because a clipped curve is wrong now and a low one is only less legible:
 
-- **Up, fast:** the 80th percentile of the pane top over the last **3 s** above `hi`
-  (a fifth of the frames clipped). No lockout beyond needing 3 s of frames since the
-  previous move.
+- **Up, fast:** the *maximum* of the pane top over the last **3 s** above
+  `hi − 0.1·span`: a peak that near the top is about to leave the plot, so the axis moves
+  before anything clips (an 80th percentile above `hi`, the first rule, let the highs run
+  off the top on the rig). No lockout beyond needing 3 s of frames since the previous move.
 - **Down, slow:** the maximum of the pane top over the last **240 s** below
   `lo + 0.35·span`, and at least **60 s** since the previous move. A song gap, a speech
   break or a quiet verse never lasts that long; an idle mic does.
@@ -97,12 +98,16 @@ Asymmetric, because a clipped curve is wrong now and a low one is only less legi
   content no longer fits, whether it clips or is cut at the bottom. (Testing "top above
   `hi`" over the slow window could never hold: the up rule fires within 3 s.) The new
   range is `level::fit` of the window's median floor and maximum top, widened downward until
-  the extent fills at most **0.6** of it, so it does not re-trigger at once. Lockout as for
-  down. The follower never narrows a span (idle-mic result below).
-- **Target:** up puts the window's *maximum* at `hi − 0.2·span`, down puts it at or below
-  that; the shift is the axis's major tick step (`nice(span / 8)`, as `level::fit` rounds)
-  times the whole number nearest the target, rounded away from zero when that is zero, then
-  clamped to the level bounds. Labels end on the same grid lines; only the numbers change.
+  the extent fills at most **0.6** of it, so it does not re-trigger at once, then raised by
+  whole steps until the maximum has the **0.2·span** headroom below. Lockout as for down. The follower never narrows a span (idle-mic result below).
+- **Target:** up and down both put the window's *maximum* at `hi − 0.2·span` or below it,
+  within a step; the shift is the axis's major tick step (`nice(span / 8)`, as `level::fit`
+  rounds) times the fewest whole steps that do, at least one, then clamped to the level
+  bounds. Twice the up trigger's 0.1, so a move leaves room for the next louder passage.
+- **Every fit has the same headroom:** a first show, a refit (Shift+Home, a rearm, a group
+  joining) and a widen leave the content's maximum at least **0.2·span** under the top
+  (`follow::fit`: `level::fit`, then the top raised by whole steps of its own grid), so a
+  fit never sits the curves at the up trigger. Labels end on the same grid lines; only the numbers change.
 - **Ease:** 0.8 s, cosine in-out, on the range itself: curves, grid, spectrograph colours
   and 3D heights move together, every frame on one consistent range.
 - **Hands off:** no move while a pointer button is down or a drag is in progress, nor within
@@ -118,7 +123,7 @@ columns, so a slightly lower per-frame max), and frames either unaveraged or wit
 exponential power average (ac2's averaging is its own setting). Step `nice(span / 8)` as
 `level::fit`. Six 50 s commercial clips (−5 … −14 dBFS rms) loop into 3-minute songs at
 ±4 dB, gaps of pink room noise about 70 dB below. The pane starts on `level::fit` of its
-first frame. Constants as written above (up 80th percentile over 3 s, down 240 s,
+first frame. Constants as first written (up 80th percentile over 3 s, down 240 s,
 lockout 60 s, pad 0.2, squash 0.35, widen 0.8 → 0.6). Ten seeds each; "below" is the mean
 share of columns under `lo`, the content cut off at the bottom:
 
@@ -153,22 +158,13 @@ programme and a level step, before the constants are frozen in `ac2-scene`.
 
 ## Manual control, kiosk gesture
 
-An Operator slot never moves until Shift+Home or a double-tap makes it Auto. No timeout: a
-range that jumps back half an hour after a zoom on a detail is a surprise mid-tune.
-
-**Double-tap** on the plot, outside the legend (`row_at` hits excluded, as is the plate's own
-double-click): fits the level only (frequency untouched), makes the slot Auto, no toast.
-egui 0.36 counts a double click within 0.3 s and 6 px of the first
-(`InputOptions::max_double_click_delay`, `max_click_dist`): mouse-sized; a fingertip on a Pi
-touch panel drifts further. The pane keeps its own detector: two clicks within 0.4 s and
-24 logical px. The first tap already focused the pane and placed the cursor; the cursor state
-from before it is restored on the second, so a kiosk is left with no stray cursor. The 3D
-view the same; its camera keeps Home.
+An Operator slot never moves until Shift+Home makes it Auto. No timeout: a range that jumps
+back half an hour after a zoom on a detail is a surprise mid-tune. No gesture or key of its
+own: following is the setting (on by default), and a kiosk's ranges stay Auto.
 
 **Every view of the spectrum pane follows**, the 3D spectrograph included: its heights are
-the pane's range, so a move eases the skyline's heights with it. A double-tap on the 3D view
-is a tap, not an orbit (an orbit needs a drag), and makes the slot Auto; an orbit, tilt or
-dolly is pointer or key input on the pane and starts the hands-off time like any other.
+the pane's range, so a move eases the skyline's heights with it. An orbit, tilt or dolly is
+pointer or key input on the pane and starts the hands-off time like any other.
 
 ## Panes on one scale
 
@@ -177,11 +173,11 @@ side-by-side panes never end up a step apart. Once a frame, before drawing, as
 `refresh_spl_scales` does for the Leq columns (`scenes/spl_meters.rs`; a pane of another rig
 read with its rig swapped in):
 
-- **The group range** is `level::fit` over the union of the members' values. It is fitted
-  again when a member joins (a pane shows a curve, or turns Auto), on Shift+Home or a
-  double-tap on any member, and on a rearm of any member's measurement; a member leaving
+- **The group range** is `follow::fit` over the union of the members' values. It is fitted
+  again when a member joins (a pane shows a curve, or turns Auto), on Shift+Home on any
+  member, and on a rearm of any member's measurement; a member leaving
   keeps the range. Framing moves every member, so it waits out the hands-off time like a
-  move; Shift+Home or the double-tap is itself the input and waits only for a button held
+  move; Shift+Home is itself the input and waits only for a button held
   on a member.
 - **Following:** the group's top per frame is the maximum of its members' tops (each the
   max over its curves), over the members whose frames still arrive (newest within the
@@ -252,11 +248,7 @@ pane's axis for the history's scale), its height post and ceiling line labelled.
   panes on the new range.
 - **Shift+Home on one member** refits the whole group; hands off on one member holds the
   other's move too.
-- **Double-tap** fits level only, leaves the cursor as before the first tap, sends the layout
-  without the range, marks `prefs_dirty` (ui.toml drops the range); a tap pair on a legend
-  row does nothing of the kind. The 0.4 s / 24 px rule is checked by hand on the CM4 kiosk
-  panel before it ships.
-- **Setting off:** nothing moves; Shift+Home and double-tap make the slot Operator as today.
+- **Setting off:** nothing moves; Shift+Home makes the slot Operator as today.
 - **Frequency zoom:** the same move as unzoomed.
 - **Daemon incarnation change:** the old history moves nothing.
 - **3D view:** a step moves the range and the skyline's heights span the moved range.

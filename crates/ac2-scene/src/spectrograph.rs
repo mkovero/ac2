@@ -417,7 +417,7 @@ impl SpectrographHistory {
 /// What the spectrograph shows: the history of the pane's measurement and how to read it.
 #[derive(Clone, Debug)]
 pub struct SpectrographInput<'a> {
-    /// The measurement's live curve: what a click on the caption (shown alone) picks.
+    /// The measurement's live curve: what its legend row (shown alone) picks.
     pub key: crate::trace::TraceKey,
     pub history: &'a SpectrographHistory,
     pub name: String,
@@ -470,11 +470,14 @@ pub struct SpectrographScene {
     /// Where the marked multi-resolution spectrum's windows change, drawn across the
     /// history too: its rows above a line update more often than those below.
     pub stitches: Vec<crate::stitch::Stitch>,
-    /// Shown alone, the caption's row, full width: a click there picks the measurement's
-    /// peak points (no level axis here to put them on; the cue says it is picked). `None`
-    /// without a caption, and in the split, whose legend above already picks.
-    pub caption_hit: Option<crate::legend::LegendHit>,
-    /// The caption carries the pick's cue.
+    /// Shown alone, the legend above the caption as drawn: the measurement's curve, named
+    /// and tagged as in the spectrum's legend. Empty in the split, whose spectrum has the
+    /// legend, and in traces only.
+    pub legend_shown: Vec<String>,
+    /// Where its row is: a click there picks the measurement's peak points (no level axis
+    /// here to put them on; the row's cue says it is picked).
+    pub legend_hits: Vec<crate::legend::LegendHit>,
+    /// The legend row drawn with the pick's cue.
     pub picked_cue: Option<crate::trace::TraceKey>,
 }
 
@@ -518,11 +521,23 @@ pub fn spectrograph_scene(
     let alone = view.spectrum.mode == SpectrumMode::Spectrograph || no_3d;
     // The colour bar sits right of the plots; a column neighbour may reserve more.
     let right = crate::freq_column::right(RIGHT_MARGIN, view);
+    let mut legend = None;
     let (spectrum, mut layers, banners, top) = if alone {
         let mut c0 = Canvas::new(size, theme);
         let plot_w = (size.width - MARGINS.left - right).max(1.0);
         let strip = canvas::banner_strip(&mut c0, status, MARGINS.left, plot_w, size, theme);
-        let top = strip.rect.bottom() + MARGINS.top;
+        let rows = legend_rows(
+            &mut c0.overlay,
+            traces,
+            sg.map(|s| s.key),
+            view,
+            strip.rect.bottom(),
+            plot_w,
+            size.height - strip.rect.bottom() - MARGINS.top - CAPTION_H - MARGINS.bottom,
+            theme,
+        );
+        let top = strip.rect.bottom() + rows.as_ref().map_or(0.0, |r| r.rect.h) + MARGINS.top;
+        legend = rows;
         (None, c0.into_scene(size).layers, strip.rows, top)
     } else {
         let top_h = ((size.height - PANE_GAP) * SPECTRUM_SHARE).floor().max(1.0);
@@ -661,9 +676,9 @@ pub fn spectrograph_scene(
             if let Some(unit) = s.history.unit_noted() {
                 caption.push_str(&format!(" · {unit}"));
             }
-            // In the split the spectrum's legend tags the curve; alone, the caption does.
+            // The legend above tags the curve; without one (traces only), the caption does.
             let tag = match s.freshness {
-                Some(f) if alone => f.tag(),
+                Some(f) if alone && legend.is_none() => f.tag(),
                 Some(f) if f.is_stopped() => f.tag(),
                 _ => None,
             };
@@ -743,7 +758,6 @@ pub fn spectrograph_scene(
             caption = full.clone();
         }
     }
-    let captioned = !own.is_empty();
     forms.extend([caption.clone(), own, String::new()]);
     // The note stays on every shortened form: it tells why the layout's 3D view is flat.
     if no_3d {
@@ -760,35 +774,16 @@ pub fn spectrograph_scene(
     }
     // The cursor readout wins the line above the plot when both do not fit; the caption
     // gives up its details first, its name last.
-    let picked_cue = sg
-        .map(|s| s.key)
-        .filter(|k| alone && captioned && view.peak_points.is_some_and(|p| p.key == *k));
-    let cue_w = if picked_cue.is_some() {
-        crate::legend::CUE_ROOM
-    } else {
-        0.0
-    };
     let room = cursor.as_ref().map_or(plot.w, |cur| {
         plot.w - canvas::text_width(&cur.text, theme.small_font_size) - 12.0
-    }) - cue_w;
-    let cue_color = traces
-        .iter()
-        .find(|t| picked_cue == Some(t.key))
-        .map_or(theme.text_dim, |t| t.color);
-    let caption_hit = crate::legend::caption_hit(
-        sg.map(|s| s.key).filter(|_| alone && captioned),
-        plot,
-        CAPTION_H,
-        picked_cue.map(|_| cue_color),
-        &mut c.overlay,
-    );
+    });
     let shown_caption = forms
         .into_iter()
         .find(|c| canvas::text_width(c, theme.small_font_size) <= room)
         .unwrap_or_default();
     c.base.labels.push(label(
         shown_caption,
-        [plot.x + cue_w, plot.y - 3.0],
+        [plot.x, plot.y - 3.0],
         anchor(HAlign::Left, VAlign::Bottom),
         theme.small_font_size,
         theme.text_dim,
@@ -844,9 +839,50 @@ pub fn spectrograph_scene(
         cursor,
         message,
         stitches,
-        caption_hit,
-        picked_cue,
+        legend_shown: legend.as_ref().map_or_else(Vec::new, |l| l.shown.clone()),
+        legend_hits: legend.as_ref().map_or_else(Vec::new, |l| l.hits.clone()),
+        picked_cue: legend.and_then(|l| l.picked_cue),
     }
+}
+
+/// The legend rows of a spectrograph shown alone, from `y` across `width`, over the one
+/// curve it draws (`key`'s, found in `traces`): its name and tags as the spectrum's legend
+/// has them, and a click on it picks its peak points as there. `None` without that curve,
+/// and in traces only (T), which hides it as it hides the other decorations. `free`: the
+/// pane's height for plot and legend.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn legend_rows(
+    layer: &mut crate::primitives::Layer,
+    traces: &[SpectrumTrace<'_>],
+    key: Option<crate::trace::TraceKey>,
+    view: &ViewState,
+    y: f32,
+    width: f32,
+    free: f32,
+    theme: &Theme,
+) -> Option<crate::spectrum::LegendStrip> {
+    if view.chrome == crate::view::PlotChrome::Bare {
+        return None;
+    }
+    let drawn: Vec<SpectrumTrace<'_>> = traces
+        .iter()
+        .filter(|t| Some(t.key) == key)
+        .cloned()
+        .collect();
+    if drawn.is_empty() {
+        return None;
+    }
+    let strip = crate::spectrum::legend_strip(
+        layer,
+        &drawn,
+        view.peak_points.map(|p| p.key),
+        MARGINS.left,
+        y,
+        width,
+        free,
+        theme,
+    );
+    (!strip.shown.is_empty()).then_some(strip)
 }
 
 #[cfg(test)]

@@ -38,10 +38,10 @@ mod units;
 pub use draw::spectrum_scene;
 pub(crate) use draw::spectrum_scene_in;
 pub use legend::caption_forms;
-use legend::{
-    LEGEND_MAX_ROWS, LEGEND_ROW, LEGEND_SHARE, SWATCH_GAP, SWATCH_W, entry_width, legend_entry,
-    legend_layout, unit_forms,
-};
+use legend::unit_forms;
+#[cfg(test)]
+use legend::{LEGEND_ROW, SWATCH_GAP};
+pub(crate) use legend::{LegendStrip, legend_strip};
 pub use mark::jump;
 pub use points::PeakLabel;
 pub use units::{

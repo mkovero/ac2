@@ -216,13 +216,12 @@ fn build_scene(
             let sky = &mut kept.1;
             let motion = (st.axes3d_alpha(id), st.scroll_lead(id, now.instant));
             let s = scenes::spectrograph_3d(st, id, sky, tier, motion, theme, vp, now);
-            // No legend here: the caption, naming the measurement, picks its points.
-            legend_hits.extend(s.caption_hit);
+            legend_hits = s.legend_hits.clone();
             (s.scene, Axes::default())
         }
         PaneKind::Spectrum if view.modes.spectrum.spectrograph() => {
             let s = scenes::spectrograph(st, id, theme, vp, now);
-            legend_hits.extend(s.caption_hit);
+            legend_hits = s.legend_hits.clone();
             if let Some(sp) = &s.spectrum {
                 plates = sp.plates();
                 legend_hits = sp.legend_hits.clone();

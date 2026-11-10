@@ -228,24 +228,6 @@ pub(super) fn navigate(
         app.dispatch(Msg::LegendPick(id, key));
         return;
     }
-    // A tap on the plot (not on a legend row or a plate); the second of two close together
-    // fits the level axis and is that alone: no focus, no cursor. The 3D view's taps too:
-    // a tap is no drag, so it never orbits.
-    if legend == LegendTook::Nothing
-        && axes.ir.is_none()
-        && app.state.level_range(id).is_some()
-        && resp.clicked()
-        && let Some(p) = resp.interact_pointer_pos()
-    {
-        app.dispatch(Msg::PaneTap {
-            pane: id,
-            x: p.x,
-            y: p.y,
-        });
-        if app.state.tap_was_double() {
-            return;
-        }
-    }
     if resp.clicked() || resp.drag_started() {
         app.dispatch(Msg::FocusPane(id));
     }

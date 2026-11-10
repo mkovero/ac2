@@ -563,7 +563,6 @@ impl AppState {
             // A click in a pane gives it the keyboard; the selection stays on the row the
             // operator chose (the pane's keys act on what it shows).
             Msg::FocusPane(p) => self.layout.set_focus(p),
-            Msg::PaneTap { pane, x, y } => self.pane_tap(pane, x, y),
             Msg::PanePointer { pane, held } => self.pane_pointer(pane, held),
             Msg::InputPick(c) => {
                 self.rig.input_pick = (self.rig.input_pick != Some(c)).then_some(c);

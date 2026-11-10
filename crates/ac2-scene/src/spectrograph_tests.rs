@@ -822,31 +822,93 @@ fn the_3d_view_on_a_gpu_without_it_is_the_spectrograph_with_a_note() {
     assert!(shown(&none).contains(&NO_3D.to_string()));
 }
 
-/// Alone, the caption's row picks the measurement's peak points and shows the pick's cue
-/// (no points: there is no level axis to put them on); in the split it is inert, the
-/// legend above picks.
+/// Alone, the spectrograph has the spectrum's legend over the curve it draws (the stored
+/// one beside it is not drawn here, so it has no row): its row picks the measurement's peak
+/// points and carries the pick's cue, the caption picks nothing, and traces only (T) hides
+/// it. In the split the spectrum part's legend is the only one.
 #[test]
-fn the_caption_alone_picks_and_the_split_leaves_it_to_the_legend() {
+fn alone_the_legend_row_picks_and_the_split_leaves_it_to_the_spectrum() {
     let mut h = SpectrographHistory::new(30);
     let mut f = Feed::new(&log_bins());
     f.push(&mut h, T0, -40.0);
     let key = crate::trace::TraceKey::Live(ac2_proto::units::MeasId(1));
-    let mut view = ViewState {
-        peak_points: Some(crate::view::PeakPoints {
-            key,
-            list: false,
-            named: false,
-        }),
-        ..ViewState::default()
+    let trace = |key, name: &str| SpectrumTrace {
+        key,
+        name: name.into(),
+        color: crate::primitives::Color::WHITE,
+        freqs: &[],
+        edges: &[],
+        level: &[],
+        drawn: None,
+        validity: None,
+        peak: None,
+        tracked: None,
+        scale: LevelScale::Dbfs,
+        quantity: crate::spectrum::Quantity::Tone,
+        bin_hz: None,
+        caption: String::new(),
+        freshness: Some(crate::time::Freshness::Stopped { age_s: 1.0 }),
+        offset_db: 0.0,
+        selected: false,
+        compared: false,
+        bands: None,
+        style: ac2_proto::model::SpectrumStyle::Line,
+        layer: 0,
     };
+    let stored = crate::trace::TraceKey::Stored(ac2_proto::units::TraceId(7));
+    let traces = [trace(key, "Main"), trace(stored, "Main S1")];
+    let input = SpectrographInput {
+        key,
+        history: &h,
+        name: "Main".into(),
+        range: Range::new(-100.0, 0.0),
+        offset_db: 0.0,
+        freshness: None,
+        colours: Colormap::default(),
+        lead_slots: 0.0,
+    };
+    let mut view = ViewState::default();
     view.spectrum.mode = SpectrumMode::Spectrograph;
-    let s = scene_of(&h, &view);
-    let hit = s.caption_hit.expect("a hit");
+    let size = Viewport {
+        width: 800.0,
+        height: 500.0,
+    };
+    let at = |view: &ViewState| {
+        spectrograph_scene(
+            &traces,
+            &Status::default(),
+            Some(&input),
+            view,
+            &Theme::dark(),
+            size,
+        )
+    };
+    let s = at(&view);
+    assert_eq!(s.legend_shown, ["Main · stopped"]);
+    let drawn = s.scene.layers.iter().flat_map(|l| &l.labels);
+    assert!(drawn.into_iter().any(|l| l.text == "Main · stopped"));
+    let [hit] = s.legend_hits[..] else {
+        panic!("one row: {:?}", s.legend_hits)
+    };
     assert_eq!(hit.key, key);
-    assert_eq!((hit.rect.x, hit.rect.w), (s.plot.x, s.plot.w));
-    assert!((hit.rect.bottom() - s.plot.y).abs() < 1e-3);
-    assert_eq!(s.picked_cue, Some(key));
+    assert!(hit.rect.bottom() < s.plot.y - 16.0, "above the caption");
+    assert_eq!(s.picked_cue, None);
+    view.peak_points = Some(crate::view::PeakPoints {
+        key,
+        list: false,
+        named: false,
+    });
+    assert_eq!(at(&view).picked_cue, Some(key));
+    // Traces only: no legend, no hit.
+    view.chrome = crate::view::PlotChrome::Bare;
+    let bare = at(&view);
+    assert!(bare.legend_shown.is_empty() && bare.legend_hits.is_empty());
+    assert_eq!(bare.picked_cue, None);
+    assert!(bare.plot.y < s.plot.y, "the plot takes the legend's room");
+    view.chrome = crate::view::PlotChrome::Full;
     view.spectrum.mode = SpectrumMode::Split;
-    let s = scene_of(&h, &view);
-    assert_eq!((s.caption_hit, s.picked_cue), (None, None));
+    let s = at(&view);
+    assert!(s.legend_hits.is_empty() && s.legend_shown.is_empty());
+    let sp = s.spectrum.expect("the spectrum part");
+    assert_eq!(sp.legend_hits.len(), 2);
 }

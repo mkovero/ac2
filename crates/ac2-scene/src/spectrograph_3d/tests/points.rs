@@ -1,4 +1,4 @@
-//! Peak points on the newest row, and the caption that picks them.
+//! Peak points on the newest row, and the legend row that picks them.
 
 use super::*;
 use crate::spectrum::Quantity;
@@ -187,16 +187,26 @@ fn points_show_at_rest_and_traces_only_hides_them() {
 }
 
 #[test]
-fn the_caption_row_picks_and_carries_the_cue() {
+fn the_legend_row_picks_and_carries_the_cue() {
     let b = flat_room();
     let s = scene(&b, &[], &picked(PlotChrome::Full), 0.0);
-    let hit = s.caption_hit.expect("a hit");
+    // The spectrum's legend row, above the caption; it stays at rest with the axes hidden.
+    assert_eq!(s.legend_shown, ["Main L"]);
+    let [hit] = s.legend_hits[..] else {
+        panic!("one row: {:?}", s.legend_hits)
+    };
     assert_eq!(hit.key, KEY);
-    // The whole row above the plot, full width.
-    assert_eq!((hit.rect.x, hit.rect.w), (s.plot.x, s.plot.w));
-    assert!((hit.rect.bottom() - s.plot.y).abs() < 1e-3);
+    assert!(hit.rect.bottom() < s.plot.y - 16.0, "above the caption");
     assert_eq!(s.picked_cue, Some(KEY));
-    // No measurement, no caption: nothing to hit.
+    let not_picked = scene(&b, &[], &ViewState::default(), 0.0);
+    assert_eq!(not_picked.legend_hits.len(), 1);
+    assert_eq!(not_picked.picked_cue, None);
+    // Traces only hides it, as it hides the points.
+    let bare = scene(&b, &[], &picked(PlotChrome::Bare), 1.0);
+    assert!(bare.legend_shown.is_empty() && bare.legend_hits.is_empty());
+    assert_eq!(bare.picked_cue, None);
+    assert!(bare.plot.y < s.plot.y, "the plot takes the legend's room");
+    // No measurement: no legend.
     let none = spectrograph_3d_scene(
         &[],
         &Status::default(),
@@ -209,5 +219,5 @@ fn the_caption_row_picks_and_carries_the_cue() {
         },
     );
     assert!(none.caption.is_empty());
-    assert_eq!(none.caption_hit, None);
+    assert!(none.legend_hits.is_empty());
 }

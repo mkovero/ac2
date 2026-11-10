@@ -266,7 +266,7 @@ impl AppState {
         self.spectrum_hold.insert(pane, SpectrumHold { shown });
     }
 
-    /// Pane `pane`'s level axis frames `fit`, as Shift+Home and a double-tap do. A spectrum
+    /// Pane `pane`'s level axis frames `fit`, as Shift+Home does. A spectrum
     /// pane whose axis follows its content stays automatic: a fit means "frame what is
     /// shown", which following keeps doing, and a stored snapshot of it would freeze the
     /// very thing asked to track; its group frames again with it. Otherwise the fit is the
@@ -353,7 +353,7 @@ impl AppState {
                     self.change_level(p, |_| d);
                 }
             }
-            C::LevelFit => match level::fit(self.level_values(p)) {
+            C::LevelFit => match self.level_fit(p) {
                 Some(fit) => {
                     self.fit_level(p, fit);
                     self.toast(format!(
@@ -375,7 +375,7 @@ impl AppState {
             if self.layout.kind(pane) != kind {
                 continue;
             }
-            if let Some(fit) = level::fit(self.level_values(pane)) {
+            if let Some(fit) = self.level_fit(pane) {
                 // Framed for the new curves: no longer a range the operator set.
                 let scale = crate::scenes::spectrum_scale(self, pane);
                 if let Some(s) = LevelSlot::of(kind, scale) {
@@ -414,7 +414,7 @@ impl AppState {
                 self.spectrum_hold.insert(pane, SpectrumHold { shown });
                 continue;
             }
-            let Some(fit) = level::fit(self.level_values(pane)) else {
+            let Some(fit) = self.level_fit(pane) else {
                 continue;
             };
             if let Some(s) = slot {
@@ -487,6 +487,18 @@ impl AppState {
             return;
         }
         self.fit_panes(PaneKind::Distortion);
+    }
+
+    /// What a fit frames pane `pane`'s level axis to (Shift+Home, a first show): a
+    /// spectrum pane's with the room above its content a follow move leaves
+    /// ([`ac2_scene::view::follow::fit`]), so its axis does not move up at once.
+    pub(in crate::state) fn level_fit(&self, pane: PaneId) -> Option<Range> {
+        let values = self.level_values(pane);
+        if self.layout.kind(pane) == PaneKind::Spectrum {
+            ac2_scene::view::follow::fit(values)
+        } else {
+            level::fit(values)
+        }
     }
 
     /// Every level pane `pane` draws in the shown frequency range, as drawn (offsets

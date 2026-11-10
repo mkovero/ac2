@@ -30,7 +30,7 @@ feature is called "peak points".
   *traces only* keeps them.
 - `AppState.view` is app-wide. `own_view` (`state/panes/ops.rs`) copies each pane's own
   values (modes, chrome, plates) into it from `panes::View`. The 3D view keeps per-pane
-  state that is not layout in side maps keyed by `PaneId` (`axes3d`). Its caption row
+  state that is not layout in side maps keyed by `PaneId` (`axes3d`). Its legend row
   names the one measurement whose history it draws.
 
 ## Where the pick lives
@@ -84,7 +84,7 @@ kiosk, and the tap that made them appear is the one that takes them away. Each p
 at most one pick, and a pane never has two curves with peak marks.
 
 The picked row gets a cue: the point's small box before its name, in the curve's colour.
-The 3D caption gets the same cue, and both get the hand cursor. A narrow pane never folds
+The spectrographs' legend row gets the same cue, and every row gets the hand cursor. A narrow pane never folds
 the picked row into `+N more`: the layout keeps it in the first row, so it can always be
 seen and tapped.
 
@@ -138,14 +138,16 @@ and one rule set mean a point from a click and a ranked box from P are the same 
 ## Every G view
 
 - **Spectrum** and **Split** (whose top is the spectrum) draw the points on the curve.
-- In **Split**, the spectrograph's caption under the spectrum is inert, because the
-  legend above it already picks.
-- The **flat Spectrograph** and the **3D spectrograph** have no legend. Their caption,
-  which names the pane's measurement, is the click target. A click or tap anywhere on the
-  caption's row, full width, sends `LegendPick(pane, Live(meas))`. When the caption is empty
-  (no measurement) there is no hit. The flat spectrograph draws no points, because it has
-  no level axis to put them on. The cue in its caption shows the pick, and one G to the
-  spectrum shows the points. In 3D they sit on the front row (below).
+- In **Split**, the spectrum's legend above is the pane's only legend; the spectrograph's
+  caption under it is inert.
+- The **flat Spectrograph** and the **3D spectrograph** have the spectrum's legend strip
+  above their caption, built by the same scene code (`spectrum::legend_strip`), over the
+  one curve they draw: the pane's measurement's live curve, named and tagged as in the
+  spectrum. A click or tap on its row sends `LegendPick(pane, Live(meas))`, as in 2D; the
+  caption picks nothing. Without a measurement, or at *traces only*, there is no row. The
+  flat spectrograph draws no points, because it has no level axis to put them on. The cue
+  on its row shows the pick, and one G to the spectrum shows the points. In 3D they sit on
+  the front row (below).
 - G keeps the pick, because it belongs to the pane and not to the view.
 
 ## Look
@@ -216,12 +218,12 @@ because a cue that changes nothing would look like a fault.
 | click row X, nothing picked | X | X | X's points (ranks + list when own mode tracks) |
 | click row Y, X picked | Y | Y | Y's points; the tracked curve is Y |
 | click picked row X | none | X | no points; the tracked curve is the pane's own |
-| click caption (flat / 3D) | toggles the pane's measurement | as a legend click | 3D front-row points; flat: cue only |
+| click the legend row (flat / 3D) | toggles the pane's measurement | as a legend click | 3D front-row points; flat: cue only |
 | G / Shift+G | kept | kept | the same pick in the next view |
 | P (own measurement's mode) | kept | — | list and ranks on or off; points otherwise |
 | T → traces only | kept | — | no peak mark of any kind |
 | X stale or stopped | kept | — | dimmed, from its newest frame |
-| X has no data yet (still on the pane) | kept | — | nothing; with no legend row yet, the cue shows only on the flat / 3D caption |
+| X has no data yet (still on the pane) | kept | — | nothing; the cue shows on the flat / 3D legend row only once the curve has one |
 | X unticked (C), hidden (A), replaced by a drop, rig drop-down on an Active pane | dropped | as today | the pane's own curve tracked |
 | pane closed, `install`, undo / redo | kept only if the pane is still a leaf and X is still on it (membership) | — | — |
 | `set_prefs` (stored layout) | cleared | — | — |
@@ -240,8 +242,8 @@ Scene first (`ac2-scene`, headless text asserts):
 - `spectrograph_3d/tests/scene.rs`: points lie on the sliding front row, inside the plot.
   A point is clamped to its cell's spike top and its label keeps the peak's value. An
   empty cell or a message gives no point. Points show at alpha 0 at *full* and none show
-  at *traces only* while revealed. The caption hit spans the row, and there is none when
-  the caption is empty.
+  at *traces only* while revealed. The legend row picks and carries the cue, at rest too;
+  there is none at *traces only* or without a measurement.
 - `spectrum/tests/` legend: the picked entry stays out of `+N more` and shows the cue.
 - Transfer scene: *traces only* hides the ▲/▼ marks (the existing assertion flips).
 
@@ -282,26 +284,25 @@ No new key, so the key tables and hint lines are unchanged.
   and before any data there are none ("no data yet"). A capture of a multi-resolution
   spectrum gets peak points across its whole range; its live curve skips the unresolved
   ranges.
-- *Spectrograph* and *3D spectrograph*: a click or tap on the caption picks the
+- *Spectrograph* and *3D spectrograph*: a click or tap on the legend row picks the
   measurement. In 3D the points sit on the front row. Rework the "no cursor" bullet.
 - *Min / max tracking*: the picked curve, else the pane's own; *traces only* hides the
   marks.
 - Help (`view/help.rs`): a mouse row beside `PLATE_MOUSE`, "Click legend row: peak points;
-  again: clear". In `Scope::Spectrograph3d` and for the flat spectrograph, "Click caption:
-  peak points".
+  again: clear", in `Scope::Spectrograph3d` too.
 - `docs/design/spectrograph-3d.md`: its "No cursor" paragraph and P row point here.
 
 ## As built
 
 Where the implementation differs from the text above, and why:
-- **Cue.** The hollow box is drawn centred on the legend row's swatch (and before a
-  caption's text, which shifts right to make room), not in extra width beside it: a legend
+- **Cue.** The hollow box is drawn centred on the legend row's swatch, not in extra width
+  beside it: a legend
   row keeps its width, so a pick never changes which entries fit before `+N more`.
 - **2D plates.** A point's label sits on the plot background colour at the axis plates'
   alpha with the theme's text colour, not on the 3D field's dark plate: in a light theme a
   dark plate with dark text would not read. The 3D view keeps the dark plate and the dark
   theme's text, since its field is dark in every theme.
-- **3D points** show only when the pick is the pane's own measurement (the caption's); the
+- **3D points** show only when the pick is the pane's own measurement (its legend row's); the
   3D view draws no compared curve, so another pick has nothing to stand on.
 - **Transfer.** The pick chooses min / max's curve only; the mark readout and the cursor
   jumps (Alt+P/N/D) still follow the selection, as before.
@@ -311,9 +312,11 @@ Where the implementation differs from the text above, and why:
   with no previous incarnation to compare, so `reborn` is false. While a rig's link is down
   (no mirror) membership is unknown and the pick waits, which is how a reconnect to the same
   daemon keeps it.
-- **Help.** The caption row reads "Click caption: Spectrograph peak points; again: clear",
-  so its title differs from the legend row's in the spectrum scope, which lists both (that
-  scope covers the flat spectrograph).
+- **Help.** One row, "Click legend row: Peak points; again: clear", in the transfer,
+  spectrum (which covers the flat spectrograph) and 3D scopes.
+- **Spectrographs.** First built with the caption as the click target (no legend); the
+  operator missed the legend rows there, so both spectrographs now carry the spectrum's
+  legend strip and the caption is text only.
 - **Test files.** The scene tests live in `spectrum/tests/points.rs` and
   `spectrograph_3d/tests/points.rs`; the reducer tests in
   `state/tests/meas_display/peak_points.rs` and `state/tests/rigs/rig_peak_points.rs`; the

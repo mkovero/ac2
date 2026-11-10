@@ -194,3 +194,97 @@ pub(super) fn legend_layout(
         kept.pop();
     }
 }
+
+/// The legend rows as drawn ([`legend_strip`]).
+pub(crate) struct LegendStrip {
+    /// One entry per curve, in drawing order.
+    pub entries: Vec<LegendEntry>,
+    /// The entry texts as drawn, shortened to fit (`+2 more` when entries do not).
+    pub shown: Vec<String>,
+    /// The band the rows take; zero height without one.
+    pub rect: Rect,
+    /// Where each drawn entry is, for a click to pick its curve's peak points.
+    pub hits: Vec<crate::legend::LegendHit>,
+    /// The entry drawn with the pick's cue.
+    pub picked_cue: Option<TraceKey>,
+}
+
+/// The legend of `traces` in rows `width` wide from `x`, `y` onto `layer`, the first row a
+/// small gap below `y` (taken out of the plot's top margin: what is below starts `rect.h`
+/// lower), taking at most [`LEGEND_SHARE`] of `free` (the pane's height for plot and
+/// legend) and [`LEGEND_MAX_ROWS`]: the spectrum's legend, and the spectrographs' over the
+/// one curve they draw, so a row reads and picks the same in every view.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn legend_strip(
+    layer: &mut crate::primitives::Layer,
+    traces: &[SpectrumTrace<'_>],
+    picked: Option<TraceKey>,
+    x: f32,
+    y: f32,
+    width: f32,
+    free: f32,
+    theme: &Theme,
+) -> LegendStrip {
+    let font = theme.small_font_size;
+    let entries: Vec<LegendEntry> = traces.iter().map(legend_entry).collect();
+    let max_rows =
+        ((free * LEGEND_SHARE / LEGEND_ROW).floor().max(0.0) as usize).min(LEGEND_MAX_ROWS);
+    let picked = picked.and_then(|k| traces.iter().position(|t| t.key == k));
+    let placed = legend_layout(&entries, width, max_rows, font, picked);
+    let rows = placed.iter().map(|p| p.1 + 1).max().unwrap_or(0);
+    let rect = Rect::new(
+        x,
+        y + if rows > 0 { 4.0 } else { 0.0 },
+        width,
+        rows as f32 * LEGEND_ROW,
+    );
+    let mut shown = Vec::with_capacity(placed.len());
+    let mut hits = Vec::with_capacity(placed.len());
+    let mut picked_cue = None;
+    for (i, row, ex, text) in placed {
+        let y = rect.y + (row as f32 + 0.5) * LEGEND_ROW;
+        let x = rect.x + ex;
+        if let Some(e) = i.and_then(|i| entries.get(i)) {
+            hits.push(crate::legend::LegendHit {
+                key: e.key,
+                rect: Rect::new(
+                    x,
+                    y - LEGEND_ROW / 2.0,
+                    entry_width(&text, font),
+                    LEGEND_ROW,
+                ),
+            });
+        }
+        let (tx, color) = match i.and_then(|i| traces.get(i).zip(entries.get(i))) {
+            Some((t, e)) => {
+                let a = if e.stale { theme.stale_alpha } else { 1.0 };
+                let color = t.color.with_alpha(a);
+                crate::tf::legend_swatch(layer, x, y, SWATCH_W, color, e.selected, None, theme);
+                if i == picked {
+                    crate::legend::pick_cue(layer, x + SWATCH_W / 2.0, y, color, None);
+                    picked_cue = Some(e.key);
+                }
+                (
+                    x + SWATCH_W + SWATCH_GAP,
+                    if e.stale { theme.text_dim } else { theme.text },
+                )
+            }
+            None => (x, theme.text_dim),
+        };
+        layer.labels.push(label(
+            text.clone(),
+            [tx, y],
+            anchor(HAlign::Left, VAlign::Center),
+            font,
+            color,
+        ));
+        shown.push(text);
+    }
+    LegendStrip {
+        entries,
+        shown,
+        rect,
+        hits,
+        picked_cue,
+    }
+}

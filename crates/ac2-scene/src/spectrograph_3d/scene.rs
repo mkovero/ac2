@@ -1,4 +1,4 @@
-//! The 3D spectrograph scene: the skyline primitive, floor, glow, labels and caption.
+//! The 3D spectrograph scene: the skyline primitive, floor, glow, labels, legend and caption.
 
 use super::*;
 
@@ -6,7 +6,7 @@ use super::*;
 /// how to see it.
 #[derive(Clone, Debug)]
 pub struct Spectrograph3dInput<'a> {
-    /// The measurement's live curve: what a click on the caption picks.
+    /// The measurement's live curve: what a click on its legend row picks.
     pub key: TraceKey,
     pub history: &'a SpectrographHistory,
     /// Updated for this history, the pane's frequency span and `tier`.
@@ -63,10 +63,12 @@ pub struct Spectrograph3dScene {
     pub view_proj: ViewProj,
     /// The picked measurement's peak points on the newest row (loudest first).
     pub points: Vec<super::PeakPoint3d>,
-    /// The caption's row, full width: a click there picks the measurement's peak points.
-    /// `None` without a caption.
-    pub caption_hit: Option<crate::legend::LegendHit>,
-    /// The caption carries the pick's cue: its measurement is the pane's pick.
+    /// The legend above the caption as drawn: the measurement's curve, named and tagged as
+    /// in the spectrum's legend. Empty without a measurement and in traces only.
+    pub legend_shown: Vec<String>,
+    /// Where its row is: a click there picks the measurement's peak points.
+    pub legend_hits: Vec<crate::legend::LegendHit>,
+    /// The legend row drawn with the pick's cue: its measurement is the pane's pick.
     pub picked_cue: Option<TraceKey>,
 }
 
@@ -238,7 +240,18 @@ pub fn spectrograph_3d_scene(
     let mut c0 = Canvas::new(size, theme);
     let plot_w = (size.width - MARGINS.left - right).max(1.0);
     let strip = canvas::banner_strip(&mut c0, status, MARGINS.left, plot_w, size, theme);
-    let top = strip.rect.bottom() + MARGINS.top;
+    // The legend row is no axis: it stays at rest, as the points it picks do.
+    let legend = crate::spectrograph::legend_rows(
+        &mut c0.overlay,
+        traces,
+        sg.map(|s| s.key),
+        view,
+        strip.rect.bottom(),
+        plot_w,
+        size.height - strip.rect.bottom() - MARGINS.top - CAPTION_H - MARGINS.bottom,
+        theme,
+    );
+    let top = strip.rect.bottom() + legend.as_ref().map_or(0.0, |l| l.rect.h) + MARGINS.top;
     let mut layers = c0.into_scene(size).layers;
     let plot = Rect::new(
         MARGINS.left,
@@ -562,7 +575,10 @@ pub fn spectrograph_3d_scene(
             if let Some(unit) = s.history.unit_noted() {
                 caption.push_str(&format!(" · {unit}"));
             }
-            if let Some(tag) = s.freshness.and_then(|f| f.tag()) {
+            // The legend tags the curve; without one (traces only), the caption does.
+            if legend.is_none()
+                && let Some(tag) = s.freshness.and_then(|f| f.tag())
+            {
                 caption.push_str(" · ");
                 caption.push_str(&tag);
             }
@@ -658,29 +674,10 @@ pub fn spectrograph_3d_scene(
     }
     let own = with_tail(&caption);
     forms.extend([own.clone(), caption.clone(), String::new()]);
-    let picked_cue = sg
-        .map(|s| s.key)
-        .filter(|k| !caption.is_empty() && view.peak_points.is_some_and(|p| p.key == *k));
-    let cue_w = if picked_cue.is_some() {
-        crate::legend::CUE_ROOM
-    } else {
-        0.0
-    };
     let shown = forms
         .into_iter()
-        .find(|c| canvas::text_width(c, small) <= plot.w - cue_w)
+        .find(|c| canvas::text_width(c, small) <= plot.w)
         .unwrap_or_default();
-    let cue_color = traces
-        .iter()
-        .find(|t| picked_cue == Some(t.key))
-        .map_or(theme.text_dim, |t| t.color);
-    let caption_hit = crate::legend::caption_hit(
-        sg.map(|s| s.key).filter(|_| !caption.is_empty()),
-        plot,
-        CAPTION_H,
-        picked_cue.map(|_| cue_color),
-        &mut c.overlay,
-    );
     let caption = if caption.is_empty() {
         caption
     } else {
@@ -688,7 +685,7 @@ pub fn spectrograph_3d_scene(
     };
     c.overlay.labels.push(label(
         shown,
-        [plot.x + cue_w, plot.y - 3.0],
+        [plot.x, plot.y - 3.0],
         anchor(HAlign::Left, VAlign::Bottom),
         small,
         theme.text_dim,
@@ -738,8 +735,9 @@ pub fn spectrograph_3d_scene(
         time_right,
         view_proj: vp,
         points,
-        caption_hit,
-        picked_cue,
+        legend_shown: legend.as_ref().map_or_else(Vec::new, |l| l.shown.clone()),
+        legend_hits: legend.as_ref().map_or_else(Vec::new, |l| l.hits.clone()),
+        picked_cue: legend.and_then(|l| l.picked_cue),
     }
 }
 

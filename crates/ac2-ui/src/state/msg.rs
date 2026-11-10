@@ -395,14 +395,6 @@ pub enum Msg {
     },
     /// A click in a pane: focuses it and selects the measurement it shows.
     FocusPane(PaneId),
-    /// A click or touch on pane `pane`'s plot at `x`, `y` (logical px), outside its legend
-    /// and plates, sent before the click's own messages: two close together are a
-    /// double-tap ([`crate::state::AppState::tap_was_double`]).
-    PaneTap {
-        pane: PaneId,
-        x: f32,
-        y: f32,
-    },
     /// A pointer button went down on pane `pane` (`held`) or came up, or the wheel turned
     /// over it: the operator works on that pane.
     PanePointer {

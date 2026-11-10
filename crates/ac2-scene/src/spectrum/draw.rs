@@ -31,76 +31,26 @@ pub(crate) fn spectrum_scene_in(
     let font = theme.small_font_size;
     // The legend takes rows of its own between the banner strip and the plot, so it never
     // covers a curve; a short pane gives it fewer rows.
-    let legend: Vec<LegendEntry> = traces.iter().map(legend_entry).collect();
     let free = size.height - strip.rect.bottom() - MARGINS.top - MARGINS.bottom;
-    let max_rows =
-        ((free * LEGEND_SHARE / LEGEND_ROW).floor().max(0.0) as usize).min(LEGEND_MAX_ROWS);
     let pick = view.peak_points;
-    let picked = pick.and_then(|p| traces.iter().position(|t| t.key == p.key));
-    let placed = legend_layout(&legend, plot_w, max_rows, font, picked);
-    let legend_rows = placed.iter().map(|p| p.1 + 1).max().unwrap_or(0);
-    let legend_rect = Rect::new(
+    let rows = legend_strip(
+        &mut c.overlay,
+        traces,
+        pick.map(|p| p.key),
         MARGINS.left,
-        strip.rect.bottom() + if legend_rows > 0 { 4.0 } else { 0.0 },
+        strip.rect.bottom(),
         plot_w,
-        legend_rows as f32 * LEGEND_ROW,
+        free,
+        theme,
     );
-    let plot = canvas::plot_area(
-        size,
-        legend_rect.bottom() - if legend_rows > 0 { 4.0 } else { 0.0 },
-        right,
-    );
-    let mut legend_shown = Vec::with_capacity(placed.len());
-    let mut legend_hits = Vec::with_capacity(placed.len());
-    let mut picked_cue = None;
-    for (i, row, x, text) in placed {
-        let y = legend_rect.y + (row as f32 + 0.5) * LEGEND_ROW;
-        let x = legend_rect.x + x;
-        if let Some(e) = i.and_then(|i| legend.get(i)) {
-            legend_hits.push(crate::legend::LegendHit {
-                key: e.key,
-                rect: Rect::new(
-                    x,
-                    y - LEGEND_ROW / 2.0,
-                    entry_width(&text, font),
-                    LEGEND_ROW,
-                ),
-            });
-        }
-        let (tx, color) = match i.and_then(|i| traces.get(i).zip(legend.get(i))) {
-            Some((t, e)) => {
-                let a = if e.stale { theme.stale_alpha } else { 1.0 };
-                let color = t.color.with_alpha(a);
-                crate::tf::legend_swatch(
-                    &mut c.overlay,
-                    x,
-                    y,
-                    SWATCH_W,
-                    color,
-                    e.selected,
-                    None,
-                    theme,
-                );
-                if i == picked {
-                    crate::legend::pick_cue(&mut c.overlay, x + SWATCH_W / 2.0, y, color, None);
-                    picked_cue = Some(e.key);
-                }
-                (
-                    x + SWATCH_W + SWATCH_GAP,
-                    if e.stale { theme.text_dim } else { theme.text },
-                )
-            }
-            None => (x, theme.text_dim),
-        };
-        c.overlay.labels.push(label(
-            text.clone(),
-            [tx, y],
-            anchor(HAlign::Left, VAlign::Center),
-            font,
-            color,
-        ));
-        legend_shown.push(text);
-    }
+    let plot = canvas::plot_area(size, strip.rect.bottom() + rows.rect.h, right);
+    let LegendStrip {
+        entries: legend,
+        shown: legend_shown,
+        rect: legend_rect,
+        hits: legend_hits,
+        picked_cue,
+    } = rows;
     let full_caption = traces.first().map_or(String::new(), |t| t.caption.clone());
     // The unit (left) and the caption (right) share the plot's top line. The caption takes
     // its longest form that leaves the unit its compact form room (`dB SPL/bin`: a bin level

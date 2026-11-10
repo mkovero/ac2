@@ -1,4 +1,4 @@
-//! Peak points: the curve a legend (or caption) click picked in a pane, whose peaks that
+//! Peak points: the curve a legend click picked in a pane, whose peaks that
 //! pane then shows (`docs/design/legend-peak-points.md`). A pick is a reading gesture,
 //! like the cursor: this app's alone, unsaved, off the wire, never on the undo stack.
 
@@ -24,7 +24,7 @@ impl AppState {
         (self.pane_rig(v) == pick.rig).then_some(pick.key)
     }
 
-    /// A legend or caption click on `key` in pane `p` (of the rig in `rig`, known to it):
+    /// A legend click on `key` in pane `p` (of the rig in `rig`, known to it):
     /// picks it, or clears the pick when it was the picked one. A transfer pane's click
     /// while min / max is off leaves the pick alone: the pick only chooses min / max's
     /// curve, so there it would change nothing.

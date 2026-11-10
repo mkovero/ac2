@@ -878,7 +878,7 @@ pub struct ViewState {
     pub plates: crate::plate::Plates,
     /// The plate under the pointer in the pane being drawn (lit, its grip shown bright).
     pub plate_hover: Option<crate::plate::PlateHover>,
-    /// The curve a legend (or caption) click picked in the pane being drawn: its peaks show
+    /// The curve a legend click picked in the pane being drawn: its peaks show
     /// as peak points; `None`: no pick, the pane's own curve is the tracked one.
     pub peak_points: Option<PeakPoints>,
 }

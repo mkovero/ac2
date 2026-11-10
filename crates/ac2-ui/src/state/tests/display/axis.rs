@@ -91,7 +91,8 @@ fn fit_frames_low_signals_in_the_spectrum() {
     t.key("Shift+Home");
     let r = t.level(PaneKind::Spectrum);
     assert!(r.lo <= -138.0 && r.lo >= -150.0, "{r:?}");
-    assert!(r.hi >= -95.0 && r.hi <= -85.0, "{r:?}");
+    // The top leaves a fifth of the span above the loudest bin, as a follow move does.
+    assert!(r.hi - 0.2 * r.span() >= -95.0 && r.hi <= -75.0, "{r:?}");
     assert!(
         t.last_toast().starts_with("Spectrum / RTA: level "),
         "{}",
@@ -103,7 +104,7 @@ fn fit_frames_low_signals_in_the_spectrum() {
     t.conn(data(&sp, vec![-100.0; 8]));
     t.key("Shift+Home");
     let r = t.level(PaneKind::Spectrum);
-    assert!(r.hi >= -70.0 && r.hi <= -60.0, "{r:?}");
+    assert!(r.hi - 0.2 * r.span() >= -70.0 && r.hi <= -30.0, "{r:?}");
     // The transfer pane frames its own curves.
     t.key("Alt+1");
     t.key("Shift+Home");
@@ -117,7 +118,7 @@ fn fit_frames_low_signals_in_the_spectrum() {
 /// What Shift+Home frames for a spectrum frame of `level` on bins at 0, 6, 12, 18 and
 /// 24 kHz: only 6–18 kHz is in 20 Hz – 20 kHz.
 fn fit_of(level: &[f32]) -> Range {
-    ac2_scene::view::level::fit(level[1..4].iter().map(|x| f64::from(*x))).expect("finite levels")
+    ac2_scene::view::follow::fit(level[1..4].iter().map(|x| f64::from(*x))).expect("finite levels")
 }
 
 /// A spectrum pane frames its first frame on its level axis, exactly as Shift+Home does;

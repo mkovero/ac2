@@ -1,7 +1,7 @@
 //! Spectrum panes' level axes following what they show ([`ac2_scene::view::follow`]).
 //!
 //! Only an automatic range follows (its slot not in `level_set`): a range the operator set
-//! stays until a fit (Shift+Home, a double-tap) makes it automatic again. A followed range is
+//! stays until a fit (Shift+Home) makes it automatic again. A followed range is
 //! as automatic as a framed one: never sent, never saved. Same-unit automatic panes on screen
 //! follow as one group with one range (under the shared-scale setting), so side-by-side panes
 //! never end up a step apart. Each frame's arrival feeds the pane ([`AppState::feed_follow`],
@@ -15,21 +15,14 @@ use ac2_proto::model::LevelScale;
 use ac2_proto::units::{DaemonIncarnation, MeasId, SessionEpoch};
 use ac2_scene::axis::Range;
 use ac2_scene::view::follow::{EASE_S, Ease, Follow, HANDS_OFF_S, MAX_GAP_S, SHADE_S, Sample};
-use ac2_scene::view::level;
 
 use super::levels::LevelSlot;
 use crate::state::{AppState, Cam3dMsg, Msg, PaneId, PaneKind};
 
-/// Two taps this close in time on one pane are a double-tap, s: a fingertip on a touch
-/// panel is slower than a mouse's double click.
-pub const DOUBLE_TAP_S: f64 = 0.4;
-/// … and this close in place, logical px: a fingertip drifts further than a mouse.
-pub const DOUBLE_TAP_PX: f32 = 24.0;
-
 /// Why a pane's group frames again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::state) enum Refit {
-    /// The operator framed the pane (Shift+Home, a double-tap): the group frames with it at
+    /// The operator framed the pane (Shift+Home): the group frames with it at
     /// once, that being the input.
     Fit,
     /// The pane shows a new signal (another measurement, a new run): its history clears,
@@ -89,18 +82,6 @@ struct Follower {
     ease: Option<(Ease, bool)>,
 }
 
-/// A tap on a pane, kept to tell the next one a double-tap; with the cursor as it was before
-/// it, which the tap moved and a double-tap puts back.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Tap {
-    pane: PaneId,
-    x: f32,
-    y: f32,
-    at: f64,
-    cursor_hz: Option<f64>,
-    cursor_s: Option<f64>,
-}
-
 /// The followers and what feeds them.
 #[derive(Clone, Debug, Default)]
 pub(in crate::state) struct LevelFollow {
@@ -112,9 +93,6 @@ pub(in crate::state) struct LevelFollow {
     held: BTreeSet<PaneId>,
     /// Panes whose group frames again on the next tick, and how.
     refit: BTreeMap<PaneId, Asked>,
-    tap: Option<Tap>,
-    /// The last tap was the second of a double-tap.
-    double: bool,
 }
 
 /// The levels of `frame` as drawn, its columns at `freqs`: offset by `offset`, NaN where a
@@ -288,47 +266,6 @@ impl AppState {
         self.level_follow.held.contains(&pane)
     }
 
-    /// A tap (a click) on pane `pane`'s plot at `x`, `y` (logical px), outside its legend
-    /// and plates. The second of two within [`DOUBLE_TAP_S`] and [`DOUBLE_TAP_PX`] fits the
-    /// pane's level axis (frequency untouched; a following spectrum stays automatic), no
-    /// toast, and puts back the cursor the first tap moved: a kiosk is left with no stray
-    /// cursor.
-    pub(in crate::state) fn pane_tap(&mut self, pane: PaneId, x: f32, y: f32) {
-        self.pane_input(pane);
-        let now = self.now_s;
-        let first = self.level_follow.tap.take().filter(|t| {
-            t.pane == pane
-                && now - t.at <= DOUBLE_TAP_S
-                && (t.x - x).hypot(t.y - y) <= DOUBLE_TAP_PX
-        });
-        self.level_follow.double = first.is_some();
-        let Some(first) = first else {
-            self.level_follow.tap = Some(Tap {
-                pane,
-                x,
-                y,
-                at: now,
-                cursor_hz: self.view.cursor_hz,
-                cursor_s: self.view.spectrum.spectrograph.cursor_s,
-            });
-            return;
-        };
-        self.view.cursor_hz = first.cursor_hz;
-        self.view.spectrum.spectrograph.cursor_s = first.cursor_s;
-        if !self.draws_level_axis(pane) {
-            return;
-        }
-        if let Some(fit) = level::fit(self.level_values(pane)) {
-            self.fit_level(pane, fit);
-        }
-    }
-
-    /// The last tap was a double-tap: the view leaves that click at that (no focus, no
-    /// cursor).
-    pub fn tap_was_double(&self) -> bool {
-        self.level_follow.double
-    }
-
     /// How strongly pane `pane`'s level gutter is shaded, 0 to 1: during a follow move and
     /// fading after it.
     pub fn follow_shade(&self, pane: PaneId) -> f32 {
@@ -470,7 +407,7 @@ impl AppState {
                 .iter()
                 .flat_map(|p| self.level_values_of(*p))
                 .collect();
-            if let Some(fit) = level::fit(values) {
+            if let Some(fit) = ac2_scene::view::follow::fit(values) {
                 for p in members {
                     self.set_slot_range(*p, scale, fit);
                 }

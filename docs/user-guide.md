@@ -973,8 +973,10 @@ a hand on the keys. Settings › Display › *Level axis follows* turns it off (
 off, an automatic range stays where it was framed.
 
 - **Up quickly**: once the loudest part of the curves (20 Hz – 20 kHz, offsets included,
-  live and compared curves alike) sits above the top for most of 3 s, the axis steps up so
-  it has a fifth of the range to spare. **Down slowly**: only after 4 minutes in which it
+  live and compared curves alike) comes within a tenth of the range of the top at any
+  moment in the last 3 s, the axis steps up so it has a fifth of the range to spare. Every
+  fit (the first frame, **Shift+Home**, a restarted run, a widened range) leaves that same
+  fifth above the loudest part. **Down slowly**: only after 4 minutes in which it
   never came near the top, and at most once a minute, so a pause between songs moves
   nothing. A range that cannot hold the content (a spectrum spread over more than 80 % of
   it for 4 minutes) widens downward; it never narrows by itself.
@@ -984,16 +986,13 @@ off, an automatic range stays where it was framed.
 - **Hands off**: nothing moves while a pointer is down on the pane or for 30 s after a key
   or a touch on it; what was due happens after.
 - **A range set by hand never follows** (zoom, pan, **Ctrl+Home**). **Shift+Home** fits
-  the axis and makes it automatic again; a **double-tap** (two taps within 0.4 s, 24 px) on
-  the plot does the same for the level axis alone, frequency and cursor left as they were,
-  on a touch panel where there is no keyboard. Taps on legend rows and plates are not
-  counted.
+  the axis and makes it automatic again.
 - **Several panes** of one unit (dBFS or dB SPL) on screen share one following range under
   Settings › Display › *Shared scale*, framed over all of them when one joins, on
-  **Shift+Home** or a double-tap on any of them, and when a run restarts. Hands on one of
+  **Shift+Home** on any of them, and when a run restarts. Hands on one of
   them holds the move for all.
 - A kiosk (no keyboard) keeps its panels readable this way: leave its spectrum ranges
-  automatic, and a double-tap brings a pane back after someone zoomed it.
+  automatic (the default) and they follow on their own.
 
 #### Grid, labels and cursor (T)
 
@@ -1365,9 +1364,10 @@ bar spans the pane's level axis, so the level-axis keys change the colours.
   <meas> --span 60`); every length keeps a row per 33 ms. It starts afresh at each length
   and when the spectrograph comes into view.
 - A click puts the cursor: `1.00 kHz · 4.2 s ago · −32.0 dBFS`.
-- With the spectrograph alone, a click or tap on its caption (the measurement's name above
-  the plot) picks the measurement's **peak points**, as a legend row does; again clears
-  them. With the spectrum beside it, the spectrum's legend picks.
+- With the spectrograph alone, the spectrum's legend row for the measurement stands above
+  its caption; a click or tap on it picks the measurement's **peak points**, as in the
+  spectrum; again clears them. With the spectrum beside it, the spectrum's legend picks.
+  *Traces only* (T) hides the row.
 - Time without frames (STALE, stopped) is a gap, never the last spectrum stretched. Where a
   pixel covers several frames or frequencies it shows the highest level, so short events
   and narrow tones are never lost.
@@ -1395,11 +1395,10 @@ per frequency and moment, as tall as its level. **G** once more is the spectrum 
 | **Home** | reset the camera (frequency left to right, just above the floor) |
 | **S**, **R**, **Shift+B**, **J** | start/stop, reset average, history span, offset, as in 2D |
 | **Ctrl+I / O**, **Ctrl+↑ / ↓**, **Shift+Home** | the level range: it sets the heights |
-| double-tap | fit the level range and let it follow again |
 
 - **Axes on demand**: the frequency, time and height labels, the floor grid and the
-  ceiling line cover the skyline, so at rest the view is the spikes on their floor and the
-  caption. The axes show while the pointer is over the view or for a few seconds after a
+  ceiling line cover the skyline, so at rest the view is the spikes on their floor, the
+  legend row and the caption. The axes show while the pointer is over the view or for a few seconds after a
   touch, a click, a camera move or a level-range change, fading in and out. **T** still
   sets which of them show; *traces only* keeps them hidden even then. An exported PNG
   always has them.
@@ -1407,8 +1406,9 @@ per frequency and moment, as tall as its level. **G** once more is the spectrum 
   Shift+wheel still zoom and pan the level range. The camera is kept with the pane and the
   measurement's layout. The cursor keys (Shift+←/→, Shift+T) and **C** do nothing here:
   there is no cursor and no compared curve in 3D.
-- **Peak points**: a click or tap on the caption picks the measurement, as its legend row
-  does in 2D (a hollow box on the caption shows it); again clears them. Its five peaks
+- **Peak points**: the measurement's legend row stands above the caption, as in 2D; a
+  click or tap on it picks the measurement (a hollow box on its swatch shows it); again
+  clears them. *Traces only* hides the row. Its five peaks
   stand as boxes on the front (newest) row, each labelled with frequency and level on a
   plate; a peak higher than its cell's spike sits on the spike's top, its label keeping the
   peak's level. They show at rest, without the axes; *traces only* hides them. **P** alone
@@ -1419,7 +1419,7 @@ per frequency and moment, as tall as its level. **G** once more is the spectrum 
   *Colour map ice*) is made for this view; every map works in both.
 - **The level range follows** the content here as in 2D (*The level axis follows the
   content* above): the spikes' heights glide with a move. An orbit, tilt or dolly counts as
-  a hand on the pane, and a double-tap on the view fits the range and makes it automatic.
+  a hand on the pane.
 - **Narrowing the level range** (Ctrl+I) turns the slab of noise into terrain. For music keep
   the top near 0, e.g. −60 … 0, never −80 … −20: hot masters reach −5 … 0 dBFS per bin and a
   low top clamps them flat.

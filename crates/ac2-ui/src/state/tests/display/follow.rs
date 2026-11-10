@@ -1,6 +1,6 @@
 //! Reducer tests of the spectrum level axis following its content: which ranges follow,
 //! what a follow move leaves alone (the layout, `ui.toml`), the hands-off time, groups of
-//! panes on one range, the double-tap and the setting.
+//! panes on one range and the setting.
 
 use super::*;
 use ac2_scene::view::follow::HANDS_OFF_S;
@@ -33,14 +33,6 @@ impl Clock {
     fn run(&mut self, t: &mut T, s: f64, meas: &[(u32, f32)]) {
         for _ in 0..(s * 10.0).round() as usize {
             self.frame(t, meas);
-        }
-    }
-
-    /// `s` seconds of ticks without frames.
-    fn idle(&mut self, t: &mut T, s: f64) {
-        for _ in 0..(s * 10.0).round() as usize {
-            self.now += 0.1;
-            t.tick(self.now);
         }
     }
 }
@@ -123,12 +115,12 @@ fn a_level_step_moves_an_automatic_range_up() {
     c.frame(&mut t, &[(2, -30.0)]);
     let p = sp(&t);
     let fit = range(&t, p);
-    assert_eq!(fit, Range::new(-80.0, -20.0));
+    assert_eq!(fit, Range::new(-80.0, -10.0));
     c.run(&mut t, 5.0, &[(2, -30.0)]);
     assert_eq!(range(&t, p), fit, "steady content: no move");
     c.run(&mut t, 3.5, &[(2, -10.0)]);
     settle(&mut c, &mut t, &[(2, -10.0)]);
-    assert_eq!(range(&t, p), Range::new(-60.0, 0.0));
+    assert_eq!(range(&t, p), Range::new(-60.0, 10.0));
 }
 
 /// A range set by hand never follows; Shift+Home fits it, makes it automatic again, and
@@ -146,7 +138,7 @@ fn a_hand_set_range_stays_until_a_fit_makes_it_automatic() {
     assert_eq!(range(&t, p), panned, "the operator's range");
     t.key("Shift+Home");
     let fit = range(&t, p);
-    assert_eq!(fit, Range::new(-60.0, 0.0));
+    assert_eq!(fit, Range::new(-60.0, 10.0));
     assert!(t.st.operator_levels(p).spectrum_dbfs.is_none(), "automatic");
     c.run(&mut t, HANDS_OFF_S + 1.0, &[(2, -10.0)]);
     assert_eq!(range(&t, p), fit);
@@ -180,7 +172,7 @@ fn a_follow_move_sends_no_layout_and_writes_nothing() {
         ));
         frames(&mut t, &[(2, -10.0)], c.seq, c.incarnation);
     }
-    assert_ne!(range(&t, p), Range::new(-80.0, -20.0), "moved");
+    assert_ne!(range(&t, p), Range::new(-80.0, -10.0), "moved");
     assert!(out.is_empty(), "{out:?}");
     assert_eq!(t.st.operator_levels(p), before);
     // The next message of the operator's finds nothing to save either.
@@ -201,7 +193,7 @@ fn a_restarted_run_refits_once_without_a_counter_move() {
     t.conn(with_running(2, true));
     c.frame(&mut t, &[(2, -60.0)]);
     let refit = range(&t, p);
-    assert_eq!(refit, Range::new(-110.0, -50.0));
+    assert_eq!(refit, Range::new(-110.0, -40.0));
     c.run(&mut t, 10.0, &[(2, -60.0)]);
     assert_eq!(range(&t, p), refit);
 }
@@ -220,7 +212,7 @@ fn a_fit_then_a_restart_refits() {
     t.conn(with_running(2, false));
     t.conn(with_running(2, true));
     c.frame(&mut t, &[(2, -60.0)]);
-    assert_eq!(range(&t, p), Range::new(-110.0, -50.0));
+    assert_eq!(range(&t, p), Range::new(-110.0, -40.0));
 }
 
 /// A layout received without a range makes the slot automatic, for a restarted run and the
@@ -237,7 +229,7 @@ fn a_layout_without_a_range_makes_the_slot_automatic() {
     t.conn(with_running(2, false));
     t.conn(with_running(2, true));
     c.frame(&mut t, &[(2, -60.0)]);
-    assert_eq!(range(&t, p), Range::new(-110.0, -50.0), "refitted");
+    assert_eq!(range(&t, p), Range::new(-110.0, -40.0), "refitted");
     c.run(&mut t, HANDS_OFF_S, &[(2, -60.0)]);
     c.run(&mut t, 4.0, &[(2, -40.0)]);
     settle(&mut c, &mut t, &[(2, -40.0)]);
@@ -273,7 +265,7 @@ fn a_step_during_a_drag_waits_out_the_hands_off_time() {
     assert_eq!(range(&t, p), fit, "hands off");
     c.run(&mut t, 2.0, &[(2, -10.0)]);
     settle(&mut c, &mut t, &[(2, -10.0)]);
-    assert_eq!(range(&t, p), Range::new(-60.0, 0.0));
+    assert_eq!(range(&t, p), Range::new(-60.0, 10.0));
 }
 
 /// The spectrum pane split (N): both halves show Sub, on one range through a step.
@@ -301,7 +293,7 @@ fn two_panes_of_one_unit_stay_on_one_range() {
         c.frame(&mut t, &[(2, -10.0)]);
         assert_eq!(range(&t, a), range(&t, b), "mid-ease too");
     }
-    assert_eq!(range(&t, a), Range::new(-60.0, 0.0));
+    assert_eq!(range(&t, a), Range::new(-60.0, 10.0));
 }
 
 /// A second pane showing content 30 dB higher joins: the group frames once over both,
@@ -315,14 +307,14 @@ fn a_second_pane_joining_refits_the_group_over_both() {
     let mut c = Clock::new();
     c.frame(&mut t, &[(2, -60.0), (4, -30.0)]);
     let a = sp(&t);
-    assert_eq!(range(&t, a), Range::new(-110.0, -50.0));
+    assert_eq!(range(&t, a), Range::new(-110.0, -40.0));
     let (_, b) = two_panes(&mut t);
     t.drop_meas(b, MeasId(4));
     c.frame(&mut t, &[(2, -60.0), (4, -30.0)]);
     // The keys that split the pane hold the group's framing for a while.
     c.run(&mut t, HANDS_OFF_S, &[(2, -60.0), (4, -30.0)]);
     let both =
-        ac2_scene::view::level::fit([-100.0, -80.0, -60.0, -70.0, -50.0, -30.0]).expect("finite");
+        ac2_scene::view::follow::fit([-100.0, -80.0, -60.0, -70.0, -50.0, -30.0]).expect("finite");
     assert_eq!(range(&t, a), both);
     assert_eq!(range(&t, b), both);
     c.run(&mut t, 5.0, &[(2, -60.0), (4, -30.0)]);
@@ -346,7 +338,7 @@ fn a_fit_on_one_member_refits_the_group_and_hands_off_holds_it() {
         &t.keys,
     );
     c.run(&mut t, 10.0, &[(2, -10.0)]);
-    assert_eq!(range(&t, b), Range::new(-80.0, -20.0), "a held holds b");
+    assert_eq!(range(&t, b), Range::new(-80.0, -10.0), "a held holds b");
     t.st.apply(
         Msg::PanePointer {
             pane: a,
@@ -357,72 +349,12 @@ fn a_fit_on_one_member_refits_the_group_and_hands_off_holds_it() {
     t.st.apply(Msg::FocusPane(b), &t.keys);
     t.key("Shift+Home");
     c.frame(&mut t, &[(2, -10.0)]);
-    let fit = ac2_scene::view::level::fit([-50.0, -30.0, -10.0]).expect("finite");
+    let fit = ac2_scene::view::follow::fit([-50.0, -30.0, -10.0]).expect("finite");
     assert_eq!(range(&t, b), fit);
     assert_eq!(range(&t, a), fit, "the whole group");
 }
 
-/// Two taps close together on a plot: the level axis framed (frequency untouched), the
-/// slot automatic, the cursor as it was before the first tap, the range gone from `ui.toml`.
-#[test]
-fn a_double_tap_fits_the_level_and_makes_it_automatic() {
-    let mut t = T::new();
-    let mut c = Clock::new();
-    c.frame(&mut t, &[(2, -30.0)]);
-    let p = sp(&t);
-    t.st.apply(Msg::FocusPane(p), &t.keys);
-    t.key("Ctrl+I");
-    assert!(t.st.operator_levels(p).spectrum_dbfs.is_some());
-    c.frame(&mut t, &[(2, -10.0)]);
-    let freq = t.st.view.freq;
-    t.st.view.cursor_hz = Some(500.0);
-    t.st.prefs_dirty = false;
-    let tap = |t: &mut T, x: f32, y: f32| {
-        let keys = t.keys.clone();
-        t.st.apply(Msg::PaneTap { pane: p, x, y }, &keys);
-        if !t.st.tap_was_double() {
-            t.st.apply(Msg::FocusPane(p), &keys);
-            t.st.apply(Msg::CursorAt(Some(2000.0)), &keys);
-        }
-    };
-    tap(&mut t, 100.0, 100.0);
-    assert_eq!(t.st.view.cursor_hz, Some(2000.0));
-    c.idle(&mut t, 0.3);
-    tap(&mut t, 110.0, 115.0);
-    assert!(t.st.tap_was_double());
-    assert_eq!(t.st.view.cursor_hz, Some(500.0), "the cursor from before");
-    assert_eq!(
-        range(&t, p),
-        ac2_scene::view::level::fit([-50.0, -30.0, -10.0]).expect("finite")
-    );
-    assert_eq!(t.st.view.freq, freq);
-    assert!(t.st.operator_levels(p).spectrum_dbfs.is_none(), "automatic");
-    assert!(t.st.prefs_dirty, "ui.toml drops the range");
-    // Too slow, or too far apart: two taps, no fit.
-    t.key("Ctrl+O");
-    let zoomed = range(&t, p);
-    tap(&mut t, 100.0, 100.0);
-    c.idle(&mut t, 0.5);
-    tap(&mut t, 100.0, 100.0);
-    assert!(!t.st.tap_was_double());
-    c.idle(&mut t, 0.5);
-    tap(&mut t, 100.0, 100.0);
-    tap(&mut t, 140.0, 100.0);
-    assert!(!t.st.tap_was_double());
-    // Clicks on legend rows are no taps (the view sends no tap for them).
-    t.st.apply(
-        Msg::LegendPick(p, ac2_scene::trace::TraceKey::Live(MeasId(2))),
-        &t.keys,
-    );
-    t.st.apply(
-        Msg::LegendPick(p, ac2_scene::trace::TraceKey::Live(MeasId(2))),
-        &t.keys,
-    );
-    assert_eq!(range(&t, p), zoomed);
-}
-
-/// With following off nothing moves, and Shift+Home and the double-tap set the operator's
-/// range as before.
+/// With following off nothing moves, and Shift+Home sets the operator's range as before.
 #[test]
 fn with_following_off_nothing_moves_and_a_fit_is_the_operators() {
     let mut t = T::new();
@@ -436,29 +368,6 @@ fn with_following_off_nothing_moves_and_a_fit_is_the_operators() {
     t.st.apply(Msg::FocusPane(p), &t.keys);
     t.key("Shift+Home");
     assert!(t.st.operator_levels(p).spectrum_dbfs.is_some());
-    t.key("Ctrl+Home");
-    let keys = t.keys.clone();
-    t.st.apply(
-        Msg::PaneTap {
-            pane: p,
-            x: 5.0,
-            y: 5.0,
-        },
-        &keys,
-    );
-    t.st.apply(
-        Msg::PaneTap {
-            pane: p,
-            x: 5.0,
-            y: 5.0,
-        },
-        &keys,
-    );
-    assert!(t.st.tap_was_double());
-    assert_eq!(
-        t.st.operator_levels(p).spectrum_dbfs.map(|r| (r.lo, r.hi)),
-        Some((-60.0, 0.0))
-    );
 }
 
 /// The frequency axis zoomed in to where the top column is not shown: the same move.
@@ -502,7 +411,7 @@ fn a_restarted_daemon_clears_the_history() {
     assert_eq!(range(&t, p), fit, "the old history moved it");
     c.run(&mut t, 1.0, &[(2, -10.0)]);
     settle(&mut c, &mut t, &[(2, -10.0)]);
-    assert_eq!(range(&t, p), Range::new(-60.0, 0.0));
+    assert_eq!(range(&t, p), Range::new(-60.0, 10.0));
 }
 
 /// In the 3D view the follower runs as in the others: a step moves the range, and the
@@ -540,11 +449,11 @@ fn a_step_in_the_3d_view_moves_the_skyline_heights() {
             .next()
             .expect("a skyline")
     };
-    assert_eq!(heights(&t), [-80.0, -20.0]);
+    assert_eq!(heights(&t), [-80.0, -10.0]);
     c.run(&mut t, 4.0, &[(2, -10.0)]);
     settle(&mut c, &mut t, &[(2, -10.0)]);
-    assert_eq!(range(&t, p), Range::new(-60.0, 0.0));
-    assert_eq!(heights(&t), [-60.0, 0.0]);
+    assert_eq!(range(&t, p), Range::new(-60.0, 10.0));
+    assert_eq!(heights(&t), [-60.0, 10.0]);
 }
 
 /// Two panes of one unit, `a` showing Sub (2) and `b` Sub 2 (4), framed as a group: the
@@ -580,7 +489,7 @@ fn a_group_frame_waits_out_the_hands_off_time() {
     assert_eq!(range(&t, a), own, "a held still while worked on");
     c.run(&mut t, 3.0, &both_meas);
     let both =
-        ac2_scene::view::level::fit([-100.0, -80.0, -60.0, -70.0, -50.0, -30.0]).expect("finite");
+        ac2_scene::view::follow::fit([-100.0, -80.0, -60.0, -70.0, -50.0, -30.0]).expect("finite");
     assert_eq!(range(&t, a), both, "framed once hands off");
     assert_eq!(range(&t, b), both);
 }
@@ -614,8 +523,8 @@ fn an_operator_fit_waits_for_a_held_member() {
         &t.keys,
     );
     c.frame(&mut t, &[(2, -60.0), (4, -80.0)]);
-    let fit =
-        ac2_scene::view::level::fit([-100.0, -80.0, -60.0, -120.0, -100.0, -80.0]).expect("finite");
+    let fit = ac2_scene::view::follow::fit([-100.0, -80.0, -60.0, -120.0, -100.0, -80.0])
+        .expect("finite");
     assert_eq!(range(&t, a), fit);
     assert_eq!(range(&t, b), fit);
 }
@@ -654,7 +563,7 @@ fn a_restart_across_a_gap_in_the_frames_clears_the_history() {
     assert_eq!(range(&t, p), fit, "the old history moved it");
     c.run(&mut t, 1.0, &[(2, -10.0)]);
     settle(&mut c, &mut t, &[(2, -10.0)]);
-    assert_eq!(range(&t, p), Range::new(-60.0, 0.0));
+    assert_eq!(range(&t, p), Range::new(-60.0, 10.0));
 }
 
 /// With following off no frame is read for it; turned on, the follower starts from what
@@ -675,5 +584,5 @@ fn following_turned_on_starts_from_its_own_frames() {
     assert_eq!(range(&t, p), fit, "the frames before moved it");
     c.run(&mut t, 1.0, &[(2, -10.0)]);
     settle(&mut c, &mut t, &[(2, -10.0)]);
-    assert_eq!(range(&t, p), Range::new(-60.0, 0.0));
+    assert_eq!(range(&t, p), Range::new(-60.0, 10.0));
 }

@@ -18,16 +18,18 @@ pub const BAND_LO_HZ: f64 = 20.0;
 pub const BAND_HI_HZ: f64 = 20_000.0;
 /// The window the up rule reads, s: short, so a clipped curve is put right within seconds.
 pub const UP_WINDOW_S: f64 = 3.0;
-/// The share of frames over the top that moves the axis up: a fifth of the frames clipped.
-/// A median left many short clipped runs on music; a higher quantile chases single peaks.
-pub const UP_QUANTILE: f64 = 0.8;
+/// The up rule: the window's maximum within this share of the span under the top. A peak
+/// that close is about to leave the plot, and a peak over the top is a curve drawn wrong:
+/// the axis moves before it clips, not after most frames have.
+pub const UP_AT: f64 = 0.1;
 /// The window the down and widen rules read, s: longer than any song gap, speech break or
 /// quiet verse, so only a lasting change (an idle mic, a gain change) moves the axis down.
 pub const SLOW_WINDOW_S: f64 = 240.0;
 /// The least time between a move and a down or widen move, s.
 pub const LOCKOUT_S: f64 = 60.0;
-/// Where a move puts the window's maximum: this share of the span under the top, so the
-/// next louder passage still fits.
+/// Where a move puts the window's maximum, and the least room a fit leaves above the
+/// content's: this share of the span under the top, so the next louder passage still fits
+/// and does not reach [`UP_AT`] at once.
 pub const TOP_PAD: f64 = 0.2;
 /// The down rule: the window's maximum under this share of the span above the bottom.
 pub const SQUASH: f64 = 0.35;
@@ -218,13 +220,13 @@ impl Follow {
 
     fn up(&mut self, now: f64, r: Range) -> Option<Move> {
         let n = self.window(now, UP_WINDOW_S, self.moved_at)?;
-        if self.quantile_of(n, UP_QUANTILE, |s| s.top) <= r.hi {
-            return None;
-        }
         let max = self
             .newest(n)
             .map(|s| s.top)
             .fold(f64::NEG_INFINITY, f64::max);
+        if max <= r.hi - UP_AT * r.span() {
+            return None;
+        }
         Some(Move {
             to: shift(r, max, false),
             why: Why::Up,
@@ -241,7 +243,7 @@ impl Follow {
             .map(|s| s.top)
             .fold(f64::NEG_INFINITY, f64::max);
         if self.quantile_of(n, 0.5, |s| s.top - s.floor) > WIDEN_AT * r.span() {
-            let to = widened(self.quantile_of(n, 0.5, |s| s.floor), max)?;
+            let to = headroom(widened(self.quantile_of(n, 0.5, |s| s.floor), max)?, max);
             // The follower never narrows: an idle mic's floor is no reason to zoom in.
             if to.span() > r.span() {
                 return Some(Move {
@@ -262,14 +264,56 @@ impl Follow {
 }
 
 /// `r` moved by whole grid steps (`nice(span / 8)`, as [`level::fit`] rounds) so that `max`
-/// sits at [`TOP_PAD`] under the top: the nearest step up (at least one), or for a move down
-/// (`down`) the fewest steps that leave it at or below that place (at least one). The labels end on the same grid lines; only the numbers change.
+/// sits at [`TOP_PAD`] under the top or lower: the fewest steps that do (at least one, up or
+/// for a move down, `down`, down). The labels end on the same grid lines; only the numbers
+/// change.
 fn shift(r: Range, max: f64, down: bool) -> Range {
+    // A max a hair over the place is on it.
+    const EPS: f64 = 1e-9;
     let step = nice(r.span() / 8.0);
     let d = (max - (r.hi - TOP_PAD * r.span())) / step;
-    let n = if down { d.ceil() } else { d.round() };
-    let n = if n == 0.0 { d.signum() } else { n };
+    let n = (d - EPS).ceil();
+    let n = match (n, down) {
+        (n, false) if n < 1.0 => 1.0,
+        (n, true) if n > -1.0 => -1.0,
+        (n, _) => n,
+    };
     level::pan(r, n * step)
+}
+
+/// A spectrum pane's fit: [`level::fit`] of `values` with [`headroom`] over their maximum,
+/// so a fit leaves the room above the content a follow move leaves and the next louder
+/// passage does not move the axis at once. `None` without a finite value.
+pub fn fit(values: impl IntoIterator<Item = f64>) -> Option<Range> {
+    let v: Vec<f64> = values.into_iter().filter(|x| x.is_finite()).collect();
+    let r = level::fit(v.iter().copied())?;
+    let max = v.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    Some(headroom(r, max))
+}
+
+/// `r` raised at its top by whole steps of its own grid until `max` sits at [`TOP_PAD`] of
+/// the span under the top or lower; its edges stay on the grid `nice(span / 8)` of the span
+/// it ends with, which [`shift`] and the labels step by.
+fn headroom(mut r: Range, max: f64) -> Range {
+    // Edges are sums of float steps: one a hair off a grid line is on it.
+    const EPS: f64 = 1e-9;
+    // Each round either aligns the edges or adds a step: a few rounds end it.
+    for _ in 0..32 {
+        let step = nice(r.span() / 8.0);
+        let on = Range::new(
+            (r.lo / step + EPS).floor() * step,
+            (r.hi / step - EPS).ceil() * step,
+        );
+        if (on.lo - r.lo).abs() > EPS * step || (on.hi - r.hi).abs() > EPS * step {
+            r = on;
+            continue;
+        }
+        if max <= r.hi - TOP_PAD * r.span() + EPS * step {
+            break;
+        }
+        r = Range::new(r.lo, r.hi + step);
+    }
+    level::clamp(r)
 }
 
 /// The range that frames content from `floor` to `top` with that extent filling at most

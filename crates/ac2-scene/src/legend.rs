@@ -264,34 +264,7 @@ pub(crate) struct RowStyle {
 /// curve's peaks are the boxes on the plot".
 const CUE_HALF: f32 = 4.0;
 
-/// Room a caption gives its cue before its text.
-pub(crate) const CUE_ROOM: f32 = 2.0 * CUE_HALF + 6.0;
-
-/// The hit of a spectrograph's caption, the row of `h` above `plot` across its full width,
-/// for a click that picks `key`'s peak points (`None`: no caption, no hit); with `cue` (the
-/// curve's colour) it carries the pick's cue at its start.
-pub(crate) fn caption_hit(
-    key: Option<TraceKey>,
-    plot: Rect,
-    h: f32,
-    cue: Option<Color>,
-    layer: &mut Layer,
-) -> Option<LegendHit> {
-    let key = key?;
-    let rect = Rect::new(plot.x, plot.y - h, plot.w, h);
-    if let Some(color) = cue {
-        pick_cue(
-            layer,
-            plot.x + CUE_HALF + 1.0,
-            plot.y - h / 2.0,
-            color,
-            None,
-        );
-    }
-    Some(LegendHit { key, rect })
-}
-
-/// The cue of a picked legend row (or caption): a peak's box in the curve's colour, centred
+/// The cue of a picked legend row: a peak's box in the curve's colour, centred
 /// at `x`, `y` on the row's swatch, so it needs no room of its own and moves no text.
 pub(crate) fn pick_cue(layer: &mut Layer, x: f32, y: f32, color: Color, clip: Option<Rect>) {
     let (x0, y0, x1, y1) = (x - CUE_HALF, y - CUE_HALF, x + CUE_HALF, y + CUE_HALF);
