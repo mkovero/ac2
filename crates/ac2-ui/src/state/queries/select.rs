@@ -278,7 +278,7 @@ impl AppState {
                 self.rig.spectrographs.clear();
                 self.view.spectrum.spectrograph.cursor_s = None;
             } else if !before && let Some(d) = self.rig.data.clone() {
-                self.rig.fold_spectrographs(&d);
+                self.rig.fold_spectrographs(&d, self.prefs.spec_ease);
             }
         }
     }

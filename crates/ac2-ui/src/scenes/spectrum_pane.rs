@@ -132,15 +132,16 @@ pub fn spectrograph(
 
 /// The spectrum pane's 3D spectrograph of its measurement: `skyline` (kept by the caller
 /// across frames, so a new frame only folds in) is brought up to the history first.
-/// `tier` is how it is drawn and whether Settings forced it; `axes` how much its axis
-/// decorations show (an export: 1).
+/// `tier` is how it is drawn and whether Settings forced it; `motion` how much its axis
+/// decorations show and how many history slots its rows are short of their places as they
+/// glide ([`AppState::row_lag`]; an export: 1 and 0).
 #[allow(clippy::too_many_arguments)]
 pub fn spectrograph_3d(
     st: &AppState,
     pane: PaneId,
     skyline: &mut Skyline,
     tier: (SkylineTier, bool),
-    axes: f32,
+    (axes, lag_slots): (f32, f64),
     theme: &Theme,
     size: Viewport,
     now: Now,
@@ -180,6 +181,7 @@ pub fn spectrograph_3d(
             tier: tier.0,
             tier_forced: tier.1,
             axes,
+            lag_slots,
         }
     });
     with_spectrum(st, pane, theme, now, |traces, status, view| {

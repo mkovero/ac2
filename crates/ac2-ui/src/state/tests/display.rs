@@ -438,3 +438,20 @@ mod select;
 mod banners;
 
 mod advice;
+
+mod row_glide;
+
+/// The colour families take OKLCH searches to make: a picture reuses the theme's, made once,
+/// and a theme change makes the new theme's.
+#[test]
+fn colour_families_are_made_once_per_theme() {
+    let t = T::new();
+    let dark = Theme::dark();
+    let kept = t.st.families(&dark);
+    let first = t.st.curve_colours(&dark);
+    assert!(Arc::ptr_eq(&kept, &t.st.families(&dark)));
+    assert_eq!(t.st.curve_colours(&dark), first);
+    let light = t.st.families(&Theme::light());
+    assert!(!Arc::ptr_eq(&kept, &light));
+    assert!(light.is_for(&Theme::light()));
+}

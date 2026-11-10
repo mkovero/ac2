@@ -204,7 +204,7 @@ fn a_chosen_family_comes_first_and_the_others_fill_around_it() {
     assert_eq!(f[&MeasId(3)], hue(2));
     // The curves follow: m1's live curve is grey.
     for theme in all() {
-        let c = curve_colours(&theme, &refs, &[]);
+        let c = curve_colours(&Families::of(&theme), &refs, &[]);
         assert_eq!(c.meas(MeasId(1)), theme.neutral);
         assert_eq!(c.meas(MeasId(2)), theme.families[1]);
     }
@@ -264,7 +264,7 @@ fn a_measurements_curves_share_its_hue_and_differ_from_each_other() {
     ];
     let trefs: Vec<&TraceMeta> = traces.iter().collect();
     for theme in all() {
-        let c = curve_colours(&theme, &refs, &trefs);
+        let c = curve_colours(&Families::of(&theme), &refs, &trefs);
         let main_curves = [
             c.meas(MeasId(1)),
             c.trace(TraceId(3)),
@@ -292,7 +292,7 @@ fn a_measurements_curves_share_its_hue_and_differ_from_each_other() {
         let mut moved = traces.clone();
         moved[1].edit.owner = sub;
         let mrefs: Vec<&TraceMeta> = moved.iter().collect();
-        let m = curve_colours(&theme, &refs, &mrefs);
+        let m = curve_colours(&Families::of(&theme), &refs, &mrefs);
         let post = m.trace(TraceId(4));
         assert!(hue_gap(post, theme.families[1]) <= SAME_HUE_DEG, "{post:?}");
         assert_ne!(post, m.trace(TraceId(6)));
@@ -301,7 +301,7 @@ fn a_measurements_curves_share_its_hue_and_differ_from_each_other() {
         let mut adopted = traces.clone();
         adopted[3].edit.owner = main;
         let arefs: Vec<&TraceMeta> = adopted.iter().collect();
-        let a = curve_colours(&theme, &refs, &arefs).trace(TraceId(7));
+        let a = curve_colours(&Families::of(&theme), &refs, &arefs).trace(TraceId(7));
         assert!(hue_gap(a, theme.families[0]) <= SAME_HUE_DEG, "{a:?}");
     }
 }
@@ -324,7 +324,7 @@ fn a_sweeps_first_run_takes_the_base() {
     ];
     let trefs: Vec<&TraceMeta> = traces.iter().collect();
     let theme = Theme::dark();
-    let c = curve_colours(&theme, &refs, &trefs);
+    let c = curve_colours(&Families::of(&theme), &refs, &trefs);
     assert_eq!(c.trace(TraceId(10)), theme.families[1]);
     assert_eq!(
         c.trace(TraceId(11)),
@@ -348,7 +348,7 @@ fn each_import_takes_a_hue_of_its_own_before_any_shade_or_grey() {
         .collect();
     let trefs: Vec<&TraceMeta> = traces.iter().collect();
     for theme in all() {
-        let c = curve_colours(&theme, &refs, &trefs);
+        let c = curve_colours(&Families::of(&theme), &refs, &trefs);
         let got: Vec<Color> = (0..6).map(|i| c.trace(TraceId(10 + i))).collect();
         assert_eq!(got, theme.families[2..8].to_vec(), "{:?}", theme.name);
     }
@@ -360,7 +360,7 @@ fn many_imports_stay_distinct_and_grey_comes_last() {
     let ms: Vec<Measurement> = (1..=15).map(|i| tf(i, &format!("m{i}"))).collect();
     let refs: Vec<&Measurement> = ms.iter().collect();
     for theme in all() {
-        let palette = import_palette(&theme, &family_indices(&refs));
+        let palette = import_palette(&Families::of(&theme), &family_indices(&refs));
         let neutral = palette
             .iter()
             .position(|c| *c == theme.neutral)
@@ -399,12 +399,31 @@ fn deleting_an_import_repaints_only_those_after_it() {
     let without: Vec<&TraceMeta> = traces.iter().filter(|t| t.id != TraceId(12)).collect();
     let theme = Theme::dark();
     let (a, b) = (
-        curve_colours(&theme, &refs, &all_refs),
-        curve_colours(&theme, &refs, &without),
+        curve_colours(&Families::of(&theme), &refs, &all_refs),
+        curve_colours(&Families::of(&theme), &refs, &without),
     );
     for id in [10, 11] {
         assert_eq!(a.trace(TraceId(id)), b.trace(TraceId(id)));
     }
     assert_eq!(b.trace(TraceId(13)), a.trace(TraceId(12)));
     assert_eq!(b.trace(TraceId(14)), a.trace(TraceId(13)));
+}
+
+#[test]
+fn a_themes_families_are_made_once_and_fit_only_that_theme() {
+    for t in all() {
+        let f = Families::of(&t);
+        for (i, base) in t.families.iter().enumerate() {
+            let hue = ColourFamily::Hue { index: i as u8 };
+            assert_eq!(*f.family(hue), Family::of(&t, *base));
+        }
+        assert_eq!(*f.neutral(), Family::of(&t, t.neutral));
+        assert_eq!(f.family(ColourFamily::Neutral), f.neutral());
+        assert!(f.is_for(&t));
+        // The plate alpha is no input: the families still fit.
+        let mut plates = t.clone();
+        plates.plate_alpha = 0.5;
+        assert!(f.is_for(&plates));
+    }
+    assert!(!Families::of(&Theme::dark()).is_for(&Theme::light()));
 }

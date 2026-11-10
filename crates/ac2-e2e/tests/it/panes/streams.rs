@@ -308,7 +308,7 @@ fn spectrograph_from_an_empty_daemon() -> R {
         pane,
         &mut skyline,
         (ac2_scene::primitives::SkylineTier::Full, false),
-        d.st.axes3d_alpha(pane),
+        (d.st.axes3d_alpha(pane), 0.0),
         &theme,
         size,
         now(),

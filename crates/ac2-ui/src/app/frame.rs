@@ -200,6 +200,7 @@ impl eframe::App for App {
         if self.state.animating()
             || self.state.bars_easing(Instant::now())
             || self.state.spectrum_gliding(Instant::now())
+            || self.state.rows_gliding(Instant::now())
             || self.state.levels_following()
             || self.state.walk_bar_easing(Instant::now())
             || self.state.embers_glowing()

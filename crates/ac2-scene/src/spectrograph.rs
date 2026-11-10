@@ -179,6 +179,9 @@ pub struct SpectrographHistory {
     /// Counts the times the ring was emptied or rewritten whole, so a picture made of it
     /// (the 3D spectrograph's skyline) knows to start over rather than fold.
     generation: u64,
+    /// Counts every change to the ring, so a picture made of it knows when it has nothing
+    /// new to take (a second frame in the newest slot changes the ring, not the slot).
+    revision: u64,
 }
 
 impl SpectrographHistory {
@@ -198,6 +201,7 @@ impl SpectrographHistory {
             last_seq: None,
             broken: false,
             generation: 0,
+            revision: 0,
         }
     }
 
@@ -267,12 +271,18 @@ impl SpectrographHistory {
         self.newest = None;
         self.broken = false;
         self.generation += 1;
+        self.revision += 1;
     }
 
     /// Changes whenever the ring is emptied or rewritten whole; between two equal values
     /// frames only ever went in after the newest.
     pub fn generation(&self) -> u64 {
         self.generation
+    }
+
+    /// Changes whenever the ring changes at all.
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 
     /// Absolute slot (capture time ÷ slot length) of the newest frame.
@@ -355,6 +365,7 @@ impl SpectrographHistory {
         }
         self.newest = Some(slot);
         self.broken = false;
+        self.revision += 1;
         true
     }
 

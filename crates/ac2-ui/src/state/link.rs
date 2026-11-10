@@ -636,8 +636,9 @@ impl RigState {
 
     /// Folds the newest spectrum / RTA frames into the spectrograph histories. A stream
     /// that is STALE, or whose measurement is not running, marks a break: the time until
-    /// its next frame is a gap in the picture.
-    pub(super) fn fold_spectrographs(&mut self, d: &DataSnapshot) {
+    /// its next frame is a gap in the picture. With `ease`, each history's 3D rows glide to
+    /// where a frame moves them ([`RowGlide`]).
+    pub(super) fn fold_spectrographs(&mut self, d: &DataSnapshot, ease: bool) {
         use ac2_proto::FrameData;
         use ac2_scene::spectrograph::{SpectrographFrame, SpectrographHistory};
         // Each measurement's own span; a history of another span cannot hold its slots.
@@ -648,6 +649,14 @@ impl RigState {
             .collect();
         self.spectrographs
             .retain(|id, h| running.get(id).is_some_and(|(_, s)| h.span_s() == *s));
+        if ease {
+            let kept = &self.spectrographs;
+            self.row_glide.retain(|id, _| kept.contains_key(id));
+            self.row_pacing.retain(|id, _| kept.contains_key(id));
+        } else {
+            self.row_glide.clear();
+            self.row_pacing.clear();
+        }
         for tf in d.latest.frames.values() {
             let (meas, scale, spec_level, level, validity) = match &tf.frame.data {
                 FrameData::Spec(f) => (f.meas, f.meta.scale, Some(f.meta.level), &f.level, None),
@@ -680,7 +689,8 @@ impl RigState {
                 continue;
             }
             let cols = ac2_scene::grid::columns(def);
-            h.push(&SpectrographFrame {
+            let before = super::row_glide::mark(h);
+            let moved = h.push(&SpectrographFrame {
                 seq: tf.frame.stamp.seq,
                 at: tf.frame.stamp.capture_wall_ns,
                 grid,
@@ -690,6 +700,10 @@ impl RigState {
                 level,
                 validity,
             });
+            if ease && moved {
+                let wall = tf.frame.stamp.capture_wall_ns.0;
+                self.keep_row_glide(meas, before, d.drained, wall);
+            }
         }
     }
 

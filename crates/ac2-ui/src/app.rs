@@ -98,6 +98,9 @@ pub struct StartupTiming {
     pub first_frame: Option<Duration>,
 }
 
+/// Whose spectrograph history a pane's skyline is made of: the rig and the measurement.
+pub(crate) type SkylineOf = (ac2_proto::units::RigId, Option<ac2_proto::units::MeasId>);
+
 /// Cached pane scene: rebuilt when what the pane shows, its kind's generation
 /// ([`App::pane_generation`]), size or theme change.
 pub(crate) struct CachedScene {
@@ -189,8 +192,10 @@ pub struct App {
     /// The time-driven texts the panes were last built with ([`ClockTexts`]).
     clock: ClockTexts,
     pub(crate) scenes: HashMap<crate::state::PaneId, CachedScene>,
-    /// The 3D spectrograph's skyline of each pane showing it, folded as frames arrive.
-    pub(crate) skylines: HashMap<crate::state::PaneId, ac2_scene::spectrograph_3d::Skyline>,
+    /// The 3D spectrograph's skyline of each pane showing it, folded as frames arrive, with
+    /// whose history it is made of.
+    pub(crate) skylines:
+        HashMap<crate::state::PaneId, (SkylineOf, ac2_scene::spectrograph_3d::Skyline)>,
     /// Wheel scroll over a 3D spectrograph not yet a whole zoom step, logical pixels.
     pub(crate) cam3d_wheel: f32,
     /// The pane a pointer button is down on, as last told to the reducer.
@@ -605,8 +610,12 @@ impl App {
         let what = Touches::of(&msg);
         let animating = self.state.animating();
         let easing = self.state.bars_easing(Instant::now());
-        // A level axis easing to its content moves the spectrum panes as a glide does.
-        let gliding = self.state.spectrum_gliding(Instant::now()) || self.state.levels_following();
+        // A level axis easing to its content, or a 3D view's rows gliding back, moves the
+        // spectrum panes as a glide does.
+        let spectrum_moving = |st: &AppState, now: Instant| {
+            st.spectrum_gliding(now) || st.levels_following() || st.rows_gliding(now)
+        };
+        let gliding = spectrum_moving(&self.state, Instant::now());
         let filling = self.state.walk_bar_easing(Instant::now());
         let glowing = self.state.embers_glowing();
         // The rig the message is from: its data and mirror say which panes change.
@@ -629,7 +638,7 @@ impl App {
                 let mut panes = tick_touches(
                     animating || self.state.animating(),
                     easing || self.state.bars_easing(now),
-                    gliding || self.state.spectrum_gliding(now) || self.state.levels_following(),
+                    gliding || spectrum_moving(&self.state, now),
                     filling || self.state.walk_bar_easing(now),
                 );
                 // The embers cool between gonio frames.

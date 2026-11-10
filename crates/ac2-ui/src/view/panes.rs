@@ -181,9 +181,19 @@ fn scene_for(
             if view.shows_3d(three_d)
                 && let Some(tier) = st.prefs.quality_3d.tier(st.auto_tier) =>
         {
-            let sky = app.skylines.entry(id).or_default();
-            let axes = st.axes3d_alpha(id);
-            let s = scenes::spectrograph_3d(st, id, sky, tier, axes, theme, vp, now);
+            // Another measurement's history is another skyline: a fold would keep the old
+            // one's rows wherever the two agree on slots and revision.
+            let of = (st.rig.id, st.pane_meas(id).map(|m| m.id));
+            let kept = app
+                .skylines
+                .entry(id)
+                .or_insert_with(|| (of, Default::default()));
+            if kept.0 != of {
+                *kept = (of, Default::default());
+            }
+            let sky = &mut kept.1;
+            let motion = (st.axes3d_alpha(id), st.row_lag(id, now.instant));
+            let s = scenes::spectrograph_3d(st, id, sky, tier, motion, theme, vp, now);
             // No legend here: the caption, naming the measurement, picks its points.
             legend_hits.extend(s.caption_hit);
             (s.scene, Axes::default())

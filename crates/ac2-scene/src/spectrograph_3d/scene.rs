@@ -25,6 +25,9 @@ pub struct Spectrograph3dInput<'a> {
     /// How much the axis decorations show, 0 … 1 ([`AxesReveal::alpha`]); what the tier
     /// in `view.chrome` would show, faded. An exported picture shows them whole (1).
     pub axes: f32,
+    /// How many history slots the rows are still short of their places as they glide back
+    /// ([`Skyline::drawn`]); 0 at rest, and in an exported picture.
+    pub lag_slots: f64,
 }
 
 /// Which axis a label belongs to.
@@ -567,14 +570,19 @@ pub fn spectrograph_3d_scene(
                 message = Some(format!("{}: no frames yet", s.name));
             } else {
                 let off = s.offset_db;
+                let drawn = sk.drawn(s.lag_slots);
+                let mut data = sk.ring().to_vec();
+                if let Some(u) = drawn.unborn {
+                    data[u] = None;
+                }
                 c.data.skylines.push(Skyline3d {
                     id: SKYLINE_ID,
                     rect: plot,
                     clip: Some(plot),
                     cols: sk.cols() as u32,
                     rows: sk.rows() as u32,
-                    newest: sk.newest() as u32,
-                    phase: sk.phase(),
+                    newest: drawn.newest as u32,
+                    phase: drawn.phase,
                     view_proj: vp.gpu(),
                     eye: vp.eye.map(|v| v as f32),
                     world: [FLOOR_HALF_W as f32, FLOOR_DEPTH as f32, MAX_HEIGHT as f32],
@@ -589,7 +597,7 @@ pub fn spectrograph_3d_scene(
                         },
                         ..LOOK
                     },
-                    data: sk.ring().to_vec(),
+                    data,
                 });
                 if s.tier.bloom_taps().is_some() {
                     c.data.glows.push(SkylineGlow {
@@ -614,6 +622,7 @@ pub fn spectrograph_3d_scene(
                         &mut c,
                         &pj,
                         s.skyline,
+                        f64::from(s.skyline.drawn(s.lag_slots).front),
                         peaks,
                         t.offset_db,
                         crate::spectrum::value_unit(t.scale, t.quantity),

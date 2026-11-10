@@ -65,6 +65,8 @@ pub use panes::drag::{DragItem, DragMsg, DropTarget, EDGE_SHARE, RowDrag, RowDro
 mod advice;
 mod glide;
 pub use glide::SpecGlide;
+mod row_glide;
+pub use row_glide::RowGlide;
 mod walk_bar;
 pub use walk_bar::FillGlide;
 mod leq;
@@ -213,6 +215,10 @@ pub struct AppState {
     /// ([`crate::scenes::refresh_spl_scales`]): every one of them spans the union of those
     /// in its unit, so one level sits at one height across them.
     pub spl_scales: Vec<(ac2_proto::model::LevelScale, ac2_scene::axis::Range)>,
+    /// The colour families of the theme last drawn in ([`AppState::curve_colours`]): made
+    /// once per theme, not per picture. Kept behind a lock as the scene builders read the
+    /// state through a shared reference.
+    families: std::sync::Mutex<Option<Arc<ac2_scene::families::Families>>>,
     /// Remembered between runs (stimulus outputs per device).
     pub prefs: UiPrefs,
     /// `prefs` changed since the app last saved them.
@@ -346,6 +352,7 @@ impl AppState {
             layout: Layout::default(),
             pane_area: DEFAULT_PANE_AREA,
             spl_scales: Vec::new(),
+            families: std::sync::Mutex::new(None),
             prefs: UiPrefs::default(),
             prefs_dirty: false,
             export_dir: std::env::home_dir(),

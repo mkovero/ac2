@@ -174,6 +174,10 @@ pub struct Skyline {
     ids: Vec<Option<u64>>,
     /// The history's newest slot when last folded.
     newest: Option<u64>,
+    /// The history's revision when last folded: with nothing new, nothing is folded, so a
+    /// picture redrawn between frames (a glide) neither recomputes rows nor hands the
+    /// renderer new ones to upload.
+    revision: Option<u64>,
     slot_s: f64,
 }
 
@@ -210,10 +214,14 @@ impl Skyline {
                 ring: vec![None; ring_rows(h.slots(), k)],
                 ids: vec![None; ring_rows(h.slots(), k)],
                 newest: None,
+                revision: None,
                 slot_s: h.slot_s(),
             };
         }
-        self.fold(h);
+        if self.revision != Some(h.revision()) {
+            self.fold(h);
+            self.revision = Some(h.revision());
+        }
     }
 
     fn fold(&mut self, h: &SpectrographHistory) {
@@ -303,10 +311,49 @@ impl Skyline {
     }
 
     /// The newest row's fill fraction (slots filled ÷ slots per row), in (0, 1]: how far
-    /// the rows have glided back. From the data, so a stalled stream stands still.
+    /// the rows have glided back once they reach their places. From the data, so a stalled
+    /// stream stands still.
     pub fn phase(&self) -> f32 {
         self.newest
             .map_or(1.0, |n| ((n % self.k) + 1) as f32 / self.k as f32)
+    }
+
+    /// Where the rows are drawn while they glide back to their places, still `lag_slots`
+    /// history slots short of them (0: at their places, [`Self::phase`]). Frames bring the
+    /// rows' advance in steps of whole slots, several at once at a slow frame rate; drawn
+    /// as received they jump back at each frame, which the eye reads as a stutter, so the
+    /// UI moves them over the time between frames instead.
+    ///
+    /// A lag reaching back past the newest row's start would stand that row in front of the
+    /// floor's front edge: until the glide reaches it, it is not drawn, and the row before
+    /// it is the front one. The lag is held to one row: a longer step is no glide but a
+    /// jump (a stream resumed after a stall), and the rows take it at once.
+    pub fn drawn(&self, lag_slots: f64) -> DrawnRows {
+        let newest = self.newest();
+        let phase = f64::from(self.phase());
+        let lag = if lag_slots.is_finite() {
+            lag_slots.max(0.0)
+        } else {
+            0.0
+        };
+        let p = (phase - lag / self.k.max(1) as f64).max(phase - 1.0);
+        let len = self.ring.len();
+        if p >= 0.0 || len < 2 {
+            let phase = p.max(0.0) as f32;
+            DrawnRows {
+                newest,
+                phase,
+                front: phase,
+                unborn: None,
+            }
+        } else {
+            DrawnRows {
+                newest: (newest + len - 1) % len,
+                phase: (p + 1.0) as f32,
+                front: 0.0,
+                unborn: Some(newest),
+            }
+        }
     }
 
     /// The frequency span the columns cover, Hz.
@@ -330,6 +377,19 @@ impl Skyline {
         }
         self.ring[(self.newest() + len - j) % len].as_ref()
     }
+}
+
+/// The rows as drawn at one moment of their glide ([`Skyline::drawn`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DrawnRows {
+    /// Ring position of the front row.
+    pub newest: usize,
+    /// How far the front row stands back, in rows, in [0, 1]: the renderer's phase.
+    pub phase: f32,
+    /// How far the newest row stands back, in rows (0 while it is not yet drawn).
+    pub front: f32,
+    /// The newest row's ring position while the glide has not yet reached it: not drawn.
+    pub unborn: Option<usize>,
 }
 
 /// History rows `[first, end)` per column for `cols` log-spaced columns over the key's

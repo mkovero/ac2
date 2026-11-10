@@ -524,7 +524,7 @@ fn a_step_in_the_3d_view_moves_the_skyline_heights() {
             p,
             &mut sky,
             (ac2_scene::primitives::SkylineTier::Full, false),
-            0.0,
+            (0.0, 0.0),
             &Theme::dark(),
             Viewport {
                 width: 800.0,

@@ -336,6 +336,92 @@ fn the_phase_advances_per_frame_from_the_data() {
     assert_eq!(s.phase(), phases[3]);
 }
 
+/// Redrawn between frames (a glide), the skyline takes nothing new: its rows are the very
+/// ones the renderer already holds, so none is uploaded again. A second frame in the newest
+/// slot is new.
+#[test]
+fn an_update_without_a_new_frame_keeps_every_row() {
+    let mut h = SpectrographHistory::new(10);
+    let mut f = Feed::new(&log_bins());
+    let mut s = Skyline::default();
+    for slot in 0..20 {
+        f.push(&mut h, slot, -30.0);
+    }
+    s.update(&h, full_range(), SkylineTier::Full);
+    let before = s.ring().to_vec();
+    s.update(&h, full_range(), SkylineTier::Full);
+    let kept = |a: &Option<HeatmapColumn>, b: &Option<HeatmapColumn>| match (a, b) {
+        (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+        (None, None) => true,
+        _ => false,
+    };
+    assert!(before.iter().zip(s.ring()).all(|(a, b)| kept(a, b)));
+    f.push(&mut h, 19, -10.0);
+    s.update(&h, full_range(), SkylineTier::Full);
+    assert_eq!(s.row_back(0).expect("newest")[50], -10.0);
+    assert!(same(&s, &rebuilt(&h, full_range(), SkylineTier::Full)));
+}
+
+/// A row's z in rows from the front edge as drawn, by its ring position.
+fn drawn_z(s: &Skyline, d: &DrawnRows, pos: usize) -> Option<f64> {
+    let len = s.rows();
+    if d.unborn == Some(pos) {
+        return None;
+    }
+    let j = (d.newest + len - pos) % len;
+    Some(j as f64 + f64::from(d.phase))
+}
+
+#[test]
+fn rows_glide_back_continuously_across_a_new_row() {
+    let mut h = SpectrographHistory::new(10);
+    let mut f = Feed::new(&log_bins());
+    let mut s = Skyline::default();
+    // k = 3: slots 6–8 make row 2, 9–11 row 3. The rows stand with slot 7 newest.
+    for slot in 4..=7 {
+        f.push(&mut h, slot, -20.0);
+    }
+    s.update(&h, full_range(), SkylineTier::Full);
+    let row2 = s.newest();
+    let before = s.drawn(0.0);
+    assert!((before.phase - 2.0 / 3.0).abs() < 1e-6);
+    assert!((drawn_z(&s, &before, row2).expect("drawn") - 2.0 / 3.0).abs() < 1e-6);
+    // Three slots in one frame: row 3 starts, two slots filled.
+    f.push(&mut h, 10, -20.0);
+    s.update(&h, full_range(), SkylineTier::Full);
+    let row3 = s.newest();
+    assert_ne!(row3, row2);
+    // At the glide's start (3 slots short) the rows stand where they were: row 2 still at
+    // the front, row 3 not yet drawn.
+    let start = s.drawn(3.0);
+    assert_eq!(start.unborn, Some(row3));
+    assert!((drawn_z(&s, &start, row2).expect("drawn") - 2.0 / 3.0).abs() < 1e-6);
+    assert_eq!(start.front, 0.0);
+    // Two slots short, row 3 is born at the front edge and row 2 has moved one slot back.
+    let born = s.drawn(2.0);
+    assert_eq!(born.unborn, None);
+    assert!(drawn_z(&s, &born, row3).expect("drawn").abs() < 1e-6);
+    assert!((drawn_z(&s, &born, row2).expect("drawn") - 1.0).abs() < 1e-6);
+    // Every lag in between moves row 2 back steadily, never back and forth.
+    let mut last = 0.0;
+    for i in 0..=30 {
+        let lag = 3.0 - 3.0 * f64::from(i) / 30.0;
+        let z = drawn_z(&s, &s.drawn(lag), row2).expect("drawn");
+        assert!(z >= last - 1e-6, "lag {lag}: {z} after {last}");
+        last = z;
+    }
+    // At rest: the data's own phase.
+    let rest = s.drawn(0.0);
+    assert_eq!(
+        (rest.newest, rest.phase, rest.unborn),
+        (row3, s.phase(), None)
+    );
+    assert_eq!(rest.front, s.phase());
+    // A lag of more than a row is held to one: no row is drawn in front of the floor.
+    let far = s.drawn(50.0);
+    assert!(far.phase > 0.0 && far.phase <= 1.0, "{far:?}");
+}
+
 #[test]
 fn camera_steps_clamp_and_round_trip() {
     let d = SpectrumCamera::DEFAULT;

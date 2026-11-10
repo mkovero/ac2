@@ -25,15 +25,16 @@ pub struct PeakPoint3d {
 const BOX_HALF: f32 = 4.0;
 
 /// The points of `peaks` (loudest first, levels as stored) of a curve offset by `offset_db`
-/// and read in `unit`, on skyline `sk` within level range `range`. A peak outside the
-/// frequency span or the level range, over a cell the newest row has no level in, or
-/// behind the eye gets none. Its height is its level clamped to its cell's spike on the
+/// and read in `unit`, on skyline `sk` (its newest row `front` rows back) within level range
+/// `range`. A peak outside the frequency span or the level range, over a cell the newest
+/// row has no level in, or behind the eye gets none. Its height is its level clamped to its cell's spike on the
 /// newest row (a cell is a coarser grid than the peak's bin); the label keeps its own.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn peak_points(
     c: &mut Canvas,
     pj: &Projector,
     sk: &Skyline,
+    front: f64,
     peaks: &[Peak],
     offset_db: f64,
     unit: &str,
@@ -49,8 +50,9 @@ pub(super) fn peak_points(
         return Vec::new();
     }
     let pitch = 2.0 * FLOOR_HALF_W / cols as f64;
-    // The newest row slides back with the rows' phase, as the renderer places it.
-    let z = f64::from(sk.phase()) * FLOOR_DEPTH / sk.rows() as f64;
+    // The newest row glides back with the rows ([`Skyline::drawn`]), as the renderer
+    // places it: `front` rows from the front edge.
+    let z = front * FLOOR_DEPTH / sk.rows() as f64;
     let mut points = Vec::new();
     for p in peaks {
         let level = p.level + offset_db;

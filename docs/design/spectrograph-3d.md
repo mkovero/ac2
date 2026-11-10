@@ -129,11 +129,18 @@ Constants in `ac2-scene::spectrograph_3d`:
 - **Field.** The plot rect is always #05080C, in the light theme too, and the labels and
   caption inside it use the dark theme's text colours: light added to a white
   field is invisible.
-- **Motion.** Rows glide back: the phase is the newest bucket's fill fraction (slots
-  filled ÷ slots per bucket), from the data, never a local clock, so a stalled stream stands
-  still. It advances per data frame: smooth at 30 frames/s, coarse on a slow stream (a long
-  FFT updating a few times a second steps the floor back in visible jumps). Heights are the
-  data as received, never interpolated.
+- **Motion.** Rows glide back: at rest the phase is the newest bucket's fill fraction
+  (slots filled ÷ slots per bucket), from the data. A frame moves it on by one slot or more
+  at once, which drawn as received steps the floor back at the frame rate; so the rows glide
+  there from where the previous frame put them over the time until the next frame
+  (`Skyline::drawn`, paced as the 2D curve's glide: capture times, 30–200 ms). The UI passes
+  how many slots the rows are still short (`lag_slots`); the scene keeps no clock. Once the
+  glide ends the phase is the data's again, so a stalled stream stands still, and the pacer
+  runs only while a 3D view glides. Where a glide reaches back past the newest bucket's
+  start, that bucket is not drawn until the rows reach it (the one before it is the front
+  row), so no row stands in front of the floor; a lag is held to one bucket. Settings ›
+  Display "jumps to each new frame" turns it off with the 2D glide. Heights are the data as
+  received, never interpolated.
 
 Spike PNGs (not committed, session scratchpad `look/`): round 1 `sheet_pink.png`,
 `sheet_tonal.png`, `sheet_max_vs_sumbloom.png`; round 2 `sheet_r2_default.png`,
@@ -446,6 +453,8 @@ stepped down once (a blanking stall) would stay degraded for months.
   bands, invalid bands); bucket max, integer k per span × tier, buckets anchored on absolute
   slots across scrolls, the oldest bucket after slots drop out, R + 1 ring; gaps empty; reset on span / grid / scale / frequency-span change;
   frame-by-frame folding equals a rebuild (property test); phase = bucket fill fraction;
+  an update without a new frame keeps every row (nothing re-uploaded); the drawn rows glide
+  back steadily across a new bucket, never drawn in front of the floor;
   heights from range and offset (bottom → 0, top → full, clamp); camera clamps, steps, reset,
   exact round-trip of `SpectrumCamera`, `PaneLayout::check` refusing each out-of-range
   field; **eye outside the grown box at every clamp corner** (yaw ±80/0 × pitch 2/75 ×
@@ -473,7 +482,9 @@ stepped down once (a blanking stall) would stay degraded for months.
 - `ac2-ui`: G / Shift+G through four views, three on a GPU without the 3D view (no camera
   keys, 3D quality does not step); scope, hint line; ←/→, PgUp/PgDn, I/O, Home move
   the camera and leave the frequency axis; inert commands; equal defaults in both scopes;
-  drag, wheel, pinch messages; camera sent on release only; Esc does not touch it.
+  drag, wheel, pinch messages; camera sent on release only; Esc does not touch it; the rows
+  glide to each frame and stand still once there, the pacer only for a 3D view, not with
+  "jumps to each new frame" (`state/tests/display/row_glide.rs`).
 - `ac2-e2e`: `spectrograph_3d_from_an_empty_daemon` (session, spectrum from the palette, G ×3,
   the fake rig's noise fills the skyline, camera keys, the camera survives a second client
   choosing the measurement, T, ice from the palette, G back); GPU snapshot `spectrograph_3d`

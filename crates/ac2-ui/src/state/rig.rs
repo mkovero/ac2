@@ -88,6 +88,11 @@ pub struct RigState {
     pub spec_glide: HashMap<Topic, SpecGlide>,
     /// Per live spectrum or RTA topic, the capture times and arrivals that pace its glides.
     pub spec_pacing: HashMap<Topic, ac2_scene::curve_ease::Pacing>,
+    /// Per measurement, its 3D spectrograph rows' glide to the newest slot.
+    pub row_glide: BTreeMap<MeasId, RowGlide>,
+    /// Per measurement, the capture times and arrivals of the frames that moved its
+    /// history on, which pace the rows' glides.
+    pub row_pacing: BTreeMap<MeasId, ac2_scene::curve_ease::Pacing>,
     /// Per transfer topic, its walk readiness bar's glide to the newest frame's `filled`
     /// ([`FillGlide`]).
     pub fill_glide: HashMap<Topic, FillGlide>,
@@ -255,6 +260,8 @@ impl RigState {
             bar_from: HashMap::new(),
             spec_glide: HashMap::new(),
             spec_pacing: HashMap::new(),
+            row_glide: BTreeMap::new(),
+            row_pacing: BTreeMap::new(),
             fill_glide: HashMap::new(),
             advice: HashMap::new(),
             traces: BTreeMap::new(),
@@ -316,7 +323,7 @@ impl RigState {
         self.fold_peaks(&d);
         self.fold_peak_tracks(&d, &fold.peak_picked);
         if fold.spectrograph_shown {
-            self.fold_spectrographs(&d);
+            self.fold_spectrographs(&d, fold.spec_ease);
         }
         // A new log clears the history before its first frame goes in.
         let forgot = self.follow_leq_logs(Some(&d), out);

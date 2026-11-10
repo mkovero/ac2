@@ -871,6 +871,7 @@ fn bench_frame_cost() {
                     tier,
                     tier_forced: false,
                     axes: 1.0,
+                    lag_slots: 0.0,
                 };
                 let sc = spectrograph_3d_scene(
                     &[],

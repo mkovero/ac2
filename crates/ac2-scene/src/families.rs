@@ -160,6 +160,62 @@ fn sequence(base: Color, candidates: &[Color], clear: f64) -> Vec<Color> {
     shades
 }
 
+/// Every family of a theme: one per hue and the neutral grey. Finding a family's shades
+/// walks the whole lightness range in OKLCH, far too much to repeat for every picture, and
+/// they depend on nothing but the theme's colours: made once per theme and kept by the
+/// caller ([`Self::is_for`] says whether a kept one still fits).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Families {
+    /// What the families were made of: the theme's bases, shade range and plot colour.
+    hues: [Color; FAMILIES],
+    neutral_base: Color,
+    shade_lightness: (f64, f64),
+    plot_background: Color,
+    fams: Vec<Family>,
+    neutral: Family,
+}
+
+impl Families {
+    /// Every family of `theme`.
+    pub fn of(theme: &Theme) -> Self {
+        Self {
+            hues: theme.families,
+            neutral_base: theme.neutral,
+            shade_lightness: theme.shade_lightness,
+            plot_background: theme.plot_background,
+            fams: theme
+                .families
+                .iter()
+                .map(|b| Family::of(theme, *b))
+                .collect(),
+            neutral: Family::of(theme, theme.neutral),
+        }
+    }
+
+    /// Whether these are `theme`'s families: it has the same colours they were made of.
+    pub fn is_for(&self, theme: &Theme) -> bool {
+        self.hues == theme.families
+            && self.neutral_base == theme.neutral
+            && self.shade_lightness == theme.shade_lightness
+            && self.plot_background == theme.plot_background
+    }
+
+    /// Family `c`.
+    pub fn family(&self, c: ColourFamily) -> &Family {
+        match c {
+            ColourFamily::Hue { index } => {
+                self.fams.get(usize::from(index)).unwrap_or(&self.neutral)
+            }
+            ColourFamily::Neutral => &self.neutral,
+        }
+    }
+
+    /// The neutral grey family.
+    pub fn neutral(&self) -> &Family {
+        &self.neutral
+    }
+}
+
 /// The colour of every curve: live curves and math results by measurement, stored traces
 /// by id.
 #[derive(Clone, Debug, PartialEq)]
@@ -247,21 +303,9 @@ pub fn step_colour(meas: &[&Measurement], id: MeasId, forward: bool) -> Option<C
         .find(|c| !held(c))
 }
 
-/// The base colour of family `c` in `theme`.
-pub fn family_base(theme: &Theme, c: ColourFamily) -> Color {
-    match c {
-        ColourFamily::Hue { index } => theme
-            .families
-            .get(usize::from(index))
-            .copied()
-            .unwrap_or(theme.neutral),
-        ColourFamily::Neutral => theme.neutral,
-    }
-}
-
 /// The colours imported traces take in turn, given the measurements' families (see the
 /// module docs for the order). Never empty: the neutral base ends it.
-pub fn import_palette(theme: &Theme, hues: &BTreeMap<MeasId, ColourFamily>) -> Vec<Color> {
+pub fn import_palette(fams: &Families, hues: &BTreeMap<MeasId, ColourFamily>) -> Vec<Color> {
     let mut taken = [false; FAMILIES];
     for c in hues.values() {
         if let ColourFamily::Hue { index } = c
@@ -270,45 +314,42 @@ pub fn import_palette(theme: &Theme, hues: &BTreeMap<MeasId, ColourFamily>) -> V
             *t = true;
         }
     }
-    let fams: Vec<Family> = theme
-        .families
-        .iter()
-        .map(|b| Family::of(theme, *b))
-        .collect();
+    let fam = |i: usize| fams.family(hue(i));
     let (free, held): (Vec<usize>, Vec<usize>) = (0..FAMILIES).partition(|i| !taken[*i]);
-    let mut out: Vec<Color> = free.iter().map(|i| fams[*i].base).collect();
+    let mut out: Vec<Color> = free.iter().map(|i| fam(*i).base).collect();
     for j in 0..MAX_SHADES {
-        out.extend(free.iter().filter_map(|i| fams[*i].shades.get(j)));
+        out.extend(free.iter().filter_map(|i| fam(*i).shades.get(j)));
     }
     for j in (0..MAX_SHADES).rev() {
-        out.extend(held.iter().filter_map(|i| fams[*i].shades.get(j)));
+        out.extend(held.iter().filter_map(|i| fam(*i).shades.get(j)));
     }
-    let neutral = Family::of(theme, theme.neutral);
-    out.push(neutral.base);
-    out.extend(neutral.shades);
+    out.push(fams.neutral.base);
+    out.extend(fams.neutral.shades.iter().copied());
     out
 }
 
-/// Every curve's colour for `meas` (math channels included) and `traces` in `theme`.
-pub fn curve_colours(theme: &Theme, meas: &[&Measurement], traces: &[&TraceMeta]) -> CurveColours {
+/// Every curve's colour for `meas` (math channels included) and `traces` in the theme
+/// `fams` are of.
+pub fn curve_colours(
+    fams: &Families,
+    meas: &[&Measurement],
+    traces: &[&TraceMeta],
+) -> CurveColours {
     let hues = family_indices(meas);
     let mut out = CurveColours {
         meas: BTreeMap::new(),
         traces: BTreeMap::new(),
-        fallback: theme.neutral,
+        fallback: fams.neutral.base,
     };
     for g in group_order(meas) {
         let owner = g.meas().and_then(|id| meas.iter().find(|m| m.id == id));
-        let family = Family::of(
-            theme,
-            match g {
-                TraceOwner::Meas { meas: id } => hues
-                    .get(&id)
-                    .map_or(theme.neutral, |c| family_base(theme, *c)),
-                TraceOwner::Imported => theme.neutral,
-            },
-        );
-        let imports = matches!(g, TraceOwner::Imported).then(|| import_palette(theme, &hues));
+        let family = match g {
+            TraceOwner::Meas { meas: id } => {
+                hues.get(&id).map_or(&fams.neutral, |c| fams.family(*c))
+            }
+            TraceOwner::Imported => &fams.neutral,
+        };
+        let imports = matches!(g, TraceOwner::Imported).then(|| import_palette(fams, &hues));
         // Without a live curve the base colour would go unused: the first member takes it.
         let base_free = owner.is_none_or(|m| !has_live_curve(&m.config.kind));
         if let Some(m) = owner.filter(|m| has_live_curve(&m.config.kind)) {

@@ -85,6 +85,7 @@ fn scene(
         tier: SkylineTier::Full,
         tier_forced: false,
         axes,
+        lag_slots: 0.0,
     };
     spectrograph_3d_scene(
         &[trace(peaks)],

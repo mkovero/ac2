@@ -292,3 +292,127 @@ fn transfer_view_with_a_live_trace_and_eight_stored() {
          every stored trace {cold:?}, with them kept {kept:?}"
     );
 }
+
+/// The 3D spectrograph at 1080p over a full 30 s history of a 1/96-octave spectrum, as a
+/// gliding view rebuilds it every display frame: the skyline's fold of a new frame, the
+/// scene, and the colour families the pane's curves take (made per picture, or kept).
+#[test]
+fn spectrograph_3d_view_with_a_full_history() {
+    use ac2_proto::model::layout::SpectrumCamera;
+    use ac2_scene::families::{Families, curve_colours};
+    use ac2_scene::primitives::{Colormap, SkylineTier};
+    use ac2_scene::spectrograph::{SpectrographFrame, SpectrographHistory};
+    use ac2_scene::spectrograph_3d::{Pose, Skyline, Spectrograph3dInput, spectrograph_3d_scene};
+    const FULL_HD: Viewport = Viewport {
+        width: 1920.0,
+        height: 1080.0,
+    };
+    let g = GridDef::LogBins {
+        fs: Hz(48_000.0),
+        n: 16_384,
+        ppo: 96,
+    };
+    let edges = g.edges();
+    let mut h = SpectrographHistory::new(30);
+    let slot_ns = 1_000_000_000 / 30;
+    let t0 = 1_790_000_000 * 1_000_000_000u64;
+    let level = |i: u64| -> Vec<f32> {
+        (0..edges.len())
+            .map(|c| -60.0 + 30.0 * (((c as u64 * 7 + i * 13) % 97) as f32 / 97.0))
+            .collect()
+    };
+    let mut seq = 0;
+    let mut push = |h: &mut SpectrographHistory, i: u64| {
+        seq += 1;
+        let l = level(i);
+        h.push(&SpectrographFrame {
+            seq,
+            at: WallNs(t0 + i * slot_ns + slot_ns / 2),
+            grid: g.id(),
+            edges: &edges,
+            scale: LevelScale::Dbfs,
+            spec_level: None,
+            level: &l,
+            validity: None,
+        });
+    };
+    let slots = h.slots() as u64;
+    for i in 0..slots {
+        push(&mut h, i);
+    }
+    let full = ac2_scene::axis::Range::new(20.0, 20_000.0);
+    let mut sky = Skyline::default();
+    let rebuild = time(20, || {
+        sky = Skyline::default();
+        sky.update(&h, full, SkylineTier::Full);
+    });
+    let mut i = slots;
+    let fold = time(20, || {
+        push(&mut h, i);
+        sky.update(&h, full, SkylineTier::Full);
+        i += 1;
+    });
+    let between = time(50, || {
+        sky.update(&h, full, SkylineTier::Full);
+    });
+    let theme = Theme::dark();
+    let view = ViewState::default();
+    let input = |lag_slots: f64| Spectrograph3dInput {
+        key: TraceKey::Live(MeasId(1)),
+        history: &h,
+        skyline: &sky,
+        name: "Main L".into(),
+        range: ac2_scene::axis::Range::new(-80.0, 0.0),
+        offset_db: 0.0,
+        freshness: None,
+        colours: Colormap::Ice,
+        camera: Pose::from(SpectrumCamera::DEFAULT),
+        tier: SkylineTier::Full,
+        tier_forced: false,
+        axes: 1.0,
+        lag_slots,
+    };
+    let scene = time(50, || {
+        std::hint::black_box(spectrograph_3d_scene(
+            &[],
+            &Status::default(),
+            Some(&input(1.5)),
+            &view,
+            &theme,
+            FULL_HD,
+        ));
+    });
+    let bare = time(50, || {
+        let mut i = input(1.5);
+        i.axes = 0.0;
+        std::hint::black_box(spectrograph_3d_scene(
+            &[],
+            &Status::default(),
+            Some(&i),
+            &view,
+            &theme,
+            FULL_HD,
+        ));
+    });
+    let meas = [
+        ac2_proto::samples::eq_measurement(),
+        ac2_proto::samples::sweep_measurement(),
+        ac2_proto::samples::math_measurement(),
+    ];
+    let refs: Vec<&Measurement> = meas.iter().collect();
+    let made = time(20, || {
+        std::hint::black_box(curve_colours(&Families::of(&theme), &refs, &[]));
+    });
+    let fams = Families::of(&theme);
+    let kept = time(50, || {
+        std::hint::black_box(curve_colours(&fams, &refs, &[]));
+    });
+    eprintln!(
+        "3D spectrograph 1920x1080, {} slots, {} columns x {} rows: skyline rebuild \
+         {rebuild:?}, fold of a frame {fold:?}, update between frames {between:?}; scene with axes {scene:?}, bare {bare:?}; \
+         curve colours making the families {made:?}, with them kept {kept:?}",
+        h.slots(),
+        sky.cols(),
+        sky.rows(),
+    );
+}

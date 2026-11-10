@@ -308,7 +308,30 @@ impl AppState {
         &self,
         theme: &ac2_scene::theme::Theme,
     ) -> ac2_scene::families::CurveColours {
-        ac2_scene::families::curve_colours(theme, &self.measurements(), &self.stored_traces())
+        ac2_scene::families::curve_colours(
+            &self.families(theme),
+            &self.measurements(),
+            &self.stored_traces(),
+        )
+    }
+
+    /// `theme`'s colour families: those kept, while they are still its.
+    pub(crate) fn families(
+        &self,
+        theme: &ac2_scene::theme::Theme,
+    ) -> Arc<ac2_scene::families::Families> {
+        let mut kept = self
+            .families
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match kept.as_ref().filter(|f| f.is_for(theme)) {
+            Some(f) => f.clone(),
+            None => {
+                let f = Arc::new(ac2_scene::families::Families::of(theme));
+                *kept = Some(f.clone());
+                f
+            }
+        }
     }
 
     /// Stored traces as the tree and the trace list get them.

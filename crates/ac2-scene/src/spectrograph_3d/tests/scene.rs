@@ -59,6 +59,7 @@ fn scene_3d_as(
         tier,
         tier_forced: forced,
         axes,
+        lag_slots: 0.0,
     };
     spectrograph_3d_scene(
         &[],
@@ -145,6 +146,7 @@ fn labels_stay_whole_inside_the_field() {
                 tier: SkylineTier::Full,
                 tier_forced: false,
                 axes: 1.0,
+                lag_slots: 0.0,
             };
             let s = spectrograph_3d_scene(
                 &[],
@@ -433,6 +435,7 @@ fn heights_follow_the_range_and_offset() {
         tier: SkylineTier::Full,
         tier_forced: false,
         axes: 1.0,
+        lag_slots: 0.0,
     };
     let s = spectrograph_3d_scene(
         &[],
