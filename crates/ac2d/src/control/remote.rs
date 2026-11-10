@@ -29,6 +29,11 @@ use crate::rig::RigSettings;
 use crate::session::Runtime;
 use crate::util::{perr, wall_ns};
 
+/// Audio queued for other rigs while the I/O thread does not take it, s: well past the
+/// longest link offset, so a hiccup loses nothing a rig could still use, and no more, since
+/// anything older reaches the other rig late.
+const TAP_QUEUE_S: f64 = 4.0 * crate::remote::MAX_LINK_OFFSET_S;
+
 use super::Control;
 use super::rig::ServerSetup;
 
@@ -316,7 +321,16 @@ impl Control {
         }
         // The tap: other rigs may take this rig's inputs in network mode only.
         if matches!(self.s.server, ServerSetup::Network(_)) {
-            match Outbox::connect(&self.s.ctx, &self.s.endpoint, 100_000) {
+            // A message per channel per device period; past this much audio queued the I/O
+            // thread has stalled, and the newest frames are dropped rather than memory
+            // spent on audio the other rig would take as late anyway.
+            let periods = (TAP_QUEUE_S * f64::from(rt.sample_rate)
+                / f64::from(rt.open.buffer_frames.max(1)))
+            .ceil() as u32;
+            let hwm = periods
+                .saturating_mul(u32::try_from(rt.input_map.len()).unwrap_or(u32::MAX))
+                .max(1);
+            match Outbox::connect(&self.s.ctx, &self.s.endpoint, hwm) {
                 Ok(o) => rt.fanout.tap(Some(SourceTap::new(
                     o,
                     Arc::clone(&self.s.interest),
