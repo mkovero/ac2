@@ -421,23 +421,27 @@ impl SpectrumMode {
     /// spectrograph first comes in beside the curve it is made of, so its history (kept only
     /// while it is shown) builds while the spectrum is still in view; it then takes the
     /// whole pane with its history, stands up in 3D on the same history, and the last step
-    /// back hides it.
-    pub fn next(self) -> Self {
+    /// back hides it. Without `three_d` (a GPU too slow to fill the spikes) the chain skips
+    /// the 3D view.
+    pub fn next(self, three_d: bool) -> Self {
         match self {
             Self::Spectrum => Self::Split,
             Self::Split => Self::Spectrograph,
-            Self::Spectrograph => Self::Spectrograph3d,
-            Self::Spectrograph3d => Self::Spectrum,
+            Self::Spectrograph if three_d => Self::Spectrograph3d,
+            Self::Spectrograph | Self::Spectrograph3d => Self::Spectrum,
         }
     }
 
     /// Shift+G: [`Self::next`] backwards.
-    pub fn prev(self) -> Self {
+    pub fn prev(self, three_d: bool) -> Self {
         match self {
-            Self::Spectrum => Self::Spectrograph3d,
+            Self::Spectrum if three_d => Self::Spectrograph3d,
+            Self::Spectrum => Self::Spectrograph,
             Self::Split => Self::Spectrum,
-            Self::Spectrograph => Self::Split,
-            Self::Spectrograph3d => Self::Spectrograph,
+            Self::Spectrograph3d if three_d => Self::Spectrograph,
+            // Without the 3D view a layout's 3D pane is drawn as the spectrograph: it steps
+            // as that one does.
+            Self::Spectrograph | Self::Spectrograph3d => Self::Split,
         }
     }
 

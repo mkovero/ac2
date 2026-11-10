@@ -5,7 +5,7 @@ use crate::state::*;
 impl AppState {
     /// The wheel moves a list window's highlight; it never reaches what is behind it.
     pub(in crate::state) fn wheel(&mut self, rows: i32, keymap: &Keymap) {
-        let scope = self.layout.focused().scope();
+        let scope = self.layout.focused().scope(self.three_d());
         match &mut self.overlay {
             Overlay::Palette(p) => {
                 let n = p.entries(keymap, scope).len();
@@ -100,7 +100,7 @@ impl AppState {
                 return;
             }
             Overlay::Palette(p) => {
-                let scope = self.layout.focused().scope();
+                let scope = self.layout.focused().scope(self.auto_tier.is_some());
                 let n = p.entries(keymap, scope).len();
                 let page = crate::palette::PALETTE_ROWS as i32;
                 match chord.key {

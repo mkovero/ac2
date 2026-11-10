@@ -196,8 +196,8 @@ pub struct AppState {
     /// The 3D spectrograph's camera while it eases or is dragged.
     cam3d: Option<cam3d::CamNav>,
     /// The 3D spectrograph's tier on this machine's GPU (Settings › 3D quality may override
-    /// it); set by the app from the adapter.
-    pub auto_tier: ac2_scene::primitives::SkylineTier,
+    /// it); set by the app from the adapter. `None`: the GPU has no 3D view.
+    pub auto_tier: Option<ac2_scene::primitives::SkylineTier>,
     pub layout: Layout,
     /// The size of the panes' area as last drawn (the view writes it): N splits the
     /// focused pane along its longer side.
@@ -331,7 +331,7 @@ impl AppState {
             view: ViewState::default(),
             nav: FreqNav::new(FreqRange::default()),
             cam3d: None,
-            auto_tier: ac2_scene::primitives::SkylineTier::Full,
+            auto_tier: Some(ac2_scene::primitives::SkylineTier::Full),
             layout: Layout::default(),
             pane_area: DEFAULT_PANE_AREA,
             spl_scales: Vec::new(),

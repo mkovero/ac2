@@ -88,7 +88,7 @@ impl AppState {
     pub fn cam3d_target(&self) -> Option<PaneId> {
         self.layout
             .focused()
-            .shows_3d()
+            .shows_3d(self.three_d())
             .then_some(self.layout.focus)
     }
 
@@ -143,7 +143,11 @@ impl AppState {
     }
 
     pub(super) fn cam3d_msg(&mut self, pane: PaneId, m: Cam3dMsg) {
-        if !self.layout.view(pane).is_some_and(|v| v.shows_3d()) {
+        if !self
+            .layout
+            .view(pane)
+            .is_some_and(|v| v.shows_3d(self.three_d()))
+        {
             return;
         }
         match m {
@@ -188,7 +192,11 @@ impl AppState {
         let Some(mut n) = self.cam3d else {
             return;
         };
-        if !self.layout.view(n.pane).is_some_and(|v| v.shows_3d()) {
+        if !self
+            .layout
+            .view(n.pane)
+            .is_some_and(|v| v.shows_3d(self.three_d()))
+        {
             self.cam3d = None;
             return;
         }

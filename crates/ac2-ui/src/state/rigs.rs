@@ -269,7 +269,7 @@ impl AppState {
             Msg::IrNav(..) | Msg::SpectrographCursor { .. } if free => focused,
             Msg::Command(c) if free && pane_command(*c) => focused,
             Msg::Key(chord) if free => {
-                let scope = self.layout.focused().scope();
+                let scope = self.layout.focused().scope(self.three_d());
                 match keymap.lookup(scope, *chord) {
                     Some(c) if pane_command(c) => focused,
                     _ => self.rig.id,

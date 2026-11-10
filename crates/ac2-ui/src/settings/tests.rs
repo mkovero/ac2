@@ -98,7 +98,7 @@ fn display_and_recording_texts() {
         shared_scale: false,
         spec_ease: false,
         quality_3d: ac2_scene::spectrograph_3d::Quality::Auto,
-        auto_tier: ac2_scene::primitives::SkylineTier::Lite,
+        auto_tier: Some(ac2_scene::primitives::SkylineTier::Lite),
         plate_background: ac2_scene::plate::PlateBackground::Solid,
     };
     let rows = display_rows(
@@ -142,6 +142,10 @@ fn display_and_recording_texts() {
             "measurement input under −70.0 dBFS RMS",
         ]
     );
+    // A GPU without the 3D view: the line says so, whatever is set.
+    for q in ac2_scene::spectrograph_3d::Quality::ALL {
+        assert_eq!(quality_3d_text(q, None), "unavailable on this GPU");
+    }
     let rows = recording_rows(60, None);
     assert_eq!(rows[0].1, "the record toggle stops by itself after 60 min");
     assert_eq!(rows[1].1, "asking the daemon…");

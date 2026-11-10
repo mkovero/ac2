@@ -548,12 +548,19 @@ pub fn spec_ease_text(on: bool) -> &'static str {
     }
 }
 
+/// The 3D quality line on a GPU too slow for any tier.
+pub const QUALITY_3D_UNAVAILABLE: &str = "unavailable on this GPU";
+
 /// What the 3D quality setting says, on the Display page and in its toast: by the GPU
-/// (naming what it chose here) or as set.
+/// (naming what it chose here) or as set; on a GPU without the 3D view (`auto` `None`),
+/// that, whatever is set.
 pub fn quality_3d_text(
     q: ac2_scene::spectrograph_3d::Quality,
-    auto: ac2_scene::primitives::SkylineTier,
+    auto: Option<ac2_scene::primitives::SkylineTier>,
 ) -> String {
+    let Some(auto) = auto else {
+        return QUALITY_3D_UNAVAILABLE.into();
+    };
     use ac2_scene::spectrograph_3d::{Quality, tier_name};
     let what = |t| match t {
         ac2_scene::primitives::SkylineTier::Full => "full: finest grid, full-resolution spikes",
@@ -581,7 +588,7 @@ pub struct DisplaySwitches {
     pub spec_ease: bool,
     pub quality_3d: ac2_scene::spectrograph_3d::Quality,
     /// The tier the GPU gets when the quality is auto.
-    pub auto_tier: ac2_scene::primitives::SkylineTier,
+    pub auto_tier: Option<ac2_scene::primitives::SkylineTier>,
     pub plate_background: ac2_scene::plate::PlateBackground,
 }
 

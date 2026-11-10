@@ -84,7 +84,7 @@ impl crate::App {
         // The 3D spectrograph exports at the full tier whatever this machine draws: an
         // exported picture is the same on every machine.
         let full;
-        let scene = if cached.view.shows_3d() {
+        let scene = if cached.view.shows_3d(self.state.three_d()) {
             let st = &self.state;
             full = crate::scenes::spectrograph_3d(
                 st,

@@ -769,3 +769,47 @@ fn a_column_reserve_lines_up_the_frequency_axes() {
         assert_eq!(x_1k, sg.x_axis.mapping.to_px(1000.0), "{name}");
     }
 }
+
+/// A layout that names the 3D view on a GPU without it: the spectrograph alone, as
+/// G steps to it, and a caption that says why it is flat, kept when the caption shortens.
+#[test]
+fn the_3d_view_on_a_gpu_without_it_is_the_spectrograph_with_a_note() {
+    let mut h = SpectrographHistory::new(30);
+    let mut f = Feed::new(&log_bins());
+    f.push(&mut h, T0, -40.0);
+    let mut view = ViewState::default();
+    view.spectrum.mode = SpectrumMode::Spectrograph;
+    let flat = scene_of(&h, &view);
+    view.spectrum.mode = SpectrumMode::Spectrograph3d;
+    let s = scene_of(&h, &view);
+    assert!(s.spectrum.is_none(), "the spectrograph alone");
+    assert_eq!(s.plot, flat.plot);
+    assert_eq!(
+        s.caption,
+        "Main · last 30 s · dBFS (tone) · 3D needs a faster GPU"
+    );
+    let shown = |s: &SpectrographScene| -> Vec<String> {
+        s.scene
+            .layers
+            .iter()
+            .flat_map(|l| l.labels.iter())
+            .map(|l| l.text.clone())
+            .collect()
+    };
+    assert!(shown(&s).contains(&s.caption), "{:?}", shown(&s));
+    assert!(!shown(&flat).iter().any(|t| t.contains(NO_3D)));
+    // Without a measurement the note is the whole caption.
+    let none = spectrograph_scene(
+        &[],
+        &Status::default(),
+        None,
+        &view,
+        &Theme::dark(),
+        Viewport {
+            width: 800.0,
+            height: 500.0,
+        },
+    );
+    assert_eq!(none.caption, NO_3D);
+    assert!(shown(&none).contains(&NO_3D.to_string()));
+}

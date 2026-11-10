@@ -863,7 +863,15 @@ impl AppState {
     /// The Display page's Plate background line, for every plate of every pane; remembered
     /// in the prefs.
     /// The Display page's 3D quality: auto → full → lite → bare; remembered in the prefs.
+    /// On a GPU without the 3D view the setting stays as it is: it says so instead.
     pub(super) fn step_quality_3d(&mut self, d: i32) {
+        if !self.three_d() {
+            self.warn(format!(
+                "3D quality: {}",
+                crate::settings::QUALITY_3D_UNAVAILABLE
+            ));
+            return;
+        }
         self.prefs.quality_3d = self.prefs.quality_3d.step(d.signum());
         self.prefs_dirty = true;
         self.toast(format!(

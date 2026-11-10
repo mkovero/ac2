@@ -1345,8 +1345,12 @@ per frequency and moment, as tall as its level. **G** once more is the spectrum 
 - **The frequency span** follows the spectrum's: change it in another pane, or one **G**
   back, zoom, then **G** again.
 - **Settings › Display › 3D quality**: *Auto* (by the GPU; the row says which it picked),
-  *Full*, *Lite* (fewer, coarser spikes at half resolution, for the Pi) or *Bare*. A forced
-  tier is named in the caption; an exported PNG is always Full.
+  *Full*, *Lite* (fewer, coarser spikes at half resolution, for an integrated GPU such as
+  Intel's) or *Bare* (Lite without the glow). A forced tier is named in the caption; an
+  exported PNG is always Full.
+- **A Raspberry Pi (V3D GPU) has no 3D view**: it cannot fill the spikes in time even on
+  *Bare*. **G** / **Shift+G** skip it, a layout that names it shows the 2D spectrograph with
+  *3D needs a faster GPU* in its caption, and 3D quality reads *unavailable on this GPU*.
 - `keys.toml` rebinds are per section: the 3D view's keys are in `[spectrograph_3d]`, and a
   key rebound in `[spectrum]` is not carried into it.
 

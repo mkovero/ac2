@@ -300,7 +300,12 @@ pub(super) fn navigate(
     }
     // The 3D spectrograph: after the level range's Ctrl / Shift+wheel (it sets the
     // heights), before the frequency axis, whose gestures move the camera here.
-    if app.state.layout.view(id).is_some_and(|v| v.shows_3d()) {
+    if app
+        .state
+        .layout
+        .view(id)
+        .is_some_and(|v| v.shows_3d(app.state.three_d()))
+    {
         navigate_3d(app, ui, resp, id);
         return;
     }

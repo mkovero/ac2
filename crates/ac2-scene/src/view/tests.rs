@@ -113,13 +113,35 @@ fn view_chains_wrap_both_ways() {
         SpectrumMode::Spectrograph,
         SpectrumMode::Spectrograph3d,
     ] {
-        assert_eq!(m.next().prev(), m);
+        assert_eq!(m.next(true).prev(true), m);
     }
     assert_eq!(
-        SpectrumMode::Spectrograph.next(),
+        SpectrumMode::Spectrograph.next(true),
         SpectrumMode::Spectrograph3d
     );
-    assert_eq!(SpectrumMode::Spectrum.prev(), SpectrumMode::Spectrograph3d);
+    assert_eq!(
+        SpectrumMode::Spectrum.prev(true),
+        SpectrumMode::Spectrograph3d
+    );
+    // A GPU without the 3D view: the chain is three views, and a layout that named the 3D
+    // view steps on as from the spectrograph it is drawn as.
+    for m in [
+        SpectrumMode::Spectrum,
+        SpectrumMode::Split,
+        SpectrumMode::Spectrograph,
+    ] {
+        assert_eq!(m.next(false).prev(false), m);
+        assert_ne!(m.next(false), SpectrumMode::Spectrograph3d);
+        assert_ne!(m.prev(false), SpectrumMode::Spectrograph3d);
+    }
+    assert_eq!(
+        SpectrumMode::Spectrograph3d.next(false),
+        SpectrumMode::Spectrum
+    );
+    assert_eq!(
+        SpectrumMode::Spectrograph3d.prev(false),
+        SpectrumMode::Split
+    );
     for bands in [false, true] {
         let modes: &[SplMode] = if bands {
             &[

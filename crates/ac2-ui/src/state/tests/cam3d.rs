@@ -49,6 +49,44 @@ fn g_walks_four_views_and_back() {
     );
 }
 
+/// A GPU without the 3D view (a Pi's V3D): G walks three views, and a layout that names
+/// the 3D one has the spectrograph's keys, not the camera's.
+#[test]
+fn without_the_3d_view_g_skips_it() {
+    let mut t = on_3d();
+    t.st.auto_tier = None;
+    assert_eq!(t.st.cam3d_target(), None);
+    assert_eq!(t.st.scope(), crate::keys::Scope::Spectrum);
+    let cam = camera(&t);
+    t.key("ArrowLeft");
+    assert_eq!(camera(&t), cam, "no camera to move");
+    // From the flat drawing of the layout's 3D view, as from the spectrograph.
+    t.key("G");
+    let mode = |t: &T| t.st.kind_modes(PaneKind::Spectrum).spectrum;
+    assert_eq!(mode(&t), SpectrumMode::Spectrum);
+    for want in [
+        SpectrumMode::Split,
+        SpectrumMode::Spectrograph,
+        SpectrumMode::Spectrum,
+    ] {
+        t.key("G");
+        assert_eq!(mode(&t), want);
+    }
+    for want in [
+        SpectrumMode::Spectrograph,
+        SpectrumMode::Split,
+        SpectrumMode::Spectrum,
+    ] {
+        t.key("Shift+G");
+        assert_eq!(mode(&t), want);
+    }
+    // Settings cannot force it: the quality stays, the toast says why.
+    let q = t.st.prefs.quality_3d;
+    t.st.step_quality_3d(1);
+    assert_eq!(t.st.prefs.quality_3d, q);
+    assert_eq!(t.last_toast(), "3D quality: unavailable on this GPU");
+}
+
 #[test]
 fn keys_move_the_camera_not_the_frequency_axis() {
     let mut t = on_3d();

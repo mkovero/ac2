@@ -494,7 +494,10 @@ impl AppState {
         style: crate::keys::LabelStyle,
     ) -> Vec<crate::hints::KeyHint> {
         let pane = self.layout.kind(id);
-        let scope = self.layout.view(id).map_or(pane.scope(), |v| v.scope());
+        let scope = self
+            .layout
+            .view(id)
+            .map_or(pane.scope(), |v| v.scope(self.three_d()));
         crate::hints::line(keymap, scope, style)
     }
 }

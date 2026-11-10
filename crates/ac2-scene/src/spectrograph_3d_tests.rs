@@ -450,45 +450,50 @@ fn auto_tier_by_adapter() {
     };
     assert_eq!(
         auto_tier(&f(true, "llvmpipe", 8192, false)),
-        SkylineTier::Bare
+        Some(SkylineTier::Bare)
     );
     assert_eq!(
         auto_tier(&f(false, "V3D 4.2", 4096, true)),
-        SkylineTier::Lite
+        None,
+        "V3D on GLES: no tier fills in time"
     );
     assert_eq!(
         auto_tier(&f(false, "V3D 4.2.14.0", 8192, false)),
-        SkylineTier::Lite,
+        None,
         "v3dv Vulkan"
     );
     assert_eq!(
         auto_tier(&f(false, "Some iGPU", 4096, false)),
-        SkylineTier::Lite
+        Some(SkylineTier::Lite)
     );
     assert_eq!(
         auto_tier(&f(false, "Intel UHD 620", 16384, true)),
-        SkylineTier::Lite
+        Some(SkylineTier::Lite)
     );
     assert_eq!(
         auto_tier(&f(false, "Apple M2", 16384, true)),
-        SkylineTier::Full
+        Some(SkylineTier::Full)
     );
     assert_eq!(
         auto_tier(&f(false, "NVIDIA RTX", 32768, false)),
-        SkylineTier::Full
+        Some(SkylineTier::Full)
     );
     assert_eq!(
-        Quality::Auto.tier(SkylineTier::Lite),
-        (SkylineTier::Lite, false)
+        Quality::Auto.tier(Some(SkylineTier::Lite)),
+        Some((SkylineTier::Lite, false))
     );
     assert_eq!(
-        Quality::Bare.tier(SkylineTier::Full),
-        (SkylineTier::Bare, true)
+        Quality::Bare.tier(Some(SkylineTier::Full)),
+        Some((SkylineTier::Bare, true))
     );
     assert_eq!(
-        Quality::Full.tier(SkylineTier::Bare),
-        (SkylineTier::Full, true)
+        Quality::Full.tier(Some(SkylineTier::Bare)),
+        Some((SkylineTier::Full, true))
     );
+    // An adapter without the view: no setting brings it back.
+    for q in Quality::ALL {
+        assert_eq!(q.tier(None), None, "{q:?}");
+    }
     assert_eq!(Quality::Bare.step(1), Quality::Auto);
 }
 

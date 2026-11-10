@@ -429,6 +429,9 @@ pub struct SpectrographScene {
     pub stitches: Vec<crate::stitch::Stitch>,
 }
 
+/// The caption's last words when a layout names the 3D view on a GPU without it.
+pub const NO_3D: &str = "3D needs a faster GPU";
+
 /// Share of the pane height the spectrum keeps above the spectrograph.
 pub const SPECTRUM_SHARE: f32 = 0.4;
 const BAR_GAP: f32 = 8.0;
@@ -449,6 +452,9 @@ const BAR_ID: HeatmapId = HeatmapId(2);
 /// [`SpectrumMode::Spectrograph`] the banners and the spectrograph alone, its caption
 /// carrying the calibration the spectrum's would. A colour bar with the level range right of
 /// it. `None` (no spectrum or RTA measurement) draws an empty plot that says so.
+///
+/// Asked for [`SpectrumMode::Spectrograph3d`], the GPU has no 3D view (the UI draws that
+/// one itself otherwise): the spectrograph alone, its caption ending in [`NO_3D`].
 pub fn spectrograph_scene(
     traces: &[SpectrumTrace<'_>],
     status: &Status,
@@ -459,7 +465,8 @@ pub fn spectrograph_scene(
 ) -> SpectrographScene {
     let chrome = view.chrome;
     let cursor_hz = view.cursor_hz.filter(|_| chrome.cursor());
-    let alone = view.spectrum.mode == SpectrumMode::Spectrograph;
+    let no_3d = view.spectrum.mode == SpectrumMode::Spectrograph3d;
+    let alone = view.spectrum.mode == SpectrumMode::Spectrograph || no_3d;
     // The colour bar sits right of the plots; a column neighbour may reserve more.
     let right = crate::freq_column::right(RIGHT_MARGIN, view);
     let (spectrum, mut layers, banners, top) = if alone {
@@ -675,6 +682,19 @@ pub fn spectrograph_scene(
         }
     }
     forms.extend([caption.clone(), own, String::new()]);
+    // The note stays on every shortened form: it tells why the layout's 3D view is flat.
+    if no_3d {
+        let note = |c: &str| {
+            if c.is_empty() {
+                NO_3D.to_string()
+            } else {
+                format!("{c} · {NO_3D}")
+            }
+        };
+        caption = note(&caption);
+        forms = forms.iter().map(|f| note(f)).collect();
+        forms.push(String::new());
+    }
     // The cursor readout wins the line above the plot when both do not fit; the caption
     // gives up its details first, its name last.
     let room = cursor.as_ref().map_or(plot.w, |cur| {

@@ -8,7 +8,8 @@ same history, same level range, a different picture of it.
 The 2D spectrograph is the reading instrument: colour is level, a click reads a point. The
 3D spectrograph is the *seeing* one: level is height, so a feedback ring, a resonance that
 keeps returning or a band that swells reads as a shape across the room without decoding a
-colour scale. It is meant to be left running (on a kiosk too) and to look good doing so.
+colour scale. It is meant to be left running and to look good doing so. It is an x86 /
+Apple desktop view: a Raspberry Pi's V3D has no 3D view (*Performance*).
 
 **G** in the spectrum pane steps spectrum → spectrum + spectrograph → spectrograph →
 **3D spectrograph** → spectrum; **Shift+G** back. The 3D view takes the whole pane, like the
@@ -350,12 +351,12 @@ spike target at half resolution composited with bilinear upscale — a quarter o
 4 M worst case — and 5-tap bloom. *Bare* as Lite without bloom. Every tier adds one composite
 pass over the pane (two with bloom); Rg8 writes half the bytes of Rgba8.
 
-| per frame, 1080p pane | Full, discrete / Apple GPU | Lite, Pi 4 / CM4 V3D |
-|---|---|---|
-| CPU (fold, scene, labels) | ≤ 0.3 ms | ≤ 2 ms |
-| GPU at default camera | ≤ 3 ms | ≤ 12 ms (under half a 30 fps frame) |
-| GPU at worst clamp corner | ≤ 6 ms | ≤ 20 ms (30 fps still holds with egui) |
-| upload | 1.5 kB | 1 kB |
+| per frame, 1080p pane | Full, discrete / Apple GPU |
+|---|---|
+| CPU (fold, scene, labels) | ≤ 0.3 ms |
+| GPU at default camera | ≤ 3 ms |
+| GPU at worst clamp corner | ≤ 6 ms |
+| upload | 1.5 kB |
 
 **Measured** (v1b, `bench_frame_cost`: the whole view at a 1920×1080 pane, every spike near
 full height, 30 s history, median of 30 frames, release build). The development desktop has
@@ -373,13 +374,32 @@ Worst corner: the worst of yaw ±80/0 × pitch 2/75 at the closest zoom.
 
 On llvmpipe GL the driver rasterizes inside the submit, so CPU ≈ GPU there (Full 156 / 225
 ms, Lite 46 / 53, Bare 25 / 40, default / worst). The CPU column is over the 0.3 ms budget
-by a tenth on this machine: the scene with labels at 1080p. The CM4 run (gate 0) fills the
-Pi column.
+by a tenth on this machine: the scene with labels at 1080p.
 
-**Tier choice (v1)**: *Auto* picks by adapter, never by backend — the Pi runs GLES 3.1 or
-v3dv Vulkan (`ac2-ui/src/gpu.rs`): `Rasterizer::Software` → Bare; adapter name containing
-`V3D` (either backend), or `max_texture_dimension_2d` ≤ 4096, or another integrated GPU that
-is not Apple → Lite; otherwise Full. The Settings override (Full / Lite / Bare) wins. No
+**Desktop GPU** (NVIDIA RTX 2070, Vulkan, 1080p, every spike at full height, the host under
+load), default camera:
+
+| tier | GPU | CPU |
+|---|---|---|
+| Full | 1.57 ms | 0.21 ms |
+| Lite | 0.38 ms | 0.20 ms |
+| Bare | 0.24 ms | 0.18 ms |
+
+Full is at half its 3 ms budget; Lite and Bare take a quarter and a sixth of Full's GPU time,
+the margin a weaker x86 GPU (an Intel iGPU, which Auto puts on Lite) has to work with.
+
+**CM4 (V3D)**: functional pass on GLES 3.1 and on v3dv Vulkan (every skyline test and golden
+passes on both), but Bare alone takes 96–142 ms of GPU a frame, 8–10× over a 30 fps frame:
+the fill rate, not a feature, is missing, and no tier the look allows closes that.
+**Decision (operator)**: the Pi is off; the view targets x86 (and Apple) desktops. On a
+V3D-class adapter the 3D view is unavailable: **G** / **Shift+G** skip it, a layout that
+names it draws the 2D spectrograph with *3D needs a faster GPU* ending its caption, and
+Settings › 3D quality reads *unavailable on this GPU* and does not step.
+
+**Tier choice (v1)**: *Auto* picks by adapter, never by backend — a Pi runs GLES 3.1 or
+v3dv Vulkan (`ac2-ui/src/gpu.rs`): adapter name containing `V3D` (either backend) → no tier,
+the view unavailable; `Rasterizer::Software` → Bare; `max_texture_dimension_2d` ≤ 4096, or
+an integrated GPU that is not Apple → Lite; otherwise Full. The Settings override (Full / Lite / Bare) wins. No
 automatic step-down in v1: with the app pacing its own frames on a never-waiting present
 mode, a late frame does not separate a busy GPU from a busy UI thread, and a kiosk that
 stepped down once (a blanking stall) would stay degraded for months.
@@ -402,7 +422,7 @@ stepped down once (a blanking stall) would stay degraded for months.
   closest zoom × narrow and very wide aspects), stored step unchanged by the clamp; floor corners inside the
   rect at the default; label texts, sides by yaw, culling, thinning at ±80°; height scale
   ticks and unit; T levels; ceiling line; draw order within the layer; caption cell size
-  from k and tier name when forced; phase per data frame; Auto tier for software, V3D on GL, V3D on Vulkan,
+  from k and tier name when forced; phase per data frame; Auto tier for software, none for V3D on GL and on Vulkan,
   4096-limit integrated, Apple, discrete; override wins.
 - `ac2-plot` (`tests/it/render.rs`, `golden.rs`): a single spike lands at the pixel the scene
   projects; max blending (two overlapping spikes give the brighter, not the sum, and the
@@ -416,7 +436,7 @@ stepped down once (a blanking stall) would stay degraded for months.
   per tier (*Performance*).
 - **GL in CI**: the skyline render tests also run with `WGPU_BACKEND=gl` (llvmpipe, which
   gets the WebGL2-class limits): vertex-stage `textureLoad` of R32Float, instancing, Max
-  into Rg8Unorm (the two-spike test) are exercised on the backend the Pi uses.
+  into Rg8Unorm (the two-spike test) are exercised on GL as well as Vulkan.
 - `ac2-ui`: G / Shift+G through four views; scope, hint line; ←/→, PgUp/PgDn, I/O, Home move
   the camera and leave the frequency axis; inert commands; equal defaults in both scopes;
   drag, wheel, pinch messages; camera sent on release only; Esc does not touch it.
@@ -429,10 +449,8 @@ stepped down once (a blanking stall) would stay degraded for months.
 
 0. **Look spike** (done): max on level and brightness into Rg8, LUT in the composite,
    additive bloom source; steep body with a fixed tip cap.
-1. **Gate 0, CM4 spike** (waits for the operator's OK to use the kiosk; not run): throwaway
-   code on the CM4 doing instanced quads, vertex-stage `textureLoad`, Max into a half-res
-   Rg8 target and the composite, on GL and on v3dv Vulkan. Go / no-go plus frame times at
-   1080p for the default and the worst camera; its numbers replace the Pi column above.
+1. **CM4 run** (done): the v1b build on the CM4, GLES 3.1 and v3dv Vulkan: every test
+   passes, Bare 96–142 ms of GPU a frame (*Performance*). The Pi is off; V3D has no 3D view.
 2. **v1a** (done, branch `spectrograph-3d`): wire (view, camera, ice, validation), skyline,
    camera, scene, axes; renderer encoder API, the offscreen spike target and composite at
    full and half resolution, floor; Settings quality; keys, mouse, hints, user guide; goldens
@@ -457,7 +475,7 @@ stepped down once (a blanking stall) would stay degraded for months.
    - **Colour maps** moved from `ac2-ui` to `ac2-scene` (`colormap`), so the skyline's LUT
      and the 2D spectrograph's come from one table.
    - The skyline goldens are their own test binary (`ac2-plot --test skyline`), run on GL in
-   CI and by gate 0 on the CM4 with `WGPU_BACKEND=gl` or `vulkan`.
+   CI and on the CM4 run with `WGPU_BACKEND=gl` or `vulkan`.
 3. **v1b** (done, branch `spectrograph-3d`): bloom as *The look* has it, `SkylineGlow` in
    the scene's data layer after the ceiling line and before the axis labels (the floor band
    and floor grid are in the base layer under the spikes, as in v1a); goldens re-blessed
@@ -489,8 +507,8 @@ stepped down once (a blanking stall) would stay degraded for months.
 3. **Floor over the shared frequency span or always the full history range?** Shared span,
    as the 2D view: zoom a band elsewhere, G, and the 3D floor shows that band in more detail.
 4. **Newest row at the front or the back?** Front: crisp and nearest, history recedes.
-5. **Double-click / double-tap to reset the camera?** Not in v1 (Home); revisit on the touch
-   kiosk.
+5. **Double-click / double-tap to reset the camera?** Not in v1 (Home); revisit with a
+   touch screen on a desktop.
 6. **Look constants** (foot 0.05, `t^3.5`, 2.5 px tip cap at 1.5×, depth `exp(−2.0·age/1.2)`,
    bloom source gain 0.12 above a 0.25 brightness threshold): set on synthetic data and
    tuned on programme material (six electrical music excerpts, *The look*); only the bloom

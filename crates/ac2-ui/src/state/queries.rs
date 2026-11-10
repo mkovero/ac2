@@ -759,8 +759,14 @@ impl AppState {
         if self.rig.input_pick.is_some() {
             Scope::Inputs
         } else {
-            self.layout.focused().scope()
+            self.layout.focused().scope(self.three_d())
         }
+    }
+
+    /// This machine's GPU draws the 3D spectrograph; without it a layout's 3D view is the
+    /// flat spectrograph and G skips it.
+    pub fn three_d(&self) -> bool {
+        self.auto_tier.is_some()
     }
 
     /// Navigation still moving: the UI keeps repainting until it settles.

@@ -613,14 +613,16 @@ impl Quality {
     }
 
     /// The tier drawn with `auto` the adapter's, and whether it was forced (the caption
-    /// names a forced tier).
-    pub fn tier(self, auto: SkylineTier) -> (SkylineTier, bool) {
-        match self {
+    /// names a forced tier). `None` when the adapter has no tier: Settings cannot force a
+    /// view the GPU cannot fill in time.
+    pub fn tier(self, auto: Option<SkylineTier>) -> Option<(SkylineTier, bool)> {
+        let auto = auto?;
+        Some(match self {
             Quality::Auto => (auto, false),
             Quality::Full => (SkylineTier::Full, true),
             Quality::Lite => (SkylineTier::Lite, true),
             Quality::Bare => (SkylineTier::Bare, true),
-        }
+        })
     }
 
     /// `d` places on in [`Self::ALL`], wrapping.
@@ -642,19 +644,19 @@ pub struct AdapterFacts {
 }
 
 /// The tier for an adapter, by what it is, never by backend (a Pi runs GLES or Vulkan):
-/// software → Bare; a Broadcom V3D, a 4096-texel limit or an integrated GPU other than
+/// a Broadcom V3D → none, the 3D view is unavailable (its fill rate leaves even Bare 8–10×
+/// over a frame); software → Bare; a 4096-texel limit or an integrated GPU other than
 /// Apple's → Lite; otherwise Full.
-pub fn auto_tier(a: &AdapterFacts) -> SkylineTier {
+pub fn auto_tier(a: &AdapterFacts) -> Option<SkylineTier> {
     let name = a.name.to_ascii_lowercase();
-    if a.software {
-        SkylineTier::Bare
-    } else if name.contains("v3d")
-        || a.max_texture_2d <= 4096
-        || (a.integrated && !name.contains("apple"))
-    {
-        SkylineTier::Lite
+    if name.contains("v3d") {
+        None
+    } else if a.software {
+        Some(SkylineTier::Bare)
+    } else if a.max_texture_2d <= 4096 || (a.integrated && !name.contains("apple")) {
+        Some(SkylineTier::Lite)
     } else {
-        SkylineTier::Full
+        Some(SkylineTier::Full)
     }
 }
 
