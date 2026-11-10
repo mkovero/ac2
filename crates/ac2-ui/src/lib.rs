@@ -45,6 +45,7 @@ pub mod palette;
 pub mod pane_export;
 pub mod plot;
 pub mod prefs;
+pub mod remote_inputs;
 pub mod scenes;
 pub mod session_dialog;
 pub mod sessions;

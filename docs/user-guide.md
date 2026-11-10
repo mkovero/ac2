@@ -127,6 +127,39 @@ another address (a new IP, network mode turned on) takes its panes back. Until i
 connected the pane reads *pupu not connected*. A closed rig connected again shows its panes'
 measurements again, found by name. Settings › Connection names the rig shown.
 
+### Inputs from another rig
+
+A session can take an input another rig captures (pupu's mic, on the FOH rig's session)
+when both rigs run `ac2d` in network mode and the app holds both. On Settings › Audio I/O,
+*Add an input from another rig…* (**Enter** on that row, or *Input from another rig…* in the
+palette) lists every rig the app holds with the inputs its session captures, in that rig's
+own row text (`pupu · in 2 · mic MM1 34804`). **↑/↓** and **Enter** take one; **Esc**
+closes the list. Taking one:
+
+1. asks the other rig to admit this rig (it shows on its Connection page under *Rigs
+   admitted to this rig*, named `rig-` and this rig's name);
+2. pairs this rig with the other one;
+3. reopens this rig's session with the input added, everything else as it was.
+
+A rig that cannot give its inputs says why instead: *serves only this computer* (its
+`ac2d` is local), *has no session*, *is replaying a recording*, or *already authorizes an
+app named …*.
+
+The input is listed under *Inputs from other rigs*, under its rig's name, with that rig's
+row text, a live meter and the link in words: *streaming, placed by capture time*, *no
+audio from pupu (unreachable since 21:04:10)*, *pupu has not admitted this rig*,
+*connecting to pupu…*. Its name is the mic's and the rig's (`MM1 34804 · pupu in 2`), in
+the channel pickers too. Spectrum, RTA and SPL run on it like on a local input; its role,
+kind, mic and calibration are set on its own rig, and changing them here is refused with
+*set on pupu*. **Delete** twice on its row removes it (the rigs stay paired).
+
+A transfer function with a remote channel is refused by the daemon: *needs the clocks
+between rigs: next build*. Settings › Connection has a *Between rigs* block per rig the
+session takes inputs from (*Between rigs* in the palette): the clock relation and why, the
+last change, the link and its bit rate, the link offset, late frames, slips and the arrival
+margin; `ac2 status` prints the same. On the rig that gives its inputs, the rigs admitted
+to it are listed there and removed with **Delete** twice.
+
 ### Log files
 
 The app and a daemon started by hand log sessions opened, devices lost, capture
@@ -3831,6 +3864,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 |---|---|
 | Rigs… | `rigs` |
 | Connect a rig… | `connect_rig` |
+| Input from another rig… | `add_remote_input` |
+| Between rigs | `between_rigs` |
 | Key hints | `key_hints` |
 | Warning toasts | `warning_toasts` |
 | Stimulus outputs… | `stimulus_outputs` |

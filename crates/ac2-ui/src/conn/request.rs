@@ -28,7 +28,7 @@ pub(super) fn request_name(r: &Request) -> String {
         Request::ExportTrace { name, .. } => format!("export {name}"),
         Request::FindDelay { .. } => "delay find".into(),
         Request::Devices => "list devices".into(),
-        Request::OpenSession { what, .. } => what.clone(),
+        Request::OpenSession { what, .. } | Request::RemoteSession { what, .. } => what.clone(),
         Request::Preview { .. } => "device meters".into(),
         Request::PreviewStop => "close device meters".into(),
         Request::Meters(_) => "meters".into(),
@@ -267,6 +267,32 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
                     result: Ok(()),
                 });
                 o.send(ConnEvent::SessionOpened);
+            });
+        }
+        Request::RemoteSession {
+            peers,
+            config,
+            what,
+        } => {
+            let (c, o) = (client.clone(), out.clone());
+            tokio::spawn(async move {
+                if let Some(peers) = peers
+                    && let Err(e) = c.call(Command::RigPeers { peers }).await
+                {
+                    o.send(ConnEvent::Reply {
+                        what: format!("{what}: pairing the rigs"),
+                        result: Err(e.to_string()),
+                    });
+                    return;
+                }
+                let result = match c.call_warned(Command::SessionOpen { config }).await {
+                    Ok((_, warnings)) => {
+                        send_warnings(&o, warnings);
+                        Ok(())
+                    }
+                    Err(e) => Err(e.to_string()),
+                };
+                o.send(ConnEvent::Reply { what, result });
             });
         }
         // Ordered through `preview_task`.

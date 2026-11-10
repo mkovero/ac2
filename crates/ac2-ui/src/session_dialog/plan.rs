@@ -122,14 +122,23 @@ impl SessionDialog {
             output_device: DeviceSelector::Id {
                 id: out_dev.id.clone(),
             },
-            input_channels: inputs.clone(),
+            // The remote inputs stay: they are the session's channels whatever the device.
+            input_channels: inputs
+                .iter()
+                .copied()
+                .chain(self.remote.iter().map(RemoteInput::session_channel))
+                .collect(),
             spare_inputs: self.spares,
             output_channels: self.out_count,
             sample_rate_hz: rate,
             buffer_frames: buffer,
             loopback,
-            remote_inputs: Vec::new(),
-            link_offset: None,
+            remote_inputs: self.remote.clone(),
+            link_offset: self
+                .open
+                .as_ref()
+                .and_then(|o| o.config.link_offset)
+                .filter(|_| !self.remote.is_empty()),
         };
         let roles = DeviceRoles {
             outputs: self.out_count,

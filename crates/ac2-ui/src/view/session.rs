@@ -191,6 +191,7 @@ pub(super) fn channels_section(
     focus: Option<Row>,
     ch: &Chrome,
     msg: &mut Option<SessionMsg>,
+    remote: &dyn Fn(&mut egui::Ui, &mut Option<SessionMsg>),
 ) {
     if d.backends.is_none() {
         // The device section says the listing is on its way.
@@ -203,6 +204,7 @@ pub(super) fn channels_section(
     if d.max_spares() > 0 {
         spares_row(ui, d, focus == Some(Row::Spares), ch, msg);
     }
+    remote(ui, msg);
     super::settings::section(ui, "Outputs", "stimulus: this app", ch);
     output_grid(ui, d, focus, ch, msg);
     super::settings::section(ui, "Reference (loopback)", "", ch);

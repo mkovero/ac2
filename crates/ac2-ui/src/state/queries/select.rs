@@ -157,6 +157,10 @@ impl AppState {
     }
 
     pub(in crate::state) fn input_setup(&self, channel: u16) -> InputSetup {
+        // A remote input's setup is its own rig's, never this rig's store.
+        if let Some(s) = self.remote_setup(channel) {
+            return s;
+        }
         ac2_proto::cal::input_setup(
             self.daemon()
                 .map(|s| s.inputs.as_slice())

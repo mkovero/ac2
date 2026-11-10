@@ -526,6 +526,12 @@ pub enum SessionMsg {
     Submit,
     /// Closes the dialog without touching the stimulus.
     Cancel,
+    /// *Add an input from another rig…*: opens its dialog.
+    AddRemote,
+    /// The add dialog's input `.1` of rig `.0`.
+    PickRemote(RigId, u16),
+    /// Remove the remote input in slot `.0` (asks first).
+    RemoveRemote(u16),
 }
 
 /// What the mouse does on a dialog (the keyboard goes through [`Msg::Key`]).

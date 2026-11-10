@@ -284,6 +284,12 @@ impl AppState {
     }
 
     pub(in crate::state) fn session_msg(&mut self, m: SessionMsg, out: &mut Vec<Request>) {
+        match m {
+            SessionMsg::AddRemote => return self.open_remote_pick(out),
+            SessionMsg::PickRemote(rig, ch) => return self.pick_remote(rig, ch, out),
+            SessionMsg::RemoveRemote(slot) => return self.remove_remote(slot, out),
+            _ => {}
+        }
         let level = self.rig.stimulus.level;
         let ceiling = self.ceiling();
         let Overlay::Settings(s) = &mut self.overlay else {
@@ -361,6 +367,7 @@ impl AppState {
             SessionMsg::DetectCancel => d.detect_cancel(),
             SessionMsg::Submit => self.submit_session(out),
             SessionMsg::Cancel => self.overlay = Overlay::None,
+            SessionMsg::AddRemote | SessionMsg::PickRemote(..) | SessionMsg::RemoveRemote(_) => {}
         }
     }
 

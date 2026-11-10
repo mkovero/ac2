@@ -357,6 +357,15 @@ impl AppState {
             }
             C::Rigs => self.open_rig_menu(),
             C::ConnectRig => self.want_connect_dialog = true,
+            C::AddRemoteInput => {
+                self.open_settings(Page::AudioIo, out);
+                if let Overlay::Settings(s) = &mut self.overlay {
+                    s.focus_want = None;
+                    s.focus_session_row(Row::AddRemote);
+                }
+                self.open_remote_pick(out);
+            }
+            C::BetweenRigs => self.open_settings(Page::Connection, out),
 
             C::FocusPane1 => self.focus_nth(1),
             C::FocusPane2 => self.focus_nth(2),

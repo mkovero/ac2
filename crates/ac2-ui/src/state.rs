@@ -52,6 +52,7 @@ use crate::settings::{FocusWant, Page, Settings};
 mod display;
 pub use display::{ChoicePrompt, ChoicePurpose, DeletePrompt, DeleteTarget, MoveWhat};
 pub use panes::levels::{LEVEL_ZOOM_FACTOR, PaneLevels};
+mod remote_impl;
 mod settings_conn;
 mod settings_impl;
 pub use settings_impl::SettingsMsg;
@@ -176,6 +177,9 @@ pub struct AppState {
     /// While a message for a rig in the background is handled, that rig is swapped in as
     /// `rig` and this is the shown rig's id ([`AppState::visit`]).
     visiting: Option<RigId>,
+    /// Requests for another rig than the one a message is handled for (pairing two rigs
+    /// asks both): [`AppState::update`] sends them on that rig's link.
+    pub(crate) elsewhere: Vec<(RigId, Request)>,
     /// Set by a switch during [`AppState::update`]: how many of the requests made so far
     /// were the rig shown before. Those after it are the newly shown rig's, for its link.
     switched_at: Option<usize>,
@@ -335,6 +339,7 @@ impl AppState {
             rig: RigState::new(target),
             background: Vec::new(),
             visiting: None,
+            elsewhere: Vec::new(),
             switched_at: None,
             next_slot: 1,
             closing: Vec::new(),

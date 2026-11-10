@@ -119,8 +119,9 @@ impl Page {
                      or buffer · Space in session · R reference · M mic · L line · A digital · \
                      {pair} pair · N name (the mic, the pair or an output) · S stimulus output · \
                      D detects the loopback · P opens the driver's settings (ASIO panel, Audio \
-                     MIDI Setup) · on the max level: type dBFS, Enter · Enter opens the session \
-                     · Esc closes"
+                     MIDI Setup) · Delete on a remote input removes it (twice) · on the max \
+                     level: type dBFS, Enter · Enter opens the session (on Add an input from \
+                     another rig…: picks one) · Esc closes"
                 );
             }
             Page::Calibration => {
@@ -772,6 +773,8 @@ pub struct Settings {
     /// The max level row is focused on the Audio I/O page (below the channels).
     pub on_ceiling: bool,
     pub ceiling: CeilingEdit,
+    /// The remote inputs' add dialog and removal on the Audio I/O page.
+    pub remote: crate::remote_inputs::RemoteRows,
     pub cal: CalView,
     /// The Leq windows of the SPL pane's meter; `None`: there is no SPL meter.
     pub leq: Option<LeqDialog>,
@@ -802,6 +805,7 @@ impl Settings {
             session,
             on_ceiling: false,
             ceiling: CeilingEdit::default(),
+            remote: Default::default(),
             cal,
             leq,
             display: DisplayRow::Theme,
@@ -885,7 +889,7 @@ impl Settings {
     pub fn inner_open(&self) -> bool {
         match self.page {
             Page::Calibration => self.cal.electrical.is_some() || self.cal.acoustic.is_some(),
-            Page::AudioIo => self.ceiling.confirm.is_some(),
+            Page::AudioIo => self.ceiling.confirm.is_some() || self.remote.pick.is_some(),
             Page::Leq => self.leq.as_ref().is_some_and(|d| d.transfer.is_some()),
             _ => false,
         }
@@ -895,6 +899,10 @@ impl Settings {
     pub fn close_inner(&mut self) -> bool {
         match self.page {
             Page::Calibration => self.cal.close_dialog(),
+            Page::AudioIo if self.remote.pick.is_some() => {
+                self.remote.pick = None;
+                true
+            }
             Page::AudioIo if self.ceiling.confirm.is_some() => {
                 self.ceiling = CeilingEdit::default();
                 true

@@ -95,6 +95,9 @@ impl AppState {
         let offset = self.clock_offset();
         let st = self.daemon();
         let name_of = |c: u16| {
+            if let Some(n) = self.remote_input_name(c) {
+                return n;
+            }
             let mic = self.input_setup(c).mic().map(str::to_owned);
             let dev = device_names
                 .as_ref()
@@ -304,6 +307,9 @@ impl AppState {
             .input_channels
             .iter()
             .map(|&c| {
+                if let Some(n) = self.remote_input_name(c) {
+                    return (c, n);
+                }
                 let mic = self.input_setup(c).mic().map(str::to_owned);
                 let dev = device_names
                     .as_ref()
@@ -333,6 +339,9 @@ impl AppState {
     /// The name of input `c` of the open device, captured or not: its mic, else the
     /// device's channel name; `None` when it has neither.
     pub fn input_own_name(&self, c: u16) -> Option<String> {
+        if let Some(n) = self.remote_input_name(c) {
+            return Some(n);
+        }
         let mic = self.input_setup(c).mic().map(str::to_owned);
         let dev = self
             .input_channel_names()

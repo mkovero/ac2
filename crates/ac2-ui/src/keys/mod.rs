@@ -134,6 +134,8 @@ commands! {
     Settings => "settings", "Settings…", [Global];
     Rigs => "rigs", "Rigs…", [Global];
     ConnectRig => "connect_rig", "Connect a rig…", [Global];
+    AddRemoteInput => "add_remote_input", "Input from another rig…", [Global];
+    BetweenRigs => "between_rigs", "Between rigs", [Global];
     Quit => "quit", "Quit", [Global];
     Fullscreen => "fullscreen", "Full screen", [Global];
     KeyHints => "key_hints", "Key hints", [Global];

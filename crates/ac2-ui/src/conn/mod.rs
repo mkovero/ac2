@@ -266,6 +266,14 @@ pub enum Request {
         pairs: Vec<ac2_proto::model::Pair>,
         what: String,
     },
+    /// Remote inputs changed: `rig.peers` first when `peers` is given (pairing with the
+    /// input's rig), then `session.open` with `config` (the open session with the remote
+    /// input added or removed, everything else kept).
+    RemoteSession {
+        peers: Option<Vec<ac2_proto::model::RigPeer>>,
+        config: SessionConfig,
+        what: String,
+    },
     /// Open or renew the capture-only preview of a device, with what its inputs are
     /// declared to be (its frames then say what each column is).
     Preview {

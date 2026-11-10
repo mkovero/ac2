@@ -30,7 +30,8 @@ use ac2_proto::cal::MAX_MIC_NAME;
 use ac2_proto::model::{
     Availability, BackendInfo, BackendKind, ClockRelation, CurveChoice, DeviceId, DeviceInfo,
     DeviceSelector, InputKind, InputSetup, InputSetups, LoopbackDetection, LoopbackRoute,
-    MAX_OUTPUT_LABEL, Mic, OpenSession, OutputSetup, Pair, PairSide, PreviewInput, SessionConfig,
+    MAX_OUTPUT_LABEL, Mic, OpenSession, OutputSetup, Pair, PairSide, PreviewInput, RemoteInput,
+    SessionConfig,
 };
 use ac2_proto::units::Dbfs;
 use ac2_scene::format;
@@ -167,6 +168,10 @@ pub enum Row {
     /// How many spare inputs the session opens (JACK only).
     Spares,
     Input(usize),
+    /// A remote input (an index into [`SessionDialog::remote`]).
+    Remote(usize),
+    /// *Add an input from another rig…*
+    AddRemote,
     Output(usize),
     Rate,
     Buffer,
@@ -286,6 +291,8 @@ pub struct SessionDialog {
     mic_names: BTreeMap<u16, String>,
     /// The rig's output labels as last mirrored.
     labels: Vec<OutputSetup>,
+    /// The open session's remote inputs as last mirrored: Enter reopens with them.
+    pub remote: Vec<RemoteInput>,
 }
 
 /// Operator-facing backend name.
@@ -363,6 +370,15 @@ impl SessionDialog {
             setup_pairs: setup.pairs.clone(),
             mic_names: BTreeMap::new(),
             labels: Vec::new(),
+            remote: c.map(|c| c.remote_inputs.clone()).unwrap_or_default(),
+        }
+    }
+
+    /// The open session's remote inputs changed (or arrived): their rows follow.
+    pub fn set_remote(&mut self, remote: &[RemoteInput]) {
+        if self.remote != remote {
+            self.remote = remote.to_vec();
+            self.keep_focus();
         }
     }
 

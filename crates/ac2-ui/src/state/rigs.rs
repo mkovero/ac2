@@ -358,9 +358,16 @@ impl AppState {
         if !tick {
             self.refresh_rig_lists();
         }
-        out.into_iter()
+        let mut out: Vec<(RigId, Request)> = out
+            .into_iter()
             .filter_map(|(s, q)| self.rig_in_slot(s).map(|r| (r.id, q)))
-            .collect()
+            .collect();
+        out.extend(
+            std::mem::take(&mut self.elsewhere)
+                .into_iter()
+                .filter(|(r, _)| self.find_rig(*r).is_some()),
+        );
+        out
     }
 
     /// Stops the stimulus of the rig in `rig` where it is armed or firing, and drops a

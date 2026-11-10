@@ -134,8 +134,13 @@ impl AppState {
     pub(super) fn follow_settings(&mut self) {
         let labels = self.daemon().map(|s| s.outputs.clone()).unwrap_or_default();
         let rig = self.daemon().map(|s| s.rig.clone());
+        let remote = self
+            .open_session()
+            .map(|o| o.config.remote_inputs.clone())
+            .unwrap_or_default();
         if let Overlay::Settings(s) = &mut self.overlay {
             s.session.set_labels(&labels);
+            s.session.set_remote(&remote);
             if let Some(r) = &rig {
                 s.rig.follow(r);
             }
@@ -508,6 +513,9 @@ impl AppState {
         swallow: Option<char>,
         out: &mut Vec<Request>,
     ) {
+        if self.remote_key(chord, out) {
+            return;
+        }
         let Overlay::Settings(s) = &mut self.overlay else {
             return;
         };

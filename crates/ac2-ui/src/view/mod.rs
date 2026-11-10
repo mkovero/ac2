@@ -12,6 +12,7 @@ mod leq;
 mod overlays;
 mod panes;
 mod recording;
+mod remote;
 mod rig;
 mod segment;
 mod session;

@@ -150,6 +150,9 @@ fn every_command_is_reachable() {
         // Ctrl chords and the plain keys are measuring keys.
         CommandId::Rigs,
         CommandId::ConnectRig,
+        // Remote inputs are set up once per show, from the Audio I/O and Connection pages.
+        CommandId::AddRemoteInput,
+        CommandId::BetweenRigs,
     ];
     let m = Keymap::default();
     for c in CommandId::ALL {

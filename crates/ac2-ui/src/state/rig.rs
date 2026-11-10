@@ -161,6 +161,9 @@ pub struct RigState {
     pub(super) choose_when_open: bool,
     /// The daemon's backends and devices as last listed (channel names for the dialogs).
     pub devices: Option<Vec<ac2_proto::model::BackendInfo>>,
+    /// The daemon's last `server.info` answer (or why it could not be asked): its mode and
+    /// key, which pairing it with another rig gives that rig.
+    pub server: Option<Result<ac2_proto::model::ServerInfo, String>>,
     /// When the device preview was last asked for.
     pub(super) preview_sent_s: f64,
     /// The session the device list was last asked for on its own (for the input names of
@@ -248,6 +251,7 @@ impl RigState {
             link: None,
             addr: None,
             daemon_addr: None,
+            server: None,
             duplicate: false,
             phase_reference: None,
             conn: ConnState::Connecting { target },

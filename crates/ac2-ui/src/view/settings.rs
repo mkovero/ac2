@@ -260,7 +260,10 @@ fn io_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Op
     let focus = (!s.on_ceiling).then_some(s.session.focus);
     section(ui, "Device", "", ch);
     super::session::device_section(ui, &s.session, focus, ch, &mut m);
-    super::session::channels_section(app, ui, &s.session, focus, ch, &mut m);
+    let remote = |ui: &mut egui::Ui, m: &mut Option<crate::state::SessionMsg>| {
+        super::remote::remote_section(app, ui, s, focus, ch, m);
+    };
+    super::session::channels_section(app, ui, &s.session, focus, ch, &mut m, &remote);
     if let Some(m) = m {
         *msg = Some(Msg::Session(m));
     }
@@ -514,11 +517,28 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
             for l in ac2_scene::rig::server_lines(info) {
                 ui.label(RichText::new(l).color(ch.text));
             }
-            if let ac2_proto::model::ServerMode::Network { refused, .. } = &info.mode {
-                ui.add_space(6.0);
-                ui.label(RichText::new("Authorized clients").strong().color(ch.text));
-                for (i, l) in lines.iter().enumerate() {
-                    if let ConnLine::Authorized(_) = l {
+            if let ac2_proto::model::ServerMode::Network {
+                refused,
+                authorized,
+                ..
+            } = &info.mode
+            {
+                let is_rig = |n: &str| authorized.iter().any(|a| a.name == n && a.rig.is_some());
+                for (title, rigs) in [
+                    ("Authorized clients", false),
+                    (ac2_scene::remote_inputs::ADMITTED, true),
+                ] {
+                    let mine: Vec<(usize, &ConnLine)> = lines
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, l)| matches!(l, ConnLine::Authorized(n) if is_rig(n) == rigs))
+                        .collect();
+                    if rigs && mine.is_empty() {
+                        continue;
+                    }
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(title).strong().color(ch.text));
+                    for (i, l) in mine {
                         let pending = matches!(l, ConnLine::Authorized(n)
                             if p.confirm.as_deref() == Some(n.as_str()));
                         row(
@@ -568,6 +588,7 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
             ui.label(RichText::new(l).color(ch.text));
         }
     }
+    super::remote::between_rigs(app, ui, ch);
     if let (Some(label), Some((_, text))) = (p.edit_label(), &p.edit) {
         ui.add_space(6.0);
         ui.horizontal(|ui| {

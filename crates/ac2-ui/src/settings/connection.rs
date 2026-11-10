@@ -80,9 +80,13 @@ pub fn conn_lines(server: Option<&ServerInfo>) -> Vec<ConnLine> {
         ..
     }) = server
     {
+        // The apps, then the rigs admitted to take this rig's inputs: the page lists them
+        // apart, in this order.
         v.extend(
             authorized
                 .iter()
+                .filter(|a| a.rig.is_none())
+                .chain(authorized.iter().filter(|a| a.rig.is_some()))
                 .map(|a| ConnLine::Authorized(a.name.clone())),
         );
         v.extend(

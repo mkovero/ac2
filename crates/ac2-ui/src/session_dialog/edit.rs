@@ -14,6 +14,8 @@ impl SessionDialog {
         if self.max_spares() > 0 {
             v.push(Row::Spares);
         }
+        v.extend((0..self.remote.len()).map(Row::Remote));
+        v.push(Row::AddRemote);
         v.extend((0..self.outputs.len()).map(Row::Output));
         v.extend([Row::Rate, Row::Buffer]);
         v

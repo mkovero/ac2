@@ -561,6 +561,7 @@ fn up_down_walk_device_channels_then_the_max_level() {
     assert!(ni > 0 && no > 0);
     let mut want = vec![Row::Backend, Row::Device, Row::OutputDevice];
     want.extend((0..ni).map(Row::Input));
+    want.push(Row::AddRemote);
     want.extend((0..no).map(Row::Output));
     want.extend([Row::Rate, Row::Buffer]);
     assert_eq!(rows, want);
