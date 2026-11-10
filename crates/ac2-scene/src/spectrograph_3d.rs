@@ -20,7 +20,7 @@ use crate::canvas::{self, Canvas, MARGINS, anchor, label};
 use crate::colormap;
 use crate::primitives::{
     Color, Colormap, Dash, FillPolygon, FillRect, HAlign, HeatmapColumn, Label, Polyline, Rect,
-    Scene, Skyline3d, SkylineId, SkylineLook, SkylineTier, Stroke, VAlign, Viewport,
+    Scene, Skyline3d, SkylineGlow, SkylineId, SkylineLook, SkylineTier, Stroke, VAlign, Viewport,
 };
 use crate::spectrograph::SpectrographHistory;
 use crate::spectrum::{SpectrumTrace, offset_note};
@@ -51,7 +51,26 @@ pub const LOOK: SkylineLook = SkylineLook {
     eye_fade: 0.35,
     width_share: 0.35,
     width_px: [1.0, 3.0],
+    // Rows stacked about a pixel apart at the default camera sum the dim bodies of a loud
+    // low end past 1 in the 8-bit bloom target, a shapeless haze over the bass; light under
+    // the threshold feeds no bloom, so only the tips glow.
+    bloom_threshold: 0.25,
+    bloom_gain: 0.12,
 };
+
+/// The bloom added over the pane: strong for ice (the holographic look), weaker for the
+/// other colour maps so their hues stay legible under it.
+pub const GLOW_ICE: f32 = 0.6;
+pub const GLOW_MAP: f32 = 0.35;
+
+/// The bloom's gain over the pane for colour map `c`.
+pub fn glow_gain(c: Colormap) -> f32 {
+    if c == Colormap::Ice {
+        GLOW_ICE
+    } else {
+        GLOW_MAP
+    }
+}
 
 /// Spike widths in the half-resolution target of the lighter tiers.
 pub const LITE_WIDTH_PX: [f32; 2] = [1.0, 2.0];
@@ -1164,6 +1183,13 @@ pub fn spectrograph_3d_scene(
                     },
                     data: sk.ring().to_vec(),
                 });
+                if s.tier.bloom_taps().is_some() {
+                    c.data.glows.push(SkylineGlow {
+                        id: SKYLINE_ID,
+                        clip: Some(plot),
+                        gain: glow_gain(s.colours),
+                    });
+                }
             }
         }
     }

@@ -519,6 +519,22 @@ fn scene_3d(
     camera: SpectrumCamera,
     forced: bool,
 ) -> Spectrograph3dScene {
+    let tier = if forced {
+        SkylineTier::Lite
+    } else {
+        SkylineTier::Full
+    };
+    scene_3d_as(b, view, camera, tier, forced, Colormap::Ice)
+}
+
+fn scene_3d_as(
+    b: &Built,
+    view: &ViewState,
+    camera: SpectrumCamera,
+    tier: SkylineTier,
+    forced: bool,
+    colours: Colormap,
+) -> Spectrograph3dScene {
     let input = Spectrograph3dInput {
         history: &b.h,
         skyline: &b.s,
@@ -526,13 +542,9 @@ fn scene_3d(
         range: Range::new(-80.0, 0.0),
         offset_db: 0.0,
         freshness: None,
-        colours: Colormap::Ice,
+        colours,
         camera: Pose::from(camera),
-        tier: if forced {
-            SkylineTier::Lite
-        } else {
-            SkylineTier::Full
-        },
+        tier,
         tier_forced: forced,
     };
     spectrograph_3d_scene(
@@ -666,6 +678,51 @@ fn chrome_levels_and_draw_order() {
     let ceiling = idx(&|l| l.polylines.iter().any(|p| p.stroke.dash.is_some())).expect("ceiling");
     let labels = idx(&|l| l.labels.iter().any(|t| t.text == "1k")).expect("labels");
     assert!(field <= band && band < sky && sky <= ceiling && sky <= labels);
+}
+
+#[test]
+fn the_glow_follows_the_ceiling_and_precedes_the_labels() {
+    let b = pink_room(30, SkylineTier::Full);
+    let s = scene_3d(&b, &ViewState::default(), SpectrumCamera::DEFAULT, false);
+    let glows: Vec<_> = s.scene.layers.iter().flat_map(|l| &l.glows).collect();
+    assert_eq!(glows.len(), 1);
+    assert_eq!(glows[0].id, skylines(&s.scene)[0].id);
+    assert_eq!(glows[0].gain, GLOW_ICE);
+    // One layer: glows draw after its polylines (the ceiling) and before its labels.
+    let l = s
+        .scene
+        .layers
+        .iter()
+        .find(|l| !l.glows.is_empty())
+        .expect("glow layer");
+    assert!(
+        l.polylines.iter().any(|p| p.stroke.dash.is_some()),
+        "ceiling"
+    );
+    assert!(l.labels.iter().any(|t| t.text == "1k"), "labels");
+    let sky = s.scene.layers.iter().position(|l| !l.skylines.is_empty());
+    let glow = s.scene.layers.iter().position(|l| !l.glows.is_empty());
+    assert!(sky <= glow);
+}
+
+#[test]
+fn the_glow_by_tier_and_colour_map() {
+    let view = ViewState::default();
+    let glows = |tier, colours| {
+        let b = pink_room(30, tier);
+        let s = scene_3d_as(&b, &view, SpectrumCamera::DEFAULT, tier, true, colours);
+        s.scene
+            .layers
+            .iter()
+            .flat_map(|l| l.glows.clone())
+            .map(|g| g.gain)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(glows(SkylineTier::Lite, Colormap::Ice), [GLOW_ICE]);
+    assert_eq!(glows(SkylineTier::Full, Colormap::Viridis), [GLOW_MAP]);
+    assert!(glows(SkylineTier::Bare, Colormap::Ice).is_empty());
+    assert_eq!(SkylineTier::Full.bloom_taps(), Some(9));
+    assert_eq!(SkylineTier::Lite.bloom_taps(), Some(5));
 }
 
 #[test]

@@ -359,8 +359,21 @@ pub enum SkylineTier {
     Full,
     /// Spike target at half resolution, upscaled in the composite: a quarter of the fill.
     Lite,
-    /// As Lite; the tier that never draws a glow.
+    /// As Lite, without the bloom.
     Bare,
+}
+
+impl SkylineTier {
+    /// Taps of the bloom's separable blur, `None` for a tier without bloom. Lite's five
+    /// fetches read between texels, so the bilinear filter folds Full's nine-tap kernel
+    /// into them: the same glow for fewer reads.
+    pub fn bloom_taps(self) -> Option<u32> {
+        match self {
+            SkylineTier::Full => Some(9),
+            SkylineTier::Lite => Some(5),
+            SkylineTier::Bare => None,
+        }
+    }
 }
 
 /// The spike look: shape and light of each spike. Kept as data, one set of constants in
@@ -383,6 +396,10 @@ pub struct SkylineLook {
     /// device pixels of the spike target.
     pub width_share: f32,
     pub width_px: [f32; 2],
+    /// The bloom source: a spike's light above `bloom_threshold` (rescaled to 0 … 1) times
+    /// its colour, summed at `bloom_gain` into a quarter-resolution target.
+    pub bloom_threshold: f32,
+    pub bloom_gain: f32,
 }
 
 /// A 3D spectrograph's spikes: a ring of `rows` rows of `cols` levels, each cell one
@@ -421,8 +438,18 @@ pub struct Skyline3d {
     pub data: Vec<Option<HeatmapColumn>>,
 }
 
+/// The bloom of the [`Skyline3d`] with `id` in the same scene, blurred and added over its
+/// rect at `gain`. A primitive of its own so it lands after the floor, grid and ceiling and
+/// before the labels. Only for a skyline whose tier has bloom ([`SkylineTier::bloom_taps`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SkylineGlow {
+    pub id: SkylineId,
+    pub clip: Option<Rect>,
+    pub gain: f32,
+}
+
 /// Primitives drawn in a fixed order: rects, heatmaps, skylines, polygons, bands, grids,
-/// polylines, points, labels. Anything that must cover text (a banner over the plot) goes into a later layer.
+/// polylines, points, glows, labels. Anything that must cover text (a banner over the plot) goes into a later layer.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Layer {
     pub rects: Vec<FillRect>,
@@ -433,6 +460,7 @@ pub struct Layer {
     pub grids: Vec<Grid>,
     pub polylines: Vec<Polyline>,
     pub points: Vec<Points>,
+    pub glows: Vec<SkylineGlow>,
     pub labels: Vec<Label>,
 }
 
@@ -447,6 +475,7 @@ impl Layer {
         self.grids.extend(other.grids);
         self.polylines.extend(other.polylines);
         self.points.extend(other.points);
+        self.glows.extend(other.glows);
         self.labels.extend(other.labels);
     }
 }
