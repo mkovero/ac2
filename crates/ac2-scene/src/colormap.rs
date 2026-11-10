@@ -7,7 +7,7 @@
 //! are perceptually uniform in lightness and readable with the common colour-vision
 //! deficiencies, which is why spectrographs use them. Grey and ice are computed directly.
 
-use crate::scene::Colormap;
+use crate::primitives::Colormap;
 
 /// Entries per lookup table. 256 matches the 8-bit output: finer steps cannot be shown.
 pub const LUT_SIZE: usize = 256;
@@ -172,9 +172,21 @@ const GREY_TOP: f64 = 0.8;
 /// is lighter than the one before, so the map stays monotonic in lightness; the top stops
 /// short of white as grey's does.
 const ICE: [[f64; 3]; 3] = [
-    [0x0B as f64 / 255.0, 0x1A as f64 / 255.0, 0x2B as f64 / 255.0],
-    [0x2D as f64 / 255.0, 0x6F as f64 / 255.0, 0xA8 as f64 / 255.0],
-    [0xCF as f64 / 255.0, 0xE8 as f64 / 255.0, 0xFF as f64 / 255.0],
+    [
+        0x0B as f64 / 255.0,
+        0x1A as f64 / 255.0,
+        0x2B as f64 / 255.0,
+    ],
+    [
+        0x2D as f64 / 255.0,
+        0x6F as f64 / 255.0,
+        0xA8 as f64 / 255.0,
+    ],
+    [
+        0xCF as f64 / 255.0,
+        0xE8 as f64 / 255.0,
+        0xFF as f64 / 255.0,
+    ],
 ];
 
 fn ice(t: f64) -> [f64; 3] {

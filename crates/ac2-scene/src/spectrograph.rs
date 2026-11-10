@@ -176,6 +176,9 @@ pub struct SpectrographHistory {
     last_seq: Option<u64>,
     /// The stream had a break (stale, stopped) since the newest frame.
     broken: bool,
+    /// Counts the times the ring was emptied or rewritten whole, so a picture made of it
+    /// (the 3D spectrograph's skyline) knows to start over rather than fold.
+    generation: u64,
 }
 
 impl SpectrographHistory {
@@ -194,6 +197,7 @@ impl SpectrographHistory {
             newest: None,
             last_seq: None,
             broken: false,
+            generation: 0,
         }
     }
 
@@ -262,6 +266,29 @@ impl SpectrographHistory {
         self.ring.iter_mut().for_each(|c| *c = None);
         self.newest = None;
         self.broken = false;
+        self.generation += 1;
+    }
+
+    /// Changes whenever the ring is emptied or rewritten whole; between two equal values
+    /// frames only ever went in after the newest.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Absolute slot (capture time ÷ slot length) of the newest frame.
+    pub fn newest_slot(&self) -> Option<u64> {
+        self.newest
+    }
+
+    /// The column at absolute slot `slot`; `None` outside the history or where it has no
+    /// frame.
+    pub fn at_slot(&self, slot: u64) -> Option<&HeatmapColumn> {
+        let newest = self.newest?;
+        let n = self.ring.len() as u64;
+        if slot > newest || newest - slot >= n {
+            return None;
+        }
+        self.ring[(slot % n) as usize].as_ref()
     }
 
     /// The stream stopped delivering (STALE, measurement stopped): the time until the next
@@ -323,6 +350,7 @@ impl SpectrographHistory {
             _ => {
                 self.ring.iter_mut().for_each(|c| *c = None);
                 self.ring[at(slot)] = Some(col);
+                self.generation += 1;
             }
         }
         self.newest = Some(slot);

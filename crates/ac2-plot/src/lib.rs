@@ -11,7 +11,7 @@
 #![deny(unsafe_code)]
 
 pub mod adapter;
-pub mod colormap;
+pub use ac2_scene::colormap;
 pub mod embers;
 mod geometry;
 mod heatmap;

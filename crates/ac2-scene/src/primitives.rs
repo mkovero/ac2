@@ -346,12 +346,86 @@ pub struct Heatmap {
     pub data: Vec<Option<HeatmapColumn>>,
 }
 
-/// Primitives drawn in a fixed order: rects, heatmaps, polygons, bands, grids, polylines,
-/// points, labels. Anything that must cover text (a banner over the plot) goes into a later layer.
+/// Identity of a 3D spectrograph's GPU state (ring texture, spike target) across frames.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SkylineId(pub u64);
+
+/// How a [`Skyline3d`] is drawn on this machine: the spike target's resolution. The grid
+/// size that goes with each is the scene's choice ([`crate::spectrograph_3d`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub enum SkylineTier {
+    /// Spike target at full resolution.
+    #[default]
+    Full,
+    /// Spike target at half resolution, upscaled in the composite: a quarter of the fill.
+    Lite,
+    /// As Lite; the tier that never draws a glow.
+    Bare,
+}
+
+/// The spike look: shape and light of each spike. Kept as data, one set of constants in
+/// [`crate::spectrograph_3d::LOOK`], so they can be retuned without touching the shader.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SkylineLook {
+    /// Brightness at a spike's foot; the body rises to 1 at the tip as `t^body_pow`.
+    pub foot: f32,
+    pub body_pow: f32,
+    /// The bright cap at the tip, device pixels, and its gain (clamped at 1).
+    pub tip_px: f32,
+    pub tip_gain: f32,
+    /// Intensity of a spike at the bottom of the level range; 1 at the top.
+    pub level_floor: f32,
+    /// Brightness falls as `exp(-age_fade · age / depth)` with age along the floor and
+    /// `exp(-eye_fade · distance)` from the eye.
+    pub age_fade: f32,
+    pub eye_fade: f32,
+    /// Spike width as a share of the projected column pitch, clamped to `width_px`
+    /// device pixels of the spike target.
+    pub width_share: f32,
+    pub width_px: [f32; 2],
+}
+
+/// A 3D spectrograph's spikes: a ring of `rows` rows of `cols` levels, each cell one
+/// vertical spike standing on the floor. The renderer draws the spikes, max-blended, into
+/// an offscreen target of `rect`'s size (half of it below [`SkylineTier::Full`]) holding
+/// level and brightness apart, then composites `LUT(level) · brightness` over `rect`.
+///
+/// Ring rows upload by `Arc` identity, as [`Heatmap`] columns do.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Skyline3d {
+    pub id: SkylineId,
+    pub rect: Rect,
+    pub clip: Option<Rect>,
+    pub cols: u32,
+    pub rows: u32,
+    /// Ring position of the newest row; the row `j` places before it is `j` rows older.
+    pub newest: u32,
+    /// How far the rows have glided back from their places: the newest row's fill
+    /// fraction, in (0, 1].
+    pub phase: f32,
+    /// World to clip space for `rect` (column-major; clip `z` in 0 … `w`).
+    pub view_proj: [[f32; 4]; 4],
+    pub eye: [f32; 3],
+    /// The floor: x in −`world[0]` … `world[0]` (frequency), z in 0 … `world[1]` (age,
+    /// newest at 0), heights 0 … `world[2]`.
+    pub world: [f32; 3],
+    /// Levels mapped to height 0 and full height; outside clamps, the bottom draws nothing.
+    pub range: [f32; 2],
+    pub colormap: Colormap,
+    pub tier: SkylineTier,
+    pub look: SkylineLook,
+    /// The ring, `rows` long, by ring position; each row `cols` levels (NaN: no value);
+    /// `None` is a row without data.
+    pub data: Vec<Option<HeatmapColumn>>,
+}
+
+/// Primitives drawn in a fixed order: rects, heatmaps, skylines, polygons, bands, grids,
+/// polylines, points, labels. Anything that must cover text (a banner over the plot) goes into a later layer.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Layer {
     pub rects: Vec<FillRect>,
     pub heatmaps: Vec<Heatmap>,
+    pub skylines: Vec<Skyline3d>,
     pub polygons: Vec<FillPolygon>,
     pub bands: Vec<Band>,
     pub grids: Vec<Grid>,
@@ -365,6 +439,7 @@ impl Layer {
     pub fn extend(&mut self, other: Layer) {
         self.rects.extend(other.rects);
         self.heatmaps.extend(other.heatmaps);
+        self.skylines.extend(other.skylines);
         self.polygons.extend(other.polygons);
         self.bands.extend(other.bands);
         self.grids.extend(other.grids);

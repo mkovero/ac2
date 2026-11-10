@@ -281,10 +281,14 @@ fn the_chosen_colours_reach_the_picture_and_its_bar() {
 fn colour_maps_step_round_and_have_names() {
     assert_eq!(Colormap::default(), Colormap::Viridis);
     assert_eq!(Colormap::Viridis.step(1), Colormap::Magma);
-    assert_eq!(Colormap::Viridis.step(-1), Colormap::Grey);
-    assert_eq!(Colormap::Grey.step(1), Colormap::Viridis);
+    assert_eq!(Colormap::Viridis.step(-1), Colormap::Ice);
+    assert_eq!(Colormap::Grey.step(1), Colormap::Ice);
+    assert_eq!(Colormap::Ice.step(1), Colormap::Viridis);
     let names: Vec<_> = Colormap::ALL.iter().map(|m| m.name()).collect();
-    assert_eq!(names, ["viridis", "magma", "inferno", "cividis", "grey"]);
+    assert_eq!(
+        names,
+        ["viridis", "magma", "inferno", "cividis", "grey", "ice"]
+    );
 }
 
 fn heatmaps(s: &Scene) -> Vec<&Heatmap> {
