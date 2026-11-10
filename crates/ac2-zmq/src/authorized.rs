@@ -99,6 +99,18 @@ fn valid_name(name: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
+/// What a key that passed the handshake is admitted as now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Admission {
+    /// No longer listed under the name it connected with (removed, or the name now holds
+    /// another key).
+    Revoked,
+    /// An operator's app.
+    App,
+    /// Another rig's daemon, with that rig's id.
+    Rig(u64),
+}
+
 /// Named client public keys. Names and keys are each unique.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AuthorizedKeys {
@@ -160,6 +172,19 @@ impl AuthorizedKeys {
     /// The key listed under `name`.
     pub fn get(&self, name: &str) -> Option<&PublicKey> {
         self.by_name.get(name)
+    }
+
+    /// What a connection that passed the handshake as `key` under `name` is admitted as
+    /// now. The name alone is not enough: a revoked name can later be given to a different
+    /// key, and that must not revive a connection the old key still holds open.
+    pub fn admission(&self, name: &str, key: &PublicKey) -> Admission {
+        if self.by_name.get(name) != Some(key) {
+            return Admission::Revoked;
+        }
+        match self.rigs.get(name) {
+            Some(&rig) => Admission::Rig(rig),
+            None => Admission::App,
+        }
     }
 
     /// The name `key` is listed under; `None` = not authorized.
@@ -313,6 +338,22 @@ mod tests {
         assert_eq!(back.get("laptop"), Some(&a));
         assert_eq!(back.remove("laptop"), Some(a));
         assert_eq!(back.name_of(&a), None);
+        Ok(())
+    }
+
+    #[test]
+    fn admission_follows_the_name_and_its_key() -> Result<(), KeyStoreError> {
+        let (a, b) = (key(), key());
+        let mut keys = AuthorizedKeys::new();
+        keys.insert_rig("pupu", a, 7)?;
+        assert_eq!(keys.admission("pupu", &a), Admission::Rig(7));
+        // The same name given to another key, as an app: the old key's connection is out.
+        keys.remove("pupu");
+        keys.insert("pupu", b)?;
+        assert_eq!(keys.admission("pupu", &a), Admission::Revoked);
+        assert_eq!(keys.admission("pupu", &b), Admission::App);
+        keys.remove("pupu");
+        assert_eq!(keys.admission("pupu", &b), Admission::Revoked);
         Ok(())
     }
 

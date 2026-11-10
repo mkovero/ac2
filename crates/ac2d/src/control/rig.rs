@@ -305,6 +305,7 @@ impl Control {
         let mut keys = n.authorized.get();
         // A name given again replaces its key and kind: its old connections are dropped
         // below, as a revoke would.
+        let old_rig = keys.rig_of(name);
         let old = keys.remove(name);
         match rig {
             Some(r) => keys.insert_rig(name, key, r.0),
@@ -319,8 +320,10 @@ impl Control {
         })?;
         n.authorized.set(keys);
         n.refused.forget(&key);
+        // The same key given another kind keeps its connections but not what they hold:
+        // an app made a rig must lose its state subscriptions, a rig made an app its audio.
         if let Some(o) = old
-            && o != key
+            && (o != key || old_rig.map(RigId) != rig)
         {
             self.s.outbox.revoke(o.as_bytes());
         }

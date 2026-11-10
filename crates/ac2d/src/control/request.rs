@@ -144,6 +144,24 @@ impl Control {
             );
             return;
         }
+        // Only a rig reads the source state: a rig whose key was admitted as an app would
+        // otherwise see its link up and its audio subscriptions refused without a word.
+        if let Some(CurvePeer { name, .. }) = &peer
+            && matches!(req.cmd, Command::SourceState)
+            && !self.s.server.is_rig(name)
+        {
+            self.send_reply(
+                routing_id,
+                &Reply::new(
+                    id,
+                    Err(perr(
+                        ErrorCode::Refused,
+                        format!("{name:?} is not admitted as a rig: admit it with auth.admit_rig"),
+                    )),
+                ),
+            );
+            return;
+        }
         let client =
             ClientId(peer.map_or_else(|| format!("local-{}", hex(routing_id)), |p| p.name));
         // Reserved before anything executes, the asynchronous branches below included: a

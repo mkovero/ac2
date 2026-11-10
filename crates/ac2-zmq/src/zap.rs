@@ -320,6 +320,16 @@ impl SecureContext {
             .clone()
     }
 
+    /// [`AuthorizedKeys::admission`] on the current keys, without copying them: asked for
+    /// every message on a data socket.
+    pub fn admission(&self, name: &str, key: &PublicKey) -> crate::Admission {
+        self.zap
+            .keys
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .admission(name, key)
+    }
+
     /// Makes the handler exit abnormally and waits until that is visible.
     #[cfg(test)]
     pub(crate) fn inject_handler_failure(&self) -> Result<()> {

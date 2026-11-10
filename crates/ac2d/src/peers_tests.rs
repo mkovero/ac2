@@ -31,9 +31,9 @@ struct Rig {
     put: u64,
     frame: Frame,
     topic: Topic,
-    /// Who the next requests come from, and whether that name was admitted as a rig.
+    /// Who the next requests come from, and what that key is admitted as.
     client: Option<CurvePeer>,
-    rig: bool,
+    admission: Admission,
 }
 
 fn up(sock: &Socket, msg: DataUp) {
@@ -67,7 +67,7 @@ impl Rig {
             frame,
             topic,
             client: None,
-            rig: false,
+            admission: Admission::App,
         }
     }
 
@@ -92,14 +92,14 @@ impl Rig {
     /// Takes the peers' requests.
     fn pump(&mut self) {
         while let Some(m) = self.router.recv_timeout(Duration::from_millis(5)).unwrap() {
-            let rig = self.rig;
+            let admission = self.admission;
             self.peers.request(
                 &self.router,
                 self.client.as_ref(),
                 m.into_frames(),
                 &self.interest,
                 Instant::now(),
-                |_| rig,
+                |_| admission,
             );
         }
     }
@@ -338,7 +338,7 @@ fn audio_queues_under_a_credit_stall_and_drops_the_oldest() {
         name: "pupu".into(),
         key: ac2_zmq::KeyPair::generate().unwrap().public,
     });
-    r.rig = true;
+    r.admission = Admission::Rig(1);
     let d = r.ctx.socket(SocketType::Dealer).unwrap();
     d.set_linger(Some(Duration::ZERO)).unwrap();
     d.connect(&r.endpoint).unwrap();
@@ -445,7 +445,7 @@ fn a_revoked_key_is_dropped_at_once() {
         name: "pupu".into(),
         key,
     });
-    r.rig = true;
+    r.admission = Admission::Rig(1);
     let d = r.ctx.socket(SocketType::Dealer).unwrap();
     d.set_linger(Some(Duration::ZERO)).unwrap();
     d.connect(&r.endpoint).unwrap();
@@ -458,5 +458,72 @@ fn a_revoked_key_is_dropped_at_once() {
     r.pump_until(|r| r.interest.count(b"audio/1") == 1);
     r.peers.drop_key(&key, &r.interest);
     assert_eq!(r.peers.len(), 0);
+    assert_eq!(r.interest.count(b"audio/1"), 0);
+
+    // The connection itself outlives the revoke: what it sends next is dropped, not taken
+    // for a new peer (which would come back as an app, free to subscribe state).
+    r.admission = Admission::Revoked;
+    for msg in [
+        DataUp::Credit {
+            bytes: 64,
+            events: 1,
+        },
+        DataUp::Subscribe {
+            sub: Subscription::Topic(Topic::Audio { channel: 1 }),
+        },
+        DataUp::Subscribe {
+            sub: Subscription::Topic(r.topic),
+        },
+    ] {
+        up(&d, msg);
+    }
+    let end = Instant::now() + Duration::from_millis(300);
+    while Instant::now() < end {
+        r.pump();
+    }
+    assert_eq!(r.peers.len(), 0);
+    assert_eq!(r.interest.count(b"audio/1"), 0);
+    assert_eq!(r.interest.count(&r.topic.to_bytes()), 0);
+    assert_eq!(r.interest.count(b"ka"), 0);
+}
+
+/// A rig re-admitted as an app on the same connection loses its audio at its next message;
+/// a rig is sent no keepalive (its generator and health are not for another rig).
+#[test]
+fn a_rig_made_an_app_loses_its_audio_and_no_rig_gets_keepalives() {
+    let mut r = Rig::new();
+    r.client = Some(CurvePeer {
+        name: "pupu".into(),
+        key: ac2_zmq::KeyPair::generate().unwrap().public,
+    });
+    r.admission = Admission::Rig(1);
+    let d = r.ctx.socket(SocketType::Dealer).unwrap();
+    d.set_linger(Some(Duration::ZERO)).unwrap();
+    d.connect(&r.endpoint).unwrap();
+    up(
+        &d,
+        DataUp::Subscribe {
+            sub: Subscription::Topic(Topic::Audio { channel: 1 }),
+        },
+    );
+    up(
+        &d,
+        DataUp::Subscribe {
+            sub: Subscription::Topic(Topic::Ka),
+        },
+    );
+    r.pump_until(|r| r.interest.count(b"audio/1") == 1);
+    assert_eq!(r.interest.count(b"ka"), 0);
+    r.outside(b"ka", Outside::Ka);
+    assert!(
+        d.recv_timeout(Duration::from_millis(100))
+            .unwrap()
+            .is_none()
+    );
+
+    r.admission = Admission::App;
+    up(&d, DataUp::Window { bytes: 4096 });
+    r.pump_until(|r| r.interest.count(b"ka") == 1);
+    assert_eq!(r.peers.len(), 1);
     assert_eq!(r.interest.count(b"audio/1"), 0);
 }

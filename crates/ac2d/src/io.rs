@@ -254,10 +254,12 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
                                 name: name.to_owned(),
                                 key,
                             });
-                        let is_rig = |name: &str| {
-                            secure
-                                .as_ref()
-                                .is_some_and(|sc| sc.authorized().rig_of(name).is_some())
+                        // A CURVE peer exists only with a secure context; without one
+                        // nothing was checked to hold it to.
+                        let admission = |c: &CurvePeer| {
+                            secure.as_ref().map_or(ac2_zmq::Admission::Revoked, |sc| {
+                                sc.admission(&c.name, &c.key)
+                            })
                         };
                         peers.request(
                             data,
@@ -265,7 +267,7 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
                             m.into_frames(),
                             interest,
                             now,
-                            is_rig,
+                            admission,
                         );
                     }
                     Ok(None) => break,

@@ -436,6 +436,11 @@ impl<'p> Link<'p> {
                     if s.rig != self.peer.rig {
                         continue;
                     }
+                    if std::mem::take(&mut self.ctrl_hs.refused) {
+                        // Admitted (as a rig) on the connection that was refused: the
+                        // subscriptions it refused meanwhile are stated again.
+                        self.join();
+                    }
                     let _ = to_control.send(ControlMsg::Remote(RemoteMsg::Source {
                         rig: self.peer.rig,
                         state: s.clone(),
@@ -447,8 +452,8 @@ impl<'p> Link<'p> {
                 Ok(_) => {}
                 Err(e) => {
                     self.poll = None;
-                    // A connection that outlived its admission is refused request by
-                    // request: the rig removed this one.
+                    // A connection that outlived its admission, or a key admitted as an
+                    // app rather than a rig, is refused request by request.
                     if e.code == ErrorCode::Refused {
                         self.ctrl_hs.refused = true;
                     }

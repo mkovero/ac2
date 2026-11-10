@@ -35,7 +35,7 @@ use ac2_proto::flow::{
     frame_charge,
 };
 use ac2_proto::{DataUp, FlowNotice, Subscription, Topic, decode_data_request, encode_notice};
-use ac2_zmq::{Error as ZmqError, Part, PublicKey, Socket};
+use ac2_zmq::{Admission, Error as ZmqError, Part, PublicKey, Socket};
 
 use crate::chain::{Chain, Encoded, Encodes, Slot};
 use crate::control::CurvePeer;
@@ -190,11 +190,11 @@ impl Peer {
     }
 
     /// Whether this peer may hold `sub`: audio only for a rig, everything else only for an
-    /// app; keepalives for both.
+    /// app. A rig is sent no keepalive either: it carries this rig's generator and health,
+    /// and the other rig learns this one is up from its `source.state` reads.
     fn may_subscribe(&self, sub: &Subscription) -> bool {
         let audio = matches!(sub, Subscription::Topic(Topic::Audio { .. }));
-        let ka = *sub == Subscription::Topic(Topic::Ka);
-        ka || audio == self.rig
+        audio == self.rig
     }
 
     fn wants(&self, t: &Topic) -> bool {
@@ -266,6 +266,7 @@ impl Peer {
     ) -> Result<(), Gone> {
         let wanted = match kind {
             Outside::Event => self.wants(&Topic::Evt),
+            Outside::Ka if self.rig => false,
             Outside::Ka => {
                 self.wants(&Topic::Ka)
                     || self
@@ -393,7 +394,7 @@ impl Peers {
     }
 
     /// One message from a peer: `[routing id][request]`, from `client` when it passed CURVE;
-    /// `is_rig` tells, for a new peer, whether its name was admitted as another rig.
+    /// `admission` tells what that client's key is admitted as now.
     pub(crate) fn request(
         &mut self,
         sock: &Socket,
@@ -401,7 +402,7 @@ impl Peers {
         frames: Vec<Vec<u8>>,
         interest: &Interest,
         now: Instant,
-        is_rig: impl FnOnce(&str) -> bool,
+        admission: impl FnOnce(&CurvePeer) -> Admission,
     ) {
         let [rid, body] = frames.as_slice() else {
             tracing::warn!(
@@ -410,6 +411,27 @@ impl Peers {
             );
             return;
         };
+        // Checked on every message: the handshake checked the key once, and a connection
+        // outlives a revoke (or a kind change) unless each message is held to the list.
+        let rig = match client.map(|c| (c, admission(c))) {
+            None => false,
+            Some((c, Admission::Revoked)) => {
+                if self.refusals.first(Some(c.key), "revoked") {
+                    tracing::warn!(
+                        "data from revoked client {:?} dropped (repeats at debug)",
+                        c.name
+                    );
+                }
+                self.drop_peer(rid, interest, "its key was revoked");
+                return;
+            }
+            Some((_, Admission::App)) => false,
+            Some((_, Admission::Rig(_))) => true,
+        };
+        if self.map.get(rid.as_slice()).is_some_and(|p| p.rig != rig) {
+            // What it may receive changed with its kind: it starts over as the new kind.
+            self.drop_peer(rid, interest, "its key was admitted as another kind");
+        }
         let req = match decode_data_request(body) {
             Ok(r) => r,
             Err(e) => {
@@ -425,12 +447,13 @@ impl Peers {
         };
         let known = self.map.contains_key(rid.as_slice());
         if !known {
-            let rig = client.is_some_and(|c| is_rig(&c.name));
             match Peer::new(rid, now, client.map(|c| c.key), rig) {
                 Ok(p) => {
                     tracing::debug!("data peer {} joined", hex(rid));
-                    // Every peer is sent keepalives, whatever it subscribes to.
-                    interest.add(&Topic::Ka.to_bytes());
+                    // Every app is sent keepalives, whatever it subscribes to.
+                    if !rig {
+                        interest.add(&Topic::Ka.to_bytes());
+                    }
                     self.map.insert(rid.clone(), p);
                 }
                 Err(e) => {
@@ -631,7 +654,9 @@ impl Peers {
         for s in &p.subs {
             interest.remove(&s.prefix());
         }
-        interest.remove(&Topic::Ka.to_bytes());
+        if !p.rig {
+            interest.remove(&Topic::Ka.to_bytes());
+        }
         tracing::info!(
             "data peer {} dropped ({why}) with {} subscription(s)",
             p.name(),

@@ -166,10 +166,14 @@ holds both:
 - **What an admitted rig may do:** subscribe `audio/` topics, and read a filtered state:
   B's clocks (with the stamp map), session (rate, captured inputs) and those inputs' setup
   and calibration, with the events that change them. Not measurements, files, peers or
-  anything else. No control commands. An app is never served `audio/`.
+  anything else. No control commands, and no keepalives (they carry B's generator and
+  health; A learns B is up from its state reads). An app is never served `audio/` nor the
+  filtered state: a key admitted as an app reads *not admitted* on A's link.
 - **Removing** an admitted rig (B's Connection page) drops it at once, not only at the next
   handshake: the peer table records each routing id's CURVE public key (the ZAP metadata
-  property `Message::client_key` reads; `User-Id` is only the key's name), so B ends that key's subscriptions and refuses its frames.
+  property `Message::client_key` reads; `User-Id` is only the key's name), so B ends that key's subscriptions and refuses its frames. Every data message is held to the list (name and
+  key, and the kind admitted), so a connection that outlived its admission is never taken
+  for a new peer, and a key given another kind starts over as that kind.
 - **Address.** A keeps the address the app gave; with B's key pinned, A may follow B's mDNS
   advert to a new address (a DHCP change), since the key, not the address, is the identity.
 - **B's key changes** (key file set aside, new pair): A's pin fails; the input reads

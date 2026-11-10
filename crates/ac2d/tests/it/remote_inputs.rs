@@ -353,3 +353,51 @@ fn a_rig_whose_key_changed_is_named() {
     a.shutdown();
     b.shutdown();
 }
+
+/// A rig whose key the other rig authorized as an app, not as a rig, is told so (its audio
+/// would be refused without a word); admitted as a rig on the same connection, it streams.
+#[test]
+fn slow_a_rig_admitted_as_an_app_is_told_so_until_admitted_as_a_rig() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let app = KeyPair::generate().unwrap();
+    let a_keys = KeyPair::generate().unwrap();
+    let b = rig(dir.path(), "rig-b", &app, None);
+    let a = rig(dir.path(), "rig-a", &app, Some(&a_keys));
+    let ctx = Context::new().unwrap();
+    let (mut cb, b_id) = client(&ctx, &b, &app);
+    let (mut ca, a_id) = client(&ctx, &a, &app);
+    cb.ok(Command::SessionOpen {
+        config: session(false),
+    });
+    cb.ok(Command::ServerAuthorize {
+        name: "rig-a".into(),
+        key: a_keys.public.to_z85(),
+    });
+    ca.ok(Command::RigPeers {
+        peers: vec![RigPeer {
+            rig: b_id,
+            name: "rig-b".into(),
+            ctrl: b.ctrl_endpoint().to_owned(),
+            data: b.data_endpoint().to_owned(),
+            key: b.server_public_key().unwrap().to_z85(),
+        }],
+    });
+    ca.ok(Command::SessionOpen {
+        config: with_remote(b_id, FS),
+    });
+    wait_remote(&mut ca, "not admitted", |r| {
+        r.rigs.first().map(|r| &r.link) == Some(&RemoteLink::NotAdmitted)
+    });
+    cb.ok(Command::AuthAdmitRig {
+        key: a_keys.public.to_z85(),
+        rig_id: a_id,
+        name: "rig-a".into(),
+    });
+    wait_remote(&mut ca, "streaming", |r| {
+        r.inputs.first().map(|i| i.audio) == Some(RemoteAudio::Streaming)
+            && r.rigs.first().map(|r| &r.link) == Some(&RemoteLink::Up)
+    });
+    a.shutdown();
+    b.shutdown();
+}
