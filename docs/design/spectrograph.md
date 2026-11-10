@@ -6,7 +6,7 @@ colormap LUT"). User-facing description: `docs/user-guide.md` → *Spectrograph*
 ## What the operator sees
 
 **G** steps the spectrum pane's views, as it steps the SPL pane's: spectrum → spectrum +
-spectrograph → spectrograph alone → spectrum (remembered in `ui.toml` as `spectrum_view`).
+spectrograph → spectrograph alone → spectrum (kept with the pane as `LayoutPane.spectrum_view`, so the layout and its measurement carry it).
 The split puts the spectrum in the top 40 %, the spectrograph of the pane's measurement under
 it; alone, the spectrograph takes the whole pane under the banners (with **W** / F11, the
 whole screen), its caption carrying the spectrum's window and calibration and its
