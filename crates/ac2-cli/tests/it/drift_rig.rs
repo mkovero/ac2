@@ -77,6 +77,8 @@ async fn slow_status_shows_the_clock_domain_and_the_drift() {
                 output: 0,
                 input: 0,
             }),
+            remote_inputs: Vec::new(),
+            link_offset: None,
         },
     })
     .await

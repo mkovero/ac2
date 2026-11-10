@@ -111,6 +111,12 @@ pub(crate) async fn session(
             }
             let mut input_channels = o.inputs.0.clone();
             input_channels.extend(spare_channels(dev, o.spare_inputs)?);
+            let remote_inputs = if o.remote_in.is_empty() {
+                Vec::new()
+            } else {
+                super::remote::remote_inputs(&super::state(&c).await?, &o.remote_in)?
+            };
+            input_channels.extend(remote_inputs.iter().map(RemoteInput::session_channel));
             let config = SessionConfig {
                 backend: Some(want),
                 input_device: DeviceSelector::Id { id: dev.id.clone() },
@@ -123,6 +129,8 @@ pub(crate) async fn session(
                 sample_rate_hz: rate,
                 buffer_frames: buffer,
                 loopback,
+                remote_inputs,
+                link_offset: None,
             };
             let (r, warnings) = c.call_warned(Command::SessionOpen { config }).await?;
             let s = expect_body!("session.open", r, ReplyBody::Session(s) => s)?;

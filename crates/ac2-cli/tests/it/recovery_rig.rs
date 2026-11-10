@@ -86,6 +86,8 @@ async fn status_shows_stopped_audio_until_the_daemon_reopens_it() {
             sample_rate_hz: Some(48_000),
             buffer_frames: Some(256),
             loopback: None,
+            remote_inputs: Vec::new(),
+            link_offset: None,
         },
     })
     .await

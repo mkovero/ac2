@@ -27,6 +27,7 @@ pub mod band_leq;
 pub mod band_transfer;
 pub mod banner;
 pub mod bar_ease;
+pub mod between_rigs;
 pub mod cal;
 pub mod cal_notice;
 mod canvas;

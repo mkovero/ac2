@@ -1,4 +1,5 @@
-//! `auth pair|show`: client-side key handling for remote mode.
+//! `auth pair|show`: client-side key handling for remote mode; `auth admit-rig|peer-add|
+//! peer-remove` trust between rigs, on the daemon ([`super::remote`]).
 //!
 //! Pairing is two-sided and never automatic: this command pins the daemon key the operator
 //! typed in (after comparing fingerprints with what the daemon host shows) and prints this
@@ -43,9 +44,19 @@ pub fn sanitize(s: &str) -> String {
     if n.is_empty() { "client".into() } else { n }
 }
 
-pub(crate) fn run(cli: &Cli, cmd: &AuthCmd, out: &mut Out<'_>) -> Result<(), CliError> {
+pub(crate) async fn run(cli: &Cli, cmd: &AuthCmd, out: &mut Out<'_>) -> Result<(), CliError> {
     let kd = key_dir(cli);
     match cmd {
+        AuthCmd::AdmitRig { name, key, rig_id } => {
+            super::remote::admit_rig(cli, name, key, rig_id, out).await?;
+        }
+        AuthCmd::PeerAdd {
+            name,
+            rig_id,
+            at,
+            key,
+        } => super::remote::peer_add(cli, name, rig_id, at, key, out).await?,
+        AuthCmd::PeerRemove { name } => super::remote::peer_remove(cli, name, out).await?,
         AuthCmd::Pair {
             host,
             server_key,

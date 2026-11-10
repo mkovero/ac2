@@ -456,4 +456,37 @@ pub enum AuthCmd {
     },
     /// Show this client's key and the pinned daemon keys.
     Show,
+    /// Admit another rig on the daemon: it may then take this rig's inputs (and nothing
+    /// else). Give it the other rig's server key and id (`ac2 status` there); removed with
+    /// the daemon's revoke under the same name.
+    AdmitRig {
+        /// The name its connections carry.
+        name: String,
+        /// The other rig's Z85 server key (40 characters).
+        #[arg(long, allow_hyphen_values = true)]
+        key: String,
+        /// The other rig's id, 16 hex digits.
+        #[arg(long)]
+        rig_id: String,
+    },
+    /// Pair the daemon with another rig it may take inputs from (that rig admits this one
+    /// with `admit-rig`).
+    PeerAdd {
+        /// Its name, as `--remote-in` names it.
+        name: String,
+        /// Its id, 16 hex digits.
+        #[arg(long)]
+        rig_id: String,
+        /// Its address as `--remote` takes it (`host[:port]`, data on port + 1).
+        #[arg(long)]
+        at: RemoteAddr,
+        /// Its Z85 server key (40 characters).
+        #[arg(long, allow_hyphen_values = true)]
+        key: String,
+    },
+    /// Unpair the daemon from a rig.
+    PeerRemove {
+        /// Its name.
+        name: String,
+    },
 }

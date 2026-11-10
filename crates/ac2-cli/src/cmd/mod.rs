@@ -20,6 +20,7 @@ mod meas_config;
 mod osc;
 mod readouts;
 mod rec;
+mod remote;
 mod salvage;
 mod selftest;
 mod selftest_frames;
@@ -72,7 +73,7 @@ pub(crate) async fn dispatch(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliErro
         Cmd::State { cmd } => readouts::state_dump(cli, cmd, out).await,
         Cmd::Selftest { cmd } => selftest::run(cli, cmd, out).await,
         Cmd::Discover(a) => discover::run(cli, a, out),
-        Cmd::Auth { cmd } => auth::run(cli, cmd, out),
+        Cmd::Auth { cmd } => auth::run(cli, cmd, out).await,
     }
 }
 

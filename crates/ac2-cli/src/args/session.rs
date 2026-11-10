@@ -366,4 +366,38 @@ pub struct SessionOpen {
     /// Mic on an input, e.g. `3=M30` (repeatable): the input setup calibrations match on.
     #[arg(long = "mic", value_name = "IN=NAME")]
     pub mics: Vec<MicAssign>,
+    /// Another rig's input, e.g. `ketunkolo:2` (repeatable): a paired rig (`ac2 auth
+    /// peer-add`) by name, and its 1-based input. Its session channel stays the same
+    /// whatever this rig's device has.
+    #[arg(long = "remote-in", value_name = "RIG:IN")]
+    pub remote_in: Vec<RemoteIn>,
+}
+
+/// `RIG:IN`: a paired rig's input.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteIn {
+    /// The rig's name as paired.
+    pub rig: String,
+    /// Its input.
+    pub input: Channel,
+}
+
+impl FromStr for RemoteIn {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        let (rig, ch) = s
+            .rsplit_once(':')
+            .ok_or_else(|| format!("{s:?}: expected RIG:IN, e.g. ketunkolo:2"))?;
+        let input: Channel = ch
+            .parse()
+            .map_err(|e: ac2_scene::unit_text::UnitError| e.0)?;
+        let rig = rig.trim();
+        if rig.is_empty() {
+            return Err(format!("{s:?}: name the rig, e.g. ketunkolo:2"));
+        }
+        Ok(Self {
+            rig: rig.to_owned(),
+            input,
+        })
+    }
 }

@@ -79,6 +79,8 @@ async fn slow_spl_watch_reads_its_input_on_a_fresh_meter() {
             sample_rate_hz: None,
             buffer_frames: None,
             loopback: None,
+            remote_inputs: Vec::new(),
+            link_offset: None,
         },
     })
     .await
@@ -206,6 +208,8 @@ async fn spl_set_changes_the_weightings_in_place() {
             sample_rate_hz: None,
             buffer_frames: None,
             loopback: None,
+            remote_inputs: Vec::new(),
+            link_offset: None,
         },
     })
     .await

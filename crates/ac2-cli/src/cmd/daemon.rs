@@ -58,6 +58,7 @@ fn status_json(
         "session": session,
         "timing": st.timing,
         "clocks": st.clocks,
+        "remote": st.remote,
         "autosave": st.autosave,
         "inputs": output::inputs_json(st),
     })
@@ -108,6 +109,15 @@ fn status_text(
         s.push_str(&c);
     }
     for l in ac2_scene::clock::status_lines(&st.clocks) {
+        s.push('\n');
+        s.push_str(&l);
+    }
+    let remote = session
+        .open
+        .as_ref()
+        .map(|o| o.config.remote_inputs.as_slice())
+        .unwrap_or_default();
+    for l in ac2_scene::between_rigs::status_lines(&st.remote, remote) {
         s.push('\n');
         s.push_str(&l);
     }

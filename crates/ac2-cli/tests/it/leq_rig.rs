@@ -97,6 +97,8 @@ async fn slow_leq_set_watch_and_export() {
             sample_rate_hz: None,
             buffer_frames: None,
             loopback: None,
+            remote_inputs: Vec::new(),
+            link_offset: None,
         },
     })
     .await
