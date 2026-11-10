@@ -1,177 +1,193 @@
 # Level axis follows the content
 
-Status: draft. Operator request: the spectrum pane's level axis re-centres on what it shows,
-gently and only when the picture needs it, because a kiosk (touch, no keyboard) cannot fix a
-range that no longer fits.
+Status: draft, review round 1 applied. Operator request: the spectrum pane's level axis
+re-centres on what it shows, gently and only when the picture needs it, because a kiosk
+(touch, no keyboard) cannot fix a range that no longer fits.
 
 ## Purpose
 
-A spectrum pane frames its level axis once: on its first curve, and again when a stopped
-run starts (`fit_first_shows`, `rearm_started_spectra` in `ac2-ui/src/state/panes/levels.rs`).
-After that the range stands until the operator acts: Ctrl+I/O zoom, Ctrl+↑/↓ pan, Ctrl+wheel
-zoom, Shift+wheel pan, Shift+Home fit, Ctrl+Home reset (`keys/table.rs`). A gain change, a
-new source or a band starting after soundcheck leaves the curve against the top or crushed
-at the bottom, and a full-screen kiosk has no way to press Shift+Home. Following the content
-fixes that without touching what the operator chose on purpose.
+A spectrum pane frames its level axis on its first curve and again when a stopped run starts
+(`fit_first_shows`, `rearm_started_spectra`, `ac2-ui/src/state/panes/levels.rs`); after that
+the range stands until the operator acts: Ctrl+I/O, Ctrl+↑/↓, Ctrl/Shift+wheel, Shift+Home
+(fit), Ctrl+Home (reset). A kiosk that fitted on a silent room, or a source whose gain
+changed after soundcheck, keeps a range that shows the curve off the top or crushed at the
+bottom, and the kiosk has no Shift+Home. Following fixes that and never touches a range the
+operator set.
 
-## What moves: the centre, not the span
+## Slot states and what each event does
 
-Only the range's position moves; its span stays. The span is the resolution the operator
-(or the first fit) chose: how many dB a centimetre is. Changing it changes the shape every
-curve appears to have, so a 3 dB bump would read differently after an automatic step; a pan
-keeps every shape and only slides the numbers. The span still comes from the first-show fit
-and from Shift+Home, as today.
+A slot is one pane's range for one scale (`LevelSlot::SpectrumDbfs`, `SpectrumSpl`). Two
+states, as the code has them today; following is armed in the first only:
+
+- **Auto**: not in `level_set`; framed by the app. Following armed. Not saved, not sent.
+- **Operator**: in `level_set`; set by hand. Following off. Saved in `ui.toml` and sent in
+  the measurement's layout (`operator_levels`; `meas_layout.rs:97`, `queries/layout.rs:156`).
+
+A *followed* range is an Auto range the follower has moved: same persistence as Auto.
+
+| event | today | with following |
+|---|---|---|
+| first show, no saved range | Auto (`level_set` cleared, hold `operator: false`) | same; ring starts empty |
+| first show on a saved range (`ui.toml`, own layout) | Operator (hold `operator: true`) | same; following off |
+| run restarted (`rearm_started_spectra`) | Auto slots refit; Operator kept | same; Auto rings cleared |
+| follow move | — | Auto only. `level_set` untouched, so `operator_levels` and the layout are unchanged: nothing sent, nothing written |
+| zoom, pan, wheel, Ctrl+Home | Operator, layout sent | same |
+| **Shift+Home** | Operator (`hold_level`), layout sent | **changed:** fit, then **Auto**: `level_set` cleared, so the layout is sent once *without* that range |
+| double-tap (touch) | — | as Shift+Home, no toast |
+| layout restored / own layout on row choice | per range: Operator if present, else Auto | same |
+| layout from another client | applied only while this app chose that row (`meas_layout.rs` header); its ranges are Operator | same. A kiosk's pinned pane never takes another client's layout, so it is never paused this way |
+
+The behaviour change: Shift+Home no longer stores the fitted range with the measurement. A
+fit means "frame what is shown", which following keeps doing; storing a snapshot of it would
+freeze the very thing the operator asked to track. Ctrl+Home (reset to the default) stays an
+Operator range: it is a chosen range, not a framing.
+
+A kiosk booting on a range set by hand in its `ui.toml` stays on it until a double-tap; the
+double-tap makes the slot Auto, which `ui.toml` then keeps, so the kiosk follows from the
+next boot on.
 
 ## The content statistic
 
-Computed in `ac2-scene` (`view::level::Follow`, pure, no I/O) from what `level_values`
-already gathers: the live curves the pane draws, offsets included, within the shown
-frequency range, in the pane's drawn unit.
+Pure, in `ac2-scene` (a `Follow` state beside `view::level`, the module inside `view.rs`).
+The app gathers its input with a new function beside `level_values`, which also takes stored
+and compared traces and only the shown band, both wrong here:
 
-- **Per frame:** the 95th percentile of the valid columns (`top`). NaN, ±∞, unresolved
-  columns (multi-resolution bands without data yet) and columns past their frame age are
-  dropped; a frame with fewer than 8 valid columns gives no value. The 95th percentile, not the
-  maximum, so one tonal spike or a 50 Hz hum peak does not steer the axis.
-- **Over time:** a ring of `(frame time, top)`, using the frames' own time, so a stalled
-  stream or a disconnect counts no time and the tests need no wall clock.
-- **Spectrum and RTA alike:** RTA bands are columns; the percentile over 31 bands is
-  coarse but the same rule.
-- **Spectrograph (2D, split, 3D):** the same live frames feed the history, so the same
-  statistic. The history itself is never scanned: it would answer for seconds ago.
-- **Not counted:** stored traces (they never drift, and a reference trace far below must
-  not hold the live curve down), the peak-hold curve (it only rises), compared panes'
-  curves when the pane follows only its own measurement (see match scales).
+- **Curves:** the live curves the pane draws, its own and compared ones, offsets included,
+  in the drawn unit. Stored traces never drift and the peak hold only rises: not counted.
+- **Per curve, per frame:** the highest valid column (NaN, ±∞, unresolved multi-resolution
+  columns dropped) between 20 Hz and 20 kHz, the frequency axis's limits, *not* the shown
+  zoom: the frequency axis is shared across panes, and zooming one must not move levels.
+  No minimum column count: a 1/1-octave RTA has ten.
+- **Per pane:** the maximum over its curves, each on its own grid. This is the "top"
+  `level::fit` frames to (its upper end is the maximum), so a fit and the follower never
+  disagree about where the content is. A feedback ring or a test tone *is* the top.
+- **Grids:** a fixed-FFT spectrum arrives on `LogBins` (single bins at the bottom, then
+  1/96 octave, tone level the maximum of a column's bins); multi-resolution on `Log`; RTA on
+  `IecBands`. The maximum over many noise bins reads a few dB above their mean, so a
+  narrowband noise curve's top sits above its look; RTA band power is its own, higher,
+  quantity. Each is placed on its own drawn values, so each lands within a step of the same
+  relative position.
+- **Clock:** the app's clock at each frame's arrival (`now_s`), one clock for a pane mixing
+  rigs. A window decides only when frames cover at least 80 % of it, so a stalled stream
+  counts no time. A curve's rig changing `session_epoch` or `daemon_incarnation` clears the
+  ring: a restarted daemon is a new signal history.
 
-## The trigger: only when the picture needs it
+## Trigger, target, motion
 
-Two conditions, deliberately asymmetric, both on the frame-time ring:
+Asymmetric, because a clipped curve is wrong now and a low one is only less legible:
 
-| condition | test | window |
-|---|---|---|
-| **clipped** | the *median* of `top` over the window is above `hi` | 10 s |
-| **squashed** | the *maximum* of `top` over the window is below `lo + 0.3·span` | 20 s |
+- **Up, fast:** the median of the pane top over the last **3 s** above `hi`. No lockout
+  beyond needing 3 s of frames since the previous move.
+- **Down, slow:** the maximum of the pane top over the last **240 s** below
+  `lo + 0.35·span`, and at least **60 s** since the previous move. A song gap, a speech
+  break or a quiet verse never lasts that long; an idle mic does.
+- **Span (Auto only):** over the slow window, the top above `hi` and the median of the
+  per-frame 5th percentile below `lo` (content overflowing both ends): refit the span as
+  `level::fit` does. The follower never narrows a span (idle-mic result below).
+- **Target:** up puts the window's *maximum* at `hi − 0.2·span`, down puts it at or below
+  that; the shift is a whole number of the axis's major tick steps, never zero, clamped to
+  the level bounds. Labels end on the same grid lines; only the numbers change.
+- **Ease:** 0.8 s, cosine in-out, on the range itself: curves, grid, spectrograph colours
+  and 3D heights move together, every frame on one consistent range.
+- **Hands off:** no move while a pointer button is down or a drag is in progress, nor within
+  30 s of a key or pointer input on that pane. The decision waits; it is not dropped.
 
-The median means the curve's top sits above the plot for more than half the time, not
-once; transients and loud bars of music are ignored. For the squash test even the loudest
-moment of 20 s must sit in the bottom third: a quiet verse between choruses never pulls the
-axis down. Neither test fires within **30 s** of the previous move or of the first-show fit,
-so the axis never walks.
+## Validation
 
-Hysteresis comes from the target (below): after a move the content top sits at
-`hi − 0.2·span`; going up again needs a further rise of 0.2·span (12 dB on a 60 dB
-axis) held for the median window, going down a fall of 0.5·span held for 20 s.
+A scratch simulation (not committed; the music clips are private) runs the rule on column
+spectra built as the daemon builds them (Hann 8192, tone level, max of bins per 1/24-octave
+column, 10 frames/s, no averaging, so noisier than ac2's curves). Six 50 s commercial clips
+(−5 … −14 dBFS rms) loop into 3-minute songs at ±4 dB, gaps of pink room noise about 70 dB
+below. The pane starts on `level::fit` of its first frame. Ten seeds each:
 
-## The target and the motion
+SIM_TABLE
 
-- **Where:** the window's median `top` lands near `hi − 0.2·span`: the curve's top
-  a fifth below the frame, its floor allowed to run off the bottom (noise floor is the
-  least read part of a spectrum).
-- **Snap:** the shift is a whole number of the axis's major tick steps (the step the
-  labels are drawn at, 10 dB on a usual spectrum axis), the multiple that lands nearest the
-  target, never zero, clamped to the level bounds. Labels end on the same values at the same
-  grid lines, so nothing crawls; only the numbers change.
-- **Ease:** 0.8 s, cosine in-out, on the range itself: curves, grid, spectrograph colours and
-  3D heights move together, every frame drawn on one consistent range.
-- **Kept or not:** a followed range is framed automatically, as the first fit is: it is not
-  an operator range, so it is not saved with the measurement's panes nor in `ui.toml`
-  (`level_set` cleared for that slot).
+The first draft's rule (95th percentile top, 20 s squash window, 30 s lockout) made 31–36
+moves an hour on the same show: a down in every gap, an up at every song.
 
-## Manual control wins
+## Manual control, kiosk gesture
 
-Any operator range change on a pane's slot (zoom, pan, wheel, Ctrl+Home reset) pauses
-following for that slot. It resumes when:
+An Operator slot never moves until Shift+Home or a double-tap makes it Auto. No timeout: a
+range that jumps back half an hour after a zoom on a detail is a surprise mid-tune.
 
-- the pane shows another measurement or scale (the existing `SpectrumHold` rule), or
-- the operator asks: **Shift+Home** (fit) frames the content *and* re-arms following. Fit
-  and follow are one concept, "frame what is shown", so they share one control; no new key.
-- **No timeout.** A range that jumps back half an hour after the operator zoomed in on a
-  detail is a surprise mid-tune; a kiosk gets its own gesture instead.
+**Double-tap** on the plot, outside the legend (`row_at` hits excluded, as is the plate's own
+double-click): fits the level only (frequency untouched), makes the slot Auto, no toast.
+egui 0.36 counts a double click within 0.3 s and 6 px of the first
+(`InputOptions::max_double_click_delay`, `max_click_dist`): mouse-sized; a fingertip on a Pi
+touch panel drifts further. The pane keeps its own detector: two clicks within 0.4 s and
+24 logical px. The first tap already focused the pane and placed the cursor; the cursor state
+from before it is restored on the second, so a kiosk is left with no stray cursor. The 3D
+view the same; its camera keeps Home.
 
-**Touch:** a double-tap on the plot (outside the legend plate, whose double-click already
-puts it back) is Shift+Home. The pane's single click focuses and places the cursor; a double
-click on the plot is unused today (`view/panes/mouse.rs`, `navigate`). In the 3D view a
-double-tap does the same; the camera keeps Home.
+## Panes on one scale
 
-A range restored from a saved layout is a starting point, not a pause: following stays armed
-on it. The pause is this run's state only, so a kiosk that boots on a layout the operator
-once zoomed on the desktop still follows.
-
-## Match scales
-
-Spectrum panes keep a range each today; only SPL panes share a union (`shared_scale`). When
-spectrum panes join the shared scale, the group follows as one: the statistic is the maximum
-of the panes' window medians in that unit, one decision, one shift, every pane eased
-together; an operator change on any pane of the group pauses the group. Until then each pane
-follows its own measurement.
+Same-unit spectrum panes on screen follow as one group, so side-by-side panes never end up a
+step apart. Once a frame, before drawing, as `refresh_spl_scales` does for the Leq columns
+(`scenes/spl_meters.rs`; a pane of another rig read with its rig swapped in), gather each
+Auto pane's top; the group's top is their maximum: one decision, one range written to every
+Auto member. Operator panes are out of the group. The group lives under the Display toggle
+of the shared Leq scale (`UiPrefs::shared_scale`), widened to same-kind panes.
 
 ## dBFS and dB SPL
 
-Each scale is its own slot (`PaneLevels::spectrum_dbfs`, `spectrum_spl`), so each has its
-own ring, pause and last-move time. Switching scale never carries a decision across: the
-other slot starts from its own state, with its first-show fit if it has none.
+Separate slots: separate rings, states and last-move times. A scale switch carries nothing.
 
 ## On/off and default
 
-One app setting, Settings → Display: **"Level axis follows the content"**, `ui.toml`
-(`UiPrefs::level_follow`), **on** by default. App, not per pane or per measurement: it
-describes this screen's behaviour (a kiosk wants it, a desk may not), and the per-pane state
-that matters, the pause, is already implicit in the operator's own range changes.
+Settings → Display: **"Level axis follows the content"**, `ui.toml` (`UiPrefs::level_follow`),
+**on** by default; app-wide (a kiosk wants it, a desk may not). The key hint stays the static
+"fit level"; the help and the user guide say a fit also re-arms following. **No wire
+change**: the toggle is `ui.toml`, rings are run state, followed ranges are Auto.
 
-**No wire change.** The toggle is `ui.toml`, the pause and ring are run state, followed
-ranges are not saved. PROTO 86 is untouched by this feature.
+## How a move shows
 
-## How the UI shows a move
-
-The level axis labels are the truth and they change; nothing else claims anything. During the
-ease and 1.5 s after, the axis's tick labels fade from the accent colour back to their usual
-grey: enough for an eye on the curve to notice the numbers changed, without a word that could
-read as a verdict about the signal. No toast (a kiosk would collect them). The hint bar's
-Shift+Home tip reads "fit level" while following and "fit + follow" while paused, so the
-desk operator sees the pause without a badge on the plot.
+The axis numbers are the truth and they change. During the ease and 1.5 s after, the
+level-axis gutter carries a faint grey shade that fades out (the gentle plot-hint style): no
+accent colour, nothing near the clip/alarm colours, no toast, no words.
 
 ## The 2D spectrograph's colours
 
-The spectrograph colours by the pane's level range (a uniform, no re-upload), so a move
-recolours the whole history at once, and the colour bar with it: bar and picture cannot
-disagree, and every cell still reads its true level on the bar. Moves are rare (a real,
-sustained level change, at most one per 30 s), so the recolour marks the moment the level
-changed rather than hiding it. A spectrograph range of its own would be a second control for
-the same concept. **Recommend: share the range.** The 3D view takes the same range
-(`spectrograph_3d.rs`, `range` from the pane's axis for the history's scale): its height
-scale post and ceiling line move with it, labelled.
+The spectrograph colours by the pane's range (a uniform), so a move recolours the history and
+the colour bar together: every cell still reads its level on the bar. Moves are rare and mark
+a real level change. A range of its own would be a second control for one concept.
+**Recommend: share.** The 3D view takes the same range (`spectrograph_3d/`, `range` from the
+pane's axis for the history's scale), its height post and ceiling line labelled.
 
 ## Tests
 
-`ac2-scene` (pure `Follow`, frames scripted with frame times):
+`ac2-scene` (pure `Follow`, scripted frames with arrival times):
 
-- **Pink-noise drift:** −1 dB/min over 20 min, inside the range: no move until the squash
-  test holds, then exactly one, snapped to the tick step.
-- **Music dynamics:** sections ±12 dB every 4–8 s, 50 ms bursts +20 dB, rests: no move in
-  10 min.
-- **Level step:** +20 dB held: one move after 10 s, content top within half a step of the
-  target, no second move; −30 dB: one move after 20 s.
-- **Validity:** NaN / unresolved / stale columns ignored; a stream that stops counts no time.
-- **Ease:** intermediate ranges monotonic, final range exactly on the grid, span unchanged.
+- **Tone over floor:** 1 kHz 40 dB over pink, fitted: no move in 10 min.
+- **Show:** an hour of 3-min songs, 30–60 s gaps: no down move, no clipped run over 2 s.
+- **Level step** +20 dB: one move up within 3 s, top within one step of the target.
+- **Idle mic** 20 min: one down after 240 s; music back: one up.
+- **Narrowband vs RTA** on one pink noise: each lands within one step of its target.
+- **Compared curve on another grid:** the pane top is the max of both.
+- **Frequency zoom:** changes no decision.
+- **Epoch / incarnation change:** ring cleared, no move on the old history.
+- **Coverage:** a stream that stops counts no time.
+- **Ease:** monotonic, final range on the grid, span unchanged.
 
 `ac2-ui` reducer (`state/tests/display/axis.rs`):
 
-- **Manual override:** a pan pauses; a later step does not move; Shift+Home fits and
-  re-arms; the next step moves.
-- **Scale switch:** dBFS pause leaves SPL following.
-- **Setting off:** nothing moves; a followed range never lands in `operator_levels`.
-- **Double-tap** dispatches the Shift+Home command (key table, hint and user-guide row
-  in the same change).
+- **Manual override:** a pan makes the slot Operator; a later step does not move it;
+  Shift+Home fits, makes it Auto, the next step moves it.
+- **A follow move sends no layout and writes nothing** (`operator_levels` unchanged, no
+  request out, prefs not dirty).
+- **Start/stop rearm:** refit once, no counter-move from the old ring.
+- **Hands off:** a step during a drag moves only 30 s after the drag ends.
+- **Two panes** of one unit stay on one range through a step.
+- **Double-tap** fits level only, leaves the cursor as before the first tap, sends the layout
+  without the range; a tap pair on a legend row does nothing of the kind.
+- **Setting off:** nothing moves.
 
 ## Open questions (with recommendations)
 
-1. **Windows and thresholds** (10 s / 20 s / 30 s, 0.3·span, target 0.2·span): start here,
-   tune on pupu with a music programme and a level step. *Recommend: constants in
-   `ac2-scene`, not settings.*
-2. **Other kinds** (transfer, sweep response): a transfer magnitude is relative and rarely
-   drifts; sweeps already fit per result. *Recommend: spectrum only.*
-3. **Should Ctrl+Home (reset to default) also re-arm?** It sets a range by hand. *Recommend:
-   no, it pauses; Shift+Home is the one way back to following.*
-4. **Double-tap in the 3D view: fit level or reset camera?** *Recommend: fit level, as the
-   2D panes do; the camera keeps Home and its drag.*
-5. **Follow the floor too** (content top fine, floor off the bottom by a lot)? *Recommend:
-   no; the span is the operator's.*
+1. **Idle mic:** after 240 s the axis drops onto the mic's floor; music back costs one up
+   move and under 2 s clipped. *Recommend: accept; the room is what there is.*
+2. **Narrowing the span** when content fills under a third of it: with a 300 s window it
+   zoomed onto an idle mic's noise floor. *Recommend: follower widens only; a fit narrows.*
+3. **Other kinds** (transfer, sweep): *Recommend: spectrum only.*
+4. **Ctrl+Home re-arm?** *Recommend: no; it is a chosen range.*
+5. **Shared-scale toggle** covering spectrum groups: *Recommend: widen the existing one, one
+   control per concept.*

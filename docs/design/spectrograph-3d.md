@@ -440,7 +440,7 @@ stepped down once (a blanking stall) would stay degraded for months.
 
 ## Tests
 
-- `ac2-scene` (`spectrograph_3d_tests.rs`): column decimation (tone in one column, wide low
+- `ac2-scene` (`spectrograph_3d/tests/`): column decimation (tone in one column, wide low
   bands, invalid bands); bucket max, integer k per span × tier, buckets anchored on absolute
   slots across scrolls, the oldest bucket after slots drop out, R + 1 ring; gaps empty; reset on span / grid / scale / frequency-span change;
   frame-by-frame folding equals a rebuild (property test); phase = bucket fill fraction;
