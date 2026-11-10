@@ -66,6 +66,7 @@ pub mod progress;
 pub mod range_band;
 pub mod readout;
 pub mod recording;
+pub mod remote_inputs;
 pub mod rig;
 pub mod rig_tree;
 pub mod room;

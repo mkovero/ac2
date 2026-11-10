@@ -162,7 +162,15 @@ pub fn server_lines(s: &ServerInfo) -> Vec<String> {
 
 /// One authorized client: `laptop · fingerprint 1a2b-…`.
 pub fn authorized_row(a: &AuthorizedClient) -> String {
-    format!("{} · fingerprint {}", a.name, a.fingerprint)
+    match a.rig {
+        // A rig admitted to take this rig's inputs: what it may do, not only who it is.
+        Some(_) => format!(
+            "{} · fingerprint {}",
+            crate::remote_inputs::admitted_row(&a.name),
+            a.fingerprint
+        ),
+        None => format!("{} · fingerprint {}", a.name, a.fingerprint),
+    }
 }
 
 /// One refused key: `fingerprint 1a2b-… from 192.168.1.40 · 12 times · 3 min ago`.

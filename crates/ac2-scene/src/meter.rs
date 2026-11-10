@@ -124,8 +124,12 @@ pub fn output_name(channel: u16, device_name: Option<&str>) -> String {
         )
 }
 
-/// A channel choice in a list: `2 · Room mic`.
+/// A channel choice in a list: `2 · Room mic`. A remote input's name already says its rig
+/// and that rig's input (`ketunkolo in 1`): it goes without a number of this rig.
 pub fn channel_choice(channel: u16, name: &str) -> String {
+    if ac2_proto::model::remote_slot(channel).is_some() {
+        return name.to_owned();
+    }
     format!("{} · {name}", u32::from(channel) + 1)
 }
 
@@ -219,7 +223,8 @@ pub fn input_label(
     role: Option<InputRole>,
 ) -> String {
     let n = u32::from(channel) + 1;
-    let generic = name == format!("Input {n}");
+    // A remote input's name says its rig's input number already.
+    let generic = name == format!("Input {n}") || ac2_proto::model::remote_slot(channel).is_some();
     let mut s = name.to_owned();
     if let Some(c) = curve {
         s.push_str(" · ");
