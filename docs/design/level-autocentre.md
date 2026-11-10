@@ -17,7 +17,7 @@ operator set.
 ## Slot states and what each event does
 
 A slot is one pane's range for one scale (`LevelSlot::SpectrumDbfs`, `SpectrumSpl`). Two
-states, as the code has them today; following is armed in the first only:
+states; following is armed in the first only:
 
 - **Auto**: not in `level_set`; framed by the app. Following armed. Not saved, not sent.
 - **Operator**: in `level_set`; set by hand. Following off. Saved in `ui.toml` and sent in
@@ -25,26 +25,35 @@ states, as the code has them today; following is armed in the first only:
 
 A *followed* range is an Auto range the follower has moved: same persistence as Auto.
 
-| event | today | with following |
+Today two flags say "the operator set this": `level_set` per slot (persistence) and
+`SpectrumHold.operator` per pane (`rearm_started_spectra` keeps such panes, levels.rs:438).
+They already disagree: a received layout without a range clears `level_set`
+(`set_operator_levels`, levels.rs:216-226) and leaves `operator: true`. The follower would
+make that worse, so **`SpectrumHold.operator` goes: the hold asks `level_set` for its
+(pane, scale) slot.** One flag, one truth; the columns below are that flag and what follows
+from it.
+
+| event | today | with following (`level_set` → state) |
 |---|---|---|
-| first show, no saved range | Auto (`level_set` cleared, hold `operator: false`) | same; ring starts empty |
-| first show on a saved range (`ui.toml`, own layout) | Operator (hold `operator: true`) | same; following off |
-| run restarted (`rearm_started_spectra`) | Auto slots refit; Operator kept | same; Auto rings cleared |
-| follow move | — | Auto only. `level_set` untouched, so `operator_levels` and the layout are unchanged: nothing sent, nothing written |
-| zoom, pan, wheel, Ctrl+Home | Operator, layout sent | same |
-| **Shift+Home** | Operator (`hold_level`), layout sent | **changed:** fit, then **Auto**: `level_set` cleared, so the layout is sent once *without* that range |
-| double-tap (touch) | — | as Shift+Home, no toast |
-| layout restored / own layout on row choice | per range: Operator if present, else Auto | same |
-| layout from another client | applied only while this app chose that row (`meas_layout.rs` header); its ranges are Operator | same. A kiosk's pinned pane never takes another client's layout, so it is never paused this way |
+| first show, no saved range | cleared → Auto | same; ring starts empty |
+| first show on a saved range (`ui.toml`, own layout) | set → Operator | same; following off |
+| run restarted (`rearm_started_spectra`) | Auto panes refit; Operator kept | same, keyed on `level_set`; Auto rings cleared |
+| follow move | — | untouched → Auto: `operator_levels` and the layout unchanged, nothing sent, nothing written |
+| zoom, pan, wheel, Ctrl+Home | set → Operator, layout sent | same |
+| **Shift+Home** | set → Operator (`hold_level`), layout sent | **changed:** fit, then cleared → **Auto**; the layout is sent once *without* that range. With following off: as today |
+| double-tap (touch) | — | as Shift+Home, no toast. With following off: as today's Shift+Home |
+| layout restored / own layout on row choice | per range: set if present, else cleared | same |
+| layout from another client | applied only while this app chose that row (`meas_layout.rs` header); set if it carries a range, else cleared | same, and now a rearm agrees with it. A kiosk's pinned pane never takes another client's layout, so it is never paused this way |
 
-The behaviour change: Shift+Home no longer stores the fitted range with the measurement. A
-fit means "frame what is shown", which following keeps doing; storing a snapshot of it would
-freeze the very thing the operator asked to track. Ctrl+Home (reset to the default) stays an
-Operator range: it is a chosen range, not a framing.
+The behaviour change, with following on: Shift+Home no longer stores the fitted range with
+the measurement. A fit means "frame what is shown", which following keeps doing; storing a
+snapshot of it would freeze the very thing the operator asked to track. With following off
+Shift+Home stores it as today: no regression for a desk that turned following off. Ctrl+Home
+(reset to the default) stays Operator: a chosen range, not a framing.
 
-A kiosk booting on a range set by hand in its `ui.toml` stays on it until a double-tap; the
-double-tap makes the slot Auto, which `ui.toml` then keeps, so the kiosk follows from the
-next boot on.
+**Kiosk line** (for the ac2pi README in the sys repo): a range set by hand over VNC is
+Operator and stays until a double-tap on the plot; the double-tap makes it Auto, which
+`ui.toml` keeps, so the kiosk follows from then on, across reboots.
 
 ## The content statistic
 
@@ -68,8 +77,9 @@ and compared traces and only the shown band, both wrong here:
   quantity. Each is placed on its own drawn values, so each lands within a step of the same
   relative position.
 - **Clock:** the app's clock at each frame's arrival (`now_s`), one clock for a pane mixing
-  rigs. A window decides only when frames cover at least 80 % of it, so a stalled stream
-  counts no time. A curve's rig changing `session_epoch` or `daemon_incarnation` clears the
+  rigs. A window decides only when no gap between consecutive frames in it is longer than
+  2 s (a multi-resolution spectrum or a slow RTA sends a few frames a second, so a frame
+  count would starve them), and a stalled stream counts no time. A curve's rig changing `session_epoch` or `daemon_incarnation` clears the
   ring: a restarted daemon is a new signal history.
 
 ## Trigger, target, motion
@@ -82,43 +92,64 @@ Asymmetric, because a clipped curve is wrong now and a low one is only less legi
 - **Down, slow:** the maximum of the pane top over the last **240 s** below
   `lo + 0.35·span`, and at least **60 s** since the previous move. A song gap, a speech
   break or a quiet verse never lasts that long; an idle mic does.
-- **Span (Auto only):** over the slow window, the top above `hi` and the median of the
-  per-frame 5th percentile below `lo` (content overflowing both ends): refit the span as
-  `level::fit` does. The follower never narrows a span (idle-mic result below).
+- **Span (Auto only), independent of clipping:** the slow-window median of the per-frame
+  extent (top minus the frame's 5th-percentile column, its floor) above **0.8·span**: the
+  content no longer fits, whether it clips or is cut at the bottom. (Testing "top above
+  `hi`" over the slow window could never hold: the up rule fires within 3 s.) The new
+  range is `level::fit` of the window's median floor and maximum top, widened downward until
+  the extent fills at most **0.6** of it, so it does not re-trigger at once. Lockout as for
+  down. The follower never narrows a span (idle-mic result below).
 - **Target:** up puts the window's *maximum* at `hi − 0.2·span`, down puts it at or below
-  that; the shift is a whole number of the axis's major tick steps, never zero, clamped to
-  the level bounds. Labels end on the same grid lines; only the numbers change.
+  that; the shift is the axis's major tick step (`nice(span / 8)`, as `level::fit` rounds)
+  times the whole number nearest the target, rounded away from zero when that is zero, then
+  clamped to the level bounds. Labels end on the same grid lines; only the numbers change.
 - **Ease:** 0.8 s, cosine in-out, on the range itself: curves, grid, spectrograph colours
   and 3D heights move together, every frame on one consistent range.
 - **Hands off:** no move while a pointer button is down or a drag is in progress, nor within
-  30 s of a key or pointer input on that pane. The decision waits; it is not dropped.
+  30 s of a key or pointer input on that pane (on any member of its group). The decision
+  waits; it is not dropped.
 
-## Validation
+## Validation (constants provisional)
 
 A scratch simulation (not committed; the music clips are private) runs the rule on column
-spectra built as the daemon builds them (Hann 8192, tone level, max of bins per 1/24-octave
-column, 10 frames/s, no averaging, so noisier than ac2's curves). Six 50 s commercial clips
-(−5 … −14 dBFS rms) loop into 3-minute songs at ±4 dB, gaps of pink room noise about 70 dB
-below. The pane starts on `level::fit` of its first frame. Ten seeds each:
+spectra close to the daemon's: Hann 8192, tone level, max of bins per column, 10 frames/s.
+Where it differs: **1/24-octave** columns, not the live grid's 1/96 (four times fewer
+columns, so a slightly lower per-frame max), and frames either unaveraged or with a 1 s
+exponential power average (ac2's averaging is its own setting). Step `nice(span / 8)` as
+`level::fit`. Six 50 s commercial clips (−5 … −14 dBFS rms) loop into 3-minute songs at
+±4 dB, gaps of pink room noise about 70 dB below. The pane starts on `level::fit` of its
+first frame. Constants as written above (up 80th percentile over 3 s, down 240 s,
+lockout 60 s, pad 0.2, squash 0.35, widen 0.8 → 0.6). Ten seeds each; "below" is the mean
+share of columns under `lo`, the content cut off at the bottom:
 
-| scenario (ten seeds) | moves, mean (max) | clipped s, mean (max) | longest clipped run |
-|---|---|---|---|
-| show: 1 h of 3-min songs, 30–60 s gaps | 0.6 (1), never down | 0.8 (3.3) | 0.6 s |
-| show, pane fitted on the silent room first | 1.5 (3), all up in the first minute | 1.2 (2.2) | 0.8 s |
-| tone 40 / 60 dB over a pink floor, 10 min after a fit | 0 | 0 | 0 |
-| tone appearing after a fit on the floor | 1.2 (2) | 1.1 (2.7) | 1.1 s |
-| music, +20 dB for 10 min, then −30 dB for 10 min | 1.3 (2) | 1.7 (5.6) | 0.8 s |
-| idle mic 20 min between music | 2.2 (3): one down, one up | 1.1 (2.9) | 0.8 s |
-| pink noise rising 1 dB/min for 20 min | 1.7 (2) | 8.1 (8.4) | 0.4 s |
+| scenario | moves, mean (max) | clipped s, mean (max) | longest clipped run | below |
+|---|---|---|---|---|
+| show: 1 h of 3-min songs, 30–60 s gaps | 1.1 (2), never down | 0.8 (5.0) | 0.4 s | 13 % |
+| same, 1 s average | 0.8 (2) | 0.1 (0.8) | 0.7 s | 7 % |
+| show, pane fitted on the silent room first | 3.1 (5): up, then widens | 2.5 (10.9) | 0.7 s | 23 % |
+| same, 1 s average | 3.6 (6) | 1.6 (3.0) | 0.8 s | 15 % |
+| fitted on a flat −140 floor, then music | 2.2 (3): up, one widen | 1.2 (2.1) | 0.7 s | 18 % |
+| tone 40 / 60 dB over a pink floor, 10 min after a fit | 0 | 0 | 0 | 0 % |
+| tone appearing after a fit on the floor | 2.0 (2): up, widen | 0.8 (0.9) | 0.8 s | 36 % |
+| music, +20 dB for 10 min, then −30 dB for 10 min | 1.5 (4) | 1.3 (3.8) | 2.2 s | 11 % |
+| idle mic 20 min between music | 2.4 (4): down, up, widen | 1.1 (2.5) | 1.4 s | 14 % |
+| pink noise rising 1 dB/min for 20 min | 1.9 (2) | 11.3 (16.5) | 0.3 s | 6 % |
+| same, 1 s average | 2.0 (2) | 2.7 (3.7) | 0.8 s | 0 % |
 
 Tuning on the same runs: the up quantile at the median left 25 s an hour clipped (max 70 s,
 in runs under a second) on the show; 0.67 left 3.4 s; 0.8 the figures above, with no more
 moves. A 5 s up window clipped more for the same moves. A 0.15 target pad clipped the noise
-drift twice as long as 0.2. The pink-drift clipped seconds are single noise columns of
-unaveraged frames above the top for under half a second; averaged curves do less.
+drift twice as long as 0.2. Without the 0.6 headroom a widen re-triggered at once. The
+"below" share stays 7–23 % on music after a widen: music's top octave sits far under its
+bass, and the fit's median floor leaves the quietest frames' lowest columns under `lo`.
+A show fitted on silence can widen a second time an hour later, when a long gap of room
+noise lowers the window's floor.
 
 The first draft's rule (95th percentile top, 20 s squash window, 30 s lockout) made 31–36
 moves an hour on the same show: a down in every gap, an up at every song.
+
+All numbers are provisional: confirm on pupu with the live grid and averaging, a music
+programme and a level step, before the constants are frozen in `ac2-scene`.
 
 ## Manual control, kiosk gesture
 
@@ -136,12 +167,21 @@ view the same; its camera keeps Home.
 
 ## Panes on one scale
 
-Same-unit spectrum panes on screen follow as one group, so side-by-side panes never end up a
-step apart. Once a frame, before drawing, as `refresh_spl_scales` does for the Leq columns
-(`scenes/spl_meters.rs`; a pane of another rig read with its rig swapped in), gather each
-Auto pane's top; the group's top is their maximum: one decision, one range written to every
-Auto member. Operator panes are out of the group. The group lives under the Display toggle
-of the shared Leq scale (`UiPrefs::shared_scale`), widened to same-kind panes.
+Same-unit Auto spectrum panes on screen follow as one group with **one range**, so
+side-by-side panes never end up a step apart. Once a frame, before drawing, as
+`refresh_spl_scales` does for the Leq columns (`scenes/spl_meters.rs`; a pane of another rig
+read with its rig swapped in):
+
+- **The group range** is `level::fit` over the union of the members' values. It is fitted
+  again when a member joins (a pane shows a curve, or turns Auto), on Shift+Home or a
+  double-tap on any member, and on a rearm of any member's measurement; a member leaving
+  keeps the range.
+- **Following:** the group's top per frame is the maximum of its members' tops (each the
+  max over its curves); one ring, one decision, one range written to every member.
+- **Hands off** on one member holds the whole group.
+- Operator panes are out of the group. The group lives under the Display toggle of the
+  shared Leq scale (`UiPrefs::shared_scale`), widened to same-kind panes; off, each pane
+  follows alone.
 
 ## dBFS and dB SPL
 
@@ -150,7 +190,8 @@ Separate slots: separate rings, states and last-move times. A scale switch carri
 ## On/off and default
 
 Settings → Display: **"Level axis follows the content"**, `ui.toml` (`UiPrefs::level_follow`),
-**on** by default; app-wide (a kiosk wants it, a desk may not). The key hint stays the static
+**on** by default; app-wide (a kiosk wants it, a desk may not). Off, everything is as today,
+Shift+Home included (it stores an Operator range). The key hint stays the static
 "fit level"; the help and the user guide say a fit also re-arms following. **No wire
 change**: the toggle is `ui.toml`, rings are run state, followed ranges are Auto.
 
@@ -183,6 +224,9 @@ pane's axis for the history's scale), its height post and ceiling line labelled.
 - **Epoch / incarnation change:** ring cleared, no move on the old history.
 - **Coverage:** a stream that stops counts no time.
 - **Ease:** monotonic, final range on the grid, span unchanged.
+- **Widen:** fitted on a flat −110 dBFS floor, then music: one up, then the span widens
+  once (no second widen in 10 min); a follow move never narrows.
+- **Coverage gap:** frames 0.3 s apart decide; a 3 s hole in the window holds the decision.
 
 `ac2-ui` reducer (`state/tests/display/axis.rs`):
 
@@ -191,11 +235,19 @@ pane's axis for the history's scale), its height post and ceiling line labelled.
 - **A follow move sends no layout and writes nothing** (`operator_levels` unchanged, no
   request out, prefs not dirty).
 - **Start/stop rearm:** refit once, no counter-move from the old ring.
+- **Shift+Home, then a run restart:** the slot refits (it is Auto, one flag says so).
+- **Received layout without a range:** the slot is Auto for following and for a rearm alike.
 - **Hands off:** a step during a drag moves only 30 s after the drag ends.
 - **Two panes** of one unit stay on one range through a step.
+- **Second pane joins** showing content 30 dB higher: the group refits once over both, both
+  panes on the new range.
+- **Shift+Home on one member** refits the whole group; hands off on one member holds the
+  other's move too.
 - **Double-tap** fits level only, leaves the cursor as before the first tap, sends the layout
-  without the range; a tap pair on a legend row does nothing of the kind.
-- **Setting off:** nothing moves.
+  without the range, marks `prefs_dirty` (ui.toml drops the range); a tap pair on a legend
+  row does nothing of the kind. The 0.4 s / 24 px rule is checked by hand on the CM4 kiosk
+  panel before it ships.
+- **Setting off:** nothing moves; Shift+Home and double-tap make the slot Operator as today.
 
 ## Open questions (with recommendations)
 
