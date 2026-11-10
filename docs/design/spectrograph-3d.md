@@ -1,6 +1,6 @@
 # 3D spectrograph
 
-Status: design (draft, review round 1 applied). Builds on [spectrograph.md](spectrograph.md):
+Status: design (draft, review rounds 1–2 applied). Builds on [spectrograph.md](spectrograph.md):
 same history, same level range, a different picture of it.
 
 ## Purpose and what the operator sees
@@ -33,54 +33,85 @@ behind is a misreadable readout. The 2D view, one G back, reads values.
 
 ## The look
 
-Settled by a look spike (a CPU emulation of the spike pass, Rgba8-quantised, on a synthetic
-pink-noise history and a sparse tonal one, at the default and a tilted camera): **additive
-spikes saturate** — with rows ~1 px apart at the default camera, dozens of rows sum into
-every pixel, and pink noise (the ordinary PA signal) becomes a white wall; normalising each
-row's gain by its projected row spacing only delays it. **Max blending** (each pixel keeps
-the brightest spike over it) keeps the skyline's shape for any density; an additive copy at
-low gain feeds only the bloom, so where many rows stand together the haze is denser, and
-that sum is clamped before it is blurred. Constants in `ac2-scene::spectrograph_3d`:
+Settled by two rounds of a look spike (a CPU emulation of the spike pass with 8-bit targets;
+round 2 on room-like synthetic data: per-bin pink with fixed LF modes, a comb from one
+reflection and a crossover dip, averaged so it moves slowly; an RTA pink of 31 third-octave
+plateaus; a sparse tonal case). **Additive spikes saturate**: with rows ~1 px apart at the
+default camera, dozens of rows sum into every pixel and pink noise, the ordinary PA signal,
+becomes a white wall; normalising each row's gain by its projected spacing only delays it.
+**Max blending** keeps the skyline's shape for any density. An additive copy at low gain
+feeds only the bloom, so where many rows stand together the haze is denser.
+
+**Level and brightness are kept apart until the end.** Spikes are drawn into an offscreen
+**Rg8Unorm** target with `BlendOperation::Max`: R = normalised level `n`, G = brightness.
+The composite pass applies the LUT, `LUT(R) · G`. A per-channel max of RGB colours would mix
+hues no level has (viridis: the red of one spike with the green of another); here the hue is
+always the LUT at a level some spike under the pixel has — the loudest one — and the
+brightness that of the brightest. Both may come from different spikes (a tall far spike
+behind a near short one gives the far one's hue at the near one's brightness): no invented
+hue, and nothing reads values off a pixel. Format: R16Float / Rg16Float would be finer, but
+on GL wgpu makes them renderable only with `EXT_color_buffer_half_float` or
+`EXT_color_buffer_float` (`wgpu-hal` gles adapter: `half_float_renderable` is a private
+capability); Rg8Unorm is renderable, blendable and filterable on every backend. 256 level
+steps match the 256-entry LUT. Full and Lite both draw offscreen, at full and half
+resolution, so the tiers differ only in target size and bloom.
+
+Constants in `ac2-scene::spectrograph_3d`:
 
 - **World.** Floor x ∈ [−1, 1] (frequency), z ∈ [0, 1.2] (age, 0 = newest), heights
   y ∈ [0, 0.7]. Wider than deep keeps 10 octaves readable from the default camera; 0.7 lets
   a full-range spike rise above the far rows without leaving the frame.
 - **Spike.** A camera-facing vertical quad from the floor to its height. Width 35 % of the
   projected column pitch, between 1 and 3 device px (thinner aliases into shimmer as rows
-  scroll; wider costs fill and stops reading as a spike). Brightness along the spike rises
-  from 0.25 at the foot to 1.0 at the tip (`0.25 + 0.75·t²`), the top 6 % at 1.5×: the tips
-  carry the light and the bloom, as in the reference.
+  scroll; wider costs fill and stops reading as a spike); Lite: 1–2 px of its half-res
+  target. Brightness along the spike rises steeply from 0.05 at the foot to 1.0 at the tip
+  (`0.05 + 0.95·t^3.5`), and a fixed 2.5 px cap at the tip is 1.5× (clamped at 1): thin
+  bright tips over faint bodies, as in the reference. Round 2 compared this with the round-1
+  constants (foot 0.25, `t²`, top 6 % bright): the new ones keep a slab of pink noise from
+  reading as a solid wall and make the tips of a tonal case the brightest thing on screen.
 - **Level to light.** Normalised level `n` (0 at the bottom of the level range, 1 at the
   top, clamped; `n = 0` draws nothing) sets height `0.7·n`, colour `LUT(n)` and intensity
-  `0.3 + 0.7·n`, so the grass is dim as well as low.
+  `0.3 + 0.7·n`, so the grass is dim as well as low. Height is the level, nothing else: no
+  automatic range, no exaggeration. Pink noise over a 100 dB range is a slab of near-equal
+  spikes; the level range keys (Ctrl+I/O, Ctrl+↑/↓) narrowed to ~40 dB around it turn the
+  slab into terrain (modes, comb, the crossover dip) — the user guide says so.
 - **Depth.** Brightness × `exp(−2.0·age/1.2)` (the back row at 13 %) × `exp(−0.35·d)` from
-  the eye. Under max blending factors are ignored, so depth scales the colour: a level keeps
-  its hue at any depth but not its lightness. Hence no claim that a colour reads the same as
-  in 2D; the level reference is the colour bar and the ceiling line (*Axes*).
+  the eye. Depth changes the G channel only: a level keeps its hue at any depth, not its
+  lightness. No claim that a colour reads the same as in 2D; the level reference is the
+  height scale and the ceiling line (*Axes*).
 - **Floor band.** One additive floor quad, brightest along the front edge (0.12 of
   `LUT(0.5)`), fading with the depth curve, plus a 1 px "now" line at 0.35.
-- **Bloom.** The spikes again, into a quarter-resolution Rgba8Unorm target, additive at gain
+- **Bloom.** The spikes again, coloured `LUT(n) · brightness`, into a quarter-resolution
+  Rgba8Unorm target cleared to 0, additive at gain
   0.12 (coverage-scaled where a spike is under 1 quarter-res px), blurred by a separable
   9-tap Gaussian (σ = 2 quarter-res px, ≈ 8 px full size), added over the pane at 0.6 (ice)
   or 0.35 (colour maps, so hues stay legible). Rgba8 drops far, dim rows below one LSB from
   the bloom; acceptable, they are the haze's edge and still drawn sharp. Float targets would
   need extensions the GLES downlevel limits do not promise.
-- **Blend space.** Max is per channel and monotonic, so it is the same in sRGB and linear
-  targets. The bloom composite adds encoded values when egui's target is not sRGB, slightly
-  brighter than a linear sum; the goldens fix the result.
+- **Blend space.** The max is taken on level and brightness, before any encoding. The
+  spike composite is blended with Max into egui's target over the dark field (max of the
+  field and the spike colour), the bloom composite with Add; both with
+  `write_mask: COLOR`, so egui's alpha is left as it is (the embers' additive pipeline also
+  adds alpha; that is harmless there but not needed here). The bloom adds encoded values
+  when egui's target is not sRGB, slightly brighter than a linear sum; goldens fix it.
 - **Palette.** By default the measurement's spectrograph colour map, through the 2D view's
   LUT. New map **ice**: #0B1A2B through #2D6FA8 to #CFE8FF, monotonic in lightness, stopping
   short of white as `grey` does. Ice + bloom is the holographic look.
-- **Field.** The plot rect is always #05080C, in the light theme too, and the labels, colour
-  bar text and caption inside it use the dark theme's text colours: light added to a white
+- **Field.** The plot rect is always #05080C, in the light theme too, and the labels and
+  caption inside it use the dark theme's text colours: light added to a white
   field is invisible.
-- **Motion.** Rows glide back continuously: the phase is the newest bucket's fill fraction
-  (slots filled ÷ slots per bucket), from the data, never a local clock, so a stalled stream
-  stands still. Heights are the data as received, never interpolated.
+- **Motion.** Rows glide back: the phase is the newest bucket's fill fraction (slots
+  filled ÷ slots per bucket), from the data, never a local clock, so a stalled stream stands
+  still. It advances per data frame: smooth at 30 frames/s, coarse on a slow stream (a long
+  FFT updating a few times a second steps the floor back in visible jumps). Heights are the
+  data as received, never interpolated.
 
-Spike PNGs (not committed): `look/sheet_pink.png`, `sheet_tonal.png`,
-`sheet_max_vs_sumbloom.png` in the session scratchpad; the script stays out of the tree, its
-pink-noise and tonal cases become goldens (*Tests*).
+Spike PNGs (not committed, session scratchpad `look/`): round 1 `sheet_pink.png`,
+`sheet_tonal.png`, `sheet_max_vs_sumbloom.png`; round 2 `sheet_r2_default.png`,
+`sheet_r2_tilted.png` (old vs new constants, ice and viridis, full and narrow level range ×
+pink-room, RTA-pink, tonal). No local raw capture existed to run through it; the constants
+are to be retuned on a rig recording before goldens are blessed. The script stays out of the
+tree; its three cases become goldens (*Tests*).
 
 ## Axes and level reference
 
@@ -92,15 +123,17 @@ the rect, thinned where they would overlap.
   remain. The edge never changes sides: frequency always reads left → right (yaw is clamped).
 - **Time** along the side edge nearer the eye (right for yaw > 0, left otherwise; right at
   0): `now` at the front, then the span's ticks (`−10 s`, … as the 2D view's).
-- **Level**: the 2D colour bar at the pane's right, with the range's dB labels and unit
-  (`dBFS`, `dB SPL`), showing the front row's colours. A **ceiling line** at the range top
-  along the back edge, faint grey and dashed (the gentle plot-hint style), labelled with the
-  top value; a spike touching it is at the top of the range.
+- **Level**: a **height scale** — a vertical post at the front corner nearer the eye, from
+  the floor to the range top, with dB ticks (the level axis's step, thinned by projected
+  length) and the unit (`dBFS`, `dB SPL`) at its top — and a **ceiling line** at the range top
+  along the back edge, faint grey and dashed (the gentle plot-hint style). Heights are the
+  level; no colour bar in 3D: colour there is lightness × depth, not a scale to read.
 - **T** (plot chrome): *Full* — faint floor grid (decade lines front to back, time ticks
-  across), labels, colour bar, ceiling line; *NoGrid* — the same without the floor grid;
+  across), labels, height scale, ceiling line; *NoGrid* — the same without the floor grid;
   *TracesOnly* — spikes and the floor band only.
 - **Caption**: measurement, window/calibration and freshness as in 2D, plus the cell size
-  the picture is made of (`1/19 oct · 0.30 s`), derived from the grid in use.
+  the picture is made of (`1/19 oct · 0.30 s`), derived from the grid in use, and the tier
+  when Settings forces one (`· lite`); Auto names none.
 
 ## Data path
 
@@ -112,10 +145,14 @@ the 3D view, so history keeps building across G).
 
 - **Columns**: C log-spaced over the pane's frequency span ∩ the history's row range; each
   the highest level among the history rows it covers, like the 2D view's max-per-pixel.
-- **Rows**: buckets of an integer k slots, `R = ceil(slots / k)`, anchored on absolute slot
-  numbers (`floor(slot / k)`; the history already places frames by capture time ÷ slot
-  length), so buckets never shift as history scrolls. Each is the highest level of its
-  slots; a bucket with no frame draws nothing.
+- **Rows**: buckets of an integer k slots, anchored on absolute slot numbers
+  (`floor(slot / k)`; the history already places frames by capture time ÷ slot length), so
+  buckets never shift as history scrolls. Each is the highest level of its slots in the
+  history; a bucket with no frame draws nothing. Since buckets are anchored, the history
+  covers `R = ceil(slots / k)` of them plus a partial one at each end: the ring holds
+  **R + 1** buckets (texture C × (R + 1)). The oldest is recomputed from its slots still in
+  the history whenever one drops out (k × rows max operations, ≤ 36 k at 120 s), so the
+  skyline is always exactly a function of the history and folding equals rebuilding.
 
 | span | slots | Full: k → R (row) | Lite/Bare: k → R (row) |
 |---|---|---|---|
@@ -129,39 +166,51 @@ the 3D view, so history keeps building across G).
   a skyline, not a wall. **R ≈ 96**: at 8° pitch the floor's depth projects to ~100 px, about
   a pixel a row, so more rows only add fill; tilted up they are 5 px apart and distinct.
 - **Incremental**: a new frame folds into the newest bucket (~1000 max operations) and
-  replaces that bucket's `Arc<[f32]>`; a new bucket advances the ring. A change of frequency
+  replaces that bucket's `Arc<[f32]>`, the oldest is recomputed as above; a new bucket
+  advances the ring. A change of frequency
   span, tier, span length or history reset rebuilds from the history: slots × rows, at 120 s
   and 20 Hz – 20 kHz 3600 × 960 ≈ 3.5 M max operations, a few ms, once.
 - Kept beside the history in UI state, folded only while the 3D view is on screen, rebuilt
   on entry.
 
 The scene carries the ring as `Vec<Option<Arc<[f32]>>>` + scroll + phase, as `Heatmap` does,
-so the renderer's upload-by-identity applies: one row (768 B) per new frame.
+so the renderer's upload-by-identity applies: two rows (newest, oldest; 1.5 kB) per new frame.
 
 ## Scene / plot split
 
 `ac2-scene` (display truth, headless): the skyline, the camera (angles, distance, clamps,
 steps, eye-outside-box), the view-projection matrix, heights from the level range and the
 measurement's offset, labels (text, projected place, culling), ceiling line, chrome level,
-caption, the tier. New primitive `Skyline3d { ring, scroll, phase, cols, rows, view_proj,
-range, colours, bloom_gain, tier }`.
+caption, the tier. New primitives `Skyline3d { id, ring, scroll, phase, cols, rows,
+view_proj, range, colours, bloom_gain, tier }` and `SkylineGlow { id, gain }` (the bloom
+composite of the skyline with that id).
 
-`ac2-plot` (pixels only): an R32Float C×R ring texture written row by row, the colormap LUT,
-one instanced draw of C×R spikes (`instance_index` → column, row; the vertex shader reads the
-cell with `textureLoad`, no storage buffers — the WebGL2-class limits GL gets have none),
-`BlendOperation::Max` with One/One, the floor quad, the bloom chain. No depth buffer and no
-sorting: max and add are order-independent. `skyline.rs`, `shaders/skyline.wgsl`.
+**Draw order** is fixed and follows `Layer`'s (`primitives.rs`: rects, heatmaps, polygons,
+bands, grids, polylines, points, labels). `Layer` gains `skylines` after `heatmaps` and
+`glows` after `points`. The scene puts the field (a rect), the skyline, the floor band
+(polygon), the floor grid and the ceiling line / height scale (grids, polylines) and the
+glow in one layer, the labels in it too: field → spikes (Max) → floor band, grid, ceiling →
+bloom (Add) → labels. The floor band is under the bloom and never bloomed.
+
+`ac2-plot` (pixels only): an R32Float C×(R+1) ring texture written row by row, the colormap
+LUT, one instanced draw of the spikes (`instance_index` → column, row; the vertex shader reads
+the cell with `textureLoad`, no storage buffers — the WebGL2-class limits GL gets have none)
+into the Rg8Unorm spike target cleared to 0 with `BlendOperation::Max` (One/One), the bloom
+chain, and two composite draws in the pass: spike target → `LUT(R)·G` with Max, bloom with
+Add. No depth buffer and no sorting: max and add are order-independent. `skyline.rs`,
+`shaders/skyline.wgsl`.
 
 **Renderer API change for bloom.** Today `PlotCallback::prepare` ignores egui's encoder
 (`ac2-ui/src/plot.rs`) and `Renderer::prepare` has none. New signature:
 `Renderer::prepare(&mut self, device, queue, encoder: &mut wgpu::CommandEncoder, scene,
-target)`; it records the quarter-res pass and the two blur passes into `encoder`.
+target)`; it records the spike pass (full or half resolution), the quarter-res bloom pass
+and the two blur passes into `encoder`.
 `PlotCallback::prepare` passes egui's (egui submits it before the render pass);
 `OffscreenTarget::render` / `paint_prepared` use one encoder for prepare and paint, so
 `render_to_image` — the goldens and `pane_export.rs` — get bloom too; the bench and render
-tests pass theirs. `paint` draws the spikes at full resolution straight into the pass and
-adds the blurred texture over the pane rect: no full-resolution offscreen copy. Bloom targets
-live in the renderer slot, reallocated on resize.
+tests pass theirs. `paint` composites the two targets over the pane rect. Targets live in
+the renderer slot, reallocated on resize. **Export** (`pane_export.rs`) always renders the
+Full tier whatever this machine's tier: an exported picture is the same on every machine.
 
 ## Camera and controls
 
@@ -172,19 +221,23 @@ Orbit around a fixed target at the floor's centre, 0.15 up; vertical FOV 35°; n
 |---|---|---|---|---|
 | yaw | 0° (frequency left → right) | ±80° | 15° | 0.3°/px drag x |
 | pitch | 8° | 2° – 75° | 5° | 0.2°/px drag y |
-| distance | d₀: the floor's front corners fit with 5 % margin at the pane's aspect | see below | 3 zoom steps | wheel / pinch: 1 step a notch |
+| distance | d₀: the floor's front corners fit with 5 % margin at the pane's aspect | see below | 2 zoom steps | wheel / pinch: 1 step a notch |
 
 - **Zoom is a dolly** in steps, distance `d₀ · 2^(−step/8)` (≈ 9 % a step), step −8 … +4.
   Moving the camera keeps the perspective cue (near spikes larger) that conveys depth when
   nothing hides anything; a narrowed FOV from afar flattens the skyline into a strip.
-- **The eye never enters the skyline**: distance is at least `max(0.7·d₀, t_exit + 0.15)`,
+- **The eye never enters the skyline**: the effective distance is at least `t_exit + 0.15`,
   `t_exit` where the ray from the target towards the eye leaves the box x ∈ [−1, 1],
-  y ∈ [0, 0.7], z ∈ [0, 1.2]. Without it, the closest dolly put the eye inside the box from
-  about 50° yaw. A zoom step beyond the clamp does nothing.
+  y ∈ [0, 0.7], z ∈ [0, 1.2]. With d₀ fitted to the pane it binds only on very wide panes
+  (small d₀) at the closest steps; there the stored zoom step stays as set and only the
+  distance drawn is clamped.
 - **Yaw is clamped** at ±80°: past 90° frequency would read right to left. **Pitch** stays
   above the floor (spikes edge-on vanish) and below top-down (that is the 2D view).
 - Key and wheel steps ease through `anim::Spring`, as the frequency axis does; repaints run
   only while it settles. A drag follows the pointer and snaps to whole degrees on release.
+- **Validation**: `PaneLayout::check` (where level ranges are checked) refuses a camera
+  outside yaw ±80, pitch 2 … 75, zoom step −8 … +4, as it refuses a bad level range: a
+  layout from another client or a session is rejected, never silently clamped.
 
 **Keys.** The 3D view has its own scope, `Scope::Spectrograph3d` (`[spectrograph_3d]` in
 `keys.toml`, *Spectrum / RTA: 3D spectrograph* in the keyboard map), chosen by
@@ -250,7 +303,7 @@ Putting curves into a pane is unaffected: that drag starts on a list row and run
 - One `PROTO_VERSION` bump, `fixtures/protocol/WIRE_LOCK` and the Python fixtures; the
   session manifest `VERSION` bumps since layouts and displays are in it.
 - **Quality** is this machine's, not the wire's: Settings › Display › *3D quality*: Auto
-  (default) / Full / Lite / Bare, in `ui.toml`.
+  (default) / Full / Lite / Bare, in `ui.toml`. A forced tier is named in the caption.
 
 ## Performance
 
@@ -259,16 +312,17 @@ Fill dominates. Worst case, every spike at full height (a loud pink noise at the
 camera, 40 M at the closest dolly; Lite (128×48) 11 M / 16 M before its half-resolution
 target. Realistic pink sits nearer 0.6 of the range (× 0.6).
 
-**Tiers**: *Full* 192×~96, spikes at full resolution, 9-tap bloom. *Lite* 128×~48, spikes
-into a half-resolution target (Max) composited with bilinear upscale — a quarter of the fill,
-4 M worst case — and 5-tap bloom. *Bare* as Lite without bloom.
+**Tiers**: *Full* 192×~96, spike target at full resolution, 9-tap bloom. *Lite* 128×~48,
+spike target at half resolution composited with bilinear upscale — a quarter of the fill,
+4 M worst case — and 5-tap bloom. *Bare* as Lite without bloom. Every tier adds one composite
+pass over the pane (two with bloom); Rg8 writes half the bytes of Rgba8.
 
 | per frame, 1080p pane | Full, discrete / Apple GPU | Lite, Pi 4 / CM4 V3D |
 |---|---|---|
 | CPU (fold, scene, labels) | ≤ 0.3 ms | ≤ 2 ms |
 | GPU at default camera | ≤ 3 ms | ≤ 12 ms (under half a 30 fps frame) |
 | GPU at worst clamp corner | ≤ 6 ms | ≤ 20 ms (30 fps still holds with egui) |
-| upload | 768 B | 512 B |
+| upload | 1.5 kB | 1 kB |
 
 **Tier choice (v1)**: *Auto* picks by adapter, never by backend — the Pi runs GLES 3.1 or
 v3dv Vulkan (`ac2-ui/src/gpu.rs`): `Rasterizer::Software` → Bare; adapter name containing
@@ -281,30 +335,33 @@ stepped down once (a blanking stall) would stay degraded for months.
 - **Not visible, no cost**: a pane not on screen builds no scene, so nothing folds, uploads
   or draws; the skyline is rebuilt from the history when it reappears.
 - Textures are far inside the 2048 limit; no float render targets, no storage buffers, no
-  depth attachment, no independent blend (GLES 3.1 lacks it, so max and add are separate
-  passes).
+  depth attachment, no half-float render target, no independent blend (GLES 3.1 lacks it,
+  so max and add are separate passes).
 
 ## Tests
 
 - `ac2-scene` (`spectrograph_3d_tests.rs`): column decimation (tone in one column, wide low
   bands, invalid bands); bucket max, integer k per span × tier, buckets anchored on absolute
-  slots across scrolls; gaps empty; reset on span / grid / scale / frequency-span change;
+  slots across scrolls, the oldest bucket after slots drop out, R + 1 ring; gaps empty; reset on span / grid / scale / frequency-span change;
   frame-by-frame folding equals a rebuild (property test); phase = bucket fill fraction;
   heights from range and offset (bottom → 0, top → full, clamp); camera clamps, steps, reset,
-  exact round-trip of `SpectrumCamera`; **eye outside the grown box at every clamp corner**
-  (yaw ±80/0 × pitch 2/75 × closest zoom × narrow and wide aspects); floor corners inside the
-  rect at the default; label texts, sides by yaw, culling, thinning at ±80°; T levels;
-  ceiling line; caption cell size from k; Auto tier for software, V3D on GL, V3D on Vulkan,
+  exact round-trip of `SpectrumCamera`, `PaneLayout::check` refusing each out-of-range
+  field; **eye outside the grown box at every clamp corner** (yaw ±80/0 × pitch 2/75 ×
+  closest zoom × narrow and very wide aspects), stored step unchanged by the clamp; floor corners inside the
+  rect at the default; label texts, sides by yaw, culling, thinning at ±80°; height scale
+  ticks and unit; T levels; ceiling line; draw order within the layer; caption cell size
+  from k and tier name when forced; phase per data frame; Auto tier for software, V3D on GL, V3D on Vulkan,
   4096-limit integrated, Apple, discrete; override wins.
 - `ac2-plot` (`tests/it/render.rs`, `golden.rs`): a single spike lands at the pixel the scene
-  projects; max blending (two overlapping spikes give the brighter, not the sum); ring rows
-  upload by identity; an empty cell draws nothing; goldens `skyline_pink` (the wall case:
-  must show structure, not saturate) and `skyline_tonal`, ice and viridis, Full and Bare,
+  projects; max blending (two overlapping spikes give the brighter, not the sum, and the
+  hue of a level one of them has); egui target alpha unchanged; ring rows upload by
+  identity; an empty cell draws nothing; goldens `skyline_pink_room` (must show structure,
+  not saturate), `skyline_rta_pink` and `skyline_tonal`, ice and viridis, Full, Lite and Bare,
   320×200, blessed on lavapipe at the line tolerance (24 / 0.2 %: blur float math differs at
-  edges like AA does); `render_to_image` output includes bloom.
+  edges like AA does); `render_to_image` output includes bloom and is Full whatever tier.
 - **GL in CI**: the skyline render tests also run with `WGPU_BACKEND=gl` (llvmpipe, which
-  gets the WebGL2-class limits): vertex-stage `textureLoad` of R32Float and instancing are
-  exercised on the backend the Pi uses.
+  gets the WebGL2-class limits): vertex-stage `textureLoad` of R32Float, instancing, Max
+  into Rg8Unorm (the two-spike test) are exercised on the backend the Pi uses.
 - `ac2-ui`: G / Shift+G through four views; scope, hint line; ←/→, PgUp/PgDn, I/O, Home move
   the camera and leave the frequency axis; inert commands; equal defaults in both scopes;
   drag, wheel, pinch messages; camera sent on release only; Esc does not touch it.
@@ -315,13 +372,18 @@ stepped down once (a blanking stall) would stay degraded for months.
 
 ## Stages
 
-0. **Look spike** (done, above): max spikes + additive bloom source chosen.
-1. **v1a**: wire (view, camera, ice), skyline, camera, scene, axes, spikes + floor without
-   bloom (the Bare tier), keys, mouse, hints, user guide, tests incl. the GL run.
-2. **Gate**: a CM4 hardware run of the Bare/Lite goldens' scenes for frame time (needs the
-   operator's OK to use the kiosk); its numbers replace the Pi column's targets.
-3. **v1b**: renderer encoder API, bloom, half-res Lite, Settings quality, goldens per tier.
-   1a and 1b ship together in one deploy: v1 is "pretty and fast" together.
+0. **Look spike** (done): max on level and brightness into Rg8, LUT in the composite,
+   additive bloom source; steep body with a fixed tip cap.
+1. **Gate 0, CM4 spike** (waits for the operator's OK to use the kiosk; not run): throwaway
+   code on the CM4 doing instanced quads, vertex-stage `textureLoad`, Max into a half-res
+   Rg8 target and the composite, on GL and on v3dv Vulkan. Go / no-go plus frame times at
+   1080p for the default and the worst camera; its numbers replace the Pi column above.
+2. **v1a**: wire (view, camera, ice, validation), skyline, camera, scene, axes; renderer
+   encoder API, the offscreen spike target and composite at full and half resolution, floor;
+   Settings quality; keys, mouse, hints, user guide; goldens for Full, Lite and Bare (Full
+   and Lite without bloom until v1b), the GL CI run.
+3. **v1b**: bloom; goldens re-blessed with it. 1a and 1b ship together in one deploy: v1 is
+   "pretty and fast" together.
 4. Later, not planned: a cursor frequency line on the floor (no value), moving the orbit
    target, the peak-hold line as a ghost row.
 
@@ -336,5 +398,8 @@ stepped down once (a blanking stall) would stay degraded for months.
 4. **Newest row at the front or the back?** Front: crisp and nearest, history recedes.
 5. **Double-click / double-tap to reset the camera?** Not in v1 (Home); revisit on the touch
    kiosk.
-6. **Bloom gain 0.12 for the additive source** was set on synthetic data; retune on a real
-   pink-noise and programme recording from the rig before v1b's goldens are blessed.
+6. **Look constants** (foot 0.05, `t^3.5`, 2.5 px tip cap, bloom source gain 0.12) were set
+   on synthetic data: retune on a real rig recording (pink noise and programme) before the
+   goldens are blessed.
+7. **For the operator: Settings › 3D quality** (Auto / Full / Lite / Bare) is one more
+   Settings row; keep it, or Auto only with the tier fixed by adapter?
