@@ -1,6 +1,6 @@
 [package]
 name = "ac2-plot"
-description = "wgpu renderer for ac2-scene scenes: lines, fills, heatmaps, grids, text."
+description = "wgpu renderer for ac2-scene scenes: lines, fills, heatmaps, 3D skylines, grids, text."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

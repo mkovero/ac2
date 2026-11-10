@@ -543,8 +543,14 @@ fn offset_target_matches_standalone_render() {
         // Outer clip cuts the scene's right 10 px.
         clip_px: [0.0, 0.0, 87.0, 90.0],
     };
-    r.prepare(&gpu.device, &gpu.queue, &s, &target)
-        .expect("prepare");
+    r.prepare(
+        &gpu.device,
+        &gpu.queue,
+        &mut common::encoder(gpu),
+        &s,
+        &target,
+    )
+    .expect("prepare");
     let (px, _) = big.paint_prepared(gpu, &r, Color::BLACK).expect("render");
     let img = Image::new(px.width, px.height, px.rgba).expect("size");
     for y in 0..90 {
@@ -573,20 +579,27 @@ fn invalid_scenes_are_rejected() {
         l.polylines.push(p);
     });
     assert!(matches!(
-        r.prepare(&gpu.device, &gpu.queue, &s, &t),
+        r.prepare(&gpu.device, &gpu.queue, &mut common::encoder(gpu), &s, &t),
         Err(PrepareError::AlphaLength { .. })
     ));
     let mut short: Vec<Option<HeatmapColumn>> = vec![None; 8];
     short[3] = Some(vec![0.0; 5].into());
     let bad_upload = heatmap_scene(0, short);
     assert!(matches!(
-        r.prepare(&gpu.device, &gpu.queue, &bad_upload, &t),
+        r.prepare(
+            &gpu.device,
+            &gpu.queue,
+            &mut common::encoder(gpu),
+            &bad_upload,
+            &t
+        ),
         Err(PrepareError::Heatmap { .. })
     ));
     assert!(matches!(
         r.prepare(
             &gpu.device,
             &gpu.queue,
+            &mut common::encoder(gpu),
             &heatmap_scene(0, vec![None; 7]),
             &t
         ),
@@ -596,7 +609,13 @@ fn invalid_scenes_are_rejected() {
     let h = twice.layers[0].heatmaps[0].clone();
     twice.layers[0].heatmaps.push(h);
     assert!(matches!(
-        r.prepare(&gpu.device, &gpu.queue, &twice, &t),
+        r.prepare(
+            &gpu.device,
+            &gpu.queue,
+            &mut common::encoder(gpu),
+            &twice,
+            &t
+        ),
         Err(PrepareError::Heatmap { .. })
     ));
 }

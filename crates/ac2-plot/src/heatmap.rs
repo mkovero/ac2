@@ -44,10 +44,13 @@ struct Ring {
 #[derive(Debug)]
 pub(crate) struct Heatmaps {
     layout: wgpu::BindGroupLayout,
-    luts: Vec<(Colormap, wgpu::TextureView)>,
     rings: HashMap<HeatmapId, Ring>,
     frame: u64,
 }
+
+/// One colormap LUT texture per [`Colormap`] in use, shared by heatmaps and skylines.
+#[derive(Debug, Default)]
+pub(crate) struct Luts(Vec<(Colormap, wgpu::TextureView)>);
 
 pub(crate) fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     let tex = |binding| wgpu::BindGroupLayoutEntry {
@@ -81,37 +84,14 @@ pub(crate) fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout 
     })
 }
 
-impl Heatmaps {
-    pub fn new(layout: wgpu::BindGroupLayout) -> Self {
-        Self {
-            layout,
-            luts: Vec::new(),
-            rings: HashMap::new(),
-            frame: 0,
-        }
-    }
-
-    pub fn begin(&mut self) {
-        self.frame += 1;
-    }
-
-    /// Releases rings not referenced since [`Self::begin`].
-    pub fn end(&mut self) {
-        let frame = self.frame;
-        self.rings.retain(|_, r| r.seen == frame);
-    }
-
-    pub fn bind_group(&self, id: HeatmapId) -> Option<&wgpu::BindGroup> {
-        self.rings.get(&id).map(|r| &r.bind_group)
-    }
-
-    fn lut_view(
+impl Luts {
+    pub fn view(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         map: Colormap,
     ) -> wgpu::TextureView {
-        if let Some((_, v)) = self.luts.iter().find(|(m, _)| *m == map) {
+        if let Some((_, v)) = self.0.iter().find(|(m, _)| *m == map) {
             return v.clone();
         }
         let size = wgpu::Extent3d {
@@ -142,8 +122,32 @@ impl Heatmaps {
             size,
         );
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        self.luts.push((map, view.clone()));
+        self.0.push((map, view.clone()));
         view
+    }
+}
+
+impl Heatmaps {
+    pub fn new(layout: wgpu::BindGroupLayout) -> Self {
+        Self {
+            layout,
+            rings: HashMap::new(),
+            frame: 0,
+        }
+    }
+
+    pub fn begin(&mut self) {
+        self.frame += 1;
+    }
+
+    /// Releases rings not referenced since [`Self::begin`].
+    pub fn end(&mut self) {
+        let frame = self.frame;
+        self.rings.retain(|_, r| r.seen == frame);
+    }
+
+    pub fn bind_group(&self, id: HeatmapId) -> Option<&wgpu::BindGroup> {
+        self.rings.get(&id).map(|r| &r.bind_group)
     }
 
     /// Validates `h`, (re)creates its ring when new or resized, uploads the columns that
@@ -152,6 +156,7 @@ impl Heatmaps {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        luts: &mut Luts,
         h: &Heatmap,
         rect: [f32; 4],
         clip: ClipPx,
@@ -197,7 +202,7 @@ impl Heatmaps {
             r.columns == h.columns && r.rows == h.rows && r.colormap == h.colormap
         });
         if !fits {
-            let lut = self.lut_view(device, queue, h.colormap);
+            let lut = luts.view(device, queue, h.colormap);
             let reuse = self
                 .rings
                 .remove(&h.id)

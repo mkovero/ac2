@@ -118,14 +118,26 @@ fn prepare_time_dense_1080p() {
     // but the label text (which is what happens in practice).
     let scenes: Vec<_> = (0..8).map(|i| dense_scene(i as f32 * 0.1)).collect();
     for s in scenes.iter().take(3) {
-        r.prepare(&gpu.device, &gpu.queue, s, &target)
-            .expect("prepare");
+        r.prepare(
+            &gpu.device,
+            &gpu.queue,
+            &mut common::encoder(gpu),
+            s,
+            &target,
+        )
+        .expect("prepare");
     }
     let mut times = Vec::new();
     for i in 0..40 {
         let t0 = Instant::now();
-        r.prepare(&gpu.device, &gpu.queue, &scenes[i % scenes.len()], &target)
-            .expect("prepare");
+        r.prepare(
+            &gpu.device,
+            &gpu.queue,
+            &mut common::encoder(gpu),
+            &scenes[i % scenes.len()],
+            &target,
+        )
+        .expect("prepare");
         times.push(t0.elapsed());
     }
     let min = times.iter().min().copied().unwrap_or_default();

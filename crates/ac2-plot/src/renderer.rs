@@ -10,8 +10,9 @@ use crate::geometry::{
     self, ClipPx, FillInstance, LineScratch, PointInstance, SegmentInstance, Xform, intersect,
     is_empty, scissor_of,
 };
-use crate::heatmap::{self, Heatmaps};
-use crate::scene::{Blend, HeatmapId, Rect, Scene};
+use crate::heatmap::{self, Heatmaps, Luts};
+use crate::scene::{Blend, HeatmapId, Rect, Scene, SkylineId};
+use crate::skyline::{self, Skylines};
 use crate::text::{Fonts, TextLayer};
 
 /// Where and how a scene lands in the render target.
@@ -53,6 +54,10 @@ pub enum PrepareError {
         id: HeatmapId,
         reason: String,
     },
+    Skyline {
+        id: SkylineId,
+        reason: String,
+    },
     InvalidTarget(FrameTarget),
     Text(glyphon::PrepareError),
 }
@@ -70,6 +75,7 @@ impl fmt::Display for PrepareError {
                 "layer {layer} polyline {polyline}: {alpha} alpha values for {points} points"
             ),
             PrepareError::Heatmap { id, reason } => write!(f, "heatmap {}: {reason}", id.0),
+            PrepareError::Skyline { id, reason } => write!(f, "skyline {}: {reason}", id.0),
             PrepareError::InvalidTarget(t) => write!(f, "invalid frame target {t:?}"),
             PrepareError::Text(e) => write!(f, "text: {e}"),
         }
@@ -93,6 +99,7 @@ enum Draw {
     Lines { first: u32, end: u32 },
     Points { first: u32, end: u32, blend: Blend },
     Heatmap(HeatmapId),
+    Skyline(SkylineId),
     Text(usize),
 }
 
@@ -142,6 +149,10 @@ pub struct RenderShared {
     lines: wgpu::RenderPipeline,
     fill: wgpu::RenderPipeline,
     heatmap: wgpu::RenderPipeline,
+    skyline_layouts: skyline::Layouts,
+    /// Spikes into the Rg8 spike target, and that target composited over the plot.
+    skyline_spikes: wgpu::RenderPipeline,
+    skyline_composite: wgpu::RenderPipeline,
     /// The same point shader under source-over and additive blending.
     points_alpha: wgpu::RenderPipeline,
     points_add: wgpu::RenderPipeline,
@@ -163,6 +174,8 @@ pub struct Renderer {
     globals: wgpu::Buffer,
     globals_bg: wgpu::BindGroup,
     heatmaps: Heatmaps,
+    skylines: Skylines,
+    luts: Luts,
     text: TextLayer,
     segments: Vec<SegmentInstance>,
     fills: Vec<FillInstance>,
@@ -252,6 +265,82 @@ fn pipeline(
         multiview_mask: None,
         cache: None,
     })
+}
+
+/// Max on colour and alpha, `One`/`One`: overlapping spikes keep the loudest level and the
+/// brightest light, never their sum, so a dense slab keeps its shape.
+const MAX: wgpu::BlendComponent = wgpu::BlendComponent {
+    src_factor: wgpu::BlendFactor::One,
+    dst_factor: wgpu::BlendFactor::One,
+    operation: wgpu::BlendOperation::Max,
+};
+
+fn skyline_pipelines(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    multisample: wgpu::MultisampleState,
+    globals: &wgpu::BindGroupLayout,
+    layouts: &skyline::Layouts,
+    module: &wgpu::ShaderModule,
+) -> (wgpu::RenderPipeline, wgpu::RenderPipeline) {
+    let make = |label, layout: &wgpu::BindGroupLayout, vs, fs, target, ms, mask| {
+        let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some(label),
+            bind_group_layouts: &[Some(globals), Some(layout)],
+            immediate_size: 0,
+        });
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(label),
+            layout: Some(&pl),
+            vertex: wgpu::VertexState {
+                module,
+                entry_point: Some(vs),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: ms,
+            fragment: Some(wgpu::FragmentState {
+                module,
+                entry_point: Some(fs),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: target,
+                    blend: Some(wgpu::BlendState {
+                        color: MAX,
+                        alpha: MAX,
+                    }),
+                    write_mask: mask,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        })
+    };
+    let spikes = make(
+        "ac2-plot skyline spikes",
+        &layouts.spike,
+        "vs_spike",
+        "fs_spike",
+        skyline::SPIKE_FORMAT,
+        wgpu::MultisampleState::default(),
+        wgpu::ColorWrites::RED | wgpu::ColorWrites::GREEN,
+    );
+    // Max of the field and the spike colour; the host target's alpha is left as it was.
+    let composite = make(
+        "ac2-plot skyline composite",
+        &layouts.composite,
+        "vs_comp",
+        "fs_comp",
+        format,
+        multisample,
+        wgpu::ColorWrites::COLOR,
+    );
+    (spikes, composite)
 }
 
 const SEGMENT_ATTRS: [wgpu::VertexAttribute; 10] = wgpu::vertex_attr_array![
@@ -380,6 +469,20 @@ impl RenderShared {
                 },
             )
         };
+        let skyline_layouts = skyline::layouts(device);
+        let sky_mod = shader(
+            device,
+            "ac2-plot skyline.wgsl",
+            include_str!("shaders/skyline.wgsl"),
+        );
+        let (skyline_spikes, skyline_composite) = skyline_pipelines(
+            device,
+            format,
+            multisample,
+            &globals_layout,
+            &skyline_layouts,
+            &sky_mod,
+        );
         let points_alpha = points("ac2-plot points", over);
         let points_add = points("ac2-plot points additive", ADDITIVE);
         Arc::new(Self {
@@ -390,6 +493,9 @@ impl RenderShared {
             lines,
             fill,
             heatmap,
+            skyline_layouts,
+            skyline_spikes,
+            skyline_composite,
             points_alpha,
             points_add,
             glyphs: glyphon::Cache::new(device),
@@ -424,6 +530,8 @@ impl Renderer {
             globals,
             globals_bg,
             heatmaps: Heatmaps::new(shared.heatmap_layout.clone()),
+            skylines: Skylines::new(device),
+            luts: Luts::default(),
             text: TextLayer::new(device, queue, shared),
             segments: Vec::new(),
             fills: Vec::new(),
@@ -455,12 +563,16 @@ impl Renderer {
         &self.shared
     }
 
-    /// Converts `scene` to instances and uploads them, heatmap columns and text. Steady
-    /// state reuses every CPU and GPU buffer; only growth or new heatmaps allocate.
+    /// Converts `scene` to instances and uploads them, heatmap columns, skyline rows and
+    /// text, and records the passes that draw into the renderer's own targets (a skyline's
+    /// spikes) into `encoder`, which the caller submits before the pass [`Self::paint`]
+    /// records into. Steady state reuses every CPU and GPU buffer; only growth or new
+    /// heatmaps and skylines allocate.
     pub fn prepare(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
         scene: &Scene,
         target: &FrameTarget,
     ) -> Result<(), PrepareError> {
@@ -486,6 +598,7 @@ impl Renderer {
         self.points.clear();
         self.cmds.clear();
         self.heatmaps.begin();
+        self.skylines.begin();
         self.text.begin(queue, target.size_px);
 
         let xf = Xform {
@@ -526,10 +639,33 @@ impl Renderer {
                 // Uploads apply even when the heatmap is clipped away, so the ring stays
                 // complete while it is scrolled out of view.
                 self.heatmaps
-                    .prepare(device, queue, h, xf.rect(&h.rect), clip)?;
+                    .prepare(device, queue, &mut self.luts, h, xf.rect(&h.rect), clip)?;
                 if let Some(scissor) = scissor_of(&clip, size) {
                     self.cmds.push(Cmd {
                         draw: Draw::Heatmap(h.id),
+                        scissor,
+                    });
+                }
+            }
+            for sk in &layer.skylines {
+                let clip = clip_of(&sk.clip);
+                self.skylines.prepare(
+                    device,
+                    queue,
+                    encoder,
+                    &mut self.luts,
+                    (
+                        &self.shared.skyline_layouts,
+                        &self.shared.skyline_spikes,
+                        &self.globals_bg,
+                    ),
+                    sk,
+                    xf.rect(&sk.rect),
+                    clip,
+                )?;
+                if let Some(scissor) = scissor_of(&clip, size) {
+                    self.cmds.push(Cmd {
+                        draw: Draw::Skyline(sk.id),
                         scissor,
                     });
                 }
@@ -639,6 +775,7 @@ impl Renderer {
             }
         }
         self.heatmaps.end();
+        self.skylines.end();
 
         let globals = Globals {
             target_size: [size[0] as f32, size[1] as f32],
@@ -703,6 +840,15 @@ impl Renderer {
                         continue;
                     };
                     pass.set_pipeline(&self.shared.heatmap);
+                    pass.set_bind_group(0, &self.globals_bg, &[]);
+                    pass.set_bind_group(1, bg, &[]);
+                    pass.draw(0..4, 0..1);
+                }
+                Draw::Skyline(id) => {
+                    let Some(bg) = self.skylines.composite_bind_group(id) else {
+                        continue;
+                    };
+                    pass.set_pipeline(&self.shared.skyline_composite);
                     pass.set_bind_group(0, &self.globals_bg, &[]);
                     pass.set_bind_group(1, bg, &[]);
                     pass.draw(0..4, 0..1);

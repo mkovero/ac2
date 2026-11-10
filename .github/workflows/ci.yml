@@ -126,7 +126,7 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -y --no-install-recommends \
             pkg-config cmake libjack-jackd2-dev \
-            mesa-vulkan-drivers libvulkan1
+            mesa-vulkan-drivers libvulkan1 libegl1 libegl-mesa0 libgl1-mesa-dri
           # Hosted Linux runners have no GPU; lavapipe (Vulkan) is the only adapter wgpu can use.
           {
             echo "WGPU_BACKEND=vulkan"
@@ -193,6 +193,14 @@ jobs:
           AC2_REQUIRE_MDNS: "1"
         # Quick tier (no `slow_*`) on a push; everything on an all-OS or release run or on request.
         run: cargo nextest run --workspace --locked --profile ${{ (inputs.all_os || inputs.full) && 'ci-full' || 'ci' }}
+
+      # The 3D spectrograph again on GL (llvmpipe under the WebGL2-class limits): vertex-stage
+      # loads of an R32Float ring, instancing and Max into Rg8 are what a Pi's GLES runs.
+      - name: skyline on GL
+        if: runner.os == 'Linux'
+        env:
+          WGPU_BACKEND: gl
+        run: cargo nextest run -p ac2-plot --test skyline --locked --profile ci
 
       # nextest does not run doctests.
       - name: doctests

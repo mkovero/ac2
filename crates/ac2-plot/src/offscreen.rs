@@ -209,16 +209,24 @@ impl Offscreen {
         background: Color,
     ) -> Result<(Pixels, FrameTiming), RenderError> {
         let t0 = Instant::now();
+        // One encoder for the renderer's own passes (skyline spikes) and the paint, so they
+        // run in order in one submission.
+        let mut enc = gpu
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("ac2-plot offscreen"),
+            });
         renderer
             .prepare(
                 &gpu.device,
                 &gpu.queue,
+                &mut enc,
                 scene,
                 &FrameTarget::full(self.size, scale),
             )
             .map_err(RenderError::Prepare)?;
         let prepare = t0.elapsed();
-        let (px, timing) = self.paint_prepared(gpu, renderer, background)?;
+        let (px, timing) = self.paint_into(gpu, enc, renderer, background)?;
         Ok((px, FrameTiming { prepare, ..timing }))
     }
 
@@ -230,15 +238,25 @@ impl Offscreen {
         renderer: &Renderer,
         background: Color,
     ) -> Result<(Pixels, FrameTiming), RenderError> {
-        let t1 = Instant::now();
-        let view = self
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-        let mut enc = gpu
+        let enc = gpu
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("ac2-plot offscreen"),
             });
+        self.paint_into(gpu, enc, renderer, background)
+    }
+
+    fn paint_into(
+        &self,
+        gpu: &Gpu,
+        mut enc: wgpu::CommandEncoder,
+        renderer: &Renderer,
+        background: Color,
+    ) -> Result<(Pixels, FrameTiming), RenderError> {
+        let t1 = Instant::now();
+        let view = self
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
         {
             let bg = |v: f32| f64::from(v);
             // The clear colour is the premultiplied value the blend stage would have left.

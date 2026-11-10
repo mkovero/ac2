@@ -69,7 +69,7 @@ impl CallbackTrait for PlotCallback {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         screen: &ScreenDescriptor,
-        _encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut wgpu::CommandEncoder,
         resources: &mut CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         let Some(map) = resources.get_mut::<PlotRenderers>() else {
@@ -101,7 +101,10 @@ impl CallbackTrait for PlotCallback {
             .as_ref()
             .is_some_and(|(sc, t)| Arc::ptr_eq(sc, &self.scene) && *t == target);
         if !same {
-            match s.renderer.prepare(device, queue, &self.scene, &target) {
+            match s
+                .renderer
+                .prepare(device, queue, encoder, &self.scene, &target)
+            {
                 Ok(()) => {
                     s.last = Some((self.scene.clone(), target));
                     s.error = None;

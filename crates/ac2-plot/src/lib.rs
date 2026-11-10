@@ -1,4 +1,4 @@
-//! wgpu renderer for plot scenes: lines, fills, heatmaps, grids, text.
+//! wgpu renderer for plot scenes: lines, fills, heatmaps, 3D skylines, grids, text.
 //!
 //! Scenes arrive as plain data ([`scene`]) with every coordinate already mapped to logical
 //! pixels; this crate chooses pixel placement (scaling, snapping, anti-aliasing, clipping)
@@ -18,6 +18,7 @@ mod heatmap;
 pub mod offscreen;
 mod renderer;
 pub mod scene;
+mod skyline;
 mod text;
 
 pub use adapter::{Rasterizer, classify_info};

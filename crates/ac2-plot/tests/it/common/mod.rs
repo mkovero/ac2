@@ -92,3 +92,10 @@ pub fn ink(img: &Image, x0: u32, y0: u32, x1: u32, y1: u32) -> u64 {
     }
     s
 }
+
+/// A command encoder for [`Renderer::prepare`]'s own passes; scenes without a skyline
+/// record nothing into it, so it may be dropped unsubmitted.
+pub fn encoder(gpu: &Gpu) -> ac2_plot::wgpu::CommandEncoder {
+    gpu.device
+        .create_command_encoder(&ac2_plot::wgpu::CommandEncoderDescriptor::default())
+}
