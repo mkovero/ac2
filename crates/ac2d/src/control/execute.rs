@@ -428,8 +428,7 @@ impl Control {
         self.spl_needs_mic(&config)?;
         self.check_meas_owner(None, &config.kind)?;
         let grid = self.grid_of(None, &config.kind)?;
-        let id = MeasId(self.next_meas);
-        self.next_meas += 1;
+        let id = self.ids.meas();
         let grid_id = grid.map(|g| self.register_grid(g));
         let delay = matches!(config.kind, MeasKind::Transfer { .. }).then(|| DelayState {
             applied: Seconds(0.0),

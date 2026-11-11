@@ -531,7 +531,7 @@ impl Control {
         let fs = self.session.as_ref().map(|r| f64::from(r.sample_rate));
         let mut loaded = Vec::with_capacity(data.measurements.len());
         for sm in data.measurements {
-            self.next_meas = self.next_meas.max(sm.id.0.saturating_add(1));
+            self.ids.meas_past(sm.id);
             let delay = matches!(sm.config.kind, MeasKind::Transfer { .. }).then(|| {
                 let d = sm.delay.unwrap_or(SavedDelay {
                     applied: Seconds(0.0),

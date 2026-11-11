@@ -343,8 +343,7 @@ impl Control {
 
     /// Asks the write thread to put the copy written at `tmp` in `dir`'s place.
     fn install(&mut self, dir: PathBuf, tmp: PathBuf, data: Box<SessionData>) -> Copy {
-        let token = self.next_token;
-        self.next_token += 1;
+        let token = self.ids.token();
         let to = self.s.to_self.clone();
         let (d, t) = (dir.clone(), tmp.clone());
         let queued = self.autosave.as_ref().is_some_and(|a| {

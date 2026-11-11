@@ -277,8 +277,7 @@ impl Control {
             return Err(raw_err(e));
         }
 
-        let token = self.next_token;
-        self.next_token += 1;
+        let token = self.ids.token();
         let (cmds, rx) = std::sync::mpsc::channel();
         let progress: SharedProgress = Arc::new(Mutex::new(Progress::default()));
         let recorder = Recorder::new(
@@ -292,8 +291,7 @@ impl Control {
             Arc::clone(&progress),
             self.s.to_self.clone(),
         );
-        let fid = self.next_fanout_id;
-        self.next_fanout_id += 1;
+        let fid = self.ids.fanout();
         let (job, feed) = jobs::spawn(
             "ac2d-record".into(),
             self.job_env(rt),

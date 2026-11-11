@@ -55,6 +55,7 @@ mod execute;
 mod file_jobs;
 mod files;
 mod generator;
+mod ids;
 mod leq;
 mod levels;
 mod maths;
@@ -395,14 +396,13 @@ pub(crate) struct Control {
     panels: HashMap<u64, PendingReply>,
     /// Warnings the command executing now raised; the next reply carries them.
     reply_warnings: Vec<ac2_proto::Warning>,
-    next_fanout_id: u64,
-    next_meas: u32,
+    /// The next id of each kind this thread hands out.
+    ids: ids::Ids,
     out: Output,
     grids: HashMap<GridId, GridDef>,
     seqs: Arc<Seqs>,
     ka_seq: u64,
     pending_finds: HashMap<u64, PendingFind>,
-    next_token: u64,
     next_ka: Instant,
     /// The clocks entity's sources.
     clocks: clocks::ClockWatch,
@@ -415,8 +415,6 @@ pub(crate) struct Control {
     damaged: Vec<crate::damage::Damage>,
     traces: traces::TraceStore,
     sweep: Option<ActiveSweep>,
-    next_sweep: u32,
-    next_walk: u32,
     /// Walk measurements of a loaded session whose first run still owes the restart a
     /// move gives: their delay and average belong to the mic's placement when it was saved.
     walk_resume: HashSet<MeasId>,
@@ -566,8 +564,7 @@ impl Control {
             detecting: None,
             panels: HashMap::new(),
             reply_warnings: Vec::new(),
-            next_fanout_id: 1,
-            next_meas: rigm.next_id(),
+            ids: ids::Ids::new(rigm.next_id()),
             out: Output {
                 lease: None,
                 gate: Arc::new(LeaseGate::new()),
@@ -579,7 +576,6 @@ impl Control {
             seqs: Arc::new(Seqs::default()),
             ka_seq: 0,
             pending_finds: HashMap::new(),
-            next_token: 1,
             next_ka: Instant::now(),
             clocks: clocks::ClockWatch::new(s.system_clock.read()),
             refusals: crate::refusals::Refusals::default(),
@@ -591,8 +587,6 @@ impl Control {
             },
             traces: traces::TraceStore::default(),
             sweep: None,
-            next_sweep: 1,
-            next_walk: 1,
             walk_resume: HashSet::new(),
             autosave,
             restore,

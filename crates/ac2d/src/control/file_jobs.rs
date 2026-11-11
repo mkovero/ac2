@@ -206,8 +206,7 @@ impl Control {
                 )));
             }
         };
-        let token = self.next_token;
-        self.next_token += 1;
+        let token = self.ids.token();
         let to = self.s.to_self.clone();
         let (alive, ended) = mpsc::channel::<()>();
         std::thread::Builder::new()

@@ -363,7 +363,7 @@ impl Control {
             )));
         }
         let taken: BTreeSet<MeasId> = self.rig.meas.saved.iter().map(|m| m.id).collect();
-        let map = remap_ids(data, &taken, &mut self.next_meas);
+        let map = remap_ids(data, &taken, &mut self.ids);
         for (from, to) in &map {
             tracing::info!(
                 "session load: measurement {from} is numbered {to} (a rig meter holds {from})"
@@ -648,19 +648,18 @@ impl Control {
     }
 }
 
-/// Renumbers the measurements of `data` whose ids are `taken`, from `next` on (past every
+/// Renumbers the measurements of `data` whose ids are `taken`, from the counter on (past every
 /// id taken or in `data`), and every reference to them. Returns what moved where.
 pub(super) fn remap_ids(
     data: &mut SessionData,
     taken: &BTreeSet<MeasId>,
-    next: &mut u32,
+    counter: &mut super::ids::Ids,
 ) -> Vec<(MeasId, MeasId)> {
     let ids: BTreeSet<MeasId> = data.measurements.iter().map(|m| m.id).collect();
     let mut map = HashMap::new();
     for id in ids.iter().filter(|i| taken.contains(i)) {
         loop {
-            let c = MeasId(*next);
-            *next = next.saturating_add(1);
+            let c = counter.meas_candidate();
             if !taken.contains(&c) && !ids.contains(&c) {
                 map.insert(*id, c);
                 break;

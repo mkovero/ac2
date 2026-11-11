@@ -408,8 +408,7 @@ impl Control {
         }
         let backend = self.backend_for(Some(kind))?;
         self.close_preview();
-        let token = self.next_token;
-        self.next_token += 1;
+        let token = self.ids.token();
         let req = crate::detect::DetectRequest {
             backend,
             kind,
@@ -449,8 +448,7 @@ impl Control {
         device: ac2_proto::model::DeviceId,
     ) -> Result<u64, ProtoError> {
         let backend = self.backend_for(Some(kind))?;
-        let token = self.next_token;
-        self.next_token += 1;
+        let token = self.ids.token();
         let selector = ac2_audio::DeviceSelector::Id(ac2_audio::DeviceId(device.0.clone()));
         tracing::info!("driver control panel of {:?} ({kind:?})", device.0);
         let to = self.s.to_self.clone();

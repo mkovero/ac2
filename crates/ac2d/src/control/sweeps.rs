@@ -166,8 +166,7 @@ impl Control {
         }
 
         // The recorder first: it must hear the first sweep from its first sample.
-        let id = SweepId(self.next_sweep);
-        self.next_sweep += 1;
+        let id = self.ids.sweep();
         let lead = (sweep::LEAD_S * fs).round() as usize;
         let period = timing.period_samples(fs);
         let total = lead + usize::from(req.repeats) * period;
@@ -181,8 +180,7 @@ impl Control {
             req.repeats,
             self.s.to_self.clone(),
         );
-        let fid = self.next_fanout_id;
-        self.next_fanout_id += 1;
+        let fid = self.ids.fanout();
         let (job, tx) = jobs::spawn(
             format!("ac2d-sweep-{}", id.0),
             self.job_env(rt),

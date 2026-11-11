@@ -102,8 +102,7 @@ impl Control {
             };
             self.commit(Change::WalkPlan(Patch::Set(p)));
         }
-        let id = WalkId(self.next_walk);
-        self.next_walk += 1;
+        let id = self.ids.walk();
         let first = mics[0];
         let mut w = WalkState {
             id,
@@ -590,7 +589,7 @@ impl Control {
         }
         let traces: HashSet<TraceId> = self.store.state().traces.iter().map(|t| t.id).collect();
         for mut w in walks {
-            self.next_walk = self.next_walk.max(w.id.0.saturating_add(1));
+            self.ids.walk_past(w.id);
             let mut lost: Vec<usize> = Vec::new();
             for (i, p) in w.points.iter_mut().enumerate() {
                 if let PointState::Captured { trace, .. } = &p.state

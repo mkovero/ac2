@@ -203,8 +203,7 @@ impl Control {
             m.config.kind,
             MeasKind::Transfer { .. } | MeasKind::Spectrum { .. } | MeasKind::Rta { .. }
         );
-        let fid = self.next_fanout_id;
-        self.next_fanout_id += 1;
+        let fid = self.ids.fanout();
         let (handle, tx) = jobs::spawn(
             format!("ac2d-meas-{}", m.id.0),
             self.job_env(rt),
@@ -316,8 +315,7 @@ impl Control {
             rt.epoch,
             self.store.state().timing,
         );
-        let fid = self.next_fanout_id;
-        self.next_fanout_id += 1;
+        let fid = self.ids.fanout();
         match jobs::spawn("ac2d-timing".into(), self.job_env(rt), fid, Box::new(a)) {
             Ok((h, tx)) => {
                 rt.fanout.attach(fid, tx);
@@ -412,8 +410,7 @@ impl Control {
             .ok_or_else(|| invalid("no open session"))?;
         let band = conv::finder_band(band);
         check_find(band, observation.map(|o| o.0), fs)?;
-        let token = self.next_token;
-        self.next_token += 1;
+        let token = self.ids.token();
         job.send(JobCmd::Find {
             token,
             band,

@@ -271,8 +271,7 @@ impl Control {
     /// Starts the next attempt on a thread of its own; `closed`: the stopped stream's close,
     /// waited for a little first.
     pub(super) fn start_attempt(&mut self, closed: Option<Receiver<()>>) {
-        let token = self.next_token;
-        self.next_token += 1;
+        let token = self.ids.token();
         let Some(r) = self.audio_recovery.as_mut() else {
             return;
         };
@@ -420,8 +419,7 @@ impl Control {
     /// Looks at the stopped session's device on a thread of its own (a hung host may not
     /// answer a device list either).
     pub(super) fn start_probe(&mut self) {
-        let token = self.next_token;
-        self.next_token += 1;
+        let token = self.ids.token();
         let Some(r) = self.audio_recovery.as_mut() else {
             return;
         };
