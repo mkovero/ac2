@@ -455,3 +455,17 @@ block, so it does not show how long after its arrival that was; the simulation a
 The one 27 ms interval came at the same instant on both spectra (one late hand-off of the
 fan-out on the non-real-time dummy server). SPL frames go on hand-offs about 16 ms apart
 again, as before frames moved to device periods (a 20 Hz meter steps 48 / 64 ms).
+
+### ketunkolo after the daemon per-hop change (197059ed on pupu, 3D view, 180 s)
+
+`selftest frames` Spectrum 2: hop 16.0 ms every frame (min = max), interval p50 16.1 / p99 20.3
+ms, age p50 2.2 / p95 4.9 ms (was 8.2 / 13.3). App log:
+
+| stage | start of day | after app fix | after daemon fix |
+|---|---|---|---|
+| capture → app link read p50 / p95 | 16.4 / 25.9 | 9.8 / 14.9 | 4.0 / 6.1 ms |
+| read → apply p50 / p95 | 8.8 / 16.3 | 0.7 / 8.3 | 2.5 / 7.7 ms |
+| **capture → present, as drawn p50 / p95 / max** | **53.4 / 63.9 / 169** | **14.6 / 29.8 / 50.6** | **10.3 / 19.3 / 37.0 ms** |
+
+What remains is mostly the wait for the next pass/refresh; compositor + TV after present stay
+unmeasured.
