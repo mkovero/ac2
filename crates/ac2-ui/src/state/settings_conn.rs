@@ -84,6 +84,20 @@ impl AppState {
                 what: format!("client {name} revoked"),
                 cmd: Command::ServerRevoke { name },
             }),
+            // As `ac2 session link-offset`: the open session reopened with it, everything
+            // else as it was.
+            ConnAction::LinkOffset(offset) => {
+                let Some(open) = self.open_session() else {
+                    return;
+                };
+                let mut config = open.config.clone();
+                config.link_offset = offset.map(ac2_proto::units::Seconds);
+                out.push(Request::RemoteSession {
+                    peers: None,
+                    config,
+                    what: ac2_scene::cross_rig::link_offset_toast(offset),
+                });
+            }
         }
     }
 }

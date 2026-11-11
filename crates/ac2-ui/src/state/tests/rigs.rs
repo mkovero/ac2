@@ -965,6 +965,7 @@ fn a_stored_pane_names_its_rig() {
 }
 
 mod rig_clocks;
+mod rig_cross_tf;
 mod rig_fold;
 mod rig_peak_points;
 mod rig_remote;

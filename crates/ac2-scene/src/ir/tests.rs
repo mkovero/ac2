@@ -527,3 +527,31 @@ fn navigated_axes_are_drawn_as_chosen() {
         auto_amplitude(&f)
     );
 }
+
+/// Across two rigs the inserted delay includes their unmeasured clock offset: time zero says
+/// so, and no distance.
+#[test]
+fn time_zero_across_rigs_says_its_basis() {
+    let s = ir_scene_between(
+        &frame(),
+        Color::WHITE,
+        None,
+        &IrCtx {
+            status: &Status::default(),
+            view: &view(IrMode::Linear),
+            axes: &IrAxes::default(),
+            style: Style {
+                chrome: PlotChrome::Full,
+                theme: &Theme::dark(),
+            },
+            size: SIZE,
+        },
+        "pupu",
+        "ketunkolo",
+    );
+    assert_eq!(
+        s.origin,
+        "t = 0 at inserted delay 12.34 ms · includes the clock offset between pupu and \
+         ketunkolo (not measured)"
+    );
+}

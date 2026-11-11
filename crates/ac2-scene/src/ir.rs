@@ -192,7 +192,22 @@ pub fn ir_scene(
     ctx: &IrCtx,
 ) -> IrScene {
     let tag = freshness.and_then(|f| f.tag());
-    draw(frame, color, freshness, tag, ctx)
+    draw(frame, color, freshness, tag, ctx, None)
+}
+
+/// [`ir_scene`] of a transfer function across two rigs, `ours` and `theirs` their names: its
+/// inserted delay includes the unmeasured offset between their clocks, so time zero says
+/// that instead of a distance.
+pub fn ir_scene_between(
+    frame: &IrFrame,
+    color: Color,
+    freshness: Option<Freshness>,
+    ctx: &IrCtx,
+    ours: &str,
+    theirs: &str,
+) -> IrScene {
+    let tag = freshness.and_then(|f| f.tag());
+    draw(frame, color, freshness, tag, ctx, Some((ours, theirs)))
 }
 
 /// A stored transfer trace's impulse response as an IR frame: the samples it was captured
@@ -218,7 +233,7 @@ pub fn stored_frame(d: &TraceData) -> Option<IrFrame> {
 pub fn stored_ir_scene(d: &TraceData, color: Color, ctx: &IrCtx) -> Option<IrScene> {
     let frame = stored_frame(d)?;
     let tag = Some(d.meta.edit.name.clone());
-    Some(draw(&frame, color, None, tag, ctx))
+    Some(draw(&frame, color, None, tag, ctx, None))
 }
 
 /// Points above which an IR line is drawn [`per_pixel`]: a live IR (4096 points) is drawn
@@ -269,6 +284,7 @@ fn draw(
     freshness: Option<Freshness>,
     tag: Option<String>,
     ctx: &IrCtx,
+    between: Option<(&str, &str)>,
 ) -> IrScene {
     let &IrCtx {
         status,
@@ -305,9 +321,13 @@ fn draw(
     }
     // t = 0: where the inserted delay puts the arrival.
     canvas::vline(&mut c.base, plot, xm.to_px(0.0), theme.zero_line);
+    let delay = frame.meta.inserted_delay.0;
     let origin = format!(
         "t = 0 at inserted delay {}",
-        readout::delay_readout(frame.meta.inserted_delay.0, view.temperature_c)
+        match between {
+            Some((ours, theirs)) => crate::cross_rig::delay_basis(delay, ours, theirs),
+            None => readout::delay_readout(delay, view.temperature_c),
+        }
     );
     let origin_line = match &tag {
         Some(t) => format!("{origin} · {t}"),

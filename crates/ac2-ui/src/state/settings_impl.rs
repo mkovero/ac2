@@ -100,9 +100,13 @@ impl AppState {
 
     /// A page was shown: it asks for what it shows.
     fn settings_entered(&mut self, out: &mut Vec<Request>) {
+        let remote = self
+            .open_session()
+            .is_some_and(|o| !o.config.remote_inputs.is_empty());
         let Overlay::Settings(s) = &mut self.overlay else {
             return;
         };
+        s.connection.remote = remote;
         if matches!(s.page, Page::Connection | Page::Recording)
             && matches!(self.rig.conn, super::ConnState::Connected { .. })
         {
@@ -141,6 +145,7 @@ impl AppState {
         if let Overlay::Settings(s) = &mut self.overlay {
             s.session.set_labels(&labels);
             s.session.set_remote(&remote);
+            s.connection.remote = !remote.is_empty();
             if let Some(r) = &rig {
                 s.rig.follow(r);
             }

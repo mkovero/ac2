@@ -207,7 +207,7 @@ fn the_dialog_refuses_in_words() {
 }
 
 /// This rig's session with pupu's input 2, as its daemon reports it.
-fn with_remote(t: &mut T, link: RemoteLink, audio: RemoteAudio) {
+pub(super) fn with_remote(t: &mut T, link: RemoteLink, audio: RemoteAudio) {
     t.remirror(|s| {
         let o = s.session.open.as_mut().expect("open");
         o.config.remote_inputs = vec![RemoteInput {

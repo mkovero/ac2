@@ -12,7 +12,7 @@ use ac2_proto::units::{RigId, WallNs};
 use crate::format;
 
 /// A rig's name among the remote rigs, else its id.
-pub(crate) fn name_of(r: &RemoteState, rig: RigId) -> String {
+pub fn name_of(r: &RemoteState, rig: RigId) -> String {
     r.rigs
         .iter()
         .find(|x| x.rig == rig)

@@ -291,6 +291,18 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         it
     });
     let mut segment = vec![session];
+    // A transfer function across two rigs stopped by the clocks: why and what to do, right
+    // after the session line. It scrolls there rather than push out the rig chips, which
+    // say the same in short.
+    let stopped_tf = st.cross_rig_banners();
+    if !stopped_tf.is_empty() {
+        let text = stopped_tf.join(" · ");
+        segment.push(Part::single(
+            ui,
+            RichText::new(text.clone()).color(ch.warn).into(),
+            Some(text),
+        ));
+    }
     segment.extend(health_part(app, ui, ch, now));
     let mut left = vec![
         Item::new(100, vec![RichText::new("ac2").strong().size(16.0)])
@@ -350,6 +362,7 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         right.push(it);
     }
     right.extend(stimulus(app, ch));
+    right.extend(rig_chips(st, ch));
     // Innermost, right after the session line: the rig everything else in the bar is of.
     right.push(rig_item(st, ch));
 
@@ -443,6 +456,22 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     if let Some(c) = run {
         app.dispatch(crate::state::Msg::Command(c));
     }
+}
+
+/// A chip per rig the session takes inputs from, beside the rig drop-down: the clocks
+/// between the rigs in words, a problem in capitals and the warning colour. A click opens
+/// the Connection page, where *Between rigs* says why.
+fn rig_chips(st: &crate::state::AppState, ch: &Chrome) -> Vec<Item> {
+    st.rig_chips()
+        .into_iter()
+        .map(|c| {
+            let (prio, color) = if c.warn { (66, ch.warn) } else { (35, ch.dim) };
+            let mut it = Item::new(prio, vec![RichText::new(c.text).color(color)]).sep();
+            it.hover = Some(ac2_scene::cross_rig::CHIP_TIP.to_owned());
+            it.click = Some(CommandId::BetweenRigs);
+            it
+        })
+        .collect()
 }
 
 /// The rigs drop-down: the rig shown, by name (also with one rig, so the bar says whose

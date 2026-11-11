@@ -21,17 +21,25 @@ pub enum ConnLine {
     Refused(Option<String>, String),
     /// Authorize a key typed with its name.
     AddKey,
+    /// *Wait for remote inputs*: the session's link offset (Enter types it), while it has
+    /// remote inputs.
+    LinkOffset,
 }
 
 /// What the Connection page asks for.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ConnAction {
     Reconnect,
     ConnectOther,
     ToggleStartLocal,
     ToggleStopOnQuit,
-    Authorize { name: String, key: String },
+    Authorize {
+        name: String,
+        key: String,
+    },
     Revoke(String),
+    /// Reopen the session with this link offset, seconds (`None`: the least that works).
+    LinkOffset(Option<f64>),
 }
 
 /// A typed edit of the Connection page.
@@ -41,6 +49,8 @@ pub enum ConnEdit {
     Name { key: String },
     /// `name key`, for a key not seen yet.
     NameAndKey,
+    /// The link offset: a time or `default`.
+    LinkOffset,
 }
 
 /// The Connection page.
@@ -56,14 +66,17 @@ pub struct ConnectionPage {
     pub confirm: Option<String>,
     pub notice: Option<String>,
     pub error: Option<String>,
+    /// The open session takes remote inputs: the link offset line is listed.
+    pub remote: bool,
 }
 
 /// Seconds between `server.info` while the Connection page is shown: refused keys appear
 /// while the operator watches for a new client to knock.
 pub const SERVER_INFO_EVERY_S: f64 = 2.0;
 
-/// The page's lines for `server` (the actions, then the network mode's keys).
-pub fn conn_lines(server: Option<&ServerInfo>) -> Vec<ConnLine> {
+/// The page's lines for `server` (the actions, then the network mode's keys, then with
+/// remote inputs the link offset, as *Between rigs* closes the page).
+pub fn conn_lines(server: Option<&ServerInfo>, remote: bool) -> Vec<ConnLine> {
     let mut v = vec![
         ConnLine::Reconnect,
         ConnLine::ConnectOther,
@@ -96,6 +109,9 @@ pub fn conn_lines(server: Option<&ServerInfo>) -> Vec<ConnLine> {
         );
         v.push(ConnLine::AddKey);
     }
+    if remote {
+        v.push(ConnLine::LinkOffset);
+    }
     v
 }
 
@@ -106,7 +122,7 @@ impl ConnectionPage {
 
     /// The lines as of the last answer.
     pub fn lines(&self) -> Vec<ConnLine> {
-        conn_lines(self.server_info())
+        conn_lines(self.server_info(), self.remote)
     }
 
     /// The focused line (clamped: lines come and go with the daemon's answers).
@@ -149,6 +165,14 @@ impl ConnectionPage {
                         })
                     }
                 }
+                ConnEdit::LinkOffset => match ac2_scene::cross_rig::parse_link_offset(t) {
+                    Ok(o) => Some(ConnAction::LinkOffset(o)),
+                    Err(e) => {
+                        self.error = Some(e);
+                        self.edit = Some((ConnEdit::LinkOffset, text));
+                        None
+                    }
+                },
                 ConnEdit::NameAndKey => {
                     let mut parts = t.split_whitespace();
                     match (parts.next(), parts.next(), parts.next()) {
@@ -183,6 +207,10 @@ impl ConnectionPage {
             }
             ConnLine::Authorized(_) => {
                 self.notice = Some("Delete twice revokes this client's key".into());
+                None
+            }
+            ConnLine::LinkOffset => {
+                self.edit = Some((ConnEdit::LinkOffset, String::new()));
                 None
             }
         }
@@ -262,6 +290,7 @@ impl ConnectionPage {
         match &self.edit {
             Some((ConnEdit::Name { .. }, _)) => Some("Authorize this key as (name):"),
             Some((ConnEdit::NameAndKey, _)) => Some("Authorize a client (name, space, key):"),
+            Some((ConnEdit::LinkOffset, _)) => Some(ac2_scene::cross_rig::LINK_OFFSET_PROMPT),
             None => None,
         }
     }
@@ -349,7 +378,11 @@ pub fn conn_line_text(l: &ConnLine, server: Option<&ServerInfo>) -> String {
                 _ => None,
             })
             .unwrap_or_else(|| name.clone()),
-        ConnLine::Refused(..) | ConnLine::StartLocal | ConnLine::StopOnQuit => String::new(),
+        // Drawn with what they need from the app (the prefs, the session).
+        ConnLine::Refused(..)
+        | ConnLine::StartLocal
+        | ConnLine::StopOnQuit
+        | ConnLine::LinkOffset => String::new(),
         ConnLine::AddKey => "Authorize a client by its key… (Enter)".into(),
     }
 }

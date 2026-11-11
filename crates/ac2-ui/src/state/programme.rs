@@ -172,12 +172,18 @@ impl AppState {
     pub fn pane_heading(&self, id: PaneId) -> String {
         let title = self.pane_title(id);
         let name = self.layout.view(id).and_then(|v| {
-            if self.ours(v) {
-                return self.pane_meas(id).map(|m| m.config.name.clone());
-            }
-            let r = self.find_rig(self.pane_rig(v))?;
-            let m = r.meas(v.meas?)?;
-            v.kind.shows(&m.config.kind).then(|| m.config.name.clone())
+            let rig = self.pane_rig(v);
+            let m = if self.ours(v) {
+                self.pane_meas(id)?
+            } else {
+                let m = self.find_rig(rig)?.meas(v.meas?)?;
+                v.kind.shows(&m.config.kind).then_some(m)?
+            };
+            // A transfer function across two rigs names the remote side.
+            Some(match self.cross_rig_of(rig, m.id) {
+                Some((x, r, _)) => ac2_scene::cross_rig::pane_title(&m.config.name, x, r),
+                None => m.config.name.clone(),
+            })
         });
         match name {
             Some(n) => format!("{title} \u{b7} {n}"),

@@ -88,6 +88,8 @@ impl Data {
     fn trace(&self, key: u32, time_base: TimeBase) -> TfTrace<'_> {
         TfTrace {
             range: None,
+            faint_phase: false,
+            delay_between: None,
             key: TraceKey::Live(MeasId(key)),
             name: format!("m{key}"),
             color: Color::WHITE,

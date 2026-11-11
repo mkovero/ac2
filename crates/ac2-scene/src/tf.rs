@@ -394,6 +394,10 @@ fn overlay_floor(c: &mut Canvas, plot: Rect, o: &CoherenceOverlay, theme: &Theme
 }
 
 /// Builds the transfer view.
+/// How much of its own opacity a faint phase keeps: clearly behind the magnitude's
+/// weight, still readable over the grid.
+pub const FAINT_PHASE_ALPHA: f32 = 0.3;
+
 pub fn transfer_scene(
     traces: &[TfTrace<'_>],
     cache: &DisplayCache,
@@ -550,7 +554,12 @@ pub fn transfer_scene(
             let alpha = (kind != TfPaneKind::Coherence && view.tf.coherence.alpha)
                 .then(|| &t.alpha[cols.clone()]);
             let wrapped = kind == TfPaneKind::Phase && view.tf.phase == PhaseView::Wrapped;
-            let stroke = trace_stroke(t, selected == Some(t.key), theme);
+            let mut stroke = trace_stroke(t, selected == Some(t.key), theme);
+            // A held cross-rig result's phase is drawn faint: its magnitude stands, but its
+            // time base is not known to hold across the stop.
+            if kind == TfPaneKind::Phase && traces.iter().any(|s| s.key == t.key && s.faint_phase) {
+                stroke.color = stroke.color.with_alpha(FAINT_PHASE_ALPHA);
+            }
             c.data.polylines.extend(trace_line(
                 &xs,
                 &values[cols.clone()],
@@ -623,10 +632,22 @@ pub fn transfer_scene(
             .iter()
             .find(|t| t.key == r.key)
             .map_or(String::new(), |t| t.name.clone());
-        format!(
-            "ref {name} {}",
-            readout::delay_readout(r.delay.0, view.temperature_c)
-        )
+        // Across two rigs the delay includes the unmeasured clock offset between them: no
+        // distance can be read from it.
+        let between = traces
+            .iter()
+            .find(|t| t.key == r.key)
+            .and_then(|t| t.delay_between.as_ref());
+        match between {
+            Some((ours, theirs)) => format!(
+                "ref {name} {}",
+                crate::cross_rig::delay_basis(r.delay.0, ours, theirs)
+            ),
+            None => format!(
+                "ref {name} {}",
+                readout::delay_readout(r.delay.0, view.temperature_c)
+            ),
+        }
     });
     // The pick only chooses min / max's curve: with min / max off a cue would change
     // nothing, and read as a fault.

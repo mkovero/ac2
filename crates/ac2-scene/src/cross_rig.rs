@@ -5,8 +5,9 @@
 //! appears its clock relation is said next to it, in words.
 
 use ac2_proto::model::{
-    CrossRigTransfer, CrossTfState, Measurement, NotLockedReason, PeerRelation, RelockOutcome,
-    RemoteSide, RemoteState, StopWhy,
+    CantTellReason, CrossRigTransfer, CrossTfState, Measurement, NotLockedReason, PeerRelation,
+    RelockOutcome, RemoteAudio, RemoteInput, RemoteLink, RemoteRig, RemoteSide, RemoteState,
+    StopWhy,
 };
 
 use crate::between_rigs::{cant_tell_why, name_of};
@@ -229,6 +230,213 @@ pub fn status_cli(r: &RemoteState, measurements: &[Measurement], ours: &str) -> 
         }
     }
     out
+}
+
+/// A remote rig's chip in the top bar, beside the rig drop-down: *ketunkolo · clocks
+/// agree*, *ketunkolo · measuring clocks…*, or as a warning *ketunkolo · CLOCKS NOT LOCKED
+/// +5.6 ppm*. The warning is said in capitals as well as coloured: never only a colour.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RigChip {
+    pub text: String,
+    pub warn: bool,
+}
+
+/// The chip's tooltip: where a click leads.
+pub const CHIP_TIP: &str = "the clocks and the link between the rigs: Settings › Connection › \
+                            Between rigs";
+
+/// The chip of remote rig `rig`; `inputs`: the session's remote inputs. No audio comes
+/// first (no relation can be measured without it), then the relation, then a link offset
+/// too small for a transfer function on it.
+pub fn rig_chip(r: &RemoteState, rig: &RemoteRig, inputs: &[RemoteInput]) -> RigChip {
+    let chip = |what: String, warn: bool| RigChip {
+        text: format!("{} · {what}", rig.name),
+        warn,
+    };
+    if no_audio(r, rig, inputs) {
+        return chip("NO AUDIO".into(), true);
+    }
+    match rig.clock.relation {
+        PeerRelation::NotLocked { reason } => {
+            let ppm = match reason {
+                NotLockedReason::CrossRate { ppm, .. } | NotLockedReason::OwnClock { ppm, .. } => {
+                    ppm
+                }
+            };
+            chip(
+                format!("CLOCKS NOT LOCKED {} ppm", format::signed(ppm, 1)),
+                true,
+            )
+        }
+        PeerRelation::CantTell { .. } => chip("CLOCKS: CAN'T TELL".into(), true),
+        _ if r.transfers.iter().any(|x| x.rig == rig.rig && x.late) => {
+            chip("LINK OFFSET TOO SMALL".into(), true)
+        }
+        PeerRelation::Measuring => chip("measuring clocks…".into(), false),
+        PeerRelation::Agree => chip("clocks agree".into(), false),
+    }
+}
+
+/// No audio comes from `rig`: its link is down or refused, the relation says so, or none of
+/// its inputs carries audio this rig can use.
+fn no_audio(r: &RemoteState, rig: &RemoteRig, inputs: &[RemoteInput]) -> bool {
+    if !matches!(rig.link, RemoteLink::Up | RemoteLink::Connecting) {
+        return true;
+    }
+    if matches!(
+        rig.clock.relation,
+        PeerRelation::CantTell {
+            reason: CantTellReason::NoAudio
+        }
+    ) {
+        return true;
+    }
+    let audio: Vec<RemoteAudio> = inputs
+        .iter()
+        .filter(|i| i.rig == rig.rig)
+        .filter_map(|i| r.inputs.iter().find(|s| s.slot == i.slot))
+        .map(|s| s.audio)
+        .collect();
+    !audio.is_empty()
+        && audio.iter().all(|a| {
+            !matches!(
+                a,
+                RemoteAudio::Streaming | RemoteAudio::Starting | RemoteAudio::Waiting
+            )
+        })
+}
+
+/// The clock line a pane's title carries while the transfer function averages: *clocks
+/// agree within 2 ppm · ketunkolo*. Stopped, the pane's banner says it instead.
+pub fn caption(x: &CrossRigTransfer, r: &RemoteState) -> Option<String> {
+    matches!(x.state, CrossTfState::Running).then(|| status_lines(x, r).remove(0))
+}
+
+/// A line of a cross-rig transfer function's banner strip on its pane: its stop verdict
+/// (which stays with the plot chrome hidden), the relock, slip, drift and late cues.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PaneBanner {
+    pub text: String,
+    /// Why, and what to do.
+    pub detail: Option<String>,
+    /// A warning (the operator has something to do or the result is held); else a note.
+    pub warn: bool,
+}
+
+/// The banner lines of the pane showing cross-rig transfer function `x` (`label` its name,
+/// `ours` this rig's name).
+pub fn pane_banners(
+    label: &str,
+    x: &CrossRigTransfer,
+    r: &RemoteState,
+    ours: &str,
+) -> Vec<PaneBanner> {
+    let rig = name_of(r, x.rig);
+    let mut out = Vec::new();
+    if let (Some(v), CrossTfState::Stopped { why, held }) = (stop_verdict(x), x.state) {
+        let detail = match (why, banner(label, x, r, ours)) {
+            (StopWhy::Measuring, _) | (_, None) => format!(
+                "less than a minute of audio from {rig} since the stream started: the clocks                  between the rigs are not known yet"
+            ),
+            (_, Some(b)) if held => {
+                format!("{b} The result from before stands; its phase is faint.")
+            }
+            (_, Some(b)) => format!("{b} No result was kept from before."),
+        };
+        out.push(PaneBanner {
+            text: v.to_owned(),
+            detail: Some(detail),
+            warn: why != StopWhy::Measuring,
+        });
+    }
+    if let Some(t) = relock_text(x) {
+        let asks = matches!(
+            x.relock.map(|r| r.outcome),
+            Some(RelockOutcome::FindAgain | RelockOutcome::Ambiguous)
+        );
+        out.push(PaneBanner {
+            text: t,
+            detail: asks.then(|| "the phase is faint until the delay is found again".into()),
+            warn: asks,
+        });
+    }
+    if let Some(s) = x.slip {
+        out.push(PaneBanner {
+            text: format!(
+                "{rig}'s audio slipped {} · delay moved with it",
+                format::delay(s.by.0.abs())
+            ),
+            detail: None,
+            warn: false,
+        });
+    }
+    if let Some(d) = drift_text(x) {
+        out.push(PaneBanner {
+            text: format!("{d}: path or clocks"),
+            detail: Some(
+                "the delay moved more than 0.05 ms a minute over two minutes: a path or the \
+                 clocks are moving"
+                    .into(),
+            ),
+            warn: false,
+        });
+    }
+    if x.late {
+        out.push(PaneBanner {
+            text: late_text(r),
+            detail: Some(format!(
+                "audio from {rig} keeps arriving after it is needed: Settings › Connection ›                  {LINK_OFFSET}"
+            )),
+            warn: true,
+        });
+    }
+    out
+}
+
+/// The Connection page's link offset control, as `late_text` names it.
+pub const LINK_OFFSET: &str = "Wait for remote inputs";
+
+/// The link offset control's line: *Wait for remote inputs (link offset): 30 ms*, or
+/// *…: default (10 ms)*. `set`: the session's own setting; `r`: what the daemon runs.
+pub fn link_offset_line(set: Option<ac2_proto::units::Seconds>, r: &RemoteState) -> String {
+    let v = match (set, r.link_offset) {
+        (Some(s), _) => format::ms(s.0, 0),
+        (None, Some(o)) => format!("default ({})", format::ms(o.0, 0)),
+        (None, None) => "default".to_owned(),
+    };
+    format!("{LINK_OFFSET} (link offset): {v}")
+}
+
+/// What the link offset control asks while it is typed.
+pub const LINK_OFFSET_PROMPT: &str =
+    "Wait for remote inputs (a time up to 500 ms, e.g. 20ms, or default):";
+
+/// The longest link offset the daemon takes: audio meeting a remote input waits this long
+/// at most.
+pub const LINK_OFFSET_MAX_S: f64 = 0.5;
+
+/// A typed link offset: `20ms`, `20` (a bare number reads as ms, as the delay field reads
+/// it), or `default` (`None`: the least that works).
+pub fn parse_link_offset(s: &str) -> Result<Option<f64>, String> {
+    use crate::unit_text::{Time, UnitText};
+    let t = s.trim();
+    if t.is_empty() || t.eq_ignore_ascii_case("default") {
+        return Ok(None);
+    }
+    let Time(sec) = Time::parse_text(t, Some("ms")).map_err(|e| e.0)?;
+    if sec.0 <= 0.0 || sec.0 > LINK_OFFSET_MAX_S {
+        return Err(format!(
+            "{t}: the link offset is above 0 and at most 500 ms (or default)"
+        ));
+    }
+    Ok(Some(sec.0))
+}
+
+/// The toast after the link offset is set: the session reopens, its remote inputs anchor
+/// again.
+pub fn link_offset_toast(offset_s: Option<f64>) -> String {
+    let v = offset_s.map_or_else(|| "default".to_owned(), |s| format::ms(s, 0));
+    format!("link offset {v}: the remote inputs anchor again, their averages restart")
 }
 
 #[cfg(test)]

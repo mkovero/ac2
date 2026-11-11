@@ -233,6 +233,8 @@ fn transfer_view_with_a_live_trace_and_eight_stored() {
     let view = ViewState::default();
     let live = TfTrace {
         range: None,
+        faint_phase: false,
+        delay_between: None,
         key: TraceKey::Live(MeasId(1)),
         name: "live".into(),
         color: theme.trace_color(0),

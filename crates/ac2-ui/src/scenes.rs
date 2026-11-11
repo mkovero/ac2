@@ -147,6 +147,17 @@ pub fn status(
             .and_then(|d| ac2_scene::autosave::damage_text(&d.rig.damaged_files)),
         drive: st.drive(),
         advice: None,
+        between_rigs: tf_meas
+            .and_then(|m| {
+                let (x, r, ours) = st.cross_rig(m.id)?;
+                Some(ac2_scene::cross_rig::pane_banners(
+                    &m.config.name,
+                    x,
+                    r,
+                    &ours,
+                ))
+            })
+            .unwrap_or_default(),
     }
 }
 
@@ -459,6 +470,10 @@ fn with_transfer<R>(
         t.note = eq_prediction_note(st, l.meas)
             .or_else(|| math_status(st, l.meas, &l.tf.frame.data).map(|a| a.tag()));
         t.compared = st.live_compared_on(PaneKind::Transfer, l.meas, pane);
+        if let Some((x, r, ours)) = st.cross_rig(l.meas.id) {
+            t.faint_phase = ac2_scene::cross_rig::faint_phase(x).is_some();
+            t.delay_between = Some((ours, ac2_scene::between_rigs::name_of(r, x.rig)));
+        }
         // A ratio or cascade of operands without a shared time base has each operand's
         // own alignment in its phase, not a time base of this session.
         if f.meta
@@ -539,21 +554,29 @@ pub fn ir(
     if let Some(ir) = ir.filter(|_| !st.meas_hidden(m) && m.running)
         && let FrameData::Ir(f) = &ir.frame.data
     {
-        return Some(ir_scene(
-            f,
-            meas_color(st, theme, m.id),
-            Some(freshness(st, ir)),
-            &ac2_scene::ir::IrCtx {
-                status: &status,
-                view: &view,
-                axes: &view.ir.axes,
-                style: ac2_scene::view::Style {
-                    chrome: view.chrome,
-                    theme,
-                },
-                size,
+        let ctx = ac2_scene::ir::IrCtx {
+            status: &status,
+            view: &view,
+            axes: &view.ir.axes,
+            style: ac2_scene::view::Style {
+                chrome: view.chrome,
+                theme,
             },
-        ));
+            size,
+        };
+        let color = meas_color(st, theme, m.id);
+        let fresh = Some(freshness(st, ir));
+        return Some(match st.cross_rig(m.id) {
+            Some((x, r, ours)) => ac2_scene::ir::ir_scene_between(
+                f,
+                color,
+                fresh,
+                &ctx,
+                &ours,
+                &ac2_scene::between_rigs::name_of(r, x.rig),
+            ),
+            None => ir_scene(f, color, fresh, &ctx),
+        });
     }
     let hidden = st.meas_hidden(m);
     let why = if hidden {

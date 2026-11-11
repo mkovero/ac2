@@ -71,6 +71,8 @@ fn cols(gain_db: f32, tau: f64) -> Cols {
 fn trace<'a>(c: &'a Cols, meas: u32, color: usize, delay: f64) -> TfTrace<'a> {
     TfTrace {
         range: None,
+        faint_phase: false,
+        delay_between: None,
         key: TraceKey::Live(MeasId(meas)),
         name: format!("Meas {meas}"),
         color: Theme::dark().trace_color(color),

@@ -136,6 +136,7 @@ fn status() -> Status {
         file_damaged: None,
         drive: Default::default(),
         advice: None,
+        between_rigs: Vec::new(),
     }
 }
 

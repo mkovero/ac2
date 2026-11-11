@@ -68,6 +68,9 @@ pub struct MeasItem<'a> {
     pub hidden: bool,
     /// The colour its curve is drawn in, in every pane and legend: its row's dot has it.
     pub color: Color,
+    /// A transfer function across two rigs: its short cue ([`crate::cross_rig::list_cue`]),
+    /// so a stop by the clocks shows with its pane closed.
+    pub cue: Option<String>,
 }
 
 /// What the list highlights on a row.
@@ -103,6 +106,9 @@ pub fn meas_row(item: &MeasItem<'_>, selected: Option<MeasId>, active: bool) -> 
     // Right after the state: a curve missing from the panes must not read as a fault.
     if item.hidden {
         text.push_str(" · hidden");
+    }
+    if let Some(c) = &item.cue {
+        text.push_str(&format!(" · {c}"));
     }
     if let Some(d) = &m.delay {
         // One delay and how far it is from the measured arrival, as the legend and the

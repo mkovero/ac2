@@ -124,6 +124,14 @@ pub struct TfTrace<'a> {
     /// An average's range across positions ([`crate::range_band`]); `None` for every other
     /// curve.
     pub range: Option<crate::range_band::Source<'a>>,
+    /// A transfer function across two rigs holding a result the clocks stopped, or a delay
+    /// that may have moved since: its phase is drawn faint (the magnitude stands), as the
+    /// pane's banner says ([`crate::cross_rig::faint_phase`]).
+    pub faint_phase: bool,
+    /// A transfer function across two rigs: this rig's and the remote rig's names. Its delay
+    /// includes the offset between their clocks, which is not measured, so its readout
+    /// says that instead of a distance ([`crate::cross_rig::delay_basis`]).
+    pub delay_between: Option<(String, String)>,
 }
 
 /// The legend tag of a compared curve, and the measurement tree's mark of a compared row.
@@ -180,6 +188,8 @@ impl<'a> TfTrace<'a> {
                     spread,
                     band: frame.range.as_ref(),
                 }),
+            faint_phase: false,
+            delay_between: None,
         }
     }
 
@@ -247,6 +257,8 @@ impl<'a> TfTrace<'a> {
                 }),
             // Stored captures keep no range (the band is live only).
             range: None,
+            faint_phase: false,
+            delay_between: None,
         }
     }
 }

@@ -270,6 +270,17 @@ impl AppState {
             v = v.iter().map(|s| format!("{h} · {s}")).collect();
             v.push(h);
         }
+        // Across two rigs the clock relation is said next to the result, first: it says
+        // whether the curve can be trusted at all.
+        let clocks = self
+            .pane_meas(id)
+            .filter(|_| pane == PaneKind::Transfer)
+            .and_then(|m| self.cross_rig(m.id))
+            .and_then(|(x, r, _)| ac2_scene::cross_rig::caption(x, r));
+        if let Some(c) = clocks {
+            v = v.iter().map(|s| format!("{c} · {s}")).collect();
+            v.push(c);
+        }
         v.extend(trace);
         v.dedup();
         v
@@ -417,6 +428,9 @@ impl AppState {
                     inverted: e.inverted,
                     hidden: self.meas_hidden(m),
                     color: colours.meas(m.id),
+                    cue: self
+                        .cross_rig(m.id)
+                        .and_then(|(x, ..)| ac2_scene::cross_rig::list_cue(x)),
                 }
             })
             .collect()

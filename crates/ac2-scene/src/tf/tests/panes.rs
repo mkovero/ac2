@@ -419,3 +419,40 @@ fn group_delay_pane() {
     let line = &s.scene.layers[1].polylines[1];
     assert!(line.points.iter().all(|p| (p[1] - y).abs() < 0.01));
 }
+
+/// A transfer function across two rigs held by the clocks: its phase faint, its magnitude
+/// as drawn; its delay readout says it includes the unmeasured clock offset, no distance.
+#[test]
+fn a_held_cross_rig_curve_has_a_faint_phase_and_says_its_delay_basis() {
+    let c = cols(100);
+    let mut t = trace(&c, TraceKey::Live(MeasId(1)), 0.012_38);
+    t.faint_phase = true;
+    t.delay_between = Some(("pupu".into(), "ketunkolo".into()));
+    let s = transfer_scene(
+        &[t],
+        &DisplayCache::default(),
+        &Status::default(),
+        &ViewState::default(),
+        &Theme::dark(),
+        SIZE,
+    );
+    let l = &s.scene.layers[1].polylines;
+    let (mag, phase) = (l[0].stroke.color.a, l[1].stroke.color.a);
+    assert!(
+        (phase - mag * FAINT_PHASE_ALPHA).abs() < 1e-6,
+        "{mag} {phase}"
+    );
+    assert_eq!(l[2].stroke.color.a, mag, "coherence as drawn");
+    let texts: Vec<&str> = s
+        .scene
+        .layers
+        .iter()
+        .flat_map(|l| l.labels.iter().map(|l| l.text.as_str()))
+        .collect();
+    // The legend plate cuts the line to its width.
+    assert!(
+        texts.iter().any(|t| t
+            .starts_with("ref m1 12.38 ms · includes the clock offset between pupu and ketunkolo")),
+        "{texts:?}"
+    );
+}

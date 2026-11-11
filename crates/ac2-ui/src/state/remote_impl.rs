@@ -6,7 +6,7 @@
 use super::*;
 use crate::remote_inputs::{PickLine, RemotePick, RemoteRow, admit_name, peer_endpoints};
 use ac2_proto::model::{
-    InputSetup, OpenSession, RemoteInput, RigPeer, ServerInfo, ServerMode, remote_slot,
+    InputSetup, OpenSession, RemoteInput, RemoteState, RigPeer, ServerInfo, ServerMode, remote_slot,
 };
 use ac2_scene::remote_inputs::{self as words, SourceRefusal};
 use eframe::egui::Key;
@@ -127,6 +127,55 @@ impl AppState {
                 ac2_scene::between_rigs::rig_block(&st.remote, rig, &o.config.remote_inputs, &|t| {
                     Some(self.at_clock(t))
                 })
+            })
+            .collect()
+    }
+
+    /// Measurement `meas` of rig `rig` as a transfer function across two rigs: its state,
+    /// that rig's remote state and that rig's own name (the words say both rigs).
+    pub fn cross_rig_of(
+        &self,
+        rig: RigId,
+        meas: ac2_proto::units::MeasId,
+    ) -> Option<(&ac2_proto::model::CrossRigTransfer, &RemoteState, String)> {
+        let st = self.find_rig(rig)?.daemon()?;
+        let x = ac2_scene::cross_rig::entry(&st.remote, meas)?;
+        Some((x, &st.remote, self.rig_name(rig)))
+    }
+
+    /// [`Self::cross_rig_of`] on the rig shown.
+    pub fn cross_rig(
+        &self,
+        meas: ac2_proto::units::MeasId,
+    ) -> Option<(&ac2_proto::model::CrossRigTransfer, &RemoteState, String)> {
+        self.cross_rig_of(self.active(), meas)
+    }
+
+    /// The top bar's chip per rig the session takes inputs from, beside the rig drop-down.
+    pub fn rig_chips(&self) -> Vec<ac2_scene::cross_rig::RigChip> {
+        let (Some(st), Some(o)) = (self.daemon(), self.open_session()) else {
+            return Vec::new();
+        };
+        st.remote
+            .rigs
+            .iter()
+            .map(|rig| ac2_scene::cross_rig::rig_chip(&st.remote, rig, &o.config.remote_inputs))
+            .collect()
+    }
+
+    /// The top bar's banner while a transfer function across two rigs is stopped by the
+    /// clocks: why and what to do, one per stopped measurement.
+    pub fn cross_rig_banners(&self) -> Vec<String> {
+        let Some(st) = self.daemon() else {
+            return Vec::new();
+        };
+        let ours = self.rig_name(self.active());
+        st.remote
+            .transfers
+            .iter()
+            .filter_map(|x| {
+                let m = st.measurements.iter().find(|m| m.id == x.meas)?;
+                ac2_scene::cross_rig::banner(&m.config.name, x, &st.remote, &ours)
             })
             .collect()
     }

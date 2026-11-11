@@ -43,6 +43,8 @@ fn cols(n: usize) -> Cols {
 fn trace(c: &Cols, key: TraceKey, delay: f64) -> TfTrace<'_> {
     TfTrace {
         range: None,
+        faint_phase: false,
+        delay_between: None,
         key,
         name: match key {
             TraceKey::Live(m) => format!("m{}", m.0),

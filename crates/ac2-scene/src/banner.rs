@@ -93,8 +93,10 @@ pub enum BannerKind {
     MathIncomplete,
     OutputTimingJump,
     ClockDrift,
+    BetweenRigs,
     LogNotSaved,
     NoDelayEstimate,
+    BetweenRigsNote,
     FileDamaged,
     Headroom,
 }
@@ -113,8 +115,11 @@ impl BannerKind {
             | Self::MathIncomplete
             | Self::OutputTimingJump
             | Self::ClockDrift
+            | Self::BetweenRigs
             | Self::LogNotSaved => Severity::Warning,
-            Self::NoDelayEstimate | Self::FileDamaged | Self::Headroom => Severity::Info,
+            Self::NoDelayEstimate | Self::BetweenRigsNote | Self::FileDamaged | Self::Headroom => {
+                Severity::Info
+            }
         }
     }
 }
@@ -158,6 +163,9 @@ pub struct Status {
     pub drive: crate::stimulus::Drive,
     /// The shown transfer measurement's headroom advice ([`crate::advice::Hold::shown`]).
     pub advice: Option<crate::advice::Advice>,
+    /// The shown transfer function across two rigs: its clock gate and cues
+    /// ([`crate::cross_rig::pane_banners`]).
+    pub between_rigs: Vec<crate::cross_rig::PaneBanner>,
 }
 
 /// Why a TF measurement has no delay the operator can rely on.
@@ -293,6 +301,14 @@ pub fn banners(s: &Status) -> Vec<Banner> {
                 format::ms(ppm.abs() * 1e-6 * 10.0, 2)
             )),
         ));
+    }
+    for b in &s.between_rigs {
+        let kind = if b.warn {
+            BannerKind::BetweenRigs
+        } else {
+            BannerKind::BetweenRigsNote
+        };
+        out.push(banner(kind, b.text.clone(), b.detail.clone()));
     }
     if let Some(l) = &s.log_not_saved {
         out.push(banner(

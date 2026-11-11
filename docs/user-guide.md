@@ -171,16 +171,42 @@ again from there. A slip in the remote audio
 moves the delay by exactly the slip (said a minute); a gap restarts the averages but keeps
 the delay. *delay drifting 0.09 ms/min* means the delay moved more than 0.05 ms a minute
 over two minutes: a path or the clocks are moving. *link offset too small* means the
-remote audio keeps arriving after the link offset (lost packets do not count): raise it with `ac2 session link-offset
-30ms` (`default` for the least that works, at most 500 ms; the remote inputs anchor again
-and every average on them restarts). Two channels on two different remote rigs are
-refused. `ac2 status` prints these lines per cross-rig transfer function.
+remote audio keeps arriving after the link offset (lost packets do not count): raise it on Settings › Connection
+(*Wait for remote inputs*, below) or with `ac2 session link-offset 30ms` (`default` for
+the least that works, at most 500 ms; the remote inputs anchor again and every average on
+them restarts). Two channels on two different remote rigs are refused. `ac2 status` prints
+these lines per cross-rig transfer function.
+
+In the app the relation is said next to every cross-rig result, always in words (a problem
+is never only a colour):
+
+- **Top bar:** a chip per remote rig beside the rig drop-down — *ketunkolo · clocks
+  agree*, *ketunkolo · measuring clocks…*, or in the warning colour and capitals
+  *ketunkolo · CLOCKS NOT LOCKED +5.6 ppm*, *CLOCKS: CAN'T TELL*, *LINK OFFSET TOO SMALL*,
+  *NO AUDIO*. A click opens Settings › Connection. While a cross-rig transfer function is
+  stopped, the bar's status line carries why and what to do (*Main L stopped: pupu and
+  ketunkolo are not on one clock (+5.6 ppm). Lock both interfaces to one reference.*).
+- **The pane:** its title names the remote side (*Transfer · TF 3 · meas from ketunkolo*,
+  *· ref from ketunkolo*), its caption starts *clocks agree within 2 ppm · ketunkolo*
+  while it averages. Stopped, its banner strip says *Clocks not locked: averaging stopped*
+  (with **T** too: banners are not plot chrome) and the held curve's phase is faint; the
+  relock, slip, drift and *link offset too small* lines show there as well. The legend's
+  delay and the IR's time zero say *includes the clock offset between pupu and ketunkolo
+  (not measured)* instead of a distance.
+- **Measurement list:** the row's cue (*clocks*, *measuring clocks…*, *delay may have
+  moved*, *delay drifting 0.30 ms/min*, *link offset too small*), so it shows with the pane
+  closed.
+- An ambiguous relock is answered as any ambiguous delay: **X** finds and opens the
+  candidates to pick from.
 
 Settings › Connection has a *Between rigs* block per rig the
-session takes inputs from (*Between rigs* in the palette): the clock relation and why, the
-last change, the link and its bit rate, the link offset, late frames, slips and the arrival
-margin; `ac2 status` prints the same. On the rig that gives its inputs, the rigs admitted
-to it are listed there and removed with **Delete** twice.
+session takes inputs from (*Between rigs* in the palette, or a click on the chip): the clock
+relation and why, the last change, the link and its bit rate, the link offset, late frames,
+slips and the arrival margin; `ac2 status` prints the same. Its last line, *Wait for remote
+inputs (link offset): default (10 ms)*, sets the link offset: **Enter** on it, type a time
+(`30ms`, or `30`: a bare number is ms) or `default`, **Enter** reopens the session with it,
+as `ac2 session link-offset` does. On the rig that gives its inputs, the rigs admitted to
+it are listed there and removed with **Delete** twice.
 
 ### Log files
 

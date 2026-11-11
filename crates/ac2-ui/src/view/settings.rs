@@ -589,6 +589,22 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
         }
     }
     super::remote::between_rigs(app, ui, ch);
+    for (i, l) in lines.iter().enumerate() {
+        if let ConnLine::LinkOffset = l
+            && let Some(d) = st.daemon()
+        {
+            let set = st.open_session().and_then(|o| o.config.link_offset);
+            row(
+                ui,
+                i,
+                format!(
+                    "{} (Enter)",
+                    ac2_scene::cross_rig::link_offset_line(set, &d.remote)
+                ),
+                ch.text,
+            );
+        }
+    }
     if let (Some(label), Some((_, text))) = (p.edit_label(), &p.edit) {
         ui.add_space(6.0);
         ui.horizontal(|ui| {

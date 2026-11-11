@@ -40,6 +40,7 @@ fn item(m: &Measurement) -> MeasItem<'_> {
         inverted: false,
         hidden: false,
         color: Color::from_rgba8([0, 0, u8::try_from(m.id.0).unwrap_or(0), 255]),
+        cue: None,
     }
 }
 

@@ -236,3 +236,181 @@ fn the_delay_says_its_basis() {
         "12.38 ms · includes the clock offset between pupu and ketunkolo (not measured)"
     );
 }
+
+fn input(slot: u16, audio: RemoteAudio) -> (RemoteInput, ac2_proto::model::RemoteInputStatus) {
+    (
+        RemoteInput {
+            slot,
+            rig: KETUNKOLO,
+            rig_name: "ketunkolo".into(),
+            channel: slot,
+        },
+        ac2_proto::model::RemoteInputStatus {
+            slot,
+            audio,
+            anchor: None,
+            late_frames: 0,
+            late_frames_hour: 0,
+            slips: 0,
+            last_slip: None,
+            arrival_margin: None,
+            setup: None,
+            cal_status: ac2_proto::model::CalStatus::Uncalibrated,
+            calibration: None,
+            curve: None,
+        },
+    )
+}
+
+#[test]
+fn the_rig_chip_says_the_relation_and_warns_in_words() {
+    let chip = |r: &RemoteState, inputs: &[RemoteInput]| {
+        let c = rig_chip(r, &r.rigs[0], inputs);
+        (c.text, c.warn)
+    };
+    let (i, st) = input(0, RemoteAudio::Streaming);
+    let mut r = remote(PeerRelation::Agree);
+    r.inputs = vec![st];
+    let inputs = vec![i];
+    assert_eq!(
+        chip(&r, &inputs),
+        ("ketunkolo · clocks agree".to_string(), false)
+    );
+    r.rigs[0].clock.relation = PeerRelation::Measuring;
+    assert_eq!(
+        chip(&r, &inputs),
+        ("ketunkolo · measuring clocks…".to_string(), false)
+    );
+    r.rigs[0].clock.relation = PeerRelation::NotLocked {
+        reason: NotLockedReason::CrossRate {
+            ppm: 5.6,
+            over: Seconds(40.0),
+        },
+    };
+    assert_eq!(
+        chip(&r, &inputs),
+        ("ketunkolo · CLOCKS NOT LOCKED +5.6 ppm".to_string(), true)
+    );
+    r.rigs[0].clock.relation = PeerRelation::CantTell {
+        reason: CantTellReason::SystemClockUnsynced { rig: KETUNKOLO },
+    };
+    assert_eq!(
+        chip(&r, &inputs),
+        ("ketunkolo · CLOCKS: CAN'T TELL".to_string(), true)
+    );
+    // Agreeing clocks under a transfer function whose audio keeps arriving late.
+    r.rigs[0].clock.relation = PeerRelation::Agree;
+    let mut x = tf(RemoteSide::Measurement, CrossTfState::Running);
+    x.late = true;
+    r.transfers = vec![x];
+    assert_eq!(
+        chip(&r, &inputs),
+        ("ketunkolo · LINK OFFSET TOO SMALL".to_string(), true)
+    );
+    // No audio outranks all: the link down, or no input carrying audio.
+    r.rigs[0].link = RemoteLink::Unreachable {
+        since: ac2_proto::units::WallNs(0),
+    };
+    assert_eq!(
+        chip(&r, &inputs),
+        ("ketunkolo · NO AUDIO".to_string(), true)
+    );
+    r.rigs[0].link = RemoteLink::Up;
+    r.inputs[0].audio = RemoteAudio::NoSession;
+    assert_eq!(
+        chip(&r, &inputs),
+        ("ketunkolo · NO AUDIO".to_string(), true)
+    );
+}
+
+#[test]
+fn the_pane_banner_says_the_stop_why_and_the_cues() {
+    let r = remote(PeerRelation::NotLocked {
+        reason: NotLockedReason::CrossRate {
+            ppm: 5.6,
+            over: Seconds(40.0),
+        },
+    });
+    let x = tf(RemoteSide::Measurement, STOPPED_HELD);
+    let b = pane_banners("TF 3", &x, &r, "pupu");
+    assert_eq!(b.len(), 1);
+    assert_eq!(b[0].text, "Clocks not locked: averaging stopped");
+    assert_eq!(
+        b[0].detail.as_deref(),
+        Some(
+            "TF 3 stopped: pupu and ketunkolo are not on one clock (+5.6 ppm). Lock both \
+             interfaces to one reference. The result from before stands; its phase is faint."
+        )
+    );
+    assert!(b[0].warn);
+    assert_eq!(caption(&x, &r), None, "the banner says it");
+
+    // Measuring: a note, no verdict of a fault.
+    let r = remote(PeerRelation::Measuring);
+    let x = tf(
+        RemoteSide::Measurement,
+        CrossTfState::Stopped {
+            why: StopWhy::Measuring,
+            held: false,
+        },
+    );
+    let b = pane_banners("TF 3", &x, &r, "pupu");
+    assert_eq!(b[0].text, "Measuring clocks…: averaging waits");
+    assert!(!b[0].warn);
+
+    // Running: the clock line goes in the title; the cues are banners.
+    let r = remote(PeerRelation::Agree);
+    let mut x = tf(RemoteSide::Measurement, CrossTfState::Running);
+    assert_eq!(
+        caption(&x, &r).as_deref(),
+        Some("clocks agree within 2 ppm · ketunkolo")
+    );
+    assert!(pane_banners("TF 3", &x, &r, "pupu").is_empty());
+    x.relock = Some(Relock {
+        after: Seconds(16.0),
+        from: StopWhy::NotLocked,
+        outcome: RelockOutcome::FindAgain,
+    });
+    x.delay_drift = Some(Seconds(0.3e-3));
+    x.late = true;
+    let b = pane_banners("TF 3", &x, &r, "pupu");
+    let texts: Vec<(&str, bool)> = b.iter().map(|b| (b.text.as_str(), b.warn)).collect();
+    assert_eq!(
+        texts,
+        vec![
+            (
+                "clocks were not locked for 16.0 s · delay may have moved: find it again",
+                true
+            ),
+            ("delay drifting 0.30 ms/min: path or clocks", false),
+            (
+                "link offset too small: raise Wait for remote inputs (now 10 ms)",
+                true
+            ),
+        ]
+    );
+}
+
+#[test]
+fn the_link_offset_reads_a_time_or_default() {
+    assert_eq!(parse_link_offset("20ms"), Ok(Some(0.02)));
+    assert_eq!(parse_link_offset("30"), Ok(Some(0.03)));
+    assert_eq!(parse_link_offset(" Default "), Ok(None));
+    assert_eq!(parse_link_offset(""), Ok(None));
+    assert!(parse_link_offset("600ms").is_err());
+    assert!(parse_link_offset("0").is_err());
+    assert!(parse_link_offset("fast").is_err());
+    let r = remote(PeerRelation::Agree);
+    assert_eq!(
+        link_offset_line(None, &r),
+        "Wait for remote inputs (link offset): default (10 ms)"
+    );
+    assert_eq!(
+        link_offset_line(Some(Seconds(0.03)), &r),
+        "Wait for remote inputs (link offset): 30 ms"
+    );
+    assert_eq!(
+        link_offset_toast(Some(0.03)),
+        "link offset 30 ms: the remote inputs anchor again, their averages restart"
+    );
+}
