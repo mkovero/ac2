@@ -562,8 +562,8 @@ reads for the ballistic (`s.rig.levels` in `ac2-ui/src/state/programme.rs`; −2
 default, while no rig state has arrived, so a preview has a span), and beside
 `bar_fill` stands `lufs_fill(reading, target) -> f32`: 0 at target −18 LU, 1 at target +9 LU,
 clamped. `ProgrammePane` keeps `inputs: Vec<ProgrammeInput>` (one per pane input, every
-ballistic), which the Inputs list rows (`ProgrammeInput::row_lines` in `ac2-scene/src/programme.rs`, called from
-`ac2-ui/src/view/chrome.rs`) and the
+ballistic), which the Inputs list rows (`row_block` in `ac2-scene/src/programme/row.rs`, called from
+`ac2-ui/src/view/inputs_list.rs`) and the
 preview rows keep reading, and gains `bars: Vec<ProgrammeBar>`, which the pane draws;
 `layout()` takes `bars.len()`. A device preview builds its `LoudnessFacts` from the preview frame
 (the kinds and pairs `session.preview` declared, `PreviewLevelsMeta.loudness`, which §6.1
@@ -1322,7 +1322,7 @@ the rule *"everything except bars themselves should be pretty static"*. Today a 
 (`ac2-ui/src/view/chrome.rs` ~600–720) shows **two quantities**. The bar and its unlabelled
 number are the always-on meter's 300 ms **RMS** (`MeterReading.rms_fill` / `text`, drawn by
 `meter_sized` in `view/session.rs`), under the header `dBFS RMS · peak tick`. The lines
-under it are the rig's **ballistic** reading and max (`ProgrammeInput::row_lines`), in dBTP
+under it are the rig's **ballistic** reading and max (`row_block`), in dBTP
 under a loudness ballistic. A pair puts `L`, a 56 px bar, its 64 px number, `R` and a
 second bar on one line, about 260 px in a sidebar of about 210 px. The R bar is squeezed
 and its number cut. The row's `cal` line, which is only the word `dBFS` for an uncalibrated

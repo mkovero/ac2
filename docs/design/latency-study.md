@@ -25,7 +25,7 @@ from pupu's tg3 PTP driver) are reused here, not run again.
   thing we can fix) and *onset-to-visible* (adds the physics of the window).
 
 Multi-res ladder at 96 kHz (`crates/ac2-core/src/multires.rs:112`, hop from
-`crates/ac2-proto/src/model/defaults.rs:86`; table in `multires-spectrum.md`):
+`SpectrumConfig::display_hop` in `crates/ac2-proto/src/model/defaults.rs`; table in `multires-spectrum.md`):
 
 | band | N | window | N/2 | hop | serves |
 |---|---|---|---|---|---|
