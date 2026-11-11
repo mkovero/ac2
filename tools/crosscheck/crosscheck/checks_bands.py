@@ -1,6 +1,8 @@
 """Check family: magnitude and phase per band against the steady-sine truth and between sources."""
 from __future__ import annotations
 
+from statistics import NormalDist
+
 import numpy as np
 
 from . import dsp
@@ -16,6 +18,27 @@ from .checks_common import (
     worst,
 )
 from .model import PathData
+
+
+# The family-wise probability that the DUT's noise alone carries a band's largest deviation
+# past its allowance.
+FAMILY_ALPHA = 0.01
+
+
+def noise_k(n: int, alpha: float = FAMILY_ALPHA) -> float:
+    """σ multiple a Gaussian column error stays within, in all `n` columns at once, with
+    probability 1 − alpha (Šidák): a band's largest deviation is a maximum over its columns, so
+    a column's 2σ admits noise that exceeds 2σ somewhere in a band of hundreds."""
+    if n < 1:
+        return 0.0
+    per = (1 - alpha) ** (1 / n)  # P(|x| ≤ kσ) a column needs
+    return NormalDist().inv_cdf((1 + per) / 2)
+
+
+def noise_excess(dev: np.ndarray, sigma: np.ndarray, k: float) -> float:
+    """The largest deviation beyond each column's own noise allowance k·σ; columns whose noise
+    model predicts nothing (σ = 0) are judged by their deviation alone."""
+    return float(np.max(np.maximum(np.abs(dev) - k * sigma, 0.0))) if len(dev) else 0.0
 
 
 class BandChecks:
@@ -146,15 +169,25 @@ class BandChecks:
                 dm = dsp.db(ratio[m])
                 dp = np.rad2deg(np.angle(ratio[m]))
                 mean, spread = float(np.mean(dm)), float(np.max(np.abs(dm - np.mean(dm))))
+                # The spread is the largest of m.sum() columns: each column's predicted noise
+                # (1σ of the two sources' magnitude difference, as the gate above has it) is
+                # allowed at the family-wise level of that many columns, so a band whose noisy
+                # columns can reach the pass limit by chance is judged on what exceeds them.
+                sig = np.nan_to_num(u_mag[m] / 2)
+                k = noise_k(int(m.sum()))
+                beyond = noise_excess(dm - mean, sig, k)
+                allow = float(np.max(k * sig)) if len(sig) else 0.0
                 pmean, pspread = float(np.mean(dp)), float(np.max(np.abs(dp - np.mean(dp))))
                 tp = _tol(self.tol["band"]["phase" if elec else "phase_acoustic"])
-                st_m = judge(spread, tm) if offset_free else worst(judge(spread, tm), judge(mean, tm))
+                st_m = judge(beyond, tm) if offset_free else worst(judge(beyond, tm), judge(mean, tm))
                 st_p = worst(judge(pspread, tp), judge(pmean, tp))
                 self.add(id=f"{p.name}.mag.{a}|{b}.{lo}-{hi}", group="magnitude", path=p.name,
-                         title=f"{a} − {b}, {lo}–{hi} Hz, magnitude", value=spread if offset_free else max(abs(mean), spread),
+                         title=f"{a} − {b}, {lo}–{hi} Hz, magnitude", value=beyond if offset_free else max(abs(mean), beyond),
                          unit="dB", tol=tm, status=st_m,
                          meaning=meaning + f". Mean {mean:+.3f} dB, max deviation from the mean ±{spread:.3f} dB "
                                  f"over {m.sum()} columns"
+                                 + (f"; judged beyond each column's noise allowance ({k:.2f}σ, up to "
+                                    f"±{allow:.3f} dB): ±{beyond:.3f} dB" if allow > 0 else "")
                                  + (f" ({nm} columns within {MAINS_GUARD_HZ:g} Hz of a mains line left out)" if nm else "")
                                  + (f" ({nn} columns whose noise alone (2σ{', from its coherence' if a == 'ac2 TF' else ''}) exceeds the pass limit left out)" if nn else "")
                                  + (f" ({nd} columns where the direct estimate's band power holds more than the pass "
@@ -162,7 +195,8 @@ class BandChecks:
                                  + (f" ({int((null & (f >= lo) & (f < hi)).sum())} comb-null columns ≥ 10 dB below "
                                     "their 1/3-octave mean left out)" if (null & (f >= lo) & (f < hi)).any() else "")
                                  + ".",
-                         detail={"mean": mean, "spread": spread, "n": int(m.sum()), "of": nall})
+                         detail={"mean": mean, "spread": spread, "n": int(m.sum()), "of": nall,
+                                 "noise_k": k, "noise_allow": allow, "noise_u": allow})
                 self.add(id=f"{p.name}.phase.{a}|{b}.{lo}-{hi}", group="phase", path=p.name,
                          title=f"{a} − {b}, {lo}–{hi} Hz, phase", value=max(abs(pmean), pspread), unit="°", tol=tp,
                          status=st_p,

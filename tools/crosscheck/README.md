@@ -370,6 +370,13 @@ calibration mapping, one table of checks per group, the data tables and the plot
   capture, also the columns whose band power holds more than the pass limit of content that
   does not correlate with the reference (−10·log10 γ²): there the power mean reads the
   harmonics the sweep made at f/k as well as the linear response, which ac2's windows exclude.
+- A band's magnitude spread is the largest of its N judged columns, so a column admitted at
+  2σ still lets noise alone pass the limit somewhere in a band of hundreds. Each column's
+  deviation is judged beyond its own noise allowance k·σ (σ: the two sources' predicted
+  magnitude noise, as the gate above has it; k from N at 1 % family-wise, Šidák, ≈4.06 at
+  N = 208): the row's value is the largest deviation left over. Columns the noise model
+  calls quiet keep their full deviation; the raw spread stays in the row's detail, the
+  largest allowance is its `noise_u`.
 - Groups:
   - **magnitude / phase**: band-wise spread after removing the delay difference (1–20 kHz
     electrical, 200 Hz–5 kHz acoustic). ac2's TF is compared only where γ² ≥ 0.99.

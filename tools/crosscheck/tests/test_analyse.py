@@ -144,3 +144,23 @@ def test_clarity_is_not_judged_when_the_decay_meets_the_noise_just_past_the_boun
     # well past it, and with real late energy, the same agreement is a pass
     checks, ours = _room_checks(d50=0.9, truncation=0.3, c50=None)
     assert checks["g.room.c50.numpy on REW IR"].status == "PASS"
+
+
+def test_band_noise_allowance_is_family_wise_and_spares_quiet_columns():
+    from crosscheck.checks_bands import noise_excess, noise_k
+    # Šidák at 1 % over n columns: two-sided 99 % (2.576σ) for one column, ≈4.06σ for 208
+    assert abs(noise_k(1) - 2.5758) < 1e-3
+    assert 4.0 < noise_k(208) < 4.2
+    assert noise_k(400) > noise_k(208)
+    dev = np.array([0.02, -0.031, 0.004])
+    # no predicted noise: the largest deviation as before
+    assert noise_excess(dev, np.zeros(3), noise_k(3)) == 0.031
+    # a noisy column's deviation within its allowance no longer counts; a quiet one still does
+    sig = np.array([0.0, 0.01, 0.0])
+    assert noise_excess(dev, sig, 4.0) == 0.02
+    # noise from 200 columns of predicted σ stays within the allowance in ≈99 % of takes
+    rng = np.random.default_rng(3)
+    s = np.full(200, 0.01)
+    k = noise_k(200)
+    over = sum(noise_excess(rng.standard_normal(200) * s, s, k) > 0 for _ in range(4000))
+    assert 10 <= over <= 80
