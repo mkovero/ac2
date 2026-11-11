@@ -1,6 +1,6 @@
 # 3D spectrograph
 
-Status: design (draft, review rounds 1–2 applied). Builds on [spectrograph.md](spectrograph.md):
+Status: built, v1a and v1b (*Stages* 0–3; `SpectrumView::Spectrograph3d`, `ac2_scene::spectrograph_3d`, `ac2-plot` skyline); design draft with review rounds 1–2 applied. Builds on [spectrograph.md](spectrograph.md):
 same history, same level range, a different picture of it.
 
 ## Purpose and what the operator sees

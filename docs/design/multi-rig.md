@@ -65,7 +65,7 @@ pub struct App {
 ```
 
 As built, the app-level struct keeps the name `AppState` (`App` is the eframe app) and holds
-the active rig by value, `rig: RigState`, beside `background: Vec<RigState>`: the
+the active rig by value, `rig: RigState`, beside `others.background: Vec<RigState>` (`OtherRigs`, `state/rigs.rs`): the
 reducer's methods then borrow a rig's fields next to the app's as they borrow any field,
 where a `Vec` index would borrow every rig at once. `AppState::active()` is the active
 `RigId`, `rigs()` every rig, the active one first; switching the tab swaps a rig in.
@@ -126,6 +126,16 @@ stage 1; the tabs are the small part.
   `fullscreen`, `panes_only`, `swallow_text`, `pane_auto`, `client_key` (one CURVE identity
   for every rig), `want_connect_dialog`, `tree_reveal`, `settings_reveal`,
   `settings_page_last`, undo.
+
+In the code these names now sit in sub-structs. `RigState` (`ac2-ui/src/state/rig.rs`):
+`folded.*` (`state/folded.rs`: `bar_from`, `spec_glide`, `tf_display`, `advice`'s holds,
+`peaks`, `peak_tracks`, `spectrographs`, `spl_hold`, `spectrum_running`), `due.*`
+(`state/follow.rs`: the `*_on_create` names, `open_session_when_empty`, `choose_when_open`,
+`own_panes_due`, `armed_with`), `choice.*` (same file: `chosen`, `own_panes`,
+`lost_own_panes`, `standin`, `lost_selection`) and `asked.*` (`state/asked.rs`: `link_wants`,
+`preview_sent_s`, `devices_for`). `AppState`: `others.*` (the other rigs), `level_axes.*`
+(`state/panes/levels.rs`: `pane_levels`, `spectrum_hold`, `level_set`) and `pane_local.*`
+(`state/panes/local.rs`: plate hover). `spec_pacing` and `embedded_autosave` no longer exist.
 
 **Windows.** `overlay` is the app's, but most windows act on one rig: Settings (its session
 dialog, connection and rig pages), the measurement forms, delay pick, EQ, Sessions, Delete,
@@ -366,7 +376,7 @@ until it answers or is closed. Names come from the rig and are display only
      (`UiPrefs.rigs`) and reconnect at start, greyed tabs and panes (*unreachable · retrying*, *not connected*), arm line
      and banner naming the rig, Shift+Escape fanned out, quit stopping every rig in
      parallel, windows bound to their rig.
-     As built (1c): the active rig stays `AppState.rig`; the others are `background`,
+     As built (1c): the active rig stays `AppState.rig`; the others are `others.background`,
      each with a `slot` (its place, fixed for the run; links and requests are matched by
      slot, since a hello can change a rig's id). A background rig's event is handled by
      *visiting* it (swapped into `rig` for the one update), so every reply is applied as on

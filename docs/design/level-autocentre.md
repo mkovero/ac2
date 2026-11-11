@@ -19,7 +19,7 @@ operator set.
 A slot is one pane's range for one scale (`LevelSlot::SpectrumDbfs`, `SpectrumSpl`). Two
 states; following is armed in the first only:
 
-- **Auto**: not in `level_set`; framed by the app. Following armed. Not saved, not sent.
+- **Auto**: not in `level_set` (a field of `AppState.level_axes`); framed by the app. Following armed. Not saved, not sent.
 - **Operator**: in `level_set`; set by hand. Following off. Saved in `ui.toml` and sent in
   the measurement's layout (`operator_levels`; `meas_layout.rs:97`, `queries/layout.rs:156`).
 

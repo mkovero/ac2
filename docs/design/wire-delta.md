@@ -1,6 +1,6 @@
 # Wire delta: send only what changed
 
-Status: design (2026-11-03, review round 2), not built. Operator: lean network protocols come
+Status: built, stages A–C (PROTO 83; where the build differs is said under each stage); design of 2026-11-03, review round 2. Operator: lean network protocols come
 first, "we are after all sending processed audio information over network with reasonably
 small sample and bitrates, shouldn't be rocket science"; send only what changed, as video
 codes inter frames. Operator decisions: (a) build both, deltas first: stage A deltas over
@@ -11,7 +11,7 @@ the previous frame" (`wire-slim.md:139`). Decisions W1–W12 are listed at the e
 
 ## Measured
 
-`tuning_session_bytes` (`crates/ac2d/tests/wire_size.rs:407`, fake rig, 60 fps, the app's
+`tuning_session_bytes` (`crates/ac2d/tests/wire_size.rs`, fake rig, 60 fps, the app's
 topics with an IR view, `AC2_WIRE_DUMP`), payload bytes without ZMTP/CURVE framing:
 
 | topic | B/frame | frames/s | Mbit/s |

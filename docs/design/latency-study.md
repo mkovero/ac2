@@ -1,6 +1,6 @@
 # Latency study: from the sample to the pixel
 
-Status: plan, not run (phase 1: code read, 2026-11-10). Operator request: profile the delay from
+Status: run; measurements and the changes made are in §7–§9 (phase 1: code read, 2026-11-10). Operator request: profile the delay from
 a sound to the pixel that shows it, which many stages now lie between. The complaint: lag and
 jitter between what is heard and the 3D spectrograph (perhaps the 2D spectrum too) on
 ketunkolo (app, RTX 2070, 60 Hz) fed by pupu (daemon, FF400 over JACK at 96 kHz / 256 frames,
@@ -41,6 +41,10 @@ kick drum or bass line**, ≈ 11–22 ms for hi-hats. No pipeline fix changes th
 it is on for Spectrum 2, adds its time constant on top.
 
 ## 1. Stage map
+
+The map is the code as read on 2026-11-10, before the changes of §8 and §9; its line numbers
+are of that day, and `state/row_glide.rs` is gone since (§8: spectrographs scroll on
+`ac2_scene::scroll_clock::ScrollClock`).
 
 Clocks: **RAW** = CLOCK_MONOTONIC_RAW (jackd's stamp clock on both hosts, phase A), **MONO** =
 CLOCK_MONOTONIC (`std::time::Instant`), **WALL** = CLOCK_REALTIME (chrony-disciplined from aika;

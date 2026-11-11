@@ -1,6 +1,6 @@
 # Timing study: capture time across rigs (multi-rig stage 3 precondition)
 
-Status: plan, not run. Precondition named in `multi-rig.md` §3; results go to
+Status: phases A, B1 and C run (§7b, *Results so far*). Precondition named in `multi-rig.md` §3; results go to
 `multi-device.md` §7 and decide the open items of `multi-rig.md` §3.
 
 Stage 3 lets one rig's measurement use an input captured by another rig. To combine the two

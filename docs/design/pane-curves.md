@@ -1,6 +1,6 @@
 # Pane curves: a pane draws the curves picked for it, from any rig
 
-Status: design, not built. Operator decisions 2026-11-01 (D1 … D9), **revised 2026-11-02
+Status: stages 1 and 2 built (the chip and the pane list are gone; `PaneContent` references, PROTO 80); of stage 3, *Make lead* is not in the code. Operator decisions 2026-11-01 (D1 … D9), **revised 2026-11-02
 (D10 … D14)**: panes have **no chip** and no pane list — "remove it as whole from all panes
 … lets not do billions of different ways changing the pane view"; the chip was on some
 panes only, which made navigation "incredibly confusing". What a pane shows changes one way:
@@ -10,6 +10,9 @@ pane. The 2026-11-01 decisions stand where D10 … D14 do not replace them; all 
 and listed at the end.
 
 ## Why the current list misleads
+
+The chip list this section describes is gone since stage 1 (decision P2 in
+`open-questions.md`): `pane_menu_rows` and `programme_menu_rows` no longer exist.
 
 The chip list (`pane_menu_rows`, `state/panes/ops.rs`; rigs from `cross_rig.rs`) offers one
 row per measurement; picking it sets `PaneContent::Meas { meas }` and the pane draws that
@@ -215,7 +218,7 @@ it like any pane.
 measurements under its heading (D8 names: `pupu`, `ketunkolo · ac2d`, `ketunkolo · in this
 app`); with one rig the headings go. Any rig's row drags, and a drop pins the pane to that
 row's rig (the chip's `pane_show_from` / `pane_meter_from`, `state/cross_rig.rs`, stay and
-take a trace variant; `pane_show` sets `here()` and `pane_show_trace` sets `Active`, so a
+take a trace variant — as built the drop is `pane_row_from` / `pane_meter_from` there; `pane_show` sets `here()` and `pane_show_trace` sets `Active`, so a
 drop of another
 rig's row must not use them). Selection is the shown rig's (`RigState`), so a row of another
 rig — clicked, or reached by Enter or Tab (Tab cycles the whole list; with a window open the
@@ -223,7 +226,8 @@ switch is refused, so Tab skips other rigs' rows) — is a rig switch
 first, then the row on that rig. The top-bar drop-down stays and names the shown rig: where
 Ctrl+M and new measurements go and whose rows the keys act on. Shape: `TreeRow` and the drag
 item carry a `RigId`; the other rigs' rows are a snapshot taken by `visit` after each
-message (as `refresh_menu_rigs`, `state/cross_rig.rs`, does for the chip today); the row
+message (as `refresh_menu_rigs`, `state/cross_rig.rs`, does for the chip today; built as
+`refresh_rig_lists` there); the row
 messages (`SelectMeas`, `SelectTrace`, `ToggleShown`, rename, …) carry the `RigId` and
 switch first when it is not the shown rig; folding (`collapsed`) is per rig; a row dropped
 onto a row of another rig (the math dialog) is refused with a toast (math across rigs is
@@ -285,6 +289,8 @@ Connection page all use it. App only: the daemon's hello name, `ac2d --name` and
 adverts are unchanged, and there is no `PROTO_VERSION` bump. Stage 0 (ec71a7cc) covers reach
 local (ipc) and embedded; a rig reached over tcp on a loopback
 address keeps its hello name until a stage-0 follow-up names it too.
+Since the app hosts no daemon ([ui-spawns-ac2d.md](ui-spawns-ac2d.md), D10) there is no
+*in this app* rig and no `· ac2d` suffix: the rig on the app's own host is headed *<host>*.
 
 Superseded in part: [ui-spawns-ac2d.md](ui-spawns-ac2d.md) D10 drops the suffix. The app
 hosts no daemon any more, so with one `ac2d` per user there is nothing on this host to tell

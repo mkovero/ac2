@@ -1,6 +1,6 @@
 # Spatial walk: room plans, suggested mic positions, a guided average
 
-Status: design (2026-10-28), reviewed in three rounds; stage 1 (G1) in progress. The operator wants three things: a spatial average of
+Status: built, stages 1–4 (`crates/ac2-room`, the `plan.*` / `walk.*` / `sim.*` commands, `ac2-roomsim` linked by `ac2d`); design of 2026-10-28, reviewed in three rounds. The operator wants three things: a spatial average of
 N mics made in one step; a walkthrough that suggests mic positions inside a room of any shape and
 follows the measurements through them; and, later, ray tracing that room. The simulator stays out
 of ac2's way while it grows (§2).
@@ -335,7 +335,7 @@ What it can claim, and what it refuses:
   change cancels the run. Outdoor plans (no ceiling) are not simulated.
 
 **As built (stage 4b part 1: daemon, wire, text).** `ac2d` links `ac2-roomsim` (pinned git rev);
-`ac2-ui` does not link it itself (its default `embedded` feature hosts a daemon, which does).
+`ac2-ui` does not link it itself (it starts `ac2d`, which does; the `embedded` feature this was written under is gone, `ui-spawns-ac2d.md`).
 `sim.run` / `sim.fit` / `sim.cancel` (`docs/protocol.md` *Room simulation*), CLI `ac2 sim
 run|fit|status|cancel`, texts in `ac2_scene::room::sim`.
 - **Plan → prism.** The outline extruded to the ceiling; a surface's material by the simulator's

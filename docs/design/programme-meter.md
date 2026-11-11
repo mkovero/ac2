@@ -1120,7 +1120,7 @@ chip). `ProgrammePane::title()` takes the view.
   pane opens alone and a toast says `no room for the goniometer pane: G turns this pane to
   it`.
 - **Inputs side by side** (no pair): one pane, Meters.
-- **A pane's own list** (`PaneMenuRow::Meter`): the pane turns into one Programme pane in
+- **A pane's own list** (`PaneMenuRow::Meter`; the pane list, `Msg::PanePick` and `pane_pick` are gone since `pane-curves.md` stage 1, an Inputs row dragged onto the pane takes their place): the pane turns into one Programme pane in
   Meters view: the pick sets `programme` to `Meters`, so a pane whose mode was left at
   Goniometer by an earlier G does not open on the square. The list turns *this* pane into something and never adds panes.
   The reset lives in the `Msg::PanePick` arm of `state.rs`, before it calls `pane_pick`,

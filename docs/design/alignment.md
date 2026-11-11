@@ -1,6 +1,6 @@
 # Alignment: delay and polarity of two systems in their overlap
 
-Status: design (2026-10-20). Operator's request: a sub/main alignment aid, generalised to any
+Status: implemented (`ac2_core::align`, `MathExpr::Align`, Alt+M, `ac2 align`); design of 2026-10-20. Operator's request: a sub/main alignment aid, generalised to any
 two systems that overlap in a band — sub/main, main/front-fill, main/delay tower. The user
 picks two transfer traces and names the band to look at; the analyzer says which one to
 delay, by how much (ms, m), whether to flip polarity, how well that fits, and what the two

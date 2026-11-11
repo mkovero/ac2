@@ -1,6 +1,6 @@
 # The app spawns ac2d: no daemon inside the app
 
-Status: built (stages 1 and 3; stage 2, packaging, separately). Operator decision 2026-11-03: "ui is ui and daemon is daemon".
+Status: built (stages 1–3; of stage 2 the macOS tester's TCC check is not recorded here). Operator decision 2026-11-03: "ui is ui and daemon is daemon".
 The app hosts no daemon in its process: it connects to this computer's `ac2d`, starts the
 bundled `ac2d` as a child when none serves, and by default stops that child when it quits.
 Decisions D1 … D12 are listed at the end.
@@ -192,6 +192,10 @@ a unit-started app makes the child skip its log file while stderr is null. Lines
 | macOS `.app` | **no**: `Contents/MacOS` has only `ac2-ui` (`packaging/macos/package.sh:37-38`); `ac2d` is in the DMG's `bin/` (`:43`) | also `Contents/MacOS/ac2d`, signed with `entitlements.plist` (audio input, hardened runtime) **before** the bundle (`:56-58`); `bin/ac2d` stays for CLI / launchd |
 | Windows MSI / zip | yes, `INSTALLFOLDER` (`packaging/windows/ac2.wxs:27-35`), zip `release.yml:228` | none |
 
+The middle column is the state before stage 2. Now the AppImage carries `usr/bin/ac2d` and the
+`.app` `Contents/MacOS/ac2d` (the `for b in ac2-ui ac2d` loops of `packaging/linux/package.sh`
+and `packaging/macos/package.sh`).
+
 **macOS microphone (unverified; needs a tester or CI).** TCC attributes a process to its
 *responsible* process; a helper an app bundle starts from its own `Contents/MacOS` is
 expected to count as the app (prompt names ac2, uses `NSMicrophoneUsageDescription`,
@@ -271,7 +275,7 @@ Each lands alone, quick tier green, with its user-guide rows.
    the CLI's `probe` a short-timeout hello; `ac2 daemon start` reads a child exit 3 as
    *another ac2d is running for this user*; `ac2d.service` `SuccessExitStatus=3`;
    `spawn.rs` tests.
-2. **Packaging**: `ac2d` in the AppImage and `Contents/MacOS` (nested signing), launchd
+2. **Packaging**, built (both package scripts): `ac2d` in the AppImage and `Contents/MacOS` (nested signing), launchd
    comment; all-OS dispatch; a macOS tester checks TCC (§5).
 3. **The app spawns, the embedded daemon goes** (app only, one change), done: `spawn.rs`
    (`ac2-ui/src/spawn.rs`, the children the app watches in `app/daemons.rs`), D1, D2,

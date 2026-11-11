@@ -1,11 +1,11 @@
 # EQ what-if overlay
 
-Status: design, not built. Operator decisions 2026-10-20: the user lists the filters they plan
+Status: implemented (`ac2_core::eq`, `ac2d` `control/eq.rs`, `ac2-ui` `eq_editor.rs`, `ac2 eq`). Operator decisions 2026-10-20: the user lists the filters they plan
 to set on a console or processor; ac2 draws the measured transfer function multiplied by them
 (**after EQ**, the prediction) and the filters' response alone (**EQ**). There is no single Q
 convention and no single shape list, so neither is hard-coded: the editor exposes each shape's
-parameters and how its Q is meant. To be built after the two-system alignment aid
-(`alignment.md`, in flight); shared parts are marked **[shared]**.
+parameters and how its Q is meant. Built after the two-system alignment aid
+(`alignment.md`); shared parts are marked **[shared]**.
 
 ## The idea in one paragraph
 

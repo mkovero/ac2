@@ -36,7 +36,7 @@ transfer delay between inputs of the one FF400 stayed at 0 samples.
 | fake | One simulated callback; `FakeConfig::drift_ppm` resamples the DAC side to simulate two clocks | `SingleCallback` (the drift is what tests inject) |
 
 `ClockRelation` already says this per opened session (`OpenSession.clock`):
-`SingleCallback` and `SameDeviceSeparateCallbacks` are *claims* of one clock;
+`SingleCallback` and `SameDeviceSeparateCallbacks` (which left the code with cpal) are *claims* of one clock;
 `Unknown` means "may drift; drift detection must warn". None of them is proof: an aggregate
 without drift correction is one device and still two clocks inside. So the relation is
 a prior, and the loopback measurement is the truth (decision 3a).

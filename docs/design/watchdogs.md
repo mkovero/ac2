@@ -37,7 +37,8 @@ a pass proves the previous present returned. An idle UI repaints at least every 
 healthy UI with nothing changing still pings.
 
 A daemon embedded in the app never notifies (`DaemonConfig::systemd_notify` is set by the
-`ac2d` program only): its pings would vouch for the UI's unit while the UI hung.
+`ac2d` program only): its pings would vouch for the UI's unit while the UI hung. (The app
+no longer hosts a daemon, `ui-spawns-ac2d.md`; in-process daemons are test daemons.)
 
 A UI that does not draw because its output is off (a Wayland compositor stops frame
 callbacks for a blanked output) stops pinging too and is restarted. The kiosk keeps its
