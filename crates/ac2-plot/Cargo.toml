@@ -19,5 +19,5 @@ pollster = "1"
 wgpu = "30"
 
 [dev-dependencies]
-ac2-proto = { path = "../ac2-proto" }
+ac2-proto = { path = "../ac2-proto", features = ["samples"] }
 ac2-testkit = { path = "../ac2-testkit", features = ["image"] }

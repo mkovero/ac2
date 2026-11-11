@@ -151,6 +151,7 @@ dependencies = [
 name = "ac2-proto"
 version = "0.0.0"
 dependencies = [
+ "ac2-proto",
  "bytemuck",
  "crc32fast",
  "miniz_oxide 0.9.1",

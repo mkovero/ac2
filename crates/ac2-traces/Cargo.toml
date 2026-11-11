@@ -21,4 +21,5 @@ serde_json = { workspace = true, features = ["float_roundtrip"] }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+ac2-proto = { path = "../ac2-proto", features = ["samples"] }
 tempfile = { workspace = true }

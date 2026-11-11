@@ -49,6 +49,7 @@ toml = "0.8"
 windows-sys = { workspace = true, features = ["Win32_Media"] }
 
 [dev-dependencies]
+ac2-proto = { path = "../ac2-proto", features = ["samples"] }
 ac2-client = { path = "../ac2-client", features = ["test-support"] }
 # Test oracle only: the rig publishes curves smoothed as the daemon would. The app itself
 # never links the DSP (tests/it/no_dsp.rs checks the normal and build edges); the fake

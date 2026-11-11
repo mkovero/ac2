@@ -14,6 +14,7 @@ pub mod frame;
 pub mod grid;
 pub mod model;
 mod packing;
+#[cfg(feature = "samples")]
 pub mod samples;
 pub mod spl_log;
 pub mod topic;

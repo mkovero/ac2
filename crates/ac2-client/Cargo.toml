@@ -29,6 +29,7 @@ tracing = { workspace = true }
 getrandom = { workspace = true }
 
 [dev-dependencies]
+ac2-proto = { path = "../ac2-proto", features = ["samples"] }
 ac2-client = { path = ".", features = ["test-support"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
 tempfile = { workspace = true }

@@ -51,6 +51,7 @@ tracing = { workspace = true }
 libc = { workspace = true }
 
 [dev-dependencies]
+ac2-proto = { path = "../ac2-proto", features = ["samples"] }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 ac2-client = { path = "../ac2-client" }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }

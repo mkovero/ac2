@@ -44,6 +44,7 @@ serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync", "signal"] }
 
 [dev-dependencies]
+ac2-proto = { path = "../ac2-proto", features = ["samples"] }
 ac2-client = { path = "../ac2-client", features = ["test-support"] }
 ac2d = { path = "../ac2d" }
 proptest = { workspace = true }

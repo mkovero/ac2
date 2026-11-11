@@ -11,6 +11,12 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# One sample value per command, reply and frame variant, for fixtures, round-trip and fuzz
+# tests here and for tests in the crates that speak the protocol. Never used by a shipping
+# binary.
+samples = []
+
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 rmp-serde = { workspace = true }
@@ -20,6 +26,7 @@ miniz_oxide = "0.9"
 crc32fast = "1.5"
 
 [dev-dependencies]
+ac2-proto = { path = ".", features = ["samples"] }
 proptest = { workspace = true }
 miniz_oxide = "0.9"
 sha2 = { workspace = true }
