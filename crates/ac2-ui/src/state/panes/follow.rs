@@ -136,12 +136,12 @@ impl AppState {
         if !self.prefs.level_follow {
             // Nothing follows: no feed is read, and none is left to start from when
             // following is turned on again.
-            self.level_follow.feeds.clear();
+            self.level_axes.level_follow.feeds.clear();
             return;
         }
         for pane in self.own_visible_panes() {
             if self.layout.kind(pane) != PaneKind::Spectrum {
-                self.level_follow.feeds.remove(&pane);
+                self.level_axes.level_follow.feeds.remove(&pane);
                 continue;
             }
             let scale = crate::scenes::spectrum_scale(self, pane);
@@ -176,14 +176,19 @@ impl AppState {
             }
             let sample = Sample::of(drawn.iter().map(|(f, l)| (&f[..], &l[..])));
             let now = self.now_s;
-            let feed = self.level_follow.feeds.entry(pane).or_insert(Feed {
-                scale,
-                curves: BTreeMap::new(),
-                sample: None,
-                at: now,
-                fresh: false,
-                reset: false,
-            });
+            let feed = self
+                .level_axes
+                .level_follow
+                .feeds
+                .entry(pane)
+                .or_insert(Feed {
+                    scale,
+                    curves: BTreeMap::new(),
+                    sample: None,
+                    at: now,
+                    fresh: false,
+                    reset: false,
+                });
             let mut fresh = false;
             for (id, (epoch, inc, seq)) in curves {
                 match feed.curves.insert(id, (epoch, inc, seq)) {
@@ -215,7 +220,7 @@ impl AppState {
             clear: why == Refit::NewSignal,
             operator: why == Refit::Fit,
         };
-        let r = self.level_follow.refit.entry(pane).or_default();
+        let r = self.level_axes.level_follow.refit.entry(pane).or_default();
         *r = r.with(a);
     }
 
@@ -242,34 +247,35 @@ impl AppState {
 
     /// A key or pointer input on pane `pane`: its group holds still for a while.
     pub(in crate::state) fn pane_input(&mut self, pane: PaneId) {
-        self.level_follow.input.insert(pane, self.now_s);
+        self.level_axes.level_follow.input.insert(pane, self.now_s);
     }
 
     /// A pointer button went down on pane `pane` (`held`) or came up.
     pub(in crate::state) fn pane_pointer(&mut self, pane: PaneId, held: bool) {
         self.pane_input(pane);
         if held {
-            self.level_follow.held.insert(pane);
+            self.level_axes.level_follow.held.insert(pane);
         } else {
-            self.level_follow.held.remove(&pane);
+            self.level_axes.level_follow.held.remove(&pane);
         }
     }
 
     /// Some pane's frames are read for the follower.
     #[cfg(test)]
     pub(in crate::state) fn follow_fed(&self) -> bool {
-        !self.level_follow.feeds.is_empty()
+        !self.level_axes.level_follow.feeds.is_empty()
     }
 
     /// A pointer button is down on pane `pane`: its level axis holds still.
     pub fn level_held(&self, pane: PaneId) -> bool {
-        self.level_follow.held.contains(&pane)
+        self.level_axes.level_follow.held.contains(&pane)
     }
 
     /// How strongly pane `pane`'s level gutter is shaded, 0 to 1: during a follow move and
     /// fading after it.
     pub fn follow_shade(&self, pane: PaneId) -> f32 {
-        self.level_follow
+        self.level_axes
+            .level_follow
             .followers
             .values()
             .filter(|f| f.members.contains(&pane))
@@ -279,7 +285,8 @@ impl AppState {
 
     /// A follow move is under way or its shade still fading: the spectrum panes redraw.
     pub fn levels_following(&self) -> bool {
-        self.level_follow
+        self.level_axes
+            .level_follow
             .followers
             .values()
             .any(|f| f.ease.is_some())
@@ -292,7 +299,7 @@ impl AppState {
 
     fn set_slot_range(&mut self, pane: PaneId, scale: LevelScale, r: Range) {
         if let Some(s) = LevelSlot::of(PaneKind::Spectrum, scale) {
-            s.set(self.pane_levels.entry(pane).or_default(), r);
+            s.set(self.level_axes.pane_levels.entry(pane).or_default(), r);
         }
     }
 
@@ -313,7 +320,7 @@ impl AppState {
         let visible = self.visible_panes();
         let kinds: BTreeMap<PaneId, PaneKind> =
             visible.iter().map(|p| (*p, self.layout.kind(*p))).collect();
-        let lf = &mut self.level_follow;
+        let lf = &mut self.level_axes.level_follow;
         if !self.prefs.level_follow {
             lf.feeds.clear();
             lf.refit.clear();
@@ -324,9 +331,9 @@ impl AppState {
         lf.held.retain(|p| kinds.contains_key(p));
         let mut groups: BTreeMap<Key, Vec<PaneId>> = BTreeMap::new();
         if self.prefs.level_follow {
-            for (p, feed) in &self.level_follow.feeds {
+            for (p, feed) in &self.level_axes.level_follow.feeds {
                 let auto = LevelSlot::of(PaneKind::Spectrum, feed.scale)
-                    .is_some_and(|s| !self.level_set.contains(&(*p, s)));
+                    .is_some_and(|s| !self.level_axes.level_set.contains(&(*p, s)));
                 if !auto || feed.sample.is_none() {
                     continue;
                 }
@@ -338,14 +345,15 @@ impl AppState {
                 groups.entry(key).or_default().push(*p);
             }
         }
-        self.level_follow
+        self.level_axes
+            .level_follow
             .followers
             .retain(|k, _| groups.contains_key(k));
-        let refit = std::mem::take(&mut self.level_follow.refit);
+        let refit = std::mem::take(&mut self.level_axes.level_follow.refit);
         for (key, members) in groups {
             self.step_group(key, &members, &refit, now);
         }
-        for feed in self.level_follow.feeds.values_mut() {
+        for feed in self.level_axes.level_follow.feeds.values_mut() {
             feed.fresh = false;
             feed.reset = false;
         }
@@ -363,7 +371,7 @@ impl AppState {
         } else {
             LevelScale::Dbfs
         };
-        let lf = &mut self.level_follow;
+        let lf = &mut self.level_axes.level_follow;
         let held = members.iter().any(|p| lf.held.contains(p));
         let hands_off = held
             || members
@@ -420,7 +428,7 @@ impl AppState {
             f.ease = None;
             f.follow.moved(now);
         }
-        let lf = &mut self.level_follow;
+        let lf = &mut self.level_axes.level_follow;
         let feeds: Vec<&Feed> = members.iter().filter_map(|p| lf.feeds.get(p)).collect();
         // A member whose curves stopped arriving is no level now: a stopped one must not
         // hold the group's top. Members of other rigs arrive apart, so recent, not this tick.
@@ -473,6 +481,10 @@ impl AppState {
     }
 
     fn follower(&mut self, key: Key) -> &mut Follower {
-        self.level_follow.followers.entry(key).or_default()
+        self.level_axes
+            .level_follow
+            .followers
+            .entry(key)
+            .or_default()
     }
 }

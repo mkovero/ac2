@@ -8,6 +8,7 @@ pub(super) mod drag;
 pub(super) mod entries;
 pub(super) mod follow;
 pub(super) mod levels;
+pub(super) mod local;
 pub(super) mod meas_display;
 pub(super) mod meas_layout;
 pub(super) mod ops;

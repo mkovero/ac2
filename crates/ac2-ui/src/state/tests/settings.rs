@@ -418,7 +418,7 @@ fn display_page_changes_apply_at_once_and_are_remembered() {
     t.key("Down");
     assert_eq!(settings(&t).display, DisplayRow::LevelAxes);
     let f = t.st.layout.focus;
-    t.st.pane_levels.insert(
+    t.st.level_axes.pane_levels.insert(
         f,
         PaneLevels {
             transfer: ac2_scene::axis::Range { lo: -3.0, hi: 3.0 },

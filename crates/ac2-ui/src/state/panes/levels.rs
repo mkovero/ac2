@@ -7,6 +7,8 @@
 //! the measurement whose row brought them (`meas.layout`) and in `ui.toml`. A range framed
 //! automatically is not: wherever the panes come back, a pane frames its first curve.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use ac2_proto::model::layout::{LayoutLevels, LevelRange};
 use ac2_proto::model::{LevelScale, Measurement};
 use ac2_proto::topic::{Stream, Topic};
@@ -14,7 +16,24 @@ use ac2_scene::axis::Range;
 use ac2_scene::format;
 use ac2_scene::view::{ViewState, level};
 
+use super::follow::LevelFollow;
 use crate::state::{AppState, PaneId, PaneKind};
+
+/// The panes' level axes as the app holds them: each pane's ranges, which of them the
+/// operator set, and the spectrum panes' framing and following of what they show.
+#[derive(Debug, Default)]
+pub(in crate::state) struct LevelAxes {
+    /// Each pane's level axis ranges, by pane: a pane not here draws on the defaults.
+    pub(in crate::state) pane_levels: BTreeMap<PaneId, PaneLevels>,
+    /// Spectrum panes whose level axis is framed for what they show, or set by the operator:
+    /// a pane not here frames its next frame.
+    pub(in crate::state) spectrum_hold: BTreeMap<PaneId, SpectrumHold>,
+    /// The spectrum panes' level axes following their content.
+    pub(in crate::state) level_follow: LevelFollow,
+    /// The level ranges the operator set, by pane: each is stored with the panes and kept
+    /// (never framed again automatically) until the pane shows another measurement.
+    pub(in crate::state) level_set: BTreeSet<(PaneId, LevelSlot)>,
+}
 
 /// Zoom factor of one level-zoom key press.
 pub const LEVEL_ZOOM_FACTOR: f64 = 1.5;
@@ -156,7 +175,11 @@ pub(in crate::state) type SpectrumShown = (Option<String>, LevelScale);
 impl AppState {
     /// Pane `pane`'s level ranges (a pane never zoomed: the defaults).
     pub fn pane_levels(&self, pane: PaneId) -> PaneLevels {
-        self.pane_levels.get(&pane).copied().unwrap_or_default()
+        self.level_axes
+            .pane_levels
+            .get(&pane)
+            .copied()
+            .unwrap_or_default()
     }
 
     /// The level range pane `pane` draws on now, if its kind has a level axis.
@@ -169,7 +192,7 @@ impl AppState {
     pub(in crate::state) fn change_level(&mut self, pane: PaneId, f: impl FnOnce(Range) -> Range) {
         let kind = self.layout.kind(pane);
         let scale = crate::scenes::spectrum_scale(self, pane);
-        let levels = self.pane_levels.entry(pane).or_default();
+        let levels = self.level_axes.pane_levels.entry(pane).or_default();
         if let Some(r) = levels.range_mut(kind, scale) {
             *r = f(*r);
         }
@@ -177,15 +200,15 @@ impl AppState {
 
     /// A pane split off `from` starts on its ranges: both halves show what it did.
     pub(in crate::state) fn copy_levels(&mut self, from: PaneId, to: PaneId) {
-        if let Some(l) = self.pane_levels.get(&from).copied() {
-            self.pane_levels.insert(to, l);
+        if let Some(l) = self.level_axes.pane_levels.get(&from).copied() {
+            self.level_axes.pane_levels.insert(to, l);
         }
-        if let Some(h) = self.spectrum_hold.get(&from).cloned() {
-            self.spectrum_hold.insert(to, h);
+        if let Some(h) = self.level_axes.spectrum_hold.get(&from).cloned() {
+            self.level_axes.spectrum_hold.insert(to, h);
         }
         for s in LevelSlot::ALL {
-            if self.level_set.contains(&(from, s)) {
-                self.level_set.insert((to, s));
+            if self.level_axes.level_set.contains(&(from, s)) {
+                self.level_axes.level_set.insert((to, s));
             }
         }
     }
@@ -193,9 +216,15 @@ impl AppState {
     /// Ranges of panes no longer in the layout go.
     pub(in crate::state) fn prune_levels(&mut self) {
         let views = &self.layout.views;
-        self.pane_levels.retain(|id, _| views.contains_key(id));
-        self.spectrum_hold.retain(|id, _| views.contains_key(id));
-        self.level_set.retain(|(id, _)| views.contains_key(id));
+        self.level_axes
+            .pane_levels
+            .retain(|id, _| views.contains_key(id));
+        self.level_axes
+            .spectrum_hold
+            .retain(|id, _| views.contains_key(id));
+        self.level_axes
+            .level_set
+            .retain(|(id, _)| views.contains_key(id));
     }
 
     /// The ranges the operator set on pane `pane`, as the panes are kept.
@@ -203,7 +232,7 @@ impl AppState {
         let l = self.pane_levels(pane);
         let mut w = LayoutLevels::default();
         for s in LevelSlot::ALL {
-            if self.level_set.contains(&(pane, s)) {
+            if self.level_axes.level_set.contains(&(pane, s)) {
                 let r = s.get(&l);
                 *s.wire(&mut w) = Some(LevelRange { lo: r.lo, hi: r.hi });
             }
@@ -219,15 +248,15 @@ impl AppState {
         for s in LevelSlot::ALL {
             if let Some(r) = *s.wire(&mut w) {
                 s.set(&mut l, Range::new(r.lo, r.hi));
-                self.level_set.insert((pane, s));
+                self.level_axes.level_set.insert((pane, s));
             } else {
-                self.level_set.remove(&(pane, s));
+                self.level_axes.level_set.remove(&(pane, s));
             }
         }
         if l == PaneLevels::default() {
-            self.pane_levels.remove(&pane);
+            self.level_axes.pane_levels.remove(&pane);
         } else {
-            self.pane_levels.insert(pane, l);
+            self.level_axes.pane_levels.insert(pane, l);
         }
     }
 
@@ -254,16 +283,18 @@ impl AppState {
         let scale = crate::scenes::spectrum_scale(self, pane);
         if let Some(s) = LevelSlot::of(self.layout.kind(pane), scale) {
             if operator {
-                self.level_set.insert((pane, s));
+                self.level_axes.level_set.insert((pane, s));
             } else {
-                self.level_set.remove(&(pane, s));
+                self.level_axes.level_set.remove(&(pane, s));
             }
         }
         if self.layout.kind(pane) != PaneKind::Spectrum {
             return;
         }
         let shown = self.spectrum_shown(pane);
-        self.spectrum_hold.insert(pane, SpectrumHold { shown });
+        self.level_axes
+            .spectrum_hold
+            .insert(pane, SpectrumHold { shown });
     }
 
     /// Pane `pane`'s level axis frames `fit`, as Shift+Home does. A spectrum
@@ -379,7 +410,7 @@ impl AppState {
                 // Framed for the new curves: no longer a range the operator set.
                 let scale = crate::scenes::spectrum_scale(self, pane);
                 if let Some(s) = LevelSlot::of(kind, scale) {
-                    self.level_set.remove(&(pane, s));
+                    self.level_axes.level_set.remove(&(pane, s));
                 }
                 self.change_level(pane, |_| fit);
             }
@@ -401,27 +432,31 @@ impl AppState {
                 continue;
             }
             let shown = self.spectrum_shown(pane);
-            let hold = self.spectrum_hold.get(&pane);
+            let hold = self.level_axes.spectrum_hold.get(&pane);
             if hold.is_some_and(|h| h.shown == shown) {
                 continue;
             }
             let slot = LevelSlot::of(PaneKind::Spectrum, shown.1);
-            let set = slot.is_some_and(|s| self.level_set.contains(&(pane, s)));
+            let set = slot.is_some_and(|s| self.level_axes.level_set.contains(&(pane, s)));
             // A pane just put on screen with a range the operator set (the panes kept with a
             // measurement, or in ui.toml) shows its first curve on it: that range is the
             // operator's, framed for this curve already.
             if hold.is_none() && set {
-                self.spectrum_hold.insert(pane, SpectrumHold { shown });
+                self.level_axes
+                    .spectrum_hold
+                    .insert(pane, SpectrumHold { shown });
                 continue;
             }
             let Some(fit) = self.level_fit(pane) else {
                 continue;
             };
             if let Some(s) = slot {
-                self.level_set.remove(&(pane, s));
+                self.level_axes.level_set.remove(&(pane, s));
             }
             self.change_level(pane, |_| fit);
-            self.spectrum_hold.insert(pane, SpectrumHold { shown });
+            self.level_axes
+                .spectrum_hold
+                .insert(pane, SpectrumHold { shown });
             // Another measurement, or a new run of it: a new signal history.
             self.follow_refit(pane, super::follow::Refit::NewSignal);
         }
@@ -450,8 +485,9 @@ impl AppState {
             let Some(name) = self.meas(id).map(|m| m.config.name.clone()) else {
                 continue;
             };
-            let set = &self.level_set;
+            let set = &self.level_axes.level_set;
             let rearmed: Vec<PaneId> = self
+                .level_axes
                 .spectrum_hold
                 .iter()
                 .filter(|(p, h)| {
@@ -462,7 +498,7 @@ impl AppState {
                 .map(|(p, _)| *p)
                 .collect();
             for p in rearmed {
-                self.spectrum_hold.remove(&p);
+                self.level_axes.spectrum_hold.remove(&p);
             }
         }
     }

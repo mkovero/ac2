@@ -105,7 +105,7 @@ impl AppState {
 
     /// The camera pane `pane` draws now.
     pub fn drawn_camera(&self, pane: PaneId) -> Pose {
-        match &self.cam3d {
+        match &self.pane_local.cam3d {
             Some(n) if n.pane == pane => n.pose(),
             _ => Pose::from(self.stored_camera(pane)),
         }
@@ -114,10 +114,10 @@ impl AppState {
     /// Stores `c` as pane `pane`'s camera, the drawn one easing to it from where it is.
     fn set_camera(&mut self, pane: PaneId, c: SpectrumCamera) {
         let from = self.drawn_camera(pane);
-        if !matches!(&self.cam3d, Some(n) if n.pane == pane) {
-            self.cam3d = Some(CamNav::at(pane, from));
+        if !matches!(&self.pane_local.cam3d, Some(n) if n.pane == pane) {
+            self.pane_local.cam3d = Some(CamNav::at(pane, from));
         }
-        if let Some(n) = &mut self.cam3d {
+        if let Some(n) = &mut self.pane_local.cam3d {
             n.drag = None;
             n.yaw.pos = from.yaw_deg;
             n.pitch.pos = from.pitch_deg;
@@ -130,18 +130,25 @@ impl AppState {
 
     /// How much pane `pane`'s 3D axes show now, 0 … 1.
     pub fn axes3d_alpha(&self, pane: PaneId) -> f32 {
-        self.axes3d.get(&pane).map_or(0.0, |r| r.alpha(self.now_s))
+        self.pane_local
+            .axes3d
+            .get(&pane)
+            .map_or(0.0, |r| r.alpha(self.now_s))
     }
 
     /// Whether the pointer is over pane `pane`'s 3D view, as last reported.
     pub fn axes3d_hovered(&self, pane: PaneId) -> bool {
-        self.axes3d.get(&pane).is_some_and(|r| r.hovered())
+        self.pane_local
+            .axes3d
+            .get(&pane)
+            .is_some_and(|r| r.hovered())
     }
 
     /// When some 3D view's axes next change: `Some(0.0)` while one fades, `Some(wait)`
     /// while one holds before fading out, `None` when all rest.
     pub fn axes3d_wait(&self) -> Option<f64> {
-        self.axes3d
+        self.pane_local
+            .axes3d
             .values()
             .filter_map(|r| r.next_change(self.now_s))
             .min_by(f64::total_cmp)
@@ -156,7 +163,7 @@ impl AppState {
             .is_some_and(|v| v.shows_3d(self.three_d()))
         {
             let now = self.now_s;
-            self.axes3d.entry(pane).or_default().poke(now);
+            self.pane_local.axes3d.entry(pane).or_default().poke(now);
         }
     }
 
@@ -192,7 +199,7 @@ impl AppState {
         }
         // Anything but the pointer's coming and going is an interaction: the axes hold.
         let now = self.now_s;
-        let reveal = self.axes3d.entry(pane).or_default();
+        let reveal = self.pane_local.axes3d.entry(pane).or_default();
         match m {
             Cam3dMsg::Hover(on) => reveal.hover(on, now),
             _ => reveal.poke(now),
@@ -202,7 +209,7 @@ impl AppState {
             Cam3dMsg::Drag { dx, dy } => {
                 let from = self.drawn_camera(pane);
                 let to = spectrograph_3d::drag(from, dx, dy);
-                let n = self.cam3d.get_or_insert(CamNav::at(pane, from));
+                let n = self.pane_local.cam3d.get_or_insert(CamNav::at(pane, from));
                 if n.pane != pane {
                     *n = CamNav::at(pane, from);
                 }
@@ -210,6 +217,7 @@ impl AppState {
             }
             Cam3dMsg::Release => {
                 let Some(p) = self
+                    .pane_local
                     .cam3d
                     .as_ref()
                     .filter(|n| n.pane == pane)
@@ -217,7 +225,7 @@ impl AppState {
                 else {
                     return;
                 };
-                if let Some(n) = &mut self.cam3d {
+                if let Some(n) = &mut self.pane_local.cam3d {
                     *n = CamNav::at(pane, p);
                 }
                 let c = p.snapped();
@@ -237,7 +245,7 @@ impl AppState {
 
     /// Moves the drawn camera `dt` seconds on; drops it once it rests on the stored one.
     pub(super) fn step_cam3d(&mut self, dt: f64) {
-        let Some(mut n) = self.cam3d else {
+        let Some(mut n) = self.pane_local.cam3d else {
             return;
         };
         if !self
@@ -245,7 +253,7 @@ impl AppState {
             .view(n.pane)
             .is_some_and(|v| v.shows_3d(self.three_d()))
         {
-            self.cam3d = None;
+            self.pane_local.cam3d = None;
             return;
         }
         if n.drag.is_some() {
@@ -255,6 +263,6 @@ impl AppState {
         n.yaw.step(to.yaw_deg, dt);
         n.pitch.step(to.pitch_deg, dt);
         n.zoom.step(to.zoom_step, dt);
-        self.cam3d = (!n.settled(to)).then_some(n);
+        self.pane_local.cam3d = (!n.settled(to)).then_some(n);
     }
 }

@@ -12,7 +12,7 @@ use crate::state::*;
 impl AppState {
     pub(in crate::state) fn plate_msg(&mut self, m: PlateMsg) {
         match m {
-            PlateMsg::Hover(h) => self.plate_hover = h,
+            PlateMsg::Hover(h) => self.pane_local.plate_hover = h,
             PlateMsg::Move { pane, kind, x, y } => {
                 if let Some(p) = self.plate_mut(pane, kind) {
                     p.move_to(x, y);

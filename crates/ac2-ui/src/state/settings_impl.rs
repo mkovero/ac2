@@ -500,8 +500,8 @@ impl AppState {
                 self.step_advice(row, d);
             }
             DisplayRow::LevelAxes if d == 0 => {
-                self.pane_levels.clear();
-                self.level_set.clear();
+                self.level_axes.pane_levels.clear();
+                self.level_axes.level_set.clear();
                 self.hold_all_levels();
                 crate::prefs::IrLevelPrefs::default().apply(&mut self.view);
                 self.toast("every pane's level axis is back at its default");

@@ -40,6 +40,7 @@ pub(super) fn plates_mouse(
     );
     let hover_now = app
         .state
+        .pane_local
         .plate_hover
         .filter(|(p, _)| *p == id)
         .map(|(_, h)| h);

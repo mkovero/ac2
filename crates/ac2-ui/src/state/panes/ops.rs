@@ -102,7 +102,11 @@ impl AppState {
         v.chrome = modes.chrome;
         v.distortion.reference = modes.sweep_reference;
         v.plates = self.layout.view(id).map(|v| v.plates).unwrap_or_default();
-        v.plate_hover = self.plate_hover.filter(|(p, _)| *p == id).map(|(_, h)| h);
+        v.plate_hover = self
+            .pane_local
+            .plate_hover
+            .filter(|(p, _)| *p == id)
+            .map(|(_, h)| h);
         // How the picked curve's peaks show is the spectrum pane's to say (its scene input).
         v.peak_points = self
             .peak_points_of(id)

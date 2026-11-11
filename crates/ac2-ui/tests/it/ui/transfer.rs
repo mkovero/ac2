@@ -447,7 +447,7 @@ fn transfer_legend_many_curves() {
     let (plate, _) = rects(&h).expect("legend drawn");
     let pane = h.state().state.layout.focus_kind();
     assert_eq!(pane, PaneKind::Transfer);
-    let hover = |h: &Harness<'_, App>| h.state().state.plate_hover.map(|(_, p)| p);
+    let hover = |h: &Harness<'_, App>| h.state().state.pane_local.plate_hover.map(|(_, p)| p);
 
     // The wheel over it scrolls its rows (the frequency axis stays).
     let freq = h.state().state.view.freq;

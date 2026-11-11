@@ -184,7 +184,7 @@ fn undo_keeps_a_member_and_a_close_drops_it() {
     t.st.layout.set_focus(p);
     t.key("Q");
     assert!(t.st.layout.view(p).is_none(), "closed");
-    assert!(t.st.peak_points.is_empty());
+    assert!(t.st.pane_local.peak_points.is_empty());
 }
 
 /// Another client's state event that takes the curve off the pane (its kind no longer
@@ -238,7 +238,7 @@ fn set_prefs_and_install_drop_picks() {
     pick(&mut t, p, SUB2);
     let prefs = t.st.prefs.clone();
     t.st.set_prefs(prefs);
-    assert!(t.st.peak_points.is_empty(), "set_prefs");
+    assert!(t.st.pane_local.peak_points.is_empty(), "set_prefs");
 
     let (mut t, p) = picked_pane();
     pick(&mut t, p, SUB2);
@@ -248,7 +248,7 @@ fn set_prefs_and_install_drop_picks() {
     t.st.layout
         .install(PaneNode::Leaf(id), [(id, v)].into_iter().collect(), id);
     peaked(&mut t, 11);
-    assert!(t.st.peak_points.is_empty(), "install");
+    assert!(t.st.pane_local.peak_points.is_empty(), "install");
 }
 
 /// An id the rig does not know is ignored.
@@ -257,7 +257,7 @@ fn an_unknown_curve_is_not_picked() {
     let (mut t, p) = picked_pane();
     pick(&mut t, p, TraceKey::Live(MeasId(77)));
     pick(&mut t, p, TraceKey::Stored(TraceId(77)));
-    assert!(t.st.peak_points.is_empty());
+    assert!(t.st.pane_local.peak_points.is_empty());
 }
 
 /// On a transfer pane the pick chooses min / max's curve: while min / max is off a click

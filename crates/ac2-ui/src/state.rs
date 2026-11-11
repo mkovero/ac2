@@ -52,6 +52,7 @@ use crate::settings::{FocusWant, Page, Settings};
 mod display;
 pub use display::{ChoicePrompt, ChoicePurpose, DeletePrompt, DeleteTarget, MoveWhat};
 pub use panes::levels::{LEVEL_ZOOM_FACTOR, PaneLevels};
+pub use panes::local::PaneLocal;
 mod remote_impl;
 mod settings_conn;
 mod settings_impl;
@@ -185,17 +186,14 @@ pub struct AppState {
     /// What the scene builders get; `view.freq` follows `nav`.
     pub view: ViewState,
     pub nav: FreqNav,
-    /// The 3D spectrograph's camera while it eases or is dragged.
-    cam3d: Option<cam3d::CamNav>,
-    /// When each 3D spectrograph's axes show: hover and the last interaction.
-    axes3d: HashMap<PaneId, ac2_scene::spectrograph_3d::AxesReveal>,
-    /// Each pane's peak points pick ([`AppState::peak_points_of`]): app-local and unsaved,
-    /// kept apart from the layout, which is stored and rebuilt.
-    peak_points: HashMap<PaneId, PeakPick>,
     /// The 3D spectrograph's tier on this machine's GPU (Settings › 3D quality may override
     /// it); set by the app from the adapter. `None`: the GPU has no 3D view.
     pub auto_tier: Option<ac2_scene::primitives::SkylineTier>,
     pub layout: Layout,
+    /// The panes' level axes: ranges, what the operator set, framing and following.
+    level_axes: panes::levels::LevelAxes,
+    /// The panes' app-local, unsaved state: 3D camera, axes reveal, peak picks, plate hover.
+    pub pane_local: PaneLocal,
     /// The size of the panes' area as last drawn (the view writes it): N splits the
     /// focused pane along its longer side.
     pub pane_area: (f32, f32),
@@ -248,13 +246,6 @@ pub struct AppState {
     pub panes_only: bool,
     /// The key that just opened a text overlay also arrives as text; drop that one char.
     swallow_text: Option<char>,
-    /// Each pane's level axis ranges, by pane: a pane not here draws on the defaults.
-    pane_levels: BTreeMap<PaneId, PaneLevels>,
-    /// Spectrum panes whose level axis is framed for what they show, or set by the operator:
-    /// a pane not here frames its next frame.
-    spectrum_hold: BTreeMap<PaneId, panes::levels::SpectrumHold>,
-    /// The spectrum panes' level axes following their content.
-    level_follow: panes::follow::LevelFollow,
     /// No layout was remembered: the one pane takes the kind of the first measurement once
     /// the daemon's state is known.
     pane_auto: bool,
@@ -274,11 +265,6 @@ pub struct AppState {
     pub leq_panes: LeqPanes,
     /// The Settings page last shown: the Settings key opens it again.
     settings_page_last: Page,
-    /// The plate under the pointer, and whose pane it is on.
-    pub plate_hover: Option<(PaneId, ac2_scene::plate::PlateHover)>,
-    /// The level ranges the operator set, by pane: each is stored with the panes and kept
-    /// (never framed again automatically) until the pane shows another measurement.
-    level_set: BTreeSet<(PaneId, panes::levels::LevelSlot)>,
     /// The keymap of the latest update: toasts and warnings name the keys it binds.
     keys: Keymap,
     /// A list row being dragged onto the panes.
@@ -323,11 +309,10 @@ impl AppState {
             theme,
             view: ViewState::default(),
             nav: FreqNav::new(FreqRange::default()),
-            cam3d: None,
-            axes3d: HashMap::new(),
-            peak_points: HashMap::new(),
             auto_tier: Some(ac2_scene::primitives::SkylineTier::Full),
             layout: Layout::default(),
+            level_axes: Default::default(),
+            pane_local: Default::default(),
             pane_area: DEFAULT_PANE_AREA,
             spl_scales: Vec::new(),
             families: std::sync::Mutex::new(None),
@@ -350,17 +335,12 @@ impl AppState {
             panes_only: false,
             swallow_text: None,
             pane_auto: true,
-            pane_levels: BTreeMap::new(),
-            spectrum_hold: BTreeMap::new(),
-            level_follow: Default::default(),
             client_key: None,
             want_connect_dialog: false,
             pane_export: None,
             tree_reveal: false,
             settings_reveal: false,
             settings_page_last: Page::AudioIo,
-            plate_hover: None,
-            level_set: BTreeSet::new(),
             keys: Keymap::default(),
             row_drag: None,
             history: undo::History::default(),

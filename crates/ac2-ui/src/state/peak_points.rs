@@ -19,7 +19,7 @@ impl AppState {
     /// The curve pane `pane` shows peak points of: its pick, while the pane shows the
     /// pick's rig.
     pub fn peak_points_of(&self, pane: PaneId) -> Option<TraceKey> {
-        let pick = self.peak_points.get(&pane)?;
+        let pick = self.pane_local.peak_points.get(&pane)?;
         let v = self.layout.view(pane)?;
         (self.pane_rig(v) == pick.rig).then_some(pick.key)
     }
@@ -37,11 +37,11 @@ impl AppState {
             key,
             incarnation: self.incarnation(),
         };
-        if self.peak_points.get(&p) == Some(&pick) {
-            self.peak_points.remove(&p);
+        if self.pane_local.peak_points.get(&p) == Some(&pick) {
+            self.pane_local.peak_points.remove(&p);
             return;
         }
-        self.peak_points.insert(p, pick);
+        self.pane_local.peak_points.insert(p, pick);
         // A stopped or stale curve may send no frame again: its tracker starts from the
         // newest frame kept, so its points show at once.
         if let TraceKey::Live(_) = key
@@ -56,7 +56,8 @@ impl AppState {
     /// The measurements whose live curve a pane showing the rig in `rig` picked: their
     /// peaks are tracked whatever their mode.
     pub(super) fn peak_picked(&self) -> BTreeSet<MeasId> {
-        self.peak_points
+        self.pane_local
+            .peak_points
             .iter()
             .filter(|(p, pick)| pick.rig == self.rig.id && self.pane_ours(**p))
             .filter_map(|(_, pick)| match pick.key {
@@ -91,12 +92,16 @@ impl AppState {
     /// come back with other content after an undo; checked here, never at draw time, a
     /// pick dropped never comes back by itself.
     pub(super) fn prune_peak_points(&mut self) {
-        if self.peak_points.is_empty() {
+        if self.pane_local.peak_points.is_empty() {
             return;
         }
         let leaves = self.layout.panes();
-        let picks: Vec<(PaneId, PeakPick)> =
-            self.peak_points.iter().map(|(p, k)| (*p, *k)).collect();
+        let picks: Vec<(PaneId, PeakPick)> = self
+            .pane_local
+            .peak_points
+            .iter()
+            .map(|(p, k)| (*p, *k))
+            .collect();
         for (pane, pick) in picks {
             let keep = leaves.contains(&pane)
                 && self
@@ -122,7 +127,7 @@ impl AppState {
                     })
                     .unwrap_or(false);
             if !keep {
-                self.peak_points.remove(&pane);
+                self.pane_local.peak_points.remove(&pane);
             }
         }
     }
@@ -136,6 +141,7 @@ impl AppState {
     /// stored trace is fixed until its data is replaced ([`RigState::keep_trace`]).
     fn keep_pick_peaks(&mut self) {
         let ids: Vec<TraceId> = self
+            .pane_local
             .peak_points
             .values()
             .filter(|p| p.rig == self.rig.id)
