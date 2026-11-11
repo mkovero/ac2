@@ -219,6 +219,11 @@ mod imp {
                     std::ptr::null(),
                 )
             };
+            // With room in the eventlist, a change that failed comes back as an event with
+            // EV_ERROR and the errno in `data`, not as -1.
+            if r > 0 && out.flags & libc::EV_ERROR != 0 && out.data != 0 {
+                return Err(io::Error::from_raw_os_error(out.data as i32));
+            }
             if r >= 0 {
                 return Ok(());
             }
