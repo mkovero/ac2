@@ -39,7 +39,7 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   desktops only: on the CM4 (V3D) every test passes but Bare is 8–10× over a frame, so V3D
   has no 3D view (G skips it, a layout's 3D pane draws the 2D spectrograph with a note);
   RTX 2070 Full 1.57 ms GPU at 1080p. Merges as one change.
-- **Next: many rigs in one app** (tabs, mixed panes, remote inputs, clocks across PTP
+- **Many rigs in one app** (tabs, mixed panes, remote inputs, clocks across PTP
   hosts): `docs/design/multi-rig.md`, decisions N1–N6. Stage 1a (wire and files) landed: a
   daemon keeps its identity in `rig-id`, the hello carries `rig_id` and `name` (`ac2d
   --name` in every mode), every layout pane names its rig (PROTO 72, session format 36, rig
@@ -59,7 +59,18 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   clock can be read beside it — JACK on Linux, PROTO 85 — else against the computer's own
   clock; the system clock as `adjtimex` states it, *not stated* off Linux), shown per rig on Settings › Connection and by `ac2 status`,
   and a top-bar chip per background rig whose stimulus is armed or playing
-  (`▶ kettu −24 dBFS`). Next: stage 3, remote inputs, after the timestamp study.
+  (`▶ kettu −24 dBFS`). Stage 3 landed (PROTO 88, session format 43, rig file 11;
+  `docs/design/remote-inputs.md`, timing study `timing-study.md`): a session takes another
+  rig's input (`auth admit-rig` on the giving rig, `auth peer-add` and `session open
+  --remote-in RIG:IN` on the taking one, or *Add an input from another rig…* in the app),
+  streamed raw per device block and joined at a fixed link offset; per remote rig a clock
+  relation (*clocks agree within 2 ppm*, *measuring clocks…*, *CLOCKS NOT LOCKED*, *CLOCKS:
+  CAN'T TELL*, never *locked*) on the top-bar chip, Settings › Connection › Between rigs and
+  `ac2 status`. A transfer function with a remote reference or measurement averages only
+  while the clocks agree, else holds its last good result (phase faint) and says why; on
+  return its delay is tracked again. Rig acceptance with the operator (§7 there: a cross-rig
+  TF on pupu and ketunkolo, then the word clock pull) is open; both rigs run on the Orion's
+  word clock / ADAT.
 - Open hardware gates (1.0): duplex check and 1 h run on macOS (Windows: done in a VM,
   a real PC and the panel/unplug cases pending, `asio.md` §4c–d), keyboard-only speaker
   tuning per OS, clean install → first measurement < 2 min per OS, signing certificates.

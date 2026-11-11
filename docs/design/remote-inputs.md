@@ -1,6 +1,7 @@
 # Remote inputs: one rig measures with another rig's input (multi-rig stage 3)
 
-Status: **reviewed** (Fable, 5 rounds, 2026-11-10; last verdict ready). Precondition met: `timing-study.md` phases A, B1 and C
+Status: **built** (3a a32f2711, 3b a3367538, 3c 197059ed; PROTO 88; on all four hosts 2026-11-11);
+reviewed (Fable, 5 rounds, 2026-11-10). Open: the rig acceptance run with the operator (§7). Precondition met: `timing-study.md` phases A, B1 and C
 (§7b there). Supersedes the list in `multi-rig.md` §3, which stays as the summary.
 
 ## What the operator gets
