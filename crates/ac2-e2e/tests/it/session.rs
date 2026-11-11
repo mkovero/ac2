@@ -1,6 +1,6 @@
 //! Daemons and sessions: local and autosaving daemons, setups, backends, restarts.
 
-use super::harness::{DEADLINE, Driver, NAME, R, measure_from_empty};
+use super::harness::{DEADLINE, Driver, NAME, R, connected, measure_from_empty};
 use ac2_client::{ClientConfig, Endpoints};
 use ac2_e2e::{Setup, sim_daemon};
 use ac2_proto::model::MeasKind;
@@ -163,8 +163,7 @@ fn a_captured_trace_survives_a_daemon_restart() -> R {
 /// expiry) a loaded machine takes to show them.
 #[test]
 fn slow_session_dialog_meters_return_every_round() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    let (daemon, mut d) = connected()?;
     d.synced()?;
     let tick = |d: &mut Driver| {
         d.send(Msg::Tick {

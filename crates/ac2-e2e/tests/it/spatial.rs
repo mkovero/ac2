@@ -1,8 +1,7 @@
 //! The spatial average from an empty daemon: two transfer measurements (two mic positions)
 //! made through the app, then the New measurement chooser's Spatial average row.
 
-use super::harness::{Driver, NAME, R, measure_from_empty};
-use ac2_e2e::{Setup, sim_daemon};
+use super::harness::{R, measuring};
 use ac2_proto::model::{AverageMethod, MathExpr, MeasKind, Operand};
 use ac2_scene::new_meas::{NewKind, SPATIAL_AVERAGE_NEEDS};
 use ac2_ui::forms::{FieldId, FormKind};
@@ -30,9 +29,7 @@ fn transfers(s: &AppState) -> Vec<ac2_proto::units::MeasId> {
 /// Enter makes it on a screen of its own, one transfer pane showing it.
 #[test]
 fn spatial_average_from_an_empty_daemon() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     let row = NewKind::ALL
         .iter()
         .position(|k| *k == NewKind::SpatialAverage)

@@ -10,7 +10,7 @@ use ac2_proto::units::MeasId;
 use ac2_scene::theme::Theme;
 use ac2_ui::forms::FormKind;
 use ac2_ui::keys::CommandId;
-use ac2_ui::state::{AppState, Msg, Overlay, StimPhase};
+use ac2_ui::state::{AppState, Msg, Overlay};
 use std::time::Instant;
 
 /// The caption's run as the SPL pane draws it now (the pane at 1280 × 720).
@@ -142,8 +142,6 @@ fn slow_run_clock_and_a_new_log_from_the_app() -> R {
     })?;
     let l = spl_log(&d.st).ok_or("log")?;
     assert!(l.alarms.is_empty());
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -214,8 +212,7 @@ fn slow_a_restarted_app_shows_the_history_from_the_log() -> R {
     })?;
     let quiet = history_points(&d.st).ok_or("history")?.1[1].leq;
     // The level typed before is kept: Space arms, Enter fires.
-    d.key("Space");
-    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
+    d.arm()?;
     d.key("Enter");
     d.until("the 1 min window 10 dB up", |s| {
         history_points(s).is_some_and(|(_, p)| p.last().is_some_and(|x| x.leq > quiet + 10.0))
@@ -404,7 +401,5 @@ fn slow_a_preset_replaces_the_windows_from_the_app() -> R {
     d.until("the 30 min window's history from the log", |s| {
         history_points(s).is_some_and(|(_, p)| p.len() as u64 >= before)
     })?;
-    drop(d);
-    drop(daemon);
     Ok(())
 }

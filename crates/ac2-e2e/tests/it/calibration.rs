@@ -1,6 +1,8 @@
 //! Mic curves and electrical/acoustic calibration from the app.
 
-use super::harness::{DEADLINE, Driver, NAME, R, first_transfer, measure_from_empty, scene_texts};
+use super::harness::{
+    DEADLINE, Driver, NAME, R, connected, first_transfer, measure_from_empty, scene_texts,
+};
 use ac2_client::ClientConfig;
 use ac2_e2e::{Setup, sim_daemon};
 use ac2_proto::FrameData;
@@ -37,8 +39,7 @@ fn meter_label(s: &AppState, channel: u16) -> String {
 fn mic_curves_imported_and_switched_in_the_input_setup() -> R {
     use ac2_proto::model::CurveChoice;
     use ac2_ui::state::PaneKind;
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    let (_daemon, mut d) = connected()?;
     d.synced()?;
     d.key("Shift+O");
     d.send(Msg::Text("O".into()));
@@ -119,8 +120,6 @@ fn mic_curves_imported_and_switched_in_the_input_setup() -> R {
     assert_eq!(d.st.overlay, Overlay::None);
     assert!(d.st.daemon().is_some_and(|x| x.generator.firing));
     d.stop()?;
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -370,8 +369,6 @@ fn slow_electrical_calibration_from_the_app() -> R {
         })
     })?;
     drop(tone);
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -521,7 +518,5 @@ fn slow_acoustic_calibration_from_the_app() -> R {
         .into());
     }
     drop(tone);
-    drop(d);
-    drop(daemon);
     Ok(())
 }

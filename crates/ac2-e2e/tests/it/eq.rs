@@ -3,12 +3,11 @@
 //! prediction assumes is in, B / Shift+B bypass, P predicts a capture, M + M marks the set
 //! as in the console and the live prediction turns into `no change`.
 
-use super::harness::{Driver, NAME, R, measure_from_empty};
-use ac2_e2e::{Setup, sim_daemon};
+use super::harness::{R, measuring};
 use ac2_proto::model::{EqShape, MeasKind, Measurement, Operand};
 use ac2_proto::units::MeasId;
 use ac2_scene::theme::Theme;
-use ac2_ui::state::{AppState, Msg, Overlay, StimPhase};
+use ac2_ui::state::{AppState, Msg, Overlay};
 use std::time::Instant;
 
 /// Every legend line of the transfer pane, without the `· indep.` of a line that keeps
@@ -63,17 +62,13 @@ fn has_legend(s: &AppState, line: &str) -> bool {
 
 #[test]
 fn eq_editor_from_an_empty_daemon() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     let m = d.st.selected_meas().cloned().ok_or("measurement")?;
     let live = Operand::Meas { meas: m.id };
 
     // The level is still set from the first run: Space arms, Enter fires.
-    d.key("Space");
-    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
-    d.key("Enter");
-    d.until("firing", |s| s.daemon().is_some_and(|d| d.generator.firing))?;
+    d.arm()?;
+    d.play()?;
     d.key("Alt+E");
     assert!(matches!(d.st.overlay, Overlay::Eq(_)), "{:?}", d.st.overlay);
     d.until("EQ 1 and its prediction", |s| {

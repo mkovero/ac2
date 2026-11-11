@@ -2,9 +2,10 @@
 //! in 3D), and record and replay.
 
 use super::{hint_line, new_spectrum, spectrum_panes};
-use crate::harness::{Driver, NAME, R, measure_from_empty, session_from_empty};
+use crate::harness::{
+    Driver, NAME, R, connected, measure_from_empty, measuring, session_from_empty,
+};
 use ac2_client::{ClientConfig, Endpoints};
-use ac2_e2e::{Setup, sim_daemon};
 use ac2_proto::FrameData;
 use ac2_proto::model::MeasKind;
 use ac2_proto::topic::{Stream, Topic};
@@ -13,7 +14,7 @@ use ac2_scene::theme::Theme;
 use ac2_scene::view::SpectrumMode;
 use ac2_ui::forms::FormKind;
 use ac2_ui::keys::CommandId;
-use ac2_ui::state::{AppState, Msg, Overlay, StimPhase};
+use ac2_ui::state::{AppState, Msg, Overlay};
 use std::time::{Duration, Instant};
 
 /// The streams of `meas` the app holds frames of now.
@@ -40,9 +41,7 @@ fn streams_of(s: &AppState, meas: MeasId) -> Vec<Stream> {
 /// measurement's input levels, which no pane draws, never arrive.
 #[test]
 fn subscriptions_follow_the_panes_from_an_empty_daemon() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     let m = d.st.selected_meas().cloned().ok_or("measurement")?.id;
     // The measurement dropped on the IR pane too.
     d.key("Alt+3");
@@ -50,10 +49,8 @@ fn subscriptions_follow_the_panes_from_an_empty_daemon() -> R {
     d.drop_meas(f, m);
     d.key("Alt+1");
     // The level typed there stays: arm and fire.
-    d.key("Space");
-    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
-    d.key("Enter");
-    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    d.arm()?;
+    d.play()?;
     let has = |s: &AppState, st: Stream| streams_of(s, m).contains(&st);
     d.until("the IR, its pane shown", |s| {
         has(s, Stream::Tf) && has(s, Stream::Ir)
@@ -98,8 +95,6 @@ fn subscriptions_follow_the_panes_from_an_empty_daemon() -> R {
     })?;
     assert!(!has(&d.st, Stream::Levels));
     d.stop()?;
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -110,9 +105,7 @@ fn subscriptions_follow_the_panes_from_an_empty_daemon() -> R {
 #[test]
 fn spectrograph_from_an_empty_daemon() -> R {
     use ac2_scene::primitives::HeatmapAxes;
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     d.key("Ctrl+K");
     d.send(Msg::Text("new spectrum".into()));
     d.key("Enter");
@@ -144,10 +137,8 @@ fn spectrograph_from_an_empty_daemon() -> R {
         SpectrumMode::Split
     );
     // The level typed for the transfer measurement is still set: arm and fire.
-    d.key("Space");
-    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
-    d.key("Enter");
-    d.until("firing", |s| s.daemon().is_some_and(|d| d.generator.firing))?;
+    d.arm()?;
+    d.play()?;
     let filled = |s: &AppState, n: usize| {
         s.rig
             .spectrographs
@@ -346,8 +337,6 @@ fn spectrograph_from_an_empty_daemon() -> R {
         SpectrumMode::Spectrum
     );
     assert!(d.st.rig.spectrographs.is_empty());
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -377,10 +366,8 @@ fn record_and_replay_from_the_app() -> R {
     let meas = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
 
     // The level typed for the first run stands: arm and fire.
-    d.key("Space");
-    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
-    d.key("Enter");
-    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    d.arm()?;
+    d.play()?;
     d.key("Ctrl+K");
     d.send(Msg::Text("record".into()));
     d.key("Enter");
@@ -467,8 +454,7 @@ fn record_and_replay_from_the_app() -> R {
 /// back, both still spectrographs.
 #[test]
 fn two_spectrographs_side_by_side_from_an_empty_daemon() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    let (_daemon, mut d) = connected()?;
     // No transfer measurement: its own panes would come with its row on the Tab round.
     session_from_empty(&mut d)?;
     // Spectrum 1 made with the empty spectrum pane focused takes it; Spectrum 2 opens
@@ -598,7 +584,5 @@ fn two_spectrographs_side_by_side_from_an_empty_daemon() -> R {
     d.until("both spectrographs filling again", |s| {
         filled(s, s1, 30) && filled(s, s2, 30)
     })?;
-    drop(d);
-    drop(daemon);
     Ok(())
 }

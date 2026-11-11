@@ -1,7 +1,6 @@
 //! Math channels on the transfer and spectrum panes.
 
-use super::harness::{Driver, NAME, R, measure_from_empty};
-use ac2_e2e::{Setup, sim_daemon};
+use super::harness::{R, measuring};
 use ac2_proto::FrameData;
 use ac2_proto::model::MeasKind;
 use ac2_proto::topic::{Stream, Topic};
@@ -9,7 +8,7 @@ use ac2_proto::units::MeasId;
 use ac2_scene::theme::Theme;
 use ac2_ui::forms::FormKind;
 use ac2_ui::keys::CommandId;
-use ac2_ui::state::{AppState, Msg, Overlay, StimPhase};
+use ac2_ui::state::{AppState, Msg, Overlay};
 use std::time::Instant;
 
 /// The legend text of live measurement `id` on the transfer pane.
@@ -55,9 +54,7 @@ fn math_channels_from_an_empty_daemon() -> R {
     use ac2_proto::frame::OperandStatus;
     use ac2_proto::model::{MathExpr, MathOp, TraceSource};
     use ac2_ui::conn::Request;
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     let first = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
 
     // One transfer function: nothing to combine it with yet, and the dialog says so.
@@ -131,10 +128,8 @@ fn math_channels_from_an_empty_daemon() -> R {
     assert_eq!(name, "Average of 2");
 
     // Two positions of the same −6 dB path average to −6 dB (the level is still typed).
-    d.key("Space");
-    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
-    d.key("Enter");
-    d.until("firing", |s| s.daemon().is_some_and(|d| d.generator.firing))?;
+    d.arm()?;
+    d.play()?;
     d.tf_frames(avg, 240)?;
     assert!(
         tf_legend(&d.st, avg).starts_with("Average of 2 · 2 positions · power avg"),
@@ -275,8 +270,6 @@ fn math_channels_from_an_empty_daemon() -> R {
         "{banners:?}"
     );
     d.stop()?;
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -285,9 +278,7 @@ fn math_channels_from_an_empty_daemon() -> R {
 #[test]
 fn spectrum_math_lands_on_the_spectrum_pane() -> R {
     use ac2_proto::model::MathDomain;
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     for n in 1..=2 {
         d.send(Msg::Command(CommandId::NewSpectrum));
         d.key("Enter");
@@ -325,10 +316,8 @@ fn spectrum_math_lands_on_the_spectrum_pane() -> R {
         MeasKind::Math { config } if config.domain == MathDomain::Spectrum
     )));
     // The level is still typed: Space arms, Enter fires.
-    d.key("Space");
-    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
-    d.key("Enter");
-    d.until("firing", |s| s.daemon().is_some_and(|d| d.generator.firing))?;
+    d.arm()?;
+    d.play()?;
     let topic = Topic::Data {
         meas: id,
         stream: Stream::Spec,
@@ -395,7 +384,5 @@ fn spectrum_math_lands_on_the_spectrum_pane() -> R {
         "spectrum math on the transfer pane"
     );
     d.stop()?;
-    drop(d);
-    drop(daemon);
     Ok(())
 }

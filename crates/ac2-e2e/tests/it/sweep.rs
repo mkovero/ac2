@@ -1,9 +1,9 @@
 //! Sweep measurements from the app: runs, room parameters, choosing sweeps, the measurement tree.
 
 use super::harness::{
-    Driver, NAME, R, arm_new_sweep, measure_from_empty, sweep_count, sweep_from_the_dialog,
+    Driver, R, arm_new_sweep, connected, measure_from_empty, measuring, sweep_count,
+    sweep_from_the_dialog,
 };
-use ac2_e2e::{Setup, sim_daemon};
 use ac2_proto::model::MeasKind;
 use ac2_proto::topic::Topic;
 use ac2_scene::theme::Theme;
@@ -21,9 +21,7 @@ fn empty_simulated_rig_sweeps_from_the_app() -> R {
     use ac2_scene::distortion::{Reading, reading_at};
     use ac2_ui::forms::FieldId;
     use ac2_ui::state::PaneKind;
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
 
     let sweeps_before = sweep_count(&d.st);
     d.key("Shift+S");
@@ -160,8 +158,6 @@ fn empty_simulated_rig_sweeps_from_the_app() -> R {
     })?;
     assert!(!d.st.stimulus_live(), "STIM OFF");
     assert!(d.st.rig.sweep.plan.is_none());
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -174,8 +170,7 @@ fn slow_room_parameters_of_a_sweep_from_the_app() -> R {
     use ac2_ui::forms::FieldId;
     use ac2_ui::session_dialog::Row;
     use ac2_ui::state::PaneKind;
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    let (_daemon, mut d) = connected()?;
     d.synced()?;
     d.key("Shift+O");
     d.send(Msg::Text("O".into()));
@@ -307,8 +302,6 @@ fn slow_room_parameters_of_a_sweep_from_the_app() -> R {
         .collect();
     assert!(labels.contains(&"T30 (s)") && labels.contains(&"250"));
     assert!(!labels.iter().any(|x| x.contains("hidden")), "{labels:?}");
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -321,9 +314,7 @@ fn input_meters_and_a_stopped_sweep_set_from_the_app() -> R {
     use ac2_proto::model::{SweepFailure, SweepStatus};
     use ac2_scene::meter::{InputUse, MeterState};
     use ac2_ui::forms::FieldId;
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
 
     // Every captured input, named with its role, metering the rig's signal.
     d.until("the input meters with names", |s| {
@@ -421,8 +412,6 @@ fn input_meters_and_a_stopped_sweep_set_from_the_app() -> R {
     })?;
     assert_eq!(d.st.operation(), None);
     assert!(d.st.rig.sweep.plan.is_none());
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -451,8 +440,7 @@ fn run_again(d: &mut Driver) -> R<ac2_proto::units::TraceId> {
 #[test]
 fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
     use ac2_ui::state::PaneKind;
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    let (_daemon, mut d) = connected()?;
     // The dialog's sweep opens on a screen of its own, its one pane focused; the transfer
     // measurement's grid stays its own, with a sweep pane at Alt+5.
     d.st.set_prefs(crate::common::grid_with_sweep_ui_prefs());
@@ -602,8 +590,6 @@ fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
     d.until("the second sweep shown again", |s| {
         s.trace_rows().iter().all(|r| r.shown)
     })?;
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -616,9 +602,7 @@ fn slow_the_measurement_tree_from_an_empty_daemon() -> R {
     use ac2_proto::model::{MathOp, Operand, TraceOwner};
     use ac2_scene::meas_list::TreeKey;
     use ac2_ui::forms::FieldId;
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     let tf = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
     let under_tf = TraceOwner::Meas { meas: tf };
 
@@ -754,8 +738,6 @@ fn slow_the_measurement_tree_from_an_empty_daemon() -> R {
         .position(|n| n == "Imported")
         .ok_or("Imported")?;
     assert_eq!(names.len(), at + 4, "{names:?}");
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -776,8 +758,7 @@ fn runs_of(s: &AppState, meas: ac2_proto::units::MeasId) -> Vec<String> {
 #[test]
 fn a_new_sweep_opens_its_own_pane() -> R {
     use ac2_ui::state::PaneKind;
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    let (_daemon, mut d) = connected()?;
     d.st.set_prefs(crate::common::grid_ui_prefs());
     measure_from_empty(&mut d)?;
     let tf = d.st.rig.selected.ok_or("the transfer measurement")?;

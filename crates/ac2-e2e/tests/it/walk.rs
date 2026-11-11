@@ -2,12 +2,11 @@
 //! from the empty session, Shift+W, a room plan drawn in the plan editor, the setup window's
 //! suggestion, the walk pane, two points captured and the walk's average made.
 
-use super::harness::{Driver, NAME, R, measure_from_empty, scene_texts};
-use ac2_e2e::{Setup, sim_daemon};
+use super::harness::{Driver, R, measuring, scene_texts};
 use ac2_proto::model::PointState;
 use ac2_scene::primitives::Viewport;
 use ac2_scene::theme::Theme;
-use ac2_ui::state::{AppState, Msg, Overlay, PaneKind, StimPhase};
+use ac2_ui::state::{AppState, Msg, Overlay, PaneKind};
 use ac2_ui::walk_setup::PlanMsg;
 
 fn captured(s: &AppState) -> usize {
@@ -44,9 +43,7 @@ fn walk_texts(s: &AppState) -> Vec<String> {
 
 #[test]
 fn spatial_walk_from_an_empty_daemon() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     let panes = d.st.layout.views.len();
 
     // Shift+W: New walk… first; no plan in the library, so its plan row is New plan….
@@ -131,10 +128,8 @@ fn spatial_walk_from_an_empty_daemon() -> R {
 
     // Two points captured with the stimulus on: the average is made at the second.
     // The level typed for the first measurement stays: Space arms, Enter fires.
-    d.key("Space");
-    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
-    d.key("Enter");
-    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    d.arm()?;
+    d.play()?;
     d.key("X");
     d.until("P1 captured", |s| captured(s) == 1)?;
     d.until("on to P2", |s| {

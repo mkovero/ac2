@@ -2,8 +2,7 @@
 //! of the focused pane highlighted, the chosen kind's form, and the new measurement in a
 //! pane of its kind, never in place of the focused one.
 
-use crate::harness::{Driver, NAME, R, measure_from_empty};
-use ac2_e2e::{Setup, sim_daemon};
+use crate::harness::{R, connected, measure_from_empty};
 use ac2_proto::model::MeasKind;
 use ac2_proto::units::MeasId;
 use ac2_ui::forms::FormKind;
@@ -23,8 +22,7 @@ fn chooser(s: &AppState) -> Option<&ChoicePrompt> {
 /// names the keys that bring more (N, Ctrl+M), never Tab.
 #[test]
 fn a_fresh_session_asks_what_to_measure() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    let (_daemon, mut d) = connected()?;
     d.synced()?;
     d.key("Shift+O");
     d.send(Msg::Text("O".into()));
@@ -86,8 +84,7 @@ fn a_fresh_session_asks_what_to_measure() -> R {
 
 #[test]
 fn ctrl_m_makes_a_spectrum_from_an_empty_daemon() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    let (_daemon, mut d) = connected()?;
     d.synced()?;
     let key = Chord::parse("Ctrl+M")?.label();
     // Nothing yet: the measurement list says where the first one is made.
@@ -167,7 +164,5 @@ fn ctrl_m_makes_a_spectrum_from_an_empty_daemon() -> R {
     d.key("Escape");
     assert_eq!(d.st.overlay, Overlay::None);
 
-    drop(d);
-    drop(daemon);
     Ok(())
 }

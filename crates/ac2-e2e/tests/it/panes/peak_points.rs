@@ -2,14 +2,13 @@
 //! peaks on the pane; again clears them; T to traces only hides them.
 
 use super::new_spectrum;
-use crate::harness::{Driver, NAME, R, measure_from_empty};
-use ac2_e2e::{Setup, sim_daemon};
+use crate::harness::{R, measuring};
 use ac2_proto::FrameData;
 use ac2_proto::topic::{Stream, Topic};
 use ac2_scene::primitives::Viewport;
 use ac2_scene::theme::Theme;
 use ac2_scene::trace::TraceKey;
-use ac2_ui::state::{AppState, Msg, Overlay, PaneId, StimPhase};
+use ac2_ui::state::{AppState, Msg, Overlay, PaneId};
 use std::time::Instant;
 
 const SIZE: Viewport = Viewport {
@@ -37,9 +36,7 @@ fn labels(s: &AppState, p: PaneId) -> Vec<String> {
 /// labels its peaks, a click again clears them, and T twice (to traces only) hides them.
 #[test]
 fn a_legend_click_shows_peak_points_from_an_empty_daemon() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     let s1 = new_spectrum(&mut d, false)?;
     let s2 = new_spectrum(&mut d, true)?;
     d.key("Alt+2");
@@ -60,10 +57,8 @@ fn a_legend_click_shows_peak_points_from_an_empty_daemon() -> R {
     // Pink noise through the simulated room (no real audio), the level range fitted to it
     // so the peaks stand on the plot.
     // The level is set already (measure_from_empty): arm and fire.
-    d.key("Space");
-    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
-    d.key("Enter");
-    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    d.arm()?;
+    d.play()?;
     let topic = Topic::Data {
         meas: s2,
         stream: Stream::Spec,

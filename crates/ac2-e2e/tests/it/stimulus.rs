@@ -1,10 +1,9 @@
 //! The stimulus and audio state: banners, following the view, output routes and max level.
 
 use super::harness::{
-    Driver, NAME, R, arm_new_sweep, first_transfer, measure_from_empty, sweep_count,
+    Driver, NAME, R, arm_new_sweep, connected, first_transfer, measure_from_empty, sweep_count,
 };
 use ac2_client::{ClientConfig, Endpoints};
-use ac2_e2e::{Setup, sim_daemon};
 use ac2_proto::topic::Stream;
 use ac2_scene::theme::Theme;
 use ac2_ui::forms::FormKind;
@@ -147,8 +146,7 @@ fn slow_the_stimulus_follows_the_view_from_the_app() -> R {
     use ac2_proto::model::{Signal, TraceKind, TraceSource};
     use ac2_ui::forms::FieldId;
     use ac2_ui::state::PaneKind;
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    let (_daemon, mut d) = connected()?;
     // The dialog's sweep opens on a screen of its own; the transfer measurement's row
     // brings its grid back, the transfer pane at Alt+1.
     d.st.set_prefs(crate::common::grid_with_sweep_ui_prefs());
@@ -282,8 +280,6 @@ fn slow_the_stimulus_follows_the_view_from_the_app() -> R {
     })?;
     d.tf_frames(meas, 240)?;
     d.stop()?;
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -295,8 +291,7 @@ fn slow_the_stimulus_follows_the_view_from_the_app() -> R {
 fn settings_name_an_output_route_the_stimulus_and_set_the_max_level() -> R {
     use ac2_ui::session_dialog::Row;
     use ac2_ui::settings::Page;
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    let (daemon, mut d) = connected()?;
     let mut other = Driver::connect(daemon.client_config("second client"), &daemon.describe())?;
     d.synced()?;
     other.synced()?;
@@ -379,8 +374,7 @@ fn settings_name_an_output_route_the_stimulus_and_set_the_max_level() -> R {
     }
     d.send(Msg::Text("-40".into()));
     d.key("Enter");
-    d.key("Space");
-    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
+    d.arm()?;
     d.key("Ctrl+P");
     d.send(Msg::Settings(ac2_ui::state::SettingsMsg::Ceiling));
     d.send(Msg::Text("-20".into()));

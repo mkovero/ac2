@@ -1,11 +1,10 @@
 //! The alignment aid from an empty daemon: two transfer curves aligned in their overlap.
 
-use super::harness::{Driver, NAME, R, measure_from_empty};
-use ac2_e2e::{Setup, sim_daemon};
+use super::harness::{R, measuring};
 use ac2_proto::model::{MathExpr, MeasKind};
 use ac2_scene::theme::Theme;
 use ac2_ui::forms::{FieldId, FormKind};
-use ac2_ui::state::{AppState, Overlay, PaneKind, StimPhase, TransferView};
+use ac2_ui::state::{AppState, Overlay, PaneKind, TransferView};
 use std::time::Instant;
 
 /// The readout of the alignment view the focused pane shows.
@@ -28,9 +27,7 @@ fn readout(s: &AppState) -> Option<ac2_scene::align::Readout> {
 /// polarity, the two adding fully.
 #[test]
 fn alignment_from_an_empty_daemon() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     let live = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
     d.tf_frames(live, 240)?;
     d.key("Ctrl+1");
@@ -42,10 +39,8 @@ fn alignment_from_an_empty_daemon() -> R {
     // A live operand under NO REFERENCE is left out of math (its held average is no longer
     // what the system does), and `measure_from_empty` stopped the stimulus (its level is still
     // set): the live curve needs it playing again for the alignment to have both operands.
-    d.key("Space");
-    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
-    d.key("Enter");
-    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    d.arm()?;
+    d.play()?;
 
     d.key("Alt+M");
     let Overlay::Form(f) = &d.st.overlay else {

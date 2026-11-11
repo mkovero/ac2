@@ -210,8 +210,6 @@ fn spl_weightings_from_the_keys_and_a_readable_number() -> R {
             (w[1] - w[0]) / 1_000_000
         );
     }
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -306,7 +304,5 @@ fn spl_pane_shows_meter_and_leq_from_an_empty_daemon() -> R {
         d.st.kind_modes(ac2_ui::state::PaneKind::Spl).spl,
         SplMode::MeterLeq
     );
-    drop(d);
-    drop(daemon);
     Ok(())
 }

@@ -1,6 +1,8 @@
 //! Transfer measurements from the app: starting, stopping, the IR pane and delay changes.
 
-use super::harness::{Driver, NAME, R, measure_from_empty, sweep_from_the_dialog};
+use super::harness::{
+    Driver, NAME, R, connected, measure_from_empty, measuring, sweep_from_the_dialog,
+};
 use ac2_e2e::{Setup, sim_daemon};
 use ac2_proto::FrameData;
 use ac2_proto::model::MeasKind;
@@ -15,14 +17,10 @@ use std::time::{Duration, Instant};
 /// the stop chord stops it from inside a window.
 #[test]
 fn windows_leave_the_stimulus_alone_and_the_stop_chord_stops_from_one() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     // The level typed there stays: arm and fire.
-    d.key("Space");
-    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
-    d.key("Enter");
-    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    d.arm()?;
+    d.play()?;
     let level = d.st.rig.stimulus.level;
     let playing = |s: &AppState| {
         s.daemon()
@@ -78,8 +76,6 @@ fn windows_leave_the_stimulus_alone_and_the_stop_chord_stops_from_one() -> R {
         s.daemon()
             .is_some_and(|x| !x.generator.firing && !x.generator.armed)
     })?;
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -122,19 +118,13 @@ fn simulated_rig_starts_measuring() -> R {
     d.fire()?;
     d.tf_frames(m.id, 240)?;
     d.stop()?;
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
 #[test]
 fn empty_simulated_rig_measures_from_the_app() -> R {
     // As on real audio (no setup), but on the simulated rig.
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
-    drop(d);
-    drop(daemon);
+    let (_daemon, _d) = measuring()?;
     Ok(())
 }
 
@@ -169,9 +159,7 @@ fn no_reference(s: &AppState) -> Option<String> {
 #[test]
 fn stopping_the_last_transfer_stops_the_noise_from_the_app() -> R {
     use ac2_ui::state::PaneKind;
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     let m = d.st.selected_meas().cloned().ok_or("measurement")?;
     assert_eq!(d.st.layout.focus_kind(), PaneKind::Transfer);
 
@@ -217,8 +205,6 @@ fn stopping_the_last_transfer_stops_the_noise_from_the_app() -> R {
             .any(|t| t.text == "stimulus stopped"),
         "said twice"
     );
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -229,19 +215,15 @@ fn stopping_the_last_transfer_stops_the_noise_from_the_app() -> R {
 fn the_ir_pane_zooms_pans_and_reads_from_the_mouse() -> R {
     use ac2_scene::view::IrPane;
     use ac2_ui::state::IrNavMsg;
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     // The transfer measurement dropped on the IR pane.
     let tf = d.st.selected_meas().map(|m| m.id).ok_or("the transfer")?;
     d.key("Alt+3");
     let f = d.st.layout.focus;
     d.drop_meas(f, tf);
     // The level typed before is kept: Space arms, Enter fires.
-    d.key("Space");
-    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
-    d.key("Enter");
-    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    d.arm()?;
+    d.play()?;
     // The rig's −6 dB path: an arrival of about 0.5 FS.
     d.until("an IR with its arrival", |s| {
         s.ir_frame_of(IrPane::Live)
@@ -312,8 +294,6 @@ fn the_ir_pane_zooms_pans_and_reads_from_the_mouse() -> R {
             .any(|l| l.text == cur.text()),
         "the readout is drawn"
     );
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -323,15 +303,11 @@ fn the_ir_pane_zooms_pans_and_reads_from_the_mouse() -> R {
 /// delay to the microsecond.
 #[test]
 fn delay_nudges_from_the_keys_keep_the_curve() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     let m = d.st.selected_meas().cloned().ok_or("measurement")?;
     // The level typed there stays: arm and fire.
-    d.key("Space");
-    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
-    d.key("Enter");
-    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    d.arm()?;
+    d.play()?;
     d.tf_frames(m.id, 240)?;
     let applied = |s: &AppState| {
         s.selected_meas()
@@ -378,8 +354,6 @@ fn delay_nudges_from_the_keys_keep_the_curve() -> R {
         d.st.toasts.list.iter().map(|t| &t.text).collect::<Vec<_>>()
     );
     d.stop()?;
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -472,8 +446,7 @@ fn phase_of(v: &[(ac2_scene::trace::TraceKey, f64, String)], k: ac2_scene::trace
 fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     use ac2_scene::trace::TraceKey;
     use ac2_ui::state::PaneKind;
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    let (_daemon, mut d) = connected()?;
     // A sweep pane of its own beside the transfer pane: the dialog's sweep goes there
     // (Alt+5) and leaves the transfer pane (Alt+1) as it is.
     d.st.set_prefs(crate::common::grid_with_sweep_ui_prefs());
@@ -498,10 +471,8 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
             .is_some_and(|x| x.measurements.iter().any(|y| y.id == m.id && y.running))
     })?;
     // The level typed before stays: arm and fire.
-    d.key("Space");
-    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
-    d.key("Enter");
-    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    d.arm()?;
+    d.play()?;
     d.tf_frames(m.id, 240)?;
     d.send(Msg::Command(CommandId::Slot1));
     d.until("the capture in slot 1", |s| {
@@ -730,8 +701,6 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     assert!(toast.contains("is stopped"), "{toast}");
     d.synced()?;
     assert_eq!(applied(&d.st), Some(a1));
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -742,9 +711,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
 #[test]
 fn a_typed_delay_moves_only_its_live_curve() -> R {
     use ac2_scene::trace::TraceKey;
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     let m = d.st.selected_meas().cloned().ok_or("measurement")?;
     d.key("Alt+1");
     let running = |s: &AppState| {
@@ -755,10 +722,8 @@ fn a_typed_delay_moves_only_its_live_curve() -> R {
         d.send(Msg::Command(CommandId::StartStop));
     }
     d.until("running", running)?;
-    d.key("Space");
-    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
-    d.key("Enter");
-    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    d.arm()?;
+    d.play()?;
     d.tf_frames(m.id, 240)?;
     d.send(Msg::Command(CommandId::Slot1));
     d.until("the capture in slot 1", |s| {
@@ -863,7 +828,5 @@ fn a_typed_delay_moves_only_its_live_curve() -> R {
         "the capture moved: before {before:?} after {after_dot:?}"
     );
     d.stop()?;
-    drop(d);
-    drop(daemon);
     Ok(())
 }

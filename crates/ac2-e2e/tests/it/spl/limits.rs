@@ -9,7 +9,7 @@ use ac2_scene::primitives::Color;
 use ac2_scene::theme::Theme;
 use ac2_scene::view::LeqStyle;
 use ac2_ui::forms::FormKind;
-use ac2_ui::state::{AppState, Msg, Overlay, Severity, StimPhase};
+use ac2_ui::state::{AppState, Msg, Overlay, Severity};
 use std::time::{Duration, Instant};
 
 /// Leq windows with limits from an empty daemon, using the app: the session from its dialog,
@@ -122,10 +122,8 @@ fn slow_leq_limits_go_over_and_recover_from_the_app() -> R {
     };
 
     // The level typed before is kept: Space arms, Enter fires.
-    d.key("Space");
-    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
-    d.key("Enter");
-    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    d.arm()?;
+    d.play()?;
     d.until("both tiles red", |s| {
         let t = tiles(s);
         t.len() >= 2 && t[0].state == TileState::Over && t[1].state == TileState::Over
@@ -195,8 +193,6 @@ fn slow_leq_limits_go_over_and_recover_from_the_app() -> R {
     let p = h.points(&config.leq.windows[0]).ok_or("points")?;
     assert!(p.iter().any(|x| x.over));
     assert!(!p.back().ok_or("newest")?.over);
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -316,8 +312,7 @@ fn slow_a_peak_limit_and_the_position_correction_from_the_app() -> R {
             })
             .count()
     };
-    d.key("Space");
-    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
+    d.arm()?;
     d.key("Enter");
     d.until("LCpeak over", |s| {
         spl_log(s).is_some_and(|l| l.peaks.lcpeak.judgement == LeqJudgement::Over)
@@ -344,8 +339,6 @@ fn slow_a_peak_limit_and_the_position_correction_from_the_app() -> R {
     d.until("its recovery toast", |s| {
         new_toasts(s, "LCpeak back within its limit", false) == 1
     })?;
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -454,10 +447,8 @@ fn slow_filling_windows_go_red_only_when_their_budget_is_spent() -> R {
     })?;
 
     // Loud: every window on course at once, amber, the value the Leq so far.
-    d.key("Space");
-    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
-    d.key("Enter");
-    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    d.arm()?;
+    d.play()?;
     let th = Theme::dark();
     let amber = th.banner_warning.background;
     let red = th.banner_fault.background;
@@ -534,7 +525,5 @@ fn slow_filling_windows_go_red_only_when_their_budget_is_spent() -> R {
             .all(|w| w.judgement == LeqJudgement::Near)
     );
     d.stop()?;
-    drop(d);
-    drop(daemon);
     Ok(())
 }

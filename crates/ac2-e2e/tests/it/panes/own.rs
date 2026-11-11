@@ -3,8 +3,7 @@
 //! pane its own meter only.
 
 use super::new_spectrum;
-use crate::harness::{Driver, NAME, R, measure_from_empty, scene_texts};
-use ac2_e2e::{Setup, sim_daemon};
+use crate::harness::{Driver, NAME, R, connected, measure_from_empty, measuring, scene_texts};
 use ac2_proto::model::{MeasKind, TraceOwner};
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{MeasId, TraceId};
@@ -105,9 +104,7 @@ fn capture(d: &mut Driver, meas: MeasId, slot: u8) -> R<TraceId> {
 /// drawn again.
 #[test]
 fn two_spectra_each_draw_their_own_from_an_empty_daemon() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     let s1 = new_spectrum(&mut d, false)?;
     let s2 = new_spectrum(&mut d, true)?;
     // Spectrum 1 on the spectrum pane, split: Spectrum 2 on the right half.
@@ -215,8 +212,6 @@ fn two_spectra_each_draw_their_own_from_an_empty_daemon() -> R {
         "{:?}",
         names(&d.st, left)
     );
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -225,9 +220,7 @@ fn two_spectra_each_draw_their_own_from_an_empty_daemon() -> R {
 /// nothing of it and says to make a measurement.
 #[test]
 fn a_transfer_pane_does_not_draw_imported_from_an_empty_daemon() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     let tf =
         d.st.selected_meas()
             .map(|m| m.id)
@@ -275,8 +268,6 @@ fn a_transfer_pane_does_not_draw_imported_from_an_empty_daemon() -> R {
             .map(|h| h.text)
             .unwrap_or_default();
     assert!(hint.starts_with("No measurements — "), "{hint}");
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -363,9 +354,7 @@ fn spl_texts(s: &AppState, pane: PaneId) -> Vec<String> {
 /// by side: a new pane (N) and the other meter dragged onto it.
 #[test]
 fn two_spl_meters_side_by_side_by_drag_from_an_empty_daemon() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     second_mic(&mut d)?;
     let m1 = new_spl(&mut d, false)?;
     let m2 = new_spl(&mut d, true)?;
@@ -431,8 +420,6 @@ fn two_spl_meters_side_by_side_by_drag_from_an_empty_daemon() -> R {
             }
     })?;
     assert!(d.st.visible_panes().contains(&pane) && d.st.visible_panes().contains(&other));
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -442,8 +429,7 @@ fn two_spl_meters_side_by_side_by_drag_from_an_empty_daemon() -> R {
 #[test]
 fn slow_the_distortion_pane_shows_its_own_sweep_from_an_empty_daemon() -> R {
     use crate::harness::sweep_from_the_dialog;
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    let (_daemon, mut d) = connected()?;
     d.st.set_prefs(crate::common::grid_with_sweep_ui_prefs());
     measure_from_empty(&mut d)?;
     let tf = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
@@ -474,8 +460,6 @@ fn slow_the_distortion_pane_shows_its_own_sweep_from_an_empty_daemon() -> R {
     );
     assert!(d.st.compared_sweeps(pane).is_empty());
 
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -485,9 +469,7 @@ fn slow_the_distortion_pane_shows_its_own_sweep_from_an_empty_daemon() -> R {
 /// `Spectrum 1` was never given them.
 #[test]
 fn a_drop_in_own_panes_comes_back_with_their_row_from_an_empty_daemon() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     let s1 = new_spectrum(&mut d, false)?;
     let s2 = new_spectrum(&mut d, true)?;
     d.key("Alt+2");
@@ -533,8 +515,6 @@ fn a_drop_in_own_panes_comes_back_with_their_row_from_an_empty_daemon() -> R {
             .is_some_and(|l| l.panes().len() == 1),
         "Spectrum 1 keeps the one pane it opened on"
     );
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -545,9 +525,7 @@ fn a_drop_in_own_panes_comes_back_with_their_row_from_an_empty_daemon() -> R {
 /// and the selection never left `Spectrum 2`'s row.
 #[test]
 fn picks_and_level_axes_come_back_to_a_restarted_app_from_an_empty_daemon() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (daemon, mut d) = measuring()?;
     let s1 = new_spectrum(&mut d, false)?;
     let s2 = new_spectrum(&mut d, true)?;
     d.key("Alt+2");
@@ -623,9 +601,7 @@ fn picks_and_level_axes_come_back_to_a_restarted_app_from_an_empty_daemon() -> R
 fn display_settings_and_compare_lists_live_on_the_daemon_from_an_empty_daemon() -> R {
     use ac2_proto::model::SpectrumStyle;
     use ac2_proto::model::layout::{EntryRef, PaneContent};
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (daemon, mut d) = measuring()?;
     let s1 = new_spectrum(&mut d, false)?;
     let s2 = new_spectrum(&mut d, true)?;
     d.key("Alt+2");

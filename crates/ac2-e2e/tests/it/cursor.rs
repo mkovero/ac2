@@ -1,7 +1,6 @@
 //! The comparison cursor's jumps and mark from an empty daemon.
 
-use super::harness::{Driver, NAME, R, measure_from_empty};
-use ac2_e2e::{Setup, sim_daemon};
+use super::harness::{R, measuring};
 use ac2_scene::theme::Theme;
 use ac2_ui::state::{AppState, PaneKind};
 use std::time::Instant;
@@ -33,9 +32,7 @@ fn transfer(s: &AppState) -> ac2_scene::tf::TfScene {
 /// Alt+Shift+D clears the mark.
 #[test]
 fn cursor_jumps_and_mark_from_an_empty_daemon() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     assert_eq!(d.st.layout.focus_kind(), PaneKind::Transfer);
     d.key("S");
     d.until("the measurement stopped", |s| {

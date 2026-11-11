@@ -1,7 +1,6 @@
 //! A curve's row dropped onto another's makes a math channel, from an empty daemon.
 
-use super::harness::{Driver, NAME, R, measure_from_empty};
-use ac2_e2e::{Setup, sim_daemon};
+use super::harness::{R, measuring};
 use ac2_proto::model::{MathExpr, MathOp, MeasKind, Operand, TraceKind, TraceOwner};
 use ac2_scene::meas_list::TreeKey;
 use ac2_ui::forms::FormKind;
@@ -13,9 +12,7 @@ use ac2_ui::state::{DragItem, DragMsg, Msg, Overlay};
 /// math channel under the same measurement.
 #[test]
 fn a_loudness_shift_dropped_on_a_capture_makes_its_math_channel() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     let m = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
     let owner = TraceOwner::Meas { meas: m };
 

@@ -1,14 +1,13 @@
 //! Zoom, hide and delete the selected measurement, a remembered level axis, and export and
 //! subtract of the selected stored trace.
 
-use crate::harness::{Driver, NAME, R, measure_from_empty};
-use ac2_e2e::{Setup, sim_daemon};
+use crate::harness::{Driver, R, connected, measure_from_empty, measuring};
 use ac2_proto::model::MeasKind;
 use ac2_proto::topic::{Stream, Topic};
 use ac2_scene::theme::Theme;
 use ac2_ui::forms::FormKind;
 use ac2_ui::keys::CommandId;
-use ac2_ui::state::{AppState, Msg, Overlay, PaneKind, PromptKind, Severity, StimPhase};
+use ac2_ui::state::{AppState, Msg, Overlay, PaneKind, PromptKind, Severity};
 use std::time::Instant;
 
 /// From an empty daemon: two captures, one spread by +3 dB with the keys (its legend says
@@ -20,9 +19,7 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
     use ac2_proto::units::TraceId;
     use ac2_scene::trace::TraceKey;
     use ac2_ui::state::PaneKind;
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     let tf = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
 
     // Two captures, their data fetched.
@@ -230,8 +227,6 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
         ]
     );
     assert_eq!(d.st.kind_meas(PaneKind::Transfer).map(|m| m.id), Some(tf));
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -244,9 +239,7 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
 #[test]
 fn a_hides_and_backspace_deletes_the_selected_measurement() -> R {
     use ac2_ui::state::{DeleteTarget, PaneKind};
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     let first = d.st.selected_meas().cloned().ok_or("measurement")?;
 
     // A second transfer measurement from the palette's dialog, as it comes.
@@ -262,10 +255,8 @@ fn a_hides_and_backspace_deletes_the_selected_measurement() -> R {
     })?;
     let second = d.st.selected_meas().cloned().ok_or("second")?;
     // The level typed for the first is kept: arm and fire.
-    d.key("Space");
-    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
-    d.key("Enter");
-    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    d.arm()?;
+    d.play()?;
     d.tf_frames(second.id, 240)?;
     // The first's row chosen, its transfer pane draws its group; the second ticked into it
     // (C, Enter on its row) draws behind it.
@@ -376,15 +367,12 @@ fn a_hides_and_backspace_deletes_the_selected_measurement() -> R {
         names(s) == [second.config.name.clone()]
     })?;
     d.stop()?;
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
 #[test]
 fn a_remembered_level_axis_still_fits_a_started_spectrum() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    let (_daemon, mut d) = connected()?;
     let remembered = ac2_scene::axis::Range::new(-160.0, -150.0);
     let mut prefs = crate::common::grid_ui_prefs();
     let spectrum_pane = |p: &ac2_ui::prefs::UiPrefs| {
@@ -422,8 +410,6 @@ fn a_remembered_level_axis_still_fits_a_started_spectrum() -> R {
     // The fit is the app's, not the operator's: not remembered, the next start frames the
     // pane's first curve again.
     assert_eq!(spectrum_pane(&d.st.prefs).spectrum_dbfs, None);
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -431,9 +417,7 @@ fn a_remembered_level_axis_still_fits_a_started_spectrum() -> R {
 /// axis (its labels are the fit's, not the default's), and frames after that leave it.
 #[test]
 fn a_new_spectrum_pane_shows_a_fitted_level_axis() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     d.key("Ctrl+K");
     d.send(Msg::Text("new spectrum".into()));
     d.key("Enter");
@@ -492,8 +476,6 @@ fn a_new_spectrum_pane_shows_a_fitted_level_axis() -> R {
     let first = seq(&d.st);
     d.until("more spectrum frames", |s| seq(s) > first)?;
     assert_eq!(level(&d.st), fit);
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -510,9 +492,7 @@ fn retype(d: &mut Driver, text: &str) {
 /// selected trace and the next shown one.
 #[test]
 fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (daemon, mut d) = measuring()?;
     d.key("Ctrl+1");
     d.until("slot 1", |s| s.slots()[0].is_some())?;
     let a = d.st.slots()[0].map(|t| t.id).ok_or("slot 1")?;

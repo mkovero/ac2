@@ -2,12 +2,11 @@
 //! mic (its noise floor about −80 dBFS) brings RAISE STIMULUS on the transfer pane, and the
 //! advice changes no level.
 
-use super::harness::{Driver, NAME, R, first_transfer};
-use ac2_e2e::{Setup, sim_daemon};
+use super::harness::{R, connected, first_transfer};
 use ac2_scene::theme::Theme;
 use ac2_ui::keys::CommandId;
 use ac2_ui::settings::DisplayRow;
-use ac2_ui::state::{AppState, Msg, Overlay, PaneKind, SettingsMsg, StimPhase};
+use ac2_ui::state::{AppState, Msg, Overlay, PaneKind, SettingsMsg};
 use std::time::{Duration, Instant};
 
 /// The transfer pane's banners now.
@@ -35,8 +34,7 @@ fn banners(s: &AppState) -> Vec<String> {
 
 #[test]
 fn a_quiet_stimulus_brings_raise_advice() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    let (_daemon, mut d) = connected()?;
     // A session on the simulated rig's roles and a transfer measurement, from the app.
     d.synced()?;
     d.key("Shift+O");
@@ -65,10 +63,8 @@ fn a_quiet_stimulus_brings_raise_advice() -> R {
     d.until("level", |s| {
         s.rig.stimulus.level.is_some_and(|l| l.0 == -76.0)
     })?;
-    d.key("Space");
-    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
-    d.key("Enter");
-    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    d.arm()?;
+    d.play()?;
     // The app's clock runs on its frame ticks; the advice's hold times count on it.
     let start = Instant::now();
     let shown = loop {
@@ -95,7 +91,5 @@ fn a_quiet_stimulus_brings_raise_advice() -> R {
             .and_then(|x| x.generator.settings.as_ref().map(|g| g.level.0));
     assert_eq!(level, Some(-76.0));
     d.stop()?;
-    drop(d);
-    drop(daemon);
     Ok(())
 }

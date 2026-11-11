@@ -2,8 +2,7 @@
 //! steps through the measurements.
 
 use super::{hint_line, new_spectrum};
-use crate::harness::{Driver, NAME, R, first_transfer, measure_from_empty};
-use ac2_e2e::{Setup, sim_daemon};
+use crate::harness::{R, connected, first_transfer, measuring};
 use ac2_proto::model::MeasKind;
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::MeasId;
@@ -16,8 +15,7 @@ use ac2_ui::state::{AppState, Msg, Overlay};
 /// them on again.
 #[test]
 fn key_hints_follow_the_panes_from_an_empty_daemon() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    let (_daemon, mut d) = connected()?;
     d.synced()?;
     // Nothing set up yet: the transfer pane has the focus and its hints.
     let tf = hint_line(&d.st);
@@ -81,8 +79,6 @@ fn key_hints_follow_the_panes_from_an_empty_daemon() -> R {
     d.key("Enter");
     assert!(d.st.prefs.key_hints);
     assert_eq!(hint_line(&d.st), tf);
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -92,8 +88,7 @@ fn key_hints_follow_the_panes_from_an_empty_daemon() -> R {
 #[test]
 fn a_row_dropped_on_a_pane_turns_it_into_its_kind_from_an_empty_daemon() -> R {
     use ac2_ui::state::PaneKind::{Spectrum, Transfer};
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    let (_daemon, mut d) = connected()?;
     d.synced()?;
     d.key("Shift+O");
     d.send(Msg::Text("O".into()));
@@ -150,8 +145,6 @@ fn a_row_dropped_on_a_pane_turns_it_into_its_kind_from_an_empty_daemon() -> R {
     d.drop_meas(ir, tf);
     assert_eq!(crate::common::visible(&d.st), before);
     assert_eq!(d.st.pane_meas(ir).map(|m| m.id), Some(tf));
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -160,9 +153,7 @@ fn a_row_dropped_on_a_pane_turns_it_into_its_kind_from_an_empty_daemon() -> R {
 /// own brings them, any other changes no pane.
 #[test]
 fn tab_steps_through_the_measurements_from_an_empty_daemon() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     for (words, kind, is) in [
         (
             "new spectrum",
@@ -246,8 +237,6 @@ fn tab_steps_through_the_measurements_from_an_empty_daemon() -> R {
         assert_eq!(d.st.rig.selected, Some(want));
         assert_eq!(d.st.live_row_selected(), live);
     }
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -258,9 +247,7 @@ fn tab_steps_through_the_measurements_from_an_empty_daemon() -> R {
 /// Spectrum 2's stored trace row: the same, the trace selected.
 #[test]
 fn a_child_row_moves_no_pane_from_an_empty_daemon() -> R {
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    let (_daemon, mut d) = measuring()?;
     let s1 = new_spectrum(&mut d, false)?;
     let s2 = new_spectrum(&mut d, true)?;
     // Spectrum 2's own screen (its one spectrum pane): Spectrum 1 dropped on it, split
@@ -363,8 +350,6 @@ fn a_child_row_moves_no_pane_from_an_empty_daemon() -> R {
     d.until("the header row brings its panes", |s| {
         Some(s.pane_layout()) == s.meas(s2).and_then(|m| m.layout.clone())
     })?;
-    drop(d);
-    drop(daemon);
     Ok(())
 }
 
@@ -375,10 +360,8 @@ fn a_child_row_moves_no_pane_from_an_empty_daemon() -> R {
 #[test]
 fn v_only_selects_from_an_empty_daemon() -> R {
     use ac2_proto::model::TraceOwner;
-    use ac2_ui::state::{PaneKind, StimPhase};
-    let daemon = sim_daemon(Setup::Empty)?;
-    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
-    measure_from_empty(&mut d)?;
+    use ac2_ui::state::PaneKind;
+    let (_daemon, mut d) = measuring()?;
     let first = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
     d.key("Ctrl+K");
     d.send(Msg::Text("new transfer".into()));
@@ -392,10 +375,8 @@ fn v_only_selects_from_an_empty_daemon() -> R {
     })?;
     let second = d.st.selected_meas().map(|m| m.id).ok_or("second")?;
     // The level typed for the first is kept: arm and fire.
-    d.key("Space");
-    d.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
-    d.key("Enter");
-    d.until("firing", |s| s.daemon().is_some_and(|x| x.generator.firing))?;
+    d.arm()?;
+    d.play()?;
     d.tf_frames(first, 240)?;
     d.tf_frames(second, 240)?;
     let owned = |s: &AppState, meas: MeasId| {
@@ -433,7 +414,5 @@ fn v_only_selects_from_an_empty_daemon() -> R {
         seen.extend(d.st.rig.selected_trace);
     }
     assert!(seen.contains(&t1) && seen.contains(&t2), "{seen:?}");
-    drop(d);
-    drop(daemon);
     Ok(())
 }

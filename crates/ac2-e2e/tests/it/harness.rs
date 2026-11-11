@@ -1,6 +1,7 @@
 //! The driver shared by every area: the app without its window, and measuring from an empty daemon.
 
 use ac2_client::ClientConfig;
+use ac2_e2e::{Setup, SimDaemon, sim_daemon};
 use ac2_proto::FrameData;
 use ac2_proto::model::{MeasKind, TfAveraging};
 use ac2_proto::topic::{Stream, Topic};
@@ -137,8 +138,18 @@ impl Driver {
         self.send(Msg::Text("-20".into()));
         self.key("Enter");
         self.until("level", |s| s.rig.stimulus.level.is_some())?;
+        self.arm()?;
+        self.play()
+    }
+
+    /// Space arms the stimulus.
+    pub fn arm(&mut self) -> R {
         self.key("Space");
-        self.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)?;
+        self.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)
+    }
+
+    /// Enter on the armed stimulus: the generator plays.
+    pub fn play(&mut self) -> R {
         self.key("Enter");
         self.until("firing", |s| s.daemon().is_some_and(|d| d.generator.firing))
     }
@@ -226,6 +237,22 @@ pub fn session_from_empty(d: &mut Driver) -> R {
     )?;
     d.key("Escape");
     Ok(())
+}
+
+/// The app connected to a simulated rig with no session. Bind the daemon first, as the
+/// pattern `(daemon, mut d)` does: the app then goes before the daemon it talks to.
+pub fn connected() -> R<(SimDaemon, Driver)> {
+    let daemon = sim_daemon(Setup::Empty)?;
+    let d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    Ok((daemon, d))
+}
+
+/// [`connected`], then a session opened and a measurement made and started, all from the
+/// app.
+pub fn measuring() -> R<(SimDaemon, Driver)> {
+    let (daemon, mut d) = connected()?;
+    measure_from_empty(&mut d)?;
+    Ok((daemon, d))
 }
 
 /// From a daemon with no session to frames, using only the app: the hint, Alt+S and its
