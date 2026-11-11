@@ -469,3 +469,50 @@ ms, age p50 2.2 / p95 4.9 ms (was 8.2 / 13.3). App log:
 
 What remains is mostly the wait for the next pass/refresh; compositor + TV after present stay
 unmeasured.
+
+### The jobs before the meters, and a tighter wake (2026-11-11)
+
+On pupu the per-hop wake (e25e4a39) moved `selftest frames` age p50 / p95 from 2.2 / 4.9 to
+4.5 / 7.0 ms. Age counts from the instant the frame's block is popped (`capture_wall_ns` is
+that pop's wall clock), so the wake's own timing does not enter it: the time went after the
+pop. The fan-out popped a hop's six blocks and then ran the input meters, the session levels
+and the programme meter over all six before handing the batch to the jobs. Handing on every
+period, that work came one block at a time, mostly before the frame's block arrived; pupu's
+fan-out cost about 0.6 ms a wake then (22.6 % of a core at 375 wakes/s), so five blocks more
+of it in front of the hand-on is about the 2.3 ms seen. The fan-out now hands each batch to
+the jobs first and runs the meters after, while the jobs compute.
+
+The wake itself (`hop_wake.rs`): where the stream's clock can be read here (JACK), the
+block's callback time put on this host's clock is when it arrived, not a bound, and the wake
+comes a sixteenth of a period after the predicted arrival (at most 0.2 ms). Elsewhere it
+keeps the bound from the pop, with an eighth of a period of slack (at most 0.4 ms) and the
+creep cut to 0.05 % of the time between frames. A block not yet in is looked for every
+sixteenth of a period (at most 0.2 ms) for a period, then every period;
+one late block no longer moves the estimate (two in a row do). A bug that let a poll taking
+only the block before the frame's replace the estimate, so the next wake came a whole period
+late, is gone. Simulated at 96 kHz / 256 with 40 µs device jitter, one block in 64 up to
+0.8 ms late and wakes up to 60 µs late: with stamps 66 wakes/s for 62.5 frames/s, frame block
+taken p50 / p95 0.19 / 0.24 ms after it arrived (max 1.0 ms, the late blocks); without, 70
+wakes/s, 0.17 / 0.44 ms. The previous scheme: 0.3–0.6 ms p50, up to 1.4 ms.
+
+The fan-out says what it saw once a minute at debug level (`RUST_LOG=warn,ac2=info,
+ac2d::hop_wake=debug`): `fan-out over 60 s: 64.3 wakes/s; frame block popped after its
+callback p50 0.30 / p95 0.35 / max 2.38 ms over 3750; handed to the jobs after the wake p50
+0.10 / p95 0.20 / max 1.02 ms over 3750` (the dummy server below, 8 inputs; 50 µs buckets,
+upper edges). The first is the
+wake's latency, from the device's callback (stream clock) to the pop; the second the
+fan-out's own time to the hand-on, which age does include.
+
+Local, `jackd -d dummy -r 96000 -p 256` (not real-time), release builds of 7fe07689 and this
+change, two multi-res 1/48 spectra and an SPL meter, `selftest frames` 36 s each, CPU and
+voluntary context switches over 30 s. With 2 inputs the fan-out does little per block and
+nothing moves (age p50 / p95 0.6 / 1.3 → 0.5 / 1.2 ms, fan-out 0.9 % at 66 → 63 wakes/s,
+ac2d 8.1 → 7.8–8.4 %). With 8 inputs (`-C 8`, 70 s) the meters weigh more and the change
+shows:
+
+| 8 inputs | before | after |
+|---|---|---|
+| spectrum age p50 / p95 / max | 0.9 / 1.6 / 5.4 ms | 0.5–0.6 / 1.3 / 3.7 ms |
+| SPL age p50 / p95 / max | 0.7 / 1.0 / 2.4 ms | 0.4 / 0.9 / 3.8 ms |
+| ac2d-fanout | 2.5 %, 66 wakes/s | 2.8 %, 63 wakes/s |
+| ac2d total | 10.0 % | 10.6 % |

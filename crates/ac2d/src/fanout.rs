@@ -13,7 +13,7 @@
 //! published from here, and every job's own meters all read them instead of rescanning
 //! the samples. The fan-out also watches for configuration changes.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
@@ -24,10 +24,11 @@ use ac2_audio::{BlockFlags, Delivery, DuplexStream};
 use ac2_proto::model::StopCause;
 use ac2_proto::units::{Rev, SessionEpoch, WallNs};
 
+use crate::batch_pool::Pool;
 use crate::burst::BurstDetector;
 use crate::capture_clock::CaptureClock;
 use crate::control::ControlMsg;
-use crate::hop_wake::{HopWake, next_frame_end, schedule};
+use crate::hop_wake::{HopWake, WakeLog, in_by, next_frame_end, schedule};
 use crate::jobs::meters::{SessionLevels, meter_period};
 use crate::jobs::programme::Programme;
 use crate::jobs::{Emitter, JobEnv, JobMsg};
@@ -58,6 +59,8 @@ pub(crate) struct Block {
     pub(crate) host_ns: u64,
     /// `host_ns` is the backend's capture stamp, not the callback's time.
     pub(crate) capture_stamp: bool,
+    /// When the block's callback ran, on the backend's clock: about when it arrived.
+    pub(crate) callback_ns: u64,
     /// The joined feed's marks on its remote columns (`crate::remote::join`).
     pub(crate) marks: ColumnMarks,
     /// Interleaved samples.
@@ -85,6 +88,7 @@ impl Block {
             wall_ns,
             host_ns: wall_ns,
             capture_stamp: false,
+            callback_ns: wall_ns,
             marks: ColumnMarks::default(),
             data,
             stats: Vec::new(),
@@ -184,6 +188,7 @@ pub(crate) fn pop_block_into(stream: &mut DuplexStream, reuse: Option<Block>) ->
             wall_ns: 0,
             host_ns: 0,
             capture_stamp: false,
+            callback_ns: 0,
             marks: ColumnMarks::default(),
             data: Vec::with_capacity(a.len() + b.len()),
             stats: Vec::new(),
@@ -195,6 +200,7 @@ pub(crate) fn pop_block_into(stream: &mut DuplexStream, reuse: Option<Block>) ->
         block.wall_ns = wall_ns();
         block.host_ns = h.capture_ns.unwrap_or(h.callback_ns);
         block.capture_stamp = h.capture_ns.is_some();
+        block.callback_ns = h.callback_ns;
         block.marks.clear();
         block.data.clear();
         block.data.extend_from_slice(a);
@@ -526,51 +532,6 @@ struct Config {
     stall_after: Option<Duration>,
 }
 
-/// Batches handed out and the spare blocks they return, so steady operation allocates
-/// nothing.
-#[derive(Default)]
-struct Pool {
-    /// Oldest first; jobs consume in order, so the front is released first.
-    in_flight: VecDeque<Batch>,
-    spare_blocks: Vec<Block>,
-    spare_batches: Vec<Vec<Block>>,
-}
-
-/// Batches kept for reuse at most; more in flight than this are left to be freed.
-const POOL_BATCHES: usize = 256;
-
-impl Pool {
-    /// Takes back every batch no job holds any more.
-    fn reclaim(&mut self) {
-        while let Some(front) = self.in_flight.front_mut() {
-            let Some(v) = Arc::get_mut(front) else {
-                break;
-            };
-            self.spare_blocks.append(v);
-            if let Some(b) = self.in_flight.pop_front().and_then(Arc::into_inner) {
-                self.spare_batches.push(b);
-            }
-        }
-    }
-
-    fn batch(&mut self) -> Vec<Block> {
-        self.spare_batches.pop().unwrap_or_default()
-    }
-
-    /// Keeps `batch` for reuse once every job is done with it.
-    fn hand_out(&mut self, batch: Batch) {
-        if self.in_flight.len() < POOL_BATCHES {
-            self.in_flight.push_back(batch);
-        }
-    }
-
-    /// A batch no job saw: its blocks are spare at once.
-    fn give_back(&mut self, mut batch: Vec<Block>) {
-        self.spare_blocks.append(&mut batch);
-        self.spare_batches.push(batch);
-    }
-}
-
 fn run(
     mut stream: DuplexStream,
     wait: &Wait,
@@ -594,6 +555,8 @@ fn run(
     let meter_early = cfg.handoff / 2;
     let mut next = Instant::now();
     let mut hop = cfg.block_period.map(|p| HopWake::new(cfg.rate, p));
+    let mut wake_log = WakeLog::new(Instant::now());
+    let stamps = stream.stamp_clock();
     // When audio last arrived, on both clocks; the open counts as the first arrival, so a
     // stream that never delivers is stopped too.
     let mut last_audio = (Instant::now(), wall_ns());
@@ -697,11 +660,28 @@ fn run(
         if let Some((w, _)) = &mut clock {
             w.pair();
         }
+        // This wake took the block a spectrum frame waited for.
+        let mut took_frame = false;
+        if let (Some(h), Some(b)) = (&mut hop, batch.last()) {
+            // Popped by now: an upper bound on when the newest block arrived, tightened to
+            // its callback's time where the stream's clock can be read here.
+            let popped = Instant::now();
+            let stamp_now = stamps.as_ref().and_then(|c| c.now_ns());
+            let (at, exact) = in_by(popped, stamp_now, b.callback_ns);
+            h.seen(at, b.end_sample(), exact);
+            let t = h.target();
+            if let Some(f) = batch
+                .iter()
+                .find(|b| b.start_sample < t && b.end_sample() >= t)
+            {
+                took_frame = true;
+                if let Some(n) = stamp_now {
+                    wake_log.pickup(n.saturating_sub(f.callback_ns));
+                }
+            }
+        }
         if let Some(b) = batch.last() {
             latest.store(b.end_sample(), Ordering::Release);
-            if let Some(h) = &mut hop {
-                h.seen(now, b.end_sample());
-            }
             last_audio = (now, b.wall_ns);
             // Read by audio time, so the reading keeps pace with the audio however the
             // stream is stepped.
@@ -717,7 +697,18 @@ fn run(
             }
         }
         stamp_arrivals(&mut batch, cfg.rate);
-        for block in &batch {
+        // The jobs first: a frame waits on its job, the meters below on nothing, and they
+        // cost the fan-out more per block than anything else here.
+        let handed: Option<Batch> = (!batch.is_empty() && !jobs.is_empty()).then(|| {
+            let b: Batch = Arc::new(std::mem::take(&mut batch));
+            deliver(&mut jobs, &b, frames, queue_limit);
+            b
+        });
+        if took_frame && handed.is_some() {
+            wake_log.handed(now.elapsed());
+        }
+        let blocks: &[Block] = handed.as_deref().map_or(&batch, |b| b);
+        for block in blocks {
             update_input_meters(meters, &mut ms, block, cfg.rate);
             if let Some((l, _)) = &mut levels {
                 l.push(block);
@@ -726,11 +717,11 @@ fn run(
         if let Some(t) = &mut tap
             && t.active()
         {
-            batch.iter().for_each(|b| t.send(b));
+            blocks.iter().for_each(|b| t.send(b));
         }
         if let Some(j) = &mut joiner {
             let line = clock.as_ref().and_then(|(w, _)| w.stamp_line());
-            let joined = j.push(&batch, line, now);
+            let joined = j.push(blocks, line, now);
             for b in &joined {
                 if let Some((l, _)) = &mut levels {
                     l.push_remote(b);
@@ -741,12 +732,9 @@ fn run(
                 deliver(&mut joined_jobs, &Arc::new(joined), n, queue_limit);
             }
         }
-        if batch.is_empty() || jobs.is_empty() {
-            pool.give_back(batch);
-        } else {
-            let batch: Batch = Arc::new(batch);
-            deliver(&mut jobs, &batch, frames, queue_limit);
-            pool.hand_out(batch);
+        match handed {
+            Some(b) => pool.hand_out(b),
+            None => pool.give_back(batch),
         }
         if let Some((l, em)) = &mut levels {
             l.emit(em);
@@ -767,6 +755,10 @@ fn run(
             }
             _ => schedule(next, now, cfg.handoff),
         };
+
+        if hop.is_some() {
+            wake_log.wake(Instant::now());
+        }
 
         // Output timing records are not used yet; keep the ring from overflowing.
         while stream.pop_output_tick().is_some() {}
@@ -946,22 +938,5 @@ mod tests {
         stamp_arrivals(&mut batch, 48_000.0);
         let walls: Vec<u64> = batch.iter().map(|b| b.wall_ns).collect();
         assert_eq!(walls, [980_000_000, 990_000_000, 1_000_000_000]);
-    }
-
-    #[test]
-    fn a_released_batch_returns_its_blocks_to_the_pool() {
-        let mut pool = Pool::default();
-        let mut v = pool.batch();
-        v.push(Block::new(0, 1, 1, BlockFlags::NONE, 0, vec![0.5]));
-        let batch: Batch = Arc::new(v);
-        let held = Arc::clone(&batch);
-        pool.hand_out(batch);
-        pool.reclaim();
-        assert!(pool.spare_blocks.is_empty(), "a job still holds the batch");
-        drop(held);
-        pool.reclaim();
-        assert_eq!(pool.spare_blocks.len(), 1);
-        assert_eq!(pool.spare_batches.len(), 1);
-        assert!(pool.in_flight.is_empty());
     }
 }

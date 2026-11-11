@@ -36,6 +36,7 @@ mod artnet;
 mod authlog;
 mod autosave;
 mod backend;
+mod batch_pool;
 mod burst;
 mod cadence;
 mod calstore;

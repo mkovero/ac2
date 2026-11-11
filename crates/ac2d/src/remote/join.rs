@@ -290,6 +290,7 @@ impl Joiner {
                 wall_ns: b.wall_ns,
                 host_ns: b.host_ns,
                 capture_stamp: b.capture_stamp,
+                callback_ns: b.callback_ns,
                 marks: ColumnMarks::default(),
                 data: b.data.clone(),
                 stats: Vec::new(),
