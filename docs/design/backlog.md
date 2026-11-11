@@ -3,23 +3,9 @@
 Work found in use, not yet scheduled into a phase. Newest first. When an item lands, move it
 to `backlog-done.md` as one line with the commit.
 
-## Many rigs in one app (design `multi-rig.md`)
-
-- **Not started.** Stages: (1) `AppState` split + id namespacing by rig, top-bar rig drop-down,
-  slots carrying their rig, `PaneSource {RigRef, PaneContent}` in `Measurement.layout`
-  (PROTO + session bump), P1 storage rule, arm line names the rig, Shift+Escape stops every
-  rig; (2) clock reporting, other-rig stimulus chips; (3) remote inputs, only after a
-  backend-timestamp and input-latency study on pupu + ketunkolo.
-
 ## Programme metering (design `programme-meter.md`)
 
-- **Stages 1 (7823115d) and 2 landed.** Stage 2: PPM ballistics against the IEC 60268-10
-  burst table (rows and ac2's acceptance in the note §3; the standard's own tolerances still
-  unread), true peak, overs, per-side gated correlation, ember goniometer, Programme pane,
-  rig-level `levels.set` (Settings › Rig monitor and `ac2 levels`). Its deviations from the
-  note are in §8. **Stage 3 (loudness) open.**
-- **Programme pane polish.** No drag of an Inputs row onto a pane yet (P and the pane's list
-  open one); the goniometer frames arrive with the session's input meters whether or not a
+- **Programme pane polish.** The goniometer frames arrive with the session's input meters whether or not a
   Programme pane shows them (`session/` prefix), a separate subscription would spare the
   bandwidth on a rig with many pairs; *both quiet* never shows (the wire names one quiet
   side, the left first).
@@ -82,9 +68,6 @@ Targets: laptops with integrated GPUs on battery, and a Pi 4 class daemon for SP
 - **The UI redraws the whole window per data frame**: under a software renderer, 4 live
   measurements cost ≈ 1.7 cores, SPL only ≈ 1.3 (egui has no damage regions). Not measured
   on a real laptop iGPU (PLAN §8.3 frame-time target).
-- **No flow control to slow clients**: a Wi-Fi client can lag up to the 48-frame send queue
-  (`DATA_SNDHWM`); client-paced credit is designed in `docs/design/flow-control.md`, not
-  implemented (wire change).
 - **Frame size on slow links**: frames are packed (`docs/design/wire-slim.md`): a `tf` frame
   ≈ 2.4 KB, a heavy tuning session ≈ 3.2 Mbit/s at 60 fps. Further cuts listed there.
 - **Delay finder full searches run on the transfer job's thread**: every 2 s while tracking,

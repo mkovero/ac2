@@ -3,6 +3,10 @@
 Items moved here from `backlog.md` when they land, newest first, one line each with the
 commit; `git show <commit>` and the linked design notes have the rest.
 
+- Many rigs in one app (`multi-rig.md`), stages: (1) `AppState` split + id namespacing by rig, top-bar rig drop-down, slots carrying their rig, a rig on every `PaneContent` reference in `Measurement.layout`, P1 storage rule, arm line names the rig, Shift+Escape stops every rig; (2) clock reporting, other-rig stimulus chips (PROTO 84; a6433d5c); (3) remote inputs, after the timing study on pupu + ketunkolo (PROTO 88; 197059ed; `remote-inputs.md`, `timing-study.md`).
+- Programme metering (`programme-meter.md`): stages 1 (7823115d) and 2: PPM ballistics against the IEC 60268-10 burst table (rows and ac2's acceptance in the note §3; the standard's own tolerances still unread), true peak, overs, per-side gated correlation, ember goniometer, Programme pane, rig-level `levels.set` (Settings › Rig monitor and `ac2 levels`), deviations from the note in §8; stages 3 (loudness), 4 (loudness bars and plate) and 5 (meter and goniometer as pane views) landed after them (the note's *Stages*).
+- An Inputs list row drags onto a pane; P and the pane's list are gone (e48a4d79; `pane-curves.md` stage 1).
+- Flow control to slow clients: a data socket with per-peer byte credit in place of the 48-frame send queue (PROTO 83; b79d4953; `flow-control.md`).
 - A measurement keeps how it is drawn: spectrum style, peak hold, spectrograph span and colours, display offset and the compared curves live on the daemon (`meas.update` display block, `meas.offset`, `meas.compare`); **C** asks which measurement to compare into (PROTO 58, session format 28; 30d85a73).
 - Power cuts: a torn, empty or garbage state file is set aside (`.damaged-<time>`) and listed in `rig.damaged_files`, never stops `ac2d` or `ac2-ui`; atomic writes sync the directory (PROTO 57; 7cd91a17; `watchdogs.md` *Power cuts*).
 - Failing loud: systemd notify (READY, watchdog, STOPPING), release builds abort on a panic, an unwritable SPL log is `autosave.log_failures` (PROTO 56; 35ea53cf; `watchdogs.md`).
