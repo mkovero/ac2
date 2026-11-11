@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use ac2_audio::BlockFlags;
 use ac2_proto::PROTO_VERSION;
-use ac2_proto::frame::{AudioFlags, AudioHeader, encode_audio};
+use ac2_proto::frame::{AudioFlags, AudioHeader, encode_audio_header};
 use ac2_proto::model::StreamIncarnation;
 
 use crate::fanout::Block;
@@ -16,8 +16,8 @@ use crate::outbox::Outbox;
 pub(crate) struct SourceTap {
     outbox: Outbox,
     interest: Arc<Interest>,
-    /// Device input channel per block column, and its topic.
-    columns: Vec<(u16, Vec<u8>)>,
+    /// The topic of the device input channel in each block column.
+    columns: Vec<Vec<u8>>,
     /// What the rigs take, read again only when a subscription has changed.
     taken: Taken,
     incarnation: StreamIncarnation,
@@ -56,7 +56,7 @@ impl SourceTap {
             interest,
             columns: input_map
                 .iter()
-                .map(|&c| (c, ac2_proto::Topic::Audio { channel: c }.to_bytes()))
+                .map(|&c| ac2_proto::Topic::Audio { channel: c }.to_bytes())
                 .collect(),
             taken: Taken::default(),
             incarnation,
@@ -86,7 +86,7 @@ impl SourceTap {
         self.taken.columns.clear();
         self.taken
             .columns
-            .extend(self.columns.iter().map(|(_, t)| self.interest.wants(t)));
+            .extend(self.columns.iter().map(|t| self.interest.wants(t)));
     }
 
     /// Sends `block`'s subscribed channels.
@@ -111,14 +111,12 @@ impl SourceTap {
         // The header is the same for every channel of the block: encoded once, by the
         // protocol's own encoder, when the first subscribed channel needs it.
         let mut head: Option<Vec<u8>> = None;
-        for (col, (channel, topic)) in self.columns.iter().enumerate() {
+        for (col, topic) in self.columns.iter().enumerate() {
             if !self.taken.columns[col] {
                 continue;
             }
             if head.is_none() {
-                head = encode_audio(*channel, &header, &[])
-                    .ok()
-                    .and_then(|parts| parts.into_iter().nth(1));
+                head = encode_audio_header(&header).ok();
             }
             let Some(head) = &head else {
                 return;
@@ -141,6 +139,7 @@ impl SourceTap {
 mod tests {
     #![allow(clippy::unwrap_used)]
 
+    use ac2_proto::frame::encode_audio;
     use ac2_proto::units::{DaemonIncarnation, SessionEpoch};
     use ac2_zmq::{Context, SocketType};
 

@@ -31,6 +31,7 @@ mod wire;
 
 pub use audio::{
     AudioFlags, AudioFrame, AudioHeader, MAX_AUDIO_FRAMES, decode_audio, encode_audio,
+    encode_audio_header,
 };
 pub use coded::CodedFrame;
 pub use data::{

@@ -85,12 +85,18 @@ pub fn encode_audio(
     samples: &[f32],
 ) -> Result<Vec<Vec<u8>>, EncodeError> {
     let topic = Topic::Audio { channel }.to_bytes();
-    let head = rmp_serde::to_vec_named(header).map_err(|e| EncodeError::Msgpack(e.to_string()))?;
+    let head = encode_audio_header(header)?;
     let mut body = Vec::with_capacity(samples.len() * 4);
     for s in samples {
         body.extend_from_slice(&s.to_le_bytes());
     }
     Ok(vec![topic, head, body])
+}
+
+/// The header part of an audio frame. It is the same for every channel of a block, so a
+/// sender of several channels encodes it once.
+pub fn encode_audio_header(header: &AudioHeader) -> Result<Vec<u8>, EncodeError> {
+    rmp_serde::to_vec_named(header).map_err(|e| EncodeError::Msgpack(e.to_string()))
 }
 
 /// Decodes the parts of an audio frame.
