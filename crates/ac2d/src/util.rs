@@ -58,6 +58,26 @@ pub(crate) fn perr(code: ErrorCode, msg: impl Into<String>) -> ProtoError {
     }
 }
 
+/// [`ErrorCode::Invalid`]: the arguments are wrong.
+pub(crate) fn invalid(msg: impl Into<String>) -> ProtoError {
+    perr(ErrorCode::Invalid, msg)
+}
+
+/// [`ErrorCode::Refused`]: the daemon will not do it as things stand.
+pub(crate) fn refused(msg: impl Into<String>) -> ProtoError {
+    perr(ErrorCode::Refused, msg)
+}
+
+/// [`ErrorCode::NotFound`]: the entity named does not exist.
+pub(crate) fn missing(msg: impl Into<String>) -> ProtoError {
+    perr(ErrorCode::NotFound, msg)
+}
+
+/// [`ErrorCode::Internal`]: the daemon's own fault.
+pub(crate) fn internal(msg: impl Into<String>) -> ProtoError {
+    perr(ErrorCode::Internal, msg)
+}
+
 /// A typed protocol error with detail.
 pub(crate) fn perr_detail(
     code: ErrorCode,

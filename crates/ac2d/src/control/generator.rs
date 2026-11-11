@@ -14,7 +14,7 @@ use ac2_proto::{ErrorCode, ErrorDetail, ProtoError, ReplyBody};
 
 use crate::conv;
 use crate::stimulus::LeasedSource;
-use crate::util::{perr, perr_detail, random_u64, random_u128, wall_ns};
+use crate::util::{internal, invalid, perr_detail, random_u64, random_u128, refused, wall_ns};
 
 use super::{Control, Lease, SourceKey, gen_err, lease_required};
 
@@ -160,44 +160,38 @@ impl Control {
         self.lease_check(client, token)?;
         let st = &desired.settings;
         if desired.firing && !desired.armed {
-            return Err(perr(ErrorCode::Refused, "firing requires armed"));
+            return Err(refused("firing requires armed"));
         }
         if !st.level.0.is_finite() {
-            return Err(perr(ErrorCode::Invalid, "level must be finite"));
+            return Err(invalid("level must be finite"));
         }
         if st.level.0 > self.s.ceiling_dbfs {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!(
-                    "{:.1} dBFS is above the global maximum {:.1} dBFS",
-                    st.level.0, self.s.ceiling_dbfs
-                ),
-            ));
+            return Err(refused(format!(
+                "{:.1} dBFS is above the global maximum {:.1} dBFS",
+                st.level.0, self.s.ceiling_dbfs
+            )));
         }
         for (i, o) in st.outputs.iter().enumerate() {
             if st.outputs[..i].contains(o) {
-                return Err(perr(ErrorCode::Invalid, format!("output {o} listed twice")));
+                return Err(invalid(format!("output {o} listed twice")));
             }
         }
         if desired.armed && st.outputs.is_empty() {
-            return Err(perr(ErrorCode::Invalid, "no output channels"));
+            return Err(invalid("no output channels"));
         }
-        let signal =
-            conv::signal(st.signal).ok_or_else(|| perr(ErrorCode::Invalid, "invalid signal"))?;
+        let signal = conv::signal(st.signal).ok_or_else(|| invalid("invalid signal"))?;
         if let Some(rt) = &self.session
             && let Some(o) = st.outputs.iter().find(|o| **o >= rt.output_channels)
         {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!("output {o} is not an output of the session"),
-            ));
+            return Err(invalid(format!(
+                "output {o} is not an output of the session"
+            )));
         }
         if desired.firing && self.session.is_none() {
-            return Err(perr(ErrorCode::Refused, "no open session to emit on"));
+            return Err(refused("no open session to emit on"));
         }
         if desired.firing && self.detecting.is_some() {
-            return Err(perr(
-                ErrorCode::Refused,
+            return Err(refused(
                 "a loopback detection is playing its burst; fire once it is done",
             ));
         }
@@ -206,8 +200,7 @@ impl Control {
             .as_ref()
             .is_some_and(|s| matches!(s.run.status, SweepStatus::Playing { .. }))
         {
-            return Err(perr(
-                ErrorCode::Refused,
+            return Err(refused(
                 "a sweep is playing: stop it (gen.stop) or let it finish",
             ));
         }
@@ -232,10 +225,7 @@ impl Control {
                 signal: st.signal,
                 band: st.band,
             };
-            let rt = self
-                .session
-                .as_mut()
-                .ok_or_else(|| perr(ErrorCode::Refused, "no session"))?;
+            let rt = self.session.as_mut().ok_or_else(|| refused("no session"))?;
             if self.out.source != Some(key) || self.out.level.is_none() {
                 let g = CoreGenerator::new(&GeneratorConfig {
                     signal,
@@ -248,10 +238,7 @@ impl Control {
                 .map_err(gen_err)?;
                 let peak = dbfs_to_rms(st.level.0) * g.crest_factor();
                 if !self.s.max_level.admits_peak(peak) {
-                    return Err(perr(
-                        ErrorCode::Refused,
-                        "the signal's peak would exceed the output limit",
-                    ));
+                    return Err(refused("the signal's peak would exceed the output limit"));
                 }
                 let lc = g.level_control();
                 // A fresh gate state for the new source; the old one fades on its own.
@@ -261,7 +248,7 @@ impl Control {
                         Box::new(g),
                         Arc::clone(&self.out.gate),
                     )))
-                    .map_err(|e| perr(ErrorCode::Internal, e.to_string()))?;
+                    .map_err(|e| internal(e.to_string()))?;
                 self.out.level = Some(lc);
                 self.out.source = Some(key);
             } else if let Some(lc) = &self.out.level {

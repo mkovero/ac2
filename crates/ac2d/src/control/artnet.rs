@@ -16,13 +16,13 @@ use std::time::{Duration, Instant};
 use ac2_proto::event::Change;
 use ac2_proto::model::{ArtnetFade, ArtnetTarget, DMX_CHANNELS, DmxSet, OutputStatus, dmx_htp};
 use ac2_proto::units::{Rev, Seconds};
-use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
+use ac2_proto::{ProtoError, ReplyBody};
 
 use super::Control;
 use super::osc::{REPEAT, status_due};
 use crate::artnet::ArtnetSender;
 use crate::rig::RigSettings;
-use crate::util::perr;
+use crate::util::{internal, invalid};
 
 /// How often the current frame is sent again.
 pub(crate) const KEEPALIVE: Duration = REPEAT;
@@ -294,7 +294,7 @@ impl Control {
     ) -> Result<ReplyBody, ProtoError> {
         self.rig_base(base)?;
         if let Some(t) = target {
-            check_addr(t.addr).map_err(|e| perr(ErrorCode::Invalid, e))?;
+            check_addr(t.addr).map_err(invalid)?;
         }
         if self.store.state().rig.artnet_target == target {
             return Ok(ReplyBody::Ack {
@@ -332,8 +332,7 @@ impl Control {
         seconds: Seconds,
     ) -> Result<ReplyBody, ProtoError> {
         self.rig_base(base)?;
-        let fade =
-            ArtnetFade::new(seconds.0).map_err(|e| perr(ErrorCode::Invalid, e.to_string()))?;
+        let fade = ArtnetFade::new(seconds.0).map_err(|e| invalid(e.to_string()))?;
         if self.store.state().rig.artnet_fade == fade {
             return Ok(ReplyBody::Ack {
                 rev: self.store.rev(),
@@ -351,20 +350,14 @@ impl Control {
     /// `artnet.test`.
     pub(super) fn artnet_test(&mut self, channels: &[DmxSet]) -> Result<ReplyBody, ProtoError> {
         let Some(target) = self.store.state().rig.artnet_target else {
-            return Err(perr(
-                ErrorCode::Invalid,
-                "no Art-Net target is set (artnet.target)",
-            ));
+            return Err(invalid("no Art-Net target is set (artnet.target)"));
         };
         if let Some((_, d)) = channels
             .iter()
             .enumerate()
             .find(|(i, d)| channels[..*i].iter().any(|x| x.channel == d.channel))
         {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!("channel {} is listed twice", d.channel),
-            ));
+            return Err(invalid(format!("channel {} is listed twice", d.channel)));
         }
         let now = Instant::now();
         let frame = dmx_htp([channels]);
@@ -372,7 +365,7 @@ impl Control {
         self.rig.artnet.test_until = Some(now + TEST_HOLD);
         self.rig.artnet.after_test = true;
         self.commit_artnet_status(true);
-        r.map_err(|e| perr(ErrorCode::Internal, e))?;
+        r.map_err(internal)?;
         Ok(ReplyBody::Ack {
             rev: self.store.rev(),
         })

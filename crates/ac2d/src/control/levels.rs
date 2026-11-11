@@ -3,11 +3,11 @@
 
 use ac2_proto::model::{Ballistic, CorrelationWindow, LevelsSettings};
 use ac2_proto::units::{Dbfs, Dbtp, Lufs, Rev};
-use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
+use ac2_proto::{ProtoError, ReplyBody};
 
 use super::Control;
 use crate::rig::RigSettings;
-use crate::util::perr;
+use crate::util::invalid;
 
 impl Control {
     /// `levels.set`: each field given replaces the rig's; the settings file is written
@@ -30,7 +30,7 @@ impl Control {
             correlation_gate: correlation_gate.unwrap_or(now.correlation_gate),
             loudness_target: loudness_target.unwrap_or(now.loudness_target),
         };
-        levels.check().map_err(|e| perr(ErrorCode::Invalid, e))?;
+        levels.check().map_err(invalid)?;
         if levels == now {
             return Ok(ReplyBody::Ack {
                 rev: self.store.rev(),

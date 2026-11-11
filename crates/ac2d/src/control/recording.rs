@@ -33,7 +33,7 @@ use super::Control;
 use crate::jobs::record::{Progress, QUEUE_S, RecordCmd, Recorder, SharedProgress};
 use crate::jobs::{self, JobHandle, block_index};
 use crate::session::Runtime;
-use crate::util::{perr, wall_ns};
+use crate::util::{internal, invalid, missing, perr, refused, wall_ns};
 
 /// How long an unfinished recording's audio file must have been left alone before it is
 /// taken for one whose daemon died: a live recorder flushes its buffer every few seconds
@@ -133,55 +133,43 @@ impl Control {
         req: RecordRequest,
     ) -> Result<ReplyBody, ProtoError> {
         if self.recording.is_some() {
-            return Err(perr(
-                ErrorCode::Refused,
-                "a recording is running: stop it first (rec.stop)",
-            ));
+            return Err(refused("a recording is running: stop it first (rec.stop)"));
         }
         let Some(rt) = self.session.as_ref() else {
-            return Err(perr(ErrorCode::Refused, "no open session to record"));
+            return Err(refused("no open session to record"));
         };
         if req.inputs.is_empty() {
-            return Err(perr(ErrorCode::Invalid, "no inputs to record"));
+            return Err(invalid("no inputs to record"));
         }
         let mut cols = Vec::with_capacity(req.inputs.len());
         for (i, &input) in req.inputs.iter().enumerate() {
             if req.inputs[..i].contains(&input) {
-                return Err(perr(
-                    ErrorCode::Invalid,
-                    format!("input {} listed twice", input + 1),
-                ));
+                return Err(invalid(format!("input {} listed twice", input + 1)));
             }
             if ac2_proto::model::remote_slot(input).is_some() {
-                return Err(perr(
-                    ErrorCode::Refused,
+                return Err(refused(
                     "a remote input is not recorded yet: record it on its own rig",
                 ));
             }
             cols.push(block_index(&rt.input_map, input).ok_or_else(|| {
-                perr(
-                    ErrorCode::Invalid,
-                    format!("input {} is not captured by the session", input + 1),
-                )
+                invalid(format!(
+                    "input {} is not captured by the session",
+                    input + 1
+                ))
             })?);
         }
         let d = req.max_duration.0;
         if !(d.is_finite() && d > 0.0 && d <= RecordRequest::MAX_DURATION_S) {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!(
-                    "the duration bound must be above 0 and at most {} h",
-                    RecordRequest::MAX_DURATION_S / 3600.0
-                ),
-            ));
+            return Err(invalid(format!(
+                "the duration bound must be above 0 and at most {} h",
+                RecordRequest::MAX_DURATION_S / 3600.0
+            )));
         }
-        let channels = u16::try_from(req.inputs.len())
-            .map_err(|_| perr(ErrorCode::Invalid, "too many inputs"))?;
+        let channels = u16::try_from(req.inputs.len()).map_err(|_| invalid("too many inputs"))?;
         if let Some(b) = req.max_bytes
             && b < raw::wav::file_bytes(channels, u64::from(rt.sample_rate))
         {
-            return Err(perr(
-                ErrorCode::Invalid,
+            return Err(invalid(
                 "the size bound must allow at least one second of audio",
             ));
         }
@@ -191,12 +179,8 @@ impl Control {
                 "this daemon has no recording directory",
             ));
         };
-        std::fs::create_dir_all(&dir).map_err(|e| {
-            perr(
-                ErrorCode::Internal,
-                format!("cannot create {}: {e}", dir.display()),
-            )
-        })?;
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| internal(format!("cannot create {}: {e}", dir.display())))?;
         let now = wall_ns();
         let name = match &req.name {
             Some(n) => {
@@ -223,12 +207,8 @@ impl Control {
             return Err(raw_err(RawError::Exists(name)));
         }
         let path = raw::audio_path(&dir, &name);
-        let writer = WavWriter::create(&path, channels, rt.sample_rate).map_err(|e| {
-            perr(
-                ErrorCode::Internal,
-                format!("cannot create {}: {e}", path.display()),
-            )
-        })?;
+        let writer = WavWriter::create(&path, channels, rt.sample_rate)
+            .map_err(|e| internal(format!("cannot create {}: {e}", path.display())))?;
 
         let names = self.input_channel_names(rt);
         let st = self.store.state();
@@ -320,12 +300,7 @@ impl Control {
             fid,
             Box::new(recorder),
         )
-        .map_err(|e| {
-            perr(
-                ErrorCode::Internal,
-                format!("cannot start the recorder: {e}"),
-            )
-        })?;
+        .map_err(|e| internal(format!("cannot start the recorder: {e}")))?;
         feed.queue.limit.store(
             (QUEUE_S * f64::from(rt.sample_rate)) as u64,
             std::sync::atomic::Ordering::Relaxed,
@@ -361,7 +336,7 @@ impl Control {
 
     pub(super) fn rec_stop(&mut self) -> Result<ReplyBody, ProtoError> {
         if self.recording.is_none() {
-            return Err(perr(ErrorCode::Refused, "nothing is being recorded"));
+            return Err(refused("nothing is being recorded"));
         }
         self.end_recording(RecordingEnd::Stopped);
         self.store
@@ -369,7 +344,7 @@ impl Control {
             .recording
             .clone()
             .map(ReplyBody::Recording)
-            .ok_or_else(|| perr(ErrorCode::Internal, "the recording vanished"))
+            .ok_or_else(|| internal("the recording vanished"))
     }
 
     pub(super) fn rec_list(&self) -> Result<ReplyBody, ProtoError> {
@@ -524,37 +499,29 @@ impl Control {
             RecordingRef::Name { name } => {
                 raw::validate_name(name).map_err(raw_err)?;
                 let dir = self.s.recording_dir.clone().ok_or_else(|| {
-                    perr(
-                        ErrorCode::NotFound,
-                        "this daemon has no recording directory; name the file by its path",
-                    )
+                    missing("this daemon has no recording directory; name the file by its path")
                 })?;
                 Ok((dir, name.clone()))
             }
             RecordingRef::Path { path } => {
                 if self.s.network {
-                    return Err(perr(
-                        ErrorCode::Refused,
+                    return Err(refused(
                         "remote clients name recordings; paths are for local clients only",
                     ));
                 }
                 let p = PathBuf::from(path);
                 if !p.is_absolute() {
-                    return Err(perr(
-                        ErrorCode::Invalid,
+                    return Err(invalid(
                         "a recording path must be absolute (the daemon's working directory is \
                          not the client's)",
                     ));
                 }
                 raw::split_path(&p).ok_or_else(|| {
-                    perr(
-                        ErrorCode::Invalid,
-                        format!(
-                            "{path}: name the recording's {} or {} file",
-                            raw::AUDIO_SUFFIX,
-                            raw::SIDECAR_SUFFIX
-                        ),
-                    )
+                    invalid(format!(
+                        "{path}: name the recording's {} or {} file",
+                        raw::AUDIO_SUFFIX,
+                        raw::SIDECAR_SUFFIX
+                    ))
                 })
             }
         }
@@ -570,10 +537,9 @@ impl Control {
         let s = raw::read_sidecar(&dir, &name).map_err(raw_err)?;
         let path = dir.join(&s.audio.file);
         if s.end.is_none() {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!("{name} is still being recorded; stop it first"),
-            ));
+            return Err(refused(format!(
+                "{name} is still being recorded; stop it first"
+            )));
         }
         let reader = WavReader::open(&path).map_err(|err| {
             raw_err(RawError::Audio {
@@ -586,17 +552,14 @@ impl Control {
         if info.sample_rate != s.audio.sample_rate
             || usize::from(info.channels) != s.audio.channels.len()
         {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!(
-                    "{}: {} channels at {} Hz, the sidecar says {} at {} Hz",
-                    path.display(),
-                    info.channels,
-                    info.sample_rate,
-                    s.audio.channels.len(),
-                    s.audio.sample_rate
-                ),
-            ));
+            return Err(invalid(format!(
+                "{}: {} channels at {} Hz, the sidecar says {} at {} Hz",
+                path.display(),
+                info.channels,
+                info.sample_rate,
+                s.audio.channels.len(),
+                s.audio.sample_rate
+            )));
         }
         let inputs: Vec<u16> = s.audio.channels.iter().map(|c| c.input).collect();
         let max = inputs.iter().max().copied().unwrap_or(0);

@@ -19,11 +19,10 @@ use ac2_proto::model::{
 use ac2_proto::units::{Blob, Db, DbSpl, Dbfs, Hz, MvPerPa, Rev, Volts, WallNs};
 
 use super::{
-    Change, Control, ErrorCode, MAX_CAL_UNSETTLED_DB, Patch, ProtoError, ReplyBody, block_index,
-    perr, upsert_inputs,
+    Change, Control, MAX_CAL_UNSETTLED_DB, Patch, ProtoError, ReplyBody, block_index, upsert_inputs,
 };
 use crate::calstore::{self, Contents, Curves};
-use crate::util::wall_ns;
+use crate::util::{internal, invalid, missing, refused, wall_ns};
 
 /// `inputs` with `channel`'s mic name set to `mic`; a new mic starts with no curve chosen
 /// (the old choice named another capsule's curve). The row is a mic's ([`Control::mic_input`]
@@ -55,10 +54,6 @@ pub(super) struct ElectricalArgs {
     pub(super) loading: Option<MicLoading>,
     pub(super) uncertainty: Option<Db>,
     pub(super) replace_acoustic: bool,
-}
-
-fn not_found(msg: String) -> ProtoError {
-    perr(ErrorCode::NotFound, msg)
 }
 
 /// `mic`'s labels, `0°, 90°`.
@@ -104,14 +99,11 @@ impl Control {
         if matches!(kind, InputKind::Mic { .. }) {
             return Ok(());
         }
-        Err(perr(
-            ErrorCode::Invalid,
-            format!(
-                "input {} is a {}; {what} needs a microphone",
-                nth(channel),
-                kind.word()
-            ),
-        ))
+        Err(invalid(format!(
+            "input {} is a {}; {what} needs a microphone",
+            nth(channel),
+            kind.word()
+        )))
     }
 
     /// The whole input setup as mirrored.
@@ -187,13 +179,12 @@ impl Control {
         self.not_remote(input)?;
         let n = nth(input);
         let Some(rt) = self.session.as_ref() else {
-            return Err(perr(
-                ErrorCode::Invalid,
+            return Err(invalid(
                 "no open session: a calibration is tied to the session's capture device",
             ));
         };
         block_index(&rt.input_map, input)
-            .ok_or_else(|| perr(ErrorCode::Invalid, format!("input {n} is not captured")))?;
+            .ok_or_else(|| invalid(format!("input {n} is not captured")))?;
         Ok(rt.open.input_device.clone())
     }
 
@@ -219,43 +210,36 @@ impl Control {
         let n = nth(input);
         let device = self.cal_target(input)?;
         let Some(rt) = self.session.as_ref() else {
-            return Err(perr(ErrorCode::Invalid, "no open session"));
+            return Err(invalid("no open session"));
         };
         let idx = block_index(&rt.input_map, input)
-            .ok_or_else(|| perr(ErrorCode::Invalid, format!("input {n} is not captured")))?;
+            .ok_or_else(|| invalid(format!("input {n} is not captured")))?;
         // Broadband and uncorrected: the mic curve is 0 dB at the calibration frequency,
         // so the corrected paths read the tone the same (Q7 §3).
         let (ms, fast) = rt.fanout.meters.mean_square(idx).unwrap_or((0.0, 0.0));
         let measured = ac2_core::spectrum::rms_dbfs(ms.sqrt());
         if !(measured.is_finite() && measured > -80.0) {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!("no {tone} signal on input {n} ({measured:.1} dBFS)"),
-            ));
+            return Err(refused(format!(
+                "no {tone} signal on input {n} ({measured:.1} dBFS)"
+            )));
         }
         let latest = rt.fanout.latest.load(std::sync::atomic::Ordering::Acquire);
         if let Some(end) = rt.fanout.meters.clipped_until(idx)
             && latest.saturating_sub(end) < 2 * u64::from(rt.sample_rate)
         {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!(
-                    "input {n} clipped in the last 2 s: a clipped {tone} reads low; lower \
-                     the level or the gain and retry"
-                ),
-            ));
+            return Err(refused(format!(
+                "input {n} clipped in the last 2 s: a clipped {tone} reads low; lower \
+                 the level or the gain and retry"
+            )));
         }
         // The 1 s mean square is within 0.05 dB of a steady level once the 0.2 s one agrees
         // with it that closely (about 5 s after the tone went on).
         let unsettled = 10.0 * (fast / ms).log10();
         if unsettled.is_nan() || unsettled.abs() > MAX_CAL_UNSETTLED_DB {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!(
-                    "the {tone} level on input {n} is not steady yet ({unsettled:+.2} dB \
-                     over the last second); keep it on and retry in a few seconds"
-                ),
-            ));
+            return Err(refused(format!(
+                "the {tone} level on input {n} is not steady yet ({unsettled:+.2} dB \
+                 over the last second); keep it on and retry in a few seconds"
+            )));
         }
         Ok((device, measured))
     }
@@ -284,8 +268,7 @@ impl Control {
             && calibrator_freq.0.is_finite()
             && calibrator_freq.0 > 0.0)
         {
-            return Err(perr(
-                ErrorCode::Invalid,
+            return Err(invalid(
                 "calibrator level and frequency must be finite, the frequency above 0 Hz",
             ));
         }
@@ -322,7 +305,6 @@ impl Control {
     ) -> Result<ReplyBody, ProtoError> {
         self.cal.check()?;
         calstore::check_mic_name(&a.mic)?;
-        let invalid = |m: String| perr(ErrorCode::Invalid, m);
         let input = a.input;
         let n = nth(input);
         // Ranges that catch a unit slip (mV typed as V, V/Pa as mV/Pa) rather than limits of
@@ -401,36 +383,27 @@ impl Control {
                 .find(|e| e.key == key)
             && let CalMethod::Acoustic { calibrator_level } = e.spl.method
         {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!(
-                    "input {n} has an acoustic calibration for {} ({:.1} dB SPL calibrator): \
-                     it measured the whole chain and is the better one; replace it only on \
-                     purpose",
-                    a.mic, calibrator_level.0
-                ),
-            ));
+            return Err(refused(format!(
+                "input {n} has an acoustic calibration for {} ({:.1} dB SPL calibrator): \
+                 it measured the whole chain and is the better one; replace it only on \
+                 purpose",
+                a.mic, calibrator_level.0
+            )));
         }
         let (_, measured) = self.cal_reading(input, "tone")?;
         if measured > cal::ELECTRICAL_MAX_DBFS {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!(
-                    "input {n} reads {measured:.1} dBFS, too close to full scale for a \
-                     calibration (at most {} dBFS): lower the tone, not the gain",
-                    cal::ELECTRICAL_MAX_DBFS
-                ),
-            ));
+            return Err(refused(format!(
+                "input {n} reads {measured:.1} dBFS, too close to full scale for a \
+                 calibration (at most {} dBFS): lower the tone, not the gain",
+                cal::ELECTRICAL_MAX_DBFS
+            )));
         }
         if measured < cal::ELECTRICAL_MIN_DBFS {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!(
-                    "input {n} reads {measured:.1} dBFS, too low for a good reading (at \
-                     least {} dBFS): raise the tone, not the gain",
-                    cal::ELECTRICAL_MIN_DBFS
-                ),
-            ));
+            return Err(refused(format!(
+                "input {n} reads {measured:.1} dBFS, too low for a good reading (at \
+                 least {} dBFS): raise the tone, not the gain",
+                cal::ELECTRICAL_MIN_DBFS
+            )));
         }
         let full_scale = cal::full_scale_volts(a.volts.0, measured);
         let sensitivity = cal::electrical_sensitivity_db(full_scale, loaded.0);
@@ -488,10 +461,7 @@ impl Control {
             .unwrap_or_default()
             .to_owned();
         if base.is_empty() || base.chars().count() > 255 {
-            return Err(perr(
-                ErrorCode::Invalid,
-                "file name must be 1 … 255 characters",
-            ));
+            return Err(invalid("file name must be 1 … 255 characters"));
         }
         let curve = MicCurve::parse(&content.0).map_err(calstore::curve_error)?;
         let info = file_info(&content.0, &base);
@@ -564,7 +534,7 @@ impl Control {
             .iter()
             .find(|m| m.name == mic)
             .cloned()
-            .ok_or_else(|| perr(ErrorCode::Internal, "imported mic missing"))?;
+            .ok_or_else(|| internal("imported mic missing"))?;
         self.commit_store(new, curves)?;
         tracing::info!(
             "mic curve {label:?} of {mic} {} from {base}",
@@ -585,12 +555,9 @@ impl Control {
             .mics
             .iter_mut()
             .find(|m| m.name == id.mic)
-            .ok_or_else(|| not_found(format!("no mic {:?} in the mic library", id.mic)))?;
+            .ok_or_else(|| missing(format!("no mic {:?} in the mic library", id.mic)))?;
         if label != id.label && m.curves.iter().any(|c| c.label == label) {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!("{} already has a curve {label:?}", id.mic),
-            ));
+            return Err(invalid(format!("{} already has a curve {label:?}", id.mic)));
         }
         let all = labels(m);
         let c = m
@@ -598,7 +565,7 @@ impl Control {
             .iter_mut()
             .find(|c| c.label == id.label)
             .ok_or_else(|| {
-                not_found(format!(
+                missing(format!(
                     "{} has no curve {:?} (stored: {all})",
                     id.mic, id.label
                 ))
@@ -638,12 +605,12 @@ impl Control {
             .mics
             .iter_mut()
             .find(|m| m.name == id.mic)
-            .ok_or_else(|| not_found(format!("no mic {:?} in the mic library", id.mic)))?;
+            .ok_or_else(|| missing(format!("no mic {:?} in the mic library", id.mic)))?;
         let before = m.curves.len();
         let all = labels(m);
         m.curves.retain(|c| c.label != id.label);
         if m.curves.len() == before {
-            return Err(not_found(format!(
+            return Err(missing(format!(
                 "{} has no curve {:?} (stored: {all})",
                 id.mic, id.label
             )));
@@ -667,7 +634,7 @@ impl Control {
                 let before = new.calibrations.len();
                 new.calibrations.retain(|e| e.key != *key);
                 if new.calibrations.len() == before {
-                    return Err(not_found(format!(
+                    return Err(missing(format!(
                         "no sensitivity calibration for {} on input {} of {}",
                         key.mic,
                         nth(key.channel),
@@ -685,7 +652,7 @@ impl Control {
                 let before = new.line_calibrations.len();
                 new.line_calibrations.retain(|e| e.key != *key);
                 if new.line_calibrations.len() == before {
-                    return Err(not_found(format!(
+                    return Err(missing(format!(
                         "no line calibration of input {} of {}",
                         nth(key.channel),
                         key.device.0
@@ -708,7 +675,6 @@ impl Control {
     /// `cal.spl_electrical` does, and the volts at 0 dBFS follow, dBu of 0 dBFS from them.
     pub(super) fn cal_line(&mut self, channel: u16, volts: Volts) -> Result<ReplyBody, ProtoError> {
         self.cal.check()?;
-        let invalid = |m: String| perr(ErrorCode::Invalid, m);
         let kind = cal::input_kind(&self.store.state().inputs, channel);
         if kind != InputKind::Line {
             return Err(invalid(format!(
@@ -730,21 +696,18 @@ impl Control {
         }
         let (device, measured) = self.steady_level(channel, "tone")?;
         if !(cal::ELECTRICAL_MIN_DBFS..=cal::ELECTRICAL_MAX_DBFS).contains(&measured) {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!(
-                    "input {} reads {measured:.1} dBFS, outside {} … {} dBFS for a \
-                     calibration: {} the tone, not the gain",
-                    nth(channel),
-                    cal::ELECTRICAL_MIN_DBFS,
-                    cal::ELECTRICAL_MAX_DBFS,
-                    if measured > cal::ELECTRICAL_MAX_DBFS {
-                        "lower"
-                    } else {
-                        "raise"
-                    }
-                ),
-            ));
+            return Err(refused(format!(
+                "input {} reads {measured:.1} dBFS, outside {} … {} dBFS for a \
+                 calibration: {} the tone, not the gain",
+                nth(channel),
+                cal::ELECTRICAL_MIN_DBFS,
+                cal::ELECTRICAL_MAX_DBFS,
+                if measured > cal::ELECTRICAL_MAX_DBFS {
+                    "lower"
+                } else {
+                    "raise"
+                }
+            )));
         }
         let v_fs = cal::full_scale_volts(volts.0, measured);
         let dbu_fs = cal::dbu_fs(v_fs);
@@ -807,7 +770,7 @@ impl Control {
         for (i, r) in rows.iter().enumerate() {
             let n = nth(r.channel);
             if rows[..i].iter().any(|o| o.channel == r.channel) {
-                return Err(perr(ErrorCode::Invalid, format!("input {n} listed twice")));
+                return Err(invalid(format!("input {n} listed twice")));
             }
             let InputKind::Mic { mic, curve } = &r.kind else {
                 continue;
@@ -825,17 +788,15 @@ impl Control {
             }
             if let CurveChoice::Curve { label } = curve {
                 let Some(m) = mic else {
-                    return Err(perr(
-                        ErrorCode::Invalid,
-                        format!("input {n}: a curve is chosen for a mic; name the mic first"),
-                    ));
+                    return Err(invalid(format!(
+                        "input {n}: a curve is chosen for a mic; name the mic first"
+                    )));
                 };
                 if cal::curve(&st.mics, m, label).is_none() {
                     let stored = cal::mic(&st.mics, m).map_or_else(|| "none".to_owned(), labels);
-                    return Err(perr(
-                        ErrorCode::Invalid,
-                        format!("input {n}: no curve {label:?} stored for {m} (stored: {stored})"),
-                    ));
+                    return Err(invalid(format!(
+                        "input {n}: no curve {label:?} stored for {m} (stored: {stored})"
+                    )));
                 }
             }
         }
@@ -850,7 +811,7 @@ impl Control {
                 .is_some()
                 .then_some(&captured_fn as &dyn Fn(u16) -> bool),
         )
-        .map_err(|e| perr(ErrorCode::Invalid, e))?;
+        .map_err(invalid)?;
         let mut pairs = pairs;
         pairs.sort_by_key(|p| p.left);
         new.inputs = cal::apply_pair_sides(&merged, &pairs);

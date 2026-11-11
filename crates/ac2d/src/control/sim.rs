@@ -17,7 +17,7 @@ use ac2_roomsim::PerBand;
 use super::Control;
 use crate::sim::run::{Job, SimEnd};
 use crate::sim::{self, Mode, SimMsg, Worker, plan};
-use crate::util::{perr, perr_detail};
+use crate::util::{internal, invalid, missing, perr, perr_detail};
 
 /// How long shutdown waits for a cancelled worker's thread to exit.
 const STOP_BOUND: Duration = Duration::from_secs(2);
@@ -84,22 +84,22 @@ fn refused(reason: SimRefusal) -> ProtoError {
 
 fn check_settings(s: &SimSettings) -> Result<(), ProtoError> {
     if s.image_order > SimSettings::MAX_IMAGE_ORDER {
-        return Err(perr(
-            ErrorCode::Invalid,
-            format!("image order at most {}", SimSettings::MAX_IMAGE_ORDER),
-        ));
+        return Err(invalid(format!(
+            "image order at most {}",
+            SimSettings::MAX_IMAGE_ORDER
+        )));
     }
     if s.rays_per_band > SimSettings::MAX_RAYS {
-        return Err(perr(
-            ErrorCode::Invalid,
-            format!("at most {} rays per band", SimSettings::MAX_RAYS),
-        ));
+        return Err(invalid(format!(
+            "at most {} rays per band",
+            SimSettings::MAX_RAYS
+        )));
     }
     if !(s.budget.0.is_finite() && s.budget.0 > 0.0 && s.budget.0 <= SimSettings::MAX_BUDGET_S) {
-        return Err(perr(
-            ErrorCode::Invalid,
-            format!("the budget lies in 0…{} s", SimSettings::MAX_BUDGET_S),
-        ));
+        return Err(invalid(format!(
+            "the budget lies in 0…{} s",
+            SimSettings::MAX_BUDGET_S
+        )));
     }
     Ok(())
 }
@@ -118,7 +118,7 @@ impl Control {
                     .find(|p| p.name == name)
                     .map(|p| (p.clone(), true))
             })
-            .ok_or_else(|| perr(ErrorCode::NotFound, format!("no plan named {name:?}")))
+            .ok_or_else(|| missing(format!("no plan named {name:?}")))
     }
 
     /// `sim.run`.
@@ -134,10 +134,10 @@ impl Control {
             SimReceivers::Walk { walk } => {
                 let w = self.walk(walk)?;
                 if w.plan != r.plan {
-                    return Err(perr(
-                        ErrorCode::Invalid,
-                        format!("walk {} walks plan {:?}, not {:?}", w.name, w.plan, r.plan),
-                    ));
+                    return Err(invalid(format!(
+                        "walk {} walks plan {:?}, not {:?}",
+                        w.name, w.plan, r.plan
+                    )));
                 }
                 let points = w
                     .points
@@ -156,14 +156,11 @@ impl Control {
         if points.len() > SimSettings::MAX_RECEIVERS
             || points.len() * r.sources.len() > SimSettings::MAX_RESULTS
         {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!(
-                    "at most {} receivers, {} over every source",
-                    SimSettings::MAX_RECEIVERS,
-                    SimSettings::MAX_RESULTS
-                ),
-            ));
+            return Err(invalid(format!(
+                "at most {} receivers, {} over every source",
+                SimSettings::MAX_RECEIVERS,
+                SimSettings::MAX_RESULTS
+            )));
         }
         let sources = r
             .sources
@@ -204,30 +201,30 @@ impl Control {
             return Err(refused(SimRefusal::Busy));
         }
         if r.image_order > SimSettings::MAX_IMAGE_ORDER {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!("image order at most {}", SimSettings::MAX_IMAGE_ORDER),
-            ));
+            return Err(invalid(format!(
+                "image order at most {}",
+                SimSettings::MAX_IMAGE_ORDER
+            )));
         }
         if !(r.spacing.is_finite() && r.spacing > 0.0) {
-            return Err(perr(ErrorCode::Invalid, "the spacing is a length > 0 m"));
+            return Err(invalid("the spacing is a length > 0 m"));
         }
         if !(r.window.0.is_finite()
             && r.window.0 > 0.0
             && r.window.0 <= SimMapRequest::MAX_WINDOW_S)
         {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!("the window lies in 0…{} s", SimMapRequest::MAX_WINDOW_S),
-            ));
+            return Err(invalid(format!(
+                "the window lies in 0…{} s",
+                SimMapRequest::MAX_WINDOW_S
+            )));
         }
         let band = match r.band {
             None => None,
             Some(hz) => Some(sim::map::band_index(hz).ok_or_else(|| {
-                perr(
-                    ErrorCode::Invalid,
-                    format!("{} Hz is not an octave band of the simulation", hz.0),
-                )
+                invalid(format!(
+                    "{} Hz is not an octave band of the simulation",
+                    hz.0
+                ))
             })?),
         };
         let (plan, library) = self.sim_plan(&r.plan)?;
@@ -356,12 +353,8 @@ impl Control {
             lost_rays: 0,
             map: None,
         };
-        let worker = sim::spawn(id, job, mode, self.s.to_self.clone()).map_err(|e| {
-            perr(
-                ErrorCode::Internal,
-                format!("cannot start the simulation: {e}"),
-            )
-        })?;
+        let worker = sim::spawn(id, job, mode, self.s.to_self.clone())
+            .map_err(|e| internal(format!("cannot start the simulation: {e}")))?;
         self.commit(Change::Sim(state.clone()));
         self.sims.active = Some(ActiveSim {
             worker,

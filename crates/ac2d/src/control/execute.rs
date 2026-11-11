@@ -11,7 +11,7 @@ use ac2_proto::units::{ClientId, Db, MeasId, Rev, Seconds};
 use ac2_proto::{Command, ErrorCode, ErrorDetail, ProtoError, ReplyBody, Welcome};
 
 use crate::jobs::JobCmd;
-use crate::util::{perr, perr_detail};
+use crate::util::{internal, invalid, missing, perr_detail, refused};
 
 use super::validate::{
     display_only, not_a_sweep, smoothing_only, spl_in_place, stale_meas, validate_meas,
@@ -54,14 +54,12 @@ impl Control {
                 self.close_preview();
                 ack(self.store.rev())
             }
-            Command::SessionDetectLoopback { .. } => Err(perr(
-                ErrorCode::Internal,
+            Command::SessionDetectLoopback { .. } => Err(internal(
                 "session.detect_loopback is answered asynchronously",
             )),
-            Command::SessionControlPanel { .. } => Err(perr(
-                ErrorCode::Internal,
-                "session.control_panel is answered asynchronously",
-            )),
+            Command::SessionControlPanel { .. } => {
+                Err(internal("session.control_panel is answered asynchronously"))
+            }
             Command::SessionOpen { config } => self.rig_session_open(client, config),
             Command::SessionClose => {
                 self.rig_session_closing();
@@ -148,55 +146,43 @@ impl Control {
             Command::MeasColour { meas, colour } => {
                 let mut m = self.meas(meas)?.clone();
                 if matches!(m.config.kind, MeasKind::Math { .. }) {
-                    return Err(perr(
-                        ErrorCode::Invalid,
-                        format!(
-                            "{} is a math channel: it is drawn in its owner's colours",
-                            m.config.name
-                        ),
-                    ));
+                    return Err(invalid(format!(
+                        "{} is a math channel: it is drawn in its owner's colours",
+                        m.config.name
+                    )));
                 }
                 if colour.is_some_and(|c| !c.is_valid()) {
-                    return Err(perr(
-                        ErrorCode::Invalid,
-                        format!(
-                            "colour families are 0 … {} and neutral",
-                            ColourFamily::HUES - 1
-                        ),
-                    ));
+                    return Err(invalid(format!(
+                        "colour families are 0 … {} and neutral",
+                        ColourFamily::HUES - 1
+                    )));
                 }
                 // Only how its curves are drawn changes: the job and its frames go on.
                 m.colour = colour;
-                self.commit(Change::Measurement(Patch::Set(m.clone())));
-                Ok(ReplyBody::Measurement(m))
+                Ok(self.reply_meas(m))
             }
             Command::MeasLayout { meas, layout } => {
                 let mut m = self.meas(meas)?.clone();
                 if let Some(l) = &layout {
-                    l.check().map_err(|e| perr(ErrorCode::Invalid, e))?;
+                    l.check().map_err(invalid)?;
                     l.check_groups(|w| self.drawn_by_group(w))
-                        .map_err(|e| perr(ErrorCode::Invalid, e))?;
+                        .map_err(invalid)?;
                 }
                 // Only what clients show changes: the job and its frames go on.
                 m.layout = layout;
-                self.commit(Change::Measurement(Patch::Set(m.clone())));
-                Ok(ReplyBody::Measurement(m))
+                Ok(self.reply_meas(m))
             }
             Command::MeasOffset { meas, offset } => {
                 let mut m = self.meas(meas)?.clone();
                 if !Measurement::offset_ok(offset) {
-                    return Err(perr(
-                        ErrorCode::Invalid,
-                        format!(
-                            "the offset must be finite and within ±{} dB",
-                            Measurement::OFFSET_MAX_DB
-                        ),
-                    ));
+                    return Err(invalid(format!(
+                        "the offset must be finite and within ±{} dB",
+                        Measurement::OFFSET_MAX_DB
+                    )));
                 }
                 // Display only: the job and its frames go on, levels as measured.
                 m.offset = offset;
-                self.commit(Change::Measurement(Patch::Set(m.clone())));
-                Ok(ReplyBody::Measurement(m))
+                Ok(self.reply_meas(m))
             }
             Command::MeasDelete { meas, traces } => self.meas_delete(meas, traces),
             Command::MeasEq { meas, edit } => self.meas_eq(client, meas, edit),
@@ -206,15 +192,13 @@ impl Control {
                 not_a_sweep(&m)?;
                 self.stop_job(meas);
                 m.running = false;
-                self.commit(Change::Measurement(Patch::Set(m.clone())));
-                Ok(ReplyBody::Measurement(m))
+                Ok(self.reply_meas(m))
             }
             Command::MeasReset { meas } => {
                 not_a_sweep(self.meas(meas)?)?;
                 if let MeasKind::Math { .. } = self.meas(meas)?.config.kind {
                     // Its operands hold the averages; resetting one is the operator's choice.
-                    return Err(perr(
-                        ErrorCode::Invalid,
+                    return Err(invalid(
                         "a math channel holds no averages of its own; reset its operands",
                     ));
                 }
@@ -224,32 +208,23 @@ impl Control {
                 ack(self.store.rev())
             }
 
-            Command::DelayFind { .. } => Err(perr(
-                ErrorCode::Internal,
-                "delay.find is answered asynchronously",
-            )),
+            Command::DelayFind { .. } => Err(internal("delay.find is answered asynchronously")),
             Command::DelayInsert { meas, pick } => {
                 let d = self.transfer_delay(meas)?;
                 let Some(f) = &d.last_finding else {
-                    return Err(perr(
-                        ErrorCode::Invalid,
+                    return Err(invalid(
                         "no delay finding to insert; run delay.find or use delay.set",
                     ));
                 };
                 if let Some(reasons) = f.no_estimate() {
-                    return Err(perr(
-                        ErrorCode::Refused,
-                        format!(
-                            "the last finding has no estimate ({reasons:?}); find again or use delay.set"
-                        ),
-                    ));
+                    return Err(refused(format!(
+                        "the last finding has no estimate ({reasons:?}); find again or use delay.set"
+                    )));
                 }
                 let delay = f
                     .arrival(pick)
                     .ok_or_else(|| {
-                        perr(
-                            ErrorCode::NotFound,
-                            "the last finding has no such arrival (ranked picks need an ambiguous finding)",
+                        missing("the last finding has no such arrival (ranked picks need an ambiguous finding)",
                         )
                     })?
                     .delay;
@@ -259,7 +234,7 @@ impl Control {
             Command::DelayNudge { meas, by } => {
                 let d = self.transfer_delay(meas)?;
                 if !by.0.is_finite() {
-                    return Err(perr(ErrorCode::Invalid, "the step must be finite"));
+                    return Err(invalid("the step must be finite"));
                 }
                 let delay = Seconds(d.applied.0 + by.0);
                 self.set_delay(meas, delay, DelaySource::Nudge)
@@ -273,8 +248,7 @@ impl Control {
                 if let Some(j) = self.jobs.get(&meas) {
                     j.send(JobCmd::Track { enabled });
                 }
-                self.commit(Change::Measurement(Patch::Set(m.clone())));
-                Ok(ReplyBody::Measurement(m))
+                Ok(self.reply_meas(m))
             }
 
             Command::TraceList => Ok(ReplyBody::Traces(self.store.state().traces.clone())),
@@ -390,7 +364,7 @@ impl Control {
                 .get(&grid_id)
                 .cloned()
                 .map(ReplyBody::Grid)
-                .ok_or_else(|| perr(ErrorCode::NotFound, format!("no grid {grid_id}"))),
+                .ok_or_else(|| missing(format!("no grid {grid_id}"))),
             Command::FileSave { .. }
             | Command::FileLoad { .. }
             | Command::FileNew { .. }
@@ -398,10 +372,9 @@ impl Control {
             | Command::FileSalvage { .. }
             | Command::FileList
             | Command::FileImport { .. }
-            | Command::FileDownloadBegin { .. } => Err(perr(
-                ErrorCode::Internal,
-                "session file work is answered asynchronously",
-            )),
+            | Command::FileDownloadBegin { .. } => {
+                Err(internal("session file work is answered asynchronously"))
+            }
             Command::FileUploadBegin {
                 file,
                 bytes,
@@ -505,8 +478,7 @@ impl Control {
             // Moving a math channel changes where it is listed, not what it
             // computes: its job and its frames' config rev go on.
             m.config = config;
-            self.commit(Change::Measurement(Patch::Set(m.clone())));
-            return Ok(ReplyBody::Measurement(m));
+            return Ok(self.reply_meas(m));
         }
         let grid = self.grid_of(Some(meas), &config.kind)?;
         let old_leq = match &m.config.kind {
@@ -530,8 +502,7 @@ impl Control {
             // Only how clients draw it changes: the job, its averages and the
             // config rev its frames carry go on.
             m.config = config;
-            self.commit(Change::Measurement(Patch::Set(m.clone())));
-            return Ok(ReplyBody::Measurement(m));
+            return Ok(self.reply_meas(m));
         }
         if let Some(change) = smoothing_only(&m.config.kind, &config.kind) {
             // Display smoothing changes in place: averaging goes on, and the next
@@ -544,8 +515,7 @@ impl Control {
                     rev: m.config_rev,
                 });
             }
-            self.commit(Change::Measurement(Patch::Set(m.clone())));
-            return Ok(ReplyBody::Measurement(m));
+            return Ok(self.reply_meas(m));
         }
         let was_transfer = matches!(m.config.kind, MeasKind::Transfer { .. });
         let is_transfer = matches!(config.kind, MeasKind::Transfer { .. });

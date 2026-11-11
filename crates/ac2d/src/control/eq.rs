@@ -9,7 +9,7 @@ use ac2_proto::model::{
     TraceKind, TraceMeta, TraceOwner, TraceSource,
 };
 use ac2_proto::units::{ClientId, EqSetId, Hz, MeasId, Seconds, TraceId, WallNs};
-use ac2_proto::{Command, ErrorCode, GridDef, ProtoError, ReplyBody};
+use ac2_proto::{Command, GridDef, ProtoError, ReplyBody};
 use ac2_traces::Columns;
 use ac2_traces::eq;
 use ac2_traces::math::trace_on_grid;
@@ -18,16 +18,12 @@ use num_complex::Complex64;
 
 use super::{Control, static_grid};
 use crate::jobs::math::Held;
-use crate::util::{perr, wall_ns};
+use crate::util::{invalid, missing, refused, wall_ns};
 
 /// The rate a new digital set assumes without a session: the common processor rate.
 const DEFAULT_RATE: f64 = 48_000.0;
 /// Points per octave of a sweep measurement's EQ curve (a transfer's is its own grid).
 const SWEEP_EQ_PPO: u32 = 48;
-
-fn invalid(m: impl Into<String>) -> ProtoError {
-    perr(ErrorCode::Invalid, m.into())
-}
 
 /// Where a curve after the set is evaluated for display: a transfer's own grid, else ten
 /// octaves at a fine resolution.
@@ -80,12 +76,9 @@ impl Control {
     }
 
     fn eq_set(m: &Measurement, set: EqSetId) -> Result<&EqSet, ProtoError> {
-        m.eq.iter().find(|s| s.id == set).ok_or_else(|| {
-            perr(
-                ErrorCode::NotFound,
-                format!("{} has no EQ set {}", m.config.name, set.0),
-            )
-        })
+        m.eq.iter()
+            .find(|s| s.id == set)
+            .ok_or_else(|| missing(format!("{} has no EQ set {}", m.config.name, set.0)))
     }
 
     /// A `response` section's trace on `grid`: a stored transfer function that is not
@@ -267,14 +260,11 @@ impl Control {
                 sections,
             } => {
                 if m.eq.len() >= EqSet::MAX_SETS {
-                    return Err(perr(
-                        ErrorCode::Refused,
-                        format!(
-                            "{} holds {} EQ sets already, the most it holds",
-                            m.config.name,
-                            EqSet::MAX_SETS
-                        ),
-                    ));
+                    return Err(refused(format!(
+                        "{} holds {} EQ sets already, the most it holds",
+                        m.config.name,
+                        EqSet::MAX_SETS
+                    )));
                 }
                 let body = EqBody {
                     name: name.unwrap_or_else(|| Self::free_eq_name(&m)),
@@ -326,14 +316,11 @@ impl Control {
                 let body = Self::eq_set(&m, set)?.body.clone();
                 let mut target = self.eq_meas(to)?;
                 if target.eq.len() >= EqSet::MAX_SETS {
-                    return Err(perr(
-                        ErrorCode::Refused,
-                        format!(
-                            "{} holds {} EQ sets already, the most it holds",
-                            target.config.name,
-                            EqSet::MAX_SETS
-                        ),
-                    ));
+                    return Err(refused(format!(
+                        "{} holds {} EQ sets already, the most it holds",
+                        target.config.name,
+                        EqSet::MAX_SETS
+                    )));
                 }
                 let id = self.add_eq(&mut target, body)?;
                 if matches!(target.config.kind, MeasKind::Transfer { .. }) {
@@ -527,13 +514,10 @@ impl Control {
         if m.eq.is_empty() || can_hold_eq(new) {
             return Ok(());
         }
-        Err(perr(
-            ErrorCode::Refused,
-            format!(
-                "{} holds EQ sets: it stays a transfer or sweep measurement; delete them first",
-                m.config.name
-            ),
-        ))
+        Err(refused(format!(
+            "{} holds EQ sets: it stays a transfer or sweep measurement; delete them first",
+            m.config.name
+        )))
     }
 
     /// Recomputes the curves of `meas`'s sets (its grid changed, or a session was loaded);
@@ -560,13 +544,10 @@ impl Control {
         if let Some(t) = st.traces.iter().find(|t| t.id == trace)
             && let TraceSource::Eq { set, .. } = t.source
         {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!(
-                    "{} is EQ set {}'s curve; delete the set instead",
-                    t.edit.name, set.0
-                ),
-            ));
+            return Err(refused(format!(
+                "{} is EQ set {}'s curve; delete the set instead",
+                t.edit.name, set.0
+            )));
         }
         for m in &st.measurements {
             for s in &m.eq {
@@ -574,14 +555,11 @@ impl Control {
                     matches!(x.shape, ac2_proto::model::EqShape::Response { trace: t } if t == trace)
                 });
                 if named {
-                    return Err(perr(
-                        ErrorCode::Refused,
-                        format!(
-                            "trace {trace} is a response section of {} on {}; remove it there \
-                             first",
-                            s.body.name, m.config.name
-                        ),
-                    ));
+                    return Err(refused(format!(
+                        "trace {trace} is a response section of {} on {}; remove it there \
+                         first",
+                        s.body.name, m.config.name
+                    )));
                 }
             }
         }

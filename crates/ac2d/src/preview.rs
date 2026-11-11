@@ -16,7 +16,6 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use ac2_audio::{Backend, DeviceSelector, DuplexRequest, MaxLevel, OutputSource};
-use ac2_proto::ErrorCode;
 use ac2_proto::ProtoError;
 use ac2_proto::cal;
 use ac2_proto::frame::{FrameData, PreviewLevelsFrame, PreviewLevelsMeta};
@@ -32,7 +31,7 @@ use crate::jobs::meters::{meter_period, meter_stamp};
 use crate::jobs::programme::{Captured, Declared, Programme, SharedPolicy};
 use crate::jobs::{Emitter, JobEnv, LevelsMeter, Meters};
 use crate::session::audio_err;
-use crate::util::perr;
+use crate::util::{internal, invalid, missing};
 
 /// A preview not renewed within this closes.
 pub(crate) const PREVIEW_EXPIRY: Duration = Duration::from_secs(5);
@@ -79,22 +78,14 @@ impl Preview {
             .map_err(audio_err)?
             .into_iter()
             .find(|d| d.id.0 == device.0)
-            .ok_or_else(|| {
-                perr(
-                    ErrorCode::NotFound,
-                    format!("no {kind:?} device {:?}", device.0),
-                )
-            })?;
+            .ok_or_else(|| missing(format!("no {kind:?} device {:?}", device.0)))?;
         let inputs = caps
             .input
             .as_ref()
             .map_or(0, |i| i.max_channels)
             .min(MAX_PREVIEW_INPUTS);
         if inputs == 0 {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!("{} has no inputs to meter", caps.name),
-            ));
+            return Err(invalid(format!("{} has no inputs to meter", caps.name)));
         }
         let sel = DeviceSelector::Id(ac2_audio::DeviceId(device.0.clone()));
         let mut req = DuplexRequest::new((0..inputs).collect(), 0, max_level);
@@ -129,16 +120,16 @@ impl Preview {
         for (i, r) in rows.iter().enumerate() {
             if rows[..i].iter().any(|o| o.channel == r.channel) {
                 let _ = stream.stop(STOP_TIMEOUT);
-                return Err(perr(
-                    ErrorCode::Invalid,
-                    format!("input {} listed twice", u32::from(r.channel) + 1),
-                ));
+                return Err(invalid(format!(
+                    "input {} listed twice",
+                    u32::from(r.channel) + 1
+                )));
             }
         }
         let captured = |ch: u16| ch < channels;
         if let Err(e) = cal::check_pairs(&rows, &pairs, Some(&captured)) {
             let _ = stream.stop(STOP_TIMEOUT);
-            return Err(perr(ErrorCode::Invalid, e));
+            return Err(invalid(e));
         }
         let meta = PreviewLevelsMeta {
             backend: kind,
@@ -242,12 +233,7 @@ impl Preview {
                 let outcome = stream.stop(STOP_TIMEOUT);
                 tracing::info!("preview stopped: {outcome:?}");
             })
-            .map_err(|e| {
-                perr(
-                    ErrorCode::Internal,
-                    format!("cannot start the preview: {e}"),
-                )
-            })?;
+            .map_err(|e| internal(format!("cannot start the preview: {e}")))?;
         Ok(Self {
             backend: kind,
             device,

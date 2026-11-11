@@ -16,13 +16,13 @@ use std::time::Instant;
 
 use super::{
     ActiveSweep, CalState, Change, ClientId, Control, ControlMsg, CoreBandLimit, CoreGenerator,
-    CoreSignal, ErrorCode, GenAction, GeneratorConfig, GeneratorSettings, LeaseToken, LeasedSource,
-    MeasKind, ProtoError, Recording, ReplyBody, Seconds, SweepAnalysis, SweepConfig, SweepError,
+    CoreSignal, GenAction, GeneratorConfig, GeneratorSettings, LeaseToken, LeasedSource, MeasKind,
+    ProtoError, Recording, ReplyBody, Seconds, SweepAnalysis, SweepConfig, SweepError,
     SweepFailure, SweepId, SweepInput, SweepRun, SweepStatus, SweepTrain, TraceKind, TraceMeta,
-    TraceSource, WallNs, block_index, dbfs_to_rms, gen_err, jobs, perr,
+    TraceSource, WallNs, block_index, dbfs_to_rms, gen_err, jobs,
 };
 use crate::sweep;
-use crate::util::wall_ns;
+use crate::util::{internal, invalid, refused, wall_ns};
 use ac2_audio::Gain;
 use ac2_proto::model::Signal;
 use ac2_proto::model::TraceOwner;
@@ -41,53 +41,45 @@ impl Control {
         self.lease_check(client, token)?;
         let m = self.meas(meas)?;
         let MeasKind::Sweep { config } = &m.config.kind else {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!("{} is not a sweep measurement", m.config.name),
-            ));
+            return Err(invalid(format!(
+                "{} is not a sweep measurement",
+                m.config.name
+            )));
         };
         let mut req: SweepConfig = config.clone();
         let meas_name = m.config.name.clone();
         let number = self.next_run_number(meas);
         let name = name.unwrap_or_else(|| format!("Run {number}"));
-        meta::check_edit(&name, None).map_err(|e| perr(ErrorCode::Invalid, e))?;
+        meta::check_edit(&name, None).map_err(invalid)?;
         let level = req.level;
         if !level.0.is_finite() {
-            return Err(perr(ErrorCode::Invalid, "level must be finite"));
+            return Err(invalid("level must be finite"));
         }
         if level.0 > self.s.ceiling_dbfs {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!(
-                    "{:.1} dBFS is above the global maximum {:.1} dBFS",
-                    level.0, self.s.ceiling_dbfs
-                ),
-            ));
+            return Err(refused(format!(
+                "{:.1} dBFS is above the global maximum {:.1} dBFS",
+                level.0, self.s.ceiling_dbfs
+            )));
         }
         if self.sweep.is_some() {
-            return Err(perr(ErrorCode::Refused, "a sweep is already running"));
+            return Err(refused("a sweep is already running"));
         }
         if self.detecting.is_some() {
-            return Err(perr(
-                ErrorCode::Refused,
+            return Err(refused(
                 "a loopback detection is playing its burst; sweep once it is done",
             ));
         }
         let g = &self.store.state().generator;
         if g.firing {
-            return Err(perr(
-                ErrorCode::Refused,
-                "the stimulus is firing: stop it before sweeping",
-            ));
+            return Err(refused("the stimulus is firing: stop it before sweeping"));
         }
         if !g.armed {
-            return Err(perr(
-                ErrorCode::Refused,
+            return Err(refused(
                 "arm the stimulus first (gen.set armed): a sweep fires like any stimulus",
             ));
         }
         let Some(rt) = self.session.as_ref() else {
-            return Err(perr(ErrorCode::Refused, "no open session to play into"));
+            return Err(refused("no open session to play into"));
         };
         // A sweep walk's run records the mics standing at its step, each trace named for its
         // point and mic; another run each input, named for its input when there are several.
@@ -95,15 +87,14 @@ impl Control {
         if let Some(p) = &walk {
             req.measurement_inputs.clone_from(&p.inputs);
         }
-        req.check_inputs()
-            .map_err(|e| perr(ErrorCode::Invalid, e.to_string()))?;
+        req.check_inputs().map_err(|e| invalid(e.to_string()))?;
         let reference = req.reference_input;
         let idx = |input: u16, what: &str| {
             block_index(&rt.input_map, input).ok_or_else(|| {
-                perr(
-                    ErrorCode::Invalid,
-                    format!("{what} input {} is not captured by the session", input + 1),
-                )
+                invalid(format!(
+                    "{what} input {} is not captured by the session",
+                    input + 1
+                ))
             })
         };
         let ref_idx = idx(reference, "reference")?;
@@ -124,28 +115,27 @@ impl Control {
             ),
         };
         for n in &names {
-            meta::check_edit(n, None).map_err(|e| perr(ErrorCode::Invalid, e))?;
+            meta::check_edit(n, None).map_err(invalid)?;
         }
         let walk = walk.map(|p| p.at);
         if req.outputs.is_empty() {
-            return Err(perr(ErrorCode::Invalid, "no output channels"));
+            return Err(invalid("no output channels"));
         }
         for (i, o) in req.outputs.iter().enumerate() {
             if req.outputs[..i].contains(o) {
-                return Err(perr(ErrorCode::Invalid, format!("output {o} listed twice")));
+                return Err(invalid(format!("output {o} listed twice")));
             }
             if *o >= rt.output_channels {
-                return Err(perr(
-                    ErrorCode::Invalid,
-                    format!("output {o} is not an output of the session"),
-                ));
+                return Err(invalid(format!(
+                    "output {o} is not an output of the session"
+                )));
             }
         }
         if !(1..=SweepConfig::MAX_REPEATS).contains(&req.repeats) {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!("repeats must be 1 … {}", SweepConfig::MAX_REPEATS),
-            ));
+            return Err(invalid(format!(
+                "repeats must be 1 … {}",
+                SweepConfig::MAX_REPEATS
+            )));
         }
         let fs = f64::from(rt.sample_rate);
         let (spec, timing) = sweep::spec(
@@ -172,10 +162,7 @@ impl Control {
             .map_err(gen_err)?;
         let crest = sweeps.first().map_or(1.0, CoreGenerator::crest_factor);
         if !self.s.max_level.admits_peak(dbfs_to_rms(level.0) * crest) {
-            return Err(perr(
-                ErrorCode::Refused,
-                "the sweep's peak would exceed the output limit",
-            ));
+            return Err(refused("the sweep's peak would exceed the output limit"));
         }
 
         // The recorder first: it must hear the first sweep from its first sample.
@@ -202,12 +189,7 @@ impl Control {
             fid,
             Box::new(recorder),
         )
-        .map_err(|e| {
-            perr(
-                ErrorCode::Internal,
-                format!("cannot start the recorder: {e}"),
-            )
-        })?;
+        .map_err(|e| internal(format!("cannot start the recorder: {e}")))?;
         rt.fanout.attach(fid, tx);
 
         // Then the train, under the lease gate like any stimulus.
@@ -216,7 +198,7 @@ impl Control {
             l.deadline = deadline;
         }
         let Some(rt) = self.session.as_mut() else {
-            return Err(perr(ErrorCode::Refused, "no open session to play into"));
+            return Err(refused("no open session to play into"));
         };
         let play = (|| {
             rt.set_routes(&req.outputs)?;
@@ -228,7 +210,7 @@ impl Control {
                     Box::new(train),
                     Arc::clone(&self.out.gate),
                 )))
-                .map_err(|e| perr(ErrorCode::Internal, e.to_string()))?;
+                .map_err(|e| internal(e.to_string()))?;
             rt.gen_handle.set_gain(Gain::UNITY);
             rt.gen_handle.start();
             Ok::<(), ProtoError>(())

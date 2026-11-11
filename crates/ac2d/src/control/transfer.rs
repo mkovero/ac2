@@ -22,7 +22,7 @@ use ac2_traces::session::{self, Manifest};
 use super::Control;
 use super::file_jobs::{FileDone, Pending, Work};
 use super::files::{info, session_err};
-use crate::util::{perr, perr_detail};
+use crate::util::{internal, invalid, missing, perr, perr_detail, refused};
 
 /// Largest chunk, bytes: well inside a 4 MiB ctrl message with its framing.
 pub(crate) const CHUNK_BYTES: u32 = 1 << 20;
@@ -67,16 +67,15 @@ pub(crate) struct Transfers {
 fn archive_err(e: ArchiveError) -> ProtoError {
     let msg = e.to_string();
     match e {
-        ArchiveError::Io { .. } => perr(ErrorCode::Internal, msg),
-        _ => perr(ErrorCode::Invalid, msg),
+        ArchiveError::Io { .. } => internal(msg),
+        _ => invalid(msg),
     }
 }
 
 fn gone(t: TransferId) -> ProtoError {
-    perr(
-        ErrorCode::NotFound,
-        format!("no transfer {t} (finished, or dropped after 2 min without a chunk)"),
-    )
+    missing(format!(
+        "no transfer {t} (finished, or dropped after 2 min without a chunk)"
+    ))
 }
 
 pub(crate) fn remove_dir(p: &Path) {
@@ -109,10 +108,9 @@ impl Transfers {
         let now = Instant::now();
         self.prune(now);
         if self.map.len() >= MAX_TRANSFERS {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!("{MAX_TRANSFERS} transfers are under way; try again when one is done"),
-            ));
+            return Err(refused(format!(
+                "{MAX_TRANSFERS} transfers are under way; try again when one is done"
+            )));
         }
         self.next = self.next.wrapping_add(1).max(1);
         let id = TransferId(self.next);
@@ -148,17 +146,11 @@ impl Transfers {
             Kind::Upload {
                 file, bytes, data, ..
             } if data.len() as u64 == *bytes => Ok((file.clone(), data.as_slice())),
-            Kind::Upload { bytes, data, .. } => Err(perr(
-                ErrorCode::Invalid,
-                format!(
-                    "upload {id} is incomplete: {} of {bytes} bytes received",
-                    data.len()
-                ),
-            )),
-            Kind::Download { .. } => Err(perr(
-                ErrorCode::Invalid,
-                format!("transfer {id} is a download"),
-            )),
+            Kind::Upload { bytes, data, .. } => Err(invalid(format!(
+                "upload {id} is incomplete: {} of {bytes} bytes received",
+                data.len()
+            ))),
+            Kind::Download { .. } => Err(invalid(format!("transfer {id} is a download"))),
         }
     }
 
@@ -192,8 +184,7 @@ impl Control {
         sha256: String,
     ) -> Result<ReplyBody, ProtoError> {
         if bytes > MAX_ARCHIVE_BYTES {
-            return Err(perr(
-                ErrorCode::Invalid,
+            return Err(invalid(
                 ArchiveError::TooLarge {
                     bytes,
                     max: MAX_ARCHIVE_BYTES,
@@ -202,7 +193,7 @@ impl Control {
             ));
         }
         if sha256.len() != 64 || !sha256.chars().all(|c| c.is_ascii_hexdigit()) {
-            return Err(perr(ErrorCode::Invalid, "sha256 must be 64 hex digits"));
+            return Err(invalid("sha256 must be 64 hex digits"));
         }
         let file_name = file_part(&file).to_owned();
         let transfer = self.transfers.add(
@@ -239,30 +230,23 @@ impl Control {
             ..
         } = &mut x.kind
         else {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!("transfer {id} is a download"),
-            ));
+            return Err(invalid(format!("transfer {id} is a download")));
         };
         if offset != got.len() as u64 {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!(
-                    "upload {id}: chunk at {offset}, expected at {} (chunks go in order)",
-                    got.len()
-                ),
-            ));
+            return Err(invalid(format!(
+                "upload {id}: chunk at {offset}, expected at {} (chunks go in order)",
+                got.len()
+            )));
         }
         if data.0.len() > CHUNK_BYTES as usize || offset + data.0.len() as u64 > *bytes {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!("upload {id}: the chunk goes past the size announced ({bytes} bytes)"),
-            ));
+            return Err(invalid(format!(
+                "upload {id}: the chunk goes past the size announced ({bytes} bytes)"
+            )));
         }
         got.extend_from_slice(&data.0);
         if got.len() as u64 == *bytes && ac2_archive::verify(got, sha256).is_err() {
             self.transfers.remove(id);
-            return Err(perr(ErrorCode::Invalid, ArchiveError::Checksum.to_string()));
+            return Err(invalid(ArchiveError::Checksum.to_string()));
         }
         Ok(ReplyBody::Ack { rev })
     }
@@ -344,10 +328,7 @@ impl Control {
                 (stem, work, Some((hash, at)))
             }
             Some(SessionRef::Upload { .. }) => {
-                return Err(perr(
-                    ErrorCode::Invalid,
-                    "an upload is on the client already",
-                ));
+                return Err(invalid("an upload is on the client already"));
             }
             Some(r) => {
                 let (name, dir) = self.session_path(r)?;
@@ -401,17 +382,14 @@ impl Control {
     ) -> Result<ReplyBody, ProtoError> {
         let x = self.transfers.get(client, id)?;
         let Kind::Download { data, .. } = &x.kind else {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!("transfer {id} is an upload"),
-            ));
+            return Err(invalid(format!("transfer {id} is an upload")));
         };
         let start = usize::try_from(offset).unwrap_or(usize::MAX);
         if start > data.len() {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!("download {id} is {} bytes; offset {offset}", data.len()),
-            ));
+            return Err(invalid(format!(
+                "download {id} is {} bytes; offset {offset}",
+                data.len()
+            )));
         }
         let end = (start + CHUNK_BYTES as usize).min(data.len());
         Ok(ReplyBody::Chunk(Blob(data[start..end].to_vec())))
@@ -425,10 +403,7 @@ impl Control {
     ) -> Result<ReplyBody, ProtoError> {
         let x = self.transfers.get(client, id)?;
         let Kind::Download { working, .. } = &x.kind else {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!("transfer {id} is an upload"),
-            ));
+            return Err(invalid(format!("transfer {id} is an upload")));
         };
         let working = *working;
         self.transfers.remove(id);
@@ -449,8 +424,7 @@ impl Control {
 /// Makes room for staging directory `p`: its parent made, anything left at `p` removed.
 pub(super) fn prepare_stage(p: &Path) -> Result<(), ProtoError> {
     if let Some(root) = p.parent() {
-        fs::create_dir_all(root)
-            .map_err(|e| perr(ErrorCode::Internal, format!("{}: {e}", root.display())))?;
+        fs::create_dir_all(root).map_err(|e| internal(format!("{}: {e}", root.display())))?;
     }
     remove_dir(p);
     Ok(())
@@ -506,10 +480,7 @@ fn import_upload(
         }
         if let Err(e) = fs::rename(target, aside) {
             remove_dir(staged);
-            return Err(perr(
-                ErrorCode::Internal,
-                format!("{}: {e}", target.display()),
-            ));
+            return Err(internal(format!("{}: {e}", target.display())));
         }
         Some(aside)
     } else {
@@ -520,10 +491,7 @@ fn import_upload(
             let _ = fs::rename(old, target);
         }
         remove_dir(staged);
-        return Err(perr(
-            ErrorCode::Internal,
-            format!("{}: {e}", target.display()),
-        ));
+        return Err(internal(format!("{}: {e}", target.display())));
     }
     if let Some(old) = old {
         remove_dir(old);

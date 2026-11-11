@@ -15,7 +15,7 @@ use ac2_proto::units::{SessionEpoch, WallNs};
 use crate::control::ControlMsg;
 use crate::conv;
 use crate::fanout::Fanout;
-use crate::util::{perr, wall_ns};
+use crate::util::{internal, invalid, perr, wall_ns};
 
 /// A running session.
 pub(crate) struct Runtime {
@@ -61,38 +61,33 @@ pub(crate) fn local_inputs(cfg: &SessionConfig) -> Vec<u16> {
 /// Checks a session configuration without a device.
 pub(crate) fn validate(cfg: &SessionConfig) -> Result<(), ProtoError> {
     if local_inputs(cfg).is_empty() {
-        return Err(perr(
-            ErrorCode::Invalid,
+        return Err(invalid(
             "no input channels on this rig: its device paces the session",
         ));
     }
     check_remote(cfg)?;
     for (i, c) in cfg.input_channels.iter().enumerate() {
         if cfg.input_channels[..i].contains(c) {
-            return Err(perr(ErrorCode::Invalid, format!("input {c} listed twice")));
+            return Err(invalid(format!("input {c} listed twice")));
         }
     }
     if let Some(l) = cfg.loopback {
         if remote_slot(l.input).is_some() {
-            return Err(perr(
-                ErrorCode::Invalid,
+            return Err(invalid(
                 "the loopback must be an input of this rig: it pairs with an output on the same converter",
             ));
         }
         if !cfg.input_channels.contains(&l.input) {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!("loopback input {} is not captured", l.input),
-            ));
+            return Err(invalid(format!(
+                "loopback input {} is not captured",
+                l.input
+            )));
         }
         if l.output >= cfg.output_channels {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!(
-                    "loopback output {} is not an output of the stream",
-                    l.output
-                ),
-            ));
+            return Err(invalid(format!(
+                "loopback output {} is not an output of the stream",
+                l.output
+            )));
         }
     }
     Ok(())
@@ -101,40 +96,45 @@ pub(crate) fn validate(cfg: &SessionConfig) -> Result<(), ProtoError> {
 /// The remote inputs and the remote channels among `input_channels` name the same slots,
 /// each once, and the link offset is a duration.
 fn check_remote(cfg: &SessionConfig) -> Result<(), ProtoError> {
-    let invalid = |m: String| Err(perr(ErrorCode::Invalid, m));
     for (i, r) in cfg.remote_inputs.iter().enumerate() {
         if r.slot >= REMOTE_BASE {
-            return invalid(format!("remote slot {} out of range", r.slot));
+            return Err(invalid(format!("remote slot {} out of range", r.slot)));
         }
         if cfg.remote_inputs[..i].iter().any(|o| o.slot == r.slot) {
-            return invalid(format!("remote slot {} listed twice", r.slot));
+            return Err(invalid(format!("remote slot {} listed twice", r.slot)));
         }
         if cfg.remote_inputs[..i]
             .iter()
             .any(|o| o.rig == r.rig && o.channel == r.channel)
         {
-            return invalid(format!("{} in {} listed twice", r.rig_name, r.channel + 1));
+            return Err(invalid(format!(
+                "{} in {} listed twice",
+                r.rig_name,
+                r.channel + 1
+            )));
         }
         if !cfg.input_channels.contains(&r.session_channel()) {
-            return invalid(format!(
+            return Err(invalid(format!(
                 "remote input {} ({} in {}) is not captured",
                 r.slot,
                 r.rig_name,
                 r.channel + 1
-            ));
+            )));
         }
     }
     for &c in &cfg.input_channels {
         if let Some(slot) = remote_slot(c)
             && !cfg.remote_inputs.iter().any(|r| r.slot == slot)
         {
-            return invalid(format!("input {c}: no remote input in slot {slot}"));
+            return Err(invalid(format!(
+                "input {c}: no remote input in slot {slot}"
+            )));
         }
     }
     if let Some(o) = cfg.link_offset
         && !(o.0.is_finite() && o.0 >= 0.0)
     {
-        return invalid(format!("link offset {} s is not a duration", o.0));
+        return Err(invalid(format!("link offset {} s is not a duration", o.0)));
     }
     Ok(())
 }
@@ -164,8 +164,7 @@ impl Runtime {
         fps: u32,
     ) -> Result<Self, ProtoError> {
         validate(cfg)?;
-        let (gen_handle, port) =
-            generator(routes.to_vec()).map_err(|e| perr(ErrorCode::Invalid, e.to_string()))?;
+        let (gen_handle, port) = generator(routes.to_vec()).map_err(|e| invalid(e.to_string()))?;
         gen_handle.set_max_level(limits.now);
         let req = DuplexRequest {
             input_device: conv::device_selector(&cfg.input_device),
@@ -220,7 +219,7 @@ impl Runtime {
         );
         let lossless = backend.kind() == ac2_audio::BackendKind::Replay;
         let fanout = Fanout::spawn(stream, epoch, to_control, fps, lossless)
-            .map_err(|e| perr(ErrorCode::Internal, format!("cannot start fan-out: {e}")))?;
+            .map_err(|e| internal(format!("cannot start fan-out: {e}")))?;
         let rt = Self {
             epoch,
             open,
@@ -247,7 +246,7 @@ impl Runtime {
         }
         self.gen_handle
             .set_routes(routes)
-            .map_err(|e| perr(ErrorCode::Invalid, e.to_string()))?;
+            .map_err(|e| invalid(e.to_string()))?;
         self.routes = routes.to_vec();
         self.connect_outputs();
         Ok(())

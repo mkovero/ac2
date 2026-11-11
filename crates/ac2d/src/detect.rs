@@ -19,7 +19,6 @@ use ac2_core::generator::{
     BandLimit, FilterOrder, Generator as CoreGenerator, GeneratorConfig, Signal, dbfs_to_rms,
 };
 use ac2_core::loopback::{LOOPBACK_MIN_CORRELATION, rank_inputs};
-use ac2_proto::ErrorCode;
 use ac2_proto::ProtoError;
 use ac2_proto::model::{BackendKind, DeviceId, LoopbackCandidate, LoopbackDetection};
 use ac2_proto::units::{Db, Dbfs, Samples, Seconds};
@@ -27,7 +26,7 @@ use ac2_proto::units::{Db, Dbfs, Samples, Seconds};
 use crate::conv;
 use crate::fanout::pop_block;
 use crate::session::audio_err;
-use crate::util::{perr, random_u64};
+use crate::util::{internal, invalid, missing, random_u64, refused};
 
 /// Burst length before the fade-out, s.
 pub(crate) const BURST_S: f64 = 0.5;
@@ -97,13 +96,10 @@ fn burst(
         level_dbfs,
         ceiling_dbfs,
     })
-    .map_err(|e| perr(ErrorCode::Refused, format!("burst level: {e}")))?;
+    .map_err(|e| refused(format!("burst level: {e}")))?;
     let peak = dbfs_to_rms(level_dbfs) * g.crest_factor();
     if !max_level.admits_peak(peak) {
-        return Err(perr(
-            ErrorCode::Refused,
-            "the burst's peak would exceed the output limit",
-        ));
+        return Err(refused("the burst's peak would exceed the output limit"));
     }
     let on = (BURST_S * fs_f).round() as usize;
     let ramp = g.ramp_samples() as usize;
@@ -130,8 +126,7 @@ impl Capture {
         let at = b.start_sample;
         let have = self.end();
         if at < have || at < start {
-            return Err(perr(
-                ErrorCode::Internal,
+            return Err(internal(
                 "the capture restarted during the burst; detect again",
             ));
         }
@@ -161,12 +156,10 @@ impl Capture {
 pub(crate) fn run(r: &DetectRequest) -> Result<LoopbackDetection, ProtoError> {
     let listed = r.backend.enumerate().map_err(audio_err)?;
     let find = |id: &DeviceId| {
-        listed.iter().find(|d| d.id.0 == id.0).ok_or_else(|| {
-            perr(
-                ErrorCode::NotFound,
-                format!("no {:?} device {:?}", r.kind, id.0),
-            )
-        })
+        listed
+            .iter()
+            .find(|d| d.id.0 == id.0)
+            .ok_or_else(|| missing(format!("no {:?} device {:?}", r.kind, id.0)))
     };
     let in_caps = find(&r.input_device)?;
     let out_caps = find(&r.output_device)?;
@@ -177,23 +170,19 @@ pub(crate) fn run(r: &DetectRequest) -> Result<LoopbackDetection, ProtoError> {
         .min(MAX_INPUTS);
     let outputs = out_caps.output.as_ref().map_or(0, |o| o.max_channels);
     if inputs == 0 {
-        return Err(perr(
-            ErrorCode::Invalid,
-            format!("{} has no inputs to listen on", in_caps.name),
-        ));
+        return Err(invalid(format!(
+            "{} has no inputs to listen on",
+            in_caps.name
+        )));
     }
     if r.output >= outputs {
-        return Err(perr(
-            ErrorCode::Invalid,
-            format!(
-                "output {} does not exist: {} has {outputs} outputs",
-                r.output + 1,
-                out_caps.name
-            ),
-        ));
+        return Err(invalid(format!(
+            "output {} does not exist: {} has {outputs} outputs",
+            r.output + 1,
+            out_caps.name
+        )));
     }
-    let (mut handle, port) =
-        generator(vec![r.output]).map_err(|e| perr(ErrorCode::Invalid, e.to_string()))?;
+    let (mut handle, port) = generator(vec![r.output]).map_err(|e| invalid(e.to_string()))?;
     let selector = |id: &DeviceId| DeviceSelector::Id(ac2_audio::DeviceId(id.0.clone()));
     let mut req = DuplexRequest::new((0..inputs).collect(), r.output + 1, r.max_level);
     req.input_device = selector(&r.input_device);
@@ -206,7 +195,7 @@ pub(crate) fn run(r: &DetectRequest) -> Result<LoopbackDetection, ProtoError> {
     let history = stream
         .history()
         .cloned()
-        .ok_or_else(|| perr(ErrorCode::Internal, "no generator history"))?;
+        .ok_or_else(|| internal("no generator history"))?;
     let result = (|| {
         let samples = burst(fs, r.level_dbfs, r.ceiling_dbfs, r.max_level)?;
         let len = samples.len() as u64;
@@ -221,10 +210,7 @@ pub(crate) fn run(r: &DetectRequest) -> Result<LoopbackDetection, ProtoError> {
         };
         let mut pump = |cap: &mut Capture| -> Result<(), ProtoError> {
             if t0.elapsed() > TIMEOUT {
-                return Err(perr(
-                    ErrorCode::Internal,
-                    "the device delivered no audio; is it running?",
-                ));
+                return Err(internal("the device delivered no audio; is it running?"));
             }
             let mut got = false;
             while let Some(b) = pop_block(&mut stream) {
@@ -245,7 +231,7 @@ pub(crate) fn run(r: &DetectRequest) -> Result<LoopbackDetection, ProtoError> {
                 samples: samples.into_boxed_slice(),
                 pos: 0,
             }))
-            .map_err(|e| perr(ErrorCode::Internal, e.to_string()))?;
+            .map_err(|e| internal(e.to_string()))?;
         handle.set_gain(Gain::UNITY);
         handle.start();
         tracing::info!(
@@ -283,7 +269,7 @@ pub(crate) fn run(r: &DetectRequest) -> Result<LoopbackDetection, ProtoError> {
         let mut x = vec![0.0f32; len as usize];
         history
             .read(first, &mut x)
-            .map_err(|e| perr(ErrorCode::Internal, format!("burst history: {e}")))?;
+            .map_err(|e| internal(format!("burst history: {e}")))?;
         let x: Vec<f64> = x.iter().map(|v| f64::from(*v)).collect();
         let pre = pre.min(first.saturating_sub(cap.start.unwrap_or(0)));
         let from = first - pre;

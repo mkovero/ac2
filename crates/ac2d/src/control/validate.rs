@@ -11,7 +11,7 @@ use ac2_proto::{ErrorCode, ErrorDetail, ProtoError};
 
 use crate::conv;
 use crate::jobs::{self, SmoothingChange};
-use crate::util::{perr, perr_detail};
+use crate::util::{invalid, missing, perr, perr_detail};
 
 use super::maths;
 
@@ -24,10 +24,9 @@ pub(super) fn check_delay(what: &str, delay: Seconds) -> Result<(), ProtoError> 
     if delay.0.is_finite() && delay.0.abs() <= MAX_DELAY_S {
         Ok(())
     } else {
-        Err(perr(
-            ErrorCode::Invalid,
-            format!("{what} must be finite and within ±{MAX_DELAY_S} s"),
-        ))
+        Err(invalid(format!(
+            "{what} must be finite and within ±{MAX_DELAY_S} s"
+        )))
     }
 }
 
@@ -50,7 +49,7 @@ pub(super) fn check_find(
     fs: f64,
 ) -> Result<(), ProtoError> {
     use ac2_core::delay::{Band, BandClass, FinderConfig};
-    let inv = |m: String| Err(perr(ErrorCode::Invalid, m));
+    let inv = |m: String| Err(invalid(m));
     let core_band = match band {
         conv::FindBand::Auto => Band::FullRange,
         conv::FindBand::Band(b) => b,
@@ -114,7 +113,7 @@ pub(super) fn stale_meas(meas: MeasId, rev: Rev) -> ProtoError {
 }
 
 pub(super) fn not_found(meas: MeasId) -> ProtoError {
-    perr(ErrorCode::NotFound, format!("no measurement {}", meas.0))
+    missing(format!("no measurement {}", meas.0))
 }
 
 pub(super) fn lease_required() -> ProtoError {
@@ -136,7 +135,7 @@ pub(super) fn gen_err(e: GeneratorError) -> ProtoError {
 
 /// Checks a measurement configuration without a session.
 pub(crate) fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
-    let inv = |m: &str| Err(perr(ErrorCode::Invalid, m.to_owned()));
+    let inv = |m: &str| Err(invalid(m.to_owned()));
     if c.scope == MeasScope::Rig && !matches!(c.kind, MeasKind::Spl { .. }) {
         return inv("only an SPL meter can be the rig's");
     }
@@ -210,7 +209,7 @@ pub(crate) fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
             }
         }
         MeasKind::Spl { config } => {
-            config.check().map_err(|m| perr(ErrorCode::Invalid, m))?;
+            config.check().map_err(invalid)?;
         }
         MeasKind::Math { config } => maths::validate(config)?,
         MeasKind::Sweep { config } => validate_sweep(config)?,
@@ -221,7 +220,7 @@ pub(crate) fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
 /// Checks of a sweep measurement's settings that need no session (the session's inputs,
 /// outputs and rate, and the ceiling, are checked at every run).
 fn validate_sweep(c: &SweepConfig) -> Result<(), ProtoError> {
-    let inv = |m: String| Err(perr(ErrorCode::Invalid, m));
+    let inv = |m: String| Err(invalid(m));
     if let Err(e) = c.check_inputs() {
         return inv(e.to_string());
     }
@@ -334,14 +333,11 @@ pub(super) fn not_a_sweep(m: &Measurement) -> Result<(), ProtoError> {
     if m.config.kind.is_job() {
         Ok(())
     } else {
-        Err(perr(
-            ErrorCode::Invalid,
-            format!(
-                "{} is a sweep measurement: it has no job to start, stop or reset; \
-                 sweep.run plays it",
-                m.config.name
-            ),
-        ))
+        Err(invalid(format!(
+            "{} is a sweep measurement: it has no job to start, stop or reset; \
+             sweep.run plays it",
+            m.config.name
+        )))
     }
 }
 

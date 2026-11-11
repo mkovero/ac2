@@ -32,13 +32,13 @@ use std::time::{Duration, Instant};
 
 use ac2_proto::model::SessionOrigin;
 use ac2_proto::units::{ClientId, RequestId, TransferId, WallNs};
-use ac2_proto::{Command, ErrorCode, ProtoError, ReplyBody};
+use ac2_proto::{Command, ProtoError, ReplyBody};
 use ac2_traces::session::{Manifest, Session as SessionData};
 
 use super::files::SalvageRead;
 use super::working::Staged;
 use super::{Control, ControlMsg, PendingReply};
-use crate::util::perr;
+use crate::util::{internal, refused};
 
 /// How long shutdown waits for a file operation under way to finish writing.
 const FLUSH_BOUND: Duration = Duration::from_secs(10);
@@ -148,13 +148,10 @@ impl Control {
             .find(|j| !matches!(j.pending, Pending::List))
         {
             None => Ok(()),
-            Some(j) => Err(perr(
-                ErrorCode::Refused,
-                format!(
-                    "{} is under way; {command} waits until it is answered",
-                    j.command
-                ),
-            )),
+            Some(j) => Err(refused(format!(
+                "{} is under way; {command} waits until it is answered",
+                j.command
+            ))),
         }
     }
 
@@ -203,10 +200,10 @@ impl Control {
                 self.begin_download(client, session.as_ref())?
             }
             other => {
-                return Err(perr(
-                    ErrorCode::Internal,
-                    format!("{} is not a file operation", other.name()),
-                ));
+                return Err(internal(format!(
+                    "{} is not a file operation",
+                    other.name()
+                )));
             }
         };
         let token = self.next_token;
@@ -223,7 +220,7 @@ impl Control {
                     done: Box::new(done),
                 });
             })
-            .map_err(|e| perr(ErrorCode::Internal, format!("cannot start {command}: {e}")))?;
+            .map_err(|e| internal(format!("cannot start {command}: {e}")))?;
         self.file_jobs.0.insert(
             token,
             FileJob {
@@ -291,10 +288,10 @@ impl Control {
                 if let FileDone::Replace(ReplaceRead { kept: Some(k), .. }) = done {
                     k.discard();
                 }
-                Err(perr(
-                    ErrorCode::Internal,
-                    format!("{}: a result of another operation", job.command),
-                ))
+                Err(internal(format!(
+                    "{}: a result of another operation",
+                    job.command
+                )))
             }
         };
         let r = job.reply;

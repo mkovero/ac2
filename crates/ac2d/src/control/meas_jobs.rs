@@ -8,14 +8,14 @@ use ac2_proto::event::{Change, Patch};
 use ac2_proto::grid::GridDef;
 use ac2_proto::model::{DelayOutcome, DelayState, FinderBand, MeasKind, Measurement};
 use ac2_proto::units::{MeasId, Rev, Seconds, SessionEpoch, WallNs};
-use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
+use ac2_proto::{ProtoError, ReplyBody};
 
 use crate::calstore::{self, InputCal};
 use crate::conv;
 use crate::jobs::programme::{Captured, Declared, Programme};
 use crate::jobs::{self, Analysis, JobCmd, JobEnv, block_index};
 use crate::session::Runtime;
-use crate::util::{perr, wall_ns};
+use crate::util::{internal, invalid, wall_ns};
 
 use super::{
     Control, DelaySource, MAX_DELAY_S, check_delay, check_find, delay_samples, static_grid,
@@ -111,13 +111,12 @@ impl Control {
         let map = joined.as_deref().unwrap_or(&rt.input_map);
         let idx = |input: u16| {
             block_index(map, input).ok_or_else(|| {
-                perr(
-                    ErrorCode::Invalid,
-                    format!("input {} is not captured by the session", input + 1),
-                )
+                invalid(format!(
+                    "input {} is not captured by the session",
+                    input + 1
+                ))
             })
         };
-        let inv = |e: String| perr(ErrorCode::Invalid, e);
         let (analysis, grid): (Box<dyn Analysis>, Option<GridDef>) = match &m.config.kind {
             MeasKind::Transfer { config } => {
                 let d = m.delay.clone().unwrap_or(DelayState {
@@ -141,7 +140,7 @@ impl Control {
                     super::cross_rig::cross_side(&m.config.kind, &rt.open.config.remote_inputs)
                         .is_some(),
                 )
-                .map_err(inv)?;
+                .map_err(invalid)?;
                 (Box::new(a), static_grid(&m.config.kind))
             }
             MeasKind::Spectrum { config } => {
@@ -154,11 +153,11 @@ impl Control {
                     self.input_cal(rt, config.input),
                     m.config_rev,
                 )
-                .map_err(inv)?;
+                .map_err(invalid)?;
                 (Box::new(a), Some(jobs::spectrum::grid(config, fs)))
             }
             MeasKind::Rta { config } => {
-                let bank = jobs::rta::bank(config, fs).map_err(inv)?;
+                let bank = jobs::rta::bank(config, fs).map_err(invalid)?;
                 let g = jobs::rta::grid(config, &bank);
                 let a = jobs::rta::Rta::new(
                     m.id,
@@ -168,7 +167,7 @@ impl Control {
                     self.input_cal(rt, config.input),
                     m.config_rev,
                 )
-                .map_err(inv)?;
+                .map_err(invalid)?;
                 (Box::new(a), Some(g))
             }
             MeasKind::Spl { config } => {
@@ -178,15 +177,14 @@ impl Control {
                 let config = config.clone();
                 let leq = leq
                     .take()
-                    .ok_or_else(|| perr(ErrorCode::Internal, "SPL meter without its log"))?;
+                    .ok_or_else(|| internal("SPL meter without its log"))?;
                 let a = jobs::spl::Spl::new(job_ctx(m, rt.epoch, config), fs, input, cal, leq)
-                    .map_err(inv)?;
+                    .map_err(invalid)?;
                 (Box::new(a), None)
             }
             MeasKind::Sweep { .. } => return Ok(None),
             MeasKind::Math { config } => {
-                let (grids, stored) =
-                    math.ok_or_else(|| perr(ErrorCode::Internal, "math channel without setup"))?;
+                let (grids, stored) = math.ok_or_else(|| internal("math channel without setup"))?;
                 let shown = grids
                     .display
                     .as_ref()
@@ -213,7 +211,7 @@ impl Control {
             fid,
             analysis,
         )
-        .map_err(|e| perr(ErrorCode::Internal, format!("cannot start job: {e}")))?;
+        .map_err(|e| internal(format!("cannot start job: {e}")))?;
         if joined.is_some() {
             rt.fanout.attach_joined(fid, tx);
         } else {
@@ -239,10 +237,7 @@ impl Control {
             .collect();
         for t in orphaned {
             if let Some(p) = self.pending_finds.remove(&t) {
-                let e = perr(
-                    ErrorCode::Invalid,
-                    "the measurement stopped during delay.find",
-                );
+                let e = invalid("the measurement stopped during delay.find");
                 self.answer(&p.routing_id, &p.client, p.id, Err(e), Instant::now());
             }
         }
@@ -352,8 +347,7 @@ impl Control {
         self.transfer_delay(meas)?;
         check_delay("delay", delay)?;
         let Some(fs) = self.session.as_ref().map(|r| f64::from(r.sample_rate)) else {
-            return Err(perr(
-                ErrorCode::Invalid,
+            return Err(invalid(
                 "no open session: the delay in samples depends on its sample rate",
             ));
         };
@@ -367,10 +361,9 @@ impl Control {
             (Some(d), DelaySource::Tracking) => d.nudged_samples,
         };
         if (nudged / fs).abs() > MAX_DELAY_S {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!("the delay may be nudged by at most ±{MAX_DELAY_S} s from the arrival"),
-            ));
+            return Err(invalid(format!(
+                "the delay may be nudged by at most ±{MAX_DELAY_S} s from the arrival"
+            )));
         }
         let rev = Rev(self.store.rev().0 + 1);
         let operator = source != DelaySource::Tracking;
@@ -399,8 +392,7 @@ impl Control {
                 resume: operator,
             });
         }
-        self.commit(Change::Measurement(Patch::Set(m.clone())));
-        Ok(ReplyBody::Measurement(m))
+        Ok(self.reply_meas(m))
     }
 
     pub(super) fn start_find(
@@ -411,16 +403,13 @@ impl Control {
     ) -> Result<u64, ProtoError> {
         self.transfer_delay(meas)?;
         let job = self.jobs.get(&meas).ok_or_else(|| {
-            perr(
-                ErrorCode::Invalid,
-                "the measurement is not running; the finder needs live audio",
-            )
+            invalid("the measurement is not running; the finder needs live audio")
         })?;
         let fs = self
             .session
             .as_ref()
             .map(|r| f64::from(r.sample_rate))
-            .ok_or_else(|| perr(ErrorCode::Invalid, "no open session"))?;
+            .ok_or_else(|| invalid("no open session"))?;
         let band = conv::finder_band(band);
         check_find(band, observation.map(|o| o.0), fs)?;
         let token = self.next_token;
@@ -439,8 +428,8 @@ impl Control {
         };
         let fs = self.session.as_ref().map(|r| f64::from(r.sample_rate));
         let reply = match (result, fs) {
-            (Err(e), _) => Err(perr(ErrorCode::Invalid, format!("delay finder: {e}"))),
-            (Ok(_), None) => Err(perr(ErrorCode::Invalid, "the session closed")),
+            (Err(e), _) => Err(invalid(format!("delay finder: {e}"))),
+            (Ok(_), None) => Err(invalid("the session closed")),
             (Ok(r), Some(fs)) => {
                 let f = conv::delay_finding(&r, fs, WallNs(wall_ns()));
                 match self.meas(p.meas).cloned() {

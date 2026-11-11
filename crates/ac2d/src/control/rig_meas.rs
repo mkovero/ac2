@@ -42,7 +42,7 @@ use ac2_traces::session::{SavedMeasurement, Session as SessionData, SplLogOnDisk
 use super::{Control, recovery};
 use crate::autosave::RigLogs;
 use crate::rig::{RigMeter, RigSettings};
-use crate::util::{perr, perr_detail, wall_ns};
+use crate::util::{invalid, perr_detail, wall_ns};
 
 /// The control thread's rig meter state.
 pub(crate) struct RigMeas {
@@ -357,13 +357,10 @@ impl Control {
             .iter()
             .find(|m| m.config.scope == MeasScope::Rig)
         {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!(
-                    "measurement {} is a rig meter: a session holds session measurements only",
-                    m.id
-                ),
-            ));
+            return Err(invalid(format!(
+                "measurement {} is a rig meter: a session holds session measurements only",
+                m.id
+            )));
         }
         let taken: BTreeSet<MeasId> = self.rig.meas.saved.iter().map(|m| m.id).collect();
         let map = remap_ids(data, &taken, &mut self.next_meas);

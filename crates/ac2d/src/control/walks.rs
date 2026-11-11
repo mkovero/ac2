@@ -16,11 +16,11 @@ use ac2_proto::model::{
     WalkMic, WalkPoint, WalkPointSpec, WalkState,
 };
 use ac2_proto::units::{MeasId, Seconds, TraceId, WalkId};
-use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
+use ac2_proto::{ProtoError, ReplyBody};
 
 use super::{Control, walk_steps, walk_sweep};
 use crate::jobs::JobCmd;
-use crate::util::perr;
+use crate::util::{internal, invalid, missing, refused};
 
 /// Most characters of a trace name (`ac2_traces::meta`).
 const MAX_TRACE_NAME: usize = 128;
@@ -32,8 +32,7 @@ impl Control {
     /// one).
     pub(super) fn plan_save(&mut self, plan: PlanSpec) -> Result<ReplyBody, ProtoError> {
         check_plan_name(&plan.name)?;
-        ac2_room::plan::validate(&plan)
-            .map_err(|e| perr(ErrorCode::Invalid, format!("plan {}: {e}", plan.name)))?;
+        ac2_room::plan::validate(&plan).map_err(|e| invalid(format!("plan {}: {e}", plan.name)))?;
         // Plan files are named by the plan: two names one case-insensitive file system
         // cannot tell apart are one plan.
         if let Some(other) = self
@@ -43,18 +42,14 @@ impl Control {
             .iter()
             .find(|p| p.name != plan.name && p.name.to_lowercase() == plan.name.to_lowercase())
         {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!("the library holds a plan named {}", other.name),
-            ));
+            return Err(refused(format!(
+                "the library holds a plan named {}",
+                other.name
+            )));
         }
         if let Some(dir) = &self.s.plan_dir {
-            write_plan(dir, &plan).map_err(|e| {
-                perr(
-                    ErrorCode::Internal,
-                    format!("plan {} not written: {e}", plan.name),
-                )
-            })?;
+            write_plan(dir, &plan)
+                .map_err(|e| internal(format!("plan {} not written: {e}", plan.name)))?;
         }
         self.commit(Change::Plan(Patch::Set(plan.clone())));
         Ok(ReplyBody::Plan(plan))
@@ -63,10 +58,7 @@ impl Control {
     /// `plan.delete`: out of the library; the session's copies stay.
     pub(super) fn plan_delete(&mut self, name: &str) -> Result<ReplyBody, ProtoError> {
         if !self.store.state().plans.iter().any(|p| p.name == name) {
-            return Err(perr(
-                ErrorCode::NotFound,
-                format!("the library holds no plan named {name}"),
-            ));
+            return Err(missing(format!("the library holds no plan named {name}")));
         }
         if let Some(dir) = &self.s.plan_dir {
             let path = dir.join(format!("{name}.json"));
@@ -74,10 +66,7 @@ impl Control {
                 Ok(()) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => {
-                    return Err(perr(
-                        ErrorCode::Internal,
-                        format!("plan {name} not deleted: {e}"),
-                    ));
+                    return Err(internal(format!("plan {name} not deleted: {e}")));
                 }
             }
         }
@@ -109,7 +98,7 @@ impl Control {
                 .find(|p| p.name == plan)
                 .cloned()
             else {
-                return Err(perr(ErrorCode::NotFound, format!("no plan named {plan}")));
+                return Err(missing(format!("no plan named {plan}")));
             };
             self.commit(Change::WalkPlan(Patch::Set(p)));
         }
@@ -158,13 +147,10 @@ impl Control {
             matches!(p.state, PointState::Captured { .. })
                 && !points.iter().any(|s| s.label == p.label)
         }) {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!(
-                    "{} is captured; skip or redo it before taking it out of the walk",
-                    gone.label
-                ),
-            ));
+            return Err(refused(format!(
+                "{} is captured; skip or redo it before taking it out of the walk",
+                gone.label
+            )));
         }
         let standing = |w: &WalkState| -> Vec<(String, WalkMic)> {
             w.standing()
@@ -218,10 +204,7 @@ impl Control {
         let mut w = self.walk(walk)?.clone();
         self.check_walk_idle(&w)?;
         if step >= w.steps() {
-            return Err(perr(
-                ErrorCode::NotFound,
-                format!("the walk {} has no step {step}", w.name),
-            ));
+            return Err(missing(format!("the walk {} has no step {step}", w.name)));
         }
         w.step = Some(step);
         self.commit(Change::Walk(Patch::Set(w.clone())));
@@ -237,8 +220,7 @@ impl Control {
             return Err(walk_sweep::sweep_capture_refusal(&w));
         }
         let Some(step) = w.step else {
-            return Err(perr(
-                ErrorCode::Invalid,
+            return Err(invalid(
                 "every point of the walk is captured or skipped; redo one to capture again",
             ));
         };
@@ -249,13 +231,10 @@ impl Control {
                 .into_iter()
                 .map(|i| w.points[i].label.as_str())
                 .collect();
-            return Err(perr(
-                ErrorCode::Refused,
-                format!(
-                    "{} captured or skipped; redo one to capture again",
-                    labels.join(", ")
-                ),
-            ));
+            return Err(refused(format!(
+                "{} captured or skipped; redo one to capture again",
+                labels.join(", ")
+            )));
         }
         let mut done: Vec<(usize, TraceId, CaptureContext)> = Vec::with_capacity(standing.len());
         for i in standing {
@@ -272,7 +251,7 @@ impl Control {
                 Ok(ReplyBody::Trace(t)) => done.push((i, t.id, capture_context(&t))),
                 Ok(_) => {
                     self.drop_captures(&traces);
-                    return Err(perr(ErrorCode::Internal, "a capture answered no trace"));
+                    return Err(internal("a capture answered no trace"));
                 }
                 Err(e) => {
                     // One step: every mic of it captures, or none does.
@@ -301,10 +280,7 @@ impl Control {
         point_of(&w, point)?;
         let i = usize::from(point);
         if matches!(w.points[i].state, PointState::Skipped) {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!("{} is skipped already", w.points[i].label),
-            ));
+            return Err(refused(format!("{} is skipped already", w.points[i].label)));
         }
         if let PointState::Captured { trace, .. } = &w.points[i].state {
             self.supersede(&[*trace]);
@@ -406,14 +382,11 @@ impl Control {
     pub(super) fn check_walk_trace_delete(&self, trace: TraceId) -> Result<(), ProtoError> {
         match self.walk_naming_trace(trace) {
             None => Ok(()),
-            Some(w) => Err(perr(
-                ErrorCode::Refused,
-                format!(
-                    "trace {trace} is a capture of the walk {}; redo or skip its point, or \
-                     delete the walk, first",
-                    w.name
-                ),
-            )),
+            Some(w) => Err(refused(format!(
+                "trace {trace} is a capture of the walk {}; redo or skip its point, or \
+                 delete the walk, first",
+                w.name
+            ))),
         }
     }
 
@@ -425,13 +398,10 @@ impl Control {
         traces: &[TraceId],
     ) -> Result<(), ProtoError> {
         if let Some(w) = self.walk_naming_meas(meas) {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!(
-                    "measurement {meas} belongs to the walk {}; delete the walk first",
-                    w.name
-                ),
-            ));
+            return Err(refused(format!(
+                "measurement {meas} belongs to the walk {}; delete the walk first",
+                w.name
+            )));
         }
         traces
             .iter()
@@ -446,7 +416,7 @@ impl Control {
             .walks
             .iter()
             .find(|w| w.id == id)
-            .ok_or_else(|| perr(ErrorCode::NotFound, format!("no walk {id}")))
+            .ok_or_else(|| missing(format!("no walk {id}")))
     }
 
     /// The mic is at a new point: each walk measurement's averaging restarts and its delay
@@ -680,19 +650,24 @@ pub(super) fn check_walks(
     plans: &[PlanSpec],
     meas: &[MeasId],
 ) -> Result<(), ProtoError> {
-    let bad = |m: String| perr(ErrorCode::Invalid, m);
     for p in plans {
-        ac2_room::plan::validate(p).map_err(|e| bad(format!("plan {}: {e}", p.name)))?;
+        ac2_room::plan::validate(p).map_err(|e| invalid(format!("plan {}: {e}", p.name)))?;
         if plans.iter().filter(|o| o.name == p.name).count() > 1 {
-            return Err(bad(format!("plan {} appears twice in the session", p.name)));
+            return Err(invalid(format!(
+                "plan {} appears twice in the session",
+                p.name
+            )));
         }
     }
     for w in walks {
         if walks.iter().filter(|o| o.id == w.id).count() > 1 {
-            return Err(bad(format!("walk {} appears twice in the session", w.id)));
+            return Err(invalid(format!(
+                "walk {} appears twice in the session",
+                w.id
+            )));
         }
         if !plans.iter().any(|p| p.name == w.plan) {
-            return Err(bad(format!(
+            return Err(invalid(format!(
                 "walk {} walks plan {}, which the session does not hold",
                 w.id, w.plan
             )));
@@ -703,7 +678,7 @@ pub(super) fn check_walks(
             .chain(&w.average)
             .find(|m| !meas.contains(m))
         {
-            return Err(bad(format!(
+            return Err(invalid(format!(
                 "walk {} names measurement {m}, which the session does not hold",
                 w.id
             )));
@@ -767,28 +742,24 @@ fn write_plan(dir: &Path, plan: &PlanSpec) -> std::io::Result<()> {
 
 fn check_plan_name(name: &str) -> Result<(), ProtoError> {
     ac2_traces::session::validate_name(name).map_err(|_| {
-        perr(
-            ErrorCode::Invalid,
-            format!(
-                "{name:?} is no plan name: letters, digits, space, '-', '_' and '.', not \
-                 starting with '.'"
-            ),
-        )
+        invalid(format!(
+            "{name:?} is no plan name: letters, digits, space, '-', '_' and '.', not \
+             starting with '.'"
+        ))
     })
 }
 
 fn check_walk_name(name: &str) -> Result<(), ProtoError> {
     if name.trim().is_empty() || name.trim() != name {
-        return Err(perr(
-            ErrorCode::Invalid,
+        return Err(invalid(
             "a walk needs a name, without leading or trailing spaces",
         ));
     }
     if name.chars().count() > WalkState::MAX_NAME {
-        return Err(perr(
-            ErrorCode::Invalid,
-            format!("walk names are at most {} characters", WalkState::MAX_NAME),
-        ));
+        return Err(invalid(format!(
+            "walk names are at most {} characters",
+            WalkState::MAX_NAME
+        )));
     }
     Ok(())
 }
@@ -796,9 +767,8 @@ fn check_walk_name(name: &str) -> Result<(), ProtoError> {
 /// Points a walk can stand at: one to [`WalkState::MAX_POINTS`] (an average takes at most
 /// that many operands), each named uniquely, on or above the floor.
 fn check_points(points: &[WalkPointSpec]) -> Result<(), ProtoError> {
-    let bad = |m: String| perr(ErrorCode::Invalid, m);
     if points.is_empty() || points.len() > WalkState::MAX_POINTS {
-        return Err(bad(format!(
+        return Err(invalid(format!(
             "a walk has 1 … {} points",
             WalkState::MAX_POINTS
         )));
@@ -808,16 +778,16 @@ fn check_points(points: &[WalkPointSpec]) -> Result<(), ProtoError> {
             || p.label.trim() != p.label
             || p.label.chars().count() > WalkState::MAX_NAME
         {
-            return Err(bad(format!(
+            return Err(invalid(format!(
                 "point {i}: a label of 1 … {} characters, without leading or trailing spaces",
                 WalkState::MAX_NAME
             )));
         }
         if points[..i].iter().any(|o| o.label == p.label) {
-            return Err(bad(format!("point label {} appears twice", p.label)));
+            return Err(invalid(format!("point label {} appears twice", p.label)));
         }
         if !p.at.iter().all(|v| v.is_finite()) || p.at[2] < 0.0 {
-            return Err(bad(format!(
+            return Err(invalid(format!(
                 "point {}: a finite position on or above the floor",
                 p.label
             )));
@@ -827,12 +797,9 @@ fn check_points(points: &[WalkPointSpec]) -> Result<(), ProtoError> {
 }
 
 fn point_of(w: &WalkState, point: u16) -> Result<&WalkPoint, ProtoError> {
-    w.points.get(usize::from(point)).ok_or_else(|| {
-        perr(
-            ErrorCode::NotFound,
-            format!("the walk {} has no point {point}", w.name),
-        )
-    })
+    w.points
+        .get(usize::from(point))
+        .ok_or_else(|| missing(format!("the walk {} has no point {point}", w.name)))
 }
 
 /// What a capture was taken under: what its trace records, so the warning and the trace's

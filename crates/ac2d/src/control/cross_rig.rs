@@ -6,6 +6,7 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
+use ac2_proto::ProtoError;
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{
     Anchor, Clocks, CrossRigTransfer, CrossTfState, DelayOutcome, DelaySlip, MeasKind, Measurement,
@@ -13,13 +14,12 @@ use ac2_proto::model::{
     RemoteSide, SampleClock, StopWhy, remote_slot,
 };
 use ac2_proto::units::{MeasId, RigId, Seconds, SessionEpoch, WallNs};
-use ac2_proto::{ErrorCode, ProtoError};
 
 use super::{Control, DelaySource};
 use crate::conv;
 use crate::jobs::JobCmd;
 use crate::jobs::cross_rig::{ClockGate, CrossEvent, GATE_LAG_S};
-use crate::util::{perr, wall_ns};
+use crate::util::{invalid, wall_ns};
 
 /// How long a settled relock and a slip are said on the pane.
 const SHOWN_FOR: Duration = Duration::from_secs(60);
@@ -450,7 +450,7 @@ impl Control {
         let d = self.transfer_delay(meas)?;
         let to = (d.applied_samples + by as f64) / fs;
         if !to.is_finite() {
-            return Err(perr(ErrorCode::Invalid, "no delay"));
+            return Err(invalid("no delay"));
         }
         self.set_delay(meas, Seconds(to), DelaySource::Tracking)
             .map(|_| ())

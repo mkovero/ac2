@@ -325,10 +325,9 @@ impl Control {
                 });
             });
         if let Err(e) = spawned {
-            self.attempt_failed(&crate::util::perr(
-                ac2_proto::ErrorCode::Internal,
-                format!("cannot start a thread to reopen the session: {e}"),
-            ));
+            self.attempt_failed(&crate::util::internal(format!(
+                "cannot start a thread to reopen the session: {e}"
+            )));
             return;
         }
         self.commit_stopped(WireRecovery::Opening {

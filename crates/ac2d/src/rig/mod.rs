@@ -31,16 +31,16 @@ use std::io;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
+use ac2_proto::ProtoError;
 use ac2_proto::model::{
     ArtnetFade, ArtnetTarget, ColourFamily, LevelsSettings, MeasConfig, Measurement, OutputSetup,
     PaneLayout, RigPeer, SessionConfig, StateFile,
 };
 use ac2_proto::units::{Db, MeasId};
-use ac2_proto::{ErrorCode, ProtoError};
 use ac2_traces::session::SavedMeasurement;
 use serde::Serialize;
 
-use crate::util::perr;
+use crate::util::{internal, refused};
 use file::{Read, VERSION};
 
 /// A rig SPL meter as the rig settings keep it: what the operator set for it, and nothing
@@ -260,14 +260,11 @@ impl RigStore {
     /// Ok unless the file could not be read at start.
     pub(crate) fn check(&self) -> Result<(), ProtoError> {
         match (&self.unreadable, &self.path) {
-            (Some(reason), Some(path)) => Err(perr(
-                ErrorCode::Refused,
-                format!(
-                    "rig settings {} are unreadable ({reason}); they are never overwritten — \
-                     fix or move the file away and restart ac2d",
-                    path.display()
-                ),
-            )),
+            (Some(reason), Some(path)) => Err(refused(format!(
+                "rig settings {} are unreadable ({reason}); they are never overwritten — \
+                 fix or move the file away and restart ac2d",
+                path.display()
+            ))),
             _ => Ok(()),
         }
     }
@@ -279,14 +276,9 @@ impl RigStore {
         let Some(path) = &self.path else {
             return Ok(());
         };
-        let text =
-            file::write(s).map_err(|e| perr(ErrorCode::Internal, format!("rig settings: {e}")))?;
-        crate::damage::write_with_prev(path, &text).map_err(|e| {
-            perr(
-                ErrorCode::Internal,
-                format!("cannot write rig settings {}: {e}", path.display()),
-            )
-        })
+        let text = file::write(s).map_err(|e| internal(format!("rig settings: {e}")))?;
+        crate::damage::write_with_prev(path, &text)
+            .map_err(|e| internal(format!("cannot write rig settings {}: {e}", path.display())))
     }
 }
 

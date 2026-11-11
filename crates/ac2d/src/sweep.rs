@@ -13,11 +13,11 @@ use ac2_proto::model::{
     Unresolved,
 };
 use ac2_proto::units::{Db, Hz, Seconds};
-use ac2_proto::{ErrorCode, GridDef, ProtoError};
+use ac2_proto::{GridDef, ProtoError};
 use ac2_traces::columns::Columns;
 
 use crate::conv;
-use crate::util::perr;
+use crate::util::invalid;
 
 /// Recorded before the first sweep can have arrived: the output → input latency allowance,
 /// seconds. A longer latency cuts the last sweep's silence and the analysis says so.
@@ -45,8 +45,7 @@ pub(crate) fn spec(
     if !(ess.start_hz.is_finite() && ess.end_hz.is_finite() && ess.start_hz > 0.0)
         || ess.end_hz <= ess.start_hz
     {
-        return Err(perr(
-            ErrorCode::Invalid,
+        return Err(invalid(
             "the sweep must run up from a positive start frequency",
         ));
     }
@@ -60,7 +59,7 @@ pub(crate) fn spec(
         grid: LogGrid::covering(resolution.ppo(), ess.start_hz, ess.end_hz),
         lf_harmonics: conv::lf_harmonics(lf_harmonics),
     };
-    let timing = SweepTiming::new(&spec).map_err(|e| perr(ErrorCode::Invalid, e.to_string()))?;
+    let timing = SweepTiming::new(&spec).map_err(|e| invalid(e.to_string()))?;
     Ok((spec, timing))
 }
 

@@ -28,7 +28,7 @@ use ac2_proto::units::{
     ClientId, DaemonIncarnation, Dbfs, LeaseToken, MeasId, RequestId, Rev, Seconds, SessionEpoch,
     SweepId, WallNs,
 };
-use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
+use ac2_proto::{ProtoError, ReplyBody};
 use ac2_zmq::{Context, PublicKey};
 
 use crate::autosave::Autosaver;
@@ -43,7 +43,7 @@ use crate::session::{Limits, Runtime};
 use crate::state::Store;
 use crate::stimulus::{LeaseGate, LeasedSource, SweepTrain};
 use crate::sweep::Recording;
-use crate::util::perr;
+use crate::util::invalid;
 
 mod artnet;
 mod autosave;
@@ -904,13 +904,17 @@ impl Control {
             .ok_or_else(|| not_found(id))
     }
 
+    /// Commits `m` as its measurement's new state and answers with it.
+    fn reply_meas(&mut self, m: Measurement) -> ReplyBody {
+        self.commit(Change::Measurement(Patch::Set(m.clone())));
+        ReplyBody::Measurement(m)
+    }
+
     fn transfer_delay(&self, id: MeasId) -> Result<&DelayState, ProtoError> {
-        self.meas(id)?.delay.as_ref().ok_or_else(|| {
-            perr(
-                ErrorCode::Invalid,
-                format!("measurement {} is not a transfer function", id.0),
-            )
-        })
+        self.meas(id)?
+            .delay
+            .as_ref()
+            .ok_or_else(|| invalid(format!("measurement {} is not a transfer function", id.0)))
     }
 
     fn register_grid(&mut self, g: GridDef) -> GridId {

@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 
 use super::file_jobs::{FileDone, Pending, ReplaceRead, Work};
 use super::{Control, ControlMsg};
-use crate::util::{perr, perr_detail, wall_ns};
+use crate::util::{internal, missing, perr, perr_detail, wall_ns};
 
 /// Beside an autosave's (or a recovery copy's) manifest.
 pub(crate) const WORKING_FILE: &str = "working.json";
@@ -404,10 +404,7 @@ impl Control {
         client: &ClientId,
     ) -> Result<(Pending, Work), ProtoError> {
         let Some(r) = self.replaced_working.as_ref() else {
-            return Err(perr(
-                ErrorCode::NotFound,
-                "no replaced working state to recover",
-            ));
+            return Err(missing("no replaced working state to recover"));
         };
         let src = match &r.copy {
             Copy::Memory(d) | Copy::Installing { data: d, .. } => RecoverFrom::Memory(d.clone()),
@@ -418,10 +415,7 @@ impl Control {
             let read = match src {
                 RecoverFrom::Memory(d) => Ok(*d),
                 RecoverFrom::Disk(dir) => session::load(&dir).map_err(|e| {
-                    perr(
-                        ErrorCode::Internal,
-                        format!("the replaced working state cannot be read: {e}"),
-                    )
+                    internal(format!("the replaced working state cannot be read: {e}"))
                 }),
             };
             // The copy read stays recoverable when it cannot replace the working state.
@@ -463,10 +457,7 @@ impl Control {
             }
             match self.replaced_working.take() {
                 Some(old) => Ok((old, data)),
-                None => Err(perr(
-                    ErrorCode::NotFound,
-                    "no replaced working state to recover",
-                )),
+                None => Err(missing("no replaced working state to recover")),
             }
         });
         let (old, data) = match checked {

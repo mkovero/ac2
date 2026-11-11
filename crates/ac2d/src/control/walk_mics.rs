@@ -6,12 +6,12 @@
 //! Either way two mics never share an input: one input is one mic, and one mic stands at one
 //! point.
 
+use ac2_proto::ProtoError;
 use ac2_proto::model::{MeasKind, MeasScope, WalkKind, WalkMic, WalkState};
 use ac2_proto::units::MeasId;
-use ac2_proto::{ErrorCode, ProtoError};
 
 use super::Control;
-use crate::util::perr;
+use crate::util::{invalid, refused};
 
 impl Control {
     /// The mics of a new walk of kind `kind` capturing with `meas`, checked.
@@ -20,38 +20,36 @@ impl Control {
         kind: WalkKind,
         meas: &[MeasId],
     ) -> Result<Vec<WalkMic>, ProtoError> {
-        let bad = |m: String| perr(ErrorCode::Invalid, m);
         match kind {
             WalkKind::LiveTransfer if meas.is_empty() || meas.len() > WalkState::MAX_MICS => {
-                return Err(bad(format!(
+                return Err(invalid(format!(
                     "a live walk captures with 1 … {} transfer measurements, one per mic",
                     WalkState::MAX_MICS
                 )));
             }
             WalkKind::Sweep if meas.len() != 1 => {
-                return Err(bad(
+                return Err(invalid(
                     "a sweep walk records with one sweep measurement: its measurement inputs \
-                     are the mics"
-                        .into(),
+                     are the mics",
                 ));
             }
             WalkKind::LiveTransfer | WalkKind::Sweep => {}
         }
         if (1..meas.len()).any(|k| meas[..k].contains(&meas[k])) {
-            return Err(bad("a walk names each measurement once: one per mic".into()));
+            return Err(invalid("a walk names each measurement once: one per mic"));
         }
         let mut mics: Vec<WalkMic> = Vec::with_capacity(meas.len());
         for &id in meas {
             let m = self.meas(id)?;
             let name = &m.config.name;
             if m.config.scope != MeasScope::Session {
-                return Err(bad(format!("{name} is a rig meter")));
+                return Err(invalid(format!("{name} is a rig meter")));
             }
             match (kind, &m.config.kind) {
                 (WalkKind::LiveTransfer, MeasKind::Transfer { config }) => {
                     // Two measurements of one input would capture the same mic at two places.
                     if mics.iter().any(|o| o.input == config.measurement_input) {
-                        return Err(bad(format!(
+                        return Err(invalid(format!(
                             "{name} measures an input another of the walk's measurements does: \
                              each mic needs its own input"
                         )));
@@ -64,9 +62,9 @@ impl Control {
                 (WalkKind::Sweep, MeasKind::Sweep { config }) => {
                     config
                         .check_inputs()
-                        .map_err(|e| bad(format!("{name}: {e}")))?;
+                        .map_err(|e| invalid(format!("{name}: {e}")))?;
                     if config.measurement_inputs.len() > WalkState::MAX_MICS {
-                        return Err(bad(format!(
+                        return Err(invalid(format!(
                             "{name} records {} inputs; a walk places at most {} mics",
                             config.measurement_inputs.len(),
                             WalkState::MAX_MICS
@@ -80,21 +78,21 @@ impl Control {
                     );
                 }
                 (WalkKind::LiveTransfer, _) => {
-                    return Err(bad(format!(
+                    return Err(invalid(format!(
                         "{name} is not a transfer measurement: a live walk captures transfers"
                     )));
                 }
                 (WalkKind::Sweep, _) => {
-                    return Err(bad(format!(
+                    return Err(invalid(format!(
                         "{name} is not a sweep measurement: a sweep walk records sweeps"
                     )));
                 }
             }
             if let Some(w) = self.walk_of(id) {
-                return Err(perr(
-                    ErrorCode::Refused,
-                    format!("{name} captures for the walk {} already", w.name),
-                ));
+                return Err(refused(format!(
+                    "{name} captures for the walk {} already",
+                    w.name
+                )));
             }
         }
         Ok(mics)
@@ -112,14 +110,11 @@ impl Control {
             return Ok(());
         };
         let refuse = |what: &str| {
-            Err(perr(
-                ErrorCode::Refused,
-                format!(
-                    "measurement {meas} belongs to the walk {}: it keeps its {what} while the \
-                     walk names it",
-                    w.name
-                ),
-            ))
+            Err(refused(format!(
+                "measurement {meas} belongs to the walk {}: it keeps its {what} while the \
+                 walk names it",
+                w.name
+            )))
         };
         if w.average == Some(meas) {
             return match new {
@@ -151,14 +146,11 @@ impl Control {
     /// records them where they stood when it started.
     pub(super) fn check_walk_idle(&self, w: &WalkState) -> Result<(), ProtoError> {
         if self.walk_sweeping() == Some(w.id) {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!(
-                    "the walk {}'s sweep is running: it records the mics where they stand; \
-                     wait for it, or stop it",
-                    w.name
-                ),
-            ));
+            return Err(refused(format!(
+                "the walk {}'s sweep is running: it records the mics where they stand; \
+                 wait for it, or stop it",
+                w.name
+            )));
         }
         Ok(())
     }

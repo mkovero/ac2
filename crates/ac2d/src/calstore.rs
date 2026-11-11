@@ -29,7 +29,7 @@ use ac2_proto::model::{
 use ac2_proto::{ErrorCode, ErrorDetail, MicCurveFileReason, ProtoError};
 use serde::{Deserialize, Serialize};
 
-use crate::util::{perr, perr_detail};
+use crate::util::{internal, invalid, perr_detail};
 
 const FORMAT: &str = "ac2-calibrations";
 const VERSION: u32 = 4;
@@ -177,12 +177,12 @@ pub(crate) struct CalStore {
 
 /// Validates a mic name: 1 … 64 characters, no control characters, no surrounding space.
 pub(crate) fn check_mic_name(m: &str) -> Result<(), ProtoError> {
-    cal::check_mic_name(m).map_err(|e| perr(ErrorCode::Invalid, e))
+    cal::check_mic_name(m).map_err(invalid)
 }
 
 /// Validates a curve label.
 pub(crate) fn check_label(l: &str) -> Result<(), ProtoError> {
-    cal::check_label(l).map_err(|e| perr(ErrorCode::Invalid, e))
+    cal::check_label(l).map_err(invalid)
 }
 
 /// The protocol error for a refused mic-curve file.
@@ -409,12 +409,12 @@ impl CalStore {
                 pairs: c.pairs.clone(),
             };
             let text = serde_json::to_vec_pretty(&file)
-                .map_err(|e| perr(ErrorCode::Internal, format!("calibration store: {e}")))?;
+                .map_err(|e| internal(format!("calibration store: {e}")))?;
             crate::damage::write_with_prev(path, &text).map_err(|e| {
-                perr(
-                    ErrorCode::Internal,
-                    format!("cannot write calibration store {}: {e}", path.display()),
-                )
+                internal(format!(
+                    "cannot write calibration store {}: {e}",
+                    path.display()
+                ))
             })?;
         }
         self.curves = curves;

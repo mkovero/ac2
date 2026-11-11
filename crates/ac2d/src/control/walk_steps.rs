@@ -2,10 +2,10 @@
 //! step, from the grouping `ac2_room::steps` makes, and how a swap, a redo and an edit of the
 //! points keep it one mic per pending point. Pure: walk state in, walk state out.
 
+use ac2_proto::ProtoError;
 use ac2_proto::model::{PointState, WalkKind, WalkMic, WalkPoint, WalkState};
-use ac2_proto::{ErrorCode, ProtoError};
 
-use crate::util::perr;
+use crate::util::{invalid, missing, refused};
 
 /// Groups `points` into steps of `mics` and gives each its step and mic. A
 /// captured point keeps the mic that captured it: that is a fact of its trace, whatever the
@@ -66,34 +66,27 @@ pub(super) fn repend(w: &mut WalkState, i: usize) {
 /// and the pending points of later steps follow the same exchange, so each mic goes on from
 /// where it now stands.
 pub(super) fn swap(w: &mut WalkState, points: &[u16]) -> Result<(), ProtoError> {
-    let bad = |m: String| perr(ErrorCode::Invalid, m);
     let Some(step) = w.step else {
-        return Err(bad(
-            "every point of the walk is captured or skipped: no mic stands anywhere".into(),
+        return Err(invalid(
+            "every point of the walk is captured or skipped: no mic stands anywhere",
         ));
     };
     if points.len() < 2 {
-        return Err(bad("a swap takes the points of at least two mics".into()));
+        return Err(invalid("a swap takes the points of at least two mics"));
     }
     let mut old: Vec<WalkMic> = Vec::with_capacity(points.len());
     for (k, &pt) in points.iter().enumerate() {
         let Some(p) = w.points.get(usize::from(pt)) else {
-            return Err(perr(
-                ErrorCode::NotFound,
-                format!("the walk {} has no point {pt}", w.name),
-            ));
+            return Err(missing(format!("the walk {} has no point {pt}", w.name)));
         };
         if points[..k].contains(&pt) {
-            return Err(bad(format!("{} is named twice", p.label)));
+            return Err(invalid(format!("{} is named twice", p.label)));
         }
         if p.step != step || !matches!(p.state, PointState::Pending) {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!(
-                    "no mic stands at {}: only this step's pending points swap",
-                    p.label
-                ),
-            ));
+            return Err(refused(format!(
+                "no mic stands at {}: only this step's pending points swap",
+                p.label
+            )));
         }
         old.push(p.mic);
     }
@@ -119,9 +112,8 @@ pub(super) fn swap(w: &mut WalkState, points: &[u16]) -> Result<(), ProtoError> 
 /// A loaded walk's steps hold together: every point's mic is one of the walk's, no step
 /// places a mic at two pending points, and the current step exists.
 pub(super) fn check(w: &WalkState) -> Result<(), ProtoError> {
-    let bad = |m: String| perr(ErrorCode::Invalid, m);
     if w.mics.is_empty() || w.mics.len() > WalkState::MAX_MICS {
-        return Err(bad(format!(
+        return Err(invalid(format!(
             "walk {} captures with {} mics; 1 … {}",
             w.id,
             w.mics.len(),
@@ -132,14 +124,14 @@ pub(super) fn check(w: &WalkState) -> Result<(), ProtoError> {
         (1..w.mics.len()).any(|k| w.mics[..k].iter().any(|o| f(o, &w.mics[k])))
     };
     if twice(&|a, b| a.input == b.input) {
-        return Err(bad(format!("walk {} names an input twice", w.id)));
+        return Err(invalid(format!("walk {} names an input twice", w.id)));
     }
     match w.kind {
         WalkKind::LiveTransfer if twice(&|a, b| a.meas == b.meas) => {
-            return Err(bad(format!("walk {} names a measurement twice", w.id)));
+            return Err(invalid(format!("walk {} names a measurement twice", w.id)));
         }
         WalkKind::Sweep if w.meas().len() != 1 => {
-            return Err(bad(format!(
+            return Err(invalid(format!(
                 "sweep walk {} records with one sweep measurement",
                 w.id
             )));
@@ -148,7 +140,7 @@ pub(super) fn check(w: &WalkState) -> Result<(), ProtoError> {
     }
     for (i, p) in w.points.iter().enumerate() {
         if !w.mics.contains(&p.mic) {
-            return Err(bad(format!(
+            return Err(invalid(format!(
                 "walk {} point {}: measurement {} input {} is none of the walk's mics",
                 w.id,
                 p.label,
@@ -157,7 +149,7 @@ pub(super) fn check(w: &WalkState) -> Result<(), ProtoError> {
             )));
         }
         if usize::from(p.step) >= w.points.len() {
-            return Err(bad(format!(
+            return Err(invalid(format!(
                 "walk {} point {}: no step {}",
                 w.id, p.label, p.step
             )));
@@ -168,14 +160,14 @@ pub(super) fn check(w: &WalkState) -> Result<(), ProtoError> {
                 .iter()
                 .any(|q| pending(q) && q.step == p.step && q.mic == p.mic)
         {
-            return Err(bad(format!(
+            return Err(invalid(format!(
                 "walk {} step {}: one mic at two points",
                 w.id, p.step
             )));
         }
     }
     if w.step.is_some_and(|s| s >= w.steps()) {
-        return Err(bad(format!("walk {} stands at no step", w.id)));
+        return Err(invalid(format!("walk {} stands at no step", w.id)));
     }
     Ok(())
 }

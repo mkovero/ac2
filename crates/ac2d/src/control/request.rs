@@ -7,13 +7,13 @@ use ac2_proto::frame::{Frame, FrameData, FrameStamp, GenSummary, KaMeta, Protect
 use ac2_proto::topic::Topic;
 use ac2_proto::units::{ClientId, RequestId, SampleIndex, WallNs};
 use ac2_proto::{
-    Command, ErrorCode, PROTO_VERSION, ProtoError, Reply, ReplyBody, decode_request, encode_reply,
+    Command, PROTO_VERSION, ProtoError, Reply, ReplyBody, decode_request, encode_reply,
     peek_envelope,
 };
 
 use crate::dedup::Admit;
 use crate::health::SessionStream;
-use crate::util::{hex, perr, wall_ns};
+use crate::util::{hex, internal, invalid, refused, wall_ns};
 
 use super::{Control, CurvePeer, PendingFind, PendingReply, mutation_conflict};
 
@@ -101,10 +101,7 @@ impl Control {
         let req = match decode_request(payload) {
             Ok(r) => r,
             Err(e) => {
-                self.send_reply(
-                    routing_id,
-                    &Reply::new(id, Err(perr(ErrorCode::Invalid, e.to_string()))),
-                );
+                self.send_reply(routing_id, &Reply::new(id, Err(invalid(e.to_string()))));
                 return;
             }
         };
@@ -118,10 +115,9 @@ impl Control {
                 routing_id,
                 &Reply::new(
                     id,
-                    Err(perr(
-                        ErrorCode::Refused,
-                        format!("the key of client {name:?} was revoked on this rig"),
-                    )),
+                    Err(refused(format!(
+                        "the key of client {name:?} was revoked on this rig"
+                    ))),
                 ),
             );
             return;
@@ -136,10 +132,9 @@ impl Control {
                 routing_id,
                 &Reply::new(
                     id,
-                    Err(perr(
-                        ErrorCode::Refused,
-                        format!("{name:?} is admitted as a rig: it may only take inputs"),
-                    )),
+                    Err(refused(format!(
+                        "{name:?} is admitted as a rig: it may only take inputs"
+                    ))),
                 ),
             );
             return;
@@ -154,10 +149,9 @@ impl Control {
                 routing_id,
                 &Reply::new(
                     id,
-                    Err(perr(
-                        ErrorCode::Refused,
-                        format!("{name:?} is not admitted as a rig: admit it with auth.admit_rig"),
-                    )),
+                    Err(refused(format!(
+                        "{name:?} is not admitted as a rig: admit it with auth.admit_rig"
+                    ))),
                 ),
             );
             return;
@@ -288,10 +282,7 @@ impl Control {
             Ok(b) => b,
             Err(e) => {
                 tracing::error!("reply not encodable: {e}");
-                match encode_reply(&Reply::new(
-                    id,
-                    Err(perr(ErrorCode::Internal, e.to_string())),
-                )) {
+                match encode_reply(&Reply::new(id, Err(internal(e.to_string())))) {
                     Ok(b) => b,
                     Err(_) => return,
                 }

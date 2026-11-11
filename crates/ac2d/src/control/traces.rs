@@ -24,7 +24,7 @@ use ac2_traces::ops::{self, Derived, OpError};
 use ac2_traces::text::{self, ImportError};
 
 use super::Control;
-use crate::util::{perr, perr_detail, wall_ns};
+use crate::util::{internal, invalid, missing, perr, perr_detail, refused, wall_ns};
 
 /// Columns and grids of the stored traces, by id.
 #[derive(Debug, Default)]
@@ -113,7 +113,7 @@ impl TraceStore {
 }
 
 fn op_err(e: &OpError) -> ProtoError {
-    perr(ErrorCode::Invalid, e.to_string())
+    invalid(e.to_string())
 }
 
 pub(crate) fn import_err(e: ImportError) -> ProtoError {
@@ -156,7 +156,7 @@ fn transfer_ir(f: ac2_proto::frame::IrFrame) -> Option<TransferIr> {
 }
 
 fn no_trace(id: TraceId) -> ProtoError {
-    perr(ErrorCode::NotFound, format!("no trace {id}"))
+    missing(format!("no trace {id}"))
 }
 
 impl Control {
@@ -176,7 +176,7 @@ impl Control {
             .traces
             .get(id)
             .cloned()
-            .ok_or_else(|| perr(ErrorCode::Internal, format!("trace {id} has no data")))?;
+            .ok_or_else(|| internal(format!("trace {id} has no data")))?;
         Ok(StoredTrace {
             meta,
             grid,
@@ -262,47 +262,37 @@ impl Control {
         slot: Option<u8>,
         position: Option<TracePosition>,
     ) -> Result<ReplyBody, ProtoError> {
-        meta::check_edit(&name, slot).map_err(|e| perr(ErrorCode::Invalid, e))?;
+        meta::check_edit(&name, slot).map_err(invalid)?;
         let m = self.meas(meas)?.clone();
         if !m.config.kind.is_job() {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!(
-                    "{} is a sweep measurement: each run is stored as a trace already",
-                    m.config.name
-                ),
-            ));
+            return Err(invalid(format!(
+                "{} is a sweep measurement: each run is stored as a trace already",
+                m.config.name
+            )));
         }
         let super::Captured { frame, ir } = self
             .jobs
             .get(&meas)
             .and_then(super::JobHandle::capture)
             .ok_or_else(|| {
-                perr(
-                    ErrorCode::Invalid,
-                    format!(
-                        "{}: no result to capture yet (the measurement must be running)",
-                        m.config.name
-                    ),
-                )
+                invalid(format!(
+                    "{}: no result to capture yet (the measurement must be running)",
+                    m.config.name
+                ))
             })?;
         if frame.stamp.session_epoch != self.epoch() {
-            return Err(perr(
-                ErrorCode::Invalid,
+            return Err(invalid(
                 "the newest result is from an earlier session epoch",
             ));
         }
         let (kind, columns) = ops::capture_columns(&frame.data).ok_or_else(|| {
-            perr(
-                ErrorCode::Invalid,
-                "only transfer, spectrum and RTA measurements can be captured",
-            )
+            invalid("only transfer, spectrum and RTA measurements can be captured")
         })?;
         let grid = frame
             .stamp
             .grid_id
             .and_then(|g| self.grids.get(&g).cloned())
-            .ok_or_else(|| perr(ErrorCode::Internal, "the frame's grid is not registered"))?;
+            .ok_or_else(|| internal("the frame's grid is not registered"))?;
         if let MeasKind::Math { config } = &m.config.kind {
             return self.capture_math(&m, config, &frame, kind, grid, columns, name, slot);
         }
@@ -332,8 +322,7 @@ impl Control {
             ),
             (_, MeasKind::Rta { config }) => (Seconds(0.0), Seconds(0.0), None, None, config.input),
             _ => {
-                return Err(perr(
-                    ErrorCode::Invalid,
+                return Err(invalid(
                     "the measurement changed kind since its last result",
                 ));
             }
@@ -434,12 +423,8 @@ impl Control {
                 FrameData::Rta(f) => (f.meta.math.as_deref(), Seconds(0.0), None),
                 _ => (None, Seconds(0.0), None),
             };
-        let state = state.ok_or_else(|| {
-            perr(
-                ErrorCode::Internal,
-                "the math channel's frame does not say what it combined",
-            )
-        })?;
+        let state = state
+            .ok_or_else(|| internal("the math channel's frame does not say what it combined"))?;
         let included: Vec<NamedOperand> = state
             .operands
             .iter()
@@ -454,13 +439,10 @@ impl Control {
             MathExpr::Average { .. } => included.len() >= MathConfig::MIN_AVERAGE,
         };
         if !enough || columns.mag_db.iter().all(|v| v.is_nan()) {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!(
-                    "{}: its operands have no usable result together; nothing to capture",
-                    m.config.name
-                ),
-            ));
+            return Err(refused(format!(
+                "{}: its operands have no usable result together; nothing to capture",
+                m.config.name
+            )));
         }
         let id = self.traces.alloc();
         // Filed where the math channel is listed: under the measurement it was made on.
@@ -504,22 +486,20 @@ impl Control {
         id: TraceId,
         edit: TraceEdit,
     ) -> Result<ReplyBody, ProtoError> {
-        meta::check_values(&edit).map_err(|e| perr(ErrorCode::Invalid, e))?;
+        meta::check_values(&edit).map_err(invalid)?;
         let mut t = self.trace_meta(id)?.clone();
         if edit.owner != t.edit.owner {
             self.check_owner(edit.owner)?;
         }
         if edit.smoothing.is_some() && !ac2_traces::smooth::smoothable(t.kind) {
-            return Err(perr(
-                ErrorCode::Invalid,
+            return Err(invalid(
                 "smoothing applies to transfer and spectrum traces only",
             ));
         }
         if !meta::lock_allows(&t.edit, &edit) {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!("trace {id} is locked; unlock it to change its curve"),
-            ));
+            return Err(refused(format!(
+                "trace {id} is locked; unlock it to change its curve"
+            )));
         }
         for other in meta::take_slot(&self.store.state().traces, id, edit.slot) {
             self.commit(Change::Trace(Patch::Set(other)));
@@ -532,10 +512,7 @@ impl Control {
     pub(super) fn trace_delete(&mut self, id: TraceId) -> Result<ReplyBody, ProtoError> {
         let t = self.trace_meta(id)?;
         if t.edit.locked {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!("trace {id} is locked; unlock it first"),
-            ));
+            return Err(refused(format!("trace {id} is locked; unlock it first")));
         }
         self.check_trace_operand_delete(id)?;
         self.check_walk_trace_delete(id)?;
@@ -554,7 +531,7 @@ impl Control {
         inputs: &[&StoredTrace],
         smoothing: Option<Smoothing>,
     ) -> Result<ReplyBody, ProtoError> {
-        meta::check_edit(&name, None).map_err(|e| perr(ErrorCode::Invalid, e))?;
+        meta::check_edit(&name, None).map_err(invalid)?;
         let first = inputs.first().map(|t| &t.meta);
         let same = |f: &dyn Fn(&TraceMeta) -> bool| inputs.iter().all(|t| f(&t.meta));
         let cal = first.map_or(CalState::Uncalibrated, |m| m.cal.clone());
@@ -676,10 +653,9 @@ impl Control {
         name: String,
         owner: TraceOwner,
     ) -> Result<ReplyBody, ProtoError> {
-        meta::check_edit(&name, None).map_err(|e| perr(ErrorCode::Invalid, e))?;
+        meta::check_edit(&name, None).map_err(invalid)?;
         self.check_owner(owner)?;
-        let (grid, columns) =
-            ac2_traces::target::generate(&curve).map_err(|e| perr(ErrorCode::Invalid, e))?;
+        let (grid, columns) = ac2_traces::target::generate(&curve).map_err(invalid)?;
         let id = self.traces.alloc();
         let t = TraceMeta {
             id,
@@ -719,10 +695,9 @@ impl Control {
         })?;
         let Some(m) = curve else {
             if t.mic_curve.is_none() {
-                return Err(perr(
-                    ErrorCode::NotFound,
-                    format!("trace {id} has no mic curve applied after capture"),
-                ));
+                return Err(missing(format!(
+                    "trace {id} has no mic curve applied after capture"
+                )));
             }
             t.mic_curve = None;
             self.traces.set_mic_curve(id, None);
@@ -744,21 +719,18 @@ impl Control {
                             .join(", ")
                     },
                 );
-                perr(
-                    ErrorCode::NotFound,
-                    format!(
-                        "no mic curve {:?} for mic {:?} in the mic library (stored: {stored}; \
-                         import one with `ac2 cal curve import`)",
-                        m.label, m.mic
-                    ),
-                )
+                missing(format!(
+                    "no mic curve {:?} for mic {:?} in the mic library (stored: {stored}; \
+                     import one with `ac2 cal curve import`)",
+                    m.label, m.mic
+                ))
             })?
             .clone();
         let Some(points) = self.cal.curve(&m.mic, &m.label).cloned() else {
-            return Err(perr(
-                ErrorCode::Internal,
-                format!("the mic curve {:?} of {:?} has no points", m.label, m.mic),
-            ));
+            return Err(internal(format!(
+                "the mic curve {:?} of {:?} has no points",
+                m.label, m.mic
+            )));
         };
         // Normalised where the trace's level calibration was read (the calibrator tone was
         // read uncorrected, so 0 dB there counts nothing twice), else where the mic's newest
@@ -796,7 +768,7 @@ impl Control {
             }),
             ExportFormat::IrWav => {
                 let wav = ac2_traces::ir_wav::export(&t)
-                    .map_err(|e| perr(ErrorCode::Invalid, format!("{}: {e}", t.meta.edit.name)))?;
+                    .map_err(|e| invalid(format!("{}: {e}", t.meta.edit.name)))?;
                 Ok(ReplyBody::Export {
                     file_name: meta::file_name(&t.meta.edit.name, "wav"),
                     content: ac2_proto::units::Blob(wav),

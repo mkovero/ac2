@@ -12,7 +12,7 @@ use ac2_proto::model::{
 };
 use ac2_proto::spl_log::SplLogInfo;
 use ac2_proto::units::{ClientId, MeasId, Rev, WallNs};
-use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
+use ac2_proto::{ProtoError, ReplyBody};
 use ac2_traces::session::{SavedSplLog, SplLogOnDisk};
 
 use super::Control;
@@ -20,7 +20,7 @@ use crate::autosave::{LogSpec, Resume};
 use crate::jobs::spl::LeqSetup;
 use crate::leq_history;
 use crate::leq_log::{self, LeqLog};
-use crate::util::{perr, wall_ns};
+use crate::util::{internal, invalid, missing, wall_ns};
 
 const NS: u64 = 1_000_000_000;
 
@@ -224,10 +224,7 @@ impl Control {
     fn spl_meter(&self, meas: MeasId) -> Result<&Measurement, ProtoError> {
         let m = self.meas(meas)?;
         if !matches!(m.config.kind, MeasKind::Spl { .. }) {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!("measurement {meas} is not an SPL meter"),
-            ));
+            return Err(invalid(format!("measurement {meas} is not an SPL meter")));
         }
         Ok(m)
     }
@@ -251,13 +248,10 @@ impl Control {
                 .ended
                 .get(&meas)
                 .ok_or_else(|| {
-                    perr(
-                        ErrorCode::NotFound,
-                        format!(
-                            "SPL meter {meas} has no previous log: none was ended since the \
-                             daemon started"
-                        ),
-                    )
+                    missing(format!(
+                        "SPL meter {meas} has no previous log: none was ended since the \
+                         daemon started"
+                    ))
                 })?
                 .page(meas, from, max),
         };
@@ -275,7 +269,7 @@ impl Control {
     ) -> Result<ReplyBody, ProtoError> {
         let m = self.spl_meter(meas)?;
         let MeasKind::Spl { config } = &m.config.kind else {
-            return Err(perr(ErrorCode::Internal, "SPL meter without its config"));
+            return Err(internal("SPL meter without its config"));
         };
         let log = self.logs.live.get(&meas);
         let extent = log.and_then(|l| leq_log::lock(l).extent());
@@ -292,22 +286,18 @@ impl Control {
             }
             HistorySpan::Range { from, to, step_s } => {
                 if step_s == 0 || to.0 <= from.0 {
-                    return Err(perr(
-                        ErrorCode::Invalid,
+                    return Err(invalid(
                         "spl.history_get range: `to` must be after `from` and `step_s` at \
                          least 1",
                     ));
                 }
                 let points = (to.0 - from.0).div_ceil(u64::from(step_s) * NS);
                 if points > u64::from(SplHistory::MAX_POINTS) {
-                    return Err(perr(
-                        ErrorCode::Invalid,
-                        format!(
-                            "spl.history_get range: {points} points of {step_s} s, at most \
-                             {}: take a larger step_s",
-                            SplHistory::MAX_POINTS
-                        ),
-                    ));
+                    return Err(invalid(format!(
+                        "spl.history_get range: {points} points of {step_s} s, at most \
+                         {}: take a larger step_s",
+                        SplHistory::MAX_POINTS
+                    )));
                 }
                 // The first second wanted is computed over the longest window before it.
                 let back = leq_history::rows_needed(&config.leq, 0) as u64 * NS;
@@ -334,7 +324,7 @@ impl Control {
     pub(super) fn spl_log_new(&mut self, meas: MeasId) -> Result<ReplyBody, ProtoError> {
         let m = self.spl_meter(meas)?.clone();
         let MeasKind::Spl { config } = &m.config.kind else {
-            return Err(perr(ErrorCode::Internal, "SPL meter without its config"));
+            return Err(internal("SPL meter without its config"));
         };
         let log = self
             .logs
@@ -470,16 +460,15 @@ impl Control {
 impl Control {
     /// Band levels, dB SPL, per band (NaN where not measured) from `src`.
     fn band_levels(&self, src: &BandLevelSource) -> Result<[f64; BAND_COUNT], ProtoError> {
-        let inv = |m: String| perr(ErrorCode::Invalid, m);
         match src {
             BandLevelSource::Levels { levels } => {
                 if levels.len() != BAND_COUNT {
-                    return Err(inv(format!(
+                    return Err(invalid(format!(
                         "band levels are {BAND_COUNT} values, 20 Hz … 10 kHz"
                     )));
                 }
                 if levels.iter().flatten().any(|l| !l.0.is_finite()) {
-                    return Err(inv("a band level must be finite".into()));
+                    return Err(invalid("a band level must be finite"));
                 }
                 let mut out = [f64::NAN; BAND_COUNT];
                 for (o, l) in out.iter_mut().zip(levels) {
@@ -491,12 +480,12 @@ impl Control {
             }
             BandLevelSource::Log { meas, from, until } => {
                 if until <= from {
-                    return Err(inv("the span ends before it starts".into()));
+                    return Err(invalid("the span ends before it starts"));
                 }
                 let rows = self.band_rows_in(*meas, *from, *until)?;
                 ac2_traces::band_log::span_average(&rows)
                     .levels()
-                    .map_err(|g| inv(format!("SPL meter {meas}: {g}")))
+                    .map_err(|g| invalid(format!("SPL meter {meas}: {g}")))
             }
         }
     }
@@ -520,14 +509,11 @@ impl Control {
         // A band meter turned off keeps its log: only an empty span of a meter without one
         // says how to get a log.
         if rows.is_empty() && !banded {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!(
-                    "{name} has no band meter, so it logs no band levels: turn it on (Leq \
-                     settings, or `ac2 spl bands set --preset finland-545-lf`), calibrate it, \
-                     then measure the span again"
-                ),
-            ));
+            return Err(invalid(format!(
+                "{name} has no band meter, so it logs no band levels: turn it on (Leq \
+                 settings, or `ac2 spl bands set --preset finland-545-lf`), calibrate it, \
+                 then measure the span again"
+            )));
         }
         Ok(rows)
     }
@@ -544,7 +530,7 @@ impl Control {
         let rows = self.band_rows_in(meas, from, until)?;
         ac2_traces::band_log::span_reply(meas, from, until, step, &rows)
             .map(|r| ReplyBody::SplBandLog(Box::new(r)))
-            .map_err(|m| perr(ErrorCode::Invalid, m))
+            .map_err(invalid)
     }
 
     /// `spl.band_transfer`: the transfer computed and stored in the band meter's
@@ -558,19 +544,15 @@ impl Control {
         background: Option<&BandLevelSource>,
         place: &str,
     ) -> Result<ReplyBody, ProtoError> {
-        BandTransferSet::check_place(place).map_err(|e| perr(ErrorCode::Invalid, e))?;
+        BandTransferSet::check_place(place).map_err(invalid)?;
         let m = self.spl_meter(meas)?.clone();
         let MeasKind::Spl { config } = &m.config.kind else {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!("{meas} is not an SPL meter"),
-            ));
+            return Err(invalid(format!("{meas} is not an SPL meter")));
         };
         if config.bands.is_none() {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!("SPL meter {meas} has no band meter: enable it first"),
-            ));
+            return Err(invalid(format!(
+                "SPL meter {meas} has no band meter: enable it first"
+            )));
         }
         let name = |id: MeasId| {
             self.spl_meter(id)
@@ -578,7 +560,7 @@ impl Control {
         };
         if let Some(e) = ac2_proto::model::overlapping_spans(foh, at_place, background, place, name)
         {
-            return Err(perr(ErrorCode::Invalid, e));
+            return Err(invalid(e));
         }
         let foh = self.band_levels(foh)?;
         let at_place = self.band_levels(at_place)?;

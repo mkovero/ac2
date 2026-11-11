@@ -8,25 +8,21 @@
 
 use std::sync::Arc;
 
+use ac2_proto::ProtoError;
 use ac2_proto::grid::{BinColumns, GridDef};
 use ac2_proto::model::{
     ALIGN_MAX_DELAY_LIMIT, AverageMethod, MathConfig, MathDomain, MathExpr, MathOp, MathReference,
     MeasKind, Measurement, Operand, TraceKind, TraceMeta,
 };
 use ac2_proto::units::{EqSetId, MeasId, SessionEpoch, TraceId};
-use ac2_proto::{ErrorCode, ProtoError};
 use ac2_traces::math::trace_on_grid;
 
 use super::{Control, static_grid};
 use crate::jobs::math::{Grids, Held, is_filter, needs_shared_time_base};
-use crate::util::perr;
+use crate::util::{invalid, missing, refused};
 
 /// A stored operand's columns, or `None` for a live one.
 type StoredOperand = Option<Arc<Held>>;
-
-fn invalid(m: impl Into<String>) -> ProtoError {
-    perr(ErrorCode::Invalid, m.into())
-}
 
 const LEVEL_RATIO: &str = "spectra and RTA bands are levels: they take − (level difference) \
     and + (power sum) of two levels; × and ÷ put a level through a filter, B a stored transfer \
@@ -210,8 +206,8 @@ pub(super) fn check_operands(
                 if Some(meas) == own {
                     return Err(invalid("a math channel cannot be its own operand"));
                 }
-                let (name, kind) = (l.meas)(meas)
-                    .ok_or_else(|| perr(ErrorCode::NotFound, format!("no measurement {meas}")))?;
+                let (name, kind) =
+                    (l.meas)(meas).ok_or_else(|| missing(format!("no measurement {meas}")))?;
                 let ok = matches!(
                     (kind, c.domain),
                     (MeasKind::Transfer { .. }, MathDomain::Transfer)
@@ -244,8 +240,8 @@ pub(super) fn check_operands(
                 time_bases.push((l.epoch, name.to_owned()));
             }
             Operand::Trace { trace } => {
-                let (t, g) = (l.trace)(trace)
-                    .ok_or_else(|| perr(ErrorCode::NotFound, format!("no trace {trace}")))?;
+                let (t, g) =
+                    (l.trace)(trace).ok_or_else(|| missing(format!("no trace {trace}")))?;
                 let name = &t.edit.name;
                 if filter && k == 1 {
                     // The filter: any stored transfer function, on its own grid.
@@ -283,10 +279,10 @@ pub(super) fn check_operands(
             }
             Operand::Eq { meas, set } => {
                 if !(l.eq)(meas, set) {
-                    return Err(perr(
-                        ErrorCode::NotFound,
-                        format!("measurement {meas} has no EQ set {}", set.0),
-                    ));
+                    return Err(missing(format!(
+                        "measurement {meas} has no EQ set {}",
+                        set.0
+                    )));
                 }
                 if c.owner != (ac2_proto::model::TraceOwner::Meas { meas }) {
                     return Err(invalid(
@@ -535,14 +531,11 @@ impl Control {
     fn named_by(&self, o: Operand) -> Result<(), ProtoError> {
         match self.maths_naming(o).first() {
             None => Ok(()),
-            Some(m) => Err(perr(
-                ErrorCode::Refused,
-                format!(
-                    "{} is an operand of the math channel {}; edit it there first",
-                    operand_word(o),
-                    m.config.name
-                ),
-            )),
+            Some(m) => Err(refused(format!(
+                "{} is an operand of the math channel {}; edit it there first",
+                operand_word(o),
+                m.config.name
+            ))),
         }
     }
 
@@ -580,13 +573,10 @@ impl Control {
         if same_shape {
             Ok(())
         } else {
-            Err(perr(
-                ErrorCode::Refused,
-                format!(
-                    "measurement {meas} is an operand of the math channel {a}: it keeps its \
-                     kind and grid; edit the math channel first"
-                ),
-            ))
+            Err(refused(format!(
+                "measurement {meas} is an operand of the math channel {a}: it keeps its \
+                 kind and grid; edit the math channel first"
+            )))
         }
     }
 }

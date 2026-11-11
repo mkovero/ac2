@@ -15,7 +15,7 @@ use ac2_proto::model::{
     SourceSession, SourceState, StreamIncarnation, SystemClock, remote_slot,
 };
 use ac2_proto::units::{RigId, Seconds, SessionEpoch, WallNs};
-use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
+use ac2_proto::{ProtoError, ReplyBody};
 use ac2_zmq::PublicKey;
 
 use crate::calstore::{self, InputCal};
@@ -27,7 +27,7 @@ use crate::remote::tap::SourceTap;
 use crate::remote::{InputReport, RemoteMsg, RemoteRun, RigReport};
 use crate::rig::RigSettings;
 use crate::session::Runtime;
-use crate::util::{perr, wall_ns};
+use crate::util::{invalid, refused, wall_ns};
 
 /// Audio queued for other rigs while the I/O thread does not take it, s: well past the
 /// longest link offset, so a hiccup loses nothing a rig could still use, and no more, since
@@ -228,9 +228,9 @@ impl Control {
 
     /// `rig.peers`.
     pub(super) fn set_rig_peers(&mut self, peers: Vec<RigPeer>) -> Result<ReplyBody, ProtoError> {
-        check_peers(&peers).map_err(|e| perr(ErrorCode::Invalid, e))?;
+        check_peers(&peers).map_err(invalid)?;
         if peers.iter().any(|p| p.rig == self.s.rig_id) {
-            return Err(perr(ErrorCode::Invalid, "a rig is not paired with itself"));
+            return Err(invalid("a rig is not paired with itself"));
         }
         if peers != self.store.state().remote.peers {
             self.rig.settings.persist(&RigSettings {
@@ -303,12 +303,12 @@ impl Control {
     pub(super) fn check_remote_inputs(&self, cfg: &SessionConfig) -> Result<(), ProtoError> {
         for r in &cfg.remote_inputs {
             if r.rig == self.s.rig_id {
-                return Err(perr(ErrorCode::Invalid, "that input is on this rig"));
+                return Err(invalid("that input is on this rig"));
             }
             if let Some(src) = self.remote.sources.get(&r.rig)
                 && let Some(why) = source_refusal(src, r.channel, cfg.sample_rate_hz)
             {
-                return Err(perr(ErrorCode::Refused, why));
+                return Err(refused(why));
             }
         }
         Ok(())
@@ -670,7 +670,7 @@ impl Control {
         let name = self
             .remote_input(ch)
             .map_or_else(|| "its rig".to_owned(), |r| r.rig_name.clone());
-        Err(perr(ErrorCode::Refused, format!("set on {name}")))
+        Err(refused(format!("set on {name}")))
     }
 
     /// The block map a job on `inputs` reads: this rig's own, or the joined feed's when any
@@ -686,10 +686,7 @@ impl Control {
         for &c in inputs {
             if let Some(slot) = remote_slot(c) {
                 remote.push(self.remote_input(c).ok_or_else(|| {
-                    perr(
-                        ErrorCode::Invalid,
-                        format!("remote input {slot} is not in the session"),
-                    )
+                    invalid(format!("remote input {slot} is not in the session"))
                 })?);
             }
         }
@@ -704,10 +701,7 @@ impl Control {
                 .len()
                 > 1
         {
-            return Err(perr(
-                ErrorCode::Refused,
-                "both inputs remote on different rigs: not yet",
-            ));
+            return Err(refused("both inputs remote on different rigs: not yet"));
         }
         Ok(Some(
             rt.remote

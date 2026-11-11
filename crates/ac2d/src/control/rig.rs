@@ -21,7 +21,7 @@ use ac2_zmq::{AuthorizedHandle, PublicKey};
 use super::Control;
 use crate::authlog::RefusedList;
 use crate::rig::{RigSettings, upsert_outputs};
-use crate::util::perr;
+use crate::util::{internal, invalid, missing, perr, refused};
 
 /// How the daemon serves clients, as `server.*` reports and changes it.
 pub(crate) enum ServerSetup {
@@ -93,38 +93,30 @@ impl Control {
         let bound = self.s.ceiling_bound;
         let old = self.s.ceiling_dbfs;
         if !new.is_finite() {
-            return Err(perr(ErrorCode::Invalid, "the level must be finite"));
+            return Err(invalid("the level must be finite"));
         }
         if new > bound {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!(
-                    "{new:.1} dBFS is above this rig's bound {bound:.1} dBFS (ac2d --max-level; \
-                     only a restart with a higher --max-level raises the bound)"
-                ),
-            ));
+            return Err(invalid(format!(
+                "{new:.1} dBFS is above this rig's bound {bound:.1} dBFS (ac2d --max-level; \
+                 only a restart with a higher --max-level raises the bound)"
+            )));
         }
         if new == old {
             return Ok(ReplyBody::Generator(self.store.state().generator.clone()));
         }
-        let peak = crate::stimulus::peak_limit(new)
-            .map_err(|e| perr(ErrorCode::Invalid, e.to_string()))?;
+        let peak = crate::stimulus::peak_limit(new).map_err(|e| invalid(e.to_string()))?;
         let raising = new > old;
         if raising {
             if !confirm_raise {
-                return Err(perr(
-                    ErrorCode::Refused,
-                    format!(
-                        "raising the system max level from {old:.1} to {new:.1} dBFS needs an \
-                         explicit confirmation"
-                    ),
-                ));
+                return Err(refused(format!(
+                    "raising the system max level from {old:.1} to {new:.1} dBFS needs an \
+                     explicit confirmation"
+                )));
             }
             let g = &self.store.state().generator;
             let sweeping = self.sweep.as_ref().is_some_and(|s| s.run.active());
             if g.armed || g.firing || sweeping || self.detecting.is_some() {
-                return Err(perr(
-                    ErrorCode::Refused,
+                return Err(refused(
                     "the stimulus is armed or playing: stop it before raising the system max \
                      level",
                 ));
@@ -194,11 +186,10 @@ impl Control {
         for (i, r) in rows.iter().enumerate() {
             let n = u32::from(r.channel) + 1;
             if rows[..i].iter().any(|o| o.channel == r.channel) {
-                return Err(perr(ErrorCode::Invalid, format!("output {n} listed twice")));
+                return Err(invalid(format!("output {n} listed twice")));
             }
             if let Some(l) = &r.label {
-                check_output_label(l)
-                    .map_err(|e| perr(ErrorCode::Invalid, format!("output {n}: {e}")))?;
+                check_output_label(l).map_err(|e| invalid(format!("output {n}: {e}")))?;
             }
         }
         let all = upsert_outputs(&self.store.state().outputs, &rows);
@@ -281,7 +272,7 @@ impl Control {
         rig: RigId,
     ) -> Result<ReplyBody, ProtoError> {
         if rig == self.s.rig_id {
-            return Err(perr(ErrorCode::Invalid, "that is this rig's own identity"));
+            return Err(invalid("that is this rig's own identity"));
         }
         self.admit(client, name, key, Some(rig))
     }
@@ -297,10 +288,7 @@ impl Control {
             return Err(network_only());
         };
         let key = PublicKey::from_z85(key.trim()).map_err(|_| {
-            perr(
-                ErrorCode::Invalid,
-                "not a client key: expected the 40 Z85 characters the client shows",
-            )
+            invalid("not a client key: expected the 40 Z85 characters the client shows")
         })?;
         let mut keys = n.authorized.get();
         // A name given again replaces its key and kind: its old connections are dropped
@@ -311,13 +299,9 @@ impl Control {
             Some(r) => keys.insert_rig(name, key, r.0),
             None => keys.insert(name, key),
         }
-        .map_err(|e| perr(ErrorCode::Invalid, e.to_string()))?;
-        keys.save(&n.authorized_file).map_err(|e| {
-            perr(
-                ErrorCode::Internal,
-                format!("cannot write {}: {e}", n.authorized_file.display()),
-            )
-        })?;
+        .map_err(|e| invalid(e.to_string()))?;
+        keys.save(&n.authorized_file)
+            .map_err(|e| internal(format!("cannot write {}: {e}", n.authorized_file.display())))?;
         n.authorized.set(keys);
         n.refused.forget(&key);
         // The same key given another kind keeps its connections but not what they hold:
@@ -347,25 +331,17 @@ impl Control {
             return Err(network_only());
         };
         if client.0 == name {
-            return Err(perr(
-                ErrorCode::Refused,
+            return Err(refused(
                 "a client cannot revoke its own key (that would lock this operator out); \
                  revoke it from another client or edit the authorized-clients file",
             ));
         }
         let mut keys = n.authorized.get();
         let Some(key) = keys.remove(name) else {
-            return Err(perr(
-                ErrorCode::NotFound,
-                format!("no authorized client {name:?}"),
-            ));
+            return Err(missing(format!("no authorized client {name:?}")));
         };
-        keys.save(&n.authorized_file).map_err(|e| {
-            perr(
-                ErrorCode::Internal,
-                format!("cannot write {}: {e}", n.authorized_file.display()),
-            )
-        })?;
+        keys.save(&n.authorized_file)
+            .map_err(|e| internal(format!("cannot write {}: {e}", n.authorized_file.display())))?;
         n.authorized.set(keys);
         // Its data connection, audio included, ends now rather than at its next request.
         self.s.outbox.revoke(key.as_bytes());

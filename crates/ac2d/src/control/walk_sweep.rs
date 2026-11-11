@@ -9,17 +9,17 @@
 //! aborted leaves the points pending; the walk never moves while its sweep runs.
 
 use ac2_core::room::positions::spread;
+use ac2_proto::ProtoError;
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{
     PointState, PositionMean, RoomAcoustics, RoomBand, RoomValue, TracePosition, WalkKind,
     WalkRoom, WalkRoomBand, WalkState,
 };
 use ac2_proto::units::{Hz, MeasId, TraceId, WalkId};
-use ac2_proto::{ErrorCode, ProtoError};
 
 use super::walks::capture_context;
 use super::{Control, walk_steps};
-use crate::util::perr;
+use crate::util::refused;
 
 /// Where a walk's sweep run records, fixed when it starts.
 #[derive(Debug, Clone)]
@@ -209,14 +209,11 @@ fn band(centre: Option<Hz>, at: &[Option<&RoomBand>]) -> WalkRoomBand {
 
 /// Refuses `walk.capture` on a sweep walk: its capture is a run of its sweep measurement.
 pub(super) fn sweep_capture_refusal(w: &WalkState) -> ProtoError {
-    perr(
-        ErrorCode::Refused,
-        format!(
-            "the walk {} captures by running its sweep (sweep.run under the stimulus lease): \
-             the run records every mic where it stands",
-            w.name
-        ),
-    )
+    refused(format!(
+        "the walk {} captures by running its sweep (sweep.run under the stimulus lease): \
+         the run records every mic where it stands",
+        w.name
+    ))
 }
 
 #[cfg(test)]

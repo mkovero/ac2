@@ -9,12 +9,12 @@ use ac2_proto::model::{
     Availability, BackendInfo, GenAction, Measurement, Session, SessionConfig, SweepFailure,
 };
 use ac2_proto::units::{ClientId, Dbfs, LeaseToken, Rev, Seconds, SessionEpoch};
-use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
+use ac2_proto::{ProtoError, ReplyBody};
 
 use crate::conv;
 use crate::preview::Preview;
 use crate::session::{self, Runtime};
-use crate::util::perr;
+use crate::util::{internal, invalid, missing, refused};
 
 use super::{Control, ControlMsg, delay_samples, recovery};
 
@@ -25,10 +25,7 @@ impl Control {
         config: SessionConfig,
     ) -> Result<ReplyBody, ProtoError> {
         if config.backend == Some(ac2_proto::model::BackendKind::Replay) {
-            return Err(perr(
-                ErrorCode::Invalid,
-                "a recording is played with session.replay",
-            ));
+            return Err(invalid("a recording is played with session.replay"));
         }
         // Refused when the operator opens the session only: one the daemon reopens on its
         // own (monitor at start, after a power cut) keeps its remote inputs, and the joiner
@@ -204,7 +201,7 @@ impl Control {
         epoch: SessionEpoch,
     ) -> Result<(), ProtoError> {
         let Some(rt) = self.session.take() else {
-            return Err(perr(ErrorCode::Invalid, "no open session"));
+            return Err(invalid("no open session"));
         };
         let config = rt.open.config.clone();
         let replay = rt.open.replay.clone();
@@ -283,12 +280,7 @@ impl Control {
                 .find(|b| conv::backend_kind(b.kind()) == k)
                 .cloned(),
         }
-        .ok_or_else(|| {
-            perr(
-                ErrorCode::NotFound,
-                format!("this daemon offers no {kind:?} backend"),
-            )
-        })
+        .ok_or_else(|| missing(format!("this daemon offers no {kind:?} backend")))
     }
 
     pub(super) fn backend_infos(&self) -> Vec<BackendInfo> {
@@ -341,8 +333,7 @@ impl Control {
         if self.detecting.is_some() {
             // The burst holds the device; a preview asked for before the detection started
             // must not reopen it under the burst.
-            return Err(perr(
-                ErrorCode::Refused,
+            return Err(refused(
                 "a loopback detection holds the device; the meters return with its result",
             ));
         }
@@ -393,35 +384,27 @@ impl Control {
         self.check_lease(Instant::now());
         self.lease_check(client, token)?;
         let Some(level) = level else {
-            return Err(perr(
-                ErrorCode::Refused,
+            return Err(refused(
                 "type the burst level: loopback detection has no default level",
             ));
         };
         if !level.0.is_finite() {
-            return Err(perr(ErrorCode::Invalid, "level must be finite"));
+            return Err(invalid("level must be finite"));
         }
         if level.0 > self.s.ceiling_dbfs {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!(
-                    "{:.1} dBFS is above the global maximum {:.1} dBFS",
-                    level.0, self.s.ceiling_dbfs
-                ),
-            ));
+            return Err(refused(format!(
+                "{:.1} dBFS is above the global maximum {:.1} dBFS",
+                level.0, self.s.ceiling_dbfs
+            )));
         }
         let g = &self.store.state().generator;
         if g.armed || g.firing {
-            return Err(perr(
-                ErrorCode::Refused,
+            return Err(refused(
                 "the stimulus is armed: stop it before detecting the loopback",
             ));
         }
         if self.detecting.is_some() {
-            return Err(perr(
-                ErrorCode::Refused,
-                "a loopback detection is already running",
-            ));
+            return Err(refused("a loopback detection is already running"));
         }
         let backend = self.backend_for(Some(kind))?;
         self.close_preview();
@@ -453,7 +436,7 @@ impl Control {
                     result: Box::new(result),
                 });
             })
-            .map_err(|e| perr(ErrorCode::Internal, format!("cannot start detection: {e}")))?;
+            .map_err(|e| internal(format!("cannot start detection: {e}")))?;
         Ok(token)
     }
 
@@ -477,21 +460,20 @@ impl Control {
             .spawn(move || {
                 let _ = tx.send(backend.control_panel(&selector));
             })
-            .map_err(|e| perr(ErrorCode::Internal, format!("cannot open the panel: {e}")))?;
+            .map_err(|e| internal(format!("cannot open the panel: {e}")))?;
         std::thread::Builder::new()
             .name("ac2d-panel-wait".into())
             .spawn(move || {
                 let result = match rx.recv_timeout(PANEL_WAIT) {
                     Ok(r) => r.map_err(session::audio_err),
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Ok(()),
-                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(perr(
-                        ErrorCode::Internal,
-                        "the control panel call ended without an answer",
-                    )),
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                        Err(internal("the control panel call ended without an answer"))
+                    }
                 };
                 let _ = to.send(ControlMsg::PanelShown { token, result });
             })
-            .map_err(|e| perr(ErrorCode::Internal, format!("cannot open the panel: {e}")))?;
+            .map_err(|e| internal(format!("cannot open the panel: {e}")))?;
         Ok(token)
     }
 }

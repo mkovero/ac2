@@ -26,12 +26,12 @@ use ac2_traces::session::{
 
 use super::file_jobs::{FileDone, Pending, ReplaceFrom, ReplaceRead, Work};
 use super::{Control, check_delay, delay_samples, maths, static_grid, validate_meas};
-use crate::util::{perr, perr_detail, wall_ns};
+use crate::util::{internal, invalid, missing, perr, perr_detail, refused, wall_ns};
 
 pub(super) fn session_err(e: SessionError) -> ProtoError {
     let msg = e.to_string();
     match e {
-        SessionError::NotFound(_) => perr(ErrorCode::NotFound, msg),
+        SessionError::NotFound(_) => missing(msg),
         SessionError::Version { found, .. } => perr_detail(
             ErrorCode::Unsupported,
             msg,
@@ -41,9 +41,9 @@ pub(super) fn session_err(e: SessionError) -> ProtoError {
             },
         ),
         SessionError::NotASession(_) | SessionError::BadName(_) | SessionError::Corrupt { .. } => {
-            perr(ErrorCode::Invalid, msg)
+            invalid(msg)
         }
-        SessionError::Io { .. } => perr(ErrorCode::Internal, msg),
+        SessionError::Io { .. } => internal(msg),
     }
 }
 
@@ -68,15 +68,13 @@ impl Control {
             }
             SessionRef::Path { path } => {
                 if self.s.network {
-                    return Err(perr(
-                        ErrorCode::Refused,
+                    return Err(refused(
                         "remote clients name sessions; paths are for local clients only",
                     ));
                 }
                 let p = PathBuf::from(path);
                 if !p.is_absolute() {
-                    return Err(perr(
-                        ErrorCode::Invalid,
+                    return Err(invalid(
                         "a session path must be absolute (the daemon's working directory is not the client's)",
                     ));
                 }
@@ -85,8 +83,7 @@ impl Control {
                     .map_or_else(|| path.clone(), |n| n.to_string_lossy().into_owned());
                 Ok((name, p))
             }
-            SessionRef::Upload { .. } => Err(perr(
-                ErrorCode::Invalid,
+            SessionRef::Upload { .. } => Err(invalid(
                 "an upload is opened with file.load or salvaged with file.salvage only",
             )),
         }
@@ -325,8 +322,7 @@ impl Control {
             self.keep(k);
         }
         let epoch = self.replace_session(Some(client), data)?;
-        let read_manifest =
-            |m: Option<Manifest>| m.ok_or_else(|| perr(ErrorCode::Internal, "no manifest read"));
+        let read_manifest = |m: Option<Manifest>| m.ok_or_else(|| internal("no manifest read"));
         match from {
             ReplaceFrom::Empty => {
                 self.set_working(super::working::Persist::untitled());
@@ -625,10 +621,10 @@ pub(super) fn check_session(data: &SessionData) -> Result<HashMap<MeasId, GridDe
             check_delay(&format!("measurement {} saved nudge", sm.id), d.nudged)?;
         }
         if data.measurements.iter().filter(|o| o.id == sm.id).count() > 1 {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!("measurement {} appears twice in the session", sm.id),
-            ));
+            return Err(invalid(format!(
+                "measurement {} appears twice in the session",
+                sm.id
+            )));
         }
         let grid = match &sm.config.kind {
             MeasKind::Math { config } => {
@@ -671,21 +667,18 @@ pub(super) fn check_session(data: &SessionData) -> Result<HashMap<MeasId, GridDe
     for sm in &data.measurements {
         for s in &sm.eq {
             if !set_ids.insert(s.id) {
-                return Err(perr(
-                    ErrorCode::Invalid,
-                    format!("EQ set {} appears twice in the session", s.id.0),
-                ));
+                return Err(invalid(format!(
+                    "EQ set {} appears twice in the session",
+                    s.id.0
+                )));
             }
             if s.body.sections.len() > ac2_proto::model::EqSet::MAX_SECTIONS
                 || !data.traces.iter().any(|t| t.meta.id == s.trace)
             {
-                return Err(perr(
-                    ErrorCode::Invalid,
-                    format!(
-                        "EQ set {} of measurement {} is not one ac2d keeps",
-                        s.id.0, sm.id
-                    ),
-                ));
+                return Err(invalid(format!(
+                    "EQ set {} of measurement {} is not one ac2d keeps",
+                    s.id.0, sm.id
+                )));
             }
         }
     }
@@ -713,10 +706,9 @@ pub(super) fn check_session(data: &SessionData) -> Result<HashMap<MeasId, GridDe
         );
     for (what, owner) in owners {
         if !owner_ok(owner) {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!("{what} is filed under a measurement the session does not hold"),
-            ));
+            return Err(invalid(format!(
+                "{what} is filed under a measurement the session does not hold"
+            )));
         }
     }
     // An SPL log belongs to an SPL meter of the session, one log each, and holds rows the
@@ -725,31 +717,22 @@ pub(super) fn check_session(data: &SessionData) -> Result<HashMap<MeasId, GridDe
         let id = l.info.meas;
         match data.measurements.iter().find(|m| m.id == id) {
             None => {
-                return Err(perr(
-                    ErrorCode::Invalid,
-                    format!("SPL log of measurement {id}, which the session does not hold"),
-                ));
+                return Err(invalid(format!(
+                    "SPL log of measurement {id}, which the session does not hold"
+                )));
             }
             Some(m) if !matches!(m.config.kind, MeasKind::Spl { .. }) => {
-                return Err(perr(
-                    ErrorCode::Invalid,
-                    format!("SPL log of measurement {id}, which is not an SPL meter"),
-                ));
+                return Err(invalid(format!(
+                    "SPL log of measurement {id}, which is not an SPL meter"
+                )));
             }
             Some(_) => {}
         }
         if data.spl_logs.iter().filter(|o| o.info.meas == id).count() > 1 {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!("measurement {id} has two SPL logs"),
-            ));
+            return Err(invalid(format!("measurement {id} has two SPL logs")));
         }
-        let row = |i: usize, e: &str| {
-            perr(
-                ErrorCode::Invalid,
-                format!("SPL log of measurement {id}, row {}: {e}", i + 1),
-            )
-        };
+        let row =
+            |i: usize, e: &str| invalid(format!("SPL log of measurement {id}, row {}: {e}", i + 1));
         for (i, r) in l.rows.iter().enumerate() {
             ac2_proto::spl_log::check_row(r).map_err(|e| row(i, e))?;
         }
@@ -760,11 +743,10 @@ pub(super) fn check_session(data: &SessionData) -> Result<HashMap<MeasId, GridDe
     for t in &data.traces {
         // Data a crafted file could hold that no capture produces (columns off the grid,
         // non-finite values, an unbounded impulse response).
-        ac2_traces::check::trace(t)
-            .map_err(|e| perr(ErrorCode::Invalid, format!("trace {}: {e}", t.meta.id)))?;
+        ac2_traces::check::trace(t).map_err(|e| invalid(format!("trace {}: {e}", t.meta.id)))?;
         // A saved edit meets the limits `trace.update` enforces.
         meta::check_values(&t.meta.edit)
-            .map_err(|e| perr(ErrorCode::Invalid, format!("trace {}: {e}", t.meta.id)))?;
+            .map_err(|e| invalid(format!("trace {}: {e}", t.meta.id)))?;
         if data
             .traces
             .iter()
@@ -772,10 +754,10 @@ pub(super) fn check_session(data: &SessionData) -> Result<HashMap<MeasId, GridDe
             .count()
             > 1
         {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!("trace {} appears twice in the session", t.meta.id),
-            ));
+            return Err(invalid(format!(
+                "trace {} appears twice in the session",
+                t.meta.id
+            )));
         }
     }
     Ok(grids)
@@ -843,7 +825,7 @@ impl Source {
                 super::transfer::remove_dir(&stage);
                 r
             }
-            Self::Empty => Err(perr(ErrorCode::Internal, "nothing to salvage")),
+            Self::Empty => Err(internal("nothing to salvage")),
         }
     }
 

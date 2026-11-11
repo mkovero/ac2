@@ -24,12 +24,12 @@ use ac2_proto::model::{
     PeakQuantity, RigCue, SplConfig, dmx_htp, dmx_nonzero,
 };
 use ac2_proto::units::{MeasId, Rev};
-use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
+use ac2_proto::{ProtoError, ReplyBody};
 
 use super::Control;
 use crate::osc::OscSender;
 use crate::rig::RigSettings;
-use crate::util::perr;
+use crate::util::{internal, invalid};
 
 /// How often the current states are sent again.
 pub(crate) const REPEAT: Duration = Duration::from_secs(1);
@@ -448,10 +448,9 @@ impl Control {
         if let Some(a) = addr
             && (a.ip().is_unspecified() || a.port() == 0)
         {
-            return Err(perr(
-                ErrorCode::Invalid,
-                format!("{a} is not an address to send to: give a host's IP and a port"),
-            ));
+            return Err(invalid(format!(
+                "{a} is not an address to send to: give a host's IP and a port"
+            )));
         }
         if self.store.state().rig.osc_target == addr {
             return Ok(ReplyBody::Ack {
@@ -479,14 +478,11 @@ impl Control {
     /// `osc.test`.
     pub(super) fn osc_test(&mut self, msg: &OscMessage) -> Result<ReplyBody, ProtoError> {
         let Some(target) = self.store.state().rig.osc_target else {
-            return Err(perr(
-                ErrorCode::Invalid,
-                "no OSC target is set (osc.target)",
-            ));
+            return Err(invalid("no OSC target is set (osc.target)"));
         };
         let r = self.rig.osc.sender.send(target, msg, Some(0.0));
         self.commit_osc_status(true);
-        r.map_err(|e| perr(ErrorCode::Internal, e))?;
+        r.map_err(internal)?;
         Ok(ReplyBody::Ack {
             rev: self.store.rev(),
         })

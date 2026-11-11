@@ -9,10 +9,10 @@ use ac2_proto::model::{
     MeasConfig, MeasKind, Measurement, Operand, OwnedTraces, TraceOwner, TraceSource,
 };
 use ac2_proto::units::{MeasId, TraceId, WalkId};
-use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
+use ac2_proto::{ProtoError, ReplyBody};
 
 use super::Control;
-use crate::util::perr;
+use crate::util::{invalid, missing, refused};
 
 /// Whether `new` is `old` with only a math channel's owner changed.
 pub(super) fn owner_only(old: &MeasConfig, new: &MeasConfig) -> bool {
@@ -39,14 +39,10 @@ impl Control {
             .iter()
             .find(|m| m.id == meas);
         match m.map(|m| &m.config.kind) {
-            None => Err(perr(
-                ErrorCode::NotFound,
-                format!("no measurement {meas} to file it under"),
-            )),
-            Some(MeasKind::Math { .. }) => Err(perr(
-                ErrorCode::Invalid,
-                format!("measurement {meas} is a math channel: math owns no traces"),
-            )),
+            None => Err(missing(format!("no measurement {meas} to file it under"))),
+            Some(MeasKind::Math { .. }) => Err(invalid(format!(
+                "measurement {meas} is a math channel: math owns no traces"
+            ))),
             Some(_) => Ok(()),
         }
     }
@@ -62,8 +58,7 @@ impl Control {
             return Ok(());
         };
         if own.is_some() && config.owner.meas() == own {
-            return Err(perr(
-                ErrorCode::Invalid,
+            return Err(invalid(
                 "a math channel is listed under a measurement, not under itself",
             ));
         }
@@ -71,15 +66,12 @@ impl Control {
         if let Some(own) = own {
             let (traces, maths) = self.owned(own);
             if !traces.is_empty() || !maths.is_empty() {
-                return Err(perr(
-                    ErrorCode::Refused,
-                    format!(
-                        "measurement {own} owns {} trace(s) and {} math channel(s): move them \
-                         first (a math channel owns nothing)",
-                        traces.len(),
-                        maths.len()
-                    ),
-                ));
+                return Err(refused(format!(
+                    "measurement {own} owns {} trace(s) and {} math channel(s): move them \
+                     first (a math channel owns nothing)",
+                    traces.len(),
+                    maths.len()
+                )));
             }
         }
         Ok(())
@@ -133,10 +125,9 @@ impl Control {
     ) -> Result<ReplyBody, ProtoError> {
         let name = self.meas(meas)?.config.name.clone();
         if self.sweep.as_ref().is_some_and(|s| s.run.meas == meas) {
-            return Err(perr(
-                ErrorCode::Refused,
-                format!("a run of {name} is playing; stop it first"),
-            ));
+            return Err(refused(format!(
+                "a run of {name} is playing; stop it first"
+            )));
         }
         let (traces, maths) = self.owned(meas);
         // Its EQ curves and predictions exist only with its sets: they always go.
@@ -180,13 +171,10 @@ impl Control {
                     Operand::Meas { .. } => name.clone(),
                     Operand::Trace { .. } | Operand::Eq { .. } => self.operand_name(o),
                 };
-                return Err(perr(
-                    ErrorCode::Refused,
-                    format!(
-                        "{what} is an operand of the math channel {}; edit it there first",
-                        m.config.name
-                    ),
-                ));
+                return Err(refused(format!(
+                    "{what} is an operand of the math channel {}; edit it there first",
+                    m.config.name
+                )));
             }
         }
 
