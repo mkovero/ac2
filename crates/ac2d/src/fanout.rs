@@ -27,6 +27,7 @@ use ac2_proto::units::{Rev, SessionEpoch, WallNs};
 use crate::burst::BurstDetector;
 use crate::capture_clock::CaptureClock;
 use crate::control::ControlMsg;
+use crate::hop_wake::{HopWake, next_frame_end, schedule};
 use crate::jobs::meters::{SessionLevels, meter_period};
 use crate::jobs::programme::Programme;
 use crate::jobs::{Emitter, JobEnv, JobMsg};
@@ -218,6 +219,10 @@ pub(crate) struct Queue {
     pub(crate) wake_at: AtomicU64,
     /// Frames this consumer may have queued; 0 = [`JOB_QUEUE_S`] of audio.
     pub(crate) limit: AtomicU64,
+    /// One past the last sample of the block that completes the job's next result, as of
+    /// its last drain ([`crate::jobs::Analysis::frames_needed`] past the audio it took); 0
+    /// before it has said.
+    pub(crate) due: AtomicU64,
 }
 
 /// What the fan-out feeds one job through.
@@ -226,10 +231,10 @@ pub(crate) struct JobFeed {
     pub(crate) queue: Arc<Queue>,
     /// The job's thread, unparked once `queue.wake_at` frames are queued.
     pub(crate) thread: std::thread::Thread,
-    /// The job's results come on a grid of device periods
-    /// ([`crate::jobs::Analysis::on_device_periods`]): audio goes every device period while
-    /// it is attached.
-    pub(crate) per_period: bool,
+    /// The job's results come every this many samples, on whole device periods
+    /// ([`crate::jobs::Analysis::frame_hop`]): while it is attached the fan-out wakes for
+    /// the block that completes each ([`HopWake`]).
+    pub(crate) per_period: Option<u64>,
 }
 
 pub(crate) enum FanoutMsg {
@@ -588,6 +593,7 @@ fn run(
     // its slot, so a hand-off a little early takes it rather than the one after.
     let meter_early = cfg.handoff / 2;
     let mut next = Instant::now();
+    let mut hop = cfg.block_period.map(|p| HopWake::new(cfg.rate, p));
     // When audio last arrived, on both clocks; the open counts as the first arrival, so a
     // stream that never delivers is stopped too.
     let mut last_audio = (Instant::now(), wall_ns());
@@ -643,27 +649,6 @@ fn run(
             }
         }
         let now = Instant::now();
-        // Audio for another rig, a remote input waiting on this rig's blocks, and a live
-        // spectrum framing on whole device periods each add a hand-off to the latency: they
-        // go every device period instead.
-        let per_period = jobs
-            .values()
-            .chain(joined_jobs.values())
-            .any(|f| f.per_period);
-        let handoff = match cfg.block_period {
-            Some(p)
-                if joiner.is_some() || tap.as_ref().is_some_and(|t| t.active()) || per_period =>
-            {
-                p
-            }
-            _ => cfg.handoff,
-        };
-        next += handoff;
-        if next <= now {
-            // Overslept (a loaded machine): start a new schedule rather than catching up
-            // with a run of back-to-back hand-offs.
-            next = now + handoff;
-        }
 
         pool.reclaim();
         let mut batch = pool.batch();
@@ -714,6 +699,9 @@ fn run(
         }
         if let Some(b) = batch.last() {
             latest.store(b.end_sample(), Ordering::Release);
+            if let Some(h) = &mut hop {
+                h.seen(now, b.end_sample());
+            }
             last_audio = (now, b.wall_ns);
             // Read by audio time, so the reading keeps pace with the audio however the
             // stream is stepped.
@@ -763,6 +751,22 @@ fn run(
         if let Some((l, em)) = &mut levels {
             l.emit(em);
         }
+        // Audio for another rig and a remote input waiting on this rig's blocks each add a
+        // hand-off to the latency: they go every device period instead. A live spectrum
+        // framing on whole device periods wakes it for the block that ends each frame.
+        let every_period = joiner.is_some()
+            || tap.as_ref().is_some_and(|t| t.active())
+            || joined_jobs.values().any(|f| f.per_period.is_some());
+        next = match (cfg.block_period, &mut hop) {
+            (Some(p), _) if every_period => schedule(next, now, p),
+            (Some(_), Some(h)) if jobs.values().any(|f| f.per_period.is_some()) => {
+                let end = latest.load(Ordering::Relaxed);
+                // Other jobs and the meters keep at least their own cadence.
+                h.next(now, next_frame_end(&jobs, end))
+                    .min(now + cfg.handoff)
+            }
+            _ => schedule(next, now, cfg.handoff),
+        };
 
         // Output timing records are not used yet; keep the ring from overflowing.
         while stream.pop_output_tick().is_some() {}

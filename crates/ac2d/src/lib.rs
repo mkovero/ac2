@@ -50,6 +50,7 @@ mod detect;
 mod fanout;
 mod firewall;
 mod health;
+mod hop_wake;
 pub mod instance;
 mod io;
 mod jobs;

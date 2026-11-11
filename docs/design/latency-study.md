@@ -394,8 +394,8 @@ period and never under `fs / 64`; 6 × 256 = 1536 samples = 16 ms at 96 kHz, 3 �
 it for long windows, a divisor for short ones; spectra end on multiples of their hop
 (`SpectrumAnalyzer`), so the multi-resolution bands frame on one grid and a frame goes at
 each grid point where the shortest band (or a long window) has a spectrum. While a spectrum
-runs the fan-out hands audio on every device period (stage 3a's mode), and the job sleeps
-until the block that ends its next frame, then sends it at once. RTA is unchanged (its own
+runs the fan-out wakes for the block that ends the next frame (below), and the job sleeps
+until that block, then sends it at once. RTA is unchanged (its own
 interval); the spectrograph keeps placing rows by `audio_sample`. No wire change; the app
 states the new update rate (`fft_resolution` takes the period).
 
@@ -414,3 +414,44 @@ The fixed 4096-point spectrum used to skip every fourth publish slot (a 21.3 ms 
 16.7 ms clock: 97 gaps in 20 s). FFT work: the multi-res ladder at 96 kHz costs 1.20 % of a
 core here against 1.29 % with the old power-of-two hops (`multires_bench`); at 48 kHz the
 shorter HF hops add about 9 % in FFT operations.
+
+### Waking for the frame, not every period (2026-11-11)
+
+Handing on every device period cost pupu (i5-2415M, 96 kHz / 256) about 17 % of a core more
+(ac2d 57 → 74 %: fan-out 22.6 %, every job woken 375 times a second). Now each spectrum
+job states the end sample of the block that completes its next frame (`Queue::due`, from
+`frames_needed`), and the fan-out (`hop_wake.rs`) predicts when the device delivers that
+block from the blocks seen so far and sleeps until a quarter period after it. A wake that
+finds it not in yet looks again a quarter period later, then every period if the stream has
+stalled; each new target starts a 64th of a period earlier, so an estimate that drifted late
+comes back. Other jobs and the meters still get audio at least every `handoff`. Stage 3a's
+cases (an active tap, a remote-input joiner) keep handing on every period. Spectra start
+their grid on a multiple of the frame hop in device samples, so all spectra of a session
+frame at the same points and share one wake. Simulated (`hop_wake` tests, ±300 ppm, jitter
+up to a third of a period): 66 wakes/s for 62.5 hops/s, the frame's block taken 0.3–0.6 ms
+p50, at most 1.4 ms (a period is 2.7 ms) after it arrived.
+
+Local, release builds of a9fd17a6 and this change, `jackd -d dummy -r 96000 -p 256`
+(not real-time), two multi-res 1/48 spectra and an SPL meter, each followed by
+`ac2 selftest frames` for 36 s; CPU and voluntary context switches over 30 s:
+
+| thread | before: % of a core, wakes/s | after |
+|---|---|---|
+| ac2d-fanout | 1.3 %, 375 | 0.9 %, 66 |
+| meas (spectrum, each) | 2.0–2.3 %, 62 | 2.0–2.2 %, 62 |
+| meas (SPL) | 0.8 %, 375 | 0.6 %, 70 |
+| ac2d-io | 1.5 %, 298 | 1.3 %, 245 |
+| ac2d total | 9.1 % | 8.1 % |
+
+| `selftest frames` | spectrum before | after | SPL before | after |
+|---|---|---|---|---|
+| frames in 36 s | 2250 | 2250 | 720 | 718 |
+| interval p50 / p95 / p99 / max | 16.0 / 16.8 / 17.2 / 20.8 | 16.0 / 16.8 / 17.3 / 26.7 | 50.6 / 50.8 / 51.5 / 54.2 | 48.0 / 64.5 / 65.2 / 80.0 ms |
+| age p50 / p95 / max | 0.5 / 1.2 / 5.1 | 0.6 / 1.3 / 3.2 | 0.3 / 0.5 / 1.4 | 0.5 / 0.9 / 1.7 ms |
+
+This host is fast enough that the CPU saved is small in percent; the wakes are what cost
+pupu, and they fell to the hop rate. Age counts from the hand-off that took the frame's
+block, so it does not show how long after its arrival that was; the simulation above does.
+The one 27 ms interval came at the same instant on both spectra (one late hand-off of the
+fan-out on the non-real-time dummy server). SPL frames go on hand-offs about 16 ms apart
+again, as before frames moved to device periods (a 20 Hz meter steps 48 / 64 ms).

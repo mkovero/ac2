@@ -364,13 +364,13 @@ pub(crate) trait Analysis: Send {
     fn frames_needed(&self) -> Option<u64> {
         None
     }
-    /// Whether the job's results come on a grid of whole device periods about a display
-    /// frame apart (a live spectrum's frame hop): the fan-out then hands audio on every
-    /// device period, so a result goes out within a period of the block that completes
-    /// it, and the publish cadence lets each through. `false`: results come as they come,
-    /// at most at the publish rate.
-    fn on_device_periods(&self) -> bool {
-        false
+    /// Samples between results when they come on a grid of whole device periods about a
+    /// display frame apart (a live spectrum's frame hop): the fan-out then wakes for the
+    /// block that completes each, so a result goes out within a period of it, and the
+    /// publish cadence lets each through. `None`: results come as they come, at most at
+    /// the publish rate.
+    fn frame_hop(&self) -> Option<u64> {
+        None
     }
     /// A count that advances whenever the result [`Analysis::capture`] returns may have
     /// changed (the job's own `Pace` generation): math channels read it through a [`Probe`]
@@ -517,7 +517,7 @@ pub(crate) fn spawn(
     let q = Arc::clone(&queue);
     let results = Arc::new(AtomicU64::new(0));
     let r = Arc::clone(&results);
-    let per_period = analysis.on_device_periods();
+    let per_period = analysis.frame_hop();
     let thread = std::thread::Builder::new()
         .name(name.clone())
         .spawn(move || {
@@ -563,7 +563,7 @@ fn run(
     // of periods near the publish period and so up to a period short of it; a cadence of
     // the publish period would hold every few back. Three quarters of it lets each through
     // and still stops a burst after a stall (and a lower publish rate passes every few).
-    let period = if a.on_device_periods() {
+    let period = if a.frame_hop().is_some() {
         publish.mul_f64(0.75)
     } else {
         publish
@@ -582,6 +582,8 @@ fn run(
     let mut emitted: Option<u64> = None;
     // When to emit again without new input (a frame held back by a rate or a refresh).
     let mut retry: Option<Instant> = None;
+    // One past the newest sample taken in.
+    let mut taken: Option<u64> = None;
     loop {
         // Sleep until audio or a command arrives, or until a frame held back is due.
         let first = if let Some(at) = retry {
@@ -608,6 +610,7 @@ fn run(
                         a.push(b);
                         frames += u64::from(b.frames);
                     }
+                    taken = batch.last().map(|b| b.end_sample()).or(taken);
                     queue.frames.fetch_sub(frames, Ordering::AcqRel);
                     true
                 }
@@ -641,6 +644,11 @@ fn run(
         }
         if let Some(g) = a.result_generation() {
             results.store(g, Ordering::Release);
+        }
+        if let Some(end) = taken
+            && let Some(n) = a.frames_needed().filter(|&n| n > 0)
+        {
+            queue.due.store(end.saturating_add(n), Ordering::Release);
         }
         let now = Instant::now();
         if changed || retry.is_some_and(|t| now >= t) {

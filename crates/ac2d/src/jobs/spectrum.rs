@@ -74,7 +74,8 @@ pub(crate) struct Spectrum {
     /// audio pushed reaches a multiple of it and a spectrum ends exactly there, so frames
     /// carry evenly spaced audio. `None`: every new spectrum is a result.
     frame_hop: Option<u64>,
-    /// Samples pushed into the analysis since it started.
+    /// Samples pushed into the analysis since it started, from a multiple of `frame_hop`
+    /// in device samples.
     pushed: u64,
 }
 
@@ -525,7 +526,14 @@ impl Analysis for Spectrum {
         }
         channel_f64(b, self.idx, &mut self.buf);
         let buf = std::mem::take(&mut self.buf);
-        let mut rest = &buf[..];
+        // The grid starts on a multiple of the frame hop in device samples, so every
+        // spectrum on the device frames at the same points and the fan-out wakes once for
+        // all of them; the audio before the first such point is not analysed.
+        let lead = match self.frame_hop {
+            Some(f) if self.pushed == 0 => ((f - b.start_sample % f) % f).min(buf.len() as u64),
+            _ => 0,
+        };
+        let mut rest = &buf[lead as usize..];
         // Pushed up to each frame-grid point in turn, so a result is placed at the grid
         // point it ends on wherever the block boundaries fall.
         let mut newest = None;
@@ -566,8 +574,8 @@ impl Analysis for Spectrum {
         self.frame_hop.map(|f| f - self.pushed % f)
     }
 
-    fn on_device_periods(&self) -> bool {
-        self.frame_hop.is_some()
+    fn frame_hop(&self) -> Option<u64> {
+        self.frame_hop
     }
 
     fn command(&mut self, c: JobCmd) {
