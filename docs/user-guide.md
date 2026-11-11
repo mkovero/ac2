@@ -56,7 +56,7 @@ SPL meters and sweeps. In the app, every setting lives in **Settings** (**Ctrl+P
 the top bar); **Shift+O** opens its Audio I/O page; **Ctrl+M** (*New measurement…*, also
 the last row of every pane's list) lists every kind — transfer, spectrum, RTA, SPL meter,
 sweep, math channel, alignment, spatial average — with what each measures, and opens the chosen
-kind's settings (created, started and selected on **Enter**, in a pane of its own); a row it
+kind's settings (created, started and selected on **Enter**, on a screen of its own); a row it
 cannot make now says why. *Spatial average* opens the math dialog filled in for
 [the average](#the-average-spatial-average) of every transfer measurement. Its last row, *Programme meter*, makes no measurement: **Enter** opens its form
 (the pair or inputs to meter, and the rig's programme-meter settings), whose **Enter** opens a
@@ -299,13 +299,13 @@ once).
 | Calibration | mics, curves, sensitivity calibrations ([below](#the-calibrations-view)) | palette *Calibrations…* |
 | SPL / Leq | the SPL meter's Leq windows, limits and band meter ([below](#leq-windows-and-limits)) | **Shift+L** |
 | Recording | how long the record toggle records (this app); where the daemon records (the rig) | |
-| Rig monitor | where the rig's OSC cues and Art-Net universe go, whether it meters at start (the rig); how its programme meters read: *Programme meters read*, *Loudness target* (−23 LUFS by default, −36 … −5 in 1 LU steps; past either end the row says the range), *Correlation window*, *An over is above*, *Correlation gate* — **←/→** steps a value and sends each step ([Programme pane](#programme-pane)) | |
 | Display | theme, key hints, warning toasts, how long the SPL number holds, the goniometer's ember decay and glow, Leq windows / history strip / bars / scale, what the spectrum and sweep panes show, spectrum glide, 3D quality, distortion unit, coherence placement, resolution marker, plate background (see-through / solid), level axes | |
 | Connection | the daemon, whether the app starts and stops this computer's `ac2d`, this client's id and key, reconnect, another daemon / pairing; the daemon's mode, mDNS name, authorized clients and refused keys | |
+| Rig monitor | where the rig's OSC cues and Art-Net universe go, whether it meters at start (the rig); how its programme meters read: *Programme meters read*, *Loudness target* (−23 LUFS by default, −36 … −5 in 1 LU steps; past either end the row says the range), *Correlation window*, *An over is above*, *Correlation gate* — **←/→** steps a value and sends each step ([Programme pane](#programme-pane)) | |
 
 #### System max level
 
-The generator never plays above the rig's maximum (dBFS RMS). The last row of the Audio &
+The generator never plays above the rig's maximum (dBFS RMS). The last row of the Audio
 I/O page shows it with its bound and who changed it last:
 `−40.0 dBFS · bound −10.0 dBFS (ac2d --max-level)`. Type a level and **Enter**:
 
@@ -564,7 +564,7 @@ laid out and keyed like the measurement forms (**↑/↓** field, **←/→** ch
 its goniometer pane on their left; the meters take the focus, and one **Ctrl+Z** takes
 both away. With room for one pane only, the meters open alone and a toast says *no room for
 the goniometer pane: G turns this pane to it*. A session with no inputs lists the row with
-*no inputs in the session to meter*. **E** on a focused Programme pane says *a Programme
+*no inputs in the session to meter*. Palette *Edit measurement…* on a focused Programme pane says *a Programme
 pane meters the Inputs row dropped on it: drag an input or a pair here*.
 
 The quicker route: drag a row of the Inputs list onto a pane. In the middle it turns that
@@ -803,7 +803,7 @@ and impulse response (**N**, then **G** the new half). The layout is remembered.
 |---|---|
 | Transfer | magnitude → phase → coherence → impulse response linear → log → ETC → magnitude |
 | Sweep / distortion | response & distortion → impulse response linear → log → ETC → room parameters → response & distortion |
-| Spectrum / RTA | spectrum → spectrum + spectrograph → spectrograph → spectrum |
+| Spectrum / RTA | spectrum → spectrum + spectrograph → spectrograph → 3D spectrograph → spectrum (the 3D view is skipped where the GPU cannot draw it) |
 | SPL | meter → Leq windows → meter + Leq → bands (with a band meter) → meter |
 | Programme | meters ↔ goniometer (a pair; *Programme: the goniometer needs a pair* otherwise) |
 
@@ -874,8 +874,8 @@ below about half), so the lead stays readable.
 To put another measurement in a pane, drag its row of the list onto the pane
 ([below](#dragging-a-row-onto-a-pane)): that is the one way to change what a pane shows. A
 pane nothing was dropped on reads *nothing picked — drag a row of the list here*; it never
-follows the selection. An empty focused pane is where a new measurement goes: made from the
-palette or the chooser, it shows there instead of taking a new pane.
+follows the selection. A new measurement made from the palette or the chooser takes the
+focused empty pane only while no pane shows anything; otherwise it opens on a screen of its own.
 
 A row of the measurement list clicked (or reached with **Tab** / **Shift+Tab**):
 
@@ -900,7 +900,7 @@ Which measurement the keys act on:
 One measurement and at most one stored trace are selected; the one selected last gets the
 keys that act on "the selected curve". A click on a measurement row, live curve or math
 channel (or **Tab** onto one) gives them to the measurement; a click on a trace (or **V**,
-**Alt+V**) to the trace; **Esc** with no window open hands them back to
+**Alt+V**) to the trace; **End** hands them back to
 the measurement. The tree shows which: the measurement row is filled while it has the keys,
 only outlined while a later-selected trace has them.
 
@@ -1578,7 +1578,7 @@ transfer legend row say the smoothing.
   restarts.
 - On a **stored trace**: select it (**V** / **Shift+V**, or click it), then **K**. A pane
   that draws it names it in its title (`Sweep 2: smoothing off`). Back to live: **V** past the last trace, click
-  the trace again, palette *Deselect the stored trace*, or select a measurement.
+  the trace again, palette *Select live*, or select a measurement.
 - CLI: `ac2 trace smooth <trace> 1/12` (`1/3` … `1/48`, `12`, `none`); a transfer or sweep
   trace keeps its mode unless `--phase` or `--magnitude-only`.
 
@@ -1653,7 +1653,7 @@ Operands are live measurements or stored traces (captures, sweeps, imports) of o
 is drawn where its kind is drawn. The daemon computes it, so it follows live operands and
 every client (and `ac2 meas list`) sees it.
 
-**Shift+M** (palette *New math channel…*): **A** (←/→ through every live measurement and
+**Shift+M** (palette *New math…*): **A** (←/→ through every live measurement and
 stored trace, `(live)` or `(stored, S2)`), the **operator**, **B** (curves of A's kind). The
 name follows the expression (`Main L ÷ Sub`) until you type one. **Enter** creates and
 starts it. *Edit measurement…* on a selected math channel reopens the dialog.
@@ -1730,7 +1730,7 @@ legend counts: `Average of 4 · 4 positions · power avg`.
 In one step: **Ctrl+M**, *Spatial average* opens the same dialog on *average of several*,
 method power, every transfer measurement of the session included (a stopped one is left out
 until it starts; **←/→** leaves one out) and the name `Spatial average` (`Spatial average 2`,
-… when taken); **Enter** makes it in a pane of its own. With fewer than two transfer
+… when taken); **Enter** makes it on a screen of its own. With fewer than two transfer
 measurements the row is dimmed: *needs two transfer measurements*.
 
 - **power** (default): the level over the positions without cancellation; EQ against this.
@@ -2040,10 +2040,10 @@ delay finder estimates it from the impulse response, with a **confidence** and t
 - **Arrivals merged into one peak** (a single candidate): two arrivals closer than the band
   can separate, or a crossover inside the band (a multi-way box in the full band). **1**
   inserts the peak's delay; for the first arrival, run the finder in a band without the
-  crossover (palette *Delay finder: mid / sub band* or a custom band, CLI `--band`).
+  crossover (palette *Finder band mid* / *Finder band sub* or a custom band, CLI `--band`).
 - The band is **auto** unless you pick one: full (2–16 kHz), then mid (300 Hz – 3 kHz), then
-  sub (20–120 Hz), the first the finder does not refuse. Palette *Delay finder: auto / full /
-  mid / sub band*, *custom band (Hz)…*, *observation length (s)…*; CLI `--band
+  sub (20–120 Hz), the first the finder does not refuse. Palette *Finder band auto* / *full* /
+  *mid* / *sub*, *Finder band custom…*, *Finder observation…*; CLI `--band
   full|mid|sub|auto|<lo>-<hi>` and `--observation`.
 
 #### Setting the delay by hand
@@ -2143,8 +2143,7 @@ Beside the panes, one tree lists every measurement with what it owns
   (`6 measurements · 12 traces · folded`, counted as the Sessions dialog counts a
   session). The fold is this app's, kept per rig in `ui.toml` across restarts. A click on
   the heading itself switches to that rig, as before.
-- The arrow before a measurement **folds** it (palette *Fold / unfold the selected
-  measurement in the list*).
+- The arrow before a measurement **folds** it (palette *Fold/unfold measurement*).
 - A row's dot is its curve's colour (a ring when hidden): a click on it shows or hides the
   curve (a live curve: this app's display; a stored trace: the daemon's). A click on the row
   selects it: a measurement row also brings its own panes, a child row (live curve, stored
@@ -2198,7 +2197,7 @@ unsmoothed.
 - **End** (palette *Select live*) goes back to the live measurement. **Esc** only stops the
   stimulus: the stop reflex never changes the selection.
 - **A** shows or hides the selected trace.
-- Palette *Move the selected trace to slot…* puts it in slot 1–9 (`none` frees its slot).
+- Palette *Move trace to slot…* puts it in slot 1–9 (`none` frees its slot).
 
 ### Trace keys
 
@@ -2210,7 +2209,7 @@ On the selected trace when its curve is on the transfer pane (else the live meas
 | **,** / **.** | move its delay by 0.1 ms (`Sweep 2: delay +0.1 ms → +0.30 ms from arrival`) |
 | **E** | makes it the phase reference |
 | **K** / **Shift+K** | smooth it |
-| palette *Mic curve on the selected trace…* | corrects it ([below](#mic-curve-on-a-stored-trace)) |
+| palette *Set trace mic curve…* | corrects it ([below](#mic-curve-on-a-stored-trace)) |
 
 A stored trace keeps only its offset from the arrival it was measured at, so no absolute
 delay is shown. A target curve takes an offset only; a locked trace refuses. A pane whose
@@ -2387,7 +2386,7 @@ afterwards. A **sweep** gets its input's curve this way automatically when store
 
 - **CLI:** `ac2 trace mic <trace> "MM1 34804" --label 90°` (label optional when the mic has
   one curve); `ac2 trace mic <trace> none` removes it.
-- **App:** select the trace, palette *Mic curve on the selected trace…* (prefilled with its
+- **App:** select the trace, palette *Set trace mic curve…* (prefilled with its
   mic), add the label (*MM1 34804 90°*).
 
 Like smoothing it is a display setting:
@@ -2422,7 +2421,7 @@ reported from the asked start.
 
 ### Making and running a sweep (app)
 
-A sweep is a **measurement**. **Shift+S** (palette *New sweep measurement…*) opens its
+A sweep is a **measurement**. **Shift+S** (palette *New sweep…*) opens its
 dialog:
 
 | Field | Choices |
@@ -2579,7 +2578,7 @@ The measurements and traces on the daemon are the **working state**. It belongs 
 session (a name in the daemon's session directory, a folder on the daemon's machine, or a
 file on your computer) or is **untitled**. The top bar shows its name and, in the warning
 colour, *unsaved changes*. **Ctrl+S** saves it where it came from (untitled: *Save as*).
-Click the name, **Alt+S** or palette *Sessions* opens the Sessions dialog
+Click the name, **Alt+S** or palette *Sessions…* opens the Sessions dialog
 ([sessions.md](design/sessions.md)):
 
 | Row | Does |
@@ -2705,6 +2704,7 @@ restarts, and `ac2 status` prints a `damaged` line for each file with what was d
 | `--autosave <dir>` | puts the autosave elsewhere (one daemon per directory) |
 | `--no-autosave` | keeps everything in memory only |
 | `--ephemeral` | keeps nothing (a simulated rig): no autosave, calibrations, rig settings, plans, rig logs or recordings, a new rig id each start; logs to `ac2d-sim.log` |
+| `--rig-logs <dir>` | where rig SPL meters keep their logs ([rig measurements](#rig-measurements); not affected by the three above) |
 
 ### Watchdogs under systemd
 
@@ -2724,7 +2724,6 @@ Restart=always
 `NotifyAccess=main` (the default) is right when the program is the unit's main process,
 also through a wrapper script that `exec`s it. Without `NOTIFY_SOCKET` (a desktop, macOS,
 Windows) none of this does anything. Design: `docs/design/watchdogs.md`.
-| `--rig-logs <dir>` | where rig SPL meters keep their logs ([rig measurements](#rig-measurements); not affected by the three above) |
 
 ## Recording and replay
 
@@ -2833,8 +2832,8 @@ Chosen per input, explicitly:
 - **CLI:** `ac2 cal use 3 90°` (or `off`); `ac2 session inputs --mic 3=M30 --curve 3=90°`
   sets several inputs at once; `ac2 session inputs` alone lists them.
 - **App:** **←/→** on the input's row in Settings › Audio I/O or the Calibrations view,
-  palette *Mic curve on input N…* (*3=90°*) or *Mic curve: next curve on the selected
-  measurement's input*.
+  palette *Set input mic curve…* (*3=90°*) or *Next mic curve* (the selected
+  measurement's input).
 
 ac2 never guesses: a mic with exactly one curve uses it on every input naming the mic; with
 several and none chosen, none applies and the input says *choose: 0°, 90°*.
@@ -3156,7 +3155,7 @@ the time before.
 
 - Settings › Display › **Leq windows** (palette *Leq style*): columns
   or **tiles** (a grid with every figure written out).
-- Settings › Display › **Leq history strip** (palette *… history strip on / off*): each
+- Settings › Display › **Leq history strip** (palette *Leq history*): each
   window over time against its limit (dashed), red where over; live, it shows twice the
   longest window (2 min … 2 h) up to the newest second, its last 4 hours rebuilt by the
   daemon for a restarted or second app. A new log clears it.
@@ -3200,7 +3199,7 @@ nothing there), **N** or **Esc** keeps the current log. The ended log can be exp
 
 #### Setting windows and limits (Shift+L)
 
-**Shift+L** (palette *Leq windows and limits…*) opens Settings › SPL / Leq: window lengths
+**Shift+L** (palette *Leq settings…*) opens Settings › SPL / Leq: window lengths
 and weightings (←/→), limits and warn margins typed in dB (empty: no limit), a **preset**
 row and the headroom horizon, and under the windows the **LCpeak** and **LAFmax** limits and
 the **position correction**.
@@ -3269,10 +3268,10 @@ Each command takes `--meas` or `--input` when there is more than one meter.
 | `ac2 spl leq export --previous -o soundcheck.csv` | the ended log (until the next new log or daemon restart) |
 | `ac2 spl leq new --yes --export soundcheck.csv` | a new log, the ended one written first; without `--yes` it only says what would end |
 
-The app writes the same CSV on the computer it runs on: palette (Ctrl+K) **Export Leq log
-(CSV, on this computer)…** for the focused (or only) SPL meter, with an editable name such
+The app writes the same CSV on the computer it runs on: palette (Ctrl+K) **Export Leq log…**
+(CSV, on this computer) for the focused (or only) SPL meter, with an editable name such
 as `~/ac2-exports/FOH-SPL-leq-2026-10-17-0012.csv` (local time; the folder is made). The
-toast says `43200 seconds of FOH SPL written to …`. **Export the previous Leq log…** does the
+toast says `43200 seconds of FOH SPL written to …`. **Export previous Leq log…** does the
 same for the ended log. Both read the log page by page (`spl.log_get`) without holding up
 the app.
 
@@ -3334,7 +3333,7 @@ transfer's summary).
 #### What the artist sees
 
 **G** in the SPL pane steps on from meter + Leq to the **bands** (with a band meter; palette
-*SPL pane: the band Leq bars*).
+*Band Leq view*).
 
 - Windows of one length, weighting and day/night scheme share a row of bars, low band to
   high, captioned ("LZeq 60 min · night limits (22–07)"). Each bar is the band's Leq at the
@@ -3643,7 +3642,9 @@ insert_delay = ["X", "Alt+D"]
 ```
 
 The sections follow the keyboard map: `[global]` (Everywhere), `[transfer]`, `[spectrum]`,
-`[ir]` (the impulse response view), `[spl]` and `[distortion]` (Sweep / distortion).
+`[ir]` (the impulse response view), `[spl]`, `[distortion]` (Sweep / distortion),
+`[programme]`, `[inputs]` (Inputs list row), `[walk]` (Spatial walk) and `[spectrograph_3d]`
+(the 3D spectrograph).
 
 A `keys.toml` that cannot be used (a conflict, an unknown key, a pane command on **H**, a
 change to **Shift+Esc**) is reported at start and the defaults are used until it is fixed. A
@@ -3675,7 +3676,7 @@ ones sit lower and push older ones up; a repeated message replaces the one alrea
 The pointer resting on them holds them all; a click dismisses one. Esc does not (it belongs
 to the open window or the stimulus).
 
-**Warning toasts** (Settings › Display, or palette *Warning toasts on / off*; on by default,
+**Warning toasts** (Settings › Display, or palette *Warning toasts*; on by default,
 `warning_toasts = false` in `ui.toml`) off keeps warnings and Leq limit alarms out of the
 corner while you go over a limit on purpose (testing a limiter); they still go to
 *Notifications…* and the SPL displays still turn the limit colour.
