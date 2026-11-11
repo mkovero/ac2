@@ -100,12 +100,12 @@ impl Outbox {
     }
 
     /// An audio frame for the I/O thread, never blocking: the fan-out sends it, and a
-    /// full pipe means the I/O thread stopped draining. `false` when not queued.
-    pub(crate) fn audio(&self, parts: Vec<Vec<u8>>) -> bool {
-        let Some(parts) = tagged(TAG_AUDIO, parts) else {
-            return false;
-        };
-        self.sock.try_send_parts(&parts).is_ok()
+    /// full pipe means the I/O thread stopped draining. `false` when not queued. The parts
+    /// are copied into the pipe, so the sender keeps its buffers for the next block.
+    pub(crate) fn audio(&self, topic: &[u8], head: &[u8], body: &[u8]) -> bool {
+        self.sock
+            .try_send(&[&[TAG_AUDIO][..], topic, head, body])
+            .is_ok()
     }
 
     pub(crate) fn revoke(&self, key: &[u8]) {

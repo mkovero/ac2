@@ -23,6 +23,8 @@ pub(crate) struct SourceTap {
     /// The blocks' host stamps are capture times on a clock the state maps to system time.
     capture_stamps: bool,
     scratch: Vec<f32>,
+    /// One channel's samples as they go on the wire, kept between blocks.
+    body: Vec<u8>,
     /// Frames the I/O thread's pipe did not take.
     dropped: u64,
 }
@@ -47,6 +49,7 @@ impl SourceTap {
             rate,
             capture_stamps,
             scratch: Vec::new(),
+            body: Vec::new(),
             dropped: 0,
         }
     }
@@ -74,20 +77,80 @@ impl SourceTap {
             rate: self.rate,
             incarnation: self.incarnation,
         };
+        // The header is the same for every channel of the block: encoded once, by the
+        // protocol's own encoder, when the first subscribed channel needs it.
+        let mut head: Option<Vec<u8>> = None;
         for (col, (channel, topic)) in self.columns.iter().enumerate() {
             if !self.interest.wants(topic) {
                 continue;
             }
-            block.channel_into(col, &mut self.scratch);
-            let Ok(parts) = encode_audio(*channel, &header, &self.scratch) else {
-                continue;
+            if head.is_none() {
+                head = encode_audio(*channel, &header, &[])
+                    .ok()
+                    .and_then(|parts| parts.into_iter().nth(1));
+            }
+            let Some(head) = &head else {
+                return;
             };
-            if !self.outbox.audio(parts) {
+            block.channel_into(col, &mut self.scratch);
+            self.body.clear();
+            self.body
+                .extend(self.scratch.iter().flat_map(|s| s.to_le_bytes()));
+            if !self.outbox.audio(topic, head, &self.body) {
                 self.dropped += 1;
                 if self.dropped.is_power_of_two() {
                     tracing::warn!("audio for other rigs: {} frame(s) not queued", self.dropped);
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use ac2_proto::units::{DaemonIncarnation, SessionEpoch};
+    use ac2_zmq::{Context, SocketType};
+
+    use super::*;
+
+    /// Each subscribed channel of a block reaches the I/O thread as the protocol's encoding
+    /// of it behind the pipe's tag, block after block from the same buffers.
+    #[test]
+    fn frames_are_the_protocol_encoding() {
+        let ctx = Context::new().unwrap();
+        let pull = ctx.socket(SocketType::Pull).unwrap();
+        pull.bind("inproc://tap-encoding").unwrap();
+        let outbox = Outbox::connect(&ctx, "inproc://tap-encoding", 64).unwrap();
+        let interest = Arc::new(Interest::default());
+        let incarnation = StreamIncarnation {
+            daemon: DaemonIncarnation(1),
+            epoch: SessionEpoch(1),
+        };
+        let mut tap = SourceTap::new(outbox, interest.clone(), &[4, 7], incarnation, 96_000, true);
+        interest.subscribe(b"audio/7");
+        for start in [0_u64, 3] {
+            let data: Vec<f32> = (0..6).map(|i| (start as f32) + 0.25 * i as f32).collect();
+            let mut block = Block::new(start, 3, 2, BlockFlags::XRUN, 1_000 + start, data.clone());
+            block.capture_stamp = true;
+            tap.send(&block);
+            let header = AudioHeader {
+                v: PROTO_VERSION,
+                start_sample: start,
+                frames: 3,
+                flags: AudioFlags::XRUN.with(AudioFlags::GAP),
+                capture_ns: Some(1_000 + start),
+                rate: 96_000,
+                incarnation,
+            };
+            let column: Vec<f32> = data.iter().skip(1).step_by(2).copied().collect();
+            let mut want = vec![vec![crate::outbox::TAG_AUDIO]];
+            want.extend(encode_audio(7, &header, &column).unwrap());
+            let got = pull.try_recv_parts().unwrap().unwrap();
+            let got: Vec<Vec<u8>> = got.iter().map(|p| p.to_vec()).collect();
+            assert_eq!(got, want);
+            assert!(pull.try_recv_parts().unwrap().is_none());
         }
     }
 }
