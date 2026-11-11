@@ -377,20 +377,23 @@ pub fn spec_level_shown(
     .then(|| spec_level(level))
 }
 
-/// What an `n`-point spectrum at `fs` resolves, over how long a window, and how often it
-/// updates: `0.73 Hz bins · 1365 ms window · 5.9 updates/s`. The update rate is the
-/// daemon's ([`ac2_proto::model::SpectrumConfig::display_hop`]); the spectrograph keeps a
+/// What an `n`-point spectrum at `fs` on a device delivering `period` samples at a time
+/// resolves, over how long a window, and how often it updates: `0.73 Hz bins · 1365 ms
+/// window · 5.7 updates/s`. The update rate is the daemon's: a spectrum per hop
+/// ([`ac2_proto::model::SpectrumConfig::display_hop`]), at most one per frame
+/// ([`ac2_proto::model::SpectrumConfig::frame_hop`]); the spectrograph keeps a
 /// row per update up to its [`crate::spectrograph::SLOTS_PER_S`] rows a second, which a
 /// faster spectrum says (`· 94 updates/s, 30 rows/s`): a longer window resolves finer and
 /// gives the spectrograph fewer rows.
-pub fn fft_resolution(n: u32, fs: u32) -> String {
+pub fn fft_resolution(n: u32, fs: u32, period: u32) -> String {
     if n == 0 || fs == 0 {
         return NO_VALUE.to_string();
     }
     let bin = f64::from(fs) / f64::from(n);
     let window_s = f64::from(n) / f64::from(fs);
     let window = ms(window_s, if window_s < 0.1 { 1 } else { 0 });
-    let hop = ac2_proto::model::SpectrumConfig::display_hop(n, fs);
+    let hop = ac2_proto::model::SpectrumConfig::display_hop(n, fs, period)
+        .max(ac2_proto::model::SpectrumConfig::frame_hop(fs, period));
     let rate = f64::from(fs) / f64::from(hop);
     let rows = crate::spectrograph::SLOTS_PER_S;
     let updates = fixed(rate, if rate < 10.0 { 1 } else { 0 });
@@ -589,20 +592,21 @@ mod tests {
             "4096 pt"
         );
         assert_eq!(spec_resolution(SpecResolution::MULTI), "multi-res 1/48 oct");
-        // 48 kHz: a 65 536-point window steps by n/8; a 1024-point one by n/2.
+        // 48 kHz, 256-sample periods: a 65 536-point window steps by the 768-sample frame
+        // multiple at or past n/8; a 1024-point one shows a spectrum every frame.
         assert_eq!(
-            fft_resolution(65_536, 48_000),
-            "0.73 Hz bins · 1365 ms window · 5.9 updates/s"
+            fft_resolution(65_536, 48_000, 256),
+            "0.73 Hz bins · 1365 ms window · 5.7 updates/s"
         );
         assert_eq!(
-            fft_resolution(1024, 48_000),
-            "46.9 Hz bins · 21.3 ms window · 94 updates/s, 30 rows/s"
+            fft_resolution(1024, 48_000, 256),
+            "46.9 Hz bins · 21.3 ms window · 62 updates/s, 30 rows/s"
         );
         assert_eq!(
-            fft_resolution(16_384, 48_000),
-            "2.93 Hz bins · 341 ms window · 23 updates/s"
+            fft_resolution(16_384, 48_000, 256),
+            "2.93 Hz bins · 341 ms window · 21 updates/s"
         );
-        assert_eq!(fft_resolution(4096, 0), "—");
+        assert_eq!(fft_resolution(4096, 0, 256), "—");
     }
 
     #[test]

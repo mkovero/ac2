@@ -342,8 +342,9 @@ pub struct Form {
     pub headings: Vec<(FieldId, String)>,
     /// The averaging field's values, one per option.
     averaging: Vec<SpecAveraging>,
-    /// The open session's sample rate: what the FFT size field's hint is stated at.
-    sample_rate: Option<u32>,
+    /// The open session's sample rate and device period: what the FFT size field's hint is
+    /// stated at.
+    stream: Option<(u32, u32)>,
 }
 
 impl Form {

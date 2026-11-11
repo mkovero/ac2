@@ -197,8 +197,8 @@ fn batched_hand_off_keeps_publish_rates() {
 }
 
 /// A spectrum slower than the frame rate goes out on the hand-off that formed it: at
-/// 10 frames/s and a 65 536-point window at 48 kHz (a new spectrum every 8192 samples,
-/// 171 ms), each frame lags the end of its window by under a hand-off, where the 100 ms
+/// 10 frames/s and a 65 536-point window at 48 kHz (a new spectrum every 8448 samples,
+/// 176 ms), each frame lags the end of its window by under a hand-off, where the 100 ms
 /// frame grid alone would hold it for up to a period.
 #[test]
 fn a_slow_spectrum_goes_when_it_is_formed() {
@@ -223,8 +223,8 @@ fn a_slow_spectrum_goes_when_it_is_formed() {
         },
     });
     c.ok(Command::MeasStart { meas: MeasId(1) });
-    let hop = 8192u64;
-    // A hand-off is 16.7 ms; a loaded machine may add a few blocks.
+    let hop = u64::from(SpectrumConfig::display_hop(65_536, FS, BLOCK));
+    // A hand-off is a device period; a loaded machine may add a few blocks.
     let tolerance = u64::from(FS) * 30 / 1000;
     let (mut frames, mut prompt) = (0u32, 0u32);
     let t0 = Instant::now();
@@ -246,5 +246,95 @@ fn a_slow_spectrum_goes_when_it_is_formed() {
         prompt >= 10,
         "{prompt} of {frames} spectra within 30 ms of their window"
     );
+    h.shutdown();
+}
+
+/// A live spectrum, one FFT or multi-resolution, frames every whole number of device periods
+/// nearest a display frame (768 samples, 3 × 256, at 48 kHz): consecutive frames step by
+/// exactly that, and each goes out once the block that ends it is handed on, before the
+/// device has delivered any audio after it. Checked in samples: the driver is stepped a
+/// block at a time and does not step past a frame's end until that frame has arrived.
+#[test]
+fn a_live_spectrum_frames_every_hop_once_its_last_block_is_in() {
+    use ac2_proto::model::SpecResolution;
+    init_log();
+    let backend = manual_rig();
+    let h = Daemon::start(config(backend.clone(), inproc("frame-hop"))).unwrap();
+    let (mut c, sub) = connect(&h, &[b"d/1/spec", b"d/2/spec"]);
+    c.ok(Command::SessionOpen {
+        config: session(false),
+    });
+    for (name, resolution) in [
+        ("one fft", SpecResolution::Fixed { fft_len: 4096 }),
+        ("multi", SpecResolution::MULTI),
+    ] {
+        c.ok(Command::MeasCreate {
+            config: MeasConfig {
+                scope: ac2_proto::model::MeasScope::Session,
+                name: name.into(),
+                kind: MeasKind::Spectrum {
+                    config: SpectrumConfig {
+                        resolution,
+                        ..SpectrumConfig::on_input(1)
+                    },
+                },
+            },
+        });
+    }
+    c.ok(Command::MeasStart { meas: MeasId(1) });
+    c.ok(Command::MeasStart { meas: MeasId(2) });
+    let hop = u64::from(SpectrumConfig::frame_hop(FS, BLOCK));
+    assert_eq!(hop, 768);
+    let mut d = driver(&backend);
+    // Past the multi-resolution ladder's longest window, so every band has a spectrum.
+    run(&mut d, 1.5);
+    let spec_end = |f: &ac2_proto::frame::Frame, m: MeasId| match &f.data {
+        FrameData::Spec(s) if s.meas == m => Some(f.stamp.audio_sample.0 + 1),
+        _ => None,
+    };
+    // Reads frames until each of `want` has one ending at or past its sample; the first
+    // such end of each.
+    let until = |want: &[(MeasId, u64)]| -> Vec<u64> {
+        let mut got: Vec<Option<u64>> = vec![None; want.len()];
+        while got.iter().any(Option::is_none) {
+            let f = sub
+                .frame(T, |f| matches!(f.data, FrameData::Spec(_)))
+                .unwrap_or_else(|| panic!("no frames for {want:?}, got {got:?}"));
+            for ((m, at), g) in want.iter().zip(&mut got) {
+                if g.is_none() && spec_end(&f, *m).is_some_and(|e| e >= *at) {
+                    *g = spec_end(&f, *m);
+                }
+            }
+        }
+        got.into_iter().flatten().collect()
+    };
+    // The newest frame of each, on its grid point at or before the audio so far.
+    let end = end_sample(&d);
+    let ids = [MeasId(1), MeasId(2)];
+    let newest = until(&ids.map(|m| (m, (end + 1).saturating_sub(hop))));
+    let mut next: Vec<(MeasId, u64)> = ids
+        .into_iter()
+        .zip(newest)
+        .map(|(m, e)| {
+            assert!(e <= end && e % u64::from(BLOCK) == 0, "{m:?} ends at {e}");
+            (m, e + hop)
+        })
+        .collect();
+    for _ in 0..60 {
+        let target = next.iter().map(|(_, e)| *e).min().unwrap();
+        while end_sample(&d) < target {
+            d.run_blocks(1);
+            taken(&d);
+        }
+        assert_eq!(end_sample(&d), target, "grid points fall on block ends");
+        let due: Vec<(MeasId, u64)> = next.iter().copied().filter(|(_, e)| *e == target).collect();
+        // Nothing past `target` was captured, so a frame here went within a block.
+        for ((m, _), e) in due.iter().zip(until(&due)) {
+            assert_eq!(e, target, "{m:?}");
+        }
+        for (_, e) in next.iter_mut().filter(|(_, e)| *e == target) {
+            *e += hop;
+        }
+    }
     h.shutdown();
 }

@@ -1352,8 +1352,9 @@ what an integrating meter reads).
 | `exp τ 2 s` | exponential: older sound fades with time constant τ; until τ has passed, the plain power mean so far | `exp:2s` |
 | `FIFO 64 frames` | the mean of the last 64 frames, each counted equally in time | `fifo:64` |
 
-A spectrum's frame is one hop of its FFT (0.17 s at 65 536 points, 48 kHz; 1024 samples for
-short ones, half the window for the shortest), so a FIFO's span depends on FFT length; an RTA's frame is one result interval,
+A spectrum's frame is one hop of its FFT (0.18 s at 65 536 points, 48 kHz; for short ones
+the whole number of device periods nearest a display frame, 768 samples = 16 ms at 48 kHz
+with 256-sample periods; half the window or less for the shortest), so a FIFO's span depends on FFT length; an RTA's frame is one result interval,
 about 1/60 s. A time constant means the same for both, so the dialogs list those first. A
 spectrum FIFO holds at most 511 frames at 65 536 points; an RTA's at most 65 536.
 
@@ -1362,7 +1363,7 @@ spectrum FIFO holds at most 511 frames at 65 536 points; an RTA's at most 65 536
   list does not offer shows as it is.
 - A spectrum's dialogs also pick *FFT length* (64 … 65 536 points, or multi-resolution
   1/12 … 1/96 oct) and *Window* (Hann, Blackman-Harris, flat-top, rectangular); the hint
-  says what it gives at the session's rate (`0.73 Hz bins · 1365 ms window · 5.9 updates/s`;
+  says what it gives at the session's rate (`0.73 Hz bins · 1365 ms window · 5.7 updates/s`;
   `0.68 s window at LF … 21 ms at HF`). A new resolution or window restarts a running
   spectrum. A spectrum named in a math channel keeps its resolution (operands share one bin
   grid); its window changes freely.

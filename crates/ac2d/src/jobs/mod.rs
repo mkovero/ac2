@@ -361,6 +361,14 @@ pub(crate) trait Analysis: Send {
     fn frames_needed(&self) -> Option<u64> {
         None
     }
+    /// Whether the job's results come on a grid of whole device periods about a display
+    /// frame apart (a live spectrum's frame hop): the fan-out then hands audio on every
+    /// device period, so a result goes out within a period of the block that completes
+    /// it, and the publish cadence lets each through. `false`: results come as they come,
+    /// at most at the publish rate.
+    fn on_device_periods(&self) -> bool {
+        false
+    }
     /// A count that advances whenever the result [`Analysis::capture`] returns may have
     /// changed (the job's own `Pace` generation): math channels read it through a [`Probe`]
     /// to form and publish a new result only when an operand has one. `None` for analyses
@@ -506,6 +514,7 @@ pub(crate) fn spawn(
     let q = Arc::clone(&queue);
     let results = Arc::new(AtomicU64::new(0));
     let r = Arc::clone(&results);
+    let per_period = analysis.on_device_periods();
     let thread = std::thread::Builder::new()
         .name(name.clone())
         .spawn(move || {
@@ -523,6 +532,7 @@ pub(crate) fn spawn(
         tx: tx.clone(),
         queue,
         thread: thread.thread().clone(),
+        per_period,
     };
     Ok((
         JobHandle {
@@ -545,7 +555,16 @@ fn run(
     em: &Emitter,
     results: &AtomicU64,
 ) {
-    let period = Duration::from_secs_f64(1.0 / f64::from(em.env.fps.max(1)));
+    let publish = Duration::from_secs_f64(1.0 / f64::from(em.env.fps.max(1)));
+    // Results on a device-period grid are already spaced by the analysis, a whole number
+    // of periods near the publish period and so up to a period short of it; a cadence of
+    // the publish period would hold every few back. Three quarters of it lets each through
+    // and still stops a burst after a stall (and a lower publish rate passes every few).
+    let period = if a.on_device_periods() {
+        publish.mul_f64(0.75)
+    } else {
+        publish
+    };
     // Audio arrives once per fan-out hand-off, a publish period apart or less, give or take
     // scheduling jitter. A frame may go a quarter period early, so a hand-off just before
     // its slot takes it rather than the one after.

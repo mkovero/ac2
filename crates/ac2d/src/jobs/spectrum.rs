@@ -70,6 +70,12 @@ pub(crate) struct Spectrum {
     result: Option<(u64, u64)>,
     /// `result` has not gone out in a frame yet.
     fresh: bool,
+    /// Samples a frame advances by ([`WireConfig::frame_hop`]): a result counts once the
+    /// audio pushed reaches a multiple of it and a spectrum ends exactly there, so frames
+    /// carry evenly spaced audio. `None`: every new spectrum is a result.
+    frame_hop: Option<u64>,
+    /// Samples pushed into the analysis since it started.
+    pushed: u64,
 }
 
 /// The analysis behind a spectrum.
@@ -107,6 +113,24 @@ struct Multi {
     unresolved: Vec<FreqRange>,
 }
 
+impl Engine {
+    /// Pushes samples; whether a spectrum was formed.
+    fn push(&mut self, x: &[f64]) -> bool {
+        match self {
+            Engine::Fixed(e) => e.analyzer.push(x) > 0,
+            Engine::Multi(e) => e.analyzer.push(x) != 0,
+        }
+    }
+
+    /// Samples pushed after the end of the newest spectrum; `None` before the first.
+    fn samples_since_newest(&self) -> Option<u64> {
+        match self {
+            Engine::Fixed(e) => e.analyzer.samples_since_frame(),
+            Engine::Multi(e) => e.analyzer.samples_since_newest(),
+        }
+    }
+}
+
 impl Multi {
     fn set_smoothing(&mut self, f: Option<SmoothingFraction>) {
         self.smoother = f.map(|f| Smoother::new(self.grid, conv::smoothing_fraction(f)));
@@ -141,13 +165,24 @@ impl Multi {
     }
 }
 
-/// The multi-resolution bands at `fs` (each framed at the spectrum's display hop for its
-/// length).
-pub(crate) fn ladder(fs: u32) -> Result<MultiResLadder, String> {
+/// The multi-resolution bands at `fs` on a device delivering `period` samples at a time
+/// (each framed at the spectrum's display hop for its length).
+pub(crate) fn ladder(fs: u32, period: u32) -> Result<MultiResLadder, String> {
     MultiResLadder::new(f64::from(fs), |n| {
-        WireConfig::display_hop(u32::try_from(n).unwrap_or(u32::MAX), fs) as usize
+        WireConfig::display_hop(u32::try_from(n).unwrap_or(u32::MAX), fs, period) as usize
     })
     .map_err(|e| e.to_string())
+}
+
+/// The frame grid of hops `hops` at `fs` and `period`: [`WireConfig::frame_hop`] when every
+/// hop divides it or is a multiple of it, so every spectrum ends on the grid or between
+/// two of its points; `None` otherwise (a device period without a divisor in range).
+fn frame_grid(fs: u32, period: u32, hops: impl IntoIterator<Item = usize>) -> Option<u64> {
+    let f = u64::from(WireConfig::frame_hop(fs, period));
+    hops.into_iter()
+        .map(|h| h as u64)
+        .all(|h| h > 0 && (h.is_multiple_of(f) || f.is_multiple_of(h)))
+        .then_some(f)
 }
 
 fn multi_grid(grid: Resolution, fs: u32) -> GridDef {
@@ -187,6 +222,7 @@ impl Spectrum {
         meas: MeasId,
         cfg: WireConfig,
         sample_rate: u32,
+        period: u32,
         idx: usize,
         cal: InputCal,
         config_rev: Rev,
@@ -199,7 +235,7 @@ impl Spectrum {
                 let analyzer = SpectrumAnalyzer::new(SpectrumConfig {
                     fs,
                     n: fft_len as usize,
-                    hop: WireConfig::display_hop(fft_len, sample_rate) as usize,
+                    hop: WireConfig::display_hop(fft_len, sample_rate, period) as usize,
                     window,
                     averaging,
                     peak_hold: None,
@@ -219,7 +255,7 @@ impl Spectrum {
                 }))
             }
             SpecResolution::Multi { grid: resolution } => {
-                let ladder = ladder(sample_rate)?;
+                let ladder = ladder(sample_rate, period)?;
                 let grid = MultiResLadder::grid(fs, resolution.ppo());
                 let unresolved = ladder
                     .unresolved_ranges(&grid)
@@ -251,7 +287,13 @@ impl Spectrum {
                 Engine::Multi(Box::new(m))
             }
         };
+        let hops: Vec<usize> = match &engine {
+            Engine::Fixed(e) => vec![e.analyzer.config().hop],
+            Engine::Multi(e) => e.analyzer.ladder().bands.iter().map(|b| b.hop).collect(),
+        };
         Ok(Self {
+            frame_hop: frame_grid(sample_rate, period, hops),
+            pushed: 0,
             grid_id: grid(&cfg, sample_rate).id(),
             capture_grid_id: capture_grid(&cfg, sample_rate).id(),
             levels: LevelsMeter::new(vec![idx], vec![cfg.input], sample_rate),
@@ -482,15 +524,30 @@ impl Analysis for Spectrum {
             self.reset_average();
         }
         channel_f64(b, self.idx, &mut self.buf);
-        let since = match &mut self.engine {
-            Engine::Fixed(e) => (e.analyzer.push(&self.buf) > 0)
-                .then(|| e.analyzer.samples_since_frame())
-                .flatten(),
-            Engine::Multi(e) => (e.analyzer.push(&self.buf) != 0)
-                .then(|| e.analyzer.samples_since_newest())
-                .flatten(),
-        };
-        if let Some(since) = since {
+        let buf = std::mem::take(&mut self.buf);
+        let mut rest = &buf[..];
+        // Pushed up to each frame-grid point in turn, so a result is placed at the grid
+        // point it ends on wherever the block boundaries fall.
+        let mut newest = None;
+        while !rest.is_empty() {
+            let take = self
+                .frame_hop
+                .map_or(rest.len(), |f| (f - self.pushed % f) as usize)
+                .min(rest.len());
+            let framed = self.engine.push(&rest[..take]);
+            self.pushed += take as u64;
+            rest = &rest[take..];
+            let since = self.engine.samples_since_newest();
+            let result = match self.frame_hop {
+                Some(f) => self.pushed.is_multiple_of(f) && since == Some(0),
+                None => framed,
+            };
+            if result && let Some(since) = since {
+                newest = Some(since + rest.len() as u64);
+            }
+        }
+        self.buf = buf;
+        if let Some(since) = newest {
             self.generation += 1;
             let since_ns = since as f64 / self.fs() * 1e9;
             self.result = Some((
@@ -502,6 +559,15 @@ impl Analysis for Spectrum {
         self.levels.push(b);
         self.end = Some(b.end_sample());
         self.wall = b.wall_ns;
+    }
+
+    fn frames_needed(&self) -> Option<u64> {
+        // Between grid points the analysis only fills its windows: nothing to publish.
+        self.frame_hop.map(|f| f - self.pushed % f)
+    }
+
+    fn on_device_periods(&self) -> bool {
+        self.frame_hop.is_some()
     }
 
     fn command(&mut self, c: JobCmd) {

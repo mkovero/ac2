@@ -406,7 +406,10 @@ impl fmt::Debug for Fft {
 }
 
 /// Streaming single-channel spectrum analyzer: push blocks of any size; a frame of N samples
-/// is analysed every `hop` samples once N samples have arrived.
+/// is analysed every `hop` samples once N samples have arrived, each ending at a multiple
+/// of `hop` samples from the first. Analysers fed the same samples with hops that divide
+/// one another then frame on one grid, so a spectrum built from several (the
+/// multi-resolution bands) changes at evenly spaced instants.
 ///
 /// Pushing does not allocate.
 #[derive(Debug, Clone)]
@@ -488,7 +491,7 @@ impl SpectrumAnalyzer {
             ring: vec![0.0; n],
             write: 0,
             total: 0,
-            next_frame_at: n as u64,
+            next_frame_at: (n as u64).next_multiple_of(cfg.hop as u64),
             frame: vec![0.0; bins],
             avg: vec![0.0; bins],
             frames_averaged: 0,
@@ -546,8 +549,10 @@ impl SpectrumAnalyzer {
     /// first frame. A frame is the spectrum of the N samples ending there, so this places
     /// a result on the input's own time axis, wherever a block boundary fell.
     pub fn samples_since_frame(&self) -> Option<u64> {
+        // Before the first frame `last_end` is the hop grid's point before the window first
+        // filled, short of N.
         let last_end = self.next_frame_at - self.cfg.hop as u64;
-        (self.total >= self.cfg.n as u64).then(|| self.total - last_end)
+        (last_end >= self.cfg.n as u64).then(|| self.total - last_end)
     }
 
     /// Pushes samples; returns how many frames were analysed during this call.

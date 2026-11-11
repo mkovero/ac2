@@ -30,7 +30,8 @@ impl Noise {
     }
 }
 
-/// The daemon's hop rule (largest power of two ≤ fs/30, clamped to n/8 … n/2).
+/// A power-of-two hop rule (largest ≤ fs/30, clamped to n/8 … n/2); the daemon frames on
+/// device periods instead, and the densities these tests check hold for any hop.
 fn display_hop(fs: f64) -> impl Fn(usize) -> usize {
     move |n| {
         let target = ((fs / 30.0) as usize).max(64);

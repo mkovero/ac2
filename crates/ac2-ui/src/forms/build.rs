@@ -18,13 +18,13 @@ impl Form {
             meter: None,
             headings: Vec::new(),
             averaging: AVERAGING.to_vec(),
-            sample_rate: None,
+            stream: None,
         }
     }
 
     /// The resolution (one FFT's size, or the multi-resolution bands) and window fields
     /// of a spectrum dialog showing `r` and `w`, with the resolution's hint stated at the
-    /// session's rate (set [`Form::sample_rate`] first).
+    /// session's rate and period (set [`Form::stream`] first).
     pub(super) fn fft_fields(&self, r: SpecResolution, w: Window, level: SpecLevel) -> [Field; 3] {
         let all = spec_resolutions();
         let labels: Vec<String> = all
@@ -70,8 +70,8 @@ impl Form {
     pub(super) fn fft_hint(&self, r: SpecResolution) -> String {
         match r {
             SpecResolution::Fixed { fft_len } => self
-                .sample_rate
-                .map(|fs| ac2_scene::format::fft_resolution(fft_len, fs))
+                .stream
+                .map(|(fs, period)| ac2_scene::format::fft_resolution(fft_len, fs, period))
                 .unwrap_or_default(),
             SpecResolution::Multi { .. } => ac2_scene::format::MULTIRES_HINT.to_owned(),
         }
@@ -104,11 +104,11 @@ impl Form {
     /// The dialog editing transfer measurement, spectrum or RTA `m` over the session's
     /// captured `inputs`: a transfer's inputs, name, smoothing, depth and resolution; a
     /// spectrum's or RTA's input, name, smoothing or bands (a spectrum's FFT size and
-    /// window too, its bin width stated at `sample_rate`), and averaging.
+    /// window too, its bin width stated at `open`'s rate), and averaging.
     pub fn edit_spec(
         m: &Measurement,
         inputs: &[(u16, String)],
-        sample_rate: Option<u32>,
+        open: Option<&OpenSession>,
     ) -> Result<Self, String> {
         if let MeasKind::Transfer { config } = &m.config.kind {
             return Ok(Self::edit_transfer(m, config, inputs));
@@ -121,7 +121,7 @@ impl Form {
             _ => return Err(format!("{} is not a spectrum or an RTA", m.config.name)),
         };
         let mut f = Self::new(kind, Vec::new());
-        f.sample_rate = sample_rate;
+        f.stream = open.map(|o| (o.sample_rate_hz, o.buffer_frames));
         // An input the session no longer captures stays listed, so the edit does not move
         // the measurement to another input unasked (Enter then says to reopen the session).
         let mut inputs = inputs.to_vec();
@@ -302,7 +302,7 @@ impl Form {
             ],
         };
         let mut f = Self::new(kind, fields);
-        f.sample_rate = open.map(|o| o.sample_rate_hz);
+        f.stream = open.map(|o| (o.sample_rate_hz, o.buffer_frames));
         if kind == FormKind::Spectrum {
             let d = SpectrumConfig::on_input(0);
             let fft = f.fft_fields(d.resolution, d.window, d.level);

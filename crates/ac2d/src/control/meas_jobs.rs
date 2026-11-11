@@ -148,6 +148,7 @@ impl Control {
                     m.id,
                     config.clone(),
                     fs,
+                    rt.open.buffer_frames,
                     idx(config.input)?,
                     self.input_cal(rt, config.input),
                     m.config_rev,

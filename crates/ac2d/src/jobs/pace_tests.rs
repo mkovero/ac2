@@ -124,11 +124,12 @@ fn spectrum() -> Spectrum {
 }
 
 fn spectrum_of(cfg: SpectrumConfig) -> Spectrum {
-    Spectrum::new(MeasId(1), cfg, FS, 0, InputCal::none(), Rev(1)).expect("spectrum")
+    Spectrum::new(MeasId(1), cfg, FS, BLOCK, 0, InputCal::none(), Rev(1)).expect("spectrum")
 }
 
-/// A spectrum whose 8192-sample hop (32 blocks) leaves stretches of audio without a new
-/// result; the first comes after 65 536 samples (256 blocks).
+/// A spectrum whose 8448-sample hop (33 blocks) leaves stretches of audio without a new
+/// result; the first comes after 67 584 samples (264 blocks, the first multiple of the hop
+/// with a full window).
 fn long_spectrum() -> Spectrum {
     spectrum_of(SpectrumConfig {
         resolution: ac2_proto::model::SpecResolution::Fixed { fft_len: 65_536 },
@@ -136,7 +137,7 @@ fn long_spectrum() -> Spectrum {
     })
 }
 
-const LONG_FIRST: usize = 256;
+const LONG_FIRST: usize = 264;
 
 /// Pushes `n` blocks from `*at`.
 fn feed(a: &mut dyn Analysis, at: &mut u64, n: usize, amp: f32, seed: &mut u64) {
@@ -276,7 +277,7 @@ fn the_last_block_is_stamped() {
     assert_eq!(last.stamp.audio_sample.0 + 1, at);
 }
 
-/// A 65 536-point spectrum at 96 kHz has an 8192-sample hop (32 blocks of 256), and audio
+/// A 65 536-point spectrum at 96 kHz has a 9216-sample hop (36 blocks of 256), and audio
 /// comes in hand-offs of 6 or 7 blocks (60 a second): the hop ends anywhere in a hand-off.
 /// Each spectrum is still stamped where its frame ended, sample and wall clock, so frames
 /// read as evenly spaced as they were analysed; the blocks after the frame do not shift it.
@@ -292,13 +293,14 @@ fn spectra_are_stamped_where_their_frame_ended() {
             ..spectrum_config()
         },
         FS96,
+        BLOCK,
         0,
         InputCal::none(),
         Rev(1),
     )
     .expect("spectrum");
-    let hop = u64::from(SpectrumConfig::display_hop(65_536, FS96));
-    assert_eq!(hop, 8192);
+    let hop = u64::from(SpectrumConfig::display_hop(65_536, FS96, BLOCK));
+    assert_eq!(hop, 9216);
     let wall0 = 1_000_000_000_000u64;
     let wall_of = |end: u64| wall0 + end * 1_000_000_000 / u64::from(FS96);
     let mut seed = 21;
@@ -330,10 +332,10 @@ fn spectra_are_stamped_where_their_frame_ended() {
     }
 }
 
-/// A multi-resolution spectrum at 96 kHz: frames come at the shortest band's 1024-sample
-/// hop, each stamped at a frame end; every band's age is exact from its own framing; the
-/// columns only the longest window serves hold still between its spectra (every 8192
-/// samples) while the top columns change with every frame, and no column has a value
+/// A multi-resolution spectrum at 96 kHz: frames come every 1536 samples (the frame hop,
+/// 6 blocks of 256), each stamped at a frame end; every band's age is exact from its own
+/// framing; the columns only the longest window serves hold still between its spectra
+/// (every 9216 samples) while the top columns change with every frame, and no column has a value
 /// before every band behind it has a spectrum.
 #[test]
 fn multires_bands_update_at_their_own_hops_with_exact_ages() {
@@ -349,23 +351,23 @@ fn multires_bands_update_at_their_own_hops_with_exact_ages() {
             ..spectrum_config()
         },
         FS96,
+        BLOCK,
         0,
         InputCal::none(),
         Rev(1),
     )
     .expect("spectrum");
-    let ladder = super::spectrum::ladder(FS96).expect("ladder");
+    let ladder = super::spectrum::ladder(FS96, BLOCK).expect("ladder");
     let grid = MultiResLadder::grid(f64::from(FS96), 48);
     let mut seed = 5;
     let mut at = 0u64;
     let mut spectra = Vec::new();
-    for k in 1..=160u64 {
-        while at < k * 1600 / 256 * 256 {
-            let mut b = block(at, 0.1, &mut seed);
-            b.wall_ns = 1 + at;
-            s.push(&b);
-            at += u64::from(BLOCK);
-        }
+    // A block per hand-off, as while a live spectrum is running.
+    for _ in 0..1000 {
+        let mut b = block(at, 0.1, &mut seed);
+        b.wall_ns = 1 + at;
+        s.push(&b);
+        at += u64::from(BLOCK);
         s.emit(&r.em);
         spectra.extend(
             r.frames()
@@ -385,7 +387,7 @@ fn multires_bands_update_at_their_own_hops_with_exact_ages() {
     );
     for f in &spectra {
         let end = f.stamp.audio_sample.0 + 1;
-        assert_eq!(end % 1024, 0, "stamped off the top band's hop at {end}");
+        assert_eq!(end % 1536, 0, "stamped off the frame hop at {end}");
         let FrameData::Spec(spec) = &f.data else {
             unreachable!()
         };
@@ -394,7 +396,8 @@ fn multires_bands_update_at_their_own_hops_with_exact_ages() {
         assert_eq!(bands.bands.len(), 6);
         for (band, meta) in ladder.bands.iter().zip(&bands.bands) {
             let (n, hop) = (band.n as u64, band.hop as u64);
-            let want = (end >= n).then(|| (end - n) % hop);
+            // Spectra end on multiples of the band's hop, the first with a full window.
+            let want = (end >= n.next_multiple_of(hop)).then(|| end % hop);
             let got = meta.age.map(|a| (a.0 * f64::from(FS96)).round() as u64);
             assert_eq!(got, want, "band of {n} at {end}");
             assert!((meta.hop.0 * f64::from(FS96) - hop as f64).abs() < 1e-6);
@@ -409,8 +412,7 @@ fn multires_bands_update_at_their_own_hops_with_exact_ages() {
             let lf_same = lf
                 .iter()
                 .all(|&c| p[c].to_bits() == spec.level[c].to_bits());
-            // A new longest-window spectrum since the previous frame (a hand-off can hold
-            // two top-band hops, so it need not end exactly at this frame).
+            // A new longest-window spectrum since the previous frame.
             let lf_new = bands.bands[0]
                 .age
                 .is_some_and(|a| end - (a.0 * f64::from(FS96)).round() as u64 > *prev_end);
@@ -437,7 +439,8 @@ fn capture_works_with_nobody_subscribed() {
     // Nothing yet to capture.
     assert!(h.capture().is_none());
     let mut seed = 3;
-    let batch: Vec<Block> = (0..32)
+    // 33 blocks: 8448 samples, a multiple of the 768-sample hop.
+    let batch: Vec<Block> = (0..33)
         .map(|i| block(i * u64::from(BLOCK), 0.1, &mut seed))
         .collect();
     feed.tx
@@ -449,7 +452,7 @@ fn capture_works_with_nobody_subscribed() {
             let f = h
                 .capture()
                 .map(|c| c.frame)
-                .filter(|f| f.stamp.audio_sample.0 + 1 == 32 * 256);
+                .filter(|f| f.stamp.audio_sample.0 + 1 == 33 * 256);
             if f.is_none() {
                 std::thread::sleep(Duration::from_millis(10));
             }

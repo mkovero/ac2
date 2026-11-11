@@ -226,6 +226,10 @@ pub(crate) struct JobFeed {
     pub(crate) queue: Arc<Queue>,
     /// The job's thread, unparked once `queue.wake_at` frames are queued.
     pub(crate) thread: std::thread::Thread,
+    /// The job's results come on a grid of device periods
+    /// ([`crate::jobs::Analysis::on_device_periods`]): audio goes every device period while
+    /// it is attached.
+    pub(crate) per_period: bool,
 }
 
 pub(crate) enum FanoutMsg {
@@ -639,10 +643,19 @@ fn run(
             }
         }
         let now = Instant::now();
-        // Audio for another rig, and a remote input waiting on this rig's blocks, each add
-        // a hand-off to the latency: they go every device period instead.
+        // Audio for another rig, a remote input waiting on this rig's blocks, and a live
+        // spectrum framing on whole device periods each add a hand-off to the latency: they
+        // go every device period instead.
+        let per_period = jobs
+            .values()
+            .chain(joined_jobs.values())
+            .any(|f| f.per_period);
         let handoff = match cfg.block_period {
-            Some(p) if joiner.is_some() || tap.as_ref().is_some_and(|t| t.active()) => p,
+            Some(p)
+                if joiner.is_some() || tap.as_ref().is_some_and(|t| t.active()) || per_period =>
+            {
+                p
+            }
             _ => cfg.handoff,
         };
         next += handoff;

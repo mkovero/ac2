@@ -61,8 +61,10 @@ impl SpectrumConfig {
     pub const MIN_FFT_LEN: u32 = 64;
     /// Longest FFT length, samples.
     pub const MAX_FFT_LEN: u32 = 65_536;
-    /// Updates per second a spectrum aims for when its window is short enough to allow it.
-    pub const UPDATES_PER_S: u32 = 30;
+    /// Frames per second a live spectrum aims for: one per display frame.
+    pub const FRAMES_PER_S: u32 = 60;
+    /// Most frames per second a live spectrum sends, whatever the device period.
+    pub const MAX_FRAMES_PER_S: u32 = 64;
 
     /// Whether `n` is an FFT length the daemon takes: a power of two in
     /// [`Self::MIN_FFT_LEN`] … [`Self::MAX_FFT_LEN`].
@@ -70,23 +72,55 @@ impl SpectrumConfig {
         n.is_power_of_two() && (Self::MIN_FFT_LEN..=Self::MAX_FFT_LEN).contains(&n)
     }
 
-    /// Hop between spectra of an `n`-point spectrum at `fs`, samples: the largest power of
-    /// two at or below `fs / UPDATES_PER_S`, kept between `n / 8` and `n / 2` (overlap
-    /// 50 – 87.5 %).
+    /// Audio a live spectrum's frame advances by at `fs` on a device delivering `period`
+    /// samples at a time, samples: the whole number of periods closest to one display
+    /// frame (`fs / FRAMES_PER_S`), at least one period and never shorter than
+    /// `fs / MAX_FRAMES_PER_S`. 1536 (6 × 256) at 96 kHz, 768 (3 × 256) at 48 kHz.
+    ///
+    /// A whole number of periods makes every frame's end a block's end, so the frame goes
+    /// as soon as the block that completes it is handed on, and every frame carries the
+    /// same amount of new audio: the picture moves the same distance each display frame
+    /// instead of stepping by the beat between the hop and the display clock.
+    pub fn frame_hop(fs: u32, period: u32) -> u32 {
+        let p = u64::from(period.max(1));
+        let fs = u64::from(fs.max(1));
+        let target = fs as f64 / f64::from(Self::FRAMES_PER_S);
+        let mut k = ((target / p as f64).round() as u64).max(1);
+        while k * p * u64::from(Self::MAX_FRAMES_PER_S) < fs {
+            k += 1;
+        }
+        u32::try_from(k * p).unwrap_or(u32::MAX)
+    }
+
+    /// Hop between spectra of an `n`-point spectrum at `fs` on a device delivering `period`
+    /// samples at a time, samples. The hop stays between `n / 8` and `n / 2` (overlap
+    /// 50 – 87.5 %) and is the frame hop ([`Self::frame_hop`]) when that is in range; a
+    /// multiple of it for a longer window, a divisor of it for a shorter one. Either way
+    /// spectra land on the frame hop's grid (every frame has a spectrum ending exactly at
+    /// it, or a long window's spectrum lands on every few frames' end), so the frames a
+    /// spectrum sends are evenly spaced in audio.
     ///
     /// Frames closer than `n / 8` cost FFTs without adding information: the power
     /// estimates of windows overlapping by more than ~75 % (Hann; the narrower flat-top and
     /// Blackman-Harris windows by a little more) are almost fully correlated, so an average
     /// over a given time is no steadier for having more of them. The exponential
     /// averaging's time constant is in seconds and stays what it is. A 65 536-point window
-    /// spans 1.37 s at 48 kHz; a new spectrum every eighth of it (0.17 s) follows it
-    /// closely, at an eighth of the FFT work a 1024-sample hop costs. Short windows keep
-    /// updating about 30 times a second. The daemon analyses with this hop and the app
-    /// states the update rate it gives, so both read it from here.
-    pub fn display_hop(n: u32, fs: u32) -> u32 {
-        let target = (fs / Self::UPDATES_PER_S).max(64);
-        let pow2 = 1u32 << (u32::BITS - 1 - target.leading_zeros());
-        pow2.clamp((n / 8).max(1), (n / 2).max(1))
+    /// spans 1.37 s at 48 kHz; a new spectrum every eighth of it or so (0.17 s) follows it
+    /// closely. The daemon analyses with this hop and the app states the update rate it
+    /// gives, so both read it from here.
+    pub fn display_hop(n: u32, fs: u32, period: u32) -> u32 {
+        let f = Self::frame_hop(fs, period);
+        let (lo, hi) = ((n / 8).max(1), (n / 2).max(1));
+        if f < lo {
+            // f·⌈lo/f⌉ < lo + f < 2·lo ≤ hi.
+            f * lo.div_ceil(f)
+        } else if f <= hi {
+            f
+        } else {
+            // A divisor of the frame hop keeps every frame's end on a spectrum's end. Only
+            // a device period with no divisor in range (none of the usual sizes) misses.
+            (lo..=hi).rev().find(|&d| f.is_multiple_of(d)).unwrap_or(hi)
+        }
     }
 
     /// `input` with the default FFT length, a Hann window and no averaging.
@@ -466,18 +500,50 @@ mod hop_tests {
     use super::SpectrumConfig;
 
     #[test]
-    fn hop_overlaps_between_half_and_seven_eighths() {
+    fn a_frame_is_the_whole_number_of_periods_nearest_a_display_frame() {
+        let f = SpectrumConfig::frame_hop;
+        assert_eq!(f(96_000, 256), 1536);
+        assert_eq!(f(48_000, 256), 768);
+        assert_eq!(f(44_100, 256), 768);
+        assert_eq!(f(48_000, 128), 768);
+        assert_eq!(f(48_000, 64), 832);
+        // A long period is one period, a shorter-than-a-frame one never over 64 frames/s.
+        assert_eq!(f(48_000, 2048), 2048);
+        assert_eq!(f(96_000, 1024), 2048);
+        assert_eq!(f(48_000, 1), 800);
+        for (fs, p) in [(44_100, 1), (48_000, 700), (96_000, 3), (192_000, 32)] {
+            assert!(
+                f(fs, p) * SpectrumConfig::MAX_FRAMES_PER_S >= fs,
+                "{fs} {p}"
+            );
+            assert_eq!(f(fs, p) % p, 0);
+        }
+    }
+
+    #[test]
+    fn hop_overlaps_between_half_and_seven_eighths_on_the_frame_grid() {
         let hop = SpectrumConfig::display_hop;
-        // 48 kHz: long windows step by n/8 (87.5 % overlap) …
-        assert_eq!(hop(65_536, 48_000), 8192);
-        assert_eq!(hop(16_384, 48_000), 2048);
-        // … short ones by a 1024-sample hop (~47 updates/s) while that is at most n/2.
-        assert_eq!(hop(4096, 48_000), 1024);
-        assert_eq!(hop(1024, 48_000), 512);
-        assert_eq!(hop(256, 48_000), 128);
-        // Other rates scale.
-        assert_eq!(hop(4096, 96_000), 2048);
-        assert_eq!(hop(65_536, 44_100), 8192);
+        // 96 kHz, 256-sample periods: frames every 1536 samples.
+        assert_eq!(hop(65_536, 96_000, 256), 9216); // 6 frames, ≥ n/8
+        assert_eq!(hop(16_384, 96_000, 256), 3072);
+        assert_eq!(hop(4096, 96_000, 256), 1536);
+        assert_eq!(hop(2048, 96_000, 256), 768); // a divisor ≤ n/2
+        assert_eq!(hop(256, 96_000, 256), 128);
+        // 48 kHz: frames every 768.
+        assert_eq!(hop(65_536, 48_000, 256), 8448);
+        assert_eq!(hop(1024, 48_000, 256), 384);
+        assert_eq!(hop(64, 48_000, 256), 32);
+        for n in (6..=16).map(|b| 1u32 << b) {
+            for (fs, p) in [(48_000, 256), (96_000, 256), (44_100, 128), (48_000, 1024)] {
+                let h = hop(n, fs, p);
+                let f = SpectrumConfig::frame_hop(fs, p);
+                assert!((n / 8..=n / 2).contains(&h), "{n} {fs} {p}: {h}");
+                assert!(
+                    h.is_multiple_of(f) || f.is_multiple_of(h),
+                    "{n} {fs} {p}: {h} vs {f}"
+                );
+            }
+        }
     }
 
     #[test]

@@ -384,3 +384,33 @@ ketunkolo with `--latency-log` is the acceptance (§5).
 Pass interval p50 9.3 ms (data passes plus display passes under Immediate), CPU 0.7 ms per
 pass. Left: the daemon's 60 Hz hand-off (≈ 8 ms mean of capture → read) waits for multi-rig
 stage 3a's per-period hand-off; present → glass (compositor + TV) is not measured.
+
+## 9. Frames on device periods (2026-11-11, H4 and H6 in the daemon)
+
+A live spectrum now frames every whole number of device periods nearest a display frame
+(`SpectrumConfig::frame_hop`: the multiple of the period closest to `fs / 60`, at least one
+period and never under `fs / 64`; 6 × 256 = 1536 samples = 16 ms at 96 kHz, 3 × 256 = 768 at
+48 kHz). Every hop (`display_hop`) is that frame hop when it lies in n/8 … n/2, a multiple of
+it for long windows, a divisor for short ones; spectra end on multiples of their hop
+(`SpectrumAnalyzer`), so the multi-resolution bands frame on one grid and a frame goes at
+each grid point where the shortest band (or a long window) has a spectrum. While a spectrum
+runs the fan-out hands audio on every device period (stage 3a's mode), and the job sleeps
+until the block that ends its next frame, then sends it at once. RTA is unchanged (its own
+interval); the spectrograph keeps placing rows by `audio_sample`. No wire change; the app
+states the new update rate (`fft_resolution` takes the period).
+
+`ac2 selftest frames`, 20 s each, local fake backend at 48 kHz / 256 (release builds of
+a32f2711 and this change):
+
+| | multi-res 1/48 before | after | 4096 pt before | after |
+|---|---|---|---|---|
+| frames | 1200 | 1250 | 938 | 1250 |
+| interval p50 / p95 / max | 16.7 / 17.2 / 19.2 | 16.0 / 16.4 / 22.6 | 16.7 / 33.5 / 34.3 | 16.0 / 16.2 / 24.2 ms |
+| audio step min / p50 / max | 10.7 / 21.3 / 21.3 | 16.0 / 16.0 / 16.0 | 21.3 (every one) | 16.0 ms |
+| age p50 / p95 / max | 5.6 / 6.3 / 8.0 | 0.5 / 0.9 / 8.5 | 5.7 / 11.2 / 16.5 | 0.3 / 0.5 / 8.5 ms |
+| ac2d CPU (meas thread) | 4.2 % (1.3) | 3.8 % (1.2) | 2.3 % (0.4) | 2.6 % (0.5) of a core |
+
+The fixed 4096-point spectrum used to skip every fourth publish slot (a 21.3 ms hop on a
+16.7 ms clock: 97 gaps in 20 s). FFT work: the multi-res ladder at 96 kHz costs 1.20 % of a
+core here against 1.29 % with the old power-of-two hops (`multires_bench`); at 48 kHz the
+shorter HF hops add about 9 % in FFT operations.
