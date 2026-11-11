@@ -353,6 +353,11 @@ pub(crate) fn answer(engine: Option<&Engine>, selector: i32, value: i32) -> i32 
     }
 }
 
+/// [`Slot::install`] found another engine in the slot: a stream of another backend
+/// instance in this process holds the callbacks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SlotBusy;
+
 /// Where the callbacks find the running stream.
 pub(crate) struct Slot {
     engine: AtomicPtr<Engine>,
@@ -370,16 +375,31 @@ impl Slot {
     }
 
     /// Points the callbacks at `engine`, which must stay alive until [`Self::clear`]
-    /// returns.
-    pub(crate) fn install(&self, engine: &Engine) {
+    /// returns. Refused while another engine is installed: the callbacks are one per
+    /// process, so a second stream would take over the first one's driver thread.
+    pub(crate) fn install(&self, engine: &Engine) -> Result<(), SlotBusy> {
         self.engine
-            .store(std::ptr::from_ref(engine).cast_mut(), Ordering::SeqCst);
+            .compare_exchange(
+                std::ptr::null_mut(),
+                std::ptr::from_ref(engine).cast_mut(),
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            )
+            .map(drop)
+            .map_err(|_| SlotBusy)
     }
 
-    /// Detaches the engine and waits for every callback still using it to leave. Called
-    /// after the driver's `stop()` has returned, so the wait is at most one switch.
-    pub(crate) fn clear(&self) {
-        self.engine.store(std::ptr::null_mut(), Ordering::SeqCst);
+    /// Detaches `engine`, if it is the one installed, and waits for every callback still
+    /// inside to leave. Called after the driver's `stop()` has returned, so the wait is at
+    /// most one switch.
+    /// `engine` is only compared, never read.
+    pub(crate) fn clear(&self, engine: *const Engine) {
+        let _ = self.engine.compare_exchange(
+            engine.cast_mut(),
+            std::ptr::null_mut(),
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        );
         while self.users.load(Ordering::SeqCst) != 0 {
             std::thread::yield_now();
         }

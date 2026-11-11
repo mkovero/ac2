@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use super::engine::{Channel, Engine, Rt, RtDriver, Slot};
+use super::engine::{Channel, Engine, Rt, RtDriver, Slot, SlotBusy};
 use super::format::Format;
 use crate::backend::{
     BackendKind, ClockRelation, ClockSource, Delivery, DeviceCaps, DeviceId, Direction,
@@ -648,7 +648,7 @@ struct AsioGuard {
     drv: Arc<dyn AsioDriver>,
     slot: &'static Slot,
     engine: Arc<Engine>,
-    /// The callbacks may reach `engine`: true from just before it is put in the slot.
+    /// The callbacks may reach `engine`: it is in the slot.
     attached: bool,
     watcher: Option<(Arc<AtomicBool>, JoinHandle<()>)>,
     release: Option<Box<dyn FnOnce() + Send>>,
@@ -673,8 +673,13 @@ impl AsioGuard {
 
     /// Attaches the callbacks to the engine and starts the driver, listed as `id`.
     fn start(&mut self, id: &str) -> Result<(), AudioError> {
+        self.slot
+            .install(&self.engine)
+            .map_err(|SlotBusy| AudioError::Unavailable {
+                backend: BackendKind::Asio,
+                reason: Unavailability::AsioDriverInUse { driver: id.into() },
+            })?;
         self.attached = true;
-        self.slot.install(&self.engine);
         self.drv.start().map_err(|e| refusal(id, Step::Start, e))?;
         self.engine.started();
         Ok(())
@@ -728,7 +733,7 @@ impl Drop for AsioGuard {
             // Also after a `start()` that failed or never returned: a driver may have begun
             // calling back by then, and the slot is only safe to empty once it has stopped.
             let _ = self.drv.stop();
-            self.slot.clear();
+            self.slot.clear(Arc::as_ptr(&self.engine));
         }
         let _ = self.drv.dispose_buffers();
         if let Some(r) = self.release.take() {

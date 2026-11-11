@@ -121,6 +121,8 @@ struct Scripted {
     calls: Mutex<Vec<&'static str>>,
     output_ready_calls: Arc<AtomicUsize>,
     running: AtomicBool,
+    /// `start` was called since the buffers were made: callbacks may have reached them.
+    started: AtomicBool,
 }
 
 struct ScriptedRt {
@@ -165,6 +167,7 @@ impl Scripted {
             calls: Mutex::new(Vec::new()),
             output_ready_calls: Arc::new(AtomicUsize::new(0)),
             running: AtomicBool::new(false),
+            started: AtomicBool::new(false),
         })
     }
 
@@ -355,6 +358,7 @@ impl AsioDriver for Scripted {
     }
     fn start(&self) -> Result<(), DriverError> {
         self.log("start");
+        self.started.store(true, Ordering::SeqCst);
         for &m in &self.script.messages_in_start {
             self.message(m, 0);
         }
@@ -380,8 +384,10 @@ impl AsioDriver for Scripted {
     }
     fn dispose_buffers(&self) -> Result<(), DriverError> {
         self.log("dispose_buffers");
+        // A slot shared with another driver may hold that driver's stream; buffers callbacks
+        // never reached need no empty slot.
         assert!(
-            !self.slot.is_set(),
+            !self.started.swap(false, Ordering::SeqCst) || !self.slot.is_set(),
             "buffers disposed while callbacks can run"
         );
         Ok(())
@@ -778,6 +784,44 @@ fn a_failure_after_the_callbacks_are_attached_stops_detaches_and_disposes() {
     drv.position.store(0, Ordering::SeqCst);
     drv.tick();
     assert_eq!(blocks(&mut s)[0].0.start_sample, 0);
+}
+
+#[test]
+fn a_second_driver_on_the_same_slot_is_refused_and_leaves_the_first_running() {
+    let slot: &'static Slot = Box::leak(Box::new(Slot::new()));
+    let a = Scripted::with_slot(Script::default(), slot);
+    let b = Scripted::with_slot(Script::default(), slot);
+    let mut sa = open(&a, DuplexRequest::new(vec![0], 2, level())).expect("open a");
+    match open(&b, DuplexRequest::new(vec![0], 2, level())) {
+        Err(AudioError::Unavailable {
+            reason: Unavailability::AsioDriverInUse { .. },
+            ..
+        }) => {}
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(
+        *b.calls.lock().expect("scripted state"),
+        ["create_buffers", "dispose_buffers"]
+    );
+    // The first stream still owns the callbacks.
+    a.position.store(0, Ordering::SeqCst);
+    a.tick();
+    assert_eq!(blocks(&mut sa).len(), 1);
+    drop(sa);
+    assert!(!slot.is_set());
+    let _sb = open(&b, DuplexRequest::new(vec![0], 2, level())).expect("open b");
+    assert!(slot.is_set());
+}
+
+#[test]
+fn clearing_detaches_only_the_engine_it_names() {
+    let drv = Scripted::new(Script::default());
+    let mut s = open(&drv, DuplexRequest::new(vec![0], 2, level())).expect("open");
+    drv.slot.clear(std::ptr::NonNull::dangling().as_ptr());
+    assert!(drv.slot.is_set());
+    drv.position.store(0, Ordering::SeqCst);
+    drv.tick();
+    assert_eq!(blocks(&mut s).len(), 1);
 }
 
 #[test]

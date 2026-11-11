@@ -29,7 +29,8 @@ use crate::error::{AudioError, Operation, Unavailability};
 use crate::stream::DuplexStream;
 
 /// Where the callbacks find the running stream. One per process: ASIO runs one driver
-/// per process, and the backend opens one stream on it at a time.
+/// per process, so a stream opened while another backend instance's stream holds the slot
+/// is refused as a driver in use.
 static SLOT: Slot = Slot::new();
 
 static CALLBACKS: Callbacks = Callbacks {
