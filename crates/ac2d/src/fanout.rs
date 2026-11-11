@@ -743,7 +743,7 @@ fn run(
         // hand-off to the latency: they go every device period instead. A live spectrum
         // framing on whole device periods wakes it for the block that ends each frame.
         let every_period = joiner.is_some()
-            || tap.as_ref().is_some_and(|t| t.active())
+            || tap.as_mut().is_some_and(|t| t.active())
             || joined_jobs.values().any(|f| f.per_period.is_some());
         next = match (cfg.block_period, &mut hop) {
             (Some(p), _) if every_period => schedule(next, now, p),

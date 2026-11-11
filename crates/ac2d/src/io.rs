@@ -16,8 +16,9 @@
 //!   daemon is told to shut down.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -35,41 +36,50 @@ use crate::peers::{Outside, Peers};
 /// only when someone receives them: the subscription prefixes of every data peer, counted
 /// per peer holding them.
 #[derive(Debug, Default)]
-pub(crate) struct Interest(Mutex<HashMap<Vec<u8>, usize>>);
+pub(crate) struct Interest {
+    prefixes: Mutex<HashMap<Vec<u8>, usize>>,
+    /// Advances whenever the set of prefixes changes, so a thread asking every block keeps
+    /// its answers and asks again only after a change.
+    generation: AtomicU64,
+}
 
 impl Interest {
+    fn prefixes(&self) -> MutexGuard<'_, HashMap<Vec<u8>, usize>> {
+        self.prefixes.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     pub(crate) fn wants(&self, topic: &[u8]) -> bool {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .keys()
-            .any(|p| topic.starts_with(p))
+        self.prefixes().keys().any(|p| topic.starts_with(p))
     }
 
     /// Whether any subscription lies under `prefix` (`audio/`: is any channel streamed).
     pub(crate) fn any_under(&self, prefix: &[u8]) -> bool {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .keys()
-            .any(|p| p.starts_with(prefix))
+        self.prefixes().keys().any(|p| p.starts_with(prefix))
+    }
+
+    /// The count of changes to the set of prefixes. It advances once the set has changed,
+    /// so an answer taken after reading the count is never older than the count: whoever
+    /// keeps answers per count asks again at the first block after a subscription.
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
     }
 
     pub(crate) fn add(&self, prefix: &[u8]) {
-        *self
-            .0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .entry(prefix.to_vec())
-            .or_default() += 1;
+        let mut m = self.prefixes();
+        let n = m.entry(prefix.to_vec()).or_default();
+        *n += 1;
+        if *n == 1 {
+            self.generation.fetch_add(1, Ordering::Release);
+        }
     }
 
     pub(crate) fn remove(&self, prefix: &[u8]) {
-        let mut m = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut m = self.prefixes();
         if let Some(n) = m.get_mut(prefix) {
             *n -= 1;
             if *n == 0 {
                 m.remove(prefix);
+                self.generation.fetch_add(1, Ordering::Release);
             }
         }
     }
@@ -87,12 +97,7 @@ impl Interest {
     /// Peers holding `prefix`.
     #[cfg(test)]
     pub(crate) fn count(&self, prefix: &[u8]) -> usize {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(prefix)
-            .copied()
-            .unwrap_or(0)
+        self.prefixes().get(prefix).copied().unwrap_or(0)
     }
 }
 

@@ -7,6 +7,7 @@
 //! re-sent now and then to keep it fresh ([`Pace`]). Every job publishes at most at the
 //! publish rate; between frames it only accumulates.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, SyncSender, TryRecvError};
@@ -96,6 +97,16 @@ pub(crate) struct StampArgs {
 pub(crate) struct Emitter {
     outbox: Outbox,
     env: JobEnv,
+    asked: RefCell<Asked>,
+}
+
+/// Which of the topics this thread asks about have a subscriber, as of `generation` of the
+/// daemon's [`Interest`]: a job asks about the same few topics every block, and the answer
+/// changes only when a subscription does.
+#[derive(Debug, Default)]
+struct Asked {
+    generation: u64,
+    topics: Vec<(Topic, bool)>,
 }
 
 impl Emitter {
@@ -103,11 +114,32 @@ impl Emitter {
     pub(crate) fn connect(env: JobEnv) -> std::io::Result<Self> {
         let outbox = Outbox::connect(&env.ctx, &env.endpoint, 64)
             .map_err(|e| std::io::Error::other(e.to_string()))?;
-        Ok(Self { outbox, env })
+        Ok(Self::new(outbox, env))
+    }
+
+    fn new(outbox: Outbox, env: JobEnv) -> Self {
+        Self {
+            outbox,
+            env,
+            asked: RefCell::default(),
+        }
     }
 
     pub(crate) fn wants(&self, t: Topic) -> bool {
-        self.env.interest.wants(&t.to_bytes())
+        let mut asked = self.asked.borrow_mut();
+        // Read before the subscriptions are: an answer kept under this count is then never
+        // older than the count says.
+        let generation = self.env.interest.generation();
+        if asked.generation != generation {
+            asked.generation = generation;
+            asked.topics.clear();
+        }
+        if let Some(&(_, wanted)) = asked.topics.iter().find(|(k, _)| *k == t) {
+            return wanted;
+        }
+        let wanted = self.env.interest.wants(&t.to_bytes());
+        asked.topics.push((t, wanted));
+        wanted
     }
 
     /// The frame `data` stamped with `s` and sequence number `seq`.
@@ -528,7 +560,7 @@ pub(crate) fn spawn(
                     return;
                 }
             };
-            let em = Emitter { outbox, env };
+            let em = Emitter::new(outbox, env);
             run(&mut *analysis, &rx, &q, &em, &r);
         })?;
     let feed = JobFeed {

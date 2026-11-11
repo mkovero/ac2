@@ -18,6 +18,8 @@ pub(crate) struct SourceTap {
     interest: Arc<Interest>,
     /// Device input channel per block column, and its topic.
     columns: Vec<(u16, Vec<u8>)>,
+    /// What the rigs take, read again only when a subscription has changed.
+    taken: Taken,
     incarnation: StreamIncarnation,
     rate: u32,
     /// The blocks' host stamps are capture times on a clock the state maps to system time.
@@ -27,6 +29,17 @@ pub(crate) struct SourceTap {
     body: Vec<u8>,
     /// Frames the I/O thread's pipe did not take.
     dropped: u64,
+}
+
+/// The subscriptions as the tap last read them.
+#[derive(Default)]
+struct Taken {
+    /// The [`Interest`] generation this was read at; `None` before the first read.
+    generation: Option<u64>,
+    /// Some rig takes audio.
+    any: bool,
+    /// Per block column: its channel is subscribed to.
+    columns: Vec<bool>,
 }
 
 impl SourceTap {
@@ -45,6 +58,7 @@ impl SourceTap {
                 .iter()
                 .map(|&c| (c, ac2_proto::Topic::Audio { channel: c }.to_bytes()))
                 .collect(),
+            taken: Taken::default(),
             incarnation,
             rate,
             capture_stamps,
@@ -55,12 +69,29 @@ impl SourceTap {
     }
 
     /// Whether any rig takes audio now: the fan-out then hands off every device period.
-    pub(crate) fn active(&self) -> bool {
-        self.interest.any_under(b"audio/")
+    pub(crate) fn active(&mut self) -> bool {
+        self.read_interest();
+        self.taken.any
+    }
+
+    fn read_interest(&mut self) {
+        // The count is read before the subscriptions, so what is kept under it is never
+        // older than it.
+        let generation = self.interest.generation();
+        if self.taken.generation == Some(generation) {
+            return;
+        }
+        self.taken.generation = Some(generation);
+        self.taken.any = self.interest.any_under(b"audio/");
+        self.taken.columns.clear();
+        self.taken
+            .columns
+            .extend(self.columns.iter().map(|(_, t)| self.interest.wants(t)));
     }
 
     /// Sends `block`'s subscribed channels.
     pub(crate) fn send(&mut self, block: &Block) {
+        self.read_interest();
         let mut flags = AudioFlags::NONE;
         if block.flags.contains(BlockFlags::XRUN) {
             flags = flags.with(AudioFlags::XRUN);
@@ -81,7 +112,7 @@ impl SourceTap {
         // protocol's own encoder, when the first subscribed channel needs it.
         let mut head: Option<Vec<u8>> = None;
         for (col, (channel, topic)) in self.columns.iter().enumerate() {
-            if !self.interest.wants(topic) {
+            if !self.taken.columns[col] {
                 continue;
             }
             if head.is_none() {
@@ -152,5 +183,16 @@ mod tests {
             assert_eq!(got, want);
             assert!(pull.try_recv_parts().unwrap().is_none());
         }
+        // A subscription that changes is followed at the next block.
+        assert!(tap.active());
+        interest.unsubscribe(b"audio/7");
+        assert!(!tap.active());
+        interest.subscribe(b"audio/4");
+        assert!(tap.active());
+        tap.send(&Block::new(6, 1, 2, BlockFlags::NONE, 0, vec![0.5, 0.25]));
+        let got = pull.try_recv_parts().unwrap().unwrap();
+        assert_eq!(&*got[1], b"audio/4");
+        assert_eq!(&*got[3], 0.5_f32.to_le_bytes());
+        assert!(pull.try_recv_parts().unwrap().is_none());
     }
 }

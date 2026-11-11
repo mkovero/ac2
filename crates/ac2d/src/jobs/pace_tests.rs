@@ -168,6 +168,25 @@ fn emit_spectra(s: &mut Spectrum, r: &Rig, last_sent: &mut Instant) -> Vec<(Fram
     frames
 }
 
+/// A job's kept answer follows the subscriptions at the very next question: a prefix
+/// arriving or leaving, while a second holder of a prefix changes nothing.
+#[test]
+fn a_kept_answer_follows_the_subscriptions() {
+    let r = Rig::new("kept-answer");
+    assert!(!r.em.wants(SPEC));
+    r.env.interest.subscribe(b"d/1/");
+    assert!(r.em.wants(SPEC));
+    assert!(!r.em.wants(Topic::SessionLevels));
+    r.subscribe(SPEC);
+    r.env.interest.unsubscribe(b"d/1/");
+    assert!(r.em.wants(SPEC));
+    r.subscribe(SPEC);
+    r.unsubscribe(SPEC);
+    assert!(r.em.wants(SPEC));
+    r.unsubscribe(SPEC);
+    assert!(!r.em.wants(SPEC));
+}
+
 #[test]
 fn nothing_is_built_or_sent_for_nobody() {
     let r = Rig::new("unsubscribed");
