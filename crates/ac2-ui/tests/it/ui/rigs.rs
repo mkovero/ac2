@@ -164,11 +164,14 @@ fn a_rig_down_and_back() {
     });
     let away = ac2_scene::chrome::rig_pane_unreachable("kettu");
     // The link reconnects on its own and the paused keepalives drop it again: whenever it
-    // is down as a frame is drawn, kettu's panes say so.
-    assert!(
-        h.query_by_label(&away).is_some() || connected(h.state(), KETTU),
-        "kettu's panes name it unreachable"
-    );
+    // is down as a frame is drawn, kettu's panes say so. The drawn frame and the state read
+    // after it are two moments, and the link can drop between them: a frame drawn while it
+    // was up proves nothing either way, so the next one is asked.
+    let t0 = Instant::now();
+    while h.query_by_label(&away).is_none() && !connected(h.state(), KETTU) {
+        assert!(t0.elapsed() < WAIT, "kettu's panes name it unreachable");
+        h.step();
+    }
     assert!(connected(h.state(), PUPU), "pupu is untouched");
     kettu.fake.lock().ka_paused = false;
     step_until(&mut h, "kettu back", |a| connected(a, KETTU));
