@@ -139,7 +139,7 @@ thread; neither is on the audio callback.
 - **Deltas against the previous frame** of a topic: frames are dropped and coalesced by
   design (PUB/SUB high-water marks, latest-only slots), so a delta stream needs keyframes and
   per-client state; and frame-to-frame changes of a noisy measurement are as large as
-  neighbour differences.
+  neighbour differences. Built since, with keyframes and per-peer chains: [`wire-delta.md`](wire-delta.md).
 - **Header-only repeats** of an unchanged result: they only replace the 250 ms refresh of a
   gated or settled stream, a few frames a second, and a late joiner whose full frame was
   dropped would hold nothing.

@@ -24,7 +24,7 @@ The monitor never touches the TF delay finder (Q1) and never changes a measureme
 ## Mapping
 
 Each side has its own sample counter: the output index from `OutputTick.start_sample` and
-the capture index from block headers. They are only shared on JACK, ASIO and fake.
+the capture index from block headers. They are only shared on JACK, ASIO, Core Audio (one device) and fake.
 
 ```
 capture_index = output_index + offset          (offset in samples, signed, per epoch)

@@ -101,7 +101,7 @@ until moved.
   then Imported when it holds anything. Under a measurement: its live curve (transfer,
   spectrum, RTA), its stored traces in list order (slot, then oldest first), its math
   channels. A sweep measurement's header says `no runs yet`, `2 runs`, `playing 1/2`,
-  `analysing`. Folding is this app's display (`AppState::collapsed`).
+  `analysing`. Folding is this app's display (`RigState::collapsed`).
 - The selection rule (PLAN §8.2): the item selected last has the keys — a
   measurement (its header, its live curve or a math channel's row) or a stored trace.
   Shift+A toggles the selected item's whole group (live curves are this app's display, the
@@ -123,14 +123,18 @@ cursor readouts and tree dots:
   simulated protan / deutan vision, then violet and cyan). Assignment follows the
   measurement id, so deleting one repaints no other: id `n` prefers family `(n − 1) mod 8`;
   walking the measurements by id, one whose family is taken takes the next free one. Past
-  eight measurements the families repeat.
+  eight measurements the families repeat. A family the operator chose for a measurement
+  (`Measurement::colour`, `meas.colour`) is taken first.
 - Its **live curve** is the family's base colour. Its stored traces (captures, sweep runs,
   in tree order: slot, then oldest first) and then its math channels' results take the
-  family's **shades**: the base's OKLCH hue and chroma at 0.1 steps of OKLab lightness,
-  nearest first, lighter before darker, kept inside the theme's lightness range (3:1
-  contrast against the plot, and still showing the hue). Three shades, then they repeat.
+  family's **shades**: the base's OKLCH hue and chroma at another OKLab lightness, each
+  next shade the one farthest from the curve before it and at least 0.1 from the base and
+  the other shades, kept inside the theme's lightness range (3:1
+  contrast against the plot, and still showing the hue). Up to four shades, then they repeat.
   A sweep measurement has no live curve: its first run takes the base.
-- **Imported** traces (and those of a deleted measurement kept) are the neutral grey family.
+- **Imported** traces (and those of a deleted measurement kept) each take a colour of their
+  own from the import palette (`import_palette`): the bases and shades of families no
+  measurement holds first, the neutral grey family last.
   A trace or math channel **moved** to another measurement takes that measurement's family
   and its place in it.
 - The daemon's per-trace colour (`TraceEdit.color`, on the wire and in session files) is

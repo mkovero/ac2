@@ -227,7 +227,7 @@ The `test` job on `macos-latest` (arm64 only: Intel adds ~8 min of build for the
 result and its label ends in 2027), after the tests, with the debug binaries they built:
 
 1. `brew install --cask blackhole-2ch`, `brew install sox`, restart coreaudiod.
-2. `tools/release/macos-blackhole.sh target/debug virtual-audio-logs`, the twin of
+2. `tools/release/macos-blackhole.sh target/debug virtual-audio-logs target/debug/coreaudio-loop`, the twin of
    `tools/release/windows-asio.ps1`:
    - waits (≤ 30 s) until `system_profiler SPAudioDataType` lists `BlackHole 2ch`;
    - asserts the `kTCCServiceMicrophone` row for `/opt/hca/hosted-compute-agent` (user or

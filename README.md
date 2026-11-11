@@ -158,8 +158,9 @@ own directories:
 
 | what | Linux | macOS | Windows |
 |---|---|---|---|
-| config: calibration store (`calibrations.json`: sensitivity calibrations, the mic library, each input's mic and active curve), rig settings (`rig.json`: system max level, output labels), UI preferences (`ui.toml`), key bindings (`keys.toml`), network keys (`server.key`, `authorized_clients`, `keys/`) | `~/.config/ac2` | `~/Library/Application Support/ac2` | `%APPDATA%\ac2\config` |
-| data: saved sessions (`sessions/<name>/`), the daemon's autosave (`autosave/`, the previous manifest in `autosave/session.prev.json`), raw recordings (`recordings/`) | `~/.local/share/ac2` | `~/Library/Application Support/ac2` | `%APPDATA%\ac2\data` |
+| config: calibration store (`calibrations.json`: sensitivity calibrations, the mic library, each input's mic and active curve), rig settings (`rig.json`: system max level, output labels, rig SPL meters), the daemon's identity (`rig-id`, which apps key a rig by), UI preferences (`ui.toml`), key bindings (`keys.toml`), network keys (`server.key`, `authorized_clients`, `keys/`) | `~/.config/ac2` | `~/Library/Application Support/ac2` | `%APPDATA%\ac2\config` |
+| data: saved sessions (`sessions/<name>/`), the daemon's autosave (`autosave/`, the previous manifest in `autosave/session.prev.json`), raw recordings (`recordings/`), the plan library (`plans/<name>.json`, room plans), the rig SPL meters' logs (`rig-logs/`, apart from the autosave so that loading a session never ends them) | `~/.local/share/ac2` | `~/Library/Application Support/ac2` | `%APPDATA%\ac2\data` |
+| logs: one file per program (`ac2d.log`, `ac2-ui.log`) | `~/.local/state/ac2` | `~/Library/Logs/ac2` | `%LOCALAPPDATA%\ac2\logs` |
 
 A session directory holds `session.json` (measurements, trace metadata, slots), one CSV per
 trace and one per-second log per SPL meter (`spl/`). The autosave is the same format, updated in place: unchanged traces are not written again and SPL logs are appended to.
@@ -172,7 +173,8 @@ version named.
 `XDG_CONFIG_HOME` / `XDG_DATA_HOME` apply on Linux. `AC2_CONFIG_DIR` moves the config
 directory, `AC2_SESSION_DIR` the sessions, `ac2d --cal-store PATH` the calibration store,
 `ac2d --autosave DIR` the autosave (`--no-autosave` keeps everything in memory),
-`ac2d --settings PATH` the rig settings, `ac2d --recordings DIR` the raw recordings and
+`ac2d --settings PATH` the rig settings, `ac2d --recordings DIR` the raw recordings,
+`ac2d --plans DIR` the plan library, `ac2d --rig-logs DIR` the rig meters' logs and
 `AC2_LOG_DIR` the log directory.
 Calibrations describe the machine's hardware and stay in the config directory; sessions are
 the operator's documents and live in the data directory.

@@ -50,14 +50,12 @@ Daemon:
 - Each job writes its newest result to a per-topic latest slot. The publisher sends each
   dirty slot at most at the topic's rate: 60 fps for every transport since packed frames
   (`wire-slim.md`), configurable per daemon (2b).
-- XPUB: `XPUB_VERBOSE`, per-peer `SNDHWM` = 48 (one burst: a full desk's ~40 topics plus
-  events and keepalives; libzmq does not see a peer's reads during a burst, so a smaller
-  queue drops part of every round; a larger one only lengthens the standing delay in front
-  of a slow link, which is queue length / link rate), set once before binding. It is not
+- The data socket is a ROUTER with per-peer byte credit ([`flow-control.md`](flow-control.md),
+  `ac2d/src/peers.rs`); its `SNDHWM` (`DATA_SNDHWM`, twice what credit and the event bound
+  let be outstanding) is set once before binding. It is not
   resized with the subscriptions: libzmq 4.3.5 applies a
   changed SNDHWM to live pipes with commands that race with a leaving peer's pipe teardown
   (a use-after-free in its I/O thread, reproduced at daemon shutdown).
-  `XPUB_NODROP` is never set.
 - On a new subscription, the daemon re-sends that topic's latest slot so late joiners
   don't wait.
 - Network mode sets `ZMQ_SNDBUF` = 64 KiB on the data socket to keep kernel backlog small.
@@ -73,8 +71,8 @@ Daemon:
 - Messages pass from the jobs through the internal pipe and the latest slot to the data
   socket as zero-copy libzmq parts: the encoded buffers are never copied in the daemon.
 - Client sockets reconnect after 100 ms, backing off to 2 s.
-- Pacing each peer to what it has consumed (instead of to the publish rate) is designed in
-  [`flow-control.md`](flow-control.md), not implemented.
+- Each peer is paced to what it has consumed (byte credit), not only to the publish rate:
+  [`flow-control.md`](flow-control.md).
 - `ka` keepalive every 250 ms carries the rev, daemon wall clock, timing state and generator
   summary (protocol §5.4).
 
@@ -83,9 +81,9 @@ Client:
   newest message per topic (frames of one topic arrive in publish order over the one
   connection, so that is the last one read), decode only those, count malformed frames and
   discard frames of an older epoch or another incarnation. Superseded messages are never
-  decoded. The data SUB's `RCVHWM` (64) holds one publish round between drains.
+  decoded. The data DEALER's `RCVHWM` (`DATA_RCVHWM`) holds what the daemon's credit lets be in flight.
 - Consumers sleep until data is queued (`Client::data_changed`, which on Unix registers
-  the SUB's `ZMQ_FD` with the runtime; `wait_data` for blocking threads) instead of
+  the DEALER's `ZMQ_FD` with the runtime; `wait_data` for blocking threads) instead of
   polling on a timer.
 - Clock offset: each `ka` gives a sample `daemon_wall_ns − local_receive_ns` = true offset
   minus that message's delivery delay. Take the **maximum** over the last 10 s (the

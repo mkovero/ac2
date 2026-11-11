@@ -475,8 +475,8 @@ loading, `ASIOCreateBuffers`, `bufferSwitchTimeInfo`, messages.
   lists the ASIO devices with channel names, rates and buffer sizes, runs a silent 20 s
   `ac2 selftest duplex --backend asio` (logging rate, buffer, index exactness, clock and
   formats, so FlexASIO's sample-position behaviour is on record), and records a silent 30 s
-  daemon session (no stop, no discontinuity, ≥ 90 % of the frames). Not yet run: it lands
-  untested on Windows.
+  daemon session (no stop, no discontinuity, ≥ 90 % of the frames). It passes on
+  `windows-latest` (all-OS dispatch).
 - App: after the script, `ac2-ui --backend asio --no-discovery --smoke` starts the `ac2d`
   beside it on ASIO (`ac2d --backend asio`, stopped when the app quits), waits for the
   device list and quits. The step passes when the app exits 0 within
@@ -484,7 +484,7 @@ loading, `ASIOCreateBuffers`, `bufferSwitchTimeInfo`, messages.
   session, so nothing plays.
 - Soak (dispatch only): `gh workflow run ci.yml --ref <branch> -f soak_minutes=60` runs the
   Windows job and keeps the recorded session open that long. Each minute goes into
-  `soak-samples.csv` in the `virtual-audio-logs` artifact: recorded frames against
+  `soak-samples.csv` in the `virtual-audio-logs-Windows` artifact: recorded frames against
   rate × time, discontinuities, the stopped flag, and the daemon's CPU, working set, private
   bytes and handles. It passes with no discontinuity, frames within 0.1 % of rate × time and
   the daemon alive. Private-byte growth over 64 MB is a warning, not a failure, because

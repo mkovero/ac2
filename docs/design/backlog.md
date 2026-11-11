@@ -63,8 +63,9 @@ Targets: laptops with integrated GPUs on battery, and a Pi 4 class daemon for SP
   apart; the engine should check each cycle's output placement against the stated latency
   and flag a cycle that differs.
 - **App Nap**: the macOS hand-off timer is not coalesced (kqueue `NOTE_CRITICAL`), but a
-  hidden app on battery may still be App Napped, throttling a daemon the app hosts. Needs an
-  activity assertion from the UI while a session is open.
+  hidden app on battery may still be App Napped; whether that also throttles the `ac2d` the
+  app starts beside it (a separate process, `crates/ac2-ui/src/spawn.rs`) is not measured.
+  Needs an activity assertion while a session is open.
 - **The UI redraws the whole window per data frame**: under a software renderer, 4 live
   measurements cost ≈ 1.7 cores, SPL only ≈ 1.3 (egui has no damage regions). Not measured
   on a real laptop iGPU (PLAN §8.3 frame-time target).

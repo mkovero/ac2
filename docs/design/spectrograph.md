@@ -6,7 +6,7 @@ colormap LUT"). User-facing description: `docs/user-guide.md` → *Spectrograph*
 ## What the operator sees
 
 **G** steps the spectrum pane's views, as it steps the SPL pane's: spectrum → spectrum +
-spectrograph → spectrograph alone → spectrum (kept with the pane as `LayoutPane.spectrum_view`, so the layout and its measurement carry it).
+spectrograph → spectrograph alone → 3D spectrograph (where the GPU allows it, `spectrograph-3d.md`) → spectrum (kept with the pane as `LayoutPane.spectrum_view`, so the layout and its measurement carry it).
 The split puts the spectrum in the top 40 %, the spectrograph of the pane's measurement under
 it; alone, the spectrograph takes the whole pane under the banners (with **W** / F11, the
 whole screen), its caption carrying the spectrum's window and calibration and its
@@ -43,8 +43,8 @@ of the UI, like peak hold, kept only while the spectrograph is shown.
   level, a wide column (a third-octave band, a low single-bin FFT column) fills every row it
   covers. Invalid RTA bands and NaN bins are no value.
 - **Time slots.** 30 a second (`SLOTS_PER_S`, the network publish period), at most 4096
-  (`MAX_SLOTS`, a Pi 4 class GPU's texture side), placed by the frame's
-  capture time on the daemon clock — not by arrival, so link jitter does not stretch the
+  (`MAX_SLOTS`, a Pi 4 class GPU's texture side), placed by the audio time the frame
+  ends at (the session's sample clock) — not by arrival, so link jitter does not stretch the
   picture. Two frames in one slot keep the higher level per row (what a pixel over several
   slots shows too).
 - **A frame stands for the time since the previous one.** A long FFT updates a few times a
@@ -101,7 +101,7 @@ and the picture cannot disagree.
   pixel shows its highest cell; the golden `heatmap_scroll` is unchanged.
 - `ac2-e2e`: `tests/it/panes/streams.rs` `spectrograph_from_an_empty_daemon` (session, spectrum
   from the palette, G, the rig's noise fills it, cursor readout, C, the history length, stopped caption,
-  G alone, W full size, level keys, G clears); GPU snapshots `tests/it/ui/views.rs` `spectrograph`
+  G alone, W full size, level keys, G clears); GPU snapshots (`ac2-ui`) `tests/it/ui/views.rs` `spectrograph`
   and `spectrograph_alone` from a pinned 25 s sweep with a gap.
 
 ## Open

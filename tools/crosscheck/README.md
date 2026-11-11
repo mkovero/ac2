@@ -7,7 +7,7 @@ committed results show (one table of ac2, REW and OSM against truth and each oth
 disparities): [comparison.md](comparison.md).
 
 ```
-crosscheck/      the package (python -m crosscheck {preflight,run,analyse,baseline,compare,repeats,osm,coherence-study,dutcov,comparison})
+crosscheck/      the package (python -m crosscheck {preflight,run,analyse,baseline,compare,repeats,osm,coherence-study,dutcov,comparison,rew-import})
 rigs/            pupu.toml: ports, roles, paths, levels, stage settings; host.toml: the digital DUT on a dummy JACK server
 comparison.md    ac2 vs REW vs OSM against truth: a table per signal path, then the disparities
 reports/         repeated takes, coherence study, DUT coverage

@@ -17,6 +17,7 @@ dialog, palette prompts, `ui.toml` and daemon flags):
 | Recording | the record toggle's limit; the daemon's recording folder | this app / the rig |
 | Display | theme, key hints, the SPL number's hold, the spectrograph's span, level axes reset | this app |
 | Connection | the link, this client's id and key, reconnect, the connect dialog (pairing); the daemon's mode, mDNS name, authorized clients (add, revoke) and refused keys | this app / the rig |
+| Rig monitor | where the rig's OSC cues and Art-Net universe go, monitoring from daemon start, the rig's meters | the rig |
 
 Every page says whose its settings are: **this app** (kept in `ui.toml` on this computer)
 or **the rig — all clients** (kept by the daemon; every client sees the change).
@@ -30,7 +31,7 @@ app starts with one pane.
 
 **Keys** (decision K9 holds: an open window owns the keyboard): `Ctrl+P` (palette
 *Settings…*, the ⚙ in the top bar) opens it at the page last shown; `Ctrl+PgUp / PgDn`
-(or `Ctrl+Tab` / `Ctrl+Shift+Tab`) step pages, `Alt+1…6` jump; ↑/↓ ←/→ Enter as in every window; Esc closes
+(or `Alt+←` / `Alt+→`) step pages, `Alt+1…7` jump; ↑/↓ ←/→ Enter as in every window; Esc closes
 the topmost window (a calibration dialog or the raise confirmation over a page, else the
 view); Shift+Esc stops the stimulus from anywhere. `Ctrl+,` — the desktop convention — is the
 transfer pane's whole-sample delay step, so the letter P (preferences) it is; layout-safe on
@@ -107,8 +108,8 @@ first — kept by the ZAP audit hook). **A** on a refused key authorizes it unde
 *Authorize a client by its key…* takes `name key`; **Delete** twice revokes a client.
 `server.authorize` / `server.revoke` write the authorized-clients file atomically and
 replace the handshake check's keys (`AuthorizedHandle`); a revoked client's requests are
-refused at once (its data socket keeps receiving until the connection drops — libzmq has no
-per-peer disconnect on ROUTER/XPUB). Nobody revokes their own key (it would lock that
+refused at once, and its data peers are dropped with them (`Peers::drop_key`: the data
+ROUTER serves each peer by its key). Nobody revokes their own key (it would lock that
 operator out). Any authorized client may do this: in network mode every paired client is
 equally trusted already (it can drive the stimulus). Local daemons have no keys
 (`unsupported`).
@@ -127,4 +128,3 @@ Neither the output labels nor the system max level are session content: both are
   *Delete calibration…*) stay as typed shortcuts; their effect is visible
   on the pages. Remove them if operators never use them.
 - Labels follow channel numbers, not devices; per-device labels if rigs switch interfaces.
-- A revoked client keeps its data stream until it reconnects.
