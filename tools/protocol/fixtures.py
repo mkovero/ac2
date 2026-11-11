@@ -6,7 +6,7 @@
                         verify py_*.bin and expected/*.json are what `gen` would write
 
 The values in `fixture_frames.py` and `fixture_messages.py` mirror
-`crates/ac2-proto/src/samples.rs`. The Rust test
+`crates/ac2-proto/src/samples/`. The Rust test
 `crates/ac2-proto/tests/it/fixtures.rs` decodes py_*.bin and compares them with those samples;
 this script decodes rust_*.bin and compares them with those dicts. A field renamed,
 re-typed or re-tagged on either side fails one of the two.
