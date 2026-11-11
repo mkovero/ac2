@@ -330,7 +330,7 @@ impl Control {
         inputs: Vec<ac2_proto::model::PreviewInput>,
         pairs: Vec<ac2_proto::model::Pair>,
     ) -> Result<ReplyBody, ProtoError> {
-        if self.detecting.is_some() {
+        if self.pending.detecting.is_some() {
             // The burst holds the device; a preview asked for before the detection started
             // must not reopen it under the burst.
             return Err(refused(
@@ -403,7 +403,7 @@ impl Control {
                 "the stimulus is armed: stop it before detecting the loopback",
             ));
         }
-        if self.detecting.is_some() {
+        if self.pending.detecting.is_some() {
             return Err(refused("a loopback detection is already running"));
         }
         let backend = self.backend_for(Some(kind))?;

@@ -229,13 +229,14 @@ impl Control {
 
     pub(super) fn stop_job(&mut self, id: MeasId) {
         let orphaned: Vec<u64> = self
-            .pending_finds
+            .pending
+            .finds
             .iter()
             .filter(|(_, p)| p.meas == id)
             .map(|(t, _)| *t)
             .collect();
         for t in orphaned {
-            if let Some(p) = self.pending_finds.remove(&t) {
+            if let Some(p) = self.pending.finds.remove(&t) {
                 let e = invalid("the measurement stopped during delay.find");
                 self.answer(&p.routing_id, &p.client, p.id, Err(e), Instant::now());
             }
@@ -420,7 +421,7 @@ impl Control {
     }
 
     pub(super) fn finish_find(&mut self, token: u64, result: Result<FinderResult, String>) {
-        let Some(p) = self.pending_finds.remove(&token) else {
+        let Some(p) = self.pending.finds.remove(&token) else {
             return;
         };
         let fs = self.session.as_ref().map(|r| f64::from(r.sample_rate));

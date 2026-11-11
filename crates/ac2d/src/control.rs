@@ -309,6 +309,17 @@ struct PendingFind {
     meas: MeasId,
 }
 
+/// The replies held until a worker thread reports back, by the token its work was given.
+#[derive(Default)]
+struct Pending {
+    /// The loopback detection running, by token.
+    detecting: Option<(u64, PendingReply)>,
+    /// Driver control panel calls under way, by token.
+    panels: HashMap<u64, PendingReply>,
+    /// The `delay.find` runs under way, by token.
+    finds: HashMap<u64, PendingFind>,
+}
+
 /// Where an applied delay came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DelaySource {
@@ -390,10 +401,8 @@ pub(crate) struct Control {
     timing_job: Option<JobHandle>,
     /// Capture-only meters of a device before a session opens on it.
     preview: Option<Preview>,
-    /// The loopback detection running, by token.
-    detecting: Option<(u64, PendingReply)>,
-    /// Driver control panel calls under way, by token.
-    panels: HashMap<u64, PendingReply>,
+    /// The replies held until a worker reports back.
+    pending: Pending,
     /// Warnings the command executing now raised; the next reply carries them.
     reply_warnings: Vec<ac2_proto::Warning>,
     /// The next id of each kind this thread hands out.
@@ -402,7 +411,6 @@ pub(crate) struct Control {
     grids: HashMap<GridId, GridDef>,
     seqs: Arc<Seqs>,
     ka_seq: u64,
-    pending_finds: HashMap<u64, PendingFind>,
     next_ka: Instant,
     /// The clocks entity's sources.
     clocks: clocks::ClockWatch,
@@ -561,8 +569,7 @@ impl Control {
             probes: Arc::new(Probes::default()),
             timing_job: None,
             preview: None,
-            detecting: None,
-            panels: HashMap::new(),
+            pending: Pending::default(),
             reply_warnings: Vec::new(),
             ids: ids::Ids::new(rigm.next_id()),
             out: Output {
@@ -575,7 +582,6 @@ impl Control {
             grids: HashMap::new(),
             seqs: Arc::new(Seqs::default()),
             ka_seq: 0,
-            pending_finds: HashMap::new(),
             next_ka: Instant::now(),
             clocks: clocks::ClockWatch::new(s.system_clock.read()),
             refusals: crate::refusals::Refusals::default(),
@@ -745,7 +751,7 @@ impl Control {
                 }
                 Ok(ControlMsg::DelayFound { token, result }) => self.finish_find(token, *result),
                 Ok(ControlMsg::PanelShown { token, result }) => {
-                    if let Some(p) = self.panels.remove(&token) {
+                    if let Some(p) = self.pending.panels.remove(&token) {
                         let r = result.map(|()| ReplyBody::Ack {
                             rev: self.store.rev(),
                         });
@@ -753,12 +759,12 @@ impl Control {
                     }
                 }
                 Ok(ControlMsg::LoopbackDetected { token, result }) => {
-                    if let Some((t, p)) = self.detecting.take() {
+                    if let Some((t, p)) = self.pending.detecting.take() {
                         if t == token {
                             let r = (*result).map(ReplyBody::LoopbackDetection);
                             self.answer(&p.routing_id, &p.client, p.id, r, Instant::now());
                         } else {
-                            self.detecting = Some((t, p));
+                            self.pending.detecting = Some((t, p));
                         }
                     }
                 }

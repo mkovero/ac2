@@ -190,7 +190,7 @@ impl Control {
         if desired.firing && self.session.is_none() {
             return Err(refused("no open session to emit on"));
         }
-        if desired.firing && self.detecting.is_some() {
+        if desired.firing && self.pending.detecting.is_some() {
             return Err(refused(
                 "a loopback detection is playing its burst; fire once it is done",
             ));

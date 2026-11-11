@@ -115,7 +115,7 @@ impl Control {
             }
             let g = &self.store.state().generator;
             let sweeping = self.sweep.as_ref().is_some_and(|s| s.run.active());
-            if g.armed || g.firing || sweeping || self.detecting.is_some() {
+            if g.armed || g.firing || sweeping || self.pending.detecting.is_some() {
                 return Err(refused(
                     "the stimulus is armed or playing: stop it before raising the system max \
                      level",

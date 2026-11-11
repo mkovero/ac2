@@ -198,7 +198,7 @@ impl Control {
                         level,
                     ) {
                         Ok(token) => {
-                            self.detecting = Some((
+                            self.pending.detecting = Some((
                                 token,
                                 PendingReply {
                                     routing_id: routing_id.to_vec(),
@@ -215,7 +215,7 @@ impl Control {
                 Command::SessionControlPanel { backend, device } => {
                     match self.start_panel(backend, device) {
                         Ok(token) => {
-                            self.panels.insert(
+                            self.pending.panels.insert(
                                 token,
                                 PendingReply {
                                     routing_id: routing_id.to_vec(),
@@ -234,7 +234,7 @@ impl Control {
                     observation,
                 } => match self.start_find(meas, band, observation) {
                     Ok(token) => {
-                        self.pending_finds.insert(
+                        self.pending.finds.insert(
                             token,
                             PendingFind {
                                 routing_id: routing_id.to_vec(),

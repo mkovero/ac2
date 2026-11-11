@@ -64,7 +64,7 @@ impl Control {
         if self.sweep.is_some() {
             return Err(refused("a sweep is already running"));
         }
-        if self.detecting.is_some() {
+        if self.pending.detecting.is_some() {
             return Err(refused(
                 "a loopback detection is playing its burst; sweep once it is done",
             ));
