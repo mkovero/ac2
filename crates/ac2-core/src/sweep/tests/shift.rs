@@ -19,10 +19,14 @@ fn the_response_does_not_depend_on_where_the_recording_starts() {
             r.first_onset_s,
             base.first_onset_s
         );
-        assert_eq!(
-            base.arrival_s.to_bits(),
-            r.arrival_s.to_bits(),
-            "trim {k}: arrival"
+        // A start inside the pre-roll shortens the cut, so the arrival is the same sum taken
+        // over fewer samples: equal to rounding, whose last bit depends on the platform's
+        // math library.
+        assert!(
+            (base.arrival_s - r.arrival_s).abs() < 1e-12,
+            "trim {k}: arrival {} vs {}",
+            r.arrival_s,
+            base.arrival_s
         );
         let curves = [
             (&base.magnitude_db, &r.magnitude_db, "magnitude"),
