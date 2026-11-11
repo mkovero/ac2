@@ -93,7 +93,13 @@ fn topic_panes(topic: &Topic) -> &'static [PaneKind] {
             Stream::Spl | Stream::Leq | Stream::BandLeq => &[PaneKind::Spl],
             Stream::Levels => &[],
         },
-        _ => &[],
+        // Named one by one: a new topic has to say here which panes draw it.
+        Topic::PreviewLevels
+        | Topic::PreviewGonio
+        | Topic::Timing
+        | Topic::Evt
+        | Topic::Ka
+        | Topic::Audio { .. } => &[],
     }
 }
 

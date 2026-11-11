@@ -107,7 +107,20 @@ fn per_frame(m: &FrameMeta) -> PerFrame {
             lpeak: s.lpeak,
             duration: s.duration,
         }),
-        _ => PerFrame::Static,
+        // Named one by one: a new kind of metadata has to say here whether any of it
+        // moves from frame to frame.
+        FrameMeta::Ir(_)
+        | FrameMeta::Rta(_)
+        | FrameMeta::Spec(_)
+        | FrameMeta::Leq(_)
+        | FrameMeta::BandLeq(_)
+        | FrameMeta::Levels(_)
+        | FrameMeta::SessionLevels(_)
+        | FrameMeta::PreviewLevels(_)
+        | FrameMeta::SessionGonio(_)
+        | FrameMeta::PreviewGonio(_)
+        | FrameMeta::Timing(_)
+        | FrameMeta::Ka(_) => PerFrame::Static,
     }
 }
 

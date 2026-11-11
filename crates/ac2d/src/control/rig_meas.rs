@@ -211,7 +211,105 @@ impl Control {
             | Command::MeasDelete { meas, .. }
             | Command::MeasStart { meas }
             | Command::MeasStop { meas } => self.is_rig(*meas),
-            _ => false,
+            // Named one by one: a new command that changes a rig meter has to be put
+            // above, and the compiler asks for the decision.
+            Command::Hello { .. }
+            | Command::SessionDevices
+            | Command::SessionPreview { .. }
+            | Command::SessionPreviewStop
+            | Command::SessionControlPanel { .. }
+            | Command::SessionDetectLoopback { .. }
+            | Command::SessionOpen { .. }
+            | Command::SessionClose
+            | Command::SessionStatus
+            | Command::SessionInputs { .. }
+            | Command::SessionOutputs { .. }
+            | Command::GenAcquire { .. }
+            | Command::GenSet { .. }
+            | Command::GenRefresh { .. }
+            | Command::GenRelease { .. }
+            | Command::GenStop
+            | Command::GenCeiling { .. }
+            | Command::OscTarget { .. }
+            | Command::OscTest { .. }
+            | Command::ArtnetTarget { .. }
+            | Command::ArtnetFade { .. }
+            | Command::ArtnetTest { .. }
+            | Command::RigMonitorStart { .. }
+            | Command::LevelsSet { .. }
+            | Command::LevelsReset { .. }
+            | Command::MeasOffset { .. }
+            | Command::MeasEq { .. }
+            | Command::MeasReset { .. }
+            | Command::DelayFind { .. }
+            | Command::DelayInsert { .. }
+            | Command::DelaySet { .. }
+            | Command::DelayNudge { .. }
+            | Command::DelayTrack { .. }
+            | Command::TraceCapture { .. }
+            | Command::TraceList
+            | Command::TraceGet { .. }
+            | Command::TraceUpdate { .. }
+            | Command::TraceDelete { .. }
+            | Command::TraceAverage { .. }
+            | Command::TraceImport { .. }
+            | Command::TraceTarget { .. }
+            | Command::TraceMicCurve { .. }
+            | Command::TraceExport { .. }
+            | Command::CalSpl { .. }
+            | Command::CalSplElectrical { .. }
+            | Command::CalCurveImport { .. }
+            | Command::CalCurveRename { .. }
+            | Command::CalCurveDelete { .. }
+            | Command::CalLine { .. }
+            | Command::CalList
+            | Command::CalDelete { .. }
+            | Command::SplLogGet { .. }
+            | Command::SplLogNew { .. }
+            | Command::SplBandTransfer { .. }
+            | Command::SplBandLogGet { .. }
+            | Command::SplHistoryGet { .. }
+            | Command::SweepRun { .. }
+            | Command::StateSnapshot
+            | Command::StateSince { .. }
+            | Command::GridGet { .. }
+            | Command::FileSave { .. }
+            | Command::FileLoad { .. }
+            | Command::FileList
+            | Command::FileNew { .. }
+            | Command::FileRecover
+            | Command::FileSalvage { .. }
+            | Command::FileUploadBegin { .. }
+            | Command::FileUploadChunk { .. }
+            | Command::FileImport { .. }
+            | Command::FileDownloadBegin { .. }
+            | Command::FileDownloadChunk { .. }
+            | Command::FileDownloadEnd { .. }
+            | Command::RecStart { .. }
+            | Command::RecStop
+            | Command::RecList
+            | Command::SessionReplay { .. }
+            | Command::ServerInfo
+            | Command::ServerAuthorize { .. }
+            | Command::ServerRevoke { .. }
+            | Command::AuthAdmitRig { .. }
+            | Command::RigPeers { .. }
+            | Command::SourceState
+            | Command::PlanSave { .. }
+            | Command::PlanList
+            | Command::PlanDelete { .. }
+            | Command::WalkNew { .. }
+            | Command::WalkUpdate { .. }
+            | Command::WalkGoto { .. }
+            | Command::WalkCapture { .. }
+            | Command::WalkSkip { .. }
+            | Command::WalkRedo { .. }
+            | Command::WalkSwap { .. }
+            | Command::WalkDelete { .. }
+            | Command::SimRun { .. }
+            | Command::SimFit { .. }
+            | Command::SimMap { .. }
+            | Command::SimCancel => false,
         };
         if touches {
             self.rig.settings.check()

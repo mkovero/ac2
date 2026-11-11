@@ -442,7 +442,27 @@ impl Control {
             Change::Generator(g) => TimelineChange::Generator(g.clone()),
             Change::Inputs(i) => TimelineChange::Inputs(i.inputs.clone()),
             Change::Calibration(c) => TimelineChange::Calibration(c.clone()),
-            _ => return,
+            // Named one by one: a new kind of change has to say here whether a replay of
+            // the recording needs it.
+            Change::Session(_)
+            | Change::Trace(_)
+            | Change::LineCalibration(_)
+            | Change::Mic(_)
+            | Change::Outputs(_)
+            | Change::SplLog(_)
+            | Change::Timing(_)
+            | Change::Clocks(_)
+            | Change::Remote(_)
+            | Change::Sweep(_)
+            | Change::Autosave(_)
+            | Change::Recording(_)
+            | Change::Working(_)
+            | Change::Rig(_)
+            | Change::Plan(_)
+            | Change::Walk(_)
+            | Change::WalkPlan(_)
+            | Change::Sim(_)
+            | Change::SimFit(_) => return,
         };
         let at_sample = self.session.as_ref().map_or(0, |r| {
             r.fanout.latest.load(std::sync::atomic::Ordering::Acquire)
