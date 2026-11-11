@@ -327,7 +327,7 @@ impl AsioDriver for Scripted {
     fn internal_buffering(&self) -> Option<(u32, u32)> {
         *self.internal.lock().expect("scripted state")
     }
-    fn create_buffers(
+    unsafe fn create_buffers(
         &self,
         channels: &[(bool, u16)],
         frames: u32,

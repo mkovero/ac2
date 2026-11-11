@@ -265,7 +265,15 @@ pub(crate) trait AsioDriver: Send + Sync {
     fn can_report_overload(&self) -> bool;
     /// `createBuffers` for `channels` (input?, index) in order, with this backend's
     /// callbacks; the two halves of each channel's buffer, in the same order.
-    fn create_buffers(
+    ///
+    /// # Safety
+    ///
+    /// Implementations return, on `Ok`, halves that each hold `frames` samples of the
+    /// channel's reported sample type and stay valid until [`Self::dispose_buffers`]. The
+    /// caller must have no switch using them by then: the callbacks' slot is cleared
+    /// before `dispose_buffers` is called.
+    #[allow(unsafe_code)]
+    unsafe fn create_buffers(
         &self,
         channels: &[(bool, u16)],
         frames: u32,
@@ -532,8 +540,10 @@ pub(crate) fn open_stream(
     }
 
     let plumbing = Plumbing::new(&mut request, rate, frames as usize);
-    let bufs = drv
-        .create_buffers(&wanted, frames)
+    // SAFETY: the buffers are reached only through the engine, which `AsioGuard` detaches
+    // from the slot before it calls `dispose_buffers`.
+    #[allow(unsafe_code)]
+    let bufs = unsafe { drv.create_buffers(&wanted, frames) }
         .map_err(|e| refusal(&id.0, Step::CreateBuffers, e))?;
     if bufs.len() != wanted.len() {
         let _ = drv.dispose_buffers();
@@ -546,10 +556,7 @@ pub(crate) fn open_stream(
             ),
         ));
     }
-    let channel = |i: usize| Channel {
-        bufs: bufs[i],
-        format: formats[i],
-    };
+    let channel = |i: usize| Channel::new(bufs[i], formats[i]);
     let by_device: BTreeMap<u16, usize> = device_inputs
         .iter()
         .enumerate()
@@ -574,7 +581,11 @@ pub(crate) fn open_stream(
         .map(|c| c.name);
 
     let events = Arc::clone(&plumbing.events);
-    let engine = Arc::new(Engine::new(
+    // SAFETY: `bufs` are the driver's halves of `frames` samples in each channel's format
+    // (checked against `wanted` above), valid until `dispose_buffers`; the guard calls that
+    // only after the slot no longer reaches this engine.
+    #[allow(unsafe_code)]
+    let rt = unsafe {
         Rt::new(
             inputs,
             outputs,
@@ -584,7 +595,10 @@ pub(crate) fn open_stream(
             rate,
             Arc::clone(&events),
             drv.rt(),
-        ),
+        )
+    };
+    let engine = Arc::new(Engine::new(
+        rt,
         Arc::clone(&events),
         Arc::clone(&plumbing.output.shared),
     ));
@@ -673,12 +687,14 @@ impl AsioGuard {
 
     /// Attaches the callbacks to the engine and starts the driver, listed as `id`.
     fn start(&mut self, id: &str) -> Result<(), AudioError> {
-        self.slot
-            .install(&self.engine)
-            .map_err(|SlotBusy| AudioError::Unavailable {
-                backend: BackendKind::Asio,
-                reason: Unavailability::AsioDriverInUse { driver: id.into() },
-            })?;
+        // SAFETY: the guard holds the engine's `Arc` until its own `Drop`, which clears the
+        // slot with this engine (`attached`) before the field drops release the `Arc`.
+        #[allow(unsafe_code)]
+        let installed = unsafe { self.slot.install(&self.engine) };
+        installed.map_err(|SlotBusy| AudioError::Unavailable {
+            backend: BackendKind::Asio,
+            reason: Unavailability::AsioDriverInUse { driver: id.into() },
+        })?;
         self.attached = true;
         self.drv.start().map_err(|e| refusal(id, Step::Start, e))?;
         self.engine.started();

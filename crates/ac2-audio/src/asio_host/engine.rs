@@ -38,8 +38,15 @@ pub(crate) struct TimeInfo {
 /// One channel's double buffer and its format.
 #[derive(Debug)]
 pub(crate) struct Channel {
-    pub(crate) bufs: [*mut u8; 2],
+    /// Read only by the switch; [`Rt::new`] carries the promise that they are valid.
+    bufs: [*mut u8; 2],
     pub(crate) format: Format,
+}
+
+impl Channel {
+    pub(crate) fn new(bufs: [*mut u8; 2], format: Format) -> Self {
+        Self { bufs, format }
+    }
 }
 
 /// Lifecycle of a stream as the callbacks see it.
@@ -63,8 +70,14 @@ pub(crate) struct Rt {
 }
 
 impl Rt {
+    /// # Safety
+    ///
+    /// Each half of every channel's buffer in `inputs` and `outputs` must hold `frames`
+    /// samples of that channel's format, and stay valid for reads and writes, untouched by
+    /// anything but the switch, for as long as an [`Engine`] holding this `Rt` can be
+    /// reached through a [`Slot`].
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
+    pub(crate) unsafe fn new(
         inputs: Vec<Channel>,
         outputs: Vec<Channel>,
         frames: u32,
@@ -109,8 +122,13 @@ pub(crate) struct Engine {
 }
 
 // SAFETY: `rt` holds raw pointers into the driver's buffers and is only touched by the one
-// thread holding `busy`; everything else is atomics. The driver's buffers live until
-// `disposeBuffers`, which the stream guard calls only after the slot is cleared.
+// thread holding `busy`; everything else is atomics or `Send + Sync` handles. The other
+// fields of `Rt` (the block producer, the output renderer, the boxed `RtDriver`, the clock,
+// latch and load timer) are each `Send` on their own, so moving `rt` to the driver's thread
+// adds nothing the pointers do not. The driver's buffers live until `disposeBuffers`,
+// which the stream guard calls only after the slot is cleared. Dropping the engine drops
+// `rt` without taking `busy`; that is sound because the last reference goes only after
+// `Slot::clear` returned, so no switch is inside.
 unsafe impl Send for Engine {}
 unsafe impl Sync for Engine {}
 
@@ -374,10 +392,15 @@ impl Slot {
         }
     }
 
-    /// Points the callbacks at `engine`, which must stay alive until [`Self::clear`]
-    /// returns. Refused while another engine is installed: the callbacks are one per
-    /// process, so a second stream would take over the first one's driver thread.
-    pub(crate) fn install(&self, engine: &Engine) -> Result<(), SlotBusy> {
+    /// Points the callbacks at `engine`. Refused while another engine is installed: the
+    /// callbacks are one per process, so a second stream would take over the first one's
+    /// driver thread.
+    ///
+    /// # Safety
+    ///
+    /// On `Ok`, `engine` must stay alive, at the same address, until [`Self::clear`] has
+    /// been called with it and has returned.
+    pub(crate) unsafe fn install(&self, engine: &Engine) -> Result<(), SlotBusy> {
         self.engine
             .compare_exchange(
                 std::ptr::null_mut(),
@@ -417,8 +440,9 @@ impl Slot {
         self.users.fetch_add(1, Ordering::SeqCst);
         let p = self.engine.load(Ordering::SeqCst);
         // SAFETY: `clear` nulls the pointer before it waits for `users` to reach zero, and
-        // the engine outlives `clear`; a non-null pointer read while counted as a user is
-        // therefore alive for the whole call.
+        // `install`'s contract keeps the engine alive until that `clear` returns; a
+        // non-null pointer read while counted as a user is therefore alive for the whole
+        // call.
         let r = f(unsafe { p.as_ref() });
         self.users.fetch_sub(1, Ordering::SeqCst);
         r

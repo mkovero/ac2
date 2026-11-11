@@ -256,7 +256,8 @@ impl AsioDriver for AzoDriver {
         ))
     }
 
-    fn create_buffers(
+    #[allow(unsafe_code)]
+    unsafe fn create_buffers(
         &self,
         channels: &[(bool, u16)],
         frames: u32,
@@ -269,9 +270,10 @@ impl AsioDriver for AzoDriver {
             })
             .collect();
         let frames = c_long::try_from(frames).map_err(|e| DriverError::text(e.to_string()))?;
-        // SAFETY: CALLBACKS is static; the stream guard disposes the buffers before the
-        // stream's pointers into them are dropped.
-        #[allow(unsafe_code)]
+        // SAFETY: CALLBACKS is an immutable static, so the table outlives any driver. The
+        // buffer pointers are used only by a switch reaching them through the slot, and this
+        // method's own contract has the caller clear the slot before `dispose_buffers`. The
+        // pointers and their size are the driver's word: azo does not check them.
         let bufs = unsafe { self.proxy.create_buffers(ids, frames, &raw const CALLBACKS) };
         bufs.map(|it| it.map(|[a, b]| [a.cast::<u8>(), b.cast::<u8>()]).collect())
             .map_err(|e| self.error(e))
