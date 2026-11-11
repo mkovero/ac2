@@ -24,11 +24,11 @@ pub(crate) struct RigList {
 impl AppState {
     /// Reads each connected rig not shown's part of the list; none with one rig.
     pub(super) fn refresh_rig_lists(&mut self) {
-        if self.visiting.is_some() {
+        if self.others.visiting.is_some() {
             return;
         }
         if !self.many_rigs() {
-            self.rig_lists.clear();
+            self.others.rig_lists.clear();
             return;
         }
         let shown = self.rig.id;
@@ -45,7 +45,7 @@ impl AppState {
                 v.push(l);
             }
         }
-        self.rig_lists = v;
+        self.others.rig_lists = v;
     }
 
     /// The rig in `rig`'s part of the list: its rows (no row marked: the keys act on the
@@ -75,11 +75,11 @@ impl AppState {
         let mut v = Vec::new();
         for r in self.rigs_in_order() {
             let rows = if r.id == shown {
-                if self.rig_lists.is_empty() && r.daemon().is_none() {
+                if self.others.rig_lists.is_empty() && r.daemon().is_none() {
                     continue;
                 }
                 self.tree_rows()
-            } else if let Some(l) = self.rig_lists.iter().find(|l| l.rig == r.id) {
+            } else if let Some(l) = self.others.rig_lists.iter().find(|l| l.rig == r.id) {
                 l.rows.clone()
             } else {
                 continue;
@@ -117,7 +117,8 @@ impl AppState {
 
     /// Another rig's row as a drop, from its list as last read.
     pub(super) fn other_row_drop(&self, rig: RigId, key: TreeKey) -> Option<RowDrop> {
-        self.rig_lists
+        self.others
+            .rig_lists
             .iter()
             .find(|l| l.rig == rig)?
             .drops
@@ -142,7 +143,7 @@ impl AppState {
             }
             return;
         }
-        if self.visiting.is_some() {
+        if self.others.visiting.is_some() {
             return;
         }
         self.forget_pane_waits(p);
@@ -165,7 +166,7 @@ impl AppState {
     /// Pane `p` meters inputs or a pair `m` of rig `r`, a rig not shown: a Programme pane set
     /// on that rig, on its meters.
     pub(super) fn pane_meter_from(&mut self, p: PaneId, r: RigId, m: Metered) {
-        if self.visiting.is_some() || self.find_rig(r).is_none() {
+        if self.others.visiting.is_some() || self.find_rig(r).is_none() {
             return;
         }
         self.forget_pane_waits(p);
@@ -185,22 +186,22 @@ impl AppState {
 
     /// Pane `p` was given something else: no rig's remembered measurement waits for it.
     fn forget_pane_waits(&mut self, p: PaneId) {
-        for r in std::iter::once(&mut self.rig).chain(&mut self.background) {
+        for r in std::iter::once(&mut self.rig).chain(&mut self.others.background) {
             r.pending.pane_meas.remove(&p);
             r.pending.deleted.remove(&p);
             r.pending.with_names.remove(&p);
         }
-        for w in self.rig_pending.values_mut() {
+        for w in self.others.rig_pending.values_mut() {
             w.remove(&p);
         }
-        self.rig_pending.retain(|_, w| !w.is_empty());
+        self.others.rig_pending.retain(|_, w| !w.is_empty());
     }
 
     /// Between messages: a pane pinned to the rig shown is its own pane (a rig remembered
     /// with its panes, shown before it said hello), and measurement names waiting for a rig
     /// go to it once it is held under that id.
     pub(super) fn settle_pins(&mut self) {
-        if self.visiting.is_some() {
+        if self.others.visiting.is_some() {
             return;
         }
         let shown = PaneRig::Rig(self.rig.id);
@@ -215,11 +216,11 @@ impl AppState {
             unpin(&mut self.layout);
             self.history.layouts_mut(unpin);
         }
-        if self.rig_pending.is_empty() {
+        if self.others.rig_pending.is_empty() {
             return;
         }
-        for r in std::iter::once(&mut self.rig).chain(&mut self.background) {
-            if let Some(w) = self.rig_pending.remove(&r.id) {
+        for r in std::iter::once(&mut self.rig).chain(&mut self.others.background) {
+            if let Some(w) = self.others.rig_pending.remove(&r.id) {
                 r.pending.pane_meas.extend(w);
             }
         }
@@ -243,7 +244,11 @@ impl AppState {
             }
         }
         if !waiting.is_empty() {
-            self.rig_pending.entry(r.id).or_default().extend(waiting);
+            self.others
+                .rig_pending
+                .entry(r.id)
+                .or_default()
+                .extend(waiting);
         }
     }
 
@@ -262,6 +267,7 @@ impl AppState {
         let rig = self.pane_rig(v);
         let Some(r) = self.find_rig(rig) else {
             return self
+                .others
                 .rig_pending
                 .get(&rig)
                 .and_then(|w| w.get(&id))

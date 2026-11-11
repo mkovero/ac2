@@ -359,7 +359,7 @@ impl AppState {
             .layout
             .view(f)
             .is_some_and(|v| !v.has_content() && self.ours(v));
-        if empty && !waits && self.visiting.is_none() {
+        if empty && !waits && self.others.visiting.is_none() {
             return Some(f);
         }
         let new = self.split_focused_pane()?;

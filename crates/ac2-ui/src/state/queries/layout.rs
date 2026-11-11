@@ -161,7 +161,7 @@ impl AppState {
         });
         // The hidden ones are the rig shown's: while another rig's message is handled, as
         // they were.
-        let hidden = match self.visiting {
+        let hidden = match self.others.visiting {
             Some(_) => self.prefs.layout.hidden.clone(),
             None => self.remembered_names(&self.rig.hidden_meas, &self.rig.pending.hidden),
         };
@@ -328,7 +328,7 @@ impl AppState {
         self.view.spl.layout = prefs.leq;
         let l = &prefs.layout;
         self.rig.pending.pane_meas.clear();
-        self.rig_pending.clear();
+        self.others.rig_pending.clear();
         // Stored ids may name other content here: no pick carries over.
         self.peak_points.clear();
         self.pane_levels.clear();
@@ -374,7 +374,10 @@ impl AppState {
                         .iter()
                         .chain(v.curves.iter().filter_map(|c| c.rig.as_ref()))
                     {
-                        self.rig_names.entry(*r).or_insert_with(|| name.clone());
+                        self.others
+                            .rig_names
+                            .entry(*r)
+                            .or_insert_with(|| name.clone());
                     }
                     let named: Vec<(Pick, String)> = v
                         .curves
@@ -391,7 +394,8 @@ impl AppState {
                         // A pinned pane's measurement waits for its rig, held now or not.
                         match &v.rig {
                             Some((r, _)) => {
-                                self.rig_pending
+                                self.others
+                                    .rig_pending
                                     .entry(*r)
                                     .or_default()
                                     .insert(v.id, n.clone());

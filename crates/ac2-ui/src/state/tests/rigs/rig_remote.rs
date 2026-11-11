@@ -59,7 +59,7 @@ fn paired_ready() -> T {
         pair: None,
     }];
     to(&mut t, PUPU, mirror(s));
-    if let Some(b) = t.st.background.iter_mut().find(|r| r.id == PUPU) {
+    if let Some(b) = t.st.others.background.iter_mut().find(|r| r.id == PUPU) {
         b.daemon_addr = Some("192.168.9.27".into());
     }
     t.conn(server(network(KEY_A, Vec::new())));

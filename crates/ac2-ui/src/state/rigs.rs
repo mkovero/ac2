@@ -19,15 +19,62 @@ pub(crate) struct Visit {
     window_rig: Option<RigId>,
 }
 
+/// The rigs this app holds besides the shown one, and what holding several takes: whose
+/// turn a message is, the links to close, the names and panes of rigs not held now.
+#[derive(Debug)]
+pub(crate) struct OtherRigs {
+    /// The rigs this app holds besides the active one, each with its own link.
+    pub(super) background: Vec<RigState>,
+    /// While a message for a rig in the background is handled, that rig is swapped in as
+    /// `rig` and this is the shown rig's id ([`AppState::visit`]).
+    pub(super) visiting: Option<RigId>,
+    /// Requests for another rig than the one a message is handled for (pairing two rigs
+    /// asks both): [`AppState::update`] sends them on that rig's link.
+    pub(super) elsewhere: Vec<(RigId, Request)>,
+    /// Set by a switch during [`AppState::update`]: how many of the requests made so far
+    /// were the rig shown before. Those after it are the newly shown rig's, for its link.
+    switched_at: Option<usize>,
+    /// The slot the next rig added takes.
+    next_slot: u32,
+    /// Rigs closed, whose links the app closes (stopping the stimulus they hold first).
+    pub(crate) closing: Vec<RigState>,
+    /// The names of rigs closed in this run: their panes stay, saying which rig they were.
+    pub(super) rig_names: BTreeMap<RigId, String>,
+    /// Pane measurements by name waiting for a rig this app does not hold (a pane pinned to
+    /// it in the layout prefs, or a rig closed): the rig takes them once it is held again
+    /// under that id, wherever it is reached.
+    pub(super) rig_pending: BTreeMap<RigId, BTreeMap<PaneId, String>>,
+    /// The measurement list's part of each connected rig not shown, read with that rig
+    /// swapped in after each message ([`AppState::refresh_rig_lists`]).
+    pub(super) rig_lists: Vec<cross_rig::RigList>,
+}
+
+impl Default for OtherRigs {
+    fn default() -> Self {
+        Self {
+            background: Vec::new(),
+            visiting: None,
+            elsewhere: Vec::new(),
+            switched_at: None,
+            // The shown rig is in slot 0.
+            next_slot: 1,
+            closing: Vec::new(),
+            rig_names: BTreeMap::new(),
+            rig_pending: BTreeMap::new(),
+            rig_lists: Vec::new(),
+        }
+    }
+}
+
 impl AppState {
     /// The rig shown (the drop-down's): the one keys and windows act on.
     pub fn active(&self) -> RigId {
-        self.visiting.unwrap_or(self.rig.id)
+        self.others.visiting.unwrap_or(self.rig.id)
     }
 
     /// Every rig this app holds, the shown one first.
     pub fn rigs(&self) -> impl Iterator<Item = &RigState> {
-        std::iter::once(&self.rig).chain(&self.background)
+        std::iter::once(&self.rig).chain(&self.others.background)
     }
 
     /// The rigs in the order they were added (the drop-down's).
@@ -50,7 +97,7 @@ impl AppState {
     /// The rig in slot `slot`, to change.
     pub fn rig_in_slot_mut(&mut self, slot: u32) -> Option<&mut RigState> {
         std::iter::once(&mut self.rig)
-            .chain(&mut self.background)
+            .chain(&mut self.others.background)
             .find(|r| r.slot == slot)
     }
 
@@ -64,7 +111,7 @@ impl AppState {
     pub fn rig_name(&self, id: RigId) -> String {
         match self.find_rig(id) {
             Some(r) => self.rig_label(r),
-            None => self.rig_names.get(&id).cloned().unwrap_or_default(),
+            None => self.others.rig_names.get(&id).cloned().unwrap_or_default(),
         }
     }
 
@@ -117,7 +164,7 @@ impl AppState {
 
     /// More than one rig: the stimulus and the top bar name the rig.
     pub fn many_rigs(&self) -> bool {
-        !self.background.is_empty()
+        !self.others.background.is_empty()
     }
 
     /// Adds a rig reached through `target` (its link the app's to make): its slot. A rig
@@ -129,21 +176,22 @@ impl AppState {
         known: Option<(RigId, String)>,
         addr: Option<crate::prefs::RigAddr>,
     ) -> u32 {
-        let slot = self.next_slot;
-        self.next_slot += 1;
+        let slot = self.others.next_slot;
+        self.others.next_slot += 1;
         let mut r = RigState::in_slot(slot, target);
         if let Some((id, name)) = known.filter(|(id, _)| self.find_rig(*id).is_none()) {
             r.id = id;
             r.name = name;
         }
         r.addr = addr;
-        self.background.push(r);
+        self.others.background.push(r);
         slot
     }
 
     /// Drops the rig in slot `slot` that never got a link (its connect failed).
     pub fn forget_rig(&mut self, slot: u32) {
-        self.background
+        self.others
+            .background
             .retain(|r| r.slot != slot || r.link.is_some());
     }
 
@@ -168,7 +216,7 @@ impl AppState {
     /// What a pane given content now is set on: the shown rig, or the one in `rig` while a
     /// message for it is handled.
     pub(super) fn here(&self) -> PaneRig {
-        match self.visiting {
+        match self.others.visiting {
             Some(_) => PaneRig::Rig(self.rig.id),
             None => PaneRig::Active,
         }
@@ -200,17 +248,17 @@ impl AppState {
     }
 
     pub(crate) fn enter(&mut self, id: RigId) -> Option<Visit> {
-        if self.visiting.is_some() {
+        if self.others.visiting.is_some() {
             return None;
         }
-        let index = self.background.iter().position(|r| r.id == id)?;
+        let index = self.others.background.iter().position(|r| r.id == id)?;
         let tab = self.rig.id;
-        std::mem::swap(&mut self.rig, &mut self.background[index]);
+        std::mem::swap(&mut self.rig, &mut self.others.background[index]);
         std::mem::swap(
             &mut self.view.tf.phase_reference,
             &mut self.rig.phase_reference,
         );
-        self.visiting = Some(tab);
+        self.others.visiting = Some(tab);
         Some(Visit {
             index,
             overlay: std::mem::take(&mut self.overlay),
@@ -228,14 +276,15 @@ impl AppState {
             &mut self.view.tf.phase_reference,
             &mut self.rig.phase_reference,
         );
-        std::mem::swap(&mut self.rig, &mut self.background[v.index]);
-        self.visiting = None;
+        std::mem::swap(&mut self.rig, &mut self.others.background[v.index]);
+        self.others.visiting = None;
         opened
     }
 
     /// The prefix of a notification about the rig in `rig` while another is shown.
     pub(super) fn notice_prefix(&self) -> Option<String> {
-        self.visiting
+        self.others
+            .visiting
             .map(|_| format!("{}: ", self.rig_label(&self.rig)))
     }
 
@@ -302,11 +351,11 @@ impl AppState {
         };
         let mut out: Vec<(u32, Request)> = Vec::new();
         if to == self.rig.id {
-            self.switched_at = None;
+            self.others.switched_at = None;
             let reqs = self.update_active(msg, keymap);
             // A switch midway: what follows it (the meters, the device list, the layout
             // of the rig now shown) is the new rig's, not the one the message was for.
-            let (at, shown) = match self.switched_at.take() {
+            let (at, shown) = match self.others.switched_at.take() {
                 Some(at) => (at, self.rig.slot),
                 None => (reqs.len(), slot),
             };
@@ -354,7 +403,7 @@ impl AppState {
             .filter_map(|(s, q)| self.rig_in_slot(s).map(|r| (r.id, q)))
             .collect();
         out.extend(
-            std::mem::take(&mut self.elsewhere)
+            std::mem::take(&mut self.others.elsewhere)
                 .into_iter()
                 .filter(|(r, _)| self.find_rig(*r).is_some()),
         );
@@ -405,14 +454,14 @@ impl AppState {
             .map(|r| r.slot)
             .collect();
         for slot in dups {
-            let Some(i) = self.background.iter().position(|r| r.slot == slot) else {
+            let Some(i) = self.others.background.iter().position(|r| r.slot == slot) else {
                 continue;
             };
-            let r = self.background.remove(i);
+            let r = self.others.background.remove(i);
             self.warn(ac2_scene::chrome::rig_already_connected(
                 &self.rig_label(&r),
             ));
-            self.closing.push(r);
+            self.others.closing.push(r);
         }
     }
 
@@ -421,14 +470,14 @@ impl AppState {
     /// named by it. Refused while a window is open: the window acts on the rig it opened
     /// on.
     pub(super) fn switch_rig(&mut self, to: RigId, out: &mut Vec<Request>) {
-        if self.visiting.is_some() || to == self.rig.id {
+        if self.others.visiting.is_some() || to == self.rig.id {
             return;
         }
         if !matches!(self.overlay, Overlay::None | Overlay::RigMenu(_)) {
             self.warn(ac2_scene::chrome::RIG_SWITCH_WINDOW_OPEN);
             return;
         }
-        let Some(i) = self.background.iter().position(|r| r.id == to) else {
+        let Some(i) = self.others.background.iter().position(|r| r.id == to) else {
             return;
         };
         self.overlay = Overlay::None;
@@ -452,9 +501,9 @@ impl AppState {
             &mut self.view.tf.phase_reference,
             &mut self.rig.phase_reference,
         );
-        std::mem::swap(&mut self.rig, &mut self.background[i]);
+        std::mem::swap(&mut self.rig, &mut self.others.background[i]);
         self.view.tf.phase_reference = self.rig.phase_reference.take();
-        self.switched_at = Some(out.len());
+        self.others.switched_at = Some(out.len());
         let unpin = |l: &mut Layout| {
             for v in l.views.values_mut() {
                 if v.rig == PaneRig::Rig(to) {
@@ -471,7 +520,7 @@ impl AppState {
     /// it goes ([`crate::conn::Conn::close`]); its panes stay, saying it is not connected.
     /// The last rig is never closed: the app always shows one.
     pub(super) fn close_rig(&mut self, id: RigId, out: &mut Vec<Request>) {
-        if !self.many_rigs() || self.visiting.is_some() {
+        if !self.many_rigs() || self.others.visiting.is_some() {
             return;
         }
         if id == self.rig.id {
@@ -484,18 +533,18 @@ impl AppState {
                 return;
             }
         }
-        let Some(i) = self.background.iter().position(|r| r.id == id) else {
+        let Some(i) = self.others.background.iter().position(|r| r.id == id) else {
             return;
         };
-        let r = self.background.remove(i);
+        let r = self.others.background.remove(i);
         self.park_closed_rig(&r);
         let name = self.rig_label(&r);
-        self.rig_names.insert(id, name.clone());
+        self.others.rig_names.insert(id, name.clone());
         let before = self.prefs.rigs.len();
         self.prefs.rigs.retain(|p| p.id != id);
         self.prefs_dirty |= self.prefs.rigs.len() != before;
         self.toast(ac2_scene::chrome::rig_closed(&name));
-        self.closing.push(r);
+        self.others.closing.push(r);
     }
 
     /// The rows of the rigs drop-down: every rig in the order added, Connect…, and closing
@@ -576,7 +625,7 @@ impl AppState {
     /// The rig in `rig` said hello with `id`: a rig already held is not taken twice.
     pub(super) fn is_duplicate(&self, id: RigId) -> bool {
         self.rigs()
-            .chain(self.closing.iter())
+            .chain(self.others.closing.iter())
             .any(|r| r.slot != self.rig.slot && r.id == id && !r.duplicate)
     }
 

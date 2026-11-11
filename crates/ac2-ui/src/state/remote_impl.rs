@@ -250,7 +250,7 @@ impl AppState {
     /// why they cannot be taken.
     pub fn remote_pick_lines(&self) -> Vec<PickLine> {
         let text = |text: String, problem| PickLine::Text { text, problem };
-        if self.background.is_empty() {
+        if self.others.background.is_empty() {
             return vec![text(words::NO_OTHER_RIG.into(), false)];
         }
         let Some(open) = self.open_session() else {
@@ -298,8 +298,9 @@ impl AppState {
         s.remote.pick = Some(RemotePick::default());
         s.remote.confirm = None;
         out.push(Request::ServerInfo);
-        let others: Vec<RigId> = self.background.iter().map(|r| r.id).collect();
-        self.elsewhere
+        let others: Vec<RigId> = self.others.background.iter().map(|r| r.id).collect();
+        self.others
+            .elsewhere
             .extend(others.into_iter().map(|r| (r, Request::ServerInfo)));
     }
 
@@ -412,7 +413,7 @@ impl AppState {
             Ok(k) => k,
             Err(e) => return self.pick_error(e),
         };
-        let Some(b) = self.background.iter().find(|r| r.id == rig) else {
+        let Some(b) = self.others.background.iter().find(|r| r.id == rig) else {
             return self.pick_error("that rig is no longer held by the app".into());
         };
         let src = match self.source(b) {
@@ -455,7 +456,7 @@ impl AppState {
             key: src.key,
         });
         let me = self.rig_label(&self.rig);
-        self.elsewhere.push((
+        self.others.elsewhere.push((
             src.id,
             Request::Call {
                 cmd: Command::AuthAdmitRig {

@@ -79,6 +79,7 @@ pub use leq::strip::{LeqSpan, STRIP_MIN_S, StripMsg};
 pub use panes::pane_export::{PaneExport, pane_export_name};
 use rig::Folding;
 pub use rig::{FoldedAt, NextFrame, RigState, UNKNOWN_RIG};
+use rigs::OtherRigs;
 mod link;
 use link::Pending;
 use panes::meas_layout::LayoutQueue;
@@ -178,30 +179,8 @@ pub struct AppState {
     /// The rig shown (the active tab): the reducer's keys and windows act on it. Held by
     /// value so a method can borrow its fields beside the app's, as with any field.
     pub rig: RigState,
-    /// The rigs this app holds besides the active one, each with its own link.
-    pub background: Vec<RigState>,
-    /// While a message for a rig in the background is handled, that rig is swapped in as
-    /// `rig` and this is the shown rig's id ([`AppState::visit`]).
-    visiting: Option<RigId>,
-    /// Requests for another rig than the one a message is handled for (pairing two rigs
-    /// asks both): [`AppState::update`] sends them on that rig's link.
-    pub(crate) elsewhere: Vec<(RigId, Request)>,
-    /// Set by a switch during [`AppState::update`]: how many of the requests made so far
-    /// were the rig shown before. Those after it are the newly shown rig's, for its link.
-    switched_at: Option<usize>,
-    /// The slot the next rig added takes.
-    next_slot: u32,
-    /// Rigs closed, whose links the app closes (stopping the stimulus they hold first).
-    pub closing: Vec<RigState>,
-    /// The names of rigs closed in this run: their panes stay, saying which rig they were.
-    pub(crate) rig_names: BTreeMap<RigId, String>,
-    /// Pane measurements by name waiting for a rig this app does not hold (a pane pinned to
-    /// it in the layout prefs, or a rig closed): the rig takes them once it is held again
-    /// under that id, wherever it is reached.
-    pub(crate) rig_pending: BTreeMap<RigId, BTreeMap<PaneId, String>>,
-    /// The measurement list's part of each connected rig not shown, read with that rig
-    /// swapped in after each message ([`AppState::refresh_rig_lists`]).
-    pub(crate) rig_lists: Vec<cross_rig::RigList>,
+    /// The rigs held besides the shown one, each with its own link, and their bookkeeping.
+    pub(crate) others: OtherRigs,
     pub theme: ThemeName,
     /// What the scene builders get; `view.freq` follows `nav`.
     pub view: ViewState,
@@ -343,14 +322,7 @@ impl AppState {
     pub fn new(theme: ThemeName, target: String) -> Self {
         Self {
             rig: RigState::new(target),
-            background: Vec::new(),
-            visiting: None,
-            elsewhere: Vec::new(),
-            switched_at: None,
-            next_slot: 1,
-            closing: Vec::new(),
-            rig_names: BTreeMap::new(),
-            rig_pending: BTreeMap::new(),
+            others: OtherRigs::default(),
             leq_panes: LeqPanes::default(),
             theme,
             view: ViewState::default(),
@@ -395,7 +367,6 @@ impl AppState {
             level_set: BTreeSet::new(),
             keys: Keymap::default(),
             row_drag: None,
-            rig_lists: Vec::new(),
             history: undo::History::default(),
             undoing: false,
             ran_command: None,

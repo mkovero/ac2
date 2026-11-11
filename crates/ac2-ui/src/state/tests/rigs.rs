@@ -146,9 +146,9 @@ fn each_rig_is_named_by_its_hello() {
 fn selection_and_choices_stay_with_their_rig() {
     let mut t = two_rigs();
     to(&mut t, PUPU, mirror(with_spl()));
-    t.st.background[0].selected = Some(MeasId(4));
-    t.st.background[0].hidden_meas.insert(MeasId(2));
-    t.st.background[0]
+    t.st.others.background[0].selected = Some(MeasId(4));
+    t.st.others.background[0].hidden_meas.insert(MeasId(2));
+    t.st.others.background[0]
         .edits
         .insert(MeasId(1), LiveEdit { inverted: true });
     assert_eq!(t.st.rig.selected, Some(MeasId(1)));
@@ -502,7 +502,8 @@ fn a_pane_key_goes_to_the_panes_rig() {
 fn stop_anywhere_stops_every_rig() {
     let mut t = two_mirrored();
     t.st.rig.stimulus.phase = StimPhase::Armed;
-    t.st.background
+    t.st.others
+        .background
         .iter_mut()
         .for_each(|r| r.stimulus.phase = StimPhase::Firing);
     let live: Vec<String> = t.st.live_elsewhere().into_iter().map(|e| e.rig).collect();
@@ -534,8 +535,8 @@ fn closing_a_rig() {
     pick(&mut t, RigRow::Close(RIG));
     assert_eq!(t.st.active(), PUPU);
     assert!(t.st.find_rig(RIG).is_none());
-    assert_eq!(t.st.closing.len(), 1);
-    assert_eq!(t.st.closing[0].id, RIG);
+    assert_eq!(t.st.others.closing.len(), 1);
+    assert_eq!(t.st.others.closing[0].id, RIG);
     assert!(t.st.prefs.rigs.is_empty());
     assert_eq!(t.st.layout.view(p).expect("pane").rig, PaneRig::Rig(RIG));
     let name = t.st.rig_name(RIG);
@@ -567,7 +568,7 @@ fn a_rig_already_held_is_not_added_twice() {
         },
     );
     assert_eq!(t.st.rigs().count(), 2);
-    assert_eq!(t.st.closing.len(), 1);
+    assert_eq!(t.st.others.closing.len(), 1);
 }
 
 /// A rig connected where it was reached is remembered for the next start, by its id.
@@ -865,7 +866,7 @@ fn a_closed_rig_back_shows_its_panes_again() {
     assert_eq!((v.rig, v.meas), (PaneRig::Rig(PUPU), None));
     assert!(t.st.pane_title(p).starts_with("pupu · "));
     // The app has closed its link meanwhile.
-    t.st.closing.clear();
+    t.st.others.closing.clear();
     let slot = t.st.add_rig("10.0.0.9".into(), None, None);
     to(
         &mut t,

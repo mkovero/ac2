@@ -677,7 +677,7 @@ impl App {
     /// stops the stimulus it holds and releases its lease (within [`crate::conn::QUIT_GRACE`])
     /// while the window goes on. An `ac2d` the app owns for the rig stops after its link.
     fn close_rigs(&mut self) {
-        for mut r in std::mem::take(&mut self.state.closing) {
+        for mut r in std::mem::take(&mut self.state.others.closing) {
             let daemon = self.daemons.release(r.slot);
             let link = r.link.take();
             self.closers.push(std::thread::spawn(move || {

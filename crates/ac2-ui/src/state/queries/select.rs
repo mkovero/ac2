@@ -486,8 +486,8 @@ impl AppState {
     /// step to (a folded rig lists none), from its list as last read; None when no other rig
     /// has one or a switch could not happen now.
     fn other_rig_stop(&self, d: i32) -> Option<(RigId, ac2_scene::meas_list::TreeKey)> {
-        if self.rig_lists.is_empty()
-            || self.visiting.is_some()
+        if self.others.rig_lists.is_empty()
+            || self.others.visiting.is_some()
             || !matches!(self.overlay, Overlay::None | Overlay::RigMenu(_))
         {
             return None;
@@ -500,7 +500,7 @@ impl AppState {
             if self.rig_folded(r) {
                 return None;
             }
-            let rows = &self.rig_lists.iter().find(|l| l.rig == r)?.rows;
+            let rows = &self.others.rig_lists.iter().find(|l| l.rig == r)?.rows;
             let mut keys = rows.iter().map(|row| row.key).filter(|k| !k.is_heading());
             let key = if d > 0 { keys.next() } else { keys.next_back() }?;
             Some((r, key))

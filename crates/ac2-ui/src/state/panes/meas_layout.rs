@@ -91,7 +91,7 @@ impl AppState {
                 let refs = WireRigs {
                     this: self.rig.id,
                     pane: self.pane_rig(&v),
-                    names: &self.rig_names,
+                    names: &self.others.rig_names,
                 };
                 PaneLayout::Pane {
                     pane: Box::new(wire_pane(&v, self.operator_levels(*id), &refs)),
@@ -523,7 +523,10 @@ impl AppState {
                 let id = self.layout.fresh_id();
                 for r in pane.content.rigs() {
                     if let wire::RigRef::Rig { id: r, name } = r {
-                        self.rig_names.entry(*r).or_insert_with(|| name.clone());
+                        self.others
+                            .rig_names
+                            .entry(*r)
+                            .or_insert_with(|| name.clone());
                     }
                 }
                 views.insert(id, ui_view(pane, self.rig.id));
