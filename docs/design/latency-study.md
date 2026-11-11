@@ -516,3 +516,11 @@ shows:
 | SPL age p50 / p95 / max | 0.7 / 1.0 / 2.4 ms | 0.4 / 0.9 / 3.8 ms |
 | ac2d-fanout | 2.5 %, 66 wakes/s | 2.8 %, 63 wakes/s |
 | ac2d total | 10.0 % | 10.6 % |
+
+The thread named `ac2d-control` that wakes 375 times a second is JACK's process thread, not
+the daemon's control loop: libjack creates its threads (the real-time process thread, and one
+reading the server's socket) when the stream opens, which happens on the control thread, and
+a new Linux thread inherits its creator's name. They appear at the session open, after the
+control thread; the busy one sleeps on a futex between cycles (JACK2's per-cycle wake), the
+others idle (one in a Unix socket read), and on pupu it runs SCHED_FIFO (`top -H`: priority −76). The
+daemon's own control thread woke 4 times a second here. Nothing to change.
