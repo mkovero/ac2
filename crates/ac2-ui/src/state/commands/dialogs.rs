@@ -45,7 +45,7 @@ impl AppState {
                             cmd: self.meas_update(meas, config),
                         },
                         None => {
-                            self.rig.pane_on_create = Some(config.name.clone());
+                            self.rig.due.pane_on_create = Some(config.name.clone());
                             Request::CreateMeas { config }
                         }
                     };
@@ -106,14 +106,16 @@ impl AppState {
             },
             None => {
                 if transfer {
-                    self.rig.stack_on_create = Some(config.name.clone());
+                    self.rig.due.stack_on_create = Some(config.name.clone());
                 } else if matches!(&config.kind, MeasKind::Math { config: m } if matches!(m.expr, ac2_proto::model::MathExpr::Align { .. }))
                 {
-                    self.rig.split_on_create = Some((config.name.clone(), TransferView::Alignment));
+                    self.rig.due.split_on_create =
+                        Some((config.name.clone(), TransferView::Alignment));
                 } else if own_pane {
-                    self.rig.split_on_create = Some((config.name.clone(), TransferView::Magnitude));
+                    self.rig.due.split_on_create =
+                        Some((config.name.clone(), TransferView::Magnitude));
                 } else {
-                    self.rig.pane_on_create = Some(config.name.clone());
+                    self.rig.due.pane_on_create = Some(config.name.clone());
                 }
                 Request::CreateMeas { config }
             }

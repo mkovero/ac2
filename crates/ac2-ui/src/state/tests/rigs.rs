@@ -935,7 +935,7 @@ fn a_stored_pane_names_its_rig() {
         }),
     };
     assert!(l.check().is_ok(), "{:?}", l.check());
-    t.st.rig.chosen = Some(MeasId(2));
+    t.st.rig.choice.chosen = Some(MeasId(2));
     t.st.show_layout(&l);
     let rigs: Vec<(PaneRig, Option<MeasId>)> =
         t.st.layout

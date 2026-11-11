@@ -314,7 +314,7 @@ impl AppState {
         }
         if let Some(settings) = self.rig.stimulus.settings() {
             self.rig.stimulus.phase = StimPhase::Arming;
-            self.rig.armed_with = Some(settings.clone());
+            self.rig.due.armed_with = Some(settings.clone());
             out.push(Request::StimArm { settings, force });
         }
     }
@@ -335,7 +335,7 @@ impl AppState {
         }
         if let Some(settings) = self.rig.stimulus.settings() {
             self.rig.stimulus.phase = StimPhase::Arming;
-            self.rig.armed_with = Some(settings.clone());
+            self.rig.due.armed_with = Some(settings.clone());
             out.push(Request::StimArm {
                 settings,
                 force: false,
@@ -400,7 +400,7 @@ impl AppState {
             StimPhase::Idle => {
                 if let Some(settings) = self.rig.stimulus.settings() {
                     self.rig.stimulus.phase = StimPhase::Arming;
-                    self.rig.armed_with = Some(settings.clone());
+                    self.rig.due.armed_with = Some(settings.clone());
                     out.push(Request::StimArm { settings, force });
                 }
             }
@@ -499,7 +499,7 @@ impl AppState {
                 // The new result is selected under its measurement: listed highlighted,
                 // named in the captions, and what the trace keys change.
                 self.rig.selected = Some(r.meas);
-                self.rig.chosen = Some(r.meas);
+                self.rig.choice.chosen = Some(r.meas);
                 self.rig
                     .collapsed
                     .remove(&ac2_proto::model::TraceOwner::Meas { meas: r.meas });

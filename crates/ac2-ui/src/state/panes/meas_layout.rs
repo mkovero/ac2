@@ -137,8 +137,8 @@ impl AppState {
 
     pub(in crate::state) fn panes_watch(&self) -> PanesWatch {
         PanesWatch {
-            owner: self.rig.own_panes,
-            theirs: self.meas_layout(self.rig.own_panes),
+            owner: self.rig.choice.own_panes,
+            theirs: self.meas_layout(self.rig.choice.own_panes),
             panes: self.pane_layout(),
         }
     }
@@ -155,8 +155,8 @@ impl AppState {
         out: &mut Vec<Request>,
     ) {
         self.settle_layout_calls();
-        if std::mem::take(&mut self.rig.own_panes_due) {
-            self.rig.own_panes = self.rig.selected;
+        if std::mem::take(&mut self.rig.due.own_panes_due) {
+            self.rig.choice.own_panes = self.rig.selected;
             let own = self.rig.selected.and_then(|id| self.own_layout(id));
             // The row asks for all of its panes: one alone (W) would hide the rest until
             // something else lays the panes out again (N's split shows them all). The stage
@@ -173,7 +173,7 @@ impl AppState {
         // The panes are the own panes of the measurement whose row was chosen here; with
         // none chosen (a stand-in, the measurement a remembered pane shows) they are
         // nobody's. An edit is stored on that one measurement alone.
-        let Some(owner) = self.rig.own_panes else {
+        let Some(owner) = self.rig.choice.own_panes else {
             return;
         };
         if before.owner != Some(owner) {
@@ -239,7 +239,7 @@ impl AppState {
     /// shows (or a later one of this app's) are done once answered; the own panes' are
     /// settled as its copy changes, above.
     fn settle_layout_calls(&mut self) {
-        let own = self.rig.own_panes;
+        let own = self.rig.choice.own_panes;
         let shown: Vec<(MeasId, usize)> = self
             .rig
             .layout_queue
@@ -292,8 +292,8 @@ impl AppState {
     /// not its own panes any more.
     pub(in crate::state) fn store_layout(&mut self, id: MeasId, out: &mut Vec<Request>) {
         if !self.panes_show(id) {
-            if self.rig.own_panes == Some(id) {
-                self.rig.own_panes = None;
+            if self.rig.choice.own_panes == Some(id) {
+                self.rig.choice.own_panes = None;
             }
             return;
         }
@@ -413,7 +413,12 @@ impl AppState {
         let mut views = BTreeMap::new();
         let mut levels = Vec::new();
         let root = self.install_node(l, &mut views, &mut levels);
-        let owner = self.rig.own_panes.and_then(|id| self.meas(id)).cloned();
+        let owner = self
+            .rig
+            .choice
+            .own_panes
+            .and_then(|id| self.meas(id))
+            .cloned();
         // A pick of a kind the pane does not draw is no pick; one the mirror does not list
         // yet waits in the pane as its choice, so that the next edit stores it. Another
         // rig's pane names that rig's ids, which this rig's mirror cannot check.

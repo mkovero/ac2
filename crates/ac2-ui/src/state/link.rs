@@ -114,7 +114,7 @@ impl AppState {
                     .iter()
                     .map(|m| m.config.name.clone())
                     .collect();
-                self.rig.meas_seen.extend(seen);
+                self.rig.choice.meas_seen.extend(seen);
                 // The daemon disarmed the generator when the audio stopped; an arm queued
                 // behind a stop must not follow it into a session that is reopening.
                 if self.rig.stimulus.arm_after_stop
@@ -130,7 +130,7 @@ impl AppState {
                     && ids.contains(&p)
                 {
                     self.rig.selected = Some(p);
-                    self.rig.chosen = Some(p);
+                    self.rig.choice.chosen = Some(p);
                     self.rig.pending.select = None;
                 }
                 if let Some(p) = self.rig.pending.stack
@@ -143,7 +143,7 @@ impl AppState {
                     && ids.contains(&p)
                 {
                     self.rig.pending.own_layout = None;
-                    if self.rig.own_panes == Some(p) {
+                    if self.rig.choice.own_panes == Some(p) {
                         self.store_layout(p, out);
                     }
                 }
@@ -154,18 +154,18 @@ impl AppState {
                 self.park_gone_meas(&names, !reborn, &gone_traces, |id| {
                     Some(id) != keep && (reborn || !ids.contains(&id))
                 });
-                if let Some(id) = self.rig.lost_selection.as_ref().and_then(|n| {
+                if let Some(id) = self.rig.choice.lost_selection.as_ref().and_then(|n| {
                     self.measurements()
                         .iter()
                         .find(|m| m.config.name == *n)
                         .map(|m| m.id)
                 }) {
                     self.rig.selected = Some(id);
-                    self.rig.chosen = Some(id);
-                    self.rig.standin = None;
-                    self.rig.lost_selection = None;
-                    if std::mem::take(&mut self.rig.lost_own_panes) {
-                        self.rig.own_panes = Some(id);
+                    self.rig.choice.chosen = Some(id);
+                    self.rig.choice.standin = None;
+                    self.rig.choice.lost_selection = None;
+                    if std::mem::take(&mut self.rig.choice.lost_own_panes) {
+                        self.rig.choice.own_panes = Some(id);
                     }
                 }
                 if !waiting && self.rig.selected.is_none() {
@@ -175,8 +175,8 @@ impl AppState {
                         .find(|m| matches!(m.config.kind, MeasKind::Transfer { .. }))
                         .or(self.measurements().first())
                         .map(|m| m.id);
-                    self.rig.chosen = self.rig.selected;
-                    self.rig.standin = self.rig.selected;
+                    self.rig.choice.chosen = self.rig.selected;
+                    self.rig.choice.standin = self.rig.selected;
                 }
                 self.rig.keep_listed(reborn, keep);
                 if let Some(TraceKey::Stored(r)) = self.view.tf.phase_reference
@@ -193,8 +193,11 @@ impl AppState {
                 self.follow_leq_alarms();
                 let data = self.rig.data.clone();
                 self.follow_leq_logs(data.as_deref(), out);
-                if self.rig.open_session_when_empty && self.connected() && self.daemon().is_some() {
-                    self.rig.open_session_when_empty = false;
+                if self.rig.due.open_session_when_empty
+                    && self.connected()
+                    && self.daemon().is_some()
+                {
+                    self.rig.due.open_session_when_empty = false;
                     // A session kept from before (autosave, a loaded file) is no fresh
                     // start: its hint names the audio page, nothing opens over it.
                     if self.nothing_kept() && self.overlay == Overlay::None {
@@ -241,13 +244,13 @@ impl AppState {
                 if let Overlay::Settings(s) = &mut self.overlay {
                     s.session.detect_result(r);
                     // The detection closed the preview on the daemon: reopen it now.
-                    self.rig.preview_sent_s = f64::NEG_INFINITY;
+                    self.rig.asked.preview_sent_s = f64::NEG_INFINITY;
                 } else if let Err(e) = r {
                     self.fault(format!("detect loopback: {e}"));
                 }
             }
             ConnEvent::SessionOpened => {
-                self.rig.choose_when_open = true;
+                self.rig.due.choose_when_open = true;
                 self.choose_first();
             }
             ConnEvent::LeqBackfill { meas, ask, result } => {
@@ -270,12 +273,13 @@ impl AppState {
                 let mine = |n: &Option<String>| n.as_ref() == Some(&m.config.name);
                 let split = self
                     .rig
+                    .due
                     .split_on_create
                     .take_if(|(name, _)| *name == m.config.name)
                     .map(|(_, view)| view);
-                let stack = mine(&self.rig.stack_on_create);
-                if mine(&self.rig.pane_on_create) || split.is_some() || stack {
-                    self.rig.pane_on_create = None;
+                let stack = mine(&self.rig.due.stack_on_create);
+                if mine(&self.rig.due.pane_on_create) || split.is_some() || stack {
+                    self.rig.due.pane_on_create = None;
                     self.flush_layout_drag(out);
                     let kind = match split {
                         Some(_) => PaneKind::Transfer,
@@ -287,7 +291,7 @@ impl AppState {
                 // Its header row is the selection, unfolded with its live curve under it,
                 // and the list scrolls to it.
                 self.rig.selected = Some(m.id);
-                self.rig.chosen = Some(m.id);
+                self.rig.choice.chosen = Some(m.id);
                 self.rig.selected_trace = None;
                 self.rig.selected_live = None;
                 self.rig.collapsed.remove(&TraceOwner::Meas { meas: m.id });
@@ -295,9 +299,9 @@ impl AppState {
                 self.rig.pending.select = Some(m.id);
                 // Made here, by the operator: as if its row were chosen, the screen it opened
                 // on is its own.
-                self.rig.own_panes = Some(m.id);
-                if self.rig.stack_on_create.as_ref() == Some(&m.config.name) {
-                    self.rig.stack_on_create = None;
+                self.rig.choice.own_panes = Some(m.id);
+                if self.rig.due.stack_on_create.as_ref() == Some(&m.config.name) {
+                    self.rig.due.stack_on_create = None;
                     self.rig.pending.stack = Some(m.id);
                 }
             }
@@ -407,7 +411,7 @@ impl AppState {
         match s {
             StimEvent::Armed => {
                 self.rig.stimulus.phase = StimPhase::Armed;
-                if self.rig.armed_with.take() != self.rig.stimulus.settings() {
+                if self.rig.due.armed_with.take() != self.rig.stimulus.settings() {
                     self.resend_stimulus(out);
                 }
                 let d = self.rig.stimulus.describe();
@@ -571,42 +575,42 @@ impl AppState {
         });
         if let Some(id) = self.rig.selected.filter(|id| gone(*id)) {
             // A stand-in going leaves the operator's choice waiting.
-            if self.rig.standin != Some(id)
+            if self.rig.choice.standin != Some(id)
                 && let Some(n) = names.get(&id)
             {
-                self.rig.lost_selection = Some(n.clone());
-                self.rig.lost_own_panes = self.rig.own_panes == Some(id);
+                self.rig.choice.lost_selection = Some(n.clone());
+                self.rig.choice.lost_own_panes = self.rig.choice.own_panes == Some(id);
             }
             self.rig.selected = None;
-            self.rig.standin = None;
+            self.rig.choice.standin = None;
         }
-        if self.rig.chosen.is_some_and(&gone) {
-            self.rig.chosen = None;
+        if self.rig.choice.chosen.is_some_and(&gone) {
+            self.rig.choice.chosen = None;
         }
         // Its panes stay on screen, nobody's own until a row is chosen.
-        if self.rig.own_panes.is_some_and(&gone) {
-            self.rig.own_panes = None;
+        if self.rig.choice.own_panes.is_some_and(&gone) {
+            self.rig.choice.own_panes = None;
         }
     }
 
     /// The selection moved off the stand-in (the operator chose, this app made something),
     /// or the operator chose the stand-in's row: the selection is theirs again.
     pub(super) fn follow_standin(&mut self) {
-        if self.rig.own_panes_due
+        if self.rig.due.own_panes_due
             || self
                 .rig
                 .selected
-                .is_some_and(|s| Some(s) != self.rig.standin)
+                .is_some_and(|s| Some(s) != self.rig.choice.standin)
         {
-            self.rig.standin = None;
-            self.rig.lost_selection = None;
-            self.rig.lost_own_panes = false;
+            self.rig.choice.standin = None;
+            self.rig.choice.lost_selection = None;
+            self.rig.choice.lost_own_panes = false;
         }
     }
 
     /// The selection is one this app made by itself.
     pub(super) fn selection_is_standin(&self) -> bool {
-        self.rig.selected.is_some() && self.rig.selected == self.rig.standin
+        self.rig.selected.is_some() && self.rig.selected == self.rig.choice.standin
     }
 }
 
@@ -839,7 +843,7 @@ impl RigState {
         // The devices listed were the last daemon's: another host has other ports,
         // and opening with them would name channels this daemon may not have.
         self.devices = None;
-        self.devices_for = None;
+        self.asked.devices_for = None;
     }
 
     /// The link lost the daemon: nothing it mirrored or was asked holds any more.

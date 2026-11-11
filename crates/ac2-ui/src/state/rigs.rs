@@ -445,8 +445,8 @@ impl AppState {
         self.history.layouts_mut(pin);
         // Whose own panes these were stays on the rig they were stored on: the next rig's
         // edits never land in its measurement's layout.
-        self.rig.own_panes = None;
-        self.rig.own_panes_due = false;
+        self.rig.choice.own_panes = None;
+        self.rig.due.own_panes_due = false;
         self.rig.input_pick = None;
         std::mem::swap(
             &mut self.view.tf.phase_reference,

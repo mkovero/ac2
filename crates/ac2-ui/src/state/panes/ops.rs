@@ -444,8 +444,8 @@ impl AppState {
         view: TransferView,
         stack: bool,
     ) {
-        let blank =
-            self.rig.own_panes.is_none() && self.layout.views.values().all(|v| !v.has_content());
+        let blank = self.rig.choice.own_panes.is_none()
+            && self.layout.views.values().all(|v| !v.has_content());
         if !blank {
             self.fresh_screen_for_new(meas, kind, view);
             return;

@@ -192,11 +192,11 @@ impl AppState {
         out: &mut Vec<Request>,
     ) {
         let after = self.meter_wants();
-        if self.rig.meters_asked != after.0 {
-            self.rig.meters_asked = after.0;
+        if self.rig.asked.meters_asked != after.0 {
+            self.rig.asked.meters_asked = after.0;
             out.push(Request::Meters(after.0));
         }
-        let renew = tick && self.now_s - self.rig.preview_sent_s >= PREVIEW_RENEW_S;
+        let renew = tick && self.now_s - self.rig.asked.preview_sent_s >= PREVIEW_RENEW_S;
         match (&before.1, &after.1) {
             (_, Some((backend, device))) if before.1 != after.1 || renew => {
                 let (inputs, pairs) = self
@@ -210,7 +210,7 @@ impl AppState {
                     inputs,
                     pairs,
                 });
-                self.rig.preview_sent_s = self.now_s;
+                self.rig.asked.preview_sent_s = self.now_s;
             }
             (Some(_), None) => out.push(Request::PreviewStop),
             _ => {}

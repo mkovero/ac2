@@ -481,7 +481,7 @@ fn a_new_meter_opens_on_a_screen_of_its_own() {
     let f = t.st.layout.focus;
     assert_eq!(t.st.layout.kind(f), PaneKind::Spl);
     assert_eq!(t.st.layout.view(f).and_then(|v| v.meas), Some(MeasId(9)));
-    assert_eq!(t.st.rig.own_panes, Some(MeasId(9)));
+    assert_eq!(t.st.rig.choice.own_panes, Some(MeasId(9)));
     // Listed, its screen is stored as its own panes: its row brings it back.
     let mut s = daemon_state();
     s.measurements.push(meas(9, &c.name, c.kind.clone()));

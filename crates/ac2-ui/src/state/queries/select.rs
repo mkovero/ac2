@@ -325,10 +325,10 @@ impl AppState {
             return;
         }
         self.rig.selected = Some(id);
-        self.rig.chosen = Some(id);
+        self.rig.choice.chosen = Some(id);
         self.rig.selected_trace = None;
         self.rig.selected_live = None;
-        self.rig.own_panes_due = true;
+        self.rig.due.own_panes_due = true;
     }
 
     /// A measurement's live-curve row chosen (click, Tab): a child row, selected so the keys
@@ -542,7 +542,7 @@ impl AppState {
             return;
         }
         self.rig.selected = Some(id);
-        self.rig.chosen = Some(id);
+        self.rig.choice.chosen = Some(id);
         self.rig.selected_trace = None;
         self.rig.selected_live = None;
         if let Some(v) = self.layout.view_mut(p) {

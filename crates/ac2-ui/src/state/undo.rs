@@ -139,7 +139,7 @@ impl AppState {
             layout: self.layout.clone(),
             fullscreen: self.fullscreen,
             panes_only: self.panes_only,
-            own_panes: self.rig.own_panes,
+            own_panes: self.rig.choice.own_panes,
             rig: self.rig.id,
         }
     }
@@ -201,6 +201,7 @@ impl AppState {
         };
         let owner = self
             .rig
+            .choice
             .own_panes
             .filter(|o| self.history.stored.contains(o));
         self.history.push(Step {
@@ -295,6 +296,7 @@ impl AppState {
         }
         let owner = self
             .rig
+            .choice
             .own_panes
             .filter(|o| self.history.stored.contains(o));
         self.history.push(Step {
@@ -353,12 +355,12 @@ impl AppState {
         self.fullscreen = s.fullscreen;
         self.panes_only = s.panes_only;
         // Another rig's measurement is no owner here: its ids name nothing on this rig.
-        self.rig.own_panes = s.own_panes.filter(|m| s.rig == rig && ids.contains(m));
+        self.rig.choice.own_panes = s.own_panes.filter(|m| s.rig == rig && ids.contains(m));
         if !self.spectrograph_shown() {
             self.rig.folded.spectrographs.clear();
             self.view.spectrum.spectrograph.cursor_s = None;
         }
-        if let Some(o) = owner.filter(|o| self.rig.own_panes == Some(*o)) {
+        if let Some(o) = owner.filter(|o| self.rig.choice.own_panes == Some(*o)) {
             self.store_layout(o, out);
         }
     }

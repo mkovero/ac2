@@ -305,7 +305,7 @@ impl App {
         state.rig.addr = target_addr.clone();
         let remembered = opts.prefs.rigs.clone();
         state.set_prefs(opts.prefs);
-        state.rig.open_session_when_empty = opts.open_session_dialog;
+        state.rig.due.open_session_when_empty = opts.open_session_dialog;
         state.client_key = opts.client_key;
         state.update(Msg::Rasterizer(rasterizer), &opts.keymap);
         for n in opts.notices {
@@ -457,7 +457,7 @@ impl App {
         r.conn = crate::state::ConnState::Connecting { target: describe };
         // A daemon without audio I/O: the audio setup once. The simulated rig is already
         // measuring, and keeps nothing once the app stops it.
-        r.open_session_when_empty = !simulated;
+        r.due.open_session_when_empty = !simulated;
         r.quit_loses = simulated;
         Ok(())
     }

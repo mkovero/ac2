@@ -114,12 +114,12 @@ fn sync(
     period: Duration,
     out: &mut Vec<(RigId, Request)>,
 ) {
-    if rig.link_wants.topics.as_ref() != Some(&topics) {
-        rig.link_wants.topics = Some(topics.clone());
+    if rig.asked.link_wants.topics.as_ref() != Some(&topics) {
+        rig.asked.link_wants.topics = Some(topics.clone());
         out.push((rig.id, Request::Topics(topics)));
     }
-    if rig.link_wants.period != Some(period) {
-        rig.link_wants.period = Some(period);
+    if rig.asked.link_wants.period != Some(period) {
+        rig.asked.link_wants.period = Some(period);
         out.push((rig.id, Request::DisplayPeriod(period)));
     }
 }

@@ -21,8 +21,8 @@ impl AppState {
         }
         // The first pane shows what the daemon measures: its first measurement, picked.
         // Not while a measurement made here is on its way: that one takes the pane.
-        let making = self.rig.pane_on_create.is_some()
-            || self.rig.split_on_create.is_some()
+        let making = self.rig.due.pane_on_create.is_some()
+            || self.rig.due.split_on_create.is_some()
             || self.rig.pending.stack.is_some();
         if self.pane_auto
             && !making
@@ -63,7 +63,7 @@ impl AppState {
                 // Gone for now (a session reopening, salvaged, a daemon restarting makes it
                 // again), or none made yet: it comes back. One the daemon never listed is
                 // not coming: the pane's usual choice is it, and nothing is saved for it.
-                if self.rig.meas_seen.contains(&name) || self.measurements().is_empty() {
+                if self.rig.choice.meas_seen.contains(&name) || self.measurements().is_empty() {
                     self.rig.pending.pane_meas.insert(pane, name);
                 }
                 continue;
@@ -80,7 +80,7 @@ impl AppState {
                 self.select_on(pane, id);
                 // Still this app's pick: a viewer nobody touches neither takes this
                 // measurement's own panes nor gives it its own.
-                self.rig.standin = Some(id);
+                self.rig.choice.standin = Some(id);
             }
         }
     }
@@ -224,7 +224,7 @@ impl AppState {
             .iter()
             .map(|m| (m.id, m.config.name.clone()))
             .collect();
-        let seen = &self.rig.meas_seen;
+        let seen = &self.rig.choice.meas_seen;
         let resolve = |pending: &mut BTreeSet<String>, ids: &mut BTreeSet<MeasId>| {
             pending.retain(|name| {
                 let mut of_name = ms.iter().filter(|(_, n)| n == name).map(|(id, _)| *id);
@@ -292,10 +292,10 @@ impl AppState {
             .map(|s| s.session.epoch);
         if let Some(e) = epoch
             && self.rig.devices.is_none()
-            && self.rig.devices_for != Some(e)
+            && self.rig.asked.devices_for != Some(e)
             && self.connected()
         {
-            self.rig.devices_for = Some(e);
+            self.rig.asked.devices_for = Some(e);
             if !matches!(self.overlay, Overlay::Settings(_) | Overlay::Form(_)) {
                 out.push(Request::Devices);
             }

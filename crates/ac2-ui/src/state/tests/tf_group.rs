@@ -180,7 +180,7 @@ fn v_steps_the_selection_and_moves_no_pane() {
         let out = t.key(key);
         assert!(out.is_empty(), "{key}: {out:?}");
         assert_eq!(t.st.layout, layout, "{key} moved a pane");
-        assert!(!t.st.rig.own_panes_due, "{key} synced the layout");
+        assert!(!t.st.rig.due.own_panes_due, "{key} synced the layout");
         assert_eq!(transfer_group(&t), Some(MeasId(1)));
         seen.extend(t.st.rig.selected_trace);
     }

@@ -8,7 +8,7 @@ use super::*;
 #[test]
 fn a_daemon_without_audio_opens_the_sessions_dialog_once() {
     let mut t = T::disconnected();
-    t.st.rig.open_session_when_empty = true;
+    t.st.rig.due.open_session_when_empty = true;
     connected_to(&mut t, "local daemon");
     let r = t.conn(mirror(no_session_state()));
     assert!(r.iter().any(|x| matches!(x, Request::SessionList)), "{r:?}");
@@ -26,7 +26,7 @@ fn a_daemon_without_audio_opens_the_sessions_dialog_once() {
     // A daemon that already has a session: no dialog; its input meters and the channel
     // names for them.
     let mut t = T::disconnected();
-    t.st.rig.open_session_when_empty = true;
+    t.st.rig.due.open_session_when_empty = true;
     connected_to(&mut t, "local daemon");
     let r = t.conn(mirror(daemon_state()));
     assert!(
@@ -34,7 +34,7 @@ fn a_daemon_without_audio_opens_the_sessions_dialog_once() {
         "{r:?}"
     );
     assert_eq!(t.st.overlay, Overlay::None);
-    assert!(!t.st.rig.open_session_when_empty);
+    assert!(!t.st.rig.due.open_session_when_empty);
 }
 
 /// A session kept from before (an autosave restored, measurements listed, its audio not
@@ -43,13 +43,13 @@ fn a_daemon_without_audio_opens_the_sessions_dialog_once() {
 #[test]
 fn a_kept_session_without_audio_opens_no_sessions_dialog() {
     let mut t = T::disconnected();
-    t.st.rig.open_session_when_empty = true;
+    t.st.rig.due.open_session_when_empty = true;
     connected_to(&mut t, "local daemon");
     let mut kept = daemon_state();
     kept.session.open = None;
     t.conn(mirror(kept));
     assert_eq!(t.st.overlay, Overlay::None);
-    assert!(!t.st.rig.open_session_when_empty);
+    assert!(!t.st.rig.due.open_session_when_empty);
     t.key("Ctrl+M");
     assert!(t.st.sessions_dialog().is_none(), "{:?}", t.st.overlay);
     assert!(

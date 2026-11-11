@@ -39,10 +39,10 @@ impl AppState {
     /// chooser says which kinds can be made from that state): a fresh session's first step
     /// is choosing what to measure; one with measurements, or a window open, asks nothing.
     pub(super) fn choose_first(&mut self) {
-        if !self.rig.choose_when_open || self.open_session().is_none() {
+        if !self.rig.due.choose_when_open || self.open_session().is_none() {
             return;
         }
-        self.rig.choose_when_open = false;
+        self.rig.due.choose_when_open = false;
         let none_yet = self.daemon().is_some_and(|s| s.measurements.is_empty());
         if none_yet && self.overlay == Overlay::None {
             let keymap = self.keys.clone();

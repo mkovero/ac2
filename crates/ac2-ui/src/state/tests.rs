@@ -210,7 +210,7 @@ impl T {
     /// first in the list it draws.
     fn pick_panes(&mut self) {
         // A measurement's own panes on screen are its layout as stored, not the operator's.
-        if self.st.rig.own_panes.is_some() {
+        if self.st.rig.choice.own_panes.is_some() {
             return;
         }
         for p in self.st.layout.root.leaves() {
