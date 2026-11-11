@@ -29,6 +29,8 @@ struct Rig {
     echo: Option<(usize, f32)>,
     /// Messages to the control thread, as read.
     msgs: Vec<ControlMsg>,
+    /// The next block is silent on both channels (no estimate from its window).
+    silent: bool,
 }
 
 fn noise(n: usize, mut x: u64) -> Vec<f32> {
@@ -76,6 +78,7 @@ fn rig(delay: usize, tracking: bool, cross: bool) -> Rig {
         delay,
         echo: None,
         msgs: Vec::new(),
+        silent: false,
     }
 }
 
@@ -91,8 +94,9 @@ impl Rig {
                     .map_or(0.0, |k| self.noise[k % self.noise.len()])
             };
             let m = at(self.delay) + self.echo.map_or(0.0, |(e, g)| g * at(e));
-            data.push(r);
-            data.push(m);
+            let g = if self.silent { 0.0 } else { 1.0 };
+            data.push(g * r);
+            data.push(g * m);
         }
         let mut b = Block::new(self.at, BLOCK as u32, 2, BlockFlags::NONE, 0, data);
         mark(&mut b.marks);
@@ -156,6 +160,11 @@ impl Rig {
 const NOT_LOCKED_40: ClockGate = ClockGate::Stop {
     why: StopWhy::NotLocked,
     window_s: 40.0,
+};
+
+const NOT_LOCKED_60: ClockGate = ClockGate::Stop {
+    why: StopWhy::NotLocked,
+    window_s: 60.0,
 };
 
 #[test]
@@ -385,9 +394,18 @@ fn late_twice_in_a_settle_span_raises_the_cue() {
     r.gate(ClockGate::Run);
     r.run(1.0);
     r.events();
+    // Lost packets leave gaps a larger link offset would not fill: no cue.
     r.block(|m| m.gap(REMOTE, 0));
     r.run(1.0);
     r.block(|m| m.gap(REMOTE, 0));
+    assert!(r.events().is_empty());
+    let late = |m: &mut crate::remote::ColumnMarks| {
+        m.gap(REMOTE, 0);
+        m.late(REMOTE);
+    };
+    r.block(late);
+    r.run(1.0);
+    r.block(late);
     let ev = r.events();
     assert!(matches!(ev[..], [CrossEvent::Late(true)]), "{ev:?}");
 }
@@ -416,4 +434,109 @@ fn the_tracked_delay_drifting_steadily_is_a_cue() {
     }
     let c = cue.expect("a drift cue");
     assert!((c * 1e3 - 0.09).abs() < 0.02, "{} ms/min", c * 1e3);
+    // A stop ends the fit, and the cue with it: it is said off.
+    r.gate(NOT_LOCKED_40);
+    let ev = r.events();
+    assert!(
+        ev.iter().any(|e| matches!(e, CrossEvent::Drift(None))),
+        "{ev:?}"
+    );
+}
+
+/// The newest result kept before audio `t` s, as `capture` stamps it, s.
+fn held_at(r: &mut Rig) -> Option<f64> {
+    r.job
+        .capture()
+        .map(|(stamp, _)| (stamp.audio_sample + 1) as f64 / f64::from(FS))
+}
+
+#[test]
+fn a_stop_on_the_60_s_window_holds_a_result_from_before_it() {
+    let mut r = rig(480, false, true);
+    r.gate(ClockGate::Run);
+    // Kept at 20, 40, 60 and 80 s. The 60 s window failing at 85 s, judged from a report
+    // 2.5 s behind the job's audio, began at 22.5 s: the result at 20 s stands.
+    r.run(85.0);
+    r.gate(ClockGate::Stop {
+        why: StopWhy::NotLocked,
+        window_s: 62.5,
+    });
+    assert!(matches!(
+        r.events()[..],
+        [CrossEvent::Stopped { held: true }]
+    ));
+    // Stored, it is dated by its own audio, not by the stop's.
+    let at = held_at(&mut r).expect("held");
+    assert!((at - 20.0).abs() < 0.2, "held from {at} s");
+    r.run(30.0);
+    assert_eq!(held_at(&mut r), Some(at), "still dated by its own audio");
+}
+
+#[test]
+fn a_longer_failed_window_after_a_stop_holds_an_older_result() {
+    let mut r = rig(480, false, true);
+    r.gate(ClockGate::Run);
+    r.run(85.0);
+    // Measured again (a re-anchor): the newest result stands.
+    r.gate(ClockGate::Stop {
+        why: StopWhy::Measuring,
+        window_s: 2.0,
+    });
+    r.events();
+    let first = held_at(&mut r).expect("held");
+    assert!((first - 80.0).abs() < 0.2, "held from {first} s");
+    // Then the 60 s window trips: what it covers was never right.
+    r.run(5.0);
+    r.gate(NOT_LOCKED_60);
+    assert!(matches!(
+        r.events()[..],
+        [CrossEvent::Stopped { held: true }]
+    ));
+    let older = held_at(&mut r).expect("held");
+    assert!((older - 20.0).abs() < 0.2, "held from {older} s");
+    // A failure reaching further back than anything kept: nothing.
+    r.run(10.0);
+    r.gate(ClockGate::Stop {
+        why: StopWhy::CantTell,
+        window_s: 90.0,
+    });
+    assert!(matches!(
+        r.events()[..],
+        [CrossEvent::Stopped { held: false }]
+    ));
+    assert_eq!(held_at(&mut r), None);
+}
+
+#[test]
+fn a_relock_says_tracked_again_only_on_the_delay_tracking_holds() {
+    // The clocks slid 1 ms apart while stopped; after the release, one window without an
+    // estimate falls between two that agree on the new arrival: tracking refuses that pair,
+    // and the relock must not report the old delay as found again.
+    let mut r = rig(480, true, true);
+    r.gate(ClockGate::Run);
+    r.run(8.0);
+    r.tracked();
+    r.gate(NOT_LOCKED_40);
+    r.delay += 48;
+    r.run(6.0);
+    r.gate(ClockGate::Run);
+    r.events();
+    let mut relocked = None;
+    for i in 0..60 {
+        if (6..26).contains(&i) {
+            r.silent = true;
+        }
+        r.block(|_| {});
+        r.silent = false;
+        for d in r.tracked() {
+            r.apply(d);
+        }
+        for e in r.events() {
+            if let CrossEvent::Relocked { now, .. } = e {
+                relocked.get_or_insert(now);
+            }
+        }
+    }
+    let now = relocked.expect("relocked");
+    assert!((now - 528.0).abs() < 1.0, "tracked again at {now}");
 }

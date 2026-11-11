@@ -89,6 +89,20 @@ fn not_locked_stops_holds_and_says_what_to_do() {
     );
     assert_eq!(list_cue(&x).as_deref(), Some("clocks"));
 
+    // One rig's interface off its own host: that rig is named, not the pair.
+    for (rig, name) in [(KETUNKOLO, "ketunkolo"), (RigId(1), "pupu")] {
+        let r = remote(PeerRelation::NotLocked {
+            reason: NotLockedReason::OwnClock { rig, ppm: 5.6 },
+        });
+        assert_eq!(
+            banner("TF 3", &x, &r, "pupu"),
+            Some(format!(
+                "TF 3 stopped: {name}'s interface runs +5.6 ppm against its host. Lock it to \
+                 the reference its host is disciplined from."
+            ))
+        );
+    }
+
     // Nothing held: nothing drawn, so no faint phase either; the words stay.
     let x = tf(
         RemoteSide::Measurement,

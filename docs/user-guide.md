@@ -164,11 +164,14 @@ the clocks agree again the averages restart; with delay tracking on, the finder 
 delay again from the held one and says it for a minute (*clocks were not locked for 3 min
 10 s · delay tracked again: 13.41 ms (was 12.38 ms)*), or asks for a pick if two arrivals
 fit; with tracking off it says *delay may have moved: find it again*. Its delay includes
-the offset between the two rigs' clocks, which is not measured. A slip in the remote audio
+the offset between the two rigs' clocks, which is not measured. It averages only on remote
+audio placed by capture time: an input placed on arrival (a system clock not yet synced,
+no clock map yet) moves to capture time by itself once it can, and the clocks are measured
+again from there. A slip in the remote audio
 moves the delay by exactly the slip (said a minute); a gap restarts the averages but keeps
 the delay. *delay drifting 0.09 ms/min* means the delay moved more than 0.05 ms a minute
 over two minutes: a path or the clocks are moving. *link offset too small* means the
-remote audio keeps arriving after the link offset: raise it with `ac2 session link-offset
+remote audio keeps arriving after the link offset (lost packets do not count): raise it with `ac2 session link-offset
 30ms` (`default` for the least that works, at most 500 ms; the remote inputs anchor again
 and every average on them restarts). Two channels on two different remote rigs are
 refused. `ac2 status` prints these lines per cross-rig transfer function.

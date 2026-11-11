@@ -47,6 +47,9 @@ pub(crate) struct ColumnMark {
     pub(crate) gaps: Vec<Range<u32>>,
     /// The input's map moved by this many samples at this block (a slip); 0: it did not.
     pub(crate) slip: i64,
+    /// A frame of the input arrived after its samples were needed since the last block:
+    /// its gaps are the link offset's, not lost packets'.
+    pub(crate) late: bool,
 }
 
 /// The marks of a block's remote columns; empty on device blocks and wherever every remote
@@ -89,6 +92,10 @@ impl ColumnMarks {
 
     pub(crate) fn slip(&mut self, column: u16, by: i64) {
         self.get_mut(column).slip += by;
+    }
+
+    pub(crate) fn late(&mut self, column: u16) {
+        self.get_mut(column).late = true;
     }
 
     /// The missing frames of `column`.

@@ -451,9 +451,7 @@ impl Control {
                             d.awaiting_pick = matches!(f.outcome, DelayOutcome::Ambiguous { .. });
                             d.last_finding = Some(f.clone());
                         }
-                        if !matches!(f.outcome, DelayOutcome::Ambiguous { .. }) {
-                            self.cross_resolved(p.meas);
-                        }
+                        self.cross_found(p.meas, &f.outcome);
                         self.commit(Change::Measurement(Patch::Set(m)));
                         Ok(ReplyBody::DelayFinding(f))
                     }

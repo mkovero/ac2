@@ -136,18 +136,23 @@ pub fn banner(label: &str, x: &CrossRigTransfer, r: &RemoteState, ours: &str) ->
     };
     match (why, rig.clock.relation) {
         (StopWhy::Measuring, _) => None,
-        (StopWhy::NotLocked, PeerRelation::NotLocked { reason }) => {
-            let ppm = match reason {
-                NotLockedReason::CrossRate { ppm, .. } | NotLockedReason::OwnClock { ppm, .. } => {
-                    ppm
-                }
-            };
-            Some(format!(
+        (StopWhy::NotLocked, PeerRelation::NotLocked { reason }) => Some(match reason {
+            NotLockedReason::CrossRate { ppm, .. } => format!(
                 "{label} stopped: {ours} and {theirs} are not on one clock ({} ppm). Lock both \
                  interfaces to one reference.",
                 format::signed(ppm, 1)
-            ))
-        }
+            ),
+            // One rig's interface against its own host: its crystal, or a host whose
+            // discipline wanders, not the two rigs against each other.
+            NotLockedReason::OwnClock { rig: who, ppm } => {
+                let who = if who == x.rig { theirs.as_str() } else { ours };
+                format!(
+                    "{label} stopped: {who}'s interface runs {} ppm against its host. Lock it \
+                     to the reference its host is disciplined from.",
+                    format::signed(ppm, 1)
+                )
+            }
+        }),
         (StopWhy::NotLocked, _) => Some(format!(
             "{label} stopped: {ours} and {theirs} are not on one clock. Lock both interfaces \
              to one reference."

@@ -6,8 +6,8 @@
 //! Every average taken while the clocks drift is wrong, and a relation trips only after its
 //! window has seen the drift: the 40 s window catches a fallback to a crystal after 20–40 s,
 //! the 60 s window a 2 ppm step after up to a minute. So the result is kept every 20 s while
-//! the clocks agree, the last three of them, and a stop holds the newest one taken before
-//! the window that failed began.
+//! the clocks agree, enough of them to reach back past the longest window, and a stop holds
+//! the newest one taken before the window that failed began.
 
 use std::collections::VecDeque;
 
@@ -15,10 +15,23 @@ use ac2_core::delay::FinderResult;
 use ac2_proto::frame::TfFrame;
 use ac2_proto::model::StopWhy;
 
+use super::StampArgs;
+use crate::remote::MAX_LINK_OFFSET_S;
+
 /// Spacing of the kept results, s.
 const SNAPSHOT_S: f64 = 20.0;
-/// Results kept: three spacings cover the longest relation window (60 s).
-const SNAPSHOTS: usize = 3;
+/// The longest relation window, s: the cross-rate's long window and a rig's own clock line.
+const LONGEST_WINDOW_S: f64 = 60.0;
+/// How far behind the job's audio a failed window can end, s, beyond the link offset: the
+/// relation is judged from a report up to a second old and reaches the job up to a second
+/// after that (`docs/design/remote-inputs.md` §3.3).
+pub(crate) const GATE_LAG_S: f64 = 2.0;
+/// Results kept: the oldest is at least `SNAPSHOTS - 1` spacings old, which must reach back
+/// past the longest window and the gate's lag, or a stop on that window holds nothing.
+const SNAPSHOTS: usize = 5;
+const _: () = assert!(
+    (SNAPSHOTS - 1) as f64 * SNAPSHOT_S >= LONGEST_WINDOW_S + GATE_LAG_S + MAX_LINK_OFFSET_S
+);
 /// The tracked delay's drift is fitted over this much audio, s.
 const DRIFT_SPAN_S: f64 = 120.0;
 /// A steady drift beyond this is a cue, s per minute (0.05 ms/min ≈ 0.8 ppm: below it an
@@ -38,8 +51,8 @@ const LATE_CLEAR_S: f64 = 60.0;
 pub(crate) enum ClockGate {
     /// The clocks agree.
     Run,
-    /// They do not, or cannot be told to: `window_s` is the span of the evidence that
-    /// failed (the result before it is held).
+    /// They do not, or cannot be told to: `window_s` reaches from the job's newest audio
+    /// back to the start of the evidence that failed (the result before it is held).
     Stop { why: StopWhy, window_s: f64 },
 }
 
@@ -66,6 +79,9 @@ pub(crate) enum CrossEvent {
 pub(crate) struct Snapshot {
     /// The sample its audio ends at.
     end: u64,
+    /// Its frame header fields as they were when it was kept: a stored trace is dated by
+    /// its own audio.
+    pub(crate) stamp: StampArgs,
     /// As published (display smoothing on).
     pub(crate) shown: TfFrame,
     /// As captured.
@@ -79,9 +95,12 @@ pub(crate) struct CrossRig {
     /// It averaged at some point since the job started: a later return to agreement is a
     /// relock, not a first start.
     ran: bool,
+    /// Kept while running; through a stop only those before every failed window, the
+    /// newest of them held.
     snapshots: VecDeque<Snapshot>,
     next_snapshot: u64,
-    held: Option<Snapshot>,
+    /// Through a stop: nothing ending after this sample can be held.
+    cutoff: Option<u64>,
     /// The arrival held through the current stop, samples.
     was: f64,
     pub(crate) drift: DriftFit,
@@ -100,7 +119,7 @@ impl CrossRig {
             ran: false,
             snapshots: VecDeque::new(),
             next_snapshot: 0,
-            held: None,
+            cutoff: None,
             was: 0.0,
             drift: DriftFit::default(),
             late: LateWatch::new(settle_s, fs),
@@ -113,7 +132,7 @@ impl CrossRig {
 
     /// The result shown while stopped; `None` while running or with nothing held.
     pub(crate) fn held(&self) -> Option<&Snapshot> {
-        self.held.as_ref().filter(|_| !self.running())
+        self.snapshots.back().filter(|_| !self.running())
     }
 
     /// A result is due at `end` (every [`SNAPSHOT_S`] of running audio).
@@ -121,34 +140,47 @@ impl CrossRig {
         self.running() && end >= self.next_snapshot
     }
 
-    pub(crate) fn keep(&mut self, end: u64, shown: TfFrame, raw: TfFrame) {
+    pub(crate) fn keep(&mut self, end: u64, stamp: StampArgs, shown: TfFrame, raw: TfFrame) {
         if self.snapshots.len() == SNAPSHOTS {
             self.snapshots.pop_front();
         }
-        self.snapshots.push_back(Snapshot { end, shown, raw });
+        self.snapshots.push_back(Snapshot {
+            end,
+            stamp,
+            shown,
+            raw,
+        });
         self.next_snapshot = end + (SNAPSHOT_S * self.fs) as u64;
     }
 
     /// A new gate at audio `end`, the arrival `arrival` (samples). What changed: `Some(true)`
-    /// stopped, `Some(false)` released, `None` nothing to do for the caller.
+    /// stopped (or a further stop picked an older result), `Some(false)` released, `None`
+    /// nothing to do for the caller.
     pub(crate) fn set_gate(&mut self, gate: ClockGate, end: u64, arrival: f64) -> Option<bool> {
         let was_running = self.running();
         self.gate = gate;
-        match (was_running, gate) {
-            (true, ClockGate::Stop { window_s, .. }) => {
+        match gate {
+            ClockGate::Stop { window_s, .. } => {
+                // A later failure can reach further back than the first (measuring, then a
+                // 60 s window tripping): the held result must precede every failed window.
                 let cutoff = end.saturating_sub((window_s.max(0.0) * self.fs) as u64);
-                self.held = self.snapshots.drain(..).rev().find(|s| s.end <= cutoff);
-                self.snapshots.clear();
-                self.was = arrival;
-                self.drift.clear();
+                let cutoff = self.cutoff.map_or(cutoff, |c| c.min(cutoff));
+                self.cutoff = Some(cutoff);
+                while self.snapshots.back().is_some_and(|s| s.end > cutoff) {
+                    self.snapshots.pop_back();
+                }
+                if was_running {
+                    self.was = arrival;
+                }
                 Some(true)
             }
-            (false, ClockGate::Run) => {
-                self.held = None;
+            ClockGate::Run if !was_running => {
+                self.snapshots.clear();
+                self.cutoff = None;
                 self.next_snapshot = end + (SNAPSHOT_S * self.fs) as u64;
                 Some(false)
             }
-            _ => None,
+            ClockGate::Run => None,
         }
     }
 
@@ -177,8 +209,10 @@ pub(crate) struct DriftFit {
 }
 
 impl DriftFit {
-    pub(crate) fn clear(&mut self) {
+    /// Forgets the fit; whether a cue was on (it is off now and must be said so).
+    pub(crate) fn clear(&mut self) -> bool {
         self.points.clear();
+        self.on.take().is_some()
     }
 
     /// The remote input slipped: the arrival jumped by exactly `by_s`, which is no drift.

@@ -250,12 +250,16 @@ fn pairing_admits_a_rig_to_its_inputs_only() {
     let x = &r.transfers[0];
     assert_eq!((x.meas, x.rig), (tf, b_id), "{r:#?}");
     assert_eq!(x.side, ac2_proto::model::RemoteSide::Measurement);
-    if r.rigs[0].clock.relation != ac2_proto::model::PeerRelation::Agree {
-        assert!(
-            matches!(x.state, ac2_proto::model::CrossTfState::Stopped { .. }),
-            "{r:#?}"
-        );
-    }
+    // Under a minute of stream the clocks cannot agree yet: it waits, and says why.
+    assert_ne!(
+        r.rigs[0].clock.relation,
+        ac2_proto::model::PeerRelation::Agree,
+        "{r:#?}"
+    );
+    assert!(
+        matches!(x.state, ac2_proto::model::CrossTfState::Stopped { .. }),
+        "{r:#?}"
+    );
 
     // The remote input's calibration is its rig's.
     let e = ca
@@ -283,6 +287,18 @@ fn pairing_admits_a_rig_to_its_inputs_only() {
         r.link_offset == Some(ac2_proto::units::Seconds(0.08)) && !r.transfers.is_empty()
     });
     assert_ne!(before, Some(ac2_proto::units::Seconds(0.08)));
+    // Anchored again, the clocks are measured again: it does not average meanwhile.
+    let r = remote(&mut ca);
+    assert!(
+        matches!(
+            r.transfers[0].state,
+            ac2_proto::model::CrossTfState::Stopped {
+                why: ac2_proto::model::StopWhy::Measuring | ac2_proto::model::StopWhy::CantTell,
+                ..
+            }
+        ),
+        "{r:#?}"
+    );
 
     // Removing A on B ends A's stream at once and A's link says why.
     cb.ok(Command::ServerRevoke {

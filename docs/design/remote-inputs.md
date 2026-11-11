@@ -244,8 +244,11 @@ slide (≤ 25° at 10 kHz). The rigs as locked measured a few ppb (timing study 
 
 A cross-rig transfer function under *Not locked* or *Can't tell* stops averaging and holds
 the result it had **before the first window that failed**: the job keeps its result at each
-20 s boundary while the relation reads Agree, the last three of them, because the 60 s window
-can take that long to trip on a small step. A fallback to a crystal (+5.6 ppm) trips the 40 s
+20 s boundary while the relation reads Agree, the last five of them, because the 60 s window
+can take that long to trip on a small step, and the relation reaches the job up to 2 s and a
+link offset after its window ended (a report a second, then the publish); a rig's own clock
+line fails over the span it states. A later stop that reaches further back (measuring, then
+the 60 s window) holds an older result, or none. A fallback to a crystal (+5.6 ppm) trips the 40 s
 window after about 20 s (0.12 ms of slide), 40 s at most (0.22 ms); a 2 ppm step trips the
 60 s window at up to 60 s. With no such result it shows nothing. The held
 result is marked the way decision 8b marks an independent-epoch trace: the magnitude
@@ -293,6 +296,10 @@ offset** (Dante's receiver latency).
   receiver without PTP does. Single-rig measurements on that input run; a cross-rig transfer
   function is refused (the relation is *Can't tell*, or *clocks of pupu and ketunkolo
   disagree by 3.2 ms* for the second case). The input row says which anchor it runs on.
+  An input on arrival for want of a synced clock or a stamp map moves to system time as
+  soon as both are there (a re-anchor: the relation measures again from it), and a cross-rig
+  transfer function averages only on an input placed by capture time, whatever the
+  relation: on arrival its delay would include the network's transit and the link offset.
 - **Anchoring on system time.** When a stream starts (or re-anchors), A fixes `local index = remote index +
   k` from B's capture stamp of a block, put on system time through B's map, against A's own
   capture stamps on system time: k pairs samples captured at the same system time, not
@@ -322,7 +329,8 @@ offset** (Dante's receiver latency).
   in a remote channel the map k has not moved, so the MTW restarts and the finder keeps its
   delay (a slip, below, is the case where k moves). Late frames are counted per input (*2 late frames in the last hour*) on the input row
   and the Connection page. A host stall (phase C's one 250 ms event) is one gap.
-- **Too late, too often:** two late frames inside one settle span of a transfer function
+- **Too late, too often:** two late frames (frames that came after their samples were
+  needed; lost ones are gaps a larger offset would not fill) inside one settle span of a transfer function
   reading that input (its longest MTW stage) raise *link offset too small: raise Wait for
   remote inputs (now 10 ms)* on the input row, the top-bar chip and the pane: at that rate the
   measurement never settles, and the operator is told rather than left with a curve that never

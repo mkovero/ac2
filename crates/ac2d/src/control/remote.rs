@@ -58,7 +58,7 @@ pub(super) struct RemoteCtl {
     links: BTreeMap<RigId, LinkHandle>,
     /// Each link's last report: state, bytes per second, window.
     link_state: BTreeMap<RigId, (RemoteLink, f64, u32)>,
-    sources: BTreeMap<RigId, Box<SourceState>>,
+    pub(super) sources: BTreeMap<RigId, Box<SourceState>>,
     joined: Option<Joined>,
     pub(super) watches: BTreeMap<RigId, PeerClockWatch>,
     /// The running transfer functions between this rig and one remote rig.
@@ -580,7 +580,7 @@ impl Control {
             })
             .collect();
         let link_offset = joined.map(|j| j.link_offset);
-        self.cross_sync();
+        self.cross_sync(&inputs, link_offset);
         let transfers = self.cross_entries();
         let next = RemoteState {
             peers,

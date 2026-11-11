@@ -344,9 +344,14 @@ impl Transfer {
         };
         match x.set_gate(gate, end, arrival) {
             Some(true) => {
-                self.finder.clock_hold(true, false);
                 let held = x.held().is_some();
+                // The fit spans the delay before the stop; a cue left on would outlive it.
+                let drift_off = x.drift.clear();
+                self.finder.clock_hold(true, false);
                 self.tell(CrossEvent::Stopped { held });
+                if drift_off {
+                    self.tell(CrossEvent::Drift(None));
+                }
             }
             Some(false) => {
                 // Averages taken across the stop would mix two alignments; the framing
@@ -401,8 +406,8 @@ impl Transfer {
             if let Some(c) = x.drift.add(t, arrival_s) {
                 events.push(CrossEvent::Drift(c));
             }
-        } else if !tracking {
-            x.drift.clear();
+        } else if !tracking && x.drift.clear() {
+            events.push(CrossEvent::Drift(None));
         }
         let due = x.snapshot_due(end) && filled;
         for e in events {
@@ -410,8 +415,9 @@ impl Transfer {
         }
         if due {
             let (shown, raw) = (self.tf_frame(true), self.tf_frame(false));
+            let stamp = self.stamp(end, self.last_prot);
             if let Some(x) = &mut self.cross {
-                x.keep(end, shown, raw);
+                x.keep(end, stamp, shown, raw);
             }
         }
     }
@@ -605,7 +611,9 @@ impl Analysis for Transfer {
         // with it, on the reference side against it.
         let slip = b.marks.get(self.meas_idx).map_or(0, |m| m.slip)
             - b.marks.get(self.ref_idx).map_or(0, |m| m.slip);
-        let late = slip == 0 && cols.iter().any(|&c| !b.marks.gaps(c).is_empty());
+        // Only audio that came after it was needed says the link offset is too small; lost
+        // packets and a dropped link leave gaps too, which a larger offset would not fill.
+        let late = cols.iter().any(|&c| b.marks.get(c).is_some_and(|m| m.late));
         if self.end.is_some() && (stream_break || remote_break) {
             if contiguous {
                 // An xrun, an overflow or missing remote samples can leave the counter
@@ -709,8 +717,8 @@ impl Analysis for Transfer {
                 self.finder.set_held(held(samples, nudged_samples));
                 if resume {
                     self.finder.set_paused(false);
-                    if let Some(x) = &mut self.cross {
-                        x.drift.clear();
+                    if self.cross.as_mut().is_some_and(|x| x.drift.clear()) {
+                        self.tell(CrossEvent::Drift(None));
                     }
                 }
             }
@@ -829,11 +837,12 @@ impl Analysis for Transfer {
 
     fn capture(&mut self) -> Option<(StampArgs, FrameData)> {
         let end = self.end?;
-        let stamp = self.stamp(end, self.last_prot);
         if let Some(x) = self.cross.as_ref().filter(|x| !x.running()) {
-            // Stopped: only a result from before the clocks parted is one.
-            return x.held().map(|h| (stamp, FrameData::Tf(h.raw.clone())));
+            // Stopped: only a result from before the clocks parted is one, dated by its own
+            // audio.
+            return x.held().map(|h| (h.stamp, FrameData::Tf(h.raw.clone())));
         }
+        let stamp = self.stamp(end, self.last_prot);
         Some((stamp, FrameData::Tf(self.tf_frame(false))))
     }
 

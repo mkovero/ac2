@@ -280,11 +280,56 @@ fn missing_audio_is_a_remote_gap_and_late_audio_is_counted() {
         .map(|b| b.start_sample)
         .collect();
     assert_eq!(gaps, (10..15).map(|i| i * 64).collect::<Vec<_>>());
-    // A frame for audio already released is late.
+    // Audio that never came is no late audio: a larger link offset would not bring it.
+    assert!(out.iter().all(|b| b.marks.get(1).is_none_or(|m| !m.late)));
+    // A frame for audio already released is late, and the next block says so.
+    let at = r.next;
+    r.send(at, RATE);
     r.send(0, RATE);
-    r.push(t0 + Duration::from_secs(2));
+    let after = r.push(t0 + Duration::from_secs(2));
+    assert!(
+        after.iter().any(|b| b.marks.get(1).is_some_and(|m| m.late)),
+        "{after:?}"
+    );
     let (inputs, _) = r.last_report().expect("reported");
     assert_eq!(inputs[0].late_frames, 1);
+}
+
+/// An input placed on arrival for want of a synced system clock moves to system time once
+/// the clock is synced: a delay across the rigs then excludes the network.
+#[test]
+fn an_input_on_arrival_re_anchors_on_system_time_once_it_can() {
+    let mut r = Rig::bare(true, &[3]);
+    let mut unsynced = source(0);
+    unsynced.clocks.system = SystemClock::Unsynced { maxerror_us: 100 };
+    r.link
+        .try_send(LinkFrame::Source(unsynced))
+        .expect("queued");
+    let t0 = Instant::now();
+    for _ in 0..10 {
+        let at = r.next;
+        r.send(at, RATE);
+        r.push(t0);
+    }
+    r.push(t0 + Duration::from_secs(2));
+    let (inputs, _) = r.last_report().expect("reported");
+    assert_eq!(
+        inputs[0].anchor,
+        Some(Anchor::Arrival {
+            reason: ArrivalReason::SystemClock
+        })
+    );
+    r.link
+        .try_send(LinkFrame::Source(source(0)))
+        .expect("queued");
+    for _ in 0..10 {
+        let at = r.next;
+        r.send(at, RATE);
+        r.push(t0 + Duration::from_secs(3));
+    }
+    r.push(t0 + Duration::from_secs(5));
+    let (inputs, _) = r.last_report().expect("reported");
+    assert_eq!(inputs[0].anchor, Some(Anchor::SystemTime));
 }
 
 #[test]

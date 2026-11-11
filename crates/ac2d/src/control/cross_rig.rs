@@ -8,9 +8,9 @@ use std::time::{Duration, Instant};
 
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{
-    CrossRigTransfer, CrossTfState, DelayOutcome, DelaySlip, MeasKind, Measurement,
-    NotLockedReason, PeerRelation, Relock, RelockOutcome, RemoteInput, RemoteSide, StopWhy,
-    remote_slot,
+    Anchor, Clocks, CrossRigTransfer, CrossTfState, DelayOutcome, DelaySlip, MeasKind, Measurement,
+    NotLockedReason, PeerRelation, Relock, RelockOutcome, RemoteInput, RemoteInputStatus,
+    RemoteSide, SampleClock, StopWhy, remote_slot,
 };
 use ac2_proto::units::{MeasId, RigId, Seconds, SessionEpoch, WallNs};
 use ac2_proto::{ErrorCode, ProtoError};
@@ -18,12 +18,12 @@ use ac2_proto::{ErrorCode, ProtoError};
 use super::{Control, DelaySource};
 use crate::conv;
 use crate::jobs::JobCmd;
-use crate::jobs::cross_rig::{ClockGate, CrossEvent};
+use crate::jobs::cross_rig::{ClockGate, CrossEvent, GATE_LAG_S};
 use crate::util::{perr, wall_ns};
 
 /// How long a settled relock and a slip are said on the pane.
 const SHOWN_FOR: Duration = Duration::from_secs(60);
-/// The span of a rig's own clock line: a minute of paired reads.
+/// The span of a rig's own clock line when it states none: a minute of paired reads.
 const OWN_LINE_S: f64 = 60.0;
 
 /// A transfer function between this rig and `rig`, as the control thread follows it.
@@ -31,6 +31,8 @@ const OWN_LINE_S: f64 = 60.0;
 pub(super) struct CrossTf {
     rig: RigId,
     side: RemoteSide,
+    /// Its remote input's slot.
+    slot: u16,
     /// The gate last sent to its job.
     sent: Option<ClockGate>,
     state: CrossTfState,
@@ -46,51 +48,96 @@ pub(super) struct CrossTf {
     late: bool,
 }
 
-/// The gate a relation sets: only agreement averages. The window is the span of the
-/// evidence that failed, so the job holds the result from before it.
-pub(super) fn gate_of(rel: &PeerRelation) -> ClockGate {
+/// What the gate is judged from beside the relation.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct GateBasis {
+    /// How the remote input is placed; `None` before it is.
+    pub(super) anchor: Option<Anchor>,
+    /// Under *not locked* on a rig's own clock: the span of that rig's clock line, s.
+    pub(super) own_line_s: Option<f64>,
+    /// How far the job's audio can run past the end of the evidence, s: the relation's
+    /// report and publish, and the link offset the joined audio is held back by.
+    pub(super) lag_s: f64,
+}
+
+/// The gate a relation sets: only agreement on audio placed by capture time averages. The
+/// window reaches from the job's newest audio back to the start of the evidence that
+/// failed, so the job holds the result from before it.
+pub(super) fn gate_of(rel: &PeerRelation, basis: &GateBasis) -> ClockGate {
+    let stop = |why, span_s: f64| ClockGate::Stop {
+        why,
+        window_s: span_s + basis.lag_s,
+    };
     match rel {
-        PeerRelation::Agree => ClockGate::Run,
-        PeerRelation::Measuring => ClockGate::Stop {
-            why: StopWhy::Measuring,
-            window_s: 0.0,
-        },
-        PeerRelation::NotLocked { reason } => ClockGate::Stop {
-            why: StopWhy::NotLocked,
-            window_s: match reason {
+        // Placed on arrival the delay includes the network's transit and the link offset,
+        // which no relation between the clocks covers. The joiner moves the input to system
+        // time as soon as it can, and the relation measures again from there.
+        PeerRelation::Agree if basis.anchor == Some(Anchor::SystemTime) => ClockGate::Run,
+        PeerRelation::Agree | PeerRelation::Measuring => stop(StopWhy::Measuring, 0.0),
+        PeerRelation::NotLocked { reason } => stop(
+            StopWhy::NotLocked,
+            match reason {
                 NotLockedReason::CrossRate { over, .. } => over.0,
-                NotLockedReason::OwnClock { .. } => OWN_LINE_S,
+                NotLockedReason::OwnClock { .. } => basis.own_line_s.unwrap_or(OWN_LINE_S),
             },
-        },
-        PeerRelation::CantTell { .. } => ClockGate::Stop {
-            why: StopWhy::CantTell,
-            window_s: 0.0,
-        },
+        ),
+        PeerRelation::CantTell { .. } => stop(StopWhy::CantTell, 0.0),
     }
 }
 
-/// Which side of `kind` is remote, and on which rig, when it is a transfer function between
-/// this rig and one other: both channels on one remote rig share its clock and are not one.
-pub(super) fn cross_side(kind: &MeasKind, inputs: &[RemoteInput]) -> Option<(RigId, RemoteSide)> {
-    let MeasKind::Transfer { config } = kind else {
-        return None;
-    };
-    let rig = |ch: u16| {
-        let slot = remote_slot(ch)?;
-        inputs.iter().find(|r| r.slot == slot).map(|r| r.rig)
-    };
-    match (rig(config.reference_input), rig(config.measurement_input)) {
-        (Some(r), None) => Some((r, RemoteSide::Reference)),
-        (None, Some(r)) => Some((r, RemoteSide::Measurement)),
+/// The span of a rig's own clock line, s, as its clocks state it.
+fn line_span(c: &Clocks) -> Option<f64> {
+    match c.capture.as_ref()?.rate {
+        SampleClock::Measured { span, .. } => Some(span.0),
         _ => None,
     }
 }
 
+/// Which side of `kind` is remote, on which rig and in which slot, when it is a transfer
+/// function between this rig and one other: both channels on one remote rig share its clock
+/// and are not one.
+pub(super) fn cross_side(
+    kind: &MeasKind,
+    inputs: &[RemoteInput],
+) -> Option<(RigId, RemoteSide, u16)> {
+    let MeasKind::Transfer { config } = kind else {
+        return None;
+    };
+    let input = |ch: u16| {
+        let slot = remote_slot(ch)?;
+        inputs
+            .iter()
+            .find(|r| r.slot == slot)
+            .map(|r| (r.rig, slot))
+    };
+    match (
+        input(config.reference_input),
+        input(config.measurement_input),
+    ) {
+        (Some((r, s)), None) => Some((r, RemoteSide::Reference, s)),
+        (None, Some((r, s))) => Some((r, RemoteSide::Measurement, s)),
+        _ => None,
+    }
+}
+
+/// Where a measurement's delay stands, for what a relock does with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum DelayMode {
+    /// Tracking is off.
+    Fixed,
+    /// Tracking is on.
+    Tracking,
+    /// An ambiguous finding awaits the operator's pick: tracking is paused and says nothing
+    /// until it is answered.
+    AwaitingPick,
+}
+
 impl CrossTf {
-    pub(super) fn new(rig: RigId, side: RemoteSide) -> Self {
+    pub(super) fn new(rig: RigId, side: RemoteSide, slot: u16) -> Self {
         Self {
             rig,
             side,
+            slot,
             sent: None,
             state: CrossTfState::Stopped {
                 why: StopWhy::Measuring,
@@ -106,15 +153,14 @@ impl CrossTf {
         }
     }
 
-    /// The relation with its rig is `rel` at `now`; the gate to send when it changed.
-    /// `tracking`: its delay tracking is on (a relock then waits for it).
+    /// The clocks set `gate` at `now`; the gate to send when it changed. `delay`: what a
+    /// relock waits for.
     pub(super) fn judge(
         &mut self,
-        rel: &PeerRelation,
-        tracking: bool,
+        gate: ClockGate,
+        delay: DelayMode,
         now: Instant,
     ) -> Option<ClockGate> {
-        let gate = gate_of(rel);
         if self.sent == Some(gate) {
             return None;
         }
@@ -127,10 +173,10 @@ impl CrossTf {
                     self.relock = Some(Relock {
                         after: Seconds(now.duration_since(since).as_secs_f64()),
                         from,
-                        outcome: if tracking {
-                            RelockOutcome::Tracking
-                        } else {
-                            RelockOutcome::FindAgain
+                        outcome: match delay {
+                            DelayMode::AwaitingPick => RelockOutcome::Ambiguous,
+                            DelayMode::Tracking => RelockOutcome::Tracking,
+                            DelayMode::Fixed => RelockOutcome::FindAgain,
                         },
                     });
                     self.settled = None;
@@ -202,6 +248,23 @@ impl CrossTf {
         }
     }
 
+    /// A find ran: only one that found the delay answers a relock waiting for it; one
+    /// without an estimate leaves the delay as unknown as before, and an ambiguous one now
+    /// waits for the operator's pick.
+    pub(super) fn found(&mut self, outcome: &DelayOutcome) {
+        match outcome {
+            DelayOutcome::Accepted { .. } => self.resolved(),
+            DelayOutcome::Ambiguous { .. } => {
+                if let Some(r) = &mut self.relock
+                    && r.outcome == RelockOutcome::FindAgain
+                {
+                    r.outcome = RelockOutcome::Ambiguous;
+                }
+            }
+            DelayOutcome::NoEstimate { .. } => {}
+        }
+    }
+
     /// Its entry at `now`: a settled relock and a slip are said for a minute.
     pub(super) fn entry(&mut self, meas: MeasId, now: Instant) -> CrossRigTransfer {
         if self
@@ -240,8 +303,10 @@ impl Control {
             .map(|rt| rt.open.config.remote_inputs.clone())
             .unwrap_or_default();
         match cross_side(&m.config.kind, &inputs) {
-            Some((rig, side)) => {
-                self.remote.cross.insert(m.id, CrossTf::new(rig, side));
+            Some((rig, side, slot)) => {
+                self.remote
+                    .cross
+                    .insert(m.id, CrossTf::new(rig, side, slot));
                 self.remote_publish();
             }
             None => self.cross_stop(m.id),
@@ -255,16 +320,30 @@ impl Control {
     }
 
     /// Sends each cross-rig job the gate its rig's relation sets, where it changed.
-    pub(super) fn cross_sync(&mut self) {
+    /// `inputs`: the remote inputs as the joiner placed them; `link_offset`: the one in force.
+    pub(super) fn cross_sync(
+        &mut self,
+        inputs: &[RemoteInputStatus],
+        link_offset: Option<Seconds>,
+    ) {
         let now = Instant::now();
         let mut sends = Vec::new();
-        let tracking: BTreeMap<MeasId, bool> = self
+        let delays: BTreeMap<MeasId, DelayMode> = self
             .store
             .state()
             .measurements
             .iter()
-            .map(|m| (m.id, m.delay.as_ref().is_some_and(|d| d.tracking)))
+            .map(|m| {
+                let mode = match &m.delay {
+                    Some(d) if d.awaiting_pick => DelayMode::AwaitingPick,
+                    Some(d) if d.tracking => DelayMode::Tracking,
+                    _ => DelayMode::Fixed,
+                };
+                (m.id, mode)
+            })
             .collect();
+        let ours = self.store.state().clocks.clone();
+        let lag_s = GATE_LAG_S + link_offset.map_or(0.0, |o| o.0);
         for (id, x) in &mut self.remote.cross {
             let rel = self
                 .remote
@@ -274,8 +353,29 @@ impl Control {
                 .unwrap_or(PeerRelation::CantTell {
                     reason: ac2_proto::model::CantTellReason::NoAudio,
                 });
-            let t = tracking.get(id).copied().unwrap_or(false);
-            if let Some(g) = x.judge(&rel, t, now) {
+            let own_line_s = match rel {
+                PeerRelation::NotLocked {
+                    reason: NotLockedReason::OwnClock { rig, .. },
+                } if rig == self.s.rig_id => line_span(&ours),
+                PeerRelation::NotLocked {
+                    reason: NotLockedReason::OwnClock { rig, .. },
+                } => self
+                    .remote
+                    .sources
+                    .get(&rig)
+                    .and_then(|s| line_span(&s.clocks)),
+                _ => None,
+            };
+            let basis = GateBasis {
+                anchor: inputs
+                    .iter()
+                    .find(|i| i.slot == x.slot)
+                    .and_then(|i| i.anchor),
+                own_line_s,
+                lag_s,
+            };
+            let d = delays.get(id).copied().unwrap_or(DelayMode::Fixed);
+            if let Some(g) = x.judge(gate_of(&rel, &basis), d, now) {
                 sends.push((*id, g));
             }
         }
@@ -300,6 +400,13 @@ impl Control {
     pub(super) fn cross_resolved(&mut self, meas: MeasId) {
         if let Some(x) = self.remote.cross.get_mut(&meas) {
             x.resolved();
+        }
+    }
+
+    /// A find on `meas` came back with `outcome`.
+    pub(super) fn cross_found(&mut self, meas: MeasId, outcome: &DelayOutcome) {
+        if let Some(x) = self.remote.cross.get_mut(&meas) {
+            x.found(outcome);
         }
     }
 

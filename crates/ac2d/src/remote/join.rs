@@ -125,6 +125,8 @@ struct InputState {
     last_slip: Option<i64>,
     /// A slip not yet marked on a released block.
     pending_slip: i64,
+    /// A late frame not yet marked on a released block.
+    pending_late: bool,
     /// Least arrival margin per second, s.
     margins: VecDeque<(Instant, f64)>,
 }
@@ -222,6 +224,7 @@ impl Joiner {
                 slips: 0,
                 last_slip: None,
                 pending_slip: 0,
+                pending_late: false,
                 margins: VecDeque::new(),
             })
             .collect();
@@ -405,6 +408,19 @@ impl Joiner {
                 i.audio = RemoteAudio::Starting;
                 continue;
             };
+            // On arrival only for want of a synced clock or a map: once both are there the
+            // input moves to system time, or a delay measured across the rigs would include
+            // the network's transit and the link offset.
+            if matches!(
+                i.anchor,
+                Some(Anchor::Arrival {
+                    reason: ArrivalReason::SystemClock | ArrivalReason::NoStampMap
+                })
+            ) && local.is_some()
+                && synced
+            {
+                i.restart();
+            }
             if i.k.is_none() {
                 let first = *i.first.get_or_insert(now);
                 let anchor = match (h.capture_ns, local, synced) {
@@ -556,6 +572,9 @@ impl Joiner {
             if slip != 0 {
                 marks.slip(column(s), slip);
             }
+            if std::mem::take(&mut i.pending_late) {
+                marks.late(column(s));
+            }
         }
         self.released = Some(end);
         let mut j = Block {
@@ -655,6 +674,7 @@ fn source_fault(source: Option<&SourceState>, channel: u16, ours: u32) -> Option
 
 fn late(i: &mut InputState, now: Instant) {
     i.late += 1;
+    i.pending_late = true;
     match i.late_at.back_mut() {
         Some((t, n)) if now.duration_since(*t) < Duration::from_secs(1) => *n += 1,
         _ => i.late_at.push_back((now, 1)),

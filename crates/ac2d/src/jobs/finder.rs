@@ -39,8 +39,9 @@ pub(crate) struct Finder {
     /// keeps filling, so a find right after has audio.
     clock_hold: bool,
     /// After a clock hold, tracking's first agreement (or ambiguity) is reported: the newest
-    /// accepted delay, fractional samples, not yet confirmed by the next one.
-    relocking: Option<Option<f64>>,
+    /// accepted delay, fractional samples, and the end of its window, not yet confirmed by
+    /// the next one.
+    relocking: Option<Option<(f64, u64)>>,
 }
 
 /// What one block told tracking.
@@ -129,6 +130,7 @@ impl Finder {
                     if moved.is_some() {
                         out.moved = moved;
                     }
+                    let held = tracker.held();
                     let Some(prev) = &mut self.relocking else {
                         continue;
                     };
@@ -140,16 +142,24 @@ impl Finder {
                             break;
                         }
                         Outcome::Accepted { first, .. } => {
-                            let agreed = moved.is_some()
-                                || prev.is_some_and(|p| (first.delay_frac - p).abs() <= agreement);
-                            if agreed {
+                            // Agreed only as the tracker agrees: on two windows that share no
+                            // samples, and on the delay it holds. Otherwise a pair the tracker
+                            // refused would report the old delay as found again while the
+                            // move it is about to make comes later.
+                            let d = first.delay_frac;
+                            let pair = prev.is_some_and(|(p, end)| {
+                                res.meas_window.start >= end && (d - p).abs() <= agreement
+                            });
+                            let on_held = held.is_some_and(|h| (d - h as f64).abs() <= agreement);
+                            if moved.is_some() || (pair && on_held) {
                                 self.relocking = None;
                                 out.relock = Some(RelockSeen::Agreed);
                             } else {
-                                *prev = Some(first.delay_frac);
+                                *prev = Some((d, res.meas_window.end));
                             }
                         }
-                        Outcome::NoEstimate { .. } => {}
+                        // As the tracker: a window without an estimate breaks the pair.
+                        Outcome::NoEstimate { .. } => *prev = None,
                     }
                 }
                 Ok(None) => break,

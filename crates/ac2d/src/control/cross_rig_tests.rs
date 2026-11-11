@@ -5,8 +5,8 @@
 use std::time::{Duration, Instant};
 
 use ac2_proto::model::{
-    CantTellReason, ClockBasis, Clocks, DeviceClock, DeviceId, PeerRelation, SampleClock,
-    SystemClock,
+    ArrivalReason, CantTellReason, ClockBasis, Clocks, DeviceClock, DeviceId, PeerRelation,
+    SampleClock, SystemClock,
 };
 use ac2_proto::units::{RigId, Seconds, WallNs};
 
@@ -14,6 +14,13 @@ use super::*;
 use crate::remote::peer_clock::{Evidence, PeerClockWatch};
 
 const SYNCED: SystemClock = SystemClock::Synced { maxerror_us: 100 };
+
+/// The remote input placed by capture time, the gate's lag left out.
+const ON_SYSTEM_TIME: GateBasis = GateBasis {
+    anchor: Some(Anchor::SystemTime),
+    own_line_s: None,
+    lag_s: 0.0,
+};
 
 fn clocks(system: SystemClock, ppm: f64) -> Clocks {
     Clocks {
@@ -40,7 +47,8 @@ struct Sim {
     stream_from: u64,
     watch: PeerClockWatch,
     tf: CrossTf,
-    tracking: bool,
+    delay: DelayMode,
+    basis: GateBasis,
     t0: Instant,
     t: u64,
     gates: Vec<(u64, ClockGate)>,
@@ -54,8 +62,9 @@ impl Sim {
             rate: Box::new(rate),
             stream_from: 0,
             watch: PeerClockWatch::default(),
-            tf: CrossTf::new(RigId(2), RemoteSide::Measurement),
-            tracking: true,
+            tf: CrossTf::new(RigId(2), RemoteSide::Measurement, 0),
+            delay: DelayMode::Tracking,
+            basis: ON_SYSTEM_TIME,
             t0: Instant::now(),
             t: 0,
             gates: Vec::new(),
@@ -90,7 +99,7 @@ impl Sim {
             .update(&e, Duration::from_secs(self.t), WallNs(self.t));
         let rel = self.watch.clock.relation;
         let at = self.now();
-        if let Some(g) = self.tf.judge(&rel, self.tracking, at) {
+        if let Some(g) = self.tf.judge(gate_of(&rel, &self.basis), self.delay, at) {
             self.gates.push((self.t, g));
         }
     }
@@ -221,7 +230,7 @@ fn a_pull_is_not_locked_within_40_s_and_relocks_after_a_clean_minute() {
 #[test]
 fn tracking_off_relocks_to_find_it_again_until_a_find() {
     let mut s = Sim::new(|t| if (100..130).contains(&t) { 5.0 } else { 0.0 });
-    s.tracking = false;
+    s.delay = DelayMode::Fixed;
     s.run_to(400);
     assert_eq!(
         s.entry().relock.map(|r| r.outcome),
@@ -311,7 +320,7 @@ fn a_source_without_capture_stamps_cannot_tell() {
     s.watch.update(&e, Duration::from_secs(101), WallNs(101));
     let rel = s.watch.clock.relation;
     assert_eq!(
-        s.tf.judge(&rel, true, s.now()),
+        s.tf.judge(gate_of(&rel, &ON_SYSTEM_TIME), DelayMode::Tracking, s.now()),
         Some(ClockGate::Stop {
             why: StopWhy::CantTell,
             window_s: 0.0
@@ -386,13 +395,113 @@ fn only_one_local_and_one_remote_channel_make_a_cross_rig_transfer_function() {
     };
     assert_eq!(
         cross_side(&tf(0, REMOTE_BASE), &inputs),
-        Some((RigId(2), RemoteSide::Measurement))
+        Some((RigId(2), RemoteSide::Measurement, 0))
     );
     assert_eq!(
         cross_side(&tf(REMOTE_BASE + 1, 1), &inputs),
-        Some((RigId(2), RemoteSide::Reference))
+        Some((RigId(2), RemoteSide::Reference, 1))
     );
     // Both on one remote rig: one clock, like a local measurement.
     assert_eq!(cross_side(&tf(REMOTE_BASE, REMOTE_BASE + 1), &inputs), None);
     assert_eq!(cross_side(&tf(0, 1), &inputs), None);
+}
+
+#[test]
+fn agreement_on_audio_placed_on_arrival_waits() {
+    let arrival = GateBasis {
+        anchor: Some(Anchor::Arrival {
+            reason: ArrivalReason::SystemClock,
+        }),
+        ..ON_SYSTEM_TIME
+    };
+    let measuring = ClockGate::Stop {
+        why: StopWhy::Measuring,
+        window_s: 0.0,
+    };
+    assert_eq!(gate_of(&PeerRelation::Agree, &arrival), measuring);
+    let unplaced = GateBasis {
+        anchor: None,
+        ..ON_SYSTEM_TIME
+    };
+    assert_eq!(gate_of(&PeerRelation::Agree, &unplaced), measuring);
+    assert_eq!(
+        gate_of(&PeerRelation::Agree, &ON_SYSTEM_TIME),
+        ClockGate::Run
+    );
+}
+
+#[test]
+fn a_stop_window_reaches_back_past_the_lag_and_the_own_line() {
+    let basis = GateBasis {
+        own_line_s: Some(90.0),
+        lag_s: 2.08,
+        ..ON_SYSTEM_TIME
+    };
+    let window = |rel| match gate_of(&rel, &basis) {
+        ClockGate::Stop { window_s, .. } => window_s,
+        ClockGate::Run => panic!("running"),
+    };
+    let cross = PeerRelation::NotLocked {
+        reason: NotLockedReason::CrossRate {
+            ppm: 5.0,
+            over: Seconds(40.0),
+        },
+    };
+    assert!((window(cross) - 42.08).abs() < 1e-9);
+    let own = PeerRelation::NotLocked {
+        reason: NotLockedReason::OwnClock {
+            rig: RigId(2),
+            ppm: 5.6,
+        },
+    };
+    assert!((window(own) - 92.08).abs() < 1e-9);
+    assert!((window(PeerRelation::Measuring) - 2.08).abs() < 1e-9);
+}
+
+#[test]
+fn a_pick_awaited_through_a_stop_is_still_asked_after_it() {
+    let mut s = Sim::new(|t| if (100..130).contains(&t) { 5.0 } else { 0.0 });
+    s.run_to(110);
+    // An ambiguous finding came back before the clocks parted: tracking is paused.
+    s.delay = DelayMode::AwaitingPick;
+    s.run_to(400);
+    assert_eq!(
+        s.entry().relock.map(|r| r.outcome),
+        Some(RelockOutcome::Ambiguous)
+    );
+}
+
+#[test]
+fn only_a_find_that_finds_the_delay_answers_find_it_again() {
+    use ac2_proto::model::DelayArrival;
+    use ac2_proto::units::{Db, Degrees};
+    let c = DelayArrival {
+        delay: Seconds(0.01),
+        delay_samples: 480.0,
+        level: Db(0.0),
+        phase: Degrees(0.0),
+        uncertainty_samples: 0.1,
+        misfit: 0.0,
+        refined: true,
+    };
+    let mut s = Sim::new(|t| if (100..130).contains(&t) { 5.0 } else { 0.0 });
+    s.delay = DelayMode::Fixed;
+    s.run_to(400);
+    let outcome = |r: &mut Sim| r.entry().relock.map(|r| r.outcome);
+    assert_eq!(outcome(&mut s), Some(RelockOutcome::FindAgain));
+    s.tf.found(&DelayOutcome::NoEstimate {
+        reasons: Vec::new(),
+    });
+    assert_eq!(outcome(&mut s), Some(RelockOutcome::FindAgain));
+    s.tf.found(&DelayOutcome::Ambiguous {
+        reasons: Vec::new(),
+        ranked: vec![c, c],
+        strongest: c,
+    });
+    assert_eq!(outcome(&mut s), Some(RelockOutcome::Ambiguous));
+    s.tf.found(&DelayOutcome::Accepted {
+        first: c,
+        strongest: c,
+    });
+    assert_eq!(outcome(&mut s), None);
 }
