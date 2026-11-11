@@ -55,9 +55,9 @@ autosave, saved sessions and recordings in `%APPDATA%\ac2\data`; logs in
 `%LOCALAPPDATA%\ac2\logs`.
 
 `ac2 --version` in a **new** Command Prompt (so the `PATH` from the installer applies) should
-name e415ef1. Then start **ac2** from the Start menu. It keeps its log, including the audio
-engine it hosts, in `%LOCALAPPDATA%\ac2\logs\ac2-ui.log` (paste that into Explorer's
-address bar); the previous run's is `ac2-ui.log.1`. Each start replaces the older one, so
+name e415ef1. Then start **ac2** from the Start menu. It keeps its log in
+`%LOCALAPPDATA%\ac2\logs\ac2-ui.log` (paste that into Explorer's
+address bar) and the daemon it starts keeps `ac2d.log` beside it; the previous run's is `ac2-ui.log.1`. Each start replaces the older one, so
 copy the file before starting ac2 again if a run went wrong.
 
 ## 2. Wiring and safety
@@ -198,7 +198,7 @@ Also worth a try: close the session (**Ctrl+K → Close audio I/O**), set the in
 and check the top bar shows 96 kHz. Unplug and replug
 the interface while a session is open (ac2 should say so and recover, not crash). If the
 interface does not open at all, copy the exact message from the app and the last lines of
-`ac2-ui.log`, and say which entry from step 2 you picked.
+`ac2-ui.log` and `ac2d.log`, and say which entry from step 2 you picked.
 
 If it opens but no meter ever moves and nothing plays:
 - **External clock.** When the interface follows an external clock (ADAT, S/PDIF, word
@@ -272,10 +272,10 @@ crash.
 2. On a laptop, run it on battery if you can; that is the case we care about most.
 3. Leave it for one hour. Don't let the PC sleep: **Settings → System → Power** (*Power &
    battery* on Windows 11), screen and sleep to **Never** for the run.
-4. At the start and the end, note CPU % and memory of **ac2-ui.exe** in
+4. At the start and the end, note CPU % and memory of **ac2-ui.exe** and **ac2d.exe** in
    **Task Manager → Details**, and the battery percentage.
 5. Afterwards, check the log for discontinuities, dropouts or bursts, in PowerShell:
-   `Select-String -Path $env:LOCALAPPDATA\ac2\logs\ac2-ui.log -Pattern 'discontinu|overflow|underrun|burst|xrun'`.
+   `Select-String -Path $env:LOCALAPPDATA\ac2\logs\ac2d.log,$env:LOCALAPPDATA\ac2\logs\ac2-ui.log -Pattern 'discontinu|overflow|underrun|burst|xrun'`.
 6. Minimise ac2 for a few minutes during the run, then bring it back. It should come back
    at once, not freeze while catching up.
 
@@ -383,5 +383,5 @@ useful.
 | CPU % of ac2-ui.exe with a session open and nothing playing | |
 | Any banner, freeze, crash, firewall prompt or odd behaviour | |
 
-Attach `%LOCALAPPDATA%\ac2\logs\ac2-ui.log` (and `ac2-ui.log.1` if the run in question was
+Attach `%LOCALAPPDATA%\ac2\logs\ac2-ui.log` and `ac2d.log` (and their `.log.1` if the run in question was
 the one before) and screenshots of anything that looked wrong.

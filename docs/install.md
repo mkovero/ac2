@@ -4,7 +4,7 @@ ac2 ships three programs:
 
 | program | what it is |
 |---|---|
-| `ac2-ui` | the desktop app (shown as **ac2** in menus). It can host its own daemon. |
+| `ac2-ui` | the desktop app (shown as **ac2** in menus). It starts the `ac2d` beside it when none is running. |
 | `ac2d` | the daemon: owns the audio interface, runs the measurements. |
 | `ac2` | the command-line client: set up sessions and measurements, script everything. |
 
@@ -117,7 +117,7 @@ For the CLI tools: `xattr -d com.apple.quarantine /usr/local/bin/ac2 /usr/local/
 
 The daemon can run as a launchd agent: `launchd/io.github.mkovero.ac2d.plist` in the disk
 image has the instructions in its header. A daemon started by launchd cannot show the
-microphone prompt, so either let the app host its daemon or start `ac2d` from Terminal.
+microphone prompt, so either let the app start its daemon or start `ac2d` from Terminal.
 
 Audio goes through Core Audio, the HAL directly (backend `coreaudio`, the only one on
 macOS): any device macOS lists, an aggregate device made in Audio MIDI Setup included. A
@@ -148,12 +148,13 @@ are verified on Windows; ASIO with a real interface is not yet.
 
 There are three ways; pick one.
 
-- **The app hosts it.** Start **ac2**. If no daemon is running, the connect dialog opens:
-  choose *This computer's audio* (Settings opens next on its Audio I/O page, to pick the
-  interface and channels) or *Simulated rig* to try ac2 without hardware (it starts with its
-  session open and a transfer measurement "demo" running). That daemon lives inside the app
-  and stops with it. The command-line client cannot reach it; everything it would do is in
-  the app.
+- **The app starts it.** Start **ac2**. If no daemon is running, the app starts the `ac2d`
+  installed beside it (the per-user daemon below, so the command-line client reaches it too)
+  and stops it when it quits. To try ac2 without hardware, `ac2-ui --connect` opens the
+  connect dialog: choose *Simulated rig (no audio)* (it starts with its
+  session open and a transfer measurement "demo" running). That daemon is a separate
+  `ac2d --ephemeral` that stops with the app. The command-line client cannot reach it;
+  everything it would do is in the app.
 - **A per-user daemon** that the app and the CLI share: `systemctl --user enable --now ac2d`
   (Linux), or `ac2 daemon start` on any OS (`ac2 daemon stop` stops it). The app connects to
   it automatically. One runs per user, whatever it listens on (a network-mode service
@@ -179,7 +180,7 @@ interface out 1 ──┬──► system under test (amp / processor / speaker)
                   └──► loopback cable ──────────────────────────────────────► in 1
 ```
 
-**In the app** (any daemon: hosted by the app, per-user, or remote; no terminal needed):
+**In the app** (any daemon: started by the app, per-user, or remote; no terminal needed):
 
 1. Until there is an audio I/O the transfer pane says *No audio I/O — press
    Shift+O*. **Shift+O** (or **Ctrl+K** → *Open audio I/O…*) opens Settings on its
@@ -240,7 +241,7 @@ calibrate the mic for dB SPL and set up Leq windows ([user guide](user-guide.md#
 
 No hardware at hand? Use the built-in simulated rig (output 1 → input 1 loopback, output 1
 → input 2 through a speaker-and-room model; it never touches real audio). In the app, choose
-*Simulated rig* in the connect dialog: its session is already open (inputs 1–2, output 1,
+*Simulated rig (no audio)* in the connect dialog (`ac2-ui --connect`): its session is already open (inputs 1–2, output 1,
 loopback 1 → 1) and the transfer measurement "demo" (reference 1, measurement 2) is running,
 so steps 1–4 above work at once. From a terminal:
 

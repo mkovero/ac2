@@ -62,25 +62,26 @@ for now.
    `xattr -d com.apple.quarantine /usr/local/bin/ac2 /usr/local/bin/ac2d`.
    `ac2 --version` prints the build.
 
-Start the app as usual (Launchpad, Finder or Dock). It keeps its log, including the audio
-engine it hosts, in `~/Library/Logs/ac2/ac2-ui.log` (Console.app lists it under *Log
+Start the app as usual (Launchpad, Finder or Dock). It keeps its log in
+`~/Library/Logs/ac2/ac2-ui.log` and the daemon it starts keeps `ac2d.log` beside it
+(Console.app lists them under *Log
 Reports*); the previous run's is `ac2-ui.log.1`. Each start replaces the older one, so copy
 the file before starting ac2 again if a run went wrong. The app shows its version at the
 foot of the connect dialog and on **Settings › Connection** (*Version: ac2-ui …*), the same
-string `ac2 --version` prints; the log's `ac2d <version> up` line names it too.
+string `ac2 --version` prints; the `ac2d <version> up` line in `ac2d.log` names it too.
 
-**The app alone, or the app and the command line together.** By default the app runs its
-audio engine inside itself (*This computer's audio* in the connect dialog), and the
-command line cannot reach that one. The app-only tests use it as is. A test that uses
-`ac2` against the app's running session says so, and needs the per-user daemon instead:
+**The app alone, or the app and the command line together.** By default the app starts
+the daemon (`ac2d`, inside the app bundle) when none is running and stops it when it quits.
+The app-only tests use it as is. A test that uses
+`ac2` against the app's running session says so, and uses a daemon started in Terminal:
 
 1. Quit the app. In Terminal: `ac2 daemon start` (it starts the `ac2d` copied beside `ac2`
    in step 5).
-2. Start the app: it finds the daemon and connects to it without the connect dialog (the
-   top bar names `ac2d …`). The app and `ac2` now share one session: `ac2 session status`
+2. Start the app: it finds the daemon and connects to it, starting none of its own. The
+   app and `ac2` now share one session: `ac2 session status`
    and `ac2 devices` read it.
-3. Afterwards quit the app, then `ac2 daemon stop`. The next start of the app is the
-   built-in engine again. The daemon's log is `~/Library/Logs/ac2/ac2d.log`.
+3. Afterwards quit the app, then `ac2 daemon stop`. The next start of the app starts
+   its own daemon again. The daemon's log is `~/Library/Logs/ac2/ac2d.log`.
 
 ## 2. Wiring and safety
 
@@ -108,8 +109,8 @@ interface out 2 ── cable 2 ──► in 2   (measurement: here a wire, so th
 Pass: the interface is listed, its inputs show live levels, and a session opens without
 errors.
 
-1. Start ac2. In the connect dialog choose **This computer's audio (Core Audio)**. Settings
-   opens on its **Audio I/O** page, on the input device.
+1. Start ac2. **Shift+O** (or **⌘K → Open audio I/O…**) opens Settings
+   on its **Audio I/O** page, on the input device.
 2. **Input** device (**←/→**): pick your interface. Note what it shows (*N in / M out ·
    rate · buffer*), and whether its inputs carry the interface's own channel names or are
    numbered (*Input 3*).
@@ -191,10 +192,10 @@ crash.
 2. On a laptop, run it on battery if you can; that is the case we care about most.
 3. Leave it for one hour. Don't let the Mac sleep: **System Settings → Lock Screen**, or
    run `caffeinate -d` in a second Terminal window.
-4. At the start and the end, note ac2's CPU % and memory in **Activity Monitor**, and the
+4. At the start and the end, note CPU % and memory of ac2 and `ac2d` in **Activity Monitor**, and the
    battery percentage.
 5. Afterwards, check the log for discontinuities, dropouts or bursts:
-   `grep -iE "discontinu|overflow|underrun|burst|xrun" ~/Library/Logs/ac2/ac2-ui.log`.
+   `grep -iE "discontinu|overflow|underrun|burst|xrun" ~/Library/Logs/ac2/ac2d.log ~/Library/Logs/ac2/ac2-ui.log`.
 6. Minimise ac2 for a few minutes during the run, then bring it back. It should come back
    at once, not freeze while catching up.
 
@@ -322,5 +323,5 @@ useful.
 | ac2 CPU % in Activity Monitor with a session open and nothing playing | |
 | Any banner, freeze, crash or odd behaviour | |
 
-Attach `~/Library/Logs/ac2/ac2-ui.log` (and `ac2-ui.log.1` if the run in question was the
+Attach `~/Library/Logs/ac2/ac2-ui.log` and `ac2d.log` (and their `.log.1` if the run in question was the
 one before) and screenshots of anything that looked wrong.
