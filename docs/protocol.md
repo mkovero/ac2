@@ -155,7 +155,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `plan.save` | `plan: PlanSpec` | `plan` | |
 | `plan.list` | — | `plans` | non-mutating |
 | `plan.delete` | `name` | `ack` | |
-| `walk.new` | `name`, `plan` (name), `kind: live_transfer`, `meas: [MeasId]`, `points: [WalkPointSpec]` ({`label`, `at: [x, y, z]`}) | `walk` | |
+| `walk.new` | `name`, `plan` (name), `kind: WalkKind` (`live_transfer` \| `sweep`), `meas: [MeasId]`, `points: [WalkPointSpec]` ({`label`, `at: [x, y, z]`}) | `walk` | |
 | `walk.update` | `walk: WalkId`, `name`, `points: [WalkPointSpec]` | `walk` | |
 | `walk.goto` | `walk`, `step: u16` | `walk` | |
 | `walk.capture` | `walk` | `walk` | |
@@ -163,6 +163,10 @@ Lease column: **L** = `lease_token` required (Q6).
 | `walk.redo` | `walk`, `point: u16` | `walk` | |
 | `walk.swap` | `walk`, `points: [u16]` | `walk` | |
 | `walk.delete` | `walk` | `ack` | |
+| `sim.run` | `request: SimRequest` | `sim` | |
+| `sim.fit` | `request: SimFitRequest` | `sim` | |
+| `sim.map` | `request: SimMapRequest` | `sim` | |
+| `sim.cancel` | — | `sim` | |
 | `spl.log_get` | `meas`, `log: SplLogWhich`, `from: u64`, `max: u32` | `spl_log_page` | |
 | `spl.log_new` | `meas` | `ack` | |
 | `spl.history_get` | `meas`, `span: HistorySpan` | `spl_history` | non-mutating |
@@ -661,7 +665,8 @@ Design: `docs/design/measurement-tree.md`. Every stored trace has an owner,
 `TraceEdit.owner` (`TraceOwner`, tagged by `type`: `meas` {`meas`} or `imported`), and so
 does every math channel (`MathConfig.owner`). A capture is owned by the measurement it came
 from, a math capture by the math channel's owner, a sweep run by its sweep measurement, an
-average by the owner its inputs share (else `imported`), an import by `imported`. Moving a
+average by the owner its inputs share (else `imported`), an import and a generated target
+by the `owner` its command names. Moving a
 trace is a `trace.update` with another `owner` (allowed on a locked trace); moving a math
 channel a `meas.update` with another `MathConfig.owner`. An owner must be an existing
 measurement other than a math channel (`not_found` / `invalid`).
@@ -964,8 +969,9 @@ rig/channel pairs are unique, an input of this rig is `invalid` ("that input is 
 rig"), a remote rig at another rate or replaying is `refused`), `link_offset` (s \| nil:
 how long the joined feed waits for remote audio; nil = two remote periods, one of this
 rig's and 2 ms, at most 0.5 s). A remote input carries the session's measurements like a
-local one, except a transfer function across rigs (`refused` until the clocks between
-rigs are measured), recording and calibration (both on the rig the input is on). `OpenSession` adds `backend` (the one used),
+local one, except recording and calibration (`refused`: both on the rig the input is
+on); a transfer function with one channel on a remote rig averages only while the two
+rigs' clocks agree (`remote.transfers`, §4.1). `OpenSession` adds `backend` (the one used),
 `input_device`, `output_device`, `sample_rate_hz`, `buffer_frames`, `clock`, `opened_at`,
 `replay` (`ReplayInfo` \| nil: the recording a replay session plays, §3.2 raw capture
 files), `clock_source` (string \| nil: the clock source the device ran on when opened,
@@ -1159,7 +1165,7 @@ display edits and are never applied to the stored data.
   file, content hash —, nil without a mic name; a sweep
   names no curve, its analysis works on the raw recordings), `mic_curve` (nil: see
   *Mic curve after capture*), `created_at`. A math channel captures as its domain's kind
-  (`transfer`, `spectrum` {`scale`}, `rta` {`scale`}) with `source.math` {`meas`,
+  (`transfer`, `spectrum` {`scale`, `level`}, `rta` {`scale`}) with `source.math` {`meas`,
   `meas_name`, `epoch`, `at_sample`, `expr`, `operands`: [`NamedOperand` {`operand`,
   `name`}] — the operands that went into the captured result, named as at capture —,
   `phase`: `PhaseBasis`}, `delay` its stated delay, `depth` and `mic` nil,
@@ -1465,7 +1471,8 @@ analysed band; responses are reported from `start`. `name` nil names the trace `
   whose edges lie inside the sweep's range; `span_end` (`Seconds`, end of the IR analysed re
   the arrival: the end of the silence after the sweep). `RoomBand`: `centre: Hz | nil` (nil =
   broadband), `onset` and `truncation` (`Seconds` re the arrival: the band's trigger and where
-  its decay meets the noise), `decay_range` (`Db`: depth of the decay curve there), `edt`,
+  its decay meets the noise), `decay_range` (`Db | nil`: depth of the decay curve there, nil
+  without a decay), `edt`,
   `t20`, `t30` (seconds), `c50`, `c80` (dB), `d50` (ratio 0…1), each a `RoomValue` (tagged by
   `type`: `value` {`value`} or `refused` {`reason`}), and `curvature` (`f64 | nil`, percent
   100·(T30/T20 − 1) when both are given). `RoomRefusal` (tagged by `type`): `no_decay`,
@@ -1794,7 +1801,7 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 `{type, value}` with `type` one of: `ack` (`{rev}`), `welcome`, `backends`, `preview`,
 `loopback_detection`, `session`,
 `lease`, `generator`, `measurement`, `delay_finding`, `trace`, `traces`, `trace_data`,
-`export`, `calibration`, `calibrations`, `mic`, `inputs`, `outputs`, `server`, `source_state`,
+`export`, `calibration`, `line_calibration`, `calibrations`, `mic`, `inputs`, `outputs`, `server`, `source_state`,
 `spl_log_page`, `spl_history`, `spl_band_log`,
 `snapshot`, `events`,
 `grid`, `session_file`, `sessions`, `transfer`, `chunk`, `salvage`, `sweep`, `recording`,
@@ -1822,7 +1829,7 @@ AudioStopped | nil`; §4.1.1),
 `layout`, `offset`, `eq`),
 `traces` (`TraceMeta`: `id`, `edit` {name, color, visible, locked, order, offset,
 polarity, delay_nudge, slot, smoothing, owner}, `kind`, `source` {captured | imported |
-math | average | sweep | eq}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_curve`, `created_at`,
+math | eq | average | generated | sweep}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_curve`, `created_at`,
 `eq_in` ([`EqSnapshot`]: the EQ sets marked in the console when captured), `position`
 (`TracePosition` | nil: a walk's capture names its point `label`, `at: [x, y, z]`, `plan`
 and `walk`), `captured_unsettled` (captured before the walk measurement was ready),
@@ -1936,9 +1943,9 @@ samples). Every later recovery reopens the configuration as it then stands.
 `state.snapshot` → `{state, rev, daemon_incarnation, session_epoch}`.
 
 An event is `{rev, kind, payload}`. `kind` is one of `session`, `measurement`, `trace`,
-`generator`, `calibration`, `line_calibration`, `mic`, `inputs`, `outputs`, `spl_log`, `timing`, `clocks`, `remote`, `sweep`, `autosave`, `recording`, `working`, `plan`, `walk`, `walk_plan`, `sim`. `payload` is the entity's
+`generator`, `calibration`, `line_calibration`, `mic`, `inputs`, `outputs`, `spl_log`, `timing`, `clocks`, `remote`, `sweep`, `autosave`, `recording`, `working`, `rig`, `plan`, `walk`, `walk_plan`, `sim`, `sim_fit`. `payload` is the entity's
 full new value (`inputs`: {`inputs`, `pairs`}, both whole lists; `outputs`: the whole list;
-`sim`: the `SimState`, which `State.sim` becomes); for keyed entities (`measurement`, `trace`,
+`sim`: the `SimState`, which `State.sim` becomes, or `State.sim_map` for a map; `sim_fit`: the `SimFitKept` or nil); for keyed entities (`measurement`, `trace`,
 `calibration`, `line_calibration` (keyed by `LineCalKey`), `mic` (keyed by name), `spl_log`, `plan` and `walk_plan` (keyed by name), `walk` (keyed by
 `WalkId`)) it is `{type: "set", value: <entity>}` or `{type: "deleted", value: <key>}`.
 Applying an event is assignment. Events travel on the data socket as
@@ -2429,10 +2436,11 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 
 `session.json`: `{format: "ac2-session", version: 43, saved_at, measurements:
 [{id, config: MeasConfig, running, delay: {applied, nudged, tracking} | null, colour:
-ColourFamily | null, layout: PaneLayout | null}], spl_logs:
+ColourFamily | null, layout: PaneLayout | null, offset: Db, eq: [EqSet]}], spl_logs:
 [{meas, file, bands: file | null}], traces: [{meta: TraceMeta, grid: GridDef, file, mic_curve_points: [[Hz,
-dB]] | null}], walks: [WalkState], plans: [PlanSpec]}` (JSON, field names as in this
-document; `plans` are the session's copies of the plans its walks walk; `mic_curve_points` are the points of
+dB]] | null}], walks: [WalkState], plans: [PlanSpec], remote_inputs: [RemoteInput]}` (JSON, field names as in this
+document; `plans` are the session's copies of the plans its walks walk; `remote_inputs` are
+the other rigs' inputs the session took, by slot; `mic_curve_points` are the points of
 `meta.mic_curve`, a curve applied after capture). A trace
 file is named by its trace id and a 64-bit FNV-1a hash of its content, so it never changes
 once written. A save writes the trace files that are not there yet, then replaces
