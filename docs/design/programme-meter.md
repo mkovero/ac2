@@ -289,7 +289,7 @@ Stage 5 (§6.3) replaces this one-pane layout by two views, Meters and Goniomete
 by **G**, and a pair brings one pane of each.
 
 Opened from the picker like any pane, or from a pair row with **P** (stage 5 brings two
-panes for a pair, §6.3 *Where panes come from*). Saved in the layout prefs and the session's panes
+panes for a pair, §6.3 *Where panes come from*; the picker and the **P** key are gone since `pane-curves.md` stage 1: an Inputs row dragged onto a pane, or the New programme meter form, opens it). Saved in the layout prefs and the session's panes
 by its input set; a session loaded on a device without those inputs shows the pane empty
 with *inputs 3+4 not in this session*.
 
@@ -1094,8 +1094,8 @@ chip). `ProgrammePane::title()` takes the view.
 
 **Where panes come from.**
 
-- **A pair** opened from its Inputs row (**P**, `open_programme` in
-  `ac2-ui/src/state/programme.rs`) or from the New programme meter form brings **two
+- **A pair** opened from its Inputs row (**P**, a key gone since `pane-curves.md` stage 1, where the row is dragged onto a pane; `open_programme` in
+  `ac2-ui/src/state/programme.rs` now serves the form) or from the New programme meter form brings **two
   panes**: the focused pane is split once (`split_focused_pane`, as today) and the new
   pane is split again side by side (`split_pane_at(new, Axis::Row, Side::A)` in
   `state/panes/ops.rs`, which halves the pane, the copy on the `A` side), goniometer left and meters right (the MSD order). The
@@ -1115,7 +1115,7 @@ chip). `ProgrammePane::title()` takes the view.
   `Watch::Command`, on a new `Watch::MeterForm` (overlay `Overlay::Form` with
   `FormKind::Programme | ProgrammeEdit` and the submit key), which `edit_of` maps to
   `PaneEdit::Split(was)` for New and to `pick_edit(p)` for Edit (its submit runs
-  `pane_pick`, as a pane-list pick does). With both, one
+  `pane_pick`, as a pane-list pick does; the Edit form, `FormKind::ProgrammeEdit` and `pick_edit` went with the pane list, so only `FormKind::Programme` is left and `Watch::MeterForm` maps to `PaneEdit::Split(was)` alone). With both, one
   **Ctrl+Z** removes both panes. If there is room for only one split, the meters
   pane opens alone and a toast says `no room for the goniometer pane: G turns this pane to
   it`.
@@ -1123,10 +1123,10 @@ chip). `ProgrammePane::title()` takes the view.
 - **A pane's own list** (`PaneMenuRow::Meter`; the pane list, `Msg::PanePick` and `pane_pick` are gone since `pane-curves.md` stage 1, an Inputs row dragged onto the pane takes their place): the pane turns into one Programme pane in
   Meters view: the pick sets `programme` to `Meters`, so a pane whose mode was left at
   Goniometer by an earlier G does not open on the square. The list turns *this* pane into something and never adds panes.
-  The reset lives in the `Msg::PanePick` arm of `state.rs`, before it calls `pane_pick`,
-  not in `pane_pick`'s `Meter` arm, because the Edit form's submit also runs `pane_pick`
+  The reset lived in the `Msg::PanePick` arm of `state.rs`, before it called `pane_pick`,
+  not in `pane_pick`'s `Meter` arm, because the Edit form's submit also ran `pane_pick`
   (`state/meter_form.rs`).
-- **The Edit form** applies to its own pane only and keeps its view: editing a Goniometer
+- **The Edit form** (gone with the pane list; the form in `state/meter_form.rs` only opens new panes) applies to its own pane only and keeps its view: editing a Goniometer
   pane's pair leaves it a Goniometer pane (a 5c test), and if the edit leaves it without a
   pair it draws Meters by the fallback below.
 
@@ -1675,10 +1675,10 @@ had no plate*. A pair's Meters view keeps the correlation chip under its bars.
 
 ### As built in stage 2
 
-- `PaneContent` is `Meas { meas } | Inputs { inputs } | Pair { left, right }`: a pair is named
+- `PaneContent` is `Meas { meas } | Inputs { inputs } | Pair { left, right }` (since `pane-curves.md` stage 2: `Nothing | Curves | Meter | Inputs | Pair | Walk`, each reference with its rig, and `Nothing` allowed on any kind): a pair is named
   by its two inputs, which is what the session's pair list keys on; there is no pair id.
   `PaneLayout::check` refuses a Programme pane without inputs and inputs on any other kind.
-- A picked Inputs row opens its Programme pane with **P**, not **Enter**: Enter fires the
+- A picked Inputs row opens its Programme pane with **P** (a key gone since `pane-curves.md` stage 1: the row is dragged onto a pane), not **Enter**: Enter fires the
   stimulus in every keymap (`RESERVED`), and a meter key must never be one chord away from
   sound. A click picks a row; Tab or a click elsewhere drops the pick.
 - The goniometer frames come with the input meters (`session/` subscription), not a

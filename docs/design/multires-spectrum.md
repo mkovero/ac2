@@ -24,9 +24,11 @@ against the others and whose passband ripple would show at the crossovers; full-
 cost more FFT work (below) but each band's frame is exactly the `N_b` samples ending where it
 ends, which keeps the ages exact.
 
-Each band has its own `SpectrumAnalyzer`, its own hop (the daemon's display-hop rule: the
-largest power of two ≤ fs/30, clamped to `N/8 … N/2`) and its own averaging state. At 96 kHz
-the hops are 8192, 4096, 2048, 2048, 2048, 1024 samples (85, 43, 21, 21, 21, 10.7 ms); at
+Each band has its own `SpectrumAnalyzer`, its own hop (the daemon's display-hop rule,
+`SpectrumConfig::display_hop`: the frame hop, the whole number of device periods closest to fs/60,
+when that lies in `N/8 … N/2`; else a multiple of it for a longer window, a divisor of it for a
+shorter one) and its own averaging state. At 96 kHz on a 256-sample device period
+the hops are 9216, 4608, 3072, 1536, 1536, 768 samples (96, 48, 32, 16, 16, 8 ms); at
 48 kHz the windows and hops have the same durations at half the samples.
 
 ## Placement
@@ -119,8 +121,8 @@ displayed columns. Display smoothing (`SpectrumConfig.smoothing`) runs on these 
 
 A column changes only when a band behind it produces a frame: the bottom at band 0's hop,
 the top at band 5's. A column is never extrapolated, and it has no value (NaN) until every
-band behind it has a frame. Because every window and hop is a power of two and band 5's
-hop divides all others, every band's frame ends on a multiple of band 5's hop: the job
+band behind it has a frame. Because every band's hop is the frame hop, a multiple
+of it or a divisor of it, every band's frame ends on the frame grid or on a whole division of it: the job
 stamps a `spec` frame at the newest band frame's end, and `SpecBand.age` is the exact time
 from each band's newest frame end to that stamp (nil before its first frame). The UI's
 glide moves a curve between two frames; since unchanged columns are identical in both, the

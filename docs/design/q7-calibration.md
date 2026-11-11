@@ -29,7 +29,7 @@ daemon; the mirrored state carries only the references, so a 2000-point curve ne
 in every snapshot.
 
 The **input setup** (K8) is daemon state too, one row per input channel:
-`{channel, mic: string | nil, curve: not_chosen | off | curve{label}}`. The input setup is
+`{channel, kind, pair?}`, the mic name and curve choice inside the kind (`InputKind`: `mic {mic: string | nil, curve: not_chosen | off | curve{label}}` | `line` | `digital`, `programme-meter.md` §1). The input setup is
 keyed by channel, not by device: it describes what is plugged into the session's inputs,
 and a device change shows up as a key mismatch, not as lost mic names.
 
@@ -201,22 +201,28 @@ it by. The peak readout therefore never carries the curve; this is stated in the
   override (tests and in-process daemons may run without a file — memory only). The store
   is machine configuration (it describes the hardware), so it lives with the config, not with
   the sessions in the data directory.
-- Format: JSON `{"format": "ac2-calibrations", "version": 3, "sensitivities": [CalEntry],
+- Format: JSON `{"format": "ac2-calibrations", "version": 4, "sensitivities": [CalEntry],
+  "lines": [LineCalEntry],
   "mics": [{"name", "curves": [{"reference": MicCurveRef, "points": [[Hz, dB]]}]}],
-  "inputs": [InputSetup]}`. Human-readable, diffable, hand-repairable.
+  "inputs": [InputSetup], "pairs": [Pair]}`. Human-readable, diffable, hand-repairable.
 - Writes are atomic: a temporary file in the same directory, flushed and synced, renamed
   over the old one, directory synced. A crash leaves the old file or the new one, never a
   mix.
 - Read once at daemon start. Missing → empty store (created on the first write).
-  **Another version** of this format (v1: one curve per device + input + mic and an on/off
+  **Version 3** (no line calibrations, no pairs, an input row holding a mic name and curve
+  choice instead of a kind) is read through a mapping and written as version 4 on the next change.
+  **Any other version** of this format (v1: one curve per device + input + mic and an on/off
   switch per input; v2: no calibration method) → the file is set aside as `<file>.v<N>` (the time
   appended when that exists; never deleted) and the daemon starts with an empty, writable
   store, logging what happened and how to recover: calibrate again (`ac2 cal spl`) and
   import the curves again (`ac2 cal curve import FILE --mic NAME`); the old file shows the
-  mic and file names. There is no migration: a version-1 entry's curve says nothing about
+  mic and file names. There is no migration of those: a version-1 entry's curve says nothing about
   which incidence angle it was, which is exactly what the new format makes explicit.
-  **Unparseable** (bad JSON, unknown `format`/`version`, an entry that fails §4
-  validation) → the daemon starts with an empty, **read-only** store: the file is never
+  **Unparseable** (bad JSON, unknown `format`, an entry that fails §4
+  validation) → the file is set aside as `<file>.damaged-<time>` (never deleted) and its
+  previous copy is read instead, else the store starts empty (`ac2d` `damage::recover`; the rig
+  lists the damaged file). A file that cannot be read at all, or cannot be moved aside → the
+  daemon starts with an empty, **read-only** store: the file is never
   overwritten; `cal.spl`, `cal.curve_*`, `cal.delete`, `session.inputs` and `cal.list` are refused
   (`refused`, detail `cal_store {path, reason}`) with "calibration store … is unreadable
   …; fix or move it away and restart ac2d". Measurements keep running uncalibrated.
@@ -236,8 +242,8 @@ it by. The peak readout therefore never carries the curve; this is stated in the
   curve.
 - refgen `calibration_mic_curve`: analog mic model points, exact cₙ at test frequencies,
   log-f band averages for 1/3-octave bands.
-- Daemon: store round trip, atomic write leaves no temp files, unparseable file refused
-  and untouched, matching rules (verified / other mic / other input / uncalibrated),
+- Daemon: store round trip, atomic write leaves no temp files, a damaged file set aside
+  and its previous copy read, matching rules (verified / other mic / other input / uncalibrated),
   frames carry the state, TF/RTA/spectrum corrected and flagged.
 - `cal.delete`: daemon (persisted across a restart, refused on an unreadable store,
   `not_found`), client fake, CLI `cal rm`, UI palette prompt.
@@ -426,7 +432,7 @@ disagree, is `invalid` with the reason.
 full_scale (V_FS), mic_sensitivity (open circuit, as stated), mic_sensitivity_from: typed |
 data_sheet {label, file_name}, loading?, uncertainty}`; the stored `sensitivity` counts the
 loading; `freq` is the tone's. A stored entry without `loading` (store file, capture sidecar)
-reads as none, which is what its sensitivity counts — the store keeps version 3. Frames carry
+reads as none, which is what its sensitivity counts — adding the field kept the store's version. Frames carry
 `CalStatus … {basis}` with the connection, sensitivity, whether it is the data sheet's, the
 loading and the uncertainty, so every readout words it from the frame: `electrical cal
 (in-line, data sheet 15.0 mV/Pa) ±1 dB · 2 h ago`, with a loading `electrical cal (in-line,

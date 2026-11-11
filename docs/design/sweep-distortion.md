@@ -195,7 +195,7 @@ The linear IR is windowed from `d − 0.1·L·ln 2` (just after H2's window) to 
 - `gate` = operator choice (`--gate 5ms`: free-field response without reflections, valid above
   ≈ 2/gate); default: up to the start of the noise window (the whole room response).
 - the stored IR spans from H5's window start to the end of the linear window, so the IR view
-  shows the harmonic impulses at `−L·ln k`; ≥ 16 384 points are decimated peak-preserving
+  shows the harmonic impulses at `−L·ln k`; more than 65 536 points (`IR_POINTS`) are decimated peak-preserving
   (signed extreme and Hilbert-envelope maximum per bucket).
 
 ## Accuracy
