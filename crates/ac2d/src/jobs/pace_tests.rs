@@ -315,11 +315,13 @@ fn spectra_are_stamped_where_their_frame_ended() {
         }
         s.emit(&r.em);
     }
-    let spectra: Vec<Frame> = r
+    let mut spectra: Vec<Frame> = r
         .frames()
         .into_iter()
         .filter(|f| matches!(f.data, FrameData::Spec(_)))
         .collect();
+    // A pass that stalls past REFRESH (a loaded test host) repeats the unchanged spectrum.
+    spectra.dedup_by_key(|f| f.stamp.audio_sample.0);
     assert!(spectra.len() > 20, "{} spectra", spectra.len());
     for f in &spectra {
         let end = f.stamp.audio_sample.0 + 1;
@@ -391,6 +393,19 @@ fn multires_bands_update_at_their_own_hops_with_exact_ages() {
         let FrameData::Spec(spec) = &f.data else {
             unreachable!()
         };
+        // A pass that stalls past REFRESH (a loaded test host) sends the unchanged spectrum
+        // again with its own stamp: a repeat, not a new frame.
+        if let Some((prev_end, p)) = &prev
+            && *prev_end == end
+        {
+            assert!(
+                p.iter()
+                    .zip(&spec.level)
+                    .all(|(a, b)| a.to_bits() == b.to_bits()),
+                "a repeat at {end} differs"
+            );
+            continue;
+        }
         assert_eq!(spec.level.len(), grid.len());
         let bands = spec.meta.bands.as_ref().expect("bands");
         assert_eq!(bands.bands.len(), 6);
