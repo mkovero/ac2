@@ -456,3 +456,44 @@ fn a_held_cross_rig_curve_has_a_faint_phase_and_says_its_delay_basis() {
         "{texts:?}"
     );
 }
+
+/// The faint phase is the held curve's alone: a curve beside it, not held, keeps its full
+/// phase.
+#[test]
+fn a_curve_beside_a_faint_one_keeps_its_full_phase() {
+    let c = cols(100);
+    let mut held = trace(&c, TraceKey::Live(MeasId(1)), 0.0);
+    held.faint_phase = true;
+    let mut other = trace(&c, TraceKey::Live(MeasId(2)), 0.0);
+    other.color = Theme::dark().trace_color(1);
+    let (held_rgb, other_rgb) = (held.color, other.color);
+    let s = transfer_scene(
+        &[held, other],
+        &DisplayCache::default(),
+        &Status::default(),
+        &ViewState::default(),
+        &Theme::dark(),
+        SIZE,
+    );
+    let same = |a: Color, b: Color| a.r == b.r && a.g == b.g && a.b == b.b;
+    let alphas = |rgb: Color| -> Vec<f32> {
+        s.scene.layers[1]
+            .polylines
+            .iter()
+            .filter(|l| same(l.stroke.color, rgb))
+            .map(|l| l.stroke.color.a)
+            .collect()
+    };
+    let (h, o) = (alphas(held_rgb), alphas(other_rgb));
+    assert!(h.len() >= 2 && o.len() >= 2, "{h:?} {o:?}");
+    let full = |v: &[f32]| v.iter().copied().fold(0.0, f32::max);
+    assert!(
+        h.iter()
+            .any(|a| (a - full(&h) * FAINT_PHASE_ALPHA).abs() < 1e-6),
+        "the held curve's phase is faint: {h:?}"
+    );
+    assert!(
+        o.iter().all(|a| (a - full(&o)).abs() < 1e-6),
+        "the other curve is drawn whole: {o:?}"
+    );
+}

@@ -252,8 +252,10 @@ the 60 s window) holds an older result, or none. A fallback to a crystal (+5.6 p
 window after about 20 s (0.12 ms of slide), 40 s at most (0.22 ms); a 2 ppm step trips the
 60 s window at up to 60 s. With no such result it shows nothing. The held
 result is marked the way decision 8b marks an independent-epoch trace: the magnitude
-stands, the phase is drawn faint under *clocks not locked* (or *clocks: can't tell*). Every
-average taken with drifting clocks is wrong (`multi-device.md` §7), so this is a refusal.
+stands, the phase is drawn faint under *clocks not locked* (or *clocks: can't tell*). It
+stays faint for as long as it is held, also when the why changes under it (a re-anchor while
+stopped measures the clocks again: *Measuring clocks…: averaging waits · result from
+before*). Every average taken with drifting clocks is wrong (`multi-device.md` §7), so this is a refusal.
 
 ### 3.4 After a passage through Not locked or Can't tell
 
@@ -267,9 +269,10 @@ step:
 - **Tracking on:** the finder's tracking relocks from the held delay (`jobs/finder.rs`); the
   pane says *clocks were not locked for 3 min 10 s · delay tracked again: 13.41 ms (was
   12.38 ms)*. If tracking comes back **ambiguous**, the operator's pick is asked as today
-  (decision 1c), and the phase stays faint until it is answered.
+  (decision 1c: *delay ambiguous: X to pick one*, X being the finder's key as bound), and
+  the phase stays faint until it is answered.
 - **Tracking off:** the delay is not touched; the phase is drawn faint under *delay may have
-  moved: find it again* until a find runs.
+  moved: X to find it again* until a find runs.
 
 A ketunkolo-style flaky link (−228 ppm for 11 min) is just Not locked.
 
@@ -320,9 +323,11 @@ offset** (Dante's receiver latency).
   (its stamp is the first sample's), waits up to a period for B's hand-off, crosses the
   network, and waits up to one of A's periods for A's hand-off. So the default is
   **2 × B's period + A's period + 2 ms** (phase C's one-way p99.9 was 0.9–1.3 ms): 10 ms at
-  256 frames / 96 kHz on both, 66 ms at 1024 / 48 kHz. A setting on A's Audio & I/O page
-  (*Wait for remote inputs: 10 ms*, default shown beside it), from that default (below it
-  every remote sample is late by construction) up to 500 ms (WAN).
+  256 frames / 96 kHz on both, 66 ms at 1024 / 48 kHz. A setting on A's Connection page,
+  under *Between rigs* beside the clocks and the link it is about (*Wait for remote inputs
+  (link offset): 10 ms*, default shown beside it), from that default (below it every remote
+  sample is late by construction) up to 500 ms (WAN). A value set below the default is raised
+  to it, and the line says both (*1 ms set · 17 ms in force, the least that works*).
   Changing it re-anchors and restarts averages, so it is a session setting, not a live knob.
 - **Late frames** are gaps, and a gap costs a transfer function its averages: today any
   non-contiguous block restarts the MTW and the finder (`jobs/transfer.rs`). For a gap only

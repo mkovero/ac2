@@ -58,7 +58,7 @@ fn agreeing_clocks_say_so_on_the_pane_and_nowhere_loudly() {
     let r = remote(PeerRelation::Agree);
     let x = tf(RemoteSide::Measurement, CrossTfState::Running);
     assert_eq!(
-        status_lines(&x, &r),
+        status_lines(&x, &r, "X"),
         vec!["clocks agree within 2 ppm · ketunkolo"]
     );
     assert_eq!(banner("TF 3", &x, &r, "pupu"), None);
@@ -76,7 +76,7 @@ fn not_locked_stops_holds_and_says_what_to_do() {
     });
     let x = tf(RemoteSide::Measurement, STOPPED_HELD);
     assert_eq!(
-        status_lines(&x, &r)[0],
+        status_lines(&x, &r, "X")[0],
         "Clocks not locked: averaging stopped · ketunkolo"
     );
     assert_eq!(faint_phase(&x), Some("clocks not locked"));
@@ -152,7 +152,7 @@ fn measuring_waits_without_a_banner() {
         },
     );
     assert_eq!(
-        status_lines(&x, &r)[0],
+        status_lines(&x, &r, "X")[0],
         "Measuring clocks…: averaging waits · ketunkolo"
     );
     assert_eq!(banner("TF 3", &x, &r, "pupu"), None);
@@ -172,7 +172,7 @@ fn a_relock_says_how_long_and_where_the_delay_went() {
         },
     });
     assert_eq!(
-        status_lines(&x, &r),
+        status_lines(&x, &r, "X"),
         vec![
             "clocks agree within 2 ppm · ketunkolo",
             "clocks were not locked for 3 min 10 s · delay tracked again: 13.41 ms (was \
@@ -188,8 +188,8 @@ fn a_relock_says_how_long_and_where_the_delay_went() {
         outcome: RelockOutcome::FindAgain,
     });
     assert_eq!(
-        relock_text(&x).as_deref(),
-        Some("clocks could not be told for 16.0 s · delay may have moved: find it again")
+        relock_text(&x, "X").as_deref(),
+        Some("clocks could not be told for 16.0 s · delay may have moved: X to find it again")
     );
     assert_eq!(faint_phase(&x), Some("delay may have moved: find it again"));
     assert_eq!(list_cue(&x).as_deref(), Some("delay may have moved"));
@@ -201,6 +201,76 @@ fn a_relock_says_how_long_and_where_the_delay_went() {
         outcome: RelockOutcome::Ambiguous,
     });
     assert_eq!(faint_phase(&x), Some("delay ambiguous: pick one"));
+    // The key named is the one given: the app's binding, the CLI's command.
+    assert_eq!(
+        relock_text(&x, "X").as_deref(),
+        Some("clocks were not locked for 16.0 s · delay ambiguous: X to pick one")
+    );
+    assert_eq!(
+        relock_text(&x, "`ac2 delay find`").as_deref(),
+        Some("clocks were not locked for 16.0 s · delay ambiguous: `ac2 delay find` to pick one")
+    );
+}
+
+/// The daemon keeps a held result across a change of why (a re-anchor while stopped moves
+/// Not locked to Measuring): the curve is still the one from before, so its phase stays
+/// faint and the words say it is from before.
+#[test]
+fn a_held_result_stays_faint_while_the_clocks_are_measured_again() {
+    let r = remote(PeerRelation::Measuring);
+    let x = tf(
+        RemoteSide::Measurement,
+        CrossTfState::Stopped {
+            why: StopWhy::Measuring,
+            held: true,
+        },
+    );
+    assert_eq!(
+        faint_phase(&x),
+        Some("measuring clocks: result from before")
+    );
+    assert_eq!(
+        stop_verdict(&x),
+        Some("Measuring clocks…: averaging waits · result from before")
+    );
+    let b = pane_banners("TF 3", &x, &r, "pupu", "X");
+    assert_eq!(
+        b[0].detail.as_deref(),
+        Some(
+            "less than a minute of audio from ketunkolo since the stream started: the clocks \
+             between the rigs are not known yet. The result from before stands; its phase is \
+             faint."
+        )
+    );
+    let x = tf(
+        RemoteSide::Measurement,
+        CrossTfState::Stopped {
+            why: StopWhy::Measuring,
+            held: false,
+        },
+    );
+    assert_eq!(faint_phase(&x), None);
+}
+
+/// For a moment after a trip the transfer function still averages (the gate acts on audio
+/// past the link offset) while the relation already says not locked: the title must not
+/// claim agreement the chip denies.
+#[test]
+fn running_without_agreement_does_not_say_the_clocks_agree() {
+    let r = remote(PeerRelation::NotLocked {
+        reason: NotLockedReason::CrossRate {
+            ppm: 5.6,
+            over: Seconds(40.0),
+        },
+    });
+    let x = tf(RemoteSide::Measurement, CrossTfState::Running);
+    assert_eq!(caption(&x, &r), None);
+    assert_eq!(
+        status_lines(&x, &r, "X")[0],
+        "CLOCKS NOT LOCKED +5.6 ppm over 40 s · ketunkolo"
+    );
+    let r = remote(PeerRelation::Measuring);
+    assert_eq!(caption(&x, &r), None);
 }
 
 #[test]
@@ -213,7 +283,7 @@ fn slip_drift_and_late_are_cues_not_refusals() {
     x.delay_drift = Some(Seconds(0.09e-3));
     x.late = true;
     assert_eq!(
-        status_lines(&x, &r),
+        status_lines(&x, &r, "X"),
         vec![
             "clocks agree within 2 ppm · ketunkolo",
             "ketunkolo's audio slipped 4.90 ms · delay moved with it",
@@ -332,7 +402,7 @@ fn the_pane_banner_says_the_stop_why_and_the_cues() {
         },
     });
     let x = tf(RemoteSide::Measurement, STOPPED_HELD);
-    let b = pane_banners("TF 3", &x, &r, "pupu");
+    let b = pane_banners("TF 3", &x, &r, "pupu", "X");
     assert_eq!(b.len(), 1);
     assert_eq!(b[0].text, "Clocks not locked: averaging stopped");
     assert_eq!(
@@ -343,6 +413,23 @@ fn the_pane_banner_says_the_stop_why_and_the_cues() {
         )
     );
     assert!(b[0].warn);
+    let x = tf(
+        RemoteSide::Measurement,
+        CrossTfState::Stopped {
+            why: StopWhy::NotLocked,
+            held: false,
+        },
+    );
+    assert_eq!(
+        pane_banners("TF 3", &x, &r, "pupu", "X")[0]
+            .detail
+            .as_deref(),
+        Some(
+            "TF 3 stopped: pupu and ketunkolo are not on one clock (+5.6 ppm). Lock both \
+             interfaces to one reference. No result was kept from before."
+        )
+    );
+    let x = tf(RemoteSide::Measurement, STOPPED_HELD);
     assert_eq!(caption(&x, &r), None, "the banner says it");
 
     // Measuring: a note, no verdict of a fault.
@@ -354,8 +441,15 @@ fn the_pane_banner_says_the_stop_why_and_the_cues() {
             held: false,
         },
     );
-    let b = pane_banners("TF 3", &x, &r, "pupu");
+    let b = pane_banners("TF 3", &x, &r, "pupu", "X");
     assert_eq!(b[0].text, "Measuring clocks…: averaging waits");
+    assert_eq!(
+        b[0].detail.as_deref(),
+        Some(
+            "less than a minute of audio from ketunkolo since the stream started: the clocks \
+             between the rigs are not known yet. No result was kept from before."
+        )
+    );
     assert!(!b[0].warn);
 
     // Running: the clock line goes in the title; the cues are banners.
@@ -365,7 +459,7 @@ fn the_pane_banner_says_the_stop_why_and_the_cues() {
         caption(&x, &r).as_deref(),
         Some("clocks agree within 2 ppm · ketunkolo")
     );
-    assert!(pane_banners("TF 3", &x, &r, "pupu").is_empty());
+    assert!(pane_banners("TF 3", &x, &r, "pupu", "X").is_empty());
     x.relock = Some(Relock {
         after: Seconds(16.0),
         from: StopWhy::NotLocked,
@@ -373,13 +467,13 @@ fn the_pane_banner_says_the_stop_why_and_the_cues() {
     });
     x.delay_drift = Some(Seconds(0.3e-3));
     x.late = true;
-    let b = pane_banners("TF 3", &x, &r, "pupu");
+    let b = pane_banners("TF 3", &x, &r, "pupu", "X");
     let texts: Vec<(&str, bool)> = b.iter().map(|b| (b.text.as_str(), b.warn)).collect();
     assert_eq!(
         texts,
         vec![
             (
-                "clocks were not locked for 16.0 s · delay may have moved: find it again",
+                "clocks were not locked for 16.0 s · delay may have moved: X to find it again",
                 true
             ),
             ("delay drifting 0.30 ms/min: path or clocks", false),
@@ -388,6 +482,17 @@ fn the_pane_banner_says_the_stop_why_and_the_cues() {
                 true
             ),
         ]
+    );
+    assert_eq!(
+        b[0].detail.as_deref(),
+        Some("X runs the delay finder; the phase is faint until the delay is found again")
+    );
+    assert_eq!(
+        b[2].detail.as_deref(),
+        Some(
+            "audio from ketunkolo keeps arriving after it is needed: Settings › Connection › \
+             Wait for remote inputs"
+        )
     );
 }
 
@@ -408,6 +513,19 @@ fn the_link_offset_reads_a_time_or_default() {
     assert_eq!(
         link_offset_line(Some(Seconds(0.03)), &r),
         "Wait for remote inputs (link offset): 30 ms"
+    );
+    // Set below the least that works: the daemon runs the least, and the line says both.
+    let r = RemoteState {
+        link_offset: Some(Seconds(0.017)),
+        ..r
+    };
+    assert_eq!(
+        link_offset_line(Some(Seconds(0.001)), &r),
+        "Wait for remote inputs (link offset): 1 ms set · 17 ms in force, the least that works"
+    );
+    assert_eq!(
+        link_offset_line(Some(Seconds(0.017)), &r),
+        "Wait for remote inputs (link offset): 17 ms"
     );
     assert_eq!(
         link_offset_toast(Some(0.03)),

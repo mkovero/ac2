@@ -28,31 +28,31 @@ pub fn pane_title(label: &str, x: &CrossRigTransfer, r: &RemoteState) -> String 
 }
 
 /// Why it does not average, as the pane says it over the held curve; the verdict stays
-/// with the plot chrome hidden. `None` while it averages.
+/// with the plot chrome hidden. `None` while it averages. A result held from before a
+/// re-anchor is said even while the clocks are measured again: the curve on screen is not
+/// what the clocks now measure.
 pub fn stop_verdict(x: &CrossRigTransfer) -> Option<&'static str> {
     match x.state {
         CrossTfState::Running => None,
-        CrossTfState::Stopped { why, .. } => Some(match why {
-            StopWhy::Measuring => "Measuring clocks…: averaging waits",
-            StopWhy::NotLocked => "Clocks not locked: averaging stopped",
-            StopWhy::CantTell => "Clocks: can't tell: averaging stopped",
+        CrossTfState::Stopped { why, held } => Some(match (why, held) {
+            (StopWhy::Measuring, false) => "Measuring clocks…: averaging waits",
+            (StopWhy::Measuring, true) => "Measuring clocks…: averaging waits · result from before",
+            (StopWhy::NotLocked, _) => "Clocks not locked: averaging stopped",
+            (StopWhy::CantTell, _) => "Clocks: can't tell: averaging stopped",
         }),
     }
 }
 
 /// The phase is drawn faint (the magnitude stands, as for an independent-epoch trace) under
-/// these words: a held result, or a delay that may have moved and waits for the operator.
+/// these words: any held result (its time base is not known to hold across the stop,
+/// whatever the clocks say now), or a delay that may have moved and waits for the operator.
 pub fn faint_phase(x: &CrossRigTransfer) -> Option<&'static str> {
-    match x.state {
-        CrossTfState::Stopped {
-            why: StopWhy::NotLocked,
-            held: true,
-        } => return Some("clocks not locked"),
-        CrossTfState::Stopped {
-            why: StopWhy::CantTell,
-            held: true,
-        } => return Some("clocks: can't tell"),
-        _ => {}
+    if let CrossTfState::Stopped { why, held: true } = x.state {
+        return Some(match why {
+            StopWhy::NotLocked => "clocks not locked",
+            StopWhy::CantTell => "clocks: can't tell",
+            StopWhy::Measuring => "measuring clocks: result from before",
+        });
     }
     match x.relock.map(|r| r.outcome) {
         Some(RelockOutcome::FindAgain) => Some("delay may have moved: find it again"),
@@ -62,8 +62,9 @@ pub fn faint_phase(x: &CrossRigTransfer) -> Option<&'static str> {
 }
 
 /// What a passage through a stop did to the delay: *clocks were not locked for 3 min 10 s ·
-/// delay tracked again: 13.41 ms (was 12.38 ms)*.
-pub fn relock_text(x: &CrossRigTransfer) -> Option<String> {
+/// delay tracked again: 13.41 ms (was 12.38 ms)*. `find`: how the operator runs the delay
+/// finder where the words are read (the app's key, `ac2 delay find` on the command line).
+pub fn relock_text(x: &CrossRigTransfer, find: &str) -> Option<String> {
     let r = x.relock?;
     let span = format::duration(r.after.0);
     let passage = match r.from {
@@ -78,8 +79,8 @@ pub fn relock_text(x: &CrossRigTransfer) -> Option<String> {
             format::delay(delay.0),
             format::delay(was.0)
         ),
-        RelockOutcome::Ambiguous => "delay ambiguous: pick one".to_owned(),
-        RelockOutcome::FindAgain => "delay may have moved: find it again".to_owned(),
+        RelockOutcome::Ambiguous => format!("delay ambiguous: {find} to pick one"),
+        RelockOutcome::FindAgain => format!("delay may have moved: {find} to find it again"),
     };
     Some(format!("{passage} · {delay}"))
 }
@@ -96,13 +97,14 @@ fn drift_text(x: &CrossRigTransfer) -> Option<String> {
 
 /// The pane's status lines: the clock line first (*clocks agree within 2 ppm · ketunkolo*,
 /// or why it stopped), then a relock for a minute, a slip, the drift and late cues.
-pub fn status_lines(x: &CrossRigTransfer, r: &RemoteState) -> Vec<String> {
+/// `find`: as for [`relock_text`].
+pub fn status_lines(x: &CrossRigTransfer, r: &RemoteState, find: &str) -> Vec<String> {
     let rig = name_of(r, x.rig);
     let mut out = vec![match stop_verdict(x) {
-        None => format!("clocks agree within 2 ppm · {rig}"),
+        None => format!("{} · {rig}", running_clock_line(x, r)),
         Some(v) => format!("{v} · {rig}"),
     }];
-    out.extend(relock_text(x));
+    out.extend(relock_text(x, find));
     if let Some(s) = x.slip {
         out.push(format!(
             "{rig}'s audio slipped {} · delay moved with it",
@@ -116,6 +118,22 @@ pub fn status_lines(x: &CrossRigTransfer, r: &RemoteState) -> Vec<String> {
         out.push(late_text(r));
     }
     out
+}
+
+/// The clock line of a transfer function that averages. It still averages for a moment
+/// after the relation leaves Agree (the gate acts on the audio once it is past the link
+/// offset), and then the relation is said, not the agreement it no longer has.
+fn running_clock_line(x: &CrossRigTransfer, r: &RemoteState) -> String {
+    match r
+        .rigs
+        .iter()
+        .find(|g| g.rig == x.rig)
+        .map(|g| &g.clock.relation)
+    {
+        Some(PeerRelation::Agree) => "clocks agree within 2 ppm".to_owned(),
+        Some(rel) => crate::between_rigs::relation_text(r, rel),
+        None => "clocks: can't tell".to_owned(),
+    }
 }
 
 /// *link offset too small: raise Wait for remote inputs (now 10 ms)*.
@@ -216,7 +234,7 @@ pub fn status_cli(r: &RemoteState, measurements: &[Measurement], ours: &str) -> 
             continue;
         };
         out.push(format!("between rigs {}", pane_title(&m.config.name, x, r)));
-        for l in status_lines(x, r) {
+        for l in status_lines(x, r, "`ac2 delay find`") {
             out.push(format!("  {l}"));
         }
         if let Some(b) = banner(&m.config.name, x, r, ours) {
@@ -306,10 +324,16 @@ fn no_audio(r: &RemoteState, rig: &RemoteRig, inputs: &[RemoteInput]) -> bool {
         })
 }
 
-/// The clock line a pane's title carries while the transfer function averages: *clocks
-/// agree within 2 ppm · ketunkolo*. Stopped, the pane's banner says it instead.
+/// The clock line a pane's title carries while the transfer function averages and the
+/// clocks agree: *clocks agree within 2 ppm · ketunkolo*. Otherwise the pane's banner and
+/// the top bar's chip say it, and the title says nothing it would contradict.
 pub fn caption(x: &CrossRigTransfer, r: &RemoteState) -> Option<String> {
-    matches!(x.state, CrossTfState::Running).then(|| status_lines(x, r).remove(0))
+    let agree = r
+        .rigs
+        .iter()
+        .any(|g| g.rig == x.rig && g.clock.relation == PeerRelation::Agree);
+    (matches!(x.state, CrossTfState::Running) && agree)
+        .then(|| format!("clocks agree within 2 ppm · {}", name_of(r, x.rig)))
 }
 
 /// A line of a cross-rig transfer function's banner strip on its pane: its stop verdict
@@ -324,24 +348,32 @@ pub struct PaneBanner {
 }
 
 /// The banner lines of the pane showing cross-rig transfer function `x` (`label` its name,
-/// `ours` this rig's name).
+/// `ours` this rig's name, `find` as for [`relock_text`]).
 pub fn pane_banners(
     label: &str,
     x: &CrossRigTransfer,
     r: &RemoteState,
     ours: &str,
+    find: &str,
 ) -> Vec<PaneBanner> {
     let rig = name_of(r, x.rig);
     let mut out = Vec::new();
     if let (Some(v), CrossTfState::Stopped { why, held }) = (stop_verdict(x), x.state) {
-        let detail = match (why, banner(label, x, r, ours)) {
-            (StopWhy::Measuring, _) | (_, None) => format!(
-                "less than a minute of audio from {rig} since the stream started: the clocks                  between the rigs are not known yet"
-            ),
-            (_, Some(b)) if held => {
-                format!("{b} The result from before stands; its phase is faint.")
-            }
-            (_, Some(b)) => format!("{b} No result was kept from before."),
+        let why_text = match why {
+            StopWhy::Measuring => Some(format!(
+                "less than a minute of audio from {rig} since the stream started: the clocks \
+                 between the rigs are not known yet."
+            )),
+            _ => banner(label, x, r, ours),
+        };
+        let kept = if held {
+            "The result from before stands; its phase is faint."
+        } else {
+            "No result was kept from before."
+        };
+        let detail = match why_text {
+            Some(w) => format!("{w} {kept}"),
+            None => kept.to_owned(),
         };
         out.push(PaneBanner {
             text: v.to_owned(),
@@ -349,14 +381,16 @@ pub fn pane_banners(
             warn: why != StopWhy::Measuring,
         });
     }
-    if let Some(t) = relock_text(x) {
+    if let Some(t) = relock_text(x, find) {
         let asks = matches!(
             x.relock.map(|r| r.outcome),
             Some(RelockOutcome::FindAgain | RelockOutcome::Ambiguous)
         );
         out.push(PaneBanner {
             text: t,
-            detail: asks.then(|| "the phase is faint until the delay is found again".into()),
+            detail: asks.then(|| {
+                format!("{find} runs the delay finder; the phase is faint until the delay is found again")
+            }),
             warn: asks,
         });
     }
@@ -385,7 +419,8 @@ pub fn pane_banners(
         out.push(PaneBanner {
             text: late_text(r),
             detail: Some(format!(
-                "audio from {rig} keeps arriving after it is needed: Settings › Connection ›                  {LINK_OFFSET}"
+                "audio from {rig} keeps arriving after it is needed: Settings › Connection › \
+                 {LINK_OFFSET}"
             )),
             warn: true,
         });
@@ -397,9 +432,17 @@ pub fn pane_banners(
 pub const LINK_OFFSET: &str = "Wait for remote inputs";
 
 /// The link offset control's line: *Wait for remote inputs (link offset): 30 ms*, or
-/// *…: default (10 ms)*. `set`: the session's own setting; `r`: what the daemon runs.
+/// *…: default (10 ms)*. `set`: the session's own setting; `r`: what the daemon runs. A set
+/// value below the least that works is raised to it by the daemon (below it every remote
+/// sample is late), and then the line says both: *1 ms set · 17 ms in force, the least
+/// that works*.
 pub fn link_offset_line(set: Option<ac2_proto::units::Seconds>, r: &RemoteState) -> String {
     let v = match (set, r.link_offset) {
+        (Some(s), Some(o)) if o.0 > s.0 && format::ms(o.0, 0) != format::ms(s.0, 0) => format!(
+            "{} set · {} in force, the least that works",
+            format::ms(s.0, 0),
+            format::ms(o.0, 0)
+        ),
         (Some(s), _) => format::ms(s.0, 0),
         (None, Some(o)) => format!("default ({})", format::ms(o.0, 0)),
         (None, None) => "default".to_owned(),

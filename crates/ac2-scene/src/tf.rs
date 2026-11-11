@@ -393,11 +393,11 @@ fn overlay_floor(c: &mut Canvas, plot: Rect, o: &CoherenceOverlay, theme: &Theme
     canvas::hline(c, plot, o.band.bottom(), floor);
 }
 
-/// Builds the transfer view.
 /// How much of its own opacity a faint phase keeps: clearly behind the magnitude's
 /// weight, still readable over the grid.
 pub const FAINT_PHASE_ALPHA: f32 = 0.3;
 
+/// Builds the transfer view.
 pub fn transfer_scene(
     traces: &[TfTrace<'_>],
     cache: &DisplayCache,

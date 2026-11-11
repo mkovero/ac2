@@ -462,11 +462,20 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
 /// between the rigs in words, a problem in capitals and the warning colour. A click opens
 /// the Connection page, where *Between rigs* says why.
 fn rig_chips(st: &crate::state::AppState, ch: &Chrome) -> Vec<Item> {
-    st.rig_chips()
+    chip_items(st.rig_chips(), ch)
+}
+
+/// The chips' items. A warning chip is kept at any width: on a narrow bar (a kiosk) it
+/// would otherwise go and leave the clock problem said nowhere but in the scrolling line.
+fn chip_items(chips: Vec<ac2_scene::cross_rig::RigChip>, ch: &Chrome) -> Vec<Item> {
+    chips
         .into_iter()
         .map(|c| {
             let (prio, color) = if c.warn { (66, ch.warn) } else { (35, ch.dim) };
             let mut it = Item::new(prio, vec![RichText::new(c.text).color(color)]).sep();
+            if c.warn {
+                it = it.kept();
+            }
             it.hover = Some(ac2_scene::cross_rig::CHIP_TIP.to_owned());
             it.click = Some(CommandId::BetweenRigs);
             it
@@ -929,7 +938,20 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
 
 #[cfg(test)]
 mod tests {
-    use super::fit_bar;
+    use super::{chip_items, fit_bar};
+
+    #[test]
+    fn a_warning_rig_chip_is_never_dropped() {
+        use ac2_scene::cross_rig::RigChip;
+        let ch = crate::theme::chrome(&ac2_scene::theme::Theme::dark());
+        let chip = |warn| RigChip {
+            text: "pupu · x".into(),
+            warn,
+        };
+        let items = chip_items(vec![chip(true), chip(false)], &ch);
+        assert!(!items[0].droppable, "a clock problem stays in the bar");
+        assert!(items[1].droppable, "a quiet chip may go");
+    }
 
     #[test]
     fn the_bar_shortens_then_drops_the_least_important_first() {

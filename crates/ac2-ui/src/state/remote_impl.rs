@@ -143,12 +143,22 @@ impl AppState {
         Some((x, &st.remote, self.rig_name(rig)))
     }
 
-    /// [`Self::cross_rig_of`] on the rig shown.
+    /// [`Self::cross_rig_of`] on the rig in `rig`: the one whose measurement `meas` is, also
+    /// while a pane of a rig in the background is drawn (a visit), when it is not the shown
+    /// rig. A measurement id means nothing on another rig.
     pub fn cross_rig(
         &self,
         meas: ac2_proto::units::MeasId,
     ) -> Option<(&ac2_proto::model::CrossRigTransfer, &RemoteState, String)> {
-        self.cross_rig_of(self.active(), meas)
+        self.cross_rig_of(self.rig.id, meas)
+    }
+
+    /// How the words of a transfer function across rigs name the delay finder: its key in
+    /// a transfer pane, else where the palette has it.
+    pub fn find_delay_key(&self) -> String {
+        self.keys
+            .label(CommandId::InsertDelay, Scope::Transfer)
+            .unwrap_or_else(|| self.keys.palette_entry(CommandId::InsertDelay.title()))
     }
 
     /// The top bar's chip per rig the session takes inputs from, beside the rig drop-down.
@@ -169,7 +179,7 @@ impl AppState {
         let Some(st) = self.daemon() else {
             return Vec::new();
         };
-        let ours = self.rig_name(self.active());
+        let ours = self.rig_label(&self.rig);
         st.remote
             .transfers
             .iter()

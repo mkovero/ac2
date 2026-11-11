@@ -163,7 +163,10 @@ ketunkolo are not on one clock (+5.6 ppm). Lock both interfaces to one reference
 the clocks agree again the averages restart; with delay tracking on, the finder tracks the
 delay again from the held one and says it for a minute (*clocks were not locked for 3 min
 10 s · delay tracked again: 13.41 ms (was 12.38 ms)*), or asks for a pick if two arrivals
-fit; with tracking off it says *delay may have moved: find it again*. Its delay includes
+fit (*delay ambiguous: X to pick one*); with tracking off it says *delay may have moved: X to
+find it again* (X is the finder's key as bound; `ac2 status` names `ac2 delay find`).
+A result held from before stays faint while the clocks are measured again after a re-anchor
+(*Measuring clocks…: averaging waits · result from before*). Its delay includes
 the offset between the two rigs' clocks, which is not measured. It averages only on remote
 audio placed by capture time: an input placed on arrival (a system clock not yet synced,
 no clock map yet) moves to capture time by itself once it can, and the clocks are measured
@@ -183,12 +186,13 @@ is never only a colour):
 - **Top bar:** a chip per remote rig beside the rig drop-down — *ketunkolo · clocks
   agree*, *ketunkolo · measuring clocks…*, or in the warning colour and capitals
   *ketunkolo · CLOCKS NOT LOCKED +5.6 ppm*, *CLOCKS: CAN'T TELL*, *LINK OFFSET TOO SMALL*,
-  *NO AUDIO*. A click opens Settings › Connection. While a cross-rig transfer function is
+  *NO AUDIO*. A warning chip stays however narrow the bar. A click opens Settings ›
+  Connection. While a cross-rig transfer function is
   stopped, the bar's status line carries why and what to do (*Main L stopped: pupu and
   ketunkolo are not on one clock (+5.6 ppm). Lock both interfaces to one reference.*).
 - **The pane:** its title names the remote side (*Transfer · TF 3 · meas from ketunkolo*,
   *· ref from ketunkolo*), its caption starts *clocks agree within 2 ppm · ketunkolo*
-  while it averages. Stopped, its banner strip says *Clocks not locked: averaging stopped*
+  while it averages and the clocks agree. Stopped, its banner strip says *Clocks not locked: averaging stopped*
   (with **T** too: banners are not plot chrome) and the held curve's phase is faint; the
   relock, slip, drift and *link offset too small* lines show there as well. The legend's
   delay and the IR's time zero say *includes the clock offset between pupu and ketunkolo
@@ -205,7 +209,8 @@ relation and why, the last change, the link and its bit rate, the link offset, l
 slips and the arrival margin; `ac2 status` prints the same. Its last line, *Wait for remote
 inputs (link offset): default (10 ms)*, sets the link offset: **Enter** on it, type a time
 (`30ms`, or `30`: a bare number is ms) or `default`, **Enter** reopens the session with it,
-as `ac2 session link-offset` does. On the rig that gives its inputs, the rigs admitted to
+as `ac2 session link-offset` does. A time below the least that works is raised to it, and
+the line says both (*1 ms set · 17 ms in force, the least that works*). On the rig that gives its inputs, the rigs admitted to
 it are listed there and removed with **Delete** twice.
 
 ### Log files

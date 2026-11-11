@@ -60,6 +60,20 @@ fn now() -> crate::scenes::Now {
     }
 }
 
+const SIZE: ac2_scene::primitives::Viewport = ac2_scene::primitives::Viewport {
+    width: 900.0,
+    height: 500.0,
+};
+
+/// The texts of the banner strip as transfer pane `p` draws it.
+fn drawn_banners(st: &AppState, p: PaneId) -> Vec<String> {
+    crate::scenes::transfer(st, p, &ac2_scene::theme::Theme::dark(), SIZE, now())
+        .banners
+        .into_iter()
+        .map(|b| b.text)
+        .collect()
+}
+
 /// The banner strip of the pane showing Main L.
 fn pane_banners(t: &T) -> Vec<(BannerKind, String)> {
     let m = t.st.meas(MeasId(1));
@@ -153,9 +167,52 @@ fn clocks_not_locked_stop_it_and_say_so_everywhere() {
         row.expect("Main L's row").text.contains("running · clocks"),
         "the short cue"
     );
-    // T hides the plot chrome; banners are not chrome.
-    t.st.update(Msg::Command(CommandId::PlotChrome), &t.keys);
-    assert_eq!(pane_banners(&t).len(), 1);
+    // T hides the plot chrome, down to the traces alone; banners are not chrome.
+    t.st.layout.set_focus(p);
+    for _ in 0..2 {
+        t.st.update(Msg::Command(CommandId::PlotChrome), &t.keys);
+    }
+    assert_eq!(t.st.view_for(p).chrome, ac2_scene::view::PlotChrome::Bare);
+    let drawn = drawn_banners(&t.st, p);
+    assert!(
+        drawn
+            .iter()
+            .any(|b| b == "Clocks not locked: averaging stopped"),
+        "{drawn:?}"
+    );
+}
+
+/// A pane of a rig in the background is drawn with that rig swapped in; its cross-rig
+/// transfer function is that rig's, not the one of the rig shown, whose measurement ids
+/// are another rig's.
+#[test]
+fn a_cross_rig_transfer_in_another_rigs_pane_is_that_rigs() {
+    let mut t = two_mirrored();
+    cross_tf(&mut t, NOT_LOCKED, HELD);
+    let p = t.pane(PaneKind::Transfer);
+    assert_eq!(t.st.pane_meas(p).map(|m| m.id), Some(MeasId(1)));
+    let tab = t.st.active();
+    pick(&mut t, RigRow::Rig(PUPU));
+    assert_eq!(
+        t.st.layout.view(p).expect("pane").rig,
+        PaneRig::Rig(tab),
+        "the pane stays with its rig"
+    );
+    // Pupu, shown, measures nothing across rigs: what the pane shows is the tab rig's.
+    let drawn =
+        t.st.visit(tab, |st| drawn_banners(st, p))
+            .expect("the pane's rig");
+    assert!(
+        drawn
+            .iter()
+            .any(|b| b == "Clocks not locked: averaging stopped"),
+        "{drawn:?}"
+    );
+    let caption = t.st.visit(tab, |st| st.pane_caption(p)).flatten();
+    assert!(
+        !caption.unwrap_or_default().contains("clocks agree"),
+        "a stopped transfer function's pane never says the clocks agree"
+    );
 }
 
 /// After a relock with tracking off, the pane says what the passage did and that the delay
@@ -178,7 +235,8 @@ fn a_relock_and_the_cues_are_said_on_the_pane() {
         vec![
             (
                 BannerKind::BetweenRigs,
-                "clocks were not locked for 3 min 10 s · delay may have moved: find it again"
+                "clocks were not locked for 3 min 10 s · delay may have moved: X to find it \
+                 again"
                     .to_string()
             ),
             (
@@ -200,8 +258,9 @@ fn a_relock_and_the_cues_are_said_on_the_pane() {
     );
 }
 
-/// An ambiguous relock asks for the operator's pick through the decision-1c candidates: X
-/// finds, an ambiguous answer opens the list for the cross-rig measurement as for any.
+/// An ambiguous relock asks for the operator's pick through the decision-1c candidates: the
+/// pane's banner names the key the key table binds to the delay finder, that key in the
+/// pane finds, an ambiguous answer opens the list for the cross-rig measurement as for any.
 #[test]
 fn an_ambiguous_relock_opens_the_pick() {
     use ac2_proto::model::DelayPick;
@@ -214,8 +273,21 @@ fn an_ambiguous_relock_opens_the_pick() {
             outcome: RelockOutcome::Ambiguous,
         });
     });
-    t.st.update(Msg::SelectMeas(MeasId(1)), &t.keys);
-    let r = t.st.update(Msg::Command(CommandId::InsertDelay), &t.keys);
+    let k = t
+        .keys
+        .label(CommandId::InsertDelay, crate::keys::Scope::Transfer)
+        .expect("the finder has a key in a transfer pane");
+    assert_eq!(k, "X");
+    assert_eq!(
+        pane_banners(&t),
+        vec![(
+            BannerKind::BetweenRigs,
+            format!("clocks were not locked for 16.0 s · delay ambiguous: {k} to pick one")
+        )]
+    );
+    let p = t.pane(PaneKind::Transfer);
+    t.st.layout.set_focus(p);
+    let r = key(&mut t, &k);
     assert!(
         r.iter().any(|(_, q)| matches!(
             q,
