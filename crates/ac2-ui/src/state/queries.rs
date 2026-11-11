@@ -57,14 +57,6 @@ impl AppState {
             && !self.keys_on_trace()
     }
 
-    /// Measurements pane `p` can show, in list order.
-    pub fn pane_candidates(&self, p: PaneKind) -> Vec<&Measurement> {
-        self.measurements()
-            .into_iter()
-            .filter(|m| p.shows(&m.config.kind))
-            .collect()
-    }
-
     /// What a pane key (start/stop, reset) acts on: the measurement the focused pane shows,
     /// never one of another kind selected elsewhere (an SPL meter picked in the list must not
     /// stop when S is pressed on the transfer pane). Says what to create when there is none.

@@ -7,7 +7,7 @@
 
 use ac2_proto::cal::{CurveUse, Sensitivity};
 use ac2_proto::model::{
-    CalBasis, CalEntry, CalMethod, CalStatus, ElectricalConnection, Mic, MicCurveRef, MicLoading,
+    CalBasis, CalEntry, CalMethod, CalStatus, ElectricalConnection, MicCurveRef, MicLoading,
     SensitivitySource,
 };
 use ac2_proto::units::{Db, Dbu, MvPerPa, WallNs};
@@ -402,15 +402,6 @@ pub fn curve_line(c: &MicCurveRef) -> String {
         s.push_str(&format!(" · data sheet {}", stated_sensitivity(mv)));
     }
     s
-}
-
-/// The stated sensitivity of a mic's curves, when its files state one (they come from the
-/// same capsule, so the first stated value stands for the mic).
-pub fn mic_stated_sensitivity(m: &Mic) -> Option<String> {
-    m.curves
-        .iter()
-        .find_map(|c| c.stated_sensitivity)
-        .map(stated_sensitivity)
 }
 
 #[cfg(test)]

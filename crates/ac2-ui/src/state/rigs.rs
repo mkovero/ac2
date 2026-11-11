@@ -54,15 +54,6 @@ impl AppState {
             .find(|r| r.slot == slot)
     }
 
-    /// The shown rig's state (`rig` is another while a message for one in the background is
-    /// handled).
-    pub fn shown_rig(&self) -> &RigState {
-        match self.visiting {
-            Some(id) => self.find_rig(id).unwrap_or(&self.rig),
-            None => &self.rig,
-        }
-    }
-
     /// What rig `r` is called, everywhere it is named ([`label_of`]).
     pub fn rig_label(&self, r: &RigState) -> String {
         label_of(r, &self.local_host)
