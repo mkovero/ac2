@@ -14,13 +14,13 @@
 //! audio server at all.
 
 use std::collections::BTreeMap;
-use std::ffi::{CStr, c_char, c_int};
+use std::ffi::{CStr, c_char};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Once, Weak};
 
 use jack::{
-    AudioIn, AudioOut, Client, ClientOptions, ClientStatus, Control, Frames, LatencyType,
-    PortFlags, ProcessScope,
+    AudioIn, AudioOut, Client, ClientOptions, ClientStatus, Frames, LatencyType, PortFlags,
+    ProcessScope,
 };
 
 use crate::backend::{
@@ -37,6 +37,9 @@ use crate::output::{OutputRenderer, OutputStamp};
 use crate::stream::{
     DuplexStream, GraphPatch, PatchLink, PatchState, Plumbing, SpareLink, StreamParts,
 };
+
+mod callbacks;
+use callbacks::{Active, guarded};
 
 /// Ports per direction. The callback gathers port buffers into fixed arrays of this size,
 /// so it never allocates.
@@ -175,43 +178,14 @@ fn libjack_message(msg: *const c_char) -> String {
     s.to_string_lossy().into_owned()
 }
 
-// The libc crate binds neither on Linux; glibc and musl agree on the values.
-const PTHREAD_CANCEL_DISABLE: c_int = 1;
-#[allow(unsafe_code)]
-unsafe extern "C" {
-    fn pthread_setcancelstate(state: c_int, oldstate: *mut c_int) -> c_int;
-}
-
-/// Runs a libjack callback body. JACK2 tears a client down by `pthread_cancel`ing its
-/// threads, and a log write is a cancellation point: there glibc would start a forced
-/// unwind, which `catch_unwind` swallows, and glibc aborts the process when a forced unwind
-/// is not rethrown. With cancellation disabled for the body, a pending cancellation waits
-/// for libjack's next cancellation point, outside any Rust frame. `catch_unwind` still
-/// keeps a Rust panic from unwinding into C.
-fn libjack_callback(body: impl FnOnce()) {
-    let mut old: c_int = 0;
-    // SAFETY: changes only the calling thread's cancel state; not a cancellation point.
-    #[allow(unsafe_code)]
-    unsafe {
-        pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &mut old)
-    };
-    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(body));
-    let mut ignored: c_int = 0;
-    // SAFETY: as above; restoring an enabled state does not act on a pending cancellation.
-    #[allow(unsafe_code)]
-    unsafe {
-        pthread_setcancelstate(old, &mut ignored)
-    };
-}
-
 #[allow(unsafe_code)]
 unsafe extern "C" fn libjack_info(msg: *const c_char) {
-    libjack_callback(|| log::debug!(target: "libjack", "{}", libjack_message(msg)));
+    guarded(&mut || log::debug!(target: "libjack", "{}", libjack_message(msg)));
 }
 
 #[allow(unsafe_code)]
 unsafe extern "C" fn libjack_error(msg: *const c_char) {
-    libjack_callback(|| {
+    guarded(&mut || {
         let m = libjack_message(msg);
         if libjack_noise(&m) {
             log::debug!(target: "libjack", "{m}");
@@ -230,6 +204,13 @@ pub fn libjack_error_for_test(msg: &CStr) {
     unsafe {
         libjack_error(msg.as_ptr())
     };
+}
+
+/// Runs `body` the way every libjack callback here runs its body (the process callback
+/// too), so a test can cancel a thread inside it without a JACK server.
+#[doc(hidden)]
+pub fn libjack_guarded_for_test(body: &mut dyn FnMut()) -> bool {
+    guarded(body)
 }
 
 fn backend_err(operation: Operation, e: impl std::fmt::Display) -> AudioError {
@@ -506,20 +487,20 @@ impl Backend for JackBackend {
             clock: FrameCounterClock::new(),
             latch: EventLatch::new(Arc::clone(&events)),
             load: LoadTimer::new(Arc::clone(&events), rate),
-            events: Arc::clone(&events),
             capture_latency_ns: frames_to_ns(cap_lat.max),
             playback_latency_ns: frames_to_ns(play_lat.max),
-            buffer_frames: frames,
         };
         let notifications = Notifications {
             events: Arc::clone(&events),
             sample_rate: rate,
+            buffer_frames: frames,
         };
-        let active = Arc::new(
-            client
-                .activate_async(notifications, process)
-                .map_err(|e| backend_err(Operation::Start, e))?,
-        );
+        let active = Arc::new(Active::activate(
+            client,
+            Arc::clone(&events),
+            notifications,
+            process,
+        )?);
 
         let c = active.as_client();
         if self.config.connect_inputs {
@@ -616,8 +597,6 @@ impl crate::stamp::StampClock for JackStampClock {
         crate::stamp::pair_with_realtime(|| Some(c.time() * 1000))
     }
 }
-
-type Active = jack::AsyncClient<Notifications, Process>;
 
 /// Connections from our output ports to the physical playback ports. Holds the client
 /// weakly: the stream's guard alone keeps it alive, so a patch kept by the control side
@@ -728,31 +707,33 @@ fn spare_channels(capture: usize) -> u16 {
     MAX_PORTS.saturating_sub(capture) as u16
 }
 
+/// The notification thread's state: the rate and buffer size the stream was opened with,
+/// so a change can be told from the server repeating them.
 struct Notifications {
     events: Arc<BackendEvents>,
     sample_rate: Frames,
+    buffer_frames: Frames,
 }
 
-impl jack::NotificationHandler for Notifications {
-    fn xrun(&mut self, _: &Client) -> Control {
+impl Notifications {
+    fn xrun(&mut self) {
         self.events.xrun();
-        Control::Continue
     }
 
-    fn sample_rate(&mut self, _: &Client, rate: Frames) -> Control {
+    fn sample_rate(&mut self, rate: Frames) {
         // The server also announces the unchanged rate at activation.
         if rate != self.sample_rate {
             self.sample_rate = rate;
             self.events.config_change();
         }
-        Control::Continue
     }
 
-    // The trait declares this `unsafe` because it runs from a signal-like context where
-    // the client must not be used; only an atomic is touched here.
-    #[allow(unsafe_code)]
-    unsafe fn shutdown(&mut self, _: ClientStatus, _: &str) {
-        self.events.end();
+    fn buffer_size(&mut self, frames: Frames) {
+        // The server also announces the unchanged size at activation.
+        if frames != self.buffer_frames {
+            self.buffer_frames = frames;
+            self.events.config_change();
+        }
     }
 }
 
@@ -764,14 +745,12 @@ struct Process {
     clock: FrameCounterClock,
     latch: EventLatch,
     load: LoadTimer,
-    events: Arc<BackendEvents>,
     capture_latency_ns: u64,
     playback_latency_ns: u64,
-    buffer_frames: Frames,
 }
 
-impl jack::ProcessHandler for Process {
-    fn process(&mut self, client: &Client, ps: &ProcessScope) -> Control {
+impl Process {
+    fn cycle(&mut self, client: &Client, ps: &ProcessScope) {
         let started = self.load.start();
         // jack_get_time: a vDSO clock read, no syscall. Used as the callback time.
         let wake_ns = client.time() * 1000;
@@ -821,16 +800,6 @@ impl jack::ProcessHandler for Process {
             },
         );
         self.load.finish(started, frames);
-        Control::Continue
-    }
-
-    fn buffer_size(&mut self, _: &Client, frames: Frames) -> Control {
-        // The server also announces the unchanged size at activation.
-        if frames != self.buffer_frames {
-            self.buffer_frames = frames;
-            self.events.config_change();
-        }
-        Control::Continue
     }
 }
 

@@ -46,7 +46,7 @@ libc = { workspace = true }
 [dev-dependencies]
 cahal = { version = "0.1.0", default-features = false }
 
-# Linux: tests/jack_cancel.rs cancels a thread inside the libjack log callback.
+# Linux: tests/jack_cancel.rs cancels a thread inside the libjack callback guard.
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 libc = { workspace = true }
 log = { workspace = true }
