@@ -284,10 +284,7 @@ fn scene_draws_bars_readouts_chip_and_field() {
     use crate::theme::Theme;
     use crate::view::{PlotChrome, Style};
     let theme = Theme::dark();
-    let size = Viewport {
-        width: 600.0,
-        height: 400.0,
-    };
+    let size = Viewport::new(600.0, 400.0);
     let p = pane_with_pair(Correlation::Quiet(Side::Right));
     let full = programme_scene(
         &p,
@@ -365,10 +362,7 @@ fn bar_readouts_keep_their_places() {
         chrome: PlotChrome::Full,
         theme: &theme,
     };
-    let size = Viewport {
-        width: 600.0,
-        height: 400.0,
-    };
+    let size = Viewport::new(600.0, 400.0);
     let places = |level: Option<f32>, overs: u32, clipped: bool| {
         let mut p = pane_with_pair(Correlation::Value(0.5));
         p.ballistic = Ballistic::Type1;

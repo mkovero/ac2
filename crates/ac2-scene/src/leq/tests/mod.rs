@@ -97,10 +97,7 @@ fn frame(scale: LevelScale) -> LeqFrame {
 }
 
 fn size(w: f32, h: f32) -> Viewport {
-    Viewport {
-        width: w,
-        height: h,
-    }
+    Viewport::new(w, h)
 }
 
 fn texts(s: &Scene) -> Vec<&str> {

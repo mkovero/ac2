@@ -21,10 +21,7 @@ fn legend_texts(s: &AppState) -> Vec<String> {
         instant: Instant::now(),
         wall: ac2_proto::units::WallNs(wall),
     };
-    let size = ac2_scene::primitives::Viewport {
-        width: 900.0,
-        height: 500.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(900.0, 500.0);
     ac2_ui::scenes::transfer(
         s,
         crate::common::pane(s, ac2_ui::state::PaneKind::Transfer),

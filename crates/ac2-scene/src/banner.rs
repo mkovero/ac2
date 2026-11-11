@@ -470,11 +470,7 @@ pub fn draw_banners(layer: &mut Layer, rows: &[BannerRow], theme: &Theme) {
             Severity::Warning => theme.banner_warning,
             Severity::Info => theme.banner_info,
         };
-        layer.rects.push(FillRect {
-            rect: r.rect,
-            color: colors.background,
-            clip: None,
-        });
+        layer.rects.push(FillRect::new(r.rect, colors.background));
         let cy = r.rect.y + r.rect.h / 2.0;
         let text = fit_headline(&r.text, r.rect.w - 20.0, theme.font_size);
         layer.labels.push(crate::primitives::Label {

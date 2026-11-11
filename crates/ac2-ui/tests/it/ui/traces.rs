@@ -106,10 +106,7 @@ fn stored_traces_and_target() {
             st,
             crate::common::pane(st, ac2_ui::state::PaneKind::Transfer),
             &ac2_scene::theme::Theme::dark(),
-            ac2_scene::primitives::Viewport {
-                width: 1000.0,
-                height: 450.0,
-            },
+            ac2_scene::primitives::Viewport::new(1000.0, 450.0),
             ac2_ui::scenes::Now {
                 instant: Instant::now(),
                 wall: ac2_proto::units::WallNs(0),
@@ -166,10 +163,7 @@ fn trace_offset_spread() {
             st,
             crate::common::pane(st, ac2_ui::state::PaneKind::Transfer),
             &ac2_scene::theme::Theme::dark(),
-            ac2_scene::primitives::Viewport {
-                width: 1000.0,
-                height: 450.0,
-            },
+            ac2_scene::primitives::Viewport::new(1000.0, 450.0),
             ac2_ui::scenes::Now {
                 instant: Instant::now(),
                 wall: ac2_proto::units::WallNs(0),
@@ -236,10 +230,7 @@ fn pane_title_and_a_drop() {
         st,
         crate::common::pane(st, ac2_ui::state::PaneKind::Transfer),
         &ac2_scene::theme::Theme::dark(),
-        ac2_scene::primitives::Viewport {
-            width: 1000.0,
-            height: 450.0,
-        },
+        ac2_scene::primitives::Viewport::new(1000.0, 450.0),
         ac2_ui::scenes::Now {
             instant: Instant::now(),
             wall: ac2_proto::units::WallNs(0),
@@ -317,10 +308,7 @@ fn smoothed_phase_and_spectrum() {
             instant: Instant::now(),
             wall: ac2_proto::units::WallNs(0),
         };
-        let size = ac2_scene::primitives::Viewport {
-            width: 1000.0,
-            height: 450.0,
-        };
+        let size = ac2_scene::primitives::Viewport::new(1000.0, 450.0);
         let theme = ac2_scene::theme::Theme::dark();
         let s = ac2_ui::scenes::transfer(
             st,

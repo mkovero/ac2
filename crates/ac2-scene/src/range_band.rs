@@ -93,12 +93,9 @@ pub(crate) fn draw(
     for ys in [&lo, &hi] {
         let (points, _) = gapped(&xs, ys, None, |_, _| false);
         if !points.is_empty() {
-            c.base.polylines.push(Polyline {
-                points,
-                alpha: vec![],
-                stroke: theme.unresolved_edge,
-                clip: Some(plot),
-            });
+            c.base
+                .polylines
+                .push(Polyline::clipped(points, theme.unresolved_edge, plot));
         }
     }
 }

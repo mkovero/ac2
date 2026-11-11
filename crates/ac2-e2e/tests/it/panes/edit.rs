@@ -32,10 +32,7 @@ fn spread_zoom_and_delete_from_an_empty_daemon() -> R {
     let id = |s: &AppState, slot: usize| s.slots()[slot].map(|t| t.id);
     let (a, b) = (id(&d.st, 0).ok_or("slot 1")?, id(&d.st, 1).ok_or("slot 2")?);
     let theme = Theme::dark();
-    let size = ac2_scene::primitives::Viewport {
-        width: 1200.0,
-        height: 600.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(1200.0, 600.0);
     let now = || ac2_ui::scenes::Now {
         instant: Instant::now(),
         wall: ac2_proto::units::WallNs(0),
@@ -282,10 +279,7 @@ fn a_hides_and_backspace_deletes_the_selected_measurement() -> R {
     );
 
     let theme = Theme::dark();
-    let size = ac2_scene::primitives::Viewport {
-        width: 1200.0,
-        height: 600.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(1200.0, 600.0);
     let now = || ac2_ui::scenes::Now {
         instant: Instant::now(),
         wall: ac2_proto::units::WallNs(0),
@@ -441,10 +435,7 @@ fn a_new_spectrum_pane_shows_a_fitted_level_axis() -> R {
             s,
             crate::common::pane(s, PaneKind::Spectrum),
             &Theme::dark(),
-            ac2_scene::primitives::Viewport {
-                width: 1200.0,
-                height: 600.0,
-            },
+            ac2_scene::primitives::Viewport::new(1200.0, 600.0),
             ac2_ui::scenes::Now {
                 instant: Instant::now(),
                 wall: ac2_proto::units::WallNs(0),

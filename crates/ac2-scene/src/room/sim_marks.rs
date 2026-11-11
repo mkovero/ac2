@@ -258,10 +258,9 @@ pub fn draw_marks(sc: &mut IrScene, marks: SimMarks, theme: &Theme) {
     boxes.push(legend);
     for x in xs.iter().flatten() {
         for (y0, y1) in around(*x, plot.y, plot.bottom(), &boxes) {
-            layer.polylines.push(Polyline {
-                points: vec![[*x, y0], [*x, y1]],
-                alpha: vec![],
-                stroke: Stroke {
+            layer.polylines.push(Polyline::clipped(
+                vec![[*x, y0], [*x, y1]],
+                Stroke {
                     color: colour,
                     width: 1.0,
                     dash: Some(Dash {
@@ -270,19 +269,19 @@ pub fn draw_marks(sc: &mut IrScene, marks: SimMarks, theme: &Theme) {
                         offset: 0.0,
                     }),
                 },
-                clip: Some(plot),
-            });
+                plot,
+            ));
         }
     }
     for (m, r) in marks.marks.iter().zip(&names) {
         if let Some(r) = r {
             // A backing in the plot's colour: the measured response under a name would
             // otherwise run through its letters.
-            layer.rects.push(FillRect {
-                rect: Rect::new(r.x - 1.0, r.y - 1.0, r.w + 2.0, r.h + 2.0),
-                color: theme.background.with_alpha(0.85),
-                clip: Some(plot),
-            });
+            layer.rects.push(FillRect::clipped(
+                Rect::new(r.x - 1.0, r.y - 1.0, r.w + 2.0, r.h + 2.0),
+                theme.background.with_alpha(0.85),
+                plot,
+            ));
             layer.labels.push(label(
                 m.name.clone(),
                 [r.x, r.y],

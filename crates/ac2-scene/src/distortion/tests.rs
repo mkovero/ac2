@@ -5,10 +5,7 @@ use ac2_proto::GridDef;
 use ac2_proto::model::*;
 use ac2_proto::units::*;
 
-const SIZE: Viewport = Viewport {
-    width: 900.0,
-    height: 500.0,
-};
+const SIZE: Viewport = Viewport::new(900.0, 500.0);
 
 pub(crate) fn grid() -> GridDef {
     GridDef::Log {
@@ -390,10 +387,7 @@ fn caption_and_legend_never_overlap_in_small_panes() {
             (900.0, 500.0),
             (1290.0, 780.0),
         ] {
-            let size = Viewport {
-                width: w,
-                height: h,
-            };
+            let size = Viewport::new(w, h);
             let sc = distortion_scene(
                 Some(SweepView {
                     data: &d,
@@ -463,10 +457,7 @@ fn lone_valid_points_are_short_lines_and_noise_is_dashed() {
     }
     let f = grid().centres();
     // Columns closer than the pixels of a 1/4 pane would make dots.
-    let size = Viewport {
-        width: 420.0,
-        height: 300.0,
-    };
+    let size = Viewport::new(420.0, 300.0);
     let sc = distortion_scene(
         Some(SweepView {
             data: &d,

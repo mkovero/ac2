@@ -435,10 +435,7 @@ fn a_step_in_the_3d_view_moves_the_skyline_heights() {
             (ac2_scene::primitives::SkylineTier::Full, false),
             (0.0, 0.0),
             &Theme::dark(),
-            Viewport {
-                width: 800.0,
-                height: 500.0,
-            },
+            Viewport::new(800.0, 500.0),
             now(),
         );
         s.scene

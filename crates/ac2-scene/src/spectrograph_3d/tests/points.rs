@@ -93,10 +93,7 @@ fn scene(
         Some(&input),
         view,
         &Theme::dark(),
-        Viewport {
-            width: 1200.0,
-            height: 600.0,
-        },
+        Viewport::new(1200.0, 600.0),
     )
 }
 
@@ -213,10 +210,7 @@ fn the_legend_row_picks_and_carries_the_cue() {
         None,
         &ViewState::default(),
         &Theme::dark(),
-        Viewport {
-            width: 1200.0,
-            height: 600.0,
-        },
+        Viewport::new(1200.0, 600.0),
     );
     assert!(none.caption.is_empty());
     assert!(none.legend_hits.is_empty());

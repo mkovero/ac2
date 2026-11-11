@@ -469,10 +469,7 @@ fn view(c: &BandLeqConfig, f: &BandLeqFrame) -> BandLeqView {
     }
 }
 
-const SIZE: Viewport = Viewport {
-    width: 1200.0,
-    height: 700.0,
-};
+const SIZE: Viewport = Viewport::new(1200.0, 700.0);
 
 fn texts(s: &BandLeqScene) -> Vec<String> {
     s.scene

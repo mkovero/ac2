@@ -47,14 +47,7 @@ fn rows(ui: &mut egui::Ui, rows: &[Row], ch: &Chrome) {
 fn plan_view(ui: &mut egui::Ui, app: &App, pic: &PlanPicture<'_>) -> Vec<PlanMsg> {
     let (rect, resp) = ui.allocate_exact_size(PLAN_SIZE, egui::Sense::click_and_drag());
     let theme = app.theme();
-    let (scene, map) = plan_scene(
-        pic,
-        Viewport {
-            width: PLAN_SIZE.x,
-            height: PLAN_SIZE.y,
-        },
-        &theme,
-    );
+    let (scene, map) = plan_scene(pic, Viewport::new(PLAN_SIZE.x, PLAN_SIZE.y), &theme);
     paint(ui, PLAN_SLOT, rect, Arc::new(scene));
     let metres = |p: egui::Pos2| map.to_m([p.x - rect.min.x, p.y - rect.min.y]);
     let reach_m = REACH_PX / map.px_per_m();

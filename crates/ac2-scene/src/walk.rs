@@ -434,14 +434,13 @@ fn coverage_legend(
             let sw = fs;
             for k in 0..RAMP_STEPS {
                 let db = ac2_proto::model::SimMap::FLOOR_DB * k as f32 / (RAMP_STEPS - 1) as f32;
-                c.data.rects.push(FillRect {
-                    rect: Rect::new(x + k as f32 * sw, y + 0.1 * fs, sw, fs),
-                    color: crate::primitives::Color {
+                c.data.rects.push(FillRect::new(
+                    Rect::new(x + k as f32 * sw, y + 0.1 * fs, sw, fs),
+                    crate::primitives::Color {
                         a: 1.0,
                         ..plan_view::heat(db)
                     },
-                    clip: None,
-                });
+                ));
             }
             x += RAMP_STEPS as f32 * sw + 0.6 * fs;
         }
@@ -518,20 +517,18 @@ pub fn walk_scene(p: &WalkPane<'_>, style: Style, size: Viewport) -> WalkScene {
         if w > 4.0 {
             let h = theme.font_size * 0.6;
             let top = y + (theme.font_size - h) / 2.0;
-            c.base.rects.push(FillRect {
-                rect: Rect::new(x, top, w, h),
-                color: theme.plot_background,
-                clip: None,
-            });
-            c.data.rects.push(FillRect {
-                rect: Rect::new(x, top, w * fill, h),
-                color: if matches!(p.ready, Ready::Ready) {
+            c.base.rects.push(FillRect::new(
+                Rect::new(x, top, w, h),
+                theme.plot_background,
+            ));
+            c.data.rects.push(FillRect::new(
+                Rect::new(x, top, w * fill, h),
+                if matches!(p.ready, Ready::Ready) {
                     theme.level_ok
                 } else {
                     theme.text_dim
                 },
-                clip: None,
-            });
+            ));
         }
     }
     y += theme.font_size * 1.5;

@@ -50,10 +50,7 @@ fn now() -> crate::scenes::Now {
     }
 }
 
-const SIZE: Viewport = Viewport {
-    width: 900.0,
-    height: 500.0,
-};
+const SIZE: Viewport = Viewport::new(900.0, 500.0);
 
 #[test]
 fn offset_steps_change_the_selected_trace() {

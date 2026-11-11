@@ -13,10 +13,7 @@ fn readout(s: &AppState) -> Option<ac2_scene::align::Readout> {
         instant: Instant::now(),
         wall: ac2_proto::units::WallNs(0),
     };
-    let size = ac2_scene::primitives::Viewport {
-        width: 1200.0,
-        height: 700.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(1200.0, 700.0);
     ac2_ui::scenes::alignment(s, s.layout.focus, &Theme::dark(), size, now).readout
 }
 

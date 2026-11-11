@@ -115,10 +115,7 @@ fn ir_sim_overlay() {
     };
     let theme = Theme::dark();
     let view = ViewState::default();
-    let size = Viewport {
-        width: 900.0,
-        height: 380.0,
-    };
+    let size = Viewport::new(900.0, 380.0);
     let mut sc = ac2_scene::ir::ir_scene(
         &frame(),
         theme.traces[0],

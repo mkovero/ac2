@@ -314,10 +314,7 @@ fn narrow_panes_move_cursor_values_below_the_legend() {
         ..ViewState::default()
     };
     let build = |w: f32| {
-        let size = Viewport {
-            width: w,
-            height: 600.0,
-        };
+        let size = Viewport::new(w, 600.0);
         transfer_scene(
             &[ta.clone(), tb.clone()],
             &DisplayCache::default(),

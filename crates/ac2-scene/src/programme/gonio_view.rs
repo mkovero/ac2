@@ -13,11 +13,7 @@ const FIELD: Color = Color::rgb(0.02, 0.02, 0.025);
 /// The field in `sq`: the grid at *full* only, the L / R labels at *full* and *no grid*.
 pub(super) fn field(c: &mut Canvas, sq: Rect, style: Style) {
     let theme = style.theme;
-    c.base.rects.push(FillRect {
-        rect: sq,
-        color: FIELD,
-        clip: None,
-    });
+    c.base.rects.push(FillRect::new(sq, FIELD));
     if style.chrome == PlotChrome::Full {
         let stroke = Stroke::solid(theme.grid_major.color.with_alpha(0.6), 1.0);
         c.base.polylines.extend(gonio::grid_polylines(sq, stroke));

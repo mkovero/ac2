@@ -11,10 +11,7 @@ use ac2_scene::trace::TraceKey;
 use ac2_ui::state::{AppState, Msg, Overlay, PaneId};
 use std::time::Instant;
 
-const SIZE: Viewport = Viewport {
-    width: 2400.0,
-    height: 900.0,
-};
+const SIZE: Viewport = Viewport::new(2400.0, 900.0);
 
 fn now() -> ac2_ui::scenes::Now {
     ac2_ui::scenes::Now {

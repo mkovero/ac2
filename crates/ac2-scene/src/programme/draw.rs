@@ -101,11 +101,7 @@ fn chip(c: &mut Canvas, r: Rect, correlation: Correlation, theme: &Theme) {
         (r.w - 8.0).max(1.0),
         (r.h - 4.0).max(1.0),
     );
-    c.base.rects.push(FillRect {
-        rect: r,
-        color: bg,
-        clip: None,
-    });
+    c.base.rects.push(FillRect::new(r, bg));
     let fs = theme.font_size;
     let word = "correlation";
     let room = r.w - text_width(&chip.text, fs) - 16.0;

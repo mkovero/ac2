@@ -388,12 +388,11 @@ fn draw(
         } else {
             1.0
         };
-        c.data.polylines.push(Polyline {
+        c.data.polylines.push(Polyline::clipped(
             points,
-            alpha: vec![],
-            stroke: Stroke::solid(color.with_alpha(dim), (theme.trace_width * 0.75).max(1.0)),
-            clip: Some(plot),
-        });
+            Stroke::solid(color.with_alpha(dim), (theme.trace_width * 0.75).max(1.0)),
+            plot,
+        ));
     }
     let cursor = values
         .as_ref()

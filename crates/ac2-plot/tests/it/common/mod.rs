@@ -48,10 +48,7 @@ pub fn renderer(gpu: &Gpu) -> Renderer {
 
 pub fn scene(w: f32, h: f32, layers: Vec<Layer>) -> Scene {
     Scene {
-        viewport: Viewport {
-            width: w,
-            height: h,
-        },
+        viewport: Viewport::new(w, h),
         layers,
     }
 }

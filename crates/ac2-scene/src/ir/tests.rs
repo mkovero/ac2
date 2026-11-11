@@ -5,10 +5,7 @@ use crate::view::PlotChrome;
 use ac2_proto::frame::IrMeta;
 use ac2_proto::units::{Hz, MeasId, Seconds};
 
-const SIZE: Viewport = Viewport {
-    width: 800.0,
-    height: 300.0,
-};
+const SIZE: Viewport = Viewport::new(800.0, 300.0);
 
 #[test]
 fn a_dense_line_keeps_each_pixel_columns_extremes_in_order() {
@@ -235,10 +232,7 @@ fn narrow_plot_puts_the_origin_under_the_title() {
     use crate::canvas::tests::{intersects, label_box};
     let f = frame();
     let build = |w: f32| {
-        let size = Viewport {
-            width: w,
-            height: 300.0,
-        };
+        let size = Viewport::new(w, 300.0);
         ir_scene(
             &f,
             Color::WHITE,

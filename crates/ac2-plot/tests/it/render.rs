@@ -56,15 +56,13 @@ fn kept_labels_match_freshly_shaped_ones() {
     let labels = |texts: &[(&str, f32)]| {
         one_layer(220.0, 120.0, |l| {
             for (i, (t, size)) in texts.iter().enumerate() {
-                l.labels.push(Label {
-                    text: (*t).into(),
-                    pos: [6.0 + 30.0 * (i % 2) as f32, 6.0 + 18.0 * i as f32],
-                    anchor: Anchor::TOP_LEFT,
-                    size: *size,
-                    color: Color::WHITE,
-                    clip: None,
-                    tabular: false,
-                });
+                l.labels.push(Label::new(
+                    *t,
+                    [6.0 + 30.0 * (i % 2) as f32, 6.0 + 18.0 * i as f32],
+                    Anchor::TOP_LEFT,
+                    *size,
+                    Color::WHITE,
+                ));
             }
         })
     };
@@ -524,15 +522,13 @@ fn offset_target_matches_standalone_render() {
             3.0,
             0.8,
         ));
-        l.labels.push(Label {
-            text: "Aa".into(),
-            pos: [30.0, 20.0],
-            anchor: Anchor::CENTER,
-            size: 12.0,
-            color: Color::WHITE,
-            clip: None,
-            tabular: false,
-        });
+        l.labels.push(Label::new(
+            "Aa",
+            [30.0, 20.0],
+            Anchor::CENTER,
+            12.0,
+            Color::WHITE,
+        ));
     });
     let alone = render_on(gpu, &mut r, &s, 1.0, Color::BLACK);
 

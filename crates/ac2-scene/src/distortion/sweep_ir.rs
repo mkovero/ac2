@@ -96,10 +96,9 @@ pub fn sweep_ir_scene(
             if !(x >= plot.x && x <= plot.right()) {
                 continue;
             }
-            overlay.polylines.push(Polyline {
-                points: vec![[x, plot.y], [x, plot.bottom() - 16.0]],
-                alpha: vec![],
-                stroke: Stroke {
+            overlay.polylines.push(Polyline::clipped(
+                vec![[x, plot.y], [x, plot.bottom() - 16.0]],
+                Stroke {
                     color: theme.text_dim,
                     width: 1.0,
                     dash: Some(crate::primitives::Dash {
@@ -108,8 +107,8 @@ pub fn sweep_ir_scene(
                         offset: 0.0,
                     }),
                 },
-                clip: Some(plot),
-            });
+                plot,
+            ));
             overlay.labels.push(label(
                 name,
                 [x + 3.0, plot.bottom() - 4.0],

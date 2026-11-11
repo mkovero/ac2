@@ -323,10 +323,7 @@ pub(super) fn scene_of(p: &ProgrammePane, chrome: PlotChrome, w: f32, h: f32) ->
             chrome,
             theme: &theme,
         },
-        Viewport {
-            width: w,
-            height: h,
-        },
+        Viewport::new(w, h),
         None,
     )
 }

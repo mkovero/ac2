@@ -546,10 +546,7 @@ pub fn spectrograph_scene(
             status,
             view,
             theme,
-            Viewport {
-                width: size.width,
-                height: top_h,
-            },
+            Viewport::new(size.width, top_h),
             right,
         );
         let layers = std::mem::take(&mut spectrum.scene.layers);
@@ -557,16 +554,15 @@ pub fn spectrograph_scene(
     };
     let mut c = Canvas::default();
     if !alone {
-        c.base.rects.push(FillRect {
-            rect: Rect::new(
+        c.base.rects.push(FillRect::new(
+            Rect::new(
                 0.0,
                 top - PANE_GAP,
                 size.width,
                 (size.height - top + PANE_GAP).max(0.0),
             ),
-            color: theme.background,
-            clip: None,
-        });
+            theme.background,
+        ));
     }
     let plot = Rect::new(
         MARGINS.left,
@@ -807,12 +803,11 @@ pub fn spectrograph_scene(
     if let Some(cur) = &cursor {
         let y = tm.to_px(cur.before_s);
         if y.is_finite() && y >= plot.y && y <= plot.bottom() {
-            c.overlay.polylines.push(Polyline {
-                points: vec![[plot.x, y], [plot.right(), y]],
-                alpha: vec![],
-                stroke: theme.cursor,
-                clip: Some(plot),
-            });
+            c.overlay.polylines.push(Polyline::clipped(
+                vec![[plot.x, y], [plot.right(), y]],
+                theme.cursor,
+                plot,
+            ));
         }
         c.overlay.labels.push(label(
             cur.text.clone(),

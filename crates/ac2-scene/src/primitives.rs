@@ -78,6 +78,12 @@ pub struct Viewport {
     pub height: f32,
 }
 
+impl Viewport {
+    pub const fn new(width: f32, height: f32) -> Self {
+        Self { width, height }
+    }
+}
+
 /// Dash pattern in logical pixels along the stroke, butt-ended.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Dash {
@@ -121,6 +127,28 @@ pub struct Polyline {
     pub stroke: Stroke,
     /// Nothing outside this rectangle is drawn (typically the plot rect).
     pub clip: Option<Rect>,
+}
+
+impl Polyline {
+    /// Fully opaque line, not clipped.
+    pub const fn new(points: Vec<[f32; 2]>, stroke: Stroke) -> Self {
+        Self {
+            points,
+            alpha: Vec::new(),
+            stroke,
+            clip: None,
+        }
+    }
+
+    /// Fully opaque line, drawn only inside `clip`.
+    pub const fn clipped(points: Vec<[f32; 2]>, stroke: Stroke, clip: Rect) -> Self {
+        Self {
+            points,
+            alpha: Vec::new(),
+            stroke,
+            clip: Some(clip),
+        }
+    }
 }
 
 /// One sample of a filled band: the two envelope edges at `x`; order of `y0`/`y1` does not
@@ -180,6 +208,26 @@ pub struct FillRect {
     pub rect: Rect,
     pub color: Color,
     pub clip: Option<Rect>,
+}
+
+impl FillRect {
+    /// Rectangle that is not clipped.
+    pub const fn new(rect: Rect, color: Color) -> Self {
+        Self {
+            rect,
+            color,
+            clip: None,
+        }
+    }
+
+    /// Rectangle drawn only inside `clip`.
+    pub const fn clipped(rect: Rect, color: Color, clip: Rect) -> Self {
+        Self {
+            rect,
+            color,
+            clip: Some(clip),
+        }
+    }
 }
 
 /// Filled polygon (a room plan's floor, a zone), any shape, concave included: the inside is
@@ -246,6 +294,25 @@ pub struct Label {
 }
 
 impl Label {
+    /// Label that is not clipped, with proportional digits.
+    pub fn new(
+        text: impl Into<String>,
+        pos: [f32; 2],
+        anchor: Anchor,
+        size: f32,
+        color: Color,
+    ) -> Self {
+        Self {
+            text: text.into(),
+            pos,
+            anchor,
+            size,
+            color,
+            clip: None,
+            tabular: false,
+        }
+    }
+
     /// The same label with tabular digits.
     pub fn tabular(self) -> Self {
         Self {

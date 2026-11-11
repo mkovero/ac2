@@ -194,10 +194,7 @@ fn the_overlay_draws_dashed_marks_names_and_the_legend() {
                 chrome: view.chrome,
                 theme: &theme,
             },
-            size: Viewport {
-                width: 800.0,
-                height: 300.0,
-            },
+            size: Viewport::new(800.0, 300.0),
         },
     );
     let before = sc.scene.layers[2].polylines.len();
@@ -254,10 +251,7 @@ fn names_avoid_each_other_and_every_line() {
                 chrome: view.chrome,
                 theme: &theme,
             },
-            size: Viewport {
-                width: 900.0,
-                height: 380.0,
-            },
+            size: Viewport::new(900.0, 380.0),
         },
     );
     let before = (

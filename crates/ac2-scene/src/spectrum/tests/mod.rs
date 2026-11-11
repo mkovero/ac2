@@ -10,10 +10,7 @@ mod mark;
 mod points;
 mod tracking;
 
-const SIZE: Viewport = Viewport {
-    width: 800.0,
-    height: 400.0,
-};
+const SIZE: Viewport = Viewport::new(800.0, 400.0);
 
 fn third_octaves() -> GridDef {
     let centres = (-17..=13)

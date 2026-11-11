@@ -101,11 +101,8 @@ impl Sky {
     fn scene(&self, field: bool) -> ac2_plot::Scene {
         let mut l = Layer::default();
         if field {
-            l.rects.push(FillRect {
-                rect: Rect::new(0.0, 0.0, W, H),
-                color: FIELD,
-                clip: None,
-            });
+            l.rects
+                .push(FillRect::new(Rect::new(0.0, 0.0, W, H), FIELD));
         }
         l.skylines.push(self.primitive());
         if self.glow && self.tier.bloom_taps().is_some() {
@@ -654,11 +651,7 @@ fn parity_renders() {
             ] {
                 let rect = Rect::new(0.0, 0.0, w, h);
                 let mut l = Layer::default();
-                l.rects.push(FillRect {
-                    rect,
-                    color: FIELD,
-                    clip: None,
-                });
+                l.rects.push(FillRect::new(rect, FIELD));
                 l.skylines.push(Skyline3d {
                     id: SkylineId(1),
                     rect,
@@ -808,10 +801,7 @@ fn bench_frame_cost() {
         });
     };
     let freq = Range::new(20.0, 20_000.0);
-    let size = Viewport {
-        width: w as f32,
-        height: h as f32,
-    };
+    let size = Viewport::new(w as f32, h as f32);
     let median = |mut v: Vec<Duration>| {
         v.sort();
         v[v.len() / 2]

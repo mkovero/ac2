@@ -139,10 +139,7 @@ fn history(c: &LeqConfig, f: &LeqFrame) -> LeqHistory {
 }
 
 fn vp(w: f32, h: f32) -> Viewport {
-    Viewport {
-        width: w,
-        height: h,
-    }
+    Viewport::new(w, h)
 }
 
 fn labels(s: &Scene) -> Vec<&Label> {

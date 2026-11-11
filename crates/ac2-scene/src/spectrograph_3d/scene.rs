@@ -266,11 +266,7 @@ pub fn spectrograph_3d_scene(
     // The field and the labels in it keep the dark theme's colours in every theme.
     let dark = Theme::dark();
     let mut c = Canvas::default();
-    c.base.rects.push(FillRect {
-        rect: plot,
-        color: FIELD,
-        clip: None,
-    });
+    c.base.rects.push(FillRect::new(plot, FIELD));
     let colours = sg.map_or_else(Colormap::default, |s| s.colours);
     let mid = Color::from_rgba8(colormap::lut(colours)[colormap::LUT_SIZE / 2]);
     let depth_fade = |z: f64| (-f64::from(LOOK.age_fade) * z / FLOOR_DEPTH).exp() as f32;
@@ -290,12 +286,11 @@ pub fn spectrograph_3d_scene(
         }
     }
     if let Some(s) = pj.segment([-FLOOR_HALF_W, 0.0, 0.0], [FLOOR_HALF_W, 0.0, 0.0]) {
-        c.base.polylines.push(Polyline {
-            points: s.to_vec(),
-            alpha: vec![],
-            stroke: Stroke::solid(mix(FIELD, mid, NOW_LINE), 1.0),
-            clip: Some(plot),
-        });
+        c.base.polylines.push(Polyline::clipped(
+            s.to_vec(),
+            Stroke::solid(mix(FIELD, mid, NOW_LINE), 1.0),
+            plot,
+        ));
     }
 
     let skyline = sg.map(|s| s.skyline);
@@ -338,12 +333,9 @@ pub fn spectrograph_3d_scene(
             for t in fax.ticks.iter().filter(|t| decade(t.value)) {
                 let x = x_of(t.value, lo, hi);
                 if let Some(s) = pj.segment([x, 0.0, 0.0], [x, 0.0, FLOOR_DEPTH]) {
-                    c.base.polylines.push(Polyline {
-                        points: s.to_vec(),
-                        alpha: vec![],
-                        stroke: grid_stroke,
-                        clip: Some(plot),
-                    });
+                    c.base
+                        .polylines
+                        .push(Polyline::clipped(s.to_vec(), grid_stroke, plot));
                 }
             }
         }
@@ -395,12 +387,9 @@ pub fn spectrograph_3d_scene(
             && t > 0.0
             && let Some(s) = pj.segment([-FLOOR_HALF_W, 0.0, z], [FLOOR_HALF_W, 0.0, z])
         {
-            c.base.polylines.push(Polyline {
-                points: s.to_vec(),
-                alpha: vec![],
-                stroke: grid_stroke,
-                clip: Some(plot),
-            });
+            c.base
+                .polylines
+                .push(Polyline::clipped(s.to_vec(), grid_stroke, plot));
         }
         let Some(p) = pj.point([side_x, 0.0, z]) else {
             continue;
@@ -447,23 +436,17 @@ pub fn spectrograph_3d_scene(
         .map_or(String::new(), str::to_string);
     if chrome.labels() && range.is_valid() {
         if let Some(s) = pj.segment([side_x, 0.0, 0.0], [side_x, MAX_HEIGHT, 0.0]) {
-            c.data.polylines.push(Polyline {
-                points: s.to_vec(),
-                alpha: vec![],
-                stroke: post_stroke,
-                clip: Some(plot),
-            });
+            c.data
+                .polylines
+                .push(Polyline::clipped(s.to_vec(), post_stroke, plot));
         }
         if let Some(s) = pj.segment(
             [-FLOOR_HALF_W, MAX_HEIGHT, FLOOR_DEPTH],
             [FLOOR_HALF_W, MAX_HEIGHT, FLOOR_DEPTH],
         ) {
-            c.data.polylines.push(Polyline {
-                points: s.to_vec(),
-                alpha: vec![],
-                stroke: ceiling_stroke,
-                clip: Some(plot),
-            });
+            c.data
+                .polylines
+                .push(Polyline::clipped(s.to_vec(), ceiling_stroke, plot));
         }
         let post = pj.length([side_x, 0.0, 0.0], [side_x, MAX_HEIGHT, 0.0]);
         let lax = axis::linear_axis(range, 0.0, post.max(1.0), &unit);
@@ -481,12 +464,9 @@ pub fn spectrograph_3d_scene(
             ) else {
                 continue;
             };
-            c.data.polylines.push(Polyline {
-                points: vec![p, q],
-                alpha: vec![],
-                stroke: post_stroke,
-                clip: Some(plot),
-            });
+            c.data
+                .polylines
+                .push(Polyline::clipped(vec![p, q], post_stroke, plot));
             ticks.push((p, q, t.label.clone().unwrap_or_default()));
         }
         // The numbers stand outside the post, past its ticks; where the field's edge would

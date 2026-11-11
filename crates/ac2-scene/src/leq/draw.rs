@@ -57,11 +57,7 @@ pub(super) fn draw_tile(
 ) {
     let Style { chrome, theme } = style;
     let (bg, fg) = tile_colors(t.state, theme);
-    c.base.rects.push(FillRect {
-        rect: r,
-        color: bg,
-        clip: None,
-    });
+    c.base.rects.push(FillRect::new(r, bg));
     let fg = if stale && t.state != TileState::Over && t.state != TileState::Near {
         theme.text_dim
     } else {
@@ -177,20 +173,18 @@ pub(super) fn draw_history(
             );
         }
         if l.points.len() > 1 {
-            c.data.polylines.push(Polyline {
-                points: l.points.clone(),
-                alpha: vec![],
-                stroke: Stroke::solid(l.color, theme.trace_width),
-                clip: Some(s.plot),
-            });
+            c.data.polylines.push(Polyline::clipped(
+                l.points.clone(),
+                Stroke::solid(l.color, theme.trace_width),
+                s.plot,
+            ));
         }
         for run in &l.over {
-            c.data.polylines.push(Polyline {
-                points: run.clone(),
-                alpha: vec![],
-                stroke: Stroke::solid(theme.banner_fault.background, theme.trace_width * 2.5),
-                clip: Some(s.plot),
-            });
+            c.data.polylines.push(Polyline::clipped(
+                run.clone(),
+                Stroke::solid(theme.banner_fault.background, theme.trace_width * 2.5),
+                s.plot,
+            ));
         }
     }
     // Legend: each window's name in its colour, along the top of the strip.
@@ -260,11 +254,10 @@ pub(super) fn history_cursor(
         (x - 8.0 - w).max(s.plot.x)
     };
     let top = s.plot.y + 20.0;
-    c.overlay.rects.push(FillRect {
-        rect: Rect::new(left, top, w, h),
-        color: theme.plot_background.with_alpha(0.88),
-        clip: None,
-    });
+    c.overlay.rects.push(FillRect::new(
+        Rect::new(left, top, w, h),
+        theme.plot_background.with_alpha(0.88),
+    ));
     for (i, (text, color)) in lines.into_iter().enumerate() {
         c.overlay.labels.push(label(
             text.to_string(),

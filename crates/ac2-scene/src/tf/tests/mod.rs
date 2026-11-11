@@ -13,10 +13,7 @@ mod panes;
 mod plates;
 mod range_band;
 
-const SIZE: Viewport = Viewport {
-    width: 960.0,
-    height: 600.0,
-};
+const SIZE: Viewport = Viewport::new(960.0, 600.0);
 
 struct Cols {
     freqs: Vec<f64>,

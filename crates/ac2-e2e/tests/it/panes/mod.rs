@@ -83,10 +83,7 @@ pub(super) fn close_opened_pane(d: &mut Driver, panes: usize, id: MeasId, prev: 
 /// The spectrum panes in reading order: the measurement each shows, its view, and the
 /// spectrograph's caption as drawn.
 pub(super) fn spectrum_panes(s: &AppState) -> Vec<(Option<MeasId>, SpectrumMode, String)> {
-    let size = ac2_scene::primitives::Viewport {
-        width: 1000.0,
-        height: 600.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(1000.0, 600.0);
     let now = ac2_ui::scenes::Now {
         instant: Instant::now(),
         wall: ac2_proto::units::WallNs(0),

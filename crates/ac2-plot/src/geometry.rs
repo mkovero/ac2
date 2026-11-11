@@ -488,12 +488,7 @@ mod tests {
     const CLIP: ClipPx = [0.0, 0.0, 100.0, 100.0];
 
     fn line(points: Vec<[f32; 2]>, width: f32) -> Polyline {
-        Polyline {
-            points,
-            alpha: vec![],
-            stroke: Stroke::solid(Color::WHITE, width),
-            clip: None,
-        }
+        Polyline::new(points, Stroke::solid(Color::WHITE, width))
     }
 
     fn trapezoid_area(f: &FillInstance) -> f32 {

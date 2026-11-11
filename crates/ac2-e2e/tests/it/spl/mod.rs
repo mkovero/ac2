@@ -63,10 +63,7 @@ pub(super) fn columns(s: &AppState) -> Vec<(String, Color, Color)> {
                 .map_or(0, |d| d.as_nanos() as u64),
         ),
     };
-    let size = ac2_scene::primitives::Viewport {
-        width: 1280.0,
-        height: 720.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(1280.0, 720.0);
     ac2_ui::scenes::leq(
         s,
         crate::common::pane(s, ac2_ui::state::PaneKind::Spl),
@@ -146,10 +143,7 @@ fn spl_weightings_from_the_keys_and_a_readable_number() -> R {
     );
     let (id, cfg) = config(&d.st).ok_or("meter")?;
     assert_eq!(cfg.leq, ac2_proto::model::LeqConfig::default_windows());
-    let size = ac2_scene::primitives::Viewport {
-        width: 1280.0,
-        height: 720.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(1280.0, 720.0);
     let now = || ac2_ui::scenes::Now {
         instant: Instant::now(),
         wall: ac2_proto::units::WallNs(0),
@@ -252,7 +246,7 @@ fn spl_pane_shows_meter_and_leq_from_an_empty_daemon() -> R {
     };
     let keys = Keymap::default();
     let both = |s: &AppState, width: f32, height: f32| {
-        let size = Viewport { width, height };
+        let size = Viewport::new(width, height);
         ac2_ui::scenes::meter_leq(
             s,
             crate::common::pane(s, ac2_ui::state::PaneKind::Spl),

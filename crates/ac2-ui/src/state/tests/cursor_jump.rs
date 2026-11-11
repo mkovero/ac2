@@ -34,10 +34,7 @@ fn now() -> crate::scenes::Now {
     }
 }
 
-const SIZE: Viewport = Viewport {
-    width: 900.0,
-    height: 500.0,
-};
+const SIZE: Viewport = Viewport::new(900.0, 500.0);
 
 fn cursor(t: &T) -> f64 {
     t.st.view.cursor_hz.expect("cursor")

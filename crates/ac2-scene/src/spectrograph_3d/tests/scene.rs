@@ -67,10 +67,7 @@ fn scene_3d_as(
         Some(&input),
         view,
         &Theme::dark(),
-        Viewport {
-            width: 1200.0,
-            height: 600.0,
-        },
+        Viewport::new(1200.0, 600.0),
     )
 }
 
@@ -154,10 +151,7 @@ fn labels_stay_whole_inside_the_field() {
                 Some(&input),
                 &view,
                 &Theme::dark(),
-                Viewport {
-                    width: w,
-                    height: h,
-                },
+                Viewport::new(w, h),
             );
             let drawn: Vec<&Label> = s
                 .scene
@@ -390,10 +384,7 @@ fn empty_and_missing_say_so() {
         None,
         &ViewState::default(),
         &Theme::light(),
-        Viewport {
-            width: 800.0,
-            height: 400.0,
-        },
+        Viewport::new(800.0, 400.0),
     );
     assert_eq!(
         none.message.as_deref(),
@@ -446,10 +437,7 @@ fn heights_follow_the_range_and_offset() {
             ..ViewState::default()
         },
         &Theme::dark(),
-        Viewport {
-            width: 900.0,
-            height: 500.0,
-        },
+        Viewport::new(900.0, 500.0),
     );
     // The offset moves the levels up, so the range in stored levels moves down.
     assert_eq!(skylines(&s.scene)[0].range, [-66.0, -16.0]);

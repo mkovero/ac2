@@ -86,10 +86,7 @@ fn empty_simulated_rig_sweeps_from_the_app() -> R {
             instant: Instant::now(),
             wall: ac2_proto::units::WallNs(0),
         };
-        let size = ac2_scene::primitives::Viewport {
-            width: 1100.0,
-            height: 600.0,
-        };
+        let size = ac2_scene::primitives::Viewport::new(1100.0, 600.0);
         match ac2_ui::scenes::sweep(
             &d.st,
             crate::common::pane(&d.st, ac2_ui::state::PaneKind::Distortion),
@@ -231,10 +228,7 @@ fn slow_room_parameters_of_a_sweep_from_the_app() -> R {
         ac2_scene::view::SweepMode::Ir(ac2_scene::view::IrMode::Linear)
     );
     let theme = Theme::dark();
-    let size = ac2_scene::primitives::Viewport {
-        width: 1100.0,
-        height: 600.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(1100.0, 600.0);
     let now = ac2_ui::scenes::Now {
         instant: Instant::now(),
         wall: ac2_proto::units::WallNs(0),
@@ -507,10 +501,7 @@ fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
         Some(format!("{n1}: smoothing off"))
     );
     let theme = Theme::dark();
-    let size = ac2_scene::primitives::Viewport {
-        width: 1200.0,
-        height: 500.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(1200.0, 500.0);
     let now = ac2_ui::scenes::Now {
         instant: Instant::now(),
         wall: ac2_proto::units::WallNs(0),

@@ -66,10 +66,7 @@ fn stacked_frequency_panes_share_their_x() {
     st.pane_area = (area.width(), area.height());
     st.view.cursor_hz = Some(744.0);
     // The plot inside a pane, as `pane` cuts it: the frame's inset and the title strip.
-    let vp = |r: egui::Rect| Viewport {
-        width: r.width() - 4.0,
-        height: r.height() - TITLE_H - 2.0,
-    };
+    let vp = |r: egui::Rect| Viewport::new(r.width() - 4.0, r.height() - TITLE_H - 2.0);
     let alone = scenes::spectrum(&st, PaneId(1), &theme, vp(layout(&st, area)[0].1), now);
     let own = natural_right(FreqPlot::Spectrum, &ac2_scene::view::ViewState::default());
     assert_eq!(st.column_right(PaneId(1)), own);

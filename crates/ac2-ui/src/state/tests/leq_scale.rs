@@ -8,10 +8,7 @@ fn columns_of(t: &T, p: PaneId) -> ac2_scene::leq::LeqColumns {
         instant: Instant::now(),
         wall: WallNs(0),
     };
-    let size = ac2_scene::primitives::Viewport {
-        width: 900.0,
-        height: 600.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(900.0, 600.0);
     crate::scenes::leq(&t.st, p, &ac2_scene::theme::Theme::dark(), size, now)
         .and_then(|s| s.columns)
         .expect("the Leq columns")

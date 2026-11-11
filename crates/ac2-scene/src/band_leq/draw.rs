@@ -118,11 +118,7 @@ pub fn band_leq_scene(
     let head_h = big * 1.6;
     let headline = Rect::new(pad, y, w, head_h);
     let (bg, ink) = tile_colors(t.headline_state, theme);
-    c.base.rects.push(FillRect {
-        rect: headline,
-        color: bg,
-        clip: None,
-    });
+    c.base.rects.push(FillRect::new(headline, bg));
     c.overlay.labels.push(label(
         t.headline.clone(),
         [pad * 2.0, y + head_h / 2.0],
@@ -249,12 +245,10 @@ fn draw_window(
     let mut x = key_x;
     for (text, stroke) in &keys {
         let mark_y = y + sfs * 0.6;
-        c.overlay.polylines.push(Polyline {
-            points: vec![[x, mark_y], [x + mark_w, mark_y]],
-            alpha: Vec::new(),
-            stroke: *stroke,
-            clip: None,
-        });
+        c.overlay.polylines.push(Polyline::new(
+            vec![[x, mark_y], [x + mark_w, mark_y]],
+            *stroke,
+        ));
         c.overlay.labels.push(label(
             *text,
             [x + mark_w + sfs * 0.4, y],
@@ -296,12 +290,10 @@ fn draw_window(
     while db <= range.1 + 1e-9 {
         let gy = to_y(db);
         if chrome.grid() {
-            c.base.polylines.push(Polyline {
-                points: vec![[area.x, gy], [area.right(), gy]],
-                alpha: Vec::new(),
-                stroke: theme.grid_major,
-                clip: None,
-            });
+            c.base.polylines.push(Polyline::new(
+                vec![[area.x, gy], [area.right(), gy]],
+                theme.grid_major,
+            ));
         }
         if chrome.labels() {
             c.overlay.labels.push(label(
@@ -323,39 +315,30 @@ fn draw_window(
         let col = Rect::new(x, area.y, cw, area.h);
         columns.push(col);
         let (track, bar) = column_colors(b.state, theme);
-        c.base.rects.push(FillRect {
-            rect: col,
-            color: track,
-            clip: None,
-        });
+        c.base.rects.push(FillRect::new(col, track));
         let bar_db = b.drawn_db.unwrap_or(b.leq_db);
         if bar_db.is_finite() {
             let top = to_y(bar_db);
-            c.data.rects.push(FillRect {
-                rect: Rect::new(x, top, cw, (area.bottom() - top).max(0.0)),
-                color: bar,
-                clip: None,
-            });
+            c.data.rects.push(FillRect::new(
+                Rect::new(x, top, cw, (area.bottom() - top).max(0.0)),
+                bar,
+            ));
         }
         // The headroom: how loud the band may go, a thin line under the limit.
         // Off the scale it would sit on the top or bottom edge, reading as a level it is not.
         if let Some(a) = allowed_drawn(b) {
             let ay = to_y(a);
-            c.overlay.polylines.push(Polyline {
-                points: vec![[x + cw * 0.2, ay], [x + cw * 0.8, ay]],
-                alpha: Vec::new(),
-                stroke: allowed_stroke,
-                clip: None,
-            });
+            c.overlay.polylines.push(Polyline::new(
+                vec![[x + cw * 0.2, ay], [x + cw * 0.8, ay]],
+                allowed_stroke,
+            ));
         }
         if let Some(l) = b.limit_db {
             let ly = to_y(l);
-            c.overlay.polylines.push(Polyline {
-                points: vec![[x - gap * 0.3, ly], [x + cw + gap * 0.3, ly]],
-                alpha: Vec::new(),
-                stroke: limit_stroke,
-                clip: None,
-            });
+            c.overlay.polylines.push(Polyline::new(
+                vec![[x - gap * 0.3, ly], [x + cw + gap * 0.3, ly]],
+                limit_stroke,
+            ));
         }
         // The value, held low on the column: read up close, the bars read from afar.
         let vfs = (cw * 0.24).clamp(sfs * 0.8, fs * 1.4);
@@ -393,18 +376,16 @@ fn draw_window(
             ));
         }
         if worst {
-            c.overlay.polylines.push(Polyline {
-                points: vec![
+            c.overlay.polylines.push(Polyline::new(
+                vec![
                     [x, area.y],
                     [x + cw, area.y],
                     [x + cw, area.bottom()],
                     [x, area.bottom()],
                     [x, area.y],
                 ],
-                alpha: Vec::new(),
-                stroke: Stroke::solid(theme.text, 2.0),
-                clip: None,
-            });
+                Stroke::solid(theme.text, 2.0),
+            ));
         }
     }
     c.overlay.labels.push(label(

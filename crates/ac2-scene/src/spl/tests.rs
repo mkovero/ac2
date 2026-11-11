@@ -45,10 +45,7 @@ fn readout(f: &SplFrame, cal: &str, age: Option<f64>) -> SplReadout {
 }
 
 fn vp(w: f32, h: f32) -> Viewport {
-    Viewport {
-        width: w,
-        height: h,
-    }
+    Viewport::new(w, h)
 }
 
 fn texts(s: &Scene) -> Vec<&str> {

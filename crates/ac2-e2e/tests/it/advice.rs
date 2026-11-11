@@ -15,10 +15,7 @@ fn banners(s: &AppState) -> Vec<String> {
         instant: Instant::now(),
         wall: ac2_proto::units::WallNs(0),
     };
-    let size = ac2_scene::primitives::Viewport {
-        width: 1100.0,
-        height: 600.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(1100.0, 600.0);
     ac2_ui::scenes::transfer(
         s,
         crate::common::pane(s, PaneKind::Transfer),

@@ -282,10 +282,7 @@ fn tone_unit_names_the_bin_and_fits_narrow_panes() {
             &Status::default(),
             &ViewState::default(),
             &theme,
-            Viewport {
-                width: w,
-                height: 300.0,
-            },
+            Viewport::new(w, 300.0),
         )
     };
     let wide = scene(std::slice::from_ref(&t), 900.0);
@@ -484,10 +481,7 @@ fn a_long_calibration_caption_leaves_the_unit_room() {
     let mut captions = Vec::new();
     for w in (300..=1300).step_by(50) {
         let w = w as f32;
-        let size = Viewport {
-            width: w,
-            height: 300.0,
-        };
+        let size = Viewport::new(w, 300.0);
         let s = spectrum_scene(
             std::slice::from_ref(&t),
             &Status::default(),

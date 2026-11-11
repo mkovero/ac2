@@ -113,12 +113,11 @@ pub(super) fn extremes(
                         Extreme::Max => (m.y, m.bottom()),
                         Extreme::Min => (m.bottom(), m.y),
                     };
-                    c.overlay.polylines.push(Polyline {
-                        points: vec![[x, tip], [m.right(), base], [m.x, base], [x, tip]],
-                        alpha: vec![],
-                        stroke: Stroke::solid(color, 1.5),
-                        clip: Some(plot),
-                    });
+                    c.overlay.polylines.push(Polyline::clipped(
+                        vec![[x, tip], [m.right(), base], [m.x, base], [x, tip]],
+                        Stroke::solid(color, 1.5),
+                        plot,
+                    ));
                     if marks {
                         let (ry, v) = match dir {
                             Extreme::Max => (m.y - 2.0, VAlign::Bottom),

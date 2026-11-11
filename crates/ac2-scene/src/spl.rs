@@ -525,26 +525,20 @@ pub(crate) fn draw_number_block(
         )
     });
     if let Some(b) = bar_rect {
-        c.base.rects.push(FillRect {
-            rect: b,
-            color: theme.plot_background,
-            clip: None,
-        });
-        c.data.rects.push(FillRect {
-            rect: Rect::new(b.x, b.y, b.w * r.bar.fill, b.h),
-            color: if r.stale.is_some() {
+        c.base.rects.push(FillRect::new(b, theme.plot_background));
+        c.data.rects.push(FillRect::new(
+            Rect::new(b.x, b.y, b.w * r.bar.fill, b.h),
+            if r.stale.is_some() {
                 theme.text_dim
             } else {
                 theme.level_ok
             },
-            clip: None,
-        });
+        ));
         for t in &r.bar.ticks {
-            c.overlay.rects.push(FillRect {
-                rect: Rect::new(b.x + b.w * t - 0.5, b.y, 1.0, b.h),
-                color: theme.background,
-                clip: None,
-            });
+            c.overlay.rects.push(FillRect::new(
+                Rect::new(b.x + b.w * t - 0.5, b.y, 1.0, b.h),
+                theme.background,
+            ));
         }
     }
     NumberBlock {

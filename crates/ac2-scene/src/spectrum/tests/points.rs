@@ -5,10 +5,7 @@ use crate::spectrum::peaks::{Peak, PeakInput, PeakTracker, find_peaks};
 use crate::view::PeakPoints;
 
 /// Wide enough that labels half a decade apart never touch.
-const WIDE: Viewport = Viewport {
-    width: 1600.0,
-    height: 400.0,
-};
+const WIDE: Viewport = Viewport::new(1600.0, 400.0);
 
 fn peaks_of(f: &[f64], level: &[f32]) -> Vec<Peak> {
     let mut t = PeakTracker::default();
@@ -278,10 +275,7 @@ fn the_picked_legend_entry_has_the_cue_and_stays_out_of_more() {
         .collect();
     let mut v = view(PlotChrome::Full, false);
     let last = TraceKey::Live(MeasId(12));
-    let narrow = Viewport {
-        width: 400.0,
-        height: 300.0,
-    };
+    let narrow = Viewport::new(400.0, 300.0);
     // Unpicked, the last entry is folded into `+N more`.
     v.peak_points = None;
     let s = spectrum_scene(&traces, &Status::default(), &v, &Theme::dark(), narrow);

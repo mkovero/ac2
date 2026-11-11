@@ -321,12 +321,7 @@ pub fn place(square: Rect, x: f32, y: f32) -> [f32; 2] {
 /// in `stroke`. Plot chrome: the caller leaves it out when **T** hides decorations.
 pub fn grid_polylines(square: Rect, stroke: Stroke) -> Vec<Polyline> {
     let (x0, y0, x1, y1) = (square.x, square.y, square.right(), square.bottom());
-    let line = |points: Vec<[f32; 2]>| Polyline {
-        points,
-        alpha: vec![],
-        stroke,
-        clip: None,
-    };
+    let line = |points: Vec<[f32; 2]>| Polyline::new(points, stroke);
     vec![
         line(vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]]),
         line(vec![[x0, y0], [x1, y1]]),

@@ -387,11 +387,7 @@ pub fn table_layer_at(t: &RoomTable, rect: Rect, theme: &Theme, size: f32) -> La
     let hidden = t.bands.len() - keep.len();
     let cw = col_w(&shown);
     let mut layer = Layer::default();
-    layer.rects.push(FillRect {
-        rect,
-        color: theme.background,
-        clip: None,
-    });
+    layer.rects.push(FillRect::new(rect, theme.background));
     let caption = if hidden > 0 {
         format!("{} · {hidden} bands hidden (narrow pane)", t.caption)
     } else {

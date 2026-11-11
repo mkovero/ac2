@@ -22,11 +22,10 @@ pub(crate) struct Canvas {
 impl Canvas {
     pub fn new(size: Viewport, theme: &Theme) -> Self {
         let mut c = Self::default();
-        c.base.rects.push(FillRect {
-            rect: Rect::new(0.0, 0.0, size.width, size.height),
-            color: theme.background,
-            clip: None,
-        });
+        c.base.rects.push(FillRect::new(
+            Rect::new(0.0, 0.0, size.width, size.height),
+            theme.background,
+        ));
         c
     }
 
@@ -89,15 +88,7 @@ pub(crate) fn label(
     size: f32,
     color: Color,
 ) -> Label {
-    Label {
-        text: text.into(),
-        pos,
-        anchor,
-        size,
-        color,
-        clip: None,
-        tabular: false,
-    }
+    Label::new(text, pos, anchor, size, color)
 }
 
 pub(crate) const fn anchor(h: HAlign, v: VAlign) -> Anchor {
@@ -143,11 +134,10 @@ pub(crate) fn pane_frame(
 /// the axis numbers are the truth, the shade only says they just changed.
 pub(crate) fn follow_shade(c: &mut Canvas, gutter: Rect, shade: f32, theme: &Theme) {
     if shade > 0.0 && gutter.w > 0.0 && gutter.h > 0.0 {
-        c.base.rects.push(FillRect {
-            rect: gutter,
-            color: theme.unresolved_shade.with_alpha(shade.min(1.0)),
-            clip: None,
-        });
+        c.base.rects.push(FillRect::new(
+            gutter,
+            theme.unresolved_shade.with_alpha(shade.min(1.0)),
+        ));
     }
 }
 
@@ -164,11 +154,9 @@ pub(crate) fn pane_frame_at(
     style: Style,
 ) {
     let Style { chrome, theme } = style;
-    c.base.rects.push(FillRect {
-        rect: plot,
-        color: theme.plot_background,
-        clip: None,
-    });
+    c.base
+        .rects
+        .push(FillRect::new(plot, theme.plot_background));
     if chrome.grid() {
         grid(c, plot, x, y, theme);
     }
@@ -237,24 +225,22 @@ fn grid(c: &mut Canvas, plot: Rect, x: &Axis, y: &Axis, theme: &Theme) {
 /// A horizontal reference line (0 dB, 0°) when `y` is inside the plot.
 pub(crate) fn hline(c: &mut Canvas, plot: Rect, y: f32, stroke: Stroke) {
     if y.is_finite() && y >= plot.y && y <= plot.bottom() {
-        c.base.polylines.push(Polyline {
-            points: vec![[plot.x, y], [plot.right(), y]],
-            alpha: vec![],
+        c.base.polylines.push(Polyline::clipped(
+            vec![[plot.x, y], [plot.right(), y]],
             stroke,
-            clip: Some(plot),
-        });
+            plot,
+        ));
     }
 }
 
 /// A vertical line across `plot` at `x` when inside it.
 pub(crate) fn vline(layer: &mut Layer, plot: Rect, x: f32, stroke: Stroke) {
     if x.is_finite() && x >= plot.x && x <= plot.right() {
-        layer.polylines.push(Polyline {
-            points: vec![[x, plot.y], [x, plot.bottom()]],
-            alpha: vec![],
+        layer.polylines.push(Polyline::clipped(
+            vec![[x, plot.y], [x, plot.bottom()]],
             stroke,
-            clip: Some(plot),
-        });
+            plot,
+        ));
     }
 }
 

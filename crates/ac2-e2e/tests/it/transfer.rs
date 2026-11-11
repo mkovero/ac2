@@ -134,10 +134,7 @@ fn no_reference(s: &AppState) -> Option<String> {
         instant: Instant::now(),
         wall: ac2_proto::units::WallNs(0),
     };
-    let size = ac2_scene::primitives::Viewport {
-        width: 1100.0,
-        height: 600.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(1100.0, 600.0);
     ac2_ui::scenes::transfer(
         s,
         crate::common::pane(s, ac2_ui::state::PaneKind::Transfer),
@@ -267,10 +264,7 @@ fn the_ir_pane_zooms_pans_and_reads_from_the_mouse() -> R {
         instant: Instant::now(),
         wall: ac2_proto::units::WallNs(0),
     };
-    let size = ac2_scene::primitives::Viewport {
-        width: 1100.0,
-        height: 600.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(1100.0, 600.0);
     let s = ac2_ui::scenes::ir(
         &d.st,
         crate::common::ir_pane(&d.st),
@@ -363,10 +357,7 @@ fn drawn_phase(s: &AppState, col: usize) -> Vec<(ac2_scene::trace::TraceKey, f64
         instant: Instant::now(),
         wall: ac2_proto::units::WallNs(0),
     };
-    let size = ac2_scene::primitives::Viewport {
-        width: 1100.0,
-        height: 600.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(1100.0, 600.0);
     let sc = ac2_ui::scenes::transfer(
         s,
         crate::common::pane(s, ac2_ui::state::PaneKind::Transfer),
@@ -393,10 +384,7 @@ fn drawn_curve(s: &AppState, k: ac2_scene::trace::TraceKey) -> (Vec<f64>, Vec<f6
         instant: Instant::now(),
         wall: ac2_proto::units::WallNs(0),
     };
-    let size = ac2_scene::primitives::Viewport {
-        width: 1100.0,
-        height: 600.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(1100.0, 600.0);
     let sc = ac2_ui::scenes::transfer(
         s,
         crate::common::pane(s, ac2_ui::state::PaneKind::Transfer),

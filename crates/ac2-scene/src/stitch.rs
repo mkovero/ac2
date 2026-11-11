@@ -83,12 +83,11 @@ pub(crate) fn draw(
         if !(x.is_finite() && x > plot.x + 0.5 && x < plot.right() - 0.5) {
             continue;
         }
-        c.base.polylines.push(Polyline {
-            points: vec![[x, plot.y], [x, plot.bottom()]],
-            alpha: vec![],
-            stroke: theme.unresolved_edge,
-            clip: Some(plot),
-        });
+        c.base.polylines.push(Polyline::clipped(
+            vec![[x, plot.y], [x, plot.bottom()]],
+            theme.unresolved_edge,
+            plot,
+        ));
         let w = text_width(&s.label, font);
         if labels && x + 3.0 >= free_from && x + 3.0 + w <= plot.right() - 2.0 {
             c.base.labels.push(label(

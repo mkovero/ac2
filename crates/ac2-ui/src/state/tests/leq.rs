@@ -739,10 +739,7 @@ fn spl_number_holds_for_the_display_period() {
     let mut t = T::new();
     t.conn(mirror(with_spl()));
     let theme = ac2_scene::theme::Theme::dark();
-    let size = ac2_scene::primitives::Viewport {
-        width: 800.0,
-        height: 500.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(800.0, 500.0);
     let now = crate::scenes::Now {
         instant: Instant::now(),
         wall: WallNs(0),
@@ -847,10 +844,7 @@ fn t_on_the_spl_pane_takes_the_limit_text() {
             instant: std::time::Instant::now(),
             wall: ac2_proto::units::WallNs(0),
         };
-        let size = ac2_scene::primitives::Viewport {
-            width: 1200.0,
-            height: 700.0,
-        };
+        let size = ac2_scene::primitives::Viewport::new(1200.0, 700.0);
         let s = crate::scenes::leq(&t.st, spl, &ac2_scene::theme::Theme::dark(), size, now)
             .expect("the Leq view");
         s.scene

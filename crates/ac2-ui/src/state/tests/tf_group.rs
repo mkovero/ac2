@@ -8,10 +8,7 @@ use ac2_proto::model::{MathConfig, MathDomain, MathExpr, MathOp, Operand};
 use ac2_scene::primitives::Viewport;
 use ac2_scene::theme::Theme;
 
-const SIZE: Viewport = Viewport {
-    width: 900.0,
-    height: 500.0,
-};
+const SIZE: Viewport = Viewport::new(900.0, 500.0);
 
 fn now() -> crate::scenes::Now {
     crate::scenes::Now {

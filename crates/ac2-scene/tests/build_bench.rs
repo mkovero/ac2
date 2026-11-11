@@ -22,10 +22,7 @@ use ac2_scene::time::Freshness;
 use ac2_scene::trace::{DisplayCache, TfTrace, TimeBase, TraceKey};
 use ac2_scene::view::{LeqLayout, LeqStyle, ViewState};
 
-const SIZE: Viewport = Viewport {
-    width: 1280.0,
-    height: 800.0,
-};
+const SIZE: Viewport = Viewport::new(1280.0, 800.0);
 
 fn median(mut v: Vec<Duration>) -> Duration {
     v.sort();
@@ -305,10 +302,7 @@ fn spectrograph_3d_view_with_a_full_history() {
     use ac2_scene::primitives::{Colormap, SkylineTier};
     use ac2_scene::spectrograph::{SpectrographFrame, SpectrographHistory};
     use ac2_scene::spectrograph_3d::{Pose, Skyline, Spectrograph3dInput, spectrograph_3d_scene};
-    const FULL_HD: Viewport = Viewport {
-        width: 1920.0,
-        height: 1080.0,
-    };
+    const FULL_HD: Viewport = Viewport::new(1920.0, 1080.0);
     let g = GridDef::LogBins {
         fs: Hz(48_000.0),
         n: 16_384,

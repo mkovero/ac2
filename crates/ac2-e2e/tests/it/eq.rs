@@ -17,10 +17,7 @@ fn legend(s: &AppState) -> Vec<String> {
         s,
         crate::common::pane(s, ac2_ui::state::PaneKind::Transfer),
         &Theme::dark(),
-        ac2_scene::primitives::Viewport {
-            width: 1200.0,
-            height: 600.0,
-        },
+        ac2_scene::primitives::Viewport::new(1200.0, 600.0),
         ac2_ui::scenes::Now {
             instant: Instant::now(),
             wall: ac2_proto::units::WallNs(0),

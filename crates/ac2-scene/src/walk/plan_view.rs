@@ -222,12 +222,7 @@ fn closed(mut v: Vec<[f32; 2]>) -> Vec<[f32; 2]> {
 }
 
 fn line(points: Vec<[f32; 2]>, color: Color, width: f32, clip: Rect) -> Polyline {
-    Polyline {
-        points,
-        alpha: Vec::new(),
-        stroke: Stroke::solid(color, width),
-        clip: Some(clip),
-    }
+    Polyline::clipped(points, Stroke::solid(color, width), clip)
 }
 
 fn disc(at: [f32; 2], r: f32, color: Color, clip: Rect) -> FillPolygon {
@@ -305,11 +300,11 @@ pub(crate) fn draw_plan(
             ];
             let tl = map.to_px([centre[0] - 0.5 * m.spacing, centre[1] + 0.5 * m.spacing]);
             // The data layer: its rects go under its markers and dots, over the floor.
-            c.data.rects.push(FillRect {
-                rect: Rect::new(tl[0], tl[1], w, w),
-                color: heat(cell.db),
-                clip: Some(rect),
-            });
+            c.data.rects.push(FillRect::clipped(
+                Rect::new(tl[0], tl[1], w, w),
+                heat(cell.db),
+                rect,
+            ));
         }
     }
     if let Some(v) = &pic.editing {

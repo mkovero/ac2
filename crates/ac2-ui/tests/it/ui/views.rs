@@ -618,10 +618,7 @@ fn spectrograph() {
             wall: ac2_proto::units::WallNs(0),
         };
         let theme = ac2_scene::theme::Theme::dark();
-        let size = ac2_scene::primitives::Viewport {
-            width: 1000.0,
-            height: 600.0,
-        };
+        let size = ac2_scene::primitives::Viewport::new(1000.0, 600.0);
         let s = ac2_ui::scenes::spectrograph(
             st,
             crate::common::pane(st, ac2_ui::state::PaneKind::Spectrum),
@@ -654,10 +651,7 @@ fn spectrograph() {
             wall: ac2_proto::units::WallNs(0),
         };
         let theme = ac2_scene::theme::Theme::dark();
-        let size = ac2_scene::primitives::Viewport {
-            width: 1000.0,
-            height: 600.0,
-        };
+        let size = ac2_scene::primitives::Viewport::new(1000.0, 600.0);
         let s = ac2_ui::scenes::spectrograph(
             st,
             crate::common::pane(st, ac2_ui::state::PaneKind::Spectrum),

@@ -40,12 +40,7 @@ const PINK: Color = Color::rgb(0.90, 0.30, 0.45);
 const GREY: Color = Color::rgb(0.55, 0.58, 0.62);
 
 fn line(points: Vec<[f32; 2]>, stroke: Stroke) -> Polyline {
-    Polyline {
-        points,
-        alpha: vec![],
-        stroke,
-        clip: None,
-    }
+    Polyline::new(points, stroke)
 }
 
 fn zigzag(x0: f32, y0: f32, n: usize, dx: f32, dy: f32) -> Vec<[f32; 2]> {
@@ -128,11 +123,10 @@ fn lines_and_joins() {
 fn clipped_plot() -> ac2_plot::Scene {
     let plot = Rect::new(20.5, 18.25, 150.0, 90.6);
     let mut layer = Layer::default();
-    layer.rects.push(FillRect {
-        rect: Rect::new(20.0, 18.0, 151.0, 91.0),
-        color: Color::rgb(0.11, 0.12, 0.15),
-        clip: None,
-    });
+    layer.rects.push(FillRect::new(
+        Rect::new(20.0, 18.0, 151.0, 91.0),
+        Color::rgb(0.11, 0.12, 0.15),
+    ));
     let mut lines = vec![];
     for i in 0..=10 {
         lines.push(GridLine {
@@ -192,17 +186,16 @@ fn clipped_plot() -> ac2_plot::Scene {
         color: BLUE.with_alpha(0.3),
         clip: Some(plot),
     });
-    layer.polylines.push(Polyline {
-        points: (0..n)
+    layer.polylines.push(Polyline::clipped(
+        (0..n)
             .map(|i| {
                 let (x, y) = f(i);
                 [x, y]
             })
             .collect(),
-        alpha: vec![],
-        stroke: Stroke::solid(BLUE, 3.0),
-        clip: Some(plot),
-    });
+        Stroke::solid(BLUE, 3.0),
+        plot,
+    ));
     layer.labels.push(Label {
         text: "clipped label".into(),
         pos: [140.0, 100.0],
@@ -311,26 +304,22 @@ fn text_anchors_and_banner() {
             vec![[pos[0], pos[1] - 4.0], [pos[0], pos[1] + 4.0]],
             Stroke::solid(PINK, 1.0),
         ));
-        base.labels.push(Label {
-            text: "Hz 1k".into(),
+        base.labels.push(Label::new(
+            "Hz 1k",
             pos,
-            anchor: ac2_plot::Anchor { h, v },
-            size: 14.0,
-            color: Color::WHITE,
-            clip: None,
-            tabular: false,
-        });
+            ac2_plot::Anchor { h, v },
+            14.0,
+            Color::WHITE,
+        ));
     }
     for (i, size) in [9.0, 11.0, 16.0, 22.0].into_iter().enumerate() {
-        base.labels.push(Label {
-            text: "−12.5 dB  coh 0.98".into(),
-            pos: [8.0, 56.0 + 22.0 * i as f32],
-            anchor: Anchor::TOP_LEFT,
+        base.labels.push(Label::new(
+            "−12.5 dB  coh 0.98",
+            [8.0, 56.0 + 22.0 * i as f32],
+            Anchor::TOP_LEFT,
             size,
-            color: Color::rgb(0.85, 0.87, 0.9),
-            clip: None,
-            tabular: false,
-        });
+            Color::rgb(0.85, 0.87, 0.9),
+        ));
     }
     base.polylines.push(line(
         vec![[200.0, 60.0], [310.0, 140.0]],
@@ -338,20 +327,17 @@ fn text_anchors_and_banner() {
     ));
     // Banner in a later layer covers the line and the base layer's text.
     let mut overlay = Layer::default();
-    overlay.rects.push(FillRect {
-        rect: Rect::new(190.0, 88.0, 124.0, 26.0),
-        color: Color::rgb(0.75, 0.15, 0.1).with_alpha(0.9),
-        clip: None,
-    });
-    overlay.labels.push(Label {
-        text: "STALE 2.4 s".into(),
-        pos: [252.0, 101.0],
-        anchor: Anchor::CENTER,
-        size: 15.0,
-        color: Color::WHITE,
-        clip: None,
-        tabular: false,
-    });
+    overlay.rects.push(FillRect::new(
+        Rect::new(190.0, 88.0, 124.0, 26.0),
+        Color::rgb(0.75, 0.15, 0.1).with_alpha(0.9),
+    ));
+    overlay.labels.push(Label::new(
+        "STALE 2.4 s",
+        [252.0, 101.0],
+        Anchor::CENTER,
+        15.0,
+        Color::WHITE,
+    ));
     let img = render(gpu, &mut r, &scene(320.0, 150.0, vec![base, overlay]), 1.0);
     golden("text_anchors_and_banner", &img, TEXT);
 }

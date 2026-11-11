@@ -234,10 +234,7 @@ fn plate_fill_honours_plate_alpha_and_hover() {
                     chrome: PlotChrome::Full,
                     theme: &theme,
                 },
-                crate::primitives::Viewport {
-                    width: 900.0,
-                    height: 400.0,
-                },
+                crate::primitives::Viewport::new(900.0, 400.0),
                 None,
             );
             let plate = s.plate.expect("a plate");

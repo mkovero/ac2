@@ -248,10 +248,7 @@ fn scene_coloured(
         Some(&input),
         view,
         &Theme::dark(),
-        Viewport {
-            width: 800.0,
-            height: 500.0,
-        },
+        Viewport::new(800.0, 500.0),
     )
 }
 
@@ -365,10 +362,7 @@ fn axes_bar_caption_and_cursor_read_as_numbers() {
 fn stale_dims_offset_shifts_and_empty_says_so() {
     let mut h = SpectrographHistory::new(10);
     let theme = Theme::dark();
-    let size = Viewport {
-        width: 600.0,
-        height: 400.0,
-    };
+    let size = Viewport::new(600.0, 400.0);
     let view = ViewState::default();
     let input = |h: &SpectrographHistory, off: f64, fr: Option<Freshness>| {
         let s = SpectrographInput {
@@ -451,10 +445,7 @@ fn the_spectrum_part_keeps_its_legend_unit_and_selection() {
         Some(&input),
         &ViewState::default(),
         &theme,
-        Viewport {
-            width: 800.0,
-            height: 500.0,
-        },
+        Viewport::new(800.0, 500.0),
     );
     let sp = s.spectrum.as_ref().expect("the spectrum above");
     assert_eq!(sp.unit, "dBFS per 2.93 Hz bin (tone)");
@@ -560,10 +551,7 @@ fn the_spectrograph_alone_takes_the_pane() {
             Some(&input),
             &view,
             &Theme::dark(),
-            Viewport {
-                width: w,
-                height: 500.0,
-            },
+            Viewport::new(w, 500.0),
         )
     };
     let s = draw(1200.0);
@@ -656,10 +644,7 @@ fn multires_stitches_cross_the_history() {
         layer: 0,
     };
     let mut view = ViewState::default();
-    let size = Viewport {
-        width: 900.0,
-        height: 500.0,
-    };
+    let size = Viewport::new(900.0, 500.0);
     let labels = |s: &SpectrographScene| {
         s.scene
             .layers
@@ -736,10 +721,7 @@ fn a_density_reads_per_hertz_and_a_level_change_starts_over() {
 #[test]
 fn a_column_reserve_lines_up_the_frequency_axes() {
     use crate::freq_column::{FreqPlot, natural_right};
-    let size = Viewport {
-        width: 800.0,
-        height: 500.0,
-    };
+    let size = Viewport::new(800.0, 500.0);
     let theme = Theme::dark();
     let status = Status::default();
     let h = SpectrographHistory::new(30);
@@ -813,10 +795,7 @@ fn the_3d_view_on_a_gpu_without_it_is_the_spectrograph_with_a_note() {
         None,
         &view,
         &Theme::dark(),
-        Viewport {
-            width: 800.0,
-            height: 500.0,
-        },
+        Viewport::new(800.0, 500.0),
     );
     assert_eq!(none.caption, NO_3D);
     assert!(shown(&none).contains(&NO_3D.to_string()));
@@ -869,10 +848,7 @@ fn alone_the_legend_row_picks_and_the_split_leaves_it_to_the_spectrum() {
     };
     let mut view = ViewState::default();
     view.spectrum.mode = SpectrumMode::Spectrograph;
-    let size = Viewport {
-        width: 800.0,
-        height: 500.0,
-    };
+    let size = Viewport::new(800.0, 500.0);
     let at = |view: &ViewState| {
         spectrograph_scene(
             &traces,

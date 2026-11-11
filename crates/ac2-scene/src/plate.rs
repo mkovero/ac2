@@ -467,11 +467,11 @@ pub(crate) fn grip(layer: &mut Layer, rect: Rect, hot: bool, clip: Rect, theme: 
     let dot = if hot { theme.text } else { theme.text_dim };
     let (gx, gy) = (rect.right() - 3.0, rect.bottom() - 3.0);
     for (dx, dy) in [(0.0, 0.0), (-4.0, 0.0), (0.0, -4.0)] {
-        layer.rects.push(FillRect {
-            rect: Rect::new(gx + dx - 2.0, gy + dy - 2.0, 2.0, 2.0),
-            color: dot,
-            clip: Some(clip),
-        });
+        layer.rects.push(FillRect::clipped(
+            Rect::new(gx + dx - 2.0, gy + dy - 2.0, 2.0, 2.0),
+            dot,
+            clip,
+        ));
     }
 }
 

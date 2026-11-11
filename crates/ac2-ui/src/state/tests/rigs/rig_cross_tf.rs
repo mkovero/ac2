@@ -60,10 +60,7 @@ fn now() -> crate::scenes::Now {
     }
 }
 
-const SIZE: ac2_scene::primitives::Viewport = ac2_scene::primitives::Viewport {
-    width: 900.0,
-    height: 500.0,
-};
+const SIZE: ac2_scene::primitives::Viewport = ac2_scene::primitives::Viewport::new(900.0, 500.0);
 
 /// The texts of the banner strip as transfer pane `p` draws it.
 fn drawn_banners(st: &AppState, p: PaneId) -> Vec<String> {

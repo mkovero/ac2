@@ -264,10 +264,7 @@ fn legend_names_every_curve_and_fits_small_panes() {
             &Status::default(),
             &ViewState::default(),
             &Theme::dark(),
-            Viewport {
-                width: w,
-                height: h,
-            },
+            Viewport::new(w, h),
         )
     };
     let texts = |s: &SpectrumScene| s.legend_shown.clone();

@@ -58,10 +58,7 @@ fn pane_texts(h: &Harness<'_, App>, pane: ac2_ui::state::PaneId) -> Vec<String> 
         st,
         pane,
         &ac2_scene::theme::Theme::dark(),
-        ac2_scene::primitives::Viewport {
-            width: 900.0,
-            height: 450.0,
-        },
+        ac2_scene::primitives::Viewport::new(900.0, 450.0),
     )
     .expect("a Programme scene");
     scene
@@ -485,10 +482,7 @@ fn plate_boxes(
         &h.state().state,
         pane,
         &ac2_scene::theme::Theme::dark(),
-        ac2_scene::primitives::Viewport {
-            width: 900.0,
-            height: 450.0,
-        },
+        ac2_scene::primitives::Viewport::new(900.0, 450.0),
     )
     .expect("a Programme scene")
     .plates()

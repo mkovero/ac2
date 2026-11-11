@@ -691,24 +691,15 @@ pub(super) fn draw_columns(
         } else {
             full
         };
-        c.base.rects.push(FillRect {
-            rect: r,
-            color: bg,
-            clip: None,
-        });
-        c.base.rects.push(FillRect {
-            rect: track,
-            color: track_color,
-            clip: None,
-        });
+        c.base.rects.push(FillRect::new(r, bg));
+        c.base.rects.push(FillRect::new(track, track_color));
         for v in ticks.iter().filter(|_| chrome.grid()) {
             let y = to_y(*v);
-            c.base.polylines.push(Polyline {
-                points: vec![[track.x, y], [track.right(), y]],
-                alpha: vec![],
-                stroke: Stroke::solid(mix(track_color, theme.grid_major.color, 0.6), 1.0),
-                clip: Some(track),
-            });
+            c.base.polylines.push(Polyline::clipped(
+                vec![[track.x, y], [track.right(), y]],
+                Stroke::solid(mix(track_color, theme.grid_major.color, 0.6), 1.0),
+                track,
+            ));
         }
         // While filling the bar is the budget spent: the Leq the window ends at if the
         // rest is silent, reaching the limit line when going over becomes certain.
@@ -719,21 +710,16 @@ pub(super) fn draw_columns(
         });
         let bar = bar.filter(|b| b.h > 0.0);
         if let Some(b) = bar {
-            c.data.rects.push(FillRect {
-                rect: b,
-                color: bar_color,
-                clip: Some(track),
-            });
+            c.data.rects.push(FillRect::clipped(b, bar_color, track));
         }
         let limit_y = t.limit_db.map(&to_y);
         let limit_w = (h * 0.006).clamp(2.0, 5.0);
         if let Some(y) = limit_y {
-            c.data.polylines.push(Polyline {
-                points: vec![[r.x, y], [r.right(), y]],
-                alpha: vec![],
-                stroke: Stroke::solid(theme.text, limit_w),
-                clip: Some(r),
-            });
+            c.data.polylines.push(Polyline::clipped(
+                vec![[r.x, y], [r.right(), y]],
+                Stroke::solid(theme.text, limit_w),
+                r,
+            ));
         }
         let fg = if stale && !alarm {
             theme.text_dim

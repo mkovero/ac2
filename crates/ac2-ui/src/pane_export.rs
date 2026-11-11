@@ -95,10 +95,7 @@ impl crate::App {
                 // its rows stand where the data puts them.
                 (1.0, 0.0),
                 &st.scene_theme(),
-                ac2_scene::primitives::Viewport {
-                    width: size[0],
-                    height: size[1],
-                },
+                ac2_scene::primitives::Viewport::new(size[0], size[1]),
                 crate::view::now(),
             )
             .scene;

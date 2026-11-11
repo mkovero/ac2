@@ -376,10 +376,7 @@ fn slow_band_leq_from_an_empty_daemon() {
         &h.state().state,
         crate::common::pane(&h.state().state, ac2_ui::state::PaneKind::Spl),
         &theme,
-        ac2_scene::Viewport {
-            width: 1200.0,
-            height: 700.0,
-        },
+        ac2_scene::Viewport::new(1200.0, 700.0),
         ac2_ui::scenes::Now {
             instant: Instant::now(),
             wall: ac2_proto::units::WallNs(0),
@@ -616,10 +613,7 @@ fn a_single_band_window_with_plus_and_minus() {
         &h.state().state,
         crate::common::pane(&h.state().state, ac2_ui::state::PaneKind::Spl),
         &ac2_scene::Theme::dark(),
-        ac2_scene::Viewport {
-            width: 1200.0,
-            height: 700.0,
-        },
+        ac2_scene::Viewport::new(1200.0, 700.0),
         ac2_ui::scenes::Now {
             instant: Instant::now(),
             wall: WallNs(0),

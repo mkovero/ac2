@@ -82,13 +82,7 @@ fn a_dropped_plate_stays_inside_a_smaller_pane() {
     let mut v = view();
     v.plates.readout.at = Some([1.0, 1.0]);
     v.plates.readout.scale = 2.0;
-    for size in [
-        SIZE,
-        Viewport {
-            width: 420.0,
-            height: 300.0,
-        },
-    ] {
+    for size in [SIZE, Viewport::new(420.0, 300.0)] {
         let s = scene(&c, &v, size);
         let b = s.readout_box.expect("values");
         let inset = crate::legend::INSET;
@@ -159,10 +153,7 @@ fn enlarged_plates_shrink_to_a_small_pane() {
     }
     v.plates.readout.move_to(0.0, 1.0);
     v.plates.legend.move_to(1.0, 0.0);
-    let small = Viewport {
-        width: 420.0,
-        height: 300.0,
-    };
+    let small = Viewport::new(420.0, 300.0);
     let s = scene(&c, &v, small);
     for b in s.plates() {
         let inside = |r: Rect| {

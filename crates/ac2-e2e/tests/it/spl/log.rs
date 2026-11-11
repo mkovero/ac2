@@ -23,10 +23,7 @@ fn run_caption(s: &AppState) -> Option<String> {
                 .map_or(0, |d| d.as_nanos() as u64),
         ),
     };
-    let size = ac2_scene::primitives::Viewport {
-        width: 1280.0,
-        height: 720.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(1280.0, 720.0);
     ac2_ui::scenes::leq(
         s,
         crate::common::pane(s, ac2_ui::state::PaneKind::Spl),
@@ -169,10 +166,7 @@ fn strip_line(s: &AppState) -> Vec<[f32; 2]> {
                 .map_or(0, |d| d.as_nanos() as u64),
         ),
     };
-    let size = ac2_scene::primitives::Viewport {
-        width: 1280.0,
-        height: 720.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(1280.0, 720.0);
     ac2_ui::scenes::leq(
         s,
         crate::common::pane(s, ac2_ui::state::PaneKind::Spl),

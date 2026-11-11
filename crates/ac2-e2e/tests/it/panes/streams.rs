@@ -149,10 +149,7 @@ fn spectrograph_from_an_empty_daemon() -> R {
     d.until("a second of spectrograph", |s| filled(s, 30))?;
 
     let theme = Theme::dark();
-    let size = ac2_scene::primitives::Viewport {
-        width: 1000.0,
-        height: 600.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(1000.0, 600.0);
     let now = || ac2_ui::scenes::Now {
         instant: Instant::now(),
         wall: ac2_proto::units::WallNs(0),

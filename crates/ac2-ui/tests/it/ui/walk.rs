@@ -119,10 +119,7 @@ fn walk_texts(h: &Harness<'_, App>) -> Vec<String> {
         st,
         st.layout.focus,
         &ac2_scene::theme::Theme::dark(),
-        ac2_scene::primitives::Viewport {
-            width: 900.0,
-            height: 600.0,
-        },
+        ac2_scene::primitives::Viewport::new(900.0, 600.0),
         ac2_ui::scenes::Now {
             instant: std::time::Instant::now(),
             wall: WallNs(wall_now()),

@@ -161,20 +161,14 @@ fn the_sweep_ir_view_carries_the_table_when_tall_enough() {
     let color = theme.trace_color(0);
     let status = Status::default();
     let view = ViewState::default();
-    let tall = Viewport {
-        width: 900.0,
-        height: 520.0,
-    };
+    let tall = Viewport::new(900.0, 520.0);
     let sc =
         crate::distortion::sweep_ir_scene(&d, color, &status, &view, &theme, tall).expect("scene");
     let t = sc.room.as_ref().expect("table");
     assert_eq!(t.bands.last().map(String::as_str), Some("All"));
     assert_eq!(sc.scene.viewport, tall);
     assert!(sc.plot.bottom() < tall.height - table_height(t, &theme));
-    let short = Viewport {
-        width: 900.0,
-        height: 250.0,
-    };
+    let short = Viewport::new(900.0, 250.0);
     let sc =
         crate::distortion::sweep_ir_scene(&d, color, &status, &view, &theme, short).expect("scene");
     assert!(sc.room.is_none());
@@ -188,10 +182,7 @@ fn the_room_view_takes_the_pane_and_grows_to_fit() {
     use crate::banner::Status;
     let theme = Theme::dark();
     let r = room();
-    let full = Viewport {
-        width: 1100.0,
-        height: 600.0,
-    };
+    let full = Viewport::new(1100.0, 600.0);
     let s = room_scene(
         Some(RoomShown::Run(&r)),
         Some("Sweep 1"),
@@ -228,10 +219,7 @@ fn the_room_view_takes_the_pane_and_grows_to_fit() {
         "Shift+S",
         &Status::default(),
         &theme,
-        Viewport {
-            width: 260.0,
-            height: 300.0,
-        },
+        Viewport::new(260.0, 300.0),
     );
     assert_eq!(small.font_size, theme.small_font_size);
     let some: Vec<&str> = small

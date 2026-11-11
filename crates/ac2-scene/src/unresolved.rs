@@ -104,21 +104,20 @@ pub(crate) fn draw(c: &mut Canvas, plot: Rect, xm: &Mapping, marks: &[RangeMark]
         if !(x0.is_finite() && x1.is_finite()) || x1 <= x0 {
             continue;
         }
-        c.base.rects.push(FillRect {
-            rect: Rect::new(x0, plot.y, x1 - x0, plot.h),
-            color: theme.unresolved_shade,
-            clip: Some(plot),
-        });
+        c.base.rects.push(FillRect::clipped(
+            Rect::new(x0, plot.y, x1 - x0, plot.h),
+            theme.unresolved_shade,
+            plot,
+        ));
         let lo_edge = (!m.from_bottom).then_some(xm.to_px(m.lo_hz));
         for x in lo_edge.into_iter().chain([xm.to_px(m.hi_hz)]) {
             // An edge on the plot's border would only thicken the frame.
             if x > plot.x + 0.5 && x < plot.right() - 0.5 {
-                c.base.polylines.push(Polyline {
-                    points: vec![[x, plot.y], [x, plot.bottom()]],
-                    alpha: vec![],
-                    stroke: theme.unresolved_edge,
-                    clip: Some(plot),
-                });
+                c.base.polylines.push(Polyline::clipped(
+                    vec![[x, plot.y], [x, plot.bottom()]],
+                    theme.unresolved_edge,
+                    plot,
+                ));
             }
         }
     }

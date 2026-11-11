@@ -23,10 +23,7 @@ fn transfer_view_two_traces_and_banner() {
             st,
             crate::common::pane(st, ac2_ui::state::PaneKind::Transfer),
             &ac2_scene::theme::Theme::dark(),
-            ac2_scene::primitives::Viewport {
-                width: 1000.0,
-                height: 450.0,
-            },
+            ac2_scene::primitives::Viewport::new(1000.0, 450.0),
             ac2_ui::scenes::Now {
                 instant: Instant::now(),
                 wall: ac2_proto::units::WallNs(0),
@@ -56,10 +53,7 @@ fn no_reference_reminds_of_the_stimulus_keys() {
             &a.state,
             crate::common::pane(&a.state, ac2_ui::state::PaneKind::Transfer),
             &ac2_scene::theme::Theme::dark(),
-            ac2_scene::primitives::Viewport {
-                width: 1000.0,
-                height: 450.0,
-            },
+            ac2_scene::primitives::Viewport::new(1000.0, 450.0),
             ac2_ui::scenes::Now {
                 instant: Instant::now(),
                 wall: ac2_proto::units::WallNs(0),
@@ -102,10 +96,7 @@ fn ir_pane_of_a_stopped_measurement() {
             crate::common::ir_pane(st),
             &h.state().keymap,
             &ac2_scene::theme::Theme::dark(),
-            ac2_scene::primitives::Viewport {
-                width: 1000.0,
-                height: 450.0,
-            },
+            ac2_scene::primitives::Viewport::new(1000.0, 450.0),
             ac2_ui::scenes::Now {
                 instant: Instant::now(),
                 wall: ac2_proto::units::WallNs(0),
@@ -218,10 +209,7 @@ fn alignment_view() {
             st,
             crate::common::pane(st, PaneKind::Transfer),
             &ac2_scene::theme::Theme::dark(),
-            ac2_scene::primitives::Viewport {
-                width: 1000.0,
-                height: 600.0,
-            },
+            ac2_scene::primitives::Viewport::new(1000.0, 600.0),
             ac2_ui::scenes::Now {
                 instant: Instant::now(),
                 wall: ac2_proto::units::WallNs(0),
@@ -278,10 +266,7 @@ fn math_average_legend_and_banner() {
             st,
             crate::common::pane(st, ac2_ui::state::PaneKind::Transfer),
             &ac2_scene::theme::Theme::dark(),
-            ac2_scene::primitives::Viewport {
-                width: 1000.0,
-                height: 450.0,
-            },
+            ac2_scene::primitives::Viewport::new(1000.0, 450.0),
             ac2_ui::scenes::Now {
                 instant: Instant::now(),
                 wall: ac2_proto::units::WallNs(0),
@@ -374,10 +359,7 @@ fn spectrum_math() {
             st,
             crate::common::pane(st, ac2_ui::state::PaneKind::Spectrum),
             &ac2_scene::theme::Theme::dark(),
-            ac2_scene::primitives::Viewport {
-                width: 1000.0,
-                height: 450.0,
-            },
+            ac2_scene::primitives::Viewport::new(1000.0, 450.0),
             ac2_ui::scenes::Now {
                 instant: Instant::now(),
                 wall: ac2_proto::units::WallNs(0),
@@ -560,10 +542,7 @@ fn transfer_min_max_tracking() {
             st,
             crate::common::pane(st, PaneKind::Transfer),
             &ac2_scene::theme::Theme::dark(),
-            ac2_scene::primitives::Viewport {
-                width: 1000.0,
-                height: 450.0,
-            },
+            ac2_scene::primitives::Viewport::new(1000.0, 450.0),
             ac2_ui::scenes::Now {
                 instant: Instant::now(),
                 wall: ac2_proto::units::WallNs(0),

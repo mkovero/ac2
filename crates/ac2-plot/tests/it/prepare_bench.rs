@@ -86,18 +86,16 @@ fn dense_scene(phase: f32) -> ac2_plot::Scene {
         });
     }
     for i in 0..=10 {
-        layer.labels.push(Label {
-            text: format!("{} Hz", 20 * (1 << i)),
-            pos: [plot.x + plot.w * i as f32 / 10.0, plot.bottom() + 6.0],
-            anchor: Anchor {
+        layer.labels.push(Label::new(
+            format!("{} Hz", 20 * (1 << i)),
+            [plot.x + plot.w * i as f32 / 10.0, plot.bottom() + 6.0],
+            Anchor {
                 h: ac2_plot::HAlign::Center,
                 v: ac2_plot::VAlign::Top,
             },
-            size: 12.0,
-            color: Color::rgb(0.8, 0.8, 0.85),
-            clip: None,
-            tabular: false,
-        });
+            12.0,
+            Color::rgb(0.8, 0.8, 0.85),
+        ));
     }
     scene(W, H, vec![layer])
 }

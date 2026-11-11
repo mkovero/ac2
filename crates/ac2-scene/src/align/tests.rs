@@ -182,10 +182,7 @@ fn curves(n: usize) -> AlignCurves {
 }
 
 fn vp() -> Viewport {
-    Viewport {
-        width: 1280.0,
-        height: 720.0,
-    }
+    Viewport::new(1280.0, 720.0)
 }
 
 #[test]

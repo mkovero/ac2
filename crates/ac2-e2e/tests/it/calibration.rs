@@ -298,10 +298,7 @@ fn slow_electrical_calibration_from_the_app() -> R {
                 .map_or(0, |d| d.as_nanos() as u64),
         ),
     };
-    let size = ac2_scene::primitives::Viewport {
-        width: 1280.0,
-        height: 720.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(1280.0, 720.0);
     let want = "electrical cal (in-line, data sheet 15.0 mV/Pa) ±1 dB";
     let texts = |s: &AppState| {
         ac2_ui::scenes::spl(
@@ -486,10 +483,7 @@ fn slow_acoustic_calibration_from_the_app() -> R {
                 .map_or(0, |d| d.as_nanos() as u64),
         ),
     };
-    let size = ac2_scene::primitives::Viewport {
-        width: 1280.0,
-        height: 720.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(1280.0, 720.0);
     let texts = |s: &AppState| {
         ac2_ui::scenes::spl(
             s,

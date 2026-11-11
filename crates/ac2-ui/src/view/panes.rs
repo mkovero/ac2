@@ -143,10 +143,7 @@ fn build_scene(
         };
         return Some((c.scene.clone(), axes));
     }
-    let vp = Viewport {
-        width: size.x,
-        height: size.y,
-    };
+    let vp = Viewport::new(size.x, size.y);
     let now = super::now();
     let st = &app.state;
     let mut unit_tip = None;

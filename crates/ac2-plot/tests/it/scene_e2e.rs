@@ -114,10 +114,7 @@ fn transfer_golden(name: &str, view: ViewState, status: Status, first: &str) {
         ..view
     };
     let theme = Theme::dark();
-    let size = Viewport {
-        width: 560.0,
-        height: 360.0,
-    };
+    let size = Viewport::new(560.0, 360.0);
     let s = ac2_scene::tf::transfer_scene(
         &traces,
         &ac2_scene::trace::DisplayCache::default(),
@@ -253,10 +250,7 @@ fn transfer_view_unresolved() {
             cursor_hz: Some(300.0),
             ..ViewState::default()
         };
-        let size = Viewport {
-            width: 560.0,
-            height: 360.0,
-        };
+        let size = Viewport::new(560.0, 360.0);
         let s = ac2_scene::tf::transfer_scene(
             std::slice::from_ref(&t),
             &ac2_scene::trace::DisplayCache::default(),
@@ -322,10 +316,7 @@ fn transfer_view_range_band() {
     };
     view.tf.coherence.blank_below = Some(0.5);
     let theme = Theme::dark();
-    let size = Viewport {
-        width: 560.0,
-        height: 360.0,
-    };
+    let size = Viewport::new(560.0, 360.0);
     let s = ac2_scene::tf::transfer_scene(
         std::slice::from_ref(&t),
         &ac2_scene::trace::DisplayCache::default(),
@@ -477,10 +468,7 @@ fn spectrum_golden_with(
         ..ViewState::default()
     };
     adjust(&mut view, &mut theme);
-    let size = Viewport {
-        width: 560.0,
-        height: 360.0,
-    };
+    let size = Viewport::new(560.0, 360.0);
     let s = spectrum_scene(
         std::slice::from_ref(&t),
         &Status::default(),

@@ -94,10 +94,7 @@ fn tree_dots_have_the_colours_of_their_curves() {
     })));
 
     let theme = ac2_scene::theme::Theme::by_name(t.st.theme);
-    let size = Viewport {
-        width: 1000.0,
-        height: 450.0,
-    };
+    let size = Viewport::new(1000.0, 450.0);
     let now = crate::scenes::Now {
         instant: Instant::now(),
         wall: WallNs(0),

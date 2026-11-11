@@ -163,23 +163,18 @@ fn draw_legend(
         let mid = y + size * 0.62;
         match e.mark {
             LegendMark::Name => {}
-            LegendMark::Dashed => c.overlay.polylines.push(Polyline {
-                points: vec![[x, mid], [x + SAMPLE_W, mid]],
-                alpha: vec![],
-                stroke: floor_stroke(e.color, theme),
-                clip: None,
-            }),
-            LegendMark::Dotted => c.overlay.polylines.push(Polyline {
-                points: vec![[x, mid], [x + SAMPLE_W, mid]],
-                alpha: vec![],
-                stroke: reference_stroke(e.color, theme),
-                clip: None,
-            }),
-            LegendMark::Shade => c.overlay.rects.push(FillRect {
-                rect: Rect::new(x, mid - 4.0, SAMPLE_W, 8.0),
-                color: noise_color(theme),
-                clip: None,
-            }),
+            LegendMark::Dashed => c.overlay.polylines.push(Polyline::new(
+                vec![[x, mid], [x + SAMPLE_W, mid]],
+                floor_stroke(e.color, theme),
+            )),
+            LegendMark::Dotted => c.overlay.polylines.push(Polyline::new(
+                vec![[x, mid], [x + SAMPLE_W, mid]],
+                reference_stroke(e.color, theme),
+            )),
+            LegendMark::Shade => c.overlay.rects.push(FillRect::new(
+                Rect::new(x, mid - 4.0, SAMPLE_W, 8.0),
+                noise_color(theme),
+            )),
         }
         c.overlay.labels.push(label(
             e.name.clone(),
@@ -308,12 +303,11 @@ fn draw_compared(
         let points = runs(&xs, &ys);
         if !points.is_empty() {
             let width = if order == 0 { 1.2 } else { 0.8 } * theme.trace_width;
-            c.data.polylines.push(Polyline {
+            c.data.polylines.push(Polyline::clipped(
                 points,
-                alpha: vec![],
-                stroke: Stroke::solid(v.color.with_alpha(0.8), width),
-                clip: Some(plot),
-            });
+                Stroke::solid(v.color.with_alpha(0.8), width),
+                plot,
+            ));
         }
     }
     let ys: Vec<f32> = cols
@@ -326,12 +320,11 @@ fn draw_compared(
         .collect();
     let (points, _) = gapped(&xs, &ys, None, |_, _| false);
     if !points.is_empty() {
-        c.data.polylines.push(Polyline {
+        c.data.polylines.push(Polyline::clipped(
             points,
-            alpha: vec![],
-            stroke: Stroke::solid(v.color, theme.trace_width),
-            clip: Some(fundamental),
-        });
+            Stroke::solid(v.color, theme.trace_width),
+            fundamental,
+        ));
     }
 }
 
@@ -532,12 +525,11 @@ pub fn distortion_scene(
                 .collect();
             let points = runs(&xs, &ys);
             if !points.is_empty() {
-                c.data.polylines.push(Polyline {
+                c.data.polylines.push(Polyline::clipped(
                     points,
-                    alpha: vec![],
-                    stroke: reference_stroke(order_color(theme, r.order), theme),
-                    clip: Some(plot),
-                });
+                    reference_stroke(order_color(theme, r.order), theme),
+                    plot,
+                ));
             }
         }
         let curves: Vec<(String, u8, &DistortionCurve)> = s
@@ -560,12 +552,9 @@ pub fn distortion_scene(
                 .collect();
             let points = runs(&xs, &floor_ys);
             if !points.is_empty() {
-                c.data.polylines.push(Polyline {
-                    points,
-                    alpha: vec![],
-                    stroke: floor_stroke(color, theme),
-                    clip: Some(plot),
-                });
+                c.data
+                    .polylines
+                    .push(Polyline::clipped(points, floor_stroke(color, theme), plot));
             }
             let ys: Vec<f32> = readings
                 .iter()
@@ -576,10 +565,9 @@ pub fn distortion_scene(
                 .collect();
             let points = runs(&xs, &ys);
             if !points.is_empty() {
-                c.data.polylines.push(Polyline {
+                c.data.polylines.push(Polyline::clipped(
                     points,
-                    alpha: vec![],
-                    stroke: Stroke::solid(
+                    Stroke::solid(
                         color,
                         if *order == 0 {
                             theme.trace_width * 1.4
@@ -587,8 +575,8 @@ pub fn distortion_scene(
                             theme.trace_width
                         },
                     ),
-                    clip: Some(plot),
-                });
+                    plot,
+                ));
             }
             legend.push(LegendEntry {
                 name: name.clone(),
@@ -631,12 +619,11 @@ pub fn distortion_scene(
             .collect();
         let (points, _) = gapped(&xs, &ys, None, |_, _| false);
         if !points.is_empty() {
-            c.data.polylines.push(Polyline {
+            c.data.polylines.push(Polyline::clipped(
                 points,
-                alpha: vec![],
-                stroke: Stroke::solid(t.color, theme.trace_width),
-                clip: Some(fundamental),
-            });
+                Stroke::solid(t.color, theme.trace_width),
+                fundamental,
+            ));
         }
     }
 

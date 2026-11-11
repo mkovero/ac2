@@ -369,10 +369,7 @@ fn stacking_and_overflow() {
 
 #[test]
 fn strip_height_follows_the_rows() {
-    let size = Viewport {
-        width: 800.0,
-        height: 600.0,
-    };
+    let size = Viewport::new(800.0, 600.0);
     let none = banner_strip(&[], 48.0, 740.0, size);
     assert!(none.rows.is_empty());
     assert_eq!(none.rect.h, 0.0);
@@ -391,15 +388,7 @@ fn strip_height_follows_the_rows() {
         assert!(r.rect.y >= all.rect.y && r.rect.bottom() <= all.rect.bottom());
     }
     // A short view gives the strip at most half its height.
-    let short = banner_strip(
-        &b,
-        0.0,
-        300.0,
-        Viewport {
-            width: 300.0,
-            height: 100.0,
-        },
-    );
+    let short = banner_strip(&b, 0.0, 300.0, Viewport::new(300.0, 100.0));
     assert!(short.rect.h <= 50.0);
     assert_eq!(short.rows.len(), 1);
     assert_eq!(short.rows[0].text, "+9 more");

@@ -113,12 +113,11 @@ pub(super) fn peak_points(
         }
         let [x, y] = p.pos;
         let (x0, y0, x1, y1) = (x - BOX_HALF, y - BOX_HALF, x + BOX_HALF, y + BOX_HALF);
-        c.overlay.polylines.push(Polyline {
-            points: vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]],
-            alpha: vec![],
-            stroke: Stroke::solid(dark.text, 1.5),
-            clip: Some(plot),
-        });
+        c.overlay.polylines.push(Polyline::clipped(
+            vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]],
+            Stroke::solid(dark.text, 1.5),
+            plot,
+        ));
     }
     for (_, mut l) in kept {
         c.overlay.polygons.push(FillPolygon {

@@ -356,10 +356,7 @@ fn the_walk_pane_draws_its_lines_and_the_plan() {
             chrome: PlotChrome::Full,
             theme: &theme,
         },
-        Viewport {
-            width: 900.0,
-            height: 600.0,
-        },
+        Viewport::new(900.0, 600.0),
     );
     let texts: Vec<&str> = s
         .scene
@@ -414,10 +411,7 @@ fn the_walk_pane_draws_its_lines_and_the_plan() {
             chrome: PlotChrome::Full,
             theme: &theme,
         },
-        Viewport {
-            width: 900.0,
-            height: 600.0,
-        },
+        Viewport::new(900.0, 600.0),
     );
     assert!(s.map.is_none());
 }
@@ -639,14 +633,7 @@ fn the_plan_view_of_an_empty_plan_has_a_scale() {
         coverage: None,
     };
     assert_eq!(pic.bounds(), None);
-    let (_, map) = plan_scene(
-        &pic,
-        Viewport {
-            width: 400.0,
-            height: 400.0,
-        },
-        &theme,
-    );
+    let (_, map) = plan_scene(&pic, Viewport::new(400.0, 400.0), &theme);
     let o = map.to_px([0.0, 0.0]);
     let far = map.to_px([EMPTY_PLAN_M, EMPTY_PLAN_M]);
     assert!(o[0] < far[0] && o[1] > far[1]);
@@ -860,10 +847,7 @@ fn the_walk_pane_draws_a_coverage_map_under_its_points_and_the_simulation_line()
             chrome: PlotChrome::Full,
             theme: &theme,
         },
-        Viewport {
-            width: 900.0,
-            height: 600.0,
-        },
+        Viewport::new(900.0, 600.0),
     );
     let texts: Vec<&str> = s
         .scene
@@ -930,10 +914,7 @@ fn the_coverage_legend_wraps_whole_clauses_at_a_narrow_pane() {
             chrome: PlotChrome::Full,
             theme: &theme,
         },
-        Viewport {
-            width: 500.0,
-            height: 600.0,
-        },
+        Viewport::new(500.0, 600.0),
     );
     let texts: Vec<&str> = s
         .scene

@@ -13,10 +13,7 @@ use std::time::Instant;
 
 /// The legend text of live measurement `id` on the transfer pane.
 fn tf_legend(s: &AppState, id: MeasId) -> String {
-    let size = ac2_scene::primitives::Viewport {
-        width: 1200.0,
-        height: 600.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(1200.0, 600.0);
     let now = ac2_ui::scenes::Now {
         instant: Instant::now(),
         wall: ac2_proto::units::WallNs(0),
@@ -242,10 +239,7 @@ fn math_channels_from_an_empty_daemon() -> R {
             .map(|m| m.config.name.clone())
             .unwrap_or_default();
     crate::common::show_on(&mut d.st, ac2_ui::state::PaneKind::Transfer, avg);
-    let size = ac2_scene::primitives::Viewport {
-        width: 1200.0,
-        height: 600.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(1200.0, 600.0);
     let now = ac2_ui::scenes::Now {
         instant: Instant::now(),
         wall: ac2_proto::units::WallNs(0),
@@ -335,10 +329,7 @@ fn spectrum_math_lands_on_the_spectrum_pane() -> R {
             })
         })
     })?;
-    let size = ac2_scene::primitives::Viewport {
-        width: 1200.0,
-        height: 600.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(1200.0, 600.0);
     let now = || ac2_ui::scenes::Now {
         instant: Instant::now(),
         wall: ac2_proto::units::WallNs(0),

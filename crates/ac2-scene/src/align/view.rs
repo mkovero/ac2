@@ -67,20 +67,19 @@ fn band_hint(c: &mut Canvas, plot: Rect, x: &Axis, band: AlignBand, theme: &Them
     let (x0, x1) = (x.mapping.to_px(band.lo.0), x.mapping.to_px(band.hi.0));
     let (l, r) = (x0.max(plot.x), x1.min(plot.right()));
     if r > l {
-        c.base.rects.push(FillRect {
-            rect: Rect::new(l, plot.y, r - l, plot.h),
-            color: theme.unresolved_shade,
-            clip: Some(plot),
-        });
+        c.base.rects.push(FillRect::clipped(
+            Rect::new(l, plot.y, r - l, plot.h),
+            theme.unresolved_shade,
+            plot,
+        ));
     }
     for e in [x0, x1] {
         if e > plot.x + 0.5 && e < plot.right() - 0.5 {
-            c.base.polylines.push(Polyline {
-                points: vec![[e, plot.y], [e, plot.bottom()]],
-                alpha: vec![],
-                stroke: theme.unresolved_edge,
-                clip: Some(plot),
-            });
+            c.base.polylines.push(Polyline::clipped(
+                vec![[e, plot.y], [e, plot.bottom()]],
+                theme.unresolved_edge,
+                plot,
+            ));
         }
     }
 }
@@ -99,12 +98,9 @@ fn curve(c: &mut Canvas, plot: Rect, xs: &[f32], y: &Axis, v: &[f32], stroke: St
     // A wrapped phase jumping by more than half a turn is the wrap, not a slope.
     let (points, _) = gapped(xs, &ys, None, |p, i| wraps && (v[i] - v[p]).abs() > 180.0);
     if points.len() > 1 {
-        c.data.polylines.push(Polyline {
-            points,
-            alpha: vec![],
-            stroke,
-            clip: Some(plot),
-        });
+        c.data
+            .polylines
+            .push(Polyline::clipped(points, stroke, plot));
     }
 }
 

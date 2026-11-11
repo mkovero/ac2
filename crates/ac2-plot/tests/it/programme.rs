@@ -129,15 +129,7 @@ fn draw(name: &str, p: &ProgrammePane, theme: &Theme, chrome: PlotChrome, w: f32
     let Some(gpu) = gpu(name) else {
         return;
     };
-    let s = programme_scene(
-        p,
-        Style { chrome, theme },
-        Viewport {
-            width: w,
-            height: h,
-        },
-        None,
-    );
+    let s = programme_scene(p, Style { chrome, theme }, Viewport::new(w, h), None);
     let mut r = renderer(gpu);
     let img = render_on(gpu, &mut r, &s.scene, 1.0, theme.background);
     golden(name, &img, TEXT);
@@ -289,10 +281,7 @@ fn programme_goniometer() {
                 chrome: PlotChrome::Full,
                 theme: &theme,
             },
-            Viewport {
-                width: w,
-                height: h,
-            },
+            Viewport::new(w, h),
             None,
         );
         assert!(s.plate.is_none(), "the Goniometer view has no plate");

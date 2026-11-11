@@ -175,11 +175,10 @@ pub(super) fn bars(c: &mut Canvas, p: &ProgrammePane, area: Rect, style: Style) 
             fs,
             theme.text,
         ));
-        c.base.rects.push(FillRect {
-            rect: Rect::new(bx, top, bw, bar_h),
-            color: theme.plot_background,
-            clip: None,
-        });
+        c.base.rects.push(FillRect::new(
+            Rect::new(bx, top, bw, bar_h),
+            theme.plot_background,
+        ));
         let grid: Vec<f32> = match bar {
             ProgrammeBar::Peak { .. } => SCALE_DBFS
                 .iter()
@@ -192,12 +191,9 @@ pub(super) fn bars(c: &mut Canvas, p: &ProgrammePane, area: Rect, style: Style) 
         };
         if style.chrome == PlotChrome::Full {
             for y in grid {
-                c.base.polylines.push(Polyline {
-                    points: vec![[bx, y], [bx + bw, y]],
-                    alpha: vec![],
-                    stroke: theme.grid_minor,
-                    clip: None,
-                });
+                c.base
+                    .polylines
+                    .push(Polyline::new(vec![[bx, y], [bx + bw, y]], theme.grid_minor));
             }
         }
         // Every readout sits at a place fixed by the column, never by its own text: the
@@ -286,19 +282,16 @@ fn peak_bar(
     let bar_h = y_of(0.0) - y_of(1.0);
     let fill = input.bar_fill();
     if fill > 0.0 {
-        c.data.rects.push(FillRect {
-            rect: Rect::new(bx, y_of(fill), bw, bar_h * fill),
-            color: bar_color(input, theme),
-            clip: None,
-        });
+        c.data.rects.push(FillRect::new(
+            Rect::new(bx, y_of(fill), bw, bar_h * fill),
+            bar_color(input, theme),
+        ));
     }
     if input.flying_peak.is_some() {
         let y = y_of(input.flying_peak_fill());
-        c.data.rects.push(FillRect {
-            rect: Rect::new(bx, y - 1.0, bw, 2.0),
-            color: theme.text,
-            clip: None,
-        });
+        c.data
+            .rects
+            .push(FillRect::new(Rect::new(bx, y - 1.0, bw, 2.0), theme.text));
     }
 }
 
@@ -417,30 +410,26 @@ fn source_bar(
     let at_target = lufs_fill(Some(target), target);
     let low = fill.min(at_target);
     if low > 0.0 {
-        c.data.rects.push(FillRect {
-            rect: Rect::new(bx, y_of(low), bw, bar_h * low),
-            color: theme.level_ok,
-            clip: None,
-        });
+        c.data.rects.push(FillRect::new(
+            Rect::new(bx, y_of(low), bw, bar_h * low),
+            theme.level_ok,
+        ));
     }
     if fill > at_target {
-        c.data.rects.push(FillRect {
-            rect: Rect::new(bx, y_of(fill), bw, bar_h * (fill - at_target)),
-            color: above_target(theme),
-            clip: None,
-        });
+        c.data.rects.push(FillRect::new(
+            Rect::new(bx, y_of(fill), bw, bar_h * (fill - at_target)),
+            above_target(theme),
+        ));
     }
     let ty = y_of(at_target);
-    c.data.polylines.push(Polyline {
-        points: vec![[bx - TICK_W - 1.0, ty], [bx + bw + TICK_W + 1.0, ty]],
-        alpha: vec![],
-        stroke: Stroke {
+    c.data.polylines.push(Polyline::new(
+        vec![[bx - TICK_W - 1.0, ty], [bx + bw + TICK_W + 1.0, ty]],
+        Stroke {
             color: theme.text,
             width: 1.0,
             dash: Some(TARGET_DASH),
         },
-        clip: None,
-    });
+    ));
     if s.below_floor(target) {
         // Pointing down at the foot of the empty bar: the reading lies under it.
         let (cx, foot) = (bx + bw / 2.0, y_of(0.0) - 2.0);
@@ -471,11 +460,10 @@ fn source_bar(
     if let Some(m) = s.max.filter(|&m| on_lufs_span(m, target)) {
         let y = y_of(lufs_fill(Some(m), target));
         for x in [bx - TICK_W - 1.0, bx + bw + 1.0] {
-            c.data.rects.push(FillRect {
-                rect: Rect::new(x, y - 1.0, TICK_W, 2.0),
-                color: theme.text_dim,
-                clip: None,
-            });
+            c.data.rects.push(FillRect::new(
+                Rect::new(x, y - 1.0, TICK_W, 2.0),
+                theme.text_dim,
+            ));
         }
     }
 }

@@ -161,16 +161,16 @@ pub(crate) fn spectrum_scene_in(
                     let (x0, x1) = (xm.to_px(e0.max(xm.range.lo * 1e-3)), xm.to_px(e1));
                     // A one-pixel gap between bars when they are wide enough to show it.
                     let gap = if x1 - x0 > 4.0 { 1.0 } else { 0.0 };
-                    c.data.rects.push(FillRect {
-                        rect: Rect::new(
+                    c.data.rects.push(FillRect::clipped(
+                        Rect::new(
                             x0 + gap / 2.0,
                             y,
                             (x1 - x0 - gap).max(0.5),
                             plot.bottom() - y,
                         ),
-                        color: color.with_alpha(theme.bar_alpha * back),
-                        clip: Some(plot),
-                    });
+                        color.with_alpha(theme.bar_alpha * back),
+                        plot,
+                    ));
                 }
             }
             SpectrumStyle::Line | SpectrumStyle::Fill => {
@@ -195,10 +195,9 @@ pub(crate) fn spectrum_scene_in(
                     });
                 }
                 if !points.is_empty() {
-                    c.data.polylines.push(Polyline {
+                    c.data.polylines.push(Polyline::clipped(
                         points,
-                        alpha: vec![],
-                        stroke: Stroke::solid(
+                        Stroke::solid(
                             color,
                             theme.trace_width
                                 * if t.selected {
@@ -207,8 +206,8 @@ pub(crate) fn spectrum_scene_in(
                                     1.0
                                 },
                         ),
-                        clip: Some(plot),
-                    });
+                        plot,
+                    ));
                 }
             }
         }
@@ -245,10 +244,9 @@ pub(crate) fn spectrum_scene_in(
                 }
             };
             if !points.is_empty() {
-                c.data.polylines.push(Polyline {
+                c.data.polylines.push(Polyline::clipped(
                     points,
-                    alpha: vec![],
-                    stroke: Stroke {
+                    Stroke {
                         color: pc,
                         width: (theme.trace_width * 0.75).max(1.0),
                         dash: (style != SpectrumStyle::Bars).then_some(Dash {
@@ -257,8 +255,8 @@ pub(crate) fn spectrum_scene_in(
                             offset: 0.0,
                         }),
                     },
-                    clip: Some(plot),
-                });
+                    plot,
+                ));
             }
         }
     }
@@ -377,18 +375,17 @@ pub(crate) fn spectrum_scene_in(
             .with_alpha(if t.is_stale() { theme.stale_alpha } else { 1.0 });
         for (k, r) in p.rows.iter().enumerate() {
             let Some(m) = r.mark else { continue };
-            c.overlay.polylines.push(Polyline {
-                points: vec![
+            c.overlay.polylines.push(Polyline::clipped(
+                vec![
                     [m.x, m.y],
                     [m.right(), m.y],
                     [m.right(), m.bottom()],
                     [m.x, m.bottom()],
                     [m.x, m.y],
                 ],
-                alpha: vec![],
-                stroke: Stroke::solid(color, 1.5),
-                clip: Some(plot),
-            });
+                Stroke::solid(color, 1.5),
+                plot,
+            ));
             if labelled(t) {
                 to_label.push((m, points::point_text(r, t, mixed)));
             } else {

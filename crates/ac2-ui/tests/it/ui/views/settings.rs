@@ -337,10 +337,7 @@ fn spectrum_peak_tracking() {
             st,
             crate::common::pane(st, PaneKind::Spectrum),
             &ac2_scene::theme::Theme::dark(),
-            ac2_scene::primitives::Viewport {
-                width: 1000.0,
-                height: 450.0,
-            },
+            ac2_scene::primitives::Viewport::new(1000.0, 450.0),
             ac2_ui::scenes::Now {
                 instant: Instant::now(),
                 wall: ac2_proto::units::WallNs(0),

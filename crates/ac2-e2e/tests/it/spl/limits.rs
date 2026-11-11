@@ -272,10 +272,7 @@ fn slow_a_peak_limit_and_the_position_correction_from_the_app() -> R {
                 .map_or(0, |d| d.as_nanos() as u64),
         ),
     };
-    let size = ac2_scene::primitives::Viewport {
-        width: 1280.0,
-        height: 720.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(1280.0, 720.0);
     let scene = ac2_ui::scenes::leq(
         &d.st,
         crate::common::pane(&d.st, ac2_ui::state::PaneKind::Spl),
@@ -352,10 +349,7 @@ fn leq_columns(s: &AppState) -> Option<ac2_scene::leq::LeqColumns> {
                 .map_or(0, |d| d.as_nanos() as u64),
         ),
     };
-    let size = ac2_scene::primitives::Viewport {
-        width: 1280.0,
-        height: 720.0,
-    };
+    let size = ac2_scene::primitives::Viewport::new(1280.0, 720.0);
     ac2_ui::scenes::leq(
         s,
         crate::common::pane(s, ac2_ui::state::PaneKind::Spl),
