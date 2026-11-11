@@ -8,6 +8,7 @@
 //! stream through [`SLOT`].
 
 use std::ffi::{c_long, c_void};
+use std::ptr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -75,6 +76,18 @@ unsafe extern "system" fn buffer_switch(index: c_long, _direct: Bool) {
     });
 }
 
+// The SDK's `ASIOTime` under its `#pragma pack(push,4)`: `timeInfo` at 16, and in it
+// `systemTime` at 8, `samplePosition` at 16, `flags` at 32. azo's `Time` is plain
+// `repr(C)`; every field there is already at a multiple of 8, so 8-byte alignment only adds
+// tail padding (`ASIOTimeCode` 84 -> 88 bytes) and the offsets the callback reads agree.
+const _: () = {
+    use std::mem::offset_of;
+    assert!(offset_of!(Time, time_info) == 16);
+    assert!(offset_of!(azo::sys::TimeInfo, system_time) == 8);
+    assert!(offset_of!(azo::sys::TimeInfo, sample_position) == 16);
+    assert!(offset_of!(azo::sys::TimeInfo, flags) == 32);
+};
+
 #[allow(unsafe_code)]
 unsafe extern "system" fn buffer_switch_time_info(
     params: *mut Time,
@@ -82,18 +95,27 @@ unsafe extern "system" fn buffer_switch_time_info(
     _direct: Bool,
 ) -> *mut Time {
     let now = now_ns();
-    // SAFETY: the driver passes a valid ASIOTime (or null) for the duration of the call.
-    let time = unsafe { params.as_ref() }.map(|t| {
-        let i = &t.time_info;
+    let time = (!params.is_null()).then(|| {
+        // SAFETY: a non-null `params` points to the driver's ASIOTime for the duration of
+        // the call. The SDK packs that struct to 4 bytes (148 bytes, align 4), so it may sit
+        // where azo's 8-aligned, 152-byte `Time` could not: no reference to it is formed,
+        // the place is only projected to fields that lie inside the SDK's layout (see the
+        // offsets checked below), and each is read unaligned.
+        let (flags, position, system) = unsafe {
+            let i = &raw const (*params).time_info;
+            (
+                ptr::read_unaligned(&raw const (*i).flags),
+                ptr::read_unaligned(&raw const (*i).sample_position),
+                ptr::read_unaligned(&raw const (*i).system_time),
+            )
+        };
         TimeInfo {
-            position: i
-                .flags
+            position: flags
                 .contains(TimeInfoFlags::SAMPLE_POSITION_VALID)
-                .then(|| i64::from(i.sample_position)),
-            system_ns: i
-                .flags
+                .then(|| i64::from(position)),
+            system_ns: flags
                 .contains(TimeInfoFlags::SYSTEM_TIME_VALID)
-                .then(|| i64::from(i.system_time).max(0) as u64),
+                .then(|| i64::from(system).max(0) as u64),
         }
     });
     SLOT.with(|e| {
