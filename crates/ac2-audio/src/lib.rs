@@ -30,6 +30,7 @@
 //! Nothing but zeros is written to an output unless the caller builds a generator, gives it
 //! a source and starts it. Automated tests use [`fake`] or a JACK dummy server, never real
 //! hardware.
+#![deny(unsafe_code)]
 
 pub mod backend;
 pub mod block;

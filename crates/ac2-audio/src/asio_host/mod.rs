@@ -8,7 +8,13 @@
 //! scripted driver; only `driver.rs` touches COM.
 
 mod backend;
+// The callback body reads and writes the driver's buffers through the raw pointers ASIO
+// hands out, and the engine crosses to the driver's thread holding them.
+#[allow(unsafe_code)]
 mod engine;
+// Sample conversion at a raw pointer into a driver buffer, whose layout only the driver's
+// reported sample type describes.
+#[allow(unsafe_code)]
 mod format;
 mod open;
 mod position;
@@ -18,5 +24,7 @@ mod driver;
 #[cfg(windows)]
 pub use driver::AsioBackend;
 
+// The scripted driver plays the driver's part: it owns the buffers and fills them by pointer.
 #[cfg(test)]
+#[allow(unsafe_code)]
 mod tests;

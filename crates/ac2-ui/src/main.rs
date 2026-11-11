@@ -1,4 +1,5 @@
 //! `ac2-ui`: the desktop app.
+#![deny(unsafe_code)]
 
 use std::process::ExitCode;
 use std::time::Instant;

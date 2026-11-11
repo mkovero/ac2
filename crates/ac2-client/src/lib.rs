@@ -14,6 +14,7 @@
 //!
 //! libzmq sockets are confined to one I/O thread per client (and the data DEALER behind a
 //! mutex, drained by its consumer, which so paces what the daemon sends it).
+#![forbid(unsafe_code)]
 
 mod client;
 pub mod data;

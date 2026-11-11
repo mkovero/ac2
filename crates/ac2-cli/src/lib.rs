@@ -3,6 +3,7 @@
 //! Every command prints a human table or, with `--json`, one JSON document (live views: JSON
 //! lines). Values on the command line carry units ([`ac2_scene::unit_text`]). The CLI holds
 //! the stimulus lease only while a foreground `ac2 gen` runs.
+#![forbid(unsafe_code)]
 
 pub mod args;
 mod cmd;
