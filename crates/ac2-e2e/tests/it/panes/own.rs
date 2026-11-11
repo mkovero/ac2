@@ -571,6 +571,7 @@ fn picks_and_level_axes_come_back_to_a_restarted_app_from_an_empty_daemon() -> R
     assert_eq!(d.st.level_range(right), Some(zoomed), "the zoom");
     d.until("Spectrum 1's spectrograph filling", |s| {
         s.rig
+            .folded
             .spectrographs
             .get(&s1)
             .is_some_and(|h| h.ring().iter().flatten().count() >= 10)

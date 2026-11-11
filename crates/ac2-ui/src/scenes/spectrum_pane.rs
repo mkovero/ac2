@@ -110,6 +110,7 @@ pub fn spectrograph(
     let input = shown.map(|(m, stream)| {
         let history = st
             .rig
+            .folded
             .spectrographs
             .get(&m.id)
             .filter(|h| h.span_s() == display.spectrograph_span_s)
@@ -158,7 +159,7 @@ pub fn spectrograph_3d(
     let empty = SpectrographHistory::new(display.spectrograph_span_s);
     let view = st.view_for(pane);
     let history = shown
-        .and_then(|(m, _)| st.rig.spectrographs.get(&m.id))
+        .and_then(|(m, _)| st.rig.folded.spectrographs.get(&m.id))
         .filter(|h| h.span_s() == display.spectrograph_span_s)
         .unwrap_or(&empty);
     skyline.update(
@@ -258,6 +259,7 @@ pub(crate) fn with_spectrum<R>(
                 return None;
             }
             st.rig
+                .folded
                 .spec_glide
                 .get(&c.tf.topic)?
                 .drawn(&c.tf.frame, now.instant)
@@ -295,7 +297,7 @@ pub(crate) fn with_spectrum<R>(
         let display = st.display_of(c.meas);
         t.style = display.style;
         if display.peak.holds() {
-            t.peak = st.rig.peaks.get(&c.meas.id).map(|p| p.2.values());
+            t.peak = st.rig.folded.peaks.get(&c.meas.id).map(|p| p.2.values());
         }
         // One curve's peaks: the picked one's, else the pane's own measurement's while it
         // tracks (the first live curve without one). Five marks per curve on several
@@ -305,7 +307,12 @@ pub(crate) fn with_spectrum<R>(
             None => listed && Some(c.meas.id) == tracked,
         };
         if mine {
-            t.tracked = st.rig.peak_tracks.get(&c.meas.id).map(|p| p.1.peaks());
+            t.tracked = st
+                .rig
+                .folded
+                .peak_tracks
+                .get(&c.meas.id)
+                .map(|p| p.1.peaks());
         }
         // Its own offset, compared into another measurement's pane too.
         t.offset_db = st.meas_offset(c.meas.id);
@@ -373,7 +380,13 @@ pub(crate) fn with_spectrum<R>(
             validity: None,
             peak: None,
             tracked: (pick == Some(TraceKey::Stored(data.meta.id)))
-                .then(|| st.rig.trace_peaks.get(&data.meta.id).map(Vec::as_slice))
+                .then(|| {
+                    st.rig
+                        .folded
+                        .trace_peaks
+                        .get(&data.meta.id)
+                        .map(Vec::as_slice)
+                })
                 .flatten(),
             scale: *scale,
             quantity: *quantity,

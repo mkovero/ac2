@@ -298,7 +298,7 @@ fn a_slow_live_curve_eases_into_each_frame_over_one_display_frame() {
     let t0 = Instant::now();
     spec_frame_at(&mut t, 3, vec![-60.0; 5], 1, t0);
     assert!(
-        t.st.rig.spec_glide.is_empty(),
+        t.st.rig.folded.spec_glide.is_empty(),
         "a first frame is drawn as received"
     );
     let t1 = t0 + ms(100);
@@ -314,7 +314,7 @@ fn a_slow_live_curve_eases_into_each_frame_over_one_display_frame() {
             .next()
             .expect("frame")
             .clone();
-    let g = t.st.rig.spec_glide[&to.topic].clone();
+    let g = t.st.rig.folded.spec_glide[&to.topic].clone();
     assert_eq!(g.to_seq, 2);
     assert_eq!(g.duration_s, EASE_S);
     assert!(t.st.spectrum_gliding(t1 + ease / 2));
@@ -329,15 +329,15 @@ fn a_slow_live_curve_eases_into_each_frame_over_one_display_frame() {
     // The next slow frame eases from where the curve is drawn: the frame before.
     let t2 = t1 + ms(50);
     spec_frame_at(&mut t, 3, vec![-60.0; 5], 3, t2);
-    let g = t.st.rig.spec_glide[&to.topic].clone();
+    let g = t.st.rig.folded.spec_glide[&to.topic].clone();
     assert_eq!(&*g.from, &[-40.0; 5]);
     // The same levels again (a refresh) move nothing.
     spec_frame_at(&mut t, 3, vec![-60.0; 5], 4, t2 + ms(300));
-    assert!(t.st.rig.spec_glide.is_empty());
+    assert!(t.st.rig.folded.spec_glide.is_empty());
     // Off: every frame is drawn as received.
     t.st.prefs.spec_ease = false;
     spec_frame_at(&mut t, 3, vec![-30.0; 5], 5, t2 + ms(400));
-    assert!(t.st.rig.spec_glide.is_empty());
+    assert!(t.st.rig.folded.spec_glide.is_empty());
     assert!(!t.st.spectrum_gliding(t2 + ms(401)));
 }
 
@@ -350,13 +350,13 @@ fn a_live_curve_at_the_display_rate_shows_each_frame_at_once() {
     for i in 0..10u32 {
         let at = t0 + frame * i;
         spec_frame_at(&mut t, 3, vec![-60.0 + i as f32; 5], 1 + u64::from(i), at);
-        assert!(t.st.rig.spec_glide.is_empty(), "frame {i} eases");
+        assert!(t.st.rig.folded.spec_glide.is_empty(), "frame {i} eases");
         assert!(!t.st.spectrum_gliding(at));
     }
     // Frames 21 ms apart (the hand-off's jitter) still come at the display's rate.
     let t1 = t0 + frame * 9 + std::time::Duration::from_millis(21);
     spec_frame_at(&mut t, 3, vec![-20.0; 5], 20, t1);
-    assert!(t.st.rig.spec_glide.is_empty());
+    assert!(t.st.rig.folded.spec_glide.is_empty());
 }
 
 /// The state with measurement `id` running or stopped.

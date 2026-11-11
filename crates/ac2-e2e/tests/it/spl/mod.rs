@@ -174,7 +174,7 @@ fn spl_weightings_from_the_keys_and_a_readable_number() -> R {
     let mut frames = std::collections::BTreeSet::new();
     while Instant::now() < end {
         d.pump();
-        if let Some(h) = d.st.rig.spl_hold.get(&id)
+        if let Some(h) = d.st.rig.folded.spl_hold.get(&id)
             && h.frame.meta.time_weighting == TimeWeighting::Slow
             && at.last() != Some(&h.at_ns)
         {

@@ -75,7 +75,7 @@ impl AppState {
     /// Some live curve still eases into its newest frame at `now`.
     pub fn spectrum_gliding(&self, now: Instant) -> bool {
         self.prefs.spec_ease
-            && self.rig.spec_glide.iter().any(|(t, g)| {
+            && self.rig.folded.spec_glide.iter().any(|(t, g)| {
                 self.rig
                     .data
                     .as_ref()
@@ -99,17 +99,19 @@ impl RigState {
     /// same curve moving: it is drawn as received.
     pub(super) fn keep_spec_glide(&mut self, d: &DataSnapshot, spec_ease: bool) {
         if !spec_ease {
-            self.spec_glide.clear();
+            self.folded.spec_glide.clear();
             return;
         }
         let old = self.data.as_deref();
-        self.spec_glide.retain(|t, _| d.latest.get(t).is_some());
+        self.folded
+            .spec_glide
+            .retain(|t, _| d.latest.get(t).is_some());
         for tf in d.latest.frames.values() {
             let Some(to) = levels(&tf.frame.data) else {
                 continue;
             };
             let Some(prev) = old.and_then(|o| o.latest.get(&tf.topic)) else {
-                self.spec_glide.remove(&tf.topic);
+                self.folded.spec_glide.remove(&tf.topic);
                 continue;
             };
             let (a, b) = (&prev.frame.stamp, &tf.frame.stamp);
@@ -124,27 +126,29 @@ impl RigState {
             let Some(prev_levels) =
                 levels(&prev.frame.data).filter(|p| same && slow && p.len() == to.len())
             else {
-                self.spec_glide.remove(&tf.topic);
+                self.folded.spec_glide.remove(&tf.topic);
                 continue;
             };
             // Mid-ease, the curve moves on from where it is drawn, so it never jumps.
             let from_capture_ns = self
+                .folded
                 .spec_glide
                 .get(&tf.topic)
                 .map_or(a.capture_wall_ns.0 as f64, |g| {
                     g.drawn_capture_ns(a, d.drained)
                 });
             let from = self
+                .folded
                 .spec_glide
                 .get(&tf.topic)
                 .and_then(|g| g.drawn(&prev.frame, d.drained))
                 .unwrap_or_else(|| prev_levels.to_vec());
             if from.iter().zip(to).all(|(x, y)| x.to_bits() == y.to_bits()) {
                 // A refresh of a settled result: nothing moves.
-                self.spec_glide.remove(&tf.topic);
+                self.folded.spec_glide.remove(&tf.topic);
                 continue;
             }
-            self.spec_glide.insert(
+            self.folded.spec_glide.insert(
                 tf.topic,
                 SpecGlide {
                     to_seq: b.seq,

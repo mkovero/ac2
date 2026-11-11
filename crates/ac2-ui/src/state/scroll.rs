@@ -13,7 +13,11 @@ impl RigState {
     /// Measurement `meas`'s history took a frame ending at audio time `audio_s`, applied
     /// at `now`: its time axis follows.
     pub(super) fn keep_scroll(&mut self, meas: MeasId, now: Instant, audio_s: f64) {
-        self.scroll.entry(meas).or_default().observe(now, audio_s);
+        self.folded
+            .scroll
+            .entry(meas)
+            .or_default()
+            .observe(now, audio_s);
     }
 }
 
@@ -32,8 +36,8 @@ impl AppState {
             return 0.0;
         };
         match (
-            self.rig.scroll.get(&m.id),
-            self.rig.spectrographs.get(&m.id),
+            self.rig.folded.scroll.get(&m.id),
+            self.rig.folded.spectrographs.get(&m.id),
         ) {
             (Some(c), Some(h)) => h.lead_slots(c.position_s(now)),
             _ => 0.0,
@@ -44,14 +48,14 @@ impl AppState {
     /// where it waits for a stalled stream. Only then does the pacer run for it.
     pub fn spectrographs_scrolling(&self, now: Instant) -> bool {
         self.prefs.spec_ease
-            && !self.rig.scroll.is_empty()
+            && !self.rig.folded.scroll.is_empty()
             && self.visible_panes().into_iter().any(|p| {
                 self.layout.view(p).is_some_and(|v| {
                     v.kind == PaneKind::Spectrum && v.modes.spectrum.spectrograph()
                 }) && self
                     .pane_meas(p)
                     .filter(|m| !self.meas_hidden(m))
-                    .and_then(|m| self.rig.scroll.get(&m.id))
+                    .and_then(|m| self.rig.folded.scroll.get(&m.id))
                     .is_some_and(|c| c.moving(now))
             })
     }

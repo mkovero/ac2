@@ -201,20 +201,23 @@ fn frames_fold_into_the_rig_that_sent_them() {
     to(&mut t, PUPU, levels(-3.0));
     to(&mut t, PUPU, spectrum_at(1, -20.0));
     let p = pupu(&t);
-    assert!(p.spl_hold.contains_key(&MeasId(4)));
+    assert!(p.folded.spl_hold.contains_key(&MeasId(4)));
     assert!(p.leq.history.contains_key(&MeasId(4)));
     assert!(p.programme.flying.contains_key(&0) && p.programme.flying.contains_key(&1));
-    assert!(p.peaks.contains_key(&MeasId(2)));
+    assert!(p.folded.peaks.contains_key(&MeasId(2)));
     assert!(p.data.is_some());
     let a = &t.st.rig;
-    assert!(a.spl_hold.is_empty() && a.leq.history.is_empty(), "{a:?}");
-    assert!(a.programme.flying.is_empty() && a.peaks.is_empty());
+    assert!(
+        a.folded.spl_hold.is_empty() && a.leq.history.is_empty(),
+        "{a:?}"
+    );
+    assert!(a.programme.flying.is_empty() && a.folded.peaks.is_empty());
     assert!(a.data.is_none());
     // The active rig's own frames of the same topics land in its own maps alone.
     t.conn(spl_data(1, 1_000, 85.0, TimeWeighting::Fast, 1));
     t.conn(spectrum_at(1, -40.0));
-    assert!(t.st.rig.spl_hold.contains_key(&MeasId(4)));
-    let peak = |r: &RigState| r.peaks[&MeasId(2)].2.values().to_vec();
+    assert!(t.st.rig.folded.spl_hold.contains_key(&MeasId(4)));
+    let peak = |r: &RigState| r.folded.peaks[&MeasId(2)].2.values().to_vec();
     assert_eq!(peak(&t.st.rig), vec![-40.0; 5]);
     assert_eq!(peak(pupu(&t)), vec![-20.0; 5]);
 }

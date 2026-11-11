@@ -485,7 +485,7 @@ fn spl_meter_big_and_stage() {
         a.state.kind_modes(ac2_ui::state::PaneKind::Spl).spl == ac2_scene::view::SplMode::Meter
             && a.state.layout.maximized
             && a.state.layout.focus_kind() == PaneKind::Spl
-            && a.state.rig.spl_hold.contains_key(&MeasId(4))
+            && a.state.rig.folded.spl_hold.contains_key(&MeasId(4))
     });
     // The group's toast expires on the wall clock: a slower rasterizer reaches the stage
     // view after it has gone, so neither picture shows it.
@@ -592,20 +592,28 @@ fn spectrograph() {
     };
     let pinned = sweep_history(&def);
     let same = |a: &App| {
-        a.state.rig.spectrographs.get(&MeasId(3)).is_some_and(|x| {
-            x.ring()
-                .iter()
-                .zip(pinned.ring())
-                .all(|(p, q)| match (p, q) {
-                    (Some(p), Some(q)) => Arc::ptr_eq(p, q),
-                    (None, None) => true,
-                    _ => false,
-                })
-        })
+        a.state
+            .rig
+            .folded
+            .spectrographs
+            .get(&MeasId(3))
+            .is_some_and(|x| {
+                x.ring()
+                    .iter()
+                    .zip(pinned.ring())
+                    .all(|(p, q)| match (p, q) {
+                        (Some(p), Some(q)) => Arc::ptr_eq(p, q),
+                        (None, None) => true,
+                        _ => false,
+                    })
+            })
     };
     let pin = |a: &mut App| {
         let st = &mut a.state;
-        st.rig.spectrographs.insert(MeasId(3), pinned.clone());
+        st.rig
+            .folded
+            .spectrographs
+            .insert(MeasId(3), pinned.clone());
         st.view.cursor_hz = Some(1000.0);
         st.view.spectrum.spectrograph.cursor_s = Some(8.0);
         st.toasts.list.clear();

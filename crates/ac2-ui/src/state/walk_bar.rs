@@ -47,7 +47,9 @@ impl RigState {
     /// filling: it is drawn as received.
     pub(super) fn keep_fill_glide(&mut self, d: &DataSnapshot) {
         let old = self.data.as_deref();
-        self.fill_glide.retain(|t, _| d.latest.get(t).is_some());
+        self.folded
+            .fill_glide
+            .retain(|t, _| d.latest.get(t).is_some());
         for tf in d.latest.frames.values() {
             let Topic::Data {
                 stream: Stream::Tf, ..
@@ -56,7 +58,7 @@ impl RigState {
                 continue;
             };
             let Some(prev) = old.and_then(|o| o.latest.get(&tf.topic)) else {
-                self.fill_glide.remove(&tf.topic);
+                self.folded.fill_glide.remove(&tf.topic);
                 continue;
             };
             let (a, b) = (&prev.frame.stamp, &tf.frame.stamp);
@@ -70,20 +72,21 @@ impl RigState {
                 continue;
             };
             if !same {
-                self.fill_glide.remove(&tf.topic);
+                self.folded.fill_glide.remove(&tf.topic);
                 continue;
             }
             // Mid-glide, the bar moves on from where it is drawn, so it never jumps.
             let from = self
+                .folded
                 .fill_glide
                 .get(&tf.topic)
                 .and_then(|g| g.drawn(&prev.frame, d.drained))
                 .unwrap_or(p);
             if from == to {
-                self.fill_glide.remove(&tf.topic);
+                self.folded.fill_glide.remove(&tf.topic);
                 continue;
             }
-            self.fill_glide.insert(
+            self.folded.fill_glide.insert(
                 tf.topic,
                 FillGlide {
                     to_seq: b.seq,
@@ -106,7 +109,7 @@ impl AppState {
             meas,
             stream: Stream::Tf,
         };
-        let g = self.rig.fill_glide.get(&topic)?;
+        let g = self.rig.folded.fill_glide.get(&topic)?;
         let tf = self.rig.data.as_ref()?.latest.get(&topic)?;
         g.drawn(&tf.frame, now)
     }

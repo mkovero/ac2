@@ -574,7 +574,7 @@ fn leq_tiles_from_an_empty_daemon() {
     h.key_press(Key::G);
     let held = move |a: &ac2_ui::App| {
         a.state.kind_modes(ac2_ui::state::PaneKind::Spl).spl == ac2_scene::view::SplMode::MeterLeq
-            && a.state.rig.spl_hold.contains_key(&meas)
+            && a.state.rig.folded.spl_hold.contains_key(&meas)
             && first_is(true)(a)
     };
     snapshot_when(&mut h, "spl_meter_leq_stage", pin, held);
@@ -645,6 +645,7 @@ fn leq_tiles_from_an_empty_daemon() {
         held(a)
             && a.state
                 .rig
+                .folded
                 .spl_hold
                 .get(&meas)
                 .is_some_and(|x| x.frame.meta.position.is_some())

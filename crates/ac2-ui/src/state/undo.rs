@@ -355,7 +355,7 @@ impl AppState {
         // Another rig's measurement is no owner here: its ids name nothing on this rig.
         self.rig.own_panes = s.own_panes.filter(|m| s.rig == rig && ids.contains(m));
         if !self.spectrograph_shown() {
-            self.rig.spectrographs.clear();
+            self.rig.folded.spectrographs.clear();
             self.view.spectrum.spectrograph.cursor_s = None;
         }
         if let Some(o) = owner.filter(|o| self.rig.own_panes == Some(*o)) {

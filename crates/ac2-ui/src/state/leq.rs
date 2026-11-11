@@ -290,14 +290,14 @@ impl RigState {
         use ac2_proto::FrameData;
         if let Some(st) = self.daemon() {
             let ids: Vec<MeasId> = st.measurements.iter().map(|m| m.id).collect();
-            self.spl_hold.retain(|k, _| ids.contains(k));
+            self.folded.spl_hold.retain(|k, _| ids.contains(k));
         }
         for tf in d.latest.frames.values() {
             let FrameData::Spl(f) = &tf.frame.data else {
                 continue;
             };
             let period = spl_display_period_s(fold.spl_hold_ms, f.meta.time_weighting);
-            let mut held = self.spl_hold.remove(&f.meas);
+            let mut held = self.folded.spl_hold.remove(&f.meas);
             ac2_scene::spl::SplHold::update(
                 &mut held,
                 f,
@@ -306,7 +306,7 @@ impl RigState {
                 period,
             );
             if let Some(h) = held {
-                self.spl_hold.insert(f.meas, h);
+                self.folded.spl_hold.insert(f.meas, h);
             }
         }
     }
@@ -317,7 +317,9 @@ impl RigState {
     /// bars moving: none is kept, and the new one is drawn as received.
     pub(super) fn keep_bar_from(&mut self, d: &DataSnapshot) {
         let old = self.data.as_deref();
-        self.bar_from.retain(|t, _| d.latest.get(t).is_some());
+        self.folded
+            .bar_from
+            .retain(|t, _| d.latest.get(t).is_some());
         for tf in d.latest.frames.values() {
             let Topic::Data {
                 stream: Stream::Leq | Stream::BandLeq,
@@ -337,9 +339,9 @@ impl RigState {
                 && a.daemon_incarnation == b.daemon_incarnation
                 && a.config_rev == b.config_rev
             {
-                self.bar_from.insert(tf.topic, prev.frame.clone());
+                self.folded.bar_from.insert(tf.topic, prev.frame.clone());
             } else {
-                self.bar_from.remove(&tf.topic);
+                self.folded.bar_from.remove(&tf.topic);
             }
         }
     }

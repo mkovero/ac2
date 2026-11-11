@@ -12,7 +12,7 @@ use ac2_scene::advice::{Reading, Stimulus, pane_coherence};
 impl AppState {
     /// The headroom advice to show for `m` on a transfer pane.
     pub fn advice_of(&self, m: MeasId) -> Option<ac2_scene::advice::Advice> {
-        self.rig.advice.get(&m)?.shown()
+        self.rig.folded.advice.get(&m)?.shown()
     }
 }
 
@@ -85,11 +85,16 @@ impl RigState {
                 },
             ));
         }
-        self.advice
+        self.folded
+            .advice
             .retain(|id, _| readings.iter().any(|(m, _)| m == id));
         let now = f.now_s;
         for (id, r) in readings {
-            self.advice.entry(id).or_default().step(now, &r, &settings);
+            self.folded
+                .advice
+                .entry(id)
+                .or_default()
+                .step(now, &r, &settings);
         }
     }
 }

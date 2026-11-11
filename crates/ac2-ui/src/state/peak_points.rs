@@ -145,7 +145,7 @@ impl AppState {
             })
             .collect();
         for id in ids {
-            if self.rig.trace_peaks.contains_key(&id) {
+            if self.rig.folded.trace_peaks.contains_key(&id) {
                 continue;
             }
             let Some(peaks) = self
@@ -156,7 +156,7 @@ impl AppState {
             else {
                 continue;
             };
-            self.rig.trace_peaks.insert(id, peaks);
+            self.rig.folded.trace_peaks.insert(id, peaks);
         }
     }
 }

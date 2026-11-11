@@ -98,7 +98,7 @@ fn easing_from<'a>(st: &'a AppState, tf: &TopicFrame, now: Now) -> Option<(&'a F
         .instant
         .saturating_duration_since(tf.received)
         .as_secs_f64();
-    let from = st.rig.bar_from.get(&tf.topic)?;
+    let from = st.rig.folded.bar_from.get(&tf.topic)?;
     ac2_scene::bar_ease::easing(since).then_some((from.as_ref(), since))
 }
 
@@ -366,7 +366,7 @@ fn spl_readout_of<'a>(
     };
     st.daemon()?;
     // The number shows the held reading; the bar and the freshness follow the newest frame.
-    let held = st.rig.spl_hold.get(&m.id).map_or(f, |h| &h.frame);
+    let held = st.rig.folded.spl_hold.get(&m.id).map_or(f, |h| &h.frame);
     let cal = spl_cal(st, config.input, held.meta.cal, held.meta.mic_curve, now);
     // The statistics run from the newest frame's capture less its interval: the same instant
     // in every frame until the meter is reset.

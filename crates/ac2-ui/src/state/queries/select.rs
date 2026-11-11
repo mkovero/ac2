@@ -279,7 +279,7 @@ impl AppState {
         // stays.
         if kind == PaneKind::Spectrum {
             if !self.spectrograph_shown() {
-                self.rig.spectrographs.clear();
+                self.rig.folded.spectrographs.clear();
                 self.view.spectrum.spectrograph.cursor_s = None;
             } else if !before && let Some(d) = self.rig.data.clone() {
                 self.rig.fold_spectrographs(&d, self.prefs.spec_ease);

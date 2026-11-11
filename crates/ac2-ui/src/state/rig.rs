@@ -80,25 +80,10 @@ pub struct RigState {
     pub conn: ConnState,
     pub mirror: Option<Arc<MirrorView>>,
     pub data: Option<Arc<DataSnapshot>>,
-    /// Per Leq and band Leq topic, the frame the newest one replaced: the bars ease from it
-    /// ([`ac2_scene::bar_ease`]).
-    pub bar_from: HashMap<Topic, Arc<ac2_proto::Frame>>,
-    /// Per live spectrum or RTA topic, the ease of its curve to a slow newest frame
-    /// ([`ac2_scene::curve_ease`]).
-    pub spec_glide: HashMap<Topic, SpecGlide>,
-    /// Per measurement, the display-clock time axis its spectrograph scrolls on
-    /// ([`ac2_scene::scroll_clock`]).
-    pub scroll: BTreeMap<MeasId, ac2_scene::scroll_clock::ScrollClock>,
-    /// Per transfer topic, its walk readiness bar's glide to the newest frame's `filled`
-    /// ([`FillGlide`]).
-    pub fill_glide: HashMap<Topic, FillGlide>,
-    /// Per running transfer measurement, its headroom advice over time
-    /// ([`ac2_scene::advice::Hold`]).
-    pub advice: HashMap<MeasId, ac2_scene::advice::Hold>,
+    /// What the frames so far leave behind to draw with: eases, holds, histories, caches.
+    pub folded: Folded,
     /// Stored traces' data, as fetched.
     pub traces: BTreeMap<TraceId, (Arc<TraceData>, Arc<GridDef>)>,
-    /// The transfer view's stored-trace display math, kept between frames.
-    pub tf_display: ac2_scene::trace::DisplayCache,
     pub selected: Option<MeasId>,
     /// The stored trace selected (list, V): the trace keys change it
     /// instead of the pane's measurement, and a selected sweep is what the sweep pane shows.
@@ -118,18 +103,6 @@ pub struct RigState {
     /// Groups of the measurement tree folded in this app (their rows not listed).
     pub collapsed: BTreeSet<ac2_proto::model::TraceOwner>,
     pub edits: BTreeMap<MeasId, LiveEdit>,
-    /// Peak hold per spectrum / RTA measurement, with the last frame folded in and its
-    /// capture time.
-    pub peaks: BTreeMap<MeasId, (Option<FoldedAt>, u64, PeakHold)>,
-    /// Tracked peaks per spectrum / RTA measurement, with the last frame folded in, kept
-    /// while peak tracking is on or a pane picked its curve.
-    pub peak_tracks: BTreeMap<MeasId, (Option<FoldedAt>, ac2_scene::spectrum::peaks::PeakTracker)>,
-    /// The peaks of stored spectra a pane picked, found once per data: a stored trace is
-    /// fixed.
-    pub trace_peaks: BTreeMap<TraceId, Vec<ac2_scene::spectrum::peaks::Peak>>,
-    /// Spectrograph history per spectrum / RTA measurement, kept while the spectrograph is
-    /// shown.
-    pub spectrographs: BTreeMap<MeasId, ac2_scene::spectrograph::SpectrographHistory>,
     pub stimulus: Stimulus,
     pub sweep: SweepUi,
     /// The output device the stimulus outputs belong to (the open session's).
@@ -171,8 +144,6 @@ pub struct RigState {
     pub(super) devices_for: Option<ac2_proto::units::SessionEpoch>,
     /// The SPL meters' Leq history, strips, logs and alarms.
     pub leq: LeqUi,
-    /// Each SPL meter's displayed reading, held for its display period.
-    pub spl_hold: BTreeMap<MeasId, ac2_scene::spl::SplHold>,
     /// The Programme panes' flying peaks and ember rings.
     pub programme: ProgrammeUi,
     /// The Inputs-list row picked (its input, a pair's left): the keys go to its meters
@@ -184,8 +155,6 @@ pub struct RigState {
     /// rig's link follows its own session, so it is asked by what it was asked last, never
     /// by what the shown rig wanted a moment ago.
     pub(crate) meters_asked: bool,
-    /// Spectrum / RTA measurements seen running, so a start is told from a run going on.
-    pub(super) spectrum_running: BTreeSet<MeasId>,
     /// `meas.layout` calls in flight and the edits waiting for them.
     pub(super) layout_queue: LayoutQueue,
     /// A measurement's row was chosen: its own panes go on screen after the message.
@@ -212,9 +181,6 @@ pub struct RigState {
     /// Names of the measurements the daemon has listed since this app started: a pane
     /// remembered on one of them waits for it to come back.
     pub(super) meas_seen: BTreeSet<String>,
-    /// Started spectrum / RTA measurements whose first frame fits the spectrum pane's level
-    /// axis (as Shift+Home), with the frame shown when they started (a stopped run's last).
-    pub(super) spectrum_fit: BTreeMap<MeasId, Option<Arc<ac2_proto::Frame>>>,
 }
 
 /// What folding a rig's frames takes from the app: the operator's settings, the time, and
@@ -257,23 +223,14 @@ impl RigState {
             conn: ConnState::Connecting { target },
             mirror: None,
             data: None,
-            bar_from: HashMap::new(),
-            spec_glide: HashMap::new(),
-            scroll: BTreeMap::new(),
-            fill_glide: HashMap::new(),
-            advice: HashMap::new(),
+            folded: Folded::default(),
             traces: BTreeMap::new(),
-            tf_display: Default::default(),
             selected: None,
             selected_trace: None,
             selected_live: None,
             hidden_meas: BTreeSet::new(),
             collapsed: BTreeSet::new(),
             edits: BTreeMap::new(),
-            peaks: BTreeMap::new(),
-            peak_tracks: BTreeMap::new(),
-            trace_peaks: BTreeMap::new(),
-            spectrographs: BTreeMap::new(),
             stimulus: Stimulus::default(),
             sweep: SweepUi::default(),
             stim_device: None,
@@ -290,12 +247,10 @@ impl RigState {
             preview_sent_s: f64::NEG_INFINITY,
             devices_for: None,
             leq: LeqUi::default(),
-            spl_hold: BTreeMap::new(),
             programme: ProgrammeUi::default(),
             input_pick: None,
             link_wants: crate::link_wants::Sent::default(),
             meters_asked: false,
-            spectrum_running: BTreeSet::new(),
             layout_queue: LayoutQueue::default(),
             own_panes_due: false,
             standin: None,
@@ -304,7 +259,6 @@ impl RigState {
             lost_own_panes: false,
             chosen: None,
             meas_seen: BTreeSet::new(),
-            spectrum_fit: BTreeMap::new(),
         }
     }
 

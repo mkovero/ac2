@@ -116,7 +116,7 @@ fn without_the_scroll_the_rows_jump() {
     let at = t0 + Duration::from_millis(250);
     assert_eq!(t.st.scroll_lead(p, at), 0.0);
     assert!(!t.st.spectrographs_scrolling(at));
-    assert!(t.st.rig.scroll.is_empty());
+    assert!(t.st.rig.folded.scroll.is_empty());
 }
 
 /// The flat spectrograph scrolls on the same clock as the 3D view.

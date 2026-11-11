@@ -16,12 +16,12 @@ fn a_background_rigs_pick_tracks_its_curve() {
     assert_eq!(t.st.peak_points_of(p), Some(key));
     to(&mut t, PUPU, spectrum_at(5, -40.0));
     assert!(
-        pupu(&t).peak_tracks.contains_key(&MeasId(2)),
+        pupu(&t).folded.peak_tracks.contains_key(&MeasId(2)),
         "pupu tracks it"
     );
     t.conn(spectrum_at(5, -40.0));
     assert!(
-        !t.st.rig.peak_tracks.contains_key(&MeasId(2)),
+        !t.st.rig.folded.peak_tracks.contains_key(&MeasId(2)),
         "the shown rig's id 2 is not picked"
     );
     // The shown rig's row dropped there pins the pane back: the pick goes.

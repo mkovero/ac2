@@ -141,6 +141,7 @@ fn spectrograph_from_an_empty_daemon() -> R {
     d.play()?;
     let filled = |s: &AppState, n: usize| {
         s.rig
+            .folded
             .spectrographs
             .get(&sp)
             .is_some_and(|h| h.ring().iter().flatten().count() >= n)
@@ -203,6 +204,7 @@ fn spectrograph_from_an_empty_daemon() -> R {
     })?;
     d.until("a history of a minute", |s| {
         s.rig
+            .folded
             .spectrographs
             .get(&sp)
             .is_some_and(|h| h.span_s() == 60)
@@ -333,7 +335,7 @@ fn spectrograph_from_an_empty_daemon() -> R {
         d.st.kind_modes(ac2_ui::state::PaneKind::Spectrum).spectrum,
         SpectrumMode::Spectrum
     );
-    assert!(d.st.rig.spectrographs.is_empty());
+    assert!(d.st.rig.folded.spectrographs.is_empty());
     Ok(())
 }
 
@@ -516,6 +518,7 @@ fn two_spectrographs_side_by_side_from_an_empty_daemon() -> R {
     // Both histories fill, side by side (30 slots a second at 30 s).
     let filled = |s: &AppState, id: MeasId, n: usize| {
         s.rig
+            .folded
             .spectrographs
             .get(&id)
             .is_some_and(|h| h.ring().iter().flatten().count() >= n)

@@ -806,7 +806,7 @@ impl AppState {
     /// Some Leq or band Leq bars still ease to their newest frame at `now`.
     pub fn bars_easing(&self, now: std::time::Instant) -> bool {
         self.prefs.bar_ease
-            && self.rig.bar_from.keys().any(|t| {
+            && self.rig.folded.bar_from.keys().any(|t| {
                 self.rig
                     .data
                     .as_ref()

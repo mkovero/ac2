@@ -747,7 +747,7 @@ fn g_steps_the_spectrum_panes_views() {
         t.st.kind_modes(PaneKind::Spectrum).spectrum,
         SpectrumMode::Split
     );
-    t.st.rig.spectrographs.insert(
+    t.st.rig.folded.spectrographs.insert(
         MeasId(2),
         ac2_scene::spectrograph::SpectrographHistory::new(30),
     );
@@ -756,7 +756,10 @@ fn g_steps_the_spectrum_panes_views() {
         t.st.kind_modes(PaneKind::Spectrum).spectrum,
         SpectrumMode::Spectrograph
     );
-    assert!(!t.st.rig.spectrographs.is_empty(), "the history stays");
+    assert!(
+        !t.st.rig.folded.spectrographs.is_empty(),
+        "the history stays"
+    );
     t.key("W");
     assert_eq!(t.visible(), [PaneKind::Spectrum]);
     let prefs = t.st.layout_prefs().panes.expect("a layout");
@@ -781,7 +784,7 @@ fn g_steps_the_spectrum_panes_views() {
         SpectrumMode::Spectrum
     );
     assert!(
-        t.st.rig.spectrographs.is_empty(),
+        t.st.rig.folded.spectrographs.is_empty(),
         "nothing kept for a hidden one"
     );
     // Shift+G walks the same chain back, wrapping at the spectrum.
@@ -794,7 +797,10 @@ fn g_steps_the_spectrum_panes_views() {
         t.key("Shift+G");
         assert_eq!(t.st.kind_modes(PaneKind::Spectrum).spectrum, want);
     }
-    assert!(t.st.rig.spectrographs.is_empty(), "hidden again: dropped");
+    assert!(
+        t.st.rig.folded.spectrographs.is_empty(),
+        "hidden again: dropped"
+    );
 
     // Remembered: a new app on these preferences opens on the spectrograph.
     let mut u = T::new();

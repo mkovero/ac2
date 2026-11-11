@@ -96,6 +96,8 @@ mod target;
 pub use drop_math::DropPlan;
 pub use sessions_impl::SessionsMsg;
 mod eq_impl;
+mod folded;
+pub use folded::Folded;
 mod sim_impl;
 mod stimulus;
 mod text;

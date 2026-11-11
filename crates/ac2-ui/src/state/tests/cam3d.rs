@@ -10,7 +10,7 @@ use ac2_scene::view::SpectrumMode;
 fn on_3d() -> T {
     let mut t = T::new();
     t.key("Alt+2");
-    t.st.rig.spectrographs.insert(
+    t.st.rig.folded.spectrographs.insert(
         MeasId(2),
         ac2_scene::spectrograph::SpectrographHistory::new(30),
     );

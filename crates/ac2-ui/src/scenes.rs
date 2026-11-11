@@ -346,7 +346,7 @@ pub fn transfer(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now:
         }
         transfer_scene(
             traces,
-            &st.rig.tf_display,
+            &st.rig.folded.tf_display,
             &status,
             &st.view_for(pane),
             theme,
@@ -368,7 +368,7 @@ pub fn transfer_jump(
     with_transfer(st, pane, &theme, |traces, _| {
         ac2_scene::tf::jump(
             traces,
-            &st.rig.tf_display,
+            &st.rig.folded.tf_display,
             &st.view_for(pane),
             shown,
             kind,

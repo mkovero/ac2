@@ -946,7 +946,7 @@ impl AppState {
             }
             _ => return,
         };
-        self.rig.advice.clear();
+        self.rig.folded.advice.clear();
         self.prefs_dirty = true;
         self.toast(said);
     }

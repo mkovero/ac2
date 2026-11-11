@@ -746,6 +746,7 @@ fn spl_number_holds_for_the_display_period() {
     };
     let held = |t: &T| {
         t.st.rig
+            .folded
             .spl_hold
             .get(&MeasId(4))
             .map(|h| h.frame.meta.level)

@@ -433,6 +433,7 @@ impl AppState {
     fn rearm_started_spectra(&mut self) {
         let arrived: Vec<_> = self
             .rig
+            .folded
             .spectrum_fit
             .iter()
             .filter(|(id, shown)| {
@@ -445,7 +446,7 @@ impl AppState {
             .map(|(id, _)| *id)
             .collect();
         for id in arrived {
-            self.rig.spectrum_fit.remove(&id);
+            self.rig.folded.spectrum_fit.remove(&id);
             let Some(name) = self.meas(id).map(|m| m.config.name.clone()) else {
                 continue;
             };

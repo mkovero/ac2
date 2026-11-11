@@ -457,7 +457,7 @@ impl AppState {
         self.rig.pending.deleted.clear();
         // The history goes with the last spectrograph shown.
         if !self.spectrograph_shown() {
-            self.rig.spectrographs.clear();
+            self.rig.folded.spectrographs.clear();
             self.view.spectrum.spectrograph.cursor_s = None;
         }
     }

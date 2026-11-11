@@ -323,12 +323,13 @@ fn spectrum_peak_tracking() {
         peak(a) == Some(PeakMode::Track)
             && a.state
                 .rig
+                .folded
                 .peak_tracks
                 .get(&MeasId(3))
                 .is_some_and(|t| !t.1.peaks().is_empty())
     });
     assert!(
-        !h.state().state.rig.peaks.contains_key(&MeasId(3)),
+        !h.state().state.rig.folded.peaks.contains_key(&MeasId(3)),
         "tracking keeps no hold"
     );
     let scene = |h: &Harness<'_, App>| {

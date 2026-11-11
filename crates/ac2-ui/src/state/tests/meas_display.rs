@@ -312,7 +312,10 @@ fn tracking_draws_no_hold_and_a_new_hold_starts_afresh() {
     assert_eq!(mode(&t), Some(PeakMode::Track));
     spectra(&mut t, &[(2, -60.0)]);
     assert_eq!(hold(&t), None, "tracking draws no hold line");
-    assert!(!t.st.rig.peaks.contains_key(&MeasId(2)), "nor keeps one");
+    assert!(
+        !t.st.rig.folded.peaks.contains_key(&MeasId(2)),
+        "nor keeps one"
+    );
     t.key_answered("P");
     assert_eq!(mode(&t), Some(PeakMode::Off));
     t.key_answered("P");
@@ -387,6 +390,7 @@ fn hold_and_tracks_start_afresh_after_a_daemon_restart() {
     let held = t.st.daemon().expect("mirrored").clone();
     let tracked = |t: &T| -> Vec<f64> {
         t.st.rig
+            .folded
             .peak_tracks
             .get(&MeasId(2))
             .map_or(vec![], |p| p.1.peaks().iter().map(|p| p.freq_hz).collect())

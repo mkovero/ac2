@@ -97,10 +97,14 @@ fn two_panes_pick_independently() {
 #[test]
 fn a_pick_seeds_its_tracker_and_keeps_it() {
     let (mut t, p) = picked_pane();
-    assert!(!t.st.rig.peak_tracks.contains_key(&MeasId(9)), "P is off");
+    assert!(
+        !t.st.rig.folded.peak_tracks.contains_key(&MeasId(9)),
+        "P is off"
+    );
     pick(&mut t, p, SUB2);
     let freqs = |t: &T| -> Vec<f64> {
         t.st.rig
+            .folded
             .peak_tracks
             .get(&MeasId(9))
             .map_or(vec![], |e| e.1.peaks().iter().map(|p| p.freq_hz).collect())
@@ -111,7 +115,7 @@ fn a_pick_seeds_its_tracker_and_keeps_it() {
     pick(&mut t, p, SUB2);
     peaked(&mut t, 12);
     assert!(
-        !t.st.rig.peak_tracks.contains_key(&MeasId(9)),
+        !t.st.rig.folded.peak_tracks.contains_key(&MeasId(9)),
         "gone with it"
     );
 }
@@ -284,7 +288,7 @@ fn a_transfer_pick_needs_min_max() {
 fn new_trace_data_drops_its_cached_peaks() {
     let (mut t, _) = picked_pane();
     let (data, grid) = sweep_data(40);
-    t.st.rig.trace_peaks.insert(TraceId(40), vec![]);
+    t.st.rig.folded.trace_peaks.insert(TraceId(40), vec![]);
     t.st.rig.keep_trace(data, grid);
-    assert!(!t.st.rig.trace_peaks.contains_key(&TraceId(40)));
+    assert!(!t.st.rig.folded.trace_peaks.contains_key(&TraceId(40)));
 }

@@ -620,12 +620,14 @@ impl RigState {
             .filter(|m| m.running && spectrum_stream(m).is_some())
             .map(|m| m.id)
             .collect();
-        for &id in running.difference(&self.spectrum_running) {
+        for &id in running.difference(&self.folded.spectrum_running) {
             let shown = self.spectrum_frame(id).map(|f| f.frame.clone());
-            self.spectrum_fit.insert(id, shown);
+            self.folded.spectrum_fit.insert(id, shown);
         }
-        self.spectrum_fit.retain(|id, _| running.contains(id));
-        self.spectrum_running = running;
+        self.folded
+            .spectrum_fit
+            .retain(|id, _| running.contains(id));
+        self.folded.spectrum_running = running;
     }
 
     /// The newest frame of spectrum / RTA measurement `id`.
@@ -652,13 +654,14 @@ impl RigState {
             .iter()
             .map(|m| (m.id, (m.running, self.display_of(m).spectrograph_span_s)))
             .collect();
-        self.spectrographs
+        self.folded
+            .spectrographs
             .retain(|id, h| running.get(id).is_some_and(|(_, s)| h.span_s() == *s));
         if ease {
-            let kept = &self.spectrographs;
-            self.scroll.retain(|id, _| kept.contains_key(id));
+            let kept = &self.folded.spectrographs;
+            self.folded.scroll.retain(|id, _| kept.contains_key(id));
         } else {
-            self.scroll.clear();
+            self.folded.scroll.clear();
         }
         // Without an open session there is no sample clock to place frames on.
         let Some(rate) = self
@@ -693,6 +696,7 @@ impl RigState {
                 continue;
             };
             let h = self
+                .folded
                 .spectrographs
                 .entry(meas)
                 .or_insert_with(|| SpectrographHistory::new(span));
@@ -727,7 +731,7 @@ impl RigState {
             .filter(|m| self.display_of(m).peak.holds())
             .map(|m| m.id)
             .collect();
-        self.peaks.retain(|id, _| held.contains(id));
+        self.folded.peaks.retain(|id, _| held.contains(id));
         if held.is_empty() {
             return;
         }
@@ -743,6 +747,7 @@ impl RigState {
             let stamp = &tf.frame.stamp;
             let at = stamp.capture_wall_ns.0;
             let e = self
+                .folded
                 .peaks
                 .entry(meas)
                 .or_insert_with(|| (None, at, PeakHold::new(0.0)));
@@ -774,7 +779,7 @@ impl RigState {
             .filter(|m| self.display_of(m).peak.tracks() || picked.contains(&m.id))
             .map(|m| m.id)
             .collect();
-        self.peak_tracks.retain(|id, _| tracked.contains(id));
+        self.folded.peak_tracks.retain(|id, _| tracked.contains(id));
         if tracked.is_empty() {
             return;
         }
@@ -796,7 +801,7 @@ impl RigState {
             let Some(grid) = tf.frame.stamp.grid_id.and_then(|g| d.grids.get(&g)) else {
                 continue;
             };
-            let e = self.peak_tracks.entry(meas).or_default();
+            let e = self.folded.peak_tracks.entry(meas).or_default();
             match FoldedAt::next(e.0, &tf.frame.stamp) {
                 NextFrame::Seen => continue,
                 NextFrame::Newer => {}
@@ -869,7 +874,7 @@ impl RigState {
         // visibility and slots change by event). The smoothing stays the one the
         // columns were served with until the re-smoothed data arrives.
         self.traces.retain(|k, _| metas.contains_key(k));
-        self.trace_peaks.retain(|k, _| metas.contains_key(k));
+        self.folded.trace_peaks.retain(|k, _| metas.contains_key(k));
         for (id, (data, _)) in &mut self.traces {
             if let Some(m) = metas.get(id) {
                 follow_meta(data, m);
@@ -890,7 +895,7 @@ impl RigState {
             follow_meta(&mut t, &m);
         }
         // New data, new peaks: found again once a pane's pick asks.
-        self.trace_peaks.remove(&t.meta.id);
+        self.folded.trace_peaks.remove(&t.meta.id);
         self.traces.insert(t.meta.id, (t, g));
     }
 }

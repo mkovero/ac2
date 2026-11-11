@@ -506,13 +506,13 @@ impl Log {
         };
         match view {
             View::Spectrum if st.prefs.spec_ease => {
-                if let Some(g) = st.rig.spec_glide.get(&tf.topic) {
+                if let Some(g) = st.rig.folded.spec_glide.get(&tf.topic) {
                     d.glide_k = g.progress(stamp, now);
                     d.glide_lag_ns = capture as f64 - g.drawn_capture_ns(stamp, now);
                 }
             }
             View::Spectrograph | View::Spectrum3d => {
-                let h = st.rig.spectrographs.get(&m.id)?;
+                let h = st.rig.folded.spectrographs.get(&m.id)?;
                 let newest = h.newest_slot();
                 d.newest_slot = newest;
                 if let Some(n) = newest {
@@ -526,7 +526,7 @@ impl Log {
                 let lead = st.scroll_lead(pane, now);
                 d.row_lag_slots = Some(-lead);
                 if st.prefs.spec_ease
-                    && let (Some(c), Some(n)) = (st.rig.scroll.get(&m.id), newest)
+                    && let (Some(c), Some(n)) = (st.rig.folded.scroll.get(&m.id), newest)
                     && let Some(newest_s) = c.newest_s()
                 {
                     let at_s = ((n + 1) as f64 + lead) * h.slot_s();
