@@ -3,7 +3,7 @@
 # and the ac2-loop check for x86_64-pc-windows-msvc, then runs them.
 #
 # Usage: tools/wine-asio/ac2.sh        (needs the image; tools/wine-asio/run.sh builds it)
-# Env:   RATE (48000), PERIOD (256), CACHE_DIR (/work/ac2-scratch/wine-asio), IMAGE,
+# Env:   RATE (48000), PERIOD (256), CACHE_DIR (~/.cache/ac2-scratch/wine-asio), IMAGE,
 #        SECONDS_REC (30), CYCLES (20)
 # Output in tools/wine-asio/out/ac2/:
 #   build.log            cross builds
@@ -29,7 +29,7 @@ repo="$(cd "$here/../.." && pwd)"
 IMAGE="${IMAGE:-ac2-wine-asio:dev}"
 RATE="${RATE:-48000}"
 PERIOD="${PERIOD:-256}"
-CACHE_DIR="${CACHE_DIR:-/work/ac2-scratch/wine-asio}"
+CACHE_DIR="${CACHE_DIR:-$HOME/.cache/ac2-scratch/wine-asio}"
 out="$here/out/ac2"
 mkdir -p "$out" "$CACHE_DIR/ac2-target" "$CACHE_DIR/registry" "$CACHE_DIR/git"
 

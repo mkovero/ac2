@@ -30,7 +30,7 @@ with no cpal/asio-sys and no `CPAL_ASIO_DIR`, and for `x86_64-pc-windows-gnu`), 
 `azo.log` (silence, two stop/start cycles), `azo-plain.log` (time info refused, so plain
 `bufferSwitch`), `azo-loop-{1,2,3}.log` (three separate processes, `probe:out_1 →
 probe:in_1` connected in JACK), `jackd.log`. Cargo cache: `$CACHE_DIR/target` (default
-`/work/ac2-scratch/wine-asio/target`). The container runs with `--memory 8g --cpus 4`
+`~/.cache/ac2-scratch/wine-asio/target`). The container runs with `--memory 8g --cpus 4`
 and `--ulimit memlock=-1` (JACK clients mlock their shared memory; without it wineasio
 cannot open its client); cargo uses `CARGO_BUILD_JOBS=4`.
 

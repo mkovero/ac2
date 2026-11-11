@@ -3,7 +3,7 @@
 # probes for x86_64-pc-windows-msvc, and run them under Wine on the WineASIO driver.
 #
 # Usage: tools/wine-asio/run.sh [--no-build]
-# Env:   RATE (48000), PERIOD (256), CACHE_DIR (/work/ac2-scratch/wine-asio), IMAGE
+# Env:   RATE (48000), PERIOD (256), CACHE_DIR (~/.cache/ac2-scratch/wine-asio), IMAGE
 # Output in tools/wine-asio/out/:
 #   build.log        cross builds (both probes; azo_probe again without any SDK and for -gnu)
 #   cpal.log         cpal_probe: cpal 0.18 ASIO host (Steinberg SDK via asio-sys), silence
@@ -21,7 +21,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE="${IMAGE:-ac2-wine-asio:dev}"
 RATE="${RATE:-48000}"
 PERIOD="${PERIOD:-256}"
-CACHE_DIR="${CACHE_DIR:-/work/ac2-scratch/wine-asio}"
+CACHE_DIR="${CACHE_DIR:-$HOME/.cache/ac2-scratch/wine-asio}"
 out="$here/out"
 mkdir -p "$out" "$CACHE_DIR/target"
 
