@@ -4,7 +4,7 @@ What the operator saves and opens: the measurements (configurations, applied del
 flags), every stored trace with its display edits and slots, and each SPL meter's per-second
 log. Not saved: calibrations (the calibration store's), the generator (a loaded session is
 always disarmed), the audio device (the audio I/O). File format:
-`ac2_traces::session` (a directory, `session.json` format 25). Wire: `docs/protocol.md`
+`ac2_traces::session` (a directory, `session.json` format 43). Wire: `docs/protocol.md`
 §3.2 *Sessions*. User guide: *Sessions*.
 
 ## Model

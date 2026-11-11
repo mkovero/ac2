@@ -244,7 +244,7 @@ generator ◄── atomics / lock-free param swap ◄── control (owner leas
 - **Reference & timing contract.** A measured reference is required: stimulus and reference leave through the same converter and the reference is looped back into an input, so every latency in interface, console, network and processors cancels. While a stimulus plays, the daemon continuously correlates generator output against the loopback input and flags any offset jump (buffer change, device reset, clock slip); when silent, the last value is shown with its age. No start-up probe. Without a loopback there is no internal reference. Detail: `docs/design/open-questions.md` Q3.
 - **Job lifetime** follows explicit commands (`meas.start/stop`; an SPL meter's per-second log and Leq windows run with the meter). Closing every UI never stops measuring, averaging, logging or alarms. Subscriptions only decide what is *published* and which optional display derivations are computed.
 - Block grid fixed to the sample stream (push pipeline); never re-segment a sliding buffer.
-- **Bounded freshness, not guaranteed latest.** Each topic has one latest-result slot in the daemon; the publisher sends only the newest frame per topic with a small PUB HWM. Frames already queued in ZMQ cannot be replaced, so clients also drain their socket and keep only the newest frame per topic before rendering. Frames carry a capture wall-clock time so age is measurable remotely; past a deadline they are shown STALE. Recoverable state events use a separate path with replay (§6.2). Detail: Q2.
+- **Bounded freshness, not guaranteed latest.** Each topic has one latest-result slot in the daemon; the publisher sends only the newest frame per topic, to each connection as its byte credit allows (`docs/protocol.md` §5.8; a small PUB HWM before PROTO 83). Frames already queued in ZMQ cannot be replaced, so clients also drain their socket and keep only the newest frame per topic before rendering. Frames carry a capture wall-clock time so age is measurable remotely; past a deadline they are shown STALE. Recoverable state events use a separate path with replay (§6.2). Detail: Q2.
 
 ### 4.4 Scene layer
 - `ac2-scene` turns frames + view state into a `Scene`: polylines with per-vertex alpha,
@@ -399,7 +399,7 @@ generator ◄── atomics / lock-free param swap ◄── control (owner leas
 | ctrl | ROUTER | async request/response with ids; slow handlers never block other clients |
 | data | ROUTER | frames + state events, per-peer subscriptions and byte credit (docs/protocol.md §5.8) |
 
-Transports: `ipc://` (Linux/macOS), `tcp://127.0.0.1` (Windows) — an embedded daemon uses the same (private ipc dir / ephemeral loopback ports), since the client owns its own ZeroMQ context;
+Transports: `ipc://` (Linux/macOS), `tcp://127.0.0.1` (Windows) — an in-process daemon (tests only; the app spawns `ac2d`) uses the same (private ipc dir / ephemeral loopback ports), since the client owns its own ZeroMQ context;
 `tcp://<iface>` only in network mode, which requires CURVE on **both** sockets.
 
 ### 6.2 Messages & state sync

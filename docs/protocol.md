@@ -2427,7 +2427,7 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 <dir>/spl/<name>.bands.csv   its band log, when the meter's band meter logged (§7.4)
 ```
 
-`session.json`: `{format: "ac2-session", version: 37, saved_at, measurements:
+`session.json`: `{format: "ac2-session", version: 43, saved_at, measurements:
 [{id, config: MeasConfig, running, delay: {applied, nudged, tracking} | null, colour:
 ColourFamily | null, layout: PaneLayout | null}], spl_logs:
 [{meas, file, bands: file | null}], traces: [{meta: TraceMeta, grid: GridDef, file, mic_curve_points: [[Hz,
