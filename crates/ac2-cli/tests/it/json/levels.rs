@@ -6,6 +6,9 @@ use super::{R, ac2, fake, ok_json};
 async fn levels_set_shows_the_rig_and_reset_clears_the_holds() -> R {
     let f = fake()?;
     f.lock().meters = true;
+    // Input 2 silent from the first frame: set once the session runs, a frame of the
+    // default level can reach its max hold first on a slow machine.
+    f.lock().set_input_peak(1, f32::NEG_INFINITY);
     // Without a session, there is nothing to meter.
     let r = ac2(&f, &["levels", "--json"]).await?;
     assert_ne!(r.code, 0);
@@ -37,7 +40,6 @@ async fn levels_set_shows_the_rig_and_reset_clears_the_holds() -> R {
     )
     .await?;
     // Input 2 silent: the pair reads right quiet.
-    f.lock().set_input_peak(1, f32::NEG_INFINITY);
     let v = ok_json(&f, &["levels", "--json"]).await?;
     assert_eq!(v["settings"]["ballistic"], "true_peak");
     let rows = v["inputs"].as_array().expect("array");
