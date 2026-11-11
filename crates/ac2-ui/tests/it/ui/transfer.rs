@@ -361,6 +361,13 @@ fn spectrum_math() {
     h.key_press(Key::W);
     // The pane shows the math channel: its caption is the expression and what it means.
     common::show_on(&mut h.state_mut().state, PaneKind::Spectrum, MeasId(7));
+    // The level axis follows the difference (±6 dB) only once a frame of it has been drawn on
+    // the pane; until then it stands on the dBFS default, above which the curve is off screen.
+    step_until(&mut h, "the level axis fitted to the math curve", |a| {
+        let st = &a.state;
+        st.level_range(crate::common::pane(st, PaneKind::Spectrum))
+            .is_some_and(|r| r.hi > 0.0 && r.lo < 0.0)
+    });
     {
         let st = &h.state().state;
         let s = ac2_ui::scenes::spectrum(
