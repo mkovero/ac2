@@ -261,7 +261,7 @@ impl AppState {
 
     pub(super) fn command(&mut self, c: CommandId, keymap: &Keymap, out: &mut Vec<Request>) {
         use CommandId as C;
-        self.ran_command.get_or_insert(c);
+        self.history.ran_command.get_or_insert(c);
         if needs_session(c) && self.sessions_first(out) {
             return;
         }

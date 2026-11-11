@@ -283,12 +283,8 @@ pub struct AppState {
     keys: Keymap,
     /// A list row being dragged onto the panes.
     row_drag: Option<RowDrag>,
-    /// Edits of the panes that undo takes back.
+    /// Edits of the panes that undo takes back, and what the message under way is to them.
     history: undo::History,
-    /// The message is an undo or redo: it puts back panes, it edits none.
-    undoing: bool,
-    /// The first command the message ran (a key, the palette): what an edit was.
-    ran_command: Option<CommandId>,
 }
 
 impl Default for AppState {
@@ -368,8 +364,6 @@ impl AppState {
             keys: Keymap::default(),
             row_drag: None,
             history: undo::History::default(),
-            undoing: false,
-            ran_command: None,
         }
     }
 
@@ -418,8 +412,8 @@ impl AppState {
         } else {
             self.undo_watch(&msg)
         };
-        self.ran_command = None;
-        self.undoing = false;
+        self.history.ran_command = None;
+        self.history.undoing = false;
         let contents = self.pane_contents();
         let worked_on = self.worked_on(&msg);
         self.update_inner(msg, keymap, &mut out);
@@ -445,10 +439,10 @@ impl AppState {
             self.restore_meas_choices();
             self.follow_standin();
             // An undo or redo stores what it restores itself, on the owner of the edit only.
-            let undoing = std::mem::take(&mut self.undoing);
+            let undoing = std::mem::take(&mut self.history.undoing);
             self.sync_meas_layout(panes_before, conn || undoing, drag, &mut out);
             if let Some(w) = edit.filter(|_| !undoing) {
-                let ran = self.ran_command;
+                let ran = self.history.ran_command;
                 self.record_edit(w, ran);
             }
             self.remember_layout();

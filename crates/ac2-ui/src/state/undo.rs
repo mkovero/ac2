@@ -70,7 +70,7 @@ struct Step {
     owner: Option<MeasId>,
 }
 
-/// The undo history.
+/// The undo history, and what the message being handled is to it.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct History {
     done: VecDeque<Step>,
@@ -80,6 +80,10 @@ pub(crate) struct History {
     drag: Option<(PaneSnap, PaneEdit)>,
     /// Measurements whose layout the edit under way stored (or will, once a drag rests).
     pub(super) stored: BTreeSet<MeasId>,
+    /// The message is an undo or redo: it puts back panes, it edits none.
+    pub(super) undoing: bool,
+    /// The first command the message ran (a key, the palette): what an edit was.
+    pub(super) ran_command: Option<CommandId>,
 }
 
 impl History {
@@ -334,7 +338,7 @@ impl AppState {
     /// was stored on, and still the one whose row was chosen, the panes are stored on it
     /// again: the daemon's copy follows the screen.
     fn restore_snap(&mut self, s: &PaneSnap, owner: Option<MeasId>, out: &mut Vec<Request>) {
-        self.undoing = true;
+        self.history.undoing = true;
         let ids: BTreeSet<MeasId> = self.measurements().iter().map(|m| m.id).collect();
         self.layout.restore(&s.layout);
         let rig = self.rig.id;
