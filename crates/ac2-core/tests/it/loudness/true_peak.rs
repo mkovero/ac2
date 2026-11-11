@@ -78,3 +78,45 @@ fn cases_20_to_23_spliced_period_at_four_offsets() {
         );
     }
 }
+
+/// The detector against the annex's sum written out, `Σₘ PHASES[p][m]·x[n − m]` phase by
+/// phase: equal to the bit, whatever the block boundaries, so the reading does not depend
+/// on how the samples were laid out for the processor.
+#[test]
+fn reading_is_the_annex_sum_to_the_bit_across_block_splits() {
+    use ac2_core::ppm::{TRUE_PEAK_HISTORY, TRUE_PEAK_PHASES};
+    // A fixed pseudo-random signal with full-scale excursions (a linear congruential
+    // generator: any sequence does, it only has to be the same every run).
+    let mut state = 0x2545_f491u32;
+    let x: Vec<f32> = (0..4801)
+        .map(|_| {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (state >> 8) as f32 / (1u32 << 23) as f32 - 1.0
+        })
+        .collect();
+    let direct = |from: usize, to: usize| {
+        let mut max = 0.0f32;
+        for n in from..to {
+            for phase in &TRUE_PEAK_PHASES {
+                let mut acc = 0.0f32;
+                for (m, &tap) in phase.iter().enumerate().take(TRUE_PEAK_HISTORY) {
+                    if n >= m {
+                        acc += tap * x[n - m];
+                    }
+                }
+                max = max.max(acc.abs());
+            }
+        }
+        max
+    };
+    for block in [1usize, 5, 12, 13, 64, 480, 4801] {
+        let mut tp = TruePeak::new();
+        let mut from = 0;
+        for chunk in x.chunks(block) {
+            let got = tp.process(chunk);
+            let want = direct(from, from + chunk.len());
+            assert_eq!(got.to_bits(), want.to_bits(), "block {block}, from {from}");
+            from += chunk.len();
+        }
+    }
+}

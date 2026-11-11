@@ -235,8 +235,43 @@ pub const TRUE_PEAK_PHASES: [[f32; TRUE_PEAK_HISTORY]; 4] = [
 /// phases, with the last twelve input samples carried across blocks.
 #[derive(Debug, Clone)]
 pub struct TruePeak {
-    history: [f32; TRUE_PEAK_HISTORY],
-    pos: usize,
+    /// The eleven samples before the next block, oldest first.
+    carry: [f32; TRUE_PEAK_HISTORY - 1],
+}
+
+/// [`TRUE_PEAK_PHASES`] as `[tap][phase]`: the four phases of one tap side by side, so one
+/// step of the tap loop is the same multiply-add on four lanes.
+const TRUE_PEAK_TAPS: [[f32; 4]; TRUE_PEAK_HISTORY] = {
+    let mut out = [[0.0; 4]; TRUE_PEAK_HISTORY];
+    let mut m = 0;
+    while m < TRUE_PEAK_HISTORY {
+        let mut p = 0;
+        while p < 4 {
+            out[m][p] = TRUE_PEAK_PHASES[p][m];
+            p += 1;
+        }
+        m += 1;
+    }
+    out
+};
+
+/// The largest `|interpolated sample|` over every run of twelve samples in `x` (oldest
+/// first, so the last of a run is `x[n]`), and `max`.
+fn true_peak_over(x: &[f32], mut max: f32) -> f32 {
+    for recent in x.windows(TRUE_PEAK_HISTORY) {
+        // Each phase sums its taps newest sample first, one after another: the same to
+        // the bit as a phase-by-phase sum, with the four phases side by side.
+        let mut acc = [0.0f32; 4];
+        for (taps, &s) in TRUE_PEAK_TAPS.iter().zip(recent.iter().rev()) {
+            for (a, &tap) in acc.iter_mut().zip(taps) {
+                *a += tap * s;
+            }
+        }
+        for a in acc {
+            max = max.max(a.abs());
+        }
+    }
+    max
 }
 
 impl Default for TruePeak {
@@ -248,27 +283,27 @@ impl Default for TruePeak {
 impl TruePeak {
     pub fn new() -> Self {
         Self {
-            history: [0.0; TRUE_PEAK_HISTORY],
-            pos: 0,
+            carry: [0.0; TRUE_PEAK_HISTORY - 1],
         }
     }
 
     /// Runs the block; returns its true peak (linear, full scale = 1, may exceed 1).
     pub fn process(&mut self, x: &[f32]) -> f32 {
-        let mut max = 0.0f32;
-        for &v in x {
-            // history[pos] is the newest sample x[n]; walking backwards gives x[n − m].
-            self.history[self.pos] = v;
-            for phase in &TRUE_PEAK_PHASES {
-                let mut acc = 0.0f32;
-                let mut i = self.pos;
-                for &tap in phase {
-                    acc += tap * self.history[i];
-                    i = if i == 0 { TRUE_PEAK_HISTORY - 1 } else { i - 1 };
-                }
-                max = max.max(acc.abs());
-            }
-            self.pos = (self.pos + 1) % TRUE_PEAK_HISTORY;
+        const CARRY: usize = TRUE_PEAK_HISTORY - 1;
+        // The block's first eleven samples still reach into the last block: those runs are
+        // read from the carried samples joined to the block's start. Every later run lies
+        // inside the block and is read where it is, with no ring to walk.
+        let head = x.len().min(CARRY);
+        let mut joined = [0.0f32; 2 * CARRY];
+        joined[..CARRY].copy_from_slice(&self.carry);
+        joined[CARRY..CARRY + head].copy_from_slice(&x[..head]);
+        let max = true_peak_over(&joined[..CARRY + head], 0.0);
+        let max = true_peak_over(x, max);
+        if x.len() >= CARRY {
+            self.carry.copy_from_slice(&x[x.len() - CARRY..]);
+        } else {
+            self.carry.copy_within(head.., 0);
+            self.carry[CARRY - head..].copy_from_slice(x);
         }
         max
     }
