@@ -315,6 +315,45 @@ pub(crate) fn visible_columns(freqs: &[f64], lo: f64, hi: f64) -> std::ops::Rang
     if a < b { a..b } else { 0..0 }
 }
 
+/// Fewest columns [`column_px`] remembers a run of: a band grid's few dozen logarithms
+/// cost less than comparing and keeping them.
+const PX_CACHE_MIN: usize = 1024;
+/// Most runs [`column_px`] remembers: one per frequency axis and grid on screen.
+const PX_CACHE: usize = 16;
+
+/// Pixel x of each of `freqs` on `xm` ([`Mapping::to_px`]), shared: a curve redrawn every
+/// display frame keeps its grid and its axis, and a 65 536-point FFT grid is 32 769
+/// logarithms. A remembered run is given only for the same axis and the same frequencies,
+/// value for value, so it is what computing it again would give.
+pub(crate) fn column_px(freqs: &[f64], xm: &crate::axis::Mapping) -> std::sync::Arc<[f32]> {
+    struct Run {
+        xm: crate::axis::Mapping,
+        freqs: Vec<f64>,
+        px: std::sync::Arc<[f32]>,
+    }
+    static CACHE: std::sync::Mutex<Vec<Run>> = std::sync::Mutex::new(Vec::new());
+    let px = || freqs.iter().map(|f| xm.to_px(*f)).collect();
+    if freqs.len() < PX_CACHE_MIN {
+        return px();
+    }
+    let mut cache = CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(r) = cache.iter().find(|r| r.xm == *xm && r.freqs == freqs) {
+        return std::sync::Arc::clone(&r.px);
+    }
+    if cache.len() >= PX_CACHE {
+        cache.remove(0);
+    }
+    let px: std::sync::Arc<[f32]> = px();
+    cache.push(Run {
+        xm: *xm,
+        freqs: freqs.to_vec(),
+        px: std::sync::Arc::clone(&px),
+    });
+    px
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -421,5 +460,37 @@ pub(crate) mod tests {
         // Sparse columns either side of the range still give the crossing segment.
         assert_eq!(visible_columns(&[10.0, 10_000.0], 100.0, 200.0), 0..2);
         assert_eq!(visible_columns(&[], 100.0, 200.0), 0..0);
+    }
+
+    /// A remembered run of column pixels is the one computed, on each axis and grid asked.
+    #[test]
+    fn column_px_is_the_mapping_of_each_column() {
+        use crate::axis::{Mapping, Range, Scale};
+        let grid = |step: f64| -> Vec<f64> { (0..2048).map(|i| f64::from(i) * step).collect() };
+        let axes = [
+            Mapping::new(Range::new(20.0, 20_000.0), Scale::Log, 40.0, 900.0),
+            Mapping::new(Range::new(20.0, 20_000.0), Scale::Log, 40.0, 700.0),
+            Mapping::new(Range::new(100.0, 5_000.0), Scale::Log, 40.0, 900.0),
+        ];
+        for _ in 0..2 {
+            for f in [grid(11.71875), grid(23.4375)] {
+                for xm in &axes {
+                    let want: Vec<f32> = f.iter().map(|v| xm.to_px(*v)).collect();
+                    let got = column_px(&f, xm);
+                    assert_eq!(got.len(), want.len());
+                    // Column 0 is 0 Hz: no pixel on a log axis, NaN both ways.
+                    assert!(
+                        got.iter()
+                            .zip(&want)
+                            .all(|(a, b)| a.to_bits() == b.to_bits())
+                    );
+                }
+            }
+        }
+        let xm = &axes[0];
+        assert_eq!(
+            &*column_px(&[100.0, 1000.0], xm),
+            [xm.to_px(100.0), xm.to_px(1000.0)]
+        );
     }
 }

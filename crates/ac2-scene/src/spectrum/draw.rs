@@ -133,6 +133,9 @@ pub(crate) fn spectrum_scene_in(
     // Later shapes draw over earlier ones, and `traces` lists the pane's own group first,
     // then the compared ones in compare order: drawn last to first, the pane's own curves
     // come out on top and the first compared above the second.
+    // One buffer for every curve's pixel heights: a narrowband curve has tens of thousands
+    // of columns, drawn again on every display frame while it moves.
+    let mut ys: Vec<f32> = Vec::new();
     for t in traces.iter().rev() {
         let dim = if t.is_stale() { theme.stale_alpha } else { 1.0 };
         let color = t.color.with_alpha(dim);
@@ -174,8 +177,9 @@ pub(crate) fn spectrum_scene_in(
                 }
             }
             SpectrumStyle::Line | SpectrumStyle::Fill => {
-                let xs: Vec<f32> = t.freqs[cols.clone()].iter().map(|f| xm.to_px(*f)).collect();
-                let ys: Vec<f32> = cols.clone().map(|i| ym.to_px(t.drawn_value(i))).collect();
+                let xs = canvas::column_px(&t.freqs[cols.clone()], &xm);
+                ys.clear();
+                ys.extend(cols.clone().map(|i| ym.to_px(t.drawn_value(i))));
                 let (xs, ys) = max_per_pixel(&xs, &ys);
                 let (points, _) = gapped(&xs, &ys, None, |_, _| false);
                 if style == SpectrumStyle::Fill && !points.is_empty() {
@@ -234,11 +238,12 @@ pub(crate) fn spectrum_scene_in(
                     pts
                 }
                 SpectrumStyle::Line | SpectrumStyle::Fill => {
-                    let xs: Vec<f32> = t.freqs[cols.clone()].iter().map(|f| xm.to_px(*f)).collect();
-                    let ys: Vec<f32> = cols
-                        .clone()
-                        .map(|i| t.peak_value(i).map_or(f32::NAN, |p| ym.to_px(p)))
-                        .collect();
+                    let xs = canvas::column_px(&t.freqs[cols.clone()], &xm);
+                    ys.clear();
+                    ys.extend(
+                        cols.clone()
+                            .map(|i| t.peak_value(i).map_or(f32::NAN, |p| ym.to_px(p))),
+                    );
                     let (xs, ys) = max_per_pixel(&xs, &ys);
                     gapped(&xs, &ys, None, |_, _| false).0
                 }
