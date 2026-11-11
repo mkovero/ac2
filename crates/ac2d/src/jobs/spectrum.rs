@@ -596,7 +596,8 @@ impl Analysis for Spectrum {
             | JobCmd::Find { .. }
             | JobCmd::Track { .. }
             | JobCmd::Smoothing { .. }
-            | JobCmd::Spl { .. } => {}
+            | JobCmd::Spl { .. }
+            | JobCmd::Clocks(_) => {}
         }
     }
 

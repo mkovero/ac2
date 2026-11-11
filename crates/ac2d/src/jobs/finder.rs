@@ -34,6 +34,32 @@ pub(crate) struct Finder {
     /// nothing until it is resolved, so it cannot move the delay to one of the candidates
     /// on its own.
     paused: bool,
+    /// The clocks between two rigs are apart: the delay slides with them, so tracking
+    /// observes nothing and the held delay stays what the relock starts from. The history
+    /// keeps filling, so a find right after has audio.
+    clock_hold: bool,
+    /// After a clock hold, tracking's first agreement (or ambiguity) is reported: the newest
+    /// accepted delay, fractional samples, not yet confirmed by the next one.
+    relocking: Option<Option<f64>>,
+}
+
+/// What one block told tracking.
+#[derive(Debug, Default)]
+pub(crate) struct Pushed {
+    /// A new tracked delay, samples.
+    pub(crate) moved: Option<f64>,
+    /// After a clock hold: tracking agreed again or found the delay ambiguous.
+    pub(crate) relock: Option<RelockSeen>,
+}
+
+/// How tracking relocked after a clock hold.
+#[derive(Debug)]
+pub(crate) enum RelockSeen {
+    /// Two windows agreed on the arrival (moved or not).
+    Agreed,
+    /// The full search found it ambiguous: tracking pauses for the operator's pick, as
+    /// after an ambiguous `delay.find`.
+    Ambiguous(Box<FinderResult>),
 }
 
 impl Finder {
@@ -48,6 +74,8 @@ impl Finder {
             track_band: Band::FullRange,
             tracking: None,
             paused: false,
+            clock_hold: false,
+            relocking: None,
         }
     }
 
@@ -61,8 +89,8 @@ impl Finder {
         }
     }
 
-    /// Appends a block; returns a new tracked delay, samples, when tracking moves it.
-    pub(crate) fn push(&mut self, start: u64, r: &[f32], m: &[f32]) -> Option<f64> {
+    /// Appends a block; says whether tracking moved the delay (samples) or relocked.
+    pub(crate) fn push(&mut self, start: u64, r: &[f32], m: &[f32]) -> Pushed {
         if self.reference.is_empty() || start != self.start + self.reference.len() as u64 {
             self.reference.clear();
             self.measurement.clear();
@@ -84,18 +112,44 @@ impl Finder {
             .reserve_exact(self.cap - self.measurement.len());
         self.reference.extend(&r[r.len() - keep..]);
         self.measurement.extend(&m[m.len() - keep..]);
-        if self.paused {
-            return None;
+        let mut out = Pushed::default();
+        if self.paused || self.clock_hold {
+            return out;
         }
-        let (stream, tracker) = self.tracking.as_mut()?;
+        let Some((stream, tracker)) = self.tracking.as_mut() else {
+            return out;
+        };
         stream.push_ref(DBlock { start, samples: r });
         stream.push_meas(DBlock { start, samples: m });
-        let mut moved = None;
+        let agreement = Agreement::for_band(self.track_band, self.fs).samples;
         loop {
             match stream.poll_tracking(tracker.held()) {
                 Ok(Some(res)) => {
-                    if let Some(d) = tracker.observe(&res) {
-                        moved = Some(d);
+                    let moved = tracker.observe(&res);
+                    if moved.is_some() {
+                        out.moved = moved;
+                    }
+                    let Some(prev) = &mut self.relocking else {
+                        continue;
+                    };
+                    match &res.outcome {
+                        Outcome::Ambiguous { .. } => {
+                            self.relocking = None;
+                            self.paused = true;
+                            out.relock = Some(RelockSeen::Ambiguous(Box::new(res)));
+                            break;
+                        }
+                        Outcome::Accepted { first, .. } => {
+                            let agreed = moved.is_some()
+                                || prev.is_some_and(|p| (first.delay_frac - p).abs() <= agreement);
+                            if agreed {
+                                self.relocking = None;
+                                out.relock = Some(RelockSeen::Agreed);
+                            } else {
+                                *prev = Some(first.delay_frac);
+                            }
+                        }
+                        Outcome::NoEstimate { .. } => {}
                     }
                 }
                 Ok(None) => break,
@@ -105,7 +159,29 @@ impl Finder {
                 }
             }
         }
-        moved
+        out
+    }
+
+    /// Holds tracking while the clocks between two rigs are apart, or releases it. On
+    /// release tracking starts over from the held delay (the audio of the hold cannot be
+    /// spliced onto what follows), and with `relock` its first agreement is reported.
+    pub(crate) fn clock_hold(&mut self, hold: bool, relock: bool) {
+        if self.clock_hold && !hold {
+            if let Some((s, t)) = &mut self.tracking {
+                s.reset();
+                t.reset();
+            }
+            self.relocking = (relock && self.tracking.is_some()).then_some(None);
+        }
+        if hold {
+            self.relocking = None;
+        }
+        self.clock_hold = hold;
+    }
+
+    /// Tracking is on.
+    pub(crate) fn tracking(&self) -> bool {
+        self.tracking.is_some()
     }
 
     /// Turns tracking on (from the held delay) or off.
@@ -322,7 +398,7 @@ mod tests {
         let r = noise(48_000 * 4, 5);
         let gain = 10f32.powf(-12.3 / 20.0);
         let m = paths(&r, &[(300, gain), (500, 1.0)], 6);
-        assert_eq!(f.push(0, &r, &m), None);
+        assert_eq!(f.push(0, &r, &m).moved, None);
         let res = f
             .find(FindBand::Band(Band::FullRange), None, 0)
             .expect("valid config");
@@ -343,7 +419,7 @@ mod tests {
         let mut start = r.len() as u64;
         for seed in [10, 20] {
             let (r, m) = clean(seed);
-            assert_eq!(f.push(start, &r, &m), None, "paused tracking moved");
+            assert_eq!(f.push(start, &r, &m).moved, None, "paused tracking moved");
             start += r.len() as u64;
         }
 
@@ -353,7 +429,7 @@ mod tests {
         let mut moved = None;
         for seed in [30, 40] {
             let (r, m) = clean(seed);
-            moved = moved.or(f.push(start, &r, &m));
+            moved = moved.or(f.push(start, &r, &m).moved);
             start += r.len() as u64;
         }
         assert_eq!(moved.map(f64::round), Some(500.0));
@@ -389,7 +465,7 @@ mod tests {
             .collect();
         let mut moves = Vec::new();
         for (i, (rc, mc)) in r.chunks(1024).zip(m.chunks(1024)).enumerate() {
-            if let Some(d) = f.push(i as u64 * 1024, rc, mc) {
+            if let Some(d) = f.push(i as u64 * 1024, rc, mc).moved {
                 moves.push((i * 1024, d));
             }
         }

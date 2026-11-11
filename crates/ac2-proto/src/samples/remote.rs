@@ -1,11 +1,13 @@
 //! Remote inputs: the paired rigs, a session's remote rigs and inputs, a source rig's state.
 
 use crate::model::{
-    Anchor, ArrivalReason, CalBasis, CalStatus, CantTellReason, Clocks, NotLockedReason, PeerClock,
-    PeerRelation, RemoteAudio, RemoteInput, RemoteInputStatus, RemoteLink, RemoteRig, RemoteState,
-    RigPeer, SourceCurve, SourceInput, SourceSession, SourceState, StampMap, StreamIncarnation,
+    Anchor, ArrivalReason, CalBasis, CalStatus, CantTellReason, Clocks, CrossRigTransfer,
+    CrossTfState, DelaySlip, NotLockedReason, PeerClock, PeerRelation, Relock, RelockOutcome,
+    RemoteAudio, RemoteInput, RemoteInputStatus, RemoteLink, RemoteRig, RemoteSide, RemoteState,
+    RigPeer, SourceCurve, SourceInput, SourceSession, SourceState, StampMap, StopWhy,
+    StreamIncarnation,
 };
-use crate::units::{DaemonIncarnation, DbSpl, RigId, Seconds, SessionEpoch, WallNs};
+use crate::units::{DaemonIncarnation, DbSpl, MeasId, RigId, Seconds, SessionEpoch, WallNs};
 
 use super::builders::{cal_entry, mic_curve_ref};
 use super::state::{clocks, inputs};
@@ -239,5 +241,89 @@ pub fn remote_state() -> RemoteState {
             ),
         ],
         link_offset: Some(Seconds(0.0101)),
+        transfers: cross_rig_transfers(),
     }
+}
+
+/// Cross-rig transfer functions in every state, relock and cue.
+fn cross_rig_transfers() -> Vec<CrossRigTransfer> {
+    let t = |meas: u32, side, state, relock, slip, drift: Option<f64>, late| CrossRigTransfer {
+        meas: MeasId(meas),
+        rig: ketunkolo(),
+        side,
+        state,
+        relock,
+        slip,
+        delay_drift: drift.map(Seconds),
+        late,
+    };
+    let relock = |from, outcome| Relock {
+        after: Seconds(190.0),
+        from,
+        outcome,
+    };
+    vec![
+        t(
+            3,
+            RemoteSide::Measurement,
+            CrossTfState::Running,
+            Some(relock(
+                StopWhy::NotLocked,
+                RelockOutcome::Tracked {
+                    delay: Seconds(0.01341),
+                    was: Seconds(0.01238),
+                },
+            )),
+            Some(DelaySlip {
+                by: Seconds(-0.0049),
+            }),
+            Some(0.0003),
+            true,
+        ),
+        t(
+            4,
+            RemoteSide::Reference,
+            CrossTfState::Stopped {
+                why: StopWhy::NotLocked,
+                held: true,
+            },
+            None,
+            None,
+            None,
+            false,
+        ),
+        t(
+            5,
+            RemoteSide::Measurement,
+            CrossTfState::Stopped {
+                why: StopWhy::CantTell,
+                held: false,
+            },
+            Some(relock(StopWhy::CantTell, RelockOutcome::Ambiguous)),
+            None,
+            None,
+            false,
+        ),
+        t(
+            6,
+            RemoteSide::Measurement,
+            CrossTfState::Stopped {
+                why: StopWhy::Measuring,
+                held: false,
+            },
+            Some(relock(StopWhy::Measuring, RelockOutcome::FindAgain)),
+            None,
+            None,
+            false,
+        ),
+        t(
+            7,
+            RemoteSide::Reference,
+            CrossTfState::Running,
+            Some(relock(StopWhy::NotLocked, RelockOutcome::Tracking)),
+            None,
+            None,
+            false,
+        ),
+    ]
 }

@@ -27,6 +27,7 @@ use crate::fanout::{Batch, Block, JobFeed, Queue};
 use crate::io::Interest;
 use crate::outbox::{FrameTx, Outbox};
 
+pub(crate) mod cross_rig;
 pub(crate) mod finder;
 mod loudness;
 pub(crate) mod math;
@@ -314,6 +315,8 @@ pub(crate) enum JobCmd {
     /// The input's calibration or mic curve changed (on the measurement input of a
     /// transfer function only the curve matters).
     Cal(Box<crate::calstore::InputCal>),
+    /// The clocks between the rigs of a cross-rig transfer function, judged anew.
+    Clocks(cross_rig::ClockGate),
 }
 
 /// A measurement's new display smoothing, by kind.

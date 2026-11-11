@@ -132,13 +132,14 @@ impl Control {
                 let a = jobs::transfer::Transfer::new(
                     job_ctx(m, rt.epoch, config.clone()),
                     fs,
-                    idx(config.reference_input)?,
-                    idx(config.measurement_input)?,
+                    (idx(config.reference_input)?, idx(config.measurement_input)?),
                     &d,
                     self.s.to_self.clone(),
                     self.input_cal(rt, config.measurement_input)
                         .correction
                         .as_deref(),
+                    super::cross_rig::cross_side(&m.config.kind, &rt.open.config.remote_inputs)
+                        .is_some(),
                 )
                 .map_err(inv)?;
                 (Box::new(a), static_grid(&m.config.kind))
@@ -225,6 +226,7 @@ impl Control {
             rt.fanout.detach(old.fanout_id);
         }
         tracing::info!("measurement {} running", m.id.0);
+        self.cross_start(m);
         Ok(grid)
     }
 
@@ -245,6 +247,7 @@ impl Control {
             }
         }
         self.probes.set(id, None);
+        self.cross_stop(id);
         if let Some(h) = self.jobs.remove(&id) {
             if let Some(rt) = &self.session {
                 rt.fanout.detach(h.fanout_id);
@@ -383,6 +386,9 @@ impl Control {
                 d.awaiting_pick = false;
             }
         }
+        if matches!(source, DelaySource::Insert | DelaySource::Typed) {
+            self.cross_resolved(meas);
+        }
         m.config_rev = rev;
         if let Some(j) = self.jobs.get(&meas) {
             j.send(JobCmd::SetDelay {
@@ -444,6 +450,9 @@ impl Control {
                             // The job paused tracking on an ambiguous result (1c).
                             d.awaiting_pick = matches!(f.outcome, DelayOutcome::Ambiguous { .. });
                             d.last_finding = Some(f.clone());
+                        }
+                        if !matches!(f.outcome, DelayOutcome::Ambiguous { .. }) {
+                            self.cross_resolved(p.meas);
                         }
                         self.commit(Change::Measurement(Patch::Set(m)));
                         Ok(ReplyBody::DelayFinding(f))

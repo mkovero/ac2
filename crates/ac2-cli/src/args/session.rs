@@ -7,7 +7,7 @@ use clap::{Args, Subcommand};
 
 use super::BackendArg;
 use ac2_proto::model::{InputKind, Pair};
-use ac2_scene::unit_text::{Channel, Channels, Freq, SampleCount};
+use ac2_scene::unit_text::{Channel, Channels, Freq, SampleCount, Time};
 
 /// `session …`.
 #[derive(Debug, Subcommand)]
@@ -83,6 +83,14 @@ pub enum SessionCmd {
     },
     /// Saved sessions in the daemon's session directory.
     List,
+    /// How long audio that meets a remote input waits for it (`20ms`), or `default`: the
+    /// least that works, two of the source's periods, one of this rig's and 2 ms. At most
+    /// 500 ms. Reopens the audio I/O with it: the remote inputs anchor again and every
+    /// average on them restarts.
+    LinkOffset {
+        /// A time, or `default`.
+        offset: LinkOffsetArg,
+    },
     /// Open a session that plays a recording (`ac2 rec list`) instead of a device: the
     /// running measurements analyse it as they did the live inputs.
     Replay {
@@ -371,6 +379,30 @@ pub struct SessionOpen {
     /// whatever this rig's device has.
     #[arg(long = "remote-in", value_name = "RIG:IN")]
     pub remote_in: Vec<RemoteIn>,
+    /// How long audio that meets a remote input waits for it, e.g. `20ms` (default: the
+    /// least that works, two of the source's periods, one of this rig's and 2 ms; at most
+    /// 500 ms).
+    #[arg(long, value_name = "TIME")]
+    pub link_offset: Option<Time>,
+}
+
+/// `TIME` or `default`: a link offset.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LinkOffsetArg {
+    /// The least that works.
+    Default,
+    /// This long.
+    Set(Time),
+}
+
+impl FromStr for LinkOffsetArg {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        if s.trim().eq_ignore_ascii_case("default") {
+            return Ok(Self::Default);
+        }
+        s.parse::<Time>().map(Self::Set).map_err(|e| e.0)
+    }
 }
 
 /// `RIG:IN`: a paired rig's input.

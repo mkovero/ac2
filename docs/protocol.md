@@ -31,7 +31,7 @@ keepalives to each connection as its credit allows (§5.8).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 87`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 88`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -1873,8 +1873,18 @@ not_captured | replaying | rate_mismatch{theirs, ours} | starting | streaming}, 
 clocks_disagree{by}}: how remote samples are placed against this rig's), `late_frames`,
 `late_frames_hour`, `slips`, `last_slip` (samples, signed), `arrival_margin` (s),
 `setup`, `cal_status`, `calibration`, `curve` (the source rig's, as it states them)}]),
-`link_offset` (s \| nil, the offset in use); committed when any of it changes; the clock
-relation is reported only, never corrected for),
+`link_offset` (s \| nil, the offset in use), `transfers` ([`CrossRigTransfer` {`meas`,
+`rig` (the remote rig), `side` {reference | measurement} (which channel is remote),
+`state` {running | stopped{why: measuring | not_locked | cant_tell, held}} (only `agree`
+averages; `held`: the result from before the failed window stands, else nothing is shown),
+`relock` (`Relock` \| nil {`after` (s stopped), `from` (why), `outcome` {tracking |
+tracked{delay, was} | ambiguous | find_again}}; said a minute once settled; `ambiguous`
+and `find_again` stay until a pick, a typed delay or a find), `slip` (`DelaySlip` \| nil
+{`by` (s)}: the remote audio slipped and the delay moved by exactly that; said a minute),
+`delay_drift` (s per minute \| nil: the delay drifts above 0.05 ms/min over 2 min),
+`late` (remote audio keeps arriving after the link offset: raise it)}], one per transfer
+function with exactly one channel on a remote rig); committed when any of it changes; the
+clock relation is reported only, never corrected for),
 `sweep` (`SweepRun` | nil: the latest `sweep.run` run),
 `autosave` (`Autosave`: `state` {off | saved | pending | failed{reason}}, `saved_at: WallNs |
 nil`, `log_failures: [LogWriteFailure]`; see §7.3), `recording` (`RecordingRun` | nil: the latest recording, §3.2), `working`

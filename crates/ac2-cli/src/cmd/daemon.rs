@@ -121,6 +121,10 @@ fn status_text(
         s.push('\n');
         s.push_str(&l);
     }
+    for l in ac2_scene::cross_rig::status_cli(&st.remote, &st.measurements, &w.name) {
+        s.push('\n');
+        s.push_str(&l);
+    }
     s.push('\n');
     s.push_str(&output::autosave(&st.autosave, crate::watch::now_wall()));
     for l in output::log_failures(&st.autosave, &st.measurements, crate::watch::now_wall()) {

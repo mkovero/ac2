@@ -49,6 +49,7 @@ mod artnet;
 mod autosave;
 mod cal;
 mod clocks;
+mod cross_rig;
 mod eq;
 mod execute;
 mod file_jobs;
@@ -147,6 +148,12 @@ pub(crate) enum ControlMsg {
         meas: MeasId,
         epoch: SessionEpoch,
         samples: f64,
+    },
+    /// A transfer function between rigs stopped, relocked, slipped or raised a cue.
+    CrossRig {
+        meas: MeasId,
+        epoch: SessionEpoch,
+        event: crate::jobs::cross_rig::CrossEvent,
     },
     /// The `session.control_panel` call started under `token` answered (or is showing a
     /// modal panel).
@@ -766,6 +773,9 @@ impl Control {
                     epoch,
                     samples,
                 }) => self.tracked(meas, epoch, samples),
+                Ok(ControlMsg::CrossRig { meas, epoch, event }) => {
+                    self.cross_event(meas, epoch, event);
+                }
                 Ok(ControlMsg::SweepProgress { id, repeat }) => self.sweep_progress(id, repeat),
                 Ok(ControlMsg::SweepRecorded { id, result }) => self.sweep_recorded(id, *result),
                 Ok(ControlMsg::SweepAnalysed { id, result }) => self.sweep_analysed(id, result),

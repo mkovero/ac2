@@ -12,7 +12,7 @@ use ac2_proto::units::{RigId, WallNs};
 use crate::format;
 
 /// A rig's name among the remote rigs, else its id.
-fn name_of(r: &RemoteState, rig: RigId) -> String {
+pub(crate) fn name_of(r: &RemoteState, rig: RigId) -> String {
     r.rigs
         .iter()
         .find(|x| x.rig == rig)
@@ -47,26 +47,30 @@ pub fn relation_text(r: &RemoteState, rel: &PeerRelation) -> String {
             ),
         },
         PeerRelation::CantTell { reason } => {
-            let why = match reason {
-                CantTellReason::NoAudio => "no audio".to_owned(),
-                CantTellReason::SystemClockUnsynced { rig } => {
-                    format!("{}'s system clock is not synced", name_of(r, *rig))
-                }
-                CantTellReason::SystemClockNotStated { rig } => {
-                    format!("{}'s system clock does not say", name_of(r, *rig))
-                }
-                CantTellReason::NotAgainstSystemClock { rig } => format!(
-                    "{}'s interface is measured against its own crystal",
-                    name_of(r, *rig)
-                ),
-                CantTellReason::NoCaptureStamps => "no capture times".to_owned(),
-                CantTellReason::ClocksDisagree { by } => format!(
-                    "the system clocks disagree by {} ms",
-                    format::fixed(by.0 * 1e3, 1)
-                ),
-            };
-            format!("CLOCKS: CAN'T TELL ({why})")
+            format!("CLOCKS: CAN'T TELL ({})", cant_tell_why(r, reason))
         }
+    }
+}
+
+/// Why the relation cannot be told: *ketunkolo's system clock is not synced*, …
+pub fn cant_tell_why(r: &RemoteState, reason: &CantTellReason) -> String {
+    match reason {
+        CantTellReason::NoAudio => "no audio".to_owned(),
+        CantTellReason::SystemClockUnsynced { rig } => {
+            format!("{}'s system clock is not synced", name_of(r, *rig))
+        }
+        CantTellReason::SystemClockNotStated { rig } => {
+            format!("{}'s system clock does not say", name_of(r, *rig))
+        }
+        CantTellReason::NotAgainstSystemClock { rig } => format!(
+            "{}'s interface is measured against its own crystal",
+            name_of(r, *rig)
+        ),
+        CantTellReason::NoCaptureStamps => "no capture times".to_owned(),
+        CantTellReason::ClocksDisagree { by } => format!(
+            "the system clocks disagree by {} ms",
+            format::fixed(by.0 * 1e3, 1)
+        ),
     }
 }
 
@@ -362,6 +366,7 @@ mod tests {
                 curve: None,
             }],
             link_offset: Some(Seconds(0.01)),
+            transfers: Vec::new(),
         };
         let inputs = vec![RemoteInput {
             slot: 0,

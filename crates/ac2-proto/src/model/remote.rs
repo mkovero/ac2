@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{CalEntry, CalStatus, Clocks, InputSetup, MicCurveRef};
-use crate::units::{DaemonIncarnation, RigId, Seconds, SessionEpoch, WallNs};
+use crate::units::{DaemonIncarnation, MeasId, RigId, Seconds, SessionEpoch, WallNs};
 
 /// Session channel of remote input slot 0. A remote input is numbered from here rather than
 /// after the device's channels, so a device with another channel count never renumbers it
@@ -167,6 +167,8 @@ pub struct RemoteState {
     /// How long audio meeting a remote input waits for it; `None` without a remote input or
     /// before the source rig's period is known.
     pub link_offset: Option<Seconds>,
+    /// The running transfer functions between this rig and one remote rig, by measurement.
+    pub transfers: Vec<CrossRigTransfer>,
 }
 
 /// A rig the session takes inputs from.
@@ -389,4 +391,109 @@ pub enum CantTellReason {
     },
     /// No audio from the remote rig.
     NoAudio,
+}
+
+/// A transfer function with one channel on this rig and one on a remote rig
+/// (`docs/design/remote-inputs.md` §3.3–§3.4): it averages only while the clocks between the
+/// rigs agree, and says what happened to its delay when they did not.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CrossRigTransfer {
+    /// The measurement.
+    pub meas: MeasId,
+    /// The remote rig.
+    pub rig: RigId,
+    /// Which of its channels is the remote rig's.
+    pub side: RemoteSide,
+    /// Averaging, or why not.
+    pub state: CrossTfState,
+    /// What the delay did after the last stop; kept a minute once settled, and until the
+    /// operator answers while it waits for them.
+    pub relock: Option<Relock>,
+    /// The remote input slipped in the last minute and the delay moved with it.
+    pub slip: Option<DelaySlip>,
+    /// A steady drift of the tracked delay above 0.05 ms a minute over 2 minutes: per minute
+    /// (positive: growing). A cue, never a refusal: a warm path drifts too.
+    pub delay_drift: Option<Seconds>,
+    /// The remote input was late twice inside one settle span of this measurement: the link
+    /// offset is too small for it to ever settle.
+    pub late: bool,
+}
+
+/// The remote channel of a cross-rig transfer function.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteSide {
+    /// Its reference.
+    Reference,
+    /// Its measurement input.
+    Measurement,
+}
+
+/// Whether a cross-rig transfer function averages.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum CrossTfState {
+    /// The clocks agree: it averages.
+    Running,
+    /// It does not average.
+    Stopped {
+        /// Why: the relation between the rigs.
+        why: StopWhy,
+        /// It shows the result it had before the first window that failed; `false`: none.
+        held: bool,
+    },
+}
+
+/// Why a cross-rig transfer function does not average.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StopWhy {
+    /// The clocks are being measured (less than a minute of stream).
+    Measuring,
+    /// The clocks are not locked.
+    NotLocked,
+    /// The evidence cannot say whether they are.
+    CantTell,
+}
+
+/// The averages restarted after a stop; what became of the delay.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Relock {
+    /// How long it was stopped.
+    pub after: Seconds,
+    /// Why it stopped (the first reason of the passage).
+    pub from: StopWhy,
+    /// The delay since.
+    pub outcome: RelockOutcome,
+}
+
+/// The delay after a stop: the rate returns when the clocks relock, an offset slid in the
+/// meantime does not.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RelockOutcome {
+    /// Tracking is finding it again from the held delay.
+    Tracking,
+    /// Tracking agreed on it again.
+    Tracked {
+        /// The arrival now.
+        delay: Seconds,
+        /// The arrival held through the stop.
+        was: Seconds,
+    },
+    /// Tracking found it ambiguous: the operator's pick is asked (`delay.awaiting_pick`).
+    Ambiguous,
+    /// Tracking is off: the delay may have moved and is not touched until a find runs.
+    FindAgain,
+}
+
+/// A slip of the remote input under a cross-rig transfer function: its delay moved by
+/// exactly the slip.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DelaySlip {
+    /// The delay's move (positive: later).
+    pub by: Seconds,
 }

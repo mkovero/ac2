@@ -226,7 +226,8 @@ fn pairing_admits_a_rig_to_its_inputs_only() {
         .unwrap_err();
     assert!(e.msg.contains("rig-b runs 48 kHz"), "{e:?}");
 
-    // A transfer function across the rigs waits for the clocks between them.
+    // A transfer function across the rigs starts, gated on the clocks between them: it
+    // averages only once they agree, and says so meanwhile.
     let tf = create(
         &mut ca,
         MeasConfig {
@@ -243,8 +244,18 @@ fn pairing_admits_a_rig_to_its_inputs_only() {
             ..transfer("across")
         },
     );
-    let e = ca.call(Command::MeasStart { meas: tf }).unwrap_err();
-    assert!(e.msg.contains("needs the clocks between rigs"), "{e:?}");
+    ca.ok(Command::MeasStart { meas: tf });
+    wait_remote(&mut ca, "the cross-rig entry", |r| !r.transfers.is_empty());
+    let r = remote(&mut ca);
+    let x = &r.transfers[0];
+    assert_eq!((x.meas, x.rig), (tf, b_id), "{r:#?}");
+    assert_eq!(x.side, ac2_proto::model::RemoteSide::Measurement);
+    if r.rigs[0].clock.relation != ac2_proto::model::PeerRelation::Agree {
+        assert!(
+            matches!(x.state, ac2_proto::model::CrossTfState::Stopped { .. }),
+            "{r:#?}"
+        );
+    }
 
     // The remote input's calibration is its rig's.
     let e = ca
@@ -258,6 +269,20 @@ fn pairing_admits_a_rig_to_its_inputs_only() {
         })
         .unwrap_err();
     assert!(e.msg.contains("set on rig-b"), "{e:?}");
+
+    // A new link offset reopens the audio I/O: the remote input anchors again, at it, and
+    // the transfer function across the rigs waits for the clocks again.
+    let before = remote(&mut ca).link_offset;
+    ca.ok(Command::SessionOpen {
+        config: SessionConfig {
+            link_offset: Some(ac2_proto::units::Seconds(0.08)),
+            ..with_remote(b_id, FS)
+        },
+    });
+    wait_remote(&mut ca, "the new link offset", |r| {
+        r.link_offset == Some(ac2_proto::units::Seconds(0.08)) && !r.transfers.is_empty()
+    });
+    assert_ne!(before, Some(ac2_proto::units::Seconds(0.08)));
 
     // Removing A on B ends A's stream at once and A's link says why.
     cb.ok(Command::ServerRevoke {

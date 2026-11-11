@@ -428,9 +428,15 @@ No new keys: everything is reached through existing pages, the chip and the pale
   A **cross-rig transfer function is refused outright** (*needs the clocks between rigs:
   next build*). Relation computed, shown on the Connection page only. The joined feed runs
   at the default link offset (§4); the setting comes in 3c.
-- **3b — clocks between rigs:** the relation everywhere of §5, the refusals, §3.4's relock.
-- **3c — transfer function across rigs:** remote reference or measurement, link offset
-  setting, delay basis words, persistently-late cue; rig acceptance run.
+- **3b — clocks between rigs, daemon side:** the cross-rig transfer function (remote
+  reference or measurement) gated on the relation, §3.3's hold, §3.4's relock, the slip,
+  gap, drift and late cues, the link offset setting (`ac2 session link-offset`), delay
+  basis words; all words in `ac2-scene` (`cross_rig`), `ac2 status` printing them. The
+  daemon accepts the measurement and gates it rather than refusing its creation: a session
+  saved while the clocks agreed must still load when they don't, and the stop is said on
+  it with why.
+- **3c — the app:** §5's words placed (pane title and status lines, faint phase, banner,
+  list cue, Connection page's link offset control); rig acceptance run.
 - **Later:** ASRC for unlocked rigs (§3.5), a stated absolute offset (B2/B3).
 
 ## 9. Decisions

@@ -153,8 +153,27 @@ the channel pickers too. Spectrum, RTA and SPL run on it like on a local input; 
 kind, mic and calibration are set on its own rig, and changing them here is refused with
 *set on pupu*. **Delete** twice on its row removes it (the rigs stay paired).
 
-A transfer function with a remote channel is refused by the daemon: *needs the clocks
-between rigs: next build*. Settings › Connection has a *Between rigs* block per rig the
+A transfer function with one channel on another rig (a remote reference or a remote
+measurement) averages only while the two rigs' clocks *agree*. While they are measured it
+waits (*Measuring clocks…: averaging waits*); when they are *not locked* or the daemon
+*can't tell*, averaging stops and the result from before the failure stands, magnitude as
+it was, phase faint under *clocks not locked* / *clocks: can't tell* (nothing is shown if
+no result was kept from before it), with why and what to do: *TF 3 stopped: pupu and
+ketunkolo are not on one clock (+5.6 ppm). Lock both interfaces to one reference.* When
+the clocks agree again the averages restart; with delay tracking on, the finder tracks the
+delay again from the held one and says it for a minute (*clocks were not locked for 3 min
+10 s · delay tracked again: 13.41 ms (was 12.38 ms)*), or asks for a pick if two arrivals
+fit; with tracking off it says *delay may have moved: find it again*. Its delay includes
+the offset between the two rigs' clocks, which is not measured. A slip in the remote audio
+moves the delay by exactly the slip (said a minute); a gap restarts the averages but keeps
+the delay. *delay drifting 0.09 ms/min* means the delay moved more than 0.05 ms a minute
+over two minutes: a path or the clocks are moving. *link offset too small* means the
+remote audio keeps arriving after the link offset: raise it with `ac2 session link-offset
+30ms` (`default` for the least that works, at most 500 ms; the remote inputs anchor again
+and every average on them restarts). Two channels on two different remote rigs are
+refused. `ac2 status` prints these lines per cross-rig transfer function.
+
+Settings › Connection has a *Between rigs* block per rig the
 session takes inputs from (*Between rigs* in the palette): the clock relation and why, the
 last change, the link and its bit rate, the link offset, late frames, slips and the arrival
 margin; `ac2 status` prints the same. On the rig that gives its inputs, the rigs admitted
@@ -4004,4 +4023,4 @@ documents each command.
 | `ac2 selftest net --listen <addr:port> \| --connect <host:port> --server-key <key> --role send\|receive --minutes N --out <dir>` | network timing between two hosts for the clock study, no audio: block-sized messages of zeros at `--rate`/`--frames`/`--channels` (default 96000/256/1) over the data wire's transport (CURVE, byte credit). The listener prints its key and writes `<dir>/server.key`; listening and sending are independent. The receiver logs every arrival to `<dir>/arrivals.bin` and ends with the one-way spread, interval jitter, missing/reordered blocks and a suggested link offset; the sender records credit stalls and late sends. Analysis in `tools/experiments/timing/` |
 | `ac2 selftest frames --meas <name\|id> [--seconds N] [--remote HOST]` | how one measurement's live frames reach this client, read-only (no sound, no state change; only hello, subscribe, unsubscribe): subscribes to its stream (`spec`, `rta`, `tf`, `spl`) as the app does and records every frame for `--seconds` (default 30, Ctrl-C ends early). Reports the arrival interval (mean, p50, p95, p99, max, gaps over twice the median), the age at arrival (this host's wall clock − the frame's `capture_wall_ns`: it includes the two hosts' clock offset, about ±1 ms with NTP) and its drift, seq gaps, the hop (`audio_sample` step at the session rate) beside the interval, and bytes per frame and Mbit/s. Text: a line every 5 s and a summary; `--json`: one line per frame and a closing summary object |
 | `ac2 discover`, `ac2 auth pair / show` | find network daemons, pair with one |
-| `ac2 auth admit-rig NAME --key KEY --rig-id ID`, `ac2 auth peer-add NAME --rig-id ID --at HOST[:PORT] --key KEY`, `ac2 auth peer-remove NAME`, `ac2 session open … --remote-in RIG:IN` | remote inputs (network mode on both rigs): the rig whose input is taken admits the other rig's server key, which may then read its inputs and nothing else; the taking rig pairs with it and opens a session with that input beside its own (`--remote-in` names the paired rig and its input, 1-based). `ac2 status` adds a *between rigs* line per remote rig (clock relation, link), the link offset and a line per remote input. A transfer function across rigs waits for the next build |
+| `ac2 auth admit-rig NAME --key KEY --rig-id ID`, `ac2 auth peer-add NAME --rig-id ID --at HOST[:PORT] --key KEY`, `ac2 auth peer-remove NAME`, `ac2 session open … --remote-in RIG:IN [--link-offset TIME]`, `ac2 session link-offset TIME\|default` | remote inputs (network mode on both rigs): the rig whose input is taken admits the other rig's server key, which may then read its inputs and nothing else; the taking rig pairs with it and opens a session with that input beside its own (`--remote-in` names the paired rig and its input, 1-based). `ac2 status` adds a *between rigs* line per remote rig (clock relation, link), the link offset and a line per remote input. and a block per transfer function across rigs (its clock gate, relock, slip, drift and late cues, delay with its basis); `link-offset` reopens the audio I/O with that offset, the remote inputs anchoring again |

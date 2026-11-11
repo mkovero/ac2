@@ -863,7 +863,8 @@ impl Analysis for Spl {
             JobCmd::SetDelay { .. }
             | JobCmd::Find { .. }
             | JobCmd::Track { .. }
-            | JobCmd::Smoothing { .. } => {}
+            | JobCmd::Smoothing { .. }
+            | JobCmd::Clocks(_) => {}
         }
     }
 

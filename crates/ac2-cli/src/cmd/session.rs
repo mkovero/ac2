@@ -130,7 +130,7 @@ pub(crate) async fn session(
                 buffer_frames: buffer,
                 loopback,
                 remote_inputs,
-                link_offset: None,
+                link_offset: o.link_offset.map(|t| t.0),
             };
             let (r, warnings) = c.call_warned(Command::SessionOpen { config }).await?;
             let s = expect_body!("session.open", r, ReplyBody::Session(s) => s)?;
@@ -157,6 +157,21 @@ pub(crate) async fn session(
                     output::inputs(i, crate::watch::now_wall())
                 ),
             })?;
+        }
+        SessionCmd::LinkOffset { offset } => {
+            let st = state(&c).await?;
+            let Some(open) = st.session.open else {
+                return Err(CliError::Usage("no audio I/O open: open one first".into()));
+            };
+            let mut config = open.config;
+            config.link_offset = match offset {
+                crate::args::LinkOffsetArg::Default => None,
+                crate::args::LinkOffsetArg::Set(t) => Some(t.0),
+            };
+            let (r, warnings) = c.call_warned(Command::SessionOpen { config }).await?;
+            let s = expect_body!("session.open", r, ReplyBody::Session(s) => s)?;
+            super::osc::note_warnings(&c, &warnings, out).await;
+            out.emit(&s, || output::session(&s))?;
         }
         SessionCmd::Close => {
             let (r, warnings) = c.call_warned(Command::SessionClose).await?;

@@ -35,6 +35,7 @@ pub mod chrome;
 pub mod clock;
 pub mod colormap;
 pub mod comb;
+pub mod cross_rig;
 pub mod cursor_jump;
 pub mod curve_ease;
 pub mod distortion;

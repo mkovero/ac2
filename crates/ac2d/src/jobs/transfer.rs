@@ -23,7 +23,8 @@ use std::time::{Duration, Instant};
 
 use ac2_proto::units::SessionEpoch;
 
-use super::finder::Finder;
+use super::cross_rig::{ClockGate, CrossEvent, CrossRig};
+use super::finder::{Finder, RelockSeen};
 use super::{
     Analysis, Due, Emitter, Flush, JobCmd, JobCtx, LevelsMeter, Pace, SmoothingChange, StampArgs,
 };
@@ -175,6 +176,8 @@ pub(crate) struct Transfer {
     ir: IrEngine,
     /// Protection flags of the newest emit, for a capture's stamp.
     last_prot: ProtectionFlags,
+    /// Its channels are on two rigs: it averages only while their clocks agree.
+    cross: Option<CrossRig>,
 }
 
 /// The mic-curve correction at each column, in dB (subtracted from `mag`) and as the linear
@@ -209,6 +212,17 @@ fn held(delay_samples: f64, nudged_samples: f64) -> i64 {
     (delay_samples - nudged_samples).round() as i64
 }
 
+/// How long the deepest MTW stage takes to fill from a restart, s: the span within which
+/// late remote audio keeps the measurement from ever settling.
+fn settle_s(mtw: &Mtw) -> f64 {
+    mtw.layout()
+        .stages
+        .iter()
+        .zip(mtw.stage_averaging())
+        .map(|(s, a)| s.first_block_s() + s.hop_s() * a.full_blocks())
+        .fold(0.0, f64::max)
+}
+
 /// Why a transfer job cannot start.
 pub(crate) type StartError = String;
 
@@ -216,11 +230,11 @@ impl Transfer {
     pub(crate) fn new(
         ctx: JobCtx<TransferConfig>,
         sample_rate: u32,
-        ref_idx: usize,
-        meas_idx: usize,
+        (ref_idx, meas_idx): (usize, usize),
         delay: &DelayState,
         to_control: Sender<ControlMsg>,
         correction: Option<&Correction>,
+        cross_rig: bool,
     ) -> Result<Self, StartError> {
         let JobCtx {
             meas,
@@ -256,6 +270,10 @@ impl Transfer {
         let mut finder = Finder::new(fs);
         finder.track(delay.tracking, held(delay_samples, nudged_samples));
         finder.set_paused(delay.awaiting_pick);
+        let cross = cross_rig.then(|| {
+            finder.clock_hold(true, false);
+            CrossRig::new(fs, settle_s(&mtw))
+        });
         let frame = mtw.frame();
         let unresolved =
             crate::sweep::unresolved(cfg.resolution, &mtw.layout().unresolved_ranges(&grid));
@@ -301,7 +319,134 @@ impl Transfer {
             wall: 0,
             discontinuity_until: 0,
             weak_until: 0,
+            cross,
         })
+    }
+
+    fn tell(&self, event: CrossEvent) {
+        let _ = self.to_control.send(ControlMsg::CrossRig {
+            meas: self.meas,
+            epoch: self.epoch,
+            event,
+        });
+    }
+
+    /// The arrival: the applied delay less the operator's nudges, samples.
+    fn arrival(&self) -> f64 {
+        self.delay_samples - self.nudged_samples
+    }
+
+    /// The clocks between the rigs judged anew.
+    fn set_gate(&mut self, gate: ClockGate) {
+        let (end, arrival) = (self.end.unwrap_or(0), self.arrival());
+        let Some(x) = &mut self.cross else {
+            return;
+        };
+        match x.set_gate(gate, end, arrival) {
+            Some(true) => {
+                self.finder.clock_hold(true, false);
+                let held = x.held().is_some();
+                self.tell(CrossEvent::Stopped { held });
+            }
+            Some(false) => {
+                // Averages taken across the stop would mix two alignments; the framing
+                // restarts too, as the blocks of the stop never reached the ladder.
+                self.mtw.restart();
+                let relock = x.relock();
+                let tracking = self.finder.tracking();
+                self.finder.clock_hold(false, relock && tracking);
+                if relock && !tracking {
+                    self.tell(CrossEvent::FindAgain);
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// The remote input slipped: the arrival moves by exactly the slip, without waiting for
+    /// tracking to find it.
+    fn slipped(&mut self, by: i64) {
+        self.delay_samples += by as f64;
+        self.delay_s = self.delay_samples / self.fs;
+        self.mtw.set_delay(self.delay_samples);
+        // The history straddles the slip: nothing before it lines up with what follows.
+        self.finder.restart();
+        self.finder
+            .set_held(held(self.delay_samples, self.nudged_samples));
+        if let Some(x) = &mut self.cross {
+            x.slipped(by);
+        }
+        self.tell(CrossEvent::Slipped { by });
+    }
+
+    /// What a block means for a cross-rig job beyond its averages: late remote audio, the
+    /// kept results and the delay's drift.
+    fn cross_block(&mut self, b: &Block, late: bool) {
+        let end = b.end_sample();
+        let arrival_s = self.arrival() / self.fs;
+        let tracking = self.finder.tracking();
+        let filled = self.mtw.fill() > 0.0;
+        let Some(x) = &mut self.cross else {
+            return;
+        };
+        let mut events = Vec::new();
+        if late && let Some(on) = x.late.seen(b.start_sample) {
+            events.push(CrossEvent::Late(on));
+        }
+        if let Some(on) = x.late.tick(end) {
+            events.push(CrossEvent::Late(on));
+        }
+        let t = end as f64 / self.fs;
+        if x.running() && tracking && x.drift.due(t) {
+            if let Some(c) = x.drift.add(t, arrival_s) {
+                events.push(CrossEvent::Drift(c));
+            }
+        } else if !tracking {
+            x.drift.clear();
+        }
+        let due = x.snapshot_due(end) && filled;
+        for e in events {
+            self.tell(e);
+        }
+        if due {
+            let (shown, raw) = (self.tf_frame(true), self.tf_frame(false));
+            if let Some(x) = &mut self.cross {
+                x.keep(end, shown, raw);
+            }
+        }
+    }
+
+    /// A frame of a stopped cross-rig job: the held result, else no curve at all.
+    fn stopped_frame(&self, raw: bool) -> Option<TfFrame> {
+        let x = self.cross.as_ref().filter(|x| !x.running())?;
+        Some(match x.held() {
+            Some(h) if raw => h.raw.clone(),
+            Some(h) => h.shown.clone(),
+            None => self.blank_frame(),
+        })
+    }
+
+    /// A frame without a curve: every column settling.
+    fn blank_frame(&self) -> TfFrame {
+        let n = self.grid.frequencies().len();
+        TfFrame {
+            range: None,
+            meas: self.meas,
+            meta: TfMeta {
+                delay: Seconds(self.delay_s),
+                nudged: Seconds(self.nudged_samples / self.fs),
+                smoothing: self.cfg.smoothing,
+                mic_curve: self.corr.is_some(),
+                math: None,
+                unresolved: Some(self.unresolved.clone()),
+                filled: 0.0,
+            },
+            mag: vec![f32::NAN; n],
+            phase: vec![f32::NAN; n],
+            coh: vec![f32::NAN; n],
+            validity: vec![ValidityMask::SETTLING; n],
+            align: None,
+        }
     }
 
     fn set_correction(&mut self, c: Option<&Correction>) {
@@ -453,16 +598,29 @@ impl Analysis for Transfer {
 
     fn push(&mut self, b: &Block) {
         let contiguous = self.end == Some(b.start_sample);
-        if self.end.is_some()
-            && (!contiguous || b.restarts_averages(&[self.ref_idx, self.meas_idx]))
-        {
+        let stream_break = !contiguous || b.restarts_averages(&[]);
+        let cols = [self.ref_idx, self.meas_idx];
+        let remote_break = cols.iter().any(|&c| b.marks.breaks(c));
+        // A slip moves the remote side's map: on the measurement side the arrival moves
+        // with it, on the reference side against it.
+        let slip = b.marks.get(self.meas_idx).map_or(0, |m| m.slip)
+            - b.marks.get(self.ref_idx).map_or(0, |m| m.slip);
+        let late = slip == 0 && cols.iter().any(|&c| !b.marks.gaps(c).is_empty());
+        if self.end.is_some() && (stream_break || remote_break) {
             if contiguous {
-                // An xrun or overflow can leave the counter contiguous while audio was lost;
-                // the block grid must restart all the same.
+                // An xrun, an overflow or missing remote samples can leave the counter
+                // contiguous while audio was lost; the block grid must restart all the same.
                 self.mtw.restart();
             }
             self.mark_discontinuity(b.start_sample);
-            self.finder.restart();
+            // Missing remote samples leave the map where it was, and so the delay: the
+            // finder keeps its history and its held delay.
+            if stream_break {
+                self.finder.restart();
+            }
+        }
+        if self.end.is_some() && slip != 0 {
+            self.slipped(slip);
         }
         if self.apply_pending {
             self.applied_at = b.start_sample;
@@ -470,6 +628,15 @@ impl Analysis for Transfer {
         }
         b.channel_into(self.ref_idx, &mut self.rbuf);
         b.channel_into(self.meas_idx, &mut self.mbuf);
+        if self.cross.as_ref().is_some_and(|x| !x.running()) {
+            // Stopped: no average, no tracking; the finder's history and the meters go on.
+            self.finder.push(b.start_sample, &self.rbuf, &self.mbuf);
+            self.levels.push(b);
+            self.end = Some(b.end_sample());
+            self.wall = b.wall_ns;
+            self.cross_block(b, late);
+            return;
+        }
         let lv = BlockLevels::from_samples(&self.rbuf, &self.mbuf, self.fs);
         let gate = match self.guard.process(&lv) {
             BlockDecision::Accept => SampleGate::Accept,
@@ -484,7 +651,8 @@ impl Analysis for Transfer {
             Ok(_) => {}
             Err(e) => tracing::error!("transfer {}: {e}", self.meas),
         }
-        if let Some(d) = self.finder.push(b.start_sample, &self.rbuf, &self.mbuf) {
+        let pushed = self.finder.push(b.start_sample, &self.rbuf, &self.mbuf);
+        if let Some(d) = pushed.moved {
             tracing::info!(
                 "measurement {}: tracking moves the delay to {d:.3} samples",
                 self.meas.0
@@ -495,10 +663,22 @@ impl Analysis for Transfer {
                 samples: d,
             });
         }
+        match pushed.relock {
+            Some(RelockSeen::Agreed) => {
+                let was = self.cross.as_ref().map_or(0.0, CrossRig::was);
+                let now = pushed.moved.unwrap_or_else(|| self.arrival());
+                self.tell(CrossEvent::Relocked { was, now });
+            }
+            Some(RelockSeen::Ambiguous(r)) => self.tell(CrossEvent::RelockAmbiguous(r)),
+            None => {}
+        }
         self.routing.push(&self.rbuf, &self.mbuf);
         self.levels.push(b);
         self.end = Some(b.end_sample());
         self.wall = b.wall_ns;
+        if self.cross.is_some() {
+            self.cross_block(b, late);
+        }
     }
 
     fn command(&mut self, c: JobCmd) {
@@ -529,6 +709,9 @@ impl Analysis for Transfer {
                 self.finder.set_held(held(samples, nudged_samples));
                 if resume {
                     self.finder.set_paused(false);
+                    if let Some(x) = &mut self.cross {
+                        x.drift.clear();
+                    }
                 }
             }
             JobCmd::Find {
@@ -552,6 +735,7 @@ impl Analysis for Transfer {
             }
             JobCmd::Reset => self.mtw.reset_averages(),
             JobCmd::Cal(cal) => self.set_correction(cal.correction.as_deref()),
+            JobCmd::Clocks(gate) => self.set_gate(gate),
             JobCmd::Smoothing {
                 change: SmoothingChange::Transfer(smoothing),
                 rev,
@@ -609,7 +793,10 @@ impl Analysis for Transfer {
         };
         let tf_due = self.tf_pace.due(e, tf_topic, self.generation, &stamp, now);
         if tf_due == Due::Send {
-            let f = self.tf_frame(true);
+            let f = match self.stopped_frame(false) {
+                Some(f) => f,
+                None => self.tf_frame(true),
+            };
             if !e.send(stamp, FrameData::Tf(f)) {
                 self.tf_pace.unsent();
             }
@@ -620,7 +807,9 @@ impl Analysis for Transfer {
             stream: Stream::Ir,
         };
         let ir_due = self.ir_pace.due(e, ir_topic, self.generation, &stamp, now);
+        let stopped = self.cross.as_ref().is_some_and(|x| !x.running());
         if ir_due == Due::Send
+            && !stopped
             && let Some(ir) = self.ir_frame()
         {
             let sent = e.send(
@@ -641,76 +830,25 @@ impl Analysis for Transfer {
     fn capture(&mut self) -> Option<(StampArgs, FrameData)> {
         let end = self.end?;
         let stamp = self.stamp(end, self.last_prot);
+        if let Some(x) = self.cross.as_ref().filter(|x| !x.running()) {
+            // Stopped: only a result from before the clocks parted is one.
+            return x.held().map(|h| (stamp, FrameData::Tf(h.raw.clone())));
+        }
         Some((stamp, FrameData::Tf(self.tf_frame(false))))
     }
 
     fn capture_ir(&mut self) -> Option<IrFrame> {
+        if self.cross.as_ref().is_some_and(|x| !x.running()) {
+            return None;
+        }
         self.ir_frame()
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+#[path = "transfer_tests.rs"]
+mod tests;
 
-    #[test]
-    fn routing_check() {
-        let mut x: u64 = 0x2545_f491_4f6c_dd1d;
-        let noise: Vec<f32> = (0..4800)
-            .map(|_| {
-                x ^= x << 13;
-                x ^= x >> 7;
-                x ^= x << 17;
-                ((x >> 40) as f32 / (1u64 << 24) as f32 - 0.5) * 0.2
-            })
-            .collect();
-        let mut c = RoutingCheck::default();
-        // Same signal on both inputs, different gain.
-        let half: Vec<f32> = noise.iter().map(|v| v * 0.5).collect();
-        c.push(&noise, &half);
-        assert_eq!(c.take(-80.0), (Routing::Identical, 4800));
-        // Reference silent, measurement live.
-        c.push(&vec![0.0; 4800], &noise);
-        assert_eq!(c.take(-80.0), (Routing::ReferenceSilent, 4800));
-        // Delayed copy: not flagged.
-        let delayed: Vec<f32> = std::iter::repeat_n(0.0, 37)
-            .chain(noise.iter().copied())
-            .take(4800)
-            .collect();
-        c.push(&noise, &delayed);
-        assert_eq!(c.take(-80.0).0, Routing::Clean);
-        // Nothing at all: not flagged.
-        c.push(&vec![0.0; 4800], &vec![0.0; 4800]);
-        assert_eq!(c.take(-80.0).0, Routing::Clean);
-    }
-
-    /// Room noise hovering at the level rule's threshold (present one interval in three, as
-    /// on the rig with no reference connected) never raises CHECK ROUTING; a standing finding
-    /// does, after a second, and clears only after two seconds without it.
-    #[test]
-    fn routing_latch_needs_a_standing_finding() {
-        let dt = 1.0 / 30.0;
-        let mut l = RoutingLatch::default();
-        for k in 0..300 {
-            assert!(!l.step(k % 3 == 0, dt), "flashed at interval {k}");
-        }
-        let mut raised_at = None;
-        for k in 0..60 {
-            if l.step(true, dt) && raised_at.is_none() {
-                raised_at = Some(k);
-            }
-        }
-        let r = raised_at.expect("raised");
-        assert!((28..=30).contains(&r), "raised after {r} intervals");
-        // A short gap keeps it up; a long one clears it.
-        for _ in 0..30 {
-            assert!(l.step(false, dt));
-        }
-        assert!(l.step(true, dt));
-        let mut cleared = false;
-        for _ in 0..70 {
-            cleared |= !l.step(false, dt);
-        }
-        assert!(cleared);
-    }
-}
+#[cfg(test)]
+#[path = "transfer_cross_tests.rs"]
+mod cross_tests;

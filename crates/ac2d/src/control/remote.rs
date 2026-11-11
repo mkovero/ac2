@@ -60,7 +60,9 @@ pub(super) struct RemoteCtl {
     link_state: BTreeMap<RigId, (RemoteLink, f64, u32)>,
     sources: BTreeMap<RigId, Box<SourceState>>,
     joined: Option<Joined>,
-    watches: BTreeMap<RigId, PeerClockWatch>,
+    pub(super) watches: BTreeMap<RigId, PeerClockWatch>,
+    /// The running transfer functions between this rig and one remote rig.
+    pub(super) cross: BTreeMap<ac2_proto::units::MeasId, super::cross_rig::CrossTf>,
     /// The links feeding the open session.
     fed: BTreeSet<RigId>,
     system_synced: Arc<AtomicBool>,
@@ -76,6 +78,7 @@ impl RemoteCtl {
             sources: BTreeMap::new(),
             joined: None,
             watches: BTreeMap::new(),
+            cross: BTreeMap::new(),
             fed: BTreeSet::new(),
             system_synced: Arc::new(AtomicBool::new(false)),
             started: Instant::now(),
@@ -476,7 +479,7 @@ impl Control {
 
     /// The `remote` entity from what the links and the joined feed reported; committed when
     /// it changed.
-    fn remote_publish(&mut self) {
+    pub(super) fn remote_publish(&mut self) {
         let st = self.store.state();
         let ours = st.clocks.clone();
         self.remote.system_synced.store(
@@ -545,7 +548,7 @@ impl Control {
         self.remote
             .watches
             .retain(|rig, _| in_session.contains(rig));
-        let inputs = session_inputs
+        let inputs: Vec<RemoteInputStatus> = session_inputs
             .iter()
             .map(|r| {
                 let rep = joined.and_then(|j| j.inputs.iter().find(|i| i.slot == r.slot));
@@ -576,6 +579,9 @@ impl Control {
                 }
             })
             .collect();
+        let link_offset = joined.map(|j| j.link_offset);
+        self.cross_sync();
+        let transfers = self.cross_entries();
         let next = RemoteState {
             peers,
             rigs,
@@ -583,8 +589,9 @@ impl Control {
             link_offset: if session_inputs.is_empty() {
                 None
             } else {
-                joined.map(|j| j.link_offset)
+                link_offset
             },
+            transfers,
         };
         if next != self.store.state().remote {
             self.commit(Change::Remote(next));
@@ -667,7 +674,8 @@ impl Control {
     }
 
     /// The block map a job on `inputs` reads: this rig's own, or the joined feed's when any
-    /// of them is remote. `Err` for a cross-rig transfer function, which 3a refuses.
+    /// of them is remote. `Err` for a transfer function on two different remote rigs: its
+    /// clocks would have to agree with each other through this rig's, not measured yet.
     pub(super) fn job_map(
         &self,
         rt: &Runtime,
@@ -688,15 +696,17 @@ impl Control {
         if remote.is_empty() {
             return Ok(None);
         }
-        if transfer {
-            let rigs: BTreeSet<RigId> = remote.iter().map(|r| r.rig).collect();
+        if transfer
+            && remote
+                .iter()
+                .map(|r| r.rig)
+                .collect::<BTreeSet<RigId>>()
+                .len()
+                > 1
+        {
             return Err(perr(
                 ErrorCode::Refused,
-                if rigs.len() > 1 {
-                    "both inputs remote on different rigs: not yet"
-                } else {
-                    "needs the clocks between rigs: next build"
-                },
+                "both inputs remote on different rigs: not yet",
             ));
         }
         Ok(Some(

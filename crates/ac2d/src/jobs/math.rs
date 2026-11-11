@@ -772,7 +772,8 @@ impl Analysis for MathJob {
             | JobCmd::Reset
             | JobCmd::Smoothing { .. }
             | JobCmd::Spl { .. }
-            | JobCmd::Cal(_) => {}
+            | JobCmd::Cal(_)
+            | JobCmd::Clocks(_) => {}
         }
     }
 
