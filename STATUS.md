@@ -30,15 +30,15 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
 - The app hosts no daemon: it starts the `ac2d` beside it (stopped when it quits, Settings ›
   Connection), one `ac2d` per user by a lock, the simulated rig a spawned
   `ac2d --backend fake --ephemeral`; e2e tests with a daemon are the `ac2-e2e` crate. Design:
-  `docs/design/ui-spawns-ac2d.md` (N7); stage 2 (ac2d in the AppImage / app bundle) open.
-- **3D spectrograph** (`docs/design/spectrograph-3d.md`): v1a + v1b on branch `spectrograph-3d`
+  `docs/design/ui-spawns-ac2d.md` (N7); the AppImage and the macOS app bundle carry that `ac2d`.
+- **3D spectrograph** (`docs/design/spectrograph-3d.md`): v1a + v1b landed
   (PROTO 86, session format 42, rig file 10): a fourth spectrum view (G) drawing the
   spectrograph's history as a skyline of spikes, camera on ←/→, PageUp/PageDown, I/O, Home
   and the mouse, the *ice* colour map, Settings › Display › 3D quality. Skyline goldens are
   their own test binary (`ac2-plot --test skyline`, GL in CI). Bloom (v1b) done. x86 / Apple
   desktops only: on the CM4 (V3D) every test passes but Bare is 8–10× over a frame, so V3D
   has no 3D view (G skips it, a layout's 3D pane draws the 2D spectrograph with a note);
-  RTX 2070 Full 1.57 ms GPU at 1080p. Merges as one change.
+  RTX 2070 Full 1.57 ms GPU at 1080p.
 - **Many rigs in one app** (tabs, mixed panes, remote inputs, clocks across PTP
   hosts): `docs/design/multi-rig.md`, decisions N1–N6. Stage 1a (wire and files) landed: a
   daemon keeps its identity in `rig-id`, the hello carries `rig_id` and `name` (`ac2d
@@ -50,8 +50,9 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   switches between them, `ui.toml` remembers the rigs and connects them again at start,
   panes keep their rig across a switch (titles `pupu · …`, *unreachable · retrying* / *not
   connected*), Shift+Esc stops every rig and quit releases them all in parallel. Stage 1d
-  landed: a pane's chip list offers every connected rig's measurements and meters under a
-  heading per rig, a pick of another rig's pins the pane to it, a list row chosen never
+  landed: the measurement list offers every connected rig's measurements and meters under a
+  heading per rig, a row of another rig's dragged onto a pane pins the pane to it (panes have
+  no chip), a list row chosen never
   takes another rig's pane, `ui.toml` keeps each pinned pane's rig by id (resolved when that
   rig is held again, any address), and a stored layout reads `ThisRig`/`Rig` panes for the
   rig it belongs to. Stage 2 landed (PROTO 84): the daemon's `clocks` entity (capture clock

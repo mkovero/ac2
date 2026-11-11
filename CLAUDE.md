@@ -13,7 +13,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
 ```
 Toolchain pinned in `rust-toolchain.toml`. Edition 2024. Each crate's integration tests are one
-binary, `tests/it/` (a module per area): `cargo test -p ac2d --test it leq::`. A test that needs
+binary, `tests/it/` (a module per area; `ac2-traces`: `tests/traces/`): `cargo test -p ac2d --test it leq::`. A test that needs
 its process to itself (global allocator, process CPU time) stays a separate file in `tests/`.
 
 ## Tests
@@ -41,7 +41,7 @@ app runs). Profiles in `.config/nextest.toml`:
 | `ac2-room` | room plans: validation, mirror axes, FOH-relative readout, suggested mic positions (Lloyd over zones, Tuning / ISO 3382-1 presets); geometry only, no I/O, `forbid(unsafe_code)` |
 | `ac2-traces` | stored traces and their math, text import/export, band log files, session files, raw capture files (f32 WAV/RF64 + sidecar) |
 | `ac2-archive` | `.ac2session` archives: pack a session folder, unpack within size/entry limits, SHA-256 (no DSP, so the app links it) |
-| `ac2-paths` | platform config / data dirs, atomic writes (daemon and UI) |
+| `ac2-paths` | platform config / data / log dirs, atomic writes, the tracing subscriber (`log.rs`), systemd notifier (`notify.rs`) (daemon and UI) |
 | `ac2-scene` | pure display truth: every displayed number/string, tested headless |
 | `ac2-plot` | wgpu renderer for scenes; places pixels, never computes values |
 | `ac2-ui` | desktop app (`ac2-ui` binary): reducer, scoped key table, dialogs; starts the `ac2d` beside it (`spawn.rs`), links no daemon or audio crate; its own code uses no DSP (`tests/it/no_dsp.rs`) |
@@ -49,7 +49,7 @@ app runs). Profiles in `.config/nextest.toml`:
 | `ac2-testkit` | golden vectors from `tools/refgen`, tolerance compare; golden images (feature `image`) |
 | `packaging/` | per-OS packaging scripts and icon, run by `.github/workflows/release.yml` |
 | `testing/` | per-platform tester guides; release binaries beside them are git-ignored |
-| `tools/` | `refgen` (golden vectors), `protocol` (Python cross-language fixtures), `release` (smoke scripts), `experiments` |
+| `tools/` | `refgen` (golden vectors), `protocol` (Python cross-language fixtures), `release` (smoke scripts), `experiments`, `crosscheck` (REW / OSM cross-check), `jack-dut` (software device under test), `wine-asio` (ASIO under Wine), `latency` |
 
 ## Rules
 - No compatibility shims, no stringly-typed modes/commands (serde enums), no trait default

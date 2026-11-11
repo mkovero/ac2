@@ -50,8 +50,8 @@ ZeroMQ, on the same machine or across the network (encrypted and paired).
   delete, show / hide, slots, display offsets to spread curves apart, a comparison cursor,
   target curves, smoothing and a mic curve applied after capture, CSV import / export (a
   sweep round-trips with its distortion and impulse response).
-- **Sessions and autosave**: save and load by name, export and open `.ac2session` files; a stand-alone daemon autosaves and
-  restores on restart, always disarmed.
+- **Sessions and autosave**: save and load by name, export and open `.ac2session` files; the daemon autosaves and
+  restores on restart, always disarmed (the simulated rig keeps nothing).
 - **Keyboard first**: one remappable binding table, layout-safe defaults, a command palette,
   **H** for every key, per-pane key hints and tooltips; per-pane level-axis zoom / pan / fit;
   layouts split → one pane → full screen (**W**), remembered between runs.
@@ -164,7 +164,7 @@ own directories:
 A session directory holds `session.json` (measurements, trace metadata, slots), one CSV per
 trace and one per-second log per SPL meter (`spl/`). The autosave is the same format, updated in place: unchanged traces are not written again and SPL logs are appended to.
 Autosaves and calibration stores this build cannot read are set aside, never deleted:
-`autosave.v<N>/` (another session format), `autosave.damaged/`, `autosave.unrestored/`
+`autosave.v<N>/` (another session format), `autosave.damaged-<time>/`, `autosave.unrestored/`
 (what `ac2d --no-restore` did not load) and `calibrations.json.v<N>` (another store version:
 calibrate and import the curves again). Sessions of another format are refused with the
 version named.
