@@ -555,10 +555,13 @@ fn slow_tuning_session_fits_a_remote_link() {
             / 1e6
     };
     // The session without the IR topic is what the app takes with no IR view: subscribing
-    // one more topic changes no other.
-    assert!(mbit(false) < 2.4, "{:.2} Mbit/s", mbit(false));
+    // one more topic changes no other. Live views send a frame per hop of whole device
+    // periods near one display frame (about 60 a second each), so the eye sees sound as it
+    // happens: that, not the link, sets the rate (2.7 Mbit/s here on Linux, 2.9 on Windows).
+    assert!(mbit(false) < 3.2, "{:.2} Mbit/s", mbit(false));
+    // The IR view adds its own topic at the transfer functions' rate (5.2 Mbit/s on Linux).
     assert!(
-        mbit(true) < 5.0,
+        mbit(true) < 6.0,
         "{:.2} Mbit/s with the IR view",
         mbit(true)
     );

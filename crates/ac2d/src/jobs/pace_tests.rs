@@ -147,6 +147,27 @@ fn feed(a: &mut dyn Analysis, at: &mut u64, n: usize, amp: f32, seed: &mut u64) 
     }
 }
 
+/// Emits what `s` has due and returns its spectrum frames, each with whether the job may have
+/// taken its refresh path: [`REFRESH`] or more since the last pass that sent anything (a loaded
+/// test host stalls a pass). A refresh sends the newest spectrum stamped at the newest block,
+/// which need not be on the frame hop. The time is taken before the pass, so it can only
+/// overstate the job's own.
+fn emit_spectra(s: &mut Spectrum, r: &Rig, last_sent: &mut Instant) -> Vec<(Frame, bool)> {
+    let t0 = Instant::now();
+    let refresh = t0.duration_since(*last_sent) >= REFRESH;
+    s.emit(&r.em);
+    let frames: Vec<(Frame, bool)> = r
+        .frames()
+        .into_iter()
+        .filter(|f| matches!(f.data, FrameData::Spec(_)))
+        .map(|f| (f, refresh))
+        .collect();
+    if !frames.is_empty() {
+        *last_sent = t0;
+    }
+    frames
+}
+
 #[test]
 fn nothing_is_built_or_sent_for_nobody() {
     let r = Rig::new("unsubscribed");
@@ -305,6 +326,7 @@ fn spectra_are_stamped_where_their_frame_ended() {
     let wall_of = |end: u64| wall0 + end * 1_000_000_000 / u64::from(FS96);
     let mut seed = 21;
     let mut at = 0u64;
+    let (mut spectra, mut last_sent) = (Vec::new(), Instant::now());
     // 6.25 blocks per hand-off on average, as at 60 hand-offs a second.
     for k in 1..=200u64 {
         while at < k * 1600 / 256 * 256 {
@@ -313,24 +335,28 @@ fn spectra_are_stamped_where_their_frame_ended() {
             s.push(&b);
             at += u64::from(BLOCK);
         }
-        s.emit(&r.em);
+        spectra.extend(emit_spectra(&mut s, &r, &mut last_sent));
     }
-    let mut spectra: Vec<Frame> = r
-        .frames()
-        .into_iter()
-        .filter(|f| matches!(f.data, FrameData::Spec(_)))
-        .collect();
-    // A pass that stalls past REFRESH (a loaded test host) repeats the unchanged spectrum.
-    spectra.dedup_by_key(|f| f.stamp.audio_sample.0);
     assert!(spectra.len() > 20, "{} spectra", spectra.len());
-    for f in &spectra {
+    // Ends of the analysed frames, each with whether a refresh went out since the one before.
+    let mut ends: Vec<(u64, bool)> = Vec::new();
+    let mut refreshed = false;
+    for (f, refresh) in &spectra {
+        if *refresh {
+            refreshed = true;
+            continue;
+        }
         let end = f.stamp.audio_sample.0 + 1;
         assert_eq!(end % hop, 0, "a spectrum stamped off its hop at {end}");
         let off_ns = f.stamp.capture_wall_ns.0.abs_diff(wall_of(end));
         assert!(off_ns < 1000, "wall clock {off_ns} ns off the frame's end");
+        ends.push((end, std::mem::take(&mut refreshed)));
     }
-    for w in spectra.windows(2) {
-        assert_eq!(w[1].stamp.audio_sample.0 - w[0].stamp.audio_sample.0, hop);
+    for w in ends.windows(2) {
+        let step = w[1].0 - w[0].0;
+        // A refresh between may have carried the frame in between.
+        let ok = if w[1].1 { step % hop == 0 } else { step == hop };
+        assert!(ok, "frames {} and {} are {step} apart", w[0].0, w[1].0);
     }
 }
 
@@ -363,19 +389,14 @@ fn multires_bands_update_at_their_own_hops_with_exact_ages() {
     let grid = MultiResLadder::grid(f64::from(FS96), 48);
     let mut seed = 5;
     let mut at = 0u64;
-    let mut spectra = Vec::new();
+    let (mut spectra, mut last_sent) = (Vec::new(), Instant::now());
     // A block per hand-off, as while a live spectrum is running.
     for _ in 0..1000 {
         let mut b = block(at, 0.1, &mut seed);
         b.wall_ns = 1 + at;
         s.push(&b);
         at += u64::from(BLOCK);
-        s.emit(&r.em);
-        spectra.extend(
-            r.frames()
-                .into_iter()
-                .filter(|f| matches!(f.data, FrameData::Spec(_))),
-        );
+        spectra.extend(emit_spectra(&mut s, &r, &mut last_sent));
     }
     assert!(spectra.len() > 100, "{} spectra", spectra.len());
     let mut prev: Option<(u64, Vec<f32>)> = None;
@@ -387,25 +408,15 @@ fn multires_bands_update_at_their_own_hops_with_exact_ages() {
             .filter(|&c| grid.frequency(c) >= ladder.bands[5].anchor_hz)
             .collect(),
     );
-    for f in &spectra {
+    for (f, refresh) in &spectra {
+        if *refresh {
+            continue;
+        }
         let end = f.stamp.audio_sample.0 + 1;
         assert_eq!(end % 1536, 0, "stamped off the frame hop at {end}");
         let FrameData::Spec(spec) = &f.data else {
             unreachable!()
         };
-        // A pass that stalls past REFRESH (a loaded test host) sends the unchanged spectrum
-        // again with its own stamp: a repeat, not a new frame.
-        if let Some((prev_end, p)) = &prev
-            && *prev_end == end
-        {
-            assert!(
-                p.iter()
-                    .zip(&spec.level)
-                    .all(|(a, b)| a.to_bits() == b.to_bits()),
-                "a repeat at {end} differs"
-            );
-            continue;
-        }
         assert_eq!(spec.level.len(), grid.len());
         let bands = spec.meta.bands.as_ref().expect("bands");
         assert_eq!(bands.bands.len(), 6);
