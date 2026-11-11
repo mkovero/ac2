@@ -24,7 +24,7 @@ impl Control {
         if !self.s.interest.wants(&Topic::Ka.to_bytes()) {
             return;
         }
-        self.ka_seq += 1;
+        self.ka.seq += 1;
         let stream = match (&self.session, &self.audio_recovery) {
             (Some(rt), _) => SessionStream::Running(&rt.health),
             (None, Some(_)) => SessionStream::Recovering,
@@ -39,7 +39,7 @@ impl Control {
             .map_or(0u64, |r| r.fanout.latest.load(Ordering::Acquire));
         let frame = Frame {
             stamp: FrameStamp {
-                seq: self.ka_seq,
+                seq: self.ka.seq,
                 audio_sample: SampleIndex(latest.saturating_sub(1)),
                 session_epoch: st.session.epoch,
                 daemon_incarnation: self.s.incarnation,

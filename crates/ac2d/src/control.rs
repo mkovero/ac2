@@ -320,6 +320,14 @@ struct Pending {
     finds: HashMap<u64, PendingFind>,
 }
 
+/// The keepalive this loop publishes.
+struct Keepalive {
+    /// The sequence number of the last one sent.
+    seq: u64,
+    /// When the next one is due.
+    due: Instant,
+}
+
 /// Where an applied delay came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DelaySource {
@@ -410,8 +418,7 @@ pub(crate) struct Control {
     out: Output,
     grids: HashMap<GridId, GridDef>,
     seqs: Arc<Seqs>,
-    ka_seq: u64,
-    next_ka: Instant,
+    ka: Keepalive,
     /// The clocks entity's sources.
     clocks: clocks::ClockWatch,
     /// Refused requests already warned about.
@@ -581,8 +588,10 @@ impl Control {
             },
             grids: HashMap::new(),
             seqs: Arc::new(Seqs::default()),
-            ka_seq: 0,
-            next_ka: Instant::now(),
+            ka: Keepalive {
+                seq: 0,
+                due: Instant::now(),
+            },
             clocks: clocks::ClockWatch::new(s.system_clock.read()),
             refusals: crate::refusals::Refusals::default(),
             damaged,
@@ -644,9 +653,9 @@ impl Control {
             }
             self.check_lease(now);
             self.check_muted();
-            if now >= self.next_ka {
+            if now >= self.ka.due {
                 self.send_ka();
-                self.next_ka = now + self.s.keepalive;
+                self.ka.due = now + self.s.keepalive;
                 if let Some(e) = self.notify.ping(now) {
                     tracing::warn!("systemd watchdog ping failed: {e}");
                 }
@@ -677,7 +686,7 @@ impl Control {
             self.osc_sync();
             self.osc_tick(now);
             self.artnet_tick(now);
-            let mut wake = self.next_ka.min(self.clocks_due());
+            let mut wake = self.ka.due.min(self.clocks_due());
             if let Some(t) = self.osc_wake() {
                 wake = wake.min(t);
             }
