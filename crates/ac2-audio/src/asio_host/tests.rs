@@ -86,6 +86,15 @@ struct Buffers {
 /// preferred buffer size, then ask the host for a reset.
 type PanelChange = (f64, i32);
 
+/// How a scripted `start()` goes wrong once the driver has called back.
+#[derive(Clone, Copy, Debug)]
+enum StartFault {
+    /// Returns this code.
+    Refuse(AsioCode),
+    /// Unwinds through the open.
+    Panic,
+}
+
 struct Scripted {
     script: Script,
     slot: &'static Slot,
@@ -97,6 +106,8 @@ struct Scripted {
     init_refusal: Mutex<Option<String>>,
     /// `createBuffers` fails with this code.
     create_refusal: Mutex<Option<AsioCode>>,
+    /// What `start` does after its priming switch, instead of returning OK.
+    start_fault: Mutex<Option<StartFault>>,
     /// What opening the panel changes.
     panel: Mutex<Option<PanelChange>>,
     panel_calls: AtomicUsize,
@@ -142,6 +153,7 @@ impl Scripted {
             present: AtomicBool::new(true),
             init_refusal: Mutex::new(None),
             create_refusal: Mutex::new(None),
+            start_fault: Mutex::new(None),
             panel: Mutex::new(None),
             panel_calls: AtomicUsize::new(0),
             rate: Mutex::new(48_000.0),
@@ -350,7 +362,16 @@ impl AsioDriver for Scripted {
         self.half.store(0, Ordering::SeqCst);
         self.switch_at(0, 0);
         self.running.store(true, Ordering::SeqCst);
-        Ok(())
+        // Copied out first: a panic with the lock held would poison it for later opens.
+        let fault = *self.start_fault.lock().expect("scripted state");
+        match fault {
+            Some(StartFault::Refuse(code)) => Err(DriverError {
+                code: Some(code),
+                message: String::new(),
+            }),
+            Some(StartFault::Panic) => panic!("scripted start fault"),
+            None => Ok(()),
+        }
     }
     fn stop(&self) -> Result<(), DriverError> {
         self.log("stop");
@@ -702,6 +723,61 @@ fn the_slot_is_cleared_before_buffers_are_disposed_and_reused_after() {
         ["create_buffers", "start", "stop", "dispose_buffers"]
     );
     assert_eq!(calls.len(), 12);
+}
+
+#[test]
+fn a_driver_without_a_usable_rate_is_refused_before_anything_is_made() {
+    let drv = Scripted::new(Script::default());
+    for rate in [0.0, f64::NAN, f64::INFINITY, -48_000.0, 12.0, 1e9] {
+        *drv.rate.lock().expect("scripted state") = rate;
+        match open(&drv, DuplexRequest::new(vec![0], 2, level())) {
+            Err(AudioError::Backend { detail, .. }) => {
+                assert!(detail.contains("sample rate"), "{detail}");
+            }
+            other => panic!("rate {rate}: {other:?}"),
+        }
+        assert!(!drv.slot.is_set(), "rate {rate}");
+    }
+    assert!(drv.calls.lock().expect("scripted state").is_empty());
+    // A rate the request names is set on the driver, whatever it reported before.
+    *drv.rate.lock().expect("scripted state") = 0.0;
+    let mut r = DuplexRequest::new(vec![0], 2, level());
+    r.sample_rate = Some(48_000);
+    let s = open(&drv, r).expect("open");
+    assert_eq!(s.negotiated().sample_rate, 48_000);
+}
+
+#[test]
+fn a_failure_after_the_callbacks_are_attached_stops_detaches_and_disposes() {
+    let torn_down = ["create_buffers", "start", "stop", "dispose_buffers"];
+    let drv = Scripted::new(Script::default());
+    *drv.start_fault.lock().expect("scripted state") =
+        Some(StartFault::Refuse(AsioCode::InvalidMode));
+    assert!(matches!(
+        open(&drv, DuplexRequest::new(vec![0], 2, level())),
+        Err(AudioError::Backend { .. })
+    ));
+    assert!(!drv.slot.is_set());
+    assert_eq!(*drv.calls.lock().expect("scripted state"), torn_down);
+
+    // The same when the open unwinds with the driver already calling back: the engine is
+    // freed by the unwind, so the slot must be empty before it.
+    drv.calls.lock().expect("scripted state").clear();
+    *drv.start_fault.lock().expect("scripted state") = Some(StartFault::Panic);
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        open(&drv, DuplexRequest::new(vec![0], 2, level())).map(drop)
+    }));
+    assert!(unwound.is_err());
+    assert!(!drv.slot.is_set());
+    assert_eq!(*drv.calls.lock().expect("scripted state"), torn_down);
+    // A switch from a driver that ignored the stop finds no engine.
+    drv.tick();
+
+    *drv.start_fault.lock().expect("scripted state") = None;
+    let mut s = open(&drv, DuplexRequest::new(vec![0], 2, level())).expect("open");
+    drv.position.store(0, Ordering::SeqCst);
+    drv.tick();
+    assert_eq!(blocks(&mut s)[0].0.start_sample, 0);
 }
 
 #[test]

@@ -426,10 +426,18 @@ pub(crate) fn first_switches_wait(rate: u32, frames: u32) -> Duration {
     periods.max(Duration::from_millis(500))
 }
 
+/// The rate a driver reports as its current one, when a stream can run at it. A driver
+/// with no clock can answer 0 with an OK status, and the index, the load timer and the
+/// drain time all divide by the rate.
+fn driver_rate(hz: f64) -> Option<u32> {
+    (hz.is_finite() && (1_000.0..=1_000_000.0).contains(&hz)).then(|| hz.round() as u32)
+}
+
 /// Opens a stream on the loaded driver `drv`, listed as `id`, with its callbacks reaching
 /// the stream through `slot`. Waits up to `first_switches` for two indexed switches, which
 /// show whether the driver's position is usable. `release` runs once the stream's driver
-/// buffers are disposed; on an error it is dropped unrun.
+/// buffers are disposed, whether the stream was handed out or the open failed after its
+/// callbacks were attached; on an earlier error it is dropped unrun.
 pub(crate) fn open_stream(
     drv: Arc<dyn AsioDriver>,
     slot: &'static Slot,
@@ -457,7 +465,19 @@ pub(crate) fn open_stream(
     }
 
     let current = drv.sample_rate().map_err(err)?;
-    let rate = request.sample_rate.unwrap_or(current.round() as u32);
+    let rate = match request.sample_rate {
+        Some(r) => r,
+        None => driver_rate(current).ok_or_else(|| {
+            backend_err(
+                Operation::Open,
+                format!(
+                    "{} reports a sample rate of {current} Hz: name a rate, or set one in \
+                     the driver's control panel",
+                    id.0
+                ),
+            )
+        })?,
+    };
     if f64::from(rate) != current {
         if !drv.can_sample_rate(f64::from(rate)) {
             let offered: Vec<String> = STANDARD_RATES
@@ -569,15 +589,12 @@ pub(crate) fn open_stream(
         Arc::clone(&plumbing.output.shared),
     ));
 
-    slot.install(&engine);
-    if let Err(e) = drv.start() {
-        slot.clear();
-        let _ = drv.dispose_buffers();
-        return Err(refusal(&id.0, Step::Start, e));
-    }
-    engine.started();
+    // The guard exists before the callbacks can reach the engine, so every way out of this
+    // function from here on, a panic included, detaches them before the engine is freed.
+    let mut guard = AsioGuard::new(drv, slot, engine, release);
+    guard.start(&id.0)?;
     let deadline = Instant::now() + first_switches;
-    while engine.indexed() < 2 && Instant::now() < deadline {
+    while guard.engine.indexed() < 2 && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(2));
     }
 
@@ -594,7 +611,7 @@ pub(crate) fn open_stream(
         input_format,
         output_format,
         clock: ClockRelation::SingleCallback,
-        index: if engine.estimated() {
+        index: if guard.engine.estimated() {
             IndexExactness::Estimated
         } else {
             IndexExactness::Exact
@@ -613,7 +630,7 @@ pub(crate) fn open_stream(
     let drain_frames = 2 * u64::from(frames) + u64::from(latencies.1);
     let drain = Duration::from_nanos(drain_frames * 1_000_000_000 / u64::from(rate))
         + Duration::from_millis(10);
-    let guard = AsioGuard::new(drv, slot, engine, latencies, release);
+    guard.watch(latencies);
     Ok(DuplexStream::new(StreamParts {
         negotiated,
         capture: plumbing.consumer,
@@ -625,12 +642,14 @@ pub(crate) fn open_stream(
     }))
 }
 
-/// Keeps a started driver; dropping it stops the driver, detaches the callbacks and
-/// disposes the buffers, in that order.
+/// Keeps a driver whose buffers exist; dropping it stops the driver, detaches the callbacks
+/// and disposes the buffers, in that order.
 struct AsioGuard {
     drv: Arc<dyn AsioDriver>,
     slot: &'static Slot,
     engine: Arc<Engine>,
+    /// The callbacks may reach `engine`: true from just before it is put in the slot.
+    attached: bool,
     watcher: Option<(Arc<AtomicBool>, JoinHandle<()>)>,
     release: Option<Box<dyn FnOnce() + Send>>,
 }
@@ -640,26 +659,42 @@ impl AsioGuard {
         drv: Arc<dyn AsioDriver>,
         slot: &'static Slot,
         engine: Arc<Engine>,
-        latencies: (u32, u32),
         release: Box<dyn FnOnce() + Send>,
     ) -> Self {
-        let quit = Arc::new(AtomicBool::new(false));
-        let watcher = std::thread::Builder::new()
-            .name("ac2-asio-latency".into())
-            .spawn({
-                let (drv, engine, quit) =
-                    (Arc::clone(&drv), Arc::clone(&engine), Arc::clone(&quit));
-                move || watch_latency(&*drv, &engine, &quit, latencies)
-            })
-            .ok()
-            .map(|h| (quit, h));
         Self {
             drv,
             slot,
             engine,
-            watcher,
+            attached: false,
+            watcher: None,
             release: Some(release),
         }
+    }
+
+    /// Attaches the callbacks to the engine and starts the driver, listed as `id`.
+    fn start(&mut self, id: &str) -> Result<(), AudioError> {
+        self.attached = true;
+        self.slot.install(&self.engine);
+        self.drv.start().map_err(|e| refusal(id, Step::Start, e))?;
+        self.engine.started();
+        Ok(())
+    }
+
+    /// Starts the thread that follows the driver's latencies from `latencies` on.
+    fn watch(&mut self, latencies: (u32, u32)) {
+        let quit = Arc::new(AtomicBool::new(false));
+        self.watcher = std::thread::Builder::new()
+            .name("ac2-asio-latency".into())
+            .spawn({
+                let (drv, engine, quit) = (
+                    Arc::clone(&self.drv),
+                    Arc::clone(&self.engine),
+                    Arc::clone(&quit),
+                );
+                move || watch_latency(&*drv, &engine, &quit, latencies)
+            })
+            .ok()
+            .map(|h| (quit, h));
     }
 }
 
@@ -688,9 +723,13 @@ impl Drop for AsioGuard {
             h.thread().unpark();
             let _ = h.join();
         }
-        self.engine.stopping();
-        let _ = self.drv.stop();
-        self.slot.clear();
+        if self.attached {
+            self.engine.stopping();
+            // Also after a `start()` that failed or never returned: a driver may have begun
+            // calling back by then, and the slot is only safe to empty once it has stopped.
+            let _ = self.drv.stop();
+            self.slot.clear();
+        }
         let _ = self.drv.dispose_buffers();
         if let Some(r) = self.release.take() {
             r();
