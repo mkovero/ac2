@@ -390,7 +390,22 @@ fn spectrum_math() {
         );
         assert_eq!(s.caption, "Mic 1 FFT − Mic 2 FFT · level difference");
     }
-    snapshot(&mut h, "spectrum_math");
+    // The pane frames a measurement newly shown on it when that one's next frame arrives
+    // (the frame already in came before the pick), and the curve eases to it: the picture
+    // waits for both. The difference runs −6 … 6 dB; Mic 1 FFT's range sits far below.
+    snapshot_when(
+        &mut h,
+        "spectrum_math",
+        |_| {},
+        |a| {
+            let st = &a.state;
+            let pane = common::pane(st, PaneKind::Spectrum);
+            st.level_range(pane)
+                .is_some_and(|r| r.lo <= -6.0 && r.hi >= 6.0 && r.hi - r.lo <= 30.0)
+                && !st.levels_following()
+                && !st.spectrum_gliding(Instant::now())
+        },
+    );
 }
 
 /// Many curves from an empty daemon: target curves imported one after another fill the

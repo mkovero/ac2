@@ -103,6 +103,9 @@ fn harness(opts: AppOptions) -> Harness<'static, App> {
     h.state_mut().state.local_zone = ac2_ui::scenes::LocalZone::Fixed { offset_s: 0 };
     // The build id names the commit: pinned, or every commit would change the pictures.
     h.state_mut().state.build_id = "0.0.0+test".into();
+    // The 3D view's tier is the adapter's pick (a software rasteriser bare, Metal full), and
+    // Settings › Display names it: pinned to the software one the references were taken on.
+    h.state_mut().state.auto_tier = Some(ac2_scene::primitives::SkylineTier::Bare);
     // The window's own frame rate and data rate move run to run: a test that shows them
     // feeds them.
     h.state_mut().health_measured = false;
