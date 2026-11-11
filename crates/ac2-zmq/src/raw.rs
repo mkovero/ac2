@@ -21,7 +21,11 @@ pub(crate) type RawResult<T> = Result<T, c_int>;
 
 // Values mirror zmq.h (4.3.5).
 const ZMQ_HAUSNUMERO: c_int = 156_384_712;
+#[cfg(unix)]
+const EFSM: c_int = ZMQ_HAUSNUMERO + 51;
 pub(crate) const ETERM: c_int = ZMQ_HAUSNUMERO + 53;
+#[cfg(unix)]
+const EMTHREAD: c_int = ZMQ_HAUSNUMERO + 54;
 
 pub(crate) const ZMQ_PAIR: c_int = 0;
 pub(crate) const ZMQ_SUB: c_int = 2;
@@ -87,6 +91,9 @@ struct zmq_pollitem_t {
     revents: c_short,
 }
 
+// SAFETY: each signature mirrors its declaration in the vendored zmq.h (4.3.5): argument and
+// return types, const-ness of pointers, `long` timeout and `size_t` lengths; the struct
+// layouts above mirror the same header. Callers uphold each function's contract.
 unsafe extern "C" {
     fn zmq_errno() -> c_int;
     fn zmq_strerror(errnum: c_int) -> *const c_char;
@@ -139,10 +146,39 @@ fn check(rc: c_int) -> RawResult<c_int> {
     if rc < 0 { Err(errno()) } else { Ok(rc) }
 }
 
-/// libzmq's message for an errno value (its own codes and the C library's).
+/// The message for an errno value libzmq reported.
+///
+/// libzmq answers its own codes (EFSM through EMTHREAD) with string literals and every other
+/// value with C `strerror()`, which some libcs (Apple's among them) format into one buffer
+/// shared by the whole process, so a concurrent call elsewhere could rewrite it while it is
+/// copied. On Unix every other value is the OS's errno, and `strerror_r` writes its message
+/// into a buffer of our own. On Windows libzmq reports C runtime errno values, not Win32
+/// codes, and the C runtime keeps `strerror`'s buffer per thread.
 pub(crate) fn strerror(errnum: c_int) -> String {
-    // SAFETY: zmq_strerror returns a pointer to a static NUL-terminated string for any value.
+    #[cfg(unix)]
+    if !(EFSM..=EMTHREAD).contains(&errnum) {
+        return os_strerror(errnum);
+    }
+    // SAFETY: for libzmq's own codes the pointer is a string literal; on Windows it may be
+    // the C runtime's per-thread buffer, which only this thread rewrites. Either way it is
+    // NUL-terminated and copied out before this thread calls `strerror` again.
     unsafe { CStr::from_ptr(zmq_strerror(errnum)) }
+        .to_string_lossy()
+        .into_owned()
+}
+
+#[cfg(unix)]
+fn os_strerror(errnum: c_int) -> String {
+    let mut buf: [c_char; 128] = [0; 128];
+    // SAFETY: `buf` is writable for its whole length. The libc crate binds the XSI
+    // `strerror_r` on every Unix (glibc's `__xpg_strerror_r`), which writes a NUL-terminated
+    // message into `buf` and touches no shared buffer.
+    let rc = unsafe { libc::strerror_r(errnum, buf.as_mut_ptr(), buf.len()) };
+    if rc != 0 {
+        return "unknown error".into();
+    }
+    // SAFETY: on success `buf` holds a NUL-terminated string.
+    unsafe { CStr::from_ptr(buf.as_ptr()) }
         .to_string_lossy()
         .into_owned()
 }
@@ -384,12 +420,21 @@ impl RawSocket {
 /// `Send` but not `Sync`: sharing the content goes through libzmq's atomic reference count,
 /// so shares may live on different threads, but making a share writes the source message's
 /// flags, which must not race with another thread using that same message.
+///
+/// The blob is moved by value once initialised (into the `UnsafeCell`, with the `RawMsg`, in
+/// a growing `Vec`). libzmq documents only `zmq_msg_move`/`zmq_msg_copy` for that; a bitwise
+/// move is right because a `msg_t` holds no pointer into itself (inline content is addressed
+/// from the blob's current address). That holds for the vendored 4.3.5 and must be checked
+/// again when the vendored version changes.
 pub(crate) struct RawMsg {
     msg: std::cell::UnsafeCell<zmq_msg_t>,
 }
 
-// SAFETY: a zmq_msg_t has no thread affinity; shared content is reference counted atomically
-// by libzmq, and the free function used here (dropping a Vec) may run on any thread.
+// SAFETY: a zmq_msg_t has no thread affinity. Its content and metadata are reference counted
+// atomically by libzmq and released by functions that may run on any thread: dropping a Vec
+// for `from_vec` content, libzmq's own for received parts (a large part may be a zero-copy
+// view of the decoder's buffer, and any part may carry connection metadata). Neither refers
+// to the socket or context the part came from, so a part may outlive both.
 unsafe impl Send for RawMsg {}
 
 impl std::fmt::Debug for RawMsg {
@@ -488,6 +533,9 @@ impl RawMsg {
         // SAFETY: data pointer and size describe the message's content, which is valid and
         // never written while the message lives; the slice borrows `self`. (Inline content of
         // small messages lives in the blob itself, which does not move while borrowed.)
+        // `share(&self)` may run while the slice lives and writes this blob, but only the
+        // flags byte and the heap reference count of a large part, never bytes the slice
+        // covers; an inline source it does not write at all.
         unsafe { std::slice::from_raw_parts(zmq_msg_data(self.msg.get()).cast::<u8>(), len) }
     }
 }

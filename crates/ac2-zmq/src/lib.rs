@@ -69,6 +69,18 @@ mod tests {
     }
 
     #[test]
+    fn error_messages_come_from_libzmq_for_its_codes_and_the_os_for_the_rest() {
+        assert_eq!(raw::strerror(raw::ETERM), "Context was terminated");
+        #[cfg(unix)]
+        assert_eq!(
+            raw::strerror(libc::EINVAL),
+            std::io::Error::from_raw_os_error(libc::EINVAL)
+                .to_string()
+                .replace(&format!(" (os error {})", libc::EINVAL), "")
+        );
+    }
+
+    #[test]
     fn z85_and_keys_roundtrip() -> Result<()> {
         // RFC 32 test vector.
         let bytes = [0x86, 0x4F, 0xD2, 0x6F, 0xB5, 0x59, 0xF7, 0x5B];

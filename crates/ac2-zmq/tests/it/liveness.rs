@@ -130,14 +130,20 @@ mod kernel {
             *mut libc::sockaddr,
             *mut libc::socklen_t,
         ) -> libc::c_int| {
+            // SAFETY: `sockaddr_in` is plain integers and bytes; all zeros is a valid value.
             let mut addr: libc::sockaddr_in = unsafe { mem::zeroed() };
             let mut len = mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
+            // SAFETY: `f` is getsockname or getpeername; `addr` is writable for `len` bytes
+            // and the kernel truncates a longer address to that. A descriptor that is stale
+            // or not a socket gives an error, not undefined behaviour.
             let rc = unsafe { f(fd, (&raw mut addr).cast(), &mut len) };
             (rc == 0 && libc::c_int::from(addr.sin_family) == libc::AF_INET)
                 .then(|| u16::from_be(addr.sin_port))
         };
         let mut sock_type: libc::c_int = 0;
         let mut len = mem::size_of::<libc::c_int>() as libc::socklen_t;
+        // SAFETY: SO_TYPE is an int and `sock_type` is writable for `len` bytes; a bad
+        // descriptor gives an error.
         let rc = unsafe {
             libc::getsockopt(
                 fd,
@@ -159,6 +165,8 @@ mod kernel {
     fn int_opt(fd: libc::c_int, level: libc::c_int, name: libc::c_int) -> libc::c_int {
         let mut v: libc::c_int = -1;
         let mut len = mem::size_of::<libc::c_int>() as libc::socklen_t;
+        // SAFETY: callers ask only for int options; `v` is writable for `len` bytes and the
+        // kernel writes no more than that. A bad descriptor gives an error.
         let rc = unsafe { libc::getsockopt(fd, level, name, (&raw mut v).cast(), &mut len) };
         assert_eq!(rc, 0, "getsockopt({level}, {name}) on fd {fd}");
         v
