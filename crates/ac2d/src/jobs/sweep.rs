@@ -181,6 +181,37 @@ mod tests {
         assert_eq!(rec.measurements[1][999], 0.5);
     }
 
+    /// The fan-out hands blocks over per period, per spectrum hop or in batches: the
+    /// recording is the same samples whatever their block shape.
+    #[test]
+    fn the_recording_does_not_depend_on_block_shapes() {
+        let record = |sizes: &[u32]| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let mut r = Recorder::new(SweepId(1), 1, vec![0, 2], 5000, 100, 400, 3, tx);
+            let mut s = 37;
+            for &n in sizes.iter().cycle() {
+                if s > 6000 {
+                    break;
+                }
+                r.push(&block(s, n, BlockFlags::NONE));
+                s += u64::from(n);
+            }
+            rx.try_iter()
+                .find_map(|m| match m {
+                    ControlMsg::SweepRecorded { result, .. } => Some(*result),
+                    _ => None,
+                })
+                .expect("recorded")
+                .expect("ok")
+        };
+        let one = record(&[128]);
+        for sizes in [&[1u32][..], &[8192], &[64, 4096, 3, 1000], &[2048, 6144]] {
+            let r = record(sizes);
+            assert_eq!(r.reference, one.reference, "{sizes:?}");
+            assert_eq!(r.measurements, one.measurements, "{sizes:?}");
+        }
+    }
+
     #[test]
     fn a_gap_ends_the_recording_as_a_dropout() {
         let (tx, rx) = std::sync::mpsc::channel();

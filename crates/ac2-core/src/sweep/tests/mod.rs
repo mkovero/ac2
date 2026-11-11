@@ -209,3 +209,4 @@ mod harmonics;
 mod ideal;
 mod noise;
 mod response;
+mod shift;
