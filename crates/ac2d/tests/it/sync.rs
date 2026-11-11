@@ -19,10 +19,8 @@ use common::*;
 const T: Duration = Duration::from_secs(5);
 
 fn snapshot(c: &mut Client) -> (State, Rev, u64) {
-    match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => (s.state, s.rev, s.daemon_incarnation.0),
-        other => panic!("{other:?}"),
-    }
+    let s = c.snapshot(Command::StateSnapshot);
+    (s.state, s.rev, s.daemon_incarnation.0)
 }
 
 fn apply(state: &mut State, e: &Event) {
@@ -59,17 +57,13 @@ fn hello_and_version_refusal() {
     init_log();
     let h = Daemon::start(config(manual_rig(), inproc("hello"))).unwrap();
     let (mut c, _s) = connect(&h, &[]);
-    match c.ok(Command::Hello {
+    let w = c.welcome(Command::Hello {
         client: "test".into(),
-    }) {
-        ReplyBody::Welcome(w) => {
-            assert_eq!(w.daemon_incarnation.0, h.incarnation());
-            assert!(w.server.contains("(build "), "{}", w.server);
-            assert!(w.client_id.0.starts_with("local-"));
-            assert_eq!(w.rev, Rev(0));
-        }
-        other => panic!("{other:?}"),
-    }
+    });
+    assert_eq!(w.daemon_incarnation.0, h.incarnation());
+    assert!(w.server.contains("(build "), "{}", w.server);
+    assert!(w.client_id.0.starts_with("local-"));
+    assert_eq!(w.rev, Rev(0));
 
     // Another version: refused with a typed error at the daemon's version.
     let mut req = Request::new(c.next_id(), Command::SessionStatus);
@@ -188,15 +182,11 @@ fn snapshot_events_missed_final_patch_and_expired_replay() {
     };
     assert_eq!(meta.rev, target.1);
     assert!(meta.rev > last, "missed final patch is visible on ka");
-    match a.ok(Command::StateSince { rev: last }) {
-        ReplyBody::Events(evs) => {
-            assert_eq!(evs.len(), 1);
-            for e in &evs {
-                apply(&mut mirror, e);
-                last = e.rev;
-            }
-        }
-        other => panic!("{other:?}"),
+    let evs = a.events(Command::StateSince { rev: last });
+    assert_eq!(evs.len(), 1);
+    for e in &evs {
+        apply(&mut mirror, e);
+        last = e.rev;
     }
     assert_eq!(last, target.1);
     assert_eq!(mirror, target.0, "mirror equals the daemon state");
@@ -284,18 +274,14 @@ fn a_stale_meas_update_is_a_conflict() {
     let h = Daemon::start(config(manual_rig(), inproc("stale-edit"))).unwrap();
     let (mut a, _s) = connect(&h, &[]);
     let mut b = Client::connect(h.context(), h.ctrl_endpoint());
-    let ReplyBody::Measurement(m) = a.ok(Command::MeasCreate {
+    let m = a.measurement(Command::MeasCreate {
         config: spl("FOH", 1),
-    }) else {
-        panic!("measurement")
-    };
-    let ReplyBody::Measurement(after_a) = a.ok(Command::MeasUpdate {
+    });
+    let after_a = a.measurement(Command::MeasUpdate {
         meas: m.id,
         base: m.config_rev,
         config: spl("FOH by A", 1),
-    }) else {
-        panic!("measurement")
-    };
+    });
     assert!(after_a.config_rev > m.config_rev);
     let e = b
         .call(Command::MeasUpdate {
@@ -422,12 +408,9 @@ fn keepalives_carry_the_host_the_callback_load_and_the_xruns() {
 
 fn welcome(h: &ac2d::Handle) -> ac2_proto::Welcome {
     let (mut c, _s) = connect(h, &[]);
-    match c.ok(Command::Hello {
+    c.welcome(Command::Hello {
         client: "test".into(),
-    }) {
-        ReplyBody::Welcome(w) => w,
-        other => panic!("{other:?}"),
-    }
+    })
 }
 
 /// The hello tells the rig's name and id; an id kept in its file is the same after a

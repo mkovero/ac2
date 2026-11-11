@@ -7,14 +7,14 @@ fn capture_average_math_export_import() {
     let mut r = rig("traces");
     let c = &mut r.c;
     let gain_db = 20.0 * f32::log10(ACOUSTIC_GAIN);
-    let epoch = state(c).session.epoch;
+    let epoch = c.state().session.epoch;
 
     // Unaligned capture into slot 1.
-    let raw = trace(c.ok(Command::TraceCapture {
+    let raw = c.trace(Command::TraceCapture {
         meas: MeasId(1),
         name: "raw".into(),
         slot: Some(1),
-    }));
+    });
     assert_eq!(raw.kind, TraceKind::Transfer);
     assert_eq!(
         raw.source,
@@ -44,29 +44,29 @@ fn capture_average_math_export_import() {
 
     // Aligned capture into slot 2.
     let delay = f64::from(ACOUSTIC_DELAY) / f64::from(FS);
-    let rev = match c.ok(Command::DelaySet {
-        meas: MeasId(1),
-        delay: Seconds(delay),
-    }) {
-        ReplyBody::Measurement(m) => m.config_rev.0,
-        other => panic!("{other:?}"),
-    };
+    let rev = c
+        .measurement(Command::DelaySet {
+            meas: MeasId(1),
+            delay: Seconds(delay),
+        })
+        .config_rev
+        .0;
     settle(&mut r.d, c, &r.sub, r.tok, rev);
-    let aligned = trace(c.ok(Command::TraceCapture {
+    let aligned = c.trace(Command::TraceCapture {
         meas: MeasId(1),
         name: "aligned".into(),
         slot: Some(2),
-    }));
+    });
     assert!((aligned.delay.0 - delay).abs() < 1e-12);
 
     // Complex average referred to the aligned trace's delay: both describe the same
     // arrival, so the average is the path itself with flat phase.
-    let avg = trace(c.ok(Command::TraceAverage {
+    let avg = c.trace(Command::TraceAverage {
         traces: vec![raw.id, aligned.id],
         method: AverageMethod::Complex,
         reference: DelayReference::Trace { trace: aligned.id },
         name: "avg".into(),
-    }));
+    });
     assert!(matches!(avg.source, TraceSource::Average { .. }));
     assert!((avg.delay.0 - delay).abs() < 1e-12);
     let ad = data(c, avg.id);
@@ -93,11 +93,11 @@ fn capture_average_math_export_import() {
     }
 
     // A capture into slot 1 takes the slot from "raw".
-    let again = trace(c.ok(Command::TraceCapture {
+    let again = c.trace(Command::TraceCapture {
         meas: MeasId(1),
         name: "again".into(),
         slot: Some(1),
-    }));
+    });
     let all = traces(c);
     let slot_of = |id| all.iter().find(|t| t.id == id).unwrap().edit.slot;
     assert_eq!(slot_of(raw.id), None);
@@ -131,13 +131,10 @@ fn capture_average_math_export_import() {
     });
 
     // Export → import is exact on the same grid; the copy is independent.
-    let (file_name, content) = match c.ok(Command::TraceExport {
+    let (file_name, content) = c.export(Command::TraceExport {
         trace: aligned.id,
         format: ExportFormat::Ac2Csv,
-    }) {
-        ReplyBody::Export { file_name, content } => (file_name, content),
-        other => panic!("{other:?}"),
-    };
+    });
     assert_eq!(file_name, "aligned.csv");
     let csv = String::from_utf8(content.0.clone()).unwrap();
     assert!(
@@ -145,14 +142,14 @@ fn capture_average_math_export_import() {
         "{csv}"
     );
     assert!(csv.contains("# source: captured from \"main\" (measurement 1)"));
-    let imp = trace(c.ok(Command::TraceImport {
+    let imp = c.trace(Command::TraceImport {
         file_name: file_name.clone(),
         format: ImportFormat::Auto,
         role: ImportRole::Trace,
         ir: None,
         content,
         owner: ac2_proto::model::TraceOwner::Imported,
-    }));
+    });
     assert_eq!(imp.grid_id, aligned.grid_id);
     assert_eq!(imp.edit.name, "aligned");
     assert!(matches!(
@@ -171,14 +168,14 @@ fn capture_average_math_export_import() {
     );
 
     // A target curve: magnitude only.
-    let tgt = trace(c.ok(Command::TraceImport {
+    let tgt = c.trace(Command::TraceImport {
         file_name: "house_curve.txt".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Target,
         ir: None,
         content: Blob(fixture("house_curve.txt")),
         owner: ac2_proto::model::TraceOwner::Imported,
-    }));
+    });
     assert_eq!(tgt.kind, TraceKind::Target);
     assert_eq!(tgt.edit.name, "house_curve");
     let td = data(c, tgt.id);
@@ -252,14 +249,14 @@ fn capture_average_math_export_import() {
 fn old_sweep_export_imports_as_transfer_with_its_delay() {
     let mut r = rig("trace-v1-sweep");
     let c = &mut r.c;
-    let t = trace(c.ok(Command::TraceImport {
+    let t = c.trace(Command::TraceImport {
         file_name: "ac2-v1-sweep1.csv".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Trace,
         ir: None,
         content: Blob(fixture("ac2-v1-sweep1.csv")),
         owner: ac2_proto::model::TraceOwner::Imported,
-    }));
+    });
     assert_eq!(t.kind, TraceKind::Transfer);
     assert!((t.delay.0 * 1000.0 - 3.333_333_333_333_333_5).abs() < 1e-12);
     assert!(matches!(
@@ -292,11 +289,11 @@ fn transfer_capture_keeps_its_ir() {
     let c = &mut r.c;
     let fs = f64::from(FS);
     let path_s = f64::from(ACOUSTIC_DELAY) / fs;
-    let raw = trace(c.ok(Command::TraceCapture {
+    let raw = c.trace(Command::TraceCapture {
         meas: MeasId(1),
         name: "raw".into(),
         slot: Some(1),
-    }));
+    });
     let ir = data(c, raw.id).ir.expect("captured with an IR");
     assert_eq!(ir.sample_rate, Hz(fs));
     assert_eq!(ir.ir.linear.len(), 4096);
@@ -325,40 +322,39 @@ fn transfer_capture_keeps_its_ir() {
     assert!((peak - path_s).abs() < 0.5 / fs, "peak {peak}");
 
     // Aligned: the arrival moves to time zero with the inserted delay.
-    let rev = match c.ok(Command::DelaySet {
-        meas: MeasId(1),
-        delay: Seconds(path_s),
-    }) {
-        ReplyBody::Measurement(m) => m.config_rev.0,
-        other => panic!("{other:?}"),
-    };
+    let rev = c
+        .measurement(Command::DelaySet {
+            meas: MeasId(1),
+            delay: Seconds(path_s),
+        })
+        .config_rev
+        .0;
     settle(&mut r.d, c, &r.sub, r.tok, rev);
-    let aligned = trace(c.ok(Command::TraceCapture {
+    let aligned = c.trace(Command::TraceCapture {
         meas: MeasId(1),
         name: "aligned".into(),
         slot: Some(2),
-    }));
+    });
     let air = data(c, aligned.id).ir.expect("captured with an IR");
     assert!((aligned.delay.0 - path_s).abs() < 1e-12);
     let peak = ir_peak_s(&air);
     assert!(peak.abs() < 0.5 / fs, "peak {peak}");
 
     // Export and import keep it bit for bit.
-    let content = match c.ok(Command::TraceExport {
-        trace: aligned.id,
-        format: ExportFormat::Ac2Csv,
-    }) {
-        ReplyBody::Export { content, .. } => content,
-        other => panic!("{other:?}"),
-    };
-    let back = trace(c.ok(Command::TraceImport {
+    let content = c
+        .export(Command::TraceExport {
+            trace: aligned.id,
+            format: ExportFormat::Ac2Csv,
+        })
+        .1;
+    let back = c.trace(Command::TraceImport {
         file_name: "aligned.csv".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Trace,
         ir: None,
         content,
         owner: ac2_proto::model::TraceOwner::Imported,
-    }));
+    });
     assert_eq!(data(c, back.id).ir, Some(air));
 
     // The stimulus stops (and has faded out) before a second measurement starts: its
@@ -385,11 +381,11 @@ fn transfer_capture_keeps_its_ir() {
         run(&mut r.d, 0.5);
         c.ok(Command::GenRefresh { lease_token: r.tok });
     }
-    let none = trace(c.ok(Command::TraceCapture {
+    let none = c.trace(Command::TraceCapture {
         meas: MeasId(2),
         name: "no reference".into(),
         slot: None,
-    }));
+    });
     assert_eq!(none.kind, TraceKind::Transfer);
     assert_eq!(data(c, none.id).ir, None);
     r.h.shutdown();

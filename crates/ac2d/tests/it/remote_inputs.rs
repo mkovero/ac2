@@ -13,7 +13,7 @@ use ac2_proto::model::{
     RemoteState, RigPeer, SessionConfig, SpectrumConfig, SystemClock,
 };
 use ac2_proto::units::{MeasId, RigId};
-use ac2_proto::{Command, ErrorCode, ReplyBody};
+use ac2_proto::{Command, ErrorCode};
 use ac2_zmq::{AuthorizedKeys, Context, CurveClient, KeyPair, PublicKey};
 use ac2d::config::SystemClockSource;
 use ac2d::{Daemon, Handle, Listen, NetworkSecurity};
@@ -63,18 +63,14 @@ fn client(ctx: &Context, h: &Handle, keys: &KeyPair) -> (Client, RigId) {
         server_key: h.server_public_key().unwrap(),
     };
     let mut c = Client::connect_with(ctx, h.ctrl_endpoint(), Some(&curve));
-    let ReplyBody::Welcome(w) = c.ok(Command::Hello {
+    let w = c.welcome(Command::Hello {
         client: "test".into(),
-    }) else {
-        panic!("welcome");
-    };
+    });
     (c, w.rig_id)
 }
 
 fn remote(c: &mut Client) -> RemoteState {
-    let ReplyBody::Snapshot(s) = c.ok(Command::StateSnapshot) else {
-        panic!("snapshot");
-    };
+    let s = c.snapshot(Command::StateSnapshot);
     s.state.remote
 }
 
@@ -116,9 +112,7 @@ fn spectrum(input: u16) -> MeasConfig {
 }
 
 fn create(c: &mut Client, config: MeasConfig) -> MeasId {
-    let ReplyBody::Measurement(m) = c.ok(Command::MeasCreate { config }) else {
-        panic!("measurement");
-    };
+    let m = c.measurement(Command::MeasCreate { config });
     m.id
 }
 
@@ -155,9 +149,7 @@ fn paired() -> Paired {
         name: "rig-a".into(),
     });
     let (mut as_rig, _) = client(&ctx, &b, &a_keys);
-    let ReplyBody::SourceState(s) = as_rig.ok(Command::SourceState) else {
-        panic!("source state");
-    };
+    let s = as_rig.source_state(Command::SourceState);
     assert_eq!(s.rig, b_id);
     let inputs: Vec<u16> = s
         .session

@@ -83,13 +83,11 @@ fn depth_policy_is_validated_and_kept() {
     let fast = DepthPolicy::FastLf {
         max_settle_s: Seconds(1.0),
     };
-    match c.ok(Command::MeasCreate { config: with(fast) }) {
-        ReplyBody::Measurement(m) => match m.config.kind {
-            MeasKind::Transfer { config } => assert_eq!(config.depth, fast),
-            other => panic!("{other:?}"),
-        },
+    let m = c.measurement(Command::MeasCreate { config: with(fast) });
+    match m.config.kind {
+        MeasKind::Transfer { config } => assert_eq!(config.depth, fast),
         other => panic!("{other:?}"),
-    }
+    };
     // The job starts with it.
     c.ok(Command::SessionOpen {
         config: session(false),
@@ -156,15 +154,12 @@ fn transfer_magnitude_delay_timing_and_ir() {
     c.ok(Command::MeasStart { meas: MeasId(1) });
     // Nothing captured yet: the finder refuses rather than guessing, with a typed reason,
     // and the refusal is what the measurement shows.
-    match c.ok(find(FinderBand::Auto, None)) {
-        ReplyBody::DelayFinding(f) => assert_eq!(
-            f.outcome,
-            DelayOutcome::NoEstimate {
-                reasons: vec![NoEstimateReason::ObservationTooShort]
-            }
-        ),
-        other => panic!("{other:?}"),
-    }
+    assert_eq!(
+        c.delay_finding(find(FinderBand::Auto, None)).outcome,
+        DelayOutcome::NoEstimate {
+            reasons: vec![NoEstimateReason::ObservationTooShort]
+        }
+    );
     let e = c
         .call(Command::DelayInsert {
             meas: MeasId(1),
@@ -188,10 +183,7 @@ fn transfer_magnitude_delay_timing_and_ir() {
         let e = c.call(find(band, obs)).unwrap_err();
         assert_eq!(e.code, ErrorCode::Invalid, "{band:?} {obs:?}: {e:?}");
     }
-    let tok = match c.ok(Command::GenAcquire { force: false }) {
-        ReplyBody::Lease(l) => l.lease_token,
-        other => panic!("{other:?}"),
-    };
+    let tok = c.acquire();
     c.ok(Command::GenSet {
         lease_token: tok,
         desired: GeneratorDesired {
@@ -259,44 +251,38 @@ fn transfer_magnitude_delay_timing_and_ir() {
     // The finder (on the raw, unaligned pair) sees the acoustic delay.
     let delay_s = f64::from(ACOUSTIC_DELAY) / f64::from(FS);
     for band in [FinderBand::Auto, FinderBand::Mid, FinderBand::Full] {
-        match c.ok(find(band, None)) {
-            ReplyBody::DelayFinding(f) => {
-                let DelayOutcome::Accepted { first, strongest } = f.outcome else {
-                    panic!("{band:?}: {f:?}");
-                };
-                assert!(
-                    (first.delay.0 - delay_s).abs() < 0.5 / f64::from(FS),
-                    "{f:?}"
-                );
-                assert!(
-                    (strongest.delay.0 - delay_s).abs() < 0.5 / f64::from(FS),
-                    "{f:?}"
-                );
-                assert!(f.confidence.psr_db.is_some_and(|p| p.0 > 10.0), "{f:?}");
-                assert!(f.observation.0 > 0.0);
-                if band == FinderBand::Mid {
-                    assert_eq!(f.band, ac2_proto::model::DelayBand::Mid);
-                }
-            }
-            other => panic!("{other:?}"),
+        let f = c.delay_finding(find(band, None));
+        let DelayOutcome::Accepted { first, strongest } = f.outcome else {
+            panic!("{band:?}: {f:?}");
+        };
+        assert!(
+            (first.delay.0 - delay_s).abs() < 0.5 / f64::from(FS),
+            "{f:?}"
+        );
+        assert!(
+            (strongest.delay.0 - delay_s).abs() < 0.5 / f64::from(FS),
+            "{f:?}"
+        );
+        assert!(f.confidence.psr_db.is_some_and(|p| p.0 > 10.0), "{f:?}");
+        assert!(f.observation.0 > 0.0);
+        if band == FinderBand::Mid {
+            assert_eq!(f.band, ac2_proto::model::DelayBand::Mid);
         }
     }
     // The finder's estimate goes in exactly, fraction included.
-    let (rev, inserted) = match c.ok(Command::DelayInsert {
-        meas: MeasId(1),
-        pick: ac2_proto::model::DelayPick::FirstArrival,
-    }) {
-        ReplyBody::Measurement(m) => {
-            let d = m.delay.unwrap();
-            assert!(
-                (d.applied_samples - f64::from(ACOUSTIC_DELAY)).abs() < 0.5,
-                "{}",
-                d.applied_samples
-            );
-            assert!((d.applied.0 * f64::from(FS) - d.applied_samples).abs() < 1e-6);
-            (m.config_rev.0, d.applied_samples)
-        }
-        other => panic!("{other:?}"),
+    let (rev, inserted) = {
+        let m = c.measurement(Command::DelayInsert {
+            meas: MeasId(1),
+            pick: ac2_proto::model::DelayPick::FirstArrival,
+        });
+        let d = m.delay.unwrap();
+        assert!(
+            (d.applied_samples - f64::from(ACOUSTIC_DELAY)).abs() < 0.5,
+            "{}",
+            d.applied_samples
+        );
+        assert!((d.applied.0 * f64::from(FS) - d.applied_samples).abs() < 1e-6);
+        (m.config_rev.0, d.applied_samples)
     };
     for _ in 0..4 {
         run_tf(&mut d, &sub, 0.5, rev);
@@ -349,17 +335,13 @@ fn transfer_magnitude_delay_timing_and_ir() {
     assert_eq!(st.nudged_samples, 1.0);
     // A capture records the applied delay and draws where the live curve is: the step is
     // its display nudge.
-    match c.ok(Command::TraceCapture {
+    let stepped = c.trace(Command::TraceCapture {
         meas: MeasId(1),
         name: "stepped".into(),
         slot: None,
-    }) {
-        ReplyBody::Trace(m) => {
-            assert!((m.delay.0 - applied / f64::from(FS)).abs() < 1e-12);
-            assert!((m.edit.delay_nudge.0 - 1.0 / f64::from(FS)).abs() < 1e-15);
-        }
-        other => panic!("{other:?}"),
-    }
+    });
+    assert!((stepped.delay.0 - applied / f64::from(FS)).abs() < 1e-12);
+    assert!((stepped.edit.delay_nudge.0 - 1.0 / f64::from(FS)).abs() < 1e-15);
     let cols = band(t, 10_000.0);
     assert!(
         cols.len() > 200,
@@ -390,13 +372,11 @@ fn transfer_magnitude_delay_timing_and_ir() {
     // Tracking follows the arrival and keeps the operator's steps from it: two agreeing
     // windows at the inserted arrival leave a delay stepped 3 samples later where it is.
     let (rev, _) = nudge(&mut c, 3.0);
-    match c.ok(Command::DelayTrack {
+    let tracked = c.measurement(Command::DelayTrack {
         meas: MeasId(1),
         enabled: true,
-    }) {
-        ReplyBody::Measurement(m) => assert!(m.delay.unwrap().tracking),
-        other => panic!("{other:?}"),
-    }
+    });
+    assert!(tracked.delay.unwrap().tracking);
     run_tf(&mut d, &sub, 1.0, rev);
     let st = snapshot_delay(&mut c);
     assert_eq!(
@@ -459,15 +439,13 @@ fn transfer_magnitude_delay_timing_and_ir() {
             offset: Samples(i64::from(LOOP_DELAY))
         }
     );
-    match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => assert_eq!(
-            s.state.timing.state,
-            TimingState::Locked {
-                offset: Samples(i64::from(LOOP_DELAY))
-            }
-        ),
-        other => panic!("{other:?}"),
-    }
+    let s = c.snapshot(Command::StateSnapshot);
+    assert_eq!(
+        s.state.timing.state,
+        TimingState::Locked {
+            offset: Samples(i64::from(LOOP_DELAY))
+        }
+    );
 
     // IR view: only computed for a subscriber; time zero at the inserted delay, so the
     // arrival sits at t = 0 with the path gain.
@@ -523,18 +501,8 @@ pub(crate) fn two_arrival_rig() -> ac2_audio::FakeBackend {
     .unwrap()
 }
 
-fn delay_state(r: ReplyBody) -> ac2_proto::model::DelayState {
-    match r {
-        ReplyBody::Measurement(m) => m.delay.unwrap(),
-        other => panic!("{other:?}"),
-    }
-}
-
 fn snapshot_delay(c: &mut Client) -> ac2_proto::model::DelayState {
-    match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state.measurements[0].delay.clone().unwrap(),
-        other => panic!("{other:?}"),
-    }
+    c.state().measurements[0].delay.clone().unwrap()
 }
 
 #[test]
@@ -552,15 +520,15 @@ fn an_ambiguous_finding_awaits_a_pick() {
         config: transfer("main"),
     });
     c.ok(Command::MeasStart { meas: MeasId(1) });
-    let st = delay_state(c.ok(Command::DelayTrack {
-        meas: MeasId(1),
-        enabled: true,
-    }));
+    let st = c
+        .measurement(Command::DelayTrack {
+            meas: MeasId(1),
+            enabled: true,
+        })
+        .delay
+        .unwrap();
     assert!(st.tracking && !st.awaiting_pick);
-    let tok = match c.ok(Command::GenAcquire { force: false }) {
-        ReplyBody::Lease(l) => l.lease_token,
-        other => panic!("{other:?}"),
-    };
+    let tok = c.acquire();
     c.ok(Command::GenSet {
         lease_token: tok,
         desired: GeneratorDesired {
@@ -581,20 +549,16 @@ fn an_ambiguous_finding_awaits_a_pick() {
     }
 
     let early = f64::from(ACOUSTIC_DELAY) / f64::from(FS);
-    match c.ok(find(FinderBand::Full, None)) {
-        ReplyBody::DelayFinding(f) => {
-            let DelayOutcome::Ambiguous { ranked, .. } = &f.outcome else {
-                panic!("{f:?}");
-            };
-            assert!(
-                ranked
-                    .iter()
-                    .any(|a| (a.delay.0 - early).abs() < 1.0 / f64::from(FS)),
-                "{ranked:?}"
-            );
-        }
-        other => panic!("{other:?}"),
-    }
+    let f = c.delay_finding(find(FinderBand::Full, None));
+    let DelayOutcome::Ambiguous { ranked, .. } = &f.outcome else {
+        panic!("{f:?}");
+    };
+    assert!(
+        ranked
+            .iter()
+            .any(|a| (a.delay.0 - early).abs() < 1.0 / f64::from(FS)),
+        "{ranked:?}"
+    );
     let st = snapshot_delay(&mut c);
     assert!(st.awaiting_pick, "{st:?}");
     assert!(st.tracking, "the operator's switch stays on while paused");
@@ -609,20 +573,26 @@ fn an_ambiguous_finding_awaits_a_pick() {
 
     // The operator picks a candidate: resolved, tracking resumes; the finding stays (the
     // other ranked picks remain insertable).
-    let st = delay_state(c.ok(Command::DelayInsert {
-        meas: MeasId(1),
-        pick: DelayPick::Ranked { index: 0 },
-    }));
+    let st = c
+        .measurement(Command::DelayInsert {
+            meas: MeasId(1),
+            pick: DelayPick::Ranked { index: 0 },
+        })
+        .delay
+        .unwrap();
     assert!(!st.awaiting_pick);
     assert!(st.last_finding.is_some());
 
     // A new ambiguous finding pauses again; a typed value resolves it too.
     c.ok(find(FinderBand::Full, None));
     assert!(snapshot_delay(&mut c).awaiting_pick);
-    let st = delay_state(c.ok(Command::DelaySet {
-        meas: MeasId(1),
-        delay: Seconds(early),
-    }));
+    let st = c
+        .measurement(Command::DelaySet {
+            meas: MeasId(1),
+            delay: Seconds(early),
+        })
+        .delay
+        .unwrap();
     assert!(!st.awaiting_pick);
     assert!(st.last_finding.is_none());
 
@@ -694,16 +664,15 @@ fn tracking_applies_a_fractional_arrival() {
     });
     c.ok(Command::MeasStart { meas: MeasId(1) });
     assert!(
-        delay_state(c.ok(Command::DelayTrack {
+        c.measurement(Command::DelayTrack {
             meas: MeasId(1),
             enabled: true,
-        }))
+        })
+        .delay
+        .unwrap()
         .tracking
     );
-    let tok = match c.ok(Command::GenAcquire { force: false }) {
-        ReplyBody::Lease(l) => l.lease_token,
-        other => panic!("{other:?}"),
-    };
+    let tok = c.acquire();
     c.ok(Command::GenSet {
         lease_token: tok,
         desired: GeneratorDesired {
@@ -732,10 +701,7 @@ fn tracking_applies_a_fractional_arrival() {
     );
     // The fraction goes in as a phase rotation: the aligned curve is flat to 10 kHz, where a
     // whole-sample delay would leave −0.37 · 360° · 10 kHz / 48 kHz ≈ −28°.
-    let rev = match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state.measurements[0].config_rev.0,
-        other => panic!("{other:?}"),
-    };
+    let rev = c.state().measurements[0].config_rev.0;
     for _ in 0..4 {
         run_tf(&mut d, &sub, 0.5, rev);
         c.ok(Command::GenRefresh { lease_token: tok });
@@ -799,16 +765,21 @@ fn tenth_millisecond_steps_at_96_khz_return_exactly() {
     c.ok(Command::MeasCreate {
         config: transfer("main"),
     });
-    let start = delay_state(c.ok(Command::DelaySet {
-        meas: MeasId(1),
-        delay: Seconds(1201.0 / f64::from(fs)),
-    }));
+    let start = c
+        .measurement(Command::DelaySet {
+            meas: MeasId(1),
+            delay: Seconds(1201.0 / f64::from(fs)),
+        })
+        .delay
+        .unwrap();
     let arrival = start.applied_samples - start.nudged_samples;
     let step = |c: &mut Client, by: f64| {
-        delay_state(c.ok(Command::DelayNudge {
+        c.measurement(Command::DelayNudge {
             meas: MeasId(1),
             by: Seconds(by),
-        }))
+        })
+        .delay
+        .unwrap()
     };
     let mut st = start.clone();
     for _ in 0..10 {
@@ -881,10 +852,7 @@ fn filled_rises_after_a_reset_and_a_delay_step_restarts_it() {
     }
     c.ok(Command::MeasCreate { config: m });
     c.ok(Command::MeasStart { meas: MeasId(1) });
-    let tok = match c.ok(Command::GenAcquire { force: false }) {
-        ReplyBody::Lease(l) => l.lease_token,
-        other => panic!("{other:?}"),
-    };
+    let tok = c.acquire();
     c.ok(Command::GenSet {
         lease_token: tok,
         desired: GeneratorDesired {
@@ -924,13 +892,13 @@ fn filled_rises_after_a_reset_and_a_delay_step_restarts_it() {
     let after_reset = fill_up(&mut d, &mut c, 0);
     assert!(after_reset[0] < 0.5, "{after_reset:?}");
 
-    let rev = match c.ok(Command::DelaySet {
-        meas: MeasId(1),
-        delay: Seconds(0.05),
-    }) {
-        ReplyBody::Measurement(m) => m.config_rev.0,
-        other => panic!("{other:?}"),
-    };
+    let rev = c
+        .measurement(Command::DelaySet {
+            meas: MeasId(1),
+            delay: Seconds(0.05),
+        })
+        .config_rev
+        .0;
     let after_step = fill_up(&mut d, &mut c, rev);
     assert!(after_step[0] < 1.0, "{after_step:?}");
     h.shutdown();

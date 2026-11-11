@@ -9,9 +9,9 @@ use crate::common;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use ac2_proto::Command;
 use ac2_proto::model::*;
 use ac2_proto::units::MeasId;
-use ac2_proto::{Command, ReplyBody};
 use ac2d::{AutosaveConfig, Daemon, Handle, Listen, NetworkSecurity};
 use common::*;
 
@@ -51,13 +51,6 @@ fn start(name: &str, dir: &Path) -> (Handle, ac2_audio::FakeBackend) {
     )
 }
 
-fn state(c: &mut Client) -> State {
-    match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state,
-        other => panic!("{other:?}"),
-    }
-}
-
 fn band_meter() -> MeasConfig {
     let mut m = spl("bands", 1);
     if let MeasKind::Spl { config } = &mut m.kind {
@@ -88,7 +81,8 @@ fn seed(dir: &Path) {
     c.ok(Command::MeasCreate {
         config: rig_meter("stage"),
     });
-    let rig = state(&mut c)
+    let rig = c
+        .state()
         .measurements
         .into_iter()
         .find(|m| m.config.scope == MeasScope::Rig)
@@ -98,7 +92,7 @@ fn seed(dir: &Path) {
         config: rig_meter("stage left"),
         base: rig.config_rev,
     });
-    for m in state(&mut c).measurements {
+    for m in c.state().measurements {
         c.ok(Command::MeasStart { meas: m.id });
     }
     let mut d = driver(&backend);
@@ -116,18 +110,18 @@ fn meter_for(c: &mut Client, backend: &ac2_audio::FakeBackend, seconds: f64) {
     c.ok(Command::SessionOpen {
         config: session(false),
     });
-    for m in state(c).measurements {
+    for m in c.state().measurements {
         if !m.running {
             c.ok(Command::MeasStart { meas: m.id });
         }
     }
     let mut d = driver(backend);
     run(&mut d, seconds);
-    assert!(state(c).measurements.iter().all(|m| m.running));
+    assert!(c.state().measurements.iter().all(|m| m.running));
 }
 
 fn damaged(c: &mut Client) -> Vec<DamagedFile> {
-    state(c).rig.damaged_files
+    c.state().rig.damaged_files
 }
 
 fn kinds(v: &[DamagedFile]) -> Vec<StateFile> {
@@ -137,7 +131,8 @@ fn kinds(v: &[DamagedFile]) -> Vec<StateFile> {
 }
 
 fn names(c: &mut Client) -> Vec<String> {
-    let mut v: Vec<_> = state(c)
+    let mut v: Vec<_> = c
+        .state()
         .measurements
         .into_iter()
         .map(|m| m.config.name)
@@ -274,15 +269,13 @@ fn no_damaged_files(dir: &Path) {
 }
 
 fn log_total(c: &mut Client, meas: MeasId) -> u64 {
-    match c.ok(Command::SplLogGet {
+    c.spl_log_page(Command::SplLogGet {
         meas,
         log: SplLogWhich::Current,
         from: 0,
         max: 1000,
-    }) {
-        ReplyBody::SplLogPage(p) => p.total,
-        other => panic!("{other:?}"),
-    }
+    })
+    .total
 }
 
 /// The nightly case, ten nights over: the log is cut inside its last row (mid-number,
@@ -322,7 +315,7 @@ fn nights(n: usize) {
 
         let (h, backend) = start("power-cut-night", &dir);
         let (mut c, _sub) = connect(&h, &[b"evt"]);
-        let st = state(&mut c);
+        let st = c.state();
         assert!(
             st.rig.damaged_files.is_empty(),
             "night {night}: {:?}",
@@ -447,7 +440,7 @@ fn damaged_small_stores_never_stop_the_start() {
         assert!(set_aside_exists(&dir.join("calibrations.json")), "{what}");
         // Meters on, and the rig settings are writable again.
         meter_on(&mut c, &backend);
-        let st = state(&mut c);
+        let st = c.state();
         let m = st
             .measurements
             .iter()
@@ -525,7 +518,7 @@ fn a_damaged_trace_costs_only_itself() {
         std::fs::write(dir.join("autosave").join(&file), &bad).unwrap();
         let (h, _backend) = start("power-cut-trace", &dir);
         let (mut c, _sub) = connect(&h, &[b"evt"]);
-        let st = state(&mut c);
+        let st = c.state();
         assert_eq!(st.measurements.len(), 1, "{what}");
         assert!(st.traces.is_empty(), "{what}");
         assert_eq!(kinds(&st.rig.damaged_files), [StateFile::Trace], "{what}");

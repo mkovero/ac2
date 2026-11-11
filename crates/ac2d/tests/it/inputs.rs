@@ -100,13 +100,11 @@ fn pair_rules_name_the_inputs_they_refuse() {
         "input 8 is not captured by the session, so it cannot be paired"
     );
     // Nothing of the refused attempts stuck.
-    let ReplyBody::Snapshot(snap) = c.ok(Command::StateSnapshot) else {
-        panic!("state");
-    };
+    let snap = c.snapshot(Command::StateSnapshot);
     let st = snap.state;
     assert!(st.inputs.is_empty() && st.pairs.is_empty());
     // A valid pair lands, and the daemon marks the rows' sides.
-    let ReplyBody::Inputs(all) = declare(
+    let all = declare(
         &mut c,
         rows,
         vec![Pair {
@@ -115,18 +113,15 @@ fn pair_rules_name_the_inputs_they_refuse() {
             name: Some("Main".into()),
         }],
     )
-    .unwrap() else {
-        panic!("inputs");
-    };
+    .unwrap()
+    .inputs();
     assert_eq!(all.pairs.len(), 1);
     let side = |ch: u16| all.inputs.iter().find(|r| r.channel == ch).unwrap().pair;
     assert_eq!(side(0), Some(PairSide::Left));
     assert_eq!(side(1), Some(PairSide::Right));
     assert_eq!(side(2), None);
     // Replacing the pair list with an empty one unpairs them.
-    let ReplyBody::Inputs(all) = declare(&mut c, Vec::new(), Vec::new()).unwrap() else {
-        panic!("inputs");
-    };
+    let all = declare(&mut c, Vec::new(), Vec::new()).unwrap().inputs();
     assert!(all.pairs.is_empty());
     assert!(all.inputs.iter().all(|r| r.pair.is_none()));
     // Two mics pair, whatever their mic names: an undeclared input is a mic too.
@@ -134,14 +129,13 @@ fn pair_rules_name_the_inputs_they_refuse() {
         mic: name.map(Into::into),
         curve: ac2_proto::model::CurveChoice::NotChosen,
     };
-    let ReplyBody::Inputs(all) = declare(
+    let all = declare(
         &mut c,
         vec![row(2, mic(Some("M30"))), row(3, mic(None))],
         vec![pair(2, 3)],
     )
-    .unwrap() else {
-        panic!("inputs");
-    };
+    .unwrap()
+    .inputs();
     assert_eq!(all.pairs.len(), 1);
     let side = |ch: u16| all.inputs.iter().find(|r| r.channel == ch).unwrap().pair;
     assert_eq!(side(2), Some(PairSide::Left));
@@ -242,9 +236,7 @@ fn slow_a_line_calibration_measures_the_tone_and_lands_in_the_list() {
     // ACOUSTIC_GAIN down: that is the level the daemon measures.
     let level = -12.0;
     let measured = level + 20.0 * f64::from(ACOUSTIC_GAIN).log10();
-    let ReplyBody::Lease(lease) = c.ok(Command::GenAcquire { force: false }) else {
-        panic!("lease");
-    };
+    let lease = c.lease(Command::GenAcquire { force: false });
     c.ok(Command::GenSet {
         lease_token: lease.lease_token,
         desired: GeneratorDesired {
@@ -272,16 +264,15 @@ fn slow_a_line_calibration_measures_the_tone_and_lands_in_the_list() {
     // A +4 dBu tone (1.2277 V) measured at −18.02 dBFS: full scale is +22.02 dBu, 9.775 V.
     let v_fs = 1.2277 / 10f64.powf(measured / 20.0);
     let dbu_fs = 20.0 * (v_fs / 0.774_597).log10();
-    let ReplyBody::LineCalibration(entry) = steady(
+    let entry = steady(
         &mut c,
         Command::CalLine {
             channel: 1,
             volts: Volts(1.2277),
         },
     )
-    .unwrap() else {
-        panic!("line calibration");
-    };
+    .unwrap()
+    .line_calibration();
     assert_eq!(entry.key.channel, 1);
     assert_eq!(entry.key.device, fake_dev());
     assert_eq!(entry.line.volts, Volts(1.2277));
@@ -303,9 +294,7 @@ fn slow_a_line_calibration_measures_the_tone_and_lands_in_the_list() {
     };
     assert_eq!(line_calibrations, vec![entry.clone()]);
     // The state carries it, and a meter on the input would read dBu through it.
-    let ReplyBody::Snapshot(snap) = c.ok(Command::StateSnapshot) else {
-        panic!("state");
-    };
+    let snap = c.snapshot(Command::StateSnapshot);
     let st = snap.state;
     assert_eq!(st.line_calibrations, vec![entry.clone()]);
     match ac2_proto::cal::state_input_use(&st, 1).sensitivity.status() {
@@ -324,9 +313,7 @@ fn slow_a_line_calibration_measures_the_tone_and_lands_in_the_list() {
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::NotFound);
-    let ReplyBody::Snapshot(snap) = c.ok(Command::StateSnapshot) else {
-        panic!("state");
-    };
+    let snap = c.snapshot(Command::StateSnapshot);
     let st = snap.state;
     assert!(st.line_calibrations.is_empty());
     assert_eq!(

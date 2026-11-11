@@ -31,10 +31,9 @@ fn spectrum_fft_length_and_window_change_restart_it() {
         .frame(T, |f| matches!(f.data, FrameData::Spec(_)))
         .expect("spec frame");
     let at_update = end_sample(&r.d);
-    let m = match c2.update_ok(MeasId(2), spec(1024, Window::FlatTop)) {
-        ReplyBody::Measurement(m) => m,
-        other => panic!("{other:?}"),
-    };
+    let m = c2
+        .update_ok(MeasId(2), spec(1024, Window::FlatTop))
+        .measurement();
     assert!(m.running);
     for _ in 0..3 {
         run(&mut r.d, 0.3);
@@ -86,10 +85,9 @@ fn spectrum_smoothing_live_and_captured() {
     c2.ok(Command::MeasCreate { config: spec(None) });
     c2.ok(Command::MeasStart { meas: MeasId(2) });
     run(&mut r.d, 0.5);
-    let m = match c2.update_ok(MeasId(2), spec(Some(SmoothingFraction::Sixth))) {
-        ReplyBody::Measurement(m) => m,
-        other => panic!("{other:?}"),
-    };
+    let m = c2
+        .update_ok(MeasId(2), spec(Some(SmoothingFraction::Sixth)))
+        .measurement();
     assert!(m.running);
     for _ in 0..3 {
         run(&mut r.d, 0.3);
@@ -109,11 +107,11 @@ fn spectrum_smoothing_live_and_captured() {
     };
     assert_eq!(live.meta.smoothing, Some(SmoothingFraction::Sixth));
 
-    let t = trace(c2.ok(Command::TraceCapture {
+    let t = c2.trace(Command::TraceCapture {
         meas: MeasId(2),
         name: "fft".into(),
         slot: None,
-    }));
+    });
     let power = Smoothing {
         fraction: SmoothingFraction::Sixth,
         mode: SmoothingMode::Magnitude,
@@ -218,10 +216,9 @@ fn multires_spectrum_live_and_captured() {
     let multi = SpecResolution::Multi {
         grid: Resolution::TwentyFourth,
     };
-    let m = match c2.update_ok(MeasId(2), spec(multi, Some(SmoothingFraction::Sixth))) {
-        ReplyBody::Measurement(m) => m,
-        other => panic!("{other:?}"),
-    };
+    let m = c2
+        .update_ok(MeasId(2), spec(multi, Some(SmoothingFraction::Sixth)))
+        .measurement();
     for _ in 0..4 {
         run(&mut r.d, 0.3);
         r.c.ok(Command::GenRefresh { lease_token: r.tok });
@@ -250,11 +247,11 @@ fn multires_spectrum_live_and_captured() {
     assert!((bands.bands[5].window.0 - 1024.0 / 48_000.0).abs() < 1e-9);
     assert_eq!(bands.unresolved.resolution, Resolution::TwentyFourth);
 
-    let t = trace(c2.ok(Command::TraceCapture {
+    let t = c2.trace(Command::TraceCapture {
         meas: MeasId(2),
         name: "multi".into(),
         slot: None,
-    }));
+    });
     assert_eq!(t.grid_id, log.id());
     let served = data(&mut c2, t.id);
     assert_eq!(served.mag_db.len(), g.len());
@@ -329,11 +326,11 @@ fn spectrum_live_columns_are_the_captured_bins_maxima() {
     let FrameData::Spec(live) = f.data else {
         unreachable!()
     };
-    let t = trace(c2.ok(Command::TraceCapture {
+    let t = c2.trace(Command::TraceCapture {
         meas: MeasId(2),
         name: "fft".into(),
         slot: None,
-    }));
+    });
     let bins = data(&mut c2, t.id).mag_db;
     assert_eq!(bins.len(), 32_769);
     let cols = ac2_proto::BinColumns::new(f64::from(FS), 65_536, 96);

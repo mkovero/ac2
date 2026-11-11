@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use ac2_proto::model::*;
 use ac2_proto::units::*;
-use ac2_proto::{Change, Command, ReplyBody};
+use ac2_proto::{Change, Command};
 use ac2d::{AutosaveConfig, Daemon, Handle};
 use common::*;
 
@@ -33,18 +33,8 @@ fn start(name: &str, dir: &Path, restore: bool) -> (Handle, ac2_audio::FakeBacke
     (Daemon::start(cfg).unwrap(), backend)
 }
 
-fn state(c: &mut Client) -> State {
-    match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state,
-        other => panic!("{other:?}"),
-    }
-}
-
 fn trace_data(c: &mut Client, id: TraceId) -> TraceData {
-    match c.ok(Command::TraceGet { trace: id }) {
-        ReplyBody::TraceData(d) => *d,
-        other => panic!("{other:?}"),
-    }
+    c.trace_data(Command::TraceGet { trace: id })
 }
 
 /// The next `autosave` event matching `pred`.
@@ -67,10 +57,7 @@ pub(super) fn capture(h: &Handle, backend: &ac2_audio::FakeBackend, c: &mut Clie
         config: transfer("main"),
     });
     c.ok(Command::MeasStart { meas: MeasId(1) });
-    let tok = match c.ok(Command::GenAcquire { force: false }) {
-        ReplyBody::Lease(l) => l.lease_token,
-        other => panic!("{other:?}"),
-    };
+    let tok = c.acquire();
     c.ok(Command::GenSet {
         lease_token: tok,
         desired: GeneratorDesired {
@@ -92,14 +79,11 @@ pub(super) fn capture(h: &Handle, backend: &ac2_audio::FakeBackend, c: &mut Clie
     }
     tf.frame(T, |f| matches!(f.data, ac2_proto::FrameData::Tf(_)))
         .expect("tf frame");
-    match c.ok(Command::TraceCapture {
+    c.trace(Command::TraceCapture {
         meas: MeasId(1),
         name: "kept".into(),
         slot: Some(1),
-    }) {
-        ReplyBody::Trace(t) => t,
-        other => panic!("{other:?}"),
-    }
+    })
 }
 
 fn rename(c: &mut Client, t: &TraceMeta, name: &str) {
@@ -116,7 +100,7 @@ fn traces_survive_a_restart() {
     let dir = tempfile::tempdir().unwrap();
     let (h, backend) = start("autosave-restart", dir.path(), true);
     let (mut c, sub) = connect(&h, &[b"evt"]);
-    let first = state(&mut c).autosave;
+    let first = c.state().autosave;
     assert_eq!(
         first,
         Autosave {
@@ -130,14 +114,11 @@ fn traces_survive_a_restart() {
     assert_eq!(kept.edit.owner, TraceOwner::Meas { meas: MeasId(1) });
     let kept_data = trace_data(&mut c, kept.id);
     // A colour changes how the running measurement is drawn, nothing of its job.
-    let before = state(&mut c).measurements[0].clone();
-    let after = match c.ok(Command::MeasColour {
+    let before = c.state().measurements[0].clone();
+    let after = c.measurement(Command::MeasColour {
         meas: MeasId(1),
         colour: Some(ColourFamily::Neutral),
-    }) {
-        ReplyBody::Measurement(m) => m,
-        other => panic!("{other:?}"),
-    };
+    });
     assert_eq!(after.colour, Some(ColourFamily::Neutral));
     assert_eq!(after.config_rev, before.config_rev);
     assert!(after.running);
@@ -151,13 +132,10 @@ fn traces_survive_a_restart() {
     );
     // So does a layout: what clients show while it is selected.
     let layout = ac2_proto::samples::pane_layout();
-    let after = match c.ok(Command::MeasLayout {
+    let after = c.measurement(Command::MeasLayout {
         meas: MeasId(1),
         layout: Some(layout.clone()),
-    }) {
-        ReplyBody::Measurement(m) => m,
-        other => panic!("{other:?}"),
-    };
+    });
     assert_eq!(after.layout, Some(layout.clone()));
     assert_eq!(after.config_rev, before.config_rev);
     assert!(after.running);
@@ -185,10 +163,10 @@ fn traces_survive_a_restart() {
         "a level range upside down"
     );
     // A settings change keeps it.
-    let kept_layout = match c.update_ok(MeasId(1), after.config.clone()) {
-        ReplyBody::Measurement(m) => m.layout,
-        other => panic!("{other:?}"),
-    };
+    let kept_layout = c
+        .update_ok(MeasId(1), after.config.clone())
+        .measurement()
+        .layout;
     assert_eq!(kept_layout, Some(layout.clone()));
     // A sweep measurement is restored with its settings (and never as running).
     let sweep = MeasConfig {
@@ -215,7 +193,7 @@ fn traces_survive_a_restart() {
     autosave_event(&sub, |a| a.state == AutosaveState::Pending);
     let saved = autosave_event(&sub, |a| a.state == AutosaveState::Saved);
     let saved_at = saved.saved_at.expect("saved_at");
-    assert_eq!(state(&mut c).autosave, saved);
+    assert_eq!(c.state().autosave, saved);
     assert!(dir.path().join("autosave/session.json").exists());
     assert!(!dir.path().join("autosave/session.prev.json").exists());
     drop((c, sub));
@@ -223,7 +201,7 @@ fn traces_survive_a_restart() {
 
     let (h, _backend) = start("autosave-restart-2", dir.path(), true);
     let (mut c, sub) = connect(&h, &[b"evt"]);
-    let st = state(&mut c);
+    let st = c.state();
     assert_eq!(st.traces, vec![kept.clone()]);
     assert_eq!(st.traces[0].edit.slot, Some(1));
     let back = trace_data(&mut c, kept.id);
@@ -279,17 +257,14 @@ fn slow_a_burst_of_edits_is_one_write() {
     let dir = tempfile::tempdir().unwrap();
     let (h, _backend) = start("autosave-burst", dir.path(), true);
     let (mut c, sub) = connect(&h, &[b"evt"]);
-    let t = match c.ok(Command::TraceImport {
+    let t = c.trace(Command::TraceImport {
         file_name: "target.txt".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Target,
         ir: None,
         content: Blob(b"20 -3.0\n1000 0.0\n20000 -6.0\n".to_vec()),
         owner: ac2_proto::model::TraceOwner::Imported,
-    }) {
-        ReplyBody::Trace(t) => t,
-        other => panic!("{other:?}"),
-    };
+    });
     autosave_event(&sub, |a| a.state == AutosaveState::Saved);
 
     let mut last = Instant::now();
@@ -355,7 +330,7 @@ fn an_unwritable_directory_is_reported() {
     };
     assert!(reason.contains("blocker"), "{reason}");
     assert_eq!(a.saved_at, None);
-    assert_eq!(state(&mut c).autosave, a);
+    assert_eq!(c.state().autosave, a);
     drop((c, sub));
     h.shutdown();
 }
@@ -386,7 +361,7 @@ fn slow_a_log_that_cannot_be_written_is_reported_until_it_is() {
     assert_eq!((f.meas, f.log), (MeasId(1), MeterLog::Spl));
     assert!(!f.reason.is_empty());
     assert!(f.since.0 > 0);
-    assert_eq!(state(&mut c).autosave.log_failures, a.log_failures);
+    assert_eq!(c.state().autosave.log_failures, a.log_failures);
 
     // The disk is fixed; the next write of the autosave tries the log again. The whole
     // autosave failed on the same path, so that write waits out the retry delay counted
@@ -400,7 +375,7 @@ fn slow_a_log_that_cannot_be_written_is_reported_until_it_is() {
         |e| matches!(&e.change, Change::Autosave(a) if a.log_failures.is_empty()),
     )
     .expect("autosave event without log failures");
-    assert!(state(&mut c).autosave.log_failures.is_empty());
+    assert!(c.state().autosave.log_failures.is_empty());
     drop((c, sub));
     h.shutdown();
 }
@@ -435,7 +410,7 @@ fn another_version_is_set_aside() {
     write_autosave(dir.path(), Some(999));
     let (h, _backend) = start("autosave-version", dir.path(), true);
     let (mut c, _sub) = connect(&h, &[b"evt"]);
-    let st = state(&mut c);
+    let st = c.state();
     assert!(st.measurements.is_empty());
     assert!(!dir.path().join("autosave").exists());
     assert!(dir.path().join("autosave.v999/session.json").exists());
@@ -450,7 +425,7 @@ fn no_restore_starts_empty() {
     write_autosave(dir.path(), None);
     let (h, _backend) = start("autosave-norestore", dir.path(), false);
     let (mut c, _sub) = connect(&h, &[b"evt"]);
-    assert!(state(&mut c).measurements.is_empty());
+    assert!(c.state().measurements.is_empty());
     let aside = ac2_traces::session::read_manifest(&dir.path().join("autosave.unrestored"));
     assert_eq!(aside.unwrap().measurements.len(), 1);
     drop(c);
@@ -458,15 +433,12 @@ fn no_restore_starts_empty() {
 }
 
 fn log_page(c: &mut Client, meas: MeasId) -> SplLogPage {
-    match c.ok(Command::SplLogGet {
+    c.spl_log_page(Command::SplLogGet {
         meas,
         log: SplLogWhich::Current,
         from: 0,
         max: 1000,
-    }) {
-        ReplyBody::SplLogPage(p) => p,
-        other => panic!("{other:?}"),
-    }
+    })
 }
 
 /// The SPL log file the autosave's manifest names, and its rows.
@@ -524,7 +496,7 @@ fn slow_spl_log_survives_a_restart() {
 
     let (h, _backend) = start("autosave-spl-2", dir.path(), true);
     let (mut c, _sub) = connect(&h, &[b"evt"]);
-    let st = state(&mut c);
+    let st = c.state();
     assert_eq!(st.measurements.len(), 1);
     assert_eq!(st.spl_logs.len(), 1);
     assert_eq!(st.spl_logs[0].windows.len(), 5);
@@ -597,7 +569,7 @@ fn an_autosave_with_a_delay_out_of_range_is_set_aside() {
 
     let (h, _backend) = start("autosave-delay", dir.path(), true);
     let (mut c, _sub) = connect(&h, &[b"evt"]);
-    assert!(state(&mut c).measurements.is_empty());
+    assert!(c.state().measurements.is_empty());
     let aside = std::fs::read_dir(dir.path())
         .unwrap()
         .filter_map(Result::ok)

@@ -25,7 +25,7 @@ use ac2_proto::model::{
     SpectrumConfig, TraceKind, TraceSource,
 };
 use ac2_proto::units::{Blob, Dbfs, LeaseToken, MeasId, Seconds, TraceId};
-use ac2_proto::{Command, ErrorCode, ReplyBody};
+use ac2_proto::{Command, ErrorCode};
 use ac2d::Daemon;
 use common::*;
 
@@ -99,13 +99,6 @@ fn tf(f: &Frame) -> &TfFrame {
     match &f.data {
         FrameData::Tf(t) => t,
         _ => unreachable!(),
-    }
-}
-
-fn created(r: ReplyBody) -> MeasId {
-    match r {
-        ReplyBody::Measurement(m) => m.id,
-        other => panic!("{other:?}"),
     }
 }
 
@@ -194,10 +187,7 @@ fn rig(name: &str, prefixes: &[&[u8]]) -> Rig {
         });
         c.ok(Command::MeasStart { meas: MeasId(meas) });
     }
-    let tok = match c.ok(Command::GenAcquire { force: false }) {
-        ReplyBody::Lease(l) => l.lease_token,
-        other => panic!("{other:?}"),
-    };
+    let tok = c.acquire();
     c.ok(Command::GenSet {
         lease_token: tok,
         desired: GeneratorDesired {
@@ -233,17 +223,13 @@ fn power_average_of_three_positions() {
         );
     }
 
-    match c.ok(Command::MeasCreate {
+    let audience = c.measurement(Command::MeasCreate {
         config: average("Audience", &[1, 2, 3]),
-    }) {
-        ReplyBody::Measurement(m) => {
-            assert_eq!(m.id, MeasId(4));
-            // Its grid is its operands', known before it runs.
-            assert!(m.grid_id.is_some());
-            assert!(m.delay.is_none());
-        }
-        other => panic!("{other:?}"),
-    }
+    });
+    assert_eq!(audience.id, MeasId(4));
+    // Its grid is its operands', known before it runs.
+    assert!(audience.grid_id.is_some());
+    assert!(audience.delay.is_none());
     c.ok(Command::MeasStart { meas: MeasId(4) });
     play(&mut r.d, c, r.tok, 3.5);
     let [f] = newest(&r.sub, &r.d, [4]);
@@ -275,14 +261,11 @@ fn power_average_of_three_positions() {
     }
 
     // Captured: a transfer trace on the average's grid naming the two positions averaged.
-    let trace = match c.ok(Command::TraceCapture {
+    let trace = c.trace(Command::TraceCapture {
         meas: MeasId(4),
         name: "audience".into(),
         slot: None,
-    }) {
-        ReplyBody::Trace(t) => t,
-        other => panic!("{other:?}"),
-    };
+    });
     match &trace.source {
         TraceSource::Math {
             meas,
@@ -370,15 +353,17 @@ fn power_average_of_three_positions() {
 fn ratio_edit_capture_and_summation() {
     let mut r = rig("math-ratio", &[b"d/4/tf", b"d/5/tf"]);
     let c = &mut r.c;
-    let q = created(c.ok(Command::MeasCreate {
-        config: binary(
-            "Seat 1 ÷ Seat 2",
-            MathDomain::Transfer,
-            meas(1),
-            MathOp::Divide,
-            meas(2),
-        ),
-    }));
+    let q = c
+        .measurement(Command::MeasCreate {
+            config: binary(
+                "Seat 1 ÷ Seat 2",
+                MathDomain::Transfer,
+                meas(1),
+                MathOp::Divide,
+                meas(2),
+            ),
+        })
+        .id;
     assert_eq!(q, MeasId(4));
     c.ok(Command::MeasStart { meas: q });
     play(&mut r.d, c, r.tok, 3.5);
@@ -400,14 +385,11 @@ fn ratio_edit_capture_and_summation() {
     }
 
     // Captured: the trace keeps +6 dB while the channel is edited to ×.
-    let captured = match c.ok(Command::TraceCapture {
+    let captured = c.trace(Command::TraceCapture {
         meas: q,
         name: "ratio".into(),
         slot: Some(1),
-    }) {
-        ReplyBody::Trace(t) => t,
-        other => panic!("{other:?}"),
-    };
+    });
     assert_eq!(captured.kind, TraceKind::Transfer);
     match &captured.source {
         TraceSource::Math {
@@ -440,33 +422,29 @@ fn ratio_edit_capture_and_summation() {
     for &i in &band(t) {
         assert!(t.mag[i].abs() < 0.3, "{} dB", t.mag[i]);
     }
-    let data = match c.ok(Command::TraceGet { trace: captured.id }) {
-        ReplyBody::TraceData(d) => d,
-        other => panic!("{other:?}"),
-    };
+    let data = c.trace_data(Command::TraceGet { trace: captured.id });
     for &i in &band(t) {
         assert!((data.mag_db[i] - 6.0).abs() < 0.3, "{}", data.mag_db[i]);
     }
 
     // Summation prediction: Seat 1 as captured plus Seat 2 live, in one epoch, is the sum of
     // the two arrivals, |g₁ + g₂·e^{−j2πfΔ}|.
-    let seat1 = match c.ok(Command::TraceCapture {
+    let seat1 = c.trace(Command::TraceCapture {
         meas: MeasId(1),
         name: "Seat 1 alone".into(),
         slot: Some(2),
-    }) {
-        ReplyBody::Trace(t) => t,
-        other => panic!("{other:?}"),
-    };
-    let sum = created(c.ok(Command::MeasCreate {
-        config: binary(
-            "Seat 1 + Seat 2",
-            MathDomain::Transfer,
-            Operand::Trace { trace: seat1.id },
-            MathOp::Add,
-            meas(2),
-        ),
-    }));
+    });
+    let sum = c
+        .measurement(Command::MeasCreate {
+            config: binary(
+                "Seat 1 + Seat 2",
+                MathDomain::Transfer,
+                Operand::Trace { trace: seat1.id },
+                MathOp::Add,
+                meas(2),
+            ),
+        })
+        .id;
     assert_eq!(sum, MeasId(5));
     c.ok(Command::MeasStart { meas: sum });
     play(&mut r.d, c, r.tok, 1.0);
@@ -505,17 +483,14 @@ fn ratio_edit_capture_and_summation() {
         let f = 20.0 * 1000f64.powf(f64::from(k) / 30.0);
         text.push_str(&format!("{f} 0.0 0.0\n"));
     }
-    let imp = match c.ok(Command::TraceImport {
+    let imp = c.trace(Command::TraceImport {
         file_name: "flat.txt".into(),
         format: ImportFormat::AnalyzerText,
         role: ImportRole::Trace,
         ir: None,
         content: Blob(text.into_bytes()),
         owner: ac2_proto::model::TraceOwner::Imported,
-    }) {
-        ReplyBody::Trace(t) => t,
-        other => panic!("{other:?}"),
-    };
+    });
     let e = c
         .call(Command::MeasCreate {
             config: binary(
@@ -530,15 +505,17 @@ fn ratio_edit_capture_and_summation() {
     assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
     assert!(e.msg.contains("time base"), "{}", e.msg);
     // ÷ with it is fine, and says its phase is of own alignments.
-    let own = created(c.ok(Command::MeasCreate {
-        config: binary(
-            "Seat 1 ÷ flat",
-            MathDomain::Transfer,
-            meas(1),
-            MathOp::Divide,
-            Operand::Trace { trace: imp.id },
-        ),
-    }));
+    let own = c
+        .measurement(Command::MeasCreate {
+            config: binary(
+                "Seat 1 ÷ flat",
+                MathDomain::Transfer,
+                meas(1),
+                MathOp::Divide,
+                Operand::Trace { trace: imp.id },
+            ),
+        })
+        .id;
     c.ok(Command::MeasDelete {
         meas: own,
         traces: ac2_proto::model::OwnedTraces::Keep,
@@ -586,15 +563,17 @@ fn spectrum_difference_on_the_spectrum_stream() {
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
-    let id = created(c.ok(Command::MeasCreate {
-        config: binary(
-            "Spectrum 1 − Spectrum 2",
-            MathDomain::Spectrum,
-            meas(4),
-            MathOp::Subtract,
-            meas(5),
-        ),
-    }));
+    let id = c
+        .measurement(Command::MeasCreate {
+            config: binary(
+                "Spectrum 1 − Spectrum 2",
+                MathDomain::Spectrum,
+                meas(4),
+                MathOp::Subtract,
+                meas(5),
+            ),
+        })
+        .id;
     assert_eq!(id, MeasId(6));
     for m in [1, 4, 5, 6] {
         c.ok(Command::MeasStart { meas: MeasId(m) });
@@ -621,14 +600,11 @@ fn spectrum_difference_on_the_spectrum_stream() {
     let median = diffs[diffs.len() / 2];
     assert!((median - 6.0).abs() < 0.5, "median {median} dB");
     // Its capture is a spectrum trace on every bin.
-    let t = match c.ok(Command::TraceCapture {
+    let t = c.trace(Command::TraceCapture {
         meas: id,
         name: "diff".into(),
         slot: None,
-    }) {
-        ReplyBody::Trace(t) => t,
-        other => panic!("{other:?}"),
-    };
+    });
     assert!(matches!(t.kind, TraceKind::Spectrum { .. }), "{:?}", t.kind);
     // An operand keeps its FFT length while named.
     let e = c
@@ -696,15 +672,17 @@ fn density_spectrum_frames_captures_and_level_mismatch() {
             },
         });
     }
-    let id = created(c.ok(Command::MeasCreate {
-        config: binary(
-            "tone − density",
-            MathDomain::Spectrum,
-            meas(4),
-            MathOp::Subtract,
-            meas(5),
-        ),
-    }));
+    let id = c
+        .measurement(Command::MeasCreate {
+            config: binary(
+                "tone − density",
+                MathDomain::Spectrum,
+                meas(4),
+                MathOp::Subtract,
+                meas(5),
+            ),
+        })
+        .id;
     for m in [4, 5, id.0] {
         c.ok(Command::MeasStart { meas: MeasId(m) });
     }
@@ -726,14 +704,11 @@ fn density_spectrum_frames_captures_and_level_mismatch() {
         [OperandStatus::Included, OperandStatus::Mismatch],
         "{m:?}"
     );
-    let t = match c.ok(Command::TraceCapture {
+    let t = c.trace(Command::TraceCapture {
         meas: MeasId(5),
         name: "density".into(),
         slot: None,
-    }) {
-        ReplyBody::Trace(t) => t,
-        other => panic!("{other:?}"),
-    };
+    });
     assert_eq!(
         t.kind,
         TraceKind::Spectrum {
@@ -765,17 +740,14 @@ fn an_imported_impulse_response_filters_live_measurements() {
         },
     });
     let wav = impulse_wav(4096, 100, 0.5);
-    let ir = match c.ok(Command::TraceImport {
+    let ir = c.trace(Command::TraceImport {
         file_name: "speaker.wav".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Trace,
         ir: None,
         content: Blob(wav.clone()),
         owner: ac2_proto::model::TraceOwner::Imported,
-    }) {
-        ReplyBody::Trace(t) => t,
-        other => panic!("{other:?}"),
-    };
+    });
     assert_eq!(ir.kind, TraceKind::Transfer);
     assert!((ir.delay.0 - 100.0 / f64::from(FS)).abs() < 1e-9);
     let TraceSource::Imported {
@@ -800,24 +772,28 @@ fn an_imported_impulse_response_filters_live_measurements() {
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
-    let through = created(c.ok(Command::MeasCreate {
-        config: binary(
-            "Spectrum 1 × speaker",
-            MathDomain::Spectrum,
-            meas(4),
-            MathOp::Multiply,
-            h,
-        ),
-    }));
-    let cascade = created(c.ok(Command::MeasCreate {
-        config: binary(
-            "Seat 1 × speaker",
-            MathDomain::Transfer,
-            meas(1),
-            MathOp::Multiply,
-            h,
-        ),
-    }));
+    let through = c
+        .measurement(Command::MeasCreate {
+            config: binary(
+                "Spectrum 1 × speaker",
+                MathDomain::Spectrum,
+                meas(4),
+                MathOp::Multiply,
+                h,
+            ),
+        })
+        .id;
+    let cascade = c
+        .measurement(Command::MeasCreate {
+            config: binary(
+                "Seat 1 × speaker",
+                MathDomain::Transfer,
+                meas(1),
+                MathOp::Multiply,
+                h,
+            ),
+        })
+        .id;
     assert_eq!((through, cascade), (MeasId(5), MeasId(6)));
     for m in 4..=6 {
         c.ok(Command::MeasStart { meas: MeasId(m) });
@@ -874,13 +850,10 @@ fn an_imported_impulse_response_filters_live_measurements() {
     assert!(checked > 50, "{checked}");
 
     // Out as it came in.
-    let (file_name, content) = match c.ok(Command::TraceExport {
+    let (file_name, content) = c.export(Command::TraceExport {
         trace: ir.id,
         format: ac2_proto::model::ExportFormat::IrWav,
-    }) {
-        ReplyBody::Export { file_name, content } => (file_name, content),
-        other => panic!("{other:?}"),
-    };
+    });
     assert_eq!(file_name, "speaker.wav");
     assert_eq!(content.0, wav);
     r.h.shutdown();
@@ -896,14 +869,11 @@ fn alignment_of_a_capture_and_a_live_seat() {
     let mut r = rig("math-align", &[b"d/4/tf"]);
     let c = &mut r.c;
     play(&mut r.d, c, r.tok, 3.0);
-    let seat1 = match c.ok(Command::TraceCapture {
+    let seat1 = c.trace(Command::TraceCapture {
         meas: MeasId(1),
         name: "Seat 1 alone".into(),
         slot: Some(1),
-    }) {
-        ReplyBody::Trace(t) => t,
-        other => panic!("{other:?}"),
-    };
+    });
     let band = AlignBand {
         lo: Hz(500.0),
         hi: Hz(2000.0),
@@ -947,9 +917,11 @@ fn alignment_of_a_capture_and_a_live_seat() {
         assert_eq!(e.code, ErrorCode::Invalid);
         assert!(e.msg.contains(why), "{}", e.msg);
     }
-    let q = created(c.ok(Command::MeasCreate {
-        config: align(stored, meas(2), band, Seconds(0.05)),
-    }));
+    let q = c
+        .measurement(Command::MeasCreate {
+            config: align(stored, meas(2), band, Seconds(0.05)),
+        })
+        .id;
     c.ok(Command::MeasStart { meas: q });
     play(&mut r.d, c, r.tok, 2.0);
     let [f] = newest(&r.sub, &r.d, [q.0]);

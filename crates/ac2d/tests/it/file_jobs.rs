@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use ac2_proto::model::*;
 use ac2_proto::units::*;
-use ac2_proto::{Command, ErrorCode, Reply, ReplyBody, Request};
+use ac2_proto::{Command, ErrorCode, Reply, Request};
 use ac2d::{AutosaveConfig, Daemon, Handle};
 use common::*;
 
@@ -58,13 +58,6 @@ fn slow_session(h_dir: &Path, name: &str) -> PathBuf {
     pipe
 }
 
-fn acquire(c: &mut Client) -> LeaseToken {
-    match c.ok(Command::GenAcquire { force: false }) {
-        ReplyBody::Lease(l) => l.lease_token,
-        other => panic!("{other:?}"),
-    }
-}
-
 /// Every other file operation is refused while one is under way.
 fn others_refused(c: &mut Client) {
     for cmd in [
@@ -88,28 +81,11 @@ fn release(pipe: PathBuf) -> JoinHandle<()> {
 }
 
 fn import(c: &mut Client) -> TraceMeta {
-    let content = std::fs::read(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../ac2-traces/tests/fixtures/rew_export.txt"),
-    )
-    .unwrap();
-    match c.ok(Command::TraceImport {
-        file_name: "rew_export.txt".into(),
-        format: ImportFormat::Auto,
-        role: ImportRole::Trace,
-        ir: None,
-        content: Blob(content),
-        owner: ac2_proto::model::TraceOwner::Imported,
-    }) {
-        ReplyBody::Trace(t) => t,
-        other => panic!("{other:?}"),
-    }
+    import_fixture(c, "rew_export.txt", "rew_export.txt", TraceOwner::Imported)
 }
 
 fn working(c: &mut Client) -> WorkingSession {
-    match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state.working,
-        other => panic!("{other:?}"),
-    }
+    c.state().working
 }
 
 fn named(name: &str) -> SessionRef {
@@ -136,10 +112,7 @@ fn a_load_waiting_on_its_disk_blocks_no_one() {
     let (mut a, _sub) = connect(&h, &[]);
     let (mut b, _sub_b) = connect(&h, &[]);
     import(&mut a);
-    let lease = match b.ok(Command::GenAcquire { force: false }) {
-        ReplyBody::Lease(l) => l.lease_token,
-        other => panic!("{other:?}"),
-    };
+    let lease = b.acquire();
     let pipe = slow_session(dir.path(), "slow");
 
     let load = send(
@@ -209,10 +182,8 @@ fn a_save_writes_the_content_it_began_with() {
     let writer = release(pipe);
     let r = reply(&a, save, Duration::from_secs(10)).expect("the save is answered");
     writer.join().unwrap();
-    match r.result.unwrap() {
-        ReplyBody::SessionFile(f) => assert_eq!(f.traces, 1),
-        other => panic!("{other:?}"),
-    }
+    let f = r.result.unwrap().session_file();
+    assert_eq!(f.traces, 1);
     // It belongs to the session now, and the edit made after the save began is unsaved.
     let w = working(&mut b);
     assert_eq!(
@@ -228,10 +199,7 @@ fn a_save_writes_the_content_it_began_with() {
         session: named("slow"),
         discard: true,
     });
-    let ts = match b.ok(Command::TraceList) {
-        ReplyBody::Traces(t) => t,
-        other => panic!("{other:?}"),
-    };
+    let ts = b.traces(Command::TraceList);
     assert_eq!(ts.len(), 1);
     assert_eq!(ts[0].edit.name, t.edit.name);
     h.shutdown();
@@ -281,7 +249,7 @@ fn a_salvage_waiting_on_its_disk_blocks_no_one() {
     });
     let pipe = dir.path().join("sessions/s/traces/zz.csv");
     mkfifo(&pipe);
-    let lease = acquire(&mut b);
+    let lease = b.acquire();
 
     let salvage = send(
         &mut a,
@@ -300,14 +268,10 @@ fn a_salvage_waiting_on_its_disk_blocks_no_one() {
     let writer = release(pipe);
     let r = reply(&a, salvage, Duration::from_secs(10)).expect("the salvage is answered");
     writer.join().unwrap();
-    match r.result.unwrap() {
-        ReplyBody::Salvage(s) => {
-            assert_eq!(s.imported.len(), 1, "{s:?}");
-            assert_eq!(s.refused.len(), 1, "{s:?}");
-            assert_eq!(s.refused[0].file, "traces/zz.csv");
-        }
-        other => panic!("{other:?}"),
-    }
+    let s = r.result.unwrap().salvage();
+    assert_eq!(s.imported.len(), 1, "{s:?}");
+    assert_eq!(s.refused.len(), 1, "{s:?}");
+    assert_eq!(s.refused[0].file, "traces/zz.csv");
     h.shutdown();
 }
 
@@ -339,7 +303,7 @@ fn a_recover_waiting_on_its_disk_blocks_no_one_and_commits_only_unchanged() {
     let (mut a, _sub) = connect(&h, &[]);
     let (mut b, _sub_b) = connect(&h, &[]);
     assert!(working(&mut a).recover.is_some());
-    let lease = acquire(&mut b);
+    let lease = b.acquire();
 
     let recover = send(&mut a, Command::FileRecover);
     assert!(reply(&a, recover, Duration::from_millis(300)).is_none());

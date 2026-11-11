@@ -8,16 +8,13 @@ use crate::common;
 use std::time::{Duration, Instant};
 
 use ac2_proto::model::{ServerInfo, ServerMode};
-use ac2_proto::{Command, ErrorCode, ReplyBody};
+use ac2_proto::{Command, ErrorCode};
 use ac2_zmq::{AuthorizedKeys, Context, CurveClient, KeyPair};
 use ac2d::{Daemon, Listen, NetworkSecurity};
 use common::*;
 
 fn info(c: &mut Client) -> ServerInfo {
-    match c.ok(Command::ServerInfo) {
-        ReplyBody::Server(s) => s,
-        other => panic!("{other:?}"),
-    }
+    c.server(Command::ServerInfo)
 }
 
 fn names(s: &ServerInfo) -> Vec<String> {
@@ -113,31 +110,25 @@ fn authorize_a_refused_key_and_revoke_it_over_the_protocol() {
     assert_eq!(e.code, ErrorCode::Invalid);
 
     // Authorized from the laptop: the tablet connects, and its refusals are forgotten.
-    match c.ok(Command::ServerAuthorize {
+    let authorized = c.server(Command::ServerAuthorize {
         name: "tablet".into(),
         key: tablet.public.to_z85(),
-    }) {
-        ReplyBody::Server(s) => {
-            assert_eq!(names(&s), vec!["laptop", "tablet"]);
-            let ServerMode::Network { refused, .. } = &s.mode else {
-                unreachable!()
-            };
-            assert!(
-                refused
-                    .iter()
-                    .all(|r| r.key.as_deref() != Some(&*tablet.public.to_z85()))
-            );
-        }
-        other => panic!("{other:?}"),
-    }
+    });
+    assert_eq!(names(&authorized), vec!["laptop", "tablet"]);
+    let ServerMode::Network { refused, .. } = &authorized.mode else {
+        unreachable!()
+    };
+    assert!(
+        refused
+            .iter()
+            .all(|r| r.key.as_deref() != Some(&*tablet.public.to_z85()))
+    );
     assert!(std::fs::read_to_string(&file).unwrap().contains("tablet"));
     let mut t = Client::connect_with(&ctx, h.ctrl_endpoint(), Some(&as_tablet));
-    match t.ok(Command::Hello {
+    let w = t.welcome(Command::Hello {
         client: "tablet".into(),
-    }) {
-        ReplyBody::Welcome(w) => assert_eq!(w.client_id.0, "tablet"),
-        other => panic!("{other:?}"),
-    }
+    });
+    assert_eq!(w.client_id.0, "tablet");
 
     // Nobody revokes their own key; an unknown name is not found.
     let e = c
@@ -154,12 +145,10 @@ fn authorize_a_refused_key_and_revoke_it_over_the_protocol() {
     assert_eq!(e.code, ErrorCode::NotFound);
 
     // Revoked from the laptop: the tablet's connection is refused from the next request on.
-    match c.ok(Command::ServerRevoke {
+    let s = c.server(Command::ServerRevoke {
         name: "tablet".into(),
-    }) {
-        ReplyBody::Server(s) => assert_eq!(names(&s), vec!["laptop"]),
-        other => panic!("{other:?}"),
-    }
+    });
+    assert_eq!(names(&s), vec!["laptop"]);
     let e = t.call(Command::SessionStatus).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused);
     assert!(!std::fs::read_to_string(&file).unwrap().contains("tablet"));
@@ -222,24 +211,17 @@ fn a_revoked_connection_stays_refused_when_its_name_goes_to_a_new_key() {
     // The new key's request ids start where the old key's did: it is answered on its own,
     // never with a reply stored for the revoked key.
     let mut new = Client::connect_with(&ctx, h.ctrl_endpoint(), Some(&curve(&new_tablet)));
-    match new.ok(Command::MeasCreate {
+    new.measurement(Command::MeasCreate {
         config: transfer("from the new key"),
-    }) {
-        ReplyBody::Measurement(_) => {}
-        other => panic!("{other:?}"),
-    }
-    match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => {
-            let names: Vec<_> = s
-                .state
-                .measurements
-                .iter()
-                .map(|m| m.config.name.clone())
-                .collect();
-            assert_eq!(names, vec!["from the new key".to_owned()]);
-        }
-        other => panic!("{other:?}"),
-    }
+    });
+    let s = c.snapshot(Command::StateSnapshot);
+    let names: Vec<_> = s
+        .state
+        .measurements
+        .iter()
+        .map(|m| m.config.name.clone())
+        .collect();
+    assert_eq!(names, vec!["from the new key".to_owned()]);
     h.shutdown();
 }
 

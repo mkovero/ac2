@@ -6,14 +6,13 @@
 
 use crate::common;
 
-use std::path::Path;
 use std::time::Duration;
 
 use ac2_audio::FakeDriver;
 use ac2_proto::frame::FrameData;
 use ac2_proto::model::*;
 use ac2_proto::units::*;
-use ac2_proto::{Command, ErrorCode, ErrorDetail, ImportProblem, ReplyBody};
+use ac2_proto::{Command, ErrorCode, ErrorDetail, ImportProblem};
 use ac2d::Daemon;
 use common::*;
 
@@ -36,41 +35,12 @@ fn band() -> Vec<usize> {
         .collect()
 }
 
-fn trace(r: ReplyBody) -> TraceMeta {
-    match r {
-        ReplyBody::Trace(t) => t,
-        other => panic!("{other:?}"),
-    }
-}
-
 fn data(c: &mut Client, id: TraceId) -> TraceData {
-    match c.ok(Command::TraceGet { trace: id }) {
-        ReplyBody::TraceData(d) => *d,
-        other => panic!("{other:?}"),
-    }
+    c.trace_data(Command::TraceGet { trace: id })
 }
 
 fn traces(c: &mut Client) -> Vec<TraceMeta> {
-    match c.ok(Command::TraceList) {
-        ReplyBody::Traces(t) => t,
-        other => panic!("{other:?}"),
-    }
-}
-
-fn state(c: &mut Client) -> State {
-    match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state,
-        other => panic!("{other:?}"),
-    }
-}
-
-fn fixture(name: &str) -> Vec<u8> {
-    std::fs::read(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../ac2-traces/tests/fixtures")
-            .join(name),
-    )
-    .unwrap()
+    c.traces(Command::TraceList)
 }
 
 /// Runs audio (refreshing the lease) until a TF frame of config rev ≥ `rev` covers it.
@@ -98,7 +68,7 @@ fn settle(
 /// the audio clock) and captured.
 fn math_capture(r: &mut Rig, a: TraceId, op: MathOp, b: TraceId, name: &str) -> TraceMeta {
     let c = &mut r.c;
-    let m = match c.ok(Command::MeasCreate {
+    let m = c.measurement(Command::MeasCreate {
         config: MeasConfig {
             scope: ac2_proto::model::MeasScope::Session,
             name: name.into(),
@@ -114,20 +84,17 @@ fn math_capture(r: &mut Rig, a: TraceId, op: MathOp, b: TraceId, name: &str) -> 
                 ),
             },
         },
-    }) {
-        ReplyBody::Measurement(m) => m,
-        other => panic!("{other:?}"),
-    };
+    });
     c.ok(Command::MeasStart { meas: m.id });
     for _ in 0..2 {
         run(&mut r.d, 0.5);
         c.ok(Command::GenRefresh { lease_token: r.tok });
     }
-    let t = trace(c.ok(Command::TraceCapture {
+    let t = c.trace(Command::TraceCapture {
         meas: m.id,
         name: name.into(),
         slot: None,
-    }));
+    });
     c.ok(Command::MeasDelete {
         meas: m.id,
         traces: ac2_proto::model::OwnedTraces::Keep,
@@ -170,10 +137,7 @@ fn rig(name: &str) -> Rig {
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
-    let tok = match c.ok(Command::GenAcquire { force: false }) {
-        ReplyBody::Lease(l) => l.lease_token,
-        other => panic!("{other:?}"),
-    };
+    let tok = c.acquire();
     c.ok(Command::GenSet {
         lease_token: tok,
         desired: GeneratorDesired {
@@ -203,8 +167,8 @@ fn rig(name: &str) -> Rig {
 fn set_smoothing(c: &mut Client, t: &TraceMeta, s: Option<Smoothing>) -> TraceMeta {
     let mut e = t.edit.clone();
     e.smoothing = s;
-    trace(c.ok(Command::TraceUpdate {
+    c.trace(Command::TraceUpdate {
         trace: t.id,
         edit: e,
-    }))
+    })
 }

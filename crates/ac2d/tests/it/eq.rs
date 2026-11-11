@@ -145,10 +145,7 @@ fn rig() -> Rig {
         delay: Seconds(f64::from(ACOUSTIC_DELAY) / f64::from(FS)),
     });
     c.ok(Command::MeasStart { meas: MeasId(1) });
-    let tok = match c.ok(Command::GenAcquire { force: false }) {
-        ReplyBody::Lease(l) => l.lease_token,
-        other => panic!("{other:?}"),
-    };
+    let tok = c.acquire();
     c.ok(Command::GenSet {
         lease_token: tok,
         desired: GeneratorDesired {
@@ -234,13 +231,10 @@ impl Rig {
     }
 
     fn eq(&mut self, edit: EqEdit) -> Measurement {
-        match self.c.ok(Command::MeasEq {
+        self.c.measurement(Command::MeasEq {
             meas: MeasId(1),
             edit,
-        }) {
-            ReplyBody::Measurement(m) => m,
-            other => panic!("{other:?}"),
-        }
+        })
     }
 
     fn eq_err(&mut self, edit: EqEdit) -> ac2_proto::ProtoError {
@@ -253,10 +247,7 @@ impl Rig {
     }
 
     fn state(&mut self) -> State {
-        match self.c.ok(Command::StateSnapshot) {
-            ReplyBody::Snapshot(s) => s.state,
-            other => panic!("{other:?}"),
-        }
+        self.c.state()
     }
 
     /// The math channel named `name`, its frames subscribed to.
@@ -281,21 +272,15 @@ impl Rig {
     }
 
     fn data(&mut self, id: TraceId) -> TraceData {
-        match self.c.ok(Command::TraceGet { trace: id }) {
-            ReplyBody::TraceData(d) => *d,
-            other => panic!("{other:?}"),
-        }
+        self.c.trace_data(Command::TraceGet { trace: id })
     }
 
     fn capture(&mut self, meas: MeasId, name: &str) -> TraceMeta {
-        match self.c.ok(Command::TraceCapture {
+        self.c.trace(Command::TraceCapture {
             meas,
             name: name.into(),
             slot: None,
-        }) {
-            ReplyBody::Trace(t) => t,
-            other => panic!("{other:?}"),
-        }
+        })
     }
 }
 
@@ -576,10 +561,7 @@ fn eq_sets_without_audio() {
             to: MeasId(2),
         },
     });
-    let state = match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state,
-        other => panic!("{other:?}"),
-    };
+    let state = c.state();
     let r = state
         .measurements
         .iter()
@@ -598,10 +580,7 @@ fn eq_sets_without_audio() {
         meas: MeasId(1),
         traces: OwnedTraces::Keep,
     });
-    let state = match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state,
-        other => panic!("{other:?}"),
-    };
+    let state = c.state();
     assert_eq!(state.traces.len(), 1, "only Main R's EQ curve");
     assert_eq!(
         state

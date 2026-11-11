@@ -10,8 +10,8 @@ use std::time::Duration;
 
 use ac2_audio::fake::FakeDrive;
 use ac2_audio::{FakeBackend, FakeConfig, FakeDriver};
-use ac2_proto::model::{ClockBasis, Clocks, SampleClock, State, SystemClock};
-use ac2_proto::{Change, Command, ReplyBody};
+use ac2_proto::model::{ClockBasis, Clocks, SampleClock, SystemClock};
+use ac2_proto::{Change, Command};
 use ac2d::Daemon;
 use common::*;
 
@@ -21,13 +21,6 @@ fn audio(d: &mut FakeDriver, seconds: u32) {
     for _ in 0..seconds {
         d.run_blocks(u64::from(FS / BLOCK));
         taken(d);
-    }
-}
-
-fn state(c: &mut Client) -> State {
-    match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state,
-        other => panic!("{other:?}"),
     }
 }
 
@@ -62,7 +55,7 @@ fn run(name: &str, audio_ppm: f64, crystal_ppm: f64) -> (f64, ClockBasis) {
     .unwrap();
     let h = Daemon::start(config(backend.clone(), inproc(name))).unwrap();
     let (mut c, sub) = connect(&h, &[b"evt"]);
-    let before = state(&mut c).clocks;
+    let before = c.state().clocks;
     assert_eq!(before.capture, None, "no audio open, no capture clock");
     if cfg!(target_os = "linux") {
         assert_ne!(before.system, SystemClock::NotStated, "Linux states it");
@@ -83,7 +76,7 @@ fn run(name: &str, audio_ppm: f64, crystal_ppm: f64) -> (f64, ClockBasis) {
     // Half a minute is no reading yet.
     audio(&mut d, 30);
     assert_eq!(
-        state(&mut c).clocks.capture.map(|d| d.rate),
+        c.state().clocks.capture.map(|d| d.rate),
         Some(SampleClock::Measuring)
     );
     audio(&mut d, 40);

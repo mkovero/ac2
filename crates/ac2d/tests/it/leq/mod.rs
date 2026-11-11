@@ -8,7 +8,7 @@ use crate::common;
 
 use std::time::{Duration, Instant};
 
-use ac2_client::{Client, ClientConfig, ClientError, Endpoints, OnDrop, StimulusLease};
+use ac2_client::{Client, ClientError, OnDrop, StimulusLease};
 use ac2_proto::frame::{FrameData, LeqFlags, LeqFrame};
 use ac2_proto::model::{
     GeneratorDesired, GeneratorSettings, HistorySpan, LeqAlarmKind, LeqConfig, LeqJudgement,
@@ -16,7 +16,7 @@ use ac2_proto::model::{
     SplHistory, SplLog, SplLogPage, SplLogWhich, State, TimeWeighting, Weighting,
 };
 use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, MeasId, Seconds};
-use ac2_proto::{Command, ErrorCode, ReplyBody, Stream, Subscription, Topic};
+use ac2_proto::{Command, ErrorCode, ReplyBody, Stream, Subscription};
 use ac2d::{Daemon, Handle};
 use common::*;
 
@@ -27,15 +27,7 @@ mod windows;
 const M: MeasId = MeasId(1);
 
 async fn connect(h: &Handle) -> Client {
-    let ep = Endpoints {
-        ctrl: h.ctrl_endpoint().to_owned(),
-        data: h.data_endpoint().to_owned(),
-    };
-    let c = Client::connect(ClientConfig::new(ep, "ac2d-leq-test"))
-        .await
-        .unwrap();
-    c.wait_synced(Duration::from_secs(5)).await.unwrap();
-    c
+    mirror(h, "ac2d-leq-test").await
 }
 
 fn tone(level: f64) -> GeneratorDesired {
@@ -85,39 +77,25 @@ fn meter(windows: Vec<LeqWindow>) -> MeasConfig {
 }
 
 const WAIT: Duration = Duration::from_secs(40);
+/// [`WAIT`], looking every 50 ms.
+const POLL: Poll = Poll::new(WAIT, 50);
 
 /// The newest `leq` frame once `ok` holds.
 async fn leq_until(c: &Client, what: &str, ok: impl Fn(&LeqFrame) -> bool) -> LeqFrame {
-    let topic = Topic::Data {
-        meas: M,
-        stream: Stream::Leq,
-    };
-    let deadline = Instant::now() + WAIT;
-    loop {
-        if let Some(f) = c.latest().unwrap().get(&topic)
-            && let FrameData::Leq(l) = &f.frame.data
-            && ok(l)
-        {
-            return (**l).clone();
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    frame_until(c, (M, Stream::Leq), POLL, what, |f| match &f.frame.data {
+        FrameData::Leq(l) if ok(l) => Some((**l).clone()),
+        _ => None,
+    })
+    .await
 }
 
 /// The meter's `spl_log` entity once `ok` holds.
 async fn log_until(c: &Client, what: &str, ok: impl Fn(&SplLog) -> bool) -> SplLog {
-    let deadline = Instant::now() + WAIT;
-    loop {
-        if let Some(s) = c.view().state.clone()
-            && let Some(l) = s.spl_logs.iter().find(|l| l.meas == M)
-            && ok(l)
-        {
-            return l.clone();
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    mirror_until(c, POLL, what, |s| {
+        let log = s.spl_logs.iter().find(|l| l.meas == M);
+        log.filter(|l| ok(l)).cloned()
+    })
+    .await
 }
 
 async fn state(c: &Client) -> std::sync::Arc<State> {
@@ -125,19 +103,15 @@ async fn state(c: &Client) -> std::sync::Arc<State> {
 }
 
 async fn page(c: &Client, from: u64) -> SplLogPage {
-    match c
-        .call(Command::SplLogGet {
-            meas: M,
-            log: SplLogWhich::Current,
-            from,
-            max: 100_000,
-        })
-        .await
-        .unwrap()
-    {
-        ReplyBody::SplLogPage(p) => p,
-        other => panic!("{other:?}"),
-    }
+    c.call(Command::SplLogGet {
+        meas: M,
+        log: SplLogWhich::Current,
+        from,
+        max: 100_000,
+    })
+    .await
+    .unwrap()
+    .spl_log_page()
 }
 
 async fn calibrate(c: &Client) {
@@ -171,19 +145,10 @@ async fn spl_until(
     what: &str,
     ok: impl Fn(&ac2_proto::frame::SplFrame, ac2_proto::units::Rev) -> bool,
 ) -> ac2_proto::frame::SplFrame {
-    let topic = Topic::Data {
-        meas: M,
-        stream: Stream::Spl,
-    };
-    let deadline = Instant::now() + WAIT;
-    loop {
-        if let Some(f) = c.latest().unwrap().get(&topic)
-            && let FrameData::Spl(s) = &f.frame.data
-            && ok(s, f.frame.stamp.config_rev)
-        {
-            return s.clone();
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
+    let poll = Poll::new(WAIT, 20);
+    frame_until(c, (M, Stream::Spl), poll, what, |f| match &f.frame.data {
+        FrameData::Spl(s) if ok(s, f.frame.stamp.config_rev) => Some(s.clone()),
+        _ => None,
+    })
+    .await
 }

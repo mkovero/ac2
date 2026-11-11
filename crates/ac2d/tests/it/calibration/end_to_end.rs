@@ -63,10 +63,11 @@ async fn slow_calibration_mic_curve_and_matching_end_to_end() {
             },
         },
     ] {
-        let m = match c.call(Command::MeasCreate { config: cfg }).await.unwrap() {
-            ReplyBody::Measurement(m) => m,
-            other => panic!("{other:?}"),
-        };
+        let m = c
+            .call(Command::MeasCreate { config: cfg })
+            .await
+            .unwrap()
+            .measurement();
         c.call(Command::MeasStart { meas: m.id }).await.unwrap();
         c.subscribe(Subscription::Meas(m.id)).unwrap();
     }

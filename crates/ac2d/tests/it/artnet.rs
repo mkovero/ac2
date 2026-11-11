@@ -9,28 +9,20 @@ use crate::common;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
-use ac2_client::{Client, ClientConfig, ClientError, Endpoints};
+use ac2_client::{Client, ClientError};
 use ac2_proto::model::{
     ArtnetFade, ArtnetTarget, Cue, CueAction, LeqConfig, LeqWindow, MeasConfig, MeasKind,
     PeakWeighting, PortAddress, SplConfig, TimeWeighting, Weighting, dmx_list_text, parse_dmx_list,
 };
 use ac2_proto::units::{Db, DbSpl, MeasId, Rev, Seconds};
-use ac2_proto::{Command, ErrorCode, ErrorDetail, ReplyBody};
+use ac2_proto::{Command, ErrorCode, ErrorDetail};
 use ac2d::Daemon;
 use common::*;
 
 const WAIT: Duration = Duration::from_secs(20);
 
 async fn connect(h: &ac2d::Handle) -> Client {
-    let ep = Endpoints {
-        ctrl: h.ctrl_endpoint().to_owned(),
-        data: h.data_endpoint().to_owned(),
-    };
-    let c = Client::connect(ClientConfig::new(ep, "ac2d-artnet-test"))
-        .await
-        .unwrap();
-    c.wait_synced(Duration::from_secs(5)).await.unwrap();
-    c
+    mirror(h, "ac2d-artnet-test").await
 }
 
 /// One received ArtDmx packet.
@@ -145,10 +137,11 @@ fn meter(name: &str, limit: Option<f64>, c: Option<Box<Cue>>) -> MeasConfig {
 }
 
 async fn create(c: &Client, config: MeasConfig) -> MeasId {
-    match c.call(Command::MeasCreate { config }).await.unwrap() {
-        ReplyBody::Measurement(m) => m.id,
-        other => panic!("{other:?}"),
-    }
+    c.call(Command::MeasCreate { config })
+        .await
+        .unwrap()
+        .measurement()
+        .id
 }
 
 fn rig_rev(c: &Client) -> Rev {

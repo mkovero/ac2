@@ -266,12 +266,22 @@ impl Client {
             .unwrap_or_else(|e| panic!("{name} failed: {e:?}"))
     }
 
+    /// The state the daemon holds now.
+    #[track_caller]
+    pub fn state(&mut self) -> ac2_proto::model::State {
+        self.snapshot(Command::StateSnapshot).state
+    }
+
+    /// The stimulus lease, taken without force.
+    #[track_caller]
+    pub fn acquire(&mut self) -> ac2_proto::units::LeaseToken {
+        self.lease(Command::GenAcquire { force: false }).lease_token
+    }
+
     /// The measurement's current `config_rev`: the `base` of an edit of it.
     pub fn config_rev(&mut self, meas: MeasId) -> Rev {
-        let ReplyBody::Snapshot(s) = self.ok(Command::StateSnapshot) else {
-            panic!("state.snapshot answered with something else")
-        };
-        let m = s.state.measurements.iter().find(|m| m.id == meas);
+        let state = self.state();
+        let m = state.measurements.iter().find(|m| m.id == meas);
         m.unwrap_or_else(|| panic!("no measurement {meas}"))
             .config_rev
     }
@@ -286,6 +296,164 @@ impl Client {
     pub fn update_ok(&mut self, meas: MeasId, config: MeasConfig) -> ReplyBody {
         self.update(meas, config)
             .unwrap_or_else(|e| panic!("meas.update failed: {e:?}"))
+    }
+}
+
+/// Reads of a reply of a known kind: `name` on a [`ReplyBody`], and `Client::name(cmd)` for a
+/// call that must succeed with it. Any other reply fails the test, naming what came back.
+macro_rules! reply_kinds {
+    ($($name:ident: $pat:pat => $out:expr, $ty:ty;)*) => {
+        pub trait Expect {
+            $(fn $name(self) -> $ty;)*
+        }
+
+        impl Expect for ReplyBody {
+            $(#[track_caller]
+            fn $name(self) -> $ty {
+                match self {
+                    $pat => $out,
+                    other => panic!("expected {}, got {other:?}", stringify!($name)),
+                }
+            })*
+        }
+
+        impl Client {
+            $(#[track_caller]
+            pub fn $name(&mut self, cmd: Command) -> $ty {
+                self.ok(cmd).$name()
+            })*
+        }
+    };
+}
+
+reply_kinds! {
+    welcome: ReplyBody::Welcome(v) => v, ac2_proto::Welcome;
+    session: ReplyBody::Session(v) => v, ac2_proto::model::Session;
+    lease: ReplyBody::Lease(v) => v, ac2_proto::model::Lease;
+    generator: ReplyBody::Generator(v) => v, ac2_proto::model::Generator;
+    measurement: ReplyBody::Measurement(v) => v, ac2_proto::model::Measurement;
+    delay_finding: ReplyBody::DelayFinding(v) => v, ac2_proto::model::DelayFinding;
+    trace: ReplyBody::Trace(v) => v, ac2_proto::model::TraceMeta;
+    sweep: ReplyBody::Sweep(v) => v, ac2_proto::model::SweepRun;
+    traces: ReplyBody::Traces(v) => v, Vec<ac2_proto::model::TraceMeta>;
+    trace_data: ReplyBody::TraceData(v) => *v, ac2_proto::model::TraceData;
+    export: ReplyBody::Export { file_name, content } => (file_name, content), (String, ac2_proto::units::Blob);
+    export_text: ReplyBody::Export { content, .. } => String::from_utf8(content.0).unwrap(), String;
+    calibration: ReplyBody::Calibration(v) => v, ac2_proto::model::CalEntry;
+    mic: ReplyBody::Mic(v) => v, ac2_proto::model::Mic;
+    outputs: ReplyBody::Outputs(v) => v, Vec<ac2_proto::model::OutputSetup>;
+    server: ReplyBody::Server(v) => v, ac2_proto::model::ServerInfo;
+    spl_log_page: ReplyBody::SplLogPage(v) => v, ac2_proto::model::SplLogPage;
+    snapshot: ReplyBody::Snapshot(v) => *v, ac2_proto::StateSnapshot;
+    grid: ReplyBody::Grid(v) => v, ac2_proto::GridDef;
+    session_file: ReplyBody::SessionFile(v) => v, ac2_proto::model::SessionFile;
+    transfer: ReplyBody::Transfer(v) => v, ac2_proto::model::Transfer;
+    chunk: ReplyBody::Chunk(v) => v, ac2_proto::units::Blob;
+    salvage: ReplyBody::Salvage(v) => v, ac2_proto::model::Salvage;
+    sessions: ReplyBody::Sessions(v) => v, Vec<ac2_proto::model::SessionFile>;
+    recording: ReplyBody::Recording(v) => v, ac2_proto::model::RecordingRun;
+    plans: ReplyBody::Plans(v) => v, Vec<ac2_proto::model::PlanSpec>;
+    walk: ReplyBody::Walk(v) => v, ac2_proto::model::WalkState;
+    sim: ReplyBody::Sim(v) => v, ac2_proto::model::SimState;
+    recordings: ReplyBody::Recordings(v) => v, Vec<ac2_proto::model::RecordingFile>;
+    spl_band_log: ReplyBody::SplBandLog(v) => *v, ac2_proto::model::SplBandLog;
+    events: ReplyBody::Events(v) => v, Vec<Event>;
+    ack: ReplyBody::Ack { rev } => rev, Rev;
+    backends: ReplyBody::Backends(v) => v, Vec<ac2_proto::model::BackendInfo>;
+    preview: ReplyBody::Preview(v) => v, ac2_proto::model::Preview;
+    loopback_detection: ReplyBody::LoopbackDetection(v) => v, ac2_proto::model::LoopbackDetection;
+    inputs: ReplyBody::Inputs(v) => v, ac2_proto::model::InputSetups;
+    source_state: ReplyBody::SourceState(v) => *v, ac2_proto::model::SourceState;
+    line_calibration: ReplyBody::LineCalibration(v) => v, ac2_proto::model::LineCalEntry;
+    spl_history: ReplyBody::SplHistory(v) => *v, ac2_proto::model::SplHistory;
+}
+
+/// A file of the `ac2-traces` test fixtures.
+pub fn fixture(name: &str) -> Vec<u8> {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../ac2-traces/tests/fixtures");
+    std::fs::read(dir.join(name)).unwrap()
+}
+
+/// Imports the fixture `fixture_name` as a trace, as if from the file `file_name`, under `owner`.
+pub fn import_fixture(
+    c: &mut Client,
+    fixture_name: &str,
+    file_name: &str,
+    owner: ac2_proto::model::TraceOwner,
+) -> ac2_proto::model::TraceMeta {
+    c.trace(Command::TraceImport {
+        file_name: file_name.into(),
+        format: ac2_proto::model::ImportFormat::Auto,
+        role: ac2_proto::model::ImportRole::Trace,
+        ir: None,
+        content: ac2_proto::units::Blob(fixture(fixture_name)),
+        owner,
+    })
+}
+
+/// An async client named `name` on `h`, its mirror synced.
+pub async fn mirror(h: &Handle, name: &str) -> ac2_client::Client {
+    let ep = ac2_client::Endpoints {
+        ctrl: h.ctrl_endpoint().to_owned(),
+        data: h.data_endpoint().to_owned(),
+    };
+    let c = ac2_client::Client::connect(ac2_client::ClientConfig::new(ep, name))
+        .await
+        .unwrap();
+    c.wait_synced(Duration::from_secs(5)).await.unwrap();
+    c
+}
+
+/// How long a poll goes on and how often it looks.
+#[derive(Clone, Copy)]
+pub struct Poll {
+    pub limit: Duration,
+    pub every: Duration,
+}
+
+impl Poll {
+    pub const fn new(limit: Duration, every_ms: u64) -> Self {
+        Self {
+            limit,
+            every: Duration::from_millis(every_ms),
+        }
+    }
+}
+
+/// Polls the newest frame of `stream` of `meas` the async client holds until `pick` returns a
+/// value; `pick` sees the frame as held, so it decides whether a stale one counts.
+pub async fn frame_until<T>(
+    c: &ac2_client::Client,
+    (meas, stream): (MeasId, ac2_proto::Stream),
+    poll: Poll,
+    what: &str,
+    mut pick: impl FnMut(&ac2_client::TopicFrame) -> Option<T>,
+) -> T {
+    let topic = Topic::Data { meas, stream };
+    let deadline = Instant::now() + poll.limit;
+    loop {
+        if let Some(v) = c.latest().unwrap().get(&topic).and_then(&mut pick) {
+            return v;
+        }
+        assert!(Instant::now() < deadline, "timed out waiting for {what}");
+        tokio::time::sleep(poll.every).await;
+    }
+}
+
+/// Polls the async client's mirrored state, once it has one, until `pick` returns a value.
+pub async fn mirror_until<T>(
+    c: &ac2_client::Client,
+    poll: Poll,
+    what: &str,
+    mut pick: impl FnMut(&Arc<ac2_proto::model::State>) -> Option<T>,
+) -> T {
+    let deadline = Instant::now() + poll.limit;
+    loop {
+        if let Some(v) = c.view().state.as_ref().and_then(&mut pick) {
+            return v;
+        }
+        assert!(Instant::now() < deadline, "timed out waiting for {what}");
+        tokio::time::sleep(poll.every).await;
     }
 }
 

@@ -92,20 +92,11 @@ fn fake_dev() -> DeviceId {
     DeviceId(ac2_audio::fake::FAKE_DEVICE_ID.into())
 }
 
-fn acquire(c: &mut Client) -> LeaseToken {
-    match c.ok(Command::GenAcquire { force: false }) {
-        ReplyBody::Lease(l) => l.lease_token,
-        other => panic!("{other:?}"),
-    }
-}
-
 #[test]
 fn devices_list_backends_with_channel_names() {
     let h = start(Arc::new(named_rig(FakeDrive::Manual, 0.0)));
     let (mut c, _s) = connect(&h, &[]);
-    let ReplyBody::Backends(b) = c.ok(Command::SessionDevices) else {
-        panic!("backends");
-    };
+    let b = c.backends(Command::SessionDevices);
     assert_eq!(b.len(), 1);
     assert_eq!(b[0].kind, BackendKind::Fake);
     assert_eq!(b[0].availability, Availability::Available);
@@ -133,11 +124,9 @@ fn devices_list_backends_with_channel_names() {
     let e = c.call(Command::SessionOpen { config: cfg }).unwrap_err();
     assert_eq!(e.code, ErrorCode::NotFound);
     // The default backend is the one the daemon names in the open session.
-    let ReplyBody::Session(s) = c.ok(Command::SessionOpen {
+    let s = c.session(Command::SessionOpen {
         config: session(true),
-    }) else {
-        panic!("session");
-    };
+    });
     assert_eq!(s.open.unwrap().backend, BackendKind::Fake);
 }
 
@@ -188,14 +177,12 @@ fn preview_is_capture_only_and_silent() {
     };
     let h = start(Arc::new(rec));
     let (mut c, s) = connect(&h, &[&Subscription::InputMeters.prefix()]);
-    let ReplyBody::Preview(p) = c.ok(Command::SessionPreview {
+    let p = c.preview(Command::SessionPreview {
         backend: BackendKind::Fake,
         device: fake_dev(),
         inputs: Vec::new(),
         pairs: Vec::new(),
-    }) else {
-        panic!("preview");
-    };
+    });
     assert_eq!(p.channels, 4);
     assert_eq!(p.sample_rate_hz, FS);
     let f = s
@@ -322,7 +309,7 @@ fn detect_loopback_finds_in_1_on_the_fake_rig() {
         .call(detect(LeaseToken(7), Some(Dbfs(-30.0))))
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::LeaseRequired);
-    let token = acquire(&mut c);
+    let token = c.acquire();
     let e = c.call(detect(token, None)).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused);
     let e = c.call(detect(token, Some(Dbfs(-3.0)))).unwrap_err();
@@ -342,9 +329,7 @@ fn detect_loopback_finds_in_1_on_the_fake_rig() {
         opened.lock().unwrap().iter().all(|(_, g)| !g),
         "no emitting stream yet"
     );
-    let ReplyBody::LoopbackDetection(d) = c.ok(detect(token, Some(Dbfs(-30.0)))) else {
-        panic!("detection");
-    };
+    let d = c.loopback_detection(detect(token, Some(Dbfs(-30.0))));
     assert_eq!(d.loopback, Some(0), "{d:?}");
     assert_eq!(d.ranked[0].input, 0);
     assert_eq!(d.ranked[0].delay_samples.0, i64::from(LOOP_DELAY));
@@ -366,7 +351,7 @@ fn detect_loopback_finds_in_1_on_the_fake_rig() {
     c.ok(Command::SessionOpen {
         config: session(true),
     });
-    let token = acquire(&mut c);
+    let token = c.acquire();
     c.ok(Command::GenSet {
         lease_token: token,
         desired: GeneratorDesired {
@@ -398,9 +383,7 @@ fn a_session_plays_on_another_device_than_it_captures_from() {
     cfg.endpoints = FakeEndpoints::Split;
     let h = start(Arc::new(FakeBackend::new(cfg).unwrap()));
     let (mut c, _s) = connect(&h, &[]);
-    let ReplyBody::Backends(b) = c.ok(Command::SessionDevices) else {
-        panic!("backends");
-    };
+    let b = c.backends(Command::SessionDevices);
     let devs = &b[0].devices;
     assert_eq!(devs.len(), 2, "{devs:?}");
     let (input, output) = (&devs[0], &devs[1]);
@@ -413,7 +396,7 @@ fn a_session_plays_on_another_device_than_it_captures_from() {
     assert_eq!(input.duplex_clock, ClockRelation::Unknown);
 
     let (in_id, out_id) = (input.id.clone(), output.id.clone());
-    let token = acquire(&mut c);
+    let token = c.acquire();
     // The input endpoint has no output to play the burst on.
     let e = c
         .call(Command::SessionDetectLoopback {
@@ -426,16 +409,14 @@ fn a_session_plays_on_another_device_than_it_captures_from() {
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
-    let ReplyBody::LoopbackDetection(d) = c.ok(Command::SessionDetectLoopback {
+    let d = c.loopback_detection(Command::SessionDetectLoopback {
         lease_token: token,
         backend: BackendKind::Fake,
         input_device: in_id.clone(),
         output_device: out_id.clone(),
         output: 0,
         level: Some(Dbfs(-30.0)),
-    }) else {
-        panic!("detection");
-    };
+    });
     assert_eq!(d.loopback, Some(0), "{d:?}");
     assert_eq!((&d.input_device, &d.output_device), (&in_id, &out_id));
 
@@ -453,9 +434,7 @@ fn a_session_plays_on_another_device_than_it_captures_from() {
         "no outputs on the input endpoint: {e:?}"
     );
     config.output_device = DeviceSelector::Id { id: out_id.clone() };
-    let ReplyBody::Session(s) = c.ok(Command::SessionOpen { config }) else {
-        panic!("session");
-    };
+    let s = c.session(Command::SessionOpen { config });
     let o = s.open.unwrap();
     assert_eq!((&o.input_device, &o.output_device), (&in_id, &out_id));
     assert_eq!(o.clock, ClockRelation::Unknown);
@@ -602,7 +581,7 @@ fn a_retried_detection_runs_once() {
     };
     let h = start(Arc::new(rec));
     let (mut c, _s) = connect(&h, &[]);
-    let token = acquire(&mut c);
+    let token = c.acquire();
     let req = ac2_proto::Request::new(
         c.next_id(),
         Command::SessionDetectLoopback {
@@ -642,9 +621,7 @@ fn spare_inputs_open_after_the_physical_ones_and_are_metered() {
     let fake = rig.clone();
     let h = start(Arc::new(rig));
     let (mut c, s) = connect(&h, &[&Subscription::InputMeters.prefix()]);
-    let ReplyBody::Backends(b) = c.ok(Command::SessionDevices) else {
-        panic!("backends");
-    };
+    let b = c.backends(Command::SessionDevices);
     let input = b[0].devices[0].input.as_ref().unwrap();
     assert_eq!(
         (input.max_channels, input.spare_channels),
@@ -664,9 +641,7 @@ fn spare_inputs_open_after_the_physical_ones_and_are_metered() {
     let mut cfg = session(true);
     cfg.spare_inputs = 2;
     cfg.input_channels = vec![0, 1, 4, 5];
-    let ReplyBody::Session(opened) = c.ok(Command::SessionOpen { config: cfg }) else {
-        panic!("session");
-    };
+    let opened = c.session(Command::SessionOpen { config: cfg });
     let spare = |input: u16| SparePort {
         input,
         port: format!("fake:in_{}", input + 1),

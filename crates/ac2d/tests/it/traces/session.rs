@@ -6,11 +6,11 @@ use super::*;
 fn session_save_load_round_trip() {
     let mut r = rig("sessions");
     let c = &mut r.c;
-    let a = trace(c.ok(Command::TraceCapture {
+    let a = c.trace(Command::TraceCapture {
         meas: MeasId(1),
         name: "pre".into(),
         slot: Some(3),
-    }));
+    });
     // Display smoothing is an edit: saved with the trace, applied again after the load.
     let mut ae = a.edit.clone();
     ae.smoothing = Some(Smoothing {
@@ -21,14 +21,14 @@ fn session_save_load_round_trip() {
         trace: a.id,
         edit: ae,
     });
-    let tgt = trace(c.ok(Command::TraceImport {
+    let tgt = c.trace(Command::TraceImport {
         file_name: "house_curve.txt".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Target,
         ir: None,
         content: Blob(fixture("house_curve.txt")),
         owner: ac2_proto::model::TraceOwner::Imported,
-    }));
+    });
     let mut e = tgt.edit.clone();
     e.visible = false;
     e.offset = Db(-2.0);
@@ -81,17 +81,14 @@ fn session_save_load_round_trip() {
     });
     assert_eq!(a.edit.owner, TraceOwner::Meas { meas: MeasId(1) });
     assert_eq!(tgt.edit.owner, TraceOwner::Imported);
-    let saved = state(c);
+    let saved = c.state();
     let saved_data: Vec<TraceData> = saved.traces.iter().map(|t| data(c, t.id)).collect();
-    let info = match c.ok(Command::FileSave {
+    let info = c.session_file(Command::FileSave {
         session: SessionRef::Name {
             name: "friday show".into(),
         },
         overwrite: false,
-    }) {
-        ReplyBody::SessionFile(f) => f,
-        other => panic!("{other:?}"),
-    };
+    });
     assert_eq!(
         (info.name.as_str(), info.measurements, info.traces),
         ("friday show", 3, 2)
@@ -106,25 +103,19 @@ fn session_save_load_round_trip() {
     c.ok(Command::MeasCreate {
         config: transfer("other"),
     });
-    match c.ok(Command::FileList) {
-        ReplyBody::Sessions(l) => {
-            assert_eq!(l.len(), 1);
-            assert_eq!(l[0].name, "friday show");
-        }
-        other => panic!("{other:?}"),
-    }
-    let before = state(c);
+    let l = c.sessions(Command::FileList);
+    assert_eq!(l.len(), 1);
+    assert_eq!(l[0].name, "friday show");
+    let before = c.state();
     assert!(before.generator.armed && before.generator.owner.is_some());
-    match c.ok(Command::FileLoad {
+    let loaded = c.session_file(Command::FileLoad {
         session: SessionRef::Name {
             name: "friday show".into(),
         },
         discard: true,
-    }) {
-        ReplyBody::SessionFile(f) => assert_eq!(f.traces, 2),
-        other => panic!("{other:?}"),
-    }
-    let after = state(c);
+    });
+    assert_eq!(loaded.traces, 2);
+    let after = c.state();
     // Disarmed, no owner, new epoch; the old lease is gone.
     assert!(!after.generator.armed && !after.generator.firing);
     assert_eq!(after.generator.owner, None);
@@ -154,10 +145,7 @@ fn session_save_load_round_trip() {
 
     // The restarted measurement runs in the new epoch; a fresh capture there is not in the
     // loaded trace's time base.
-    let tok = match c.ok(Command::GenAcquire { force: false }) {
-        ReplyBody::Lease(l) => l.lease_token,
-        other => panic!("{other:?}"),
-    };
+    let tok = c.acquire();
     c.ok(Command::GenSet {
         lease_token: tok,
         desired: GeneratorDesired {
@@ -173,11 +161,11 @@ fn session_save_load_round_trip() {
     });
     let mut d = driver(&r.backend);
     settle(&mut d, c, &r.sub, tok, 0);
-    let fresh = trace(c.ok(Command::TraceCapture {
+    let fresh = c.trace(Command::TraceCapture {
         meas: MeasId(1),
         name: "post".into(),
         slot: None,
-    }));
+    });
     let epoch_of = |t: &TraceMeta| match t.source {
         TraceSource::Captured { epoch, .. } => epoch,
         _ => unreachable!(),
@@ -242,15 +230,13 @@ fn session_save_load_round_trip() {
     assert_eq!(e.code, ErrorCode::NotFound);
     // An absolute path works for a local client.
     let p = r._dir.path().join("by-path");
-    match c.ok(Command::FileSave {
+    let f = c.session_file(Command::FileSave {
         session: SessionRef::Path {
             path: p.to_string_lossy().into_owned(),
         },
         overwrite: false,
-    }) {
-        ReplyBody::SessionFile(f) => assert_eq!(f.name, "by-path"),
-        other => panic!("{other:?}"),
-    }
+    });
+    assert_eq!(f.name, "by-path");
     r.h.shutdown();
 }
 
@@ -263,11 +249,11 @@ fn mic_curve_on_a_stored_trace() {
     const CURVE: &str = "* test mic\n20 0\n1000 0\n4000 0\n8000 6\n24000 6\n";
     let mut r = rig("trace-mic");
     let c = &mut r.c;
-    let raw = trace(c.ok(Command::TraceCapture {
+    let raw = c.trace(Command::TraceCapture {
         meas: MeasId(1),
         name: "before cal".into(),
         slot: None,
-    }));
+    });
     assert_eq!(raw.mic, None);
     let raw_data = data(c, raw.id);
     // No curve for that mic yet.
@@ -291,10 +277,10 @@ fn mic_curve_on_a_stored_trace() {
         content: Blob(CURVE.as_bytes().to_vec()),
         input: Some(1),
     });
-    let t = trace(c.ok(Command::TraceMicCurve {
+    let t = c.trace(Command::TraceMicCurve {
         trace: raw.id,
         curve: m30(),
-    }));
+    });
     let mc = t.mic_curve.clone().unwrap();
     assert_eq!((mc.mic.as_str(), mc.curve.label.as_str()), ("M30", "M30"));
     assert_eq!(mc.f_norm, Hz(1000.0));
@@ -319,24 +305,21 @@ fn mic_curve_on_a_stored_trace() {
     };
     assert_eq!(bits(&d.phase_deg), bits(&raw_data.phase_deg));
     // The export keeps the measured columns and names the curve.
-    let csv = match c.ok(Command::TraceExport {
+    let csv = c.export_text(Command::TraceExport {
         trace: raw.id,
         format: ExportFormat::Ac2Csv,
-    }) {
-        ReplyBody::Export { content, .. } => String::from_utf8(content.0).unwrap(),
-        other => panic!("{other:?}"),
-    };
+    });
     assert!(
         csv.contains("# mic: M30 (curve: M30, applied after capture as a display edit"),
         "{}",
         &csv[..1200]
     );
     // A capture taken now has the curve in its columns: no second correction.
-    let with = trace(c.ok(Command::TraceCapture {
+    let with = c.trace(Command::TraceCapture {
         meas: MeasId(1),
         name: "after cal".into(),
         slot: None,
-    }));
+    });
     assert_eq!(
         with.mic
             .as_ref()
@@ -368,10 +351,10 @@ fn mic_curve_on_a_stored_trace() {
         bits(&Some(d.mag_db.clone()))
     );
     // Removed: the served data is the measured one again.
-    let off = trace(c.ok(Command::TraceMicCurve {
+    let off = c.trace(Command::TraceMicCurve {
         trace: raw.id,
         curve: None,
-    }));
+    });
     assert!(off.mic_curve.is_none());
     assert_eq!(
         bits(&Some(data(c, raw.id).mag_db)),

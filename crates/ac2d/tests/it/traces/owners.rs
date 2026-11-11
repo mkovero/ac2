@@ -13,18 +13,18 @@ fn owners_capture_move_and_delete() {
     let c = &mut r.c;
     let main = TraceOwner::Meas { meas: MeasId(1) };
     let cap = |c: &mut Client, meas: MeasId, name: &str| {
-        trace(c.ok(Command::TraceCapture {
+        c.trace(Command::TraceCapture {
             meas,
             name: name.into(),
             slot: None,
-        }))
+        })
     };
     let pre = cap(c, MeasId(1), "pre-EQ");
     let post = cap(c, MeasId(1), "post-EQ");
     assert_eq!((pre.edit.owner, post.edit.owner), (main, main));
 
     // A math channel made on the measurement: listed and captured under it.
-    let math = match c.ok(Command::MeasCreate {
+    let math = c.measurement(Command::MeasCreate {
         config: MeasConfig {
             scope: ac2_proto::model::MeasScope::Session,
             name: "pre ÷ post".into(),
@@ -40,10 +40,7 @@ fn owners_capture_move_and_delete() {
                 ),
             },
         },
-    }) {
-        ReplyBody::Measurement(m) => m,
-        other => panic!("{other:?}"),
-    };
+    });
     c.ok(Command::MeasStart { meas: math.id });
     for _ in 0..2 {
         run(&mut r.d, 0.5);
@@ -51,12 +48,12 @@ fn owners_capture_move_and_delete() {
     }
     let captured = cap(c, math.id, "pre ÷ post 21:04");
     assert_eq!(captured.edit.owner, main);
-    let avg = trace(c.ok(Command::TraceAverage {
+    let avg = c.trace(Command::TraceAverage {
         traces: vec![pre.id, post.id],
         method: AverageMethod::Power,
         reference: DelayReference::Trace { trace: pre.id },
         name: "avg".into(),
-    }));
+    });
     assert_eq!(avg.edit.owner, main);
 
     // Owners must exist and must not be math channels; math cannot own math.
@@ -72,7 +69,7 @@ fn owners_capture_move_and_delete() {
     assert_eq!(e.code, ErrorCode::NotFound, "{}", e.msg);
     let e = mv(c, &avg, TraceOwner::Meas { meas: math.id }).unwrap_err();
     assert_eq!(e.code, ErrorCode::Invalid, "{}", e.msg);
-    let avg = trace(mv(c, &avg, TraceOwner::Imported).unwrap());
+    let avg = mv(c, &avg, TraceOwner::Imported).unwrap().trace();
     assert_eq!(avg.edit.owner, TraceOwner::Imported);
     let mut under_math = MathConfig::of(
         TraceOwner::Meas { meas: math.id },
@@ -100,23 +97,23 @@ fn owners_capture_move_and_delete() {
     let MeasKind::Math { config } = &math.config.kind else {
         unreachable!()
     };
-    let moved = match c.update_ok(
-        math.id,
-        MeasConfig {
-            scope: ac2_proto::model::MeasScope::Session,
-            name: math.config.name.clone(),
-            kind: MeasKind::Math {
-                config: MathConfig {
-                    owner: TraceOwner::Imported,
-                    ..config.clone()
+    let moved = c
+        .update_ok(
+            math.id,
+            MeasConfig {
+                scope: ac2_proto::model::MeasScope::Session,
+                name: math.config.name.clone(),
+                kind: MeasKind::Math {
+                    config: MathConfig {
+                        owner: TraceOwner::Imported,
+                        ..config.clone()
+                    },
                 },
             },
-        },
-    ) {
-        ReplyBody::Measurement(m) => m,
-        other => panic!("{other:?}"),
-    };
-    let before_rev = state(c)
+        )
+        .measurement();
+    let before_rev = c
+        .state()
         .measurements
         .iter()
         .find(|m| m.id == math.id)
@@ -131,7 +128,7 @@ fn owners_capture_move_and_delete() {
     c.ok(Command::MeasCreate {
         config: transfer("side"),
     });
-    let side = state(c).measurements.iter().map(|m| m.id).max().unwrap();
+    let side = c.state().measurements.iter().map(|m| m.id).max().unwrap();
     c.ok(Command::MeasStart { meas: side });
     for _ in 0..2 {
         run(&mut r.d, 0.5);
@@ -147,16 +144,13 @@ fn owners_capture_move_and_delete() {
     under_math.reference = MathReference::Operand {
         operand: Operand::Trace { trace: s1.id },
     };
-    let user = match c.ok(Command::MeasCreate {
+    let user = c.measurement(Command::MeasCreate {
         config: MeasConfig {
             scope: ac2_proto::model::MeasScope::Session,
             name: "side ÷ avg".into(),
             kind: MeasKind::Math { config: under_math },
         },
-    }) {
-        ReplyBody::Measurement(m) => m,
-        other => panic!("{other:?}"),
-    };
+    });
     // Deleting side with its traces would take an operand from a math channel that stays.
     let e = c
         .call(Command::MeasDelete {
@@ -171,7 +165,7 @@ fn owners_capture_move_and_delete() {
         meas: side,
         traces: OwnedTraces::Keep,
     });
-    let st = state(c);
+    let st = c.state();
     assert_eq!(
         st.traces.iter().find(|t| t.id == s1.id).unwrap().edit.owner,
         TraceOwner::Imported
@@ -186,7 +180,7 @@ fn owners_capture_move_and_delete() {
         meas: MeasId(1),
         traces: OwnedTraces::Delete,
     });
-    let st = state(c);
+    let st = c.state();
     assert!(
         st.measurements
             .iter()

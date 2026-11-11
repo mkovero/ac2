@@ -97,10 +97,7 @@ fn live_smoothing_and_resmoothed_captures() {
     if let MeasKind::Transfer { config } = &mut cfg.kind {
         config.smoothing = Some(sixth());
     }
-    let m = match c.update_ok(MeasId(1), cfg) {
-        ReplyBody::Measurement(m) => m,
-        other => panic!("{other:?}"),
-    };
+    let m = c.update_ok(MeasId(1), cfg).measurement();
     assert!(m.running);
     run(&mut r.d, 0.1);
     c.ok(Command::GenRefresh { lease_token: r.tok });
@@ -125,11 +122,11 @@ fn live_smoothing_and_resmoothed_captures() {
     };
 
     // The capture shows what the live curve showed…
-    let a = trace(c.ok(Command::TraceCapture {
+    let a = c.trace(Command::TraceCapture {
         meas: MeasId(1),
         name: "a".into(),
         slot: Some(1),
-    }));
+    });
     assert_eq!(a.edit.smoothing, Some(sixth()));
     let smoothed = data(c, a.id);
     // Live frames carry hundredths of a dB (docs/protocol.md §5.2): within 0.005 dB.
@@ -182,17 +179,17 @@ fn live_smoothing_and_resmoothed_captures() {
 
     // A second capture of the same result; their average uses the unsmoothed columns and
     // starts with the smoothing the inputs share.
-    let b = trace(c.ok(Command::TraceCapture {
+    let b = c.trace(Command::TraceCapture {
         meas: MeasId(1),
         name: "b".into(),
         slot: Some(2),
-    }));
-    let avg = trace(c.ok(Command::TraceAverage {
+    });
+    let avg = c.trace(Command::TraceAverage {
         traces: vec![a.id, b.id],
         method: AverageMethod::Power,
         reference: DelayReference::Trace { trace: a.id },
         name: "avg".into(),
-    }));
+    });
     assert_eq!(avg.edit.smoothing, Some(sixth()));
     let avg = set_smoothing(c, &avg, None);
     let ad = data(c, avg.id);
@@ -219,14 +216,14 @@ fn live_smoothing_and_resmoothed_captures() {
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused);
-    let tgt = trace(c.ok(Command::TraceImport {
+    let tgt = c.trace(Command::TraceImport {
         file_name: "house_curve.txt".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Target,
         ir: None,
         content: Blob(fixture("house_curve.txt")),
         owner: ac2_proto::model::TraceOwner::Imported,
-    }));
+    });
     let mut te = tgt.edit.clone();
     te.smoothing = Some(sixth());
     let e = c

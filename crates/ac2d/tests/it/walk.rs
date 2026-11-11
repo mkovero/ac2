@@ -13,7 +13,7 @@ use ac2_proto::frame::{Frame, FrameData};
 use ac2_proto::model::layout::*;
 use ac2_proto::model::*;
 use ac2_proto::units::*;
-use ac2_proto::{Command, ErrorCode, ReplyBody};
+use ac2_proto::{Command, ErrorCode};
 use ac2d::Daemon;
 use common::*;
 
@@ -51,10 +51,7 @@ fn rig(name: &str, backend: FakeBackend) -> Rig {
     }
     c.ok(Command::MeasCreate { config: m });
     c.ok(Command::MeasStart { meas: MeasId(1) });
-    let tok = match c.ok(Command::GenAcquire { force: false }) {
-        ReplyBody::Lease(l) => l.lease_token,
-        other => panic!("{other:?}"),
-    };
+    let tok = c.acquire();
     c.ok(Command::GenSet {
         lease_token: tok,
         desired: GeneratorDesired {
@@ -113,10 +110,7 @@ impl Rig {
     }
 
     fn state(&mut self) -> State {
-        match self.c.ok(Command::StateSnapshot) {
-            ReplyBody::Snapshot(s) => s.state,
-            other => panic!("{other:?}"),
-        }
+        self.c.state()
     }
 
     fn meas(&mut self, id: MeasId) -> Measurement {
@@ -136,10 +130,7 @@ impl Rig {
     }
 
     fn walk(&mut self, cmd: Command) -> WalkState {
-        match self.c.ok(cmd) {
-            ReplyBody::Walk(w) => w,
-            other => panic!("{other:?}"),
-        }
+        self.c.walk(cmd)
     }
 
     fn new_walk(&mut self, labels: &[&str]) -> WalkState {
@@ -239,13 +230,13 @@ fn captures_carry_positions_and_a_delay_step_restarts_filled() {
     let w = r.new_walk(&["P1", "P2", "P3"]);
     r.fill();
     // A delay step mid-walk starts the stages over: a capture now is unsettled.
-    let rev = match r.c.ok(Command::DelaySet {
-        meas: MeasId(1),
-        delay: Seconds(0.05),
-    }) {
-        ReplyBody::Measurement(m) => m.config_rev.0,
-        other => panic!("{other:?}"),
-    };
+    let rev =
+        r.c.measurement(Command::DelaySet {
+            meas: MeasId(1),
+            delay: Seconds(0.05),
+        })
+        .config_rev
+        .0;
     let f = filled(&r.frame(0.1, rev));
     assert!(f < 1.0, "{f}");
     let w = r.walk(Command::WalkCapture { walk: w.id });
@@ -366,10 +357,7 @@ fn second_mic(r: &mut Rig) -> MeasId {
     if let MeasKind::Transfer { config } = &mut m.kind {
         config.measurement_input = 2;
     }
-    let id = match r.c.ok(Command::MeasCreate { config: m }) {
-        ReplyBody::Measurement(m) => m.id,
-        other => panic!("{other:?}"),
-    };
+    let id = r.c.measurement(Command::MeasCreate { config: m }).id;
     r.c.ok(Command::MeasStart { meas: id });
     id
 }
@@ -621,16 +609,12 @@ fn awaiting_pick_reaches_the_walk_pane_and_marks_the_capture_unsettled() {
     for _ in 0..6 {
         r.frame(0.5, 0);
     }
-    match r.c.ok(Command::DelayFind {
+    let f = r.c.delay_finding(Command::DelayFind {
         meas: MeasId(1),
         band: FinderBand::Full,
         observation: None,
-    }) {
-        ReplyBody::DelayFinding(f) => {
-            assert!(matches!(f.outcome, DelayOutcome::Ambiguous { .. }), "{f:?}");
-        }
-        other => panic!("{other:?}"),
-    }
+    });
+    assert!(matches!(f.outcome, DelayOutcome::Ambiguous { .. }), "{f:?}");
     // What the walk pane reads: its walk, at P1, with the measurement waiting for a pick.
     let st = r.state();
     let m = st.measurements.iter().find(|m| m.id == MeasId(1)).unwrap();
@@ -731,10 +715,8 @@ fn a_loaded_walk_restarts_its_measurements_on_their_first_run_only() {
     resume_audio(&mut r);
 
     // The first run is a move: tracking on, the average starts empty.
-    match r.c.ok(Command::MeasStart { meas: MeasId(1) }) {
-        ReplyBody::Measurement(m) => assert!(m.delay.as_ref().unwrap().tracking, "{m:?}"),
-        other => panic!("{other:?}"),
-    }
+    let started = r.c.measurement(Command::MeasStart { meas: MeasId(1) });
+    assert!(started.delay.as_ref().unwrap().tracking, "{started:?}");
     let first = r.fill();
     assert!(first < 0.5, "the first run restarts the averages: {first}");
 
@@ -775,10 +757,7 @@ fn a_loaded_walk_restarts_its_measurements_on_their_first_run_only() {
 /// disarms the generator and ends the lease).
 fn resume_audio(r: &mut Rig) {
     r.d = driver(&r.backend);
-    r.tok = match r.c.ok(Command::GenAcquire { force: false }) {
-        ReplyBody::Lease(l) => l.lease_token,
-        other => panic!("{other:?}"),
-    };
+    r.tok = r.c.acquire();
     r.c.ok(Command::GenSet {
         lease_token: r.tok,
         desired: GeneratorDesired {
@@ -812,10 +791,10 @@ fn the_plan_library_keeps_checked_plans_on_disk() {
     case.name = "hall".into();
     let e = r.c.call(Command::PlanSave { plan: case }).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
-    match r.c.ok(Command::PlanList) {
-        ReplyBody::Plans(p) => assert_eq!(p, vec![ac2_proto::samples::plan()]),
-        other => panic!("{other:?}"),
-    }
+    assert_eq!(
+        r.c.plans(Command::PlanList),
+        vec![ac2_proto::samples::plan()]
+    );
     let plan_dir = dir.clone();
     let tmp = std::mem::replace(&mut r.dir, tempfile::tempdir().unwrap());
     r.shutdown();
@@ -825,10 +804,8 @@ fn the_plan_library_keeps_checked_plans_on_disk() {
     cfg.plan_dir = Some(plan_dir.clone());
     let h = Daemon::start(cfg).unwrap();
     let (mut c, _sub) = connect(&h, &[]);
-    match c.ok(Command::PlanList) {
-        ReplyBody::Plans(p) => assert_eq!(p, vec![ac2_proto::samples::plan()]),
-        other => panic!("{other:?}"),
-    }
+    let p = c.plans(Command::PlanList);
+    assert_eq!(p, vec![ac2_proto::samples::plan()]);
     c.ok(Command::PlanDelete {
         name: "Hall".into(),
     });

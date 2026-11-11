@@ -13,7 +13,7 @@ use ac2_audio::{FakeBackend, FakeConfig, FakeDriver};
 use ac2_proto::frame::FrameData;
 use ac2_proto::model::{GeneratorDesired, GeneratorSettings, Signal, TimingState, TimingStatus};
 use ac2_proto::units::{Dbfs, LeaseToken, Samples};
-use ac2_proto::{Change, Command, DataMessage, ReplyBody};
+use ac2_proto::{Change, Command, DataMessage};
 use ac2d::Daemon;
 use common::*;
 
@@ -58,10 +58,7 @@ fn start(name: &str, backend: FakeBackend) -> Rig {
     c.ok(Command::SessionOpen {
         config: session(true),
     });
-    let tok = match c.ok(Command::GenAcquire { force: false }) {
-        ReplyBody::Lease(l) => l.lease_token,
-        other => panic!("{other:?}"),
-    };
+    let tok = c.acquire();
     c.ok(Command::GenSet {
         lease_token: tok,
         desired: GeneratorDesired {
@@ -131,10 +128,7 @@ impl Rig {
     fn committed(&mut self, until: impl Fn(&TimingStatus) -> bool) -> TimingStatus {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
-            let t = match self.c.ok(Command::StateSnapshot) {
-                ReplyBody::Snapshot(s) => s.state.timing,
-                other => panic!("{other:?}"),
-            };
+            let t = self.c.state().timing;
             if until(&t) || Instant::now() > deadline {
                 return t;
             }

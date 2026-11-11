@@ -6,8 +6,8 @@
 
 use crate::common;
 
+use ac2_proto::Command;
 use ac2_proto::model::{Availability, BackendKind};
-use ac2_proto::{Command, ReplyBody};
 use ac2d::{BackendChoice, Daemon, DaemonConfig};
 use std::time::Duration;
 
@@ -21,9 +21,7 @@ fn jack_lists_port_names_or_says_why_not() {
     cfg.backends = backends;
     let h = Daemon::start(cfg).expect("daemon");
     let (mut c, _s) = connect(&h, &[]);
-    let ReplyBody::Backends(b) = c.ok(Command::SessionDevices) else {
-        panic!("backends");
-    };
+    let b = c.backends(Command::SessionDevices);
     assert_eq!(b[0].kind, BackendKind::Jack);
     assert!(
         b.iter().all(|x| x.kind != BackendKind::Fake),
@@ -135,9 +133,7 @@ fn chosen_outputs_reach_playback_and_connections_survive_routing() {
     cfg.backends = backends;
     let h = Daemon::start(cfg).expect("daemon");
     let (mut c, _s) = connect(&h, &[]);
-    let ReplyBody::Backends(b) = c.ok(Command::SessionDevices) else {
-        panic!("backends");
-    };
+    let b = c.backends(Command::SessionDevices);
     let Some(dev) = b[0].devices.first() else {
         eprintln!("skipping: no JACK server");
         return;
@@ -153,7 +149,7 @@ fn chosen_outputs_reach_playback_and_connections_survive_routing() {
     }
     // The listing names the dummy ports by their short names.
     let phys = |k: usize| format!("system:{}", playback[k]);
-    let ReplyBody::Session(s) = c.ok(Command::SessionOpen {
+    let s = c.session(Command::SessionOpen {
         config: SessionConfig {
             backend: Some(BackendKind::Jack),
             input_device: DeviceSelector::Default,
@@ -167,17 +163,13 @@ fn chosen_outputs_reach_playback_and_connections_survive_routing() {
             remote_inputs: Vec::new(),
             link_offset: None,
         },
-    }) else {
-        panic!("session");
-    };
+    });
     let rec = Recorder::start(["ac2:out_1", "ac2:out_2"]);
     assert!(
         !rec.linked("ac2:out_1", &phys(0)) && !rec.linked("ac2:out_2", &phys(1)),
         "nothing reaches playback before the operator chooses"
     );
-    let ReplyBody::Lease(l) = c.ok(Command::GenAcquire { force: false }) else {
-        panic!("lease");
-    };
+    let l = c.lease(Command::GenAcquire { force: false });
     let set = |c: &mut Client, outputs: Vec<u16>, firing: bool| {
         c.ok(Command::GenSet {
             lease_token: l.lease_token,
@@ -219,9 +211,7 @@ fn chosen_outputs_reach_playback_and_connections_survive_routing() {
         p[0] == 0.0 && p[1] > 0.03,
         "the recorder hears output 2: {p:?}"
     );
-    let ReplyBody::Snapshot(snap) = c.ok(Command::StateSnapshot) else {
-        panic!("snapshot");
-    };
+    let snap = c.snapshot(Command::StateSnapshot);
     assert_eq!(snap.state.session.epoch, s.epoch, "no reopen");
     c.ok(Command::GenStop);
     c.ok(Command::SessionClose);
@@ -244,16 +234,14 @@ fn spare_input_sources_survive_a_reopen() {
     cfg.backends = backends;
     let h = Daemon::start(cfg).expect("daemon");
     let (mut c, _s) = connect(&h, &[]);
-    let ReplyBody::Backends(b) = c.ok(Command::SessionDevices) else {
-        panic!("backends");
-    };
+    let b = c.backends(Command::SessionDevices);
     let Some(input) = b[0].devices.first().and_then(|d| d.input.clone()) else {
         eprintln!("skipping: no JACK capture ports");
         return;
     };
     let first = input.max_channels;
     let open = |c: &mut Client, spares: u16| {
-        let ReplyBody::Session(s) = c.ok(Command::SessionOpen {
+        let s = c.session(Command::SessionOpen {
             config: SessionConfig {
                 backend: Some(BackendKind::Jack),
                 input_device: DeviceSelector::Default,
@@ -267,9 +255,7 @@ fn spare_input_sources_survive_a_reopen() {
                 remote_inputs: Vec::new(),
                 link_offset: None,
             },
-        }) else {
-            panic!("session");
-        };
+        });
         s.open.expect("open").spare_ports
     };
     let ports = open(&mut c, 1);

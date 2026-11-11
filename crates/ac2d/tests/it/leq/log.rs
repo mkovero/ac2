@@ -3,7 +3,7 @@
 use super::*;
 
 async fn previous_page(c: &Client) -> Result<SplLogPage, ClientError> {
-    match c
+    let p = c
         .call(Command::SplLogGet {
             meas: M,
             log: SplLogWhich::Previous,
@@ -11,10 +11,8 @@ async fn previous_page(c: &Client) -> Result<SplLogPage, ClientError> {
             max: 100_000,
         })
         .await?
-    {
-        ReplyBody::SplLogPage(p) => Ok(p),
-        other => panic!("{other:?}"),
-    }
+        .spl_log_page();
+    Ok(p)
 }
 
 /// The run clock and the total in the `leq` frame, then `spl.log_new`: the windows, their
@@ -146,16 +144,14 @@ async fn slow_a_new_log_starts_over_and_keeps_the_windows() {
     assert_eq!(p.rows[0].start, new.rows[0].start);
 
     // Only SPL meters have a log to renew.
-    let t = match c
+    let t = c
         .call(Command::MeasCreate {
             config: transfer("tf"),
         })
         .await
         .unwrap()
-    {
-        ReplyBody::Measurement(m) => m.id,
-        other => panic!("{other:?}"),
-    };
+        .measurement()
+        .id;
     let e = c.call(Command::SplLogNew { meas: t }).await.unwrap_err();
     assert!(matches!(e, ClientError::Daemon(p) if p.code == ErrorCode::Invalid));
     tokio::task::spawn_blocking(move || h.shutdown())
@@ -255,9 +251,7 @@ async fn a_long_log_in_pages_and_its_history() {
         })
         .await
         .unwrap();
-    let ReplyBody::SplHistory(hist) = r else {
-        panic!("{r:?}")
-    };
+    let hist = r.spl_history();
     assert_eq!(hist.scale, LevelScale::DbSpl);
     assert_eq!(hist.windows, vec![window(60.0, Some(95.0))]);
     assert_eq!(hist.at.len(), SplHistory::MAX_SECONDS as usize + 1);

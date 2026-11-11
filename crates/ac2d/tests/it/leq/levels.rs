@@ -45,9 +45,7 @@ async fn slow_weightings_change_in_place_and_keep_the_log() {
     config.weighting = Weighting::C;
     config.time_weighting = TimeWeighting::Slow;
     config.peak_weighting = PeakWeighting::Z;
-    let ReplyBody::Measurement(m) = common::meas_update(&c, M, cfg).await.unwrap() else {
-        panic!()
-    };
+    let m = common::meas_update(&c, M, cfg).await.unwrap().measurement();
     assert!(m.running);
     let after = spl_until(&c, "a frame under the new rev", |_, rev| {
         rev >= m.config_rev
@@ -200,10 +198,10 @@ async fn slow_peak_limits_and_the_position_correction() {
         level: Db(5.0),
         peak: Db(1.0),
     };
-    let ReplyBody::Measurement(m) = common::meas_update(&c, M, with(Some(pos))).await.unwrap()
-    else {
-        panic!()
-    };
+    let m = common::meas_update(&c, M, with(Some(pos)))
+        .await
+        .unwrap()
+        .measurement();
     let s = spl_until(&c, "a corrected spl frame", |_, rev| rev >= m.config_rev).await;
     assert_eq!(s.meta.position, Some(pos));
     assert!((s.meta.level - 99.0).abs() < 0.2, "{:?}", s.meta);

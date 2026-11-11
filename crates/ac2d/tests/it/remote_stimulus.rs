@@ -9,7 +9,7 @@
 
 use crate::common;
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use ac2_client::{Client, ClientConfig, Endpoints, OnDrop};
 use ac2_proto::frame::{FrameData, SplMeta};
@@ -18,7 +18,7 @@ use ac2_proto::model::{
     Weighting,
 };
 use ac2_proto::units::{Dbfs, Hz, MeasId, SessionEpoch};
-use ac2_proto::{Command, ReplyBody, Stream, Topic};
+use ac2_proto::{Command, Stream, Topic};
 use ac2_zmq::{AuthorizedKeys, CurveClient, KeyPair};
 use ac2d::{Daemon, Listen, NetworkSecurity};
 use common::*;
@@ -40,35 +40,19 @@ fn desired(outputs: Vec<u16>, armed: bool, firing: bool) -> GeneratorDesired {
 
 /// The newest fresh SPL reading of measurement 1 satisfying `ok`.
 async fn spl_until(c: &Client, what: &str, ok: impl Fn(&SplMeta) -> bool) -> SplMeta {
-    let topic = Topic::Data {
-        meas: MeasId(1),
-        stream: Stream::Spl,
-    };
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        if let Some(f) = c.latest().unwrap().get(&topic)
-            && !f.stale
-            && let FrameData::Spl(s) = &f.frame.data
-            && ok(&s.meta)
-        {
-            return s.meta;
+    let poll = Poll::new(Duration::from_secs(10), 30);
+    frame_until(c, (MeasId(1), Stream::Spl), poll, what, |f| {
+        match &f.frame.data {
+            FrameData::Spl(s) if !f.stale && ok(&s.meta) => Some(s.meta),
+            _ => None,
         }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        tokio::time::sleep(Duration::from_millis(30)).await;
-    }
+    })
+    .await
 }
 
 async fn state_until(c: &Client, what: &str, ok: impl Fn(&State) -> bool) -> std::sync::Arc<State> {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        if let Some(s) = c.view().state.clone()
-            && ok(&s)
-        {
-            return s;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
+    let poll = Poll::new(Duration::from_secs(10), 20);
+    mirror_until(c, poll, what, |s| ok(s).then(|| s.clone())).await
 }
 
 fn plays(m: &SplMeta) -> bool {
@@ -119,7 +103,7 @@ async fn slow_remote_client_fires_reroutes_and_recovers_from_expiry() {
     })
     .await
     .unwrap();
-    let ReplyBody::Measurement(m) = c
+    let m = c
         .call(Command::MeasCreate {
             config: ac2_proto::model::MeasConfig {
                 scope: ac2_proto::model::MeasScope::Session,
@@ -131,9 +115,7 @@ async fn slow_remote_client_fires_reroutes_and_recovers_from_expiry() {
         })
         .await
         .unwrap()
-    else {
-        panic!("measurement");
-    };
+        .measurement();
     c.call(Command::MeasStart { meas: m.id }).await.unwrap();
     c.subscribe(ac2_proto::Subscription::Topic(Topic::Data {
         meas: m.id,
@@ -193,9 +175,11 @@ async fn slow_remote_client_fires_reroutes_and_recovers_from_expiry() {
     spl_until(&c, "silence after the lease is released", silent).await;
 
     // A client that stops refreshing: the state shows the expiry and the output is silent.
-    let ReplyBody::Lease(l) = c.call(Command::GenAcquire { force: false }).await.unwrap() else {
-        panic!("lease");
-    };
+    let l = c
+        .call(Command::GenAcquire { force: false })
+        .await
+        .unwrap()
+        .lease();
     c.call(Command::GenSet {
         lease_token: l.lease_token,
         desired: desired(vec![0], true, true),

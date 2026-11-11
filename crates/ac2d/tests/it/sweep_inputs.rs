@@ -13,7 +13,7 @@ use ac2_proto::model::{
     MeasConfig, MeasKind, SessionRef, SweepConfig, SweepStatus, TraceData, TraceMeta, TraceSource,
 };
 use ac2_proto::units::{Blob, Hz, LeaseToken, TraceId};
-use ac2_proto::{Command, ErrorCode, ReplyBody};
+use ac2_proto::{Command, ErrorCode};
 use ac2d::Daemon;
 use common::*;
 
@@ -51,29 +51,16 @@ fn import_curve(c: &mut Client, mic: &str, input: u16, curve: &str) {
 }
 
 fn data(c: &mut Client, trace: TraceId) -> TraceData {
-    match c.ok(Command::TraceGet { trace }) {
-        ReplyBody::TraceData(t) => *t,
-        other => panic!("{other:?}"),
-    }
-}
-
-fn state(c: &mut Client) -> ac2_proto::model::State {
-    match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state,
-        other => panic!("{other:?}"),
-    }
+    c.trace_data(Command::TraceGet { trace })
 }
 
 /// The trace's frequencies and magnitude as measured (the CSV export keeps the columns as
 /// measured).
 fn csv_mag(c: &mut Client, trace: TraceId) -> (Vec<f64>, Vec<f64>) {
-    let csv = match c.ok(Command::TraceExport {
+    let csv = c.export_text(Command::TraceExport {
         trace,
         format: ac2_proto::model::ExportFormat::Ac2Csv,
-    }) {
-        ReplyBody::Export { content, .. } => String::from_utf8(content.0).unwrap(),
-        other => panic!("{other:?}"),
-    };
+    });
     let mut cols = csv_columns(&csv);
     (
         cols.remove("freq_hz").unwrap(),
@@ -109,10 +96,7 @@ fn two_mic_setup(
         },
     });
     let d = driver(&backend);
-    let token = match c.ok(Command::GenAcquire { force: false }) {
-        ReplyBody::Lease(l) => l.lease_token,
-        other => panic!("{other:?}"),
-    };
+    let token = c.acquire();
     (h, c, sub, ka, d, token)
 }
 
@@ -220,7 +204,7 @@ fn one_sweep_records_each_mic_into_its_own_trace_with_its_own_curve() {
     );
 
     // The measurement counts one run, the run's traces both under it.
-    let st = state(&mut c);
+    let st = c.state();
     let owned: Vec<TraceId> = st
         .traces
         .iter()
@@ -246,7 +230,7 @@ fn one_sweep_records_each_mic_into_its_own_trace_with_its_own_curve() {
         },
         discard: true,
     });
-    let st = state(&mut c);
+    let st = c.state();
     let m = st
         .measurements
         .iter()
@@ -332,6 +316,6 @@ fn inputs_that_make_no_run_are_refused() {
         "{}",
         e.msg
     );
-    let st = state(&mut c);
+    let st = c.state();
     assert!(!st.generator.firing, "nothing played");
 }

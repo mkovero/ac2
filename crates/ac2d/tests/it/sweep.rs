@@ -17,7 +17,7 @@ use ac2_proto::model::{
     TraceSource,
 };
 use ac2_proto::units::{Blob, Dbfs, Hz, LeaseToken, MeasId, Seconds, TraceId};
-use ac2_proto::{Command, ErrorCode, ReplyBody};
+use ac2_proto::{Command, ErrorCode};
 use ac2d::{Daemon, FAKE_RIG_DISTORTION};
 use common::*;
 
@@ -59,30 +59,23 @@ pub(crate) fn request(level: f64) -> SweepConfig {
 
 /// A sweep measurement with `config`: created, never started.
 pub(crate) fn create(c: &mut Client, name: &str, config: SweepConfig) -> MeasId {
-    match c.ok(Command::MeasCreate {
+    let m = c.measurement(Command::MeasCreate {
         config: MeasConfig {
             scope: ac2_proto::model::MeasScope::Session,
             name: name.into(),
             kind: MeasKind::Sweep { config },
         },
-    }) {
-        ReplyBody::Measurement(m) => {
-            assert!(!m.running, "a sweep measurement waits for sweep.run");
-            m.id
-        }
-        other => panic!("{other:?}"),
-    }
+    });
+    assert!(!m.running, "a sweep measurement waits for sweep.run");
+    m.id
 }
 
 pub(crate) fn start(c: &mut Client, token: LeaseToken, meas: MeasId) -> SweepRun {
-    match c.ok(Command::SweepRun {
+    c.sweep(Command::SweepRun {
         lease_token: token,
         meas,
         name: None,
-    }) {
-        ReplyBody::Sweep(r) => r,
-        other => panic!("{other:?}"),
-    }
+    })
 }
 
 pub(crate) fn arm(c: &mut Client, token: LeaseToken) {
@@ -152,10 +145,7 @@ fn setup() -> (
         config: session(true),
     });
     let d = driver(&backend);
-    let token = match c.ok(Command::GenAcquire { force: false }) {
-        ReplyBody::Lease(l) => l.lease_token,
-        other => panic!("{other:?}"),
-    };
+    let token = c.acquire();
     (h, backend, c, sub, ka, d, token)
 }
 
@@ -166,10 +156,7 @@ fn slow_sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
     // A sweep measurement is settings only: creating it plays nothing, and it has no job.
     let meas = create(&mut c, "Genelec 1 m", request(LEVEL));
     let loud = create(&mut c, "too loud", request(-5.0));
-    let st = match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state,
-        other => panic!("{other:?}"),
-    };
+    let st = c.state();
     assert!(!st.generator.armed && !st.generator.firing && st.sweep.is_none());
     for cmd in [
         Command::MeasStart { meas },
@@ -215,9 +202,7 @@ fn slow_sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
     assert_eq!(e.code, ErrorCode::Refused);
     assert!(e.msg.contains("maximum"), "{}", e.msg);
 
-    let ReplyBody::Sweep(run0) = capture(&mut c, meas).unwrap() else {
-        panic!("not a sweep");
-    };
+    let run0 = capture(&mut c, meas).unwrap().sweep();
     assert_eq!((run0.meas, run0.name.as_str()), (meas, "Run 1"));
     // Its measurement cannot go while the run plays.
     let e = c
@@ -229,10 +214,7 @@ fn slow_sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
     assert_eq!(e.code, ErrorCode::Refused, "{}", e.msg);
     assert_eq!(run0.status, SweepStatus::Playing { repeat: 1 });
     // While it plays, the generator fires the sweep and other stimulus commands wait.
-    let st = match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state,
-        other => panic!("{other:?}"),
-    };
+    let st = c.state();
     assert!(st.generator.firing && st.generator.armed);
     assert_eq!(st.sweep.as_ref().map(|s| s.id), Some(run0.id));
     assert_eq!(
@@ -261,10 +243,7 @@ fn slow_sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
     let trace = traces[0];
     // A finished sweep leaves the generator disarmed, never re-armed with the state from
     // before it: the lease stays with its holder, and the next sweep needs an explicit arm.
-    let st = match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state,
-        other => panic!("{other:?}"),
-    };
+    let st = c.state();
     assert!(!st.generator.armed && !st.generator.firing);
     assert!(st.generator.owner.is_some(), "the lease is still held");
     let last = st.generator.last_action.as_ref().unwrap();
@@ -274,10 +253,7 @@ fn slow_sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
     assert_eq!(e.code, ErrorCode::Refused, "{}", e.msg);
     assert!(e.msg.contains("arm"), "{}", e.msg);
 
-    let data = match c.ok(Command::TraceGet { trace }) {
-        ReplyBody::TraceData(t) => *t,
-        other => panic!("{other:?}"),
-    };
+    let data = c.trace_data(Command::TraceGet { trace });
     assert_eq!(data.meta.kind, TraceKind::Sweep);
     assert!(matches!(
         &data.meta.source,
@@ -298,13 +274,11 @@ fn slow_sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
     let fund = a + 0.75 * c3 * a.powi(3);
     let h2 = 20.0 * (0.5 * c2 * a * a / fund).log10();
     let h3 = 20.0 * (0.25 * c3 * a.powi(3) / fund).log10();
-    let freqs = match c.ok(Command::GridGet {
-        grid_id: data.meta.grid_id,
-    }) {
-        ReplyBody::Grid(g) => g,
-        other => panic!("{other:?}"),
-    }
-    .centres();
+    let freqs = c
+        .grid(Command::GridGet {
+            grid_id: data.meta.grid_id,
+        })
+        .centres();
     let mut worst = (0.0f64, 0.0f64);
     for (i, f) in freqs.iter().enumerate() {
         if (200.0..=5000.0 / 3.0 / 1.2).contains(f) {
@@ -325,13 +299,10 @@ fn slow_sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
     );
     assert!(worst.0 < 0.5 && worst.1 < 0.5, "H2 / H3 error {worst:?}");
     // The CSV export carries every curve.
-    let csv = match c.ok(Command::TraceExport {
+    let csv = c.export_text(Command::TraceExport {
         trace,
         format: ac2_proto::model::ExportFormat::Ac2Csv,
-    }) {
-        ReplyBody::Export { content, .. } => String::from_utf8(content.0).unwrap(),
-        other => panic!("{other:?}"),
-    };
+    });
     assert!(
         csv.contains(",h2_db,h2_floor_db,h3_db,h3_floor_db,"),
         "{}",
@@ -340,25 +311,19 @@ fn slow_sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
     assert_eq!(trace, TraceId(1));
     // Re-imported, the export is the same sweep again: the distortion pane draws it, the
     // delay readout reads the arrival.
-    let back = match c.ok(Command::TraceImport {
+    let back = c.trace(Command::TraceImport {
         file_name: "sweep.csv".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Trace,
         ir: None,
         content: Blob(csv.into_bytes()),
         owner: ac2_proto::model::TraceOwner::Imported,
-    }) {
-        ReplyBody::Trace(t) => t,
-        other => panic!("{other:?}"),
-    };
+    });
     assert_eq!(back.kind, TraceKind::Sweep);
     assert_eq!(back.edit.owner, TraceOwner::Imported);
     assert!((back.delay.0 - data.meta.delay.0).abs() < 1e-12);
     assert!(matches!(&back.source, TraceSource::Imported { notes, .. } if notes.is_empty()));
-    let again = match c.ok(Command::TraceGet { trace: back.id }) {
-        ReplyBody::TraceData(t) => *t,
-        other => panic!("{other:?}"),
-    };
+    let again = c.trace_data(Command::TraceGet { trace: back.id });
     let s2 = again.sweep.expect("sweep data after import");
     assert_eq!((s2.ir, s2.info), (s.ir, s.info));
     assert_eq!(s2.harmonics.len(), s.harmonics.len());
@@ -374,10 +339,7 @@ fn slow_sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
         panic!("sweep failed: {:?}", done.status);
     };
     let second = traces[0];
-    let st = match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state,
-        other => panic!("{other:?}"),
-    };
+    let st = c.state();
     let t2 = st.traces.iter().find(|t| t.id == second).unwrap();
     assert_eq!(t2.edit.owner, TraceOwner::Meas { meas });
     assert!(matches!(t2.source, TraceSource::Sweep { number: 2, .. }));
@@ -387,10 +349,7 @@ fn slow_sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
         meas,
         traces: OwnedTraces::Keep,
     });
-    let st = match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state,
-        other => panic!("{other:?}"),
-    };
+    let st = c.state();
     assert!(st.measurements.iter().all(|m| m.id != meas));
     for id in [trace, second] {
         let t = st.traces.iter().find(|t| t.id == id).unwrap();
@@ -416,10 +375,7 @@ fn stopping_or_losing_the_lease_discards_the_run() {
             ..
         }
     ));
-    let st = match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state,
-        other => panic!("{other:?}"),
-    };
+    let st = c.state();
     assert!(!st.generator.firing && !st.generator.armed);
     assert!(st.traces.is_empty(), "nothing stored");
 
@@ -471,10 +427,7 @@ fn a_failed_sweep_leaves_the_generator_disarmed() {
         "{:?}",
         ended.status
     );
-    let st = match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state,
-        other => panic!("{other:?}"),
-    };
+    let st = c.state();
     assert!(!st.generator.armed && !st.generator.firing);
     assert!(st.traces.is_empty(), "nothing stored");
 }
@@ -521,10 +474,7 @@ fn a_sweep_in_a_hall_reads_its_reverberation_time() {
         },
     });
     let mut d = driver(&backend);
-    let token = match c.ok(Command::GenAcquire { force: false }) {
-        ReplyBody::Lease(l) => l.lease_token,
-        other => panic!("{other:?}"),
-    };
+    let token = c.acquire();
     let req = SweepConfig {
         reference_input: 0,
         measurement_inputs: vec![2],
@@ -545,10 +495,7 @@ fn a_sweep_in_a_hall_reads_its_reverberation_time() {
         panic!("sweep failed: {:?}", done.status);
     };
     let trace = traces[0];
-    let data = match c.ok(Command::TraceGet { trace }) {
-        ReplyBody::TraceData(t) => *t,
-        other => panic!("{other:?}"),
-    };
+    let data = c.trace_data(Command::TraceGet { trace });
     // 100 Hz … 10 kHz at 96 points per octave.
     assert!(data.mag_db.len() > 600, "{}", data.mag_db.len());
     let s = data.sweep.expect("sweep data");
@@ -605,33 +552,24 @@ fn a_sweep_in_a_hall_reads_its_reverberation_time() {
     }
     assert!(!bad, "reverberation time off by 8 % or more");
     // The export carries the parameters, the import restores them.
-    let csv = match c.ok(Command::TraceExport {
+    let csv = c.export_text(Command::TraceExport {
         trace,
         format: ac2_proto::model::ExportFormat::Ac2Csv,
-    }) {
-        ReplyBody::Export { content, .. } => String::from_utf8(content.0).unwrap(),
-        other => panic!("{other:?}"),
-    };
+    });
     assert!(csv.contains("\n# room_metrics: {"), "no room_metrics line");
     assert!(
         csv.contains("\n# band_hz,edt_s,t20_s,t30_s,"),
         "no room table"
     );
-    let back = match c.ok(Command::TraceImport {
+    let back = c.trace(Command::TraceImport {
         file_name: "hall.csv".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Trace,
         ir: None,
         content: Blob(csv.into_bytes()),
         owner: ac2_proto::model::TraceOwner::Imported,
-    }) {
-        ReplyBody::Trace(t) => t,
-        other => panic!("{other:?}"),
-    };
-    let again = match c.ok(Command::TraceGet { trace: back.id }) {
-        ReplyBody::TraceData(t) => *t,
-        other => panic!("{other:?}"),
-    };
+    });
+    let again = c.trace_data(Command::TraceGet { trace: back.id });
     let again = again.sweep.expect("sweep data after import");
     assert_eq!(again.room, Some(room));
     assert_eq!(again.unresolved, Some(unresolved));
@@ -660,10 +598,7 @@ fn slow_fine_lf_harmonics_report_h2_below_20_hz() {
             panic!("sweep failed: {:?}", done.status);
         };
         let trace = traces[0];
-        let data = match c.ok(Command::TraceGet { trace }) {
-            ReplyBody::TraceData(t) => *t,
-            other => panic!("{other:?}"),
-        };
+        let data = c.trace_data(Command::TraceGet { trace });
         let TraceSource::Sweep {
             lf_harmonics: stored,
             ..
@@ -672,13 +607,11 @@ fn slow_fine_lf_harmonics_report_h2_below_20_hz() {
             panic!("{:?}", data.meta.source);
         };
         let s = data.sweep.expect("sweep data");
-        let freqs = match c.ok(Command::GridGet {
-            grid_id: data.meta.grid_id,
-        }) {
-            ReplyBody::Grid(g) => g,
-            other => panic!("{other:?}"),
-        }
-        .centres();
+        let freqs = c
+            .grid(Command::GridGet {
+                grid_id: data.meta.grid_id,
+            })
+            .centres();
         let h2 = s.harmonics.iter().find(|h| h.order == 2).expect("H2");
         let lowest = (0..freqs.len())
             .find(|&i| h2.curve.valid(i, s.info.floor_margin))
@@ -755,10 +688,7 @@ fn a_sweep_through_a_corrected_mic_applies_its_curve() {
         panic!("sweep failed: {:?}", done.status);
     };
     let trace = traces[0];
-    let shown = match c.ok(Command::TraceGet { trace }) {
-        ReplyBody::TraceData(t) => *t,
-        other => panic!("{other:?}"),
-    };
+    let shown = c.trace_data(Command::TraceGet { trace });
     let meta = &shown.meta;
     assert_eq!(
         meta.mic
@@ -771,13 +701,10 @@ fn a_sweep_through_a_corrected_mic_applies_its_curve() {
     assert_eq!((mc.mic.as_str(), mc.curve.label.as_str()), ("M30", "M30"));
     assert_eq!(mc.f_norm, Hz(1000.0));
 
-    let csv = match c.ok(Command::TraceExport {
+    let csv = c.export_text(Command::TraceExport {
         trace,
         format: ac2_proto::model::ExportFormat::Ac2Csv,
-    }) {
-        ReplyBody::Export { content, .. } => String::from_utf8(content.0).unwrap(),
-        other => panic!("{other:?}"),
-    };
+    });
     assert!(
         csv.contains("# mic: M30 (curve: M30, applied after capture as a display edit"),
         "{}",
@@ -822,10 +749,7 @@ fn a_sweep_through_a_corrected_mic_applies_its_curve() {
 
     // Taken off, the trace serves what was measured.
     c.ok(Command::TraceMicCurve { trace, curve: None });
-    let bare = match c.ok(Command::TraceGet { trace }) {
-        ReplyBody::TraceData(t) => *t,
-        other => panic!("{other:?}"),
-    };
+    let bare = c.trace_data(Command::TraceGet { trace });
     for (i, a) in raw["mag_db"].iter().enumerate() {
         if a.is_finite() {
             assert!((a - f64::from(bare.mag_db[i])).abs() < 1e-3);

@@ -20,10 +20,10 @@ use ac2_audio::{FakeBackend, FakeConfig, FakeDriver};
 use ac2_core::generator::RAMP_SECONDS;
 use ac2_proto::frame::{FrameData, LoudnessSource, SessionLevelsFrame, SourceLoudness};
 use ac2_proto::model::{
-    Ballistic, GeneratorDesired, GeneratorSettings, InputKind, InputSetup, Pair, Signal, State,
+    Ballistic, GeneratorDesired, GeneratorSettings, InputKind, InputSetup, Pair, Signal,
 };
 use ac2_proto::units::{Dbfs, Hz, LeaseToken};
-use ac2_proto::{Command, ReplyBody, Subscription};
+use ac2_proto::{Command, Subscription};
 use ac2d::{Daemon, Handle};
 use common::*;
 
@@ -102,13 +102,7 @@ fn open(name: &str, ballistic: Ballistic, start: f64) -> Prog {
             name: None,
         }],
     });
-    let base = match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => {
-            let st: State = s.state;
-            st.rig.rev
-        }
-        other => panic!("{other:?}"),
-    };
+    let base = c.state().rig.rev;
     c.ok(Command::LevelsSet {
         base,
         ballistic: Some(ballistic),
@@ -117,9 +111,7 @@ fn open(name: &str, ballistic: Ballistic, start: f64) -> Prog {
         correlation_gate: None,
         loudness_target: None,
     });
-    let ReplyBody::Lease(lease) = c.ok(Command::GenAcquire { force: false }) else {
-        panic!("lease");
-    };
+    let lease = c.lease(Command::GenAcquire { force: false });
     let d = driver(&backend);
     let mut p = Prog {
         _h: h,

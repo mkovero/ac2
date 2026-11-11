@@ -21,11 +21,11 @@ use ac2_proto::Change;
 use ac2_proto::frame::FrameData;
 use ac2_proto::model::{
     BackendKind, BandFraction, DiscontinuityCause, GeneratorDesired, GeneratorSettings, MeasConfig,
-    MeasKind, RecordRequest, RecordingEnd, RecordingRef, RecordingRun, RecordingStatus, ReplayPace,
-    RtaConfig, Signal, SpecAveraging, SpectrumConfig, State, TraceData,
+    MeasKind, RecordRequest, RecordingEnd, RecordingRef, RecordingStatus, ReplayPace, RtaConfig,
+    Signal, SpecAveraging, SpectrumConfig, TraceData,
 };
 use ac2_proto::units::{Dbfs, MeasId, Seconds, SessionEpoch, TraceId};
-use ac2_proto::{Command, ErrorCode, ReplyBody};
+use ac2_proto::{Command, ErrorCode};
 use ac2_traces::raw::{self, TimelineChange, WavReader};
 use ac2d::Daemon;
 use common::*;
@@ -59,33 +59,15 @@ fn xrun_rig() -> FakeBackend {
     .unwrap()
 }
 
-fn state(c: &mut Client) -> State {
-    match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state,
-        other => panic!("{other:?}"),
-    }
-}
-
-fn run_of(r: ReplyBody) -> RecordingRun {
-    match r {
-        ReplyBody::Recording(r) => r,
-        other => panic!("{other:?}"),
-    }
-}
-
 fn capture(c: &mut Client, meas: u32, name: &str) -> TraceData {
-    let id: TraceId = match c.ok(Command::TraceCapture {
-        meas: MeasId(meas),
-        name: name.into(),
-        slot: None,
-    }) {
-        ReplyBody::Trace(t) => t.id,
-        other => panic!("{other:?}"),
-    };
-    match c.ok(Command::TraceGet { trace: id }) {
-        ReplyBody::TraceData(d) => *d,
-        other => panic!("{other:?}"),
-    }
+    let id: TraceId = c
+        .trace(Command::TraceCapture {
+            meas: MeasId(meas),
+            name: name.into(),
+            slot: None,
+        })
+        .id;
+    c.trace_data(Command::TraceGet { trace: id })
 }
 
 fn record(inputs: Vec<u16>, name: &str, max_s: f64) -> Command {
@@ -192,12 +174,11 @@ fn slow_replayed_recording_reproduces_the_live_analyses() {
     let e = c.call(record(vec![0, 1], "x", 10.0)).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
 
-    let live_epoch = match c.ok(Command::SessionOpen {
-        config: session(true),
-    }) {
-        ReplyBody::Session(s) => s.epoch,
-        other => panic!("{other:?}"),
-    };
+    let live_epoch = c
+        .session(Command::SessionOpen {
+            config: session(true),
+        })
+        .epoch;
     c.ok(Command::MeasCreate {
         config: transfer("main"),
     });
@@ -225,10 +206,7 @@ fn slow_replayed_recording_reproduces_the_live_analyses() {
     for m in 1..=4 {
         c.ok(Command::MeasStart { meas: MeasId(m) });
     }
-    let tok = match c.ok(Command::GenAcquire { force: false }) {
-        ReplyBody::Lease(l) => l.lease_token,
-        other => panic!("{other:?}"),
-    };
+    let tok = c.acquire();
     c.ok(Command::GenSet {
         lease_token: tok,
         desired: GeneratorDesired {
@@ -253,7 +231,7 @@ fn slow_replayed_recording_reproduces_the_live_analyses() {
         let e = c.call(bad).unwrap_err();
         assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
     }
-    let started = run_of(c.ok(record(vec![0, 1], "take 1", 60.0)));
+    let started = c.recording(record(vec![0, 1], "take 1", 60.0));
     assert!(started.active());
     assert_eq!(started.inputs, vec![0, 1]);
     let e = c.call(record(vec![0], "take 2", 10.0)).unwrap_err();
@@ -286,7 +264,7 @@ fn slow_replayed_recording_reproduces_the_live_analyses() {
     let live_tf = capture(&mut c, 1, "live tf");
     let live_spec = capture(&mut c, 2, "live spec");
 
-    let done_run = run_of(c.ok(Command::RecStop));
+    let done_run = c.recording(Command::RecStop);
     assert_eq!(
         done_run.status,
         RecordingStatus::Ended {
@@ -353,32 +331,25 @@ fn slow_replayed_recording_reproduces_the_live_analyses() {
         "before the gap, frames are samples"
     );
 
-    match c.ok(Command::RecList) {
-        ReplyBody::Recordings(l) => {
-            assert_eq!(l.len(), 1);
-            assert_eq!(l[0].name, "take 1");
-            assert_eq!(l[0].frames, frames);
-            assert_eq!(l[0].end, Some(RecordingEnd::Stopped));
-        }
-        other => panic!("{other:?}"),
-    }
+    let l = c.recordings(Command::RecList);
+    assert_eq!(l.len(), 1);
+    assert_eq!(l[0].name, "take 1");
+    assert_eq!(l[0].frames, frames);
+    assert_eq!(l[0].end, Some(RecordingEnd::Stopped));
 
     // Replay, as fast as the analyses take it: the same measurements run on the file.
-    let session = match c.ok(Command::SessionReplay {
+    let session = c.session(Command::SessionReplay {
         recording: RecordingRef::Name {
             name: "take 1".into(),
         },
         pace: ReplayPace::Fast,
-    }) {
-        ReplyBody::Session(s) => s,
-        other => panic!("{other:?}"),
-    };
+    });
     let open = session.open.clone().expect("open");
     assert_eq!(open.backend, BackendKind::Replay);
     assert_eq!(open.replay.as_ref().map(|r| r.frames), Some(frames));
     assert_eq!(open.replay.as_ref().map(|r| r.end_sample.0), Some(live_end));
     assert_eq!(open.config.output_channels, 0);
-    let g = state(&mut c).generator;
+    let g = c.state().generator;
     assert!(!g.armed && !g.firing, "a replay plays nothing");
     wait_handed_on(&ka, session.epoch, live_end);
     let replay_spl = spl_level(&sub, live_end);
@@ -408,20 +379,19 @@ fn slow_replayed_recording_reproduces_the_live_analyses() {
     );
 
     // Recording the replay (real time) gives back the recorded samples, bit for bit.
-    let again_epoch = match c.ok(Command::SessionReplay {
-        recording: RecordingRef::Path {
-            path: raw::sidecar_path(dir.path(), "take 1")
-                .to_string_lossy()
-                .into_owned(),
-        },
-        pace: ReplayPace::Realtime,
-    }) {
-        ReplyBody::Session(s) => s.epoch,
-        other => panic!("{other:?}"),
-    };
+    let again_epoch = c
+        .session(Command::SessionReplay {
+            recording: RecordingRef::Path {
+                path: raw::sidecar_path(dir.path(), "take 1")
+                    .to_string_lossy()
+                    .into_owned(),
+            },
+            pace: ReplayPace::Realtime,
+        })
+        .epoch;
     c.ok(record(vec![1, 0], "again", 60.0));
     wait_handed_on(&ka, again_epoch, live_end);
-    let again = run_of(c.ok(Command::RecStop));
+    let again = c.recording(Command::RecStop);
     assert!(again.frames > 0);
     let (orig, _) = by_session_sample(dir.path(), "take 1");
     let (copy, ch) = by_session_sample(dir.path(), "again");
@@ -467,12 +437,11 @@ fn replayed_rta_reads_a_steady_tone_alike() {
     let h = Daemon::start(cfg).unwrap();
     let (mut c, _sub) = connect(&h, &[]);
     let ka = Sub::connect(h.context(), h.data_endpoint(), &[b"ka"]);
-    let live_epoch = match c.ok(Command::SessionOpen {
-        config: session(false),
-    }) {
-        ReplyBody::Session(s) => s.epoch,
-        other => panic!("{other:?}"),
-    };
+    let live_epoch = c
+        .session(Command::SessionOpen {
+            config: session(false),
+        })
+        .epoch;
     c.ok(Command::MeasCreate {
         config: MeasConfig {
             scope: ac2_proto::model::MeasScope::Session,
@@ -492,10 +461,7 @@ fn replayed_rta_reads_a_steady_tone_alike() {
         },
     });
     c.ok(Command::MeasStart { meas: MeasId(1) });
-    let tok = match c.ok(Command::GenAcquire { force: false }) {
-        ReplyBody::Lease(l) => l.lease_token,
-        other => panic!("{other:?}"),
-    };
+    let tok = c.acquire();
     c.ok(Command::GenSet {
         lease_token: tok,
         desired: GeneratorDesired {
@@ -529,15 +495,14 @@ fn replayed_rta_reads_a_steady_tone_alike() {
     let live = capture(&mut c, 1, "live rta");
     c.ok(Command::RecStop);
 
-    let epoch = match c.ok(Command::SessionReplay {
-        recording: RecordingRef::Name {
-            name: "tone".into(),
-        },
-        pace: ReplayPace::Fast,
-    }) {
-        ReplyBody::Session(s) => s.epoch,
-        other => panic!("{other:?}"),
-    };
+    let epoch = c
+        .session(Command::SessionReplay {
+            recording: RecordingRef::Name {
+                name: "tone".into(),
+            },
+            pace: ReplayPace::Fast,
+        })
+        .epoch;
     let s = raw::read_sidecar(dir.path(), "tone").unwrap();
     let end = s.end.as_ref().map(|e| e.frames).unwrap();
     wait_handed_on(&ka, epoch, end);
@@ -617,14 +582,14 @@ fn bounds_shutdown_and_a_dead_daemon_leave_finished_files() {
     assert_eq!(e.code, ErrorCode::Refused);
 
     // A shutdown while recording finishes the file and says why.
-    let rec = run_of(c.ok(Command::RecStart {
+    let rec = c.recording(Command::RecStart {
         request: RecordRequest {
             inputs: vec![0, 1],
             name: None,
             max_duration: Seconds(60.0),
             max_bytes: Some(1 << 30),
         },
-    }));
+    });
     assert!(rec.name.starts_with("rec-"), "{}", rec.name);
     run_of_state_progress(&mut c, &mut d);
     h.shutdown();
@@ -662,7 +627,7 @@ fn bounds_shutdown_and_a_dead_daemon_leave_finished_files() {
     cfg.recording_dir = Some(dir.path().to_owned());
     let h = Daemon::start(cfg).unwrap();
     let (mut c, _sub) = connect(&h, &[]);
-    let st = state(&mut c);
+    let st = c.state();
     let r = st.recording.expect("the interrupted recording is shown");
     assert_eq!(r.name, "dead");
     assert_eq!(
@@ -700,7 +665,7 @@ fn run_of_state_progress(c: &mut Client, d: &mut ac2_audio::FakeDriver) {
     let deadline = Instant::now() + T;
     loop {
         run(d, 1.2);
-        if state(c).recording.is_some_and(|r| r.frames > 0) {
+        if c.state().recording.is_some_and(|r| r.frames > 0) {
             return;
         }
         assert!(Instant::now() < deadline, "no progress");

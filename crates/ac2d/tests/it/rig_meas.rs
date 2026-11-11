@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use ac2_proto::model::layout::{EntryRef, PaneContent, PaneEntry, PaneKind, RigRef};
 use ac2_proto::model::*;
 use ac2_proto::units::*;
-use ac2_proto::{Command, ErrorCode, ReplyBody};
+use ac2_proto::{Command, ErrorCode};
 use ac2d::{AutosaveConfig, Daemon, Handle};
 use common::*;
 
@@ -33,13 +33,6 @@ fn start(name: &str, dir: &Path) -> (Handle, ac2_audio::FakeBackend) {
         restore: true,
     });
     (Daemon::start(cfg).unwrap(), backend)
-}
-
-fn state(c: &mut Client) -> State {
-    match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state,
-        other => panic!("{other:?}"),
-    }
 }
 
 fn rig_meter(name: &str) -> MeasConfig {
@@ -69,7 +62,8 @@ fn load(c: &mut Client, name: &str) {
 
 /// The measurements as (id, name, scope), by id.
 fn listed(c: &mut Client) -> Vec<(u32, String, MeasScope)> {
-    let mut v: Vec<_> = state(c)
+    let mut v: Vec<_> = c
+        .state()
         .measurements
         .into_iter()
         .map(|m| (m.id.0, m.config.name, m.config.scope))
@@ -83,15 +77,13 @@ fn rig_json(dir: &Path) -> serde_json::Value {
 }
 
 fn log_total(c: &mut Client, meas: MeasId) -> u64 {
-    match c.ok(Command::SplLogGet {
+    c.spl_log_page(Command::SplLogGet {
         meas,
         log: SplLogWhich::Current,
         from: 0,
         max: 1000,
-    }) {
-        ReplyBody::SplLogPage(p) => p.total,
-        other => panic!("{other:?}"),
-    }
+    })
+    .total
 }
 
 #[test]
@@ -147,7 +139,7 @@ fn rig_meter_survives_loads_and_stays_out_of_session_files() {
         ]
     );
     // A rig meter is not session content: the working state is clean after the load.
-    assert!(!state(&mut c).working.dirty);
+    assert!(!c.state().working.dirty);
 
     // Back to the session: the rig settings let it go.
     c.update_ok(MeasId(1), spl("FOH", 1));
@@ -178,7 +170,7 @@ fn rig_meters_come_back_after_a_restart() {
 
     let (h, _backend) = start("rig-meas-restart-2", dir.path());
     let (mut c, _sub) = connect(&h, &[]);
-    let st = state(&mut c);
+    let st = c.state();
     assert_eq!(
         listed(&mut c),
         vec![
@@ -190,12 +182,10 @@ fn rig_meters_come_back_after_a_restart() {
     assert!(m.running, "a running rig meter comes back running");
     assert!(st.spl_logs.iter().any(|l| l.meas == MeasId(1)));
     // New measurements are numbered past both.
-    match c.ok(Command::MeasCreate {
+    let m = c.measurement(Command::MeasCreate {
         config: spl("new", 0),
-    }) {
-        ReplyBody::Measurement(m) => assert_eq!(m.id, MeasId(3)),
-        other => panic!("{other:?}"),
-    }
+    });
+    assert_eq!(m.id, MeasId(3));
     drop(c);
     h.shutdown();
 }
@@ -205,7 +195,7 @@ fn monitor_start_is_rev_guarded() {
     let dir = tempfile::tempdir().unwrap();
     let (h, _backend) = start("rig-meas-monitor-rev", dir.path());
     let (mut c, _sub) = connect(&h, &[]);
-    let rig = state(&mut c).rig;
+    let rig = c.state().rig;
     let stale = Rev(rig.rev.0 + 100);
     let e = c
         .call(Command::RigMonitorStart {
@@ -218,7 +208,7 @@ fn monitor_start_is_rev_guarded() {
         base: rig.rev,
         on: true,
     });
-    let now = state(&mut c).rig;
+    let now = c.state().rig;
     assert!(now.monitor_at_start);
     assert!(now.rev > rig.rev);
     assert_eq!(rig_json(dir.path())["monitor_at_start"], true);
@@ -246,7 +236,7 @@ fn monitor_at_start_meters_with_no_client() {
         config: rig_meter("Stage"),
     });
     c.ok(Command::MeasStart { meas: MeasId(1) });
-    let rev = state(&mut c).rig.rev;
+    let rev = c.state().rig.rev;
     c.ok(Command::RigMonitorStart {
         base: rev,
         on: true,
@@ -278,7 +268,7 @@ fn monitor_at_start_meters_with_no_client() {
     // No client has asked for anything: the daemon opened the device on its own.
     let mut d = driver(&backend);
     let (mut c, sub) = connect(&h, &[b"d/1/leq"]);
-    let st = state(&mut c);
+    let st = c.state();
     let open = st
         .session
         .open
@@ -301,10 +291,7 @@ fn monitor_at_start_meters_with_no_client() {
         assert!(Instant::now() < deadline, "the rig meter never metered");
     }
     // The generator has no output to play on.
-    let tok = match c.ok(Command::GenAcquire { force: false }) {
-        ReplyBody::Lease(l) => l.lease_token,
-        other => panic!("{other:?}"),
-    };
+    let tok = c.acquire();
     let e = c
         .call(Command::GenSet {
             lease_token: tok,
@@ -333,15 +320,13 @@ fn monitor_at_start_keeps_a_remote_input_it_could_not_add() {
     let dir = tempfile::tempdir().unwrap();
     let (h, _backend) = start("rig-meas-monitor-remote-1", dir.path());
     let (mut c, _sub) = connect(&h, &[]);
-    let ReplyBody::Welcome(w) = c.ok(Command::Hello {
+    let w = c.welcome(Command::Hello {
         client: "test".into(),
-    }) else {
-        panic!("welcome");
-    };
+    });
     c.ok(Command::MeasCreate {
         config: rig_meter("Stage"),
     });
-    let rev = state(&mut c).rig.rev;
+    let rev = c.state().rig.rev;
     c.ok(Command::RigMonitorStart {
         base: rev,
         on: true,
@@ -371,7 +356,7 @@ fn monitor_at_start_keeps_a_remote_input_it_could_not_add() {
 
     let (h, _backend) = start("rig-meas-monitor-remote-2", dir.path());
     let (mut c, _sub) = connect(&h, &[]);
-    let st = state(&mut c);
+    let st = c.state();
     let open = st
         .session
         .open
@@ -432,7 +417,7 @@ fn session_close_and_device_change_warn_of_rig_meters() {
         )
         .is_empty()
     );
-    let dev = state(&mut c).session.open.unwrap().input_device;
+    let dev = c.state().session.open.unwrap().input_device;
     let other = SessionConfig {
         input_device: DeviceSelector::Id { id: dev },
         ..session(false)
@@ -584,7 +569,7 @@ fn a_loaded_measurements_pane_references_follow_its_new_number() {
             (4, "A".into(), MeasScope::Session),
         ]
     );
-    let st = state(&mut c);
+    let st = c.state();
     let b = st.measurements.iter().find(|m| m.id == MeasId(3)).unwrap();
     let shown: Vec<(PaneKind, PaneContent)> = b
         .layout

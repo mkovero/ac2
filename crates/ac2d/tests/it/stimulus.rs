@@ -22,19 +22,15 @@ const T: Duration = Duration::from_secs(5);
 const EXPIRY: Duration = Duration::from_millis(1500);
 
 fn client_id(c: &mut Client) -> ClientId {
-    match c.ok(Command::Hello {
+    c.welcome(Command::Hello {
         client: "test".into(),
-    }) {
-        ReplyBody::Welcome(w) => w.client_id,
-        other => panic!("{other:?}"),
-    }
+    })
+    .client_id
 }
 
 fn acquire(c: &mut Client, force: bool) -> Result<LeaseToken, ac2_proto::ProtoError> {
-    c.call(Command::GenAcquire { force }).map(|r| match r {
-        ReplyBody::Lease(l) => l.lease_token,
-        other => panic!("{other:?}"),
-    })
+    c.call(Command::GenAcquire { force })
+        .map(|r| r.lease().lease_token)
 }
 
 /// Pink noise high-passed at 50 Hz. Full-band pink reaches down to 5 Hz, where a 200–300 ms
@@ -232,10 +228,7 @@ fn lease_acquire_force_expiry_and_universal_stop() {
     let _fade_in = m.level(&mut d, 0.35);
     let (_, rms) = m.level(&mut d, 0.2);
     assert!((rms + 26.0).abs() < 1.5, "{rms}");
-    match a.ok(Command::GenStop) {
-        ReplyBody::Ack { .. } => {}
-        other => panic!("{other:?}"),
-    }
+    a.ack(Command::GenStop);
     let _ = m.level(&mut d, 0.05);
     let (peak, _) = m.level(&mut d, 0.2);
     assert_eq!(
@@ -243,10 +236,7 @@ fn lease_acquire_force_expiry_and_universal_stop() {
         f32::NEG_INFINITY,
         "stopped by a client without the lease"
     );
-    let (s, _, _) = match a.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => (s.state, s.rev, ()),
-        other => panic!("{other:?}"),
-    };
+    let s = a.state();
     assert_eq!(
         s.generator.owner,
         Some(id_b.clone()),
@@ -281,12 +271,9 @@ fn lease_acquire_force_expiry_and_universal_stop() {
         .call(Command::GenRefresh { lease_token: tok_b })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::LeaseRequired);
-    match a.ok(Command::GenRelease {
+    a.ack(Command::GenRelease {
         lease_token: tok_a2,
-    }) {
-        ReplyBody::Ack { .. } => {}
-        other => panic!("{other:?}"),
-    }
+    });
     // Keep the device running while the stream fades out on shutdown.
     let stop = std::thread::spawn(move || {
         h.shutdown();
@@ -333,10 +320,11 @@ fn call_as(c: &mut Client, id: u64, cmd: Command) -> Result<ReplyBody, ac2_proto
 }
 
 fn generator(c: &mut Client, id: u64) -> ac2_proto::model::Generator {
-    match call_as(c, id, Command::StateSnapshot).unwrap() {
-        ReplyBody::Snapshot(s) => s.state.generator,
-        other => panic!("{other:?}"),
-    }
+    call_as(c, id, Command::StateSnapshot)
+        .unwrap()
+        .snapshot()
+        .state
+        .generator
 }
 
 /// A lease belongs to the client instance holding its token, not to the key: a new
@@ -379,10 +367,10 @@ fn same_key_new_connection_acquires_disarmed() {
     // A's socket drops within the lease; B, same key, acquires without force.
     drop(a);
     let mut b = Client::connect_with(h.context(), h.ctrl_endpoint(), Some(&curve));
-    let tok_b = match call_as(&mut b, 1000, Command::GenAcquire { force: false }).unwrap() {
-        ReplyBody::Lease(l) => l.lease_token,
-        other => panic!("{other:?}"),
-    };
+    let tok_b = call_as(&mut b, 1000, Command::GenAcquire { force: false })
+        .unwrap()
+        .lease()
+        .lease_token;
     assert_ne!(tok_b, tok_a);
     let g = generator(&mut b, 1001);
     assert!(

@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ac2_audio::FakeBackend;
-use ac2_client::{Client, ClientConfig, Endpoints, OnDrop};
+use ac2_client::{Client, OnDrop};
 use ac2_proto::frame::{FrameData, LeqRun};
 use ac2_proto::model::{
     DriverChange, DriverReset, DriverResetReason, GeneratorDesired, GeneratorSettings, Recovery,
@@ -26,15 +26,7 @@ use common::*;
 const WAIT: Duration = Duration::from_secs(40);
 
 async fn connect(h: &Handle) -> Client {
-    let ep = Endpoints {
-        ctrl: h.ctrl_endpoint().to_owned(),
-        data: h.data_endpoint().to_owned(),
-    };
-    let c = Client::connect(ClientConfig::new(ep, "ac2d-recovery-test"))
-        .await
-        .unwrap();
-    c.wait_synced(Duration::from_secs(5)).await.unwrap();
-    c
+    mirror(h, "ac2d-recovery-test").await
 }
 
 fn state(c: &Client) -> Arc<State> {
@@ -80,10 +72,12 @@ async fn start_with(
     .unwrap();
     let mut ids = Vec::new();
     for m in [transfer("Main"), spl("FOH SPL", 1)] {
-        let id = match c.call(Command::MeasCreate { config: m }).await.unwrap() {
-            ReplyBody::Measurement(m) => m.id,
-            other => panic!("{other:?}"),
-        };
+        let id = c
+            .call(Command::MeasCreate { config: m })
+            .await
+            .unwrap()
+            .measurement()
+            .id;
         c.call(Command::MeasStart { meas: id }).await.unwrap();
         ids.push(id);
     }
@@ -92,22 +86,14 @@ async fn start_with(
 
 /// The SPL meter's run once `ok` holds.
 async fn run_until(c: &Client, meas: MeasId, what: &str, ok: impl Fn(&LeqRun) -> bool) -> LeqRun {
-    let topic = Topic::Data {
-        meas,
-        stream: Stream::Leq,
-    };
-    let deadline = Instant::now() + WAIT;
-    loop {
-        if let Some(f) = c.latest().unwrap().get(&topic)
-            && let FrameData::Leq(l) = &f.frame.data
-            && let Some(r) = l.meta.run
-            && ok(&r)
-        {
-            return r;
+    let poll = Poll::new(WAIT, 50);
+    frame_until(c, (meas, Stream::Leq), poll, what, |f| {
+        match &f.frame.data {
+            FrameData::Leq(l) => l.meta.run.filter(|r| ok(r)),
+            _ => None,
         }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    })
+    .await
 }
 
 fn stopped(s: &Session) -> bool {
@@ -174,10 +160,8 @@ async fn slow_a_stalled_device_is_reported_and_the_session_reopens_by_itself() {
     assert!(stopped(&s.session));
     tokio::time::sleep(Duration::from_secs(2)).await;
     let asked = Instant::now();
-    match c.call(Command::SessionStatus).await.unwrap() {
-        ReplyBody::Session(s) => assert!(s.stopped.is_some()),
-        other => panic!("{other:?}"),
-    }
+    let status = c.call(Command::SessionStatus).await.unwrap().session();
+    assert!(status.stopped.is_some());
     assert!(asked.elapsed() < Duration::from_millis(500));
 
     // The device is back: the same configuration and measurements, a new epoch, disarmed.

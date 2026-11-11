@@ -10,7 +10,7 @@ use crate::common;
 
 use std::time::{Duration, Instant};
 
-use ac2_client::{Client, ClientConfig, ClientError, Endpoints, OnDrop, StimulusLease};
+use ac2_client::{Client, ClientError, OnDrop, StimulusLease};
 use ac2_proto::frame::{FrameData, SpecFrame, SplMeta, TfFrame};
 use ac2_proto::model::{
     BandFraction, CalBasis, CalKey, CalMethod, CalRef, CalState, CalStatus, CurveChoice,
@@ -30,15 +30,7 @@ mod end_to_end;
 const CURVE: &str = "* test mic\n20 0\n1000 0\n4000 0\n8000 6\n24000 6\n";
 
 async fn connect(h: &Handle) -> Client {
-    let ep = Endpoints {
-        ctrl: h.ctrl_endpoint().to_owned(),
-        data: h.data_endpoint().to_owned(),
-    };
-    let c = Client::connect(ClientConfig::new(ep, "ac2d-cal-test"))
-        .await
-        .unwrap();
-    c.wait_synced(Duration::from_secs(5)).await.unwrap();
-    c
+    mirror(h, "ac2d-cal-test").await
 }
 
 fn start(store: &std::path::Path) -> Handle {
@@ -69,21 +61,11 @@ async fn wait<T>(
     what: &str,
     mut pick: impl FnMut(&FrameData) -> Option<T>,
 ) -> T {
-    let topic = Topic::Data {
-        meas: MeasId(meas),
-        stream,
-    };
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        if let Some(f) = c.latest().unwrap().get(&topic)
-            && !f.stale
-            && let Some(v) = pick(&f.frame.data)
-        {
-            return v;
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        tokio::time::sleep(Duration::from_millis(40)).await;
-    }
+    let poll = Poll::new(Duration::from_secs(15), 40);
+    frame_until(c, (MeasId(meas), stream), poll, what, |f| {
+        if f.stale { None } else { pick(&f.frame.data) }
+    })
+    .await
 }
 
 /// The mirrored state once `ok` holds.
@@ -136,18 +118,14 @@ fn spec_peak(f: &SpecFrame) -> (usize, f32) {
 }
 
 async fn capture(c: &Client, meas: u32, name: &str) -> TraceMeta {
-    match c
-        .call(Command::TraceCapture {
-            meas: MeasId(meas),
-            name: name.into(),
-            slot: None,
-        })
-        .await
-        .unwrap()
-    {
-        ReplyBody::Trace(t) => t,
-        other => panic!("{other:?}"),
-    }
+    c.call(Command::TraceCapture {
+        meas: MeasId(meas),
+        name: name.into(),
+        slot: None,
+    })
+    .await
+    .unwrap()
+    .trace()
 }
 
 async fn set_curve(c: &Client, mic: &str, curve: CurveChoice) {
@@ -171,20 +149,16 @@ fn label(l: &str) -> CurveChoice {
 }
 
 async fn import(c: &Client, mic: &str, file_name: &str, content: &[u8]) -> Mic {
-    match c
-        .call(Command::CalCurveImport {
-            mic: mic.into(),
-            label: None,
-            file_name: file_name.into(),
-            content: Blob(content.to_vec()),
-            input: Some(1),
-        })
-        .await
-        .unwrap()
-    {
-        ReplyBody::Mic(m) => m,
-        other => panic!("{other:?}"),
-    }
+    c.call(Command::CalCurveImport {
+        mic: mic.into(),
+        label: None,
+        file_name: file_name.into(),
+        content: Blob(content.to_vec()),
+        input: Some(1),
+    })
+    .await
+    .unwrap()
+    .mic()
 }
 
 fn fixture(name: &str) -> Vec<u8> {

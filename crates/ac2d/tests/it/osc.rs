@@ -10,7 +10,7 @@ use crate::common;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
-use ac2_client::{Client, ClientConfig, ClientError, Endpoints, OnDrop};
+use ac2_client::{Client, ClientError, OnDrop};
 use ac2_proto::model::{
     Cue, CueAction, CueState, CueSubject, GeneratorDesired, GeneratorSettings, LeqConfig,
     LeqWindow, MeasConfig, MeasKind, OscArg, OscMessage, OscPath, OwnedTraces, PeakWeighting,
@@ -25,15 +25,7 @@ use rosc::{OscPacket, OscType};
 const WAIT: Duration = Duration::from_secs(20);
 
 async fn connect(h: &Handle) -> Client {
-    let ep = Endpoints {
-        ctrl: h.ctrl_endpoint().to_owned(),
-        data: h.data_endpoint().to_owned(),
-    };
-    let c = Client::connect(ClientConfig::new(ep, "ac2d-osc-test"))
-        .await
-        .unwrap();
-    c.wait_synced(Duration::from_secs(5)).await.unwrap();
-    c
+    mirror(h, "ac2d-osc-test").await
 }
 
 /// The OSC target: a socket on the loopback interface.
@@ -142,10 +134,11 @@ fn meter(name: &str, windows: Vec<LeqWindow>, meter_cue: Option<Box<Cue>>) -> Me
 }
 
 async fn create(c: &Client, config: MeasConfig) -> MeasId {
-    match c.call(Command::MeasCreate { config }).await.unwrap() {
-        ReplyBody::Measurement(m) => m.id,
-        other => panic!("{other:?}"),
-    }
+    c.call(Command::MeasCreate { config })
+        .await
+        .unwrap()
+        .measurement()
+        .id
 }
 
 fn rig_rev(c: &Client) -> Rev {

@@ -10,7 +10,7 @@ use crate::common;
 
 use std::time::{Duration, Instant};
 
-use ac2_client::{Client, ClientConfig, ClientError, Endpoints, OnDrop, StimulusLease};
+use ac2_client::{Client, ClientError, OnDrop, StimulusLease};
 use ac2_proto::frame::{BandLeqFrame, FrameData};
 use ac2_proto::model::{
     AlarmSubject, BAND_COUNT, BandLeqConfig, BandLeqPreset, BandLevelSource, BandLimitPlace,
@@ -19,7 +19,7 @@ use ac2_proto::model::{
     SessionRef, Signal, SplConfig, SplLog, TimeWeighting, Weighting,
 };
 use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, MeasId, Seconds, WallNs};
-use ac2_proto::{Command, ErrorCode, ReplyBody, Stream, Subscription, Topic};
+use ac2_proto::{Command, ErrorCode, ReplyBody, Stream, Subscription};
 use ac2d::{Daemon, Handle, LocalClock};
 use common::*;
 
@@ -27,17 +27,11 @@ const M: MeasId = MeasId(1);
 /// Index of the 63 Hz band.
 const B63: usize = 5;
 const WAIT: Duration = Duration::from_secs(40);
+/// [`WAIT`], looking every 50 ms.
+const POLL: Poll = Poll::new(WAIT, 50);
 
 async fn connect(h: &Handle) -> Client {
-    let ep = Endpoints {
-        ctrl: h.ctrl_endpoint().to_owned(),
-        data: h.data_endpoint().to_owned(),
-    };
-    let c = Client::connect(ClientConfig::new(ep, "ac2d-band-leq-test"))
-        .await
-        .unwrap();
-    c.wait_synced(Duration::from_secs(5)).await.unwrap();
-    c
+    mirror(h, "ac2d-band-leq-test").await
 }
 
 /// A clock whose local time of day is `at_s` (s after midnight) now.
@@ -130,35 +124,21 @@ async fn start(clock: LocalClock) -> (Handle, Client, tempfile::TempDir) {
 
 /// The newest `band_leq` frame once `ok` holds.
 async fn band_until(c: &Client, what: &str, ok: impl Fn(&BandLeqFrame) -> bool) -> BandLeqFrame {
-    let topic = Topic::Data {
-        meas: M,
-        stream: Stream::BandLeq,
-    };
-    let deadline = Instant::now() + WAIT;
-    loop {
-        if let Some(f) = c.latest().unwrap().get(&topic)
-            && let FrameData::BandLeq(b) = &f.frame.data
-            && ok(b)
-        {
-            return (**b).clone();
+    frame_until(c, (M, Stream::BandLeq), POLL, what, |f| {
+        match &f.frame.data {
+            FrameData::BandLeq(b) if ok(b) => Some((**b).clone()),
+            _ => None,
         }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    })
+    .await
 }
 
 async fn log_until(c: &Client, what: &str, ok: impl Fn(&SplLog) -> bool) -> SplLog {
-    let deadline = Instant::now() + WAIT;
-    loop {
-        if let Some(s) = c.view().state.clone()
-            && let Some(l) = s.spl_logs.iter().find(|l| l.meas == M)
-            && ok(l)
-        {
-            return l.clone();
-        }
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    mirror_until(c, POLL, what, |s| {
+        let log = s.spl_logs.iter().find(|l| l.meas == M);
+        log.filter(|l| ok(l)).cloned()
+    })
+    .await
 }
 
 async fn calibrate(c: &Client, lease: &StimulusLease) {
@@ -794,21 +774,17 @@ async fn slow_a_recorders_wav_replayed_gives_the_bedroom_spans_of_a_transfer() {
     ac2_traces::raw::import_wav(&src, dir.path(), "bedroom", wall_now_ns()).unwrap();
 
     let t0 = wall_now_ns();
-    match c
-        .call(Command::SessionReplay {
-            recording: RecordingRef::Path {
-                path: ac2_traces::raw::sidecar_path(dir.path(), "bedroom")
-                    .to_string_lossy()
-                    .into_owned(),
-            },
-            pace: ReplayPace::Realtime,
-        })
-        .await
-        .unwrap()
-    {
-        ReplyBody::Session(_) => {}
-        other => panic!("{other:?}"),
-    }
+    c.call(Command::SessionReplay {
+        recording: RecordingRef::Path {
+            path: ac2_traces::raw::sidecar_path(dir.path(), "bedroom")
+                .to_string_lossy()
+                .into_owned(),
+        },
+        pace: ReplayPace::Realtime,
+    })
+    .await
+    .unwrap()
+    .session();
     let mut cfg = meter(Some(bands()));
     cfg.name = "Recorder".into();
     if let MeasKind::Spl { config } = &mut cfg.kind {
@@ -857,7 +833,7 @@ async fn slow_a_recorders_wav_replayed_gives_the_bedroom_spans_of_a_transfer() {
         from,
         until,
     };
-    match c
+    let l = c
         .call(Command::SplBandLogGet {
             meas: M,
             from: bedroom.0,
@@ -866,16 +842,12 @@ async fn slow_a_recorders_wav_replayed_gives_the_bedroom_spans_of_a_transfer() {
         })
         .await
         .unwrap()
-    {
-        ReplyBody::SplBandLog(l) => {
-            assert_eq!(l.average.uncalibrated, 0, "{l:?}");
-            let avg = l.average.levels.unwrap();
-            for (i, a) in avg[..ac2_proto::model::LF_BAND_COUNT].iter().enumerate() {
-                let a = a.unwrap().0;
-                assert!((a - 74.0).abs() < 1.5, "band {i}: {a} dB, not 74");
-            }
-        }
-        other => panic!("{other:?}"),
+        .spl_band_log();
+    assert_eq!(l.average.uncalibrated, 0, "{l:?}");
+    let avg = l.average.levels.unwrap();
+    for (i, a) in avg[..ac2_proto::model::LF_BAND_COUNT].iter().enumerate() {
+        let a = a.unwrap().0;
+        assert!((a - 74.0).abs() < 1.5, "band {i}: {a} dB, not 74");
     }
     let foh = BandLevelSource::Levels {
         levels: vec![Some(DbSpl(100.0)); BAND_COUNT],
@@ -890,9 +862,7 @@ async fn slow_a_recorders_wav_replayed_gives_the_bedroom_spans_of_a_transfer() {
         })
         .await
         .unwrap();
-    let ReplyBody::Measurement(m) = r else {
-        panic!("{r:?}");
-    };
+    let m = r.measurement();
     let MeasKind::Spl { config } = &m.config.kind else {
         panic!("{m:?}");
     };

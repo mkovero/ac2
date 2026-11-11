@@ -15,8 +15,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command as Process, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
-use ac2_proto::model::{ImportFormat, ImportRole, TraceMeta, TraceOwner};
-use ac2_proto::units::Blob;
+use ac2_proto::model::{TraceMeta, TraceOwner};
 use ac2_proto::{Command, ReplyBody};
 use ac2_zmq::Context;
 use ac2d::instance::{Instance, exit};
@@ -211,21 +210,8 @@ fn answers(ctx: &Context, ctrl: &str) -> bool {
 }
 
 fn import(c: &mut Client, name: &str) -> TraceMeta {
-    let content = std::fs::read(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../ac2-traces/tests/fixtures/rew_export.txt"),
-    )
-    .unwrap();
-    match c.ok(Command::TraceImport {
-        file_name: format!("{name}.txt"),
-        format: ImportFormat::Auto,
-        role: ImportRole::Trace,
-        ir: None,
-        content: Blob(content),
-        owner: TraceOwner::Imported,
-    }) {
-        ReplyBody::Trace(t) => t,
-        other => panic!("{other:?}"),
-    }
+    let file = format!("{name}.txt");
+    common::import_fixture(c, "rew_export.txt", &file, TraceOwner::Imported)
 }
 
 fn read(p: &Path) -> String {
@@ -544,9 +530,7 @@ fn slow_a_kill_around_the_autosave_write_leaves_a_loadable_autosave() {
         p.args(["--ctrl", ANY_PORT, "--data", ANY_PORT]);
         let (_next, ctrl, _) = Daemon::spawn_printing(p);
         let mut c = Client::connect(&Context::new().unwrap(), &ctrl);
-        let ReplyBody::Snapshot(snap) = c.ok(Command::StateSnapshot) else {
-            panic!("no snapshot");
-        };
+        let snap = c.snapshot(Command::StateSnapshot);
         // A cut write is not damage: nothing is set aside.
         let damaged = &snap.state.rig.damaged_files;
         assert!(damaged.is_empty(), "killed {offset_ms} ms in: {damaged:?}");

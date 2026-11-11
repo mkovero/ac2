@@ -12,7 +12,6 @@ use std::path::Path;
 
 use ac2_proto::model::*;
 use ac2_proto::units::*;
-use ac2_proto::{Command, ReplyBody};
 use ac2d::{Daemon, Handle};
 use common::*;
 use serde_json::{Value, json};
@@ -24,13 +23,6 @@ fn start(name: &str, dir: &Path) -> Handle {
     cfg.rig_settings = Some(dir.join("rig.json"));
     cfg.rig_logs = Some(dir.join("rig-logs"));
     Daemon::start(cfg).unwrap()
-}
-
-fn state(c: &mut Client) -> State {
-    match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state,
-        other => panic!("{other:?}"),
-    }
 }
 
 /// A rig SPL meter with a night limit, a warn margin and a DMX cue.
@@ -147,7 +139,7 @@ fn a_v1_file_loads_whole_and_round_trips() {
 
     let h = start("rig-file-v1", dir.path());
     let (mut c, _sub) = connect(&h, &[]);
-    let st = state(&mut c);
+    let st = c.state();
     assert!(
         st.rig.damaged_files.is_empty(),
         "{:?}",
@@ -178,7 +170,7 @@ fn a_v1_file_loads_whole_and_round_trips() {
     // What it wrote, the next start reads unchanged and leaves unchanged.
     let h = start("rig-file-v1-again", dir.path());
     let (mut c, _sub) = connect(&h, &[]);
-    let again = state(&mut c);
+    let again = c.state();
     assert!(again.rig.damaged_files.is_empty());
     assert_rig_kept(&again, &s);
     let m = again
@@ -230,7 +222,7 @@ fn unreadable_meters_keep_the_ceiling_monitor_and_artnet() {
     let bytes = v2_with_meters(dir.path(), &s, json!("garbage"));
     let h = start("rig-file-garbage", dir.path());
     let (mut c, _sub) = connect(&h, &[]);
-    let st = state(&mut c);
+    let st = c.state();
     assert_rig_kept(&st, &s);
     assert!(st.measurements.is_empty());
     let d = damage(&st);
@@ -253,7 +245,7 @@ fn unreadable_meters_keep_the_ceiling_monitor_and_artnet() {
     v2_with_meters(dir.path(), &s, json!([bad_layout, unknown]));
     let h = start("rig-file-meter", dir.path());
     let (mut c, _sub) = connect(&h, &[]);
-    let st = state(&mut c);
+    let st = c.state();
     assert_rig_kept(&st, &s);
     let ids: Vec<_> = st.measurements.iter().map(|m| m.id).collect();
     assert_eq!(ids, [MeasId(1)]);
@@ -294,7 +286,7 @@ fn a_v2_meter_layout_with_a_pick_reads_whole() {
     v2_with_meters(dir.path(), &s, json!([meter(1, json!(1))]));
     let h = start("rig-file-v2-layout", dir.path());
     let (mut c, _sub) = connect(&h, &[]);
-    let st = state(&mut c);
+    let st = c.state();
     assert!(
         st.rig.damaged_files.is_empty(),
         "{:?}",
@@ -365,7 +357,7 @@ fn a_v3_meter_layout_with_three_plates_reads_whole() {
     std::fs::write(dir.path().join("rig.json"), serde_json::to_vec(&v).unwrap()).unwrap();
     let h = start("rig-file-v3-plates", dir.path());
     let (mut c, _sub) = connect(&h, &[]);
-    let st = state(&mut c);
+    let st = c.state();
     assert!(
         st.rig.damaged_files.is_empty(),
         "{:?}",
@@ -418,7 +410,7 @@ fn a_v4_file_gains_the_loudness_target_and_plate() {
     std::fs::write(dir.path().join("rig.json"), serde_json::to_vec(&v).unwrap()).unwrap();
     let h = start("rig-file-v4", dir.path());
     let (mut c, _sub) = connect(&h, &[]);
-    let st = state(&mut c);
+    let st = c.state();
     assert!(
         st.rig.damaged_files.is_empty(),
         "{:?}",
@@ -457,7 +449,7 @@ fn a_v5_monitor_session_opens_no_spare_inputs() {
     std::fs::write(dir.path().join("rig.json"), serde_json::to_vec(&v).unwrap()).unwrap();
     let h = start("rig-file-v5", dir.path());
     let (mut c, _sub) = connect(&h, &[]);
-    let st = state(&mut c);
+    let st = c.state();
     assert!(
         st.rig.damaged_files.is_empty(),
         "{:?}",
@@ -507,7 +499,7 @@ fn a_v6_pair_pane_becomes_a_goniometer_beside_its_meters() {
     std::fs::write(dir.path().join("rig.json"), serde_json::to_vec(&v).unwrap()).unwrap();
     let h = start("rig-file-v6", dir.path());
     let (mut c, _sub) = connect(&h, &[]);
-    let st = state(&mut c);
+    let st = c.state();
     assert!(
         st.rig.damaged_files.is_empty(),
         "{:?}",
@@ -573,7 +565,7 @@ fn a_v7_meter_layout_shows_this_rig() {
     std::fs::write(dir.path().join("rig.json"), serde_json::to_vec(&v).unwrap()).unwrap();
     let h = start("rig-file-v7", dir.path());
     let (mut c, _sub) = connect(&h, &[]);
-    let st = state(&mut c);
+    let st = c.state();
     assert!(
         st.rig.damaged_files.is_empty(),
         "{:?}",
@@ -641,7 +633,7 @@ fn a_v8_meter_layout_names_the_rig_per_reference() {
     std::fs::write(dir.path().join("rig.json"), serde_json::to_vec(&v).unwrap()).unwrap();
     let h = start("rig-file-v8", dir.path());
     let (mut c, _sub) = connect(&h, &[]);
-    let st = state(&mut c);
+    let st = c.state();
     assert!(
         st.rig.damaged_files.is_empty(),
         "{:?}",
@@ -711,7 +703,7 @@ fn a_v9_meter_layout_gains_the_default_camera() {
     std::fs::write(dir.path().join("rig.json"), serde_json::to_vec(&v).unwrap()).unwrap();
     let h = start("rig-file-v9", dir.path());
     let (mut c, _sub) = connect(&h, &[]);
-    let st = state(&mut c);
+    let st = c.state();
     assert!(
         st.rig.damaged_files.is_empty(),
         "{:?}",

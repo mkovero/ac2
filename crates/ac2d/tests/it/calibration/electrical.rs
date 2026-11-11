@@ -77,16 +77,13 @@ async fn slow_electrical_calibration_end_to_end() {
     })
     .await
     .unwrap();
-    let m = match c
+    let m = c
         .call(Command::MeasCreate {
             config: spl("meter", 1),
         })
         .await
         .unwrap()
-    {
-        ReplyBody::Measurement(m) => m,
-        other => panic!("{other:?}"),
-    };
+        .measurement();
     c.call(Command::MeasStart { meas: m.id }).await.unwrap();
     c.subscribe(Subscription::Meas(m.id)).unwrap();
 
@@ -154,13 +151,10 @@ async fn slow_electrical_calibration_end_to_end() {
     // 20·lg(15 mV / (15 mV/Pa · 20 µPa)) − L = 93.98 + 26.02 = 120.0 dB.
     lease.set(tone(-20.0)).await.unwrap();
     spl_until(&c, "the louder tone", |m| (m.level + 26.02).abs() < 0.3).await;
-    let e = match steady(&c, electrical("MM1 34804", 0.015, None, false))
+    let e = steady(&c, electrical("MM1 34804", 0.015, None, false))
         .await
         .unwrap()
-    {
-        ReplyBody::Calibration(e) => e,
-        other => panic!("{other:?}"),
-    };
+        .calibration();
     let l = e.spl.measured.0;
     assert!((l + 26.02).abs() < 0.06, "{l}");
     let CalMethod::Electrical {
@@ -243,9 +237,7 @@ async fn slow_electrical_calibration_end_to_end() {
     )
     .await
     .unwrap();
-    let ReplyBody::Calibration(e2) = r else {
-        panic!("{r:?}")
-    };
+    let e2 = r.calibration();
     assert!(matches!(
         e2.spl.method,
         CalMethod::Electrical {

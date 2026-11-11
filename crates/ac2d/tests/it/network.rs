@@ -51,12 +51,10 @@ fn curve_authorized_ok_unauthorized_refused_on_both_sockets() {
 
     // Authorized: ctrl answers with the ZAP identity, data delivers keepalives.
     let mut c = Client::connect_with(&ctx, h.ctrl_endpoint(), Some(&ok));
-    match c.ok(Command::Hello {
+    let w = c.welcome(Command::Hello {
         client: "laptop".into(),
-    }) {
-        ReplyBody::Welcome(w) => assert_eq!(w.client_id.0, "laptop"),
-        other => panic!("{other:?}"),
-    }
+    });
+    assert_eq!(w.client_id.0, "laptop");
     let sub = Sub::connect_with(&ctx, h.data_endpoint(), &[b"ka"], Some(&ok), None);
     assert!(sub.ka(Duration::from_secs(5)).is_some());
 

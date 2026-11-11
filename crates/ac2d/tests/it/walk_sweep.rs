@@ -11,7 +11,7 @@ use ac2_audio::fake::{FakeDrive, FakePath};
 use ac2_audio::{FakeBackend, FakeConfig, FakeReverb};
 use ac2_proto::model::*;
 use ac2_proto::units::*;
-use ac2_proto::{Command, ErrorCode, ReplyBody};
+use ac2_proto::{Command, ErrorCode};
 use ac2d::Daemon;
 use common::*;
 
@@ -42,15 +42,8 @@ fn reverberant_rig() -> FakeBackend {
     .unwrap()
 }
 
-fn state(c: &mut Client) -> State {
-    match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state,
-        other => panic!("{other:?}"),
-    }
-}
-
 fn walk(c: &mut Client) -> WalkState {
-    state(c).walks.into_iter().next().expect("the walk")
+    c.state().walks.into_iter().next().expect("the walk")
 }
 
 fn points(n: usize) -> Vec<WalkPointSpec> {
@@ -82,10 +75,7 @@ fn slow_a_two_mic_sweep_walk_captures_each_step_with_one_run() {
         },
     });
     let mut d = driver(&backend);
-    let token = match c.ok(Command::GenAcquire { force: false }) {
-        ReplyBody::Lease(l) => l.lease_token,
-        other => panic!("{other:?}"),
-    };
+    let token = c.acquire();
     c.ok(Command::PlanSave {
         plan: ac2_proto::samples::plan(),
     });
@@ -101,16 +91,13 @@ fn slow_a_two_mic_sweep_walk_captures_each_step_with_one_run() {
     );
 
     // A sweep walk takes one sweep measurement; its inputs are the mics.
-    let w = match c.ok(Command::WalkNew {
+    let w = c.walk(Command::WalkNew {
         name: "Room".into(),
         plan: "Hall".into(),
         kind: WalkKind::Sweep,
         meas: vec![meas],
         points: points(4),
-    }) {
-        ReplyBody::Walk(w) => w,
-        other => panic!("{other:?}"),
-    };
+    });
     let mic = |input| WalkMic { meas, input };
     assert_eq!(w.mics, vec![mic(1), mic(2)]);
     assert_eq!(w.steps(), 2);
@@ -125,7 +112,8 @@ fn slow_a_two_mic_sweep_walk_captures_each_step_with_one_run() {
     // Its capture is the sweep's run, not walk.capture; it cannot change its mics.
     let e = c.call(Command::WalkCapture { walk: w.id }).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{}", e.msg);
-    let m = state(&mut c)
+    let m = c
+        .state()
         .measurements
         .into_iter()
         .find(|m| m.id == meas)
@@ -193,7 +181,7 @@ fn slow_a_two_mic_sweep_walk_captures_each_step_with_one_run() {
             panic!("sweep failed: {:?}", done.status);
         };
         assert_eq!(traces.len(), at.len());
-        let st = state(&mut c);
+        let st = c.state();
         for ((label, m), t) in at.iter().zip(&traces) {
             let meta = st.traces.iter().find(|x| x.id == *t).unwrap();
             assert_eq!(meta.kind, TraceKind::Sweep);
@@ -217,7 +205,7 @@ fn slow_a_two_mic_sweep_walk_captures_each_step_with_one_run() {
     }
 
     // The average: a power average of the four sweep traces, a transfer.
-    let st = state(&mut c);
+    let st = c.state();
     let avg = st
         .measurements
         .iter()
@@ -266,12 +254,9 @@ fn slow_a_two_mic_sweep_walk_captures_each_step_with_one_run() {
     assert!(seen >= 3, "T20 in too few bands: {room:?}");
 
     // A skip takes the position out of the room parameters.
-    let skipped = match c.ok(Command::WalkSkip {
+    let skipped = c.walk(Command::WalkSkip {
         walk: w.id,
         point: 0,
-    }) {
-        ReplyBody::Walk(w) => w,
-        other => panic!("{other:?}"),
-    };
+    });
     assert_eq!(skipped.room.expect("three positions").positions, 3);
 }

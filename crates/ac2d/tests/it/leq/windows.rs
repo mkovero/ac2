@@ -25,16 +25,13 @@ async fn slow_windows_go_over_and_recover_and_survive() {
         .unwrap_err();
     assert!(matches!(e, ClientError::Daemon(p) if p.code == ErrorCode::Invalid));
 
-    let m = match c
+    let m = c
         .call(Command::MeasCreate {
             config: meter(vec![window(5.0, Some(90.0)), window(10.0, Some(90.0))]),
         })
         .await
         .unwrap()
-    {
-        ReplyBody::Measurement(m) => m,
-        other => panic!("{other:?}"),
-    };
+        .measurement();
     assert_eq!(m.id, M);
     // The entity exists before the meter runs: limits set, nothing calibrated.
     let l = log_until(&c, "entity", |_| true).await;
@@ -162,9 +159,7 @@ async fn slow_windows_go_over_and_recover_and_survive() {
     )
     .await
     .unwrap();
-    let ReplyBody::Measurement(m) = r else {
-        panic!()
-    };
+    let m = r.measurement();
     assert!(m.config_rev > rev_before);
     let f = leq_until(&c, "frames of the new windows", |f| {
         f.leq.len() == 2 && f.elapsed[1] > 10.0
@@ -227,16 +222,14 @@ async fn slow_windows_go_over_and_recover_and_survive() {
     log_until(&c, "entity after the load", |l| l.windows.len() == 2).await;
 
     // Not an SPL meter: invalid; no such measurement: not found.
-    let t = match c
+    let t = c
         .call(Command::MeasCreate {
             config: transfer("tf"),
         })
         .await
         .unwrap()
-    {
-        ReplyBody::Measurement(m) => m.id,
-        other => panic!("{other:?}"),
-    };
+        .measurement()
+        .id;
     let e = c
         .call(Command::SplLogGet {
             meas: t,

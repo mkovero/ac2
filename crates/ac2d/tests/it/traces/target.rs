@@ -15,11 +15,11 @@ fn a_generated_target_is_a_target_trace_with_its_parameters_and_survives_a_reloa
             corner: Hz(100.0),
         }),
     };
-    let t = trace(c.ok(Command::TraceTarget {
+    let t = c.trace(Command::TraceTarget {
         curve,
         name: "house".into(),
         owner: ac2_proto::model::TraceOwner::Imported,
-    }));
+    });
     assert_eq!(t.kind, TraceKind::Target);
     assert_eq!(t.source, TraceSource::Generated { curve });
     assert_eq!(t.edit.owner, TraceOwner::Imported);
@@ -30,11 +30,11 @@ fn a_generated_target_is_a_target_trace_with_its_parameters_and_survives_a_reloa
     // About 10 octaves of −1 dB/oct, and the shelf's 6 dB at the bottom.
     assert!(first > 10.0 && last < -4.0, "{first} … {last}");
 
-    let loud = trace(c.ok(Command::TraceTarget {
+    let loud = c.trace(Command::TraceTarget {
         curve: TargetCurve::loudness_shift(),
         name: "loudness 85 → 100 phon".into(),
         owner: ac2_proto::model::TraceOwner::Imported,
-    }));
+    });
     assert!(data(c, loud.id).mag_db[0] > 7.0);
 
     let e = c
@@ -76,21 +76,21 @@ fn a_target_is_filed_under_the_measurement_it_was_made_for_and_stays_there() {
     let mut r = rig("target_owned");
     let c = &mut r.c;
     let main = TraceOwner::Meas { meas: MeasId(1) };
-    let loud = trace(c.ok(Command::TraceTarget {
+    let loud = c.trace(Command::TraceTarget {
         curve: TargetCurve::loudness_shift(),
         name: "loudness 85 → 100 phon".into(),
         owner: main,
-    }));
+    });
     assert_eq!(loud.edit.owner, main);
     // A file loaded as a target goes under the same measurement.
-    let file = trace(c.ok(Command::TraceImport {
+    let file = c.trace(Command::TraceImport {
         file_name: "house.txt".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Target,
         ir: None,
         content: Blob(b"20 6\n1000 0\n20000 -6\n".to_vec()),
         owner: main,
-    }));
+    });
     assert_eq!(file.edit.owner, main);
     // A measurement that does not exist is refused.
     let e = c

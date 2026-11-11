@@ -13,7 +13,7 @@ use ac2_audio::{FakeBackend, FakeConfig, FakeDriver};
 use ac2_proto::frame::{FrameData, LoudnessSource, SessionLevelsFrame, SourceLoudness};
 use ac2_proto::model::{GeneratorDesired, GeneratorSettings, InputKind, InputSetup, Pair, Signal};
 use ac2_proto::units::{Dbfs, Hz};
-use ac2_proto::{Command, ReplyBody, Subscription};
+use ac2_proto::{Command, Subscription};
 use ac2d::{Daemon, Handle};
 use common::*;
 
@@ -79,9 +79,7 @@ fn open(name: &str, backend: FakeBackend, sample_rate: u32, tone: bool) -> Rig {
         }],
     });
     if tone {
-        let ReplyBody::Lease(lease) = c.ok(Command::GenAcquire { force: false }) else {
-            panic!("lease");
-        };
+        let lease = c.lease(Command::GenAcquire { force: false });
         c.ok(Command::GenSet {
             lease_token: lease.lease_token,
             desired: GeneratorDesired {

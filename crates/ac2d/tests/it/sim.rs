@@ -117,13 +117,6 @@ fn wait(sub: &Sub, id: SimId, pred: impl Fn(&SimState) -> bool) -> SimState {
     sim_event(&e).unwrap().clone()
 }
 
-fn started(r: ReplyBody) -> SimState {
-    match r {
-        ReplyBody::Sim(s) => s,
-        other => panic!("{other:?}"),
-    }
-}
-
 fn refusal(r: Result<ReplyBody, ac2_proto::ProtoError>) -> SimRefusal {
     let e = r.expect_err("refused");
     assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
@@ -136,9 +129,9 @@ fn refusal(r: Result<ReplyBody, ac2_proto::ProtoError>) -> SimRefusal {
 #[test]
 fn a_run_reports_progress_and_its_t20_follows_eyring() {
     let mut r = rig("sim-run");
-    let s = started(r.c.ok(Command::SimRun {
+    let s = r.c.sim(Command::SimRun {
         request: request("Box", 6_000, 30.0),
-    }));
+    });
     assert!(s.active());
     assert_eq!(s.absorption, SimAbsorption::Assumed);
     let running = wait(&r.sub, s.id, |s| {
@@ -183,10 +176,7 @@ fn a_run_reports_progress_and_its_t20_follows_eyring() {
         );
     }
     // The state holds the result.
-    let st = match r.c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state,
-        other => panic!("{other:?}"),
-    };
+    let st = r.c.state();
     assert_eq!(st.sim.as_ref(), Some(&done));
     drop(r.h);
 }
@@ -253,9 +243,9 @@ fn refusals_name_their_reason() {
 
 /// A run long enough to be stopped: a million rays per band under a minute's budget.
 fn long_run(r: &mut Rig) -> SimState {
-    let s = started(r.c.ok(Command::SimRun {
+    let s = r.c.sim(Command::SimRun {
         request: request("Box", 1_000_000, 60.0),
-    }));
+    });
     wait(&r.sub, s.id, |s| {
         matches!(
             s.status,
@@ -278,7 +268,7 @@ fn cancel_a_plan_change_and_a_session_close_stop_a_run() {
         })),
         SimRefusal::Busy
     );
-    let stopped = started(r.c.ok(Command::SimCancel));
+    let stopped = r.c.sim(Command::SimCancel);
     assert_eq!(
         stopped.status,
         SimStatus::Cancelled {
@@ -314,9 +304,9 @@ fn cancel_a_plan_change_and_a_session_close_stop_a_run() {
         }
     );
     // A new run starts at once.
-    let s = started(r.c.ok(Command::SimRun {
+    let s = r.c.sim(Command::SimRun {
         request: request("Box", 1_000, 10.0),
-    }));
+    });
     assert_eq!(wait(&r.sub, s.id, |s| !s.active()).status, SimStatus::Done);
 }
 
@@ -362,19 +352,16 @@ fn a_coverage_map_is_the_states_map_and_too_fine_is_refused() {
         })
         .expect_err("not a band");
     assert_eq!(e.code, ErrorCode::Invalid);
-    let s = started(r.c.ok(Command::SimMap {
+    let s = r.c.sim(Command::SimMap {
         request: req("Seated", 1.0),
-    }));
+    });
     assert_eq!(s.kind, SimKind::Map);
     let done = wait(&r.sub, s.id, |s| !s.active());
     assert_eq!(done.status, SimStatus::Done, "{:?}", done.status);
     let m = done.map.as_ref().unwrap();
     assert_eq!(m.cells.len(), 42);
     assert!(m.cells.iter().any(|c| c.db == 0.0));
-    let st = match r.c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state,
-        other => panic!("{other:?}"),
-    };
+    let st = r.c.state();
     assert_eq!(st.sim_map.as_ref(), Some(&done));
     assert_eq!(st.sim, None, "a map leaves the run's place alone");
     assert_eq!(st.sim_fit, None);

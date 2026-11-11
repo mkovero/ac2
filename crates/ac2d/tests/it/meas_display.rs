@@ -10,7 +10,7 @@ use std::path::Path;
 
 use ac2_proto::model::*;
 use ac2_proto::units::*;
-use ac2_proto::{Command, ErrorCode, ReplyBody};
+use ac2_proto::{Command, ErrorCode};
 use ac2d::{Daemon, Handle};
 use common::*;
 
@@ -32,16 +32,11 @@ fn spectrum(name: &str) -> MeasConfig {
 }
 
 fn created(c: &mut Client, config: MeasConfig) -> Measurement {
-    match c.ok(Command::MeasCreate { config }) {
-        ReplyBody::Measurement(m) => m,
-        other => panic!("{other:?}"),
-    }
+    c.measurement(Command::MeasCreate { config })
 }
 
 fn meas_of(c: &mut Client, id: MeasId) -> Measurement {
-    let ReplyBody::Snapshot(s) = c.ok(Command::StateSnapshot) else {
-        panic!("state.snapshot answered with something else")
-    };
+    let s = c.snapshot(Command::StateSnapshot);
     s.state
         .measurements
         .into_iter()
@@ -54,24 +49,7 @@ fn import(c: &mut Client) -> TraceMeta {
 }
 
 fn import_under(c: &mut Client, owner: TraceOwner) -> TraceMeta {
-    let name = "rew_export.txt";
-    let content = std::fs::read(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../ac2-traces/tests/fixtures")
-            .join(name),
-    )
-    .unwrap();
-    match c.ok(Command::TraceImport {
-        file_name: name.into(),
-        format: ImportFormat::Auto,
-        role: ImportRole::Trace,
-        ir: None,
-        content: Blob(content),
-        owner,
-    }) {
-        ReplyBody::Trace(t) => t,
-        other => panic!("{other:?}"),
-    }
+    import_fixture(c, "rew_export.txt", "rew_export.txt", owner)
 }
 
 fn save_and_reload(c: &mut Client, name: &str) {
@@ -101,10 +79,7 @@ fn display_settings_keep_the_job_and_survive_a_reload() {
     d.spectrograph_span_s = 60;
     d.spectrograph_colours = Colormap::Magma;
     let want = *d;
-    let m = match c.update_ok(a.id, config) {
-        ReplyBody::Measurement(m) => m,
-        other => panic!("{other:?}"),
-    };
+    let m = c.update_ok(a.id, config).measurement();
     assert_eq!(
         m.config_rev, a.config_rev,
         "how it is drawn is not a new config"

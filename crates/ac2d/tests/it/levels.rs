@@ -12,7 +12,7 @@ use std::time::Duration;
 use ac2_proto::frame::{FrameData, GONIO_POINTS, SessionLevelsFrame};
 use ac2_proto::model::{
     Ballistic, CorrelationWindow, GeneratorDesired, GeneratorSettings, InputKind, InputSetup,
-    LevelsSettings, Pair, PairSide, Signal, State,
+    LevelsSettings, Pair, PairSide, Signal,
 };
 use ac2_proto::units::{Dbfs, Dbtp, Hz, Lufs, Rev};
 use ac2_proto::{Command, ErrorCode, ReplyBody, Subscription};
@@ -28,13 +28,6 @@ fn start_with_file(dir: &Path) -> Handle {
     cfg.rig_settings = Some(dir.join("rig.json"));
     cfg.rig_logs = Some(dir.join("rig-logs"));
     Daemon::start(cfg).unwrap()
-}
-
-fn state(c: &mut Client) -> State {
-    match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state,
-        other => panic!("{other:?}"),
-    }
 }
 
 fn set(c: &mut Client, base: Rev, f: impl FnOnce(&mut Command)) -> Result<ReplyBody, ErrorCode> {
@@ -63,7 +56,7 @@ fn set_is_a_rig_edit_checked_and_kept_across_a_restart() {
     let dir = tempfile::tempdir().unwrap();
     let h = start_with_file(dir.path());
     let (mut c, _s) = connect(&h, &[]);
-    let rig = state(&mut c).rig;
+    let rig = c.state().rig;
     assert_eq!(rig.levels, LevelsSettings::default());
     // Another rev: conflict, nothing changes.
     let stale = Rev(rig.rev.0 + 7);
@@ -83,7 +76,7 @@ fn set_is_a_rig_edit_checked_and_kept_across_a_restart() {
         (None, Some(-121.0)),
         (None, Some(f64::INFINITY)),
     ] {
-        let base = state(&mut c).rig.rev;
+        let base = c.state().rig.rev;
         let e = set(&mut c, base, |cmd| {
             if let Command::LevelsSet {
                 over_threshold,
@@ -98,9 +91,9 @@ fn set_is_a_rig_edit_checked_and_kept_across_a_restart() {
         .unwrap_err();
         assert_eq!(e, ErrorCode::Invalid, "{thr:?} {gate:?}");
     }
-    assert_eq!(state(&mut c).rig.levels, LevelsSettings::default());
+    assert_eq!(c.state().rig.levels, LevelsSettings::default());
     // Applied: the fields given change, the rest stay, the rig rev moves.
-    let base = state(&mut c).rig.rev;
+    let base = c.state().rig.rev;
     let ReplyBody::Ack { rev } = set(&mut c, base, |cmd| {
         if let Command::LevelsSet {
             ballistic,
@@ -124,7 +117,7 @@ fn set_is_a_rig_edit_checked_and_kept_across_a_restart() {
         correlation_gate: Dbfs(-60.0),
         loudness_target: Lufs(-23.0),
     };
-    let rig = state(&mut c).rig;
+    let rig = c.state().rig;
     assert_eq!(rig.levels, want);
     assert_eq!(rig.rev, rev);
     assert!(rig.rev > base);
@@ -133,7 +126,7 @@ fn set_is_a_rig_edit_checked_and_kept_across_a_restart() {
     // The next daemon reads them back from the rig settings file.
     let h = start_with_file(dir.path());
     let (mut c, _s) = connect(&h, &[]);
-    assert_eq!(state(&mut c).rig.levels, want);
+    assert_eq!(c.state().rig.levels, want);
     let json: serde_json::Value =
         serde_json::from_slice(&std::fs::read(dir.path().join("rig.json")).unwrap()).unwrap();
     assert_eq!(json["levels"]["ballistic"], "type1");
@@ -148,7 +141,7 @@ fn a_loudness_target_outside_its_range_is_refused() {
     let h = start_with_file(dir.path());
     let (mut c, _s) = connect(&h, &[]);
     for t in [-36.5, -4.5, -40.0, 0.0, f64::NAN, f64::NEG_INFINITY] {
-        let base = state(&mut c).rig.rev;
+        let base = c.state().rig.rev;
         let e = c
             .call(Command::LevelsSet {
                 base,
@@ -162,7 +155,7 @@ fn a_loudness_target_outside_its_range_is_refused() {
         assert_eq!(e.code, ErrorCode::Invalid, "{t}");
         assert!(e.msg.contains("loudness target"), "{t}: {}", e.msg);
     }
-    let base = state(&mut c).rig.rev;
+    let base = c.state().rig.rev;
     let e = set(&mut c, base, |cmd| {
         if let Command::LevelsSet {
             loudness_target, ..
@@ -172,10 +165,10 @@ fn a_loudness_target_outside_its_range_is_refused() {
         }
     });
     assert_eq!(e.unwrap_err(), ErrorCode::Invalid);
-    assert_eq!(state(&mut c).rig.levels, LevelsSettings::default());
+    assert_eq!(c.state().rig.levels, LevelsSettings::default());
     // The range's ends are targets a rig may set.
     for t in [-36.0, -5.0, -14.0] {
-        let base = state(&mut c).rig.rev;
+        let base = c.state().rig.rev;
         set(&mut c, base, |cmd| {
             if let Command::LevelsSet {
                 ballistic,
@@ -188,7 +181,7 @@ fn a_loudness_target_outside_its_range_is_refused() {
             }
         })
         .unwrap();
-        assert_eq!(state(&mut c).rig.levels.loudness_target, Lufs(t));
+        assert_eq!(c.state().rig.levels.loudness_target, Lufs(t));
     }
     let want = LevelsSettings {
         ballistic: Ballistic::ShortTerm,
@@ -199,7 +192,7 @@ fn a_loudness_target_outside_its_range_is_refused() {
     h.shutdown();
     let h = start_with_file(dir.path());
     let (mut c, _s) = connect(&h, &[]);
-    assert_eq!(state(&mut c).rig.levels, want);
+    assert_eq!(c.state().rig.levels, want);
     let json: serde_json::Value =
         serde_json::from_slice(&std::fs::read(dir.path().join("rig.json")).unwrap()).unwrap();
     assert_eq!(json["levels"]["ballistic"], "short_term");
@@ -245,7 +238,7 @@ fn slow_session_meters_carry_the_programme_columns_and_count_an_over_once() {
             name: None,
         }],
     });
-    let base = state(&mut c).rig.rev;
+    let base = c.state().rig.rev;
     set(&mut c, base, |cmd| {
         if let Command::LevelsSet { over_threshold, .. } = cmd {
             *over_threshold = Some(Dbtp(-20.0));
@@ -268,9 +261,7 @@ fn slow_session_meters_carry_the_programme_columns_and_count_an_over_once() {
     // A −12 dBFS tone out of output 0: input 0 (loopback) reads −12 dBTP, input 1
     // (ACOUSTIC_GAIN down) −18; both above −20 dBTP, so both go over, once.
     let acoustic = -12.0 + 20.0 * ACOUSTIC_GAIN.log10();
-    let ReplyBody::Lease(lease) = c.ok(Command::GenAcquire { force: false }) else {
-        panic!("lease");
-    };
+    let lease = c.lease(Command::GenAcquire { force: false });
     c.ok(Command::GenSet {
         lease_token: lease.lease_token,
         desired: GeneratorDesired {
@@ -312,7 +303,7 @@ fn slow_session_meters_carry_the_programme_columns_and_count_an_over_once() {
     assert!(g.pairs[0].points.iter().any(|p| p != &[0, 0]));
     // VU chosen but not offered on a line input without a line calibration: the frame names
     // the choice, the column carries the true peak.
-    let base = state(&mut c).rig.rev;
+    let base = c.state().rig.rev;
     set(&mut c, base, |cmd| {
         if let Command::LevelsSet { ballistic, .. } = cmd {
             *ballistic = Some(Ballistic::Vu);

@@ -11,36 +11,21 @@ use std::time::Duration;
 use ac2_audio::FakeDriver;
 use ac2_proto::frame::FrameData;
 use ac2_proto::model::{
-    GenAction, Generator, GeneratorDesired, GeneratorSettings, OutputSetup, Signal, State,
+    GenAction, Generator, GeneratorDesired, GeneratorSettings, OutputSetup, Signal,
 };
-use ac2_proto::units::{Dbfs, LeaseToken, MeasId};
-use ac2_proto::{Change, Command, ErrorCode, ReplyBody};
+use ac2_proto::units::{Dbfs, MeasId};
+use ac2_proto::{Change, Command, ErrorCode};
 use ac2d::Daemon;
 use common::*;
 
 const T: Duration = Duration::from_secs(5);
 
 fn hello(c: &mut Client) -> String {
-    match c.ok(Command::Hello {
+    c.welcome(Command::Hello {
         client: "test".into(),
-    }) {
-        ReplyBody::Welcome(w) => w.client_id.0,
-        other => panic!("{other:?}"),
-    }
-}
-
-fn state(c: &mut Client) -> State {
-    match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state,
-        other => panic!("{other:?}"),
-    }
-}
-
-fn acquire(c: &mut Client) -> LeaseToken {
-    match c.ok(Command::GenAcquire { force: false }) {
-        ReplyBody::Lease(l) => l.lease_token,
-        other => panic!("{other:?}"),
-    }
+    })
+    .client_id
+    .0
 }
 
 fn fire(level: f64) -> GeneratorDesired {
@@ -61,10 +46,7 @@ fn ceiling(c: &mut Client, dbfs: f64, confirm_raise: bool) -> Result<Generator, 
         ceiling: Dbfs(dbfs),
         confirm_raise,
     })
-    .map(|r| match r {
-        ReplyBody::Generator(g) => g,
-        other => panic!("{other:?}"),
-    })
+    .map(|r| r.generator())
     .map_err(|e| e.code)
 }
 
@@ -117,7 +99,7 @@ fn lowering_applies_at_once_raising_needs_a_confirmation_and_silence() {
     let mut b = Client::connect(h.context(), h.ctrl_endpoint());
     hello(&mut a);
     let id_b = hello(&mut b);
-    let g = state(&mut a).generator;
+    let g = a.state().generator;
     assert_eq!((g.ceiling, g.ceiling_bound), (Dbfs(-10.0), Dbfs(-10.0)));
 
     a.ok(Command::SessionOpen {
@@ -127,7 +109,7 @@ fn lowering_applies_at_once_raising_needs_a_confirmation_and_silence() {
         config: spl("loopback", 0),
     });
     a.ok(Command::MeasStart { meas: MeasId(1) });
-    let tok = acquire(&mut a);
+    let tok = a.acquire();
     a.ok(Command::GenSet {
         lease_token: tok,
         desired: fire(-20.0),
@@ -233,12 +215,10 @@ fn level_and_output_labels_survive_a_restart_under_the_bound() {
     let (mut c, _) = connect(&h, &[b"evt"]);
     hello(&mut c);
     ceiling(&mut c, -32.0, false).unwrap();
-    match c.ok(Command::SessionOutputs {
+    let o = c.outputs(Command::SessionOutputs {
         outputs: vec![label(0, "Main L"), label(1, "Sub")],
-    }) {
-        ReplyBody::Outputs(o) => assert_eq!(o, vec![label(0, "Main L"), label(1, "Sub")]),
-        other => panic!("{other:?}"),
-    }
+    });
+    assert_eq!(o, vec![label(0, "Main L"), label(1, "Sub")]);
     // A label clears with none; a bad one is refused.
     c.ok(Command::SessionOutputs {
         outputs: vec![OutputSetup {
@@ -257,7 +237,7 @@ fn level_and_output_labels_survive_a_restart_under_the_bound() {
     // The same bound: the level and the labels come back.
     let h = start(-10.0);
     let (mut c, _) = connect(&h, &[b"evt"]);
-    let s = state(&mut c);
+    let s = c.state();
     assert_eq!(s.generator.ceiling, Dbfs(-32.0));
     assert_eq!(s.outputs, vec![label(0, "Main L")]);
     h.shutdown();
@@ -265,7 +245,7 @@ fn level_and_output_labels_survive_a_restart_under_the_bound() {
     // A lower bound at start wins over the kept level.
     let h = start(-40.0);
     let (mut c, _) = connect(&h, &[b"evt"]);
-    let g = state(&mut c).generator;
+    let g = c.state().generator;
     assert_eq!((g.ceiling, g.ceiling_bound), (Dbfs(-40.0), Dbfs(-40.0)));
     // And the bound refuses anything above it.
     assert_eq!(ceiling(&mut c, -32.0, true), Err(ErrorCode::Invalid));
@@ -274,6 +254,6 @@ fn level_and_output_labels_survive_a_restart_under_the_bound() {
     // A higher bound again: the kept level (it was never raised) is still in force.
     let h = start(-6.0);
     let (mut c, _) = connect(&h, &[b"evt"]);
-    assert_eq!(state(&mut c).generator.ceiling, Dbfs(-32.0));
+    assert_eq!(c.state().generator.ceiling, Dbfs(-32.0));
     h.shutdown();
 }

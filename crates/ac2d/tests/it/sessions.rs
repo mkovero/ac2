@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use ac2_proto::model::*;
 use ac2_proto::units::*;
-use ac2_proto::{Command, ErrorCode, ErrorDetail, ReplyBody};
+use ac2_proto::{Command, ErrorCode, ErrorDetail};
 use ac2d::{AutosaveConfig, Daemon, Handle};
 use common::*;
 
@@ -28,37 +28,15 @@ fn start(name: &str, dir: &Path, autosave: bool) -> Handle {
 }
 
 fn working(c: &mut Client) -> WorkingSession {
-    match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state.working,
-        other => panic!("{other:?}"),
-    }
+    c.state().working
 }
 
 fn traces(c: &mut Client) -> Vec<TraceMeta> {
-    match c.ok(Command::TraceList) {
-        ReplyBody::Traces(t) => t,
-        other => panic!("{other:?}"),
-    }
+    c.traces(Command::TraceList)
 }
 
 fn import(c: &mut Client, name: &str) -> TraceMeta {
-    let content = std::fs::read(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../ac2-traces/tests/fixtures")
-            .join(name),
-    )
-    .unwrap();
-    match c.ok(Command::TraceImport {
-        file_name: name.into(),
-        format: ImportFormat::Auto,
-        role: ImportRole::Trace,
-        ir: None,
-        content: Blob(content),
-        owner: ac2_proto::model::TraceOwner::Imported,
-    }) {
-        ReplyBody::Trace(t) => t,
-        other => panic!("{other:?}"),
-    }
+    import_fixture(c, name, name, TraceOwner::Imported)
 }
 
 fn rename(c: &mut Client, t: &TraceMeta, name: &str) {
@@ -76,22 +54,16 @@ fn save(c: &mut Client, name: &str, overwrite: bool) -> Result<SessionFile, ac2_
         session: named(name),
         overwrite,
     })
-    .map(|r| match r {
-        ReplyBody::SessionFile(f) => f,
-        other => panic!("{other:?}"),
-    })
+    .map(|r| r.session_file())
 }
 
 /// Uploads `bytes` in chunks of the daemon's size; returns the upload.
 fn upload(c: &mut Client, file: &str, bytes: &[u8]) -> TransferId {
-    let t = match c.ok(Command::FileUploadBegin {
+    let t = c.transfer(Command::FileUploadBegin {
         file: file.into(),
         bytes: bytes.len() as u64,
         sha256: ac2_archive::sha256_hex(bytes),
-    }) {
-        ReplyBody::Transfer(t) => t,
-        other => panic!("{other:?}"),
-    };
+    });
     for (i, chunk) in bytes.chunks(t.chunk_bytes as usize).enumerate() {
         c.ok(Command::FileUploadChunk {
             transfer: t.transfer,
@@ -104,19 +76,14 @@ fn upload(c: &mut Client, file: &str, bytes: &[u8]) -> TransferId {
 
 /// Downloads the working state (`None`) or a session; returns the transfer and the bytes.
 fn download(c: &mut Client, session: Option<SessionRef>) -> (Transfer, Vec<u8>) {
-    let t = match c.ok(Command::FileDownloadBegin { session }) {
-        ReplyBody::Transfer(t) => t,
-        other => panic!("{other:?}"),
-    };
+    let t = c.transfer(Command::FileDownloadBegin { session });
     let mut data = Vec::new();
     while (data.len() as u64) < t.bytes {
-        match c.ok(Command::FileDownloadChunk {
+        let b = c.chunk(Command::FileDownloadChunk {
             transfer: t.transfer,
             offset: data.len() as u64,
-        }) {
-            ReplyBody::Chunk(b) => data.extend_from_slice(&b.0),
-            other => panic!("{other:?}"),
-        }
+        });
+        data.extend_from_slice(&b.0);
     }
     ac2_archive::verify(&data, &t.sha256).unwrap();
     (t, data)
@@ -252,7 +219,7 @@ fn archives_round_trip_in_checked_chunks() {
     import(c, "rew_export.txt");
     import(c, "smaart_tf.txt");
     // A measurement's own panes travel in the archive.
-    let meter = match c.ok(Command::MeasCreate {
+    let meter = c.measurement(Command::MeasCreate {
         config: MeasConfig {
             scope: ac2_proto::model::MeasScope::Session,
             name: "FOH SPL".into(),
@@ -260,10 +227,7 @@ fn archives_round_trip_in_checked_chunks() {
                 config: SplConfig::on_input(0, Weighting::A, TimeWeighting::Fast),
             },
         },
-    }) {
-        ReplyBody::Measurement(m) => m,
-        other => panic!("{other:?}"),
-    };
+    });
     let layout = ac2_proto::samples::pane_layout();
     c.ok(Command::MeasLayout {
         meas: meter.id,
@@ -284,29 +248,21 @@ fn archives_round_trip_in_checked_chunks() {
     c.ok(Command::FileNew { discard: false });
 
     let up = upload(c, stick, &bytes);
-    match c.ok(Command::FileLoad {
+    let loaded = c.session_file(Command::FileLoad {
         session: SessionRef::Upload { transfer: up },
         discard: false,
-    }) {
-        ReplyBody::SessionFile(f) => {
-            assert_eq!(f.name, "friday.ac2session");
-            assert_eq!(f.path, stick);
-            assert_eq!(f.traces, 2);
-        }
-        other => panic!("{other:?}"),
-    }
+    });
+    assert_eq!(loaded.name, "friday.ac2session");
+    assert_eq!(loaded.path, stick);
+    assert_eq!(loaded.traces, 2);
     let after = traces(c);
     assert_eq!(
         after.iter().map(|t| &t.edit).collect::<Vec<_>>(),
         before.iter().map(|t| &t.edit).collect::<Vec<_>>()
     );
-    match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => {
-            let m = s.state.measurements.iter().find(|m| m.id == meter.id);
-            assert_eq!(m.and_then(|m| m.layout.clone()), Some(layout.clone()));
-        }
-        other => panic!("{other:?}"),
-    }
+    let s = c.snapshot(Command::StateSnapshot);
+    let m = s.state.measurements.iter().find(|m| m.id == meter.id);
+    assert_eq!(m.and_then(|m| m.layout.clone()), Some(layout.clone()));
     let w = working(c);
     assert_eq!(w.origin, Some(SessionOrigin::Client { path: stick.into() }));
     assert!(!w.dirty);
@@ -326,12 +282,8 @@ fn archives_round_trip_in_checked_chunks() {
         name: "from stick".into(),
         overwrite: false,
     });
-    match c.ok(Command::FileList) {
-        ReplyBody::Sessions(l) => {
-            assert!(l.iter().any(|f| f.name == "from stick" && f.traces == 2))
-        }
-        other => panic!("{other:?}"),
-    }
+    let l = c.sessions(Command::FileList);
+    assert!(l.iter().any(|f| f.name == "from stick" && f.traces == 2));
     // A named session downloads too.
     let (t, _) = download(c, Some(named("from stick")));
     assert_eq!(t.file_name, "from stick.ac2session");
@@ -358,13 +310,13 @@ fn transfers_refuse_damage_disorder_and_size() {
     assert_eq!(e.code, ErrorCode::Invalid);
     assert!(e.msg.contains("at most"), "{}", e.msg);
 
-    let begin = |c: &mut Client, bytes: &[u8], sha: String| match c.ok(Command::FileUploadBegin {
-        file: "x.ac2session".into(),
-        bytes: bytes.len() as u64,
-        sha256: sha,
-    }) {
-        ReplyBody::Transfer(t) => t.transfer,
-        other => panic!("{other:?}"),
+    let begin = |c: &mut Client, bytes: &[u8], sha: String| {
+        c.transfer(Command::FileUploadBegin {
+            file: "x.ac2session".into(),
+            bytes: bytes.len() as u64,
+            sha256: sha,
+        })
+        .transfer
     };
     let data = b"not really an archive".to_vec();
     // Out of order.
@@ -442,12 +394,9 @@ fn an_old_session_refuses_to_load_and_salvages_its_traces() {
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Unsupported);
-    let s = match c.ok(Command::FileSalvage {
+    let s = c.salvage(Command::FileSalvage {
         session: named("old"),
-    }) {
-        ReplyBody::Salvage(s) => s,
-        other => panic!("{other:?}"),
-    };
+    });
     assert_eq!(s.version, Some(19));
     assert_eq!(s.imported.len(), 2, "{s:?}");
     assert_eq!(s.refused.len(), 1, "{s:?}");
@@ -570,10 +519,7 @@ fn remote_clients_never_name_daemon_paths() {
         assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
     }
     // Its own files travel as archives: the working state downloads.
-    let t = match c.ok(Command::FileDownloadBegin { session: None }) {
-        ReplyBody::Transfer(t) => t,
-        other => panic!("{other:?}"),
-    };
+    let t = c.transfer(Command::FileDownloadBegin { session: None });
     assert!(t.bytes > 0);
     h.shutdown();
 }
@@ -633,10 +579,7 @@ fn a_session_with_values_out_of_range_refuses_to_load() {
 
     // Unsaved changes, so a load that went ahead would keep a recovery copy.
     let t = import(c, "smaart_tf.txt");
-    let before = match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state,
-        other => panic!("{other:?}"),
-    };
+    let before = c.state();
     assert!(before.working.dirty);
     assert_eq!(before.working.recover, None);
     for name in ["far", "far-back", "nudged", "offset", "trace-nudge"] {
@@ -647,10 +590,7 @@ fn a_session_with_values_out_of_range_refuses_to_load() {
             })
             .unwrap_err();
         assert_eq!(e.code, ErrorCode::Invalid, "{name}: {e:?}");
-        let after = match c.ok(Command::StateSnapshot) {
-            ReplyBody::Snapshot(s) => s.state,
-            other => panic!("{other:?}"),
-        };
+        let after = c.state();
         assert_eq!(after.measurements, before.measurements, "{name}");
         assert_eq!(after.traces, before.traces, "{name}");
         assert_eq!(after.working, before.working, "{name}");
@@ -661,10 +601,7 @@ fn a_session_with_values_out_of_range_refuses_to_load() {
         session: named("near"),
         discard: true,
     });
-    let m = match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state.measurements,
-        other => panic!("{other:?}"),
-    };
+    let m = c.state().measurements;
     assert_eq!(m.len(), 1);
     let d = m[0].delay.as_ref().expect("transfer delay");
     assert_eq!((d.applied, d.nudged), (Seconds(-10.0), Seconds(0.5)));
@@ -854,10 +791,7 @@ fn a_session_with_crafted_logs_or_trace_data_refuses_to_load() {
     );
 
     let t = import(c, "smaart_tf.txt");
-    let before = match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state,
-        other => panic!("{other:?}"),
-    };
+    let before = c.state();
     assert!(before.working.dirty);
     for name in [
         "spl-orphan",
@@ -874,10 +808,7 @@ fn a_session_with_crafted_logs_or_trace_data_refuses_to_load() {
             })
             .unwrap_err();
         assert_eq!(e.code, ErrorCode::Invalid, "{name}: {e:?}");
-        let after = match c.ok(Command::StateSnapshot) {
-            ReplyBody::Snapshot(s) => s.state,
-            other => panic!("{other:?}"),
-        };
+        let after = c.state();
         assert_eq!(after.measurements, before.measurements, "{name}");
         assert_eq!(after.traces, before.traces, "{name}");
         assert_eq!(after.spl_logs, before.spl_logs, "{name}");
@@ -891,10 +822,7 @@ fn a_session_with_crafted_logs_or_trace_data_refuses_to_load() {
             discard: true,
         });
     }
-    let m = match c.ok(Command::StateSnapshot) {
-        ReplyBody::Snapshot(s) => s.state.measurements,
-        other => panic!("{other:?}"),
-    };
+    let m = c.state().measurements;
     assert_eq!(m.len(), 2);
     h.shutdown();
 }
