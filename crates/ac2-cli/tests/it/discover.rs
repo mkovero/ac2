@@ -4,12 +4,12 @@
 
 use std::net::{IpAddr, Ipv4Addr};
 
-use ac2_cli::{Cli, Out, run_reporting};
 use ac2_client::KeyDir;
 use ac2_discovery::{Advert, Advertiser, Bind, Options};
 use ac2_zmq::KeyPair;
-use clap::Parser;
 use serde_json::Value;
+
+use super::common::cli;
 
 type R<T = ()> = Result<T, Box<dyn std::error::Error>>;
 
@@ -46,8 +46,7 @@ async fn discover_lists_rigs_with_pairing_status() -> R {
 
     let key_dir = dir.path().to_string_lossy().into_owned();
     let port_s = port.to_string();
-    let cli = Cli::try_parse_from([
-        "ac2",
+    let run = cli(&[
         "--json",
         "--key-dir",
         &key_dir,
@@ -57,14 +56,10 @@ async fn discover_lists_rigs_with_pairing_status() -> R {
         "--loopback",
         "--mdns-port",
         &port_s,
-    ])?;
-    let (mut so, mut se) = (Vec::new(), Vec::new());
-    let code = {
-        let mut out = Out::new(cli.json, &mut so);
-        run_reporting(&cli, &mut out, &mut se).await
-    };
-    assert_eq!(code, 0, "{}", String::from_utf8_lossy(&se));
-    let v: Value = serde_json::from_slice(&so)?;
+    ])
+    .await;
+    assert_eq!(run.code, 0, "{}", run.stderr);
+    let v: Value = serde_json::from_str(&run.stdout)?;
     let rigs = v.as_array().ok_or("not an array")?;
     if rigs.is_empty() {
         assert!(

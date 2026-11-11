@@ -7,31 +7,13 @@ use std::sync::Arc;
 
 use ac2_audio::fake::{FAKE_INPUT_ID, FAKE_OUTPUT_ID, FAKE_SPLIT_NAME, FakeDrive};
 use ac2_audio::{FakeBackend, FakeConfig, FakeEndpoints};
-use ac2_cli::{Cli, Out, run_reporting};
 use ac2_client::Endpoints;
-use ac2d::{Daemon, DaemonConfig, Listen};
-use clap::Parser;
+
+use super::common::{self, rig_on};
 
 async fn ac2(ep: &Endpoints, args: &[&str]) -> (u8, String, String) {
-    let mut argv = vec![
-        "ac2",
-        "--ctrl-endpoint",
-        &ep.ctrl,
-        "--data-endpoint",
-        &ep.data,
-    ];
-    argv.extend_from_slice(args);
-    let cli = Cli::try_parse_from(argv).unwrap();
-    let (mut so, mut se) = (Vec::new(), Vec::new());
-    let code = {
-        let mut out = Out::new(false, &mut so);
-        run_reporting(&cli, &mut out, &mut se).await
-    };
-    (
-        code,
-        String::from_utf8(so).unwrap(),
-        String::from_utf8(se).unwrap(),
-    )
+    let r = common::ac2(ep, false, args).await;
+    (r.code, r.stdout, r.stderr)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -42,15 +24,7 @@ async fn session_open_plays_on_the_out_device() {
         ..FakeConfig::default()
     })
     .unwrap();
-    let listen = Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    };
-    let h = Daemon::start(DaemonConfig::new(Arc::new(backend), listen, -10.0)).unwrap();
-    let ep = Endpoints {
-        ctrl: h.ctrl_endpoint().to_owned(),
-        data: h.data_endpoint().to_owned(),
-    };
+    let (h, ep) = rig_on(Arc::new(backend), |_| {});
 
     let (code, devices, _) = ac2(&ep, &["devices"]).await;
     assert_eq!(code, 0);

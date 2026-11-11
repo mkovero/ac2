@@ -5,34 +5,14 @@
 
 use std::time::{Duration, Instant};
 
-use ac2_cli::{Cli, Out, run_reporting};
 use ac2_client::Endpoints;
-use ac2d::{BackendChoice, Daemon, DaemonConfig, Listen};
-use clap::Parser;
 use serde_json::Value;
 
+use super::common::{self, fake_backend, rig_on};
+
 async fn ac2(ep: &Endpoints, args: &[&str]) -> (u8, String, String) {
-    let argv: Vec<&str> = [
-        "ac2",
-        "--ctrl-endpoint",
-        &ep.ctrl,
-        "--data-endpoint",
-        &ep.data,
-    ]
-    .into_iter()
-    .chain(args.iter().copied())
-    .collect();
-    let cli = Cli::try_parse_from(argv).unwrap();
-    let (mut so, mut se) = (Vec::new(), Vec::new());
-    let code = {
-        let mut out = Out::new(cli.json, &mut so);
-        run_reporting(&cli, &mut out, &mut se).await
-    };
-    (
-        code,
-        String::from_utf8(so).unwrap(),
-        String::from_utf8(se).unwrap(),
-    )
+    let r = common::ac2(ep, false, args).await;
+    (r.code, r.stdout, r.stderr)
 }
 
 async fn json(ep: &Endpoints, args: &[&str]) -> Value {
@@ -46,18 +26,9 @@ async fn json(ep: &Endpoints, args: &[&str]) -> Value {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn record_list_and_replay() {
     let dir = tempfile::tempdir().unwrap();
-    let backend = ac2d::backend(BackendChoice::Fake).unwrap();
-    let listen = Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    };
-    let mut cfg = DaemonConfig::new(backend, listen, -10.0);
-    cfg.recording_dir = Some(dir.path().to_owned());
-    let h = Daemon::start(cfg).unwrap();
-    let ep = Endpoints {
-        ctrl: h.ctrl_endpoint().to_owned(),
-        data: h.data_endpoint().to_owned(),
-    };
+    let (h, ep) = rig_on(fake_backend(), |cfg| {
+        cfg.recording_dir = Some(dir.path().to_owned())
+    });
 
     // Without a session there is nothing to record.
     let (code, _, err) = ac2(&ep, &["rec", "start", "--max", "1s"]).await;

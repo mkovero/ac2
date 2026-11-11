@@ -3,71 +3,31 @@
 //! the alignment's fit.
 #![allow(clippy::unwrap_used)]
 
-use ac2_cli::{Cli, Out, run_reporting};
-use ac2_client::{Client, ClientConfig, Endpoints, OnDrop};
+use ac2_cli::Cli;
+use ac2_client::{Endpoints, OnDrop};
 use ac2_proto::Command;
-use ac2_proto::model::{
-    DeviceSelector, GeneratorDesired, GeneratorSettings, LoopbackRoute, SessionConfig, Signal,
-};
+use ac2_proto::model::{GeneratorDesired, GeneratorSettings, LoopbackRoute, SessionConfig, Signal};
 use ac2_proto::units::Dbfs;
-use ac2d::{BackendChoice, Daemon, DaemonConfig, Listen};
 use clap::Parser;
 use serde_json::Value;
 
+use super::common::{ac2, client, rig, session};
+
 async fn run(ep: &Endpoints, json: bool, args: &[&str]) -> (i32, String) {
-    let argv: Vec<&str> = ["ac2"]
-        .into_iter()
-        .chain(json.then_some("--json"))
-        .chain(["--ctrl-endpoint", &ep.ctrl, "--data-endpoint", &ep.data])
-        .chain(args.iter().copied())
-        .collect();
-    let cli = Cli::try_parse_from(argv).unwrap();
-    let (mut so, mut se) = (Vec::new(), Vec::new());
-    let code = {
-        let mut out = Out::new(json, &mut so);
-        run_reporting(&cli, &mut out, &mut se).await
-    };
-    let text = String::from_utf8(so).unwrap();
-    (
-        i32::from(code),
-        format!("{text}{}", String::from_utf8_lossy(&se)),
-    )
+    ac2(ep, json, args).await.text()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn alignment_by_name() {
-    let backend = ac2d::backend(BackendChoice::Fake).unwrap();
-    let listen = Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    };
-    let h = Daemon::start(DaemonConfig::new(backend, listen, -10.0)).unwrap();
-    let ep = Endpoints {
-        ctrl: h.ctrl_endpoint().to_owned(),
-        data: h.data_endpoint().to_owned(),
-    };
-    let c = Client::connect(ClientConfig::new(ep.clone(), "align-rig-test"))
-        .await
-        .unwrap();
-    c.wait_synced(std::time::Duration::from_secs(5))
-        .await
-        .unwrap();
+    let (_h, ep) = rig();
+    let c = client(&ep, "align-rig-test").await;
     c.call(Command::SessionOpen {
         config: SessionConfig {
-            backend: None,
-            input_device: DeviceSelector::Default,
-            output_device: DeviceSelector::Default,
-            input_channels: vec![0, 1, 2, 3],
-            spare_inputs: 0,
-            output_channels: 2,
-            sample_rate_hz: None,
-            buffer_frames: None,
             loopback: Some(LoopbackRoute {
                 output: 0,
                 input: 0,
             }),
-            remote_inputs: Vec::new(),
-            link_offset: None,
+            ..session(vec![0, 1, 2, 3])
         },
     })
     .await

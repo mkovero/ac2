@@ -7,42 +7,28 @@
 
 use std::time::{Duration, Instant};
 
-use ac2_cli::{Cli, Out, run_reporting};
-use ac2_client::{Client, ClientConfig, Endpoints, OnDrop};
+use ac2_client::{Endpoints, OnDrop};
 use ac2_proto::model::{
-    DeviceSelector, GeneratorDesired, GeneratorSettings, MeasConfig, MeasKind, PeakWeighting,
-    SessionConfig, Signal, SplConfig, TimeWeighting, Weighting,
+    GeneratorDesired, GeneratorSettings, MeasConfig, MeasKind, PeakWeighting, Signal, SplConfig,
+    TimeWeighting, Weighting,
 };
 use ac2_proto::units::{Dbfs, Hz};
 use ac2_proto::{Command, ReplyBody};
-use ac2d::{BackendChoice, Daemon, DaemonConfig, Listen};
 use clap::Parser;
 use serde_json::Value;
 
+use super::common::{ac2, client, rig, session};
+
 /// The `spl watch` JSON lines of one run.
 async fn watch(ep: &Endpoints, args: &[&str]) -> Vec<Value> {
-    let argv: Vec<&str> = [
-        "ac2",
-        "--json",
-        "--ctrl-endpoint",
-        &ep.ctrl,
-        "--data-endpoint",
-        &ep.data,
-        "spl",
-        "watch",
-    ]
-    .into_iter()
-    .chain(args.iter().copied())
-    .collect();
-    let cli = Cli::try_parse_from(argv).unwrap();
-    let (mut so, mut se) = (Vec::new(), Vec::new());
-    let code = {
-        let mut out = Out::new(true, &mut so);
-        run_reporting(&cli, &mut out, &mut se).await
-    };
-    let text = String::from_utf8(so).unwrap();
-    assert_eq!(code, 0, "{text} {}", String::from_utf8_lossy(&se));
-    text.lines()
+    let args: Vec<&str> = ["spl", "watch"]
+        .into_iter()
+        .chain(args.iter().copied())
+        .collect();
+    let r = ac2(ep, true, &args).await;
+    assert_eq!(r.code, 0, "{} {}", r.stdout, r.stderr);
+    r.stdout
+        .lines()
         .filter_map(|l| serde_json::from_str::<Value>(l).ok())
         .filter(|v| v["spl"].is_object())
         .collect()
@@ -54,34 +40,10 @@ fn num(v: &Value, k: &str) -> f64 {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn slow_spl_watch_reads_its_input_on_a_fresh_meter() {
-    let backend = ac2d::backend(BackendChoice::Fake).unwrap();
-    let listen = Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    };
-    let h = Daemon::start(DaemonConfig::new(backend, listen, -10.0)).unwrap();
-    let ep = Endpoints {
-        ctrl: h.ctrl_endpoint().to_owned(),
-        data: h.data_endpoint().to_owned(),
-    };
-    let c = Client::connect(ClientConfig::new(ep.clone(), "spl-rig-test"))
-        .await
-        .unwrap();
-    c.wait_synced(Duration::from_secs(5)).await.unwrap();
+    let (h, ep) = rig();
+    let c = client(&ep, "spl-rig-test").await;
     c.call(Command::SessionOpen {
-        config: SessionConfig {
-            backend: None,
-            input_device: DeviceSelector::Default,
-            output_device: DeviceSelector::Default,
-            input_channels: vec![0, 1],
-            spare_inputs: 0,
-            output_channels: 2,
-            sample_rate_hz: None,
-            buffer_frames: None,
-            loopback: None,
-            remote_inputs: Vec::new(),
-            link_offset: None,
-        },
+        config: session(vec![0, 1]),
     })
     .await
     .unwrap();
@@ -183,34 +145,10 @@ async fn slow_spl_watch_reads_its_input_on_a_fresh_meter() {
 /// the new weightings in its configuration, the Leq windows as they were.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn spl_set_changes_the_weightings_in_place() {
-    let backend = ac2d::backend(BackendChoice::Fake).unwrap();
-    let listen = Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    };
-    let h = Daemon::start(DaemonConfig::new(backend, listen, -10.0)).unwrap();
-    let ep = Endpoints {
-        ctrl: h.ctrl_endpoint().to_owned(),
-        data: h.data_endpoint().to_owned(),
-    };
-    let c = Client::connect(ClientConfig::new(ep.clone(), "spl-set-test"))
-        .await
-        .unwrap();
-    c.wait_synced(Duration::from_secs(5)).await.unwrap();
+    let (h, ep) = rig();
+    let c = client(&ep, "spl-set-test").await;
     c.call(Command::SessionOpen {
-        config: SessionConfig {
-            backend: None,
-            input_device: DeviceSelector::Default,
-            output_device: DeviceSelector::Default,
-            input_channels: vec![0, 1],
-            spare_inputs: 0,
-            output_channels: 2,
-            sample_rate_hz: None,
-            buffer_frames: None,
-            loopback: None,
-            remote_inputs: Vec::new(),
-            link_offset: None,
-        },
+        config: session(vec![0, 1]),
     })
     .await
     .unwrap();
@@ -234,25 +172,12 @@ async fn spl_set_changes_the_weightings_in_place() {
     let run = |args: &'static [&'static str]| {
         let ep = ep.clone();
         async move {
-            let argv: Vec<&str> = [
-                "ac2",
-                "--ctrl-endpoint",
-                &ep.ctrl,
-                "--data-endpoint",
-                &ep.data,
-                "spl",
-                "set",
-            ]
-            .into_iter()
-            .chain(args.iter().copied())
-            .collect();
-            let cli = Cli::try_parse_from(argv).unwrap();
-            let (mut so, mut se) = (Vec::new(), Vec::new());
-            let code = {
-                let mut out = Out::new(false, &mut so);
-                run_reporting(&cli, &mut out, &mut se).await
-            };
-            (code, String::from_utf8(so).unwrap())
+            let args: Vec<&str> = ["spl", "set"]
+                .into_iter()
+                .chain(args.iter().copied())
+                .collect();
+            let r = ac2(&ep, false, &args).await;
+            (r.code, r.stdout)
         }
     };
     let (code, text) = run(&["--weight", "c", "--time", "slow"]).await;
@@ -275,7 +200,7 @@ async fn spl_set_changes_the_weightings_in_place() {
     assert_eq!(code, 0, "{text}");
     assert_eq!(text.trim(), "FOH SPL: LCI");
     // Nothing to set is a usage error.
-    assert!(Cli::try_parse_from(["ac2", "spl", "set"]).is_err());
+    assert!(ac2_cli::Cli::try_parse_from(["ac2", "spl", "set"]).is_err());
     drop(c);
     h.shutdown();
 }

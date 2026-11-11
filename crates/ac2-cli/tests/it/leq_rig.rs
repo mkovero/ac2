@@ -7,43 +7,16 @@
 
 use std::time::{Duration, Instant};
 
-use ac2_cli::{Cli, Out, run_reporting};
-use ac2_client::{Client, ClientConfig, ClientError, Endpoints, OnDrop};
+use ac2_client::{ClientError, OnDrop};
 use ac2_proto::model::{
-    DeviceSelector, GeneratorDesired, GeneratorSettings, MeasConfig, MeasKind, SessionConfig,
-    Signal, SplConfig, TimeWeighting, Weighting,
+    GeneratorDesired, GeneratorSettings, MeasConfig, MeasKind, Signal, SplConfig, TimeWeighting,
+    Weighting,
 };
 use ac2_proto::units::{DbSpl, Dbfs, Hz};
 use ac2_proto::{Command, ReplyBody};
-use ac2d::{BackendChoice, Daemon, DaemonConfig, Listen};
-use clap::Parser;
 use serde_json::Value;
 
-/// The output of one `ac2 --json …` run, and its exit code.
-async fn run(ep: &Endpoints, args: &[&str]) -> (i32, String) {
-    let argv: Vec<&str> = [
-        "ac2",
-        "--json",
-        "--ctrl-endpoint",
-        &ep.ctrl,
-        "--data-endpoint",
-        &ep.data,
-    ]
-    .into_iter()
-    .chain(args.iter().copied())
-    .collect();
-    let cli = Cli::try_parse_from(argv).unwrap();
-    let (mut so, mut se) = (Vec::new(), Vec::new());
-    let code = {
-        let mut out = Out::new(true, &mut so);
-        run_reporting(&cli, &mut out, &mut se).await
-    };
-    let text = String::from_utf8(so).unwrap();
-    (
-        i32::from(code),
-        format!("{text}{}", String::from_utf8_lossy(&se)),
-    )
-}
+use super::common::{client, document, fake_backend, rig_on, run_json as run, session};
 
 fn lines(text: &str) -> Vec<Value> {
     text.lines()
@@ -51,35 +24,17 @@ fn lines(text: &str) -> Vec<Value> {
         .collect()
 }
 
-/// The one (pretty) JSON document a command printed before any stderr text.
-fn document(text: &str) -> Value {
-    let mut de = serde_json::Deserializer::from_str(text).into_iter::<Value>();
-    de.next().expect("a document").expect("json")
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn slow_leq_set_watch_and_export() {
-    let backend = ac2d::backend(BackendChoice::Fake).unwrap();
-    let listen = Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    };
     let dir = tempfile::tempdir().unwrap();
-    let mut cfg = DaemonConfig::new(backend, listen, -10.0);
-    cfg.cal_store = Some(dir.path().join("calibrations.json"));
-    // The tone's lease is held across many CLI runs; a slow runner can stall the client's
-    // refresher past the 1.5 s expiry (the tone fades out, the 5 s Leq falls), and the
-    // lease is not under test here.
-    cfg.lease_expiry = Duration::from_secs(60);
-    let h = Daemon::start(cfg).unwrap();
-    let ep = Endpoints {
-        ctrl: h.ctrl_endpoint().to_owned(),
-        data: h.data_endpoint().to_owned(),
-    };
-    let c = Client::connect(ClientConfig::new(ep.clone(), "leq-rig-test"))
-        .await
-        .unwrap();
-    c.wait_synced(Duration::from_secs(5)).await.unwrap();
+    let (h, ep) = rig_on(fake_backend(), |cfg| {
+        cfg.cal_store = Some(dir.path().join("calibrations.json"));
+        // The tone's lease is held across many CLI runs; a slow runner can stall the
+        // client's refresher past the 1.5 s expiry (the tone fades out, the 5 s Leq falls),
+        // and the lease is not under test here.
+        cfg.lease_expiry = Duration::from_secs(60);
+    });
+    let c = client(&ep, "leq-rig-test").await;
 
     // No meter yet: the commands say how to make one.
     let (code, text) = run(&ep, &["spl", "leq", "set", "--limit", "5s=90db"]).await;
@@ -87,19 +42,7 @@ async fn slow_leq_set_watch_and_export() {
     assert!(text.contains("no SPL meter"), "{text}");
 
     c.call(Command::SessionOpen {
-        config: SessionConfig {
-            backend: None,
-            input_device: DeviceSelector::Default,
-            output_device: DeviceSelector::Default,
-            input_channels: vec![0, 1],
-            spare_inputs: 0,
-            output_channels: 2,
-            sample_rate_hz: None,
-            buffer_frames: None,
-            loopback: None,
-            remote_inputs: Vec::new(),
-            link_offset: None,
-        },
+        config: session(vec![0, 1]),
     })
     .await
     .unwrap();

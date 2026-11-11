@@ -4,54 +4,11 @@
 //! traces asks for `--keep-traces` or `--delete-traces`; a target is filed with `--meas`.
 #![allow(clippy::unwrap_used)]
 
-use ac2_cli::{Cli, Out, run_reporting};
-use ac2_client::Endpoints;
-use ac2d::{BackendChoice, Daemon, DaemonConfig, Listen};
-use clap::Parser;
-use serde_json::Value;
-
-async fn run(ep: &Endpoints, args: &[&str]) -> (i32, String) {
-    let argv: Vec<&str> = [
-        "ac2",
-        "--json",
-        "--ctrl-endpoint",
-        &ep.ctrl,
-        "--data-endpoint",
-        &ep.data,
-    ]
-    .into_iter()
-    .chain(args.iter().copied())
-    .collect();
-    let cli = Cli::try_parse_from(argv).unwrap();
-    let (mut so, mut se) = (Vec::new(), Vec::new());
-    let code = {
-        let mut out = Out::new(true, &mut so);
-        run_reporting(&cli, &mut out, &mut se).await
-    };
-    let text = String::from_utf8(so).unwrap();
-    (
-        i32::from(code),
-        format!("{text}{}", String::from_utf8_lossy(&se)),
-    )
-}
-
-fn document(text: &str) -> Value {
-    let mut de = serde_json::Deserializer::from_str(text).into_iter::<Value>();
-    de.next().expect("a document").expect("json")
-}
+use super::common::{document, rig, run_json as run};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn owners_from_the_cli() {
-    let backend = ac2d::backend(BackendChoice::Fake).unwrap();
-    let listen = Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    };
-    let h = Daemon::start(DaemonConfig::new(backend, listen, -10.0)).unwrap();
-    let ep = Endpoints {
-        ctrl: h.ctrl_endpoint().to_owned(),
-        data: h.data_endpoint().to_owned(),
-    };
+    let (h, ep) = rig();
     let (code, text) = run(
         &ep,
         &[

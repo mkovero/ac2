@@ -10,7 +10,8 @@ use ac2_client::fake::{FakeDaemon, FakeOptions};
 use ac2_proto::units::{Dbfs, LeaseToken, RequestId, Rev};
 use ac2_proto::{Command, ErrorDetail, Reply, ReplyBody, Request, decode_reply, encode_request};
 use ac2_zmq::{Context, Socket, SocketType};
-use ac2d::{BackendChoice, Daemon, DaemonConfig, Listen};
+
+use super::common::{fake_backend, rig_on};
 
 const T: Duration = Duration::from_secs(5);
 const LEASE: Duration = Duration::from_millis(400);
@@ -180,15 +181,8 @@ fn fake_daemon_matches_the_real_one_on_dedup_revs_and_lease() {
     .unwrap();
     let faked = script(&fake.endpoints().ctrl);
 
-    let backend = ac2d::backend(BackendChoice::Fake).unwrap();
-    let listen = Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    };
-    let mut cfg = DaemonConfig::new(backend, listen, -10.0);
-    cfg.lease_expiry = LEASE;
-    let h = Daemon::start(cfg).unwrap();
-    let real = script(h.ctrl_endpoint());
+    let (h, ep) = rig_on(fake_backend(), |cfg| cfg.lease_expiry = LEASE);
+    let real = script(&ep.ctrl);
     h.shutdown();
 
     let diff: Vec<String> = real

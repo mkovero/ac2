@@ -6,9 +6,7 @@
 use std::net::UdpSocket;
 use std::time::{Duration, Instant};
 
-use ac2_client::Endpoints;
-use ac2d::{BackendChoice, Daemon, DaemonConfig, Listen};
-
+use super::common::{fake_backend, rig_on};
 use super::osc_rig::{ac2, ok};
 
 /// The next frame's 512 channels that `want` accepts.
@@ -30,19 +28,10 @@ fn frame_until(rx: &UdpSocket, want: impl Fn(&[u8]) -> bool) -> Vec<u8> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn artnet_target_test_cue_levels_and_status() {
-    let backend = ac2d::backend(BackendChoice::Fake).unwrap();
-    let listen = Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    };
     let dir = tempfile::tempdir().unwrap();
-    let mut cfg = DaemonConfig::new(backend, listen, -10.0);
-    cfg.rig_settings = Some(dir.path().join("rig.json"));
-    let h = Daemon::start(cfg).unwrap();
-    let ep = Endpoints {
-        ctrl: h.ctrl_endpoint().to_owned(),
-        data: h.data_endpoint().to_owned(),
-    };
+    let (h, ep) = rig_on(fake_backend(), |cfg| {
+        cfg.rig_settings = Some(dir.path().join("rig.json"));
+    });
     let rx = UdpSocket::bind("127.0.0.1:0").unwrap();
     rx.set_read_timeout(Some(Duration::from_millis(100)))
         .unwrap();

@@ -5,6 +5,7 @@
 mod align_rig;
 mod artnet_rig;
 mod band_rig;
+mod common;
 mod discover;
 mod drift_rig;
 mod eq_rig;

@@ -9,38 +9,20 @@ use std::time::{Duration, Instant};
 
 use ac2_audio::fake::{FakeDrive, Pace};
 use ac2_audio::{FakeBackend, FakeConfig};
-use ac2_cli::{Cli, Out, run_reporting};
-use ac2_client::{Client, ClientConfig, Endpoints};
+use ac2_client::Endpoints;
 use ac2_proto::Command;
-use ac2_proto::model::{DeviceSelector, SessionConfig};
-use ac2d::{Daemon, DaemonConfig, Listen};
-use clap::Parser;
+use ac2_proto::model::SessionConfig;
+
+use super::common::{ac2, client, rig_on, session};
 
 async fn status(ep: &Endpoints, json: bool) -> String {
     run(ep, json, &["status"]).await
 }
 
 async fn run(ep: &Endpoints, json: bool, args: &[&str]) -> String {
-    let mut argv = vec![
-        "ac2",
-        "--ctrl-endpoint",
-        &ep.ctrl,
-        "--data-endpoint",
-        &ep.data,
-    ];
-    if json {
-        argv.push("--json");
-    }
-    argv.extend_from_slice(args);
-    let cli = Cli::try_parse_from(argv).unwrap();
-    let (mut so, mut se) = (Vec::new(), Vec::new());
-    let code = {
-        let mut out = Out::new(json, &mut so);
-        run_reporting(&cli, &mut out, &mut se).await
-    };
-    let text = String::from_utf8(so).unwrap();
-    assert_eq!(code, 0, "{text} {}", String::from_utf8_lossy(&se));
-    text
+    let r = ac2(ep, json, args).await;
+    assert_eq!(r.code, 0, "{} {}", r.stdout, r.stderr);
+    r.stdout
 }
 
 async fn status_until(ep: &Endpoints, what: &str, ok: impl Fn(&str) -> bool) -> String {
@@ -62,32 +44,13 @@ async fn status_shows_stopped_audio_until_the_daemon_reopens_it() {
         ..FakeConfig::default()
     })
     .unwrap();
-    let listen = Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    };
-    let h = Daemon::start(DaemonConfig::new(Arc::new(backend.clone()), listen, -10.0)).unwrap();
-    let ep = Endpoints {
-        ctrl: h.ctrl_endpoint().to_owned(),
-        data: h.data_endpoint().to_owned(),
-    };
-    let c = Client::connect(ClientConfig::new(ep.clone(), "recovery-rig-test"))
-        .await
-        .unwrap();
-    c.wait_synced(Duration::from_secs(5)).await.unwrap();
+    let (_h, ep) = rig_on(Arc::new(backend.clone()), |_| {});
+    let c = client(&ep, "recovery-rig-test").await;
     c.call(Command::SessionOpen {
         config: SessionConfig {
-            backend: None,
-            input_device: DeviceSelector::Default,
-            output_device: DeviceSelector::Default,
-            input_channels: vec![0, 1],
-            spare_inputs: 0,
-            output_channels: 2,
             sample_rate_hz: Some(48_000),
             buffer_frames: Some(256),
-            loopback: None,
-            remote_inputs: Vec::new(),
-            link_offset: None,
+            ..session(vec![0, 1])
         },
     })
     .await
@@ -129,35 +92,14 @@ async fn session_panel_opens_the_drivers_panel_and_status_says_what_it_changed()
         ..FakeConfig::default()
     })
     .unwrap();
-    let listen = Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    };
-    let h = Daemon::start(DaemonConfig::new(Arc::new(backend.clone()), listen, -10.0)).unwrap();
-    let ep = Endpoints {
-        ctrl: h.ctrl_endpoint().to_owned(),
-        data: h.data_endpoint().to_owned(),
-    };
-    let fail = {
-        let cli = Cli::try_parse_from([
-            "ac2",
-            "--ctrl-endpoint",
-            &ep.ctrl,
-            "--data-endpoint",
-            &ep.data,
-            "session",
-            "panel",
-        ])
-        .unwrap();
-        let (mut so, mut se) = (Vec::new(), Vec::new());
-        let code = run_reporting(&cli, &mut Out::new(false, &mut so), &mut se).await;
-        (code, String::from_utf8(se).unwrap())
-    };
-    assert_ne!(fail.0, 0);
+    let (_h, ep) = rig_on(Arc::new(backend.clone()), |_| {});
+    let fail = ac2(&ep, false, &["session", "panel"]).await;
+    assert_ne!(fail.code, 0);
     assert!(
-        fail.1.contains("no audio I/O is open: name the backend"),
+        fail.stderr
+            .contains("no audio I/O is open: name the backend"),
         "{}",
-        fail.1
+        fail.stderr
     );
 
     run(

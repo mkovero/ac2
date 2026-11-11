@@ -7,34 +7,17 @@ use std::time::{Duration, Instant};
 
 use ac2_audio::fake::{FakeDrive, FakePath};
 use ac2_audio::{FakeBackend, FakeConfig};
-use ac2_cli::{Cli, Out, run_reporting};
-use ac2_client::{Client, ClientConfig, Endpoints, OnDrop};
-use ac2_proto::model::{
-    DeviceSelector, GeneratorDesired, GeneratorSettings, LoopbackRoute, SessionConfig, Signal,
-};
+use ac2_client::{Endpoints, OnDrop};
+use ac2_proto::model::{GeneratorDesired, GeneratorSettings, LoopbackRoute, SessionConfig, Signal};
 use ac2_proto::units::Dbfs;
 use ac2_proto::{Command, ReplyBody};
-use ac2d::{Daemon, DaemonConfig, Listen};
-use clap::Parser;
+
+use super::common::{ac2, client, rig_on, session};
 
 async fn status(ep: &Endpoints) -> String {
-    let argv = [
-        "ac2",
-        "--ctrl-endpoint",
-        &ep.ctrl,
-        "--data-endpoint",
-        &ep.data,
-        "status",
-    ];
-    let cli = Cli::try_parse_from(argv).unwrap();
-    let (mut so, mut se) = (Vec::new(), Vec::new());
-    let code = {
-        let mut out = Out::new(false, &mut so);
-        run_reporting(&cli, &mut out, &mut se).await
-    };
-    let text = String::from_utf8(so).unwrap();
-    assert_eq!(code, 0, "{text} {}", String::from_utf8_lossy(&se));
-    text
+    let r = ac2(ep, false, &["status"]).await;
+    assert_eq!(r.code, 0, "{} {}", r.stdout, r.stderr);
+    r.stdout
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -47,38 +30,20 @@ async fn slow_status_shows_the_clock_domain_and_the_drift() {
         ..FakeConfig::default()
     })
     .unwrap();
-    let listen = Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    };
-    let mut cfg = DaemonConfig::new(Arc::new(backend.clone()), listen, -10.0);
     // Debug builds run the DSP slower than real time; the lease is not under test.
-    cfg.lease_expiry = Duration::from_secs(60);
-    let h = Daemon::start(cfg).unwrap();
-    let ep = Endpoints {
-        ctrl: h.ctrl_endpoint().to_owned(),
-        data: h.data_endpoint().to_owned(),
-    };
-    let c = Client::connect(ClientConfig::new(ep.clone(), "drift-rig-test"))
-        .await
-        .unwrap();
-    c.wait_synced(Duration::from_secs(5)).await.unwrap();
+    let (_h, ep) = rig_on(Arc::new(backend.clone()), |cfg| {
+        cfg.lease_expiry = Duration::from_secs(60);
+    });
+    let c = client(&ep, "drift-rig-test").await;
     c.call(Command::SessionOpen {
         config: SessionConfig {
-            backend: None,
-            input_device: DeviceSelector::Default,
-            output_device: DeviceSelector::Default,
-            input_channels: vec![0, 1],
-            spare_inputs: 0,
-            output_channels: 2,
             sample_rate_hz: Some(48_000),
             buffer_frames: Some(256),
             loopback: Some(LoopbackRoute {
                 output: 0,
                 input: 0,
             }),
-            remote_inputs: Vec::new(),
-            link_offset: None,
+            ..session(vec![0, 1])
         },
     })
     .await

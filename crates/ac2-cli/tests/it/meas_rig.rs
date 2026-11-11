@@ -2,34 +2,14 @@
 //! open session does not capture it creates nothing, so a retry cannot make a duplicate.
 #![allow(clippy::unwrap_used)]
 
-use ac2_cli::{Cli, Out, run_reporting};
 use ac2_client::Endpoints;
-use ac2d::{BackendChoice, Daemon, DaemonConfig, Listen};
-use clap::Parser;
 use serde_json::Value;
 
+use super::common::{self, rig};
+
 async fn ac2(ep: &Endpoints, args: &[&str]) -> (u8, Value) {
-    let argv: Vec<&str> = [
-        "ac2",
-        "--json",
-        "--ctrl-endpoint",
-        &ep.ctrl,
-        "--data-endpoint",
-        &ep.data,
-    ]
-    .into_iter()
-    .chain(args.iter().copied())
-    .collect();
-    let cli = Cli::try_parse_from(argv).unwrap();
-    let (mut so, mut se) = (Vec::new(), Vec::new());
-    let code = {
-        let mut out = Out::new(cli.json, &mut so);
-        run_reporting(&cli, &mut out, &mut se).await
-    };
-    let so = String::from_utf8(so).unwrap();
-    let v = serde_json::from_str(&so)
-        .unwrap_or_else(|e| panic!("{args:?}: {e}: {so} {}", String::from_utf8_lossy(&se)));
-    (code, v)
+    let r = common::ac2(ep, true, args).await;
+    (r.code, r.json(args))
 }
 
 async fn ok(ep: &Endpoints, args: &[&str]) -> Value {
@@ -40,16 +20,7 @@ async fn ok(ep: &Endpoints, args: &[&str]) -> Value {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn meas_new_start_on_an_uncaptured_input_creates_nothing() {
-    let backend = ac2d::backend(BackendChoice::Fake).unwrap();
-    let listen = Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    };
-    let h = Daemon::start(DaemonConfig::new(backend, listen, -10.0)).unwrap();
-    let ep = Endpoints {
-        ctrl: h.ctrl_endpoint().to_owned(),
-        data: h.data_endpoint().to_owned(),
-    };
+    let (h, ep) = rig();
     let tf = |name: &'static str, start: bool| {
         let mut a = vec![
             "meas", "new", "tf", "--name", name, "--ref", "5", "--meas", "1",

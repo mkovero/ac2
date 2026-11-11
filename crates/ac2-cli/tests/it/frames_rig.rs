@@ -2,50 +2,13 @@
 //! spectrum is logged with its spacing, age and hop, then a summary that adds up.
 #![allow(clippy::unwrap_used)]
 
-use ac2_cli::{Cli, Out, run_reporting};
-use ac2_client::Endpoints;
-use ac2d::{BackendChoice, Daemon, DaemonConfig, Listen};
-use clap::Parser;
 use serde_json::Value;
 
-async fn ac2(ep: &Endpoints, args: &[&str]) -> (u8, String) {
-    let argv: Vec<&str> = [
-        "ac2",
-        "--json",
-        "--ctrl-endpoint",
-        &ep.ctrl,
-        "--data-endpoint",
-        &ep.data,
-    ]
-    .into_iter()
-    .chain(args.iter().copied())
-    .collect();
-    let cli = Cli::try_parse_from(argv).unwrap();
-    let (mut so, mut se) = (Vec::new(), Vec::new());
-    let code = {
-        let mut out = Out::new(cli.json, &mut so);
-        run_reporting(&cli, &mut out, &mut se).await
-    };
-    let text = format!(
-        "{}{}",
-        String::from_utf8(so).unwrap(),
-        String::from_utf8_lossy(&se)
-    );
-    (code, text)
-}
+use super::common::{rig, run_json as ac2};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn selftest_frames_logs_every_frame_of_a_spectrum() {
-    let backend = ac2d::backend(BackendChoice::Fake).unwrap();
-    let listen = Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    };
-    let h = Daemon::start(DaemonConfig::new(backend, listen, -10.0)).unwrap();
-    let ep = Endpoints {
-        ctrl: h.ctrl_endpoint().to_owned(),
-        data: h.data_endpoint().to_owned(),
-    };
+    let (_h, ep) = rig();
     for args in [
         &["session", "open", "--backend", "fake", "--in", "1-2"][..],
         &[

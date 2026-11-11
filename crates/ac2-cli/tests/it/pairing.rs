@@ -3,30 +3,12 @@
 //! silence, so the message names this client's fingerprint and where to authorize it).
 #![allow(clippy::unwrap_used)]
 
-use ac2_cli::{Cli, Out, run_reporting};
+use ac2_cli::Cli;
 use ac2_zmq::PublicKey;
 use ac2d::{BackendChoice, Daemon, DaemonConfig, Listen, NetworkSecurity};
 use clap::Parser;
 
-struct Run {
-    code: u8,
-    stdout: String,
-    stderr: String,
-}
-
-async fn ac2(args: &[&str]) -> Run {
-    let cli = Cli::try_parse_from(std::iter::once("ac2").chain(args.iter().copied())).unwrap();
-    let (mut so, mut se) = (Vec::new(), Vec::new());
-    let code = {
-        let mut out = Out::new(cli.json, &mut so);
-        run_reporting(&cli, &mut out, &mut se).await
-    };
-    Run {
-        code,
-        stdout: String::from_utf8(so).unwrap(),
-        stderr: String::from_utf8(se).unwrap(),
-    }
-}
+use super::common::cli as ac2;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn unpaired_client_is_told_to_pair() {

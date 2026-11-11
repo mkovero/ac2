@@ -5,35 +5,16 @@
 
 use std::net::UdpSocket;
 
-use ac2_cli::{Cli, Out, run_reporting};
 use ac2_client::Endpoints;
-use ac2d::{BackendChoice, Daemon, DaemonConfig, Listen};
-use clap::Parser;
 use serde_json::Value;
+
+use super::common::{self, fake_backend, rig_on};
 
 /// Exit code, stdout as JSON, stderr.
 pub(crate) async fn ac2(ep: &Endpoints, args: &[&str]) -> (u8, Value, String) {
-    let argv: Vec<&str> = [
-        "ac2",
-        "--json",
-        "--ctrl-endpoint",
-        &ep.ctrl,
-        "--data-endpoint",
-        &ep.data,
-    ]
-    .into_iter()
-    .chain(args.iter().copied())
-    .collect();
-    let cli = Cli::try_parse_from(argv).unwrap();
-    let (mut so, mut se) = (Vec::new(), Vec::new());
-    let code = {
-        let mut out = Out::new(cli.json, &mut so);
-        run_reporting(&cli, &mut out, &mut se).await
-    };
-    let so = String::from_utf8(so).unwrap();
-    let se = String::from_utf8(se).unwrap();
-    let v = serde_json::from_str(&so).unwrap_or_else(|e| panic!("{args:?}: {e}: {so} {se}"));
-    (code, v, se)
+    let r = common::ac2(ep, true, args).await;
+    let v = r.json(args);
+    (r.code, v, r.stderr)
 }
 
 pub(crate) async fn ok(ep: &Endpoints, args: &[&str]) -> (Value, String) {
@@ -44,20 +25,11 @@ pub(crate) async fn ok(ep: &Endpoints, args: &[&str]) -> (Value, String) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn rig_meter_cues_status_and_close_warning() {
-    let backend = ac2d::backend(BackendChoice::Fake).unwrap();
-    let listen = Listen::Local {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-    };
     let dir = tempfile::tempdir().unwrap();
-    let mut cfg = DaemonConfig::new(backend, listen, -10.0);
-    cfg.rig_settings = Some(dir.path().join("rig.json"));
-    cfg.rig_logs = Some(dir.path().join("rig-logs"));
-    let h = Daemon::start(cfg).unwrap();
-    let ep = Endpoints {
-        ctrl: h.ctrl_endpoint().to_owned(),
-        data: h.data_endpoint().to_owned(),
-    };
+    let (h, ep) = rig_on(fake_backend(), |cfg| {
+        cfg.rig_settings = Some(dir.path().join("rig.json"));
+        cfg.rig_logs = Some(dir.path().join("rig-logs"));
+    });
 
     ok(
         &ep,
