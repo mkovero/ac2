@@ -51,7 +51,10 @@ struct Sky {
     glow_gain: f32,
     // Blur taps: 9 (point taps) or 5 (bilinear fetches folding the same kernel).
     taps: u32,
-    _pad2: vec2<u32>,
+    // The newest row's absolute number, wrapped: row j back is newest_id − j.
+    newest_id: u32,
+    // How far a spike stands off its cell's centre at most, cell pitches.
+    scatter: f32,
 }
 
 @group(1) @binding(0) var<uniform> sky: Sky;
@@ -75,6 +78,30 @@ struct SpikeOut {
     @location(5) @interpolate(flat) light: f32,
     // The bloom pass's colour, LUT(level); unused by the spike pass.
     @location(6) @interpolate(flat) colour: vec3<f32>,
+}
+
+// The spike's offset from its cell's centre, cell pitches along x and z: the scene's
+// `spectrograph_3d::scatter` (and `mix32`), line for line. A lattice line whose vertical plane
+// holds the eye would stack all its spikes on one screen line, which max blending shows as
+// one spike beside a dark stripe; scattered, they leave the plane.
+
+fn mix32(v: u32) -> u32 {
+    var x = v;
+    x ^= x >> 16u;
+    x *= 0x7feb352du;
+    x ^= x >> 15u;
+    x *= 0x846ca68bu;
+    x ^= x >> 16u;
+    return x;
+}
+
+fn unit_scatter(v: u32) -> f32 {
+    return (f32(v >> 8u) * (1.0 / 16777216.0) * 2.0 - 1.0) * sky.scatter;
+}
+
+fn scatter(col: u32, row_id: u32) -> vec2<f32> {
+    let h = mix32(col ^ mix32(row_id));
+    return vec2<f32>(unit_scatter(h), unit_scatter(mix32(h)));
 }
 
 // World point to spike target pixels; w ≤ 0 never reaches here (the eye is outside the box).
@@ -116,8 +143,9 @@ fn spike(vi: u32, ii: u32, size: vec2<f32>, scale: f32) -> SpikeOut {
     let hw = sky.world.x;
     let depth = sky.world.y;
     let pitch = 2.0 * hw / f32(sky.cols);
-    let x = -hw + (f32(col) + 0.5) * pitch;
-    let z = (f32(j) + sky.phase) * depth / f32(sky.rows);
+    let off = scatter(col, sky.newest_id - j);
+    let x = -hw + (f32(col) + 0.5 + off.x) * pitch;
+    let z = (f32(j) + sky.phase + off.y) * depth / f32(sky.rows);
     let foot = vec3<f32>(x, 0.0, z);
     let f = to_target(foot, size);
     let t = to_target(vec3<f32>(x, sky.world.z * h, z), size);

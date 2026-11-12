@@ -86,6 +86,13 @@ Constants in `ac2-scene::spectrograph_3d`:
   bodies, and a higher foot (0.1, `t³`) only greys them. At the default camera the body of a
   tall spike reads lit even so, because the tips of the rows behind it land on it (rows ~1 px
   apart); that is the history standing behind the newest row, not the body's own light.
+- **Scatter.** Each spike stands off its cell's centre by up to ±0.35 pitch in x and z, a
+  hash of its column and its row's absolute number (so a row keeps its scatter as it moves
+  back). On the bare lattice any lattice line whose vertical plane holds the eye stacks all
+  its spikes onto one screen line, which max blending shows as one spike beside a dark
+  stripe that wanders with the camera; scattered, they leave that plane. Display only: a
+  spike still reads its column's frequency and its row's age, and the pick, the cursor and
+  the peak marks stand it where the shader does (`spike_foot`).
 - **Level to light.** Normalised level `n` (0 at the bottom of the level range, 1 at the
   top; `n ≤ 0` draws nothing) sets height `0.7·n`, colour `LUT(n)` and intensity
   `0.3 + 0.7·n`, so the grass is dim as well as low. Past the top the height keeps growing

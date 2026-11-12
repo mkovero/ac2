@@ -125,13 +125,30 @@ fn points_stand_on_the_sliding_newest_row_inside_the_plot() {
     let peaks = [peak(1000.0, -40.0), peak(100.0, -50.0)];
     let s = scene(&b, &peaks, &chrome(PlotChrome::Full), 1.0);
     assert_eq!(s.points.len(), 2);
-    let z = f64::from(b.1.phase()) * FLOOR_DEPTH / b.1.rows() as f64;
     assert!(b.1.phase() < 1.0, "a part-filled row");
+    let sk = &b.1;
+    let (lo, hi) = sk.span_hz().expect("a span");
+    // Each on its column's spike of the newest row, where in the cell the renderer stands it.
+    let foot = |hz: f64| {
+        let col = ((hz / lo).ln() / (hi / lo).ln() * sk.cols() as f64).floor() as usize;
+        let d = sk.drawn(0.0);
+        spike_foot(
+            sk.cols(),
+            sk.rows(),
+            (col, 0),
+            f64::from(d.phase),
+            d.newest_id,
+        )
+    };
     let inside = |p: [f32; 2]| {
         p[0] >= s.plot.x && p[0] <= s.plot.right() && p[1] >= s.plot.y && p[1] <= s.plot.bottom()
     };
     for p in &s.points {
-        assert!((p.world[2] - z).abs() < 1e-12, "{p:?}");
+        let f = foot(p.freq_hz);
+        assert!(
+            (p.world[0] - f[0]).abs() < 1e-12 && (p.world[2] - f[2]).abs() < 1e-12,
+            "{p:?}"
+        );
         assert!(inside(p.pos), "{p:?}");
     }
     // Below the cells' top, a point stands at its own level: −40 of −80 … 0.

@@ -410,3 +410,65 @@ fn a_spike_past_the_range_top_keeps_growing_up_to_the_cap() {
     let (c, k) = cell_at(sk, at.hz, at.before_s).expect("a cell");
     assert_eq!((c, k), (col, 0));
 }
+
+/// Each spike stands inside its own cell, offset by its column and row number alone: a row
+/// moving back (one row further, its number one older than the new newest) keeps its
+/// spikes' places in their cells.
+#[test]
+fn spikes_scatter_inside_their_cells_and_keep_it_as_rows_move_back() {
+    let (cols, rows) = (192, 97);
+    let (px, pz) = (2.0 * FLOOR_HALF_W / cols as f64, FLOOR_DEPTH / rows as f64);
+    let (mut sum, mut n) = ([0.0; 2], 0.0);
+    for newest_id in [0, 5, u32::MAX - 2] {
+        for j in 0..rows {
+            for col in 0..cols {
+                let f = spike_foot(cols, rows, (col, j), 0.5, newest_id);
+                let dx = (f[0] + FLOOR_HALF_W) / px - col as f64 - 0.5;
+                let dz = f[2] / pz - j as f64 - 0.5;
+                assert!(dx.abs() <= f64::from(SCATTER) + 1e-9, "{col} {j}: {dx}");
+                assert!(dz.abs() <= f64::from(SCATTER) + 1e-9, "{col} {j}: {dz}");
+                sum = [sum[0] + dx, sum[1] + dz];
+                n += 1.0;
+                let later = spike_foot(cols, rows, (col, j + 1), 0.5, newest_id.wrapping_add(1));
+                assert!((later[0] - f[0]).abs() < 1e-12);
+                assert!((later[2] - f[2] - pz).abs() < 1e-12);
+            }
+        }
+    }
+    // No lean: the offsets centre on the cell.
+    assert!(
+        sum[0].abs() / n < 0.01 && sum[1].abs() / n < 0.01,
+        "{sum:?}"
+    );
+}
+
+/// The orchard effect: from an eye straight over a column's line, every spike of that
+/// column lies in one vertical plane with the eye and would stand on one screen column,
+/// showing as one spike beside a dark stripe. Scattered, they spread over many.
+#[test]
+fn a_column_under_the_eye_no_longer_stacks_on_one_pixel_column() {
+    let (cols, rows) = (9, 48);
+    let vp = view_proj(Pose::from(SpectrumCamera::DEFAULT), 16.0 / 9.0);
+    // The middle column stands at x = 0, the eye's own x at yaw 0.
+    let col = cols / 2;
+    assert!(vp.eye[0].abs() < 1e-9, "{:?}", vp.eye);
+    let px = |p: V3| ((vp.ndc(p).expect("before the eye")[0] + 1.0) / 2.0 * 1600.0) as i64;
+    let mut lattice = std::collections::BTreeSet::new();
+    let mut scattered = std::collections::BTreeSet::new();
+    for j in 0..rows {
+        let z = (j as f64 + 0.5) * FLOOR_DEPTH / rows as f64;
+        lattice.insert(px([0.0, 0.0, z]));
+        lattice.insert(px([0.0, MAX_HEIGHT, z]));
+        let f = spike_foot(cols, rows, (col, j), 0.5, 1234);
+        scattered.insert(px(f));
+    }
+    assert!(
+        lattice.len() <= 2,
+        "the pose puts the column under the eye: {lattice:?}"
+    );
+    assert!(
+        scattered.len() >= rows / 2,
+        "{} pixel columns for {rows} spikes: {scattered:?}",
+        scattered.len()
+    );
+}

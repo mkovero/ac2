@@ -57,7 +57,8 @@ struct Uniform {
     bloom_gain: f32,
     glow_gain: f32,
     taps: u32,
-    _pad2: [u32; 2],
+    newest_id: u32,
+    scatter: f32,
 }
 
 #[derive(Debug)]
@@ -523,7 +524,8 @@ impl Skylines {
             // Set by the glow primitive, later in the scene; nothing glows without one.
             glow_gain: 0.0,
             taps: taps.unwrap_or(0),
-            _pad2: [0; 2],
+            newest_id: s.newest_id,
+            scatter: look.scatter,
         };
         queue.write_buffer(&g.uniform, 0, bytemuck::bytes_of(&uniform));
         g.instances = if s.data.iter().any(Option::is_some) {
@@ -721,8 +723,50 @@ mod tests {
     #[test]
     fn the_uniform_matches_the_shader_layout() {
         // The WGSL struct: a mat4, four vec4s, then 28 four-byte scalars (vec2s among them),
-        // the last two padding to a multiple of 16.
+        // ending on a multiple of 16.
         assert_eq!(std::mem::size_of::<Uniform>(), 64 + 4 * 16 + 28 * 4);
         assert_eq!(std::mem::offset_of!(Uniform, bloom_size), 208);
+    }
+
+    /// The shader scatters spikes as the scene does (`spectrograph_3d::scatter`): its
+    /// `mix32`, read back from the WGSL source (shifts and multipliers in order), agrees
+    /// with the scene's on sample inputs, at the scene's amplitude. That the shader places
+    /// spikes there is `tests/skyline.rs`' `a_spike_stands_where_the_scene_projects_it`.
+    #[test]
+    fn the_shader_scatter_is_the_scenes() {
+        use ac2_scene::spectrograph_3d::{LOOK, SCATTER, mix32};
+        let src = include_str!("shaders/skyline.wgsl");
+        let body = src
+            .split("fn mix32(v: u32) -> u32 {")
+            .nth(1)
+            .and_then(|b| b.split("return x;").next())
+            .expect("mix32 in skyline.wgsl");
+        // Each statement: `x ^= x >> N;` or `x *= 0x…u;`.
+        let steps: Vec<(bool, u32)> = body
+            .lines()
+            .map(str::trim)
+            .filter_map(|l| {
+                if let Some(n) = l.strip_prefix("x ^= x >> ") {
+                    Some((true, n.trim_end_matches("u;").parse().expect("shift")))
+                } else {
+                    let m = l.strip_prefix("x *= 0x")?.trim_end_matches("u;");
+                    Some((false, u32::from_str_radix(m, 16).expect("multiplier")))
+                }
+            })
+            .collect();
+        assert_eq!(steps.len(), 5, "{body}");
+        let wgsl = |v: u32| {
+            steps.iter().fold(v, |x, &(shift, k)| {
+                if shift {
+                    x ^ (x >> k)
+                } else {
+                    x.wrapping_mul(k)
+                }
+            })
+        };
+        for v in [0, 1, 2, 7, 191, 0x8000_0000, u32::MAX - 3, u32::MAX] {
+            assert_eq!(wgsl(v), mix32(v), "mix32({v})");
+        }
+        assert_eq!(LOOK.scatter, SCATTER);
     }
 }

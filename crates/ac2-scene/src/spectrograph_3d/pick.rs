@@ -14,6 +14,9 @@ pub struct PickFrame {
     pub plot: Rect,
     /// How far the front row stood back, rows ([`DrawnRows::phase`]).
     pub phase: f32,
+    /// The front row's absolute bucket number, wrapped ([`DrawnRows::newest_id`]): where in
+    /// its cell each spike stands ([`spike_foot`]).
+    pub newest_id: u32,
     /// The level range the heights span, as stored (the display offset taken off).
     pub range: [f64; 2],
     /// The spike target's resolution: how wide the spikes are drawn.
@@ -245,10 +248,8 @@ pub(super) fn spike(
     if n <= 0.0 {
         return None;
     }
-    let pitch = 2.0 * FLOOR_HALF_W / cols as f64;
-    let x = -FLOOR_HALF_W + (col as f64 + 0.5) * pitch;
-    let z = (j as f64 + f64::from(f.phase)) * FLOOR_DEPTH / rows as f64;
-    Some(([x, 0.0, z], [x, MAX_HEIGHT * n, z]))
+    let foot = spike_foot(cols, rows, (col, j), f64::from(f.phase), f.newest_id);
+    Some((foot, [foot[0], MAX_HEIGHT * n, foot[2]]))
 }
 
 /// Distance from `p` to `q`, pixels.

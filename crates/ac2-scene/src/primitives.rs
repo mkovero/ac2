@@ -472,6 +472,10 @@ pub struct SkylineLook {
     /// its colour, summed at `bloom_gain` into a quarter-resolution target.
     pub bloom_threshold: f32,
     pub bloom_gain: f32,
+    /// How far each spike stands off its cell's centre at most, cell pitches
+    /// ([`crate::spectrograph_3d::scatter`] scaled to this); the scene's spikes stand at
+    /// [`crate::spectrograph_3d::SCATTER`], and its pick and marks read them there.
+    pub scatter: f32,
 }
 
 /// A 3D spectrograph's spikes: a ring of `rows` rows of `cols` levels, each cell one
@@ -489,6 +493,11 @@ pub struct Skyline3d {
     pub rows: u32,
     /// Ring position of the newest row; the row `j` places before it is `j` rows older.
     pub newest: u32,
+    /// The newest row's absolute number, wrapped to 32 bits; row `j` back is
+    /// `newest_id − j`. Each spike stands off its cell's centre by
+    /// [`crate::spectrograph_3d::scatter`] of its column and row number, so a row keeps its
+    /// scatter as it moves back ([`crate::spectrograph_3d::spike_foot`]).
+    pub newest_id: u32,
     /// How far back the newest row stands, in rows, in [0,
     /// [`crate::spectrograph_3d::MAX_PHASE`]]: the newest row's fill fraction at rest, more
     /// or less as the time axis scrolls on between frames. Row `j` (0 = newest) stands at

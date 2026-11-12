@@ -153,12 +153,7 @@ fn ends(
     pj: &Projector,
 ) -> (Option<[f32; 2]>, Option<[f32; 2]>) {
     let (cols, rows) = (sk.cols(), sk.rows());
-    let pitch = 2.0 * FLOOR_HALF_W / cols as f64;
-    let foot = [
-        -FLOOR_HALF_W + (col as f64 + 0.5) * pitch,
-        0.0,
-        (j as f64 + f64::from(f.phase)) * FLOOR_DEPTH / rows as f64,
-    ];
+    let foot = spike_foot(cols, rows, (col, j), f64::from(f.phase), f.newest_id);
     let (foot, top) = spike(f, cols, rows, col, j, v).unwrap_or((foot, foot));
     (pj.point(foot), pj.point(top))
 }

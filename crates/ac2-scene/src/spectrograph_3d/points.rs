@@ -24,7 +24,7 @@ pub struct PeakPoint3d {
 const BOX_HALF: f32 = 4.0;
 
 /// The points of `peaks` (loudest first, levels as stored) of a curve offset by `offset_db`
-/// and read in `unit`, on skyline `sk` (its newest row `front` rows back) within level range
+/// and read in `unit`, on skyline `sk` (its rows drawn as `front`) within level range
 /// `range`. A peak outside the frequency span, under the level range, over a cell the newest
 /// row has no level in, or behind the eye gets none; one above the range top stands on its
 /// spike, which keeps growing there. Its height is its level clamped to its cell's spike on
@@ -34,7 +34,7 @@ pub(super) fn peak_points(
     c: &mut Canvas,
     pj: &Projector,
     sk: &Skyline,
-    front: f64,
+    front: DrawnRows,
     peaks: &[Peak],
     offset_db: f64,
     unit: &str,
@@ -49,10 +49,17 @@ pub(super) fn peak_points(
     if cols == 0 || sk.rows() == 0 || !range.is_valid() {
         return Vec::new();
     }
-    let pitch = 2.0 * FLOOR_HALF_W / cols as f64;
     // The newest row glides back with the rows ([`Skyline::drawn`]), as the renderer
-    // places it: `front` rows from the front edge.
-    let z = front * FLOOR_DEPTH / sk.rows() as f64;
+    // places it, each spike where in its cell the renderer stands it.
+    let foot = |col| {
+        spike_foot(
+            cols,
+            sk.rows(),
+            (col, 0),
+            f64::from(front.phase),
+            front.newest_id,
+        )
+    };
     let mut points = Vec::new();
     for p in peaks {
         let level = p.level + offset_db;
@@ -66,11 +73,8 @@ pub(super) fn peak_points(
         };
         let shown = level.min(f64::from(top) + offset_db);
         let n = super::spike_height(shown, range.lo, range.hi);
-        let world = [
-            -FLOOR_HALF_W + (col as f64 + 0.5) * pitch,
-            MAX_HEIGHT * n,
-            z,
-        ];
+        let [x, _, z] = foot(col);
+        let world = [x, MAX_HEIGHT * n, z];
         let Some(pos) = pj.point(world).filter(|q| pj.inside(*q)) else {
             continue;
         };

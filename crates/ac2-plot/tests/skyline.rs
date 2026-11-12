@@ -54,6 +54,8 @@ struct Sky {
     cam: SpectrumCamera,
     range: [f32; 2],
     phase: f32,
+    /// The newest row's number: where in their cells the spikes stand.
+    newest_id: u32,
     look: SkylineLook,
     /// Adds the bloom, as the scene does for a tier that has it.
     glow: bool,
@@ -70,6 +72,7 @@ impl Sky {
             cam: SpectrumCamera::DEFAULT,
             range: [-100.0, 0.0],
             phase: 1.0,
+            newest_id: 0,
             look: LOOK,
             glow: false,
         }
@@ -85,6 +88,7 @@ impl Sky {
             cols: self.cols,
             rows: self.rows,
             newest: 0,
+            newest_id: self.newest_id,
             phase: self.phase,
             view_proj: vp.gpu(),
             eye: vp.eye.map(|v| v as f32),
@@ -155,45 +159,49 @@ fn a_spike_stands_where_the_scene_projects_it() {
         return;
     };
     let (cols, rows) = (8, 4);
-    let s = Sky::new(cols, rows, lone(cols, rows, 5, 0, 0.0));
-    let img = draw(&s);
-    let vp = view(s.cam);
-    let x = -FLOOR_HALF_W + 5.5 * 2.0 * FLOOR_HALF_W / f64::from(cols);
-    // Row 0 at phase 1 stands one row back.
-    let z = FLOOR_DEPTH / f64::from(rows);
-    let foot = pixel(&vp, [x, 0.0, z]);
-    let tip = pixel(&vp, [x, MAX_HEIGHT, z]);
-    let near_tip = [
-        foot[0] + 0.97 * (tip[0] - foot[0]),
-        foot[1] + 0.97 * (tip[1] - foot[1]),
-    ];
-    assert!(
-        lit(img.pixel(near_tip[0] as u32, near_tip[1] as u32)),
-        "nothing at {near_tip:?} (foot {foot:?}, tip {tip:?})"
-    );
-    // Everything lit lies on the segment, within its width and a pixel of coverage.
-    let (dx, dy) = (tip[0] - foot[0], tip[1] - foot[1]);
-    let len = dx.hypot(dy);
-    let mut n = 0;
-    for py in 0..H as u32 {
-        for px in 0..W as u32 {
-            if !lit(img.pixel(px, py)) {
-                continue;
+    // Scattered in its cell by its column and row number (`spike_foot`), a row number
+    // wrapping past zero among them: the shader's scatter is the scene's.
+    for (c, j, newest_id) in [(5, 0, 0), (2, 3, 1), (6, 1, 0x8000_0000), (1, 2, 977)] {
+        let mut s = Sky::new(cols, rows, lone(cols, rows, c, j, 0.0));
+        s.newest_id = newest_id;
+        let img = draw(&s);
+        let vp = view(s.cam);
+        let at = (c as usize, j as usize);
+        let foot = spectrograph_3d::spike_foot(cols as usize, rows as usize, at, 1.0, newest_id);
+        let tip = pixel(&vp, [foot[0], MAX_HEIGHT, foot[2]]);
+        let foot = pixel(&vp, foot);
+        let near_tip = [
+            foot[0] + 0.97 * (tip[0] - foot[0]),
+            foot[1] + 0.97 * (tip[1] - foot[1]),
+        ];
+        assert!(
+            lit(img.pixel(near_tip[0] as u32, near_tip[1] as u32)),
+            "nothing at {near_tip:?} (foot {foot:?}, tip {tip:?})"
+        );
+        // Everything lit lies on the segment, within its width and a pixel of coverage.
+        let (dx, dy) = (tip[0] - foot[0], tip[1] - foot[1]);
+        let len = dx.hypot(dy);
+        let mut n = 0;
+        for py in 0..H as u32 {
+            for px in 0..W as u32 {
+                if !lit(img.pixel(px, py)) {
+                    continue;
+                }
+                n += 1;
+                let (cx, cy) = (f64::from(px) + 0.5 - foot[0], f64::from(py) + 0.5 - foot[1]);
+                let along = (cx * dx + cy * dy) / len;
+                let across = (cx * dy - cy * dx).abs() / len;
+                assert!(
+                    (-1.0..=len + 1.0).contains(&along) && across <= 2.5,
+                    "{at:?}: lit pixel ({px},{py}) off the spike: along {along:.1}, across {across:.1}"
+                );
             }
-            n += 1;
-            let (cx, cy) = (f64::from(px) + 0.5 - foot[0], f64::from(py) + 0.5 - foot[1]);
-            let along = (cx * dx + cy * dy) / len;
-            let across = (cx * dy - cy * dx).abs() / len;
-            assert!(
-                (-1.0..=len + 1.0).contains(&along) && across <= 2.5,
-                "lit pixel ({px},{py}) off the spike: along {along:.1}, across {across:.1}"
-            );
         }
+        assert!(
+            f64::from(n) > len * 0.8,
+            "{n} lit pixels for a {len:.0} px spike"
+        );
     }
-    assert!(
-        f64::from(n) > len * 0.8,
-        "{n} lit pixels for a {len:.0} px spike"
-    );
 }
 
 #[test]
@@ -202,8 +210,16 @@ fn overlapping_spikes_keep_the_brighter_never_the_sum() {
         return;
     };
     let (cols, rows) = (4, 64);
-    let a = draw(&Sky::new(cols, rows, lone(cols, rows, 2, 10, -10.0)));
-    let b = draw(&Sky::new(cols, rows, lone(cols, rows, 2, 11, -10.0)));
+    // On the lattice, so the two stand in one line.
+    let sky = |data| Sky {
+        look: SkylineLook {
+            scatter: 0.0,
+            ..LOOK
+        },
+        ..Sky::new(cols, rows, data)
+    };
+    let a = draw(&sky(lone(cols, rows, 2, 10, -10.0)));
+    let b = draw(&sky(lone(cols, rows, 2, 11, -10.0)));
     let mut both_rows = vec![None; rows as usize];
     let r = |v: f32| -> Vec<f32> {
         (0..cols)
@@ -212,7 +228,7 @@ fn overlapping_spikes_keep_the_brighter_never_the_sum() {
     };
     both_rows[(rows - 10) as usize] = Some(Arc::from(r(-10.0)));
     both_rows[(rows - 11) as usize] = Some(Arc::from(r(-10.0)));
-    let both = draw(&Sky::new(cols, rows, both_rows));
+    let both = draw(&sky(both_rows));
     let mut overlap = 0;
     let mut summed_would_differ = 0;
     for y in 0..H as u32 {
@@ -293,6 +309,8 @@ fn a_row_of_spikes_at_a_near_integer_pitch_leaves_no_dark_columns() {
     let mut s = Sky::new(cols, rows, data);
     s.cam = camera(0, 75);
     s.look.width_px = [1.0, 1.0];
+    // On the lattice: scattered, one row has gaps of its own.
+    s.look.scatter = 0.0;
     let img = draw(&s);
     let lit_cols: Vec<u64> = (0..W as u32)
         .map(|x| (0..H as u32).map(|y| u64::from(img.pixel(x, y)[1])).sum())
@@ -659,6 +677,7 @@ fn parity_renders() {
                     cols,
                     rows,
                     newest: 0,
+                    newest_id: 0,
                     phase: 1e-3,
                     view_proj: vp.gpu(),
                     eye: vp.eye.map(|v| v as f32),

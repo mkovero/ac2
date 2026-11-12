@@ -64,6 +64,57 @@ pub fn spike_height(v: f64, lo: f64, hi: f64) -> f64 {
     ((v - lo) / (hi - lo)).clamp(0.0, HEIGHT_CAP)
 }
 
+/// How far a spike stands off its cell's centre at most, in cell pitches along each axis.
+/// On a regular lattice every lattice line whose vertical plane holds the eye projects all
+/// its spikes onto one screen line; max blending shows that stack as one spike, so the line
+/// reads as a dark stripe that wanders with the camera. Scattered within the cell the
+/// spikes leave every such plane; under half a pitch keeps each strictly inside its cell.
+pub const SCATTER: f32 = 0.35;
+
+/// A full-avalanche 32-bit mix (Wellons' lowbias32): neighbouring cells get unrelated
+/// offsets, so the scatter is white within each cell (a stratified, blue-ish pattern) and
+/// lays no new lattice. `skyline.wgsl` has the same function.
+pub const fn mix32(mut x: u32) -> u32 {
+    x ^= x >> 16;
+    x = x.wrapping_mul(0x7feb_352d);
+    x ^= x >> 15;
+    x = x.wrapping_mul(0x846c_a68b);
+    x ^= x >> 16;
+    x
+}
+
+/// The spike of column `col` on row `row_id` (the row's absolute bucket number, wrapped to
+/// 32 bits: a row keeps its offsets as it moves back): its offset from the cell's centre
+/// along x and z, cell pitches, each within ±[`SCATTER`]. Display only: the spike still
+/// reads its column's frequency and its row's age. `skyline.wgsl` computes the same at the
+/// look's `scatter` ([`LOOK`]), every step exact in f32 but the last multiply, which IEEE
+/// rounds alike everywhere.
+pub fn scatter(col: u32, row_id: u32) -> [f32; 2] {
+    let h = mix32(col ^ mix32(row_id));
+    let u = |v: u32| ((v >> 8) as f32 * (1.0 / 16_777_216.0) * 2.0 - 1.0) * SCATTER;
+    [u(h), u(mix32(h))]
+}
+
+/// Where the spike of column `col`, `j` rows back, stands on the floor, in a skyline of
+/// `cols` columns and `rows` ring rows whose newest row stands `phase` rows back and is
+/// row `newest_id` ([`DrawnRows`]): its cell's centre moved by [`scatter`]. The renderer,
+/// the pick, the cursor and the peak marks all stand spikes here.
+pub fn spike_foot(
+    cols: usize,
+    rows: usize,
+    (col, j): (usize, usize),
+    phase: f64,
+    newest_id: u32,
+) -> V3 {
+    let [dx, dz] = scatter(col as u32, newest_id.wrapping_sub(j as u32));
+    let pitch = 2.0 * FLOOR_HALF_W / cols.max(1) as f64;
+    [
+        -FLOOR_HALF_W + (col as f64 + 0.5 + f64::from(dx)) * pitch,
+        0.0,
+        (j as f64 + phase + f64::from(dz)) * FLOOR_DEPTH / rows.max(1) as f64,
+    ]
+}
+
 /// The spike look. Set on synthetic room-like data (a look spike, `docs/design`); to be
 /// retuned on a rig recording, here and nowhere else.
 pub const LOOK: SkylineLook = SkylineLook {
@@ -81,6 +132,7 @@ pub const LOOK: SkylineLook = SkylineLook {
     // the threshold feeds no bloom, so only the tips glow.
     bloom_threshold: 0.25,
     bloom_gain: 0.12,
+    scatter: SCATTER,
 };
 
 /// The bloom added over the pane: strong for ice (the holographic look), weaker for the
@@ -320,6 +372,12 @@ impl Skyline {
         &self.ring
     }
 
+    /// The newest row's absolute bucket number, wrapped to 32 bits: row `j` back is
+    /// `newest_id − j` ([`spike_foot`]).
+    pub fn newest_id(&self) -> u32 {
+        self.newest.map_or(0, |n| (n / self.k.max(1)) as u32)
+    }
+
     /// Ring position of the newest row.
     pub fn newest(&self) -> usize {
         self.newest.map_or(0, |n| {
@@ -354,6 +412,7 @@ impl Skyline {
         let p = f64::from(self.phase()) + lead / self.k.max(1) as f64;
         DrawnRows {
             newest: self.newest(),
+            newest_id: self.newest_id(),
             phase: p.clamp(0.0, MAX_PHASE) as f32,
         }
     }
@@ -396,6 +455,8 @@ pub const MAX_PHASE: f64 = 1.0 + crate::spectrograph::LEAD_SLOTS.1;
 pub struct DrawnRows {
     /// Ring position of the front (newest) row.
     pub newest: usize,
+    /// Its absolute bucket number, wrapped ([`Skyline::newest_id`]).
+    pub newest_id: u32,
     /// How far the front row stands back, in rows, in [0, [`MAX_PHASE`]]: the renderer's
     /// phase.
     pub phase: f32,
