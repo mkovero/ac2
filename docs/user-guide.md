@@ -1061,7 +1061,7 @@ off, an automatic range stays where it was framed.
 - **Up quickly**: once the loudest part of the curves (20 Hz – 20 kHz, offsets included,
   live and compared curves alike) comes within a tenth of the range of the top at any
   moment in the last 3 s, the axis steps up so it has a fifth of the range to spare. Every
-  fit (the first frame, **Shift+Home**, a restarted run, a widened range) leaves that same
+  fit (the first frame, **Shift+Home**, a widened range) leaves that same
   fifth above the loudest part. **Down slowly**: only after 4 minutes in which it
   never came near the top, and at most once a minute, so a pause between songs moves
   nothing. A range that cannot hold the content (a spectrum spread over more than 80 % of
@@ -1071,11 +1071,13 @@ off, an automatic range stays where it was framed.
   change. A move changes nothing in `ui.toml` or the layout.
 - **Hands off**: nothing moves while a pointer is down on the pane or for 30 s after a key
   or a touch on it; what was due happens after.
+- **Stopped holds**: while a pane's measurement is stopped (**S**) its range stays put, in
+  every view (the stopped time is no silence); started again it follows on from there.
 - **A range set by hand never follows** (zoom, pan, **Ctrl+Home**). **Shift+Home** fits
   the axis and makes it automatic again.
 - **Several panes** of one unit (dBFS or dB SPL) on screen share one following range under
-  Settings › Display › *Shared scale*, framed over all of them when one joins, on
-  **Shift+Home** on any of them, and when a run restarts. Hands on one of
+  Settings › Display › *Shared scale*, framed over all of them when one joins (a stopped one rejoins
+  when started) and on **Shift+Home** on any of them. Hands on one of
   them holds the move for all.
 - A kiosk (no keyboard) keeps its panels readable this way: leave its spectrum ranges
   automatic (the default) and they follow on their own.

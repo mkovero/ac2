@@ -185,11 +185,13 @@ fn an_operator_level_range_is_not_refitted() {
     );
 }
 
-/// A pane framed automatically frames a measurement's new run again on its first new
-/// frame (a new run is often a new signal); a stop alone, or the old frame, does not.
+/// With following off, a pane framed automatically frames a measurement's new run again
+/// on its first new frame (a new run is often a new signal); a stop alone, or the old
+/// frame, does not. (A following range resumes from where it was held: `follow.rs`.)
 #[test]
 fn a_started_spectrum_refits_an_automatically_framed_pane() {
     let mut t = T::new();
+    t.st.prefs.level_follow = false;
     spec_frame(&mut t, 2, vec![0.0, -138.0, -120.0, -95.0, 0.0]);
     let fit = t.level(PaneKind::Spectrum);
     t.conn(with_running(2, false));

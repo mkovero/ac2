@@ -463,8 +463,9 @@ impl AppState {
     }
 
     /// A started spectrum / RTA measurement's first new frame is in: panes framed
-    /// automatically on its last run frame it again. A new run is often a new signal
-    /// (another source, another gain); a range the operator set stays.
+    /// automatically on its last run frame it again, unless their range follows the content
+    /// (that follows the new run from the range held over the stop). A new run is often a
+    /// new signal (another source, another gain); a range the operator set stays.
     fn rearm_started_spectra(&mut self) {
         let arrived: Vec<_> = self
             .rig
@@ -482,6 +483,12 @@ impl AppState {
             .collect();
         for id in arrived {
             self.rig.folded.spectrum_fit.remove(&id);
+            // A following range resumes from where the stop held it: the run's first frames
+            // (an average filling up) are no level to frame, and following moves it once
+            // the content says so.
+            if self.prefs.level_follow {
+                continue;
+            }
             let Some(name) = self.meas(id).map(|m| m.config.name.clone()) else {
                 continue;
             };

@@ -181,42 +181,70 @@ fn a_follow_move_sends_no_layout_and_writes_nothing() {
     assert_eq!(t.st.prefs.to_toml(), toml);
 }
 
-/// A run restarted refits an automatic range once; the old run's frames move nothing after.
+/// A stopped measurement holds its pane's range, in every view: the time without its
+/// frames (and any frame still drawn while stopped) is no silence. Started again, the range
+/// follows the new run from where it was held: its first frames do not frame it, a lasting
+/// louder level moves it up as before.
 #[test]
-fn a_restarted_run_refits_once_without_a_counter_move() {
-    let mut t = T::new();
-    let mut c = Clock::new();
-    c.frame(&mut t, &[(2, -30.0)]);
-    let p = sp(&t);
-    c.run(&mut t, 2.5, &[(2, -5.0)]);
-    t.conn(with_running(2, false));
-    t.conn(with_running(2, true));
-    c.frame(&mut t, &[(2, -60.0)]);
-    let refit = range(&t, p);
-    assert_eq!(refit, Range::new(-110.0, -40.0));
-    c.run(&mut t, 10.0, &[(2, -60.0)]);
-    assert_eq!(range(&t, p), refit);
+fn a_stopped_run_holds_its_range_and_a_start_follows_from_it() {
+    use ac2_scene::view::SpectrumMode;
+    for mode in [
+        SpectrumMode::Spectrum,
+        SpectrumMode::Split,
+        SpectrumMode::Spectrograph,
+        SpectrumMode::Spectrograph3d,
+    ] {
+        let mut t = T::new();
+        let p = sp(&t);
+        if let Some(v) = t.st.layout.view_mut(p) {
+            v.modes.spectrum = mode;
+        }
+        let mut c = Clock::new();
+        c.frame(&mut t, &[(2, -30.0)]);
+        c.run(&mut t, 5.0, &[(2, -30.0)]);
+        let held = range(&t, p);
+        assert_eq!(held, Range::new(-80.0, -10.0), "{mode:?}");
+        t.conn(with_running(2, false));
+        // Minutes stopped: ticks without frames, then the last frames redrawn low.
+        for _ in 0..3000 {
+            c.now += 0.1;
+            t.tick(c.now);
+        }
+        c.run(&mut t, 300.0, &[(2, -95.0)]);
+        assert_eq!(range(&t, p), held, "{mode:?}: moved while stopped");
+        t.conn(with_running(2, true));
+        // The new run's first frames are low (its average filling): no jump down.
+        c.run(&mut t, 2.0, &[(2, -95.0)]);
+        assert_eq!(range(&t, p), held, "{mode:?}: a start framed it");
+        c.run(&mut t, 3.5, &[(2, -10.0)]);
+        settle(&mut c, &mut t, &[(2, -10.0)]);
+        assert_eq!(range(&t, p), Range::new(-60.0, 10.0), "{mode:?}");
+    }
 }
 
-/// Shift+Home makes the slot automatic: a run restarted afterwards refits it (one flag
-/// says so for both).
+/// A range the operator set stays through a stop and a start, and Ctrl+I while stopped
+/// still zooms it.
 #[test]
-fn a_fit_then_a_restart_refits() {
+fn a_hand_set_range_works_while_stopped() {
     let mut t = T::new();
     let mut c = Clock::new();
     c.frame(&mut t, &[(2, -30.0)]);
     let p = sp(&t);
+    let fit = range(&t, p);
+    t.conn(with_running(2, false));
+    c.now += 40.0;
+    t.tick(c.now);
     t.st.apply(Msg::FocusPane(p), &t.keys);
     t.key("Ctrl+I");
-    t.key("Shift+Home");
-    t.conn(with_running(2, false));
+    let zoomed = range(&t, p);
+    assert!(zoomed.span() < fit.span(), "{zoomed:?}");
+    c.run(&mut t, 60.0, &[(2, -95.0)]);
     t.conn(with_running(2, true));
-    c.frame(&mut t, &[(2, -60.0)]);
-    assert_eq!(range(&t, p), Range::new(-110.0, -40.0));
+    c.run(&mut t, 60.0, &[(2, -10.0)]);
+    assert_eq!(range(&t, p), zoomed);
 }
 
-/// A layout received without a range makes the slot automatic, for a restarted run and the
-/// follower alike.
+/// A layout received without a range makes the slot automatic: the follower moves it.
 #[test]
 fn a_layout_without_a_range_makes_the_slot_automatic() {
     let mut t = T::new();
@@ -225,15 +253,12 @@ fn a_layout_without_a_range_makes_the_slot_automatic() {
     let p = sp(&t);
     t.st.apply(Msg::FocusPane(p), &t.keys);
     t.key("Ctrl+I");
+    let zoomed = range(&t, p);
     t.st.set_operator_levels(p, &ac2_proto::model::layout::LayoutLevels::default());
-    t.conn(with_running(2, false));
-    t.conn(with_running(2, true));
-    c.frame(&mut t, &[(2, -60.0)]);
-    assert_eq!(range(&t, p), Range::new(-110.0, -40.0), "refitted");
-    c.run(&mut t, HANDS_OFF_S, &[(2, -60.0)]);
-    c.run(&mut t, 4.0, &[(2, -40.0)]);
-    settle(&mut c, &mut t, &[(2, -40.0)]);
-    assert!(range(&t, p).hi > -50.0, "followed: {:?}", range(&t, p));
+    c.run(&mut t, HANDS_OFF_S, &[(2, -30.0)]);
+    c.run(&mut t, 4.0, &[(2, 0.0)]);
+    settle(&mut c, &mut t, &[(2, 0.0)]);
+    assert!(range(&t, p).hi > zoomed.hi, "followed: {:?}", range(&t, p));
 }
 
 /// A step during a drag on the pane moves only once the hands-off time after the drag has

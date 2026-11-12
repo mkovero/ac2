@@ -64,6 +64,9 @@ struct Feed {
     fresh: bool,
     /// A curve's rig restarted its session or daemon: the history so far is another signal's.
     reset: bool,
+    /// The pane's measurement is stopped: no frame of it is a level now, and the time
+    /// without frames is no silence, so the pane leaves its group and its range holds.
+    stopped: bool,
 }
 
 /// Which panes share a follower: one per unit when same-unit panes share a scale, else one
@@ -144,6 +147,13 @@ impl AppState {
                 self.level_axes.level_follow.feeds.remove(&pane);
                 continue;
             }
+            if self.pane_meas(pane).is_some_and(|m| !m.running) {
+                if let Some(feed) = self.level_axes.level_follow.feeds.get_mut(&pane) {
+                    feed.stopped = true;
+                    feed.fresh = false;
+                }
+                continue;
+            }
             let scale = crate::scenes::spectrum_scale(self, pane);
             let shown = self.pane_meas(pane);
             let mut curves = BTreeMap::new();
@@ -188,7 +198,9 @@ impl AppState {
                     at: now,
                     fresh: false,
                     reset: false,
+                    stopped: false,
                 });
+            feed.stopped = false;
             let mut fresh = false;
             for (id, (epoch, inc, seq)) in curves {
                 match feed.curves.insert(id, (epoch, inc, seq)) {
@@ -336,7 +348,7 @@ impl AppState {
             for (p, feed) in &self.level_axes.level_follow.feeds {
                 let auto = LevelSlot::of(PaneKind::Spectrum, feed.scale)
                     .is_some_and(|s| !self.level_axes.level_set.contains(&(*p, s)));
-                if !auto || feed.sample.is_none() {
+                if !auto || feed.sample.is_none() || feed.stopped {
                     continue;
                 }
                 let spl = feed.scale == LevelScale::DbSpl;
