@@ -262,8 +262,9 @@ const CAMERA: [(CommandId, &str); 3] = [
     (CommandId::ZoomIn, "Dolly in/out"),
     (CommandId::ResetView, "Reset camera"),
 ];
-const CAMERA_MOUSE: [(&str, &str); 3] = [
+const CAMERA_MOUSE: [(&str, &str); 4] = [
     ("Drag", "Orbit and tilt"),
+    ("Click\nTap", "Cursor on the spike"),
     ("Wheel\nPinch", "Dolly"),
     // The axes cover the skyline, so they come on demand; a touch screen has no hover.
     ("Hover\nTouch", "Show the axes"),

@@ -12,11 +12,13 @@ pub fn spectrum_scene(
     size: Viewport,
 ) -> SpectrumScene {
     let right = crate::freq_column::right(MARGINS.right, view);
-    spectrum_scene_in(traces, status, view, theme, size, right)
+    spectrum_scene_in(traces, status, view, theme, size, right, None)
 }
 
 /// [`spectrum_scene`] with `right` logical pixels right of the plot: room for what a
-/// composed view draws beside a plot under it, so the two frequency axes line up.
+/// composed view draws beside a plot under it, so the two frequency axes line up; and
+/// `history`, the spectrograph's cursor line under it, on the cursor values' plate (one
+/// cursor, one plate).
 pub(crate) fn spectrum_scene_in(
     traces: &[SpectrumTrace<'_>],
     status: &Status,
@@ -24,6 +26,7 @@ pub(crate) fn spectrum_scene_in(
     theme: &Theme,
     size: Viewport,
     right: f32,
+    history: Option<&str>,
 ) -> SpectrumScene {
     let mut c = Canvas::new(size, theme);
     let plot_w = (size.width - MARGINS.left - right).max(1.0);
@@ -308,54 +311,31 @@ pub(crate) fn spectrum_scene_in(
     let mut readout_y = plot.y + 22.0;
     let mark = cursor.as_ref().and_then(|_| mark::readout(traces, view));
     let mut readout_box = None;
-    if let Some(cur) = &cursor {
-        canvas::vline(&mut c.overlay, plot, xm.to_px(cur.freq_hz), theme.cursor);
-        let mut lines = vec![cur.freq.clone()];
-        lines.extend(cur.rows.iter().map(|(n, v)| format!("{n}  {v}")));
+    // Without a curve to read, the history's line under it still has the cursor's plate.
+    let at = cursor
+        .as_ref()
+        .map(|cur| (cur.freq_hz, cur.freq.clone()))
+        .or_else(|| {
+            cursor_hz
+                .filter(|_| history.is_some())
+                .map(|hz| (hz, format::freq_readout(hz)))
+        });
+    if let Some((hz, freq)) = at {
+        canvas::vline(&mut c.overlay, plot, xm.to_px(hz), theme.cursor);
+        let mut lines = vec![freq];
+        if let Some(cur) = &cursor {
+            lines.extend(cur.rows.iter().map(|(n, v)| format!("{n}  {v}")));
+        }
+        lines.extend(history.map(str::to_string));
         if let Some(m) = &mark {
             let x = xm.to_px(m.freq_hz);
             canvas::vline(&mut c.overlay, plot, x, canvas::mark_stroke(theme));
             lines.extend(m.lines.iter().cloned());
         }
-        let place = &view.plates.readout;
-        let s = place.scale();
-        let m = crate::plate::Metrics::new(theme, s);
-        let (w, h) = m.size(&lines);
-        // Placed by the scene: its text where an unplated readout would start, under the
-        // unit and the caption at the plot's top.
-        let rect = match place.at {
-            Some(at) => crate::plate::PlatePlace::rect_at(at, plot, w, h),
-            None => Rect::new(
-                plot.right() - crate::legend::INSET - w,
-                plot.y + 22.0 - m.pad_y,
-                w,
-                h,
-            ),
-        };
-        if place.at.is_none() {
-            readout_y = rect.bottom() + GAP_EM * font;
-        }
-        let hover = view
-            .plate_hover
-            .filter(|h| h.kind == crate::plate::PlateKind::Readout);
-        let lines: Vec<(String, Color)> = lines.into_iter().map(|l| (l, theme.text)).collect();
-        crate::plate::draw_lines(
-            &mut c.overlay,
-            rect,
-            &lines,
-            HAlign::Right,
-            m,
-            true,
-            hover,
-            plot,
-            theme,
-        );
-        readout_box = Some(crate::plate::PlateBox::new(
-            crate::plate::PlateKind::Readout,
-            plot,
-            rect,
-            s,
-        ));
+        // Under the unit and the caption at the plot's top.
+        let (b, under) = readout_plate(&mut c.overlay, lines, plot, plot.y + 22.0, view, theme);
+        readout_y = under.unwrap_or(readout_y);
+        readout_box = Some(b);
     }
     let marks_on = view.chrome.peak_marks();
     let peaks = tracked_peaks(traces, &xm, Some(&ym), plot, marks_on);
@@ -433,6 +413,50 @@ pub(crate) const LEGEND_TOP: f32 = 18.0;
 
 /// The gap left between the cursor values' plate and the peak list under it, in ems.
 const GAP_EM: f32 = 0.5;
+
+/// Draws the cursor values `lines` on their plate. Placed by the scene, it hangs from the
+/// plot's right edge with its text's top at `top`; dragged, it sits where it was dropped.
+/// Its box, and where a plate placed under it starts (`None` when dragged).
+pub(crate) fn readout_plate(
+    layer: &mut crate::primitives::Layer,
+    lines: Vec<String>,
+    plot: Rect,
+    top: f32,
+    view: &ViewState,
+    theme: &Theme,
+) -> (crate::plate::PlateBox, Option<f32>) {
+    let place = &view.plates.readout;
+    let s = place.scale();
+    let m = crate::plate::Metrics::new(theme, s);
+    let (w, h) = m.size(&lines);
+    let rect = match place.at {
+        Some(at) => crate::plate::PlatePlace::rect_at(at, plot, w, h),
+        None => Rect::new(plot.right() - crate::legend::INSET - w, top - m.pad_y, w, h),
+    };
+    let under = place
+        .at
+        .is_none()
+        .then(|| rect.bottom() + GAP_EM * theme.small_font_size);
+    let hover = view
+        .plate_hover
+        .filter(|h| h.kind == crate::plate::PlateKind::Readout);
+    let lines: Vec<(String, Color)> = lines.into_iter().map(|l| (l, theme.text)).collect();
+    crate::plate::draw_lines(
+        layer,
+        rect,
+        &lines,
+        HAlign::Right,
+        m,
+        true,
+        hover,
+        plot,
+        theme,
+    );
+    (
+        crate::plate::PlateBox::new(crate::plate::PlateKind::Readout, plot, rect, s),
+        under,
+    )
+}
 
 /// Draws the peak list `list` on its plate. Placed by the scene, it hangs from the plot's
 /// right edge with its text's top at `top` (under the cursor values while those are where

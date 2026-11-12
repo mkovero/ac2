@@ -28,11 +28,14 @@ Name everywhere (view toast, caption, hint tooltip, help, user guide, CLI, `keys
 section, wire): **3D spectrograph**, spelled `spectrograph_3d` in identifiers and on the
 wire. Never "waterfall": in acoustics that is a cumulative spectral decay plot.
 
-No cursor and no readout: which spike, at what depth, a pointer is over is ambiguous in a
-perspective without hidden lines, and a value that could belong to the row in front or
-behind is a misreadable readout. The 2D view, one G back, reads values. The one value read
-here is the measurement's tracked peaks (**P**), placed on the front row where no depth is
-in doubt.
+Cursor by picking: which spike, at what depth, a pointer is over is ambiguous in a
+perspective without hidden lines, so hover reads nothing. A click picks the spike nearest
+the pointer (its line from floor to tip within 6 px; of spikes as near, the one whose tip
+is at the pointer, then the one nearer the eye), and the cursor is that cell: its column's
+centre frequency and its row's middle age, the same cursor the 2D views read. The cell is
+marked on its spike and read (the cell's level) on the cursor values' plate. Stopped (S)
+the picture stands still to pick in. The measurement's tracked peaks (**P**) stand on the
+front row, where no depth is in doubt.
 
 ## The look
 
@@ -336,7 +339,7 @@ The spectrum scope's commands in the 3D scope:
 | offset (J), colour maps (palette) | in the palette and help, J bound | the offset moves the heights; the map colours them |
 | smooth_coarser/finer (K, Shift+K), smoothing presets | inert, unbound | the history is built from unsmoothed frames |
 | spectrum_style (B), peak_hold (P), next/prev peak and notch (Alt+P/N), cursor_mark / clear_mark (Alt+D) | inert, unbound | they act on the curve or the cursor, not drawn here; the front-row peaks follow the measurement's Track, set with P on the 2D views |
-| global Shift+←/→ (cursor), C (compare), Shift+T | inert, intercepted | no cursor and no compared curves in 3D |
+| global Shift+←/→ (cursor steps), C (compare) | inert, intercepted | the cursor is picked with the mouse; no compared curves in 3D. Shift+T toggles the cursor as everywhere |
 
 Commands bound in both scopes keep the same default keys (a test checks it). `keys.toml`
 rebinds are per section, as `[ir]`'s are: a `start_stop` rebound in `[spectrum]` is not

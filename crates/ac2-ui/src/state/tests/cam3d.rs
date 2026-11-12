@@ -134,18 +134,34 @@ fn camera_limits_hold() {
 }
 
 #[test]
-fn cursor_and_compare_keys_are_inert() {
+fn cursor_steps_and_compare_are_inert_and_the_cursor_toggles() {
     let mut t = on_3d();
     let freq = t.st.view.freq;
-    for k in ["Shift+T", "C"] {
+    for k in ["Shift+ArrowLeft", "Shift+ArrowRight", "C"] {
         t.key(k);
     }
     assert_eq!(camera(&t), SpectrumCamera::DEFAULT);
     assert_eq!(t.st.view.freq, freq);
+    assert_eq!(t.st.view.cursor_hz, None);
     assert_eq!(
         t.st.kind_modes(PaneKind::Spectrum).spectrum,
         SpectrumMode::Spectrograph3d
     );
+    // A click on a spike puts the cursor on its cell; Shift+T takes it off, time and all.
+    let pane = t.st.layout.focus;
+    t.st.apply(
+        Msg::SpectrographCursor {
+            hz: 1000.0,
+            before_s: 4.0,
+        },
+        &t.keys,
+    );
+    assert_eq!(t.st.view.cursor_hz, Some(1000.0));
+    t.key("Shift+T");
+    assert_eq!(t.st.view.cursor_hz, None);
+    assert_eq!(t.st.view.spectrum.spectrograph.cursor_s, None);
+    assert_eq!(t.st.layout.focus, pane);
+    assert_eq!(camera(&t), SpectrumCamera::DEFAULT);
 }
 
 #[test]

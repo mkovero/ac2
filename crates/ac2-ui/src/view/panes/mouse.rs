@@ -305,6 +305,22 @@ pub(super) fn navigate(
         .view(id)
         .is_some_and(|v| v.shows_3d(app.state.three_d()))
     {
+        if free
+            && resp.clicked()
+            && let Some(f) = axes.pick3d
+            && let Some(p) = resp.interact_pointer_pos()
+            && let Some((_, sk)) = app.skylines.get(&id)
+            && let Some(at) = ac2_scene::spectrograph_3d::pick(
+                &f,
+                sk,
+                [p.x - plot_rect.min.x, p.y - plot_rect.min.y],
+            )
+        {
+            app.dispatch(Msg::SpectrographCursor {
+                hz: at.hz,
+                before_s: at.before_s,
+            });
+        }
         navigate_3d(app, ui, resp, id);
         return;
     }
@@ -404,7 +420,8 @@ fn reveal_3d(app: &mut App, ui: &egui::Ui, resp: &egui::Response, id: PaneId) {
 const WHEEL_PX_PER_STEP: f32 = 50.0;
 
 /// The mouse on a 3D spectrograph: a drag orbits and tilts (stored on release), the plain
-/// wheel and a touch pinch dolly a zoom step at a time, a click only focuses.
+/// wheel and a touch pinch dolly a zoom step at a time (a click on a spike, which puts the
+/// cursor there, is the caller's).
 fn navigate_3d(app: &mut App, ui: &egui::Ui, resp: &egui::Response, id: PaneId) {
     use crate::state::Cam3dMsg;
     if resp.dragged() {

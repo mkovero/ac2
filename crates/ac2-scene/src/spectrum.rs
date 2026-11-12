@@ -33,7 +33,9 @@ mod mark;
 pub mod peaks;
 mod units;
 pub use draw::spectrum_scene;
-pub(crate) use draw::{MARK_HALF, list_text, peak_plate, spectrum_scene_in, tracked_peaks};
+pub(crate) use draw::{
+    MARK_HALF, list_text, peak_plate, readout_plate, spectrum_scene_in, tracked_peaks,
+};
 pub use legend::caption_forms;
 use legend::unit_forms;
 pub(crate) use legend::{SpectrumLegend, legend_of};

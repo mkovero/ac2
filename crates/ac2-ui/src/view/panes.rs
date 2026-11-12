@@ -82,6 +82,8 @@ struct Axes {
     ir: Option<(IrPane, Mapping, Mapping)>,
     /// An SPL pane's Leq history strip: where and over what time.
     strip: Option<scenes::StripPlace>,
+    /// A 3D spectrograph's picture as a click picks a spike on it.
+    pick3d: Option<ac2_scene::spectrograph_3d::PickFrame>,
 }
 
 /// Scene for `pane` at `size` ([`build_scene`]), noted in the `--latency-log` when on.
@@ -139,6 +141,7 @@ fn build_scene(
             time: c.time_axis,
             ir: c.ir_axes,
             strip: c.strip,
+            pick3d: c.pick3d,
         };
         return Some((c.scene.clone(), axes));
     }
@@ -192,6 +195,7 @@ fn build_scene(
                     time: None,
                     ir: None,
                     strip: None,
+                    pick3d: None,
                 },
             )
         }
@@ -215,7 +219,13 @@ fn build_scene(
             plates = s.plates();
             legend = s.legend_box.clone();
             legend_hits = s.legend_hits.clone();
-            (s.scene, Axes::default())
+            (
+                s.scene,
+                Axes {
+                    pick3d: s.pick,
+                    ..Axes::default()
+                },
+            )
         }
         PaneKind::Spectrum if view.modes.spectrum.spectrograph() => {
             let s = scenes::spectrograph(st, id, theme, vp, now);
@@ -240,6 +250,7 @@ fn build_scene(
                     time: Some(s.time_axis.mapping),
                     ir: None,
                     strip: None,
+                    pick3d: None,
                 },
             )
         }
@@ -263,6 +274,7 @@ fn build_scene(
                     time: None,
                     ir: None,
                     strip: None,
+                    pick3d: None,
                 },
             )
         }
@@ -284,6 +296,7 @@ fn build_scene(
                 time: None,
                 ir: s.ir_axes().map(|(x, y)| (IrPane::Sweep, x, y)),
                 strip: None,
+                pick3d: None,
             };
             (s.scene(), axes)
         }
@@ -315,6 +328,7 @@ fn build_scene(
             time_axis: axes.time,
             ir_axes: axes.ir,
             strip: axes.strip,
+            pick3d: axes.pick3d,
             unit_tip,
             legend,
             plates,

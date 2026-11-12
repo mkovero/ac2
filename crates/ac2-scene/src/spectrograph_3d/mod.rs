@@ -4,8 +4,9 @@
 //! Frequency runs left to right across a dark floor, time from the front edge (newest)
 //! back into the distance, and on every cell of a decimated grid stands one thin spike
 //! whose height is the cell's level within the pane's level range. Rows behind show through
-//! the gaps; nothing hides anything, so there is no cursor and no readout here: which row a
-//! pointer is over is ambiguous in such a picture, and the 2D view one G back reads values.
+//! the gaps; nothing hides anything, so a pointer over the picture names no cell by itself:
+//! a click picks the spike nearest it, the nearer the eye of two as near ([`pick()`]), and
+//! the cursor is that cell, read on the cursor values' plate as on every view.
 //!
 //! This module is display truth only: the decimated grid ([`Skyline`]), the camera and its
 //! clamps, the projection, the labels and the caption. `ac2-plot` places the pixels.
@@ -32,9 +33,11 @@ use crate::view::{PlotChrome, ViewState};
 type V3 = [f64; 3];
 
 mod camera;
+mod pick;
 mod points;
 mod scene;
 pub use camera::*;
+pub use pick::{PICK_PX, PickFrame, Picked, cell_at, col_hz, pick, row_age};
 pub use points::PeakPoint3d;
 pub use scene::*;
 

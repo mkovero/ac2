@@ -10,7 +10,7 @@ use ac2_proto::units::MeasId;
 const KEY: TraceKey = TraceKey::Live(MeasId(1));
 
 /// Every cell at −30 dB below 5 kHz, none above it.
-fn flat_room() -> (SpectrographHistory, Skyline) {
+pub(super) fn flat_room() -> (SpectrographHistory, Skyline) {
     let mut h = SpectrographHistory::new(30);
     let mut f = Feed::new(&log_bins());
     // A part-filled newest row: its points slide back with the rows' phase.
@@ -55,7 +55,7 @@ fn trace(peaks: Option<&[Peak]>) -> SpectrumTrace<'_> {
     }
 }
 
-fn chrome(chrome: PlotChrome) -> ViewState {
+pub(super) fn chrome(chrome: PlotChrome) -> ViewState {
     ViewState {
         chrome,
         ..ViewState::default()
@@ -71,7 +71,7 @@ fn scene(
     scene_of(b, Some(peaks), view, axes)
 }
 
-fn scene_of(
+pub(super) fn scene_of(
     (h, s): &(SpectrographHistory, Skyline),
     peaks: Option<&[Peak]>,
     view: &ViewState,

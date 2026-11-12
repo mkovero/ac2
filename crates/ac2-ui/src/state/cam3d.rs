@@ -68,8 +68,8 @@ impl CamNav {
 }
 
 /// The commands the 3D view takes over: the frequency axis's navigation keys move the
-/// camera, and the cursor and compare keys do nothing (there is no cursor and no compared
-/// curve in 3D).
+/// camera, and the cursor's steps and compare do nothing (the cursor is put by a click on a
+/// spike, and there is no compared curve in 3D). The cursor's toggle stays its own.
 pub(super) fn is_nav(c: CommandId) -> bool {
     use CommandId as C;
     matches!(
@@ -81,7 +81,6 @@ pub(super) fn is_nav(c: CommandId) -> bool {
             | C::ResetView
             | C::TiltUp
             | C::TiltDown
-            | C::ToggleCursor
             | C::CursorLeft
             | C::CursorRight
             | C::Compare

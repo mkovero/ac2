@@ -648,5 +648,6 @@ fn auto_tier_by_adapter() {
     assert_eq!(Quality::Bare.step(1), Quality::Auto);
 }
 
+mod pick;
 mod points;
 mod scene;

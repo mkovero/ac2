@@ -132,6 +132,8 @@ pub(crate) struct CachedScene {
     )>,
     /// Where an SPL pane drew its Leq history strip and the time it spans.
     pub strip: Option<crate::scenes::StripPlace>,
+    /// A 3D spectrograph's picture, for picking a spike with a click.
+    pub pick3d: Option<ac2_scene::spectrograph_3d::PickFrame>,
     /// Where on the scene the level axis's unit is drawn and what it means, for a tooltip.
     pub unit_tip: Option<(egui::Rect, String)>,
     /// Where the scene put its legend, for scrolling it.

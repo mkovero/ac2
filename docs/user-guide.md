@@ -1440,7 +1440,9 @@ bar spans the pane's level axis, so the level-axis keys change the colours.
 - **Shift+B** steps the measurement's history 10, 30 (default), 60, 120 s (`ac2 meas set
   <meas> --span 60`); every length keeps a row per 33 ms. It starts afresh at each length
   and when the spectrograph comes into view.
-- A click puts the cursor: `1.00 kHz · 4.2 s ago · −32.0 dBFS`.
+- A click puts the cursor; its values are on the cursor values' plate (drag it, size it,
+  as every plate): `1.00 kHz` over `4.2 s ago  −32.0 dBFS`. With the spectrum above, the
+  line joins the spectrum's cursor values on its plate: one cursor, one plate.
 - With the spectrograph alone, the legend plate names the measurement, as in the spectrum
   (with the spectrum beside it, the spectrum's legend is the pane's). While the
   measurement's peaks track (**P**), each is a box at its frequency on the top (newest)
@@ -1481,8 +1483,16 @@ per frequency and moment, as tall as its level. **G** once more is the spectrum 
   always has them.
 - **Mouse**: drag orbits and tilts, the wheel or a pinch dollies; Ctrl+wheel and
   Shift+wheel still zoom and pan the level range. The camera is kept with the pane and the
-  measurement's layout. The cursor keys (Shift+←/→, Shift+T) and **C** do nothing here:
-  there is no cursor and no compared curve in 3D.
+  measurement's layout. The cursor's steps (Shift+←/→) and **C** do nothing here: the
+  cursor is put with the mouse, and there is no compared curve in 3D.
+- **Cursor**: stop the measurement (**S**) so the picture stands still, orbit to where the
+  spike you want stands clear, and click (or tap) it: the cursor goes on that cell, its
+  spike drawn in the cursor's colour with a box at its tip, and its frequency, age and
+  level read on the cursor values' plate as in 2D (the cell's level: the highest of the
+  bins and frames it covers). Of spikes as near the pointer, the one whose tip is at the
+  pointer wins, then the one nearer you. The cursor is the 2D views' too: **G** back reads
+  the same frequency and time. **Shift+T** takes it off; *traces only* hides it. Live, the
+  cursor stays at its age while the rows move through it.
 - **Legend**: the same plate as in 2D, moved and sized the same way; a click on its row
   selects the measurement.
 - **Peaks**: while the measurement's peaks track (**P**, set one **G** back: the key is
@@ -1491,8 +1501,8 @@ per frequency and moment, as tall as its level. **G** once more is the spectrum 
   spike's top, its label keeping the peak's level. They show at rest, without the axes;
   *traces only* hides them.
 - **Colour** is the loudest spike along the line of sight, so a tall peak behind a low row
-  still shows its colour. Read levels from the heights against the level ticks, or go one
-  **G** back to the 2D spectrograph and its cursor. The *ice* colour map (palette
+  still shows its colour. Read levels from the heights against the level ticks, or with
+  the cursor. The *ice* colour map (palette
   *Colour map ice*) is made for this view; every map works in both.
 - **The level range follows** the content here as in 2D (*The level axis follows the
   content* above): the spikes' heights glide with a move. An orbit, tilt or dolly counts as

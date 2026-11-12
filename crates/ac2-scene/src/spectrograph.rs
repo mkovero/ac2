@@ -441,6 +441,8 @@ pub struct SpectrographCursor {
     pub before_s: f64,
     /// `1.00 kHz · 4.2 s ago · −23.5 dBFS`.
     pub text: String,
+    /// Its line on the cursor values' plate, under the frequency: `4.2 s ago  −23.5 dBFS`.
+    pub line: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -466,6 +468,8 @@ pub struct SpectrographScene {
     /// Above the plot: `Main L · last 30 s · dBFS`, ` · stopped` when it is.
     pub caption: String,
     pub cursor: Option<SpectrographCursor>,
+    /// Shown alone, the cursor values' plate; in the split the spectrum part's has the line.
+    pub readout_box: Option<crate::plate::PlateBox>,
     /// Shown in the plot instead of a picture (nothing measured yet).
     pub message: Option<String>,
     /// Where the marked multi-resolution spectrum's windows change, drawn across the
@@ -498,6 +502,7 @@ impl SpectrographScene {
                 .as_ref()
                 .map(|b| b.plate)
                 .into_iter()
+                .chain(self.readout_box)
                 .chain(self.peaks_box)
                 .collect(),
         }
@@ -521,7 +526,7 @@ const BAR_GAP: f32 = 8.0;
 const BAR_W: f32 = 10.0;
 /// Right of the plots: the colour bar and its labels.
 pub const RIGHT_MARGIN: f32 = BAR_GAP + BAR_W + 4.0 + 34.0;
-/// Above the spectrograph plot: its caption and cursor readout.
+/// Above the spectrograph plot: its caption.
 const CAPTION_H: f32 = 16.0;
 /// Entries of the colour bar: the colormap's own resolution.
 const BAR_STEPS: usize = 256;
@@ -552,6 +557,10 @@ pub fn spectrograph_scene(
     let alone = view.spectrum.mode == SpectrumMode::Spectrograph || no_3d;
     // The colour bar sits right of the plots; a column neighbour may reserve more.
     let right = crate::freq_column::right(RIGHT_MARGIN, view);
+    let span = sg.map_or(ac2_proto::model::SpectrumDisplay::DEFAULT_SPAN_S, |s| {
+        s.history.span_s()
+    });
+    let cursor = sg.and_then(|s| history_cursor(s, cursor_hz, view, span));
     let (spectrum, mut layers, banners, top) = if alone {
         let mut c0 = Canvas::new(size, theme);
         let plot_w = (size.width - MARGINS.left - right).max(1.0);
@@ -567,6 +576,7 @@ pub fn spectrograph_scene(
             theme,
             Viewport::new(size.width, top_h),
             right,
+            cursor.as_ref().map(|c| c.line.as_str()),
         );
         let layers = std::mem::take(&mut spectrum.scene.layers);
         (Some(spectrum), layers, Vec::new(), top_h + PANE_GAP)
@@ -590,9 +600,6 @@ pub fn spectrograph_scene(
         (size.height - top - CAPTION_H - MARGINS.bottom).max(1.0),
     );
     let x_axis = axis::freq_axis(view.freq.range(), plot.x, plot.right());
-    let span = sg.map_or(ac2_proto::model::SpectrumDisplay::DEFAULT_SPAN_S, |s| {
-        s.history.span_s()
-    });
     let colormap = sg.map_or_else(Default::default, |s| s.colours);
     let mut time_axis = axis::linear_axis(
         Range::new(0.0, f64::from(span)),
@@ -675,7 +682,6 @@ pub fn spectrograph_scene(
 
     let mut caption = String::new();
     let mut message = None;
-    let mut cursor = None;
     let xm = x_axis.mapping;
     let tm = time_axis.mapping;
     match sg {
@@ -728,29 +734,6 @@ pub fn spectrograph_scene(
                 }
                 _ => message = Some(format!("{}: no frames yet", s.name)),
             }
-            if let (Some(hz), Some(before)) = (cursor_hz, view.spectrum.spectrograph.cursor_s)
-                && before <= f64::from(span)
-            {
-                let v = s
-                    .history
-                    .value_at(hz, before)
-                    .map_or(f64::NAN, |v| f64::from(v) + s.offset_db);
-                let level = match s.history.unit_noted() {
-                    Some(unit) if v.is_finite() => {
-                        format!("{} {unit}", format::level(v))
-                    }
-                    _ => format::level(f64::NAN),
-                };
-                cursor = Some(SpectrographCursor {
-                    freq_hz: hz,
-                    before_s: before,
-                    text: format!(
-                        "{} · {} ago · {level}",
-                        format::freq_readout(hz),
-                        format::age(before)
-                    ),
-                });
-            }
         }
     }
     // Alone, the caption also says what the spectrum's would: the window and the
@@ -787,14 +770,10 @@ pub fn spectrograph_scene(
         forms = forms.iter().map(|f| note(f)).collect();
         forms.push(String::new());
     }
-    // The cursor readout wins the line above the plot when both do not fit; the caption
-    // gives up its details first, its name last.
-    let room = cursor.as_ref().map_or(plot.w, |cur| {
-        plot.w - canvas::text_width(&cur.text, theme.small_font_size) - 12.0
-    });
+    // The caption gives up its details first, its name last.
     let shown_caption = forms
         .into_iter()
-        .find(|c| canvas::text_width(c, theme.small_font_size) <= room)
+        .find(|c| canvas::text_width(c, theme.small_font_size) <= plot.w)
         .unwrap_or_default();
     c.base.labels.push(label(
         shown_caption,
@@ -828,18 +807,30 @@ pub fn spectrograph_scene(
                 plot,
             ));
         }
-        c.overlay.labels.push(label(
-            cur.text.clone(),
-            [plot.right(), plot.y - 3.0],
-            anchor(HAlign::Right, VAlign::Bottom),
-            theme.small_font_size,
-            theme.text,
-        ));
+    }
+    // Alone, the cursor values' plate as the spectrum has it, at the plot's top right; in
+    // the split its line is on the spectrum's.
+    let mut readout_box = None;
+    let mut under = plot.y + crate::legend::INSET + crate::legend::PAD_Y;
+    if let Some(cur) = cursor.as_ref().filter(|_| alone) {
+        let lines = vec![format::freq_readout(cur.freq_hz), cur.line.clone()];
+        let (b, below) =
+            crate::spectrum::readout_plate(&mut c.overlay, lines, plot, under, view, theme);
+        under = below.unwrap_or(under);
+        readout_box = Some(b);
     }
     let (peaks, peak_list, peaks_box) = match sg {
-        Some(s) if alone && message.is_none() => {
-            tracked_marks(&mut c, traces, s.key, view, plot, &xm, theme)
-        }
+        Some(s) if alone && message.is_none() => tracked_marks(
+            &mut c,
+            traces,
+            s.key,
+            view,
+            plot,
+            &xm,
+            under,
+            readout_box,
+            theme,
+        ),
         _ => (Vec::new(), None, None),
     };
     // Alone, the legend plate over the one curve drawn; in the split the spectrum's is the
@@ -865,6 +856,7 @@ pub fn spectrograph_scene(
         bar_axis,
         caption,
         cursor,
+        readout_box,
         message,
         stitches,
         legend_shown: legend.as_ref().map_or_else(Vec::new, |l| l.shown.clone()),
@@ -880,6 +872,7 @@ pub fn spectrograph_scene(
 /// put them on, so each is a box at its frequency on the newest row (the plot's top edge)
 /// with its rank under it, listed on the peak list's plate as the spectrum lists them;
 /// traces only (T) hides marks and list. Its peaks, the list and its plate.
+#[allow(clippy::too_many_arguments)]
 fn tracked_marks(
     c: &mut Canvas,
     traces: &[SpectrumTrace<'_>],
@@ -887,6 +880,8 @@ fn tracked_marks(
     view: &ViewState,
     plot: Rect,
     xm: &crate::axis::Mapping,
+    top: f32,
+    readout: Option<crate::plate::PlateBox>,
     theme: &Theme,
 ) -> (
     Vec<crate::spectrum::SpectrumPeaks>,
@@ -935,9 +930,44 @@ fn tracked_marks(
         c.overlay.labels.push(l);
     }
     let list = crate::spectrum::list_text(&[(t, p)]);
-    let top = plot.y + crate::legend::INSET + crate::legend::PAD_Y;
-    let b = crate::spectrum::peak_plate(c, &list, plot, top, None, view, theme);
+    let b = crate::spectrum::peak_plate(c, &list, plot, top, readout, view, theme);
     (peaks, Some(list), Some(b))
+}
+
+/// The cursor on the history of `s`: put (`cursor_hz`, the view's `cursor_s`) within the
+/// `span` shown, it reads the history there.
+fn history_cursor(
+    s: &SpectrographInput<'_>,
+    cursor_hz: Option<f64>,
+    view: &ViewState,
+    span: u32,
+) -> Option<SpectrographCursor> {
+    let hz = cursor_hz?;
+    let before = view.spectrum.spectrograph.cursor_s?;
+    if before > f64::from(span) {
+        return None;
+    }
+    let v = s
+        .history
+        .value_at(hz, before)
+        .map_or(f64::NAN, |v| f64::from(v) + s.offset_db);
+    let level = cursor_level(v, s.history.unit_noted().as_deref());
+    let ago = format!("{} ago", format::age(before));
+    Some(SpectrographCursor {
+        freq_hz: hz,
+        before_s: before,
+        text: format!("{} · {ago} · {level}", format::freq_readout(hz)),
+        line: format!("{ago}  {level}"),
+    })
+}
+
+/// A history cursor's level as the 2D and 3D views read it: `−23.5 dBFS (tone)` for
+/// displayed level `v` in `unit`, a dash for none.
+pub(crate) fn cursor_level(v: f64, unit: Option<&str>) -> String {
+    match unit {
+        Some(unit) if v.is_finite() => format!("{} {unit}", format::level(v)),
+        _ => format::level(f64::NAN),
+    }
 }
 
 /// Whether a spectrograph's legend plate names curve `key`: not hidden, and the curve is

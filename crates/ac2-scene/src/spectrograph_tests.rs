@@ -359,6 +359,60 @@ fn axes_bar_caption_and_cursor_read_as_numbers() {
 }
 
 #[test]
+fn the_cursor_reads_on_the_plate_of_every_view() {
+    let mut h = SpectrographHistory::new(30);
+    let mut f = Feed::new(&third_octaves());
+    f.push(&mut h, T0, -23.5);
+    f.push(&mut h, T0 + 5_000_000_000, -60.0);
+    let mut view = ViewState {
+        cursor_hz: Some(1000.0),
+        ..ViewState::default()
+    };
+    view.spectrum.spectrograph.cursor_s = Some(4.2);
+    let line = "4.2 s ago  \u{2212}23.5 dBFS (tone)";
+    let texts = |s: &SpectrographScene| -> Vec<String> {
+        s.scene
+            .layers
+            .iter()
+            .flat_map(|l| &l.labels)
+            .map(|l| l.text.clone())
+            .collect()
+    };
+    // Split: one cursor, one plate, the spectrum's, with the history's line on it.
+    let split = scene_of(&h, &view);
+    assert_eq!(split.cursor.as_ref().expect("cursor").line, line);
+    assert!(split.readout_box.is_none());
+    let sp = split.spectrum.as_ref().expect("the spectrum part");
+    assert!(sp.readout_box.is_some());
+    assert!(
+        texts(&split).iter().any(|t| t == line),
+        "{:?}",
+        texts(&split)
+    );
+    // Alone: its own plate, the frequency over the line, where the caption had to make room.
+    view.spectrum.mode = SpectrumMode::Spectrograph;
+    let alone = scene_of(&h, &view);
+    let b = alone.readout_box.expect("the plate");
+    assert!(b.rect.y >= alone.plot.y && b.rect.right() <= alone.plot.right());
+    assert!(
+        alone
+            .plates()
+            .iter()
+            .any(|p| p.kind == crate::plate::PlateKind::Readout)
+    );
+    let t = texts(&alone);
+    assert!(
+        t.iter().any(|t| t == line) && t.iter().any(|t| t == "1.00 kHz"),
+        "{t:?}"
+    );
+    assert!(
+        alone.caption.starts_with("Main · last 30 s"),
+        "{}",
+        alone.caption
+    );
+}
+
+#[test]
 fn stale_dims_offset_shifts_and_empty_says_so() {
     let mut h = SpectrographHistory::new(10);
     let theme = Theme::dark();

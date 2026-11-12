@@ -71,15 +71,36 @@ pub struct Spectrograph3dScene {
     pub legend_box: Option<crate::legend::LegendBox>,
     /// Where its row is: a click there selects the measurement.
     pub legend_hits: Vec<crate::legend::LegendHit>,
+    /// What a click needs to pick a spike ([`super::pick()`]); `None` without a picture.
+    pub pick: Option<super::PickFrame>,
+    /// The cursor's cell, marked on its spike; `None` off the picture, without a cursor, or
+    /// at traces only (T).
+    pub cursor: Option<Cursor3d>,
+    /// The cursor values' plate, as every view's.
+    pub readout_box: Option<crate::plate::PlateBox>,
+}
+
+/// The cursor in the 3D view: the cell it is on, read as the 2D view reads its cursor.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Cursor3d {
+    pub freq_hz: f64,
+    pub before_s: f64,
+    /// The cell's column and how many rows back from the newest.
+    pub cell: (usize, usize),
+    /// Its lines on the plate: the frequency, then `4.2 s ago  −23.5 dBFS`.
+    pub lines: Vec<String>,
+    /// The spike's tip on screen; `None` when it has no spike or is behind the eye.
+    pub tip: Option<[f32; 2]>,
 }
 
 impl Spectrograph3dScene {
-    /// The plates the operator moves: the legend.
+    /// The plates the operator moves: the legend and the cursor values.
     pub fn plates(&self) -> Vec<crate::plate::PlateBox> {
         self.legend_box
             .as_ref()
             .map(|b| b.plate)
             .into_iter()
+            .chain(self.readout_box)
             .collect()
     }
 }
@@ -96,6 +117,10 @@ pub(super) struct Projector {
 }
 
 impl Projector {
+    pub(super) fn new(vp: ViewProj, plot: Rect) -> Self {
+        Self { vp, plot }
+    }
+
     fn px(&self, ndc: [f64; 2]) -> [f32; 2] {
         [
             self.plot.x + ((ndc[0] + 1.0) / 2.0) as f32 * self.plot.w,
@@ -263,7 +288,7 @@ pub fn spectrograph_3d_scene(
     let aspect = f64::from(plot.w / plot.h);
     let pose = sg.map_or(Pose::from(SpectrumCamera::DEFAULT), |s| s.camera);
     let vp = view_proj(pose, aspect);
-    let pj = Projector { vp, plot };
+    let pj = Projector::new(vp, plot);
     // The field and the labels in it keep the dark theme's colours in every theme.
     let dark = Theme::dark();
     let mut c = Canvas::default();
@@ -543,6 +568,7 @@ pub fn spectrograph_3d_scene(
     }
 
     let mut message = None;
+    let mut pick = None;
     let mut caption = String::new();
     match sg {
         None => message = Some("no spectrum or RTA measurement".to_string()),
@@ -569,6 +595,12 @@ pub fn spectrograph_3d_scene(
             } else {
                 let off = s.offset_db;
                 let drawn = sk.drawn(s.lead_slots);
+                pick = Some(super::PickFrame {
+                    view_proj: vp,
+                    plot,
+                    phase: drawn.phase,
+                    range: [range.lo - off, range.hi - off],
+                });
                 let data = sk.ring().to_vec();
                 c.data.skylines.push(Skyline3d {
                     id: SKYLINE_ID,
@@ -627,6 +659,10 @@ pub fn spectrograph_3d_scene(
                 )
             }),
         _ => Vec::new(),
+    };
+    let cursor = match (sg, pick.as_ref()) {
+        (Some(s), Some(f)) if view.chrome.cursor() => super::pick::cursor_cell(&mut c, f, s, view),
+        _ => None,
     };
     let cell = sg.and_then(|s| cell_text(s.skyline));
     let tier = sg
@@ -711,6 +747,12 @@ pub fn spectrograph_3d_scene(
         plot,
         theme,
     );
+    // The cursor values' plate as every view's, at the plot's top right; over the legend's
+    // place only when dragged there.
+    let readout_box = cursor.as_ref().map(|cur| {
+        let top = plot.y + crate::legend::INSET + crate::legend::PAD_Y;
+        crate::spectrum::readout_plate(&mut c.overlay, cur.lines.clone(), plot, top, view, theme).0
+    });
     layers.extend(c.into_scene(size).layers.into_iter().take(3));
     Spectrograph3dScene {
         scene: Scene {
@@ -728,6 +770,9 @@ pub fn spectrograph_3d_scene(
         legend_shown: legend.as_ref().map_or_else(Vec::new, |l| l.shown.clone()),
         legend_box: legend.as_ref().and_then(|l| l.b.clone()),
         legend_hits: legend.as_ref().map_or_else(Vec::new, |l| l.hits.clone()),
+        pick,
+        cursor,
+        readout_box,
     }
 }
 
