@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-FIX = Path(os.environ.get("CROSSCHECK_FIXTURES", "/work/ac2-scratch/crosscheck-fixtures"))
+FIX = Path(os.environ.get("CROSSCHECK_FIXTURES", "fixtures"))
 pytestmark = pytest.mark.skipif(not (FIX / "rew_fr1.json").exists(), reason="fixtures absent")
 
 

@@ -1,5 +1,6 @@
 import math
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -7,7 +8,8 @@ import pytest
 from crosscheck import baseline as B
 
 TOL = {"compare": {"pass_fraction": 0.5, "step": {"dB": 0.02, "°": 0.1, "rel": 0.02, "µs": 0.2, "": 0.01}}}
-RUNS = Path("/work/ac2-crosscheck/runs")
+# Two rig runs of 2026-10-07, not in git: the test runs where CROSSCHECK_RUNS holds them.
+RUNS = Path(os.environ.get("CROSSCHECK_RUNS", "runs"))
 
 
 def chk(id_, group, value, status="PASS", unit="dB", tol=(0.05, 0.2), path="xone"):

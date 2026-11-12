@@ -83,14 +83,14 @@ ssh -t mui@192.168.9.27 'cd ~/crosscheck && ~/ac2-test/venv-meas/bin/python -m c
 ./rig-run.sh --stages genelec --emit-speaker=-50dbfs --resolution 1/96   # own baselines: <stage>-<level>dbfs-r96.json
 
 python -m crosscheck analyse runs/<UTC time>                      # again, after changing tolerances
-python -m crosscheck analyse /work/ac2-scratch/crosscheck-fixtures --out /tmp/xc-fixtures
+python -m crosscheck analyse $CROSSCHECK_FIXTURES --out /tmp/xc-fixtures      # a copy of the hand run
 ```
 
 `rig-run.sh` copies the package to `~/crosscheck` on the rig and runs it under `ssh -t`, so
 the operator can confirm and press Ctrl-C there. It then copies `runs/<UTC time>` back to
-`/work/ac2-crosscheck/runs` when that directory exists, else `runs/` here (git-ignored; set
-`CROSSCHECK_RUNS` to change that), writes `runs/<UTC time>/report/` and compares the run with
-the baselines (below); differences are printed, they do not fail the script.
+`$CROSSCHECK_RUNS` when set, else `runs/` here (git-ignored), writes `runs/<UTC time>/report/`
+and compares the run with the baselines (below); differences are printed, they do not fail the
+script.
 
 ### The Genelec stage is audible: the operator must be present
 
@@ -464,7 +464,9 @@ anywhere (`rigs/host.toml`, *On a dummy server*).
 
 ## Fixtures (2026-10-07)
 
-`python -m crosscheck analyse /work/ac2-scratch/crosscheck-fixtures` loads the hand run:
+The hand run is not in git, and the scratch disk that held it is gone; with a copy,
+`python -m crosscheck analyse $CROSSCHECK_FIXTURES` loads it (and
+`tests/test_fixtures_smoke.py` runs; without one it skips):
 Xone path only, with the documented sine truth in `reference/`. The truth was taken at
 −27 dBFS. The hand scripts played amplitude 10^(L/20)·√2, so their "−30 dBFS" is −27 in the
 convention used here, 3 dB hotter than the −30 dBFS sweeps it is compared with.

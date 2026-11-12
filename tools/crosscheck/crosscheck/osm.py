@@ -716,8 +716,6 @@ def runs_dir() -> Path:
     """Where rig-run.sh puts fetched runs (the same rule as that script)."""
     if os.environ.get("CROSSCHECK_RUNS"):
         return Path(os.environ["CROSSCHECK_RUNS"])
-    if Path("/work/ac2-crosscheck/runs").is_dir():
-        return Path("/work/ac2-crosscheck/runs")
     return HERE / "runs"
 
 

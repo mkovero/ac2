@@ -8,7 +8,6 @@ cd "$(dirname "$0")"
 RIG=rigs/pupu.toml
 if [[ "${1:-}" == "--rig" ]]; then RIG=$2; shift 2; fi
 PY_LOCAL=${PYTHON:-python3}
-if [[ -z "${CROSSCHECK_RUNS:-}" && -d /work/ac2-crosscheck/runs ]]; then CROSSCHECK_RUNS=/work/ac2-crosscheck/runs; fi
 RUNS=${CROSSCHECK_RUNS:-$PWD/runs}
 SUITE=$(git describe --always --dirty --abbrev=7 2>/dev/null || echo unknown)
 read -r SSH WORKDIR PY < <("$PY_LOCAL" -c 'import sys,tomllib;r=tomllib.load(open(sys.argv[1],"rb"))["rig"];print(r["ssh"],r["workdir"],r["python"])' "$RIG")
