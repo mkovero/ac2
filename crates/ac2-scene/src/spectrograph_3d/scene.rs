@@ -6,7 +6,8 @@ use super::*;
 /// how to see it.
 #[derive(Clone, Debug)]
 pub struct Spectrograph3dInput<'a> {
-    /// The measurement's live curve: what a click on its legend row picks.
+    /// The measurement's live curve: its legend row's, and the one whose tracked peaks (P)
+    /// stand on the newest row.
     pub key: TraceKey,
     pub history: &'a SpectrographHistory,
     /// Updated for this history, the pane's frequency span and `tier`.
@@ -61,15 +62,26 @@ pub struct Spectrograph3dScene {
     /// The time axis's side: `true` right.
     pub time_right: bool,
     pub view_proj: ViewProj,
-    /// The picked measurement's peak points on the newest row (loudest first).
+    /// The measurement's tracked peaks (P) on the newest row (loudest first).
     pub points: Vec<super::PeakPoint3d>,
-    /// The legend above the caption as drawn: the measurement's curve, named and tagged as
-    /// in the spectrum's legend. Empty without a measurement and in traces only.
+    /// The legend's rows as drawn: the measurement's curve, named and tagged as in the
+    /// spectrum's legend. Empty without a measurement or while hidden.
     pub legend_shown: Vec<String>,
-    /// Where its row is: a click there picks the measurement's peak points.
+    /// The legend's plate, moved and scaled as on every view.
+    pub legend_box: Option<crate::legend::LegendBox>,
+    /// Where its row is: a click there selects the measurement.
     pub legend_hits: Vec<crate::legend::LegendHit>,
-    /// The legend row drawn with the pick's cue: its measurement is the pane's pick.
-    pub picked_cue: Option<TraceKey>,
+}
+
+impl Spectrograph3dScene {
+    /// The plates the operator moves: the legend.
+    pub fn plates(&self) -> Vec<crate::plate::PlateBox> {
+        self.legend_box
+            .as_ref()
+            .map(|b| b.plate)
+            .into_iter()
+            .collect()
+    }
 }
 
 /// Floor x of frequency `hz` over `lo … hi`.
@@ -240,18 +252,7 @@ pub fn spectrograph_3d_scene(
     let mut c0 = Canvas::new(size, theme);
     let plot_w = (size.width - MARGINS.left - right).max(1.0);
     let strip = canvas::banner_strip(&mut c0, status, MARGINS.left, plot_w, size, theme);
-    // The legend row is no axis: it stays at rest, as the points it picks do.
-    let legend = crate::spectrograph::legend_rows(
-        &mut c0.overlay,
-        traces,
-        sg.map(|s| s.key),
-        view,
-        strip.rect.bottom(),
-        plot_w,
-        size.height - strip.rect.bottom() - MARGINS.top - CAPTION_H - MARGINS.bottom,
-        theme,
-    );
-    let top = strip.rect.bottom() + legend.as_ref().map_or(0.0, |l| l.rect.h) + MARGINS.top;
+    let top = strip.rect.bottom() + MARGINS.top;
     let mut layers = c0.into_scene(size).layers;
     let plot = Rect::new(
         MARGINS.left,
@@ -555,8 +556,8 @@ pub fn spectrograph_3d_scene(
             if let Some(unit) = s.history.unit_noted() {
                 caption.push_str(&format!(" · {unit}"));
             }
-            // The legend tags the curve; without one (traces only), the caption does.
-            if legend.is_none()
+            // The legend tags the curve; without one (hidden), the caption does.
+            if !crate::spectrograph::legend_shows(traces, s.key, view)
                 && let Some(tag) = s.freshness.and_then(|f| f.tag())
             {
                 caption.push_str(" · ");
@@ -603,29 +604,28 @@ pub fn spectrograph_3d_scene(
             }
         }
     }
-    // Points come from a deliberate click and are few: they show at rest too, reading the
-    // pane's own tier, not the bare one the hidden axes force; traces only hides them.
-    let points = match (sg, view.peak_points) {
-        (Some(s), Some(p)) if message.is_none() && p.key == s.key && view.chrome.peak_marks() => {
-            traces
-                .iter()
-                .find(|t| t.key == s.key)
-                .and_then(|t| Some((t, t.tracked?)))
-                .map_or_else(Vec::new, |(t, peaks)| {
-                    super::points::peak_points(
-                        &mut c,
-                        &pj,
-                        s.skyline,
-                        f64::from(s.skyline.drawn(s.lead_slots).phase),
-                        peaks,
-                        t.offset_db,
-                        crate::spectrum::value_unit(t.scale, t.quantity),
-                        range,
-                        plot,
-                        small,
-                    )
-                })
-        }
+    // The tracked peaks (P) of the measurement drawn, on its newest row. Few, and asked for:
+    // they show at rest too, reading the pane's own tier, not the bare one the hidden axes
+    // force; traces only hides them.
+    let points = match sg {
+        Some(s) if message.is_none() && view.chrome.peak_marks() => traces
+            .iter()
+            .find(|t| t.key == s.key)
+            .and_then(|t| Some((t, t.tracked?)))
+            .map_or_else(Vec::new, |(t, peaks)| {
+                super::points::peak_points(
+                    &mut c,
+                    &pj,
+                    s.skyline,
+                    f64::from(s.skyline.drawn(s.lead_slots).phase),
+                    peaks,
+                    t.offset_db,
+                    crate::spectrum::value_unit(t.scale, t.quantity),
+                    range,
+                    plot,
+                    small,
+                )
+            }),
         _ => Vec::new(),
     };
     let cell = sg.and_then(|s| cell_text(s.skyline));
@@ -701,6 +701,16 @@ pub fn spectrograph_3d_scene(
             l.color = l.color.with_alpha(axes);
             l
         }));
+    // The legend is no axis: its plate stays at rest, as the points do, over
+    // everything else.
+    let legend = crate::spectrograph::legend_over(
+        &mut c.overlay,
+        traces,
+        sg.map(|s| s.key),
+        view,
+        plot,
+        theme,
+    );
     layers.extend(c.into_scene(size).layers.into_iter().take(3));
     Spectrograph3dScene {
         scene: Scene {
@@ -716,8 +726,8 @@ pub fn spectrograph_3d_scene(
         view_proj: vp,
         points,
         legend_shown: legend.as_ref().map_or_else(Vec::new, |l| l.shown.clone()),
+        legend_box: legend.as_ref().and_then(|l| l.b.clone()),
         legend_hits: legend.as_ref().map_or_else(Vec::new, |l| l.hits.clone()),
-        picked_cue: legend.and_then(|l| l.picked_cue),
     }
 }
 

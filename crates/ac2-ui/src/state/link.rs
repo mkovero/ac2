@@ -773,14 +773,14 @@ impl RigState {
     }
 
     /// Chooses the tracked peaks again from each newest frame of the measurements whose peak
-    /// mode tracks (P), from when it went on, and of those a pane picked (`picked`).
-    pub(super) fn fold_peak_tracks(&mut self, d: &DataSnapshot, picked: &BTreeSet<MeasId>) {
+    /// mode tracks (P), from when it went on.
+    pub(super) fn fold_peak_tracks(&mut self, d: &DataSnapshot) {
         use ac2_proto::FrameData;
         use ac2_scene::spectrum::peaks::{PeakInput, find_peaks};
         let tracked: BTreeSet<MeasId> = self
             .measurements()
             .iter()
-            .filter(|m| self.display_of(m).peak.tracks() || picked.contains(&m.id))
+            .filter(|m| self.display_of(m).peak.tracks())
             .map(|m| m.id)
             .collect();
         self.folded.peak_tracks.retain(|id, _| tracked.contains(id));
@@ -878,7 +878,6 @@ impl RigState {
         // visibility and slots change by event). The smoothing stays the one the
         // columns were served with until the re-smoothed data arrives.
         self.traces.retain(|k, _| metas.contains_key(k));
-        self.folded.trace_peaks.retain(|k, _| metas.contains_key(k));
         for (id, (data, _)) in &mut self.traces {
             if let Some(m) = metas.get(id) {
                 follow_meta(data, m);
@@ -898,8 +897,6 @@ impl RigState {
         {
             follow_meta(&mut t, &m);
         }
-        // New data, new peaks: found again once a pane's pick asks.
-        self.folded.trace_peaks.remove(&t.meta.id);
         self.traces.insert(t.meta.id, (t, g));
     }
 }

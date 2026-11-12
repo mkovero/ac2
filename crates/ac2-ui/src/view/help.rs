@@ -251,9 +251,9 @@ const PLATE_MOUSE: [(&str, &str); 1] = [(
     "Move it; its corner: text size; double-click: back",
 )];
 
-/// A click (or tap) on a legend row picks the curve's peak points; on a picked row it
-/// clears them: no key does this, and a kiosk without a keyboard has only the tap.
-const LEGEND_CLICK: (&str, &str) = ("Click\nlegend row", "Peak points; again: clear");
+/// A click (or tap) on a legend row selects its curve, so the selection's keys act on it:
+/// no key picks a curve by its row, and a kiosk without a keyboard has only the tap.
+const LEGEND_CLICK: (&str, &str) = ("Click\nlegend row", "Select its curve");
 
 /// What the frequency axis's keys and gestures do in the 3D spectrograph: they move the
 /// camera. Listed under its pane's keys with the keys they are bound to.
@@ -280,13 +280,17 @@ pub(crate) fn help_rows(keymap: &Keymap, active: Scope) -> Vec<HelpRow> {
         if !pane.is_empty() {
             rows.push(HelpRow::Header(format!("{} pane", active.title())));
             rows.extend(pane);
-            if matches!(active, Scope::Transfer | Scope::Spectrum) {
+            if matches!(
+                active,
+                Scope::Transfer | Scope::Spectrum | Scope::Spectrograph3d
+            ) {
                 rows.extend(PLATE_MOUSE.iter().map(|(keys, title)| HelpRow::Bind {
                     keys: (*keys).into(),
                     title: (*title).into(),
                 }));
             }
-            // The spectrum pane's scope covers the flat spectrograph too.
+            // The spectrum pane's scope covers the flat spectrograph too; every one of them
+            // has the same legend plate.
             if matches!(
                 active,
                 Scope::Transfer | Scope::Spectrum | Scope::Spectrograph3d
@@ -658,12 +662,12 @@ mod tests {
         let ir = help_rows(&Keymap::default(), Scope::Ir);
         assert!(!binds(&ir).contains(&PLATE_MOUSE[0]));
         assert!(!binds(&ir).contains(&LEGEND_CLICK));
-        // Peak points: a legend row's click on the spectrum, both spectrographs (the flat one
-        // is the spectrum pane's scope) and the transfer plot alike.
+        // The legend plate: a row's click and a drag on the spectrum, both spectrographs
+        // (the flat one is the spectrum pane's scope) and the transfer plot alike.
         assert!(b.contains(&LEGEND_CLICK));
         let three_d = help_rows(&Keymap::default(), Scope::Spectrograph3d);
         assert!(binds(&three_d).contains(&LEGEND_CLICK));
-        assert!(!binds(&three_d).contains(&PLATE_MOUSE[0]));
+        assert!(binds(&three_d).contains(&PLATE_MOUSE[0]));
         let spectrum = help_rows(&Keymap::default(), Scope::Spectrum);
         assert!(binds(&spectrum).contains(&LEGEND_CLICK));
     }

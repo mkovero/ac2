@@ -452,7 +452,14 @@ fn the_spectrum_part_keeps_its_legend_unit_and_selection() {
     assert_eq!(sp.legend_shown, ["Main L S1", "Main L S2"]);
     let selected: Vec<bool> = sp.legend.iter().map(|e| e.selected).collect();
     assert_eq!(selected, [false, true]);
-    assert!(sp.legend_rect.bottom() <= sp.plot.y);
+    let lb = sp.legend_box.as_ref().expect("the spectrum's legend plate");
+    assert!(lb.rect.y >= sp.plot.y && lb.rect.bottom() <= sp.plot.bottom());
+    assert_eq!(
+        s.legend().map(|b| b.rect),
+        Some(lb.rect),
+        "the split's one legend"
+    );
+    assert!(s.legend_box.is_none());
     assert!(
         sp.plot.bottom() < s.plot.y,
         "the spectrum part is above the spectrograph"
@@ -801,12 +808,12 @@ fn the_3d_view_on_a_gpu_without_it_is_the_spectrograph_with_a_note() {
     assert!(shown(&none).contains(&NO_3D.to_string()));
 }
 
-/// Alone, the spectrograph has the spectrum's legend over the curve it draws (the stored
-/// one beside it is not drawn here, so it has no row): its row picks the measurement's peak
-/// points and carries the pick's cue, the caption picks nothing, and traces only (T) hides
-/// it. In the split the spectrum part's legend is the only one.
+/// Alone, the spectrograph has the legend plate of every view over the curve it draws (the
+/// stored one beside it is not drawn here, so it has no row), in the plot; with the
+/// measurement's peak mode tracking (P), its peaks are marked on the newest row and listed.
+/// In the split the spectrum part's legend and marks are the only ones.
 #[test]
-fn alone_the_legend_row_picks_and_the_split_leaves_it_to_the_spectrum() {
+fn alone_the_legend_plate_and_tracked_peaks_and_the_split_leaves_them_to_the_spectrum() {
     let mut h = SpectrographHistory::new(30);
     let mut f = Feed::new(&log_bins());
     f.push(&mut h, T0, -40.0);
@@ -835,7 +842,18 @@ fn alone_the_legend_row_picks_and_the_split_leaves_it_to_the_spectrum() {
         layer: 0,
     };
     let stored = crate::trace::TraceKey::Stored(ac2_proto::units::TraceId(7));
-    let traces = [trace(key, "Main"), trace(stored, "Main S1")];
+    let peaks = [
+        crate::spectrum::peaks::Peak {
+            freq_hz: 1000.0,
+            level: -40.0,
+        },
+        crate::spectrum::peaks::Peak {
+            freq_hz: 100.0,
+            level: -50.0,
+        },
+    ];
+    let mut traces = [trace(key, "Main"), trace(stored, "Main S1")];
+    traces[0].tracked = Some(&peaks);
     let input = SpectrographInput {
         key,
         history: &h,
@@ -867,24 +885,46 @@ fn alone_the_legend_row_picks_and_the_split_leaves_it_to_the_spectrum() {
         panic!("one row: {:?}", s.legend_hits)
     };
     assert_eq!(hit.key, key);
-    assert!(hit.rect.bottom() < s.plot.y - 16.0, "above the caption");
-    assert_eq!(s.picked_cue, None);
-    view.peak_points = Some(crate::view::PeakPoints {
-        key,
-        list: false,
-        named: false,
-    });
-    assert_eq!(at(&view).picked_cue, Some(key));
-    // Traces only: no legend, no hit.
+    let lb = s.legend_box.as_ref().expect("legend plate");
+    assert_eq!(lb.rect.x, s.plot.x + crate::legend::INSET);
+    assert_eq!(lb.rect.y, s.plot.y + crate::legend::INSET);
+    // Tracked: a box and a rank per peak at the plot's top, the list on its plate.
+    assert_eq!(s.peaks.len(), 1);
+    assert_eq!(s.peaks[0].rows.len(), 2);
+    let list = s.peak_list.as_deref().expect("peak list");
+    assert!(list.starts_with("1  1.00 kHz  −40.0 dBFS"), "{list}");
+    let ranks: Vec<&str> = s
+        .scene
+        .layers
+        .iter()
+        .flat_map(|l| &l.labels)
+        .filter(|l| l.text == "1" || l.text == "2")
+        .map(|l| l.text.as_str())
+        .collect();
+    assert_eq!(ranks, ["1", "2"]);
+    assert_eq!(
+        s.plates().iter().map(|p| p.kind).collect::<Vec<_>>(),
+        [
+            crate::plate::PlateKind::Legend,
+            crate::plate::PlateKind::Peaks
+        ]
+    );
+    // Traces only: the legend stays, as on every view; the peaks' marks and list go.
     view.chrome = crate::view::PlotChrome::Bare;
     let bare = at(&view);
-    assert!(bare.legend_shown.is_empty() && bare.legend_hits.is_empty());
-    assert_eq!(bare.picked_cue, None);
-    assert!(bare.plot.y < s.plot.y, "the plot takes the legend's room");
+    assert_eq!(bare.legend_hits.len(), 1);
+    assert!(bare.peak_list.is_none() && bare.peaks_box.is_none());
     view.chrome = crate::view::PlotChrome::Full;
+    // Hidden, as every legend.
+    view.legend.hidden = true;
+    let hidden = at(&view);
+    assert!(hidden.legend_box.is_none() && hidden.legend_hits.is_empty());
+    view.legend.hidden = false;
     view.spectrum.mode = SpectrumMode::Split;
     let s = at(&view);
     assert!(s.legend_hits.is_empty() && s.legend_shown.is_empty());
+    assert!(s.peaks.is_empty() && s.peaks_box.is_none());
     let sp = s.spectrum.expect("the spectrum part");
     assert_eq!(sp.legend_hits.len(), 2);
+    assert!(sp.peak_list.is_some(), "the spectrum lists them");
 }

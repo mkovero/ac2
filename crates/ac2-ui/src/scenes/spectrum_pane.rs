@@ -265,8 +265,8 @@ pub(crate) fn with_spectrum<R>(
                 .drawn(&c.tf.frame, now.instant)
         })
         .collect();
-    // The pane's own curve: its measurement's, else the first live one. Its mode gates
-    // the list, also for a picked curve (a stored one has no mode).
+    // The pane's own curve: its measurement's, else the first live one. Its mode (P) says
+    // whether its peaks are tracked.
     let tracked = shown
         .map(|m| m.id)
         .filter(|id| cols.iter().any(|c| c.meas.id == *id))
@@ -274,7 +274,6 @@ pub(crate) fn with_spectrum<R>(
     let listed = tracked
         .and_then(|id| cols.iter().find(|c| c.meas.id == id))
         .is_some_and(|c| st.display_of(c.meas).peak.tracks());
-    let pick = st.peak_points_of(pane);
     let mut traces = Vec::new();
     for ((c, note), drawn) in cols.iter().zip(&notes).zip(&drawn) {
         let name = c.meas.config.name.clone();
@@ -299,14 +298,10 @@ pub(crate) fn with_spectrum<R>(
         if display.peak.holds() {
             t.peak = st.rig.folded.peaks.get(&c.meas.id).map(|p| p.2.values());
         }
-        // One curve's peaks: the picked one's, else the pane's own measurement's while it
-        // tracks (the first live curve without one). Five marks per curve on several
-        // curves crowd the plot, and a list of fifteen rows is no longer read at a glance.
-        let mine = match pick {
-            Some(k) => k == TraceKey::Live(c.meas.id),
-            None => listed && Some(c.meas.id) == tracked,
-        };
-        if mine {
+        // One curve's peaks: the pane's own measurement's while it tracks (the first live
+        // curve without one). Five marks per curve on several curves crowd the plot, and a
+        // list of fifteen rows is no longer read at a glance.
+        if listed && Some(c.meas.id) == tracked {
             t.tracked = st
                 .rig
                 .folded
@@ -379,15 +374,7 @@ pub(crate) fn with_spectrum<R>(
             drawn: None,
             validity: None,
             peak: None,
-            tracked: (pick == Some(TraceKey::Stored(data.meta.id)))
-                .then(|| {
-                    st.rig
-                        .folded
-                        .trace_peaks
-                        .get(&data.meta.id)
-                        .map(Vec::as_slice)
-                })
-                .flatten(),
+            tracked: None,
             scale: *scale,
             quantity: *quantity,
             bin_hz: match quantity {
@@ -428,9 +415,5 @@ pub(crate) fn with_spectrum<R>(
     // The pane draws on the level range of the scale its curves are in.
     let mut view = st.view_for(pane);
     view.spectrum.level = view.spectrum.range(spectrum_scale(st, pane));
-    if let Some(p) = view.peak_points.as_mut() {
-        p.list = listed;
-        p.named = tracked.is_none_or(|id| p.key != TraceKey::Live(id));
-    }
     f(&traces, &status, &view)
 }

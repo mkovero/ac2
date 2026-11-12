@@ -354,6 +354,7 @@ fn spectrum_peak_tracking() {
     assert_eq!(
         kinds,
         [
+            ac2_scene::plate::PlateKind::Legend,
             ac2_scene::plate::PlateKind::Readout,
             ac2_scene::plate::PlateKind::Peaks
         ]
@@ -371,7 +372,9 @@ fn spectrum_peak_tracking() {
     });
     let s = scene(&h);
     assert_eq!(s.peak_list, None);
-    assert!(s.plates().is_empty(), "no plate under T");
+    // The legend stays, as on every view: it names the traces that are left.
+    let kinds: Vec<_> = s.plates().iter().map(|p| p.kind).collect();
+    assert_eq!(kinds, [ac2_scene::plate::PlateKind::Legend]);
     assert!(s.cursor.is_none());
     // Traces only: the traces alone, no peak mark of any kind.
     assert!(s.peaks[0].rows[0].mark.is_none(), "no box");

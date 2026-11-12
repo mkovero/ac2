@@ -411,5 +411,3 @@ fn hold_and_tracks_start_afresh_after_a_daemon_restart() {
         "{before:?} → {after:?}"
     );
 }
-
-mod peak_points;

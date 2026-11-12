@@ -149,9 +149,6 @@ pub(super) struct Folding {
     pub pairs_shown: Vec<(u16, u16)>,
     /// A spectrum pane shows a spectrograph: only then are histories kept.
     pub spectrograph_shown: bool,
-    /// Measurements whose live curve a pane picked ([`AppState::peak_points_of`]): their
-    /// peaks are tracked whatever their mode.
-    pub peak_picked: BTreeSet<MeasId>,
 }
 
 impl RigState {
@@ -212,7 +209,7 @@ impl RigState {
         out: &mut Vec<Request>,
     ) -> Vec<MeasId> {
         self.fold_peaks(&d);
-        self.fold_peak_tracks(&d, &fold.peak_picked);
+        self.fold_peak_tracks(&d);
         if fold.spectrograph_shown {
             self.fold_spectrographs(&d, fold.spec_ease);
         }
@@ -290,7 +287,6 @@ impl AppState {
             cooling: self.ember_cooling(),
             pairs_shown: self.programme_pairs_shown(),
             spectrograph_shown: self.spectrograph_shown(),
-            peak_picked: self.peak_picked(),
         }
     }
 }

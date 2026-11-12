@@ -417,7 +417,8 @@ impl SpectrographHistory {
 /// What the spectrograph shows: the history of the pane's measurement and how to read it.
 #[derive(Clone, Debug)]
 pub struct SpectrographInput<'a> {
-    /// The measurement's live curve: what its legend row (shown alone) picks.
+    /// The measurement's live curve: its legend row's (shown alone), and the one whose
+    /// tracked peaks (P) are marked on the newest row.
     pub key: crate::trace::TraceKey,
     pub history: &'a SpectrographHistory,
     pub name: String,
@@ -470,15 +471,45 @@ pub struct SpectrographScene {
     /// Where the marked multi-resolution spectrum's windows change, drawn across the
     /// history too: its rows above a line update more often than those below.
     pub stitches: Vec<crate::stitch::Stitch>,
-    /// Shown alone, the legend above the caption as drawn: the measurement's curve, named
-    /// and tagged as in the spectrum's legend. Empty in the split, whose spectrum has the
-    /// legend, and in traces only.
+    /// Shown alone, the legend's rows as drawn: the measurement's curve, named and tagged
+    /// as in the spectrum's legend. Empty in the split, whose spectrum has the legend.
     pub legend_shown: Vec<String>,
-    /// Where its row is: a click there picks the measurement's peak points (no level axis
-    /// here to put them on; the row's cue says it is picked).
+    /// Shown alone, the legend's plate; `None` in the split, when hidden or without a curve.
+    pub legend_box: Option<crate::legend::LegendBox>,
+    /// Where its row is: a click there selects the measurement.
     pub legend_hits: Vec<crate::legend::LegendHit>,
-    /// The legend row drawn with the pick's cue.
-    pub picked_cue: Option<crate::trace::TraceKey>,
+    /// Shown alone, the measurement's tracked peaks (P), each marked at its frequency on
+    /// the newest row with its rank; empty in the split, whose spectrum marks them on the
+    /// curve, and while its peak mode does not track.
+    pub peaks: Vec<crate::spectrum::SpectrumPeaks>,
+    /// Their list as drawn; `None` without one, or at traces only (T).
+    pub peak_list: Option<String>,
+    /// The peak list's plate.
+    pub peaks_box: Option<crate::plate::PlateBox>,
+}
+
+impl SpectrographScene {
+    /// The plates the operator moves: the spectrum part's in the split, else the legend.
+    pub fn plates(&self) -> Vec<crate::plate::PlateBox> {
+        match &self.spectrum {
+            Some(sp) => sp.plates(),
+            None => self
+                .legend_box
+                .as_ref()
+                .map(|b| b.plate)
+                .into_iter()
+                .chain(self.peaks_box)
+                .collect(),
+        }
+    }
+
+    /// The legend the operator moves and scrolls: the spectrum part's in the split.
+    pub fn legend(&self) -> Option<&crate::legend::LegendBox> {
+        match &self.spectrum {
+            Some(sp) => sp.legend_box.as_ref(),
+            None => self.legend_box.as_ref(),
+        }
+    }
 }
 
 /// The caption's last words when a layout names the 3D view on a GPU without it.
@@ -521,23 +552,11 @@ pub fn spectrograph_scene(
     let alone = view.spectrum.mode == SpectrumMode::Spectrograph || no_3d;
     // The colour bar sits right of the plots; a column neighbour may reserve more.
     let right = crate::freq_column::right(RIGHT_MARGIN, view);
-    let mut legend = None;
     let (spectrum, mut layers, banners, top) = if alone {
         let mut c0 = Canvas::new(size, theme);
         let plot_w = (size.width - MARGINS.left - right).max(1.0);
         let strip = canvas::banner_strip(&mut c0, status, MARGINS.left, plot_w, size, theme);
-        let rows = legend_rows(
-            &mut c0.overlay,
-            traces,
-            sg.map(|s| s.key),
-            view,
-            strip.rect.bottom(),
-            plot_w,
-            size.height - strip.rect.bottom() - MARGINS.top - CAPTION_H - MARGINS.bottom,
-            theme,
-        );
-        let top = strip.rect.bottom() + rows.as_ref().map_or(0.0, |r| r.rect.h) + MARGINS.top;
-        legend = rows;
+        let top = strip.rect.bottom() + MARGINS.top;
         (None, c0.into_scene(size).layers, strip.rows, top)
     } else {
         let top_h = ((size.height - PANE_GAP) * SPECTRUM_SHARE).floor().max(1.0);
@@ -672,9 +691,9 @@ pub fn spectrograph_scene(
             if let Some(unit) = s.history.unit_noted() {
                 caption.push_str(&format!(" · {unit}"));
             }
-            // The legend above tags the curve; without one (traces only), the caption does.
+            // The legend tags the curve; without one (hidden), the caption does.
             let tag = match s.freshness {
-                Some(f) if alone && legend.is_none() => f.tag(),
+                Some(f) if alone && !legend_shows(traces, s.key, view) => f.tag(),
                 Some(f) if f.is_stopped() => f.tag(),
                 _ => None,
             };
@@ -817,6 +836,20 @@ pub fn spectrograph_scene(
             theme.text,
         ));
     }
+    let (peaks, peak_list, peaks_box) = match sg {
+        Some(s) if alone && message.is_none() => {
+            tracked_marks(&mut c, traces, s.key, view, plot, &xm, theme)
+        }
+        _ => (Vec::new(), None, None),
+    };
+    // Alone, the legend plate over the one curve drawn; in the split the spectrum's is the
+    // pane's legend. Over the
+    // cursor's lines, as the plates are on every view.
+    let legend = if alone {
+        legend_over(&mut c.overlay, traces, sg.map(|s| s.key), view, plot, theme)
+    } else {
+        None
+    };
     layers.extend(c.into_scene(size).layers.into_iter().take(3));
     SpectrographScene {
         scene: Scene {
@@ -835,30 +868,99 @@ pub fn spectrograph_scene(
         message,
         stitches,
         legend_shown: legend.as_ref().map_or_else(Vec::new, |l| l.shown.clone()),
+        legend_box: legend.as_ref().and_then(|l| l.b.clone()),
         legend_hits: legend.as_ref().map_or_else(Vec::new, |l| l.hits.clone()),
-        picked_cue: legend.and_then(|l| l.picked_cue),
+        peaks,
+        peak_list,
+        peaks_box,
     }
 }
 
-/// The legend rows of a spectrograph shown alone, from `y` across `width`, over the one
-/// curve it draws (`key`'s, found in `traces`): its name and tags as the spectrum's legend
-/// has them, and a click on it picks its peak points as there. `None` without that curve,
-/// and in traces only (T), which hides it as it hides the other decorations. `free`: the
-/// pane's height for plot and legend.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn legend_rows(
+/// The tracked peaks (P) of curve `key` on a spectrograph shown alone: no level axis to
+/// put them on, so each is a box at its frequency on the newest row (the plot's top edge)
+/// with its rank under it, listed on the peak list's plate as the spectrum lists them;
+/// traces only (T) hides marks and list. Its peaks, the list and its plate.
+fn tracked_marks(
+    c: &mut Canvas,
+    traces: &[SpectrumTrace<'_>],
+    key: crate::trace::TraceKey,
+    view: &ViewState,
+    plot: Rect,
+    xm: &crate::axis::Mapping,
+    theme: &Theme,
+) -> (
+    Vec<crate::spectrum::SpectrumPeaks>,
+    Option<String>,
+    Option<crate::plate::PlateBox>,
+) {
+    let Some(t) = traces.iter().find(|t| t.key == key && t.tracked.is_some()) else {
+        return (Vec::new(), None, None);
+    };
+    let peaks = crate::spectrum::tracked_peaks(std::slice::from_ref(t), xm, None, plot, false);
+    let Some(p) = peaks.first().filter(|p| !p.rows.is_empty()) else {
+        return (peaks, None, None);
+    };
+    if !view.chrome.peak_marks() {
+        return (peaks, None, None);
+    }
+    let half = crate::spectrum::MARK_HALF;
+    let stroke = crate::primitives::Stroke::solid(theme.text, 1.5);
+    for (k, r) in p.rows.iter().enumerate() {
+        let x = xm.to_px(r.freq_hz);
+        if !(x.is_finite() && x >= plot.x && x <= plot.right()) {
+            continue;
+        }
+        let (y0, y1) = (plot.y + 1.0, plot.y + 1.0 + 2.0 * half);
+        c.overlay.polylines.push(Polyline::clipped(
+            vec![
+                [x - half, y0],
+                [x + half, y0],
+                [x + half, y1],
+                [x - half, y1],
+                [x - half, y0],
+            ],
+            stroke,
+            plot,
+        ));
+        // The rank ties a mark to its row in the list; under the box, as the plot's top
+        // is the newest row's edge.
+        let mut l = label(
+            (k + 1).to_string(),
+            [x, y1 + 2.0],
+            anchor(HAlign::Center, VAlign::Top),
+            theme.small_font_size,
+            theme.text,
+        );
+        l.clip = Some(plot);
+        c.overlay.labels.push(l);
+    }
+    let list = crate::spectrum::list_text(&[(t, p)]);
+    let top = plot.y + crate::legend::INSET + crate::legend::PAD_Y;
+    let b = crate::spectrum::peak_plate(c, &list, plot, top, None, view, theme);
+    (peaks, Some(list), Some(b))
+}
+
+/// Whether a spectrograph's legend plate names curve `key`: not hidden, and the curve is
+/// among `traces`.
+pub(crate) fn legend_shows(
+    traces: &[SpectrumTrace<'_>],
+    key: crate::trace::TraceKey,
+    view: &ViewState,
+) -> bool {
+    !view.legend.hidden && traces.iter().any(|t| t.key == key)
+}
+
+/// The legend plate of a spectrograph shown alone, in `plot`, over the one curve it draws
+/// (`key`'s, found in `traces`): its name and tags as the spectrum's legend has them, moved,
+/// scaled and hidden as every legend is. `None` without that curve.
+pub(crate) fn legend_over(
     layer: &mut crate::primitives::Layer,
     traces: &[SpectrumTrace<'_>],
     key: Option<crate::trace::TraceKey>,
     view: &ViewState,
-    y: f32,
-    width: f32,
-    free: f32,
+    plot: Rect,
     theme: &Theme,
-) -> Option<crate::spectrum::LegendStrip> {
-    if view.chrome == crate::view::PlotChrome::Bare {
-        return None;
-    }
+) -> Option<crate::spectrum::SpectrumLegend> {
     let drawn: Vec<SpectrumTrace<'_>> = traces
         .iter()
         .filter(|t| Some(t.key) == key)
@@ -867,17 +969,9 @@ pub(crate) fn legend_rows(
     if drawn.is_empty() {
         return None;
     }
-    let strip = crate::spectrum::legend_strip(
-        layer,
-        &drawn,
-        view.peak_points.map(|p| p.key),
-        MARGINS.left,
-        y,
-        width,
-        free,
-        theme,
-    );
-    (!strip.shown.is_empty()).then_some(strip)
+    Some(crate::spectrum::legend_of(
+        layer, &drawn, view, plot, plot, theme,
+    ))
 }
 
 #[cfg(test)]

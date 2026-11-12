@@ -90,8 +90,6 @@ pub use programme::{MAX_METERED, Metered, ProgrammeUi, ballistic};
 mod meter_form;
 mod new_meas;
 mod panes;
-mod peak_points;
-pub use peak_points::PeakPick;
 mod queries;
 pub(crate) mod sessions_impl;
 mod target;
@@ -549,7 +547,7 @@ impl AppState {
             }
             Msg::DistortionUnit(unit) => self.view.distortion.unit = unit,
             Msg::Plate(m) => self.plate_msg(m),
-            Msg::LegendScroll { first } => self.view.tf.legend.first = first,
+            Msg::LegendScroll { first } => self.view.legend.first = first,
         }
     }
 

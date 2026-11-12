@@ -59,7 +59,7 @@ impl AppState {
         if let Some(p) = self.plate_mut(id, PlateKind::Legend) {
             p.at = Some(c.position());
         }
-        self.view.tf.legend.hidden = false;
+        self.view.legend.hidden = false;
     }
 }
 

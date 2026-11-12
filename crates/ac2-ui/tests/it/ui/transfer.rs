@@ -440,7 +440,7 @@ fn transfer_legend_many_curves() {
     h.key_press(Key::W);
     step_until(&mut h, "maximised", |a| a.state.layout.maximized);
     settle(&mut h, 3);
-    let legend = |h: &Harness<'_, App>| h.state().state.view.tf.legend;
+    let legend = |h: &Harness<'_, App>| h.state().state.view.legend;
     let id = h.state().state.layout.focus;
     let place = |a: &App| a.state.layout.view(id).expect("pane").plates.legend;
     let rects = |h: &Harness<'_, App>| h.state().plate_rects(id, PlateKind::Legend);
@@ -469,7 +469,7 @@ fn transfer_legend_many_curves() {
         });
         settle(&mut h, 20);
     }
-    step_until(&mut h, "scrolled", |a| a.state.view.tf.legend.first > 0);
+    step_until(&mut h, "scrolled", |a| a.state.view.legend.first > 0);
     assert_eq!(h.state().state.view.freq, freq);
     h.event(Event::PointerMoved(egui::pos2(900.0, 700.0)));
     h.state_mut().state.toasts.list.clear();

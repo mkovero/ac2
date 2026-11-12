@@ -1,8 +1,10 @@
 # Peak points from the legend
 
-Status: implemented (`ac2_scene::spectrum::points`, `ac2_scene::spectrograph_3d::points`,
-`ac2-ui` `state/peak_points.rs`); off the wire, no PROTO bump. Where the build differs from
-this note, see *As built* at the end.
+Status: superseded. **P** (peak hold Track) is the one peak UX in every view; a legend
+click only selects its curve, and the legend is one movable plate on every view. The
+legend-row pick, `spectrum::points` and `state/peak_points.rs` are gone; the 3D front-row
+boxes (`spectrograph_3d::points`) now show the tracked peaks. Kept as the record of the
+rejected design.
 
 A click on a curve's legend row shows that curve's **peak points**: its five peaks, each
 with frequency and level, on the spectrum pane and in every G view of it, the 3D

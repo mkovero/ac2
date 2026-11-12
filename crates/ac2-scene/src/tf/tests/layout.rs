@@ -420,7 +420,7 @@ fn many_curves_scroll_on_a_plate() {
         .count();
     assert_eq!(n, b.shown + 1);
     // Scrolled to the end, the pointer on it.
-    view.tf.legend.first = b.scrolled(100);
+    view.legend.first = b.scrolled(100);
     view.plate_hover = Some(crate::plate::PlateHover {
         kind: crate::plate::PlateKind::Legend,
         grip: false,
@@ -487,7 +487,7 @@ fn legend_corners_and_hidden() {
     assert_eq!(b.rect.bottom(), mag.bottom() - crate::legend::INSET);
     let values = s.readout_box.expect("values").rect;
     assert_eq!(values.x, mag.x + crate::legend::INSET);
-    view.tf.legend.hidden = true;
+    view.legend.hidden = true;
     let s = build(&view);
     assert_eq!(s.legend_box, None);
     let labels: Vec<&str> = s.scene.layers[2]

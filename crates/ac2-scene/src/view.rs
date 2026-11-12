@@ -364,9 +364,6 @@ pub struct TfView {
     /// Trace whose measured delay is the phase reference (decision 8b). `None`: the first
     /// trace with a shared time base.
     pub phase_reference: Option<TraceKey>,
-    /// The legend over the magnitude pane: shown or not, scrolled how far (its place and
-    /// text size are the pane's [`ViewState::plates`]).
-    pub legend: LegendView,
     /// Min / max tracking (P): the highest peaks and deepest dips of the magnitude marked
     /// and listed.
     pub extremes: bool,
@@ -383,7 +380,6 @@ impl Default for TfView {
             coherence: CoherenceStyle::default(),
             coherence_placement: CoherencePlacement::Pane,
             phase_reference: None,
-            legend: LegendView::default(),
             extremes: false,
         }
     }
@@ -781,7 +777,7 @@ impl PlotChrome {
     pub fn name(self) -> &'static str {
         match self {
             Self::Full => "grid, labels and cursor",
-            // "Marks" alone would read as covering peak points, which stay at this step.
+            // "Marks" alone would read as covering the peak marks, which stay at this step.
             Self::NoGrid => "no grid or resolution marks",
             Self::Bare => "traces only",
         }
@@ -801,8 +797,8 @@ impl PlotChrome {
         self != Self::Bare
     }
 
-    /// Every peak mark: the spectrum's peak list, its boxes, ranks and peak point labels,
-    /// and the transfer pane's min / max marks and list. They go together at *traces
+    /// Every peak mark: the tracked peaks' list, boxes and ranks (spectrum, both
+    /// spectrographs), and the transfer pane's min / max marks and list. They go together at *traces
     /// only*, so the same key does the same thing to the same kind of mark; *no grid*
     /// keeps them, since they are values like the axis labels.
     pub fn peak_marks(self) -> bool {
@@ -878,20 +874,10 @@ pub struct ViewState {
     pub plates: crate::plate::Plates,
     /// The plate under the pointer in the pane being drawn (lit, its grip shown bright).
     pub plate_hover: Option<crate::plate::PlateHover>,
-    /// The curve a legend click picked in the pane being drawn: its peaks show
-    /// as peak points; `None`: no pick, the pane's own curve is the tracked one.
-    pub peak_points: Option<PeakPoints>,
-}
-
-/// A pane's picked curve ([`ViewState::peak_points`]) and how its peaks show.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PeakPoints {
-    pub key: crate::trace::TraceKey,
-    /// The pane's own measurement tracks (P): the peaks are ranked and listed, as the own
-    /// curve's would be, instead of labelled one by one.
-    pub list: bool,
-    /// The curve is not the pane's own: a list of it says whose it is.
-    pub named: bool,
+    /// The curves' legend, one plate on every frequency view (transfer, spectrum, both
+    /// spectrographs): shown or not, scrolled how far (its place and text size are the
+    /// pane's [`Self::plates`]).
+    pub legend: LegendView,
 }
 
 impl Default for ViewState {
@@ -914,7 +900,7 @@ impl Default for ViewState {
             freq_right: 0.0,
             plates: crate::plate::Plates::default(),
             plate_hover: None,
-            peak_points: None,
+            legend: LegendView::default(),
         }
     }
 }

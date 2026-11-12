@@ -107,14 +107,6 @@ impl AppState {
             .plate_hover
             .filter(|(p, _)| *p == id)
             .map(|(_, h)| h);
-        // How the picked curve's peaks show is the spectrum pane's to say (its scene input).
-        v.peak_points = self
-            .peak_points_of(id)
-            .map(|key| ac2_scene::view::PeakPoints {
-                key,
-                list: false,
-                named: false,
-            });
         // The transfer scene lays out the plots it is asked for: one alone fills the pane.
         // The coherence rides on the magnitude view only when placed over it.
         let over =
@@ -130,7 +122,7 @@ impl AppState {
         }
         // The stack's top pane carries the legend for the column.
         if self.stacked_under(id) {
-            v.tf.legend.hidden = true;
+            v.legend.hidden = true;
         }
         v
     }

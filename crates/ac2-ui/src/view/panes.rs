@@ -131,7 +131,6 @@ fn build_scene(
         && c.freq_right == freq_right
         && c.theme == app.state.theme
         && c.axes3d == app.state.axes3d_alpha(id)
-        && c.peak_points == app.state.peak_points_of(id)
         && (pane != PaneKind::Spl || c.spl_scales == app.state.spl_scales)
     {
         let axes = Axes {
@@ -213,14 +212,17 @@ fn build_scene(
             let sky = &mut kept.1;
             let motion = (st.axes3d_alpha(id), st.scroll_lead(id, now.instant));
             let s = scenes::spectrograph_3d(st, id, sky, tier, motion, theme, vp, now);
+            plates = s.plates();
+            legend = s.legend_box.clone();
             legend_hits = s.legend_hits.clone();
             (s.scene, Axes::default())
         }
         PaneKind::Spectrum if view.modes.spectrum.spectrograph() => {
             let s = scenes::spectrograph(st, id, theme, vp, now);
+            plates = s.plates();
+            legend = s.legend().cloned();
             legend_hits = s.legend_hits.clone();
             if let Some(sp) = &s.spectrum {
-                plates = sp.plates();
                 legend_hits = sp.legend_hits.clone();
                 let r = sp.unit_rect;
                 unit_tip = sp.unit_help.clone().map(|h| {
@@ -244,6 +246,7 @@ fn build_scene(
         PaneKind::Spectrum => {
             let s = scenes::spectrum(st, id, theme, vp, now);
             plates = s.plates();
+            legend = s.legend_box.clone();
             legend_hits = s.legend_hits;
             let r = s.unit_rect;
             unit_tip = s.unit_help.map(|h| {
@@ -301,7 +304,6 @@ fn build_scene(
             freq_right,
             theme: app.state.theme,
             axes3d: app.state.axes3d_alpha(id),
-            peak_points: app.state.peak_points_of(id),
             spl_scales: if pane == PaneKind::Spl {
                 app.state.spl_scales.clone()
             } else {

@@ -1177,10 +1177,10 @@ text size), *Show/hide legend*. Whether it is hidden is kept in `ui.toml`
 
 #### Moving the plates and their text size
 
-The legend, the cursor values, the mark's readout, the spectrum's list of tracked peaks and
-the Programme pane's loudness readout are plates, and every plate takes the same mouse
-(transfer, spectrum and Programme panes; a spectrum's legend is a strip of rows above the
-plot, not a plate, and its mark lines ride on the cursor values' plate):
+The legend, the cursor values, the mark's readout, the list of tracked peaks and the
+Programme pane's loudness readout are plates, and every plate takes the same mouse
+(transfer, spectrum, both spectrographs and Programme panes; a spectrum's mark lines ride
+on the cursor values' plate):
 
 - **Drag** a plate anywhere inside its plot. It stays where it was dropped as the pane
   grows or shrinks (kept as a share of the room around it, so one dropped against an edge
@@ -1266,17 +1266,13 @@ unit.
 #### The spectrum legend
 
 It names every curve the pane draws (live spectra and RTAs, then shown captures) with its
-colour and tags (`stopped`, `STALE 3.2 s`, `offset +3.0 dB`), in rows above the plot so it
-never covers a curve; a narrow pane drops tags first, then shows `+2 more`. A click selects
-the curve and shows its **peak points**, its five peaks with frequency and level. A click on
-the picked row clears them (**A** hides the curve). The picked row carries a small hollow
-box on its swatch and is never folded into `+N more`. A tap does the same on a kiosk.
-
-Peak points belong to the pane and this app: two panes on one measurement pick apart,
-nothing is sent to the daemon or saved, and **Ctrl+Z** does not undo a pick. A pick goes
-when its curve leaves the pane (unticked with **C**, hidden with **A**, another row dropped
-on the pane, the pane closed or pinned to another rig, the daemon restarted) and does not
-come back by itself; a reconnect to the same daemon keeps it.
+colour and tags (`stopped`, `STALE 3.2 s`, `offset +3.0 dB`) on the same plate as the
+transfer legend, under the unit at the plot's top left: drag it, size its text, double-click
+it back ([Moving the plates and their text size](#moving-the-plates-and-their-text-size)); rows
+that do not fit scroll with the wheel over it, a line saying how many are out of view. Both
+spectrographs carry the same plate. A click (or tap) on a row selects that curve, so its keys
+act on it (**A** hides it). The palette's *Legend top-left* … *Show/hide legend* work here
+as on a transfer pane; the legend's shown or hidden state is one for every pane.
 
 #### How a live spectrum is drawn
 
@@ -1339,17 +1335,11 @@ invalid columns and a multi-resolution spectrum's unresolved columns hold no pea
 not hop: a marked peak keeps its place unless a rival beats it by more than 3 dB, and keeps
 its row unless the one below beats it by more than 1 dB.
 
-**Peak points** ([the spectrum legend](#the-spectrum-legend)) need no **P**: a click on a
-legend row shows the curve's five peaks by the same rules, each box labelled `1.00 kHz
-−32.0 dBFS` (the quantity note only on a pane mixing quantities). Labels that would touch
-keep the louder peak's; one the plot's top would cut goes below its box. **P** stays the
-switch for the list and the ranks: while the pane's own measurement tracks (else the first
-live curve's), the list and ranks go to the picked curve, the list naming it when it is not
-the pane's own, and its labels give way to the list. With nothing picked tracking marks the
-pane's own curve as above. A stopped curve shows the points of its newest frame; before any
-data there are none. A capture of a multi-resolution spectrum gets peak points across its
-whole range (it keeps no unresolved ranges); its live curve skips the unresolved ones.
-**T** to traces only hides every peak mark: boxes, ranks, labels and the list.
+**P** is the one way to peaks, in every view of the measurement: the flat spectrograph
+alone marks the tracked peaks at the top (newest) edge with a box and rank and lists them
+on the same plate, and the 3D spectrograph stands them on its front row (see below). A
+stopped curve shows the peaks of its newest frame; before any data there are none. **T** to
+traces only hides every peak mark: boxes, ranks and the list.
 
 #### Fixed or multi-resolution
 
@@ -1451,10 +1441,10 @@ bar spans the pane's level axis, so the level-axis keys change the colours.
   <meas> --span 60`); every length keeps a row per 33 ms. It starts afresh at each length
   and when the spectrograph comes into view.
 - A click puts the cursor: `1.00 kHz · 4.2 s ago · −32.0 dBFS`.
-- With the spectrograph alone, the spectrum's legend row for the measurement stands above
-  its caption; a click or tap on it picks the measurement's **peak points**, as in the
-  spectrum; again clears them. With the spectrum beside it, the spectrum's legend picks.
-  *Traces only* (T) hides the row.
+- With the spectrograph alone, the legend plate names the measurement, as in the spectrum
+  (with the spectrum beside it, the spectrum's legend is the pane's). While the
+  measurement's peaks track (**P**), each is a box at its frequency on the top (newest)
+  edge with its rank under it, listed on the peak list's plate.
 - Time without frames (STALE, stopped) is a gap, never the last spectrum stretched. Where a
   pixel covers several frames or frequencies it shows the highest level, so short events
   and narrow tones are never lost.
@@ -1485,7 +1475,7 @@ per frequency and moment, as tall as its level. **G** once more is the spectrum 
 
 - **Axes on demand**: the frequency, time and height labels, the floor grid and the
   ceiling line cover the skyline, so at rest the view is the spikes on their floor, the
-  legend row and the caption. The axes show while the pointer is over the view or for a few seconds after a
+  legend plate and the caption. The axes show while the pointer is over the view or for a few seconds after a
   touch, a click, a camera move or a level-range change, fading in and out. **T** still
   sets which of them show; *traces only* keeps them hidden even then. An exported PNG
   always has them.
@@ -1493,13 +1483,13 @@ per frequency and moment, as tall as its level. **G** once more is the spectrum 
   Shift+wheel still zoom and pan the level range. The camera is kept with the pane and the
   measurement's layout. The cursor keys (Shift+←/→, Shift+T) and **C** do nothing here:
   there is no cursor and no compared curve in 3D.
-- **Peak points**: the measurement's legend row stands above the caption, as in 2D; a
-  click or tap on it picks the measurement (a hollow box on its swatch shows it); again
-  clears them. *Traces only* hides the row. Its five peaks
-  stand as boxes on the front (newest) row, each labelled with frequency and level on a
-  plate; a peak higher than its cell's spike sits on the spike's top, its label keeping the
-  peak's level. They show at rest, without the axes; *traces only* hides them. **P** alone
-  draws nothing here: the list and ranks are 2D's.
+- **Legend**: the same plate as in 2D, moved and sized the same way; a click on its row
+  selects the measurement.
+- **Peaks**: while the measurement's peaks track (**P**, set one **G** back: the key is
+  the 2D views'), its five peaks stand as boxes on the front (newest) row, each labelled
+  with frequency and level on a plate; a peak higher than its cell's spike sits on the
+  spike's top, its label keeping the peak's level. They show at rest, without the axes;
+  *traces only* hides them.
 - **Colour** is the loudest spike along the line of sight, so a tall peak behind a low row
   still shows its colour. Read levels from the heights against the level ticks, or go one
   **G** back to the 2D spectrograph and its cursor. The *ice* colour map (palette
@@ -1630,9 +1620,8 @@ They are this app's settings (`ui.toml`, `[advice]`).
 ### Min / max tracking on the transfer function
 
 **P** on a transfer pane turns min / max tracking on or off. It marks the five highest
-peaks (▲) and the five deepest dips (▼) of one curve's magnitude (the curve picked by a
-click on its legend row, else the pane's own; the picked row carries a hollow box while min /
-max is on, and a click there while it is off only selects) and lists them on a plate in a bottom corner of the magnitude view, clear
+peaks (▲) and the five deepest dips (▼) of one curve's magnitude (the selected curve when
+the pane shows it, a click on its legend row selecting it, else the pane's own) and lists them on a plate in a bottom corner of the magnitude view, clear
 of the legend and the cursor values: `max` and `min`, each row rank, frequency and dB. It
 reads the magnitude as drawn: smoothed, with its offset, without coherence-blanked or
 invalid columns. Peaks and dips follow the spectrum's rules (6 dB prominence, 1/6 octave

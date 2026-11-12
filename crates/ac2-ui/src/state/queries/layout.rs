@@ -255,7 +255,7 @@ impl AppState {
             self.prefs.ir_levels = levels;
             self.prefs_dirty = true;
         }
-        let legend = crate::prefs::LegendPrefs::of(&self.view.tf.legend);
+        let legend = crate::prefs::LegendPrefs::of(&self.view.legend);
         if legend != self.prefs.legend {
             self.prefs.legend = legend;
             self.prefs_dirty = true;
@@ -329,8 +329,6 @@ impl AppState {
         let l = &prefs.layout;
         self.rig.pending.pane_meas.clear();
         self.others.rig_pending.clear();
-        // Stored ids may name other content here: no pick carries over.
-        self.pane_local.peak_points.clear();
         self.level_axes.pane_levels.clear();
         self.level_axes.level_set.clear();
         self.level_axes.spectrum_hold.clear();
@@ -419,7 +417,7 @@ impl AppState {
         self.view.distortion.unit = l.distortion_unit;
         // Before any frame: a spectrum that starts still fits its axis on its first one.
         prefs.ir_levels.apply(&mut self.view);
-        prefs.legend.apply(&mut self.view.tf.legend);
+        prefs.legend.apply(&mut self.view.legend);
         self.view.unresolved = prefs.resolution_marker;
         self.view.range_band = prefs.range_band;
         self.view.sim_hints = prefs.sim_hints;

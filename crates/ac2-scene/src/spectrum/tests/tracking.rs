@@ -86,7 +86,7 @@ fn tracked_peaks_are_listed_under_the_cursor_and_marked() {
     assert_eq!(plate.rect.right(), s.plot.right() - crate::legend::INSET);
     assert_eq!(
         s.plates().iter().map(|b| b.kind).collect::<Vec<_>>(),
-        [PlateKind::Readout, PlateKind::Peaks]
+        [PlateKind::Legend, PlateKind::Readout, PlateKind::Peaks]
     );
     // Rank numbers beside the marks.
     for k in ["1", "2", "3"] {
@@ -111,7 +111,11 @@ fn traces_only_hides_every_peak_mark() {
     );
     assert_eq!(s.peak_list, None);
     assert_eq!(s.peaks_box, None);
-    assert!(s.plates().is_empty());
+    // Only the legend's plate: T leaves the curves' names, as on the transfer view.
+    assert_eq!(
+        s.plates().iter().map(|b| b.kind).collect::<Vec<_>>(),
+        [PlateKind::Legend]
+    );
     assert!(s.cursor.is_none());
     assert_eq!(s.peaks[0].rows.len(), 3);
     let overlay = &s.scene.layers[2];
@@ -192,7 +196,7 @@ fn dragged_cursor_values_leave_the_list_the_top() {
     let peaks = s.peaks_box.expect("the peak list's plate");
     let m = crate::plate::Metrics::new(&Theme::dark(), 1.0);
     assert_eq!(peaks.rect.y + m.pad_y, s.plot.y + 22.0);
-    assert_eq!(s.plates(), vec![b, peaks]);
+    assert_eq!(s.plates()[1..], [b, peaks]);
 }
 
 /// The peak list dragged to the bottom-left at twice the text size: its plate sits there

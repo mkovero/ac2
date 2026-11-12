@@ -170,8 +170,8 @@ impl AppState {
             C::LegendBottomLeft => self.snap_legend(LegendCorner::BottomLeft),
             C::LegendBottomRight => self.snap_legend(LegendCorner::BottomRight),
             C::LegendHide => {
-                let hidden = !self.view.tf.legend.hidden;
-                self.view.tf.legend.hidden = hidden;
+                let hidden = !self.view.legend.hidden;
+                self.view.legend.hidden = hidden;
                 self.toast(if hidden {
                     "legend hidden (Show/hide legend brings it back)"
                 } else {

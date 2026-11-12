@@ -287,13 +287,11 @@ impl AppState {
         }
     }
 
-    /// A click on a legend row of pane `p` (or a spectrograph's caption): selects exactly
-    /// the curve it names — a stored trace, else the measurement (or math channel) whose
-    /// live curve it is, as its row in the list does — so the keys of the selection (A
-    /// hides it) act on it, and picks its peak points (a click on the picked row clears
-    /// them). The pane keeps what it shows: the curve is on it already, and a compared
-    /// curve of another measurement selected must not swap the pane's curves under the
-    /// pointer.
+    /// A click on a legend row of pane `p`: selects exactly the curve it names — a stored
+    /// trace, else the measurement (or math channel) whose live curve it is, as its row in
+    /// the list does — so the keys of the selection (A hides it) act on it. The pane keeps
+    /// what it shows: the curve is on it already, and a compared curve of another
+    /// measurement selected must not swap the pane's curves under the pointer.
     pub(in crate::state) fn legend_pick(&mut self, p: PaneId, key: ac2_scene::trace::TraceKey) {
         use ac2_scene::trace::TraceKey;
         self.layout.set_focus(p);
@@ -301,7 +299,6 @@ impl AppState {
             TraceKey::Stored(id) => {
                 if self.trace_meta(id).is_ok() {
                     self.set_selected_trace(Some(id));
-                    self.toggle_peak_pick(p, key);
                 }
             }
             TraceKey::Live(id) => {
@@ -311,7 +308,6 @@ impl AppState {
                     self.rig.selected = Some(id);
                     self.rig.selected_trace = None;
                     self.rig.selected_live = live.then_some(id);
-                    self.toggle_peak_pick(p, key);
                 }
             }
         }

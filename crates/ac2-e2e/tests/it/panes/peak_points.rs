@@ -1,9 +1,10 @@
-//! Peak points from the legend, end to end: a click on a curve's legend row labels its
-//! peaks on the pane; again clears them; T to traces only hides them.
+//! Peaks by P, end to end: a click on a curve's legend row selects it and marks nothing;
+//! P to tracking lists the pane's own curve's peaks; T to traces only hides them.
 
 use super::new_spectrum;
 use crate::harness::{R, measuring};
 use ac2_proto::FrameData;
+use ac2_proto::model::PeakMode;
 use ac2_proto::topic::{Stream, Topic};
 use ac2_scene::primitives::Viewport;
 use ac2_scene::theme::Theme;
@@ -20,19 +21,16 @@ fn now() -> ac2_ui::scenes::Now {
     }
 }
 
-/// The peak point labels pane `p` draws.
-fn labels(s: &AppState, p: PaneId) -> Vec<String> {
-    ac2_ui::scenes::spectrum(s, p, &Theme::dark(), SIZE, now())
-        .peak_labels
-        .into_iter()
-        .map(|l| l.text)
-        .collect()
+/// The peak list pane `p` draws.
+fn list(s: &AppState, p: PaneId) -> Option<String> {
+    ac2_ui::scenes::spectrum(s, p, &Theme::dark(), SIZE, now()).peak_list
 }
 
-/// From an empty daemon, two spectra in one pane, pink noise fired: a click on the second's legend row
-/// labels its peaks, a click again clears them, and T twice (to traces only) hides them.
+/// From an empty daemon, two spectra in one pane, pink noise fired: a click on the second's
+/// legend row selects it and lists no peaks; P twice (hold, then track) lists the pane's
+/// own curve's peaks, and T twice (to traces only) hides them.
 #[test]
-fn a_legend_click_shows_peak_points_from_an_empty_daemon() -> R {
+fn a_legend_click_selects_and_p_tracks_from_an_empty_daemon() -> R {
     let (_daemon, mut d) = measuring()?;
     let s1 = new_spectrum(&mut d, false)?;
     let s2 = new_spectrum(&mut d, true)?;
@@ -71,21 +69,22 @@ fn a_legend_click_shows_peak_points_from_an_empty_daemon() -> R {
     d.key("Shift+Home");
     d.send(Msg::LegendPick(p, key));
     assert_eq!(d.st.rig.selected, Some(s2));
-    d.until("its peak points", |s| !labels(s, p).is_empty())?;
+    assert_eq!(list(&d.st, p), None, "a legend click marks no peaks");
+    // Each P edits the measurement on the daemon: the second steps from the first's reply.
+    let mode = |s: &AppState| s.pane_meas(p).map(|m| s.display_of(m).peak);
+    d.key("P");
+    d.until("peaks held", |s| mode(s) == Some(PeakMode::Hold))?;
+    d.key("P");
+    d.until("the tracked peaks listed", |s| list(s, p).is_some())?;
+    let l = list(&d.st, p).unwrap_or_default();
     assert!(
-        labels(&d.st, p)
-            .iter()
-            .all(|l| l.contains(" Hz  ") || l.contains(" kHz  ")),
-        "{:?}",
-        labels(&d.st, p)
+        l.lines()
+            .all(|r| r.contains("Hz") || !r.starts_with(char::is_numeric)),
+        "{l}"
     );
-    d.send(Msg::LegendPick(p, key));
-    assert_eq!(labels(&d.st, p), Vec::<String>::new(), "cleared");
-    d.send(Msg::LegendPick(p, key));
-    d.until("its peak points again", |s| !labels(s, p).is_empty())?;
     d.key("T");
-    assert!(!labels(&d.st, p).is_empty(), "no grid keeps them");
+    assert!(list(&d.st, p).is_some(), "no grid keeps them");
     d.key("T");
-    assert_eq!(labels(&d.st, p), Vec::<String>::new(), "traces only");
+    assert_eq!(list(&d.st, p), None, "traces only");
     Ok(())
 }

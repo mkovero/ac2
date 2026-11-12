@@ -29,28 +29,7 @@ pub(crate) fn spectrum_scene_in(
     let plot_w = (size.width - MARGINS.left - right).max(1.0);
     let strip = canvas::banner_strip(&mut c, status, MARGINS.left, plot_w, size, theme);
     let font = theme.small_font_size;
-    // The legend takes rows of its own between the banner strip and the plot, so it never
-    // covers a curve; a short pane gives it fewer rows.
-    let free = size.height - strip.rect.bottom() - MARGINS.top - MARGINS.bottom;
-    let pick = view.peak_points;
-    let rows = legend_strip(
-        &mut c.overlay,
-        traces,
-        pick.map(|p| p.key),
-        MARGINS.left,
-        strip.rect.bottom(),
-        plot_w,
-        free,
-        theme,
-    );
-    let plot = canvas::plot_area(size, strip.rect.bottom() + rows.rect.h, right);
-    let LegendStrip {
-        entries: legend,
-        shown: legend_shown,
-        rect: legend_rect,
-        hits: legend_hits,
-        picked_cue,
-    } = rows;
+    let plot = canvas::plot_area(size, strip.rect.bottom(), right);
     let full_caption = traces.first().map_or(String::new(), |t| t.caption.clone());
     // The unit (left) and the caption (right) share the plot's top line. The caption takes
     // its longest form that leaves the unit its compact form room (`dB SPL/bin`: a bin level
@@ -311,6 +290,19 @@ pub(crate) fn spectrum_scene_in(
             rows,
         })
     });
+    // On its plate, under the unit at the plot's top left unless dragged.
+    let legend_area = Rect::new(
+        plot.x,
+        plot.y + LEGEND_TOP,
+        plot.w,
+        (plot.h - LEGEND_TOP).max(1.0),
+    );
+    let SpectrumLegend {
+        entries: legend,
+        shown: legend_shown,
+        b: legend_box,
+        hits: legend_hits,
+    } = legend_of(&mut c.overlay, traces, view, legend_area, plot, theme);
     // The readouts stack down the plot's right side from here: the cursor's, then the
     // peak list under it (at the top when the cursor values were dragged elsewhere).
     let mut readout_y = plot.y + 22.0;
@@ -366,14 +358,7 @@ pub(crate) fn spectrum_scene_in(
         ));
     }
     let marks_on = view.chrome.peak_marks();
-    let peaks = tracked_peaks(traces, &xm, &ym, plot, marks_on);
-    // The picked curve's peaks are labelled one by one unless its pane's own mode tracks,
-    // when they are ranked and listed as the own curve's would be.
-    let labelled = |t: &SpectrumTrace<'_>| pick.is_some_and(|p| p.key == t.key && !p.list);
-    let mixed = traces
-        .first()
-        .is_some_and(|f| traces.iter().any(|t| t.quantity != f.quantity));
-    let mut to_label = Vec::new();
+    let peaks = tracked_peaks(traces, &xm, Some(&ym), plot, marks_on);
     for (t, p) in traces.iter().filter(|t| t.tracked.is_some()).zip(&peaks) {
         let color = t
             .color
@@ -391,42 +376,23 @@ pub(crate) fn spectrum_scene_in(
                 Stroke::solid(color, 1.5),
                 plot,
             ));
-            if labelled(t) {
-                to_label.push((m, points::point_text(r, t, mixed)));
-            } else {
-                // The rank ties a mark to its row in the list.
-                c.overlay.labels.push(label(
-                    (k + 1).to_string(),
-                    [m.x + m.w / 2.0, m.y - 2.0],
-                    anchor(HAlign::Center, VAlign::Bottom),
-                    font,
-                    theme.text,
-                ));
-            }
+            // The rank ties a mark to its row in the list.
+            c.overlay.labels.push(label(
+                (k + 1).to_string(),
+                [m.x + m.w / 2.0, m.y - 2.0],
+                anchor(HAlign::Center, VAlign::Bottom),
+                font,
+                theme.text,
+            ));
         }
     }
-    let peak_labels = points::label_marks(&mut c, &to_label, plot, theme);
     let listed: Vec<(&SpectrumTrace<'_>, &SpectrumPeaks)> = traces
         .iter()
         .filter(|t| t.tracked.is_some())
         .zip(&peaks)
-        .filter(|(t, p)| !labelled(t) && !p.rows.is_empty())
+        .filter(|(_, p)| !p.rows.is_empty())
         .collect();
-    let several = listed.len() > 1;
-    let peak_list = (marks_on && !listed.is_empty()).then(|| {
-        let mut lines = Vec::new();
-        for (t, p) in &listed {
-            // A curve's name heads its rows when the list could be read against another
-            // curve's, its levels are spread by an offset, or it is not the curve the eye
-            // expects (a picked curve not the pane's own).
-            let named = pick.is_some_and(|k| k.key == t.key && k.named);
-            if several || t.offset_db != 0.0 || named {
-                lines.push(p.name.clone());
-            }
-            lines.extend(p.rows.iter().map(|r| r.text.clone()));
-        }
-        lines.join("\n")
-    });
+    let peak_list = (marks_on && !listed.is_empty()).then(|| list_text(&listed));
     let peaks_box = peak_list
         .as_ref()
         .map(|list| peak_plate(&mut c, list, plot, readout_y, readout_box, view, theme));
@@ -451,11 +417,9 @@ pub(crate) fn spectrum_scene_in(
         peaks,
         peak_list,
         peaks_box,
-        peak_labels,
-        picked_cue,
         legend,
         legend_shown,
-        legend_rect,
+        legend_box,
         legend_hits,
         strip: strip.rect,
         banners: strip.rows,
@@ -464,6 +428,9 @@ pub(crate) fn spectrum_scene_in(
     }
 }
 
+/// Above the legend's plate placed by the scene: the unit's line at the plot's top.
+pub(crate) const LEGEND_TOP: f32 = 18.0;
+
 /// The gap left between the cursor values' plate and the peak list under it, in ems.
 const GAP_EM: f32 = 0.5;
 
@@ -471,7 +438,7 @@ const GAP_EM: f32 = 0.5;
 /// right edge with its text's top at `top` (under the cursor values while those are where
 /// the scene puts them); were it to cover cursor values dragged there (`readout`), it goes
 /// to the bottom-right corner instead. Dragged, it sits where it was dropped.
-fn peak_plate(
+pub(crate) fn peak_plate(
     c: &mut Canvas,
     list: &str,
     plot: Rect,
@@ -526,15 +493,31 @@ fn peak_plate(
 
 /// Half the side of a peak's box, logical pixels: big enough to find on a busy curve,
 /// small enough that marks a [`peaks::SPACING_OCT`] apart do not touch on a wide pane.
-const MARK_HALF: f32 = 4.0;
+pub(crate) const MARK_HALF: f32 = 4.0;
+
+/// The peak list of `listed` (each curve with its peaks), a row per peak.
+pub(crate) fn list_text(listed: &[(&SpectrumTrace<'_>, &SpectrumPeaks)]) -> String {
+    let several = listed.len() > 1;
+    let mut lines = Vec::new();
+    for (t, p) in listed {
+        // A curve's name heads its rows when the list could be read against another
+        // curve's, or its levels are spread by an offset.
+        if several || t.offset_db != 0.0 {
+            lines.push(p.name.clone());
+        }
+        lines.extend(p.rows.iter().map(|r| r.text.clone()));
+    }
+    lines.join("\n")
+}
 
 /// Each tracked curve's peaks, in [`SpectrumTrace::tracked`] order: a row per peak with
 /// its displayed level (offset included, as the cursor reads) and its box where it is on
-/// the plot, while `marks` (T) draws peak marks at all.
-fn tracked_peaks(
+/// the plot, while `marks` (T) draws peak marks at all; no box without a level axis `ym`
+/// (a spectrograph marks them itself).
+pub(crate) fn tracked_peaks(
     traces: &[SpectrumTrace<'_>],
     xm: &crate::axis::Mapping,
-    ym: &crate::axis::Mapping,
+    ym: Option<&crate::axis::Mapping>,
     plot: Rect,
     marks: bool,
 ) -> Vec<SpectrumPeaks> {
@@ -547,7 +530,7 @@ fn tracked_peaks(
                 .enumerate()
                 .map(|(k, p)| {
                     let level = p.level + t.offset_db;
-                    let (x, y) = (xm.to_px(p.freq_hz), ym.to_px(level));
+                    let (x, y) = (xm.to_px(p.freq_hz), ym.map_or(f32::NAN, |m| m.to_px(level)));
                     let inside = marks
                         && x.is_finite()
                         && y.is_finite()

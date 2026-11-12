@@ -28,11 +28,8 @@ pub struct Folded {
     /// capture time.
     pub peaks: BTreeMap<MeasId, (Option<FoldedAt>, u64, PeakHold)>,
     /// Tracked peaks per spectrum / RTA measurement, with the last frame folded in, kept
-    /// while peak tracking is on or a pane picked its curve.
+    /// while peak tracking is on.
     pub peak_tracks: BTreeMap<MeasId, (Option<FoldedAt>, ac2_scene::spectrum::peaks::PeakTracker)>,
-    /// The peaks of stored spectra a pane picked, found once per data: a stored trace is
-    /// fixed.
-    pub(crate) trace_peaks: BTreeMap<TraceId, Vec<ac2_scene::spectrum::peaks::Peak>>,
     /// Spectrograph history per spectrum / RTA measurement, kept while the spectrograph is
     /// shown.
     pub spectrographs: BTreeMap<MeasId, ac2_scene::spectrograph::SpectrographHistory>,

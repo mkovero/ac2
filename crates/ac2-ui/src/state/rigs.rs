@@ -394,7 +394,6 @@ impl AppState {
         self.follow_rig_ids(&ids);
         self.close_duplicates();
         self.settle_pins();
-        self.prune_peak_points();
         if !tick {
             self.refresh_rig_lists();
         }

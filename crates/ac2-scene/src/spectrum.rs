@@ -14,9 +14,7 @@ use ac2_proto::units::WallNs;
 
 use crate::axis::{self, Axis};
 use crate::banner::{BannerRow, Status};
-use crate::canvas::{
-    self, Canvas, MARGINS, anchor, cut_to, gapped, label, text_width, visible_columns,
-};
+use crate::canvas::{self, Canvas, MARGINS, anchor, gapped, label, text_width, visible_columns};
 use crate::format;
 use crate::grid::column_at;
 use crate::primitives::{
@@ -33,17 +31,13 @@ mod draw;
 mod legend;
 mod mark;
 pub mod peaks;
-mod points;
 mod units;
 pub use draw::spectrum_scene;
-pub(crate) use draw::spectrum_scene_in;
+pub(crate) use draw::{MARK_HALF, list_text, peak_plate, spectrum_scene_in, tracked_peaks};
 pub use legend::caption_forms;
 use legend::unit_forms;
-#[cfg(test)]
-use legend::{LEGEND_ROW, SWATCH_GAP};
-pub(crate) use legend::{LegendStrip, legend_strip};
+pub(crate) use legend::{SpectrumLegend, legend_of};
 pub use mark::jump;
-pub use points::PeakLabel;
 pub use units::{
     BinWidth, cal_caption, density_unit_help, fraction_label, level_unit, level_unit_forms,
     narrow_unit_help, quantity_note, tone_unit_help, value_unit, weighting_label, window_label,
@@ -103,8 +97,8 @@ pub struct SpectrumTrace<'a> {
     /// Peak-hold values, column-aligned ([`PeakHold`]).
     pub peak: Option<&'a [f32]>,
     /// Tracked peaks ([`peaks::PeakTracker`]), loudest first; `Some` on the one curve of
-    /// the pane whose peaks show: the picked one ([`ViewState::peak_points`]), labelled or
-    /// listed as it says, else the pane's own while its peak mode tracks, ranked and listed.
+    /// the pane whose peaks show: the pane's own while its peak mode tracks (P), ranked
+    /// and listed.
     pub tracked: Option<&'a [peaks::Peak]>,
     pub scale: LevelScale,
     pub quantity: Quantity,
@@ -437,19 +431,15 @@ pub struct SpectrumScene {
     pub peak_list: Option<String>,
     /// The peak list's plate, when the list is drawn.
     pub peaks_box: Option<crate::plate::PlateBox>,
-    /// The picked curve's peak points as labelled (loudest first; a label that would
-    /// overlap a louder one's is left out, its box stays).
-    pub peak_labels: Vec<PeakLabel>,
-    /// The legend entry drawn with the pick's cue: the picked curve's, when it has a row.
-    pub picked_cue: Option<TraceKey>,
     /// One entry per curve, in drawing order: name, colour and tags (`stopped`,
-    /// `STALE 3.2 s`, `offset +3.0 dB`). Drawn in rows above the plot, never over a curve.
+    /// `STALE 3.2 s`, `offset +3.0 dB`), on the legend plate as on the transfer view.
     pub legend: Vec<LegendEntry>,
-    /// The legend as drawn: entry texts, shortened to fit (`+2 more` when entries do not).
+    /// The legend's shown rows as drawn (cut to the plate's width; the rest scroll).
     pub legend_shown: Vec<String>,
-    /// The band the legend takes above the plot; zero height without one.
-    pub legend_rect: Rect,
-    /// Where each drawn legend entry is, for a click to select its curve.
+    /// Where the legend went (`None`: hidden or no curve): the UI moves, resizes and
+    /// scrolls it by this.
+    pub legend_box: Option<crate::legend::LegendBox>,
+    /// Where each shown legend row is, for a click to select its curve.
     pub legend_hits: Vec<crate::legend::LegendHit>,
     /// Banner strip above the plot; zero height when no banner is up.
     pub strip: Rect,
@@ -462,10 +452,16 @@ pub struct SpectrumScene {
 }
 
 impl SpectrumScene {
-    /// The plates the operator moves: the cursor values and the peak list (the legend is
-    /// rows above the plot, no plate; the mark's lines ride on the cursor values' plate).
+    /// The plates the operator moves: the legend, the cursor values and the peak list (the
+    /// mark's lines ride on the cursor values' plate).
     pub fn plates(&self) -> Vec<crate::plate::PlateBox> {
-        self.readout_box.into_iter().chain(self.peaks_box).collect()
+        self.legend_box
+            .as_ref()
+            .map(|b| b.plate)
+            .into_iter()
+            .chain(self.readout_box)
+            .chain(self.peaks_box)
+            .collect()
     }
 }
 

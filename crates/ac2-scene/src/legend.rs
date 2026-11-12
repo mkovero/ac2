@@ -256,24 +256,6 @@ pub(crate) struct RowStyle {
     pub color: Color,
     pub dim: bool,
     pub selected: bool,
-    /// The row's curve is the pane's pick: its swatch carries the peak's box ([`pick_cue`]).
-    pub picked: bool,
-}
-
-/// Half the side of the pick's cue: the peak box's own size, so the row reads as "this
-/// curve's peaks are the boxes on the plot".
-const CUE_HALF: f32 = 4.0;
-
-/// The cue of a picked legend row: a peak's box in the curve's colour, centred
-/// at `x`, `y` on the row's swatch, so it needs no room of its own and moves no text.
-pub(crate) fn pick_cue(layer: &mut Layer, x: f32, y: f32, color: Color, clip: Option<Rect>) {
-    let (x0, y0, x1, y1) = (x - CUE_HALF, y - CUE_HALF, x + CUE_HALF, y + CUE_HALF);
-    layer.polylines.push(crate::primitives::Polyline {
-        points: vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]],
-        alpha: vec![],
-        stroke: crate::primitives::Stroke::solid(color, 1.5),
-        clip,
-    });
 }
 
 /// Draws `b` with `styles` (one per row of the whole legend, not only the shown ones);
@@ -311,15 +293,6 @@ pub(crate) fn draw(
             Some(clip),
             theme,
         );
-        if st.picked {
-            pick_cue(
-                layer,
-                x0 + 1.0 + SWATCH_W * s / 2.0,
-                *y,
-                st.color,
-                Some(clip),
-            );
-        }
         let color = if st.dim { theme.text_dim } else { theme.text };
         text(layer, t, x0 + (SWATCH_W + SWATCH_GAP) * s, *y, color);
     }
@@ -329,6 +302,36 @@ pub(crate) fn draw(
         y += m.row;
     }
     crate::plate::grip(layer, b.rect, hover.is_some_and(|h| h.grip), clip, theme);
+}
+
+/// The legend plate of a frequency view (transfer, spectrum, both spectrographs): a row per
+/// entry of `entries`, drawn as `styles` (one per entry) says, and `notes` under them, laid
+/// out in `area` as the pane's legend view and plate place in `view` say and drawn onto
+/// `layer` clipped to `clip`. One plate in every view: dragged, scaled, scrolled and hidden
+/// alike. `None` when hidden or empty; with it, where each shown row is, for a click to
+/// select its curve.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn legend_plate(
+    layer: &mut Layer,
+    entries: &[crate::tf::LegendEntry],
+    styles: &[RowStyle],
+    notes: &[String],
+    view: &crate::view::ViewState,
+    area: Rect,
+    clip: Rect,
+    theme: &Theme,
+) -> (Option<LegendBox>, Vec<LegendHit>) {
+    let texts: Vec<&str> = entries.iter().map(|e| e.text.as_str()).collect();
+    let at = &view.plates.legend;
+    let m = Metrics::new(theme, at.scale());
+    let Some(b) = place(&view.legend, at, area, &texts, notes, m) else {
+        return (None, Vec::new());
+    };
+    let hover = view.plate_hover.filter(|h| h.kind == PlateKind::Legend);
+    draw(layer, &b, styles, hover, clip, theme);
+    let keys: Vec<TraceKey> = entries.iter().map(|e| e.key).collect();
+    let hits = b.hits(&keys);
+    (Some(b), hits)
 }
 
 #[cfg(test)]

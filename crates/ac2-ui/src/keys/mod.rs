@@ -296,11 +296,11 @@ commands! {
     TargetLoudness => "target_loudness", "Loudness shift…", [Transfer];
     CoherenceMask => "coherence_mask", "Coherence mask", [Transfer];
     CoherencePlacement => "coherence_placement", "Coherence placement", [Transfer];
-    LegendTopLeft => "legend_top_left", "Legend top-left", [Transfer];
-    LegendTopRight => "legend_top_right", "Legend top-right", [Transfer];
-    LegendBottomLeft => "legend_bottom_left", "Legend bottom-left", [Transfer];
-    LegendBottomRight => "legend_bottom_right", "Legend bottom-right", [Transfer];
-    LegendHide => "legend_hide", "Show/hide legend", [Transfer];
+    LegendTopLeft => "legend_top_left", "Legend top-left", [Transfer, Spectrum];
+    LegendTopRight => "legend_top_right", "Legend top-right", [Transfer, Spectrum];
+    LegendBottomLeft => "legend_bottom_left", "Legend bottom-left", [Transfer, Spectrum];
+    LegendBottomRight => "legend_bottom_right", "Legend bottom-right", [Transfer, Spectrum];
+    LegendHide => "legend_hide", "Show/hide legend", [Transfer, Spectrum];
     Average => "average", "Average power", [Transfer];
     AverageComplex => "average_complex", "Average complex", [Transfer];
     AverageCoherence => "average_coherence", "Average coherence-weighted", [Transfer];

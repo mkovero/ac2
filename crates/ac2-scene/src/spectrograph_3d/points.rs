@@ -1,13 +1,12 @@
-//! Peak points in the 3D view: the picked measurement's peaks on the skyline's newest row,
-//! each a box in screen space with its frequency and level on an axis label's plate
-//! (`docs/design/legend-peak-points.md`).
+//! Tracked peaks (P) in the 3D view: the measurement's peaks on the skyline's newest row,
+//! each a box in screen space with its frequency and level on an axis label's plate.
 
 use super::scene::{Projector, label_box, plate, thin};
 use super::*;
 use crate::format;
 use crate::spectrum::peaks::Peak;
 
-/// A peak point as placed.
+/// A tracked peak as placed.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PeakPoint3d {
     pub freq_hz: f64,

@@ -182,7 +182,7 @@ pub(super) fn plates_mouse(
     if rows != 0.0 {
         app.legend_wheel -= rows;
         let first = b.scrolled(rows as i32);
-        if first != app.state.view.tf.legend.first {
+        if first != app.state.view.legend.first {
             app.dispatch(Msg::LegendScroll { first });
         }
     }
@@ -231,10 +231,6 @@ pub(super) fn navigate(
     }
     if resp.clicked() || resp.drag_started() {
         app.dispatch(Msg::FocusPane(id));
-    }
-    // The spectrum's legend is no plate to drag: the pointer over an entry says it clicks.
-    if legend == LegendTook::Nothing && row_at(app, resp.hover_pos()).is_some() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     // A click on the legend is not a cursor placed behind it, a drag on it not a pan; when
     // its rows scroll, the wheel over it is theirs.

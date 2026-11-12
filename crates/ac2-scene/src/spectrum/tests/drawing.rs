@@ -223,23 +223,22 @@ fn banners_sit_above_the_plot() {
     };
     let calm = build(&Status::default());
     assert_eq!(calm.strip.h, 0.0);
-    // The legend row sits between the strip and the plot.
-    assert_eq!(calm.legend_rect.y, 4.0);
-    assert_eq!(calm.plot.y, calm.legend_rect.bottom() - 4.0 + MARGINS.top);
+    // The legend is a plate in the plot: the plot starts under the strip.
+    assert_eq!(calm.plot.y, MARGINS.top);
     let s = build(&crate::banner::tests::everything());
     assert_eq!(s.banners.len(), crate::banner::MAX_BANNERS);
-    assert_eq!(s.legend_rect.y, s.strip.bottom() + 4.0);
-    assert_eq!(s.plot.y, s.legend_rect.bottom() - 4.0 + MARGINS.top);
+    assert_eq!(s.plot.y, s.strip.bottom() + MARGINS.top);
     assert_eq!(s.plot.bottom(), calm.plot.bottom());
     assert!(s.cursor.is_some());
-    crate::canvas::tests::assert_banners_clear(&s.scene, &s.banners, &[s.plot, s.legend_rect]);
+    crate::canvas::tests::assert_banners_clear(&s.scene, &s.banners, &[s.plot]);
 }
 
-/// Several live spectra and captures are told apart by a legend above the plot: name,
-/// colour and tags in full while they fit, names alone when not, then the names that fit
-/// and `+N more`. It never reaches into the plot or past the pane.
+/// Several live spectra and captures are told apart by the legend plate the transfer view
+/// has: name, colour and tags, at the plot's top left under the unit, inside the plot; on a
+/// short pane the rows scroll and a line says how many are out of view. Moved, scaled and
+/// hidden as the pane's legend place and view say.
 #[test]
-fn legend_names_every_curve_and_fits_small_panes() {
+fn legend_names_every_curve_on_its_plate() {
     let g = third_octaves();
     let (f, e) = (g.centres(), g.edges());
     let level = vec![-40.0f32; f.len()];
@@ -258,19 +257,19 @@ fn legend_names_every_curve_and_fits_small_panes() {
     traces[1].freshness = Some(Freshness::Stopped { age_s: 3.0 });
     traces[2].offset_db = -6.0;
     traces[3].selected = true;
-    let build = |w: f32, h: f32| {
+    let build = |w: f32, h: f32, view: &ViewState| {
         spectrum_scene(
             &traces,
             &Status::default(),
-            &ViewState::default(),
+            view,
             &Theme::dark(),
             Viewport::new(w, h),
         )
     };
-    let texts = |s: &SpectrumScene| s.legend_shown.clone();
-    let wide = build(1200.0, 500.0);
+    let view = ViewState::default();
+    let wide = build(1200.0, 500.0, &view);
     assert_eq!(
-        texts(&wide),
+        wide.legend_shown,
         [
             "Main L",
             "Main R · stopped",
@@ -283,79 +282,47 @@ fn legend_names_every_curve_and_fits_small_panes() {
     assert_eq!(wide.legend[1].tags, ["stopped"]);
     let selected: Vec<bool> = wide.legend.iter().map(|e| e.selected).collect();
     assert_eq!(selected, [false, false, false, true, false]);
-    assert_eq!(wide.legend_rect.h, LEGEND_ROW);
-    // A click on an entry's swatch or text names its curve.
-    let hit = |s: &SpectrumScene, text: &str| {
-        let l = s
-            .scene
-            .layers
+    let b = wide.legend_box.as_ref().expect("legend plate");
+    assert_eq!(b.plate.kind, crate::plate::PlateKind::Legend);
+    assert_eq!(b.rect.x, wide.plot.x + crate::legend::INSET);
+    assert!(
+        b.rect.y > wide.plot.y + 12.0,
+        "under the unit: {:?}",
+        b.rect
+    );
+    assert!(
+        wide.plates()
             .iter()
-            .flat_map(|l| &l.labels)
-            .find(|l| l.text == text)
-            .expect("entry");
-        let b = crate::canvas::tests::label_box(l);
-        (
-            crate::legend::hit_at(&s.legend_hits, b.x + b.w / 2.0, b.y + b.h / 2.0),
-            crate::legend::hit_at(&s.legend_hits, b.x - SWATCH_GAP - 2.0, l.pos[1]),
-        )
-    };
+            .any(|p| p.kind == crate::plate::PlateKind::Legend)
+    );
+    // A click on a row names its curve.
+    let y = b.row_y(3).expect("fourth row");
     let front = Some(TraceKey::Live(MeasId(4)));
-    assert_eq!(hit(&wide, "Front fill"), (front, front));
+    assert_eq!(
+        crate::legend::hit_at(&wide.legend_hits, b.rect.x + 8.0, y),
+        front
+    );
     assert_eq!(wide.legend_hits.len(), 5);
-    // Narrow: rows wrap, then the tags go, then `+N more`.
-    let narrow = build(420.0, 500.0);
+    // Short: the rows scroll inside the plate, the plate inside the plot.
+    let short = build(300.0, 150.0, &view);
+    let sb = short.legend_box.as_ref().expect("legend plate");
+    assert!(sb.shown < 5, "{sb:?}");
     assert!(
-        narrow.legend_rect.h > LEGEND_ROW,
-        "{:?}",
-        narrow.legend_rect
+        sb.more.as_deref().is_some_and(|m| m.ends_with("below")),
+        "{sb:?}"
     );
-    let short = build(300.0, 120.0);
-    assert_eq!(texts(&short).first().map(String::as_str), Some("Main L"));
-    assert!(
-        texts(&short).last().is_some_and(|t| t.ends_with(" more")),
-        "{:?}",
-        texts(&short)
-    );
-    assert!(!texts(&short).iter().any(|t| t.contains('·')));
-    // `+N more` is no curve's.
-    assert_eq!(short.legend_hits.len(), texts(&short).len() - 1);
-    let more = texts(&short).last().cloned().expect("more");
-    assert_eq!(hit(&short, &more).0, None);
-    let tiny = build(160.0, 120.0);
-    assert!(tiny.legend_rect.h <= LEGEND_ROW);
-    for (w, h) in [
-        (1200.0, 500.0),
-        (420.0, 500.0),
-        (300.0, 200.0),
-        (220.0, 160.0),
-        (160.0, 120.0),
-    ] {
-        let s = build(w, h);
-        let boxes: Vec<Rect> = s
-            .scene
-            .layers
-            .iter()
-            .flat_map(|l| &l.labels)
-            .filter(|l| s.legend_shown.contains(&l.text))
-            .map(crate::canvas::tests::label_box)
-            .collect();
-        assert_eq!(boxes.len(), s.legend_shown.len(), "{w}x{h}");
-        for b in &boxes {
-            assert!(
-                !crate::canvas::tests::intersects(*b, s.plot),
-                "{w}x{h}: {b:?} in the plot"
-            );
-            assert!(b.right() <= w + 0.5, "{w}x{h}: {b:?} past the pane");
-        }
-        for (i, a) in boxes.iter().enumerate() {
-            for b in &boxes[i + 1..] {
-                assert!(
-                    !crate::canvas::tests::intersects(*a, *b),
-                    "{w}x{h}: {a:?} {b:?}"
-                );
-            }
-        }
-    }
+    assert_eq!(short.legend_hits.len(), sb.shown);
+    assert!(sb.rect.bottom() <= short.plot.bottom() && sb.rect.right() <= short.plot.right());
+    // Dragged to the bottom right and hidden, as on the transfer view.
+    let mut moved = view;
+    moved.plates.legend.move_to(1.0, 1.0);
+    let m = build(1200.0, 500.0, &moved);
+    let mb = m.legend_box.as_ref().expect("legend plate");
+    assert_eq!(mb.rect.right(), m.plot.right() - crate::legend::INSET);
+    assert_eq!(mb.rect.bottom(), m.plot.bottom() - crate::legend::INSET);
+    moved.legend.hidden = true;
+    let h = build(1200.0, 500.0, &moved);
+    assert!(h.legend_box.is_none() && h.legend_hits.is_empty() && h.legend_shown.is_empty());
 }
 
 #[test]
