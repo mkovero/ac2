@@ -225,38 +225,31 @@ fn old_meas(v: &Value) -> Result<OldMeas, String> {
     let delay = optional("delay").and_then(|d| lenient::<SavedDelay>(d, None, "delay", &mut notes));
     let colour =
         optional("colour").and_then(|d| lenient::<ColourFamily>(d, None, "colour", &mut notes));
-    // The compare list of an older version follows the measurement's group in its own
-    // panes; with none to follow, it is dropped and said so.
-    let compared = obj
+    // A pane layout is taken whole or not at all: a pane half read could show something
+    // the operator never put there. One not of this version's shape gives way to the
+    // default layout the client opens a measurement with.
+    let layout =
+        optional("layout").and_then(|d| match serde_json::from_value::<PaneLayout>(d.clone()) {
+            Ok(l) => Some(l),
+            Err(e) => {
+                notes.push(format!(
+                    "its pane layout is not of this version ({e}): the default layout instead"
+                ));
+                None
+            }
+        });
+    // The compare list of an older version has no place of its own in this one: its curves
+    // are picked into a pane again.
+    if let Some(n) = obj
         .get("compared")
         .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let owner = obj
-        .get("id")
-        .cloned()
-        .map(|id| ac2_traces::old_layout::LayoutOwner::of(id, &config.kind));
-    let mut took = 0;
-    let old_layout = optional("layout").map(|d| {
-        let mut d = d.clone();
-        ac2_traces::old_layout::pane_meas_to_content(&mut d);
-        ac2_traces::old_layout::plates_add_peaks(&mut d);
-        ac2_traces::old_layout::plates_add_loudness(&mut d);
-        ac2_traces::old_layout::programme_views(&mut d);
-        ac2_traces::old_layout::panes_this_rig(&mut d);
-        took = ac2_traces::old_layout::panes_curves(&mut d, owner.as_ref(), &compared);
-        ac2_traces::old_layout::panes_spectrum_camera(&mut d);
-        d
-    });
-    if !compared.is_empty() && took == 0 {
+        .map(Vec::len)
+        .filter(|&n| n > 0)
+    {
         notes.push(format!(
-            "its compare list ({} curve(s)) is dropped: no pane of its own draws it",
-            compared.len()
+            "its compare list ({n} curve(s)) is dropped: pick them into a pane again"
         ));
     }
-    let layout = old_layout
-        .as_ref()
-        .and_then(|d| lenient::<PaneLayout>(d, None, "layout", &mut notes));
     let known = meas_keys();
     for (k, v) in obj {
         if !known.contains(k) && k != "compared" {
@@ -582,7 +575,6 @@ mod tests {
     use super::*;
     use ac2_proto::model::layout::{EntryRef, PaneContent, PaneEntry, PlotChrome, RigRef};
     use ac2_proto::model::{MeasKind, SpecLevel, SpecResolution, SplConfig, Window};
-    use ac2_proto::units::TraceId;
     use serde_json::json;
 
     fn spl() -> MeasConfig {
@@ -620,211 +612,77 @@ mod tests {
         }
     }
 
-    /// A layout saved before panes carried a pick and level ranges reads whole: each pane
-    /// shows its measurement, with no level range of the operator's.
-    #[test]
-    fn a_layout_of_format_27_reads_with_no_picks_or_levels() {
-        let pane = json!({ "kind": "spl", "transfer_view": "magnitude",
-                           "spectrum_view": "spectrograph", "spl_view": "meter_leq",
-                           "sweep_view": "response", "chrome": "full" });
-        let v = json!({ "id": 7, "config": serde_json::to_value(spl()).unwrap(),
-                        "running": false, "delay": null, "colour": null,
-                        "layout": { "type": "pane", "pane": pane } });
-        let m = old_meas(&v).unwrap();
-        assert!(m.notes.is_empty(), "{:?}", m.notes);
-        let layout = m.layout.expect("the layout");
-        let panes = layout.panes();
-        assert_eq!(panes.len(), 1);
-        let meter = PaneContent::Meter {
-            rig: RigRef::ThisRig,
-            meas: MeasId(7),
-        };
-        assert_eq!(panes[0].content, meter);
-        assert!(panes[0].levels.is_empty());
-    }
-
-    /// A layout of format 31 names a picked measurement as `meas`: on an SPL pane the pick
-    /// reads as this rig's meter, nothing is dropped.
-    #[test]
-    fn a_layout_of_format_31_keeps_its_pick() {
-        let pane = json!({ "kind": "spl", "transfer_view": "coherence",
-                           "spectrum_view": "spectrum", "spl_view": "leq",
-                           "sweep_view": "response", "chrome": "no_grid", "meas": 3,
-                           "levels": { "transfer": null, "spectrum_dbfs": null,
-                                       "spectrum_spl": null, "distortion": null } });
-        let v = json!({ "id": 7, "config": serde_json::to_value(spl()).unwrap(),
-                        "running": false, "delay": null, "colour": null,
-                        "layout": { "type": "pane", "pane": pane } });
-        let m = old_meas(&v).unwrap();
-        assert!(m.notes.is_empty(), "{:?}", m.notes);
-        let layout = m.layout.expect("the layout");
-        let panes = layout.panes();
-        assert_eq!(
-            panes[0].content,
-            PaneContent::Meter {
-                rig: RigRef::ThisRig,
-                meas: MeasId(3)
-            }
-        );
-        assert_eq!(panes[0].chrome, PlotChrome::NoGrid);
-    }
-
-    /// A layout of format 32 holds three plates: the dragged ones are kept and the peak
-    /// list sits where the client puts it, nothing is dropped.
-    #[test]
-    fn a_layout_of_format_32_keeps_its_plates() {
+    /// A pane in this version's shape.
+    fn current_pane(content: PaneContent) -> serde_json::Value {
         let auto = json!({ "at": null, "scale": 1.0 });
         let pane = json!({ "kind": "spectrum", "transfer_view": "magnitude",
-                           "spectrum_view": "spectrum", "spl_view": "meter_leq",
-                           "sweep_view": "response", "chrome": "full", "content": null,
+                           "spectrum_view": "spectrum",
+                           "spectrum_camera": ac2_proto::model::layout::SpectrumCamera::default(),
+                           "spl_view": "meter_leq", "sweep_view": "response",
+                           "programme_view": "meters", "chrome": "no_grid",
+                           "content": content,
                            "levels": { "transfer": null, "spectrum_dbfs": null,
                                        "spectrum_spl": null, "distortion": null },
                            "plates": { "legend": auto,
                                        "readout": { "at": [1.0, 0.5], "scale": 1.5 },
-                                       "mark": auto } });
-        let v = json!({ "id": 7, "config": serde_json::to_value(spl()).unwrap(),
-                        "running": false, "delay": null, "colour": null,
-                        "layout": { "type": "pane", "pane": pane } });
-        let m = old_meas(&v).unwrap();
-        assert!(m.notes.is_empty(), "{:?}", m.notes);
-        let layout = m.layout.expect("the layout");
-        let p = layout.panes()[0].plates;
-        assert_eq!(p.readout.at, Some([1.0, 0.5]));
-        assert_eq!(p.readout.scale, 1.5);
-        assert_eq!(p.peaks, ac2_proto::model::layout::LayoutPlate::default());
-        assert_eq!(p.loudness, ac2_proto::model::layout::LayoutPlate::default());
-    }
-
-    /// A layout of format 33 holds four plates: a moved peak list is kept and the loudness
-    /// readout docks where the pane puts it, nothing is dropped.
-    #[test]
-    fn a_layout_of_format_33_keeps_its_plates() {
-        let auto = json!({ "at": null, "scale": 1.0 });
-        let pane = json!({ "kind": "spectrum", "transfer_view": "magnitude",
-                           "spectrum_view": "spectrum", "spl_view": "meter_leq",
-                           "sweep_view": "response", "chrome": "full", "content": null,
-                           "levels": { "transfer": null, "spectrum_dbfs": null,
-                                       "spectrum_spl": null, "distortion": null },
-                           "plates": { "legend": auto, "readout": auto, "mark": auto,
-                                       "peaks": { "at": [0.25, 0.75], "scale": 2.0 } } });
-        let v = json!({ "id": 7, "config": serde_json::to_value(spl()).unwrap(),
-                        "running": false, "delay": null, "colour": null,
-                        "layout": { "type": "pane", "pane": pane } });
-        let m = old_meas(&v).unwrap();
-        assert!(m.notes.is_empty(), "{:?}", m.notes);
-        let layout = m.layout.expect("the layout");
-        let p = layout.panes()[0].plates;
-        assert_eq!(p.peaks.at, Some([0.25, 0.75]));
-        assert_eq!(p.peaks.scale, 2.0);
-        assert_eq!(p.loudness, ac2_proto::model::layout::LayoutPlate::default());
-    }
-
-    /// A layout of format 34 has no Programme views: a pair's Programme pane becomes the
-    /// goniometer pane beside the meters pane a pair now brings, nothing is dropped.
-    #[test]
-    fn a_layout_of_format_34_splits_a_pair_pane() {
-        use ac2_proto::model::layout::ProgrammeView;
-        let auto = json!({ "at": null, "scale": 1.0 });
-        let pane = json!({ "kind": "programme", "transfer_view": "magnitude",
-                           "spectrum_view": "spectrum", "spl_view": "meter_leq",
-                           "sweep_view": "response", "chrome": "full",
-                           "content": { "type": "pair", "left": 0, "right": 1 },
-                           "levels": { "transfer": null, "spectrum_dbfs": null,
-                                       "spectrum_spl": null, "distortion": null },
-                           "plates": { "legend": auto, "readout": auto, "mark": auto,
-                                       "peaks": auto,
-                                       "loudness": { "at": [0.25, 0.75], "scale": 2.0 } } });
-        let v = json!({ "id": 7, "config": serde_json::to_value(spl()).unwrap(),
-                        "running": false, "delay": null, "colour": null,
-                        "layout": { "type": "pane", "pane": pane } });
-        let m = old_meas(&v).unwrap();
-        assert!(m.notes.is_empty(), "{:?}", m.notes);
-        let layout = m.layout.expect("the layout");
-        let panes = layout.panes();
-        assert_eq!(panes.len(), 2);
-        assert_eq!(panes[0].programme_view, ProgrammeView::Goniometer);
-        assert_eq!(panes[1].programme_view, ProgrammeView::Meters);
-        assert_eq!(panes[1].plates.loudness.at, Some([0.25, 0.75]));
-        for p in panes {
-            let want = PaneContent::Pair {
-                rig: RigRef::ThisRig,
-                left: 0,
-                right: 1,
-            };
-            assert_eq!(p.content, want);
-        }
-    }
-
-    fn format_40(layout: Option<serde_json::Value>, compared: serde_json::Value) -> OldMeas {
-        let rta = MeasConfig {
-            scope: ac2_proto::model::MeasScope::Session,
-            name: "FOH RTA".into(),
-            kind: MeasKind::Rta {
-                config: ac2_proto::model::RtaConfig::on_input(
-                    2,
-                    ac2_proto::model::BandFraction::Third,
-                ),
-            },
-        };
-        let mut v = json!({ "id": 7, "config": serde_json::to_value(rta).unwrap(),
-                            "running": false, "delay": null, "colour": null,
-                            "compared": compared });
-        if let Some(l) = layout {
-            v["layout"] = l;
-        }
-        old_meas(&v).unwrap()
-    }
-
-    fn format_40_pane(kind: &str, content: serde_json::Value) -> serde_json::Value {
-        let auto = json!({ "at": null, "scale": 1.0 });
-        let pane = json!({ "kind": kind, "transfer_view": "magnitude",
-                           "spectrum_view": "spectrum", "spl_view": "meter_leq",
-                           "sweep_view": "response", "programme_view": "meters",
-                           "chrome": "full", "content": content,
-                           "rig": { "type": "this_rig" },
-                           "levels": { "transfer": null, "spectrum_dbfs": null,
-                                       "spectrum_spl": null, "distortion": null },
-                           "plates": { "legend": auto, "readout": auto, "mark": auto,
-                                       "peaks": auto, "loudness": auto } });
+                                       "mark": auto, "peaks": auto, "loudness": auto } });
         json!({ "type": "pane", "pane": pane })
     }
 
-    /// A format-40 compare list follows the measurement's own group into the pane that
-    /// draws it: compared measurements as live entries, traces as trace entries, after the
-    /// group; nothing is said dropped.
-    #[test]
-    fn a_compare_list_of_format_40_joins_the_pane_of_its_measurement() {
-        let compared = json!([{ "type": "meas", "meas": 3 }, { "type": "trace", "trace": 9 }]);
-        let m = format_40(Some(format_40_pane("spectrum", json!(null))), compared);
-        assert!(m.notes.is_empty(), "{:?}", m.notes);
-        let layout = m.layout.expect("the layout");
-        let this = |what| PaneEntry {
-            rig: RigRef::ThisRig,
-            what,
-        };
-        assert_eq!(
-            layout.panes()[0].content,
-            PaneContent::Curves {
-                entries: vec![
-                    this(EntryRef::Group { meas: MeasId(7) }),
-                    this(EntryRef::Live { meas: MeasId(3) }),
-                    this(EntryRef::Trace { trace: TraceId(9) }),
-                ]
-            }
-        );
+    fn with_layout(layout: serde_json::Value) -> serde_json::Value {
+        json!({ "id": 7, "config": serde_json::to_value(spl()).unwrap(),
+                "running": true, "delay": null, "colour": { "type": "hue", "index": 2 }, "layout": layout })
     }
 
-    /// A compare list with no pane of its measurement to join, a layout of another pick or
-    /// none at all, is dropped and said so.
+    /// A layout of this version's shape is taken whole, nothing said.
     #[test]
-    fn a_compare_list_of_format_40_with_no_own_pane_is_dropped_and_named() {
-        let compared = json!([{ "type": "meas", "meas": 3 }]);
-        let picked = format_40_pane("spectrum", json!({ "type": "meas", "meas": 5 }));
-        for layout in [Some(picked), None] {
-            let m = format_40(layout, compared.clone());
-            assert_eq!(m.notes.len(), 1, "{:?}", m.notes);
-            assert!(m.notes[0].contains("compare list"), "{:?}", m.notes);
-        }
+    fn a_layout_of_this_version_reads_whole() {
+        let content = PaneContent::Curves {
+            entries: vec![PaneEntry {
+                rig: RigRef::ThisRig,
+                what: EntryRef::Live { meas: MeasId(3) },
+            }],
+        };
+        let m = old_meas(&with_layout(current_pane(content.clone()))).unwrap();
+        assert!(m.notes.is_empty(), "{:?}", m.notes);
+        let layout = m.layout.expect("the layout");
+        let panes = layout.panes();
+        assert_eq!(panes[0].content, content);
+        assert_eq!(panes[0].chrome, PlotChrome::NoGrid);
+        assert_eq!(panes[0].plates.readout.at, Some([1.0, 0.5]));
+    }
+
+    /// A layout of an older shape (here format 27's, before panes carried a pick, levels or
+    /// plates) costs the layout only: the measurement is salvaged with everything else it
+    /// held, falls back to the default layout, and the note says so.
+    #[test]
+    fn a_layout_of_an_older_shape_falls_back_to_the_default() {
+        let pane = json!({ "kind": "spl", "transfer_view": "magnitude",
+                           "spectrum_view": "spectrogram", "spl_view": "meter_leq",
+                           "sweep_view": "response", "chrome": "full" });
+        let m = old_meas(&with_layout(json!({ "type": "pane", "pane": pane }))).unwrap();
+        assert_eq!(m.layout, None);
+        assert_eq!(m.old_id, Some(MeasId(7)));
+        assert_eq!(m.config, spl());
+        assert!(m.running);
+        assert_eq!(m.colour, Some(ColourFamily::Hue { index: 2 }));
+        assert_eq!(m.notes.len(), 1, "{:?}", m.notes);
+        assert!(m.notes[0].contains("the default layout"), "{:?}", m.notes);
+    }
+
+    /// An older version's compare list is dropped and said so; the rest is read.
+    #[test]
+    fn a_compare_list_is_dropped_and_named() {
+        let mut v = with_layout(serde_json::Value::Null);
+        v["compared"] = json!([{ "type": "meas", "meas": 3 }, { "type": "trace", "trace": 9 }]);
+        let m = old_meas(&v).unwrap();
+        assert_eq!(m.config, spl());
+        assert_eq!(m.notes.len(), 1, "{:?}", m.notes);
+        assert!(
+            m.notes[0].contains("compare list (2 curve(s))"),
+            "{:?}",
+            m.notes
+        );
     }
 
     #[test]

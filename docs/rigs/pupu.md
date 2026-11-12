@@ -85,7 +85,9 @@ operator's inputs, so the running measurements can start), bring it back from ke
 the CLI reads the folder, so copy it over first (pupu's daemon listens on the network only):
 `cd ~/ac2-test && scp -rq mui@192.168.9.27:.local/share/ac2/autosave.vN /tmp/ && bin/ac2 --remote 192.168.9.27 session salvage /tmp/autosave.vN`.
 (ketunkolo may lack pupu's SSH host key; then copy by way of the build host, `scp -3`.)
-It makes each measurement again with its settings, colour, layout, delay and tracking,
+It makes each measurement again with its settings, colour, layout, delay and tracking (a
+pane layout of an older shape is not mapped: that measurement opens with the default layout,
+and the summary says so),
 puts each stored trace back under its measurement, rebuilds math channels, starts what was
 running, and prints a table of what was restored or skipped and every setting not read as
 saved; keep that summary in the deploy log below. It does not bring back the SPL meters'

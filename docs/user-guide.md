@@ -2637,9 +2637,10 @@ sets its old autosave aside as `autosave.vN` and starts empty. `ac2 session salv
 or .ac2session file>`, where that path is readable, rebuilds it on top of what is there:
 
 - each measurement with its name, kind, settings, colour, own pane layout, and a transfer's
-  delay and tracking; a compare list of an older version joins the pane of that
-  measurement's own layout that drew its group (named in the summary when it has none to
-  join), and pane references to what was not restored are dropped;
+  delay and tracking; a pane layout of an older shape is not mapped: that measurement opens
+  with the default layout, and the summary says so; a compare list of an older version is
+  dropped and named in the summary (pick its curves into a pane again); pane references to
+  what was not restored are dropped;
 - each stored trace with its name, colour, slot, offset, polarity, nudge, smoothing and
   lock, under its measurement; math channels on the restored items;
 - measurements that were running are started when the open audio I/O captures their
