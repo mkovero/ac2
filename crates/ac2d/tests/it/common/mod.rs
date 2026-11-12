@@ -772,3 +772,25 @@ pub fn wall_now_ns() -> u64 {
         .unwrap()
         .as_nanos() as u64
 }
+
+/// Polls `f` until it holds; fails the test after `limit`.
+pub async fn until(what: &str, limit: Duration, mut f: impl FnMut() -> bool) {
+    let deadline = Instant::now() + limit;
+    while !f() {
+        assert!(Instant::now() < deadline, "timed out waiting for {what}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// Shuts `h` down, running the manual device `d` meanwhile: a stream fades out on
+/// shutdown, and a device that stands still never finishes the fade.
+pub fn shutdown_driving(h: Handle, d: Option<FakeDriver>) {
+    let stop = std::thread::spawn(move || h.shutdown());
+    if let Some(mut d) = d {
+        while !stop.is_finished() {
+            d.run_blocks(4);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    stop.join().unwrap();
+}
