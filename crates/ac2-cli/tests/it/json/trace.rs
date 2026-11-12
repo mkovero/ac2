@@ -1,11 +1,11 @@
 //! Stored traces.
 
 use ac2_cli::Cli;
-use ac2_client::fake::{FakeDaemon, FakeOptions};
+use ac2_proto::model::Signal;
 use clap::Parser;
-use serde_json::json;
+use serde_json::{Value, json};
 
-use super::{R, ac2, ok_json};
+use super::{R, ac2, fake, ok_json};
 
 fn fixture(name: &str) -> String {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -17,11 +17,22 @@ fn fixture(name: &str) -> String {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn trace_commands_json() -> R {
-    let dir = tempfile::tempdir()?;
-    let f = FakeDaemon::start(FakeOptions {
-        session_dir: Some(dir.path().join("sessions")),
-        ..FakeOptions::default()
-    })?;
+    let f = fake()?;
+    let dir = f.dir();
+    ok_json(
+        &f,
+        &[
+            "session",
+            "open",
+            "--backend",
+            "fake",
+            "--in",
+            "1-2",
+            "--json",
+        ],
+    )
+    .await?;
+    let (_c, _lease) = f.tone(Signal::Pink, -20.0, vec![0]).await?;
     ok_json(
         &f,
         &[
@@ -30,23 +41,33 @@ async fn trace_commands_json() -> R {
     )
     .await?;
     ok_json(&f, &["delay", "set", "main", "10ms", "--json"]).await?;
-    let a = ok_json(
+    // Seconds of pink noise in the averages: a curve over the whole band.
+    f.run_for(3.0).await?;
+    let mut a = ok_json(
         &f,
         &[
             "trace", "capture", "main", "--name", "a", "--slot", "1", "--json",
         ],
     )
     .await?;
+    // Where and when it was captured are the daemon's: checked for their kind, then
+    // compared with the rest.
+    let actual = a.clone();
+    for path in ["/grid_id", "/created_at", "/source/at_sample"] {
+        let v = a.pointer_mut(path).ok_or(path)?;
+        assert!(v.as_u64().is_some_and(|n| n > 0), "{path}: {actual}");
+        *v = Value::Null;
+    }
     assert_eq!(
         a,
         json!({
-            "id": 2,
+            "id": 1,
             "edit": {
                 "name": "a",
-                "color": { "r": 86, "g": 180, "b": 233 },
+                "color": { "r": 230, "g": 159, "b": 0 },
                 "visible": true,
                 "locked": false,
-                "order": 2,
+                "order": 1,
                 "offset": 0.0,
                 "polarity": "normal",
                 // The typed 10 ms moved the live curve from its arrival (0): the capture
@@ -62,19 +83,19 @@ async fn trace_commands_json() -> R {
                 "meas": 1,
                 "meas_name": "main",
                 "epoch": 1,
-                "at_sample": 48000
+                "at_sample": null
             },
             "eq_in": [],
             "position": null,
             "captured_unsettled": false,
             "superseded": false,
-            "grid_id": 0x79ec_3d16_ae0e_94d0u64,
+            "grid_id": null,
             "delay": 0.01,
             "depth": { "type": "equal_confidence" },
             "cal": { "type": "uncalibrated" },
             "mic": null,
             "mic_curve": null,
-            "created_at": 1790000000000000000u64
+            "created_at": null
         })
     );
     // The slot range is checked by the parser.
@@ -95,9 +116,9 @@ async fn trace_commands_json() -> R {
     let l = ok_json(&f, &["trace", "list", "--json"]).await?;
     assert_eq!(l.as_array().map(Vec::len), Some(2));
     let s = ok_json(&f, &["trace", "show", "a", "--json"]).await?;
-    assert_eq!(s, a);
-    let d = ok_json(&f, &["trace", "show", "2", "--data", "--json"]).await?;
-    assert_eq!(d["meta"], a);
+    assert_eq!(s, actual);
+    let d = ok_json(&f, &["trace", "show", "1", "--data", "--json"]).await?;
+    assert_eq!(d["meta"], actual);
     assert_eq!(d["mag_db"].as_array().map(Vec::len), Some(480));
     assert!(d["coherence"].is_array());
     // Both captured at the same applied delay: no difference.
@@ -123,9 +144,9 @@ async fn trace_commands_json() -> R {
         avg["source"],
         json!({
             "type": "average",
-            "traces": [2, 3],
+            "traces": [1, 2],
             "method": "complex",
-            "reference": { "type": "trace", "trace": 3 }
+            "reference": { "type": "trace", "trace": 2 }
         })
     );
     assert_eq!(avg["delay"], 0.01);
@@ -155,9 +176,9 @@ async fn trace_commands_json() -> R {
         m["config"]["kind"]["config"]["expr"],
         json!({
             "type": "binary",
-            "a": { "type": "trace", "trace": 2 },
+            "a": { "type": "trace", "trace": 1 },
             "op": "divide",
-            "b": { "type": "trace", "trace": 3 }
+            "b": { "type": "trace", "trace": 2 }
         })
     );
 
@@ -193,7 +214,7 @@ async fn trace_commands_json() -> R {
     // A mic curve on a stored trace: none in the mic library yet, then the imported one.
     let r = ac2(&f, &["trace", "mic", "a", "M30", "--json"]).await?;
     assert_eq!(r.json()?["error"]["code"], "usage");
-    let curve = dir.path().join("M30.txt");
+    let curve = dir.join("M30.txt");
     std::fs::write(
         &curve,
         "20 -1.5
@@ -276,7 +297,7 @@ async fn trace_commands_json() -> R {
     .await?;
     assert_eq!(t["kind"], json!({ "type": "target" }));
     assert_eq!(t["edit"]["name"], "house");
-    let bad = dir.path().join("bad.txt");
+    let bad = dir.join("bad.txt");
     std::fs::write(&bad, "20 1\n30 x\n")?;
     let r = ac2(&f, &["trace", "import", &bad.to_string_lossy(), "--json"]).await?;
     assert_eq!(r.code, 1);
@@ -315,7 +336,7 @@ async fn trace_commands_json() -> R {
     assert_eq!(dump["state"]["traces"].as_array().map(Vec::len), Some(6));
     assert_eq!(dump["state"]["generator"]["owner"], json!(null));
     assert_eq!(dump["state"]["generator"]["armed"], false);
-    let by_path = dir.path().join("elsewhere");
+    let by_path = dir.join("elsewhere");
     let p = ok_json(
         &f,
         &["session", "save-as", &by_path.to_string_lossy(), "--json"],
@@ -330,7 +351,7 @@ async fn trace_commands_json() -> R {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn trace_target_adds_a_named_generated_curve() -> R {
-    let f = super::fake()?;
+    let f = fake()?;
     let t = ok_json(&f, &["trace", "target", "tilt", "--shelf", "6dB", "--json"]).await?;
     assert_eq!(
         t["edit"]["name"],
@@ -349,7 +370,7 @@ async fn trace_target_adds_a_named_generated_curve() -> R {
         l["source"]["curve"],
         json!({ "shape": "loudness_shift", "from": 85.0, "to": 100.0 })
     );
-    let r = super::ac2(&f, &["trace", "target", "loudness", "--to", "120phon"]).await?;
+    let r = ac2(&f, &["trace", "target", "loudness", "--to", "120phon"]).await?;
     assert_ne!(r.code, 0);
     assert!(r.stderr.contains("phon"), "{}", r.stderr);
     Ok(())

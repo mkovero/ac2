@@ -1,8 +1,13 @@
 //! Input setup, mic curves and calibration.
 
+use ac2_proto::model::Signal;
+use ac2_proto::units::Hz;
 use serde_json::{Value, json};
 
-use super::{R, ac2, fake, ok_json};
+use super::{R, ac2, ac2_at, looped, ok_json};
+
+/// A 1 kHz calibrator tone at −20 dBFS on every input.
+const CAL_LEVEL: f64 = -20.0;
 
 /// The row of 1-based input `n` in an inputs JSON table.
 fn input_row(v: &Value, n: u64) -> Value {
@@ -22,7 +27,7 @@ fn mic_curve_file(name: &str) -> String {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn input_setup_mic_curve_and_cal_flow() -> R {
-    let f = fake()?;
+    let f = looped()?;
     // A session: a calibration of this device's input is verified, not just matched by mic.
     ok_json(
         &f,
@@ -37,6 +42,10 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
         ],
     )
     .await?;
+    let (_c, _lease) = f
+        .tone(Signal::Sine { freq: Hz(1000.0) }, CAL_LEVEL, vec![0])
+        .await?;
+    f.run_for(8.0).await?;
     // No mic name on input 2 yet: cal commands ask for one instead of guessing.
     let r = ac2(
         &f,
@@ -87,7 +96,7 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
         &["cal", "spl", "--input", "2", "--ref", "114db", "--json"],
     )
     .await?;
-    assert_eq!(c["key"]["mic"], "MM1 34804");
+    assert_eq!(c["key"]["mic"], "MM1 34804", "{c}");
 
     // Both curves of the capsule: labels from the files, the first one chosen (the mic's
     // only curve then), the second one not.
@@ -201,7 +210,7 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
     .await?;
     assert_ne!(r.code, 0);
     assert_eq!(r.json()?["error"]["code"], "refused");
-    // Replaced on purpose, the sensitivity from the data sheet of the mic's curve (the fake
+    // Replaced on purpose, the sensitivity from the data sheet of the mic's curve (the
     // input reads −20 dBFS: 0 dBFS = 150 mV, 150 mV / 15 mV/Pa = 10 Pa = 114.0 dB SPL).
     let e = ok_json(
         &f,
@@ -224,7 +233,7 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
     assert_eq!(m["mic_sensitivity_from"]["type"], "data_sheet");
     assert_eq!(m["uncertainty"], 1.0);
     let s = e["spl"]["sensitivity"].as_f64().unwrap_or_default();
-    assert!((s - 113.979_400_086_720_4).abs() < 1e-9, "{s}");
+    assert!((s - 113.979_400_086_720_4).abs() < 0.005, "{s}");
     // The text names the numbers it rests on and what to do with the phantom power.
     let text = ac2(
         &f,
@@ -291,7 +300,7 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
     );
     let s = e["spl"]["sensitivity"].as_f64().unwrap_or_default();
     let want = 113.979_400_086_720_4 + 20.0 * (2330.0f64 / 2000.0).log10();
-    assert!((s - want).abs() < 1e-9, "{s}");
+    assert!((s - want).abs() < 0.005, "{s}");
     let text = ac2(&f, &["cal", "list"]).await?;
     for want in [
         "data sheet 15.0 mV/Pa, loaded 330 Ω → 2.0 kΩ −1.3 dB",
@@ -306,7 +315,7 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
     let d = ok_json(&f, &["cal", "rm", "--input", "2", "--json"]).await?;
     assert_eq!(
         d["key"],
-        json!({ "device": "fake:loop", "channel": 1, "mic": "MM1 34804" })
+        json!({ "device": "fake", "channel": 1, "mic": "MM1 34804" })
     );
     let l = ok_json(&f, &["cal", "list", "--json"]).await?;
     assert_eq!(l["calibrations"], json!([]));
@@ -317,7 +326,24 @@ async fn input_setup_mic_curve_and_cal_flow() -> R {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn cal_and_unreachable_daemon() -> R {
-    let f = fake()?;
+    let f = looped()?;
+    ok_json(
+        &f,
+        &[
+            "session",
+            "open",
+            "--backend",
+            "fake",
+            "--in",
+            "1-4",
+            "--json",
+        ],
+    )
+    .await?;
+    let (_c, lease) = f
+        .tone(Signal::Sine { freq: Hz(1000.0) }, CAL_LEVEL, vec![0])
+        .await?;
+    f.run_for(8.0).await?;
     let c = ok_json(
         &f,
         &[
@@ -327,13 +353,17 @@ async fn cal_and_unreachable_daemon() -> R {
     .await?;
     assert_eq!(
         c["key"],
-        json!({ "device": "fake:loop", "channel": 2, "mic": "M30" })
+        json!({ "device": "fake", "channel": 2, "mic": "M30" }),
+        "{c}"
     );
     assert_eq!(
         c["spl"]["method"],
         json!({ "type": "acoustic", "calibrator_level": 94.0 })
     );
     assert_eq!(c["spl"]["freq"], 1000.0);
+    let measured = c["spl"]["measured"].as_f64().ok_or("measured")?;
+    assert!((measured - CAL_LEVEL).abs() < 0.005, "{c}");
+    assert_eq!(c["spl"]["sensitivity"].as_f64(), Some(94.0 - measured));
     let l = ok_json(&f, &["cal", "list", "--json"]).await?;
     assert_eq!(l["calibrations"].as_array().map(Vec::len), Some(1));
     // Calibrating bound the input's mic name.
@@ -343,8 +373,11 @@ async fn cal_and_unreachable_daemon() -> R {
         json!({ "type": "not_chosen" })
     );
 
-    f.lock().mute = true;
-    let r = ac2(&f, &["--timeout", "100ms", "devices", "--json"]).await?;
+    // The daemon gone: nothing answers at its endpoints.
+    let ep = f.ep.clone();
+    drop(lease);
+    drop(f);
+    let r = ac2_at(&ep, &["--timeout", "100ms", "devices", "--json"]).await?;
     assert_eq!(r.code, 3);
     assert_eq!(r.json()?["error"]["code"], "not_running");
     Ok(())

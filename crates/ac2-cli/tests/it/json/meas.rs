@@ -1,13 +1,67 @@
 //! Sessions, measurements, delay finding, and naming measurements.
 
+use ac2_audio::FakeConfig;
+use ac2_audio::fake::FakePath;
+use ac2_proto::model::Signal;
 use serde_json::{Value, json};
 
-use super::{R, ac2, fake, ok_json};
+use super::{R, Rig, ac2, fake, ok_json};
+
+const FS: f64 = 48_000.0;
+/// The reference's loopback delay, samples.
+const LOOP: u32 = 32;
+/// The acoustic path's arrival after the reference, samples.
+const ACOUSTIC: u32 = 240;
+
+/// `ok_json` of `args` until `done` holds of the answer: a finding of a measurement whose
+/// averages are still filling.
+async fn until(f: &Rig, args: &[&str], done: impl Fn(&Value) -> bool) -> R<Value> {
+    let end = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        let v = ok_json(f, args).await?;
+        if done(&v) || std::time::Instant::now() > end {
+            return Ok(v);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+
+fn delay(v: &Value) -> f64 {
+    v.as_f64().unwrap_or(f64::NAN)
+}
+
+/// Two arrivals 200 samples apart, the earlier 12.3 dB under the later: within 2 dB of the
+/// first-arrival threshold, so the finder leaves the pick to the operator.
+fn two_arrivals() -> R<Rig> {
+    let mut fir = vec![0.0; 201];
+    fir[0] = 0.5 * 10f32.powf(-12.3 / 20.0);
+    fir[200] = 0.5;
+    Rig::on(FakeConfig {
+        paths: vec![
+            FakePath::loopback(0, 0, LOOP),
+            // No noise: the finding is the same from one look to the next.
+            FakePath::acoustic(0, 1, LOOP + ACOUSTIC, fir, 0.0),
+        ],
+        ..FakeConfig::default()
+    })
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn delay_find_bands_ambiguity_and_refusal() -> R {
-    use ac2_client::fake::FakeFinding;
-    let f = fake()?;
+    let f = two_arrivals()?;
+    ok_json(
+        &f,
+        &[
+            "session",
+            "open",
+            "--backend",
+            "fake",
+            "--in",
+            "1-2",
+            "--json",
+        ],
+    )
+    .await?;
     ok_json(
         &f,
         &[
@@ -21,69 +75,99 @@ async fn delay_find_bands_ambiguity_and_refusal() -> R {
             "--name",
             "sub",
             "--fast-lf",
+            "--start",
             "--json",
         ],
     )
     .await
     .map(|m| assert_eq!(m["config"]["kind"]["config"]["depth"]["type"], "fast_lf"))?;
+    let (_c, lease) = f.tone(Signal::Pink, -20.0, vec![0]).await?;
 
-    // Ambiguous: candidates listed, the third one inserted (1-based on the command line).
-    f.lock().finding = FakeFinding::Ambiguous;
+    // Ambiguous once the averages hold both arrivals: the two candidates listed, the second
+    // one inserted (1-based on the command line).
+    let find = ["delay", "find", "sub", "--observation", "2s", "--json"];
+    until(&f, &find, |d| {
+        d["finding"]["outcome"]["type"] == "ambiguous"
+    })
+    .await?;
     let d = ok_json(
         &f,
         &[
             "delay",
             "find",
             "sub",
-            "--band",
-            "sub",
             "--observation",
-            "8s",
+            "2s",
             "--insert",
-            "3",
+            "2",
             "--json",
         ],
     )
     .await?;
-    assert_eq!(d["finding"]["outcome"]["type"], "ambiguous");
-    assert_eq!(d["finding"]["band"]["type"], "sub");
-    assert_eq!(
-        d["finding"]["outcome"]["ranked"].as_array().map(Vec::len),
-        Some(3)
+    let outcome = &d["finding"]["outcome"];
+    assert_eq!(outcome["type"], "ambiguous", "{d}");
+    assert_eq!(d["finding"]["band"]["type"], "full");
+    let ranked = outcome["ranked"].as_array().ok_or("ranked")?;
+    assert_eq!(ranked.len(), 2, "{d}");
+    // The earlier arrival is among the picks.
+    let early = f64::from(ACOUSTIC) / FS;
+    assert!(
+        ranked
+            .iter()
+            .any(|a| (delay(&a["delay"]) - early).abs() < 1.0 / FS),
+        "{d}"
     );
-    assert_eq!(d["inserted"]["delay"]["applied"], 0.0134);
-    let r = ac2(&f, &["delay", "find", "sub", "--band", "80hz-800hz"]).await?;
+    assert!(
+        (delay(&d["inserted"]["delay"]["applied"]) - delay(&ranked[1]["delay"])).abs() < 1e-9,
+        "{d}"
+    );
+    let r = ac2(&f, &["delay", "find", "sub", "--observation", "2s"]).await?;
     assert_eq!(r.code, 0, "{}", r.stderr);
     assert!(
         r.stdout.starts_with("AMBIGUOUS · near the threshold"),
         "{}",
         r.stdout
     );
-    assert!(r.stdout.contains("12.50 ms  −11.5 dB") || r.stdout.contains("12.50 ms"));
-    assert!(r.stdout.contains("--pick 1|2|3"), "{}", r.stdout);
+    assert!(r.stdout.contains("--pick 1|2"), "{}", r.stdout);
+    // Bands are sent as given and named in the finding, whatever it finds there.
+    let d = ok_json(&f, &["delay", "find", "sub", "--band", "sub", "--json"]).await?;
+    assert_eq!(d["finding"]["band"]["type"], "sub", "{d}");
+    let r = ac2(&f, &["delay", "find", "sub", "--band", "80hz-800hz"]).await?;
+    assert_eq!(r.code, 0, "{}", r.stderr);
     assert!(
         r.stdout.contains("band           custom 80–800 Hz"),
         "{}",
         r.stdout
     );
 
-    // Refused: the reasons are typed in JSON and spelled out for people; nothing inserted.
-    f.lock().finding = FakeFinding::NoEstimate;
-    let d = ok_json(&f, &["delay", "find", "sub", "--insert", "--json"]).await?;
-    assert_eq!(d["finding"]["outcome"]["type"], "no_estimate");
+    // Refused: seconds after the stimulus stopped, the reasons are typed in JSON and spelled
+    // out for people; nothing inserted.
+    drop(lease);
+    f.run_for(5.0).await?;
+    let d = ok_json(
+        &f,
+        &[
+            "delay",
+            "find",
+            "sub",
+            "--observation",
+            "1s",
+            "--insert",
+            "--json",
+        ],
+    )
+    .await?;
+    assert_eq!(d["finding"]["outcome"]["type"], "no_estimate", "{d}");
+    // Silence on both inputs: neither side has anything to correlate.
     assert_eq!(
         d["finding"]["outcome"]["reasons"],
-        json!([{ "type": "low_psr" }, { "type": "low_band_snr" }])
+        json!([{ "type": "no_reference" }, { "type": "no_signal" }]),
+        "{d}"
     );
     assert_eq!(d["inserted"], Value::Null);
-    let r = ac2(&f, &["delay", "find", "sub"]).await?;
+    let r = ac2(&f, &["delay", "find", "sub", "--observation", "1s"]).await?;
     assert_eq!(r.code, 0);
-    assert!(
-        r.stdout
-            .starts_with("NO ESTIMATE · no clear peak, too noisy in band"),
-        "{}",
-        r.stdout
-    );
+    assert!(r.stdout.starts_with("NO ESTIMATE · "), "{}", r.stdout);
     Ok(())
 }
 
@@ -105,8 +189,8 @@ async fn session_meas_delay_trace_flow() -> R {
         ],
     )
     .await?;
-    assert_eq!(s["epoch"], 2);
-    assert_eq!(s["open"]["input_device"], "fake:loop");
+    assert_eq!(s["epoch"], 1);
+    assert_eq!(s["open"]["input_device"], "fake");
     assert_eq!(s["open"]["config"]["input_channels"], json!([0, 1, 2, 3]));
     assert_eq!(s["open"]["config"]["sample_rate_hz"], 48000);
 
@@ -156,7 +240,7 @@ async fn session_meas_delay_trace_flow() -> R {
                 }},
                 "scope": "session"
             },
-            "config_rev": 2,
+            "config_rev": 3,
             "running": false,
             "delay": null,
             "eq": [],
@@ -169,7 +253,7 @@ async fn session_meas_delay_trace_flow() -> R {
     // Clearing panes it never had leaves it as it is.
     let m = ok_json(&f, &["meas", "layout", "clear", "foh", "--json"]).await?;
     assert_eq!(m["layout"], serde_json::Value::Null);
-    assert_eq!(m["config_rev"], 2);
+    assert_eq!(m["config_rev"], 3);
 
     let tf = ok_json(
         &f,
@@ -202,32 +286,54 @@ async fn session_meas_delay_trace_flow() -> R {
         .collect();
     assert_eq!(names, ["foh", "main-l"]);
 
-    let d = ok_json(&f, &["delay", "find", "main-l", "--insert", "--json"]).await?;
-    assert_eq!(d["finding"]["outcome"]["type"], "accepted");
-    assert_eq!(d["finding"]["outcome"]["first"]["delay"], 0.0125);
-    assert_eq!(d["finding"]["outcome"]["strongest"]["delay"], 0.0127);
+    // Pink noise on out 1: the room mic hears it 240 samples after the loopback.
+    let (_c, _lease) = f.tone(Signal::Pink, -20.0, vec![0]).await?;
+    let d = until(
+        &f,
+        &["delay", "find", "main-l", "--observation", "1s", "--json"],
+        |d| d["finding"]["outcome"]["type"] == "accepted",
+    )
+    .await?;
+    let arrival = f64::from(ACOUSTIC) / FS;
+    let outcome = &d["finding"]["outcome"];
+    assert_eq!(outcome["type"], "accepted", "{d}");
+    assert!(
+        (delay(&outcome["first"]["delay"]) - arrival).abs() < 0.5 / FS,
+        "{d}"
+    );
+    assert_eq!(
+        outcome["strongest"]["delay"], outcome["first"]["delay"],
+        "{d}"
+    );
     assert_eq!(d["finding"]["band"]["type"], "full");
-    assert_eq!(d["finding"]["confidence"]["psr_db"], 24.0);
-    assert_eq!(d["finding"]["candidates"].as_array().map(Vec::len), Some(2));
-    assert_eq!(d["inserted"]["delay"]["applied"], 0.0125);
-    assert_eq!(d["inserted"]["delay"]["applied_samples"], 600.0);
+    assert!(
+        d["finding"]["confidence"]["psr_db"].as_f64() > Some(10.0),
+        "{d}"
+    );
+    let d = ok_json(&f, &["delay", "insert", "main-l", "--json"]).await?;
+    assert!(
+        (delay(&d["delay"]["applied"]) - delay(&outcome["first"]["delay"])).abs() < 1e-9,
+        "{d}"
+    );
+    let n = delay(&d["delay"]["applied_samples"]);
+    assert!((n - f64::from(ACOUSTIC)).abs() < 0.5, "{d}");
 
     let d = ok_json(&f, &["delay", "set", "main-l", "480samples", "--json"]).await?;
     assert_eq!(d["delay"]["applied"], 0.01);
     let d = ok_json(&f, &["delay", "nudge", "main-l", "-0.25samples", "--json"]).await?;
     let n = d["delay"]["applied_samples"].as_f64().unwrap_or(f64::NAN);
     assert!((n - 479.75).abs() < 1e-9, "{n}");
-    // One delay and its offset from the inserted arrival (12.5 ms), as the app says it.
+    // One delay and its offset from the inserted arrival (5 ms), as the app says it.
     let r = ac2(&f, &["meas", "list"]).await?;
     assert!(
-        r.stdout.contains("9.995 ms (−2.505 ms from arrival)"),
+        r.stdout.contains("9.995 ms (+4.995 ms from arrival)"),
         "{}",
         r.stdout
     );
     let r = ac2(&f, &["delay", "nudge", "main-l", "0samples"]).await?;
     assert!(
         r.stdout
-            .contains("delay 9.995 ms (−2.505 ms from arrival) · 479.75 samples"),
+            .contains("delay 9.995 ms (+4.995 ms from arrival) · 479.75 samples"),
         "{}",
         r.stdout
     );
@@ -259,11 +365,20 @@ async fn session_meas_delay_trace_flow() -> R {
         "{}",
         csv.stdout
     );
-    assert!(
-        csv.stdout
-            .contains("\nfreq_hz,mag_db,phase_deg,coherence\n")
-    );
-    assert_eq!(csv.stdout.lines().count(), 17 + 480);
+    // One row per point of the trace under its header (an impulse response, when the
+    // capture carries one, follows in a table of its own).
+    let data = ok_json(&f, &["trace", "show", "l-pre-eq", "--data", "--json"]).await?;
+    let points = data["mag_db"].as_array().map_or(0, Vec::len);
+    assert_eq!(points, 480, "1/48 octave over the analysis range");
+    let rows = csv
+        .stdout
+        .split_once("\nfreq_hz,mag_db,phase_deg,coherence\n")
+        .map_or(0, |(_, t)| {
+            t.lines()
+                .take_while(|l| l.matches(',').count() == 3)
+                .count()
+        });
+    assert_eq!(rows, points, "{}", csv.stdout);
 
     let rm = ok_json(&f, &["meas", "rm", "foh", "--json"]).await?;
     assert_eq!(rm["deleted"], 1);
@@ -274,7 +389,11 @@ async fn session_meas_delay_trace_flow() -> R {
     );
 
     let dump = ok_json(&f, &["state", "dump"]).await?;
-    assert_eq!(dump["rev"], json!(f.lock().rev.0));
+    let status = ok_json(&f, &["status", "--json"]).await?;
+    assert!(
+        dump["rev"].as_u64() >= status["rev"].as_u64(),
+        "{dump} {status}"
+    );
     assert_eq!(
         dump["state"]["measurements"].as_array().map(Vec::len),
         Some(1)
@@ -332,12 +451,31 @@ async fn numeric_names_resolve_and_ambiguity_is_refused() -> R {
             "meas", "new", "tf", "--ref", "1", "--meas", "2", "--name", name, "--json",
         ]
     };
+    ok_json(
+        &f,
+        &[
+            "session",
+            "open",
+            "--backend",
+            "fake",
+            "--in",
+            "1-2",
+            "--json",
+        ],
+    )
+    .await?;
     let a = ok_json(&f, &tf("1083")).await?;
     assert_eq!(a["id"], 1);
-    let d = ok_json(&f, &["delay", "find", "1083", "--json"]).await?;
-    assert_eq!(d["finding"]["outcome"]["type"], "accepted");
     let m = ok_json(&f, &["meas", "start", "1083", "--json"]).await?;
     assert_eq!(m["id"], 1);
+    let (_c, _lease) = f.tone(Signal::Pink, -20.0, vec![0]).await?;
+    let d = until(
+        &f,
+        &["delay", "find", "1083", "--observation", "1s", "--json"],
+        |d| d["finding"]["outcome"]["type"] == "accepted",
+    )
+    .await?;
+    assert_eq!(d["finding"]["outcome"]["type"], "accepted", "{d}");
 
     let b = ok_json(&f, &tf("1")).await?;
     assert_eq!(b["id"], 2);

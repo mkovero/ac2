@@ -1,14 +1,25 @@
-//! `ac2 levels`, `levels set` and `levels reset` against the fake daemon.
+//! `ac2 levels`, `levels set` and `levels reset` against the daemon.
 
-use super::{R, ac2, fake, ok_json};
+use std::time::{Duration, Instant};
+
+use ac2_audio::FakeConfig;
+use ac2_audio::fake::FakePath;
+use ac2_proto::model::Signal;
+use ac2_proto::units::Hz;
+
+use super::{R, Rig, ac2, ok_json, set_tone};
+
+/// A sine's true peak is its level in dBFS (0 dBFS: a full-scale sine).
+const TONE: f64 = -12.0;
+const QUIET: f64 = -30.0;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn levels_set_shows_the_rig_and_reset_clears_the_holds() -> R {
-    let f = fake()?;
-    f.lock().meters = true;
-    // Input 2 silent from the first frame: set once the session runs, a frame of the
-    // default level can reach its max hold first on a slow machine.
-    f.lock().set_input_peak(1, f32::NEG_INFINITY);
+    // Out 1 reaches inputs 1 and 3; inputs 2 and 4 are silent.
+    let f = Rig::on(FakeConfig {
+        paths: vec![FakePath::loopback(0, 0, 32), FakePath::loopback(0, 2, 32)],
+        ..FakeConfig::default()
+    })?;
     // Without a session, there is nothing to meter.
     let r = ac2(&f, &["levels", "--json"]).await?;
     assert_ne!(r.code, 0);
@@ -39,8 +50,14 @@ async fn levels_set_shows_the_rig_and_reset_clears_the_holds() -> R {
         ],
     )
     .await?;
+    let (_c, lease) = f
+        .tone(Signal::Sine { freq: Hz(1000.0) }, TONE, vec![0])
+        .await?;
+    let near =
+        |v: &serde_json::Value, want: f64| v.as_f64().is_some_and(|v| (v - want).abs() < 0.1);
+    // The tone at its level on input 1 (the meters have seen it once its max is there).
+    let v = levels_until(&f, |v| near(&v["inputs"][0]["true_peak"], TONE)).await?;
     // Input 2 silent: the pair reads right quiet.
-    let v = ok_json(&f, &["levels", "--json"]).await?;
     assert_eq!(v["settings"]["ballistic"], "true_peak");
     let rows = v["inputs"].as_array().expect("array");
     assert_eq!(rows.len(), 4);
@@ -48,14 +65,13 @@ async fn levels_set_shows_the_rig_and_reset_clears_the_holds() -> R {
     assert_eq!(rows[0]["kind"], "line");
     assert_eq!(rows[0]["ballistic"], "true_peak");
     // True peak chosen: the reading and its max are the true peak.
-    let near = |v: &serde_json::Value, want: f64| (v.as_f64().expect("number") - want).abs() < 1e-6;
-    assert!(near(&rows[0]["ppm"], -11.8), "{}", rows[0]["ppm"]);
+    assert!(near(&rows[0]["ppm"], TONE), "{}", rows[0]["ppm"]);
     assert!(
-        near(&rows[0]["true_peak"], -11.8),
+        near(&rows[0]["true_peak"], TONE),
         "{}",
         rows[0]["true_peak"]
     );
-    assert!(near(&rows[0]["max"], -11.8), "{}", rows[0]["max"]);
+    assert!(near(&rows[0]["max"], TONE), "{}", rows[0]["max"]);
     assert_eq!(rows[0]["overs"], 0);
     assert_eq!(rows[0]["clip"], false);
     assert_eq!(
@@ -74,7 +90,7 @@ async fn levels_set_shows_the_rig_and_reset_clears_the_holds() -> R {
         loud[1]["source"],
         serde_json::json!({"type": "input", "input": 3})
     );
-    assert!(near(&loud[0]["max_true_peak"], -11.8), "{}", loud[0]);
+    assert!(near(&loud[0]["max_true_peak"], TONE), "{}", loud[0]);
     for l in loud {
         // Before its first gating block passes, integrated is null, never "-inf".
         let int = &l["integrated"];
@@ -180,20 +196,33 @@ async fn levels_set_shows_the_rig_and_reset_clears_the_holds() -> R {
     assert!(t.stdout.contains("Mom (bars)"), "{}", t.stdout);
     ok_json(&f, &["levels", "set", "--ballistic", "vu", "--json"]).await?;
     // Reset: the holds of the inputs given go, the others stay.
-    f.lock().set_input_peak(0, -30.0);
-    let v = ok_json(&f, &["levels", "--json"]).await?;
-    assert!(near(&v["inputs"][0]["max"], -11.8), "held");
+    set_tone(&lease, Signal::Sine { freq: Hz(1000.0) }, QUIET, vec![0]).await?;
+    let v = levels_until(&f, |v| near(&v["inputs"][0]["true_peak"], QUIET)).await?;
+    assert!(near(&v["inputs"][0]["max"], TONE), "held: {v}");
     let r = ok_json(&f, &["levels", "reset", "--input", "1", "--json"]).await?;
     assert_eq!(r["channels"], serde_json::json!([0]));
-    let v = ok_json(&f, &["levels", "--json"]).await?;
+    // The hold starts again from the next block metered.
+    let v = levels_until(&f, |v| v["inputs"][0]["max"].is_f64()).await?;
     assert!(
-        near(&v["inputs"][0]["max"], -29.8),
-        "the VU fallback's true peak"
+        near(&v["inputs"][0]["max"], QUIET),
+        "the VU fallback's true peak: {v}"
     );
-    assert!(near(&v["inputs"][2]["max"], -11.8));
+    assert!(near(&v["inputs"][2]["max"], TONE));
     let r = ok_json(&f, &["levels", "reset", "--json"]).await?;
     assert_eq!(r["channels"], serde_json::json!([]));
     let t = ac2(&f, &["levels", "reset"]).await?;
     assert!(t.stdout.contains("every input"), "{}", t.stdout);
     Ok(())
+}
+
+/// `levels --json` until `done` holds of it: the meters are read from the running stream.
+async fn levels_until(f: &Rig, done: impl Fn(&serde_json::Value) -> bool) -> R<serde_json::Value> {
+    let end = Instant::now() + Duration::from_secs(30);
+    loop {
+        let v = ok_json(f, &["levels", "--json"]).await?;
+        if done(&v) || Instant::now() > end {
+            return Ok(v);
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }

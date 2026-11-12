@@ -2,9 +2,11 @@
 //! `session inputs --kind / --pair`, `cal line`, `cal list` and `cal rm --line` send, print
 //! and refuse, in the app's words.
 
+use ac2_proto::model::Signal;
+use ac2_proto::units::Hz;
 use serde_json::{Value, json};
 
-use super::{R, ac2, fake, ok_json};
+use super::{R, ac2, looped, ok_json};
 
 /// The row of 1-based input `n` in an inputs JSON table.
 fn input_row(v: &Value, n: u64) -> Value {
@@ -20,7 +22,7 @@ fn has(text: &str, want: &str) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn kinds_pairs_and_line_calibration_flow() -> R {
-    let f = fake()?;
+    let f = looped()?;
     ok_json(
         &f,
         &[
@@ -96,8 +98,12 @@ async fn kinds_pairs_and_line_calibration_flow() -> R {
     let i = ok_json(&f, &["session", "inputs", "--json"]).await?;
     assert_eq!(input_row(&i, 3)["pair"], "left");
 
-    // Line calibration: +4 dBu (1.228 V) with the fake's inputs reading −20 dBFS puts full
-    // scale at +24 dBu; the daemon measured the level, the operator typed only the volts.
+    // Line calibration: +4 dBu (1.228 V) with a tone reading −20 dBFS puts full scale at
+    // +24 dBu; the daemon measured the level, the operator typed only the volts.
+    let (_c, _lease) = f
+        .tone(Signal::Sine { freq: Hz(1000.0) }, -20.0, vec![0])
+        .await?;
+    f.run_for(8.0).await?;
     let r = ac2(&f, &["cal", "line", "--input", "3", "--volts", "1.228v"]).await?;
     assert_eq!(r.code, 0, "{} {}", r.stdout, r.stderr);
     assert_eq!(
@@ -114,7 +120,10 @@ async fn kinds_pairs_and_line_calibration_flow() -> R {
         (j["dbu_fs"].as_f64().unwrap_or(f64::NAN) - 24.0).abs() < 0.05,
         "{j}"
     );
-    assert!((j["line"]["measured"].as_f64().unwrap_or(f64::NAN) + 20.0).abs() < 1e-9);
+    assert!(
+        (j["line"]["measured"].as_f64().unwrap_or(f64::NAN) + 20.0).abs() < 0.005,
+        "{j}"
+    );
     // On a digital input: the daemon's refusal, verbatim.
     let r = ac2(
         &f,
@@ -129,7 +138,7 @@ async fn kinds_pairs_and_line_calibration_flow() -> R {
     // `cal list`: its own block; the input line now reads dBu on the calibrated side.
     let t = ac2(&f, &["cal", "list"]).await?.stdout;
     has(&t, "line calibrations\nin 3 · +24.0 dBu at full scale · ");
-    has(&t, " · fake:loop");
+    has(&t, " · fake");
     has(
         &t,
         "in 3+4 · line · pair Main · L dBu · full scale +24.0 dBu · ",
@@ -148,7 +157,7 @@ async fn kinds_pairs_and_line_calibration_flow() -> R {
     assert_eq!(r.code, 0, "{} {}", r.stdout, r.stderr);
     assert_eq!(
         r.stdout.trim(),
-        "line calibration of input 3 of fake:loop deleted"
+        "line calibration of input 3 of fake deleted"
     );
     let l = ok_json(&f, &["cal", "list", "--json"]).await?;
     assert_eq!(l["line_calibrations"].as_array().map(Vec::len), Some(0));

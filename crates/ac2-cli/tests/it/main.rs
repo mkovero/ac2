@@ -9,7 +9,6 @@ mod common;
 mod discover;
 mod drift_rig;
 mod eq_rig;
-mod fake_parity;
 mod frames_rig;
 mod json;
 mod leq_rig;

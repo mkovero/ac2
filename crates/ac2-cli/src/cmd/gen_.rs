@@ -318,16 +318,25 @@ async fn foreground(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use std::time::{Duration, Instant};
 
-    use ac2_client::ClientConfig;
-    use ac2_client::fake::{FakeDaemon, FakeOptions};
+    use ac2_client::{ClientConfig, Endpoints};
+    use ac2_proto::model::{DeviceSelector, Generator, SessionConfig};
     use ac2_proto::units::Dbfs;
 
     use super::*;
     use ac2_scene::unit_text::{Channels, LevelDbfs};
 
     type R<T = ()> = Result<T, Box<dyn std::error::Error>>;
+
+    fn generator(c: &Client) -> Option<Generator> {
+        c.watch()
+            .borrow()
+            .state
+            .as_ref()
+            .map(|s| s.generator.clone())
+    }
 
     async fn until(what: &str, mut f: impl FnMut() -> bool) -> R {
         let end = Instant::now() + Duration::from_secs(10);
@@ -340,10 +349,43 @@ mod tests {
         Ok(())
     }
 
+    /// The daemon on its simulated rig (no audio leaves the process), a session open on
+    /// both outputs.
+    async fn daemon() -> R<(ac2d::Handle, Client)> {
+        let listen = ac2d::Listen::Local {
+            ctrl: "tcp://127.0.0.1:0".into(),
+            data: "tcp://127.0.0.1:0".into(),
+        };
+        let backend = Arc::new(ac2d::fake_rig()?);
+        let h = ac2d::Daemon::start(ac2d::DaemonConfig::new(backend, listen, -10.0))?;
+        let ep = Endpoints {
+            ctrl: h.ctrl_endpoint().to_owned(),
+            data: h.data_endpoint().to_owned(),
+        };
+        let c = Client::connect(ClientConfig::new(ep, "gen-test")).await?;
+        c.wait_synced(Duration::from_secs(5)).await?;
+        c.call(Command::SessionOpen {
+            config: SessionConfig {
+                backend: None,
+                input_device: DeviceSelector::Default,
+                output_device: DeviceSelector::Default,
+                input_channels: vec![0],
+                spare_inputs: 0,
+                output_channels: 2,
+                sample_rate_hz: None,
+                buffer_frames: None,
+                loopback: None,
+                remote_inputs: Vec::new(),
+                link_offset: None,
+            },
+        })
+        .await?;
+        Ok((h, c))
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn arm_enter_fires_quit_stops_and_releases() -> R {
-        let f = FakeDaemon::start(FakeOptions::default())?;
-        let c = Client::connect(ClientConfig::new(f.endpoints(), "gen-test")).await?;
+        let (_h, c) = daemon().await?;
         let opts = GenOpts {
             outputs: Channels(vec![0, 1]),
             level: LevelDbfs(Dbfs(-30.0)),
@@ -358,11 +400,11 @@ mod tests {
         let mut buf = Vec::new();
         let mut out = Out::new(true, &mut buf);
         let drive = async {
-            until("armed", || f.lock().state.generator.armed).await?;
+            until("armed", || generator(&c).is_some_and(|g| g.armed)).await?;
             // Arming alone never emits.
-            assert!(!f.lock().state.generator.firing);
+            assert!(generator(&c).is_some_and(|g| !g.firing));
             tx.send(Input::Key(Key::Enter))?;
-            until("firing", || f.lock().state.generator.firing).await?;
+            until("firing", || generator(&c).is_some_and(|g| g.firing)).await?;
             tx.send(Input::Key(Key::Quit))?;
             R::Ok(())
         };
@@ -370,10 +412,11 @@ mod tests {
             tokio::join!(foreground(&c, lease, settings, &mut out, (None, rx)), drive);
         drove?;
         ran?;
-        let g = f.lock().state.generator.clone();
-        assert!(!g.firing && !g.armed && g.owner.is_none());
-        assert_eq!(f.executions("gen.release"), 1);
-        assert_eq!(f.executions("gen.stop"), 1);
+        // Stopped, disarmed and released.
+        until("released", || {
+            generator(&c).is_some_and(|g| !g.firing && !g.armed && g.owner.is_none())
+        })
+        .await?;
         let text = String::from_utf8(buf)?;
         let events: Vec<String> = text
             .lines()
