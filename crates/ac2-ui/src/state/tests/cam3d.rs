@@ -159,7 +159,7 @@ fn cursor_steps_and_compare_are_inert_and_the_cursor_toggles() {
     assert_eq!(t.st.view.cursor_hz, Some(1000.0));
     t.key("Shift+T");
     assert_eq!(t.st.view.cursor_hz, None);
-    assert_eq!(t.st.view.spectrum.spectrograph.cursor_s, None);
+    assert_eq!(t.st.view.spectrum.spectrograph.cursor_at_s, None);
     assert_eq!(t.st.layout.focus, pane);
     assert_eq!(camera(&t), SpectrumCamera::DEFAULT);
 }
@@ -263,4 +263,26 @@ fn the_axes_show_on_hover_and_after_an_interaction() {
     t.st.apply(Msg::Cam3d(p, Cam3dMsg::Dolly { steps: -1 }), &t.keys);
     at(&mut t, now + 1.0);
     assert_eq!(t.st.axes3d_alpha(p), 1.0);
+}
+
+#[test]
+fn the_pointer_over_the_view_reaches_its_scene_until_it_leaves_or_drags() {
+    use ac2_scene::spectrograph_3d::Pointer3d;
+    let mut t = on_3d();
+    let p = t.st.layout.focus;
+    let at = Pointer3d {
+        pos: [200.0, 150.0],
+        px_per_pt: 1.5,
+    };
+    t.st.apply(Msg::Cam3d(p, Cam3dMsg::Hover(true)), &t.keys);
+    let wait = t.st.axes3d_wait();
+    t.st.apply(Msg::Cam3d(p, Cam3dMsg::Point(Some(at))), &t.keys);
+    assert_eq!(t.st.view_for(p).pointer_3d, Some(at));
+    // Moving over the view is no interaction: the axes do not hold for it.
+    assert_eq!(t.st.axes3d_wait(), wait);
+    t.st.apply(Msg::Cam3d(p, Cam3dMsg::Drag { dx: 4.0, dy: 0.0 }), &t.keys);
+    assert_eq!(t.st.view_for(p).pointer_3d, None, "a drag orbits");
+    t.st.apply(Msg::Cam3d(p, Cam3dMsg::Point(Some(at))), &t.keys);
+    t.st.apply(Msg::Cam3d(p, Cam3dMsg::Hover(false)), &t.keys);
+    assert_eq!(t.st.view_for(p).pointer_3d, None, "gone");
 }

@@ -513,6 +513,7 @@ impl AppState {
         unpin(&mut self.layout);
         self.history.layouts_mut(unpin);
         self.pane_local.plate_hover = None;
+        self.pane_local.pointer3d = None;
     }
 
     /// Closes rig `id`: its link stops the stimulus it holds and gives up its lease before

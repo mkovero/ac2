@@ -232,6 +232,7 @@ pub(super) fn navigate(
     if resp.clicked() || resp.drag_started() {
         app.dispatch(Msg::FocusPane(id));
     }
+    point_3d(app, ui, resp, id, plot_rect, legend == LegendTook::Nothing);
     // A click on the legend is not a cursor placed behind it, a drag on it not a pan; when
     // its rows scroll, the wheel over it is theirs.
     if legend == LegendTook::PointerAndWheel {
@@ -305,21 +306,30 @@ pub(super) fn navigate(
         .view(id)
         .is_some_and(|v| v.shows_3d(app.state.three_d()))
     {
+        // A click commits the spike the picture marks under the pointer; a touch, with no
+        // hover before it, the spike under the touch.
         if free
             && resp.clicked()
             && let Some(f) = axes.pick3d
             && let Some(p) = resp.interact_pointer_pos()
             && let Some((_, sk)) = app.skylines.get(&id)
-            && let Some(at) = ac2_scene::spectrograph_3d::pick(
-                &f,
-                sk,
-                [p.x - plot_rect.min.x, p.y - plot_rect.min.y],
-            )
         {
-            app.dispatch(Msg::SpectrographCursor {
-                hz: at.hz,
-                before_s: at.before_s,
+            let at = ac2_scene::spectrograph_3d::Pointer3d {
+                pos: [p.x - plot_rect.min.x, p.y - plot_rect.min.y],
+                px_per_pt: ui.ctx().pixels_per_point(),
+            };
+            let marked = axes.hover3d.filter(|(was, _)| {
+                (was.pos[0] - at.pos[0]).hypot(was.pos[1] - at.pos[1]) <= MARKED_PX
             });
+            if let Some(at) = marked
+                .map(|m| m.1)
+                .or_else(|| ac2_scene::spectrograph_3d::pick(&f, sk, at))
+            {
+                app.dispatch(Msg::SpectrographCursor {
+                    hz: at.hz,
+                    before_s: at.before_s,
+                });
+            }
         }
         navigate_3d(app, ui, resp, id);
         return;
@@ -415,6 +425,47 @@ fn reveal_3d(app: &mut App, ui: &egui::Ui, resp: &egui::Response, id: PaneId) {
         app.dispatch(Msg::Cam3d(id, crate::state::Cam3dMsg::Touch));
     }
 }
+
+/// Where the pointer is over a 3D spectrograph's picture, told to the reducer when it moves,
+/// so the scene marks the spike under it: kept through a click's press (the click commits
+/// it), not while dragging (a drag orbits), over a plate (`free` false) or off the plot.
+fn point_3d(
+    app: &mut App,
+    ui: &egui::Ui,
+    resp: &egui::Response,
+    id: PaneId,
+    plot_rect: egui::Rect,
+    free: bool,
+) {
+    if !app
+        .state
+        .layout
+        .view(id)
+        .is_some_and(|v| v.shows_3d(app.state.three_d()))
+    {
+        return;
+    }
+    let at = resp
+        .hover_pos()
+        .filter(|p| free && plot_rect.contains(*p) && !resp.dragged())
+        .map(|p| ac2_scene::spectrograph_3d::Pointer3d {
+            pos: [p.x - plot_rect.min.x, p.y - plot_rect.min.y],
+            px_per_pt: ui.ctx().pixels_per_point(),
+        });
+    let now = app
+        .state
+        .pane_local
+        .pointer3d
+        .filter(|(p, _)| *p == id)
+        .map(|(_, at)| at);
+    if at != now {
+        app.dispatch(Msg::Cam3d(id, crate::state::Cam3dMsg::Point(at)));
+    }
+}
+
+/// How near the pointer the picture last marked a spike from a click must be, logical
+/// pixels, for the click to commit that spike: a pointer that moved since is picked anew.
+const MARKED_PX: f32 = 3.0;
 
 /// Wheel scroll that makes one zoom step: a mouse notch.
 const WHEEL_PX_PER_STEP: f32 = 50.0;

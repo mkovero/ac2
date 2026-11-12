@@ -107,6 +107,11 @@ impl AppState {
             .plate_hover
             .filter(|(p, _)| *p == id)
             .map(|(_, h)| h);
+        v.pointer_3d = self
+            .pane_local
+            .pointer3d
+            .filter(|(p, _)| *p == id)
+            .map(|(_, at)| at);
         // The transfer scene lays out the plots it is asked for: one alone fills the pane.
         // The coherence rides on the magnitude view only when placed over it.
         let over =
@@ -657,7 +662,7 @@ impl AppState {
         // The history goes with the last spectrograph shown.
         if !self.spectrograph_shown() {
             self.rig.folded.spectrographs.clear();
-            self.view.spectrum.spectrograph.cursor_s = None;
+            self.view.spectrum.spectrograph.cursor_at_s = None;
         }
     }
 }

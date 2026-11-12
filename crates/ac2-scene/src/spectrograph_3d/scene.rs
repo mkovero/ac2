@@ -76,6 +76,9 @@ pub struct Spectrograph3dScene {
     /// The cursor's cell, marked on its spike; `None` off the picture, without a cursor, or
     /// at traces only (T).
     pub cursor: Option<Cursor3d>,
+    /// The spike under the pointer ([`ViewState::pointer_3d`]), marked: what a click puts
+    /// the cursor on.
+    pub hover: Option<super::Picked>,
     /// The cursor values' plate, as every view's.
     pub readout_box: Option<crate::plate::PlateBox>,
 }
@@ -661,8 +664,19 @@ pub fn spectrograph_3d_scene(
             }),
         _ => Vec::new(),
     };
+    // The spike under the pointer first, so the cursor's mark is drawn over it.
+    let hover = match (sg, pick.as_ref(), view.pointer_3d) {
+        (Some(s), Some(f), Some(at)) if view.chrome.cursor() => super::pick(f, s.skyline, at),
+        _ => None,
+    };
+    if let (Some(s), Some(f), Some(h)) = (sg, pick.as_ref(), hover.as_ref()) {
+        let cursor = super::cursor::cursor_at(s.skyline, view).map(|c| c.2);
+        super::cursor::hover_cell(&mut c, f, s.skyline, h, cursor);
+    }
     let cursor = match (sg, pick.as_ref()) {
-        (Some(s), Some(f)) if view.chrome.cursor() => super::pick::cursor_cell(&mut c, f, s, view),
+        (Some(s), Some(f)) if view.chrome.cursor() => {
+            super::cursor::cursor_cell(&mut c, f, s, view)
+        }
         _ => None,
     };
     let cell = sg.and_then(|s| cell_text(s.skyline));
@@ -773,6 +787,7 @@ pub fn spectrograph_3d_scene(
         legend_hits: legend.as_ref().map_or_else(Vec::new, |l| l.hits.clone()),
         pick,
         cursor,
+        hover,
         readout_box,
     }
 }

@@ -44,6 +44,13 @@ impl AppState {
         }
     }
 
+    /// Audio time at the end of the newest frame's slot in pane `pane`'s spectrograph
+    /// history, seconds: what the spectrograph cursor's age counts back from.
+    pub fn spectrograph_end_s(&self, pane: PaneId) -> Option<f64> {
+        let m = self.pane_meas(pane)?;
+        self.rig.folded.spectrographs.get(&m.id)?.newest_end_s()
+    }
+
     /// Some spectrograph on screen still scrolls at `now`: its time axis has not reached
     /// where it waits for a stalled stream. Only then does the pacer run for it.
     pub fn spectrographs_scrolling(&self, now: Instant) -> bool {

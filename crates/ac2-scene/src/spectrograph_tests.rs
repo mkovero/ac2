@@ -346,14 +346,14 @@ fn axes_bar_caption_and_cursor_read_as_numbers() {
     assert_eq!(s.message, None);
     // A point 4.2 s ago at 1 kHz: the hold of the −23.5 dB frame.
     view.cursor_hz = Some(1000.0);
-    view.spectrum.spectrograph.cursor_s = Some(4.2);
+    view.spectrum.spectrograph.cursor_at_s = ago(&h, 4.2);
     let s = scene_of(&h, &view);
     assert_eq!(
         s.cursor.expect("cursor").text,
         "1.00 kHz · 4.2 s ago · \u{2212}23.5 dBFS (tone)"
     );
     // Before the first frame: no value.
-    view.spectrum.spectrograph.cursor_s = Some(12.0);
+    view.spectrum.spectrograph.cursor_at_s = ago(&h, 12.0);
     let s = scene_of(&h, &view);
     assert_eq!(s.cursor.expect("cursor").text, "1.00 kHz · 12 s ago · —");
 }
@@ -368,7 +368,7 @@ fn the_cursor_reads_on_the_plate_of_every_view() {
         cursor_hz: Some(1000.0),
         ..ViewState::default()
     };
-    view.spectrum.spectrograph.cursor_s = Some(4.2);
+    view.spectrum.spectrograph.cursor_at_s = ago(&h, 4.2);
     let line = "4.2 s ago  \u{2212}23.5 dBFS (tone)";
     let texts = |s: &SpectrographScene| -> Vec<String> {
         s.scene
@@ -558,7 +558,7 @@ fn the_spectrograph_alone_takes_the_pane() {
     assert_eq!(alone.caption, "Main · last 30 s · dBFS (tone)");
     assert_eq!((alone.bar.y, alone.bar.h), (alone.plot.y, alone.plot.h));
     view.cursor_hz = Some(1000.0);
-    view.spectrum.spectrograph.cursor_s = Some(0.0);
+    view.spectrum.spectrograph.cursor_at_s = ago(&h, 0.0);
     let s = scene_of(&h, &view);
     assert!(s.cursor.is_some());
 
@@ -981,4 +981,9 @@ fn alone_the_legend_plate_and_tracked_peaks_and_the_split_leaves_them_to_the_spe
     let sp = s.spectrum.expect("the spectrum part");
     assert_eq!(sp.legend_hits.len(), 2);
     assert!(sp.peak_list.is_some(), "the spectrum lists them");
+}
+
+/// The cursor's time `before_s` seconds before the newest frame of `h`.
+fn ago(h: &SpectrographHistory, before_s: f64) -> Option<f64> {
+    Some(h.newest_end_s().expect("frames") - before_s)
 }

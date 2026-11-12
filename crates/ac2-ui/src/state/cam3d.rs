@@ -24,6 +24,9 @@ pub enum Cam3dMsg {
     /// A touch or click on the view: the axes show for a few seconds (a kiosk's touch
     /// screen has no hover).
     Touch,
+    /// The pointer moved over the picture (not dragging), or left it or began a drag
+    /// (`None`): the spike under it is marked.
+    Point(Option<spectrograph_3d::Pointer3d>),
 }
 
 /// The camera drawn while it moves: springs towards the stored camera, or the pointer's
@@ -196,15 +199,31 @@ impl AppState {
         {
             return;
         }
-        // Anything but the pointer's coming and going is an interaction: the axes hold.
+        // Anything but the pointer's coming, going and moving is an interaction: the axes
+        // hold.
         let now = self.now_s;
         let reveal = self.pane_local.axes3d.entry(pane).or_default();
         match m {
             Cam3dMsg::Hover(on) => reveal.hover(on, now),
+            Cam3dMsg::Point(_) => {}
             _ => reveal.poke(now),
         }
+        // Gone from the view, or the view dragged: nothing under the pointer is marked.
+        let pointer_off = match m {
+            Cam3dMsg::Hover(on) => !on,
+            Cam3dMsg::Point(p) => p.is_none(),
+            Cam3dMsg::Drag { .. } => true,
+            _ => false,
+        };
+        if pointer_off {
+            if self.pane_local.pointer3d.is_some_and(|(p, _)| p == pane) {
+                self.pane_local.pointer3d = None;
+            }
+        } else if let Cam3dMsg::Point(Some(at)) = m {
+            self.pane_local.pointer3d = Some((pane, at));
+        }
         match m {
-            Cam3dMsg::Hover(_) | Cam3dMsg::Touch => {}
+            Cam3dMsg::Hover(_) | Cam3dMsg::Touch | Cam3dMsg::Point(_) => {}
             Cam3dMsg::Drag { dx, dy } => {
                 let from = self.drawn_camera(pane);
                 let to = spectrograph_3d::drag(from, dx, dy);

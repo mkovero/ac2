@@ -362,7 +362,7 @@ impl AppState {
         self.rig.choice.own_panes = s.own_panes.filter(|m| s.rig == rig && ids.contains(m));
         if !self.spectrograph_shown() {
             self.rig.folded.spectrographs.clear();
-            self.view.spectrum.spectrograph.cursor_s = None;
+            self.view.spectrum.spectrograph.cursor_at_s = None;
         }
         if let Some(o) = owner.filter(|o| self.rig.choice.own_panes == Some(*o)) {
             self.store_layout(o, out);

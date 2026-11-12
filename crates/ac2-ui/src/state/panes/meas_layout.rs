@@ -463,7 +463,7 @@ impl AppState {
         // The history goes with the last spectrograph shown.
         if !self.spectrograph_shown() {
             self.rig.folded.spectrographs.clear();
-            self.view.spectrum.spectrograph.cursor_s = None;
+            self.view.spectrum.spectrograph.cursor_at_s = None;
         }
     }
 

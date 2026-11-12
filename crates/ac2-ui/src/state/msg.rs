@@ -387,8 +387,8 @@ pub enum Msg {
     ToggleShown(TraceId),
     /// A stored trace double-clicked in the list: selected, and its name asked for.
     RenameTrace(TraceId),
-    /// A click in the spectrograph: the cursor at `hz`, `before_s` seconds before the
-    /// newest frame.
+    /// A click in the spectrograph (the focused pane): the cursor at `hz`, on the frame
+    /// `before_s` seconds before the newest.
     SpectrographCursor {
         hz: f64,
         before_s: f64,

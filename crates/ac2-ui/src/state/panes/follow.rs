@@ -240,7 +240,9 @@ impl AppState {
             | Msg::FocusPane(pane)
             | Msg::LegendPick(pane, _)
             | Msg::LeqStrip(pane, _) => Some(Some(*pane)),
-            Msg::Cam3d(pane, m) if !matches!(m, Cam3dMsg::Hover(_)) => Some(Some(*pane)),
+            Msg::Cam3d(pane, m) if !matches!(m, Cam3dMsg::Hover(_) | Cam3dMsg::Point(_)) => {
+                Some(Some(*pane))
+            }
             _ => None,
         }
     }

@@ -456,8 +456,11 @@ impl SpectrumMode {
 /// measurement's ([`ac2_proto::model::SpectrumDisplay`]).
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct SpectrographView {
-    /// The cursor's time, seconds before the newest frame (with `cursor_hz`, a point).
-    pub cursor_s: Option<f64>,
+    /// The cursor's time (with `cursor_hz`, a point): audio time on the history's slot
+    /// clock, seconds ([`crate::spectrograph::SpectrographHistory::newest_end_s`]). Put on a
+    /// frame, it stays on that frame while newer ones arrive: its age counts up as its row
+    /// moves back, until it leaves the history.
+    pub cursor_at_s: Option<f64>,
 }
 
 impl SpectrumView {
@@ -874,6 +877,9 @@ pub struct ViewState {
     pub plates: crate::plate::Plates,
     /// The plate under the pointer in the pane being drawn (lit, its grip shown bright).
     pub plate_hover: Option<crate::plate::PlateHover>,
+    /// The pointer over the 3D spectrograph being drawn, not dragging: the spike under it
+    /// is marked ([`crate::spectrograph_3d::Spectrograph3dScene::hover`]).
+    pub pointer_3d: Option<crate::spectrograph_3d::Pointer3d>,
     /// The curves' legend, one plate on every frequency view (transfer, spectrum, both
     /// spectrographs): shown or not, scrolled how far (its place and text size are the
     /// pane's [`Self::plates`]).
@@ -900,6 +906,7 @@ impl Default for ViewState {
             freq_right: 0.0,
             plates: crate::plate::Plates::default(),
             plate_hover: None,
+            pointer_3d: None,
             legend: LegendView::default(),
         }
     }

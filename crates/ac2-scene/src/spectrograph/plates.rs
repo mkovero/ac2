@@ -69,8 +69,8 @@ pub(super) fn tracked_marks(
     (peaks, Some(list), Some(b))
 }
 
-/// The cursor on the history of `s`: put (`cursor_hz`, the view's `cursor_s`) within the
-/// `span` shown, it reads the history there.
+/// The cursor on the history of `s`: put (`cursor_hz`, the view's `cursor_at_s`) within
+/// the `span` shown, it reads the history there.
 pub(super) fn history_cursor(
     s: &SpectrographInput<'_>,
     cursor_hz: Option<f64>,
@@ -78,7 +78,7 @@ pub(super) fn history_cursor(
     span: u32,
 ) -> Option<SpectrographCursor> {
     let hz = cursor_hz?;
-    let before = view.spectrum.spectrograph.cursor_s?;
+    let before = (s.history.newest_end_s()? - view.spectrum.spectrograph.cursor_at_s?).max(0.0);
     if before > f64::from(span) {
         return None;
     }

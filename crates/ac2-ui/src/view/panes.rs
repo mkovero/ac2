@@ -84,6 +84,12 @@ struct Axes {
     strip: Option<scenes::StripPlace>,
     /// A 3D spectrograph's picture as a click picks a spike on it.
     pick3d: Option<ac2_scene::spectrograph_3d::PickFrame>,
+    /// The spike under the pointer as that picture marks it, and where the pointer was:
+    /// what a click there commits.
+    hover3d: Option<(
+        ac2_scene::spectrograph_3d::Pointer3d,
+        ac2_scene::spectrograph_3d::Picked,
+    )>,
 }
 
 /// Scene for `pane` at `size` ([`build_scene`]), noted in the `--latency-log` when on.
@@ -142,6 +148,7 @@ fn build_scene(
             ir: c.ir_axes,
             strip: c.strip,
             pick3d: c.pick3d,
+            hover3d: c.hover3d,
         };
         return Some((c.scene.clone(), axes));
     }
@@ -196,6 +203,7 @@ fn build_scene(
                     ir: None,
                     strip: None,
                     pick3d: None,
+                    hover3d: None,
                 },
             )
         }
@@ -223,6 +231,7 @@ fn build_scene(
                 s.scene,
                 Axes {
                     pick3d: s.pick,
+                    hover3d: st.view_for(id).pointer_3d.zip(s.hover),
                     ..Axes::default()
                 },
             )
@@ -251,6 +260,7 @@ fn build_scene(
                     ir: None,
                     strip: None,
                     pick3d: None,
+                    hover3d: None,
                 },
             )
         }
@@ -275,6 +285,7 @@ fn build_scene(
                     ir: None,
                     strip: None,
                     pick3d: None,
+                    hover3d: None,
                 },
             )
         }
@@ -297,6 +308,7 @@ fn build_scene(
                 ir: s.ir_axes().map(|(x, y)| (IrPane::Sweep, x, y)),
                 strip: None,
                 pick3d: None,
+                hover3d: None,
             };
             (s.scene(), axes)
         }
@@ -329,6 +341,7 @@ fn build_scene(
             ir_axes: axes.ir,
             strip: axes.strip,
             pick3d: axes.pick3d,
+            hover3d: axes.hover3d,
             unit_tip,
             legend,
             plates,

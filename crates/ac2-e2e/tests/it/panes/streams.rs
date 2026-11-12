@@ -194,7 +194,7 @@ fn spectrograph_from_an_empty_daemon() -> R {
     );
     // The cursor toggle turns it off, time and all.
     d.send(Msg::Command(CommandId::ToggleCursor));
-    assert_eq!(d.st.view.spectrum.spectrograph.cursor_s, None);
+    assert_eq!(d.st.view.spectrum.spectrograph.cursor_at_s, None);
 
     // A minute of history (Shift+B), the measurement's, started afresh.
     d.send(Msg::Command(CommandId::SpectrographSpan));

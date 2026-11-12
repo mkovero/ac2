@@ -615,7 +615,7 @@ fn spectrograph() {
             .spectrographs
             .insert(MeasId(3), pinned.clone());
         st.view.cursor_hz = Some(1000.0);
-        st.view.spectrum.spectrograph.cursor_s = Some(8.0);
+        st.view.spectrum.spectrograph.cursor_at_s = pinned.newest_end_s().map(|e| e - 8.0);
         st.toasts.list.clear();
     };
     {

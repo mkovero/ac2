@@ -543,7 +543,10 @@ impl AppState {
             Msg::CursorAt(hz) => self.view.cursor_hz = hz,
             Msg::SpectrographCursor { hz, before_s } => {
                 self.view.cursor_hz = Some(hz);
-                self.view.spectrum.spectrograph.cursor_s = Some(before_s);
+                // The cursor holds the frame it is put on: its time on the history's clock,
+                // so it moves back with that frame as newer ones arrive.
+                let end = self.spectrograph_end_s(self.layout.focus);
+                self.view.spectrum.spectrograph.cursor_at_s = end.map(|e| e - before_s);
             }
             Msg::DistortionUnit(unit) => self.view.distortion.unit = unit,
             Msg::Plate(m) => self.plate_msg(m),

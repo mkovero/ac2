@@ -58,7 +58,7 @@ impl AppState {
             Some(hz) => {
                 self.view.cursor_hz = Some(hz);
                 // The jump is to a frequency: the spectrograph's time goes with the old spot.
-                self.view.spectrum.spectrograph.cursor_s = None;
+                self.view.spectrum.spectrograph.cursor_at_s = None;
             }
             None => self.toast(cursor_jump::none_text(
                 kind,

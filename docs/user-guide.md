@@ -1442,7 +1442,9 @@ bar spans the pane's level axis, so the level-axis keys change the colours.
   and when the spectrograph comes into view.
 - A click puts the cursor; its values are on the cursor values' plate (drag it, size it,
   as every plate): `1.00 kHz` over `4.2 s ago  −32.0 dBFS`. With the spectrum above, the
-  line joins the spectrum's cursor values on its plate: one cursor, one plate.
+  line joins the spectrum's cursor values on its plate: one cursor, one plate. The cursor
+  stays on the frame it was put on: live, it moves down with it, its age counting up,
+  until the frame leaves the history.
 - With the spectrograph alone, the legend plate names the measurement, as in the spectrum
   (with the spectrum beside it, the spectrum's legend is the pane's). While the
   measurement's peaks track (**P**), each is a box at its frequency on the top (newest)
@@ -1485,14 +1487,15 @@ per frequency and moment, as tall as its level. **G** once more is the spectrum 
   Shift+wheel still zoom and pan the level range. The camera is kept with the pane and the
   measurement's layout. The cursor's steps (Shift+←/→) and **C** do nothing here: the
   cursor is put with the mouse, and there is no compared curve in 3D.
-- **Cursor**: stop the measurement (**S**) so the picture stands still, orbit to where the
-  spike you want stands clear, and click (or tap) it: the cursor goes on that cell, its
-  spike drawn in the cursor's colour with a box at its tip, and its frequency, age and
-  level read on the cursor values' plate as in 2D (the cell's level: the highest of the
-  bins and frames it covers). Of spikes as near the pointer, the one whose tip is at the
-  pointer wins, then the one nearer you. The cursor is the 2D views' too: **G** back reads
-  the same frequency and time. **Shift+T** takes it off; *traces only* hides it. Live, the
-  cursor stays at its age while the rows move through it.
+- **Cursor**: the spike under the pointer is marked with a light line and a ring at its
+  tip; a click (or tap) puts the cursor on that spike: drawn thick in the cursor's colour
+  on a dark edge, with a box at its tip, its frequency, age and level read on the cursor
+  values' plate as in 2D (the cell's level: the highest of the bins and frames it covers).
+  The spike marked is the one the pixel shows: of spikes covering the pointer the
+  highest; off them, the nearest within a few pixels. Live, the cursor's spike moves back
+  with its row, its age counting up; stop the measurement (**S**) to pick in a still
+  picture. The cursor is the 2D views' too: **G** back reads the same frequency and time.
+  **Shift+T** takes it off; *traces only* hides it and the mark.
 - **Legend**: the same plate as in 2D, moved and sized the same way; a click on its row
   selects the measurement.
 - **Peaks**: while the measurement's peaks track (**P**, set one **G** back: the key is

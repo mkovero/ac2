@@ -49,6 +49,9 @@ pub(super) enum Touches {
     Toasts,
     /// The mouse on a plate: the panes that draw plates, rebuilt on every step of a drag.
     Plates,
+    /// The pointer moving over a 3D spectrograph: the spectrum panes (one of them draws
+    /// it).
+    Spectrum,
     /// Keys, commands, replies: anything may change.
     All,
 }
@@ -69,6 +72,7 @@ impl Touches {
                 | crate::state::DragMsg::OverRow(_),
             ) => Self::Toasts,
             Msg::Plate(_) | Msg::LegendScroll { .. } => Self::Plates,
+            Msg::Cam3d(_, crate::state::Cam3dMsg::Point(_)) => Self::Spectrum,
             Msg::LeqStrip(..) => Self::Spl,
             Msg::Conn(_, e) => match **e {
                 ConnEvent::Data(_) => Self::Data,

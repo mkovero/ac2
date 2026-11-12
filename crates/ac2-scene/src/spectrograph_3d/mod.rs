@@ -33,11 +33,12 @@ use crate::view::{PlotChrome, ViewState};
 type V3 = [f64; 3];
 
 mod camera;
+mod cursor;
 mod pick;
 mod points;
 mod scene;
 pub use camera::*;
-pub use pick::{PICK_PX, PickFrame, Picked, cell_at, col_hz, pick, row_age};
+pub use pick::{PICK_PX, PickFrame, Picked, Pointer3d, cell_at, col_hz, pick, row_age};
 pub use points::PeakPoint3d;
 pub use scene::*;
 
@@ -350,6 +351,12 @@ impl Skyline {
             .as_ref()
             .filter(|_| !self.cols.is_empty())
             .map(|k| (k.lo, k.hi))
+    }
+
+    /// Audio time at the end of the newest slot when last folded, seconds
+    /// ([`SpectrographHistory::newest_end_s`]).
+    pub fn newest_end_s(&self) -> Option<f64> {
+        self.newest.map(|n| (n + 1) as f64 * self.slot_s)
     }
 
     /// Length of one row, seconds.

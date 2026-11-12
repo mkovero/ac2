@@ -580,7 +580,7 @@ impl AppState {
                     self.view.cursor_mark_hz = None;
                 }
                 // Off takes the spectrograph's time with it; on starts on frequency alone.
-                self.view.spectrum.spectrograph.cursor_s = None;
+                self.view.spectrum.spectrograph.cursor_at_s = None;
             }
             C::CursorLeft | C::CursorRight => {
                 let t = self.nav.target;

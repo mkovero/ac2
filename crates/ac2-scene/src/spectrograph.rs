@@ -302,6 +302,12 @@ impl SpectrographHistory {
         self.revision
     }
 
+    /// Audio time at the end of the newest frame's slot, seconds: what a cursor's age
+    /// counts back from.
+    pub fn newest_end_s(&self) -> Option<f64> {
+        self.newest.map(|n| (n + 1) as f64 * self.slot_s())
+    }
+
     /// Absolute slot (audio time ÷ slot length) of the newest frame.
     pub fn newest_slot(&self) -> Option<u64> {
         self.newest

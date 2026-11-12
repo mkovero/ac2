@@ -14,4 +14,6 @@ pub struct PaneLocal {
     pub(in crate::state) axes3d: HashMap<PaneId, ac2_scene::spectrograph_3d::AxesReveal>,
     /// The plate under the pointer, and whose pane it is on.
     pub plate_hover: Option<(PaneId, ac2_scene::plate::PlateHover)>,
+    /// The pointer over a 3D spectrograph's picture, and whose pane it is on.
+    pub pointer3d: Option<(PaneId, ac2_scene::spectrograph_3d::Pointer3d)>,
 }

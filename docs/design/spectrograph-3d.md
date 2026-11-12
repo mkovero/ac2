@@ -29,13 +29,16 @@ section, wire): **3D spectrograph**, spelled `spectrograph_3d` in identifiers an
 wire. Never "waterfall": in acoustics that is a cumulative spectral decay plot.
 
 Cursor by picking: which spike, at what depth, a pointer is over is ambiguous in a
-perspective without hidden lines, so hover reads nothing. A click picks the spike nearest
-the pointer (its line from floor to tip within 6 px; of spikes as near, the one whose tip
-is at the pointer, then the one nearer the eye), and the cursor is that cell: its column's
-centre frequency and its row's middle age, the same cursor the 2D views read. The cell is
-marked on its spike and read (the cell's level) on the cursor values' plate. Stopped (S)
-the picture stands still to pick in. The measurement's tracked peaks (**P**) stand on the
-front row, where no depth is in doubt.
+perspective without hidden lines. The pick is the spike the pixel under the pointer shows
+(the renderer composites by level: of spikes whose drawn width covers the pointer, the
+highest; off every body, the nearest within 6 px). While the pointer is over the view
+that spike is marked (a light line and a ring at its tip), and a click commits that one:
+the cursor is that cell, its column's centre frequency and its row's frame, held as audio
+time, the same cursor the 2D views read. Live it moves back with its row, its age counting
+up, until it leaves the history; stopped (S) the picture stands still to pick in. The
+cell is marked on its spike (thick, in the cursor's colour on a dark edge, a box at its
+tip) and read (the cell's level) on the cursor values' plate. The measurement's tracked
+peaks (**P**) stand on the front row, where no depth is in doubt.
 
 ## The look
 

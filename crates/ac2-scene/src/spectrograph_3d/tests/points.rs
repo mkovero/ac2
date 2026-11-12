@@ -72,10 +72,23 @@ fn scene(
 }
 
 pub(super) fn scene_of(
+    b: &(SpectrographHistory, Skyline),
+    peaks: Option<&[Peak]>,
+    view: &ViewState,
+    axes: f32,
+) -> Spectrograph3dScene {
+    let pose = Pose::from(SpectrumCamera::DEFAULT);
+    scene_posed(b, peaks, view, axes, (pose, 0.0, SkylineTier::Full))
+}
+
+/// [`scene_of`] from camera `pose`, the time axis `lead_slots` past the newest slot, at
+/// `tier`.
+pub(super) fn scene_posed(
     (h, s): &(SpectrographHistory, Skyline),
     peaks: Option<&[Peak]>,
     view: &ViewState,
     axes: f32,
+    (pose, lead_slots, tier): (Pose, f64, SkylineTier),
 ) -> Spectrograph3dScene {
     let input = Spectrograph3dInput {
         key: KEY,
@@ -86,11 +99,11 @@ pub(super) fn scene_of(
         offset_db: 0.0,
         freshness: None,
         colours: Colormap::Ice,
-        camera: Pose::from(SpectrumCamera::DEFAULT),
-        tier: SkylineTier::Full,
+        camera: pose,
+        tier,
         tier_forced: false,
         axes,
-        lead_slots: 0.0,
+        lead_slots,
     };
     spectrograph_3d_scene(
         &[trace(peaks)],

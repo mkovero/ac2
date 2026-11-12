@@ -134,6 +134,11 @@ pub(crate) struct CachedScene {
     pub strip: Option<crate::scenes::StripPlace>,
     /// A 3D spectrograph's picture, for picking a spike with a click.
     pub pick3d: Option<ac2_scene::spectrograph_3d::PickFrame>,
+    /// The spike that picture marks under the pointer, and where the pointer was.
+    pub hover3d: Option<(
+        ac2_scene::spectrograph_3d::Pointer3d,
+        ac2_scene::spectrograph_3d::Picked,
+    )>,
     /// Where on the scene the level axis's unit is drawn and what it means, for a tooltip.
     pub unit_tip: Option<(egui::Rect, String)>,
     /// Where the scene put its legend, for scrolling it.
@@ -660,6 +665,7 @@ impl App {
             },
             Touches::Spl => vec![PaneKind::Spl],
             Touches::Plates => vec![PaneKind::Transfer, PaneKind::Spectrum],
+            Touches::Spectrum => vec![PaneKind::Spectrum],
             Touches::All => PaneKind::ALL.to_vec(),
         };
         self.touch(&panes);
