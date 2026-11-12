@@ -299,7 +299,7 @@ once).
 | Calibration | mics, curves, sensitivity calibrations ([below](#the-calibrations-view)) | palette *Calibrations…* |
 | SPL / Leq | the SPL meter's Leq windows, limits and band meter ([below](#leq-windows-and-limits)) | **Shift+L** |
 | Recording | how long the record toggle records (this app); where the daemon records (the rig) | |
-| Display | theme, key hints, warning toasts, how long the SPL number holds, the goniometer's ember decay and glow, Leq windows / history strip / bars / scale, what the spectrum and sweep panes show, spectrum glide, 3D quality, distortion unit, coherence placement, resolution marker, plate background (see-through / solid), level axes | |
+| Display | theme, key hints, warning toasts, how long the SPL number holds, the goniometer's ember decay and glow, Leq windows / history strip / bars / scale, what the spectrum and sweep panes show, spectrum glide, 3D quality, invert vertical drag (3D), distortion unit, coherence placement, resolution marker, plate background (see-through / solid), level axes | |
 | Connection | the daemon, whether the app starts and stops this computer's `ac2d`, this client's id and key, reconnect, another daemon / pairing; the daemon's mode, mDNS name, authorized clients and refused keys | |
 | Rig monitor | where the rig's OSC cues and Art-Net universe go, whether it meters at start (the rig); how its programme meters read: *Programme meters read*, *Loudness target* (−23 LUFS by default, −36 … −5 in 1 LU steps; past either end the row says the range), *Correlation window*, *An over is above*, *Correlation gate* — **←/→** steps a value and sends each step ([Programme pane](#programme-pane)) | |
 
@@ -1477,13 +1477,19 @@ per frequency and moment, as tall as its level. **G** once more is the spectrum 
 | **S**, **R**, **P**, **Shift+B**, **J** | start/stop, reset average, peaks, history span, offset, as in 2D |
 | **Ctrl+I / O**, **Ctrl+↑ / ↓**, **Shift+Home** | the level range: it sets the heights |
 
+- **Heights**: a spike is as tall as its level over the level range: none at or under the
+  bottom, the ceiling line at the top. A level above the top keeps growing at the same dB
+  per height, its colour the map's top, so a hot peak stands out above the ceiling (stop
+  and orbit to look at it); at two spans above the top it stops growing.
+
 - **Axes on demand**: the frequency, time and height labels, the floor grid and the
   ceiling line cover the skyline, so at rest the view is the spikes on their floor, the
   legend plate and the caption. The axes show while the pointer is over the view or for a few seconds after a
   touch, a click, a camera move or a level-range change, fading in and out. **T** still
   sets which of them show; *traces only* keeps them hidden even then. An exported PNG
   always has them.
-- **Mouse**: drag orbits and tilts, the wheel or a pinch dollies; Ctrl+wheel and
+- **Mouse**: drag orbits and tilts (a drag down looks from higher; **Settings › Display ›
+  Invert vertical drag** off: a drag up does, touch the same), the wheel or a pinch dollies; Ctrl+wheel and
   Shift+wheel still zoom and pan the level range. The camera is kept with the pane and the
   measurement's layout. The cursor's steps (Shift+←/→) and **C** do nothing here: the
   cursor is put with the mouse, and there is no compared curve in 3D.
@@ -1510,9 +1516,9 @@ per frequency and moment, as tall as its level. **G** once more is the spectrum 
 - **The level range follows** the content here as in 2D (*The level axis follows the
   content* above): the spikes' heights glide with a move. An orbit, tilt or dolly counts as
   a hand on the pane.
-- **Narrowing the level range** (Ctrl+I) turns the slab of noise into terrain. For music keep
-  the top near 0, e.g. −60 … 0, never −80 … −20: hot masters reach −5 … 0 dBFS per bin and a
-  low top clamps them flat.
+- **Narrowing the level range** (Ctrl+I) turns the slab of noise into terrain. For music,
+  e.g. −60 … 0: hot masters reach −5 … 0 dBFS per bin; with a lower top they rise above the
+  ceiling line, all in the colour map's top colour.
 - **The frequency span** follows the spectrum's: change it in another pane, or one **G**
   back, zoom, then **G** again.
 - **Settings › Display › 3D quality**: *Auto* (by the GPU; the row says which it picked),

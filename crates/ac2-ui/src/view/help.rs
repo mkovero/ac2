@@ -262,9 +262,11 @@ const CAMERA: [(CommandId, &str); 3] = [
     (CommandId::ZoomIn, "Dolly in/out"),
     (CommandId::ResetView, "Reset camera"),
 ];
-const CAMERA_MOUSE: [(&str, &str); 4] = [
+const CAMERA_MOUSE: [(&str, &str); 5] = [
     ("Drag", "Orbit and tilt"),
-    ("Click\nTap", "Cursor on the spike"),
+    // The pixel can show any of many spikes, so the one a click would take is marked first.
+    ("Hover", "Mark the spike a click picks"),
+    ("Click\nTap", "Cursor on it, held as it moves back"),
     ("Wheel\nPinch", "Dolly"),
     // The axes cover the skyline, so they come on demand; a touch screen has no hover.
     ("Hover\nTouch", "Show the axes"),

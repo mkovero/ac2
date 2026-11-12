@@ -99,6 +99,7 @@ fn display_and_recording_texts() {
         level_follow: true,
         spec_ease: false,
         quality_3d: ac2_scene::spectrograph_3d::Quality::Auto,
+        invert_drag_3d: true,
         auto_tier: Some(ac2_scene::primitives::SkylineTier::Lite),
         plate_background: ac2_scene::plate::PlateBackground::Solid,
     };
@@ -128,6 +129,7 @@ fn display_and_recording_texts() {
             "the spectrum over its spectrograph",
             "jumps to each new frame",
             "by the GPU (lite here)",
+            "on: in 3D, drag down to look from higher",
             "the room parameters",
             "% of fundamental",
             "over the magnitude",

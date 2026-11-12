@@ -41,6 +41,9 @@ struct File {
     /// Written only when set (the default is by the GPU).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     quality_3d: Option<Quality3dFile>,
+    /// Written only when off (the default is on).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    invert_drag_3d: Option<bool>,
     /// Written only when not the default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     jump_prominence_db: Option<f64>,
@@ -756,6 +759,7 @@ impl UiPrefs {
             level_follow: f.level_follow.unwrap_or(true),
             spec_ease: f.spec_ease.unwrap_or(true),
             quality_3d: f.quality_3d.map_or(Quality::Auto, Quality3dFile::quality),
+            invert_drag_3d: f.invert_drag_3d.unwrap_or(true),
             // A value no step reaches (hand-edited) is kept when it can be stood out by;
             // anything else is the default.
             jump_prominence_db: f
@@ -825,6 +829,7 @@ impl UiPrefs {
             level_follow: (!self.level_follow).then_some(false),
             spec_ease: (!self.spec_ease).then_some(false),
             quality_3d: Quality3dFile::of(self.quality_3d),
+            invert_drag_3d: (!self.invert_drag_3d).then_some(false),
             jump_prominence_db: (self.jump_prominence_db
                 != ac2_scene::cursor_jump::DEFAULT_PROMINENCE_DB)
                 .then_some(self.jump_prominence_db),

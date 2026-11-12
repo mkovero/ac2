@@ -283,6 +283,7 @@ pub enum DisplayRow {
     SpectrumView,
     SpectrumGlide,
     Quality3d,
+    InvertDrag3d,
     SweepView,
     DistortionUnit,
     Coherence,
@@ -300,7 +301,7 @@ pub enum DisplayRow {
 }
 
 impl DisplayRow {
-    pub const ALL: [DisplayRow; 27] = [
+    pub const ALL: [DisplayRow; 28] = [
         DisplayRow::Theme,
         DisplayRow::KeyHints,
         DisplayRow::WarningToasts,
@@ -314,6 +315,7 @@ impl DisplayRow {
         DisplayRow::SpectrumView,
         DisplayRow::SpectrumGlide,
         DisplayRow::Quality3d,
+        DisplayRow::InvertDrag3d,
         DisplayRow::SweepView,
         DisplayRow::DistortionUnit,
         DisplayRow::Coherence,
@@ -345,6 +347,7 @@ impl DisplayRow {
             DisplayRow::SpectrumView => "Spectrum pane shows",
             DisplayRow::SpectrumGlide => "Spectrum",
             DisplayRow::Quality3d => "3D quality",
+            DisplayRow::InvertDrag3d => "Invert vertical drag",
             DisplayRow::SweepView => "Sweep pane shows",
             DisplayRow::DistortionUnit => "Distortion in",
             DisplayRow::Coherence => "Coherence",
@@ -562,6 +565,15 @@ pub fn spec_ease_text(on: bool) -> &'static str {
     }
 }
 
+/// What the 3D view's vertical drag setting says, on the Display page and in its toast.
+pub fn invert_drag_3d_text(on: bool) -> &'static str {
+    if on {
+        "on: in 3D, drag down to look from higher"
+    } else {
+        "off: in 3D, drag up to look from higher"
+    }
+}
+
 /// The 3D quality line on a GPU too slow for any tier.
 pub const QUALITY_3D_UNAVAILABLE: &str = "unavailable on this GPU";
 
@@ -602,6 +614,7 @@ pub struct DisplaySwitches {
     pub level_follow: bool,
     pub spec_ease: bool,
     pub quality_3d: ac2_scene::spectrograph_3d::Quality,
+    pub invert_drag_3d: bool,
     /// The tier the GPU gets when the quality is auto.
     pub auto_tier: Option<ac2_scene::primitives::SkylineTier>,
     pub plate_background: ac2_scene::plate::PlateBackground,
@@ -653,6 +666,7 @@ pub fn display_rows(
                 DisplayRow::LeqScale => shared_scale_text(switches.shared_scale).into(),
                 DisplayRow::SpectrumGlide => spec_ease_text(switches.spec_ease).into(),
                 DisplayRow::Quality3d => quality_3d_text(switches.quality_3d, switches.auto_tier),
+                DisplayRow::InvertDrag3d => invert_drag_3d_text(switches.invert_drag_3d).into(),
                 DisplayRow::DistortionUnit => match views.distortion_unit {
                     DistortionUnit::Db => "dB re fundamental".into(),
                     DistortionUnit::Percent => "% of fundamental".into(),

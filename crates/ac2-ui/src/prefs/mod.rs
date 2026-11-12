@@ -386,6 +386,10 @@ pub struct UiPrefs {
     /// The live spectrum and RTA curves glide to each new frame (on until the operator
     /// turns it off); off, they jump to it as received.
     pub spec_ease: bool,
+    /// A vertical drag over the 3D spectrograph tilts the other way: a drag down looks from
+    /// higher, as if pulling the picture (on until the operator turns it off); off, a drag
+    /// up looks from higher.
+    pub invert_drag_3d: bool,
     /// How the 3D spectrograph is drawn on this machine: by the GPU (auto) or as set.
     pub quality_3d: ac2_scene::spectrograph_3d::Quality,
     /// How far a peak or notch must stand out for the cursor to jump to it, dB
@@ -492,6 +496,7 @@ impl Default for UiPrefs {
             sim_hints: true,
             plate_background: ac2_scene::plate::PlateBackground::SeeThrough,
             quality_3d: ac2_scene::spectrograph_3d::Quality::Auto,
+            invert_drag_3d: true,
             bar_ease: true,
             shared_scale: true,
             level_follow: true,

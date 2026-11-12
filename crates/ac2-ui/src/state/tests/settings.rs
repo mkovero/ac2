@@ -344,6 +344,15 @@ fn display_page_changes_apply_at_once_and_are_remembered() {
         ac2_scene::spectrograph_3d::Quality::Auto
     );
     t.key("Down");
+    assert_eq!(settings(&t).display, DisplayRow::InvertDrag3d);
+    assert!(t.st.prefs.invert_drag_3d);
+    t.st.prefs_dirty = false;
+    t.key("Right");
+    assert!(!t.st.prefs.invert_drag_3d);
+    assert!(t.st.prefs_dirty);
+    t.key("Left");
+    assert!(t.st.prefs.invert_drag_3d);
+    t.key("Down");
     t.key("Right");
     assert_eq!(
         t.st.kind_modes(PaneKind::Distortion).sweep,

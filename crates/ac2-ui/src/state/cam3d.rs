@@ -13,7 +13,8 @@ use crate::keys::CommandId;
 /// What the mouse does on a 3D spectrograph.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Cam3dMsg {
-    /// A drag moved by `dx`, `dy` logical pixels (right, down): orbit and tilt.
+    /// A drag moved by `dx`, `dy` logical pixels (right, down): orbit and tilt (the tilt's
+    /// direction as Settings › Display › Invert vertical drag says).
     Drag { dx: f64, dy: f64 },
     /// The drag ended: the camera snaps to whole degrees and is stored.
     Release,
@@ -225,6 +226,7 @@ impl AppState {
         match m {
             Cam3dMsg::Hover(_) | Cam3dMsg::Touch | Cam3dMsg::Point(_) => {}
             Cam3dMsg::Drag { dx, dy } => {
+                let dy = if self.prefs.invert_drag_3d { -dy } else { dy };
                 let from = self.drawn_camera(pane);
                 let to = spectrograph_3d::drag(from, dx, dy);
                 let n = self.pane_local.cam3d.get_or_insert(CamNav::at(pane, from));

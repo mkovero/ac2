@@ -400,6 +400,7 @@ fn display_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &m
             level_follow: st.prefs.level_follow,
             spec_ease: st.prefs.spec_ease,
             quality_3d: st.prefs.quality_3d,
+            invert_drag_3d: st.prefs.invert_drag_3d,
             auto_tier: st.auto_tier,
             plate_background: st.prefs.plate_background,
         },

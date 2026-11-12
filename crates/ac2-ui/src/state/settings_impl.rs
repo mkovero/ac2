@@ -479,6 +479,7 @@ impl AppState {
             DisplayRow::LevelFollow if d != 0 => self.toggle_level_follow(),
             DisplayRow::SpectrumGlide if d != 0 => self.toggle_spec_ease(),
             DisplayRow::Quality3d if d != 0 => self.step_quality_3d(d),
+            DisplayRow::InvertDrag3d if d != 0 => self.toggle_invert_drag_3d(),
             DisplayRow::DistortionUnit if d != 0 => self.toggle_distortion_unit(),
             DisplayRow::Coherence if d != 0 => self.toggle_coherence_placement(),
             DisplayRow::ResolutionMarker if d != 0 => self.toggle_resolution_marker(),
@@ -859,6 +860,16 @@ impl AppState {
         self.toast(format!(
             "Level axis follows {}",
             crate::settings::level_follow_text(self.prefs.level_follow)
+        ));
+    }
+
+    /// The Display page's 3D vertical drag line; remembered in the prefs.
+    pub(super) fn toggle_invert_drag_3d(&mut self) {
+        self.prefs.invert_drag_3d = !self.prefs.invert_drag_3d;
+        self.prefs_dirty = true;
+        self.toast(format!(
+            "Invert vertical drag {}",
+            crate::settings::invert_drag_3d_text(self.prefs.invert_drag_3d)
         ));
     }
 

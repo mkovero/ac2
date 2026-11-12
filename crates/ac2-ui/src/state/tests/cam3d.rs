@@ -173,7 +173,7 @@ fn a_drag_stores_one_camera_on_release() {
         &t.keys,
     );
     t.st.apply(
-        Msg::Cam3d(pane, Cam3dMsg::Drag { dx: 0.0, dy: -50.0 }),
+        Msg::Cam3d(pane, Cam3dMsg::Drag { dx: 0.0, dy: 50.0 }),
         &t.keys,
     );
     assert_eq!(
@@ -182,7 +182,8 @@ fn a_drag_stores_one_camera_on_release() {
         "stored only on release"
     );
     let drawn = t.st.drawn_camera(pane);
-    // The eye orbits with the pointer: a drag right turns the floor towards the right.
+    // The eye orbits with the pointer: a drag right turns the floor towards the right; a
+    // drag down looks from higher (vertical drag inverted, the default).
     assert!(drawn.yaw_deg < 0.0 && drawn.pitch_deg > 8.0, "{drawn:?}");
     t.st.apply(Msg::Cam3d(pane, Cam3dMsg::Release), &t.keys);
     assert_eq!(camera(&t), drawn.snapped());
@@ -193,6 +194,22 @@ fn a_drag_stores_one_camera_on_release() {
     let before = camera(&t);
     t.key("Escape");
     assert_eq!(camera(&t), before);
+}
+
+#[test]
+fn invert_vertical_drag_off_tilts_up_with_a_drag_up() {
+    let pitch = |invert: bool, dy: f64| {
+        let mut t = on_3d();
+        t.st.prefs.invert_drag_3d = invert;
+        let pane = t.st.layout.focus;
+        let before = t.st.drawn_camera(pane).pitch_deg;
+        t.st.apply(Msg::Cam3d(pane, Cam3dMsg::Drag { dx: 0.0, dy }), &t.keys);
+        t.st.drawn_camera(pane).pitch_deg - before
+    };
+    assert!(pitch(true, 30.0) > 0.0);
+    assert!(pitch(true, -30.0) < 0.0);
+    assert!(pitch(false, -30.0) > 0.0);
+    assert!(pitch(false, 30.0) < 0.0);
 }
 
 #[test]
