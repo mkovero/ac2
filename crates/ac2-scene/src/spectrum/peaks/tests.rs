@@ -129,16 +129,76 @@ fn peaks_closer_than_the_spacing_merge_into_the_stronger() {
 }
 
 #[test]
-fn gaps_invalid_and_unresolved_columns_hold_no_peak() {
+fn gaps_and_invalid_columns_hold_no_peak() {
     let f = bins();
     let mut l = floor(f.len());
-    let (a, b, c) = (bin_of(&f, 1000.0), bin_of(&f, 4000.0), bin_of(&f, 100.0));
+    let (a, b) = (bin_of(&f, 1000.0), bin_of(&f, 4000.0));
     tone(&mut l, a, -20.0, 10.0);
     tone(&mut l, b, -20.0, 10.0);
-    tone(&mut l, c, -20.0, 10.0);
     l[a] = f32::NAN;
     let mut validity = vec![ValidityMask::NONE; f.len()];
     validity[b] = ValidityMask::INSUFFICIENT_RESOLUTION;
+    let p = find_peaks(&PeakInput {
+        validity: Some(&validity),
+        ..narrow(&f, &l)
+    });
+    // The neighbours of the gap and of the invalid column are the tone's skirt, now maxima
+    // beside nothing: 60 dB over the floor on their one side, so marked — but never the
+    // flagged column itself.
+    assert!(
+        p.iter().all(|p| p.freq_hz != 1000.0 && p.freq_hz != 4000.0),
+        "{p:?}"
+    );
+    assert!(p.iter().any(|p| p.freq_hz == 990.0), "{p:?}");
+}
+
+#[test]
+fn a_maximum_at_the_curves_end_is_a_peak() {
+    let f = bins();
+    let mut l = floor(f.len());
+    l[0] = -30.0;
+    l[1] = -40.0;
+    let n = f.len();
+    l[n - 1] = -35.0;
+    let p = find_peaks(&narrow(&f, &l));
+    let at: Vec<f64> = p.iter().map(|p| p.freq_hz).collect();
+    assert_eq!(at, [f[0], f[n - 1]], "{p:?}");
+}
+
+#[test]
+fn a_maximum_beside_a_gap_is_a_peak() {
+    let f = bins();
+    let mut l = floor(f.len());
+    let k = bin_of(&f, 2000.0);
+    l[k] = -40.0;
+    l[k - 1] = -50.0;
+    l[k + 1] = f32::NAN;
+    let p = find_peaks(&narrow(&f, &l));
+    assert_eq!(p.len(), 1, "{p:?}");
+    assert_eq!(p[0].freq_hz, 2000.0);
+    assert_eq!(p[0].level, -40.0);
+}
+
+#[test]
+fn a_lone_column_between_gaps_is_no_peak() {
+    let v = [f64::NAN, -10.0, f64::NAN, -90.0, -91.0];
+    assert_eq!(prominence(&v, 1), 0.0);
+    let f = [100.0, 200.0, 300.0, 400.0, 500.0];
+    assert!(find_extremes(&f, &v, Extreme::Max, true).is_empty());
+}
+
+#[test]
+fn a_loud_peak_in_an_unresolved_range_is_tracked_first() {
+    // Below 200 Hz the window resolves less than the grid: the bass is interpolated
+    // between bins, yet its maximum is a bin's level and the loudest thing on the curve.
+    let f = bins();
+    let mut l = floor(f.len());
+    let lo = bin_of(&f, 100.0);
+    for (d, v) in [(0, -10.0), (1, -12.0), (2, -16.0), (3, -22.0)] {
+        l[lo + d] = v;
+        l[lo - d] = v + 1.0 - if d == 0 { 1.0 } else { 0.0 };
+    }
+    tone(&mut l, bin_of(&f, 1000.0), -30.0, 10.0);
     let unresolved = Unresolved {
         resolution: Resolution::FortyEighth,
         ranges: vec![FreqRange {
@@ -147,18 +207,16 @@ fn gaps_invalid_and_unresolved_columns_hold_no_peak() {
         }],
     };
     let p = find_peaks(&PeakInput {
-        validity: Some(&validity),
         unresolved: Some(&unresolved),
         ..narrow(&f, &l)
     });
-    // The neighbours of the gap and of the invalid column are the tone's skirt, now maxima
-    // beside nothing: they stand only 10 dB over the floor on one side, which is enough —
-    // but never at the flagged column itself.
-    assert!(
-        p.iter().all(|p| p.freq_hz != 1000.0 && p.freq_hz != 4000.0),
-        "{p:?}"
-    );
-    assert!(p.iter().all(|p| p.freq_hz > 200.0), "{p:?}");
+    let at: Vec<f64> = p.iter().map(|p| p.freq_hz).collect();
+    // No vertex fitted to the lopsided interpolated skirt: the column's own frequency.
+    assert_eq!(at, [100.0, 1000.0], "{p:?}");
+    assert_eq!(p[0].level, -10.0);
+    let mut t = PeakTracker::new(Extreme::Max);
+    t.update(&p);
+    assert_eq!(t.peaks()[0].freq_hz, 100.0);
 }
 
 /// Frames of six peaks where the fifth and sixth trade places by a dB each frame.
@@ -272,10 +330,11 @@ fn a_combs_dips_sit_on_its_notches() {
     assert!(t.peaks().windows(2).all(|w| w[0].level <= w[1].level));
     let spacing = comb_spacing(&dips).expect("a comb");
     assert!((spacing - 1000.0).abs() < 10.0, "{spacing}");
-    // The peaks between, at whole multiples of 1 kHz.
+    // The peaks between, at whole multiples of 1 kHz; the curve's first column is the
+    // flank of the one at 0 Hz, the highest the curve shows there.
     let peaks = find_extremes(&f, &m, Extreme::Max, true);
     assert!(!peaks.is_empty());
-    for p in &peaks {
+    for p in peaks.iter().filter(|p| p.freq_hz != f[0]) {
         let k = (p.freq_hz / 1000.0).round();
         assert!((p.freq_hz - k * 1000.0).abs() < 0.01 * p.freq_hz, "{p:?}");
     }

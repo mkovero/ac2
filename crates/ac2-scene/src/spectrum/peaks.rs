@@ -73,21 +73,28 @@ pub struct PeakInput<'a> {
 }
 
 impl PeakInput<'_> {
-    /// Column `i`'s level, or NaN where it may not hold a peak: a gap, a column flagged
-    /// invalid, or one inside an unresolved range — there several columns share one bin of
-    /// the window behind them, so their shape (and any maximum in it) is interpolation.
+    /// Column `i`'s level, or NaN where it may not hold a peak: a gap, or a column flagged
+    /// invalid.
     fn value(&self, i: usize) -> f64 {
         let ok = self
             .validity
             .is_none_or(|v| v.get(i).is_some_and(|m| *m == ValidityMask::NONE));
-        let resolved = self.unresolved.is_none_or(|u| {
-            let f = self.freqs[i];
-            !u.ranges.iter().any(|r| f >= r.lo.0 && f <= r.hi.0)
-        });
         match self.level.get(i) {
-            Some(l) if ok && resolved && l.is_finite() => f64::from(*l),
+            Some(l) if ok && l.is_finite() => f64::from(*l),
             _ => f64::NAN,
         }
+    }
+
+    /// Whether column `i` is as fine as the analysis resolves. Inside an unresolved range
+    /// several columns share one resolution cell and the levels between the window's bins
+    /// are interpolated from them, so a maximum there is still a bin's level (real), but
+    /// the curve's shape around it is not: its frequency is the column's, not a vertex
+    /// fitted to that shape.
+    fn resolved(&self, i: usize) -> bool {
+        self.unresolved.is_none_or(|u| {
+            let f = self.freqs[i];
+            !u.ranges.iter().any(|r| f >= r.lo.0 && f <= r.hi.0)
+        })
     }
 }
 
@@ -96,7 +103,12 @@ impl PeakInput<'_> {
 pub fn find_peaks(input: &PeakInput<'_>) -> Vec<Peak> {
     let n = input.freqs.len().min(input.level.len());
     let v: Vec<f64> = (0..n).map(|i| input.value(i)).collect();
-    find_extremes(&input.freqs[..n], &v, Extreme::Max, input.narrow)
+    let resolved: Vec<bool> = (0..n).map(|i| input.resolved(i)).collect();
+    // The vertex is fitted only where the column and both neighbours are resolved: the
+    // parabola stands for the window's main lobe, which interpolated columns do not trace.
+    let fit =
+        |i: usize| input.narrow && (i.saturating_sub(1)..=(i + 1).min(n - 1)).all(|j| resolved[j]);
+    extremes(&input.freqs[..n], &v, Extreme::Max, fit)
 }
 
 /// Every extreme of `values` (dB, column-aligned with `freqs`; NaN where no extreme may
@@ -104,6 +116,12 @@ pub fn find_peaks(input: &PeakInput<'_>) -> Vec<Peak> {
 /// [`SPACING_OCT`], the most outstanding (highest peak, deepest dip) first. `narrow`: the
 /// columns are points on a curve, not bands, and the frequency is interpolated.
 pub fn find_extremes(freqs: &[f64], values: &[f64], dir: Extreme, narrow: bool) -> Vec<Peak> {
+    extremes(freqs, values, dir, |_| narrow)
+}
+
+/// [`find_extremes`] with the frequency interpolated at the columns where `fit` holds, read
+/// at the column elsewhere.
+fn extremes(freqs: &[f64], values: &[f64], dir: Extreme, fit: impl Fn(usize) -> bool) -> Vec<Peak> {
     let n = freqs.len().min(values.len());
     let v: Vec<f64> = values[..n].iter().map(|x| dir.height(*x)).collect();
     let mut found: Vec<(usize, Peak)> = Vec::new();
@@ -122,11 +140,12 @@ pub fn find_extremes(freqs: &[f64], values: &[f64], dir: Extreme, narrow: bool) 
         if prominence(&v, i) < PROMINENCE_DB {
             continue;
         }
-        let freq_hz = if narrow {
+        let freq_hz = if fit(i) {
             interpolated_freq(freqs, &v, i)
         } else {
             // A band's level is the power in the whole band: no point in it is the peak's
-            // frequency more than another, so it reads the band's centre.
+            // frequency more than another, so it reads the band's centre; an unresolved
+            // column reads its own, the nearest the grid comes.
             freqs[i]
         };
         found.push((
@@ -154,22 +173,29 @@ fn near(a: f64, b: f64) -> bool {
 
 /// Height of `v[i]` above the higher of the lowest points on each side before a higher
 /// point; a gap (NaN) ends a side as the curve's end does: across a gap nothing is known.
+/// A side with no column in it (the peak at the curve's end or beside a gap) says nothing
+/// either way, so the other side alone sets the height; with neither, there is no curve
+/// around the point to stand out of, and the height is 0.
 pub(crate) fn prominence(v: &[f64], i: usize) -> f64 {
     let peak = v[i];
     let side = |it: &mut dyn Iterator<Item = usize>| {
-        let mut low = peak;
+        let mut low: Option<f64> = None;
         for j in it {
             let x = v[j];
             if x.is_nan() || x > peak {
                 break;
             }
-            low = low.min(x);
+            low = Some(low.map_or(x, |l| l.min(x)));
         }
         low
     };
     let l = side(&mut (0..i).rev());
     let r = side(&mut (i + 1..v.len()));
-    peak - l.max(r)
+    match (l, r) {
+        (Some(l), Some(r)) => peak - l.max(r),
+        (Some(low), None) | (None, Some(low)) => peak - low,
+        (None, None) => 0.0,
+    }
 }
 
 /// The frequency of the vertex of the parabola through the dB levels of the column and its
