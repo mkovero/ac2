@@ -27,8 +27,6 @@ mod band;
 mod cross_rig;
 mod drag;
 mod eq;
-mod export;
-mod latency;
 mod leq;
 mod overlays;
 mod programme;

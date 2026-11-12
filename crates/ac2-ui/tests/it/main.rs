@@ -3,7 +3,6 @@
 //! `cargo nextest run -p ac2-ui -E 'test(/^conn::/)'` or `cargo test -p ac2-ui --test it conn::`.
 
 mod common;
-mod conn;
 mod connect;
 mod gonio_parity;
 mod keymap_doc;

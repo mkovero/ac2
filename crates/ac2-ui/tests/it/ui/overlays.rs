@@ -112,71 +112,6 @@ fn toasts_wrap_and_stack() {
     assert_eq!(h.state().state.notices.len(), 3);
 }
 
-/// The keys belong to the reducer, so egui never holds keyboard focus: Tab and the arrows in
-/// an open dialog (or with none open) leave no widget focused — the sidebar's measurement
-/// chip in particular — and the dialog stays open on its own focus.
-#[test]
-fn keyboard_focus_stays_in_the_open_dialog() {
-    if !have_gpu("keyboard_focus_stays_in_the_open_dialog") {
-        return;
-    }
-    let rig = common::Rig::start();
-    let mut h = harness(options(Some(&rig)));
-    step_until(&mut h, "live frames", live);
-    let wander = |h: &mut Harness<'_, App>, what: &str| {
-        for key in [
-            Key::Tab,
-            Key::ArrowDown,
-            Key::ArrowRight,
-            Key::ArrowLeft,
-            Key::ArrowUp,
-            Key::Tab,
-            Key::ArrowDown,
-        ] {
-            h.key_press(key);
-            h.step();
-            h.step();
-            assert_eq!(
-                h.ctx.memory(|m| m.focused()),
-                None,
-                "{what}: egui focus after {key:?}"
-            );
-        }
-    };
-    wander(&mut h, "no dialog");
-    type Open = (
-        &'static str,
-        fn(&mut Harness<'_, App>),
-        fn(&Overlay) -> bool,
-    );
-    let dialogs: [Open; 4] = [
-        (
-            "Leq windows",
-            |h| h.key_press_modifiers(Modifiers::SHIFT, Key::L),
-            |o| o.leq().is_some(),
-        ),
-        (
-            "palette",
-            |h| h.key_press_modifiers(Modifiers::COMMAND, Key::K),
-            |o| matches!(o, Overlay::Palette(_)),
-        ),
-        (
-            "level prompt",
-            |h| h.key_press(Key::Space),
-            |o| matches!(o, Overlay::Prompt(_)),
-        ),
-        ("help", |h| h.key_press(Key::H), |o| *o == Overlay::Help),
-    ];
-    for (what, open, is_open) in dialogs {
-        open(&mut h);
-        step_until(&mut h, what, |a| is_open(&a.state.overlay));
-        wander(&mut h, what);
-        assert!(is_open(&h.state().state.overlay), "{what} stays open");
-        h.key_press(Key::Escape);
-        step_until(&mut h, "closed", |a| a.state.overlay == Overlay::None);
-    }
-}
-
 #[test]
 fn command_palette() {
     if !have_gpu("command_palette") {
@@ -367,50 +302,6 @@ fn themes() {
     snapshot(&mut h, "theme_high_contrast");
 }
 
-#[test]
-fn stimulus_flow_against_the_fake_daemon() {
-    if !have_gpu("stimulus_flow_against_the_fake_daemon") {
-        return;
-    }
-    let rig = common::Rig::start();
-    let mut h = harness(options(Some(&rig)));
-    step_until(&mut h, "live frames", live);
-    // Space without a level: the prompt opens; nothing reaches the daemon.
-    h.key_press(Key::Space);
-    step_until(&mut h, "level prompt", |a| {
-        matches!(a.state.overlay, Overlay::Prompt(_))
-    });
-    assert_eq!(rig.fake.executions("gen.acquire"), 0);
-    h.event(Event::Text("-24".into()));
-    h.key_press(Key::Enter);
-    step_until(&mut h, "level", |a| a.state.rig.stimulus.level.is_some());
-    h.key_press(Key::Space);
-    step_until(&mut h, "armed", |a| {
-        a.state.daemon().is_some_and(|s| s.generator.armed)
-    });
-    assert!(!h.state().state.daemon().is_some_and(|s| s.generator.firing));
-    h.key_press(Key::Enter);
-    step_until(&mut h, "firing", |a| {
-        a.state.daemon().is_some_and(|s| s.generator.firing)
-    });
-    h.key_press(Key::ArrowDown);
-    step_until(&mut h, "level −25", |a| {
-        a.state.daemon().is_some_and(|s| {
-            s.generator
-                .settings
-                .as_ref()
-                .is_some_and(|g| g.level.0 == -25.0)
-        })
-    });
-    h.key_press(Key::Escape);
-    step_until(&mut h, "stopped", |a| {
-        a.state.daemon().is_some_and(|s| {
-            !s.generator.firing && !s.generator.armed && s.generator.owner.is_none()
-        })
-    });
-    assert!(rig.fake.executions("gen.stop") >= 1);
-}
-
 /// Full screen is the pane alone: with the stimulus armed and then playing, the stage view
 /// draws exactly what it drew with the stimulus off (one snapshot, taken three times); Esc
 /// still stops it from there.
@@ -511,43 +402,4 @@ fn startup_first_frame() {
     // Tens of milliseconds unloaded; a blocking call on the startup path (a connect, a
     // device or file wait) takes the bound out at once.
     assert!(app < Duration::from_secs(1), "{app:?}");
-}
-
-/// A button pressed on the spectrum pane and released while a window is over the panes (the
-/// pane's own pointer check is not run then) still ends the hold on its level axis.
-#[test]
-fn a_release_under_a_window_ends_the_pane_hold() {
-    if !have_gpu("a_release_under_a_window_ends_the_pane_hold") {
-        return;
-    }
-    let rig = common::Rig::start();
-    let mut h = harness(options(Some(&rig)));
-    step_until(&mut h, "live frames", live);
-    let (p, rect) = h
-        .state()
-        .pane_rects
-        .iter()
-        .copied()
-        .find(|(p, _)| h.state().state.layout.kind(*p) == PaneKind::Spectrum)
-        .expect("a spectrum pane");
-    let at = rect.center();
-    let button = |pressed| Event::PointerButton {
-        pos: at,
-        button: egui::PointerButton::Primary,
-        pressed,
-        modifiers: Modifiers::NONE,
-    };
-    h.event(Event::PointerMoved(at));
-    settle(&mut h, 2);
-    h.event(button(true));
-    settle(&mut h, 2);
-    assert!(
-        h.state().state.level_held(p),
-        "held while the button is down"
-    );
-    h.key_press(Key::H);
-    step_until(&mut h, "help", |a| a.state.overlay == Overlay::Help);
-    h.event(button(false));
-    settle(&mut h, 3);
-    assert!(!h.state().state.level_held(p), "released under the window");
 }

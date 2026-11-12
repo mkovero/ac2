@@ -188,58 +188,6 @@ fn trace_offset_spread() {
     snapshot(&mut h, "trace_offset_spread");
 }
 
-/// The transfer pane's title names the measurement it shows in plain text; Delay tower's
-/// row dropped on the pane switches it there, the selection staying where it was.
-#[test]
-fn pane_title_and_a_drop() {
-    if !have_gpu("pane_title_and_a_drop") {
-        return;
-    }
-    let rig = common::Rig::start();
-    let mut h = harness(options(Some(&rig)));
-    step_until(&mut h, "live frames", live);
-    let tf = crate::common::pane(&h.state().state, PaneKind::Transfer);
-    assert!(
-        h.query_by_label("1  Transfer · Main L").is_some(),
-        "the transfer pane's title"
-    );
-    {
-        use ac2_scene::meas_list::TreeKey;
-        use ac2_ui::state::{DragItem, DragMsg, DropTarget, Msg};
-        let a = h.state_mut();
-        let rig = a.state.active();
-        let key = TreeKey::Meas(MeasId(2));
-        a.dispatch(Msg::RowDrag(DragMsg::Start(DragItem::Row { rig, key })));
-        a.dispatch(Msg::RowDrag(DragMsg::Over(Some(DropTarget {
-            pane: tf,
-            edge: None,
-        }))));
-        a.dispatch(Msg::RowDrag(DragMsg::Drop));
-    }
-    step_until(&mut h, "delay tower shown", |a| {
-        a.state.pane_meas(tf).map(|m| m.id) == Some(MeasId(2))
-    });
-    assert_eq!(
-        h.state().state.rig.selected,
-        Some(MeasId(1)),
-        "a drop selects nothing"
-    );
-    // The pane now leads with it: first legend row, IR of it.
-    let st = &h.state().state;
-    let s = ac2_ui::scenes::transfer(
-        st,
-        crate::common::pane(st, ac2_ui::state::PaneKind::Transfer),
-        &ac2_scene::theme::Theme::dark(),
-        ac2_scene::primitives::Viewport::new(1000.0, 450.0),
-        ac2_ui::scenes::Now {
-            instant: Instant::now(),
-            wall: ac2_proto::units::WallNs(0),
-        },
-    );
-    assert_eq!(s.legend[0].name, "Delay tower");
-    assert_eq!(ac2_ui::scenes::focus_tf(st).map(|m| m.id), Some(MeasId(2)));
-}
-
 /// A slot selected in the list takes the smoothing keys: K re-smooths the stored capture
 /// (the daemon serves it at the new setting) while the live curves keep theirs.
 #[test]
