@@ -209,6 +209,10 @@ fn learned_bindings_carry_over() {
     // Scoped lookup: P tracks extremes in both plots — peak hold and peaks on the
     // spectrum, min / max on the transfer function; Shift+P is the phase view there.
     assert_eq!(m.lookup(Scope::Spectrum, c("P")), Some(CommandId::PeakHold));
+    assert_eq!(
+        m.lookup(Scope::Spectrograph3d, c("P")),
+        Some(CommandId::PeakHold)
+    );
     assert_eq!(m.lookup(Scope::Transfer, c("P")), Some(CommandId::MinMax));
     assert_eq!(
         m.lookup(Scope::Transfer, c("Shift+P")),

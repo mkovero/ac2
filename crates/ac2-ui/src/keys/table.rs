@@ -302,6 +302,7 @@ pub fn defaults() -> Vec<Binding> {
         (C::NextView, S::Spectrograph3d, k(K::G)),
         (C::PrevView, S::Spectrograph3d, sh(K::G)),
         (C::SpectrographSpan, S::Spectrograph3d, sh(K::B)),
+        (C::PeakHold, S::Spectrograph3d, k(K::P)),
         (C::Offset, S::Spectrograph3d, k(K::J)),
         (C::TiltUp, S::Spectrograph3d, k(K::PageUp)),
         (C::TiltDown, S::Spectrograph3d, k(K::PageDown)),
@@ -429,7 +430,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::ResetView, "reset camera", 70),
                     hint(C::NextView, "view", 80),
                     hint(C::StartStop, "start/stop", 75),
-                    hint(C::SpectrographSpan, "span", 60),
+                    hint(C::PeakHold, "peaks", 65),
                     hint(C::MaximisePane, "maximise", 40),
                 ]
             }

@@ -1472,7 +1472,7 @@ per frequency and moment, as tall as its level. **G** once more is the spectrum 
 | **PageUp / PageDown** | tilt up / down (5° a step, 2° … 75°) |
 | **I / O** | dolly in / out |
 | **Home** | reset the camera (frequency left to right, just above the floor) |
-| **S**, **R**, **Shift+B**, **J** | start/stop, reset average, history span, offset, as in 2D |
+| **S**, **R**, **P**, **Shift+B**, **J** | start/stop, reset average, peaks, history span, offset, as in 2D |
 | **Ctrl+I / O**, **Ctrl+↑ / ↓**, **Shift+Home** | the level range: it sets the heights |
 
 - **Axes on demand**: the frequency, time and height labels, the floor grid and the
@@ -3906,6 +3906,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `R` | Reset averaging | `reset_average` |
 | `S` | Start/stop | `start_stop` |
 | `J` | Set offset… | `offset` |
+| `P` | Peaks | `peak_hold` |
 | `Shift+B` | Spectrograph span | `spectrograph_span` |
 | `PageUp` | Tilt up | `tilt_up` |
 | `PageDown` | Tilt down | `tilt_down` |
@@ -4018,7 +4019,7 @@ The least used go first on a narrow pane; `G/Shift+G` steps the pane's views for
 | Programme | `R` reset · `Shift+R` reset all · `G/Shift+G` view · `T` grid · `W` maximise · `Q` close pane · `H` all keys |
 | Inputs list row | `R` reset · `Shift+R` reset all · `Tab` measurements · `Shift+Tab` back · `H` all keys |
 | Spatial walk | `X` capture here · `PageDown` next step · `PageUp` previous · `K` skip · `Shift+R` redo, resets the walk's measurements · `M` mics trade places · `Space` stimulus · `W` maximise · `H` all keys |
-| Spectrum / RTA: 3D spectrograph | `←/→` orbit · `PageUp/PageDown` tilt · `I/O` zoom · `Home` reset camera · `G/Shift+G` view · `S` start/stop · `Shift+B` span · `W` maximise · `H` all keys |
+| Spectrum / RTA: 3D spectrograph | `←/→` orbit · `PageUp/PageDown` tilt · `I/O` zoom · `Home` reset camera · `G/Shift+G` view · `S` start/stop · `P` peaks · `W` maximise · `H` all keys |
 
 <!-- keymap:end -->
 

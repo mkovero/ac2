@@ -322,7 +322,7 @@ commands! {
     ClearMark => "clear_mark", "Clear cursor mark", [Transfer, Spectrum];
 
     SpectrumStyle => "spectrum_style", "Spectrum style", [Spectrum];
-    PeakHold => "peak_hold", "Peaks", [Spectrum];
+    PeakHold => "peak_hold", "Peaks", [Spectrum, Spectrograph3d];
     SpectrographSpan => "spectrograph_span", "Spectrograph span", [Spectrum, Spectrograph3d];
     SpectrographColours => "spectrograph_colours", "Next colour map", [Spectrum, Spectrograph3d];
     SpectrographViridis => "spectrograph_colours_viridis", "Colour map viridis", [Spectrum, Spectrograph3d];

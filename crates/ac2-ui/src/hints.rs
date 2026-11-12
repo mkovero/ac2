@@ -190,7 +190,7 @@ mod tests {
                 "Home reset camera",
                 "G/Shift+G view",
                 "S start/stop",
-                "Shift+B span",
+                "P peaks",
                 "W maximise",
                 "H all keys"
             ]
