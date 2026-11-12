@@ -564,3 +564,219 @@ mod stale_tests {
         }
     }
 }
+
+/// The chain rules on frames handed straight to [`DataState::apply`] and [`DataState::drain`]
+/// at chosen instants: a delta on a frame the client never held, a lost frame, a frame of
+/// an old epoch or another daemon, a daemon clock far from the local one. A working daemon
+/// produces none of these on demand, so they are put in by hand.
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod chain_tests {
+    use super::*;
+    use crate::mirror::Mirror;
+    use ac2_proto::frame::FrameData;
+    use ac2_proto::units::{MeasId, WallNs};
+    use ac2_proto::{Stream, encode_delta, encode_frame, encode_key, samples};
+    use ac2_zmq::{Context, SocketType};
+
+    const TF1: Topic = Topic::Data {
+        meas: MeasId(1),
+        stream: Stream::Tf,
+    };
+    const IR1: Topic = Topic::Data {
+        meas: MeasId(1),
+        stream: Stream::Ir,
+    };
+
+    /// Over a DEALER connected to nothing: what it would send up (credit, keyframe
+    /// requests) finds no peer and is dropped, which `send_up` allows.
+    fn data_state() -> DataState {
+        let ctx = Context::new().unwrap();
+        let sock = ctx.socket(SocketType::Dealer).unwrap();
+        let monitor = sock.monitor().unwrap();
+        DataState::new(sock, monitor, 1 << 20, Arc::default(), false).unwrap()
+    }
+
+    /// A mirror of the sample frames' daemon and epoch, its keepalives arriving, its clock
+    /// `offset_ns` ahead of the local one.
+    fn view(now: Instant, offset_ns: i128) -> MirrorView {
+        let s = samples::stamp(None);
+        let mut v = Mirror::new(true).view();
+        v.incarnation = Some(s.daemon_incarnation);
+        v.session_epoch = Some(s.session_epoch);
+        v.last_ka = Some(now);
+        v.clock_offset_ns = Some(offset_ns);
+        v
+    }
+
+    /// The `name` sample chain on measurement 1.
+    fn chain(name: &str) -> Vec<CodedFrame> {
+        let (_, frames) = samples::chains()
+            .into_iter()
+            .find(|(n, _)| *n == name)
+            .unwrap();
+        frames
+            .into_iter()
+            .map(|mut fr| {
+                match &mut fr.data {
+                    FrameData::Tf(t) => t.meas = MeasId(1),
+                    FrameData::Ir(r) => r.meas = MeasId(1),
+                    _ => {}
+                }
+                CodedFrame::from_frame(&fr).unwrap()
+            })
+            .collect()
+    }
+
+    fn wire(parts: Vec<Vec<u8>>) -> WireFrame {
+        let refs: Vec<&[u8]> = parts.iter().map(Vec::as_slice).collect();
+        decode_wire(&refs).unwrap()
+    }
+
+    fn key(x: &CodedFrame) -> WireFrame {
+        wire(encode_key(x).unwrap())
+    }
+
+    fn delta(x: &CodedFrame, base: &CodedFrame) -> WireFrame {
+        wire(encode_delta(x, base).unwrap().unwrap())
+    }
+
+    /// A drain at `now`, the local wall clock at the capture of `at` plus `late_ns`.
+    fn drain(d: &mut DataState, now: Instant, at: &CodedFrame, late_ns: i128) -> Latest {
+        let mut out = Latest::default();
+        let wall = i128::from(at.stamp.capture_wall_ns.0) + late_ns;
+        d.drain(&view(now, 0), now, wall, &mut out).unwrap();
+        out
+    }
+
+    fn shown(l: &Latest, t: &Topic) -> Option<(u64, bool)> {
+        l.get(t).map(|f| (f.frame.stamp.seq, f.stale))
+    }
+
+    fn same_values(l: &Latest, t: &Topic, want: &CodedFrame) {
+        let got = &l.get(t).unwrap().frame;
+        assert_eq!(
+            encode_frame(got).unwrap(),
+            encode_frame(&want.to_frame().unwrap()).unwrap()
+        );
+    }
+
+    #[test]
+    fn a_broken_chain_keeps_the_last_frame_and_asks_once() {
+        let t0 = Instant::now();
+        let v = view(t0, 0);
+        let mut d = data_state();
+        let tf = chain("tf");
+
+        // In order: each delta applies on the frame before it.
+        assert!(d.apply(key(&tf[0]), &v, t0).is_some());
+        assert!(d.apply(delta(&tf[1], &tf[0]), &v, t0).is_some());
+        let l = drain(&mut d, t0, &tf[1], 0);
+        assert_eq!(shown(&l, &TF1), Some((tf[1].stamp.seq, false)));
+        same_values(&l, &TF1, &tf[1]);
+
+        // `tf[2]` is lost: the delta on it is refused, the frame before stays, one keyframe
+        // is asked for.
+        assert!(d.apply(delta(&tf[3], &tf[2]), &v, t0).is_none());
+        assert_eq!(d.asks, [TF1]);
+        let l = drain(&mut d, t0, &tf[1], 0);
+        assert_eq!(l.refused_total, 1);
+        assert_eq!(shown(&l, &TF1), Some((tf[1].stamp.seq, false)));
+        same_values(&l, &TF1, &tf[1]);
+
+        // Refused again within the gap: no second request; after it, one more.
+        let t1 = t0 + KEYFRAME_ASK_GAP / 2;
+        assert!(d.apply(delta(&tf[3], &tf[2]), &view(t1, 0), t1).is_none());
+        assert!(d.asks.is_empty(), "asked twice within the gap");
+        let t2 = t0 + KEYFRAME_ASK_GAP;
+        assert!(d.apply(delta(&tf[3], &tf[2]), &view(t2, 0), t2).is_none());
+        assert_eq!(d.asks, [TF1]);
+
+        // No new frame: the kept frame goes STALE, never replaced by a wrong one.
+        let t3 = t0 + STALE_AFTER + Duration::from_millis(10);
+        let l = drain(&mut d, t3, &tf[1], 0);
+        assert_eq!(l.refused_total, 3);
+        assert_eq!(shown(&l, &TF1), Some((tf[1].stamp.seq, true)));
+
+        // The keyframe brings it back, and the chain goes on from it.
+        let v3 = view(t3, 0);
+        assert!(d.apply(key(&tf[2]), &v3, t3).is_some());
+        assert!(d.apply(delta(&tf[3], &tf[2]), &v3, t3).is_some());
+        let l = drain(&mut d, t3, &tf[3], 0);
+        assert_eq!(shown(&l, &TF1), Some((tf[3].stamp.seq, false)));
+        same_values(&l, &TF1, &tf[3]);
+        assert_eq!(l.malformed_total, 0);
+    }
+
+    #[test]
+    fn a_delta_before_any_keyframe_waits_for_it() {
+        let t0 = Instant::now();
+        let v = view(t0, 0);
+        let mut d = data_state();
+        let ir = chain("ir");
+
+        // A new subscription may see deltas before its keyframe: nothing held, nothing asked.
+        assert!(d.apply(delta(&ir[1], &ir[0]), &v, t0).is_none());
+        let l = drain(&mut d, t0, &ir[1], 0);
+        assert!(l.get(&IR1).is_none());
+        assert_eq!(l.refused_total, 0);
+        assert!(d.asks.is_empty());
+
+        // Its keyframe, then a delta whose exponent changed.
+        assert!(d.apply(key(&ir[1]), &v, t0).is_some());
+        assert!(d.apply(delta(&ir[2], &ir[1]), &v, t0).is_some());
+        let l = drain(&mut d, t0, &ir[2], 0);
+        assert_eq!(shown(&l, &IR1), Some((ir[2].stamp.seq, false)));
+        same_values(&l, &IR1, &ir[2]);
+    }
+
+    /// Only the newest frame of the current epoch and daemon is kept: an older `seq`, an
+    /// older epoch with a higher `seq`, and another incarnation are all passed over.
+    #[test]
+    fn frames_of_an_old_epoch_or_another_daemon_are_discarded() {
+        let t0 = Instant::now();
+        let v = view(t0, 0);
+        let mut d = data_state();
+        let tf = chain("tf");
+        assert!(d.apply(key(&tf[1]), &v, t0).is_some());
+        assert!(d.apply(key(&tf[0]), &v, t0).is_none(), "an older seq");
+        let mut old = tf[3].clone();
+        old.stamp.seq += 100;
+        old.stamp.session_epoch = SessionEpoch(old.stamp.session_epoch.0 - 1);
+        assert!(d.apply(key(&old), &v, t0).is_none());
+        let mut other = tf[3].clone();
+        other.stamp.seq += 200;
+        other.stamp.daemon_incarnation = DaemonIncarnation(1);
+        assert!(d.apply(key(&other), &v, t0).is_none());
+        let l = drain(&mut d, t0, &tf[1], 0);
+        assert_eq!(l.discarded_total, 2);
+        assert_eq!(shown(&l, &TF1), Some((tf[1].stamp.seq, false)));
+    }
+
+    /// Age is read on the daemon's clock: a daemon 30 s ahead of this host shows a frame
+    /// just captured as new, not as from the future, and an old capture as STALE however
+    /// recently it arrived.
+    #[test]
+    fn frame_age_uses_the_clock_offset() {
+        const AHEAD: i128 = 30_000_000_000;
+        let t0 = Instant::now();
+        let mut d = data_state();
+        let tf = chain("tf");
+        let local = i128::from(tf[0].stamp.capture_wall_ns.0) - AHEAD;
+        let mut out = Latest::default();
+        assert!(d.apply(key(&tf[0]), &view(t0, AHEAD), t0).is_some());
+        d.drain(&view(t0, AHEAD), t0, local, &mut out).unwrap();
+        let t = out.get(&TF1).unwrap();
+        assert!(t.age.unwrap().abs() < 1e-6, "age {:?}", t.age);
+        assert!(!t.stale);
+
+        let mut old = tf[1].clone();
+        old.stamp.capture_wall_ns = WallNs(tf[0].stamp.capture_wall_ns.0 - 3_000_000_000);
+        assert!(d.apply(key(&old), &view(t0, AHEAD), t0).is_some());
+        d.drain(&view(t0, AHEAD), t0, local, &mut out).unwrap();
+        let t = out.get(&TF1).unwrap();
+        assert_eq!(t.frame.stamp.seq, old.stamp.seq);
+        assert!(t.stale);
+        assert!((t.age.unwrap() - 3.0).abs() < 1e-6);
+    }
+}

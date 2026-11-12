@@ -593,6 +593,86 @@ mod tests {
         assert!(!Mirror::new(false).needs_tick());
     }
 
+    /// Mirroring at `rev` with nothing outstanding.
+    fn live(rev: u64, t0: Instant) -> Mirror {
+        let mut m = Mirror::new(true);
+        let (s, k) = ka(1, rev);
+        assert_eq!(m.on_ka(&s, k, t0, 0), Some(Need::Snapshot));
+        assert_eq!(m.on_snapshot(snap(1, rev), t0), None);
+        m
+    }
+
+    /// A keepalive may run ahead of its event briefly; only one still ahead after
+    /// [`REV_AHEAD_GRACE`] has its events fetched, by the tick when no later keepalive comes.
+    #[test]
+    fn a_missed_final_patch_is_fetched_by_the_tick_after_the_grace() {
+        let t0 = Instant::now();
+        let mut m = live(5, t0);
+        let (s, k) = ka(1, 6);
+        assert_eq!(m.on_ka(&s, k, t0, 0), None);
+        let early = t0 + REV_AHEAD_GRACE - Duration::from_millis(100);
+        assert_eq!(m.on_tick(early), None);
+        let late = t0 + REV_AHEAD_GRACE + Duration::from_millis(100);
+        assert_eq!(m.on_tick(late), Some(Need::Since(Rev(5))));
+        assert_eq!(m.on_since(vec![meas_ev(6, 9)], late), None);
+        let v = m.view();
+        assert_eq!(v.rev, Rev(6));
+        assert_eq!((v.snapshots, v.since_requests), (1, 1));
+        assert!(!m.needs_tick());
+    }
+
+    /// A gap is asked for once while the request is outstanding, however many later events
+    /// arrive, and filled without a new snapshot.
+    #[test]
+    fn a_gap_is_filled_by_one_since() {
+        let t0 = Instant::now();
+        let mut m = live(5, t0);
+        assert_eq!(m.on_event(meas_ev(7, 9), t0), Some(Need::Since(Rev(5))));
+        let t1 = t0 + RETRY_INTERVAL / 2;
+        assert_eq!(m.on_event(meas_ev(8, 10), t1), None);
+        assert_eq!(m.on_tick(t1), None);
+        assert_eq!(m.on_since(vec![meas_ev(6, 8), meas_ev(7, 9)], t1), None);
+        let v = m.view();
+        assert_eq!(v.rev, Rev(8));
+        assert_eq!((v.snapshots, v.since_requests), (1, 1));
+    }
+
+    /// Events the daemon no longer holds (`resync_required`): a second snapshot, which
+    /// replaces the state and applies what arrived after it.
+    #[test]
+    fn an_expired_replay_takes_a_new_snapshot() {
+        let t0 = Instant::now();
+        let mut m = live(5, t0);
+        assert_eq!(m.on_event(meas_ev(9, 9), t0), Some(Need::Since(Rev(5))));
+        assert_eq!(m.on_resync_required(t0), Some(Need::Snapshot));
+        assert!(!m.view().synced());
+        assert_eq!(m.on_event(meas_ev(10, 10), t0), None);
+        assert_eq!(m.on_snapshot(snap(1, 9), t0), None);
+        let v = m.view();
+        assert!(v.synced());
+        assert_eq!(v.rev, Rev(10));
+        assert_eq!(v.snapshots, 2);
+        let st = v.state.unwrap_or_else(|| panic!("state"));
+        assert!(st.measurements.iter().any(|x| x.id == MeasId(10)));
+    }
+
+    /// Responding while keepalives come within [`KA_TIMEOUT`]; silence counts from the
+    /// last one.
+    #[test]
+    fn not_responding_after_missing_keepalives() {
+        let t0 = Instant::now();
+        let m = live(5, t0);
+        let v = m.view();
+        assert!(v.responding(t0 + KA_TIMEOUT - Duration::from_millis(1)));
+        assert!(!v.responding(t0 + KA_TIMEOUT));
+        assert_eq!(v.silent_for(t0 + KA_TIMEOUT), KA_TIMEOUT);
+        let mut m = m;
+        let (s, k) = ka(1, 5);
+        let t1 = t0 + 2 * KA_TIMEOUT;
+        assert_eq!(m.on_ka(&s, k, t1, 0), None);
+        assert!(m.view().responding(t1));
+    }
+
     #[test]
     fn clock_takes_least_delayed_sample() {
         let t0 = Instant::now();

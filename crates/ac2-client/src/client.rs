@@ -862,3 +862,104 @@ async fn run_sync(
         view_tx.send_replace(Arc::new(v));
     }
 }
+
+/// The request half against a ROUTER the test answers by hand: a reply the daemon sent but
+/// the network lost, and a daemon that never answers. A working daemon does neither on
+/// demand; that it executes a resent id once is the daemon's own test (`ac2d` `dedup`).
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod retry_tests {
+    use super::*;
+    use ac2_proto::{Reply, Request, decode_request, encode_reply};
+
+    /// A [`CallCore`] whose ctrl DEALER is connected to a ROUTER handed back, and a context
+    /// both live on.
+    fn core(retry: Retry) -> (CallCore, Socket, Context) {
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let ep = format!(
+            "inproc://ac2-client-retry/{}",
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        );
+        let ctx = Context::new().unwrap();
+        let router = ctx.socket(SocketType::Router).unwrap();
+        router.bind(&ep).unwrap();
+        let dealer = ctx.socket(SocketType::Dealer).unwrap();
+        dealer.connect(&ep).unwrap();
+        // Events are not under test: the sync DEALER is connected to nothing.
+        let sync = ctx.socket(SocketType::Dealer).unwrap();
+        let mon = sync.monitor().unwrap();
+        let sync = crate::io::SyncSocket::new(sync, mon, &[]).unwrap();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let io = Io::start(&ctx, dealer, sync, tx, Arc::default()).unwrap();
+        let core = CallCore {
+            io,
+            next_id: AtomicU64::new(7),
+            retry,
+        };
+        (core, router, ctx)
+    }
+
+    /// Requests as the ROUTER received them, each with the peer's routing id, for `wait`.
+    fn received(router: &Socket, wait: Duration) -> Vec<(Vec<u8>, Request)> {
+        let mut out = Vec::new();
+        let end = Instant::now() + wait;
+        while let Some(left) = end.checked_duration_since(Instant::now()) {
+            let Some(m) = router.recv_timeout(left).unwrap() else {
+                break;
+            };
+            let f = m.frames();
+            out.push((f[0].clone(), decode_request(&f[f.len() - 1]).unwrap()));
+        }
+        out
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_retry_resends_the_same_id_and_takes_the_reply() {
+        let retry = Retry {
+            timeout: Duration::from_millis(300),
+            retries: 3,
+        };
+        let (core, router, _ctx) = core(retry);
+        // The first reply is lost: the ROUTER answers only the resend.
+        let daemon = std::thread::spawn(move || {
+            let got = received(&router, Duration::from_millis(450));
+            let (peer, req) = got.last().cloned().unwrap();
+            let reply = Reply::new(req.id, Ok(ReplyBody::Ack { rev: Rev(3) }));
+            router.send(&[peer, encode_reply(&reply).unwrap()]).unwrap();
+            got.into_iter().map(|(_, r)| r).collect::<Vec<_>>()
+        });
+        let r = core
+            .call(Command::SessionStatus, None, retry)
+            .await
+            .unwrap();
+        assert_eq!(r, ReplyBody::Ack { rev: Rev(3) });
+        let got = daemon.join().unwrap();
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert_eq!(got[0].id, got[1].id);
+        assert_eq!(got[0].cmd, got[1].cmd);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_silent_daemon_times_out_after_every_retry() {
+        let retry = Retry {
+            timeout: Duration::from_millis(100),
+            retries: 2,
+        };
+        let (core, router, _ctx) = core(retry);
+        let e = core
+            .call(Command::SessionStatus, None, retry)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                e,
+                ClientError::Timeout {
+                    op: "session.status",
+                    attempts: 3
+                }
+            ),
+            "{e}"
+        );
+        assert_eq!(received(&router, Duration::from_millis(50)).len(), 3);
+    }
+}
