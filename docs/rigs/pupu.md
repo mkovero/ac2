@@ -92,8 +92,12 @@ saved; keep that summary in the deploy log below. It does not bring back the SPL
 per-second Leq history (their windows start again; before the deploy, `spl leq export
 --meas <name> -o <file>` keeps it) or a mic curve applied to a trace after capture. Run it
 once: a second run adds copies.
-The calibration store (`~/.config/ac2/calibrations.json`) survives unless its own format
-changes; then redo the electrical calibration with the operator.
+The rig settings (`~/.config/ac2/rig.json`: system max level, output labels, rig meters,
+cue targets, paired rigs) and the calibration store (`~/.config/ac2/calibrations.json`)
+survive unless their own format changes. Then the old file is set aside as `rig.json.vN` /
+`calibrations.json.vN` (never deleted) and nothing is read from it: set the max level,
+labels, meters and cues again from the old file, and redo the electrical calibration with
+the operator.
 When an enum in the app's `ui.toml` loses a value, the app drops the whole section holding it
 (no compatibility shims): edit the value on ketunkolo and the Pi with the app stopped.
 

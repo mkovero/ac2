@@ -209,15 +209,15 @@ it by. The peak readout therefore never carries the curve; this is stated in the
   over the old one, directory synced. A crash leaves the old file or the new one, never a
   mix.
 - Read once at daemon start. Missing → empty store (created on the first write).
-  **Version 3** (no line calibrations, no pairs, an input row holding a mic name and curve
-  choice instead of a kind) is read through a mapping and written as version 4 on the next change.
-  **Any other version** of this format (v1: one curve per device + input + mic and an on/off
-  switch per input; v2: no calibration method) → the file is set aside as `<file>.v<N>` (the time
+  **Any other version** of this format, older or newer (v1: one curve per device + input +
+  mic and an on/off switch per input; v2: no calibration method; v3: no line calibrations,
+  no pairs, an input row holding a mic name and curve choice instead of a kind) → the file is set aside as `<file>.v<N>` (the time
   appended when that exists; never deleted) and the daemon starts with an empty, writable
   store, logging what happened and how to recover: calibrate again (`ac2 cal spl`) and
   import the curves again (`ac2 cal curve import FILE --mic NAME`); the old file shows the
-  mic and file names. There is no migration of those: a version-1 entry's curve says nothing about
-  which incidence angle it was, which is exactly what the new format makes explicit.
+  mic and file names. Nothing is read from an older version: a version-1 entry's curve says
+  nothing about which incidence angle it was, which is exactly what the new format makes
+  explicit, and every later version lacks something the current one states.
   **Unparseable** (bad JSON, unknown `format`, an entry that fails §4
   validation) → the file is set aside as `<file>.damaged-<time>` (never deleted) and its
   previous copy is read instead, else the store starts empty (`ac2d` `damage::recover`; the rig
