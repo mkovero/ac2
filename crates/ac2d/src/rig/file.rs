@@ -9,8 +9,7 @@
 //! A rig meter is kept as [`RigMeter`], what the operator set for it, not as a session
 //! measurement: a field a session measurement gains (compare picks, display offsets, the
 //! transfer delay) never changes this file. A change to [`RigMeter`] or to a section's
-//! shape bumps [`VERSION`], and each previous version is read by its own module
-//! ([`super::v1`] … [`super::v10`]).
+//! shape bumps [`VERSION`]; a file of any other version is not read.
 
 use std::net::SocketAddr;
 
@@ -138,14 +137,13 @@ impl Sections {
 /// What a rig settings file holds.
 #[derive(Debug)]
 pub(super) enum Read {
-    /// A file of a version this ac2d reads: its version, the sections read, and what could
-    /// not be read (each entry names its section).
+    /// A file of the version this ac2d reads: the sections read, and what could not be read
+    /// (each entry names its section).
     File {
-        version: u32,
         sections: Box<Sections>,
         lost: Vec<String>,
     },
-    /// A rig settings file of a version this ac2d does not read (a newer build's).
+    /// A rig settings file of a version this ac2d does not read (an older or newer build's).
     OtherVersion(u32),
 }
 
@@ -164,23 +162,8 @@ pub(super) fn read(text: &[u8]) -> Result<Read, String> {
         .and_then(|v| v.as_u64())
         .and_then(|v| u32::try_from(v).ok())
         .ok_or("no format version")?;
-    if version == 0 || version > VERSION {
+    if version != VERSION {
         return Ok(Read::OtherVersion(version));
-    }
-    // Each version's step reads it into the next one's shape.
-    for v in version..VERSION {
-        match v {
-            1 => super::v1::upgrade(&mut obj),
-            2 => super::v2::upgrade(&mut obj),
-            3 => super::v3::upgrade(&mut obj),
-            4 => super::v4::upgrade(&mut obj),
-            5 => super::v5::upgrade(&mut obj),
-            6 => super::v6::upgrade(&mut obj),
-            7 => super::v7::upgrade(&mut obj),
-            8 => super::v8::upgrade(&mut obj),
-            9 => super::v9::upgrade(&mut obj),
-            _ => super::v10::upgrade(&mut obj),
-        }
     }
     let mut r = Reader {
         obj,
@@ -212,7 +195,6 @@ pub(super) fn read(text: &[u8]) -> Result<Read, String> {
             .map(|k| format!("{k}: not a rig setting this ac2d knows")),
     );
     Ok(Read::File {
-        version,
         sections: Box::new(sections),
         lost,
     })

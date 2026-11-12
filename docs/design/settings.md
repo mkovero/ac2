@@ -90,8 +90,8 @@ the channels, with *applies when the session opens (Enter)* until it is the open
   a ceiling that cannot be read is taken from the previous copy (`rig.json.prev`) where it
   reads there, else the daemon starts at the bound, as with no file. A file that cannot be
   moved out of the way is never written (the daemon refuses changes with the reason); one
-  of a newer format version is set aside, one of the previous version is read and kept as
-  `rig.json.v1`.
+  of any other format version, older or newer, is set aside as `rig.json.v<N>` (renamed,
+  never deleted) and nothing is read from it: the daemon starts as with no file.
 - Every emitting path keeps enforcing it: `gen.set`, `sweep.run`, `session.detect_loopback`
   refuse levels above it; the peak limit of the running stream and of the detection burst's
   stream follow it.

@@ -166,8 +166,9 @@ A session directory holds `session.json` (measurements, trace metadata, slots), 
 trace and one per-second log per SPL meter (`spl/`). The autosave is the same format, updated in place: unchanged traces are not written again and SPL logs are appended to.
 Autosaves and calibration stores this build cannot read are set aside, never deleted:
 `autosave.v<N>/` (another session format), `autosave.damaged-<time>/`, `autosave.unrestored/`
-(what `ac2d --no-restore` did not load) and `calibrations.json.v<N>` (another store version:
-calibrate and import the curves again). Sessions of another format are refused with the
+(what `ac2d --no-restore` did not load), `calibrations.json.v<N>` (another store version:
+calibrate and import the curves again) and `rig.json.v<N>` (another rig settings version:
+set the max level, labels and rig meters again). Sessions of another format are refused with the
 version named.
 
 `XDG_CONFIG_HOME` / `XDG_DATA_HOME` apply on Linux. `AC2_CONFIG_DIR` moves the config

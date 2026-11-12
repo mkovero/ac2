@@ -12,20 +12,10 @@
 //! and the file written again with what was read. A file that cannot be read at all is set
 //! aside and its previous copy read instead. A file that cannot be moved out of the way is
 //! never written: every change is refused with the reason, so a lowered limit is never
-//! silently replaced. A file of a newer format version is set aside (renamed, never
-//! deleted); one of the previous version is read ([`v1`]) and kept beside the new one.
+//! silently replaced. A file of any other format version, older or newer, is set aside
+//! (renamed, never deleted) and nothing is read from it.
 
 mod file;
-mod v1;
-mod v10;
-mod v2;
-mod v3;
-mod v4;
-mod v5;
-mod v6;
-mod v7;
-mod v8;
-mod v9;
 
 use std::io;
 use std::net::SocketAddr;
@@ -134,12 +124,11 @@ impl RigStore {
         self.damage.take()
     }
 
-    /// Reads `path`. Missing → nothing set. A newer format version → set aside, nothing
-    /// set. Not a rig settings file at all (torn, garbage) → set aside and the previous
+    /// Reads `path`. Missing → nothing set. Another format version, older or newer → set
+    /// aside, nothing set. Not a rig settings file at all (torn, garbage) → set aside and the previous
     /// copy read ([`crate::damage::recover`]), else nothing set. Sections that cannot be
     /// read → set aside, those sections from the previous copy where they read there, the
-    /// rest kept, and the file written again. The previous version → read, kept as
-    /// `<name>.v1`, written as this version. A file that cannot be read at all (or moved)
+    /// rest kept, and the file written again. A file that cannot be read at all (or moved)
     /// → what could be read, and read-only.
     pub(crate) fn open(path: &Path) -> (Self, RigSettings) {
         let mut store = Self {
@@ -157,12 +146,8 @@ impl RigStore {
                 return (store, RigSettings::default());
             }
         };
-        let (version, sections, lost) = match file::read(&text) {
-            Ok(Read::File {
-                version,
-                sections,
-                lost,
-            }) => (version, *sections, lost),
+        let (sections, lost) = match file::read(&text) {
+            Ok(Read::File { sections, lost }) => (*sections, lost),
             Ok(Read::OtherVersion(v)) => {
                 match set_aside(path, &format!("v{v}")) {
                     Some(to) => {
@@ -199,44 +184,26 @@ impl RigStore {
                 };
             }
         };
-        if lost.is_empty() && version == VERSION {
+        if lost.is_empty() {
             return (store, sections.settings());
         }
-        let s = if lost.is_empty() {
-            let Some(to) = set_aside(path, &format!("v{version}")) else {
-                store.refuse(format!(
-                    "format version {version}, to be written as {VERSION}, and it cannot be \
-                     renamed out of the way"
-                ));
-                return (store, sections.settings());
-            };
-            tracing::info!(
-                "rig settings {} read from format version {version}; kept as {}, written as \
-                 version {VERSION}",
-                path.display(),
-                to.display()
-            );
-            sections.settings()
-        } else {
-            let (s, reason) = salvage(path, sections, &lost);
-            match ac2_paths::set_aside_damaged(path) {
-                Ok(to) => {
-                    let d = crate::damage::Damage {
-                        kind: StateFile::RigSettings,
-                        path: path.to_owned(),
-                        set_aside_as: Some(to),
-                        reason,
-                    };
-                    d.log();
-                    store.damage = Some(d);
-                }
-                Err(e) => {
-                    store.refuse(format!("{reason}, and it cannot be set aside: {e}"));
-                    return (store, s);
-                }
+        let (s, reason) = salvage(path, sections, &lost);
+        match ac2_paths::set_aside_damaged(path) {
+            Ok(to) => {
+                let d = crate::damage::Damage {
+                    kind: StateFile::RigSettings,
+                    path: path.to_owned(),
+                    set_aside_as: Some(to),
+                    reason,
+                };
+                d.log();
+                store.damage = Some(d);
             }
-            s
-        };
+            Err(e) => {
+                store.refuse(format!("{reason}, and it cannot be set aside: {e}"));
+                return (store, s);
+            }
+        }
         // Written now, so that the next start reads it whole; what was not read stays in
         // the copy set aside.
         if let Err(e) = store.persist(&s) {
@@ -405,40 +372,6 @@ mod tests {
         assert_eq!(start_ceiling(None, -10.0), -10.0);
     }
 
-    /// A version 1 file written before rig meters and cues existed keeps its lowered
-    /// ceiling and labels: resetting it would put the generator back at the `--max-level`
-    /// bound, louder than the operator set. It is kept as `.v1` and written as version 2.
-    #[test]
-    fn a_v1_file_without_meters_or_cues_reads_intact() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let p = dir.path().join("rig.json");
-        let v1 = r#"{"format":"ac2-rig-settings","version":1,"ceiling_dbfs":-30.0,
-                "outputs":[{"channel":0,"label":"Main L"},{"channel":3,"label":"Sub"}]}"#;
-        std::fs::write(&p, v1).expect("write");
-        let (mut store, got) = RigStore::open(&p);
-        let want = RigSettings {
-            ceiling_dbfs: Some(-30.0),
-            outputs: vec![label(0, "Main L"), label(3, "Sub")],
-            ..RigSettings::default()
-        };
-        assert_eq!(got, want);
-        assert!(store.check().is_ok());
-        assert!(store.take_damage().is_none());
-        // Written before fades: the default fade, not a jump and not a refusal.
-        assert_eq!(got.artnet_fade, ArtnetFade::DEFAULT);
-        assert_eq!(start_ceiling(got.ceiling_dbfs, -10.0), -30.0);
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join("rig.json.v1")).expect("kept"),
-            v1
-        );
-        let (mut store, again) = RigStore::open(&p);
-        assert_eq!(again, want);
-        assert!(store.take_damage().is_none());
-        let written: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(&p).expect("v2")).expect("json");
-        assert_eq!(written["version"], VERSION);
-    }
-
     fn rig_meter(id: u32, scope: MeasScope) -> RigMeter {
         use ac2_proto::model::{SplConfig, TimeWeighting, Weighting};
         RigMeter {
@@ -527,16 +460,25 @@ mod tests {
             std::fs::remove_file(&p).expect("remove");
         }
 
-        std::fs::write(
-            &p,
-            r#"{"format":"ac2-rig-settings","version":99,"ceiling_dbfs":-3.0,"outputs":[]}"#,
-        )
-        .expect("write");
-        let (store, s) = RigStore::open(&p);
-        assert_eq!(s, RigSettings::default());
-        assert!(!p.exists());
-        assert!(dir.path().join("rig.json.v99").exists());
-        store.persist(&RigSettings::default()).expect("writable");
+        // Another version, older or newer: set aside whole, nothing read from it, and not
+        // reported as damage — it is a file of another build, not a broken one.
+        for v in [VERSION - 1, 1, VERSION + 88] {
+            let text = format!(
+                r#"{{"format":"ac2-rig-settings","version":{v},"ceiling_dbfs":-3.0,"outputs":[]}}"#
+            );
+            std::fs::write(&p, &text).expect("write");
+            let (mut store, s) = RigStore::open(&p);
+            assert_eq!(s, RigSettings::default());
+            assert!(store.check().is_ok());
+            assert!(store.take_damage().is_none());
+            assert!(!p.exists());
+            assert_eq!(
+                std::fs::read_to_string(dir.path().join(format!("rig.json.v{v}"))).expect("kept"),
+                text
+            );
+            store.persist(&RigSettings::default()).expect("writable");
+            std::fs::remove_file(&p).expect("remove");
+        }
     }
 
     /// Values a command would refuse cost their section only. The ceiling is taken from
