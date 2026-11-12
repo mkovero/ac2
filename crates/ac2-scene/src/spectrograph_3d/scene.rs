@@ -600,6 +600,7 @@ pub fn spectrograph_3d_scene(
                     plot,
                     phase: drawn.phase,
                     range: [range.lo - off, range.hi - off],
+                    tier: s.tier,
                 });
                 let data = sk.ring().to_vec();
                 c.data.skylines.push(Skyline3d {

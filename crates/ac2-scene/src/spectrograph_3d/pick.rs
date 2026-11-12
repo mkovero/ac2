@@ -1,8 +1,8 @@
 //! The cursor in the 3D view. Live, which spike a pointer is over is ambiguous: rows behind
 //! show through the gaps and move. Stopped (S), the picture stands still, and a click picks
-//! the spike nearest the pointer; the cursor is then that cell, marked on its spike and
-//! read on the cursor values' plate as on every view. Live, the cursor stays at its age
-//! while the rows move through it.
+//! the spike the pixel under the pointer shows; the cursor is then that cell, marked on its
+//! spike and read on the cursor values' plate as on every view. Live, the cursor stays at
+//! its age while the rows move through it.
 
 use super::scene::Projector;
 use super::*;
@@ -16,6 +16,8 @@ pub struct PickFrame {
     pub phase: f32,
     /// The level range the heights span, as stored (the display offset taken off).
     pub range: [f64; 2],
+    /// The spike target's resolution: how wide the spikes are drawn.
+    pub tier: SkylineTier,
 }
 
 /// A picked cell: its column's centre frequency and its row's middle age, seconds before
@@ -33,9 +35,17 @@ pub const PICK_PX: f32 = 6.0;
 /// Spikes this near alike, pixels, are both under the pointer.
 const TIE_PX: f32 = 1.0;
 
-/// The spike of skyline `sk`, drawn by `f`, nearest `pos` within [`PICK_PX`]: a spike is
-/// its line from the floor to its tip, as drawn. Of spikes as near, the one whose tip is
-/// nearer the pointer, then the one nearer the eye. `None` off every spike.
+/// How far past a spike's edge its light reaches, pixels: the renderer's box filter takes
+/// in the half pixel around the pixel centre and widens the spike a quarter pixel more.
+const COVER_PAD: f32 = 0.75;
+
+/// The spike of skyline `sk`, drawn by `f`, that the pointer at `pos` is on. The renderer
+/// composites spikes by their maximum, the level (the colour) apart from the light, so the
+/// pixel shows the highest spike covering it whatever stands in front: of the spikes
+/// covering the pointer, the highest, then the brightest there (of one colour, the
+/// brighter is the one seen), then the nearer the eye. Off every spike's body, the spike
+/// nearest within [`PICK_PX`]: of spikes as near, the one whose tip is nearer the pointer
+/// (a level is read at the tip), then the one nearer the eye. `None` off every spike.
 pub fn pick(f: &PickFrame, sk: &Skyline, pos: [f32; 2]) -> Option<Picked> {
     let (cols, rows) = (sk.cols(), sk.rows());
     let spans = f.range[1].partial_cmp(&f.range[0]) == Some(std::cmp::Ordering::Greater);
@@ -43,8 +53,11 @@ pub fn pick(f: &PickFrame, sk: &Skyline, pos: [f32; 2]) -> Option<Picked> {
         return None;
     }
     let pj = Projector::new(f.view_proj, f.plot);
-    // (distance to the spike, to its tip, depth from the eye, column, row back)
-    let mut best: Option<(f32, f32, f64, usize, usize)> = None;
+    let look = Look::of(f);
+    // Covering the pointer: (level step, light, depth from the eye, column, row back).
+    let mut on: Option<(u8, f32, f64, usize, usize)> = None;
+    // Near it: (distance to the spike, to its tip, depth from the eye, column, row back).
+    let mut near: Option<(f32, f32, f64, usize, usize)> = None;
     for j in 0..rows {
         let Some(row) = sk.row_back(j) else { continue };
         for (col, &v) in row.iter().enumerate().take(cols) {
@@ -58,24 +71,98 @@ pub fn pick(f: &PickFrame, sk: &Skyline, pos: [f32; 2]) -> Option<Picked> {
             if d > PICK_PX {
                 continue;
             }
-            let t = to_segment(pos, b, b);
             let w = f.view_proj.clip(foot)[3];
-            // Spikes as near: the one whose tip is at the pointer (a level is read at the
-            // tip), then the nearer the eye.
-            let better = best.is_none_or(|(bd, bt, bw, _, _)| {
+            let next = [foot[0] + 2.0 * FLOOR_HALF_W / cols as f64, foot[1], foot[2]];
+            if let Some(nb) = pj.point(next)
+                && d <= look.half_width(dist(a, nb)) + COVER_PAD
+            {
+                let n = level(f, v);
+                let light = look.light(n, foot, w, along(pos, a, b), dist(a, b));
+                // Two spikes in one step of the renderer's 8-bit level target show one colour.
+                let n = (n * 255.0).round() as u8;
+                let better = on.is_none_or(|(bn, bl, bw, _, _)| {
+                    n > bn || (n == bn && (light > bl || (light == bl && w < bw)))
+                });
+                if better {
+                    on = Some((n, light, w, col, j));
+                }
+            }
+            let t = dist(pos, b);
+            let better = near.is_none_or(|(bd, bt, bw, _, _)| {
                 d < bd - TIE_PX
                     || (d <= bd + TIE_PX && (t < bt - TIE_PX || (t <= bt + TIE_PX && w < bw)))
             });
             if better {
-                best = Some((d, t, w, col, j));
+                near = Some((d, t, w, col, j));
             }
         }
     }
-    let (_, _, _, col, j) = best?;
+    let (col, j) = match (on, near) {
+        (Some((_, _, _, col, j)), _) | (None, Some((_, _, _, col, j))) => (col, j),
+        (None, None) => return None,
+    };
     Some(Picked {
         hz: col_hz(sk, col)?,
         before_s: row_age(sk, j),
     })
+}
+
+/// The level `v` (as stored) of a spike as a share of the picture's level range.
+fn level(f: &PickFrame, v: f32) -> f32 {
+    ((f64::from(v) - f.range[0]) / (f.range[1] - f.range[0])).clamp(0.0, 1.0) as f32
+}
+
+/// The renderer's spike look ([`LOOK`]) at the picture's tier, in plot pixels. The look's
+/// pixels are the display's; the scene knows no scale factor, so they are taken as plot
+/// pixels: on a denser display the spikes are thinner than this, and a pointer is not
+/// placed finer than a plot pixel anyway.
+struct Look {
+    /// How many spike target pixels to a plot pixel.
+    down: f32,
+    width_px: [f32; 2],
+    /// Clip depth of the floor's nearest corner, where the depth fade starts.
+    nearest: f64,
+}
+
+impl Look {
+    fn of(f: &PickFrame) -> Self {
+        let (down, width_px) = match f.tier {
+            SkylineTier::Full => (1.0, LOOK.width_px),
+            SkylineTier::Lite | SkylineTier::Bare => (0.5, LITE_WIDTH_PX),
+        };
+        let (hw, d) = (FLOOR_HALF_W, FLOOR_DEPTH);
+        let nearest = [[-hw, 0.0, 0.0], [hw, 0.0, 0.0], [-hw, 0.0, d], [hw, 0.0, d]]
+            .into_iter()
+            .map(|p| f.view_proj.clip(p)[3])
+            .fold(f64::INFINITY, f64::min);
+        Self {
+            down,
+            width_px,
+            nearest,
+        }
+    }
+
+    /// Half a spike's width, plot pixels, for a column pitch of `pitch` plot pixels.
+    fn half_width(&self, pitch: f32) -> f32 {
+        let w = (LOOK.width_share * pitch * self.down).clamp(self.width_px[0], self.width_px[1]);
+        w / self.down / 2.0
+    }
+
+    /// The light of a spike at level `n` (a share of the range), foot `foot` at clip depth `w`,
+    /// `along` pixels up its `len` pixels: a steep body, a bright cap at the tip, faded by
+    /// age along the floor and by depth beyond the floor's nearest point.
+    fn light(&self, n: f32, foot: V3, w: f64, along: f32, len: f32) -> f32 {
+        let fade = (-LOOK.age_fade * (foot[2] / FLOOR_DEPTH) as f32).exp()
+            * (-LOOK.eye_fade * (w - self.nearest).max(0.0) as f32).exp();
+        let light = (LOOK.level_floor + (1.0 - LOOK.level_floor) * n) * fade;
+        let t = (along / len.max(1e-4)).clamp(0.0, 1.0);
+        let body = if len - along <= LOOK.tip_px {
+            LOOK.tip_gain
+        } else {
+            LOOK.foot + (1.0 - LOOK.foot) * t.powf(LOOK.body_pow)
+        };
+        (body * light).min(1.0)
+    }
 }
 
 /// The cell the cursor (`hz`, `before_s` seconds before the newest frame) is in: its
@@ -206,8 +293,22 @@ pub(super) fn cursor_cell(
     })
 }
 
+/// Distance from `p` to `q`, pixels.
+fn dist(p: [f32; 2], q: [f32; 2]) -> f32 {
+    (p[0] - q[0]).hypot(p[1] - q[1])
+}
+
+/// How far along the segment `a`–`b` the point nearest `p` is from `a`, pixels.
+fn along(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
+    let len = dist(a, b);
+    if len <= 0.0 {
+        return 0.0;
+    }
+    (((p[0] - a[0]) * (b[0] - a[0]) + (p[1] - a[1]) * (b[1] - a[1])) / len).clamp(0.0, len)
+}
+
 /// Distance from `p` to the segment `a`–`b`, pixels.
-fn to_segment(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
+pub(super) fn to_segment(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
     let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
     let len2 = dx * dx + dy * dy;
     let t = if len2 > 0.0 {
