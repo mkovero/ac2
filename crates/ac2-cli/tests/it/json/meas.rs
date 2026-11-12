@@ -388,8 +388,10 @@ async fn session_meas_delay_trace_flow() -> R {
         json!({ "error": { "code": "usage", "msg": "no measurement named \"foh\"" } })
     );
 
-    let dump = ok_json(&f, &["state", "dump"]).await?;
+    // The live daemon's rev moves on between two calls, so the dump taken second is at
+    // least as new as the status taken first.
     let status = ok_json(&f, &["status", "--json"]).await?;
+    let dump = ok_json(&f, &["state", "dump"]).await?;
     assert!(
         dump["rev"].as_u64() >= status["rev"].as_u64(),
         "{dump} {status}"
