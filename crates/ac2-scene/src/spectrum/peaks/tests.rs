@@ -166,6 +166,18 @@ fn a_maximum_at_the_curves_end_is_a_peak() {
 }
 
 #[test]
+fn the_0_hz_column_and_its_lobe_hold_no_peak() {
+    let f: Vec<f64> = (0..2000).map(|i| f64::from(i) * 10.0).collect();
+    let mut l = floor(f.len());
+    l[0] = -30.0;
+    l[1] = -36.0;
+    tone(&mut l, bin_of(&f, 1000.0), -40.0, 10.0);
+    let p = find_peaks(&narrow(&f, &l));
+    let at: Vec<f64> = p.iter().map(|p| p.freq_hz).collect();
+    assert_eq!(at, [1000.0], "{p:?}");
+}
+
+#[test]
 fn a_maximum_beside_a_gap_is_a_peak() {
     let f = bins();
     let mut l = floor(f.len());

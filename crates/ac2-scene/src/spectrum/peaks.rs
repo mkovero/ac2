@@ -127,7 +127,10 @@ fn extremes(freqs: &[f64], values: &[f64], dir: Extreme, fit: impl Fn(usize) -> 
     let mut found: Vec<(usize, Peak)> = Vec::new();
     for i in 0..n {
         let b = v[i];
-        if !b.is_finite() {
+        // A narrowband spectrum's 0 Hz column is the signal's offset and its window lobe,
+        // with no place on a log axis: it holds no peak, though it is still the curve its
+        // neighbour stands beside (so the lobe's flank is no peak either).
+        if !b.is_finite() || freqs[i] <= 0.0 {
             continue;
         }
         let left = if i > 0 { v[i - 1] } else { f64::NAN };
