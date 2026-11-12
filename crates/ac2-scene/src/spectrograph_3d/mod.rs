@@ -50,6 +50,19 @@ pub const FLOOR_DEPTH: f64 = 1.2;
 /// Height of a spike at the top of the level range: tall enough to rise above the far rows
 /// without leaving the frame.
 pub const MAX_HEIGHT: f64 = 0.7;
+/// The tallest spike, in [`MAX_HEIGHT`]s: a level two spans above the range top. Above the
+/// top a spike keeps the same dB per unit height (the camera can stop and look at it), but
+/// a broken frame (a wild level, a mis-set range) must not stand a spike off past every
+/// camera limit and swamp the picture; two spans above is more than any real level above
+/// a range the operator chose.
+pub const HEIGHT_CAP: f64 = 3.0;
+
+/// A level `v` as the height of its spike, in [`MAX_HEIGHT`]s, over the level range
+/// `lo..hi`: 0 at or under the range bottom (no spike), 1 at its top, in proportion past
+/// it up to [`HEIGHT_CAP`]. The renderer's `skyline.wgsl` stands spikes by the same rule.
+pub fn spike_height(v: f64, lo: f64, hi: f64) -> f64 {
+    ((v - lo) / (hi - lo)).clamp(0.0, HEIGHT_CAP)
+}
 
 /// The spike look. Set on synthetic room-like data (a look spike, `docs/design`); to be
 /// retuned on a rig recording, here and nowhere else.

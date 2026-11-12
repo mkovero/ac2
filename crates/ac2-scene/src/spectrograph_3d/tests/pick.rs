@@ -380,3 +380,33 @@ fn the_pointer_marks_the_spike_a_click_would_pick() {
     view.pointer_3d = Some(pt([s.plot.x + 2.0, s.plot.y + 2.0]));
     assert_eq!(scene_of(&b, None, &view, 0.0).hover, None);
 }
+
+#[test]
+fn a_spike_past_the_range_top_keeps_growing_up_to_the_cap() {
+    let b = flat_room();
+    let sk = &b.1;
+    let s = scene_of(&b, None, &chrome(PlotChrome::Full), 0.0);
+    let mut f = s.pick.expect("a picture");
+    let col = col_of(sk, 1000.0);
+    let (cols, rows) = (sk.cols(), sk.rows());
+    let height = |f: &PickFrame, v: f32| spike(f, cols, rows, col, 0, v).map(|(_, t)| t[1]);
+    f.range = [-80.0, 0.0];
+    // 1.5 spans above the bottom: half a span over the top, half a height taller.
+    let h = height(&f, 40.0).expect("a spike");
+    assert!((h - 1.5 * MAX_HEIGHT).abs() < 1e-9, "{h}");
+    // Far past it: clamped at the cap.
+    let h = height(&f, 1.0e6).expect("a spike");
+    assert!((h - HEIGHT_CAP * MAX_HEIGHT).abs() < 1e-9, "{h}");
+    assert_eq!(height(&f, -90.0), None);
+    // The −30 dB room stands 1.5 spans tall over −60 … −40: its tip is where a click on
+    // it picks it, as the renderer draws it.
+    f.range = [-60.0, -40.0];
+    let (_, top) = spike(&f, cols, rows, col, 0, -30.0).expect("a spike");
+    assert!((top[1] - 1.5 * MAX_HEIGHT).abs() < 1e-9);
+    let p = Projector::new(f.view_proj, f.plot)
+        .point(top)
+        .expect("before the eye");
+    let at = pick(&f, sk, pt(p)).expect("on a spike");
+    let (c, k) = cell_at(sk, at.hz, at.before_s).expect("a cell");
+    assert_eq!((c, k), (col, 0));
+}

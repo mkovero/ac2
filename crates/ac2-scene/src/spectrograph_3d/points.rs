@@ -25,9 +25,10 @@ const BOX_HALF: f32 = 4.0;
 
 /// The points of `peaks` (loudest first, levels as stored) of a curve offset by `offset_db`
 /// and read in `unit`, on skyline `sk` (its newest row `front` rows back) within level range
-/// `range`. A peak outside the frequency span or the level range, over a cell the newest
-/// row has no level in, or behind the eye gets none. Its height is its level clamped to its cell's spike on the
-/// newest row (a cell is a coarser grid than the peak's bin); the label keeps its own.
+/// `range`. A peak outside the frequency span, under the level range, over a cell the newest
+/// row has no level in, or behind the eye gets none; one above the range top stands on its
+/// spike, which keeps growing there. Its height is its level clamped to its cell's spike on
+/// the newest row (a cell is a coarser grid than the peak's bin); the label keeps its own.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn peak_points(
     c: &mut Canvas,
@@ -55,7 +56,7 @@ pub(super) fn peak_points(
     let mut points = Vec::new();
     for p in peaks {
         let level = p.level + offset_db;
-        if !(lo..=hi).contains(&p.freq_hz) || !(range.lo..=range.hi).contains(&level) {
+        if !(lo..=hi).contains(&p.freq_hz) || !level.is_finite() || level < range.lo {
             continue;
         }
         let col =
@@ -64,7 +65,7 @@ pub(super) fn peak_points(
             continue;
         };
         let shown = level.min(f64::from(top) + offset_db);
-        let n = ((shown - range.lo) / range.span()).clamp(0.0, 1.0);
+        let n = super::spike_height(shown, range.lo, range.hi);
         let world = [
             -FLOOR_HALF_W + (col as f64 + 0.5) * pitch,
             MAX_HEIGHT * n,

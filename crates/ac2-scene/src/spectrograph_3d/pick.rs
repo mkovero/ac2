@@ -124,7 +124,8 @@ pub fn pick(f: &PickFrame, sk: &Skyline, at: Pointer3d) -> Option<Picked> {
     })
 }
 
-/// The level `v` (as stored) of a spike as a share of the picture's level range.
+/// The level `v` (as stored) of a spike as a share of the picture's level range, as its
+/// colour shows it: saturated at the range top (the height carries the rest).
 fn level(f: &PickFrame, v: f32) -> f32 {
     ((f64::from(v) - f.range[0]) / (f.range[1] - f.range[0])).clamp(0.0, 1.0) as f32
 }
@@ -240,7 +241,7 @@ pub(super) fn spike(
     if !v.is_finite() {
         return None;
     }
-    let n = ((f64::from(v) - f.range[0]) / (f.range[1] - f.range[0])).clamp(0.0, 1.0);
+    let n = super::spike_height(f64::from(v), f.range[0], f.range[1]);
     if n <= 0.0 {
         return None;
     }

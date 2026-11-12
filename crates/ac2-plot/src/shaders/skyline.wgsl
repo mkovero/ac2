@@ -41,7 +41,8 @@ struct Sky {
     width_max: f32,
     // Spike target pixels per host pixel: 1 or 0.5.
     down: f32,
-    _pad: u32,
+    // The tallest spike in full heights (`HEIGHT_CAP`).
+    height_cap: f32,
     // The bloom target's size (a quarter of the rect's, rounded up).
     bloom_size: vec2<f32>,
     bloom_threshold: f32,
@@ -104,10 +105,14 @@ fn spike(vi: u32, ii: u32, size: vec2<f32>, scale: f32) -> SpikeOut {
     if (is_nan_bits(v)) {
         return out;
     }
-    let n = clamp((v - sky.range.x) / (sky.range.y - sky.range.x), 0.0, 1.0);
-    if (n <= 0.0) {
+    // Height in full heights: in proportion past the range top, up to the cap. The level
+    // the target keeps (R, 8 bits) saturates at the top instead: the colour stops at the
+    // colormap's top and the height carries the rest, so the range keeps all 256 steps.
+    let h = clamp((v - sky.range.x) / (sky.range.y - sky.range.x), 0.0, sky.height_cap);
+    if (h <= 0.0) {
         return out;
     }
+    let n = min(h, 1.0);
     let hw = sky.world.x;
     let depth = sky.world.y;
     let pitch = 2.0 * hw / f32(sky.cols);
@@ -115,7 +120,7 @@ fn spike(vi: u32, ii: u32, size: vec2<f32>, scale: f32) -> SpikeOut {
     let z = (f32(j) + sky.phase) * depth / f32(sky.rows);
     let foot = vec3<f32>(x, 0.0, z);
     let f = to_target(foot, size);
-    let t = to_target(vec3<f32>(x, sky.world.z * n, z), size);
+    let t = to_target(vec3<f32>(x, sky.world.z * h, z), size);
     let nb = to_target(vec3<f32>(x + pitch, 0.0, z), size);
     if (f.z <= 1e-3 || t.z <= 1e-3 || nb.z <= 1e-3) {
         return out;

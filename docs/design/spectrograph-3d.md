@@ -87,16 +87,21 @@ Constants in `ac2-scene::spectrograph_3d`:
   tall spike reads lit even so, because the tips of the rows behind it land on it (rows ~1 px
   apart); that is the history standing behind the newest row, not the body's own light.
 - **Level to light.** Normalised level `n` (0 at the bottom of the level range, 1 at the
-  top, clamped; `n = 0` draws nothing) sets height `0.7·n`, colour `LUT(n)` and intensity
-  `0.3 + 0.7·n`, so the grass is dim as well as low. Height is the level, nothing else: no
+  top; `n ≤ 0` draws nothing) sets height `0.7·n`, colour `LUT(n)` and intensity
+  `0.3 + 0.7·n`, so the grass is dim as well as low. Past the top the height keeps growing
+  at the same dB per unit (the camera can stop and look at it), up to `n = 3` (two spans
+  above the top) so a broken frame cannot stand a spike off past every camera limit; colour
+  and intensity saturate at `n = 1`, so the spike target's 8-bit level keeps all its steps
+  for the range itself. Height is the level, nothing else: no
   automatic range, no exaggeration. Pink noise over a 100 dB range is a slab of near-equal
   spikes; the level range keys (Ctrl+I/O, Ctrl+↑/↓) narrowed to ~40 dB around it turn the
   slab into terrain (modes, comb, the crossover dip) — the user guide says so. Programme
   material is the same story: a mastered track's bins sit around −70…−5 dBFS (tone level,
   65 536-point default), so on −100…0 they form a plateau at mid height; about **−60…0**
   drops the bed to near-floor grass with the bass line and tonal partials standing out.
-  Narrowing must keep the top near 0: hot masters reach −5…0 dBFS per bin, and a top at
-  −20 clamps them into a flat white ceiling.
+  Narrowing below the material's top is readable: hot masters reach −5…0 dBFS per bin,
+  and with a top at −20 they stand out above the ceiling line, white, their height still
+  the level.
 - **Depth.** Brightness × `exp(−2.0·age/1.2)` (the back row at 13 %) × `exp(−0.35·d)`,
   `d` the depth along the view beyond the floor's nearest point (its nearest corner's clip
   `w`), not the distance from the eye: the front row keeps full light at any dolly. Round 3 tried 3.0 and 3.5: at the default camera they barely change the picture,
