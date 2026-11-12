@@ -57,6 +57,16 @@ impl Drop for SimDaemon {
 /// Starts a simulated rig on loopback port 0 with `setup` (the demo the app sets up, or no
 /// session).
 pub fn sim_daemon(setup: Setup) -> Result<SimDaemon, Box<dyn std::error::Error>> {
+    sim_daemon_with(setup, |_| {})
+}
+
+/// [`sim_daemon`] with its configuration changed by `edit` before it starts: another name,
+/// an identity kept in a file (a rig that keeps its id across a restart), a session
+/// directory of the test's own (two rigs opening each other's sessions).
+pub fn sim_daemon_with(
+    setup: Setup,
+    edit: impl FnOnce(&mut ac2d::DaemonConfig),
+) -> Result<SimDaemon, Box<dyn std::error::Error>> {
     let listen = ac2d::Listen::Local {
         ctrl: "tcp://127.0.0.1:0".into(),
         data: "tcp://127.0.0.1:0".into(),
@@ -66,6 +76,7 @@ pub fn sim_daemon(setup: Setup) -> Result<SimDaemon, Box<dyn std::error::Error>>
     let mut config = ac2d::DaemonConfig::new(std::sync::Arc::clone(&audio[0]), listen, -10.0);
     config.backends = audio;
     config.name = "Simulated rig".into();
+    edit(&mut config);
     let handle = ac2d::Daemon::start(config)?;
     let d = SimDaemon {
         endpoints: Endpoints {

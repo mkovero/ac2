@@ -19,10 +19,14 @@ ac2-ui = { path = "../ac2-ui" }
 ac2d = { path = "../ac2d" }
 
 [dev-dependencies]
+# A simulated rig of the test's own (`FakeConfig`), started as `ac2d --backend fake` would.
+ac2-audio = { path = "../ac2-audio" }
 ac2-client = { path = "../ac2-client", features = ["test-support"] }
 ac2-plot = { path = "../ac2-plot" }
 ac2-proto = { path = "../ac2-proto" }
 ac2-scene = { path = "../ac2-scene" }
+# The exported PNG read back (RGBA8, as the export writes it).
+ac2-testkit = { path = "../ac2-testkit", features = ["image"] }
 # Test oracle only, as in ac2-ui's tests (the shared fake rig smooths as the daemon would).
 ac2-core = { path = "../ac2-core" }
 ac2-traces = { path = "../ac2-traces" }

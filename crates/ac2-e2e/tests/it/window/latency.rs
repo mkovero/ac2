@@ -1,6 +1,7 @@
 //! `--latency-log`: a frame applied and drawn yields a row whose stages run in order.
 
 use super::*;
+use crate::harness::R;
 
 /// The CSV's lines as column → value maps, comments skipped.
 fn rows(text: &str) -> Vec<std::collections::HashMap<String, String>> {
@@ -24,26 +25,26 @@ fn rows(text: &str) -> Vec<std::collections::HashMap<String, String>> {
 }
 
 #[test]
-fn latency_rows_in_stage_order() {
+fn latency_rows_in_stage_order() -> R {
     if !have_gpu("latency_rows_in_stage_order") {
-        return;
+        return Ok(());
     }
-    let rig = common::Rig::start();
-    let mut h = harness(options(Some(&rig)));
+    let rig = Rig::start()?;
+    let mut h = harness(options(&rig));
     step_until(&mut h, "live frames", live);
-    let dir = tempfile::tempdir().expect("temp dir");
+    let dir = tempfile::tempdir()?;
     let path = dir.path().join("latency.csv");
-    let log = ac2_ui::latency::Latency::create(&path, &["test run".into()]).expect("log");
+    let log = ac2_ui::latency::Latency::create(&path, &["test run".into()])?;
     h.state_mut().set_latency_log(log);
     // Passes drawn and rendered (the probe runs in the render) while new frames arrive.
     for _ in 0..30 {
         h.step();
-        h.render().expect("render");
+        h.render()?;
         std::thread::sleep(Duration::from_millis(20));
     }
     h.state_mut()
         .set_latency_log(ac2_ui::latency::Latency::off());
-    let text = std::fs::read_to_string(&path).expect("read log");
+    let text = std::fs::read_to_string(&path)?;
     assert!(text.contains("# test run"), "{text}");
     let rows = rows(&text);
     assert!(!rows.is_empty());
@@ -76,7 +77,8 @@ fn latency_rows_in_stage_order() {
             .collect();
         assert!(wall.windows(2).all(|w| w[0] <= w[1]), "{wall:?} in {r:?}");
         assert!(r["panes_drawn"].contains("spectrum"), "{r:?}");
-        let lag: f64 = r["glide_lag_ms"].parse().expect("glide lag");
+        let lag: f64 = r["glide_lag_ms"].parse()?;
         assert!(lag >= 0.0, "{r:?}");
     }
+    Ok(())
 }

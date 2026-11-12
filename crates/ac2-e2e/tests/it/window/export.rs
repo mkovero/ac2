@@ -2,17 +2,18 @@
 //! the pane's scene offscreen and the PNG on disk.
 
 use super::*;
+use crate::harness::R;
 
 /// The focused transfer pane written where the prompt says: twice the plot's on-screen
 /// pixels (the harness draws at 1 px per point), opaque, and a picture rather than a
 /// blank plate; the toast names the file and its size.
 #[test]
-fn the_focused_pane_exports_as_png() {
+fn the_focused_pane_exports_as_png() -> R {
     if !have_gpu("the_focused_pane_exports_as_png") {
-        return;
+        return Ok(());
     }
-    let rig = common::Rig::start();
-    let mut h = harness(options(Some(&rig)));
+    let rig = Rig::start()?;
+    let mut h = harness(options(&rig));
     step_until(&mut h, "live frames", live);
     settle(&mut h, 3);
     let pane = h.state().state.layout.focus;
@@ -37,7 +38,7 @@ fn the_focused_pane_exports_as_png() {
     assert!(p.text.starts_with("~/ac2-exports/"), "{}", p.text);
     assert!(p.text.ends_with(".png"), "{}", p.text);
 
-    let dir = tempfile::tempdir().expect("temp dir");
+    let dir = tempfile::tempdir()?;
     let path = dir.path().join("report").join("transfer.png");
     if let Overlay::Prompt(p) = &mut h.state_mut().state.overlay {
         p.text = path.display().to_string();
@@ -73,15 +74,10 @@ fn the_focused_pane_exports_as_png() {
         )
     );
 
-    let file = std::fs::File::open(&path).expect("the PNG written");
-    let mut reader = png::Decoder::new(std::io::BufReader::new(file))
-        .read_info()
-        .expect("a PNG");
-    let mut buf = vec![0; reader.output_buffer_size().expect("size")];
-    let info = reader.next_frame(&mut buf).expect("decoded");
-    assert_eq!([info.width, info.height], want);
-    assert_eq!(info.color_type, png::ColorType::Rgba);
-    let px = &buf[..info.buffer_size()];
+    // RGBA8, or the load refuses it.
+    let img = ac2_testkit::image::Image::load_png(&path)?;
+    assert_eq!([img.width(), img.height()], want);
+    let px = img.rgba();
     assert!(px.chunks(4).all(|p| p[3] == 255), "opaque");
     let colours: std::collections::HashSet<&[u8]> = px.chunks(4).collect();
     assert!(
@@ -89,4 +85,5 @@ fn the_focused_pane_exports_as_png() {
         "curves, grid and text drawn: {} colours",
         colours.len()
     );
+    Ok(())
 }

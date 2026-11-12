@@ -3,11 +3,11 @@
 //! daemon restarted. Only an operator action brings a measurement's own panes: the
 //! selection falling back to another measurement while the shown one is gone must not.
 
-use super::harness::{DEADLINE, Driver, NAME, R};
-use ac2_client::{Client, ClientConfig, Endpoints};
+use super::harness::{Cli, DEADLINE, Driver, NAME, R};
+use ac2_client::{ClientConfig, Endpoints};
+use ac2_proto::Command;
 use ac2_proto::model::{MeasConfig, MeasKind, OwnedTraces};
 use ac2_proto::units::MeasId;
-use ac2_proto::{Command, ReplyBody};
 use ac2_ui::forms::FormKind;
 use ac2_ui::prefs::{PanePrefs, PanesPrefs, UiPrefs};
 use ac2_ui::sim::{demo_measurement, demo_session};
@@ -46,28 +46,6 @@ fn daemon(dir: &Path, ep: &Endpoints, restore: bool) -> R<(ac2d::Handle, Endpoin
         data: handle.data_endpoint().to_owned(),
     };
     Ok((handle, ep))
-}
-
-/// Commands as `ac2` sends them: a client of its own.
-struct Cli {
-    rt: tokio::runtime::Runtime,
-    c: Client,
-}
-
-impl Cli {
-    fn connect(ep: &Endpoints) -> R<Self> {
-        let rt = tokio::runtime::Runtime::new()?;
-        let c = rt.block_on(async {
-            let c = Client::connect(ClientConfig::new(ep.clone(), "ac2-ui e2e cli")).await?;
-            c.wait_synced(Duration::from_secs(10)).await?;
-            Ok::<_, Box<dyn std::error::Error>>(c)
-        })?;
-        Ok(Self { rt, c })
-    }
-
-    fn call(&self, cmd: Command) -> R<ReplyBody> {
-        Ok(self.rt.block_on(self.c.call(cmd))?)
-    }
 }
 
 /// The kiosk's preferences: one SPL pane on `FOH SPL`, full screen.

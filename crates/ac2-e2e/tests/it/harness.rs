@@ -446,6 +446,60 @@ pub fn sweep_from_the_dialog(d: &mut Driver) -> R<ac2_proto::units::TraceId> {
         .ok_or_else(|| "the new sweep is not selected".into())
 }
 
+/// Commands as `ac2` sends them: a client of its own.
+pub struct Cli {
+    rt: tokio::runtime::Runtime,
+    c: ac2_client::Client,
+}
+
+impl Cli {
+    pub fn connect(ep: &ac2_client::Endpoints) -> R<Self> {
+        let rt = tokio::runtime::Runtime::new()?;
+        let c = rt.block_on(async {
+            let config = ClientConfig::new(ep.clone(), "ac2-ui e2e cli");
+            let c = ac2_client::Client::connect(config).await?;
+            c.wait_synced(Duration::from_secs(10)).await?;
+            Ok::<_, Box<dyn std::error::Error>>(c)
+        })?;
+        Ok(Self { rt, c })
+    }
+
+    pub fn call(&self, cmd: ac2_proto::Command) -> R<ac2_proto::ReplyBody> {
+        Ok(self.rt.block_on(self.c.call(cmd))?)
+    }
+
+    /// The id the daemon knows this client by.
+    pub fn client_id(&self) -> ac2_proto::units::ClientId {
+        self.c.client_id()
+    }
+
+    /// The stimulus lease taken and the generator set to `desired`; held (refreshed in the
+    /// background) until the lease is dropped.
+    pub fn lease(
+        &self,
+        desired: ac2_proto::model::GeneratorDesired,
+    ) -> R<ac2_client::StimulusLease> {
+        self.rt.block_on(async {
+            let lease = self
+                .c
+                .acquire_lease(false, ac2_client::OnDrop::StopAndRelease)
+                .await?;
+            lease.set(desired).await?;
+            Ok(lease)
+        })
+    }
+
+    /// `f` run to its end on this client's runtime (a lease's own calls).
+    pub fn block_on<F: std::future::Future>(&self, f: F) -> F::Output {
+        self.rt.block_on(f)
+    }
+
+    /// The daemon's state as this client mirrors it.
+    pub fn state(&self) -> Option<std::sync::Arc<ac2_proto::model::State>> {
+        self.c.view().state.clone()
+    }
+}
+
 /// The text labels of a scene.
 pub fn scene_texts(s: &ac2_scene::primitives::Scene) -> Vec<String> {
     s.layers
