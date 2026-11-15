@@ -27,7 +27,8 @@ what ac2 learned on it.
   Position (2026-10-13): MM1 at 56 cm from the Genelec on its tweeter axis, 90° grazing.
 - **Analog Discovery 2** (used 2026-10-12, removed after; plug it back for an electrical calibration): scope 1+/1- across in 1's hot/cold through 10 µF 100 V electrolytics (+ to the XLR; phantom is on, so the ±2.5 V range needs the AC coupling). Reads the mic's loaded voltage for electrical calibrations: 1 kHz at −50 dBFS on out 1 → ≈0.39 mV. Host setup (udev, Digilent runtime, `~/ad2/` scripts) in `~/src/sys/pupu.md`.
 - **Emission ceilings:** −40 dBFS standing, **−50 dBFS on anything that drives the speaker**.
-- **Baseline check:** 1 kHz at −60 dBFS on out 5 only → in 7 ≈ −65.8 dBTP (ppm), out 6 → in 8
+- **Baseline check:** 1 kHz at −60 dBFS on out 5 only → in 7 ≈ −59.8 dBTP (ppm) since 2026-11-15
+  (−65.8 before: the rear line inputs were at Lo Gain, see *FF400 line levels*), out 6 → in 8
   the same, other inputs at their floor (2026-10-28; before that out 2 → in 2 −57.7 dBFS); mic room noise ≈ −72 dBFS, with occasional 60–200 Hz
   rumble bursts up to ≈ −53 dBFS.
 - **Network:** ufw active (operator approved): `47820/tcp`, `47821/tcp` and `5353/udp` allowed
@@ -301,7 +302,7 @@ crosstalk elsewhere below −118 dBFS except the Xone's own L/R (−68 dB):
 | 1 | nothing since 2026-10-28 (was the Genelec) | — | |
 | 2 | Genelec 1083 since 2026-10-28 (was in 2, loopback reference: −47.6 dBFS, +2.4 dB) | — | |
 | 3, 4 | nothing | — | |
-| 5 | in 7 (loopback reference since 2026-10-28; −60 dBFS sine → −65.8 dBTP ppm) | | |
+| 5 | in 7 (loopback reference since 2026-10-28; −60 dBFS sine → −59.8 dBTP ppm, −65.8 before 2026-11-15) | | |
 | 6 | in 8 (second loopback; the same) | | |
 
 The FF400's jacks: ins 1–4 on the front, 5–8 on the back. In silence ins 5/6 hold the Xone's
@@ -313,6 +314,15 @@ jack labels; JACK's numbering, found with a −60 dBFS tone per output, is the o
 read their floor, no Xone signal. In 1 is the MM1, in 2 the Behringer "Vilppu behringer #3" (both
 phantom, mic gain 20, written by `ff400-recover` after a reset); ins 3–6 are empty. Session:
 `session open --backend jack --in 1-8 --outputs 6 --loopback-out 5 --loopback-in 7 --mic "1=MM1 34804" --mic "2=Vilppu behringer #3"`.
+
+**FF400 line levels (measured 2026-11-15).** The driver's `line-input-level` labels are swapped:
+item 0 "Low" is the real +4 dBu (0 dBFS = +13 dBu), item 1 "-10dBV" is +4.2 dBu, item 2 "+4dBu" is
+Lo Gain (+19 dBu); the output items are labelled right. `ff400-recover` (sys repo) writes item 0
+since then. Until that day the rear inputs ran at Lo Gain, so every rear-loop reading before it is
+6 dB low. Rear loops (out 5 → in 7, out 6 → in 8) at the real +4/+4: −0.2 dB, flat −0.13…0 dB
+20 Hz–20 kHz, THD 0.0002–0.002 % from −40 to −1 dBFS, rear-input floor −113 dBFS rms
+(20 Hz–20 kHz) at every setting, so ≈ −100 dBu at +4 and ≈ −108 dBu at −10 dBV; the line out's idle
+noise is ≈ −100.5 dBu. Captures and scripts: pupu `~/ac2-test/ff400-loop-20261115/`.
 
 **An FF400 reset or unplug recovers by itself** (verified 2026-10-17: a quick and a ~22 s
 unplug, audio back 22 s / 37 s after the cut). ac2's part (`docs/design/audio-recovery.md`):
