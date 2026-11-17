@@ -11,19 +11,10 @@ publish.workspace = true
 [lints]
 workspace = true
 
-[features]
-# An in-process fake daemon (two ROUTERs built from ac2-proto + ac2-zmq) for tests of
-# ac2-cli, ac2-ui and ac2-e2e. Never used by a shipping binary. This crate's own tests run
-# against the real daemon (`ac2d` tests `client_*`); its dev-dependency on itself only keeps
-# the fake built and linted here.
-test-support = ["dep:ac2-traces", "dep:ac2-core"]
-
 [dependencies]
 ac2-archive = { path = "../ac2-archive" }
-ac2-core = { path = "../ac2-core", optional = true }
 ac2-paths = { path = "../ac2-paths" }
 ac2-proto = { path = "../ac2-proto" }
-ac2-traces = { path = "../ac2-traces", optional = true }
 ac2-zmq = { path = "../ac2-zmq" }
 tokio = { workspace = true, features = ["rt", "sync", "time", "macros", "net"] }
 thiserror = { workspace = true }
@@ -32,6 +23,5 @@ getrandom = { workspace = true }
 
 [dev-dependencies]
 ac2-proto = { path = "../ac2-proto", features = ["samples"] }
-ac2-client = { path = ".", features = ["test-support"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
 tempfile = { workspace = true }

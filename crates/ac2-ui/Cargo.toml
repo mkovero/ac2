@@ -50,13 +50,12 @@ windows-sys = { workspace = true, features = ["Win32_Media"] }
 
 [dev-dependencies]
 ac2-proto = { path = "../ac2-proto", features = ["samples"] }
-ac2-client = { path = "../ac2-client", features = ["test-support"] }
-# Test oracle only: the rig publishes curves smoothed as the daemon would. The app itself
-# never links the DSP (tests/it/no_dsp.rs checks the normal and build edges); the fake
-# daemon's band log rows are ac2-traces'.
+ac2-client = { path = "../ac2-client" }
+# Test oracle only: the goniometer's landing intensity as the daemon computes it. The app
+# itself never links the DSP (tests/it/no_dsp.rs checks the normal and build edges).
 ac2-core = { path = "../ac2-core" }
+# Unit tests write impulse-response files as an export would (`ir_import_dialog.rs`).
 ac2-traces = { path = "../ac2-traces" }
-num-complex = { workspace = true }
 # The recorded daemon answers in fixtures/daemon/ (tests/it/recorded.rs).
 serde_json = { workspace = true }
 egui_kittest = { version = "0.36.2", features = ["eframe", "snapshot", "wgpu"] }

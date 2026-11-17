@@ -1,5 +1,5 @@
 //! A generated target curve's columns (`trace.target`), from its parameters: the daemon
-//! stores them as a target trace; the client's fake daemon makes the same.
+//! stores them as a target trace.
 
 use ac2_core::target::{iso226, lf_shelf_db, tilt_db};
 use ac2_proto::GridDef;

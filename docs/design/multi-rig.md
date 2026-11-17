@@ -100,6 +100,8 @@ tests can start two distinguishable fake daemons (its `Welcome` is built in
 `fake_session.rs`); `ConnEvent::Connected` and
 `ConnState::Connected` carry them.
 
+*The fake daemon named here (`ac2_client::fake`) was a hand-written test aid since removed: these tests run against the real `ac2d` on the simulated rig.*
+
 **Ids are per daemon.** `MeasId`, `TraceId`, input and pair channel numbers and frame topics collide across rigs,
 and the app keys a dozen maps by them today (bar origins, traces, edits, peaks,
 spectrographs, SPL holds, selection…). Every such key becomes `(RigId, MeasId)` (or lives
@@ -429,6 +431,8 @@ until it answers or is closed. Names come from the rig and are display only
    start two fake daemons (`FakeDaemon::start` is per instance) for connect, reconnect and
    the stop; a session saved with `ThisRig` panes loads right on either tab, and a `Rig` pin
    resolves by id after the pinned daemon reconnects on another address.
+
+   *The fake daemon named here was a hand-written test aid since removed: these tests run against the real `ac2d` on the simulated rig.*
 2. **Clock reporting and stimulus chips** — daemon state gains the clock lines of §4
    (`PROTO_VERSION` bump), Connection page shows them, `ac2 status` prints them; other-rig
    stimulus chips in the top bar.

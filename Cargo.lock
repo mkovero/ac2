@@ -59,11 +59,8 @@ name = "ac2-client"
 version = "0.0.0"
 dependencies = [
  "ac2-archive",
- "ac2-client",
- "ac2-core",
  "ac2-paths",
  "ac2-proto",
- "ac2-traces",
  "ac2-zmq",
  "getrandom 0.3.4",
  "tempfile",
@@ -100,7 +97,6 @@ version = "0.0.0"
 dependencies = [
  "ac2-audio",
  "ac2-client",
- "ac2-core",
  "ac2-plot",
  "ac2-proto",
  "ac2-scene",
@@ -111,7 +107,6 @@ dependencies = [
  "ac2d",
  "eframe",
  "egui_kittest",
- "num-complex",
  "serde",
  "serde_json",
  "tempfile",
@@ -236,7 +231,6 @@ dependencies = [
  "eframe",
  "egui-wgpu",
  "egui_kittest",
- "num-complex",
  "png",
  "serde",
  "serde_json",

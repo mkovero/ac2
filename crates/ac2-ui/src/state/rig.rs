@@ -68,7 +68,7 @@ pub struct RigState {
     /// touches it: the app sends this rig's requests over it and drains its events.
     pub link: Option<crate::conn::Conn>,
     /// Where the app reached this rig, remembered with it (`None`: not to be remembered, as
-    /// a fake daemon, which is another rig each run).
+    /// a daemon that is another rig each run).
     pub addr: Option<crate::prefs::RigAddr>,
     /// The host the link reaches the daemon at over the network; `None` on a local link.
     pub daemon_addr: Option<String>,

@@ -1,5 +1,5 @@
-//! Trace metadata rules shared by the daemon and the fake daemon: fresh edits, colours,
-//! slots and what a lock protects.
+//! Trace metadata rules the daemon applies: fresh edits, colours, slots and what a lock
+//! protects.
 
 use ac2_proto::model::{Polarity, Rgb, TraceEdit, TraceMeta, TraceOwner};
 use ac2_proto::units::{Db, Seconds, TraceId};

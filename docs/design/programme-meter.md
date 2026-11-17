@@ -1631,6 +1631,8 @@ had no plate*. A pair's Meters view keeps the correlation chip under its bars.
   `a_mic_pair_on_short_loudness_reads_true_peak`) and not named `slow_…`: the fake's
   meters answer at once, so it waits on no real Leq window and runs in 0.4 s. The line-pair
   e2e is `programme_pane_of_a_pair`, which reads both panes' scene text.
+  *The fake daemon named here was a hand-written test aid since removed: these tests run
+  against the real `ac2d` on the simulated rig.*
 - The header-by-ballistic rule is pinned by the scene's `inputs_header` test rather than an
   egui snapshot per ballistic; the snapshots show the true-peak header.
 

@@ -27,9 +27,6 @@ pub mod mirror;
 pub mod sessions;
 pub mod spl_log;
 
-#[cfg(feature = "test-support")]
-pub mod fake;
-
 pub use client::{Client, ClientConfig, DEAD_AFTER, Retry, body_name};
 pub use data::{Arrival, Latest, TopicFrame, frame_age};
 pub use endpoint::{Endpoints, RemoteAddr};

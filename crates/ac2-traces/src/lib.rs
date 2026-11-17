@@ -2,8 +2,7 @@
 //! published frame, averaging, math channels' combinations, the text formats traces are imported from and
 //! exported to, and the session directory format.
 //!
-//! The daemon owns the trace store and calls into this crate; the client's fake daemon uses
-//! the same code so tests against it see real numbers. Display edits (offset, polarity,
+//! The daemon owns the trace store and calls into this crate. Display edits (offset, polarity,
 //! nudge, smoothing, a mic curve applied after capture) are never baked into stored
 //! columns: columns stay as measured, and the display smoothing and mic curve are applied
 //! only when a trace's data is served ([`smooth`], [`mic`]).
