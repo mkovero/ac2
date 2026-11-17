@@ -160,3 +160,92 @@ fn a_release_under_a_window_ends_the_pane_hold() -> R {
     assert!(!h.state().state.level_held(p), "released under the window");
     Ok(())
 }
+
+/// What the stage view shows besides the curves: every widget of the window (role and text)
+/// and the transfer plot's legend and banners, digits masked (live readouts move).
+fn drawn_texts(h: &Harness<'_, App>) -> Vec<String> {
+    use egui_kittest::kittest::{By, NodeT as _, Queryable as _};
+    let mask = |l: &str| -> String {
+        l.chars()
+            .map(|c| if c.is_ascii_digit() { '#' } else { c })
+            .collect()
+    };
+    let mut t: Vec<String> = h
+        .query_all(By::new().predicate(|_| true))
+        .map(|n| {
+            let n = n.accesskit_node();
+            // A label widget carries its text as the node's value; others as its label.
+            let text = n.label().or_else(|| n.value()).unwrap_or_default();
+            format!("widget {:?} {}", n.role(), mask(&text))
+        })
+        .collect();
+    let s = &h.state().state;
+    let tf = ac2_ui::scenes::transfer(
+        s,
+        crate::common::pane(s, PaneKind::Transfer),
+        &ac2_scene::theme::Theme::dark(),
+        ac2_scene::primitives::Viewport::new(1280.0, 800.0),
+        ac2_ui::scenes::Now {
+            instant: Instant::now(),
+            wall: ac2_proto::units::WallNs(0),
+        },
+    );
+    t.extend(
+        tf.legend
+            .iter()
+            .map(|e| format!("legend {}", mask(&e.text))),
+    );
+    t.extend(
+        tf.banners
+            .iter()
+            .map(|b| format!("banner {}", mask(&b.text))),
+    );
+    t.sort();
+    t
+}
+
+/// Full screen is the pane alone: with the stimulus armed and then playing on the daemon,
+/// the stage view draws the same texts as with it off (no badge, chip or strip joins it);
+/// Esc still stops the stimulus from there, the stage view staying.
+#[test]
+fn the_stage_view_stays_the_pane_while_firing() -> R {
+    if !have_gpu("the_stage_view_stays_the_pane_while_firing") {
+        return Ok(());
+    }
+    let rig = Rig::start()?;
+    let mut h = harness(options(&rig));
+    step_until(&mut h, "live frames", live);
+    h.state_mut().state.rig.stimulus.level = Some(ac2_proto::units::Dbfs(-24.0));
+    h.key_press(Key::W);
+    h.key_press(Key::W);
+    step_until(&mut h, "the stage view", |a| {
+        a.state.stage_view() && a.state.layout.focus_kind() == PaneKind::Transfer
+    });
+    let quiet = |h: &mut Harness<'_, App>| {
+        h.state_mut().state.toasts.list.clear();
+        settle(h, 3);
+        drawn_texts(h)
+    };
+    let off = quiet(&mut h);
+    assert!(
+        off.iter().any(|t| t.starts_with("legend Main L")),
+        "the pane's legend among {off:?}"
+    );
+    h.key_press(Key::Space);
+    step_until(&mut h, "armed", |a| {
+        a.state.daemon().is_some_and(|s| s.generator.armed)
+    });
+    assert_eq!(quiet(&mut h), off, "armed");
+    h.key_press(Key::Enter);
+    step_until(&mut h, "firing", |a| {
+        a.state.daemon().is_some_and(|s| s.generator.firing) && a.state.stage_view()
+    });
+    assert_eq!(quiet(&mut h), off, "firing");
+    h.key_press(Key::Escape);
+    step_until(&mut h, "stopped, the stage view staying", |a| {
+        a.state.daemon().is_some_and(|s| {
+            !s.generator.firing && !s.generator.armed && s.generator.owner.is_none()
+        }) && a.state.stage_view()
+    });
+    Ok(())
+}
