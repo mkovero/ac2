@@ -1,7 +1,7 @@
 //! The session dialog and the Sessions dialog against a real daemon: a mic named, the
 //! loopback detected, kinds and a pair; Save as by name.
 
-use crate::harness::{Driver, R, connected, measuring};
+use crate::harness::{Driver, NAME, R, connected, measure_from_empty};
 use ac2_ui::forms::FormKind;
 use ac2_ui::keys::CommandId;
 use ac2_ui::state::{AppState, Msg, Overlay};
@@ -129,7 +129,13 @@ fn a_mic_named_and_the_loopback_detected_from_the_session_dialog() -> R {
 fn sessions_dialog_save_as() -> R {
     use ac2_proto::model::SessionOrigin;
     use ac2_ui::sessions::Page;
-    let (_daemon, mut d) = measuring()?;
+    // A session directory of the test's own: a save never lands in the operator's sessions.
+    let dir = tempfile::tempdir()?;
+    let daemon = ac2_e2e::sim_daemon_with(ac2_e2e::Setup::Empty, |c| {
+        c.session_dir = dir.path().join("sessions");
+    })?;
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    measure_from_empty(&mut d)?;
     d.key("Alt+S");
     d.until("the dialog, listed", |s| {
         s.sessions_dialog().is_some_and(|x| x.daemon.is_some())
