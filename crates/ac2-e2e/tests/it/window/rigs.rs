@@ -372,3 +372,169 @@ fn a_pin_finds_its_rig_on_another_address() -> R {
     assert!(h.query_by_label(&away).is_none(), "kettu's pane is back");
     Ok(())
 }
+
+/// Connect… adds kettu beside pupu and shows it; pupu stays linked. The drop-down goes back
+/// to pupu, kettu linked in the background, and lists both. Kettu is remembered by its
+/// name and id.
+#[test]
+fn a_second_rig_connects_and_the_drop_down_switches() -> R {
+    if !have_gpu("a_second_rig_connects_and_the_drop_down_switches") {
+        return Ok(());
+    }
+    let dir = tempfile::tempdir()?;
+    let pupu = named("pupu", &dir.path().join("pupu-id"))?;
+    let kettu = named("kettu", &dir.path().join("kettu-id"))?;
+    let (mut h, pupu_id) = on_pupu(&pupu, &dir.path().join("keys"));
+    let kettu_id = connect_kettu(&mut h, pupu_id, &kettu, Duration::from_secs(10));
+    assert_ne!(kettu_id, pupu_id);
+    assert!(connected(h.state(), pupu_id), "pupu keeps its link");
+    assert!(
+        h.state()
+            .state
+            .prefs
+            .rigs
+            .iter()
+            .any(|r| r.id == kettu_id && r.name == "kettu"),
+        "kettu remembered"
+    );
+
+    pick_first_rig(&mut h);
+    step_until(&mut h, "pupu shown", |a| {
+        a.state.active() == pupu_id && live(a)
+    });
+    assert!(
+        connected(h.state(), kettu_id),
+        "kettu keeps its link in the background"
+    );
+    // The drop-down lists both rigs by name.
+    open_rig_menu(&mut h);
+    settle(&mut h, 2);
+    for name in ["pupu", "kettu"] {
+        assert!(
+            h.query_all(egui_kittest::kittest::By::new().label_contains(name))
+                .next()
+                .is_some(),
+            "{name} in the drop-down"
+        );
+    }
+    h.key_press(Key::Escape);
+    step_until(&mut h, "the drop-down closed", |a| {
+        a.state.overlay == Overlay::None
+    });
+    Ok(())
+}
+
+/// Each rig armed in turn from the app, kettu fired: pupu shown, its top bar carries kettu's
+/// chip; Shift+Esc on pupu stops both daemons' stimulus, kettu's too.
+#[test]
+fn shift_esc_stops_every_rig() -> R {
+    if !have_gpu("shift_esc_stops_every_rig") {
+        return Ok(());
+    }
+    let dir = tempfile::tempdir()?;
+    let pupu = named("pupu", &dir.path().join("pupu-id"))?;
+    let kettu = named("kettu", &dir.path().join("kettu-id"))?;
+    let (mut h, pupu_id) = on_pupu(&pupu, &dir.path().join("keys"));
+    connect_kettu(&mut h, pupu_id, &kettu, Duration::from_secs(10));
+    let generator = |rig: &Rig| rig.cli.state().map(|s| s.generator.clone());
+    let arm = |h: &mut Harness<'_, App>, rig: &Rig| {
+        h.state_mut().state.rig.stimulus.level = Some(Dbfs(-24.0));
+        h.key_press(Key::Space);
+        step_until(h, "armed", |_| generator(rig).is_some_and(|g| g.armed));
+    };
+    arm(&mut h, &kettu);
+    h.key_press(Key::Enter);
+    step_until(&mut h, "kettu firing", |_| {
+        generator(&kettu).is_some_and(|g| g.firing)
+    });
+    pick_first_rig(&mut h);
+    step_until(&mut h, "pupu shown", |a| {
+        a.state.active() == pupu_id && live(a)
+    });
+    arm(&mut h, &pupu);
+    assert!(
+        generator(&kettu).is_some_and(|g| g.armed),
+        "kettu still armed"
+    );
+    // Kettu plays out of sight: the top bar says so beside pupu's own badge.
+    let chip = "▶ kettu −24 dBFS";
+    step_until(&mut h, "kettu's chip", |a| {
+        a.state
+            .live_elsewhere()
+            .iter()
+            .map(ac2_scene::stimulus::elsewhere_chip)
+            .any(|c| c == chip)
+    });
+    settle(&mut h, 2);
+    assert!(h.query_by_label(chip).is_some(), "the chip is drawn");
+    h.key_press_modifiers(Modifiers::SHIFT, Key::Escape);
+    let stopped =
+        |rig: &Rig| generator(rig).is_some_and(|g| !g.armed && !g.firing && g.owner.is_none());
+    step_until(&mut h, "both stopped", |_| {
+        stopped(&pupu) && stopped(&kettu)
+    });
+    Ok(())
+}
+
+/// Pupu shown; the list shows kettu's rows under kettu's heading, its spectrum by kettu's
+/// own name for it, and that row dragged onto a pane shows kettu's measurement there (not
+/// pupu's of the same id), titled with kettu's name, pupu still shown.
+#[test]
+fn another_rigs_measurement_dropped_into_a_pane() -> R {
+    use ac2_proto::model::MeasConfig;
+    if !have_gpu("another_rigs_measurement_dropped_into_a_pane") {
+        return Ok(());
+    }
+    let dir = tempfile::tempdir()?;
+    let pupu = named("pupu", &dir.path().join("pupu-id"))?;
+    let kettu = named("kettu", &dir.path().join("kettu-id"))?;
+    // Kettu's spectrum goes by another name than pupu's of the same id.
+    let m = kettu
+        .cli
+        .state()
+        .and_then(|s| s.measurements.iter().find(|m| m.id == MIC_FFT).cloned())
+        .ok_or("kettu's spectrum")?;
+    kettu.call(Command::MeasUpdate {
+        meas: MIC_FFT,
+        base: m.config_rev,
+        config: MeasConfig {
+            name: "Kettu FFT".into(),
+            ..m.config.clone()
+        },
+    })?;
+    let (mut h, pupu_id) = on_pupu(&pupu, &dir.path().join("keys"));
+    let kettu_id = connect_kettu(&mut h, pupu_id, &kettu, Duration::from_secs(10));
+    pick_first_rig(&mut h);
+    step_until(&mut h, "pupu shown", |a| {
+        a.state.active() == pupu_id && live(a)
+    });
+    let p = h.state().state.layout.focus;
+    step_until(&mut h, "kettu's rows listed", |a| {
+        a.state
+            .list_rows()
+            .iter()
+            .any(|(r, row)| *r == kettu_id && row.name.contains("Kettu FFT"))
+    });
+    settle(&mut h, 2);
+    // Each rig's heading over its rows, kettu's measurement by its own name.
+    for (what, label) in [("kettu's heading", "kettu"), ("its spectrum", "Kettu FFT")] {
+        assert!(
+            h.query_all(egui_kittest::kittest::By::new().label_contains(label))
+                .next()
+                .is_some(),
+            "{what}"
+        );
+    }
+    drop_kettus(&mut h, kettu_id, MIC_FFT, p);
+    assert_eq!(h.state().state.active(), pupu_id, "the rig shown stays");
+    let v = *h.state().state.layout.view(p).ok_or("pane")?;
+    assert_eq!((v.rig, v.meas), (PaneRig::Rig(kettu_id), Some(MIC_FFT)));
+    assert_eq!(v.kind, PaneKind::Spectrum);
+    settle(&mut h, 2);
+    assert!(
+        h.query_all_by_label_contains("kettu · ").next().is_some(),
+        "the pane's title names kettu"
+    );
+    assert!(connected(h.state(), kettu_id));
+    Ok(())
+}
