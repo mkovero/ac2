@@ -408,3 +408,56 @@ fn settings_name_an_output_route_the_stimulus_and_set_the_max_level() -> R {
     })?;
     Ok(())
 }
+
+/// Settings, then Alt+4, Alt+5 and Alt+6: the Recording, Display and Connection pages; the
+/// last asks the daemon what it serves, which a daemon on a local socket answers with its
+/// mode, and lists the page's actions only (no client keys on a local socket).
+#[test]
+fn settings_pages() -> R {
+    use ac2_proto::model::ServerMode;
+    use ac2_ui::settings::Page;
+    use ac2_ui::settings::{ConnLine, conn_lines};
+    let (_daemon, mut d) = super::harness::measuring()?;
+    d.key("Ctrl+P");
+    d.until("Audio I/O", |s| {
+        s.overlay
+            .settings()
+            .is_some_and(|x| x.page == Page::AudioIo && x.session.device_info().is_some())
+    })?;
+    for (key, page) in [
+        ("Alt+4", Page::Recording),
+        ("Alt+5", Page::Display),
+        ("Alt+6", Page::Connection),
+    ] {
+        d.key(key);
+        assert_eq!(d.st.overlay.settings().map(|x| x.page), Some(page), "{key}");
+    }
+    d.until("the daemon's answer", |s| {
+        s.overlay
+            .settings()
+            .is_some_and(|x| matches!(x.connection.server, Some(Ok(_))))
+    })?;
+    let page = &d.st.overlay.settings().ok_or("settings")?.connection;
+    let Some(Ok(server)) = &page.server else {
+        return Err("no answer".into());
+    };
+    assert!(
+        matches!(server.mode, ServerMode::Local { .. }),
+        "{:?}",
+        server.mode
+    );
+    assert_eq!(page.lines(), conn_lines(Some(server), false));
+    assert_eq!(
+        page.lines(),
+        [
+            ConnLine::Reconnect,
+            ConnLine::ConnectOther,
+            ConnLine::StartLocal,
+            ConnLine::StopOnQuit,
+        ]
+    );
+    assert!(page.error.is_none());
+    d.key("Escape");
+    assert_eq!(d.st.overlay, Overlay::None);
+    Ok(())
+}
