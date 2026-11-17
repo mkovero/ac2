@@ -12,6 +12,8 @@ pub use ac2_ui::sim::Setup;
 pub struct SimDaemon {
     endpoints: Endpoints,
     handle: Option<ac2d::Handle>,
+    /// The session directory it saves into unless `edit` gave it another; removed with it.
+    _sessions: tempfile::TempDir,
 }
 
 impl SimDaemon {
@@ -76,6 +78,10 @@ pub fn sim_daemon_with(
     let mut config = ac2d::DaemonConfig::new(std::sync::Arc::clone(&audio[0]), listen, -10.0);
     config.backends = audio;
     config.name = "Simulated rig".into();
+    // A test that saves a session must not leave it in the platform directory, where the
+    // next run (and the operator's own app) would find it.
+    let sessions = tempfile::tempdir()?;
+    config.session_dir = sessions.path().to_owned();
     edit(&mut config);
     let handle = ac2d::Daemon::start(config)?;
     let d = SimDaemon {
@@ -84,6 +90,7 @@ pub fn sim_daemon_with(
             data: handle.data_endpoint().to_owned(),
         },
         handle: Some(handle),
+        _sessions: sessions,
     };
     if setup == Setup::Demo {
         // Dropping `d` on failure shuts the daemon down again.

@@ -17,6 +17,8 @@ workspace = true
 ac2-client = { path = "../ac2-client" }
 ac2-ui = { path = "../ac2-ui" }
 ac2d = { path = "../ac2d" }
+# A simulated rig's session directory: never the platform one.
+tempfile = { workspace = true }
 
 [dev-dependencies]
 # A simulated rig of the test's own (`FakeConfig`), started as `ac2d --backend fake` would.
@@ -34,5 +36,4 @@ eframe = { version = "0.36.2", default-features = false, features = ["default_fo
 egui_kittest = { version = "0.36.2", features = ["eframe", "snapshot", "wgpu"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "sync", "time", "macros"] }
