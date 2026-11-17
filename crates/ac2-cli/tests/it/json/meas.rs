@@ -141,8 +141,9 @@ async fn delay_find_bands_ambiguity_and_refusal() -> R {
     );
 
     // Refused: seconds after the stimulus stopped, the reasons are typed in JSON and spelled
-    // out for people; nothing inserted.
-    drop(lease);
+    // out for people; nothing inserted. The stop is awaited: dropping the lease only queues
+    // it, and a stop that lands late in the audio below is "generator stopped" instead.
+    lease.end().await?;
     f.run_for(5.0).await?;
     let d = ok_json(
         &f,
