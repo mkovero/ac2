@@ -156,8 +156,7 @@ impl Control {
             );
             return;
         }
-        let client =
-            ClientId(peer.map_or_else(|| format!("local-{}", hex(routing_id)), |p| p.name));
+        let client = peer.map_or_else(|| ClientId::local(&hex(routing_id)), |p| ClientId(p.name));
         // Reserved before anything executes, the asynchronous branches below included: a
         // copy of a request still running waits for its reply rather than running it again.
         match self.dedup.admit(&client, req.id, routing_id, now) {

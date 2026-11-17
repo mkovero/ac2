@@ -6,7 +6,7 @@
 //! level, so the operator reads what will play before it plays.
 
 use ac2_proto::model::{OutputSetup, Signal};
-use ac2_proto::units::Dbfs;
+use ac2_proto::units::{ClientId, Dbfs};
 
 use crate::format;
 
@@ -194,6 +194,16 @@ pub struct Elsewhere {
     pub holder: Option<String>,
 }
 
+/// Who holds `rig`'s generator, for "held by …": a key's admitted name, or for a client
+/// on the rig's own host (whose id is only a routing tag) the words `an app on pupu`.
+pub fn holder(owner: &ClientId, rig: &str) -> String {
+    if owner.is_local() {
+        format!("an app on {rig}")
+    } else {
+        owner.0.clone()
+    }
+}
+
 /// The top bar's chip for `e`, beside the stop that stops every rig's: `▶ pupu −20 dBFS`,
 /// `pupu armed −20 dBFS`, `▶ pupu −20 dBFS · held by alice`.
 pub fn elsewhere_chip(e: &Elsewhere) -> String {
@@ -221,6 +231,15 @@ pub fn stop_every_rig_tip(stop: &str) -> String {
 mod tests {
     use super::*;
     use ac2_proto::units::Hz;
+
+    #[test]
+    fn a_holder_on_the_rigs_own_host_is_named_by_the_rig() {
+        assert_eq!(
+            holder(&ClientId::local("006b8b4567"), "pupu"),
+            "an app on pupu"
+        );
+        assert_eq!(holder(&ClientId("ketunkolo".into()), "pupu"), "ketunkolo");
+    }
 
     #[test]
     fn a_chip_names_the_rig_its_state_and_level() {

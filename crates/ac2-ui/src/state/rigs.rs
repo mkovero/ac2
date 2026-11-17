@@ -139,7 +139,7 @@ impl AppState {
                     holder: g
                         .and_then(|g| g.owner.as_ref())
                         .filter(|o| Some(*o) != r.client_id())
-                        .map(|o| o.0.clone()),
+                        .map(|o| ac2_scene::stimulus::holder(o, &self.rig_label(r))),
                 })
             })
             .collect()

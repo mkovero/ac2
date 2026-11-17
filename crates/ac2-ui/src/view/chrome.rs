@@ -582,7 +582,7 @@ fn stimulus(app: &App, ch: &Chrome) -> Vec<Item> {
     let other = generator
         .and_then(|g| g.owner.as_ref())
         .filter(|_| !mine)
-        .map(|o| o.0.clone());
+        .map(|o| ac2_scene::stimulus::holder(o, &st.rig_name(st.active())));
     // The mirrored generator is the truth; the local phase only adds "requested".
     // A lit badge is a filled chip: banner fills with their own text colour.
     let firing = (ch.fault_fill, ch.on_fault_fill);
