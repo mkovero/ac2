@@ -15,6 +15,7 @@ pub mod clock_rate;
 pub mod delay;
 pub mod eq;
 pub mod generator;
+pub mod harmonics;
 pub mod ir_response;
 pub mod ir_view;
 pub mod leq;

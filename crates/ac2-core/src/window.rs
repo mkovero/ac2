@@ -2,7 +2,7 @@
 //! points of a symmetric window of length N + 1, which is what makes overlapped segments sum
 //! correctly and keeps one convention across every analysis (design Q4).
 
-use std::f64::consts::TAU;
+use std::f64::consts::{PI, TAU};
 
 /// Window shapes offered by ac2.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -44,6 +44,50 @@ impl Window {
                     .sum()
             })
             .collect()
+    }
+
+    /// Half-width of the main lobe in bins: a tone `d` bins from a bin centre has its first
+    /// spectral nulls `lobe_half_width()` bins either side of it. A sum of K cosine terms
+    /// (orders 0..K−1) is K pairs of Dirichlet kernels at offsets 0, ±1, … ±(K−1) bins, each
+    /// with nulls on every other integer offset, so the first offset where all of them are
+    /// in a null is K.
+    pub fn lobe_half_width(self) -> usize {
+        self.cosine_terms().len()
+    }
+
+    /// |W(ν)|², the squared magnitude of the length-`n` window's transform `ν` bins from its
+    /// centre (ν need not be an integer): what a unit complex exponential `ν` bins away from
+    /// a bin leaves in that bin. Summed over all `n` integer steps of ν it is `n·Σw²`
+    /// (Parseval).
+    ///
+    /// W(ν) = Σ_m (−1)^m (a_m/2)·[D(ν−m) + D(ν+m)] with the Dirichlet kernel
+    /// D(x) = e^{−iπx(n−1)/n}·sin(πx)/sin(πx/n). The offsets x = ν∓m differ by integers, so
+    /// sin(πx) = (−1)^m·sin(πν) and the phase is a common factor times (−1)^m·e^{∓iπm/n};
+    /// what remains inside the sum is e^{∓iπm/n}/sin(π(ν∓m)/n) with alternating sign.
+    pub fn transform_power(self, nu: f64, n: usize) -> f64 {
+        let terms = self.cosine_terms();
+        let nf = n as f64;
+        let nearest = nu.round();
+        // On an integer offset every kernel is either at its peak (n) or in a null.
+        if (nu - nearest).abs() < 1e-12 {
+            let m = (nearest.rem_euclid(nf)).min(nf - nearest.rem_euclid(nf)) as usize;
+            return match terms.get(m) {
+                Some(a) if m == 0 => (a * nf).powi(2),
+                Some(a) => (a * nf / 2.0).powi(2),
+                None => 0.0,
+            };
+        }
+        let (mut re, mut im) = (0.0, 0.0);
+        for (m, a) in terms.iter().enumerate() {
+            let sign = if m % 2 == 0 { 1.0 } else { -1.0 };
+            let mf = m as f64;
+            let below = 1.0 / (PI * (nu - mf) / nf).sin();
+            let above = 1.0 / (PI * (nu + mf) / nf).sin();
+            let (sin_m, cos_m) = (PI * mf / nf).sin_cos();
+            re += sign * a / 2.0 * cos_m * (below + above);
+            im += sign * a / 2.0 * sin_m * (above - below);
+        }
+        (PI * nu).sin().powi(2) * (re * re + im * im)
     }
 
     /// Worst-case amplitude loss for a tone halfway between bins, in dB (positive number).
@@ -130,6 +174,48 @@ mod tests {
                 (loss_db - stated).abs() < 0.01,
                 "{win:?}: measured {loss_db:.4} dB, stated {stated} dB"
             );
+        }
+    }
+
+    /// The closed-form transform against the defining sum, on and between bins, and its
+    /// Parseval total over the n bins.
+    #[test]
+    fn transform_power_matches_the_direct_sum() {
+        let n = 64;
+        for win in [
+            Window::Hann,
+            Window::BlackmanHarris4,
+            Window::FlatTop,
+            Window::Rectangular,
+        ] {
+            let w = win.coefficients(n);
+            let direct = |nu: f64| {
+                let (re, im) = w.iter().enumerate().fold((0.0, 0.0), |(re, im), (j, v)| {
+                    let ph = TAU * nu * j as f64 / n as f64;
+                    (re + v * ph.cos(), im - v * ph.sin())
+                });
+                re * re + im * im
+            };
+            let peak = direct(0.0);
+            for nu in [0.0, 0.25, -0.5, 1.0, 2.0, 3.3, -4.0, 5.0, 7.5, -20.25, 31.9] {
+                let (got, want) = (win.transform_power(nu, n), direct(nu));
+                assert!(
+                    (got - want).abs() < 1e-12 * peak,
+                    "{win:?} at {nu}: {got} vs {want}"
+                );
+            }
+            let s2 = WindowGains::of(&w).sum_sq;
+            for d in [0.0, 0.3, 0.5] {
+                let total: f64 = (0..n).map(|k| win.transform_power(k as f64 - d, n)).sum();
+                assert!(
+                    (total / (n as f64 * s2) - 1.0).abs() < 1e-12,
+                    "{win:?} offset {d}"
+                );
+            }
+            // The lobe edge is a null for a tone on a bin.
+            let k = win.lobe_half_width() as f64;
+            assert!(direct(k) < 1e-20 * peak, "{win:?} null at {k}");
+            assert!(direct(k - 0.5) > 1e-12 * peak, "{win:?} inside the lobe");
         }
     }
 

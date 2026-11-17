@@ -139,6 +139,21 @@ impl<'a> PowerSpectrum<'a> {
         k as f64 * self.fs / self.n as f64
     }
 
+    /// Sample rate in Hz.
+    pub fn fs(&self) -> f64 {
+        self.fs
+    }
+
+    /// FFT length N.
+    pub fn n(&self) -> usize {
+        self.n
+    }
+
+    /// Window gains S₁, S₂ of the analyzer that produced the spectrum.
+    pub fn gains(&self) -> WindowGains {
+        self.gains
+    }
+
     /// Folded power F_k = c_k·|X_k|² (unnormalised).
     pub fn folded(&self) -> &'a [f64] {
         self.folded
