@@ -247,6 +247,34 @@ pub fn connected() -> R<(SimDaemon, Driver)> {
     Ok((daemon, d))
 }
 
+/// The app without its window on the window tests' rig (session, four measurements running),
+/// its panes given the rig's measurements by name as the operator dropped them; once every
+/// pane holds a frame.
+pub fn on_rig(rig: &crate::window::Rig) -> R<Driver> {
+    let mut d = Driver::connect(rig.daemon.client_config(NAME), &rig.daemon.describe())?;
+    let mut p = crate::common::grid_ui_prefs();
+    p.layout.panes = p.layout.panes.map(crate::common::fake_rig_picks);
+    d.st.set_prefs(p);
+    d.until("the rig live", crate::window::rig_live)?;
+    Ok(d)
+}
+
+/// Pink noise on out 1 at −20 dBFS from a client of its own, playing until the lease is
+/// dropped: the rig's paths carry something to measure (the simulated rig only).
+pub fn noise(cli: &Cli) -> R<ac2_client::StimulusLease> {
+    use ac2_proto::model::{GeneratorDesired, GeneratorSettings, Signal};
+    cli.lease(GeneratorDesired {
+        settings: GeneratorSettings {
+            signal: Signal::Pink,
+            level: ac2_proto::units::Dbfs(-20.0),
+            band: None,
+            outputs: vec![0],
+        },
+        armed: true,
+        firing: true,
+    })
+}
+
 /// [`connected`], then a session opened and a measurement made and started, all from the
 /// app.
 pub fn measuring() -> R<(SimDaemon, Driver)> {

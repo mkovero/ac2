@@ -267,7 +267,11 @@ pub fn step_until(h: &mut Harness<'_, App>, what: &str, cond: impl Fn(&App) -> b
 /// spectrum and SPL panes held (with its grid). The impulse response is left out: the daemon
 /// sends it once the stimulus has given it something to show.
 pub fn live(app: &App) -> bool {
-    let st = &app.state;
+    rig_live(&app.state)
+}
+
+/// [`live`] for the app's state alone (the app without its window).
+pub fn rig_live(st: &ac2_ui::state::AppState) -> bool {
     let synced = st.rig.mirror.as_ref().is_some_and(|m| m.synced());
     let have = |m: MeasId, s: Stream| {
         st.rig.data.as_ref().is_some_and(|d| {

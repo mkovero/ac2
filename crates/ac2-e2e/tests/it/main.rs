@@ -31,6 +31,7 @@ mod spatial;
 mod spl;
 mod stimulus;
 mod sweep;
+mod traces;
 mod transfer;
 mod walk;
 mod window;
