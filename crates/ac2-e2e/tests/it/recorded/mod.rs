@@ -21,6 +21,8 @@ use serde_json::Value;
 
 use crate::harness::{Cli, R};
 
+mod scenes;
+
 fn dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/daemon")
 }
@@ -42,6 +44,33 @@ fn pin_clock(mut v: Value) -> Value {
     v
 }
 
+/// Wall-clock instants (`…_at`, `since`, `at`: nanoseconds since 1970) as how long before
+/// `now` they were, `"now-<ns>"`: the app reads them against its own clock (a session open
+/// for 3 h, calibrated yesterday), so a test rebases them on its own now
+/// (`ac2-ui/tests/it/recorded.rs`).
+fn pin_times(mut v: Value, now: i128) -> Value {
+    fn walk(v: &mut Value, now: i128) {
+        match v {
+            Value::Object(m) => {
+                for (k, x) in m.iter_mut() {
+                    let instant = k.ends_with("_at") || k == "since" || k == "at";
+                    match x.as_u64() {
+                        // Zero is "never" (a fresh rig's unset instants), not 1970.
+                        Some(t) if instant && t > 0 => {
+                            *x = Value::String(format!("now-{}", now - i128::from(t)));
+                        }
+                        _ => walk(x, now),
+                    }
+                }
+            }
+            Value::Array(a) => a.iter_mut().for_each(|x| walk(x, now)),
+            _ => {}
+        }
+    }
+    walk(&mut v, now);
+    v
+}
+
 /// Measured on the simulated rig's noise, so different every run: how close two recordings
 /// of one measured quantity must be, and the decimals a fixture keeps of it.
 fn measured(key: &str) -> Option<(f64, i32)> {
@@ -50,6 +79,9 @@ fn measured(key: &str) -> Option<(f64, i32)> {
         "correlation" => Some((0.05, 3)),
         // A path's gain in dB: noise moves a weak one by about 0.2 dB.
         "gain" => Some((1.0, 1)),
+        // A calibration's reading of the calibrator, and the sensitivity it gives, dB: the
+        // rig's noise moves them by about 0.001 dB.
+        "measured" | "sensitivity" => Some((0.05, 2)),
         _ => None,
     }
 }
@@ -104,6 +136,11 @@ fn differs(a: &Value, b: &Value, at: &str) -> Option<String> {
             .zip(y)
             .enumerate()
             .find_map(|(i, (va, vb))| differs(va, vb, &format!("{at}/{i}"))),
+        // Two recordings take a different few milliseconds between an event and the
+        // snapshot: a relative instant is only checked to be one.
+        (Value::String(x), Value::String(y)) if x.starts_with("now-") && y.starts_with("now-") => {
+            None
+        }
         _ => (a != b).then(|| format!("{at}: {a} vs {b}")),
     }
 }
@@ -159,27 +196,30 @@ fn only_fake(b: &[BackendInfo]) -> R<ac2_proto::model::DeviceId> {
     }
 }
 
-/// The fixtures are what the daemon answers now; under `AC2_RECORD_FIXTURES=1`, rewritten.
-#[test]
-fn fixtures_match_the_daemon() -> R {
+/// `fixtures` compared with the checked-in files; under `AC2_RECORD_FIXTURES=1`, each that
+/// differs is rewritten (one that differs only by the rig's noise is left as it is, so a
+/// regeneration changes only what the daemon changed).
+fn check(fixtures: Vec<(String, Value)>) -> R {
     let rewrite = std::env::var("AC2_RECORD_FIXTURES").is_ok_and(|v| v == "1");
     let mut stale = Vec::new();
-    for (name, now) in record()? {
-        let path = dir().join(name);
-        if rewrite {
-            std::fs::create_dir_all(dir())?;
-            std::fs::write(&path, serde_json::to_string_pretty(&now)? + "\n")?;
-            continue;
-        }
-        let kept: Value = match std::fs::read_to_string(&path) {
-            Ok(t) => serde_json::from_str(&t)?,
-            Err(e) => {
-                stale.push(format!("{name}: {e}"));
-                continue;
-            }
+    for (name, now) in fixtures {
+        let path = dir().join(&name);
+        let kept: Option<Value> = match std::fs::read_to_string(&path) {
+            Ok(t) => Some(serde_json::from_str(&t)?),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(e.into()),
         };
-        if let Some(d) = differs(&kept, &now, "") {
-            stale.push(format!("{name}: {d}"));
+        let differs = match &kept {
+            Some(kept) => differs(kept, &now, ""),
+            None => Some("missing".to_owned()),
+        };
+        match (differs, rewrite) {
+            (None, _) => {}
+            (Some(_), true) => {
+                std::fs::create_dir_all(dir())?;
+                std::fs::write(&path, serde_json::to_string_pretty(&now)? + "\n")?;
+            }
+            (Some(d), false) => stale.push(format!("{name}: {d}")),
         }
     }
     assert!(
@@ -190,7 +230,111 @@ fn fixtures_match_the_daemon() -> R {
     Ok(())
 }
 
-/// Each fixture parses back into the type it was recorded from (what `ac2-ui` reads).
+/// The fixtures are what the daemon answers now; under `AC2_RECORD_FIXTURES=1`, rewritten.
+#[test]
+fn fixtures_match_the_daemon() -> R {
+    check(
+        record()?
+            .into_iter()
+            .map(|(n, v)| (n.to_owned(), v))
+            .collect(),
+    )
+}
+
+/// Scene `name` built by `build` on a fresh simulated rig and saved as "friday": the
+/// daemon's state once saved, the grids its measurements and traces are on and the data of
+/// every stored trace (an EQ set's curve), as `fixtures/daemon/rig_<name>.json`.
+fn scene(name: &str, build: fn(&Cli) -> R) -> R {
+    let sessions = tempfile::tempdir()?;
+    let d = ac2_e2e::sim_daemon_with(Setup::Empty, |c| {
+        c.session_dir = sessions.path().to_owned();
+    })?;
+    let cli = Cli::connect(d.endpoints())?;
+    build(&cli)?;
+    // Saved, as an operator's rig is between changes: an unsaved session's label takes the
+    // top bar's room first and would be in every picture.
+    cli.call(Command::FileSave {
+        session: ac2_proto::model::SessionRef::Name {
+            name: "friday".into(),
+        },
+        overwrite: false,
+    })?;
+    let snap = cli.block_on(cli.client().snapshot())?;
+    let state = snap.state;
+    let mut grids = Vec::new();
+    let traced = state.traces.iter().map(|t| t.grid_id);
+    for id in state
+        .measurements
+        .iter()
+        .filter_map(|m| m.grid_id)
+        .chain(traced)
+    {
+        let g = cli.block_on(cli.client().grid(id))?;
+        if !grids.contains(&*g) {
+            grids.push((*g).clone());
+        }
+    }
+    let mut traces = Vec::new();
+    for t in &state.traces {
+        match cli.call(Command::TraceGet { trace: t.id })? {
+            ReplyBody::TraceData(data) => traces.push(*data),
+            other => return Err(format!("trace.get: {other:?}").into()),
+        }
+    }
+    let value = pin_times(
+        serde_json::json!({
+            "state": pin_clock(serde_json::to_value(&state)?),
+            "grids": grids,
+            "traces": traces,
+        }),
+        wall_ns(),
+    );
+    check(vec![(format!("rig_{name}.json"), doc(&value)?)])
+}
+
+fn wall_ns() -> i128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as i128)
+}
+
+#[test]
+fn rig() -> R {
+    scene("base", scenes::rig)
+}
+
+#[test]
+fn rig_math_average() -> R {
+    scene("math_average", scenes::math_average)
+}
+
+#[test]
+fn rig_spectrum_math() -> R {
+    scene("spectrum_math", scenes::spectrum_math)
+}
+
+#[test]
+fn rig_alignment() -> R {
+    scene("alignment", scenes::alignment)
+}
+
+#[test]
+fn rig_eq() -> R {
+    scene("eq", scenes::eq)
+}
+
+#[test]
+fn rig_monitor() -> R {
+    scene("monitor", scenes::rig_monitor)
+}
+
+#[test]
+fn rig_calibrations() -> R {
+    scene("calibrations", scenes::calibrations)
+}
+
+/// Each fixture parses back into the type it was recorded from (what `ac2-ui` reads; the
+/// scenes, whose instants it rebases first, are parsed by every picture of them).
 #[test]
 fn fixtures_parse() -> R {
     fn value<T: serde::de::DeserializeOwned>(name: &str) -> R<T> {

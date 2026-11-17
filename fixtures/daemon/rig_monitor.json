@@ -1,0 +1,558 @@
+{
+  "proto_version": 89,
+  "value": {
+    "grids": [
+      {
+        "k_max": 119,
+        "k_min": -120,
+        "ppo": 24,
+        "type": "log"
+      },
+      {
+        "fs": 48000.0,
+        "n": 4096,
+        "ppo": 96,
+        "type": "log_bins"
+      }
+    ],
+    "state": {
+      "autosave": {
+        "log_failures": [],
+        "saved_at": null,
+        "state": {
+          "type": "off"
+        }
+      },
+      "calibrations": [],
+      "clocks": {
+        "capture": {
+          "device": "fake",
+          "rate": {
+            "type": "measuring"
+          }
+        },
+        "stamp_map": null,
+        "system": {
+          "maxerror_us": 1000,
+          "type": "synced"
+        }
+      },
+      "generator": {
+        "armed": false,
+        "ceiling": -10.0,
+        "ceiling_bound": -10.0,
+        "firing": false,
+        "last_action": null,
+        "owner": null,
+        "settings": null
+      },
+      "inputs": [],
+      "line_calibrations": [],
+      "measurements": [
+        {
+          "colour": null,
+          "config": {
+            "kind": {
+              "config": {
+                "averaging": {
+                  "time_constant": 1.0,
+                  "type": "exponential"
+                },
+                "depth": {
+                  "type": "equal_confidence"
+                },
+                "measurement_input": 1,
+                "reference_input": 0,
+                "resolution": "twenty_fourth",
+                "smoothing": {
+                  "fraction": "sixth",
+                  "mode": "magnitude_phase"
+                }
+              },
+              "type": "transfer"
+            },
+            "name": "Main L",
+            "scope": "session"
+          },
+          "config_rev": 13,
+          "delay": {
+            "applied": 0.0125,
+            "applied_samples": 600.0,
+            "awaiting_pick": false,
+            "last_finding": null,
+            "nudged": 0.0125,
+            "nudged_samples": 600.0,
+            "tracking": true
+          },
+          "eq": [],
+          "grid_id": 1318697155222946296,
+          "id": 1,
+          "layout": null,
+          "offset": 0.0,
+          "running": true
+        },
+        {
+          "colour": null,
+          "config": {
+            "kind": {
+              "config": {
+                "averaging": {
+                  "time_constant": 1.0,
+                  "type": "exponential"
+                },
+                "depth": {
+                  "type": "equal_confidence"
+                },
+                "measurement_input": 2,
+                "reference_input": 0,
+                "resolution": "twenty_fourth",
+                "smoothing": {
+                  "fraction": "sixth",
+                  "mode": "magnitude_phase"
+                }
+              },
+              "type": "transfer"
+            },
+            "name": "Delay tower",
+            "scope": "session"
+          },
+          "config_rev": 15,
+          "delay": {
+            "applied": 0.014104166666666666,
+            "applied_samples": 677.0,
+            "awaiting_pick": false,
+            "last_finding": null,
+            "nudged": 0.014104166666666666,
+            "nudged_samples": 677.0,
+            "tracking": false
+          },
+          "eq": [],
+          "grid_id": 1318697155222946296,
+          "id": 2,
+          "layout": null,
+          "offset": 0.0,
+          "running": true
+        },
+        {
+          "colour": null,
+          "config": {
+            "kind": {
+              "config": {
+                "averaging": {
+                  "type": "off"
+                },
+                "display": {
+                  "peak": "off",
+                  "spectrograph_colours": "viridis",
+                  "spectrograph_span_s": 30,
+                  "style": "bars"
+                },
+                "input": 1,
+                "level": "tone",
+                "resolution": {
+                  "fft_len": 4096,
+                  "type": "fixed"
+                },
+                "smoothing": null,
+                "window": "hann"
+              },
+              "type": "spectrum"
+            },
+            "name": "Mic 1 FFT",
+            "scope": "session"
+          },
+          "config_rev": 8,
+          "delay": null,
+          "eq": [],
+          "grid_id": 18085098523030766332,
+          "id": 3,
+          "layout": null,
+          "offset": 0.0,
+          "running": true
+        },
+        {
+          "colour": null,
+          "config": {
+            "kind": {
+              "config": {
+                "bands": null,
+                "cue": null,
+                "input": 1,
+                "leq": {
+                  "horizon": 60.0,
+                  "peaks": {
+                    "lafmax": null,
+                    "lcpeak": null
+                  },
+                  "windows": [
+                    {
+                      "cue": null,
+                      "duration": 60.0,
+                      "limit": null,
+                      "warn_margin": 3.0,
+                      "weighting": "a"
+                    },
+                    {
+                      "cue": null,
+                      "duration": 300.0,
+                      "limit": null,
+                      "warn_margin": 3.0,
+                      "weighting": "a"
+                    },
+                    {
+                      "cue": null,
+                      "duration": 600.0,
+                      "limit": null,
+                      "warn_margin": 3.0,
+                      "weighting": "a"
+                    },
+                    {
+                      "cue": null,
+                      "duration": 1800.0,
+                      "limit": null,
+                      "warn_margin": 3.0,
+                      "weighting": "a"
+                    },
+                    {
+                      "cue": null,
+                      "duration": 3600.0,
+                      "limit": null,
+                      "warn_margin": 3.0,
+                      "weighting": "a"
+                    }
+                  ]
+                },
+                "peak_weighting": "c",
+                "position": null,
+                "time_weighting": "fast",
+                "weighting": "a"
+              },
+              "type": "spl"
+            },
+            "name": "FOH SPL",
+            "scope": "session"
+          },
+          "config_rev": 10,
+          "delay": null,
+          "eq": [],
+          "grid_id": null,
+          "id": 4,
+          "layout": null,
+          "offset": 0.0,
+          "running": true
+        },
+        {
+          "colour": null,
+          "config": {
+            "kind": {
+              "config": {
+                "bands": null,
+                "cue": {
+                  "fault": {
+                    "dmx": [
+                      {
+                        "channel": 12,
+                        "value": 255
+                      },
+                      {
+                        "channel": 14,
+                        "value": 40
+                      }
+                    ],
+                    "osc": null
+                  },
+                  "near": null,
+                  "ok": null,
+                  "over": null
+                },
+                "input": 0,
+                "leq": {
+                  "horizon": 60.0,
+                  "peaks": {
+                    "lafmax": null,
+                    "lcpeak": null
+                  },
+                  "windows": [
+                    {
+                      "cue": null,
+                      "duration": 60.0,
+                      "limit": 99.0,
+                      "warn_margin": 3.0,
+                      "weighting": "a"
+                    },
+                    {
+                      "cue": null,
+                      "duration": 300.0,
+                      "limit": null,
+                      "warn_margin": 3.0,
+                      "weighting": "a"
+                    },
+                    {
+                      "cue": null,
+                      "duration": 600.0,
+                      "limit": null,
+                      "warn_margin": 3.0,
+                      "weighting": "a"
+                    },
+                    {
+                      "cue": null,
+                      "duration": 1800.0,
+                      "limit": null,
+                      "warn_margin": 3.0,
+                      "weighting": "a"
+                    },
+                    {
+                      "cue": null,
+                      "duration": 3600.0,
+                      "limit": null,
+                      "warn_margin": 3.0,
+                      "weighting": "a"
+                    }
+                  ]
+                },
+                "peak_weighting": "c",
+                "position": null,
+                "time_weighting": "fast",
+                "weighting": "a"
+              },
+              "type": "spl"
+            },
+            "name": "FOH limit",
+            "scope": "rig"
+          },
+          "config_rev": 16,
+          "delay": null,
+          "eq": [],
+          "grid_id": null,
+          "id": 5,
+          "layout": null,
+          "offset": 0.0,
+          "running": true
+        }
+      ],
+      "mics": [],
+      "outputs": [],
+      "pairs": [],
+      "plans": [],
+      "recording": null,
+      "remote": {
+        "inputs": [],
+        "link_offset": null,
+        "peers": [],
+        "rigs": [],
+        "transfers": []
+      },
+      "rig": {
+        "artnet": {
+          "last_error": null,
+          "sent": 1
+        },
+        "artnet_fade": 1.5,
+        "artnet_target": {
+          "addr": "127.0.0.1:6454",
+          "universe": 1
+        },
+        "cues": [
+          {
+            "meas": 5,
+            "state": "fault",
+            "subject": {
+              "type": "meter"
+            }
+          }
+        ],
+        "damaged_files": [],
+        "dmx": [
+          {
+            "channel": 12,
+            "value": 255
+          },
+          {
+            "channel": 14,
+            "value": 40
+          }
+        ],
+        "levels": {
+          "ballistic": "true_peak",
+          "correlation_gate": -60.0,
+          "correlation_window": "long",
+          "loudness_target": -23.0,
+          "over_threshold": 0.0
+        },
+        "monitor_at_start": true,
+        "osc": {
+          "last_error": null,
+          "sent": 0
+        },
+        "osc_target": "127.0.0.1:9000",
+        "rev": 24
+      },
+      "session": {
+        "epoch": 1,
+        "open": {
+          "backend": "fake",
+          "buffer_frames": 256,
+          "clock": "single_callback",
+          "clock_source": null,
+          "config": {
+            "backend": "fake",
+            "buffer_frames": 256,
+            "input_channels": [
+              0,
+              1,
+              2,
+              3
+            ],
+            "input_device": {
+              "type": "default"
+            },
+            "link_offset": null,
+            "loopback": {
+              "input": 0,
+              "output": 0
+            },
+            "output_channels": 2,
+            "output_device": {
+              "type": "default"
+            },
+            "remote_inputs": [],
+            "sample_rate_hz": 48000,
+            "spare_inputs": 0
+          },
+          "driver_change": null,
+          "driver_reset": null,
+          "input_device": "fake",
+          "opened_at": "now-55125413",
+          "output_device": "fake",
+          "replay": null,
+          "sample_rate_hz": 48000,
+          "spare_ports": [],
+          "stated_latency": null
+        },
+        "stopped": null
+      },
+      "sim": null,
+      "sim_fit": null,
+      "sim_map": null,
+      "spl_logs": [
+        {
+          "alarms": [],
+          "meas": 4,
+          "peaks": {
+            "lafmax": {
+              "judgement": "no_limit",
+              "since": "now-17398892"
+            },
+            "lcpeak": {
+              "judgement": "no_limit",
+              "since": "now-17398892"
+            }
+          },
+          "started_at": null,
+          "windows": [
+            {
+              "duration": 60.0,
+              "judgement": "no_limit",
+              "since": "now-17398892",
+              "weighting": "a"
+            },
+            {
+              "duration": 300.0,
+              "judgement": "no_limit",
+              "since": "now-17398892",
+              "weighting": "a"
+            },
+            {
+              "duration": 600.0,
+              "judgement": "no_limit",
+              "since": "now-17398892",
+              "weighting": "a"
+            },
+            {
+              "duration": 1800.0,
+              "judgement": "no_limit",
+              "since": "now-17398892",
+              "weighting": "a"
+            },
+            {
+              "duration": 3600.0,
+              "judgement": "no_limit",
+              "since": "now-17398892",
+              "weighting": "a"
+            }
+          ]
+        },
+        {
+          "alarms": [],
+          "meas": 5,
+          "peaks": {
+            "lafmax": {
+              "judgement": "no_limit",
+              "since": "now-13460642"
+            },
+            "lcpeak": {
+              "judgement": "no_limit",
+              "since": "now-13460642"
+            }
+          },
+          "started_at": null,
+          "windows": [
+            {
+              "duration": 60.0,
+              "judgement": "not_calibrated",
+              "since": "now-13460642",
+              "weighting": "a"
+            },
+            {
+              "duration": 300.0,
+              "judgement": "no_limit",
+              "since": "now-13460642",
+              "weighting": "a"
+            },
+            {
+              "duration": 600.0,
+              "judgement": "no_limit",
+              "since": "now-13460642",
+              "weighting": "a"
+            },
+            {
+              "duration": 1800.0,
+              "judgement": "no_limit",
+              "since": "now-13460642",
+              "weighting": "a"
+            },
+            {
+              "duration": 3600.0,
+              "judgement": "no_limit",
+              "since": "now-13460642",
+              "weighting": "a"
+            }
+          ]
+        }
+      ],
+      "sweep": null,
+      "timing": {
+        "drift": null,
+        "epoch": 0,
+        "internal_reference": false,
+        "last_lock": null,
+        "state": {
+          "type": "no_stimulus"
+        }
+      },
+      "traces": [],
+      "walk_plans": [],
+      "walks": [],
+      "working": {
+        "dirty": false,
+        "origin": {
+          "name": "friday",
+          "type": "name"
+        },
+        "recover": null,
+        "saved_at": "now-4960917"
+      }
+    },
+    "traces": []
+  }
+}
