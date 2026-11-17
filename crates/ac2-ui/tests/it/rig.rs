@@ -564,6 +564,7 @@ fn spec_frame(grid: &GridDef, meas: u32) -> SpecFrame {
             smoothing: None,
             math: None,
             bands: None,
+            harmonics: None,
         },
         level,
     }

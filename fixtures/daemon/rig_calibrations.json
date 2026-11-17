@@ -1,5 +1,5 @@
 {
-  "proto_version": 89,
+  "proto_version": 90,
   "value": {
     "grids": [
       {
@@ -31,7 +31,7 @@
             "mic": "MM1 34804"
           },
           "spl": {
-            "calibrated_at": "now-5159351",
+            "calibrated_at": "now-6627927",
             "freq": 1000.0,
             "measured": -25.98,
             "method": {
@@ -62,7 +62,7 @@
         "firing": false,
         "last_action": {
           "action": "release",
-          "at": "now-4193311",
+          "at": "now-5068920",
           "client": "local-006b8b4567"
         },
         "owner": null,
@@ -295,7 +295,7 @@
               "f_hi": 19980.0,
               "f_lo": 50.0,
               "file_name": "449350_34804_0Grad.txt",
-              "imported_at": "now-4554920370",
+              "imported_at": "now-4579349297",
               "label": "0°",
               "points": 100,
               "stated_sensitivity": 15.0
@@ -305,7 +305,7 @@
               "f_hi": 19980.0,
               "f_lo": 50.0,
               "file_name": "449350_34804_90Grad.txt",
-              "imported_at": "now-4553383843",
+              "imported_at": "now-4578124660",
               "label": "90°",
               "points": 100,
               "stated_sensitivity": 15.0
@@ -385,7 +385,7 @@
           "driver_change": null,
           "driver_reset": null,
           "input_device": "fake",
-          "opened_at": "now-4613875694",
+          "opened_at": "now-4659610254",
           "output_device": "fake",
           "replay": null,
           "sample_rate_hz": 48000,
@@ -404,43 +404,43 @@
           "peaks": {
             "lafmax": {
               "judgement": "no_limit",
-              "since": "now-4567932423"
+              "since": "now-4590569605"
             },
             "lcpeak": {
               "judgement": "no_limit",
-              "since": "now-4567932423"
+              "since": "now-4590569605"
             }
           },
-          "started_at": "now-4581038379",
+          "started_at": "now-4595187831",
           "windows": [
             {
               "duration": 60.0,
               "judgement": "no_limit",
-              "since": "now-4567932423",
+              "since": "now-4590569605",
               "weighting": "a"
             },
             {
               "duration": 300.0,
               "judgement": "no_limit",
-              "since": "now-4567932423",
+              "since": "now-4590569605",
               "weighting": "a"
             },
             {
               "duration": 600.0,
               "judgement": "no_limit",
-              "since": "now-4567932423",
+              "since": "now-4590569605",
               "weighting": "a"
             },
             {
               "duration": 1800.0,
               "judgement": "no_limit",
-              "since": "now-4567932423",
+              "since": "now-4590569605",
               "weighting": "a"
             },
             {
               "duration": 3600.0,
               "judgement": "no_limit",
-              "since": "now-4567932423",
+              "since": "now-4590569605",
               "weighting": "a"
             }
           ]
@@ -466,7 +466,7 @@
           "type": "name"
         },
         "recover": null,
-        "saved_at": "now-4025074"
+        "saved_at": "now-4798010"
       }
     },
     "traces": []
