@@ -10,15 +10,20 @@
 use std::io::IsTerminal;
 
 use ac2_client::{Client, LeaseLost, OnDrop, StimulusLease, expect_body};
-use ac2_proto::model::{BandLimit, FilterOrder, GeneratorDesired, GeneratorSettings, Signal};
-use ac2_proto::units::Samples;
+use ac2_core::harmonics::snap_to_bin;
+use ac2_core::multires::MultiResLadder;
+use ac2_proto::model::{
+    BandLimit, FilterOrder, GeneratorDesired, GeneratorSettings, MeasKind, Signal, SpecResolution,
+    State,
+};
+use ac2_proto::units::{Hz, Samples};
 use ac2_proto::{Command, ReplyBody};
 use serde_json::json;
 use tokio::sync::mpsc;
 
-use super::connect;
+use super::{connect, find_meas, rate};
 use crate::CliError;
-use crate::args::{Cli, GenCmd, GenOpts, SlopeArg};
+use crate::args::{Cli, GenCmd, GenOpts, MeasRef, SlopeArg};
 use crate::output::Out;
 use crate::watch::{Key, RawTerm, quit_signal};
 use ac2_scene::rig;
@@ -31,7 +36,7 @@ pub fn settings(cmd: &GenCmd) -> Result<Option<(GeneratorSettings, bool)>, CliEr
         GenCmd::Stop | GenCmd::Ceiling { .. } => return Ok(None),
         GenCmd::Pink(o) => (Signal::Pink, o),
         GenCmd::White(o) => (Signal::White, o),
-        GenCmd::Sine { freq, opts } => (Signal::Sine { freq: freq.0 }, opts),
+        GenCmd::Sine { freq, opts, .. } => (Signal::Sine { freq: freq.0 }, opts),
         GenCmd::PeriodicPink { period, opts } => {
             let p = period.0;
             if !(1024..=(1 << 22)).contains(&p) || (p & (p - 1)) != 0 {
@@ -78,6 +83,45 @@ pub fn settings(cmd: &GenCmd) -> Result<Option<(GeneratorSettings, bool)>, CliEr
         },
         opts.force,
     )))
+}
+
+/// A sine moved onto an FFT bin of a spectrum measurement.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Lock {
+    /// The measurement's name.
+    pub meas: String,
+    /// The bin's centre frequency, Hz.
+    pub freq: f64,
+    /// The FFT length the bin belongs to.
+    pub fft_len: u32,
+    /// The session's sample rate, Hz.
+    pub sample_rate: u32,
+}
+
+/// `freq` on the nearest bin of spectrum measurement `meas`: of its one FFT, or of a
+/// multi-resolution spectrum's longest, the one the daemon reads the sine from.
+pub(crate) fn lock(st: &State, meas: &MeasRef, freq: f64) -> Result<Lock, CliError> {
+    let m = find_meas(st, meas)?;
+    let MeasKind::Spectrum { config } = &m.config.kind else {
+        return Err(CliError::Usage(format!(
+            "--lock needs a spectrum measurement; \"{}\" is not one",
+            m.config.name
+        )));
+    };
+    let sample_rate = rate(st).ok_or_else(|| {
+        CliError::Usage("no audio I/O open; open it with `ac2 session open`".into())
+    })?;
+    let fs = f64::from(sample_rate);
+    let n = match config.resolution {
+        SpecResolution::Fixed { fft_len } => fft_len as usize,
+        SpecResolution::Multi { .. } => MultiResLadder::longest_window(fs),
+    };
+    Ok(Lock {
+        meas: m.config.name.clone(),
+        freq: snap_to_bin(freq, fs, n),
+        fft_len: u32::try_from(n).unwrap_or(u32::MAX),
+        sample_rate,
+    })
 }
 
 fn signal_text(s: &GeneratorSettings) -> String {
@@ -225,7 +269,7 @@ pub(crate) async fn run(cli: &Cli, cmd: &GenCmd, out: &mut Out<'_>) -> Result<()
     if let GenCmd::Ceiling { level, yes } = cmd {
         return ceiling(cli, *level, *yes, out).await;
     }
-    let Some((settings, force)) = settings(cmd)? else {
+    let Some((mut settings, force)) = settings(cmd)? else {
         let c = connect(cli, false).await?;
         let r = c.call(Command::GenStop).await?;
         let rev = expect_body!("gen.stop", r, ReplyBody::Ack { rev } => rev)?;
@@ -248,6 +292,32 @@ pub(crate) async fn run(cli: &Cli, cmd: &GenCmd, out: &mut Out<'_>) -> Result<()
         return Err(CliError::Usage(
             "no audio I/O open; open it with `ac2 session open`".into(),
         ));
+    }
+    if let GenCmd::Sine {
+        freq,
+        lock: Some(meas),
+        ..
+    } = cmd
+    {
+        let l = lock(&st, meas, freq.0.0)?;
+        settings.signal = Signal::Sine { freq: Hz(l.freq) };
+        // The readout rounds; the bin's frequency is stated in full.
+        say(
+            out,
+            false,
+            "locked",
+            &format!(
+                "sine locked to a bin of \"{}\": {} Hz ({}-point FFT at {} Hz)",
+                l.meas, l.freq, l.fft_len, l.sample_rate
+            ),
+            json!({
+                "meas": l.meas,
+                "freq": l.freq,
+                "requested": freq.0.0,
+                "fft_len": l.fft_len,
+                "sample_rate": l.sample_rate,
+            }),
+        );
     }
     let lease = c.acquire_lease(force, OnDrop::StopAndRelease).await?;
     let keys = input()?;
@@ -381,6 +451,68 @@ mod tests {
         })
         .await?;
         Ok((h, c))
+    }
+
+    /// `--lock` puts the sine on a bin of the named spectrum (its one FFT, or the longest
+    /// of a multi-resolution spectrum) at the session's rate, and refuses anything else.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn lock_moves_the_sine_onto_a_bin_of_a_spectrum() -> R {
+        use ac2_core::harmonics::is_on_bin;
+        use ac2_proto::model::{BandFraction, MeasConfig, MeasScope, RtaConfig, SpectrumConfig};
+
+        let (_h, c) = daemon().await?;
+        let spectrum = |name: &str, resolution| MeasConfig {
+            scope: MeasScope::Session,
+            name: name.into(),
+            kind: MeasKind::Spectrum {
+                config: SpectrumConfig {
+                    resolution,
+                    ..SpectrumConfig::on_input(0)
+                },
+            },
+        };
+        for config in [
+            spectrum("fft", SpecResolution::Fixed { fft_len: 4096 }),
+            spectrum("multi", SpecResolution::MULTI),
+            MeasConfig {
+                scope: MeasScope::Session,
+                name: "rta".into(),
+                kind: MeasKind::Rta {
+                    config: RtaConfig::on_input(0, BandFraction::Third),
+                },
+            },
+        ] {
+            c.call(Command::MeasCreate { config }).await?;
+        }
+        let st = c.snapshot().await?.state;
+        let fs = rate(&st).ok_or("no session")?;
+        let bin = f64::from(fs) / 4096.0;
+
+        let l = lock(&st, &MeasRef("fft".into()), 1000.0)?;
+        assert_eq!(
+            (l.meas.as_str(), l.fft_len, l.sample_rate),
+            ("fft", 4096, fs)
+        );
+        assert!(is_on_bin(l.freq, f64::from(fs), 4096), "{l:?}");
+        assert!((l.freq - 1000.0).abs() <= bin / 2.0, "{l:?}");
+        // Never DC: the lowest bin there is.
+        assert_eq!(lock(&st, &MeasRef("fft".into()), 0.1)?.freq, bin);
+
+        let l = lock(&st, &MeasRef("multi".into()), 1000.0)?;
+        let longest = MultiResLadder::longest_window(f64::from(fs));
+        assert_eq!(l.fft_len as usize, longest);
+        assert!(
+            longest > 4096 && is_on_bin(l.freq, f64::from(fs), longest),
+            "{l:?}"
+        );
+
+        let e = lock(&st, &MeasRef("rta".into()), 1000.0).expect_err("an RTA is no spectrum");
+        assert!(
+            matches!(&e, CliError::Usage(m) if m.contains("needs a spectrum measurement")),
+            "{e:?}"
+        );
+        assert!(lock(&st, &MeasRef("nothing".into()), 1000.0).is_err());
+        Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]

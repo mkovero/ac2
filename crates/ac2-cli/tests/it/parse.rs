@@ -363,6 +363,9 @@ fn other_commands_parse() {
         "gen", "sine", "--freq", "1khz", "--out", "1", "--level", "-30dbfs", "--force",
     ]);
     ok(&[
+        "gen", "sine", "--freq", "1khz", "--lock", "fft", "--out", "1", "--level", "-30dbfs",
+    ]);
+    ok(&[
         "gen",
         "periodic-pink",
         "--period",
@@ -615,6 +618,10 @@ fn refusals() {
         &["gen", "pink", "--level", "-20dbfs"],
         &["gen", "pink", "--out", "0", "--level", "-20dbfs"],
         &["gen", "sine", "--out", "1", "--level", "-20dbfs"],
+        // A lock is a sine's.
+        &[
+            "gen", "pink", "--lock", "fft", "--out", "1", "--level", "-20dbfs",
+        ],
         &[
             "gen", "sine", "--freq", "1000", "--out", "1", "--level", "-20dbfs",
         ],

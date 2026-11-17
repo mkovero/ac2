@@ -4,6 +4,8 @@ use clap::{Args, Subcommand, ValueEnum};
 
 use ac2_scene::unit_text::{Channels, Freq, LevelDbfs, SampleCount};
 
+use super::MeasRef;
+
 /// `gen …`.
 #[derive(Debug, Subcommand)]
 pub enum GenCmd {
@@ -25,6 +27,12 @@ pub enum GenCmd {
         /// Frequency, e.g. `1khz`.
         #[arg(long)]
         freq: Freq,
+        /// Move the frequency to the nearest FFT bin of this spectrum measurement (name or
+        /// id), at the open session's sample rate: on a bin the spectrum reads the sine
+        /// and its harmonics with no window leakage. A multi-resolution spectrum's
+        /// longest FFT counts.
+        #[arg(long, value_name = "MEAS")]
+        lock: Option<MeasRef>,
         /// Common options.
         #[command(flatten)]
         opts: GenOpts,

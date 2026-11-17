@@ -4054,7 +4054,7 @@ documents each command.
 | `ac2 session new / save / save-as / load / recover / salvage / export / import / list` | the working state and saved sessions ([Sessions](#sessions)) |
 | `ac2 meas new / list / set / start / stop / rm`, `ac2 meas layout clear` | transfer (`tf`), `spectrum`, `rta`, `spl` and `sweep` measurements (math channels are listed too); `rm` of one that owns traces needs `--keep-traces` (moved to Imported) or `--delete-traces`; `layout clear` removes a measurement's own panes |
 | `ac2 math new / set` | math channels: `"A / B"`, `--op div\|mul\|add\|sub --a A --b B`, `--op avg --of A,B,C` |
-| `ac2 gen pink / white / periodic-pink / sine`, `ac2 gen stop` | the generator in the foreground (Enter fires, Esc stops); `stop` from any client |
+| `ac2 gen pink / white / periodic-pink / sine`, `ac2 gen stop` | the generator in the foreground (Enter fires, Esc stops); `stop` from any client; `sine --lock MEAS` moves the frequency to the nearest FFT bin of that spectrum measurement and prints it |
 | `ac2 gen ceiling [LEVEL] [--yes]` | the system max level: shown with its bound and who changed it; a lower level applies at once, a higher one needs `--yes` and nothing armed |
 | `ac2 delay find / insert / set / nudge / track` | the delay finder and delay of a transfer measurement |
 | `ac2 sweep run <meas>` | a run of a sweep measurement with its settings, stored under it |
