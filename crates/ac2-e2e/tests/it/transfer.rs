@@ -818,3 +818,150 @@ fn a_typed_delay_moves_only_its_live_curve() -> R {
     d.stop()?;
     Ok(())
 }
+
+/// The IR pane of a stopped transfer measurement, maximised: its last IR is no longer the
+/// system's, so the plot says S starts it, with no STALE banner. Started again (S from
+/// here), the frequency panes' keys zoom its live IR: I twice the time axis, Ctrl+I the
+/// amplitude, and the cursor toggle puts the time cursor on it.
+#[test]
+fn ir_pane_of_a_stopped_measurement() -> R {
+    use crate::window::{MAIN_L, Rig};
+    use ac2_scene::view::IrPane;
+    let rig = Rig::start()?;
+    let _noise = crate::harness::noise(&rig.cli)?;
+    let mut d = crate::harness::on_rig(&rig)?;
+    let scene = |s: &AppState, keys: &ac2_ui::keys::Keymap| {
+        ac2_ui::scenes::ir(
+            s,
+            crate::common::ir_pane(s),
+            keys,
+            &Theme::dark(),
+            ac2_scene::primitives::Viewport::new(1000.0, 450.0),
+            ac2_ui::scenes::Now {
+                instant: Instant::now(),
+                wall: ac2_proto::units::WallNs(0),
+            },
+        )
+    };
+    d.until("Main L's IR", |s| s.ir_frame_of(IrPane::Live).is_some())?;
+    d.key("Alt+3");
+    d.key("W");
+    d.key("S");
+    d.until("the IR pane alone, its measurement stopped", |s| {
+        s.layout.maximized
+            && s.layout.focused().shows_ir()
+            && s.meas(MAIN_L).is_some_and(|m| !m.running)
+    })?;
+    let s = scene(&d.st, &d.keys).ok_or("IR scene")?;
+    let note = s.note.unwrap_or_default();
+    assert_eq!(note, "Main L stopped — S starts it");
+    assert_eq!(s.tag, None);
+    assert!(s.banners.iter().all(|b| !b.text.starts_with("STALE")));
+
+    d.key("S");
+    d.until("the live IR again", |s| {
+        s.meas(MAIN_L).is_some_and(|m| m.running) && s.ir_frame_of(IrPane::Live).is_some()
+    })?;
+    let keys = d.keys.clone();
+    d.until("no note on the live IR", |s| {
+        scene(s, &keys).is_some_and(|x| x.note.is_none())
+    })?;
+    d.key("I");
+    d.key("I");
+    d.key("Ctrl+I");
+    d.key("Ctrl+K");
+    d.send(Msg::Text("comparison cursor".into()));
+    d.key("Enter");
+    let ax = d.st.view.ir.axes;
+    assert!(ax.time_ms.is_some(), "time zoomed");
+    assert!(ax.amplitude.is_some(), "amplitude zoomed");
+    assert!(ax.cursor_ms.is_some(), "the time cursor");
+    Ok(())
+}
+
+/// The simulated rig with Main L's path heard twice, 200 samples apart, the earlier
+/// arrival 12.3 dB under the later: close enough to the first-arrival threshold that the
+/// finder leaves the pick to the operator.
+fn two_arrival_rig() -> R<std::sync::Arc<dyn ac2_audio::Backend>> {
+    use ac2_audio::fake::{FakeConfig, FakeDrive, FakePath, Pace};
+    const LOOP: u32 = 32;
+    let mut fir = vec![0.0; 201];
+    fir[0] = 0.5 * 10f32.powf(-12.3 / 20.0);
+    fir[200] = 0.5;
+    let names = |n: &[&str]| Some(n.iter().map(|s| (*s).to_owned()).collect());
+    let backend = ac2_audio::FakeBackend::new(FakeConfig {
+        drive: FakeDrive::Thread(Pace::Realtime),
+        paths: vec![
+            FakePath::loopback(0, 0, LOOP),
+            FakePath::acoustic(0, 1, LOOP + 240, fir, 1e-4),
+            FakePath::acoustic(0, 2, LOOP + 480, vec![0.25], 1e-5),
+        ],
+        input_names: names(&["Loop return", "Room mic", "Tower mic", "Line 4"]),
+        output_names: names(&["Out 1 (speaker + loop)", "Out 2"]),
+        ..FakeConfig::default()
+    })?;
+    Ok(std::sync::Arc::new(backend))
+}
+
+/// X on Main L, whose path arrives twice: the daemon's finding is ambiguous, so the app
+/// lists the candidates over the transfer pane and tracking waits for the pick; 2 inserts
+/// the second candidate and the daemon applies it.
+#[test]
+fn ambiguous_delay_candidate_list() -> R {
+    use crate::window::{MAIN_L, Rig};
+    use ac2_proto::model::DelayOutcome;
+    let backend = two_arrival_rig()?;
+    let rig = Rig::start_with(move |c| c.backends = vec![backend])?;
+    let _noise = crate::harness::noise(&rig.cli)?;
+    let mut d = crate::harness::on_rig(&rig)?;
+    d.key("Alt+1");
+    // The finder answers "not enough audio yet" until the noise has filled its window: X
+    // again until it has an answer of substance.
+    let end = Instant::now() + crate::harness::DEADLINE;
+    loop {
+        let seen = d.st.toasts.list.last().map_or(0, |t| t.id);
+        d.key("X");
+        d.until("the finder's answer", |s| {
+            matches!(s.overlay, Overlay::DelayPick(_))
+                || s.toasts
+                    .list
+                    .iter()
+                    .any(|t| t.id > seen && t.text.contains("no delay estimate"))
+        })?;
+        if matches!(d.st.overlay, Overlay::DelayPick(_)) {
+            break;
+        }
+        if Instant::now() > end {
+            return Err("the finder never had enough audio".into());
+        }
+        std::thread::sleep(Duration::from_millis(300));
+    }
+    d.until("the candidate list, tracking waiting", |s| {
+        matches!(s.overlay, Overlay::DelayPick(_))
+            && s.meas(MAIN_L)
+                .is_some_and(|m| m.delay.as_ref().is_some_and(|x| x.awaiting_pick))
+    })?;
+    let Overlay::DelayPick(c) = &d.st.overlay else {
+        return Err("no list".into());
+    };
+    assert_eq!(c.meas, MAIN_L);
+    let DelayOutcome::Ambiguous { ranked, .. } = &c.finding.outcome else {
+        return Err(format!("not ambiguous: {:?}", c.finding.outcome).into());
+    };
+    assert!(ranked.len() >= 2, "{ranked:?}");
+    let rows = c.rows();
+    assert_eq!(rows.len(), ranked.len());
+    let second = ranked[1].delay;
+    // The two arrivals: 200 samples apart at 48 kHz.
+    let gap = (ranked[0].delay.0 - ranked[1].delay.0).abs();
+    assert!((gap - 200.0 / 48_000.0).abs() < 2e-5, "{ranked:?}");
+    d.key("2");
+    d.until("the second candidate applied", |s| {
+        s.overlay == Overlay::None
+            && s.meas(MAIN_L).is_some_and(|m| {
+                m.delay
+                    .as_ref()
+                    .is_some_and(|x| !x.awaiting_pick && (x.applied.0 - second.0).abs() < 1e-6)
+            })
+    })
+}
