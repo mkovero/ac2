@@ -1,5 +1,6 @@
 //! The SPL meter, Leq windows and limits, the SPL log and its history.
 
+mod band;
 mod limits;
 mod log;
 mod rig;
