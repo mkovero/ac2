@@ -27,6 +27,7 @@ mod math;
 mod panes;
 mod recorded;
 mod session;
+mod session_dialog;
 mod spatial;
 mod spl;
 mod stimulus;
