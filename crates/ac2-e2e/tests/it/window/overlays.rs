@@ -249,3 +249,66 @@ fn the_stage_view_stays_the_pane_while_firing() -> R {
     });
     Ok(())
 }
+
+/// The key hints on a crowded grid: the sweep pane shown beside the others (four narrow
+/// panes under the transfer pane), the SPL meter focused with its hint line, and the
+/// transfer title naming the selected stored trace. Then the SPL hint line's tooltip: the
+/// pane's hints in full.
+#[test]
+fn key_hints() -> R {
+    use egui_kittest::kittest::Queryable as _;
+    if !have_gpu("key_hints") {
+        return Ok(());
+    }
+    let rig = Rig::start()?;
+    let mut opts = options(&rig);
+    opts.prefs.layout.panes = Some(crate::common::fake_rig_picks(
+        crate::common::grid_with_sweep_prefs(),
+    ));
+    let mut h = harness(opts);
+    step_until(&mut h, "live frames", live);
+    // A capture of the transfer measurement.
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
+    step_until(&mut h, "slot 1", |a| a.state.slots()[0].is_some());
+    // The sweep pane focused (Alt+5), then the SPL meter.
+    h.key_press_modifiers(Modifiers::ALT, Key::Num5);
+    h.key_press_modifiers(Modifiers::ALT, Key::Num4);
+    step_until(&mut h, "five panes, SPL focused", |a| {
+        crate::common::visible(&a.state).len() == 5 && a.state.layout.focus_kind() == PaneKind::Spl
+    });
+    // The capture selected (the focus stays): the transfer title names it.
+    h.key_press(Key::V);
+    step_until(&mut h, "slot 1 selected", |a| {
+        a.state.selected_trace_meta().is_some() && a.state.layout.focus_kind() == PaneKind::Spl
+    });
+    let names = |a: &App| {
+        a.state
+            .pane_caption_variants(crate::common::pane(&a.state, PaneKind::Transfer))
+    };
+    assert!(
+        names(h.state())
+            .last()
+            .is_some_and(|n| n.starts_with("slot 1 (")),
+        "{:?}",
+        names(h.state())
+    );
+    let line = h
+        .state()
+        .state
+        .key_hint_line(
+            &h.state().keymap,
+            crate::common::pane(&h.state().state, PaneKind::Spl),
+            ac2_ui::keys::LabelStyle::Pc,
+        )
+        .ok_or("the SPL hint line")?;
+    assert_eq!(line[0].text(), "G/Shift+G view");
+    // The SPL hint line's tooltip (the title has none: it would cover the plot's top).
+    settle(&mut h, 2);
+    h.get_by_label("SPL keys").hover();
+    settle(&mut h, 6);
+    assert!(
+        h.query_by_label_contains("most used keys").is_some(),
+        "the tooltip"
+    );
+    Ok(())
+}
