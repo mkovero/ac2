@@ -474,6 +474,9 @@ ms, age p50 2.2 / p95 4.9 ms (was 8.2 / 13.3). App log:
 What remains is mostly the wait for the next pass/refresh; compositor + TV after present stay
 unmeasured.
 
+Operator, 2026-11-17: the measured latency is acceptable; compositor + TV after present (H2)
+will not be benched.
+
 ### The jobs before the meters, and a tighter wake (2026-11-11)
 
 On pupu the per-hop wake (e25e4a39) moved `selftest frames` age p50 / p95 from 2.2 / 4.9 to
