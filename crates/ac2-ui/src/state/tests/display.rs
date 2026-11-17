@@ -260,6 +260,7 @@ fn spec_frame_captured(
             smoothing: None,
             math: None,
             bands: None,
+            harmonics: None,
         },
         level,
     });

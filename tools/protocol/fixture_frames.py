@@ -293,6 +293,22 @@ def frames():
                         "ranges": [{"lo": 7.8125, "hi": 101.5}],
                     },
                 },
+                "harmonics": {
+                    "f0": 1000.0,
+                    "on_bin": False,
+                    "reading": {
+                        "type": "read",
+                        "fundamental": -12.5,
+                        "harmonics": [
+                            {"order": 2, "level": -80.25, "floor": -112.0, "resolved": True},
+                            {"order": 3, "level": -110.5, "floor": -110.5, "resolved": False},
+                        ],
+                        "thd": -80.25,
+                        "thd_bound": -80.0,
+                        "thd_n": -74.5,
+                        "leakage": -98.0,
+                    },
+                },
             },
             [
                 (arr("level", "dbfs_per_hz"), [-120.0, -20.0, INF, NAN]),

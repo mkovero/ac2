@@ -75,6 +75,68 @@ pub(crate) fn window(w: pm::Window) -> core::window::Window {
     }
 }
 
+fn harmonic_unreadable(u: core::harmonics::Unreadable) -> ac2_proto::frame::HarmonicUnreadable {
+    use ac2_proto::frame::HarmonicUnreadable as W;
+    use core::harmonics::Unreadable as U;
+    match u {
+        U::RectangularOffBin => W::RectangularOffBin,
+        U::TooLow => W::TooLow,
+        U::OutOfBand => W::OutOfBand,
+        U::NoFundamental => W::NoFundamental,
+    }
+}
+
+/// A power ratio in dB. A power of exactly zero (digital silence beside the sine) has no
+/// level; the wire carries [`ac2_proto::frame::HARMONIC_DB_MIN`] for it, which no ratio of
+/// f64 powers reaches otherwise.
+fn harmonic_ratio_db(r: f64) -> ac2_proto::units::Db {
+    ac2_proto::units::Db((10.0 * r.log10()).max(ac2_proto::frame::HARMONIC_DB_MIN))
+}
+
+/// The reading of the sine at `f0` as the frame carries it. `on_bin` is told apart from
+/// the reading because a sine that cannot be read is on a bin or not all the same;
+/// `sensitivity_db` takes the fundamental from dBFS to the frame's scale.
+pub(crate) fn spec_harmonics(
+    f0: f64,
+    on_bin: bool,
+    reading: Result<core::harmonics::Harmonics, core::harmonics::Unreadable>,
+    sensitivity_db: f64,
+) -> ac2_proto::frame::SpecHarmonics {
+    use ac2_proto::frame::{HarmonicLevel, HarmonicReading, SpecHarmonics};
+    let reading = match reading {
+        Ok(h) => HarmonicReading::Read {
+            fundamental: core::spectrum::power_dbfs(h.fundamental) + sensitivity_db,
+            thd: h
+                .harmonics
+                .iter()
+                .any(|x| x.resolved)
+                .then(|| harmonic_ratio_db(h.thd)),
+            thd_bound: harmonic_ratio_db(h.thd_bound),
+            thd_n: harmonic_ratio_db(h.thd_n),
+            // On a bin the window leaks nothing: there is no limit to state.
+            leakage: (!h.on_bin).then(|| harmonic_ratio_db(h.leakage)),
+            harmonics: h
+                .harmonics
+                .iter()
+                .map(|x| HarmonicLevel {
+                    order: u8::try_from(x.order).unwrap_or(u8::MAX),
+                    level: harmonic_ratio_db(x.power / h.fundamental),
+                    floor: harmonic_ratio_db(x.floor / h.fundamental),
+                    resolved: x.resolved,
+                })
+                .collect(),
+        },
+        Err(u) => HarmonicReading::Unreadable {
+            reason: harmonic_unreadable(u),
+        },
+    };
+    SpecHarmonics {
+        f0: ac2_proto::units::Hz(f0),
+        on_bin,
+        reading,
+    }
+}
+
 pub(crate) fn spec_level(l: pm::SpecLevel) -> core::spectrum::SpectrumLevel {
     match l {
         pm::SpecLevel::Tone => core::spectrum::SpectrumLevel::Tone,

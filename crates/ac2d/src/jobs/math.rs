@@ -688,6 +688,7 @@ pub(crate) fn combine(
                     smoothing: None,
                     math: state,
                     bands: None,
+                    harmonics: None,
                 },
                 level: mag,
             })
@@ -769,6 +770,7 @@ impl Analysis for MathJob {
             JobCmd::Find { .. }
             | JobCmd::Track { .. }
             | JobCmd::GeneratorEdge(_)
+            | JobCmd::Tone(_)
             | JobCmd::SetDelay { .. }
             | JobCmd::Reset
             | JobCmd::Smoothing { .. }

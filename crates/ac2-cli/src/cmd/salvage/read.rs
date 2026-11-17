@@ -625,7 +625,8 @@ mod tests {
                                        "spectrum_spl": null, "distortion": null },
                            "plates": { "legend": auto,
                                        "readout": { "at": [1.0, 0.5], "scale": 1.5 },
-                                       "mark": auto, "peaks": auto, "loudness": auto } });
+                                       "mark": auto, "peaks": auto, "harmonics": auto,
+                                       "loudness": auto } });
         json!({ "type": "pane", "pane": pane })
     }
 

@@ -159,6 +159,22 @@ impl<'a> PowerSpectrum<'a> {
         self.folded
     }
 
+    /// This spectrum's normalisation over other folded powers: the same bins weighted per
+    /// frequency (a mic curve correction as a power factor), for whatever reads a
+    /// spectrum to read the corrected one.
+    ///
+    /// # Panics
+    /// If `folded` has another bin count.
+    pub fn with_folded<'b>(&self, folded: &'b [f64]) -> PowerSpectrum<'b> {
+        assert_eq!(folded.len(), self.folded.len(), "one power per bin");
+        PowerSpectrum {
+            folded,
+            fs: self.fs,
+            n: self.n,
+            gains: self.gains,
+        }
+    }
+
     /// Amplitude of bin `k` in FS RMS: a bin-centred sine reads its RMS.
     pub fn amplitude_rms(&self, k: usize) -> f64 {
         self.folded[k].sqrt() / self.gains.sum

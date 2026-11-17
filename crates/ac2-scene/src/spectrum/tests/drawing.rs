@@ -484,6 +484,7 @@ fn multires_spectrum_marks_where_its_windows_change() {
             smoothing: None,
             math: None,
             bands: Some(Box::new(bands)),
+            harmonics: None,
         },
         level: freqs.iter().map(|_| -60.0).collect(),
     };

@@ -342,6 +342,7 @@ def _layout_pane(
             "readout": readout or _plate(),
             "mark": _plate(),
             "peaks": _plate(),
+            "harmonics": _plate(),
             "loudness": _plate(),
         },
     }

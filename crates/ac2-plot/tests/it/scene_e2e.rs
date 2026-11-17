@@ -445,6 +445,7 @@ fn spectrum_golden_with(
             smoothing: None,
             math: None,
             bands: Some(Box::new(bands)),
+            harmonics: None,
         },
         level,
     };

@@ -131,6 +131,7 @@ fn live_frames(t: &mut T) {
                 smoothing: None,
                 math: None,
                 bands: None,
+                harmonics: None,
             },
             level: vec![-60.0; 8],
         }),

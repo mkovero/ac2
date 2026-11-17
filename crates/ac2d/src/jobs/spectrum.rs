@@ -15,10 +15,13 @@
 //! and where the columns are finer than the band behind them resolves.
 
 use ac2_core::grid::LogGrid;
+use ac2_core::harmonics::{is_on_bin, read_harmonics};
 use ac2_core::multires::{MultiResAnalyzer, MultiResConfig, MultiResLadder};
 use ac2_core::smoothing::{LinearSmoother, Smoother, SmoothingMode, TfColumns};
 use ac2_core::spectrum::{SpectrumAnalyzer, SpectrumConfig, column_max, column_mean};
-use ac2_proto::frame::{FrameData, ProtectionFlags, SpecBand, SpecBands, SpecFrame, SpecMeta};
+use ac2_proto::frame::{
+    FrameData, ProtectionFlags, SpecBand, SpecBands, SpecFrame, SpecHarmonics, SpecMeta,
+};
 use ac2_proto::grid::{BinColumns, GridDef, GridId};
 use ac2_proto::model::{
     FreqRange, LevelScale, Resolution, SmoothingFraction, SpecLevel, SpecResolution,
@@ -42,6 +45,12 @@ use crate::fanout::Block;
 /// highest point per pixel either way). Zoomed in further, or for an exact bin, a capture
 /// has every bin.
 pub(crate) const DISPLAY_PPO: u32 = 96;
+
+/// Highest harmonic read of the generator's sine. The reading is listed as text, a row per
+/// harmonic: nine rows are what a plate over the plot can hold. A THD figure is a sum up to
+/// a stated order, so the order is fixed rather than following the FFT length; the wire
+/// documents it.
+const HARMONIC_MAX_ORDER: u32 = 10;
 
 pub(crate) struct Spectrum {
     meas: MeasId,
@@ -77,6 +86,12 @@ pub(crate) struct Spectrum {
     /// Samples pushed into the analysis since it started, from a multiple of `frame_hop`
     /// in device samples.
     pushed: u64,
+    /// Frequency of the sine the generator is firing, Hz: its harmonics are read from
+    /// every frame.
+    tone: Option<f64>,
+    /// The folded powers with the mic curve applied, for the harmonics to be read from the
+    /// spectrum the frame shows.
+    corrected: Vec<f64>,
 }
 
 /// The analysis behind a spectrum.
@@ -312,6 +327,8 @@ impl Spectrum {
             wall: 0,
             result: None,
             fresh: false,
+            tone: None,
+            corrected: Vec::new(),
         }
         .with_cal(cal))
     }
@@ -338,6 +355,13 @@ impl Spectrum {
             Engine::Multi(e) => e.analyzer.set_gain(gain_at),
         }
         self.cal = cal;
+        self.generation += 1;
+    }
+
+    /// The sine the generator fires, or none. The average still holds what came before
+    /// the change; it settles as any change of the input does.
+    pub(crate) fn set_tone(&mut self, tone: Option<f64>) {
+        self.tone = tone;
         self.generation += 1;
     }
 
@@ -386,8 +410,68 @@ impl Spectrum {
         }
     }
 
+    /// The generator's sine read from the averaged spectrum: every bin of the one FFT, or
+    /// of a multi-resolution spectrum's longest (its finest bins; the columns blend bands
+    /// and hold no lobe to sum). `None` without a sine, and before that FFT's first
+    /// spectrum.
+    ///
+    /// Read before the display's smoothing and level scaling. The mic curve is applied
+    /// per bin first, as the frame applies it, so the fundamental reads what the frame
+    /// shows for it, each harmonic carries the curve's difference between k·f0 and f0,
+    /// and the distortion figures agree with the harmonics they sum.
+    fn harmonics(&mut self) -> Option<Box<SpecHarmonics>> {
+        let f0 = self.tone?;
+        let window = conv::window(self.cfg.window);
+        let curve = self.cal.correction.is_some();
+        let analyzer = match &self.engine {
+            Engine::Fixed(e) => &e.analyzer,
+            Engine::Multi(e) => e.analyzer.longest(),
+        };
+        let spectrum = analyzer.average()?;
+        let on_bin = is_on_bin(f0, spectrum.fs(), spectrum.n());
+        let reading = if curve {
+            // The per-bin gains hold the level scaling and the sensitivity as well, both
+            // the same for every bin: divided out, the curve alone is left.
+            let flat = 10f64.powf(-self.cal.sensitivity.unwrap_or(0.0) / 10.0);
+            self.corrected.clear();
+            match &self.engine {
+                Engine::Fixed(e) => {
+                    let k = flat / e.analyzer.power_factor(conv::spec_level(self.cfg.level));
+                    self.corrected.extend(
+                        spectrum
+                            .folded()
+                            .iter()
+                            .zip(&e.gain)
+                            .map(|(f, g)| f * g * k),
+                    );
+                }
+                Engine::Multi(e) => self.corrected.extend(
+                    spectrum
+                        .folded()
+                        .iter()
+                        .zip(e.analyzer.longest_gain())
+                        .map(|(f, g)| f * g * flat),
+                ),
+            }
+            read_harmonics(
+                &spectrum.with_folded(&self.corrected),
+                window,
+                f0,
+                HARMONIC_MAX_ORDER,
+            )
+        } else {
+            read_harmonics(&spectrum, window, f0, HARMONIC_MAX_ORDER)
+        };
+        Some(Box::new(conv::spec_harmonics(
+            f0,
+            on_bin,
+            reading,
+            self.cal.sensitivity.unwrap_or(0.0),
+        )))
+    }
+
     /// Metadata of a frame whose audio ends at `end` (exclusive).
-    fn meta(&self, end: u64) -> SpecMeta {
+    fn meta(&self, end: u64, harmonics: Option<Box<SpecHarmonics>>) -> SpecMeta {
         SpecMeta {
             window: self.cfg.window,
             scale: if self.cal.sensitivity.is_some() {
@@ -401,6 +485,7 @@ impl Spectrum {
             smoothing: self.cfg.smoothing,
             math: None,
             bands: self.bands(end),
+            harmonics,
         }
     }
 
@@ -582,6 +667,7 @@ impl Analysis for Spectrum {
         match c {
             JobCmd::Reset => self.reset_average(),
             JobCmd::Cal(cal) => self.set_cal(*cal),
+            JobCmd::Tone(tone) => self.set_tone(tone),
             JobCmd::Smoothing {
                 change: SmoothingChange::Spectrum(smoothing),
                 rev,
@@ -624,9 +710,10 @@ impl Analysis for Spectrum {
             .due(e, topic, self.generation, &stamp, std::time::Instant::now());
         if due == Due::Send && self.fill_power() {
             let at = self.result_stamp(end);
+            let harmonics = self.harmonics();
             let live = SpecFrame {
                 meas: self.meas,
-                meta: self.meta(at.audio_sample + 1),
+                meta: self.meta(at.audio_sample + 1, harmonics),
                 level: self.live_levels(),
             };
             if e.send(
@@ -658,9 +745,14 @@ impl Analysis for Spectrum {
         };
         let capture = SpecFrame {
             meas: self.meas,
-            meta: self.meta(stamp.audio_sample + 1),
+            // A capture keeps the curve; the reading of the sine is the live frame's.
+            meta: self.meta(stamp.audio_sample + 1, None),
             level: self.capture_levels(),
         };
         Some((stamp, FrameData::Spec(capture)))
     }
 }
+
+#[cfg(test)]
+#[path = "spectrum_tests.rs"]
+mod tests;

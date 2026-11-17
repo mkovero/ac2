@@ -66,6 +66,7 @@ fn frames(t: &mut T, meas: &[(u32, f32)], seq: u64, incarnation: u64) {
                 smoothing: None,
                 math: None,
                 bands: None,
+                harmonics: None,
             },
             level: levels(*top),
         });

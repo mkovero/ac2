@@ -167,6 +167,97 @@ pub struct SpecMeta {
     /// The bands behind a multi-resolution spectrum's columns; `None` for one FFT and a
     /// math channel.
     pub bands: Option<Box<SpecBands>>,
+    /// The generator's sine read from this measurement's spectrum; `None` unless the
+    /// generator is firing a sine, and for a math channel.
+    pub harmonics: Option<Box<SpecHarmonics>>,
+}
+
+/// The harmonics of the generator's sine in a spectrum, read from the averaged power
+/// spectrum at full resolution (before display smoothing), each tone as the power in its
+/// window's main lobe.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpecHarmonics {
+    /// The generator's frequency.
+    pub f0: Hz,
+    /// `f0` is a bin centre of the FFT that was read: the window leaks nothing and the
+    /// reading is exact with any window.
+    pub on_bin: bool,
+    /// What the spectrum says about the sine.
+    pub reading: HarmonicReading,
+}
+
+/// The lowest ratio a harmonic reading carries, dB. A ratio is a quotient of f64 powers,
+/// whose rounding alone lies near −320 dB re the larger, so only a power of exactly zero
+/// (digital silence around the sine) is lower: it is sent as this, never as −∞.
+pub const HARMONIC_DB_MIN: f64 = -400.0;
+
+/// A spectrum's reading of the sine, or why it has none.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum HarmonicReading {
+    /// The sine was read.
+    Read {
+        /// Level of the fundamental in the frame's `scale` (dBFS or dB SPL), as the
+        /// spectrum shows a tone at `f0` in tone-level mode: calibration and mic curve
+        /// applied.
+        fundamental: f64,
+        /// Harmonics 2, 3, … in order, as far as their lobes lie below fs/2 (at most the
+        /// 10th).
+        harmonics: Vec<HarmonicLevel>,
+        /// Total harmonic distortion: the power of the resolved harmonics re the
+        /// fundamental. `None` when no harmonic is resolved; then only `thd_bound` says
+        /// anything.
+        thd: Option<Db>,
+        /// Upper limit of the distortion: every harmonic listed, each at the larger of its
+        /// level and its floor, re the fundamental. Like `thd_n`, not below
+        /// [`HARMONIC_DB_MIN`].
+        thd_bound: Db,
+        /// THD+N: everything outside the lobes of DC and the fundamental, re the
+        /// fundamental. With a mic curve each bin is corrected as the spectrum's is.
+        thd_n: Db,
+        /// The lower limit of `thd_n` set by the window: the part of an off-bin sine's own
+        /// power outside its lobe. `None` on a bin, where the window leaks nothing.
+        leakage: Option<Db>,
+    },
+    /// The spectrum cannot be read for this sine.
+    Unreadable {
+        /// Why.
+        reason: HarmonicUnreadable,
+    },
+}
+
+/// Why a spectrum has no reading for the sine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HarmonicUnreadable {
+    /// A rectangular window reads a sine only on a bin: between bins its leakage covers
+    /// every harmonic.
+    RectangularOffBin,
+    /// The frequency is too low for this FFT length: the lobes of DC, the sine and its
+    /// harmonics leave no bins between them.
+    TooLow,
+    /// The sine's own lobe reaches fs/2.
+    OutOfBand,
+    /// The sine's lobe holds no power (digital silence): nothing to refer harmonics to.
+    NoFundamental,
+}
+
+/// One harmonic of the sine, re the fundamental; neither ratio is below
+/// [`HARMONIC_DB_MIN`].
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HarmonicLevel {
+    /// Order k: the harmonic at k·`f0`.
+    pub order: u8,
+    /// Its level re the fundamental (dBc). When not `resolved` this is the floor's: the
+    /// harmonic is below it, by how much is not known.
+    pub level: Db,
+    /// What its lobe would hold with no harmonic there (the noise or the fundamental's
+    /// skirt around it), re the fundamental.
+    pub floor: Db,
+    /// `level` stands at least 6 dB above `floor`.
+    pub resolved: bool,
 }
 
 /// The windows of a multi-resolution spectrum as of this frame

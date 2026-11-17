@@ -8,7 +8,8 @@ use ac2_core::generator::{Generator as CoreGenerator, GeneratorConfig, dbfs_to_r
 use ac2_proto::event::Change;
 use ac2_proto::model::MeasKind;
 use ac2_proto::model::{
-    GenAction, GenAudit, Generator, GeneratorDesired, Lease as WireLease, SweepFailure, SweepStatus,
+    GenAction, GenAudit, Generator, GeneratorDesired, Lease as WireLease, Signal, SweepFailure,
+    SweepStatus,
 };
 use ac2_proto::units::{ClientId, LeaseToken, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError, ReplyBody};
@@ -27,6 +28,15 @@ pub(super) fn start_output(h: &GeneratorHandle) -> bool {
     h.set_gain(Gain::UNITY);
     h.start();
     starts
+}
+
+/// The frequency (Hz) of the sine the generator is firing; `None` when it is silent or
+/// plays anything else (noise, a sweep).
+pub(super) fn firing_sine(g: &Generator) -> Option<f64> {
+    match g.settings.as_ref().filter(|_| g.firing)?.signal {
+        Signal::Sine { freq } => Some(freq.0),
+        Signal::White | Signal::Pink | Signal::PeriodicPink { .. } | Signal::Ess { .. } => None,
+    }
 }
 
 impl Control {
@@ -89,6 +99,26 @@ impl Control {
                 .is_ok_and(|m| matches!(m.config.kind, MeasKind::Transfer { .. }))
             {
                 j.send(JobCmd::GeneratorEdge(edge));
+            }
+        }
+    }
+
+    /// Tells every spectrum job which sine the generator fires now, when that changed.
+    /// Called on every commit of the generator's state, the one place every start, stop,
+    /// expiry, recovery and sweep passes: the state says firing exactly while the output
+    /// sounds. Only spectrum jobs read a sine.
+    pub(super) fn sync_tone(&mut self) {
+        let tone = firing_sine(&self.store.state().generator);
+        if tone == self.out.tone {
+            return;
+        }
+        self.out.tone = tone;
+        for (id, j) in &self.jobs {
+            if self
+                .meas(*id)
+                .is_ok_and(|m| matches!(m.config.kind, MeasKind::Spectrum { .. }))
+            {
+                j.send(JobCmd::Tone(tone));
             }
         }
     }

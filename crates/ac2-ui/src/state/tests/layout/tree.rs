@@ -67,6 +67,7 @@ fn tree_dots_have_the_colours_of_their_curves() {
                 smoothing: None,
                 math: None,
                 bands: None,
+                harmonics: None,
             },
             level: vec![-60.0; 8],
         }),

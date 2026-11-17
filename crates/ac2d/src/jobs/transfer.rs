@@ -754,7 +754,7 @@ impl Analysis for Transfer {
                 self.config_rev = rev;
                 self.apply_pending = true;
             }
-            JobCmd::Smoothing { .. } | JobCmd::Spl { .. } => {}
+            JobCmd::Smoothing { .. } | JobCmd::Spl { .. } | JobCmd::Tone(_) => {}
         }
     }
 

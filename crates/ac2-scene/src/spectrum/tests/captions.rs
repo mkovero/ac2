@@ -130,6 +130,7 @@ fn live_traces_carry_the_calibration_in_their_caption() {
             smoothing: None,
             math: None,
             bands: None,
+            harmonics: None,
         },
         level: vec![],
     };

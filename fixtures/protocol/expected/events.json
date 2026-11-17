@@ -203,6 +203,10 @@
          "at": null,
          "scale": 1.0
         },
+        "harmonics": {
+         "at": null,
+         "scale": 1.0
+        },
         "loudness": {
          "at": null,
          "scale": 1.0
@@ -261,6 +265,10 @@
           "at": null,
           "scale": 1.0
          },
+         "harmonics": {
+          "at": null,
+          "scale": 1.0
+         },
          "loudness": {
           "at": null,
           "scale": 1.0
@@ -311,6 +319,10 @@
           "scale": 1.0
          },
          "peaks": {
+          "at": null,
+          "scale": 1.0
+         },
+         "harmonics": {
           "at": null,
           "scale": 1.0
          },

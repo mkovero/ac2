@@ -259,8 +259,9 @@ pub enum RigRef {
     },
 }
 
-/// A pane's five plates: the legend, the cursor values, the mark's readout, the
-/// spectrum's list of tracked peaks and the Programme pane's loudness readout. A pane kind
+/// A pane's six plates: the legend, the cursor values, the mark's readout, the
+/// spectrum's list of tracked peaks, its reading of the generator's sine and the Programme
+/// pane's loudness readout. A pane kind
 /// without one of them keeps that slot at its default.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -269,17 +270,19 @@ pub struct LayoutPlates {
     pub readout: LayoutPlate,
     pub mark: LayoutPlate,
     pub peaks: LayoutPlate,
+    pub harmonics: LayoutPlate,
     /// `at: None` docks it: the pane reserves room for it beside or above the bars.
     pub loudness: LayoutPlate,
 }
 
 impl LayoutPlates {
-    fn all(&self) -> [(&'static str, LayoutPlate); 5] {
+    fn all(&self) -> [(&'static str, LayoutPlate); 6] {
         [
             ("legend", self.legend),
             ("readout", self.readout),
             ("mark", self.mark),
             ("peaks", self.peaks),
+            ("harmonics", self.harmonics),
             ("loudness", self.loudness),
         ]
     }

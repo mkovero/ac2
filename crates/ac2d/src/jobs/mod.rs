@@ -349,6 +349,9 @@ pub(crate) enum JobCmd {
     /// The input's calibration or mic curve changed (on the measurement input of a
     /// transfer function only the curve matters).
     Cal(Box<crate::calstore::InputCal>),
+    /// The sine the generator fires (Hz), or that it fires none: a spectrum reads its
+    /// harmonics.
+    Tone(Option<f64>),
     /// The clocks between the rigs of a cross-rig transfer function, judged anew.
     Clocks(cross_rig::ClockGate),
 }

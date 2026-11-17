@@ -21,6 +21,7 @@ mod discovery;
 mod drift;
 mod eq;
 mod file_jobs;
+mod harmonics;
 mod inputs;
 mod jack;
 mod leq;

@@ -57,6 +57,7 @@ fn spectra_of(t: &mut T, frames: &[(u32, Vec<f32>)], seq: u64, incarnation: Daem
                 smoothing: None,
                 math: None,
                 bands: None,
+                harmonics: None,
             },
             level: level.clone(),
         });

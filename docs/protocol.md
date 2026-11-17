@@ -31,7 +31,7 @@ keepalives to each connection as its credit allows (§5.8).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 89`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 90`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -435,8 +435,9 @@ shows (`content`, required, a tagged map, each reference carrying the rig whose 
 level axis ranges the operator set on it (`levels`: {`transfer`, `spectrum_dbfs`,
 `spectrum_spl`, `distortion`}, each {`lo`, `hi`} dB or nil, nil being framed by the client
 when the pane first shows a curve) and where its readout plates sit (`plates`: {`legend`,
-`readout`, `mark`, `peaks`, `loudness`}, each {`at`, `scale`}, all five required; a pane kind
-without a plate keeps its slot at the default; `loudness` is the Programme pane's loudness
+`readout`, `mark`, `peaks`, `harmonics`, `loudness`}, each {`at`, `scale`}, all six required; a
+pane kind without a plate keeps its slot at the default; `harmonics` is the spectrum's reading
+of the generator's sine (§3.2 *Harmonics of the generator's sine*); `loudness` is the Programme pane's loudness
 readout, docked beside or above the bars and sized from the room it gets while `at` is nil
 (its `scale` then only sizes it once floated): `at` nil for the client's own placement or
 [x, y], each in 0 … 1, the plate's top-left corner as a fraction of the room the plot leaves
@@ -1777,6 +1778,46 @@ newest frame's end before this frame's audio end; nil before its first frame)}. 
 exact: every band's frame ends on a multiple of the shortest hop, and a column whose bands
 made no new frame since the previous `spec` frame repeats its previous value.
 
+#### Harmonics of the generator's sine (`SpecMeta.harmonics`)
+
+While the generator fires a `sine` (`Generator.firing` with `settings.signal` a sine; not a
+sweep, not noise), every live `spec` frame of a spectrum measurement carries
+`SpecMeta.harmonics` (`SpecHarmonics`); otherwise, for a math channel, in a captured
+frame and before the FFT that is read has a spectrum it is nil. `SpecHarmonics` {`f0`: Hz
+(the generator's frequency), `on_bin`: bool (`f0` is a bin centre of the FFT read, so the
+window leaks nothing), `reading`: `HarmonicReading`}.
+
+The reading is taken from the averaged power spectrum at full resolution, before display
+smoothing and whatever `level` is: every bin of a `fixed` spectrum's FFT; for `multi` the
+bins of its longest window (the ladder's first band, 32 768 points at 48 kHz, 65 536 at
+96 kHz). A tone's power is the sum over its window's main lobe, corrected for the part of
+the window's energy outside it, so a sine between bins reads its level without scalloping.
+A mic curve is applied per bin before reading, as the frame's `level` has it.
+
+`HarmonicReading` is tagged by `type`:
+
+- `read` {`fundamental`: f64, the sine's level in the frame's `scale` (dBFS or dB SPL), what
+  the spectrum shows for a tone at `f0` in tone-level mode; `harmonics`: [`HarmonicLevel`],
+  orders 2, 3, … up to 10 or the last whose lobe lies below fs/2; `thd`: Db \| nil, the
+  power of the resolved harmonics re the fundamental, nil when none is resolved; `thd_bound`:
+  Db, an upper limit of the distortion: every harmonic listed at the larger of its level
+  and its floor; `thd_n`: Db, everything outside the lobes of DC and the fundamental re the
+  fundamental; `leakage`: Db \| nil, the part of an off-bin sine's own power its window
+  spreads outside its lobe, below which `thd_n` cannot read; nil on a bin}.
+  `HarmonicLevel` {`order`: u8, `level`: Db re the fundamental (dBc), `floor`: Db re the
+  fundamental, what the harmonic's lobe would hold from the noise or the fundamental's
+  skirt around it, `resolved`: bool, `level` stands 6 dB above `floor`}. A harmonic that
+  is not resolved has `level` = `floor`: it is below that, by how much is not known. No
+  ratio is NaN or infinite: a power of exactly zero is sent as −400 dB.
+- `unreadable` {`reason`: `rectangular_off_bin` (a rectangular window reads a sine only on
+  a bin) \| `too_low` (the lobes of DC, the sine and its harmonics leave no bins between
+  them at this FFT length) \| `out_of_band` (the sine's lobe reaches fs/2) \|
+  `no_fundamental` (the lobe holds no power: digital silence)}.
+
+The average still holds what the input was before the sine started or moved; the reading
+settles with it. `ac2 gen sine --lock MEAS` sets a frequency on a bin of a spectrum
+measurement (`k · fs / N`, 1 ≤ k < N/2, nearest to the one asked for).
+
 #### Spectrum level (`SpecLevel`)
 
 `SpectrumConfig.level: SpecLevel` is `tone` or `density`; a change restarts the job (its
@@ -2164,7 +2205,7 @@ always `i8`).
 | `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask; an alignment's (all four or none) `align_phase_before`, `align_phase_after`: deg (A − B as measured and with the fit applied), `align_sum_before`, `align_sum_after`: db (the summation per column); an average's range across positions (all three or none) `range_lo`, `range_hi`: db, `range_coh`: coherence | `delay`, `nudged` (Seconds: the part of `delay` `delay.nudge` steps added to the arrival; 0 for a math channel), `smoothing`, `mic_curve`, `math` (`MathState` \| nil: a math channel's operands, below), `unresolved` (`Unresolved` \| nil, §3.2 *Resolution*), `filled` (f32, 0…1: how full the averages are, counted in accumulated blocks of the least full analysis stage, so refused blocks add nothing; a math channel's is the least of its included live operands, 1 for traces) |
 | `ir` | `ir_linear`: full_scale, `ir_etc`: db (optional) | `sample_rate`, `t0`, `dt`, `inserted_delay`; point i at `t0 + i·dt` |
 | `rta` | `level`: dbfs or db_spl (band power), `validity`: bitmask | `fraction`, `weighting`, `scale`, `cal`, `mic_curve`, `math` (`MathState` \| nil) |
-| `spec` | `level`: dbfs or db_spl (tone level), dbfs_per_hz or db_spl_per_hz (density; §3.2 *Spectrum level*); smoothed when `smoothing` is set; NaN for no power; on a `log_bins` grid (`fixed`) or a `log` grid (`multi`, §3.2 *Spectrum resolution*): each column the highest level among its bins (tone) or their mean power (density) | `window`, `scale`, `level` (`SpecLevel`), `cal`, `mic_curve`, `smoothing`, `math` (`MathState` \| nil), `bands` (`SpecBands` \| nil) |
+| `spec` | `level`: dbfs or db_spl (tone level), dbfs_per_hz or db_spl_per_hz (density; §3.2 *Spectrum level*); smoothed when `smoothing` is set; NaN for no power; on a `log_bins` grid (`fixed`) or a `log` grid (`multi`, §3.2 *Spectrum resolution*): each column the highest level among its bins (tone) or their mean power (density) | `window`, `scale`, `level` (`SpecLevel`), `cal`, `mic_curve`, `smoothing`, `math` (`MathState` \| nil), `bands` (`SpecBands` \| nil), `harmonics` (`SpecHarmonics` \| nil, §3.2 *Harmonics of the generator's sine*) |
 | `spl` | none (n = 0) | `scale`, `weighting`, `time_weighting`, `peak_weighting`, `level`, `lmax`, `lmin`, `leq`, `lpeak`, `duration`, `cal`, `mic_curve`, `position` (`PositionCorrection` \| nil: included in the levels) |
 | `leq` | one column per window of the meter's configuration (`config_rev`), in its order: `leq`: dbfs or db_spl, `elapsed`: seconds, `measured`: seconds, `allowed`: dbfs or db_spl (headroom; NaN without a judged limit or when it cannot recover), `recover`: seconds (to recover at the limit; NaN unless it cannot within the horizon), `least`: dbfs or db_spl (the Leq the window ends at if the rest is silent; the Leq once full), `over_in`: seconds (until a window `ON_COURSE` spends its budget; else NaN), `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `logged` (rows logged so far), `run` (`LeqRun` \| nil, §3.2 SPL log), `lcpeak`, `lafmax` (`LeqPeak` \| nil), `position` (`PositionCorrection` \| nil: included in every level) |
 | `band_leq` | one column per band window, in configuration order: `leq`: dbfs or db_spl, `limit`: dbfs or db_spl, `allowed`: dbfs or db_spl, `recover`: seconds, `leq_flags`: bitmask | `scale`, `cal`, `mic_curve`, `horizon`, `correction`, `limits_from`, `windows` ([`BandWindowState`]), `predicted` (`PredictedLeq` \| nil); §3.2 *Band meter* |

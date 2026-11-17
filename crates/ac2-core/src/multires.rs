@@ -331,6 +331,20 @@ impl MultiResAnalyzer {
         &self.cfg
     }
 
+    /// The band with the longest window: the finest bins the analyzer has, and like every
+    /// band a full-rate FFT up to fs/2, so a single tone and its harmonics can be read
+    /// from it alone.
+    pub fn longest(&self) -> &SpectrumAnalyzer {
+        &self.bands[0]
+    }
+
+    /// Per bin of [`Self::longest`]: the factor [`Self::set_gain`] set, without the tone
+    /// scaling.
+    pub fn longest_gain(&self) -> impl Iterator<Item = f64> + '_ {
+        let tone = self.bands[0].tone_power_factor();
+        self.gain[0].iter().map(move |g| g / tone)
+    }
+
     /// Number of output columns.
     pub fn columns(&self) -> usize {
         self.cfg.grid.len()

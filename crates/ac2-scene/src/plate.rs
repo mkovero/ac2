@@ -66,16 +66,19 @@ pub enum PlateKind {
     Mark,
     /// The tracked peaks, ranked (spectrum view; their boxes stay on the curve).
     Peaks,
+    /// The generator's sine and its harmonics as the spectrum reads them (spectrum view).
+    Harmonics,
     /// A Programme pane's one loudness source: Int, Mom, Short, the maxima, LRA, TP max.
     Loudness,
 }
 
 impl PlateKind {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Legend,
         Self::Readout,
         Self::Mark,
         Self::Peaks,
+        Self::Harmonics,
         Self::Loudness,
     ];
 
@@ -86,6 +89,7 @@ impl PlateKind {
             Self::Readout => "cursor values",
             Self::Mark => "mark readout",
             Self::Peaks => "peak list",
+            Self::Harmonics => "harmonics",
             Self::Loudness => "loudness readout",
         }
     }
@@ -186,6 +190,7 @@ pub struct Plates {
     pub readout: PlatePlace,
     pub mark: PlatePlace,
     pub peaks: PlatePlace,
+    pub harmonics: PlatePlace,
     pub loudness: PlatePlace,
 }
 
@@ -196,6 +201,7 @@ impl Plates {
             PlateKind::Readout => &self.readout,
             PlateKind::Mark => &self.mark,
             PlateKind::Peaks => &self.peaks,
+            PlateKind::Harmonics => &self.harmonics,
             PlateKind::Loudness => &self.loudness,
         }
     }
@@ -206,6 +212,7 @@ impl Plates {
             PlateKind::Readout => &mut self.readout,
             PlateKind::Mark => &mut self.mark,
             PlateKind::Peaks => &mut self.peaks,
+            PlateKind::Harmonics => &mut self.harmonics,
             PlateKind::Loudness => &mut self.loudness,
         }
     }

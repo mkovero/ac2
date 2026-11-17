@@ -13,7 +13,7 @@ import zlib
 
 import msgpack
 
-PROTO_VERSION = 89
+PROTO_VERSION = 90
 MAX_HEADER_BYTES = 8192
 MAX_N = 1 << 16
 MAX_ARRAYS = 12
@@ -234,6 +234,12 @@ _MATH = ("opt", [("operands", ("list", [("operand", _OPERAND), ("status", _OPERA
                  ("range", ("opt", ("tagged", {"too_few": [], "envelope": [("positions", None)],
                                                "percentiles": [("positions", None)]})))])
 _POSITION = [("level", None), ("peak", None)]
+_HARMONIC_READING = ("tagged", {
+    "read": [("fundamental", None),
+             ("harmonics", ("list", [("order", None), ("level", None), ("floor", None), ("resolved", None)])),
+             ("thd", None), ("thd_bound", None), ("thd_n", None), ("leakage", None)],
+    "unreadable": [("reason", None)],
+})
 _PEAK = [("level", None), ("judgement", None)]
 _PAIR_LEVELS = [("left", None), ("right", None), ("correlation", None), ("quiet", None)]
 _LOUDNESS = [("source", ("tagged", {"pair": [("left", None), ("right", None)],
@@ -255,7 +261,8 @@ META = {
              ("bands", ("opt", [("bands", ("list", [("window", None), ("hop", None), ("sole", None),
                                                      ("age", None)])),
                                 ("unresolved", [("resolution", None),
-                                                ("ranges", ("list", [("lo", None), ("hi", None)]))])]))],
+                                                ("ranges", ("list", [("lo", None), ("hi", None)]))])])),
+             ("harmonics", ("opt", [("f0", None), ("on_bin", None), ("reading", _HARMONIC_READING)]))],
     "spl": [("scale", None), ("weighting", None), ("time_weighting", None), ("peak_weighting", None),
             ("level", None), ("lmax", None), ("lmin", None), ("leq", None), ("lpeak", None),
             ("duration", None), ("cal", _CAL), ("mic_curve", None), ("position", ("opt", _POSITION))],

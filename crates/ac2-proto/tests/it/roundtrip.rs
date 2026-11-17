@@ -576,6 +576,72 @@ fn lf_harmonics_is_a_named_setting_that_defaults_to_standard() {
     }
 }
 
+/// A spectrum's reading of the generator's sine: `read` and `unreadable` are told apart by
+/// `type`, the reasons are named, and a distortion without a resolved harmonic or a leakage
+/// on a bin is nil, never a number standing for "none".
+#[test]
+fn harmonic_readings_roundtrip_by_name() {
+    use std::collections::BTreeMap;
+
+    use ac2_proto::frame::{HarmonicLevel, HarmonicReading, HarmonicUnreadable, SpecHarmonics};
+    use ac2_proto::units::{Db, Hz};
+
+    for (reason, name) in [
+        (HarmonicUnreadable::RectangularOffBin, "rectangular_off_bin"),
+        (HarmonicUnreadable::TooLow, "too_low"),
+        (HarmonicUnreadable::OutOfBand, "out_of_band"),
+        (HarmonicUnreadable::NoFundamental, "no_fundamental"),
+    ] {
+        let r = HarmonicReading::Unreadable { reason };
+        let b = rmp_serde::to_vec_named(&r).expect("encode");
+        let m: BTreeMap<String, String> = rmp_serde::from_slice(&b).expect("a map of names");
+        let want = [("type", "unreadable"), ("reason", name)];
+        assert_eq!(
+            m,
+            want.into_iter()
+                .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                .collect()
+        );
+        assert_eq!(
+            rmp_serde::from_slice::<HarmonicReading>(&b).expect("decode"),
+            r
+        );
+    }
+
+    /// What a client reading only these two fields sees.
+    #[derive(serde::Deserialize)]
+    struct Limits {
+        r#type: String,
+        thd: Option<f64>,
+        leakage: Option<f64>,
+    }
+    let h = SpecHarmonics {
+        f0: Hz(1000.0),
+        on_bin: true,
+        reading: HarmonicReading::Read {
+            fundamental: 94.0,
+            harmonics: vec![HarmonicLevel {
+                order: 2,
+                level: Db(-131.0),
+                floor: Db(-131.0),
+                resolved: false,
+            }],
+            thd: None,
+            thd_bound: Db(-131.0),
+            thd_n: Db(-110.0),
+            leakage: None,
+        },
+    };
+    let b = rmp_serde::to_vec_named(&h).expect("encode");
+    assert_eq!(
+        rmp_serde::from_slice::<SpecHarmonics>(&b).expect("decode"),
+        h
+    );
+    let b = rmp_serde::to_vec_named(&h.reading).expect("encode");
+    let l: Limits = rmp_serde::from_slice(&b).expect("a map");
+    assert_eq!((l.r#type.as_str(), l.thd, l.leakage), ("read", None, None));
+}
+
 /// Encode and decode time of a 480-column transfer function with measurement-like noise,
 /// printed (`cargo test --release -p ac2-proto --test it codec_cost -- --ignored
 /// --nocapture`).

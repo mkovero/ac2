@@ -27,6 +27,7 @@ fn frame(t: &mut T, i: u64, drained: Instant) {
             smoothing: None,
             math: None,
             bands: None,
+            harmonics: None,
         },
         level: vec![-60.0, -40.0, -20.0, -30.0, -60.0],
     });

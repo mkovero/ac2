@@ -465,6 +465,8 @@ struct Output {
     gate: Arc<LeaseGate>,
     level: Option<LevelControl>,
     source: Option<SourceKey>,
+    /// The firing sine the spectrum jobs were last told (Hz).
+    tone: Option<f64>,
     /// The system max level a client last set (kept in the rig settings); `None`: never
     /// set, the bound applies.
     ceiling_set: Option<f64>,
@@ -584,6 +586,7 @@ impl Control {
                 gate: Arc::new(LeaseGate::new()),
                 level: None,
                 source: None,
+                tone: None,
                 ceiling_set: saved.ceiling_dbfs,
             },
             grids: HashMap::new(),
@@ -877,6 +880,7 @@ impl Control {
             change,
             Change::Measurement(_) | Change::Trace(_) | Change::Walk(_) | Change::WalkPlan(_)
         );
+        let generator = matches!(change, Change::Generator(_));
         let levels = matches!(
             change,
             Change::Rig(_) | Change::Inputs(_) | Change::LineCalibration(_)
@@ -887,6 +891,9 @@ impl Control {
         let ev = self.store.commit(change, Instant::now());
         if levels {
             self.sync_levels_policy();
+        }
+        if generator {
+            self.sync_tone();
         }
         match ac2_proto::encode_event(&ev) {
             Ok(b) => self.s.outbox.event(&b),

@@ -218,6 +218,7 @@ impl Analysis for Rta {
             | JobCmd::Find { .. }
             | JobCmd::Track { .. }
             | JobCmd::GeneratorEdge(_)
+            | JobCmd::Tone(_)
             | JobCmd::Smoothing { .. }
             | JobCmd::Spl { .. }
             | JobCmd::Clocks(_) => {}

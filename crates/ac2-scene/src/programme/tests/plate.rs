@@ -304,8 +304,8 @@ fn p_floating(p: &ProgrammePane) -> ProgrammePane {
 
 #[test]
 fn plate_kind_loudness() {
-    assert_eq!(PlateKind::ALL.len(), 5);
-    assert_eq!(PlateKind::ALL[4], PlateKind::Loudness);
+    assert_eq!(PlateKind::ALL.len(), 6);
+    assert_eq!(PlateKind::ALL[5], PlateKind::Loudness);
     assert_eq!(PlateKind::Loudness.name(), "loudness readout");
     let mut plates = crate::plate::Plates::default();
     plates.get_mut(PlateKind::Loudness).set_scale(2.0);

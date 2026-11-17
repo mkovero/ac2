@@ -99,6 +99,7 @@ fn spectrum_at(seq: u64, level: f32) -> ConnEvent {
             smoothing: None,
             math: None,
             bands: None,
+            harmonics: None,
         },
         level: vec![level; 5],
     });

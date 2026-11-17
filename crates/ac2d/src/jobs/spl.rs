@@ -864,6 +864,7 @@ impl Analysis for Spl {
             | JobCmd::Find { .. }
             | JobCmd::Track { .. }
             | JobCmd::GeneratorEdge(_)
+            | JobCmd::Tone(_)
             | JobCmd::Smoothing { .. }
             | JobCmd::Clocks(_) => {}
         }

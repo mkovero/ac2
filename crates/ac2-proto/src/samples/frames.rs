@@ -4,12 +4,12 @@ use super::builders::*;
 use super::state::*;
 use crate::frame::{
     AudioHealth, BandLeqFrame, BandLeqMeta, BandWindowState, ClipFlags, DaemonHealth, Frame,
-    FrameData, FrameStamp, GONIO_POINTS, GenSummary, GonioFrame, GonioPair, IrFrame, IrMeta,
-    KaMeta, LeqFlags, LeqFrame, LeqMeta, LeqPeak, LeqRun, LevelsFrame, LevelsMeta, LoudnessSource,
-    MathState, OperandState, OperandStatus, PairLevels, PreviewLevelsFrame, PreviewLevelsMeta,
-    ProtectionFlags, RtaFrame, RtaMeta, SessionLevelsFrame, SessionLevelsMeta, SourceLoudness,
-    SpecBand, SpecBands, SpecFrame, SpecMeta, SplFrame, SplMeta, TfFrame, TfMeta, TimingMeta,
-    TimingWindow, ValidityMask,
+    FrameData, FrameStamp, GONIO_POINTS, GenSummary, GonioFrame, GonioPair, HarmonicLevel,
+    HarmonicReading, IrFrame, IrMeta, KaMeta, LeqFlags, LeqFrame, LeqMeta, LeqPeak, LeqRun,
+    LevelsFrame, LevelsMeta, LoudnessSource, MathState, OperandState, OperandStatus, PairLevels,
+    PreviewLevelsFrame, PreviewLevelsMeta, ProtectionFlags, RtaFrame, RtaMeta, SessionLevelsFrame,
+    SessionLevelsMeta, SourceLoudness, SpecBand, SpecBands, SpecFrame, SpecHarmonics, SpecMeta,
+    SplFrame, SplMeta, TfFrame, TfMeta, TimingMeta, TimingWindow, ValidityMask,
 };
 use crate::grid::GridDef;
 use crate::model::*;
@@ -273,6 +273,31 @@ pub fn frames() -> Vec<Frame> {
                                 lo: Hz(7.8125),
                                 hi: Hz(101.5),
                             }],
+                        },
+                    })),
+                    harmonics: Some(Box::new(SpecHarmonics {
+                        f0: Hz(1000.0),
+                        on_bin: false,
+                        reading: HarmonicReading::Read {
+                            fundamental: -12.5,
+                            harmonics: vec![
+                                HarmonicLevel {
+                                    order: 2,
+                                    level: Db(-80.25),
+                                    floor: Db(-112.0),
+                                    resolved: true,
+                                },
+                                HarmonicLevel {
+                                    order: 3,
+                                    level: Db(-110.5),
+                                    floor: Db(-110.5),
+                                    resolved: false,
+                                },
+                            ],
+                            thd: Some(Db(-80.25)),
+                            thd_bound: Db(-80.0),
+                            thd_n: Db(-74.5),
+                            leakage: Some(Db(-98.0)),
                         },
                     })),
                 },

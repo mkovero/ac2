@@ -45,10 +45,10 @@ pub use error::{DecodeError, EncodeError};
 pub use flags::{ClipFlags, LeqFlags, ProtectionFlags, ValidityMask};
 pub use meta::{
     AudioHealth, BandLeqMeta, BandWindowState, DaemonHealth, FrameHeader, FrameMeta, GenSummary,
-    GonioMeta, GonioPairMeta, IrMeta, KaMeta, LeqMeta, LeqPeak, LeqRun, LevelsMeta, LoudnessSource,
-    MathState, OperandState, OperandStatus, PairLevels, PreviewLevelsMeta, RtaMeta,
-    SessionLevelsMeta, SourceLoudness, SpecBand, SpecBands, SpecMeta, SplMeta, TfMeta, TimingMeta,
-    TimingWindow,
+    GonioMeta, GonioPairMeta, HARMONIC_DB_MIN, HarmonicLevel, HarmonicReading, HarmonicUnreadable,
+    IrMeta, KaMeta, LeqMeta, LeqPeak, LeqRun, LevelsMeta, LoudnessSource, MathState, OperandState,
+    OperandStatus, PairLevels, PreviewLevelsMeta, RtaMeta, SessionLevelsMeta, SourceLoudness,
+    SpecBand, SpecBands, SpecHarmonics, SpecMeta, SplMeta, TfMeta, TimingMeta, TimingWindow,
 };
 pub use schema::{ArrayDesc, ArrayName, Elem, FrameKind, Unit};
 pub use wire::{DeltaFrame, Form, WireFrame, decode_frame, decode_wire, encode_delta, encode_key};

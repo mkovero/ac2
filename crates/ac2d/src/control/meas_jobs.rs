@@ -144,7 +144,7 @@ impl Control {
                 (Box::new(a), static_grid(&m.config.kind))
             }
             MeasKind::Spectrum { config } => {
-                let a = jobs::spectrum::Spectrum::new(
+                let mut a = jobs::spectrum::Spectrum::new(
                     m.id,
                     config.clone(),
                     fs,
@@ -154,6 +154,8 @@ impl Control {
                     m.config_rev,
                 )
                 .map_err(invalid)?;
+                // A job made while a sine fires reads it from its first frame.
+                a.set_tone(super::generator::firing_sine(&self.store.state().generator));
                 (Box::new(a), Some(jobs::spectrum::grid(config, fs)))
             }
             MeasKind::Rta { config } => {
