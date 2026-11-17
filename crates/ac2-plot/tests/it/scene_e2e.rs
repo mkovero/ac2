@@ -368,6 +368,7 @@ fn spectrum_tracked_peaks_solid_plates() {
         "spectrum_tracked_peaks_solid_plates",
         SpectrumStyle::Line,
         Some(&peaks),
+        None,
         |view, theme| {
             view.plates.peaks.move_to(0.0, 1.0);
             view.plates.peaks.set_scale(1.5);
@@ -377,13 +378,50 @@ fn spectrum_tracked_peaks_solid_plates() {
 }
 
 fn spectrum_golden(name: &str, style: SpectrumStyle) {
-    spectrum_golden_with(name, style, None, |_, _| {});
+    spectrum_golden_with(name, style, None, None, |_, _| {});
+}
+
+/// A sine fired at 1 kHz with its second and third harmonics standing out of the floor:
+/// the harmonics plate under the cursor values on the right, clear of the legend, each
+/// read harmonic's row and its mark on the curve in the order's colour, the unresolved
+/// orders one limit row.
+#[test]
+fn spectrum_harmonics_plate() {
+    use ac2_proto::frame::{HarmonicLevel, HarmonicReading, SpecHarmonics};
+    use ac2_proto::units::{Db, Hz};
+    let order = |order: u8, level: f64, resolved: bool| HarmonicLevel {
+        order,
+        level: Db(level),
+        floor: Db(if resolved { -62.0 } else { level }),
+        resolved,
+    };
+    let mut harmonics = vec![order(2, -30.0, true), order(3, -38.0, true)];
+    harmonics.extend((4..=10).map(|k| order(k, -58.0 - f64::from(k), false)));
+    spectrum_golden_with(
+        "spectrum_harmonics_plate",
+        SpectrumStyle::Line,
+        None,
+        Some(SpecHarmonics {
+            f0: Hz(1000.0),
+            on_bin: true,
+            reading: HarmonicReading::Read {
+                fundamental: -20.0,
+                harmonics,
+                thd: Some(Db(-29.4)),
+                thd_bound: Db(-29.3),
+                thd_n: Db(-27.1),
+                leakage: None,
+            },
+        }),
+        |_, _| {},
+    );
 }
 
 fn spectrum_golden_with(
     name: &str,
     style: SpectrumStyle,
     tracked: Option<&[ac2_scene::spectrum::peaks::Peak]>,
+    harmonics: Option<ac2_proto::frame::SpecHarmonics>,
     adjust: impl FnOnce(&mut ViewState, &mut Theme),
 ) {
     use ac2_proto::GridDef;
@@ -422,16 +460,21 @@ fn spectrum_golden_with(
     };
     let freqs = grid.centres();
     let edges = grid.edges();
-    // Pink-like noise floor with a sine at 1 kHz.
+    // Pink-like noise floor with a sine at 1 kHz, and its second and third harmonics when
+    // a reading of them is shown.
+    let tones: &[(f64, f32)] = if harmonics.is_some() {
+        &[(1000.0, -20.0), (2000.0, -50.0), (3000.0, -58.0)]
+    } else {
+        &[(1000.0, -20.0)]
+    };
     let level = freqs
         .iter()
         .map(|&f| {
             let floor = -70.0 - 3.0 * (f / 1000.0).log2() as f32;
-            if (f / 1000.0).log2().abs() < 0.5 / 48.0 {
-                -20.0
-            } else {
-                floor
-            }
+            tones
+                .iter()
+                .find(|(hz, _)| (f / hz).log2().abs() < 0.5 / 48.0)
+                .map_or(floor, |(_, l)| *l)
         })
         .collect();
     let spec = SpecFrame {
@@ -445,7 +488,7 @@ fn spectrum_golden_with(
             smoothing: None,
             math: None,
             bands: Some(Box::new(bands)),
-            harmonics: None,
+            harmonics: harmonics.map(Box::new),
         },
         level,
     };

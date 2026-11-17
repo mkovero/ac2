@@ -500,6 +500,12 @@ pub struct SpectrographScene {
     pub peak_list: Option<String>,
     /// The peak list's plate.
     pub peaks_box: Option<crate::plate::PlateBox>,
+    /// Shown alone, the harmonics plate's text: what the measurement's spectrum reads of
+    /// the generator's sine, as the spectrum view writes it (no marks: there is no level
+    /// axis to put them on). `None` in the split, without a reading and at traces only.
+    pub harmonic_list: Option<String>,
+    /// The harmonics plate.
+    pub harmonics_box: Option<crate::plate::PlateBox>,
 }
 
 impl SpectrographScene {
@@ -514,6 +520,7 @@ impl SpectrographScene {
                 .into_iter()
                 .chain(self.readout_box)
                 .chain(self.peaks_box)
+                .chain(self.harmonics_box)
                 .collect(),
         }
     }
@@ -851,6 +858,22 @@ pub fn spectrograph_scene(
     } else {
         None
     };
+    let (harmonic_list, harmonics_box) = match sg {
+        Some(s) if alone && message.is_none() => {
+            let own: Vec<SpectrumTrace<'_>> =
+                traces.iter().filter(|t| t.key == s.key).cloned().collect();
+            let avoid: Vec<crate::plate::PlateBox> = readout_box
+                .into_iter()
+                .chain(peaks_box)
+                .chain(legend.as_ref().and_then(|l| l.b.as_ref()).map(|b| b.plate))
+                .collect();
+            let (_, list, b) = crate::spectrum::harmonics::draw(
+                &mut c, &own, &xm, None, plot, under, &avoid, view, theme,
+            );
+            (list, b)
+        }
+        _ => (None, None),
+    };
     layers.extend(c.into_scene(size).layers.into_iter().take(3));
     SpectrographScene {
         scene: Scene {
@@ -875,6 +898,8 @@ pub fn spectrograph_scene(
         peaks,
         peak_list,
         peaks_box,
+        harmonic_list,
+        harmonics_box,
     }
 }
 

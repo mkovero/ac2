@@ -86,6 +86,7 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
 - Power cuts and watchdogs: `docs/design/watchdogs.md`.
 - EQ what-if (sets, prediction, console mark, APO text): `docs/design/eq-overlay.md`, `docs/user-guide.md` *EQ what-if*.
 - Cursor peak / notch jumps and the mark's Δ / comb readout (Alt+P, Alt+N, Alt+D): `crates/ac2-scene/src/cursor_jump.rs`, `docs/user-guide.md` *Cursor jumps and the mark*.
+- Harmonics plate (a fired sine's H1…H10, THD, THD+N on every live spectrum; `ac2 gen sine --lock`): `crates/ac2-scene/src/spectrum/harmonics.rs`, `docs/user-guide.md` *Harmonics of a sine*.
 
 ## Where to look
 | need | file |

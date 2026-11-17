@@ -28,6 +28,7 @@ use crate::view::ViewState;
 use ac2_proto::model::SpectrumStyle;
 
 mod draw;
+pub mod harmonics;
 mod legend;
 mod mark;
 pub mod peaks;
@@ -129,6 +130,9 @@ pub struct SpectrumTrace<'a> {
     /// A live multi-resolution spectrum's bands: where its windows change, and which
     /// columns resolve less than their grid.
     pub bands: Option<&'a SpecBands>,
+    /// What a live spectrum reads of the generator's sine ([`harmonics`]); `Some` only
+    /// while the generator fires one.
+    pub harmonics: Option<&'a ac2_proto::frame::SpecHarmonics>,
 }
 
 /// Opacity multiplier of a curve's bars and fill on stacking layer `layer`
@@ -205,6 +209,7 @@ impl<'a> SpectrumTrace<'a> {
             style: SpectrumStyle::default(),
             layer: 0,
             bands: None,
+            harmonics: None,
         }
     }
 
@@ -255,6 +260,7 @@ impl<'a> SpectrumTrace<'a> {
             style: SpectrumStyle::default(),
             layer: 0,
             bands: frame.meta.bands.as_deref(),
+            harmonics: frame.meta.harmonics.as_deref(),
         }
     }
 
@@ -433,6 +439,13 @@ pub struct SpectrumScene {
     pub peak_list: Option<String>,
     /// The peak list's plate, when the list is drawn.
     pub peaks_box: Option<crate::plate::PlateBox>,
+    /// What each live curve reads of the generator's sine; empty unless it fires one.
+    pub harmonics: Vec<harmonics::SpectrumHarmonics>,
+    /// The harmonics plate's text as drawn; `None` without a reading, or at *traces
+    /// only* (T).
+    pub harmonic_list: Option<String>,
+    /// The harmonics plate, when it is drawn.
+    pub harmonics_box: Option<crate::plate::PlateBox>,
     /// One entry per curve, in drawing order: name, colour and tags (`stopped`,
     /// `STALE 3.2 s`, `offset +3.0 dB`), on the legend plate as on the transfer view.
     pub legend: Vec<LegendEntry>,
@@ -454,8 +467,8 @@ pub struct SpectrumScene {
 }
 
 impl SpectrumScene {
-    /// The plates the operator moves: the legend, the cursor values and the peak list (the
-    /// mark's lines ride on the cursor values' plate).
+    /// The plates the operator moves: the legend, the cursor values, the peak list and the
+    /// harmonics (the mark's lines ride on the cursor values' plate).
     pub fn plates(&self) -> Vec<crate::plate::PlateBox> {
         self.legend_box
             .as_ref()
@@ -463,6 +476,7 @@ impl SpectrumScene {
             .into_iter()
             .chain(self.readout_box)
             .chain(self.peaks_box)
+            .chain(self.harmonics_box)
             .collect()
     }
 }

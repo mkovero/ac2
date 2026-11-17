@@ -393,6 +393,7 @@ pub(crate) fn with_spectrum<R>(
             selected: st.rig.selected_trace == Some(data.meta.id),
             compared,
             bands: None,
+            harmonics: None,
             style: st.trace_display(&data.meta).style,
             layer: if compared {
                 st.compare_layer(

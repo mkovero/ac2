@@ -477,6 +477,7 @@ fn the_spectrum_part_keeps_its_legend_unit_and_selection() {
         selected,
         compared: false,
         bands: None,
+        harmonics: None,
         style: ac2_proto::model::SpectrumStyle::Line,
         layer: 0,
     };
@@ -587,6 +588,7 @@ fn the_spectrograph_alone_takes_the_pane() {
         selected: false,
         compared: false,
         bands: None,
+        harmonics: None,
         style: ac2_proto::model::SpectrumStyle::Line,
         layer: 0,
     };
@@ -701,6 +703,7 @@ fn multires_stitches_cross_the_history() {
         selected: false,
         compared: false,
         bands: Some(&bands),
+        harmonics: None,
         style: ac2_proto::model::SpectrumStyle::Line,
         layer: 0,
     };
@@ -892,6 +895,7 @@ fn alone_the_legend_plate_and_tracked_peaks_and_the_split_leaves_them_to_the_spe
         selected: false,
         compared: false,
         bands: None,
+        harmonics: None,
         style: ac2_proto::model::SpectrumStyle::Line,
         layer: 0,
     };
@@ -986,4 +990,100 @@ fn alone_the_legend_plate_and_tracked_peaks_and_the_split_leaves_them_to_the_spe
 /// The cursor's time `before_s` seconds before the newest frame of `h`.
 fn ago(h: &SpectrographHistory, before_s: f64) -> Option<f64> {
     Some(h.newest_end_s().expect("frames") - before_s)
+}
+
+/// Alone, the spectrograph has the harmonics plate of the spectrum view over the
+/// measurement it draws, under its peak list and clear of the legend, without marks (no
+/// level axis); the split leaves it to the spectrum part.
+#[test]
+fn alone_the_harmonics_plate_and_the_split_leaves_it_to_the_spectrum() {
+    use ac2_proto::frame::{HarmonicReading, HarmonicUnreadable, SpecHarmonics};
+    let mut h = SpectrographHistory::new(30);
+    let mut f = Feed::new(&log_bins());
+    f.push(&mut h, T0, -40.0);
+    let key = crate::trace::TraceKey::Live(ac2_proto::units::MeasId(1));
+    let reading = SpecHarmonics {
+        f0: ac2_proto::units::Hz(1000.0),
+        on_bin: false,
+        reading: HarmonicReading::Unreadable {
+            reason: HarmonicUnreadable::RectangularOffBin,
+        },
+    };
+    let peaks = [crate::spectrum::peaks::Peak {
+        freq_hz: 1000.0,
+        level: -40.0,
+    }];
+    let traces = [SpectrumTrace {
+        key,
+        name: "Main".into(),
+        color: crate::primitives::Color::WHITE,
+        freqs: &[],
+        edges: &[],
+        level: &[],
+        drawn: None,
+        validity: None,
+        peak: None,
+        tracked: Some(&peaks),
+        scale: LevelScale::Dbfs,
+        quantity: crate::spectrum::Quantity::Tone,
+        bin_hz: None,
+        caption: String::new(),
+        freshness: None,
+        offset_db: 0.0,
+        selected: false,
+        compared: false,
+        bands: None,
+        harmonics: Some(&reading),
+        style: ac2_proto::model::SpectrumStyle::Line,
+        layer: 0,
+    }];
+    let input = SpectrographInput {
+        key,
+        history: &h,
+        name: "Main".into(),
+        range: Range::new(-100.0, 0.0),
+        offset_db: 0.0,
+        freshness: None,
+        colours: Colormap::default(),
+        lead_slots: 0.0,
+    };
+    let mut view = ViewState::default();
+    view.spectrum.mode = SpectrumMode::Spectrograph;
+    let at = |view: &ViewState| {
+        spectrograph_scene(
+            &traces,
+            &Status::default(),
+            Some(&input),
+            view,
+            &Theme::dark(),
+            Viewport::new(800.0, 500.0),
+        )
+    };
+    let s = at(&view);
+    assert_eq!(
+        s.harmonic_list.as_deref(),
+        Some("sine 1000 Hz · between bins\nnot read: a rectangular window needs the sine on a bin")
+    );
+    let b = s.harmonics_box.expect("the harmonics plate");
+    assert_eq!(b.kind, crate::plate::PlateKind::Harmonics);
+    let list = s.peaks_box.expect("the peak list").rect;
+    assert!(b.rect.y > list.bottom());
+    assert_eq!(b.rect.right(), s.plot.right() - crate::legend::INSET);
+    assert_eq!(
+        s.plates().iter().map(|p| p.kind).collect::<Vec<_>>(),
+        [
+            crate::plate::PlateKind::Legend,
+            crate::plate::PlateKind::Peaks,
+            crate::plate::PlateKind::Harmonics
+        ]
+    );
+    view.chrome = crate::view::PlotChrome::Bare;
+    let bare = at(&view);
+    assert!(bare.harmonic_list.is_none() && bare.harmonics_box.is_none());
+    view.chrome = crate::view::PlotChrome::Full;
+    view.spectrum.mode = SpectrumMode::Split;
+    let s = at(&view);
+    assert!(s.harmonic_list.is_none() && s.harmonics_box.is_none());
+    let sp = s.spectrum.expect("the spectrum part");
+    assert!(sp.harmonic_list.is_some(), "the spectrum has the plate");
 }

@@ -106,6 +106,17 @@ pub fn freq_readout(hz: f64) -> String {
     }
 }
 
+/// A frequency to the hundredth of a hertz, no more decimals than it has: `1000 Hz`,
+/// `999.02 Hz`, `10007.32 Hz`. For a generator's sine, whose FFT bin (a fraction of a
+/// hertz wide) three significant digits cannot tell from its neighbours.
+pub fn freq_exact(hz: f64) -> String {
+    if !hz.is_finite() || hz <= 0.0 {
+        return NO_VALUE.to_string();
+    }
+    let r = (hz * 100.0).round() / 100.0;
+    format!("{} Hz", fixed(r, needed_decimals(r, 2)))
+}
+
 /// A frequency named only roughly, two significant digits: `68 Hz`, `410 Hz`, `1.6 kHz`.
 /// For edges that are themselves estimates (where a resolution runs out).
 pub fn freq_rough(hz: f64) -> String {

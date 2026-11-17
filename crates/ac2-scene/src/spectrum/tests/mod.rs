@@ -6,6 +6,7 @@ use ac2_proto::units::{Hz, MeasId};
 
 mod captions;
 mod drawing;
+mod harmonics;
 mod mark;
 mod tracking;
 
@@ -51,6 +52,7 @@ fn rta_trace<'a>(
         selected: false,
         compared: false,
         bands: None,
+        harmonics: None,
         style: SpectrumStyle::Bars,
         layer: 0,
     }

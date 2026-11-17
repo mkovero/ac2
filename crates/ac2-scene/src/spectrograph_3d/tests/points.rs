@@ -52,6 +52,7 @@ fn trace(peaks: Option<&[Peak]>) -> SpectrumTrace<'_> {
         style: SpectrumStyle::Line,
         layer: 0,
         bands: None,
+        harmonics: None,
     }
 }
 

@@ -2,6 +2,7 @@
 
 mod edit;
 mod focus;
+mod harmonics;
 mod new_meas;
 mod own;
 mod peak_points;

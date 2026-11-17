@@ -1205,7 +1205,10 @@ or over a busy plot (saved in `ui.toml`). The peak list, placed by the pane, han
 the cursor values on the plot's right side (at the top while those are dragged elsewhere,
 in the bottom-right corner if they were dropped on its place); dragged, it keeps its
 place as the other plates do, while its boxes stay on the curve (until **T** to traces
-only, which hides them with the list). A dragged cursor-values plate names each curve beside its values, since it
+only, which hides them with the list). The harmonics plate ([Harmonics of a
+sine](#harmonics-of-a-sine)) hangs under those two on the right, beside them when the pane
+is too low to hold it under them, and never on the legend where the pane places both;
+dragged, it keeps its place too. A dragged cursor-values plate names each curve beside its values, since it
 no longer sits on the legend's rows; the frequency is its first line. Each pane keeps its
 own plates, with the measurement's panes (so in the session, like the level ranges) or in
 `ui.toml` with the window's panes. A move or a size is one **Ctrl+Z** step. The list of
@@ -1343,6 +1346,65 @@ on the same plate, and the 3D spectrograph stands them on its front row (see bel
 stopped curve shows the peaks of its newest frame; before any data there are none. **T** to
 traces only hides every peak mark: boxes, ranks and the list.
 
+#### Harmonics of a sine
+
+While the generator fires a sine, every live spectrum reads it, and its pane (the flat
+spectrograph alone too) shows the **harmonics plate** on the right under the cursor values
+and the peak list: a plate like the others, to drag, size and double-click back. The app
+cannot start a sine yet; the command line does: `ac2 gen sine --freq 1khz --out 1
+--level -20dbfs --lock <meas>`. The plate goes when the sine stops, and **T** to traces only hides it with
+its marks.
+
+```
+sine 999.02 Hz · on bin
+H1  −12.3 dBFS
+H2  −96.4 dB
+H3  −101.2 dB
+H4–H10  < −118.0 dB
+THD  −95.1 dB · 0.00176 %
+THD+N  −88.0 dB · 0.00398 %
+```
+
+- **sine** — the generator's frequency to a hundredth of a hertz, and whether it is a bin
+  centre of this spectrum's FFT (*on bin*) or not (*between bins*).
+- **H1** — the fundamental's level, as the cursor reads a tone there: dBFS, or dB SPL on a
+  calibrated input.
+- **H2, H3, …** — each harmonic that stands at least 6 dB above the floor around it, in
+  dB re the fundamental, named and coloured as on the sweep's distortion view. Each is
+  marked on the curve with a diamond and its name in the same colour (H1 too). Harmonics
+  are read up to the 10th, as far as they lie below half the sample rate.
+- **`H4–H10  < −118.0 dB`** — a limit, not a reading: these harmonics do not stand out of
+  the floor, so each is below its floor and by how much cannot be known. They share one
+  row at the highest of their floors (`H4, H6–H10` when they are not neighbours) and have
+  no mark.
+- **THD** — the power of the harmonics that were read, re the fundamental, in dB and
+  percent. With none read it is a limit, `THD  < −112.3 dB`: every harmonic at its floor.
+- **THD+N** — everything but the fundamental and DC, re the fundamental.
+
+When the spectrum cannot read the sine, the second line says why: `not read: a rectangular
+window needs the sine on a bin`, `… the sine is too low for this FFT length`, `… the sine
+is above this spectrum's range`, `… no sine in this input`. A ratio never reads below
+−200 dB: a digital loopback of exact silence around the sine shows `< −200.0 dB`.
+
+**On bin or between bins.** A sine on a bin centre fits a whole number of periods in the
+FFT: the window leaks nothing of it and the reading is exact with any window.
+`--lock <meas>` moves the frequency you asked for to the nearest bin of that spectrum
+measurement (of its longest window when it is multi-resolution) and prints it; the plate's
+first line shows what was played. Between bins the window spreads part of the sine around
+it. That is counted in THD+N, and while it is within 10 dB of the figure the row says so
+and reads as a limit: `THD+N  < −31.0 dB · window leakage (sine between bins)` — the
+device's own THD+N is somewhere below, the window hides where.
+
+**Which window.** On a bin: any; rectangular has the lowest noise floor and is read only
+there. Between bins (a sine from another source, a fixed frequency): Blackman-Harris,
+whose leakage lies below any converter's floor. Hann leaks enough between bins to set
+THD+N, as the row then says.
+
+**What the floor is.** The harmonics are those of everything between the generator and the
+input: the interface's own converters included. Without an analogue notch on the
+fundamental in front of the input, a device cleaner than the interface reads as the
+interface; measure the interface alone (output looped to input) first to know that floor.
+
 #### Fixed or multi-resolution
 
 A spectrum's **FFT length** is one FFT (`64 pt` … `65536 pt`, default 65 536) or
@@ -1451,6 +1513,8 @@ bar spans the pane's level axis, so the level-axis keys change the colours.
   (with the spectrum beside it, the spectrum's legend is the pane's). While the
   measurement's peaks track (**P**), each is a box at its frequency on the top (newest)
   edge with its rank under it, listed on the peak list's plate.
+  While the generator fires a sine, the harmonics plate reads it as in the spectrum
+  ([Harmonics of a sine](#harmonics-of-a-sine)), without marks.
 - Time without frames (STALE, stopped) is a gap, never the last spectrum stretched. Where a
   pixel covers several frames or frequencies it shows the highest level, so short events
   and narrow tones are never lost.

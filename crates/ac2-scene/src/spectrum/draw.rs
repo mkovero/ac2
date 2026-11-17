@@ -376,6 +376,23 @@ pub(crate) fn spectrum_scene_in(
     let peaks_box = peak_list
         .as_ref()
         .map(|list| peak_plate(&mut c, list, plot, readout_y, readout_box, view, theme));
+    // Last down the right side, clear of the plates above it and of the legend.
+    let avoid: Vec<crate::plate::PlateBox> = readout_box
+        .into_iter()
+        .chain(peaks_box)
+        .chain(legend_box.as_ref().map(|b| b.plate))
+        .collect();
+    let (harmonics, harmonic_list, harmonics_box) = harmonics::draw(
+        &mut c,
+        traces,
+        &xm,
+        Some(&ym),
+        plot,
+        readout_y,
+        &avoid,
+        view,
+        theme,
+    );
 
     SpectrumScene {
         scene: c.into_scene(size),
@@ -397,6 +414,9 @@ pub(crate) fn spectrum_scene_in(
         peaks,
         peak_list,
         peaks_box,
+        harmonics,
+        harmonic_list,
+        harmonics_box,
         legend,
         legend_shown,
         legend_box,
