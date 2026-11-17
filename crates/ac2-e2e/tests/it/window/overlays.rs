@@ -262,7 +262,7 @@ fn key_hints() -> R {
     }
     let rig = Rig::start()?;
     let mut opts = options(&rig);
-    opts.prefs.layout.panes = Some(crate::common::fake_rig_picks(
+    opts.prefs.layout.panes = Some(crate::common::rig_picks(
         crate::common::grid_with_sweep_prefs(),
     ));
     let mut h = harness(opts);

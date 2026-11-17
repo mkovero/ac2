@@ -17,7 +17,7 @@ fn two_panes() -> ac2_ui::prefs::UiPrefs {
         levels: Default::default(),
         plates: Default::default(),
     };
-    p.layout.panes = Some(common::fake_rig_picks(ac2_ui::prefs::PanesPrefs {
+    p.layout.panes = Some(common::rig_picks(ac2_ui::prefs::PanesPrefs {
         root: PaneNode::Split {
             axis: Axis::Column,
             ratio: 0.5,
@@ -39,8 +39,8 @@ fn a_list_row_dragged_onto_the_lower_pane() {
     if !have_gpu("a_list_row_dragged_onto_the_lower_pane") {
         return;
     }
-    let rig = common::Rig::start();
-    let mut opts = options(Some(&rig));
+    let _rig = Rig::start();
+    let mut opts = options();
     opts.prefs = two_panes();
     let mut h = harness(opts);
     // Only what the two panes draw is subscribed: the transfer and the spectrum.

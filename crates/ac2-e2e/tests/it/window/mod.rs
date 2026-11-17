@@ -191,7 +191,7 @@ pub fn options_at(config: Option<ac2_client::ClientConfig>) -> AppOptions {
         keymap_path: Some("~/.config/ac2/keys.toml".into()),
         prefs: {
             let mut p = crate::common::grid_ui_prefs();
-            p.layout.panes = p.layout.panes.map(crate::common::fake_rig_picks);
+            p.layout.panes = p.layout.panes.map(crate::common::rig_picks);
             p
         },
         prefs_path: None,

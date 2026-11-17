@@ -253,7 +253,7 @@ pub fn connected() -> R<(SimDaemon, Driver)> {
 pub fn on_rig(rig: &crate::window::Rig) -> R<Driver> {
     let mut d = Driver::connect(rig.daemon.client_config(NAME), &rig.daemon.describe())?;
     let mut p = crate::common::grid_ui_prefs();
-    p.layout.panes = p.layout.panes.map(crate::common::fake_rig_picks);
+    p.layout.panes = p.layout.panes.map(crate::common::rig_picks);
     d.st.set_prefs(p);
     d.until("the rig live", crate::window::rig_live)?;
     Ok(d)

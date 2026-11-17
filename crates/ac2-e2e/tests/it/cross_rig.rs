@@ -191,7 +191,7 @@ fn slow_clocks_not_locked_across_rigs() -> R {
 
     let mut d = Driver::connect(config(&pupu, &app, crate::harness::NAME)?, "pupu")?;
     let mut p = crate::common::grid_ui_prefs();
-    p.layout.panes = p.layout.panes.map(crate::common::fake_rig_picks);
+    p.layout.panes = p.layout.panes.map(crate::common::rig_picks);
     d.st.set_prefs(p);
     // The relation is judged once the remote input has streamed for a minute.
     let end = Instant::now() + Duration::from_secs(150);

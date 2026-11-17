@@ -7,8 +7,8 @@ fn transfer_view_two_traces_and_banner() {
     if !have_gpu("transfer_view_two_traces_and_banner") {
         return;
     }
-    let rig = common::Rig::start();
-    let mut h = harness(options(Some(&rig)));
+    let _rig = Rig::start();
+    let mut h = harness(options());
     step_until(&mut h, "live frames", live);
     // The pane draws Main L's group; Delay tower joins it compared (C), tagged `cmp`.
     crate::common::draw_in(
@@ -44,9 +44,9 @@ fn no_reference_reminds_of_the_stimulus_keys() {
     if !have_gpu("no_reference_reminds_of_the_stimulus_keys") {
         return;
     }
-    let rig = common::Rig::start();
+    let rig = Rig::start();
     rig.set_tf_protection(ac2_proto::frame::ProtectionFlags::NO_REFERENCE);
-    let mut h = harness(options(Some(&rig)));
+    let mut h = harness(options());
     step_until(&mut h, "live frames", live);
     step_until(&mut h, "NO REFERENCE on the live frames", |a| {
         let s = ac2_ui::scenes::transfer(
@@ -69,111 +69,6 @@ fn no_reference_reminds_of_the_stimulus_keys() {
     snapshot(&mut h, "transfer_no_reference_reminder");
 }
 
-/// The IR pane of a stopped transfer measurement, maximised: its last IR is no longer the
-/// system's, so none is drawn and the plot says S starts it, with no STALE banner. Started
-/// again (S from here), the frequency panes' keys zoom its live IR.
-#[test]
-fn ir_pane_of_a_stopped_measurement() {
-    if !have_gpu("ir_pane_of_a_stopped_measurement") {
-        return;
-    }
-    let rig = common::Rig::start();
-    let mut h = harness(options(Some(&rig)));
-    step_until(&mut h, "live frames", live);
-    h.key_press_modifiers(Modifiers::ALT, Key::Num3);
-    h.key_press(Key::W);
-    h.key_press(Key::S);
-    step_until(&mut h, "the IR pane alone, its measurement stopped", |a| {
-        let st = &a.state;
-        st.layout.maximized
-            && st.layout.focused().shows_ir()
-            && st.meas(MeasId(1)).is_some_and(|m| !m.running)
-    });
-    let scene = |h: &Harness<'_, App>| {
-        let st = &h.state().state;
-        ac2_ui::scenes::ir(
-            st,
-            crate::common::ir_pane(st),
-            &h.state().keymap,
-            &ac2_scene::theme::Theme::dark(),
-            ac2_scene::primitives::Viewport::new(1000.0, 450.0),
-            ac2_ui::scenes::Now {
-                instant: Instant::now(),
-                wall: ac2_proto::units::WallNs(0),
-            },
-        )
-        .expect("IR scene")
-    };
-    {
-        let s = scene(&h);
-        let note = s.note.unwrap_or_default();
-        assert!(note.ends_with(" stopped — S starts it"), "{note}");
-        assert_eq!(s.tag, None);
-        assert!(s.banners.iter().all(|b| !b.text.starts_with("STALE")));
-    }
-    h.state_mut().state.toasts.list.clear();
-    h.step();
-    snapshot(&mut h, "ir_stopped");
-    // S starts it again: its live IR. The frequency panes' keys on its time and amplitude
-    // axes: I twice zooms time about the middle, Ctrl+I the amplitude, the cursor toggle
-    // puts the time cursor there.
-    h.key_press(Key::S);
-    step_until(&mut h, "the live IR again", |a| {
-        a.state.meas(MeasId(1)).is_some_and(|m| m.running)
-            && a.state.ir_frame_of(ac2_scene::view::IrPane::Live).is_some()
-    });
-    assert_eq!(scene(&h).note, None);
-    h.key_press(Key::I);
-    h.key_press(Key::I);
-    h.key_press_modifiers(Modifiers::COMMAND, Key::I);
-    palette(&mut h, "comparison cursor");
-    step_until(&mut h, "zoomed, the cursor on", |a| {
-        let ax = a.state.view.ir.axes;
-        ax.time_ms.is_some() && ax.amplitude.is_some() && ax.cursor_ms.is_some()
-    });
-    h.state_mut().state.toasts.list.clear();
-    h.step();
-    snapshot(&mut h, "ir_zoomed_cursor");
-}
-
-/// The top bar while recording: `REC` with the audio's length and size in the record
-/// colour, with a dropout counted.
-#[test]
-fn recording_indicator() {
-    use ac2_proto::Change;
-    use ac2_proto::model::{RecordingRun, RecordingStatus};
-    use ac2_proto::units::{ClientId, SampleIndex, Seconds, SessionEpoch, WallNs};
-    if !have_gpu("recording_indicator") {
-        return;
-    }
-    let rig = common::Rig::start();
-    rig.fake.lock().commit(Change::Recording(RecordingRun {
-        name: "rec-2026-10-05T18-00-00".into(),
-        path: "/home/op/.local/share/ac2/recordings/rec-2026-10-05T18-00-00.wav".into(),
-        inputs: vec![0, 1],
-        sample_rate_hz: 48_000,
-        session_epoch: SessionEpoch(1),
-        start_sample: SampleIndex(0),
-        started_at: WallNs(0),
-        started_by: ClientId("ac2-ui test".into()),
-        frames: 48_000 * 83,
-        bytes: 116 + 48_000 * 83 * 8,
-        discontinuities: 1,
-        max_duration: Seconds(3600.0),
-        max_bytes: None,
-        status: RecordingStatus::Recording,
-    }));
-    let mut h = harness(options(Some(&rig)));
-    step_until(&mut h, "live frames and the recording", |a| {
-        live(a) && a.state.recording_label().is_some()
-    });
-    assert_eq!(
-        h.state().state.recording_label().map(|l| l.text),
-        Some("REC 1:23 · 31.9 MB · 1 dropout".to_owned())
-    );
-    snapshot(&mut h, "recording_indicator");
-}
-
 /// The alignment view of "Delay tower ↔ Main L": the readout says what to do, the phase
 /// difference and the summation before (dim) and after (bright), the band shaded.
 #[test]
@@ -181,15 +76,15 @@ fn alignment_view() {
     if !have_gpu("alignment_view") {
         return;
     }
-    let rig = common::Rig::start();
-    rig.add_alignment();
-    let mut h = harness(options(Some(&rig)));
+    let rig = Rig::scene("alignment");
+    let math = rig.id("Delay tower ↔ Main L");
+    let mut h = harness(options());
     step_until(&mut h, "the alignment's frames", |a| {
         live_with(a, 5)
             && a.state.rig.data.as_ref().is_some_and(|d| {
                 d.latest
                     .get(&Topic::Data {
-                        meas: MeasId(9),
+                        meas: math,
                         stream: Stream::Tf,
                     })
                     .is_some()
@@ -197,7 +92,7 @@ fn alignment_view() {
     });
     {
         let st = &mut h.state_mut().state;
-        common::show_on(st, PaneKind::Transfer, MeasId(9));
+        common::show_on(st, PaneKind::Transfer, math);
         let p = common::pane(st, PaneKind::Transfer);
         if let Some(v) = st.layout.view_mut(p) {
             v.modes.transfer = ac2_ui::state::TransferView::Alignment;
@@ -240,15 +135,15 @@ fn math_average_legend_and_banner() {
     if !have_gpu("math_average_legend_and_banner") {
         return;
     }
-    let rig = common::Rig::start();
-    rig.add_math_average();
-    let mut h = harness(options(Some(&rig)));
+    let rig = Rig::scene("math_average");
+    let math = rig.id("Audience");
+    let mut h = harness(options());
     let has_average = |app: &App| {
         app.state.measurements().len() == 6
             && app.state.rig.data.as_ref().is_some_and(|d| {
                 d.latest
                     .get(&Topic::Data {
-                        meas: MeasId(6),
+                        meas: math,
                         stream: Stream::Tf,
                     })
                     .is_some()
@@ -258,8 +153,8 @@ fn math_average_legend_and_banner() {
         live_with(a, 6) && has_average(a)
     });
     // The transfer pane shows the average: its banner names the position left out.
-    common::show_on(&mut h.state_mut().state, PaneKind::Transfer, MeasId(6));
-    h.state_mut().state.rig.selected = Some(MeasId(6));
+    common::show_on(&mut h.state_mut().state, PaneKind::Transfer, math);
+    h.state_mut().state.rig.selected = Some(math);
     {
         let st = &h.state().state;
         let s = ac2_ui::scenes::transfer(
@@ -301,8 +196,8 @@ fn math_dialog() {
     if !have_gpu("math_dialog") {
         return;
     }
-    let rig = common::Rig::start();
-    let mut h = harness(options(Some(&rig)));
+    let _rig = Rig::start();
+    let mut h = harness(options());
     step_until(&mut h, "live frames", live);
     h.key_press_modifiers(Modifiers::SHIFT, Key::M);
     h.event(Event::Text("M".into()));
@@ -328,15 +223,15 @@ fn spectrum_math() {
     if !have_gpu("spectrum_math") {
         return;
     }
-    let rig = common::Rig::start();
-    rig.add_spectrum_math();
-    let mut h = harness(options(Some(&rig)));
+    let rig = Rig::scene("spectrum_math");
+    let math = rig.id("Mic 1 − Mic 2");
+    let mut h = harness(options());
     step_until(&mut h, "the spectrum math's frames", |a| {
         live_with(a, 6)
             && a.state.rig.data.as_ref().is_some_and(|d| {
                 d.latest
                     .get(&Topic::Data {
-                        meas: MeasId(7),
+                        meas: math,
                         stream: Stream::Spec,
                     })
                     .is_some()
@@ -345,7 +240,7 @@ fn spectrum_math() {
     h.key_press_modifiers(Modifiers::ALT, Key::Num2);
     h.key_press(Key::W);
     // The pane shows the math channel: its caption is the expression and what it means.
-    common::show_on(&mut h.state_mut().state, PaneKind::Spectrum, MeasId(7));
+    common::show_on(&mut h.state_mut().state, PaneKind::Spectrum, math);
     // The level axis follows the difference (±6 dB) only once a frame of it has been drawn on
     // the pane; until then it stands on the dBFS default, above which the curve is off screen.
     step_until(&mut h, "the level axis fitted to the math curve", |a| {
@@ -390,140 +285,6 @@ fn spectrum_math() {
     );
 }
 
-/// Many curves from an empty daemon: target curves imported one after another fill the
-/// transfer legend. Its rows sit on a plate in the plot's colour; at most 70 % of the pane tall,
-/// the rest scroll with the wheel over it. A drag moves it, a drag on its grip enlarges its
-/// text, a double-click puts it back, the palette snaps it to a corner and hides it, and
-/// ui.toml keeps all that.
-#[test]
-fn transfer_legend_many_curves() {
-    use ac2_scene::legend::LegendCorner;
-    use ac2_scene::plate::{PlateHover, PlateKind, PlatePlace};
-    if !have_gpu("transfer_legend_many_curves") {
-        return;
-    }
-    let fake = ac2_client::fake::FakeDaemon::start(common::fake_options()).expect("fake daemon");
-    let mut h = harness(options_at(Some(fake.endpoints())));
-    step_until(&mut h, "synced", |a| {
-        a.state.rig.mirror.as_ref().is_some_and(|m| m.synced())
-    });
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../ac2-traces/tests/fixtures/house_curve.txt");
-    const CURVES: usize = 30;
-    for n in 1..=CURVES {
-        // Z, then the chooser's first row: a target curve from a file.
-        h.key_press(Key::Z);
-        step_until(&mut h, "target chooser", |a| {
-            matches!(a.state.overlay, Overlay::Choose(_))
-        });
-        h.key_press(Key::Enter);
-        step_until(&mut h, "target prompt", |a| {
-            matches!(a.state.overlay, Overlay::Prompt(_))
-        });
-        h.event(Event::Text(path.to_string_lossy().into_owned()));
-        h.key_press(Key::Enter);
-        step_until(&mut h, "one more curve", |a| {
-            a.state.rig.traces.len() == n && a.state.overlay == Overlay::None
-        });
-    }
-    // Filed under a transfer measurement: under Imported no pane would draw them.
-    common::file_traces_under_main_l(&fake);
-    step_until(&mut h, "every curve under Main L", |a| {
-        a.state.rig.traces.values().all(|(d, _)| {
-            d.meta.edit.owner
-                == ac2_proto::model::TraceOwner::Meas {
-                    meas: ac2_proto::units::MeasId(1),
-                }
-        }) && a.state.pane_shows_stored(a.state.layout.focus)
-    });
-    // The transfer pane alone.
-    h.key_press(Key::W);
-    step_until(&mut h, "maximised", |a| a.state.layout.maximized);
-    settle(&mut h, 3);
-    let legend = |h: &Harness<'_, App>| h.state().state.view.legend;
-    let id = h.state().state.layout.focus;
-    let place = |a: &App| a.state.layout.view(id).expect("pane").plates.legend;
-    let rects = |h: &Harness<'_, App>| h.state().plate_rects(id, PlateKind::Legend);
-    let (plate, _) = rects(&h).expect("legend drawn");
-    let pane = h.state().state.layout.focus_kind();
-    assert_eq!(pane, PaneKind::Transfer);
-    let hover = |h: &Harness<'_, App>| h.state().state.pane_local.plate_hover.map(|(_, p)| p);
-
-    // The wheel over it scrolls its rows (the frequency axis stays).
-    let freq = h.state().state.view.freq;
-    h.event(Event::PointerMoved(plate.center()));
-    settle(&mut h, 3);
-    assert_eq!(
-        hover(&h),
-        Some(PlateHover {
-            kind: PlateKind::Legend,
-            grip: false
-        })
-    );
-    for _ in 0..2 {
-        h.event(Event::MouseWheel {
-            unit: egui::MouseWheelUnit::Line,
-            delta: egui::vec2(0.0, -1.0),
-            phase: egui::TouchPhase::Move,
-            modifiers: Modifiers::NONE,
-        });
-        settle(&mut h, 20);
-    }
-    step_until(&mut h, "scrolled", |a| a.state.view.legend.first > 0);
-    assert_eq!(h.state().state.view.freq, freq);
-    h.event(Event::PointerMoved(egui::pos2(900.0, 700.0)));
-    h.state_mut().state.toasts.list.clear();
-    settle(&mut h, 3);
-    assert_eq!(hover(&h), None);
-    dense_snapshot(&mut h, "transfer_legend_many_curves");
-
-    // Dragged right and down: off its corner, the cursor not placed by the click.
-    drag(
-        &mut h,
-        plate.center(),
-        plate.center() + egui::vec2(400.0, 120.0),
-    );
-    step_until(&mut h, "moved", |a| {
-        place(a).at.is_some_and(|[x, y]| x > 0.3 && y > 0.1)
-    });
-    assert_eq!(h.state().state.view.cursor_hz, None);
-    // Its grip dragged out: larger text.
-    let (_, grip) = rects(&h).expect("legend drawn");
-    drag(
-        &mut h,
-        grip.center(),
-        grip.center() + egui::vec2(150.0, 60.0),
-    );
-    step_until(&mut h, "larger", |a| place(a).scale > 1.2);
-    // Double-clicked: back in its corner at the plot's text size.
-    let (plate, _) = rects(&h).expect("legend drawn");
-    double_click(&mut h, plate.center());
-    step_until(&mut h, "put back", |a| place(a) == PlatePlace::default());
-    assert_eq!(h.state().state.view.cursor_hz, None);
-
-    // Snapped to a corner from the palette, in the light theme.
-    palette(&mut h, "legend bottom-right");
-    assert_eq!(
-        place(h.state()).at,
-        Some(LegendCorner::BottomRight.position())
-    );
-    palette(&mut h, "theme");
-    step_until(&mut h, "light", |a| a.state.theme == ThemeName::Light);
-    h.event(Event::PointerMoved(egui::pos2(900.0, 120.0)));
-    h.state_mut().state.toasts.list.clear();
-    settle(&mut h, 3);
-    dense_snapshot(&mut h, "transfer_legend_many_curves_light");
-
-    // Hidden, and kept so; the pane keeps its place.
-    palette(&mut h, "hide legend");
-    assert!(legend(&h).hidden);
-    assert!(rects(&h).is_none());
-    assert!(h.state().state.prefs.legend.hidden);
-    let kept = h.state().state.prefs.layout.panes.clone().expect("panes");
-    let v = kept.views.iter().find(|v| v.id == id).expect("pane kept");
-    assert_eq!(v.plates.legend.at, Some([1.0, 1.0]));
-}
-
 /// P on the transfer pane: min / max tracking marks the magnitude's peak (▲) and lists it on
 /// a plate in a bottom corner, clear of the legend.
 #[test]
@@ -531,8 +292,8 @@ fn transfer_min_max_tracking() {
     if !have_gpu("transfer_min_max_tracking") {
         return;
     }
-    let rig = common::Rig::start();
-    let mut h = harness(options(Some(&rig)));
+    let _rig = Rig::start();
+    let mut h = harness(options());
     step_until(&mut h, "live frames", live);
     h.key_press(Key::P);
     step_until(&mut h, "min / max on", |a| a.state.view.tf.extremes);

@@ -3,17 +3,21 @@
 
 use super::*;
 
-fn has_prediction(app: &App) -> bool {
+fn has_prediction(app: &App, after: MeasId) -> bool {
     live_with(app, 5)
         && app.state.rig.data.as_ref().is_some_and(|d| {
             d.latest
                 .get(&Topic::Data {
-                    meas: MeasId(6),
+                    meas: after,
                     stream: Stream::Tf,
                 })
                 .is_some()
         })
-        && app.state.trace_list().iter().any(|t| t.id.0 == 40)
+        && app.state.daemon().is_some_and(|s| {
+            s.traces
+                .iter()
+                .any(|t| matches!(t.source, ac2_proto::model::TraceSource::Eq { .. }))
+        })
 }
 
 fn legend(st: &ac2_ui::state::AppState) -> Vec<String> {
@@ -39,10 +43,12 @@ fn transfer_eq_and_editor() {
     if !have_gpu("transfer_eq_and_editor") {
         return;
     }
-    let rig = common::Rig::start();
-    rig.add_eq();
-    let mut h = harness(options(Some(&rig)));
-    step_until(&mut h, "the prediction's frames", has_prediction);
+    let rig = Rig::scene("eq");
+    let after = rig.id("Main L after EQ 1");
+    let mut h = harness(options());
+    step_until(&mut h, "the prediction's frames", |a| {
+        has_prediction(a, after)
+    });
     step_until(&mut h, "the legend", |a| {
         let l = legend(&a.state);
         l.iter()

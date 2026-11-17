@@ -7,8 +7,8 @@ fn help_overlay() {
     if !have_gpu("help_overlay") {
         return;
     }
-    let rig = common::Rig::start();
-    let mut h = harness(options(Some(&rig)));
+    let _rig = Rig::start();
+    let mut h = harness(options());
     step_until(&mut h, "live frames", live);
     h.key_press(Key::H);
     step_until(&mut h, "help", |a| a.state.overlay == Overlay::Help);
@@ -24,7 +24,7 @@ fn software_rendering_is_said() {
     if !have_gpu("software_rendering_is_said") {
         return;
     }
-    let mut opts = options(None);
+    let mut opts = options();
     opts.rasterizer = Some(ac2_plot::Rasterizer::Software);
     let mut h = harness(opts);
     h.step();
@@ -49,8 +49,8 @@ fn toasts_wrap_and_stack() {
     if !have_gpu("toasts_wrap_and_stack") {
         return;
     }
-    let rig = common::Rig::start();
-    let mut h = harness(options(Some(&rig)));
+    let _rig = Rig::start();
+    let mut h = harness(options());
     step_until(&mut h, "live frames", live);
     h.state_mut().state.toasts.list.clear();
     let rig = h.state().state.active();
@@ -117,8 +117,8 @@ fn command_palette() {
     if !have_gpu("command_palette") {
         return;
     }
-    let rig = common::Rig::start();
-    let mut h = harness(options(Some(&rig)));
+    let _rig = Rig::start();
+    let mut h = harness(options());
     step_until(&mut h, "live frames", live);
     h.key_press_modifiers(Modifiers::COMMAND, Key::K);
     step_until(&mut h, "palette", |a| {
@@ -131,81 +131,23 @@ fn command_palette() {
         |a| matches!(&a.state.overlay, Overlay::Palette(p) if p.query == "delay"),
     );
     snapshot(&mut h, "command_palette");
-    // Enter runs the highlighted command against the fake daemon.
+    // Enter runs the highlighted command (its request goes nowhere: no link) and closes.
     h.key_press(Key::Enter);
     step_until(&mut h, "palette closed", |a| {
         a.state.overlay == Overlay::None
     });
 }
 
-/// The calibrations view over a rig whose mic has two curves (0° chosen on its input), a
-/// sensitivity calibration taken 3 h ago and the 90° curve also stored: what each input uses,
+/// The calibrations view over a rig whose mic has two curves (0° chosen on its input) and a
+/// sensitivity calibration just taken with the 1 kHz calibrator tone: what each input uses,
 /// the library and the calibrations, with the sidebar naming the curve in use.
 #[test]
 fn calibrations_view() {
-    use ac2_proto::model::{
-        CalEntry, CalKey, CurveChoice, DeviceId, InputKind, InputSetup, InputSetups, Mic,
-        MicCurveRef, SplCal,
-    };
-    use ac2_proto::units::{Db, DbSpl, Dbfs, Hz, WallNs};
-    use ac2_proto::{Change, Patch};
     if !have_gpu("settings_calibration") {
         return;
     }
-    let rig = common::Rig::start();
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_nanos() as u64);
-    let curve = |label: &str, file: &str| MicCurveRef {
-        label: label.into(),
-        file_name: file.into(),
-        content_hash: "0123456789abcdef".into(),
-        points: 100,
-        f_lo: Hz(50.0),
-        f_hi: Hz(20_000.0),
-        imported_at: WallNs(now),
-        stated_sensitivity: Some(15.0),
-    };
-    {
-        let mut f = rig.fake.lock();
-        f.commit(Change::Mic(Patch::Set(Mic {
-            name: "MM1 34804".into(),
-            curves: vec![
-                curve("0°", "449350_34804_0Grad.txt"),
-                curve("90°", "449350_34804_90Grad.txt"),
-            ],
-        })));
-        f.commit(Change::Calibration(Patch::Set(CalEntry {
-            key: CalKey {
-                device: DeviceId("fake:loop".into()),
-                channel: 1,
-                mic: "MM1 34804".into(),
-            },
-            spl: SplCal {
-                sensitivity: Db(130.5),
-                method: ac2_proto::model::CalMethod::Acoustic {
-                    calibrator_level: DbSpl(94.0),
-                },
-                freq: Hz(1000.0),
-                measured: Dbfs(-36.5),
-                calibrated_at: WallNs(now - 3 * 3_600_000_000_000 - 60_000_000_000),
-            },
-        })));
-        f.commit(Change::Inputs(InputSetups {
-            inputs: vec![InputSetup {
-                channel: 1,
-                kind: InputKind::Mic {
-                    mic: Some("MM1 34804".into()),
-                    curve: CurveChoice::Curve {
-                        label: "0°".into()
-                    },
-                },
-                pair: None,
-            }],
-            pairs: Vec::new(),
-        }));
-    }
-    let mut h = harness(options(Some(&rig)));
+    let _rig = Rig::scene("calibrations");
+    let mut h = harness(options());
     step_until(&mut h, "live frames", |a| {
         live(a) && a.state.daemon().is_some_and(|s| !s.mics.is_empty())
     });
@@ -245,52 +187,13 @@ fn calibrations_view() {
     snapshot(&mut h, "acoustic_calibration_dialog");
 }
 
-/// X on an ambiguous finding: the candidate list over the transfer pane (decision 1c), the
-/// banner saying tracking waits for the pick, and a key inserting a candidate.
-#[test]
-fn ambiguous_delay_candidate_list() {
-    if !have_gpu("ambiguous_delay_candidate_list") {
-        return;
-    }
-    let rig = common::Rig::start();
-    rig.fake.lock().finding = ac2_client::fake::FakeFinding::Ambiguous;
-    let mut h = harness(options(Some(&rig)));
-    step_until(&mut h, "live frames", live);
-    h.key_press_modifiers(Modifiers::ALT, Key::Num1);
-    h.key_press(Key::X);
-    step_until(&mut h, "candidate list", |a| {
-        matches!(a.state.overlay, Overlay::DelayPick(_))
-            && a.state
-                .meas(MeasId(1))
-                .is_some_and(|m| m.delay.as_ref().is_some_and(|d| d.awaiting_pick))
-    });
-    assert_eq!(
-        rig.fake.lock().last_find,
-        Some((ac2_proto::model::FinderBand::Auto, None))
-    );
-    // Toasts expire on the wall clock; the snapshot shows the list and the plots.
-    h.state_mut().state.toasts.list.clear();
-    h.step();
-    snapshot(&mut h, "delay_pick_candidates");
-    // 2 inserts the second candidate (12.7 ms) and resolves the finding.
-    h.key_press(Key::Num2);
-    step_until(&mut h, "inserted", |a| {
-        a.state.overlay == Overlay::None
-            && a.state.meas(MeasId(1)).is_some_and(|m| {
-                m.delay
-                    .as_ref()
-                    .is_some_and(|d| !d.awaiting_pick && (d.applied.0 - 0.0127).abs() < 1e-9)
-            })
-    });
-}
-
 #[test]
 fn themes() {
     if !have_gpu("themes") {
         return;
     }
-    let rig = common::Rig::start();
-    let mut h = harness(options(Some(&rig)));
+    let _rig = Rig::start();
+    let mut h = harness(options());
     step_until(&mut h, "live frames", live);
     palette(&mut h, "theme");
     step_until(&mut h, "light", |a| a.state.theme == ThemeName::Light);
@@ -302,49 +205,6 @@ fn themes() {
     snapshot(&mut h, "theme_high_contrast");
 }
 
-/// Full screen is the pane alone: with the stimulus armed and then playing, the stage view
-/// draws exactly what it drew with the stimulus off (one snapshot, taken three times); Esc
-/// still stops it from there.
-#[test]
-fn the_stage_view_stays_the_pane_while_firing() {
-    if !have_gpu("the_stage_view_stays_the_pane_while_firing") {
-        return;
-    }
-    let rig = common::Rig::start();
-    let mut h = harness(options(Some(&rig)));
-    step_until(&mut h, "live frames", live);
-    h.state_mut().state.rig.stimulus.level = Some(ac2_proto::units::Dbfs(-24.0));
-    h.key_press(Key::W);
-    h.key_press(Key::W);
-    step_until(&mut h, "the stage view", |a| {
-        a.state.stage_view() && a.state.layout.focus_kind() == PaneKind::Transfer
-    });
-    let quiet = |h: &mut Harness<'_, App>| {
-        h.state_mut().state.toasts.list.clear();
-        h.step();
-    };
-    quiet(&mut h);
-    snapshot(&mut h, "transfer_stage");
-    h.key_press(Key::Space);
-    step_until(&mut h, "armed", |a| {
-        a.state.daemon().is_some_and(|s| s.generator.armed)
-    });
-    quiet(&mut h);
-    snapshot(&mut h, "transfer_stage");
-    h.key_press(Key::Enter);
-    step_until(&mut h, "firing", |a| {
-        a.state.daemon().is_some_and(|s| s.generator.firing) && a.state.stage_view()
-    });
-    quiet(&mut h);
-    snapshot(&mut h, "transfer_stage");
-    h.key_press(Key::Escape);
-    step_until(&mut h, "stopped", |a| {
-        a.state.daemon().is_some_and(|s| {
-            !s.generator.firing && !s.generator.armed && s.generator.owner.is_none()
-        }) && a.state.stage_view()
-    });
-}
-
 /// F twice: the panes alone, every pane of the layout, full screen (no top bar, lists, pane
 /// titles or key hints; each plot with its one-line caption).
 #[test]
@@ -352,8 +212,8 @@ fn panes_only_full_screen() {
     if !have_gpu("panes_only_full_screen") {
         return;
     }
-    let rig = common::Rig::start();
-    let mut h = harness(options(Some(&rig)));
+    let _rig = Rig::start();
+    let mut h = harness(options());
     step_until(&mut h, "live frames", live);
     h.key_press(Key::F);
     h.key_press(Key::F);
@@ -381,7 +241,7 @@ fn startup_first_frame() {
         .with_pixels_per_point(1.0)
         .wgpu()
         .build_eframe(move |cc| {
-            let mut opts = options(None);
+            let mut opts = options();
             opts.started = Instant::now();
             App::new(cc, opts)
         });

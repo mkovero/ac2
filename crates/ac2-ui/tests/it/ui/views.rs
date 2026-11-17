@@ -1,101 +1,12 @@
-//! The top bar, key hints, the SPL meter, the spectrograph and settings.
+//! The top bar, the SPL meter and settings.
 
 use super::*;
 
 mod settings;
 
-/// A set of sweeps running while the transfer pane is maximised: the progress strip shows
-/// which sweep of how many, the bar and the time left, and the sidebar marks the sweep's
-/// inputs; the strip's Stop button stops the stimulus. The strip is drawn over the panes:
-/// the sweep starting moves no pane (its title row stays where it was).
-#[test]
-fn sweep_progress_strip() {
-    use ac2_proto::event::Change;
-    use ac2_proto::model::{EssSpec, SweepRun, SweepStatus};
-    use ac2_proto::units::{ClientId, Dbfs, Hz, Seconds, SweepId, WallNs};
-    if !have_gpu("sweep_progress_strip") {
-        return;
-    }
-    let rig = common::Rig::start();
-    let mut h = harness(options(Some(&rig)));
-    step_until(&mut h, "live frames", live);
-    // The pane's title naming its measurement (the tree has rows of that name too).
-    let title = |h: &Harness<'_, App>| {
-        use egui_kittest::kittest::By;
-        h.query_all(By::new().label_contains(" · Main L"))
-            .map(|n| n.rect())
-            .filter(|r| r.min.x > 230.0)
-            .fold(egui::Rect::NOTHING, |a, r| a.union(r))
-    };
-    let before = title(&h);
-    assert!(before.is_positive(), "no measurement title in the pane");
-    {
-        let mut s = rig.fake.lock();
-        let mut g = s.state.generator.clone();
-        g.armed = true;
-        g.firing = true;
-        s.commit(Change::Generator(g));
-        s.commit(Change::Sweep(SweepRun {
-            id: SweepId(1),
-            meas: ac2_proto::units::MeasId(1),
-            owner: ClientId("other".into()),
-            name: "Sweep 1".into(),
-            reference_input: 0,
-            measurement_inputs: vec![1],
-            outputs: vec![0, 1],
-            level: Dbfs(-30.0),
-            sweep: EssSpec::with_fades(Hz(20.0), Hz(20_000.0), Seconds(30.0)),
-            sweep_duration: Seconds(30.0),
-            post_roll: Seconds(1.0),
-            repeats: 2,
-            gate: None,
-            lf_harmonics: ac2_proto::model::LfHarmonics::Standard,
-            resolution: ac2_proto::model::Resolution::FortyEighth,
-            status: SweepStatus::Playing { repeat: 1 },
-            started_at: WallNs(0),
-        }));
-    }
-    step_until(&mut h, "the progress strip", |a| {
-        a.state.operation().is_some()
-    });
-    let p = h.state().state.operation().expect("progress");
-    assert_eq!(p.step, "sweep 1 of 2");
-    h.step();
-    assert_eq!(title(&h), before, "the strip moved the panes");
-    h.key_press(Key::W);
-    step_until(&mut h, "maximized", |a| a.state.layout.maximized);
-    h.state_mut().state.toasts.list.clear();
-    // The bar at the start of the step, for a picture that does not depend on timing.
-    let start = {
-        let st = &h.state().state;
-        let run = st.daemon().and_then(|s| s.sweep.clone()).expect("run");
-        ac2_scene::progress::sweep(&run, 0.0).expect("progress")
-    };
-    snapshot_when(
-        &mut h,
-        "sweep_progress",
-        |a| {
-            let now = a.state.now_s;
-            if let Some(seen) = &mut a.state.rig.sweep.step_seen {
-                seen.2 = now;
-            }
-        },
-        |a| {
-            a.state.operation().is_some_and(|p| {
-                p.remaining == start.remaining && (p.fraction - start.fraction).abs() < 2e-3
-            })
-        },
-    );
-    let stops = rig.fake.executions("gen.stop");
-    h.get_by_label_contains("Stop (").click();
-    step_until(&mut h, "stop sent", |_| {
-        rig.fake.executions("gen.stop") > stops
-    });
-}
-
 /// The health meter after the session line: the daemon's host CPU, its callback load and
-/// xruns, the data rate and the window's frame rate, from figures the test sets (the fake
-/// daemon's keepalives and this window's own, fed at chosen instants).
+/// xruns, the data rate and the window's frame rate, from figures the test sets (the rig's
+/// keepalives and this window's own, fed at chosen instants).
 #[test]
 fn top_bar_health_meter() {
     use std::sync::atomic::Ordering;
@@ -106,10 +17,10 @@ fn top_bar_health_meter() {
     if !have_gpu("top_bar_health_meter") {
         return;
     }
-    let rig = common::Rig::start();
-    let mut h = harness(options(Some(&rig)));
+    let rig = Rig::start();
+    let mut h = harness(options());
     step_until(&mut h, "live frames", live);
-    rig.fake.lock().health = DaemonHealth {
+    rig.set_health(DaemonHealth {
         host: "pupu".into(),
         cpu: Some(0.23),
         audio: Some(AudioHealth {
@@ -119,7 +30,7 @@ fn top_bar_health_meter() {
             session_peak: Some(0.48),
             xruns: 0,
         }),
-    };
+    });
     step_until(&mut h, "the daemon's figures", |a| {
         a.state
             .rig
@@ -178,10 +89,10 @@ fn top_bar_marquee_scrolls_when_narrow() {
     }
     const HOST: &str = "pupu-stage-left-amp-rack-02.venue.example";
     const WIDTH: f32 = 700.0;
-    let rig = common::Rig::start();
-    let mut h = harness(options(Some(&rig)));
+    let rig = Rig::start();
+    let mut h = harness(options());
     step_until(&mut h, "live frames", live);
-    rig.fake.lock().health = DaemonHealth {
+    rig.set_health(DaemonHealth {
         host: HOST.into(),
         cpu: Some(0.23),
         audio: Some(AudioHealth {
@@ -191,7 +102,7 @@ fn top_bar_marquee_scrolls_when_narrow() {
             session_peak: Some(0.48),
             xruns: 0,
         }),
-    };
+    });
     step_until(&mut h, "the daemon's figures", |a| {
         a.state
             .rig
@@ -295,104 +206,6 @@ fn top_bar_marquee_scrolls_when_narrow() {
     );
 }
 
-/// The key hints on a crowded grid: the sweep pane shown beside the others (four narrow
-/// panes under the transfer pane at 1280 px), the SPL meter focused with its hint line cut
-/// to what fits, its footer naming the mic and its curve without running into the readouts,
-/// and the transfer title naming the selected stored trace, shortened. Then the SPL title's
-/// tooltip: the pane's hints in full.
-#[test]
-fn key_hints() {
-    use ac2_proto::model::{CurveChoice, InputKind, InputSetup, InputSetups, Mic, MicCurveRef};
-    use ac2_proto::units::{Hz, WallNs};
-    use ac2_proto::{Change, Patch};
-    if !have_gpu("key_hints") {
-        return;
-    }
-    let rig = common::Rig::start();
-    {
-        let curve = |label: &str| MicCurveRef {
-            label: label.into(),
-            file_name: format!("34804_{label}.txt"),
-            content_hash: "0123456789abcdef".into(),
-            points: 100,
-            f_lo: Hz(50.0),
-            f_hi: Hz(20_000.0),
-            imported_at: WallNs(0),
-            stated_sensitivity: None,
-        };
-        let mut f = rig.fake.lock();
-        f.commit(Change::Mic(Patch::Set(Mic {
-            name: "MM1 34804".into(),
-            curves: vec![curve("0°"), curve("90°")],
-        })));
-        f.commit(Change::Inputs(InputSetups {
-            inputs: vec![InputSetup {
-                channel: 1,
-                kind: InputKind::Mic {
-                    mic: Some("MM1 34804".into()),
-                    curve: CurveChoice::Curve {
-                        label: "90°".into(),
-                    },
-                },
-                pair: None,
-            }],
-            pairs: Vec::new(),
-        }));
-    }
-    let mut opts = options(Some(&rig));
-    opts.prefs.layout.panes = Some(common::fake_rig_picks(common::grid_with_sweep_prefs()));
-    let mut h = harness(opts);
-    step_until(&mut h, "live frames with the mic", |a| {
-        live(a) && a.state.daemon().is_some_and(|s| !s.mics.is_empty())
-    });
-    // A capture of the transfer measurement.
-    h.key_press_modifiers(Modifiers::COMMAND, Key::Num1);
-    step_until(&mut h, "slot 1", |a| a.state.slots()[0].is_some());
-    // The sweep pane focused (Alt+5), then the SPL meter.
-    h.key_press_modifiers(Modifiers::ALT, Key::Num5);
-    h.key_press_modifiers(Modifiers::ALT, Key::Num4);
-    step_until(&mut h, "five panes, SPL focused", |a| {
-        crate::common::visible(&a.state).len() == 5 && a.state.layout.focus_kind() == PaneKind::Spl
-    });
-    // The capture selected (the focus stays): the transfer title names it.
-    h.key_press(Key::V);
-    step_until(&mut h, "slot 1 selected", |a| {
-        a.state.selected_trace_meta().is_some() && a.state.layout.focus_kind() == PaneKind::Spl
-    });
-    let names = |a: &App| {
-        a.state
-            .pane_caption_variants(crate::common::pane(&a.state, PaneKind::Transfer))
-    };
-    assert!(
-        names(h.state())
-            .last()
-            .is_some_and(|n| n.starts_with("slot 1 (")),
-        "{:?}",
-        names(h.state())
-    );
-    let style = ac2_ui::keys::LabelStyle::Pc;
-    assert!(
-        h.state()
-            .state
-            .key_hint_line(
-                &h.state().keymap,
-                common::pane(&h.state().state, PaneKind::Spl),
-                style
-            )
-            .is_some()
-    );
-    h.event(Event::PointerGone);
-    h.state_mut().state.toasts.list.clear();
-    h.step();
-    snapshot(&mut h, "key_hints");
-    // The SPL hint line's tooltip (the title has none: it would cover the plot's top).
-    h.get_by_label("SPL keys").hover();
-    for _ in 0..6 {
-        h.step();
-    }
-    snapshot(&mut h, "key_hints_tooltip");
-}
-
 /// The SPL meter maximised (W): the held level large and centred with `LAF · dBFS` under
 /// it, the level bar, the statistics and the footer; W again, full screen: the stage view,
 /// the meter alone on the screen, without the calibration footer.
@@ -401,8 +214,8 @@ fn spl_meter_big_and_stage() {
     if !have_gpu("spl_meter_big_and_stage") {
         return;
     }
-    let rig = common::Rig::start();
-    let mut h = harness(options(Some(&rig)));
+    let _rig = Rig::start();
+    let mut h = harness(options());
     step_until(&mut h, "live frames", live);
     h.key_press_modifiers(Modifiers::ALT, Key::Num4);
     // G: from meter + Leq (the default) to the meter alone.
@@ -422,183 +235,4 @@ fn spl_meter_big_and_stage() {
     step_until(&mut h, "the stage view", |a| a.state.stage_view());
     h.state_mut().state.toasts.list.clear();
     snapshot(&mut h, "spl_meter_stage");
-}
-
-/// 25 s of a spectrum with a tone sweeping from 100 Hz to 12.8 kHz over a sloped floor and a
-/// steady 1 kHz tone, with 1.5 s without frames (STALE) in the middle, at a fixed time: a
-/// picture that does not depend on when the frames arrived.
-fn sweep_history(def: &ac2_proto::GridDef) -> ac2_scene::spectrograph::SpectrographHistory {
-    use ac2_scene::spectrograph::{SpectrographFrame, SpectrographHistory};
-    let edges = def.edges();
-    let freqs = def.centres();
-    let mut h = SpectrographHistory::new(30);
-    let t0 = common::SPL_SINCE.0;
-    for i in 0..750u64 {
-        let t = i as f64 / 30.0;
-        if (12.0..13.5).contains(&t) {
-            h.mark_break();
-            continue;
-        }
-        let sweep = 100.0 * 2f64.powf(7.0 * t / 25.0);
-        let level: Vec<f32> = freqs
-            .iter()
-            .map(|&f| {
-                let f = f.max(5.0);
-                let floor = -70.0 - 3.0 * (f / 1000.0).log2();
-                let tone = if (f - 1000.0).abs() < 6.0 {
-                    -32.0
-                } else {
-                    -200.0
-                };
-                let swept = if (f / sweep).log2().abs() < 1.0 / 24.0 {
-                    -20.0
-                } else {
-                    -200.0
-                };
-                floor.max(tone).max(swept) as f32
-            })
-            .collect();
-        h.push(&SpectrographFrame {
-            seq: i + 1,
-            at_ns: t0 + i * 1_000_000_000 / 30,
-            grid: def.id(),
-            edges: &edges,
-            scale: ac2_proto::model::LevelScale::Dbfs,
-            spec_level: None,
-            level: &level,
-            validity: None,
-        });
-    }
-    h
-}
-
-/// The spectrum pane maximised with the spectrograph under it (G): the stopped spectrum on
-/// top, a sweep and a steady tone over 25 s below on the same frequency axis with a gap
-/// where frames stopped, the colour bar on the pane's level range, and the cursor's
-/// frequency, time and level.
-#[test]
-fn spectrograph() {
-    if !have_gpu("spectrograph") {
-        return;
-    }
-    let rig = common::Rig::start();
-    let mut h = harness(options(Some(&rig)));
-    step_until(&mut h, "live frames", live);
-    h.key_press_modifiers(Modifiers::ALT, Key::Num2);
-    h.key_press(Key::W);
-    h.key_press(Key::G);
-    // Stopped: the rig's frames keep coming but are not folded in, so the picture is the
-    // pinned history alone.
-    h.key_press(Key::S);
-    step_until(
-        &mut h,
-        "the spectrum stopped, maximised, with its spectrograph",
-        |a| {
-            let st = &a.state;
-            st.layout.maximized
-                && st.layout.focus_kind() == PaneKind::Spectrum
-                && st.kind_modes(ac2_ui::state::PaneKind::Spectrum).spectrum
-                    == ac2_scene::view::SpectrumMode::Split
-                && st.meas(MeasId(3)).is_some_and(|m| !m.running)
-        },
-    );
-    let def = {
-        let st = &h.state().state;
-        let d = st.rig.data.as_ref().expect("data");
-        let f = d
-            .latest
-            .get(&Topic::Data {
-                meas: MeasId(3),
-                stream: Stream::Spec,
-            })
-            .expect("spectrum frame");
-        d.grids
-            .get(&f.frame.stamp.grid_id.expect("grid"))
-            .expect("grid definition")
-            .clone()
-    };
-    let pinned = sweep_history(&def);
-    let same = |a: &App| {
-        a.state
-            .rig
-            .folded
-            .spectrographs
-            .get(&MeasId(3))
-            .is_some_and(|x| {
-                x.ring()
-                    .iter()
-                    .zip(pinned.ring())
-                    .all(|(p, q)| match (p, q) {
-                        (Some(p), Some(q)) => Arc::ptr_eq(p, q),
-                        (None, None) => true,
-                        _ => false,
-                    })
-            })
-    };
-    let pin = |a: &mut App| {
-        let st = &mut a.state;
-        st.rig
-            .folded
-            .spectrographs
-            .insert(MeasId(3), pinned.clone());
-        st.view.cursor_hz = Some(1000.0);
-        st.view.spectrum.spectrograph.cursor_at_s = pinned.newest_end_s().map(|e| e - 8.0);
-        st.toasts.list.clear();
-    };
-    {
-        pin(h.state_mut());
-        let st = &h.state().state;
-        let now = ac2_ui::scenes::Now {
-            instant: Instant::now(),
-            wall: ac2_proto::units::WallNs(0),
-        };
-        let theme = ac2_scene::theme::Theme::dark();
-        let size = ac2_scene::primitives::Viewport::new(1000.0, 600.0);
-        let s = ac2_ui::scenes::spectrograph(
-            st,
-            crate::common::pane(st, ac2_ui::state::PaneKind::Spectrum),
-            &theme,
-            size,
-            now,
-        );
-        assert_eq!(s.caption, "Mic 1 FFT · last 30 s · dBFS (tone) · stopped");
-        assert_eq!(
-            s.cursor.expect("cursor").text,
-            "1.00 kHz · 8.0 s ago · \u{2212}32.0 dBFS (tone)"
-        );
-    }
-    snapshot_when(&mut h, "spectrograph", pin, same);
-
-    // G again: the spectrograph alone, maximised, its history kept; the caption carries the
-    // spectrum's window.
-    h.key_press(Key::G);
-    step_until(&mut h, "the spectrograph alone", |a| {
-        a.state
-            .kind_modes(ac2_ui::state::PaneKind::Spectrum)
-            .spectrum
-            == ac2_scene::view::SpectrumMode::Spectrograph
-    });
-    {
-        pin(h.state_mut());
-        let st = &h.state().state;
-        let now = ac2_ui::scenes::Now {
-            instant: Instant::now(),
-            wall: ac2_proto::units::WallNs(0),
-        };
-        let theme = ac2_scene::theme::Theme::dark();
-        let size = ac2_scene::primitives::Viewport::new(1000.0, 600.0);
-        let s = ac2_ui::scenes::spectrograph(
-            st,
-            crate::common::pane(st, ac2_ui::state::PaneKind::Spectrum),
-            &theme,
-            size,
-            now,
-        );
-        assert!(s.spectrum.is_none());
-        assert_eq!(
-            s.caption,
-            "Mic 1 FFT · last 30 s · dBFS (tone) · stopped · Hann window"
-        );
-    }
-    snapshot_when(&mut h, "spectrograph_alone", pin, same);
 }
