@@ -91,6 +91,155 @@ fn programme_texts(h: &Harness<'_, App>) -> Vec<String> {
     crate::harness::scene_texts(&scene.scene)
 }
 
+/// The scene texts of Programme pane `pane`.
+fn pane_texts(h: &Harness<'_, App>, pane: ac2_ui::state::PaneId) -> Vec<String> {
+    let scene = ac2_ui::scenes::programme(
+        &h.state().state,
+        pane,
+        &ac2_scene::theme::Theme::dark(),
+        ac2_scene::primitives::Viewport::new(900.0, 450.0),
+    )
+    .expect("a Programme scene");
+    crate::harness::scene_texts(&scene.scene)
+}
+
+/// A dB readout's number (`−22.1`, the minus sign as drawn).
+fn db_value(text: &str) -> Option<f64> {
+    text.replace('\u{2212}', "-").parse().ok()
+}
+
+/// A click picks the pair's Inputs row (the tone on its left side, nothing on its right),
+/// dropped twice it meters the pair in two new Programme panes: the goniometer on the left,
+/// the meters (G) on the right with the focus. The meters' title says the ballistic, the
+/// pair and the correlator window, the chip that the right side is too quiet to correlate.
+/// The bar reads the daemon's true peak in dBTP; the loudness plate the pair's BS.1770
+/// loudness, which for a sine on one side of two is its mean square: the peak less 3 dB.
+/// Both panes and their views outlive a save and load of the layout.
+#[test]
+fn programme_pane_of_a_pair() -> R {
+    use ac2_scene::view::ProgrammeMode as M;
+    use egui_kittest::kittest::Queryable as _;
+    if !have_gpu("programme_pane_of_a_pair") {
+        return Ok(());
+    }
+    let rig = pair_rig()?;
+    let _tone = rig.cli.lease(tone(-10.0))?;
+    let mut h = harness(options(&rig));
+    step_until(&mut h, "the pair's levels", |a| {
+        a.state.session_inputs().iter().any(|r| r.right.is_some())
+            && a.state.row_meters(2).is_some_and(|m| {
+                a.state
+                    .programme_of(m)
+                    .inputs
+                    .iter()
+                    .all(|i| i.max.is_some())
+            })
+    });
+    let label = h
+        .state()
+        .state
+        .session_inputs()
+        .into_iter()
+        .find(|r| r.channel == 2)
+        .map(|r| r.label)
+        .ok_or("the pair's row")?;
+    h.get_by_label(&label).click();
+    step_until(&mut h, "the pair's row picked", |a| {
+        a.state.rig.input_pick == Some(2)
+    });
+    // Dropped beside the focused pane: the goniometer; dropped again beside that and
+    // stepped (G): the meters, with the focus.
+    drop_input(&mut h, 2);
+    step_until(&mut h, "a Programme pane", |a| {
+        crate::common::visible(&a.state).contains(&PaneKind::Programme)
+    });
+    let gonio = h.state().state.layout.focus;
+    drop_input(&mut h, 2);
+    h.key_press(Key::G);
+    h.step();
+    let st = &h.state().state;
+    let panes: Vec<_> = st
+        .visible_panes()
+        .into_iter()
+        .filter(|p| st.layout.kind(*p) == PaneKind::Programme)
+        .collect();
+    let [left, pane] = panes[..] else {
+        return Err(format!("two Programme panes: {panes:?}").into());
+    };
+    assert_eq!(left, gonio);
+    assert_eq!(st.layout.focus, pane);
+    assert_eq!(st.pane_title(pane), "true peak · Main · 1 s");
+    // The goniometer fills its pane: its axes, the correlation scale and the pair's chip,
+    // no bars.
+    step_until(&mut h, "the chip gated", |a| {
+        a.state
+            .programme_pane(pane)
+            .and_then(|(p, _)| p.pair)
+            .is_some_and(|p| p.correlation.chip().text == "right quiet")
+    });
+    assert_eq!(
+        pane_texts(&h, gonio),
+        ["L", "R", "correlation", "right quiet"]
+    );
+    let texts = programme_texts(&h);
+    let shown = crate::common::scene_texts_excerpt(&texts, crate::common::TEXTS_SHOWN);
+    // The bar reads the true peak in dBTP, its max too, and no second true-peak line.
+    assert!(!texts.iter().any(|t| t.ends_with("dBFS")), "{shown}");
+    for want in ["right quiet", "max"] {
+        assert!(texts.iter().any(|t| t == want), "{want}: {shown}");
+    }
+    let peak = texts
+        .iter()
+        .find_map(|t| t.strip_suffix(" dBTP").and_then(db_value))
+        .ok_or_else(|| format!("no dBTP reading: {shown}"))?;
+    // The tone at −10 dBFS through the path to in 3: a quarter (−12 dB), give or take its
+    // reverb's tail, which adds to the direct sound in or out of phase.
+    assert!((-24.0..-12.0).contains(&peak), "{peak} dBTP");
+
+    step_until(&mut h, "the pair's short-term loudness", |a| {
+        loudness(a, pane).is_some_and(|l| l.short_term.is_finite())
+    });
+    let l = loudness(h.state(), pane).ok_or("the pair's loudness")?;
+    assert_eq!(l.title, "Main");
+    assert!(
+        (l.short_term - (peak - 3.0)).abs() < 1.5,
+        "short-term {} LUFS for a {peak} dBTP sine on one side",
+        l.short_term
+    );
+    let texts = programme_texts(&h);
+    let shown = crate::common::scene_texts_excerpt(&texts, crate::common::TEXTS_SHOWN);
+    for want in [
+        "Main", "Int", "LUFS", "Mom", "Short", "LRA", "settling", "TP max",
+    ] {
+        assert!(texts.iter().any(|t| t == want), "{want}: {shown}");
+    }
+    assert!(
+        texts.iter().any(|t| t.ends_with(" · R resets")),
+        "the since line: {shown}"
+    );
+
+    // The layout keeps the pane and what it meters, through the preferences file.
+    let mut prefs = h.state().state.prefs.clone();
+    prefs.layout = h.state().state.layout_prefs();
+    let read = ac2_ui::prefs::UiPrefs::from_toml(&prefs.to_toml())?;
+    let saved: Vec<_> = read
+        .layout
+        .panes
+        .as_ref()
+        .ok_or("a layout")?
+        .views
+        .iter()
+        .filter(|v| v.kind == PaneKind::Programme)
+        .map(|v| (v.meters, v.modes.programme))
+        .collect();
+    let pair = Some(ac2_ui::state::Metered::Pair { left: 2, right: 3 });
+    assert_eq!(saved.len(), 2, "{saved:?}");
+    for want in [(pair, M::Goniometer), (pair, M::Meters)] {
+        assert!(saved.contains(&want), "{saved:?}");
+    }
+    Ok(())
+}
+
 /// The readout of Programme pane `pane`'s loudness plate, if it has one.
 fn loudness(a: &App, pane: ac2_ui::state::PaneId) -> Option<LoudnessReadout> {
     a.state.programme_pane(pane)?.0.loudness
