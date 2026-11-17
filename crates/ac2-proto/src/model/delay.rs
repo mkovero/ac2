@@ -107,6 +107,10 @@ pub enum NoEstimateReason {
     PeakAtSearchEdge,
     /// Coherent-to-incoherent band power too low.
     LowBandSnr,
+    /// The generator stopped within the audio a find would read: the reference is its tail
+    /// and silence, nothing to find a delay against. The daemon says it; the finder did not
+    /// run.
+    GeneratorStopped,
 }
 
 /// Why a finding is ambiguous: the operator resolves it (decision 1c).

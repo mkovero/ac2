@@ -603,6 +603,7 @@ impl Analysis for Spectrum {
             JobCmd::SetDelay { .. }
             | JobCmd::Find { .. }
             | JobCmd::Track { .. }
+            | JobCmd::GeneratorEdge(_)
             | JobCmd::Smoothing { .. }
             | JobCmd::Spl { .. }
             | JobCmd::Clocks(_) => {}

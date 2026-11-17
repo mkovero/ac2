@@ -24,6 +24,7 @@ pub fn no_estimate_text(r: &NoEstimateReason) -> String {
         NoEstimateReason::LowPrecision => "timing too uncertain".into(),
         NoEstimateReason::PeakAtSearchEdge => "peak at the search edge".into(),
         NoEstimateReason::LowBandSnr => "too noisy in band".into(),
+        NoEstimateReason::GeneratorStopped => "the generator stopped".into(),
     }
 }
 

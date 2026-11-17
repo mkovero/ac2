@@ -324,6 +324,8 @@ pub(crate) enum JobCmd {
     },
     /// Delay tracking on or off.
     Track { enabled: bool },
+    /// The generator started or stopped: a find places it in the audio it reads.
+    GeneratorEdge(finder::GeneratorEdge),
     /// New alignment delay (transfer); `rev` is the commit that set it. `resume`: the
     /// operator inserted or typed it, which resolves an ambiguous finding.
     SetDelay {

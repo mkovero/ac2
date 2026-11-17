@@ -737,6 +737,7 @@ impl Analysis for Transfer {
                     result: Box::new(result),
                 });
             }
+            JobCmd::GeneratorEdge(e) => self.finder.generator_edge(e),
             JobCmd::Track { enabled } => {
                 self.finder
                     .track(enabled, held(self.delay_samples, self.nudged_samples));

@@ -31,7 +31,7 @@ keepalives to each connection as its credit allows (§5.8).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 88`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 89`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -1071,7 +1071,12 @@ The reply `DelayFinding`:
 `NoEstimateReason` (tagged by `type`): `no_reference`, `no_signal`,
 `observation_too_short` (also: not enough audio captured yet), `insufficient_overlap`,
 `insufficient_excitation`, `periodic_excitation` {`period`: Samples}, `low_psr`,
-`low_precision`, `peak_at_search_edge`, `low_band_snr`. A refusal is a successful reply
+`low_precision`, `peak_at_search_edge`, `low_band_snr`, `generator_stopped`. The last comes
+from the daemon, not the finder: the generator stopped within the audio a find would read
+(the observation plus the ±1 s search span), so the finder does not run, and the refusal
+is in the reply only (`delay.last_finding`, an awaited pick and tracking stay as they were).
+After the generator starts, a find reads only the audio from 0.1 s after the start; too
+little of it yet is `observation_too_short`. A refusal is a successful reply
 with a `no_estimate` outcome, never an error; errors are kept for requests that cannot run
 (not a running transfer measurement, invalid band or observation).
 

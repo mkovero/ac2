@@ -3,9 +3,10 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use ac2_audio::Gain;
+use ac2_audio::{Gain, GeneratorHandle, OutputState};
 use ac2_core::generator::{Generator as CoreGenerator, GeneratorConfig, dbfs_to_rms};
 use ac2_proto::event::Change;
+use ac2_proto::model::MeasKind;
 use ac2_proto::model::{
     GenAction, GenAudit, Generator, GeneratorDesired, Lease as WireLease, SweepFailure, SweepStatus,
 };
@@ -17,6 +18,16 @@ use crate::stimulus::LeasedSource;
 use crate::util::{internal, invalid, perr_detail, random_u64, random_u128, refused, wall_ns};
 
 use super::{Control, Lease, SourceKey, gen_err, lease_required};
+use crate::jobs::JobCmd;
+use crate::jobs::finder::GeneratorEdge;
+
+/// Starts `h` at unity gain; says whether it starts sounding (it was silent or fading out).
+pub(super) fn start_output(h: &GeneratorHandle) -> bool {
+    let starts = !matches!(h.state(), OutputState::Active | OutputState::FadingIn);
+    h.set_gain(Gain::UNITY);
+    h.start();
+    starts
+}
 
 impl Control {
     pub(super) fn audit(&self, g: &mut Generator, action: GenAction, client: Option<&ClientId>) {
@@ -55,11 +66,31 @@ impl Control {
     /// Fades the output out (the gate makes the source fade on its own as well).
     pub(super) fn stop_output(&mut self) {
         self.out.gate.close();
+        let sounding = self
+            .session
+            .as_ref()
+            .is_some_and(|rt| rt.gen_handle.state() != OutputState::Silent);
         if let Some(rt) = &self.session {
             rt.gen_handle.stop();
         }
+        if sounding {
+            self.generator_edge(GeneratorEdge::Stopped);
+        }
         self.out.level = None;
         self.out.source = None;
+    }
+
+    /// Tells every transfer job the generator started or stopped: it places the edge in the
+    /// audio a delay find reads.
+    pub(super) fn generator_edge(&self, edge: GeneratorEdge) {
+        for (id, j) in &self.jobs {
+            if self
+                .meas(*id)
+                .is_ok_and(|m| matches!(m.config.kind, MeasKind::Transfer { .. }))
+            {
+                j.send(JobCmd::GeneratorEdge(edge));
+            }
+        }
     }
 
     pub(super) fn check_lease(&mut self, now: Instant) {
@@ -255,8 +286,10 @@ impl Control {
                 lc.set_level_dbfs(st.level.0).map_err(gen_err)?;
                 self.out.gate.open_until(deadline);
             }
-            rt.gen_handle.set_gain(Gain::UNITY);
-            rt.gen_handle.start();
+            let starts = start_output(&rt.gen_handle);
+            if starts {
+                self.generator_edge(GeneratorEdge::Started);
+            }
         } else {
             self.stop_output();
         }

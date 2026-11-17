@@ -23,7 +23,6 @@ use super::{
 };
 use crate::sweep;
 use crate::util::{internal, invalid, refused, wall_ns};
-use ac2_audio::Gain;
 use ac2_proto::model::Signal;
 use ac2_proto::model::TraceOwner;
 use ac2_proto::units::MeasId;
@@ -209,15 +208,17 @@ impl Control {
                     Arc::clone(&self.out.gate),
                 )))
                 .map_err(|e| internal(e.to_string()))?;
-            rt.gen_handle.set_gain(Gain::UNITY);
-            rt.gen_handle.start();
-            Ok::<(), ProtoError>(())
+            Ok::<bool, ProtoError>(super::generator::start_output(&rt.gen_handle))
         })();
-        if let Err(e) = play {
-            rt.fanout.detach(fid);
-            drop(job);
-            self.stop_output();
-            return Err(e);
+        match play {
+            Ok(true) => self.generator_edge(crate::jobs::finder::GeneratorEdge::Started),
+            Ok(false) => {}
+            Err(e) => {
+                rt.fanout.detach(fid);
+                drop(job);
+                self.stop_output();
+                return Err(e);
+            }
         }
         // The train is no level-controlled generator: a later fire builds its own source.
         self.out.level = None;

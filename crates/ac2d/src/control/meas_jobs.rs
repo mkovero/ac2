@@ -3,7 +3,6 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use ac2_core::delay::FinderResult;
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::grid::GridDef;
 use ac2_proto::model::{DelayOutcome, DelayState, FinderBand, MeasKind, Measurement};
@@ -12,6 +11,7 @@ use ac2_proto::{ProtoError, ReplyBody};
 
 use crate::calstore::{self, InputCal};
 use crate::conv;
+use crate::jobs::finder::Found;
 use crate::jobs::programme::{Captured, Declared, Programme};
 use crate::jobs::{self, Analysis, JobCmd, JobEnv, block_index};
 use crate::session::Runtime;
@@ -420,7 +420,7 @@ impl Control {
         Ok(token)
     }
 
-    pub(super) fn finish_find(&mut self, token: u64, result: Result<FinderResult, String>) {
+    pub(super) fn finish_find(&mut self, token: u64, result: Result<Found, String>) {
         let Some(p) = self.pending.finds.remove(&token) else {
             return;
         };
@@ -428,7 +428,20 @@ impl Control {
         let reply = match (result, fs) {
             (Err(e), _) => Err(invalid(format!("delay finder: {e}"))),
             (Ok(_), None) => Err(invalid("the session closed")),
-            (Ok(r), Some(fs)) => {
+            // Said in the reply alone: the finder did not run, so the measurement's finding,
+            // an awaited pick and tracking stay as they were.
+            (
+                Ok(Found::GeneratorStopped {
+                    band,
+                    observation_s,
+                }),
+                Some(_),
+            ) => Ok(ReplyBody::DelayFinding(conv::generator_stopped(
+                band,
+                observation_s,
+                WallNs(wall_ns()),
+            ))),
+            (Ok(Found::Ran(r)), Some(fs)) => {
                 let f = conv::delay_finding(&r, fs, WallNs(wall_ns()));
                 match self.meas(p.meas).cloned() {
                     Err(e) => Err(e),

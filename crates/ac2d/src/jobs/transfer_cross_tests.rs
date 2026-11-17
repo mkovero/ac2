@@ -325,12 +325,7 @@ fn a_remote_gap_restarts_the_averages_but_keeps_the_finder() {
                 _ => None,
             })
             .expect("a finding");
-    let pick = found
-        .as_ref()
-        .as_ref()
-        .expect("valid")
-        .pick()
-        .map(|p| p.delay);
+    let pick = (*found).expect("valid").ran().pick().map(|p| p.delay);
     assert_eq!(pick, Some(480));
     assert!(
         r.job.discontinuity_until > r.at - BLOCK as u64,

@@ -903,3 +903,58 @@ fn filled_rises_after_a_reset_and_a_delay_step_restarts_it() {
     assert!(after_step[0] < 1.0, "{after_step:?}");
     h.shutdown();
 }
+
+/// A find whose audio spans the generator stopping says so instead of correlating against
+/// a reference that is half silence, and leaves the measurement's finding alone.
+#[test]
+fn a_find_across_a_generator_stop_says_so() {
+    init_log();
+    let backend = manual_rig();
+    let mut cfg = config(backend.clone(), inproc("tf-find-edge"));
+    cfg.lease_expiry = Duration::from_secs(60);
+    let h = Daemon::start(cfg).unwrap();
+    let (mut c, sub) = connect(&h, &[b"d/1/tf"]);
+    c.ok(Command::SessionOpen {
+        config: session(true),
+    });
+    c.ok(Command::MeasCreate {
+        config: transfer("main"),
+    });
+    c.ok(Command::MeasStart { meas: MeasId(1) });
+    let refused = |f: &ac2_proto::model::DelayFinding| match &f.outcome {
+        DelayOutcome::NoEstimate { reasons } => reasons.clone(),
+        o => panic!("{o:?}"),
+    };
+    let tok = c.acquire();
+    c.ok(Command::GenSet {
+        lease_token: tok,
+        desired: GeneratorDesired {
+            settings: GeneratorSettings {
+                signal: Signal::Pink,
+                level: Dbfs(-20.0),
+                band: None,
+                outputs: vec![0],
+            },
+            armed: true,
+            firing: true,
+        },
+    });
+    let mut d = driver(&backend);
+    for _ in 0..4 {
+        run_tf(&mut d, &sub, 0.5, 0);
+        c.ok(Command::GenRefresh { lease_token: tok });
+    }
+    c.ok(Command::GenStop);
+    let f = c.delay_finding(find(FinderBand::Full, None));
+    assert_eq!(refused(&f), vec![NoEstimateReason::GeneratorStopped]);
+    assert!(f.candidates.is_empty());
+    // The refusal is the reply's alone: the job never ran, so the state keeps no finding.
+    assert!(snapshot_delay(&mut c).last_finding.is_none());
+
+    let stop = std::thread::spawn(move || h.shutdown());
+    while !stop.is_finished() {
+        d.run_blocks(4);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    stop.join().unwrap();
+}

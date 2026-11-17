@@ -42,7 +42,43 @@ pub(crate) struct Finder {
     /// accepted delay, fractional samples, and the end of its window, not yet confirmed by
     /// the next one.
     relocking: Option<Option<(f64, u64)>>,
+    /// The generator's last start or stop and the sample it is placed at: the newest one
+    /// held when the job heard of it, never later than the audio it changed (that comes back
+    /// through the output and the loop after the command).
+    edge: Option<(GeneratorEdge, u64)>,
 }
+
+/// The generator started or stopped sounding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum GeneratorEdge {
+    Started,
+    Stopped,
+}
+
+/// What `delay.find` came to.
+#[derive(Debug)]
+pub(crate) enum Found {
+    /// The finder ran on the newest audio.
+    Ran(Box<FinderResult>),
+    /// The generator stopped within the audio a find of `band` would read: the reference is
+    /// its tail and silence, and the correlation of the rest ranks noise peaks as arrivals.
+    /// Said instead of running.
+    GeneratorStopped { band: Band, observation_s: f64 },
+}
+
+#[cfg(test)]
+impl Found {
+    pub(crate) fn ran(self) -> FinderResult {
+        match self {
+            Found::Ran(r) => *r,
+            other => panic!("the finder did not run: {other:?}"),
+        }
+    }
+}
+
+/// Audio a find skips after the generator starts, seconds: its 20 ms fade-in, and the
+/// output and capture latency between the edge's placement and its sound.
+const START_SETTLE_S: f64 = 0.1;
 
 /// What one block told tracking.
 #[derive(Debug, Default)]
@@ -77,7 +113,15 @@ impl Finder {
             paused: false,
             clock_hold: false,
             relocking: None,
+            edge: None,
         }
+    }
+
+    /// The generator started or stopped. With no audio held yet, everything that follows
+    /// is after it, and an older edge is out of reach too.
+    pub(crate) fn generator_edge(&mut self, edge: GeneratorEdge) {
+        self.edge =
+            (!self.reference.is_empty()).then(|| (edge, self.start + self.reference.len() as u64));
     }
 
     /// A stream gap: nothing before it can be spliced onto what follows.
@@ -251,7 +295,7 @@ impl Finder {
         band: FindBand,
         observation: Option<f64>,
         held: i64,
-    ) -> Result<FinderResult, String> {
+    ) -> Result<Found, String> {
         let (core_band, default_s) = match band {
             FindBand::Auto => (Band::FullRange, AUTO_OBSERVATION_S),
             FindBand::Band(b) => (b, b.class().default_observation_s()),
@@ -262,7 +306,25 @@ impl Finder {
         let lead = cfg.search.max.max(0) as usize;
         let tail = cfg.search.min.min(0).unsigned_abs() as usize;
         let total = self.measurement.len();
-        let room = total.saturating_sub(lead + tail);
+        let reach =
+            (observation.unwrap_or(default_s) * self.fs).round() as u64 + (lead + tail) as u64;
+        let end = self.start + total as u64;
+        // A start leaves the window to the audio after it; a stop has nothing after it to
+        // find against.
+        let skip = match self.edge {
+            Some((GeneratorEdge::Stopped, at)) if at + reach > end => {
+                return Ok(Found::GeneratorStopped {
+                    band: core_band,
+                    observation_s: observation.unwrap_or(default_s),
+                });
+            }
+            Some((GeneratorEdge::Started, at)) => {
+                let settled = at + (START_SETTLE_S * self.fs).round() as u64;
+                settled.saturating_sub(self.start).min(total as u64) as usize
+            }
+            _ => 0,
+        };
+        let room = (total - skip).saturating_sub(lead + tail);
         let (want, need) = match observation {
             Some(s) => {
                 let n = (s * self.fs).round() as usize;
@@ -274,9 +336,8 @@ impl Finder {
             ),
         };
         if room < need {
-            let end = self.start + total as u64;
             self.set_paused(false);
-            return Ok(FinderResult {
+            return Ok(Found::Ran(Box::new(FinderResult {
                 outcome: Outcome::NoEstimate {
                     reasons: vec![NoEstimateReason::ObservationTooShort],
                 },
@@ -293,7 +354,7 @@ impl Finder {
                 },
                 band: core_band,
                 meas_window: end - room as u64..end,
-            });
+            })));
         }
         let lm = room.min(want);
         let m0 = total - tail - lm;
@@ -320,7 +381,7 @@ impl Finder {
             }
         }
         self.set_paused(matches!(res.outcome, Outcome::Ambiguous { .. }));
-        Ok(res)
+        Ok(Found::Ran(Box::new(res)))
     }
 }
 
@@ -345,7 +406,7 @@ mod tests {
         let mut f = Finder::new(48_000.0);
         let r = noise(48_000, 1);
         f.push(0, &r, &r);
-        let res = f.find(FindBand::Auto, None, 0).expect("valid config");
+        let res = f.find(FindBand::Auto, None, 0).expect("valid config").ran();
         assert_eq!(
             res.outcome,
             Outcome::NoEstimate {
@@ -357,7 +418,8 @@ mod tests {
         f.push(48_000, &r, &r);
         let res = f
             .find(FindBand::Band(Band::Sub), Some(8.0), 0)
-            .expect("valid config");
+            .expect("valid config")
+            .ran();
         assert!(matches!(res.outcome, Outcome::NoEstimate { .. }));
     }
 
@@ -374,7 +436,8 @@ mod tests {
         f.push(0, &r, &m);
         let res = f
             .find(FindBand::Band(Band::Mid), None, 0)
-            .expect("valid config");
+            .expect("valid config")
+            .ran();
         let pick = res.pick().expect("an estimate");
         assert!((pick.delay_frac - d as f64).abs() < 1.0, "{res:?}");
         assert_eq!(res.band, Band::Mid);
@@ -411,7 +474,8 @@ mod tests {
         assert_eq!(f.push(0, &r, &m).moved, None);
         let res = f
             .find(FindBand::Band(Band::FullRange), None, 0)
-            .expect("valid config");
+            .expect("valid config")
+            .ran();
         assert!(
             matches!(res.outcome, Outcome::Ambiguous { .. }),
             "{:?}",
@@ -445,6 +509,71 @@ mod tests {
         assert_eq!(moved.map(f64::round), Some(500.0));
     }
 
+    /// A stop inside the audio a find reads is said instead of searched; once the window has
+    /// moved past it, the finder runs again.
+    #[test]
+    fn a_find_across_a_stop_says_so_and_one_after_it_runs() {
+        let mut f = Finder::new(48_000.0);
+        let r = noise(48_000 * 4, 7);
+        let m = paths(&r, &[(120, 1.0)], 8);
+        f.push(0, &r, &m);
+        f.generator_edge(GeneratorEdge::Stopped);
+        let quiet = vec![0.0; 48_000];
+        f.push(r.len() as u64, &quiet, &quiet);
+        let found = f
+            .find(FindBand::Band(Band::FullRange), None, 0)
+            .expect("valid config");
+        assert!(
+            matches!(
+                found,
+                Found::GeneratorStopped {
+                    band: Band::FullRange,
+                    ..
+                }
+            ),
+            "{found:?}"
+        );
+        let r2 = noise(48_000 * 3, 9);
+        let m2 = paths(&r2, &[(120, 1.0)], 10);
+        f.push((r.len() + quiet.len()) as u64, &r2, &m2);
+        let res = f
+            .find(FindBand::Band(Band::FullRange), None, 0)
+            .expect("valid config")
+            .ran();
+        assert_eq!(res.accepted().map(|a| a.delay), Some(120), "{res:?}");
+    }
+
+    /// After a start, a find reads only the audio after it: too little of it yet is too
+    /// short an observation, not a search across the silence before.
+    #[test]
+    fn a_find_after_a_start_reads_only_what_follows_it() {
+        let mut f = Finder::new(48_000.0);
+        let quiet = vec![0.0; 48_000 * 4];
+        f.push(0, &quiet, &quiet);
+        f.generator_edge(GeneratorEdge::Started);
+        let r = noise(48_000, 7);
+        let m = paths(&r, &[(120, 1.0)], 8);
+        f.push(quiet.len() as u64, &r, &m);
+        let res = f
+            .find(FindBand::Band(Band::FullRange), None, 0)
+            .expect("valid config")
+            .ran();
+        assert_eq!(
+            res.outcome,
+            Outcome::NoEstimate {
+                reasons: vec![NoEstimateReason::ObservationTooShort]
+            }
+        );
+        let r2 = noise(48_000 * 2, 9);
+        let m2 = paths(&r2, &[(120, 1.0)], 10);
+        f.push((quiet.len() + r.len()) as u64, &r2, &m2);
+        let res = f
+            .find(FindBand::Band(Band::FullRange), None, 0)
+            .expect("valid config")
+            .ran();
+        assert_eq!(res.accepted().map(|a| a.delay), Some(120), "{res:?}");
+    }
+
     #[test]
     fn a_new_finding_that_is_not_ambiguous_resumes_tracking() {
         let mut f = Finder::new(48_000.0);
@@ -455,7 +584,8 @@ mod tests {
         f.push(0, &r, &m);
         let res = f
             .find(FindBand::Band(Band::FullRange), None, 0)
-            .expect("valid config");
+            .expect("valid config")
+            .ran();
         assert!(matches!(res.outcome, Outcome::Accepted { .. }), "{res:?}");
         assert!(!f.paused());
     }
@@ -505,7 +635,8 @@ mod tests {
         );
         let res = f
             .find(FindBand::Band(Band::FullRange), None, 0)
-            .expect("valid config");
+            .expect("valid config")
+            .ran();
         assert_eq!(res.accepted().map(|a| a.delay), Some(d as i64), "{res:?}");
         // a block longer than the whole history keeps its newest samples
         let long = noise(f.cap + 500, 11);

@@ -768,6 +768,7 @@ impl Analysis for MathJob {
             // the rest belong to its operands.
             JobCmd::Find { .. }
             | JobCmd::Track { .. }
+            | JobCmd::GeneratorEdge(_)
             | JobCmd::SetDelay { .. }
             | JobCmd::Reset
             | JobCmd::Smoothing { .. }

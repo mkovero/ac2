@@ -327,6 +327,33 @@ pub(crate) fn finder_band(b: pm::FinderBand) -> FindBand {
     }
 }
 
+/// The finding `delay.find` answers when the generator stopped within the audio it would
+/// read: no estimate, no evidence, no candidates.
+pub(crate) fn generator_stopped(
+    band: core::delay::Band,
+    observation_s: f64,
+    at: WallNs,
+) -> pm::DelayFinding {
+    pm::DelayFinding {
+        outcome: pm::DelayOutcome::NoEstimate {
+            reasons: vec![pm::NoEstimateReason::GeneratorStopped],
+        },
+        confidence: pm::DelayConfidence {
+            psr_db: None,
+            psr_acq_db: None,
+            band_snr_db: None,
+            excited_fraction: None,
+            uncertainty_samples: None,
+            pulse_width_samples: None,
+            period: None,
+        },
+        band: delay_band(band),
+        observation: ac2_proto::units::Seconds(observation_s),
+        candidates: Vec::new(),
+        found_at: at,
+    }
+}
+
 fn delay_band(b: core::delay::Band) -> pm::DelayBand {
     use core::delay::Band;
     match b {

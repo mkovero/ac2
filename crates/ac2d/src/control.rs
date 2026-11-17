@@ -142,7 +142,7 @@ pub(crate) enum ControlMsg {
     /// A `delay.find` started under `token` finished.
     DelayFound {
         token: u64,
-        result: Box<Result<ac2_core::delay::FinderResult, String>>,
+        result: Box<Result<crate::jobs::finder::Found, String>>,
     },
     /// Delay tracking of `meas` agreed on a new arrival, in (fractional) samples.
     DelayTracked {
