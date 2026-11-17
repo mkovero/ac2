@@ -1,0 +1,98 @@
+{
+  "proto_version": 88,
+  "value": {
+    "autosave": {
+      "log_failures": [],
+      "saved_at": null,
+      "state": {
+        "type": "off"
+      }
+    },
+    "calibrations": [],
+    "clocks": {
+      "capture": null,
+      "stamp_map": null,
+      "system": {
+        "maxerror_us": 1000,
+        "type": "synced"
+      }
+    },
+    "generator": {
+      "armed": false,
+      "ceiling": -10.0,
+      "ceiling_bound": -10.0,
+      "firing": false,
+      "last_action": null,
+      "owner": null,
+      "settings": null
+    },
+    "inputs": [],
+    "line_calibrations": [],
+    "measurements": [],
+    "mics": [],
+    "outputs": [],
+    "pairs": [],
+    "plans": [],
+    "recording": null,
+    "remote": {
+      "inputs": [],
+      "link_offset": null,
+      "peers": [],
+      "rigs": [],
+      "transfers": []
+    },
+    "rig": {
+      "artnet": {
+        "last_error": null,
+        "sent": 0
+      },
+      "artnet_fade": 1.0,
+      "artnet_target": null,
+      "cues": [],
+      "damaged_files": [],
+      "dmx": [],
+      "levels": {
+        "ballistic": "true_peak",
+        "correlation_gate": -60.0,
+        "correlation_window": "long",
+        "loudness_target": -23.0,
+        "over_threshold": 0.0
+      },
+      "monitor_at_start": false,
+      "osc": {
+        "last_error": null,
+        "sent": 0
+      },
+      "osc_target": null,
+      "rev": 0
+    },
+    "session": {
+      "epoch": 0,
+      "open": null,
+      "stopped": null
+    },
+    "sim": null,
+    "sim_fit": null,
+    "sim_map": null,
+    "spl_logs": [],
+    "sweep": null,
+    "timing": {
+      "drift": null,
+      "epoch": 0,
+      "internal_reference": false,
+      "last_lock": null,
+      "state": {
+        "type": "no_stimulus"
+      }
+    },
+    "traces": [],
+    "walk_plans": [],
+    "walks": [],
+    "working": {
+      "dirty": false,
+      "origin": null,
+      "recover": null,
+      "saved_at": null
+    }
+  }
+}

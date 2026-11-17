@@ -111,6 +111,8 @@ dependencies = [
  "eframe",
  "egui_kittest",
  "num-complex",
+ "serde",
+ "serde_json",
  "tempfile",
  "tokio",
 ]
@@ -236,6 +238,7 @@ dependencies = [
  "num-complex",
  "png",
  "serde",
+ "serde_json",
  "sysinfo",
  "tempfile",
  "tokio",

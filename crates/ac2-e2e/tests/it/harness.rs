@@ -468,6 +468,11 @@ impl Cli {
         Ok(self.rt.block_on(self.c.call(cmd))?)
     }
 
+    /// The client itself, for calls made on [`Cli::block_on`].
+    pub fn client(&self) -> &ac2_client::Client {
+        &self.c
+    }
+
     /// The id the daemon knows this client by.
     pub fn client_id(&self) -> ac2_proto::units::ClientId {
         self.c.client_id()

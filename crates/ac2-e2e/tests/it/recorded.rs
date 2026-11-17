@@ -1,0 +1,204 @@
+//! What a real `ac2d` on the simulated rig answers, recorded for the app's tests that need
+//! daemon state but no daemon (`ac2-ui` links none): `fixtures/daemon/*.json`, each the value
+//! wrapped with the `PROTO_VERSION` it was recorded at.
+//!
+//! The quick tier records again and compares with the checked-in files, so a daemon change
+//! that alters what the app is fed fails here, not as a silently stale picture. After an
+//! intended change, regenerate every fixture with
+//!
+//! ```text
+//! AC2_RECORD_FIXTURES=1 cargo nextest run -p ac2-e2e -E 'test(/^recorded::/)'
+//! ```
+
+use std::path::PathBuf;
+
+use ac2_e2e::{Setup, sim_daemon};
+use ac2_proto::model::{BackendInfo, BackendKind, LoopbackDetection, State};
+use ac2_proto::units::Dbfs;
+use ac2_proto::{Command, ReplyBody};
+use serde::Serialize;
+use serde_json::Value;
+
+use crate::harness::{Cli, R};
+
+fn dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/daemon")
+}
+
+/// `value` as its fixture file holds it: under the protocol version it was recorded at.
+fn doc<T: Serialize>(value: &T) -> R<Value> {
+    Ok(serde_json::json!({
+        "proto_version": ac2_proto::PROTO_VERSION,
+        "value": round_measured(serde_json::to_value(value)?),
+    }))
+}
+
+/// The host clock's estimated error, which the daemon reports as the operating system gives
+/// it: a property of the machine recording, not of the daemon.
+fn pin_clock(mut v: Value) -> Value {
+    if let Some(e) = v.pointer_mut("/clocks/system/maxerror_us") {
+        *e = Value::from(1000);
+    }
+    v
+}
+
+/// Measured on the simulated rig's noise, so different every run: how close two recordings
+/// of one measured quantity must be, and the decimals a fixture keeps of it.
+fn measured(key: &str) -> Option<(f64, i32)> {
+    match key {
+        // Normalised cross-correlation of a burst: a weak path moves by about 0.01.
+        "correlation" => Some((0.05, 3)),
+        // A path's gain in dB: noise moves a weak one by about 0.2 dB.
+        "gain" => Some((1.0, 1)),
+        _ => None,
+    }
+}
+
+/// `v` with each measured number rounded to the decimals its fixture keeps.
+fn round_measured(mut v: Value) -> Value {
+    fn walk(v: &mut Value) {
+        match v {
+            Value::Object(m) => {
+                for (k, x) in m.iter_mut() {
+                    match (measured(k), x.as_f64()) {
+                        (Some((_, dp)), Some(f)) => {
+                            let p = 10f64.powi(dp);
+                            // `+ 0.0` turns a rounded −0 into 0, so the sign of noise
+                            // around zero does not show in the file.
+                            *x = Value::from((f * p).round() / p + 0.0);
+                        }
+                        _ => walk(x),
+                    }
+                }
+            }
+            Value::Array(a) => a.iter_mut().for_each(walk),
+            _ => {}
+        }
+    }
+    walk(&mut v);
+    v
+}
+
+/// `a` and `b` alike, measured numbers within their tolerance; the first difference's path.
+fn differs(a: &Value, b: &Value, at: &str) -> Option<String> {
+    match (a, b) {
+        (Value::Object(x), Value::Object(y)) => {
+            if x.len() != y.len() {
+                return Some(format!("{at}: keys {:?} vs {:?}", x.keys(), y.keys()));
+            }
+            x.iter().find_map(|(k, va)| {
+                let path = format!("{at}/{k}");
+                let Some(vb) = y.get(k) else {
+                    return Some(format!("{path}: missing"));
+                };
+                match (measured(k), va.as_f64(), vb.as_f64()) {
+                    (Some((tol, _)), Some(fa), Some(fb)) => {
+                        ((fa - fb).abs() > tol).then(|| format!("{path}: {fa} vs {fb}"))
+                    }
+                    _ => differs(va, vb, &path),
+                }
+            })
+        }
+        (Value::Array(x), Value::Array(y)) if x.len() == y.len() => x
+            .iter()
+            .zip(y)
+            .enumerate()
+            .find_map(|(i, (va, vb))| differs(va, vb, &format!("{at}/{i}"))),
+        _ => (a != b).then(|| format!("{at}: {a} vs {b}")),
+    }
+}
+
+/// Records every fixture from a fresh daemon with no session (as on real audio).
+fn record() -> R<Vec<(&'static str, Value)>> {
+    let d = sim_daemon(Setup::Empty)?;
+    let cli = Cli::connect(d.endpoints())?;
+    let state: State = (*cli.state().ok_or("no state")?).clone();
+    let backends = match cli.call(Command::SessionDevices)? {
+        ReplyBody::Backends(b) => b,
+        other => return Err(format!("session.devices: {other:?}").into()),
+    };
+    let device = only_fake(&backends)?;
+    // A quiet burst on the simulated rig (never real audio): out 1 returns on in 1.
+    let lease = cli.block_on(cli_lease(&cli))?;
+    let detection = match cli.call(Command::SessionDetectLoopback {
+        lease_token: lease.token(),
+        backend: BackendKind::Fake,
+        input_device: device.clone(),
+        output_device: device,
+        output: 0,
+        level: Some(Dbfs(-30.0)),
+    })? {
+        ReplyBody::LoopbackDetection(x) => x,
+        other => return Err(format!("session.detect_loopback: {other:?}").into()),
+    };
+    drop(lease);
+    Ok(vec![
+        (
+            "empty_state.json",
+            doc(&pin_clock(serde_json::to_value(&state)?))?,
+        ),
+        ("session_devices.json", doc(&backends)?),
+        ("detect_loopback.json", doc(&detection)?),
+    ])
+}
+
+async fn cli_lease(cli: &Cli) -> R<ac2_client::StimulusLease> {
+    Ok(cli
+        .client()
+        .acquire_lease(false, ac2_client::OnDrop::StopAndRelease)
+        .await?)
+}
+
+/// The simulated rig's one device: the daemon here runs no other backend.
+fn only_fake(b: &[BackendInfo]) -> R<ac2_proto::model::DeviceId> {
+    match b {
+        [one] if one.kind == BackendKind::Fake && one.devices.len() == 1 => {
+            Ok(one.devices[0].id.clone())
+        }
+        _ => Err(format!("expected the simulated rig alone: {b:?}").into()),
+    }
+}
+
+/// The fixtures are what the daemon answers now; under `AC2_RECORD_FIXTURES=1`, rewritten.
+#[test]
+fn fixtures_match_the_daemon() -> R {
+    let rewrite = std::env::var("AC2_RECORD_FIXTURES").is_ok_and(|v| v == "1");
+    let mut stale = Vec::new();
+    for (name, now) in record()? {
+        let path = dir().join(name);
+        if rewrite {
+            std::fs::create_dir_all(dir())?;
+            std::fs::write(&path, serde_json::to_string_pretty(&now)? + "\n")?;
+            continue;
+        }
+        let kept: Value = match std::fs::read_to_string(&path) {
+            Ok(t) => serde_json::from_str(&t)?,
+            Err(e) => {
+                stale.push(format!("{name}: {e}"));
+                continue;
+            }
+        };
+        if let Some(d) = differs(&kept, &now, "") {
+            stale.push(format!("{name}: {d}"));
+        }
+    }
+    assert!(
+        stale.is_empty(),
+        "fixtures/daemon no longer match the daemon ({stale:?}); regenerate with \
+         AC2_RECORD_FIXTURES=1 cargo nextest run -p ac2-e2e -E 'test(/^recorded::/)'"
+    );
+    Ok(())
+}
+
+/// Each fixture parses back into the type it was recorded from (what `ac2-ui` reads).
+#[test]
+fn fixtures_parse() -> R {
+    fn value<T: serde::de::DeserializeOwned>(name: &str) -> R<T> {
+        let doc: Value = serde_json::from_str(&std::fs::read_to_string(dir().join(name))?)?;
+        Ok(serde_json::from_value(doc["value"].clone())?)
+    }
+    let _: State = value("empty_state.json")?;
+    let _: Vec<BackendInfo> = value("session_devices.json")?;
+    let _: LoopbackDetection = value("detect_loopback.json")?;
+    Ok(())
+}

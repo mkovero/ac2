@@ -25,6 +25,7 @@ mod keep;
 mod link;
 mod math;
 mod panes;
+mod recorded;
 mod session;
 mod spatial;
 mod spl;

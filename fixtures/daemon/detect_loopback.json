@@ -1,0 +1,42 @@
+{
+  "proto_version": 88,
+  "value": {
+    "backend": "fake",
+    "clock": "single_callback",
+    "input_device": "fake",
+    "level": -30.0,
+    "loopback": 0,
+    "output": 0,
+    "output_device": "fake",
+    "ranked": [
+      {
+        "correlation": 1.0,
+        "delay": 0.0006666666666666666,
+        "delay_samples": 32,
+        "gain": 0.0,
+        "input": 0
+      },
+      {
+        "correlation": 1.0,
+        "delay": 0.005666666666666667,
+        "delay_samples": 272,
+        "gain": -6.0,
+        "input": 1
+      },
+      {
+        "correlation": 0.74,
+        "delay": 0.010666666666666666,
+        "delay_samples": 512,
+        "gain": -12.0,
+        "input": 2
+      },
+      {
+        "correlation": 0.0,
+        "delay": -0.1,
+        "delay_samples": -4800,
+        "gain": null,
+        "input": 3
+      }
+    ]
+  }
+}

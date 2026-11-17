@@ -1,0 +1,68 @@
+{
+  "proto_version": 88,
+  "value": [
+    {
+      "availability": {
+        "type": "available"
+      },
+      "description": "Simulated rig (no audio): out 1 returns on in 1 (loop) and in 2 (room)",
+      "devices": [
+        {
+          "backend": "fake",
+          "clock_sources": [],
+          "duplex_clock": "single_callback",
+          "host": "fake",
+          "id": "fake",
+          "index": "exact",
+          "input": {
+            "buffer_frames": {
+              "max": 256,
+              "min": 256
+            },
+            "channel_names": [
+              "Loop return",
+              "Room mic",
+              "Hall mic",
+              "Line 4"
+            ],
+            "default_buffer_frames": 256,
+            "default_rate_hz": 48000,
+            "max_channels": 4,
+            "rates_hz": [
+              {
+                "max": 48000,
+                "min": 48000
+              }
+            ],
+            "spare_channels": 8,
+            "system_default": true
+          },
+          "name": "simulated duplex device",
+          "notes": [],
+          "output": {
+            "buffer_frames": {
+              "max": 256,
+              "min": 256
+            },
+            "channel_names": [
+              "Out 1 (speaker + loop)",
+              "Out 2"
+            ],
+            "default_buffer_frames": 256,
+            "default_rate_hz": 48000,
+            "max_channels": 2,
+            "rates_hz": [
+              {
+                "max": 48000,
+                "min": 48000
+              }
+            ],
+            "spare_channels": 0,
+            "system_default": true
+          }
+        }
+      ],
+      "kind": "fake"
+    }
+  ]
+}
