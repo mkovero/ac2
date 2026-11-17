@@ -13,6 +13,7 @@
 #[path = "../../../ac2-ui/tests/it/common/mod.rs"]
 mod common;
 mod connect;
+mod cross_rig;
 
 mod advice;
 mod align;

@@ -107,6 +107,7 @@ dependencies = [
  "ac2-testkit",
  "ac2-traces",
  "ac2-ui",
+ "ac2-zmq",
  "ac2d",
  "eframe",
  "egui_kittest",
