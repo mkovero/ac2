@@ -191,7 +191,7 @@ fn an_input_only_device_plays_on_another_output_device() {
         .expect("detect");
     assert_eq!(req.device, DeviceId("USB mic".into()));
     assert_eq!(req.output_device, DeviceId("Speakers".into()));
-    let mut det = ac2_client::fake::fake_detection();
+    let mut det = crate::state::tests::recorded::detection();
     det.input_device = req.device.clone();
     det.output_device = req.output_device.clone();
     t.conn(ConnEvent::LoopbackDetected(Ok(det)));

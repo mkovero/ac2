@@ -57,5 +57,7 @@ ac2-client = { path = "../ac2-client", features = ["test-support"] }
 ac2-core = { path = "../ac2-core" }
 ac2-traces = { path = "../ac2-traces" }
 num-complex = { workspace = true }
+# The recorded daemon answers in fixtures/daemon/ (tests/it/recorded.rs).
+serde_json = { workspace = true }
 egui_kittest = { version = "0.36.2", features = ["eframe", "snapshot", "wgpu"] }
 tempfile = { workspace = true }

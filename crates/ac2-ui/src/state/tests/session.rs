@@ -625,7 +625,9 @@ fn detect_loopback_needs_a_stimulus_output_and_a_typed_level() {
     // The burst holds the device: no preview meanwhile.
     assert!(r.iter().any(|x| matches!(x, Request::PreviewStop)), "{r:?}");
     // The answer: input 3 is the loopback; it becomes the Reference and the preview resumes.
-    let mut det = ac2_client::fake::fake_detection();
+    let mut det = super::recorded::detection();
+    det.input_device = req.device.clone();
+    det.output_device = req.output_device.clone();
     det.loopback = Some(2);
     det.ranked[0].input = 2;
     let r = t.conn(ConnEvent::LoopbackDetected(Ok(det)));

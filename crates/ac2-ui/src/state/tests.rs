@@ -4,7 +4,6 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use ac2_client::fake::empty_state;
 use ac2_client::{MirrorView, Phase};
 use ac2_proto::Command;
 use ac2_proto::model::*;
@@ -15,6 +14,10 @@ use crate::conn::{ConnEvent, Request, StimEvent};
 use crate::keys::{Chord, Keymap};
 use crate::prefs::KindPref;
 use crate::session_dialog::{RoleKey, Row, SessionDialog};
+
+#[path = "../../tests/it/recorded.rs"]
+mod recorded;
+use recorded::empty_state;
 
 fn meas(id: u32, name: &str, kind: MeasKind) -> Measurement {
     let delay = matches!(kind, MeasKind::Transfer { .. }).then(|| DelayState {

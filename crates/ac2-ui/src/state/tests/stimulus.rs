@@ -171,8 +171,9 @@ fn space_during_a_stop_arms_once_the_stop_lands() {
 #[test]
 fn level_never_exceeds_the_ceiling() {
     let mut t = T::new();
-    // empty_state's ceiling is −6 dBFS.
-    assert_eq!(t.st.ceiling(), Some(Dbfs(-6.0)));
+    // The recorded daemon's ceiling: the −10 dBFS global maximum of `ac2d` without
+    // `--max-level`.
+    assert_eq!(t.st.ceiling(), Some(Dbfs(-10.0)));
     t.key("L");
     t.text("-3");
     assert!(t.key("Enter").is_empty());
@@ -182,12 +183,12 @@ fn level_never_exceeds_the_ceiling() {
     }
     assert_eq!(t.st.rig.stimulus.level, None);
     t.key("Esc");
-    t.st.rig.stimulus.level = Some(Dbfs(-7.0));
+    t.st.rig.stimulus.level = Some(Dbfs(-11.0));
     t.st.rig.stimulus.phase = StimPhase::Armed;
     let r = t.key("Shift+Up");
     assert_eq!(
         r.iter().filter_map(set_level).collect::<Vec<_>>(),
-        [(-6.0, true, false)]
+        [(-10.0, true, false)]
     );
     assert!(t.key("Up").is_empty());
     assert!(t.last_toast().contains("ceiling"));

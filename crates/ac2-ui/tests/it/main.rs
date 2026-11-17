@@ -8,4 +8,5 @@ mod gonio_parity;
 mod keymap_doc;
 mod no_dsp;
 mod pane_title;
+mod recorded;
 mod ui;

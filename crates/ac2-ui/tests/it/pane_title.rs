@@ -5,7 +5,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use ac2_client::fake::empty_state;
+use crate::recorded::empty_state;
 use ac2_client::{MirrorView, Phase};
 use ac2_proto::model::*;
 use ac2_proto::units::*;

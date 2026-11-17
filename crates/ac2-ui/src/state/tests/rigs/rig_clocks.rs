@@ -93,7 +93,7 @@ fn the_connection_page_says_each_rigs_clock() {
         "pupu · clock: +6 ppm against the system clock · system clock synced, OS bound ±3.0 ms"
     );
     assert!(
-        lines[0].ends_with("clock: no audio open · system clock not stated by the OS"),
+        lines[0].ends_with("clock: no audio open · system clock synced, OS bound ±1.0 ms"),
         "{lines:?}"
     );
 }
