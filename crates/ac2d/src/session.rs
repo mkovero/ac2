@@ -9,7 +9,7 @@ use ac2_audio::{
 };
 use ac2_proto::ErrorCode;
 use ac2_proto::ProtoError;
-use ac2_proto::model::{OpenSession, REMOTE_BASE, SessionConfig, remote_slot};
+use ac2_proto::model::{OpenSession, REMOTE_BASE, RemoteInput, SessionConfig, remote_slot};
 use ac2_proto::units::{SessionEpoch, WallNs};
 
 use crate::control::ControlMsg;
@@ -56,6 +56,17 @@ pub(crate) fn local_inputs(cfg: &SessionConfig) -> Vec<u16> {
         .copied()
         .filter(|&c| remote_slot(c).is_none())
         .collect()
+}
+
+/// `cfg` taking `remote` as its remote inputs in place of its own: the local inputs stay,
+/// the remote channels become `remote`'s, in its order.
+pub(crate) fn with_remote_inputs(cfg: &SessionConfig, remote: &[RemoteInput]) -> SessionConfig {
+    let mut c = cfg.clone();
+    c.input_channels.retain(|&ch| remote_slot(ch).is_none());
+    c.input_channels
+        .extend(remote.iter().map(RemoteInput::session_channel));
+    c.remote_inputs = remote.to_vec();
+    c
 }
 
 /// Checks a session configuration without a device.

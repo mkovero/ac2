@@ -8,6 +8,7 @@ use crate::common;
 use std::time::{Duration, Instant};
 
 use ac2_proto::frame::FrameData;
+use ac2_proto::model::SessionRef;
 use ac2_proto::model::{
     MeasConfig, MeasKind, MeasScope, REMOTE_BASE, RemoteAudio, RemoteInput, RemoteLink,
     RemoteState, RigPeer, SessionConfig, SpectrumConfig, SystemClock,
@@ -433,4 +434,66 @@ fn slow_a_rig_admitted_as_an_app_is_told_so_until_admitted_as_a_rig() {
     });
     a.shutdown();
     b.shutdown();
+}
+
+/// The open session's input channels and remote inputs.
+fn session_inputs(c: &mut Client) -> (Vec<u16>, Vec<RemoteInput>) {
+    let s = c.snapshot(Command::StateSnapshot).state.session;
+    let cfg = s.open.expect("an open session").config;
+    (cfg.input_channels, cfg.remote_inputs)
+}
+
+/// A session file names its remote inputs and its measurements name their channels: loading
+/// it gives the open session those remote inputs back, and a file with none takes the open
+/// session's away. The local inputs stay the device's.
+#[test]
+fn a_session_load_gives_back_its_remote_inputs() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let mut cfg = config(manual_rig(), inproc(&unique("remote-load")));
+    cfg.session_dir = dir.path().join("sessions");
+    let h = Daemon::start(cfg).unwrap();
+    let (mut c, _) = connect(&h, &[]);
+    let save = |c: &mut Client, name: &str| {
+        c.ok(Command::FileSave {
+            session: SessionRef::Name { name: name.into() },
+            overwrite: true,
+        });
+    };
+    let load = |c: &mut Client, name: &str| {
+        c.ok(Command::FileLoad {
+            session: SessionRef::Name { name: name.into() },
+            discard: true,
+        });
+    };
+    // Rig B is not paired: its input waits for it, and the file still records it.
+    let b = RigId(0xb);
+    c.ok(Command::SessionOpen {
+        config: session(false),
+    });
+    save(&mut c, "local");
+    let with = with_remote(b, FS);
+    c.ok(Command::SessionOpen {
+        config: with.clone(),
+    });
+    create(&mut c, spectrum(REMOTE_BASE));
+    save(&mut c, "remote");
+
+    load(&mut c, "local");
+    assert_eq!(session_inputs(&mut c), (vec![0], Vec::new()));
+    c.ok(Command::SessionOpen {
+        config: session(false),
+    });
+    load(&mut c, "remote");
+    assert_eq!(
+        session_inputs(&mut c),
+        (vec![0, 1, REMOTE_BASE], with.remote_inputs.clone())
+    );
+    wait_remote(&mut c, "the loaded input is run", |r| {
+        r.inputs.iter().map(|i| i.slot).eq([0])
+    });
+    // Loaded again: the same remote inputs, nothing reopened for them.
+    load(&mut c, "remote");
+    assert_eq!(session_inputs(&mut c).1, with.remote_inputs);
+    h.shutdown();
 }

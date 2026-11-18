@@ -9,7 +9,7 @@ use ac2_proto::ProtoError;
 use ac2_proto::event::Change;
 use ac2_proto::model::{
     AudioStopped, BackendKind, DriverChange, DriverReset, DriverResetReason, GenAction,
-    OpenSession, Recovery as WireRecovery, Session, StopCause,
+    OpenSession, Recovery as WireRecovery, Session, SessionConfig, StopCause,
 };
 use ac2_proto::units::{SessionEpoch, WallNs};
 
@@ -476,14 +476,23 @@ impl Control {
         }
     }
 
+    /// The configuration a stopped session is being reopened with.
+    pub(super) fn recovery_config(&self) -> Option<&SessionConfig> {
+        self.audio_recovery.as_ref().map(|r| &r.open.config)
+    }
+
     /// A session file loaded while the audio is stopped: the stopped session shows the
-    /// load's `epoch`, and comes back without generator routes like any loaded session.
-    pub(super) fn rebase_recovery(&mut self, epoch: SessionEpoch) {
+    /// load's `epoch`, comes back without generator routes like any loaded session, and on
+    /// `config` when the load changed it (its remote inputs).
+    pub(super) fn rebase_recovery(&mut self, epoch: SessionEpoch, config: Option<SessionConfig>) {
         let Some(r) = self.audio_recovery.as_mut() else {
             return;
         };
         r.epoch = epoch;
         r.routes.clear();
+        if let Some(c) = config {
+            r.open.config = c;
+        }
         if let Some(st) = self.store.state().session.stopped.clone() {
             self.commit_stopped(st.recovery);
         }

@@ -13,9 +13,9 @@ use std::path::{Path, PathBuf};
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::grid::GridDef;
 use ac2_proto::model::{
-    DelayState, GenAction, ImportFormat, ImportRole, MeasKind, MeasScope, Measurement, Salvage,
-    SalvageRefusal, Session, SessionFile, SessionOrigin, SessionRef, SweepFailure, TraceKind,
-    TraceOwner,
+    DelayState, GenAction, ImportFormat, ImportRole, MeasKind, MeasScope, Measurement, RemoteInput,
+    Salvage, SalvageRefusal, Session, SessionConfig, SessionFile, SessionOrigin, SessionRef,
+    SweepFailure, TraceKind, TraceOwner,
 };
 use ac2_proto::units::{ClientId, Db, MeasId, Rev, Seconds, SessionEpoch, TransferId, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError, ReplyBody};
@@ -439,6 +439,43 @@ impl Control {
         }))
     }
 
+    /// The session configuration a load of `remote` reopens on: the open (or stopped)
+    /// session's, its remote inputs replaced by the loaded ones, since the loaded
+    /// measurements name their channels. `None` when nothing changes: the same remote inputs,
+    /// a replay (it plays a recording, not inputs), or no session to take them.
+    fn config_after_load(
+        &self,
+        remote: &[RemoteInput],
+    ) -> Result<Option<SessionConfig>, ProtoError> {
+        let now = match &self.session {
+            Some(rt) if rt.open.replay.is_some() => {
+                if !remote.is_empty() {
+                    tracing::info!("session load: a replay takes no remote inputs");
+                }
+                return Ok(None);
+            }
+            Some(rt) => &rt.open.config,
+            None => match self.recovery_config() {
+                Some(c) => c,
+                None => {
+                    if !remote.is_empty() {
+                        tracing::warn!(
+                            "session load: no open session to take its {} remote inputs",
+                            remote.len()
+                        );
+                    }
+                    return Ok(None);
+                }
+            },
+        };
+        if now.remote_inputs == remote {
+            return Ok(None);
+        }
+        let next = crate::session::with_remote_inputs(now, remote);
+        crate::session::validate(&next)?;
+        Ok(Some(next))
+    }
+
     /// Replaces every session measurement and every trace with `data`, disarmed (module
     /// docs); the rig meters go on ([`super::rig_meas`]). Returns the new session epoch.
     pub(super) fn replace_session(
@@ -452,6 +489,7 @@ impl Control {
         let mut grids = check_session(&data)?;
         let ids: Vec<MeasId> = data.measurements.iter().map(|m| m.id).collect();
         super::walks::check_walks(&data.walks, &data.plans, &ids)?;
+        let config = self.config_after_load(&data.remote_inputs)?;
 
         // Disarmed, no owner; a sweep run in progress is discarded.
         self.abort_sweep(SweepFailure::Stopped, "a session was loaded");
@@ -495,7 +533,10 @@ impl Control {
             .max()
             .unwrap_or(0);
         let epoch = SessionEpoch(self.epoch().0.max(newest) + 1);
-        if self.session.is_some() {
+        if let Some(rt) = &mut self.session {
+            if let Some(c) = config {
+                rt.open.config = c;
+            }
             // The stream reopens without generator routes: nothing is armed after a load.
             // A device that fails to reopen leaves the session open with its audio stopped
             // and being reopened (`reopen_at`); the saved state still loads.
@@ -505,7 +546,7 @@ impl Control {
         } else if self.audio_recovery.is_some() {
             // The session's audio is stopped: it stays open and keeps being reopened, now in
             // the loaded state's epoch.
-            self.rebase_recovery(epoch);
+            self.rebase_recovery(epoch, config);
         } else {
             self.commit(Change::Session(Session {
                 epoch,
