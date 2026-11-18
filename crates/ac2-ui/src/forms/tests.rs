@@ -81,6 +81,7 @@ fn measurement_defaults_match_the_cli() {
                 resolution: Resolution::FortyEighth,
                 smoothing: None,
                 depth: DepthPolicy::EqualConfidence,
+                peak: ac2_proto::model::PeakMode::Off,
             }
         }
     );

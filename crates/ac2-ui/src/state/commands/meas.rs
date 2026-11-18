@@ -353,6 +353,11 @@ impl AppState {
 
             C::ResetAverage => {
                 let m = self.focused_pane_meas();
+                // A peak hold starts over with the averages: what it held is of the
+                // curve before the reset.
+                if let Some(m) = &m {
+                    self.rig.folded.peaks.remove(&m.id);
+                }
                 if let Some(m) = &m
                     && let MeasKind::Math { config } = &m.config.kind
                 {

@@ -731,13 +731,17 @@ impl RigState {
         }
     }
 
-    pub(super) fn fold_peaks(&mut self, d: &DataSnapshot) {
+    /// Folds each newest frame into the hold of the measurements whose peak mode holds (P),
+    /// from when it went on: a spectrum's or an RTA's level, a transfer function's
+    /// magnitude where it is drawn (`blank_below`: the coherence threshold under which it
+    /// is not).
+    pub(super) fn fold_peaks(&mut self, d: &DataSnapshot, blank_below: Option<f32>) {
         use ac2_proto::FrameData;
         // Held only for the measurements whose peak hold is on (P), from when it went on.
         let held: BTreeSet<MeasId> = self
             .measurements()
             .iter()
-            .filter(|m| self.display_of(m).peak.holds())
+            .filter(|m| self.peak_of(m).holds())
             .map(|m| m.id)
             .collect();
         self.folded.peaks.retain(|id, _| held.contains(id));
@@ -745,9 +749,14 @@ impl RigState {
             return;
         }
         for tf in d.latest.frames.values() {
+            let shown;
             let (meas, level, validity) = match &tf.frame.data {
                 FrameData::Spec(f) => (f.meas, &f.level, None),
                 FrameData::Rta(f) => (f.meas, &f.level, Some(f.validity.as_slice())),
+                FrameData::Tf(f) if held.contains(&f.meas) => {
+                    shown = ac2_scene::trace::shown_magnitude(&f.mag, &f.coh, blank_below);
+                    (f.meas, &shown, Some(f.validity.as_slice()))
+                }
                 _ => continue,
             };
             if !held.contains(&meas) {
@@ -777,15 +786,16 @@ impl RigState {
         }
     }
 
-    /// Chooses the tracked peaks again from each newest frame of the measurements whose peak
-    /// mode tracks (P), from when it went on.
+    /// Chooses the tracked peaks and dips again from each newest frame of the spectrum and
+    /// RTA measurements whose peak mode tracks (P), from when it went on. A transfer
+    /// function's are chosen where it is drawn, from the magnitude as displayed.
     pub(super) fn fold_peak_tracks(&mut self, d: &DataSnapshot) {
         use ac2_proto::FrameData;
-        use ac2_scene::spectrum::peaks::{PeakInput, find_peaks};
+        use ac2_scene::spectrum::peaks::{PeakInput, find_dips, find_peaks};
         let tracked: BTreeSet<MeasId> = self
             .measurements()
             .iter()
-            .filter(|m| self.display_of(m).peak.tracks())
+            .filter(|m| m.config.kind.publishes_levels() && self.peak_of(m).tracks())
             .map(|m| m.id)
             .collect();
         self.folded.peak_tracks.retain(|id, _| tracked.contains(id));
@@ -818,13 +828,14 @@ impl RigState {
                 NextFrame::Afresh => e.1.reset(),
             }
             let cols = ac2_scene::grid::columns(grid);
-            e.1.update(&find_peaks(&PeakInput {
+            let input = PeakInput {
                 freqs: &cols.freqs,
                 level,
                 validity,
                 unresolved,
                 narrow,
-            }));
+            };
+            e.1.update(&find_peaks(&input), &find_dips(&input));
             e.0 = Some(FoldedAt::of(&tf.frame.stamp));
         }
     }

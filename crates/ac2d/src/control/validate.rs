@@ -274,8 +274,8 @@ pub(super) fn spl_in_place(old: &MeasKind, new: &MeasKind) -> Option<ac2_proto::
 }
 
 /// Whether `new` is `old` with only how clients draw it changed (a spectrum or RTA
-/// measurement's `display`): nothing the daemon computes depends on it, so the job, its
-/// averages and the config rev go on.
+/// measurement's `display`, a transfer measurement's `peak`): nothing the daemon computes
+/// depends on it, so the job, its averages and the config rev go on.
 pub(super) fn display_only(old: &MeasKind, new: &MeasKind) -> bool {
     match (old, new) {
         (MeasKind::Spectrum { config: a }, MeasKind::Spectrum { config: b }) => {
@@ -287,6 +287,12 @@ pub(super) fn display_only(old: &MeasKind, new: &MeasKind) -> bool {
         (MeasKind::Rta { config: a }, MeasKind::Rta { config: b }) => {
             ac2_proto::model::RtaConfig {
                 display: b.display,
+                ..a.clone()
+            } == *b
+        }
+        (MeasKind::Transfer { config: a }, MeasKind::Transfer { config: b }) => {
+            ac2_proto::model::TransferConfig {
+                peak: b.peak,
                 ..a.clone()
             } == *b
         }
@@ -302,6 +308,7 @@ pub(super) fn smoothing_only(old: &MeasKind, new: &MeasKind) -> Option<Smoothing
         (MeasKind::Transfer { config: a }, MeasKind::Transfer { config: b })
             if ac2_proto::model::TransferConfig {
                 smoothing: b.smoothing,
+                peak: b.peak,
                 ..a.clone()
             } == *b =>
         {

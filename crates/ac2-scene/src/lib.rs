@@ -60,6 +60,7 @@ pub mod missing;
 pub mod new_meas;
 pub mod osc;
 pub mod pane_edit;
+mod peak_marks;
 pub mod plate;
 pub mod primitives;
 pub mod programme;

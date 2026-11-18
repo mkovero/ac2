@@ -183,17 +183,8 @@ impl AppState {
                 self.view.tf.phase = next;
                 self.toast(next.name());
             }
-            C::MinMax => {
-                let on = !self.view.tf.extremes;
-                self.view.tf.extremes = on;
-                self.toast(if on {
-                    "min / max tracking"
-                } else {
-                    "min / max tracking off"
-                });
-            }
             C::SpectrumStyle => self.step_spectrum_style(out),
-            C::PeakHold => self.step_peak_mode(out),
+            C::Peaks => self.step_peak_mode(out),
             C::SpectrographSpan => self.step_spectrograph_span(out),
             C::SplShowMeter | C::SplShowLeq | C::SplShowMeterLeq | C::SplShowBands => {
                 if self.focus_kind(PaneKind::Spl) {

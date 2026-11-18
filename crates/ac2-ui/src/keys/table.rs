@@ -209,9 +209,8 @@ pub fn defaults() -> Vec<Binding> {
         (C::EqEditor, S::Transfer, alt(K::E)),
         (C::Target, S::Transfer, k(K::Z)),
         (C::Average, S::Transfer, k(K::M)),
-        // P tracks extremes in both plots: min / max here, peak hold and peaks on the
-        // spectrum. The phase views share Shift+P.
-        (C::MinMax, S::Transfer, k(K::P)),
+        // P is Peaks in both plots: off, hold, tracking. The phase views share Shift+P.
+        (C::Peaks, S::Transfer, k(K::P)),
         // K steps smoothing coarser, Shift+K finer (off → 1/48 … 1/3 octave).
         (C::SmoothCoarser, S::Transfer, k(K::K)),
         (C::SmoothFiner, S::Transfer, sh(K::K)),
@@ -241,7 +240,7 @@ pub fn defaults() -> Vec<Binding> {
         (C::StartStop, S::Spl, k(K::S)),
         (C::SpectrumStyle, S::Spectrum, k(K::B)),
         (C::StartStop, S::Spectrum, k(K::S)),
-        (C::PeakHold, S::Spectrum, k(K::P)),
+        (C::Peaks, S::Spectrum, k(K::P)),
         // G steps the focused pane's views, Shift+G back: one key pair for every pane, the
         // IR's displays among the views, so no view needs a second key to reach.
         (C::NextView, S::Transfer, k(K::G)),
@@ -296,7 +295,7 @@ pub fn defaults() -> Vec<Binding> {
         (C::NextView, S::Spectrograph3d, k(K::G)),
         (C::PrevView, S::Spectrograph3d, sh(K::G)),
         (C::SpectrographSpan, S::Spectrograph3d, sh(K::B)),
-        (C::PeakHold, S::Spectrograph3d, k(K::P)),
+        (C::Peaks, S::Spectrograph3d, k(K::P)),
         (C::Offset, S::Spectrograph3d, k(K::J)),
         (C::TiltUp, S::Spectrograph3d, k(K::PageUp)),
         (C::TiltDown, S::Spectrograph3d, k(K::PageDown)),
@@ -353,7 +352,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::ToggleSelected, "show/hide", 80),
                     hint(C::Slot1, "capture", 85),
                     hint(C::InsertDelay, "find delay", 70),
-                    hint(C::MinMax, "min/max", 55),
+                    hint(C::Peaks, "peaks", 55),
                     hint(C::SmoothCoarser, "smoothing", 60),
                 ]
             }
@@ -362,7 +361,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
             const {
                 &[
                     hint(C::StartStop, "start/stop", 70),
-                    hint(C::PeakHold, "peaks", 75),
+                    hint(C::Peaks, "peaks", 75),
                     // The spectrum style (B) is in the help and the palette: the line
                     // holds eight.
                     hint(C::NextView, "view", 65),
@@ -430,7 +429,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::ResetView, "reset camera", 70),
                     hint(C::NextView, "view", 80),
                     hint(C::StartStop, "start/stop", 75),
-                    hint(C::PeakHold, "peaks", 65),
+                    hint(C::Peaks, "peaks", 65),
                     hint(C::MaximisePane, "maximise", 40),
                 ]
             }

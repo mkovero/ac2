@@ -124,6 +124,30 @@ fn display_settings_keep_the_job_and_survive_a_reload() {
     h.shutdown();
 }
 
+/// P on a transfer function changes what is drawn over it, never what is measured: the
+/// job and its averages stay, and the mode comes back with the session.
+#[test]
+fn a_transfers_peak_mode_keeps_the_job_and_survives_a_reload() {
+    use ac2_proto::model::PeakMode;
+    let dir = tempfile::tempdir().unwrap();
+    let h = start("meas-display-tf", dir.path());
+    let (mut c, _sub) = connect(&h, &[]);
+    let c = &mut c;
+    let a = created(c, transfer("Main"));
+    assert_eq!(a.config.kind.peak(), Some(PeakMode::Off));
+    let mut config = a.config.clone();
+    *config.kind.peak_mut().unwrap() = PeakMode::Track;
+    let m = c.update_ok(a.id, config).measurement();
+    assert_eq!(
+        m.config_rev, a.config_rev,
+        "what P draws is not a new config"
+    );
+    assert_eq!(m.config.kind.peak(), Some(PeakMode::Track));
+    save_and_reload(c, "tf-peak");
+    assert_eq!(meas_of(c, a.id).config.kind.peak(), Some(PeakMode::Track));
+    h.shutdown();
+}
+
 fn entry(what: layout::EntryRef) -> layout::PaneEntry {
     layout::PaneEntry {
         rig: layout::RigRef::ThisRig,

@@ -263,6 +263,7 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
                             return Err(CliError::Usage("--fast-lf must be longer than 0".into()));
                         }
                     },
+                    peak: PeakMode::Off,
                 },
             }
         }
@@ -333,6 +334,16 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
             }
         }
     };
+    let mut kind = kind;
+    if let Some(p) = n.peak {
+        let Some(mode) = kind.peak_mut() else {
+            return Err(CliError::Usage(format!(
+                "--peak applies to tf, spectrum and rta, not {:?}",
+                n.kind
+            )));
+        };
+        *mode = p.into();
+    }
     if n.name.trim().is_empty() {
         return Err(CliError::Usage("--name must not be empty".into()));
     }
@@ -380,7 +391,8 @@ pub(crate) fn meas_set(config: &MeasConfig, set: MeasSet) -> Result<MeasConfig, 
         return Err(CliError::Usage(
             "say what changes: --average (spectrum, rta), --blocks (tf), --fft, --window or \
              --level (spectrum), --resolution (tf, sweep; multi[:1/N] for a spectrum), \
-             --style, --peak, --span or --colours (spectrum, rta), --colour or --offset"
+             --peak (tf, spectrum, rta), --style, --span or --colours (spectrum, rta), \
+             --colour or --offset"
                 .into(),
         ));
     }
@@ -473,17 +485,19 @@ pub(crate) fn meas_set(config: &MeasConfig, set: MeasSet) -> Result<MeasConfig, 
         };
         c.level = l;
     }
-    let display =
-        set.style.is_some() || set.peak.is_some() || set.span_s.is_some() || set.colours.is_some();
+    if let Some(p) = set.peak {
+        let Some(mode) = config.kind.peak_mut() else {
+            return not("peak", "tf, spectrum and rta");
+        };
+        *mode = p;
+    }
+    let display = set.style.is_some() || set.span_s.is_some() || set.colours.is_some();
     if display {
         let Some(d) = config.kind.display_mut() else {
-            return not("style, --peak, --span and --colours", "spectrum and rta");
+            return not("style, --span and --colours", "spectrum and rta");
         };
         if let Some(s) = set.style {
             d.style = s;
-        }
-        if let Some(p) = set.peak {
-            d.peak = p;
         }
         if let Some(s) = set.span_s {
             if !SpectrumDisplay::SPANS_S.contains(&s) {

@@ -371,3 +371,43 @@ fn uneven_dips_are_no_comb() {
     let s = comb_spacing(&[d(80.0), d(500.0), d(1500.0), d(2510.0), d(3490.0)]);
     assert!(s.is_some_and(|s| (s - 996.67).abs() < 0.1), "{s:?}");
 }
+
+/// A dip is a peak of the curve turned upside down: a notch 6 dB or more below the rises
+/// on both sides is found, a shallower one is ripple, and the deepest comes first.
+#[test]
+fn dips_follow_the_peaks_rules_mirrored() {
+    let f = bins();
+    let mut level = vec![-40.0_f32; f.len()];
+    let mut notch = |i: usize, depth: f32| {
+        level[i] = -40.0 - depth;
+        level[i - 1] = -40.0 - depth / 2.0;
+        level[i + 1] = -40.0 - depth / 2.0;
+    };
+    notch(100, 20.0);
+    notch(400, 30.0);
+    notch(800, 4.0);
+    let dips = find_dips(&narrow(&f, &level));
+    let at: Vec<f64> = dips.iter().map(|p| p.freq_hz).collect();
+    assert_eq!(
+        at,
+        vec![f[400], f[100]],
+        "deepest first, the 4 dB one left out"
+    );
+    assert_eq!(dips[0].level, -70.0);
+}
+
+/// One tracker keeps a curve's peaks and its dips, each in its own list order.
+#[test]
+fn an_extreme_tracker_keeps_peaks_and_dips_apart() {
+    let p = |freq_hz: f64, level: f64| Peak { freq_hz, level };
+    let mut t = ExtremeTracker::default();
+    t.update(
+        &[p(1000.0, -10.0), p(100.0, -20.0)],
+        &[p(500.0, -60.0), p(5000.0, -80.0)],
+    );
+    let marks = t.tracked();
+    assert_eq!(marks.max[0].freq_hz, 1000.0, "highest first");
+    assert_eq!(marks.min[0].freq_hz, 5000.0, "deepest first");
+    t.reset();
+    assert!(t.tracked().max.is_empty() && t.tracked().min.is_empty());
+}

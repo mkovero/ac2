@@ -649,7 +649,7 @@ pub fn spectrograph_3d_scene(
         Some(s) if message.is_none() && view.chrome.peak_marks() => traces
             .iter()
             .find(|t| t.key == s.key)
-            .and_then(|t| Some((t, t.tracked?)))
+            .and_then(|t| Some((t, t.tracked?.max)))
             .map_or_else(Vec::new, |(t, peaks)| {
                 super::points::peak_points(
                     &mut c,

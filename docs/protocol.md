@@ -31,7 +31,7 @@ keepalives to each connection as its credit allows (§5.8).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 91`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 92`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -559,13 +559,19 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   `SpectrumDisplay`): how clients draw the measurement, kept with it so every client draws
   it the same and a session file restores it. `style` (`SpectrumStyle`: `line` \| `fill` \|
   `bars`; narrowband curves asked for `bars` draw as `line`), `peak` (`PeakMode`: `off` \|
-  `hold` \| `track`: clients draw a peak-hold curve they keep themselves, and with `track`
-  also mark and list the curve's highest peaks, found by themselves), `spectrograph_span_s` (u32: 10 \| 30 \| 60
+  `hold` \| `track`: with `hold` clients draw a peak-hold curve they keep themselves, with
+  `track` they mark and list the curve's highest peaks and deepest dips, found by
+  themselves, and draw no hold), `spectrograph_span_s` (u32: 10 \| 30 \| 60
   \| 120, `invalid` otherwise) and `spectrograph_colours` (`Colormap`: `viridis` \| `magma`
   \| `inferno` \| `cividis` \| `grey` \| `ice`). A configuration that differs only in `display`
   (and the name) changes nothing the daemon computes: the job, its averages and the
   measurement's `config_rev` stay as they are. A math channel on the spectrum pane draws
   with its owner's display.
+- **Transfer peak mode** (`TransferConfig.peak`: `PeakMode`, as a spectrum's
+  `display.peak`): what clients draw over the live magnitude, the hold and the marks their
+  own. A configuration that differs only in `peak` (and the name) changes nothing the
+  daemon computes: the job, its averages and the measurement's `config_rev` stay as they
+  are. A math channel on the transfer pane draws with its owner's mode.
 - **SPL** (`SplConfig`): any change on the same `input` — `weighting`, `time_weighting`,
   `peak_weighting`, the Leq windows and peak limits (`leq: LeqConfig`), the measuring-position
   correction (`position`), the name — applies in place; the
@@ -2482,7 +2488,7 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 <dir>/spl/<name>.bands.csv   its band log, when the meter's band meter logged (§7.4)
 ```
 
-`session.json`: `{format: "ac2-session", version: 44, saved_at, measurements:
+`session.json`: `{format: "ac2-session", version: 45, saved_at, measurements:
 [{id, config: MeasConfig, running, delay: {applied, nudged, tracking} | null, colour:
 ColourFamily | null, layout: PaneLayout | null, offset: Db, eq: [EqSet]}], spl_logs:
 [{meas, file, bands: file | null}], traces: [{meta: TraceMeta, grid: GridDef, file, mic_curve_points: [[Hz,

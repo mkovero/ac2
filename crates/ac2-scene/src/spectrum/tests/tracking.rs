@@ -45,8 +45,15 @@ fn tracked_peaks_are_listed_under_the_cursor_and_marked() {
     let (f, e) = (g.centres(), g.edges());
     let level = levels(&f);
     let peaks = tracked_rta(&f, &level);
+    let dips = [Peak {
+        freq_hz: 400.0,
+        level: -70.0,
+    }];
     let mut t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
-    t.tracked = Some(&peaks);
+    t.tracked = Some(crate::spectrum::peaks::Tracked {
+        max: &peaks,
+        min: &dips,
+    });
     let s = spectrum_scene(
         &[t],
         &Status::default(),
@@ -54,18 +61,20 @@ fn tracked_peaks_are_listed_under_the_cursor_and_marked() {
         &Theme::dark(),
         SIZE,
     );
+    // The transfer's list shape: `max` then `min`, each row rank, frequency, level.
     assert_eq!(
         s.peak_list.as_deref(),
         Some(
-            "1  1.00 kHz  −32.0 dBFS (band)\n2  100 Hz  −40.0 dBFS (band)\n3  3.98 kHz  −50.0 dBFS (band)"
+            "max\n1  1.00 kHz  −32.0 dBFS (band)\n2  100 Hz  −40.0 dBFS (band)\n3  3.98 kHz  −50.0 dBFS (band)\nmin\n1  400 Hz  −70.0 dBFS (band)"
         )
     );
     assert_eq!(s.peaks.len(), 1);
     let rows = &s.peaks[0].rows;
     assert_eq!(s.peaks[0].name, "RTA");
+    assert_eq!(s.peaks[0].dips.len(), 1);
     // Each mark is centred on its point on the curve.
     let (xm, ym) = (s.x_axis.mapping, s.y_axis.mapping);
-    for r in rows {
+    for r in rows.iter().chain(&s.peaks[0].dips) {
         let m = r.mark.expect("on the plot");
         assert!((m.x + m.w / 2.0 - xm.to_px(r.freq_hz)).abs() < 1e-3);
         assert!((m.y + m.h / 2.0 - ym.to_px(r.level)).abs() < 1e-3);
@@ -101,7 +110,10 @@ fn traces_only_hides_every_peak_mark() {
     let level = levels(&f);
     let peaks = tracked_rta(&f, &level);
     let mut t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
-    t.tracked = Some(&peaks);
+    t.tracked = Some(crate::spectrum::peaks::Tracked {
+        max: &peaks,
+        min: &[],
+    });
     let s = spectrum_scene(
         &[t],
         &Status::default(),
@@ -156,14 +168,17 @@ fn an_offset_curve_lists_its_displayed_levels_under_its_name() {
     let level = levels(&f);
     let peaks = tracked_rta(&f, &level);
     let mut t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
-    t.tracked = Some(&peaks);
+    t.tracked = Some(crate::spectrum::peaks::Tracked {
+        max: &peaks,
+        min: &[],
+    });
     t.offset_db = 6.0;
     let mut v = view(PlotChrome::Full);
     v.cursor_hz = None;
     let s = spectrum_scene(&[t], &Status::default(), &v, &Theme::dark(), SIZE);
     let list = s.peak_list.expect("list");
     assert!(
-        list.starts_with("RTA · offset +6.0 dB\n1  1.00 kHz  −26.0 dBFS (band)"),
+        list.starts_with("RTA · offset +6.0 dB\nmax\n1  1.00 kHz  −26.0 dBFS (band)"),
         "{list}"
     );
 }
@@ -177,7 +192,10 @@ fn dragged_cursor_values_leave_the_list_the_top() {
     let level = levels(&f);
     let peaks = tracked_rta(&f, &level);
     let mut t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
-    t.tracked = Some(&peaks);
+    t.tracked = Some(crate::spectrum::peaks::Tracked {
+        max: &peaks,
+        min: &[],
+    });
     let mut v = view(PlotChrome::Full);
     v.plates.readout.at = Some([0.0, 1.0]);
     v.plates.readout.scale = 2.0;
@@ -209,7 +227,10 @@ fn a_dragged_peak_list_moves_and_scales_but_the_marks_stay() {
     let peaks = tracked_rta(&f, &level);
     let scene = |v: &ViewState| {
         let mut t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
-        t.tracked = Some(&peaks);
+        t.tracked = Some(crate::spectrum::peaks::Tracked {
+            max: &peaks,
+            min: &[],
+        });
         spectrum_scene(&[t], &Status::default(), v, &Theme::dark(), SIZE)
     };
     let auto = scene(&view(PlotChrome::Full));
@@ -242,7 +263,10 @@ fn the_list_leaves_its_place_to_cursor_values_dropped_there() {
     let level = levels(&f);
     let peaks = tracked_rta(&f, &level);
     let mut t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
-    t.tracked = Some(&peaks);
+    t.tracked = Some(crate::spectrum::peaks::Tracked {
+        max: &peaks,
+        min: &[],
+    });
     let mut v = view(PlotChrome::Full);
     v.plates.readout.move_to(1.0, 0.0);
     let s = spectrum_scene(&[t], &Status::default(), &v, &Theme::dark(), SIZE);
@@ -263,7 +287,10 @@ fn the_peak_plate_is_filled_by_the_plate_background() {
     let peaks = tracked_rta(&f, &level);
     let fill = |bg: crate::plate::PlateBackground| {
         let mut t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
-        t.tracked = Some(&peaks);
+        t.tracked = Some(crate::spectrum::peaks::Tracked {
+            max: &peaks,
+            min: &[],
+        });
         let mut theme = Theme::dark();
         theme.plate_alpha = bg.alpha();
         let s = spectrum_scene(

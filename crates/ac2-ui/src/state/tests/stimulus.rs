@@ -281,38 +281,41 @@ fn opening_key_is_not_typed_into_the_prompt() {
     assert_eq!(t.st.rig.stimulus.level, Some(Dbfs(-19.0)));
 }
 
-/// P on the spectrum pane steps the focused pane's measurement off → peak hold → peak
-/// tracking → off, the toast naming each step.
+/// On the transfer pane P steps the pane's measurement through the same peak modes as on
+/// the spectrum, and Shift+P steps the phase view wrapped → unwrapped → group delay →
+/// wrapped; each toast names the new state.
 #[test]
-fn p_cycles_peak_hold_and_tracking() {
+fn p_steps_the_transfers_peak_mode_and_shift_p_the_phase_view() {
     use ac2_proto::model::PeakMode;
-    let mut t = T::new();
-    t.key("Alt+2");
-    for (want, toast) in [
-        (PeakMode::Hold, "Sub: peaks: hold"),
-        (PeakMode::Track, "Sub: peaks: tracking"),
-        (PeakMode::Off, "Sub: peaks off"),
-    ] {
-        t.key_answered("P");
-        let sub = t.st.meas(MeasId(2)).expect("Sub");
-        assert_eq!(t.st.display_of(sub).peak, want);
-        assert_eq!(t.last_toast(), toast);
-    }
-}
-
-/// On the transfer pane P is min / max tracking on / off, and Shift+P steps the phase view
-/// wrapped → unwrapped → group delay → wrapped; each toast names the new state.
-#[test]
-fn p_tracks_min_max_and_shift_p_steps_the_phase_view() {
     use ac2_scene::view::PhaseView;
     let mut t = T::new();
     assert_eq!(t.st.scope(), Scope::Transfer);
-    t.key("P");
-    assert!(t.st.view.tf.extremes);
-    assert_eq!(t.last_toast(), "min / max tracking");
-    t.key("P");
-    assert!(!t.st.view.tf.extremes);
-    assert_eq!(t.last_toast(), "min / max tracking off");
+    for (want, toast) in [
+        (PeakMode::Hold, "Main L: peaks: hold"),
+        (PeakMode::Track, "Main L: peaks: tracking"),
+        (PeakMode::Off, "Main L: peaks off"),
+    ] {
+        let r = t.key_answered("P");
+        assert!(
+            matches!(
+                calls(&r)[..],
+                [(
+                    Command::MeasUpdate {
+                        meas: MeasId(1),
+                        ..
+                    },
+                    _
+                )]
+            ),
+            "{r:?}"
+        );
+        let main = t.st.meas(MeasId(1)).expect("Main");
+        assert_eq!(main.config.kind.peak(), Some(want));
+        assert_eq!(t.last_toast(), toast);
+    }
+    // The spectrum beside it keeps its own mode.
+    let sub = t.st.meas(MeasId(2)).expect("Sub");
+    assert_eq!(t.st.display_of(sub).peak, PeakMode::Off);
     assert_eq!(t.st.view.tf.phase, PhaseView::Wrapped);
     for want in ["phase: unwrapped", "group delay", "phase: wrapped"] {
         t.key("Shift+P");

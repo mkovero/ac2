@@ -443,6 +443,9 @@ fn with_transfer<R>(
             1 + groups.iter().position(|x| *x == g).unwrap_or(groups.len())
         }
     };
+    // The pane's measurement's mode (P) says whether the pane tracks peaks and dips, on
+    // the curve it follows.
+    let tracks = pane_tf(st, pane).is_some_and(|m| st.rig.peak_of(m).tracks());
     let mut ranks: Vec<usize> = Vec::new();
     let mut traces: Vec<TfTrace<'_>> = Vec::new();
     for l in &live {
@@ -471,6 +474,10 @@ fn with_transfer<R>(
         t.note = eq_prediction_note(st, l.meas)
             .or_else(|| math_status(st, l.meas, &l.tf.frame.data).map(|a| a.tag()));
         t.compared = st.live_compared_on(PaneKind::Transfer, l.meas, pane);
+        t.tracks = tracks;
+        if st.rig.peak_of(l.meas).holds() {
+            t.hold = st.rig.folded.peaks.get(&l.meas.id).map(|p| p.2.values());
+        }
         if let Some((x, r, ours)) = st.cross_rig(l.meas.id) {
             t.faint_phase = ac2_scene::cross_rig::faint_phase(x).is_some();
             t.delay_between = Some((ours, ac2_scene::between_rigs::name_of(r, x.rig)));
@@ -490,6 +497,7 @@ fn with_transfer<R>(
         ranks.push(rank(ac2_scene::meas_list::group_of(&data.meta, &ms)));
         let mut t = TfTrace::stored(data, &cols.freqs, colours.trace(data.meta.id));
         t.selected = st.rig.selected_trace == Some(data.meta.id);
+        t.tracks = tracks;
         if let Some(tags) = eq_curve_tags(st, &data.meta) {
             t.note = Some(tags);
         }

@@ -24,12 +24,13 @@ pub struct Folded {
     pub(super) advice: HashMap<MeasId, ac2_scene::advice::Hold>,
     /// The transfer view's stored-trace display math, kept between frames.
     pub(crate) tf_display: ac2_scene::trace::DisplayCache,
-    /// Peak hold per spectrum / RTA measurement, with the last frame folded in and its
+    /// Peak hold per spectrum / RTA / transfer measurement, with the last frame folded in and its
     /// capture time.
     pub peaks: BTreeMap<MeasId, (Option<FoldedAt>, u64, PeakHold)>,
-    /// Tracked peaks per spectrum / RTA measurement, with the last frame folded in, kept
-    /// while peak tracking is on.
-    pub peak_tracks: BTreeMap<MeasId, (Option<FoldedAt>, ac2_scene::spectrum::peaks::PeakTracker)>,
+    /// Tracked peaks and dips per spectrum / RTA measurement, with the last frame folded
+    /// in, kept while peak tracking is on.
+    pub peak_tracks:
+        BTreeMap<MeasId, (Option<FoldedAt>, ac2_scene::spectrum::peaks::ExtremeTracker)>,
     /// Spectrograph history per spectrum / RTA measurement, kept while the spectrograph is
     /// shown.
     pub spectrographs: BTreeMap<MeasId, ac2_scene::spectrograph::SpectrographHistory>,

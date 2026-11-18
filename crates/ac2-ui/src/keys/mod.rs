@@ -311,7 +311,6 @@ commands! {
     Average => "average", "Average power", [Transfer];
     AverageComplex => "average_complex", "Average complex", [Transfer];
     AverageCoherence => "average_coherence", "Average coherence-weighted", [Transfer];
-    MinMax => "min_max", "Min/max tracking", [Transfer];
     PhaseView => "phase_view", "Phase view", [Transfer];
     SmoothCoarser => "smooth_coarser", "Smoothing coarser", [Transfer, Spectrum];
     SmoothFiner => "smooth_finer", "Smoothing finer", [Transfer, Spectrum];
@@ -329,7 +328,7 @@ commands! {
     ClearMark => "clear_mark", "Clear cursor mark", [Transfer, Spectrum];
 
     SpectrumStyle => "spectrum_style", "Spectrum style", [Spectrum];
-    PeakHold => "peak_hold", "Peaks", [Spectrum, Spectrograph3d];
+    Peaks => "peaks", "Peaks", [Transfer, Spectrum, Spectrograph3d];
     SpectrographSpan => "spectrograph_span", "Spectrograph span", [Spectrum, Spectrograph3d];
     SpectrographColours => "spectrograph_colours", "Next colour map", [Spectrum, Spectrograph3d];
     SpectrographViridis => "spectrograph_colours_viridis", "Colour map viridis", [Spectrum, Spectrograph3d];

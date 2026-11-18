@@ -378,6 +378,7 @@ mod tests {
             inverted: false,
             freqs,
             magnitude_db: mag,
+            hold_db: None,
             phase_wrapped_deg: vec![-44.6; n],
             phase_unwrapped_deg: vec![-404.6; n],
             group_delay_s: vec![0.001_234; n],

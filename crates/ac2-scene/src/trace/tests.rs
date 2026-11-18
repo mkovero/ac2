@@ -87,6 +87,8 @@ impl Data {
 
     fn trace(&self, key: u32, time_base: TimeBase) -> TfTrace<'_> {
         TfTrace {
+            hold: None,
+            tracks: false,
             range: None,
             faint_phase: false,
             delay_between: None,

@@ -99,10 +99,10 @@ pub struct SpectrumTrace<'a> {
     pub validity: Option<&'a [ValidityMask]>,
     /// Peak-hold values, column-aligned ([`PeakHold`]).
     pub peak: Option<&'a [f32]>,
-    /// Tracked peaks ([`peaks::PeakTracker`]), loudest first; `Some` on the one curve of
+    /// Tracked peaks and dips ([`peaks::ExtremeTracker`]); `Some` on the one curve of
     /// the pane whose peaks show: the pane's own while its peak mode tracks (P), ranked
     /// and listed.
-    pub tracked: Option<&'a [peaks::Peak]>,
+    pub tracked: Option<peaks::Tracked<'a>>,
     pub scale: LevelScale,
     pub quantity: Quantity,
     /// FFT bin spacing of a narrowband trace's grid ([`crate::grid::bin_spacing`]): its
@@ -391,15 +391,19 @@ pub struct SpectrumCursor {
     pub rows: Vec<(String, String)>,
 }
 
-/// One tracked curve's peaks as listed and marked.
+/// One tracked curve's peaks and dips as listed and marked.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SpectrumPeaks {
     /// The curve, with its display offset when it has one ([`offset_note`]).
     pub name: String,
+    /// The peaks, highest first: the list's `max` rows, each marked with a box.
     pub rows: Vec<PeakRow>,
+    /// The dips, deepest first: the list's `min` rows, each marked ▼. Empty on a
+    /// spectrograph, which has no level axis to stand a dip on.
+    pub dips: Vec<PeakRow>,
 }
 
-/// A tracked peak: where it is, what the list says about it, and its mark.
+/// A tracked peak or dip: where it is, what the list says about it, and its mark.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PeakRow {
     pub freq_hz: f64,
@@ -407,7 +411,8 @@ pub struct PeakRow {
     pub level: f64,
     /// `1  1.00 kHz  −32.0 dBFS`.
     pub text: String,
-    /// The box drawn around the point on the curve; `None` off the plot (zoomed past it),
+    /// The square its mark is drawn in around the point on the curve (a box, or a
+    /// triangle's bounds); `None` off the plot (zoomed past it),
     /// when only the list names it, and at *traces only*, when nothing marks it.
     pub mark: Option<Rect>,
 }
@@ -432,7 +437,7 @@ pub struct SpectrumScene {
     /// The cursor read against its mark ([`ViewState::cursor_mark_hz`]) on the selected
     /// curve (else the pane's own); its lines follow the cursor's values.
     pub mark: Option<crate::readout::MarkReadout>,
-    /// Tracked peaks, per tracked curve; empty unless peak tracking is on.
+    /// Tracked peaks and dips, per tracked curve; empty unless peak tracking is on.
     pub peaks: Vec<SpectrumPeaks>,
     /// The peak list as drawn on its plate; `None` with no listed peaks, or at *traces
     /// only* (T), which hides every peak mark.

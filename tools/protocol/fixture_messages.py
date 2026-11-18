@@ -108,6 +108,7 @@ MEAS_CONFIG = {
             "resolution": "ninety_sixth",
             "smoothing": {"fraction": "sixth", "mode": "magnitude"},
             "depth": {"type": "fast_lf", "max_settle_s": 1.0},
+            "peak": "hold",
         },
     },
 }

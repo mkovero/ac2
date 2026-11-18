@@ -394,7 +394,9 @@ fn hold_and_tracks_start_afresh_after_a_daemon_restart() {
             .folded
             .peak_tracks
             .get(&MeasId(2))
-            .map_or(vec![], |p| p.1.peaks().iter().map(|p| p.freq_hz).collect())
+            .map_or(vec![], |p| {
+                p.1.tracked().max.iter().map(|p| p.freq_hz).collect()
+            })
     };
     let bump = |at: usize| {
         let mut l = vec![-80.0; 5];
@@ -411,4 +413,129 @@ fn hold_and_tracks_start_afresh_after_a_daemon_restart() {
         !after.is_empty() && after != before,
         "{before:?} → {after:?}"
     );
+}
+
+/// Live transfer frames of measurement 1, numbered `seq`: every column at `mag` dB with
+/// coherence `coh`.
+fn transfer_frame(t: &mut T, seq: u64, mag: f32, coh: f32) {
+    use ac2_client::{Latest, TopicFrame};
+    use ac2_proto::FrameData;
+    let mut f = ac2_proto::samples::tf_frame();
+    f.stamp.seq = seq;
+    if let FrameData::Tf(tf) = &mut f.data {
+        tf.meas = MeasId(1);
+        tf.meta.math = None;
+        tf.validity = vec![ac2_proto::frame::ValidityMask::NONE; tf.mag.len()];
+        tf.coh = vec![coh; tf.mag.len()];
+        tf.mag = vec![mag; tf.mag.len()];
+    }
+    let f = TopicFrame {
+        topic: f.data.topic(),
+        frame: Arc::new(f),
+        received: Instant::now(),
+        since_new: std::time::Duration::ZERO,
+        age: Some(0.0),
+        stale: false,
+    };
+    let mut latest = Latest::default();
+    latest.frames.insert(f.topic.to_string().into(), f);
+    let mut grids = std::collections::BTreeMap::new();
+    let g = ac2_proto::samples::log_grid();
+    grids.insert(g.id(), Arc::new(g));
+    t.conn(ConnEvent::Data(Arc::new(crate::conn::DataSnapshot {
+        latest,
+        grids,
+        drained: Instant::now(),
+    })));
+}
+
+/// A transfer's peak hold is kept as a spectrum's: the highest magnitude each column has
+/// reached where the curve is drawn (a column blanked for its coherence adds nothing),
+/// started over by R and by turning the hold on again; tracking draws no hold.
+#[test]
+fn a_transfer_holds_its_highest_shown_magnitude() {
+    use ac2_proto::model::PeakMode;
+    let mut t = T::new();
+    assert_eq!(t.st.scope(), Scope::Transfer);
+    let scene = |t: &T| {
+        let p = t.pane(PaneKind::Transfer);
+        let size = ac2_scene::primitives::Viewport::new(1000.0, 600.0);
+        crate::scenes::transfer(&t.st, p, &Theme::dark(), size, now())
+    };
+    let hold = |t: &T| -> Option<Vec<f64>> {
+        scene(t)
+            .traces
+            .iter()
+            .find(|c| c.key == ac2_scene::trace::TraceKey::Live(MeasId(1)))
+            .and_then(|c| c.hold_db.clone())
+    };
+    let all = |h: Option<Vec<f64>>, want: f64| h.is_some_and(|h| h.iter().all(|v| *v == want));
+    let mode = |t: &T| t.st.meas(MeasId(1)).and_then(|m| m.config.kind.peak());
+    transfer_frame(&mut t, 1, 0.0, 1.0);
+    assert_eq!(hold(&t), None, "no hold while the mode is off");
+    assert!(scene(&t).extremes.is_none(), "nor any tracking");
+    t.st.view.tf.coherence.blank_below = Some(0.5);
+    t.key_answered("P");
+    assert_eq!(mode(&t), Some(PeakMode::Hold));
+    transfer_frame(&mut t, 2, 3.0, 1.0);
+    assert!(all(hold(&t), 3.0));
+    transfer_frame(&mut t, 3, -6.0, 1.0);
+    assert!(all(hold(&t), 3.0), "a lower frame leaves the hold");
+    transfer_frame(&mut t, 4, 12.0, 0.1);
+    assert!(all(hold(&t), 3.0), "a blanked frame adds nothing");
+    // R starts the hold over with the averages.
+    t.key("R");
+    transfer_frame(&mut t, 5, -6.0, 1.0);
+    assert!(all(hold(&t), -6.0), "{:?}", hold(&t));
+    t.key_answered("P");
+    assert_eq!(mode(&t), Some(PeakMode::Track));
+    transfer_frame(&mut t, 6, -6.0, 1.0);
+    assert_eq!(hold(&t), None, "tracking draws no hold line");
+    assert!(!t.st.rig.folded.peaks.contains_key(&MeasId(1)));
+    assert!(
+        scene(&t).extremes.is_some(),
+        "the pane's measurement tracks"
+    );
+    t.key_answered("P");
+    t.key_answered("P");
+    assert_eq!(mode(&t), Some(PeakMode::Hold));
+    transfer_frame(&mut t, 7, -9.0, 1.0);
+    assert!(all(hold(&t), -9.0), "a fresh hold");
+}
+
+/// Peak tracking keeps a spectrum's dips beside its peaks.
+#[test]
+fn tracking_keeps_a_spectrums_dips_too() {
+    let mut t = on_sub(two_spectra(), &[]);
+    t.key_answered("P");
+    t.key_answered("P");
+    // A floor with one tone and one notch.
+    let mut level = vec![-60.0_f32; 5];
+    level[1] = -20.0;
+    level[3] = -90.0;
+    let stamp = ac2_proto::samples::stamp(None);
+    spectra_of(&mut t, &[(2, level)], stamp.seq, stamp.daemon_incarnation);
+    let marks = t.st.rig.folded.peak_tracks[&MeasId(2)].1.tracked();
+    assert_eq!(marks.max[0].level, -20.0, "{marks:?}");
+    assert_eq!(marks.min.len(), 1, "{marks:?}");
+    assert_eq!(marks.min[0].level, -90.0);
+}
+
+/// P on the spectrum pane steps the focused pane's measurement off → peak hold → peak
+/// tracking → off, the toast naming each step.
+#[test]
+fn p_cycles_peak_hold_and_tracking() {
+    use ac2_proto::model::PeakMode;
+    let mut t = T::new();
+    t.key("Alt+2");
+    for (want, toast) in [
+        (PeakMode::Hold, "Sub: peaks: hold"),
+        (PeakMode::Track, "Sub: peaks: tracking"),
+        (PeakMode::Off, "Sub: peaks off"),
+    ] {
+        t.key_answered("P");
+        let sub = t.st.meas(MeasId(2)).expect("Sub");
+        assert_eq!(t.st.display_of(sub).peak, want);
+        assert_eq!(t.last_toast(), toast);
+    }
 }

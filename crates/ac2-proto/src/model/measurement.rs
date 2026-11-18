@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    AverageMethod, BandFraction, DelayState, PeakWeighting, Resolution, Smoothing,
+    AverageMethod, BandFraction, DelayState, PeakMode, PeakWeighting, Resolution, Smoothing,
     SmoothingFraction, SpecAveraging, SpecLevel, SpecResolution, SpectrumDisplay, SweepConfig,
     TfAveraging, TimeWeighting, Weighting, Window,
 };
@@ -40,6 +40,8 @@ pub struct TransferConfig {
     pub smoothing: Option<Smoothing>,
     /// How deep the decimated stages average (decision M1).
     pub depth: DepthPolicy,
+    /// What P draws over the live magnitude; the hold and the tracking are each client's.
+    pub peak: PeakMode,
 }
 
 /// Averaging depth of the MTW ladder's decimated stages (decision M1).
@@ -379,6 +381,27 @@ impl MeasKind {
         match self {
             MeasKind::Spectrum { config } => Some(&config.display),
             MeasKind::Rta { config } => Some(&config.display),
+            _ => None,
+        }
+    }
+
+    /// What P draws over its live curve, for the kinds that take a peak mode: a spectrum,
+    /// an RTA or a transfer function (a math channel draws with its owner's).
+    pub fn peak(&self) -> Option<PeakMode> {
+        match self {
+            MeasKind::Spectrum { config } => Some(config.display.peak),
+            MeasKind::Rta { config } => Some(config.display.peak),
+            MeasKind::Transfer { config } => Some(config.peak),
+            _ => None,
+        }
+    }
+
+    /// [`Self::peak`], to change.
+    pub fn peak_mut(&mut self) -> Option<&mut PeakMode> {
+        match self {
+            MeasKind::Spectrum { config } => Some(&mut config.display.peak),
+            MeasKind::Rta { config } => Some(&mut config.display.peak),
+            MeasKind::Transfer { config } => Some(&mut config.peak),
             _ => None,
         }
     }

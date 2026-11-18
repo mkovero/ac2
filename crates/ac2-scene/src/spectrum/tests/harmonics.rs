@@ -341,7 +341,10 @@ fn the_plate_stays_clear_of_the_other_plates_and_the_window_labels() {
     let scene = |size: Viewport, multi: bool| {
         let mut t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
         t.harmonics = Some(&h);
-        t.tracked = Some(&peaks[..]);
+        t.tracked = Some(crate::spectrum::peaks::Tracked {
+            max: &peaks,
+            min: &[],
+        });
         t.bands = multi.then_some(&bands);
         let mut v = view(PlotChrome::Full);
         v.cursor_hz = Some(1000.0);

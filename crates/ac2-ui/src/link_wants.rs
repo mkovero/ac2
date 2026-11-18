@@ -29,8 +29,8 @@ pub struct Sent {
 
 impl AppState {
     /// The streams the rig in `rig` should send now, for its panes on screen:
-    /// - each transfer measurement's TF while a transfer pane draws its response, and the
-    ///   IR and TF of the one a transfer pane in its IR view shows;
+    /// - each transfer measurement's TF while a transfer pane draws its response or its
+    ///   peak hold is on, and the IR and TF of the one a transfer pane in its IR view shows;
     /// - each spectrum / RTA while the spectrum pane is in view or peak hold or the
     ///   spectrograph is on (both fold every frame, so a hidden pane keeps its history);
     /// - each SPL meter's readout and Leq windows always: the held reading, the Leq history
@@ -73,7 +73,7 @@ impl AppState {
                 matches!(
                     t,
                     Topic::Data {
-                        stream: Stream::Spec | Stream::Rta,
+                        stream: Stream::Spec | Stream::Rta | Stream::Tf,
                         ..
                     }
                 )
@@ -126,8 +126,8 @@ fn sync(
 
 /// The streams `rig` should send: those of the measurements a pane draws (`shows` a pane
 /// kind outside an IR view, `ir_of` the measurements an IR view shows, `spectrum_shown` a
-/// spectrum pane or spectrograph), and those folded whether shown or not (a spectrum's
-/// peak hold, every SPL meter).
+/// spectrum pane or spectrograph), and those folded whether shown or not (a spectrum's or
+/// a transfer's peak hold, every SPL meter).
 fn topics_of(
     rig: &RigState,
     shows: impl Fn(PaneKind) -> bool,
@@ -143,7 +143,10 @@ fn topics_of(
     for m in rig.measurements() {
         let streams: &[Stream] = match &m.config.kind {
             MeasKind::Transfer { .. } => {
-                match (shows(PaneKind::Transfer), ir_of.contains(&m.id)) {
+                // A held transfer folds every frame, as a held spectrum does, so its hold
+                // goes on while no pane shows it.
+                let tf = shows(PaneKind::Transfer) || rig.peak_of(m).holds();
+                match (tf, ir_of.contains(&m.id)) {
                     (true, true) => &[Stream::Tf, Stream::Ir],
                     (true, false) => &[Stream::Tf],
                     // The IR view carries its transfer stream's banners (no reference, no
@@ -161,7 +164,9 @@ fn topics_of(
             }
             MeasKind::Spl { .. } => &[Stream::Spl, Stream::Leq],
             MeasKind::Math { config } => match config.domain {
-                MathDomain::Transfer if shows(PaneKind::Transfer) => &[Stream::Tf],
+                MathDomain::Transfer if shows(PaneKind::Transfer) || rig.peak_of(m).holds() => {
+                    &[Stream::Tf]
+                }
                 MathDomain::Spectrum if spectrum => &[Stream::Spec],
                 MathDomain::Rta if spectrum => &[Stream::Rta],
                 _ => &[],

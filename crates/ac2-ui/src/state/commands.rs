@@ -723,9 +723,8 @@ impl AppState {
             | C::LegendBottomRight
             | C::LegendHide
             | C::PhaseView
-            | C::MinMax
             | C::SpectrumStyle
-            | C::PeakHold
+            | C::Peaks
             | C::SpectrographSpan
             | C::SplShowMeter
             | C::SplShowLeq

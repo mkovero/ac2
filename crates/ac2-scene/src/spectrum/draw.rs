@@ -338,7 +338,7 @@ pub(crate) fn spectrum_scene_in(
         readout_box = Some(b);
     }
     let marks_on = view.chrome.peak_marks();
-    let peaks = tracked_peaks(traces, &xm, Some(&ym), plot, marks_on);
+    let peaks = tracked_peaks(traces, &xm, Some(&ym), plot, marks_on, true);
     for (t, p) in traces.iter().filter(|t| t.tracked.is_some()).zip(&peaks) {
         let color = t
             .color
@@ -365,12 +365,27 @@ pub(crate) fn spectrum_scene_in(
                 theme.text,
             ));
         }
+        // A dip is no box: the triangle's point says the curve turns upward there, so a
+        // mark is read as a peak or a dip without the list.
+        for (k, r) in p.dips.iter().enumerate() {
+            if let Some(m) = r.mark {
+                crate::peak_marks::triangle(
+                    &mut c,
+                    m,
+                    k + 1,
+                    peaks::Extreme::Min,
+                    color,
+                    plot,
+                    theme,
+                );
+            }
+        }
     }
     let listed: Vec<(&SpectrumTrace<'_>, &SpectrumPeaks)> = traces
         .iter()
         .filter(|t| t.tracked.is_some())
         .zip(&peaks)
-        .filter(|(_, p)| !p.rows.is_empty())
+        .filter(|(_, p)| !(p.rows.is_empty() && p.dips.is_empty()))
         .collect();
     let peak_list = (marks_on && !listed.is_empty()).then(|| list_text(&listed));
     let peaks_box = peak_list
@@ -491,20 +506,12 @@ pub(crate) fn peak_plate(
     view: &ViewState,
     theme: &Theme,
 ) -> crate::plate::PlateBox {
-    use crate::plate::{Metrics, PlateBox, PlateKind, PlatePlace};
-    let place = &view.plates.peaks;
-    let lines: Vec<(String, Color)> = list
-        .split('\n')
-        .map(|l| (l.to_string(), theme.text))
-        .collect();
-    let texts: Vec<&str> = lines.iter().map(|l| l.0.as_str()).collect();
-    let (w, h) = Metrics::new(theme, place.scale()).size(&texts);
-    let s = crate::plate::fitted(place.scale(), plot, w, h);
-    let m = Metrics::new(theme, s);
-    let (w, h) = m.size(&texts);
-    let rect = match place.at {
-        Some(at) => PlatePlace::rect_at(at, plot, w, h),
-        None => {
+    crate::peak_marks::list_plate(
+        c,
+        list,
+        plot,
+        HAlign::Right,
+        |w, h, m| {
             let x = plot.right() - crate::legend::INSET - w;
             let under = Rect::new(x, top - m.pad_y, w, h);
             let covers = readout.is_some_and(|r| {
@@ -518,98 +525,88 @@ pub(crate) fn peak_plate(
             } else {
                 under
             }
-        }
-    };
-    let hover = view.plate_hover.filter(|h| h.kind == PlateKind::Peaks);
-    crate::plate::draw_lines(
-        &mut c.overlay,
-        rect,
-        &lines,
-        HAlign::Right,
-        m,
-        true,
-        hover,
-        plot,
+        },
+        view,
         theme,
-    );
-    PlateBox::new(PlateKind::Peaks, plot, rect, s)
+    )
 }
 
 /// Half the side of a peak's box, logical pixels: big enough to find on a busy curve,
 /// small enough that marks a [`peaks::SPACING_OCT`] apart do not touch on a wide pane.
 pub(crate) const MARK_HALF: f32 = 4.0;
 
-/// The peak list of `listed` (each curve with its peaks), a row per peak.
+/// The peak list of `listed` (each curve with its peaks and dips): `max` and `min`, a row
+/// per mark.
 pub(crate) fn list_text(listed: &[(&SpectrumTrace<'_>, &SpectrumPeaks)]) -> String {
     let several = listed.len() > 1;
-    let mut lines = Vec::new();
-    for (t, p) in listed {
-        // A curve's name heads its rows when the list could be read against another
-        // curve's, or its levels are spread by an offset.
-        if several || t.offset_db != 0.0 {
-            lines.push(p.name.clone());
-        }
-        lines.extend(p.rows.iter().map(|r| r.text.clone()));
-    }
-    lines.join("\n")
+    listed
+        .iter()
+        .map(|(t, p)| {
+            // A curve's name heads its rows when the list could be read against another
+            // curve's, or its levels are spread by an offset.
+            let name = (several || t.offset_db != 0.0).then_some(p.name.as_str());
+            crate::peak_marks::list_text(name, &p.rows, &p.dips, None)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
-/// Each tracked curve's peaks, in [`SpectrumTrace::tracked`] order: a row per peak with
-/// its displayed level (offset included, as the cursor reads) and its box where it is on
-/// the plot, while `marks` (T) draws peak marks at all; no box without a level axis `ym`
-/// (a spectrograph marks them itself).
+/// Each tracked curve's peaks and dips, in [`SpectrumTrace::tracked`] order: a row per
+/// mark with its displayed level (offset included, as the cursor reads) and its mark
+/// where it is on the plot (a peak's box, a dip's triangle), while `marks` (T) draws peak
+/// marks at all; no mark without a level axis `ym` (a spectrograph marks them itself, and
+/// only the peaks: `dips` off).
 pub(crate) fn tracked_peaks(
     traces: &[SpectrumTrace<'_>],
     xm: &crate::axis::Mapping,
     ym: Option<&crate::axis::Mapping>,
     plot: Rect,
     marks: bool,
+    dips: bool,
 ) -> Vec<SpectrumPeaks> {
     traces
         .iter()
         .filter_map(|t| {
             let tracked = t.tracked?;
-            let rows = tracked
-                .iter()
-                .enumerate()
-                .map(|(k, p)| {
-                    let level = p.level + t.offset_db;
-                    let (x, y) = (xm.to_px(p.freq_hz), ym.map_or(f32::NAN, |m| m.to_px(level)));
-                    let inside = marks
-                        && x.is_finite()
-                        && y.is_finite()
-                        && x >= plot.x
-                        && x <= plot.right()
-                        && y >= plot.y
-                        && y <= plot.bottom();
-                    PeakRow {
-                        freq_hz: p.freq_hz,
-                        level,
-                        text: format!(
-                            "{}  {}  {} {} ({})",
-                            k + 1,
-                            format::freq_readout(p.freq_hz),
-                            format::level(level),
-                            value_unit(t.scale, t.quantity),
-                            quantity_note(t.quantity)
-                        ),
-                        mark: inside.then(|| {
-                            Rect::new(
-                                x - MARK_HALF,
-                                y - MARK_HALF,
-                                2.0 * MARK_HALF,
-                                2.0 * MARK_HALF,
-                            )
-                        }),
-                    }
-                })
-                .collect();
+            let rows_of = |found: &[peaks::Peak], half: f32| -> Vec<PeakRow> {
+                found
+                    .iter()
+                    .enumerate()
+                    .map(|(k, p)| {
+                        let level = p.level + t.offset_db;
+                        let (x, y) = (xm.to_px(p.freq_hz), ym.map_or(f32::NAN, |m| m.to_px(level)));
+                        PeakRow {
+                            freq_hz: p.freq_hz,
+                            level,
+                            text: format!(
+                                "{}  {}  {} {} ({})",
+                                k + 1,
+                                format::freq_readout(p.freq_hz),
+                                format::level(level),
+                                value_unit(t.scale, t.quantity),
+                                quantity_note(t.quantity)
+                            ),
+                            mark: crate::peak_marks::mark_rect(x, y, half, plot, marks),
+                        }
+                    })
+                    .collect()
+            };
+            let rows = rows_of(tracked.max, MARK_HALF);
+            let dip_rows = if dips {
+                rows_of(tracked.min, crate::peak_marks::TRIANGLE_HALF)
+            } else {
+                Vec::new()
+            };
             let name = if t.offset_db != 0.0 {
                 offset_note(&t.name, t.offset_db)
             } else {
                 t.name.clone()
             };
-            Some(SpectrumPeaks { name, rows })
+            Some(SpectrumPeaks {
+                name,
+                rows,
+                dips: dip_rows,
+            })
         })
         .collect()
 }

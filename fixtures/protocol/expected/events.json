@@ -26,7 +26,8 @@
        "depth": {
         "type": "fast_lf",
         "max_settle_s": 1.0
-       }
+       },
+       "peak": "hold"
       }
      }
     },

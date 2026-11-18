@@ -101,14 +101,14 @@ impl From<StyleArg> for ac2_proto::model::SpectrumStyle {
     }
 }
 
-/// What is drawn over spectrum and RTA curves.
+/// What is drawn over a transfer function's magnitude and over spectrum and RTA curves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum PeakArg {
     /// The live curve alone.
     Off,
-    /// Each bin's highest level over the live curve.
+    /// Each column's highest value over the live curve.
     Hold,
-    /// The live curve's highest peaks marked and listed (no hold line).
+    /// The live curve's highest peaks and deepest dips marked and listed (no hold line).
     Track,
 }
 
@@ -257,7 +257,7 @@ pub enum MeasCmd {
         /// Spectrum and RTA: how every client draws its curves (the app's B).
         #[arg(long, value_enum)]
         style: Option<StyleArg>,
-        /// Spectrum and RTA: peak hold, peak tracking, or neither (the app's P).
+        /// tf, spectrum and RTA: peak hold, peak and dip tracking, or neither (the app's P).
         #[arg(long, value_enum)]
         peak: Option<PeakArg>,
         /// Spectrum and RTA: spectrograph history shown, seconds: 10, 30, 60 or 120 (the
@@ -391,6 +391,10 @@ pub struct MeasNew {
     /// at a higher coherence floor there. Default: equal confidence at every frequency.
     #[arg(long, num_args = 0..=1, default_missing_value = "1s", value_name = "TIME")]
     pub fast_lf: Option<Time>,
+    /// tf, spectrum and RTA: peak hold, peak and dip tracking, or neither (the app's P;
+    /// default off).
+    #[arg(long, value_enum)]
+    pub peak: Option<PeakArg>,
     /// Spectrum and RTA averaging, on power (default off): `off`, `fifo:<frames>` (the mean
     /// of the last frames: a spectrum's hop, an RTA's result interval of about 1/60 s, each
     /// weighted by its length), `exp:<time>` (exponential, e.g. `exp:2s`).

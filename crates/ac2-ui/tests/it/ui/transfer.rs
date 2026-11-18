@@ -285,18 +285,17 @@ fn spectrum_math() {
     );
 }
 
-/// P on the transfer pane: min / max tracking marks the magnitude's peak (▲) and lists it on
-/// a plate in a bottom corner, clear of the legend.
+/// A transfer measurement whose peak mode tracks: the magnitude's peak is marked (▲) and
+/// listed on the peak list's plate in a bottom corner, clear of the legend.
 #[test]
-fn transfer_min_max_tracking() {
-    if !have_gpu("transfer_min_max_tracking") {
+fn transfer_peak_tracking() {
+    if !have_gpu("transfer_peak_tracking") {
         return;
     }
-    let _rig = Rig::start();
+    let rig = Rig::start();
+    rig.set_peak("Main L", ac2_proto::model::PeakMode::Track);
     let mut h = harness(options());
     step_until(&mut h, "live frames", live);
-    h.key_press(Key::P);
-    step_until(&mut h, "min / max on", |a| a.state.view.tf.extremes);
     {
         let st = &h.state().state;
         let s = ac2_ui::scenes::transfer(
@@ -313,5 +312,5 @@ fn transfer_min_max_tracking() {
         assert!(list.starts_with("max\n1  "), "{list}");
     }
     h.state_mut().state.toasts.list.clear();
-    snapshot(&mut h, "transfer_min_max");
+    snapshot(&mut h, "transfer_peak_tracking");
 }

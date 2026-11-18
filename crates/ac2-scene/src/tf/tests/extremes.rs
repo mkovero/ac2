@@ -22,17 +22,21 @@ pub(super) fn comb_cols() -> Cols {
 
 fn view(chrome: PlotChrome) -> ViewState {
     ViewState {
-        tf: TfView {
-            extremes: true,
-            ..TfView::default()
-        },
         chrome,
         ..ViewState::default()
     }
 }
 
+/// The curve of a measurement whose peak mode tracks.
+fn tracking<'a>(c: &'a Cols, key: TraceKey) -> TfTrace<'a> {
+    TfTrace {
+        tracks: true,
+        ..trace(c, key, 0.0)
+    }
+}
+
 fn scene(c: &Cols, v: &ViewState, cache: &DisplayCache) -> TfScene {
-    let t = trace(c, TraceKey::Live(MeasId(1)), 0.0);
+    let t = tracking(c, TraceKey::Live(MeasId(1)));
     transfer_scene(&[t], cache, &Status::default(), v, &Theme::dark(), SIZE)
 }
 
@@ -134,17 +138,18 @@ fn blanked_columns_hold_no_dip_and_off_tracks_nothing() {
         "{:?}",
         e.min
     );
-    v.tf.extremes = false;
-    let s = scene(&c, &v, &cache);
-    assert!(s.extremes.is_none() && s.extremes_list.is_none());
+    // A measurement whose mode does not track: nothing marked, nothing listed.
+    let t = trace(&c, TraceKey::Live(MeasId(1)), 0.0);
+    let s = transfer_scene(&[t], &cache, &Status::default(), &v, &Theme::dark(), SIZE);
+    assert!(s.extremes.is_none() && s.extremes_list.is_none() && s.extremes_box.is_none());
 }
 
-/// Min / max follows the selected curve when the pane shows it, else the pane's own.
+/// Tracking follows the selected curve when the pane shows it, else the pane's own.
 #[test]
-fn min_max_follows_the_selected_curve_else_the_own() {
+fn tracking_follows_the_selected_curve_else_the_own() {
     let c = comb_cols();
     let (own, other) = (TraceKey::Live(MeasId(1)), TraceKey::Live(MeasId(2)));
-    let mut traces = [trace(&c, own, 0.0), trace(&c, other, 0.0)];
+    let mut traces = [tracking(&c, own), tracking(&c, other)];
     let cache = DisplayCache::default();
     let v = view(PlotChrome::Full);
     let at = |traces: &[TfTrace<'_>]| {
@@ -155,4 +160,91 @@ fn min_max_follows_the_selected_curve_else_the_own() {
     assert_eq!(at(&traces), Some(own));
     traces[1].selected = true;
     assert_eq!(at(&traces), Some(other));
+}
+
+/// The list is on the peak list's plate, the one a spectrum lists its peaks on: in a bottom
+/// corner of the magnitude view until the operator drops it somewhere, sized as set.
+#[test]
+fn the_list_is_on_the_movable_peaks_plate() {
+    use crate::plate::PlateKind;
+    let c = comb_cols();
+    let mut v = view(PlotChrome::Full);
+    let s = scene(&c, &v, &DisplayCache::default());
+    let b = s.extremes_box.expect("plate");
+    assert_eq!(b.kind, PlateKind::Peaks);
+    assert!(s.plates().contains(&b), "the pointer finds it");
+    let mag = s.panes[0].plot;
+    assert!(
+        (b.rect.bottom() - (mag.bottom() - INSET)).abs() < 0.01,
+        "{:?} in {mag:?}",
+        b.rect
+    );
+    v.plates.peaks.move_to(0.0, 0.0);
+    let moved = scene(&c, &v, &DisplayCache::default())
+        .extremes_box
+        .expect("plate");
+    assert!(
+        moved.rect.x < b.rect.x && moved.rect.y < b.rect.y,
+        "{:?}, from {:?}",
+        moved.rect,
+        b.rect
+    );
+    // Traces only (T) hides the list with its plate.
+    let bare = scene(&c, &view(PlotChrome::Bare), &DisplayCache::default());
+    assert_eq!(bare.extremes_box, None);
+}
+
+/// A held magnitude is drawn with the curve's offset, leaving out the columns no frame
+/// has shown yet; a hold kept on another grid is not drawn.
+#[test]
+fn the_hold_draws_with_the_curves_offset() {
+    let c = comb_cols();
+    let n = c.freqs.len();
+    let mut hold = vec![3.0_f32; n];
+    hold[0] = f32::NAN;
+    let lines = |hold: Option<&[f32]>| {
+        let t = TfTrace {
+            hold,
+            offset_db: 2.0,
+            ..trace(&c, TraceKey::Live(MeasId(1)), 0.0)
+        };
+        let s = transfer_scene(
+            &[t],
+            &DisplayCache::default(),
+            &Status::default(),
+            &view(PlotChrome::Full),
+            &Theme::dark(),
+            SIZE,
+        );
+        (
+            s.traces[0].hold_db.clone(),
+            s.scene
+                .layers
+                .iter()
+                .map(|l| l.polylines.len())
+                .sum::<usize>(),
+        )
+    };
+    let (none, plain) = lines(None);
+    assert_eq!(none, None);
+    let (held, with_hold) = lines(Some(&hold));
+    let held = held.expect("hold");
+    assert!(held[0].is_nan());
+    assert!(held[1..].iter().all(|v| *v == 5.0), "{:?}", &held[..4]);
+    assert_eq!(with_hold, plain + 1, "one line more, on the magnitude");
+    let (other_grid, lines_drawn) = lines(Some(&hold[..n - 1]));
+    assert_eq!((other_grid, lines_drawn), (None, plain));
+}
+
+/// Columns the plot leaves out for their coherence add nothing to a hold.
+#[test]
+fn a_hold_takes_only_the_shown_magnitude() {
+    let got = crate::trace::shown_magnitude(&[1.0, 2.0, 3.0], &[0.9, 0.2, f32::NAN], Some(0.5));
+    assert_eq!(got[0], 1.0);
+    assert!(got[1].is_nan(), "γ² 0.2 is blanked below 0.5");
+    assert_eq!(got[2], 3.0, "no coherence known: drawn, so held");
+    assert_eq!(
+        crate::trace::shown_magnitude(&[1.0, 2.0], &[0.9, 0.2], None),
+        vec![1.0, 2.0]
+    );
 }

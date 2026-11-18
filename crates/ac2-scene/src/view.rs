@@ -364,9 +364,6 @@ pub struct TfView {
     /// Trace whose measured delay is the phase reference (decision 8b). `None`: the first
     /// trace with a shared time base.
     pub phase_reference: Option<TraceKey>,
-    /// Min / max tracking (P): the highest peaks and deepest dips of the magnitude marked
-    /// and listed.
-    pub extremes: bool,
 }
 
 impl Default for TfView {
@@ -380,7 +377,6 @@ impl Default for TfView {
             coherence: CoherenceStyle::default(),
             coherence_placement: CoherencePlacement::Pane,
             phase_reference: None,
-            extremes: false,
         }
     }
 }
@@ -801,7 +797,7 @@ impl PlotChrome {
     }
 
     /// Every peak mark: the tracked peaks' list, boxes and ranks (spectrum, both
-    /// spectrographs), and the transfer pane's min / max marks and list. They go together at *traces
+    /// spectrographs), and the transfer pane's peak and dip marks and list. They go together at *traces
     /// only*, so the same key does the same thing to the same kind of mark; *no grid*
     /// keeps them, since they are values like the axis labels.
     pub fn peak_marks(self) -> bool {

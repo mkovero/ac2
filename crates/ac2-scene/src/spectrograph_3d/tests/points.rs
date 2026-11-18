@@ -40,7 +40,7 @@ fn trace(peaks: Option<&[Peak]>) -> SpectrumTrace<'_> {
         drawn: None,
         validity: None,
         peak: None,
-        tracked: peaks,
+        tracked: peaks.map(|max| crate::spectrum::peaks::Tracked { max, min: &[] }),
         scale: LevelScale::Dbfs,
         quantity: Quantity::Band,
         bin_hz: None,

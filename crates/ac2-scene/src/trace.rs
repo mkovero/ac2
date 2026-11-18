@@ -132,6 +132,30 @@ pub struct TfTrace<'a> {
     /// includes the offset between their clocks, which is not measured, so its readout
     /// says that instead of a distance ([`crate::cross_rig::delay_basis`]).
     pub delay_between: Option<(String, String)>,
+    /// The highest magnitude each column has reached, column-aligned
+    /// ([`crate::spectrum::PeakHold`] over [`shown_magnitude`]), while its measurement's
+    /// peak mode holds.
+    pub hold: Option<&'a [f32]>,
+    /// Its measurement's peak mode tracks: the pane marks and lists the peaks and dips of
+    /// the curve it follows when this is the one.
+    pub tracks: bool,
+}
+
+/// A live transfer frame's magnitude as a peak hold may take it: NaN where the curve is
+/// not drawn for its coherence (γ² below `blank_below`), so a column the plot leaves out
+/// adds nothing to the hold. Invalid columns are the hold's own to skip (it takes the
+/// frame's validity).
+pub fn shown_magnitude(mag_db: &[f32], coherence: &[f32], blank_below: Option<f32>) -> Vec<f32> {
+    mag_db
+        .iter()
+        .enumerate()
+        .map(|(i, m)| {
+            let blanked = blank_below
+                .zip(coherence.get(i))
+                .is_some_and(|(th, g)| g.is_finite() && *g < th);
+            if blanked { f32::NAN } else { *m }
+        })
+        .collect()
 }
 
 /// The legend tag of a compared curve, and the measurement tree's mark of a compared row.
@@ -190,6 +214,8 @@ impl<'a> TfTrace<'a> {
                 }),
             faint_phase: false,
             delay_between: None,
+            hold: None,
+            tracks: false,
         }
     }
 
@@ -259,6 +285,8 @@ impl<'a> TfTrace<'a> {
             range: None,
             faint_phase: false,
             delay_between: None,
+            hold: None,
+            tracks: false,
         }
     }
 }
@@ -351,6 +379,9 @@ pub struct DisplayTrace {
     pub offset_db: f64,
     pub inverted: bool,
     pub freqs: Vec<f64>,
+    /// The peak hold as drawn (offset applied, NaN where no column has been shown yet);
+    /// `None` unless the curve holds ([`TfTrace::hold`]).
+    pub hold_db: Option<Vec<f64>>,
     /// Magnitude + offset, dB.
     pub magnitude_db: Vec<f64>,
     /// Rotated phase, wrapped to (−180, 180].
@@ -567,6 +598,13 @@ pub fn display_trace(
         inverted,
         freqs: t.freqs[..n].to_vec(),
         magnitude_db,
+        // A hold kept on another grid (the measurement's resolution changed under it) is
+        // not this curve's: it is dropped by its keeper with the next frame.
+        hold_db: t.hold.filter(|h| h.len() == n).map(|h| {
+            h.iter()
+                .map(|v| f64::from(*v) + t.offset_db)
+                .collect::<Vec<f64>>()
+        }),
         phase_wrapped_deg,
         phase_unwrapped_deg,
         group_delay_s,
@@ -625,19 +663,12 @@ fn columns_of_stored(t: &TfTrace<'_>, data: &TraceData) -> bool {
 /// its data, edits, reference or the coherence style change — not on every frame a live
 /// trace beside it moves. Entries not used by a scene are dropped. A clone starts empty.
 ///
-/// It also keeps what min / max tracking marked on each curve in the previous scene, so the
+/// It also keeps what peak tracking marked on each curve in the previous scene, so the
 /// marks hold still from frame to frame ([`crate::spectrum::peaks::PeakTracker`]).
 #[derive(Default)]
 pub struct DisplayCache {
     traces: Mutex<Vec<(CacheKey, DisplayTrace)>>,
-    extremes: Mutex<Vec<(TraceKey, ExtremeTrackers)>>,
-}
-
-/// A curve's peak and dip trackers.
-#[derive(Clone, Debug)]
-struct ExtremeTrackers {
-    max: crate::spectrum::peaks::PeakTracker,
-    min: crate::spectrum::peaks::PeakTracker,
+    extremes: Mutex<Vec<(TraceKey, crate::spectrum::peaks::ExtremeTracker)>>,
 }
 
 /// Curves whose marks are kept: a few transfer panes' worth, so the list stays small
@@ -678,18 +709,14 @@ impl DisplayCache {
         Vec<crate::spectrum::peaks::Peak>,
         Vec<crate::spectrum::peaks::Peak>,
     ) {
-        use crate::spectrum::peaks::{Extreme, PeakTracker};
         let mut all = self.extremes.lock().unwrap_or_else(|e| e.into_inner());
         let mut t = match all.iter().position(|(k, _)| *k == key) {
             Some(i) => all.remove(i).1,
-            None => ExtremeTrackers {
-                max: PeakTracker::new(Extreme::Max),
-                min: PeakTracker::new(Extreme::Min),
-            },
+            None => Default::default(),
         };
-        t.max.update(max);
-        t.min.update(min);
-        let out = (t.max.peaks().to_vec(), t.min.peaks().to_vec());
+        t.update(max, min);
+        let marks = t.tracked();
+        let out = (marks.max.to_vec(), marks.min.to_vec());
         all.push((key, t));
         if all.len() > EXTREME_CURVES {
             all.remove(0);

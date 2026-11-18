@@ -70,6 +70,8 @@ fn cols(gain_db: f32, tau: f64) -> Cols {
 
 fn trace<'a>(c: &'a Cols, meas: u32, color: usize, delay: f64) -> TfTrace<'a> {
     TfTrace {
+        hold: None,
+        tracks: false,
         range: None,
         faint_phase: false,
         delay_between: None,
@@ -506,7 +508,7 @@ fn spectrum_golden_with(
     );
     let mut theme = Theme::dark();
     t.style = style;
-    t.tracked = tracked;
+    t.tracked = tracked.map(|max| ac2_scene::spectrum::peaks::Tracked { max, min: &[] });
     let mut view = ViewState {
         cursor_hz: Some(1000.0),
         ..ViewState::default()

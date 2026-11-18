@@ -113,6 +113,7 @@ pub(super) fn meas_config() -> MeasConfig {
                 depth: DepthPolicy::FastLf {
                     max_settle_s: Seconds(1.0),
                 },
+                peak: crate::model::PeakMode::Hold,
             },
         },
     }

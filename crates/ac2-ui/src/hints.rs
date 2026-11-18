@@ -148,7 +148,7 @@ mod tests {
                 "A show/hide",
                 "Ctrl+1 capture",
                 "X find delay",
-                "P min/max",
+                "P peaks",
                 "K smoothing",
                 "H all keys"
             ]

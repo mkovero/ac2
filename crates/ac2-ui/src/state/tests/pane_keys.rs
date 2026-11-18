@@ -166,12 +166,10 @@ fn the_ir_view_has_the_transfer_measurement_keys() {
         Overlay::Prompt(p) if p.kind == PromptKind::Delay(MeasId(1))
     ));
     t.key("Esc");
-    // Smoothing, min / max and the cursor jumps belong to the frequency plot.
-    let extremes = t.st.view.tf.extremes;
+    // Smoothing, peaks and the cursor jumps belong to the frequency plot.
     for key in ["K", "Shift+K", "P", "Alt+P", "Alt+N", "B"] {
         assert!(t.key(key).is_empty(), "{key}");
     }
-    assert_eq!(t.st.view.tf.extremes, extremes);
     assert_eq!(t.st.view.cursor_hz, None);
     // The view is still the IR's, and its hint line names its keys.
     assert_eq!(t.st.scope(), Scope::Ir);

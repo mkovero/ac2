@@ -235,6 +235,7 @@ fn no_delay_estimate_says_why() {
                     resolution: Resolution::Twelfth,
                     smoothing: None,
                     depth: ac2_proto::model::DepthPolicy::EqualConfidence,
+                    peak: ac2_proto::model::PeakMode::Off,
                 },
             },
         },

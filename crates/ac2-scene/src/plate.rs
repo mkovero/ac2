@@ -64,7 +64,8 @@ pub enum PlateKind {
     /// The cursor read against its mark (transfer view; the spectrum lists it with the
     /// cursor values).
     Mark,
-    /// The tracked peaks, ranked (spectrum view; their boxes stay on the curve).
+    /// The tracked peaks and dips, ranked (spectrum and transfer views; their marks stay
+    /// on the curve).
     Peaks,
     /// The generator's sine and its harmonics as the spectrum reads them (spectrum view).
     Harmonics,

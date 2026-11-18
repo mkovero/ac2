@@ -39,6 +39,8 @@ fn cols(n: usize) -> Cols {
 
 fn trace(c: &Cols, key: TraceKey, delay: f64) -> TfTrace<'_> {
     TfTrace {
+        hold: None,
+        tracks: false,
         range: None,
         faint_phase: false,
         delay_between: None,

@@ -118,6 +118,23 @@ impl Rig {
         self.inner.borrow_mut().health = health;
     }
 
+    /// Measurement `name`'s peak mode (P) in the state the app is about to mirror: the rig
+    /// answers no command, so a test sets it before the app's first pass.
+    pub fn set_peak(&self, name: &str, mode: PeakMode) {
+        let mut inner = self.inner.borrow_mut();
+        assert!(!inner.connected, "the app has the state already");
+        let state = Arc::make_mut(&mut inner.state);
+        let m = state
+            .measurements
+            .iter_mut()
+            .find(|m| m.config.name == name)
+            .unwrap_or_else(|| panic!("no measurement {name}"));
+        *m.config
+            .kind
+            .peak_mut()
+            .unwrap_or_else(|| panic!("{name} takes no peak mode")) = mode;
+    }
+
     /// The recorded state.
     pub fn state(&self) -> Arc<State> {
         Arc::clone(&self.inner.borrow().state)

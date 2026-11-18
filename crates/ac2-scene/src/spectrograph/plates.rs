@@ -26,7 +26,8 @@ pub(super) fn tracked_marks(
     let Some(t) = traces.iter().find(|t| t.key == key && t.tracked.is_some()) else {
         return (Vec::new(), None, None);
     };
-    let peaks = crate::spectrum::tracked_peaks(std::slice::from_ref(t), xm, None, plot, false);
+    let peaks =
+        crate::spectrum::tracked_peaks(std::slice::from_ref(t), xm, None, plot, false, false);
     let Some(p) = peaks.first().filter(|p| !p.rows.is_empty()) else {
         return (peaks, None, None);
     };

@@ -111,12 +111,14 @@ pub struct TfScene {
     pub mark: Option<readout::MarkReadout>,
     /// The mark's plate, in a bottom corner of the magnitude view unless dragged.
     pub mark_box: Option<crate::plate::PlateBox>,
-    /// Min / max tracking's peaks and dips of the tracked curve; `None` while it is off or
-    /// the magnitude is not shown.
+    /// Peak tracking's peaks and dips of the tracked curve; `None` unless its measurement's
+    /// peak mode tracks ([`TfTrace::tracks`]) and the magnitude is shown.
     pub extremes: Option<TfExtremes>,
-    /// Their list as drawn; `None` also while plot chrome is off (T), when only the marks
-    /// stay.
+    /// Their list as drawn; `None` also at traces only (T), which hides every peak mark.
     pub extremes_list: Option<String>,
+    /// The list's plate ([`crate::plate::PlateKind::Peaks`]), in a bottom corner of the
+    /// magnitude view unless dragged.
+    pub extremes_box: Option<crate::plate::PlateBox>,
     /// Reference trace's delay: `ref m1 12.34 ms · 4.24 m @ 20 °C`.
     pub delay: Option<String>,
     /// Present when coherence is drawn over the magnitude pane.
@@ -137,6 +139,7 @@ impl TfScene {
             .map(|b| b.plate)
             .chain(self.readout_box)
             .chain(self.mark_box)
+            .chain(self.extremes_box)
             .collect()
     }
 }
@@ -566,6 +569,19 @@ pub fn transfer_scene(
                 stroke,
                 plot,
             ));
+            if let (TfPaneKind::Magnitude, Some(hold)) = (kind, &t.hold_db) {
+                // Over the live curve, fainter, as a spectrum's hold is; never faded by
+                // coherence: it is where the curve has been, not how sure it is now.
+                c.data.polylines.extend(trace_line(
+                    &xs,
+                    &hold[cols.clone()],
+                    |v| ym.to_px(v),
+                    None,
+                    false,
+                    Stroke::solid(stroke.color.with_alpha(theme.peak_alpha), theme.trace_width),
+                    plot,
+                ));
+            }
             if let Some(o) = &band {
                 let om = o.axis.mapping;
                 let stroke = Stroke {
@@ -714,16 +730,20 @@ pub fn transfer_scene(
         let hover = view
             .plate_hover
             .filter(|h| h.kind == crate::plate::PlateKind::Mark);
-        Some(extremes::draw_list(
+        Some(extremes::draw_mark(
             &mut c,
             &m.lines.join("\n"),
             plot,
             &avoid,
-            Some((&view.plates.mark, hover)),
+            &view.plates.mark,
+            hover,
             theme,
         ))
     });
-    let extremes = match mag.filter(|_| view.tf.extremes) {
+    // The curve the pane follows says whether its peaks and dips are tracked (its
+    // measurement's peak mode).
+    let tracks = extremes::tracked(traces).is_some_and(|i| traces[i].tracks);
+    let extremes = match mag.filter(|_| tracks) {
         Some(p) => extremes::extremes(
             &mut c,
             traces,
@@ -737,13 +757,13 @@ pub fn transfer_scene(
             theme,
         ),
         None => {
-            if !view.tf.extremes {
+            if !tracks {
                 cache.clear_extremes();
             }
             None
         }
     };
-    let extremes_list = extremes
+    let (extremes_list, extremes_box) = extremes
         .as_ref()
         .filter(|e| view.chrome.peak_marks() && !(e.max.is_empty() && e.min.is_empty()))
         .zip(mag)
@@ -755,9 +775,18 @@ pub fn transfer_scene(
                 .chain(readout_box.map(|b| b.rect))
                 .chain(mark_box.map(|b| b.rect))
                 .collect();
-            extremes::draw_list(&mut c, &text, p.plot, &avoid, None, theme);
-            text
-        });
+            let b = crate::peak_marks::list_plate(
+                &mut c,
+                &text,
+                p.plot,
+                HAlign::Left,
+                |w, h, _| extremes::corner(p.plot, &avoid, w, h),
+                view,
+                theme,
+            );
+            (text, b)
+        })
+        .unzip();
 
     TfScene {
         scene: c.into_scene(size),
@@ -774,6 +803,7 @@ pub fn transfer_scene(
         mark_box,
         extremes,
         extremes_list,
+        extremes_box,
         delay,
         coherence_overlay,
         strip: strip.rect,

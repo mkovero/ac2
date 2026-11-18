@@ -1,4 +1,4 @@
-//! Peak tracking: the few highest peaks (or deepest dips) of a curve, kept steady from frame
+//! Peak tracking: the few highest peaks and deepest dips of a curve, kept steady from frame
 //! to frame. Display logic on the values the curve already shows (local extremes of the
 //! drawn columns), not analysis: nothing here is measured that the curve does not show.
 //! A dip is a peak of the curve turned upside down, so both follow the same rules.
@@ -101,6 +101,18 @@ impl PeakInput<'_> {
 /// Every peak of the curve that stands out by [`PROMINENCE_DB`], merged to one per
 /// [`SPACING_OCT`], loudest first.
 pub fn find_peaks(input: &PeakInput<'_>) -> Vec<Peak> {
+    find_levels(input, Extreme::Max)
+}
+
+/// Every dip of the curve that stands [`PROMINENCE_DB`] below the rises on both sides of
+/// it, merged to one per [`SPACING_OCT`], deepest first: [`find_peaks`] of the curve
+/// turned upside down.
+pub fn find_dips(input: &PeakInput<'_>) -> Vec<Peak> {
+    find_levels(input, Extreme::Min)
+}
+
+/// The extremes of a level curve pointing `dir`.
+fn find_levels(input: &PeakInput<'_>, dir: Extreme) -> Vec<Peak> {
     let n = input.freqs.len().min(input.level.len());
     let v: Vec<f64> = (0..n).map(|i| input.value(i)).collect();
     let resolved: Vec<bool> = (0..n).map(|i| input.resolved(i)).collect();
@@ -108,7 +120,7 @@ pub fn find_peaks(input: &PeakInput<'_>) -> Vec<Peak> {
     // parabola stands for the window's main lobe, which interpolated columns do not trace.
     let fit =
         |i: usize| input.narrow && (i.saturating_sub(1)..=(i + 1).min(n - 1)).all(|j| resolved[j]);
-    extremes(&input.freqs[..n], &v, Extreme::Max, fit)
+    extremes(&input.freqs[..n], &v, dir, fit)
 }
 
 /// Every extreme of `values` (dB, column-aligned with `freqs`; NaN where no extreme may
@@ -332,6 +344,51 @@ impl PeakTracker {
         }
         self.peaks = next;
     }
+}
+
+/// The marked peaks and dips of one curve ([`PeakTracker`] each way), kept between frames
+/// while the curve's peak mode tracks.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExtremeTracker {
+    max: PeakTracker,
+    min: PeakTracker,
+}
+
+impl Default for ExtremeTracker {
+    fn default() -> Self {
+        Self {
+            max: PeakTracker::new(Extreme::Max),
+            min: PeakTracker::new(Extreme::Min),
+        }
+    }
+}
+
+impl ExtremeTracker {
+    pub fn reset(&mut self) {
+        self.max.reset();
+        self.min.reset();
+    }
+
+    /// Chooses the marks again from a frame's peaks (`max`) and dips (`min`).
+    pub fn update(&mut self, max: &[Peak], min: &[Peak]) {
+        self.max.update(max);
+        self.min.update(min);
+    }
+
+    /// The marks, each group in list order.
+    pub fn tracked(&self) -> Tracked<'_> {
+        Tracked {
+            max: self.max.peaks(),
+            min: self.min.peaks(),
+        }
+    }
+}
+
+/// A curve's marked peaks (highest first) and dips (deepest first).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Tracked<'a> {
+    pub max: &'a [Peak],
+    pub min: &'a [Peak],
 }
 
 #[cfg(test)]

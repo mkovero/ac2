@@ -48,7 +48,10 @@ fn alone_the_legend_plate_and_tracked_peaks_and_the_split_leaves_them_to_the_spe
         },
     ];
     let mut traces = [trace(key, "Main"), trace(stored, "Main S1")];
-    traces[0].tracked = Some(&peaks);
+    traces[0].tracked = Some(crate::spectrum::peaks::Tracked {
+        max: &peaks,
+        min: &[],
+    });
     let input = SpectrographInput {
         key,
         history: &h,
@@ -87,7 +90,7 @@ fn alone_the_legend_plate_and_tracked_peaks_and_the_split_leaves_them_to_the_spe
     assert_eq!(s.peaks.len(), 1);
     assert_eq!(s.peaks[0].rows.len(), 2);
     let list = s.peak_list.as_deref().expect("peak list");
-    assert!(list.starts_with("1  1.00 kHz  −40.0 dBFS"), "{list}");
+    assert!(list.starts_with("max\n1  1.00 kHz  −40.0 dBFS"), "{list}");
     let ranks: Vec<&str> = s
         .scene
         .layers
@@ -155,7 +158,10 @@ fn alone_the_harmonics_plate_and_the_split_leaves_it_to_the_spectrum() {
         drawn: None,
         validity: None,
         peak: None,
-        tracked: Some(&peaks),
+        tracked: Some(crate::spectrum::peaks::Tracked {
+            max: &peaks,
+            min: &[],
+        }),
         scale: LevelScale::Dbfs,
         quantity: crate::spectrum::Quantity::Tone,
         bin_hz: None,

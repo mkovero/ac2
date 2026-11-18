@@ -886,7 +886,7 @@ draw it over the magnitude. A stopped measurement draws no live IR (its other
 views keep the last curve, tagged `stopped`); a selected capture's stored IR still shows.
 The keys that act on the measurement work in these views as in the others: **S**, **R**,
 **X** / **Shift+X** (find the delay), **D**, **Y**, **,** / **.** and their Ctrl / Alt forms.
-The keys that read or dress the frequency plot do nothing here (smoothing **K**, min / max
+The keys that read or dress the frequency plot do nothing here (smoothing **K**, peaks
 **P**, the cursor jumps, the target **Z**, the phase reference **E**, polarity **U**, the
 offset **J**, the average **M**).
 
@@ -1199,7 +1199,7 @@ On a transfer magnitude or a spectrum pane the comparison cursor (**Shift+T**) c
 along the focused pane's curve only (no other pane stands in):
 **Alt+P** to the next peak up in frequency, **Alt+Shift+P** to the one below, **Alt+N** /
 **Alt+Shift+N** the same for notches. A jump turns the cursor on when it is off. It reads
-one curve, the one min / max tracking follows: the selected curve when the pane draws it,
+one curve, the one peak tracking follows: the selected curve when the pane draws it,
 else the pane's own. It reads that curve as drawn (smoothed, with its offset, without
 blanked or invalid columns) and only the part the pane shows: a peak off screen is not
 jumped to, and a column at the edge of the view or of a gap is never one. A peak or notch
@@ -1221,7 +1221,7 @@ values on a spectrum, on a plate in a bottom corner of the transfer magnitude vi
 phase view's mode (wrapped degrees folded into ±180°, unwrapped degrees, or group delay in
 ms). The `comb` line reads the two frequencies as neighbouring notches (or peaks) of a comb:
 a copy arriving `τ` later cancels every `1/τ` Hz, so `Δf` names the delay and the extra path
-the copy travelled, as min / max tracking does for evenly spaced dips. It shows only when
+the copy travelled, as peak tracking does for evenly spaced dips. It shows only when
 the mark and the cursor are both on notches or both on peaks, as the jumps find them: a
 peak to a notch is half the spacing, and any other point has none. Any two ripples of a
 room curve have a spacing, so the numbers need evidence, asked in this order:
@@ -1231,7 +1231,7 @@ room curve have a spacing, so the numbers need evidence, asked in this order:
   then reads `comb: smoothing 1/6 oct hides combs under 335 Hz here`. Turn the smoothing
   down to look closer. Unsmoothed curves have no such limit.
 - **A third tooth.** A third notch (or peak) one `Δf` above the upper end or below the
-  lower, within 10 % of `Δf` (the tolerance min / max tracking uses), as the jumps find it
+  lower, within 10 % of `Δf` (the tolerance peak tracking uses), as the jumps find it
   in the shown range. Without one the line reads `comb: uneven, no third notch` (or
   `peak`): two uneven ripples say nothing about one delay.
 
@@ -1263,6 +1263,11 @@ below`), so every curve stays reachable by name. **Click** a row to select its c
 *Legend top-left* / *top-right* / *bottom-left* / *bottom-right* (back to that corner at its
 text size), *Show/hide legend*. Whether it is hidden is kept in `ui.toml`
 (`[legend.transfer]`); where it sits is the pane's, as below.
+
+#### Peaks on a transfer function
+
+**P** steps the measurement through peak hold and peak tracking (peaks, dips and a comb's
+spacing), as it does on a spectrum pane: see [Peaks (P)](#peaks-p).
 
 #### Moving the plates and their text size
 
@@ -1402,36 +1407,10 @@ The pane's own view (**G**) and plot chrome (**T**) stay the pane's: they are ab
 on this screen, and two panes on one measurement may well want a spectrograph in one and the
 plain spectrum in the other.
 
-#### Peaks: hold and tracking
+#### Peaks on a spectrum
 
-**P** (palette *Peaks*) steps the spectrum pane's measurement through **off → peak hold →
-peak tracking → off** (`ac2 meas set <meas> --peak off|hold|track`), the toast naming the
-step (`Sub: peaks: hold`). The mode is the measurement's; the hold and the tracked peaks
-are each app's own, started when the mode asks for them, so a hold turned on again starts
-afresh. Tracking draws no hold line: the boxes and the list say where the peaks are, and a
-hold line under them would only crowd them. Tracking marks the five highest peaks of the pane's own live curve (the first live curve
-when the pane's measurement has none) with a small box on the curve and lists them on a
-plate under the cursor readout (a plate you can drag and size, see [Moving the plates and
-their text size](#moving-the-plates-and-their-text-size)), loudest first: `1  1.00 kHz  −32.0 dBFS (band)`, the value's
-quantity in parentheses as the cursor readout gives it. One curve is tracked, not
-every curve shown: five boxes per curve on several curves crowd the plot and the list would
-no longer read at a glance.
-
-A peak is a maximum that stands at least 6 dB above the dips on both sides of it (each
-dip the lowest point before the curve rises higher than the peak; an averaged noise floor
-ripples by a few dB, so a mark always sits on something that stands out); peaks closer than 1/6 octave count as one, the
-stronger. A narrowband peak's frequency is the vertex of the parabola through its bin and
-the two beside it (within a fraction of a bin of a tone between bins); an RTA peak reads
-its band's centre. The level is the curve's own at that column, what the cursor reads. Gaps,
-invalid columns and a multi-resolution spectrum's unresolved columns hold no peak. Marks do
-not hop: a marked peak keeps its place unless a rival beats it by more than 3 dB, and keeps
-its row unless the one below beats it by more than 1 dB.
-
-**P** is the one way to peaks, in every view of the measurement: the flat spectrograph
-alone marks the tracked peaks at the top (newest) edge with a box and rank and lists them
-on the same plate, and the 3D spectrograph stands them on its front row (see below). A
-stopped curve shows the peaks of its newest frame; before any data there are none. **T** to
-traces only hides every peak mark: boxes, ranks and the list.
+**P** steps the measurement through peak hold and peak tracking, as it does on a transfer
+pane: see [Peaks (P)](#peaks-p).
 
 #### Harmonics of a sine
 
@@ -1794,22 +1773,65 @@ within 1 … 12 dB of full scale, default 3); *Advise raising at* (coherence und
 0.95, default 0.70); *… and* (measurement input under −80 … −30 dBFS RMS, default −70).
 They are this app's settings (`ui.toml`, `[advice]`).
 
-### Min / max tracking on the transfer function
+### Peaks (P)
 
-**P** on a transfer pane turns min / max tracking on or off. It marks the five highest
-peaks (▲) and the five deepest dips (▼) of one curve's magnitude (the selected curve when
-the pane shows it, a click on its legend row selecting it, else the pane's own) and lists them on a plate in a bottom corner of the magnitude view, clear
-of the legend and the cursor values: `max` and `min`, each row rank, frequency and dB. It
-reads the magnitude as drawn: smoothed, with its offset, without coherence-blanked or
-invalid columns. Peaks and dips follow the spectrum's rules (6 dB prominence, 1/6 octave
-merge, marks that do not hop; see [Peaks: hold and tracking](#peaks-hold-and-tracking)).
-When four or more neighbouring dips are evenly spaced on a linear axis (within 10 %), as the
-notches of a comb are (a copy of the sound arriving `τ` later cancels every `1/τ` Hz), the
-list ends with the spacing, the delay it implies and the extra path it stands for at the
-session's air temperature: `comb Δf 1.00 kHz · 1.00 ms · 0.34 m @ 20 °C`. An
-uneven set shows nothing. The cursor mark reads the same comb from a chosen pair of notches
-and asks for less: one third notch one spacing beyond the pair
-([Cursor jumps and the mark](#cursor-jumps-and-the-mark-altp-altn-altd)). **T** to traces only takes the list and the marks away.
+**P** (palette *Peaks*) does the same on a transfer pane and a spectrum pane: it steps the
+pane's measurement through **off → hold → tracking → off**, the toast naming the step
+(`Sub: peaks: hold`). From the command line: `ac2 meas set <meas> --peak off|hold|track`
+(`--peak` on `ac2 meas new tf|spectrum|rta` too). The mode is the measurement's, so every
+client shows it; the hold and the tracked marks are each app's own, started when the mode
+asks for them.
+
+**Hold** draws, as a faint line over the live curve, the highest value each column has
+reached: a spectrum's level, a transfer function's magnitude. Invalid columns add nothing
+to it, nor do a transfer function's coherence-blanked ones. **R** starts it over, as does
+turning hold on again; a change of the measurement's frequency grid drops it.
+
+**Tracking** marks the five highest peaks and the five deepest dips of one curve and lists
+them on the **peak list**, a plate you can drag and size ([Moving the plates and their text
+size](#moving-the-plates-and-their-text-size)): `max` and `min`, each row rank, frequency
+and value, strongest first (`1  1.00 kHz  −32.0 dBFS (band)` on a spectrum, the value's
+quantity in parentheses as the cursor readout gives it; `1  1.99 kHz  +4.9 dB` on a
+transfer function). Tracking draws no hold line: the marks and the list say where the peaks
+are, and a hold line under them would only crowd them. One curve is tracked, not every
+curve shown: ten marks per curve on several curves crowd the plot and the list would no
+longer read at a glance.
+
+- **Spectrum.** The pane's own live curve (the first live curve when the pane's measurement
+  has none). A peak is a small box on the curve, a dip a ▼ under it; the list sits under
+  the cursor readout.
+- **Transfer function.** The selected curve when the pane shows it (a click on its legend
+  row selects it), else the pane's own; peaks ▲, dips ▼; the list sits in a bottom corner of
+  the magnitude view, clear of the legend and the cursor values. It reads the magnitude as
+  drawn: smoothed, with its offset, without coherence-blanked or invalid columns.
+
+A peak is a maximum that stands at least 6 dB above the dips on both sides of it (each
+dip the lowest point before the curve rises higher than the peak; an averaged noise floor
+ripples by a few dB, so a mark always sits on something that stands out); peaks closer than
+1/6 octave count as one, the stronger. A dip is the same upside down: a minimum at least
+6 dB under the crests on both sides, the deeper of two within 1/6 octave. A narrowband
+spectrum's peak or dip reads the vertex of the parabola through its bin and the two beside
+it (within a fraction of a bin of a tone between bins); an RTA's reads its band's centre.
+The value is the curve's own at that column, what the cursor reads. Gaps, invalid columns
+and a multi-resolution spectrum's unresolved columns hold no mark. Marks do not hop: a
+marked peak or dip keeps its place unless a rival beats it by more than 3 dB, and keeps its
+row unless the one below beats it by more than 1 dB.
+
+On a transfer function, when four or more neighbouring dips are evenly spaced on a linear
+axis (within 10 %), as the notches of a comb are (a copy of the sound arriving `τ` later
+cancels every `1/τ` Hz), the list ends with the spacing, the delay it implies and the extra
+path it stands for at the session's air temperature: `comb Δf 1.00 kHz · 1.00 ms · 0.34 m
+@ 20 °C`. An uneven set shows nothing. The cursor mark reads the same comb from a chosen
+pair of notches and asks for less: one third notch one spacing beyond the pair ([Cursor
+jumps and the mark](#cursor-jumps-and-the-mark-altp-altn-altd)). A spectrum's list has no
+comb line: the gaps between a tone's harmonics are evenly spaced too, and would read as a
+comb that is not there.
+
+The spectrograph views of a measurement show its tracked peaks only, no dips: the flat
+spectrograph alone marks them at the top (newest) edge with a box and rank and lists them on
+the same plate, and the 3D spectrograph stands them on its front row. A stopped curve shows
+the marks of its newest frame; before any data there are none. **T** to traces only hides
+every mark and the list, on both panes.
 
 ### Math channels
 
@@ -3990,7 +4012,6 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `E` | Set phase reference | `phase_reference` |
 | `Z` | Target curve… | `target` |
 | `M` | Average power | `average` |
-| `P` | Min/max tracking | `min_max` |
 | `Shift+P` | Phase view | `phase_view` |
 | `K` | Smoothing coarser | `smooth_coarser` |
 | `Shift+K` | Smoothing finer | `smooth_finer` |
@@ -4000,6 +4021,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+Shift+N` | Previous notch | `prev_notch` |
 | `Alt+D` | Cursor mark | `cursor_mark` |
 | `Alt+Shift+D` | Clear cursor mark | `clear_mark` |
+| `P` | Peaks | `peaks` |
 | `G` | Next view | `next_view` |
 | `Shift+G` | Previous view | `prev_view` |
 
@@ -4019,7 +4041,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+D` | Cursor mark | `cursor_mark` |
 | `Alt+Shift+D` | Clear cursor mark | `clear_mark` |
 | `B` | Spectrum style | `spectrum_style` |
-| `P` | Peaks | `peak_hold` |
+| `P` | Peaks | `peaks` |
 | `Shift+B` | Spectrograph span | `spectrograph_span` |
 | `G` | Next view | `next_view` |
 | `Shift+G` | Previous view | `prev_view` |
@@ -4097,7 +4119,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `R` | Reset averaging | `reset_average` |
 | `S` | Start/stop | `start_stop` |
 | `J` | Set offset… | `offset` |
-| `P` | Peaks | `peak_hold` |
+| `P` | Peaks | `peaks` |
 | `Shift+B` | Spectrograph span | `spectrograph_span` |
 | `PageUp` | Tilt up | `tilt_up` |
 | `PageDown` | Tilt down | `tilt_down` |
@@ -4205,7 +4227,7 @@ The least used go first on a narrow pane; `G/Shift+G` steps the pane's views for
 
 | Pane | Hint line |
 |---|---|
-| Transfer function | `V` select trace · `G/Shift+G` view · `A` show/hide · `Ctrl+1` capture · `X` find delay · `P` min/max · `K` smoothing · `H` all keys |
+| Transfer function | `V` select trace · `G/Shift+G` view · `A` show/hide · `Ctrl+1` capture · `X` find delay · `P` peaks · `K` smoothing · `H` all keys |
 | Spectrum / RTA | `S` start/stop · `P` peaks · `G/Shift+G` view · `K` smoothing · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
 | Transfer: impulse response view | `G/Shift+G` view · `S` start/stop · `X` find delay · `,/.` delay · `R` reset · `I` zoom time · `Shift+Home` fit level · `H` all keys |
 | SPL | `G/Shift+G` view · `Shift+F` F/S/I · `Z` A/C/Z · `Shift+L` windows · `W` maximise · `H` all keys |

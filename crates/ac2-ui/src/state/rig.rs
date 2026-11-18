@@ -149,6 +149,9 @@ pub(super) struct Folding {
     pub pairs_shown: Vec<(u16, u16)>,
     /// A spectrum pane shows a spectrograph: only then are histories kept.
     pub spectrograph_shown: bool,
+    /// Transfer columns with γ² below this are not drawn, so a transfer's peak hold takes
+    /// nothing from them.
+    pub blank_below: Option<f32>,
 }
 
 impl RigState {
@@ -208,7 +211,7 @@ impl RigState {
         fold: &Folding,
         out: &mut Vec<Request>,
     ) -> Vec<MeasId> {
-        self.fold_peaks(&d);
+        self.fold_peaks(&d, fold.blank_below);
         self.fold_peak_tracks(&d);
         if fold.spectrograph_shown {
             self.fold_spectrographs(&d, fold.spec_ease);
@@ -273,6 +276,24 @@ impl RigState {
         }
         ac2_proto::model::SpectrumDisplay::default()
     }
+
+    /// What P draws over measurement `m`'s live curve: its own peak mode, a math channel
+    /// its owner's (as it takes its owner's display), off for a kind that takes none.
+    pub fn peak_of(&self, m: &Measurement) -> ac2_proto::model::PeakMode {
+        if let Some(p) = m.config.kind.peak() {
+            return p;
+        }
+        if let MeasKind::Math { config } = &m.config.kind
+            && let Some(p) = config
+                .owner
+                .meas()
+                .and_then(|id| self.meas(id))
+                .and_then(|o| o.config.kind.peak())
+        {
+            return p;
+        }
+        ac2_proto::model::PeakMode::Off
+    }
 }
 
 impl AppState {
@@ -287,6 +308,7 @@ impl AppState {
             cooling: self.ember_cooling(),
             pairs_shown: self.programme_pairs_shown(),
             spectrograph_shown: self.spectrograph_shown(),
+            blank_below: self.view.tf.coherence.blank_below,
         }
     }
 }

@@ -273,7 +273,7 @@ pub(crate) fn with_spectrum<R>(
         .or_else(|| cols.first().map(|c| c.meas.id));
     let listed = tracked
         .and_then(|id| cols.iter().find(|c| c.meas.id == id))
-        .is_some_and(|c| st.display_of(c.meas).peak.tracks());
+        .is_some_and(|c| st.rig.peak_of(c.meas).tracks());
     let mut traces = Vec::new();
     for ((c, note), drawn) in cols.iter().zip(&notes).zip(&drawn) {
         let name = c.meas.config.name.clone();
@@ -307,7 +307,7 @@ pub(crate) fn with_spectrum<R>(
                 .folded
                 .peak_tracks
                 .get(&c.meas.id)
-                .map(|p| p.1.peaks());
+                .map(|p| p.1.tracked());
         }
         // Its own offset, compared into another measurement's pane too.
         t.offset_db = st.meas_offset(c.meas.id);

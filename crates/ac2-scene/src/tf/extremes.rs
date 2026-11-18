@@ -1,7 +1,7 @@
-//! Min / max tracking on the transfer magnitude: the highest peaks and deepest dips of one
-//! curve, marked ▲ / ▼ where they are and listed on a plate in a corner of the magnitude
-//! view. Dips explain a comb (a delayed copy summed in) at a glance; when four or more
-//! are evenly spaced the list names the spacing and the delay it implies.
+//! Peak tracking on the transfer magnitude: the highest peaks and deepest dips of one
+//! curve, marked ▲ / ▼ where they are and listed on the peak list's plate. Dips explain a
+//! comb (a delayed copy summed in) at a glance; when four or more are evenly spaced the
+//! list names the spacing and the delay it implies.
 
 use super::*;
 use crate::plate::{Metrics, PlateBox, PlateHover, PlateKind, PlatePlace};
@@ -30,10 +30,7 @@ pub struct Comb {
     pub text: String,
 }
 
-/// Size of a mark's triangle, logical pixels: as wide as the spectrum's boxes.
-const MARK: f32 = 4.5;
-
-/// The curve min / max tracking, the cursor's mark and jumps follow: the selected one when
+/// The curve peak tracking, the cursor's mark and jumps follow: the selected one when
 /// shown, else the first of the pane's own (not compared), else the first. One curve, so
 /// the marks and the list stay one statement.
 pub(super) fn tracked(traces: &[TfTrace<'_>]) -> Option<usize> {
@@ -78,41 +75,16 @@ pub(super) fn extremes(
             .iter()
             .enumerate()
             .map(|(k, p)| {
-                let (x, y) = (xm.to_px(p.freq_hz), ym.to_px(p.level));
-                let inside = x.is_finite()
-                    && y.is_finite()
-                    && x >= plot.x
-                    && x <= plot.right()
-                    && y >= plot.y
-                    && y <= plot.bottom();
                 // At traces only the peaks are still tracked (their order holds), not marked.
-                let mark = (inside && marks)
-                    .then(|| Rect::new(x - MARK, y - MARK, 2.0 * MARK, 2.0 * MARK));
+                let mark = crate::peak_marks::mark_rect(
+                    xm.to_px(p.freq_hz),
+                    ym.to_px(p.level),
+                    crate::peak_marks::TRIANGLE_HALF,
+                    plot,
+                    marks,
+                );
                 if let Some(m) = mark {
-                    // ▲ on a peak, ▼ on a dip: the point of the triangle says which way the
-                    // curve turns there.
-                    let (tip, base) = match dir {
-                        Extreme::Max => (m.y, m.bottom()),
-                        Extreme::Min => (m.bottom(), m.y),
-                    };
-                    c.overlay.polylines.push(Polyline::clipped(
-                        vec![[x, tip], [m.right(), base], [m.x, base], [x, tip]],
-                        Stroke::solid(color, 1.5),
-                        plot,
-                    ));
-                    if marks {
-                        let (ry, v) = match dir {
-                            Extreme::Max => (m.y - 2.0, VAlign::Bottom),
-                            Extreme::Min => (m.bottom() + 2.0, VAlign::Top),
-                        };
-                        c.overlay.labels.push(label(
-                            (k + 1).to_string(),
-                            [x, ry],
-                            anchor(HAlign::Center, v),
-                            theme.small_font_size,
-                            theme.text,
-                        ));
-                    }
+                    crate::peak_marks::triangle(c, m, k + 1, dir, color, plot, theme);
                 }
                 PeakRow {
                     freq_hz: p.freq_hz,
@@ -142,35 +114,42 @@ pub(super) fn extremes(
 /// The list as drawn: the curve's name when others are shown beside it, then `max` and
 /// `min` with their rows, then the comb.
 pub(super) fn list_text(e: &TfExtremes, named: bool) -> String {
-    let mut lines = Vec::new();
-    if named {
-        lines.push(e.name.clone());
-    }
-    for (head, rows) in [("max", &e.max), ("min", &e.min)] {
-        if !rows.is_empty() {
-            lines.push(head.to_string());
-            lines.extend(rows.iter().map(|r| r.text.clone()));
-        }
-    }
-    if let Some(c) = &e.comb {
-        lines.push(c.text.clone());
-    }
-    lines.join("\n")
+    crate::peak_marks::list_text(
+        named.then_some(e.name.as_str()),
+        &e.max,
+        &e.min,
+        e.comb.as_ref().map(|c| c.text.as_str()),
+    )
 }
 
-/// Draws `text` on a plate in a bottom corner of `plot` clear of the legend and the cursor
-/// values (`avoid`): bottom-right first, as the legend starts top-left and the cursor values
-/// top-right. `plate`: one the operator moves and scales (the mark's), with the pointer on
-/// it or not; where it was dropped, when dragged. Returns the plate.
-pub(super) fn draw_list(
+/// A `w` × `h` plate's place in a bottom corner of `plot` clear of the legend and the
+/// cursor values (`avoid`): bottom-right first, as the legend starts top-left and the
+/// cursor values top-right.
+pub(super) fn corner(plot: Rect, avoid: &[Rect], w: f32, h: f32) -> Rect {
+    let y = plot.bottom() - INSET - h;
+    let right = Rect::new(plot.right() - INSET - w, y, w, h);
+    let left = Rect::new(plot.x + INSET, y, w, h);
+    let clear = |r: &Rect| {
+        !avoid
+            .iter()
+            .any(|a| r.x < a.right() && a.x < r.right() && r.y < a.bottom() && a.y < r.bottom())
+    };
+    [right, left].into_iter().find(clear).unwrap_or(right)
+}
+
+/// Draws the cursor mark's `text` on its plate, one the operator moves and scales
+/// (`place`, with the pointer on it or not): where it was dropped, else in a bottom
+/// [`corner`] of `plot`. Returns the plate.
+pub(super) fn draw_mark(
     c: &mut Canvas,
     text: &str,
     plot: Rect,
     avoid: &[Rect],
-    plate: Option<(&PlatePlace, Option<PlateHover>)>,
+    place: &PlatePlace,
+    hover: Option<PlateHover>,
     theme: &Theme,
 ) -> PlateBox {
-    let set = plate.map_or(1.0, |p| p.0.scale());
+    let set = place.scale();
     let lines: Vec<(String, Color)> = text
         .split('\n')
         .map(|l| (l.to_string(), theme.text))
@@ -180,19 +159,9 @@ pub(super) fn draw_list(
     let s = crate::plate::fitted(set, plot, w, h);
     let m = Metrics::new(theme, s);
     let (w, h) = m.size(&texts);
-    let rect = match plate.and_then(|p| p.0.at) {
+    let rect = match place.at {
         Some(at) => PlatePlace::rect_at(at, plot, w, h),
-        None => {
-            let y = plot.bottom() - INSET - h;
-            let right = Rect::new(plot.right() - INSET - w, y, w, h);
-            let left = Rect::new(plot.x + INSET, y, w, h);
-            let clear = |r: &Rect| {
-                !avoid.iter().any(|a| {
-                    r.x < a.right() && a.x < r.right() && r.y < a.bottom() && a.y < r.bottom()
-                })
-            };
-            [right, left].into_iter().find(clear).unwrap_or(right)
-        }
+        None => corner(plot, avoid, w, h),
     };
     crate::plate::draw_lines(
         &mut c.overlay,
@@ -200,8 +169,8 @@ pub(super) fn draw_list(
         &lines,
         HAlign::Left,
         m,
-        plate.is_some(),
-        plate.and_then(|p| p.1),
+        true,
+        hover,
         plot,
         theme,
     );

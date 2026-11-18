@@ -1,5 +1,5 @@
 //! The cursor's mark on the transfer view, and the curve the cursor jumps along: both the
-//! curve min / max tracking follows ([`extremes::tracked`]), so the jumps, the marks and
+//! curve peak tracking follows ([`extremes::tracked`]), so the jumps, the marks and
 //! the differences read one curve.
 
 use super::*;

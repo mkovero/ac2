@@ -229,6 +229,8 @@ fn transfer_view_with_a_live_trace_and_eight_stored() {
     let theme = Theme::dark();
     let view = ViewState::default();
     let live = TfTrace {
+        hold: None,
+        tracks: false,
         range: None,
         faint_phase: false,
         delay_between: None,

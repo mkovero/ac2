@@ -1,5 +1,5 @@
 {
-  "proto_version": 91,
+  "proto_version": 92,
   "value": {
     "grids": [
       {
@@ -62,6 +62,7 @@
                   "type": "equal_confidence"
                 },
                 "measurement_input": 1,
+                "peak": "off",
                 "reference_input": 0,
                 "resolution": "twenty_fourth",
                 "smoothing": {
@@ -104,6 +105,7 @@
                   "type": "equal_confidence"
                 },
                 "measurement_input": 2,
+                "peak": "off",
                 "reference_input": 0,
                 "resolution": "twenty_fourth",
                 "smoothing": {
@@ -254,6 +256,7 @@
                   "type": "equal_confidence"
                 },
                 "measurement_input": 3,
+                "peak": "off",
                 "reference_input": 0,
                 "resolution": "twenty_fourth",
                 "smoothing": {
@@ -409,7 +412,7 @@
           "driver_change": null,
           "driver_reset": null,
           "input_device": "fake",
-          "opened_at": "now-183527770",
+          "opened_at": "now-109898552",
           "output_device": "fake",
           "replay": null,
           "sample_rate_hz": 48000,
@@ -428,11 +431,11 @@
           "peaks": {
             "lafmax": {
               "judgement": "no_limit",
-              "since": "now-54446939"
+              "since": "now-51957916"
             },
             "lcpeak": {
               "judgement": "no_limit",
-              "since": "now-54446939"
+              "since": "now-51957916"
             }
           },
           "started_at": null,
@@ -440,31 +443,31 @@
             {
               "duration": 60.0,
               "judgement": "no_limit",
-              "since": "now-54446939",
+              "since": "now-51957916",
               "weighting": "a"
             },
             {
               "duration": 300.0,
               "judgement": "no_limit",
-              "since": "now-54446939",
+              "since": "now-51957916",
               "weighting": "a"
             },
             {
               "duration": 600.0,
               "judgement": "no_limit",
-              "since": "now-54446939",
+              "since": "now-51957916",
               "weighting": "a"
             },
             {
               "duration": 1800.0,
               "judgement": "no_limit",
-              "since": "now-54446939",
+              "since": "now-51957916",
               "weighting": "a"
             },
             {
               "duration": 3600.0,
               "judgement": "no_limit",
-              "since": "now-54446939",
+              "since": "now-51957916",
               "weighting": "a"
             }
           ]
@@ -490,7 +493,7 @@
           "type": "name"
         },
         "recover": null,
-        "saved_at": "now-8491147"
+        "saved_at": "now-8143031"
       }
     },
     "traces": []

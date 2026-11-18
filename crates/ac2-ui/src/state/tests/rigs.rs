@@ -490,7 +490,7 @@ fn a_pane_key_goes_to_the_panes_rig() {
     pick(&mut t, RigRow::Rig(PUPU));
     t.st.layout.set_focus(p);
     // Peak hold on the spectrum pane: a display edit of the measurement it shows.
-    let r = t.st.update(Msg::Command(CommandId::PeakHold), &t.keys);
+    let r = t.st.update(Msg::Command(CommandId::Peaks), &t.keys);
     assert!(
         !r.is_empty() && r.iter().all(|(rig, _)| *rig == RIG),
         "{r:?}"

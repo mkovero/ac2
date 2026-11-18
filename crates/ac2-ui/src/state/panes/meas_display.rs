@@ -1,5 +1,6 @@
-//! What the daemon keeps with a measurement about how it is drawn: a spectrum's style, peak
-//! hold and spectrograph (B, P, Shift+B, colours), which every client draws the same and
+//! What the daemon keeps with a measurement about how it is drawn: a spectrum's style and
+//! spectrograph (B, Shift+B, colours) and a spectrum's or a transfer's peak mode (P), which
+//! every client draws the same and
 //! a session restores; and what a graph pane draws behind its lead (C's tick list), kept
 //! in the pane.
 
@@ -23,7 +24,7 @@ impl AppState {
             .map_or_else(SpectrumDisplay::default, |m| self.display_of(m))
     }
 
-    /// The measurement B, P, Shift+B and the colour maps act on: the spectrum pane's (the
+    /// The measurement B, Shift+B and the colour maps act on: the spectrum pane's (the
     /// focused one, else the one focused last), or the owner of the math channel it shows.
     fn display_target(&self) -> Result<Measurement, String> {
         let Some(m) = self.kind_meas(PaneKind::Spectrum) else {
@@ -81,16 +82,58 @@ impl AppState {
         );
     }
 
-    /// P: peak hold, then peak tracking, then off (the hold and the tracked peaks are this
-    /// app's, kept while the mode asks for them, so each hold starts afresh).
+    /// The measurement P acts on: the focused transfer pane's, else the spectrum pane's
+    /// (the focused one, else the one focused last); of a math channel, the owner whose
+    /// mode it draws with.
+    fn peak_target(&self) -> Result<Measurement, String> {
+        let kind = match self.layout.kind(self.layout.focus) {
+            PaneKind::Transfer => PaneKind::Transfer,
+            _ => PaneKind::Spectrum,
+        };
+        let Some(m) = self.kind_meas(kind) else {
+            return Err(format!(
+                "no {}: {} makes one",
+                match kind {
+                    PaneKind::Transfer => "transfer measurement",
+                    _ => "spectrum or RTA",
+                },
+                self.new_meas_reach()
+            ));
+        };
+        if m.config.kind.peak().is_some() {
+            return Ok(m.clone());
+        }
+        if let MeasKind::Math { config } = &m.config.kind
+            && let Some(o) = config.owner.meas().and_then(|id| self.meas(id))
+            && o.config.kind.peak().is_some()
+        {
+            return Ok(o.clone());
+        }
+        Err(format!(
+            "{} keeps no peak mode: a math channel takes the one of the measurement it is \
+             filed under, and it is filed under none",
+            m.config.name
+        ))
+    }
+
+    /// P: peak hold, then peak tracking, then off, on a transfer pane as on a spectrum (the
+    /// hold and the tracked peaks are this app's, kept while the mode asks for them, so
+    /// each hold starts afresh).
     pub(in crate::state) fn step_peak_mode(&mut self, out: &mut Vec<Request>) {
-        self.edit_display(
-            |d| {
-                d.peak = d.peak.next();
-                d.peak.name().to_owned()
-            },
-            out,
-        );
+        let mut m = match self.peak_target() {
+            Ok(m) => m,
+            Err(e) => {
+                self.warn(e);
+                return;
+            }
+        };
+        let Some(mode) = m.config.kind.peak_mut() else {
+            return;
+        };
+        *mode = mode.next();
+        let what = format!("{}: {}", m.config.name, mode.name());
+        let cmd = self.meas_update(m.id, m.config);
+        self.call(out, cmd, what);
     }
 
     /// Shift+B: the next spectrograph span.

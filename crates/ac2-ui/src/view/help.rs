@@ -645,8 +645,12 @@ mod tests {
             ]
         );
         let b = binds(&rows);
-        // Only this pane's and the global keys: the spectrum's peak hold is not listed.
-        assert!(!b.iter().any(|(_, t)| *t == CommandId::PeakHold.title()));
+        // Only this pane's and the global keys: the spectrum's curve style is not listed.
+        assert!(
+            !b.iter()
+                .any(|(_, t)| *t == CommandId::SpectrumStyle.title())
+        );
+        assert!(b.contains(&("P", CommandId::Peaks.title())));
         assert!(b.contains(&("↑/↓", "Stimulus level ±1 dB")));
         assert!(b.contains(&("X/Shift+X", "Find first arrival/strongest peak")));
         assert!(b.contains(&("Ctrl+1…9", "Capture to slot 1…9")));

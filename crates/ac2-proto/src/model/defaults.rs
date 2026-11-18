@@ -45,6 +45,7 @@ impl TransferConfig {
             resolution: Resolution::default(),
             smoothing: None,
             depth: DepthPolicy::EqualConfidence,
+            peak: crate::model::PeakMode::Off,
         }
     }
 }

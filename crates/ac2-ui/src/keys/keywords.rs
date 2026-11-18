@@ -236,7 +236,6 @@ impl CommandId {
             C::LegendHide => &["hide", "labels"],
             C::Average | C::AverageComplex => &["math", "combine", "mean"],
             C::AverageCoherence => &["math", "combine", "mean", "coherence"],
-            C::MinMax => &["min", "max", "peak", "dip", "notch", "comb", "extremes"],
             C::PhaseView => &["unwrap", "unwrapped", "wrapped", "group delay"],
             C::SmoothCoarser
             | C::SmoothFiner
@@ -247,7 +246,10 @@ impl CommandId {
             | C::Smooth6
             | C::Smooth3 => &["octave", "resolution"],
             C::SpectrumStyle => &["line", "fill", "bars"],
-            C::PeakHold => &["peak", "hold", "max hold", "tracking", "top 5", "max"],
+            C::Peaks => &[
+                "peak", "hold", "max hold", "tracking", "top 5", "max", "min", "dip", "notch",
+                "comb", "extremes",
+            ],
             C::SpectrographSpan => &["waterfall", "history", "time"],
             C::SpectrographColours
             | C::SpectrographViridis

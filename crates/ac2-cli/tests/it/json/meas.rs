@@ -274,7 +274,8 @@ async fn session_meas_delay_trace_flow() -> R {
             "averaging": { "type": "fifo", "blocks": 8 },
             "resolution": "forty_eighth",
             "smoothing": { "fraction": "sixth", "mode": "magnitude_phase" },
-            "depth": { "type": "equal_confidence" }
+            "depth": { "type": "equal_confidence" },
+            "peak": "off"
         }})
     );
 
@@ -441,6 +442,12 @@ async fn session_meas_delay_trace_flow() -> R {
     assert_eq!(r.code, 1);
     let r = ac2(&f, &["meas", "set", "main-l", "--style", "line", "--json"]).await?;
     assert_eq!(r.code, 1);
+    // A transfer function takes the peak mode alone, and it is no new config either.
+    let held = ok_json(&f, &["meas", "set", "main-l", "--peak", "hold", "--json"]).await?;
+    assert_eq!(held["config"]["kind"]["config"]["peak"], "hold");
+    let tracked = ok_json(&f, &["meas", "set", "main-l", "--peak", "track", "--json"]).await?;
+    assert_eq!(tracked["config"]["kind"]["config"]["peak"], "track");
+    assert_eq!(tracked["config_rev"], held["config_rev"]);
     Ok(())
 }
 

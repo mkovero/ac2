@@ -212,12 +212,12 @@ fn learned_bindings_carry_over() {
     }
     // Scoped lookup: P tracks extremes in both plots — peak hold and peaks on the
     // spectrum, min / max on the transfer function; Shift+P is the phase view there.
-    assert_eq!(m.lookup(Scope::Spectrum, c("P")), Some(CommandId::PeakHold));
+    assert_eq!(m.lookup(Scope::Spectrum, c("P")), Some(CommandId::Peaks));
     assert_eq!(
         m.lookup(Scope::Spectrograph3d, c("P")),
-        Some(CommandId::PeakHold)
+        Some(CommandId::Peaks)
     );
-    assert_eq!(m.lookup(Scope::Transfer, c("P")), Some(CommandId::MinMax));
+    assert_eq!(m.lookup(Scope::Transfer, c("P")), Some(CommandId::Peaks));
     assert_eq!(
         m.lookup(Scope::Transfer, c("Shift+P")),
         Some(CommandId::PhaseView)
@@ -426,7 +426,7 @@ fn toml_errors() {
         ("[global]\nhelp = \"Ctrl+Nope\"", "unknown key"),
         ("[global]\nhelp = 3", "keys.toml"),
         // H is help in every pane: a pane's command on H conflicts with it there.
-        ("[spectrum]\npeak_hold = \"H\"", "bound to both"),
+        ("[spectrum]\npeaks = \"H\"", "bound to both"),
     ];
     for (src, want) in bad {
         let e = Keymap::from_toml(src).expect_err(src);
@@ -708,7 +708,7 @@ fn palette_titles_are_terse_and_uniform() {
         (C::SplitPane, "Split pane"),
         (C::ClosePane, "Close pane"),
         (C::MaximisePane, "Maximise pane"),
-        (C::PeakHold, "Peaks"),
+        (C::Peaks, "Peaks"),
         (C::CoherenceMask, "Coherence mask"),
         (C::PhaseView, "Phase view"),
     ] {

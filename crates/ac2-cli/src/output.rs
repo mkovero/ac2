@@ -242,6 +242,11 @@ pub fn measurement(m: &Measurement) -> String {
             d.spectrograph_colours.name()
         ));
     }
+    if let MeasKind::Transfer { config } = &m.config.kind
+        && config.peak != PeakMode::Off
+    {
+        s.push_str(&format!("  {}", config.peak.name()));
+    }
     if m.offset.0 != 0.0 {
         s.push_str(&format!("  offset {}", format::db_readout(m.offset.0)));
     }

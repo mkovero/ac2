@@ -250,7 +250,7 @@ mod tests {
             ("chrome", CommandId::PlotChrome),
             ("quit", CommandId::Quit),
             ("track", CommandId::TrackDelay),
-            ("peak", CommandId::PeakHold),
+            ("peak", CommandId::Peaks),
             ("cohmask", CommandId::CoherenceMask),
             ("previous view", CommandId::PrevView),
             ("stim stop", CommandId::StimulusStop),
@@ -300,7 +300,7 @@ mod tests {
         let r = search("", &k, Scope::Spectrum);
         assert_eq!(r.len(), CommandId::ALL.len());
         let row = |c| r.iter().find(|e| e.command == c).expect("row");
-        assert_eq!(row(CommandId::PeakHold).key.as_deref(), Some("P"));
+        assert_eq!(row(CommandId::Peaks).key.as_deref(), Some("P"));
         assert_eq!(
             row(CommandId::InsertDelay).key.as_deref(),
             Some("X (transfer)")
@@ -322,8 +322,8 @@ mod tests {
             ("grid", CommandId::PlotChrome),
             ("polarity", CommandId::Invert),
             ("coherence", CommandId::CoherenceMask),
-            ("hold", CommandId::PeakHold),
-            ("dip", CommandId::MinMax),
+            ("hold", CommandId::Peaks),
+            ("dip", CommandId::Peaks),
             ("remove", CommandId::DeleteSelected),
             ("microphone", CommandId::Calibrations),
             ("calibration", CommandId::Calibrations),

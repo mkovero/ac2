@@ -36,6 +36,7 @@ fn transfer(id: u32, name: &str) -> Measurement {
                     resolution: Resolution::FortyEighth,
                     smoothing: None,
                     depth: DepthPolicy::EqualConfidence,
+                    peak: ac2_proto::model::PeakMode::Off,
                 },
             },
         },

@@ -87,7 +87,8 @@ impl Colormap {
     }
 }
 
-/// What P draws over a spectrum or RTA measurement's live curve.
+/// What P draws over a measurement's live curve: a spectrum's or an RTA's level, a
+/// transfer function's magnitude.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PeakMode {
@@ -96,8 +97,9 @@ pub enum PeakMode {
     Off,
     /// The highest level each column has reached.
     Hold,
-    /// The highest peaks of the live curve marked and listed, without the hold: the marks
-    /// and the list are the statement, a hold line under them would only crowd it.
+    /// The highest peaks and the deepest dips of the live curve marked and listed, without
+    /// the hold: the marks and the list are the statement, a hold line under them would
+    /// only crowd it.
     Track,
 }
 
@@ -116,7 +118,7 @@ impl PeakMode {
         self == Self::Hold
     }
 
-    /// Peaks are marked and listed.
+    /// Peaks and dips are marked and listed.
     pub fn tracks(self) -> bool {
         self == Self::Track
     }
