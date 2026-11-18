@@ -856,10 +856,9 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
             ui.label(RichText::new("Measurements").strong());
             ui.label(
                 RichText::new(format!(
-                    "{} selects a trace · {} shows / hides · {} edits",
+                    "{} selects a trace · {} shows / hides",
                     key_hint(app, CommandId::NextTrace),
-                    key_hint(app, CommandId::ToggleSelected),
-                    key_hint(app, CommandId::EditSelected)
+                    key_hint(app, CommandId::ToggleSelected)
                 ))
                 .small()
                 .color(ch.dim),

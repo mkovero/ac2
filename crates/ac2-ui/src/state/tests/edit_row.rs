@@ -5,7 +5,7 @@ use ac2_scene::meas_list::TreeKey;
 
 use super::*;
 
-/// The tree of `tree_state` with an SPL meter, whose kind has no form.
+/// The tree of `tree_state` with an SPL meter, which no pane shows.
 fn t() -> T {
     let mut s = tree_state();
     s.measurements.push(meas(7, "SPL A", spl_meter()));
@@ -18,6 +18,16 @@ fn t() -> T {
 fn editing(t: &T) -> Option<MeasId> {
     match &t.st.overlay {
         Overlay::Form(f) => f.edits(),
+        _ => None,
+    }
+}
+
+/// The meter Settings is open on at its SPL/Leq page.
+fn leq_page(t: &T) -> Option<(MeasId, String)> {
+    match &t.st.overlay {
+        Overlay::Settings(s) if s.page == crate::settings::Page::Leq => {
+            s.leq.as_ref().map(|d| (d.meas, d.name.clone()))
+        }
         _ => None,
     }
 }
@@ -79,16 +89,19 @@ fn a_row_double_clicked_is_selected_and_edited() {
     );
     assert_eq!(editing(&t), Some(MeasId(1)));
     t.st.overlay = Overlay::None;
-    // An SPL meter has no form: selected, and the row's own name in what is said, never
-    // another measurement's form.
+    // An SPL meter is edited on Settings › SPL/Leq: the page on the row's meter, though
+    // no SPL pane shows it.
     t.st.apply(Msg::EditRow(TreeKey::Meas(MeasId(7))), &t.keys);
     assert_eq!(t.st.rig.selected, Some(MeasId(7)));
-    assert_eq!(t.st.overlay, Overlay::None);
-    assert_eq!(
-        t.last_toast(),
-        "SPL A has no settings form: Edit measurement… is for a transfer, sweep, spectrum, RTA \
-         or math channel"
-    );
+    assert_eq!(leq_page(&t), Some((MeasId(7), "SPL A".to_owned())));
+    t.st.overlay = Overlay::None;
+    // The key and the palette's command open the same on the selected meter.
+    t.key("F2");
+    assert_eq!(leq_page(&t), Some((MeasId(7), "SPL A".to_owned())));
+    t.st.overlay = Overlay::None;
+    t.st.apply(Msg::Command(CommandId::EditMeas), &t.keys);
+    assert_eq!(leq_page(&t), Some((MeasId(7), "SPL A".to_owned())));
+    t.st.overlay = Overlay::None;
     // A heading stands for no measurement.
     t.st.apply(Msg::EditRow(TreeKey::Session), &t.keys);
     assert_eq!(t.st.rig.selected, Some(MeasId(7)));

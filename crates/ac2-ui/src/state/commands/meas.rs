@@ -23,9 +23,9 @@ impl AppState {
         f.set_text(crate::forms::FieldId::Name, &name);
     }
 
-    /// Opens the form that edits `m`: the one that made it, on its settings. `false` for a
-    /// kind with no such form (an SPL meter), nothing opened or said.
-    fn open_meas_edit(&mut self, m: &Measurement) -> bool {
+    /// Opens what edits `m`: the form that made it, on its settings; an SPL meter's
+    /// Settings › SPL/Leq page, on that meter whatever the SPL pane shows.
+    fn open_meas_edit(&mut self, m: &Measurement, out: &mut Vec<Request>) {
         let form = match &m.config.kind {
             MeasKind::Sweep { .. } => {
                 let open = self.open_session().cloned();
@@ -43,19 +43,33 @@ impl AppState {
                     f
                 })
             }
-            MeasKind::Spl { .. } => return false,
+            MeasKind::Spl { .. } => {
+                let leq = crate::leq_dialog::LeqDialog::new(
+                    m,
+                    self.leq_calibrated(m.id),
+                    self.leq_panes.cues_shown,
+                );
+                self.open_settings(crate::settings::Page::Leq, out);
+                if let Overlay::Settings(s) = &mut self.overlay {
+                    s.leq = leq;
+                }
+                return;
+            }
         };
         match form {
             Ok(f) => self.overlay = Overlay::Form(Box::new(f)),
             Err(e) => self.warn(e),
         }
-        true
     }
 
     /// A measurement's row asked to be edited (double click, its edit button): selected as
     /// a click on the row selects it, then its form opened. The row names the measurement,
     /// so the focused pane has no say (unlike the command, which reads what is in focus).
-    pub(in crate::state) fn edit_row(&mut self, key: ac2_scene::meas_list::TreeKey) {
+    pub(in crate::state) fn edit_row(
+        &mut self,
+        key: ac2_scene::meas_list::TreeKey,
+        out: &mut Vec<Request>,
+    ) {
         use ac2_scene::meas_list::TreeKey;
         match key {
             TreeKey::Meas(id) => self.select_meas_row(id),
@@ -70,9 +84,7 @@ impl AppState {
         let Some(m) = key.edits().and_then(|id| self.meas(id)).cloned() else {
             return;
         };
-        if !self.open_meas_edit(&m) {
-            self.warn(ac2_scene::meas_list::no_edit_form(&m));
-        }
+        self.open_meas_edit(&m, out);
     }
 
     /// The session, measurement, input and finder [`CommandId`]s [`AppState::command`] routes here.
@@ -207,8 +219,8 @@ impl AppState {
                     self.warn(ac2_scene::pane_edit::PROGRAMME_EDIT);
                     return;
                 }
-                // The selected sweep, else the sweep pane's; else the selected measurement
-                // when its kind has a form; else a math channel a pane shows.
+                // The selected sweep, else the sweep pane's; else the selected measurement;
+                // else a math channel a pane shows.
                 let selected = self.selected_meas();
                 let target = selected
                     .filter(|m| matches!(m.config.kind, MeasKind::Sweep { .. }))
@@ -217,7 +229,7 @@ impl AppState {
                             .then(|| self.sweep_meas())
                             .flatten()
                     })
-                    .or_else(|| selected.filter(|m| !matches!(m.config.kind, MeasKind::Spl { .. })))
+                    .or(selected)
                     .or_else(|| {
                         [PaneKind::Transfer, PaneKind::Spectrum]
                             .into_iter()
@@ -225,11 +237,12 @@ impl AppState {
                             .find(|m| matches!(m.config.kind, MeasKind::Math { .. }))
                     })
                     .cloned();
-                if !target.is_some_and(|m| self.open_meas_edit(&m)) {
-                    self.warn(
-                        "select a measurement first (a transfer, sweep, spectrum, RTA or math \
-                         channel), or focus a Programme pane",
-                    );
+                match target {
+                    Some(m) => self.open_meas_edit(&m, out),
+                    None => self.warn(
+                        "select a measurement first (a transfer, sweep, spectrum, RTA, SPL \
+                         meter or math channel), or focus a Programme pane",
+                    ),
                 }
             }
             C::HideGroup => self.toggle_group_shown(out),

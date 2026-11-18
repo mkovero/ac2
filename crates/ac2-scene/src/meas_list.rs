@@ -291,15 +291,6 @@ pub fn edit_hint(key: Option<&str>) -> String {
     )
 }
 
-/// Edit asked for on the row of a measurement whose kind has no form to edit it in.
-pub fn no_edit_form(m: &Measurement) -> String {
-    format!(
-        "{} has no settings form: Edit measurement… is for a transfer, sweep, spectrum, RTA \
-         or math channel",
-        m.config.name
-    )
-}
-
 /// One row of the tree.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TreeRow {

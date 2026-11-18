@@ -2339,11 +2339,11 @@ Beside the panes, one tree lists every measurement with what it owns
   ([Choosing what a pane shows](#choosing-what-a-pane-shows)); a click on the selected trace
   deselects it. A double click on a trace renames it.
 - **Edit measurement…** opens the form a measurement was made in, on its settings (a math
-  channel: the math dialog). Three ways in from its row: a **double click** on the row (its
-  header, its live curve or a math channel's row), the **pencil button** at the right end
-  of the selected row and of the row under the pointer, and **F2** with the row selected.
-  The row says which measurement, whatever pane has the keys. An SPL meter has no such
-  form (a warning says so). **F2** edits the row selected last, as Delete deletes it: a
+  channel: the math dialog; an SPL meter: Settings › SPL/Leq on that meter). Three ways in
+  from its row: a **double click** on the row (its header, its live curve or a math
+  channel's row), the **pencil button** at the right end of the selected row and of the row
+  under the pointer, and **F2** with the row selected. The row says which measurement,
+  whatever pane has the keys. **F2** edits the row selected last, as Delete deletes it: a
   stored trace selected after the measurement is renamed instead. The palette's *Edit
   measurement…* and *Rename trace…* each do the one thing.
 - **Tab** / **Shift+Tab** select the next / previous listed row, wrapping (hidden rows too;
