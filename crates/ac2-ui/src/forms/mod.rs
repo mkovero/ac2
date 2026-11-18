@@ -54,6 +54,8 @@ pub enum FormKind {
     TargetLoudness,
     /// A new Programme pane ([`crate::meter_dialog`]).
     Programme,
+    /// What the generator plays, asked at its first arm ([`crate::signal_dialog`]).
+    StimulusSignal,
 }
 
 impl FormKind {
@@ -74,6 +76,7 @@ impl FormKind {
             FormKind::TargetTilt => ac2_scene::target_curve::tilt::TITLE,
             FormKind::TargetLoudness => ac2_scene::target_curve::loudness::TITLE,
             FormKind::Programme => ac2_scene::programme::form::NEW_TITLE,
+            FormKind::StimulusSignal => ac2_scene::stimulus::SIGNAL_DIALOG_TITLE,
         }
     }
 
@@ -86,6 +89,7 @@ impl FormKind {
             FormKind::IrImport => "Enter imports it as a transfer trace",
             FormKind::TargetTilt | FormKind::TargetLoudness => ac2_scene::target_curve::SUBMIT,
             FormKind::Programme => ac2_scene::programme::form::NEW_SUBMIT,
+            FormKind::StimulusSignal => ac2_scene::stimulus::SIGNAL_DIALOG_SUBMIT,
             FormKind::MathEdit
             | FormKind::SweepEdit
             | FormKind::SpectrumEdit
@@ -108,6 +112,7 @@ impl FormKind {
             FormKind::IrImport => "Import",
             FormKind::TargetTilt | FormKind::TargetLoudness => "Add",
             FormKind::Programme => "Open",
+            FormKind::StimulusSignal => ac2_scene::stimulus::SIGNAL_DIALOG_VERB,
             FormKind::MathEdit
             | FormKind::SweepEdit
             | FormKind::SpectrumEdit
@@ -204,6 +209,10 @@ pub enum FieldId {
     EmberDecay,
     /// How bright a goniometer point lands: this app's too.
     EmberGlow,
+    /// The stimulus signal dialog's rows ([`crate::signal_dialog`]).
+    Signal,
+    SineFrequency,
+    OnBin,
 }
 
 /// A field's value: typed text, one of a few options (←/→ pick), or an input of the session
@@ -338,6 +347,8 @@ pub struct Form {
     pub ir_import: Option<Box<crate::ir_import_dialog::IrTarget>>,
     /// The programme meter dialog's own state ([`crate::meter_dialog`]).
     pub meter: Option<Box<crate::meter_dialog::MeterForm>>,
+    /// The stimulus signal dialog's own state ([`crate::signal_dialog`]).
+    pub signal: Option<Box<crate::signal_dialog::SignalForm>>,
     /// A heading drawn above the field it names.
     pub headings: Vec<(FieldId, String)>,
     /// The averaging field's values, one per option.
@@ -471,7 +482,10 @@ impl Form {
     /// ←/→ on the focused choice or channel: the next or previous option, stopping at the
     /// ends. An unchosen channel takes the first option on →, the last on ←.
     pub fn cycle(&mut self, d: i32) {
-        if crate::meter_dialog::cycle(self, d) || self.cycle_sweep_input(d) {
+        if crate::meter_dialog::cycle(self, d)
+            || crate::signal_dialog::cycle(self, d)
+            || self.cycle_sweep_input(d)
+        {
             return;
         }
         let Some(f) = self.fields.get_mut(self.focus) else {
@@ -558,6 +572,7 @@ impl Form {
             t.push_str(s);
             self.error = None;
         }
+        crate::signal_dialog::rehint(self);
     }
 
     /// Deletes the last character, or the selected text.
@@ -575,6 +590,7 @@ impl Form {
             }
             self.error = None;
         }
+        crate::signal_dialog::rehint(self);
     }
 }
 

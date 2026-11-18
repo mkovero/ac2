@@ -3,11 +3,12 @@
 //! when the sine stops.
 
 use super::new_spectrum;
-use crate::harness::{Cli, R, measuring};
+use crate::harness::{Cli, Driver, R, measuring};
 use ac2_proto::model::{GeneratorDesired, GeneratorSettings, Signal};
 use ac2_proto::units::{Dbfs, Hz};
 use ac2_scene::primitives::Viewport;
 use ac2_scene::theme::Theme;
+use ac2_ui::forms::FormKind;
 use ac2_ui::state::{AppState, Msg, Overlay, PaneId, PromptKind, StimPhase};
 use std::time::Instant;
 
@@ -105,13 +106,28 @@ fn a_sine_chosen_at_the_first_arm_is_fired_on_a_bin_of_the_running_spectrum() ->
     d.st.rig.stimulus.generator = None;
     d.st.rig.stimulus.level = None;
     d.key("Space");
-    match &mut d.st.overlay {
-        Overlay::Prompt(prompt) if prompt.kind == PromptKind::StimulusSignal => {
-            assert_eq!(prompt.text, "pink");
-            prompt.text = "1k".into();
-        }
-        o => return Err(format!("no signal prompt: {o:?}").into()),
-    }
+    let rows = |d: &Driver| match &d.st.overlay {
+        Overlay::Form(f) if f.kind == FormKind::StimulusSignal => Ok(f
+            .fields
+            .iter()
+            .map(|x| format!("{}: {} {}", x.label, x.display(), x.hint))
+            .collect::<Vec<_>>()),
+        o => Err(format!("no signal dialog: {o:?}")),
+    };
+    assert_eq!(rows(&d)?, ["Signal: pink noise "]);
+    // ← from pink noise is the sine, at 1 kHz on a bin of the running spectrum.
+    d.key("ArrowLeft");
+    assert_eq!(
+        rows(&d)?,
+        [
+            "Signal: sine ".to_owned(),
+            "Sine frequency: 1000 Hz 997, 1k, 1.5 kHz".to_owned(),
+            format!(
+                "On an FFT bin: on · bins of the {n}-point FFT plays 1000 Hz → {}",
+                ac2_scene::format::freq_exact(bin)
+            ),
+        ]
+    );
     d.key("Enter");
     let toast = d.st.toasts.list.last().map(|t| t.text.clone());
     assert_eq!(

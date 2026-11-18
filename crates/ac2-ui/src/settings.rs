@@ -20,6 +20,7 @@
 use ac2_proto::model::{Generator, ServerInfo};
 use ac2_proto::units::Dbfs;
 use ac2_scene::rig::{RAISE_WHILE_LIVE, RAISE_WORD};
+use ac2_scene::stimulus::SignalRow;
 use ac2_scene::theme::ThemeName;
 use ac2_scene::view::{
     CoherencePlacement, DistortionUnit, IrMode, LeqLayout, LeqStyle, SpectrumMode, SweepMode,
@@ -268,28 +269,6 @@ impl CeilingEdit {
     }
 }
 
-/// A row of the Audio I/O page's stimulus signal section.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SignalRow {
-    /// Pink noise, white noise or a sine: ←/→.
-    Signal,
-    /// The sine's frequency, typed. Shown with a sine.
-    Frequency,
-    /// Whether the sine is moved onto an FFT bin: ←/→. Shown with a sine.
-    OnBin,
-}
-
-impl SignalRow {
-    /// The rows shown: the sine's own only while the signal is a sine.
-    pub fn shown(sine: bool) -> &'static [SignalRow] {
-        if sine {
-            &[SignalRow::Signal, SignalRow::Frequency, SignalRow::OnBin]
-        } else {
-            &[SignalRow::Signal]
-        }
-    }
-}
-
 /// The stimulus signal rows of the Audio I/O page.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SignalRows {
@@ -305,18 +284,15 @@ impl SignalRows {
         *self = Self::default();
     }
 
-    /// Enter on the frequency row: the frequency typed, read as the signal prompt reads
-    /// one, or the reason it is refused. `rate_hz`: the open session's sample rate.
+    /// Enter on the frequency row: the frequency typed, or the reason it is refused.
+    /// `rate_hz`: the open session's sample rate.
     pub fn enter(&mut self, rate_hz: Option<u32>) -> Option<ac2_proto::units::Hz> {
-        self.error = None;
-        let text = self.text.trim();
-        if text.is_empty() {
-            self.error = Some(ac2_scene::stimulus::SINE_FREQ_EMPTY.into());
-            return None;
-        }
-        match ac2_scene::stimulus::parse_sine_freq(text, rate_hz) {
+        match ac2_scene::stimulus::typed_sine_freq(&self.text, rate_hz) {
             Ok(hz) => {
-                self.text.clear();
+                *self = Self {
+                    focus: self.focus,
+                    ..Self::default()
+                };
                 Some(hz)
             }
             Err(e) => {

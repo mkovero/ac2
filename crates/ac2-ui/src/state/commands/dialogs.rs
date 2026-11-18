@@ -69,6 +69,21 @@ impl AppState {
             self.submit_meter(out);
             return;
         }
+        if f.kind == FormKind::StimulusSignal {
+            match crate::signal_dialog::choice(f) {
+                Ok(choice) => {
+                    self.overlay = Overlay::None;
+                    self.choose_signal(choice, out);
+                    // The first arm asks for the signal, then for a level still missing;
+                    // the Space after both arms.
+                    if self.rig.stimulus.level.is_none() {
+                        self.prompt(PromptKind::StimulusLevel, String::new());
+                    }
+                }
+                Err(e) => f.error = Some(e),
+            }
+            return;
+        }
         if matches!(f.kind, FormKind::TargetTilt | FormKind::TargetLoudness) {
             match crate::target_dialog::curve(f) {
                 Ok(curve) => {

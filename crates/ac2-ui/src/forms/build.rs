@@ -16,6 +16,7 @@ impl Form {
             meas_edit: None,
             ir_import: None,
             meter: None,
+            signal: None,
             headings: Vec::new(),
             averaging: AVERAGING.to_vec(),
             stream: None,
@@ -245,7 +246,8 @@ impl Form {
         let input_field = Field::channel(FieldId::Input, "Input", inputs, Some(measurement), "");
         let fields = match kind {
             // Built by [`Form::sweep`], [`Form::math`], [`crate::ir_import_dialog::form`] and
-            // [`crate::target_dialog`]; the programme meter's by [`crate::meter_dialog`].
+            // [`crate::target_dialog`]; the programme meter's by [`crate::meter_dialog`], the
+            // stimulus signal's by [`crate::signal_dialog`].
             FormKind::Sweep
             | FormKind::SweepEdit
             | FormKind::Math
@@ -256,7 +258,8 @@ impl Form {
             | FormKind::IrImport
             | FormKind::TargetTilt
             | FormKind::TargetLoudness
-            | FormKind::Programme => Vec::new(),
+            | FormKind::Programme
+            | FormKind::StimulusSignal => Vec::new(),
             FormKind::Transfer => vec![
                 Field::channel(
                     FieldId::Reference,
@@ -647,6 +650,7 @@ impl Form {
             FormKind::Programme => {
                 return Err("a programme meter dialog".into());
             }
+            FormKind::StimulusSignal => return Err("the stimulus signal dialog".into()),
             FormKind::TargetTilt | FormKind::TargetLoudness => {
                 return Err("a target curve dialog".into());
             }

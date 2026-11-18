@@ -29,8 +29,9 @@ pub enum Stimulus {
     },
     /// The sweep view with no sweep measurement yet: Space opens the dialog that makes one.
     SweepDialog,
-    /// A live view before the operator chose the generator's signal: Space asks for it.
-    SignalPrompt,
+    /// A live view before the operator chose the generator's signal: Space opens the
+    /// dialog that asks for it.
+    SignalDialog,
 }
 
 /// Which key the hint is for.
@@ -51,7 +52,7 @@ pub fn hint(next: Next, what: &Stimulus, level_key: &str) -> (String, String) {
             "Space sets up a sweep measurement".into(),
             "Space: sweep…".into(),
         ),
-        (Next::Space, Stimulus::SignalPrompt) => (
+        (Next::Space, Stimulus::SignalDialog) => (
             "Space asks what to play: pink, white or a sine".into(),
             "Space: signal…".into(),
         ),
@@ -91,7 +92,7 @@ pub fn describe(what: &Stimulus) -> String {
             level_text(*level)
         ),
         Stimulus::SweepDialog => "new sweep measurement".into(),
-        Stimulus::SignalPrompt => "no signal chosen".into(),
+        Stimulus::SignalDialog => "no signal chosen".into(),
     }
 }
 
@@ -198,13 +199,7 @@ pub enum SignalChoice {
     Sine { freq: Hz, on_bin: bool },
 }
 
-/// The signal prompt's label.
-pub const SIGNAL_PROMPT: &str = "Stimulus signal: pink, white, sine, or a sine's frequency \
-     (997, 1k; \"exact\" after it keeps it off the FFT bin)";
-
-const SIGNAL_FORMS: &str = "type pink, white, sine, or a sine's frequency";
-
-/// A sine's frequency as its settings row and the signal prompt read it: as every
+/// A sine's frequency as its settings row and the signal dialog read it: as every
 /// frequency field does (`997`, `1k`, `1.5 kHz`). `rate_hz` is the open session's sample
 /// rate when known: a sine at or above half of it cannot be played.
 pub fn parse_sine_freq(text: &str, rate_hz: Option<u32>) -> Result<Hz, String> {
@@ -222,37 +217,27 @@ pub fn parse_sine_freq(text: &str, rate_hz: Option<u32>) -> Result<Hz, String> {
     Ok(Hz(hz))
 }
 
+/// The frequency row's text when Enter takes it, in Settings and in the signal dialog: a
+/// frequency ([`parse_sine_freq`]), or what to type instead.
+pub fn typed_sine_freq(text: &str, rate_hz: Option<u32>) -> Result<Hz, String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Err(SINE_FREQ_EMPTY.into());
+    }
+    parse_sine_freq(text, rate_hz)
+}
+
 impl SignalChoice {
-    /// What the signal prompt takes: `pink`, `white`, `sine` (at `sine_now`, the frequency
-    /// its settings row holds), or a frequency ([`parse_sine_freq`]); `exact` after a sine
-    /// keeps it off the FFT bin.
-    pub fn parse(text: &str, rate_hz: Option<u32>, sine_now: Hz) -> Result<Self, String> {
-        let t = text.trim().to_lowercase();
-        match t.as_str() {
-            "" => return Err(SIGNAL_FORMS.into()),
-            "pink" => return Ok(Self::Pink),
-            "white" => return Ok(Self::White),
-            _ => {}
+    /// `kind` with the sine as set.
+    pub fn of(kind: SignalKind, sine: SineSetting) -> Self {
+        match kind {
+            SignalKind::Pink => Self::Pink,
+            SignalKind::White => Self::White,
+            SignalKind::Sine => Self::Sine {
+                freq: sine.freq,
+                on_bin: sine.on_bin,
+            },
         }
-        let (what, on_bin) = match t.strip_suffix("exact") {
-            Some(n) => (n.trim_end(), false),
-            None => (t.as_str(), true),
-        };
-        if what == "sine" {
-            return Ok(Self::Sine {
-                freq: sine_now,
-                on_bin,
-            });
-        }
-        if !what
-            .starts_with(|c: char| c.is_ascii_digit() || matches!(c, '.' | '+' | '-' | '\u{2212}'))
-        {
-            return Err(format!("{:?} is no signal: {SIGNAL_FORMS}", text.trim()));
-        }
-        Ok(Self::Sine {
-            freq: parse_sine_freq(what, rate_hz)?,
-            on_bin,
-        })
     }
 
     pub fn kind(self) -> SignalKind {
@@ -295,7 +280,77 @@ impl SignalChoice {
     }
 }
 
-/// The settings section of the three rows below.
+/// A row of the stimulus signal choice, in Settings › Audio I/O and in the dialog the
+/// first arm opens: both show [`signal_rows`], so they name and word the rows alike.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SignalRow {
+    /// Pink noise, white noise or a sine: ←/→.
+    Signal,
+    /// The sine's frequency, typed. Shown with a sine.
+    Frequency,
+    /// Whether the sine is moved onto an FFT bin: ←/→. Shown with a sine.
+    OnBin,
+}
+
+impl SignalRow {
+    /// The rows shown: the sine's own only while the signal is a sine, since a noise has
+    /// no frequency to set.
+    pub fn shown(sine: bool) -> &'static [SignalRow] {
+        if sine {
+            &[SignalRow::Signal, SignalRow::Frequency, SignalRow::OnBin]
+        } else {
+            &[SignalRow::Signal]
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            SignalRow::Signal => SIGNAL_ROW,
+            SignalRow::Frequency => SINE_FREQ_ROW,
+            SignalRow::OnBin => ON_BIN_ROW,
+        }
+    }
+
+    /// The hint line under the row in Settings.
+    pub fn settings_hint(self) -> &'static str {
+        match self {
+            SignalRow::Signal => SIGNAL_ROW_HINT,
+            SignalRow::Frequency => SINE_FREQ_HINT,
+            SignalRow::OnBin => ON_BIN_HINT,
+        }
+    }
+}
+
+/// A row of the signal choice as shown: its title and its value.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SignalRowText {
+    pub row: SignalRow,
+    pub title: &'static str,
+    pub value: String,
+}
+
+/// The rows of the signal choice for `kind` (`None`: not chosen yet) and the sine as set.
+/// `bins` as in [`SignalChoice::played`].
+pub fn signal_rows(
+    kind: Option<SignalKind>,
+    sine: SineSetting,
+    bins: Option<(usize, f64)>,
+) -> Vec<SignalRowText> {
+    SignalRow::shown(kind == Some(SignalKind::Sine))
+        .iter()
+        .map(|&row| SignalRowText {
+            row,
+            title: row.title(),
+            value: match row {
+                SignalRow::Signal => signal_row_value(kind).to_owned(),
+                SignalRow::Frequency => sine_freq_value(sine, bins),
+                SignalRow::OnBin => on_bin_value(sine.on_bin, bins),
+            },
+        })
+        .collect()
+}
+
+/// The settings section of the rows.
 pub const SIGNAL_SECTION: &str = "Stimulus signal";
 /// The signal row: title, the value before a choice is made, its hint line.
 pub const SIGNAL_ROW: &str = "Signal";
@@ -310,6 +365,19 @@ pub const SINE_FREQ_EMPTY: &str = "type the sine's frequency (e.g. 1k), then Ent
 pub const ON_BIN_ROW: &str = "On an FFT bin";
 pub const ON_BIN_HINT: &str = "On: the sine is moved to the nearest bin of the shortest FFT \
      among the running spectrum measurements, where no window leaks it into THD+N.";
+
+/// The dialog the first arm opens: its title, what Enter does, its button.
+pub const SIGNAL_DIALOG_TITLE: &str = "What should the generator play?";
+pub const SIGNAL_DIALOG_SUBMIT: &str = "Enter chooses it; nothing is armed";
+pub const SIGNAL_DIALOG_VERB: &str = "Choose";
+/// Beside the dialog's frequency row: the forms a frequency is typed in.
+pub const SINE_FREQ_FORMS: &str = "997, 1k, 1.5 kHz";
+
+/// Beside the dialog's bin row: the frequency typed and, when a bin moves it, the one
+/// played, `plays 1000 Hz → 996.09 Hz`, so the operator sees it before choosing.
+pub fn sine_plays_text(sine: SineSetting, bins: Option<(usize, f64)>) -> String {
+    format!("plays {}", sine_freq_value(sine, bins))
+}
 
 /// The signal row's value.
 pub fn signal_row_value(kind: Option<SignalKind>) -> &'static str {
@@ -396,7 +464,7 @@ pub fn rig_hint(rig: &str, next: Next, what: &Stimulus, level_key: &str) -> (Str
         (
             Next::Space,
             Stimulus::SweepDialog
-            | Stimulus::SignalPrompt
+            | Stimulus::SignalDialog
             | Stimulus::Generator { level: None, .. },
         ) => {
             let (long, short) = hint(next, what, level_key);
@@ -517,55 +585,37 @@ mod tests {
     #[test]
     fn an_unchosen_signal_is_asked_not_named() {
         assert_eq!(
-            hint(Next::Space, &Stimulus::SignalPrompt, "L"),
+            hint(Next::Space, &Stimulus::SignalDialog, "L"),
             (
                 "Space asks what to play: pink, white or a sine".into(),
                 "Space: signal…".into()
             )
         );
         assert_eq!(
-            rig_hint("pupu", Next::Space, &Stimulus::SignalPrompt, "L").0,
+            rig_hint("pupu", Next::Space, &Stimulus::SignalDialog, "L").0,
             "pupu: Space asks what to play: pink, white or a sine"
         );
     }
 
+    /// The frequency row reads a frequency as every frequency field does, refuses one the
+    /// session cannot play, and says what to type when Enter finds it empty.
     #[test]
-    fn the_signal_prompt_reads_a_noise_or_a_frequency() {
-        for (text, want) in [
-            ("pink", SignalChoice::Pink),
-            ("White", SignalChoice::White),
-            ("997", sine(997.0, true)),
-            ("1k", sine(1000.0, true)),
-            ("997 Hz", sine(997.0, true)),
-            ("1.5 kHz", sine(1500.0, true)),
-            ("1,5khz", sine(1500.0, true)),
-            ("1k exact", sine(1000.0, false)),
-            ("997hz EXACT", sine(997.0, false)),
-            ("23999.99", sine(23_999.99, true)),
-            // The bare word: the sine at the frequency the settings row holds.
-            ("sine", sine(440.0, true)),
-            (" Sine  exact ", sine(440.0, false)),
+    fn the_frequency_row_reads_a_frequency() {
+        for (text, hz) in [
+            ("997", 997.0),
+            ("1k", 1000.0),
+            ("997 Hz", 997.0),
+            ("1.5 kHz", 1500.0),
+            ("1,5khz", 1500.0),
+            (" 1000 Hz ", 1000.0),
+            ("23999.99", 23_999.99),
         ] {
-            assert_eq!(
-                SignalChoice::parse(text, Some(48_000), Hz(440.0)),
-                Ok(want),
-                "{text}"
-            );
+            assert_eq!(typed_sine_freq(text, Some(48_000)), Ok(Hz(hz)), "{text}");
         }
-        assert_eq!(
-            SignalChoice::parse("sine", None, DEFAULT_SINE.freq),
-            Ok(sine(1000.0, true))
-        );
         for (text, error) in [
-            ("", "type pink, white, sine, or a sine's frequency"),
-            (
-                "exact",
-                "\"exact\" is no signal: type pink, white, sine, or a sine's frequency",
-            ),
-            (
-                "brown",
-                "\"brown\" is no signal: type pink, white, sine, or a sine's frequency",
-            ),
+            ("", "type the sine's frequency (e.g. 1k), then Enter"),
+            ("  ", "type the sine's frequency (e.g. 1k), then Enter"),
+            ("x", "\"x\": expected a number followed by a unit"),
             ("0", "\"0\": frequency must be positive"),
             ("1 m", "\"1 m\": unknown unit \"m\" (expected hz or khz)"),
             (
@@ -579,26 +629,61 @@ mod tests {
         ] {
             let rate = if text == "22.05k" { 44_100 } else { 48_000 };
             assert_eq!(
-                SignalChoice::parse(text, Some(rate), Hz(440.0)),
+                typed_sine_freq(text, Some(rate)),
                 Err(error.to_string()),
                 "{text}"
             );
         }
         // The rate unknown: only the frequency field's own bound holds.
+        assert_eq!(typed_sine_freq("30k", None), Ok(Hz(30_000.0)));
+        assert!(typed_sine_freq("2000k", None).is_err());
+    }
+
+    /// The rows of the choice, as Settings and the dialog both show them: the sine's own
+    /// only with a sine.
+    #[test]
+    fn a_noise_has_one_row_a_sine_three() {
+        let rows = |kind| -> Vec<(&'static str, String)> {
+            signal_rows(kind, DEFAULT_SINE, BINS)
+                .into_iter()
+                .map(|r| (r.title, r.value))
+                .collect()
+        };
         assert_eq!(
-            SignalChoice::parse("30k", None, Hz(440.0)),
-            Ok(sine(30_000.0, true))
+            rows(None),
+            [("Signal", "not chosen · asked at the first arm".to_owned())]
         );
-        assert!(SignalChoice::parse("2000k", None, Hz(440.0)).is_err());
-        // The settings row reads a frequency the same way, with the same refusals.
-        assert_eq!(parse_sine_freq("1.5 kHz", Some(48_000)), Ok(Hz(1500.0)));
         assert_eq!(
-            parse_sine_freq("24k", Some(48_000)),
-            Err("a sine must be below 24000 Hz, half the sample rate".into())
+            rows(Some(SignalKind::Pink)),
+            [("Signal", "pink noise".to_owned())]
         );
         assert_eq!(
-            parse_sine_freq("x", None),
-            Err("\"x\": expected a number followed by a unit".into())
+            rows(Some(SignalKind::White)),
+            [("Signal", "white noise".to_owned())]
+        );
+        assert_eq!(
+            rows(Some(SignalKind::Sine)),
+            [
+                ("Signal", "sine".to_owned()),
+                ("Sine frequency", "1000 Hz → 1001.95 Hz".to_owned()),
+                (
+                    "On an FFT bin",
+                    "on · bins of the 8192-point FFT".to_owned()
+                ),
+            ]
+        );
+        assert_eq!(
+            sine_plays_text(DEFAULT_SINE, BINS),
+            "plays 1000 Hz → 1001.95 Hz"
+        );
+        assert_eq!(sine_plays_text(DEFAULT_SINE, None), "plays 1000 Hz");
+        assert_eq!(
+            SignalChoice::of(SignalKind::Sine, DEFAULT_SINE),
+            sine(1000.0, true)
+        );
+        assert_eq!(
+            SignalChoice::of(SignalKind::White, DEFAULT_SINE),
+            SignalChoice::White
         );
     }
 

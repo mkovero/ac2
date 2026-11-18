@@ -757,7 +757,7 @@ fn tree_state() -> State {
     s
 }
 
-/// The signal prompt: pink, white or a sine, and its bin lock.
+/// The signal choice: pink, white or a sine, and its bin lock.
 mod signal;
 mod stimulus;
 

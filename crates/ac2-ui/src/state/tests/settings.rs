@@ -577,7 +577,7 @@ fn up_down_walk_device_channels_then_the_max_level() {
     // Shift+O lands on the input device.
     assert_eq!(settings(&t).session.focus, Row::Device);
     assert!(!settings(&t).on_ceiling);
-    use crate::settings::SignalRow;
+    use ac2_scene::stimulus::SignalRow;
     // The one row focused: the max level's, a stimulus signal row, else a session row.
     let at = |t: &T| {
         let s = settings(t);

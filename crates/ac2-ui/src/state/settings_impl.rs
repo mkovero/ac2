@@ -13,10 +13,10 @@ use crate::keys::{Chord, CommandId, Keymap, Scope};
 use crate::leq_dialog::{Focus, LeqDialog};
 use crate::session_dialog::{Edit, RoleKey, Row, SessionDialog};
 use crate::settings::{
-    DisplayRow, Page, RecordingRow, RigPage, RigRow, SERVER_INFO_EVERY_S, Settings, SignalRow,
-    step_hold, step_theme,
+    DisplayRow, Page, RecordingRow, RigPage, RigRow, SERVER_INFO_EVERY_S, Settings, step_hold,
+    step_theme,
 };
-use ac2_scene::stimulus::{SignalChoice, SignalKind};
+use ac2_scene::stimulus::{SignalChoice, SignalKind, SignalRow};
 
 /// What the mouse does on the Settings view (the hosted pages keep their own messages).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -724,14 +724,7 @@ impl AppState {
                 SignalKind::Sine
             }
         };
-        let choice = match kind {
-            SignalKind::Pink => SignalChoice::Pink,
-            SignalKind::White => SignalChoice::White,
-            SignalKind::Sine => SignalChoice::Sine {
-                freq: sine.freq,
-                on_bin: sine.on_bin,
-            },
-        };
+        let choice = SignalChoice::of(kind, sine);
         self.choose_signal(choice, out);
     }
 

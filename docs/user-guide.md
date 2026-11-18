@@ -295,7 +295,7 @@ once).
 
 | Page | What | Opened also by |
 |---|---|---|
-| Audio I/O | backend, input and output device, rate, buffer; inputs and outputs by name, roles, mics, the stimulus outputs, the reference; the **stimulus signal** (pink, white or a sine, its frequency, its bin lock); the **system max level**; Enter opens the audio I/O | **Shift+O** (on the input device), palette *Input setup…* (on the first input), *Stimulus outputs…* (on the stimulus output), *Stimulus signal…* (on the signal row) |
+| Audio I/O | backend, input and output device, rate, buffer; inputs and outputs by name, roles, mics, the stimulus outputs, the reference; the **stimulus signal** (pink noise, white noise or a sine; with a sine its frequency and its bin lock); the **system max level**; Enter opens the audio I/O | **Shift+O** (on the input device), palette *Input setup…* (on the first input), *Stimulus outputs…* (on the stimulus output), *Stimulus signal…* (on the signal row) |
 | Calibration | mics, curves, sensitivity calibrations ([below](#the-calibrations-view)) | palette *Calibrations…* |
 | SPL / Leq | the SPL meter's Leq windows, limits and band meter ([below](#leq-windows-and-limits)) | **Shift+L** |
 | Recording | how long the record toggle records (this app); where the daemon records (the rig) | |
@@ -420,19 +420,21 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
   under the stimulus lease and the ceiling, faded — and marks the input it returns on as the
   Reference (or says none answered and which came closest).
 - **Stimulus signal** (this app's, like the stimulus outputs; between the channels and
-  the max level), three rows, each with a line under it saying what it does
-  ([Choosing the signal](#choosing-the-signal)):
+  the max level): one row for a noise, three for a sine, each with a line under it saying
+  what it does ([Choosing the signal](#choosing-the-signal)):
   - **Signal** (**←/→**): *pink noise*, *white noise* or *sine*; *not chosen · asked at
     the first arm* until you choose here or at the first Space.
-  - **Sine frequency** (shown with a sine): 1 kHz until you type another (`997`, `1k`,
+  - **Sine frequency** (only with a sine): 1 kHz until you type another (`997`, `1k`,
     `1.5 kHz`) and press **Enter**; a frequency the generator cannot play is refused in
     words under the row. When the bin row moves the sine, the row shows both:
     `1000 Hz → 1001.95 Hz`, typed → played.
-  - **On an FFT bin** (shown with a sine; **←/→**, on by default): on, the sine is moved
+  - **On an FFT bin** (only with a sine; **←/→**, on by default): on, the sine is moved
     to the nearest bin of the shortest FFT among the running spectrum measurements
     (`on · bins of the 8192-point FFT`; `on · no spectrum running, played as typed`); off,
     it plays as typed.
 
+  With a noise, or before a signal is chosen, **↑/↓** go from the Signal row straight to
+  the rows around the section: a noise has no frequency to set.
   A change takes effect at once while the stimulus is armed or playing.
 - **Driver control panel…** (**P**, ASIO devices): opens the driver's own settings
   window (sample rate, buffer size, clock source, routing). On a Core Audio device the same
@@ -751,19 +753,33 @@ accident:
 ### Choosing the signal
 
 The generator plays pink noise, white noise or a sine on the live views. Like the level,
-the signal has no silent default: the **first Space** of an app run on a live view asks
-for it before anything is armed. The prompt opens with `pink`, so **Enter** takes pink
-noise; or type `white`, `sine` (the sine at the frequency set in Settings, 1 kHz until you
-change it), or a sine's frequency as in every frequency field (`997`, `1k`, `1.5 kHz`).
-When no level is typed yet the level prompt follows. After the prompts nothing is armed
-yet: the next **Space** arms, as after typing a level with **L**. **Esc** on the signal
-prompt chooses nothing, and the next Space asks again. Arming a sweep on the sweep view
-never asks: a sweep plays its own signal.
+the signal has no silent default: the **first Space** of an app run on a live view opens a
+dialog, *What should the generator play?*, before anything is armed. Nothing is typed to
+pick the signal; it is one of three:
+
+| Row | Shown | Keys |
+|---|---|---|
+| **Signal** | always | **←/→**: *pink noise*, *white noise*, *sine* (around the ends) |
+| **Sine frequency** | only with *sine* | type it as in every frequency field (`997`, `1k`, `1.5 kHz`); it holds the frequency set in Settings, 1 kHz until you change it, and typing replaces that |
+| **On an FFT bin** | only with *sine* | **←/→**: on or off; beside it the frequency that will play, `plays 1000 Hz → 999.76 Hz` when a bin moves it |
+
+**↑/↓** (or Tab) move between the rows, **Enter** chooses what the dialog shows, **Esc**
+closes it with nothing chosen — the next Space asks again. The dialog opens on *pink
+noise*, so **Enter** alone takes pink noise. A frequency the generator cannot play (no
+frequency, zero, at or above half the sample rate) is refused in the dialog, in words,
+and nothing is chosen until it is put right. The rows are the ones in Settings, with the
+same names and values.
+
+When no level is typed yet the level prompt follows. After the dialog (and the prompt)
+nothing is armed yet: the next **Space** arms, as after typing a level with **L**, and a
+toast names what was chosen (`pink noise · Space arms`, `sine 999.76 Hz · on an FFT bin of
+the spectrum · Space arms`). Arming a sweep on the sweep view never asks: a sweep plays its
+own signal.
 
 The choice lives in **Settings › Audio I/O**, under *Stimulus signal* (palette: *Stimulus
-signal…* opens the page on that row; there is no key for it): **Signal** (←/→), and for a
-sine **Sine frequency** (1 kHz by default; type another and Enter) and **On an FFT bin**
-(on by default). It is this app's setting, kept per rig for as long as the app runs, like
+signal…* opens the page on that row; there is no key for it): **Signal** (←/→), and only
+while it is a sine **Sine frequency** (1 kHz by default; type another and Enter) and **On
+an FFT bin** (on by default). It is this app's setting, kept per rig for as long as the app runs, like
 the level: a sweep run and a visit to the sweep view do not drop it. Changed while armed
 or playing, it takes effect at once, as a level does. The top bar names a signal other
 than pink before the level (`sine 999.76 Hz −20.0 dBFS → out 1`), always with the
@@ -783,7 +799,7 @@ the stimulus is armed or fired and whenever a spectrum measurement starts, stops
 changes its resolution while the sine is armed or playing; it is re-sent only when it
 changed. With no spectrum running the sine plays as typed (`sine 1000 Hz · no spectrum
 running, played as typed`). To keep the typed frequency whatever runs, turn the row off,
-or add `exact` in the prompt (`1k exact`, `sine exact`): `sine 1000 Hz · as typed`.
+in the dialog or in Settings: `sine 1000 Hz · as typed`.
 
 ### What Space and Enter start
 

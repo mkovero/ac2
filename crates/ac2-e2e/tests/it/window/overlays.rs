@@ -53,9 +53,9 @@ fn keyboard_focus_stays_in_the_open_dialog() -> R {
             |o| matches!(o, Overlay::Palette(_)),
         ),
         (
-            "level prompt",
+            "signal dialog",
             |h| h.key_press(Key::Space),
-            |o| matches!(o, Overlay::Prompt(_)),
+            |o| matches!(o, Overlay::Form(_)),
         ),
         ("help", |h| h.key_press(Key::H), |o| *o == Overlay::Help),
     ];
@@ -84,8 +84,8 @@ fn stimulus_flow_against_the_daemon() -> R {
     h.key_press(Key::Space);
     step_until(
         &mut h,
-        "signal prompt",
-        |a| matches!(&a.state.overlay, Overlay::Prompt(p) if p.kind == ac2_ui::state::PromptKind::StimulusSignal),
+        "signal dialog",
+        |a| matches!(&a.state.overlay, Overlay::Form(f) if f.kind == ac2_ui::forms::FormKind::StimulusSignal),
     );
     h.key_press(Key::Enter);
     step_until(

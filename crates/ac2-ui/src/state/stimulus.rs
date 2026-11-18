@@ -73,18 +73,7 @@ impl AppState {
         changed
     }
 
-    /// The signal prompt's text applied: the generator's choice for the live views.
-    pub(super) fn set_signal_text(
-        &mut self,
-        text: &str,
-        out: &mut Vec<Request>,
-    ) -> Result<(), String> {
-        let choice = SignalChoice::parse(text, self.session_rate(), self.rig.stimulus.sine.freq)?;
-        self.choose_signal(choice, out);
-        Ok(())
-    }
-
-    /// The operator's choice of signal, from the prompt or the settings rows: kept, said
+    /// The operator's choice of signal, from the dialog or the settings rows: kept, said
     /// with the frequency really played, and sent at once while armed or playing with the
     /// generator (a sweep set up keeps its own signal; the choice is what the next Space
     /// on a live view arms).
@@ -183,7 +172,7 @@ impl AppState {
             // Without a level the hint names the key that types one, whatever the signal;
             // with one, an unchosen signal is what Space asks for next.
             StimPhase::Idle if level.is_some() && self.rig.stimulus.generator.is_none() => {
-                Some((NextKey::Space, NextStimulus::SignalPrompt))
+                Some((NextKey::Space, NextStimulus::SignalDialog))
             }
             StimPhase::Idle => Some((NextKey::Space, self.generator_stimulus())),
             _ => None,
@@ -322,13 +311,17 @@ impl AppState {
             return;
         }
         // Nothing of the generator is armed before the operator said what it plays, as
-        // nothing is without a level: the prompt takes pink on Enter.
+        // nothing is without a level: the dialog opens on pink, so Enter alone takes it.
         if self.rig.stimulus.generator.is_none() {
             if !self.connected() {
                 self.warn("not connected");
                 return;
             }
-            self.prompt(PromptKind::StimulusSignal, "pink".to_owned());
+            self.overlay = Overlay::Form(Box::new(crate::signal_dialog::form(
+                self.rig.stimulus.sine,
+                self.sine_bins(),
+                self.session_rate(),
+            )));
             self.toast("say what to play first; Enter takes pink noise");
             return;
         }

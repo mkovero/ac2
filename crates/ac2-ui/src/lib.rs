@@ -50,6 +50,7 @@ pub mod scenes;
 pub mod session_dialog;
 pub mod sessions;
 pub mod settings;
+pub mod signal_dialog;
 pub mod sim;
 pub mod spawn;
 pub mod state;

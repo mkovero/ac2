@@ -342,32 +342,17 @@ fn io_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Op
 /// The stimulus signal rows of the Audio I/O page: what the generator plays, a sine's
 /// frequency and its bin lock, each with its hint line.
 fn signal_section(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Option<Msg>) {
-    use crate::settings::SignalRow;
     use ac2_scene::stimulus as text;
+    use text::SignalRow;
     let st = &app.state;
     let stim = &st.rig.stimulus;
     let bins = st.sine_bins();
-    let sine = stim.generator == Some(text::SignalKind::Sine);
     section(ui, text::SIGNAL_SECTION, crate::settings::THIS_APP, ch);
-    for &row in SignalRow::shown(sine) {
+    for text::SignalRowText { row, title, value } in
+        text::signal_rows(stim.generator, stim.sine, bins)
+    {
         let focused = s.signal.focus == Some(row);
-        let (title, value, hint) = match row {
-            SignalRow::Signal => (
-                text::SIGNAL_ROW,
-                text::signal_row_value(stim.generator).to_owned(),
-                text::SIGNAL_ROW_HINT,
-            ),
-            SignalRow::Frequency => (
-                text::SINE_FREQ_ROW,
-                text::sine_freq_value(stim.sine, bins),
-                text::SINE_FREQ_HINT,
-            ),
-            SignalRow::OnBin => (
-                text::ON_BIN_ROW,
-                text::on_bin_value(stim.sine.on_bin, bins),
-                text::ON_BIN_HINT,
-            ),
-        };
+        let hint = row.settings_hint();
         ui.horizontal(|ui| {
             let marker = if focused { "▸" } else { " " };
             ui.label(RichText::new(marker).color(ch.focus).monospace());

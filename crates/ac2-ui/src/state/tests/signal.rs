@@ -1,11 +1,12 @@
-//! Reducer tests of the generator's signal: asked at the first arm like the level, set on
+//! Reducer tests of the generator's signal: asked in a dialog at the first arm, set on
 //! the Settings › Audio I/O rows, and a sine resolved onto an FFT bin of the running
 //! spectrum measurements whenever it is sent.
 
 use super::sweep::{next_hint, sweep_once};
 use super::*;
-use crate::settings::SignalRow;
+use crate::forms::FormKind;
 use ac2_proto::model::SpecResolution;
+use ac2_scene::stimulus::SignalRow;
 
 /// The test daemon's one spectrum (Sub) has 8192 points at 48 kHz: bins 5.859375 Hz
 /// apart, the 171st nearest 1 kHz.
@@ -18,15 +19,51 @@ fn prompt(t: &T) -> (PromptKind, &str, Option<&str>) {
     }
 }
 
-/// The first Space of a fresh app, `text` typed over the signal prompt's prefill, Enter.
-fn first_arm(t: &mut T, text: &str) -> Vec<Request> {
-    let mut r = t.key("Space");
-    let Overlay::Prompt(p) = &mut t.st.overlay else {
-        panic!("no prompt");
-    };
-    assert_eq!(p.kind, PromptKind::StimulusSignal);
-    p.text = text.into();
+/// The signal dialog's rows as shown (title, value, what stands beside it) and its error.
+fn dialog(t: &T) -> (Vec<(&str, String, &str)>, Option<&str>) {
+    match &t.st.overlay {
+        Overlay::Form(f) if f.kind == FormKind::StimulusSignal => (
+            f.fields
+                .iter()
+                .map(|x| (x.label.as_str(), x.display(), x.hint.as_str()))
+                .collect(),
+            f.error.as_deref(),
+        ),
+        o => panic!("no signal dialog: {o:?}"),
+    }
+}
+
+fn dialog_open(t: &T) -> bool {
+    matches!(&t.st.overlay, Overlay::Form(f) if f.kind == FormKind::StimulusSignal)
+}
+
+/// The first Space of a fresh app and the keys that take the dialog from pink noise to
+/// `kind`; the dialog stays open.
+fn ask(t: &mut T, kind: SignalKind) -> Vec<Request> {
+    let mut r = t.type_key("Space", " ");
+    assert_eq!(dialog(t).0, [("Signal", "pink noise".to_owned(), "")]);
+    match kind {
+        SignalKind::Pink => {}
+        SignalKind::White => r.extend(t.key("ArrowRight")),
+        SignalKind::Sine => r.extend(t.key("ArrowLeft")),
+    }
+    r
+}
+
+/// [`ask`], then Enter.
+fn first_arm(t: &mut T, kind: SignalKind) -> Vec<Request> {
+    let mut r = ask(t, kind);
     r.extend(t.key("Enter"));
+    r
+}
+
+/// [`ask`] for a sine with `freq` typed over the frequency held; the dialog stays open on
+/// the frequency row.
+fn ask_sine(t: &mut T, freq: &str) -> Vec<Request> {
+    let mut r = ask(t, SignalKind::Sine);
+    r.extend(t.key("ArrowDown"));
+    r.extend(t.key("Backspace"));
+    t.text(freq);
     r
 }
 
@@ -85,9 +122,9 @@ fn rows(t: &T) -> &crate::settings::SignalRows {
     &t.st.overlay.settings().expect("Settings open").signal
 }
 
-/// The first Space asks what to play (pink on Enter), then the level; the level typed,
-/// nothing is armed yet, as after the level prompt alone: the next Space arms. Neither is
-/// asked again.
+/// The first Space asks what to play in a dialog that opens on pink noise, then the level;
+/// the level typed, nothing is armed yet, as after the level prompt alone: the next Space
+/// arms. Neither is asked again.
 #[test]
 fn the_first_arm_asks_the_signal_then_the_level() {
     let mut t = T::new();
@@ -95,15 +132,21 @@ fn the_first_arm_asks_the_signal_then_the_level() {
     assert_eq!(next_hint(&t).as_deref(), Some("L types a level"));
     let r = t.type_key("Space", " ");
     assert!(r.is_empty(), "{r:?}");
-    assert_eq!(prompt(&t), (PromptKind::StimulusSignal, "pink", None));
+    assert_eq!(
+        dialog(&t),
+        (vec![("Signal", "pink noise".to_owned(), "")], None)
+    );
+    let Overlay::Form(f) = &t.st.overlay else {
+        panic!()
+    };
+    assert_eq!(f.kind.title(), "What should the generator play?");
+    assert_eq!(
+        f.keys_hint(),
+        "Enter chooses it; nothing is armed · ←→ choose · Esc closes"
+    );
     assert_eq!(
         t.last_toast(),
         "say what to play first; Enter takes pink noise"
-    );
-    assert_eq!(
-        PromptKind::StimulusSignal.label(),
-        "Stimulus signal: pink, white, sine, or a sine's frequency (997, 1k; \"exact\" after \
-         it keeps it off the FFT bin)"
     );
     let r = t.key("Enter");
     assert!(r.is_empty(), "{r:?}");
@@ -137,19 +180,21 @@ fn the_first_arm_asks_the_signal_then_the_level() {
     assert_eq!(t.st.overlay, Overlay::None);
 }
 
-/// Esc on the signal prompt chooses nothing: the next Space asks again. Esc on the level
-/// prompt after it keeps the signal entered and no level, so the next Space asks only for
-/// the level. Neither arms.
+/// Esc on the signal dialog chooses nothing, whatever it showed: the next Space asks
+/// again, from pink noise. Esc on the level prompt after it keeps the signal chosen and
+/// no level, so the next Space asks only for the level. Neither arms or sends anything.
 #[test]
-fn escape_on_either_prompt_arms_nothing() {
+fn escape_on_either_question_arms_nothing() {
     let mut t = T::new();
-    t.key("Space");
+    let r = ask_sine(&mut t, "5k");
+    assert!(r.is_empty(), "{r:?}");
     let r = t.key("Escape");
     assert!(r.is_empty(), "{r:?}");
     assert_eq!(t.st.overlay, Overlay::None);
     assert_eq!(t.st.rig.stimulus.generator, None);
+    assert_eq!(t.st.rig.stimulus.sine, ac2_scene::stimulus::DEFAULT_SINE);
     assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
-    let r = first_arm(&mut t, "white");
+    let r = first_arm(&mut t, SignalKind::White);
     assert!(r.is_empty(), "{r:?}");
     assert_eq!(prompt(&t).0, PromptKind::StimulusLevel);
     let r = t.key("Escape");
@@ -173,7 +218,7 @@ fn a_level_typed_before_leaves_only_the_signal_to_ask() {
         next_hint(&t).as_deref(),
         Some("Space asks what to play: pink, white or a sine")
     );
-    let r = first_arm(&mut t, "white");
+    let r = first_arm(&mut t, SignalKind::White);
     assert!(r.is_empty(), "{r:?}");
     assert_eq!(t.st.overlay, Overlay::None);
     assert_eq!(t.last_toast(), "white noise · Space arms");
@@ -188,113 +233,191 @@ fn a_level_typed_before_leaves_only_the_signal_to_ask() {
     }
 }
 
-/// Each form the prompt takes; a sine goes onto a bin of the running spectrum unless
-/// `exact`, and the bare word is the sine at the frequency its settings row holds (1 kHz
-/// until another is typed).
+/// ←/→ on the signal row go through pink noise, white noise and sine; only the sine has
+/// the frequency and bin rows, holding 1 kHz on a bin of the running spectrum and saying
+/// what that plays. ↑/↓ move between the rows there are.
 #[test]
-fn the_prompt_takes_a_noise_a_frequency_or_the_word_sine() {
-    let level = " · type a level; nothing is armed without one";
-    for (text, kind, sine_set, played, toast) in [
+fn the_sine_rows_are_there_only_with_a_sine() {
+    let mut t = T::new();
+    t.type_key("Space", " ");
+    let pink = vec![("Signal", "pink noise".to_owned(), "")];
+    let sine_rows = vec![
+        ("Signal", "sine".to_owned(), ""),
+        ("Sine frequency", "1000 Hz".to_owned(), "997, 1k, 1.5 kHz"),
         (
-            " Pink ",
+            "On an FFT bin",
+            "on · bins of the 8192-point FFT".to_owned(),
+            "plays 1000 Hz → 1001.95 Hz",
+        ),
+    ];
+    assert_eq!(dialog(&t).0, pink);
+    // One row: ↑/↓ have nowhere to go.
+    t.key("ArrowDown");
+    t.key("ArrowRight");
+    assert_eq!(dialog(&t).0, [("Signal", "white noise".to_owned(), "")]);
+    t.key("ArrowRight");
+    assert_eq!(dialog(&t).0, sine_rows);
+    let Overlay::Form(f) = &t.st.overlay else {
+        panic!()
+    };
+    assert_eq!(
+        f.keys_hint(),
+        "Enter chooses it; nothing is armed · ↑↓ field · ←→ choose · Esc closes"
+    );
+    assert_eq!(f.focus, 0);
+    t.key("ArrowRight");
+    assert_eq!(dialog(&t).0, pink);
+    t.key("ArrowLeft");
+    assert_eq!(dialog(&t).0, sine_rows);
+    for (key, at) in [
+        ("ArrowDown", 1),
+        ("ArrowDown", 2),
+        ("ArrowDown", 0),
+        ("ArrowUp", 2),
+    ] {
+        t.key(key);
+        let Overlay::Form(f) = &t.st.overlay else {
+            panic!()
+        };
+        assert_eq!(f.focus, at, "{key}");
+    }
+    // Nothing is chosen, sent or armed by looking.
+    assert_eq!(t.st.rig.stimulus.generator, None);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
+}
+
+/// Enter takes what the dialog shows: a noise, or the sine at the frequency typed, on a
+/// bin of the running spectrum unless the bin row is off. The toast names it as played,
+/// and the level is asked next.
+#[test]
+fn enter_takes_the_signal_shown() {
+    let level = " · type a level; nothing is armed without one";
+    // (the frequency typed, the bin row turned off) for a sine.
+    for (kind, typed, sine_set, played, toast) in [
+        (
             SignalKind::Pink,
+            None,
             (1000.0, true),
             Signal::Pink,
             "pink noise",
         ),
         (
-            "white",
             SignalKind::White,
+            None,
             (1000.0, true),
             Signal::White,
             "white noise",
         ),
         (
-            "sine",
             SignalKind::Sine,
+            None,
             (1000.0, true),
             sine(BIN_1K),
             "sine 1001.95 Hz · on an FFT bin of the spectrum",
         ),
         (
-            "sine exact",
             SignalKind::Sine,
-            (1000.0, false),
-            sine(1000.0),
-            "sine 1000 Hz · as typed",
-        ),
-        (
-            "1k",
-            SignalKind::Sine,
-            (1000.0, true),
-            sine(BIN_1K),
-            "sine 1001.95 Hz · on an FFT bin of the spectrum",
-        ),
-        (
-            "1.5 kHz",
-            SignalKind::Sine,
+            Some(("1.5 kHz", false)),
             (1500.0, true),
             sine(256.0 * 48_000.0 / 8192.0),
             "sine 1500 Hz · on an FFT bin of the spectrum",
         ),
         (
-            "999,76 exact",
             SignalKind::Sine,
+            Some(("999,76", true)),
             (999.76, false),
             sine(999.76),
             "sine 999.76 Hz · as typed",
         ),
     ] {
         let mut t = T::new();
-        let r = first_arm(&mut t, text);
-        assert!(r.is_empty(), "{text}: {r:?}");
+        let what = format!("{kind:?} {typed:?}");
+        let mut r = match typed {
+            None => ask(&mut t, kind),
+            Some((freq, off)) => {
+                let mut r = ask_sine(&mut t, freq);
+                if off {
+                    r.extend(t.key("ArrowDown"));
+                    r.extend(t.key("ArrowRight"));
+                    assert_eq!(
+                        dialog(&t).0[2],
+                        (
+                            "On an FFT bin",
+                            "off · played as typed".to_owned(),
+                            "plays 999.76 Hz"
+                        )
+                    );
+                }
+                r
+            }
+        };
+        r.extend(t.key("Enter"));
+        assert!(r.is_empty(), "{what}: {r:?}");
         let stim = &t.st.rig.stimulus;
-        assert_eq!(stim.generator, Some(kind), "{text}");
-        assert_eq!((stim.sine.freq.0, stim.sine.on_bin), sine_set, "{text}");
-        assert_eq!(t.st.generator_signal(), Some(played), "{text}");
-        assert_eq!(t.last_toast(), format!("{toast}{level}"), "{text}");
-        assert_eq!(prompt(&t).0, PromptKind::StimulusLevel, "{text}");
+        assert_eq!(stim.generator, Some(kind), "{what}");
+        assert_eq!((stim.sine.freq.0, stim.sine.on_bin), sine_set, "{what}");
+        assert_eq!(t.st.generator_signal(), Some(played), "{what}");
+        assert_eq!(t.last_toast(), format!("{toast}{level}"), "{what}");
+        assert_eq!(prompt(&t).0, PromptKind::StimulusLevel, "{what}");
     }
-    // The word takes the frequency typed before, not the default.
+    // The rows hold what Settings holds, not the defaults; a noise chosen leaves it be.
     let mut t = T::new();
-    t.st.rig.stimulus.sine.freq = Hz(440.0);
-    first_arm(&mut t, "sine exact");
+    t.st.rig.stimulus.sine = SineSetting {
+        freq: Hz(440.0),
+        on_bin: false,
+    };
+    ask(&mut t, SignalKind::Sine);
+    assert_eq!(
+        dialog(&t).0[1..],
+        [
+            ("Sine frequency", "440 Hz".to_owned(), "997, 1k, 1.5 kHz"),
+            (
+                "On an FFT bin",
+                "off · played as typed".to_owned(),
+                "plays 440 Hz"
+            ),
+        ]
+    );
+    t.key("Enter");
     assert_eq!(t.st.generator_signal(), Some(sine(440.0)));
+    let mut t = T::new();
+    ask_sine(&mut t, "5k");
+    t.key("ArrowUp");
+    t.key("ArrowRight");
+    t.key("Enter");
+    assert_eq!(t.st.rig.stimulus.generator, Some(SignalKind::Pink));
+    assert_eq!(t.st.rig.stimulus.sine, ac2_scene::stimulus::DEFAULT_SINE);
 }
 
-/// What the generator cannot play is refused in the prompt, in words, and chooses nothing.
+/// A frequency the generator cannot play is refused in the dialog on Enter, in the words
+/// of the settings row, and chooses nothing; typing on clears the refusal.
 #[test]
-fn the_prompt_refuses_what_the_generator_cannot_play() {
+fn the_dialog_refuses_a_frequency_the_generator_cannot_play() {
     let mut t = T::new();
     for (text, error) in [
-        ("", "type pink, white, sine, or a sine's frequency"),
-        (
-            "brown",
-            "\"brown\" is no signal: type pink, white, sine, or a sine's frequency",
-        ),
+        ("", "type the sine's frequency (e.g. 1k), then Enter"),
+        ("brown", "\"brown\": expected a number followed by a unit"),
         ("0", "\"0\": frequency must be positive"),
         ("-40", "\"-40\": frequency must be positive"),
         ("1 v", "\"1 v\": unknown unit \"v\" (expected hz or khz)"),
         // The test session runs at 48 kHz.
         ("24k", "a sine must be below 24000 Hz, half the sample rate"),
-        (
-            "30 khz exact",
-            "a sine must be below 24000 Hz, half the sample rate",
-        ),
     ] {
-        let r = first_arm(&mut t, text);
+        let mut r = ask_sine(&mut t, text);
+        r.extend(t.key("Enter"));
         assert!(r.is_empty(), "{text}: {r:?}");
-        assert_eq!(
-            prompt(&t),
-            (PromptKind::StimulusSignal, text, Some(error)),
-            "{text}"
-        );
+        let (rows, e) = dialog(&t);
+        assert_eq!(rows[1].1, text, "{text}");
+        assert_eq!(e, Some(error), "{text}");
+        t.text("1");
+        assert_eq!(dialog(&t).1, None, "{text}");
         t.key("Escape");
         assert_eq!(t.st.rig.stimulus.generator, None, "{text}");
     }
     // With no audio I/O open the rate is not known: the daemon judges it on arming.
     t.remirror(|s| s.session.open = None);
-    first_arm(&mut t, "30k");
+    ask_sine(&mut t, "30k");
+    t.key("Enter");
     assert_eq!(t.st.generator_signal(), Some(sine(30_000.0)));
 }
 
@@ -320,9 +443,17 @@ fn a_sweep_arm_never_asks_the_signal() {
     t.go(PaneKind::Transfer);
     let r = t.key("Space");
     assert!(r.is_empty(), "{r:?}");
-    assert_eq!(prompt(&t), (PromptKind::StimulusSignal, "pink", None));
+    assert!(dialog_open(&t));
     assert!(matches!(t.st.rig.stimulus.signal, Signal::Ess { .. }));
     assert_eq!(t.st.rig.stimulus.phase, StimPhase::Armed);
+    // Esc closes the dialog and nothing else: the sweep stays armed.
+    let r = t.key("Escape");
+    assert!(r.is_empty(), "{r:?}");
+    assert_eq!(t.st.overlay, Overlay::None);
+    assert!(matches!(t.st.rig.stimulus.signal, Signal::Ess { .. }));
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Armed);
+    t.key("Space");
+    assert!(dialog_open(&t));
     let r = t.key("Enter");
     assert!(r.is_empty(), "{r:?}");
     assert_eq!(t.st.overlay, Overlay::None);
@@ -454,7 +585,7 @@ fn the_signal_row_chooses_and_a_sine_starts_at_1_khz() {
 }
 
 /// The frequency row is typed in place and applied on Enter, read and refused as the
-/// prompt does; the bin row toggles with ←/→; both are sent at once while armed and while
+/// dialog does; the bin row toggles with ←/→; both are sent at once while armed and while
 /// playing.
 #[test]
 fn the_sine_rows_are_typed_toggled_and_sent_while_live() {

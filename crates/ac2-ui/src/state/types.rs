@@ -309,14 +309,7 @@ impl Default for Stimulus {
 impl Stimulus {
     /// The generator's signal as chosen, a sine with its settings.
     pub fn choice(&self) -> Option<SignalChoice> {
-        self.generator.map(|k| match k {
-            SignalKind::Pink => SignalChoice::Pink,
-            SignalKind::White => SignalChoice::White,
-            SignalKind::Sine => SignalChoice::Sine {
-                freq: self.sine.freq,
-                on_bin: self.sine.on_bin,
-            },
-        })
+        self.generator.map(|k| SignalChoice::of(k, self.sine))
     }
 
     pub(super) fn settings(&self) -> Option<GeneratorSettings> {

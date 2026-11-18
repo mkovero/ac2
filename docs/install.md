@@ -230,7 +230,8 @@ The app's dialogs use the same defaults as these commands. Then in the app (or w
 
 1. Press **L**, type a level such as `-30` (dBFS) and Enter. ac2 never plays anything at a
    default level.
-2. Press **Space**: the first time ac2 asks what to play, and **Enter** takes pink noise.
+2. Press **Space**: the first time a dialog asks what to play; it shows *pink noise*, and
+   **Enter** takes it.
    Press **Space** again to arm and **Enter** to fire: pink noise plays on output 1.
 3. Press **X** to find the delay and insert it. The phase trace flattens; coherence (the
    transparency of the trace) shows where the data is trustworthy.

@@ -349,7 +349,7 @@ impl AppState {
             C::StimulusSignal => {
                 self.open_settings(Page::AudioIo, out);
                 if let Overlay::Settings(s) = &mut self.overlay {
-                    s.focus_signal(crate::settings::SignalRow::Signal);
+                    s.focus_signal(ac2_scene::stimulus::SignalRow::Signal);
                 }
             }
             C::StimulusOutputs => {
