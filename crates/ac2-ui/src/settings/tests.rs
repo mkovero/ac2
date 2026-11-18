@@ -2,6 +2,10 @@
 
 use super::*;
 use ac2_proto::model::GenAudit;
+use ac2_scene::theme::ThemeName;
+use ac2_scene::view::{
+    CoherencePlacement, DistortionUnit, LeqLayout, LeqStyle, SpectrumMode, SweepMode,
+};
 
 fn generator(ceiling: f64, bound: f64) -> Generator {
     Generator {

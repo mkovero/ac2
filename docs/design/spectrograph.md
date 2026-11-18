@@ -91,7 +91,7 @@ and the picture cannot disagree.
 
 ## Tests
 
-- `ac2-scene` (`spectrograph_tests.rs`): row resampling (narrow tone, wide low columns,
+- `ac2-scene` (`spectrograph/tests/`): row resampling (narrow tone, wide low columns,
   invalid bands), ring capacity and scroll, hold between frames sharing one allocation, gaps
   after a break, overflow and clock reset, max within a slot, grid / scale change, the scene
   (rect on the axis, same columns after zoom, colour range with offset, stale opacity, axis

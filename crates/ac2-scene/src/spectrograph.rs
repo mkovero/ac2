@@ -904,5 +904,4 @@ pub fn spectrograph_scene(
 }
 
 #[cfg(test)]
-#[path = "spectrograph_tests.rs"]
 mod tests;

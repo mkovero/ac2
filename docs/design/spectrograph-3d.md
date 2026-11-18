@@ -496,7 +496,7 @@ stepped down once (a blanking stall) would stay degraded for months.
 - **GL in CI**: the skyline render tests also run with `WGPU_BACKEND=gl` (llvmpipe, which
   gets the WebGL2-class limits): vertex-stage `textureLoad` of R32Float, instancing, Max
   into Rg8Unorm (the two-spike test) are exercised on GL as well as Vulkan.
-- `ac2-scene` (`spectrograph_tests.rs`): the 3D view asked of the 2D scene (a GPU without
+- `ac2-scene` (`spectrograph/tests/`): the 3D view asked of the 2D scene (a GPU without
   it) is the spectrograph alone with *3D needs a faster GPU* in its caption.
 - `ac2-ui`: G / Shift+G through four views, three on a GPU without the 3D view (no camera
   keys, 3D quality does not step); scope, hint line; ←/→, PgUp/PgDn, I/O, Home move
