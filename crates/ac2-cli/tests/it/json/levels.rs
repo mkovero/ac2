@@ -202,7 +202,8 @@ async fn levels_set_shows_the_rig_and_reset_clears_the_holds() -> R {
     let r = ok_json(&f, &["levels", "reset", "--input", "1", "--json"]).await?;
     assert_eq!(r["channels"], serde_json::json!([0]));
     // The hold starts again from the next block metered.
-    let v = levels_until(&f, |v| v["inputs"][0]["max"].is_f64()).await?;
+    // A frame metered before the reset still holds the tone; wait for the quiet one.
+    let v = levels_until(&f, |v| near(&v["inputs"][0]["max"], QUIET)).await?;
     assert!(
         near(&v["inputs"][0]["max"], QUIET),
         "the VU fallback's true peak: {v}"

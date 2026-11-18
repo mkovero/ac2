@@ -93,7 +93,7 @@ async fn show(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
             "no session is open: ac2 session open meters the inputs".into(),
         ));
     }
-    let (f, captured_at) = one_frame(&c).await?;
+    let (f, captured_at) = one_frame(&c, st.rig.levels.ballistic).await?;
     let rows: Vec<serde_json::Value> = f
         .meta
         .channels
@@ -312,8 +312,13 @@ pub(crate) fn level_json<T: Into<f64> + serde::Serialize + Copy>(v: T) -> serde_
     }
 }
 
-/// The newest session meter frame and its capture time (daemon clock).
-async fn one_frame(c: &Client) -> Result<(SessionLevelsFrame, WallNs), CliError> {
+/// The newest session meter frame metered under `ballistic`, the rig's as just read, and its
+/// capture time (daemon clock). A frame metered before a ballistic change reaches the meter
+/// reads the old type, so it would contradict the settings printed beside it.
+async fn one_frame(
+    c: &Client,
+    ballistic: Ballistic,
+) -> Result<(SessionLevelsFrame, WallNs), CliError> {
     c.subscribe(Subscription::InputMeters)?;
     let end = Instant::now() + WAIT;
     let mut got = None;
@@ -321,6 +326,7 @@ async fn one_frame(c: &Client) -> Result<(SessionLevelsFrame, WallNs), CliError>
         let latest = c.latest()?;
         if let Some(l) = latest.get(&Topic::SessionLevels)
             && let FrameData::SessionLevels(f) = &l.frame.data
+            && f.meta.ballistic == ballistic
         {
             got = Some((f.clone(), l.frame.stamp.capture_wall_ns));
             break;
