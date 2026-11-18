@@ -188,3 +188,60 @@ fn a_measurement_row_is_edited_by_its_button_and_a_double_click() {
     assert_eq!(editing(&h), Some(MeasId(1)), "the transfer's form");
     assert!(!h.state().state.row_drag_held());
 }
+
+/// The Settings view covers the list and owns the keys: a double click where a row is and
+/// the edit key reach no row, so an edit never replaces the page Settings is open on.
+#[test]
+fn settings_open_no_row_is_edited() {
+    use ac2_ui::keys::CommandId;
+    use ac2_ui::state::Msg;
+    use egui_kittest::kittest::By;
+    if !have_gpu("settings_open_no_row_is_edited") {
+        return;
+    }
+    let _rig = Rig::start();
+    let mut opts = options();
+    opts.prefs = two_panes();
+    let mut h = harness(opts);
+    step_until(&mut h, "the measurements", |a| {
+        a.state.rig.mirror.as_ref().is_some_and(|m| m.synced()) && a.state.measurements().len() == 4
+    });
+    let row = h
+        .query_all(By::new().predicate(|n| n.label().is_some_and(|l| l.starts_with("FFT  "))))
+        .map(|n| n.rect())
+        .find(|r| r.max.x < 260.0)
+        .expect("the spectrum's row in the list");
+    let selected = h.state().state.rig.selected;
+    assert_ne!(
+        selected,
+        Some(MeasId(3)),
+        "the spectrum is not the selected row"
+    );
+    h.state_mut().dispatch(Msg::Command(CommandId::Settings));
+    settle(&mut h, 2);
+    // The page and the meter its SPL/Leq page is on; the key itself is the open page's.
+    let open = |h: &Harness<'_, App>| match &h.state().state.overlay {
+        Overlay::Settings(s) => Some((s.page, s.leq.clone())),
+        _ => None,
+    };
+    let before = open(&h);
+    assert!(before.is_some());
+    let at = row.left_center() + egui::vec2(30.0, 0.0);
+    h.event(Event::PointerMoved(at));
+    settle(&mut h, 2);
+    for _ in 0..2 {
+        for pressed in [true, false] {
+            h.input_mut().events.push(Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            });
+        }
+    }
+    settle(&mut h, 3);
+    h.key_press(Key::F2);
+    settle(&mut h, 2);
+    assert_eq!(h.state().state.rig.selected, selected, "no row was clicked");
+    assert_eq!(open(&h), before, "Settings on the page and meter it was");
+}

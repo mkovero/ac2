@@ -121,3 +121,15 @@ fn a_row_is_edited_with_a_programme_pane_in_focus() {
     t.st.apply(Msg::EditRow(TreeKey::Meas(MeasId(1))), &t.keys);
     assert_eq!(editing(&t), Some(MeasId(1)));
 }
+
+/// Open Settings owns the keys: the edit key goes to its page, so the SPL/Leq page stays
+/// on the meter it was opened on and what is typed there is kept.
+#[test]
+fn the_edit_key_is_the_open_settings_views() {
+    let mut t = t();
+    t.st.apply(Msg::EditRow(TreeKey::Meas(MeasId(7))), &t.keys);
+    let before = t.st.overlay.clone();
+    assert_eq!(leq_page(&t), Some((MeasId(7), "SPL A".to_owned())));
+    t.key("F2");
+    assert_eq!(t.st.overlay, before);
+}

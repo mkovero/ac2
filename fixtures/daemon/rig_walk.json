@@ -1,5 +1,5 @@
 {
-  "proto_version": 90,
+  "proto_version": 92,
   "value": {
     "grids": [
       {
@@ -62,6 +62,7 @@
                   "type": "equal_confidence"
                 },
                 "measurement_input": 1,
+                "peak": "off",
                 "reference_input": 0,
                 "resolution": "twenty_fourth",
                 "smoothing": {
@@ -104,6 +105,7 @@
                   "type": "equal_confidence"
                 },
                 "measurement_input": 2,
+                "peak": "off",
                 "reference_input": 0,
                 "resolution": "twenty_fourth",
                 "smoothing": {
@@ -376,7 +378,7 @@
           "driver_change": null,
           "driver_reset": null,
           "input_device": "fake",
-          "opened_at": "now-58699155",
+          "opened_at": "now-87661680",
           "output_device": "fake",
           "replay": null,
           "sample_rate_hz": 48000,
@@ -395,11 +397,11 @@
           "peaks": {
             "lafmax": {
               "judgement": "no_limit",
-              "since": "now-15868895"
+              "since": "now-29236650"
             },
             "lcpeak": {
               "judgement": "no_limit",
-              "since": "now-15868895"
+              "since": "now-29236650"
             }
           },
           "started_at": null,
@@ -407,31 +409,31 @@
             {
               "duration": 60.0,
               "judgement": "no_limit",
-              "since": "now-15868895",
+              "since": "now-29236650",
               "weighting": "a"
             },
             {
               "duration": 300.0,
               "judgement": "no_limit",
-              "since": "now-15868895",
+              "since": "now-29236650",
               "weighting": "a"
             },
             {
               "duration": 600.0,
               "judgement": "no_limit",
-              "since": "now-15868895",
+              "since": "now-29236650",
               "weighting": "a"
             },
             {
               "duration": 1800.0,
               "judgement": "no_limit",
-              "since": "now-15868895",
+              "since": "now-29236650",
               "weighting": "a"
             },
             {
               "duration": 3600.0,
               "judgement": "no_limit",
-              "since": "now-15868895",
+              "since": "now-29236650",
               "weighting": "a"
             }
           ]
@@ -605,7 +607,7 @@
           "type": "name"
         },
         "recover": null,
-        "saved_at": "now-6649927"
+        "saved_at": "now-11097948"
       }
     },
     "traces": []
