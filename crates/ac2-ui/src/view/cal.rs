@@ -60,7 +60,9 @@ pub(super) fn cal_page(app: &App, ui: &mut egui::Ui, v: &CalView, ch: &Chrome) {
                     ch.text
                 }));
                 ui.label(RichText::new(&r.detail).color(if r.warn { ch.armed } else { ch.text }));
-                ui.label(RichText::new(&r.extra).small().color(ch.dim));
+                // The library rows' details set the third column's width, so the status gets
+                // what is left of the page: it wraps there rather than running off the edge.
+                ui.add(egui::Label::new(RichText::new(&r.extra).small().color(ch.dim)).wrap());
                 ui.end_row();
                 if focused {
                     super::settings::reveal_focused(&resp);
