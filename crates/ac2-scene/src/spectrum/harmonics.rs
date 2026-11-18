@@ -305,16 +305,17 @@ fn overlaps(a: Rect, b: Rect) -> bool {
     a.x < b.right() && b.x < a.right() && a.y < b.bottom() && b.y < a.bottom()
 }
 
-/// Draws the harmonics plate with `lines`. Placed by the scene, it hangs from the plot's
-/// right edge with its text's top at `top` (under the cursor values), and goes under each
-/// of the plates in `avoid` it would cover (the peak list, cursor values dragged there);
-/// with no room left under them it stands beside them instead, to their left. Dragged, it
-/// sits where it was dropped.
+/// Draws the harmonics plate with `lines`. Placed by the scene, it stands in the plot's
+/// bottom-left corner, `foot` above the plot's bottom edge (the labels drawn along it):
+/// harmonics lie above the fundamental, so the left is where the plate covers none of the
+/// marks it names. It goes over each of the plates in `avoid` it would cover (a legend,
+/// cursor values or peak list dragged there); with no room left over them it stands beside
+/// them instead, to their right. Dragged, it sits where it was dropped.
 pub(crate) fn harmonics_plate(
     c: &mut Canvas,
     lines: &[HarmonicRow],
     plot: Rect,
-    top: f32,
+    foot: f32,
     avoid: &[PlateBox],
     view: &ViewState,
     theme: &Theme,
@@ -329,27 +330,25 @@ pub(crate) fn harmonics_plate(
     let rect = match place.at {
         Some(at) => PlatePlace::rect_at(at, plot, w, h),
         None => {
-            let x = plot.right() - crate::legend::INSET - w;
-            let mut r = Rect::new(x, top - m.pad_y, w, h);
-            // Each plate in the way pushes it down at most once.
+            let inset = crate::legend::INSET;
+            let x = plot.x + inset;
+            // A plot too low for the plate and the labels under it keeps the plate inside.
+            let y = (plot.bottom() - inset - foot - h).max(plot.y + inset);
+            let mut r = Rect::new(x, y, w, h);
+            // Each plate in the way pushes it up at most once.
             for _ in avoid {
                 match avoid.iter().find(|b| overlaps(r, b.rect)) {
-                    Some(b) => r.y = b.rect.bottom() + gap,
+                    Some(b) => r.y = b.rect.y - gap - h,
                     None => break,
                 }
             }
-            if r.bottom() > plot.bottom() - crate::legend::INSET {
+            if r.y < plot.y + inset && r.y < y {
                 let column = avoid
                     .iter()
-                    .filter(|b| b.rect.right() > x)
-                    .map(|b| b.rect.x)
-                    .fold(plot.right() - crate::legend::INSET, f32::min);
-                r = Rect::new(
-                    (column - gap - w).max(plot.x + crate::legend::INSET),
-                    top - m.pad_y,
-                    w,
-                    h,
-                );
+                    .filter(|b| b.rect.x < x + w)
+                    .map(|b| b.rect.right())
+                    .fold(x, f32::max);
+                r = Rect::new((column + gap).min(plot.right() - inset - w).max(x), y, w, h);
             }
             r
         }
@@ -376,8 +375,8 @@ pub(crate) fn harmonics_plate(
     PlateBox::new(PlateKind::Harmonics, plot, rect, s)
 }
 
-/// The harmonics of `traces` drawn: their marks, and their plate under `top` clear of
-/// `avoid`, unless *traces only* (T) hides marks and lists. Each curve's reading, the
+/// The harmonics of `traces` drawn: their marks, and their plate `foot` above the plot's
+/// bottom edge clear of `avoid`, unless *traces only* (T) hides marks and lists. Each curve's reading, the
 /// plate's text and its box.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn draw(
@@ -386,7 +385,7 @@ pub(crate) fn draw(
     xm: &crate::axis::Mapping,
     ym: Option<&crate::axis::Mapping>,
     plot: Rect,
-    top: f32,
+    foot: f32,
     avoid: &[PlateBox],
     view: &ViewState,
     theme: &Theme,
@@ -405,7 +404,7 @@ pub(crate) fn draw(
         draw_marks(c, h, plot, t.is_stale(), t.tracked.is_some(), theme);
     }
     let lines = list_lines(&listed);
-    let b = harmonics_plate(c, &lines, plot, top, avoid, view, theme);
+    let b = harmonics_plate(c, &lines, plot, foot, avoid, view, theme);
     let text = lines
         .iter()
         .map(|l| l.text.as_str())

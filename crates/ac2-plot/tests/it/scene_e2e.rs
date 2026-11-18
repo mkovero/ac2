@@ -382,9 +382,9 @@ fn spectrum_golden(name: &str, style: SpectrumStyle) {
 }
 
 /// A sine fired at 1 kHz with its second and third harmonics standing out of the floor:
-/// the harmonics plate under the cursor values on the right, clear of the legend, each
-/// read harmonic's row and its mark on the curve in the order's colour, the unresolved
-/// orders one limit row.
+/// the harmonics plate in the bottom-left corner over the window labels, clear of the
+/// legend and of the marks, each read harmonic's row and its mark on the curve in the
+/// order's colour, the unresolved orders one limit row.
 #[test]
 fn spectrum_harmonics_plate() {
     use ac2_proto::frame::{HarmonicLevel, HarmonicReading, SpecHarmonics};

@@ -993,7 +993,7 @@ fn ago(h: &SpectrographHistory, before_s: f64) -> Option<f64> {
 }
 
 /// Alone, the spectrograph has the harmonics plate of the spectrum view over the
-/// measurement it draws, under its peak list and clear of the legend, without marks (no
+/// measurement it draws, bottom-left clear of its peak list and the legend, without marks (no
 /// level axis); the split leaves it to the spectrum part.
 #[test]
 fn alone_the_harmonics_plate_and_the_split_leaves_it_to_the_spectrum() {
@@ -1067,8 +1067,9 @@ fn alone_the_harmonics_plate_and_the_split_leaves_it_to_the_spectrum() {
     let b = s.harmonics_box.expect("the harmonics plate");
     assert_eq!(b.kind, crate::plate::PlateKind::Harmonics);
     let list = s.peaks_box.expect("the peak list").rect;
-    assert!(b.rect.y > list.bottom());
-    assert_eq!(b.rect.right(), s.plot.right() - crate::legend::INSET);
+    assert!(b.rect.right() < list.x);
+    assert_eq!(b.rect.x, s.plot.x + crate::legend::INSET);
+    assert_eq!(b.rect.bottom(), s.plot.bottom() - crate::legend::INSET);
     assert_eq!(
         s.plates().iter().map(|p| p.kind).collect::<Vec<_>>(),
         [

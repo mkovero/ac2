@@ -262,11 +262,12 @@ fn without_a_sine_there_is_no_plate() {
     assert!(s.plates().iter().all(|b| b.kind != PlateKind::Harmonics));
 }
 
-/// The plate hangs from the plot's right edge under the unit's line, clear of the legend;
-/// the fundamental and each resolved harmonic are marked on the curve in their order's
-/// colour, the unresolved ones are not.
+/// The plate stands in the plot's bottom-left corner, clear of the legend and of every
+/// mark it names (harmonics lie to the right of the fundamental); the fundamental and each
+/// resolved harmonic are marked on the curve in their order's colour, the unresolved ones
+/// are not.
 #[test]
-fn the_plate_hangs_on_the_right_and_resolved_harmonics_are_marked() {
+fn the_plate_stands_bottom_left_and_resolved_harmonics_are_marked() {
     let h = on_bin();
     let s = scene_of(Some(&h), &view(PlotChrome::Full));
     assert_eq!(
@@ -276,11 +277,13 @@ fn the_plate_hangs_on_the_right_and_resolved_harmonics_are_marked() {
     let b = s.harmonics_box.expect("the harmonics plate");
     assert_eq!(b.kind, PlateKind::Harmonics);
     assert_eq!(b.area, s.plot);
-    assert_eq!(b.rect.right(), s.plot.right() - crate::legend::INSET);
-    let m = crate::plate::Metrics::new(&Theme::dark(), 1.0);
-    assert_eq!(b.rect.y + m.pad_y, s.plot.y + 22.0);
+    assert_eq!(b.rect.x, s.plot.x + crate::legend::INSET);
+    assert_eq!(b.rect.bottom(), s.plot.bottom() - crate::legend::INSET);
     let legend = s.legend_box.as_ref().expect("legend").plate;
     assert!(!intersects(b.rect, legend.rect));
+    for m in &s.harmonics[0].marks {
+        assert!(m.at[0] > b.rect.right(), "{m:?} under {:?}", b.rect);
+    }
     assert_eq!(
         s.plates().iter().map(|b| b.kind).collect::<Vec<_>>(),
         [PlateKind::Legend, PlateKind::Harmonics]
@@ -322,10 +325,10 @@ fn traces_only_hides_the_plate_and_the_marks() {
     assert!(s.scene.layers[2].labels.iter().all(|l| l.text != "H1"));
 }
 
-/// Under the cursor's values and the peak list, covering neither; where they leave no
-/// room under them it stands beside them.
+/// The cursor's values and the peak list on the right leave it where it is; the window
+/// labels of a multi-resolution spectrum along the plot's foot stay readable under it.
 #[test]
-fn the_plate_goes_under_the_cursor_values_and_the_peak_list() {
+fn the_plate_stays_clear_of_the_other_plates_and_the_window_labels() {
     let h = on_bin();
     let g = third_octaves();
     let (f, e) = (g.centres(), g.edges());
@@ -334,35 +337,79 @@ fn the_plate_goes_under_the_cursor_values_and_the_peak_list() {
         freq_hz: 1000.0,
         level: -12.3,
     }];
-    let scene = |size: Viewport, tracked: bool| {
+    let bands = crate::stitch::tests::bands_96k();
+    let scene = |size: Viewport, multi: bool| {
         let mut t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
         t.harmonics = Some(&h);
-        t.tracked = tracked.then_some(&peaks[..]);
+        t.tracked = Some(&peaks[..]);
+        t.bands = multi.then_some(&bands);
         let mut v = view(PlotChrome::Full);
         v.cursor_hz = Some(1000.0);
         spectrum_scene(&[t], &Status::default(), &v, &Theme::dark(), size)
     };
-    let s = scene(SIZE, false);
-    let readout = s.readout_box.expect("cursor values").rect;
-    let b = s.harmonics_box.expect("plate").rect;
-    assert!(b.y > readout.bottom());
-    assert_eq!(b.right(), s.plot.right() - crate::legend::INSET);
+    let clear = |s: &SpectrumScene| {
+        let b = s.harmonics_box.expect("plate").rect;
+        for other in s.plates().iter().filter(|p| p.kind != PlateKind::Harmonics) {
+            assert!(!intersects(b, other.rect), "{:?} {b:?}", other.kind);
+        }
+        b
+    };
+    for size in [SIZE, Viewport::new(800.0, 600.0)] {
+        let s = scene(size, false);
+        assert!(s.readout_box.is_some() && s.peaks_box.is_some());
+        let b = clear(&s);
+        assert_eq!(b.x, s.plot.x + crate::legend::INSET);
+        assert_eq!(b.bottom(), s.plot.bottom() - crate::legend::INSET);
+    }
 
     let s = scene(Viewport::new(800.0, 600.0), true);
-    let list = s.peaks_box.expect("peak list").rect;
-    let b = s.harmonics_box.expect("plate").rect;
-    assert!(b.y > list.bottom());
-    assert_eq!(b.right(), s.plot.right() - crate::legend::INSET);
-    assert!(b.bottom() <= s.plot.bottom());
-
-    // A low pane: no room under the two, so beside them, covering neither nor the legend.
-    let s = scene(Viewport::new(800.0, 220.0), true);
-    let b = s.harmonics_box.expect("plate").rect;
-    for other in s.plates().iter().filter(|p| p.kind != PlateKind::Harmonics) {
-        assert!(!intersects(b, other.rect), "{:?} {b:?}", other.kind);
+    let b = clear(&s);
+    assert_eq!(b.x, s.plot.x + crate::legend::INSET);
+    let font = Theme::dark().small_font_size;
+    let windows: Vec<_> = s.scene.layers[0]
+        .labels
+        .iter()
+        .filter(|l| l.text.ends_with(" ms"))
+        .collect();
+    assert!(!windows.is_empty());
+    for l in windows {
+        assert_eq!(l.pos[1], s.plot.bottom() - 3.0);
+        assert!(
+            b.bottom() <= l.pos[1] - 1.25 * font,
+            "{b:?} over {}",
+            l.text
+        );
     }
-    let p = s.peaks_box.expect("peak list").rect;
-    assert!(b.right() < p.x, "{b:?} {p:?} {:?}", s.plot);
+}
+
+/// A plate dragged into the bottom-left corner pushes it up; where that leaves no room
+/// over it, the harmonics plate stands beside it.
+#[test]
+fn the_plate_goes_over_or_beside_a_plate_dragged_into_its_corner() {
+    let h = on_bin();
+    let g = third_octaves();
+    let (f, e) = (g.centres(), g.edges());
+    let level = levels(&f);
+    let scene = |size: Viewport| {
+        let mut t = rta_trace(&f, &e, &level, LevelScale::Dbfs);
+        t.harmonics = Some(&h);
+        let mut v = view(PlotChrome::Full);
+        v.plates.legend.move_to(0.0, 1.0);
+        spectrum_scene(&[t], &Status::default(), &v, &Theme::dark(), size)
+    };
+    let s = scene(Viewport::new(800.0, 600.0));
+    let legend = s.legend_box.as_ref().expect("legend").plate.rect;
+    let b = s.harmonics_box.expect("plate").rect;
+    assert_eq!(b.x, s.plot.x + crate::legend::INSET);
+    assert!(b.bottom() < legend.y, "{b:?} {legend:?}");
+    assert!(b.y >= s.plot.y);
+
+    let s = scene(Viewport::new(800.0, 170.0));
+    let legend = s.legend_box.as_ref().expect("legend").plate.rect;
+    let b = s.harmonics_box.expect("plate").rect;
+    assert!(b.x > legend.right(), "{b:?} {legend:?}");
+    assert!(b.right() <= s.plot.right());
+    assert!(b.bottom() <= s.plot.bottom());
 }
 
 /// Dragged to the bottom-left at twice the text size, the plate sits there; the marks

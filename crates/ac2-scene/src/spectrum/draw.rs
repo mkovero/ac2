@@ -110,7 +110,7 @@ pub(crate) fn spectrum_scene_in(
         )
     });
     crate::unresolved::draw(&mut c, plot, &xm, &unresolved, theme);
-    crate::stitch::draw(&mut c, plot, &xm, &stitches, true, theme);
+    let foot = crate::stitch::draw(&mut c, plot, &xm, &stitches, true, theme);
 
     // Later shapes draw over earlier ones, and `traces` lists the pane's own group first,
     // then the compared ones in compare order: drawn last to first, the pane's own curves
@@ -376,7 +376,7 @@ pub(crate) fn spectrum_scene_in(
     let peaks_box = peak_list
         .as_ref()
         .map(|list| peak_plate(&mut c, list, plot, readout_y, readout_box, view, theme));
-    // Last down the right side, clear of the plates above it and of the legend.
+    // Placed last, so it knows every plate it has to stand clear of.
     let avoid: Vec<crate::plate::PlateBox> = readout_box
         .into_iter()
         .chain(peaks_box)
@@ -388,7 +388,7 @@ pub(crate) fn spectrum_scene_in(
         &xm,
         Some(&ym),
         plot,
-        readout_y,
+        foot,
         &avoid,
         view,
         theme,

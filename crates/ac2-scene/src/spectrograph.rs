@@ -811,7 +811,7 @@ pub fn spectrograph_scene(
     // Labelled here only when the spectrum above, which labels them, is not shown.
     let stitches = crate::spectrum::marked_bands(traces, view)
         .map_or_else(Vec::new, |(b, _)| crate::stitch::stitches(b));
-    crate::stitch::draw(&mut c, plot, &xm, &stitches, alone, theme);
+    let foot = crate::stitch::draw(&mut c, plot, &xm, &stitches, alone, theme);
     if let Some(hz) = cursor_hz {
         canvas::vline(&mut c.overlay, plot, xm.to_px(hz), theme.cursor);
     }
@@ -868,7 +868,7 @@ pub fn spectrograph_scene(
                 .chain(legend.as_ref().and_then(|l| l.b.as_ref()).map(|b| b.plate))
                 .collect();
             let (_, list, b) = crate::spectrum::harmonics::draw(
-                &mut c, &own, &xm, None, plot, under, &avoid, view, theme,
+                &mut c, &own, &xm, None, plot, foot, &avoid, view, theme,
             );
             (list, b)
         }

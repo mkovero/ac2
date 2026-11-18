@@ -67,7 +67,8 @@ pub fn windows_at(bands: &SpecBands, hz: f64) -> Option<String> {
 }
 
 /// The lines in `plot`, labelled at its foot when `labels` (a label that would run into
-/// the one before is left out; the line stays).
+/// the one before is left out; the line stays). Returns the height the labels take at the
+/// plot's foot (0 with none drawn), for what else stands there to keep above them.
 pub(crate) fn draw(
     c: &mut Canvas,
     plot: Rect,
@@ -75,9 +76,10 @@ pub(crate) fn draw(
     stitches: &[Stitch],
     labels: bool,
     theme: &Theme,
-) {
+) -> f32 {
     let font = theme.small_font_size;
     let mut free_from = plot.x;
+    let mut foot = 0.0;
     for s in stitches {
         let x = xm.to_px(s.hz);
         if !(x.is_finite() && x > plot.x + 0.5 && x < plot.right() - 0.5) {
@@ -98,8 +100,10 @@ pub(crate) fn draw(
                 theme.text_dim,
             ));
             free_from = x + 3.0 + w + 6.0;
+            foot = 3.0 + 1.25 * font;
         }
     }
+    foot
 }
 
 #[cfg(test)]

@@ -1349,8 +1349,10 @@ traces only hides every peak mark: boxes, ranks and the list.
 #### Harmonics of a sine
 
 While the generator fires a sine, every live spectrum reads it, and its pane (the flat
-spectrograph alone too) shows the **harmonics plate** on the right under the cursor values
-and the peak list: a plate like the others, to drag, size and double-click back. The app
+spectrograph alone too) shows the **harmonics plate** in the plot's bottom-left corner,
+left of the fundamental so it covers none of the harmonics it names, above the window
+labels of a multi-resolution spectrum: a plate like the others, to drag, size and
+double-click back. The app
 cannot start a sine yet; the command line does: `ac2 gen sine --freq 1khz --out 1
 --level -20dbfs --lock <meas>`. The plate goes when the sine stops, and **T** to traces only hides it with
 its marks.
