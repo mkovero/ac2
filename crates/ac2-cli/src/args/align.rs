@@ -12,7 +12,7 @@ use ac2_scene::unit_text::{Celsius, Freq, Time, UnitText};
 #[derive(Debug, Subcommand)]
 pub enum AlignCmd {
     /// Align two transfer curves (live or stored) in their overlap: which one to delay, by
-    /// how much, the polarity and how fully they then add. Created as a math channel
+    /// how much, the polarity and how fully they then add. Created as a math trace
     /// (`ac2 math set` renames it), started, and its first fit printed.
     New(AlignNew),
     /// The current fit of an alignment.

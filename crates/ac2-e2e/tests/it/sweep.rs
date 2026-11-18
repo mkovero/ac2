@@ -585,7 +585,7 @@ fn slow_two_sweeps_chosen_between_in_the_transfer_pane() -> R {
 }
 
 /// The measurement tree from an empty daemon, keyboard only: a transfer measurement, two
-/// captures filed under it, a math channel made on it; a sweep measurement that plays
+/// captures filed under it, a math trace made on it; a sweep measurement that plays
 /// nothing until Space and Enter, two runs under it; the transfer measurement deleted with
 /// its traces kept, which then list under Imported.
 #[test]
@@ -610,7 +610,7 @@ fn slow_the_measurement_tree_from_an_empty_daemon() -> R {
         assert_eq!(d.st.trace_meta(id)?.edit.owner, under_tf);
     }
 
-    // A math channel made with the measurement selected lives under it.
+    // A math trace made with the measurement selected lives under it.
     d.send(Msg::SelectMeas(tf));
     d.key("Shift+M");
     d.send(Msg::Text("M".into()));
@@ -631,7 +631,7 @@ fn slow_the_measurement_tree_from_an_empty_daemon() -> R {
             )
             .map(|m| m.id)
     };
-    d.until("the math channel under the measurement", |s| {
+    d.until("the math trace under the measurement", |s| {
         math(s).is_some()
     })?;
     let math_id = math(&d.st).ok_or("math")?;
@@ -710,7 +710,7 @@ fn slow_the_measurement_tree_from_an_empty_daemon() -> R {
     };
     assert_eq!(
         c.lines[0],
-        "transfer function · running · it has 2 traces and 1 math channel."
+        "transfer function · running · it has 2 stored traces and 1 math trace."
     );
     assert_eq!(c.index, ac2_scene::meas_list::KEEP);
     d.key("Enter");

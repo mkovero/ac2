@@ -1,6 +1,6 @@
 //! Ownership from the CLI against a real daemon (`docs/design/measurement-tree.md`): a
 //! sweep measurement made with `meas new sweep` waits (no job), traces move with `trace
-//! move`, a math channel is filed with `--under`, and `meas rm` of a measurement that owns
+//! move`, a math trace is filed with `--under`, and `meas rm` of a measurement that owns
 //! traces asks for `--keep-traces` or `--delete-traces`; a target is filed with `--meas`.
 #![allow(clippy::unwrap_used)]
 
@@ -99,7 +99,7 @@ async fn owners_from_the_cli() {
     assert_ne!(code, 0);
     assert!(text.contains("--imported"), "{text}");
 
-    // A math channel over it, listed under the measurement it is made on.
+    // A math trace over it, listed under the measurement it is made on.
     let (code, text) = run(
         &ep,
         &[
@@ -123,11 +123,11 @@ async fn owners_from_the_cli() {
     let (code, text) = run(&ep, &["meas", "rm", "Main L"]).await;
     assert_ne!(code, 0);
     assert!(
-        text.contains("owns 1 trace(s) and 1 math channel(s)"),
+        text.contains("owns 1 stored trace(s) and 1 math trace(s)"),
         "{text}"
     );
     assert!(text.contains("--keep-traces"), "{text}");
-    // Kept, the math channel still computes from Main L: refused, nothing changes.
+    // Kept, the math trace still computes from Main L: refused, nothing changes.
     let (code, text) = run(&ep, &["meas", "rm", "Main L", "--keep-traces"]).await;
     assert_ne!(code, 0);
     assert!(text.contains("operand"), "{text}");

@@ -16,7 +16,7 @@ pub struct RigRoot<'a> {
     pub shown: bool,
     /// Its branch folded: only the heading is listed.
     pub folded: bool,
-    /// Every measurement on the rig, its meters and math channels included.
+    /// Every measurement on the rig, its meters and math traces included.
     pub measurements: u32,
     /// Every stored trace on the rig.
     pub traces: u32,

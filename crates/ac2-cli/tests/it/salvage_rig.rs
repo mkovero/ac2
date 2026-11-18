@@ -1,7 +1,7 @@
 //! `ac2 session salvage` of sessions saved by earlier format versions (fixtures under
 //! `tests/fixtures/salvage`, in the shapes of formats 20, 22, 23 and 24) into a real
 //! daemon: measurements with their settings, colours and delays, the trace under its
-//! measurement, the math channel on the restored ids, and the running ones started only
+//! measurement, the math trace on the restored ids, and the running ones started only
 //! where the audio I/O captures their inputs. The fixtures were saved from the fake
 //! backend; the format 20 and 22 manifests are the format-23 one less the fields those versions
 //! lacked (`layout`; `colour` too in 20, which also has a nudged, tracking delay), and the
@@ -153,7 +153,7 @@ async fn check_common(r: &Rig, report: &Value) {
         "{report:#}"
     );
 
-    // The math channel computes from the restored TF 1 and its trace.
+    // The math trace computes from the restored TF 1 and its trace.
     let s = r.c.snapshot().await.unwrap().state;
     let trace = s
         .traces

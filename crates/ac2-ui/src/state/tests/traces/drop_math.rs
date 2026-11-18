@@ -88,7 +88,7 @@ fn drop(t: &mut T, dragged: TreeKey, onto: TreeKey) -> Vec<Request> {
     r
 }
 
-/// The math channel Enter makes from the open dialog: its name, owner and expression.
+/// The math trace Enter makes from the open dialog: its name, owner and expression.
 fn made(t: &mut T) -> (String, TraceOwner, MathExpr) {
     assert!(
         matches!(&t.st.overlay, Overlay::Form(f) if f.kind == FormKind::Math),
@@ -129,7 +129,7 @@ fn a_curve_dropped_on_a_trace_opens_the_math_dialog_with_its_reading() {
     );
     assert_eq!(
         t.st.drag_label().as_deref(),
-        Some("math channel: Main L S1 × loudness 85 → 100 phon")
+        Some("math trace: Main L S1 × loudness 85 → 100 phon")
     );
     t.st.apply(Msg::RowDrag(DragMsg::Drop), &t.keys);
     assert_eq!(

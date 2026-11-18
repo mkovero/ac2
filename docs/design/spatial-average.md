@@ -1,8 +1,8 @@
 # Live spatial average of transfer functions
 
-Status: implemented as a math channel's average (`MeasKind::Math`, `expr: average`; created
+Status: implemented as a math trace's average (`MeasKind::Math`, `expr: average`; created
 with Shift+M or `ac2 math new --op avg --of …`). The former `spatial_average` measurement kind
-is removed. Model, wire, statuses, daemon and tests: [`math-channels.md`](math-channels.md)
+is removed. Model, wire, statuses, daemon and tests: [`math-traces.md`](math-traces.md)
 (*Average*, *Operands left out*). This note keeps why the average is formed the way it is.
 
 ## Why
@@ -11,7 +11,7 @@ A loudspeaker's response changes from seat to seat, so a system is tuned to the 
 several mic positions rather than to one spot. With one mic per position (one transfer
 measurement each: same reference, its own mic input) the average of those measurements is a
 live `tf` stream like any transfer function. One mic moved from seat to seat is the same
-mathematics over stored captures (`trace.average`, `M`, or a math channel of traces), so the
+mathematics over stored captures (`trace.average`, `M`, or a math trace of stored traces), so the
 two agree.
 
 ## Definition and its reasons

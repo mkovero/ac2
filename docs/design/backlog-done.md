@@ -26,17 +26,17 @@ commit; `git show <commit>` and the linked design notes have the rest.
 - Toasts fit their text, three kinds, recent notifications in the palette (`ac2_scene::toast`).
 - Colour families: each measurement a hue, its traces shades of it (`ac2_scene::families`).
 - Ctrl / Alt + `,` `.` move only the measurement's live curve; captures carry the steps (PROTO 25; `delay-no-resettle.md`).
-- Math channels formed only when a live operand has a new result (a680dcd).
+- Math traces formed only when a live operand has a new result (a680dcd).
 - Stopping the last running transfer measurement stops the stimulus; NO REFERENCE names the stimulus keys; full screen stays the pane alone; Leq run line and caption only with the history.
 - A measurement owns its traces: one tree, ownership on the wire, sweep as a measurement kind (PROTO 24; `measurement-tree.md`).
 - A, Delete, Backspace act on the item selected last, measurement or trace.
 - A new sweep result fits its level axis as Shift+Home does.
 - `ir_capture_on_the_simulated_rig` H3 checks the median, not the noise-biased maximum.
-- Math channels replace A − B / A / B and the spatial-average kind (PROTO 22; `math-channels.md`).
+- Math traces replace A − B / A / B and the spatial-average kind (PROTO 22; `math-traces.md`).
 - Settings view, system max level at run time (`gen.ceiling`), output names, server features (PROTO 23; `settings.md`).
 - Space arms by focused view (re-sweep or generator); narrow-pane spectrum caption; `audio stopped` freshness; banner fitting; fast reopen probe; spectrum and sweep pane views on G; IR pane carries its measurement's banners (0f9f4ac … f005562).
 - Audio that stops: AUDIO STOPPED, reopen with backoff (PROTO 21; `audio-recovery.md`).
-- Live spatial average of N transfer functions (PROTO 19; since folded into math channels).
+- Live spatial average of N transfer functions (PROTO 19; since folded into math traces).
 - ISO 3382-1 room parameters from the sweep IR (PROTO 18; `room-metrics.md`).
 - Raw capture files: record to f32 WAV / RF64 + sidecar, replay as a session (PROTO 17; `raw-capture.md`).
 - Spectrograph under the spectrum (`spectrograph.md`).

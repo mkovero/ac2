@@ -14,7 +14,7 @@ fn t() -> T {
     t
 }
 
-/// The measurement whose form is open, a math channel's dialog included.
+/// The measurement whose form is open, a math trace's dialog included.
 fn editing(t: &T) -> Option<MeasId> {
     match &t.st.overlay {
         Overlay::Form(f) => f.edits(),
@@ -48,7 +48,7 @@ fn f2_edits_a_measurement_and_renames_a_trace() {
         Overlay::Prompt(p) if p.kind == PromptKind::TraceRename(TraceId(3)) && p.text == "pre-EQ"
     ));
     t.st.overlay = Overlay::None;
-    // A math channel is a measurement: its dialog.
+    // A math trace is a measurement: its dialog.
     t.st.apply(Msg::SelectMath(MeasId(6)), &t.keys);
     t.key("F2");
     assert_eq!(editing(&t), Some(MeasId(6)), "the math dialog");

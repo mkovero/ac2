@@ -1,4 +1,4 @@
-//! When a live math channel forms a new result: at its operands' rate, not on every
+//! When a live math trace forms a new result: at its operands' rate, not on every
 //! operand's new result.
 //!
 //! Each live operand forms results at its own rate, out of step with the others. A result
@@ -13,7 +13,7 @@
 //! slower than the rest must not hold the result: once the first newer result has waited as
 //! long as the slowest running operand's own period, the result forms with what has
 //! arrived, and an operand two of its periods past its last result is no longer waited for
-//! until it forms one again. So the newest operand result goes into the channel's result within about one
+//! until it forms one again. So the newest operand result goes into the math trace's result within about one
 //! operand period, which is the delay a reader of that operand alone would see between
 //! two of its frames. Times are sample indices of the hand-offs, so the pace follows the
 //! audio clock, as the operands do.
@@ -31,7 +31,7 @@ struct Operand {
     fresh: bool,
 }
 
-/// The pace of a live math channel's results ([module docs](self)).
+/// The pace of a live math trace's results ([module docs](self)).
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ResultPace {
     /// One per operand in expression order; `None` for a stored one (it never changes).

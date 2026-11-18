@@ -1,5 +1,5 @@
 //! EQ what-if sets (`docs/design/eq-overlay.md` §2): `meas.eq`, the locked filter curve each
-//! set keeps, the predictions (`curve × set` math channels) and the `eq_in` a capture
+//! set keeps, the predictions (`curve × set` math traces) and the `eq_in` a capture
 //! records, so a curve that already contains the set is never filtered by it twice.
 
 use ac2_proto::event::{Change, Patch};
@@ -42,7 +42,7 @@ fn can_hold_eq(kind: &MeasKind) -> bool {
     matches!(kind, MeasKind::Transfer { .. } | MeasKind::Sweep { .. })
 }
 
-/// The math channel predicting `curve` after set `set` of `meas`.
+/// The math trace predicting `curve` after set `set` of `meas`.
 fn prediction_expr(meas: MeasId, set: EqSetId, curve: Operand) -> MathExpr {
     MathExpr::Binary {
         a: curve,
@@ -213,7 +213,7 @@ impl Control {
             .map_or(DEFAULT_RATE, |rt| f64::from(rt.sample_rate))
     }
 
-    /// The prediction math channels of set `set` of `meas`, with the curve each filters.
+    /// The prediction math traces of set `set` of `meas`, with the curve each filters.
     fn predictions(&self, meas: MeasId, set: EqSetId) -> Vec<(MeasId, Operand)> {
         let o = Operand::Eq { meas, set };
         self.maths_naming(o)
@@ -483,7 +483,7 @@ impl Control {
             .unwrap_or_default()
     }
 
-    /// What a capture of math channel `c` records: a prediction's curve contains its set
+    /// What a capture of math trace `c` records: a prediction's curve contains its set
     /// as it is now (plus whatever its curve recorded of the other sets).
     pub(super) fn eq_in_math(&self, c: &MathConfig) -> Vec<EqSnapshot> {
         let MathExpr::Binary {

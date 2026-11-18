@@ -46,7 +46,7 @@ pub fn stamp(grid: Option<GridDef>) -> FrameStamp {
     }
 }
 
-/// A 480-column TF frame of a math channel averaging four operands, two of them included.
+/// A 480-column TF frame of a math trace averaging four operands, two of them included.
 /// Columns 0..4 are thinned and 470.. out of band (NaN). Values are exactly representable
 /// so other languages can rebuild them bit for bit.
 pub fn tf_frame() -> Frame {

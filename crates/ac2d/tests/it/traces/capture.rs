@@ -1,4 +1,4 @@
-//! Capture, averaging, math channels, export/import of stored traces, and transfer IRs.
+//! Capture, averaging, math traces, export/import of stored traces, and transfer IRs.
 
 use super::*;
 

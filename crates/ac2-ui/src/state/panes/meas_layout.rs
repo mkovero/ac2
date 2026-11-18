@@ -1,6 +1,6 @@
 //! A measurement's own panes (`meas.layout`): choosing a measurement's row in the list
 //! puts its panes on screen; one without keeps the panes there are. Nothing else moves the
-//! panes as a whole: a child row (live curve, math channel, stored trace) only selects, a
+//! panes as a whole: a child row (live curve, math trace, stored trace) only selects, a
 //! click in a pane only focuses it, and a row dropped on a pane changes that pane alone.
 //! Editing the panes (N, Q, a pane's kind or view, T, a split dragged, the transfer stack, a
 //! drop, a level axis zoomed or panned) gives the measurement whose row was chosen that

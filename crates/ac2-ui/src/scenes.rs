@@ -214,7 +214,7 @@ pub fn daemon_wall(st: &AppState, client_now: WallNs) -> WallNs {
     WallNs(t.clamp(0, i128::from(u64::MAX)) as u64)
 }
 
-/// What a math channel's frame combined, operands named as the lists name them; `None`
+/// What a math trace's frame combined, operands named as the lists name them; `None`
 /// for any other frame.
 /// A prediction's legend tag: what its curve already contains of the set
 /// (`assumes none of it in`, `change since rev 4`, `EQ 1 in · no change`).
@@ -263,7 +263,7 @@ fn math_status(st: &AppState, m: &Measurement, frame: &FrameData) -> Option<Math
     )
 }
 
-/// The banner status of the math channel `focus` shows, unless it is stopped (its last
+/// The banner status of the math trace `focus` shows, unless it is stopped (its last
 /// frame is history).
 fn shown_math(
     st: &AppState,
@@ -322,7 +322,7 @@ struct LiveTf<'a> {
 }
 
 /// The transfer view: the group of the measurement the pane shows — its live curve, the
-/// math channels made on it, its shown stored traces — and the curves compared (C), tagged
+/// math traces made on it, its shown stored traces — and the curves compared (C), tagged
 /// so. Other groups wait until theirs is the pane's measurement; Imported until moved under
 /// a measurement.
 pub fn transfer(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now: Now) -> TfScene {
@@ -330,11 +330,11 @@ pub fn transfer(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now:
         let shown: Vec<&TopicFrame> = live.iter().map(|l| l.tf).collect();
         let focus = pane_tf(st, pane);
         let mut status = status(st, &shown, focus, now);
-        // The shown math channel's operands.
+        // The shown math trace's operands.
         let frames: Vec<(MeasId, &TopicFrame)> = live.iter().map(|l| (l.meas.id, l.tf)).collect();
         status.math = shown_math(st, focus, &frames);
         // Headroom advice is about the measurement the pane shows, from live levels; a stored
-        // trace or math channel has no stimulus to change.
+        // stored trace or math trace has no stimulus to change.
         status.advice = focus
             .filter(|m| matches!(m.config.kind, MeasKind::Transfer { .. }))
             .and_then(|m| st.advice_of(m.id));
@@ -390,7 +390,7 @@ fn with_transfer<R>(
     let pane_shows = st.pane_meas(pane);
     let mut live = Vec::new();
     for (_, m) in pane_order(st, pane) {
-        // The pane's group (its measurement and the math channels made on it), and what is
+        // The pane's group (its measurement and the math traces made on it), and what is
         // compared. A hidden measurement keeps its colour: showing it again brings back the
         // same curve.
         if !(st.live_on_pane(PaneKind::Transfer, m, pane_shows)
@@ -428,7 +428,7 @@ fn with_transfer<R>(
     stored.sort_by_key(|(t, _)| (t.meta.edit.order, t.meta.id));
 
     // The legend groups a measurement's curves: its live curve, its stored traces, the
-    // math channels made on it, group by group in the tree's order.
+    // math traces made on it, group by group in the tree's order.
     let ms = st.measurements();
     // The group of the measurement the pane shows leads, as its curve does.
     let groups = ac2_scene::meas_list::group_order(&ms);

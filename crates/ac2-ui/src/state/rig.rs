@@ -259,7 +259,7 @@ impl RigState {
         self.daemon()?.measurements.iter().find(|m| m.id == id)
     }
 
-    /// How measurement `m`'s curves draw: its own display, a math channel its owner's (as it
+    /// How measurement `m`'s curves draw: its own display, a math trace its owner's (as it
     /// takes its owner's colours), the defaults for anything else.
     pub fn display_of(&self, m: &Measurement) -> ac2_proto::model::SpectrumDisplay {
         if let Some(d) = m.config.kind.display() {
@@ -277,7 +277,7 @@ impl RigState {
         ac2_proto::model::SpectrumDisplay::default()
     }
 
-    /// What P draws over measurement `m`'s live curve: its own peak mode, a math channel
+    /// What P draws over measurement `m`'s live curve: its own peak mode, a math trace
     /// its owner's (as it takes its owner's display), off for a kind that takes none.
     pub fn peak_of(&self, m: &Measurement) -> ac2_proto::model::PeakMode {
         if let Some(p) = m.config.kind.peak() {

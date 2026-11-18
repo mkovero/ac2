@@ -1,4 +1,4 @@
-//! A curve's row dropped onto another's makes a math channel, from an empty daemon.
+//! A curve's row dropped onto another's makes a math trace, from an empty daemon.
 
 use super::harness::{R, measuring};
 use ac2_proto::model::{MathExpr, MathOp, MeasKind, Operand, TraceKind, TraceOwner};
@@ -9,9 +9,9 @@ use ac2_ui::state::{DragItem, DragMsg, Msg, Overlay};
 /// From an empty daemon: a capture of the first transfer measurement, then Z's loudness
 /// shift, which is listed under that measurement (not Imported); the shift's row dropped
 /// on the capture's opens the math dialog as `capture × loudness`, and Enter makes that
-/// math channel under the same measurement.
+/// math trace under the same measurement.
 #[test]
-fn a_loudness_shift_dropped_on_a_capture_makes_its_math_channel() -> R {
+fn a_loudness_shift_dropped_on_a_capture_makes_its_math_trace() -> R {
     let (_daemon, mut d) = measuring()?;
     let m = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
     let owner = TraceOwner::Meas { meas: m };
@@ -68,7 +68,7 @@ fn a_loudness_shift_dropped_on_a_capture_makes_its_math_channel() -> R {
     let name = format!("{} × {loud_name}", capture.edit.name);
     assert_eq!(
         d.st.drag_label().as_deref(),
-        Some(format!("math channel: {name}").as_str())
+        Some(format!("math trace: {name}").as_str())
     );
     d.send(Msg::RowDrag(DragMsg::Drop));
     assert!(
@@ -84,7 +84,7 @@ fn a_loudness_shift_dropped_on_a_capture_makes_its_math_channel() -> R {
             .any(|x| matches!(x.config.kind, MeasKind::Math { .. }))
     );
     d.key("Enter");
-    d.until("the math channel", |s| {
+    d.until("the math trace", |s| {
         s.measurements()
             .iter()
             .any(|x| matches!(x.config.kind, MeasKind::Math { .. }))
@@ -94,7 +94,7 @@ fn a_loudness_shift_dropped_on_a_capture_makes_its_math_channel() -> R {
             .into_iter()
             .find(|x| matches!(x.config.kind, MeasKind::Math { .. }))
             .cloned()
-            .ok_or("math channel")?;
+            .ok_or("math trace")?;
     assert_eq!(made.config.name, name);
     let MeasKind::Math { config } = &made.config.kind else {
         return Err("not math".into());

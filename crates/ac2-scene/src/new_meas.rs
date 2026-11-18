@@ -42,7 +42,7 @@ impl NewKind {
             NewKind::Rta => "RTA",
             NewKind::Spl => "SPL meter",
             NewKind::Sweep => "Sweep",
-            NewKind::Math => "Math channel",
+            NewKind::Math => "Math trace",
             NewKind::Alignment => "Alignment",
             NewKind::SpatialAverage => "Spatial average",
             NewKind::Programme => "Programme meter",
@@ -247,7 +247,7 @@ mod tests {
                 "RTA — one input's level in fractional-octave bands",
                 "SPL meter — sound level: A / C / Z weighting, Leq windows and limits",
                 "Sweep — a played sweep: response and harmonic distortion  ·  Shift+S",
-                "Math channel — A ÷ × + − B of two curves, or the average of several",
+                "Math trace — A ÷ × + − B of two curves, or the average of several",
                 "Alignment — delay and polarity of two systems in their overlap (sub + main, \
                  delay tower)  ·  Alt+M",
                 "Spatial average — the power average of every transfer measurement (one per mic \
@@ -337,7 +337,7 @@ mod tests {
         assert_eq!(
             no_measurements("Ctrl+M"),
             "No measurements — Ctrl+M → New measurement… (transfer, spectrum, RTA, SPL meter, \
-             sweep, math channel, alignment, spatial average)"
+             sweep, math trace, alignment, spatial average)"
         );
     }
 }

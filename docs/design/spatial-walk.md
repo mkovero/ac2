@@ -7,13 +7,13 @@ of ac2's way while it grows (§2).
 
 ## What exists
 
-- **Average of live transfers.** A math channel `expr: average` over transfer measurements
+- **Average of live transfers.** A math trace `expr: average` over transfer measurements
   (one per mic, each with its own reference): power, complex or coherence-weighted, every
   operand re-referred to one delay, left-out operands named (*AVERAGE · 3 OF 4 POSITIONS*)
-  ([math-channels.md](math-channels.md), [spatial-average.md](spatial-average.md)). Made with
+  ([math-traces.md](math-traces.md), [spatial-average.md](spatial-average.md)). Made with
   **Shift+M**, whose operator row starts on ÷. At most `MathConfig::MAX_AVERAGE` = 16 operands.
 - **Average of stored traces.** The same maths over captures (`Ctrl+1 … 9`) or sweep runs (sweep
-  runs are transfer-domain operands): a math channel of traces, or the one-shot `M`
+  runs are transfer-domain operands): a math trace of stored traces, or the one-shot `M`
   (`trace.average`).
 - **Sweep gate** (`--gate`), and ISO 3382-1 parameters from a sweep IR
   ([room-metrics.md](room-metrics.md)), one position at a time. A sweep reads one mic
@@ -145,7 +145,7 @@ A **walk** is daemon state (a second client sees it; it survives an app restart)
 hold several walks (one per system tuned, say), each with its own pane. A walk reads the
 session's copy of its plan: a library edit mid-walk changes nothing, and points keep their `at`.
 It names: a plan, the transfer or sweep measurements (one per mic), its points, and the
-math channel it feeds.
+math trace it feeds.
 
 ```
 WalkState { id, name, plan: PlanName, kind: WalkKind (live_transfer | sweep),
@@ -179,7 +179,7 @@ add nothing and a measurement that never averaged never reads full. A stage is f
 `fill_s` after a restart (discontinuity or delay change) or `settle_s` + one hop after an averaging
 reset, exponential stages at their `settle_blocks()`, and *FastLf*-capped stages at their capped
 length; the slowest stage is the one with the most blocks to go, not necessarily the deepest. A
-math channel's frame carries the least `filled` of its included live operands (1 for traces).
+math trace's frame carries the least `filled` of its included live operands (1 for stored traces).
 
 *Ready* at a point = tracking has not moved the delay since the last restart, `filled` = 1, and no
 fault banner. The walk pane shows *settling · 60 %* until then, and *arrival: pick one* when the
@@ -203,8 +203,8 @@ New `TraceMeta` facts (facts, not `TraceEdit`): `position: Option<TracePosition>
 plan, walk id), `captured_unsettled: bool`, `superseded: bool` (a redone point's old trace, kept,
 listed dimmed, out of the average).
 
-**The running average** is an ordinary math channel, owned by the walk's first measurement (a math
-channel's owner is never another math channel). The daemon creates it at the walk's second
+**The running average** is an ordinary math trace, owned by the walk's first measurement (a math
+trace's owner is never another math trace). The daemon creates it at the walk's second
 capture (an average needs two operands) and updates its `of` (`meas.update`) on each capture,
 redo or skip, as it already restarts maths whose operands change. Once made it stays when redos
 and skips leave fewer than two captures (operator 2026-10-29): the panes showing it keep it, and it
@@ -227,7 +227,7 @@ Traces captured before ready count in the average and the legend says so (*8 pos
 unsettled*), as it counts left-out ones. Captures are named by point and mic name (*P3 · Vilppu*),
 never by number.
 
-**Invariants:** a measurement, trace or math channel a walk names cannot be deleted while it does
+**Invariants:** a measurement, stored trace or math trace a walk names cannot be deleted while it does
 (the owners check). Deleting the walk keeps its traces, and its average stays as an ordinary
 average of them.
 
@@ -332,7 +332,7 @@ What it can claim, and what it refuses:
   is identifiable; per-surface absorption is not, so after a fit *which wall* a reflection comes
   from is geometry and holds, but *how loud* it is stays an assumption, and the overlay says so.
   An unfitted result says *absorption assumed*.
-- **Output** is labelled *simulated*, is never a math-channel operand, and never takes a
+- **Output** is labelled *simulated*, is never a math-trace operand, and never takes a
   measurement's colour. Uses: predicted reflection arrivals at a point over the measured ETC (which
   wall made that 7 ms reflection), and a direct-plus-early-energy map over the zones per speaker
   marker. Speakers are omnidirectional at first, stated on the map; directivity tables later.
@@ -388,7 +388,7 @@ run|fit|status|cancel`, texts in `ac2_scene::room::sim`.
 - **Labels** (`ac2_scene::room::sim`): *simulated*; *absorption assumed* or *absorption fitted to
   4 positions*; *simulation not valid below 180 Hz* (Schroeder, two digits); *omnidirectional
   source*. The simulated room table brackets bands reaching below the limit. A simulation is a
-  `SimState`, a type of its own, never a trace: no math channel can name it.
+  `SimState`, a type of its own, never a trace: no math trace can name it.
 
 **As built (stage 4b part 2: overlay, coverage map, UI).**
 - **Reflection overlay** (`ac2_scene::room::sim_marks`). On a sweep pane's IR / ETC view, a
@@ -463,7 +463,7 @@ after the last pick; the CLI takes `--mic 1,3` / `--meas 1,3`.
   refused). A run with every point done records the measurement's inputs as an ordinary run.
 - **No reset, no tracking** at a move: a sweep's run starts from nothing, and its delay is
   the reference's.
-- **The average** is the walk's power-average math channel over the sweep traces (transfer
+- **The average** is the walk's power-average math trace over the sweep traces (transfer
   domain), as for a live walk; the G9 band applies to it.
 - **UI.** The setup's first mic row cycles the session's transfers, then its sweeps (*Sweep 1
   · sweep, 2 mics in one play*); choosing a sweep makes a sweep walk with no further mic rows.

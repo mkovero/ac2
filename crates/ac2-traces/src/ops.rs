@@ -1,4 +1,4 @@
-//! Capture and averaging of stored traces (math channels: [`crate::math`]).
+//! Capture and averaging of stored traces (math traces: [`crate::math`]).
 //!
 //! # Time base
 //!

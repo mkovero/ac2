@@ -1,5 +1,5 @@
 //! Trace store and sessions on the fake rig: capture keeps the shown result with its
-//! metadata, averaging and math channels of stored traces use the shared time base, export re-imports exactly,
+//! metadata, averaging and math traces of stored traces use the shared time base, export re-imports exactly,
 //! imports refuse bad files with typed errors, and a session reload comes up disarmed in a
 //! new epoch with every measurement and trace as saved.
 #![allow(clippy::unwrap_used)]
@@ -64,7 +64,7 @@ fn settle(
     .expect("settled tf frame")
 }
 
-/// A math channel `a op b` of stored traces, started, run for a moment (it publishes on
+/// A math trace `a op b` of stored traces, started, run for a moment (it publishes on
 /// the audio clock) and captured.
 fn math_capture(r: &mut Rig, a: TraceId, op: MathOp, b: TraceId, name: &str) -> TraceMeta {
     let c = &mut r.c;

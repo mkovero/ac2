@@ -125,7 +125,7 @@ Phase numbers refer to §9. Phases 0–6 are the **1.0 release** (§9.1); phase 
 | Multiple measurement pairs live at once | P0 | ac | 3 |
 | Fault banners: NO REFERENCE / NO SIGNAL / CHECK ROUTING / CLIP / STALE (frame age) / NO DELAY ESTIMATE | P0 | ac + new | 4 |
 | Delay change without full ladder resettle; sub-sample delay | P1 | new | 7 |
-| Live spatial average of N transfer functions (done, as a math channel's average: `docs/design/math-channels.md`) | P1 | new | 7 |
+| Live spatial average of N transfer functions (done, as a math trace's average: `docs/design/math-traces.md`) | P1 | new | 7 |
 
 ### 3.4 Spectrum / RTA
 | Feature | Pri | Src | Phase |
@@ -141,12 +141,12 @@ Phase numbers refer to §9. Phases 0–6 are the **1.0 release** (§9.1); phase 
 |---|---|---|---|
 | Capture live → named, colored trace; slots; mandatory metadata: delay, polarity, offset, smoothing, cal state, mic, time | P0 | ac | 4 |
 | Show/hide/lock/reorder, offset, invert | P0 | ac | 4 |
-| A measurement owns its traces: one tree of measurements with their captures, math channels and sweep runs (Imported for the rest); move, fold, delete keeping or deleting them; sweep as a measurement kind (done: `docs/design/measurement-tree.md`) | P0 | new | 7 |
+| A measurement owns its traces: one tree of measurements with their captures, math traces and sweep runs (Imported for the rest); move, fold, delete keeping or deleting them; sweep as a measurement kind (done: `docs/design/measurement-tree.md`) | P0 | new | 7 |
 | Synchronized comparison cursor across traces and panes | P0 | new | 4 |
 | Phase comparison: overlays drawn relative to the selected trace's measured delay (pick key to change), so relative arrival stays visible; imported traces marked independent; per-trace delay nudge | P0 | new | 4 |
 | Delay distance readout: delay × c(temperature) next to ms, no correction layers | P1 | new | 4 |
 | Trace averaging: power, complex, coherence-weighted; common delay/phase reference stated per average | P0 | ac | 5 |
-| Math channels: A ÷ × + − B and the average of N, operands by name (live measurements and stored traces), complex for transfer functions (magnitude and phase on a stated delay reference), levels for spectra / RTA, drawn in their kind's pane, live, editable, captured (done: `docs/design/math-channels.md`) | P1 | new | 5 |
+| Math traces: A ÷ × + − B and the average of N, operands by name (live measurements and stored traces), complex for transfer functions (magnitude and phase on a stated delay reference), levels for spectra / RTA, drawn in their kind's pane, live, editable, captured (done: `docs/design/math-traces.md`) | P1 | new | 5 |
 | Target curves (file or drawn) | P1 | ac (file) | 5 |
 | CSV export; import common analyzer text exports | P0 | ac (export) | 5 |
 | Sessions: whole state save/load (always loads disarmed) | P0 | new | 5 |
@@ -407,7 +407,7 @@ Transports: `ipc://` (Linux/macOS), `tcp://127.0.0.1` (Windows) — an in-proces
   Reply `{v, id, result | error{code, msg}}`. Request ids are deduplicated per client
   for a retry window, so a retried command never executes twice.
 - Command groups: `session`, `gen` (lease, full-state `set`, stop, ceiling), `meas` (math
-  channels and sweeps are measurement kinds), `delay`, `trace`, `cal`, `spl`, `sweep`, `rec`,
+  traces and sweeps are measurement kinds), `delay`, `trace`, `cal`, `spl`, `sweep`, `rec`,
   `state`, `grid`, `file`, `server`. `docs/protocol.md` is the normative list.
 - Mutations take an optional `expect_rev` precondition; stale → `conflict` error.
   The daemon commits state changes serially.
@@ -527,7 +527,7 @@ Daemon auto-spawn locally; staleness detected by build id in `status`, not file 
   as everywhere) and is shown in the top bar of every other layout.
 - The keys that act on "the selected curve" (`A` show / hide, `Delete` / `Backspace`
   delete after a confirmation, the offsets) act on the item selected last: a measurement
-  (its row in the measurement tree, its live curve's or a math channel's row, `N`, a pane's
+  (its row in the measurement tree, its live curve's or a math trace's row, `N`, a pane's
   chip) or a stored trace (the tree, `V`); `Shift+A` the item's whole group (the
   measurement and everything under it); selecting a measurement
   deselects the trace, `Esc` hands the keys back to the measurement. Hiding a measurement
@@ -576,7 +576,7 @@ device, sample rate, buffer size and job load). Hosted CI never stands in for an
 | 4 | done (headless UI snapshots on lavapipe/WARP/Metal) | keyboard-only tuning of a real speaker per OS — **open** (Linux: measured from the app on pupu) |
 | 5 | done (traces, sessions, calibration — acoustic and electrical, mic library — SPL) | mains + sub + delay workflow per OS — **open** (Linux: electrical SPL calibration on pupu) |
 | 6 | done (packages, release dry run, mDNS) | clean install → first measurement < 2 min per OS — **open** (macOS: disk image installs, app starts and asks for microphone access; Windows: MSI install and simulated rig in a VM); signing needs Apple Developer ID + Windows code-signing cert |
-| 7 | in progress. Done, each with its design note in `docs/design/`: sweep with H2…H5 / THD and IR (`sweep-distortion.md`); ISO 3382-1 room parameters (`room-metrics.md`); rolling Leq windows, limits, alarms, presets, per-second SPL log, peak limits, position correction (`leq.md`); band Leq (`band-leq.md`); acoustic and electrical calibration dialogs (`q7-calibration.md`); spectrograph (`spectrograph.md`); multi-resolution spectrum, tone / density level (`multires-spectrum.md`); delay change without resettle, sub-sample delay and sweep arrival (`delay-no-resettle.md`, `subsample-arrival-group-delay.md`); output-vs-input drift detection (`multi-device.md`); raw capture and replay (`raw-capture.md`); math channels incl. spatial average (`math-channels.md`); measurement tree (`measurement-tree.md`); audio recovery (`audio-recovery.md`); Settings and run-time max level (`settings.md`). ASIO in progress (`asio.md`: the only Windows backend, in every Windows build, WASAPI removed (W1); passes under Wine; FlexASIO in Windows CI; RME's driver on a Babyface Pro in a VM passes the 1 h run and loopback timing; control panel during a run, unplug and a real PC pending, ships as preview until then), open: multi-device support (resampling), input-vs-input drift | 24 h log clean — **done** on Linux (pupu, 32 h log with 26 h continuous, no discontinuity; `docs/rigs/pupu.md`) |
+| 7 | in progress. Done, each with its design note in `docs/design/`: sweep with H2…H5 / THD and IR (`sweep-distortion.md`); ISO 3382-1 room parameters (`room-metrics.md`); rolling Leq windows, limits, alarms, presets, per-second SPL log, peak limits, position correction (`leq.md`); band Leq (`band-leq.md`); acoustic and electrical calibration dialogs (`q7-calibration.md`); spectrograph (`spectrograph.md`); multi-resolution spectrum, tone / density level (`multires-spectrum.md`); delay change without resettle, sub-sample delay and sweep arrival (`delay-no-resettle.md`, `subsample-arrival-group-delay.md`); output-vs-input drift detection (`multi-device.md`); raw capture and replay (`raw-capture.md`); math traces incl. spatial average (`math-traces.md`); measurement tree (`measurement-tree.md`); audio recovery (`audio-recovery.md`); Settings and run-time max level (`settings.md`). ASIO in progress (`asio.md`: the only Windows backend, in every Windows build, WASAPI removed (W1); passes under Wine; FlexASIO in Windows CI; RME's driver on a Babyface Pro in a VM passes the 1 h run and loopback timing; control panel during a run, unplug and a real PC pending, ships as preview until then), open: multi-device support (resampling), input-vs-input drift | 24 h log clean — **done** on Linux (pupu, 32 h log with 26 h continuous, no discontinuity; `docs/rigs/pupu.md`) |
 
 Hardware so far: Linux on one rig (JACK, RME Fireface 400, 96 kHz / 256 frames: transfer,
 delay finder, sweeps, electrical SPL calibration, remote CLI and app over CURVE, mDNS, REW

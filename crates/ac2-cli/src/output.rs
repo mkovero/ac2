@@ -162,7 +162,7 @@ pub fn meas_kind(k: &MeasKind) -> String {
     }
 }
 
-/// Where a trace or math channel is filed: `#3` (measurement 3) or `imported`.
+/// Where a stored trace or math trace is filed: `#3` (measurement 3) or `imported`.
 pub fn owner_text(o: ac2_proto::model::TraceOwner) -> String {
     match o {
         ac2_proto::model::TraceOwner::Meas { meas } => format!("#{meas}"),

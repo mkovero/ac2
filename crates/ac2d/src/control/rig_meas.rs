@@ -16,7 +16,7 @@
 //! Traces are always the session's: a trace filed under a rig meter is saved in the
 //! session as an import (no owner), so that the file holds nothing that names a
 //! measurement it does not have; a load replaces such traces like any other. A math
-//! channel filed under a rig meter is saved the same way.
+//! trace filed under a rig meter is saved the same way.
 //!
 //! The monitor at start: with `rig.monitor_start` on, each successful `session.open` while
 //! rig meters exist is recorded in the rig settings, and a restarted daemon reopens that

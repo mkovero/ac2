@@ -116,7 +116,7 @@ fn ctrl_m_makes_a_spectrum_from_an_empty_daemon() -> R {
             "RTA",
             "SPL meter",
             "Sweep",
-            "Math channel",
+            "Math trace",
             "Alignment",
             "Spatial average",
             "Programme meter"

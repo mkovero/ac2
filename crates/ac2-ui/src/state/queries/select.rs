@@ -312,7 +312,7 @@ impl AppState {
     }
 
     /// A click on a legend row of pane `p`: selects exactly the curve it names — a stored
-    /// trace, else the measurement (or math channel) whose live curve it is, as its row in
+    /// trace, else the measurement (or math trace) whose live curve it is, as its row in
     /// the list does — so the keys of the selection (A hides it) act on it. The pane keeps
     /// what it shows: the curve is on it already, and a compared curve of another
     /// measurement selected must not swap the pane's curves under the pointer.
@@ -327,7 +327,7 @@ impl AppState {
             }
             TraceKey::Live(id) => {
                 if let Some(m) = self.meas(id) {
-                    // A math channel's curve is its own row; a measurement's is its live row.
+                    // A math trace's curve is its own row; a measurement's is its live row.
                     let live = ac2_scene::meas_list::has_live_curve(&m.config.kind);
                     self.rig.selected = Some(id);
                     self.rig.selected_trace = None;
@@ -363,8 +363,8 @@ impl AppState {
         self.rig.selected_live = Some(id);
     }
 
-    /// A math channel's row chosen (click, Tab): a child row of its owner, selected so the
-    /// keys act on the channel; no pane changes.
+    /// A math trace's row chosen (click, Tab): a child row of its owner, selected so the
+    /// keys act on the math trace; no pane changes.
     pub(in crate::state) fn select_math_row(&mut self, id: MeasId) {
         if self.meas(id).is_none() {
             return;

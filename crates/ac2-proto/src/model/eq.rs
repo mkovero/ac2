@@ -400,7 +400,7 @@ pub enum EqEdit {
         /// Clear the mark instead.
         clear: bool,
     },
-    /// Show (or stop showing) a curve of the measurement after the set: a math channel
+    /// Show (or stop showing) a curve of the measurement after the set: a math trace
     /// `curve × set`.
     Predict {
         /// The set.

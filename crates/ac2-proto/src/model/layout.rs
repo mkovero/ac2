@@ -79,10 +79,10 @@ pub struct PaneEntry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum EntryRef {
-    /// A measurement's group: its live curve, its math channels, its shown traces, what is
+    /// A measurement's group: its live curve, its math traces, its shown stored traces, what is
     /// filed under it now and later.
     Group { meas: MeasId },
-    /// One live curve: a measurement's or a math channel's.
+    /// One live curve: a measurement's or a math trace's.
     Live { meas: MeasId },
     /// One stored trace.
     Trace { trace: TraceId },

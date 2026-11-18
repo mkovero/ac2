@@ -77,7 +77,7 @@ impl AppState {
     }
 
     /// The live curve a pane key acts on: the selected measurement's when the focused pane
-    /// draws it (its own, a math channel of its group, or one compared behind it), else the
+    /// draws it (its own, a math trace of its group, or one compared behind it), else the
     /// pane's own measurement. Never a measurement the pane does not show, whatever the
     /// list has selected.
     pub fn focused_live(&self) -> Option<&Measurement> {
@@ -405,7 +405,7 @@ impl AppState {
         self.tree_rows_folded(&self.rig.collapsed)
     }
 
-    /// Every measurement and math channel in the tree's order, folded groups included:
+    /// Every measurement and math trace in the tree's order, folded groups included:
     /// folding hides a group's rows, not the measurements in it. The imported group's
     /// header is no measurement and is left out.
     pub fn tree_meas_order(&self) -> Vec<MeasId> {
@@ -471,7 +471,7 @@ impl AppState {
     }
 
     /// The group (measurement or imported) that owns what is selected: the selected trace's
-    /// owner, a math channel's owner, else the selected measurement.
+    /// owner, a math trace's owner, else the selected measurement.
     pub fn selected_group(&self) -> Option<ac2_proto::model::TraceOwner> {
         use ac2_proto::model::TraceOwner;
         if let Some(t) = self.selected_trace_meta().filter(|_| self.keys_on_trace()) {
@@ -694,7 +694,7 @@ impl AppState {
     }
 
     /// The measurement whose group a pane showing `shown` draws: `shown`, or the owner of
-    /// the math channel it is. `None` with nothing shown (or a math channel under Imported).
+    /// the math trace it is. `None` with nothing shown (or a math trace under Imported).
     pub fn group_of_shown(&self, shown: Option<&Measurement>) -> Option<MeasId> {
         let m = shown?;
         ac2_scene::meas_list::meas_group(m, &self.measurements()).meas()
@@ -724,7 +724,7 @@ impl AppState {
 
     /// Whether a pane of kind `kind` showing `shown` draws measurement `m`'s live curve as
     /// its own: it publishes one the pane draws, is not hidden, and is the pane's
-    /// measurement or a math channel of the pane's group. Stopped, it keeps its last curve,
+    /// measurement or a math trace of the pane's group. Stopped, it keeps its last curve,
     /// tagged `stopped`: hiding it is the operator's call (A).
     pub fn live_on_pane(
         &self,

@@ -1,4 +1,4 @@
-//! An alignment math channel's frame (`docs/design/alignment.md`): the fit of
+//! An alignment math trace's frame (`docs/design/alignment.md`): the fit of
 //! [`ac2_core::align`] over the operands' complex values on one time base, the curve it
 //! publishes (their sum with the fit applied, referred to A's delay) and the alignment
 //! view's curves.

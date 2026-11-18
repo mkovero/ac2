@@ -60,7 +60,7 @@ pub fn alignment(
         );
     };
     let MeasKind::Math { config } = &m.config.kind else {
-        unreachable!("an alignment is a math channel")
+        unreachable!("an alignment is a math trace")
     };
     let MathExpr::Align { a, b, band, .. } = config.expr else {
         unreachable!("an alignment's expression")

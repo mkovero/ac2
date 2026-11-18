@@ -129,7 +129,7 @@ impl AppState {
     }
 
     /// What a row of the rig in `rig`'s list is called in the drag label and toasts: a
-    /// measurement's or math channel's name, a stored trace's label.
+    /// measurement's or math trace's name, a stored trace's label.
     pub(in crate::state) fn row_name(&self, item: TreeKey) -> Option<String> {
         self.row_drop(item).map(|d| d.name)
     }
@@ -201,7 +201,7 @@ impl AppState {
     }
 
     /// The label beside the pointer: `FOH SPL → pane 2`, `FOH SPL → pane 2, becomes SPL`
-    /// where the drop turns the pane's kind; over a row the math channel the drop opens (or
+    /// where the drop turns the pane's kind; over a row the math trace the drop opens (or
     /// why the two do not combine); `None` elsewhere.
     pub fn drag_label(&self) -> Option<String> {
         let d = self.row_drag()?;

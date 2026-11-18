@@ -772,7 +772,7 @@ fn tab_steps_on_into_the_next_rigs_list() {
     assert_eq!(t.st.active(), RIG, "a window open: within the rig shown");
 }
 
-/// A row of one rig dropped on a row of another makes no math channel: one rig's
+/// A row of one rig dropped on a row of another makes no math trace: one rig's
 /// measurements combine.
 #[test]
 fn rows_of_two_rigs_do_not_combine() {

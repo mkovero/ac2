@@ -1,5 +1,5 @@
 //! Stored traces outside the live DSP path: the column data a trace holds, capture from a
-//! published frame, averaging, math channels' combinations, the text formats traces are imported from and
+//! published frame, averaging, math traces' combinations, the text formats traces are imported from and
 //! exported to, and the session directory format.
 //!
 //! The daemon owns the trace store and calls into this crate. Display edits (offset, polarity,

@@ -190,7 +190,7 @@ fn math_average_legend_and_banner() {
     snapshot(&mut h, "transfer_math_average");
 }
 
-/// Shift+M: the math channel dialog over the rig's measurements, A ÷ B by name.
+/// Shift+M: the math trace dialog over the rig's measurements, A ÷ B by name.
 #[test]
 fn math_dialog() {
     if !have_gpu("math_dialog") {
@@ -239,7 +239,7 @@ fn spectrum_math() {
     });
     h.key_press_modifiers(Modifiers::ALT, Key::Num2);
     h.key_press(Key::W);
-    // The pane shows the math channel: its caption is the expression and what it means.
+    // The pane shows the math trace: its caption is the expression and what it means.
     common::show_on(&mut h.state_mut().state, PaneKind::Spectrum, math);
     // The level axis follows the difference (±6 dB) only once a frame of it has been drawn on
     // the pane; until then it stands on the dBFS default, above which the curve is off screen.

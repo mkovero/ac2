@@ -1,4 +1,4 @@
-//! Math channels on a fake rig with three mic inputs (+3 dB, −3 dB and silent paths, the
+//! Math traces on a fake rig with three mic inputs (+3 dB, −3 dB and silent paths, the
 //! second arriving `ACOUSTIC_DELAY` samples after the first):
 //!
 //! - the live average of three positions reads the analytic power average, the silent
@@ -294,7 +294,7 @@ fn power_average_of_three_positions() {
         "an average keeps the epoch"
     );
 
-    // Operands stay transfers on the channel's grid, and are not deleted under it.
+    // Operands stay transfers on the math trace's grid, and are not deleted under it.
     let e = c
         .call(Command::MeasDelete {
             meas: MeasId(2),
@@ -337,7 +337,7 @@ fn power_average_of_three_positions() {
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
 
-    // Deleting the channel frees its operands.
+    // Deleting the math trace frees its operands.
     c.ok(Command::MeasDelete {
         meas: MeasId(4),
         traces: ac2_proto::model::OwnedTraces::Keep,
@@ -384,7 +384,7 @@ fn ratio_edit_capture_and_summation() {
         assert!(off.abs() < 5.0, "{:.0} Hz: {}° off", grid_freq(i), off);
     }
 
-    // Captured: the trace keeps +6 dB while the channel is edited to ×.
+    // Captured: the trace keeps +6 dB while the math trace is edited to ×.
     let captured = c.trace(Command::TraceCapture {
         meas: q,
         name: "ratio".into(),
@@ -477,7 +477,7 @@ fn ratio_edit_capture_and_summation() {
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
 
     // Refused: an imported operand in a sum (no shared time base), a spectrum operand in
-    // transfer math, a math channel as an operand.
+    // transfer math, a math trace as an operand.
     let mut text = String::new();
     for k in 0..=30 {
         let f = 20.0 * 1000f64.powf(f64::from(k) / 30.0);
@@ -637,7 +637,7 @@ fn spectrum_difference_on_the_spectrum_stream() {
             },
         },
     );
-    // A math channel is drawn in its measurement's colours: it has none of its own.
+    // A math trace is drawn in its measurement's colours: it has none of its own.
     let e = c
         .call(Command::MeasColour {
             meas: id,

@@ -729,7 +729,7 @@ mod settings;
 mod eq_edits;
 
 /// The measurement tree as the operator sees it: Main L with two captures and a math
-/// channel made on it, the spectrum, an import; captures stay under Main L.
+/// trace made on it, the spectrum, an import; captures stay under Main L.
 fn tree_state() -> State {
     let mut s = daemon_state();
     let main = TraceOwner::Meas { meas: MeasId(1) };

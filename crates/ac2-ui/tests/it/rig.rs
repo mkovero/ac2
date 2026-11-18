@@ -376,7 +376,7 @@ impl Inner {
         f
     }
 
-    /// Each operand of math channel `m`, included unless its measurement is stopped.
+    /// Each operand of math trace `m`, included unless its measurement is stopped.
     fn operands(&self, m: &Measurement) -> Vec<OperandState> {
         let MeasKind::Math { config } = &m.config.kind else {
             panic!("{} is not math", m.config.name)

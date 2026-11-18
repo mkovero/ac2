@@ -1,4 +1,4 @@
-//! `ac2 math …`: math channels and their operands.
+//! `ac2 math …`: math traces and their operands.
 
 use std::str::FromStr;
 
@@ -10,29 +10,29 @@ use ac2_scene::unit_text::{Freq, Time};
 /// `math …`.
 #[derive(Debug, Subcommand)]
 pub enum MathCmd {
-    /// Create a math channel: `ac2 math new "Main L / Sub"`, `--op div --a "Main L" --b
+    /// Create a math trace: `ac2 math new "Main L / Sub"`, `--op div --a "Main L" --b
     /// Sub`, or `--op avg --of "Seat 1,Seat 2,Seat 3"`. It is listed in `meas list` and
     /// captured like any measurement (`trace capture`).
     New {
-        /// The channel.
+        /// The math trace.
         #[command(flatten)]
         math: MathArgs,
         /// Start right away.
         #[arg(long)]
         start: bool,
     },
-    /// Change a math channel: its operands and operator (as for `new`), its average method,
+    /// Change a math trace: its operands and operator (as for `new`), its average method,
     /// phase reference, smoothing or name. What is not given stays as it is.
     Set {
-        /// The math channel, by id or name.
-        channel: MeasRef,
+        /// The math trace, by id or name.
+        math_trace: MeasRef,
         /// What changes.
         #[command(flatten)]
         math: MathArgs,
     },
 }
 
-/// A math channel as typed.
+/// A math trace as typed.
 #[derive(Debug, Args)]
 pub struct MathArgs {
     /// `"A op B"` with the operator spaced: `/` or `÷` (A relative to B), `*` or `×`

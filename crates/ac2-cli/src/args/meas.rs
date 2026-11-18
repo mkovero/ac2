@@ -233,8 +233,8 @@ pub enum MeasCmd {
         /// tf averaging: FIFO blocks of the full-rate stage (≥ 1).
         #[arg(long)]
         blocks: Option<u32>,
-        /// Spectrum FFT length: a power of two, 64 … 65536 samples. A math channel's
-        /// operand keeps its length (edit the math channel first).
+        /// Spectrum FFT length: a power of two, 64 … 65536 samples. A math trace's
+        /// operand keeps its length (edit the math trace first).
         #[arg(long, value_name = "SAMPLES")]
         fft: Option<SampleCount>,
         /// Spectrum window.
@@ -251,7 +251,7 @@ pub enum MeasCmd {
         #[arg(long, value_name = "1/N|multi[:1/N]")]
         resolution: Option<ResolutionArg>,
         /// The colour its curves are drawn in: `1` … `8` (the app's `colour N`), `grey`,
-        /// or `auto` (by its id, the default). Not for a math channel (its measurement's).
+        /// or `auto` (by its id, the default). Not for a math trace (its measurement's).
         #[arg(long, value_name = "N|grey|auto")]
         colour: Option<ColourArg>,
         /// Spectrum and RTA: how every client draws its curves (the app's B).
@@ -302,15 +302,15 @@ pub enum MeasCmd {
         #[command(subcommand)]
         cmd: MeasLayoutCmd,
     },
-    /// Delete a measurement. One that owns stored traces or math channels needs
+    /// Delete a measurement. One that owns stored traces or math traces needs
     /// `--keep-traces` (they move to the imported group) or `--delete-traces`.
     Rm {
         /// Id or name.
         meas: MeasRef,
-        /// Keep its traces and math channels, moved to the imported group.
+        /// Keep its stored traces and math traces, moved to the imported group.
         #[arg(long, conflicts_with = "delete_traces")]
         keep_traces: bool,
-        /// Delete its traces and math channels with it.
+        /// Delete its stored traces and math traces with it.
         #[arg(long)]
         delete_traces: bool,
     },

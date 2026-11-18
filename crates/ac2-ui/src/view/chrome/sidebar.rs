@@ -30,7 +30,7 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
             "Click shows it in the focused pane · {} · the arrow folds it · {} / {} step \
              through the list · {} shows / hides its curve, {} everything under it · {} \
              deletes it (asks first) · drag onto a pane to show it there, onto another row \
-             to combine the two in a math channel",
+             to combine the two in a math trace",
             ac2_scene::meas_list::edit_hint(edit_key.as_deref()),
             key_hint(app, CommandId::NextInTree),
             key_hint(app, CommandId::PrevInTree),
@@ -42,7 +42,7 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         select: format!(
             "Click selects it (again: deselects) · double click renames (an EQ set: opens \
              it) · {} moves it · {} / {} step through the shown traces · drag onto another \
-             row to combine the two in a math channel",
+             row to combine the two in a math trace",
             key_hint(app, CommandId::MoveTrace),
             key_hint(app, CommandId::NextTrace),
             key_hint(app, CommandId::PrevTrace)

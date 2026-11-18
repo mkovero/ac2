@@ -542,8 +542,8 @@ impl AppState {
         }
     }
 
-    /// What a math channel can combine: the live measurements and the stored traces.
-    /// What a math channel can combine; `owner`'s live curve and traces first.
+    /// What a math trace can combine: the live measurements and the stored traces.
+    /// What a math trace can combine; `owner`'s live curve and traces first.
     pub(in crate::state) fn math_candidates(
         &self,
         owner: Option<ac2_proto::model::TraceOwner>,

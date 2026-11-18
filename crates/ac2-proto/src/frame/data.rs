@@ -49,7 +49,7 @@ pub struct TfFrame {
     pub coh: Vec<f32>,
     /// Validity per column.
     pub validity: Vec<ValidityMask>,
-    /// An alignment math channel's view curves; `None` for every other transfer frame.
+    /// An alignment math trace's view curves; `None` for every other transfer frame.
     pub align: Option<crate::model::AlignCurves>,
     /// An average's range across positions ([`crate::frame::MathState::range`]); `None` for
     /// every other transfer frame and below three positions.

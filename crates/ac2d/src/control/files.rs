@@ -562,7 +562,7 @@ impl Control {
                 crate::leq_log::LeqLog::from_rows(l.rows, l.bands),
             );
         }
-        // Traces first: a math channel's stored operands must be there when it starts.
+        // Traces first: a math trace's stored operands must be there when it starts.
         for t in data.traces {
             self.register_grid(t.grid.clone());
             self.traces
@@ -593,7 +593,7 @@ impl Control {
             });
             let grid_id = grids.remove(&sm.id).map(|g| self.register_grid(g));
             let running = sm.running && sm.config.kind.is_job();
-            // A math channel takes its owner's family; an index no theme has is no choice.
+            // A math trace takes its owner's family; an index no theme has is no choice.
             let colour = sm
                 .colour
                 .filter(|c| c.is_valid() && !matches!(sm.config.kind, MeasKind::Math { .. }));
@@ -625,7 +625,7 @@ impl Control {
         for m in &loaded {
             self.eq_refresh(m.id);
         }
-        // Then the jobs, once every measurement is there: a math channel looks its live
+        // Then the jobs, once every measurement is there: a math trace looks its live
         // operands up whatever their order.
         if self.session.is_some() {
             for mut meas in loaded.into_iter().filter(|m| m.running) {
@@ -650,7 +650,7 @@ impl Control {
 
 /// Checks `data` before a load replaces anything with it: everything the live commands
 /// would refuse is refused here too. Returns the grid of each measurement that has one before
-/// a session runs; a transfer math channel's is its operands' (checked against the loaded
+/// a session runs; a transfer math trace's is its operands' (checked against the loaded
 /// measurements and traces).
 pub(super) fn check_session(data: &SessionData) -> Result<HashMap<MeasId, GridDef>, ProtoError> {
     let mut grids: HashMap<MeasId, GridDef> = HashMap::new();
@@ -723,7 +723,7 @@ pub(super) fn check_session(data: &SessionData) -> Result<HashMap<MeasId, GridDe
             }
         }
     }
-    // Every owner is a measurement of the session that can own (not a math channel).
+    // Every owner is a measurement of the session that can own (not a math trace).
     let owner_ok = |o: TraceOwner| match o.meas() {
         None => true,
         Some(id) => data
@@ -740,7 +740,7 @@ pub(super) fn check_session(data: &SessionData) -> Result<HashMap<MeasId, GridDe
                 .iter()
                 .filter_map(|m| match &m.config.kind {
                     MeasKind::Math { config } => {
-                        Some((format!("math channel {}", m.id), config.owner))
+                        Some((format!("math trace {}", m.id), config.owner))
                     }
                     _ => None,
                 }),

@@ -55,7 +55,7 @@ inputs to capture. **Measurements** run on it: transfer functions (`tf`), spectr
 SPL meters and sweeps. In the app, every setting lives in **Settings** (**Ctrl+P**, the ⚙ in
 the top bar); **Shift+O** opens its Audio I/O page; **Ctrl+M** (*New measurement…*, also
 the last row of every pane's list) lists every kind — transfer, spectrum, RTA, SPL meter,
-sweep, math channel, alignment, spatial average — with what each measures, and opens the chosen
+sweep, math trace, alignment, spatial average — with what each measures, and opens the chosen
 kind's settings (created, started and selected on **Enter**, on a screen of its own); a row it
 cannot make now says why. *Spatial average* opens the math dialog filled in for
 [the average](#the-average-spatial-average) of every transfer measurement. Its last row, *Programme meter*, makes no measurement: **Enter** opens its form
@@ -114,7 +114,7 @@ naming the rig; the rig shown stays as it is. Clicking a row of another rig (or 
 with Enter or Tab) switches to that rig first, as the drop-down does, then acts as a click
 there; with a window open the switch is refused, and Tab skips the other rigs' rows. A click
 on a rig's heading switches to it. A row of another rig dropped on a row of this one (a math
-channel) is refused: *not combined: the two rows are of different rigs; math uses one rig's (pupu)*.
+trace) is refused: *not combined: the two rows are of different rigs; math uses one rig's (pupu)*.
 
 Choosing a measurement row never changes another rig's pane: a row with its own panes
 brings them, one without only selects. A measurement's saved layout keeps only its own
@@ -905,8 +905,8 @@ opens no pane: the toast says to **Tab** to it.
 
 Each pane's title names its measurement in plain text (`2  TF 1`, cut short with … when the
 pane is narrow). Every pane draws that measurement's **group** as the measurement tree lists it, and nothing else of its own
-accord: its live curve (unless hidden), the math channels filed under it, and its shown
-stored traces of the kinds the pane draws. A math channel dropped on a pane draws its
+accord: its live curve (unless hidden), the math traces filed under it, and its shown
+stored traces of the kinds the pane draws. A math trace dropped on a pane draws its
 owner's group. A stopped measurement keeps its last curve, tagged `stopped` in the legend
 and list; **S** starts it again. A pane never borrows another measurement's data: while its
 own has nothing to draw (hidden, stopped before its first frame, or not measured yet) it
@@ -914,8 +914,8 @@ says so (`Spectrum 2: no frames yet`, `FOH SPL hidden — A shows it`).
 
 | Pane | Draws |
 |---|---|
-| **Transfer** | the group's live transfer curve, math channels, captures, targets and sweep runs (a sweep measurement dropped on it: its shown runs, no live curve) |
-| **Spectrum / RTA** | the group's live spectrum or RTA, math channels and stored spectra / band sets; two spectrum measurements are two panes, each with its own curves |
+| **Transfer** | the group's live transfer curve, math traces, captures, targets and sweep runs (a sweep measurement dropped on it: its shown runs, no live curve) |
+| **Spectrum / RTA** | the group's live spectrum or RTA, math traces and stored spectra / band sets; two spectrum measurements are two panes, each with its own curves |
 | **Sweep / distortion** | one run of its sweep measurement: the selected run when it is one of that sweep's, else the run of it picked last, else its newest; never another sweep's run |
 | **SPL** | its one meter (no compare); to see two meters, add a pane and drag the other SPL measurement onto it |
 
@@ -929,7 +929,7 @@ pane **C** opens *Draw in Transfer* (the pane's title): the measurements of the 
 lead first, each with what its group brings and a tick on those the pane draws
 (`✓ Main L · live + 3 traces · lead`, `  Main R · live + 1 trace`). **Enter** ticks or unticks a
 row and the list stays open; **Esc** closes. A ticked measurement's group (its live curve, math
-channels and shown traces, and what is filed under it later) is drawn behind the lead, tagged
+traces and shown traces, and what is filed under it later) is drawn behind the lead, tagged
 `cmp` in the legend and on its tree row, in this pane only. A pane with nothing picked takes the
 first measurement ticked as its lead; unticking the lead makes the next ticked one lead, and
 unticking the last leaves the pane empty. A sweep ticked over a sweep pane draws its shown run
@@ -959,7 +959,7 @@ A row of the measurement list clicked (or reached with **Tab** / **Shift+Tab**):
 - a **measurement row** selects the measurement. One with its own panes brings them
   ([Layouts follow the measurement](#layouts-follow-the-measurement)); one without changes
   no pane;
-- a **child row** — a live curve, stored trace or math channel — only selects it, for the
+- a **child row** — a live curve, stored trace or math trace — only selects it, for the
   keys below; no pane changes. One no pane draws stays selected all the same.
 
 Which measurement the keys act on:
@@ -975,7 +975,7 @@ Which measurement the keys act on:
 - A pane can draw several curves. The selected one gets the keys when the focused pane
   draws it: a stored trace (a click on its legend row or list row, or **V**) for **K**,
   the offset, **U**, **,** / **.**, **E** and **P**; a live curve compared into the pane
-  or a math channel of its group for capture and the offset. A trace or measurement
+  or a math trace of its group for capture and the offset. A trace or measurement
   selected in the list that the focused pane does not draw leaves the keys with the
   pane's own measurement; the pane's title names the stored trace the keys act on.
 - Keys of the selection (**A**, **C**, **Delete**, colour, mic curve, rename) act on the
@@ -985,7 +985,7 @@ Which measurement the keys act on:
 
 One measurement and at most one stored trace are selected; the one selected last gets the
 keys that act on "the selected curve". A click on a measurement row, live curve or math
-channel (or **Tab** onto one) gives them to the measurement; a click on a trace (or **V**,
+trace (or **Tab** onto one) gives them to the measurement; a click on a trace (or **V**,
 **Alt+V**) to the trace; **End** hands them back to
 the measurement. The tree shows which: the measurement row is filled while it has the keys,
 only outlined while a later-selected trace has them.
@@ -1002,13 +1002,13 @@ only outlined while a later-selected trace has them.
   written to `ui.toml` either.
   A click on a legend row selects that curve, so click then **A** hides it.
 - **Shift+A** hides a measurement and everything under it (live curve, traces, math
-  channels), and shows them all when all are hidden (with a trace selected: its group).
+  traces), and shows them all when all are hidden (with a trace selected: its group).
 - **Delete** / **Backspace** on a measurement that owns no stored traces asks: *Delete
   measurement TF 2? Its live curve and settings go; it owns no stored traces.* **Delete**
   or **Backspace** deletes (**Enter** does nothing there), **Esc** or **N** keeps. One that owns traces or math
-  channels asks what happens to them
-  ([below](#deleting-a-measurement-that-owns-traces)). A measurement a math channel computes from cannot be deleted; the
-  window names the channel to edit or delete first.
+  traces asks what happens to them
+  ([below](#deleting-a-measurement-that-owns-traces)). A measurement a math trace computes from cannot be deleted; the
+  window names the math trace to edit or delete first.
 - On a stored trace both act on the trace ([below](#rename-export-delete)).
 
 #### One pane only, full screen (W)
@@ -1070,12 +1070,12 @@ pupu`); `ac2 meas layout clear <meas>` removes a measurement's own panes. Deleti
 #### Dragging a row onto a pane
 
 This is how a pane is changed. Any row of the measurement list (a measurement, its live
-curve, a math channel, a stored trace, a row of another connected rig) and any row of the
+curve, a math trace, a stored trace, a row of another connected rig) and any row of the
 Inputs list (an input, a pair) can be dragged onto a pane: hold the button and move a few
 pixels. A label beside the pointer says where it lands (`FOH SPL → pane 2`, or
 `FOH SPL → pane 2, becomes SPL` when the pane turns into another kind) and the target is
 shaded faintly with a dashed edge. Dropped in the middle of a pane, that pane's content is
-replaced by the row (a live curve or math channel: that measurement; a stored trace: its
+replaced by the row (a live curve or math trace: that measurement; a stored trace: its
 measurement, in the kind of pane that draws the trace; an input: its Programme meters; a
 pair: its Programme pane on the goniometer), turning into the kind that draws it; focus
 moves there and no other pane changes. The selection in the list stays. A drop is
@@ -1090,7 +1090,7 @@ on a pane's edge. A row of another rig is shown by that rig's numbering and the 
 on that rig ([Many rigs](#many-rigs-in-one-window)). **Esc** cancels the drag; a drop
 outside the panes does nothing.
 
-A row dropped onto **another row** of the list combines the two in a math channel: see
+A row dropped onto **another row** of the list combines the two in a math trace: see
 [Dropping a row on another](#dropping-a-row-on-another).
 
 #### Undo and redo (Ctrl+Z, Ctrl+Shift+Z)
@@ -1542,7 +1542,7 @@ spectrum FIFO holds at most 511 frames at 65 536 points; an RTA's at most 65 536
   1/12 … 1/96 oct) and *Window* (Hann, Blackman-Harris, flat-top, rectangular); the hint
   says what it gives at the session's rate (`0.73 Hz bins · 1365 ms window · 5.7 updates/s`;
   `0.68 s window at LF … 21 ms at HF`). A new resolution or window restarts a running
-  spectrum. A spectrum named in a math channel keeps its resolution (operands share one bin
+  spectrum. A spectrum named in a math trace keeps its resolution (operands share one bin
   grid); its window changes freely.
 - The list says it: `RTA  Room · running · avg FIFO 2400 frames`; so does `ac2 meas list`.
 - **R** restarts the average; so does changing it.
@@ -1694,7 +1694,7 @@ shows where: a faint grey shade with dashed edges, and the cursor says it
   [LF harmonics: fine](#low-frequency-harmonics-lf-harmonics-fine) moves it down (to less
   than half). Distortion is drawn 1/24-octave band-averaged; the marker there refers to the
   harmonic estimates.
-- Stored transfer captures and math channels carry no marker; sweep runs do.
+- Stored transfer captures and math traces carry no marker; sweep runs do.
 - Settings › Display › Resolution marker turns it off (on by default).
 
 ### Smoothing
@@ -1729,14 +1729,14 @@ transfer legend row say the smoothing.
   trace keeps its mode unless `--phase` or `--magnitude-only`.
 
 Smoothing never changes stored data: captures keep the unsmoothed curve (starting with the
-measurement's smoothing); averages and math channels combine unsmoothed curves.
+measurement's smoothing); averages and math traces combine unsmoothed curves.
 
 #### Banners
 
 Banners say what is wrong rather than show a misleading curve: **NO REFERENCE**, **NO
 SIGNAL**, **CHECK ROUTING**, **CLIP**, **STALE** (with the age: `STALE · 3.2 s`), **NO DELAY
 ESTIMATE**, **CLOCK DRIFT** (in ppm), **OUTPUT TIMING JUMP**, **AUDIO STOPPED** (with the
-reason), **DAEMON NOT RESPONDING**, and for math channels **AVERAGE · 3 OF 4 POSITIONS** / **NO AVERAGE** / **NO RESULT**.
+reason), **DAEMON NOT RESPONDING**, and for math traces **AVERAGE · 3 OF 4 POSITIONS** / **NO AVERAGE** / **NO RESULT**.
 
 #### Headroom advice
 
@@ -1833,10 +1833,10 @@ the same plate, and the 3D spectrograph stands them on its front row. A stopped 
 the marks of its newest frame; before any data there are none. **T** to traces only hides
 every mark and the list, on both panes.
 
-### Math channels
+### Math traces
 
-A **math channel** is a live result made from other curves by name: **A ÷ B**, **A × B**,
-**A + B**, **A − B**, or the **average** of several ([math-channels.md](design/math-channels.md)).
+A **math trace** is a live result made from other curves by name: **A ÷ B**, **A × B**,
+**A + B**, **A − B**, or the **average** of several ([math-traces.md](design/math-traces.md)).
 Operands are live measurements or stored traces (captures, sweeps, imports) of one kind; it
 is drawn where its kind is drawn. The daemon computes it, so it follows live operands and
 every client (and `ac2 meas list`) sees it.
@@ -1844,7 +1844,7 @@ every client (and `ac2 meas list`) sees it.
 **Shift+M** (palette *New math…*): **A** (←/→ through every live measurement and
 stored trace, `(live)` or `(stored, S2)`), the **operator**, **B** (curves of A's kind). The
 name follows the expression (`Main L ÷ Sub`) until you type one. **Enter** creates and
-starts it. *Edit measurement…* on a selected math channel reopens the dialog.
+starts it. *Edit measurement…* on a selected math trace reopens the dialog.
 
 #### Dropping a row on another
 
@@ -1852,7 +1852,7 @@ Drag a row of the measurement list onto another row (a live curve, a stored trac
 set, a target or loudness shift, from any measurement) and the math dialog opens with them
 filled in: **A** the row dropped on, **B** the row dragged, the operator the reading B asks
 for, the name following the expression. While dragging, the row under the pointer is
-shaded with a dashed edge and the label says what the drop makes (`math channel: Main L S1
+shaded with a dashed edge and the label says what the drop makes (`math trace: Main L S1
 × loudness 85 → 100 phon`). Nothing is made until **Enter**: the operator, operands and
 name can still be changed, and **Esc** drops it.
 
@@ -1871,7 +1871,7 @@ B under the set's measurement, as **P**'s predictions are. Two rows that do not 
 toast saying why, in the dialog's words, and nothing opens: `Sub is a spectrum: it does
 not combine with Main L S1, a transfer function`; `EQ 1 is an EQ set: it filters transfer
 functions, and Sub is a spectrum`; `a spectrum is filtered by a stored transfer function:
-capture Main L first`; a math channel as an operand: `… is a math channel: capture it to
+capture Main L first`; a math trace as an operand: `… is a math trace: capture it to
 combine it with another curve`.
 
 Transfer functions combine as complex values (magnitude and phase):
@@ -2096,8 +2096,8 @@ An operand that is stopped, settling, CLIP, NO REFERENCE, CHECK ROUTING, NO SIGN
 incompatible is left out and named (**AVERAGE · 3 OF 4 POSITIONS**; legend `3 of 4
 positions`). One curve is never passed off as the result: fewer than two positions is
 **NO AVERAGE**, a missing operand of a ratio or sum **NO RESULT · 1 OF 2 OPERANDS**. An
-operand cannot be deleted, or moved to another grid, while a math channel names it. **R**
-resets a math channel's live operands; **Ctrl+1 … 9** captures it, naming the expression and
+operand cannot be deleted, or moved to another grid, while a math trace names it. **R**
+resets a math trace's live operands; **Ctrl+1 … 9** captures it, naming the expression and
 operands.
 
 ```
@@ -2109,7 +2109,7 @@ ac2 math set Audience --method complex            # what is not given stays
 ac2 math set Audience --under "FOH"               # listed under another measurement
 ```
 
-A math channel is filed under `--under MEAS` (or `--imported`); without it under its first
+A math trace is filed under `--under MEAS` (or `--imported`); without it under its first
 operand when that is a measurement, else where that trace is filed (the app: the
 measurement selected when Shift+M was pressed). Operands are names or ids; `trace:NAME` /
 `meas:NAME` when a measurement and trace share a name.
@@ -2157,7 +2157,7 @@ ac2 align show "Sub ↔ Main alone" [--temp 18c] [--json]
 
 What would this EQ do to this curve? An EQ set is a list of filter sections on a transfer
 measurement; ac2 draws its filter curve (dashed, `EQ 1`) and a prediction of the curve
-after it (`Main L after EQ 1`), a math channel `curve × EQ`. Nothing is sent to a console:
+after it (`Main L after EQ 1`), a math trace `curve × EQ`. Nothing is sent to a console:
 the set is a model of what you dial in.
 
 **Alt+E** on a transfer pane (palette **EQ…**) opens the editor over the plot, making `EQ 1`
@@ -2168,7 +2168,7 @@ it holds: `EQ · 3 sections`, `EQ · 1 section · bypassed`, `EQ · 2 sections �
 4)`. A **double click** on the row (or **Alt+E** with it selected) opens the editor on that
 set; **Delete** asks first (`Delete EQ 1?`, naming the predictions that go with it) and
 deletes the set. In the math dialog a set is a **B** operand (`EQ 1 (EQ set of Main L)`):
-**A × EQ 1** is the same channel **P** makes. Drop the set's row on a curve's row to open
+**A × EQ 1** is the same math trace **P** makes. Drop the set's row on a curve's row to open
 that ([Dropping a row on another](#dropping-a-row-on-another)), on any curve of its own
 measurement or another's.
 
@@ -2331,7 +2331,7 @@ Beside the panes, one tree lists every measurement with what it owns
 | Item | Filed under |
 |---|---|
 | **capture** (Ctrl+1 … 9) | the measurement it came from |
-| **math channel** (Shift+M) | the measurement selected when it was made; its captures under the same measurement |
+| **math trace** (Shift+M) | the measurement selected when it was made; its captures under the same measurement |
 | **sweep run** | its sweep measurement |
 | **average** (M) | with its inputs, when they share one |
 | **imports**, session traces of no measurement | **Imported**, listed last when it holds something |
@@ -2347,13 +2347,13 @@ Beside the panes, one tree lists every measurement with what it owns
 - A row's dot is its curve's colour (a ring when hidden): a click on it shows or hides the
   curve (a live curve: this app's display; a stored trace: the daemon's). A click on the row
   selects it: a measurement row also brings its own panes, a child row (live curve, stored
-  trace, math channel) only selects and no pane changes
+  trace, math trace) only selects and no pane changes
   ([Choosing what a pane shows](#choosing-what-a-pane-shows)); a click on the selected trace
   deselects it. A double click on a trace renames it.
 - **Edit measurement…** opens the form a measurement was made in, on its settings (a math
-  channel: the math dialog; an SPL meter: Settings › SPL/Leq on that meter). Three ways in
+  trace: the math dialog; an SPL meter: Settings › SPL/Leq on that meter). Three ways in
   from its row: a **double click** on the row (its header, its live curve or a math
-  channel's row), the **pencil button** at the right end of the selected row and of the row
+  trace's row), the **pencil button** at the right end of the selected row and of the row
   under the pointer, and **F2** with the row selected. The row says which measurement,
   whatever pane has the keys. **F2** edits the row selected last, as Delete deletes it: a
   stored trace selected after the measurement is renamed instead. The palette's *Edit
@@ -2362,7 +2362,7 @@ Beside the panes, one tree lists every measurement with what it owns
   the Imported header and folded rows skipped, a folded rig's rows too), as a click on it
   does. A selected live-curve
   row is marked and **A** hides that curve.
-- **Move to measurement…** (**Shift+F2**) files the selected stored trace or math channel
+- **Move to measurement…** (**Shift+F2**) files the selected stored trace or math trace
   under another measurement or Imported (**↑/↓**, **Enter**, **Esc**). Only where it is
   listed changes (a locked trace moves too).
 - **Colour families**: each measurement's live curve has the family's colour, its captures,
@@ -2373,14 +2373,14 @@ Beside the panes, one tree lists every measurement with what it owns
 - **Shift+C** steps the selected measurement to the next colour no other measurement has
   (grey last); palette *Previous colour* steps back. The daemon keeps it (sessions,
   autosave), so every app shows it. `ac2 meas set <meas> --colour 1…8|grey|auto`. A math
-  channel takes its measurement's colours.
+  trace takes its measurement's colours.
 
 ### Deleting a measurement that owns traces
 
 It asks every time: *Keep them (move to Imported)*, *Delete them too*, or *Cancel*
-(**←/→**, **Enter**, **Esc**). An answer that would leave a math channel without an operand
-cannot be taken (Keep with a math channel under it computing from the measurement; Delete
-when a math channel elsewhere uses one of its traces). **Enter** keeps them by default, or
+(**←/→**, **Enter**, **Esc**). An answer that would leave a math trace without an operand
+cannot be taken (Keep with a math trace under it computing from the measurement; Delete
+when a math trace elsewhere uses one of its traces). **Enter** keeps them by default, or
 cancels when Keep cannot be taken. A measurement owning nothing
 gets the plain confirmation. CLI: `ac2 meas rm` needs `--keep-traces` or `--delete-traces`.
 
@@ -2394,7 +2394,7 @@ unsmoothed.
 
 - **Ctrl+1 … Ctrl+9** capture the focused pane's measurement into slot 1–9 (replacing
   what was there): its own, or the selected live curve when the pane draws it (one
-  compared into it, a math channel of its group). **1 … 9** show and hide a slot.
+  compared into it, a math trace of its group). **1 … 9** show and hide a slot.
 - The tree lists every trace under its owner: name, kind (*capture*, *sweep run*,
   *imported*, *average*, *A ÷ B*, *target* …), slot, *hidden*, colour dot. Within a
   measurement slotted traces come first by slot, then the rest oldest first. A click selects
@@ -2506,7 +2506,7 @@ and for a loudness shift `target · generated · perceived shift, not an EQ targ
 
 To read a curve against a target, or through a loudness shift, drop the target's row on
 the curve's row: the math dialog opens with `curve ÷ target` (for a loudness shift,
-`curve × loudness 85 → 100 phon`). See [Math channels](#math-channels).
+`curve × loudness 85 → 100 phon`). See [Math traces](#math-traces).
 
 - **House tilt** (default −1.0 dB/oct about 1 kHz, no shelf): slope −6 … 6 dB/oct, pivot
   20 Hz … 20 kHz. The **LF shelf** (±20 dB, corner 20 Hz … 1 kHz) is a second-order low
@@ -2613,7 +2613,7 @@ Like smoothing it is a display setting:
   capture as a display edit, not in the columns; …)` plus a `# mic_curve:` line); a live
   capture's reads `(curve: 90°, in the columns; …)`;
 - a trace captured **with** the curve in its columns refuses a second one;
-- averages and math channels combine the corrected curves.
+- averages and math traces combine the corrected curves.
 
 ## Sweep measurement: response and harmonic distortion
 
@@ -2843,7 +2843,7 @@ or .ac2session file>`, where that path is readable, rebuilds it on top of what i
   dropped and named in the summary (pick its curves into a pane again); pane references to
   what was not restored are dropped;
 - each stored trace with its name, colour, slot, offset, polarity, nudge, smoothing and
-  lock, under its measurement; math channels on the restored items;
+  lock, under its measurement; math traces on the restored items;
 - measurements that were running are started when the open audio I/O captures their
   inputs (open the audio I/O first);
 - panes and the selection that showed a measurement come back to it once it is recreated.
@@ -4271,8 +4271,8 @@ documents each command.
 | `ac2 session inputs [--kind IN=mic\|line\|digital] [--mic IN=NAME] [--curve IN=LABEL\|off] [--pair L,R[=NAME]] [--no-pairs]` | what each input carries, its mic and curve, the stereo pairs; alone, lists them |
 | `ac2 session panel [--backend B] [--device D]` | opens the device's driver settings on the daemon's host (an ASIO driver's control panel, Audio MIDI Setup for Core Audio) |
 | `ac2 session new / save / save-as / load / recover / salvage / export / import / list` | the working state and saved sessions ([Sessions](#sessions)) |
-| `ac2 meas new / list / set / start / stop / rm`, `ac2 meas layout clear` | transfer (`tf`), `spectrum`, `rta`, `spl` and `sweep` measurements (math channels are listed too); `rm` of one that owns traces needs `--keep-traces` (moved to Imported) or `--delete-traces`; `layout clear` removes a measurement's own panes |
-| `ac2 math new / set` | math channels: `"A / B"`, `--op div\|mul\|add\|sub --a A --b B`, `--op avg --of A,B,C` |
+| `ac2 meas new / list / set / start / stop / rm`, `ac2 meas layout clear` | transfer (`tf`), `spectrum`, `rta`, `spl` and `sweep` measurements (math traces are listed too); `rm` of one that owns traces needs `--keep-traces` (moved to Imported) or `--delete-traces`; `layout clear` removes a measurement's own panes |
+| `ac2 math new / set` | math traces: `"A / B"`, `--op div\|mul\|add\|sub --a A --b B`, `--op avg --of A,B,C` |
 | `ac2 gen pink / white / periodic-pink / sine`, `ac2 gen stop` | the generator in the foreground (Enter fires, Esc stops); `stop` from any client; `sine --lock MEAS` moves the frequency to the nearest FFT bin of that spectrum measurement and prints it |
 | `ac2 gen ceiling [LEVEL] [--yes]` | the system max level: shown with its bound and who changed it; a lower level applies at once, a higher one needs `--yes` and nothing armed |
 | `ac2 delay find / insert / set / nudge / track` | the delay finder and delay of a transfer measurement |

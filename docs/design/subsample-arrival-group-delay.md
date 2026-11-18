@@ -15,7 +15,7 @@ function), `sweep-distortion.md`.
   0.05 sample from the applied one (a 600.37-sample path tracks to within 0.02 sample, phase
   flat to 1° at 10 kHz).
 - Readouts show the arrival to the µs, and the A − B difference to 0.1 µs in `ac2 trace
-  delay-diff` and in the legend of a transfer math channel ÷, − or + on one time base
+  delay-diff` and in the legend of a transfer math trace ÷, − or + on one time base
   (`arrival Δ +3.7 µs · +1.3 mm @ 20 °C`).
 - The **group delay pane is right to a few percent from 16 Hz up**, on live and sweep
   traces alike, and says over what bandwidth it was taken (`Group delay ms · 1/12 oct`).

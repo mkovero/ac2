@@ -1,13 +1,13 @@
 //! `math new|set` against a real daemon: operands by name, the expression typed or by
 //! `--op`, the method and phase reference as typed, an edit, `meas list`, and the daemon's
-//! refusals (an operand deleted under its channel, too few operands, levels with ÷) reach
+//! refusals (an operand deleted under its math trace, too few operands, levels with ÷) reach
 //! the operator as errors.
 #![allow(clippy::unwrap_used)]
 
 use super::common::{document, rig, run_json as run};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn math_channels_by_name() {
+async fn math_traces_by_name() {
     let (h, ep) = rig();
     for (name, input) in [("Seat 1", "2"), ("Seat 2", "3"), ("Seat 3", "4")] {
         let (code, text) = run(
@@ -124,7 +124,7 @@ async fn math_channels_by_name() {
     assert!(text.contains("Audience"), "{text}");
     let (code, text) = run(&ep, &["meas", "rm", "Seat 3"]).await;
     assert_ne!(code, 0, "{text}");
-    assert!(text.contains("operand of the math channel"), "{text}");
+    assert!(text.contains("operand of the math trace"), "{text}");
     // Seat 2 is no operand any more: it goes.
     let (code, text) = run(&ep, &["meas", "rm", "Seat 2"]).await;
     assert_eq!(code, 0, "{text}");

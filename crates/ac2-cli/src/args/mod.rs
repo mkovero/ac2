@@ -99,7 +99,7 @@ pub enum Cmd {
         #[command(subcommand)]
         cmd: MeasCmd,
     },
-    /// Math channels: live results computed from measurements and stored traces by name
+    /// Math traces: live results computed from measurements and stored traces by name
     /// (`A ÷ B`, `A × B`, `A + B`, `A − B`, the average of several).
     Math {
         /// Action.

@@ -250,7 +250,7 @@ impl Rig {
         self.c.state()
     }
 
-    /// The math channel named `name`, its frames subscribed to.
+    /// The math trace named `name`, its frames subscribed to.
     fn channel(&mut self, name: &str) -> MeasId {
         let s = self.state();
         let id = s

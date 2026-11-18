@@ -1,12 +1,12 @@
-//! Math channel job: evaluates a math channel's expression over its operands' current
+//! Math trace job: evaluates a math trace's expression over its operands' current
 //! results and publishes the result as a `tf`, `spec` or `rta` stream
-//! (`docs/design/math-channels.md`).
+//! (`docs/design/math-traces.md`).
 //!
 //! The job analyses no audio itself. The capture fan-out still feeds it every hand-off, so
 //! it publishes on the same clock as its live operands, its frames carry the session's
 //! sample index, and it goes STALE exactly when they do. A frame is due when a live operand
 //! has a new result (its job's result generation, read through its probe on each hand-off)
-//! or a command changed the channel; a channel of stored traces alone only refreshes, as any
+//! or a command changed the math trace; a math trace of stored traces alone only refreshes, as any
 //! unchanged result does. Whenever a frame is due it asks
 //! every live operand for its current unsmoothed result (the same request `trace.capture`
 //! makes), so the result is formed once per published frame from the operands' newest
@@ -82,7 +82,7 @@ pub(crate) enum Answer {
     Stored(Arc<Held>),
 }
 
-/// The grids a math channel works on.
+/// The grids a math trace works on.
 #[derive(Debug, Clone)]
 pub(crate) struct Grids {
     /// Where the operands are combined and the capture is: a transfer's log grid, a
@@ -415,7 +415,7 @@ fn value(a: &Answer, f: Option<&Frame>, epoch: SessionEpoch) -> Option<Value> {
     })
 }
 
-/// The math channel puts a level through a filter: a spectrum or RTA `A × B` or `A ÷ B`,
+/// The math trace puts a level through a filter: a spectrum or RTA `A × B` or `A ÷ B`,
 /// `B` a stored transfer function (`ac2_traces::math::filtered`).
 pub(crate) fn is_filter(c: &MathConfig) -> bool {
     c.domain != MathDomain::Transfer
@@ -439,7 +439,7 @@ pub(crate) fn needs_shared_time_base(c: &MathConfig) -> bool {
         }
 }
 
-/// The math channel's result from its operands' answers (`answers[k]` is the expression's
+/// The math trace's result from its operands' answers (`answers[k]` is the expression's
 /// `k`-th operand's), before display smoothing, on `grid`. `seen_delay[k]` is the newest
 /// inserted delay seen from operand `k`.
 ///
@@ -740,7 +740,7 @@ impl Analysis for MathJob {
             self.applied_at = b.start_sample;
             self.apply_pending = false;
         }
-        // The result changes only with a live operand's: a channel of stored traces is the
+        // The result changes only with a live operand's: a math trace of stored traces is the
         // same until a command changes it (the pace refreshes it for the client), and one of
         // live operands forms a new result at their rate ([`pace`]), not on every hand-off.
         self.read_operand_states();
@@ -765,7 +765,7 @@ impl Analysis for MathJob {
                 self.config_rev = rev;
                 self.apply_pending = true;
             }
-            // A math channel holds no audio state of its own: delay, reset, calibration and
+            // A math trace holds no audio state of its own: delay, reset, calibration and
             // the rest belong to its operands.
             JobCmd::Find { .. }
             | JobCmd::Track { .. }

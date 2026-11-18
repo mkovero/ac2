@@ -185,8 +185,8 @@ fn delete_and_backspace_ask_then_delete_the_selected_measurement() {
     );
 }
 
-/// A measurement a math channel computes from cannot go (the daemon refuses it): the
-/// window says so in the confirmation's place, naming the channel, and only closes.
+/// A measurement a math trace computes from cannot go (the daemon refuses it): the
+/// window says so in the confirmation's place, naming the math trace, and only closes.
 #[test]
 fn deleting_a_math_operand_says_which_channel_uses_it() {
     use ac2_proto::model::{MathConfig, MathDomain, MathExpr, MathOp, Operand};
@@ -218,7 +218,7 @@ fn deleting_a_math_operand_says_which_channel_uses_it() {
     assert_eq!(
         p.confirm.lines,
         [
-            "transfer function · an operand of the math channel Sum",
+            "transfer function · an operand of the math trace Sum",
             "Edit or delete Sum first: it computes from Main L."
         ]
     );
@@ -230,7 +230,7 @@ fn deleting_a_math_operand_says_which_channel_uses_it() {
         t.key("Delete");
     }
     assert!(t.st.apply(Msg::Delete(true), &t.keys).is_empty());
-    // The math channel itself goes after a confirmation.
+    // The math trace itself goes after a confirmation.
     t.st.apply(Msg::SelectMeas(MeasId(3)), &t.keys);
     t.key("Delete");
     assert_eq!(

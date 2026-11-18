@@ -152,7 +152,7 @@ pub struct Status {
     /// The open session's audio stopped ([`crate::audio::audio_stopped_text`]).
     pub audio_stopped: Option<crate::audio::AudioStoppedText>,
     pub no_delay_estimate: Option<NoDelayEstimate>,
-    /// The shown math channel (its name and what its newest frame combined).
+    /// The shown math trace (its name and what its newest frame combined).
     pub math: Option<(String, MathStatus)>,
     /// SPL logs the daemon cannot write ([`crate::autosave::log_failure_text`]).
     pub log_not_saved: Option<crate::autosave::LogFailureText>,

@@ -1,4 +1,4 @@
-//! `math new|set`: math channels with their operands by name.
+//! `math new|set`: math traces with their operands by name.
 
 use ac2_proto::model::{
     MathConfig, MathDomain, MathExpr, MathOp, MathReference, MeasConfig, MeasKind, Operand,
@@ -23,8 +23,8 @@ pub(crate) async fn run(cli: &Cli, cmd: &MathCmd, out: &mut Out<'_>) -> Result<(
             }
             m
         }
-        MathCmd::Set { channel, math } => {
-            let existing = find_meas(&s, channel)?;
+        MathCmd::Set { math_trace, math } => {
+            let existing = find_meas(&s, math_trace)?;
             let config = math_config(math, &s, Some(existing))?;
             super::meas::meas_call(
                 &c,
@@ -77,7 +77,7 @@ pub(crate) fn find_operand(s: &State, r: &MeasRef) -> Result<Operand, CliError> 
     }
 }
 
-/// Where a new math channel is listed when `--under` does not say: under its first operand
+/// Where a new math trace is listed when `--under` does not say: under its first operand
 /// when that is a measurement, else where that trace is filed (the CLI's stand-in for the
 /// app's "the measurement selected when it was made").
 pub(crate) fn default_owner(s: &State, first: Operand) -> TraceOwner {
@@ -109,7 +109,7 @@ pub(crate) fn operand_name(s: &State, o: Operand) -> String {
     }
 }
 
-/// What a math channel of `o` combines: transfer functions, spectra or RTA bands.
+/// What a math trace of `o` combines: transfer functions, spectra or RTA bands.
 fn domain_of(s: &State, o: Operand) -> Result<MathDomain, CliError> {
     let name = operand_name(s, o);
     let not = || {
@@ -129,7 +129,7 @@ fn domain_of(s: &State, o: Operand) -> Result<MathDomain, CliError> {
                 MeasKind::Spectrum { .. } => Ok(MathDomain::Spectrum),
                 MeasKind::Rta { .. } => Ok(MathDomain::Rta),
                 MeasKind::Math { .. } => Err(CliError::Usage(format!(
-                    "{name} is a math channel: capture it (`ac2 trace capture`) and use the trace"
+                    "{name} is a math trace: capture it (`ac2 trace capture`) and use the stored trace"
                 ))),
                 MeasKind::Spl { .. } | MeasKind::Sweep { .. } => Err(not()),
             }
@@ -191,7 +191,7 @@ pub(crate) fn math_config(
         Some(MeasKind::Math { config }) => Some(config),
         Some(_) => {
             return Err(CliError::Usage(format!(
-                "{} is not a math channel",
+                "{} is not a math trace",
                 existing.map_or("", |m| m.config.name.as_str())
             )));
         }

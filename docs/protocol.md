@@ -125,7 +125,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `meas.layout` | `meas`, `layout: PaneLayout \| nil` | `measurement` | |
 | `meas.offset` | `meas`, `offset: Db` | `measurement` | |
 | `meas.eq` | `meas`, `edit: EqEdit` | `measurement` | |
-| `meas.delete` | `meas`, `traces: keep \| delete` (what becomes of the traces and math channels it owns) | `ack` | |
+| `meas.delete` | `meas`, `traces: keep \| delete` (what becomes of the stored traces and math traces it owns) | `ack` | |
 | `meas.start` | `meas` | `measurement` | |
 | `meas.stop` | `meas` | `measurement` | |
 | `meas.reset` | `meas` | `ack` | |
@@ -412,7 +412,7 @@ never touches connections made by anyone else, and connects again after any reop
 nil: the family its id gives). It is `Measurement.colour`, kept in sessions and the
 autosave; the job, its averages and `config_rev` are untouched. Families are the display's:
 clients take chosen families first and give the others the rest by id. `invalid` for a
-math channel (drawn in its owner's colours) and for an index past 7.
+math trace (drawn in its owner's colours) and for an index past 7.
 
 `meas.layout` sets the panes a client shows while the measurement is selected, or clears
 them (nil). It is `Measurement.layout`, kept in sessions and the autosave (and so in
@@ -456,8 +456,8 @@ plate's text size, 1 being the theme's; missing = all nil at 1).
 | `walk` | `rig`, `walk: WalkId` | `walk` |
 
 A `PaneEntry` is {`rig`, `what`}; `what` is `{type: group, meas}` (a measurement's group: its
-live curve, its math channels, its shown traces, what is filed under it now and later),
-`{type: live, meas}` (one live curve, a measurement's or a math channel's) or `{type: trace,
+live curve, its math traces, its shown stored traces, what is filed under it now and later),
+`{type: live, meas}` (one live curve, a measurement's or a math trace's) or `{type: trace,
 trace}` (one stored trace). The lead names the pane and owns its readouts; the entries after
 it are drawn behind it, nearest first, tagged as compared. `rig` is `{type: this_rig}`, the
 daemon storing the layout, or `{type: rig, id: RigId, name}`, another rig by its id (never
@@ -469,7 +469,7 @@ with `hi` above `lo`, for a plate `at` outside 0 … 1 or a `scale` not finite a
 for content on a pane of another kind (the table's last column), for `curves` with no entry,
 more than 33 or one twice, for inputs none, more than eight or one twice, for a pair of one
 input, and for a `live` or `trace` entry of this rig that a `group` entry in the same pane
-already draws (the trace filed under that measurement, its live curve or a math channel it
+already draws (the trace filed under that measurement, its live curve or a math trace it
 owns). Ids of this rig are not looked up when stored: deleting a measurement, a trace or a
 walk takes its entries out of every layout (an emptied pane becomes `nothing`; one more
 `measurement` change per layout it was in), and so does loading a session. Another rig's
@@ -490,7 +490,7 @@ predicts the live curve —, `put` {`set`, `body`: `EqBody`} (replaces what the 
 `rev` + 1), `delete` {`set`} (its filter curve and predictions go with it), `mark` {`set`,
 `clear`} (snapshots the set as `in_console`, or clears it), `predict` {`set`, `curve`:
 `Operand` (`meas` = this measurement's live curve, or `trace` = one of its transfer
-traces), `on`} (creates or deletes the math channel `curve × EQ`), `copy` {`set`, `to`}.
+traces), `on`} (creates or deletes the math trace `curve × EQ`), `copy` {`set`, `to`}.
 `EqSet` = {`id`: `EqSetId`, `rev`, `body`, `in_console`: `EqSnapshot` \| nil, `trace`: the
 set's filter curve, a locked transfer trace with `source.eq` {`meas`, `set`, `rev`} whose
 columns the daemon recomputes on every edit and load (`rev`: the set's rev they are of; a
@@ -523,7 +523,7 @@ measurement between them under the same id; a change to a rig measurement is ref
 counter; a loaded session file whose ids rig measurements hold has those measurements (and
 every reference to them) numbered past the counter. Its SPL log is kept apart from the
 autosave (`ac2d --rig-logs`) and carries on after a restart. Traces are always the session's:
-a trace or math channel filed under a rig measurement is saved in a session file without an
+a stored trace or math trace filed under a rig measurement is saved in a session file without an
 owner (as an import), and a load replaces it like any other.
 
 `meas.update` carries `base`, the measurement's `config_rev` the edit was made on. Another
@@ -532,7 +532,7 @@ current `config_rev`): the client re-reads the measurement rather than overwrite
 
 `meas.update` replaces the configuration and restarts a running job (averages start over;
 a spectrum's new `resolution` (§3.2 *Spectrum resolution*) or `window` included: frames of
-the new `config_rev` carry the new grid's `grid_id`; a spectrum named by a math channel
+the new `config_rev` carry the new grid's `grid_id`; a spectrum named by a math trace
 keeps its `resolution`, `refused` otherwise), except when a transfer or spectrum measurement's configuration differs only in `smoothing`
 (and the name): display smoothing then changes in place, averaging goes on, and the first
 `tf` / `spec` frame with the new `config_rev` carries it (`TfMeta.smoothing`,
@@ -565,13 +565,13 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   \| 120, `invalid` otherwise) and `spectrograph_colours` (`Colormap`: `viridis` \| `magma`
   \| `inferno` \| `cividis` \| `grey` \| `ice`). A configuration that differs only in `display`
   (and the name) changes nothing the daemon computes: the job, its averages and the
-  measurement's `config_rev` stay as they are. A math channel on the spectrum pane draws
+  measurement's `config_rev` stay as they are. A math trace on the spectrum pane draws
   with its owner's display.
 - **Transfer peak mode** (`TransferConfig.peak`: `PeakMode`, as a spectrum's
   `display.peak`): what clients draw over the live magnitude, the hold and the marks their
   own. A configuration that differs only in `peak` (and the name) changes nothing the
   daemon computes: the job, its averages and the measurement's `config_rev` stay as they
-  are. A math channel on the transfer pane draws with its owner's mode.
+  are. A math trace on the transfer pane draws with its owner's mode.
 - **SPL** (`SplConfig`): any change on the same `input` — `weighting`, `time_weighting`,
   `peak_weighting`, the Leq windows and peak limits (`leq: LeqConfig`), the measuring-position
   correction (`position`), the name — applies in place; the
@@ -581,10 +581,10 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   weighting settled, and its `lmax`, `lmin`, `leq`, `lpeak` and `duration` cover the same
   interval as before the change (since the meter started or `meas.reset`). A new `input`
   restarts the meter.
-- **Math channel** (`math`, `MathConfig`: `owner`, `domain`, `expr`, `reference`,
-  `smoothing`). Design: `docs/design/math-channels.md`. `owner` (`TraceOwner`, below): the
+- **Math trace** (`math`, `MathConfig`: `owner`, `domain`, `expr`, `reference`,
+  `smoothing`). Design: `docs/design/math-traces.md`. `owner` (`TraceOwner`, below): the
   measurement it is listed under — front ends give it the one selected when it was made —
-  or `imported`; its captures are filed under the same owner. A math channel or a
+  or `imported`; its captures are filed under the same owner. A math trace or a
   measurement that does not exist as owner is `invalid` / `not_found`. A result the daemon computes from operands named
   by id — live measurements and stored traces — and publishes like a measurement of its
   `domain`'s kind: `transfer` (`tf`, combined as complex values), `spectrum` (`spec`, tone
@@ -644,13 +644,13 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
     (otherwise its validity is the union of theirs). The frame's `math` meta says which
     operands went in and what the phase is relative to (§5.4).
   - Refused at create / update: an operand that does not exist (`not_found`), of another
-    kind than the domain, a math channel as an operand, live transfer operands on
-    different grids, `a` = `b`, a duplicate in an average (`invalid`). While a math channel
-    names a measurement, `meas.delete` of it (unless the channel goes with it: owned by it,
+    kind than the domain, a math trace as an operand, live transfer operands on
+    different grids, `a` = `b`, a duplicate in an average (`invalid`). While a math trace
+    names a measurement, `meas.delete` of it (unless the math trace goes with it: owned by it,
     `traces: delete`) and a `meas.update` that changes its kind,
     grid, FFT length or band layout are `refused`; `trace.delete` of a named trace is
-    `refused`; `trace.mic_curve` on it restarts the channel with the corrected columns.
-    `meas.reset` of a math channel is `invalid` (reset its operands).
+    `refused`; `trace.mic_curve` on it restarts the math trace with the corrected columns.
+    `meas.reset` of a math trace is `invalid` (reset its operands).
 
 - **Sweep measurement** (`sweep`, `SweepConfig`: `reference_input`, `measurement_inputs`
   ([u16], 1…16 mics recorded by the same play, each its own trace; none twice, none the
@@ -670,18 +670,18 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
 
 Design: `docs/design/measurement-tree.md`. Every stored trace has an owner,
 `TraceEdit.owner` (`TraceOwner`, tagged by `type`: `meas` {`meas`} or `imported`), and so
-does every math channel (`MathConfig.owner`). A capture is owned by the measurement it came
-from, a math capture by the math channel's owner, a sweep run by its sweep measurement, an
+does every math trace (`MathConfig.owner`). A capture is owned by the measurement it came
+from, a math capture by the math trace's owner, a sweep run by its sweep measurement, an
 average by the owner its inputs share (else `imported`), an import and a generated target
 by the `owner` its command names. Moving a
 trace is a `trace.update` with another `owner` (allowed on a locked trace); moving a math
-channel a `meas.update` with another `MathConfig.owner`. An owner must be an existing
-measurement other than a math channel (`not_found` / `invalid`).
+trace a `meas.update` with another `MathConfig.owner`. An owner must be an existing
+measurement other than a math trace (`not_found` / `invalid`).
 
 `meas.delete {meas, traces}` deletes the measurement and, by `traces` (`OwnedTraces`):
-`keep` — its traces and math channels stay, their owner becomes `imported` (one `trace` /
+`keep` — its stored traces and math traces stay, their owner becomes `imported` (one `trace` /
 `measurement` event each); `delete` — they are deleted with it (locked traces included:
-the operator chose to). Refused (`refused`) while a math channel that stays names the
+the operator chose to). Refused (`refused`) while a math trace that stays names the
 measurement or a trace deleted with it as an operand, and while a run of the measurement
 plays or analyses.
 
@@ -1134,7 +1134,7 @@ display edits and are never applied to the stored data.
   with the live job's kernel (a spectrum has no phase: its power is smoothed in either
   `mode`; a spectrum capture starts with `magnitude`); coherence is never smoothed.
   `trace.export` and `file.save` write the unsmoothed columns (the setting is listed in the
-  CSV header), and `trace.average` and math channels combine unsmoothed columns. A capture
+  CSV header), and `trace.average` and math traces combine unsmoothed columns. A capture
   starts with the smoothing its measurement had; an average starts with the smoothing its
   inputs share (nil when they differ).
 - **Mic curve after capture.** `trace.mic_curve {trace, curve}` puts the named curve of the
@@ -1148,7 +1148,7 @@ display edits and are never applied to the stored data.
   normalisation frequency of the trace's sensitivity calibration (the calibrator's; 1 kHz
   for an electrical one), else of the newest sensitivity calibration of the mic, else 1 kHz. The daemon keeps the curve's points with the trace, so a later change to the
   calibration store does not change it. `trace.export` writes the uncorrected columns and
-  names the curve in its `# mic:` line; `trace.average` and math channels combine corrected
+  names the curve in its `# mic:` line; `trace.average` and math traces combine corrected
   columns, and an average's `mic.curve` names the curve its columns now carry. Refused:
   a trace whose `mic.curve` is set (captured with the curve in its columns: a second
   correction would count it twice) and a locked trace (`refused`), a target (`invalid`),
@@ -1164,7 +1164,7 @@ display edits and are never applied to the stored data.
   from the same state: `TraceData.ir` (`TransferIr` {`sample_rate`, `ir`: `TraceIr`},
   `t0` re the trace's `delay`), every sample (one FFT length of the full-rate stage: 4096 points, ±42.7 ms at 48 kHz). It is nil
   when the measurement has no IR yet (no block accepted with a reference); traces made by
-  `trace.average`, math channels, imports of other formats and targets have none.
+  `trace.average`, math traces, imports of other formats and targets have none.
   It needs a result in the current session epoch (`invalid` otherwise: not running, no
   frame yet, SPL measurement). Metadata: `kind` (`TraceKind`, tagged by `type`: `transfer`,
   `target`, `spectrum` {`scale`, `level`: `SpecLevel`}, `rta` {`scale`}), `source.captured` {`meas`, `meas_name`,
@@ -1176,7 +1176,7 @@ display edits and are never applied to the stored data.
   name and the mic curve applied to the captured columns as its full `MicCurveRef` — label,
   file, content hash —, nil without a mic name; a sweep
   names no curve, its analysis works on the raw recordings), `mic_curve` (nil: see
-  *Mic curve after capture*), `created_at`. A math channel captures as its domain's kind
+  *Mic curve after capture*), `created_at`. A math trace captures as its domain's kind
   (`transfer`, `spectrum` {`scale`, `level`}, `rta` {`scale`}) with `source.math` {`meas`,
   `meas_name`, `epoch`, `at_sample`, `expr`, `operands`: [`NamedOperand` {`operand`,
   `name`}] — the operands that went into the captured result, named as at capture —,
@@ -1223,7 +1223,7 @@ display edits and are never applied to the stored data.
   response (§7.6). The trace is listed under `owner` (`TraceOwner`: a measurement, or
   `imported`): a target loaded for the system being tuned belongs with that system's
   measurement; `not_found` for a measurement that does not exist, `invalid` for a math
-  channel (math owns no traces). A refused file is `invalid` with
+  trace (math owns no traces). A refused file is `invalid` with
   `detail: {type: import, line (1-based) | nil, problem: ImportProblem}`.
   `ImportProblem`: `not_text`, `no_data`, `bad_number`, `column_count`, `too_few_columns`,
   `not_ascending`, `out_of_range`, `too_many_rows` (> 65536, IR rows too),
@@ -1322,7 +1322,7 @@ one `<name>.json` per plan in its data directory (`plans/`), mirrored as `State.
   renames the walk and edits its points by label, grouping them into steps again: a kept
   point keeps its state (a captured one its position and mic too); a captured point cannot
   be taken out (`refused`).
-- The walk's **average** is a power-average math channel of the captured points' traces,
+- The walk's **average** is a power-average math trace of the captured points' traces,
   in point order, owned by the walk's first measurement and named `<walk> · average`: made
   (and started) at the second capture, its `of` updated after every capture, skip and redo
   (as `meas.update`, which restarts it), kept (holding no average) when fewer than two captures are left.
@@ -1491,7 +1491,7 @@ analysed band; responses are reported from `start`. `name` nil names the trace `
   `insufficient_range` {`range`, `needed`} (`Db`; EDT, C50, C80, D50 need 20 dB, T20 35 dB,
   T30 45 dB), `filter_limited` {`bandwidth_decay`} (bandwidth × decay time below 8). A refused
   value is never sent as a number.
-- Smoothing, averages and math channels treat a sweep trace as a transfer function (magnitude and
+- Smoothing, averages and math traces treat a sweep trace as a transfer function (magnitude and
   phase; the distortion stays with the sweep trace).
 
 #### Sessions (`file.*`)
@@ -1539,7 +1539,7 @@ with the autosave (§7.3).
   state it replaced, so a second recover undoes the first); `not_found` without one.
 - `file.salvage`: imports each `traces/*.csv` of the session — any format version — into
   the working state as `trace.import` of an ac2 CSV would (role from the file; a math
-  channel's trace becomes an imported trace), file by file. Reply `salvage` {`version`:
+  trace's trace becomes an imported trace), file by file. Reply `salvage` {`version`:
   the manifest's version | nil, `imported`: [TraceMeta], `refused`: [{file, reason}]}.
 - `file.list`: the sessions in the session directory, by name.
 - Disk and archive work (`file.save`, `file.load`, `file.new`, `file.recover`,
@@ -1744,7 +1744,7 @@ applies to its next run, and stored traces keep their grid.
 `Unresolved` {`resolution`, `ranges`: [`FreqRange` {`lo`, `hi`: Hz}], ascending, disjoint,
 on column edges} lists where one estimate's resolution cell — the bandwidth its analysis
 window sets — is wider than one column at that resolution, so the columns there are
-interpolation, not detail. Transfer (`TfMeta.unresolved`; nil for a math channel): the cell
+interpolation, not detail. Transfer (`TfMeta.unresolved`; nil for a math trace): the cell
 is the bin spacing of the coarsest MTW stage serving the column (stages switch over where a
 bin fills a 1/48-octave column, so at 1/96 the band just above each crossover is
 unresolved too; at 96 kHz: below ≈ 135 Hz, ≈ 203–406 Hz and ≈ 1.62–3.25 kHz). Sweep
@@ -1790,7 +1790,7 @@ made no new frame since the previous `spec` frame repeats its previous value.
 
 While the generator fires a `sine` (`Generator.firing` with `settings.signal` a sine; not a
 sweep, not noise), every live `spec` frame of a spectrum measurement carries
-`SpecMeta.harmonics` (`SpecHarmonics`); otherwise, for a math channel, in a captured
+`SpecMeta.harmonics` (`SpecHarmonics`); otherwise, for a math trace, in a captured
 frame and before the FFT that is read has a spectrum it is nil. `SpecHarmonics` {`f0`: Hz
 (the generator's frequency), `on_bin`: bool (`f0` is a bin centre of the FFT read, so the
 window leaks nothing), `reading`: `HarmonicReading`}.
@@ -2210,7 +2210,7 @@ always `i8`).
 
 | kind | arrays (name: unit) | meta |
 |---|---|---|
-| `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask; an alignment's (all four or none) `align_phase_before`, `align_phase_after`: deg (A − B as measured and with the fit applied), `align_sum_before`, `align_sum_after`: db (the summation per column); an average's range across positions (all three or none) `range_lo`, `range_hi`: db, `range_coh`: coherence | `delay`, `nudged` (Seconds: the part of `delay` `delay.nudge` steps added to the arrival; 0 for a math channel), `smoothing`, `mic_curve`, `math` (`MathState` \| nil: a math channel's operands, below), `unresolved` (`Unresolved` \| nil, §3.2 *Resolution*), `filled` (f32, 0…1: how full the averages are, counted in accumulated blocks of the least full analysis stage, so refused blocks add nothing; a math channel's is the least of its included live operands, 1 for traces) |
+| `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask; an alignment's (all four or none) `align_phase_before`, `align_phase_after`: deg (A − B as measured and with the fit applied), `align_sum_before`, `align_sum_after`: db (the summation per column); an average's range across positions (all three or none) `range_lo`, `range_hi`: db, `range_coh`: coherence | `delay`, `nudged` (Seconds: the part of `delay` `delay.nudge` steps added to the arrival; 0 for a math trace), `smoothing`, `mic_curve`, `math` (`MathState` \| nil: a math trace's operands, below), `unresolved` (`Unresolved` \| nil, §3.2 *Resolution*), `filled` (f32, 0…1: how full the averages are, counted in accumulated blocks of the least full analysis stage, so refused blocks add nothing; a math trace's is the least of its included live operands, 1 for traces) |
 | `ir` | `ir_linear`: full_scale, `ir_etc`: db (optional) | `sample_rate`, `t0`, `dt`, `inserted_delay`; point i at `t0 + i·dt` |
 | `rta` | `level`: dbfs or db_spl (band power), `validity`: bitmask | `fraction`, `weighting`, `scale`, `cal`, `mic_curve`, `math` (`MathState` \| nil) |
 | `spec` | `level`: dbfs or db_spl (tone level), dbfs_per_hz or db_spl_per_hz (density; §3.2 *Spectrum level*); smoothed when `smoothing` is set; NaN for no power; on a `log_bins` grid (`fixed`) or a `log` grid (`multi`, §3.2 *Spectrum resolution*): each column the highest level among its bins (tone) or their mean power (density) | `window`, `scale`, `level` (`SpecLevel`), `cal`, `mic_curve`, `smoothing`, `math` (`MathState` \| nil), `bands` (`SpecBands` \| nil), `harmonics` (`SpecHarmonics` \| nil, §3.2 *Harmonics of the generator's sine*) |
@@ -2266,7 +2266,7 @@ as aligned by its own delay, no shared time base; `no_phase`). `OperandStatus` (
 without a usable result: no valid column yet, or no answer in time), `refused`
 {`protection`: the operand's fault flags among `CLIP`, `NO_REFERENCE`, `CHECK_ROUTING`,
 `NO_SIGNAL`}, `mismatch` (does not combine with the others: another level scale, spectrum
-level (`tone` / `density`), grid or time base). A math channel's own `protection` is always 0: its operands' faults are in their
+level (`tone` / `density`), grid or time base). A math trace's own `protection` is always 0: its operands' faults are in their
 statuses. `align` (`AlignState` \| nil, an `align` expression's): `outcome` (tagged by
 `type`) `fit` {`fit`: `AlignFit`} or `no_fit` {`why`: `AlignNoFit`, tagged by `type`:
 `few_operands`, `few_columns` {`found`}, `no_weight`}. `AlignFit`: `best`,
@@ -2301,7 +2301,7 @@ Undefined bits refuse the frame.
 
 `validity` (0 = valid): `THINNED` 1, `OUT_OF_BAND` 2, `SETTLING` 4, `NO_REFERENCE` 8,
 `NO_MEASUREMENT` 16, `PROTECTED` 32, `BELOW_FLOOR` 64, `INSUFFICIENT_RESOLUTION` 128,
-`ABOVE_NYQUIST` 256, `FEW_OPERANDS` 512 (a math channel without the usable operands its
+`ABOVE_NYQUIST` 256, `FEW_OPERANDS` 512 (a math trace without the usable operands its
 expression needs).
 
 `protection`: `NO_REFERENCE` 1, `NO_SIGNAL` 2, `CLIP` 4, `WEAK_REFERENCE` 8,
@@ -2345,7 +2345,7 @@ than most real curves); bytes include topic, header and payload, not the transpo
 | `spl` (no arrays) | 138 B | ≈ 141 B | ≈ 85 B |
 
 A `tf` stream goes out at its analysis hop (≈ 26 frames/s at 48 kHz, whatever the publish
-rate), a math channel's whenever an operand changes (up to the publish rate), a default
+rate), a math trace's whenever an operand changes (up to the publish rate), a default
 `spec` with each new spectrum (every `n/8` samples: ≈ 6 per second at 65 536 points),
 re-sent every 0.25 s of audio while nothing changes. About 7 % of a `tf` stream's frames go
 as keyframes. A session of three transfer functions

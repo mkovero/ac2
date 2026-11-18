@@ -20,7 +20,7 @@ ZeroMQ, on the same machine or across the network (encrypted and paired).
   a value.
 - **Spectrum and RTA** (1/1 … 1/24 octave, A/C/Z), on a dBFS or, calibrated, a dB SPL axis,
   with a **spectrograph** under (or instead of) the spectrum.
-- **Math channels**: live A ÷ B, A × B, A + B (summation prediction), A − B and spatial
+- **Math traces**: live A ÷ B, A × B, A + B (summation prediction), A − B and spatial
   averages (power, complex, coherence-weighted) of measurements and stored traces.
 - **SPL meter**: Fast / Slow / Impulse and A / C / Z switched in place (A-weighted Fast by
   default), a held big number, Leq, LCpeak, Lmax / Lmin; three views — meter, Leq windows,

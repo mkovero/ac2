@@ -20,32 +20,32 @@ use super::{ArrayDesc, FrameKind, ProtectionFlags};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TfMeta {
-    /// Delay applied to the reference; for a math channel, the delay its phase is referred
+    /// Delay applied to the reference; for a math trace, the delay its phase is referred
     /// to.
     pub delay: Seconds,
     /// The part of `delay` that `delay.nudge` steps added to the arrival
-    /// ([`crate::model::DelayState::nudged`]) when this frame was made; 0 for a math channel.
+    /// ([`crate::model::DelayState::nudged`]) when this frame was made; 0 for a math trace.
     /// A view's shared time base refers the curve to `delay − nudged`.
     pub nudged: Seconds,
     /// Live smoothing applied.
     pub smoothing: Option<Smoothing>,
-    /// A mic curve was subtracted from `mag` (for a math channel: from every operand).
+    /// A mic curve was subtracted from `mag` (for a math trace: from every operand).
     pub mic_curve: bool,
-    /// What a math channel combined; `None` for a transfer measurement.
+    /// What a math trace combined; `None` for a transfer measurement.
     pub math: Option<Box<MathState>>,
     /// Where the columns are finer than the analysis stage serving them resolves; `None`
-    /// for a math channel.
+    /// for a math trace.
     pub unresolved: Option<Unresolved>,
     /// How full the averages behind this frame are, 0 to 1: the least full analysis stage's
     /// accumulated blocks over the blocks it needs. Blocks, not elapsed time, so blocks that
     /// protection refused add nothing and a measurement that never averaged never reads 1.
     /// Columns turn valid with a single block, long before their averages settle, so a
     /// client that waits for a settled average (a capture at a position) needs this.
-    /// For a math channel: the least of its included live operands (1 for a trace).
+    /// For a math trace: the least of its included live operands (1 for a stored trace).
     pub filled: f32,
 }
 
-/// What a math channel's frame combined.
+/// What a math trace's frame combined.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MathState {
@@ -70,7 +70,7 @@ impl MathState {
     }
 }
 
-/// One operand of a math channel in a frame.
+/// One operand of a math trace in a frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OperandState {
@@ -80,7 +80,7 @@ pub struct OperandState {
     pub status: OperandStatus,
 }
 
-/// Whether an operand went into a math channel's frame. An operand is left out rather than
+/// Whether an operand went into a math trace's frame. An operand is left out rather than
 /// let it mislead the result (PLAN principle 8).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -141,7 +141,7 @@ pub struct RtaMeta {
     pub cal: CalStatus,
     /// A mic curve was subtracted from `level`.
     pub mic_curve: bool,
-    /// What a math channel combined; `None` for an RTA measurement.
+    /// What a math trace combined; `None` for an RTA measurement.
     pub math: Option<Box<MathState>>,
 }
 
@@ -162,13 +162,13 @@ pub struct SpecMeta {
     /// Display smoothing applied to `level`: a smoothed bin is a fractional-octave power
     /// average of tone levels, not the tone level of the bin.
     pub smoothing: Option<SmoothingFraction>,
-    /// What a math channel combined; `None` for a spectrum measurement.
+    /// What a math trace combined; `None` for a spectrum measurement.
     pub math: Option<Box<MathState>>,
     /// The bands behind a multi-resolution spectrum's columns; `None` for one FFT and a
-    /// math channel.
+    /// math trace.
     pub bands: Option<Box<SpecBands>>,
     /// The generator's sine read from this measurement's spectrum; `None` unless the
-    /// generator is firing a sine, and for a math channel.
+    /// generator is firing a sine, and for a math trace.
     pub harmonics: Option<Box<SpecHarmonics>>,
 }
 

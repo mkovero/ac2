@@ -3,7 +3,7 @@
 //! Each measurement owns a hue ([`Theme::families`]); everything it owns is drawn in that
 //! hue, so the eye groups a measurement's curves the way the tree does. Its live curve has
 //! the family's base colour; its stored traces (captures, sweep runs) and then its math
-//! channels' results take the family's shades in tree order. A shade keeps the base's
+//! traces' results take the family's shades in tree order. A shade keeps the base's
 //! OKLCH hue and chroma and moves only its lightness, across the theme's whole shade range:
 //! each next shade is the one farthest from the curve before it, kept clear of the base and
 //! the other shades, so the first capture sits at the far end of the range from the live
@@ -12,7 +12,7 @@
 //! measurement without a live curve (a sweep) gives its first run the base colour.
 //!
 //! Traces under no measurement (imports, those of a deleted measurement kept) and math
-//! channels listed with them belong to no one family: each takes a colour of its own, so
+//! traces listed with them belong to no one family: each takes a colour of its own, so
 //! imported curves overlaid on a pane stay as distinct from each other and from the
 //! measurements as the palette allows. They walk the import palette ([`import_palette`])
 //! in tree order: first the bases of families no measurement holds (whole new hues), then
@@ -33,7 +33,7 @@
 //! measurement may choose the neutral grey. Stepping a measurement's colour
 //! ([`step_colour`]) skips families another measurement holds.
 //! Shades follow the tree's order within the measurement (slot, then oldest first, then
-//! math channels by id); after the last shade they repeat.
+//! math traces by id); after the last shade they repeat.
 //!
 //! Every pane, legend, cursor readout and tree dot takes its colour from
 //! [`CurveColours`], so a curve reads the same everywhere. The daemon's per-trace colour
@@ -227,7 +227,7 @@ pub struct CurveColours {
 }
 
 impl CurveColours {
-    /// Measurement `id`'s live curve (or a math channel's result).
+    /// Measurement `id`'s live curve (or a math trace's result).
     pub fn meas(&self, id: MeasId) -> Color {
         self.meas.get(&id).copied().unwrap_or(self.fallback)
     }
@@ -238,7 +238,7 @@ impl CurveColours {
     }
 }
 
-/// The family of every measurement that is not a math channel, by id (see the module docs
+/// The family of every measurement that is not a math trace, by id (see the module docs
 /// for the rule).
 pub fn family_indices(meas: &[&Measurement]) -> BTreeMap<MeasId, ColourFamily> {
     let n = FAMILIES;
@@ -281,7 +281,7 @@ fn hue(i: usize) -> ColourFamily {
 
 /// The family measurement `id` steps to from its current one, forwards or backwards through
 /// the hues and then neutral grey (wrapping), skipping those another measurement holds;
-/// `None` when every other is held, or `id` is a math channel or not listed.
+/// `None` when every other is held, or `id` is a math trace or not listed.
 pub fn step_colour(meas: &[&Measurement], id: MeasId, forward: bool) -> Option<ColourFamily> {
     let fams = family_indices(meas);
     let current = *fams.get(&id)?;
@@ -328,7 +328,7 @@ pub fn import_palette(fams: &Families, hues: &BTreeMap<MeasId, ColourFamily>) ->
     out
 }
 
-/// Every curve's colour for `meas` (math channels included) and `traces` in the theme
+/// Every curve's colour for `meas` (math traces included) and `traces` in the theme
 /// `fams` are of.
 pub fn curve_colours(
     fams: &Families,

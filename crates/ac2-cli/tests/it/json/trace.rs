@@ -169,7 +169,7 @@ async fn trace_commands_json() -> R {
         fixed["source"]["reference"],
         json!({ "type": "fixed", "delay": 0.0125 })
     );
-    // A math channel of the two stored traces, by name.
+    // A math trace of the two stored traces, by name.
     let m = ok_json(&f, &["math", "new", "a / b", "--json"]).await?;
     assert_eq!(m["config"]["name"], "a ÷ b");
     assert_eq!(

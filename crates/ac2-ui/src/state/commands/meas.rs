@@ -220,7 +220,7 @@ impl AppState {
                     return;
                 }
                 // The selected sweep, else the sweep pane's; else the selected measurement;
-                // else a math channel a pane shows.
+                // else a math trace a pane shows.
                 let selected = self.selected_meas();
                 let target = selected
                     .filter(|m| matches!(m.config.kind, MeasKind::Sweep { .. }))
@@ -241,7 +241,7 @@ impl AppState {
                     Some(m) => self.open_meas_edit(&m, out),
                     None => self.warn(
                         "select a measurement first (a transfer, sweep, spectrum, RTA, SPL \
-                         meter or math channel), or focus a Programme pane",
+                         meter or math trace), or focus a Programme pane",
                     ),
                 }
             }
@@ -382,7 +382,7 @@ impl AppState {
                 if let Some(m) = &m
                     && let MeasKind::Math { config } = &m.config.kind
                 {
-                    // A math channel holds no averaging of its own: starting it over means
+                    // A math trace holds no averaging of its own: starting it over means
                     // starting its live operands over.
                     for o in config.expr.operands() {
                         if let Operand::Meas { meas } = o {

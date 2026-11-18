@@ -29,7 +29,7 @@ pub struct WalkState {
     /// The step the mics are at ([`WalkPoint::step`]): each stands at its pending point of
     /// it. `None`: every point is captured or skipped.
     pub step: Option<u16>,
-    /// The math channel averaging the captures, made at the second capture; `None` before.
+    /// The math trace averaging the captures, made at the second capture; `None` before.
     pub average: Option<MeasId>,
     /// A sweep walk's room parameters over its captured positions (ISO 3382-1), `None`
     /// for a live walk and before a capture carries room parameters.

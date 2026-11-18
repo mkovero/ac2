@@ -182,7 +182,7 @@ pub fn curves(m: &Measurement, traces: &[&TraceMeta]) -> Vec<Curve> {
     .collect()
 }
 
-/// Whether `curve` is predicted after the set: a math channel `curve × EQ` exists.
+/// Whether `curve` is predicted after the set: a math trace `curve × EQ` exists.
 pub fn predicted(ms: &[&Measurement], meas: MeasId, set: EqSetId, curve: &Operand) -> bool {
     ms.iter().any(|p| match &p.config.kind {
         MeasKind::Math { config } => text::prediction(&config.expr) == Some((meas, set, curve)),

@@ -193,7 +193,7 @@ pub fn spectrograph_3d(
 
 /// Calls `f` with the spectrum pane's traces, its banner status and the view on the level
 /// range of the scale its curves are in. The pane draws its measurement's group — its live
-/// curve, the math channels made on it, its shown stored spectra and band sets — and the
+/// curve, the math traces made on it, its shown stored spectra and band sets — and the
 /// curves compared into that measurement (C), tagged so; never another measurement's
 /// otherwise, nor an imported trace. Its own group comes first (live, then stored), then
 /// the compared curves in compare order: the order they stack in, top first. Each draws
@@ -311,7 +311,7 @@ pub(crate) fn with_spectrum<R>(
         }
         // Its own offset, compared into another measurement's pane too.
         t.offset_db = st.meas_offset(c.meas.id);
-        // A math channel's caption is its expression and what it means.
+        // A math trace's caption is its expression and what it means.
         if let Some(m) = math_status(st, c.meas, &c.tf.frame.data) {
             t.caption = m.tag();
         }

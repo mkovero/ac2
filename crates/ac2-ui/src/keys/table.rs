@@ -81,7 +81,7 @@ pub fn defaults() -> Vec<Binding> {
         // Ctrl+M (the operator's choice): every kind of measurement in one list, so the
         // kinds without a key of their own are found without the palette's words.
         (C::NewMeasurement, S::Global, cmd(K::M)),
-        // Shift+M, a step on from M (average the shown traces): a math channel by name.
+        // Shift+M, a step on from M (average the shown traces): a math trace by name.
         (C::NewMath, S::Global, sh(K::M)),
         // Alt+M, the same dialog with its operator on align: two systems' delay and polarity
         // in their overlap.
@@ -276,7 +276,7 @@ pub fn defaults() -> Vec<Binding> {
         (C::LevelsResetAll, S::Programme, sh(K::R)),
         (C::LevelsReset, S::Inputs, k(K::R)),
         (C::LevelsResetAll, S::Inputs, sh(K::R)),
-        // Shift+W, as Shift+M / Shift+S open a new math channel and a new sweep: the
+        // Shift+W, as Shift+M / Shift+S open a new math trace and a new sweep: the
         // session's spatial walks, a new one first.
         (C::Walks, S::Global, sh(K::W)),
         // The walk pane's actions have no default key: each is a button on the pane, pressed

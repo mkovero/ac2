@@ -1,4 +1,4 @@
-//! The range across positions of an average math channel (`docs/design/spatial-walk.md` §10).
+//! The range across positions of an average math trace (`docs/design/spatial-walk.md` §10).
 
 use serde::{Deserialize, Serialize};
 

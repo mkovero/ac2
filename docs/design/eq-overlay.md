@@ -11,11 +11,11 @@ parameters and how its Q is meant. Built after the two-system alignment aid
 
 An EQ set lives **on the measurement** (operator, 2026-10-20): it models the processor feeding
 that system, so any of the measurement's transfer curves — live, captures, sweep runs, imports
-filed under it — can show "after EQ". Each prediction shown is a math channel
-`curve × EQ 1` — the cascade `math-channels.md` already defines (delays add, the filter's is 0;
+filed under it — can show "after EQ". Each prediction shown is a math trace
+`curve × EQ 1` — the cascade `math-traces.md` already defines (delays add, the filter's is 0;
 the lower γ² carried, the filter's is 1) — whose B operand is the new typed operand
 `Operand::Eq`, evaluated by the daemon. So the prediction updates live, is captured with
-Ctrl+1 … 9, coloured, listed and refused with reasons like any math channel.
+Ctrl+1 … 9, coloured, listed and refused with reasons like any math trace.
 
 ## 1. Filter model
 
@@ -99,7 +99,7 @@ order per alignment, biquad stability, `response` a transfer trace; a refusal re
 
 - **Math**: `ac2_core::eq` (pure: section → complex response at a list of frequencies, plus
   the parameter conversions above). The daemon evaluates a set on the curve's grid when a math
-  channel's `Operand::Eq` asks; the UI never evaluates a filter (`tests/it/no_dsp.rs` stays as
+  trace's `Operand::Eq` asks; the UI never evaluates a filter (`tests/it/no_dsp.rs` stays as
   is; `ac2-scene` links only `ac2-proto`). Every edit round-trips through the daemon:
   `meas.eq` → new columns → redraw; ~1 k columns × 20 sections is microseconds.
 - **Stored**: `Measurement.eq: Vec<EqSet>` (several per measurement — `EQ 1`, `EQ 2` — the
@@ -111,7 +111,7 @@ order per alignment, biquad stability, `response` a transfer trace; a refusal re
   `WIRE_LOCK` bump.
 - **Which curves get a prediction**: only the ones the user ticks in the editor's curve list
   (`meas eq on`); a new set starts with the live curve ticked. Each ticked curve is
-  one math channel; unticking deletes it. Other measurements get a copy (`meas eq copy`).
+  one math trace; unticking deletes it. Other measurements get a copy (`meas eq copy`).
 - **Bypass**: `enabled` per section and per set. A disabled section is skipped; a disabled set
   evaluates as no filter, so the A/B is one key and nothing is rebuilt. Legend `EQ 1 · bypassed`.
 - **Invariants**: deleting a set deletes its predictions (the confirmation names them); a
@@ -144,7 +144,7 @@ its filter curve's row and legend `EQ 1`; a prediction reads `Main L after EQ 1`
 `Main L · capture 2 after EQ 1`; the expression column shows `× EQ 1`). A section reads
 `3 · peaking 1.25 kHz −4.0 dB Q 2.0 (half-gain)`. Marked: `EQ 1 · in console (rev 4)`.
 
-**Drawing.** On the transfer pane the prediction is a math channel result: the measurement's shade,
+**Drawing.** On the transfer pane the prediction is a math trace result: the measurement's shade,
 solid, with phase on the phase pane and the curve's coherence mask. The EQ curve is a trace in
 another shade, drawn dashed and on the same magnitude axis about 0 dB, with its phase on the
 phase pane (all-pass and delay sections only show there). Both have tree dots and toggle like
@@ -297,6 +297,6 @@ a `#` comment at the top of the file. Never approximated.
 - **Plot handles**: a dot per peaking / shelf / pass section at (f, gain) while the editor is
   open; drag moves f and gain, Shift-drag or the wheel Q; the daemon still draws.
 - **Linked pair**: one set shared by L and R of a stereo processor. First cut: `copy` only.
-- **Spectrum / RTA × EQ**: math channels already take a stored transfer B for levels, but what
+- **Spectrum / RTA × EQ**: math traces already take a stored transfer B for levels, but what
   a level becomes through a filter depends on the programme material (the RTA band gain is
-  exact only for pink noise, `math-channels.md` *Levels*), so it waits for a use case.
+  exact only for pink noise, `math-traces.md` *Levels*), so it waits for a use case.

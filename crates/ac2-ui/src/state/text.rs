@@ -247,7 +247,7 @@ pub fn parse_session_ref(text: &str) -> Result<SessionRef, String> {
 }
 
 /// The input a measurement's mic curve belongs to (a transfer function's measurement
-/// input); a math channel has its operands', none of its own, and a sweep of several mics
+/// input); a math trace has its operands', none of its own, and a sweep of several mics
 /// none either (each of its traces carries its own input's curve).
 pub fn meas_input(k: &MeasKind) -> Option<u16> {
     match k {

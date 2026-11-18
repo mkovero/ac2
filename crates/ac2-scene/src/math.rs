@@ -1,6 +1,6 @@
-//! What a math channel says about itself: its expression by name, which operands went into
+//! What a math trace says about itself: its expression by name, which operands went into
 //! its newest frame and why the others did not, and what its phase and coherence mean
-//! (`docs/design/math-channels.md`).
+//! (`docs/design/math-traces.md`).
 //!
 //! A result that silently dropped an operand would read as what its expression says while
 //! being something else: the legend counts an average's positions, and a banner names the
@@ -55,7 +55,7 @@ pub fn expression(expr: &MathExpr, name_of: impl Fn(Operand) -> String) -> Strin
     }
 }
 
-/// The name a new math channel gets: the expression, `Main L ÷ Sub`; an average of
+/// The name a new math trace gets: the expression, `Main L ÷ Sub`; an average of
 /// positions is `Average of 4`; a curve through an EQ set is its prediction, named as the
 /// EQ editor names one: `Main L after EQ 1`.
 pub fn default_name(expr: &MathExpr, name_of: impl Fn(Operand) -> String) -> String {
@@ -147,7 +147,7 @@ pub fn arrival_note(
     ))
 }
 
-/// A math channel's frame, as the display tells it.
+/// A math trace's frame, as the display tells it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MathStatus {
     /// The expression by name.
@@ -172,7 +172,7 @@ pub struct MathStatus {
 }
 
 impl MathStatus {
-    /// From the channel's configuration and its frame's [`MathState`], operands named by
+    /// From the math trace's configuration and its frame's [`MathState`], operands named by
     /// `name_of`.
     pub fn new(c: &MathConfig, s: &MathState, name_of: impl Fn(Operand) -> String) -> Self {
         let notes = match c.domain {

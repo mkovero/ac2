@@ -76,7 +76,7 @@ impl Recorder {
 
 impl Analysis for Recorder {
     fn result_generation(&self) -> Option<u64> {
-        // Not an operand of math channels.
+        // Not an operand of math traces.
         None
     }
 

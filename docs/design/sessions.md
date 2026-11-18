@@ -89,9 +89,9 @@ whole when it fits, otherwise field by field onto this version's default of that
 known moves (a format-23 `fft_len` becomes `resolution: fixed`) — and names every field it
 dropped or defaulted. It then issues the ordinary commands (`meas.create`, `meas.colour`,
 `meas.layout`, `delay.set`, `delay.track`, `trace.import`, `trace.update` with the restored
-owner, math channels last on the restored ids, `meas.start` where the open session captures
+owner, math traces last on the restored ids, `meas.start` where the open session captures
 the inputs). The daemon's loader keeps reading its own version only; a sweep (its level)
-and a math channel are never rebuilt from defaults. A format change that moves a setting
+and a math trace are never rebuilt from defaults. A format change that moves a setting
 adds an entry to `moved()` in `salvage/read.rs` and a fixture under
 `crates/ac2-cli/tests/fixtures/salvage`.
 

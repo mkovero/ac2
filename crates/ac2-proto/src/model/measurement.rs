@@ -333,9 +333,9 @@ pub enum MeasKind {
         /// Configuration.
         config: SplConfig,
     },
-    /// Math channel: a result the daemon computes from named live measurements and stored
+    /// Math trace: a result the daemon computes from named live measurements and stored
     /// traces, published as `tf`, `spec` or `rta` by its domain
-    /// (`docs/design/math-channels.md`).
+    /// (`docs/design/math-traces.md`).
     Math {
         /// Configuration.
         config: MathConfig,
@@ -375,7 +375,7 @@ impl MeasKind {
         matches!(self.stream(), Some(Stream::Spec | Stream::Rta))
     }
 
-    /// How its curves are drawn, for a spectrum or RTA measurement (a math channel draws
+    /// How its curves are drawn, for a spectrum or RTA measurement (a math trace draws
     /// with its owner's).
     pub fn display(&self) -> Option<&SpectrumDisplay> {
         match self {
@@ -386,7 +386,7 @@ impl MeasKind {
     }
 
     /// What P draws over its live curve, for the kinds that take a peak mode: a spectrum,
-    /// an RTA or a transfer function (a math channel draws with its owner's).
+    /// an RTA or a transfer function (a math trace draws with its owner's).
     pub fn peak(&self) -> Option<PeakMode> {
         match self {
             MeasKind::Spectrum { config } => Some(config.display.peak),
@@ -422,12 +422,12 @@ impl MeasKind {
     }
 }
 
-/// Who a stored trace or a math channel belongs to: the measurement it is listed under, or
+/// Who a stored trace or a math trace belongs to: the measurement it is listed under, or
 /// the imported group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum TraceOwner {
-    /// A measurement (never a math channel: math lives under a measurement).
+    /// A measurement (never a math trace: math lives under a measurement).
     Meas {
         /// The measurement.
         meas: MeasId,
@@ -446,7 +446,7 @@ impl TraceOwner {
     }
 }
 
-/// What `meas.delete` does with the stored traces and math channels the measurement owns.
+/// What `meas.delete` does with the stored traces and math traces the measurement owns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OwnedTraces {
@@ -456,7 +456,7 @@ pub enum OwnedTraces {
     Delete,
 }
 
-/// A math channel: an expression over operands of one domain, evaluated by the daemon
+/// A math trace: an expression over operands of one domain, evaluated by the daemon
 /// whenever it publishes, so every client shows the same result.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -510,7 +510,7 @@ impl MathConfig {
     }
 }
 
-/// What a math channel's operands are.
+/// What a math trace's operands are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MathDomain {
@@ -524,7 +524,7 @@ pub enum MathDomain {
 }
 
 impl MathDomain {
-    /// The stream a math channel of this domain publishes.
+    /// The stream a math trace of this domain publishes.
     pub fn stream(self) -> Stream {
         match self {
             MathDomain::Transfer => Stream::Tf,
@@ -534,7 +534,7 @@ impl MathDomain {
     }
 }
 
-/// A math channel's expression.
+/// A math trace's expression.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum MathExpr {
@@ -601,7 +601,7 @@ pub enum MathOp {
     Subtract,
 }
 
-/// A math channel's operand: a live measurement or a stored trace, named by id.
+/// A math trace's operand: a live measurement or a stored trace, named by id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Operand {
@@ -725,7 +725,7 @@ pub struct Measurement {
     /// Grid of the measurement's main stream.
     pub grid_id: Option<GridId>,
     /// Colour family the operator chose (`meas.colour`); `None`: the one its id gives.
-    /// Always `None` for a math channel, which takes its owner's.
+    /// Always `None` for a math trace, which takes its owner's.
     pub colour: Option<ColourFamily>,
     /// The panes a client shows while this measurement is selected (`meas.layout`);
     /// `None`: none of its own, a client keeps the panes it has.

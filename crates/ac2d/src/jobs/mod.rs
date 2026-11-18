@@ -369,7 +369,7 @@ pub(crate) enum JobMsg {
     /// Blocks of one hand-off, oldest first.
     Blocks(Batch),
     Cmd(JobCmd),
-    /// Form the current result for a math channel's operand and answer on the channel.
+    /// Form the current result for a math trace's operand and answer on the channel.
     Capture(SyncSender<Option<Frame>>),
     /// Form the current result with its impulse response for `trace.capture`.
     CaptureTrace(SyncSender<Option<Captured>>),
@@ -410,9 +410,9 @@ pub(crate) trait Analysis: Send {
         None
     }
     /// A count that advances whenever the result [`Analysis::capture`] returns may have
-    /// changed (the job's own `Pace` generation): math channels read it through a [`Probe`]
+    /// changed (the job's own `Pace` generation): math traces read it through a [`Probe`]
     /// to form and publish a new result only when an operand has one. `None` for analyses
-    /// a math channel cannot use as an operand.
+    /// a math trace cannot use as an operand.
     fn result_generation(&self) -> Option<u64>;
 }
 
@@ -489,7 +489,7 @@ impl Drop for JobHandle {
 }
 
 /// Asks a running job for its current result, as `trace.capture` does, from another thread
-/// (a math channel asking its live operands). A probe of a stopped job answers nothing.
+/// (a math trace asking its live operands). A probe of a stopped job answers nothing.
 #[derive(Clone, Debug)]
 pub(crate) struct Probe {
     tx: Sender<JobMsg>,
@@ -515,7 +515,7 @@ impl Probe {
 }
 
 /// The probes of running transfer, spectrum and RTA jobs by measurement, kept by control as
-/// jobs start and stop, read by math channels when they publish.
+/// jobs start and stop, read by math traces when they publish.
 #[derive(Debug, Default)]
 pub(crate) struct Probes(Mutex<HashMap<MeasId, Probe>>);
 

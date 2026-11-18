@@ -511,7 +511,7 @@ impl Control {
     }
 
     /// The walk's average made to average its captures now: made at the second capture, its
-    /// operands updated (the math channel restarts with them). Once made it stays while redos
+    /// operands updated (the math trace restarts with them). Once made it stays while redos
     /// and skips leave fewer than two captures, so the panes showing it keep it; its frames
     /// then say NO AVERAGE (`FEW_OPERANDS`). Returns the walk as it is after.
     pub(super) fn walk_average(&mut self, walk: WalkId) -> Result<WalkState, ProtoError> {

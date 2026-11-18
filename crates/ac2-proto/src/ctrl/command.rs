@@ -268,7 +268,7 @@ pub enum Command {
         config: MeasConfig,
     },
     /// Choose the colour family a measurement's curves are drawn in (`None`: the one its
-    /// id gives). Its job and config rev go on. Refused for a math channel, which takes its
+    /// id gives). Its job and config rev go on. Refused for a math trace, which takes its
     /// owner's.
     #[serde(rename = "meas.colour")]
     MeasColour {
@@ -295,14 +295,14 @@ pub enum Command {
         /// Offset, finite and at most [`crate::model::Measurement::OFFSET_MAX_DB`] either way.
         offset: Db,
     },
-    /// Delete a measurement, and say what becomes of the stored traces and math channels
-    /// it owns. Refused while a math channel that stays computes from it or from a trace
+    /// Delete a measurement, and say what becomes of the stored traces and math traces
+    /// it owns. Refused while a math trace that stays computes from it or from a trace
     /// deleted with it, and while a run of it (a sweep measurement) plays.
     #[serde(rename = "meas.delete")]
     MeasDelete {
         /// Measurement.
         meas: MeasId,
-        /// Its traces and math channels: kept (moved to the imported group) or deleted.
+        /// Its stored traces and math traces: kept (moved to the imported group) or deleted.
         traces: OwnedTraces,
     },
     /// Edit a measurement's EQ what-if sets (transfer and sweep measurements). Its job and
@@ -441,7 +441,7 @@ pub enum Command {
         content: Blob,
         /// The measurement it is listed under, or the imported group: a target loaded for
         /// the system being tuned belongs with that system's measurement. Refused for a
-        /// math channel or a measurement that does not exist.
+        /// math trace or a measurement that does not exist.
         owner: TraceOwner,
     },
     /// Generate a target curve as a new target trace (`trace.import` of a target, without a

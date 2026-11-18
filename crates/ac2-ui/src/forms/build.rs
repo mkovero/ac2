@@ -210,7 +210,7 @@ impl Form {
         f
     }
 
-    /// The measurement this dialog edits (a math channel, a spectrum or an RTA), if any.
+    /// The measurement this dialog edits (a math trace, a spectrum or an RTA), if any.
     pub fn edits(&self) -> Option<MeasId> {
         self.math_edit().or(self.meas_edit.as_ref().map(|m| m.id))
     }

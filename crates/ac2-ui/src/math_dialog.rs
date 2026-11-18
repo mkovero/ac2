@@ -1,7 +1,7 @@
-//! The math channel dialog: A, the operator and B picked by name from the live
+//! The math trace dialog: A, the operator and B picked by name from the live
 //! measurements and stored traces that can be combined, or the operands of an average
 //! ticked; the method, phase reference and smoothing where they apply; the name prefilled
-//! from the expression. The same dialog edits an existing channel. Pure data, like the
+//! from the expression. The same dialog edits an existing math trace. Pure data, like the
 //! other dialogs ([`crate::forms`]); the daemon does the maths and refuses what it cannot
 //! combine, saying why.
 
@@ -17,11 +17,11 @@ use crate::forms::{Field, FieldId, Form, FormKind, Value};
 mod align;
 pub use align::Level;
 
-/// Something a math channel can combine.
+/// Something a math trace can combine.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Candidate {
     pub operand: Operand,
-    /// Its name, as the expression and the channel's name use it.
+    /// Its name, as the expression and the math trace's name use it.
     pub name: String,
     /// As the dialog lists it: a stored trace says so.
     pub label: String,
@@ -29,9 +29,9 @@ pub struct Candidate {
 }
 
 impl Candidate {
-    /// Every live transfer, spectrum and RTA measurement (not a math channel: capture one
+    /// Every live transfer, spectrum and RTA measurement (not a math trace: capture one
     /// to use it), then every stored trace of those kinds, in list order — `owner`'s live
-    /// curve and traces first: the channel is made on that measurement.
+    /// curve and traces first: the math trace is made on that measurement.
     pub fn all(
         ms: &[&Measurement],
         traces: &[&TraceMeta],
@@ -177,14 +177,14 @@ const SMOOTHING: [(&str, Option<SmoothingFraction>); 6] = [
 #[derive(Clone, Debug, PartialEq)]
 pub struct MathForm {
     pub candidates: Vec<Candidate>,
-    /// The channel being edited; `None` for a new one.
+    /// The math trace being edited; `None` for a new one.
     pub edit: Option<MeasId>,
-    /// Where the channel is listed: the measurement selected when it was made.
+    /// Where the math trace is listed: the measurement selected when it was made.
     pub owner: TraceOwner,
     /// The name the dialog last filled in: while the name field still holds it, it follows
     /// the expression.
     auto_name: String,
-    /// The smoothing mode kept from the channel being edited.
+    /// The smoothing mode kept from the math trace being edited.
     mode: SmoothingMode,
     /// The transfer curves an alignment's band is prefilled from.
     levels: Vec<Level>,
@@ -263,7 +263,7 @@ impl MathForm {
 }
 
 impl Form {
-    /// The new-math-channel dialog over `candidates`; `first` is preselected as A (the
+    /// The new-math-trace dialog over `candidates`; `first` is preselected as A (the
     /// focused measurement or the selected trace). `None` with fewer than two candidates of
     /// one kind.
     pub fn math(
@@ -308,7 +308,7 @@ impl Form {
         Some(f)
     }
 
-    /// The new-math-channel dialog a row dropped on another opens: `a op b`, listed under
+    /// The new-math-trace dialog a row dropped on another opens: `a op b`, listed under
     /// `owner`, the name following the expression. `None` when either is no candidate.
     pub fn math_drop(
         candidates: Vec<Candidate>,
@@ -343,16 +343,16 @@ impl Form {
             auto_band: Default::default(),
             own_pane: false,
         }));
-        // The operator focused: ←/→ changes the reading, Enter makes the channel as dropped.
+        // The operator focused: ←/→ changes the reading, Enter makes the math trace as dropped.
         f.lay_out(picks, Some(FieldId::Operator));
         let p = f.picks()?;
         (p.a == Some(a) && p.b == Some(b) && p.choice == Choice::Binary(op)).then_some(f)
     }
 
-    /// The dialog editing math channel `m`, its rows as configured.
+    /// The dialog editing math trace `m`, its rows as configured.
     pub fn edit_math(m: &Measurement, candidates: Vec<Candidate>) -> Result<Form, String> {
         let MeasKind::Math { config } = &m.config.kind else {
-            return Err(format!("{} is not a math channel", m.config.name));
+            return Err(format!("{} is not a math trace", m.config.name));
         };
         let mut band = Default::default();
         let mut max_delay = align::default_max_delay();
@@ -409,7 +409,7 @@ impl Form {
             candidates,
             edit: Some(m.id),
             owner: config.owner,
-            // An edited channel keeps its name unless the operator types another.
+            // An edited math trace keeps its name unless the operator types another.
             auto_name: String::new(),
             mode: config
                 .smoothing
@@ -696,8 +696,8 @@ impl Form {
 
     /// The `meas.create` / `meas.update` configuration of the math dialog.
     pub(crate) fn math_config(&self) -> Result<MeasConfig, String> {
-        let m = self.math.as_ref().ok_or("not a math channel dialog")?;
-        let p = self.picks().ok_or("not a math channel dialog")?;
+        let m = self.math.as_ref().ok_or("not a math trace dialog")?;
+        let p = self.picks().ok_or("not a math trace dialog")?;
         let a = p.a.or_else(|| p.of.first().copied());
         let domain = m.domain_of(a).ok_or("choose the operands")?;
         let expr = match p.choice {
@@ -776,7 +776,7 @@ impl Form {
         })
     }
 
-    /// The channel this dialog edits, if it edits one.
+    /// The math trace this dialog edits, if it edits one.
     pub fn math_edit(&self) -> Option<MeasId> {
         self.math.as_ref().and_then(|m| m.edit)
     }

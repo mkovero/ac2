@@ -271,7 +271,7 @@ fn log_event(ev: &TimingEvent) {
 
 impl Analysis for Timing {
     fn result_generation(&self) -> Option<u64> {
-        // Not an operand of math channels.
+        // Not an operand of math traces.
         None
     }
 

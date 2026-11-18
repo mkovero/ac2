@@ -37,7 +37,7 @@ pub(crate) struct Plan {
 /// A measurement as the old session had it, in this version's types.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct OldMeas {
-    /// Its id in the old session (math channels and traces name it).
+    /// Its id in the old session (math traces and stored traces name it).
     pub old_id: Option<MeasId>,
     /// Configuration.
     pub config: MeasConfig,
@@ -56,7 +56,7 @@ pub(crate) struct OldMeas {
 /// A stored trace entry of the old manifest.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct OldTrace {
-    /// Its id in the old session (math channels name it).
+    /// Its id in the old session (math traces name it).
     pub old_id: Option<TraceId>,
     /// Data file, relative to the session directory.
     pub file: String,
@@ -212,7 +212,7 @@ fn old_meas(v: &Value) -> Result<OldMeas, String> {
     let config = meas_config(config, &mut notes)?;
     let old_id = obj.get("id").and_then(MeasId::deserialize_value);
     if old_id.is_none() {
-        notes.push("its old id is unreadable: no trace or math channel finds it".into());
+        notes.push("its old id is unreadable: no stored trace or math trace finds it".into());
     }
     let running = match obj.get("running").and_then(Value::as_bool) {
         Some(r) => r,
@@ -268,7 +268,7 @@ fn old_meas(v: &Value) -> Result<OldMeas, String> {
 }
 
 /// A measurement configuration, field by field onto this version's default of its kind. A
-/// sweep (whose level is never invented) and a math channel (whose expression has no
+/// sweep (whose level is never invented) and a math trace (whose expression has no
 /// default) are taken whole or not at all.
 fn meas_config(v: &Value, notes: &mut Vec<String>) -> Result<MeasConfig, String> {
     let name = v

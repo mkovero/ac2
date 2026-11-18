@@ -87,7 +87,7 @@ impl Control {
             let g = jobs::spectrum::capture_grid(config, rt.sample_rate);
             self.register_grid(g);
         }
-        // A math channel combines on one grid and, a spectrum's, publishes on another.
+        // A math trace combines on one grid and, a spectrum's, publishes on another.
         let math = match (&m.config.kind, &self.session) {
             (MeasKind::Math { config }, Some(rt)) => {
                 let (grids, stored) = self.math_setup(m.id, config, rt.sample_rate)?;
@@ -186,7 +186,7 @@ impl Control {
             }
             MeasKind::Sweep { .. } => return Ok(None),
             MeasKind::Math { config } => {
-                let (grids, stored) = math.ok_or_else(|| internal("math channel without setup"))?;
+                let (grids, stored) = math.ok_or_else(|| internal("math trace without setup"))?;
                 let shown = grids
                     .display
                     .as_ref()
@@ -200,7 +200,7 @@ impl Control {
                 (Box::new(a), Some(shown))
             }
         };
-        // Math channels ask their live operands for results; a math channel is never one.
+        // Math traces ask their live operands for results; a math trace is never one.
         let probed = matches!(
             m.config.kind,
             MeasKind::Transfer { .. } | MeasKind::Spectrum { .. } | MeasKind::Rta { .. }

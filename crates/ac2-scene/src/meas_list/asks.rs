@@ -7,18 +7,18 @@ use ac2_proto::model::{MeasKind, Measurement, TraceOwner};
 use super::{kind_name, kind_tag, state_word};
 use crate::trace_list::DeleteConfirm;
 
-/// What a measurement owns, for the question Delete asks: `3 traces`, `2 traces and 1 math
-/// channel`.
+/// What a measurement owns, for the question Delete asks: `3 stored traces`, `2 stored traces and
+/// trace`.
 pub fn owned_words(traces: usize, maths: usize) -> String {
     let t = match traces {
         0 => None,
-        1 => Some("1 trace".to_owned()),
-        n => Some(format!("{n} traces")),
+        1 => Some("1 stored trace".to_owned()),
+        n => Some(format!("{n} stored traces")),
     };
     let m = match maths {
         0 => None,
-        1 => Some("1 math channel".to_owned()),
-        n => Some(format!("{n} math channels")),
+        1 => Some("1 math trace".to_owned()),
+        n => Some(format!("{n} math traces")),
     };
     match (t, m) {
         (Some(t), Some(m)) => format!("{t} and {m}"),
@@ -32,11 +32,11 @@ pub fn owned_words(traces: usize, maths: usize) -> String {
 pub struct Choice {
     /// `Keep them (move to Imported)`.
     pub label: String,
-    /// Why it cannot be chosen (a math channel that stays would lose an operand).
+    /// Why it cannot be chosen (a math trace that stays would lose an operand).
     pub blocked: Option<String>,
 }
 
-/// The question Delete asks for a measurement that owns stored traces or math channels:
+/// The question Delete asks for a measurement that owns stored traces or math traces:
 /// keep them (moved to the imported group), delete them too, or cancel. Asked every time;
 /// Keep is the default.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -60,7 +60,7 @@ pub const DELETE: usize = 1;
 pub const CANCEL: usize = 2;
 
 /// The question for measurement `m` owning `traces` stored traces and `maths` math
-/// channels. `keep_blocked` / `delete_blocked`: the math channels that would lose an
+/// traces. `keep_blocked` / `delete_blocked`: the math traces that would lose an
 /// operand with that answer (the daemon refuses it).
 pub fn delete_choices(
     m: &Measurement,
@@ -79,7 +79,7 @@ pub fn delete_choices(
     let why = |users: &[String]| {
         (!users.is_empty()).then(|| {
             format!(
-                "the math channel{} {} would lose an operand",
+                "the math trace{} {} would lose an operand",
                 if users.len() == 1 { "" } else { "s" },
                 users.join(", ")
             )
@@ -124,14 +124,14 @@ pub fn delete_choices(
     }
 }
 
-/// The question "Move to measurement…" asks: where a stored trace or a math channel is
+/// The question "Move to measurement…" asks: where a stored trace or a math trace is
 /// filed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MoveChoices {
     /// `Move pre-EQ to…`
     pub title: String,
     pub lines: Vec<String>,
-    /// Every measurement that can own (not a math channel), in tree order, then Imported;
+    /// Every measurement that can own (not a math trace), in tree order, then Imported;
     /// where it is filed now cannot be picked.
     pub choices: Vec<Choice>,
     /// Where each answer files it.
@@ -195,18 +195,14 @@ pub fn delete_confirm(m: &Measurement) -> DeleteConfirm {
     }
 }
 
-/// What shows in the confirmation's place when math channels `users` compute from `m`: the
-/// daemon refuses deleting an operand, so the window says which channel to change first.
+/// What shows in the confirmation's place when math traces `users` compute from `m`: the
+/// daemon refuses deleting an operand, so the window says which math trace to change first.
 pub fn delete_refused(m: &Measurement, users: &[String]) -> DeleteConfirm {
     let name = &m.config.name;
     let (which, them, computes) = match users {
-        [one] => (
-            format!("the math channel {one}"),
-            one.clone(),
-            "it computes",
-        ),
+        [one] => (format!("the math trace {one}"), one.clone(), "it computes"),
         _ => (
-            format!("the math channels {}", users.join(", ")),
+            format!("the math traces {}", users.join(", ")),
             "them".to_owned(),
             "they compute",
         ),

@@ -57,7 +57,7 @@ bitmask!(
         INSUFFICIENT_RESOLUTION = 1 << 7;
         /// Band above Nyquist.
         ABOVE_NYQUIST = 1 << 8;
-        /// A math channel without the usable operands it needs: no value.
+        /// A math trace without the usable operands it needs: no value.
         FEW_OPERANDS = 1 << 9;
     }
 );

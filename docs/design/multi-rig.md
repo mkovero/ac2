@@ -348,7 +348,7 @@ until it answers or is closed. Names come from the rig and are display only
   system max level, programme-meter ballistic) are each rig's, edited on its tab.
 - Undo is the app's history of pane edits (`state/undo.rs`) and stays one history across
   every rig's panes; what a daemon does is not undone, as today.
-- Cross-rig math channels are offered like any other math: both operands are traces or live
+- Cross-rig math traces are offered like any other math: both operands are traces or live
   curves the app already has; the daemon doing the math is the measurement's.
 
 ## 7. What is and isn't claimed (N6)

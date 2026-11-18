@@ -569,7 +569,7 @@ fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
         })
     })?;
 
-    // A math channel of an unslotted stored trace: Shift+M starts with the selected trace
+    // A math trace of an unslotted stored trace: Shift+M starts with the selected trace
     // as A, by name.
     d.key("Ctrl+2");
     d.until("slot 2", |s| s.slots()[1].is_some())?;
@@ -596,7 +596,7 @@ fn the_selected_trace_exports_and_subtracts_from_the_palette() -> R {
     assert!(name.starts_with(&format!("{b_name} ÷ ")), "{name}");
     d.key("Enter");
     let operand = ac2_proto::model::Operand::Trace { trace: b };
-    d.until("the math channel of the trace", |s| {
+    d.until("the math trace of the trace", |s| {
         s.measurements().iter().any(|m| {
             m.config.name == name
                 && matches!(&m.config.kind, MeasKind::Math { config } if config.expr.names(operand))

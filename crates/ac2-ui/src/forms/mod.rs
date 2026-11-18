@@ -1,6 +1,6 @@
 //! The new-measurement dialogs: a few fields that build a `meas.create` (a sweep
 //! measurement's too: its settings, run later with `sweep.run`), and the dialogs that edit
-//! a math channel, a transfer or sweep measurement, a spectrum or an RTA. Inputs and outputs
+//! a math trace, a transfer or sweep measurement, a spectrum or an RTA. Inputs and outputs
 //! are picked by name from the session's channels (inputs with their meters in the view), never typed as numbers. Pure
 //! data; the reducer routes keys here and the view draws them. Every default is the CLI's
 //! (`ac2 meas new`, `ac2 ir capture`), taken from the shared constructors in `ac2-proto`.
@@ -36,9 +36,9 @@ pub enum FormKind {
     Sweep,
     /// A sweep measurement's settings edited (for its next run).
     SweepEdit,
-    /// A new math channel ([`crate::math_dialog`]).
+    /// A new math trace ([`crate::math_dialog`]).
     Math,
-    /// A math channel edited.
+    /// A math trace edited.
     MathEdit,
     /// A spectrum's settings edited.
     SpectrumEdit,
@@ -65,8 +65,8 @@ impl FormKind {
             FormKind::Spectrum => "New spectrum",
             FormKind::Rta => "New RTA",
             FormKind::Spl => "New SPL meter",
-            FormKind::Math => "New math channel (A ÷ × + − ↔ B, or the average of several)",
-            FormKind::MathEdit => "Edit math channel",
+            FormKind::Math => "New math trace (A ÷ × + − ↔ B, or the average of several)",
+            FormKind::MathEdit => "Edit math trace",
             FormKind::Sweep => "New sweep measurement (response and harmonic distortion)",
             FormKind::SweepEdit => "Edit sweep measurement (its next run)",
             FormKind::SpectrumEdit => "Edit spectrum",
@@ -156,17 +156,17 @@ pub enum FieldId {
     Window,
     /// A spectrum's level: tone or density.
     SpecLevel,
-    /// Whether this operand is in a math channel's average.
+    /// Whether this operand is in a math trace's average.
     Member(Operand),
-    /// How a math channel's average combines its operands.
+    /// How a math trace's average combines its operands.
     Method,
-    /// A math channel's first operand.
+    /// A math trace's first operand.
     OperandA,
-    /// A math channel's operator.
+    /// A math trace's operator.
     Operator,
-    /// A math channel's second operand.
+    /// A math trace's second operand.
     OperandB,
-    /// The operand whose delay a math channel's sum or average is referred to.
+    /// The operand whose delay a math trace's sum or average is referred to.
     PhaseRef,
     /// An alignment's overlap band, lower and upper edge.
     AlignFrom,
@@ -337,7 +337,7 @@ pub struct Form {
     /// The focused text field's whole text is selected: typing replaces it, Backspace
     /// clears it. A text field is selected when it gets the focus, and by Ctrl+A.
     pub selected: bool,
-    /// The math channel dialog's own state ([`crate::math_dialog`]).
+    /// The math trace dialog's own state ([`crate::math_dialog`]).
     pub math: Option<Box<crate::math_dialog::MathForm>>,
     /// The sweep measurement this dialog edits.
     pub sweep_edit: Option<MeasId>,

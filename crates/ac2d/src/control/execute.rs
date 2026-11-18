@@ -147,7 +147,7 @@ impl Control {
                 let mut m = self.meas(meas)?.clone();
                 if matches!(m.config.kind, MeasKind::Math { .. }) {
                     return Err(invalid(format!(
-                        "{} is a math channel: it is drawn in its owner's colours",
+                        "{} is a math trace: it is drawn in its owner's colours",
                         m.config.name
                     )));
                 }
@@ -199,7 +199,7 @@ impl Control {
                 if let MeasKind::Math { .. } = self.meas(meas)?.config.kind {
                     // Its operands hold the averages; resetting one is the operator's choice.
                     return Err(invalid(
-                        "a math channel holds no averages of its own; reset its operands",
+                        "a math trace holds no averages of its own; reset its operands",
                     ));
                 }
                 if let Some(j) = self.jobs.get(&meas) {
@@ -474,7 +474,7 @@ impl Control {
         self.check_walk_meas_update(meas, &config.kind)?;
         self.check_eq_update(meas, &config.kind)?;
         if owners::owner_only(&m.config, &config) {
-            // Moving a math channel changes where it is listed, not what it
+            // Moving a math trace changes where it is listed, not what it
             // computes: its job and its frames' config rev go on.
             m.config = config;
             return Ok(self.reply_meas(m));

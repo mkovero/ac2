@@ -78,7 +78,7 @@ arrival it had at capture, so after its nudge is changed no honest absolute dela
   applied to them at all).
 - **Sessions**: the saved form (`applied: Seconds`, `nudged`); a loaded delay is not rounded
   to whole samples.
-- **TF frame shape** is unchanged (math channels and other consumers see the same frames).
+- **TF frame shape** is unchanged (math traces and other consumers see the same frames).
 
 ## Validation (`crates/ac2-core/tests/it/mtw_delay.rs`)
 

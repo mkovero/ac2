@@ -1,10 +1,10 @@
-//! Math channels: their configuration checks, their operands' invariants, and the stored
-//! operands' columns they start with (`docs/design/math-channels.md`).
+//! Math traces: their configuration checks, their operands' invariants, and the stored
+//! operands' columns they start with (`docs/design/math-traces.md`).
 //!
-//! A math channel names its operands by id. That holds for as long as it exists: a live
+//! A math trace names its operands by id. That holds for as long as it exists: a live
 //! operand cannot be deleted, turned into another kind or moved to another grid, and a
-//! stored one cannot be deleted, while a math channel names it — the channel would silently
-//! stop meaning what its name says. The operator edits the channel first.
+//! stored one cannot be deleted, while a math trace names it — it would silently
+//! stop meaning what its name says. The operator edits the math trace first.
 
 use std::sync::Arc;
 
@@ -28,7 +28,7 @@ const LEVEL_RATIO: &str = "spectra and RTA bands are levels: they take − (leve
     and + (power sum) of two levels; × and ÷ put a level through a filter, B a stored transfer \
     function (an imported impulse response, a captured transfer function)";
 
-/// Checks of a math channel's configuration that need no other entity.
+/// Checks of a math trace's configuration that need no other entity.
 /// A new average starts with two operands: one curve is not an average. An existing one may
 /// shrink below that ([`validate`]).
 pub(super) fn new_average_has_two(kind: &MeasKind) -> Result<(), ProtoError> {
@@ -77,7 +77,7 @@ pub(super) fn validate(c: &MathConfig) -> Result<(), ProtoError> {
             }
         }
         MathExpr::Average { of, method } => {
-            // Fewer than two are accepted here: an average once made keeps its channel (and
+            // Fewer than two are accepted here: an average once made keeps its math trace (and
             // the panes showing it) while a spatial walk's redos leave it fewer positions, and
             // the job shows FEW_OPERANDS. A new one needs two (`new_average_has_two`).
             if of.len() > MathConfig::MAX_AVERAGE {
@@ -168,19 +168,19 @@ fn domain_word(d: MathDomain) -> &'static str {
     }
 }
 
-/// What the math channel's operands are, looked up in the state.
+/// What the math trace's operands are, looked up in the state.
 pub(super) struct Lookup<'a> {
     pub(super) meas: &'a dyn Fn(MeasId) -> Option<(&'a str, &'a MeasKind)>,
     pub(super) trace: &'a dyn Fn(TraceId) -> Option<(&'a TraceMeta, GridDef)>,
     /// Whether measurement `meas` holds EQ set `set`.
     pub(super) eq: &'a dyn Fn(MeasId, EqSetId) -> bool,
     /// The current session epoch, the time base of every live operand; `None` skips the
-    /// time-base checks (a session being loaded starts a new epoch: its math channels say
+    /// time-base checks (a session being loaded starts a new epoch: its math traces say
     /// per frame which operands share it).
     pub(super) epoch: Option<SessionEpoch>,
 }
 
-/// Checks math channel `own`'s operands (`None` while it is being created) against the
+/// Checks math trace `own`'s operands (`None` while it is being created) against the
 /// state and returns the grid its result has without a session (a transfer result's), if
 /// one is known yet.
 pub(super) fn check_operands(
@@ -204,7 +204,7 @@ pub(super) fn check_operands(
         match o {
             Operand::Meas { meas } => {
                 if Some(meas) == own {
-                    return Err(invalid("a math channel cannot be its own operand"));
+                    return Err(invalid("a math trace cannot be its own operand"));
                 }
                 let (name, kind) =
                     (l.meas)(meas).ok_or_else(|| missing(format!("no measurement {meas}")))?;
@@ -216,13 +216,13 @@ pub(super) fn check_operands(
                 );
                 if let MeasKind::Math { .. } = kind {
                     return Err(invalid(format!(
-                        "{name} is a math channel: capture it (Ctrl+1…9, `ac2 trace capture`) \
-                         and use the trace"
+                        "{name} is a math trace: capture it (Ctrl+1…9, `ac2 trace capture`) \
+                         and use the stored trace"
                     )));
                 }
                 if !ok {
                     return Err(invalid(format!(
-                        "{name} is not one of the {want} this math channel combines"
+                        "{name} is not one of the {want} this math trace combines"
                     )));
                 }
                 if let Some(g) = static_grid(kind) {
@@ -252,7 +252,7 @@ pub(super) fn check_operands(
                 }
                 if trace_domain(t.kind) != Some(c.domain) {
                     return Err(invalid(format!(
-                        "{name} is not one of the {want} this math channel combines"
+                        "{name} is not one of the {want} this math trace combines"
                     )));
                 }
                 if t.kind == TraceKind::Target && !ratio {
@@ -354,7 +354,7 @@ impl Control {
     }
 
     /// The grid of `kind` for measurement `own` without a session: a transfer's own, a
-    /// transfer math channel's operands'.
+    /// transfer math trace's operands'.
     pub(super) fn grid_of(
         &self,
         own: Option<MeasId>,
@@ -383,7 +383,7 @@ impl Control {
         }
     }
 
-    /// The grids of math channel `own` on the open session at `fs`, and its stored
+    /// The grids of math trace `own` on the open session at `fs`, and its stored
     /// operands' columns on them (`None` for a live operand), in expression order.
     pub(super) fn math_setup(
         &self,
@@ -434,7 +434,7 @@ impl Control {
                 .and_then(|g| self.grids.get(&g).cloned())
                 .map(|g| (g, String::new()))
         });
-        let (grid, _) = grid.ok_or_else(|| invalid("a math channel needs operands"))?;
+        let (grid, _) = grid.ok_or_else(|| invalid("a math trace needs operands"))?;
         let freqs = grid.centres();
         let mut stored = Vec::with_capacity(operands.len());
         for o in &operands {
@@ -494,7 +494,7 @@ impl Control {
         Ok((Grids { grid, display }, stored))
     }
 
-    /// The math channels naming `o`.
+    /// The math traces naming `o`.
     pub(super) fn maths_naming(&self, o: Operand) -> Vec<&Measurement> {
         self.store
             .state()
@@ -507,7 +507,7 @@ impl Control {
             .collect()
     }
 
-    /// Restarts the running math channels naming `o`, so they take its columns as they are
+    /// Restarts the running math traces naming `o`, so they take its columns as they are
     /// now (a stored operand's mic curve changed). One that cannot start again is stopped
     /// and says why in the log.
     pub(super) fn restart_maths_naming(&mut self, o: Operand) {
@@ -523,7 +523,7 @@ impl Control {
         for m in running {
             self.stop_job(m.id);
             if let Err(e) = self.start_job(&m) {
-                tracing::warn!("math channel {} not restarted: {}", m.id, e.msg);
+                tracing::warn!("math trace {} not restarted: {}", m.id, e.msg);
             }
         }
     }
@@ -532,20 +532,20 @@ impl Control {
         match self.maths_naming(o).first() {
             None => Ok(()),
             Some(m) => Err(refused(format!(
-                "{} is an operand of the math channel {}; edit it there first",
+                "{} is an operand of the math trace {}; edit it there first",
                 operand_word(o),
                 m.config.name
             ))),
         }
     }
 
-    /// Refuses deleting trace `trace` while a math channel names it.
+    /// Refuses deleting trace `trace` while a math trace names it.
     pub(super) fn check_trace_operand_delete(&self, trace: TraceId) -> Result<(), ProtoError> {
         self.named_by(Operand::Trace { trace })
     }
 
     /// Refuses changing measurement `meas` into another kind or onto another grid (another
-    /// FFT length, another band layout) while a math channel names it.
+    /// FFT length, another band layout) while a math trace names it.
     pub(super) fn check_operand_update(
         &self,
         meas: MeasId,
@@ -574,8 +574,8 @@ impl Control {
             Ok(())
         } else {
             Err(refused(format!(
-                "measurement {meas} is an operand of the math channel {a}: it keeps its \
-                 kind and grid; edit the math channel first"
+                "measurement {meas} is an operand of the math trace {a}: it keeps its \
+                 kind and grid; edit the math trace first"
             )))
         }
     }

@@ -1,7 +1,7 @@
-//! What a math channel computes from its operands (`docs/design/math-channels.md`): the
+//! What a math trace computes from its operands (`docs/design/math-traces.md`): the
 //! daemon gathers each operand's columns on the result's grid — a live measurement's current
 //! result, a stored trace's columns — and this module combines them. The daemon's live math
-//! job and every test use the same functions, so a capture of a math channel and the
+//! job and every test use the same functions, so a capture of a math trace and the
 //! analytic value agree.
 //!
 //! # Transfer functions

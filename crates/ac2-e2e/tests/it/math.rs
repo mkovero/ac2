@@ -1,4 +1,4 @@
-//! Math channels on the transfer and spectrum panes.
+//! Math traces on the transfer and spectrum panes.
 
 use super::harness::{R, measuring};
 use ac2_proto::FrameData;
@@ -32,7 +32,7 @@ fn tf_legend(s: &AppState, id: MeasId) -> String {
     .unwrap_or_default()
 }
 
-/// The math channel of the mirrored state, if there is one running.
+/// The math trace of the mirrored state, if there is one running.
 fn running_math(s: &AppState) -> Option<(MeasId, String)> {
     s.measurements()
         .iter()
@@ -41,12 +41,12 @@ fn running_math(s: &AppState) -> Option<(MeasId, String)> {
 }
 
 /// From an empty daemon: two transfer measurements (two positions of the room mic); the
-/// math channel dialog by name (Shift+M) makes their average, drawn as a transfer curve whose
+/// math trace dialog by name (Shift+M) makes their average, drawn as a transfer curve whose
 /// legend counts its positions; Ctrl+1 captures it into a stored trace naming the
 /// expression; edited into A ÷ B it reads 0 dB (one path over itself); a position stopped
 /// is named in a banner and the ratio says it has no result.
 #[test]
-fn math_channels_from_an_empty_daemon() -> R {
+fn math_traces_from_an_empty_daemon() -> R {
     use ac2_proto::Command;
     use ac2_proto::frame::OperandStatus;
     use ac2_proto::model::{MathExpr, MathOp, TraceSource};
@@ -120,8 +120,8 @@ fn math_channels_from_an_empty_daemon() -> R {
         "{rows:?}"
     );
     d.key("Enter");
-    d.until("the math channel, running", |s| running_math(s).is_some())?;
-    let (avg, name) = running_math(&d.st).ok_or("math channel")?;
+    d.until("the math trace, running", |s| running_math(s).is_some())?;
+    let (avg, name) = running_math(&d.st).ok_or("math trace")?;
     assert_eq!(name, "Average of 2");
 
     // Two positions of the same −6 dB path average to −6 dB (the level is still typed).
@@ -303,7 +303,7 @@ fn spectrum_math_lands_on_the_spectrum_pane() -> R {
     assert_eq!(op, "−  level difference (dB)");
     d.key("Enter");
     d.until("the spectrum math, running", |s| running_math(s).is_some())?;
-    let (id, name) = running_math(&d.st).ok_or("math channel")?;
+    let (id, name) = running_math(&d.st).ok_or("math trace")?;
     assert_eq!(name, "Spectrum 2 − Spectrum 1");
     assert!(d.st.meas(id).is_some_and(|m| matches!(
         &m.config.kind,

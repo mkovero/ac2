@@ -194,9 +194,9 @@ pub enum TraceSource {
         /// An impulse-response file's facts ([`ImportFormat::IrWav`]); `None` for text.
         ir_file: Option<Box<IrFile>>,
     },
-    /// Captured from a math channel: the expression and the operands that went into it.
+    /// Captured from a math trace: the expression and the operands that went into it.
     Math {
-        /// The math channel.
+        /// The math trace.
         meas: MeasId,
         /// Its name at capture.
         meas_name: String,

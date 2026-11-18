@@ -59,10 +59,10 @@ pub enum PaneContent {
 }
 pub struct PaneEntry { pub rig: RigRef, pub what: EntryRef }
 pub enum EntryRef {
-    /// A measurement's group: its live curve, its math channels, its shown traces —
+    /// A measurement's group: its live curve, its math traces, its shown stored traces —
     /// what is filed under it now and later (D1).
     Group { meas: MeasId },
-    /// One live curve: a measurement's or a math channel's.
+    /// One live curve: a measurement's or a math trace's.
     Live { meas: MeasId },
     /// One stored trace.
     Trace { trace: TraceId },
@@ -174,7 +174,7 @@ keeps the name in `Pending::deleted` for its *deleted* text while the name waits
 - **Hide (A / Shift+A) and slots 1–9** stay global and win everywhere (D4): a hidden entry
   stays listed in the pane's legend as *Slot 3 hidden — 3 shows it*, as a hidden lead does
   today.
-- **Math channels** are measurements: `Live { meas }` of a math channel picks it alone, its
+- **Math traces** are measurements: `Live { meas }` of a math trace picks it alone, its
   owner's `Group` brings it. Cross-rig math stays as multi-rig.md §6 says.
 - **Own layouts (P1).** Choosing a measurement's row still brings its panes, and editing
   panes while it is chosen stores them on it. A stored pane keeps every reference, other
@@ -199,7 +199,7 @@ row of the measurement list or of the Inputs list — as the guide's *Dragging a
 pane* describes today:
 
 - dropped in the middle: the pane shows that row alone (a measurement row: `Group`, or
-  `Meter` on SPL; a live curve or math channel: `Live`; a stored trace: `Trace`; an Inputs
+  `Meter` on SPL; a live curve or math trace: `Live`; a stored trace: `Trace`; an Inputs
   row: `Inputs`, a pair row: `Pair`), turning into the kind that draws it; the drag label
   says so before release (`FOH SPL → pane 2, becomes SPL`). The drop is the operator's own
   step, so its kind change is not a side effect (D7);
@@ -395,7 +395,7 @@ Each stage lands alone, with its own user-guide rows, and is tested through `ac2
 2026-11-01:
 
 - **D1** A measurement row, dropped or ticked, is the `Group` entry, which follows its
-  group: a new capture or math channel appears in the panes holding the group. Single rows
+  group: a new capture or math trace appears in the panes holding the group. Single rows
   are fixed.
 - **D2** Compare is per pane; the per-measurement compare list goes, salvaged into entries.
 - **D3** A split starts with the focused pane's lead only.

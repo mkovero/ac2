@@ -10,7 +10,7 @@ then sum to.
 
 - Transfer traces: a measurement's live curve, its captures, imports, sweep runs — each a
   math operand (`Operand::Meas` = the live curve, `Operand::Trace` = a stored trace).
-- Math channels (`math-channels.md`): `A ÷ B` already *is* the phase difference
+- Math traces (`math-traces.md`): `A ÷ B` already *is* the phase difference
   (`H_a / H_b`, phase keeps A's arrival relative to B); `A + B` is the summation prediction
   on a shared time base. Nothing fits a delay to that phase or applies one to a sum.
 - The delay finder (`q1-delay-finder.md`) answers another question: the broadband first
@@ -22,7 +22,7 @@ then sum to.
 ## Decision: an `align` math expression
 
 `MathExpr::Align {a, b, band: {lo, hi}, max_delay}` (domain transfer). It reuses what a math
-channel already has: operands by name (live curves or stored traces, two under one
+trace already has: operands by name (live curves or stored traces, two under one
 measurement too), the result following a live operand, operands left out with a reason,
 operand invariants (an operand cannot be deleted under it), an owner in the tree, sessions,
 capture. A measurement kind of its own would duplicate all of that.
@@ -87,11 +87,11 @@ one period away; a band outside the data is `no fit`.
   before, after, columns}`, `AlignCandidate {delay, delayed: A | B, inverted, residual,
   score}`, `Summation {mean, worst}`.
 - `TransferView::Alignment` in pane layouts.
-- `PROTO_VERSION` 58 → 59, session format 28 → 29 (sessions hold math channels and layouts).
+- `PROTO_VERSION` 58 → 59, session format 28 → 29 (sessions hold math traces and layouts).
 
 ## App
 
-- **Alt+M** (palette *New alignment…*; Shift+M is the math channel, Alt+M the same dialog
+- **Alt+M** (palette *New alignment…*; Shift+M is the math trace, Alt+M the same dialog
   with the operator `align`): **A** and **B** — every transfer trace by name, live curves
   `(live)` and stored ones, two under one measurement too; **Overlap from / to** (Hz, typed);
   **Max delay**; **Name** (`Sub ↔ Main`, following the picks). The band is asked, never
@@ -120,7 +120,7 @@ one period away; a band outside the data is `no fit`.
 creates and starts the alignment (operands as `ac2 math`: name, id, `trace:NAME`,
 `meas:NAME`), waits for its first frame and prints the readout; `ac2 align show <name>
 [--temp]` prints the current one (`--json` for both). `ac2 math set` edits it like any math
-channel's name and smoothing.
+trace's name and smoothing.
 
 ## Tests
 

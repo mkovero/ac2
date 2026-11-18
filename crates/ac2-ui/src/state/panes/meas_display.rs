@@ -9,7 +9,7 @@ use ac2_proto::model::layout::EntryRef;
 use ac2_proto::model::{Colormap, SpectrumDisplay};
 
 impl AppState {
-    /// How measurement `m`'s curves draw: its own display, a math channel its owner's (as it
+    /// How measurement `m`'s curves draw: its own display, a math trace its owner's (as it
     /// takes its owner's colours), the defaults for anything else.
     pub fn display_of(&self, m: &Measurement) -> SpectrumDisplay {
         self.rig.display_of(m)
@@ -25,7 +25,7 @@ impl AppState {
     }
 
     /// The measurement B, Shift+B and the colour maps act on: the spectrum pane's (the
-    /// focused one, else the one focused last), or the owner of the math channel it shows.
+    /// focused one, else the one focused last), or the owner of the math trace it shows.
     fn display_target(&self) -> Result<Measurement, String> {
         let Some(m) = self.kind_meas(PaneKind::Spectrum) else {
             return Err(format!(
@@ -83,7 +83,7 @@ impl AppState {
     }
 
     /// The measurement P acts on: the focused transfer pane's, else the spectrum pane's
-    /// (the focused one, else the one focused last); of a math channel, the owner whose
+    /// (the focused one, else the one focused last); of a math trace, the owner whose
     /// mode it draws with.
     fn peak_target(&self) -> Result<Measurement, String> {
         let kind = match self.layout.kind(self.layout.focus) {
@@ -110,7 +110,7 @@ impl AppState {
             return Ok(o.clone());
         }
         Err(format!(
-            "{} keeps no peak mode: a math channel takes the one of the measurement it is \
+            "{} keeps no peak mode: a math trace takes the one of the measurement it is \
              filed under, and it is filed under none",
             m.config.name
         ))
@@ -184,7 +184,7 @@ impl AppState {
             .collect()
     }
 
-    /// The group measurement `id` draws: its own, or a math channel's owner's.
+    /// The group measurement `id` draws: its own, or a math trace's owner's.
     fn group_meas(&self, id: MeasId) -> Option<MeasId> {
         let m = self.meas(id)?;
         ac2_scene::meas_list::meas_group(m, &self.measurements()).meas()
@@ -224,7 +224,7 @@ impl AppState {
 
     /// The measurements C lists on graph pane `pane`: its lead first, then every other
     /// measurement of the pane's rig whose group the pane's kind draws, in list order. A
-    /// math channel comes with its owner's group.
+    /// math trace comes with its owner's group.
     fn tick_rows(&self, pane: PaneId) -> Vec<MeasId> {
         let Some(v) = self.layout.view(pane) else {
             return Vec::new();

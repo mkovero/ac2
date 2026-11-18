@@ -45,7 +45,7 @@ fn tree_dots_have_the_colours_of_their_curves() {
             Arc::new(grid),
         ));
     }
-    // Live frames of Main L, of the math channel on it and of Sub.
+    // Live frames of Main L, of the math trace on it and of Sub.
     let spec_grid = GridDef::Linear {
         fs: Hz(48_000.0),
         n: 14,
@@ -243,7 +243,7 @@ fn the_tree_lists_what_each_measurement_owns_and_folds() {
     assert_eq!(tree_names(&t).len(), 9);
 }
 
-/// Shift+A on a measurement hides its live curve, its traces and its math channel; again
+/// Shift+A on a measurement hides its live curve, its stored traces and its math trace; again
 /// shows them.
 #[test]
 fn shift_a_hides_a_measurement_with_everything_under_it() {
@@ -316,7 +316,7 @@ fn move_files_a_trace_under_another_measurement() {
         other => panic!("{other:?}"),
     }
     assert_eq!(t.st.overlay, Overlay::None);
-    // A math channel moves with `meas.update`.
+    // A math trace moves with `meas.update`.
     t.st.apply(Msg::SelectMeas(MeasId(6)), &t.keys);
     t.key("Shift+F2");
     t.key("Down");
@@ -349,7 +349,7 @@ fn deleting_a_measurement_with_traces_asks_keep_delete_or_cancel() {
     assert_eq!(c.title, "Delete measurement Main L?");
     assert_eq!(
         c.lines[0],
-        "transfer function · running · it has 2 traces and 1 math channel."
+        "transfer function · running · it has 2 stored traces and 1 math trace."
     );
     assert_eq!(c.index, ac2_scene::meas_list::KEEP);
     // Esc cancels; nothing is sent.
@@ -380,10 +380,10 @@ fn deleting_a_measurement_with_traces_asks_keep_delete_or_cancel() {
     assert_eq!(t.st.overlay, Overlay::None);
 }
 
-/// Shift+M files the new math channel under the measurement selected, and offers its live
+/// Shift+M files the new math trace under the measurement selected, and offers its live
 /// curve and traces first.
 #[test]
-fn a_new_math_channel_lives_under_the_selected_measurement() {
+fn a_new_math_trace_lives_under_the_selected_measurement() {
     let mut t = T::new();
     t.conn(mirror(tree_state()));
     t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
@@ -413,7 +413,7 @@ fn a_new_math_channel_lives_under_the_selected_measurement() {
 }
 
 /// Tab / Shift+Tab walk the rows of the tree as listed (a measurement's header, its live
-/// curve, its stored traces and math channels, the imported traces; the Imported header
+/// curve, its stored traces and math traces, the imported traces; the Imported header
 /// skipped), wrapping; the focused pane shows each row's measurement.
 #[test]
 fn tab_steps_through_the_trees_rows() {
@@ -455,7 +455,7 @@ fn tab_steps_through_the_trees_rows() {
     assert_eq!(
         t.st.layout.view(pane).copied(),
         before,
-        "a math channel's row"
+        "a math trace's row"
     );
     assert_eq!(tab(&mut t, "Shift+Tab"), "t4");
     assert_eq!(t.st.layout.focus, pane);

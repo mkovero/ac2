@@ -1,6 +1,6 @@
 //! Who owns what (`docs/design/measurement-tree.md`): every stored trace and every math
-//! channel is listed under a measurement or in the imported group. The daemon keeps that
-//! true — an owner always exists and is never a math channel — and `meas.delete` says what
+//! trace is listed under a measurement or in the imported group. The daemon keeps that
+//! true — an owner always exists and is never a math trace — and `meas.delete` says what
 //! becomes of what a measurement owns.
 
 use ac2_proto::event::{Change, Patch};
@@ -14,7 +14,7 @@ use ac2_proto::{ProtoError, ReplyBody};
 use super::Control;
 use crate::util::{invalid, missing, refused};
 
-/// Whether `new` is `old` with only a math channel's owner changed.
+/// Whether `new` is `old` with only a math trace's owner changed.
 pub(super) fn owner_only(old: &MeasConfig, new: &MeasConfig) -> bool {
     match (&old.kind, &new.kind) {
         (MeasKind::Math { config: a }, MeasKind::Math { config: b }) => {
@@ -27,7 +27,7 @@ pub(super) fn owner_only(old: &MeasConfig, new: &MeasConfig) -> bool {
 }
 
 impl Control {
-    /// Refuses an owner that is not an existing measurement other than a math channel.
+    /// Refuses an owner that is not an existing measurement other than a math trace.
     pub(super) fn check_owner(&self, owner: TraceOwner) -> Result<(), ProtoError> {
         let Some(meas) = owner.meas() else {
             return Ok(());
@@ -41,14 +41,14 @@ impl Control {
         match m.map(|m| &m.config.kind) {
             None => Err(missing(format!("no measurement {meas} to file it under"))),
             Some(MeasKind::Math { .. }) => Err(invalid(format!(
-                "measurement {meas} is a math channel: math owns no traces"
+                "measurement {meas} is a math trace: math owns no traces"
             ))),
             Some(_) => Ok(()),
         }
     }
 
-    /// A math channel's owner must be a measurement that can own it; and a measurement that
-    /// owns traces or math channels cannot become a math channel (math owns nothing).
+    /// A math trace's owner must be a measurement that can own it; and a measurement that
+    /// owns stored traces or math traces cannot become a math trace (math owns nothing).
     pub(super) fn check_meas_owner(
         &self,
         own: Option<MeasId>,
@@ -59,7 +59,7 @@ impl Control {
         };
         if own.is_some() && config.owner.meas() == own {
             return Err(invalid(
-                "a math channel is listed under a measurement, not under itself",
+                "a math trace is listed under a measurement, not under itself",
             ));
         }
         self.check_owner(config.owner)?;
@@ -67,8 +67,8 @@ impl Control {
             let (traces, maths) = self.owned(own);
             if !traces.is_empty() || !maths.is_empty() {
                 return Err(refused(format!(
-                    "measurement {own} owns {} trace(s) and {} math channel(s): move them \
-                     first (a math channel owns nothing)",
+                    "measurement {own} owns {} stored trace(s) and {} math trace(s): move them \
+                     first (a math trace owns nothing)",
                     traces.len(),
                     maths.len()
                 )));
@@ -77,7 +77,7 @@ impl Control {
         Ok(())
     }
 
-    /// The stored traces and math channels `meas` owns.
+    /// The stored traces and math traces `meas` owns.
     pub(super) fn owned(&self, meas: MeasId) -> (Vec<TraceId>, Vec<MeasId>) {
         let owner = TraceOwner::Meas { meas };
         let st = self.store.state();
@@ -151,7 +151,7 @@ impl Control {
         for &m in &gone_maths {
             self.check_walk_meas_delete(m, &[])?;
         }
-        // A math channel that stays must not lose an operand.
+        // A math trace that stays must not lose an operand.
         let staying = self.store.state().measurements.iter().filter(|m| {
             m.id != meas
                 && !gone_maths.contains(&m.id)
@@ -172,7 +172,7 @@ impl Control {
                     Operand::Trace { .. } | Operand::Eq { .. } => self.operand_name(o),
                 };
                 return Err(refused(format!(
-                    "{what} is an operand of the math channel {}; edit it there first",
+                    "{what} is an operand of the math trace {}; edit it there first",
                     m.config.name
                 )));
             }
@@ -216,7 +216,7 @@ impl Control {
                 }
             }
             OwnedTraces::Delete => {
-                // The math channels first: they may compute from the traces.
+                // The math traces first: they may compute from the traces.
                 for id in &maths {
                     self.remove_meas(*id);
                 }
@@ -227,7 +227,7 @@ impl Control {
             }
         }
         tracing::info!(
-            "measurement {meas} deleted; {} trace(s) and {} math channel(s) {}",
+            "measurement {meas} deleted; {} stored trace(s) and {} math trace(s) {}",
             traces.len(),
             maths.len(),
             match what {
@@ -241,7 +241,7 @@ impl Control {
     }
 
     /// The measurement whose group draws `what` of this rig, if a group draws it: a live
-    /// curve its own measurement's (a math channel's, its owner's), a stored trace the
+    /// curve its own measurement's (a math trace's, its owner's), a stored trace the
     /// measurement it is filed under.
     pub(super) fn drawn_by_group(&self, what: EntryRef) -> Option<MeasId> {
         let st = self.store.state();

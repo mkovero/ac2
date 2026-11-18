@@ -104,7 +104,7 @@ fn coherence_weighting_favours_the_coherent_trace() {
     );
 }
 
-/// `a op b` of two stored traces on `a`'s grid, as a math channel of them computes it.
+/// `a op b` of two stored traces on `a`'s grid, as a math trace of them computes it.
 pub(super) fn binary(
     a: &StoredTrace,
     b: &StoredTrace,

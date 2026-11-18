@@ -40,7 +40,7 @@ fn session_save_load_round_trip() {
         meas: MeasId(1),
         delay: Seconds(0.0025),
     });
-    // Owners travel with the session: a math channel under the transfer measurement, a
+    // Owners travel with the session: a math trace under the transfer measurement, a
     // sweep measurement (settings only) owning nothing yet.
     c.ok(Command::MeasCreate {
         config: MeasConfig {

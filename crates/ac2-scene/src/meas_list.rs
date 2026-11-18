@@ -1,6 +1,6 @@
 //! The measurement tree beside the panes (`docs/design/measurement-tree.md`): each
 //! measurement with what it owns under it — its live curve, its stored traces, the math
-//! channels made on it — then the imported group; whether the keys act on a row; and what
+//! traces made on it — then the imported group; whether the keys act on a row; and what
 //! Delete asks (the confirmation, the three choices for a measurement that owns traces, or
 //! the refusal).
 
@@ -28,14 +28,14 @@ pub fn kind_tag(k: &MeasKind) -> &'static str {
     }
 }
 
-/// What a measurement is, in words: `transfer function`, `math channel` …
+/// What a measurement is, in words: `transfer function`, `math trace` …
 pub fn kind_name(k: &MeasKind) -> &'static str {
     match k {
         MeasKind::Transfer { .. } => "transfer function",
         MeasKind::Spectrum { .. } => "spectrum",
         MeasKind::Rta { .. } => "RTA",
         MeasKind::Spl { .. } => "SPL meter",
-        MeasKind::Math { .. } => "math channel",
+        MeasKind::Math { .. } => "math trace",
         MeasKind::Sweep { .. } => "sweep measurement",
     }
 }
@@ -58,7 +58,7 @@ pub fn state_word(m: &Measurement) -> &'static str {
 #[derive(Clone, Debug)]
 pub struct MeasItem<'a> {
     pub meas: &'a Measurement,
-    /// A math channel's expression by its operands' names ([`crate::math::expression`]).
+    /// A math trace's expression by its operands' names ([`crate::math::expression`]).
     pub expression: Option<String>,
     /// Display offset, dB (this app's).
     pub offset_db: f64,
@@ -230,7 +230,7 @@ pub enum TreeKey {
     Live(MeasId),
     /// A stored trace.
     Trace(TraceId),
-    /// A math channel under the measurement it was made on: selects the math channel.
+    /// A math trace under the measurement it was made on: selects the math trace.
     Math(MeasId),
     /// The imported group's header.
     Imported,
@@ -254,7 +254,7 @@ impl TreeKey {
     }
 
     /// The measurement a double click on the row edits: the row's own (its header, its
-    /// live curve, a math channel). A stored trace's double click renames it, and a
+    /// live curve, a math trace). A stored trace's double click renames it, and a
     /// heading stands for no measurement.
     pub fn edits(self) -> Option<MeasId> {
         match self {
@@ -310,7 +310,7 @@ pub struct TreeRow {
     pub hidden: bool,
     pub mark: Mark,
     /// The colour of the curve the row stands for (its live curve, a stored trace or sweep
-    /// run, a math channel's result), as the panes draw it, and whether it is shown: filled
+    /// run, a math trace's result), as the panes draw it, and whether it is shown: filled
     /// when shown, a ring when hidden, and a click on it toggles that. Headers have none:
     /// they stand for a group, not a curve. A curve no visible pane draws right now keeps
     /// its colour, so it reads the same when its pane comes back.
@@ -324,7 +324,7 @@ pub struct TreeRow {
 /// What the tree is built from.
 #[derive(Debug)]
 pub struct TreeInput<'a> {
-    /// Every measurement, math channels included.
+    /// Every measurement, math traces included.
     pub meas: Vec<MeasItem<'a>>,
     pub traces: Vec<TraceItem<'a>>,
     /// Folded groups.
@@ -339,7 +339,7 @@ pub struct TreeInput<'a> {
     /// The latest sweep run (a sweep measurement's header says it plays).
     pub sweep: Option<&'a SweepRun>,
     /// Rows the focused pane draws behind its lead (measurements ticked in C, live curves,
-    /// math channels, stored traces): marked
+    /// math traces, stored traces): marked
     /// [`crate::trace::COMPARED`], as the legend tags their curves.
     pub compared: Vec<TreeKey>,
     /// The rig entity: which meters' cues are in which state, where cues go.
@@ -354,7 +354,7 @@ pub fn group_of(t: &TraceMeta, meas: &[&Measurement]) -> TraceOwner {
     }
 }
 
-/// The group a math channel is listed in (`None`: not a math channel).
+/// The group a math trace is listed in (`None`: not a math trace).
 pub(crate) fn math_group(m: &Measurement, meas: &[&Measurement]) -> Option<TraceOwner> {
     let MeasKind::Math { config } = &m.config.kind else {
         return None;
@@ -372,7 +372,7 @@ pub(crate) fn math_group(m: &Measurement, meas: &[&Measurement]) -> Option<Trace
 }
 
 /// The group a measurement is listed in: its own for one with a live curve or runs, its
-/// owner's for a math channel (Imported once that owner is gone).
+/// owner's for a math trace (Imported once that owner is gone).
 pub fn meas_group(m: &Measurement, meas: &[&Measurement]) -> TraceOwner {
     math_group(m, meas).unwrap_or(TraceOwner::Meas { meas: m.id })
 }
@@ -484,7 +484,7 @@ pub fn tick_no_rows(what: &str) -> String {
 /// What C says on an SPL, Programme or Walk pane: it shows one source.
 pub const ONE_SOURCE: &str = "one source per pane: drag a row onto it";
 
-/// The groups in tree order: the measurements that are not math channels — the rig's
+/// The groups in tree order: the measurements that are not math traces — the rig's
 /// first, then the session's, each by id — then the imported group.
 pub fn group_order(meas: &[&Measurement]) -> Vec<TraceOwner> {
     let mut ids: Vec<(bool, MeasId)> = meas

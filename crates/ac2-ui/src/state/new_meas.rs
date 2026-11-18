@@ -130,10 +130,10 @@ impl AppState {
         None
     }
 
-    /// The math channel form as Shift+M opens it, or why it cannot open.
+    /// The math trace form as Shift+M opens it, or why it cannot open.
     pub(super) fn math_form(&self) -> Result<Form, String> {
-        // The channel lives under the measurement selected now (a selected trace's or math
-        // channel's owner): its live curve and traces are offered first.
+        // The math trace lives under the measurement selected now (a selected stored trace's
+        // or math trace's owner): its live curve and stored traces are offered first.
         let owner = self
             .selected_group()
             .unwrap_or(ac2_proto::model::TraceOwner::Imported);
@@ -153,14 +153,14 @@ impl AppState {
             });
         Form::math(self.math_candidates(Some(owner)), first, owner).ok_or_else(|| {
             format!(
-                "a math channel needs two transfer functions, spectra or RTAs of one kind, \
+                "a math trace needs two transfer functions, spectra or RTAs of one kind, \
                  live or stored: make a measurement or capture one ({}) first",
                 self.capture_keys()
             )
         })
     }
 
-    /// The math channel form with its operator on align (Alt+M), A a transfer curve, the
+    /// The math trace form with its operator on align (Alt+M), A a transfer curve, the
     /// band prefilled from the curves drawn now; or why it cannot open.
     pub(super) fn alignment_form(&self) -> Result<Form, String> {
         let owner = self
@@ -202,7 +202,7 @@ impl AppState {
         Ok(f)
     }
 
-    /// The math channel form on the average of several, power method, over every transfer
+    /// The math trace form on the average of several, power method, over every transfer
     /// measurement of the session (running or stopped: the daemon leaves a stopped one out
     /// until it starts), named `Spatial average` (numbered past the names taken); or why it
     /// cannot open.

@@ -15,9 +15,9 @@ pub struct DropPlan {
     pub a: Operand,
     pub op: MathOp,
     pub b: Operand,
-    /// Where the channel is listed: with A, as a math channel made on A's measurement is.
+    /// Where the math trace is listed: with A, as a math trace made on A's measurement is.
     pub owner: TraceOwner,
-    /// The label by the pointer: `math channel: TF 1 S1 × loudness 85 → 100 phon`.
+    /// The label by the pointer: `math trace: TF 1 S1 × loudness 85 → 100 phon`.
     pub label: String,
 }
 
@@ -133,7 +133,7 @@ impl AppState {
             Some(f) => self.overlay = Overlay::Form(Box::new(f)),
             None => self.warn(format!(
                 "{}: not offered by the math dialog",
-                p.label.trim_start_matches("math channel: ")
+                p.label.trim_start_matches("math trace: ")
             )),
         }
     }

@@ -394,7 +394,7 @@ impl Control {
         }
     }
 
-    /// `trace.capture` of a math channel: the trace names the expression and the operands
+    /// `trace.capture` of a math trace: the trace names the expression and the operands
     /// that went into it (an average's operands left out at that moment are not named). A
     /// combination of several inputs, it names no single mic or calibration.
     #[allow(clippy::too_many_arguments)]
@@ -424,7 +424,7 @@ impl Control {
                 _ => (None, Seconds(0.0), None),
             };
         let state = state
-            .ok_or_else(|| internal("the math channel's frame does not say what it combined"))?;
+            .ok_or_else(|| internal("the math trace's frame does not say what it combined"))?;
         let included: Vec<NamedOperand> = state
             .operands
             .iter()
@@ -445,7 +445,7 @@ impl Control {
             )));
         }
         let id = self.traces.alloc();
-        // Filed where the math channel is listed: under the measurement it was made on.
+        // Filed where the math trace is listed: under the measurement it was made on.
         let mut edit = meta::new_edit(id, name, slot, config.owner);
         edit.smoothing = smoothing;
         let t = TraceMeta {
@@ -473,7 +473,7 @@ impl Control {
             captured_unsettled: false,
             superseded: false,
         };
-        tracing::info!("trace {id} captured from math channel {}", m.id);
+        tracing::info!("trace {id} captured from math trace {}", m.id);
         Ok(self.add_trace(t, grid, columns, None, None, None))
     }
 
@@ -749,7 +749,7 @@ impl Control {
         t.mic_curve = Some(applied);
         self.traces.set_mic_curve(id, Some(k));
         self.commit(Change::Trace(Patch::Set(t.clone())));
-        // The curve corrects the trace's columns as a math channel combines them.
+        // The curve corrects the trace's columns as a math trace combines them.
         self.restart_maths_naming(Operand::Trace { trace: id });
         tracing::info!("trace {id}: mic curve of {m:?} applied (0 dB at {f_norm} Hz)");
         Ok(ReplyBody::Trace(t))

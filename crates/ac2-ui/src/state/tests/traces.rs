@@ -1,4 +1,4 @@
-//! Reducer tests of panes, smoothing, stored traces and slots, math channels, the palette and the toasts.
+//! Reducer tests of panes, smoothing, stored traces and slots, math traces, the palette and the toasts.
 
 use super::*;
 

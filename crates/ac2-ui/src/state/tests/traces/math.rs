@@ -1,4 +1,4 @@
-//! Reducer tests of slots, averages of stored traces, math channels and measurement edits.
+//! Reducer tests of slots, averages of stored traces, math traces and measurement edits.
 
 use super::*;
 
@@ -181,10 +181,10 @@ fn m_averages_the_shown_stored_traces() {
     ));
 }
 
-/// Shift+M opens the math channel dialog: A is what the pane shows, B the next of its kind
+/// Shift+M opens the math trace dialog: A is what the pane shows, B the next of its kind
 /// (live or stored), the operator ÷, the name the expression; Enter creates it.
 #[test]
-fn math_channel_dialog_by_name() {
+fn math_trace_dialog_by_name() {
     use crate::forms::{FieldId, FormKind};
     use ac2_proto::model::{MathDomain, MathExpr, MathOp, Operand};
     let mut t = T::new();
@@ -230,10 +230,10 @@ fn math_channel_dialog_by_name() {
     );
 }
 
-/// The selected math channel edits in the same dialog: Enter sends `meas.update` with its
+/// The selected math trace edits in the same dialog: Enter sends `meas.update` with its
 /// name kept.
 #[test]
-fn math_channel_edit() {
+fn math_trace_edit() {
     use crate::forms::FormKind;
     use ac2_proto::model::{MathConfig, MathDomain, MathExpr, MathOp, Operand};
     let mut t = T::new();

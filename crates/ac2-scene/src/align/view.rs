@@ -28,7 +28,7 @@ pub struct Shown<'a> {
     pub state: &'a AlignState,
     pub curves: &'a AlignCurves,
     pub freqs: &'a [f64],
-    /// The channel's colour (the aligned curves); the as-measured ones are dim.
+    /// The math trace's colour (the aligned curves); the as-measured ones are dim.
     pub color: Color,
 }
 

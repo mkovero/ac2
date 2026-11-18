@@ -23,7 +23,7 @@ pub enum DeleteTarget {
         meas: MeasId,
         set: ac2_proto::units::EqSetId,
     },
-    /// Nothing: the window says why the selection cannot go (a math channel computes from
+    /// Nothing: the window says why the selection cannot go (a math trace computes from
     /// it) and only closes.
     Refused,
 }
@@ -40,10 +40,10 @@ pub struct DeletePrompt {
 /// What a question's answer acts on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ChoicePurpose {
-    /// Deleting measurement `meas` that owns traces or math channels: keep, delete, cancel
+    /// Deleting measurement `meas` that owns stored traces or math traces: keep, delete, cancel
     /// ([`ac2_scene::meas_list::KEEP`] …).
     DeleteOwned { meas: MeasId },
-    /// Filing a stored trace (or a math channel) under the owner of the answer picked.
+    /// Filing a stored trace (or a math trace) under the owner of the answer picked.
     Move(MoveWhat),
     /// Unsaved changes before `then` replaces them (New, Open, Quit): Save / Discard /
     /// Cancel ([`ac2_scene::sessions::unsaved_question`]).
@@ -272,7 +272,7 @@ impl AppState {
     }
 
     /// Shift+A: hides the selected measurement's whole group — its live curve, its stored
-    /// traces and the math channels made on it — or, when all of it is hidden, shows it
+    /// stored traces and the math traces made on it — or, when all of it is hidden, shows it
     /// again. With a trace selected, its group.
     pub(super) fn toggle_group_shown(&mut self, out: &mut Vec<Request>) {
         let Some(group) = self.selected_group() else {
@@ -328,7 +328,7 @@ impl AppState {
         });
     }
 
-    /// "Move to measurement…": asks where the selected stored trace (or math channel) is
+    /// "Move to measurement…": asks where the selected stored trace (or math trace) is
     /// filed: under another measurement, or in the imported group.
     pub(super) fn ask_move(&mut self) {
         let (what, label, current) =
@@ -341,7 +341,7 @@ impl AppState {
                     }
                     _ => {
                         self.warn(
-                            "select a stored trace or a math channel to move (a measurement is a \
+                            "select a stored trace or a math trace to move (a measurement is a \
                          group of its own)",
                         );
                         return;
@@ -455,7 +455,7 @@ impl AppState {
     }
 
     /// Delete / Backspace: asks before the selected stored trace or measurement goes (a
-    /// locked trace refuses; a measurement a math channel computes from says so in the
+    /// locked trace refuses; a measurement a math trace computes from says so in the
     /// confirmation's place).
     pub(super) fn ask_delete(&mut self) {
         if self.keys_on_trace() {
@@ -481,7 +481,7 @@ impl AppState {
                 |x| matches!(&x.config.kind, MeasKind::Math { config } if config.owner == owner),
             )
             .collect();
-        // Math channels it owns go (or stay) with it; the others refuse as before.
+        // Math traces it owns go (or stay) with it; the others refuse as before.
         let outside: Vec<String> = self
             .measurements()
             .iter()
@@ -489,13 +489,13 @@ impl AppState {
             .map(|x| x.config.name.clone())
             .collect();
         if outside.is_empty() && (!owned.is_empty() || !maths.is_empty()) {
-            // Keep leaves its math channels computing from it: refused if they name it.
+            // Keep leaves its math traces computing from it: refused if they name it.
             let keep_blocked: Vec<String> = maths
                 .iter()
                 .filter(|x| matches!(&x.config.kind, MeasKind::Math { config } if config.expr.names(operand)))
                 .map(|x| x.config.name.clone())
                 .collect();
-            // Delete takes its traces: refused if a math channel elsewhere names one.
+            // Delete takes its traces: refused if a math trace elsewhere names one.
             let delete_blocked: Vec<String> = self
                 .measurements()
                 .iter()

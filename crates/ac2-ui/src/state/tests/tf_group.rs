@@ -1,5 +1,5 @@
 //! Reducer and scene tests of the transfer pane's group: it draws the measurement it shows,
-//! that measurement's math channels and stored traces, and nothing of another measurement or
+//! that measurement's math traces and stored traces, and nothing of another measurement or
 //! of Imported.
 
 use super::*;
@@ -29,7 +29,7 @@ fn under(meas: u32) -> TraceOwner {
 }
 
 /// Main L (1) and Delay tower (3) are transfer measurements; "L ÷ tower" (6) is a math
-/// channel filed under Main L. t10, t13 are Main L's captures, t11 Delay tower's, t12 an
+/// trace filed under Main L. t10, t13 are Main L's captures, t11 Delay tower's, t12 an
 /// import.
 fn two_groups() -> State {
     let mut s = four();
@@ -119,7 +119,7 @@ fn loaded(s: State) -> T {
 }
 
 /// The measurement whose group the transfer pane draws: the one it shows, or the owner of
-/// the math channel it shows.
+/// the math trace it shows.
 fn transfer_group(t: &T) -> Option<MeasId> {
     t.st.group_of_shown(t.st.kind_meas(PaneKind::Transfer))
 }
@@ -140,7 +140,7 @@ fn legend(t: &T) -> Vec<String> {
     v
 }
 
-/// The pane draws its measurement's group only: Main L's live curve, its math channel and
+/// The pane draws its measurement's group only: Main L's live curve, its math trace and
 /// its two captures; neither Delay tower's capture nor the import. Choosing Delay tower
 /// switches the whole set; selecting a capture of Main L leaves it (a child row moves no
 /// pane).
@@ -156,7 +156,7 @@ fn the_transfer_pane_draws_its_measurements_group_only() {
     t.st.apply(Msg::SelectTrace(TraceId(13)), &t.keys);
     assert_eq!(transfer_group(&t), Some(MeasId(3)));
     assert_eq!(legend(&t), ["Delay tower", "t11"]);
-    // The math channel shown on the pane draws its owner's group.
+    // The math trace shown on the pane draws its owner's group.
     t.drop_meas(t.pane(PaneKind::Transfer), MeasId(6));
     assert_eq!(transfer_group(&t), Some(MeasId(1)));
     assert_eq!(legend(&t), ["L ÷ tower", "Main L", "t10", "t13"]);
@@ -617,7 +617,7 @@ fn a_stopped_transfer_measurement_keeps_its_curve_tagged() {
 }
 
 /// A click on a transfer legend row selects that row's curve, wherever it comes from —
-/// a capture of the group, its math channel, a compared measurement, another measurement's
+/// a capture of the group, its math trace, a compared measurement, another measurement's
 /// compared capture —
 /// the list marks it (a live curve: its measurement's row), the pane keeps its group, and A hides exactly that curve.
 #[test]

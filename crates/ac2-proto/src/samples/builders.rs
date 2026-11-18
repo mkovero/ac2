@@ -323,7 +323,7 @@ pub fn sweep_measurement() -> Measurement {
     }
 }
 
-/// A math channel: the coherence-weighted average of two live transfer measurements and a
+/// A math trace: the coherence-weighted average of two live transfer measurements and a
 /// stored trace.
 pub fn math_measurement() -> Measurement {
     Measurement {
@@ -387,7 +387,7 @@ pub(super) fn align_measurement() -> Measurement {
     m
 }
 
-/// A capture of the math channel `Main L ÷ Sub` (a live measurement over a stored trace).
+/// A capture of the math trace `Main L ÷ Sub` (a live measurement over a stored trace).
 pub(super) fn spectrum_trace_meta() -> TraceMeta {
     TraceMeta {
         id: TraceId(11),

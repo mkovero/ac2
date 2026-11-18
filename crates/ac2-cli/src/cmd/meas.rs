@@ -178,7 +178,7 @@ pub(crate) async fn meas(cli: &Cli, cmd: &MeasCmd, out: &mut Out<'_>) -> Result<
                 _ if traces + maths == 0 => OwnedTraces::Keep,
                 _ => {
                     return Err(CliError::Usage(format!(
-                        "{} owns {traces} trace(s) and {maths} math channel(s): add \
+                        "{} owns {traces} stored trace(s) and {maths} math trace(s): add \
                          --keep-traces (moved to the imported group) or --delete-traces",
                         m.config.name
                     )));

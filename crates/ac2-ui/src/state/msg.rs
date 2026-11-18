@@ -139,7 +139,7 @@ pub enum Overlay {
     /// The confirmation before a new SPL log.
     NewLog(Box<NewLogPrompt>),
     /// The confirmation before the selected measurement or stored trace is deleted (or,
-    /// for a measurement a math channel computes from, why it cannot be).
+    /// for a measurement a math trace computes from, why it cannot be).
     Delete(Box<DeletePrompt>),
     /// A question with a few answers (←/→ or ↑/↓ pick, Enter takes it, Esc cancels):
     /// what deleting a measurement does with its traces, where a trace moves, unsaved
@@ -378,7 +378,7 @@ pub enum Msg {
     /// A measurement's live-curve row clicked in the list: a child row, selected, the live
     /// row marked as what the keys act on; no pane changes.
     SelectLive(MeasId),
-    /// A math channel's row clicked in the list: a child row, selected; no pane changes.
+    /// A math trace's row clicked in the list: a child row, selected; no pane changes.
     SelectMath(MeasId),
     /// A stored trace clicked in the list: selected, so the trace keys act on it; no pane
     /// changes.

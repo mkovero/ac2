@@ -118,7 +118,7 @@ pub struct TfTrace<'a> {
     /// group): the legend tags it [`COMPARED`].
     pub compared: bool,
     /// Ranges of the grid finer than the analysis behind the columns (the valid-resolution
-    /// marker, [`crate::unresolved`]); `None`: not known (math channels, stored transfer
+    /// marker, [`crate::unresolved`]); `None`: not known (math traces, stored transfer
     /// curves).
     pub unresolved: Option<crate::unresolved::Source<'a>>,
     /// An average's range across positions ([`crate::range_band`]); `None` for every other

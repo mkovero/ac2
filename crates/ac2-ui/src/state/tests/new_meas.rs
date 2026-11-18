@@ -8,7 +8,7 @@ use crate::forms::FormKind;
 const ALIGN_REFUSAL: &str = "an alignment needs two transfer curves, live or stored: make a \
                              transfer measurement or capture one";
 
-const MATH_REFUSAL: &str = "a math channel needs two transfer functions, spectra or RTAs of one \
+const MATH_REFUSAL: &str = "a math trace needs two transfer functions, spectra or RTAs of one \
                             kind, live or stored: make a measurement or capture one";
 
 /// The open chooser.
@@ -38,7 +38,7 @@ fn ctrl_m_lists_every_kind_with_its_own_key() {
             "RTA — one input's level in fractional-octave bands",
             "SPL meter — sound level: A / C / Z weighting, Leq windows and limits",
             "Sweep — a played sweep: response and harmonic distortion  ·  Shift+S",
-            "Math channel — A ÷ × + − B of two curves, or the average of several  ·  Shift+M",
+            "Math trace — A ÷ × + − B of two curves, or the average of several  ·  Shift+M",
             "Alignment — delay and polarity of two systems in their overlap (sub + main, delay \
              tower)  ·  Alt+M",
             "Spatial average — the power average of every transfer measurement (one per mic \
@@ -349,7 +349,7 @@ fn enter_opens_the_kinds_form_and_a_refused_kind_stays_listed() {
         t.last_toast()
     );
     t.key("Esc");
-    // Two transfer functions: the math channel's form.
+    // Two transfer functions: the math trace's form.
     t.conn(mirror(four()));
     t.key("Ctrl+M");
     assert_eq!(chooser(&t).choices[5].blocked, None);
@@ -444,7 +444,7 @@ fn empty_texts_name_the_chooser() {
             .as_deref(),
         Some(
             "No measurements — Ctrl+M → New measurement… (transfer, spectrum, RTA, SPL meter, \
-             sweep, math channel, alignment, spatial average)"
+             sweep, math trace, alignment, spatial average)"
         )
     );
 }

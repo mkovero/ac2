@@ -3,7 +3,7 @@
 //! and traces with the commands a client always uses. The old file is read here
 //! ([`read`]); the daemon only ever reads its own version and checks each command as usual.
 //!
-//! Measurements first (math channels last: they name other measurements and traces), each
+//! Measurements first (math traces last: they name other measurements and traces), each
 //! with its colour, layout and delay; then each trace file imported, given its old
 //! properties and filed under its measurement; then the measurements that were running are
 //! started where the open audio I/O captures their inputs. A summary names what was
@@ -160,7 +160,7 @@ async fn restore(
         items.push(restore_trace(c, dir, t, &meas_ids, &mut trace_ids).await);
     }
 
-    // A math channel may compute from another: make each whose operands exist, until a
+    // A math trace may compute from another: make each whose operands exist, until a
     // round makes none.
     let mut pending = math;
     loop {

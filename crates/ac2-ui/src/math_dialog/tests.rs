@@ -135,7 +135,7 @@ fn average_ticks() {
     assert!(f.math_config().is_err());
 }
 
-/// Editing keeps the channel's name and expression.
+/// Editing keeps the math trace's name and expression.
 #[test]
 fn edit_prefills() {
     let mut m = tf(9, "Main + Sub");

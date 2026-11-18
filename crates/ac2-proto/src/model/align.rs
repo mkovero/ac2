@@ -1,5 +1,5 @@
 //! The alignment of two transfer functions in their overlap (`docs/design/alignment.md`):
-//! the band asked for, and what a frame of an alignment math channel found.
+//! the band asked for, and what a frame of an alignment math trace found.
 
 use serde::{Deserialize, Serialize};
 
@@ -70,7 +70,7 @@ pub struct Summation {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AlignFit {
-    /// The best alignment: the one the channel's curve applies.
+    /// The best alignment: the one the math trace's curve applies.
     pub best: AlignCandidate,
     /// The best one of the other polarity.
     pub other_polarity: Option<AlignCandidate>,
@@ -116,7 +116,7 @@ pub enum AlignOutcome {
     },
 }
 
-/// What an alignment math channel's frame found, beside its curve (the aligned sum). The
+/// What an alignment math trace's frame found, beside its curve (the aligned sum). The
 /// alignment view's curves travel as the frame's arrays ([`crate::frame::TfFrame::align`]).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

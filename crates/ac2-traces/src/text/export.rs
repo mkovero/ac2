@@ -95,7 +95,7 @@ fn source_text(s: &TraceSource) -> String {
             operands,
             phase,
         } => format!(
-            "captured from math channel {meas_name:?} (measurement {meas}) of {}, phase {phase:?}, session epoch {}, sample {}",
+            "captured from math trace {meas_name:?} (measurement {meas}) of {}, phase {phase:?}, session epoch {}, sample {}",
             operands
                 .iter()
                 .map(|m| format!("{:?}", m.name))

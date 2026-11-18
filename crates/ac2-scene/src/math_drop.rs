@@ -1,4 +1,4 @@
-//! A list row dropped onto another row: the math channel that combines them, or why they do
+//! A list row dropped onto another row: the math trace that combines them, or why they do
 //! not combine. Nothing is made by the drop itself: it opens the math dialog with A (the row
 //! dropped on), the operator and B (the row dragged) filled in.
 //!
@@ -20,7 +20,7 @@ pub enum DropCurve {
     Live,
     /// A stored measured trace: a capture, sweep run, import, average.
     Stored,
-    /// A math channel: its result is no operand until captured.
+    /// A math trace: its result is no operand until captured.
     Math,
     /// An EQ set (its curve's row).
     Eq,
@@ -76,7 +76,7 @@ pub fn plan(a: &DropSide<'_>, b: &DropSide<'_>) -> Result<MathOp, String> {
     for s in [b, a] {
         if s.curve == DropCurve::Math {
             return Err(format!(
-                "{} is a math channel: capture it to combine it with another curve",
+                "{} is a math trace: capture it to combine it with another curve",
                 s.name
             ));
         }
@@ -136,13 +136,13 @@ pub fn plan(a: &DropSide<'_>, b: &DropSide<'_>) -> Result<MathOp, String> {
     }
 }
 
-/// The label by the pointer over a row the drop combines with: `math channel: TF 1 S1 ×
-/// loudness 85 → 100 phon`, `math channel: Main L after EQ 1`.
+/// The label by the pointer over a row the drop combines with: `math trace: TF 1 S1 ×
+/// loudness 85 → 100 phon`, `math trace: Main L after EQ 1`.
 pub fn label(a: &str, op: MathOp, b: &str, b_is_eq: bool) -> String {
     if b_is_eq && op == MathOp::Multiply {
-        format!("math channel: {a} after {b}")
+        format!("math trace: {a} after {b}")
     } else {
-        format!("math channel: {a} {} {b}", op_symbol(op))
+        format!("math trace: {a} {} {b}", op_symbol(op))
     }
 }
 
@@ -210,7 +210,7 @@ mod tests {
             plan(&tf, &side("TF 1 ÷ TF 2", TF, DropCurve::Math))
                 .err()
                 .as_deref(),
-            Some("TF 1 ÷ TF 2 is a math channel: capture it to combine it with another curve")
+            Some("TF 1 ÷ TF 2 is a math trace: capture it to combine it with another curve")
         );
         assert_eq!(
             plan(&side("FOH", None, DropCurve::Live), &tf)
@@ -234,15 +234,15 @@ mod tests {
     fn the_label_names_the_channel_the_dialog_opens_with() {
         assert_eq!(
             label("TF 1 S1", MathOp::Multiply, "loudness 85 → 100 phon", false),
-            "math channel: TF 1 S1 × loudness 85 → 100 phon"
+            "math trace: TF 1 S1 × loudness 85 → 100 phon"
         );
         assert_eq!(
             label("Main L", MathOp::Multiply, "EQ 1", true),
-            "math channel: Main L after EQ 1"
+            "math trace: Main L after EQ 1"
         );
         assert_eq!(
             label("TF 1 S1", MathOp::Divide, "flat", false),
-            "math channel: TF 1 S1 ÷ flat"
+            "math trace: TF 1 S1 ÷ flat"
         );
     }
 }

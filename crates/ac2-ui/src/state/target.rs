@@ -46,7 +46,7 @@ impl AppState {
     }
 
     /// Where a new target curve is listed: the transfer or sweep measurement of the selected
-    /// row (a trace's, a math channel's owner), else the one the transfer pane shows, else
+    /// row (a trace's, a math trace's owner), else the one the transfer pane shows, else
     /// Imported. A target is read against that system's curves, so it belongs with them and
     /// is drawn in its panes; a curve under Imported is drawn in none.
     pub(super) fn curve_owner(&self) -> TraceOwner {

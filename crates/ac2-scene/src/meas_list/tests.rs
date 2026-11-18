@@ -222,7 +222,7 @@ fn delete_asks_and_a_math_operand_refuses() {
     assert_eq!(
         r.lines,
         [
-            "transfer function · an operand of the math channel Avg",
+            "transfer function · an operand of the math trace Avg",
             "Edit or delete Avg first: it computes from TF 2."
         ]
     );
@@ -231,7 +231,7 @@ fn delete_asks_and_a_math_operand_refuses() {
     let r = delete_refused(&m, &["Avg".to_owned(), "Sum".to_owned()]);
     assert_eq!(
         r.lines[0],
-        "transfer function · an operand of the math channels Avg, Sum"
+        "transfer function · an operand of the math traces Avg, Sum"
     );
     assert_eq!(
         r.lines[1],
@@ -516,7 +516,7 @@ fn a_trace_selected_after_the_measurement_has_the_keys() {
         .find(|x| x.key == TreeKey::Trace(TraceId(3)))
         .expect("row");
     assert_eq!(run1.mark, Mark::Active);
-    // A math channel selected is marked like a measurement.
+    // A math trace selected is marked like a measurement.
     let t = rows(&r, &none, Some(MeasId(4)), None);
     let m = t
         .iter()
@@ -667,7 +667,7 @@ fn deleting_a_measurement_with_traces_asks_keep_delete_or_cancel() {
     assert_eq!(
         c.lines,
         [
-            "transfer function · running · it has 3 traces.",
+            "transfer function · running · it has 3 stored traces.",
             "Keep: they stay, listed under Imported. Delete: they go with Main L; it cannot be \
              undone."
         ]
@@ -682,14 +682,14 @@ fn deleting_a_measurement_with_traces_asks_keep_delete_or_cancel() {
     let c = delete_choices(&m, 1, 1, &["pre ÷ Main L".into()], &[]);
     assert_eq!(
         c.lines[0],
-        "transfer function · running · it has 1 trace and 1 math channel."
+        "transfer function · running · it has 1 stored trace and 1 math trace."
     );
     assert_eq!(
         c.choices[KEEP].blocked.as_deref(),
-        Some("the math channel pre ÷ Main L would lose an operand")
+        Some("the math trace pre ÷ Main L would lose an operand")
     );
     assert_eq!(c.default, CANCEL, "Keep is refused: Enter cancels");
-    assert_eq!(owned_words(0, 2), "2 math channels");
+    assert_eq!(owned_words(0, 2), "2 math traces");
 }
 
 /// A meter kept by the rig is listed first, under a Rig header that says where cues go;

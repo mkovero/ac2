@@ -28,7 +28,7 @@ mod leq;
 mod levels;
 mod loudness;
 mod loudness_bars;
-mod math_channels;
+mod math_traces;
 mod meas_display;
 mod network;
 mod osc;

@@ -1,14 +1,14 @@
-# Math channels
+# Math traces
 
 Status: implemented (`MeasKind::Math`, `ac2_traces::math`, the daemon's math job
-`crates/ac2d/src/jobs/math.rs`, `ac2 math new / set`, the app's math channel dialog,
+`crates/ac2d/src/jobs/math.rs`, `ac2 math new / set`, the app's math trace dialog,
 Shift+M). Answers PLAN.md §3.3 "Live spatial average" and §3.5 "Trace math"; supersedes the
 spatial-average measurement kind (its rationale: [`spatial-average.md`](spatial-average.md))
 and the stored-trace `trace.math` command.
 
 ## What the operator gets
 
-A math channel is a curve made from other curves by name: **A ÷ B**, **A × B**, **A + B**,
+A math trace is a curve made from other curves by name: **A ÷ B**, **A × B**, **A + B**,
 **A − B**, or the **average** of several. Its operands are live measurements or stored traces
 of one kind; the result is a measurement of that kind — drawn where the kind is drawn
 (transfer math on the magnitude / phase / coherence panes, spectrum and RTA math on the
@@ -26,15 +26,15 @@ daemon evaluates, with operands chosen by name.
 
 - `owner`: the measurement it is listed under (`measurement-tree.md`) — the one selected
   when it was made (Shift+M), or `imported`; its captures are filed there too. Moving it is
-  a `meas.update` of the owner alone, applied without restarting the channel.
+  a `meas.update` of the owner alone, applied without restarting the math trace.
 - `domain`: `transfer` | `spectrum` | `rta` — what the operands are, so what the result is and
   which stream it publishes (`tf`, `spec`, `rta`). The daemon checks every operand against
   it; clients read the pane and stream from it without looking the operands up.
 - `expr`: `binary {a, op, b}` or `average {of: 2 … 64, method}`.
 - `op`: `divide`, `multiply`, `add`, `subtract`.
 - operands: `meas {meas}` (a live measurement's current result) or `trace {trace}` (a stored
-  trace's columns). A math channel is not an operand: capture it and use the trace (an
-  operand chain would wait on another channel's operands within one frame).
+  trace's columns). A math trace is not an operand: capture it and use the stored trace (an
+  operand chain would wait on another math trace's operands within one frame).
 - `reference`: `operand {operand}` | `fixed {delay}` — the delay a transfer sum, difference
   or average is referred to (default: the first operand).
 - `smoothing`: display smoothing of the result (transfer and spectrum), applied after the
@@ -127,16 +127,16 @@ reference, so the phase does not jump to another operand's arrival.
 
 ## Operands' invariants
 
-While a math channel names an operand, the daemon refuses to delete it (measurement or
+While a math trace names an operand, the daemon refuses to delete it (measurement or
 trace), to change a measurement into another kind or onto another grid (transfer grid, FFT
-length, band layout). A stored operand's columns are read when the channel starts; a mic
-curve applied to that trace afterwards restarts the channel with the corrected columns.
-`meas.reset` of a math channel is `invalid` (it holds no averaging; the app's reset resets its
+length, band layout). A stored operand's columns are read when the math trace starts; a mic
+curve applied to that trace afterwards restarts the math trace with the corrected columns.
+`meas.reset` of a math trace is `invalid` (it holds no averaging; the app's reset resets its
 live operands).
 
 ## Daemon
 
-The math channel is a job fed by the capture fan-out although it analyses no audio: it
+The math trace is a job fed by the capture fan-out although it analyses no audio: it
 publishes on its live operands' clock, its frames carry the session's sample index, and it
 goes STALE exactly when audio stops. Control keeps a registry of probes of running transfer,
 spectrum and RTA jobs; when a frame is due (only while someone subscribes, or for a capture)
@@ -145,22 +145,22 @@ the wait is the slowest operand's. Stored operands are held as their columns on 
 grid (mic curve baked in, resampled onto a transfer result's grid). The combination is
 `ac2_traces::math` (transfer and levels), shared with the tests.
 
-A math channel of stored traces only still needs a running audio I/O to publish (its
+A math trace of stored traces only still needs a running audio I/O to publish (its
 clock is the fan-out's); its result does not change.
 
 ## App
 
-**Shift+M** (palette *New math channel…*) opens the dialog: **A** (every live measurement
+**Shift+M** (palette *New math trace…*) opens the dialog: **A** (every live measurement
 and stored trace, by name, `(live)` / `(stored, S2)`), **Operator** (by A's kind: ÷ × + − and
 average for transfer functions; − + and average for levels), **B** (the curves of A's kind),
 or, for the average, one row per curve of A's kind (all in to start with; ←/→ leaves one out),
 **Method**, **Phase reference** (the operand whose delay a sum, difference or average is
 referred to), **Smoothing**, **Name** (follows the expression — `Main L ÷ Sub`, `Average of 4`
 — until the operator types one). A starts as the selected trace, else what the focused pane
-shows. *Edit the selected math channel…* opens the same dialog on an existing one and sends
+shows. *Edit the selected math trace…* opens the same dialog on an existing one and sends
 `meas.update`. The legend shows the expression and what it means (`Main L + Sub · no
 coherence`), and for a transfer ÷, − or + on one time base how far apart the operands arrive by
-the delays their phases are referred to (`· arrival Δ +3.7 µs · +1.3 mm @ 20 °C`, A − B); a spectrum math channel's caption says `level difference` / `power sum`. The UI
+the delays their phases are referred to (`· arrival Δ +3.7 µs · +1.3 mm @ 20 °C`, A − B); a spectrum math trace's caption says `level difference` / `power sum`. The UI
 does no maths: the dialog builds a configuration, the daemon combines and refuses with a
 reason.
 
@@ -168,7 +168,7 @@ reason.
 
 `ac2 math new "Main L / Sub"` (operator spaced: `/ ÷ * × + - −`), `--op div|mul|add|sub --a
 A --b B`, `--op avg --of A,B,C [--method …] [--phase-ref X | --ref-delay T] [--smooth N]
-[--name …] [--start]`; `ac2 math set <channel> …` changes what is given. Operands by name or
+[--name …] [--start]`; `ac2 math set <math-trace> …` changes what is given. Operands by name or
 id; `trace:NAME` / `meas:NAME` when a measurement and a trace share a name. Replaces `ac2 meas
 new avg` and `ac2 trace math`. `--smooth-magnitude-only` keeps the phase unsmoothed;
 `--no-smooth` (on `set`) takes smoothing off.
@@ -182,7 +182,7 @@ new avg` and `ac2 trace math`. `--smooth-magnitude-only` keeps the phase unsmoot
   [`NamedOperand` {`operand`, `name`}], `phase`}: a capture shares its epoch's time base when
   its phase is `shared_time_base` and it is a sum, difference or average (a ratio or cascade
   is relative).
-- Sessions hold math channels; a load checks their operands against the loaded measurements
+- Sessions hold math traces; a load checks their operands against the loaded measurements
   and traces and starts them after every measurement and trace is in.
 
 ## Tests
@@ -196,7 +196,7 @@ new avg` and `ac2 trace math`. `--smooth-magnitude-only` keeps the phase unsmoot
 - `ac2d` (`jobs/math/tests.rs`): the spatial-average cases (dropouts, reference left out,
   gaps, weighting); a live ÷ stored ratio (6 dB, relative arrival, lower coherence); a sum
   with a stored operand of another epoch left out as `mismatch`; a capture + live sum is the
-  comb. `tests/it/math_channels.rs` on the fake rig: the live average of three positions
+  comb. `tests/it/math_traces.rs` on the fake rig: the live average of three positions
   (analytic power average, NO SIGNAL position refused, capture naming two positions,
   invariants, FEW_OPERANDS); Seat 1 ÷ Seat 2 = +6 dB with the later arrival in the phase,
   edited to × = 0 dB, capture kept at +6 dB; capture + live = the two-arrival sum; an
@@ -214,7 +214,7 @@ new avg` and `ac2 trace math`. `--smooth-magnitude-only` keeps the phase unsmoot
 
 - A level difference is drawn on the spectrum pane's absolute level axis (in A's scale). A
   relative axis for differences (0 dB centred) would read better; not built.
-- Math channels as operands (a chain) are refused; capture first. If wanted, the job would
+- Math traces as operands (a chain) are refused; capture first. If wanted, the job would
   need an evaluation order and the wait budget split across levels.
 - `trace.average` (M, one-shot on the shown stored traces) stays beside the math average of
   stored traces; one could go.

@@ -2,10 +2,10 @@
 
 use super::*;
 
-/// Who owns what: a capture is filed under its measurement, a math channel's capture under
-/// the math channel's owner, an average with its inputs' common owner; a trace moves by
-/// `trace.update`, a math channel by `meas.update`; deleting a measurement keeps what it
-/// owns (in the imported group) or deletes it, and refuses while a math channel that stays
+/// Who owns what: a capture is filed under its measurement, a math trace's capture under
+/// the math trace's owner, an average with its inputs' common owner; a trace moves by
+/// `trace.update`, a math trace by `meas.update`; deleting a measurement keeps what it
+/// owns (in the imported group) or deletes it, and refuses while a math trace that stays
 /// would lose an operand.
 #[test]
 fn owners_capture_move_and_delete() {
@@ -23,7 +23,7 @@ fn owners_capture_move_and_delete() {
     let post = cap(c, MeasId(1), "post-EQ");
     assert_eq!((pre.edit.owner, post.edit.owner), (main, main));
 
-    // A math channel made on the measurement: listed and captured under it.
+    // A math trace made on the measurement: listed and captured under it.
     let math = c.measurement(Command::MeasCreate {
         config: MeasConfig {
             scope: ac2_proto::model::MeasScope::Session,
@@ -56,7 +56,7 @@ fn owners_capture_move_and_delete() {
     });
     assert_eq!(avg.edit.owner, main);
 
-    // Owners must exist and must not be math channels; math cannot own math.
+    // Owners must exist and must not be math traces; math cannot own math.
     let mv = |c: &mut Client, t: &TraceMeta, owner: TraceOwner| {
         let mut e = t.edit.clone();
         e.owner = owner;
@@ -93,7 +93,7 @@ fn owners_capture_move_and_delete() {
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Invalid, "{}", e.msg);
 
-    // A math channel moves without restarting: its config rev stays.
+    // A math trace moves without restarting: its config rev stays.
     let MeasKind::Math { config } = &math.config.kind else {
         unreachable!()
     };
@@ -124,7 +124,7 @@ fn owners_capture_move_and_delete() {
     // Back under the measurement for the delete below.
     c.update_ok(math.id, math.config.clone());
 
-    // A second measurement and a math channel elsewhere computing from one of its traces.
+    // A second measurement and a math trace elsewhere computing from one of its traces.
     c.ok(Command::MeasCreate {
         config: transfer("side"),
     });
@@ -151,7 +151,7 @@ fn owners_capture_move_and_delete() {
             kind: MeasKind::Math { config: under_math },
         },
     });
-    // Deleting side with its traces would take an operand from a math channel that stays.
+    // Deleting side with its traces would take an operand from a math trace that stays.
     let e = c
         .call(Command::MeasDelete {
             meas: side,
@@ -160,7 +160,7 @@ fn owners_capture_move_and_delete() {
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{}", e.msg);
     assert!(e.msg.contains("side ÷ avg"), "{}", e.msg);
-    // Kept, they move to the imported group and the math channel keeps its operand.
+    // Kept, they move to the imported group and the math trace keeps its operand.
     c.ok(Command::MeasDelete {
         meas: side,
         traces: OwnedTraces::Keep,
@@ -175,7 +175,7 @@ fn owners_capture_move_and_delete() {
         traces: OwnedTraces::Keep,
     });
 
-    // The main measurement with its traces: the math channel under it goes too.
+    // The main measurement with its traces: the math trace under it goes too.
     c.ok(Command::MeasDelete {
         meas: MeasId(1),
         traces: OwnedTraces::Delete,

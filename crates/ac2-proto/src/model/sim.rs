@@ -1,6 +1,6 @@
 //! Room simulation (`docs/design/spatial-walk.md` §7): geometric acoustics on a plan's prism,
 //! run by the daemon on a worker (`sim.run`, `sim.fit`). Everything here is *simulated*: a
-//! [`SimState`] is not a trace, has no colour and is never a math-channel operand (those take
+//! [`SimState`] is not a trace, has no colour and is never a math-trace operand (those take
 //! [`TraceId`](crate::units::TraceId)s), so a prediction cannot be mistaken for a measurement.
 
 use serde::{Deserialize, Serialize};

@@ -231,7 +231,7 @@ impl AppState {
         };
         if matches!(m.config.kind, MeasKind::Math { .. }) {
             self.warn(format!(
-                "{} is a math channel: it takes its measurement's colours",
+                "{} is a math trace: it takes its measurement's colours",
                 m.config.name
             ));
             return;
