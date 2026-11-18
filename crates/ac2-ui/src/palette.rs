@@ -255,7 +255,7 @@ mod tests {
             ("previous view", CommandId::PrevView),
             ("stim stop", CommandId::StimulusStop),
             ("set stim", CommandId::StimulusLevel),
-            ("set signal", CommandId::StimulusSignal),
+            ("stimulus signal", CommandId::StimulusSignal),
             ("slot 3", CommandId::Slot3),
             ("open audio", CommandId::OpenSession),
             ("open session", CommandId::SessionLoad),

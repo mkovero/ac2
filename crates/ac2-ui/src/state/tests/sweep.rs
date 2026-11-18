@@ -377,7 +377,7 @@ fn the_sweep_dialog_offers_fine_lf_harmonics() {
 #[test]
 fn a_sweep_submitted_during_a_stop_arms_after_it() {
     let mut t = T::new();
-    t.st.rig.stimulus.level = Some(Dbfs(-30.0));
+    t.pink_at(-30.0);
     let r = t.key("Space");
     assert!(matches!(r.as_slice(), [Request::StimArm { .. }]), "{r:?}");
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
@@ -638,7 +638,7 @@ fn space_on_the_sweep_view_re_sweeps_with_the_same_parameters() {
 #[test]
 fn space_on_the_sweep_view_without_a_sweep_opens_the_dialog() {
     let mut t = T::new();
-    t.st.rig.stimulus.level = Some(Dbfs(-40.0));
+    t.pink_at(-40.0);
     t.go(PaneKind::Distortion);
     assert!(t.st.sweep_view(), "{:?}", t.st.layout.focus);
     assert_eq!(
@@ -663,6 +663,7 @@ fn space_on_the_sweep_view_without_a_sweep_opens_the_dialog() {
 #[test]
 fn space_on_the_live_views_drives_the_generator() {
     let mut t = T::new();
+    t.st.rig.stimulus.generator = Some(SignalKind::Pink);
     sweep_once(&mut t);
     for pane in [PaneKind::Transfer, PaneKind::Spectrum] {
         t.go(pane);

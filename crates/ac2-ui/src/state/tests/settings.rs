@@ -115,7 +115,7 @@ fn the_old_dialog_keys_open_their_pages_and_ctrl_p_the_last_one() {
 #[test]
 fn the_view_owns_the_keys_and_shift_esc_still_stops() {
     let mut t = T::new();
-    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
+    t.pink_at(-20.0);
     t.key("Space");
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     t.key("Ctrl+P");
@@ -577,26 +577,52 @@ fn up_down_walk_device_channels_then_the_max_level() {
     // Shift+O lands on the input device.
     assert_eq!(settings(&t).session.focus, Row::Device);
     assert!(!settings(&t).on_ceiling);
+    use crate::settings::SignalRow;
+    // The one row focused: the max level's, a stimulus signal row, else a session row.
     let at = |t: &T| {
         let s = settings(t);
-        (s.on_ceiling, s.session.focus)
+        (
+            s.on_ceiling,
+            s.signal.focus,
+            (!s.on_ceiling && s.signal.focus.is_none()).then_some(s.session.focus),
+        )
     };
     t.key("ArrowUp");
-    assert_eq!(at(&t), (false, Row::Backend));
-    let mut walked = vec![at(&t).1];
+    assert_eq!(at(&t), (false, None, Some(Row::Backend)));
+    let mut walked = vec![Row::Backend];
     for _ in 1..want.len() {
         t.key("ArrowDown");
-        walked.push(at(&t).1);
+        walked.extend(at(&t).2);
     }
     assert_eq!(walked, want);
     t.key("ArrowDown");
-    assert!(at(&t).0, "the max level row after the buffer");
+    assert_eq!(
+        at(&t),
+        (false, Some(SignalRow::Signal), None),
+        "the signal row after the buffer"
+    );
     t.key("ArrowDown");
-    assert_eq!(at(&t), (false, Row::Backend), "wraps to the backend");
+    assert_eq!(at(&t), (true, None, None), "then the max level row");
+    t.key("ArrowDown");
+    assert_eq!(at(&t), (false, None, Some(Row::Backend)), "wraps");
     t.key("ArrowUp");
     assert!(at(&t).0, "↑ from the backend: the max level row");
     t.key("ArrowUp");
-    assert_eq!(at(&t), (false, Row::Buffer));
+    assert_eq!(at(&t), (false, Some(SignalRow::Signal), None));
+    t.key("ArrowUp");
+    assert_eq!(at(&t), (false, None, Some(Row::Buffer)));
+    // With a sine its two rows stand between the signal row and the max level.
+    t.key("ArrowDown");
+    t.key("ArrowLeft");
+    assert_eq!(t.st.rig.stimulus.generator, Some(SignalKind::Sine));
+    for row in [SignalRow::Frequency, SignalRow::OnBin] {
+        t.key("ArrowDown");
+        assert_eq!(at(&t), (false, Some(row), None));
+    }
+    t.key("Tab");
+    assert!(at(&t).0);
+    t.key("Shift+Tab");
+    assert_eq!(at(&t), (false, Some(SignalRow::OnBin), None));
     assert_eq!(page(&t), Page::AudioIo);
 }
 

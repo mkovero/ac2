@@ -649,7 +649,7 @@ fn stimulus(app: &App, ch: &Chrome) -> Vec<Item> {
     let prefix = if sweep {
         "sweep ".to_owned()
     } else {
-        ac2_scene::stimulus::level_prefix(st.rig.stimulus.generator)
+        ac2_scene::stimulus::level_prefix(st.generator_signal().as_ref())
     };
     let mut v = vec![
         Item::new(100, vec![badge_text]).kept(),
@@ -675,10 +675,10 @@ fn stimulus(app: &App, ch: &Chrome) -> Vec<Item> {
         .kept(),
     ];
     if let Some(it) = v.last_mut() {
-        it.hover = Some(ac2_scene::stimulus::level_tip(
-            &key_hint(app, CommandId::StimulusLevel),
-            &key_hint(app, CommandId::StimulusSignal),
-        ));
+        it.hover = Some(ac2_scene::stimulus::level_tip(&key_hint(
+            app,
+            CommandId::StimulusLevel,
+        )));
     }
     if let Some(o) = other {
         v.push(Item::new(

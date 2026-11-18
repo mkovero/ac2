@@ -307,6 +307,7 @@ impl AppState {
                 | SessionMsg::EditMic(_)
         ) {
             s.on_ceiling = false;
+            s.signal = Default::default();
         }
         let d = &mut s.session;
         match m {

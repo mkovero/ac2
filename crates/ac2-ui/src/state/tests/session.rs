@@ -212,7 +212,7 @@ fn hints_name_the_keys_the_keymap_binds() {
 fn arming_without_a_session_names_the_key() {
     let mut t = T::new();
     t.conn(mirror(no_session_state()));
-    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
+    t.pink_at(-20.0);
     let r = t.key("Space");
     assert!(r.is_empty(), "{r:?}");
     assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
@@ -642,7 +642,7 @@ fn detect_loopback_needs_a_stimulus_output_and_a_typed_level() {
         "{text}"
     );
     // A typed stimulus level is offered again for the next detection.
-    t.st.rig.stimulus.level = Some(Dbfs(-24.0));
+    t.pink_at(-24.0);
     t.type_key("D", "d");
     assert_eq!(
         dialog(&t).detect.as_ref().map(|d| d.level.as_str()),

@@ -312,6 +312,7 @@ impl AppState {
             C::StimulusFire => match self.rig.stimulus.phase {
                 StimPhase::Armed if self.rig.sweep.plan.is_some() => self.fire_sweep(out),
                 StimPhase::Armed => {
+                    self.sync_generator_signal();
                     if let Some(settings) = self.rig.stimulus.settings() {
                         self.rig.stimulus.phase = StimPhase::FireRequested;
                         out.push(Request::StimSet(GeneratorDesired {
@@ -346,8 +347,10 @@ impl AppState {
                 self.prompt(PromptKind::StimulusLevel, text);
             }
             C::StimulusSignal => {
-                let text = self.rig.stimulus.generator.field_text();
-                self.prompt(PromptKind::StimulusSignal, text);
+                self.open_settings(Page::AudioIo, out);
+                if let Overlay::Settings(s) = &mut self.overlay {
+                    s.focus_signal(crate::settings::SignalRow::Signal);
+                }
             }
             C::StimulusOutputs => {
                 self.open_settings(Page::AudioIo, out);

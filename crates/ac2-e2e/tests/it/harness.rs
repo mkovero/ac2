@@ -9,7 +9,7 @@ use ac2_proto::units::MeasId;
 use ac2_ui::conn::{Conn, Target};
 use ac2_ui::forms::FormKind;
 use ac2_ui::keys::{Chord, CommandId, Keymap};
-use ac2_ui::state::{AppState, ChoicePurpose, Msg, Overlay, StimPhase};
+use ac2_ui::state::{AppState, ChoicePurpose, Msg, Overlay, PromptKind, StimPhase};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -145,6 +145,14 @@ impl Driver {
     /// Space arms the stimulus.
     pub fn arm(&mut self) -> R {
         self.key("Space");
+        // The first arm of the generator asks what to play: pink, as Enter takes it.
+        if matches!(&self.st.overlay, Overlay::Prompt(p) if p.kind == PromptKind::StimulusSignal) {
+            self.key("Enter");
+            if self.st.overlay != Overlay::None {
+                return Err(format!("a level is asked: {:?}", self.st.overlay).into());
+            }
+            self.key("Space");
+        }
         self.until("armed", |s| s.rig.stimulus.phase == StimPhase::Armed)
     }
 

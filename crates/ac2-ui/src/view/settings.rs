@@ -257,7 +257,7 @@ pub(super) fn section(ui: &mut egui::Ui, title: &str, whose: &str, ch: &Chrome) 
 fn io_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Option<Msg>) {
     let mut m = None;
     // One focus marker on the page: the max level row's, or a session row's.
-    let focus = (!s.on_ceiling).then_some(s.session.focus);
+    let focus = (!s.on_ceiling && s.signal.focus.is_none()).then_some(s.session.focus);
     section(ui, "Device", "", ch);
     super::session::device_section(ui, &s.session, focus, ch, &mut m);
     let remote = |ui: &mut egui::Ui, m: &mut Option<crate::state::SessionMsg>| {
@@ -267,6 +267,7 @@ fn io_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Op
     if let Some(m) = m {
         *msg = Some(Msg::Session(m));
     }
+    signal_section(app, ui, s, ch, msg);
     section(ui, "System max level", crate::settings::THE_RIG, ch);
     let g = app.state.daemon().map(|d| d.generator.clone());
     let focused = s.on_ceiling;
@@ -335,6 +336,74 @@ fn io_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Op
     // The max level is the page's last section: focused, it and its prompt stay in view.
     if focused {
         ui.scroll_to_cursor(Some(egui::Align::BOTTOM));
+    }
+}
+
+/// The stimulus signal rows of the Audio I/O page: what the generator plays, a sine's
+/// frequency and its bin lock, each with its hint line.
+fn signal_section(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg: &mut Option<Msg>) {
+    use crate::settings::SignalRow;
+    use ac2_scene::stimulus as text;
+    let st = &app.state;
+    let stim = &st.rig.stimulus;
+    let bins = st.sine_bins();
+    let sine = stim.generator == Some(text::SignalKind::Sine);
+    section(ui, text::SIGNAL_SECTION, crate::settings::THIS_APP, ch);
+    for &row in SignalRow::shown(sine) {
+        let focused = s.signal.focus == Some(row);
+        let (title, value, hint) = match row {
+            SignalRow::Signal => (
+                text::SIGNAL_ROW,
+                text::signal_row_value(stim.generator).to_owned(),
+                text::SIGNAL_ROW_HINT,
+            ),
+            SignalRow::Frequency => (
+                text::SINE_FREQ_ROW,
+                text::sine_freq_value(stim.sine, bins),
+                text::SINE_FREQ_HINT,
+            ),
+            SignalRow::OnBin => (
+                text::ON_BIN_ROW,
+                text::on_bin_value(stim.sine.on_bin, bins),
+                text::ON_BIN_HINT,
+            ),
+        };
+        ui.horizontal(|ui| {
+            let marker = if focused { "▸" } else { " " };
+            ui.label(RichText::new(marker).color(ch.focus).monospace());
+            title_cell(ui, title, focused, ch);
+            if row == SignalRow::Frequency {
+                let shown = if focused {
+                    format!("{value}   new frequency: {}▏", s.signal.text)
+                } else {
+                    value
+                };
+                // Monospace as the other typed row of the page: the caret is its glyph.
+                let t = RichText::new(shown).monospace().color(if focused {
+                    ch.focus
+                } else {
+                    ch.text
+                });
+                if ui.add(egui::Button::selectable(focused, t)).clicked() {
+                    *msg = Some(Msg::Settings(SettingsMsg::Signal(row, 0)));
+                }
+            } else {
+                if ui.small_button("‹").clicked() {
+                    *msg = Some(Msg::Settings(SettingsMsg::Signal(row, -1)));
+                }
+                ui.label(RichText::new(value).color(ch.text));
+                if ui.small_button("›").clicked() {
+                    *msg = Some(Msg::Settings(SettingsMsg::Signal(row, 1)));
+                }
+            }
+        });
+        ui.label(RichText::new(hint).small().color(ch.dim));
+        if focused {
+            ui.scroll_to_cursor(Some(egui::Align::Center));
+        }
+    }
+    if let Some(e) = &s.signal.error {
+        ui.label(RichText::new(e).color(ch.fault));
     }
 }
 

@@ -258,7 +258,7 @@ fn requests_name_their_rig() {
         "{r:?}"
     );
     // Space arms the active rig's stimulus.
-    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
+    t.pink_at(-20.0);
     let r =
         t.st.update(Msg::Key(Chord::parse("Space").expect("key")), &t.keys);
     assert!(
@@ -382,7 +382,7 @@ fn the_drop_down_switches_the_rig_shown() {
     assert_eq!(t.st.overlay, Overlay::None);
     assert!(t.st.find_rig(RIG).is_some());
     // Space arms pupu's stimulus now.
-    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
+    t.pink_at(-20.0);
     let r =
         t.st.update(Msg::Key(Chord::parse("Space").expect("key")), &t.keys);
     assert!(
@@ -411,7 +411,7 @@ fn no_switch_under_a_window() {
 #[test]
 fn replies_after_a_switch_reach_their_rig() {
     let mut t = two_mirrored();
-    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
+    t.pink_at(-20.0);
     t.key("Space");
     assert_eq!(t.st.rig.stimulus.phase, StimPhase::Arming);
     pick(&mut t, RigRow::Rig(PUPU));

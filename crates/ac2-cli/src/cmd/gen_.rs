@@ -123,7 +123,9 @@ fn signal_text(s: &GeneratorSettings) -> String {
         Signal::White => "white noise".to_owned(),
         Signal::Pink => "pink noise".to_owned(),
         Signal::PeriodicPink { period } => format!("periodic pink ({} samples)", period.0),
-        Signal::Sine { freq } => format!("sine {}", ac2_scene::format::freq_readout(freq.0)),
+        // To the hundredth of a hertz, as the app's top bar and the harmonics plate print
+        // it: a sine on an FFT bin is told from the round number beside it.
+        Signal::Sine { freq } => format!("sine {}", ac2_scene::format::freq_exact(freq.0)),
         Signal::Ess { .. } => "sweep".to_owned(),
     };
     format!(
@@ -487,6 +489,54 @@ mod tests {
                         snap_to_bin(f, fs, n),
                         "{r:?} {f} {fs}"
                     );
+                }
+            }
+        }
+    }
+
+    /// A bin of the shortest FFT among several spectra is a bin of each of them, as the
+    /// analyzer judges it: every length the daemon takes and the multi-resolution
+    /// spectrum's longest window are powers of two, so the shorter's bins are among the
+    /// longer's.
+    #[test]
+    fn a_bin_of_the_shortest_fft_is_a_bin_of_every_longer_one() {
+        use ac2_core::harmonics::is_on_bin;
+        use ac2_proto::model::{SpectrumConfig, nearest_bin};
+        let lens: Vec<u32> = (0..32)
+            .map(|k| 1u32 << k)
+            .filter(|n| SpectrumConfig::fft_len_ok(*n))
+            .collect();
+        assert_eq!(lens.first(), Some(&SpectrumConfig::MIN_FFT_LEN));
+        assert_eq!(lens.last(), Some(&SpectrumConfig::MAX_FFT_LEN));
+        for fs in [8000.0, 44_100.0, 48_000.0, 88_200.0, 96_000.0, 192_000.0] {
+            let all: Vec<SpecResolution> = lens
+                .iter()
+                .map(|&fft_len| SpecResolution::Fixed { fft_len })
+                .chain([SpecResolution::MULTI])
+                .collect();
+            assert!(SpecResolution::MULTI.sine_fft_len(fs).is_power_of_two());
+            assert_eq!(SpecResolution::shared_sine_fft_len([], fs), None);
+            for shortest in &all {
+                // This one with every one at least as long.
+                let n = shortest.sine_fft_len(fs);
+                let with: Vec<SpecResolution> = all
+                    .iter()
+                    .copied()
+                    .filter(|r| r.sine_fft_len(fs) >= n)
+                    .collect();
+                assert_eq!(
+                    SpecResolution::shared_sine_fft_len(with.iter().rev().copied(), fs),
+                    Some(n)
+                );
+                for f in [19.9, 997.0, 1000.0, 12_345.678, 0.45 * fs] {
+                    let bin = nearest_bin(f, fs, n);
+                    assert_eq!(bin, shortest.nearest_bin(f, fs));
+                    for r in &with {
+                        assert!(
+                            is_on_bin(bin, fs, r.sine_fft_len(fs)),
+                            "{f} Hz at {fs}: bin {bin} of {n} points is off the bins of {r:?}"
+                        );
+                    }
                 }
             }
         }

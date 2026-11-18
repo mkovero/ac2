@@ -150,7 +150,7 @@ commands! {
     LevelUpCoarse => "level_up_coarse", "Stimulus level +3 dB", [Global];
     LevelDownCoarse => "level_down_coarse", "Stimulus level −3 dB", [Global];
     StimulusLevel => "stimulus_level", "Set stimulus level…", [Global];
-    StimulusSignal => "stimulus_signal", "Set stimulus signal…", [Global];
+    StimulusSignal => "stimulus_signal", "Stimulus signal…", [Global];
     StimulusOutputs => "stimulus_outputs", "Stimulus outputs…", [Global];
     StimulusTakeOver => "stimulus_take_over", "Take over stimulus", [Global];
 

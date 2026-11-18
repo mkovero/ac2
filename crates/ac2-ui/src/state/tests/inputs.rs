@@ -28,7 +28,7 @@ fn finder_band_text() {
 #[test]
 fn level_change_during_arming_is_sent_once_armed() {
     let mut t = T::new();
-    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
+    t.pink_at(-20.0);
     t.key("Space");
     // ↓ while the arm is in flight: nothing to send yet.
     assert!(t.key("Down").is_empty());
@@ -363,7 +363,7 @@ fn outputs_never_change_under_a_held_stimulus() {
     t.st.prefs
         .outputs
         .insert((RIG, "hw:UMC1820".into()), vec![3]);
-    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
+    t.pink_at(-20.0);
     t.key("Space");
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     t.conn(mirror(with_output_device("hw:UMC1820")));

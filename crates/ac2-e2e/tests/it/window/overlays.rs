@@ -70,8 +70,9 @@ fn keyboard_focus_stays_in_the_open_dialog() -> R {
     Ok(())
 }
 
-/// Space without a level asks for one and takes nothing; typed, Space arms, Enter plays, ↓
-/// steps the level a dB, Esc stops and releases: each step as the daemon's generator says.
+/// The first Space asks what to play (Enter: pink), then for the level, and takes nothing;
+/// typed, Space arms, Enter plays, ↓ steps the level a dB, Esc stops and releases: each
+/// step as the daemon's generator says.
 #[test]
 fn stimulus_flow_against_the_daemon() -> R {
     if !have_gpu("stimulus_flow_against_the_daemon") {
@@ -81,9 +82,17 @@ fn stimulus_flow_against_the_daemon() -> R {
     let mut h = harness(options(&rig));
     step_until(&mut h, "live frames", live);
     h.key_press(Key::Space);
-    step_until(&mut h, "level prompt", |a| {
-        matches!(a.state.overlay, Overlay::Prompt(_))
-    });
+    step_until(
+        &mut h,
+        "signal prompt",
+        |a| matches!(&a.state.overlay, Overlay::Prompt(p) if p.kind == ac2_ui::state::PromptKind::StimulusSignal),
+    );
+    h.key_press(Key::Enter);
+    step_until(
+        &mut h,
+        "level prompt",
+        |a| matches!(&a.state.overlay, Overlay::Prompt(p) if p.kind == ac2_ui::state::PromptKind::StimulusLevel),
+    );
     // Nothing reached the daemon: the generator has no owner.
     let owner = rig
         .cli
@@ -216,6 +225,7 @@ fn the_stage_view_stays_the_pane_while_firing() -> R {
     let mut h = harness(options(&rig));
     step_until(&mut h, "live frames", live);
     h.state_mut().state.rig.stimulus.level = Some(ac2_proto::units::Dbfs(-24.0));
+    h.state_mut().state.rig.stimulus.generator = Some(ac2_scene::stimulus::SignalKind::Pink);
     h.key_press(Key::W);
     h.key_press(Key::W);
     step_until(&mut h, "the stage view", |a| {

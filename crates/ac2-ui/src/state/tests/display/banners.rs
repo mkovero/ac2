@@ -249,7 +249,7 @@ fn the_ir_pane_says_why_there_is_no_ir() {
             "stimulus off: Space arms, Enter starts it".into()
         )
     );
-    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
+    t.pink_at(-20.0);
     t.key("Space");
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     assert_eq!(

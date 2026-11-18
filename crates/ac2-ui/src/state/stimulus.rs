@@ -27,38 +27,84 @@ impl AppState {
         Ok(())
     }
 
-    /// The signal prompt's text applied: the generator's choice for the live views. A sine
-    /// typed without `exact` while the focused pane shows a spectrum measurement goes onto
-    /// the nearest bin of the FFT that measurement reads it on: only there a rectangular
-    /// window can read it, and no window leaks it into THD+N.
+    /// The open session's sample rate, when one is open.
+    fn session_rate(&self) -> Option<u32> {
+        self.daemon()
+            .and_then(|s| s.session.open.as_ref())
+            .map(|o| o.sample_rate_hz)
+    }
+
+    /// The FFT whose bins a sine goes onto, with the sample rate: the shortest FFT a
+    /// running spectrum measurement of this rig reads a sine on, whose bins are bins of
+    /// every longer one too. `None` with no spectrum running or no audio I/O open.
+    pub fn sine_bins(&self) -> Option<(usize, f64)> {
+        let fs = f64::from(self.session_rate()?);
+        let all = self.measurements();
+        let running = all
+            .iter()
+            .filter(|m| m.running)
+            .filter_map(|m| match &m.config.kind {
+                MeasKind::Spectrum { config } => Some(config.resolution),
+                _ => None,
+            });
+        ac2_proto::model::SpecResolution::shared_sine_fft_len(running, fs).map(|n| (n, fs))
+    }
+
+    /// The generator's signal as it is or would be sent: the choice, a sine set to be on
+    /// a bin moved there. `None` until a signal is chosen.
+    pub fn generator_signal(&self) -> Option<Signal> {
+        self.rig
+            .stimulus
+            .choice()
+            .map(|c| c.played(self.sine_bins()))
+    }
+
+    /// Makes the stimulus' signal the generator's as it resolves now, unless a sweep is
+    /// set up (which keeps its own). `true` when that changed it.
+    pub(super) fn sync_generator_signal(&mut self) -> bool {
+        if self.rig.sweep.plan.is_some() {
+            return false;
+        }
+        let Some(signal) = self.generator_signal() else {
+            return false;
+        };
+        let changed = self.rig.stimulus.signal != signal;
+        self.rig.stimulus.signal = signal;
+        changed
+    }
+
+    /// The signal prompt's text applied: the generator's choice for the live views.
     pub(super) fn set_signal_text(
         &mut self,
         text: &str,
         out: &mut Vec<Request>,
     ) -> Result<(), String> {
-        let rate = self
-            .daemon()
-            .and_then(|s| s.session.open.as_ref())
-            .map(|o| o.sample_rate_hz);
-        let mut choice = SignalChoice::parse(text, rate)?;
-        let mut on_bin_of = None;
-        if let SignalChoice::Sine { freq, exact: false } = &mut choice
-            && let Some(fs) = rate
-            && let Some(m) = self.pane_meas(self.layout.focus)
-            && let MeasKind::Spectrum { config } = &m.config.kind
-        {
-            freq.0 = config.resolution.nearest_bin(freq.0, f64::from(fs));
-            on_bin_of = Some(m.config.name.clone());
+        let choice = SignalChoice::parse(text, self.session_rate(), self.rig.stimulus.sine.freq)?;
+        self.choose_signal(choice, out);
+        Ok(())
+    }
+
+    /// The operator's choice of signal, from the prompt or the settings rows: kept, said
+    /// with the frequency really played, and sent at once while armed or playing with the
+    /// generator (a sweep set up keeps its own signal; the choice is what the next Space
+    /// on a live view arms).
+    pub(super) fn choose_signal(&mut self, choice: SignalChoice, out: &mut Vec<Request>) {
+        self.rig.stimulus.generator = Some(choice.kind());
+        if let SignalChoice::Sine { freq, on_bin } = choice {
+            self.rig.stimulus.sine = SineSetting { freq, on_bin };
         }
-        self.rig.stimulus.generator = choice;
-        self.toast(choice.chosen_text(on_bin_of.as_deref()));
-        // A sweep set up keeps its own signal; the choice is what the next Space on a live
-        // view arms.
+        let said = choice.chosen_text(self.sine_bins());
+        let idle = self.rig.stimulus.phase == StimPhase::Idle;
+        match self.rig.stimulus.level {
+            None => self.toast(format!(
+                "{said} · type a level; nothing is armed without one"
+            )),
+            Some(_) if idle => self.toast(format!("{said} · Space arms")),
+            Some(_) => self.toast(said),
+        }
         if self.rig.sweep.plan.is_none() {
-            self.rig.stimulus.signal = choice.signal();
             self.resend_stimulus(out);
         }
-        Ok(())
     }
 
     /// Sends the current settings when armed or firing (level / output change).
@@ -68,6 +114,7 @@ impl AppState {
             StimPhase::Firing | StimPhase::FireRequested => true,
             _ => return,
         };
+        self.sync_generator_signal();
         if let Some(settings) = self.rig.stimulus.settings() {
             out.push(Request::StimSet(GeneratorDesired {
                 settings,
@@ -133,6 +180,11 @@ impl AppState {
                     })
                     .unwrap_or(NextStimulus::SweepDialog),
             )),
+            // Without a level the hint names the key that types one, whatever the signal;
+            // with one, an unchosen signal is what Space asks for next.
+            StimPhase::Idle if level.is_some() && self.rig.stimulus.generator.is_none() => {
+                Some((NextKey::Space, NextStimulus::SignalPrompt))
+            }
             StimPhase::Idle => Some((NextKey::Space, self.generator_stimulus())),
             _ => None,
         }
@@ -184,10 +236,10 @@ impl AppState {
     }
 
     /// The generator as the live views play it: the operator's choice, which is never a
-    /// sweep signal.
+    /// sweep signal (armed before a choice was made, by a sweep: what is armed).
     pub(super) fn generator_stimulus(&self) -> NextStimulus {
         NextStimulus::Generator {
-            signal: self.rig.stimulus.generator.signal(),
+            signal: self.generator_signal().unwrap_or(self.rig.stimulus.signal),
             level: self.rig.stimulus.level,
             outputs: self.rig.stimulus.outputs.clone(),
             labels: self.daemon().map(|s| s.outputs.clone()).unwrap_or_default(),
@@ -269,6 +321,17 @@ impl AppState {
         if self.rig.sweep.run.is_some() {
             return;
         }
+        // Nothing of the generator is armed before the operator said what it plays, as
+        // nothing is without a level: the prompt takes pink on Enter.
+        if self.rig.stimulus.generator.is_none() {
+            if !self.connected() {
+                self.warn("not connected");
+                return;
+            }
+            self.prompt(PromptKind::StimulusSignal, "pink".to_owned());
+            self.toast("say what to play first; Enter takes pink noise");
+            return;
+        }
         if self.rig.sweep.plan.is_some() {
             match self.rig.stimulus.phase {
                 StimPhase::Armed => {
@@ -344,6 +407,7 @@ impl AppState {
         if !matches!(self.rig.stimulus.phase, StimPhase::Idle) && !force {
             return;
         }
+        self.sync_generator_signal();
         if let Some(settings) = self.rig.stimulus.settings() {
             self.rig.stimulus.phase = StimPhase::Arming;
             self.rig.due.armed_with = Some(settings.clone());
@@ -365,6 +429,7 @@ impl AppState {
             self.warn("not armed: the audio stopped; the daemon is reopening the audio I/O");
             return;
         }
+        self.sync_generator_signal();
         if let Some(settings) = self.rig.stimulus.settings() {
             self.rig.stimulus.phase = StimPhase::Arming;
             self.rig.due.armed_with = Some(settings.clone());
@@ -489,7 +554,10 @@ impl AppState {
     /// A stop ends the sweep set-up: the next arm is the generator's chosen signal again.
     pub(super) fn end_sweep_mode(&mut self) {
         if self.rig.sweep.plan.take().is_some() {
-            self.rig.stimulus.signal = self.rig.stimulus.generator.signal();
+            // Before a choice was made nothing of the generator can be armed, so pink
+            // here is only what the idle state holds; the first arm asks.
+            self.rig.stimulus.signal = Signal::Pink;
+            self.sync_generator_signal();
         }
     }
 

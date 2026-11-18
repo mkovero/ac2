@@ -1,39 +1,33 @@
-//! Reducer tests of the stimulus signal prompt: the forms it takes, what it refuses, the
-//! FFT bin a sine is moved onto, and the choice outliving a sweep.
+//! Reducer tests of the generator's signal: asked at the first arm like the level, set on
+//! the Settings › Audio I/O rows, and a sine resolved onto an FFT bin of the running
+//! spectrum measurements whenever it is sent.
 
 use super::sweep::{next_hint, sweep_once};
 use super::*;
+use crate::settings::SignalRow;
 use ac2_proto::model::SpecResolution;
-use ac2_scene::stimulus::SignalChoice;
 
-/// Shift+J, `text` typed over the prompt's prefill, Enter.
-fn choose(t: &mut T, text: &str) -> Vec<Request> {
-    t.key("Shift+J");
+/// The test daemon's one spectrum (Sub) has 8192 points at 48 kHz: bins 5.859375 Hz
+/// apart, the 171st nearest 1 kHz.
+const BIN_1K: f64 = 171.0 * 48_000.0 / 8192.0;
+
+fn prompt(t: &T) -> (PromptKind, &str, Option<&str>) {
+    match &t.st.overlay {
+        Overlay::Prompt(p) => (p.kind, p.text.as_str(), p.error.as_deref()),
+        o => panic!("no prompt: {o:?}"),
+    }
+}
+
+/// The first Space of a fresh app, `text` typed over the signal prompt's prefill, Enter.
+fn first_arm(t: &mut T, text: &str) -> Vec<Request> {
+    let mut r = t.key("Space");
     let Overlay::Prompt(p) = &mut t.st.overlay else {
         panic!("no prompt");
     };
     assert_eq!(p.kind, PromptKind::StimulusSignal);
     p.text = text.into();
-    t.key("Enter")
-}
-
-/// What the prompt opens with.
-fn prefill(t: &mut T) -> String {
-    t.key("Shift+J");
-    let Overlay::Prompt(p) = &t.st.overlay else {
-        panic!("no prompt");
-    };
-    let text = p.text.clone();
-    t.key("Escape");
-    assert_eq!(t.st.overlay, Overlay::None);
-    text
-}
-
-fn sine(hz: f64, exact: bool) -> SignalChoice {
-    SignalChoice::Sine {
-        freq: Hz(hz),
-        exact,
-    }
+    r.extend(t.key("Enter"));
+    r
 }
 
 fn signals(r: &[Request]) -> Vec<(Signal, bool, bool)> {
@@ -45,65 +39,238 @@ fn signals(r: &[Request]) -> Vec<(Signal, bool, bool)> {
         .collect()
 }
 
-/// Shift+J opens the prompt with the current choice; each form it takes is applied as
-/// typed on a pane that is no spectrum, sends nothing while idle and leaves the level and
-/// the phase alone.
+fn sine(hz: f64) -> Signal {
+    Signal::Sine { freq: Hz(hz) }
+}
+
+/// Every spectrum measurement of the mirrored state given `resolution`.
+fn set_resolution(t: &mut T, resolution: SpecResolution) {
+    t.remirror(|s| {
+        for m in &mut s.measurements {
+            if let MeasKind::Spectrum { config } = &mut m.config.kind {
+                config.resolution = resolution;
+            }
+        }
+    });
+}
+
+/// A second spectrum measurement of `fft_len` points beside Sub.
+fn add_spectrum(t: &mut T, id: u32, fft_len: u32) {
+    t.remirror(|s| {
+        let mut m = s
+            .measurements
+            .iter()
+            .find(|m| matches!(m.config.kind, MeasKind::Spectrum { .. }))
+            .cloned()
+            .expect("a spectrum");
+        m.id = MeasId(id);
+        m.config.name = format!("Spectrum {id}");
+        if let MeasKind::Spectrum { config } = &mut m.config.kind {
+            config.resolution = SpecResolution::Fixed { fft_len };
+        }
+        s.measurements.push(m);
+    });
+}
+
+/// Settings on the Audio I/O page, at the signal row, as the palette's command opens it.
+fn open_rows(t: &mut T) {
+    t.st.apply(Msg::Command(CommandId::StimulusSignal), &t.keys);
+    let s = t.st.overlay.settings().expect("Settings open");
+    assert_eq!(s.page, Page::AudioIo);
+    assert_eq!(s.signal.focus, Some(SignalRow::Signal));
+    assert!(!s.on_ceiling);
+}
+
+fn rows(t: &T) -> &crate::settings::SignalRows {
+    &t.st.overlay.settings().expect("Settings open").signal
+}
+
+/// The first Space asks what to play (pink on Enter), then the level; the level typed,
+/// nothing is armed yet, as after the level prompt alone: the next Space arms. Neither is
+/// asked again.
 #[test]
-fn the_prompt_takes_a_noise_or_a_sines_frequency() {
+fn the_first_arm_asks_the_signal_then_the_level() {
     let mut t = T::new();
-    assert_eq!(t.focus_kind(), PaneKind::Transfer);
-    assert_eq!(prefill(&mut t), "pink");
-    for (text, want, toast) in [
-        ("white", SignalChoice::White, "white noise"),
-        (" Pink ", SignalChoice::Pink, "pink noise"),
+    assert_eq!(t.st.rig.stimulus.generator, None);
+    assert_eq!(next_hint(&t).as_deref(), Some("L types a level"));
+    let r = t.type_key("Space", " ");
+    assert!(r.is_empty(), "{r:?}");
+    assert_eq!(prompt(&t), (PromptKind::StimulusSignal, "pink", None));
+    assert_eq!(
+        t.last_toast(),
+        "say what to play first; Enter takes pink noise"
+    );
+    assert_eq!(
+        PromptKind::StimulusSignal.label(),
+        "Stimulus signal: pink, white, sine, or a sine's frequency (997, 1k; \"exact\" after \
+         it keeps it off the FFT bin)"
+    );
+    let r = t.key("Enter");
+    assert!(r.is_empty(), "{r:?}");
+    assert_eq!(t.st.rig.stimulus.generator, Some(SignalKind::Pink));
+    assert_eq!(prompt(&t), (PromptKind::StimulusLevel, "", None));
+    assert_eq!(
+        t.last_toast(),
+        "pink noise · type a level; nothing is armed without one"
+    );
+    t.text("-20");
+    let r = t.key("Enter");
+    assert!(r.is_empty(), "{r:?}");
+    assert_eq!(t.st.overlay, Overlay::None);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
+    assert_eq!(t.last_toast(), "level −20.0 dBFS · Space arms");
+    assert_eq!(
+        next_hint(&t).as_deref(),
+        Some("Space arms: pink −20 dBFS → out 1")
+    );
+    let r = t.key("Space");
+    match r.as_slice() {
+        [Request::StimArm { settings, .. }] => assert_eq!(settings.signal, Signal::Pink),
+        other => panic!("{other:?}"),
+    }
+    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
+    t.key("Escape");
+    t.conn(ConnEvent::Stimulus(StimEvent::Stopped));
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
+    let r = t.key("Space");
+    assert!(matches!(r.as_slice(), [Request::StimArm { .. }]), "{r:?}");
+    assert_eq!(t.st.overlay, Overlay::None);
+}
+
+/// Esc on the signal prompt chooses nothing: the next Space asks again. Esc on the level
+/// prompt after it keeps the signal entered and no level, so the next Space asks only for
+/// the level. Neither arms.
+#[test]
+fn escape_on_either_prompt_arms_nothing() {
+    let mut t = T::new();
+    t.key("Space");
+    let r = t.key("Escape");
+    assert!(r.is_empty(), "{r:?}");
+    assert_eq!(t.st.overlay, Overlay::None);
+    assert_eq!(t.st.rig.stimulus.generator, None);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
+    let r = first_arm(&mut t, "white");
+    assert!(r.is_empty(), "{r:?}");
+    assert_eq!(prompt(&t).0, PromptKind::StimulusLevel);
+    let r = t.key("Escape");
+    assert!(r.is_empty(), "{r:?}");
+    assert_eq!(t.st.overlay, Overlay::None);
+    assert_eq!(t.st.rig.stimulus.generator, Some(SignalKind::White));
+    assert_eq!(t.st.rig.stimulus.level, None);
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
+    let r = t.key("Space");
+    assert!(r.is_empty(), "{r:?}");
+    assert_eq!(prompt(&t), (PromptKind::StimulusLevel, "", None));
+}
+
+/// With the level typed before (L), the first Space asks only for the signal and the
+/// answer arms nothing: the next Space does.
+#[test]
+fn a_level_typed_before_leaves_only_the_signal_to_ask() {
+    let mut t = T::new();
+    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
+    assert_eq!(
+        next_hint(&t).as_deref(),
+        Some("Space asks what to play: pink, white or a sine")
+    );
+    let r = first_arm(&mut t, "white");
+    assert!(r.is_empty(), "{r:?}");
+    assert_eq!(t.st.overlay, Overlay::None);
+    assert_eq!(t.last_toast(), "white noise · Space arms");
+    assert_eq!(
+        next_hint(&t).as_deref(),
+        Some("Space arms: white −20 dBFS → out 1")
+    );
+    let r = t.key("Space");
+    match r.as_slice() {
+        [Request::StimArm { settings, .. }] => assert_eq!(settings.signal, Signal::White),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// Each form the prompt takes; a sine goes onto a bin of the running spectrum unless
+/// `exact`, and the bare word is the sine at the frequency its settings row holds (1 kHz
+/// until another is typed).
+#[test]
+fn the_prompt_takes_a_noise_a_frequency_or_the_word_sine() {
+    let level = " · type a level; nothing is armed without one";
+    for (text, kind, sine_set, played, toast) in [
         (
-            "997",
-            sine(997.0, false),
-            "sine 997 Hz · as typed, not moved onto an FFT bin",
+            " Pink ",
+            SignalKind::Pink,
+            (1000.0, true),
+            Signal::Pink,
+            "pink noise",
+        ),
+        (
+            "white",
+            SignalKind::White,
+            (1000.0, true),
+            Signal::White,
+            "white noise",
+        ),
+        (
+            "sine",
+            SignalKind::Sine,
+            (1000.0, true),
+            sine(BIN_1K),
+            "sine 1001.95 Hz · on an FFT bin of the spectrum",
+        ),
+        (
+            "sine exact",
+            SignalKind::Sine,
+            (1000.0, false),
+            sine(1000.0),
+            "sine 1000 Hz · as typed",
         ),
         (
             "1k",
-            sine(1000.0, false),
-            "sine 1000 Hz · as typed, not moved onto an FFT bin",
-        ),
-        (
-            "997 Hz",
-            sine(997.0, false),
-            "sine 997 Hz · as typed, not moved onto an FFT bin",
+            SignalKind::Sine,
+            (1000.0, true),
+            sine(BIN_1K),
+            "sine 1001.95 Hz · on an FFT bin of the spectrum",
         ),
         (
             "1.5 kHz",
-            sine(1500.0, false),
-            "sine 1500 Hz · as typed, not moved onto an FFT bin",
+            SignalKind::Sine,
+            (1500.0, true),
+            sine(256.0 * 48_000.0 / 8192.0),
+            "sine 1500 Hz · on an FFT bin of the spectrum",
         ),
         (
             "999,76 exact",
-            sine(999.76, true),
-            "sine 999.76 Hz · as typed, not moved onto an FFT bin",
+            SignalKind::Sine,
+            (999.76, false),
+            sine(999.76),
+            "sine 999.76 Hz · as typed",
         ),
     ] {
-        let r = choose(&mut t, text);
+        let mut t = T::new();
+        let r = first_arm(&mut t, text);
         assert!(r.is_empty(), "{text}: {r:?}");
-        assert_eq!(t.st.overlay, Overlay::None, "{text}");
-        assert_eq!(t.st.rig.stimulus.generator, want, "{text}");
-        assert_eq!(t.st.rig.stimulus.signal, want.signal(), "{text}");
-        assert_eq!(t.last_toast(), toast, "{text}");
+        let stim = &t.st.rig.stimulus;
+        assert_eq!(stim.generator, Some(kind), "{text}");
+        assert_eq!((stim.sine.freq.0, stim.sine.on_bin), sine_set, "{text}");
+        assert_eq!(t.st.generator_signal(), Some(played), "{text}");
+        assert_eq!(t.last_toast(), format!("{toast}{level}"), "{text}");
+        assert_eq!(prompt(&t).0, PromptKind::StimulusLevel, "{text}");
     }
-    assert_eq!(t.st.rig.stimulus.level, None);
-    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
-    assert_eq!(prefill(&mut t), "999.76 exact");
+    // The word takes the frequency typed before, not the default.
+    let mut t = T::new();
+    t.st.rig.stimulus.sine.freq = Hz(440.0);
+    first_arm(&mut t, "sine exact");
+    assert_eq!(t.st.generator_signal(), Some(sine(440.0)));
 }
 
-/// What the generator cannot play is refused in the prompt, in words, and changes nothing.
+/// What the generator cannot play is refused in the prompt, in words, and chooses nothing.
 #[test]
 fn the_prompt_refuses_what_the_generator_cannot_play() {
     let mut t = T::new();
-    choose(&mut t, "white");
     for (text, error) in [
-        ("", "type pink, white, or a sine's frequency"),
+        ("", "type pink, white, sine, or a sine's frequency"),
         (
             "brown",
-            "\"brown\" is no signal: type pink, white, or a sine's frequency",
+            "\"brown\" is no signal: type pink, white, sine, or a sine's frequency",
         ),
         ("0", "\"0\": frequency must be positive"),
         ("-40", "\"-40\": frequency must be positive"),
@@ -115,107 +282,53 @@ fn the_prompt_refuses_what_the_generator_cannot_play() {
             "a sine must be below 24000 Hz, half the sample rate",
         ),
     ] {
-        let r = choose(&mut t, text);
+        let r = first_arm(&mut t, text);
         assert!(r.is_empty(), "{text}: {r:?}");
-        match &t.st.overlay {
-            Overlay::Prompt(p) => assert_eq!(p.error.as_deref(), Some(error), "{text}"),
-            o => panic!("{text}: {o:?}"),
-        }
+        assert_eq!(
+            prompt(&t),
+            (PromptKind::StimulusSignal, text, Some(error)),
+            "{text}"
+        );
         t.key("Escape");
-        assert_eq!(t.st.rig.stimulus.generator, SignalChoice::White, "{text}");
+        assert_eq!(t.st.rig.stimulus.generator, None, "{text}");
     }
     // With no audio I/O open the rate is not known: the daemon judges it on arming.
     t.remirror(|s| s.session.open = None);
-    choose(&mut t, "30k");
-    assert_eq!(t.st.rig.stimulus.generator, sine(30_000.0, false));
+    first_arm(&mut t, "30k");
+    assert_eq!(t.st.generator_signal(), Some(sine(30_000.0)));
 }
 
-/// On a pane showing a spectrum measurement a sine goes onto the nearest bin of its FFT
-/// (one FFT: its length; multi-resolution: its longest window's), and the toast names the
-/// frequency really set; `exact`, an RTA and any other pane leave it as typed.
+/// A sweep is armed and run from the sweep view without the signal ever being asked; the
+/// first arm of the generator after it, armed re-sweep or not, still asks, and leaves an
+/// armed sweep alone until answered.
 #[test]
-fn a_sine_is_moved_onto_a_bin_of_the_focused_spectrum() {
+fn a_sweep_arm_never_asks_the_signal() {
     let mut t = T::new();
-    t.go(PaneKind::Spectrum);
-    assert_eq!(
-        t.st.pane_meas(t.st.layout.focus).map(|m| m.id),
-        Some(MeasId(2))
+    sweep_once(&mut t);
+    assert_eq!(t.st.rig.stimulus.generator, None);
+    assert!(t.st.sweep_view());
+    let r = t.key("Space");
+    assert!(
+        matches!(r.as_slice(), [Request::StimArm { settings, .. }]
+            if matches!(settings.signal, Signal::Ess { .. })),
+        "{r:?}"
     );
-    // 8192 points at 48 kHz: bins 5.859375 Hz apart, the 171st nearest 1 kHz.
-    let bin = 171.0 * 48_000.0 / 8192.0;
-    choose(&mut t, "1k");
-    assert_eq!(t.st.rig.stimulus.generator, sine(bin, false));
-    assert_eq!(t.st.rig.stimulus.signal, Signal::Sine { freq: Hz(bin) });
-    assert_eq!(t.last_toast(), "sine 1001.95 Hz · on a bin of Sub");
-    // The prefill keeps every digit, so Enter on it anywhere leaves the sine on its bin.
-    assert_eq!(prefill(&mut t), "1001.953125");
-    choose(&mut t, "1001.953125");
-    assert_eq!(t.st.rig.stimulus.generator, sine(bin, false));
-
-    choose(&mut t, "1k exact");
-    assert_eq!(t.st.rig.stimulus.generator, sine(1000.0, true));
-    assert_eq!(
-        t.last_toast(),
-        "sine 1000 Hz · as typed, not moved onto an FFT bin"
-    );
-    assert_eq!(prefill(&mut t), "1000 exact");
-
-    // Multi-resolution: the longest window at 48 kHz has 32 768 points.
-    t.remirror(|s| {
-        for m in &mut s.measurements {
-            if let MeasKind::Spectrum { config } = &mut m.config.kind {
-                config.resolution = SpecResolution::MULTI;
-            }
-        }
-    });
-    let bin = 683.0 * 48_000.0 / 32_768.0;
-    choose(&mut t, "1k");
-    assert_eq!(t.st.rig.stimulus.generator, sine(bin, false));
-    assert_eq!(t.last_toast(), "sine 1000.49 Hz · on a bin of Sub");
-
-    // The spectrograph of the same measurement: the same bins.
-    t.key("G");
-    t.key("G");
-    choose(&mut t, "2k");
-    assert_eq!(
-        t.st.rig.stimulus.generator,
-        sine(1365.0 * 48_000.0 / 32_768.0, false)
-    );
-
-    // An RTA in the pane has no FFT bins to offer.
-    t.remirror(|s| {
-        for m in &mut s.measurements {
-            if matches!(m.config.kind, MeasKind::Spectrum { .. }) {
-                m.config.kind = rta();
-            }
-        }
-    });
-    choose(&mut t, "1k");
-    assert_eq!(t.st.rig.stimulus.generator, sine(1000.0, false));
-    assert_eq!(
-        t.last_toast(),
-        "sine 1000 Hz · as typed, not moved onto an FFT bin"
-    );
-}
-
-/// A signal chosen while armed or playing goes to the daemon at once, as a level does.
-#[test]
-fn a_choice_while_armed_or_firing_is_sent() {
-    let mut t = T::new();
-    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
-    t.key("Space");
+    assert_eq!(t.st.overlay, Overlay::None);
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
-    let r = choose(&mut t, "1k");
-    assert_eq!(
-        signals(&r),
-        [(Signal::Sine { freq: Hz(1000.0) }, true, false)]
-    );
-    t.key("Enter");
-    t.conn(ConnEvent::Stimulus(StimEvent::Set { firing: true }));
-    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Firing);
-    let r = choose(&mut t, "white");
-    assert_eq!(signals(&r), [(Signal::White, true, true)]);
-    assert_eq!(set_level(&r[0]), Some((-20.0, true, true)));
+    // Armed with the sweep, Space on a live view would turn it into the generator's
+    // signal: not before that is chosen.
+    t.go(PaneKind::Transfer);
+    let r = t.key("Space");
+    assert!(r.is_empty(), "{r:?}");
+    assert_eq!(prompt(&t), (PromptKind::StimulusSignal, "pink", None));
+    assert!(matches!(t.st.rig.stimulus.signal, Signal::Ess { .. }));
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Armed);
+    let r = t.key("Enter");
+    assert!(r.is_empty(), "{r:?}");
+    assert_eq!(t.st.overlay, Overlay::None);
+    assert!(matches!(t.st.rig.stimulus.signal, Signal::Ess { .. }));
+    let r = t.key("Space");
+    assert_eq!(signals(&r), [(Signal::Pink, true, false)]);
 }
 
 /// A chosen sine is what Space arms on the live views before and after a sweep ran, and
@@ -224,10 +337,10 @@ fn a_choice_while_armed_or_firing_is_sent() {
 #[test]
 fn a_chosen_sine_outlives_a_sweep() {
     let mut t = T::new();
-    choose(&mut t, "1k exact");
-    let tone = Signal::Sine { freq: Hz(1000.0) };
+    t.st.rig.stimulus.generator = Some(SignalKind::Sine);
+    t.st.rig.stimulus.sine.on_bin = false;
     sweep_once(&mut t);
-    assert_eq!(t.st.rig.stimulus.generator, sine(1000.0, true));
+    assert_eq!(t.st.rig.stimulus.generator, Some(SignalKind::Sine));
     // On the sweep view the keys still name the sweep, never the sine.
     assert!(t.st.sweep_view());
     assert_eq!(
@@ -241,7 +354,7 @@ fn a_chosen_sine_outlives_a_sweep() {
     );
     let r = t.key("Space");
     match r.as_slice() {
-        [Request::StimArm { settings, .. }] => assert_eq!(settings.signal, tone),
+        [Request::StimArm { settings, .. }] => assert_eq!(settings.signal, sine(1000.0)),
         other => panic!("{other:?}"),
     }
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
@@ -254,15 +367,298 @@ fn a_chosen_sine_outlives_a_sweep() {
         "{r:?}"
     );
     // A choice made now is kept for the live views and leaves the armed sweep alone.
-    let r = choose(&mut t, "white");
+    open_rows(&mut t);
+    let r = t.key("ArrowRight");
     assert!(r.is_empty(), "{r:?}");
+    assert_eq!(t.st.rig.stimulus.generator, Some(SignalKind::Pink));
     assert!(matches!(t.st.rig.stimulus.signal, Signal::Ess { .. }));
+    t.key("Escape");
     assert_eq!(
         next_hint(&t).as_deref(),
         Some("Enter fires: sweep Sweep 1 · 3 s −50 dBFS")
     );
     t.go(PaneKind::Transfer);
     let r = t.key("Space");
-    assert_eq!(signals(&r), [(Signal::White, true, false)]);
-    assert_eq!(t.st.rig.stimulus.signal, Signal::White);
+    assert_eq!(signals(&r), [(Signal::Pink, true, false)]);
+    assert_eq!(t.st.rig.stimulus.signal, Signal::Pink);
+}
+
+/// The command has no key in any scope: the palette's "Stimulus signal…" opens Settings
+/// on the Audio I/O page at the signal row.
+#[test]
+fn the_palette_command_opens_settings_at_the_signal_row() {
+    let mut t = T::new();
+    assert!(
+        crate::keys::defaults()
+            .iter()
+            .all(|b| b.command != CommandId::StimulusSignal)
+    );
+    assert_eq!(CommandId::StimulusSignal.title(), "Stimulus signal…");
+    open_rows(&mut t);
+    assert_eq!(t.st.rig.stimulus.generator, None);
+    // On the open view, from another row, it comes back to the row.
+    t.key("ArrowDown");
+    assert!(t.st.overlay.settings().is_some_and(|s| s.on_ceiling));
+    open_rows(&mut t);
+}
+
+/// ←/→ on the signal row choose among pink, white and sine, from nothing chosen too; the
+/// sine is complete at once at 1 kHz, on a bin of the running spectrum, and is what the
+/// next Space arms without asking.
+#[test]
+fn the_signal_row_chooses_and_a_sine_starts_at_1_khz() {
+    let mut t = T::new();
+    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
+    open_rows(&mut t);
+    assert_eq!(SignalRow::shown(false), [SignalRow::Signal]);
+    for (key, kind) in [
+        ("ArrowRight", SignalKind::Pink),
+        ("ArrowRight", SignalKind::White),
+        ("Space", SignalKind::Sine),
+        ("Enter", SignalKind::Pink),
+        ("ArrowLeft", SignalKind::Sine),
+    ] {
+        let r = t.key(key);
+        assert!(r.is_empty(), "{key}: {r:?}");
+        assert_eq!(t.st.rig.stimulus.generator, Some(kind), "{key}");
+    }
+    assert_eq!(t.st.rig.stimulus.sine, ac2_scene::stimulus::DEFAULT_SINE);
+    assert_eq!(
+        t.last_toast(),
+        "sine 1001.95 Hz · on an FFT bin of the spectrum · Space arms"
+    );
+    assert_eq!(
+        ac2_scene::stimulus::sine_freq_value(t.st.rig.stimulus.sine, t.st.sine_bins()),
+        "1000 Hz → 1001.95 Hz"
+    );
+    t.key("Escape");
+    assert_eq!(
+        next_hint(&t).as_deref(),
+        Some("Space arms: sine 1001.95 Hz −20 dBFS → out 1")
+    );
+    let r = t.key("Space");
+    match r.as_slice() {
+        [Request::StimArm { settings, .. }] => assert_eq!(settings.signal, sine(BIN_1K)),
+        other => panic!("{other:?}"),
+    }
+    // From nothing chosen, ← starts at the other end.
+    let mut t = T::new();
+    open_rows(&mut t);
+    t.key("ArrowLeft");
+    assert_eq!(t.st.rig.stimulus.generator, Some(SignalKind::Sine));
+    assert_eq!(
+        t.last_toast(),
+        "sine 1001.95 Hz · on an FFT bin of the spectrum · type a level; nothing is armed \
+         without one"
+    );
+}
+
+/// The frequency row is typed in place and applied on Enter, read and refused as the
+/// prompt does; the bin row toggles with ←/→; both are sent at once while armed and while
+/// playing.
+#[test]
+fn the_sine_rows_are_typed_toggled_and_sent_while_live() {
+    let mut t = T::new();
+    t.pink_at(-20.0);
+    t.key("Space");
+    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
+    open_rows(&mut t);
+    let r = t.key("ArrowLeft");
+    assert_eq!(signals(&r), [(sine(BIN_1K), true, false)]);
+    assert_eq!(
+        t.last_toast(),
+        "sine 1001.95 Hz · on an FFT bin of the spectrum"
+    );
+    t.key("ArrowDown");
+    assert_eq!(rows(&t).focus, Some(SignalRow::Frequency));
+    assert!(t.st.overlay.settings().is_some_and(Settings::typing));
+    for (text, error) in [
+        ("", "type the sine's frequency (e.g. 1k), then Enter"),
+        ("0", "\"0\": frequency must be positive"),
+        ("1 v", "\"1 v\": unknown unit \"v\" (expected hz or khz)"),
+        ("x", "\"x\": expected a number followed by a unit"),
+        ("24k", "a sine must be below 24000 Hz, half the sample rate"),
+    ] {
+        t.text(text);
+        let r = t.key("Enter");
+        assert!(r.is_empty(), "{text}: {r:?}");
+        assert_eq!(rows(&t).error.as_deref(), Some(error), "{text}");
+        assert_eq!(rows(&t).text, text, "{text}");
+        for _ in text.chars() {
+            t.key("Backspace");
+        }
+        assert_eq!(rows(&t).text, "", "{text}");
+        assert_eq!(t.st.rig.stimulus.sine.freq, Hz(1000.0), "{text}");
+    }
+    // Typing clears the refusal; letters are text here, not keys of the page.
+    t.type_key("2", "2");
+    assert_eq!(rows(&t).error, None);
+    t.type_key("K", "k");
+    assert_eq!(rows(&t).text, "2k");
+    let r = t.key("Enter");
+    let bin_2k = 341.0 * 48_000.0 / 8192.0;
+    assert_eq!(signals(&r), [(sine(bin_2k), true, false)]);
+    assert_eq!(rows(&t).text, "");
+    assert_eq!(t.st.rig.stimulus.sine.freq, Hz(2000.0));
+    assert_eq!(
+        ac2_scene::stimulus::sine_freq_value(t.st.rig.stimulus.sine, t.st.sine_bins()),
+        "2000 Hz → 1998.05 Hz"
+    );
+
+    // Playing: the bin row off sends the typed frequency, on again the bin.
+    t.key("Escape");
+    t.key("Enter");
+    t.conn(ConnEvent::Stimulus(StimEvent::Set { firing: true }));
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Firing);
+    open_rows(&mut t);
+    t.key("ArrowDown");
+    t.key("ArrowDown");
+    assert_eq!(rows(&t).focus, Some(SignalRow::OnBin));
+    let r = t.key("ArrowRight");
+    assert_eq!(signals(&r), [(sine(2000.0), true, true)]);
+    assert!(!t.st.rig.stimulus.sine.on_bin);
+    assert_eq!(t.last_toast(), "sine 2000 Hz · as typed");
+    let r = t.key("ArrowLeft");
+    assert_eq!(signals(&r), [(sine(bin_2k), true, true)]);
+    assert!(t.st.rig.stimulus.sine.on_bin);
+    assert_eq!(set_level(&r[0]), Some((-20.0, true, true)));
+    // The mouse: ‹/› act on a choice row, a click on the frequency row focuses it.
+    let r = t.st.apply(
+        Msg::Settings(SettingsMsg::Signal(SignalRow::Frequency, 0)),
+        &t.keys,
+    );
+    assert!(r.is_empty(), "{r:?}");
+    assert_eq!(rows(&t).focus, Some(SignalRow::Frequency));
+    let r = t.st.apply(
+        Msg::Settings(SettingsMsg::Signal(SignalRow::Signal, 1)),
+        &t.keys,
+    );
+    assert_eq!(signals(&r), [(Signal::Pink, true, true)]);
+    assert_eq!(rows(&t).focus, Some(SignalRow::Signal));
+}
+
+/// The bin a sine goes onto is the shortest FFT's among the running spectrum
+/// measurements, whatever pane is focused: none running, the frequency typed; one FFT,
+/// its length; multi-resolution, its longest window; two, the shorter.
+#[test]
+fn a_sine_goes_onto_a_bin_of_the_shortest_running_spectrum_fft() {
+    let mut t = T::new();
+    t.st.rig.stimulus.generator = Some(SignalKind::Sine);
+    assert_eq!(t.focus_kind(), PaneKind::Transfer);
+    assert_eq!(t.st.sine_bins(), Some((8192, 48_000.0)));
+    assert_eq!(t.st.generator_signal(), Some(sine(BIN_1K)));
+    // Multi-resolution: the longest window at 48 kHz has 32 768 points.
+    set_resolution(&mut t, SpecResolution::MULTI);
+    assert_eq!(t.st.sine_bins(), Some((32_768, 48_000.0)));
+    assert_eq!(
+        t.st.generator_signal(),
+        Some(sine(683.0 * 48_000.0 / 32_768.0))
+    );
+    // A second, shorter one decides; a longer one changes nothing.
+    add_spectrum(&mut t, 7, 1024);
+    assert_eq!(t.st.sine_bins(), Some((1024, 48_000.0)));
+    assert_eq!(
+        t.st.generator_signal(),
+        Some(sine(21.0 * 48_000.0 / 1024.0))
+    );
+    add_spectrum(&mut t, 8, 65_536);
+    assert_eq!(t.st.sine_bins(), Some((1024, 48_000.0)));
+    // A stopped one does not count.
+    t.remirror(|s| {
+        for m in &mut s.measurements {
+            m.running = m.id != MeasId(7);
+        }
+    });
+    assert_eq!(t.st.sine_bins(), Some((32_768, 48_000.0)));
+    // The bin row off: as typed, with every spectrum running.
+    t.st.rig.stimulus.sine.on_bin = false;
+    assert_eq!(t.st.generator_signal(), Some(sine(1000.0)));
+    t.st.rig.stimulus.sine.on_bin = true;
+    // An RTA has no FFT bins to offer; nor has a rig without audio I/O a rate.
+    t.remirror(|s| {
+        s.measurements
+            .retain(|m| !matches!(m.config.kind, MeasKind::Spectrum { .. }));
+        s.measurements.push(meas(9, "RTA", rta()));
+    });
+    assert_eq!(t.st.sine_bins(), None);
+    assert_eq!(t.st.generator_signal(), Some(sine(1000.0)));
+    let mut t = T::new();
+    t.st.rig.stimulus.generator = Some(SignalKind::Sine);
+    t.remirror(|s| s.session.open = None);
+    assert_eq!(t.st.sine_bins(), None);
+    assert_eq!(t.st.generator_signal(), Some(sine(1000.0)));
+}
+
+/// While the sine plays (or is armed), a spectrum added, removed or given another
+/// resolution re-sends it only when the frequency it resolves to changed.
+#[test]
+fn a_playing_sine_follows_the_spectrum_measurements() {
+    let mut t = T::new();
+    t.pink_at(-20.0);
+    t.st.rig.stimulus.generator = Some(SignalKind::Sine);
+    let r = t.key("Space");
+    match r.as_slice() {
+        [Request::StimArm { settings, .. }] => assert_eq!(settings.signal, sine(BIN_1K)),
+        other => panic!("{other:?}"),
+    }
+    t.conn(ConnEvent::Stimulus(StimEvent::Armed));
+    let sent = |t: &mut T, f: &dyn Fn(&mut State)| {
+        let mut s = t.st.daemon().cloned().expect("a daemon state");
+        f(&mut s);
+        signals(&t.conn(mirror(s)))
+    };
+    // A longer FFT beside it: the bin of the 8192-point one is its bin too.
+    fn by_id(s: &mut State, id: u32) -> &mut Measurement {
+        s.measurements
+            .iter_mut()
+            .find(|m| m.id == MeasId(id))
+            .expect("the measurement")
+    }
+    let longer = |s: &mut State| {
+        let mut m = by_id(s, 2).clone();
+        assert!(matches!(m.config.kind, MeasKind::Spectrum { .. }));
+        m.id = MeasId(7);
+        if let MeasKind::Spectrum { config } = &mut m.config.kind {
+            config.resolution = SpecResolution::Fixed { fft_len: 65_536 };
+        }
+        s.measurements.push(m);
+    };
+    assert_eq!(sent(&mut t, &longer), []);
+    // Armed: a shorter one moves the sine.
+    let shorter = |s: &mut State| {
+        if let MeasKind::Spectrum { config } = &mut by_id(s, 7).config.kind {
+            config.resolution = SpecResolution::Fixed { fft_len: 1024 };
+        }
+    };
+    let bin_1024 = 21.0 * 48_000.0 / 1024.0;
+    assert_eq!(sent(&mut t, &shorter), [(sine(bin_1024), true, false)]);
+    t.key("Enter");
+    t.conn(ConnEvent::Stimulus(StimEvent::Set { firing: true }));
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Firing);
+    // Playing: the same state again sends nothing; the short one stopped, back to 8192.
+    assert_eq!(sent(&mut t, &|_| {}), []);
+    let stop = |s: &mut State| by_id(s, 7).running = false;
+    assert_eq!(sent(&mut t, &stop), [(sine(BIN_1K), true, true)]);
+    // Removed altogether: nothing changes for the sine.
+    let remove = |s: &mut State| s.measurements.retain(|m| m.id != MeasId(7));
+    assert_eq!(sent(&mut t, &remove), []);
+    // Its resolution changed to multi-resolution: 32 768 points, another bin.
+    let multi = |s: &mut State| {
+        if let MeasKind::Spectrum { config } = &mut by_id(s, 2).config.kind {
+            config.resolution = SpecResolution::MULTI;
+        }
+    };
+    assert_eq!(
+        sent(&mut t, &multi),
+        [(sine(683.0 * 48_000.0 / 32_768.0), true, true)]
+    );
+    // The last spectrum gone: the sine as typed.
+    let none = |s: &mut State| s.measurements.retain(|m| m.id != MeasId(2));
+    assert_eq!(sent(&mut t, &none), [(sine(1000.0), true, true)]);
+    // A noise never follows them.
+    let rta_added = |s: &mut State| s.measurements.push(meas(8, "RTA", rta()));
+    t.st.rig.stimulus.generator = Some(SignalKind::Pink);
+    let r = t.key("ArrowUp");
+    assert_eq!(signals(&r), [(Signal::Pink, true, true)]);
+    assert_eq!(sent(&mut t, &rta_added), []);
 }

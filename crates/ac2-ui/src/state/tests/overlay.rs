@@ -21,7 +21,7 @@ fn stimulus_requests(r: &[Request]) -> Vec<&Request> {
 
 /// Pink noise at −20 dBFS, playing.
 fn firing(t: &mut T) {
-    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
+    t.pink_at(-20.0);
     t.key("Space");
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     t.key("Enter");
@@ -347,7 +347,7 @@ fn closing_the_sweep_dialog_leaves_the_stimulus_alone() {
     // The dialog makes a sweep measurement; it never arms. Armed (noise) behind it: Esc
     // closes it and the noise stays armed.
     let mut t = T::new();
-    t.st.rig.stimulus.level = Some(Dbfs(-30.0));
+    t.pink_at(-30.0);
     t.key("Space");
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     t.type_key("Shift+S", "S");

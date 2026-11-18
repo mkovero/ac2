@@ -55,6 +55,7 @@ fn every_binding_is_in_a_scope_where_it_acts() {
 fn every_command_is_reachable() {
     // Every command has a key or is deliberately palette-only.
     let palette_only = [
+        CommandId::StimulusSignal,
         CommandId::StimulusOutputs,
         CommandId::StimulusTakeOver,
         CommandId::Reconnect,

@@ -162,16 +162,31 @@ impl SpecResolution {
         }
     }
 
-    /// The centre of the bin of that FFT nearest `f`: k·fs/n with 1 ≤ k < n/2, never DC or
-    /// fs/2. A sine there has a whole number of periods in the window, so no window leaks
-    /// it into its neighbours and a rectangular one can read it at all.
+    /// The centre of the bin of that FFT nearest `f` ([`nearest_bin`]).
     pub fn nearest_bin(self, f: f64, fs: f64) -> f64 {
-        let n = self.sine_fft_len(fs);
-        let last = (n.saturating_sub(1) / 2).max(1) as f64;
-        // NaN and negative frequencies land on the first bin.
-        let k = (f * n as f64 / fs).round().max(1.0).min(last);
-        k * fs / n as f64
+        nearest_bin(f, fs, self.sine_fft_len(fs))
     }
+
+    /// The FFT length whose bins a sine goes onto to be on a bin of every one of
+    /// `resolutions` at sample rate `fs`: the shortest of their [`Self::sine_fft_len`]s.
+    /// Every length the daemon takes is a power of two, so the bins k·fs/n of the shortest
+    /// are the bins (N/n)·k·fs/N of each longer one. `None` without a spectrum.
+    pub fn shared_sine_fft_len(
+        resolutions: impl IntoIterator<Item = Self>,
+        fs: f64,
+    ) -> Option<usize> {
+        resolutions.into_iter().map(|r| r.sine_fft_len(fs)).min()
+    }
+}
+
+/// The centre of the bin of an `n`-point FFT nearest `f`: k·fs/n with 1 ≤ k < n/2, never
+/// DC or fs/2. A sine there has a whole number of periods in the window, so no window
+/// leaks it into its neighbours and a rectangular one can read it at all.
+pub fn nearest_bin(f: f64, fs: f64, n: usize) -> f64 {
+    let last = (n.saturating_sub(1) / 2).max(1) as f64;
+    // NaN and negative frequencies land on the first bin.
+    let k = (f * n as f64 / fs).round().max(1.0).min(last);
+    k * fs / n as f64
 }
 
 /// What a spectrum's level values are.

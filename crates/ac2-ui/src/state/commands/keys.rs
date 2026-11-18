@@ -583,6 +583,10 @@ impl AppState {
         match r {
             Ok(()) => {
                 self.overlay = ir_form.map_or(Overlay::None, |f| Overlay::Form(Box::new(f)));
+                // The first arm asks for the signal, then for a level still missing.
+                if kind == PromptKind::StimulusSignal && self.rig.stimulus.level.is_none() {
+                    self.prompt(PromptKind::StimulusLevel, String::new());
+                }
             }
             Err(e) => {
                 if let Overlay::Prompt(p) = &mut self.overlay {

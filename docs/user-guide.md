@@ -295,7 +295,7 @@ once).
 
 | Page | What | Opened also by |
 |---|---|---|
-| Audio I/O | backend, input and output device, rate, buffer; inputs and outputs by name, roles, mics, the stimulus outputs, the reference; the **system max level**; Enter opens the audio I/O | **Shift+O** (on the input device), palette *Input setup…* (on the first input), *Stimulus outputs…* (on the stimulus output) |
+| Audio I/O | backend, input and output device, rate, buffer; inputs and outputs by name, roles, mics, the stimulus outputs, the reference; the **stimulus signal** (pink, white or a sine, its frequency, its bin lock); the **system max level**; Enter opens the audio I/O | **Shift+O** (on the input device), palette *Input setup…* (on the first input), *Stimulus outputs…* (on the stimulus output), *Stimulus signal…* (on the signal row) |
 | Calibration | mics, curves, sensitivity calibrations ([below](#the-calibrations-view)) | palette *Calibrations…* |
 | SPL / Leq | the SPL meter's Leq windows, limits and band meter ([below](#leq-windows-and-limits)) | **Shift+L** |
 | Recording | how long the record toggle records (this app); where the daemon records (the rig) | |
@@ -419,6 +419,21 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
   offered), then on **Enter** plays a 0.5 s band-limited noise burst on the stimulus output —
   under the stimulus lease and the ceiling, faded — and marks the input it returns on as the
   Reference (or says none answered and which came closest).
+- **Stimulus signal** (this app's, like the stimulus outputs; between the channels and
+  the max level), three rows, each with a line under it saying what it does
+  ([Choosing the signal](#choosing-the-signal)):
+  - **Signal** (**←/→**): *pink noise*, *white noise* or *sine*; *not chosen · asked at
+    the first arm* until you choose here or at the first Space.
+  - **Sine frequency** (shown with a sine): 1 kHz until you type another (`997`, `1k`,
+    `1.5 kHz`) and press **Enter**; a frequency the generator cannot play is refused in
+    words under the row. When the bin row moves the sine, the row shows both:
+    `1000 Hz → 1001.95 Hz`, typed → played.
+  - **On an FFT bin** (shown with a sine; **←/→**, on by default): on, the sine is moved
+    to the nearest bin of the shortest FFT among the running spectrum measurements
+    (`on · bins of the 8192-point FFT`; `on · no spectrum running, played as typed`); off,
+    it plays as typed.
+
+  A change takes effect at once while the stimulus is armed or playing.
 - **Driver control panel…** (**P**, ASIO devices): opens the driver's own settings
   window (sample rate, buffer size, clock source, routing). On a Core Audio device the same
   key is **Audio MIDI Setup…**: it brings up macOS's Audio MIDI Setup, where the device's
@@ -715,7 +730,8 @@ The generator plays pink, periodic pink, white noise or a sine, and is hard to s
 accident:
 
 - nothing plays without a typed **level** (`L` in the app, `--level` in the CLI); there is
-  no default;
+  no default; in the app the first Space also asks what to play
+  ([Choosing the signal](#choosing-the-signal));
 - **arm** (`Space`) and **fire** (`Enter`) are separate steps; **Esc** stops (with a window
   open, Esc first closes it), **Shift+Esc** stops from anywhere, from any client, and
   with several rigs held it stops every rig's stimulus, not only the one shown. While
@@ -734,25 +750,40 @@ accident:
 
 ### Choosing the signal
 
-**Shift+J** (palette: *Set stimulus signal…*) asks what the generator plays on the live
-views: `pink` (the default), `white`, or a sine by its frequency, typed as in every
-frequency field (`997`, `1k`, `1.5 kHz`). The choice stays until you change it: a sweep run
-and a visit to the sweep view do not drop it, and a sweep always plays its own signal.
-Chosen while armed or playing, it takes effect at once, as a level does. The top bar names
-a signal other than pink before the level (`sine 999.76 Hz −20.0 dBFS → out 1`); the level
-rules, the ceiling and the arm / fire / stop keys are the same for every signal.
+The generator plays pink noise, white noise or a sine on the live views. Like the level,
+the signal has no silent default: the **first Space** of an app run on a live view asks
+for it before anything is armed. The prompt opens with `pink`, so **Enter** takes pink
+noise; or type `white`, `sine` (the sine at the frequency set in Settings, 1 kHz until you
+change it), or a sine's frequency as in every frequency field (`997`, `1k`, `1.5 kHz`).
+When no level is typed yet the level prompt follows. After the prompts nothing is armed
+yet: the next **Space** arms, as after typing a level with **L**. **Esc** on the signal
+prompt chooses nothing, and the next Space asks again. Arming a sweep on the sweep view
+never asks: a sweep plays its own signal.
 
-**Bin lock.** A sine typed while the focused pane shows a spectrum measurement is moved to
-the nearest bin of that spectrum's FFT (of its longest window when it is
-multi-resolution), and the app says what it set: `sine 999.76 Hz · on a bin of Main L`. On
-a bin the sine has a whole number of periods in the window: a rectangular window, which
-can read a sine nowhere else, reads it, and with any window none of the fundamental leaks
-into THD+N ([Harmonics of a sine](#harmonics-of-a-sine)). The bin belongs to that
-measurement at the session's sample rate; a spectrum with another FFT length may see the
-same sine between its bins. Add `exact` (`1k exact`) to keep the frequency as typed; so it
-stays on any other pane, an RTA included, and then the app says `sine 1000 Hz · as typed,
-not moved onto an FFT bin`. The prompt opens with the current choice at its full
-frequency, so Enter on it never moves a sine off its bin.
+The choice lives in **Settings › Audio I/O**, under *Stimulus signal* (palette: *Stimulus
+signal…* opens the page on that row; there is no key for it): **Signal** (←/→), and for a
+sine **Sine frequency** (1 kHz by default; type another and Enter) and **On an FFT bin**
+(on by default). It is this app's setting, kept per rig for as long as the app runs, like
+the level: a sweep run and a visit to the sweep view do not drop it. Changed while armed
+or playing, it takes effect at once, as a level does. The top bar names a signal other
+than pink before the level (`sine 999.76 Hz −20.0 dBFS → out 1`), always with the
+frequency that is or would be played; the level rules, the ceiling and the arm / fire /
+stop keys are the same for every signal.
+
+**Bin lock.** With *On an FFT bin* on, a sine is moved to the nearest bin of the
+**shortest FFT among the rig's running spectrum measurements** (for a multi-resolution
+spectrum its longest window counts), whatever pane is focused, and the app says what it
+plays: `sine 999.76 Hz · on an FFT bin of the spectrum`. Every FFT length is a power of
+two, so a bin of the shortest FFT is a bin of every longer one at the same sample rate:
+the sine is on a bin of all the running spectra at once. On a bin the sine has a whole
+number of periods in the window: a rectangular window, which can read a sine nowhere
+else, reads it, and with any window none of the fundamental leaks into THD+N
+([Harmonics of a sine](#harmonics-of-a-sine)). The frequency is worked out again whenever
+the stimulus is armed or fired and whenever a spectrum measurement starts, stops or
+changes its resolution while the sine is armed or playing; it is re-sent only when it
+changed. With no spectrum running the sine plays as typed (`sine 1000 Hz · no spectrum
+running, played as typed`). To keep the typed frequency whatever runs, turn the row off,
+or add `exact` in the prompt (`1k exact`, `sine exact`): `sine 1000 Hz · as typed`.
 
 ### What Space and Enter start
 
@@ -1374,7 +1405,7 @@ While the generator fires a sine, every live spectrum reads it, and its pane (th
 spectrograph alone too) shows the **harmonics plate** in the plot's bottom-left corner,
 left of the fundamental so it covers none of the harmonics it names, above the window
 labels of a multi-resolution spectrum: a plate like the others, to drag, size and
-double-click back. Start the sine from the app with **Shift+J** on the spectrum's pane
+double-click back. Start the sine from the app by choosing *sine* as the stimulus signal
 ([Choosing the signal](#choosing-the-signal)), or from the command line: `ac2 gen sine
 --freq 1khz --out 1 --level -20dbfs --lock <meas>`. The plate goes when the sine stops,
 and **T** to traces only hides it with its marks.
@@ -1412,9 +1443,10 @@ is above this spectrum's range`, `… no sine in this input`. A ratio never read
 
 **On bin or between bins.** A sine on a bin centre fits a whole number of periods in the
 FFT: the window leaks nothing of it and the reading is exact with any window.
-`--lock <meas>` (in the app: **Shift+J** on the spectrum's pane) moves the frequency you
-asked for to the nearest bin of that spectrum measurement (of its longest window when it
-is multi-resolution) and prints it; the plate's
+`--lock <meas>` moves the frequency you asked for to the nearest bin of that spectrum
+measurement (of its longest window when it is multi-resolution) and prints it; the app
+does the same for every running spectrum at once while *On an FFT bin* is on
+([Choosing the signal](#choosing-the-signal)); the plate's
 first line shows what was played. Between bins the window spreads part of the sine around
 it. That is counted in THD+N, and while it is within 10 dB of the figure the row says so
 and reads as a limit: `THD+N  < −31.0 dB · window leakage (sine between bins)` — the
@@ -3810,7 +3842,6 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Shift+↑` | Stimulus level +3 dB | `level_up_coarse` |
 | `Shift+↓` | Stimulus level −3 dB | `level_down_coarse` |
 | `L` | Set stimulus level… | `stimulus_level` |
-| `Shift+J` | Set stimulus signal… | `stimulus_signal` |
 | `Alt+1` | Focus pane 1 | `focus_pane_1` |
 | `Alt+2` | Focus pane 2 | `focus_pane_2` |
 | `Alt+3` | Focus pane 3 | `focus_pane_3` |
@@ -4027,6 +4058,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Between rigs | `between_rigs` |
 | Key hints | `key_hints` |
 | Warning toasts | `warning_toasts` |
+| Stimulus signal… | `stimulus_signal` |
 | Stimulus outputs… | `stimulus_outputs` |
 | Take over stimulus | `stimulus_take_over` |
 | Transfer stack | `transfer_stack` |

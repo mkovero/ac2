@@ -17,6 +17,8 @@ fn selects_the_first_transfer_measurement() {
 #[test]
 fn stimulus_needs_a_typed_level() {
     let mut t = T::new();
+    // The signal chosen before (the first arm's other question: `tests::signal`).
+    t.st.rig.stimulus.generator = Some(SignalKind::Pink);
     // Space without a level opens the level prompt and arms nothing.
     let r = t.type_key("Space", " ");
     assert!(r.is_empty(), "{r:?}");
@@ -37,7 +39,7 @@ fn stimulus_needs_a_typed_level() {
 #[test]
 fn arm_fire_level_stop() {
     let mut t = T::new();
-    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
+    t.pink_at(-20.0);
     // Enter before arming does nothing but say so.
     assert!(t.key("Enter").is_empty());
     assert!(t.last_toast().contains("not armed"));
@@ -93,7 +95,7 @@ fn arm_fire_level_stop() {
 #[test]
 fn space_during_a_stop_arms_once_the_stop_lands() {
     let stopping = |t: &mut T| {
-        t.st.rig.stimulus.level = Some(Dbfs(-20.0));
+        t.pink_at(-20.0);
         t.st.rig.stimulus.phase = StimPhase::Firing;
         let r = t.key("Esc");
         assert!(matches!(r.as_slice(), [Request::StimStop]), "{r:?}");
@@ -183,7 +185,7 @@ fn level_never_exceeds_the_ceiling() {
     }
     assert_eq!(t.st.rig.stimulus.level, None);
     t.key("Esc");
-    t.st.rig.stimulus.level = Some(Dbfs(-11.0));
+    t.pink_at(-11.0);
     t.st.rig.stimulus.phase = StimPhase::Armed;
     let r = t.key("Shift+Up");
     assert_eq!(
@@ -210,7 +212,7 @@ fn arrows_without_level_send_nothing() {
 #[test]
 fn escape_closes_a_window_or_stops() {
     let mut t = T::new();
-    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
+    t.pink_at(-20.0);
     t.key("Space");
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     // Esc from inside the palette only closes it; the next Esc, with nothing open, stops.
@@ -241,7 +243,7 @@ fn escape_closes_a_window_or_stops() {
 #[test]
 fn disconnected_never_arms() {
     let mut t = T::disconnected();
-    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
+    t.pink_at(-20.0);
     assert!(t.key("Space").is_empty());
     assert!(t.last_toast().contains("not connected"));
     assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle);
@@ -250,7 +252,7 @@ fn disconnected_never_arms() {
 #[test]
 fn lost_lease_returns_to_idle() {
     let mut t = T::new();
-    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
+    t.pink_at(-20.0);
     t.key("Space");
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     t.conn(ConnEvent::Stimulus(StimEvent::Lost("taken over".into())));
@@ -583,7 +585,7 @@ fn transfer_commands_need_a_transfer_measurement() {
 
 /// Arms the generator at −20 dBFS and, with `fire`, plays it.
 fn play_noise(t: &mut T, fire: bool) {
-    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
+    t.pink_at(-20.0);
     t.key("Space");
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     if fire {
@@ -752,7 +754,7 @@ fn the_stimulus_never_changes_the_layout() {
         };
         let before = seen(&t);
         let check = |t: &mut T, what: &str| assert_eq!(seen(t), before, "{keys:?}: {what}");
-        t.st.rig.stimulus.level = Some(Dbfs(-20.0));
+        t.pink_at(-20.0);
         t.key("Space");
         check(&mut t, "arming");
         t.conn(ConnEvent::Stimulus(StimEvent::Armed));

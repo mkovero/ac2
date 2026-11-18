@@ -440,7 +440,7 @@ fn the_sweep_pane_follows_the_selection_and_selects() {
 fn escape_stops_the_stimulus_and_keeps_the_selected_slot() {
     let mut t = T::new();
     t.conn(with_traces(vec![stored(10, Some(1), 2)]));
-    t.st.rig.stimulus.level = Some(Dbfs(-20.0));
+    t.pink_at(-20.0);
     t.key("Space");
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
     t.key("V");

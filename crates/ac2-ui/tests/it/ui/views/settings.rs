@@ -31,3 +31,43 @@ fn rig_monitor_views() {
     h.step();
     snapshot(&mut h, "settings_rig");
 }
+
+/// The stimulus signal rows of the Audio I/O page as the palette's "Stimulus signal…"
+/// opens them, a sine chosen: the signal, its frequency with the one played on a bin of
+/// the rig's spectrum, the bin row, each with its hint, between the channels and the max
+/// level.
+#[test]
+fn audio_io_stimulus_signal_rows() {
+    use ac2_ui::settings::SignalRow;
+    if !have_gpu("audio_io_stimulus_signal_rows") {
+        return;
+    }
+    let _rig = Rig::start();
+    let mut h = harness(options());
+    step_until(&mut h, "live frames", live);
+    h.state_mut().dispatch(ac2_ui::state::Msg::Command(
+        ac2_ui::keys::CommandId::StimulusSignal,
+    ));
+    step_until(&mut h, "the signal row", |a| {
+        a.state
+            .overlay
+            .settings()
+            .is_some_and(|s| s.signal.focus == Some(SignalRow::Signal))
+    });
+    h.key_press(Key::ArrowLeft);
+    step_until(&mut h, "a sine", |a| {
+        a.state.rig.stimulus.generator == Some(ac2_scene::stimulus::SignalKind::Sine)
+    });
+    h.key_press(Key::ArrowDown);
+    step_until(&mut h, "the frequency row", |a| {
+        a.state
+            .overlay
+            .settings()
+            .is_some_and(|s| s.signal.focus == Some(SignalRow::Frequency))
+    });
+    let st = &h.state().state;
+    assert!(st.sine_bins().is_some(), "the rig's spectrum is running");
+    h.state_mut().state.toasts.list.clear();
+    h.step();
+    snapshot(&mut h, "settings_stimulus_signal");
+}

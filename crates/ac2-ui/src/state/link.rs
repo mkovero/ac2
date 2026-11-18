@@ -187,6 +187,11 @@ impl AppState {
                     self.view.tf.phase_reference = None;
                 }
                 self.rig.follow_spectrum_starts();
+                // A spectrum started, stopped or changed its FFT: the bin a sine is on may
+                // be another one now.
+                if self.sync_generator_signal() {
+                    self.resend_stimulus(out);
+                }
                 self.follow_output_device();
                 self.follow_settings();
                 self.follow_sweep(out);

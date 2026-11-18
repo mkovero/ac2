@@ -208,6 +208,13 @@ impl T {
         t
     }
 
+    /// The stimulus as the first arm's two prompts leave it: pink noise chosen, `db` typed
+    /// as the level.
+    fn pink_at(&mut self, db: f64) {
+        self.st.rig.stimulus.generator = Some(SignalKind::Pink);
+        self.st.rig.stimulus.level = Some(Dbfs(db));
+    }
+
     /// Every pane with nothing picked given a measurement it draws, as a layout the operator
     /// filled by dropping rows (not while a measurement's own panes are on screen): the selected measurement where the pane draws it, else the
     /// first in the list it draws.

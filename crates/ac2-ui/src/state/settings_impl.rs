@@ -13,9 +13,10 @@ use crate::keys::{Chord, CommandId, Keymap, Scope};
 use crate::leq_dialog::{Focus, LeqDialog};
 use crate::session_dialog::{Edit, RoleKey, Row, SessionDialog};
 use crate::settings::{
-    DisplayRow, Page, RecordingRow, RigPage, RigRow, SERVER_INFO_EVERY_S, Settings, step_hold,
-    step_theme,
+    DisplayRow, Page, RecordingRow, RigPage, RigRow, SERVER_INFO_EVERY_S, Settings, SignalRow,
+    step_hold, step_theme,
 };
+use ac2_scene::stimulus::{SignalChoice, SignalKind};
 
 /// What the mouse does on the Settings view (the hosted pages keep their own messages).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,6 +29,8 @@ pub enum SettingsMsg {
     Ceiling,
     /// Apply what is typed on the max level row (or its confirmation).
     CeilingApply,
+    /// A stimulus signal row of the Audio I/O page: focused, and ‹/› on a choice row.
+    Signal(SignalRow, i32),
     /// ‹/› on a line of the Display page (0: the line's action).
     Display(DisplayRow, i32),
     /// A line of the Connection page: focused and acted on.
@@ -522,15 +525,30 @@ impl AppState {
         if self.remote_key(chord, out) {
             return;
         }
+        let sine = self.rig.stimulus.generator == Some(SignalKind::Sine);
         let Overlay::Settings(s) = &mut self.overlay else {
             return;
         };
         if s.on_ceiling {
             match chord.key {
                 Key::Enter => self.apply_ceiling(out),
-                Key::ArrowUp => s.io_move(-1),
-                Key::Tab if chord.shift => s.io_move(-1),
-                Key::ArrowDown | Key::Tab => s.io_move(1),
+                Key::ArrowUp => s.io_move(-1, sine),
+                Key::Tab if chord.shift => s.io_move(-1, sine),
+                Key::ArrowDown | Key::Tab => s.io_move(1, sine),
+                _ => self.swallow_text = swallow,
+            }
+            return;
+        }
+        if let Some(row) = s.signal.focus {
+            let typed = row == SignalRow::Frequency;
+            match chord.key {
+                Key::ArrowUp => s.io_move(-1, sine),
+                Key::Tab if chord.shift => s.io_move(-1, sine),
+                Key::ArrowDown | Key::Tab => s.io_move(1, sine),
+                Key::Enter if typed => self.signal_row(row, 0, out),
+                _ if typed => self.swallow_text = swallow,
+                Key::ArrowLeft => self.signal_row(row, -1, out),
+                Key::ArrowRight | Key::Space | Key::Enter => self.signal_row(row, 1, out),
                 _ => self.swallow_text = swallow,
             }
             return;
@@ -555,7 +573,7 @@ impl AppState {
             }
             Key::ArrowUp | Key::ArrowDown | Key::Tab => {
                 let back = chord.key == Key::ArrowUp || (chord.key == Key::Tab && chord.shift);
-                s.io_move(if back { -1 } else { 1 });
+                s.io_move(if back { -1 } else { 1 }, sine);
             }
             Key::ArrowLeft | Key::ArrowRight if d.edit.is_none() => {
                 let forward = chord.key == Key::ArrowRight;
@@ -681,6 +699,42 @@ impl AppState {
         }
     }
 
+    /// A stimulus signal row acted on: ←/→ (`d`) on a choice row, Enter on the frequency
+    /// row. The change is this app's and is sent at once while armed or playing.
+    fn signal_row(&mut self, row: SignalRow, d: i32, out: &mut Vec<Request>) {
+        let rate = self
+            .daemon()
+            .and_then(|s| s.session.open.as_ref())
+            .map(|o| o.sample_rate_hz);
+        let mut sine = self.rig.stimulus.sine;
+        let kind = match row {
+            SignalRow::Signal => SignalKind::step(self.rig.stimulus.generator, d),
+            SignalRow::Frequency => {
+                let Overlay::Settings(s) = &mut self.overlay else {
+                    return;
+                };
+                let Some(freq) = s.signal.enter(rate) else {
+                    return;
+                };
+                sine.freq = freq;
+                SignalKind::Sine
+            }
+            SignalRow::OnBin => {
+                sine.on_bin = !sine.on_bin;
+                SignalKind::Sine
+            }
+        };
+        let choice = match kind {
+            SignalKind::Pink => SignalChoice::Pink,
+            SignalKind::White => SignalChoice::White,
+            SignalKind::Sine => SignalChoice::Sine {
+                freq: sine.freq,
+                on_bin: sine.on_bin,
+            },
+        };
+        self.choose_signal(choice, out);
+    }
+
     /// Enter on the system max level row.
     fn apply_ceiling(&mut self, out: &mut Vec<Request>) {
         let live = self.stimulus_live();
@@ -706,6 +760,11 @@ impl AppState {
         };
         match s.page {
             Page::AudioIo if s.on_ceiling => s.ceiling.type_text(t),
+            Page::AudioIo if s.signal.focus == Some(SignalRow::Frequency) => {
+                s.signal.error = None;
+                s.signal.text.push_str(t);
+            }
+            Page::AudioIo if s.signal.focus.is_some() => {}
             Page::AudioIo => s.session.type_text(t),
             Page::Calibration => s.cal.type_text(t),
             Page::Leq => {
@@ -737,6 +796,9 @@ impl AppState {
         };
         match s.page {
             Page::AudioIo if s.on_ceiling => s.ceiling.backspace(),
+            Page::AudioIo if s.signal.focus.is_some() => {
+                s.signal.text.pop();
+            }
             Page::AudioIo => s.session.backspace(),
             Page::Calibration if s.cal.typing() => s.cal.backspace(),
             Page::Calibration => self.cal_view_key(Chord::key(Key::Delete), None, out),
@@ -772,13 +834,24 @@ impl AppState {
             SettingsMsg::Close => self.close_overlay(),
             SettingsMsg::Ceiling => {
                 if let Overlay::Settings(s) = &mut self.overlay {
-                    s.session.finish_edit();
-                    s.on_ceiling = true;
+                    s.focus_ceiling();
                 }
+            }
+            SettingsMsg::Signal(row, d) => {
+                if let Overlay::Settings(s) = &mut self.overlay {
+                    if s.signal.focus != Some(row) {
+                        s.focus_signal(row);
+                    }
+                    // A click on the frequency row only focuses it: it is typed.
+                    if row == SignalRow::Frequency {
+                        return;
+                    }
+                }
+                self.signal_row(row, d, out);
             }
             SettingsMsg::CeilingApply => {
                 if let Overlay::Settings(s) = &mut self.overlay {
-                    s.on_ceiling = true;
+                    s.focus_ceiling();
                 }
                 self.apply_ceiling(out);
             }

@@ -8,8 +8,7 @@ use ac2_proto::model::{GeneratorDesired, GeneratorSettings, Signal};
 use ac2_proto::units::{Dbfs, Hz};
 use ac2_scene::primitives::Viewport;
 use ac2_scene::theme::Theme;
-use ac2_ui::keys::CommandId;
-use ac2_ui::state::{AppState, Msg, Overlay, PaneId, PromptKind};
+use ac2_ui::state::{AppState, Msg, Overlay, PaneId, PromptKind, StimPhase};
 use std::time::Instant;
 
 const SIZE: Viewport = Viewport::new(1600.0, 900.0);
@@ -63,40 +62,49 @@ fn a_fired_sine_shows_the_harmonics_plate_until_it_stops() -> R {
     Ok(())
 }
 
-/// The app's own sine: on the spectrum's pane, a level, `1k` in the signal prompt (moved
-/// onto a bin of that spectrum, which 1 kHz is not at 48 kHz), Space and Enter. The
-/// generator plays the sine at the bin's frequency and the plate reads it *on bin*; Esc
-/// stops it and the plate goes.
+/// The app's own sine, with a spectrum running: the first Space asks the signal (`1k`,
+/// moved onto a bin of the spectrum, which 1 kHz is not at 48 kHz), then the level; Space
+/// and Enter then arm and fire. The generator plays the sine at the bin's frequency and
+/// the plate reads it *on bin*; Esc stops it and the plate goes.
 #[test]
-fn a_sine_chosen_in_the_app_is_fired_on_a_bin_of_the_focused_spectrum() -> R {
+fn a_sine_chosen_at_the_first_arm_is_fired_on_a_bin_of_the_running_spectrum() -> R {
+    use ac2_proto::model::{MeasKind, SpecResolution, nearest_bin};
     let (_daemon, mut d) = measuring()?;
     let spectrum = new_spectrum(&mut d, false)?;
     d.key("Alt+2");
     let p = d.st.layout.focus;
     d.drop_meas(p, spectrum);
-    let (resolution, name) =
-        d.st.measurements()
+    d.until("the spectrum running", |s| {
+        s.measurements()
             .iter()
-            .find(|m| m.id == spectrum)
-            .and_then(|m| match &m.config.kind {
-                ac2_proto::model::MeasKind::Spectrum { config } => {
-                    Some((config.resolution, m.config.name.clone()))
-                }
-                _ => None,
-            })
-            .ok_or("no spectrum")?;
+            .any(|m| m.id == spectrum && m.running)
+    })?;
     let fs =
         d.st.daemon()
             .and_then(|s| s.session.open.as_ref())
             .map(|o| f64::from(o.sample_rate_hz))
             .ok_or("no session")?;
-    let bin = resolution.nearest_bin(1000.0, fs);
+    let running: Vec<SpecResolution> =
+        d.st.measurements()
+            .iter()
+            .filter(|m| m.running)
+            .filter_map(|m| match &m.config.kind {
+                MeasKind::Spectrum { config } => Some(config.resolution),
+                _ => None,
+            })
+            .collect();
+    let n = SpecResolution::shared_sine_fft_len(running, fs).ok_or("no spectrum")?;
+    let bin = nearest_bin(1000.0, fs, n);
     assert!(bin != 1000.0 && (bin - 1000.0).abs() < 3.0, "{bin}");
 
-    d.send(Msg::Command(CommandId::StimulusLevel));
-    d.send(Msg::Text("-20".into()));
-    d.key("Enter");
-    d.send(Msg::Command(CommandId::StimulusSignal));
+    // The pane focused is the transfer's: the bin is the running spectrum's all the same.
+    d.key("Alt+1");
+    // The noise the measurement was started with stopped, and the stimulus as an app just
+    // started has it: no signal chosen, no level typed.
+    d.stop()?;
+    d.st.rig.stimulus.generator = None;
+    d.st.rig.stimulus.level = None;
+    d.key("Space");
     match &mut d.st.overlay {
         Overlay::Prompt(prompt) if prompt.kind == PromptKind::StimulusSignal => {
             assert_eq!(prompt.text, "pink");
@@ -105,22 +113,30 @@ fn a_sine_chosen_in_the_app_is_fired_on_a_bin_of_the_focused_spectrum() -> R {
         o => return Err(format!("no signal prompt: {o:?}").into()),
     }
     d.key("Enter");
-    assert_eq!(d.st.overlay, Overlay::None);
     let toast = d.st.toasts.list.last().map(|t| t.text.clone());
     assert_eq!(
         toast,
         Some(format!(
-            "sine {} · on a bin of {name}",
+            "sine {} · on an FFT bin of the spectrum · type a level; nothing is armed without one",
             ac2_scene::format::freq_exact(bin)
         ))
     );
+    match &d.st.overlay {
+        Overlay::Prompt(prompt) if prompt.kind == PromptKind::StimulusLevel => {}
+        o => return Err(format!("no level prompt: {o:?}").into()),
+    }
+    d.send(Msg::Text("-20".into()));
+    d.key("Enter");
+    assert_eq!(d.st.overlay, Overlay::None);
+    assert_eq!(d.st.rig.stimulus.phase, StimPhase::Idle);
     d.arm()?;
     d.play()?;
-    let playing =
-        d.st.daemon()
+    d.until("the sine playing", |s| {
+        s.daemon()
             .and_then(|s| s.generator.settings.as_ref())
-            .map(|s| s.signal);
-    assert_eq!(playing, Some(Signal::Sine { freq: Hz(bin) }));
+            .map(|s| s.signal)
+            == Some(Signal::Sine { freq: Hz(bin) })
+    })?;
     d.until("the sine read on the plate", |s| {
         plate(s, p).is_some_and(|t| t.lines().any(|l| l.starts_with("H1  ")))
     })?;

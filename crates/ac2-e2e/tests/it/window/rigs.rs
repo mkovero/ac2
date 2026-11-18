@@ -439,6 +439,7 @@ fn shift_esc_stops_every_rig() -> R {
     let generator = |rig: &Rig| rig.cli.state().map(|s| s.generator.clone());
     let arm = |h: &mut Harness<'_, App>, rig: &Rig| {
         h.state_mut().state.rig.stimulus.level = Some(Dbfs(-24.0));
+        h.state_mut().state.rig.stimulus.generator = Some(ac2_scene::stimulus::SignalKind::Pink);
         h.key_press(Key::Space);
         step_until(h, "armed", |_| generator(rig).is_some_and(|g| g.armed));
     };

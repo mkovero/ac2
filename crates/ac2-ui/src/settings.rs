@@ -93,7 +93,7 @@ impl Page {
     /// Whose the page's settings are, as its header says.
     pub fn whose(self) -> &'static str {
         match self {
-            Page::AudioIo => "the rig — all clients · stimulus outputs: this app",
+            Page::AudioIo => "the rig — all clients · stimulus outputs and signal: this app",
             Page::Calibration | Page::Leq | Page::Rig => THE_RIG,
             Page::Recording => "the limit: this app · the folder: the rig — all clients",
             Page::Display => THIS_APP,
@@ -119,7 +119,8 @@ impl Page {
                      or buffer · Space in session · R reference · M mic · L line · A digital · \
                      {pair} pair · N name (the mic, the pair or an output) · S stimulus output · \
                      D detects the loopback · P opens the driver's settings (ASIO panel, Audio \
-                     MIDI Setup) · Delete on a remote input removes it (twice) · on the max \
+                     MIDI Setup) · Delete on a remote input removes it (twice) · on the \
+                     stimulus signal: ←→ change, type the sine's frequency, Enter · on the max \
                      level: type dBFS, Enter · Enter opens the session (on Add an input from \
                      another rig…: picks one) · Esc closes"
                 );
@@ -262,6 +263,65 @@ impl CeilingEdit {
             }
             None => {
                 self.text.pop();
+            }
+        }
+    }
+}
+
+/// A row of the Audio I/O page's stimulus signal section.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SignalRow {
+    /// Pink noise, white noise or a sine: ←/→.
+    Signal,
+    /// The sine's frequency, typed. Shown with a sine.
+    Frequency,
+    /// Whether the sine is moved onto an FFT bin: ←/→. Shown with a sine.
+    OnBin,
+}
+
+impl SignalRow {
+    /// The rows shown: the sine's own only while the signal is a sine.
+    pub fn shown(sine: bool) -> &'static [SignalRow] {
+        if sine {
+            &[SignalRow::Signal, SignalRow::Frequency, SignalRow::OnBin]
+        } else {
+            &[SignalRow::Signal]
+        }
+    }
+}
+
+/// The stimulus signal rows of the Audio I/O page.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SignalRows {
+    /// The focused row; `None`: the focus is elsewhere on the page.
+    pub focus: Option<SignalRow>,
+    /// The frequency being typed; empty shows the one set.
+    pub text: String,
+    pub error: Option<String>,
+}
+
+impl SignalRows {
+    fn leave(&mut self) {
+        *self = Self::default();
+    }
+
+    /// Enter on the frequency row: the frequency typed, read as the signal prompt reads
+    /// one, or the reason it is refused. `rate_hz`: the open session's sample rate.
+    pub fn enter(&mut self, rate_hz: Option<u32>) -> Option<ac2_proto::units::Hz> {
+        self.error = None;
+        let text = self.text.trim();
+        if text.is_empty() {
+            self.error = Some(ac2_scene::stimulus::SINE_FREQ_EMPTY.into());
+            return None;
+        }
+        match ac2_scene::stimulus::parse_sine_freq(text, rate_hz) {
+            Ok(hz) => {
+                self.text.clear();
+                Some(hz)
+            }
+            Err(e) => {
+                self.error = Some(e);
+                None
             }
         }
     }
@@ -787,6 +847,9 @@ pub struct Settings {
     /// The max level row is focused on the Audio I/O page (below the channels).
     pub on_ceiling: bool,
     pub ceiling: CeilingEdit,
+    /// The stimulus signal rows on the Audio I/O page (between the channels and the max
+    /// level), and which of them is focused.
+    pub signal: SignalRows,
     /// The remote inputs' add dialog and removal on the Audio I/O page.
     pub remote: crate::remote_inputs::RemoteRows,
     pub cal: CalView,
@@ -819,6 +882,7 @@ impl Settings {
             session,
             on_ceiling: false,
             ceiling: CeilingEdit::default(),
+            signal: SignalRows::default(),
             remote: Default::default(),
             cal,
             leq,
@@ -866,8 +930,28 @@ impl Settings {
     pub fn focus_session_row(&mut self, row: crate::session_dialog::Row) {
         self.show(Page::AudioIo);
         self.on_ceiling = false;
+        self.signal.leave();
         self.session.detect_cancel();
         self.session.focus_row(row);
+    }
+
+    /// Shows the Audio I/O page focused on a stimulus signal row.
+    pub fn focus_signal(&mut self, row: SignalRow) {
+        self.show(Page::AudioIo);
+        self.focus_want = None;
+        self.on_ceiling = false;
+        self.ceiling = CeilingEdit::default();
+        self.session.finish_edit();
+        self.session.detect_cancel();
+        self.signal.leave();
+        self.signal.focus = Some(row);
+    }
+
+    /// The max level row takes the focus.
+    pub fn focus_ceiling(&mut self) {
+        self.session.finish_edit();
+        self.signal.leave();
+        self.on_ceiling = true;
     }
 
     /// Shows `page`.
@@ -889,6 +973,9 @@ impl Settings {
     pub fn typing(&self) -> bool {
         match self.page {
             Page::AudioIo if self.on_ceiling => true,
+            Page::AudioIo if self.signal.focus.is_some() => {
+                self.signal.focus == Some(SignalRow::Frequency)
+            }
             Page::AudioIo => self.session.text_focus(),
             Page::Calibration => self.cal.typing(),
             Page::Leq => self.leq.is_some(),
@@ -929,18 +1016,32 @@ impl Settings {
         }
     }
 
-    /// ↑/↓ on the Audio I/O page: the device rows, the channel rows, then the max level
-    /// row, wrapping.
-    pub fn io_move(&mut self, d: i32) {
+    /// ↑/↓ on the Audio I/O page: the device rows, the channel rows, the stimulus signal
+    /// rows (`sine`: the sine's own are shown), then the max level row, wrapping.
+    pub fn io_move(&mut self, d: i32, sine: bool) {
         let rows = self.session.rows();
+        let signal = SignalRow::shown(sine);
         if self.on_ceiling {
             self.on_ceiling = false;
             self.ceiling.confirm = None;
             self.ceiling.error = None;
-            match (d > 0, rows.first(), rows.last()) {
-                (true, Some(first), _) => self.session.focus = *first,
-                (false, _, Some(last)) => self.session.focus = *last,
-                _ => self.on_ceiling = true,
+            match (d > 0, rows.first()) {
+                (true, Some(first)) => self.session.focus = *first,
+                (true, None) => self.signal.focus = signal.first().copied(),
+                (false, _) => self.signal.focus = signal.last().copied(),
+            }
+            return;
+        }
+        if let Some(now) = self.signal.focus {
+            let i = signal.iter().position(|r| *r == now).unwrap_or(0) as i32 + d;
+            self.signal.leave();
+            match usize::try_from(i).ok().and_then(|i| signal.get(i)) {
+                Some(r) => self.signal.focus = Some(*r),
+                None if d > 0 => self.on_ceiling = true,
+                None => match rows.last() {
+                    Some(last) => self.session.focus = *last,
+                    None => self.on_ceiling = true,
+                },
             }
             return;
         }
@@ -952,7 +1053,11 @@ impl Settings {
         if leaving {
             self.session.finish_edit();
             self.session.detect_cancel();
-            self.on_ceiling = true;
+            if d > 0 {
+                self.signal.focus = signal.first().copied();
+            } else {
+                self.on_ceiling = true;
+            }
         } else {
             self.session.detect_cancel();
             self.session.move_focus(d);

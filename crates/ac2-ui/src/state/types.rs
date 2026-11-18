@@ -273,9 +273,12 @@ pub struct Stimulus {
     pub level: Option<Dbfs>,
     /// What is armed or would be: the generator's choice, or a sweep while one is set up.
     pub signal: Signal,
-    /// What the operator chose for the live views. A sweep set-up borrows `signal` and
-    /// gives it back from here, so a chosen sine outlives a sweep run.
-    pub generator: SignalChoice,
+    /// What the operator chose for the live views; `None` until then — the first arm of
+    /// the generator asks. A sweep set-up borrows `signal` and gives it back from here, so
+    /// a chosen sine outlives a sweep run.
+    pub generator: Option<SignalKind>,
+    /// The sine as set (typed frequency, bin lock), kept while a noise is chosen.
+    pub sine: SineSetting,
     /// Zero-based output channels.
     pub outputs: Vec<u16>,
     pub phase: StimPhase,
@@ -293,7 +296,8 @@ impl Default for Stimulus {
         Self {
             level: None,
             signal: Signal::Pink,
-            generator: SignalChoice::Pink,
+            generator: None,
+            sine: ac2_scene::stimulus::DEFAULT_SINE,
             outputs: vec![0],
             phase: StimPhase::Idle,
             arm_after_stop: false,
@@ -303,6 +307,18 @@ impl Default for Stimulus {
 }
 
 impl Stimulus {
+    /// The generator's signal as chosen, a sine with its settings.
+    pub fn choice(&self) -> Option<SignalChoice> {
+        self.generator.map(|k| match k {
+            SignalKind::Pink => SignalChoice::Pink,
+            SignalKind::White => SignalChoice::White,
+            SignalKind::Sine => SignalChoice::Sine {
+                freq: self.sine.freq,
+                on_bin: self.sine.on_bin,
+            },
+        })
+    }
+
     pub(super) fn settings(&self) -> Option<GeneratorSettings> {
         Some(GeneratorSettings {
             signal: self.signal,
