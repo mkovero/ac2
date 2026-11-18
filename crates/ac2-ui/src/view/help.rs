@@ -73,6 +73,7 @@ impl Section {
             | C::SelectLive
             | C::DeleteSelected
             | C::TraceRename
+            | C::EditSelected
             | C::MoveTrace
             | C::TraceSlot
             | C::TraceExport

@@ -387,6 +387,9 @@ pub enum Msg {
     ToggleShown(TraceId),
     /// A stored trace double-clicked in the list: selected, and its name asked for.
     RenameTrace(TraceId),
+    /// A measurement's row double-clicked in the list, or its edit button clicked: the row
+    /// selected as a click selects it, and the form that edits its measurement opened.
+    EditRow(ac2_scene::meas_list::TreeKey),
     /// A click in the spectrograph (the focused pane): the cursor at `hz`, on the frame
     /// `before_s` seconds before the newest.
     SpectrographCursor {

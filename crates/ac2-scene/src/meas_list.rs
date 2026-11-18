@@ -252,6 +252,52 @@ impl TreeKey {
             TreeKey::Imported | TreeKey::Rig | TreeKey::Session | TreeKey::RigName(_)
         )
     }
+
+    /// The measurement a double click on the row edits: the row's own (its header, its
+    /// live curve, a math channel). A stored trace's double click renames it, and a
+    /// heading stands for no measurement.
+    pub fn edits(self) -> Option<MeasId> {
+        match self {
+            TreeKey::Meas(m) | TreeKey::Live(m) | TreeKey::Math(m) => Some(m),
+            TreeKey::Trace(_)
+            | TreeKey::Imported
+            | TreeKey::Rig
+            | TreeKey::Session
+            | TreeKey::RigName(_) => None,
+        }
+    }
+
+    /// The row carries the edit button: the rows that stand for a measurement itself. A
+    /// live-curve row is one curve of the header above it, which has the button.
+    pub fn has_edit_button(self) -> bool {
+        matches!(self, TreeKey::Meas(_) | TreeKey::Math(_))
+    }
+}
+
+/// The edit button's tooltip, with the key that does the same on the selected row:
+/// `Edit measurement… (F2)`.
+pub fn edit_tip(key: Option<&str>) -> String {
+    key.map_or_else(
+        || "Edit measurement…".to_owned(),
+        |k| format!("Edit measurement… ({k})"),
+    )
+}
+
+/// What a measurement row's tooltip says about editing it: `double click or F2 edits it`.
+pub fn edit_hint(key: Option<&str>) -> String {
+    key.map_or_else(
+        || "double click edits it".to_owned(),
+        |k| format!("double click or {k} edits it"),
+    )
+}
+
+/// Edit asked for on the row of a measurement whose kind has no form to edit it in.
+pub fn no_edit_form(m: &Measurement) -> String {
+    format!(
+        "{} has no settings form: Edit measurement… is for a transfer, sweep, spectrum, RTA \
+         or math channel",
+        m.config.name
+    )
 }
 
 /// One row of the tree.

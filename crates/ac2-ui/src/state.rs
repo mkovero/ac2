@@ -374,6 +374,7 @@ impl AppState {
                 | Msg::SelectLive(_)
                 | Msg::SelectMath(_)
                 | Msg::SelectTrace(_)
+                | Msg::EditRow(_)
                 | Msg::OpenRig
         ) {
             self.rig.input_pick = None;
@@ -518,6 +519,7 @@ impl AppState {
                     self.prompt(PromptKind::TraceRename(id), t.edit.name.clone());
                 }
             }
+            Msg::EditRow(key) => self.edit_row(key),
             // A click in a pane gives it the keyboard; the selection stays on the row the
             // operator chose (the pane's keys act on what it shows).
             Msg::FocusPane(p) => self.layout.set_focus(p),

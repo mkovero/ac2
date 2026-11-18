@@ -23,6 +23,58 @@ impl AppState {
         f.set_text(crate::forms::FieldId::Name, &name);
     }
 
+    /// Opens the form that edits `m`: the one that made it, on its settings. `false` for a
+    /// kind with no such form (an SPL meter), nothing opened or said.
+    fn open_meas_edit(&mut self, m: &Measurement) -> bool {
+        let form = match &m.config.kind {
+            MeasKind::Sweep { .. } => {
+                let open = self.open_session().cloned();
+                let (inputs, outputs) = (self.session_input_names(), self.session_output_names());
+                Form::edit_sweep(m, open.as_ref(), &inputs, &outputs)
+            }
+            MeasKind::Transfer { .. } | MeasKind::Spectrum { .. } | MeasKind::Rta { .. } => {
+                Form::edit_spec(m, &self.session_input_names(), self.open_session())
+            }
+            MeasKind::Math { config } => {
+                let candidates = self.math_candidates(Some(config.owner));
+                let levels = self.transfer_levels();
+                Form::edit_math(m, candidates).map(|mut f| {
+                    f.set_levels(levels);
+                    f
+                })
+            }
+            MeasKind::Spl { .. } => return false,
+        };
+        match form {
+            Ok(f) => self.overlay = Overlay::Form(Box::new(f)),
+            Err(e) => self.warn(e),
+        }
+        true
+    }
+
+    /// A measurement's row asked to be edited (double click, its edit button): selected as
+    /// a click on the row selects it, then its form opened. The row names the measurement,
+    /// so the focused pane has no say (unlike the command, which reads what is in focus).
+    pub(in crate::state) fn edit_row(&mut self, key: ac2_scene::meas_list::TreeKey) {
+        use ac2_scene::meas_list::TreeKey;
+        match key {
+            TreeKey::Meas(id) => self.select_meas_row(id),
+            TreeKey::Live(id) => self.select_live_row(id),
+            TreeKey::Math(id) => self.select_math_row(id),
+            TreeKey::Trace(_)
+            | TreeKey::Imported
+            | TreeKey::Rig
+            | TreeKey::Session
+            | TreeKey::RigName(_) => return,
+        }
+        let Some(m) = key.edits().and_then(|id| self.meas(id)).cloned() else {
+            return;
+        };
+        if !self.open_meas_edit(&m) {
+            self.warn(ac2_scene::meas_list::no_edit_form(&m));
+        }
+    }
+
     /// The session, measurement, input and finder [`CommandId`]s [`AppState::command`] routes here.
     pub(in crate::state) fn command_meas(
         &mut self,
@@ -155,48 +207,17 @@ impl AppState {
                     self.warn(ac2_scene::pane_edit::PROGRAMME_EDIT);
                     return;
                 }
-                // A sweep measurement selected (or the sweep pane's) edits its settings.
-                let sweep = self
-                    .selected_meas()
+                // The selected sweep, else the sweep pane's; else the selected measurement
+                // when its kind has a form; else a math channel a pane shows.
+                let selected = self.selected_meas();
+                let target = selected
                     .filter(|m| matches!(m.config.kind, MeasKind::Sweep { .. }))
                     .or_else(|| {
                         (self.layout.focus_kind() == PaneKind::Distortion)
                             .then(|| self.sweep_meas())
                             .flatten()
                     })
-                    .cloned();
-                if let Some(m) = sweep {
-                    let open = self.open_session().cloned();
-                    let (inputs, outputs) =
-                        (self.session_input_names(), self.session_output_names());
-                    match Form::edit_sweep(&m, open.as_ref(), &inputs, &outputs) {
-                        Ok(f) => self.overlay = Overlay::Form(Box::new(f)),
-                        Err(e) => self.warn(e),
-                    }
-                    return;
-                }
-                // A transfer, spectrum or RTA selected edits its settings.
-                let spec = self
-                    .selected_meas()
-                    .filter(|m| {
-                        matches!(
-                            m.config.kind,
-                            MeasKind::Transfer { .. }
-                                | MeasKind::Spectrum { .. }
-                                | MeasKind::Rta { .. }
-                        )
-                    })
-                    .cloned();
-                if let Some(m) = spec {
-                    match Form::edit_spec(&m, &self.session_input_names(), self.open_session()) {
-                        Ok(f) => self.overlay = Overlay::Form(Box::new(f)),
-                        Err(e) => self.warn(e),
-                    }
-                    return;
-                }
-                let m = self
-                    .selected_meas()
-                    .filter(|m| matches!(m.config.kind, MeasKind::Math { .. }))
+                    .or_else(|| selected.filter(|m| !matches!(m.config.kind, MeasKind::Spl { .. })))
                     .or_else(|| {
                         [PaneKind::Transfer, PaneKind::Spectrum]
                             .into_iter()
@@ -204,24 +225,11 @@ impl AppState {
                             .find(|m| matches!(m.config.kind, MeasKind::Math { .. }))
                     })
                     .cloned();
-                let owner = m.as_ref().and_then(|m| match &m.config.kind {
-                    MeasKind::Math { config } => Some(config.owner),
-                    _ => None,
-                });
-                let candidates = self.math_candidates(owner);
-                let levels = self.transfer_levels();
-                match m.map(|m| {
-                    Form::edit_math(&m, candidates).map(|mut f| {
-                        f.set_levels(levels);
-                        f
-                    })
-                }) {
-                    Some(Ok(f)) => self.overlay = Overlay::Form(Box::new(f)),
-                    Some(Err(e)) => self.warn(e),
-                    None => self.warn(
+                if !target.is_some_and(|m| self.open_meas_edit(&m)) {
+                    self.warn(
                         "select a measurement first (a transfer, sweep, spectrum, RTA or math \
                          channel), or focus a Programme pane",
-                    ),
+                    );
                 }
             }
             C::HideGroup => self.toggle_group_shown(out),

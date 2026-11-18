@@ -12,6 +12,8 @@ use crate::theme::Chrome;
 /// The tooltips of the tree's rows, with the keys that do the same.
 pub(super) struct RowTips {
     pub(super) meas: String,
+    /// The edit button's, with the key that edits the selected row.
+    pub(super) edit: String,
     /// The key that shows / hides the selected curve.
     pub(super) eye: String,
     pub(super) select: String,
@@ -21,6 +23,9 @@ pub(super) struct RowTips {
 const EYE_W: f32 = 18.0;
 /// How far a row under a header is indented.
 const INDENT: f32 = 14.0;
+/// The edit button at a measurement row's right end: as tall as the name's line, so the
+/// detail lines under the name stay readable beside it.
+const EDIT_SIZE: egui::Vec2 = egui::vec2(18.0, 16.0);
 
 /// How far (points) the pointer moves with the button held on a row before the row is
 /// dragged: a click that wobbles a little stays a click.
@@ -223,9 +228,44 @@ pub(super) fn tree_row(
                     key: row.key,
                 })));
             }
+            // The edit button, on the selected row and under the pointer. It is laid over the
+            // row's right end, not beside it: a row whose text moved when the pointer came
+            // over it would be hard to read and to hit. Only its own square takes the press,
+            // so the rest of the row still drags.
+            let mut edit = false;
+            if row.key.has_edit_button()
+                && !dragging
+                && (row.mark != Mark::None || r.contains_pointer())
+            {
+                // Inside what is drawn of the row: the list may be narrower than its rows.
+                let right = r.rect.max.x.min(ui.clip_rect().max.x) - 2.0;
+                let at = egui::Rect::from_min_size(
+                    egui::pos2(right - EDIT_SIZE.x, r.rect.min.y + 2.0),
+                    EDIT_SIZE,
+                );
+                let b = ui.interact(at, r.id.with("edit"), egui::Sense::click());
+                let label = format!("Edit {}", row.name);
+                b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+                // A plate under the pencil: the row's own text may run beneath it.
+                ui.painter().rect(
+                    at,
+                    3.0,
+                    if b.hovered() { ch.raised } else { ch.panel },
+                    egui::Stroke::new(1.0, ch.border),
+                    egui::StrokeKind::Inside,
+                );
+                pencil(
+                    ui.painter(),
+                    at.center(),
+                    if b.hovered() { ch.text } else { ch.dim },
+                );
+                edit = b.on_hover_text(&tips.edit).clicked();
+            }
             // A double click's second click also reads as a click: check it first, or it would
-            // deselect the row the first click selected.
-            if let TreeKey::Trace(id) = row.key
+            // deselect the trace (or select again the measurement) the first click selected.
+            if edit || (row.key.edits().is_some() && r.double_clicked()) {
+                click = Some(on_rig(Msg::EditRow(row.key)));
+            } else if let TreeKey::Trace(id) = row.key
                 && r.double_clicked()
             {
                 click = Some(on_rig(Msg::RenameTrace(id)));
@@ -245,6 +285,23 @@ pub(super) fn tree_row(
         .response
         .rect;
     (click, rect)
+}
+
+/// A pencil, tip at the lower left. Drawn, not a glyph: the UI font's coverage of the
+/// pencil characters is not something the row can rely on.
+fn pencil(p: &egui::Painter, c: egui::Pos2, color: Color32) {
+    let (tip, neck, end) = (
+        c + egui::vec2(-4.5, 4.5),
+        c + egui::vec2(-2.0, 2.0),
+        c + egui::vec2(3.5, -3.5),
+    );
+    p.line_segment([neck, end], egui::Stroke::new(2.5, color));
+    let across = egui::vec2(1.25, 1.25);
+    p.add(egui::Shape::convex_polygon(
+        vec![tip, neck - across * 0.9, neck + across * 0.9],
+        color,
+        egui::Stroke::NONE,
+    ));
 }
 
 fn to_color32(c: ac2_scene::primitives::Color) -> Color32 {

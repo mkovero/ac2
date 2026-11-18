@@ -118,3 +118,73 @@ fn a_list_row_dragged_onto_the_lower_pane() {
     h.state_mut().state.toasts.list.clear();
     snapshot(&mut h, "row_dropped_on_pane");
 }
+
+/// A measurement's row in the list: one click only selects it, its edit button (shown under
+/// the pointer) opens its form, and so does a double click, which starts no drag.
+#[test]
+fn a_measurement_row_is_edited_by_its_button_and_a_double_click() {
+    use egui_kittest::kittest::By;
+    if !have_gpu("a_measurement_row_is_edited_by_its_button_and_a_double_click") {
+        return;
+    }
+    let _rig = Rig::start();
+    let mut opts = options();
+    opts.prefs = two_panes();
+    let mut h = harness(opts);
+    step_until(&mut h, "the measurements", |a| {
+        a.state.rig.mirror.as_ref().is_some_and(|m| m.synced()) && a.state.measurements().len() == 4
+    });
+    let labelled = |h: &Harness<'_, App>, start: &'static str| {
+        h.query_all(By::new().predicate(move |n| n.label().is_some_and(|l| l.starts_with(start))))
+            .map(|n| n.rect())
+            .find(|r| r.max.x < 260.0)
+    };
+    let editing = |h: &Harness<'_, App>| match &h.state().state.overlay {
+        Overlay::Form(f) => f.edits(),
+        _ => None,
+    };
+    let button = |pos, pressed| Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    // The spectrum's row is not the selected one: no button until the pointer is over it.
+    let row = labelled(&h, "FFT  ").expect("the spectrum's row in the list");
+    assert_eq!(labelled(&h, "Edit FFT  "), None);
+    let at = row.left_center() + egui::vec2(30.0, 0.0);
+    h.event(Event::PointerMoved(at));
+    settle(&mut h, 2);
+    let edit = labelled(&h, "Edit FFT  ").expect("the hovered row's edit button");
+    assert_eq!(labelled(&h, "FFT  "), Some(row), "the row is where it was");
+    // One click selects, and opens nothing.
+    h.event(button(at, true));
+    h.event(button(at, false));
+    settle(&mut h, 2);
+    assert_eq!(h.state().state.rig.selected, Some(MeasId(3)));
+    assert_eq!(h.state().state.overlay, Overlay::None);
+    // The button edits its row.
+    h.event(Event::PointerMoved(edit.center()));
+    settle(&mut h, 2);
+    h.event(button(edit.center(), true));
+    h.event(button(edit.center(), false));
+    settle(&mut h, 2);
+    assert_eq!(editing(&h), Some(MeasId(3)), "the spectrum's form");
+    h.state_mut().state.overlay = Overlay::None;
+    settle(&mut h, 2);
+    // A double click on another row selects it and edits it. Both clicks go into one
+    // frame's input: the harness gives each queued event a frame of a quarter second, near
+    // the longest gap egui takes for a double click.
+    let row = labelled(&h, "TF  ").expect("the transfer's row in the list");
+    let at = row.left_center() + egui::vec2(30.0, 0.0);
+    h.event(Event::PointerMoved(at));
+    settle(&mut h, 2);
+    for _ in 0..2 {
+        h.input_mut().events.push(button(at, true));
+        h.input_mut().events.push(button(at, false));
+    }
+    settle(&mut h, 3);
+    assert_eq!(h.state().state.rig.selected, Some(MeasId(1)));
+    assert_eq!(editing(&h), Some(MeasId(1)), "the transfer's form");
+    assert!(!h.state().state.row_drag_held());
+}

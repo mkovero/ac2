@@ -814,12 +814,19 @@ pub(super) fn sidebar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
 }
 
 fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
+    let edit_key = app
+        .keymap
+        .chords(CommandId::EditSelected, Scope::Global)
+        .first()
+        .map(|k| k.label());
     let tips = RowTips {
+        edit: ac2_scene::meas_list::edit_tip(edit_key.as_deref()),
         meas: format!(
-            "Click shows it in the focused pane · the arrow folds it · {} / {} step through \
-             the list · {} shows / hides its curve, {} everything under it · {} \
+            "Click shows it in the focused pane · {} · the arrow folds it · {} / {} step \
+             through the list · {} shows / hides its curve, {} everything under it · {} \
              deletes it (asks first) · drag onto a pane to show it there, onto another row \
              to combine the two in a math channel",
+            ac2_scene::meas_list::edit_hint(edit_key.as_deref()),
             key_hint(app, CommandId::NextInTree),
             key_hint(app, CommandId::PrevInTree),
             key_hint(app, CommandId::ToggleSelected),
@@ -849,9 +856,10 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
             ui.label(RichText::new("Measurements").strong());
             ui.label(
                 RichText::new(format!(
-                    "{} selects a trace · {} shows / hides",
+                    "{} selects a trace · {} shows / hides · {} edits",
                     key_hint(app, CommandId::NextTrace),
-                    key_hint(app, CommandId::ToggleSelected)
+                    key_hint(app, CommandId::ToggleSelected),
+                    key_hint(app, CommandId::EditSelected)
                 ))
                 .small()
                 .color(ch.dim),

@@ -479,6 +479,16 @@ impl AppState {
                 Some(t) => self.prompt(PromptKind::TraceRename(t.id), t.edit.name.clone()),
                 None => self.warn(self.select_trace_first()),
             },
+            // The row selected last, as for Delete: a trace is renamed, else the measurement
+            // is edited.
+            C::EditSelected => {
+                let c = if self.keys_on_trace() {
+                    C::TraceRename
+                } else {
+                    C::EditMeas
+                };
+                self.command(c, keymap, out);
+            }
             C::SelectLive => self.select_live(),
             C::DeleteSelected => self.ask_delete(),
             C::SmoothCoarser => self.smooth(1, None, out),

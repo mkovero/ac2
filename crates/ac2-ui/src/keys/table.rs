@@ -137,7 +137,8 @@ pub fn defaults() -> Vec<Binding> {
         // Backspace too: Mac keyboards and many laptops have no Delete key.
         (C::DeleteSelected, S::Global, k(K::Delete)),
         (C::DeleteSelected, S::Global, k(K::Backspace)),
-        (C::TraceRename, S::Global, k(K::F2)),
+        // F2 edits the row selected last: a trace is renamed, a measurement opens its form.
+        (C::EditSelected, S::Global, k(K::F2)),
         (C::Compare, S::Global, k(K::C)),
         // Shift+C steps the selected measurement's colour (C itself compares).
         (C::NextColour, S::Global, sh(K::C)),
@@ -187,7 +188,7 @@ pub fn defaults() -> Vec<Binding> {
         (C::ToggleSelected, S::Global, k(K::A)),
         // Shift+A, a step on from A: the whole group (the measurement and its traces).
         (C::HideGroup, S::Global, sh(K::A)),
-        // Shift+F2, beside F2 (rename): where the trace is listed.
+        // Shift+F2, beside F2 (edit): where the trace is listed.
         (C::MoveTrace, S::Global, sh(K::F2)),
         (C::InsertDelay, S::Transfer, k(K::X)),
         (C::InsertStrongest, S::Transfer, sh(K::X)),

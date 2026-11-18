@@ -854,3 +854,5 @@ fn shift_c_steps_the_selected_measurements_colour() {
 }
 
 mod meas_display;
+
+mod edit_row;

@@ -227,6 +227,7 @@ commands! {
     ExportPanePng => "pane_export_png", "Export pane as PNG…", [Global];
     SelectLive => "select_live", "Select live", [Global];
     DeleteSelected => "delete_selected", "Delete selected…", [Global];
+    EditSelected => "edit_selected", "Edit selected…", [Global];
     OffsetUp => "offset_up", "Offset +1 dB", [Global];
     OffsetDown => "offset_down", "Offset −1 dB", [Global];
     OffsetUpCoarse => "offset_up_coarse", "Offset +3 dB", [Global];

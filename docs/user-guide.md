@@ -2338,6 +2338,14 @@ Beside the panes, one tree lists every measurement with what it owns
   trace, math channel) only selects and no pane changes
   ([Choosing what a pane shows](#choosing-what-a-pane-shows)); a click on the selected trace
   deselects it. A double click on a trace renames it.
+- **Edit measurement…** opens the form a measurement was made in, on its settings (a math
+  channel: the math dialog). Three ways in from its row: a **double click** on the row (its
+  header, its live curve or a math channel's row), the **pencil button** at the right end
+  of the selected row and of the row under the pointer, and **F2** with the row selected.
+  The row says which measurement, whatever pane has the keys. An SPL meter has no such
+  form (a warning says so). **F2** edits the row selected last, as Delete deletes it: a
+  stored trace selected after the measurement is renamed instead. The palette's *Edit
+  measurement…* and *Rename trace…* each do the one thing.
 - **Tab** / **Shift+Tab** select the next / previous listed row, wrapping (hidden rows too;
   the Imported header and folded rows skipped, a folded rig's rows too), as a click on it
   does. A selected live-curve
@@ -2428,7 +2436,8 @@ as a level difference. A locked trace keeps its offset.
 ### Rename, export, delete
 
 - **F2** (palette *Rename trace…*, or a double click) renames the selected
-  trace; `ac2 trace rename <trace> <name>`.
+  trace (with a measurement row selected last, F2 is *Edit measurement…*);
+  `ac2 trace rename <trace> <name>`.
 - Palette *Export trace…* writes it as `ac2 trace
   export --csv` does: a file path, or a folder (named after the trace, `Main L S1.csv`); a
   path ending in `.wav` writes its impulse response. The prompt starts in the last export's
@@ -3969,9 +3978,9 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Alt+V` | Next trace incl. hidden | `next_any_trace` |
 | `Alt+Shift+V` | Previous trace incl. hidden | `prev_any_trace` |
 | `A` | Show/hide curve | `toggle_selected` |
-| `F2` | Rename trace… | `trace_rename` |
 | `End` | Select live | `select_live` |
 | `Delete` or `Backspace` | Delete selected… | `delete_selected` |
+| `F2` | Edit selected… | `edit_selected` |
 | `Alt+↑` | Offset +1 dB | `offset_up` |
 | `Alt+↓` | Offset −1 dB | `offset_down` |
 | `Alt+Shift+↑` | Offset +3 dB | `offset_up_coarse` |
@@ -4143,6 +4152,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Theme | `cycle_theme` |
 | Clear compare | `clear_compare` |
 | Move trace to slot… | `trace_slot` |
+| Rename trace… | `trace_rename` |
 | Export trace… | `trace_export` |
 | Export pane as PNG… | `pane_export_png` |
 | Import trace… | `import_trace` |

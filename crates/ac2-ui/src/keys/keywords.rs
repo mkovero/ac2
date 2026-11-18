@@ -141,6 +141,7 @@ impl CommandId {
             C::ToggleSelected => &["hide", "visible", "trace"],
             C::TraceSlot | C::MoveTrace => &["stored", "slot"],
             C::TraceRename => &["name", "label"],
+            C::EditSelected => &["rename", "name", "trace", "measurement", "settings"],
             C::TraceExport => &["save", "text", "csv", "file"],
             C::ExportPanePng => &["save", "image", "picture", "screenshot", "report", "print"],
             C::SelectLive => &["curve", "trace"],
