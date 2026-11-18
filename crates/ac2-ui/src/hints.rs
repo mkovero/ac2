@@ -43,7 +43,8 @@ pub fn line(keymap: &Keymap, scope: Scope, style: LabelStyle) -> Vec<KeyHint> {
             let chord = keymap.first_chord(h.command, scope)?;
             let mut keys = chord.label_in(style);
             // The view keys are one pair, forward and back: one hint names both. So are the
-            // 3D camera's, where one direction alone reads as a key that only turns one way.
+            // delay nudges and the 3D camera's, where one direction alone reads as a key
+            // that only goes one way.
             if let Some(back) = partner(h.command, scope).and_then(|p| keymap.first_chord(p, scope))
             {
                 keys = format!("{keys}/{}", back.label_in(style));
@@ -67,11 +68,33 @@ pub fn line(keymap: &Keymap, scope: Scope, style: LabelStyle) -> Vec<KeyHint> {
     v
 }
 
+/// [`line`] with scope `over` laid over `scope` (a picked Inputs row over the focused
+/// pane): the overlay's hints first, then the pane's whose keys the overlay has not taken.
+pub fn line_over(
+    keymap: &Keymap,
+    over: Option<Scope>,
+    scope: Scope,
+    style: LabelStyle,
+) -> Vec<KeyHint> {
+    let under = line(keymap, scope, style);
+    let Some(over) = over else {
+        return under;
+    };
+    let mut v: Vec<KeyHint> = line(keymap, over, style)
+        .into_iter()
+        .filter(|h| h.command != CommandId::Help)
+        .collect();
+    let taken: Vec<String> = v.iter().map(|h| h.keys.clone()).collect();
+    v.extend(under.into_iter().filter(|h| !taken.contains(&h.keys)));
+    v
+}
+
 /// The command whose key a hint for `c` names with its own.
 fn partner(c: CommandId, scope: Scope) -> Option<CommandId> {
     use CommandId as C;
     match (c, scope) {
         (C::NextView, _) => Some(C::PrevView),
+        (C::NudgeEarlier, _) => Some(C::NudgeLater),
         (C::PanLeft, Scope::Spectrograph3d) => Some(C::PanRight),
         (C::TiltUp, Scope::Spectrograph3d) => Some(C::TiltDown),
         (C::ZoomIn, Scope::Spectrograph3d) => Some(C::ZoomOut),
@@ -125,7 +148,6 @@ mod tests {
                 "A show/hide",
                 "Ctrl+1 capture",
                 "X find delay",
-                "B coherence mask",
                 "P min/max",
                 "K smoothing",
                 "H all keys"
@@ -148,12 +170,12 @@ mod tests {
             pc(Scope::Ir),
             [
                 "G/Shift+G view",
+                "S start/stop",
+                "X find delay",
+                ",/. delay",
+                "R reset",
                 "I zoom time",
-                "Ctrl+I zoom level",
                 "Shift+Home fit level",
-                "Tab next row",
-                "Q close pane",
-                "W maximise",
                 "H all keys"
             ]
         );
@@ -164,7 +186,6 @@ mod tests {
                 "Shift+F F/S/I",
                 "Z A/C/Z",
                 "Shift+L windows",
-                "Shift+R new log",
                 "W maximise",
                 "H all keys"
             ]
@@ -196,6 +217,40 @@ mod tests {
             ]
         );
         assert!(pc(Scope::Global) == ["H all keys"]);
+    }
+
+    /// A picked Inputs row lays its keys over the pane's: its hints open the line, the
+    /// pane's follow, and a pane hint on a key the row took is left out.
+    #[test]
+    fn an_inputs_row_puts_its_keys_before_the_panes() {
+        let k = Keymap::default();
+        let over = |s| texts(&line_over(&k, Some(Scope::Inputs), s, LabelStyle::Pc));
+        assert_eq!(
+            over(Scope::Spectrum),
+            [
+                "R reset",
+                "Shift+R reset all",
+                "Tab measurements",
+                "Shift+Tab back",
+                "S start/stop",
+                "P peaks",
+                "G/Shift+G view",
+                "K smoothing",
+                "Shift+Home fit level",
+                "Ctrl+1 capture",
+                "W maximise",
+                "H all keys"
+            ]
+        );
+        // The Programme pane's own R / Shift+R are the row's now: named once.
+        let p = over(Scope::Programme);
+        assert_eq!(p.iter().filter(|s| s.starts_with("R ")).count(), 1, "{p:?}");
+        assert_eq!(p.iter().filter(|s| s.starts_with("Shift+R ")).count(), 1);
+        assert_eq!(p.last().map(String::as_str), Some("H all keys"));
+        assert_eq!(
+            line_over(&k, None, Scope::Spl, LabelStyle::Pc),
+            line(&k, Scope::Spl, LabelStyle::Pc)
+        );
     }
 
     #[test]

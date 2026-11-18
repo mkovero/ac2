@@ -533,7 +533,7 @@ Daemon auto-spawn locally; staleness detected by build id in `status`, not file 
   deselects the trace, `Esc` hands the keys back to the measurement. Hiding a measurement
   is this app's display only; it keeps measuring. In an open window `Backspace` edits text
   and never deletes what is behind the window.
-- Carry `ac` bindings that operators learned (`X` insert delay, `Y` track, `U` invert, `J` offset, `Z` target, `B` coherence mask, `M` average, `Ctrl+1..9` slots, `Shift+P` group delay) unless a conflict forces change (`H` IR became `Shift+I` when `H` became help).
+- Carry `ac` bindings that operators learned (`X` insert delay, `Y` track, `U` invert, `J` offset, `Z` target, `M` average, `Ctrl+1..9` slots, `Shift+P` group delay) unless a conflict forces change (`H` IR became `Shift+I` when `H` became help).
 
 ### 8.3 Lightweight targets
 - First frame < 300 ms, RSS < 120 MB with 8 live TFs, binary < 25 MB.

@@ -123,7 +123,7 @@ fn with_window(w: Window) -> T {
         }
         Window::NewLog => {
             t.key("Alt+4");
-            t.key("Shift+R");
+            cmd(&mut t, CommandId::SplNewLog);
         }
         Window::DeleteTrace => {
             t.key("V");

@@ -116,8 +116,8 @@ pub fn spectrum_smoothing(fraction: SmoothingFraction) -> Smoothing {
     }
 }
 
-/// What the smoothing keys change: the selected slot's trace, or the focused pane's
-/// measurement (the spectrum pane's when it has focus, else the transfer pane's).
+/// What the smoothing keys change: the selected stored trace when the focused pane draws
+/// it, else the focused pane's measurement.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SmoothTarget {
     Trace(TraceMeta),

@@ -118,14 +118,20 @@ fn p_hint(t: &T) -> String {
     }
 }
 
-/// Shift+R in the SPL pane (or "New SPL log…" in Ctrl+K) asks first, naming the
-/// run that ends and what starts over; N keeps the log, Shift+R again sends `spl.log_new`.
+/// The palette's command.
+fn new_log(t: &mut T) -> Vec<Request> {
+    t.st.apply(Msg::Command(CommandId::SplNewLog), &t.keys.clone())
+}
+
+/// "New SPL log…" in Ctrl+K asks first, naming the run that ends and what starts over; N
+/// keeps the log, Enter sends `spl.log_new`. No key asks: Shift+R, which resets readings on
+/// the meters beside it, must not be the key that discards a show's log.
 #[test]
 fn new_spl_log_asks_first() {
     let mut t = T::new();
     t.st.local_zone = crate::scenes::LocalZone::Fixed { offset_s: 7200 };
     t.key("Alt+4");
-    t.key("Shift+R");
+    new_log(&mut t);
     assert!(
         t.last_toast().contains("no SPL meter"),
         "{}",
@@ -140,7 +146,12 @@ fn new_spl_log_asks_first() {
         97.84,
         ac2_proto::frame::LeqFlags::NONE,
     ));
+    // Shift+R is no key of the SPL pane.
+    assert_eq!(t.st.scope(), crate::keys::Scope::Spl);
     let r = t.key("Shift+R");
+    assert!(r.is_empty(), "{r:?}");
+    assert_eq!(t.st.overlay, Overlay::None);
+    let r = new_log(&mut t);
     assert!(r.is_empty(), "{r:?}");
     let Overlay::NewLog(p) = &t.st.overlay else {
         panic!("{:?}", t.st.overlay)
@@ -158,7 +169,7 @@ fn new_spl_log_asks_first() {
     assert!(r.is_empty(), "{r:?}");
     assert_eq!(t.st.overlay, Overlay::None);
     // Esc closes it too.
-    t.key("Shift+R");
+    new_log(&mut t);
     t.key("Escape");
     assert_eq!(t.st.overlay, Overlay::None);
     // From the palette, then Enter: spl.log_new for the pane's meter.
@@ -170,15 +181,14 @@ fn new_spl_log_asks_first() {
         "{:?}",
         t.st.overlay
     );
-    // Enter, the stimulus's key, discards nothing; Shift+R again, the key that asked, does.
     assert_eq!(
         p_hint(&t),
-        "Shift+R starts the new log · N or Esc keeps the current one"
+        "Enter starts the new log · N or Esc keeps the current one"
     );
-    let r = t.key("Enter");
+    let r = t.key("Shift+R");
     assert!(r.is_empty(), "{r:?}");
     assert!(matches!(t.st.overlay, Overlay::NewLog(_)));
-    let r = t.key("Shift+R");
+    let r = t.key("Enter");
     assert_eq!(t.st.overlay, Overlay::None);
     assert!(
         r.iter().any(|r| matches!(
@@ -189,11 +199,11 @@ fn new_spl_log_asks_first() {
         "{r:?}"
     );
     // The mouse: "Keep the current log" sends nothing, "Start a new log" sends it.
-    t.key("Shift+R");
+    new_log(&mut t);
     let r = t.st.apply(Msg::NewLog(false), &t.keys);
     assert!(r.is_empty());
     assert_eq!(t.st.overlay, Overlay::None);
-    t.key("Shift+R");
+    new_log(&mut t);
     let r = t.st.apply(Msg::NewLog(true), &t.keys);
     assert!(r.iter().any(|r| matches!(
         r,
@@ -202,6 +212,37 @@ fn new_spl_log_asks_first() {
             ..
         }
     )));
+}
+
+/// An operator who gives the command a key confirms with that key again: Enter, the
+/// stimulus's key, then discards nothing.
+#[test]
+fn a_bound_new_log_key_confirms_itself() {
+    let mut t = T::new();
+    let keys = Keymap::from_toml("[spl]\nspl_new_log = \"Alt+R\"\n").expect("valid");
+    t.keys = keys;
+    t.conn(mirror(with_spl()));
+    t.key("Alt+4");
+    t.key("Alt+R");
+    assert_eq!(
+        p_hint(&t),
+        "Alt+R starts the new log · N or Esc keeps the current one"
+    );
+    let r = t.key("Enter");
+    assert!(r.is_empty(), "{r:?}");
+    assert!(matches!(t.st.overlay, Overlay::NewLog(_)));
+    let r = t.key("Alt+R");
+    assert_eq!(t.st.overlay, Overlay::None);
+    assert!(
+        r.iter().any(|r| matches!(
+            r,
+            Request::Call {
+                cmd: Command::SplLogNew { .. },
+                ..
+            }
+        )),
+        "{r:?}"
+    );
 }
 
 /// The Leq view starts as columns without the history strip; B switches columns / tiles, H

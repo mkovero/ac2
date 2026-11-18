@@ -51,8 +51,8 @@ fn run_seconds(s: &AppState) -> Option<u64> {
 
 /// The run clock and a new log from an empty daemon, using the app: a session and an SPL
 /// meter from the app; the Leq view's caption counts the meter's log (`running 0:00:05
-/// since … · LAeq total …`); Shift+R asks first, naming the run that ends; N keeps it,
-/// Shift+R twice starts a new log, and the clock starts again from zero.
+/// since … · LAeq total …`); the palette's new log asks first, naming the run that ends; N
+/// keeps it, Enter starts a new log, and the clock starts again from zero.
 #[test]
 fn slow_run_clock_and_a_new_log_from_the_app() -> R {
     use ac2_ui::state::PaneKind;
@@ -102,8 +102,8 @@ fn slow_run_clock_and_a_new_log_from_the_app() -> R {
     assert!(run_caption(&d.st).is_some());
     let before = run_seconds(&d.st).ok_or("clock")?;
 
-    // Shift+R asks first; N keeps the log and its clock.
-    d.key("Shift+R");
+    // The new log asks first; N keeps the log and its clock.
+    d.send(Msg::Command(CommandId::SplNewLog));
     let Overlay::NewLog(p) = &d.st.overlay else {
         return Err(format!("no confirmation: {:?}", d.st.overlay).into());
     };
@@ -121,9 +121,9 @@ fn slow_run_clock_and_a_new_log_from_the_app() -> R {
     })?;
     let ended = run_seconds(&d.st).ok_or("clock")?;
 
-    // Shift+R, Shift+R again: a new log; the clock starts from zero again.
-    d.key("Shift+R");
-    d.key("Shift+R");
+    // Asked again and confirmed: a new log; the clock starts from zero again.
+    d.send(Msg::Command(CommandId::SplNewLog));
+    d.key("Enter");
     assert_eq!(d.st.overlay, Overlay::None);
     d.until("the new log toasted", |s| {
         s.toasts
@@ -288,8 +288,8 @@ fn slow_a_restarted_app_shows_the_history_from_the_log() -> R {
     other.until("the other app's history", |s| {
         history_points(s).is_some_and(|(_, p)| p.first().is_some_and(|x| x.t <= first + 0.5))
     })?;
-    d.key("Shift+R");
-    d.key("Shift+R");
+    d.send(Msg::Command(CommandId::SplNewLog));
+    d.key("Enter");
     d.until("the new log toasted", |s| {
         s.toasts
             .list

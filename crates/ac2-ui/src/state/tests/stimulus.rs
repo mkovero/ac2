@@ -481,8 +481,10 @@ fn transfer_commands() {
         ),
         "{r:?}"
     );
-    // View toggles.
+    // View toggles. The coherence mask is the palette's: B is no key here.
     t.key("B");
+    assert_eq!(t.st.view.tf.coherence.blank_below, None);
+    t.st.apply(Msg::Command(CommandId::CoherenceMask), &t.keys.clone());
     assert_eq!(t.st.view.tf.coherence.blank_below, Some(0.3));
     // Shift+P steps wrapped → unwrapped → group delay → wrapped.
     t.key("Shift+P");
@@ -580,7 +582,11 @@ fn transfer_commands_need_a_transfer_measurement() {
         t.st.apply(Msg::Command(CommandId::InsertDelay), &t.keys)
             .is_empty()
     );
-    assert!(t.last_toast().contains("transfer-function"));
+    assert!(
+        t.last_toast().contains("focus a Transfer pane first"),
+        "{}",
+        t.last_toast()
+    );
 }
 
 /// Arms the generator at −20 dBFS and, with `fire`, plays it.
@@ -646,8 +652,7 @@ fn stopping_the_last_transfer_disarms_an_armed_stimulus() {
 
 #[test]
 fn every_stop_path_of_a_transfer_stops_the_stimulus() {
-    // S on the transfer pane, S on its IR view (`None`), the palette's command (any pane),
-    // and the command on the sweep view with the transfer measurement selected.
+    // S on the transfer pane, S on its IR view (`None`), and the palette's command there.
     enum Via {
         Key,
         Palette,
@@ -656,7 +661,6 @@ fn every_stop_path_of_a_transfer_stops_the_stimulus() {
         (Some(PaneKind::Transfer), Via::Key),
         (None, Via::Key),
         (Some(PaneKind::Transfer), Via::Palette),
-        (Some(PaneKind::Distortion), Via::Palette),
     ] {
         let mut t = T::new();
         t.put(PaneKind::Transfer);
@@ -672,6 +676,23 @@ fn every_stop_path_of_a_transfer_stops_the_stimulus() {
         };
         assert_eq!(meas_stop(&r), (STIM_TOO.into(), true), "{focus:?}");
     }
+}
+
+/// Start/stop acts on what the focused pane shows: on the sweep pane the transfer
+/// measurement selected in the list keeps running, and so does the stimulus.
+#[test]
+fn start_stop_on_the_sweep_pane_leaves_the_selected_transfer() {
+    let mut t = T::new();
+    t.put(PaneKind::Transfer);
+    play_noise(&mut t, true);
+    t.put(PaneKind::Distortion);
+    t.st.rig.selected = Some(MeasId(1));
+    let r = t.st.apply(Msg::Command(CommandId::StartStop), &t.keys);
+    assert!(r.is_empty(), "{r:?}");
+    assert!(t.last_toast().contains("sweep"), "{}", t.last_toast());
+    let r = t.st.apply(Msg::Command(CommandId::ResetAverage), &t.keys);
+    assert!(r.is_empty(), "{r:?}");
+    assert_eq!(t.st.rig.stimulus.phase, StimPhase::Firing);
 }
 
 #[test]

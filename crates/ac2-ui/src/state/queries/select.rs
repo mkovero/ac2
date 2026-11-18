@@ -223,21 +223,45 @@ impl AppState {
         );
     }
 
-    /// The transfer measurement a delay key acts on: the one the focused transfer pane
-    /// shows (a pane key acts on its pane, whatever row is selected), else the selected one.
+    /// The transfer measurement a delay or polarity key acts on: the one the focused
+    /// transfer pane shows (in its IR view too). A pane that shows none says so: no key
+    /// reaches past its pane to a measurement selected in the list.
     pub(in crate::state) fn need_tf(&mut self) -> Option<Measurement> {
         let f = self.layout.focus;
-        if self.layout.kind(f) == PaneKind::Transfer
-            && let Some(m) = self
-                .pane_meas(f)
-                .filter(|m| matches!(m.config.kind, MeasKind::Transfer { .. }))
-        {
-            return Some(m.clone());
+        if self.layout.kind(f) != PaneKind::Transfer {
+            self.warn(self.focus_transfer_first());
+            return None;
         }
-        self.need_meas(
-            &[|k| matches!(k, MeasKind::Transfer { .. })],
-            "transfer-function",
-        )
+        let m = self
+            .pane_meas(f)
+            .filter(|m| matches!(m.config.kind, MeasKind::Transfer { .. }))
+            .cloned();
+        if m.is_none() {
+            let new = self.keys.reach(CommandId::NewTransfer);
+            self.warn(format!(
+                "this pane shows no transfer-function measurement ({}; {new} makes one)",
+                self.to_it()
+            ));
+        }
+        m
+    }
+
+    /// The measurement a capture stores: the live curve of the focused pane the keys act
+    /// on ([`Self::focused_live`]), when it is one that can be stored as a trace.
+    pub(in crate::state) fn capture_source(&mut self) -> Option<Measurement> {
+        let m = self
+            .focused_live()
+            .filter(|m| m.config.kind.publishes_tf() || m.config.kind.publishes_levels())
+            .cloned();
+        if m.is_none() {
+            let to_it = self.to_it();
+            let new = self.new_meas_reach();
+            self.warn(format!(
+                "this pane shows no transfer, spectrum, RTA or math measurement to capture \
+                 ({to_it}; {new} makes one)"
+            ));
+        }
+        m
     }
 
     /// G / Shift+G: the focused pane's next or previous view, in its kind's chain.

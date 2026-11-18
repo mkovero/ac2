@@ -52,13 +52,14 @@ fn now() -> crate::scenes::Now {
 
 const SIZE: Viewport = Viewport::new(900.0, 500.0);
 
+/// The offset keys act on the selected stored trace when the focused pane draws it.
 #[test]
 fn offset_steps_change_the_selected_trace() {
     let mut t = T::new();
-    let mut locked = stored(12, None, 2);
+    let mut locked = captured(12, None, 2);
     locked.edit.locked = true;
     t.conn(with_traces(vec![
-        stored(13, Some(2), 2),
+        captured(13, Some(2), 2),
         locked,
         spec_meta(16),
     ]));
@@ -67,7 +68,10 @@ fn offset_steps_change_the_selected_trace() {
     assert_eq!((id, edit.offset), (TraceId(13), Db(3.0)));
     assert_eq!(what, "slot 2 (t13): offset +3.0 dB");
     // Steps start from what the daemon holds.
-    t.conn(with_traces(vec![with_offset(stored(13, Some(2), 2), 3.0)]));
+    t.conn(with_traces(vec![with_offset(
+        captured(13, Some(2), 2),
+        3.0,
+    )]));
     let (_, edit, what) = trace_update(&t.key("Alt+Down"));
     assert_eq!(edit.offset, Db(2.0));
     assert_eq!(what, "slot 2 (t13): offset +2.0 dB");
@@ -83,10 +87,10 @@ fn offset_steps_change_the_selected_trace() {
 
     // Tenths stay tenths however many steps.
     t.conn(with_traces(vec![
-        with_offset(stored(13, Some(2), 2), 0.3),
+        with_offset(captured(13, Some(2), 2), 0.3),
         spec_meta(16),
         {
-            let mut l = stored(12, None, 2);
+            let mut l = captured(12, None, 2);
             l.edit.locked = true;
             l
         },
@@ -94,17 +98,32 @@ fn offset_steps_change_the_selected_trace() {
     let (_, edit, _) = trace_update(&t.key("Alt+Down"));
     assert_eq!(edit.offset, Db(-0.7));
 
-    // Any kind of trace, from any pane: a spectrum capture with the transfer pane focused.
+    // A spectrum capture selected with the transfer pane focused: the pane does not draw
+    // it, so its keys stay with its own measurement.
     t.st.apply(Msg::SelectTrace(TraceId(16)), &t.keys);
-    let (id, edit, _) = trace_update(&t.key("Alt+Up"));
-    assert_eq!((id, edit.offset), (TraceId(16), Db(1.0)));
-    // J types it, in the spectrum pane too.
+    let r = t.key("Alt+Up");
+    assert!(
+        matches!(
+            calls(&r).first(),
+            Some((
+                Command::MeasOffset {
+                    meas: MeasId(1),
+                    ..
+                },
+                _
+            ))
+        ),
+        "{r:?}"
+    );
+    // The spectrum pane draws it: there the keys are the trace's, J too.
     t.key("Alt+2");
     assert_eq!(
         t.st.rig.selected_trace,
         Some(TraceId(16)),
         "drawn there: kept"
     );
+    let (id, edit, _) = trace_update(&t.key("Alt+Up"));
+    assert_eq!((id, edit.offset), (TraceId(16), Db(1.0)));
     t.type_key("J", "j");
     assert!(matches!(
         &t.st.overlay,
@@ -112,10 +131,21 @@ fn offset_steps_change_the_selected_trace() {
     ));
     t.key("Esc");
     // A locked trace says so and sends nothing.
+    t.key("Alt+1");
     t.st.apply(Msg::SelectTrace(TraceId(12)), &t.keys);
     assert!(t.key("Alt+Up").is_empty());
     assert!(
         t.last_toast().contains("t12 is locked"),
+        "{}",
+        t.last_toast()
+    );
+    // A pane with no curves has nothing to offset: no other pane's curve moves.
+    t.st.apply(Msg::SelectTrace(TraceId(13)), &t.keys);
+    t.key("Alt+4");
+    assert_eq!(t.focus_kind(), PaneKind::Spl);
+    assert!(t.key("Alt+Up").is_empty());
+    assert!(
+        t.last_toast().contains("no live curve to offset"),
         "{}",
         t.last_toast()
     );

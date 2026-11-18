@@ -110,6 +110,15 @@ impl AppState {
             )
     }
 
+    /// What a transfer pane's command says from another pane: it acts on what its pane
+    /// shows, so it has nothing to act on there.
+    pub(super) fn focus_transfer_first(&self) -> String {
+        format!(
+            "focus a {} pane first: this acts on what its pane shows",
+            PaneKind::Transfer.title()
+        )
+    }
+
     /// What a command needing a selected measurement says without one.
     pub(super) fn select_meas_first(&self) -> String {
         format!("select a measurement first ({})", self.to_it())

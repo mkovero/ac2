@@ -57,18 +57,44 @@ impl AppState {
             && !self.keys_on_trace()
     }
 
-    /// What a pane key (start/stop, reset) acts on: the measurement the focused pane shows,
-    /// never one of another kind selected elsewhere (an SPL meter picked in the list must not
-    /// stop when S is pressed on the transfer pane). Says what to create when there is none.
+    /// The selected stored trace, when the focused pane draws it: a pane key acts on what
+    /// its pane shows, and a click on a legend row is how the operator says which of the
+    /// pane's curves. A trace selected in the list that the pane does not draw is not the
+    /// key's business: the pane's own measurement is.
+    pub fn focused_trace(&self) -> Option<&TraceMeta> {
+        let f = self.layout.focus;
+        if self.layout.kind(f) == PaneKind::Distortion {
+            // The sweep pane draws runs: its own, and those compared behind it.
+            let sel = self.rig.selected_trace?;
+            return self
+                .pane_sweep(f)
+                .into_iter()
+                .chain(self.compared_sweeps(f))
+                .map(|(d, _)| &d.meta)
+                .find(|t| t.id == sel);
+        }
+        self.caption_trace(f)
+    }
+
+    /// The live curve a pane key acts on: the selected measurement's when the focused pane
+    /// draws it (its own, a math channel of its group, or one compared behind it), else the
+    /// pane's own measurement. Never a measurement the pane does not show, whatever the
+    /// list has selected.
+    pub fn focused_live(&self) -> Option<&Measurement> {
+        let f = self.layout.focus;
+        let kind = self.layout.kind(f);
+        let shown = self.pane_meas(f);
+        self.layout.view(f).filter(|v| self.ours(v))?;
+        self.selected_meas()
+            .filter(|m| self.live_on_pane(kind, m, shown) || self.live_compared_on(kind, m, f))
+            .or(shown)
+    }
+
+    /// What start/stop and reset act on: the measurement the focused pane shows, never one
+    /// selected elsewhere (an SPL meter picked in the list must not stop when S is pressed
+    /// on the transfer pane). Says what to create when there is none.
     pub(super) fn focused_pane_meas(&mut self) -> Option<Measurement> {
         let p = self.layout.focus_kind();
-        if p == PaneKind::Distortion {
-            let m = self.selected_meas().cloned();
-            if m.is_none() {
-                self.warn(self.select_meas_first());
-            }
-            return m;
-        }
         let m = self.pane_meas(self.layout.focus).cloned();
         if m.is_none() {
             let make = match p {
@@ -79,17 +105,32 @@ impl AppState {
                 PaneKind::Spectrum => {
                     format!("no spectrum or RTA: {} makes one", self.new_meas_reach())
                 }
-                _ => format!("no SPL meter: {}", self.keys.reach(CommandId::NewSpl)),
+                PaneKind::Spl => format!("no SPL meter: {}", self.keys.reach(CommandId::NewSpl)),
+                PaneKind::Distortion => {
+                    format!("no sweep: {}", self.keys.reach(CommandId::SweepNew))
+                }
+                PaneKind::Programme | PaneKind::Walk => format!(
+                    "the {} pane shows no measurement to start, stop or reset",
+                    p.title()
+                ),
             };
             self.warn(make);
         }
-        // The transfer pane showing a sweep's runs: a sweep plays only from the sweep pane.
+        // A sweep is no job to start: it plays when the armed stimulus fires, from its pane.
         if let Some(s) = m.as_ref().filter(|m| !m.config.kind.is_job()) {
-            self.warn(format!(
-                "{} is a sweep: run it on the {} pane",
-                s.config.name,
-                PaneKind::Distortion.title()
-            ));
+            let name = &s.config.name;
+            self.warn(if p == PaneKind::Distortion {
+                format!(
+                    "{name} is a sweep: {} arms it, {} runs it",
+                    self.keys.reach(CommandId::StimulusArm),
+                    self.keys.reach(CommandId::StimulusFire)
+                )
+            } else {
+                format!(
+                    "{name} is a sweep: run it on the {} pane",
+                    PaneKind::Distortion.title()
+                )
+            });
             return None;
         }
         m
@@ -109,17 +150,18 @@ impl AppState {
         self.daemon()?.traces.iter().find(|t| t.id == id)
     }
 
-    /// What K / Shift+K change now: the selected slot, else the spectrum pane's
-    /// measurement when that pane has focus, else the transfer pane's.
+    /// What K / Shift+K change now: the selected stored trace when the focused pane draws
+    /// it, else the focused pane's measurement. `None` on a pane that shows nothing to
+    /// smooth.
     pub fn smooth_target(&self) -> Option<SmoothTarget> {
-        if let Some(t) = self.selected_trace_meta() {
+        if let Some(t) = self.focused_trace() {
             return Some(SmoothTarget::Trace(t.clone()));
         }
-        let pane = match self.layout.focus_kind() {
-            PaneKind::Spectrum => PaneKind::Spectrum,
-            _ => PaneKind::Transfer,
-        };
-        self.kind_meas(pane).map(|m| SmoothTarget::Meas(m.clone()))
+        let f = self.layout.focus;
+        matches!(self.layout.kind(f), PaneKind::Transfer | PaneKind::Spectrum)
+            .then(|| self.pane_meas(f))
+            .flatten()
+            .map(|m| SmoothTarget::Meas(m.clone()))
     }
 
     /// A pane's title caption: the selected stored trace with its smoothing when its curve
@@ -475,12 +517,14 @@ impl AppState {
         out
     }
 
-    /// Shown stored traces on the transfer pane, slotted first (by slot), then by order.
-    pub(super) fn shown_transfer_traces(&self) -> Vec<&TraceMeta> {
+    /// Shown stored traces of transfer pane `pane`'s group, slotted first (by slot), then
+    /// by order.
+    pub(super) fn shown_transfer_traces(&self, pane: PaneId) -> Vec<&TraceMeta> {
+        let shown = self.pane_meas(pane);
         let mut v: Vec<&TraceMeta> = self
             .stored_traces()
             .into_iter()
-            .filter(|t| self.on_pane(PaneKind::Transfer, t, self.kind_meas(PaneKind::Transfer)))
+            .filter(|t| self.on_pane(PaneKind::Transfer, t, shown))
             .collect();
         v.sort_by_key(|t| (t.edit.slot.unwrap_or(u8::MAX), t.edit.order, t.id));
         v
@@ -783,13 +827,20 @@ impl AppState {
         matches!(self.rig.conn, ConnState::Connected { .. })
     }
 
-    /// Keys go to the picked Inputs row's meters, else to the focused pane's scope.
+    /// The focused pane's scope: where a key is looked up.
     pub fn scope(&self) -> Scope {
-        if self.rig.input_pick.is_some() {
-            Scope::Inputs
-        } else {
-            self.layout.focused().scope(self.three_d())
-        }
+        self.layout.focused().scope(self.three_d())
+    }
+
+    /// The scope laid over the pane's: a picked Inputs row takes its meters' keys and
+    /// leaves every other key to the pane, which stays on screen and in use.
+    pub fn overlay_scope(&self) -> Option<Scope> {
+        self.rig.input_pick.map(|_| Scope::Inputs)
+    }
+
+    /// The command `chord` runs now.
+    pub fn key_command(&self, keymap: &Keymap, chord: Chord) -> Option<CommandId> {
+        keymap.lookup_over(self.overlay_scope(), self.scope(), chord)
     }
 
     /// This machine's GPU draws the 3D spectrograph; without it a layout's 3D view is the

@@ -137,7 +137,7 @@ fn smoothing_keys_change_a_selected_slot() {
     };
     // Sub's: the spectrum pane draws it.
     spec.edit.owner = ac2_proto::model::TraceOwner::Meas { meas: MeasId(2) };
-    let mut locked = stored(12, Some(5), 2);
+    let mut locked = captured(12, Some(5), 2);
     locked.edit.locked = true;
     // Main L's capture: the transfer pane draws it, so its title names it.
     let mut slot = stored(10, Some(3), 2);
@@ -190,6 +190,9 @@ fn smoothing_keys_change_a_selected_slot() {
             .as_deref(),
         Some("smoothing off")
     );
+    // The transfer pane does not draw it: K there stays with the pane's measurement.
+    assert_eq!(smoothing_set(&t.key("K")).0, "m1");
+    t.key("Alt+2");
     assert_eq!(
         smoothing_set(&t.key("K")),
         (
@@ -197,6 +200,7 @@ fn smoothing_keys_change_a_selected_slot() {
             smoothing(SmoothingFraction::FortyEighth, SmoothingMode::Magnitude)
         )
     );
+    t.key("Alt+1");
     // A locked slot says so and sends nothing.
     t.st.apply(Msg::SelectTrace(TraceId(12)), &t.keys);
     assert!(t.key("K").is_empty());
@@ -215,4 +219,43 @@ fn smoothing_keys_change_a_selected_slot() {
     t.st.apply(Msg::SelectTrace(TraceId(10)), &t.keys);
     t.conn(with_traces(vec![]));
     assert_eq!(t.st.rig.selected_trace, None);
+}
+
+/// K acts on what the focused pane shows: a transfer trace selected in the list is not on
+/// the spectrum pane, so K there changes the spectrum's smoothing and leaves the trace; on
+/// a pane with no curve to smooth it changes nothing anywhere.
+#[test]
+fn smoothing_keys_stay_with_the_focused_pane() {
+    let mut t = T::new();
+    t.conn(with_traces(vec![captured(10, Some(3), 2)]));
+    t.st.apply(Msg::SelectTrace(TraceId(10)), &t.keys);
+    t.key("Alt+2");
+    assert_eq!(t.focus_kind(), PaneKind::Spectrum);
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(10)));
+    assert_eq!(
+        smoothing_set(&t.key("K")),
+        (
+            "m2".into(),
+            smoothing(SmoothingFraction::FortyEighth, SmoothingMode::Magnitude)
+        )
+    );
+    // Back on the transfer pane, which draws the trace: K is the trace's.
+    t.key("Alt+1");
+    assert_eq!(smoothing_set(&t.key("K")).0, "t10");
+    // An imported trace is on no pane: selected, it leaves K with the pane's measurement.
+    t.conn(with_traces(vec![stored(13, None, 2)]));
+    t.st.apply(Msg::SelectTrace(TraceId(13)), &t.keys);
+    assert_eq!(smoothing_set(&t.key("K")).0, "m1");
+    // The SPL pane has nothing to smooth: the command from the palette says so, and
+    // reaches for no other pane's curve.
+    t.key("Alt+4");
+    let r =
+        t.st.apply(Msg::Command(CommandId::SmoothCoarser), &t.keys.clone());
+    assert!(r.is_empty(), "{r:?}");
+    assert!(
+        t.last_toast()
+            .contains("no transfer or spectrum curve to smooth"),
+        "{}",
+        t.last_toast()
+    );
 }

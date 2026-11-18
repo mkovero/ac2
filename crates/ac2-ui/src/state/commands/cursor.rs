@@ -26,19 +26,17 @@ impl AppState {
         }
     }
 
-    /// The pane a jump reads: the focused frequency pane, else the transfer pane worked in
-    /// last, else the spectrum pane. A transfer pane counts while it shows the magnitude:
-    /// its peaks and notches are what a jump goes to.
+    /// The pane a jump reads: the focused one, when it is a frequency pane. A transfer pane
+    /// counts while it shows the magnitude: its peaks and notches are what a jump goes to.
+    /// No other pane stands in: the cursor would move by a curve the operator is not on.
     fn jump_pane(&self) -> Option<(PaneId, PaneKind)> {
-        let ok = |id: PaneId| match self.layout.kind(id) {
+        let id = self.layout.focus;
+        match self.layout.kind(id) {
             PaneKind::Transfer => (self.pane_modes(id).transfer == TransferView::Magnitude)
                 .then_some((id, PaneKind::Transfer)),
             PaneKind::Spectrum => Some((id, PaneKind::Spectrum)),
             _ => None,
-        };
-        ok(self.layout.focus)
-            .or_else(|| self.lead(PaneKind::Transfer).and_then(ok))
-            .or_else(|| self.lead(PaneKind::Spectrum).and_then(ok))
+        }
     }
 
     /// Puts the cursor on the next `kind` that way of the curve the pane draws inside the

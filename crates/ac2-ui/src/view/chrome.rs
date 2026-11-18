@@ -930,7 +930,7 @@ fn sidebar_lists(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
         if !rows.iter().any(|(_, r)| matches!(r.key, TreeKey::Trace(_))) && listed {
             ui.label(
                 RichText::new(format!(
-                    "{} captures the selected TF under it",
+                    "{} captures the focused pane's measurement under it",
                     key_hint(app, CommandId::Slot1)
                 ))
                 .small()

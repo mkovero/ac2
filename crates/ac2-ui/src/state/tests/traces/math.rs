@@ -40,17 +40,41 @@ fn slots_capture_and_replace() {
             ..
         }]
     ));
-    // Spectrum measurements capture too.
+    // A capture stores what the focused pane shows: the spectrum selected in the list is
+    // not on the transfer pane, whose own measurement is captured.
     t.st.rig.selected = Some(MeasId(2));
     let r = t.key("Ctrl+1");
-    assert!(matches!(
-        r.as_slice(),
-        [Request::Capture {
-            meas: MeasId(2),
-            slot: 1,
-            ..
-        }]
-    ));
+    assert!(
+        matches!(
+            r.as_slice(),
+            [Request::Capture {
+                meas: MeasId(1),
+                slot: 1,
+                ..
+            }]
+        ),
+        "{r:?}"
+    );
+    // The spectrum pane captures the spectrum, whatever the list has selected.
+    t.key("Alt+2");
+    t.st.rig.selected = Some(MeasId(1));
+    let r = t.key("Ctrl+1");
+    assert!(
+        matches!(
+            r.as_slice(),
+            [Request::Capture {
+                meas: MeasId(2),
+                slot: 1,
+                ..
+            }]
+        ),
+        "{r:?}"
+    );
+    // A pane with no curve to store says so.
+    t.key("Alt+4");
+    assert!(t.key("Ctrl+1").is_empty());
+    assert!(t.last_toast().contains("to capture"), "{}", t.last_toast());
+    t.key("Alt+1");
     // A trace deleted daemon-side frees its slot.
     t.conn(mirror(daemon_state()));
     assert!(t.st.slots()[2].is_none());

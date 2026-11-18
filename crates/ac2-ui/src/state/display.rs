@@ -144,12 +144,11 @@ pub(super) fn home_pane(kind: TraceKind) -> PaneKind {
 impl AppState {
     // ----- display offsets ---------------------------------------------------------------
 
-    /// The selected stored trace (any kind: every curve takes an offset), else the selected
-    /// live curve when the focused pane draws it compared (picked in the legend or the
-    /// list), else the live measurement of the focused pane (the spectrum pane's when it has
-    /// focus, else the transfer pane's). A locked trace refuses, saying so.
+    /// The selected stored trace when the focused pane draws it (any kind: every curve
+    /// takes an offset), else the live curve of the focused pane the keys act on
+    /// ([`Self::focused_live`]). A locked trace refuses, saying so.
     fn offset_target(&mut self) -> Option<OffsetTarget> {
-        if let Some(t) = self.selected_trace_meta().cloned() {
+        if let Some(t) = self.focused_trace().cloned() {
             if t.edit.locked {
                 self.warn(format!("{} is locked: its offset stays", trace_label(&t)));
                 return None;
@@ -157,17 +156,10 @@ impl AppState {
             return Some(OffsetTarget::Trace(t));
         }
         let focus = self.layout.focus_kind();
-        let pane = match focus {
-            PaneKind::Spectrum => PaneKind::Spectrum,
-            _ => PaneKind::Transfer,
-        };
-        if let Some(m) = self.selected_meas()
-            && focus == pane
-            && self.live_compared_on(pane, m, self.layout.focus)
-        {
-            return Some(OffsetTarget::Live(m.clone()));
-        }
-        match self.kind_meas(pane).cloned() {
+        let live = matches!(focus, PaneKind::Transfer | PaneKind::Spectrum)
+            .then(|| self.focused_live().cloned())
+            .flatten();
+        match live {
             Some(m) => Some(OffsetTarget::Live(m)),
             None => {
                 let how = self
@@ -177,10 +169,10 @@ impl AppState {
                         crate::keys::Scope::Global,
                     )
                     .map_or_else(
-                        || "select a stored trace with a click in the list".to_owned(),
-                        |v| format!("select a stored trace with {v} or a click in the list"),
+                        || "select one of its stored traces with a click".to_owned(),
+                        |v| format!("select one of its stored traces with {v} or a click"),
                     );
-                self.warn(format!("no {} measurement to offset ({how})", pane.what()));
+                self.warn(format!("this pane shows no live curve to offset ({how})"));
                 None
             }
         }

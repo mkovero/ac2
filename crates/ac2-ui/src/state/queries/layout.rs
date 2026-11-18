@@ -491,6 +491,8 @@ impl AppState {
     }
 
     /// Every hint of `pane` (the title's tooltip lists them whether or not the line shows).
+    /// With an Inputs row picked the focused pane's line opens with that row's keys: they
+    /// are laid over the pane's, which follow.
     pub fn pane_hints(
         &self,
         keymap: &Keymap,
@@ -502,6 +504,7 @@ impl AppState {
             .layout
             .view(id)
             .map_or(pane.scope(), |v| v.scope(self.three_d()));
-        crate::hints::line(keymap, scope, style)
+        let over = self.overlay_scope().filter(|_| self.layout.focus == id);
+        crate::hints::line_over(keymap, over, scope, style)
     }
 }

@@ -208,7 +208,6 @@ pub fn defaults() -> Vec<Binding> {
         // Alt+E: the EQ what-if editor (E is the phase reference, Shift+E notifications).
         (C::EqEditor, S::Transfer, alt(K::E)),
         (C::Target, S::Transfer, k(K::Z)),
-        (C::CoherenceMask, S::Transfer, k(K::B)),
         (C::Average, S::Transfer, k(K::M)),
         // P tracks extremes in both plots: min / max here, peak hold and peaks on the
         // spectrum. The phase views share Shift+P.
@@ -242,15 +241,11 @@ pub fn defaults() -> Vec<Binding> {
         (C::StartStop, S::Spl, k(K::S)),
         (C::SpectrumStyle, S::Spectrum, k(K::B)),
         (C::StartStop, S::Spectrum, k(K::S)),
-        // The IR view shows the transfer measurement: S starts and stops it there too.
-        (C::StartStop, S::Ir, k(K::S)),
         (C::PeakHold, S::Spectrum, k(K::P)),
         // G steps the focused pane's views, Shift+G back: one key pair for every pane, the
         // IR's displays among the views, so no view needs a second key to reach.
         (C::NextView, S::Transfer, k(K::G)),
         (C::PrevView, S::Transfer, sh(K::G)),
-        (C::NextView, S::Ir, k(K::G)),
-        (C::PrevView, S::Ir, sh(K::G)),
         (C::NextView, S::Spectrum, k(K::G)),
         (C::PrevView, S::Spectrum, sh(K::G)),
         (C::NextView, S::Spl, k(K::G)),
@@ -261,9 +256,8 @@ pub fn defaults() -> Vec<Binding> {
         (C::PrevView, S::Programme, sh(K::G)),
         // Shift+B, beside B (line / fill / bars): the spectrograph's history length.
         (C::SpectrographSpan, S::Spectrum, sh(K::B)),
-        // R resets the meter's display; Shift+R, a step further, starts a new log (after a
-        // confirmation: it discards show data).
-        (C::SplNewLog, S::Spl, sh(K::R)),
+        // R resets the meter's display. A new log has no key: it discards show data, and
+        // Shift+R on the meters beside it only resets readings.
         // The meter's weightings: Shift+F for the time weighting (Fast → Slow → Impulse;
         // plain F is full screen everywhere), Z for the frequency weighting (A → C → Z).
         // Letters only: the same keys on every layout.
@@ -307,6 +301,14 @@ pub fn defaults() -> Vec<Binding> {
         (C::TiltUp, S::Spectrograph3d, k(K::PageUp)),
         (C::TiltDown, S::Spectrograph3d, k(K::PageDown)),
     ];
+    // The IR view shows the transfer pane's measurement: what acts on the measurement
+    // there keeps its key here, so the two tables cannot drift apart.
+    let ir: Vec<(C, S, Chord)> = v
+        .iter()
+        .filter(|(c, s, _)| *s == S::Transfer && c.scopes().contains(&S::Ir))
+        .map(|(c, _, chord)| (*c, S::Ir, *chord))
+        .collect();
+    v.extend(ir);
     v.extend(RESERVED.iter().map(|(c, id)| (*id, S::Global, *c)));
     v.into_iter()
         .map(|(command, scope, chord)| Binding {
@@ -351,7 +353,6 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::ToggleSelected, "show/hide", 80),
                     hint(C::Slot1, "capture", 85),
                     hint(C::InsertDelay, "find delay", 70),
-                    hint(C::CoherenceMask, "coherence mask", 65),
                     hint(C::MinMax, "min/max", 55),
                     hint(C::SmoothCoarser, "smoothing", 60),
                 ]
@@ -376,12 +377,12 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
             const {
                 &[
                     hint(C::NextView, "view", 92),
+                    hint(C::StartStop, "start/stop", 70),
+                    hint(C::InsertDelay, "find delay", 85),
+                    hint(C::NudgeEarlier, "delay", 75),
+                    hint(C::ResetAverage, "reset", 65),
                     hint(C::ZoomIn, "zoom time", 80),
-                    hint(C::LevelZoomIn, "zoom level", 65),
                     hint(C::LevelFit, "fit level", 55),
-                    hint(C::NextInTree, "next row", 60),
-                    hint(C::ClosePane, "close pane", 45),
-                    hint(C::MaximisePane, "maximise", 50),
                 ]
             }
         }
@@ -392,7 +393,6 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::SplTimeWeighting, "F/S/I", 88),
                     hint(C::SplWeighting, "A/C/Z", 86),
                     hint(C::LeqWindows, "windows", 80),
-                    hint(C::SplNewLog, "new log", 50),
                     hint(C::MaximisePane, "maximise", 40),
                 ]
             }

@@ -435,8 +435,8 @@ impl AppState {
         self.overlay = Overlay::None;
     }
 
-    /// Whether `chord` starts the new SPL log in its confirmation: the key that asked
-    /// (Shift+R), pressed again; Enter only where the keymap leaves the command without a key.
+    /// Whether `chord` starts the new SPL log in its confirmation: the key the operator
+    /// gave the command, pressed again; Enter while it has none (the palette asked).
     pub(in crate::state) fn new_log_confirms(&self, chord: Chord) -> bool {
         match self.keys.key_hint(CommandId::SplNewLog, Scope::Spl) {
             Some(_) => self.keys.lookup(Scope::Spl, chord) == Some(CommandId::SplNewLog),
@@ -463,11 +463,17 @@ impl AppState {
         self.overlay = Overlay::None;
     }
 
-    /// M: averages the shown stored transfer traces, phase referred to the phase reference
-    /// when it is one of them, else to the first (decision 8b).
+    /// M: averages the stored transfer traces the focused transfer pane shows, phase
+    /// referred to the phase reference when it is one of them, else to the first
+    /// (decision 8b).
     pub(in crate::state) fn average(&mut self, method: AverageMethod, out: &mut Vec<Request>) {
+        let f = self.layout.focus;
+        if self.layout.kind(f) != PaneKind::Transfer {
+            self.warn(self.focus_transfer_first());
+            return;
+        }
         let shown: Vec<&TraceMeta> = self
-            .shown_transfer_traces()
+            .shown_transfer_traces(f)
             .into_iter()
             .filter(|t| matches!(t.kind, TraceKind::Transfer | TraceKind::Sweep))
             .collect();

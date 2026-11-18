@@ -20,7 +20,7 @@ impl AppState {
         out: &mut Vec<Request>,
     ) {
         let Some(target) = self.smooth_target() else {
-            self.warn("no transfer or spectrum measurement to smooth");
+            self.warn("this pane shows no transfer or spectrum curve to smooth");
             return;
         };
         let label = target.label();
@@ -197,11 +197,11 @@ impl AppState {
         self.call(out, Command::TraceUpdate { trace: id, edit }, what);
     }
 
-    /// The selected stored trace when its curve is on the transfer pane, where the trace
-    /// keys (U, J, `,` `.`, E) act on it; `Ok(None)`: they act on the live measurement. A
-    /// locked trace is refused here, saying so.
+    /// The selected stored trace when the focused pane draws it and it is a transfer curve,
+    /// where the trace keys (U, `,` `.`, E) act on it; `Ok(None)`: they act on the live
+    /// measurement. A locked trace is refused here, saying so.
     pub(super) fn transfer_trace_for_edit(&mut self) -> Result<Option<TraceMeta>, ()> {
-        let Some(t) = self.selected_trace_meta().cloned() else {
+        let Some(t) = self.focused_trace().cloned() else {
             return Ok(None);
         };
         if !matches!(
@@ -606,10 +606,7 @@ impl AppState {
             | C::Slot8
             | C::Slot9 => {
                 let slot = slot_of(c);
-                if let Some(m) = self.need_meas(
-                    &[MeasKind::publishes_tf, MeasKind::publishes_levels],
-                    "transfer, spectrum, RTA or math",
-                ) {
+                if let Some(m) = self.capture_source() {
                     // The slot's previous trace is replaced unless it is locked; a locked
                     // one only gives up the slot.
                     let replace = self.slots()[usize::from(slot - 1)]

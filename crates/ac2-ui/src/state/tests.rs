@@ -715,6 +715,8 @@ mod display;
 
 mod cursor_jump;
 
+mod pane_keys;
+
 mod overlay;
 
 mod ir_nav_tests;

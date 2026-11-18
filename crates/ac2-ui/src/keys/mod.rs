@@ -4,6 +4,11 @@
 //! Rules (PLAN §8.2), enforced by the tests at the bottom:
 //! - A binding belongs to a [`Scope`]. The active scope is the focused pane's; a key is looked
 //!   up in that scope first, then in `Global`. Within `Global ∪ scope` every chord is unique.
+//! - `Inputs` is laid over the active scope while an Inputs row is picked: its chords win,
+//!   every other key keeps the pane's meaning, so picking a row turns no pane key off.
+//! - `Ir` is the transfer pane in its impulse response view. The same measurement is on
+//!   screen, so every `Transfer` binding of a command that also lists `Ir` is the IR
+//!   view's too; the commands that read a frequency plot do not list it.
 //! - No defaults on `[ ] + - =` or other keys that need AltGr or a dead key on Nordic and
 //!   other European layouts.
 //! - A command is only bound in scopes where it means something ([`CommandId::scopes`]); the
@@ -39,7 +44,8 @@ pub enum Scope {
     Distortion,
     /// A Programme pane in focus.
     Programme,
-    /// A row of the Inputs list picked (clicked): its meters' keys.
+    /// A row of the Inputs list picked (clicked): its meters' keys, laid over the focused
+    /// pane's.
     Inputs,
     /// A spatial walk's pane in focus.
     Walk,
@@ -267,28 +273,28 @@ commands! {
     SplC => "spl_c", "C weighting", [Global];
     SplZ => "spl_z", "Z weighting", [Global];
 
-    ResetAverage => "reset_average", "Reset averaging", [Transfer, Spectrum, Spl, Spectrograph3d];
+    ResetAverage => "reset_average", "Reset averaging", [Transfer, Spectrum, Ir, Spl, Spectrograph3d];
     StartStop => "start_stop", "Start/stop", [Transfer, Spectrum, Ir, Spl, Spectrograph3d];
 
-    InsertDelay => "insert_delay", "Find first arrival", [Transfer];
+    InsertDelay => "insert_delay", "Find first arrival", [Transfer, Ir];
     EqEditor => "eq_editor", "EQ…", [Transfer];
-    InsertStrongest => "insert_strongest", "Find strongest peak", [Transfer];
-    TypeDelay => "type_delay", "Set delay…", [Transfer];
-    TrackDelay => "track_delay", "Delay tracking", [Transfer];
-    DelayDown => "delay_down", "Delay −1 sample", [Transfer];
-    DelayUp => "delay_up", "Delay +1 sample", [Transfer];
-    DelayDownFine => "delay_down_fine", "Delay −0.1 sample", [Transfer];
-    DelayUpFine => "delay_up_fine", "Delay +0.1 sample", [Transfer];
-    FinderAuto => "finder_auto", "Finder band auto", [Transfer];
-    FinderFull => "finder_full", "Finder band full", [Transfer];
-    FinderMid => "finder_mid", "Finder band mid", [Transfer];
-    FinderSub => "finder_sub", "Finder band sub", [Transfer];
-    FinderCustom => "finder_custom", "Finder band custom…", [Transfer];
-    FinderObservation => "finder_observation", "Finder observation…", [Transfer];
+    InsertStrongest => "insert_strongest", "Find strongest peak", [Transfer, Ir];
+    TypeDelay => "type_delay", "Set delay…", [Transfer, Ir];
+    TrackDelay => "track_delay", "Delay tracking", [Transfer, Ir];
+    DelayDown => "delay_down", "Delay −1 sample", [Transfer, Ir];
+    DelayUp => "delay_up", "Delay +1 sample", [Transfer, Ir];
+    DelayDownFine => "delay_down_fine", "Delay −0.1 sample", [Transfer, Ir];
+    DelayUpFine => "delay_up_fine", "Delay +0.1 sample", [Transfer, Ir];
+    FinderAuto => "finder_auto", "Finder band auto", [Transfer, Ir];
+    FinderFull => "finder_full", "Finder band full", [Transfer, Ir];
+    FinderMid => "finder_mid", "Finder band mid", [Transfer, Ir];
+    FinderSub => "finder_sub", "Finder band sub", [Transfer, Ir];
+    FinderCustom => "finder_custom", "Finder band custom…", [Transfer, Ir];
+    FinderObservation => "finder_observation", "Finder observation…", [Transfer, Ir];
     Invert => "invert", "Invert polarity", [Transfer];
     Offset => "offset", "Set offset…", [Transfer, Spectrum, Spectrograph3d];
-    NudgeEarlier => "nudge_earlier", "Delay −0.1 ms", [Transfer];
-    NudgeLater => "nudge_later", "Delay +0.1 ms", [Transfer];
+    NudgeEarlier => "nudge_earlier", "Delay −0.1 ms", [Transfer, Ir];
+    NudgeLater => "nudge_later", "Delay +0.1 ms", [Transfer, Ir];
     PhaseReference => "phase_reference", "Set phase reference", [Transfer];
     Target => "target", "Target curve…", [Transfer];
     TargetFile => "target_file", "Load target file…", [Transfer];

@@ -135,8 +135,8 @@ fn traces_are_selected_from_the_keyboard() {
     // Shift+V goes the other way, from live to the last shown trace.
     t.key("Shift+V");
     assert_eq!(t.st.rig.selected_trace, Some(TraceId(13)));
-    // K then changes the selected trace, though it has no slot.
-    assert_eq!(smoothing_set(&t.key("K")).0, "t13");
+    // An imported trace is on no pane: selected, it leaves K with the pane's measurement.
+    assert_eq!(smoothing_set(&t.key("K")).0, "m1");
     t.key("Shift+V");
     assert_eq!(t.st.rig.selected_trace, Some(TraceId(12)));
     // Alt+V reaches the hidden ones too.
@@ -299,7 +299,7 @@ fn the_selected_trace_is_renamed() {
 #[test]
 fn trace_keys_act_on_the_selected_trace() {
     let mut t = T::new();
-    let mut locked = stored(12, None, 2);
+    let mut locked = captured(12, None, 2);
     locked.edit.locked = true;
     let mut target = stored(15, None, 2);
     target.kind = TraceKind::Target;
@@ -310,12 +310,15 @@ fn trace_keys_act_on_the_selected_trace() {
         scale: LevelScale::Dbfs,
         level: ac2_proto::model::SpecLevel::Tone,
     };
+    // A sweep run moved under Main L: the transfer pane draws it with the captures.
+    let mut sweep = sweep_meta(14);
+    sweep.edit.owner = ac2_proto::model::TraceOwner::Meas { meas: MeasId(1) };
     t.conn(with_traces(vec![
-        stored(13, None, 2),
+        captured(13, None, 2),
         locked,
         target,
         spec,
-        sweep_meta(14),
+        sweep,
     ]));
     // An unslotted capture: U, J, , . and E change it, not the live measurement.
     t.st.apply(Msg::SelectTrace(TraceId(13)), &t.keys);
@@ -427,9 +430,16 @@ fn the_sweep_pane_follows_the_selection_and_selects() {
     assert_eq!(t.last_toast(), "t15 selected");
     t.key("Shift+V");
     assert_eq!(t.st.rig.selected_trace, Some(TraceId(14)));
-    // U on the sweep pane is its unit; on the transfer pane it inverts the selected sweep.
+    // U is no key of the sweep pane. The transfer pane shows Main L and does not draw the
+    // selected run: U there inverts what it shows, the live curve.
     assert!(t.key("U").is_empty());
     t.key("Alt+1");
+    assert!(t.key("U").is_empty());
+    assert!(t.st.edit(MeasId(1)).inverted);
+    // Showing the sweep, the transfer pane draws its runs: U inverts the selected one.
+    let pane = t.st.layout.focus;
+    t.drop_meas(pane, MeasId(5));
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(14)));
     assert_eq!(trace_update(&t.key("U")).0, TraceId(14));
     // A click on a sweep in the list does the same.
     t.st.apply(Msg::SelectTrace(TraceId(15)), &t.keys);

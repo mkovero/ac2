@@ -154,6 +154,10 @@ fn every_command_is_reachable() {
         // Remote inputs are set up once per show, from the Audio I/O and Connection pages.
         CommandId::AddRemoteInput,
         CommandId::BetweenRigs,
+        // B is the spectrum's style key in the pane beside it: one letter, one meaning.
+        CommandId::CoherenceMask,
+        // It discards a show's log, and Shift+R on the other meters only resets readings.
+        CommandId::SplNewLog,
     ];
     let m = Keymap::default();
     for c in CommandId::ALL {
@@ -173,7 +177,6 @@ fn learned_bindings_carry_over() {
         ("U", CommandId::Invert),
         ("J", CommandId::Offset),
         ("Z", CommandId::Target),
-        ("B", CommandId::CoherenceMask),
         ("M", CommandId::Average),
         ("Shift+P", CommandId::PhaseView),
         ("Ctrl+1", CommandId::Slot1),
@@ -768,4 +771,116 @@ fn the_3d_view_keeps_the_spectrum_panes_keys() {
             );
         }
     }
+}
+
+/// B is the spectrum's style key and nothing else: the transfer pane beside it leaves the
+/// letter free, its coherence mask is in the palette.
+#[test]
+fn b_means_one_thing() {
+    let m = Keymap::default();
+    let b = Chord::parse("B").expect("B");
+    assert_eq!(m.lookup(Scope::Spectrum, b), Some(CommandId::SpectrumStyle));
+    for scope in Scope::ALL {
+        if scope != Scope::Spectrum {
+            assert_eq!(m.lookup(scope, b), None, "{scope:?}");
+        }
+    }
+    assert!(
+        hints(Scope::Transfer)
+            .iter()
+            .all(|h| h.command != CommandId::CoherenceMask)
+    );
+}
+
+/// Shift+R resets every input's meters where there are meters; it never starts a new SPL
+/// log, which discards show data.
+#[test]
+fn shift_r_never_discards_a_log() {
+    let m = Keymap::default();
+    let c = Chord::parse("Shift+R").expect("Shift+R");
+    assert_eq!(m.lookup(Scope::Spl, c), None);
+    assert_eq!(
+        m.lookup(Scope::Programme, c),
+        Some(CommandId::LevelsResetAll)
+    );
+    assert_eq!(m.lookup(Scope::Inputs, c), Some(CommandId::LevelsResetAll));
+    assert!(
+        m.bindings()
+            .iter()
+            .all(|b| b.command != CommandId::SplNewLog)
+    );
+}
+
+/// The IR view of a transfer pane has every transfer key that acts on the measurement, on
+/// the same chord; the keys that read a frequency plot are not there.
+#[test]
+fn the_ir_view_keeps_the_transfer_measurement_keys() {
+    let m = Keymap::default();
+    let c = |s: &str| Chord::parse(s).expect(s);
+    for (chord, cmd) in [
+        ("S", CommandId::StartStop),
+        ("R", CommandId::ResetAverage),
+        ("X", CommandId::InsertDelay),
+        ("Shift+X", CommandId::InsertStrongest),
+        ("D", CommandId::TypeDelay),
+        ("Y", CommandId::TrackDelay),
+        (",", CommandId::NudgeEarlier),
+        (".", CommandId::NudgeLater),
+        ("Ctrl+,", CommandId::DelayDown),
+        ("Ctrl+.", CommandId::DelayUp),
+        ("Alt+,", CommandId::DelayDownFine),
+        ("Alt+.", CommandId::DelayUpFine),
+        ("G", CommandId::NextView),
+        ("Shift+G", CommandId::PrevView),
+    ] {
+        assert_eq!(m.lookup(Scope::Ir, c(chord)), Some(cmd), "{chord}");
+        assert_eq!(m.lookup(Scope::Transfer, c(chord)), Some(cmd), "{chord}");
+    }
+    // What reads the frequency plot, or changes only how it is drawn.
+    for chord in [
+        "K", "Shift+K", "P", "Shift+P", "Alt+P", "Alt+N", "Alt+D", "Z", "E", "U", "J", "M", "B",
+    ] {
+        let own = m
+            .bindings()
+            .iter()
+            .any(|b| b.scope == Scope::Ir && b.chord == c(chord));
+        assert!(!own, "{chord} is bound in the IR view");
+    }
+    // Every IR binding is the transfer pane's: no key changes meaning between the views.
+    for b in m.bindings().iter().filter(|b| b.scope == Scope::Ir) {
+        assert_eq!(
+            m.lookup(Scope::Transfer, b.chord),
+            Some(b.command),
+            "{}",
+            b.chord
+        );
+    }
+}
+
+/// A scope laid over the active one takes its own chords and leaves the rest.
+#[test]
+fn an_overlay_scope_takes_only_its_own_chords() {
+    let m = Keymap::default();
+    let c = |s: &str| Chord::parse(s).expect(s);
+    let over = Some(Scope::Inputs);
+    assert_eq!(
+        m.lookup_over(over, Scope::Transfer, c("R")),
+        Some(CommandId::LevelsReset)
+    );
+    assert_eq!(
+        m.lookup_over(over, Scope::Spl, c("Shift+R")),
+        Some(CommandId::LevelsResetAll)
+    );
+    assert_eq!(
+        m.lookup_over(over, Scope::Transfer, c("X")),
+        Some(CommandId::InsertDelay)
+    );
+    assert_eq!(
+        m.lookup_over(over, Scope::Spectrum, c("G")),
+        Some(CommandId::NextView)
+    );
+    assert_eq!(
+        m.lookup_over(None, Scope::Transfer, c("R")),
+        Some(CommandId::ResetAverage)
+    );
 }

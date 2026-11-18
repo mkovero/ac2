@@ -249,7 +249,7 @@ impl AppState {
             }
             Overlay::None => {}
         }
-        if let Some(c) = keymap.lookup(self.scope(), chord) {
+        if let Some(c) = self.key_command(keymap, chord) {
             self.run_key_command(c, chord, keymap, out);
         }
     }
@@ -263,7 +263,7 @@ impl AppState {
         keymap: &Keymap,
         out: &mut Vec<Request>,
     ) {
-        let Some(c) = keymap.lookup(self.scope(), chord) else {
+        let Some(c) = self.key_command(keymap, chord) else {
             return;
         };
         if RESERVED.iter().any(|(_, id)| *id == c) || c == CommandId::StimulusTakeOver {

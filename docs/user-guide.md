@@ -546,7 +546,10 @@ correlation means depends on how they are set up (a coincident XY pair reads hig
 AB pair low), and ac2 draws no conclusion from it.
 
 A click picks a row (outlined); then **R** clears its max, overs and loudness (a pair: both
-sides, and the pair's loudness), **Shift+R** those of every input. Drag a row onto a pane to
+sides, and the pair's loudness), **Shift+R** those of every input. Only those two keys go to
+the row: every other key keeps what it does in the focused pane (**G** still steps its view,
+**S** starts and stops its measurement), and the pane's hint line lists the row's two keys
+first. Drag a row onto a pane to
 meter it big there, in a [Programme pane](#programme-pane) (a pair opens on its goniometer;
 **G** steps to its meters). Tab, a click on a pane or on a list row leaves the pick.
 
@@ -833,8 +836,8 @@ Each is its own view of the pane (**G** steps them).
 - **Coherence (γ²)** is how much of the measured energy the reference explains. It is
   computed per FFT bin and averaged over each column, weighted by the reference's power in
   each bin, so it does not drop at a coarser resolution or where phase turns quickly. It is drawn as trace transparency, its own curve,
-  or a mask blanking the traces where γ² is below a threshold (**B**: off, 0.3, 0.5, 0.7,
-  0.9).
+  or a mask blanking the traces where γ² is below a threshold (palette *Coherence mask*:
+  off, 0.3, 0.5, 0.7, 0.9; it has no key, **B** is the spectrum pane's style).
 - **Averaging** accumulates the cross- and auto-spectra; **R** resets it. To keep a result,
   capture it (**Ctrl+1 … 9**) or stop the measurement (**S**).
 - **Smoothing** (1/3 … 1/48 octave) is applied after coherence, so it never makes bad data
@@ -881,6 +884,11 @@ linear amplitude, dB re its peak, or energy-time curve (**Shift+G** from magnitu
 the ETC in one step). Coherence is always a view of its own; Settings › Display can also
 draw it over the magnitude. A stopped measurement draws no live IR (its other
 views keep the last curve, tagged `stopped`); a selected capture's stored IR still shows.
+The keys that act on the measurement work in these views as in the others: **S**, **R**,
+**X** / **Shift+X** (find the delay), **D**, **Y**, **,** / **.** and their Ctrl / Alt forms.
+The keys that read or dress the frequency plot do nothing here (smoothing **K**, min / max
+**P**, the cursor jumps, the target **Z**, the phase reference **E**, polarity **U**, the
+offset **J**, the average **M**).
 
 A command about a kind (an SPL view key, the sweep's views) goes to the pane of that kind
 focused last; with none on screen no pane changes and a toast says so (*no SPL pane: drag FOH SPL onto
@@ -957,12 +965,21 @@ A row of the measurement list clicked (or reached with **Tab** / **Shift+Tab**):
 Which measurement the keys act on:
 
 - A click inside a pane focuses it; the selection stays on the row chosen in the list.
-- Keys of a pane act on what that pane shows: **S** and **R** on the focused pane's
-  measurement (they say what to drag there when it shows none), **X** and the delay keys on the
-  focused transfer pane's measurement (on another pane: the selected one), **Space** on the
-  sweep view on the focused sweep pane's sweep.
-- Keys of the selection (**A**, **C**, **K**, **Delete**, the offset, colour, capture
-  **Ctrl+1…9**, mic curve) act on the row selected in the list, whatever pane has the focus.
+- A pane's keys act on what the focused pane shows, whatever row is selected in the
+  list: **S** and **R** on its measurement (they say what to drag there when it shows
+  none), **X** and the delay keys on a transfer pane's measurement, capture
+  **Ctrl+1…9**, smoothing **K** and the offset on its curve, the cursor jumps along its
+  curve, **M** on the stored traces it shows, **Space** on the sweep view on the focused
+  sweep pane's sweep. No key reaches past its pane: on a pane that shows nothing a key
+  can act on, the key says so and changes nothing.
+- A pane can draw several curves. The selected one gets the keys when the focused pane
+  draws it: a stored trace (a click on its legend row or list row, or **V**) for **K**,
+  the offset, **U**, **,** / **.**, **E** and **P**; a live curve compared into the pane
+  or a math channel of its group for capture and the offset. A trace or measurement
+  selected in the list that the focused pane does not draw leaves the keys with the
+  pane's own measurement; the pane's title names the stored trace the keys act on.
+- Keys of the selection (**A**, **C**, **Delete**, colour, mic curve, rename) act on the
+  row selected in the list, whatever pane has the focus.
 
 #### What A and Delete act on: the item selected last
 
@@ -1178,7 +1195,8 @@ Settings › Display and the palette (*Theme*).
 
 #### Cursor jumps and the mark (Alt+P, Alt+N, Alt+D)
 
-On a transfer magnitude or a spectrum pane the comparison cursor (**Shift+T**) can jump:
+On a transfer magnitude or a spectrum pane the comparison cursor (**Shift+T**) can jump,
+along the focused pane's curve only (no other pane stands in):
 **Alt+P** to the next peak up in frequency, **Alt+Shift+P** to the one below, **Alt+N** /
 **Alt+Shift+N** the same for notches. A jump turns the cursor on when it is off. It reads
 one curve, the one min / max tracking follows: the selected curve when the pane draws it,
@@ -1724,8 +1742,9 @@ transfer legend row say the smoothing.
 - **RTA** bands already are fractional-octave: **K** says so and changes nothing.
 - On a **live measurement** the keys act on the focused pane's measurement; nothing
   restarts.
-- On a **stored trace**: select it (**V** / **Shift+V**, or click it), then **K**. A pane
-  that draws it names it in its title (`Sweep 2: smoothing off`). Back to live: **V** past the last trace, click
+- On a **stored trace**: select it (**V** / **Shift+V**, or click it), then **K** on a
+  pane that draws it, which names it in its title (`Sweep 2: smoothing off`). On a pane
+  that does not draw it **K** stays with that pane's measurement. Back to live: **V** past the last trace, click
   the trace again, palette *Select live*, or select a measurement.
 - CLI: `ac2 trace smooth <trace> 1/12` (`1/3` … `1/48`, `12`, `none`); a transfer or sweep
   trace keeps its mode unless `--phase` or `--magnitude-only`.
@@ -2331,8 +2350,9 @@ unsmoothed.
 
 ### Capturing and selecting
 
-- **Ctrl+1 … Ctrl+9** capture the selected measurement into slot 1–9 (replacing what was
-  there); **1 … 9** show and hide a slot.
+- **Ctrl+1 … Ctrl+9** capture the focused pane's measurement into slot 1–9 (replacing
+  what was there): its own, or the selected live curve when the pane draws it (one
+  compared into it, a math channel of its group). **1 … 9** show and hide a slot.
 - The tree lists every trace under its owner: name, kind (*capture*, *sweep run*,
   *imported*, *average*, *A ÷ B*, *target* …), slot, *hidden*, colour dot. Within a
   measurement slotted traces come first by slot, then the rest oldest first. A click selects
@@ -2348,7 +2368,7 @@ unsmoothed.
 
 ### Trace keys
 
-On the selected trace when its curve is on the transfer pane (else the live measurement):
+On the selected trace when the focused pane draws it (else on the pane's live measurement):
 
 | Key | Does |
 |---|---|
@@ -2374,9 +2394,10 @@ response on an IR view is not named there.
 | **Alt+Home** | back to 0 dB |
 | **J** | to a typed value (transfer and spectrum panes) |
 
-The selected curve is the selected stored trace (any kind), else a live curve compared
-into the focused pane once picked there (legend or list), else the focused pane's
-measurement. A trace's offset is part of its record (`ac2 trace list`, sessions, exports); a
+The selected curve is the selected stored trace (any kind) when the focused pane draws
+it, else a live curve compared into the focused pane once picked there (legend or list),
+else the focused pane's measurement. A pane with no curves (SPL, Programme) has nothing to
+offset. A trace's offset is part of its record (`ac2 trace list`, sessions, exports); a
 live measurement's is kept with the measurement on the daemon (`ac2 meas set <meas> --offset
 6`, sessions), levels as measured: the curve keeps it in every pane that draws it. The plot says it beside the curve
 (`Main L S2 · Δt 0.00 ms · +3.0 dB`, `Main L S2 · offset +3.0 dB`), so a spread is never read
@@ -2407,7 +2428,7 @@ as a level difference. A locked trace keeps its offset.
   across panes; **Shift+←/→** move it.
 - **C** on a pane ticks other measurements into it: their groups draw behind its lead
   (an Imported trace draws nowhere: move it under a measurement first).
-- **M** averages the shown stored traces of the transfer pane's group (power; complex and
+- **M** averages the shown stored traces of the focused transfer pane's group (power; complex and
   coherence-weighted in the palette). For ÷ × + −, **Shift+M** with the trace selected
   starts with it as A.
 - **Z** adds a target curve: from a file or one of the built-in curves (below); the palette
@@ -3346,12 +3367,15 @@ over everything measured (LCeq and LZeq too when a window uses them), and time n
 Narrow panes shorten it (`2:14:05 · total 97.8`); after 48 hours it says "last 48 h".
 Without the history strip it is not shown; `ac2 spl leq watch` always prints it.
 
-#### A new log (Shift+R)
+#### A new log
 
-**Shift+R** in the SPL pane (palette *New SPL log…*) starts a **new log**, for the
+Palette *New SPL log…* with the SPL pane showing the meter starts a **new log**, for the
 show after a loud soundcheck: windows, states, alarms, clock and total start over; windows
-and limits stay. It asks first, naming the run that ends; **Shift+R** again starts it (**Enter** does
-nothing there), **N** or **Esc** keeps the current log. The ended log can be exported
+and limits stay. It has no key of its own: it discards show data, and **Shift+R** on the
+meters beside it only resets readings. It asks first, naming the run that ends; **Enter**
+starts it, **N** or **Esc** keeps the current log. With a key given to it in `keys.toml`
+(`[spl] spl_new_log`), that key asks and the same key again starts it; **Enter** then does
+nothing there. The ended log can be exported
 (`ac2 spl leq export --previous`) until the next new log or daemon restart.
 
 #### Setting windows and limits (Shift+L)
@@ -3771,7 +3795,7 @@ Everything in the app is reachable from the keyboard.
   other European layouts.
 
 The stimulus cluster is fixed: **Space** arm, **Enter** fire, **Esc** stop, **↑/↓** level
-±1 dB (Shift: ±3 dB). **Alt+↑/↓** move the selected curve's display offset instead,
+±1 dB (Shift: ±3 dB). **Alt+↑/↓** move the display offset of the focused pane's curve instead,
 **Ctrl+↑/↓** pan the level axis.
 
 **An open window owns the keyboard.** With the help, the palette, a prompt, a dialog or
@@ -3965,7 +3989,6 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `.` | Delay +0.1 ms | `nudge_later` |
 | `E` | Set phase reference | `phase_reference` |
 | `Z` | Target curve… | `target` |
-| `B` | Coherence mask | `coherence_mask` |
 | `M` | Average power | `average` |
 | `P` | Min/max tracking | `min_max` |
 | `Shift+P` | Phase view | `phase_view` |
@@ -4005,7 +4028,18 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 
 | Keys | Command | `keys.toml` |
 |---|---|---|
+| `R` | Reset averaging | `reset_average` |
 | `S` | Start/stop | `start_stop` |
+| `X` | Find first arrival | `insert_delay` |
+| `Shift+X` | Find strongest peak | `insert_strongest` |
+| `D` | Set delay… | `type_delay` |
+| `Y` | Delay tracking | `track_delay` |
+| `Ctrl+,` | Delay −1 sample | `delay_down` |
+| `Ctrl+.` | Delay +1 sample | `delay_up` |
+| `Alt+,` | Delay −0.1 sample | `delay_down_fine` |
+| `Alt+.` | Delay +0.1 sample | `delay_up_fine` |
+| `,` | Delay −0.1 ms | `nudge_earlier` |
+| `.` | Delay +0.1 ms | `nudge_later` |
 | `G` | Next view | `next_view` |
 | `Shift+G` | Previous view | `prev_view` |
 
@@ -4017,7 +4051,6 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `S` | Start/stop | `start_stop` |
 | `G` | Next view | `next_view` |
 | `Shift+G` | Previous view | `prev_view` |
-| `Shift+R` | New SPL log… | `spl_new_log` |
 | `Shift+F` | Time weighting | `spl_time_weighting` |
 | `Z` | Frequency weighting | `spl_weighting` |
 
@@ -4129,6 +4162,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Flat target | `target_flat` |
 | House tilt target… | `target_tilt` |
 | Loudness shift… | `target_loudness` |
+| Coherence mask | `coherence_mask` |
 | Coherence placement | `coherence_placement` |
 | Legend top-left | `legend_top_left` |
 | Legend top-right | `legend_top_right` |
@@ -4156,6 +4190,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Band Leq view | `spl_show_bands` |
 | Leq style | `spl_leq_style` |
 | Leq history | `spl_leq_history` |
+| New SPL log… | `spl_new_log` |
 | Export Leq log… | `spl_log_export` |
 | Export previous Leq log… | `spl_log_export_previous` |
 | Distortion unit | `distortion_unit` |
@@ -4170,10 +4205,10 @@ The least used go first on a narrow pane; `G/Shift+G` steps the pane's views for
 
 | Pane | Hint line |
 |---|---|
-| Transfer function | `V` select trace · `G/Shift+G` view · `A` show/hide · `Ctrl+1` capture · `X` find delay · `B` coherence mask · `P` min/max · `K` smoothing · `H` all keys |
+| Transfer function | `V` select trace · `G/Shift+G` view · `A` show/hide · `Ctrl+1` capture · `X` find delay · `P` min/max · `K` smoothing · `H` all keys |
 | Spectrum / RTA | `S` start/stop · `P` peaks · `G/Shift+G` view · `K` smoothing · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
-| Transfer: impulse response view | `G/Shift+G` view · `I` zoom time · `Ctrl+I` zoom level · `Shift+Home` fit level · `Tab` next row · `Q` close pane · `W` maximise · `H` all keys |
-| SPL | `G/Shift+G` view · `Shift+F` F/S/I · `Z` A/C/Z · `Shift+L` windows · `Shift+R` new log · `W` maximise · `H` all keys |
+| Transfer: impulse response view | `G/Shift+G` view · `S` start/stop · `X` find delay · `,/.` delay · `R` reset · `I` zoom time · `Shift+Home` fit level · `H` all keys |
+| SPL | `G/Shift+G` view · `Shift+F` F/S/I · `Z` A/C/Z · `Shift+L` windows · `W` maximise · `H` all keys |
 | Sweep / distortion | `Shift+S` new sweep · `V` select trace · `G/Shift+G` view · `E` reference · `W` maximise · `Q` close pane · `H` all keys |
 | Programme | `R` reset · `Shift+R` reset all · `G/Shift+G` view · `T` grid · `W` maximise · `Q` close pane · `H` all keys |
 | Inputs list row | `R` reset · `Shift+R` reset all · `Tab` measurements · `Shift+Tab` back · `H` all keys |

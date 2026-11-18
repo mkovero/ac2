@@ -182,13 +182,26 @@ impl Keymap {
 
     /// The command `chord` runs with `scope` active.
     pub fn lookup(&self, scope: Scope, chord: Chord) -> Option<CommandId> {
+        self.lookup_over(None, scope, chord)
+    }
+
+    /// [`Keymap::lookup`] with `over` laid over the active scope: a chord bound in `over`
+    /// runs its command there, every other chord keeps its meaning.
+    pub fn lookup_over(
+        &self,
+        over: Option<Scope>,
+        scope: Scope,
+        chord: Chord,
+    ) -> Option<CommandId> {
         let find = |s: Scope| {
             self.bindings
                 .iter()
                 .find(|b| b.scope == s && b.chord == chord)
                 .map(|b| b.command)
         };
-        find(scope).or_else(|| find(Scope::Global))
+        over.and_then(find)
+            .or_else(|| find(scope))
+            .or_else(|| find(Scope::Global))
     }
 
     /// Chords of `command` in `scope`.
