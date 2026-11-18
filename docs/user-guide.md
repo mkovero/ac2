@@ -732,6 +732,28 @@ accident:
   (default −10 dBFS RMS);
 - loading a session or restarting the daemon comes up disarmed.
 
+### Choosing the signal
+
+**Shift+J** (palette: *Set stimulus signal…*) asks what the generator plays on the live
+views: `pink` (the default), `white`, or a sine by its frequency, typed as in every
+frequency field (`997`, `1k`, `1.5 kHz`). The choice stays until you change it: a sweep run
+and a visit to the sweep view do not drop it, and a sweep always plays its own signal.
+Chosen while armed or playing, it takes effect at once, as a level does. The top bar names
+a signal other than pink before the level (`sine 999.76 Hz −20.0 dBFS → out 1`); the level
+rules, the ceiling and the arm / fire / stop keys are the same for every signal.
+
+**Bin lock.** A sine typed while the focused pane shows a spectrum measurement is moved to
+the nearest bin of that spectrum's FFT (of its longest window when it is
+multi-resolution), and the app says what it set: `sine 999.76 Hz · on a bin of Main L`. On
+a bin the sine has a whole number of periods in the window: a rectangular window, which
+can read a sine nowhere else, reads it, and with any window none of the fundamental leaks
+into THD+N ([Harmonics of a sine](#harmonics-of-a-sine)). The bin belongs to that
+measurement at the session's sample rate; a spectrum with another FFT length may see the
+same sine between its bins. Add `exact` (`1k exact`) to keep the frequency as typed; so it
+stays on any other pane, an RTA included, and then the app says `sine 1000 Hz · as typed,
+not moved onto an FFT bin`. The prompt opens with the current choice at its full
+frequency, so Enter on it never moves a sine off its bin.
+
 ### What Space and Enter start
 
 | Focused view | Space | Enter |
@@ -1352,10 +1374,10 @@ While the generator fires a sine, every live spectrum reads it, and its pane (th
 spectrograph alone too) shows the **harmonics plate** in the plot's bottom-left corner,
 left of the fundamental so it covers none of the harmonics it names, above the window
 labels of a multi-resolution spectrum: a plate like the others, to drag, size and
-double-click back. The app
-cannot start a sine yet; the command line does: `ac2 gen sine --freq 1khz --out 1
---level -20dbfs --lock <meas>`. The plate goes when the sine stops, and **T** to traces only hides it with
-its marks.
+double-click back. Start the sine from the app with **Shift+J** on the spectrum's pane
+([Choosing the signal](#choosing-the-signal)), or from the command line: `ac2 gen sine
+--freq 1khz --out 1 --level -20dbfs --lock <meas>`. The plate goes when the sine stops,
+and **T** to traces only hides it with its marks.
 
 ```
 sine 999.02 Hz · on bin
@@ -1390,8 +1412,9 @@ is above this spectrum's range`, `… no sine in this input`. A ratio never read
 
 **On bin or between bins.** A sine on a bin centre fits a whole number of periods in the
 FFT: the window leaks nothing of it and the reading is exact with any window.
-`--lock <meas>` moves the frequency you asked for to the nearest bin of that spectrum
-measurement (of its longest window when it is multi-resolution) and prints it; the plate's
+`--lock <meas>` (in the app: **Shift+J** on the spectrum's pane) moves the frequency you
+asked for to the nearest bin of that spectrum measurement (of its longest window when it
+is multi-resolution) and prints it; the plate's
 first line shows what was played. Between bins the window spreads part of the sine around
 it. That is counted in THD+N, and while it is within 10 dB of the figure the row says so
 and reads as a limit: `THD+N  < −31.0 dB · window leakage (sine between bins)` — the
@@ -3787,6 +3810,7 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Shift+↑` | Stimulus level +3 dB | `level_up_coarse` |
 | `Shift+↓` | Stimulus level −3 dB | `level_down_coarse` |
 | `L` | Set stimulus level… | `stimulus_level` |
+| `Shift+J` | Set stimulus signal… | `stimulus_signal` |
 | `Alt+1` | Focus pane 1 | `focus_pane_1` |
 | `Alt+2` | Focus pane 2 | `focus_pane_2` |
 | `Alt+3` | Focus pane 3 | `focus_pane_3` |

@@ -255,6 +255,7 @@ mod tests {
             ("previous view", CommandId::PrevView),
             ("stim stop", CommandId::StimulusStop),
             ("set stim", CommandId::StimulusLevel),
+            ("set signal", CommandId::StimulusSignal),
             ("slot 3", CommandId::Slot3),
             ("open audio", CommandId::OpenSession),
             ("open session", CommandId::SessionLoad),
@@ -326,13 +327,20 @@ mod tests {
             ("remove", CommandId::DeleteSelected),
             ("microphone", CommandId::Calibrations),
             ("calibration", CommandId::Calibrations),
-            ("thd", CommandId::SweepNew),
+            ("chirp", CommandId::SweepNew),
+            ("tone", CommandId::StimulusSignal),
+            ("white", CommandId::StimulusSignal),
         ] {
             for active in [Scope::Transfer, Scope::Spectrum, Scope::Spl] {
                 let r = search(q, &k, active);
                 assert_eq!(r.first().map(|e| e.command), Some(want), "{q}: {r:?}");
             }
         }
+        // THD is read two ways, and the word leads to both: a sine's harmonics on the
+        // spectrum and the sweep's distortion over frequency.
+        let r = search("thd", &k, Scope::Spectrum);
+        let first: Vec<CommandId> = r.iter().take(2).map(|e| e.command).collect();
+        assert_eq!(first, [CommandId::StimulusSignal, CommandId::SweepNew]);
     }
 
     /// A keyword is never on the row: the row is the command's title and key, nothing of

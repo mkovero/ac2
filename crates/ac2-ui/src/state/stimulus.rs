@@ -27,6 +27,40 @@ impl AppState {
         Ok(())
     }
 
+    /// The signal prompt's text applied: the generator's choice for the live views. A sine
+    /// typed without `exact` while the focused pane shows a spectrum measurement goes onto
+    /// the nearest bin of the FFT that measurement reads it on: only there a rectangular
+    /// window can read it, and no window leaks it into THD+N.
+    pub(super) fn set_signal_text(
+        &mut self,
+        text: &str,
+        out: &mut Vec<Request>,
+    ) -> Result<(), String> {
+        let rate = self
+            .daemon()
+            .and_then(|s| s.session.open.as_ref())
+            .map(|o| o.sample_rate_hz);
+        let mut choice = SignalChoice::parse(text, rate)?;
+        let mut on_bin_of = None;
+        if let SignalChoice::Sine { freq, exact: false } = &mut choice
+            && let Some(fs) = rate
+            && let Some(m) = self.pane_meas(self.layout.focus)
+            && let MeasKind::Spectrum { config } = &m.config.kind
+        {
+            freq.0 = config.resolution.nearest_bin(freq.0, f64::from(fs));
+            on_bin_of = Some(m.config.name.clone());
+        }
+        self.rig.stimulus.generator = choice;
+        self.toast(choice.chosen_text(on_bin_of.as_deref()));
+        // A sweep set up keeps its own signal; the choice is what the next Space on a live
+        // view arms.
+        if self.rig.sweep.plan.is_none() {
+            self.rig.stimulus.signal = choice.signal();
+            self.resend_stimulus(out);
+        }
+        Ok(())
+    }
+
     /// Sends the current settings when armed or firing (level / output change).
     pub(super) fn resend_stimulus(&mut self, out: &mut Vec<Request>) {
         let firing = match self.rig.stimulus.phase {
@@ -149,13 +183,11 @@ impl AppState {
         }
     }
 
-    /// The generator as the live views play it: never a sweep signal.
+    /// The generator as the live views play it: the operator's choice, which is never a
+    /// sweep signal.
     pub(super) fn generator_stimulus(&self) -> NextStimulus {
         NextStimulus::Generator {
-            signal: match self.rig.stimulus.signal {
-                Signal::Ess { .. } => Signal::Pink,
-                s => s,
-            },
+            signal: self.rig.stimulus.generator.signal(),
             level: self.rig.stimulus.level,
             outputs: self.rig.stimulus.outputs.clone(),
             labels: self.daemon().map(|s| s.outputs.clone()).unwrap_or_default(),
@@ -454,10 +486,10 @@ impl AppState {
         });
     }
 
-    /// A stop ends the sweep set-up: the next arm is noise again.
+    /// A stop ends the sweep set-up: the next arm is the generator's chosen signal again.
     pub(super) fn end_sweep_mode(&mut self) {
         if self.rig.sweep.plan.take().is_some() {
-            self.rig.stimulus.signal = Signal::Pink;
+            self.rig.stimulus.signal = self.rig.stimulus.generator.signal();
         }
     }
 

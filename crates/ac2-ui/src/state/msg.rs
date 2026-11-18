@@ -10,6 +10,8 @@ pub const RECORD_MAX_S: f64 = 3600.0;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PromptKind {
     StimulusLevel,
+    /// What the generator plays for the live views: a noise or a sine.
+    StimulusSignal,
     Offset(MeasId),
     Delay(MeasId),
     /// A file to import as a trace or target curve.
@@ -49,6 +51,7 @@ impl PromptKind {
     pub fn label(self) -> &'static str {
         match self {
             PromptKind::StimulusLevel => "Stimulus level (dBFS)",
+            PromptKind::StimulusSignal => ac2_scene::stimulus::SIGNAL_PROMPT,
             PromptKind::Offset(_) => "Display offset (dB)",
             PromptKind::TraceOffset(_) => "Display offset of the selected trace (dB)",
             PromptKind::TraceSlot(_) => {

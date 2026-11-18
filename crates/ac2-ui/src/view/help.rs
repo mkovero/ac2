@@ -58,6 +58,7 @@ impl Section {
             | C::LevelUpCoarse
             | C::LevelDownCoarse
             | C::StimulusLevel
+            | C::StimulusSignal
             | C::StimulusOutputs
             | C::StimulusTakeOver => Section::Stimulus,
             C::NextInTree

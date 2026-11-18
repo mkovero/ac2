@@ -68,6 +68,16 @@ impl CommandId {
                 &["volume", "gain", "generator"]
             }
             C::StimulusLevel => &["volume", "gain", "generator"],
+            C::StimulusSignal => &[
+                "sine",
+                "tone",
+                "pink",
+                "white",
+                "noise",
+                "generator",
+                "thd",
+                "harmonics",
+            ],
             C::StimulusOutputs => &["channels", "routing", "generator"],
             C::StimulusTakeOver => &["generator"],
             C::FocusPane1

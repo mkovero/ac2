@@ -10,11 +10,8 @@
 use std::io::IsTerminal;
 
 use ac2_client::{Client, LeaseLost, OnDrop, StimulusLease, expect_body};
-use ac2_core::harmonics::snap_to_bin;
-use ac2_core::multires::MultiResLadder;
 use ac2_proto::model::{
-    BandLimit, FilterOrder, GeneratorDesired, GeneratorSettings, MeasKind, Signal, SpecResolution,
-    State,
+    BandLimit, FilterOrder, GeneratorDesired, GeneratorSettings, MeasKind, Signal, State,
 };
 use ac2_proto::units::{Hz, Samples};
 use ac2_proto::{Command, ReplyBody};
@@ -112,13 +109,10 @@ pub(crate) fn lock(st: &State, meas: &MeasRef, freq: f64) -> Result<Lock, CliErr
         CliError::Usage("no audio I/O open; open it with `ac2 session open`".into())
     })?;
     let fs = f64::from(sample_rate);
-    let n = match config.resolution {
-        SpecResolution::Fixed { fft_len } => fft_len as usize,
-        SpecResolution::Multi { .. } => MultiResLadder::longest_window(fs),
-    };
+    let n = config.resolution.sine_fft_len(fs);
     Ok(Lock {
         meas: m.config.name.clone(),
-        freq: snap_to_bin(freq, fs, n),
+        freq: config.resolution.nearest_bin(freq, fs),
         fft_len: u32::try_from(n).unwrap_or(u32::MAX),
         sample_rate,
     })
@@ -392,7 +386,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use ac2_client::{ClientConfig, Endpoints};
-    use ac2_proto::model::{DeviceSelector, Generator, SessionConfig};
+    use ac2_proto::model::{DeviceSelector, Generator, SessionConfig, SpecResolution};
     use ac2_proto::units::Dbfs;
 
     use super::*;
@@ -453,11 +447,57 @@ mod tests {
         Ok((h, c))
     }
 
+    /// The bin the protocol crate names for a spectrum's resolution (what the app and
+    /// `--lock` snap to) is the one the analyzer reads the sine on: the same FFT length as
+    /// the multi-resolution ladder's longest window and the same bin as its `snap_to_bin`.
+    #[test]
+    fn the_shared_bin_snap_agrees_with_the_analyzer() {
+        use ac2_core::harmonics::snap_to_bin;
+        use ac2_core::multires::MultiResLadder;
+        let freqs = [
+            f64::NAN,
+            -5.0,
+            0.0,
+            0.1,
+            19.9,
+            997.0,
+            1000.0,
+            12_345.678,
+            23_999.0,
+            95_999.0,
+            1e6,
+        ];
+        for fs in [8000.0, 44_100.0, 48_000.0, 88_200.0, 96_000.0, 192_000.0] {
+            let multi = SpecResolution::MULTI;
+            assert_eq!(
+                multi.sine_fft_len(fs),
+                MultiResLadder::longest_window(fs),
+                "{fs}"
+            );
+            let fixed = [3u32, 4, 5, 1024, 4096, 65_536, 1 << 20]
+                .map(|fft_len| SpecResolution::Fixed { fft_len });
+            for r in fixed.into_iter().chain([multi]) {
+                let n = r.sine_fft_len(fs);
+                if let SpecResolution::Fixed { fft_len } = r {
+                    assert_eq!(n, fft_len as usize);
+                }
+                for f in freqs {
+                    assert_eq!(
+                        r.nearest_bin(f, fs),
+                        snap_to_bin(f, fs, n),
+                        "{r:?} {f} {fs}"
+                    );
+                }
+            }
+        }
+    }
+
     /// `--lock` puts the sine on a bin of the named spectrum (its one FFT, or the longest
     /// of a multi-resolution spectrum) at the session's rate, and refuses anything else.
     #[tokio::test(flavor = "multi_thread")]
     async fn lock_moves_the_sine_onto_a_bin_of_a_spectrum() -> R {
         use ac2_core::harmonics::is_on_bin;
+        use ac2_core::multires::MultiResLadder;
         use ac2_proto::model::{BandFraction, MeasConfig, MeasScope, RtaConfig, SpectrumConfig};
 
         let (_h, c) = daemon().await?;

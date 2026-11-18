@@ -58,6 +58,9 @@ pub fn defaults() -> Vec<Binding> {
         (C::Fullscreen, S::Global, k(K::F)),
         (C::Fullscreen, S::Global, k(K::F11)),
         (C::StimulusLevel, S::Global, k(K::L)),
+        // Shift+L is the Leq windows'; J is the nearest letter whose Shift is free in
+        // every scope.
+        (C::StimulusSignal, S::Global, sh(K::J)),
         // Plain digits are the slots' (as in `ac`); panes take Alt+digit.
         (C::FocusPane1, S::Global, alt(K::Num1)),
         (C::FocusPane2, S::Global, alt(K::Num2)),

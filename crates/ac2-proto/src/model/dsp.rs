@@ -147,6 +147,31 @@ impl SpecResolution {
             Self::Multi { .. } => 1 << 17,
         }
     }
+
+    /// Length of the FFT a steady sine is read on at sample rate `fs`: the one FFT, or a
+    /// multi-resolution spectrum's longest window, whose bins are the narrowest it has
+    /// (the shortest power of two with bins of at most 96 000 / 65 536 Hz, never under 64
+    /// points so that the sixth window, 1/32 of it, still has two samples).
+    pub fn sine_fft_len(self, fs: f64) -> usize {
+        match self {
+            Self::Fixed { fft_len } => fft_len as usize,
+            Self::Multi { .. } => {
+                let need = fs * 65_536.0 / 96_000.0 * (1.0 - 1e-12);
+                (need.ceil().max(1.0) as usize).next_power_of_two().max(64)
+            }
+        }
+    }
+
+    /// The centre of the bin of that FFT nearest `f`: k·fs/n with 1 ≤ k < n/2, never DC or
+    /// fs/2. A sine there has a whole number of periods in the window, so no window leaks
+    /// it into its neighbours and a rectangular one can read it at all.
+    pub fn nearest_bin(self, f: f64, fs: f64) -> f64 {
+        let n = self.sine_fft_len(fs);
+        let last = (n.saturating_sub(1) / 2).max(1) as f64;
+        // NaN and negative frequencies land on the first bin.
+        let k = (f * n as f64 / fs).round().max(1.0).min(last);
+        k * fs / n as f64
+    }
 }
 
 /// What a spectrum's level values are.

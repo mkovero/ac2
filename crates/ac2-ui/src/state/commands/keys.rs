@@ -355,6 +355,7 @@ impl AppState {
         let mut ir_form = None;
         let r = match kind {
             PromptKind::StimulusLevel => self.set_level_text(&text, out),
+            PromptKind::StimulusSignal => self.set_signal_text(&text, out),
             PromptKind::CalDelete => self.cal_delete(&text, out),
             PromptKind::TraceMicCurve(id) => {
                 let mics = self.daemon().map(|s| s.mics.clone()).unwrap_or_default();

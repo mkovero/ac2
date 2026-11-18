@@ -6,7 +6,7 @@
 //! level, so the operator reads what will play before it plays.
 
 use ac2_proto::model::{OutputSetup, Signal};
-use ac2_proto::units::{ClientId, Dbfs};
+use ac2_proto::units::{ClientId, Dbfs, Hz};
 
 use crate::format;
 
@@ -135,12 +135,131 @@ pub fn no_reference_note(d: &Drive) -> String {
     }
 }
 
-fn signal_name(s: &Signal) -> String {
+/// The generator's signal as the operator chooses it for the live views: a noise or a
+/// sine, never a sweep (a sweep is a measurement's, armed from the sweep view).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum SignalChoice {
+    #[default]
+    Pink,
+    White,
+    /// `exact`: typed to stay where it is; otherwise it may be moved onto the nearest FFT
+    /// bin of the spectrum in focus.
+    Sine {
+        freq: Hz,
+        exact: bool,
+    },
+}
+
+/// The signal prompt's label.
+pub const SIGNAL_PROMPT: &str = "Stimulus signal: pink, white, or a sine's frequency (1k, 997; \
+     \"exact\" after it keeps it off the FFT bin)";
+
+impl SignalChoice {
+    /// What the signal prompt takes: `pink`, `white`, or a frequency as every frequency
+    /// field reads it (`997`, `1k`, `1.5 kHz`), `exact` after it. `rate_hz` is the open
+    /// session's sample rate when known: a sine at or above half of it cannot be played.
+    pub fn parse(text: &str, rate_hz: Option<u32>) -> Result<Self, String> {
+        let t = text.trim().to_lowercase();
+        match t.as_str() {
+            "" => return Err("type pink, white, or a sine's frequency".into()),
+            "pink" => return Ok(Self::Pink),
+            "white" => return Ok(Self::White),
+            _ => {}
+        }
+        let (number, exact) = match t.strip_suffix("exact") {
+            Some(n) => (n.trim_end(), true),
+            None => (t.as_str(), false),
+        };
+        if !number
+            .starts_with(|c: char| c.is_ascii_digit() || matches!(c, '.' | '+' | '-' | '\u{2212}'))
+        {
+            return Err(format!(
+                "{:?} is no signal: type pink, white, or a sine's frequency",
+                text.trim()
+            ));
+        }
+        let hz = crate::unit_text::in_field::<crate::unit_text::Freq>(number, "hz")?
+            .0
+            .0;
+        if let Some(fs) = rate_hz
+            && hz >= f64::from(fs) / 2.0
+        {
+            return Err(format!(
+                "a sine must be below {}, half the sample rate",
+                format::freq_exact(f64::from(fs) / 2.0)
+            ));
+        }
+        Ok(Self::Sine {
+            freq: Hz(hz),
+            exact,
+        })
+    }
+
+    /// The choice as the prompt takes it back, every digit of a sine's frequency kept: a
+    /// rounded one would move a sine off the bin it was put on.
+    pub fn field_text(self) -> String {
+        match self {
+            Self::Pink => "pink".into(),
+            Self::White => "white".into(),
+            Self::Sine { freq, exact: false } => format!("{}", freq.0),
+            Self::Sine { freq, exact: true } => format!("{} exact", freq.0),
+        }
+    }
+
+    /// What the generator is asked to play.
+    pub fn signal(self) -> Signal {
+        match self {
+            Self::Pink => Signal::Pink,
+            Self::White => Signal::White,
+            Self::Sine { freq, .. } => Signal::Sine { freq },
+        }
+    }
+
+    /// What the app says once the choice is made. `on_bin_of` names the spectrum whose
+    /// FFT bin the sine was moved onto; without one nothing was computed about bins, so
+    /// the text only says the frequency was left as typed.
+    pub fn chosen_text(self, on_bin_of: Option<&str>) -> String {
+        match (self, on_bin_of) {
+            (Self::Pink, _) => "pink noise".into(),
+            (Self::White, _) => "white noise".into(),
+            (Self::Sine { freq, .. }, Some(meas)) => {
+                format!("sine {} · on a bin of {meas}", format::freq_exact(freq.0))
+            }
+            (Self::Sine { freq, .. }, None) => format!(
+                "sine {} · as typed, not moved onto an FFT bin",
+                format::freq_exact(freq.0)
+            ),
+        }
+    }
+}
+
+/// What stands before the level on the top bar's stimulus line: nothing for pink noise,
+/// what every level is for unless said otherwise; `white `, `sine 999.76 Hz ` for a chosen
+/// other, so the line never shows a level without saying it is a tone's.
+pub fn level_prefix(choice: SignalChoice) -> String {
+    match choice {
+        SignalChoice::Pink => String::new(),
+        c => format!("{} ", signal_name(&c.signal())),
+    }
+}
+
+/// The tip of the top bar's level: the keys that set what plays.
+pub fn level_tip(level_key: &str, signal_key: &str) -> String {
+    format!(
+        "{level_key} types the level; {signal_key} chooses the signal: pink or white noise, \
+         or a sine, moved onto an FFT bin of the spectrum in focus"
+    )
+}
+
+/// A signal by name, a sine with its frequency to the hundredth of a hertz as the
+/// harmonics plate prints it: a sine on an FFT bin (`999.76 Hz`) must not read `1.00 kHz`
+/// here and its true frequency there.
+pub fn signal_name(s: &Signal) -> String {
     match s {
         Signal::White => "white".into(),
         Signal::Pink => "pink".into(),
         Signal::PeriodicPink { .. } => "periodic pink".into(),
-        Signal::Sine { freq } => format!("sine {}", format::freq_readout(freq.0)),
+        Signal::Sine { freq } => format!("sine {}", format::freq_exact(freq.0)),
         Signal::Ess { sweep } => format!("sweep {} s", short_number(sweep.duration.0)),
     }
 }
@@ -231,6 +350,117 @@ pub fn stop_every_rig_tip(stop: &str) -> String {
 mod tests {
     use super::*;
     use ac2_proto::units::Hz;
+
+    /// A sine reads to the hundredth of a hertz wherever the stimulus is named, as the
+    /// harmonics plate prints it: one on a bin is told from the round number beside it.
+    #[test]
+    fn a_sine_is_named_with_its_exact_frequency() {
+        let on_bin = SignalChoice::Sine {
+            freq: Hz(999.755_859_375),
+            exact: false,
+        };
+        let what = Stimulus::Generator {
+            signal: on_bin.signal(),
+            level: Some(Dbfs(-20.0)),
+            outputs: vec![0],
+            labels: Vec::new(),
+        };
+        assert_eq!(
+            hint(Next::Enter, &what, "L").0,
+            "Enter fires: sine 999.76 Hz −20 dBFS → out 1"
+        );
+        assert_eq!(
+            rig_hint("pupu", Next::Space, &what, "L").0,
+            "arm pupu's stimulus · Space: sine 999.76 Hz −20 dBFS → out 1"
+        );
+        assert_eq!(
+            signal_name(&on_bin.signal()),
+            format!("sine {}", format::freq_exact(999.755_859_375))
+        );
+        // The top bar's level: pink is what a level means unless it says otherwise.
+        assert_eq!(level_prefix(SignalChoice::Pink), "");
+        assert_eq!(level_prefix(SignalChoice::White), "white ");
+        assert_eq!(level_prefix(on_bin), "sine 999.76 Hz ");
+    }
+
+    #[test]
+    fn the_signal_prompt_reads_a_noise_or_a_frequency() {
+        let sine = |hz, exact| SignalChoice::Sine {
+            freq: Hz(hz),
+            exact,
+        };
+        for (text, want) in [
+            ("pink", SignalChoice::Pink),
+            ("White", SignalChoice::White),
+            ("997", sine(997.0, false)),
+            ("1k", sine(1000.0, false)),
+            ("997 Hz", sine(997.0, false)),
+            ("1.5 kHz", sine(1500.0, false)),
+            ("1,5khz", sine(1500.0, false)),
+            ("1k exact", sine(1000.0, true)),
+            ("997hz EXACT", sine(997.0, true)),
+            ("23999.99", sine(23_999.99, false)),
+        ] {
+            assert_eq!(SignalChoice::parse(text, Some(48_000)), Ok(want), "{text}");
+            // What it gives back for the prompt reads as itself.
+            assert_eq!(
+                SignalChoice::parse(&want.field_text(), Some(48_000)),
+                Ok(want),
+                "{text}"
+            );
+        }
+        assert_eq!(sine(999.755_859_375, false).field_text(), "999.755859375");
+        assert_eq!(sine(1000.0, true).field_text(), "1000 exact");
+        for (text, error) in [
+            ("", "type pink, white, or a sine's frequency"),
+            (
+                "exact",
+                "\"exact\" is no signal: type pink, white, or a sine's frequency",
+            ),
+            (
+                "sine",
+                "\"sine\" is no signal: type pink, white, or a sine's frequency",
+            ),
+            ("0", "\"0\": frequency must be positive"),
+            ("1 m", "\"1 m\": unknown unit \"m\" (expected hz or khz)"),
+            (
+                "24000",
+                "a sine must be below 24000 Hz, half the sample rate",
+            ),
+            (
+                "22.05k",
+                "a sine must be below 22050 Hz, half the sample rate",
+            ),
+        ] {
+            let rate = if text == "22.05k" { 44_100 } else { 48_000 };
+            assert_eq!(
+                SignalChoice::parse(text, Some(rate)),
+                Err(error.to_string()),
+                "{text}"
+            );
+        }
+        // The rate unknown: only the frequency field's own bound holds.
+        assert_eq!(SignalChoice::parse("30k", None), Ok(sine(30_000.0, false)));
+        assert!(SignalChoice::parse("2000k", None).is_err());
+    }
+
+    #[test]
+    fn the_choice_is_said_with_what_was_done_about_bins() {
+        let s = SignalChoice::Sine {
+            freq: Hz(999.755_859_375),
+            exact: false,
+        };
+        assert_eq!(
+            s.chosen_text(Some("Main L")),
+            "sine 999.76 Hz · on a bin of Main L"
+        );
+        assert_eq!(
+            s.chosen_text(None),
+            "sine 999.76 Hz · as typed, not moved onto an FFT bin"
+        );
+        assert_eq!(SignalChoice::Pink.chosen_text(Some("Main L")), "pink noise");
+        assert_eq!(SignalChoice::White.chosen_text(None), "white noise");
+    }
 
     #[test]
     fn a_holder_on_the_rigs_own_host_is_named_by_the_rig() {
@@ -369,7 +599,7 @@ mod tests {
         };
         assert_eq!(
             hint(Next::Space, &two, "L").0,
-            "Space arms: sine 1.00 kHz −12 dBFS → out 1, 2"
+            "Space arms: sine 1000 Hz −12 dBFS → out 1, 2"
         );
         // Outputs the rig has named are named.
         let named = Stimulus::Generator {

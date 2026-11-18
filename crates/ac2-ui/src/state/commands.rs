@@ -345,6 +345,10 @@ impl AppState {
                     .unwrap_or_default();
                 self.prompt(PromptKind::StimulusLevel, text);
             }
+            C::StimulusSignal => {
+                let text = self.rig.stimulus.generator.field_text();
+                self.prompt(PromptKind::StimulusSignal, text);
+            }
             C::StimulusOutputs => {
                 self.open_settings(Page::AudioIo, out);
                 if let Overlay::Settings(s) = &mut self.overlay {

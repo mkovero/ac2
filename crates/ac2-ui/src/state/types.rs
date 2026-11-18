@@ -271,7 +271,11 @@ pub enum StimPhase {
 pub struct Stimulus {
     /// Typed by the operator; `None` until then — nothing arms without it.
     pub level: Option<Dbfs>,
+    /// What is armed or would be: the generator's choice, or a sweep while one is set up.
     pub signal: Signal,
+    /// What the operator chose for the live views. A sweep set-up borrows `signal` and
+    /// gives it back from here, so a chosen sine outlives a sweep run.
+    pub generator: SignalChoice,
     /// Zero-based output channels.
     pub outputs: Vec<u16>,
     pub phase: StimPhase,
@@ -289,6 +293,7 @@ impl Default for Stimulus {
         Self {
             level: None,
             signal: Signal::Pink,
+            generator: SignalChoice::Pink,
             outputs: vec![0],
             phase: StimPhase::Idle,
             arm_after_stop: false,
@@ -313,7 +318,7 @@ impl Stimulus {
             Signal::White => "white noise".to_string(),
             Signal::Pink => "pink noise".to_string(),
             Signal::PeriodicPink { .. } => "periodic pink".to_string(),
-            Signal::Sine { freq } => format!("sine {}", format::freq_readout(freq.0)),
+            Signal::Sine { freq } => format!("sine {}", format::freq_exact(freq.0)),
             Signal::Ess { sweep } => format!(
                 "sweep {} – {} {} s",
                 format::freq_readout(sweep.start.0),

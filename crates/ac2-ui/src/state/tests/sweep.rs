@@ -484,14 +484,14 @@ fn autosave_indicator_follows_the_daemon() {
 }
 
 /// The top bar's hint for the stimulus keys, as the scene words it.
-fn next_hint(t: &T) -> Option<String> {
+pub(super) fn next_hint(t: &T) -> Option<String> {
     t.st.stimulus_next()
         .map(|(n, w)| ac2_scene::stimulus::hint(n, &w, "L").0)
 }
 
 /// The sweep measurement from the dialog (−50 dBFS, 3 s, out 1), run once and stored as
 /// trace 7: its settings.
-fn sweep_once(t: &mut T) -> SweepConfig {
+pub(super) fn sweep_once(t: &mut T) -> SweepConfig {
     sweep_stored_as(t, 7)
 }
 

@@ -28,7 +28,7 @@ pub use ac2_scene::banner::Severity;
 use ac2_scene::format;
 // The reducer tests read these through `super::*`.
 use ac2_scene::spectrum::PeakHold;
-use ac2_scene::stimulus::{Drive, Next as NextKey, Stimulus as NextStimulus};
+use ac2_scene::stimulus::{Drive, Next as NextKey, SignalChoice, Stimulus as NextStimulus};
 use ac2_scene::theme::ThemeName;
 use ac2_scene::trace::TraceKey;
 use ac2_scene::view::{
