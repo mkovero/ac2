@@ -9,6 +9,7 @@ use std::time::Duration;
 use ac2_proto::model::{Anchor, RemoteAudio, RemoteLink, SourceState};
 use ac2_proto::units::{RigId, Seconds, SessionEpoch};
 
+pub(crate) mod follow;
 pub(crate) mod join;
 pub(crate) mod link;
 pub(crate) mod peer_clock;
@@ -154,6 +155,8 @@ pub(crate) enum RemoteMsg {
         rigs: Vec<RigReport>,
         link_offset: Seconds,
     },
+    /// A rig's mDNS advert, resolved: where a paired rig with its key answers now.
+    Advert(Box<ac2_discovery::Rig>),
 }
 
 #[cfg(test)]

@@ -174,6 +174,8 @@ pub struct Handle {
     control: Option<JoinHandle<Ended>>,
     io: Option<JoinHandle<()>>,
     advert: Option<ac2_discovery::Advertiser>,
+    /// The browse that follows paired rigs to new addresses (network mode with mDNS).
+    browse: Option<remote::follow::PeerBrowse>,
     /// Held for the daemon's lifetime: frame hand-offs, publish gaps and job timers are all
     /// timed waits, which Windows otherwise ends only on its 15.6 ms tick.
     _timer: ac2_audio::timer::FineResolution,
@@ -280,6 +282,7 @@ impl Handle {
             None => Ended::Stopped,
         };
         self.advert = None;
+        self.browse = None;
         if let Some(t) = self.io.take() {
             let _ = t.join();
         }
@@ -527,6 +530,13 @@ impl Daemon {
             (Some(a), Some(key)) => advertise(&config.name, a, &key, &ctrl),
             _ => None,
         };
+        // Only a networked rig takes other rigs' inputs, and only it can follow them.
+        let browse = match (&config.advertise, server_key) {
+            (Some(a), Some(_)) => remote::follow::PeerBrowse::start(a.mdns.clone(), tx.clone())
+                .inspect_err(|e| tracing::warn!("mDNS browse not started: {e}"))
+                .ok(),
+            _ => None,
+        };
         if let Some(a) = &advert {
             *advertised_as
                 .lock()
@@ -557,6 +567,7 @@ impl Daemon {
             control: Some(control),
             io: Some(io),
             advert,
+            browse,
             _timer: timer,
         })
     }

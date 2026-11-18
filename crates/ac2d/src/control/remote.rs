@@ -42,6 +42,8 @@ use super::rig::ServerSetup;
 const LINK_QUEUE: usize = 1024;
 /// The most rigs paired with one rig.
 const MAX_PEERS: usize = 16;
+/// The most rigs' adverts kept.
+const MAX_ADVERTS: usize = 64;
 
 /// The joined feed's last report.
 struct Joined {
@@ -65,6 +67,9 @@ pub(super) struct RemoteCtl {
     pub(super) cross: BTreeMap<ac2_proto::units::MeasId, super::cross_rig::CrossTf>,
     /// The links feeding the open session.
     fed: BTreeSet<RigId>,
+    /// The last mDNS advert seen per server key: a rig may announce its new address before
+    /// its link here notices the old one is gone, or before it is paired.
+    adverts: BTreeMap<String, ac2_discovery::Rig>,
     system_synced: Arc<AtomicBool>,
     started: Instant,
 }
@@ -80,6 +85,7 @@ impl RemoteCtl {
             watches: BTreeMap::new(),
             cross: BTreeMap::new(),
             fed: BTreeSet::new(),
+            adverts: BTreeMap::new(),
             system_synced: Arc::new(AtomicBool::new(false)),
             started: Instant::now(),
         }
@@ -428,8 +434,61 @@ impl Control {
         }
     }
 
+    /// A rig's advert, kept by its key; the paired rig with that key follows it.
+    fn peer_advert(&mut self, advert: ac2_discovery::Rig) {
+        let key = advert.advert.server_key.clone();
+        // A network has a handful of rigs; a flood of adverts is not kept.
+        if self.remote.adverts.len() >= MAX_ADVERTS && !self.remote.adverts.contains_key(&key) {
+            return;
+        }
+        self.remote.adverts.insert(key.clone(), advert);
+        if let Some(rig) = self
+            .store
+            .state()
+            .remote
+            .peers
+            .iter()
+            .find(|p| p.key == key)
+            .map(|p| p.rig)
+        {
+            self.follow_peer(rig);
+        }
+    }
+
+    /// Pairs `rig` at the address its last advert names, when its link is not up and the
+    /// advert carries its pinned key but not the address it was paired at (saved, its link
+    /// started over).
+    fn follow_peer(&mut self, rig: RigId) {
+        if matches!(self.remote.link_state.get(&rig), Some((RemoteLink::Up, ..))) {
+            return;
+        }
+        let mut peers = self.store.state().remote.peers.clone();
+        let Some(p) = peers.iter_mut().find(|p| p.rig == rig) else {
+            return;
+        };
+        let Some((ctrl, data)) = self
+            .remote
+            .adverts
+            .get(&p.key)
+            .and_then(|a| crate::remote::follow::followed(p, a))
+        else {
+            return;
+        };
+        tracing::info!(
+            "{} answers at {ctrl} now (its advert carries the paired key), was {}",
+            p.name,
+            p.ctrl
+        );
+        p.ctrl = ctrl;
+        p.data = data;
+        if let Err(e) = self.set_rig_peers(peers) {
+            tracing::warn!("the new address of a paired rig is not saved: {}", e.msg);
+        }
+    }
+
     pub(super) fn remote_msg(&mut self, m: RemoteMsg) {
         match m {
+            RemoteMsg::Advert(advert) => self.peer_advert(*advert),
             RemoteMsg::Link {
                 rig,
                 link,
@@ -437,9 +496,13 @@ impl Control {
                 window,
             } => {
                 if self.remote.links.contains_key(&rig) {
+                    let up = link == RemoteLink::Up;
                     self.remote
                         .link_state
                         .insert(rig, (link, bytes_per_s, window));
+                    if !up {
+                        self.follow_peer(rig);
+                    }
                 }
             }
             RemoteMsg::Source { rig, state } => {

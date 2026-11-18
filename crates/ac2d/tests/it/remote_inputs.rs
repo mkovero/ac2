@@ -25,6 +25,30 @@ const T: Duration = Duration::from_secs(20);
 /// A network-mode daemon on a real-time fake device whose system clock is stated synced,
 /// with `app` authorized and, when given, `keys` as its server key pair.
 fn rig(dir: &std::path::Path, name: &str, app: &KeyPair, keys: Option<&KeyPair>) -> Handle {
+    rig_on(dir, name, app, keys, None)
+}
+
+/// [`rig`], advertising and browsing on `mdns` when given.
+fn rig_on(
+    dir: &std::path::Path,
+    name: &str,
+    app: &KeyPair,
+    keys: Option<&KeyPair>,
+    mdns: Option<ac2_discovery::Options>,
+) -> Handle {
+    rig_at(dir, name, app, keys, mdns, 0)
+}
+
+/// [`rig_on`] with ctrl on `port` and data on `port + 1`, as `ac2d` binds them; any free
+/// ports for 0.
+fn rig_at(
+    dir: &std::path::Path,
+    name: &str,
+    app: &KeyPair,
+    keys: Option<&KeyPair>,
+    mdns: Option<ac2_discovery::Options>,
+    port: u16,
+) -> Handle {
     let d = dir.join(name);
     std::fs::create_dir_all(&d).unwrap();
     let mut authorized = AuthorizedKeys::new();
@@ -44,9 +68,10 @@ fn rig(dir: &std::path::Path, name: &str, app: &KeyPair, keys: Option<&KeyPair>)
             std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
         }
     }
+    let data = if port == 0 { 0 } else { port + 1 };
     let listen = Listen::Network {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
+        ctrl: format!("tcp://127.0.0.1:{port}"),
+        data: format!("tcp://127.0.0.1:{data}"),
         security: NetworkSecurity {
             server_key_file: d.join("server.key"),
             authorized_clients_file: d.join("authorized_clients"),
@@ -55,6 +80,7 @@ fn rig(dir: &std::path::Path, name: &str, app: &KeyPair, keys: Option<&KeyPair>)
     let mut cfg = config(realtime_rig(), listen);
     cfg.name = name.into();
     cfg.system_clock = SystemClockSource::Stated(SystemClock::Synced { maxerror_us: 100 });
+    cfg.advertise = mdns.map(|mdns| ac2d::Advertise { mdns });
     Daemon::start(cfg).unwrap()
 }
 
@@ -496,4 +522,101 @@ fn a_session_load_gives_back_its_remote_inputs() {
     load(&mut c, "remote");
     assert_eq!(session_inputs(&mut c).1, with.remote_inputs);
     h.shutdown();
+}
+
+/// Rig B's address moved (a new DHCP lease): A, paired with B where B no longer answers,
+/// finds B's mDNS advert by the key the app pinned, pairs it at the advertised address and
+/// takes its input again. Runs on loopback with a private mDNS port; where the host has no
+/// multicast on loopback the test reports a skip unless `AC2_REQUIRE_MDNS=1`.
+#[test]
+fn slow_a_paired_rig_is_followed_to_its_new_address() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let port = std::net::UdpSocket::bind(("127.0.0.1", 0))
+        .and_then(|s| s.local_addr())
+        .map_or(53_532, |a| a.port());
+    let mdns = ac2_discovery::Options {
+        mdns_port: port,
+        loopback_only: true,
+    };
+    let app = KeyPair::generate().unwrap();
+    let a_keys = KeyPair::generate().unwrap();
+    // B as `ac2d` serves: data on the port after ctrl, which an advert does not carry.
+    let b = rig_at(
+        dir.path(),
+        "rig-b",
+        &app,
+        None,
+        Some(mdns.clone()),
+        free_pair(),
+    );
+    let a = rig_on(dir.path(), "rig-a", &app, Some(&a_keys), Some(mdns));
+    let ctx = Context::new().unwrap();
+    let (mut cb, b_id) = client(&ctx, &b, &app);
+    let (mut ca, a_id) = client(&ctx, &a, &app);
+    cb.ok(Command::SessionOpen {
+        config: session(false),
+    });
+    cb.ok(Command::AuthAdmitRig {
+        key: a_keys.public.to_z85(),
+        rig_id: a_id,
+        name: "rig-a".into(),
+    });
+    // Paired where B was: nothing answers there now.
+    let gone = "tcp://127.0.0.1:9";
+    ca.ok(Command::RigPeers {
+        peers: vec![RigPeer {
+            rig: b_id,
+            name: "rig-b".into(),
+            ctrl: gone.into(),
+            data: "tcp://127.0.0.1:10".into(),
+            key: b.server_public_key().unwrap().to_z85(),
+        }],
+    });
+    ca.ok(Command::SessionOpen {
+        config: with_remote(b_id, FS),
+    });
+
+    let t0 = Instant::now();
+    let r = loop {
+        let r = remote(&mut ca);
+        let followed = r.peers.first().is_some_and(|p| p.ctrl == b.ctrl_endpoint());
+        let up = r.rigs.first().map(|r| &r.link) == Some(&RemoteLink::Up);
+        if followed && up {
+            break r;
+        }
+        if t0.elapsed() > T {
+            assert!(
+                followed || std::env::var_os("AC2_REQUIRE_MDNS").is_none_or(|v| v != "1"),
+                "no mDNS answer on loopback within {T:?}: {r:#?}"
+            );
+            if !followed {
+                eprintln!(
+                    "skipped: no multicast on loopback here (AC2_REQUIRE_MDNS=1 makes this fail)"
+                );
+                a.shutdown();
+                b.shutdown();
+                return;
+            }
+            panic!("followed but the link is not up: {r:#?}");
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    assert_eq!(r.peers[0].data, b.data_endpoint());
+    wait_remote(&mut ca, "streaming from the new address", |r| {
+        r.inputs.first().map(|i| i.audio) == Some(RemoteAudio::Streaming)
+    });
+    a.shutdown();
+    b.shutdown();
+}
+
+/// A free TCP port on loopback whose next port is free too.
+fn free_pair() -> u16 {
+    loop {
+        let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let p = l.local_addr().unwrap().port();
+        if p < u16::MAX && std::net::TcpListener::bind(("127.0.0.1", p + 1)).is_ok() {
+            return p;
+        }
+    }
 }

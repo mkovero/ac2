@@ -177,8 +177,13 @@ holds both:
   property `Message::client_key` reads; `User-Id` is only the key's name), so B ends that key's subscriptions and refuses its frames. Every data message is held to the list (name and
   key, and the kind admitted), so a connection that outlived its admission is never taken
   for a new peer, and a key given another kind starts over as that kind.
-- **Address.** A keeps the address the app gave; with B's key pinned, A may follow B's mDNS
-  advert to a new address (a DHCP change), since the key, not the address, is the identity.
+- **Address.** A keeps the address the app gave, and follows B's mDNS advert to a new one (a
+  DHCP change, a restart on another port), since the key, not the address, is the identity:
+  a networked A browses `_ac2._tcp` (afresh each minute), keeps the last advert per key, and
+  when its link to B is not up and B's advert carries the pinned key but not the paired
+  endpoint, pairs B there (saved to the rig settings, link restarted). Nothing else in the
+  advert is trusted; the CURVE handshake on the new address still proves the key. The data
+  port is the advertised ctrl port + 1, as `ac2d` binds them.
 - **B's key changes** (key file set aside, new pair): A's pin fails; the input reads
   *ketunkolo's key changed: pair the rigs again from the app*. Never re-pinned silently.
 - Network mode only: a daemon that listens only locally cannot serve another rig (*ketunkolo
