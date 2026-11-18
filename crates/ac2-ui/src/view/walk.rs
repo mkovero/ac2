@@ -1,6 +1,8 @@
 //! The walk setup window and the plan editor: their rows and notes as
 //! `ac2_scene::walk::setup` words them, and a plan view the mouse edits. Nothing here computes
-//! a value; the mouse's pixels become plan metres through the scene's own mapping.
+//! a value; the mouse's pixels become plan metres through the scene's own mapping. The walk
+//! pane's control bar: the buttons `ac2_scene::walk::controls` words, sizes and dims, each
+//! sending its action's command.
 
 use std::sync::Arc;
 
@@ -8,11 +10,14 @@ use eframe::egui::{self, RichText};
 
 use super::overlays::{backdrop, card};
 use crate::app::App;
+use crate::keys::CommandId;
 use crate::plot::{PlotSlot, paint};
-use crate::state::{Msg, Overlay};
+use crate::state::{Msg, Overlay, PaneId};
 use crate::theme::Chrome;
 use crate::walk_setup::PlanMsg;
 use ac2_scene::primitives::Viewport;
+use ac2_scene::theme::Theme;
+use ac2_scene::walk::controls::Action;
 use ac2_scene::walk::setup::{EditorInput, Layer, Row, SetupInput, editor_view, setup_view};
 use ac2_scene::walk::{DotLook, PlanDot, PlanPicture, plan_scene};
 
@@ -261,4 +266,107 @@ pub(super) fn editor(app: &mut App, ctx: &egui::Context, ch: &Chrome) {
     for m in msgs {
         app.dispatch(Msg::Plan(m));
     }
+}
+
+/// The command a button of the walk pane's bar sends: the one the palette runs.
+pub(crate) fn action_command(a: Action) -> CommandId {
+    match a {
+        Action::Prev => CommandId::WalkPrev,
+        Action::Next => CommandId::WalkNext,
+        Action::Capture => CommandId::WalkCapture,
+        Action::Skip => CommandId::WalkSkip,
+        Action::Redo => CommandId::WalkRedo,
+        Action::Swap => CommandId::WalkSwap,
+    }
+}
+
+/// The control bar of walk pane `id` along the bottom of `rect`; returns what is left of
+/// `rect` above it (all of it when the pane shows no walk). The bar is a control, not plot
+/// chrome: it stays whatever the pane's chrome hides, and takes its strip off the plot so no
+/// button covers the plan.
+pub(super) fn control_bar(
+    app: &mut App,
+    ui: &egui::Ui,
+    id: PaneId,
+    rect: egui::Rect,
+    theme: &Theme,
+    ch: &Chrome,
+) -> egui::Rect {
+    let Some(bar) = crate::scenes::walk_controls(&app.state, id, theme, rect.width()) else {
+        return rect;
+    };
+    let above = egui::Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.max.y - bar.height));
+    // A pane too short for the bar and anything above it keeps its picture: the walk is
+    // still read there, and the palette runs every action.
+    if above.height() < bar.height {
+        return rect;
+    }
+    // A window over the panes owns the mouse.
+    let live = !app.state.window_over_panes();
+    let mut pressed = None;
+    for b in &bar.buttons {
+        let r = egui::Rect::from_min_size(
+            above.left_bottom() + egui::vec2(b.rect.x, b.rect.y),
+            egui::vec2(b.rect.w, b.rect.h),
+        );
+        let enabled = b.blocked.is_none();
+        let sense = if enabled && live {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        };
+        let resp = ui.interact(r, ui.id().with(("walk-bar", id.0, b.action)), sense);
+        resp.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, b.action.label())
+        });
+        let primary = b.action.primary();
+        let fill = match (primary, enabled) {
+            (true, true) => ch.focus,
+            (true, false) => ch.focus.gamma_multiply(0.35),
+            (false, _) => ch.panel,
+        };
+        let edge = if enabled && resp.hovered() {
+            ch.text
+        } else if enabled {
+            ch.border
+        } else {
+            ch.border.gamma_multiply(0.5)
+        };
+        let painter = ui.painter().with_clip_rect(r);
+        painter.rect_filled(r, 5.0, fill);
+        painter.rect_stroke(
+            r,
+            5.0,
+            egui::Stroke::new(if primary { 1.5 } else { 1.0 }, edge),
+            egui::StrokeKind::Inside,
+        );
+        if enabled && resp.is_pointer_button_down_on() {
+            painter.rect_filled(r, 5.0, ch.text.gamma_multiply(0.12));
+        }
+        let text = RichText::new(&b.label).size(b.font_size).color(if enabled {
+            ch.text
+        } else {
+            ch.dim.gamma_multiply(0.6)
+        });
+        let text = if primary { text.strong() } else { text };
+        let galley = egui::WidgetText::from(text).into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::TextStyle::Button,
+        );
+        painter.galley(r.center() - galley.size() / 2.0, galley, ch.text);
+        if resp.clicked() {
+            pressed = Some(b.action);
+        }
+        if let Some(tip) = b.tip() {
+            resp.on_hover_text(tip);
+        }
+    }
+    if let Some(a) = pressed {
+        // The commands act on the focused pane's walk: the pane pressed is that one.
+        app.dispatch(Msg::FocusPane(id));
+        app.dispatch(Msg::Command(action_command(a)));
+    }
+    above
 }

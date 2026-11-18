@@ -1,12 +1,13 @@
 //! The spatial walk in the reducer: the *Spatial walk…* window, the setup window and the plan
-//! editor's keys and mouse, `walk.new` and the walk pane it opens, and the walk pane's keys
-//! (capture, next and previous point, redo, skip).
+//! editor's keys and mouse, `walk.new` and the walk pane it opens, and the walk pane's
+//! actions (capture, next and previous step, redo, skip, the mics trading places).
 
 use super::*;
 use crate::walk_setup::{PlanEditor, PlanMsg, WalkSetup};
-use ac2_proto::model::{Operand, PlanSpec, PointState, WalkKind, WalkMic, WalkState};
+use ac2_proto::model::{Operand, PlanSpec, WalkKind, WalkMic, WalkState};
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::WalkId;
+use ac2_scene::walk::controls::Action;
 use ac2_scene::walk::setup::SetupField;
 use ac2_scene::walk::{Ready, SweepAt};
 
@@ -445,7 +446,7 @@ impl AppState {
         }
     }
 
-    // ----- the walk pane's keys ----------------------------------------------------------
+    // ----- the walk pane's actions -------------------------------------------------------
 
     fn walk_call(
         &mut self,
@@ -461,30 +462,42 @@ impl AppState {
         }
     }
 
-    /// X on a sweep walk: its capture is a run of its sweep, through the stimulus path every
-    /// sweep takes (the lease, arming, the measurement's level under the ceiling): idle, X
-    /// arms it as Space does; armed with it, X plays it as Enter does.
+    /// The walk's sweep is armed: its capture plays it.
+    fn walk_sweep_armed(&self, w: &WalkState) -> bool {
+        self.rig.stimulus.phase == StimPhase::Armed
+            && self.rig.sweep.plan.as_ref().map(|p| p.meas) == w.mics.first().map(|m| m.meas)
+    }
+
+    /// A sweep walk's capture waits for the stimulus that plays now (its own sweep's run
+    /// too): a capture is a run of its sweep, and one stimulus plays at a time.
+    pub fn walk_capture_held(&self, w: &WalkState) -> bool {
+        w.kind == WalkKind::Sweep
+            && !self.walk_sweep_armed(w)
+            && (self.rig.sweep.run.is_some()
+                || matches!(
+                    self.rig.stimulus.phase,
+                    StimPhase::Firing | StimPhase::FireRequested
+                ))
+    }
+
+    /// Why `action` cannot run on the focused pane's walk now, as its button says it
+    /// ([`ac2_scene::walk::controls::refusal`]); `None` when it can, or no walk is focused.
+    fn walk_refusal(&self, action: Action) -> Option<String> {
+        let w = self.focused_walk().ok()?;
+        ac2_scene::walk::controls::refusal(w, action, self.walk_capture_held(w))
+    }
+
+    /// The capture of a sweep walk is a run of its sweep, through the stimulus path every
+    /// sweep takes (the lease, arming, the measurement's level under the ceiling): idle, it
+    /// arms the sweep as Space does; armed with it, it plays it as Enter does.
     fn walk_sweep(&mut self, keymap: &Keymap, out: &mut Vec<Request>) {
-        let meas = self
-            .focused_sweep_walk()
-            .and_then(|w| w.mics.first())
-            .map(|m| m.meas);
-        let armed_with_it = self.rig.stimulus.phase == StimPhase::Armed
-            && self.rig.sweep.plan.as_ref().map(|p| p.meas) == meas;
-        if armed_with_it {
-            self.fire_sweep(out);
+        let Some(w) = self.focused_sweep_walk() else {
             return;
-        }
-        let x = self.keys.reach(CommandId::WalkCapture);
-        if self.rig.sweep.run.is_some()
-            || matches!(
-                self.rig.stimulus.phase,
-                StimPhase::Firing | StimPhase::FireRequested
-            )
-        {
-            self.warn(format!(
-                "the stimulus is playing: Esc stops it, then {x} arms the walk's sweep"
-            ));
+        };
+        let meas = w.mics.first().map(|m| m.meas);
+        let armed = self.walk_sweep_armed(w);
+        if armed {
+            self.fire_sweep(out);
             return;
         }
         self.space_sweep(false, keymap, out);
@@ -492,23 +505,16 @@ impl AppState {
             && self.rig.sweep.plan.as_ref().map(|p| p.meas) == meas
         {
             self.toast(format!(
-                "arming the walk's sweep · {x} again plays it · Esc stops"
+                "arming the walk's sweep · {} again plays it · Esc stops",
+                Action::Capture.short()
             ));
         }
     }
 
-    /// X: capture where the mics stand, go on to the next step with a pending point.
+    /// Capture where the mics stand, go on to the next step with a pending point.
     pub(super) fn walk_capture(&mut self, keymap: &Keymap, out: &mut Vec<Request>) {
-        if let Ok(w) = self.focused_walk()
-            && w.standing().is_empty()
-        {
-            let redo = self.keys.reach(CommandId::WalkRedo);
-            let why = if w.step.is_none() {
-                "every point is captured or skipped"
-            } else {
-                "this step is captured"
-            };
-            self.warn(format!("{}: {why} ({redo} redoes one)", w.name));
+        if let Some(why) = self.walk_refusal(Action::Capture) {
+            self.warn(why);
             return;
         }
         if self.focused_sweep_walk().is_some() {
@@ -528,7 +534,7 @@ impl AppState {
         });
     }
 
-    /// PageDown / PageUp: the next or previous step, wrapping round.
+    /// The next (`d` = 1) or previous (−1) step, wrapping round.
     pub(super) fn walk_step(&mut self, d: isize, out: &mut Vec<Request>) {
         let names = self
             .focused_walk()
@@ -553,60 +559,46 @@ impl AppState {
         });
     }
 
-    /// Shift+R: redo at the step the mics are at when it holds a capture, else at the last
-    /// step before it that does; with several captures there, a chooser picks which.
+    /// Redo at the step the mics are at when it holds a capture, else at the last step
+    /// before it that does; with several captures there, a chooser picks which.
     pub(super) fn walk_redo(&mut self, out: &mut Vec<Request>) {
-        let target = self.focused_walk().map(|w| {
-            let captured = |s: u16| -> Vec<usize> {
-                w.step_points(s)
-                    .into_iter()
-                    .filter(|&i| matches!(w.points[i].state, PointState::Captured { .. }))
-                    .collect()
-            };
-            // Back from the step the mics are at (from the last when the walk is done).
-            let n = w.steps().max(1);
-            let start = w.step.unwrap_or(n - 1);
-            (0..n)
-                .map(|k| (start + n - k) % n)
-                .map(captured)
-                .find(|c| !c.is_empty())
-                .unwrap_or_default()
-        });
-        match target {
-            Ok(points) if points.is_empty() => {
-                self.warn("no point is captured yet: nothing to redo");
-            }
+        if let Some(why) = self.walk_refusal(Action::Redo) {
+            self.warn(why);
+            return;
+        }
+        match self
+            .focused_walk()
+            .map(ac2_scene::walk::controls::redo_points)
+        {
             Ok(points) => self.walk_points(points, true, out),
             Err(e) => self.warn(e),
         }
     }
 
-    /// K: leave out the point a mic stands at; with several mics standing, a chooser picks
+    /// Leave out the point a mic stands at; with several mics standing, a chooser picks
     /// which (or the whole step).
     pub(super) fn walk_skip(&mut self, out: &mut Vec<Request>) {
+        if let Some(why) = self.walk_refusal(Action::Skip) {
+            self.warn(why);
+            return;
+        }
         match self.focused_walk().map(WalkState::standing) {
-            Ok(points) if points.is_empty() => {
-                let name = self
-                    .focused_walk()
-                    .map(|w| w.name.clone())
-                    .unwrap_or_default();
-                self.warn(format!("{name}: no point to skip"));
-            }
             Ok(points) => self.walk_points(points, false, out),
             Err(e) => self.warn(e),
         }
     }
 
-    /// M: the mics standing at the step move round by one (two trade places).
+    /// The mics standing at the step move round by one (two trade places).
     pub(super) fn walk_swap(&mut self, out: &mut Vec<Request>) {
+        if let Some(why) = self.walk_refusal(Action::Swap) {
+            self.warn(why);
+            return;
+        }
         let names = self
             .focused_walk()
             .map(|w| self.walk_mic_names(w))
             .unwrap_or_default();
         match self.focused_walk().map(WalkState::standing) {
-            Ok(points) if points.len() < 2 => {
-                self.warn("one mic stands at this step: no other to trade places with");
-            }
             Ok(points) => self.walk_call(out, |w| {
                 // As the daemon will place them: each mic one point on.
                 let mut after = w.clone();

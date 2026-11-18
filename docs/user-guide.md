@@ -1979,7 +1979,7 @@ OF 8 POSITIONS*, then *Mains · average · 8 positions · 2 unsettled*). When th
 not all taken under the same conditions — a walk resumed from a saved session another day, or
 another mic, mic curve or EQ marked in the console between captures — a warning line under the
 average says so, e.g. *P1–P4 yesterday, P5–P8 today · EQ changed*. It only warns: capture and
-the average go on as before. Its keys:
+the average go on as before.
 
 With **several mics** the walk places them all at each step: the step line names each by its
 mic (*Move Vilppu to P3, MM1 to P4*), a line per mic under it gives its readout in the mic's
@@ -1989,21 +1989,33 @@ P2 …) each step takes the points nearest to where the mics stood, paired so th
 is least; when fewer points are left than mics, the nearest mics go and the others sit out.
 The readiness line is the slowest mic's, named (*settling · MM1*), with its bar.
 
-| Key | |
+The walk is driven by the **control bar** along the bottom of its pane, a button per action,
+sized for a finger on a touch screen; *Capture here and go on*, the one pressed at every
+position, is the largest. The bar stays when **T** strips the pane to its picture, and never
+covers the plan: on a narrow pane the labels shorten (*Capture*, *Redo* …, each saying its
+action in full under the pointer), narrower still the capture takes a row of its own and the
+others wrap under it. A button that cannot run now is dimmed and says why under the pointer
+(*no point is captured yet: nothing to redo*); pressing it does nothing.
+
+| Button | |
 |---|---|
-| **X** | capture where the mics stand (one trace per mic) and go on to the next step; on a sweep walk, arm its sweep, then (armed) play it |
-| **PageDown / PageUp** | the next / previous step (moving the mics restarts the averages) |
-| **Shift+R** | redo a point (at the step the mics are at, else the last one captured): its capture leaves the average, the walk's measurements restart there; with several captures there, pick one or the whole step |
-| **K** | skip the point a mic stands at; with several mics, pick one or the whole step (the others stay) |
-| **M** | the mics trade places at this step (with three or more, each moves one on); later steps follow each mic from where it now stands |
-| **Space / Enter** | the stimulus, as everywhere |
+| **Previous step / Next step** | the previous / next step, round from the last to the first (moving the mics restarts the averages) |
+| **Capture here and go on** | capture where the mics stand (one trace per mic) and go on to the next step; on a sweep walk, arm its sweep, then (armed) play it. Dimmed at a step already captured and when every point is captured or skipped; on a sweep walk also while the stimulus plays |
+| **Skip point** | skip the point a mic stands at; with several mics, pick one or the whole step (the others stay). Dimmed when no mic stands at a pending point |
+| **Redo point and reset** | redo a point (at the step the mics are at, else the last one captured): its capture leaves the average, the walk's measurements restart there; with several captures there, pick one or the whole step. Dimmed until a point is captured |
+| **Mics trade places** | the mics trade places at this step (with three or more, each moves one on); later steps follow each mic from where it now stands. Dimmed with fewer than two mics standing |
+
+The actions have no keys of their own: the letters a plot pane uses (**X**, **K**, **M** …)
+do nothing on a walk pane. Each is also a command in the palette (**Ctrl+K**) and can be given
+a key in `keys.toml` (`walk_capture`, `walk_next`, `walk_prev`, `walk_skip`, `walk_redo`,
+`walk_swap`). **Space / Enter** are the stimulus, as everywhere.
 
 Captures are named *P3 · <mic>* and list their position (*at P3*); a superseded capture is
 dimmed in the list, an unsettled one says so.
 
 A **sweep walk** records with one sweep measurement whose measurement inputs are the mics:
-one play at a step records every mic standing there. **X** arms the walk's sweep (as
-**Space** does on a sweep pane) and **X** again plays it (as **Enter**), at the measurement's
+one play at a step records every mic standing there. **Capture** arms the walk's sweep (as
+**Space** does on a sweep pane) and **Capture** again plays it (as **Enter**), at the measurement's
 level under the stimulus lease and the global maximum; **Esc** stops it. The step line reads
 the run instead of a readiness (*sweep plays at P1, P2*, *sweep playing · 1 of 2*,
 *analysing the sweep*); when the run is done each standing point is captured by its mic's
@@ -4110,17 +4122,6 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `R` | Reset overs, max, loudness | `levels_reset` |
 | `Shift+R` | Reset every input | `levels_reset_all` |
 
-#### Spatial walk
-
-| Keys | Command | `keys.toml` |
-|---|---|---|
-| `X` | Capture here and go on | `walk_capture` |
-| `PageDown` | Next step | `walk_next` |
-| `PageUp` | Previous step | `walk_prev` |
-| `Shift+R` | Redo point and reset | `walk_redo` |
-| `K` | Skip point | `walk_skip` |
-| `M` | Mics trade places | `walk_swap` |
-
 #### Spectrum / RTA: 3D spectrograph
 
 | Keys | Command | `keys.toml` |
@@ -4226,6 +4227,12 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | Export Leq log… | `spl_log_export` |
 | Export previous Leq log… | `spl_log_export_previous` |
 | Distortion unit | `distortion_unit` |
+| Capture here and go on | `walk_capture` |
+| Next step | `walk_next` |
+| Previous step | `walk_prev` |
+| Redo point and reset | `walk_redo` |
+| Skip point | `walk_skip` |
+| Mics trade places | `walk_swap` |
 | Simulate room | `sim_run` |
 | Fit simulation to walk | `sim_fit` |
 | Coverage map | `sim_map` |
@@ -4244,7 +4251,7 @@ The least used go first on a narrow pane; `G/Shift+G` steps the pane's views for
 | Sweep / distortion | `Shift+S` new sweep · `V` select trace · `G/Shift+G` view · `E` reference · `W` maximise · `Q` close pane · `H` all keys |
 | Programme | `R` reset · `Shift+R` reset all · `G/Shift+G` view · `T` grid · `W` maximise · `Q` close pane · `H` all keys |
 | Inputs list row | `R` reset · `Shift+R` reset all · `Tab` measurements · `Shift+Tab` back · `H` all keys |
-| Spatial walk | `X` capture here · `PageDown` next step · `PageUp` previous · `K` skip · `Shift+R` redo, resets the walk's measurements · `M` mics trade places · `Space` stimulus · `W` maximise · `H` all keys |
+| Spatial walk | `Shift+W` walks · `Space` stimulus · `W` maximise · `Q` close pane · `H` all keys |
 | Spectrum / RTA: 3D spectrograph | `←/→` orbit · `PageUp/PageDown` tilt · `I/O` zoom · `Home` reset camera · `G/Shift+G` view · `S` start/stop · `P` peaks · `W` maximise · `H` all keys |
 
 <!-- keymap:end -->

@@ -319,6 +319,11 @@ fn rig_alignment() -> R {
 }
 
 #[test]
+fn rig_walk() -> R {
+    scene("walk", scenes::walk)
+}
+
+#[test]
 fn rig_eq() -> R {
     scene("eq", scenes::eq)
 }

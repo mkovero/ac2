@@ -1,6 +1,6 @@
 //! The spatial walk from the keyboard: the Spatial walk window, the setup window (K9 keys,
 //! typed fields, no letter keys), the plan editor, `walk.new` opening the walk's own pane,
-//! and the walk pane's keys.
+//! and the walk pane's actions (buttons on the pane: no keys of their own).
 
 use super::*;
 use crate::walk_setup::PlanMsg;
@@ -305,10 +305,16 @@ fn the_plan_editor_makes_the_walks_plan() {
     assert_eq!(s.points.len(), 8, "suggested on the new plan");
 }
 
-/// The walk pane's keys: X captures, PageDown/PageUp go to the next and previous point,
-/// Shift+R redoes the last capture, K skips; on another pane X is the transfer's own.
+/// A walk action as its button and the palette send it.
+fn run(t: &mut T, c: CommandId) -> Vec<Request> {
+    t.st.apply(Msg::Command(c), &t.keys)
+}
+
+/// The walk pane's actions: the capture, the next and previous step, the redo of the last
+/// capture, the skip. None has a key: the letters a transfer pane uses do nothing on a walk
+/// pane, and on a transfer pane they stay the transfer's own.
 #[test]
-fn the_walk_pane_keys_drive_the_walk() {
+fn the_walk_pane_actions_drive_the_walk() {
     let mut t = with_plan();
     t.remirror(|s| {
         s.walk_plans = vec![hall()];
@@ -321,15 +327,32 @@ fn the_walk_pane_keys_drive_the_walk() {
             .any(|(c, _)| matches!(c, Command::WalkCapture { .. })),
         "a transfer pane's X"
     );
+    // Off a walk pane the action says where it belongs and sends nothing.
+    assert!(calls(&run(&mut t, CommandId::WalkCapture)).is_empty());
+    assert!(
+        t.last_toast().contains("focus a Spatial walk pane first"),
+        "{}",
+        t.last_toast()
+    );
     t.st.open_walk_pane(WalkId(1));
+    let toasts = t.st.toasts.list.len();
+    for key in ["X", "K", "M", "Shift+R", "PageDown", "PageUp"] {
+        assert!(t.key(key).is_empty(), "{key} on a walk pane");
+        assert_eq!(
+            t.st.key_command(&t.keys, Chord::parse(key).expect(key)),
+            None
+        );
+    }
+    assert_eq!(t.st.toasts.list.len(), toasts, "and says nothing");
+    assert_eq!(t.st.overlay, Overlay::None);
     let only = |r: Vec<Request>| match calls(&r).as_slice() {
         [(c, what)] => ((*c).clone(), (*what).to_owned()),
         _ => panic!("{r:?}"),
     };
-    let (c, what) = only(t.key("X"));
+    let (c, what) = only(run(&mut t, CommandId::WalkCapture));
     assert_eq!(c, Command::WalkCapture { walk: WalkId(1) });
     assert_eq!(what, "Mains captured at P2");
-    let (c, _) = only(t.key("PageDown"));
+    let (c, _) = only(run(&mut t, CommandId::WalkNext));
     assert_eq!(
         c,
         Command::WalkGoto {
@@ -337,7 +360,7 @@ fn the_walk_pane_keys_drive_the_walk() {
             step: 2
         }
     );
-    let (c, _) = only(t.key("PageUp"));
+    let (c, _) = only(run(&mut t, CommandId::WalkPrev));
     assert_eq!(
         c,
         Command::WalkGoto {
@@ -345,8 +368,8 @@ fn the_walk_pane_keys_drive_the_walk() {
             step: 0
         }
     );
-    // The mic at a pending point: Shift+R redoes the last one captured before it.
-    let (c, what) = only(t.key("Shift+R"));
+    // The mic at a pending point: the redo is of the last one captured before it.
+    let (c, what) = only(run(&mut t, CommandId::WalkRedo));
     assert_eq!(
         c,
         Command::WalkRedo {
@@ -355,7 +378,7 @@ fn the_walk_pane_keys_drive_the_walk() {
         }
     );
     assert!(what.contains("out of the average"), "{what}");
-    let (c, _) = only(t.key("K"));
+    let (c, _) = only(run(&mut t, CommandId::WalkSkip));
     assert_eq!(
         c,
         Command::WalkSkip {
@@ -364,11 +387,11 @@ fn the_walk_pane_keys_drive_the_walk() {
         }
     );
     // One mic: no other to trade places with.
-    assert!(calls(&t.key("M")).is_empty());
+    assert!(calls(&run(&mut t, CommandId::WalkSwap)).is_empty());
     assert!(t.last_toast().contains("no other"), "{}", t.last_toast());
-    // Every point done: X says so and sends nothing.
+    // Every point done: the capture says so and sends nothing.
     t.remirror(|s| s.walks[0].step = None);
-    assert!(calls(&t.key("X")).is_empty());
+    assert!(calls(&run(&mut t, CommandId::WalkCapture)).is_empty());
     assert!(t.last_toast().contains("every point"), "{}", t.last_toast());
 }
 
@@ -404,10 +427,10 @@ fn two_mics() -> WalkState {
     w
 }
 
-/// Two mics: the setup adds the second on its own input, X captures both, M has them trade
-/// places, K and Shift+R ask which point (the whole step first).
+/// Two mics: the setup adds the second on its own input, a capture takes both, the mics
+/// trade places, and the skip and the redo ask which point (the whole step first).
 #[test]
-fn a_walk_with_two_mics_from_the_keyboard() {
+fn a_walk_with_two_mics() {
     let mut t = with_plan();
     t.remirror(|s| s.measurements.push(second_mic()));
     t.key("Shift+W");
@@ -451,10 +474,10 @@ fn a_walk_with_two_mics_from_the_keyboard() {
         [(c, what)] => ((*c).clone(), (*what).to_owned()),
         _ => panic!("{r:?}"),
     };
-    let (c, what) = only(t.key("X"));
+    let (c, what) = only(run(&mut t, CommandId::WalkCapture));
     assert_eq!(c, Command::WalkCapture { walk: WalkId(1) });
     assert_eq!(what, "Mains captured at P4, P3");
-    let (c, what) = only(t.key("M"));
+    let (c, what) = only(run(&mut t, CommandId::WalkSwap));
     assert_eq!(
         c,
         Command::WalkSwap {
@@ -463,8 +486,8 @@ fn a_walk_with_two_mics_from_the_keyboard() {
         }
     );
     assert_eq!(what, "Mains: move Main R to P4, Main L to P3");
-    // K: which point, the whole step first.
-    t.key("K");
+    // The skip: which point, the whole step first.
+    run(&mut t, CommandId::WalkSkip);
     let Overlay::Choose(c) = &t.st.overlay else {
         panic!("{:?}", t.st.overlay);
     };
@@ -484,11 +507,11 @@ fn a_walk_with_two_mics_from_the_keyboard() {
         }
     );
     // Esc closes the chooser, nothing sent.
-    t.key("K");
+    run(&mut t, CommandId::WalkSkip);
     assert!(calls(&t.key("Esc")).is_empty());
     assert_eq!(t.st.overlay, Overlay::None);
     // The whole step: a skip per point.
-    t.key("K");
+    run(&mut t, CommandId::WalkSkip);
     let r = t.key("Enter");
     assert_eq!(calls(&r).len(), 2, "{r:?}");
 }
@@ -554,7 +577,7 @@ fn sweep_walk() -> WalkState {
 }
 
 /// The setup offers the sweep measurement on the mic row: choosing it makes a sweep walk.
-/// On the sweep walk's pane X arms the walk's sweep, then plays it (`sweep.run`, under the
+/// On the sweep walk's pane the capture arms the walk's sweep, then plays it (`sweep.run`, under the
 /// lease and level path every sweep takes); the pane reads the run, not a readiness.
 #[test]
 fn a_sweep_walk_from_the_setup_to_its_run() {
@@ -602,7 +625,7 @@ fn a_sweep_walk_from_the_setup_to_its_run() {
     assert_eq!(t.st.walk_sweep_at(&w), Some(SweepAt::Idle));
     assert_eq!(SweepAt::Idle.text(&["P1"]), "sweep plays at P1");
     assert!(t.st.sweep_view(), "the sweep walk's pane is a sweep's");
-    let r = t.key("X");
+    let r = run(&mut t, CommandId::WalkCapture);
     assert!(
         r.iter().any(|x| matches!(x, Request::StimArm { .. })),
         "{r:?}"
@@ -613,7 +636,7 @@ fn a_sweep_walk_from_the_setup_to_its_run() {
             .any(|(c, _)| matches!(c, Command::WalkCapture { .. }))
     );
     t.conn(ConnEvent::Stimulus(StimEvent::Armed));
-    let r = t.key("X");
+    let r = run(&mut t, CommandId::WalkCapture);
     let [Request::Sweep { meas, .. }] = r.as_slice() else {
         panic!("{r:?}");
     };

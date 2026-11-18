@@ -62,3 +62,24 @@ pub fn walk(
     };
     Some(walk_scene(&p, style, size))
 }
+
+/// The control bar of walk pane `pane` at `width`; `None` when the pane shows no walk of
+/// the session.
+pub fn walk_controls(
+    st: &AppState,
+    pane: PaneId,
+    theme: &Theme,
+    width: f32,
+) -> Option<ac2_scene::walk::controls::Bar> {
+    let v = st.layout.view(pane)?;
+    if v.kind != crate::state::PaneKind::Walk {
+        return None;
+    }
+    let w = v.walk.and_then(|id| st.walk(id))?;
+    Some(ac2_scene::walk::controls::bar(
+        w,
+        st.walk_capture_held(w),
+        width,
+        theme.font_size,
+    ))
+}

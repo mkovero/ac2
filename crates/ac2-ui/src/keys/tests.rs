@@ -142,6 +142,14 @@ fn every_command_is_reachable() {
         CommandId::SpectrographCividis,
         CommandId::SpectrographGrey,
         CommandId::SpectrographIce,
+        // Buttons on the walk pane: pressed at a mic position, where a plot pane's letters
+        // would be easy to mistake.
+        CommandId::WalkCapture,
+        CommandId::WalkNext,
+        CommandId::WalkPrev,
+        CommandId::WalkRedo,
+        CommandId::WalkSkip,
+        CommandId::WalkSwap,
         // Once a show: the palette's "export leq".
         CommandId::SplLogExport,
         CommandId::SplLogExportPrevious,
@@ -716,22 +724,31 @@ fn palette_titles_are_terse_and_uniform() {
     }
 }
 
-/// The walk pane's keys (`docs/design/spatial-walk.md` §5, §6): X captures, PageDown / PageUp
-/// step through the steps, Shift+R redoes, K skips, M has the mics trade places, Shift+W
-/// opens the walks from anywhere; the
-/// stimulus keys keep their meaning in the pane, and none of its keys is a transfer pane's
-/// nudge or Delete.
+/// The walk pane's actions (`docs/design/spatial-walk.md` §5, §6) are buttons on the pane:
+/// none has a default key, so the letters and paging keys a plot pane uses mean nothing on a
+/// walk pane rather than something else. Shift+W opens the walks from anywhere, and the
+/// stimulus keys keep their meaning in the pane.
 #[test]
-fn walk_keys_are_the_notes() {
+fn walk_actions_have_no_default_key() {
     let m = Keymap::default();
     let c = |s: &str| Chord::parse(s).expect(s);
+    for cmd in [
+        CommandId::WalkCapture,
+        CommandId::WalkNext,
+        CommandId::WalkPrev,
+        CommandId::WalkRedo,
+        CommandId::WalkSkip,
+        CommandId::WalkSwap,
+    ] {
+        assert!(m.bindings().iter().all(|b| b.command != cmd), "{cmd:?}");
+        assert_eq!(cmd.scopes(), [Scope::Walk], "bindable on the walk pane");
+    }
+    for key in [
+        "X", "K", "M", "Shift+R", "PageDown", "PageUp", ".", ",", "G",
+    ] {
+        assert_eq!(m.lookup(Scope::Walk, c(key)), None, "{key}");
+    }
     for (key, cmd) in [
-        ("X", CommandId::WalkCapture),
-        ("PageDown", CommandId::WalkNext),
-        ("PageUp", CommandId::WalkPrev),
-        ("Shift+R", CommandId::WalkRedo),
-        ("K", CommandId::WalkSkip),
-        ("M", CommandId::WalkSwap),
         ("Shift+W", CommandId::Walks),
         ("Space", CommandId::StimulusArm),
         ("Enter", CommandId::StimulusFire),
@@ -743,13 +760,6 @@ fn walk_keys_are_the_notes() {
         m.lookup(Scope::Transfer, c("Shift+W")),
         Some(CommandId::Walks)
     );
-    for key in [".", ",", "Delete"] {
-        let walk = m.lookup(Scope::Walk, c(key));
-        assert!(
-            walk.is_none() || walk == m.lookup(Scope::Global, c(key)),
-            "{key} means {walk:?} in the walk pane"
-        );
-    }
 }
 
 /// The 3D spectrograph is the spectrum pane in another view: a command bound in both scopes

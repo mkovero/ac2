@@ -4,6 +4,7 @@
 //! window's rows; the setup window's and the plan editor's rows ([`setup`]).
 
 pub mod conditions;
+pub mod controls;
 pub mod plan_view;
 pub mod setup;
 #[cfg(test)]

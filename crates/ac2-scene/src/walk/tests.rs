@@ -38,7 +38,7 @@ fn hall() -> PlanSpec {
     }
 }
 
-fn walk(states: &[PointState], current: Option<u16>) -> WalkState {
+pub(super) fn walk(states: &[PointState], current: Option<u16>) -> WalkState {
     WalkState {
         id: WalkId(1),
         name: "Mains".into(),
@@ -75,7 +75,7 @@ fn mic(m: u32) -> WalkMic {
     }
 }
 
-fn pending(n: usize) -> Vec<PointState> {
+pub(super) fn pending(n: usize) -> Vec<PointState> {
     vec![PointState::Pending; n]
 }
 
@@ -119,7 +119,7 @@ fn captured_at(t: u32, at: u64, c: CaptureContext) -> PointState {
     }
 }
 
-fn captured(t: u32) -> PointState {
+pub(super) fn captured(t: u32) -> PointState {
     captured_at(t, NOON, chain(Some(("Vilppu", Some("aa"))), &[]))
 }
 
@@ -213,7 +213,7 @@ fn dots_mark_the_current_point_and_the_next_one_faint() {
 
 /// Two mics, Vilppu (1) and MM1 (2), over five points: step 0 at P1 and P2, step 1 at P3
 /// (MM1) and P4 (Vilppu), step 2 at P5 (MM1).
-fn two_mics(states: &[PointState], step: Option<u16>) -> WalkState {
+pub(super) fn two_mics(states: &[PointState], step: Option<u16>) -> WalkState {
     let mut w = walk(states, step);
     w.mics = vec![mic(1), mic(2)];
     let plan = [(0, 1), (0, 2), (1, 2), (1, 1), (2, 2)];

@@ -511,6 +511,7 @@ fn pane(
             ui.id().with(("stage", id.0)),
             egui::Sense::click_and_drag(),
         );
+        let rect = super::walk::control_bar(app, ui, id, rect, theme, ch);
         let built = if app.plots {
             scene_for(app, id, rect.size(), theme)
         } else {
@@ -559,6 +560,8 @@ fn pane(
         ui.id().with(("pane", id.0)),
         egui::Sense::click_and_drag(),
     );
+    // After the pane's own response too: a press on a button is the button's.
+    let plot_rect = super::walk::control_bar(app, ui, id, plot_rect, theme, ch);
     // After the pane's own response, so a hover or click there is theirs.
     let all = app.state.pane_hints(&app.keymap, id, style);
     let left = title.left() + 8.0;

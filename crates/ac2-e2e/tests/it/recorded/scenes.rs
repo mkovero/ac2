@@ -4,10 +4,11 @@
 
 use ac2_proto::model::{
     AlignBand, ArtnetTarget, Bandwidth, CurveChoice, DepthPolicy, EqBody, EqEdit, EqRealisation,
-    EqSection, EqShape, InputKind, InputSetup, MathConfig, MathDomain, MathExpr, MathOp,
-    MeasConfig, MeasKind, MeasScope, Measurement, Operand, PeakQ, Resolution, SessionConfig,
-    ShelfFreq, ShelfOrder, ShelfSlope, Smoothing, SmoothingFraction, SmoothingMode, SpecResolution,
-    SpectrumConfig, SplConfig, TfAveraging, TimeWeighting, TraceOwner, TransferConfig, Weighting,
+    EqSection, EqShape, InputKind, InputSetup, Marker, MarkerKind, MathConfig, MathDomain,
+    MathExpr, MathOp, MeasConfig, MeasKind, MeasScope, Measurement, Operand, PeakQ, PlanSpec,
+    Resolution, SessionConfig, ShelfFreq, ShelfOrder, ShelfSlope, Smoothing, SmoothingFraction,
+    SmoothingMode, SpecResolution, SpectrumConfig, SplConfig, TfAveraging, TimeWeighting,
+    TraceOwner, TransferConfig, WalkKind, WalkPointSpec, Weighting, ZoneSpec,
 };
 use ac2_proto::units::{Db, DbSpl, Hz, MeasId, Seconds};
 use ac2_proto::{Command, ReplyBody};
@@ -189,6 +190,49 @@ pub fn alignment(cli: &Cli) -> R {
         cli,
         session_meas("Delay tower ↔ Main L", MeasKind::Math { config }),
     )?;
+    Ok(())
+}
+
+/// [`rig`] with the plan "Hall" (a 20 × 15 m floor, FOH at its middle facing the stage) and
+/// "Mains", a walk of four points with Main L's and Delay tower's mics (two steps of two),
+/// none captured yet.
+pub fn walk(cli: &Cli) -> R {
+    rig(cli)?;
+    let plan = PlanSpec {
+        name: "Hall".into(),
+        outline: vec![[0.0, 0.0], [20.0, 0.0], [20.0, 15.0], [0.0, 15.0]],
+        ceiling: Some(8.0),
+        zones: vec![ZoneSpec {
+            name: "Floor".into(),
+            outline: vec![[2.0, 2.0], [18.0, 2.0], [18.0, 11.0], [2.0, 11.0]],
+            ear_height: 1.2,
+            weight: None,
+            seats: Some(400),
+        }],
+        markers: vec![Marker {
+            name: "FOH".into(),
+            kind: MarkerKind::Foh,
+            at: [10.0, 3.0, 1.2],
+            heading_deg: Some(90.0),
+        }],
+        surfaces: vec![],
+    };
+    cli.call(Command::PlanSave { plan })?;
+    let points = [[5.0, 9.0], [15.0, 9.0], [15.0, 5.0], [5.0, 5.0]]
+        .iter()
+        .enumerate()
+        .map(|(i, at)| WalkPointSpec {
+            label: format!("P{}", i + 1),
+            at: [at[0], at[1], 1.2],
+        })
+        .collect();
+    cli.call(Command::WalkNew {
+        name: "Mains".into(),
+        plan: "Hall".into(),
+        kind: WalkKind::LiveTransfer,
+        meas: vec![id_of(cli, "Main L")?, id_of(cli, "Delay tower")?],
+        points,
+    })?;
     Ok(())
 }
 

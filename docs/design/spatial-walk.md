@@ -162,8 +162,8 @@ line. The keyboard stays with the panes, so the stimulus keys (**Space**, **Ente
 a transfer pane's **R** work during the walk (an open window would own them, K9). Setup (plan,
 zones, preset, `n`, kind, mics) is a window that closes before the walk starts.
 
-**Moving the mic restarts the measurement, at placement, not at the key.** The operator presses
-next, picks up the mic, walks and places it; a reset at the key press would average the carry.
+**Moving the mic restarts the measurement, at placement, not at the press.** The operator presses
+next, picks up the mic, walks and places it; a reset at the press would average the carry.
 So on a move (next, back, redo) the daemon resets every walk measurement's averaging
 (`meas.reset`) and turns on **delay tracking** for it (decision 3a, `DelayState.tracking`). While
 the mic travels, tracking follows the changing arrival; every tracking move restarts the MTW
@@ -193,7 +193,7 @@ beside it that glides between frames exactly as the Leq bars do (`ac2_scene::bar
 *Leq bars* setting turns it off): app-side display easing of a wire fact, no new DSP. No standard
 governs the indicator; it is a plain meter.
 
-**Capture.** Live transfer: the capture key (below) sends `walk.capture`; the daemon captures
+**Capture.** Live transfer: the capture button (below) sends `walk.capture`; the daemon captures
 every walk measurement of the step in one step (one `trace.capture` per measurement, milliseconds
 apart, each a settled average, which is harmless for a spatial average) and advances. Sweep: the
 sweep fires with **Enter** as always; a complete, unrefused run at the current point is that
@@ -235,23 +235,37 @@ average of them.
 `PaneKind::Walk` / `PaneContent::Walk`, `TfMeta.filled`, the three `TraceMeta` facts, the plan types and plan-library commands. A
 `PROTO_VERSION` bump and a session-format bump (`ac2-traces` `session::VERSION`).
 
-**Keys** (each ships with its hint-bar tip, key-table row and user-guide row; a new `Scope::Walk`
-in the key table and the keymap-doc generator). Pane-scope keys shadow global ones while the walk
-pane is focused, so the walk avoids keys whose meaning differs in a transfer pane on screen beside
-it (`.`/`,` nudge delay there) and global keys the operator expects (Delete):
+**Controls.** The walk's actions are buttons on its pane, not keys: the operator presses them
+standing at a mic position, possibly on a touch screen, and a plot pane on screen beside the walk
+gives the same letters another meaning. The pane's **control bar** (along its bottom, above the
+hint line) has a button per action, in this order; `ac2-scene` (`walk::controls`) words, sizes and
+dims them, `ac2-ui` places them and sends each one's command:
+
+| button | does | dimmed when (the reason is its tip, and what the command answers) |
+|---|---|---|
+| **Previous step** / **Next step** | previous / next step, wrapping round (moving there resets, above) | never |
+| **Capture here and go on** | capture here (mark the point) and go to the next; the largest button | the step is captured; every point is captured or skipped; on a sweep walk, the stimulus plays |
+| **Skip point** | skip the current point (several mics: pick one, or the whole step) | no mic stands at a pending point |
+| **Redo point and reset** | redo the current point; the walk's measurements reset there | no point is captured yet |
+| **Mics trade places** | the mics trade places at this step (§6) | fewer than two mics stand at the step |
+
+Capture is never dimmed for readiness: what is captured before ready is counted as unsettled
+(below). The bar is a control, not plot chrome: **T** does not hide it. It takes its strip off the
+picture, so it never covers the plan; too narrow for the labels in full it shortens them, narrower
+still the capture takes a row of its own and the rest wrap under it. Each action stays a command
+(`walk_capture`, `walk_next`, `walk_prev`, `walk_skip`, `walk_redo`, `walk_swap`): in the palette,
+and bindable in `keys.toml`, with no default key.
+
+**Keys** (each ships with its hint-bar tip, key-table row and user-guide row; a `Scope::Walk`
+in the key table and the keymap-doc generator, with no default binding of its own):
 
 | key | scope | does |
 |---|---|---|
 | **Shift+W** | everywhere | *Spatial walk…*: the window listing the session's walks, **New walk** first (as Shift+M / Shift+S open *New …*) |
-| **X** | walk pane | capture here (mark the point) and go to the next |
-| **PageDown** / **PageUp** | walk pane | next / previous point (moving there resets, above) |
-| **Shift+R** | walk pane | redo the current point (its tip says it resets the walk's measurements) |
-| **K** | walk pane | skip the current point (several mics: pick one, or the whole step) |
-| **M** | walk pane | the mics trade places at this step (§6) |
 | **Space** / **Enter** | walk pane, kind `sweep` | arm / fire the walk's sweep measurement (the walk pane's measurement, as a sweep pane's) |
 | click / drag | plan view | add / move a vertex or a point |
 
-`keys.toml` chord parsing (`ac2-ui` `keys/chord.rs`) learns the names `PageUp` / `PageDown`.
+`keys.toml` chord parsing (`ac2-ui` `keys/chord.rs`) knows the names `PageUp` / `PageDown`.
 
 The setup window has no letter keys (K9: ↑/↓ rows, ←/→ choices, typed fields): the pattern is a
 row (*pattern 3*, **→** next seed).
@@ -281,8 +295,8 @@ As built (2026-10-29):
 - **Mics** are 1 … 8 transfer measurements, each on its own measurement input (two
   measurements of one input would be one mic at two points). The setup window adds them
   with a *mic 2* … row (**→** adds the next transfer on an input of its own, *none* drops it).
-- **Swap** (`walk.swap {points}`, key **M**): the mics at two or more pending points of the
-  current step move round by one (two trade places; the key rotates every mic standing).
+- **Swap** (`walk.swap {points}`, the **Mics trade places** button): the mics at two or more pending points of the
+  current step move round by one (two trade places; the button rotates every mic standing).
   The same exchange applies to the pending points of later steps, since those were planned
   from where each mic stood: whoever stands there now walks on. A swap is a move (§5 reset).
 - **Skip and redo are per point.** A point that cannot be measured (a pillar, a seat taken)
@@ -292,7 +306,7 @@ As built (2026-10-29):
   others' captures there stay). With several candidates the keys open a chooser: the whole
   step first (a skip or redo per point), then each point by name (*P3 · Vilppu*). The CLI's
   `walk skip` without a point skips every point a mic stands at.
-- **PageDown / PageUp** step through steps (`walk.goto {step}`), not points.
+- **Next step / Previous step** step through steps (`walk.goto {step}`), not points.
 - **The walk pane**: the step line names each mic (*Move Vilppu to P3, MM1 to P4*), a line
   per mic in its colour gives its readout from FOH, and on the plan each standing point is
   ringed in its mic's colour (`Theme::trace_color` by the mic's place), the next step's
@@ -453,7 +467,7 @@ after the last pick; the CLI takes `--mic 1,3` / `--meas 1,3`.
   domain), as for a live walk; the G9 band applies to it.
 - **UI.** The setup's first mic row cycles the session's transfers, then its sweeps (*Sweep 1
   · sweep, 2 mics in one play*); choosing a sweep makes a sweep walk with no further mic rows.
-  On a sweep walk's pane **X** (the walk's capture key) arms the walk's sweep when nothing is
+  On a sweep walk's pane **Capture** (the walk's capture button) arms the walk's sweep when nothing is
   armed and plays it when it is armed, through the same arm/fire path as **Space**/**Enter**,
   which also work there. The ready line reads the run: *sweep plays at P1, P2*, *sweep
   playing · 1 of 2*, *analysing the sweep*.

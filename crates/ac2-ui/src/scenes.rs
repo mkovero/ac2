@@ -39,7 +39,7 @@ pub use spl_meters::{
     LocalZone, StripPlace, band_leq, has_band_meter, leq, leq_keyed, leq_meter, meter_leq,
     refresh_spl_scales, spl, spl_pane, spl_placeholder,
 };
-pub use walk::walk;
+pub use walk::{walk, walk_controls};
 
 /// Inputs that come from the clock, passed in so the assembly stays testable.
 #[derive(Clone, Copy, Debug)]

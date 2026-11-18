@@ -6,6 +6,8 @@ use super::harness::{Driver, R, measuring, scene_texts};
 use ac2_proto::model::PointState;
 use ac2_scene::primitives::Viewport;
 use ac2_scene::theme::Theme;
+use ac2_scene::walk::controls::Action;
+use ac2_ui::keys::CommandId;
 use ac2_ui::state::{AppState, Msg, Overlay, PaneKind};
 use ac2_ui::walk_setup::PlanMsg;
 
@@ -36,6 +38,19 @@ fn walk_texts(s: &AppState) -> Vec<String> {
     )
     .map(|w| scene_texts(&w.scene))
     .unwrap_or_default()
+}
+
+/// The actions the focused walk pane's control bar dims.
+fn dimmed(s: &AppState) -> Vec<Action> {
+    ac2_ui::scenes::walk_controls(s, s.layout.focus, &Theme::dark(), 1000.0)
+        .map(|b| {
+            b.buttons
+                .iter()
+                .filter(|x| x.blocked.is_some())
+                .map(|x| x.action)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 #[test]
@@ -127,12 +142,16 @@ fn spatial_walk_from_an_empty_daemon() -> R {
     // The level typed for the first measurement stays: Space arms, Enter fires.
     d.arm()?;
     d.play()?;
-    d.key("X");
+    // The pane's control bar, as its buttons send their actions: nothing captured, so
+    // nothing to redo; one mic, so none to trade places with.
+    assert_eq!(dimmed(&d.st), [Action::Redo, Action::Swap]);
+    d.send(Msg::Command(CommandId::WalkCapture));
     d.until("P1 captured", |s| captured(s) == 1)?;
+    assert_eq!(dimmed(&d.st), [Action::Swap]);
     d.until("on to P2", |s| {
         s.walks().first().and_then(|w| w.step) == Some(1)
     })?;
-    d.key("X");
+    d.send(Msg::Command(CommandId::WalkCapture));
     d.until("the average", |s| {
         captured(s) == 2
             && s.walks()

@@ -279,15 +279,8 @@ pub fn defaults() -> Vec<Binding> {
         // Shift+W, as Shift+M / Shift+S open a new math channel and a new sweep: the
         // session's spatial walks, a new one first.
         (C::Walks, S::Global, sh(K::W)),
-        // The walk pane's own keys avoid what a transfer pane beside it means by `.` / `,`
-        // (nudges) and the Delete everyone expects: X marks the spot, PageDown / PageUp page
-        // through the points, K skips, Shift+R (R a step further) redoes.
-        (C::WalkCapture, S::Walk, k(K::X)),
-        (C::WalkNext, S::Walk, k(K::PageDown)),
-        (C::WalkPrev, S::Walk, k(K::PageUp)),
-        (C::WalkRedo, S::Walk, sh(K::R)),
-        (C::WalkSkip, S::Walk, k(K::K)),
-        (C::WalkSwap, S::Walk, k(K::M)),
+        // The walk pane's actions have no default key: each is a button on the pane, pressed
+        // at a mic position with the plots' letters meaning something else one pane over.
         // The 3D spectrograph's own section: what acts on its measurement or view keeps the
         // spectrum's keys; PageUp / PageDown tilt (↑/↓ are the stimulus level, and
         // Ctrl / Alt+↑/↓ the level range and offset, which set the heights here too).
@@ -438,14 +431,10 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
         Scope::Walk => {
             const {
                 &[
-                    hint(C::WalkCapture, "capture here", 95),
-                    hint(C::WalkNext, "next step", 85),
-                    hint(C::WalkPrev, "previous", 60),
-                    hint(C::WalkSkip, "skip", 75),
-                    hint(C::WalkRedo, "redo, resets the walk's measurements", 70),
-                    hint(C::WalkSwap, "mics trade places", 65),
-                    hint(C::StimulusArm, "stimulus", 50),
-                    hint(C::MaximisePane, "maximise", 40),
+                    hint(C::Walks, "walks", 90),
+                    hint(C::StimulusArm, "stimulus", 80),
+                    hint(C::MaximisePane, "maximise", 50),
+                    hint(C::ClosePane, "close pane", 40),
                 ]
             }
         }

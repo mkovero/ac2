@@ -171,3 +171,21 @@ fn layout_fills_the_area_with_the_tree() {
         assert!(area.contains_rect(*r), "{r:?}");
     }
 }
+
+/// Each button of the walk pane's bar sends the command titled as the button reads: one
+/// name for an action on the pane, in the palette and in `keys.toml`'s reference.
+#[test]
+fn walk_bar_buttons_are_their_commands() {
+    use ac2_scene::walk::controls::Action;
+    let mut seen = Vec::new();
+    for a in Action::ALL {
+        let c = crate::view::walk::action_command(a);
+        assert_eq!(c.title(), a.label(), "{a:?}");
+        assert!(a.label().starts_with(a.short()) || a == Action::Swap);
+        assert_eq!(c.scopes(), [Scope::Walk]);
+        seen.push(c);
+    }
+    seen.sort();
+    seen.dedup();
+    assert_eq!(seen.len(), Action::ALL.len());
+}

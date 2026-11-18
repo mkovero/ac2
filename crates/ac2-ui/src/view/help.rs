@@ -257,6 +257,13 @@ const PLATE_MOUSE: [(&str, &str); 1] = [(
 /// no key picks a curve by its row, and a kiosk without a keyboard has only the tap.
 const LEGEND_CLICK: (&str, &str) = ("Click\nlegend row", "Select its curve");
 
+/// The walk pane's actions are the buttons of its control bar and have no keys: the help of
+/// that pane names the bar, so the page that lists every key also says where these are.
+const WALK_BAR: (&str, &str) = (
+    "Click\nTap",
+    "Control bar: capture, steps, skip, redo, mics trade places",
+);
+
 /// What the frequency axis's keys and gestures do in the 3D spectrograph: they move the
 /// camera. Listed under its pane's keys with the keys they are bound to.
 const CAMERA: [(CommandId, &str); 3] = [
@@ -282,9 +289,15 @@ pub(crate) fn help_rows(keymap: &Keymap, active: Scope) -> Vec<HelpRow> {
     let mut rows = Vec::new();
     if active != Scope::Global {
         let pane = scope_rows(keymap, active, |_| true);
-        if !pane.is_empty() {
+        if !pane.is_empty() || active == Scope::Walk {
             rows.push(HelpRow::Header(format!("{} pane", active.title())));
             rows.extend(pane);
+            if active == Scope::Walk {
+                rows.push(HelpRow::Bind {
+                    keys: WALK_BAR.0.into(),
+                    title: WALK_BAR.1.into(),
+                });
+            }
             if matches!(
                 active,
                 Scope::Transfer | Scope::Spectrum | Scope::Spectrograph3d
@@ -674,6 +687,9 @@ mod tests {
         // The legend plate: a row's click and a drag on the spectrum, both spectrographs
         // (the flat one is the spectrum pane's scope) and the transfer plot alike.
         assert!(b.contains(&LEGEND_CLICK));
+        let walk = help_rows(&Keymap::default(), Scope::Walk);
+        assert_eq!(walk[0], HelpRow::Header("Spatial walk pane".into()));
+        assert_eq!(binds(&walk)[0], (WALK_BAR.0, WALK_BAR.1));
         let three_d = help_rows(&Keymap::default(), Scope::Spectrograph3d);
         assert!(binds(&three_d).contains(&LEGEND_CLICK));
         assert!(binds(&three_d).contains(&PLATE_MOUSE[0]));
