@@ -173,7 +173,7 @@ fn two_rates_are_never_one_clock_whatever_the_daemon_says() {
 }
 
 #[test]
-fn a_daemons_agreement_reads_locked_with_its_figure() {
+fn a_daemons_agreement_reads_agree_with_its_figure() {
     // The verdict stands on its own: neither OS states its system clock here.
     let a = clocks(
         measured_against(0.0, ClockBasis::HostCrystal),
@@ -181,7 +181,7 @@ fn a_daemons_agreement_reads_locked_with_its_figure() {
     );
     let sees = remote(KETUNKOLO, PeerRelation::Agree, Some(-0.3));
     let d = clock_domains(&pair_with(&a, &a, &sees));
-    assert_eq!(tags(&d), [Some("LOCKED"), Some("LOCKED")]);
+    assert_eq!(tags(&d), [Some("AGREE"), Some("AGREE")]);
     assert_eq!(
         tip(&d, 0),
         "clocks agree with ketunkolo: measured between the rigs, within 2 ppm (+0.3 ppm over \
@@ -357,7 +357,7 @@ fn a_broken_chain_keeps_the_group_the_daemon_measured() {
     let sees = remote(KETUNKOLO, PeerRelation::Agree, Some(1.4));
     let [pupu, ketunkolo] = pair_with(&a, &b, &sees);
     let d = clock_domains(&[pupu, ketunkolo, rig("c", 96_000, &c)]);
-    assert_eq!(tags(&d), [Some("LOCKED"), Some("LOCKED"), Some("UNKNOWN")]);
+    assert_eq!(tags(&d), [Some("AGREE"), Some("AGREE"), Some("UNKNOWN")]);
     assert_eq!(
         tip(&d, 2),
         "can't tell: the rates agree in a chain within 2 ppm, but pupu runs −3.0 ppm against c (by each \
@@ -401,7 +401,8 @@ fn two_groups_are_lettered_in_list_order() {
     assert!(tip(&d, 3).starts_with("rates agree with b within 2 ppm"));
     assert!(matches!(d.same_domain(0, 1), SameDomain::No { .. }));
 
-    // One pair measured by its daemon, the other at another rate: each keeps its own word.
+    // One pair measured by its daemon, the other by system clocks: one word, the basis kept
+    // apart in the data and the tooltip.
     let sees = remote(KETUNKOLO, PeerRelation::Agree, None);
     let [pupu, ketunkolo] = pair_with(&zero, &zero, &sees);
     let d = clock_domains(&[
@@ -414,15 +415,27 @@ fn two_groups_are_lettered_in_list_order() {
         tags(&d),
         [
             Some("AGREE A"),
-            Some("LOCKED B"),
+            Some("AGREE B"),
             Some("AGREE A"),
-            Some("LOCKED B")
+            Some("AGREE B")
         ]
     );
     assert_eq!(
         tip(&d, 1),
         "clocks agree with ketunkolo: measured between the rigs, within 2 ppm; a lock is not \
          proven below 2 ppm"
+    );
+    let basis = |i: usize| match d.rigs[i].domain {
+        Domain::Group { basis, .. } => Some(basis),
+        _ => None,
+    };
+    assert_eq!(basis(0), Some(Basis::SystemClocks));
+    assert_eq!(basis(1), Some(Basis::BetweenRigs));
+    assert!(
+        d.rigs
+            .iter()
+            .all(|r| r.tag.as_deref().is_none_or(|t| !t.contains("LOCKED"))),
+        "no evidence here shows a lock"
     );
 }
 

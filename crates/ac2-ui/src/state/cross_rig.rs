@@ -16,7 +16,9 @@ use super::*;
 use crate::state::panes::drag::RowDrop;
 use ac2_scene::clock_domain::{DomainTag, RigClockFacts, clock_domains};
 use ac2_scene::meas_list::{Mark, TreeKey, TreeRow};
-use ac2_scene::rig_tree::{Away, ClockTag, RigAudio, RigRoot, rig_away_heading, rig_branch};
+use ac2_scene::rig_tree::{
+    Away, ClockTag, ClockVerdict, RigAudio, RigRoot, rig_away_heading, rig_branch,
+};
 
 /// A rig not shown, as its part of the measurement list was last read: its rows, and what
 /// each draggable row needs of a pane. Read with the rig swapped in, so between messages.
@@ -221,9 +223,14 @@ impl AppState {
             .and_then(|s| s.session.open.as_ref())
             .map_or(&[][..], |o| &o.config.remote_inputs[..]);
         for ((id, name), clock) in paired.into_iter().zip(&clocks[1..]) {
+            // One verdict on a heading: a rig with a clock tag says the clocks there.
+            let verdict = match clock.tag {
+                Some(_) => ClockVerdict::OnTag,
+                None => ClockVerdict::InWords,
+            };
             let pairing = remote.map_or_else(
                 || ac2_scene::rig_tree::PAIRED.to_owned(),
-                |r| ac2_scene::rig_tree::pairing_text(r, inputs, id),
+                |r| ac2_scene::rig_tree::pairing_text(r, inputs, id, verdict),
             );
             let held = self.find_rig(id);
             let list = self.others.rig_lists.iter().find(|l| l.rig == id);

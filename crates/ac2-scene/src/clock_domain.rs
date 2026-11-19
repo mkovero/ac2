@@ -1,5 +1,5 @@
 //! Which rigs of a list share a sample clock, as a tag on each rig's row and the words
-//! behind it: `LOCKED`, `AGREE`, `FREE`, `UNKNOWN`.
+//! behind it: `AGREE`, `FREE`, `UNKNOWN`.
 //!
 //! A transfer function between two rigs means something only when both count samples on
 //! one clock. Three kinds of evidence say whether they do, strongest first:
@@ -11,9 +11,12 @@
 //!    only while both system clocks are held to a common time closely enough.
 //!
 //! Neither 2 nor 3 can prove a lock: block stamps resolve about 2 ppm over a minute, and
-//! two free crystals can sit that close. The daemon's verdict watches one stream over two
-//! windows and holds a failure for a minute, so it earns `LOCKED`; agreement of two
-//! separately measured figures earns only `AGREE`. Every tooltip states its basis.
+//! two free crystals can sit that close. Both therefore earn the same tag, `AGREE`, and
+//! the tooltip states which of the two the agreement rests on ([`Basis`]).
+//!
+//! `LOCKED` is reserved: no tag reads it. It is for rigs shown to hold no drift over a
+//! long window, the one evidence that tells a shared clock from two crystals that happen
+//! to sit close (`docs/design/remote-auto.md` §5.2).
 
 use ac2_proto::model::{
     CantTellReason, ClockBasis, Clocks, NotLockedReason, PeerClock, PeerRelation, RemoteRig,
@@ -52,7 +55,9 @@ pub struct RigClockFacts<'a> {
     pub between: &'a [RemoteRig],
 }
 
-/// What a group's agreement rests on.
+/// What a group's agreement rests on. Both read `AGREE`: the tooltip says which, and a
+/// tag for a proven lock (see the module text) would be earned on top of
+/// [`Basis::BetweenRigs`], never on system clocks alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Basis {
     /// Daemons' verdicts on the streams between the group's rigs join all of it.
@@ -85,7 +90,7 @@ pub enum Domain {
 /// One rig's row tag.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DomainTag {
-    /// The tag: `LOCKED`, `LOCKED A`, `AGREE`, `FREE`, `UNKNOWN`; `None`
+    /// The tag: `AGREE`, `AGREE A`, `FREE`, `UNKNOWN`; `None`
     /// where there is nothing to say (no session, or no other rig to compare with).
     pub tag: Option<String>,
     /// The tooltip: the other rigs of the group and the basis, or what differs, or what is
@@ -293,13 +298,9 @@ pub fn clock_domains(rigs: &[RigClockFacts<'_>]) -> ClockDomains {
     groups.sort_by_key(|(members, _)| members[0]);
 
     for (index, (members, basis)) in groups.iter().enumerate() {
-        let word = match basis {
-            Basis::BetweenRigs => "LOCKED",
-            Basis::SystemClocks => "AGREE",
-        };
         let tag = match groups.len() {
-            1 => word.to_owned(),
-            _ => format!("{word} {}", group_letter(index)),
+            1 => "AGREE".to_owned(),
+            _ => format!("AGREE {}", group_letter(index)),
         };
         for &i in members {
             out.rigs[i] = DomainTag {

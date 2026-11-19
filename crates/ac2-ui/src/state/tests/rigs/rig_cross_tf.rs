@@ -112,13 +112,27 @@ fn pupu_pairing(t: &T) -> String {
     line.split(" · click ").next().unwrap_or(line).to_owned()
 }
 
-/// Agreeing clocks: said quietly on the rig's heading, the pane names the remote side and says the relation in
-/// its title, no banner and no cue.
+/// Agreeing clocks: said once on the rig's heading, by its clock tag with the words behind
+/// it in the tooltip (the pairing line gives no second verdict); the pane names the remote
+/// side and says the relation in its title, no banner and no cue.
 #[test]
 fn agreeing_clocks_are_said_quietly() {
     let mut t = two_mirrored();
     cross_tf(&mut t, PeerRelation::Agree, CrossTfState::Running);
-    assert_eq!(pupu_pairing(&t), "paired · streaming · clocks agree");
+    assert_eq!(pupu_pairing(&t), "paired · streaming");
+    let rows = t.st.list_rows();
+    let head = rows
+        .iter()
+        .map(|(_, r)| r)
+        .find(|r| r.depth == 0 && r.name.starts_with("pupu"))
+        .expect("pupu's heading");
+    assert_eq!(head.name, "pupu · 48 kHz · AGREE");
+    assert!(
+        head.describe
+            .contains("\nclock AGREE: clocks agree with test rig: measured between the rigs"),
+        "{}",
+        head.describe
+    );
     assert!(t.st.cross_rig_banners().is_empty());
     let p = t.pane(PaneKind::Transfer);
     assert!(

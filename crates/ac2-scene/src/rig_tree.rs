@@ -70,20 +70,38 @@ pub struct RigRoot<'a> {
 /// tag alone states no basis.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ClockTag<'a> {
-    /// `LOCKED`, `AGREE`, `FREE`, `UNKNOWN`.
+    /// `AGREE`, `FREE`, `UNKNOWN`.
     pub tag: &'a str,
     /// What the tag rests on.
     pub tip: &'a str,
 }
 
+/// Where a heading says how the clocks between its rig and the rig shown stand.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClockVerdict {
+    /// In the pairing's words: the heading carries no clock tag.
+    InWords,
+    /// On the heading's clock tag ([`ClockTag`]), judged on more evidence than the rig
+    /// shown's daemon has (the other daemon's verdict, each system clock). The pairing
+    /// then gives no second verdict that could read otherwise; a warning is still said,
+    /// since it is why a measurement stopped, and a rig warned of is never in the tag's
+    /// group with the rig shown.
+    OnTag,
+}
+
 /// The pairing with `rig` as the rig shown's daemon reports it (`r`, with its session's
 /// remote inputs `inputs`), in the words the lines between rigs use: a link that is not up,
 /// else the first of that rig's inputs whose audio does not stream (*cm4 runs 48 kHz, this
-/// rig 96 kHz*), else that its audio streams and how the clocks between the two stand
-/// (*paired · streaming · clocks agree*, *CLOCKS NOT LOCKED +5.6 ppm · paired · streaming*).
-/// A daemon says nothing of a paired rig its session takes no input from: that one reads
-/// *paired*, no more.
-pub fn pairing_text(r: &RemoteState, inputs: &[RemoteInput], rig: RigId) -> String {
+/// rig 96 kHz*), else that its audio streams and, as `clocks` has it, how the clocks
+/// between the two stand (*paired · streaming · clocks agree*, *CLOCKS NOT LOCKED +5.6 ppm
+/// · paired · streaming*). A daemon says nothing of a paired rig its session takes no
+/// input from: that one reads *paired*, no more.
+pub fn pairing_text(
+    r: &RemoteState,
+    inputs: &[RemoteInput],
+    rig: RigId,
+    clocks: ClockVerdict,
+) -> String {
     let Some(remote) = r.rigs.iter().find(|x| x.rig == rig) else {
         return PAIRED.to_owned();
     };
@@ -98,10 +116,15 @@ pub fn pairing_text(r: &RemoteState, inputs: &[RemoteInput], rig: RigId) -> Stri
         Some((a, channel)) => between_rigs::audio_text(a, &remote.name, channel),
         // Audio streams: the clocks between the two rigs are what is left to say. A
         // warning leads, so the narrowest list still shows it.
-        None if audio.next().is_some() => match crate::cross_rig::clock_words(r, remote) {
-            (words, true) => format!("{words} · {PAIRED} · streaming"),
-            (words, false) => format!("{PAIRED} · streaming · {words}"),
-        },
+        None if audio.next().is_some() => {
+            match (crate::cross_rig::clock_words(r, remote), clocks) {
+                ((words, true), _) => format!("{words} · {PAIRED} · streaming"),
+                ((words, false), ClockVerdict::InWords) => {
+                    format!("{PAIRED} · streaming · {words}")
+                }
+                ((_, false), ClockVerdict::OnTag) => format!("{PAIRED} · streaming"),
+            }
+        }
         None => PAIRED.to_owned(),
     }
 }
@@ -381,15 +404,15 @@ mod tests {
         assert_eq!(name(RigAudio::NoSession, None), "pupu · no session");
         assert_eq!(name(RigAudio::NoAudio, None), "pupu · no audio I/O");
         assert_eq!(
-            name(RigAudio::Rate(48_000), Some("LOCKED")),
-            "pupu · 48 kHz · LOCKED"
+            name(RigAudio::Rate(48_000), Some("AGREE")),
+            "pupu · 48 kHz · AGREE"
         );
         // The tag's basis is in the heading's tooltip, after what the heading is.
-        let tagged = head(RigAudio::Rate(48_000), Some("LOCKED")).describe;
+        let tagged = head(RigAudio::Rate(48_000), Some("AGREE")).describe;
         assert_eq!(
             tagged,
             "pupu: the rig shown; new measurements and the keys go to it\n\
-             clock LOCKED: with cm4, by the rate between the two rigs"
+             clock AGREE: with cm4, by the rate between the two rigs"
         );
         assert!(
             !head(RigAudio::Rate(48_000), None)
@@ -404,11 +427,21 @@ mod tests {
     #[test]
     fn a_pairing_reads_as_the_rig_shown_reports_it() {
         let rig = RigId(2);
-        assert_eq!(pairing_text(&RemoteState::default(), &[], rig), "paired");
+        let words = ClockVerdict::InWords;
+        assert_eq!(
+            pairing_text(&RemoteState::default(), &[], rig, words),
+            "paired"
+        );
         let text = |link, audio| {
             let (r, inputs) = remote(link, audio);
-            pairing_text(&r, &inputs, rig)
+            pairing_text(&r, &inputs, rig, words)
         };
+        // With a clock tag on the heading the tag is the verdict: the pairing gives none.
+        let (r, inputs) = remote(RemoteLink::Up, Some(RemoteAudio::Streaming));
+        assert_eq!(
+            pairing_text(&r, &inputs, rig, ClockVerdict::OnTag),
+            "paired · streaming"
+        );
         assert_eq!(
             text(RemoteLink::Up, Some(RemoteAudio::Streaming)),
             "paired · streaming · measuring clocks…"

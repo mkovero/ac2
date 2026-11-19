@@ -1,4 +1,5 @@
 use super::*;
+use crate::rig_tree::ClockVerdict;
 use ac2_proto::model::{
     CantTellReason, DelaySlip, PeerClock, Relock, RemoteAudio, RemoteInput, RemoteLink, RemoteRig,
     StopWhy,
@@ -333,21 +334,27 @@ fn input(slot: u16, audio: RemoteAudio) -> (RemoteInput, ac2_proto::model::Remot
     )
 }
 
-/// What the top bar's chip per remote rig said, a rig's heading in the list says: the
-/// pairing as the list words it, a warning in capitals and first.
+/// A rig's heading in the list says the pairing as the list words it, a warning in
+/// capitals and first. A heading with a clock tag leaves the verdict to the tag and keeps
+/// the warnings.
 #[test]
 fn a_rigs_heading_says_the_relation_and_warns_in_words() {
     let says = |r: &RemoteState, inputs: &[RemoteInput]| {
-        crate::rig_tree::pairing_text(r, inputs, KETUNKOLO)
+        crate::rig_tree::pairing_text(r, inputs, KETUNKOLO, ClockVerdict::InWords)
+    };
+    let tagged = |r: &RemoteState, inputs: &[RemoteInput]| {
+        crate::rig_tree::pairing_text(r, inputs, KETUNKOLO, ClockVerdict::OnTag)
     };
     let (i, st) = input(0, RemoteAudio::Streaming);
     let mut r = remote(PeerRelation::Agree);
     r.inputs = vec![st];
     let inputs = vec![i];
     assert_eq!(says(&r, &inputs), "paired · streaming · clocks agree");
+    assert_eq!(tagged(&r, &inputs), "paired · streaming");
     assert_eq!(clock_words(&r, &r.rigs[0]), ("clocks agree".into(), false));
     r.rigs[0].clock.relation = PeerRelation::Measuring;
     assert_eq!(says(&r, &inputs), "paired · streaming · measuring clocks…");
+    assert_eq!(tagged(&r, &inputs), "paired · streaming");
     r.rigs[0].clock.relation = PeerRelation::NotLocked {
         reason: NotLockedReason::CrossRate {
             ppm: 5.6,
@@ -358,6 +365,7 @@ fn a_rigs_heading_says_the_relation_and_warns_in_words() {
         says(&r, &inputs),
         "CLOCKS NOT LOCKED +5.6 ppm · paired · streaming"
     );
+    assert_eq!(tagged(&r, &inputs), says(&r, &inputs));
     assert!(clock_words(&r, &r.rigs[0]).1);
     r.rigs[0].clock.relation = PeerRelation::CantTell {
         reason: CantTellReason::SystemClockUnsynced { rig: KETUNKOLO },
