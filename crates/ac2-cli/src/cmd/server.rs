@@ -5,9 +5,9 @@
 
 use ac2_client::{Client, expect_body};
 use ac2_proto::model::{
-    AuthorizedClient, LocalServer, NetBind, NetReason, NetReasonKind, NetSaved, NetSetting,
-    NetSettingKind, NetSettingView, NetStatus, NetStatusView, NetworkServer, NotSavedReason,
-    PeerNetStatus, RefusedKey, ServerInfo,
+    AuthorizedClient, LocalServer, NetBind, NetChoice, NetReason, NetReasonKind, NetSaved,
+    NetSetting, NetSettingKind, NetSettingView, NetStatus, NetStatusView, NetToggle,
+    NetUnavailable, NotSavedReason, PeerNetStatus, RefusedKey, ServerInfo,
 };
 use ac2_proto::{Command, ReplyBody};
 use serde_json::json;
@@ -35,11 +35,12 @@ pub(crate) async fn run(cli: &Cli, cmd: &ServerCmd, out: &mut Out<'_>) -> Result
                 &json!({
                     "setting": n.setting,
                     "status": n.status,
+                    "toggle": info.toggle,
                     "server_key": n.server_key,
                     "fingerprint": n.fingerprint,
                     "advertised_as": n.advertised_as,
                 }),
-                || network_text(n),
+                || network_text(&info),
             )?;
         }
         ServerCmd::Authorize { name, refused, key } => {
@@ -130,6 +131,30 @@ fn bind_text(b: &NetBind) -> String {
     }
 }
 
+/// `every interface, port 47820 (data 47821)`.
+fn choice_text(c: &NetChoice) -> String {
+    format!(
+        "{}, port {} (data {})",
+        bind_text(&c.bind),
+        c.port,
+        u32::from(c.port) + 1
+    )
+}
+
+/// Why `server.network` would be refused; `None` where it may switch the network.
+fn toggle_text(t: NetToggle) -> Option<&'static str> {
+    match t {
+        NetToggle::Allowed => None,
+        NetToggle::Fixed => Some("fixed by ac2d --listen: restart ac2d without it to switch here"),
+        NetToggle::Unavailable {
+            reason: NetUnavailable::InProcess,
+        } => Some("unavailable: this daemon serves in-process only"),
+        NetToggle::Unavailable {
+            reason: NetUnavailable::NoKeyStore,
+        } => Some("unavailable: this daemon has no key files"),
+    }
+}
+
 fn not_saved_text(r: &NotSavedReason) -> String {
     match r {
         NotSavedReason::StoreReadOnly => "the settings file cannot be written".into(),
@@ -155,13 +180,18 @@ fn saved_text(s: &NetSaved) -> String {
 pub fn setting_text(v: &NetSettingView) -> String {
     match v {
         NetSettingView::Host { setting } => match setting {
-            NetSetting::Off { saved } => format!("off; {}", saved_text(saved)),
-            NetSetting::On { bind, port, saved } => format!(
-                "on: {}, port {port} (data {}); {}",
-                bind_text(bind),
-                u32::from(*port) + 1,
+            NetSetting::Off { kept: None, saved } => format!("off; {}", saved_text(saved)),
+            NetSetting::Off {
+                kept: Some(c),
+                saved,
+            } => format!(
+                "off (on again at {}); {}",
+                choice_text(c),
                 saved_text(saved)
             ),
+            NetSetting::On { choice, saved } => {
+                format!("on: {}; {}", choice_text(choice), saved_text(saved))
+            }
             NetSetting::Fixed { listen } => format!("fixed by ac2d --listen {listen}"),
         },
         NetSettingView::Peer { setting } => match setting {
@@ -215,12 +245,16 @@ pub fn status_text(v: &NetStatusView) -> String {
     format!("{word}: {reason}; retried")
 }
 
-fn network_text(n: &NetworkServer) -> String {
+fn network_text(info: &ServerInfo) -> String {
+    let n = &info.network;
     let mut s = format!(
         "network      {}\nstatus       {}\n",
         setting_text(&n.setting),
         status_text(&n.status)
     );
+    if let Some(t) = toggle_text(info.toggle) {
+        s.push_str(&format!("switch       {t}\n"));
+    }
     match (&n.server_key, &n.fingerprint) {
         (Some(k), Some(fp)) => s.push_str(&format!("server key   {k}\nfingerprint  {fp}\n")),
         _ => s.push_str("server key   none yet (made when the network is first turned on)\n"),
@@ -260,7 +294,7 @@ fn info_text(info: &ServerInfo) -> String {
         Some(LocalServer::Embedded) => "local        in this process only\n".into(),
         None => String::new(),
     };
-    s.push_str(&network_text(&info.network));
+    s.push_str(&network_text(info));
     if let Some(d) = &info.recording_dir {
         s.push_str(&format!("recordings   {d}\n"));
     }

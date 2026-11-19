@@ -218,6 +218,9 @@ struct Link<'p> {
     heard: Instant,
     began: Instant,
     unreachable_since: Option<WallNs>,
+    /// The other rig said it turned its network off; cleared when it welcomes this one
+    /// again.
+    network_off: bool,
     channels: Vec<u16>,
     to: Option<SyncSender<LinkFrame>>,
     /// Owed credit: frame bytes and outside-window messages.
@@ -249,6 +252,7 @@ impl<'p> Link<'p> {
             heard: now,
             began: now,
             unreachable_since: None,
+            network_off: false,
             channels: Vec::new(),
             to: None,
             owed: (0, 0),
@@ -316,6 +320,10 @@ impl<'p> Link<'p> {
         }
         if self.ctrl_hs.failed >= KEY_FAILURES || self.data_hs.failed >= KEY_FAILURES {
             return RemoteLink::KeyChanged;
+        }
+        // Said before the connection ended: the reason, not a loss, until it is back.
+        if self.network_off {
+            return RemoteLink::NetworkOff;
         }
         let silent = now.saturating_duration_since(self.heard) > SILENT_AFTER;
         if self.welcomed && !silent {
@@ -419,6 +427,7 @@ impl<'p> Link<'p> {
                 Ok(ReplyBody::Welcome(w)) if Some(reply.id) == self.hello => {
                     if w.rig_id == self.peer.rig {
                         self.welcomed = true;
+                        self.network_off = false;
                         self.other_rig = None;
                     } else {
                         tracing::warn!(
@@ -471,9 +480,16 @@ impl<'p> Link<'p> {
                 self.owed.1 += 1;
                 if topic == FLOW_TOPIC
                     && let Some(b) = f.get(1)
-                    && decode_notice(b) == Ok(FlowNotice::Rejoin)
                 {
-                    self.join();
+                    match decode_notice(b) {
+                        Ok(FlowNotice::Rejoin) => self.join(),
+                        Ok(FlowNotice::NetworkOff) => {
+                            tracing::info!("link to {}: it turned its network off", self.peer.name);
+                            self.network_off = true;
+                            self.welcomed = false;
+                        }
+                        _ => {}
+                    }
                 }
                 continue;
             }

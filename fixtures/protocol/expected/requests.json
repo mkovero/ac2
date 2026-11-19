@@ -1,6 +1,6 @@
 [
  {
-  "v": 93,
+  "v": 94,
   "id": 0,
   "cmd": {
    "op": "hello",
@@ -11,7 +11,7 @@
   "expect_rev": null
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 2,
   "cmd": {
    "op": "session.open",
@@ -54,7 +54,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 6,
   "cmd": {
    "op": "gen.set",
@@ -87,7 +87,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 9,
   "cmd": {
    "op": "gen.stop"
@@ -95,7 +95,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 10,
   "cmd": {
    "op": "meas.create",
@@ -130,7 +130,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 16,
   "cmd": {
    "op": "delay.find",
@@ -145,7 +145,7 @@
   "expect_rev": null
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 17,
   "cmd": {
    "op": "delay.insert",
@@ -160,7 +160,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 26,
   "cmd": {
    "op": "trace.import",
@@ -189,7 +189,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 29,
   "cmd": {
    "op": "cal.curve_import",
@@ -206,7 +206,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 31,
   "cmd": {
    "op": "spl.log_get",
@@ -220,7 +220,7 @@
   "expect_rev": null
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 32,
   "cmd": {
    "op": "sweep.run",
@@ -235,7 +235,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 39,
   "cmd": {
    "op": "session.inputs",
@@ -309,7 +309,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 40,
   "cmd": {
    "op": "cal.delete",
@@ -324,7 +324,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 41,
   "cmd": {
    "op": "session.preview",
@@ -357,7 +357,7 @@
   "expect_rev": null
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 42,
   "cmd": {
    "op": "session.preview_stop"
@@ -365,7 +365,7 @@
   "expect_rev": null
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 43,
   "cmd": {
    "op": "session.detect_loopback",
@@ -383,7 +383,7 @@
   "expect_rev": null
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 44,
   "cmd": {
    "op": "trace.mic_curve",
@@ -398,7 +398,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 46,
   "cmd": {
    "op": "cal.curve_delete",
@@ -412,7 +412,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 47,
   "cmd": {
    "op": "spl.log_new",
@@ -423,7 +423,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 48,
   "cmd": {
    "op": "cal.spl_electrical",
@@ -445,7 +445,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 49,
   "cmd": {
    "op": "spl.history_get",
@@ -462,7 +462,7 @@
   "expect_rev": null
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 50,
   "cmd": {
    "op": "delay.nudge",
@@ -474,7 +474,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 51,
   "cmd": {
    "op": "rec.start",
@@ -493,7 +493,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 53,
   "cmd": {
    "op": "rec.list"
@@ -501,7 +501,7 @@
   "expect_rev": null
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 54,
   "cmd": {
    "op": "session.replay",
@@ -516,7 +516,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 55,
   "cmd": {
    "op": "gen.ceiling",
@@ -528,7 +528,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 56,
   "cmd": {
    "op": "session.outputs",
@@ -548,7 +548,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 57,
   "cmd": {
    "op": "server.info"
@@ -556,7 +556,7 @@
   "expect_rev": null
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 59,
   "cmd": {
    "op": "server.revoke",
@@ -567,7 +567,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 60,
   "cmd": {
    "op": "auth.admit_rig",
@@ -580,7 +580,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 61,
   "cmd": {
    "op": "rig.peers",
@@ -599,7 +599,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 62,
   "cmd": {
    "op": "source.state"
@@ -607,7 +607,7 @@
   "expect_rev": null
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 63,
   "cmd": {
    "op": "spl.band_transfer",
@@ -659,7 +659,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 64,
   "cmd": {
    "op": "spl.band_log_get",
@@ -673,7 +673,7 @@
   "expect_rev": null
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 65,
   "cmd": {
    "op": "meas.colour",
@@ -688,7 +688,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 66,
   "cmd": {
    "op": "file.new",
@@ -699,7 +699,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 70,
   "cmd": {
    "op": "file.upload_chunk",
@@ -714,7 +714,7 @@
   "expect_rev": null
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 74,
   "cmd": {
    "op": "file.download_end",
@@ -726,7 +726,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 76,
   "cmd": {
    "op": "session.control_panel",
@@ -738,7 +738,7 @@
   "expect_rev": null
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 77,
   "cmd": {
    "op": "osc.target",
@@ -750,7 +750,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 78,
   "cmd": {
    "op": "osc.test",
@@ -770,7 +770,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 79,
   "cmd": {
    "op": "rig.monitor_start",
@@ -782,7 +782,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 80,
   "cmd": {
    "op": "artnet.target",
@@ -797,7 +797,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 81,
   "cmd": {
    "op": "artnet.test",
@@ -817,7 +817,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 82,
   "cmd": {
    "op": "artnet.fade",
@@ -829,7 +829,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 84,
   "cmd": {
    "op": "cal.line",
@@ -841,7 +841,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 87,
   "cmd": {
    "op": "levels.set",
@@ -857,7 +857,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 88,
   "cmd": {
    "op": "levels.reset",
@@ -871,7 +871,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 90,
   "cmd": {
    "op": "plan.list"
@@ -879,7 +879,7 @@
   "expect_rev": null
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 91,
   "cmd": {
    "op": "plan.delete",
@@ -890,7 +890,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 92,
   "cmd": {
    "op": "walk.new",
@@ -925,7 +925,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 94,
   "cmd": {
    "op": "walk.goto",
@@ -937,7 +937,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 95,
   "cmd": {
    "op": "walk.capture",
@@ -948,7 +948,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 96,
   "cmd": {
    "op": "walk.skip",
@@ -960,7 +960,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 97,
   "cmd": {
    "op": "walk.swap",
@@ -975,7 +975,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 98,
   "cmd": {
    "op": "walk.redo",
@@ -987,7 +987,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 100,
   "cmd": {
    "op": "sim.run",
@@ -1022,7 +1022,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 101,
   "cmd": {
    "op": "sim.fit",
@@ -1042,7 +1042,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 102,
   "cmd": {
    "op": "sim.map",
@@ -1062,7 +1062,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 103,
   "cmd": {
    "op": "sim.cancel"
@@ -1070,7 +1070,7 @@
   "expect_rev": 41
  },
  {
-  "v": 93,
+  "v": 94,
   "id": 104,
   "cmd": {
    "op": "server.network",

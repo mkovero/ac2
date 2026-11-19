@@ -107,6 +107,7 @@ pub fn link_text(r: &RemoteRig) -> String {
         }
         RemoteLink::Connecting => "connecting".into(),
         RemoteLink::Up => format!("up, {}", bit_rate(r.bytes_per_s)),
+        RemoteLink::NetworkOff => format!("{} turned its network off", r.name),
         RemoteLink::Unreachable { .. } => "unreachable".into(),
         RemoteLink::NotAdmitted => format!("{} has not admitted this rig", r.name),
         RemoteLink::KeyChanged => {
@@ -198,6 +199,11 @@ pub fn input_state(
             return problem(format!(
                 "no audio from {rig}: this rig has no server key yet (turn its network on \
                  once)"
+            ));
+        }
+        Some(RemoteLink::NetworkOff) => {
+            return problem(format!(
+                "no audio from {rig}: {rig} turned its network off (turn it on there)"
             ));
         }
         Some(RemoteLink::Unreachable { since }) => {
@@ -447,6 +453,14 @@ mod tests {
                 .text
                 .contains("ketunkolo has not admitted this rig")
         );
+        r.rigs[0].link = RemoteLink::NetworkOff;
+        let s = input_state(&r, &i[0], &at);
+        assert_eq!(
+            s.text,
+            "no audio from ketunkolo: ketunkolo turned its network off (turn it on there)"
+        );
+        assert!(s.problem);
+        assert_eq!(link_text(&r.rigs[0]), "ketunkolo turned its network off");
         let (r, i) = state(PeerRelation::Measuring, RemoteAudio::NotCaptured);
         let s = input_state(&r, &i[0], &at);
         assert!(

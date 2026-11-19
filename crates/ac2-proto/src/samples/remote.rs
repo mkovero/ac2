@@ -177,7 +177,7 @@ pub fn remote_state() -> RemoteState {
                 },
             ),
             rig(
-                RemoteLink::Up,
+                RemoteLink::NetworkOff,
                 PeerRelation::CantTell {
                     reason: CantTellReason::NoAudio,
                 },

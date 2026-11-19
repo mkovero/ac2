@@ -187,14 +187,16 @@ methods take the socket their peer's origin picks).
   neither port nor port + 1 equal to a local port. A clash under `--listen` is an argument
   error (exit 2) at start, not a `Waiting`. An enable that cannot bind now (address in use, interface missing) is
   stored and goes `Waiting`, the same as at start; the reply says so.
-- `ServerInfo { local: Option<LocalServer>, network: NetworkServer, interfaces,
+- `ServerInfo { local: Option<LocalServer>, network: NetworkServer, interfaces, toggle,
   recording_dir }`; `LocalServer = Embedded | Local { ctrl, data }`;
   `NetworkServer { setting: NetSettingView, status: NetStatusView, server_key, fingerprint (both `Option`, once a key
   exists), advertised_as, authorized, refused }`;
   `NetSettingView = Host { setting: NetSetting } | Peer { setting: Off | On | Fixed }`:
   a network client is told only the kind, never the bind (this host's interfaces and
   addresses) nor whether it is kept (the file system's words);
-  `NetSetting = Off { saved } | On { bind, port, saved } | Fixed { listen }` (a fixed
+  `NetSetting = Off { kept: Option<NetChoice>, saved } | On { choice: NetChoice, saved } |
+  Fixed { listen }`, `NetChoice { bind, port }` (`kept`: where it was last on, where a
+  turn-on with neither given goes; PROTO 94) (a fixed
   network keeps nothing: the command line is the setting);
   `saved: Saved | NotSaved { reason: StoreReadOnly | Unreadable { detail } |
   DamagedInPlace | NoStore | WriteFailed { detail } }`;
@@ -204,6 +206,10 @@ methods take the socket their peer's origin picks).
   NotHandedOver | Other { detail }`; `PeerNetStatus` carries `NetReasonKind` (the same
   without `Other`'s detail, which is the host OS's words). `ServerMode` goes. To a network client `local` is
   `None` and `interfaces` empty.
+- `ServerInfo.toggle: NetToggle = Allowed | Fixed | Unavailable { reason: InProcess |
+  NoKeyStore }` (PROTO 94), to every client: whether `server.network` may switch the
+  network. One function (`NetCtl::toggle`) gives both this and the command's refusal, so
+  the app offers the switch exactly where it works.
 - `State.server: ServerSummary { status kind, ctrl endpoint (when listening), port,
   fingerprint }` so every mirrored app
   sees a change made elsewhere; key lists stay in `server.info`.
@@ -212,7 +218,9 @@ methods take the socket their peer's origin picks).
   numbered state event: it concerns that connection, which is about to end, and is nothing
   a mirror applies (the local clients learn from `State.server`). Remote apps then say
   "network turned off on the rig" instead of "connection lost"; an app that misses it
-  falls back to "connection lost".
+  falls back to "connection lost". A rig link that hears it reads
+  `RemoteLink::NetworkOff` (PROTO 94) until the source welcomes it again; a plain drop
+  still reads `Unreachable`.
 - `server.authorize`, `server.revoke`, `auth.admit_rig` work with the network off (they
   edit the authorized-clients file).
 - Samples, Python fixtures (`tools/protocol`), `docs/protocol.md` follow.
@@ -220,7 +228,8 @@ methods take the socket their peer's origin picks).
 ## Configuration and precedence
 
 The setting lives in its own file, `<config>/network.json` (`ac2_paths::network_settings`):
-`{ "version": 1, "enabled", "bind", "port" }`, written atomically. Not in `rig.json`: a
+`{ "version": 2, "enabled", "choice": { "bind", "port" } | null }`, written atomically; the
+choice is kept while off (version 1 had no way to say "never on", and is set aside). Not in `rig.json`: a
 change there that bumps its VERSION would set aside the meters and the max level of every
 rig (pupu, the CM4 meter) with it. A missing file, a damaged one or another version means
 off; a damaged or other-version file is set aside with a damage notice, as the other stores

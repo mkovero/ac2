@@ -9,7 +9,9 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use ac2_proto::ProtoError;
-use ac2_proto::model::{NetSaved, NetSetting, NotSavedReason, ServerSummary};
+use ac2_proto::model::{
+    NetChoice, NetSaved, NetSetting, NetToggle, NetUnavailable, NotSavedReason, ServerSummary,
+};
 use ac2_zmq::{AuthorizedHandle, AuthorizedKeys, KeyPair, PublicKey};
 
 use crate::authlog::{AuthLog, RefusedList};
@@ -236,9 +238,12 @@ impl NetCtl {
         match &self.choice {
             NetworkChoice::Off => None,
             NetworkChoice::Fixed(l) => Some(l.clone()),
-            NetworkChoice::FromSettings { .. } => self.settings.enabled.then(|| NetListen {
-                bind: self.settings.bind.clone(),
-                port: NetPort::Port(self.settings.port),
+            NetworkChoice::FromSettings { .. } => self.settings.enabled.then(|| {
+                let c = self.settings.effective();
+                NetListen {
+                    bind: c.bind,
+                    port: NetPort::Port(c.port),
+                }
             }),
         }
     }
@@ -249,12 +254,12 @@ impl NetCtl {
             (NetworkChoice::Fixed(l), _) => NetSetting::Fixed {
                 listen: intended(l).0,
             },
-            (_, Some(l)) => NetSetting::On {
-                bind: l.bind,
-                port: self.settings.port,
+            (_, Some(_)) => NetSetting::On {
+                choice: self.settings.effective(),
                 saved: self.saved(),
             },
             (_, None) => NetSetting::Off {
+                kept: self.settings.choice.clone(),
                 saved: self.saved(),
             },
         }
@@ -303,35 +308,25 @@ impl NetCtl {
         outbox: &Outbox,
         now: Instant,
     ) -> Result<(), ProtoError> {
-        match &self.choice {
-            NetworkChoice::Fixed(l) => {
-                return Err(crate::util::refused(format!(
-                    "the network is fixed by ac2d --listen {}; restart ac2d without --listen \
-                     to change it",
-                    intended(l).0
-                )));
-            }
-            NetworkChoice::Off => {
-                return Err(crate::util::perr(
-                    ac2_proto::ErrorCode::Unsupported,
-                    "this daemon serves in-process only: it has no network to turn on",
-                ));
-            }
-            NetworkChoice::FromSettings { .. } if self.files.is_none() => {
-                return Err(crate::util::perr(
-                    ac2_proto::ErrorCode::Unsupported,
-                    "this daemon has no key files: it cannot serve a network",
-                ));
-            }
-            NetworkChoice::FromSettings { .. } => {}
-        }
+        self.toggle_refusal()?;
+        let was = self.settings.effective();
+        let given = bind.is_some() || port.is_some();
+        let choice = NetChoice {
+            bind: bind.unwrap_or_else(|| was.bind.clone()),
+            port: port.unwrap_or(was.port),
+        };
+        check_port(choice.port, &self.local).map_err(|e| crate::util::invalid(e.0))?;
+        check_bind(&choice.bind).map_err(|e| crate::util::invalid(e.0))?;
+        // Turned on, the choice it is on at is kept; turned off, one given is kept for the
+        // next time, and none given leaves the kept one as it is.
         let new = NetSettings {
             enabled,
-            bind: bind.unwrap_or_else(|| self.settings.bind.clone()),
-            port: port.unwrap_or(self.settings.port),
+            choice: if enabled || given {
+                Some(choice)
+            } else {
+                self.settings.choice.clone()
+            },
         };
-        check_port(new.port, &self.local).map_err(|e| crate::util::invalid(e.0))?;
-        check_bind(&new.bind).map_err(|e| crate::util::invalid(e.0))?;
         if enabled {
             self.ensure_keys()?;
         }
@@ -340,7 +335,7 @@ impl NetCtl {
         if let Some(store) = &mut self.store {
             store.save(&new);
         }
-        let moved = old.bind != new.bind || old.port != new.port;
+        let moved = was != new.effective();
         match (old.enabled, enabled) {
             (_, false) => {
                 self.detach(outbox, true);
@@ -362,6 +357,47 @@ impl NetCtl {
             }
         }
         Ok(())
+    }
+
+    /// Whether `server.network` may switch the network here. [`Self::set`] refuses by the
+    /// same answer, so what `server.info` says is what the command does.
+    pub(crate) fn toggle(&self) -> NetToggle {
+        match &self.choice {
+            NetworkChoice::Fixed(_) => NetToggle::Fixed,
+            NetworkChoice::Off => NetToggle::Unavailable {
+                reason: NetUnavailable::InProcess,
+            },
+            NetworkChoice::FromSettings { .. } if self.files.is_none() => NetToggle::Unavailable {
+                reason: NetUnavailable::NoKeyStore,
+            },
+            NetworkChoice::FromSettings { .. } => NetToggle::Allowed,
+        }
+    }
+
+    /// [`Self::toggle`] as `server.network`'s refusal.
+    fn toggle_refusal(&self) -> Result<(), ProtoError> {
+        match (self.toggle(), &self.choice) {
+            (NetToggle::Allowed, _) => Ok(()),
+            (NetToggle::Fixed, NetworkChoice::Fixed(l)) => Err(crate::util::refused(format!(
+                "the network is fixed by ac2d --listen {}; restart ac2d without --listen to \
+                 change it",
+                intended(l).0
+            ))),
+            (NetToggle::Fixed, _) => Err(crate::util::refused(
+                "the network is fixed by ac2d --listen",
+            )),
+            (NetToggle::Unavailable { reason }, _) => Err(crate::util::perr(
+                ac2_proto::ErrorCode::Unsupported,
+                match reason {
+                    NetUnavailable::InProcess => {
+                        "this daemon serves in-process only: it has no network to turn on"
+                    }
+                    NetUnavailable::NoKeyStore => {
+                        "this daemon has no key files: it cannot serve a network"
+                    }
+                },
+            )),
+        }
     }
 
     /// Loads or creates the server key, then the authorized-clients file, before the first

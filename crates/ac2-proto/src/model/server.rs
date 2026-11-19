@@ -17,12 +17,41 @@ pub struct ServerInfo {
     pub local: Option<LocalServer>,
     /// The network listener and its keys.
     pub network: NetworkServer,
+    /// Whether `server.network` may switch the network, as it would answer.
+    pub toggle: NetToggle,
     /// The host's interfaces the network can bind (loopback left out), read at each
     /// `server.info`; empty to a network client.
     pub interfaces: Vec<NetInterface>,
     /// Where raw capture files are recorded on the daemon host; `None`: this daemon does
     /// not record.
     pub recording_dir: Option<String>,
+}
+
+/// Whether `server.network` may switch the network on this daemon: the same answer the
+/// command itself gives, so an app offers the switch only where it works.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum NetToggle {
+    /// It may, from a client on the rig's own host.
+    Allowed,
+    /// Fixed by `ac2d --listen` for the daemon's life.
+    Fixed,
+    /// This daemon has no network to switch.
+    Unavailable {
+        /// Why.
+        reason: NetUnavailable,
+    },
+}
+
+/// Why a daemon has no network to switch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NetUnavailable {
+    /// It serves in its own process only (embedded in an app or a test).
+    InProcess,
+    /// It keeps no key files (no config directory), so it has no server key to serve
+    /// CURVE with.
+    NoKeyStore,
 }
 
 /// The local pair, served for the daemon's whole life.
@@ -99,15 +128,16 @@ pub enum NetSettingKind {
 pub enum NetSetting {
     /// Local only.
     Off {
+        /// Where it was last on, which `server.network` turns it on at again unless told
+        /// otherwise; `None` until it was first on.
+        kept: Option<NetChoice>,
         /// Whether that outlives a restart.
         saved: NetSaved,
     },
     /// On, from `server.network`.
     On {
-        /// Where it binds.
-        bind: NetBind,
-        /// Ctrl port; data is on the next one.
-        port: u16,
+        /// Where.
+        choice: NetChoice,
         /// Whether that outlives a restart.
         saved: NetSaved,
     },
@@ -128,6 +158,16 @@ impl NetSetting {
             Self::Fixed { .. } => NetSettingKind::Fixed,
         }
     }
+}
+
+/// Where the network binds, and its port.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NetChoice {
+    /// Where it binds.
+    pub bind: NetBind,
+    /// Ctrl port; data is on the next one.
+    pub port: u16,
 }
 
 /// Where the network binds.

@@ -31,7 +31,7 @@ keepalives to each connection as its credit allows (§5.8).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 93`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 94`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -360,7 +360,7 @@ level, dB SPL, as a trailing float)}; `OscArg` = {`type`: `int` \| `float` \| `s
 i32 \| f32 \| str}.
 
 **Server (`server.*`).** `server.info` → `ServerInfo` {`local`, `network`, `interfaces`,
-`recording_dir`}. `local`: `LocalServer` (tagged by `type`) \| nil: `embedded` (in its
+`toggle`, `recording_dir`}. `local`: `LocalServer` (tagged by `type`) \| nil: `embedded` (in its
 client's process; only test daemons, the app spawns `ac2d`) \| `local` {`ctrl`, `data`} (the
 pair served for the daemon's whole life, this machine only; the OS user is the trust
 boundary); nil to a network client, which has no use for this host's local endpoints.
@@ -377,13 +377,19 @@ without its `detail`: the OS's words about the host stay on it), `server_key` (Z
 at the first turn-on), `fingerprint` \| nil, `advertised_as`: string \| nil (the mDNS name),
 `authorized`: [`AuthorizedClient` {`name`, `key`, `fingerprint`, `rig`: RigId \| nil}],
 `refused`: [`RefusedKey` {`key`: string \| nil (nil: not CURVE), `fingerprint`: string \|
-nil, `address`, `count`, `last_at`: WallNs}], newest first, at most 32}. `NetSetting` is
-tagged by `type`: `off` {`saved`} \| `on` {`bind`: `NetBind`, `port`, `saved`} \| `fixed`
+nil, `address`, `count`, `last_at`: WallNs}], newest first, at most 32}. `toggle`
+(`NetToggle`, tagged by `type`, to every client): `allowed` \| `fixed` (`ac2d --listen`) \|
+`unavailable` {`reason`: `in_process` \| `no_key_store` (no key files, so no server key)}:
+whether `server.network` may switch the network, the same answer the command gives (one
+function decides both). `NetSetting` is tagged by `type`: `off` {`kept`: `NetChoice` \| nil
+(where it was last on, where a turn-on with nil `bind` and `port` goes; nil until it was
+first on), `saved`} \| `on` {`choice`: `NetChoice`, `saved`} \| `fixed`
 {`listen`: the `ac2d --listen` address as given; nothing is kept, the command line is the
 setting}; `saved` (`NetSaved`: `saved` \| `not_saved` {`reason`: `store_read_only` \|
 `unreadable` {`detail`} (left as it is, never written over, until a restart reads it) \|
 `damaged_in_place` (could not be set aside; each change tries again before it writes) \|
-`no_store` \| `write_failed` {`detail`}}) says whether it outlives a restart. `NetBind` is tagged
+`no_store` \| `write_failed` {`detail`}}) says whether it outlives a restart. `NetChoice`
+{`bind`: `NetBind`, `port` (ctrl; data on the next)}. `NetBind` is tagged
 by `type`: `all` (every IPv4 interface) \| `interface` {`name`} (resolved at each bind: its
 first IPv4 address, else its first global IPv6 one) \| `addr` {`addr`: the address as
 text}. `interfaces`: [`NetInterface` {`name`, `addrs`: [address as text], `up`}], the
@@ -404,7 +410,8 @@ trusted.
 
 `server.network` {`enabled`, `bind`, `port`} turns the network listener on or off while the
 daemon runs; a nil `bind` or `port` keeps the one set before (at first `all` and 47820, data
-on the next port). Only a client of the local pair may send it (`refused` over the network:
+on the next port). Turning on keeps its choice; turning off keeps the one it was on at (or a
+`bind` or `port` given with it) as `kept`, in `network.json` too. Only a client of the local pair may send it (`refused` over the network:
 a remote app could otherwise cut itself and every other one off); `refused` when `ac2d
 --listen` fixed the network for the daemon's life (`setting` `fixed`), `unsupported` on an
 `embedded` daemon or one without key files; a port of 0 or 65535 (data needs the next
@@ -1967,7 +1974,9 @@ clock, `system = system_ns + (stamp − epoch_stamp_ns)·(1 + ppm·10⁻⁶)`; n
 whose stamp clock can be read beside the system clock is open); committed when any changes),
 `remote` (`RemoteState`: `peers` ([RigPeer], as `rig.peers` set them), `rigs`
 ([`RemoteRig` {`rig`, `name`, `link` {not_paired | no_server_key | connecting | up |
-unreachable{since} | not_admitted | key_changed | other_rig{found}}, `clock`: `PeerClock`
+network_off (it sent the `network_off` notice, §5.8; read until it welcomes this rig
+again, where a plain loss reads unreachable) | unreachable{since} | not_admitted |
+key_changed | other_rig{found}}, `clock`: `PeerClock`
 {`relation` {measuring | agree | not_locked{reason: cross_rate{ppm, over} |
 own_clock{rig, ppm}} | cant_tell{reason: system_clock_unsynced{rig} |
 system_clock_not_stated{rig} | not_against_system_clock{rig} | no_capture_stamps |

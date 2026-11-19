@@ -274,6 +274,13 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
         ))),
         Ok(ReplyBody::Server(server_info_off())),
         Ok(ReplyBody::Server(server_info_fixed())),
+        Ok(ReplyBody::Server(ServerInfo {
+            local: Some(LocalServer::Embedded),
+            toggle: NetToggle::Unavailable {
+                reason: NetUnavailable::InProcess,
+            },
+            ..server_info_off()
+        })),
         Err(ProtoError {
             code: ErrorCode::Conflict,
             msg: "state moved".into(),

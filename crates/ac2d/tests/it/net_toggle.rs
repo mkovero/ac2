@@ -11,10 +11,10 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use ac2_proto::model::{
-    GeneratorDesired, GeneratorSettings, LocalServer, NetBind, NetSaved, NetSetting,
-    NetSettingKind, NetSettingView, NetStatus, NetStatusKind, NetStatusView, NotSavedReason,
-    PeerNetStatus, REMOTE_BASE, RemoteAudio, RemoteInput, RigPeer, ServerInfo, SessionConfig,
-    Signal, StateFile, SystemClock,
+    GeneratorDesired, GeneratorSettings, LocalServer, NetBind, NetChoice, NetSaved, NetSetting,
+    NetSettingKind, NetSettingView, NetStatus, NetStatusKind, NetStatusView, NetToggle,
+    NetUnavailable, NotSavedReason, PeerNetStatus, REMOTE_BASE, RemoteAudio, RemoteInput,
+    RemoteLink, RigPeer, ServerInfo, SessionConfig, Signal, StateFile, SystemClock,
 };
 use ac2_proto::units::{Dbfs, Hz};
 use ac2_proto::{Command, ErrorCode};
@@ -127,7 +127,7 @@ fn status(s: &ServerInfo) -> &NetStatus {
 /// Whether the setting in force outlives a restart.
 fn saved(s: &ServerInfo) -> &NetSaved {
     match setting(s) {
-        NetSetting::Off { saved } | NetSetting::On { saved, .. } => saved,
+        NetSetting::Off { saved, .. } | NetSetting::On { saved, .. } => saved,
         NetSetting::Fixed { .. } => panic!("a fixed network keeps nothing"),
     }
 }
@@ -181,9 +181,11 @@ fn on_change_the_port_on_again_and_kept_across_a_restart() {
     assert_eq!(
         setting(&s),
         &NetSetting::Off {
+            kept: None,
             saved: NetSaved::Saved
         }
     );
+    assert_eq!(s.toggle, NetToggle::Allowed);
     assert_eq!(status(&s), &NetStatus::Off);
     assert_eq!(s.network.server_key, None);
     assert!(h.server_public_key().is_none());
@@ -230,14 +232,26 @@ fn on_change_the_port_on_again_and_kept_across_a_restart() {
     // Off, then on with the port kept.
     let s = turn(&mut c, false, None);
     assert_eq!(status(&s), &NetStatus::Off);
+    assert_eq!(
+        setting(&s),
+        &NetSetting::Off {
+            kept: Some(NetChoice {
+                bind: NetBind::Addr { addr: LOOPBACK },
+                port: p2,
+            }),
+            saved: NetSaved::Saved,
+        }
+    );
     assert!(s.network.server_key.is_some(), "the key stays");
     assert!(!file_enabled(dir.path()));
     let s = turn(&mut c, true, None);
     assert_eq!(
         setting(&s),
         &NetSetting::On {
-            bind: NetBind::Addr { addr: LOOPBACK },
-            port: p2,
+            choice: NetChoice {
+                bind: NetBind::Addr { addr: LOOPBACK },
+                port: p2,
+            },
             saved: NetSaved::Saved,
         }
     );
@@ -318,11 +332,21 @@ fn a_network_client_may_not_toggle_and_is_told_no_host_detail() {
         }
     );
     let told = serde_json::to_string(&s.network.setting).unwrap();
-    for detail in ["addr", "127.0.0.1", "port", "saved", "bind"] {
+    for detail in [
+        "addr",
+        "127.0.0.1",
+        "port",
+        "saved",
+        "bind",
+        "choice",
+        "kept",
+    ] {
         assert!(!told.contains(detail), "{detail} in {told}");
     }
+    // Whether this rig's network can be switched at all, as every client is told.
+    assert_eq!(s.toggle, NetToggle::Allowed);
     let host = serde_json::to_string(&local.server(Command::ServerInfo).network.setting).unwrap();
-    for detail in ["127.0.0.1", "saved", "bind"] {
+    for detail in ["127.0.0.1", "saved", "bind", "choice"] {
         assert!(host.contains(detail), "the host is told {detail}: {host}");
     }
     for enabled in [false, true] {
@@ -368,7 +392,12 @@ fn fixed_by_listen_or_in_process_the_toggle_is_refused() {
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
+    assert!(
+        e.msg.starts_with("the network is fixed by ac2d --listen"),
+        "{e:?}"
+    );
     let s = c.server(Command::ServerInfo);
+    assert_eq!(s.toggle, NetToggle::Fixed);
     assert!(matches!(setting(&s), NetSetting::Fixed { .. }), "{s:?}");
     assert!(matches!(status(&s), NetStatus::Listening { .. }));
     assert!(!store(dir.path()).exists(), "--listen writes no setting");
@@ -384,6 +413,92 @@ fn fixed_by_listen_or_in_process_the_toggle_is_refused() {
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Unsupported, "{e:?}");
+    assert!(e.msg.contains("in-process only"), "{e:?}");
+    assert_eq!(
+        c.server(Command::ServerInfo).toggle,
+        NetToggle::Unavailable {
+            reason: NetUnavailable::InProcess
+        }
+    );
+    h.shutdown();
+
+    // From settings but without key files: no server key to serve with.
+    let mut cfg = settings_config(manual_rig(), dir.path(), &laptop, None);
+    cfg.keys = None;
+    let h = Daemon::start(cfg).unwrap();
+    let mut c = Client::connect(&ctx, h.ctrl_endpoint());
+    let e = c
+        .call(Command::ServerNetwork {
+            enabled: true,
+            bind: None,
+            port: None,
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Unsupported, "{e:?}");
+    assert!(e.msg.contains("no key files"), "{e:?}");
+    assert_eq!(
+        c.server(Command::ServerInfo).toggle,
+        NetToggle::Unavailable {
+            reason: NetUnavailable::NoKeyStore
+        }
+    );
+    h.shutdown();
+}
+
+/// Turned off, where it was on is kept, across a restart too; on again with nothing given
+/// goes back there.
+#[test]
+fn the_choice_is_kept_while_off_and_across_a_restart() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let laptop = KeyPair::generate().unwrap();
+    let cfg = settings_config(manual_rig(), dir.path(), &laptop, Some(store(dir.path())));
+    let h = Daemon::start(cfg.clone()).unwrap();
+    let ctx = Context::new().unwrap();
+    let mut c = Client::connect(&ctx, h.ctrl_endpoint());
+    let port = turn_on(&mut c, &h);
+    let at = NetChoice {
+        bind: NetBind::Addr { addr: LOOPBACK },
+        port,
+    };
+    let s = c.server(Command::ServerNetwork {
+        enabled: false,
+        bind: None,
+        port: None,
+    });
+    assert_eq!(
+        setting(&s),
+        &NetSetting::Off {
+            kept: Some(at.clone()),
+            saved: NetSaved::Saved,
+        }
+    );
+    h.shutdown();
+
+    let h = Daemon::start(cfg).unwrap();
+    let mut c = Client::connect(&ctx, h.ctrl_endpoint());
+    let s = c.server(Command::ServerInfo);
+    assert_eq!(status(&s), &NetStatus::Off);
+    assert_eq!(
+        setting(&s),
+        &NetSetting::Off {
+            kept: Some(at.clone()),
+            saved: NetSaved::Saved,
+        }
+    );
+    let s = c.server(Command::ServerNetwork {
+        enabled: true,
+        bind: None,
+        port: None,
+    });
+    assert_eq!(
+        setting(&s),
+        &NetSetting::On {
+            choice: at,
+            saved: NetSaved::Saved,
+        }
+    );
+    wait_status(&h, "on again where it was", listening_on(port));
     h.shutdown();
 }
 
@@ -394,7 +509,7 @@ fn a_damaged_or_other_version_setting_is_set_aside_and_means_off() {
         ("torn", r#"{"version":1,"enabled":tr"#.to_owned()),
         (
             "another version",
-            r#"{"version":2,"enabled":true,"bind":{"type":"all"},"port":47820}"#.to_owned(),
+            r#"{"version":1,"enabled":true,"bind":{"type":"all"},"port":47820}"#.to_owned(),
         ),
     ] {
         let dir = tempfile::tempdir().unwrap();
@@ -415,6 +530,7 @@ fn a_damaged_or_other_version_setting_is_set_aside_and_means_off() {
         assert_eq!(
             setting(&c.server(Command::ServerInfo)),
             &NetSetting::Off {
+                kept: None,
                 saved: NetSaved::Saved
             }
         );
@@ -505,7 +621,8 @@ async fn turning_off_tells_the_network_app_and_its_lease_fades() {
 }
 
 /// A rig whose network is turned on while its session runs serves a paired rig its input
-/// at once: the session needs no reopening for the new pair.
+/// at once: the session needs no reopening for the new pair. Turned off, the paired rig
+/// reads why rather than a lost link, and is back up once it is on again.
 #[test]
 fn slow_turned_on_mid_session_a_paired_rig_gets_its_audio() {
     init_log();
@@ -585,6 +702,28 @@ fn slow_turned_on_mid_session_a_paired_rig_gets_its_audio() {
         epoch,
         "the session was not reopened"
     );
+
+    let link = |ca: &mut Client| ca.state().remote.rigs.first().map(|r| r.link.clone());
+    turn(&mut cb, false, None);
+    let t0 = Instant::now();
+    while link(&mut ca) != Some(RemoteLink::NetworkOff) {
+        assert!(
+            t0.elapsed() < T,
+            "never read network off: {:?}",
+            link(&mut ca)
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // Still off well past the time a lost link turns unreachable.
+    std::thread::sleep(Duration::from_secs(4));
+    assert_eq!(link(&mut ca), Some(RemoteLink::NetworkOff));
+    turn(&mut cb, true, None);
+    wait_status(&b, "on again", listening_on(port));
+    let t0 = Instant::now();
+    while link(&mut ca) != Some(RemoteLink::Up) {
+        assert!(t0.elapsed() < T, "never up again: {:?}", link(&mut ca));
+        std::thread::sleep(Duration::from_millis(50));
+    }
     a.shutdown();
     b.shutdown();
 }
@@ -646,7 +785,7 @@ fn kept_on_and_its_port_busy_at_start_it_waits_then_listens() {
     std::fs::write(
         store(dir.path()),
         format!(
-            r#"{{"version":1,"enabled":true,"bind":{{"type":"addr","addr":"127.0.0.1"}},"port":{port}}}"#
+            r#"{{"version":2,"enabled":true,"choice":{{"bind":{{"type":"addr","addr":"127.0.0.1"}},"port":{port}}}}}"#
         ),
     )
     .unwrap();

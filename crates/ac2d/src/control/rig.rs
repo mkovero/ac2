@@ -234,6 +234,7 @@ impl Control {
                 refused,
             },
             interfaces: if local { n.interfaces() } else { Vec::new() },
+            toggle: n.toggle(),
             recording_dir: self
                 .s
                 .recording_dir

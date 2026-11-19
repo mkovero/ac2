@@ -1,5 +1,5 @@
-//! The network setting's own file, `<config>/network.json`: whether the network is on, where
-//! it binds and its port. Apart from `rig.json` so that a change of either never sets aside
+//! The network setting's own file, `<config>/network.json`: whether the network is on, and
+//! where it binds and its port, kept while it is off for the next time it goes on. Apart from `rig.json` so that a change of either never sets aside
 //! the other: a rig whose network setting is lost starts local only, which an operator on
 //! the rig fixes in a moment, while the meters and the max level must survive.
 //!
@@ -12,31 +12,31 @@
 use std::io;
 use std::path::PathBuf;
 
-use ac2_proto::model::{NetBind, NetSaved, NotSavedReason, StateFile};
+use ac2_proto::model::{NetBind, NetChoice, NetSaved, NotSavedReason, StateFile};
 use serde::{Deserialize, Serialize};
 
 use crate::config::Listen;
 use crate::damage::Damage;
 
 /// The file's version; any change of its shape bumps it.
-pub(crate) const VERSION: u32 = 1;
+pub(crate) const VERSION: u32 = 2;
 
 /// The network setting.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct NetSettings {
     pub(crate) enabled: bool,
-    pub(crate) bind: NetBind,
-    pub(crate) port: u16,
+    /// Where it is on, or was last on; `None` until it was first on.
+    pub(crate) choice: Option<NetChoice>,
 }
 
-impl Default for NetSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
+impl NetSettings {
+    /// Where it is on, or would go on: the choice, else every interface at the default port.
+    pub(crate) fn effective(&self) -> NetChoice {
+        self.choice.clone().unwrap_or(NetChoice {
             bind: NetBind::All,
             port: crate::config::DEFAULT_PORT,
-        }
+        })
     }
 }
 
@@ -229,8 +229,10 @@ fn parse(bytes: &[u8], local: &Listen) -> Result<NetSettings, String> {
     }
     let f: File =
         serde_json::from_slice(bytes).map_err(|e| format!("not a network setting: {e}"))?;
-    crate::network::check_port(f.settings.port, local).map_err(|e| e.0)?;
-    crate::network::check_bind(&f.settings.bind).map_err(|e| e.0)?;
+    if let Some(c) = &f.settings.choice {
+        crate::network::check_port(c.port, local).map_err(|e| e.0)?;
+        crate::network::check_bind(&c.bind).map_err(|e| e.0)?;
+    }
     Ok(f.settings)
 }
 
@@ -251,18 +253,28 @@ mod tests {
         assert_eq!((s, d), (NetSettings::default(), None));
         let on = NetSettings {
             enabled: true,
-            bind: NetBind::Addr {
-                addr: "10.0.0.2".parse().unwrap(),
-            },
-            port: 5000,
+            choice: Some(NetChoice {
+                bind: NetBind::Addr {
+                    addr: "10.0.0.2".parse().unwrap(),
+                },
+                port: 5000,
+            }),
         };
         store.save(&on);
         assert_eq!(store.saved_state(), NetSaved::Saved);
         assert_eq!(NetStore::load(Some(path.clone()), &local).1, on);
+        // Off, the choice is kept for the next time it goes on.
+        let off = NetSettings {
+            enabled: false,
+            ..on
+        };
+        store.save(&off);
+        assert_eq!(NetStore::load(Some(path.clone()), &local).1, off);
         for bad in [
-            r#"{"version":1,"enabled":true,"bind":{"type":"all"},"port":0}"#,
-            r#"{"version":1,"enabled":true,"bind":{"type":"all"},"port":5999}"#,
-            r#"{"version":1,"enabled":true,"bind":{"type":"interface","name":"e\u0000"},"port":5000}"#,
+            r#"{"version":2,"enabled":true,"choice":{"bind":{"type":"all"},"port":0}}"#,
+            r#"{"version":2,"enabled":false,"choice":{"bind":{"type":"all"},"port":5999}}"#,
+            r#"{"version":2,"enabled":true,"choice":{"bind":{"type":"interface","name":"e\u0000"},"port":5000}}"#,
+            r#"{"version":1,"enabled":true,"bind":{"type":"all"},"port":5000}"#,
         ] {
             std::fs::write(&path, bad).unwrap();
             let (_, s, d) = NetStore::load(Some(path.clone()), &local);

@@ -57,6 +57,8 @@ async fn the_network_is_shown_turned_on_and_off_and_kept() {
     let v = shown.json(&[]);
     assert_eq!(v["setting"]["type"], "host");
     assert_eq!(v["setting"]["setting"]["type"], "off");
+    assert_eq!(v["setting"]["setting"]["kept"], Value::Null);
+    assert_eq!(v["toggle"], json!({ "type": "allowed" }));
     assert_eq!(
         v["status"],
         json!({ "type": "host", "status": { "type": "off" } })
@@ -91,8 +93,10 @@ async fn the_network_is_shown_turned_on_and_off_and_kept() {
             v["setting"]["setting"],
             json!({
                 "type": "on",
-                "bind": { "type": "addr", "addr": "127.0.0.1" },
-                "port": port,
+                "choice": {
+                    "bind": { "type": "addr", "addr": "127.0.0.1" },
+                    "port": port,
+                },
                 "saved": { "type": "saved" },
             })
         );
@@ -138,14 +142,26 @@ async fn the_network_is_shown_turned_on_and_off_and_kept() {
     let v = off.json(&[]);
     assert_eq!(
         v["setting"]["setting"],
-        json!({ "type": "off", "saved": { "type": "saved" } })
+        json!({
+            "type": "off",
+            "kept": {
+                "bind": { "type": "addr", "addr": "127.0.0.1" },
+                "port": port,
+            },
+            "saved": { "type": "saved" },
+        })
     );
     assert_eq!(v["status"]["status"]["type"], "off");
     let text = ac2(&ep, false, &["server", "network", "off"]).await.stdout;
     assert!(
-        text.starts_with("network      off; kept across restarts\nstatus       off\n"),
+        text.starts_with(&format!(
+            "network      off (on again at address 127.0.0.1, port {port} (data {})); \
+             kept across restarts\nstatus       off\n",
+            port + 1
+        )),
         "{text}"
     );
+    assert!(!text.contains("switch"), "allowed: nothing said: {text}");
     h.shutdown();
 }
 
@@ -166,8 +182,15 @@ async fn a_network_fixed_by_listen_is_shown_and_not_switched() {
         text.starts_with("network      fixed by ac2d --listen tcp://"),
         "{text}"
     );
+    assert!(
+        text.contains(
+            "\nswitch       fixed by ac2d --listen: restart ac2d without it to switch here\n"
+        ),
+        "{text}"
+    );
     let v = ac2(&ep, true, &["server", "network"]).await.json(&[]);
     assert_eq!(v["setting"]["setting"]["type"], "fixed");
+    assert_eq!(v["toggle"], json!({ "type": "fixed" }));
 
     for args in [
         &["server", "network", "off"][..],
@@ -203,8 +226,19 @@ async fn a_daemon_with_no_network_says_so() {
         "{}",
         r.stderr
     );
+    let v = ac2(&ep, true, &["server", "network"]).await.json(&[]);
+    assert_eq!(
+        v["toggle"],
+        json!({ "type": "unavailable", "reason": "in_process" })
+    );
     let info = ac2(&ep, false, &["server", "info"]).await;
     assert_eq!(info.code, 0, "{}", info.stderr);
+    assert!(
+        info.stdout
+            .contains("switch       unavailable: this daemon serves in-process only\n"),
+        "{}",
+        info.stdout
+    );
     assert!(
         info.stdout
             .contains("authorized\n  none\nrefused lately\n  none\n"),

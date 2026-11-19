@@ -202,6 +202,9 @@ pub enum RemoteLink {
     Connecting,
     /// Connected and answering.
     Up,
+    /// It turned its network off (it said so before the connection ended); read until it
+    /// answers again.
+    NetworkOff,
     /// Not answering since `since`.
     Unreachable {
         /// When it last answered (or when connecting started).

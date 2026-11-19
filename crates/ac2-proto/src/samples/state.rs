@@ -15,10 +15,12 @@ pub fn server_info() -> ServerInfo {
         network: NetworkServer {
             setting: NetSettingView::Host {
                 setting: NetSetting::On {
-                    bind: NetBind::Interface {
-                        name: "eth0".into(),
+                    choice: NetChoice {
+                        bind: NetBind::Interface {
+                            name: "eth0".into(),
+                        },
+                        port: 47820,
                     },
-                    port: 47820,
                     saved: NetSaved::Saved,
                 },
             },
@@ -77,6 +79,7 @@ pub fn server_info() -> ServerInfo {
                 up: false,
             },
         ],
+        toggle: NetToggle::Allowed,
         recording_dir: Some("/home/fohtech/.local/share/ac2/recordings".into()),
     }
 }
@@ -91,6 +94,12 @@ pub fn server_info_off() -> ServerInfo {
         network: NetworkServer {
             setting: NetSettingView::Host {
                 setting: NetSetting::Off {
+                    kept: Some(NetChoice {
+                        bind: NetBind::Addr {
+                            addr: std::net::IpAddr::from([10, 0, 0, 2]),
+                        },
+                        port: 5000,
+                    }),
                     saved: NetSaved::NotSaved {
                         reason: NotSavedReason::WriteFailed {
                             detail: "read-only file system".into(),
@@ -108,6 +117,7 @@ pub fn server_info_off() -> ServerInfo {
             refused: Vec::new(),
         },
         interfaces: Vec::new(),
+        toggle: NetToggle::Allowed,
         recording_dir: None,
     }
 }
@@ -132,6 +142,7 @@ pub fn server_info_fixed() -> ServerInfo {
             refused: Vec::new(),
         },
         interfaces: Vec::new(),
+        toggle: NetToggle::Fixed,
         recording_dir: None,
     }
 }
