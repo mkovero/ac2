@@ -232,6 +232,7 @@ fn a_paired_rig_whose_link_is_down_is_a_heading_alone() {
         ConnEvent::Failed {
             target: "pupu".into(),
             error: "gone".into(),
+            down: ac2_scene::chrome::RigDown::Unreachable,
             retry_in: std::time::Duration::from_secs(2),
         },
     );
