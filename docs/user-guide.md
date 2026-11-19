@@ -2380,8 +2380,10 @@ Beside the panes, one tree lists every measurement with what it owns
 - The arrow before a measurement **folds** it (palette *Fold/unfold measurement*).
 - A row's dot is its curve's colour (a ring when hidden): a click on it shows or hides the
   curve (a live curve: this app's display; a stored trace: the daemon's). A click on the row
-  selects it: a measurement row also brings its own panes, a child row (live curve, stored
-  trace, math trace) only selects and no pane changes
+  selects it: a measurement row also puts it on screen (its own panes, or, with none and
+  no pane showing it, the panes a new measurement of its kind starts on: click `FOH SPL`
+  and its meter is there), a child row (live curve, stored trace, math trace) only selects
+  and no pane changes
   ([Choosing what a pane shows](#choosing-what-a-pane-shows)); a click on the selected trace
   deselects it. A double click on a trace renames it.
 - **Edit measurement…** opens the form a measurement was made in, on its settings (a math
