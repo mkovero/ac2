@@ -8,6 +8,7 @@ mod curve;
 mod latest;
 mod listen_toggle;
 mod liveness;
+mod monitor;
 mod parts;
 mod pubsub;
 mod transports;

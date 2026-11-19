@@ -322,6 +322,13 @@ impl RawSocket {
         check(unsafe { zmq_socket_monitor(self.ptr.as_ptr(), endpoint.as_ptr(), events) }).map(drop)
     }
 
+    /// Stops the socket's monitor: libzmq sends `MonitorStopped`, closes its end of the
+    /// monitor pipe and reports nothing more.
+    pub(crate) fn stop_monitor(&self) -> RawResult<()> {
+        // SAFETY: a null endpoint is libzmq's documented way to stop monitoring.
+        check(unsafe { zmq_socket_monitor(self.ptr.as_ptr(), std::ptr::null(), 0) }).map(drop)
+    }
+
     /// Sends one frame (copying `data` into a libzmq message).
     pub(crate) fn send_frame(&self, data: &[u8], flags: c_int) -> RawResult<()> {
         let mut msg = zmq_msg_t { _opaque: [0; 64] };

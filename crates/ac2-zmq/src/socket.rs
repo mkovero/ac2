@@ -1,5 +1,6 @@
 //! Context, sockets, typed options and multipart messages.
 
+use std::cell::RefCell;
 use std::ffi::{CString, c_int};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -7,7 +8,7 @@ use std::time::Duration;
 
 use crate::curve::{CurveClient, PublicKey};
 use crate::error::{Error, Result, zmq};
-use crate::monitor::Monitor;
+use crate::monitor::{self, Monitor, SharedWatch};
 use crate::poll::{PollItem, poll};
 use crate::raw::{self, RawContext, RawSocket};
 use crate::zap::ZapGuard;
@@ -192,6 +193,19 @@ pub struct Socket {
     ctx: Context,
     /// CURVE server sockets keep their context's ZAP handler alive (see [`crate::zap`]).
     _zap: Option<Arc<ZapGuard>>,
+    /// The current monitor's shared state (see [`crate::monitor::Watch`]).
+    watch: RefCell<Option<SharedWatch>>,
+}
+
+impl Drop for Socket {
+    fn drop(&mut self) {
+        // Before the close: libzmq's I/O thread finishes closing the socket after
+        // `zmq_close` returns, reporting to the monitor meanwhile (see `Watch`).
+        if let Some(w) = self.watch.get_mut().take() {
+            let _ = self.raw.stop_monitor();
+            monitor::stopped(&w);
+        }
+    }
 }
 
 static ENDPOINT_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -223,6 +237,7 @@ impl Socket {
             kind,
             ctx: ctx.clone(),
             _zap: None,
+            watch: RefCell::new(None),
         };
         // libzmq's default linger is infinite: context teardown would block on undeliverable
         // messages to vanished peers.
@@ -454,11 +469,23 @@ impl Socket {
     /// Starts reporting this socket's connection events. Attach before `bind`/`connect` to
     /// see every event. A socket has at most one monitor; a new one replaces the previous.
     pub fn monitor(&self) -> Result<Monitor> {
-        let ep = unique_inproc("monitor");
-        zmq(self.raw.monitor(&c_endpoint(&ep)?, raw::ZMQ_EVENT_ALL))?;
+        let ep = c_endpoint(&unique_inproc("monitor"))?;
         let pair = self.ctx.pair_socket()?;
-        pair.connect(&ep)?;
-        Ok(Monitor::new(pair))
+        // No limit on the inproc pipe (libzmq lifts it when either end's is 0): the I/O
+        // thread's send to a full pipe would block it like a send to no reader.
+        pair.set_recv_hwm(0)?;
+        // libzmq stops a previous monitor here, before starting this one.
+        zmq(self.raw.monitor(&ep, raw::ZMQ_EVENT_ALL))?;
+        if let Some(old) = self.watch.borrow_mut().take() {
+            monitor::stopped(&old);
+        }
+        if let Err(e) = zmq(pair.raw.connect(&ep)) {
+            let _ = self.raw.stop_monitor();
+            return Err(e);
+        }
+        let watch = SharedWatch::default();
+        *self.watch.borrow_mut() = Some(Arc::clone(&watch));
+        Ok(Monitor::new(pair, watch))
     }
 
     // --- messages --------------------------------------------------------------------------

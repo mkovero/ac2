@@ -31,4 +31,6 @@ sha2 = { workspace = true }
 zeromq-src = "=0.3.6"
 
 [dev-dependencies]
+# A listener with no room in its accept queue: a connect that stays in progress.
+socket2 = "0.6"
 tempfile = { workspace = true }

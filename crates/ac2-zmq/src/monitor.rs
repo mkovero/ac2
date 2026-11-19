@@ -4,6 +4,7 @@
 //! [`MonitorEvent::HandshakeFailedAuth`] on both ends, a mechanism mismatch or wrong server
 //! key as [`MonitorEvent::HandshakeFailedProtocol`].
 
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use crate::error::Result;
@@ -137,26 +138,77 @@ impl SocketEvent {
     }
 }
 
+/// What a monitored socket and its [`Monitor`] share.
+///
+/// libzmq reports a socket's events from the context's I/O thread with a blocking send on a
+/// PAIR, among them the `Closed` of a connect still in progress when the socket closes (a peer
+/// whose host does not answer SYNs). With the reader gone that send never returns, and the I/O
+/// thread stops serving every socket of the context. So the reader stays open until the
+/// socket has stopped its monitor: a monitor dropped first parks its reader here, and the
+/// socket stops monitoring before it closes, then lets the parked reader go.
+#[derive(Debug, Default)]
+pub(crate) struct Watch {
+    /// The socket stopped this monitor (it closed, or a new monitor replaced this one).
+    stopped: bool,
+    parked: Option<Socket>,
+}
+
+pub(crate) type SharedWatch = Arc<Mutex<Watch>>;
+
+fn lock(w: &SharedWatch) -> MutexGuard<'_, Watch> {
+    // Two plain fields: a panic while held cannot leave them inconsistent.
+    w.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The socket's side: its monitor is stopped, so the parked reader may close.
+pub(crate) fn stopped(w: &SharedWatch) {
+    let parked = {
+        let mut w = lock(w);
+        w.stopped = true;
+        w.parked.take()
+    };
+    drop(parked);
+}
+
 /// Reader of one socket's events (see [`Socket::monitor`]). Like a socket, used by one thread
 /// at a time; include [`Monitor::socket`] in a [`crate::poll`] to wait on events.
 #[derive(Debug)]
 pub struct Monitor {
-    pair: Socket,
+    /// `Some` until dropped.
+    pair: Option<Socket>,
+    watch: SharedWatch,
+}
+
+impl Drop for Monitor {
+    fn drop(&mut self) {
+        let Some(pair) = self.pair.take() else {
+            return;
+        };
+        let mut w = lock(&self.watch);
+        if !w.stopped {
+            w.parked = Some(pair);
+        }
+    }
 }
 
 impl Monitor {
-    pub(crate) fn new(pair: Socket) -> Self {
-        Self { pair }
+    pub(crate) fn new(pair: Socket, watch: SharedWatch) -> Self {
+        Self {
+            pair: Some(pair),
+            watch,
+        }
     }
 
     /// The underlying socket, for polling.
     pub fn socket(&self) -> &Socket {
-        &self.pair
+        self.pair
+            .as_ref()
+            .expect("a monitor holds its reader until dropped")
     }
 
     /// The next event if one is queued.
     pub fn try_recv(&self) -> Result<Option<SocketEvent>> {
-        while let Some(m) = self.pair.try_recv()? {
+        while let Some(m) = self.socket().try_recv()? {
             if let Some(ev) = SocketEvent::parse(&m) {
                 return Ok(Some(ev));
             }
@@ -173,7 +225,7 @@ impl Monitor {
         let deadline = Instant::now() + timeout;
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
-            let Some(m) = self.pair.recv_timeout(left)? else {
+            let Some(m) = self.socket().recv_timeout(left)? else {
                 return Ok(None);
             };
             if let Some(ev) = SocketEvent::parse(&m)
