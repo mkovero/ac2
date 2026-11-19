@@ -12,8 +12,9 @@ use std::time::{Duration, Instant};
 
 use ac2_proto::model::{
     GeneratorDesired, GeneratorSettings, LocalServer, NetBind, NetSaved, NetSetting,
-    NetSettingKind, NetSettingView, NetStatus, NetStatusKind, NotSavedReason, REMOTE_BASE,
-    RemoteAudio, RemoteInput, RigPeer, ServerInfo, SessionConfig, Signal, StateFile, SystemClock,
+    NetSettingKind, NetSettingView, NetStatus, NetStatusKind, NetStatusView, NotSavedReason,
+    PeerNetStatus, REMOTE_BASE, RemoteAudio, RemoteInput, RigPeer, ServerInfo, SessionConfig,
+    Signal, StateFile, SystemClock,
 };
 use ac2_proto::units::{Dbfs, Hz};
 use ac2_proto::{Command, ErrorCode};
@@ -115,6 +116,14 @@ fn setting(s: &ServerInfo) -> &NetSetting {
     }
 }
 
+/// The status as a client on the rig's host is told it.
+fn status(s: &ServerInfo) -> &NetStatus {
+    match &s.network.status {
+        NetStatusView::Host { status } => status,
+        v => panic!("a local client is told the status in full: {v:?}"),
+    }
+}
+
 /// Whether the setting in force outlives a restart.
 fn saved(s: &ServerInfo) -> &NetSaved {
     match setting(s) {
@@ -175,7 +184,7 @@ fn on_change_the_port_on_again_and_kept_across_a_restart() {
             saved: NetSaved::Saved
         }
     );
-    assert_eq!(s.network.status, NetStatus::Off);
+    assert_eq!(status(&s), &NetStatus::Off);
     assert_eq!(s.network.server_key, None);
     assert!(h.server_public_key().is_none());
     assert_eq!(c.state().server.status, NetStatusKind::Off);
@@ -203,7 +212,7 @@ fn on_change_the_port_on_again_and_kept_across_a_restart() {
 
     let p1 = turn_on(&mut c, &h);
     let s = c.server(Command::ServerInfo);
-    assert!(listening_on(p1)(&s.network.status), "{s:?}");
+    assert!(listening_on(p1)(status(&s)), "{s:?}");
     assert_eq!(saved(&s), &NetSaved::Saved);
     assert!(s.network.server_key.is_some() && h.server_public_key().is_some());
     assert!(file_enabled(dir.path()));
@@ -220,7 +229,7 @@ fn on_change_the_port_on_again_and_kept_across_a_restart() {
 
     // Off, then on with the port kept.
     let s = turn(&mut c, false, None);
-    assert_eq!(s.network.status, NetStatus::Off);
+    assert_eq!(status(&s), &NetStatus::Off);
     assert!(s.network.server_key.is_some(), "the key stays");
     assert!(!file_enabled(dir.path()));
     let s = turn(&mut c, true, None);
@@ -296,7 +305,11 @@ fn a_network_client_may_not_toggle_and_is_told_no_host_detail() {
     let s = remote.server(Command::ServerInfo);
     assert_eq!(s.local, None);
     assert!(s.interfaces.is_empty());
-    assert!(matches!(s.network.status, NetStatus::Listening { .. }));
+    let ep = format!("tcp://127.0.0.1:{port}");
+    assert!(
+        matches!(&s.network.status, NetStatusView::Peer { status: PeerNetStatus::Listening { ctrl, .. } } if *ctrl == ep),
+        "{s:?}"
+    );
     // Whether it is on, and nothing of where it binds or how it is kept.
     assert_eq!(
         s.network.setting,
@@ -357,7 +370,7 @@ fn fixed_by_listen_or_in_process_the_toggle_is_refused() {
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
     let s = c.server(Command::ServerInfo);
     assert!(matches!(setting(&s), NetSetting::Fixed { .. }), "{s:?}");
-    assert!(matches!(s.network.status, NetStatus::Listening { .. }));
+    assert!(matches!(status(&s), NetStatus::Listening { .. }));
     assert!(!store(dir.path()).exists(), "--listen writes no setting");
     h.shutdown();
 
@@ -749,7 +762,7 @@ fn a_key_that_cannot_be_made_refuses_and_changes_nothing() {
     assert!(e.msg.contains("server key"), "{e:?}");
     let s = c.server(Command::ServerInfo);
     assert_eq!(setting(&s), &setting_before);
-    assert_eq!(s.network.status, NetStatus::Off);
+    assert_eq!(status(&s), &NetStatus::Off);
     assert_eq!(s.network.server_key, None);
     assert_eq!(std::fs::read(store(dir.path())).unwrap(), before);
     assert_eq!(c.state().server.status, NetStatusKind::Off);

@@ -3,8 +3,8 @@
 //! the authorized client keys and the keys it refused).
 
 use ac2_proto::model::{
-    AuthorizedClient, GenAction, Generator, LocalServer, NetReason, NetStatus, OutputSetup,
-    RefusedKey, ServerInfo,
+    AuthorizedClient, GenAction, Generator, LocalServer, NetReason, NetReasonKind, NetStatus,
+    NetStatusKind, NetStatusView, OutputSetup, PeerNetStatus, RefusedKey, ServerInfo,
 };
 use ac2_proto::units::{Dbfs, WallNs};
 
@@ -143,20 +143,25 @@ pub fn server_lines(s: &ServerInfo) -> Vec<String> {
         None => Vec::new(),
     };
     let n = &s.network;
-    v.push(match &n.status {
-        NetStatus::Off => "Network: off".to_owned(),
-        NetStatus::Listening { ctrl, .. } => {
-            format!("Network: {ctrl} (CURVE; paired clients only)")
-        }
-        NetStatus::Waiting { reason } => format!("Network: waiting, {}", reason_text(reason)),
-        NetStatus::Failed { reason } => {
-            format!("Network: failed, {}; retrying", reason_text(reason))
-        }
+    let why = match &n.status {
+        NetStatusView::Host {
+            status: NetStatus::Waiting { reason } | NetStatus::Failed { reason },
+        } => reason_text(reason),
+        NetStatusView::Peer {
+            status: PeerNetStatus::Waiting { reason } | PeerNetStatus::Failed { reason },
+        } => reason_kind_text(*reason).to_owned(),
+        _ => String::new(),
+    };
+    v.push(match (n.status.kind(), n.status.endpoints()) {
+        (_, Some((ctrl, _))) => format!("Network: {ctrl} (CURVE; paired clients only)"),
+        (NetStatusKind::Waiting, _) => format!("Network: waiting, {why}"),
+        (NetStatusKind::Failed, _) => format!("Network: failed, {why}; retrying"),
+        _ => "Network: off".to_owned(),
     });
     if let Some(f) = &n.fingerprint {
         v.push(format!("Server key fingerprint: {f}"));
     }
-    if matches!(n.status, NetStatus::Listening { .. }) {
+    if n.status.endpoints().is_some() {
         v.push(match &n.advertised_as {
             Some(a) => format!("Advertised over mDNS as {a:?}"),
             None => "Not advertised over mDNS (clients need the address)".to_owned(),
@@ -172,13 +177,21 @@ pub fn server_lines(s: &ServerInfo) -> Vec<String> {
 /// Why the network is not listening, in words.
 pub fn reason_text(r: &NetReason) -> String {
     match r {
-        NetReason::AddressInUse => "the port is in use".into(),
-        NetReason::InterfaceMissing => "the interface is not there".into(),
-        NetReason::AddressMissing => "the address is not on this computer".into(),
-        NetReason::ZapFailed => "key checking stopped".into(),
-        NetReason::NoServerKey => "no server key".into(),
-        NetReason::NotHandedOver => "the daemon is too busy".into(),
         NetReason::Other { detail } => detail.clone(),
+        r => reason_kind_text(r.kind()).to_owned(),
+    }
+}
+
+/// [`reason_text`] as a network client is told it: by kind.
+pub fn reason_kind_text(k: NetReasonKind) -> &'static str {
+    match k {
+        NetReasonKind::AddressInUse => "the port is in use",
+        NetReasonKind::InterfaceMissing => "the interface is not there",
+        NetReasonKind::AddressMissing => "the address is not on this computer",
+        NetReasonKind::ZapFailed => "key checking stopped",
+        NetReasonKind::NoServerKey => "no server key",
+        NetReasonKind::NotHandedOver => "the daemon is too busy",
+        NetReasonKind::Other => "an error on the rig",
     }
 }
 

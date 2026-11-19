@@ -22,9 +22,11 @@ pub fn server_info() -> ServerInfo {
                     saved: NetSaved::Saved,
                 },
             },
-            status: NetStatus::Listening {
-                ctrl: "tcp://192.168.1.20:47820".into(),
-                data: "tcp://192.168.1.20:47821".into(),
+            status: NetStatusView::Host {
+                status: NetStatus::Listening {
+                    ctrl: "tcp://192.168.1.20:47820".into(),
+                    data: "tcp://192.168.1.20:47821".into(),
+                },
             },
             server_key: Some("rq:rM>}U?@Lns47E1%kR.o@n%FcmmsL/@{H8]yf7".into()),
             fingerprint: Some("SHA256:3f1c 9a2e 77b0 51d4".into()),
@@ -96,7 +98,9 @@ pub fn server_info_off() -> ServerInfo {
                     },
                 },
             },
-            status: NetStatus::Off,
+            status: NetStatusView::Host {
+                status: NetStatus::Off,
+            },
             server_key: None,
             fingerprint: None,
             advertised_as: None,
@@ -116,8 +120,10 @@ pub fn server_info_fixed() -> ServerInfo {
             setting: NetSettingView::Peer {
                 setting: NetSettingKind::Fixed,
             },
-            status: NetStatus::Waiting {
-                reason: NetReason::AddressMissing,
+            status: NetStatusView::Peer {
+                status: PeerNetStatus::Waiting {
+                    reason: NetReasonKind::AddressMissing,
+                },
             },
             server_key: Some("rq:rM>}U?@Lns47E1%kR.o@n%FcmmsL/@{H8]yf7".into()),
             fingerprint: Some("SHA256:3f1c 9a2e 77b0 51d4".into()),

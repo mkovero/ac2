@@ -102,7 +102,10 @@ impl CliError {
 
 /// Runs one parsed command, writing its output to `out`.
 pub async fn run(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
-    cmd::dispatch(cli, out).await
+    // The dispatch future is the union of every command's state, wire replies and the
+    // daemon's whole state included: tens of KB. On the heap, a caller's future holds a
+    // pointer, so awaiting a run (or many, from one async body) costs no stack.
+    Box::pin(cmd::dispatch(cli, out)).await
 }
 
 /// Runs `cli`, printing an error (as JSON with `--json`) to `err`; returns the exit code.

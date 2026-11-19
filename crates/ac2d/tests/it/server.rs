@@ -54,7 +54,7 @@ fn authorize_a_refused_key_and_revoke_it_over_the_protocol() {
 
     let s = info(&mut c);
     let n = &s.network;
-    assert!(matches!(n.status, NetStatus::Listening { .. }), "{s:?}");
+    assert!(n.status.endpoints().is_some(), "{s:?}");
     assert_eq!(n.server_key, Some(server_key.to_z85()));
     assert_eq!(n.fingerprint, Some(server_key.fingerprint()));
     assert!(n.refused.is_empty());
@@ -224,7 +224,12 @@ fn a_local_daemon_has_no_client_keys() {
     let mut c = Client::connect(&ctx, h.ctrl_endpoint());
     let s = info(&mut c);
     assert!(matches!(s.local, Some(LocalServer::Local { .. })), "{s:?}");
-    assert_eq!(s.network.status, NetStatus::Off);
+    assert_eq!(
+        s.network.status,
+        ac2_proto::model::NetStatusView::Host {
+            status: NetStatus::Off
+        }
+    );
     let e = c
         .call(Command::ServerAuthorize {
             name: "x".into(),

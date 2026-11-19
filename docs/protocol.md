@@ -367,10 +367,13 @@ boundary); nil to a network client, which has no use for this host's local endpo
 `network`: `NetworkServer` {`setting` (`NetSettingView`, tagged by `type`: `host`
 {`setting`: `NetSetting`} to a client of the local pair \| `peer` {`setting`: `off` \| `on`
 \| `fixed`} to a network client, which is told neither where the rig binds nor whether
-the setting is kept), `status` (`NetStatus`:
-`off` \| `listening` {`ctrl`, `data`} \| `waiting` {`reason`} \| `failed` {`reason`}; `reason`
-`NetReason`: `address_in_use` \| `interface_missing` \| `address_missing` \| `zap_failed` \|
-`no_server_key` \| `not_handed_over` \| `other` {`detail`}), `server_key` (Z85) \| nil (made
+the setting is kept), `status` (`NetStatusView`, tagged by `type`: `host` {`status`:
+`NetStatus`} to a client of the local pair \| `peer` {`status`: `PeerNetStatus`} to a
+network client; `NetStatus`: `off` \| `listening` {`ctrl`, `data`} \| `waiting` {`reason`} \|
+`failed` {`reason`}; `reason` `NetReason`: `address_in_use` \| `interface_missing` \|
+`address_missing` \| `zap_failed` \| `no_server_key` \| `not_handed_over` \| `other`
+{`detail`}; `PeerNetStatus` is the same with `reason` a plain `NetReasonKind` string, `other`
+without its `detail`: the OS's words about the host stay on it), `server_key` (Z85) \| nil (made
 at the first turn-on), `fingerprint` \| nil, `advertised_as`: string \| nil (the mDNS name),
 `authorized`: [`AuthorizedClient` {`name`, `key`, `fingerprint`, `rig`: RigId \| nil}],
 `refused`: [`RefusedKey` {`key`: string \| nil (nil: not CURVE), `fingerprint`: string \|

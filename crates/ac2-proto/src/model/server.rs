@@ -48,8 +48,8 @@ pub enum LocalServer {
 pub struct NetworkServer {
     /// What it is set to, as much as the asking client may know.
     pub setting: NetSettingView,
-    /// What it is doing.
-    pub status: NetStatus,
+    /// What it is doing, as much as the asking client may know.
+    pub status: NetStatusView,
     /// The server's public key (Z85), which clients pin when pairing; `None` until the
     /// network is first turned on.
     pub server_key: Option<String>,
@@ -225,6 +225,95 @@ impl NetStatus {
     }
 }
 
+/// The listener's status as one client is told it. A network client gets why it is not
+/// listening by kind only: an unforeseen failure is worded by the host's OS, which a
+/// remote app has no business reading.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum NetStatusView {
+    /// To a client on the rig's own host: all of it.
+    Host {
+        /// The status.
+        status: NetStatus,
+    },
+    /// To a network client.
+    Peer {
+        /// The status, reasons by kind.
+        status: PeerNetStatus,
+    },
+}
+
+impl NetStatusView {
+    /// Its kind.
+    pub fn kind(&self) -> NetStatusKind {
+        match self {
+            Self::Host { status } => status.kind(),
+            Self::Peer { status } => match status {
+                PeerNetStatus::Off => NetStatusKind::Off,
+                PeerNetStatus::Listening { .. } => NetStatusKind::Listening,
+                PeerNetStatus::Waiting { .. } => NetStatusKind::Waiting,
+                PeerNetStatus::Failed { .. } => NetStatusKind::Failed,
+            },
+        }
+    }
+
+    /// The ctrl and data endpoints while listening.
+    pub fn endpoints(&self) -> Option<(&str, &str)> {
+        match self {
+            Self::Host {
+                status: NetStatus::Listening { ctrl, data },
+            }
+            | Self::Peer {
+                status: PeerNetStatus::Listening { ctrl, data },
+            } => Some((ctrl, data)),
+            _ => None,
+        }
+    }
+}
+
+/// [`NetStatus`] as a network client is told it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum PeerNetStatus {
+    /// Not served.
+    Off,
+    /// Bound: the endpoints as bound (the client reached one of them).
+    Listening {
+        /// Ctrl endpoint.
+        ctrl: String,
+        /// Data endpoint.
+        data: String,
+    },
+    /// Not bound yet; retried.
+    Waiting {
+        /// Why, by kind.
+        reason: NetReasonKind,
+    },
+    /// Was bound and failed; retried.
+    Failed {
+        /// Why, by kind.
+        reason: NetReasonKind,
+    },
+}
+
+impl From<&NetStatus> for PeerNetStatus {
+    fn from(s: &NetStatus) -> Self {
+        match s {
+            NetStatus::Off => Self::Off,
+            NetStatus::Listening { ctrl, data } => Self::Listening {
+                ctrl: ctrl.clone(),
+                data: data.clone(),
+            },
+            NetStatus::Waiting { reason } => Self::Waiting {
+                reason: reason.kind(),
+            },
+            NetStatus::Failed { reason } => Self::Failed {
+                reason: reason.kind(),
+            },
+        }
+    }
+}
+
 /// Why the network is not listening.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -247,6 +336,41 @@ pub enum NetReason {
         /// What failed.
         detail: String,
     },
+}
+
+/// [`NetReason`] without its details.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NetReasonKind {
+    /// [`NetReason::AddressInUse`].
+    AddressInUse,
+    /// [`NetReason::InterfaceMissing`].
+    InterfaceMissing,
+    /// [`NetReason::AddressMissing`].
+    AddressMissing,
+    /// [`NetReason::ZapFailed`].
+    ZapFailed,
+    /// [`NetReason::NoServerKey`].
+    NoServerKey,
+    /// [`NetReason::NotHandedOver`].
+    NotHandedOver,
+    /// [`NetReason::Other`].
+    Other,
+}
+
+impl NetReason {
+    /// Its kind, as a network client is told it.
+    pub fn kind(&self) -> NetReasonKind {
+        match self {
+            Self::AddressInUse => NetReasonKind::AddressInUse,
+            Self::InterfaceMissing => NetReasonKind::InterfaceMissing,
+            Self::AddressMissing => NetReasonKind::AddressMissing,
+            Self::ZapFailed => NetReasonKind::ZapFailed,
+            Self::NoServerKey => NetReasonKind::NoServerKey,
+            Self::NotHandedOver => NetReasonKind::NotHandedOver,
+            Self::Other { .. } => NetReasonKind::Other,
+        }
+    }
 }
 
 /// For logs; apps word the reason themselves.
@@ -380,6 +504,28 @@ mod ips_text {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A network client is told why by kind: an unforeseen failure's words stay on the host.
+    #[test]
+    fn a_peer_is_told_reasons_by_kind_only() {
+        let failed = NetStatus::Failed {
+            reason: NetReason::Other {
+                detail: "bind: Permission denied (os error 13) on /secret/path".into(),
+            },
+        };
+        let told = PeerNetStatus::from(&failed);
+        assert_eq!(
+            told,
+            PeerNetStatus::Failed {
+                reason: NetReasonKind::Other
+            }
+        );
+        let b = rmp_serde::to_vec_named(&told).expect("encode");
+        assert!(!b.windows(6).any(|w| w == b"secret"));
+        let view = NetStatusView::Peer { status: told };
+        assert_eq!(view.kind(), NetStatusKind::Failed);
+        assert_eq!(view.endpoints(), None);
+    }
 
     #[test]
     fn addresses_travel_as_text() {

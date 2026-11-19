@@ -8,8 +8,8 @@
 
 use ac2_proto::event::Change;
 use ac2_proto::model::{
-    AuthorizedClient, GenAction, LocalServer, NetBind, NetSettingView, NetworkServer, OutputSetup,
-    RefusedKey, ServerInfo, SweepFailure, check_output_label,
+    AuthorizedClient, GenAction, LocalServer, NetBind, NetSettingView, NetStatusView,
+    NetworkServer, OutputSetup, RefusedKey, ServerInfo, SweepFailure, check_output_label,
 };
 use ac2_proto::units::{Dbfs, RigId, WallNs};
 use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
@@ -220,7 +220,13 @@ impl Control {
                         setting: n.setting().kind(),
                     }
                 },
-                status: n.status(),
+                status: if local {
+                    NetStatusView::Host { status: n.status() }
+                } else {
+                    NetStatusView::Peer {
+                        status: (&n.status()).into(),
+                    }
+                },
                 server_key: key.map(|k| k.to_z85()),
                 fingerprint: key.map(|k| k.fingerprint()),
                 advertised_as: n.advertised_as(),

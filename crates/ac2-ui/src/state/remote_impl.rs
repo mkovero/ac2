@@ -6,8 +6,8 @@
 use super::*;
 use crate::remote_inputs::{PickLine, RemotePick, RemoteRow, admit_name, peer_endpoints};
 use ac2_proto::model::{
-    InputSetup, NetStatus, NetworkServer, OpenSession, RemoteInput, RemoteState, RigPeer,
-    ServerInfo, remote_slot,
+    InputSetup, NetworkServer, OpenSession, RemoteInput, RemoteState, RigPeer, ServerInfo,
+    remote_slot,
 };
 use ac2_scene::remote_inputs::{self as words, SourceRefusal};
 use eframe::egui::Key;
@@ -204,18 +204,11 @@ impl AppState {
             Some(Err(e)) => return Err(SourceRefusal::Unanswered(e.clone())),
             Some(Ok(i)) => i,
         };
-        let (
-            NetworkServer {
-                status: NetStatus::Listening { ctrl, data },
-                server_key: Some(server_key),
-                authorized,
-                ..
-            },
-            ..,
-        ) = (&info.network, ())
-        else {
+        let n = &info.network;
+        let (Some((ctrl, data)), Some(server_key)) = (n.status.endpoints(), &n.server_key) else {
             return Err(SourceRefusal::LocalOnly);
         };
+        let authorized = &n.authorized;
         let st = b.daemon();
         let open = st.and_then(|s| s.session.open.as_ref());
         match open {

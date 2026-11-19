@@ -16,9 +16,11 @@ const KEY_B: &str = "Yne@$w-vo<fVvi]a<NY6T1ed:M$fCG*[IaLV{hID";
 
 fn network(key: &str, authorized: Vec<AuthorizedClient>) -> ServerInfo {
     let mut s = local_only();
-    s.network.status = ac2_proto::model::NetStatus::Listening {
-        ctrl: "tcp://0.0.0.0:7700".into(),
-        data: "tcp://0.0.0.0:7701".into(),
+    s.network.status = ac2_proto::model::NetStatusView::Peer {
+        status: ac2_proto::model::PeerNetStatus::Listening {
+            ctrl: "tcp://0.0.0.0:7700".into(),
+            data: "tcp://0.0.0.0:7701".into(),
+        },
     };
     s.network.server_key = Some(key.into());
     s.network.fingerprint = Some("ab12".into());

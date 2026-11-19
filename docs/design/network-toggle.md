@@ -189,8 +189,7 @@ methods take the socket their peer's origin picks).
   stored and goes `Waiting`, the same as at start; the reply says so.
 - `ServerInfo { local: Option<LocalServer>, network: NetworkServer, interfaces,
   recording_dir }`; `LocalServer = Embedded | Local { ctrl, data }`;
-  `NetworkServer { setting: NetSettingView, status: Off | Listening { ctrl, data } |
-  Waiting { reason } | Failed { reason }, server_key, fingerprint (both `Option`, once a key
+  `NetworkServer { setting: NetSettingView, status: NetStatusView, server_key, fingerprint (both `Option`, once a key
   exists), advertised_as, authorized, refused }`;
   `NetSettingView = Host { setting: NetSetting } | Peer { setting: Off | On | Fixed }`:
   a network client is told only the kind, never the bind (this host's interfaces and
@@ -199,8 +198,11 @@ methods take the socket their peer's origin picks).
   network keeps nothing: the command line is the setting);
   `saved: Saved | NotSaved { reason: StoreReadOnly | Unreadable { detail } |
   DamagedInPlace | NoStore | WriteFailed { detail } }`;
+  `NetStatusView = Host { status: NetStatus } | Peer { status: PeerNetStatus }`, with
+  `NetStatus = Off | Listening { ctrl, data } | Waiting { reason } | Failed { reason }` and
   `NetReason = AddressInUse | InterfaceMissing | AddressMissing | ZapFailed | NoServerKey |
-  NotHandedOver | Other { detail }`. `ServerMode` goes. To a network client `local` is
+  NotHandedOver | Other { detail }`; `PeerNetStatus` carries `NetReasonKind` (the same
+  without `Other`'s detail, which is the host OS's words). `ServerMode` goes. To a network client `local` is
   `None` and `interfaces` empty.
 - `State.server: ServerSummary { status kind, ctrl endpoint (when listening), port,
   fingerprint }` so every mirrored app
