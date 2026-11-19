@@ -88,7 +88,8 @@ pick *Rigs…* in the palette (**Ctrl+K**), for the drop-down:
   greyed and reads *unreachable · retrying* (the app keeps reconnecting on its own); one
   whose daemon refuses this app's key reads *has not authorized this app*: Settings ›
   Connection names this app's key fingerprint and the line to add to `authorized_clients`
-  on that host (then restart its `ac2d`);
+  on that host (then restart its `ac2d`). This is the only place that lists every rig the
+  app holds: choosing one changes the rig shown, and with it the whole measurement list;
 - *Connect a rig…* (also in the palette) opens the connect dialog: *This computer* (its
   `ac2d`, started when none is running), *Simulated rig (no audio)*, a rig it finds or one
   you paired, or an address typed in (`host` or `host:port`). The rig joins the ones held
@@ -102,21 +103,39 @@ pick *Rigs…* in the palette (**Ctrl+K**), for the drop-down:
 or the stage view, and it is greyed while a window is open: a window belongs to the rig it
 was opened on.
 
-The panes stay where they are when you switch: a pane showing another rig's measurement
-keeps showing it, its title starting with that rig's name (`pupu · Transfer 1`). Its
-windows (settings, edits) open only on its own rig: switch to it first. A pane of a rig
-that is down reads *pupu unreachable · retrying* (or *pupu has not authorized this app ·
-Settings › Connection says what to add*); one of a closed rig reads *pupu not
+The panes stay where they are when you switch. A pane showing a measurement of a rig
+**paired** with the one now shown keeps showing it, its title starting with that rig's name
+(`pupu · Transfer 1`). A pane of a rig the one shown is *not* paired with keeps what it
+holds and draws nothing: it reads *pupu is not paired with ketunkolo — the rig drop-down
+shows pupu*, and its keys do nothing; switch back to pupu (or pair the two) and it draws
+again. A pane's windows (settings, edits) open only on its own rig: switch to it first. A
+pane of a rig that is down reads *pupu unreachable · retrying* (or *pupu has not authorized
+this app · Settings › Connection says what to add*); one of a closed rig reads *pupu not
 connected* and stays until you close or reuse it.
 
-**Another rig's measurement in a pane.** The measurement list is rooted at every connected
-rig (one rig too), each rig's rows under a heading with its name, in the drop-down's order;
-the heading's arrow folds that rig's rows away
-([The measurement tree](#the-measurement-tree)). Drag a row of another rig onto a pane and the pane shows it, by that rig's own
+**The list shows what the rig shown is connected to.** The measurement list is rooted at
+the rig shown (one rig too), then at each rig that rig's daemon is **paired** with, each
+rig's rows under its heading; the heading's arrow folds that rig's rows away
+([The measurement tree](#the-measurement-tree)). A rig the app holds that the rig shown is
+not paired with is not in the list: it is in the drop-down, and has nothing to do with the
+rig shown. Two rigs are paired when one takes an input of the other
+([Inputs from another rig](#inputs-from-another-rig)); either one shown lists the other.
+
+A heading says the rig's name and its session's sample rate, `pupu · 96 kHz` (*no session*
+or *no audio I/O* when it has none, as the top bar says). A paired rig's heading also says
+the pairing as the rig shown reports it, in the words of *Between rigs*: *paired* (nothing
+taken from it right now), *paired · streaming*, *connecting*, *unreachable*, *cm4 runs
+48 kHz, this rig 96 kHz*, *cm4 has not admitted this rig*. A paired rig this app is not
+connected to is its heading alone, *paired · this app is not connected to it*: the app
+connects to no rig by itself, so *Connect a rig…* adds it and its measurements appear.
+
+**Another rig's measurement in a pane.** Drag a row of a paired rig onto a pane and the
+pane shows it, by that rig's own
 numbering (two rigs both have a measurement 3; the pane shows the one dragged), its title
 naming the rig; the rig shown stays as it is. Clicking a row of another rig (or reaching it
 with Enter or Tab) switches to that rig first, as the drop-down does, then acts as a click
-there; with a window open the switch is refused, and Tab skips the other rigs' rows. A click
+there; with a window open the switch is refused, and Tab skips the other rigs' rows. Tab
+steps only through the rigs listed. A click
 on a rig's heading switches to it. A row of another rig dropped on a row of this one (a math
 trace) is refused: *not combined: the two rows are of different rigs; math uses one rig's (pupu)*.
 
@@ -1099,7 +1118,8 @@ Dropped within about the outer fifth of a pane (`FOH SPL → new pane below`), t
 on that side as **N** would and the new half shows the row. A pane too small for **N** to
 split takes a plain drop instead, and the label names the pane. To draw another curve over
 a pane's own, use **C** (Compare, above). Two SPL meters side by side: drop the other meter
-on a pane's edge. A row of another rig is shown by that rig's numbering and the pane is set
+on a pane's edge. A row of another rig (one paired with the rig shown: only those are
+listed) is shown by that rig's numbering and the pane is set
 on that rig ([Many rigs](#many-rigs-in-one-window)). **Esc** cancels the drag; a drop
 outside the panes does nothing.
 
@@ -2375,9 +2395,12 @@ Beside the panes, one tree lists every measurement with what it owns
 | **average** (M) | with its inputs, when they share one |
 | **imports**, session traces of no measurement | **Imported**, listed last when it holds something |
 
-- Each connected rig is a root of the tree, even when it is the only one: its heading
-  (`pupu`, `ketunkolo`) and under it everything that lives on that rig (its Rig
-  monitor meters, its Session measurements, its Imported group). The arrow before the
+- The rig shown is the first root of the tree, even when it is the only one, then each rig
+  its daemon is paired with ([Many rigs](#many-rigs-in-one-window)): its heading with its
+  session's rate (`pupu · 96 kHz`, `ketunkolo · 48 kHz`; a paired rig's second line says the
+  pairing) and under it everything that lives on that rig (its Rig
+  monitor meters, its Session measurements, its Imported group). A rig the app holds that
+  the rig shown is not paired with has no root: the top bar's drop-down lists it. The arrow before the
   heading **folds** the rig's branch: only the heading stays, saying what it hides
   (`6 measurements · 12 traces · folded`, counted as the Sessions dialog counts a
   session). The fold is this app's, kept per rig in `ui.toml` across restarts. A click on

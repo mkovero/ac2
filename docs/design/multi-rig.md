@@ -32,9 +32,11 @@ cripple the other rigs. The math is the daemon's; the app renders streams. Both 
   stimulus banner **name the rig** (*arm pupu's stimulus · Space*): sound must never leave a
   system the operator did not mean.
 - **Panes are the app's**, not a tab's: the pane tree stays when the tab changes, and a pane
-  shows a measurement, input set or pair of any connected rig. A pane's title names the rig
-  when it is not the active one (*pupu · Stage*). Pick and drag work across rigs: the picker
-  lists every rig's measurements under a heading per rig.
+  shows a measurement, input set or pair of the rig shown or of a rig paired with it. A
+  pane's title names the rig when it is not the active one (*pupu · Stage*). Drag works
+  across paired rigs: the measurement list has a heading for the rig shown, then one per rig
+  its daemon is paired with (N8, *The list and reach* below). A rig the app merely holds is
+  the drop-down's.
 - **Remote inputs** (stage 3): a rig's session may include a mic or line input of another
   rig (*ketunkolo · in 3*). It appears on the Audio & I/O page under its rig, with its name,
   kind and calibration as that rig states them, and goes into measurements like a local
@@ -173,6 +175,37 @@ retrying* and the connection retries as today. Closing a tab closes that connect
 stimulus stopped and lease released first, `QUIT_GRACE`); its panes stay in the layout
 saying *pupu not connected* until re-connected or re-pointed. Quit stops every rig's held
 stimulus in parallel, each within `QUIT_GRACE`.
+
+### The list and reach (N8)
+
+The list once had a heading per connected rig. On a kiosk holding pupu, its own local
+daemon and a CM4 meter, with pupu's daemon paired with the CM4 alone, that read as pupu
+being linked to the kiosk's daemon: *rigs this app holds* and *rigs pupu is connected to*
+looked the same. The operator's ruling (2026-11-19): connected to pupu, the list shows
+only what pupu is connected to; a paired rig's group has its measurement list; a curve
+crosses rigs only between paired ones.
+
+- **Paired**, app-side, is read from the mirrored daemon state and matched by `RigId`
+  (`AppState::paired_rigs`): the rig shown's `remote.peers` (the rigs it may take inputs
+  from, in that order), then every held rig whose own `remote.peers` names the rig shown. A
+  pairing is the two daemons', so either side shown lists the other. The admitted-keys list
+  (`server.info`) is not used: it is asked for only when a page shows it.
+- **The list** (`AppState::list_rows`): the rig shown's root, then a root per paired rig
+  with its rows as last read (`rig_lists`, read only for paired rigs). A paired rig the app
+  does not hold, or whose link is down, is its heading alone (`rig_tree::rig_away_heading`):
+  the app has no measurements of it and connects to no rig on its own.
+- **A heading** (`rig_tree::RigRoot`): name, the session's rate (`RigAudio`; *no session* /
+  *no audio I/O* in the top bar's words), a clock tag when one is given (`clock`), and for a
+  paired rig the pairing as the rig shown's daemon reports it (`rig_tree::pairing_text`: a
+  link that is not up, else the first of its inputs whose audio does not stream, in
+  `between_rigs`' words; *paired* when the daemon takes no input from it and so reports
+  nothing).
+- **Reach** (`AppState::rig_in_reach`: the rig shown or one paired with it) is the one rule
+  for: which rigs' lists are read (so what a drag offers and Tab steps onto), a row click
+  (`Msg::OnRig`), a drop (`drop_row`, `pane_row_from`, `pane_meter_from`), the keys of a
+  focused pane of another rig, and what a pane draws. A pane on a rig out of reach keeps its
+  `View` untouched and reads `Missing::NotPaired`; layout prefs and stored measurement
+  layouts are written as before, so the pane draws again when its rig is shown or paired.
 
 ### Stimulus awareness
 

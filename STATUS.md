@@ -50,8 +50,10 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   switches between them, `ui.toml` remembers the rigs and connects them again at start,
   panes keep their rig across a switch (titles `pupu · …`, *unreachable · retrying* / *not
   connected*), Shift+Esc stops every rig and quit releases them all in parallel. Stage 1d
-  landed: the measurement list offers every connected rig's measurements and meters under a
-  heading per rig, a row of another rig's dragged onto a pane pins the pane to it (panes have
+  landed: the measurement list offers the rig shown's measurements and meters, then those of
+  each rig its daemon is paired with, under a heading per rig with its session rate (N8,
+  2026-11-19: a rig merely held is the drop-down's; a pane left on a rig out of reach reads
+  *not paired*), a row of a paired rig's dragged onto a pane pins the pane to it (panes have
   no chip), a list row chosen never
   takes another rig's pane, `ui.toml` keeps each pinned pane's rig by id (resolved when that
   rig is held again, any address), and a stored layout reads `ThisRig`/`Rig` panes for the

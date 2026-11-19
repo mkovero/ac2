@@ -215,7 +215,9 @@ heading switches to that rig, then acts as on the shown rig's heading. A Walk pa
 with its walk (the walk window opens it, as a new measurement's own pane); a drop replaces
 it like any pane.
 
-**Every connected rig in the list (D15).** The measurement list shows each connected rig's
+**Every connected rig in the list (D15; narrowed by N8, 2026-11-19, to the rig shown and
+the rigs its daemon is paired with: multi-rig.md, *The list and reach*).** The measurement
+list shows each connected rig's
 measurements under its heading (D8 names: `pupu`, `ketunkolo · ac2d`, `ketunkolo · in this
 app`); with one rig the headings go. Any rig's row drags, and a drop pins the pane to that
 row's rig (the chip's `pane_show_from` / `pane_meter_from`, `state/cross_rig.rs`, stay and
@@ -430,6 +432,7 @@ different ways changing the pane view"):
 - **D14** Dragging a list row onto a pane is the one way to change what a pane shows.
 - **D15** The measurement list shows every connected rig's measurements under its heading,
   so any rig's row drags; the top-bar drop-down shows which rig is shown (new measurements,
-  own layouts) (operator: "List shows all").
+  own layouts) (operator: "List shows all"). Narrowed by N8 (operator 2026-11-19): the
+  rig shown and the rigs its daemon is paired with; only those rows drag.
 - **D16** Inputs list rows drag onto panes and make Programme panes; P and E stop changing
   panes (operator: "Drag inputs only").
