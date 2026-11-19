@@ -525,7 +525,13 @@ impl AppState {
         gone: impl Fn(MeasId) -> bool,
     ) {
         let (rig, tab) = (self.rig.id, self.active());
-        for (pane, v) in &mut self.layout.views {
+        // The screens kept for rigs not shown hold this rig's panes too.
+        let kept = self
+            .others
+            .screens
+            .values_mut()
+            .flat_map(|s| s.layout.views.iter_mut());
+        for (pane, v) in self.layout.views.iter_mut().chain(kept) {
             // Another rig's pane names that rig's measurements.
             let ours = match v.rig {
                 PaneRig::Active => tab == rig,

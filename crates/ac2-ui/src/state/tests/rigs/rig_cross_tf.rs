@@ -209,14 +209,16 @@ fn clocks_not_locked_stop_it_and_say_so_everywhere() {
 fn a_cross_rig_transfer_in_another_rigs_pane_is_that_rigs() {
     let mut t = two_mirrored();
     cross_tf(&mut t, NOT_LOCKED, HELD);
-    let p = t.pane(PaneKind::Transfer);
-    assert_eq!(t.st.pane_meas(p).map(|m| m.id), Some(MeasId(1)));
     let tab = t.st.active();
     pick(&mut t, RigRow::Rig(PUPU));
+    // The first rig's transfer function dragged onto a pane of pupu's screen.
+    let p = t.st.layout.focus;
+    let key = ac2_scene::meas_list::TreeKey::Meas(MeasId(1));
+    t.drag_drop(DragItem::Row { rig: tab, key }, p, None);
     assert_eq!(
         t.st.layout.view(p).expect("pane").rig,
         PaneRig::Rig(tab),
-        "the pane stays with its rig"
+        "the pane is the first rig's"
     );
     // Pupu, shown, measures nothing across rigs: what the pane shows is the tab rig's.
     let drawn =

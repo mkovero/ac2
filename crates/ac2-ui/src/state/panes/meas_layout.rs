@@ -147,6 +147,32 @@ impl AppState {
         }
     }
 
+    /// A rig shown for the first time starts on its selected (else first) measurement, as
+    /// that row brings it: now if it lists one, else when it does (a rig shown before it
+    /// said hello). A pane the operator filled meanwhile is the screen: nothing is brought.
+    fn first_screen_due(&mut self) {
+        if !self.rig.due.first_screen || self.others.visiting.is_some() {
+            return;
+        }
+        let untouched = self.layout.views.len() == 1
+            && self.layout.views.values().all(|v| !v.has_content())
+            && !self.rig.due.own_panes_due;
+        if !untouched {
+            self.rig.due.first_screen = false;
+            return;
+        }
+        let listed = |id: &MeasId| self.meas(*id).is_some();
+        let first = self
+            .rig
+            .selected
+            .filter(listed)
+            .or_else(|| self.tree_meas_order().into_iter().find(listed));
+        if let Some(id) = first {
+            self.rig.due.first_screen = false;
+            self.select_meas_row(id);
+        }
+    }
+
     /// After a message: the chosen measurement's layout on screen when its row was chosen
     /// or another client changed it; the panes sent as its layout when the operator edited
     /// them (`conn`: the message came from the daemon, which edits nothing; `drag`: a split
@@ -159,6 +185,7 @@ impl AppState {
         out: &mut Vec<Request>,
     ) {
         self.settle_layout_calls();
+        self.first_screen_due();
         let row = self.rig.due.row_curve.take();
         if std::mem::take(&mut self.rig.due.own_panes_due) {
             let owner = row.map_or(self.rig.selected, |r| Some(r.owner));

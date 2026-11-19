@@ -46,14 +46,14 @@ impl AppState {
         let pending = std::mem::take(&mut self.rig.pending.pane_meas);
         for (pane, name) in pending {
             // Given another measurement meanwhile: the pane's choice now.
-            if self
-                .layout
-                .view(pane)
-                .is_none_or(|v| v.meas.is_some() || !self.ours(v))
-            {
+            // A pane of a screen kept for a rig not shown waits there as on screen.
+            let Some(kind) = self
+                .held_view(pane)
+                .filter(|v| v.meas.is_none() && self.ours(v))
+                .map(|v| v.kind)
+            else {
                 continue;
-            }
-            let kind = self.layout.kind(pane);
+            };
             let id = self
                 .measurements()
                 .iter()
@@ -68,7 +68,7 @@ impl AppState {
                 }
                 continue;
             };
-            if let Some(v) = self.layout.view_mut(pane) {
+            if let Some(v) = self.held_view_mut(pane) {
                 v.meas = Some(id);
             }
             self.rig.pending.deleted.remove(&pane);

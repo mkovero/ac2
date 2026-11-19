@@ -103,14 +103,22 @@ daemon). The top bar starts with the rig shown, by name, with the dot of its lin
 or the stage view, and it is greyed while a window is open: a window belongs to the rig it
 was opened on.
 
-The panes stay where they are when you switch. A pane showing a measurement of a rig
-**paired** with the one now shown keeps showing it, its title starting with that rig's name
-(`pupu · Transfer 1`). A pane of a rig the one shown is *not* paired with keeps what it
-holds and draws nothing: it reads *pupu is not paired with ketunkolo — the rig drop-down
-shows pupu*, and its keys do nothing; switch back to pupu (or pair the two) and it draws
-again. A pane's windows (settings, edits) open only on its own rig: switch to it first. A
-pane of a rig that is down reads *pupu unreachable · retrying* (or *pupu has not authorized
-this app · Settings › Connection says what to add*); one of a closed rig reads *pupu not
+Each rig has its own screen: switching puts that rig's panes on screen, laid out, focused
+and showing what they showed when you last had it up, and the screen you leave comes back
+the same when you switch back. Undo (**Ctrl+Z**) takes back steps of the screen that is up;
+the switch itself is not a step. A rig you show for the first time starts on its selected
+(else first) measurement, as a click on that row brings it; with no measurement, on one
+empty pane. The screens are kept while the app runs: after a restart, the rig shown has
+the screen it had and the others start as for the first time. A pane showing a measurement
+of a rig **paired** with the one shown (a row dragged in, below) belongs to the screen it is
+on and comes and goes with it, its title starting with that rig's name
+(`pupu · Transfer 1`). Its windows (settings, edits) open only on its own rig: switch to it
+first. Should the pairing be removed while such a pane is on a screen (or a screen from
+before a restart holds a pane of a rig the one shown is not paired with), the pane keeps
+what it holds and draws nothing: it reads *pupu is not paired with ketunkolo — the rig
+drop-down shows pupu*, and its keys do nothing; pair the two again and it draws. A pane of a
+rig that is down reads *pupu unreachable · retrying* (or *pupu has not authorized this app ·
+Settings › Connection says what to add*); one of a closed rig reads *pupu not
 connected* and stays until you close or reuse it.
 
 **The list shows what the rig shown is connected to.** The measurement list is rooted at

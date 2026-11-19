@@ -376,7 +376,12 @@ impl AppState {
     /// when the rig is back (reached anywhere, its daemon maybe restarted with other ids).
     pub(super) fn park_closed_rig(&mut self, r: &RigState) {
         let mut waiting: BTreeMap<PaneId, String> = BTreeMap::new();
-        for (pane, v) in &mut self.layout.views {
+        let kept = self
+            .others
+            .screens
+            .values_mut()
+            .flat_map(|s| s.layout.views.iter_mut());
+        for (pane, v) in self.layout.views.iter_mut().chain(kept) {
             if v.rig != PaneRig::Rig(r.id) {
                 continue;
             }

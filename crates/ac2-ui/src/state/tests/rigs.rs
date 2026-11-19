@@ -430,75 +430,25 @@ fn replies_after_a_switch_reach_their_rig() {
     assert_eq!(t.st.rig.stimulus.phase, StimPhase::Idle, "pupu's untouched");
 }
 
-/// A pane given a measurement on one rig keeps showing that rig's after a switch, though
-/// the other rig has a measurement of the same id: its ids are resolved against its own
-/// rig alone. A pane with no pick of its own stays the rig shown's, showing nothing.
-#[test]
-fn a_pane_keeps_its_rig_through_a_switch() {
-    let mut t = two_mirrored();
-    let p = t.st.layout.focus;
-    t.st.layout.split_pane(p, Axis::Row, Side::B);
-    let q = t.st.layout.focus;
-    t.st.layout.view_mut(p).expect("pane").kind = PaneKind::Spectrum;
-    t.st.layout.view_mut(q).expect("pane").kind = PaneKind::Spectrum;
-    t.st.layout.view_mut(p).expect("pane").meas = Some(MeasId(2));
-    t.st.layout.view_mut(q).expect("pane").meas = None;
-    pick(&mut t, RigRow::Rig(PUPU));
-    assert_eq!(t.st.layout.view(p).expect("pane").rig, PaneRig::Rig(RIG));
-    assert_eq!(t.st.layout.view(q).expect("pane").rig, PaneRig::Active);
-    // Pupu has a MeasId(2) too: the pinned pane never shows it.
-    assert!(t.st.pane_meas(p).is_none());
-    assert!(t.st.pane_meas(q).is_none(), "nothing picked, nothing shown");
-    assert!(
-        t.st.pane_title(p)
-            .starts_with(&format!("{} · ", t.st.rig_name(RIG)))
-    );
-    let shown =
-        t.st.visit(RIG, |st| st.pane_meas(p).map(|m| m.id))
-            .flatten();
-    assert_eq!(shown, Some(MeasId(2)));
-    // Back on the first rig the pane is the shown rig's again.
-    pick(&mut t, RigRow::Rig(RIG));
-    assert_eq!(t.st.layout.view(p).expect("pane").rig, PaneRig::Active);
-    assert_eq!(t.st.pane_meas(p).map(|m| m.id), Some(MeasId(2)));
-}
-
 /// What is stored as a measurement's layout is its own rig's panes alone.
 #[test]
 fn a_measurement_layout_never_holds_another_rigs_pane() {
-    let mut t = two_mirrored();
-    for v in t.st.layout.views.values_mut() {
-        v.meas = None;
-    }
-    let p = t.st.layout.focus;
-    t.st.layout.split_pane(p, Axis::Row, Side::B);
-    t.st.layout.view_mut(p).expect("pane").kind = PaneKind::Spectrum;
-    t.st.layout.view_mut(p).expect("pane").meas = Some(MeasId(2));
-    let both = t.st.pane_layout();
-    pick(&mut t, RigRow::Rig(PUPU));
-    let own = t.st.pane_layout();
-    fn count(l: &ac2_proto::model::PaneLayout) -> usize {
-        match l {
-            ac2_proto::model::PaneLayout::Pane { .. } => 1,
-            ac2_proto::model::PaneLayout::Split { a, b, .. } => count(a) + count(b),
-        }
-    }
-    assert_eq!(count(&own), count(&both) - 1, "{own:?}");
+    let (mut t, p) = two_lists();
+    let all = t.st.visible_panes().len();
+    drop_pupu(&mut t, p);
+    assert_eq!(t.st.pane_layout().panes().len(), all - 1);
 }
 
 /// A key on a pane of the rig not shown acts on that pane's rig.
 #[test]
 fn a_pane_key_goes_to_the_panes_rig() {
-    let mut t = two_mirrored();
-    let p = t.st.layout.focus;
-    t.st.layout.view_mut(p).expect("pane").kind = PaneKind::Spectrum;
-    t.st.layout.view_mut(p).expect("pane").meas = Some(MeasId(2));
-    pick(&mut t, RigRow::Rig(PUPU));
+    let (mut t, p) = two_lists();
+    drop_pupu(&mut t, p);
     t.st.layout.set_focus(p);
     // Peak hold on the spectrum pane: a display edit of the measurement it shows.
     let r = t.st.update(Msg::Command(CommandId::Peaks), &t.keys);
     assert!(
-        !r.is_empty() && r.iter().all(|(rig, _)| *rig == RIG),
+        !r.is_empty() && r.iter().all(|(rig, _)| *rig == PUPU),
         "{r:?}"
     );
 }
@@ -527,7 +477,8 @@ fn stop_anywhere_stops_every_rig() {
 
 /// Closing the rig shown shows the next one first; the closed rig goes to the app, which
 /// closes its link (stopping the stimulus it holds and releasing its lease first). Its
-/// panes stay, saying it is not connected, and it is no longer remembered.
+/// screen goes with it, and it is no longer remembered. A pane of a closed rig on another
+/// rig's screen stays, saying it is not connected.
 #[test]
 fn closing_a_rig() {
     let mut t = two_mirrored();
@@ -536,11 +487,15 @@ fn closing_a_rig() {
         name: "ac2d test".into(),
         addr: crate::prefs::RigAddr::Local,
     });
+    // On pupu's screen, a pane showing the first rig's measurement 2.
+    pick(&mut t, RigRow::Rig(PUPU));
     let p = t.st.layout.focus;
-    t.st.layout.view_mut(p).expect("pane").kind = PaneKind::Spectrum;
-    t.st.layout.view_mut(p).expect("pane").meas = Some(MeasId(2));
+    let key = ac2_scene::meas_list::TreeKey::Meas(MeasId(2));
+    t.drag_drop(DragItem::Row { rig: RIG, key }, p, None);
+    pick(&mut t, RigRow::Rig(RIG));
     pick(&mut t, RigRow::Close(RIG));
     assert_eq!(t.st.active(), PUPU);
+    assert!(t.st.others.screens.is_empty(), "its screen went with it");
     assert!(t.st.find_rig(RIG).is_none());
     assert_eq!(t.st.others.closing.len(), 1);
     assert_eq!(t.st.others.closing[0].id, RIG);
@@ -941,3 +896,4 @@ mod rig_cross_tf;
 mod rig_fold;
 mod rig_reach;
 mod rig_remote;
+mod rig_screens;

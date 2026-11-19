@@ -26,6 +26,10 @@ pub(crate) struct Due {
     /// A row of the list was chosen: its measurement's own panes go on screen after the
     /// message.
     pub(super) own_panes_due: bool,
+    /// The rig was shown for the first time and has no screen yet: its selected (else
+    /// first) measurement's row is chosen once the rig lists one, unless the operator put
+    /// something on the pane first.
+    pub(super) first_screen: bool,
     /// The row chosen was a child row: the measurement it is listed under, whose panes
     /// come, and its curve, which one of them is to draw. `None` with `own_panes_due`: a
     /// measurement's own row, the selected one.

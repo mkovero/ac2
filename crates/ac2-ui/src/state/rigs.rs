@@ -47,6 +47,21 @@ pub(crate) struct OtherRigs {
     /// The measurement list's part of each connected rig paired with the rig shown, read
     /// with that rig swapped in after each message ([`AppState::refresh_rig_lists`]).
     pub(super) rig_lists: Vec<cross_rig::RigList>,
+    /// The screen of each rig held and not shown, as the app last had it. Kept for this
+    /// run only.
+    pub(super) screens: BTreeMap<RigId, Screen>,
+    /// The rig is being shown for a row of its list chosen: that row brings the screen, so
+    /// a rig shown for the first time starts on it, not on its first measurement.
+    row_follows: bool,
+}
+
+/// A rig's screen while another rig is shown: the panes, the focus and what each pane
+/// shows, and the undo steps made on it. Its own panes that show something are pinned to
+/// it (`PaneRig::Rig`), as they would read from any other rig.
+#[derive(Clone, Debug)]
+pub(super) struct Screen {
+    pub(super) layout: Layout,
+    steps: undo::Steps,
 }
 
 impl Default for OtherRigs {
@@ -62,6 +77,8 @@ impl Default for OtherRigs {
             rig_names: BTreeMap::new(),
             rig_pending: BTreeMap::new(),
             rig_lists: Vec::new(),
+            screens: BTreeMap::new(),
+            row_follows: false,
         }
     }
 }
@@ -336,7 +353,15 @@ impl AppState {
             // A row of a rig the list no longer shows (the pairing went as it was clicked).
             Msg::OnRig(r, _) if !self.rig_in_reach(r) => return Vec::new(),
             Msg::OnRig(r, m) if !matches!(*m, Msg::ToggleGroup(_)) => {
+                self.others.row_follows = matches!(
+                    *m,
+                    Msg::SelectMeas(_)
+                        | Msg::SelectLive(_)
+                        | Msg::SelectMath(_)
+                        | Msg::SelectTrace(_)
+                );
                 let mut out = self.update(Msg::ShowRig(r), keymap);
+                self.others.row_follows = false;
                 if self.rig.id == r {
                     out.extend(self.update(*m, keymap));
                 }
@@ -453,6 +478,13 @@ impl AppState {
             };
             repin(&mut self.layout);
             self.history.layouts_mut(repin);
+            for s in self.others.screens.values_mut() {
+                repin(&mut s.layout);
+                s.steps.layouts_mut(repin);
+            }
+            if let Some(s) = self.others.screens.remove(&old) {
+                self.others.screens.insert(new, s);
+            }
             if self.window_rig == Some(old) {
                 self.window_rig = Some(new);
             }
@@ -478,10 +510,13 @@ impl AppState {
         }
     }
 
-    /// Shows rig `to`: its panes are the ones that follow the shown rig, and its windows
-    /// and keys are the operator's. Panes given content on the rig shown before keep it,
-    /// named by it. Refused while a window is open: the window acts on the rig it opened
-    /// on.
+    /// Shows rig `to`: its windows and keys are the operator's, and its screen is the one
+    /// on screen — each rig keeps its own panes, focus and picks, so the screen left comes
+    /// back exactly when its rig is shown again. A rig shown for the first time starts on
+    /// its selected (else first) measurement, as that row brings it; with no measurement,
+    /// on one empty pane. A pane showing another rig's curve (a row dragged there) is part
+    /// of the screen it is on. Refused while a window is open: the window acts on the rig
+    /// it opened on.
     pub(super) fn switch_rig(&mut self, to: RigId, out: &mut Vec<Request>) {
         if self.others.visiting.is_some() || to == self.rig.id {
             return;
@@ -496,19 +531,21 @@ impl AppState {
         self.overlay = Overlay::None;
         self.flush_layout_drag(out);
         let from = self.rig.id;
+        // Every pane of the screen left is its rig's, an empty one too: what waits for a
+        // pane (a measurement by name) finds it there and not on the rig shown.
         let pin = |l: &mut Layout| {
             for v in l.views.values_mut() {
-                if v.rig == PaneRig::Active && v.has_content() {
+                if v.rig == PaneRig::Active {
                     v.rig = PaneRig::Rig(from);
                 }
             }
         };
         pin(&mut self.layout);
         self.history.layouts_mut(pin);
-        // Whose own panes these were stays on the rig they were stored on: the next rig's
-        // edits never land in its measurement's layout.
-        self.rig.choice.own_panes = None;
+        // Whose own panes these are stays with the rig and its screen: the next rig's
+        // edits are of its own screen, and never land in this one's measurement's layout.
         self.rig.due.own_panes_due = false;
+        self.rig.due.row_curve = None;
         self.rig.input_pick = None;
         std::mem::swap(
             &mut self.view.tf.phase_reference,
@@ -517,6 +554,27 @@ impl AppState {
         std::mem::swap(&mut self.rig, &mut self.others.background[i]);
         self.view.tf.phase_reference = self.rig.phase_reference.take();
         self.others.switched_at = Some(out.len());
+        let left = Screen {
+            layout: self.layout.clone(),
+            steps: self.history.take_steps(),
+        };
+        let first_time = match self.others.screens.remove(&to) {
+            Some(screen) => {
+                self.layout.restore(&screen.layout);
+                self.history.put_steps(screen.steps);
+                false
+            }
+            None => {
+                // Pane ids go on from the screen left: what is kept by a pane's id (a
+                // level range) never follows a pane of another screen.
+                let id = self.layout.fresh_id();
+                let views = BTreeMap::from([(id, View::of(PaneKind::Transfer))]);
+                self.layout.install(PaneNode::Leaf(id), views, id);
+                self.layout.maximized = false;
+                true
+            }
+        };
+        self.others.screens.insert(from, left);
         let unpin = |l: &mut Layout| {
             for v in l.views.values_mut() {
                 if v.rig == PaneRig::Rig(to) {
@@ -528,10 +586,34 @@ impl AppState {
         self.history.layouts_mut(unpin);
         self.pane_local.plate_hover = None;
         self.pane_local.pointer3d = None;
+        self.rig.due.first_screen |= first_time && !self.others.row_follows;
+    }
+
+    /// Pane `p`'s view, on the screen up or on one kept for a rig not shown (pane ids are
+    /// never shared between screens).
+    pub(super) fn held_view(&self, p: PaneId) -> Option<&View> {
+        self.layout.view(p).or_else(|| {
+            self.others
+                .screens
+                .values()
+                .find_map(|s| s.layout.views.get(&p))
+        })
+    }
+
+    /// [`Self::held_view`], to edit.
+    pub(super) fn held_view_mut(&mut self, p: PaneId) -> Option<&mut View> {
+        if self.layout.views.contains_key(&p) {
+            return self.layout.view_mut(p);
+        }
+        self.others
+            .screens
+            .values_mut()
+            .find_map(|s| s.layout.views.get_mut(&p))
     }
 
     /// Closes rig `id`: its link stops the stimulus it holds and gives up its lease before
-    /// it goes ([`crate::conn::Conn::close`]); its panes stay, saying it is not connected.
+    /// it goes ([`crate::conn::Conn::close`]); its screen goes with it, and a pane of
+    /// another rig's screen showing its curve stays, saying it is not connected.
     /// The last rig is never closed: the app always shows one.
     pub(super) fn close_rig(&mut self, id: RigId, out: &mut Vec<Request>) {
         if !self.many_rigs() || self.others.visiting.is_some() {
@@ -551,6 +633,7 @@ impl AppState {
             return;
         };
         let r = self.others.background.remove(i);
+        self.others.screens.remove(&id);
         self.park_closed_rig(&r);
         let name = self.rig_label(&r);
         self.others.rig_names.insert(id, name.clone());

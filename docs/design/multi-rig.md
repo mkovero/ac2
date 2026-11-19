@@ -170,10 +170,22 @@ the Inputs scope (`input_pick`) and every other command act on the active tab's 
 (**T** chrome, **W** / **F** view) are not rig commands and are unchanged. No key ever acts
 on a rig the operator is neither looking at (tab) nor pointing at (focused pane).
 
+**A screen per rig** (operator, 2026-11-19: "switching rig swaps to that rig's screen").
+The app keeps, for each rig held and not shown, the screen it last had: the `Layout`
+(split, views, focus, maximised) and the undo steps made on it (`OtherRigs.screens`).
+Switching saves the screen left (its own panes pinned to it, as any pane of a rig not
+shown) and puts the other rig's up, its pins released; pane ids run on across screens, so
+what is kept by pane id (level ranges) stays with its screen. A rig with no screen yet
+starts on its selected (else first) measurement, by the code its row uses. A pane showing
+another rig's curve is part of the screen it was dragged onto. The switch is no undo
+step. The screens live for the run: `ui.toml`'s `[layout]` is the screen up at exit, as
+before, and keeping every rig's would be a change of that file's format.
+
 A rig that drops out keeps its tab and its panes: panes grey with *pupu unreachable ·
 retrying* and the connection retries as today. Closing a tab closes that connection (its
-stimulus stopped and lease released first, `QUIT_GRACE`); its panes stay in the layout
-saying *pupu not connected* until re-connected or re-pointed. Quit stops every rig's held
+stimulus stopped and lease released first, `QUIT_GRACE`); its screen goes with it, and a
+pane of another screen showing its curve stays, saying *pupu not connected*, until
+re-connected or re-pointed. Quit stops every rig's held
 stimulus in parallel, each within `QUIT_GRACE`.
 
 ### The list and reach (N8)

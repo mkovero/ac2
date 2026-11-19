@@ -70,6 +70,23 @@ struct Step {
     owner: Option<MeasId>,
 }
 
+/// The steps of one screen's history, kept while another screen is up.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Steps {
+    done: VecDeque<Step>,
+    undone: Vec<Step>,
+}
+
+impl Steps {
+    /// Each layout the steps hold, edited by `f`.
+    pub(super) fn layouts_mut(&mut self, f: impl Fn(&mut Layout)) {
+        for s in self.done.iter_mut().chain(self.undone.iter_mut()) {
+            f(&mut s.before.layout);
+            f(&mut s.after.layout);
+        }
+    }
+}
+
 /// The undo history, and what the message being handled is to it.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct History {
@@ -104,6 +121,21 @@ impl History {
         if let Some((snap, _)) = &mut self.drag {
             f(&mut snap.layout);
         }
+    }
+
+    /// The steps taken out, none left: a screen's steps go and come back with it, so
+    /// undo never puts one rig's earlier panes on another rig's screen.
+    pub(super) fn take_steps(&mut self) -> Steps {
+        Steps {
+            done: std::mem::take(&mut self.done),
+            undone: std::mem::take(&mut self.undone),
+        }
+    }
+
+    /// The steps put back, as [`History::take_steps`] took them.
+    pub(super) fn put_steps(&mut self, s: Steps) {
+        self.done = s.done;
+        self.undone = s.undone;
     }
 
     /// Steps that undo can take back.

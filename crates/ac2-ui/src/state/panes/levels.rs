@@ -213,18 +213,17 @@ impl AppState {
         }
     }
 
-    /// Ranges of panes no longer in the layout go.
+    /// Ranges of panes no longer in the layout go; those of a rig's screen kept while
+    /// another rig is shown stay, so that screen comes back as it was left.
     pub(in crate::state) fn prune_levels(&mut self) {
         let views = &self.layout.views;
-        self.level_axes
-            .pane_levels
-            .retain(|id, _| views.contains_key(id));
-        self.level_axes
-            .spectrum_hold
-            .retain(|id, _| views.contains_key(id));
-        self.level_axes
-            .level_set
-            .retain(|(id, _)| views.contains_key(id));
+        let screens = &self.others.screens;
+        let kept = |id: &PaneId| {
+            views.contains_key(id) || screens.values().any(|s| s.layout.views.contains_key(id))
+        };
+        self.level_axes.pane_levels.retain(|id, _| kept(id));
+        self.level_axes.spectrum_hold.retain(|id, _| kept(id));
+        self.level_axes.level_set.retain(|(id, _)| kept(id));
     }
 
     /// The ranges the operator set on pane `pane`, as the panes are kept.

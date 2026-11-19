@@ -332,11 +332,12 @@ fn a_session_with_its_own_panes_loads_on_either_rig() -> R {
     step_until(&mut h, "kettu's own panes", |a| {
         own(a, PaneRig::Active) >= pupus && own(a, PaneRig::Rig(pupu_id)) == 0
     });
-    // Back on pupu: kettu's stay kettu's.
+    // Back on pupu: its own screen, none of kettu's panes.
     pick_first_rig(&mut h);
     step_until(&mut h, "pupu shown", |a| a.state.active() == pupu_id);
     let a = h.state();
-    assert!(own(a, PaneRig::Rig(kettu_id)) >= pupus);
+    assert_eq!(own(a, PaneRig::Active), pupus);
+    assert_eq!(own(a, PaneRig::Rig(kettu_id)), 0);
     Ok(())
 }
 
