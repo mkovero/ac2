@@ -1,12 +1,10 @@
 # Automatic remote inputs, levels only, and the paired rig's generator
 
-Status: **design, not built.** Builds on `remote-inputs.md` (the stream, the link offset, the
-clock relation, trust between rigs), which stays in force wherever this document does not
-replace it. Taken as given (operator, 2026-11-19): the measurement tree shows the rig on
-screen plus the rigs its daemon is paired with, each with rate, pairing state and a clock
-tag; hosts are shown by mDNS name; the top bar carries no paired-rig chips, only the shown
-rig's stimulus state; a click on any tree row of any rig shows that measurement's own
-screen, and comparing across rigs is by drag only.
+Status: **design, not built.** Builds on `remote-inputs.md`, which stays in force wherever
+this document does not replace it. Taken as given (operator, 2026-11-19): the tree shows
+the rig on screen plus the rigs its daemon is paired with (mDNS name, rate, pairing state,
+clock tag); the top bar carries only the shown rig's stimulus state; a click on any tree
+row of any rig shows that measurement's own screen; comparing across rigs is by drag.
 
 ## 1. What the operator gets
 
@@ -94,9 +92,9 @@ as *in 32769 · mic · — · uncalibrated*): *ketunkolo · in 1 · mic …*.
 
 ### 2.3 Refusals, said in the picker before anything starts
 
-A row that can never work as configured cannot be chosen. A row whose state may change can
-be chosen; the measurement is created and **does not average** until the state allows, as a
-loaded session's does today (`remote-inputs.md` §8, 3b).
+A row that can never work cannot be chosen. A row whose state may change can be; the
+measurement is created and **does not average** until the state allows, as a loaded
+session's does today (`remote-inputs.md` §8, 3b).
 
 | row state | words on the row | can be chosen |
 |---|---|---|
@@ -383,8 +381,8 @@ format 45 → 46 in stage 1b: `remote_inputs` goes with no reader for the old sh
 older session file or autosave is set aside whole and measurements on remote inputs are
 made again by picking the inputs. Rig file and raw sidecar: no bump (§2.1).
 
-**Deploys.** All hosts together. Stage 1b sets the old autosave aside; `rig.json`, and with
-it the system max level, peers, monitor at start and rig meters, is never touched.
+**Deploys.** All hosts together. Stage 1b sets the old autosave aside; `rig.json` (system
+max level, peers, monitor at start, rig meters) is never touched.
 
 ## 7. UI
 
