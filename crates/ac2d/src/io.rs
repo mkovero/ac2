@@ -2,8 +2,13 @@
 //! that the rest of the daemon feeds, and polls the three with `zmq_poll`. No other thread
 //! touches a client-facing socket.
 //!
-//! - ctrl ROUTER: each request is handed to the control thread with its routing id and ZAP
-//!   user id; replies come back through the PULL.
+//! Two pairs: the local one for the daemon's whole life, and the network one (CURVE) while
+//! attached. Control attaches and detaches the network pair in band (`TAG_ATTACH`,
+//! `TAG_DETACH`), so the switch is ordered with every reply and event; a closing pair is
+//! dropped on a closer thread, never here.
+//!
+//! - ctrl ROUTER: each request is handed to the control thread with its route (pair and
+//!   routing id) and, on the network, its ZAP identity; replies come back through the PULL.
 //! - data ROUTER: one peer per client connection ([`crate::peers`]): its subscriptions
 //!   update the shared [`Interest`], its credit paces what it is sent. Frames come from the
 //!   jobs as codes ([`crate::outbox::FrameTx`]) into per-topic latest slots; each peer is
@@ -11,26 +16,29 @@
 //!   most at the publish rate (bounded freshness, Q2), as a keyframe or a delta on its own
 //!   chain ([`crate::chain`]). Events and keepalives go to every peer at once, outside
 //!   credit.
-//! - Network mode: the ZAP handler's status is checked every iteration; if it has exited,
-//!   both network sockets are closed (a CURVE server without a handler fails open) and the
-//!   daemon is told to shut down.
+//! - Network: the ZAP handler's status is checked every iteration; if it has exited, the
+//!   network pair is closed (a CURVE server without a handler fails open) and control is
+//!   told, which retries with a new context. Local clients are served on throughout.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use ac2_proto::Topic;
-use ac2_zmq::{Error as ZmqError, Message, Part, PollItem, SecureContext, Socket, poll};
+use ac2_zmq::{Admission, Error as ZmqError, Message, Part, PollItem, Socket, poll};
 
 use crate::chain::Slot;
-use crate::control::{ControlMsg, CurvePeer};
+use crate::control::ControlMsg;
+use crate::network::{NetReason, Pair};
 use crate::outbox::{
-    FrameRx, TAG_AUDIO, TAG_CLEAR, TAG_EVENT, TAG_FRAME, TAG_KA, TAG_REPLY, TAG_REVOKE, TAG_STOP,
+    FrameRx, TAG_ATTACH, TAG_AUDIO, TAG_CLEAR, TAG_DETACH, TAG_EVENT, TAG_FRAME, TAG_KA, TAG_REPLY,
+    TAG_REVOKE, TAG_STOP,
 };
 use crate::peers::{Outside, Peers};
+use crate::route::{CurvePeer, NetEpoch, Origin, Peer, Route};
 
 /// Topics with at least one subscriber, shared with jobs that compute optional derivations
 /// only when someone receives them: the subscription prefixes of every data peer, counted
@@ -101,25 +109,39 @@ impl Interest {
     }
 }
 
-/// The sockets the I/O thread owns; built (and bound) on the starting thread so bind errors
-/// reach [`crate::Daemon::start`].
+/// The sockets the I/O thread owns; the local pair is built (and bound) on the starting
+/// thread so bind errors reach [`crate::Daemon::start`].
 pub(crate) struct IoSockets {
+    /// The local pair.
     pub(crate) router: Socket,
     pub(crate) data: Socket,
     pub(crate) pull: Socket,
     /// Frames from the jobs.
     pub(crate) frames: FrameRx,
-    /// Network mode: the context whose ZAP handler authenticates both sockets.
-    pub(crate) secure: Option<SecureContext>,
+    /// Network pairs, each taken when its `TAG_ATTACH` comes through the pipe.
+    pub(crate) attach: Receiver<Attach>,
+}
+
+/// A network pair bound by control, to serve from its `TAG_ATTACH` on.
+pub(crate) struct Attach {
+    pub(crate) epoch: NetEpoch,
+    pub(crate) pair: Pair,
+}
+
+/// The attached network pair and its data peers.
+struct Net {
+    epoch: NetEpoch,
+    pair: Pair,
+    peers: Peers,
 }
 
 /// Most messages taken from one socket per poll round, so no source starves the others.
 const BATCH: usize = 256;
 
-/// Longest poll in network mode, so a dead ZAP handler is noticed within it.
+/// Longest poll with the network attached, so a dead ZAP handler is noticed within it.
 const ZAP_CHECK: Duration = Duration::from_millis(100);
-/// Longest poll in local mode with nothing held back: every input wakes the poll anyway, and
-/// a stalled peer is looked for this often.
+/// Longest poll with nothing held back: every input wakes the poll anyway, and a stalled
+/// peer is looked for this often.
 const IDLE_POLL: Duration = Duration::from_secs(1);
 
 pub(crate) fn spawn(
@@ -164,15 +186,90 @@ impl Slots {
     }
 }
 
+/// Ends the network pair: its peers (and their interest) go now, its sockets and context
+/// on a closer thread.
+fn detach(n: Net, interest: &Interest) {
+    let Net {
+        epoch,
+        pair,
+        mut peers,
+    } = n;
+    peers.drop_all(interest, "the network was detached");
+    crate::network::close(pair);
+    tracing::info!("network pair {} detached", epoch.0);
+}
+
+/// Takes the pair of `epoch` from the attach channel; older ones found first never served
+/// (their tags overtaken by a newer attach cannot happen, but a pair left behind must not
+/// stay bound).
+fn take_attach(rx: &Receiver<Attach>, epoch: NetEpoch) -> Option<Attach> {
+    while let Ok(a) = rx.try_recv() {
+        if a.epoch == epoch {
+            return Some(a);
+        }
+        crate::network::close(a.pair);
+    }
+    tracing::error!("bug: network pair {} attached but not handed over", epoch.0);
+    None
+}
+
+fn epoch_of(msg: &[Part]) -> Option<NetEpoch> {
+    let [e] = msg else { return None };
+    Some(NetEpoch(u64::from_le_bytes(
+        <[u8; 8]>::try_from(&e[..]).ok()?,
+    )))
+}
+
+fn send_reply(router: &Socket, rid: &[u8], reply: &[u8]) {
+    match router.try_send(&[rid, reply]) {
+        Ok(()) => {}
+        Err(ZmqError::HostUnreachable) => {
+            tracing::debug!("reply to a departed client dropped");
+        }
+        Err(e) => tracing::warn!("reply send: {e}"),
+    }
+}
+
+/// Reads a batch from a ctrl ROUTER.
+fn ctrl_batch(router: &Socket, origin: Origin, to_control: &Sender<ControlMsg>) {
+    for _ in 0..BATCH {
+        match router.try_recv() {
+            Ok(Some(m)) => forward_request(m, origin, to_control),
+            Ok(None) => break,
+            Err(e) => {
+                tracing::warn!("ctrl recv: {e}");
+                break;
+            }
+        }
+    }
+}
+
+/// The ZAP identity of a network message; `None` (logged) without one, which our handler
+/// never lets through: such a message is a bug and is not served.
+fn curve_peer(m: &Message, what: &str) -> Option<CurvePeer> {
+    match (m.user_id(), m.client_key()) {
+        (Some(name), Some(key)) => Some(CurvePeer {
+            name: name.to_owned(),
+            key,
+        }),
+        (name, _) => {
+            tracing::error!(
+                "bug: {what} message on the network pair without a ZAP identity and key ({name:?}) dropped"
+            );
+            None
+        }
+    }
+}
+
+#[allow(clippy::too_many_lines)]
 fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: u32) {
     let IoSockets {
         router,
         data,
         pull,
         frames,
-        secure,
+        attach,
     } = s;
-    let mut net: Option<(Socket, Socket)> = Some((router, data));
     let period = Duration::from_secs_f64(1.0 / f64::from(fps.max(1)));
     // Shortest interval between two frames of one topic to one peer. Publishers pace
     // themselves on a cadence (`crate::cadence`) that keeps the average rate by sending some
@@ -182,6 +279,7 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
     let min_gap = period / 2;
     let mut slots = Slots::default();
     let mut peers = Peers::default();
+    let mut net: Option<Net> = None;
     let mut due: Option<Instant> = None;
     let evt_topic = match Part::copy_from(b"evt") {
         Ok(p) => p,
@@ -192,92 +290,98 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
         }
     };
     loop {
-        if let Some(sc) = &secure
-            && net.is_some()
-            && let Err(e) = sc.zap_status()
+        if let Some(n) = &net
+            && let Err(e) = n.pair.secure.zap_status()
         {
-            tracing::error!("{e}: closing network sockets and shutting down");
-            net = None;
-            let _ = to_control.send(ControlMsg::Fatal(e.to_string()));
+            tracing::error!("{e}: closing the network sockets; local clients are served on");
+            let epoch = n.epoch;
+            if let Some(n) = net.take() {
+                detach(n, interest);
+            }
+            let _ = to_control.send(ControlMsg::NetFailed {
+                epoch,
+                reason: NetReason::ZapFailed,
+            });
         }
         let now = Instant::now();
-        // With nothing held back the thread only needs to wake for socket traffic; in
-        // network mode it still looks at the ZAP handler regularly, since a CURVE server
+        // With nothing held back the thread only needs to wake for socket traffic; with the
+        // network attached it still looks at the ZAP handler regularly, since a CURVE server
         // whose handler died must close promptly.
-        let idle = if secure.is_some() {
-            ZAP_CHECK
-        } else {
-            IDLE_POLL
-        };
+        let idle = if net.is_some() { ZAP_CHECK } else { IDLE_POLL };
         let timeout = due
             .map_or(idle, |t| t.saturating_duration_since(now))
             .min(idle);
 
-        let (r_ready, d_ready, p_ready) = {
-            let mut items: Vec<PollItem<'_>> = Vec::with_capacity(3);
+        let ready = {
+            let mut items: Vec<PollItem<'_>> = Vec::with_capacity(5);
             items.push(PollItem::readable(&pull));
-            if let Some((r, d)) = &net {
-                items.push(PollItem::readable(r));
-                items.push(PollItem::readable(d));
+            items.push(PollItem::readable(&router));
+            items.push(PollItem::readable(&data));
+            if let Some(n) = &net {
+                items.push(PollItem::readable(&n.pair.router));
+                items.push(PollItem::readable(&n.pair.data));
             }
             if let Err(e) = poll(&mut items, Some(timeout)) {
                 tracing::error!("poll failed: {e}");
                 std::thread::sleep(Duration::from_millis(10));
                 continue;
             }
-            let p = items[0].is_readable();
-            let r = items.get(1).is_some_and(PollItem::is_readable);
-            let d = items.get(2).is_some_and(PollItem::is_readable);
-            (r, d, p)
-        };
-
-        if r_ready && let Some((router, _)) = &net {
-            for _ in 0..BATCH {
-                match router.try_recv() {
-                    Ok(Some(m)) => forward_request(m, to_control),
-                    Ok(None) => break,
-                    Err(e) => {
-                        tracing::warn!("ctrl recv: {e}");
-                        break;
-                    }
-                }
+            let mut r = [false; 5];
+            for (i, it) in items.iter().enumerate() {
+                r[i] = it.is_readable();
             }
+            r
+        };
+        let [p_ready, r_ready, d_ready, nr_ready, nd_ready] = ready;
+
+        if r_ready {
+            ctrl_batch(&router, Origin::Local, to_control);
+        }
+        if nr_ready && let Some(n) = &net {
+            ctrl_batch(&n.pair.router, Origin::Network(n.epoch), to_control);
         }
 
         // Frames first: a subscription that arrives with them is served the newest.
         slots.take(&frames);
 
-        if d_ready && let Some((_, data)) = &net {
+        if d_ready {
             let now = Instant::now();
             for _ in 0..BATCH {
                 match data.try_recv() {
                     Ok(Some(m)) => {
-                        let client = m
-                            .user_id()
-                            .zip(m.client_key())
-                            .map(|(name, key)| CurvePeer {
-                                name: name.to_owned(),
-                                key,
-                            });
-                        // A CURVE peer exists only with a secure context; without one
-                        // nothing was checked to hold it to.
-                        let admission = |c: &CurvePeer| {
-                            secure.as_ref().map_or(ac2_zmq::Admission::Revoked, |sc| {
-                                sc.admission(&c.name, &c.key)
-                            })
-                        };
-                        peers.request(
-                            data,
-                            client.as_ref(),
-                            m.into_frames(),
-                            interest,
-                            now,
-                            admission,
-                        );
+                        peers.request(&data, None, m.into_frames(), interest, now, |_| {
+                            Admission::Revoked
+                        })
                     }
                     Ok(None) => break,
                     Err(e) => {
                         tracing::warn!("data recv: {e}");
+                        break;
+                    }
+                }
+            }
+        }
+        if nd_ready && let Some(n) = &mut net {
+            let now = Instant::now();
+            for _ in 0..BATCH {
+                match n.pair.data.try_recv() {
+                    Ok(Some(m)) => {
+                        let Some(client) = curve_peer(&m, "data") else {
+                            continue;
+                        };
+                        let secure = &n.pair.secure;
+                        n.peers.request(
+                            &n.pair.data,
+                            Some(&client),
+                            m.into_frames(),
+                            interest,
+                            now,
+                            |c| secure.admission(&c.name, &c.key),
+                        );
+                    }
+                    Ok(None) => break,
+                    Err(e) => {
+                        tracing::warn!("network data recv: {e}");
                         break;
                     }
                 }
@@ -301,51 +405,72 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
                 let tag = msg.remove(0)[0];
                 match tag {
                     TAG_REPLY => {
-                        // [routing id, reply]
-                        if let Some((router, _)) = &net
-                            && msg.len() == 2
-                        {
-                            match router.try_send_parts(&msg) {
-                                Ok(()) => {}
-                                Err(ZmqError::HostUnreachable) => {
-                                    tracing::debug!("reply to a departed client dropped");
+                        // [route, reply]
+                        let [route, reply] = msg.as_slice() else {
+                            continue;
+                        };
+                        let Some(route) = Route::decode(route) else {
+                            tracing::error!("bug: reply with an unreadable route dropped");
+                            continue;
+                        };
+                        match route.origin {
+                            Origin::Local => send_reply(&router, &route.id, reply),
+                            Origin::Network(e) => match &net {
+                                Some(n) if n.epoch == e => {
+                                    send_reply(&n.pair.router, &route.id, reply);
                                 }
-                                Err(e) => tracing::warn!("reply send: {e}"),
-                            }
+                                // Its connection ended with that pair; a client of the
+                                // pair now may hold the same routing id.
+                                _ => tracing::debug!(
+                                    "reply to a client of network pair {} dropped",
+                                    e.0
+                                ),
+                            },
                         }
                     }
                     TAG_EVENT => {
-                        if let (Some((_, data)), [body]) = (&net, msg.as_slice()) {
+                        if let [body] = msg.as_slice() {
                             match (evt_topic.share(), body.share()) {
                                 (Ok(t), Ok(b)) => {
-                                    peers.outside(data, &[t, b], Outside::Event, interest)
+                                    let parts = [t, b];
+                                    peers.outside(&data, &parts, Outside::Event, interest);
+                                    if let Some(n) = &mut net {
+                                        n.peers.outside(
+                                            &n.pair.data,
+                                            &parts,
+                                            Outside::Event,
+                                            interest,
+                                        );
+                                    }
                                 }
                                 (Err(e), _) | (_, Err(e)) => tracing::warn!("event not sent: {e}"),
                             }
                         }
                     }
-                    TAG_KA => {
-                        if let Some((_, data)) = &net
-                            && msg.len() == 2
-                        {
-                            peers.outside(data, &msg, Outside::Ka, interest);
+                    TAG_KA if msg.len() == 2 => {
+                        peers.outside(&data, &msg, Outside::Ka, interest);
+                        if let Some(n) = &mut net {
+                            n.peers.outside(&n.pair.data, &msg, Outside::Ka, interest);
                         }
                     }
                     // The frames themselves wait in the channel, drained below.
                     TAG_FRAME => {}
+                    // Only rigs take audio, and another rig is always a network client.
                     TAG_AUDIO => {
-                        if let Some((_, data)) = &net
+                        if let Some(n) = &mut net
                             && msg.len() == 3
                             && let Ok(topic) = Topic::parse(&msg[0])
                         {
-                            peers.audio(data, topic, msg, interest);
+                            n.peers.audio(&n.pair.data, topic, msg, interest);
                         }
                     }
                     TAG_REVOKE => {
                         if let [key] = msg.as_slice()
                             && let Ok(k) = <[u8; 32]>::try_from(&key[..])
+                            && let Some(n) = &mut net
                         {
-                            peers.drop_key(&ac2_zmq::PublicKey::from_bytes(k), interest);
+                            n.peers
+                                .drop_key(&ac2_zmq::PublicKey::from_bytes(k), interest);
                         }
                     }
                     TAG_CLEAR => {
@@ -354,6 +479,38 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
                             slots.take(&frames);
                             slots.clear(prefix);
                             peers.clear(prefix);
+                            if let Some(n) = &mut net {
+                                n.peers.clear(prefix);
+                            }
+                        }
+                    }
+                    TAG_ATTACH => {
+                        let Some(epoch) = epoch_of(&msg) else {
+                            continue;
+                        };
+                        if let Some(old) = net.take() {
+                            tracing::error!(
+                                "bug: network pair {} attached over {}",
+                                epoch.0,
+                                old.epoch.0
+                            );
+                            detach(old, interest);
+                        }
+                        if let Some(a) = take_attach(&attach, epoch) {
+                            tracing::info!("network pair {} attached", epoch.0);
+                            net = Some(Net {
+                                epoch,
+                                pair: a.pair,
+                                peers: Peers::default(),
+                            });
+                        }
+                    }
+                    TAG_DETACH => {
+                        if let Some(epoch) = epoch_of(&msg)
+                            && net.as_ref().is_some_and(|n| n.epoch == epoch)
+                            && let Some(n) = net.take()
+                        {
+                            detach(n, interest);
                         }
                     }
                     TAG_STOP => stop = true,
@@ -366,36 +523,44 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
         // before it.
         let now = Instant::now();
         slots.take(&frames);
-        due = None;
-        if let Some((_, data)) = &net {
-            peers.sweep(now, interest);
-            due = peers.serve(data, &slots.map, &slots.order, now, min_gap, interest);
+        peers.sweep(now, interest);
+        due = peers.serve(&data, &slots.map, &slots.order, now, min_gap, interest);
+        if let Some(n) = &mut net {
+            n.peers.sweep(now, interest);
+            let d = n.peers.serve(
+                &n.pair.data,
+                &slots.map,
+                &slots.order,
+                now,
+                min_gap,
+                interest,
+            );
+            due = match (due, d) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            };
         }
 
         if stop {
             break;
         }
     }
-    // Sockets close with linger 0 when dropped here.
+    // Sockets close with linger 0 when dropped here; the network pair's short linger lets
+    // its last events leave.
     drop(net);
+    drop(router);
+    drop(data);
     drop(pull);
-    drop(secure);
     tracing::debug!("io thread stopped");
 }
 
-fn forward_request(m: Message, to_control: &Sender<ControlMsg>) {
-    let peer = match (m.user_id(), m.client_key()) {
-        (None, _) => None,
-        (Some(name), Some(key)) => Some(CurvePeer {
-            name: name.to_owned(),
-            key,
-        }),
-        // Our ZAP handler attaches both or neither; without the key the connection cannot
-        // be tied to the authorization it was granted, so it is not served.
-        (Some(name), None) => {
-            tracing::warn!("ctrl message from {name:?} without its client key dropped");
-            return;
-        }
+fn forward_request(m: Message, origin: Origin, to_control: &Sender<ControlMsg>) {
+    let curve = match origin {
+        Origin::Local => None,
+        Origin::Network(_) => match curve_peer(&m, "ctrl") {
+            Some(c) => Some(c),
+            None => return,
+        },
     };
     let mut f = m.into_frames();
     if f.len() != 2 {
@@ -406,10 +571,15 @@ fn forward_request(m: Message, to_control: &Sender<ControlMsg>) {
         return;
     }
     let payload = f.pop().unwrap_or_default();
-    let routing_id = f.pop().unwrap_or_default();
+    let id = f.pop().unwrap_or_default();
+    let peer = curve.map_or_else(|| Peer::local(&id), Peer::from);
     let _ = to_control.send(ControlMsg::Request {
-        routing_id,
+        route: Route { origin, id },
         peer,
         payload,
     });
 }
+
+#[cfg(test)]
+#[path = "io_tests.rs"]
+mod tests;

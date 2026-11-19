@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use ac2_proto::frame::{Frame, FrameData, FrameStamp, GenSummary, KaMeta, ProtectionFlags};
 use ac2_proto::topic::Topic;
-use ac2_proto::units::{ClientId, RequestId, SampleIndex, WallNs};
+use ac2_proto::units::{RequestId, SampleIndex, WallNs};
 use ac2_proto::{
     Command, PROTO_VERSION, ProtoError, Reply, ReplyBody, decode_request, encode_reply,
     peek_envelope,
@@ -13,9 +13,10 @@ use ac2_proto::{
 
 use crate::dedup::Admit;
 use crate::health::SessionStream;
-use crate::util::{hex, internal, invalid, refused, wall_ns};
+use crate::util::{internal, invalid, refused, wall_ns};
 
-use super::{Control, CurvePeer, PendingFind, PendingReply, mutation_conflict};
+use super::{Control, PendingFind, PendingReply, mutation_conflict};
+use crate::route::{Peer, Route};
 
 impl Control {
     pub(super) fn send_ka(&mut self) {
@@ -67,12 +68,7 @@ impl Control {
         }
     }
 
-    pub(super) fn on_request(
-        &mut self,
-        routing_id: &[u8],
-        peer: Option<CurvePeer>,
-        payload: &[u8],
-    ) {
+    pub(super) fn on_request(&mut self, route: &Route, peer: Peer, payload: &[u8]) {
         let now = Instant::now();
         let env = match peek_envelope(payload) {
             Ok(e) => e,
@@ -87,32 +83,32 @@ impl Control {
                 Some(v) => format!("protocol version {v}"),
                 None => "no protocol version".to_owned(),
             };
-            let who = peer.as_ref().map_or("a local client", |p| p.name.as_str());
-            if self.refusals.first(peer.as_ref().map(|p| p.key), &why) {
+            let who = peer.curve().map_or("a local client", |(name, _)| name);
+            if self.refusals.first(peer.curve().map(|(_, k)| *k), &why) {
                 tracing::warn!(
                     "refused {who} at {why}, this build speaks {PROTO_VERSION} (repeats at debug)"
                 );
             } else {
                 tracing::debug!("refused {who} at {why}");
             }
-            self.send_reply(routing_id, &Reply::version_refusal(id, env.v));
+            self.send_reply(route, &Reply::version_refusal(id, env.v));
             return;
         }
         let req = match decode_request(payload) {
             Ok(r) => r,
             Err(e) => {
-                self.send_reply(routing_id, &Reply::new(id, Err(invalid(e.to_string()))));
+                self.send_reply(route, &Reply::new(id, Err(invalid(e.to_string()))));
                 return;
             }
         };
-        if let Some(CurvePeer { name, key }) = &peer
-            && self.s.server.revoked(name, key)
+        if let Some((name, key)) = peer.curve()
+            && self.s.server.network.revoked(name, key)
         {
             // The handshake check refuses it from now on; a connection already up must
             // not keep acting on the rig until it drops.
             tracing::warn!(target: "ac2d::auth", "request from revoked client {name:?} refused");
             self.send_reply(
-                routing_id,
+                route,
                 &Reply::new(
                     id,
                     Err(refused(format!(
@@ -124,12 +120,12 @@ impl Control {
         }
         // A rig admitted to take this rig's inputs says hello and reads the source state;
         // it is no operator and never drives this rig.
-        if let Some(CurvePeer { name, .. }) = &peer
-            && self.s.server.is_rig(name)
+        if let Some((name, _)) = peer.curve()
+            && self.s.server.network.is_rig(name)
             && !matches!(req.cmd, Command::Hello { .. } | Command::SourceState)
         {
             self.send_reply(
-                routing_id,
+                route,
                 &Reply::new(
                     id,
                     Err(refused(format!(
@@ -141,12 +137,12 @@ impl Control {
         }
         // Only a rig reads the source state: a rig whose key was admitted as an app would
         // otherwise see its link up and its audio subscriptions refused without a word.
-        if let Some(CurvePeer { name, .. }) = &peer
+        if let Some((name, _)) = peer.curve()
             && matches!(req.cmd, Command::SourceState)
-            && !self.s.server.is_rig(name)
+            && !self.s.server.network.is_rig(name)
         {
             self.send_reply(
-                routing_id,
+                route,
                 &Reply::new(
                     id,
                     Err(refused(format!(
@@ -156,18 +152,22 @@ impl Control {
             );
             return;
         }
-        let client = peer.map_or_else(|| ClientId::local(&hex(routing_id)), |p| ClientId(p.name));
+        let client = peer;
         // Reserved before anything executes, the asynchronous branches below included: a
         // copy of a request still running waits for its reply rather than running it again.
-        match self.dedup.admit(&client, req.id, routing_id, now) {
+        match self.dedup.admit(&client, req.id, route, now) {
             Admit::Execute => {}
             Admit::Attached => {
-                tracing::debug!("{} retried running request {}", client.0, req.id.0);
+                tracing::debug!("{} retried running request {}", client.id().0, req.id.0);
                 return;
             }
             Admit::Stored(stored) => {
-                tracing::debug!("{} retried request {}; stored reply", client.0, req.id.0);
-                self.s.outbox.reply(routing_id, &stored);
+                tracing::debug!(
+                    "{} retried request {}; stored reply",
+                    client.id().0,
+                    req.id.0
+                );
+                self.s.outbox.reply(route, &stored);
                 return;
             }
         }
@@ -200,7 +200,7 @@ impl Control {
                             self.pending.detecting = Some((
                                 token,
                                 PendingReply {
-                                    routing_id: routing_id.to_vec(),
+                                    route: route.clone(),
                                     client,
                                     id: req.id,
                                 },
@@ -217,7 +217,7 @@ impl Control {
                             self.pending.panels.insert(
                                 token,
                                 PendingReply {
-                                    routing_id: routing_id.to_vec(),
+                                    route: route.clone(),
                                     client,
                                     id: req.id,
                                 },
@@ -236,7 +236,7 @@ impl Control {
                         self.pending.finds.insert(
                             token,
                             PendingFind {
-                                routing_id: routing_id.to_vec(),
+                                route: route.clone(),
                                 client,
                                 id: req.id,
                                 meas,
@@ -255,7 +255,7 @@ impl Control {
                 | Command::FileList
                 | Command::FileImport { .. }
                 | Command::FileDownloadBegin { .. }) => {
-                    match self.start_file_job(routing_id, &client, req.id, cmd) {
+                    match self.start_file_job(route, &client, req.id, cmd) {
                         Ok(()) => return,
                         Err(e) => Err(e),
                     }
@@ -263,15 +263,15 @@ impl Control {
                 cmd => self.execute(&client, cmd),
             },
         };
-        self.answer(routing_id, &client, req.id, result, now);
+        self.answer(route, &client, req.id, result, now);
     }
 
-    /// Answers request `id`, received on `routing_id`: sends the reply to it and to every
-    /// copy of the request that arrived while it ran, and remembers it for later retries.
+    /// Answers request `id`, received on `route`: sends the reply to it and to every copy
+    /// of the request that arrived while it ran, and remembers it for later retries.
     pub(super) fn answer(
         &mut self,
-        routing_id: &[u8],
-        client: &ClientId,
+        route: &Route,
+        client: &Peer,
         id: RequestId,
         result: Result<ReplyBody, ProtoError>,
         now: Instant,
@@ -287,18 +287,18 @@ impl Control {
                 }
             }
         };
-        let owed = self.dedup.complete(client, id, routing_id, &bytes, now);
+        let owed = self.dedup.complete(client, id, route, &bytes, now);
         if owed.is_empty() {
-            self.s.outbox.reply(routing_id, &bytes);
+            self.s.outbox.reply(route, &bytes);
         }
         for r in &owed {
             self.s.outbox.reply(r, &bytes);
         }
     }
 
-    pub(super) fn send_reply(&self, routing_id: &[u8], r: &Reply) {
+    pub(super) fn send_reply(&self, route: &Route, r: &Reply) {
         match encode_reply(r) {
-            Ok(b) => self.s.outbox.reply(routing_id, &b),
+            Ok(b) => self.s.outbox.reply(route, &b),
             Err(e) => tracing::error!("reply not encodable: {e}"),
         }
     }

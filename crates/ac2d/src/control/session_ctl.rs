@@ -8,11 +8,12 @@ use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{
     Availability, BackendInfo, GenAction, Measurement, Session, SessionConfig, SweepFailure,
 };
-use ac2_proto::units::{ClientId, Dbfs, LeaseToken, Rev, Seconds, SessionEpoch};
+use ac2_proto::units::{Dbfs, LeaseToken, Rev, Seconds, SessionEpoch};
 use ac2_proto::{ProtoError, ReplyBody};
 
 use crate::conv;
 use crate::preview::Preview;
+use crate::route::Peer;
 use crate::session::{self, Runtime};
 use crate::util::{internal, invalid, missing, refused};
 
@@ -21,7 +22,7 @@ use super::{Control, ControlMsg, delay_samples, recovery};
 impl Control {
     pub(super) fn session_open(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         config: SessionConfig,
     ) -> Result<ReplyBody, ProtoError> {
         if config.backend == Some(ac2_proto::model::BackendKind::Replay) {
@@ -38,7 +39,7 @@ impl Control {
     /// Opens a session on `config` (a replay of `replay`, on the replay backend).
     pub(super) fn open_session(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         config: SessionConfig,
         replay: Option<ac2_proto::model::ReplayInfo>,
     ) -> Result<Session, ProtoError> {
@@ -141,7 +142,7 @@ impl Control {
         self.start_session_levels();
     }
 
-    pub(super) fn session_close(&mut self, client: &ClientId) {
+    pub(super) fn session_close(&mut self, client: &Peer) {
         self.abort_sweep(SweepFailure::SessionClosed, "the audio I/O closed");
         self.end_recording(ac2_proto::model::RecordingEnd::SessionClosed);
         self.stop_sim(ac2_proto::model::SimCancel::SessionClosed);
@@ -376,7 +377,7 @@ impl Control {
     /// Checks a `session.detect_loopback` and starts it on its own thread.
     pub(super) fn start_detect(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         token: LeaseToken,
         kind: ac2_proto::model::BackendKind,
         (input_device, output_device): (ac2_proto::model::DeviceId, ac2_proto::model::DeviceId),
@@ -425,7 +426,7 @@ impl Control {
             target: "ac2d::audit",
             "loopback detection on output {} by {}",
             output + 1,
-            client.0
+            client.id().0
         );
         let to = self.s.to_self.clone();
         std::thread::Builder::new()

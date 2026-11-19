@@ -6,25 +6,29 @@
 //! confirmation and a silent generator, never goes above the bound the daemon was started
 //! with, and leaves an audit line naming the client.
 
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-
 use ac2_proto::event::Change;
 use ac2_proto::model::{
     AuthorizedClient, GenAction, OutputSetup, RefusedKey, ServerInfo, ServerMode, SweepFailure,
     check_output_label,
 };
-use ac2_proto::units::{ClientId, Dbfs, RigId, WallNs};
+use ac2_proto::units::{Dbfs, RigId, WallNs};
 use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
-use ac2_zmq::{AuthorizedHandle, PublicKey};
+use ac2_zmq::PublicKey;
 
 use super::Control;
-use crate::authlog::RefusedList;
+use crate::network::NetStatus;
 use crate::rig::{RigSettings, upsert_outputs};
+use crate::route::Peer;
 use crate::util::{internal, invalid, missing, perr, refused};
 
 /// How the daemon serves clients, as `server.*` reports and changes it.
-pub(crate) enum ServerSetup {
+pub(crate) struct Server {
+    pub(crate) local: LocalSetup,
+    pub(crate) network: super::network::NetCtl,
+}
+
+/// The local pair.
+pub(crate) enum LocalSetup {
     /// In-process only.
     Embedded,
     /// This machine only.
@@ -32,52 +36,12 @@ pub(crate) enum ServerSetup {
         /// Ctrl endpoint as bound.
         ctrl: String,
     },
-    /// Network mode (CURVE).
-    Network(Box<NetworkSetup>),
-}
-
-/// What a network-mode daemon reports and changes.
-pub(crate) struct NetworkSetup {
-    pub(crate) ctrl: String,
-    pub(crate) data: String,
-    pub(crate) server_key: PublicKey,
-    /// The server keypair: this rig connects to the rigs it takes inputs from with it, so
-    /// the key they admitted is the one the app saw on this rig.
-    pub(crate) keys: ac2_zmq::KeyPair,
-    /// The keys the handshake check uses.
-    pub(crate) authorized: AuthorizedHandle,
-    /// Where they are kept.
-    pub(crate) authorized_file: PathBuf,
-    pub(crate) refused: RefusedList,
-    /// The mDNS name, once the advert is up.
-    pub(crate) advertised_as: Arc<Mutex<Option<String>>>,
-}
-
-impl ServerSetup {
-    /// Whether the authorization a CURVE connection was granted (`key` under `name`) is gone.
-    /// The name alone is not enough: a revoked name can later be given to a different key,
-    /// and that must not revive a connection the old key still holds open.
-    pub(crate) fn revoked(&self, name: &str, key: &PublicKey) -> bool {
-        match self {
-            Self::Network(n) => n.authorized.get().get(name) != Some(key),
-            _ => false,
-        }
-    }
-
-    /// Whether `name` is admitted as a rig rather than an app.
-    pub(crate) fn is_rig(&self, name: &str) -> bool {
-        match self {
-            Self::Network(n) => n.authorized.get().rig_of(name).is_some(),
-            _ => false,
-        }
-    }
 }
 
 fn network_only() -> ProtoError {
     perr(
         ErrorCode::Unsupported,
-        "this daemon is not in network mode: there are no client keys (the operating system's \
-         user is the boundary)",
+        "this daemon keeps no client keys (the operating system's user is the boundary)",
     )
 }
 
@@ -85,7 +49,7 @@ impl Control {
     /// `gen.ceiling`.
     pub(super) fn gen_ceiling(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         ceiling: Dbfs,
         confirm_raise: bool,
     ) -> Result<ReplyBody, ProtoError> {
@@ -162,7 +126,7 @@ impl Control {
             target: "ac2d::audit",
             "system max level {} from {old:.1} to {new:.1} dBFS by {} (bound {bound:.1} dBFS)",
             if raising { "raised" } else { "lowered" },
-            client.0
+            client.id().0
         );
         g.ceiling = ceiling;
         self.audit(
@@ -205,43 +169,50 @@ impl Control {
 
     /// `server.info`.
     pub(super) fn server_info(&self) -> ServerInfo {
-        let mode = match &self.s.server {
-            ServerSetup::Embedded => ServerMode::Embedded,
-            ServerSetup::Local { ctrl } => ServerMode::Local { ctrl: ctrl.clone() },
-            ServerSetup::Network(n) => ServerMode::Network {
-                ctrl: n.ctrl.clone(),
-                data: n.data.clone(),
-                server_key: n.server_key.to_z85(),
-                fingerprint: n.server_key.fingerprint(),
-                advertised_as: n
-                    .advertised_as
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .clone(),
-                authorized: {
-                    let keys = n.authorized.get();
-                    keys.iter()
+        let n = &self.s.server.network;
+        let mode = match (
+            n.listen(),
+            n.server_key(),
+            &n.authorized,
+            &self.s.server.local,
+        ) {
+            (Some(l), Some(key), Some(a), _) => {
+                let (ctrl, data) = match n.status() {
+                    NetStatus::Listening { ctrl, data } => (ctrl, data),
+                    _ => super::network::intended(l),
+                };
+                let keys = a.handle.get();
+                ServerMode::Network {
+                    ctrl,
+                    data,
+                    server_key: key.to_z85(),
+                    fingerprint: key.fingerprint(),
+                    advertised_as: n.advertised_as(),
+                    authorized: keys
+                        .iter()
                         .map(|(name, k)| AuthorizedClient {
                             name: name.to_owned(),
                             key: k.to_z85(),
                             fingerprint: k.fingerprint(),
                             rig: keys.rig_of(name).map(RigId),
                         })
-                        .collect()
-                },
-                refused: n
-                    .refused
-                    .snapshot()
-                    .into_iter()
-                    .map(|r| RefusedKey {
-                        key: r.key.map(|k| k.to_z85()),
-                        fingerprint: r.key.map(|k| k.fingerprint()),
-                        address: r.address,
-                        count: r.count,
-                        last_at: WallNs(r.last_at_ns),
-                    })
-                    .collect(),
-            },
+                        .collect(),
+                    refused: n
+                        .refused
+                        .snapshot()
+                        .into_iter()
+                        .map(|r| RefusedKey {
+                            key: r.key.map(|k| k.to_z85()),
+                            fingerprint: r.key.map(|k| k.fingerprint()),
+                            address: r.address,
+                            count: r.count,
+                            last_at: WallNs(r.last_at_ns),
+                        })
+                        .collect(),
+                }
+            }
+            (.., LocalSetup::Embedded) => ServerMode::Embedded,
+            (.., LocalSetup::Local { ctrl }) => ServerMode::Local { ctrl: ctrl.clone() },
         };
         ServerInfo {
             mode,
@@ -256,7 +227,7 @@ impl Control {
     /// `server.authorize`.
     pub(super) fn server_authorize(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         name: &str,
         key: &str,
     ) -> Result<ReplyBody, ProtoError> {
@@ -266,7 +237,7 @@ impl Control {
     /// `auth.admit_rig`: the other rig's key, admitted to take this rig's inputs only.
     pub(super) fn admit_rig(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         name: &str,
         key: &str,
         rig: RigId,
@@ -279,18 +250,26 @@ impl Control {
 
     fn admit(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         name: &str,
         key: &str,
         rig: Option<RigId>,
     ) -> Result<ReplyBody, ProtoError> {
-        let ServerSetup::Network(n) = &self.s.server else {
+        let Some(n) = &self.s.server.network.authorized else {
             return Err(network_only());
         };
+        // Only a connection on the local pair is local; a name that reads like a local
+        // client's id would still mislead the logs and every app that shows the lease.
+        let local = ac2_proto::units::ClientId::local("").0;
+        if name.starts_with(&local) {
+            return Err(refused(format!(
+                "{name:?}: names starting {local:?} are kept for local clients"
+            )));
+        }
         let key = PublicKey::from_z85(key.trim()).map_err(|_| {
             invalid("not a client key: expected the 40 Z85 characters the client shows")
         })?;
-        let mut keys = n.authorized.get();
+        let mut keys = n.handle.get();
         // A name given again replaces its key and kind: its old connections are dropped
         // below, as a revoke would.
         let old_rig = keys.rig_of(name);
@@ -300,10 +279,10 @@ impl Control {
             None => keys.insert(name, key),
         }
         .map_err(|e| invalid(e.to_string()))?;
-        keys.save(&n.authorized_file)
-            .map_err(|e| internal(format!("cannot write {}: {e}", n.authorized_file.display())))?;
-        n.authorized.set(keys);
-        n.refused.forget(&key);
+        keys.save(&n.file)
+            .map_err(|e| internal(format!("cannot write {}: {e}", n.file.display())))?;
+        n.handle.set(keys);
+        self.s.server.network.refused.forget(&key);
         // The same key given another kind keeps its connections but not what they hold:
         // an app made a rig must lose its state subscriptions, a rig made an app its audio.
         if let Some(o) = old
@@ -316,7 +295,7 @@ impl Control {
             target: "ac2d::audit",
             "{kind} {name:?} (fingerprint {}) authorized by {}",
             key.fingerprint(),
-            client.0
+            client.id().0
         );
         Ok(ReplyBody::Server(self.server_info()))
     }
@@ -324,33 +303,33 @@ impl Control {
     /// `server.revoke`.
     pub(super) fn server_revoke(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         name: &str,
     ) -> Result<ReplyBody, ProtoError> {
-        let ServerSetup::Network(n) = &self.s.server else {
+        let Some(n) = &self.s.server.network.authorized else {
             return Err(network_only());
         };
-        if client.0 == name {
+        if client.curve().is_some_and(|(own, _)| own == name) {
             return Err(refused(
                 "a client cannot revoke its own key (that would lock this operator out); \
                  revoke it from another client or edit the authorized-clients file",
             ));
         }
-        let mut keys = n.authorized.get();
+        let mut keys = n.handle.get();
         let Some(key) = keys.remove(name) else {
             return Err(missing(format!("no authorized client {name:?}")));
         };
-        keys.save(&n.authorized_file)
-            .map_err(|e| internal(format!("cannot write {}: {e}", n.authorized_file.display())))?;
-        n.authorized.set(keys);
+        keys.save(&n.file)
+            .map_err(|e| internal(format!("cannot write {}: {e}", n.file.display())))?;
+        n.handle.set(keys);
         // Its data connection, audio included, ends now rather than at its next request.
         self.s.outbox.revoke(key.as_bytes());
-        self.dedup.forget(&ClientId(name.to_owned()));
+        self.dedup.forget_name(name);
         tracing::warn!(
             target: "ac2d::audit",
             "client {name:?} (fingerprint {}) revoked by {}",
             key.fingerprint(),
-            client.0
+            client.id().0
         );
         Ok(ReplyBody::Server(self.server_info()))
     }

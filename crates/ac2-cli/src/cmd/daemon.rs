@@ -159,13 +159,11 @@ pub(crate) async fn status(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError>
 /// lock (`ac2d::instance::exit::ANOTHER_RUNNING`).
 const EXIT_ANOTHER_RUNNING: i32 = 3;
 
-/// The lock holder's ctrl endpoint when it serves in network mode, which the default
-/// local target never reaches.
-fn network_winner() -> Option<String> {
-    match ac2_client::endpoint::LockHolder::read()? {
-        ac2_client::endpoint::LockHolder::Network(ep) => Some(ep.ctrl),
-        ac2_client::endpoint::LockHolder::Local(_) => None,
-    }
+/// The lock holder's endpoints when they are not the default local ones (it was started
+/// with its own --ctrl/--data), which the default target never reaches.
+fn elsewhere_winner() -> Option<ac2_client::endpoint::Endpoints> {
+    let ep = ac2_client::endpoint::LockHolder::read()?.endpoints;
+    (ep != ac2_client::endpoint::Endpoints::local()).then_some(ep)
 }
 
 /// A quick probe: hello with a short deadline. Only an answer counts: a `ctrl.sock` left
@@ -264,10 +262,11 @@ async fn start(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliError> {
                     exe.display()
                 )));
             }
-            if let Some(ctrl) = network_winner() {
+            if let Some(ep) = elsewhere_winner() {
                 return Err(CliError::NotRunning(format!(
-                    "another ac2d is running for this user, in network mode on {ctrl}; \
-                     reach it with --remote"
+                    "another ac2d is running for this user, on {} and {}; reach it with \
+                     --ctrl-endpoint and --data-endpoint",
+                    ep.ctrl, ep.data
                 )));
             }
             lost_lock = true;

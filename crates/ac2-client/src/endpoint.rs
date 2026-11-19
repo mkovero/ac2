@@ -8,8 +8,11 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-/// Default ctrl port (local Windows and remote); data is this + 1.
+/// Default network ctrl port; data is this + 1.
 pub const DEFAULT_PORT: u16 = 47_820;
+/// Local ctrl port on Windows (no ipc there); data is this + 1. Apart from the network
+/// ports, since a daemon serves both at once.
+pub const LOCAL_PORT: u16 = 47_822;
 
 /// Ctrl (ROUTER) and data (ROUTER) endpoints of one daemon.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,7 +32,7 @@ impl Endpoints {
         }
         #[cfg(not(unix))]
         {
-            Self::tcp("127.0.0.1", DEFAULT_PORT)
+            Self::tcp("127.0.0.1", LOCAL_PORT)
         }
     }
 
@@ -193,26 +196,21 @@ pub fn parse_listening(line: &str) -> Option<Endpoints> {
     })
 }
 
-/// The daemon holding the instance lock, as its endpoints file says.
+/// The daemon holding the instance lock, as its endpoints file says: its local pair
+/// (ipc or loopback, no authentication), which every daemon serves whatever its network
+/// does, made dialable ([`Endpoints::dialable`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LockHolder {
-    /// It serves without authentication (ipc or loopback): reachable as is, its endpoints
-    /// made dialable ([`Endpoints::dialable`]).
-    Local(Endpoints),
-    /// It serves with CURVE: a client needs its pinned key, so it is a network rig.
-    Network(Endpoints),
+pub struct LockHolder {
+    /// Where to reach it.
+    pub endpoints: Endpoints,
 }
 
 impl LockHolder {
     /// The endpoints file's text (see [`endpoints_file`]); `None` when it is not one.
     pub fn parse(text: &str) -> Option<Self> {
         let mut lines = text.lines();
-        let ep = parse_listening(lines.next()?)?.dialable();
-        match lines.next()?.trim_end() {
-            "mode=local" => Some(Self::Local(ep)),
-            "mode=network" => Some(Self::Network(ep)),
-            _ => None,
-        }
+        let endpoints = parse_listening(lines.next()?)?.dialable();
+        lines.next().is_none().then_some(Self { endpoints })
     }
 
     /// Reads [`endpoints_file`]; `None` while there is none (the holder is still binding)
@@ -257,21 +255,19 @@ mod tests {
         };
         assert_eq!(
             LockHolder::parse(
-                "ac2d: listening ctrl=ipc:///run/ac2/ctrl.sock data=ipc:///run/ac2/data.sock\nmode=local\n"
+                "ac2d: listening ctrl=ipc:///run/ac2/ctrl.sock data=ipc:///run/ac2/data.sock\n"
             ),
-            Some(LockHolder::Local(ep(
-                "ipc:///run/ac2/ctrl.sock",
-                "ipc:///run/ac2/data.sock"
-            )))
+            Some(LockHolder {
+                endpoints: ep("ipc:///run/ac2/ctrl.sock", "ipc:///run/ac2/data.sock")
+            })
         );
         assert_eq!(
             LockHolder::parse(
-                "ac2d: listening ctrl=tcp://0.0.0.0:47820 data=tcp://0.0.0.0:47821\nmode=network\n"
+                "ac2d: listening ctrl=tcp://127.0.0.1:47822 data=tcp://127.0.0.1:47823\n"
             ),
-            Some(LockHolder::Network(ep(
-                "tcp://127.0.0.1:47820",
-                "tcp://127.0.0.1:47821"
-            )))
+            Some(LockHolder {
+                endpoints: ep("tcp://127.0.0.1:47822", "tcp://127.0.0.1:47823")
+            })
         );
         assert_eq!(
             parse_listening("ac2d: listening ctrl=tcp://[::]:5 data=tcp://[::]:6")
@@ -283,8 +279,11 @@ mod tests {
             LockHolder::parse("ac2d: listening ctrl=tcp://1.2.3.4:5\n"),
             None
         );
-        assert_eq!(LockHolder::parse("ac2d: listening ctrl=a data=b\n"), None);
         assert_eq!(LockHolder::parse("mode=local\n"), None);
+        assert_eq!(
+            LockHolder::parse("ac2d: listening ctrl=a data=b\nsomething else\n"),
+            None
+        );
     }
 
     #[test]

@@ -42,6 +42,8 @@ pub use monitor::{Monitor, MonitorEvent, SocketEvent};
 pub use pattern::{Drained, Latest, SubscriptionEvent, SubscriptionTracker, drain_latest};
 pub use poll::{Interest, PollItem, poll};
 pub use socket::{Context, Message, Part, Socket, SocketType, TcpLiveness};
+#[cfg(feature = "fault-injection")]
+pub use zap::ZapFault;
 pub use zap::{
     AuthorizedHandle, DenyReason, Mechanism, SecureContext, Verdict, ZapDecision, ZapExit,
 };

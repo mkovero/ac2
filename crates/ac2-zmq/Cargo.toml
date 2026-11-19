@@ -13,6 +13,11 @@ links = "zmq"
 [lints]
 workspace = true
 
+[features]
+# `SecureContext::zap_fault`: tests of an owner's recovery from a dead ZAP handler. Never
+# used by a shipping binary.
+fault-injection = []
+
 [dependencies]
 # Static libsodium (Unix: built from its bundled, signature-checked tarball; Windows: its
 # minisign-verified prebuilt archive). The build script reads its `DEP_SODIUM_*` metadata to

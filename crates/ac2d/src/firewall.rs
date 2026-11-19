@@ -1,4 +1,4 @@
-//! Network mode and the host firewall: a firewall that drops the two TCP ports makes the
+//! The network pair and the host firewall: a firewall that drops the two TCP ports makes the
 //! daemon unreachable without a word on either side (the client only sees "not
 //! responding"), so the daemon names the ports at startup and warns when it can see an
 //! active firewall.
@@ -89,7 +89,7 @@ pub(crate) fn report(ctrl_endpoint: &str, data_endpoint: &str) {
         return;
     };
     tracing::info!(
-        "network mode: remote clients connect to TCP ports {ctrl} (ctrl) and {data} (data); a \
+        "network: remote clients connect to TCP ports {ctrl} (ctrl) and {data} (data); a \
          host firewall must allow both"
     );
     for fw in detect() {

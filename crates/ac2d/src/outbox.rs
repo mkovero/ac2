@@ -16,7 +16,10 @@ use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use ac2_proto::CodedFrame;
 use ac2_zmq::{Context, Error as ZmqError, Part, Socket, SocketType};
 
-/// Reply: `[R][routing id][reply]`.
+use crate::route::{NetEpoch, Route};
+
+/// Reply: `[R][route][reply]` ([`Route::encode`]); one for a network pair other than the
+/// attached one is dropped.
 pub(crate) const TAG_REPLY: u8 = b'R';
 /// State event: `[E][event body]` → data socket `[evt][body]` to every peer receiving it.
 pub(crate) const TAG_EVENT: u8 = b'E';
@@ -32,6 +35,11 @@ pub(crate) const TAG_STOP: u8 = b'X';
 pub(crate) const TAG_AUDIO: u8 = b'A';
 /// `[tag][key]`: a client key was revoked; its data connections end now.
 pub(crate) const TAG_REVOKE: u8 = b'V';
+/// `[tag][epoch]`: the network pair of that epoch waits in the attach channel; serve it
+/// from here on. In band, so it is ordered with every reply and event.
+pub(crate) const TAG_ATTACH: u8 = b'N';
+/// `[tag][epoch]`: close the network pair of that epoch, after what was queued before.
+pub(crate) const TAG_DETACH: u8 = b'D';
 
 /// One thread's PUSH end.
 #[derive(Debug)]
@@ -72,8 +80,16 @@ impl Outbox {
         tracing::warn!("internal pipe full for 1 s; message dropped");
     }
 
-    pub(crate) fn reply(&self, routing_id: &[u8], reply: &[u8]) {
-        self.send(TAG_REPLY, &[routing_id, reply]);
+    pub(crate) fn reply(&self, route: &Route, reply: &[u8]) {
+        self.send(TAG_REPLY, &[&route.encode(), reply]);
+    }
+
+    pub(crate) fn attach(&self, epoch: NetEpoch) {
+        self.send(TAG_ATTACH, &[&epoch.0.to_le_bytes()]);
+    }
+
+    pub(crate) fn detach(&self, epoch: NetEpoch) {
+        self.send(TAG_DETACH, &[&epoch.0.to_le_bytes()]);
     }
 
     pub(crate) fn event(&self, body: &[u8]) {

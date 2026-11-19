@@ -7,7 +7,7 @@ use crate::common;
 
 use std::time::{Duration, Instant};
 
-use ac2d::{Advertise, Daemon, Listen, NetworkSecurity};
+use ac2d::{Daemon, Listen, Mdns, NetworkSecurity};
 use common::*;
 
 fn mdns_opts() -> ac2_discovery::Options {
@@ -33,25 +33,27 @@ fn network_mode_advertises_fingerprint_local_mode_does_not() {
     };
     let mut cfg = config(manual_rig(), local);
     cfg.name = "local rig".into();
-    cfg.advertise = Some(Advertise { mdns: mdns.clone() });
+    cfg.mdns = Some(Mdns {
+        options: mdns.clone(),
+        advertise: true,
+    });
     let hl = Daemon::start(cfg).unwrap();
     assert_eq!(hl.advertised_as(), None, "local mode is not on the network");
 
-    let listen = Listen::Network {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-        security: NetworkSecurity {
-            server_key_file: dir.path().join("server.key"),
-            authorized_clients_file: dir.path().join("authorized_clients"),
-        },
+    let security = NetworkSecurity {
+        server_key_file: dir.path().join("server.key"),
+        authorized_clients_file: dir.path().join("authorized_clients"),
     };
-    let mut cfg = config(manual_rig(), listen);
+    let mut cfg = net_config(manual_rig(), security);
     cfg.name = "stage.rig".into();
-    cfg.advertise = Some(Advertise { mdns: mdns.clone() });
+    cfg.mdns = Some(Mdns {
+        options: mdns.clone(),
+        advertise: true,
+    });
     let h = Daemon::start(cfg).unwrap();
-    let fullname = h.advertised_as().expect("advert registered").to_owned();
-    let port: u16 = h
-        .ctrl_endpoint()
+    let fullname = h.advertised_as().expect("advert registered");
+    let port: u16 = net_endpoints(&h)
+        .0
         .rsplit_once(':')
         .and_then(|(_, p)| p.parse().ok())
         .unwrap();

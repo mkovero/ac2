@@ -11,7 +11,7 @@ use ac2_proto::model::{
     GenAction, GenAudit, Generator, GeneratorDesired, Lease as WireLease, Signal, SweepFailure,
     SweepStatus,
 };
-use ac2_proto::units::{ClientId, LeaseToken, WallNs};
+use ac2_proto::units::{LeaseToken, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError, ReplyBody};
 
 use crate::conv;
@@ -19,6 +19,16 @@ use crate::stimulus::LeasedSource;
 use crate::util::{internal, invalid, perr_detail, random_u64, random_u128, refused, wall_ns};
 
 use super::{Control, Lease, SourceKey, gen_err, lease_required};
+use crate::route::Peer;
+
+/// A client as the audit names it: its id and the pair it came in on, since a network
+/// key's name may read like a local client's id.
+fn describe(p: &Peer) -> String {
+    match p.curve() {
+        None => format!("{} (local)", p.id().0),
+        Some((name, key)) => format!("{name} (network, key {})", key.fingerprint()),
+    }
+}
 use crate::jobs::JobCmd;
 use crate::jobs::finder::GeneratorEdge;
 
@@ -40,15 +50,15 @@ pub(super) fn firing_sine(g: &Generator) -> Option<f64> {
 }
 
 impl Control {
-    pub(super) fn audit(&self, g: &mut Generator, action: GenAction, client: Option<&ClientId>) {
+    pub(super) fn audit(&self, g: &mut Generator, action: GenAction, client: Option<&Peer>) {
         tracing::info!(
             target: "ac2d::audit",
             "generator {action:?} by {}",
-            client.map_or("daemon", |c| c.0.as_str())
+            client.map_or_else(|| "daemon".to_owned(), describe)
         );
         g.last_action = Some(GenAudit {
             action,
-            client: client.cloned(),
+            client: client.map(|c| c.id().clone()),
             at: WallNs(wall_ns()),
         });
     }
@@ -60,11 +70,7 @@ impl Control {
         }
     }
 
-    pub(super) fn lease_check(
-        &self,
-        client: &ClientId,
-        token: LeaseToken,
-    ) -> Result<(), ProtoError> {
+    pub(super) fn lease_check(&self, client: &Peer, token: LeaseToken) -> Result<(), ProtoError> {
         match &self.out.lease {
             Some(l) if l.token == token && l.owner == *client && l.deadline > Instant::now() => {
                 Ok(())
@@ -128,7 +134,7 @@ impl Control {
             let owner = self.out.lease.take().map(|l| l.owner);
             tracing::warn!(
                 "stimulus lease of {} expired: output muted",
-                owner.as_ref().map_or("?", |o| o.0.as_str())
+                owner.as_ref().map_or_else(|| "?".to_owned(), describe)
             );
             self.abort_sweep(SweepFailure::LeaseExpired, "the stimulus lease expired");
             self.stop_output();
@@ -151,7 +157,7 @@ impl Control {
         let owner = self.out.lease.take().map(|l| l.owner);
         tracing::warn!(
             "stimulus lease of {} expired: output muted",
-            owner.as_ref().map_or("?", |o| o.0.as_str())
+            owner.as_ref().map_or_else(|| "?".to_owned(), describe)
         );
         self.abort_sweep(SweepFailure::LeaseExpired, "the stimulus lease expired");
         self.stop_output();
@@ -165,7 +171,7 @@ impl Control {
 
     pub(super) fn gen_acquire(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         force: bool,
     ) -> Result<ReplyBody, ProtoError> {
         self.check_lease(Instant::now());
@@ -179,9 +185,9 @@ impl Control {
             Some(l) if l.owner != *client && !force => {
                 return Err(perr_detail(
                     ErrorCode::LeaseHeld,
-                    format!("{} holds the stimulus lease", l.owner.0),
+                    format!("{} holds the stimulus lease", l.owner.id().0),
                     ErrorDetail::LeaseHeld {
-                        owner: l.owner.clone(),
+                        owner: l.owner.id().clone(),
                     },
                 ));
             }
@@ -206,7 +212,7 @@ impl Control {
             owner: client.clone(),
             deadline,
         });
-        g.owner = Some(client.clone());
+        g.owner = Some(client.id().clone());
         self.audit(&mut g, action, Some(client));
         self.commit(Change::Generator(g));
         Ok(ReplyBody::Lease(self.wire_lease(token)))
@@ -214,7 +220,7 @@ impl Control {
 
     pub(super) fn gen_set(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         token: LeaseToken,
         desired: GeneratorDesired,
     ) -> Result<ReplyBody, ProtoError> {

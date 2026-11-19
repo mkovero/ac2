@@ -52,7 +52,7 @@ pub enum ZapExit {
     /// The handler loop panicked.
     Panicked,
     /// Injected by a test.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "fault-injection"))]
     Injected,
 }
 
@@ -62,7 +62,7 @@ impl fmt::Display for ZapExit {
             Self::ContextTerminated => f.write_str("context terminated"),
             Self::SocketError(e) => write!(f, "socket error: {e}"),
             Self::Panicked => f.write_str("handler panicked"),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "fault-injection"))]
             Self::Injected => f.write_str("injected by test"),
         }
     }
@@ -168,7 +168,7 @@ impl fmt::Debug for ZapGuard {
 
 /// Message on the stop pipe that asks the handler to exit normally.
 const STOP: &[u8] = b"stop";
-#[cfg(test)]
+#[cfg(any(test, feature = "fault-injection"))]
 const FAIL: &[u8] = b"fail";
 
 impl ZapGuard {
@@ -231,6 +231,17 @@ impl SecureContext {
         keys: AuthorizedKeys,
         audit: impl Fn(&ZapDecision) + Send + 'static,
     ) -> Result<Self> {
+        Self::with_keys(domain, AuthorizedHandle::new(keys), audit)
+    }
+
+    /// [`Self::new`] on keys that outlive this context: an owner that makes a new context
+    /// for every listen keeps one list, so what it authorizes or revokes in between applies
+    /// to the next context's handshakes too.
+    pub fn with_keys(
+        domain: &str,
+        keys: AuthorizedHandle,
+        audit: impl Fn(&ZapDecision) + Send + 'static,
+    ) -> Result<Self> {
         if domain.is_empty() || domain.len() > MAX_DOMAIN_LEN || domain.contains('\0') {
             return Err(Error::InvalidArgument(
                 "ZAP domain must be 1-255 bytes without NUL",
@@ -245,7 +256,7 @@ impl SecureContext {
         stop.bind(&stop_endpoint)?;
 
         let state = Arc::new(ZapState::default());
-        let keys = Arc::new(RwLock::new(keys));
+        let keys = keys.0;
         let handler = Handler {
             domain: domain.to_owned(),
             keys: Arc::clone(&keys),
@@ -333,9 +344,34 @@ impl SecureContext {
     /// Makes the handler exit abnormally and waits until that is visible.
     #[cfg(test)]
     pub(crate) fn inject_handler_failure(&self) -> Result<()> {
-        self.zap.signal(FAIL)?;
+        self.zap_fault().fail()
+    }
+
+    /// A handle that makes this context's handler exit abnormally from another thread,
+    /// for tests of an owner's recovery; it does not keep the context alive.
+    #[cfg(any(test, feature = "fault-injection"))]
+    pub fn zap_fault(&self) -> ZapFault {
+        ZapFault(Arc::downgrade(&self.zap))
+    }
+}
+
+/// See [`SecureContext::zap_fault`].
+#[cfg(any(test, feature = "fault-injection"))]
+#[derive(Clone, Debug)]
+pub struct ZapFault(std::sync::Weak<ZapGuard>);
+
+#[cfg(any(test, feature = "fault-injection"))]
+impl ZapFault {
+    /// Makes the handler exit abnormally and waits until that is visible. An error when
+    /// the context is gone or the handler does not exit.
+    pub fn fail(&self) -> Result<()> {
+        let zap = self
+            .0
+            .upgrade()
+            .ok_or(Error::InvalidArgument("the secure context is gone"))?;
+        zap.signal(FAIL)?;
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        while self.zap_status().is_ok() {
+        while lock(&zap.state.exit).is_none() {
             if std::time::Instant::now() > deadline {
                 return Err(Error::InvalidArgument("handler did not exit"));
             }
@@ -358,6 +394,11 @@ impl fmt::Debug for AuthorizedHandle {
 }
 
 impl AuthorizedHandle {
+    /// A handle on `keys`, for [`SecureContext::with_keys`].
+    pub fn new(keys: AuthorizedKeys) -> Self {
+        Self(Arc::new(RwLock::new(keys)))
+    }
+
     /// A copy of the current keys.
     pub fn get(&self) -> AuthorizedKeys {
         self.0
@@ -414,7 +455,7 @@ impl Handler {
             }
             if items[1].is_readable() {
                 match stop.try_recv() {
-                    #[cfg(test)]
+                    #[cfg(any(test, feature = "fault-injection"))]
                     Ok(Some(m)) if m.frames() == [FAIL] => return Some(ZapExit::Injected),
                     Ok(_) => return None,
                     Err(e) => return Some(fail(e)),

@@ -14,7 +14,7 @@
 //! The holder writes its pid ([`crate::pid_file`]) and where it listens
 //! ([`endpoints_file`]) beside the lock: a starter whose child exited
 //! [`exit::ANOTHER_RUNNING`] learns there where the winner is, which need not be the
-//! default local endpoints (a network-mode service).
+//! default local endpoints (a service started with its own --ctrl/--data).
 
 use std::fmt;
 use std::fs::{File, OpenOptions, TryLockError};
@@ -42,10 +42,9 @@ pub fn lock_file() -> PathBuf {
 const LOCK_FILE: &str = "ac2d.lock";
 const ENDPOINTS_FILE: &str = "ac2d.endpoints";
 
-/// The endpoints file of the daemon holding the lock, in [`crate::runtime_dir`]:
-/// [`listening_line`], then `mode=local` or `mode=network` (CURVE: a client needs the
-/// server key and to be paired). A wildcard interface (`tcp://0.0.0.0:…`) is reached on a
-/// loopback address.
+/// The endpoints file of the daemon holding the lock, in [`crate::runtime_dir`]: its
+/// [`listening_line`], naming the local pair (no authentication), which every daemon
+/// serves whatever its network does.
 pub fn endpoints_file() -> PathBuf {
     crate::runtime_dir().join(ENDPOINTS_FILE)
 }
@@ -53,24 +52,6 @@ pub fn endpoints_file() -> PathBuf {
 /// The line `--print-endpoints` prints and [`endpoints_file`] starts with.
 pub fn listening_line(ctrl: &str, data: &str) -> String {
     format!("ac2d: listening ctrl={ctrl} data={data}")
-}
-
-/// How the lock holder's endpoints are reached.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Mode {
-    /// No authentication: ipc or loopback TCP.
-    Local,
-    /// CURVE on TCP.
-    Network,
-}
-
-impl Mode {
-    fn name(self) -> &'static str {
-        match self {
-            Self::Local => "local",
-            Self::Network => "network",
-        }
-    }
 }
 
 /// Why the instance lock was not taken.
@@ -158,8 +139,8 @@ impl Instance {
     }
 
     /// Writes the endpoints file beside the lock (see [`endpoints_file`]).
-    pub fn write_endpoints(&mut self, ctrl: &str, data: &str, mode: Mode) -> io::Result<()> {
-        let text = format!("{}\nmode={}\n", listening_line(ctrl, data), mode.name());
+    pub fn write_endpoints(&mut self, ctrl: &str, data: &str) -> io::Result<()> {
+        let text = format!("{}\n", listening_line(ctrl, data));
         ac2_paths::write_private_atomic(&self.endpoints_file, text.as_bytes())?;
         self.endpoints_written = true;
         Ok(())

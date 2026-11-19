@@ -33,18 +33,26 @@ async fn unpaired_client_is_told_to_pair() {
 #[tokio::test(flavor = "multi_thread")]
 async fn unauthorized_client_hears_its_fingerprint() {
     let dir = tempfile::tempdir().unwrap();
-    let listen = Listen::Network {
+    let listen = Listen::Local {
         ctrl: "tcp://127.0.0.1:0".into(),
         data: "tcp://127.0.0.1:0".into(),
-        security: NetworkSecurity {
-            server_key_file: dir.path().join("server.key"),
-            authorized_clients_file: dir.path().join("authorized_clients"),
-        },
     };
     let backend = ac2d::backend(BackendChoice::Fake).unwrap();
-    let h = Daemon::start(DaemonConfig::new(backend, listen, -10.0)).unwrap();
+    let mut cfg = DaemonConfig::new(backend, listen, -10.0);
+    cfg.network = ac2d::NetworkChoice::Fixed(ac2d::NetListen {
+        bind: ac2d::NetBind::Addr(std::net::Ipv4Addr::LOCALHOST.into()),
+        port: ac2d::NetPort::Any,
+    });
+    cfg.keys = Some(NetworkSecurity {
+        server_key_file: dir.path().join("server.key"),
+        authorized_clients_file: dir.path().join("authorized_clients"),
+    });
+    let h = Daemon::start(cfg).unwrap();
     let server: PublicKey = h.server_public_key().unwrap();
-    let port = h.ctrl_endpoint().rsplit_once(':').unwrap().1.to_owned();
+    let ac2d::NetStatus::Listening { ctrl, .. } = h.network_status() else {
+        panic!("the network is not listening");
+    };
+    let port = ctrl.rsplit_once(':').unwrap().1.to_owned();
 
     let keys = tempfile::tempdir().unwrap();
     let kd = keys.path().to_str().unwrap();

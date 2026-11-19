@@ -11,7 +11,7 @@ use ac2_proto::model::{
     LeqJudgement, MeasKind, Measurement, PeakQuantity, SplHistory, SplLog, SplLogWhich,
 };
 use ac2_proto::spl_log::SplLogInfo;
-use ac2_proto::units::{ClientId, MeasId, Rev, WallNs};
+use ac2_proto::units::{MeasId, Rev, WallNs};
 use ac2_proto::{ProtoError, ReplyBody};
 use ac2_traces::session::{SavedSplLog, SplLogOnDisk};
 
@@ -20,6 +20,7 @@ use crate::autosave::{LogSpec, Resume};
 use crate::jobs::spl::LeqSetup;
 use crate::leq_history;
 use crate::leq_log::{self, LeqLog};
+use crate::route::Peer;
 use crate::util::{internal, invalid, missing, wall_ns};
 
 const NS: u64 = 1_000_000_000;
@@ -537,7 +538,7 @@ impl Control {
     /// configuration, applied as `meas.update` applies any change to it.
     pub(super) fn spl_band_transfer(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         meas: MeasId,
         foh: &BandLevelSource,
         at_place: &BandLevelSource,

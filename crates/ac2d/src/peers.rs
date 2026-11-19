@@ -38,9 +38,9 @@ use ac2_proto::{DataUp, FlowNotice, Subscription, Topic, decode_data_request, en
 use ac2_zmq::{Admission, Error as ZmqError, Part, PublicKey, Socket};
 
 use crate::chain::{Chain, Encoded, Encodes, Slot};
-use crate::control::CurvePeer;
 use crate::io::Interest;
 use crate::refusals::Refusals;
+use crate::route::CurvePeer;
 use crate::util::hex;
 
 /// Send queue of the data ROUTER per peer, in messages: twice what credit and the event
@@ -572,6 +572,14 @@ impl Peers {
             .collect();
         for rid in rids {
             self.drop_peer(&rid, interest, "its key was revoked");
+        }
+    }
+
+    /// Drops every peer: their pair is closing, and with them what they subscribed.
+    pub(crate) fn drop_all(&mut self, interest: &Interest, why: &str) {
+        let rids: Vec<Vec<u8>> = self.map.keys().cloned().collect();
+        for rid in rids {
+            self.drop_peer(&rid, interest, why);
         }
     }
 

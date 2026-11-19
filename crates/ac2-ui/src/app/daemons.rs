@@ -229,12 +229,11 @@ impl App {
         }
         for (slot, since) in std::mem::take(&mut self.daemons.lost) {
             match LockHolder::read() {
-                Some(LockHolder::Local(ep)) => {
-                    if ep != Endpoints::local() {
-                        self.retarget(ctx, slot, ep);
+                Some(LockHolder { endpoints }) => {
+                    if endpoints != Endpoints::local() {
+                        self.retarget(ctx, slot, endpoints);
                     }
                 }
-                Some(LockHolder::Network(ep)) => self.network_holder(slot, &ep),
                 None if since.elapsed() > HOLDER_WAIT => self.state.fault(format!(
                     "another ac2d is running for this user, but {} does not say where it \
                      listens",
@@ -283,27 +282,6 @@ impl App {
                     ),
                 );
             }
-        }
-    }
-
-    /// The lock holder serves in network mode: a client needs its pinned key, so it is
-    /// reached as a network rig, paired first. The dialog opens with its address typed in.
-    fn network_holder(&mut self, slot: u32, ep: &Endpoints) {
-        let address = ep
-            .ctrl
-            .strip_prefix("tcp://")
-            .unwrap_or(&ep.ctrl)
-            .to_owned();
-        self.daemon_failed(
-            slot,
-            format!(
-                "another ac2d is running for this user, in network mode on {}: pair with it, \
-                 then connect to {address}",
-                ep.ctrl
-            ),
-        );
-        if let Some(d) = &mut self.connect {
-            d.address = address;
         }
     }
 

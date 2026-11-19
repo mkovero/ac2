@@ -240,7 +240,7 @@ impl Control {
         for t in orphaned {
             if let Some(p) = self.pending.finds.remove(&t) {
                 let e = invalid("the measurement stopped during delay.find");
-                self.answer(&p.routing_id, &p.client, p.id, Err(e), Instant::now());
+                self.answer(&p.route, &p.client, p.id, Err(e), Instant::now());
             }
         }
         self.probes.set(id, None);
@@ -460,7 +460,7 @@ impl Control {
                 }
             }
         };
-        self.answer(&p.routing_id, &p.client, p.id, reply, Instant::now());
+        self.answer(&p.route, &p.client, p.id, reply, Instant::now());
     }
 
     pub(super) fn tracked(&mut self, meas: MeasId, epoch: SessionEpoch, samples: f64) {

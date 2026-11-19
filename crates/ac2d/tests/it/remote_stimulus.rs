@@ -20,7 +20,7 @@ use ac2_proto::model::{
 use ac2_proto::units::{Dbfs, Hz, MeasId, SessionEpoch};
 use ac2_proto::{Command, Stream, Topic};
 use ac2_zmq::{AuthorizedKeys, CurveClient, KeyPair};
-use ac2d::{Daemon, Listen, NetworkSecurity};
+use ac2d::{Daemon, NetworkSecurity};
 use common::*;
 
 const LEVEL: f64 = -20.0;
@@ -72,21 +72,17 @@ async fn slow_remote_client_fires_reroutes_and_recovers_from_expiry() {
     keys.insert("laptop", laptop.public).unwrap();
     let authorized = dir.path().join("authorized_clients");
     keys.save(&authorized).unwrap();
-    let listen = Listen::Network {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-        security: NetworkSecurity {
-            server_key_file: dir.path().join("server.key"),
-            authorized_clients_file: authorized,
-        },
+    let security = NetworkSecurity {
+        server_key_file: dir.path().join("server.key"),
+        authorized_clients_file: authorized,
     };
-    let mut cfg = config(realtime_rig(), listen);
+    let mut cfg = net_config(realtime_rig(), security);
     cfg.lease_expiry = Duration::from_millis(600);
     let h = Daemon::start(cfg).unwrap();
     let mut cc = ClientConfig::new(
         Endpoints {
-            ctrl: h.ctrl_endpoint().to_owned(),
-            data: h.data_endpoint().to_owned(),
+            ctrl: net_endpoints(&h).0.as_str().to_owned(),
+            data: net_endpoints(&h).1.as_str().to_owned(),
         },
         "remote-stimulus-test",
     );

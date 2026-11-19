@@ -17,7 +17,7 @@ use ac2_proto::units::{MeasId, RigId};
 use ac2_proto::{Command, ErrorCode};
 use ac2_zmq::{AuthorizedKeys, Context, CurveClient, KeyPair, PublicKey};
 use ac2d::config::SystemClockSource;
-use ac2d::{Daemon, Handle, Listen, NetworkSecurity};
+use ac2d::{Daemon, Handle, NetworkSecurity};
 use common::*;
 
 const T: Duration = Duration::from_secs(20);
@@ -36,18 +36,27 @@ fn rig_on(
     keys: Option<&KeyPair>,
     mdns: Option<ac2_discovery::Options>,
 ) -> Handle {
-    rig_at(dir, name, app, keys, mdns, 0)
+    rig_at(dir, name, app, keys, mdns, Net::Any)
 }
 
-/// [`rig_on`] with ctrl on `port` and data on `port + 1`, as `ac2d` binds them; any free
-/// ports for 0.
+/// Where a test rig's network listens.
+enum Net {
+    /// Any free ports.
+    Any,
+    /// Ctrl on this port and data on the next, as `ac2d` binds them.
+    Port(u16),
+    /// Off: the rig serves locally only, its key still links it to other rigs.
+    Off,
+}
+
+/// [`rig_on`] with its network at `net`.
 fn rig_at(
     dir: &std::path::Path,
     name: &str,
     app: &KeyPair,
     keys: Option<&KeyPair>,
     mdns: Option<ac2_discovery::Options>,
-    port: u16,
+    net: Net,
 ) -> Handle {
     let d = dir.join(name);
     std::fs::create_dir_all(&d).unwrap();
@@ -68,19 +77,29 @@ fn rig_at(
             std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o600)).unwrap();
         }
     }
-    let data = if port == 0 { 0 } else { port + 1 };
-    let listen = Listen::Network {
-        ctrl: format!("tcp://127.0.0.1:{port}"),
-        data: format!("tcp://127.0.0.1:{data}"),
-        security: NetworkSecurity {
+    let mut cfg = net_config(
+        realtime_rig(),
+        NetworkSecurity {
             server_key_file: d.join("server.key"),
             authorized_clients_file: d.join("authorized_clients"),
         },
-    };
-    let mut cfg = config(realtime_rig(), listen);
+    );
+    match net {
+        Net::Any => {}
+        Net::Port(port) => {
+            cfg.network = ac2d::NetworkChoice::Fixed(ac2d::NetListen {
+                bind: ac2d::NetBind::Addr(std::net::Ipv4Addr::LOCALHOST.into()),
+                port: ac2d::NetPort::Port(port),
+            });
+        }
+        Net::Off => cfg.network = ac2d::NetworkChoice::Off,
+    }
     cfg.name = name.into();
     cfg.system_clock = SystemClockSource::Stated(SystemClock::Synced { maxerror_us: 100 });
-    cfg.advertise = mdns.map(|mdns| ac2d::Advertise { mdns });
+    cfg.mdns = mdns.map(|options| ac2d::Mdns {
+        options,
+        advertise: true,
+    });
     cfg.recording_dir = Some(d.join("recordings"));
     Daemon::start(cfg).unwrap()
 }
@@ -90,7 +109,7 @@ fn client(ctx: &Context, h: &Handle, keys: &KeyPair) -> (Client, RigId) {
         keys: keys.clone(),
         server_key: h.server_public_key().unwrap(),
     };
-    let mut c = Client::connect_with(ctx, h.ctrl_endpoint(), Some(&curve));
+    let mut c = Client::connect_with(ctx, net_endpoints(h).0.as_str(), Some(&curve));
     let w = c.welcome(Command::Hello {
         client: "test".into(),
     });
@@ -204,8 +223,8 @@ fn paired() -> Paired {
         peers: vec![RigPeer {
             rig: b_id,
             name: "rig-b".into(),
-            ctrl: b.ctrl_endpoint().to_owned(),
-            data: b.data_endpoint().to_owned(),
+            ctrl: net_endpoints(&b).0.as_str().to_owned(),
+            data: net_endpoints(&b).1.as_str().to_owned(),
             key: b.server_public_key().unwrap().to_z85(),
         }],
     });
@@ -348,7 +367,7 @@ fn slow_spectrum_spl_and_meters_read_a_remote_input() {
     // A spectrum and an SPL meter on the remote input, and the session meters, all read it.
     let sub = Sub::connect_with(
         a.context(),
-        a.data_endpoint(),
+        net_endpoints(&a).1.as_str(),
         &[b"d/", b"session/levels"],
         Some(&CurveClient {
             keys: app.clone(),
@@ -400,8 +419,8 @@ fn a_rig_whose_key_changed_is_named() {
         peers: vec![RigPeer {
             rig: b_id,
             name: "rig-b".into(),
-            ctrl: b.ctrl_endpoint().to_owned(),
-            data: b.data_endpoint().to_owned(),
+            ctrl: net_endpoints(&b).0.as_str().to_owned(),
+            data: net_endpoints(&b).1.as_str().to_owned(),
             key: other.to_z85(),
         }],
     });
@@ -439,8 +458,8 @@ fn slow_a_rig_admitted_as_an_app_is_told_so_until_admitted_as_a_rig() {
         peers: vec![RigPeer {
             rig: b_id,
             name: "rig-b".into(),
-            ctrl: b.ctrl_endpoint().to_owned(),
-            data: b.data_endpoint().to_owned(),
+            ctrl: net_endpoints(&b).0.as_str().to_owned(),
+            data: net_endpoints(&b).1.as_str().to_owned(),
             key: b.server_public_key().unwrap().to_z85(),
         }],
     });
@@ -527,7 +546,7 @@ fn a_session_load_gives_back_its_remote_inputs() {
 
 /// Rig B's address moved (a new DHCP lease): A, paired with B where B no longer answers,
 /// finds B's mDNS advert by the key the app pinned, pairs it at the advertised address and
-/// takes its input again. Runs on loopback with a private mDNS port; where the host has no
+/// takes its input again, with its own network off. Runs on loopback with a private mDNS port; where the host has no
 /// multicast on loopback the test reports a skip unless `AC2_REQUIRE_MDNS=1`.
 #[test]
 fn slow_a_paired_rig_is_followed_to_its_new_address() {
@@ -549,12 +568,26 @@ fn slow_a_paired_rig_is_followed_to_its_new_address() {
         &app,
         None,
         Some(mdns.clone()),
-        free_pair(),
+        Net::Port(free_pair()),
     );
-    let a = rig_on(dir.path(), "rig-a", &app, Some(&a_keys), Some(mdns));
+    // A follows with its own network off: the browse and the link need only its key.
+    let a = rig_at(
+        dir.path(),
+        "rig-a",
+        &app,
+        Some(&a_keys),
+        Some(mdns),
+        Net::Off,
+    );
+    assert_eq!(a.network_status(), ac2d::NetStatus::Off);
     let ctx = Context::new().unwrap();
     let (mut cb, b_id) = client(&ctx, &b, &app);
-    let (mut ca, a_id) = client(&ctx, &a, &app);
+    let mut ca = Client::connect(&ctx, a.ctrl_endpoint());
+    let a_id = ca
+        .welcome(Command::Hello {
+            client: "test".into(),
+        })
+        .rig_id;
     cb.ok(Command::SessionOpen {
         config: session(false),
     });
@@ -581,7 +614,10 @@ fn slow_a_paired_rig_is_followed_to_its_new_address() {
     let t0 = Instant::now();
     let r = loop {
         let r = remote(&mut ca);
-        let followed = r.peers.first().is_some_and(|p| p.ctrl == b.ctrl_endpoint());
+        let followed = r
+            .peers
+            .first()
+            .is_some_and(|p| p.ctrl == net_endpoints(&b).0.as_str());
         let up = r.rigs.first().map(|r| &r.link) == Some(&RemoteLink::Up);
         if followed && up {
             break r;
@@ -603,7 +639,7 @@ fn slow_a_paired_rig_is_followed_to_its_new_address() {
         }
         std::thread::sleep(Duration::from_millis(100));
     };
-    assert_eq!(r.peers[0].data, b.data_endpoint());
+    assert_eq!(r.peers[0].data, net_endpoints(&b).1.as_str());
     wait_remote(&mut ca, "streaming from the new address", |r| {
         r.inputs.first().map(|i| i.audio) == Some(RemoteAudio::Streaming)
     });

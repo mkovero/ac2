@@ -58,6 +58,7 @@ mod jobs;
 pub mod keys;
 mod leq_history;
 mod leq_log;
+pub mod network;
 mod osc;
 mod outbox;
 mod peers;
@@ -66,6 +67,7 @@ mod refusals;
 mod remote;
 mod rig;
 mod rig_id;
+mod route;
 mod session;
 mod sim;
 mod state;
@@ -81,12 +83,16 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use ac2_proto::units::DaemonIncarnation;
-use ac2_zmq::{Context, PublicKey, SecureContext, Socket, SocketType, TcpLiveness};
+use ac2_zmq::{Context, PublicKey, Socket, SocketType, TcpLiveness};
 
 pub use config::{
-    Advertise, AutosaveConfig, DEFAULT_PORT, DaemonConfig, DedupLimits, Listen, ListenError,
-    LocalClock, NetworkSecurity, ReplayLimits, RigIdSource, SystemClockSource, pid_file,
+    AutosaveConfig, DEFAULT_PORT, DaemonConfig, DedupLimits, LOCAL_PORT, Listen, ListenError,
+    LocalClock, Mdns, NetworkSecurity, ReplayLimits, RigIdSource, SystemClockSource, pid_file,
     runtime_dir,
+};
+pub use network::{
+    Backoff, Interfaces, NetBind, NetInterface, NetListen, NetPort, NetReason, NetStatus,
+    NetworkChoice, check_port,
 };
 
 pub use backend::{
@@ -98,8 +104,8 @@ use io::{Interest, IoSockets};
 use outbox::Outbox;
 
 /// ZAP domain of the daemon's CURVE sockets.
-const ZAP_DOMAIN: &str = "ac2";
-/// Kernel send buffer of the data socket in network mode (Q2): a small buffer keeps the
+pub(crate) const ZAP_DOMAIN: &str = "ac2";
+/// Kernel send buffer of the network data socket (Q2): a small buffer keeps the
 /// backlog in front of a slow link short, so the latest-slot publisher stays fresh.
 const NETWORK_SNDBUF: u32 = 64 * 1024;
 /// Dead-peer detection on both client-facing sockets (TCP only). A client that vanishes
@@ -170,12 +176,10 @@ pub struct Handle {
     data: String,
     ctx: Context,
     server_key: Option<PublicKey>,
+    net: control::network::NetView,
     tx: Sender<ControlMsg>,
     control: Option<JoinHandle<Ended>>,
     io: Option<JoinHandle<()>>,
-    advert: Option<ac2_discovery::Advertiser>,
-    /// The browse that follows paired rigs to new addresses (network mode with mDNS).
-    browse: Option<remote::follow::PeerBrowse>,
     /// Held for the daemon's lifetime: frame hand-offs, publish gaps and job timers are all
     /// timed waits, which Windows otherwise ends only on its 15.6 ms tick.
     _timer: ac2_audio::timer::FineResolution,
@@ -225,12 +229,13 @@ impl Handle {
         self.incarnation.0
     }
 
-    /// The ctrl (ROUTER) endpoint as bound (a `tcp://…:0` request shows its real port).
+    /// The local ctrl (ROUTER) endpoint as bound (a `tcp://…:0` request shows its real
+    /// port).
     pub fn ctrl_endpoint(&self) -> &str {
         &self.ctrl
     }
 
-    /// The data (ROUTER) endpoint as bound.
+    /// The local data (ROUTER) endpoint as bound.
     pub fn data_endpoint(&self) -> &str {
         &self.data
     }
@@ -240,17 +245,37 @@ impl Handle {
         &self.ctx
     }
 
-    /// The server's CURVE public key (network mode).
+    /// The server's CURVE public key, once one exists (the network was on at least once).
     pub fn server_public_key(&self) -> Option<PublicKey> {
         self.server_key
     }
 
-    /// The mDNS full name this daemon advertises under (network mode with
-    /// [`DaemonConfig::advertise`]), once registered.
-    pub fn advertised_as(&self) -> Option<&str> {
-        self.advert
-            .as_ref()
-            .map(ac2_discovery::Advertiser::fullname)
+    /// What the network listener is doing now.
+    pub fn network_status(&self) -> NetStatus {
+        self.net.status()
+    }
+
+    /// The mDNS full name this daemon advertises under while the network listens (with
+    /// [`DaemonConfig::mdns`] advertising), once registered.
+    pub fn advertised_as(&self) -> Option<String> {
+        self.net.advertised_as()
+    }
+
+    /// Makes the ZAP handler of the network pair now attached fail, as a crash of it would:
+    /// the daemon must close that pair, keep serving locally and rebind on its own.
+    ///
+    /// # Errors
+    /// No pair is attached, or the handler did not stop.
+    #[cfg(feature = "fault-injection")]
+    pub fn fail_zap_handler(&self) -> Result<(), String> {
+        let fault = self
+            .net
+            .fault
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .ok_or("no network pair attached")?;
+        fault.fail().map_err(|e| e.to_string())
     }
 
     /// A handle that can request shutdown from elsewhere.
@@ -272,17 +297,12 @@ impl Handle {
     }
 
     fn join(&mut self) -> Ended {
-        // The advert lives as long as the daemon serves: only once control has stopped
-        // does the goodbye go out, still before the sockets close, so browsers drop the rig
-        // at once.
         let ended = match self.control.take() {
             Some(t) => t
                 .join()
                 .unwrap_or_else(|_| Ended::Fatal("the control thread panicked".into())),
             None => Ended::Stopped,
         };
-        self.advert = None;
-        self.browse = None;
         if let Some(t) = self.io.take() {
             let _ = t.join();
         }
@@ -317,7 +337,17 @@ fn prepare_ipc(_endpoint: &str) -> Result<(), StartError> {
     Ok(())
 }
 
-fn data_socket_options(data: &Socket, network: bool) -> Result<(), StartError> {
+/// Options of a ctrl ROUTER, local or network, set before it binds.
+pub(crate) fn ctrl_socket_options(router: &Socket) -> Result<(), StartError> {
+    router
+        .set_router_mandatory(true)
+        .map_err(zerr("ROUTER_MANDATORY"))?;
+    router
+        .set_tcp_liveness(Some(PEER_LIVENESS))
+        .map_err(zerr("ROUTER liveness"))
+}
+
+pub(crate) fn data_socket_options(data: &Socket, network: bool) -> Result<(), StartError> {
     // A send to a vanished connection then fails `EHOSTUNREACH`, which is how a peer is
     // known to be gone; a full queue fails `EAGAIN` instead of dropping silently.
     data.set_router_mandatory(true)
@@ -341,7 +371,10 @@ impl Daemon {
     /// Binds the sockets and starts the I/O and control threads. No audio I/O is open
     /// until a client sends `session.open`.
     pub fn start(config: DaemonConfig) -> Result<Handle, StartError> {
-        config.listen.validate().map_err(StartError::Listen)?;
+        config
+            .listen
+            .validate(&config.network)
+            .map_err(StartError::Listen)?;
         if config.backends.is_empty() {
             return Err(StartError::NoBackend);
         }
@@ -353,85 +386,25 @@ impl Daemon {
             ));
         }
         let incarnation = DaemonIncarnation(util::random_u64());
-        let network = config.listen.is_network();
-
-        // Network mode: what `server.*` reports and changes while the daemon runs.
-        let mut network_parts = None;
-        let mut keypair: Option<ac2_zmq::KeyPair> = None;
         let (rig_id, rig_id_damage) = rig_id::load(&config.rig_id);
-        let mut key_damage: Vec<_> = rig_id_damage.into_iter().collect();
-        let (ctx, secure, router, data_sock, server_key) = match &config.listen {
-            Listen::Inproc { name } => {
-                let ctx = Context::new().map_err(zerr("context"))?;
-                let router = ctx.socket(SocketType::Router).map_err(zerr("ROUTER"))?;
-                let data = ctx
-                    .socket(SocketType::Router)
-                    .map_err(zerr("data ROUTER"))?;
-                let _ = name;
-                (ctx, None, router, data, None)
-            }
-            Listen::Local { ctrl, data } => {
-                prepare_ipc(ctrl)?;
-                prepare_ipc(data)?;
-                let ctx = Context::new().map_err(zerr("context"))?;
-                let router = ctx.socket(SocketType::Router).map_err(zerr("ROUTER"))?;
-                let data = ctx
-                    .socket(SocketType::Router)
-                    .map_err(zerr("data ROUTER"))?;
-                (ctx, None, router, data, None)
-            }
-            Listen::Network { security, .. } => {
-                let (kp, d) = keys::load_or_create_server_keys(&security.server_key_file)
-                    .map_err(StartError::Keys)?;
-                key_damage.extend(d);
-                let (authorized, d) =
-                    keys::load_or_create_authorized(&security.authorized_clients_file)
-                        .map_err(StartError::Keys)?;
-                key_damage.extend(d);
-                tracing::info!(
-                    "network mode: {} authorized client(s); server key {} (fingerprint {})",
-                    authorized.len(),
-                    kp.public.to_z85(),
-                    kp.public.fingerprint()
-                );
-                let log = authlog::AuthLog::new(&security.authorized_clients_file);
-                let refused = log.refused();
-                let sc = SecureContext::new(ZAP_DOMAIN, authorized, move |d| log.record(d))
-                    .map_err(zerr("ZAP handler"))?;
-                keypair = Some(kp.clone());
-                network_parts = Some((
-                    sc.authorized_handle(),
-                    security.authorized_clients_file.clone(),
-                    refused,
-                ));
-                let router = sc
-                    .curve_server_socket(SocketType::Router, &kp)
-                    .map_err(zerr("CURVE ROUTER"))?;
-                let data = sc
-                    .curve_server_socket(SocketType::Router, &kp)
-                    .map_err(zerr("CURVE data ROUTER"))?;
-                (
-                    sc.context().clone(),
-                    Some(sc),
-                    router,
-                    data,
-                    Some(kp.public),
-                )
-            }
-        };
-        router
-            .set_router_mandatory(true)
-            .map_err(zerr("ROUTER_MANDATORY"))?;
-        router
-            .set_tcp_liveness(Some(PEER_LIVENESS))
-            .map_err(zerr("ROUTER liveness"))?;
-        data_socket_options(&data_sock, network)?;
+
+        // The local pair lives as long as the daemon, on a plain context that also owns the
+        // internal pipe and every outgoing link; the network pair comes and goes on its own.
+        let ctx = Context::new().map_err(zerr("context"))?;
+        let router = ctx.socket(SocketType::Router).map_err(zerr("ROUTER"))?;
+        let data_sock = ctx
+            .socket(SocketType::Router)
+            .map_err(zerr("data ROUTER"))?;
+        ctrl_socket_options(&router)?;
+        data_socket_options(&data_sock, false)?;
         let (ctrl_ep, data_ep) = match &config.listen {
             Listen::Inproc { name } => (
                 format!("inproc://{name}/ctrl"),
                 format!("inproc://{name}/data"),
             ),
-            Listen::Local { ctrl, data } | Listen::Network { ctrl, data, .. } => {
+            Listen::Local { ctrl, data } => {
+                prepare_ipc(ctrl)?;
+                prepare_ipc(data)?;
                 (ctrl.clone(), data.clone())
             }
         };
@@ -443,9 +416,6 @@ impl Daemon {
             .map_err(zerr(format!("bind {data_ep}")))?;
         let ctrl = router.last_endpoint().unwrap_or(ctrl_ep);
         let data = data_sock.last_endpoint().unwrap_or(data_ep);
-        if network {
-            firewall::report(&ctrl, &data);
-        }
 
         let pull_ep = format!("inproc://ac2d-{:016x}/out", incarnation.0);
         let pull = ctx.socket(SocketType::Pull).map_err(zerr("PULL"))?;
@@ -453,27 +423,35 @@ impl Daemon {
         pull.bind(&pull_ep).map_err(zerr("bind internal pipe"))?;
         let outbox = Outbox::connect(&ctx, &pull_ep, 100_000).map_err(zerr("internal pipe"))?;
 
-        let advertised_as = Arc::new(std::sync::Mutex::new(None));
-        let server = match (&config.listen, network_parts, keypair) {
-            (Listen::Network { .. }, Some((authorized, authorized_file, refused)), Some(key)) => {
-                control::rig::ServerSetup::Network(Box::new(control::rig::NetworkSetup {
-                    ctrl: ctrl.clone(),
-                    data: data.clone(),
-                    server_key: key.public,
-                    keys: key,
-                    authorized,
-                    authorized_file,
-                    refused,
-                    advertised_as: Arc::clone(&advertised_as),
-                }))
-            }
-            (Listen::Inproc { .. }, ..) => control::rig::ServerSetup::Embedded,
-            _ => control::rig::ServerSetup::Local { ctrl: ctrl.clone() },
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (attach, attach_rx) = std::sync::mpsc::channel();
+        let (mut network, damage) = control::network::NetCtl::new(control::network::NetSetup {
+            choice: config.network.clone(),
+            files: config.keys.clone(),
+            interfaces: config.interfaces.clone(),
+            retry: config.net_retry,
+            mdns: config.mdns.clone(),
+            name: config.name.clone(),
+            attach,
+            to_control: tx.clone(),
+        })?;
+        let mut key_damage: Vec<_> = rig_id_damage.into_iter().collect();
+        key_damage.extend(damage);
+        // The first bind before anyone is told the daemon is up, so a network that can be
+        // served is served from the start; one that cannot is retried by control.
+        network.attempt(&outbox, std::time::Instant::now());
+        let server_key = network.server_key();
+        let net = network.view();
+        let server = control::rig::Server {
+            local: match &config.listen {
+                Listen::Inproc { .. } => control::rig::LocalSetup::Embedded,
+                Listen::Local { .. } => control::rig::LocalSetup::Local { ctrl: ctrl.clone() },
+            },
+            network,
         };
         let timer = ac2_audio::timer::fine_resolution();
         let fps = config.publish_fps.max(1);
         let interest = Arc::new(Interest::default());
-        let (tx, rx) = std::sync::mpsc::channel();
         let (frames, frames_rx) = outbox::frame_channel();
         let io = io::spawn(
             IoSockets {
@@ -481,7 +459,7 @@ impl Daemon {
                 data: data_sock,
                 pull,
                 frames: frames_rx,
-                secure,
+                attach: attach_rx,
             },
             tx.clone(),
             Arc::clone(&interest),
@@ -512,7 +490,6 @@ impl Daemon {
             outbox,
             to_self: tx.clone(),
             session_dir: config.session_dir.clone(),
-            network,
             cal_store: config.cal_store.clone(),
             autosave: config.autosave.clone(),
             recording_dir: config.recording_dir.clone(),
@@ -526,22 +503,6 @@ impl Daemon {
             .name("ac2d-control".into())
             .spawn(move || control.run(&rx))
             .map_err(StartError::Io)?;
-        let advert = match (&config.advertise, server_key) {
-            (Some(a), Some(key)) => advertise(&config.name, a, &key, &ctrl),
-            _ => None,
-        };
-        // Only a networked rig takes other rigs' inputs, and only it can follow them.
-        let browse = match (&config.advertise, server_key) {
-            (Some(a), Some(_)) => remote::follow::PeerBrowse::start(a.mdns.clone(), tx.clone())
-                .inspect_err(|e| tracing::warn!("mDNS browse not started: {e}"))
-                .ok(),
-            _ => None,
-        };
-        if let Some(a) = &advert {
-            *advertised_as
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(a.fullname().to_owned());
-        }
         tracing::info!(
             "ac2d {} up: {:?} (rig id {rig_id}), ctrl {ctrl}, data {data}, backends {:?}, \
              incarnation {:016x}",
@@ -563,72 +524,12 @@ impl Daemon {
             data,
             ctx,
             server_key,
+            net,
             tx,
             control: Some(control),
             io: Some(io),
-            advert,
-            browse,
             _timer: timer,
         })
-    }
-}
-
-/// Registers the mDNS advert of a network-mode daemon bound at `ctrl`. A failure is logged
-/// and otherwise ignored: discovery is a convenience, the daemon serves paired clients
-/// without it.
-fn advertise(
-    name: &str,
-    a: &Advertise,
-    key: &PublicKey,
-    ctrl: &str,
-) -> Option<ac2_discovery::Advertiser> {
-    let (host, port) = ctrl
-        .strip_prefix("tcp://")
-        .and_then(|r| r.rsplit_once(':'))
-        .and_then(|(h, p)| Some((h, p.parse::<u16>().ok()?)))?;
-    let advert = ac2_discovery::Advert {
-        name: ac2_discovery::instance_name(name),
-        version: env!("CARGO_PKG_VERSION").to_owned(),
-        proto: ac2_proto::PROTO_VERSION,
-        fingerprint: key.fingerprint(),
-        server_key: key.to_z85(),
-    };
-    let report = |e: ac2_discovery::AdvertEvent| match e {
-        ac2_discovery::AdvertEvent::Error(e) => {
-            tracing::warn!("mDNS responder: {e}; the rig may not be discoverable");
-        }
-        ac2_discovery::AdvertEvent::AddressAdded(a) => {
-            tracing::info!("mDNS: advertising on {a}");
-        }
-        ac2_discovery::AdvertEvent::AddressRemoved(a) => {
-            tracing::info!("mDNS: {a} went away");
-        }
-        ac2_discovery::AdvertEvent::Renamed { from, to } => {
-            tracing::warn!("mDNS: {from:?} is taken on this network; advertising as {to:?}");
-        }
-    };
-    match ac2_discovery::Advertiser::start(
-        &advert,
-        port,
-        &ac2_discovery::Bind::from_listen_host(host),
-        &a.mdns,
-        report,
-    ) {
-        Ok(adv) => {
-            tracing::info!(
-                "mDNS: advertising {:?} ({}) on port {port}",
-                advert.name,
-                advert.fingerprint
-            );
-            Some(adv)
-        }
-        Err(e) => {
-            tracing::warn!(
-                "{e}: the rig is not advertised, `ac2 discover` will not list it (clients can \
-                 still connect with --remote <address>)"
-            );
-            None
-        }
     }
 }
 

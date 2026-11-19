@@ -8,7 +8,7 @@ use ac2_proto::model::{
     MathDomain, MathExpr, MathOp, MeasConfig, MeasKind, MeasScope, Measurement, Operand, PeakQ,
     TraceKind, TraceMeta, TraceOwner, TraceSource,
 };
-use ac2_proto::units::{ClientId, EqSetId, Hz, MeasId, Seconds, TraceId, WallNs};
+use ac2_proto::units::{EqSetId, Hz, MeasId, Seconds, TraceId, WallNs};
 use ac2_proto::{Command, GridDef, ProtoError, ReplyBody};
 use ac2_traces::Columns;
 use ac2_traces::eq;
@@ -18,6 +18,7 @@ use num_complex::Complex64;
 
 use super::{Control, static_grid};
 use crate::jobs::math::Held;
+use crate::route::Peer;
 use crate::util::{invalid, missing, refused, wall_ns};
 
 /// The rate a new digital set assumes without a session: the common processor rate.
@@ -247,7 +248,7 @@ impl Control {
     /// `meas.eq`.
     pub(super) fn meas_eq(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         meas: MeasId,
         edit: EqEdit,
     ) -> Result<ReplyBody, ProtoError> {
@@ -351,7 +352,7 @@ impl Control {
     /// Shows (`on`) or stops showing `curve` of `m` after set `set`.
     fn eq_predict(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         m: &Measurement,
         set: EqSetId,
         curve: Operand,

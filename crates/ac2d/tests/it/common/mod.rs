@@ -114,6 +114,26 @@ pub fn local(dir: &std::path::Path) -> Listen {
     }
 }
 
+/// [`config`] with the network on: CURVE on loopback, OS-chosen ports, local endpoints
+/// beside it. [`net_endpoints`] says where it bound.
+pub fn net_config(backend: FakeBackend, security: ac2d::NetworkSecurity) -> DaemonConfig {
+    let mut cfg = config(backend, local_tcp());
+    cfg.network = ac2d::NetworkChoice::Fixed(ac2d::NetListen {
+        bind: ac2d::NetBind::Addr(std::net::Ipv4Addr::LOCALHOST.into()),
+        port: ac2d::NetPort::Any,
+    });
+    cfg.keys = Some(security);
+    cfg
+}
+
+/// The network ctrl and data endpoints of a daemon listening there.
+pub fn net_endpoints(h: &Handle) -> (String, String) {
+    match h.network_status() {
+        ac2d::NetStatus::Listening { ctrl, data } => (ctrl, data),
+        s => panic!("the network is not listening: {s:?}"),
+    }
+}
+
 pub fn local_tcp() -> Listen {
     Listen::Local {
         ctrl: "tcp://127.0.0.1:0".into(),

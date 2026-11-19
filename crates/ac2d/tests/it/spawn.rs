@@ -320,7 +320,7 @@ fn explicit_endpoints_still_lock_and_ephemeral_never_does() {
     assert_eq!(read(&home.runtime().join("ac2d.pid")), pid);
     assert_eq!(
         read(&home.runtime().join("ac2d.endpoints")),
-        format!("ac2d: listening ctrl={ctrl} data={data}\nmode=local\n")
+        format!("ac2d: listening ctrl={ctrl} data={data}\n")
     );
 
     let mut second = Daemon::spawn(explicit());
@@ -349,51 +349,29 @@ fn ephemeral_needs_its_own_endpoints() {
     assert!(!home.runtime().exists());
 }
 
-/// A free loopback port whose successor is free too (network mode puts data on port + 1
-/// and refuses port 0).
-fn free_port_pair() -> u16 {
-    loop {
-        let a = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = a.local_addr().unwrap().port();
-        if port < u16::MAX && std::net::TcpListener::bind(("127.0.0.1", port + 1)).is_ok() {
-            return port;
-        }
-    }
-}
-
-/// A network-mode daemon (a stage machine's service) holds the lock too, and says in the
-/// endpoints file that it is CURVE: a second daemon on the default local endpoints, as an
-/// app on that host would start, exits 3 instead of opening the same interface.
+/// A daemon with the network on (a stage machine's service) holds the lock too and still
+/// serves its local endpoints, which the endpoints file names: a second daemon, as an app on
+/// that host would start, exits 3 instead of opening the same interface. The network port
+/// need not be free: a port taken is retried, never fatal.
 #[test]
-fn network_mode_locks() {
+fn a_networked_daemon_locks_and_names_its_local_endpoints() {
     let home = Home::new();
-    // The pair is free when chosen but not held: another process's outgoing connection
-    // may take one of the two before the daemon binds (the OS hands ephemeral ports from
-    // the same range), so a daemon that could not bind is retried on a fresh pair.
-    let mut tries = 0;
-    let (net, ctrl, data, port) = loop {
-        let port = free_port_pair();
-        let mut p = home.ac2d_with_stores();
-        p.args(["--listen", &format!("tcp://127.0.0.1:{port}"), "--no-mdns"])
-            .arg("--key-file")
-            .arg(home.path("config/server.key"))
-            .arg("--authorized")
-            .arg(home.path("config/authorized_clients"));
-        match Daemon::try_spawn_printing(p) {
-            Ok((d, ctrl, data)) => break (d, ctrl, data, port),
-            Err((st, err)) => {
-                tries += 1;
-                assert!(
-                    tries < 5 && st.code() == Some(i32::from(exit::FATAL)),
-                    "ac2d on port {port} ended: {st}, stderr: {err}"
-                );
-            }
-        }
-    };
-    assert_eq!(ctrl, format!("tcp://127.0.0.1:{port}"));
+    let mut p = home.ac2d_with_stores();
+    p.args(["--listen", "tcp://127.0.0.1:47960", "--no-mdns"])
+        .arg("--key-file")
+        .arg(home.path("config/server.key"))
+        .arg("--authorized")
+        .arg(home.path("config/authorized_clients"));
+    let (net, ctrl, data) = Daemon::spawn_printing(p);
+    assert_ne!(
+        ctrl, "tcp://127.0.0.1:47960",
+        "the line names the local pair"
+    );
+    let ctx = Context::new().unwrap();
+    assert!(answers(&ctx, &ctrl));
     assert_eq!(
         read(&home.runtime().join("ac2d.endpoints")),
-        format!("ac2d: listening ctrl={ctrl} data={data}\nmode=network\n")
+        format!("ac2d: listening ctrl={ctrl} data={data}\n")
     );
     assert_eq!(
         read(&home.runtime().join("ac2d.pid")),

@@ -1,4 +1,4 @@
-//! Log lines for ZAP decisions (network mode), rate-limited per refused key and address.
+//! Log lines for ZAP decisions (the network pair), rate-limited per refused key and address.
 //!
 //! A refused CURVE client sees only silence: libzmq drops the handshake and the client
 //! retries. The daemon's log is the one place the operator can see who knocked, so every
@@ -238,7 +238,7 @@ fn refusal_line(
             k.to_z85()
         ),
         (DenyReason::NotCurve, _) => format!(
-            "refused a client without CURVE ({}) from {address}: network mode accepts paired \
+            "refused a client without CURVE ({}) from {address}: the network pair accepts paired \
              clients only",
             match &d.mechanism {
                 Mechanism::Null => "NULL",

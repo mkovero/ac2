@@ -476,15 +476,11 @@ fn remote_clients_never_name_daemon_paths() {
     keys.insert("laptop", laptop.public).unwrap();
     let authorized = dir.path().join("authorized_clients");
     keys.save(&authorized).unwrap();
-    let listen = ac2d::Listen::Network {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-        security: ac2d::NetworkSecurity {
-            server_key_file: dir.path().join("server.key"),
-            authorized_clients_file: authorized,
-        },
+    let security = ac2d::NetworkSecurity {
+        server_key_file: dir.path().join("server.key"),
+        authorized_clients_file: authorized,
     };
-    let mut cfg = config(manual_rig(), listen);
+    let mut cfg = net_config(manual_rig(), security);
     cfg.session_dir = dir.path().join("sessions");
     let h = Daemon::start(cfg).unwrap();
     let ctx = Context::new().unwrap();
@@ -492,7 +488,7 @@ fn remote_clients_never_name_daemon_paths() {
         keys: laptop,
         server_key: h.server_public_key().unwrap(),
     };
-    let mut c = Client::connect_with(&ctx, h.ctrl_endpoint(), Some(&curve));
+    let mut c = Client::connect_with(&ctx, net_endpoints(&h).0.as_str(), Some(&curve));
     let path = SessionRef::Path {
         path: dir.path().join("x").to_string_lossy().into_owned(),
     };

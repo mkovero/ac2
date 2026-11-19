@@ -26,13 +26,14 @@ use std::path::{Path, PathBuf};
 
 use ac2_proto::event::Change;
 use ac2_proto::model::{Recoverable, SessionOrigin, WorkingSession};
-use ac2_proto::units::{ClientId, Seconds, WallNs};
+use ac2_proto::units::{Seconds, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError, ReplyBody};
 use ac2_traces::session::{self, Session as SessionData};
 use serde::{Deserialize, Serialize};
 
 use super::file_jobs::{FileDone, Pending, ReplaceRead, Work};
 use super::{Control, ControlMsg};
+use crate::route::Peer;
 use crate::util::{internal, missing, perr, perr_detail, wall_ns};
 
 /// Beside an autosave's (or a recovery copy's) manifest.
@@ -398,10 +399,7 @@ impl Control {
     /// `file.recover`: swaps the working state with the recovery copy. A worker reads the
     /// copy and writes the working state it replaces (when that has unsaved changes);
     /// [`Self::finish_recover`] commits.
-    pub(super) fn begin_recover(
-        &mut self,
-        client: &ClientId,
-    ) -> Result<(Pending, Work), ProtoError> {
+    pub(super) fn begin_recover(&mut self, client: &Peer) -> Result<(Pending, Work), ProtoError> {
         let Some(r) = self.replaced_working.as_ref() else {
             return Err(missing("no replaced working state to recover"));
         };
@@ -441,7 +439,7 @@ impl Control {
     /// (`super::file_jobs`).
     pub(super) fn finish_recover(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         standing: (u64, u64),
         r: ReplaceRead,
     ) -> Result<ReplyBody, ProtoError> {

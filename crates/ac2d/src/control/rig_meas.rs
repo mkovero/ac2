@@ -42,6 +42,7 @@ use ac2_traces::session::{SavedMeasurement, Session as SessionData, SplLogOnDisk
 use super::{Control, recovery};
 use crate::autosave::RigLogs;
 use crate::rig::{RigMeter, RigSettings};
+use crate::route::Peer;
 use crate::util::{invalid, perr_detail, wall_ns};
 
 /// The control thread's rig meter state.
@@ -528,7 +529,7 @@ impl Control {
     /// configuration for the monitor at start.
     pub(super) fn rig_session_open(
         &mut self,
-        client: &ac2_proto::units::ClientId,
+        client: &Peer,
         config: SessionConfig,
     ) -> Result<ReplyBody, ProtoError> {
         let moved = self.has_rig_meters()
@@ -603,7 +604,7 @@ impl Control {
         let Some(cfg) = self.rig.meas.session.as_ref().map(capture_only) else {
             return;
         };
-        let daemon = ac2_proto::units::ClientId("ac2d".into());
+        let daemon = Peer::Local(ac2_proto::units::ClientId("ac2d".into()));
         match self.open_session(&daemon, cfg, None) {
             Ok(s) => {
                 let dev = s

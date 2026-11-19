@@ -22,7 +22,7 @@ use ac2_proto::model::{
     CalEntry, DeviceSelector, DiscontinuityCause, MeasKind, RecordRequest, RecordingEnd,
     RecordingRef, RecordingRun, RecordingStatus, RemoteGaps, ReplayInfo, ReplayPace, SessionConfig,
 };
-use ac2_proto::units::{ClientId, SampleIndex, Seconds, SessionEpoch, WallNs};
+use ac2_proto::units::{SampleIndex, Seconds, SessionEpoch, WallNs};
 use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
 use ac2_traces::raw::{
     self, AudioFile, ChannelRole, Initial, Limits, Mark, RawError, RecordedChannel, RecordedDevice,
@@ -33,6 +33,7 @@ use super::Control;
 use crate::jobs::record::{Progress, QUEUE_S, RecordCmd, Recorder, SharedProgress};
 use crate::jobs::{self, JobHandle, block_index};
 use crate::remote::replay::ReplayMarks;
+use crate::route::Peer;
 use crate::session::Runtime;
 use crate::util::{internal, invalid, missing, perr, refused, wall_ns};
 
@@ -130,7 +131,7 @@ impl Control {
 
     pub(super) fn rec_start(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         req: RecordRequest,
     ) -> Result<ReplyBody, ProtoError> {
         if self.recording.is_some() {
@@ -258,7 +259,7 @@ impl Control {
                 max_duration: req.max_duration,
                 max_bytes: req.max_bytes,
             },
-            started_by: client.clone(),
+            started_by: client.id().clone(),
             initial: Initial {
                 measurements: st.measurements.clone(),
                 generator: st.generator.clone(),
@@ -322,7 +323,7 @@ impl Control {
             session_epoch: rt.epoch,
             start_sample: SampleIndex(latest),
             started_at: WallNs(now),
-            started_by: client.clone(),
+            started_by: client.id().clone(),
             frames: 0,
             bytes: raw::wav::HEADER_BYTES,
             discontinuities: 0,
@@ -504,8 +505,13 @@ impl Control {
         }
     }
 
-    /// The directory and name a reference names. Paths are refused in network mode.
-    fn recording_path(&self, r: &RecordingRef) -> Result<(PathBuf, String), ProtoError> {
+    /// The directory and name a reference names. Paths are for clients on the local pair
+    /// only.
+    fn recording_path(
+        &self,
+        client: &Peer,
+        r: &RecordingRef,
+    ) -> Result<(PathBuf, String), ProtoError> {
         match r {
             RecordingRef::Name { name } => {
                 raw::validate_name(name).map_err(raw_err)?;
@@ -515,7 +521,7 @@ impl Control {
                 Ok((dir, name.clone()))
             }
             RecordingRef::Path { path } => {
-                if self.s.network {
+                if !client.is_local() {
                     return Err(refused(
                         "remote clients name recordings; paths are for local clients only",
                     ));
@@ -540,11 +546,11 @@ impl Control {
 
     pub(super) fn session_replay(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         r: &RecordingRef,
         pace: ReplayPace,
     ) -> Result<ReplyBody, ProtoError> {
-        let (dir, name) = self.recording_path(r)?;
+        let (dir, name) = self.recording_path(client, r)?;
         let s = raw::read_sidecar(&dir, &name).map_err(raw_err)?;
         let path = dir.join(&s.audio.file);
         if s.end.is_none() {

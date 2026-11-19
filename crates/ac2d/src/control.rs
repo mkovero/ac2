@@ -25,11 +25,11 @@ use ac2_proto::model::{
     TimingStatus, TraceKind, TraceMeta, TraceSource,
 };
 use ac2_proto::units::{
-    ClientId, DaemonIncarnation, Dbfs, LeaseToken, MeasId, RequestId, Rev, Seconds, SessionEpoch,
-    SweepId, WallNs,
+    DaemonIncarnation, Dbfs, LeaseToken, MeasId, RequestId, Rev, Seconds, SessionEpoch, SweepId,
+    WallNs,
 };
 use ac2_proto::{ProtoError, ReplyBody};
-use ac2_zmq::{Context, PublicKey};
+use ac2_zmq::Context;
 
 use crate::autosave::Autosaver;
 use crate::calstore::{self, CalStore};
@@ -39,6 +39,7 @@ use crate::io::Interest;
 use crate::jobs::{self, Captured, JobHandle, Probes, Seqs, block_index};
 use crate::outbox::Outbox;
 use crate::preview::Preview;
+use crate::route::{Peer, Route};
 use crate::session::{Limits, Runtime};
 use crate::state::Store;
 use crate::stimulus::{LeaseGate, LeasedSource, SweepTrain};
@@ -60,6 +61,7 @@ mod leq;
 mod levels;
 mod maths;
 mod meas_jobs;
+pub(crate) mod network;
 mod osc;
 mod owners;
 mod recording;
@@ -90,23 +92,18 @@ use validate::{
 };
 pub(crate) use walk_sweep::walk_room;
 
-/// The authenticated peer of a network-mode (CURVE) connection, as the ZAP handler granted
-/// it at the handshake.
-pub(crate) struct CurvePeer {
-    /// The authorized name the key had at the handshake.
-    pub(crate) name: String,
-    /// The key the connection authenticated with.
-    pub(crate) key: PublicKey,
-}
-
 /// Everything that reaches the control thread.
 pub(crate) enum ControlMsg {
-    /// A ctrl request from the I/O thread.
+    /// A ctrl request from the I/O thread, with the pair it came in on.
     Request {
-        routing_id: Vec<u8>,
-        /// `None` on connections without ZAP (embedded, local).
-        peer: Option<CurvePeer>,
+        route: Route,
+        peer: Peer,
         payload: Vec<u8>,
+    },
+    /// The I/O thread closed network pair `epoch` (its ZAP handler died).
+    NetFailed {
+        epoch: crate::route::NetEpoch,
+        reason: crate::network::NetReason,
     },
     /// The stream of `epoch` reported a configuration change.
     DeviceChanged { epoch: SessionEpoch },
@@ -251,7 +248,7 @@ pub(crate) struct Setup {
     /// Where the rig's SPL meters keep their logs (`DaemonConfig::rig_logs`).
     pub(crate) rig_logs: Option<std::path::PathBuf>,
     /// How the daemon serves clients (`server.*`).
-    pub(crate) server: rig::ServerSetup,
+    pub(crate) server: rig::Server,
     pub(crate) lease_expiry: Duration,
     pub(crate) keepalive: Duration,
     pub(crate) replay: ReplayLimits,
@@ -266,8 +263,6 @@ pub(crate) struct Setup {
     pub(crate) to_self: Sender<ControlMsg>,
     /// Session directory for `file.*` by name.
     pub(crate) session_dir: std::path::PathBuf,
-    /// Network mode: `file.*` accept names only, never paths.
-    pub(crate) network: bool,
     pub(crate) cal_store: Option<std::path::PathBuf>,
     /// Autosave directory and whether to restore it at start.
     pub(crate) autosave: Option<crate::config::AutosaveConfig>,
@@ -296,15 +291,15 @@ impl Setup {
 
 /// A request answered when a worker thread reports back.
 struct PendingReply {
-    routing_id: Vec<u8>,
-    client: ClientId,
+    route: Route,
+    client: Peer,
     id: RequestId,
 }
 
 /// A `delay.find` running on a job thread; answered when the result arrives.
 struct PendingFind {
-    routing_id: Vec<u8>,
-    client: ClientId,
+    route: Route,
+    client: Peer,
     id: RequestId,
     meas: MeasId,
 }
@@ -344,7 +339,7 @@ enum DelaySource {
 
 struct Lease {
     token: LeaseToken,
-    owner: ClientId,
+    owner: Peer,
     deadline: Instant,
 }
 
@@ -692,12 +687,16 @@ impl Control {
             self.osc_sync();
             self.osc_tick(now);
             self.artnet_tick(now);
+            self.s.server.network.tick(&self.s.outbox, now);
             let mut wake = self.ka.due.min(self.clocks_due());
             if let Some(t) = self.osc_wake() {
                 wake = wake.min(t);
             }
             if let Some(t) = self.artnet_wake() {
                 wake = wake.min(t);
+            }
+            if let Some(d) = self.s.server.network.due() {
+                wake = wake.min(d);
             }
             if let Some(l) = &self.out.lease {
                 wake = wake.min(l.deadline);
@@ -727,10 +726,13 @@ impl Control {
             }
             match rx.recv_timeout(wake.saturating_duration_since(Instant::now())) {
                 Ok(ControlMsg::Request {
-                    routing_id,
+                    route,
                     peer,
                     payload,
-                }) => self.on_request(&routing_id, peer, &payload),
+                }) => self.on_request(&route, peer, &payload),
+                Ok(ControlMsg::NetFailed { epoch, reason }) => {
+                    self.s.server.network.failed(epoch, reason, Instant::now());
+                }
                 Ok(ControlMsg::DeviceChanged { epoch }) => {
                     if self.session.as_ref().is_some_and(|r| r.epoch == epoch) {
                         tracing::warn!("device or configuration change: reopening the audio I/O");
@@ -770,14 +772,14 @@ impl Control {
                         let r = result.map(|()| ReplyBody::Ack {
                             rev: self.store.rev(),
                         });
-                        self.answer(&p.routing_id, &p.client, p.id, r, Instant::now());
+                        self.answer(&p.route, &p.client, p.id, r, Instant::now());
                     }
                 }
                 Ok(ControlMsg::LoopbackDetected { token, result }) => {
                     if let Some((t, p)) = self.pending.detecting.take() {
                         if t == token {
                             let r = (*result).map(ReplyBody::LoopbackDetection);
-                            self.answer(&p.routing_id, &p.client, p.id, r, Instant::now());
+                            self.answer(&p.route, &p.client, p.id, r, Instant::now());
                         } else {
                             self.pending.detecting = Some((t, p));
                         }
@@ -873,6 +875,7 @@ impl Control {
         self.flush_file_jobs();
         self.flush_autosave();
         self.finish_rig_logs();
+        self.s.server.network.shutdown();
         self.s.outbox.stop();
     }
 

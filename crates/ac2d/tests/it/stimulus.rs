@@ -14,7 +14,7 @@ use ac2_proto::model::{
 use ac2_proto::units::{ClientId, Dbfs, Hz, LeaseToken, MeasId, RequestId};
 use ac2_proto::{Command, ErrorCode, ErrorDetail, ReplyBody, Request};
 use ac2_zmq::{AuthorizedKeys, CurveClient, KeyPair};
-use ac2d::{Daemon, Listen, NetworkSecurity};
+use ac2d::{Daemon, NetworkSecurity};
 use common::*;
 
 const T: Duration = Duration::from_secs(5);
@@ -294,16 +294,12 @@ fn curve_rig(dir: &std::path::Path) -> (FakeBackend, ac2d::Handle, CurveClient) 
     keys.insert("laptop", key.public).unwrap();
     let authorized = dir.join("authorized_clients");
     keys.save(&authorized).unwrap();
-    let listen = Listen::Network {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-        security: NetworkSecurity {
-            server_key_file: dir.join("server.key"),
-            authorized_clients_file: authorized,
-        },
+    let security = NetworkSecurity {
+        server_key_file: dir.join("server.key"),
+        authorized_clients_file: authorized,
     };
     let backend = manual_rig();
-    let mut cfg = config(backend.clone(), listen);
+    let mut cfg = net_config(backend.clone(), security);
     cfg.lease_expiry = EXPIRY;
     let h = Daemon::start(cfg).unwrap();
     let curve = CurveClient {
@@ -336,11 +332,11 @@ fn same_key_new_connection_acquires_disarmed() {
     init_log();
     let dir = tempfile::tempdir().unwrap();
     let (backend, h, curve) = curve_rig(dir.path());
-    let mut a = Client::connect_with(h.context(), h.ctrl_endpoint(), Some(&curve));
+    let mut a = Client::connect_with(h.context(), net_endpoints(&h).0.as_str(), Some(&curve));
     let mut m = Meter {
         sub: Sub::connect_with(
             h.context(),
-            h.data_endpoint(),
+            net_endpoints(&h).1.as_str(),
             &[b"d/1/levels"],
             Some(&curve),
             None,
@@ -366,7 +362,7 @@ fn same_key_new_connection_acquires_disarmed() {
 
     // A's socket drops within the lease; B, same key, acquires without force.
     drop(a);
-    let mut b = Client::connect_with(h.context(), h.ctrl_endpoint(), Some(&curve));
+    let mut b = Client::connect_with(h.context(), net_endpoints(&h).0.as_str(), Some(&curve));
     let tok_b = call_as(&mut b, 1000, Command::GenAcquire { force: false })
         .unwrap()
         .lease()
@@ -390,7 +386,7 @@ fn same_key_new_connection_acquires_disarmed() {
     assert!(peak == f32::NEG_INFINITY, "silent: peak {peak}, rms {rms}");
 
     // A, back on a new socket with its old token, holds nothing any more.
-    let mut a2 = Client::connect_with(h.context(), h.ctrl_endpoint(), Some(&curve));
+    let mut a2 = Client::connect_with(h.context(), net_endpoints(&h).0.as_str(), Some(&curve));
     let e = call_as(&mut a2, 2000, Command::GenRefresh { lease_token: tok_a }).unwrap_err();
     assert_eq!(e.code, ErrorCode::LeaseRequired);
     let e = call_as(
@@ -426,7 +422,7 @@ fn lease_refresh_with_token_survives_a_new_socket() {
     init_log();
     let dir = tempfile::tempdir().unwrap();
     let (_backend, h, curve) = curve_rig(dir.path());
-    let mut a = Client::connect_with(h.context(), h.ctrl_endpoint(), Some(&curve));
+    let mut a = Client::connect_with(h.context(), net_endpoints(&h).0.as_str(), Some(&curve));
     a.ok(Command::SessionOpen {
         config: session(false),
     });
@@ -440,7 +436,7 @@ fn lease_refresh_with_token_survives_a_new_socket() {
     assert!(g.armed && g.firing);
 
     drop(a);
-    let mut a2 = Client::connect_with(h.context(), h.ctrl_endpoint(), Some(&curve));
+    let mut a2 = Client::connect_with(h.context(), net_endpoints(&h).0.as_str(), Some(&curve));
     call_as(&mut a2, 1000, Command::GenRefresh { lease_token: tok }).unwrap();
     let g = generator(&mut a2, 1001);
     assert!(

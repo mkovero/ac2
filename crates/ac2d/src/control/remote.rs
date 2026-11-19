@@ -35,7 +35,6 @@ use crate::util::{invalid, refused, wall_ns};
 const TAP_QUEUE_S: f64 = 4.0 * crate::remote::MAX_LINK_OFFSET_S;
 
 use super::Control;
-use super::rig::ServerSetup;
 
 /// Frames a link may hold for the fan-out: a second of 64-frame blocks of one channel; past
 /// that the fan-out is behind and the audio shows late there.
@@ -192,10 +191,9 @@ impl Control {
     /// Starts a link to every peer of `peers` that has none or whose pairing changed, and
     /// ends the others.
     fn respawn_links(&mut self, peers: &[RigPeer]) {
-        let keys = match &self.s.server {
-            ServerSetup::Network(n) => Some(n.keys.clone()),
-            _ => None,
-        };
+        // Links authenticate with the server key whether or not this rig listens itself.
+        let keys = self.s.server.network.keys.clone();
+        self.s.server.network.sync_browse(!peers.is_empty());
         self.remote
             .links
             .retain(|rig, l| peers.iter().any(|p| p.rig == *rig && *p == l.peer));
@@ -328,8 +326,9 @@ impl Control {
         if rt.remote.is_some() {
             return;
         }
-        // The tap: other rigs may take this rig's inputs in network mode only.
-        if matches!(self.s.server, ServerSetup::Network(_)) {
+        // The tap, at every session start: whether another rig can take these inputs depends
+        // on the network pair, which comes and goes during the session.
+        {
             // A message per channel per device period; past this much audio queued the I/O
             // thread has stalled, and the newest frames are dropped rather than memory
             // spent on audio the other rig would take as late anyway.
@@ -549,7 +548,8 @@ impl Control {
             matches!(ours.system, SystemClock::Synced { .. }),
             Ordering::Relaxed,
         );
-        let network = matches!(self.s.server, ServerSetup::Network(_));
+        // Without a server key there is nothing to link with.
+        let network = self.s.server.network.keys.is_some();
         let peers = st.remote.peers.clone();
         let session_inputs: Vec<RemoteInput> = self
             .session

@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use ac2_proto::{Command, ReplyBody};
 use ac2_zmq::{AuthorizedKeys, Context, CurveClient, KeyPair};
-use ac2d::{Daemon, Listen, NetworkSecurity};
+use ac2d::{Daemon, NetworkSecurity};
 use common::*;
 
 #[test]
@@ -25,12 +25,8 @@ fn curve_authorized_ok_unauthorized_refused_on_both_sockets() {
         server_key_file: dir.path().join("server.key"),
         authorized_clients_file: authorized,
     };
-    let listen = Listen::Network {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-        security: security.clone(),
-    };
-    let h = Daemon::start(config(manual_rig(), listen)).unwrap();
+    let security = security.clone();
+    let h = Daemon::start(net_config(manual_rig(), security.clone())).unwrap();
     let server_key = h
         .server_public_key()
         .expect("network mode has a server key");
@@ -50,16 +46,22 @@ fn curve_authorized_ok_unauthorized_refused_on_both_sockets() {
     };
 
     // Authorized: ctrl answers with the ZAP identity, data delivers keepalives.
-    let mut c = Client::connect_with(&ctx, h.ctrl_endpoint(), Some(&ok));
+    let mut c = Client::connect_with(&ctx, net_endpoints(&h).0.as_str(), Some(&ok));
     let w = c.welcome(Command::Hello {
         client: "laptop".into(),
     });
     assert_eq!(w.client_id.0, "laptop");
-    let sub = Sub::connect_with(&ctx, h.data_endpoint(), &[b"ka"], Some(&ok), None);
+    let sub = Sub::connect_with(
+        &ctx,
+        net_endpoints(&h).1.as_str(),
+        &[b"ka"],
+        Some(&ok),
+        None,
+    );
     assert!(sub.ka(Duration::from_secs(5)).is_some());
 
     // Unauthorized: nothing comes back on either socket.
-    let intruder = Client::connect_with(&ctx, h.ctrl_endpoint(), Some(&bad));
+    let intruder = Client::connect_with(&ctx, net_endpoints(&h).0.as_str(), Some(&bad));
     let req = ac2_proto::Request::new(
         ac2_proto::units::RequestId(1),
         Command::Hello {
@@ -67,9 +69,9 @@ fn curve_authorized_ok_unauthorized_refused_on_both_sockets() {
         },
     );
     intruder.offer(&req);
-    let sub_bad = Sub::knock(&ctx, h.data_endpoint(), &[b""], Some(&bad));
+    let sub_bad = Sub::knock(&ctx, net_endpoints(&h).1.as_str(), &[b""], Some(&bad));
     // A plain (non-CURVE) client is refused too.
-    let plain = Sub::knock(&ctx, h.data_endpoint(), &[b""], None);
+    let plain = Sub::knock(&ctx, net_endpoints(&h).1.as_str(), &[b""], None);
     assert!(
         intruder.recv(Duration::from_millis(1500)).is_none(),
         "ctrl refused"
@@ -90,12 +92,7 @@ fn curve_authorized_ok_unauthorized_refused_on_both_sockets() {
     h.shutdown();
 
     // A restart reuses the stored key pair.
-    let listen = Listen::Network {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-        security,
-    };
-    let h2 = Daemon::start(config(manual_rig(), listen)).unwrap();
+    let h2 = Daemon::start(net_config(manual_rig(), security)).unwrap();
     assert_eq!(h2.server_public_key(), Some(server_key));
     h2.shutdown();
 }

@@ -7,6 +7,8 @@ use std::time::Duration;
 
 use ac2_audio::Backend;
 
+pub use crate::network::{NetBind, NetListen, NetPort, NetworkChoice};
+
 /// Everything [`crate::Daemon::start`] needs.
 #[derive(Clone)]
 pub struct DaemonConfig {
@@ -14,8 +16,18 @@ pub struct DaemonConfig {
     /// first. Chosen explicitly by the caller: there is no default and no fallback (a fake
     /// device must never stand in for a missing real one). See [`crate::backends`].
     pub backends: Vec<Arc<dyn Backend>>,
-    /// Where the ctrl and data sockets listen.
+    /// Where the local ctrl and data sockets listen, for the daemon's whole life.
     pub listen: Listen,
+    /// Whether the network listener runs beside the local one, and where.
+    pub network: NetworkChoice,
+    /// The server key pair and authorized-clients files. The key is loaded when it exists
+    /// (outgoing rig links use it with the network off too) and generated when the network
+    /// first comes on; `None`: no keys at all (in-process daemons).
+    pub keys: Option<NetworkSecurity>,
+    /// The host's interfaces, read at each bind and while bound.
+    pub interfaces: crate::network::Interfaces,
+    /// Retry delays of a network that is not listening.
+    pub net_retry: crate::network::Backoff,
     /// The hard upper bound of the system max level, dBFS RMS (0 dBFS = RMS of a full-scale
     /// sine). The level clients set at run time (`gen.ceiling`, kept in `rig_settings`)
     /// never exceeds it; requests above the level in force are refused, and the output path
@@ -53,14 +65,14 @@ pub struct DaemonConfig {
     pub recording_dir: Option<PathBuf>,
     /// The plan library's directory (`plan.*`); `None` keeps plans in memory only.
     pub plan_dir: Option<PathBuf>,
-    /// The rig's name, told every client at hello and advertised in network mode; display
+    /// The rig's name, told every client at hello and advertised while the network listens; display
     /// only (default *ac2 on <hostname>*).
     pub name: String,
     /// Where the daemon's identity comes from, loaded at every start in every mode.
     pub rig_id: RigIdSource,
-    /// mDNS advert of a network-mode daemon (`_ac2._tcp`) under [`Self::name`]; ignored in
-    /// local modes, which are not reachable from the network. `None` advertises nothing.
-    pub advertise: Option<Advertise>,
+    /// mDNS: the advert while the network listens, and the browse that follows paired rigs
+    /// to new addresses. `None`: no mDNS at all.
+    pub mdns: Option<Mdns>,
     /// Local time of day, which decides each band-meter second's day or night limits.
     pub local_clock: LocalClock,
     /// Tell systemd when the daemon serves, ping its watchdog from the control loop and say
@@ -151,13 +163,16 @@ pub enum RigIdSource {
     Ephemeral,
 }
 
-/// What a network-mode daemon advertises over mDNS. The advert names the rig
-/// ([`DaemonConfig::name`]) and its key fingerprint; it never grants anything (clients
-/// still need a pinned key and an entry in the authorized-clients file).
+/// The daemon's mDNS. The advert names the rig ([`DaemonConfig::name`]) and its key
+/// fingerprint; it never grants anything (clients still need a pinned key and an entry in
+/// the authorized-clients file).
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Advertise {
+pub struct Mdns {
     /// mDNS port and interfaces (tests confine it to loopback).
-    pub mdns: ac2_discovery::Options,
+    pub options: ac2_discovery::Options,
+    /// Advertise while the network listens (`--no-mdns` clears it; the browse that follows
+    /// paired rigs runs either way).
+    pub advertise: bool,
 }
 
 impl fmt::Debug for DaemonConfig {
@@ -168,6 +183,9 @@ impl fmt::Debug for DaemonConfig {
                 &self.backends.iter().map(|b| b.kind()).collect::<Vec<_>>(),
             )
             .field("listen", &self.listen)
+            .field("network", &self.network)
+            .field("keys", &self.keys)
+            .field("net_retry", &self.net_retry)
             .field("max_level_dbfs", &self.max_level_dbfs)
             .field("rig_settings", &self.rig_settings)
             .field("rig_logs", &self.rig_logs)
@@ -183,7 +201,7 @@ impl fmt::Debug for DaemonConfig {
             .field("plan_dir", &self.plan_dir)
             .field("name", &self.name)
             .field("rig_id", &self.rig_id)
-            .field("advertise", &self.advertise)
+            .field("mdns", &self.mdns)
             .field("local_clock", &self.local_clock)
             .field("system_clock", &self.system_clock)
             .field("systemd_notify", &self.systemd_notify)
@@ -202,6 +220,10 @@ impl DaemonConfig {
         Self {
             backends: vec![backend],
             listen,
+            network: NetworkChoice::Off,
+            keys: None,
+            interfaces: crate::network::Interfaces::host(),
+            net_retry: crate::network::Backoff::default(),
             max_level_dbfs,
             rig_settings: None,
             rig_logs: None,
@@ -217,7 +239,7 @@ impl DaemonConfig {
             plan_dir: None,
             name: ac2_discovery::default_rig_name(),
             rig_id: RigIdSource::Ephemeral,
-            advertise: None,
+            mdns: None,
             local_clock: LocalClock::Host,
             systemd_notify: false,
             system_clock: SystemClockSource::Os,
@@ -261,7 +283,7 @@ impl Default for DedupLimits {
     }
 }
 
-/// Transports.
+/// The local transport.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Listen {
     /// In-process only (`inproc://<name>/ctrl`, `…/data`), for a daemon inside a test.
@@ -278,19 +300,9 @@ pub enum Listen {
         /// Data (ROUTER) endpoint.
         data: String,
     },
-    /// Network mode: `tcp://` on any interface, CURVE on both sockets, every client
-    /// authenticated by the ZAP handler against the authorized-clients file.
-    Network {
-        /// Ctrl (ROUTER) endpoint.
-        ctrl: String,
-        /// Data (ROUTER) endpoint.
-        data: String,
-        /// Key files.
-        security: NetworkSecurity,
-    },
 }
 
-/// Key files of network mode.
+/// Key files of the network.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NetworkSecurity {
     /// Server CURVE key pair; generated on first run (atomic write, 0600 on Unix).
@@ -311,8 +323,12 @@ impl fmt::Display for ListenError {
 
 impl std::error::Error for ListenError {}
 
-/// Ctrl port of the Windows local endpoints and the network-mode default; data is + 1.
+/// The network's default ctrl port; data is + 1.
 pub const DEFAULT_PORT: u16 = 47_820;
+
+/// Ctrl port of the Windows local endpoints (data + 1), apart from the network's default so
+/// the two never clash.
+pub const LOCAL_PORT: u16 = 47_822;
 
 /// Per-user directory of the local daemon's sockets and pid file: `$AC2_RUNTIME_DIR`, else
 /// `$XDG_RUNTIME_DIR/ac2`, else `<temp>/ac2-<user>` (the same rule as `ac2-client`).
@@ -334,7 +350,7 @@ pub fn pid_file() -> PathBuf {
     runtime_dir().join("ac2d.pid")
 }
 
-fn tcp_host_port(endpoint: &str) -> Option<(&str, &str)> {
+pub(crate) fn tcp_host_port(endpoint: &str) -> Option<(&str, &str)> {
     let rest = endpoint.strip_prefix("tcp://")?;
     if let Some(v6) = rest.strip_prefix('[') {
         let (host, tail) = v6.split_once(']')?;
@@ -354,7 +370,7 @@ fn is_loopback_tcp(endpoint: &str) -> bool {
 
 impl Listen {
     /// The platform's default local endpoints: `ipc://<runtime dir>/ctrl.sock` and
-    /// `data.sock` on Unix, `tcp://127.0.0.1:47820` / `:47821` on Windows.
+    /// `data.sock` on Unix, `tcp://127.0.0.1:47822` / `:47823` on Windows.
     pub fn default_local() -> Self {
         #[cfg(unix)]
         {
@@ -367,49 +383,22 @@ impl Listen {
         #[cfg(not(unix))]
         {
             Self::Local {
-                ctrl: format!("tcp://127.0.0.1:{DEFAULT_PORT}"),
-                data: format!("tcp://127.0.0.1:{}", DEFAULT_PORT + 1),
+                ctrl: format!("tcp://127.0.0.1:{LOCAL_PORT}"),
+                data: format!("tcp://127.0.0.1:{}", LOCAL_PORT + 1),
             }
         }
     }
 
-    /// Network mode from `tcp://<iface>[:<port>]`: ctrl on `port` (default
-    /// [`DEFAULT_PORT`]), data on `port + 1`.
-    pub fn network(endpoint: &str, security: NetworkSecurity) -> Result<Self, ListenError> {
-        let bad = || ListenError(format!("{endpoint}: expected tcp://<iface>[:<port>]"));
-        let rest = endpoint.strip_prefix("tcp://").ok_or_else(bad)?;
-        let with_port = if tcp_host_port(endpoint).is_some_and(|(h, p)| {
-            !h.is_empty() && !p.is_empty() && p.bytes().all(|c| c.is_ascii_digit())
-        }) {
-            endpoint.to_owned()
-        } else if rest.starts_with('[') || !rest.contains(':') {
-            format!("tcp://{rest}:{DEFAULT_PORT}")
-        } else {
-            return Err(bad());
-        };
-        let (host, port) = tcp_host_port(&with_port).ok_or_else(bad)?;
-        let port: u16 = port
-            .parse()
-            .map_err(|_| ListenError(format!("{endpoint}: bad port")))?;
-        let data_port = port
-            .checked_add(1)
-            .filter(|_| port != 0)
-            .ok_or_else(|| ListenError(format!("{endpoint}: need a fixed port below 65535")))?;
-        let host = if host.contains(':') {
-            format!("[{host}]")
-        } else {
-            host.to_string()
-        };
-        Ok(Self::Network {
-            ctrl: format!("tcp://{host}:{port}"),
-            data: format!("tcp://{host}:{data_port}"),
-            security,
-        })
-    }
-
-    /// Checks that the endpoints fit the mode: local endpoints are `ipc://` or loopback TCP,
-    /// network endpoints are TCP.
-    pub fn validate(&self) -> Result<(), ListenError> {
+    /// Checks that the endpoints are local (`ipc://` or loopback TCP), and that `network`
+    /// fits beside them ([`crate::network::check_port`]).
+    pub fn validate(&self, network: &NetworkChoice) -> Result<(), ListenError> {
+        if let NetworkChoice::Fixed(NetListen {
+            port: NetPort::Port(p),
+            ..
+        }) = network
+        {
+            crate::network::check_port(*p, self)?;
+        }
         match self {
             Self::Inproc { name } => {
                 if name.is_empty() || name.contains('\0') {
@@ -422,25 +411,13 @@ impl Listen {
                     if !ok {
                         return Err(ListenError(format!(
                             "{e}: local mode serves only ipc:// or tcp:// on a loopback address; \
-                             other interfaces need network mode (CURVE)"
+                             other interfaces are the network's (CURVE)"
                         )));
-                    }
-                }
-            }
-            Self::Network { ctrl, data, .. } => {
-                for e in [ctrl, data] {
-                    if tcp_host_port(e).is_none() {
-                        return Err(ListenError(format!("{e}: network mode needs tcp://")));
                     }
                 }
             }
         }
         Ok(())
-    }
-
-    /// Whether this is network mode.
-    pub fn is_network(&self) -> bool {
-        matches!(self, Self::Network { .. })
     }
 }
 
@@ -454,35 +431,29 @@ mod tests {
             ctrl: "tcp://127.0.0.1:1".into(),
             data: "ipc:///tmp/x".into(),
         };
-        assert!(ok.validate().is_ok());
+        assert!(ok.validate(&NetworkChoice::Off).is_ok());
         let bad = Listen::Local {
             ctrl: "tcp://0.0.0.0:1".into(),
             data: "ipc:///tmp/x".into(),
         };
-        assert!(bad.validate().is_err());
+        assert!(bad.validate(&NetworkChoice::Off).is_err());
     }
 
     #[test]
-    fn network_ports() {
-        let sec = NetworkSecurity {
-            server_key_file: "k".into(),
-            authorized_clients_file: "a".into(),
+    fn a_fixed_network_must_fit_beside_local_tcp() {
+        let local = Listen::Local {
+            ctrl: "tcp://127.0.0.1:47820".into(),
+            data: "tcp://127.0.0.1:47821".into(),
         };
-        let l = Listen::network("tcp://0.0.0.0:5000", sec.clone()).expect("valid");
-        assert_eq!(
-            l,
-            Listen::Network {
-                ctrl: "tcp://0.0.0.0:5000".into(),
-                data: "tcp://0.0.0.0:5001".into(),
-                security: sec.clone()
-            }
-        );
-        assert!(Listen::network("tcp://0.0.0.0:65535", sec.clone()).is_err());
-        assert!(matches!(
-            Listen::network("tcp://10.0.0.2", sec.clone()),
-            Ok(Listen::Network { ctrl, data, .. })
-                if ctrl == "tcp://10.0.0.2:47820" && data == "tcp://10.0.0.2:47821"
-        ));
-        assert!(Listen::network("ipc:///x", sec).is_err());
+        let at = |port| {
+            NetworkChoice::Fixed(NetListen {
+                bind: NetBind::All,
+                port: NetPort::Port(port),
+            })
+        };
+        assert!(local.validate(&at(DEFAULT_PORT)).is_err());
+        assert!(local.validate(&at(47_819)).is_err());
+        assert!(local.validate(&at(47_822)).is_ok());
+        assert!(local.validate(&at(0)).is_err());
     }
 }

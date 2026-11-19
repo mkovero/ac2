@@ -15,12 +15,13 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use super::{
-    ActiveSweep, CalState, Change, ClientId, Control, ControlMsg, CoreBandLimit, CoreGenerator,
-    CoreSignal, GenAction, GeneratorConfig, GeneratorSettings, LeaseToken, LeasedSource, MeasKind,
-    ProtoError, Recording, ReplyBody, Seconds, SweepAnalysis, SweepConfig, SweepError,
-    SweepFailure, SweepId, SweepInput, SweepRun, SweepStatus, SweepTrain, TraceKind, TraceMeta,
-    TraceSource, WallNs, block_index, dbfs_to_rms, gen_err, jobs,
+    ActiveSweep, CalState, Change, Control, ControlMsg, CoreBandLimit, CoreGenerator, CoreSignal,
+    GenAction, GeneratorConfig, GeneratorSettings, LeaseToken, LeasedSource, MeasKind, ProtoError,
+    Recording, ReplyBody, Seconds, SweepAnalysis, SweepConfig, SweepError, SweepFailure, SweepId,
+    SweepInput, SweepRun, SweepStatus, SweepTrain, TraceKind, TraceMeta, TraceSource, WallNs,
+    block_index, dbfs_to_rms, gen_err, jobs,
 };
+use crate::route::Peer;
 use crate::sweep;
 use crate::util::{internal, invalid, refused, wall_ns};
 use ac2_proto::model::Signal;
@@ -31,7 +32,7 @@ use ac2_traces::meta;
 impl Control {
     pub(super) fn sweep_run(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         token: LeaseToken,
         meas: MeasId,
         name: Option<String>,
@@ -238,7 +239,7 @@ impl Control {
         let run = SweepRun {
             id,
             meas,
-            owner: client.clone(),
+            owner: client.id().clone(),
             name,
             reference_input: reference,
             measurement_inputs: req.measurement_inputs.clone(),
@@ -258,7 +259,7 @@ impl Control {
             target: "ac2d::audit",
             "sweep {} by {}: {} × {:.2} s at {:.1} dBFS on out {:?}, inputs {:?} re {}",
             id.0,
-            client.0,
+            client.id().0,
             run.repeats,
             run.sweep_duration.0,
             level.0,

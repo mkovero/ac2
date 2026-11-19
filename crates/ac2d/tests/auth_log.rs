@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use ac2_proto::model::ServerMode;
 use ac2_proto::{Command, ReplyBody};
 use ac2_zmq::{AuthorizedKeys, Context, CurveClient, KeyPair};
-use ac2d::{Daemon, Listen, NetworkSecurity};
+use ac2d::{Daemon, NetworkSecurity};
 use common::*;
 
 #[derive(Clone, Default)]
@@ -57,15 +57,11 @@ fn refused_key_is_logged_once_per_key_and_address() {
     keys.insert("laptop", laptop.public).unwrap();
     let authorized = dir.path().join("authorized_clients");
     keys.save(&authorized).unwrap();
-    let listen = Listen::Network {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-        security: NetworkSecurity {
-            server_key_file: dir.path().join("server.key"),
-            authorized_clients_file: authorized.clone(),
-        },
+    let security = NetworkSecurity {
+        server_key_file: dir.path().join("server.key"),
+        authorized_clients_file: authorized.clone(),
     };
-    let h = Daemon::start(config(manual_rig(), listen)).unwrap();
+    let h = Daemon::start(net_config(manual_rig(), security)).unwrap();
     let server_key = h.server_public_key().unwrap();
     let ctx = Context::new().unwrap();
     let curve = |keys: &KeyPair| CurveClient {
@@ -79,12 +75,12 @@ fn refused_key_is_logged_once_per_key_and_address() {
     for _ in 0..3 {
         socks.push(Client::connect_with(
             &ctx,
-            h.ctrl_endpoint(),
+            net_endpoints(&h).0.as_str(),
             Some(&curve(&stranger)),
         ));
         subs.push(Sub::knock(
             &ctx,
-            h.data_endpoint(),
+            net_endpoints(&h).1.as_str(),
             &[b""],
             Some(&curve(&stranger)),
         ));
@@ -97,7 +93,8 @@ fn refused_key_is_logged_once_per_key_and_address() {
     }
     // The remaining handshakes reached the handler: the daemon counts all six refusals
     // (`server.info`, asked by the authorized laptop).
-    let mut laptop_c = Client::connect_with(&ctx, h.ctrl_endpoint(), Some(&curve(&laptop)));
+    let mut laptop_c =
+        Client::connect_with(&ctx, net_endpoints(&h).0.as_str(), Some(&curve(&laptop)));
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let ReplyBody::Server(info) = laptop_c.ok(Command::ServerInfo) else {
@@ -129,7 +126,7 @@ fn refused_key_is_logged_once_per_key_and_address() {
     // Another key from the same address is its own entry.
     socks.push(Client::connect_with(
         &ctx,
-        h.ctrl_endpoint(),
+        net_endpoints(&h).0.as_str(),
         Some(&curve(&other)),
     ));
     let other_needle = format!(
@@ -143,7 +140,7 @@ fn refused_key_is_logged_once_per_key_and_address() {
     assert_eq!(log.lines_with(&other_needle).len(), 1);
 
     // An accepted client is named with its fingerprint.
-    let _ok = Client::connect_with(&ctx, h.ctrl_endpoint(), Some(&curve(&laptop)));
+    let _ok = Client::connect_with(&ctx, net_endpoints(&h).0.as_str(), Some(&curve(&laptop)));
     let accepted = format!(
         "accepted client \"laptop\" (fingerprint {}) from 127.0.0.1",
         laptop.public.fingerprint()

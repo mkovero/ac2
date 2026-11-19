@@ -11,6 +11,11 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# `Handle::fail_zap_handler`: tests of the network's recovery from a dead ZAP handler.
+# Never used by a shipping binary.
+fault-injection = ["ac2-zmq/fault-injection"]
+
 [lib]
 path = "src/lib.rs"
 
@@ -35,6 +40,8 @@ chrono = { workspace = true, features = ["clock"] }
 clap = { workspace = true, features = ["derive"] }
 ctrlc = { workspace = true, features = ["termination"] }
 getrandom = { workspace = true }
+# The host's interfaces, to bind the network on one by name and notice its address go.
+if-addrs = { workspace = true }
 # OSC cues: encoding only; the socket is ours (non-blocking, never on the audio thread).
 rosc = "0.11"
 num-complex = { workspace = true }
@@ -51,6 +58,7 @@ tracing = { workspace = true }
 libc = { workspace = true }
 
 [dev-dependencies]
+ac2d = { path = ".", features = ["fault-injection"] }
 ac2-proto = { path = "../ac2-proto", features = ["samples"] }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 ac2-client = { path = "../ac2-client" }

@@ -7,10 +7,11 @@ use ac2_proto::event::{Change, Patch};
 use ac2_proto::model::{
     ColourFamily, DelayState, GenAction, MeasConfig, MeasKind, Measurement, SweepFailure,
 };
-use ac2_proto::units::{ClientId, Db, MeasId, Rev, Seconds};
+use ac2_proto::units::{Db, MeasId, Rev, Seconds};
 use ac2_proto::{Command, ErrorCode, ErrorDetail, ProtoError, ReplyBody, Welcome};
 
 use crate::jobs::JobCmd;
+use crate::route::Peer;
 use crate::util::{internal, invalid, missing, perr_detail, refused};
 
 use super::validate::{
@@ -19,11 +20,8 @@ use super::validate::{
 use super::{Control, DelaySource, cal, owners};
 
 impl Control {
-    pub(super) fn execute(
-        &mut self,
-        client: &ClientId,
-        cmd: Command,
-    ) -> Result<ReplyBody, ProtoError> {
+    pub(super) fn execute(&mut self, peer: &Peer, cmd: Command) -> Result<ReplyBody, ProtoError> {
+        let client = peer.id();
         let ack = |rev: Rev| Ok(ReplyBody::Ack { rev });
         self.rig_preflight(&cmd)?;
         match cmd {
@@ -60,21 +58,21 @@ impl Control {
             Command::SessionControlPanel { .. } => {
                 Err(internal("session.control_panel is answered asynchronously"))
             }
-            Command::SessionOpen { config } => self.rig_session_open(client, config),
+            Command::SessionOpen { config } => self.rig_session_open(peer, config),
             Command::SessionClose => {
                 self.rig_session_closing();
-                self.session_close(client);
+                self.session_close(peer);
                 ack(self.store.rev())
             }
             Command::SessionStatus => Ok(ReplyBody::Session(self.store.state().session.clone())),
 
-            Command::GenAcquire { force } => self.gen_acquire(client, force),
+            Command::GenAcquire { force } => self.gen_acquire(peer, force),
             Command::GenSet {
                 lease_token,
                 desired,
-            } => self.gen_set(client, lease_token, desired),
+            } => self.gen_set(peer, lease_token, desired),
             Command::GenRefresh { lease_token } => {
-                self.lease_check(client, lease_token)?;
+                self.lease_check(peer, lease_token)?;
                 let deadline = Instant::now() + self.s.lease_expiry;
                 if let Some(l) = &mut self.out.lease {
                     l.deadline = deadline;
@@ -85,7 +83,7 @@ impl Control {
                 Ok(ReplyBody::Lease(self.wire_lease(lease_token)))
             }
             Command::GenRelease { lease_token } => {
-                self.lease_check(client, lease_token)?;
+                self.lease_check(peer, lease_token)?;
                 self.abort_sweep(SweepFailure::Stopped, "the stimulus lease was released");
                 self.stop_output();
                 self.out.lease = None;
@@ -93,19 +91,19 @@ impl Control {
                 g.owner = None;
                 g.armed = false;
                 g.firing = false;
-                self.audit(&mut g, GenAction::Release, Some(client));
+                self.audit(&mut g, GenAction::Release, Some(peer));
                 ack(self.commit(Change::Generator(g)))
             }
             Command::GenCeiling {
                 ceiling,
                 confirm_raise,
-            } => self.gen_ceiling(client, ceiling, confirm_raise),
+            } => self.gen_ceiling(peer, ceiling, confirm_raise),
             Command::SessionOutputs { outputs } => self.session_outputs(outputs),
             Command::ServerInfo => Ok(ReplyBody::Server(self.server_info())),
-            Command::ServerAuthorize { name, key } => self.server_authorize(client, &name, &key),
-            Command::ServerRevoke { name } => self.server_revoke(client, &name),
+            Command::ServerAuthorize { name, key } => self.server_authorize(peer, &name, &key),
+            Command::ServerRevoke { name } => self.server_revoke(peer, &name),
             Command::AuthAdmitRig { key, rig_id, name } => {
-                self.admit_rig(client, &name, &key, rig_id)
+                self.admit_rig(peer, &name, &key, rig_id)
             }
             Command::RigPeers { peers } => self.set_rig_peers(peers),
             Command::SourceState => Ok(ReplyBody::SourceState(Box::new(self.source_state()))),
@@ -137,7 +135,7 @@ impl Control {
                 let mut g = self.store.state().generator.clone();
                 g.armed = false;
                 g.firing = false;
-                self.audit(&mut g, GenAction::Stop, Some(client));
+                self.audit(&mut g, GenAction::Stop, Some(peer));
                 ack(self.commit(Change::Generator(g)))
             }
 
@@ -185,7 +183,7 @@ impl Control {
                 Ok(self.reply_meas(m))
             }
             Command::MeasDelete { meas, traces } => self.meas_delete(meas, traces),
-            Command::MeasEq { meas, edit } => self.meas_eq(client, meas, edit),
+            Command::MeasEq { meas, edit } => self.meas_eq(peer, meas, edit),
             Command::MeasStart { meas } => self.meas_start(meas).map(ReplyBody::Measurement),
             Command::MeasStop { meas } => {
                 let mut m = self.meas(meas)?.clone();
@@ -330,7 +328,7 @@ impl Control {
                 at_place,
                 background,
                 place,
-            } => self.spl_band_transfer(client, meas, &foh, &at_place, background.as_ref(), &place),
+            } => self.spl_band_transfer(peer, meas, &foh, &at_place, background.as_ref(), &place),
             Command::SplHistoryGet { meas, span } => self.spl_history_get(meas, span),
             Command::SplBandLogGet {
                 meas,
@@ -343,7 +341,7 @@ impl Control {
                 lease_token,
                 meas,
                 name,
-            } => self.sweep_run(client, lease_token, meas, name),
+            } => self.sweep_run(peer, lease_token, meas, name),
 
             Command::StateSnapshot => Ok(ReplyBody::Snapshot(Box::new(
                 self.store.snapshot(self.s.incarnation),
@@ -379,23 +377,23 @@ impl Control {
                 file,
                 bytes,
                 sha256,
-            } => self.file_upload_begin(client, file, bytes, sha256),
+            } => self.file_upload_begin(peer, file, bytes, sha256),
             Command::FileUploadChunk {
                 transfer,
                 offset,
                 data,
-            } => self.file_upload_chunk(client, transfer, offset, &data),
+            } => self.file_upload_chunk(peer, transfer, offset, &data),
             Command::FileDownloadChunk { transfer, offset } => {
-                self.file_download_chunk(client, transfer, offset)
+                self.file_download_chunk(peer, transfer, offset)
             }
             Command::FileDownloadEnd { transfer, saved_as } => {
-                self.file_download_end(client, transfer, saved_as)
+                self.file_download_end(peer, transfer, saved_as)
             }
-            Command::RecStart { request } => self.rec_start(client, request),
+            Command::RecStart { request } => self.rec_start(peer, request),
             Command::RecStop => self.rec_stop(),
             Command::RecList => self.rec_list(),
             Command::SessionReplay { recording, pace } => {
-                self.session_replay(client, &recording, pace)
+                self.session_replay(peer, &recording, pace)
             }
             Command::PlanSave { plan } => self.plan_save(plan),
             Command::PlanList => Ok(ReplyBody::Plans(self.store.state().plans.clone())),

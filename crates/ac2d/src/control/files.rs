@@ -17,7 +17,7 @@ use ac2_proto::model::{
     Salvage, SalvageRefusal, Session, SessionConfig, SessionFile, SessionOrigin, SessionRef,
     SweepFailure, TraceKind, TraceOwner,
 };
-use ac2_proto::units::{ClientId, Db, MeasId, Rev, Seconds, SessionEpoch, TransferId, WallNs};
+use ac2_proto::units::{Db, MeasId, Rev, Seconds, SessionEpoch, TransferId, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError, ReplyBody};
 use ac2_traces::meta;
 use ac2_traces::session::{
@@ -26,6 +26,7 @@ use ac2_traces::session::{
 
 use super::file_jobs::{FileDone, Pending, ReplaceFrom, ReplaceRead, Work};
 use super::{Control, check_delay, delay_samples, maths, static_grid, validate_meas};
+use crate::route::Peer;
 use crate::util::{internal, invalid, missing, perr, perr_detail, refused, wall_ns};
 
 pub(super) fn session_err(e: SessionError) -> ProtoError {
@@ -58,16 +59,20 @@ pub(super) fn info(name: &str, dir: &Path, m: &Manifest) -> SessionFile {
 }
 
 impl Control {
-    /// The directory a reference names. Paths are refused in network mode: a remote client
-    /// may only use the daemon's own session directory.
-    pub(super) fn session_path(&self, r: &SessionRef) -> Result<(String, PathBuf), ProtoError> {
+    /// The directory a reference names. Paths are for clients on the local pair only: one
+    /// on the network may only use the daemon's own session directory.
+    pub(super) fn session_path(
+        &self,
+        client: &Peer,
+        r: &SessionRef,
+    ) -> Result<(String, PathBuf), ProtoError> {
         match r {
             SessionRef::Name { name } => {
                 session::validate_name(name).map_err(session_err)?;
                 Ok((name.clone(), self.s.session_dir.join(name)))
             }
             SessionRef::Path { path } => {
-                if self.s.network {
+                if !client.is_local() {
                     return Err(refused(
                         "remote clients name sessions; paths are for local clients only",
                     ));
@@ -154,10 +159,11 @@ impl Control {
     /// `file.save`: the content now, written by a worker ([`super::file_jobs`]).
     pub(super) fn begin_save(
         &mut self,
+        client: &Peer,
         r: &SessionRef,
         overwrite: bool,
     ) -> Result<(Pending, Work), ProtoError> {
-        let (name, dir) = self.session_path(r)?;
+        let (name, dir) = self.session_path(client, r)?;
         let origin = Self::origin_of(r, &dir);
         // Its own session is saved again without asking.
         let ask = !overwrite && self.working.origin.as_ref() != Some(&origin);
@@ -213,7 +219,7 @@ impl Control {
     /// [`Self::finish_replace`].
     pub(super) fn begin_load(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         r: &SessionRef,
         discard: bool,
     ) -> Result<(Pending, Work), ProtoError> {
@@ -233,7 +239,7 @@ impl Control {
                 )
             }
             _ => {
-                let (name, dir) = self.session_path(r)?;
+                let (name, dir) = self.session_path(client, r)?;
                 let origin = Self::origin_of(r, &dir);
                 let src = Source::Dir(dir.clone());
                 (ReplaceFrom::Dir { name, dir, origin }, src)
@@ -245,7 +251,7 @@ impl Control {
     /// `file.new`: a replace with the empty session.
     pub(super) fn begin_new(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         discard: bool,
     ) -> Result<(Pending, Work), ProtoError> {
         self.guard_unsaved(discard)?;
@@ -256,7 +262,7 @@ impl Control {
     /// captured here, written by the worker after the new session read well.
     fn begin_replace(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         discard: bool,
         from: ReplaceFrom,
         src: Source,
@@ -288,7 +294,7 @@ impl Control {
     /// began on (`super::file_jobs`).
     pub(super) fn finish_replace(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         discard: bool,
         from: ReplaceFrom,
         standing: (u64, u64),
@@ -364,7 +370,7 @@ impl Control {
     /// worker reads the files (an upload unpacked first); [`Self::finish_salvage`] imports.
     pub(super) fn begin_salvage(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         r: &SessionRef,
     ) -> Result<(Pending, Work), ProtoError> {
         let (transfer, src) = match r {
@@ -375,7 +381,7 @@ impl Control {
                     Source::Upload(self.stage_path("upload"), bytes),
                 )
             }
-            _ => (None, Source::Dir(self.session_path(r)?.1)),
+            _ => (None, Source::Dir(self.session_path(client, r)?.1)),
         };
         let work: Work = Box::new(move || FileDone::Salvage(src.read_traces()));
         Ok((Pending::Salvage { transfer }, work))
@@ -480,7 +486,7 @@ impl Control {
     /// docs); the rig meters go on ([`super::rig_meas`]). Returns the new session epoch.
     pub(super) fn replace_session(
         &mut self,
-        client: Option<&ClientId>,
+        client: Option<&Peer>,
         mut data: SessionData,
     ) -> Result<SessionEpoch, ProtoError> {
         // Everything is checked before anything changes: a refused load leaves the state

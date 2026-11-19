@@ -31,13 +31,14 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use ac2_proto::model::SessionOrigin;
-use ac2_proto::units::{ClientId, RequestId, TransferId, WallNs};
+use ac2_proto::units::{RequestId, TransferId, WallNs};
 use ac2_proto::{Command, ProtoError, ReplyBody};
 use ac2_traces::session::{Manifest, Session as SessionData};
 
 use super::files::SalvageRead;
 use super::working::Staged;
 use super::{Control, ControlMsg, PendingReply};
+use crate::route::{Peer, Route};
 use crate::util::{internal, refused};
 
 /// How long shutdown waits for a file operation under way to finish writing.
@@ -55,7 +56,7 @@ pub(super) enum Pending {
     },
     /// `file.load` or `file.new`.
     Replace {
-        client: ClientId,
+        client: Peer,
         discard: bool,
         from: ReplaceFrom,
         /// [`Control::standing`] when it began.
@@ -63,7 +64,7 @@ pub(super) enum Pending {
     },
     /// `file.recover`.
     Recover {
-        client: ClientId,
+        client: Peer,
         /// [`Control::standing`] when it began.
         standing: (u64, u64),
     },
@@ -77,7 +78,7 @@ pub(super) enum Pending {
         target: PathBuf,
     },
     Download {
-        client: ClientId,
+        client: Peer,
         stem: String,
         /// A working-state download: the content hash and time it was packed at.
         working: Option<(u64, WallNs)>,
@@ -159,8 +160,8 @@ impl Control {
     /// reply comes later; `Err`: refused before anything began.
     pub(super) fn start_file_job(
         &mut self,
-        routing_id: &[u8],
-        client: &ClientId,
+        route: &Route,
+        client: &Peer,
         id: RequestId,
         cmd: Command,
     ) -> Result<(), ProtoError> {
@@ -169,7 +170,7 @@ impl Control {
             Command::FileList => self.begin_list(),
             Command::FileSave { session, overwrite } => {
                 self.file_idle(command)?;
-                self.begin_save(&session, overwrite)?
+                self.begin_save(client, &session, overwrite)?
             }
             Command::FileLoad { session, discard } => {
                 self.file_idle(command)?;
@@ -225,7 +226,7 @@ impl Control {
             FileJob {
                 command,
                 reply: PendingReply {
-                    routing_id: routing_id.to_vec(),
+                    route: route.clone(),
                     client: client.clone(),
                     id,
                 },
@@ -294,7 +295,7 @@ impl Control {
             }
         };
         let r = job.reply;
-        self.answer(&r.routing_id, &r.client, r.id, result, Instant::now());
+        self.answer(&r.route, &r.client, r.id, result, Instant::now());
     }
 
     /// Shutdown: a file operation under way finishes writing first, within a bound.

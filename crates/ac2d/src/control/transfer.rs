@@ -15,13 +15,14 @@ use std::time::{Duration, Instant};
 
 use ac2_archive::{ArchiveError, MAX_ARCHIVE_BYTES};
 use ac2_proto::model::{SessionOrigin, SessionRef, Transfer};
-use ac2_proto::units::{Blob, ClientId, TransferId, WallNs};
+use ac2_proto::units::{Blob, TransferId, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError, ReplyBody};
 use ac2_traces::session::{self, Manifest};
 
 use super::Control;
 use super::file_jobs::{FileDone, Pending, Work};
 use super::files::{info, session_err};
+use crate::route::Peer;
 use crate::util::{internal, invalid, missing, perr, perr_detail, refused};
 
 /// Largest chunk, bytes: well inside a 4 MiB ctrl message with its framing.
@@ -51,7 +52,7 @@ enum Kind {
 
 #[derive(Debug)]
 struct Xfer {
-    client: ClientId,
+    client: Peer,
     last: Instant,
     kind: Kind,
 }
@@ -104,7 +105,7 @@ impl Transfers {
         });
     }
 
-    fn add(&mut self, client: &ClientId, kind: Kind) -> Result<TransferId, ProtoError> {
+    fn add(&mut self, client: &Peer, kind: Kind) -> Result<TransferId, ProtoError> {
         let now = Instant::now();
         self.prune(now);
         if self.map.len() >= MAX_TRANSFERS {
@@ -125,7 +126,7 @@ impl Transfers {
         Ok(id)
     }
 
-    fn get(&mut self, client: &ClientId, id: TransferId) -> Result<&mut Xfer, ProtoError> {
+    fn get(&mut self, client: &Peer, id: TransferId) -> Result<&mut Xfer, ProtoError> {
         self.prune(Instant::now());
         match self.map.get_mut(&id) {
             Some(x) if x.client == *client => {
@@ -139,7 +140,7 @@ impl Transfers {
     /// A complete upload's client path and bytes.
     pub(crate) fn upload(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         id: TransferId,
     ) -> Result<(String, &[u8]), ProtoError> {
         match &self.get(client, id)?.kind {
@@ -178,7 +179,7 @@ impl Control {
 
     pub(super) fn file_upload_begin(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         file: String,
         bytes: u64,
         sha256: String,
@@ -216,7 +217,7 @@ impl Control {
 
     pub(super) fn file_upload_chunk(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         id: TransferId,
         offset: u64,
         data: &Blob,
@@ -255,7 +256,7 @@ impl Control {
     /// unpacking and renames run on a worker ([`super::file_jobs`]).
     pub(super) fn begin_import(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         id: TransferId,
         name: String,
         overwrite: bool,
@@ -299,7 +300,7 @@ impl Control {
     /// session), packed by a worker.
     pub(super) fn begin_download(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         r: Option<&SessionRef>,
     ) -> Result<(Pending, Work), ProtoError> {
         let (stem, work, working): (String, Work, _) = match r {
@@ -331,7 +332,7 @@ impl Control {
                 return Err(invalid("an upload is on the client already"));
             }
             Some(r) => {
-                let (name, dir) = self.session_path(r)?;
+                let (name, dir) = self.session_path(client, r)?;
                 let work: Work = Box::new(move || {
                     FileDone::Download(
                         session::read_manifest(&dir)
@@ -354,7 +355,7 @@ impl Control {
 
     pub(super) fn finish_download(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         stem: &str,
         working: Option<(u64, WallNs)>,
         packed: Result<Vec<u8>, ProtoError>,
@@ -376,7 +377,7 @@ impl Control {
 
     pub(super) fn file_download_chunk(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         id: TransferId,
         offset: u64,
     ) -> Result<ReplyBody, ProtoError> {
@@ -397,7 +398,7 @@ impl Control {
 
     pub(super) fn file_download_end(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         id: TransferId,
         saved_as: Option<String>,
     ) -> Result<ReplyBody, ProtoError> {
@@ -408,7 +409,7 @@ impl Control {
         let working = *working;
         self.transfers.remove(id);
         if let (Some(path), Some((hash, at))) = (saved_as, working) {
-            tracing::info!("working state exported by {} to {path:?}", client.0);
+            tracing::info!("working state exported by {} to {path:?}", client.id().0);
             self.set_working(super::working::Persist {
                 origin: Some(SessionOrigin::Client { path }),
                 saved_hash: hash,
@@ -528,7 +529,7 @@ mod tests {
     #[test]
     fn transfers_are_bounded_and_per_client() {
         let mut t = Transfers::default();
-        let a = ClientId("a".into());
+        let a = Peer::local(b"a");
         let kind = || Kind::Download {
             data: vec![1, 2, 3],
             working: None,
@@ -540,7 +541,7 @@ mod tests {
             t.add(&a, kind()).map_err(|e| e.code),
             Err(ErrorCode::Refused)
         );
-        let b = ClientId("b".into());
+        let b = Peer::local(b"b");
         assert_eq!(
             t.get(&b, ids[0]).map(|_| ()).map_err(|e| e.code),
             Err(ErrorCode::NotFound)

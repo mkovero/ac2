@@ -12,7 +12,7 @@ use std::time::Duration;
 use ac2_proto::Command;
 use ac2_proto::model::*;
 use ac2_proto::units::MeasId;
-use ac2d::{AutosaveConfig, Daemon, Handle, Listen, NetworkSecurity};
+use ac2d::{AutosaveConfig, Daemon, Handle, NetworkSecurity};
 use common::*;
 
 const T: Duration = Duration::from_secs(10);
@@ -471,22 +471,18 @@ fn damaged_network_keys_never_stop_the_start() {
         format!("laptop {}\nphone zzz\ntorn-li", laptop.public.to_z85()),
     )
     .unwrap();
-    let listen = Listen::Network {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-        security: NetworkSecurity {
-            server_key_file: key.clone(),
-            authorized_clients_file: authorized.clone(),
-        },
+    let security = NetworkSecurity {
+        server_key_file: key.clone(),
+        authorized_clients_file: authorized.clone(),
     };
-    let h = Daemon::start(config(manual_rig(), listen)).expect("starts");
+    let h = Daemon::start(net_config(manual_rig(), security)).expect("starts");
     let server_key = h.server_public_key().expect("a new key");
     let ctx = ac2_zmq::Context::new().unwrap();
     let ok = ac2_zmq::CurveClient {
         keys: laptop,
         server_key,
     };
-    let mut c = Client::connect_with(&ctx, h.ctrl_endpoint(), Some(&ok));
+    let mut c = Client::connect_with(&ctx, net_endpoints(&h).0.as_str(), Some(&ok));
     let d = damaged(&mut c);
     let mut want = vec![StateFile::AuthorizedClients, StateFile::ServerKey];
     want.sort_by_key(|k| format!("{k:?}"));

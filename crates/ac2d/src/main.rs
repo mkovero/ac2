@@ -8,10 +8,10 @@ use std::time::{Duration, Instant};
 
 use clap::Parser;
 
-use ac2d::instance::{Instance, LockError, Mode, exit};
+use ac2d::instance::{Instance, LockError, exit};
 use ac2d::{
-    Advertise, AutosaveConfig, BackendChoice, Daemon, DaemonConfig, Ended, Listen, NetworkSecurity,
-    RigIdSource, Stopper,
+    AutosaveConfig, BackendChoice, Daemon, DaemonConfig, Ended, Listen, Mdns, NetListen, NetPort,
+    NetworkChoice, NetworkSecurity, RigIdSource, Stopper,
 };
 
 /// Stores whose defaults live in the config and data dirs: `--ephemeral` keeps none.
@@ -57,8 +57,11 @@ struct Args {
     /// path; only when named here, never as a fallback).
     #[arg(long, value_name = "NAME")]
     backend: Option<BackendChoice>,
-    /// Network mode: ctrl on port (default 47820), data on port+1, CURVE on both.
-    #[arg(long, value_name = "tcp://IFACE[:PORT]", conflicts_with_all = ["ctrl", "data"])]
+    /// Also serve the network: ctrl on port (default 47820), data on port+1, CURVE on both;
+    /// IFACE is an interface name, an address or `*`. The local endpoints are served as
+    /// well. An interface or address not there yet, or a port taken, is retried until it
+    /// binds.
+    #[arg(long, value_name = "tcp://IFACE[:PORT]")]
     listen: Option<String>,
     /// Local ctrl endpoint (ipc:// or tcp://127.0.0.1:port).
     #[arg(long, value_name = "ENDPOINT", requires = "data")]
@@ -66,19 +69,20 @@ struct Args {
     /// Local data endpoint.
     #[arg(long, value_name = "ENDPOINT", requires = "ctrl")]
     data: Option<String>,
-    /// Server key pair (network mode; generated if missing).
+    /// Server key pair (generated when the network is on and it is missing; links to other
+    /// rigs use it).
     #[arg(long, value_name = "PATH")]
     key_file: Option<PathBuf>,
-    /// Authorized clients (network mode; created empty if missing).
+    /// Authorized clients (created empty when the network is on and it is missing).
     #[arg(long, value_name = "PATH")]
     authorized: Option<PathBuf>,
-    /// Rig name, shown by every client and advertised over mDNS in network mode (default:
-    /// ac2 on <hostname>).
+    /// Rig name, shown by every client and advertised over mDNS while the network listens
+    /// (default: ac2 on <hostname>).
     #[arg(long, value_name = "TEXT")]
     name: Option<String>,
-    /// Network mode without the mDNS advert (clients then need the address; pairing is
-    /// required either way).
-    #[arg(long, requires = "listen")]
+    /// No mDNS advert while the network listens (clients then need the address; pairing is
+    /// required either way). Paired rigs are still followed to new addresses.
+    #[arg(long)]
     no_mdns: bool,
     /// Hard upper bound of the system max level, dBFS RMS: `-10` or `-10dbfs`; clients lower
     /// the level in force at run time (and raise it up to this bound after a confirmation),
@@ -143,7 +147,7 @@ fn max_level(v: &str) -> Result<f64, String> {
 fn main() -> ExitCode {
     let started = Instant::now();
     let args = Args::parse();
-    let listen = match listen(&args) {
+    let (listen, network) = match listen(&args) {
         Ok(l) => l,
         Err(e) => {
             eprintln!("ac2d: {e}");
@@ -190,7 +194,7 @@ fn main() -> ExitCode {
             return ExitCode::from(exit::SETUP);
         }
     };
-    let config = config(&args, backends, listen);
+    let config = config(&args, backends, listen, network);
     let handle = match Daemon::start(config) {
         Ok(h) => h,
         Err(e) => {
@@ -204,12 +208,7 @@ fn main() -> ExitCode {
         if let Err(e) = i.write_pid() {
             tracing::warn!("cannot write {}: {e}", i.pid_file().display());
         }
-        let mode = if handle.server_public_key().is_some() {
-            Mode::Network
-        } else {
-            Mode::Local
-        };
-        if let Err(e) = i.write_endpoints(handle.ctrl_endpoint(), handle.data_endpoint(), mode) {
+        if let Err(e) = i.write_endpoints(handle.ctrl_endpoint(), handle.data_endpoint()) {
             tracing::warn!("cannot write {}: {e}", i.endpoints_file().display());
         }
     }
@@ -241,42 +240,58 @@ fn main() -> ExitCode {
     }
 }
 
-fn listen(args: &Args) -> Result<Listen, String> {
-    match (&args.listen, &args.ctrl, &args.data) {
-        (Some(l), None, None) => {
-            let sec = NetworkSecurity {
-                server_key_file: args.key_file.clone().unwrap_or_else(ac2_paths::server_key),
-                authorized_clients_file: args
-                    .authorized
-                    .clone()
-                    .unwrap_or_else(ac2_paths::authorized_clients),
-            };
-            Listen::network(l, sec).map_err(|e| e.to_string())
-        }
-        (None, None, None) => Ok(Listen::default_local()),
-        (None, Some(c), Some(d)) => Ok(Listen::Local {
+/// The local endpoints and the network setting. A network port that cannot fit beside the
+/// local endpoints is refused here, since no retry would ever bind it.
+fn listen(args: &Args) -> Result<(Listen, NetworkChoice), String> {
+    let local = match (&args.ctrl, &args.data) {
+        (None, None) => Listen::default_local(),
+        (Some(c), Some(d)) => Listen::Local {
             ctrl: c.clone(),
             data: d.clone(),
-        }),
-        _ => Err("use either --listen, or both --ctrl and --data".into()),
-    }
+        },
+        _ => return Err("give both --ctrl and --data".into()),
+    };
+    let network = match &args.listen {
+        None => NetworkChoice::Off,
+        Some(l) => {
+            let l = NetListen::parse(l).map_err(|e| e.to_string())?;
+            if let NetPort::Port(p) = l.port {
+                ac2d::check_port(p, &local).map_err(|e| e.to_string())?;
+            }
+            NetworkChoice::Fixed(l)
+        }
+    };
+    Ok((local, network))
 }
 
-fn config(args: &Args, backends: Vec<Arc<dyn ac2_audio::Backend>>, listen: Listen) -> DaemonConfig {
-    let advertise = (listen.is_network() && !args.no_mdns).then(|| Advertise {
-        mdns: ac2_discovery::Options::default(),
-    });
+fn config(
+    args: &Args,
+    backends: Vec<Arc<dyn ac2_audio::Backend>>,
+    listen: Listen,
+    network: NetworkChoice,
+) -> DaemonConfig {
     let mut config = DaemonConfig::new(Arc::clone(&backends[0]), listen, args.max_level);
     config.backends = backends;
     if let Some(name) = &args.name {
         config.name.clone_from(name);
     }
     config.systemd_notify = true;
-    config.advertise = advertise;
+    config.network = network;
+    config.mdns = Some(Mdns {
+        options: ac2_discovery::Options::default(),
+        advertise: !args.no_mdns,
+    });
     if args.ephemeral {
         // `DaemonConfig::new` keeps nothing: an ephemeral id and every store off.
         return config;
     }
+    config.keys = Some(NetworkSecurity {
+        server_key_file: args.key_file.clone().unwrap_or_else(ac2_paths::server_key),
+        authorized_clients_file: args
+            .authorized
+            .clone()
+            .unwrap_or_else(ac2_paths::authorized_clients),
+    });
     config.rig_id = RigIdSource::File(ac2_paths::rig_id());
     config.cal_store = Some(args.cal_store.clone().unwrap_or_else(ac2_paths::cal_store));
     config.plan_dir = Some(args.plans.clone().unwrap_or_else(ac2_paths::plan_dir));

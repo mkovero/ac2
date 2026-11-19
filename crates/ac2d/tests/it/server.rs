@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use ac2_proto::model::{ServerInfo, ServerMode};
 use ac2_proto::{Command, ErrorCode};
 use ac2_zmq::{AuthorizedKeys, Context, CurveClient, KeyPair};
-use ac2d::{Daemon, Listen, NetworkSecurity};
+use ac2d::{Daemon, NetworkSecurity};
 use common::*;
 
 fn info(c: &mut Client) -> ServerInfo {
@@ -36,15 +36,11 @@ fn authorize_a_refused_key_and_revoke_it_over_the_protocol() {
     keys.insert("laptop", laptop.public).unwrap();
     let file = dir.path().join("authorized_clients");
     keys.save(&file).unwrap();
-    let listen = Listen::Network {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-        security: NetworkSecurity {
-            server_key_file: dir.path().join("server.key"),
-            authorized_clients_file: file.clone(),
-        },
+    let security = NetworkSecurity {
+        server_key_file: dir.path().join("server.key"),
+        authorized_clients_file: file.clone(),
     };
-    let h = Daemon::start(config(manual_rig(), listen)).unwrap();
+    let h = Daemon::start(net_config(manual_rig(), security)).unwrap();
     let server_key = h.server_public_key().unwrap();
     let ctx = Context::new().unwrap();
     let as_laptop = CurveClient {
@@ -55,7 +51,7 @@ fn authorize_a_refused_key_and_revoke_it_over_the_protocol() {
         keys: tablet.clone(),
         server_key,
     };
-    let mut c = Client::connect_with(&ctx, h.ctrl_endpoint(), Some(&as_laptop));
+    let mut c = Client::connect_with(&ctx, net_endpoints(&h).0.as_str(), Some(&as_laptop));
 
     let s = info(&mut c);
     let ServerMode::Network {
@@ -73,7 +69,7 @@ fn authorize_a_refused_key_and_revoke_it_over_the_protocol() {
     assert_eq!(names(&s), vec!["laptop"]);
 
     // The tablet knocks and is refused; its key shows in the refused list.
-    let knock = Client::connect_with(&ctx, h.ctrl_endpoint(), Some(&as_tablet));
+    let knock = Client::connect_with(&ctx, net_endpoints(&h).0.as_str(), Some(&as_tablet));
     knock.send(&ac2_proto::Request::new(
         ac2_proto::units::RequestId(1),
         Command::Hello {
@@ -124,7 +120,7 @@ fn authorize_a_refused_key_and_revoke_it_over_the_protocol() {
             .all(|r| r.key.as_deref() != Some(&*tablet.public.to_z85()))
     );
     assert!(std::fs::read_to_string(&file).unwrap().contains("tablet"));
-    let mut t = Client::connect_with(&ctx, h.ctrl_endpoint(), Some(&as_tablet));
+    let mut t = Client::connect_with(&ctx, net_endpoints(&h).0.as_str(), Some(&as_tablet));
     let w = t.welcome(Command::Hello {
         client: "tablet".into(),
     });
@@ -168,23 +164,23 @@ fn a_revoked_connection_stays_refused_when_its_name_goes_to_a_new_key() {
     keys.insert("tablet", old_tablet.public).unwrap();
     let file = dir.path().join("authorized_clients");
     keys.save(&file).unwrap();
-    let listen = Listen::Network {
-        ctrl: "tcp://127.0.0.1:0".into(),
-        data: "tcp://127.0.0.1:0".into(),
-        security: NetworkSecurity {
-            server_key_file: dir.path().join("server.key"),
-            authorized_clients_file: file,
-        },
+    let security = NetworkSecurity {
+        server_key_file: dir.path().join("server.key"),
+        authorized_clients_file: file,
     };
-    let h = Daemon::start(config(manual_rig(), listen)).unwrap();
+    let h = Daemon::start(net_config(manual_rig(), security)).unwrap();
     let server_key = h.server_public_key().unwrap();
     let ctx = Context::new().unwrap();
     let curve = |keys: &KeyPair| CurveClient {
         keys: keys.clone(),
         server_key,
     };
-    let mut c = Client::connect_with(&ctx, h.ctrl_endpoint(), Some(&curve(&laptop)));
-    let mut old = Client::connect_with(&ctx, h.ctrl_endpoint(), Some(&curve(&old_tablet)));
+    let mut c = Client::connect_with(&ctx, net_endpoints(&h).0.as_str(), Some(&curve(&laptop)));
+    let mut old = Client::connect_with(
+        &ctx,
+        net_endpoints(&h).0.as_str(),
+        Some(&curve(&old_tablet)),
+    );
     old.ok(Command::SessionStatus);
 
     c.ok(Command::ServerRevoke {
@@ -210,7 +206,11 @@ fn a_revoked_connection_stays_refused_when_its_name_goes_to_a_new_key() {
 
     // The new key's request ids start where the old key's did: it is answered on its own,
     // never with a reply stored for the revoked key.
-    let mut new = Client::connect_with(&ctx, h.ctrl_endpoint(), Some(&curve(&new_tablet)));
+    let mut new = Client::connect_with(
+        &ctx,
+        net_endpoints(&h).0.as_str(),
+        Some(&curve(&new_tablet)),
+    );
     new.measurement(Command::MeasCreate {
         config: transfer("from the new key"),
     });

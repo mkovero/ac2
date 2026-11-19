@@ -58,15 +58,19 @@ fn rig(
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&key_file, std::fs::Permissions::from_mode(0o600))?;
     }
-    let listen = ac2d::Listen::Network {
+    let listen = ac2d::Listen::Local {
         ctrl: "tcp://127.0.0.1:0".into(),
         data: "tcp://127.0.0.1:0".into(),
-        security: ac2d::NetworkSecurity {
-            server_key_file: key_file,
-            authorized_clients_file: d.join("authorized_clients"),
-        },
     };
     let mut cfg = ac2d::DaemonConfig::new(std::sync::Arc::clone(&device), listen, -10.0);
+    cfg.network = ac2d::NetworkChoice::Fixed(ac2d::NetListen {
+        bind: ac2d::NetBind::Addr(std::net::Ipv4Addr::LOCALHOST.into()),
+        port: ac2d::NetPort::Any,
+    });
+    cfg.keys = Some(ac2d::NetworkSecurity {
+        server_key_file: key_file,
+        authorized_clients_file: d.join("authorized_clients"),
+    });
     cfg.backends = vec![device];
     cfg.name = name.into();
     cfg.system_clock =
@@ -74,12 +78,20 @@ fn rig(
     Ok(ac2d::Daemon::start(cfg)?)
 }
 
+/// The network ctrl and data endpoints of a daemon listening there.
+fn net_endpoints(h: &ac2d::Handle) -> (String, String) {
+    match h.network_status() {
+        ac2d::NetStatus::Listening { ctrl, data } => (ctrl, data),
+        s => panic!("the network is not listening: {s:?}"),
+    }
+}
+
 /// The app's settings for `h`: its endpoints and the CURVE keys.
 fn config(h: &ac2d::Handle, app: &KeyPair, name: &str) -> R<ClientConfig> {
     let mut c = ClientConfig::new(
         Endpoints {
-            ctrl: h.ctrl_endpoint().to_owned(),
-            data: h.data_endpoint().to_owned(),
+            ctrl: net_endpoints(h).0,
+            data: net_endpoints(h).1,
         },
         name,
     );
@@ -152,8 +164,8 @@ fn slow_clocks_not_locked_across_rigs() -> R {
             peers: vec![RigPeer {
                 rig: kettu_id,
                 name: "kettu".into(),
-                ctrl: kettu.ctrl_endpoint().to_owned(),
-                data: kettu.data_endpoint().to_owned(),
+                ctrl: net_endpoints(&kettu).0,
+                data: net_endpoints(&kettu).1,
                 key: kettu_keys.public.to_z85(),
             }],
         },

@@ -4,16 +4,17 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
 
-use ac2_proto::units::{ClientId, RequestId};
+use ac2_proto::units::RequestId;
 
 use crate::config::DedupLimits;
+use crate::route::{Peer, Route};
 
 /// One request id of a client.
 #[derive(Debug)]
 enum Slot {
-    /// Still running: the routing ids of every copy of the request received, each owed the
+    /// Still running: the routes of every copy of the request received, each owed the
     /// reply when it is known.
-    Pending(Vec<Vec<u8>>),
+    Pending(Vec<Route>),
     /// Answered: the encoded reply.
     Done(Vec<u8>),
 }
@@ -43,10 +44,12 @@ pub(crate) enum Admit {
     Stored(Vec<u8>),
 }
 
-/// Remembered replies per client.
+/// Remembered replies per client: a local connection by its route, a network one by its
+/// key, so a client that retries a request across a reconnect (a new routing id, perhaps
+/// a new network pair) gets the stored reply instead of running it twice.
 #[derive(Debug)]
 pub(crate) struct Dedup {
-    clients: HashMap<ClientId, Window>,
+    clients: HashMap<Peer, Window>,
     limits: DedupLimits,
 }
 
@@ -70,14 +73,14 @@ impl Dedup {
         }
     }
 
-    /// Admits request `id` from `client`, received on `routing_id`. A new id is reserved
+    /// Admits request `id` from `client`, received on `route`. A new id is reserved
     /// before anything executes, so a copy arriving while it runs (a retry after a lost or
     /// slow reply) attaches to it instead of executing again.
     pub(crate) fn admit(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         id: RequestId,
-        routing_id: &[u8],
+        route: &Route,
         now: Instant,
     ) -> Admit {
         let limits = self.limits;
@@ -86,36 +89,36 @@ impl Dedup {
         match w.slots.get_mut(&id) {
             Some(Slot::Done(reply)) => Admit::Stored(reply.clone()),
             Some(Slot::Pending(waiters)) => {
-                waiters.push(routing_id.to_vec());
+                waiters.push(route.clone());
                 Admit::Attached
             }
             None => {
-                w.slots.insert(id, Slot::Pending(vec![routing_id.to_vec()]));
+                w.slots.insert(id, Slot::Pending(vec![route.clone()]));
                 Admit::Execute
             }
         }
     }
 
-    /// Stores the reply to `id`, reserved by the request received on `routing_id`, and
-    /// returns the routing ids owed it, one per copy of the request received. Empty when that
+    /// Stores the reply to `id`, reserved by the request received on `route`, and
+    /// returns the routes owed it, one per copy of the request received. Empty when that
     /// reservation is gone (the client was forgotten meanwhile, and its name may since have
     /// reserved the same id from another connection): the reply is then not stored, and only
     /// the asking connection is owed it.
     pub(crate) fn complete(
         &mut self,
-        client: &ClientId,
+        client: &Peer,
         id: RequestId,
-        routing_id: &[u8],
+        route: &Route,
         reply: &[u8],
         now: Instant,
-    ) -> Vec<Vec<u8>> {
+    ) -> Vec<Route> {
         let limits = self.limits;
         let Some(w) = self.clients.get_mut(client) else {
             return Vec::new();
         };
         let ours = matches!(
             w.slots.get(&id),
-            Some(Slot::Pending(waiters)) if waiters.first().is_some_and(|r| r == routing_id)
+            Some(Slot::Pending(waiters)) if waiters.first().is_some_and(|r| r == route)
         );
         if !ours {
             return Vec::new();
@@ -137,25 +140,40 @@ impl Dedup {
         waiters
     }
 
-    /// Drops every reply and reservation of `client`. A revoked name can be given to a
-    /// different key, whose requests must neither be answered with replies meant for the old
-    /// one nor attach to the old one's running work. Work already running still answers the
-    /// connection that asked, but its reply is not stored (see [`Self::complete`]).
-    pub(crate) fn forget(&mut self, client: &ClientId) {
-        self.clients.remove(client);
+    /// Drops every reply and reservation of the network client `name`, revoked. Work
+    /// already running still answers the connection that asked, but its reply is not
+    /// stored (see [`Self::complete`]).
+    pub(crate) fn forget_name(&mut self, name: &str) {
+        self.clients
+            .retain(|p, _| p.curve().is_none_or(|(n, _)| n != name));
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ac2_proto::units::ClientId;
+
+    fn r(id: &[u8]) -> Route {
+        Route {
+            origin: crate::route::Origin::Local,
+            id: id.to_vec(),
+        }
+    }
+
+    fn peer(name: &str) -> Peer {
+        Peer::Curve {
+            id: ClientId(name.into()),
+            key: ac2_zmq::PublicKey::from_bytes([1; 32]),
+        }
+    }
     use std::time::Duration;
 
-    fn done(d: &mut Dedup, c: &ClientId, id: u64, reply: u8, t: Instant) {
-        assert_eq!(d.admit(c, RequestId(id), b"r", t), Admit::Execute);
+    fn done(d: &mut Dedup, c: &Peer, id: u64, reply: u8, t: Instant) {
+        assert_eq!(d.admit(c, RequestId(id), &r(b"r"), t), Admit::Execute);
         assert_eq!(
-            d.complete(c, RequestId(id), b"r", &[reply], t),
-            vec![b"r".to_vec()]
+            d.complete(c, RequestId(id), &r(b"r"), &[reply], t),
+            vec![r(b"r")]
         );
     }
 
@@ -165,18 +183,24 @@ mod tests {
             ids: 2,
             age: Duration::from_secs(30),
         });
-        let c = ClientId("a".into());
+        let c = peer("a");
         let t0 = Instant::now();
         done(&mut d, &c, 1, 1, t0);
         done(&mut d, &c, 2, 2, t0);
-        assert_eq!(d.admit(&c, RequestId(1), b"r", t0), Admit::Stored(vec![1]));
-        done(&mut d, &c, 3, 3, t0);
-        assert_eq!(d.admit(&c, RequestId(3), b"r", t0), Admit::Stored(vec![3]));
-        assert_eq!(d.admit(&c, RequestId(1), b"r", t0), Admit::Execute);
-        let late = t0 + Duration::from_secs(31);
-        assert_eq!(d.admit(&c, RequestId(3), b"r", late), Admit::Execute);
         assert_eq!(
-            d.admit(&ClientId("b".into()), RequestId(3), b"r", t0),
+            d.admit(&c, RequestId(1), &r(b"r"), t0),
+            Admit::Stored(vec![1])
+        );
+        done(&mut d, &c, 3, 3, t0);
+        assert_eq!(
+            d.admit(&c, RequestId(3), &r(b"r"), t0),
+            Admit::Stored(vec![3])
+        );
+        assert_eq!(d.admit(&c, RequestId(1), &r(b"r"), t0), Admit::Execute);
+        let late = t0 + Duration::from_secs(31);
+        assert_eq!(d.admit(&c, RequestId(3), &r(b"r"), late), Admit::Execute);
+        assert_eq!(
+            d.admit(&peer("b"), RequestId(3), &r(b"r"), t0),
             Admit::Execute
         );
     }
@@ -187,26 +211,29 @@ mod tests {
             ids: 1,
             age: Duration::from_secs(30),
         });
-        let c = ClientId("a".into());
+        let c = peer("a");
         let t0 = Instant::now();
-        assert_eq!(d.admit(&c, RequestId(1), b"x", t0), Admit::Execute);
+        assert_eq!(d.admit(&c, RequestId(1), &r(b"x"), t0), Admit::Execute);
         // Neither other answered ids nor time evict a request that has not replied.
         done(&mut d, &c, 2, 2, t0);
         done(&mut d, &c, 3, 3, t0);
         let late = t0 + Duration::from_secs(300);
-        assert_eq!(d.admit(&c, RequestId(1), b"y", late), Admit::Attached);
+        assert_eq!(d.admit(&c, RequestId(1), &r(b"y"), late), Admit::Attached);
         assert_eq!(
-            d.complete(&c, RequestId(1), b"x", &[9], late),
-            vec![b"x".to_vec(), b"y".to_vec()]
+            d.complete(&c, RequestId(1), &r(b"x"), &[9], late),
+            vec![r(b"x"), r(b"y")]
         );
         assert_eq!(
-            d.admit(&c, RequestId(1), b"z", late),
+            d.admit(&c, RequestId(1), &r(b"z"), late),
             Admit::Stored(vec![9])
         );
         // A second completion of the same id owes nobody and changes nothing.
-        assert!(d.complete(&c, RequestId(1), b"x", &[7], late).is_empty());
+        assert!(
+            d.complete(&c, RequestId(1), &r(b"x"), &[7], late)
+                .is_empty()
+        );
         assert_eq!(
-            d.admit(&c, RequestId(1), b"z", late),
+            d.admit(&c, RequestId(1), &r(b"z"), late),
             Admit::Stored(vec![9])
         );
     }
@@ -217,22 +244,49 @@ mod tests {
             ids: 8,
             age: Duration::from_secs(30),
         });
-        let c = ClientId("a".into());
+        let c = peer("a");
         let t0 = Instant::now();
-        assert_eq!(d.admit(&c, RequestId(1), b"old", t0), Admit::Execute);
-        d.forget(&c);
+        assert_eq!(d.admit(&c, RequestId(1), &r(b"old"), t0), Admit::Execute);
+        d.forget_name("a");
         // The name's next holder executes its own request 1; the old one's late reply
         // neither completes that reservation nor reaches the new connection.
-        assert_eq!(d.admit(&c, RequestId(1), b"new", t0), Admit::Execute);
-        assert!(d.complete(&c, RequestId(1), b"old", &[1], t0).is_empty());
-        assert_eq!(d.admit(&c, RequestId(1), b"new", t0), Admit::Attached);
+        assert_eq!(d.admit(&c, RequestId(1), &r(b"new"), t0), Admit::Execute);
+        assert!(
+            d.complete(&c, RequestId(1), &r(b"old"), &[1], t0)
+                .is_empty()
+        );
+        assert_eq!(d.admit(&c, RequestId(1), &r(b"new"), t0), Admit::Attached);
         assert_eq!(
-            d.complete(&c, RequestId(1), b"new", &[2], t0),
-            vec![b"new".to_vec(), b"new".to_vec()]
+            d.complete(&c, RequestId(1), &r(b"new"), &[2], t0),
+            vec![r(b"new"), r(b"new")]
         );
         assert_eq!(
-            d.admit(&c, RequestId(1), b"new", t0),
+            d.admit(&c, RequestId(1), &r(b"new"), t0),
             Admit::Stored(vec![2])
         );
+    }
+
+    #[test]
+    fn a_network_client_retrying_on_a_new_pair_gets_the_stored_reply() {
+        use crate::route::{NetEpoch, Origin};
+        let mut d = Dedup::new(DedupLimits::default());
+        let c = peer("a");
+        let on = |epoch, id: &[u8]| Route {
+            origin: Origin::Network(NetEpoch(epoch)),
+            id: id.to_vec(),
+        };
+        let t0 = Instant::now();
+        assert_eq!(d.admit(&c, RequestId(4), &on(1, b"x"), t0), Admit::Execute);
+        assert_eq!(
+            d.complete(&c, RequestId(4), &on(1, b"x"), &[5], t0),
+            vec![on(1, b"x")]
+        );
+        assert_eq!(
+            d.admit(&c, RequestId(4), &on(2, b"y"), t0),
+            Admit::Stored(vec![5])
+        );
+        // A local connection is its route: another one is another client.
+        let local = Peer::local(b"x");
+        assert_eq!(d.admit(&local, RequestId(4), &r(b"x"), t0), Admit::Execute);
     }
 }
