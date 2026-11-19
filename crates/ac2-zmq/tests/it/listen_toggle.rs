@@ -178,3 +178,58 @@ fn local_and_network_routers_share_one_poll_and_routing_ids() -> TestResult {
     assert_eq!(rb.frames(), &[b"net".to_vec()]);
     Ok(())
 }
+
+/// Off then on at once, as the daemon does it: the old pair (200 ms linger, a client still
+/// connected and a message still queued to it) is dropped on a closer thread while the new
+/// pair binds the same port. The new bind may meet the old listener: it fails "address in
+/// use", its own context is torn down, and a retry binds once the closer is done.
+#[test]
+fn rebind_while_the_old_pair_closes_elsewhere_succeeds_on_retry() -> TestResult {
+    let alice = KeyPair::generate()?;
+    let server = KeyPair::generate()?;
+    let mut keys = AuthorizedKeys::new();
+    keys.insert("alice", alice.public)?;
+    let client = CurveClient {
+        keys: alice,
+        server_key: server.public,
+    };
+    let ctx = Context::new()?;
+    let old_secure = SecureContext::new("ac2", keys.clone(), |_| {})?;
+    let old = old_secure.curve_server_socket(SocketType::Router, &server)?;
+    old.set_linger(Some(std::time::Duration::from_millis(200)))?;
+    old.bind("tcp://127.0.0.1:*")?;
+    let ep = old.last_endpoint()?;
+    let d = dealer(&ctx, &ep, Some(&client))?;
+    round_trip(&old, &d, 1)?;
+    let rid = {
+        d.send(&[[2u8]])?;
+        let m = old.recv_timeout(TIMEOUT)?.ok_or("no request")?;
+        m.frames()[0].clone()
+    };
+    old.send(&[rid.as_slice(), &[3]])?;
+
+    let closer = std::thread::spawn(move || {
+        drop(old);
+        drop(old_secure);
+    });
+    let started = std::time::Instant::now();
+    let (secure, router) = loop {
+        let secure = SecureContext::new("ac2", keys.clone(), |_| {})?;
+        let router = secure.curve_server_socket(SocketType::Router, &server)?;
+        match router.bind(&ep) {
+            Ok(()) => break (secure, router),
+            Err(ac2_zmq::Error::AddressInUse) if started.elapsed() < TIMEOUT => {
+                drop(router);
+                drop(secure);
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(e) => return Err(e.into()),
+        }
+    };
+    closer.join().map_err(|_| "closer panicked")?;
+    let d2 = dealer(&ctx, &ep, Some(&client))?;
+    round_trip(&router, &d2, 4)?;
+    drop(router);
+    drop(secure);
+    Ok(())
+}

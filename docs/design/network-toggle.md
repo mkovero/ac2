@@ -5,6 +5,26 @@ started; the app manages the local daemon completely and at once. Today the tran
 fixed by `ac2d --listen` at start, and a network-mode daemon serves tcp only, so the local
 app and CLI cannot reach it.
 
+## Implementation briefs
+
+One agent per stage; each stage lands with its tests on the quick tier.
+
+1. Spike, done: `crates/ac2-zmq/tests/it/listen_toggle.rs`.
+2. Dual pair, live attach/detach, retry, non-fatal network: `crates/ac2d/src/{lib.rs,
+   io.rs, peers.rs, outbox.rs, control.rs, dedup.rs, config.rs, main.rs}`,
+   `control/{request.rs, files.rs, recording.rs, generator.rs, remote.rs, rig.rs,
+   execute.rs, file_jobs.rs, meas_jobs.rs}`, `refusals.rs`, `ac2-client/src/endpoint.rs`,
+   `ac2-ui/src/{spawn.rs, app/daemons.rs}`, `ac2-cli/src/cmd/daemon.rs`, root `Cargo.toml`
+   (`if-addrs` into `[workspace.dependencies]`), ac2d tests; all-OS CI.
+3. Wire and setting: `ac2-proto/src/{lib.rs, ctrl/command.rs, model/state.rs, samples/}`,
+   `fixtures/protocol/WIRE_LOCK`, `tools/protocol`, `docs/protocol.md`, `ac2-paths/src/lib.rs`
+   (`network_settings`), `crates/ac2d/src/{network_store.rs (new), control/rig.rs,
+   control/remote.rs, lib.rs}`, `ac2-scene/src/stimulus.rs`, ac2d and ac2-e2e tests;
+   all-OS CI.
+4. CLI: `ac2-cli/src/cmd/` (`server network`, `server authorize --refused`).
+5. App rows: `ac2-ui` Settings › Connection, keytips, `docs/user-guide.md`.
+6. Docs: `docs/rigs/pupu.md` (line 86: units keep `--listen`), STATUS.md.
+
 ## Behaviour
 
 1. `ac2d` **always serves local** (ipc on Linux/macOS, loopback tcp on Windows). The
@@ -33,6 +53,11 @@ app and CLI cannot reach it.
 ## Spike: what libzmq 4.3.5 does
 
 Kept as tests in `crates/ac2-zmq/tests/it/listen_toggle.rs`:
+
+- **Off then on at once:** the old pair (200 ms linger, a client connected, a message
+  queued) dropped on a closer thread while a new pair binds the same port: the new bind may
+  fail "address in use"; tearing its context down and retrying binds once the closer is
+  done.
 
 - **ZAP address** is set by libzmq from the accepted socket: `"localhost"` on ipc (this
   build reads no SO_PEERCRED, so no uid), `"127.0.0.1"` on loopback tcp. Loopback is also
@@ -80,6 +105,9 @@ methods take the socket their peer's origin picks).
   the bare `routing_id` the control thread passes around (45 mentions in control.rs,
   request.rs, dedup.rs, outbox.rs, refusals.rs, file/meas jobs; mechanical). A typed field
   rather than a prefix byte: the epoch needs a place too.
+- Lease ownership and the audit compare on `Peer` (origin and identity), not on `ClientId`
+  alone (control/generator.rs, the lease checks and audit lines): a remote key named like a
+  local client can never pass as it.
 - `dedup` keys a `Curve` peer on (key, request id), not on its route, so a client that
   retries a request across off/on (new epoch, new routing id) gets the stored reply instead
   of running it twice; a `Local` peer keys on its route as today.
@@ -94,9 +122,10 @@ methods take the socket their peer's origin picks).
   `ClientId::is_local` (a prefix test) has no daemon caller; its readers are the app's
   stimulus owner wording (ac2-scene stimulus.rs) and an e2e test, through the lease owner
   on the wire. It goes: the daemon records the `Peer` with each lease, and the wire's
-  lease owner carries `local: bool` from it (part of PROTO 93). Names in the authorized
-  file need no new rule, so loading an existing file is unaffected; a key named `local-x`
-  is still a `Curve` peer.
+  lease owner carries `local: bool` from it (part of PROTO 93). Belt and braces:
+  `server.authorize` and `auth.admit_rig` refuse a name starting `local-`, so no new
+  authorized name looks local in logs or the app; loading the authorized file is not
+  touched (an existing `local-x` entry still loads and is still a `Curve` peer).
 
 ### What reads the network today, and becomes per-request or live
 
@@ -114,8 +143,8 @@ methods take the socket their peer's origin picks).
     wants `audio/`. Enabling with a session open needs no session restart.
   - link keys (`respawn_links`): taken from `keys`, present once a key exists, on or off
     (behaviour 6).
-  - `RemoteLink::NotNetworked` (remote.rs, state summary): means "no server key yet", not
-    "network off".
+  - `RemoteLink::NotNetworked` (remote.rs, state summary) is renamed `NoServerKey`: it
+    means "no server key yet", not "network off".
   - `server_info`, `admit`, `server_revoke`: read the live setup; the key lists work off.
     `server.info` to a `Curve` peer leaves out the local endpoints and the interface list
     (host detail a remote client has no use for).
@@ -134,6 +163,9 @@ methods take the socket their peer's origin picks).
   first global IPv6 address (link-local IPv6 needs a scope id clients rarely carry). The
   resolved address is what mDNS gets (`Bind::Addr`) and what `Listening` shows. `All`
   binds `tcp://*:port` (IPv4) as today.
+- The interface lister and the retry backoff are injectable in `DaemonConfig` (as
+  `lease_expiry` is), so tests drive interfaces appearing and vanishing and run the backoff
+  in milliseconds on the fake backend.
 - When the chosen interface or address is missing at enable, at start or later: status
   `Waiting { reason }`, retried on a timer (2 s, backing off to 30 s). An address that goes
   away while bound is noticed by the same timer (the bound address is no longer among the
@@ -148,9 +180,11 @@ methods take the socket their peer's origin picks).
 
 - `server.network { enabled: bool, bind: Option<NetBind>, port: Option<u16> }` (mutation;
   `None` keeps the stored value; defaults `All`, `DEFAULT_PORT`; data on port + 1). Replies
-  `ServerInfo`. Refused from a network client, when fixed, and for in-process daemons. Port
-  checks: not 0, not 65535 (port + 1 must exist), and whenever the local transport is tcp
-  (Windows, or `--ctrl/--data` on tcp) neither port nor port + 1 equal to a local port. An enable that cannot bind now (address in use, interface missing) is
+  `ServerInfo`. Refused from a network client, when fixed, and for in-process daemons. One
+  port validator, shared with `Listen::validate` at start: not 0, not 65535 (port + 1 must
+  exist), and whenever the local transport is tcp (Windows, or `--ctrl/--data` on tcp)
+  neither port nor port + 1 equal to a local port. A clash under `--listen` is an argument
+  error (exit 2) at start, not a `Waiting`. An enable that cannot bind now (address in use, interface missing) is
   stored and goes `Waiting`, the same as at start; the reply says so.
 - `ServerInfo { local: LocalServer, network: NetworkServer, interfaces, recording_dir }`;
   `LocalServer = Embedded | Local { ctrl, data }`;
@@ -160,7 +194,8 @@ methods take the socket their peer's origin picks).
   fingerprint (both `Option`, once a key exists), advertised_as, authorized, refused }`;
   `NetReason = AddressInUse | InterfaceMissing | AddressMissing | ZapFailed | Other {
   detail }`. `ServerMode` goes.
-- `State.server: ServerSummary { status kind, port, fingerprint }` so every mirrored app
+- `State.server: ServerSummary { status kind, ctrl endpoint (when listening), port,
+  fingerprint }` so every mirrored app
   sees a change made elsewhere; key lists stay in `server.info`.
 - Event `server.network_off`, sent to the network peers only (the local ones learn from
   `State.server`) before the pair closes, so remote apps say "network turned off on the
@@ -208,14 +243,16 @@ do. `DaemonConfig.network: NetworkChoice`:
 - **Enable** (control thread): validate, store the setting, load/create the key and
   authorized file, make the `SecureContext` (audit into the `AuthLog`), make and bind both
   ROUTERs with today's options (`data_socket_options(…, true)`, liveness) and a short
-  linger (200 ms), then send `Attach { epoch, ctrl, data, secure }` over a channel with an
-  outbox tag to wake the io thread. Reply `ServerInfo` (`Listening`, or `Waiting` on a bind failure).
+  linger (200 ms), put `Attach { epoch, ctrl, data, secure }` on a channel and queue
+  `TAG_ATTACH { epoch }` on the outbox. The io thread takes the `Attach` from the channel
+  only when it reads that tag, so attach and detach are ordered with every reply and event
+  in the one outbox stream. A failed bind drops its sockets and context at once. Reply `ServerInfo` (`Listening`, or `Waiting` on a bind failure).
 - **Disable:** queue `server.network_off` and then `TAG_DETACH { epoch }` on the outbox,
   in band like `TAG_REVOKE`/`TAG_CLEAR`, so the io thread sends the event before it
-  detaches; reply at once. The mDNS `Advertiser` is dropped on a helper thread: its goodbye blocks up
+  detaches; reply at once. A change of bind or port while on is `TAG_DETACH { e1 }` then
+  an attach of `e2`. The mDNS `Advertiser` is dropped on a helper thread: its goodbye blocks up
   to about 1 s, and the control thread must keep renewing leases (1.5 s expiry).
-- **io thread:** drains the attach channel at the top of every loop and never sends an ack
-  the control thread waits for. On `TAG_DETACH` it drops every `Network` peer (their
+- **io thread:** never sends an ack the control thread waits for. On `TAG_DETACH` it drops every `Network` peer (their
   `Interest` counts with them, as `drop_key` does) and hands the sockets and context to a
   closer thread, which drops them there (linger lets the event leave; context term waits
   for it), so the io thread never blocks. A re-enable right after can find the port still
@@ -269,24 +306,32 @@ From `server.info`, refreshed on open and on a `State.server` change:
 
 1. **Spike** (this commit): the listen_toggle tests.
 2. **ac2d dual pair, no wire change:** lifetime/secure contexts, `Route`/`Origin`/`Peer`,
-   epoch, data-plane origin, `Shared.network` replaced by per-request origin,
-   `Peer::is_local` for `ClientId::is_local`, dedup on key for `Curve`, tap at every session
-   start, PeerBrowse on key + peers; `--listen` serves local too; endpoints file and
+   epoch, `TAG_ATTACH`/`TAG_DETACH`, the retry timer and "a network failure is not fatal"
+   (never deployed without them: today ZAP death is fatal and systemd's
+   `Restart=on-failure` is what brings pupu and the CM4 back), data-plane origin, `Shared.network` replaced by per-request origin,
+   leases and audit on `Peer`, `local-` names refused by authorize/admit, dedup on key for
+   `Curve`, tap at every session start, PeerBrowse on key + peers, `NoServerKey`, shared
+   port validator, injectable lister and backoff; `--listen` serves local too; endpoints file and
    `LockHolder` simplified. Tests: path refused for a `Curve` client and accepted for a
    `Local` one on one daemon; equal routing ids on both pairs; Fixed still serves local; ZAP
    death under `Fixed` goes `Failed`, local stays up, and it returns to `Listening` unaided;
-   with the network off and a rig peer whose address changes, the outgoing link follows it.
-   **All-OS CI run here** (endpoints, Windows ports).
+   with the network off and a rig peer whose address changes, the outgoing link follows it;
+   an address vanishing while bound goes `Waiting` then `Listening` when back; `Waiting {
+   InterfaceMissing }`; a stale-epoch reply dropped when a routing id is reused; `local-x`
+   refused by `server.authorize` while an existing `local-x` file entry loads; a port clash
+   under `--listen` exits 2. **All-OS CI run here** (endpoints, Windows ports).
 3. **Live toggle + wire:** `server.network`, `ServerInfo`/`State.server`, `network_off`
    event before `TAG_DETACH`, `network.json`, `NetworkChoice`, interfaces and `Waiting`/retry, mDNS on its
    helper, PROTO 93, WIRE_LOCK, samples, fixtures, protocol doc. Tests: enable with a session
    open, a rig subscribes and gets audio; `Interest` back to zero after detach; re-enable
    after ZAP death works; restart with the port busy goes `Waiting`, then `Listening` once
    freed; rapid on/off/on; a remote client receives `network_off` before its connection
-   ends; a request retried across off/on is answered once; a remote lease's stimulus faded at turn-off; toggle refused from
+   ends; a request retried across off/on is answered once; on, change the port, on again;
+   a damaged or other-version `network.json` set aside (off, damage notice); `server.info`
+   to a `Curve` peer without local endpoints or interfaces; **all-OS CI run again**; a remote lease's stimulus faded at turn-off; toggle refused from
    remote, when fixed, and for bad ports.
 4. **CLI:** `ac2 server network on|off [--interface X] [--port N]`, `ac2 server authorize
    <name> --refused <fingerprint>`.
 5. **App rows** above, keytips, user guide (with the Windows notes: key files have no ACL
    step, and any local user or forwarded port can turn the network on and authorize).
-6. `docs/rigs/pupu.md`: units keep `--listen`.
+6. `docs/rigs/pupu.md` (line 86): units keep `--listen`.
