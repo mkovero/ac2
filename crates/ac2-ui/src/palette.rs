@@ -15,7 +15,7 @@ fn is_boundary(prev: Option<char>) -> bool {
 
 /// Fuzzy subsequence match, case-insensitive. Every query character (spaces ignored) must
 /// appear in order. Rewards consecutive runs, word starts and an early first match;
-/// penalises gaps. Greedy from each possible start of the first character, best kept.
+/// penalises gaps; a run outranks a jump to the next word start. Greedy from each possible start of the first character, best kept.
 pub fn fuzzy(query: &str, text: &str) -> Option<Match> {
     let q: Vec<char> = query
         .chars()
@@ -65,7 +65,9 @@ pub fn fuzzy(query: &str, text: &str) -> Option<Match> {
             if n > 0 {
                 let gap = p - positions[n - 1] - 1;
                 if gap == 0 {
-                    score += 12;
+                    // More than a word start earns: typing on in a word means that word,
+                    // so `sett` is "Settings" before it is "Set trace".
+                    score += 16;
                 } else {
                     score -= gap.min(10) as i32;
                 }
@@ -238,6 +240,19 @@ mod tests {
         let run = fuzzy("del", "Delay tracking").expect("match");
         let scattered = fuzzy("del", "Show / hide IR pane, double click").map(|m| m.score);
         assert!(scattered.is_none_or(|s| run.score > s));
+    }
+
+    #[test]
+    fn typing_on_in_a_word_beats_the_next_word() {
+        let k = Keymap::default();
+        for q in ["se", "set", "sett", "setti", "settings"] {
+            let first = search(q, &k, Scope::Global).first().map(|e| e.command);
+            assert_eq!(first, Some(CommandId::Settings), "{q}");
+        }
+        let first = search("set tr", &k, Scope::Global)
+            .first()
+            .map(|e| e.command);
+        assert_eq!(first, Some(CommandId::TraceMicCurve));
     }
 
     #[test]
