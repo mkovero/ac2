@@ -147,46 +147,79 @@ fn a_rig_not_paired_gives_no_curve_to_a_pane() {
     assert_eq!(t.st.layout.view(p).expect("pane").rig, PaneRig::Rig(PUPU));
 }
 
-/// A pane given a measurement on the rig shown, then kettu shown: the pane keeps its rig
-/// and measurement, out of reach (the view says the two rigs are not paired) and deaf to
-/// its keys; back on the first rig it shows its measurement as before. The same pane with
-/// pupu shown is in reach: the two are paired.
+/// Each rig has its own screen, so a switch leaves no pane of the rig left on screen: with
+/// kettu shown, which is paired with neither, the screen is kettu's alone, and the first
+/// rig's pane is back, its own again, when that rig is.
 #[test]
-fn a_pane_out_of_reach_keeps_its_content_and_comes_back() {
+fn a_switch_to_a_rig_not_paired_leaves_no_pane_out_of_reach() {
     let (mut t, p) = three_rigs();
     t.st.layout.view_mut(p).expect("pane").kind = PaneKind::Spectrum;
     t.st.layout.view_mut(p).expect("pane").meas = Some(MeasId(2));
     pick_rig(&mut t, KETTU);
-    let v = *t.st.layout.view(p).expect("pane");
-    assert_eq!((v.rig, v.meas), (PaneRig::Rig(RIG), Some(MeasId(2))));
-    assert!(!t.st.rig_in_reach(t.st.pane_rig(&v)));
-    t.st.layout.set_focus(p);
-    let r = t.st.update(Msg::Command(CommandId::Peaks), &t.keys);
-    assert!(r.is_empty(), "{r:?}");
-    assert_eq!(*t.st.layout.view(p).expect("pane"), v, "kept as it was");
-    pick_rig(&mut t, PUPU);
-    assert!(t.st.rig_in_reach(RIG), "pupu and the first rig are paired");
+    assert!(t.st.layout.view(p).is_none(), "not on kettu's screen");
+    let panes = t.st.visible_panes();
+    assert!(
+        panes
+            .iter()
+            .filter_map(|p| t.st.layout.view(*p))
+            .all(|v| t.st.rig_in_reach(t.st.pane_rig(v))),
+        "{panes:?}"
+    );
     pick_rig(&mut t, RIG);
     let v = *t.st.layout.view(p).expect("pane");
     assert_eq!((v.rig, v.meas), (PaneRig::Active, Some(MeasId(2))));
     assert_eq!(t.st.pane_meas(p).map(|m| m.id), Some(MeasId(2)));
 }
 
-/// A pane the layout prefs pin to a rig out of reach is kept as stored: its rig and
-/// measurement by name are written back unchanged.
+/// A pane showing pupu's curve (its row dragged there), then the pairing removed: the pane
+/// keeps its rig and measurement, out of reach (the view says the two rigs are not paired)
+/// and deaf to its keys; paired again it is in reach as it was. The same holds on a screen
+/// kept for a rig not shown: it comes back as it was left, and reach is judged then.
+#[test]
+fn a_dragged_in_pane_whose_pairing_went_keeps_its_content_and_comes_back() {
+    let (mut t, p) = three_rigs();
+    drop_pupu(&mut t, p);
+    let v = *t.st.layout.view(p).expect("pane");
+    assert_eq!((v.rig, v.meas), (PaneRig::Rig(PUPU), Some(MeasId(2))));
+    assert!(t.st.rig_in_reach(PUPU));
+    to(&mut t, RIG, mirror(with_spl()));
+    assert!(!t.st.rig_in_reach(PUPU), "no longer paired");
+    assert_eq!(*t.st.layout.view(p).expect("pane"), v, "kept as it was");
+    t.st.layout.set_focus(p);
+    let r = t.st.update(Msg::Command(CommandId::Peaks), &t.keys);
+    assert!(r.is_empty(), "{r:?}");
+    assert_eq!(*t.st.layout.view(p).expect("pane"), v, "kept as it was");
+    // Kettu's screen and back: the pane is on the screen it was left on, still out of reach.
+    pick_rig(&mut t, KETTU);
+    assert!(t.st.layout.view(p).is_none());
+    pick_rig(&mut t, RIG);
+    assert_eq!(*t.st.layout.view(p).expect("pane"), v);
+    assert!(!t.st.rig_in_reach(t.st.pane_rig(&v)));
+    to(&mut t, RIG, mirror(paired(with_spl())));
+    assert!(t.st.rig_in_reach(t.st.pane_rig(&v)));
+    assert_eq!(*t.st.layout.view(p).expect("pane"), v);
+}
+
+/// A pane the layout prefs pin to a rig out of reach (a screen stored before the pairing
+/// was removed) is kept as stored: its rig and measurement by name are written back
+/// unchanged.
 #[test]
 fn a_stored_pane_of_a_rig_out_of_reach_is_kept() {
     let (mut t, p) = three_rigs();
-    t.st.layout.view_mut(p).expect("pane").kind = PaneKind::Spectrum;
-    t.st.layout.view_mut(p).expect("pane").meas = Some(MeasId(2));
-    pick_rig(&mut t, KETTU);
+    {
+        let v = t.st.layout.view_mut(p).expect("pane");
+        v.kind = PaneKind::Spectrum;
+        v.rig = PaneRig::Rig(KETTU);
+        v.meas = Some(MeasId(2));
+    }
     let v = *t.st.layout.view(p).expect("pane");
+    assert!(!t.st.rig_in_reach(t.st.pane_rig(&v)));
     assert_eq!(
         t.st.pane_pref_rig(&v).map(|(r, _)| r),
-        Some(RIG),
+        Some(KETTU),
         "the prefs name its rig"
     );
-    assert_eq!(t.st.pane_pref_meas(p, &v).as_deref(), Some("Sub"));
+    assert_eq!(t.st.pane_pref_meas(p, &v).as_deref(), Some("Kettu sub"));
 }
 
 /// A rig the rig shown is paired with and this app does not hold: its heading alone, by

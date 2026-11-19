@@ -37,8 +37,7 @@ fn on_pupu(pupu: &Rig, keys: &std::path::Path) -> (Harness<'static, App>, RigId)
 }
 
 /// Connect a rig… from the palette, the dialog's choice `kettu` at its endpoints, shown once
-/// its mirror is in step (the panes keep pupu's measurements, pinned to it by the switch);
-/// kettu's id. The watchdog gives up on a silent link after `dead_after`.
+/// its mirror is in step (on kettu's own screen; pupu's is kept for pupu); kettu's id. The watchdog gives up on a silent link after `dead_after`.
 fn connect_kettu(
     h: &mut Harness<'_, App>,
     pupu: RigId,
@@ -246,8 +245,8 @@ fn drop_kettus(h: &mut Harness<'_, App>, kettu: RigId, id: MeasId, p: ac2_ui::st
 
 /// A session saved on pupu with its measurement's own panes (`ThisRig`) and loaded on
 /// kettu: choosing that measurement on kettu brings kettu's panes of it, on kettu's ids,
-/// and none of pupu's stays beside them; back on pupu, kettu's panes stay kettu's until a
-/// row of pupu brings a screen.
+/// and none of pupu's stays beside them; back on pupu its own screen is back, with none of
+/// kettu's panes.
 #[test]
 fn a_session_with_its_own_panes_loads_on_either_rig() -> R {
     if !have_gpu("a_session_with_its_own_panes_loads_on_either_rig") {
@@ -448,11 +447,11 @@ fn a_second_rig_connects_and_the_drop_down_switches() -> R {
     Ok(())
 }
 
-/// Kettu connected beside pupu, the two daemons not paired: with kettu shown the list is
-/// kettu's alone and the panes left on pupu's measurements say the rigs are not paired,
-/// kept as they are; pupu shown again draws them and lists pupu alone. Once pupu's daemon
-/// is paired with kettu the list shows both, whichever of the two is shown, and pupu's
-/// panes draw beside kettu's.
+/// Kettu connected beside pupu, the two daemons not paired: each rig shown lists itself
+/// alone on its own screen, no pane of the other on it. Once pupu's daemon is paired with
+/// kettu the list shows both, whichever of the two is shown, and kettu's row dragged onto
+/// a pane of pupu's screen draws there. The pairing removed, that pane keeps what it holds
+/// and says the rigs are not paired; paired again it draws.
 #[test]
 fn rigs_not_paired_share_neither_the_list_nor_panes() -> R {
     use ac2_scene::missing::{Missing, missing_text};
@@ -469,18 +468,18 @@ fn rigs_not_paired_share_neither_the_list_nor_panes() -> R {
         rigs.dedup();
         rigs
     };
-    let pinned = |a: &App| {
+    let pinned = |a: &App, rig: RigId| {
         a.state
             .layout
             .panes()
             .into_iter()
             .filter_map(|p| a.state.layout.view(p).copied())
-            .filter(|v| v.rig == PaneRig::Rig(pupu_id))
-            .collect::<Vec<_>>()
+            .filter(|v| v.rig == PaneRig::Rig(rig))
+            .count()
     };
     let plate = missing_text(
-        "pupu",
-        Missing::NotPaired { shown: "kettu" },
+        "kettu",
+        Missing::NotPaired { shown: "pupu" },
         "the rig drop-down",
     );
     let plates = |h: &Harness<'_, App>| {
@@ -488,23 +487,66 @@ fn rigs_not_paired_share_neither_the_list_nor_panes() -> R {
             .count()
     };
     settle(&mut h, 2);
-    let kept = pinned(h.state());
-    assert!(!kept.is_empty(), "pupu's panes stay, pinned to pupu");
+    assert_eq!(
+        pinned(h.state(), pupu_id),
+        0,
+        "kettu's screen, no pane of pupu"
+    );
     assert_eq!(listed(h.state()), [kettu_id], "kettu's list alone");
-    assert_eq!(plates(&h), kept.len(), "{plate}");
 
     pick_first_rig(&mut h);
     step_until(&mut h, "pupu shown", |a| {
         a.state.active() == pupu_id && live(a)
     });
     settle(&mut h, 2);
-    assert_eq!(plates(&h), 0, "pupu's panes are back");
+    assert_eq!(
+        pinned(h.state(), kettu_id),
+        0,
+        "pupu's screen, no pane of kettu"
+    );
     assert_eq!(listed(h.state()), [pupu_id], "pupu's list alone");
+    let p = h.state().state.layout.focus;
+    let before = *h.state().state.layout.view(p).ok_or("pane")?;
+    drop_kettus(&mut h, kettu_id, MIC_FFT, p);
+    assert_eq!(
+        *h.state().state.layout.view(p).ok_or("pane")?,
+        before,
+        "not paired: kettu's row is no drop"
+    );
 
     pair(&pupu, kettu_id, "kettu")?;
     step_until(&mut h, "kettu listed under pupu", |a| {
         listed(a) == [pupu_id, kettu_id]
     });
+    drop_kettus(&mut h, kettu_id, MIC_FFT, p);
+    let v = *h.state().state.layout.view(p).ok_or("pane")?;
+    assert_eq!((v.rig, v.meas), (PaneRig::Rig(kettu_id), Some(MIC_FFT)));
+    settle(&mut h, 2);
+    assert_eq!(
+        plates(&h),
+        0,
+        "paired: kettu's curve draws on pupu's screen"
+    );
+
+    pupu.call(Command::RigPeers { peers: Vec::new() })?;
+    step_until(&mut h, "pupu's list alone again", |a| {
+        listed(a) == [pupu_id]
+    });
+    settle(&mut h, 2);
+    assert_eq!(
+        *h.state().state.layout.view(p).ok_or("pane")?,
+        v,
+        "the pane kept what it held"
+    );
+    assert_eq!(plates(&h), 1, "{plate}");
+
+    pair(&pupu, kettu_id, "kettu")?;
+    step_until(&mut h, "kettu listed under pupu", |a| {
+        listed(a) == [pupu_id, kettu_id]
+    });
+    settle(&mut h, 2);
+    assert_eq!(plates(&h), 0, "paired again: it draws");
+    // Kettu shown lists pupu too: a pairing is the two daemons', whichever side takes.
     open_rig_menu(&mut h);
     h.key_press(Key::Home);
     h.key_press(Key::ArrowDown);
@@ -512,9 +554,7 @@ fn rigs_not_paired_share_neither_the_list_nor_panes() -> R {
     step_until(&mut h, "kettu shown, pupu listed under it", |a| {
         a.state.active() == kettu_id && listed(a) == [kettu_id, pupu_id]
     });
-    settle(&mut h, 2);
-    assert_eq!(pinned(h.state()), kept, "the panes kept what they held");
-    assert_eq!(plates(&h), 0, "paired: pupu's panes draw beside kettu's");
+    assert!(h.state().state.layout.view(p).is_none(), "on pupu's screen");
     Ok(())
 }
 
