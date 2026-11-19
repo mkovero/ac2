@@ -368,20 +368,33 @@ fn audio_queues_under_a_credit_stall_and_drops_the_oldest() {
     }
     let dropped = r.peers.audio_dropped();
     assert!(dropped > 0, "nothing dropped");
+    // What went out is counted on the daemon's side: frames handed to libzmq reach the
+    // dealer some time later, so a quiet spell on the dealer proves nothing.
+    let in_flight = n - dropped - r.peers.audio_waiting();
     let mut starts = Vec::new();
     let mut owed = 0u32;
-    while let Some(m) = d.recv_timeout(Duration::from_millis(100)).unwrap() {
-        let f = m.into_frames();
-        owed += frame_charge(f.iter().map(Vec::len).sum());
-        let parts: Vec<&[u8]> = f.iter().map(Vec::as_slice).collect();
-        starts.push(
-            ac2_proto::frame::decode_audio(&parts)
-                .unwrap()
-                .header
-                .start_sample,
+    let end = Instant::now() + WAIT;
+    let take = |d: &Socket, starts: &mut Vec<u64>, owed: &mut u32| {
+        assert!(
+            Instant::now() < end,
+            "audio never arrived: {} frames",
+            starts.len()
         );
+        if let Some(m) = d.recv_timeout(Duration::from_millis(5)).unwrap() {
+            let f = m.into_frames();
+            *owed += frame_charge(f.iter().map(Vec::len).sum());
+            let parts: Vec<&[u8]> = f.iter().map(Vec::as_slice).collect();
+            starts.push(
+                ac2_proto::frame::decode_audio(&parts)
+                    .unwrap()
+                    .header
+                    .start_sample,
+            );
+        }
+    };
+    while (starts.len() as u64) < in_flight {
+        take(&d, &mut starts, &mut owed);
     }
-    let in_flight = starts.len() as u64;
     up(
         &d,
         DataUp::Credit {
@@ -389,21 +402,18 @@ fn audio_queues_under_a_credit_stall_and_drops_the_oldest() {
             events: 0,
         },
     );
-    r.pump();
-    while let Some(m) = d.recv_timeout(Duration::from_millis(100)).unwrap() {
-        let f = m.into_frames();
-        let parts: Vec<&[u8]> = f.iter().map(Vec::as_slice).collect();
-        starts.push(
-            ac2_proto::frame::decode_audio(&parts)
-                .unwrap()
-                .header
-                .start_sample,
-        );
+    // The credit reaches the router whenever libzmq delivers it: pumped until the queue
+    // has gone out, then read until every frame sent has arrived.
+    while r.peers.audio_waiting() > 0 {
+        assert!(Instant::now() < end, "the credit never arrived");
+        r.pump();
     }
-    assert_eq!(
-        starts.len() as u64 + dropped,
-        n,
-        "every frame sent or counted"
+    while starts.len() as u64 + dropped < n {
+        take(&d, &mut starts, &mut owed);
+    }
+    assert!(
+        d.recv_timeout(Duration::from_millis(50)).unwrap().is_none(),
+        "more frames than were sent or counted"
     );
     // The first window went at once; the queue kept the newest, in order.
     let (first, queued) = starts.split_at(in_flight as usize);

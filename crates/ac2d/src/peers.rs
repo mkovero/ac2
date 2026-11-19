@@ -581,6 +581,12 @@ impl Peers {
         self.map.values().map(|p| p.audio_dropped).sum()
     }
 
+    /// Audio frames queued for credit, over every peer now connected.
+    #[cfg(test)]
+    pub(crate) fn audio_waiting(&self) -> u64 {
+        self.map.values().map(|p| p.audio.len() as u64).sum()
+    }
+
     /// One send round over every peer. Returns when a frame held back by the shortest
     /// interval between frames of a topic may go.
     pub(crate) fn serve(

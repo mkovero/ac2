@@ -36,10 +36,18 @@ fn legend(s: &AppState) -> Vec<String> {
     .collect()
 }
 
+/// Slot `n` (1…9) holds a trace and its data is fetched. The mirror lists a capture before
+/// the app's own fetch of its columns returns, so a slot alone says nothing of the data.
+fn slot_with_data(s: &AppState, n: usize) -> bool {
+    s.slots()[n - 1].is_some_and(|t| s.rig.traces.contains_key(&t.id))
+}
+
 /// Z, the chooser's first row (a target curve from a file), the house curve's path typed:
-/// one more stored trace, the dialog closed.
+/// one more stored trace, its data fetched, the dialog closed.
 fn import_target(d: &mut Driver) -> R {
-    let before = d.st.rig.traces.len();
+    // The new trace is told by its id, not by a count of fetched data: an earlier
+    // capture's fetch may land before or with the target's, in any order.
+    let before: Vec<TraceId> = d.st.stored_traces().iter().map(|t| t.id).collect();
     d.key("Z");
     assert!(
         matches!(d.st.overlay, Overlay::Choose(_)),
@@ -57,7 +65,10 @@ fn import_target(d: &mut Driver) -> R {
     d.send(Msg::Text(path.to_string_lossy().into_owned()));
     d.key("Enter");
     d.until("the target stored with its data", |s| {
-        s.rig.traces.len() == before + 1 && s.overlay == Overlay::None
+        s.overlay == Overlay::None
+            && s.stored_traces()
+                .iter()
+                .any(|t| !before.contains(&t.id) && s.rig.traces.contains_key(&t.id))
     })
 }
 
@@ -88,10 +99,10 @@ fn stored_traces_and_a_target_moved_and_compared() -> R {
     let _noise = noise(&rig.cli)?;
     let mut d = on_rig(&rig)?;
     d.key("Ctrl+1");
-    d.until("slot 1", |s| s.slots()[0].is_some())?;
+    d.until("slot 1 with its data", |s| slot_with_data(s, 1))?;
     delay_tower_on_screen(&mut d);
     d.key("Ctrl+2");
-    d.until("slot 2", |s| s.slots()[1].is_some())?;
+    d.until("slot 2 with its data", |s| slot_with_data(s, 2))?;
     import_target(&mut d)?;
     assert_eq!(d.st.rig.traces.len(), 3);
     let target = trace_named(&d.st, "house_curve").ok_or("the target")?;
@@ -356,12 +367,12 @@ fn measurement_tree_and_delete_choices() -> R {
     let _noise = noise(&rig.cli)?;
     let mut d = on_rig(&rig)?;
     d.key("Ctrl+1");
-    d.until("slot 1", |s| s.slots()[0].is_some())?;
+    d.until("slot 1 with its data", |s| slot_with_data(s, 1))?;
     d.key("Ctrl+2");
-    d.until("slot 2", |s| s.slots()[1].is_some())?;
+    d.until("slot 2 with its data", |s| slot_with_data(s, 2))?;
     delay_tower_on_screen(&mut d);
     d.key("Ctrl+3");
-    d.until("slot 3", |s| s.slots()[2].is_some())?;
+    d.until("slot 3 with its data", |s| slot_with_data(s, 3))?;
     import_target(&mut d)?;
     d.until("four stored traces with data", |s| s.rig.traces.len() == 4)?;
     let names =
