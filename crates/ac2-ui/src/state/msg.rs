@@ -370,18 +370,18 @@ pub enum Msg {
     DismissToast(u64),
     /// What rasterises the window, known once its adapter is chosen.
     Rasterizer(ac2_plot::Rasterizer),
-    /// A measurement's row clicked in the list: selected, and its own panes on screen when
-    /// it has them (no pane changes otherwise).
+    /// A measurement's row clicked in the list: selected, and on screen (its own panes, or
+    /// the ones a measurement of its kind starts on).
     SelectMeas(MeasId),
     /// The rig group's header in the list: the Rig monitor settings.
     OpenRig,
-    /// A measurement's live-curve row clicked in the list: a child row, selected, the live
-    /// row marked as what the keys act on; no pane changes.
+    /// A measurement's live-curve row clicked in the list: selected, the live row marked
+    /// as what the keys act on, and its measurement on screen as its own row brings it.
     SelectLive(MeasId),
-    /// A math trace's row clicked in the list: a child row, selected; no pane changes.
+    /// A math trace's row clicked in the list: selected, and its owner on screen.
     SelectMath(MeasId),
-    /// A stored trace clicked in the list: selected, so the trace keys act on it; no pane
-    /// changes.
+    /// A stored trace clicked in the list: selected, so the trace keys act on it, and its
+    /// measurement on screen; the selected one clicked again is deselected, no pane changing.
     SelectTrace(TraceId),
     /// A stored trace's eye in the list: shown / hidden.
     ToggleShown(TraceId),

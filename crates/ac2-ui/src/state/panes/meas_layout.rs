@@ -1,7 +1,10 @@
 //! A measurement's own panes (`meas.layout`): choosing a measurement's row in the list
 //! puts its panes on screen; one without keeps the panes there are when one of them shows
-//! it, else starts on the panes a new one of its kind does. Nothing else moves the
-//! panes as a whole: a child row (live curve, math trace, stored trace) only selects, a
+//! it (and are no other measurement's layout), else starts on the panes a new one of its
+//! kind does. A child row (live curve, math trace, stored trace) brings the panes of the
+//! measurement it is listed under the same way, and a curve none of them draws gets a pane
+//! of its kind in that layout. The screen is then that measurement's alone, whichever rig
+//! it is of: nothing is kept beside it. Nothing else moves the panes as a whole: a
 //! click in a pane only focuses it, and a row dropped on a pane changes that pane alone.
 //! Editing the panes (N, Q, a pane's kind or view, T, a split dragged, the transfer stack, a
 //! drop, a level axis zoomed or panned) gives the measurement whose row was chosen that
@@ -156,9 +159,16 @@ impl AppState {
         out: &mut Vec<Request>,
     ) {
         self.settle_layout_calls();
+        let row = self.rig.due.row_curve.take();
         if std::mem::take(&mut self.rig.due.own_panes_due) {
-            self.rig.choice.own_panes = self.rig.selected;
-            let own = self.rig.selected.and_then(|id| self.own_layout(id));
+            let owner = row.map_or(self.rig.selected, |r| Some(r.owner));
+            // Panes showing a measurement that has no layout become its own, unless they
+            // are another measurement's layout: that one's panes are never taken over.
+            let anothers = self.rig.choice.own_panes.is_some_and(|w| {
+                Some(w) != owner && self.own_layout(w).is_some_and(|l| self.on_screen(&l))
+            });
+            self.rig.choice.own_panes = owner;
+            let own = owner.and_then(|id| self.own_layout(id));
             // The row asks for all of its panes: one alone (W) would hide the rest until
             // something else lays the panes out again (N's split shows them all). The stage
             // view stays one, with every pane.
@@ -166,20 +176,42 @@ impl AppState {
                 self.layout.maximized = false;
                 self.panes_only |= self.fullscreen;
             }
+            let mut has_own = own.is_some();
+            let mut store = false;
             match own {
                 Some(l) if !self.on_screen(&l) => self.show_layout(&l),
                 Some(_) => {}
-                // A row always shows its measurement. One with no layout that no pane
-                // shows starts as one just made does, and those panes are stored on it
-                // as a new one's are, so every client's row brings the same.
+                // A row always shows its measurement. One with no layout starts as one
+                // just made does, and those panes are stored on it as a new one's are, so
+                // every client's row brings the same.
                 None => {
-                    if let Some(id) = self.rig.selected
-                        && !self.panes_show(id)
+                    if let Some(id) = owner
+                        && (anothers || !self.panes_show(id))
                         && self.show_first_screen(id)
                     {
-                        self.store_layout(id, out);
+                        has_own = true;
+                        store = true;
                     }
                 }
+            }
+            if let (Some(id), Some(r)) = (owner, row)
+                && !self.screen_holds(r.curve)
+                && let Some(kind) = self.kind_drawing(r.curve)
+            {
+                // A pane is added to the measurement's own layout only: panes it is merely
+                // shown on are whatever happened to be open, not its to grow.
+                if !has_own {
+                    store |= self.show_first_screen(id);
+                }
+                if !self.screen_holds(r.curve) {
+                    self.pane_for_curve(id, r.curve, kind);
+                    store = true;
+                }
+            }
+            if let Some(id) = owner
+                && store
+            {
+                self.store_layout(id, out);
             }
             return;
         }
@@ -333,6 +365,91 @@ impl AppState {
             .any(|p| self.pane_meas(p).is_some_and(|m| m.id == id))
     }
 
+    /// Some pane on screen holds `curve`: one of a kind that draws it whose lead's group
+    /// it is of, or with an entry that brings it. Whether it is hidden (A) is not asked: a
+    /// hidden curve has its pane and stays hidden.
+    fn screen_holds(&self, curve: EntryRef) -> bool {
+        let ms = self.measurements();
+        let (group, live) = match curve {
+            EntryRef::Live { meas } | EntryRef::Group { meas } => {
+                let Some(m) = self.meas(meas) else {
+                    return true;
+                };
+                (ac2_scene::meas_list::meas_group(m, &ms).meas(), Some(m))
+            }
+            EntryRef::Trace { trace } => match self.trace_meta(trace) {
+                Ok(t) => (ac2_scene::meas_list::group_of(&t, &ms).meas(), None),
+                Err(_) => return true,
+            },
+        };
+        self.layout.panes().into_iter().any(|p| {
+            let kind = self.layout.kind(p);
+            self.pane_ours(p)
+                && self.draws(kind, curve)
+                && (live.is_some_and(|m| self.pane_meas(p).is_some_and(|s| s.id == m.id))
+                    || (group.is_some() && self.group_of_shown(self.pane_meas(p)) == group)
+                    || self
+                        .compared_into(p)
+                        .iter()
+                        .any(|e| self.entry_brings(*e, curve)))
+        })
+    }
+
+    /// A pane of kind `kind` draws curves like `curve`.
+    fn draws(&self, kind: PaneKind, curve: EntryRef) -> bool {
+        match curve {
+            EntryRef::Live { meas } | EntryRef::Group { meas } => self
+                .meas(meas)
+                .is_some_and(|m| Self::live_drawn_in(m, kind)),
+            EntryRef::Trace { trace } => self
+                .trace_meta(trace)
+                .is_ok_and(|t| crate::state::text::drawn_in(&t, kind)),
+        }
+    }
+
+    /// The kind of pane that draws `curve`; `None` for a row with no curve (an SPL meter's).
+    fn kind_drawing(&self, curve: EntryRef) -> Option<PaneKind> {
+        [PaneKind::Transfer, PaneKind::Spectrum, PaneKind::Distortion]
+            .into_iter()
+            .find(|k| self.draws(*k, curve))
+    }
+
+    /// A pane of `kind` for `curve` under the panes of `owner`, the measurement it is
+    /// listed under, with the focus: led by `owner` when the kind shows it (its group
+    /// brings the curve), else by the math trace the curve is, else holding the stored
+    /// trace alone. It goes below the whole layout, as tall as one of the panes there
+    /// were in an even stack (a quarter at least), so the arrangement the operator made
+    /// keeps its shape.
+    fn pane_for_curve(&mut self, owner: MeasId, curve: EntryRef, kind: PaneKind) {
+        let leads = self.meas(owner).is_some_and(|m| kind.shows(&m.config.kind));
+        let mut v = View::of(kind);
+        v.rig = self.here();
+        v.meas = match curve {
+            _ if leads => Some(owner),
+            EntryRef::Live { meas } | EntryRef::Group { meas } => Some(meas),
+            EntryRef::Trace { .. } => {
+                v.with.push(Pick::here(curve));
+                None
+            }
+        };
+        let p = self.layout.fresh_id();
+        let n = self.layout.root.leaves().len() as f32;
+        let above = std::mem::replace(&mut self.layout.root, PaneNode::Leaf(p));
+        self.layout.root = PaneNode::Split {
+            axis: Axis::Column,
+            ratio: (n / (n + 1.0)).min(0.75),
+            a: Box::new(above),
+            b: Box::new(PaneNode::Leaf(p)),
+        };
+        self.layout.views.insert(p, v);
+        // One pane alone (W) would hide either the new pane or the rest.
+        if self.layout.maximized {
+            self.layout.maximized = false;
+            self.panes_only |= self.fullscreen;
+        }
+        self.focus_pane(p);
+    }
+
     fn send_layout(&mut self, id: MeasId, l: PaneLayout, out: &mut Vec<Request>) {
         let Some(m) = self.meas(id) else {
             return;
@@ -472,9 +589,9 @@ impl AppState {
 
     /// The panes a measurement of `id`'s kind starts on when made, on screen for one that
     /// has no layout of its own: one pane of its kind showing it, a transfer's laid out as
-    /// the transfer stack ([`Self::stack_created`]). The other rigs' panes stay, as with a
-    /// stored layout. `false`, and no pane changes, for a math trace: made, it is a curve
-    /// in its owner's panes, with no screen of its own to start on.
+    /// the transfer stack ([`Self::stack_created`]), and nothing else. `false`, and no pane
+    /// changes, for a math trace: made, it is a curve in its owner's panes, with no screen
+    /// of its own to start on.
     fn show_first_screen(&mut self, id: MeasId) -> bool {
         let Some(kind) = self.meas(id).map(|m| m.config.kind.clone()) else {
             return false;
@@ -498,10 +615,10 @@ impl AppState {
         true
     }
 
-    /// This rig's panes replaced by `root` and its `views` ([`Self::beside_other_rigs`]),
-    /// with nothing left waiting for the panes that went.
+    /// The screen replaced by `root` and its `views`, with nothing left waiting for the
+    /// panes that went. Another rig's panes go too: a measurement's screen is its own panes
+    /// alone, and rigs are compared by a row dragged onto a pane.
     fn install_own(&mut self, root: PaneNode, views: BTreeMap<PaneId, View>, focus: PaneId) {
-        let (root, views) = self.beside_other_rigs(root, views);
         self.layout.install(root, views, focus);
         self.prune_levels();
         self.pane_auto = false;
@@ -512,51 +629,6 @@ impl AppState {
             self.rig.folded.spectrographs.clear();
             self.view.spectrum.spectrograph.cursor_at_s = None;
         }
-    }
-
-    /// Panes `root` brought on screen with the other rigs' panes kept where they are: they
-    /// take the place of this rig's panes (the focused one's, else the first's), or with
-    /// none of this rig's on screen go beside them.
-    fn beside_other_rigs(
-        &self,
-        root: PaneNode,
-        mut views: BTreeMap<PaneId, View>,
-    ) -> (PaneNode, BTreeMap<PaneId, View>) {
-        let (ours, theirs): (Vec<PaneId>, Vec<PaneId>) = self
-            .layout
-            .root
-            .reading_order()
-            .into_iter()
-            .partition(|p| self.pane_ours(*p));
-        if theirs.is_empty() {
-            return (root, views);
-        }
-        let mut tree = self.layout.root.clone();
-        let anchor = Some(self.layout.focus)
-            .filter(|f| ours.contains(f))
-            .or_else(|| ours.first().copied());
-        match anchor {
-            Some(a) => {
-                for p in ours.iter().filter(|p| **p != a) {
-                    tree.remove(*p);
-                }
-                tree.replace_leaf(a, root);
-            }
-            None => {
-                tree = PaneNode::Split {
-                    axis: Axis::Row,
-                    ratio: 0.5,
-                    a: Box::new(tree),
-                    b: Box::new(root),
-                };
-            }
-        }
-        for p in theirs {
-            if let Some(v) = self.layout.view(p) {
-                views.insert(p, *v);
-            }
-        }
-        (tree, views)
     }
 
     fn install_node(

@@ -134,15 +134,19 @@ pane shows it, by that rig's own
 numbering (two rigs both have a measurement 3; the pane shows the one dragged), its title
 naming the rig; the rig shown stays as it is. Clicking a row of another rig (or reaching it
 with Enter or Tab) switches to that rig first, as the drop-down does, then acts as a click
-there; with a window open the switch is refused, and Tab skips the other rigs' rows. Tab
-steps only through the rigs listed. A click
+there: that measurement's screen comes up alone, its own panes or, with none, the panes a
+new measurement of its kind starts on, and nothing of the rig shown before stays beside it
+(to compare rigs, drag a row onto a pane); with a window open the switch is refused, and Tab
+skips the other rigs' rows. Tab steps only through the rigs listed. A click
 on a rig's heading switches to it. A row of another rig dropped on a row of this one (a math
 trace) is refused: *not combined: the two rows are of different rigs; math uses one rig's (pupu)*.
 
-Choosing a measurement row never changes another rig's pane: a row with its own panes
-brings them, one without only selects. A measurement's saved layout keeps only its own
-rig's panes, so a session saved on one rig opens the same on any rig; the panes pinned to
-other rigs are the app's and stay where they are.
+A row whose measurement is on screen already changes no pane, another rig's neither. A
+row that brings a screen brings that measurement's panes alone: a pane showing only another
+rig goes with the panes it stood beside, and is put back by dragging the row again. A
+measurement's saved layout keeps only its own rig's panes (a pane of its own that also
+draws another rig's curve is kept whole), so a session saved on one rig opens the same on
+any rig.
 
 The rigs held are remembered and connected again at the next start, and so is each pane
 set on another rig: it is kept by the rig's id, not its address, so the rig reached on
@@ -1015,8 +1019,12 @@ A row of the measurement list clicked (or reached with **Tab** / **Shift+Tab**):
   panes brings them ([Layouts follow the measurement](#layouts-follow-the-measurement)); one
   without, which no pane shows yet, gets the panes a new measurement of its kind starts on —
   click `FOH SPL` and its meter is there. One a pane shows already changes no pane;
-- a **child row** — a live curve, stored trace or math trace — only selects it, for the
-  keys below; no pane changes. One no pane draws stays selected all the same.
+- a **child row** — a live curve, stored trace or math trace — selects it, for the keys
+  below, and puts the measurement it is listed under on screen exactly as that
+  measurement's own row does; with its panes up already nothing changes. A curve none of
+  those panes draws (a spectrum math trace under a transfer) gets a pane of its kind below
+  them, stored in that measurement's layout — never in whatever panes were open. A hidden
+  curve stays hidden. A row under *Imported* is no measurement's: it only selects.
 
 Which measurement the keys act on:
 
@@ -1075,7 +1083,7 @@ a one-line caption naming the pane and measurement (the SPL meter and Leq window
 themselves). Arming, playing, stopping the stimulus or a running sweep change nothing on it;
 Esc and Shift+Esc stop as always. A measurement row with more than one pane of its own
 brings them all back (one pane alone again with **W**; in the stage view it stays the stage
-view, panes only); any other row only selects.
+view, panes only), and so does a row under it.
 
 **F** (or **F11**) steps the window: windowed → window full screen (top bar and lists as
 before) → **panes only** (the stage view with every pane) → windowed. With one pane up (W),
@@ -1106,12 +1114,13 @@ transfer stack, drop a row on a pane, zoom or pan
 a pane's level axis — and the layout is stored on that measurement. Choosing its row again
 brings its panes back, all of them even when one pane was alone on screen (**W**). A
 measurement's row always puts it on screen: one without a layout that a pane already shows
-keeps the panes as they are; one that no pane shows gets the panes a new measurement of its
-kind starts on (an SPL meter, a spectrum or a sweep one pane, a transfer the magnitude /
-phase / coherence stack), in place of the panes of its rig, and they are stored as its
-layout. **Ctrl+Z** brings the panes before back. Only a
-measurement row brings panes: a live curve, a math trace or a stored trace under it only
-selects. A measurement picked into one of its panes is a guest there:
+keeps the panes as they are, unless they are another measurement's layout; otherwise it gets
+the panes a new measurement of its kind starts on (an SPL meter, a spectrum or a sweep one
+pane, a transfer the magnitude / phase / coherence stack) as the whole screen, nothing of
+what was open beside them, and they are stored as its layout. **Ctrl+Z** brings the panes
+before back, one step per screen. A row under a measurement — its live curve, a math trace,
+a stored trace — brings the same screen, and a curve none of its panes draws gets a pane in
+that layout ([Choosing what a pane shows](#choosing-what-a-pane-shows)). A measurement picked into one of its panes is a guest there:
 the edit is stored on the measurement whose row was chosen, never on the guest, and never on
 any other measurement, even one whose panes happen to look the same. An edit after which no
 pane shows that measurement is stored on nobody. The list says it: `· 3 own panes`.
@@ -2439,8 +2448,8 @@ Beside the panes, one tree lists every measurement with what it owns
   curve (a live curve: this app's display; a stored trace: the daemon's). A click on the row
   selects it: a measurement row also puts it on screen (its own panes, or, with none and
   no pane showing it, the panes a new measurement of its kind starts on: click `FOH SPL`
-  and its meter is there), a child row (live curve, stored trace, math trace) only selects
-  and no pane changes
+  and its meter is there), a child row (live curve, stored trace, math trace) selects and
+  puts the measurement it is under on screen the same way
   ([Choosing what a pane shows](#choosing-what-a-pane-shows)); a click on the selected trace
   deselects it. A double click on a trace renames it.
 - **Edit measurement…** opens the form a measurement was made in, on its settings (a math
@@ -2494,8 +2503,8 @@ unsmoothed.
   measurement slotted traces come first by slot, then the rest oldest first. A click selects
   (again: deselects).
 - **V** / **Shift+V** select the next / previous **shown** trace in tree order, with the live
-  measurement between last and first; **Alt+V** / **Alt+Shift+V** include hidden ones. Like
-  a click on a child row, **V** only selects: no pane changes, and a trace no pane draws
+  measurement between last and first; **Alt+V** / **Alt+Shift+V** include hidden ones.
+  Unlike a click on a row, **V** only selects: no pane changes, and a trace no pane draws
   stays selected all the same.
 - **End** (palette *Select live*) goes back to the live measurement. **Esc** only stops the
   stimulus: the stop reflex never changes the selection.

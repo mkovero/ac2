@@ -1,6 +1,8 @@
 //! A measurement row chosen in the list brings its own panes at once: SPL meters split.
 //! One with no panes of its own that no pane shows gets the panes a new one of its kind
-//! starts on.
+//! starts on. A child row brings the panes of the measurement it is listed under, and a
+//! curve none of them draws gets a pane in that layout. The screen is that measurement's
+//! alone, whichever rig it is of.
 
 use super::*;
 use ac2_proto::model::PaneLayout;
@@ -51,17 +53,13 @@ fn click(t: &mut T, id: u32) {
     t.st.apply(Msg::SelectMeas(MeasId(id)), &t.keys);
 }
 
-/// `SPL 2`'s two panes are the layout, and both are drawn (beside `others` of another rig).
-fn both_shown_beside(t: &T, others: usize, what: &str) {
+/// `SPL 2`'s two panes are the layout, and they are all that is drawn.
+fn both_shown(t: &T, what: &str) {
     let shown = split_spl(5);
     assert_eq!(t.st.pane_layout(), shown, "{what}");
     let area = PaneRect::new(0.0, 0.0, 1000.0, 600.0);
     let drawn = t.st.pane_rects(area, 0.0).len();
-    assert_eq!(drawn, 2 + others, "{what}: one pane alone");
-}
-
-fn both_shown(t: &T, what: &str) {
-    both_shown_beside(t, 0, what);
+    assert_eq!(drawn, 2, "{what}: its two panes and no other");
 }
 
 /// One rig: a click on `SPL 2`'s row puts both of its panes on screen.
@@ -159,8 +157,8 @@ fn a_meter_row_brings_its_split_panes_on_the_rig_switched_to() {
     assert_eq!(t.st.rig.id, PUPU);
     click(&mut t, 4);
     click(&mut t, 5);
-    // The pane this computer's rig showed stays beside pupu's.
-    both_shown_beside(&t, 1, "SPL 2 chosen");
+    // The pane this computer's rig showed is not kept beside pupu's.
+    both_shown(&t, "SPL 2 chosen");
 }
 
 /// Pupu shown from the start, another rig behind: the click brings both panes, also out
@@ -322,32 +320,276 @@ fn a_row_without_own_panes_brings_its_kinds_first_panes() {
     }
 }
 
-/// The child rows only select: a live curve's, a math trace's and a stored trace's row
-/// change no pane and store nothing, whatever the screen shows.
+/// Main L's transfer stack, as its row brings it.
+fn stack_of_1() -> Vec<(PaneKind, TransferView, Option<u32>)> {
+    use TransferView as V;
+    [V::Magnitude, V::Phase, V::Coherence]
+        .map(|v| (PaneKind::Transfer, v, Some(1)))
+        .to_vec()
+}
+
+/// `tree_state` with `FOH SPL` (4), and under Main L a spectrum-domain math trace (7) and
+/// a stored spectrum trace (8): curves no pane of a transfer's stack draws.
+fn tree_with_spectra() -> State {
+    let mut s = tree_state();
+    s.measurements.push(meas(4, "FOH SPL", spl_meter()));
+    let main = TraceOwner::Meas { meas: MeasId(1) };
+    s.measurements.push(meas(
+        7,
+        "pre + post",
+        MeasKind::Math {
+            config: MathConfig::of(
+                main,
+                MathDomain::Spectrum,
+                MathExpr::Binary {
+                    a: Operand::Trace { trace: TraceId(8) },
+                    op: MathOp::Divide,
+                    b: Operand::Trace { trace: TraceId(8) },
+                },
+            ),
+        },
+    ));
+    let mut t = stored(8, None, 2);
+    t.kind = TraceKind::Spectrum {
+        scale: LevelScale::Dbfs,
+        level: SpecLevel::Tone,
+    };
+    t.edit.owner = main;
+    s.traces.push(t);
+    s
+}
+
+/// Every row under a measurement brings that measurement's screen, as its own row does: a
+/// live curve's, a math trace's (also reached as a measurement) and a stored trace's, from
+/// another measurement's screen. The first one stores the panes on it; from then on the
+/// rows bring what is stored and send nothing. A row of the measurement on screen changes
+/// no pane, and a row under Imported, which is no measurement's, only selects.
 #[test]
-fn child_rows_bring_no_panes() {
+fn child_rows_bring_their_measurements_screen() {
+    let mut t = T::fresh();
+    let mut s = tree_state();
+    s.measurements.push(meas(4, "FOH SPL", spl_meter()));
+    t.connect(s);
+    let spl = [(PaneKind::Spl, TransferView::Magnitude, Some(4))];
+    let rows = [
+        (Msg::SelectLive(MeasId(1)), Some(1), None),
+        (Msg::SelectMath(MeasId(6)), Some(6), None),
+        (Msg::SelectMeas(MeasId(6)), Some(6), None),
+        (Msg::SelectTrace(TraceId(3)), Some(1), Some(3)),
+    ];
+    for (i, (msg, selected, trace)) in rows.iter().enumerate() {
+        choose(&mut t, 4);
+        assert_eq!(screen(&t), spl, "{msg:?}: FOH SPL's screen first");
+        let r = t.st.apply(msg.clone(), &t.keys);
+        assert_eq!(screen(&t), stack_of_1(), "{msg:?}");
+        assert_eq!(t.st.rig.selected, selected.map(MeasId), "{msg:?}");
+        assert_eq!(t.st.rig.selected_trace, trace.map(TraceId), "{msg:?}");
+        let sent = stored_on(&r);
+        if i == 0 {
+            assert_eq!(sent, [(MeasId(1), Some(t.st.pane_layout()))], "{msg:?}");
+        } else {
+            assert!(sent.is_empty(), "{msg:?}: {r:?}");
+        }
+    }
+    // Main L's screen is up: its other rows change nothing.
+    let before = t.st.layout.clone();
+    for msg in [
+        Msg::SelectLive(MeasId(1)),
+        Msg::SelectTrace(TraceId(4)),
+        Msg::SelectMath(MeasId(6)),
+        Msg::SelectTrace(TraceId(5)),
+    ] {
+        let what = format!("{msg:?}");
+        let r = t.st.apply(msg, &t.keys);
+        assert_eq!(t.st.layout, before, "{what}");
+        assert!(stored_on(&r).is_empty(), "{what}: {r:?}");
+    }
+    // The imported trace from another measurement's screen: selected, the screen stays.
+    choose(&mut t, 4);
+    t.st.apply(Msg::SelectTrace(TraceId(5)), &t.keys);
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(5)));
+    assert_eq!(t.st.rig.selected, Some(MeasId(4)));
+    assert_eq!(screen(&t), spl);
+}
+
+/// A second click on the selected trace deselects it and changes no pane.
+#[test]
+fn a_second_click_on_a_trace_deselects_and_keeps_the_screen() {
     let mut t = T::fresh();
     let mut s = tree_state();
     s.measurements.push(meas(4, "FOH SPL", spl_meter()));
     t.connect(s);
     choose(&mut t, 4);
-    let before = t.st.layout.views.clone();
-    for msg in [
-        Msg::SelectLive(MeasId(1)),
-        Msg::SelectMath(MeasId(6)),
-        Msg::SelectTrace(TraceId(3)),
-    ] {
-        let what = format!("{msg:?}");
-        let r = t.st.apply(msg, &t.keys);
-        assert_eq!(t.st.layout.views, before, "{what}");
-        assert!(stored_on(&r).is_empty(), "{what}: {r:?}");
-    }
-    // A math trace has no screen of its own to start on: chosen as a measurement's row
-    // is, it is selected and the panes stay.
-    let r = choose(&mut t, 6);
-    assert_eq!(t.st.rig.selected, Some(MeasId(6)));
-    assert_eq!(t.st.layout.views, before);
+    t.st.apply(Msg::SelectTrace(TraceId(3)), &t.keys);
+    let before = t.st.layout.clone();
+    let r = t.st.apply(Msg::SelectTrace(TraceId(3)), &t.keys);
+    assert_eq!(t.st.rig.selected_trace, None);
+    assert_eq!(t.st.rig.selected, Some(MeasId(1)));
+    assert_eq!(t.st.layout, before);
     assert!(stored_on(&r).is_empty(), "{r:?}");
+}
+
+/// A curve no pane of its measurement's screen draws — a spectrum-domain math trace or a
+/// stored spectrum under a transfer — gets a spectrum pane in that measurement's layout,
+/// stored there in one call, and the pane then draws the measurement's other spectrum
+/// curves too. No other measurement's layout is sent or changed.
+#[test]
+fn a_curve_without_a_pane_gets_one_in_its_measurements_layout() {
+    use TransferView as V;
+    let math = (Msg::SelectMath(MeasId(7)), Some(7));
+    let trace = (Msg::SelectTrace(TraceId(8)), None);
+    for (first, second) in [(&math, &trace), (&trace, &math)] {
+        let mut t = T::fresh();
+        t.connect(tree_with_spectra());
+        let spl = choose(&mut t, 4);
+        assert_eq!(stored_on(&spl).len(), 1, "FOH SPL's first pane");
+        let r = t.st.apply(first.0.clone(), &t.keys);
+        let mut want = stack_of_1();
+        want.push((PaneKind::Spectrum, V::Magnitude, first.1));
+        assert_eq!(screen(&t), want, "{:?}", first.0);
+        assert_eq!(
+            stored_on(&r),
+            [(MeasId(1), Some(t.st.pane_layout()))],
+            "{:?}: one call, Main L's",
+            first.0
+        );
+        let added = t.st.layout.focus;
+        assert_eq!(t.st.layout.kind(added), PaneKind::Spectrum);
+        // The stored spectrum alone leads no pane: it is the pane's one entry.
+        if first.1.is_none() {
+            let p = t.st.pane_layout();
+            assert_eq!(
+                p.panes().last().map(|p| p.content.clone()),
+                Some(wire::PaneContent::Curves {
+                    entries: vec![wire::PaneEntry {
+                        rig: wire::RigRef::ThisRig,
+                        what: wire::EntryRef::Trace { trace: TraceId(8) },
+                    }],
+                })
+            );
+        }
+        // The other spectrum curve of Main L: the math trace's pane draws its group; the
+        // stored trace's pane holds that trace alone, so the math trace gets its own.
+        let before = t.st.layout.clone();
+        let r = t.st.apply(second.0.clone(), &t.keys);
+        if first.1.is_some() {
+            assert_eq!(t.st.layout, before, "{:?}", second.0);
+            assert!(stored_on(&r).is_empty(), "{r:?}");
+        } else {
+            assert_eq!(screen(&t).len(), 5, "{:?}", second.0);
+            // Held behind the call in flight: nothing goes to another measurement.
+            assert!(stored_on(&r).iter().all(|(m, _)| *m == MeasId(1)), "{r:?}");
+        }
+        // FOH SPL's screen is its own still.
+        let r = choose(&mut t, 4);
+        assert_eq!(screen(&t), [(PaneKind::Spl, V::Magnitude, Some(4))]);
+        assert!(stored_on(&r).is_empty(), "{r:?}");
+    }
+}
+
+/// Panes nobody's that happen to show the measurement (the remembered grid) are not
+/// grown by a curve's pane: the row brings the measurement's first screen and the pane
+/// is added there. A hidden curve gets its pane and stays hidden.
+#[test]
+fn a_curves_pane_is_never_added_to_panes_that_were_open() {
+    let mut t = T::new();
+    t.conn(mirror(tree_with_spectra()));
+    t.st.apply(Msg::ToggleMeasShown(MeasId(7)), &t.keys);
+    assert_eq!(t.st.visible_panes().len(), 4, "the grid");
+    assert_eq!(t.st.rig.choice.own_panes, None);
+    let r = t.st.apply(Msg::SelectMath(MeasId(7)), &t.keys);
+    let mut want = stack_of_1();
+    want.push((PaneKind::Spectrum, TransferView::Magnitude, Some(7)));
+    assert_eq!(screen(&t), want);
+    assert_eq!(stored_on(&r), [(MeasId(1), Some(t.st.pane_layout()))]);
+    let hidden = t.st.meas(MeasId(7)).expect("the math trace");
+    assert!(t.st.meas_hidden(hidden), "not unhidden");
+}
+
+/// A measurement with no panes of its own chosen while another measurement's screen is
+/// open — its pane with an Inputs pane and a guest pane showing the chosen one: only its
+/// own first pane is on screen, nothing of the other's beside it, and the other
+/// measurement's layout is not sent again and comes back whole.
+#[test]
+fn a_row_without_own_panes_takes_nothing_of_anothers_screen() {
+    let mut t = T::fresh();
+    t.connect(with_spl());
+    choose(&mut t, 1);
+    t.key("N");
+    t.drag_drop(DragItem::Input(0), t.st.layout.focus, None);
+    t.key("N");
+    t.drop_meas(t.st.layout.focus, MeasId(4));
+    let mains = t.st.pane_layout();
+    assert_eq!(mains.panes().len(), 3, "its pane, the inputs, the guest");
+    assert_eq!(t.st.rig.choice.own_panes, Some(MeasId(1)));
+    for (id, kind) in [(2, PaneKind::Spectrum), (4, PaneKind::Spl)] {
+        let r = choose(&mut t, id);
+        assert_eq!(
+            screen(&t),
+            [(kind, TransferView::Magnitude, Some(id))],
+            "measurement {id}"
+        );
+        assert_eq!(
+            stored_on(&r),
+            [(MeasId(id), Some(t.st.pane_layout()))],
+            "measurement {id}: its own pane, and nothing for Main L"
+        );
+        let r = choose(&mut t, 1);
+        assert_eq!(t.st.pane_layout(), mains, "Main L's screen back whole");
+        assert!(stored_on(&r).is_empty(), "{r:?}");
+    }
+}
+
+/// Tab down a list of two measurements with two stored traces each (eight rows: header,
+/// live curve, two traces, twice) changes the screen once per measurement, on the step
+/// onto its header, and never between rows of one measurement; once each has its panes
+/// stored, stepping sends nothing.
+#[test]
+fn tab_changes_the_screen_once_per_measurement() {
+    let mut s = daemon_state();
+    let trace = |id: u32, meas: u32| {
+        let mut t = stored(id, None, 2);
+        if meas == 2 {
+            t.kind = TraceKind::Spectrum {
+                scale: LevelScale::Dbfs,
+                level: SpecLevel::Tone,
+            };
+        }
+        t.edit.owner = TraceOwner::Meas { meas: MeasId(meas) };
+        t
+    };
+    s.traces = vec![trace(11, 1), trace(12, 1), trace(13, 2), trace(14, 2)];
+    let mut t = T::fresh();
+    t.connect(s);
+    let stops = 8;
+    // The first round stores each measurement's first panes.
+    for _ in 0..stops {
+        t.key("Tab");
+    }
+    let mut changes = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for _ in 0..2 * stops {
+        let before = (t.st.pane_layout(), t.st.rig.selected);
+        let r = t.key("Tab");
+        assert!(stored_on(&r).is_empty(), "{r:?}");
+        seen.insert((
+            t.st.rig.selected,
+            t.st.rig.selected_trace,
+            t.st.live_row_selected(),
+        ));
+        if t.st.pane_layout() != before.0 {
+            assert_ne!(t.st.rig.selected, before.1, "within one measurement");
+            assert_eq!(t.st.rig.selected_trace, None, "onto a header");
+            assert!(!t.st.live_row_selected(), "onto a header");
+            changes.push(t.st.rig.selected);
+        }
+    }
+    assert_eq!(seen.len(), stops, "every row is a stop: {seen:?}");
+    assert_eq!(
+        changes.len(),
+        4,
+        "two rounds, two measurements: {changes:?}"
+    );
 }
 
 /// A row dragged onto a pane changes that pane alone, also for a measurement with no
@@ -396,13 +638,42 @@ fn undo_takes_back_the_panes_a_row_brought() {
     }
 }
 
-/// This computer's rig shown, pupu in the background: a click on a row of pupu's part of
-/// the list shows pupu and brings that measurement's panes — the stored ones of `SPL 2`,
-/// and for `FOH SPL`, which has none, an SPL meter's first pane, sent to pupu's daemon.
+/// A child row that brought its measurement's screen is one step: Ctrl+Z puts the panes
+/// before it back, redo the screen again.
 #[test]
-fn another_rigs_row_brings_its_panes() {
+fn undo_takes_back_the_screen_a_child_row_brought() {
+    let mut t = T::fresh();
+    t.connect(tree_with_spectra());
+    choose(&mut t, 4);
+    let before = screen(&t);
+    for msg in [Msg::SelectTrace(TraceId(3)), Msg::SelectMath(MeasId(7))] {
+        choose(&mut t, 4);
+        t.st.apply(msg.clone(), &t.keys);
+        let brought = screen(&t);
+        assert_ne!(brought, before, "{msg:?}");
+        t.key("Ctrl+Z");
+        assert_eq!(screen(&t), before, "{msg:?}: undone in one step");
+        assert!(t.last_toast().starts_with("Undid: "), "{}", t.last_toast());
+        t.key("Ctrl+Shift+Z");
+        assert_eq!(screen(&t), brought, "{msg:?}: redone");
+    }
+}
+
+/// This computer's rig shown with a pane showing its meter, pupu in the background: a
+/// click on a row of pupu's part of the list shows pupu and puts that measurement's
+/// screen up alone — the stored panes of `SPL 2`, and for `FOH SPL`, which has none, an
+/// SPL meter's first pane, sent to pupu's daemon. The first rig's pane is not kept beside
+/// either: rigs are compared by a row dragged onto a pane.
+#[test]
+fn another_rigs_row_brings_its_screen_alone() {
     let on_pupu = |id: u32| Msg::OnRig(PUPU, Box::new(Msg::SelectMeas(MeasId(id))));
-    let mut t = pupu_behind();
+    let start = || {
+        let mut t = pupu_behind();
+        click(&mut t, 4);
+        t.drop_meas(t.st.layout.focus, MeasId(4));
+        t
+    };
+    let mut t = start();
     let r = t.st.update(on_pupu(5), &t.keys);
     assert_eq!(t.st.active(), PUPU);
     both_shown(&t, "pupu's SPL 2 chosen from the other rig");
@@ -411,7 +682,7 @@ fn another_rigs_row_brings_its_panes() {
             .all(|(_, q)| stored_on(std::slice::from_ref(q)).is_empty())
     );
 
-    let mut t = pupu_behind();
+    let mut t = start();
     let r = t.st.update(on_pupu(4), &t.keys);
     assert_eq!(t.st.active(), PUPU);
     assert_eq!(
@@ -426,4 +697,14 @@ fn another_rigs_row_brings_its_panes() {
         .map(|(rig, q)| (*rig, stored_on(std::slice::from_ref(q))[0].0))
         .collect();
     assert_eq!(sent, [(PUPU, MeasId(4))]);
+
+    // A child row of pupu's list: the same screen.
+    let mut t = start();
+    let live = Msg::OnRig(PUPU, Box::new(Msg::SelectLive(MeasId(2))));
+    t.st.update(live, &t.keys);
+    assert_eq!(t.st.active(), PUPU);
+    assert_eq!(
+        screen(&t),
+        [(PaneKind::Spectrum, TransferView::Magnitude, Some(2))]
+    );
 }

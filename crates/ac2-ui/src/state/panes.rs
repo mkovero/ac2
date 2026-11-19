@@ -373,24 +373,6 @@ impl PaneNode {
         }
     }
 
-    /// Leaf `id` replaced by `with`; false when there is no such leaf.
-    pub fn replace_leaf(&mut self, id: PaneId, with: PaneNode) -> bool {
-        match self {
-            PaneNode::Leaf(l) if *l == id => {
-                *self = with;
-                true
-            }
-            PaneNode::Leaf(_) => false,
-            PaneNode::Split { a, b, .. } => {
-                if a.contains(id) {
-                    a.replace_leaf(id, with)
-                } else {
-                    b.replace_leaf(id, with)
-                }
-            }
-        }
-    }
-
     /// Removes leaf `id`: its sibling takes the parent's place. The leaf of that sibling
     /// that bordered `id` along the split (its first when `id` was `a`, its last when `id`
     /// was `b`), which gets the focus; `None` for the last leaf (never removed) or no such

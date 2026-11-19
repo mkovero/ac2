@@ -119,8 +119,9 @@ fn rows_of_a_rig_drag_from_the_tree() {
 
 /// A click on another rig's row switches to that rig first, then selects the row there; a
 /// window open refuses the switch and selects nothing. The row's measurement, with no panes
-/// of its own, gets the pane a new one of its kind does, beside the panes of the rig shown
-/// before, and that rig's daemon is sent it as the measurement's layout.
+/// of its own, gets the pane a new one of its kind does as the whole screen — none of the
+/// panes of the rig shown before is kept beside it — and that rig's daemon is sent it as
+/// the measurement's layout.
 #[test]
 fn a_click_on_another_rigs_row_switches_rig_first() {
     let (mut t, _) = two_lists();
@@ -130,20 +131,15 @@ fn a_click_on_another_rigs_row_switches_rig_first() {
     assert_eq!(t.st.active(), RIG, "refused with a window open");
     t.st.overlay = Overlay::None;
     let before = t.st.visible_panes();
+    assert!(before.len() > 1, "the first rig's grid");
     let r = t.st.update(click.clone(), &t.keys);
     assert_eq!(t.st.active(), PUPU);
     assert_eq!(t.st.rig.selected, Some(MeasId(2)));
     let after = t.st.visible_panes();
-    let added: Vec<PaneId> = after
-        .iter()
-        .copied()
-        .filter(|p| !before.contains(p))
-        .collect();
-    assert_eq!(after.len(), before.len() + 1, "one pane beside the others");
-    assert!(before.iter().all(|p| after.contains(p)), "none taken away");
-    let [new] = added[..] else {
-        panic!("one pane added: {added:?}")
+    let [new] = after[..] else {
+        panic!("its one pane alone: {after:?}")
     };
+    assert!(!before.contains(&new));
     assert_eq!(t.st.layout.focus, new);
     assert_eq!(t.st.layout.kind(new), PaneKind::Spectrum);
     assert_eq!(t.st.layout.view(new).map(|v| t.st.pane_rig(v)), Some(PUPU));

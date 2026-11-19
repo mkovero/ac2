@@ -64,11 +64,12 @@ fn a_row_dropped_on_the_focused_pane_turns_it_into_its_kind() {
     }
 }
 
-/// A stored trace's row chosen, by a click or by Tab, only selects, maximised or split: the
-/// layout stays as it was, no refocus and no pane turning into the trace's kind (a drop is
-/// what puts a trace in a pane).
+/// A stored trace's row chosen, by a click or by Tab, maximised or split: the trace is
+/// selected and the screen is its measurement's. A row of the measurement whose panes are
+/// up changes no pane, and neither does a row under Imported; a run of the sweep, which
+/// has no panes yet, brings the sweep's first pane.
 #[test]
-fn a_trace_row_click_or_tab_only_selects_maximised_or_not() {
+fn a_trace_row_click_or_tab_brings_its_measurements_screen_maximised_or_not() {
     for maximised in [true, false] {
         let mut t = T::new();
         t.conn(with_sweeps(vec![
@@ -80,25 +81,34 @@ fn a_trace_row_click_or_tab_only_selects_maximised_or_not() {
             t.key("W");
         }
         assert_eq!(t.st.layout.maximized, maximised);
-        // The IR view focused: a click on a trace it does not draw leaves it.
         t.key("Alt+3");
+        // The grid shows Sub, whose trace 16 is, and 13 is imported: nothing moves.
         let layout = t.st.layout.clone();
-        for id in [16, 13, 14, 16, 14] {
+        for id in [16, 13, 16] {
             t.st.apply(Msg::SelectTrace(TraceId(id)), &t.keys);
             assert_eq!(t.st.rig.selected_trace, Some(TraceId(id)));
             assert_eq!(t.st.layout, layout, "click on t{id}, maximised {maximised}");
         }
-        // Tab: every step that lands on a trace row leaves the layout as the step found it
-        // (a measurement row brings its own panes, a trace row nothing).
+        t.st.apply(Msg::SelectTrace(TraceId(14)), &t.keys);
+        assert_eq!(t.st.rig.selected_trace, Some(TraceId(14)));
+        assert_eq!(t.st.rig.selected, Some(MeasId(5)));
+        let panes = t.st.visible_panes();
+        assert_eq!(panes.len(), 1, "maximised {maximised}");
+        assert_eq!(t.st.layout.kind(panes[0]), PaneKind::Distortion);
+        assert_eq!(t.st.pane_meas(panes[0]).map(|m| m.id), Some(MeasId(5)));
+        // Tab: a step onto a trace row of the measurement selected before it leaves the
+        // layout as the step found it.
         let mut seen = Vec::new();
         for _ in 0..16 {
-            let before = t.st.layout.clone();
+            let before = (t.st.layout.clone(), t.st.rig.selected);
             t.key("Tab");
             if let Some(id) = t.st.rig.selected_trace {
-                assert_eq!(
-                    t.st.layout, before,
-                    "Tab onto {id:?}, maximised {maximised}"
-                );
+                if t.st.rig.selected == before.1 {
+                    assert_eq!(
+                        t.st.layout, before.0,
+                        "Tab onto {id:?}, maximised {maximised}"
+                    );
+                }
                 seen.push(id);
             }
         }

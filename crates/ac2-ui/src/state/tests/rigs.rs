@@ -761,8 +761,9 @@ fn rows_of_two_rigs_do_not_combine() {
     );
 }
 
-/// A measurement row chosen in the list while another rig's pane has the focus changes no
-/// pane: the pinned pane stays as it was.
+/// A measurement row chosen in the list while another rig's pane has the focus, its
+/// measurement shown on the panes already: no pane changes, and the pinned pane stays as
+/// it was.
 #[test]
 fn a_row_chosen_leaves_another_rigs_pane() {
     let (mut t, p) = two_lists();

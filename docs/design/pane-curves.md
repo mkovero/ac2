@@ -118,10 +118,11 @@ every pane) out by construction.
 | a split of an SPL, Programme or Walk pane | a copy of it, as today |
 | a split of an empty pane | nothing picked |
 | a measurement row clicked, with an own layout | its panes come on screen (P1, D12) |
-| a measurement row clicked, no own layout | a pane shows it already: selection only, every pane keeps what it shows. None does: the panes a new measurement of its kind starts on (one pane of its kind, a transfer's stack) take the place of this rig's panes and are stored as its own (D9, revised 2026-11-19) |
+| a measurement row clicked, no own layout | a pane shows it already and the panes are not another measurement's layout: selection only, every pane keeps what it shows. Else: the panes a new measurement of its kind starts on (one pane of its kind, a transfer's stack) are the whole screen and are stored as its own (D9, revised 2026-11-19) |
+| a child row clicked (live curve, math trace, stored trace) | selected, and the screen of the measurement it is listed under comes as that measurement's row brings it; with that screen up nothing changes. A curve no pane there holds (no pane of a kind that draws it whose lead's group it is of, and no entry bringing it) gets a pane of its kind below the layout, stored in it: led by the measurement when the kind shows it, else by the math trace, else holding the stored trace as its one entry. With no layout stored the first panes come first, so the pane is never added to panes that were merely open. Hidden stays hidden; a row under Imported only selects (D17) |
 | any list selection while a pane is empty | nothing changes: an empty pane does not follow the selection (D6) |
 | the top-bar rig drop-down | that rig is shown; no layout comes (as today: `switch_rig` brings none); panes that follow the shown rig and show something are pinned to the old one, as today |
-| a row of another rig reached (click, Enter, Tab) | a rig switch first, as the drop-down (refused with a window open), then the row on that rig, as a click there: an own layout comes, else a new measurement's panes beside the panes of the rig shown before, stored on that rig (D15) |
+| a row of another rig reached (click, Enter, Tab) | a rig switch first, as the drop-down (refused with a window open), then the row on that rig, as a click there: that measurement's screen alone — its own layout, else a new measurement's panes, stored on that rig — and nothing of the rig shown before beside it (D15, D18) |
 
 Today `select_meas_row` (`state/queries/select.rs`) shows a measurement without an own layout
 in the focused pane and turns that pane's kind, or splits a pane off for it (`own_pane_for`,
@@ -419,7 +420,24 @@ Each stage lands alone, with its own user-guide rows, and is tested through `ac2
   panes (P1); one without changes no pane. Revised 2026-11-19 ("I would expect to see spl
   meter when I click it"; no measurement on the rigs has a layout): one without that no pane
   shows gets the panes a new measurement of its kind starts on, stored as its own; a pane
-  is still never taken over, the screen is. Child rows only select.
+  is still never taken over, the screen is. Child rows only select (superseded by D17).
+
+2026-11-19, after using that build:
+
+- **D17** "if I click any trace under measurement the view should change to its measurement
+  view where trace is and also if there is no pane under measurement the new kind
+  measurement should go under the measurement it is under, not to be added what happens to
+  be open": every row under a measurement brings that measurement's screen, by the code
+  path of its own row; a curve none of its panes draws gets a pane in that measurement's
+  layout; a measurement without a layout shown as a guest on another measurement's layout
+  gets its own first screen. Tab steps as a click does, so the screen changes once per
+  measurement. A drop on a pane still changes that pane alone; V and the legend only select.
+- **D18** "for comparison it should be enough to drag trace from paired hosts trace list,
+  not to add it by clicking the trace in the list. it just confuses being like such it is
+  now": one rule for every row of every rig — a row that brings a screen brings that
+  measurement's panes and nothing else, stored layout and first panes alike. Panes of the
+  rig shown before are no longer kept beside (multi-rig.md's "leaves pinned panes where
+  they are" is superseded); rigs are compared by a row dragged onto a pane.
 
 2026-11-02 ("remove it as whole from all panes to avoid confusion, lets not do billions of
 different ways changing the pane view"):

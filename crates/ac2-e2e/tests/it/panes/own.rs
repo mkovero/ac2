@@ -9,6 +9,7 @@ use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{MeasId, TraceId};
 use ac2_scene::primitives::Viewport;
 use ac2_scene::theme::Theme;
+use ac2_scene::trace::TraceKey;
 use ac2_ui::forms::FormKind;
 use ac2_ui::keys::Keymap;
 use ac2_ui::state::{AppState, Msg, Overlay, PaneId, PaneKind};
@@ -45,11 +46,11 @@ fn owned_trace(s: &AppState, meas: MeasId) -> Option<TraceId> {
         .map(|t| t.id)
 }
 
-/// `trace` selected (a click on its row; a click on the selected row unselects it).
+/// `trace` selected as a click on its legend row selects it: the panes stay as they are
+/// (its row in the list would bring its measurement's own screen).
 fn select(d: &mut Driver, trace: TraceId) {
-    if d.st.rig.selected_trace != Some(trace) {
-        d.send(Msg::SelectTrace(trace));
-    }
+    let p = d.st.layout.focus;
+    d.send(Msg::LegendPick(p, TraceKey::Stored(trace)));
 }
 
 /// The selected trace moved under `to` with the move dialog (Shift+F2).
@@ -87,8 +88,9 @@ fn capture(d: &mut Driver, meas: MeasId, slot: u8) -> R<TraceId> {
             .as_ref()
             .is_some_and(|x| x.latest.get(&topic).is_some())
     })?;
-    // Its live row: selects it for the capture and changes no pane.
-    d.send(Msg::SelectLive(meas));
+    // Its legend row: selects it for the capture and changes no pane.
+    let p = d.st.layout.focus;
+    d.send(Msg::LegendPick(p, TraceKey::Live(meas)));
     d.key(&format!("Ctrl+{slot}"));
     d.until("the capture", |s| owned_trace(s, meas).is_some())?;
     owned_trace(&d.st, meas).ok_or_else(|| "the capture".into())
@@ -441,7 +443,7 @@ fn slow_the_distortion_pane_shows_its_own_sweep_from_an_empty_daemon() -> R {
     let pane = crate::common::pane(&d.st, PaneKind::Distortion);
     d.send(Msg::FocusPane(pane));
     d.drop_meas(pane, sweep_a);
-    // Sweep B's run selected with the transfer pane focused (a child row moves no pane):
+    // Sweep B's run selected with the transfer pane focused (no row chosen, no pane moves):
     // the sweep pane keeps sweep A.
     d.send(Msg::FocusPane(crate::common::pane(
         &d.st,

@@ -339,9 +339,15 @@ impl AppState {
 
     /// A measurement's row in the tree chosen (click, Enter, Tab): selected, and on screen
     /// ([`Self::sync_meas_layout`]) — its own panes when it has them, else the panes it is
-    /// shown on already, else the ones a measurement of its kind starts on.
+    /// shown on already when they are no other measurement's, else the ones a measurement
+    /// of its kind starts on.
     pub(in crate::state) fn select_meas_row(&mut self, id: MeasId) {
-        if self.meas(id).is_none() {
+        let Some(m) = self.meas(id) else {
+            return;
+        };
+        // A math trace is a row under its owner wherever its id comes from.
+        if matches!(m.config.kind, MeasKind::Math { .. }) {
+            self.select_math_row(id);
             return;
         }
         self.rig.selected = Some(id);
@@ -349,11 +355,22 @@ impl AppState {
         self.rig.selected_trace = None;
         self.rig.selected_live = None;
         self.rig.due.own_panes_due = true;
+        self.rig.due.row_curve = None;
     }
 
-    /// A measurement's live-curve row chosen (click, Tab): a child row, selected so the keys
-    /// act on the live curve, as a click on its legend row makes it. No pane changes: a pane
-    /// is given a curve by a row dragged onto it.
+    /// A child row of `owner` chosen: the screen is `owner`'s, as its own row brings it,
+    /// and one of its panes draws `curve`. One rule for every row under a measurement: the
+    /// operator who picks a curve in the list wants to see it where it belongs, not on
+    /// whatever panes are open.
+    fn bring_row(&mut self, owner: MeasId, curve: EntryRef) {
+        self.rig.choice.chosen = Some(owner);
+        self.rig.due.own_panes_due = true;
+        self.rig.due.row_curve = Some(crate::state::follow::RowCurve { owner, curve });
+    }
+
+    /// A measurement's live-curve row chosen (click, Tab): selected so the keys act on the
+    /// live curve, as a click on its legend row makes it, and its measurement's panes on
+    /// screen ([`Self::bring_row`]).
     pub(in crate::state) fn select_live_row(&mut self, id: MeasId) {
         if self.meas(id).is_none() {
             return;
@@ -361,23 +378,29 @@ impl AppState {
         self.rig.selected = Some(id);
         self.rig.selected_trace = None;
         self.rig.selected_live = Some(id);
+        self.bring_row(id, EntryRef::Live { meas: id });
     }
 
     /// A math trace's row chosen (click, Tab): a child row of its owner, selected so the
-    /// keys act on the math trace; no pane changes.
+    /// keys act on the math trace, its owner's panes on screen ([`Self::bring_row`]). One
+    /// under Imported is no measurement's: it is selected and no pane changes.
     pub(in crate::state) fn select_math_row(&mut self, id: MeasId) {
-        if self.meas(id).is_none() {
+        let Some(m) = self.meas(id) else {
             return;
-        }
+        };
+        let owner = ac2_scene::meas_list::meas_group(m, &self.measurements()).meas();
         self.rig.selected = Some(id);
         self.rig.selected_trace = None;
         self.rig.selected_live = None;
+        if let Some(owner) = owner.filter(|o| *o != id) {
+            self.bring_row(owner, EntryRef::Live { meas: id });
+        }
     }
 
-    /// A stored trace's row chosen (click, Tab): a child row, the trace selected so the trace
-    /// keys act on it; the measurement selection stays and no pane changes (a selected sweep
-    /// is the run its measurement's sweep pane draws).
-    pub(in crate::state) fn select_trace_row(&mut self, id: TraceId) {
+    /// Stored trace `id` selected by a key or a command (V, a run stepped, the next one
+    /// after a delete): the trace keys act on it and no pane changes — only a row chosen
+    /// in the list brings a screen.
+    pub(in crate::state) fn select_trace(&mut self, id: TraceId) {
         if self
             .daemon()
             .is_some_and(|s| s.traces.iter().any(|t| t.id == id))
@@ -386,12 +409,35 @@ impl AppState {
         }
     }
 
+    /// A stored trace's row chosen (click, Tab): the trace selected so the trace keys act
+    /// on it (a selected sweep is the run its measurement's sweep pane draws), and the
+    /// measurement it is filed under selected with its panes on screen
+    /// ([`Self::bring_row`]): the selection and the screen stay one measurement's. One
+    /// under Imported is no measurement's: it is selected and nothing else changes.
+    pub(in crate::state) fn select_trace_row(&mut self, id: TraceId) {
+        let ms = self.measurements();
+        let Some(owner) = self
+            .daemon()
+            .and_then(|s| s.traces.iter().find(|t| t.id == id))
+            .map(|t| ac2_scene::meas_list::group_of(t, &ms).meas())
+        else {
+            return;
+        };
+        if let Some(owner) = owner {
+            self.rig.selected = Some(owner);
+            self.rig.selected_live = None;
+            self.bring_row(owner, EntryRef::Trace { trace: id });
+        }
+        self.set_selected_trace(Some(id));
+    }
+
     /// Tab / Shift+Tab: the next / previous row of the measurement list as it is shown
     /// (a folded group's rows skipped, hidden curves included: they are selectable),
     /// wrapping. A measurement's header and its live curve are two stops, as they are two
     /// rows: the live curve is selected as a click on its row (or legend row) selects it.
-    /// A measurement row is chosen as a click on it is; a stored trace row selects the
-    /// trace as a click does, no pane changing.
+    /// Every row is chosen as a click on it is, so a step onto another measurement's rows
+    /// brings that measurement's panes and a step among one measurement's rows changes no
+    /// pane.
     pub(in crate::state) fn cycle_tree_row(&mut self, d: i32, out: &mut Vec<Request>) {
         use ac2_scene::meas_list::TreeKey;
         #[derive(Clone, Copy, PartialEq)]

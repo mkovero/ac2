@@ -633,7 +633,7 @@ impl AppState {
             .find(|(x, shown)| *x != id && *shown)
             .map(|(x, _)| *x);
         match next {
-            Some(n) => self.select_trace_row(n),
+            Some(n) => self.select_trace(n),
             None => self.set_selected_trace(None),
         }
         let then = match self.selected_trace_meta() {

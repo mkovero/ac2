@@ -804,7 +804,7 @@ impl AppState {
             .and_then(|c| ids.iter().position(|x| *x == c))
             .unwrap_or(0) as i32;
         let id = ids[(i + d).rem_euclid(ids.len() as i32) as usize];
-        self.select_trace_row(id);
+        self.select_trace(id);
         if let Some((t, _)) = self.pane_sweep(pane) {
             let name = trace_label(&t.meta);
             self.toast(format!("{name} selected"));

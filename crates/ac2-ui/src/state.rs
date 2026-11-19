@@ -510,7 +510,7 @@ impl AppState {
             Msg::Sessions(m) => self.sessions_msg(m, out),
             Msg::RenameTrace(id) => {
                 if self.rig.selected_trace != Some(id) {
-                    self.select_trace_row(id);
+                    self.select_trace(id);
                 }
                 // An EQ set's curve is named by its set: a double click opens the set.
                 if let Ok(ac2_proto::model::TraceSource::Eq { meas, set, .. }) =

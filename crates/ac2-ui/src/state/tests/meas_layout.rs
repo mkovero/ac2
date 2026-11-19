@@ -291,8 +291,9 @@ fn spectrum_2_layout(t: &T) -> Option<PaneLayout> {
 }
 
 /// The operator's sequence: `Spectrum 1`'s row chosen, C on one of its traces, then a click
-/// on a `Spectrum 2` trace. Two layouts alike are still two: nothing is sent for
-/// `Spectrum 2`, and a child row moves no pane.
+/// on a `Spectrum 2` trace. Two layouts alike are still two: the trace's row brings
+/// `Spectrum 2`'s own panes, without the compared trace, and nothing is sent for
+/// `Spectrum 2`.
 #[test]
 fn a_trace_compared_then_another_measurements_trace_chosen_leaves_its_layout() {
     let mut t = desk_on_twin_spectra();
@@ -300,11 +301,15 @@ fn a_trace_compared_then_another_measurements_trace_chosen_leaves_its_layout() {
     sent.extend(t.st.apply(Msg::SelectTrace(TraceId(13)), &t.keys));
     sent.extend(t.key("C"));
     answer_layout_calls(&mut t, &sent);
-    let before = t.st.pane_layout();
     let r = t.st.apply(Msg::SelectTrace(TraceId(14)), &t.keys);
     assert_eq!(t.st.rig.selected_trace, Some(TraceId(14)));
+    assert_eq!(t.st.rig.selected, Some(MeasId(4)));
     assert!(layout_calls(&r).is_empty(), "a trace row: {r:?}");
-    assert_eq!(t.st.pane_layout(), before, "a child row moves no pane");
+    assert_eq!(
+        t.st.pane_layout(),
+        three_spectrum(4),
+        "the trace's measurement's own panes"
+    );
     sent.extend(r);
     assert!(
         !layout_targets(&sent).contains(&MeasId(4)),
@@ -775,7 +780,8 @@ fn shown(t: &T) -> Vec<Option<MeasId>> {
 
 /// `Spectrum 2`'s own panes, `Spectrum 1` put into its spectrograph by `put`; then
 /// `Spectrum 1`'s row and `Spectrum 2`'s again: the spectrograph still shows `Spectrum 1`,
-/// and `Spectrum 1` (which has no panes of its own) was never given these.
+/// and `Spectrum 1` (which has no panes of its own) was never given these: its row brought
+/// the one pane a new spectrum starts on, stored as its own.
 fn guest_in_spectrograph_survives_the_rows(put: fn(&mut T, PaneId) -> Vec<Request>) {
     let mut t = desk_on_spectrum_2();
     let graph = t.st.layout.root.reading_order()[1];
@@ -785,7 +791,12 @@ fn guest_in_spectrograph_survives_the_rows(put: fn(&mut T, PaneId) -> Vec<Reques
     assert!(!layout_targets(&r).contains(&s1), "the pick: {r:?}");
     assert_eq!(t.st.pane_meas(graph).map(|m| m.id), Some(s1));
     let r = select(&mut t, 3);
-    assert!(layout_calls(&r).is_empty(), "Spectrum 1's row: {r:?}");
+    assert_eq!(shown(&t), [Some(s1)], "Spectrum 1's first pane alone");
+    assert_eq!(
+        layout_calls(&r),
+        [(s1, Some(t.st.pane_layout()))],
+        "Spectrum 1's row"
+    );
     let r = select(&mut t, 4);
     assert!(layout_calls(&r).is_empty(), "Spectrum 2's row: {r:?}");
     assert_eq!(t.st.rig.selected, Some(s2));
@@ -801,9 +812,6 @@ fn guest_in_spectrograph_survives_the_rows(put: fn(&mut T, PaneId) -> Vec<Reques
         [Some(s2), Some(s1), Some(s2)],
         "the spectrograph keeps the pick"
     );
-    let at = t.st.layout.root.reading_order()[1];
-    assert_eq!(t.st.layout.focus, at, "the focus stays on the spectrograph");
-    assert!(t.st.meas(s1).expect("Spectrum 1").layout.is_none());
 }
 
 /// The operator's sequence: a chip pick on the spectrograph of `Spectrum 2`'s own panes.

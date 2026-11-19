@@ -23,11 +23,24 @@ pub(crate) struct Due {
     /// The session dialog's session opened: ask what to measure ([`Self::choose_first`])
     /// once the daemon's state shows it open.
     pub(super) choose_when_open: bool,
-    /// A measurement's row was chosen: its own panes go on screen after the message.
+    /// A row of the list was chosen: its measurement's own panes go on screen after the
+    /// message.
     pub(super) own_panes_due: bool,
+    /// The row chosen was a child row: the measurement it is listed under, whose panes
+    /// come, and its curve, which one of them is to draw. `None` with `own_panes_due`: a
+    /// measurement's own row, the selected one.
+    pub(super) row_curve: Option<RowCurve>,
     /// Settings sent with the arm in flight; a change made before the arm is confirmed is
     /// sent once it is.
     pub(super) armed_with: Option<GeneratorSettings>,
+}
+
+/// A child row chosen in the list: a live curve, a math trace or a stored trace.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct RowCurve {
+    /// The measurement the row is listed under.
+    pub(super) owner: MeasId,
+    pub(super) curve: ac2_proto::model::layout::EntryRef,
 }
 
 /// The measurement whose row the operator chose, whose own panes are on screen, and what
@@ -35,13 +48,13 @@ pub(crate) struct Due {
 #[derive(Debug, Default)]
 pub(super) struct MeasChoice {
     /// The measurement whose row was chosen last (or that this app selected by itself, a
-    /// measurement made, a sweep just run): its own panes are the ones on screen, and pane
-    /// edits are its layout's. A child row, a row dropped on a pane or a click in a pane
-    /// never moves it.
+    /// measurement made, a sweep just run), or under which a child row was chosen: its own
+    /// panes are the ones on screen, and pane edits are its layout's. A row dropped on a
+    /// pane or a click in a pane never moves it.
     pub(super) chosen: Option<MeasId>,
     /// The measurement whose own panes the operator put on screen here by choosing its row.
     /// An edit of the panes is stored as its layout (while a pane still shows it), even
-    /// after a pane or child row selected another measurement: that one is a guest in its
+    /// after a click in a pane selected another measurement: that one is a guest in its
     /// panes. While it is selected, another client's edit of its layout shows here too; no
     /// other measurement's does: a viewer nobody touches keeps its panes.
     pub(super) own_panes: Option<MeasId>,

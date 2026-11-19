@@ -372,7 +372,7 @@ fn a_stopped_measurement_keeps_its_last_ir() {
     for _ in 0..3 {
         t.key("Shift+G");
     }
-    t.st.select_trace_row(TraceId(5));
+    t.st.select_trace(TraceId(5));
     let sc = scene(&t);
     assert_eq!(sc.note, None);
     assert_eq!(sc.tag.as_deref(), Some("Main L pre EQ"));
@@ -436,7 +436,7 @@ fn the_transfer_ir_view_shows_the_selected_stored_ir() {
     assert_eq!(curve(&live).points.len(), 21);
     assert_eq!(live.tag, None);
 
-    t.st.select_trace_row(TraceId(5));
+    t.st.select_trace(TraceId(5));
     let s = scene(&t);
     assert_eq!(s.tag.as_deref(), Some("Main L pre EQ"));
     assert!(
@@ -473,7 +473,7 @@ fn the_transfer_ir_view_shows_the_selected_stored_ir() {
     assert!(scene(&t).cursor.is_some());
 
     // A trace without an IR, or none selected: the live IR.
-    t.st.select_trace_row(TraceId(6));
+    t.st.select_trace(TraceId(6));
     assert_eq!(curve(&scene(&t)).points.len(), 21);
     t.st.set_selected_trace(None);
     assert_eq!(curve(&scene(&t)).points.len(), 21);

@@ -266,7 +266,9 @@ panes**: a pane pinned to another rig is never written into a measurement's layo
 would come back as a duplicate of the pinned pane already on screen); it lives in the app's
 layout prefs. Bringing rig A's measurement replaces the panes whose source is `Active` or
 `ThisRig` of A and leaves pinned panes where they are. The operator who put ketunkolo's
-loudness beside pupu's meter keeps it when stepping through pupu's measurements. A
+loudness beside pupu's meter keeps it when stepping through pupu's measurements.
+(Superseded 2026-11-19, pane-curves.md D18: a row that brings a screen brings that
+measurement's panes alone; a pinned pane stays only while the screen does not change.) A
 Programme pane opened from a pair row (a child row; no measurement chosen) is likewise the
 app's: child rows never store panes (list click model), so it is saved in the layout prefs
 only.

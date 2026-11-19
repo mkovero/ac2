@@ -245,8 +245,9 @@ fn drop_kettus(h: &mut Harness<'_, App>, kettu: RigId, id: MeasId, p: ac2_ui::st
 }
 
 /// A session saved on pupu with its measurement's own panes (`ThisRig`) and loaded on
-/// kettu: choosing that measurement on kettu brings kettu's panes of it, on kettu's ids;
-/// back on pupu its own come back beside kettu's, which stay kettu's.
+/// kettu: choosing that measurement on kettu brings kettu's panes of it, on kettu's ids,
+/// and none of pupu's stays beside them; back on pupu, kettu's panes stay kettu's until a
+/// row of pupu brings a screen.
 #[test]
 fn a_session_with_its_own_panes_loads_on_either_rig() -> R {
     if !have_gpu("a_session_with_its_own_panes_loads_on_either_rig") {
@@ -329,14 +330,13 @@ fn a_session_with_its_own_panes_loads_on_either_rig() -> R {
     });
     tab_to(&mut h, MIC_FFT);
     step_until(&mut h, "kettu's own panes", |a| {
-        own(a, PaneRig::Active) >= pupus && own(a, PaneRig::Rig(pupu_id)) >= pupus
+        own(a, PaneRig::Active) >= pupus && own(a, PaneRig::Rig(pupu_id)) == 0
     });
-    // Back on pupu: kettu's stay kettu's, pupu's are pupu's own again.
+    // Back on pupu: kettu's stay kettu's.
     pick_first_rig(&mut h);
     step_until(&mut h, "pupu shown", |a| a.state.active() == pupu_id);
     let a = h.state();
     assert!(own(a, PaneRig::Rig(kettu_id)) >= pupus);
-    assert!(own(a, PaneRig::Active) >= pupus);
     Ok(())
 }
 
