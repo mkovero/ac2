@@ -142,19 +142,21 @@ jobs and marks find a column by its position. The joiner is therefore reshaped:
   state, incarnation, `k`) and per **column** (a ring). The first reader of any remote
   input switches the fan-out to per-period hand-off and starts holding local blocks by the
   link offset, as a session with remote inputs does at open; the last one leaving undoes it.
-- **One `k` per rig incarnation, for the joiner's life**, shared by all that rig's columns
-  (every channel of one device carries the same sample index). It is set from the
-  minute-smoothed standing offset (§5.1) when that exists, else from the first block (on
-  arrival, with its reason). It is **not** dropped when the rig's last column goes: one
-  block's stamp is good to a few samples, and a cross-rig delay must not move by that on
-  every stop and start. A column added later takes `k` as it stands; two channels of one
-  rig are thus sample-aligned whatever the anchor, which makes §5's one-clock row true.
-- **One re-anchor is kept from today** (`join.rs`: an input on arrival for want of a synced
-  clock or a stamp map moves to system time once both are there). When a rig's arrival
-  reason clears, `ClocksDisagree` included, its `k` is set anew on system time, for all its
-  columns in the same block, counted and marked like a slip. Without it a rig meter started
-  before chrony synced after a power cut would leave every later cross-rig transfer
-  function refused (`gate_of` needs `Anchor::SystemTime`) until the session reopened.
+- **One `k` at a time per rig**, shared by all its columns (every channel of one device
+  carries the same sample index). It is set once per incarnation: from the minute-smoothed
+  standing offset (§5.1) if there is one; else, with a synced clock and a stamp map, on
+  system time from the first block, as built; else on arrival, with its reason. It does
+  not move when the smoothed offset arrives later, nor when the rig's last column goes: a
+  cross-rig delay must not shift by a block's stamp error on every stop and start. A
+  column added later takes `k` as it stands, which makes §5's one-clock row true.
+- **Re-anchor when an arrival reason clears.** Built for a synced clock or a stamp map
+  that came late (`join.rs`); **new** for `ClocksDisagree`, which today is set once. `k` is
+  then set anew on system time, all the rig's columns in the same block, counted and
+  marked like a slip. Since §5.1 checks age on every mark, a disagreement must have been
+  clear for a minute first, and at most once per incarnation, or it would flap. Without
+  the re-anchor, a rig meter started before chrony synced would leave every later
+  cross-rig transfer function refused (`gate_of` needs `Anchor::SystemTime`). The
+  standing relation is not reset by a re-anchor.
 - **Slips** are judged only on a column that has audio and move `k` for all that rig's
   columns in the same block; a new, still empty column never moves the rig.
 - **Column slots are stable.** A column is appended; a removed one stays a dead slot (no
@@ -381,23 +383,26 @@ format 45 → 46 in 1b: `remote_inputs` goes with no reader for the old shape, s
 session file or autosave is set aside whole. Raw sidecar: no bump (§2.1).
 
 **`rig.json`: version 11 stays; one section is lost once.** It stores `monitor_session` as
-the wire `SessionConfig` (`rig/file.rs`), which is `deny_unknown_fields` and always writes
+the wire `SessionConfig` (`rig/file.rs`), `deny_unknown_fields`, always with
 `remote_inputs`. In 1b the section gets a type of its own, capture-only by construction
-(backend, input device, input channels, spare inputs, rate, period, link offset), so the
-wire type never again decides what a restart can read. Today's bytes cannot stay valid
-without carrying dead fields (output device and channels, loopback, `remote_inputs`),
-which would be a shim. So the built section reader drops that one section at the first
-start after the 1b deploy, and the monitor at start finds none recorded. Chosen over a
-`VERSION` bump, which would also cost the max level, peers and meters; the rule in
-`rig/file.rs` (*a section's shape change bumps the version*) is amended to say so.
+(backend, input device, input channels, spare inputs, rate, period, link offset) and
+itself `deny_unknown_fields`: its fields are a subset of today's, so without that old
+bytes would read silently, input channels ≥ 0x8000 included. Old bytes are thus refused
+(keeping the dead fields to read them would be a shim) and the section goes down the
+built damage path (`rig/mod.rs`): `rig.json` is copied aside as damaged, one rig-settings
+damage notice names `monitor_session`, and the salvaged file (max level, peers, meters)
+is written back. Chosen over a `VERSION` bump, which would cost those too. The rule in
+`rig/file.rs` is reworded: *a section's shape change costs that section; a change to
+`RigMeter`, or to anything holding the max level or the peers, bumps `VERSION`.*
 
-**Deploy of 1b**, all hosts together, per rig with a monitor at start: (1) beforehand note
-its session's device, channels and rate, and copy out the rig meters' logs: their
-directory's manifest is a session file (`autosave/rig_logs.rs`), so 45 → 46 sets the logs
-and the running Leq windows aside. (2) Deploy. (3) Open the session once (`ac2 session
-open …` as noted), which records the config. (4) Restart the daemon with no client and
-read the audit line *monitor at start: audio opened capture-only on <device>*; *no
-session recorded yet* means step 3 did not take. The system max level is not touched.
+**Deploy of 1b**, all hosts together, per rig with a monitor at start: (1) note its
+session's device, channels and rate, and copy out the rig meters' logs: their manifest
+is a session file (`autosave/rig_logs.rs`), so 45 → 46 sets logs and running Leq windows
+aside. (2) Deploy; expect the one damage notice; audio stays closed and the rig meters
+read nothing until (3) the session is opened once (`ac2 session open …` as noted), which
+records the config. (4) Restart the daemon with no client and read the audit line
+*monitor at start: audio opened capture-only on <device>*; the info line *no session
+recorded yet* means step 3 did not take. The system max level is not touched.
 
 ## 7. UI
 
@@ -427,9 +432,9 @@ stated system clocks); scene text asserted.
   again, its log carries on, the source's log names the rig; when the clock syncs, one
   re-anchor, after which a cross-rig transfer function averages. Remove the rig: the
   monitor session closes. A session measurement stays stopped. Generators disarmed.
-- **Files:** a `rig.json` with today's `monitor_session` → that section lost, the rest
-  kept, *no session recorded yet*; after one `session.open`, the monitor reopens. The
-  sidecar fixture (`raw/tests.rs`) with a remote column lists, replays and names its rig.
+- **Files:** a `rig.json` with today's `monitor_session` → the damage notice naming it,
+  the rest kept, *no session recorded yet*; after one `session.open`, the monitor reopens.
+  The sidecar fixture (`raw/tests.rs`) with a remote column lists, replays, names its rig.
 - **Levels:** three rigs in a chain: `source/levels` from B holds B's rows only; each row
   of §3's table refused as it says; frames stop → *no level*.
 - **Generator on the paired rig**, through the app's second client matched by key: above
@@ -455,7 +460,8 @@ rewrites what this design builds on in `control/remote.rs`: the tap install in
   `InputRef`; `remote_inputs` gone; the reshaped joiner on the standing relation; every
   paired rig offered; pickers and Audio & I/O rows with *available* / *in use by*;
   `peer/<rig>/levels`, since an in-use remote input must keep the meter it has today (it
-  rides `session/levels` now). A rig meter on a remote input is refused until stage 3.
+  rides `session/levels` now). `RigMeter`'s input is an `InputRef` from here (bytes
+  unchanged), a remote one refused until stage 3, which therefore needs no file bump.
 - **2 — the paired rig's generator** (wire). `loopback` and the stimulus in brief; the
   dialog by rig, client by key, routed stimulus keys, the one-rig and no-outputs words.
 - **3 — unattended** (no wire, no file bump). Rig meters on remote inputs; the widened
