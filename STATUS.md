@@ -74,6 +74,8 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   return its delay is tracked again. Rig acceptance with the operator (§7 there: a cross-rig
   TF on pupu and ketunkolo, then the word clock pull) is open; both rigs run on the Orion's
   word clock / ADAT.
+  Designed, not built: `docs/design/remote-auto.md` (paired rigs' inputs offered and streamed
+  only while used, levels otherwise, the paired rig's own generator driven from the shown rig).
 - Open hardware gates (1.0): duplex check and 1 h run on macOS (Windows: done in a VM,
   a real PC and the panel/unplug cases pending, `asio.md` §4c–d), keyboard-only speaker
   tuning per OS, clean install → first measurement < 2 min per OS, signing certificates.
