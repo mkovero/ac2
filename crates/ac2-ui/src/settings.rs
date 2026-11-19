@@ -28,6 +28,7 @@ use crate::session_dialog::SessionDialog;
 
 mod connection;
 mod display;
+mod network;
 mod rig;
 mod signal;
 pub use connection::{
@@ -42,6 +43,7 @@ pub use display::{
     spectrum_view_name, step_ember_decay, step_ember_glow, step_hold, step_theme, sweep_view_name,
     theme_name, warning_toasts_text,
 };
+pub use network::{IfacePick, NetPicks, Switch, read_only_row, switch};
 pub use rig::{RigPage, RigRow, levels_set};
 pub use signal::SignalRows;
 

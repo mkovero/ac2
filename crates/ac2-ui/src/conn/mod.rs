@@ -333,9 +333,13 @@ pub enum Request {
     Reconnect,
     /// `server.info` ([`ConnEvent::Server`]).
     ServerInfo,
-    /// `server.authorize` / `server.revoke`; answered with the new info
-    /// ([`ConnEvent::Server`] carrying `what`).
-    ServerCall { cmd: Command, what: String },
+    /// `server.authorize`, `server.revoke`, `server.network`; answered with the new info
+    /// ([`ConnEvent::Server`] carrying `what` when done, `failed` when not).
+    ServerCall {
+        cmd: Command,
+        what: String,
+        failed: String,
+    },
     /// A Sessions-dialog job ([`ConnEvent::SessionProgress`] while it moves a file,
     /// [`ConnEvent::Sessions`] when it ends).
     Sessions(crate::sessions::SessionJob),
@@ -601,6 +605,8 @@ impl Out {
 
 enum Next {
     Reconnect,
+    /// The rig said it turned its network off: the link is down on purpose.
+    NetworkOff,
     Exit,
 }
 
@@ -621,6 +627,9 @@ async fn run(target: Target, mut ctl: mpsc::UnboundedReceiver<Ctl>, out: Out) {
         topics: HashSet::new(),
         period: DISPLAY_PERIOD,
     };
+    // The rig turned its network off and has not answered since: every failed attempt
+    // reads as that, not as a fault, until it answers again.
+    let mut off = false;
     loop {
         out.send(ConnEvent::Connecting {
             target: target.describe.clone(),
@@ -633,6 +642,7 @@ async fn run(target: Target, mut ctl: mpsc::UnboundedReceiver<Ctl>, out: Out) {
                 let why = describe_err(&e, &target);
                 let down = match e {
                     ac2_client::ClientError::NotAuthorized { .. } => RigDown::NotAuthorized,
+                    _ if off => RigDown::NetworkOff,
                     _ => RigDown::Unreachable,
                 };
                 if wait_retry(&target, &mut ctl, &out, (why, down), &mut wants).await {
@@ -642,20 +652,18 @@ async fn run(target: Target, mut ctl: mpsc::UnboundedReceiver<Ctl>, out: Out) {
             }
             Err(_) => {
                 let why = not_responding(&target);
-                if wait_retry(
-                    &target,
-                    &mut ctl,
-                    &out,
-                    (why, RigDown::Unreachable),
-                    &mut wants,
-                )
-                .await
-                {
+                let down = if off {
+                    RigDown::NetworkOff
+                } else {
+                    RigDown::Unreachable
+                };
+                if wait_retry(&target, &mut ctl, &out, (why, down), &mut wants).await {
                     continue;
                 }
                 return;
             }
         };
+        off = false;
         let w = client.welcome();
         out.send(ConnEvent::Connected {
             target: target.describe.clone(),
@@ -666,6 +674,21 @@ async fn run(target: Target, mut ctl: mpsc::UnboundedReceiver<Ctl>, out: Out) {
         });
         match session(client, &mut ctl, &out, &mut wants).await {
             Next::Reconnect => continue,
+            Next::NetworkOff => {
+                off = true;
+                let why = ac2_scene::network::RIG_NETWORK_OFF.to_owned();
+                if !wait_retry(
+                    &target,
+                    &mut ctl,
+                    &out,
+                    (why, RigDown::NetworkOff),
+                    &mut wants,
+                )
+                .await
+                {
+                    return;
+                }
+            }
             Next::Exit => return,
         }
     }
@@ -714,8 +737,8 @@ async fn wait_retry(
                     what: None,
                     result: Err("not connected".into()),
                 }),
-                Some(Ctl::Req(Request::ServerCall { what, .. })) => out.send(ConnEvent::Server {
-                    what: Some(what),
+                Some(Ctl::Req(Request::ServerCall { failed, .. })) => out.send(ConnEvent::Server {
+                    what: Some(failed),
                     result: Err("not connected".into()),
                 }),
                 // Applied on the next connection.
@@ -808,6 +831,9 @@ async fn session(
                 Some(Ctl::Req(r)) => handle(&client, r, &stim_tx, out),
             },
             silent = client.await_dead() => {
+                if client.network_turned_off() {
+                    break Next::NetworkOff;
+                }
                 // The transport may still look connected (a half-open TCP connection after
                 // the link dropped), so libzmq would never reconnect by itself: drop the
                 // client, which closes all three sockets, and connect anew.
@@ -851,6 +877,11 @@ async fn session(
             () = tokio::time::sleep_until(clock.next) => {
                 let active = poll.poll(&client, out).await;
                 clock.polled(tokio::time::Instant::now(), active, out.ui_behind(), wants.period);
+                // Said before the rig closed the connection: no keepalive will come, and
+                // waiting for their silence would read as a fault meanwhile.
+                if client.network_turned_off() {
+                    break Next::NetworkOff;
+                }
             },
             () = client.data_changed(), if clock.watch => {
                 clock.arrived(tokio::time::Instant::now());

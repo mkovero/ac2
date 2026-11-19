@@ -494,7 +494,7 @@ fn connection_page_asks_the_daemon_authorizes_and_revokes() {
         result: Ok(Box::new(info.clone())),
     });
     let lines = settings(&t).connection.lines();
-    assert_eq!(lines[4], ConnLine::Authorized("laptop".into()));
+    assert_eq!(lines[7], ConnLine::Authorized("laptop".into()));
     // Enter on Reconnect; Enter on Connect… asks the app for the connect dialog.
     assert!(
         t.key("Enter")
@@ -517,8 +517,10 @@ fn connection_page_asks_the_daemon_authorizes_and_revokes() {
         t.key("Enter");
         assert!(!t.st.prefs.daemon.stop_on_quit);
     }
-    // Delete twice revokes the focused client.
-    t.key("Down");
+    // Delete twice revokes the focused client (past the network's three rows).
+    for _ in 0..4 {
+        t.key("Down");
+    }
     assert!(t.key("Delete").is_empty());
     let r = t.key("Delete");
     assert!(r.iter().any(|r| matches!(r,
@@ -538,6 +540,107 @@ fn connection_page_asks_the_daemon_authorizes_and_revokes() {
     });
     assert!(t.last_toast().contains("already authorized"));
     assert_eq!(settings(&t).connection.server, Some(Ok(info)));
+}
+
+/// The network of the rig's own daemon: Enter turns it off at once (the row said who it
+/// cuts), on after a second Enter; a refusal is said on the page in the daemon's words; a
+/// change made anywhere (`State.server`) asks for the info again at once.
+#[test]
+fn connection_page_switches_the_network() {
+    let mut t = T::new();
+    t.key("Ctrl+P");
+    t.key("Alt+6");
+    let info = ac2_proto::samples::server_info();
+    t.conn(ConnEvent::Server {
+        what: None,
+        result: Ok(Box::new(info.clone())),
+    });
+    for _ in 0..4 {
+        t.key("Down");
+    }
+    assert_eq!(settings(&t).connection.focused(), Some(ConnLine::Network));
+    let r = t.key("Enter");
+    assert!(
+        r.iter().any(|r| matches!(
+            r,
+            Request::ServerCall {
+                cmd: Command::ServerNetwork {
+                    enabled: false,
+                    bind: None,
+                    port: None
+                },
+                ..
+            }
+        )),
+        "{r:?}"
+    );
+    t.conn(ConnEvent::Server {
+        what: Some("cannot turn the network off".into()),
+        result: Err("Refused: the network is fixed by ac2d --listen tcp://eth0:47820".into()),
+    });
+    assert_eq!(
+        settings(&t).connection.error.as_deref(),
+        Some(
+            "cannot turn the network off: Refused: the network is fixed by ac2d --listen tcp://eth0:47820"
+        )
+    );
+    assert_eq!(settings(&t).connection.server, Some(Ok(info.clone())));
+
+    // Off now: Enter asks, a second Enter turns it on.
+    let mut off = ac2_proto::samples::server_info_off();
+    off.interfaces = info.interfaces.clone();
+    t.conn(ConnEvent::Server {
+        what: Some("network turned off".into()),
+        result: Ok(Box::new(off)),
+    });
+    assert_eq!(t.last_toast(), "network turned off");
+    assert!(t.key("Enter").is_empty());
+    let r = t.key("Enter");
+    assert!(
+        r.iter().any(|r| matches!(
+            r,
+            Request::ServerCall {
+                cmd: Command::ServerNetwork { enabled: true, .. },
+                ..
+            }
+        )),
+        "{r:?}"
+    );
+
+    // Another client moved it: asked again before the 2 s poll is due.
+    let mut st = t.st.daemon().expect("mirrored").clone();
+    st.server.status = ac2_proto::model::NetStatusKind::Listening;
+    t.conn(mirror(st));
+    let r = t.st.apply(
+        Msg::Tick {
+            now_s: 0.1,
+            dt_s: 0.1,
+        },
+        &t.keys,
+    );
+    assert!(r.iter().any(|r| matches!(r, Request::ServerInfo)), "{r:?}");
+}
+
+/// A rig reached over the network: its network is read, never switched from here.
+#[test]
+fn a_remote_rigs_network_has_no_switch() {
+    let mut t = T::new();
+    t.key("Ctrl+P");
+    t.key("Alt+6");
+    t.conn(ConnEvent::Server {
+        what: None,
+        result: Ok(Box::new(ac2_proto::samples::server_info_fixed())),
+    });
+    let p = &settings(&t).connection;
+    assert!(!p.lines().contains(&ConnLine::Network));
+    for _ in 0..8 {
+        assert!(
+            !t.key("Down")
+                .iter()
+                .chain(t.key("Enter").iter())
+                .any(|r| matches!(r, Request::ServerCall { .. }))
+        );
+    }
 }
 
 /// One page holds the audio device and the channels; its title is the name every text uses.

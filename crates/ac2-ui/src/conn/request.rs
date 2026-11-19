@@ -211,7 +211,7 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
                 o.send(ConnEvent::Server { what: None, result });
             });
         }
-        Request::ServerCall { cmd, what } => {
+        Request::ServerCall { cmd, what, failed } => {
             let (c, o) = (client.clone(), out.clone());
             tokio::spawn(async move {
                 let op = cmd.name();
@@ -220,6 +220,8 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
                     .await
                     .and_then(|r| expect_body!(op, r, ReplyBody::Server(s) => Box::new(s)))
                     .map_err(|e| e.to_string());
+                // The words say what happened: a refused change did not happen.
+                let what = if result.is_ok() { what } else { failed };
                 o.send(ConnEvent::Server {
                     what: Some(what),
                     result,

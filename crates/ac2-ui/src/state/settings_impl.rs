@@ -33,6 +33,8 @@ pub enum SettingsMsg {
     Display(DisplayRow, i32),
     /// A line of the Connection page: focused and acted on.
     Connection(usize),
+    /// ‹/› on a line of the Connection page: focused, and stepped as ←/→ step it.
+    ConnectionStep(usize, i32),
     /// A row of the Rig monitor page focused.
     RigFocus(RigRow),
     /// A click on a text row of the Rig monitor page: focused, the caret before its
@@ -104,6 +106,7 @@ impl AppState {
         let remote = self
             .open_session()
             .is_some_and(|o| !o.config.remote_inputs.is_empty());
+        let seen = self.daemon().map(|d| d.server.clone());
         let Overlay::Settings(s) = &mut self.overlay else {
             return;
         };
@@ -112,25 +115,30 @@ impl AppState {
             && matches!(self.rig.conn, super::ConnState::Connected { .. })
         {
             s.connection.asked_s = Some(self.now_s);
+            s.connection.seen = seen;
             out.push(Request::ServerInfo);
         }
     }
 
     /// Asks for the daemon's server info again while the Connection page is shown (a new
-    /// client's refused key appears while the operator waits for it).
+    /// client's refused key appears while the operator waits for it), and at once when
+    /// `State.server` moves.
     pub(super) fn poll_settings(&mut self, out: &mut Vec<Request>) {
         let connected = self.connected();
         let now = self.now_s;
+        let seen = self.daemon().map(|d| d.server.clone());
         let Overlay::Settings(s) = &mut self.overlay else {
             return;
         };
         if s.page == Page::Connection
             && connected
-            && s.connection
-                .asked_s
-                .is_none_or(|t| now - t >= SERVER_INFO_EVERY_S)
+            && (s.connection.seen != seen
+                || s.connection
+                    .asked_s
+                    .is_none_or(|t| now - t >= SERVER_INFO_EVERY_S))
         {
             s.connection.asked_s = Some(now);
+            s.connection.seen = seen;
             out.push(Request::ServerInfo);
         }
     }
@@ -716,6 +724,18 @@ impl AppState {
                     Overlay::Settings(s) => {
                         s.connection.focus = i;
                         s.connection.enter()
+                    }
+                    _ => None,
+                };
+                if let Some(a) = a {
+                    self.connection_action(a, out);
+                }
+            }
+            SettingsMsg::ConnectionStep(i, d) => {
+                let a = match &mut self.overlay {
+                    Overlay::Settings(s) => {
+                        s.connection.focus = i;
+                        s.connection.toggle(d)
                     }
                     _ => None,
                 };

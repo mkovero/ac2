@@ -35,7 +35,8 @@ impl AppState {
                 None
             }
             Key::Enter => p.enter(),
-            Key::ArrowLeft | Key::ArrowRight if !p.typing() => p.toggle(),
+            Key::ArrowLeft if !p.typing() => p.toggle(-1),
+            Key::ArrowRight if !p.typing() => p.toggle(1),
             _ if p.typing() => {
                 self.swallow_text = swallow;
                 None
@@ -78,11 +79,27 @@ impl AppState {
             }
             ConnAction::Authorize { name, key } => out.push(Request::ServerCall {
                 what: format!("client {name} authorized"),
+                failed: format!("cannot authorize {name}"),
                 cmd: Command::ServerAuthorize { name, key },
             }),
             ConnAction::Revoke(name) => out.push(Request::ServerCall {
                 what: format!("client {name} revoked"),
+                failed: format!("cannot revoke {name}"),
                 cmd: Command::ServerRevoke { name },
+            }),
+            ConnAction::Network {
+                enabled,
+                bind,
+                port,
+                change,
+            } => out.push(Request::ServerCall {
+                what: ac2_scene::network::change_done(change).into(),
+                failed: ac2_scene::network::change_failed(change).into(),
+                cmd: Command::ServerNetwork {
+                    enabled,
+                    bind,
+                    port,
+                },
             }),
             // As `ac2 session link-offset`: the open session reopened with it, everything
             // else as it was.

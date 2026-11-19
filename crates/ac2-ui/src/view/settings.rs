@@ -1,8 +1,9 @@
 //! The Settings view: the whole window below the top bar (which keeps showing what drives
 //! the speakers), the pages in a sidebar, the shown page with whose its settings are, and
-//! the page's keys. Every text comes from [`crate::settings`], the hosted dialogs' modules or
-//! `ac2_scene::rig`.
+//! the page's keys. Every text comes from [`crate::settings`], the hosted dialogs' modules,
+//! `ac2_scene::rig` or `ac2_scene::network`.
 
+use ac2_proto::model::NetStatusKind;
 use eframe::egui::{self, RichText};
 
 use crate::app::App;
@@ -528,12 +529,20 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
     let focus = p.focus.min(lines.len().saturating_sub(1));
     let mut row = |ui: &mut egui::Ui, i: usize, text: String, color| {
         let focused = i == focus;
+        // The interface is picked from a list: ‹/› step it as ←/→ do.
+        let steps = matches!(lines.get(i), Some(ConnLine::Interface));
         ui.horizontal(|ui| {
             let marker = if focused { "▸" } else { " " };
             ui.label(RichText::new(marker).color(ch.focus).monospace());
+            if steps && ui.small_button("‹").clicked() {
+                *msg = Some(Msg::Settings(SettingsMsg::ConnectionStep(i, -1)));
+            }
             let t = RichText::new(text).color(if focused { ch.focus } else { color });
             if ui.add(egui::Button::selectable(focused, t)).clicked() {
                 *msg = Some(Msg::Settings(SettingsMsg::Connection(i)));
+            }
+            if steps && ui.small_button("›").clicked() {
+                *msg = Some(Msg::Settings(SettingsMsg::ConnectionStep(i, 1)));
             }
         });
     };
@@ -569,6 +578,38 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
             ui.label(RichText::new(format!("cannot ask the daemon: {e}")).color(ch.fault));
         }
         Some(Ok(info)) => {
+            for l in ac2_scene::rig::local_lines(info) {
+                ui.label(RichText::new(l).color(ch.text));
+            }
+            match crate::settings::read_only_row(info) {
+                Some(t) => {
+                    ui.label(RichText::new(t).color(ch.text));
+                }
+                None => {
+                    for (i, l) in lines.iter().enumerate() {
+                        if matches!(l, ConnLine::Network | ConnLine::Interface | ConnLine::Port) {
+                            row(ui, i, p.net_line_text(l), ch.text);
+                        }
+                    }
+                }
+            }
+            let status = &info.network.status;
+            let tone = match status.kind() {
+                NetStatusKind::Off => ch.dim,
+                NetStatusKind::Listening => ch.text,
+                NetStatusKind::Waiting => ch.warn,
+                NetStatusKind::Failed => ch.fault,
+            };
+            ui.label(RichText::new(ac2_scene::network::status_line(status)).color(tone));
+            if let ac2_proto::model::NetSettingView::Host {
+                setting:
+                    ac2_proto::model::NetSetting::Off { saved }
+                    | ac2_proto::model::NetSetting::On { saved, .. },
+            } = &info.network.setting
+                && let Some(t) = ac2_scene::network::not_saved_line(saved)
+            {
+                ui.label(RichText::new(t).color(ch.warn));
+            }
             for l in ac2_scene::rig::server_lines(info) {
                 ui.label(RichText::new(l).color(ch.text));
             }

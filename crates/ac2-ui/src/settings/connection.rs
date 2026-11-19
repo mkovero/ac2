@@ -1,7 +1,11 @@
-//! The Connection page of the Settings view: the link to the daemon, this client's key, and
-//! in network mode the authorized and refused clients.
+//! The Connection page of the Settings view: the link to the daemon, this client's key, the
+//! network of a rig on this computer ([`super::network`]), and the authorized and refused
+//! clients.
 
-use ac2_proto::model::{NetworkServer, ServerInfo};
+use ac2_proto::model::{NetBind, NetworkServer, ServerInfo, ServerSummary};
+use ac2_scene::network::NetChange;
+
+use super::network::NetPicks;
 
 /// A line of the Connection page.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -15,6 +19,12 @@ pub enum ConnLine {
     StartLocal,
     /// *Stop ac2d when the app quits* (←/→ or Enter).
     StopOnQuit,
+    /// The network of a rig on this computer: on or off (Enter, ←/→).
+    Network,
+    /// Where it binds (←/→ picks, Enter applies or types an address).
+    Interface,
+    /// Its port (Enter types it).
+    Port,
     /// An authorized client, by name.
     Authorized(String),
     /// A refused key (Z85), or a refused peer without CURVE (`None`).
@@ -38,6 +48,13 @@ pub enum ConnAction {
         key: String,
     },
     Revoke(String),
+    /// `server.network`: `None` keeps what the rig has.
+    Network {
+        enabled: bool,
+        bind: Option<NetBind>,
+        port: Option<u16>,
+        change: NetChange,
+    },
     /// Reopen the session with this link offset, seconds (`None`: the least that works).
     LinkOffset(Option<f64>),
 }
@@ -51,6 +68,10 @@ pub enum ConnEdit {
     NameAndKey,
     /// The link offset: a time or `default`.
     LinkOffset,
+    /// An address of the rig's computer for the network.
+    Address,
+    /// The network's port.
+    Port,
 }
 
 /// The Connection page.
@@ -68,6 +89,11 @@ pub struct ConnectionPage {
     pub error: Option<String>,
     /// The open session takes remote inputs: the link offset line is listed.
     pub remote: bool,
+    /// The network's interface and port as picked here, not yet in force.
+    pub net: NetPicks,
+    /// `State.server` when `server.info` was last asked: a change made anywhere (another
+    /// app, the CLI, a retry in the daemon) asks again at once.
+    pub seen: Option<ServerSummary>,
 }
 
 /// Seconds between `server.info` while the Connection page is shown: refused keys appear
@@ -83,6 +109,9 @@ pub fn conn_lines(server: Option<&ServerInfo>, remote: bool) -> Vec<ConnLine> {
         ConnLine::StartLocal,
         ConnLine::StopOnQuit,
     ];
+    if server.and_then(super::network::switch).is_some() {
+        v.extend([ConnLine::Network, ConnLine::Interface, ConnLine::Port]);
+    }
     if let Some(ServerInfo {
         network:
             NetworkServer {
@@ -118,7 +147,7 @@ pub fn conn_lines(server: Option<&ServerInfo>, remote: bool) -> Vec<ConnLine> {
 }
 
 impl ConnectionPage {
-    fn server_info(&self) -> Option<&ServerInfo> {
+    pub(super) fn server_info(&self) -> Option<&ServerInfo> {
         self.server.as_ref().and_then(|r| r.as_ref().ok())
     }
 
@@ -133,7 +162,8 @@ impl ConnectionPage {
         l.get(self.focus.min(l.len().saturating_sub(1))).cloned()
     }
 
-    fn clear(&mut self) {
+    pub(super) fn clear(&mut self) {
+        self.net.confirm_on = false;
         self.confirm = None;
         self.notice = None;
         self.error = None;
@@ -175,6 +205,7 @@ impl ConnectionPage {
                         None
                     }
                 },
+                ConnEdit::Address | ConnEdit::Port => self.net_edit(kind, text),
                 ConnEdit::NameAndKey => {
                     let mut parts = t.split_whitespace();
                     match (parts.next(), parts.next(), parts.next()) {
@@ -198,7 +229,8 @@ impl ConnectionPage {
         match self.focused()? {
             ConnLine::Reconnect => Some(ConnAction::Reconnect),
             ConnLine::ConnectOther => Some(ConnAction::ConnectOther),
-            ConnLine::StartLocal | ConnLine::StopOnQuit => self.toggle(),
+            ConnLine::StartLocal | ConnLine::StopOnQuit => self.toggle(1),
+            l @ (ConnLine::Network | ConnLine::Interface | ConnLine::Port) => self.net_enter(&l),
             ConnLine::AddKey => {
                 self.edit = Some((ConnEdit::NameAndKey, String::new()));
                 None
@@ -218,11 +250,17 @@ impl ConnectionPage {
         }
     }
 
-    /// ←/→ (or Enter) on an `ac2d` row: its choice flipped; nothing elsewhere.
-    pub fn toggle(&mut self) -> Option<ConnAction> {
+    /// ←/→ (`d`) on an `ac2d` row: its choice flipped; on the network's switch as Enter; on
+    /// the interface, the next choice; nothing elsewhere.
+    pub fn toggle(&mut self, d: i32) -> Option<ConnAction> {
         match self.focused()? {
             ConnLine::StartLocal => Some(ConnAction::ToggleStartLocal),
             ConnLine::StopOnQuit => Some(ConnAction::ToggleStopOnQuit),
+            ConnLine::Network => self.net_enter(&ConnLine::Network),
+            ConnLine::Interface => {
+                self.cycle_interface(d);
+                None
+            }
             _ => None,
         }
     }
@@ -293,6 +331,8 @@ impl ConnectionPage {
             Some((ConnEdit::Name { .. }, _)) => Some("Authorize this key as (name):"),
             Some((ConnEdit::NameAndKey, _)) => Some("Authorize a client (name, space, key):"),
             Some((ConnEdit::LinkOffset, _)) => Some(ac2_scene::cross_rig::LINK_OFFSET_PROMPT),
+            Some((ConnEdit::Address, _)) => Some(ac2_scene::network::ADDRESS_PROMPT),
+            Some((ConnEdit::Port, _)) => Some(ac2_scene::network::PORT_PROMPT),
             None => None,
         }
     }
@@ -380,8 +420,12 @@ pub fn conn_line_text(l: &ConnLine, server: Option<&ServerInfo>) -> String {
                     .map(ac2_scene::rig::authorized_row)
             })
             .unwrap_or_else(|| name.clone()),
-        // Drawn with what they need from the app (the prefs, the session).
-        ConnLine::Refused(..)
+        // Drawn with what they need from the app (the prefs, the session, the page's picks:
+        // [`ConnectionPage::net_line_text`]).
+        ConnLine::Network
+        | ConnLine::Interface
+        | ConnLine::Port
+        | ConnLine::Refused(..)
         | ConnLine::StartLocal
         | ConnLine::StopOnQuit
         | ConnLine::LinkOffset => String::new(),

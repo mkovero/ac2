@@ -76,6 +76,13 @@ impl AppState {
                 let names = self.meas_names();
                 // The daemon reached next may be another, numbering afresh: names only.
                 self.park_gone_meas(&names, false, &BTreeSet::new(), |_| true);
+                // Turned off on purpose: said once, by name, rather than as a link lost.
+                if down == ac2_scene::chrome::RigDown::NetworkOff
+                    && matches!(self.rig.conn, ConnState::Connected { .. })
+                {
+                    let rig = self.rig_name(self.active());
+                    self.toast(ac2_scene::network::network_off_toast(&rig));
+                }
                 self.rig.failed(target, error, down);
             }
             ConnEvent::Mirror(v) => {
@@ -363,8 +370,14 @@ impl AppState {
                 }
                 if let Overlay::Settings(s) = &mut self.overlay {
                     match (&result, &what) {
-                        // A failed change leaves the info shown as it was.
-                        (Err(_), Some(_)) => {}
+                        // A failed change leaves the info shown as it was, and says why
+                        // on the page too: the daemon's refusal, in its words.
+                        (Err(e), Some(w)) => s.connection.error = Some(format!("{w}: {e}")),
+                        // Done: the rows show what is in force, no longer what was picked.
+                        (Ok(_), Some(_)) => {
+                            s.connection.net = Default::default();
+                            s.connection.server = Some(result.clone());
+                        }
                         _ => s.connection.server = Some(result.clone()),
                     }
                 }
