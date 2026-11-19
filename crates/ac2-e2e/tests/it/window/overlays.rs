@@ -243,16 +243,29 @@ fn the_stage_view_stays_the_pane_while_firing() -> R {
         off.iter().any(|t| t.starts_with("legend Main L")),
         "the pane's legend among {off:?}"
     );
+    // The daemon's word that the stimulus is armed or plays reaches the app a topic at a
+    // time, so the frames right after it may still draw the state between; what must
+    // hold is what the view comes to rest on, and a badge that stayed would never match.
+    let rests_as = |h: &mut Harness<'_, App>, what: &str| {
+        let mut now = quiet(h);
+        for _ in 0..100 {
+            if now == off {
+                break;
+            }
+            now = quiet(h);
+        }
+        assert_eq!(now, off, "{what}");
+    };
     h.key_press(Key::Space);
     step_until(&mut h, "armed", |a| {
         a.state.daemon().is_some_and(|s| s.generator.armed)
     });
-    assert_eq!(quiet(&mut h), off, "armed");
+    rests_as(&mut h, "armed");
     h.key_press(Key::Enter);
     step_until(&mut h, "firing", |a| {
         a.state.daemon().is_some_and(|s| s.generator.firing) && a.state.stage_view()
     });
-    assert_eq!(quiet(&mut h), off, "firing");
+    rests_as(&mut h, "firing");
     h.key_press(Key::Escape);
     step_until(&mut h, "stopped, the stage view staying", |a| {
         a.state.daemon().is_some_and(|s| {
