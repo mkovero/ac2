@@ -375,17 +375,7 @@ impl App {
     /// held is shown rather than added again: a second link to one daemon is a second row
     /// that can never connect either.
     pub(super) fn show_held(&mut self, choice: &Choice) -> bool {
-        let place = match choice {
-            Choice::Target(_, addr) => addr.clone(),
-            Choice::Local { .. } => Some(crate::prefs::RigAddr::Local),
-            Choice::Simulated => None,
-        };
-        let held = place.and_then(|a| {
-            self.state
-                .rigs()
-                .find(|r| r.link.is_some() && r.addr.as_ref().is_some_and(|b| b.same_place(&a)))
-                .map(|r| r.id)
-        });
+        let held = choice.place().and_then(|a| self.state.rig_at(&a));
         let Some(id) = held else {
             return false;
         };
