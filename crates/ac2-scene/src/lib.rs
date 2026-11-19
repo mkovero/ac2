@@ -33,6 +33,7 @@ pub mod cal_notice;
 mod canvas;
 pub mod chrome;
 pub mod clock;
+pub mod clock_domain;
 pub mod colormap;
 pub mod comb;
 pub mod cross_rig;
