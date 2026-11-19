@@ -240,7 +240,9 @@ impl AppState {
         match m {
             DragMsg::Start(item) => {
                 let heading = item.row().is_some_and(|(_, k)| k.is_heading());
-                if self.row_drag.is_none() && !heading {
+                // A row of a rig the list does not show (its pairing just gone) is no drag.
+                let reach = item.row().is_none_or(|(r, _)| self.rig_in_reach(r));
+                if self.row_drag.is_none() && !heading && reach {
                     self.row_drag = Some(RowDrag {
                         item,
                         over: None,
@@ -351,7 +353,8 @@ impl AppState {
 
     /// `item` dropped on `target`: shown alone by that pane (or a half split off it).
     pub(in crate::state) fn drop_row(&mut self, item: DragItem, target: DropTarget) {
-        if self.layout.view(target.pane).is_none() {
+        // Nothing to show: its rig is out of reach or down, or the row went meanwhile.
+        if self.layout.view(target.pane).is_none() || self.item_drop(item).is_none() {
             return;
         }
         let mut p = target.pane;

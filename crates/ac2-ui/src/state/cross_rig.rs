@@ -1,8 +1,13 @@
-//! Panes and the measurement list across rigs: the list is a tree rooted at each connected
-//! rig, the rig's rows under its heading (its branch folds), any rig's row drags onto a
-//! pane, and a drop of another rig's sets the pane on that rig; pins stay right as rigs come
-//! and go (a pin to the rig shown is its own pane again, and measurement names wait by rig
-//! id for a rig not held); the layout prefs name each pinned pane's rig.
+//! Panes and the measurement list across rigs: the list is a tree rooted at the rig shown,
+//! then at each rig that rig's daemon is paired with, a rig's rows under its heading (its
+//! branch folds); a row of a paired rig drags onto a pane, and the drop sets the pane on
+//! that rig; pins stay right as rigs come and go (a pin to the rig shown is its own pane
+//! again, and measurement names wait by rig id for a rig not held); the layout prefs name
+//! each pinned pane's rig.
+//!
+//! A rig this app holds that the rig shown is not paired with is reached through the
+//! drop-down alone: the list is what the rig shown is connected to, so neither its rows
+//! nor its curves are offered, and a pane left on it says so until it is shown or paired.
 //!
 //! A pane is pinned by the rig's id, never by where it is reached: a rig reached on another
 //! address (a new IP, network mode turned on) is the same rig, and its panes come back.
@@ -10,7 +15,7 @@
 use super::*;
 use crate::state::panes::drag::RowDrop;
 use ac2_scene::meas_list::{Mark, TreeKey, TreeRow};
-use ac2_scene::rig_tree::{RigRoot, rig_branch};
+use ac2_scene::rig_tree::{Away, RigAudio, RigRoot, rig_away_heading, rig_branch};
 
 /// A rig not shown, as its part of the measurement list was last read: its rows, and what
 /// each draggable row needs of a pane. Read with the rig swapped in, so between messages.
@@ -22,7 +27,49 @@ pub(crate) struct RigList {
 }
 
 impl AppState {
-    /// Reads each connected rig not shown's part of the list; none with one rig.
+    /// The rigs the rig shown's daemon is paired with, each by its id with the name it
+    /// goes by: the rigs that daemon may take inputs from (its `rig.peers`, in its order),
+    /// then the rigs this app holds whose daemon lists the rig shown among its own. A
+    /// pairing is the two daemons', whichever side takes: either side shown lists the other.
+    /// Both sides are read from the daemons' mirrored state, matched by rig id: a name is
+    /// what a rig is called, never which rig it is.
+    pub fn paired_rigs(&self) -> Vec<(RigId, String)> {
+        let shown = self.active();
+        let mut v: Vec<(RigId, String)> = Vec::new();
+        let takes = self
+            .find_rig(shown)
+            .and_then(|r| r.daemon())
+            .into_iter()
+            .flat_map(|s| &s.remote.peers)
+            .map(|p| match self.find_rig(p.rig) {
+                Some(r) => (p.rig, self.rig_label(r)),
+                None => (p.rig, p.name.clone()),
+            });
+        let gives = self
+            .rigs_in_order()
+            .into_iter()
+            .filter(|r| {
+                r.daemon()
+                    .is_some_and(|s| s.remote.peers.iter().any(|p| p.rig == shown))
+            })
+            .map(|r| (r.id, self.rig_label(r)));
+        for (id, name) in takes.chain(gives) {
+            if id != shown && !v.iter().any(|(r, _)| *r == id) {
+                v.push((id, name));
+            }
+        }
+        v
+    }
+
+    /// Rig `r`'s rows and curves are within reach of the screen: it is the rig shown, or
+    /// that rig's daemon is paired with it. The one rule for what the list offers, what a
+    /// pane takes and what a pane draws of another rig.
+    pub fn rig_in_reach(&self, r: RigId) -> bool {
+        r == self.active() || self.paired_rigs().iter().any(|(id, _)| *id == r)
+    }
+
+    /// Reads the part of the list of each connected rig paired with the rig shown; none
+    /// with one rig.
     pub(super) fn refresh_rig_lists(&mut self) {
         if self.others.visiting.is_some() {
             return;
@@ -31,11 +78,11 @@ impl AppState {
             self.others.rig_lists.clear();
             return;
         }
-        let shown = self.rig.id;
         let others: Vec<RigId> = self
-            .rigs_in_order()
+            .paired_rigs()
             .into_iter()
-            .filter(|r| r.id != shown && r.daemon().is_some())
+            .filter_map(|(id, _)| self.find_rig(id))
+            .filter(|r| r.daemon().is_some())
             .filter(|r| matches!(r.conn, ConnState::Connected { .. }))
             .map(|r| r.id)
             .collect();
@@ -66,38 +113,84 @@ impl AppState {
         }
     }
 
-    /// The measurement list as drawn: a root per connected rig, in the order the rigs were
-    /// added (the drop-down's), and under it (unfolded) that rig's rows, each row with its
-    /// rig. One rig is a root too, so the list always says whose rows it lists; a lone rig
-    /// with no daemon yet has nothing to list.
+    /// What rig `r`'s audio session runs at, for its heading: the rate, else what the top
+    /// bar says of a rig without one.
+    fn rig_audio(r: &RigState) -> RigAudio {
+        match r.daemon() {
+            Some(s) => match &s.session.open {
+                Some(o) => RigAudio::Rate(o.sample_rate_hz),
+                None if s.measurements.is_empty() => RigAudio::NoSession,
+                None => RigAudio::NoAudio,
+            },
+            None => RigAudio::NoSession,
+        }
+    }
+
+    /// Rig `r`'s branch of the list over its rows `rows`; `pairing` for a rig not shown.
+    fn rig_rows(&self, r: &RigState, rows: Vec<TreeRow>, pairing: Option<&str>) -> Vec<TreeRow> {
+        let count = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
+        let (measurements, traces) = r.daemon().map_or((0, 0), |s| {
+            (count(s.measurements.len()), count(s.traces.len()))
+        });
+        let name = self.rig_label(r);
+        let root = RigRoot {
+            rig: r.id,
+            name: &name,
+            shown: pairing.is_none(),
+            folded: self.rig_folded(r.id),
+            measurements,
+            traces,
+            audio: Self::rig_audio(r),
+            clock: None,
+            pairing,
+        };
+        rig_branch(&root, rows)
+    }
+
+    /// The measurement list as drawn: the rig shown's root first, then a root per rig its
+    /// daemon is paired with, in that daemon's order, and under each (unfolded) that rig's
+    /// rows, each row with its rig. One rig is a root too, so the list always says whose
+    /// rows it lists; a lone rig with no daemon yet has nothing to list. A paired rig this
+    /// app does not read (not connected to it, or its link down) is its heading alone: the
+    /// pairing is the rig shown's to report, the measurements are not.
     pub fn list_rows(&self) -> Vec<(RigId, TreeRow)> {
-        let shown = self.active();
         let mut v = Vec::new();
-        for r in self.rigs_in_order() {
-            let rows = if r.id == shown {
-                if self.others.rig_lists.is_empty() && r.daemon().is_none() {
-                    continue;
+        let Some(shown) = self.find_rig(self.active()) else {
+            return v;
+        };
+        let paired = self.paired_rigs();
+        if paired.is_empty() && shown.daemon().is_none() {
+            return v;
+        }
+        let own = self.rig_rows(shown, self.tree_rows(), None);
+        v.extend(own.into_iter().map(|row| (shown.id, row)));
+        let remote = shown.daemon().map(|s| &s.remote);
+        let inputs = shown
+            .daemon()
+            .and_then(|s| s.session.open.as_ref())
+            .map_or(&[][..], |o| &o.config.remote_inputs[..]);
+        for (id, name) in paired {
+            let pairing = remote.map_or_else(
+                || ac2_scene::rig_tree::PAIRED.to_owned(),
+                |r| ac2_scene::rig_tree::pairing_text(r, inputs, id),
+            );
+            let held = self.find_rig(id);
+            let list = self.others.rig_lists.iter().find(|l| l.rig == id);
+            match (held, list) {
+                (Some(r), Some(l)) => v.extend(
+                    self.rig_rows(r, l.rows.clone(), Some(&pairing))
+                        .into_iter()
+                        .map(|row| (id, row)),
+                ),
+                (Some(r), None) => {
+                    let name = self.rig_label(r);
+                    v.push((id, rig_away_heading(id, &name, &pairing, Away::Unreachable)));
                 }
-                self.tree_rows()
-            } else if let Some(l) = self.others.rig_lists.iter().find(|l| l.rig == r.id) {
-                l.rows.clone()
-            } else {
-                continue;
-            };
-            let count = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
-            let (measurements, traces) = r.daemon().map_or((0, 0), |s| {
-                (count(s.measurements.len()), count(s.traces.len()))
-            });
-            let name = self.rig_label(r);
-            let root = RigRoot {
-                rig: r.id,
-                name: &name,
-                shown: r.id == shown,
-                folded: self.rig_folded(r.id),
-                measurements,
-                traces,
-            };
-            v.extend(rig_branch(&root, rows).into_iter().map(|row| (r.id, row)));
+                (None, _) => v.push((
+                    id,
+                    rig_away_heading(id, &name, &pairing, Away::NotConnected),
+                )),
+            }
         }
         v
     }
@@ -115,7 +208,8 @@ impl AppState {
         self.prefs_dirty = true;
     }
 
-    /// Another rig's row as a drop, from its list as last read.
+    /// Another rig's row as a drop, from its list as last read: none for a rig the rig
+    /// shown is not paired with, whose list is not read.
     pub(super) fn other_row_drop(&self, rig: RigId, key: TreeKey) -> Option<RowDrop> {
         self.others
             .rig_lists
@@ -128,7 +222,8 @@ impl AppState {
     }
 
     /// Pane `p` shows row `key` of rig `r`, a rig not shown: as a drop of the shown rig's,
-    /// with that rig swapped in, and the pane is set on it.
+    /// with that rig swapped in, and the pane is set on it. Refused for a rig out of reach
+    /// ([`AppState::rig_in_reach`]).
     pub(super) fn pane_row_from(&mut self, p: PaneId, r: RigId, key: TreeKey) {
         let id = match key {
             TreeKey::Meas(id) | TreeKey::Live(id) | TreeKey::Math(id) => Some(id),
@@ -143,7 +238,7 @@ impl AppState {
             }
             return;
         }
-        if self.others.visiting.is_some() {
+        if self.others.visiting.is_some() || !self.rig_in_reach(r) {
             return;
         }
         self.forget_pane_waits(p);
@@ -166,7 +261,7 @@ impl AppState {
     /// Pane `p` meters inputs or a pair `m` of rig `r`, a rig not shown: a Programme pane set
     /// on that rig, on its meters.
     pub(super) fn pane_meter_from(&mut self, p: PaneId, r: RigId, m: Metered) {
-        if self.others.visiting.is_some() || self.find_rig(r).is_none() {
+        if self.others.visiting.is_some() || self.find_rig(r).is_none() || !self.rig_in_reach(r) {
             return;
         }
         self.forget_pane_waits(p);

@@ -119,8 +119,8 @@ fn a_meter_row_brings_its_split_panes_out_of_one_pane_alone() {
 /// The second rig, as its hello reply names it.
 const PUPU: RigId = RigId(0x9e9e);
 
-/// This computer's rig shown (the test daemon with `FOH SPL`), pupu connected in the
-/// background with `SPL 2` split.
+/// This computer's rig shown (the test daemon with `FOH SPL`, paired with pupu), pupu
+/// connected in the background with `SPL 2` split.
 fn pupu_behind() -> T {
     // The grid's panes left unpicked: a pane showing something would stay pinned to the
     // first rig when pupu is shown.
@@ -128,7 +128,7 @@ fn pupu_behind() -> T {
     t.st.layout = grid();
     t.st.pane_auto = false;
     t.connect(daemon_state());
-    t.conn(mirror(with_spl()));
+    t.conn(mirror(paired_with(with_spl(), PUPU, "pupu")));
     let slot = t.st.add_rig("pupu".into(), None, None);
     to(
         &mut t,

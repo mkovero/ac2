@@ -180,7 +180,8 @@ pub fn rig_closed(rig: &str) -> String {
 }
 
 /// The rigs drop-down's tip.
-pub const RIG_MENU_TIP: &str = "The rig shown: switch to another, connect a rig, or close this one";
+pub const RIG_MENU_TIP: &str = "The rig shown, of every rig this app holds: switch to another, connect a rig, or \
+     close this one. The measurement list shows this rig and the rigs paired with it";
 
 #[cfg(test)]
 mod tests {

@@ -44,8 +44,8 @@ pub(crate) struct OtherRigs {
     /// it in the layout prefs, or a rig closed): the rig takes them once it is held again
     /// under that id, wherever it is reached.
     pub(super) rig_pending: BTreeMap<RigId, BTreeMap<PaneId, String>>,
-    /// The measurement list's part of each connected rig not shown, read with that rig
-    /// swapped in after each message ([`AppState::refresh_rig_lists`]).
+    /// The measurement list's part of each connected rig paired with the rig shown, read
+    /// with that rig swapped in after each message ([`AppState::refresh_rig_lists`]).
     pub(super) rig_lists: Vec<cross_rig::RigList>,
 }
 
@@ -333,6 +333,8 @@ impl AppState {
         // another rig's group is that rig's alone: it shows no other rig.
         let msg = match msg {
             Msg::OnRig(r, m) if r == self.rig.id => *m,
+            // A row of a rig the list no longer shows (the pairing went as it was clicked).
+            Msg::OnRig(r, _) if !self.rig_in_reach(r) => return Vec::new(),
             Msg::OnRig(r, m) if !matches!(*m, Msg::ToggleGroup(_)) => {
                 let mut out = self.update(Msg::ShowRig(r), keymap);
                 if self.rig.id == r {
@@ -356,6 +358,11 @@ impl AppState {
             // A closed rig's link, drained after it closed.
             return Vec::new();
         };
+        // A pane left on a rig out of reach draws nothing of it: its keys change nothing
+        // there either. That rig's own link is still heard.
+        if to != self.rig.id && !conn && !self.rig_in_reach(to) {
+            return Vec::new();
+        }
         let mut out: Vec<(u32, Request)> = Vec::new();
         if to == self.rig.id {
             self.others.switched_at = None;

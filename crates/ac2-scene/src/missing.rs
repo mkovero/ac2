@@ -4,7 +4,7 @@
 
 /// Why a pane's own measurement draws nothing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Missing {
+pub enum Missing<'a> {
     /// Hidden in this app (it keeps measuring); the key shows it.
     Hidden,
     /// Stopped before its first frame arrived; the key starts it.
@@ -22,11 +22,15 @@ pub enum Missing {
     /// The pane has no measurement of the `kind` its view draws (`transfer`); the key
     /// makes one. It has no name to say.
     NoMeasurement { kind: &'static str },
+    /// The pane's content is rig `name`'s, and `shown` (the rig shown) is not paired with
+    /// it: a curve crosses rigs only between paired ones. The pane keeps what it holds and
+    /// draws it again once `name` is shown or paired; `key` is where the rig shown is chosen.
+    NotPaired { shown: &'a str },
 }
 
 /// The text for measurement `name`; `key` shows a hidden one, starts a stopped one or
 /// makes the one that is missing.
-pub fn missing_text(name: &str, why: Missing, key: &str) -> String {
+pub fn missing_text(name: &str, why: Missing<'_>, key: &str) -> String {
     match why {
         Missing::Hidden => format!("{name} hidden — {key} shows it"),
         Missing::Stopped => format!("{name} stopped — {key} starts it"),
@@ -40,6 +44,9 @@ pub fn missing_text(name: &str, why: Missing, key: &str) -> String {
             "{name}: no band meter — turn it on in the SPL / Leq settings (or `ac2 spl bands set`)"
         ),
         Missing::NoMeasurement { kind } => format!("no {kind} measurement — {key} makes one"),
+        Missing::NotPaired { shown } => {
+            format!("{name} is not paired with {shown} — {key} shows {name}")
+        }
     }
 }
 
@@ -100,6 +107,18 @@ mod tests {
         assert_eq!(
             missing_text("", Missing::NoMeasurement { kind: "transfer" }, "Ctrl+M"),
             "no transfer measurement — Ctrl+M makes one"
+        );
+    }
+
+    #[test]
+    fn a_pane_of_a_rig_not_paired_names_both_rigs() {
+        assert_eq!(
+            missing_text(
+                "pupu",
+                Missing::NotPaired { shown: "kiosk" },
+                "the rig drop-down"
+            ),
+            "pupu is not paired with kiosk — the rig drop-down shows pupu"
         );
     }
 }

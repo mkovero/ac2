@@ -557,12 +557,14 @@ impl AppState {
     pub fn no_audio_line(&self, keymap: &Keymap) -> String {
         if self.measurements().is_empty() {
             format!(
-                "no session · {}, then New session",
+                "{} · {}, then New session",
+                ac2_scene::rig_tree::NO_SESSION,
                 keymap.reach(CommandId::Sessions)
             )
         } else {
             format!(
-                "no audio I/O · {} opens it",
+                "{} · {} opens it",
+                ac2_scene::rig_tree::NO_AUDIO,
                 keymap.reach(CommandId::OpenSession)
             )
         }

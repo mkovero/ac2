@@ -259,6 +259,19 @@ pub(super) fn spl_meter() -> MeasKind {
     }
 }
 
+/// Daemon state `s` of a rig paired with rig `rig`, called `name` there: it may take that
+/// rig's inputs (a `rig.peers` entry, as the app's pairing leaves one).
+pub(super) fn paired_with(mut s: State, rig: RigId, name: &str) -> State {
+    s.remote.peers.push(ac2_proto::model::RigPeer {
+        rig,
+        name: name.into(),
+        ctrl: "tcp://192.168.9.27:7700".into(),
+        data: "tcp://192.168.9.27:7701".into(),
+        key: "Yne@$w-vo<fVvi]a<NY6T1ed:M$fCG*[IaLV{hID".into(),
+    });
+    s
+}
+
 pub(super) fn with_spl() -> State {
     let mut s = daemon_state();
     s.measurements.push(meas(4, "FOH SPL", spl_meter()));

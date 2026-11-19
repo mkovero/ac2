@@ -1,6 +1,7 @@
 //! Many rigs against two real daemons: a rig gone quiet greys out and comes back, the Inputs
 //! list meters the rig shown, a session's own panes load on either rig, a pin finds its
-//! rig on another address.
+//! rig on another address; the list and the panes reach another rig only once the two
+//! daemons are paired.
 
 use super::*;
 use crate::harness::R;
@@ -68,6 +69,25 @@ fn connect_kettu(
     h.state().state.active()
 }
 
+/// `taker`'s daemon paired with rig `source`, by the command the app's pairing sends it
+/// (`rig.peers`): the rig may take that rig's inputs. These daemons listen on this computer
+/// only, so no link between them comes up and the source's half of a pairing (admitting
+/// the taker's key) has no key to admit; the pairing itself is the daemon's, and the
+/// address is where a networked rig would be.
+fn pair(taker: &Rig, source: RigId, name: &str) -> R {
+    use ac2_proto::model::RigPeer;
+    taker.call(Command::RigPeers {
+        peers: vec![RigPeer {
+            rig: source,
+            name: name.into(),
+            ctrl: "tcp://127.0.0.1:7700".into(),
+            data: "tcp://127.0.0.1:7701".into(),
+            key: ac2_zmq::KeyPair::generate()?.public.to_z85(),
+        }],
+    })?;
+    Ok(())
+}
+
 /// The mirror is in step with the daemon: what a rig with no pane of its own on screen
 /// (nothing subscribed) can be waited for.
 fn synced(a: &App) -> bool {
@@ -115,6 +135,7 @@ fn a_rig_down_and_back() -> R {
     let kettu = named("kettu", &dir.path().join("kettu-id"))?;
     let (mut h, pupu_id) = on_pupu(&pupu, &keys);
     let kettu_id = connect_kettu(&mut h, pupu_id, &kettu, Duration::from_millis(600));
+    pair(&pupu, kettu_id, "kettu")?;
     // Pupu shown, kettu's spectrum dropped on its focused pane.
     pick_first_rig(&mut h);
     step_until(&mut h, "pupu shown", |a| a.state.active() == pupu_id);
@@ -246,6 +267,7 @@ fn a_session_with_its_own_panes_loads_on_either_rig() -> R {
     let kettu = both("kettu")?;
     let (mut h, pupu_id) = on_pupu(&pupu, &keys);
     let kettu_id = connect_kettu(&mut h, pupu_id, &kettu, Duration::from_secs(10));
+    pair(&pupu, kettu_id, "kettu")?;
     pick_first_rig(&mut h);
     step_until(&mut h, "pupu shown", |a| {
         a.state.active() == pupu_id && live(a)
@@ -332,6 +354,7 @@ fn a_pin_finds_its_rig_on_another_address() -> R {
     let kettu = named("kettu", &kettu_file)?;
     let (mut h, pupu_id) = on_pupu(&pupu, &keys);
     let kettu_id = connect_kettu(&mut h, pupu_id, &kettu, Duration::from_secs(10));
+    pair(&pupu, kettu_id, "kettu")?;
     pick_first_rig(&mut h);
     step_until(&mut h, "pupu shown", |a| {
         a.state.active() == pupu_id && live(a)
@@ -424,6 +447,76 @@ fn a_second_rig_connects_and_the_drop_down_switches() -> R {
     Ok(())
 }
 
+/// Kettu connected beside pupu, the two daemons not paired: with kettu shown the list is
+/// kettu's alone and the panes left on pupu's measurements say the rigs are not paired,
+/// kept as they are; pupu shown again draws them and lists pupu alone. Once pupu's daemon
+/// is paired with kettu the list shows both, whichever of the two is shown, and pupu's
+/// panes draw beside kettu's.
+#[test]
+fn rigs_not_paired_share_neither_the_list_nor_panes() -> R {
+    use ac2_scene::missing::{Missing, missing_text};
+    if !have_gpu("rigs_not_paired_share_neither_the_list_nor_panes") {
+        return Ok(());
+    }
+    let dir = tempfile::tempdir()?;
+    let pupu = named("pupu", &dir.path().join("pupu-id"))?;
+    let kettu = named("kettu", &dir.path().join("kettu-id"))?;
+    let (mut h, pupu_id) = on_pupu(&pupu, &dir.path().join("keys"));
+    let kettu_id = connect_kettu(&mut h, pupu_id, &kettu, Duration::from_secs(10));
+    let listed = |a: &App| {
+        let mut rigs: Vec<RigId> = a.state.list_rows().iter().map(|(r, _)| *r).collect();
+        rigs.dedup();
+        rigs
+    };
+    let pinned = |a: &App| {
+        a.state
+            .layout
+            .panes()
+            .into_iter()
+            .filter_map(|p| a.state.layout.view(p).copied())
+            .filter(|v| v.rig == PaneRig::Rig(pupu_id))
+            .collect::<Vec<_>>()
+    };
+    let plate = missing_text(
+        "pupu",
+        Missing::NotPaired { shown: "kettu" },
+        "the rig drop-down",
+    );
+    let plates = |h: &Harness<'_, App>| {
+        h.query_all(egui_kittest::kittest::By::new().label(&plate))
+            .count()
+    };
+    settle(&mut h, 2);
+    let kept = pinned(h.state());
+    assert!(!kept.is_empty(), "pupu's panes stay, pinned to pupu");
+    assert_eq!(listed(h.state()), [kettu_id], "kettu's list alone");
+    assert_eq!(plates(&h), kept.len(), "{plate}");
+
+    pick_first_rig(&mut h);
+    step_until(&mut h, "pupu shown", |a| {
+        a.state.active() == pupu_id && live(a)
+    });
+    settle(&mut h, 2);
+    assert_eq!(plates(&h), 0, "pupu's panes are back");
+    assert_eq!(listed(h.state()), [pupu_id], "pupu's list alone");
+
+    pair(&pupu, kettu_id, "kettu")?;
+    step_until(&mut h, "kettu listed under pupu", |a| {
+        listed(a) == [pupu_id, kettu_id]
+    });
+    open_rig_menu(&mut h);
+    h.key_press(Key::Home);
+    h.key_press(Key::ArrowDown);
+    h.key_press(Key::Enter);
+    step_until(&mut h, "kettu shown, pupu listed under it", |a| {
+        a.state.active() == kettu_id && listed(a) == [kettu_id, pupu_id]
+    });
+    settle(&mut h, 2);
+    assert_eq!(pinned(h.state()), kept, "the panes kept what they held");
+    assert_eq!(plates(&h), 0, "paired: pupu's panes draw beside kettu's");
+    Ok(())
+}
+
 /// Each rig armed in turn from the app, kettu fired: pupu shown, its top bar carries kettu's
 /// chip; Shift+Esc on pupu stops both daemons' stimulus, kettu's too.
 #[test]
@@ -505,6 +598,7 @@ fn another_rigs_measurement_dropped_into_a_pane() -> R {
     })?;
     let (mut h, pupu_id) = on_pupu(&pupu, &dir.path().join("keys"));
     let kettu_id = connect_kettu(&mut h, pupu_id, &kettu, Duration::from_secs(10));
+    pair(&pupu, kettu_id, "kettu")?;
     pick_first_rig(&mut h);
     step_until(&mut h, "pupu shown", |a| {
         a.state.active() == pupu_id && live(a)

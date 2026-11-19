@@ -396,6 +396,22 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
             None => pane(app, &mut pane_ui, theme, ch, id, rect, stage, &order),
             // Another rig's pane is drawn with that rig swapped in: its ids are that rig's.
             Some(r) => match app.state.find_rig(r).map(|x| x.conn.clone()) {
+                None => {
+                    let text = ac2_scene::chrome::rig_pane_closed(&app.state.rig_name(r));
+                    rig_away(app, &mut pane_ui, ch, id, rect, &text);
+                }
+                // A rig the rig shown is not paired with: the pane keeps what it holds,
+                // drawn again once that rig is shown or paired.
+                Some(_) if !app.state.rig_in_reach(r) => {
+                    let text = ac2_scene::missing::missing_text(
+                        &app.state.rig_name(r),
+                        ac2_scene::missing::Missing::NotPaired {
+                            shown: &app.state.rig_name(app.state.active()),
+                        },
+                        "the rig drop-down",
+                    );
+                    rig_away(app, &mut pane_ui, ch, id, rect, &text);
+                }
                 Some(crate::state::ConnState::Connected { .. }) => {
                     app.with_rig(r, |app| {
                         pane(app, &mut pane_ui, theme, ch, id, rect, stage, &order)
@@ -406,10 +422,6 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
                         .down()
                         .unwrap_or(ac2_scene::chrome::RigDown::Unreachable);
                     let text = ac2_scene::chrome::rig_pane_down(&app.state.rig_name(r), down);
-                    rig_away(app, &mut pane_ui, ch, id, rect, &text);
-                }
-                None => {
-                    let text = ac2_scene::chrome::rig_pane_closed(&app.state.rig_name(r));
                     rig_away(app, &mut pane_ui, ch, id, rect, &text);
                 }
             },

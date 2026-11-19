@@ -1,5 +1,6 @@
-//! The measurement list as a tree rooted at each rig: one rig is a root too, a rig's branch
-//! folds, Tab skips a folded rig's rows, and the fold is remembered by rig id.
+//! The measurement list as a tree rooted at the rig shown and the rigs paired with it: one
+//! rig is a root too, a rig's branch folds, Tab skips a folded rig's rows, and the fold is
+//! remembered by rig id.
 
 use super::*;
 use ac2_scene::meas_list::TreeKey;
@@ -46,7 +47,7 @@ fn a_rigs_arrow_folds_its_branch() {
     assert_eq!(folded[0].collapsed, Some(true));
     let n = pupu(&t).daemon().expect("mirrored").measurements.len();
     assert!(
-        folded[0].details[0].starts_with(&format!("{n} measurements · ")),
+        folded[0].details[0].starts_with(&format!("paired · {n} measurements · ")),
         "{:?}",
         folded[0].details
     );

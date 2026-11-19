@@ -8,12 +8,17 @@ use super::*;
 /// The second rig, as its hello reply names it.
 const PUPU: RigId = RigId(0x9e9e);
 
-/// The test grid on the test daemon (with an SPL meter), and a second rig in the
+/// Daemon state `s` of a rig paired with pupu: it may take pupu's inputs.
+fn paired(s: State) -> State {
+    paired_with(s, PUPU, "pupu")
+}
+
+/// The test grid on the test daemon (with an SPL meter, paired with pupu), and pupu in the
 /// background, connected and mirroring the same daemon state: the same measurement ids,
 /// topics and inputs.
 fn two_rigs() -> T {
     let mut t = T::new();
-    t.conn(mirror(with_spl()));
+    t.conn(mirror(paired(with_spl())));
     let slot = t.st.add_rig("pupu".into(), None, None);
     let r = to(
         &mut t,
@@ -677,10 +682,10 @@ fn drop_pupu(t: &mut T, p: PaneId) {
     t.drag_drop(DragItem::Row { rig: PUPU, key }, p, None);
 }
 
-/// With two rigs the list has a heading per rig, in the drop-down's order, and each rig's
-/// rows under it by that rig's ids: measurement 2 twice, one per rig.
+/// With pupu paired the list has the rig shown's heading, then pupu's, and each rig's rows
+/// under it by that rig's ids: measurement 2 twice, one per rig.
 #[test]
-fn the_list_shows_every_rig_under_its_heading() {
+fn the_list_shows_the_rig_shown_then_the_rig_paired_with_it() {
     use ac2_scene::meas_list::TreeKey;
     let (t, _) = two_lists();
     let rows = t.st.list_rows();
@@ -932,4 +937,5 @@ fn a_stored_pane_names_its_rig() {
 mod rig_clocks;
 mod rig_cross_tf;
 mod rig_fold;
+mod rig_reach;
 mod rig_remote;

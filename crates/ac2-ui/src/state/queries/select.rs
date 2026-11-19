@@ -502,7 +502,7 @@ impl AppState {
         true
     }
 
-    /// The first row (`d` > 0) or last row of the next rig in list order that has a row to
+    /// The first row (`d` > 0) or last row of the next rig the list shows that has a row to
     /// step to (a folded rig lists none), from its list as last read; None when no other rig
     /// has one or a switch could not happen now.
     fn other_rig_stop(&self, d: i32) -> Option<(RigId, ac2_scene::meas_list::TreeKey)> {
@@ -512,7 +512,11 @@ impl AppState {
         {
             return None;
         }
-        let order: Vec<RigId> = self.rigs_in_order().iter().map(|r| r.id).collect();
+        // The list's own order: the rig shown, then the rigs paired with it. A rig the list
+        // does not show is never stepped onto.
+        let order: Vec<RigId> = std::iter::once(self.rig.id)
+            .chain(self.paired_rigs().into_iter().map(|(r, _)| r))
+            .collect();
         let at = order.iter().position(|r| *r == self.rig.id)? as i32;
         let n = order.len() as i32;
         (1..n).find_map(|k| {
