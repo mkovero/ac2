@@ -495,7 +495,7 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
 - The top bar reads left to right: the rig shown (the rigs drop-down); where its daemon
   runs and how it is doing; the session; and, fixed at the right, the stop while anything
   is armed or playing, the key hints and the Settings gear:
-  `pupu ▾ | remote: ac2pi-0ab1c6 (STIM OFF) · 96 kHz · 256 frames · CPU remote 43 % · DSP
+  `pupu ▾ | remote: ac2pi-0ab1c6 (STIM OFF) · 96 kHz · 256 frames · CPU 43 % · DSP
   0 % · 0 xruns · 85 fps | untitled · unsaved changes`.
   - **Where the daemon runs:** `local` for the daemon on this computer, `remote: <host>`
     for one reached over the network, and just `remote` when the host is called what the
@@ -516,10 +516,10 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
   - After the session come an autosave, a recording or a replay under way, and what the
     stimulus keys do next.
 - How the rig holds up, in that line:
-  `CPU remote 23 % · local 41 % · DSP 14 % · 0 xruns · 14 Mbit/s · 30 fps`. **CPU** is the
+  `CPU 23 % · app CPU 41 % · DSP 14 % · 0 xruns · 14 Mbit/s · 30 fps`. **CPU** is the
   whole daemon host's use (every process, every core); with the daemon on another computer
-  it reads **remote** and **local** is this one's, and with the daemon on this computer a
-  single `CPU 23 %`; **DSP** is the share of each buffer period ac2d's own
+  **app CPU** is this computer's, and with the daemon on this computer there is the single
+  `CPU 23 %`; **DSP** is the share of each buffer period ac2d's own
   audio callback takes (not the whole JACK graph's load); **xruns** count since the session
   opened; the data rate is what this window receives from the daemon; **fps** is shown while live data arrives — at most 60 on a GPU and
   30 on a software renderer, since the app paces its own frames rather than wait for the

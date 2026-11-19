@@ -472,7 +472,9 @@ rewrites what this design builds on in `control/remote.rs`: the tap install in
 the levels publisher can reach block stamps; the fan-out's hand-off can be switched on a
 running stream; the untagged `InputRef` reads under `deny_unknown_fields` in every config.
 
-## 10. Open questions for the operator
+## 10. Questions put to the operator
+
+All five were accepted as recommended (operator, 2026-11-19: "1-5 ok").
 
 1. **Clock tags.** Recommended, conditional on the rig check of stage 1a: **`LOCKED`** = no
    drift held ≥ 30 min, the figure on hover (*no drift: < 0.03 ppm over 42 min*);

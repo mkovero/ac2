@@ -66,7 +66,7 @@ fn top_bar_health_meter() {
         .collect();
     assert!(
         bar.iter()
-            .any(|t| t == "CPU remote 23 % · DSP 14 % · 0 xruns · 14 Mbit/s · 30 fps"),
+            .any(|t| t == "CPU 23 % · DSP 14 % · 0 xruns · 14 Mbit/s · 30 fps"),
         "{bar:?}"
     );
     snapshot(&mut h, "top_bar_health");
@@ -156,7 +156,7 @@ fn top_bar_line_scrolls_when_narrow() {
     assert_eq!(h.state().marquee.offset(), 0.0);
     assert_eq!(find(&bar(&h), "local"), Some(place));
     assert!(find(&wide, "frames").is_some(), "{wide:?}");
-    assert!(find(&wide, "CPU remote 23 %").is_some(), "{wide:?}");
+    assert!(find(&wide, "CPU 23 %").is_some(), "{wide:?}");
 
     // Narrow: it moves with time.
     h.set_size(egui::vec2(NARROW, 800.0));

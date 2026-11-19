@@ -1,5 +1,5 @@
 //! The health meter after the session line: CPU use, the audio callback's load, xruns, the
-//! link's data rate and the UI's frame rate (`CPU remote 23 % · local 41 % · DSP 14 % ·
+//! link's data rate and the UI's frame rate (`CPU 23 % · app CPU 41 % · DSP 14 % ·
 //! 0 xruns · 14 Mbit/s · 60 fps`).
 //!
 //! Every figure that is missing (an older daemon, no session, the first second) is left
@@ -62,7 +62,7 @@ pub struct HealthInputs<'a> {
 /// as their widest expected text, so a figure gaining a digit moves nothing after it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct HealthPart {
-    /// What the figure is, before the number (`CPU remote`, `local`, `DSP`); empty when the
+    /// What the figure is, before the number (`CPU`, `app CPU`, `DSP`); empty when the
     /// unit names it (`xruns`, `Mbit/s`, `fps`).
     pub label: String,
     pub value: String,
@@ -192,7 +192,7 @@ fn xruns_text(n: u64) -> String {
     format!("{n} {}", xruns_unit(n))
 }
 
-/// A share as a figure: `CPU remote 23 %`. Loads past 100 % (an overrun callback) still fit.
+/// A share as a figure: `CPU 23 %`. Loads past 100 % (an overrun callback) still fit.
 fn percent_part(label: String, share: f64, warn: bool) -> HealthPart {
     HealthPart {
         label,
@@ -217,18 +217,13 @@ pub fn health_line(i: &HealthInputs) -> Option<HealthLine> {
     if let Some(d) = daemon {
         let mut lines = Vec::new();
         if let Some(c) = d.cpu {
-            // Host names go to the detail: one can be as long as the bar.
-            let label = if remote { "CPU remote" } else { "CPU" };
-            parts.push(percent_part(label.to_owned(), c, c >= CPU_WARN));
+            // The bar says where the daemon runs before this meter, so its CPU needs no
+            // place word; host names go to the detail, one can be as long as the bar.
+            parts.push(percent_part("CPU".to_owned(), c, c >= CPU_WARN));
             lines.push(format!("CPU {} (every process on every core)", percent(c)));
         }
         if let Some(cpu) = local_cpu {
-            let label = if d.cpu.is_some() {
-                "local"
-            } else {
-                "CPU local"
-            };
-            parts.push(percent_part(label.to_owned(), cpu, cpu >= CPU_WARN));
+            parts.push(percent_part("app CPU".to_owned(), cpu, cpu >= CPU_WARN));
         }
         if let Some(a) = d.audio {
             if let Some(l) = a.load {
@@ -392,7 +387,7 @@ mod tests {
         let l = health_line(&i).expect("figures");
         assert_eq!(
             l.text(),
-            "CPU remote 23 % · local 41 % · DSP 14 % · 0 xruns · 14 Mbit/s · 60 fps"
+            "CPU 23 % · app CPU 41 % · DSP 14 % · 0 xruns · 14 Mbit/s · 60 fps"
         );
         assert!(l.parts.iter().all(|p| !p.warn));
         assert!(
@@ -469,7 +464,7 @@ mod tests {
             .filter(|p| p.warn)
             .map(HealthPart::text)
             .collect();
-        assert_eq!(warned, ["CPU remote 90 %", "DSP 75 %", "1 xrun", "1 fps"]);
+        assert_eq!(warned, ["CPU 90 %", "DSP 75 %", "1 xrun", "1 fps"]);
         let later = HealthInputs {
             since_xrun_s: Some(XRUN_WARN_S + 0.1),
             frames: Some(streaming(25.0)),
@@ -535,8 +530,8 @@ mod tests {
             })
             .collect();
         let s = |v: &[&str]| v.iter().map(|&x| x.to_owned()).collect::<Vec<_>>();
-        assert_eq!(slots[0], ("CPU remote", "9", "999", &s(&["%"])[..]));
-        assert_eq!(slots[1], ("local", "100", "999", &s(&["%"])[..]));
+        assert_eq!(slots[0], ("CPU", "9", "999", &s(&["%"])[..]));
+        assert_eq!(slots[1], ("app CPU", "100", "999", &s(&["%"])[..]));
         assert_eq!(slots[2], ("DSP", "100", "999", &s(&["%"])[..]));
         assert_eq!(slots[3], ("", "12", "9999", &s(&["xruns"])[..]));
         assert_eq!(

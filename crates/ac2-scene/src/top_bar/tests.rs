@@ -115,7 +115,7 @@ fn a_remote_rig_in_good_health() {
     assert_eq!(b.tone, LinkTone::Ok);
     assert_eq!(
         b.text(),
-        "remote: ac2pi-0ab1c6 (STIM OFF) · 96 kHz · 256 frames · CPU remote 43 % · DSP 0 % · \
+        "remote: ac2pi-0ab1c6 (STIM OFF) · 96 kHz · 256 frames · CPU 43 % · DSP 0 % · \
          0 xruns · 85 fps | untitled · unsaved changes"
     );
     // The daemon's software and the numeric address are a hover away, never in the line.
