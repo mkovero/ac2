@@ -86,9 +86,8 @@ its `source.state` every second (`remote/link.rs`). This design publishes what i
 (`SourceSession.inputs`), not every input of its interface; with no session, none
 (*ketunkolo has no session open*). §2.5 says what keeps a session open.
 
-Rows carry that rig's row text (name, role, mic, calibration) from its `source.state`,
-never copied, and never a channel number (`ac2 status` on pupu shows a remote input today
-as *in 32769 · mic · — · uncalibrated*): *ketunkolo · in 1 · mic …*.
+Rows carry that rig's row text (name, role, mic, calibration) from its `source.state`, never
+a channel number (`ac2 status` shows one today as *in 32769 · mic · — · uncalibrated*).
 
 ### 2.3 Refusals, said in the picker before anything starts
 
@@ -386,9 +385,8 @@ max level, peers, monitor at start, rig meters) is never touched.
 
 ## 7. UI
 
-Said where it arises (§1, §2.3, §3, §4.2, §10 q1). The rules: one quantity, one wording; a
-remote input is a rig name and that rig's row text, never a number; a verdict only on
-evidence, shown on hover; nothing about paired rigs in the top bar; no new keys.
+Said where it arises (§1, §2.3, §3, §4.2, §10 q1): one quantity, one wording; a remote
+input is a rig name and row text, never a number; verdicts on evidence only; no new keys.
 
 ## 8. Tests
 
@@ -480,5 +478,4 @@ Operator, 2026-11-19:
   question (ie. no generator output over network)."
 - "if we're receiving input levels nevertheless from remotes, could we use that information
   to estimate whether we are LOCKED or ?" (§5; the tag words are §10 q1, open.)
-- No paired-rig chips in the top bar; a click on any tree row shows that measurement's own
-  screen; comparison across rigs is by drag.
+- The tree and top bar as stated at the top of this document.
