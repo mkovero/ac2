@@ -560,7 +560,8 @@ impl Control {
                 state: status,
                 saved_at: None,
                 log_failures: Vec::new(),
-            });
+            })
+            .with_server(s.server.network.summary());
         let dedup = Dedup::new(s.dedup);
         let rigm = rig_meas::RigMeas::new(&saved, s.rig_logs.as_deref());
         Self {
@@ -688,6 +689,7 @@ impl Control {
             self.osc_tick(now);
             self.artnet_tick(now);
             self.s.server.network.tick(&self.s.outbox, now);
+            self.server_sync();
             let mut wake = self.ka.due.min(self.clocks_due());
             if let Some(t) = self.osc_wake() {
                 wake = wake.min(t);
@@ -732,6 +734,7 @@ impl Control {
                 }) => self.on_request(&route, peer, &payload),
                 Ok(ControlMsg::NetFailed { epoch, reason }) => {
                     self.s.server.network.failed(epoch, reason, Instant::now());
+                    self.server_sync();
                 }
                 Ok(ControlMsg::DeviceChanged { epoch }) => {
                     if self.session.as_ref().is_some_and(|r| r.epoch == epoch) {

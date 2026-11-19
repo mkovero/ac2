@@ -563,7 +563,7 @@ def frames():
                 "rev": 40,
                 "daemon_wall_ns": 1790000000123456789,
                 "timing": {"type": "locked", "offset": 312},
-                "generator": {"owner": "alice", "armed": True, "firing": True},
+                "generator": {"owner": "alice", "owner_local": True, "armed": True, "firing": True},
                 "health": {
                     "host": "pupu",
                     "cpu": 0.25,

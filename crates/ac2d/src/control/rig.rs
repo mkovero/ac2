@@ -8,15 +8,14 @@
 
 use ac2_proto::event::Change;
 use ac2_proto::model::{
-    AuthorizedClient, GenAction, OutputSetup, RefusedKey, ServerInfo, ServerMode, SweepFailure,
-    check_output_label,
+    AuthorizedClient, GenAction, LocalServer, NetBind, NetworkServer, OutputSetup, RefusedKey,
+    ServerInfo, SweepFailure, check_output_label,
 };
 use ac2_proto::units::{Dbfs, RigId, WallNs};
 use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
 use ac2_zmq::PublicKey;
 
 use super::Control;
-use crate::network::NetStatus;
 use crate::rig::{RigSettings, upsert_outputs};
 use crate::route::Peer;
 use crate::util::{internal, invalid, missing, perr, refused};
@@ -35,6 +34,8 @@ pub(crate) enum LocalSetup {
     Local {
         /// Ctrl endpoint as bound.
         ctrl: String,
+        /// Data endpoint as bound.
+        data: String,
     },
 }
 
@@ -167,60 +168,107 @@ impl Control {
         Ok(ReplyBody::Outputs(self.store.state().outputs.clone()))
     }
 
-    /// `server.info`.
-    pub(super) fn server_info(&self) -> ServerInfo {
+    /// `server.info`. A network client gets no local endpoints and no interface list: host
+    /// detail it has no use for.
+    pub(super) fn server_info(&self, peer: &Peer) -> ServerInfo {
         let n = &self.s.server.network;
-        let mode = match (
-            n.listen(),
-            n.server_key(),
-            &n.authorized,
-            &self.s.server.local,
-        ) {
-            (Some(l), Some(key), Some(a), _) => {
-                let (ctrl, data) = match n.status() {
-                    NetStatus::Listening { ctrl, data } => (ctrl, data),
-                    _ => super::network::intended(l),
-                };
+        let local = peer.curve().is_none();
+        let key = n.server_key();
+        let (authorized, refused) = match &n.authorized {
+            Some(a) => {
                 let keys = a.handle.get();
-                ServerMode::Network {
-                    ctrl,
-                    data,
-                    server_key: key.to_z85(),
-                    fingerprint: key.fingerprint(),
-                    advertised_as: n.advertised_as(),
-                    authorized: keys
-                        .iter()
-                        .map(|(name, k)| AuthorizedClient {
-                            name: name.to_owned(),
-                            key: k.to_z85(),
-                            fingerprint: k.fingerprint(),
-                            rig: keys.rig_of(name).map(RigId),
-                        })
-                        .collect(),
-                    refused: n
-                        .refused
-                        .snapshot()
-                        .into_iter()
-                        .map(|r| RefusedKey {
-                            key: r.key.map(|k| k.to_z85()),
-                            fingerprint: r.key.map(|k| k.fingerprint()),
-                            address: r.address,
-                            count: r.count,
-                            last_at: WallNs(r.last_at_ns),
-                        })
-                        .collect(),
-                }
+                let authorized = keys
+                    .iter()
+                    .map(|(name, k)| AuthorizedClient {
+                        name: name.to_owned(),
+                        key: k.to_z85(),
+                        fingerprint: k.fingerprint(),
+                        rig: keys.rig_of(name).map(RigId),
+                    })
+                    .collect();
+                let refused = n
+                    .refused
+                    .snapshot()
+                    .into_iter()
+                    .map(|r| RefusedKey {
+                        key: r.key.map(|k| k.to_z85()),
+                        fingerprint: r.key.map(|k| k.fingerprint()),
+                        address: r.address,
+                        count: r.count,
+                        last_at: WallNs(r.last_at_ns),
+                    })
+                    .collect();
+                (authorized, refused)
             }
-            (.., LocalSetup::Embedded) => ServerMode::Embedded,
-            (.., LocalSetup::Local { ctrl }) => ServerMode::Local { ctrl: ctrl.clone() },
+            None => (Vec::new(), Vec::new()),
         };
         ServerInfo {
-            mode,
+            local: local.then(|| match &self.s.server.local {
+                LocalSetup::Embedded => LocalServer::Embedded,
+                LocalSetup::Local { ctrl, data } => LocalServer::Local {
+                    ctrl: ctrl.clone(),
+                    data: data.clone(),
+                },
+            }),
+            network: NetworkServer {
+                setting: n.setting(),
+                saved: n.saved(),
+                status: n.status(),
+                server_key: key.map(|k| k.to_z85()),
+                fingerprint: key.map(|k| k.fingerprint()),
+                advertised_as: n.advertised_as(),
+                authorized,
+                refused,
+            },
+            interfaces: if local { n.interfaces() } else { Vec::new() },
             recording_dir: self
                 .s
                 .recording_dir
                 .as_ref()
                 .map(|d| d.display().to_string()),
+        }
+    }
+
+    /// `server.network`: only from this host, whose user already holds every other power;
+    /// a network client could otherwise cut itself and everyone else off, or open the rig
+    /// on a network it reached some other way.
+    pub(super) fn server_network(
+        &mut self,
+        client: &Peer,
+        enabled: bool,
+        bind: Option<NetBind>,
+        port: Option<u16>,
+    ) -> Result<ReplyBody, ProtoError> {
+        if client.curve().is_some() {
+            return Err(refused(
+                "the network can only be turned on or off on the rig's own machine",
+            ));
+        }
+        let created = self.s.server.network.set(
+            enabled,
+            bind,
+            port,
+            &self.s.outbox,
+            std::time::Instant::now(),
+        )?;
+        tracing::warn!(
+            target: "ac2d::audit",
+            "network {} by {}",
+            if enabled { "turned on" } else { "turned off" },
+            client.id().0
+        );
+        if created {
+            self.keys_created();
+        }
+        self.server_sync();
+        Ok(ReplyBody::Server(self.server_info(client)))
+    }
+
+    /// `State.server` follows the network, whatever moved it (a request, a retry, a failure).
+    pub(super) fn server_sync(&mut self) {
+        let now = self.s.server.network.summary();
+        if self.store.state().server != now {
+            self.commit(ac2_proto::event::Change::Server(now));
         }
     }
 
@@ -297,7 +345,7 @@ impl Control {
             key.fingerprint(),
             client.id().0
         );
-        Ok(ReplyBody::Server(self.server_info()))
+        Ok(ReplyBody::Server(self.server_info(client)))
     }
 
     /// `server.revoke`.
@@ -331,6 +379,6 @@ impl Control {
             key.fingerprint(),
             client.id().0
         );
-        Ok(ReplyBody::Server(self.server_info()))
+        Ok(ReplyBody::Server(self.server_info(client)))
     }
 }

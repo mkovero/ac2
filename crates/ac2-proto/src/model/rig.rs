@@ -91,12 +91,14 @@ pub enum StateFile {
     RigLogs,
     /// The calibration store.
     Calibrations,
-    /// The server key pair (network mode).
+    /// The server key pair.
     ServerKey,
-    /// The clients allowed to connect (network mode).
+    /// The clients allowed to connect over the network.
     AuthorizedClients,
     /// The daemon's identity (`rig-id`).
     RigId,
+    /// The network setting (`network.json`).
+    NetworkSettings,
 }
 
 /// `Option<SocketAddr>` as `"ip:port"` text: msgpack has no address type, and the text

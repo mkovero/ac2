@@ -492,6 +492,7 @@ pub(super) fn spectrum_measurement() -> Measurement {
 pub(super) fn generator() -> Generator {
     Generator {
         owner: Some(ClientId("alice".into())),
+        owner_local: false,
         armed: true,
         firing: true,
         settings: Some(settings()),

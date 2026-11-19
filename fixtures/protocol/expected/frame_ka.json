@@ -1,7 +1,7 @@
 {
  "topic": "ka",
  "header": {
-  "v": 92,
+  "v": 93,
   "kind": "ka",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -24,6 +24,7 @@
     },
     "generator": {
      "owner": "alice",
+     "owner_local": true,
      "armed": true,
      "firing": true
     },

@@ -1,7 +1,7 @@
 //! The Connection page of the Settings view: the link to the daemon, this client's key, and
 //! in network mode the authorized and refused clients.
 
-use ac2_proto::model::{ServerInfo, ServerMode};
+use ac2_proto::model::{NetworkServer, ServerInfo};
 
 /// A line of the Connection page.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -84,8 +84,9 @@ pub fn conn_lines(server: Option<&ServerInfo>, remote: bool) -> Vec<ConnLine> {
         ConnLine::StopOnQuit,
     ];
     if let Some(ServerInfo {
-        mode:
-            ServerMode::Network {
+        network:
+            NetworkServer {
+                server_key: Some(_),
                 authorized,
                 refused,
                 ..
@@ -370,12 +371,12 @@ pub fn conn_line_text(l: &ConnLine, server: Option<&ServerInfo>) -> String {
             "Connect a rig (another daemon, or pair with one)… (Enter)".into()
         }
         ConnLine::Authorized(name) => server
-            .and_then(|s| match &s.mode {
-                ServerMode::Network { authorized, .. } => authorized
+            .and_then(|s| {
+                s.network
+                    .authorized
                     .iter()
                     .find(|a| &a.name == name)
-                    .map(ac2_scene::rig::authorized_row),
-                _ => None,
+                    .map(ac2_scene::rig::authorized_row)
             })
             .unwrap_or_else(|| name.clone()),
         // Drawn with what they need from the app (the prefs, the session).

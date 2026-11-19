@@ -10,6 +10,7 @@ use ac2_scene::view::{
 fn generator(ceiling: f64, bound: f64) -> Generator {
     Generator {
         owner: None,
+        owner_local: false,
         armed: false,
         firing: false,
         settings: None,

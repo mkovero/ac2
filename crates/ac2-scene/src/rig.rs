@@ -3,7 +3,8 @@
 //! the authorized client keys and the keys it refused).
 
 use ac2_proto::model::{
-    AuthorizedClient, GenAction, Generator, OutputSetup, RefusedKey, ServerInfo, ServerMode,
+    AuthorizedClient, GenAction, Generator, LocalServer, NetReason, NetStatus, OutputSetup,
+    RefusedKey, ServerInfo,
 };
 use ac2_proto::units::{Dbfs, WallNs};
 
@@ -131,33 +132,54 @@ pub fn stimulus_outputs(channels: &[u16], labels: &[OutputSetup]) -> String {
 
 /// How the daemon serves clients, in lines.
 pub fn server_lines(s: &ServerInfo) -> Vec<String> {
-    let mut v = match &s.mode {
-        ServerMode::Embedded => {
+    let mut v = match &s.local {
+        Some(LocalServer::Embedded) => {
             vec!["In-process: no client outside its program can connect.".to_owned()]
         }
-        ServerMode::Local { ctrl } => vec![
-            format!("Local only: {ctrl}"),
+        Some(LocalServer::Local { ctrl, .. }) => vec![
+            format!("Local: {ctrl}"),
             "Clients on this computer under the same user connect without keys.".to_owned(),
         ],
-        ServerMode::Network {
-            ctrl,
-            fingerprint,
-            advertised_as,
-            ..
-        } => vec![
-            format!("Network mode: {ctrl} (CURVE; paired clients only)"),
-            format!("Server key fingerprint: {fingerprint}"),
-            match advertised_as {
-                Some(n) => format!("Advertised over mDNS as {n:?}"),
-                None => "Not advertised over mDNS (clients need the address)".to_owned(),
-            },
-        ],
+        None => Vec::new(),
     };
+    let n = &s.network;
+    v.push(match &n.status {
+        NetStatus::Off => "Network: off".to_owned(),
+        NetStatus::Listening { ctrl, .. } => {
+            format!("Network: {ctrl} (CURVE; paired clients only)")
+        }
+        NetStatus::Waiting { reason } => format!("Network: waiting, {}", reason_text(reason)),
+        NetStatus::Failed { reason } => {
+            format!("Network: failed, {}; retrying", reason_text(reason))
+        }
+    });
+    if let Some(f) = &n.fingerprint {
+        v.push(format!("Server key fingerprint: {f}"));
+    }
+    if matches!(n.status, NetStatus::Listening { .. }) {
+        v.push(match &n.advertised_as {
+            Some(a) => format!("Advertised over mDNS as {a:?}"),
+            None => "Not advertised over mDNS (clients need the address)".to_owned(),
+        });
+    }
     v.push(match &s.recording_dir {
         Some(d) => format!("Recordings: {d}"),
         None => "Recordings: this daemon does not record".to_owned(),
     });
     v
+}
+
+/// Why the network is not listening, in words.
+pub fn reason_text(r: &NetReason) -> String {
+    match r {
+        NetReason::AddressInUse => "the port is in use".into(),
+        NetReason::InterfaceMissing => "the interface is not there".into(),
+        NetReason::AddressMissing => "the address is not on this computer".into(),
+        NetReason::ZapFailed => "key checking stopped".into(),
+        NetReason::NoServerKey => "no server key".into(),
+        NetReason::NotHandedOver => "the daemon is too busy".into(),
+        NetReason::Other { detail } => detail.clone(),
+    }
 }
 
 /// One authorized client: `laptop · fingerprint 1a2b-…`.
@@ -200,6 +222,7 @@ mod tests {
     fn generator(ceiling: f64, bound: f64, action: Option<GenAction>) -> Generator {
         Generator {
             owner: None,
+            owner_local: false,
             armed: false,
             firing: false,
             settings: None,
@@ -276,20 +299,15 @@ mod tests {
         assert_eq!(
             lines,
             vec![
-                "Network mode: tcp://0.0.0.0:47820 (CURVE; paired clients only)",
+                "Local: ipc:///run/user/1000/ac2/ctrl.sock",
+                "Clients on this computer under the same user connect without keys.",
+                "Network: tcp://192.168.1.20:47820 (CURVE; paired clients only)",
                 "Server key fingerprint: SHA256:3f1c 9a2e 77b0 51d4",
                 "Advertised over mDNS as \"foh-rig\"",
                 "Recordings: /home/fohtech/.local/share/ac2/recordings",
             ]
         );
-        let ServerMode::Network {
-            authorized,
-            refused,
-            ..
-        } = &s.mode
-        else {
-            unreachable!()
-        };
+        let (authorized, refused) = (&s.network.authorized, &s.network.refused);
         assert_eq!(
             authorized_row(&authorized[0]),
             "laptop · fingerprint SHA256:b2aa 0c3d 9e41 7f60"
@@ -304,12 +322,10 @@ mod tests {
             "a client without CURVE from 192.168.1.41 · once · 3 min ago"
         );
         assert_eq!(
-            server_lines(&ServerInfo {
-                mode: ServerMode::Embedded,
-                recording_dir: None,
-            }),
+            server_lines(&ac2_proto::samples::server_info_fixed()),
             vec![
-                "In-process: no client outside its program can connect.",
+                "Network: waiting, the address is not on this computer",
+                "Server key fingerprint: SHA256:3f1c 9a2e 77b0 51d4",
                 "Recordings: this daemon does not record",
             ]
         );

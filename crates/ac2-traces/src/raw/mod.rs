@@ -637,6 +637,7 @@ pub fn import_wav(src: &Path, dir: &Path, name: &str, now_ns: u64) -> Result<Sid
             measurements: Vec::new(),
             generator: Generator {
                 owner: None,
+                owner_local: false,
                 armed: false,
                 firing: false,
                 settings: None,

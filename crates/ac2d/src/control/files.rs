@@ -504,6 +504,7 @@ impl Control {
         let mut g = self.store.state().generator.clone();
         if g.owner.is_some() || g.armed || g.firing {
             g.owner = None;
+            g.owner_local = false;
             g.armed = false;
             g.firing = false;
             self.audit(&mut g, GenAction::Stop, client);

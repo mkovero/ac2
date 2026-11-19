@@ -88,7 +88,9 @@ fn rig_at(
         Net::Any => {}
         Net::Port(port) => {
             cfg.network = ac2d::NetworkChoice::Fixed(ac2d::NetListen {
-                bind: ac2d::NetBind::Addr(std::net::Ipv4Addr::LOCALHOST.into()),
+                bind: ac2d::NetBind::Addr {
+                    addr: std::net::Ipv4Addr::LOCALHOST.into(),
+                },
                 port: ac2d::NetPort::Port(port),
             });
         }

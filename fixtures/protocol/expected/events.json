@@ -1,5 +1,25 @@
 [
  {
+  "kind": "server",
+  "rev": 98,
+  "payload": {
+   "status": "listening",
+   "ctrl": "tcp://192.168.1.20:47820",
+   "port": 47820,
+   "fingerprint": "SHA256:3f1c 9a2e 77b0 51d4"
+  }
+ },
+ {
+  "kind": "server",
+  "rev": 99,
+  "payload": {
+   "status": "off",
+   "ctrl": null,
+   "port": null,
+   "fingerprint": null
+  }
+ },
+ {
   "kind": "measurement",
   "rev": 43,
   "payload": {

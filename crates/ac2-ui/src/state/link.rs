@@ -356,6 +356,7 @@ impl AppState {
             }
             ConnEvent::Stimulus(s) => self.stim_event(s, out),
             ConnEvent::Server { what, result } => {
+                let result = result.map(|s| *s);
                 // A failed change leaves the info as it was.
                 if what.is_none() || result.is_ok() {
                     self.rig.server = Some(result.clone());

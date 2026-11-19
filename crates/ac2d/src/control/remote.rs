@@ -188,6 +188,13 @@ impl Control {
         self.remote_publish();
     }
 
+    /// The server key was just created: links to the paired rigs can start now.
+    pub(super) fn keys_created(&mut self) {
+        let peers = self.store.state().remote.peers.clone();
+        self.respawn_links(&peers);
+        self.remote_publish();
+    }
+
     /// Starts a link to every peer of `peers` that has none or whose pairing changed, and
     /// ends the others.
     fn respawn_links(&mut self, peers: &[RigPeer]) {
@@ -571,7 +578,7 @@ impl Control {
             }
             let paired = peers.iter().find(|p| p.rig == r.rig);
             let (link, bytes_per_s, window) = match (network, paired) {
-                (false, _) => (RemoteLink::NotNetworked, 0.0, 0),
+                (false, _) => (RemoteLink::NoServerKey, 0.0, 0),
                 (true, None) => (RemoteLink::NotPaired, 0.0, 0),
                 (true, Some(_)) => self.remote.link_state.get(&r.rig).cloned().unwrap_or((
                     RemoteLink::Connecting,

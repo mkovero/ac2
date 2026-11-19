@@ -1,5 +1,5 @@
 {
-  "proto_version": 92,
+  "proto_version": 93,
   "value": {
     "grids": [
       {
@@ -44,6 +44,7 @@
         "firing": false,
         "last_action": null,
         "owner": null,
+        "owner_local": false,
         "settings": null
       },
       "inputs": [],
@@ -330,6 +331,12 @@
         "osc_target": null,
         "rev": 0
       },
+      "server": {
+        "ctrl": null,
+        "fingerprint": null,
+        "port": null,
+        "status": "off"
+      },
       "session": {
         "epoch": 1,
         "open": {
@@ -365,7 +372,7 @@
           "driver_change": null,
           "driver_reset": null,
           "input_device": "fake",
-          "opened_at": "now-94416174",
+          "opened_at": "now-96419877",
           "output_device": "fake",
           "replay": null,
           "sample_rate_hz": 48000,
@@ -384,11 +391,11 @@
           "peaks": {
             "lafmax": {
               "judgement": "no_limit",
-              "since": "now-23385537"
+              "since": "now-31154276"
             },
             "lcpeak": {
               "judgement": "no_limit",
-              "since": "now-23385537"
+              "since": "now-31154276"
             }
           },
           "started_at": null,
@@ -396,31 +403,31 @@
             {
               "duration": 60.0,
               "judgement": "no_limit",
-              "since": "now-23385537",
+              "since": "now-31154276",
               "weighting": "a"
             },
             {
               "duration": 300.0,
               "judgement": "no_limit",
-              "since": "now-23385537",
+              "since": "now-31154276",
               "weighting": "a"
             },
             {
               "duration": 600.0,
               "judgement": "no_limit",
-              "since": "now-23385537",
+              "since": "now-31154276",
               "weighting": "a"
             },
             {
               "duration": 1800.0,
               "judgement": "no_limit",
-              "since": "now-23385537",
+              "since": "now-31154276",
               "weighting": "a"
             },
             {
               "duration": 3600.0,
               "judgement": "no_limit",
-              "since": "now-23385537",
+              "since": "now-31154276",
               "weighting": "a"
             }
           ]
@@ -446,7 +453,7 @@
           "type": "name"
         },
         "recover": null,
-        "saved_at": "now-8703818"
+        "saved_at": "now-8511583"
       }
     },
     "traces": []

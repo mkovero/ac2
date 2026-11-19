@@ -31,6 +31,7 @@ mod loudness_bars;
 mod math_traces;
 mod meas_display;
 mod net_pairs;
+mod net_toggle;
 mod network;
 mod osc;
 mod power_cut;

@@ -125,7 +125,7 @@ pub fn remote_state() -> RemoteState {
             rig(RemoteLink::Up, PeerRelation::Agree),
             rig(RemoteLink::NotPaired, PeerRelation::Measuring),
             rig(
-                RemoteLink::NotNetworked,
+                RemoteLink::NoServerKey,
                 PeerRelation::NotLocked {
                     reason: NotLockedReason::CrossRate {
                         ppm: 5.6,

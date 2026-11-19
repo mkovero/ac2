@@ -496,9 +496,10 @@ pub struct Elsewhere {
 }
 
 /// Who holds `rig`'s generator, for "held by …": a key's admitted name, or for a client
-/// on the rig's own host (whose id is only a routing tag) the words `an app on pupu`.
-pub fn holder(owner: &ClientId, rig: &str) -> String {
-    if owner.is_local() {
+/// on the rig's own host (`local`, as the rig saw its connection; its id is only a routing
+/// tag) the words `an app on pupu`.
+pub fn holder(owner: &ClientId, local: bool, rig: &str) -> String {
+    if local {
         format!("an app on {rig}")
     } else {
         owner.0.clone()
@@ -774,10 +775,13 @@ mod tests {
     #[test]
     fn a_holder_on_the_rigs_own_host_is_named_by_the_rig() {
         assert_eq!(
-            holder(&ClientId::local("006b8b4567"), "pupu"),
+            holder(&ClientId::local("006b8b4567"), true, "pupu"),
             "an app on pupu"
         );
-        assert_eq!(holder(&ClientId("ketunkolo".into()), "pupu"), "ketunkolo");
+        assert_eq!(
+            holder(&ClientId("ketunkolo".into()), false, "pupu"),
+            "ketunkolo"
+        );
     }
 
     #[test]

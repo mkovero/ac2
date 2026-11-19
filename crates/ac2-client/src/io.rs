@@ -15,7 +15,7 @@
 //! nothing to do, and an idle client should not wake the CPU.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -109,6 +109,8 @@ pub(crate) struct Io {
     /// The ZAP status of the daemon's last refusal of this client's key (0: none since the
     /// last handshake that passed).
     refused: Arc<AtomicU32>,
+    /// See [`Io::network_off`].
+    network_off: Arc<AtomicBool>,
 }
 
 impl Io {
@@ -135,8 +137,10 @@ impl Io {
         let pending: Pending = Arc::default();
         let malformed = Arc::new(AtomicU64::new(0));
         let refused = Arc::new(AtomicU32::new(0));
+        let network_off = Arc::new(AtomicBool::new(false));
         let worker = Worker {
             refused: refused.clone(),
+            network_off: network_off.clone(),
             dealer,
             dealer_monitor,
             sync,
@@ -156,7 +160,14 @@ impl Io {
             pending,
             malformed,
             refused,
+            network_off,
         })
+    }
+
+    /// Whether the daemon said its network was turned off on the rig, and has not been
+    /// heard from since: the connection's end is that, not a fault.
+    pub(crate) fn network_off(&self) -> bool {
+        self.network_off.load(Ordering::Acquire)
     }
 
     /// Whether the daemon refused this client's key at its last handshake on the ctrl
@@ -208,6 +219,8 @@ struct Worker {
     received: Arc<AtomicU64>,
     /// See [`Io::refused`].
     refused: Arc<AtomicU32>,
+    /// See [`Io::network_off`].
+    network_off: Arc<AtomicBool>,
 }
 
 impl Worker {
@@ -347,14 +360,22 @@ impl Worker {
                     continue;
                 }
                 Ok(DataMessage::Flow(FlowNotice::ResyncRequired)) => SyncIn::Resync,
+                Ok(DataMessage::Flow(FlowNotice::NetworkOff)) => {
+                    self.network_off.store(true, Ordering::Release);
+                    continue;
+                }
                 Ok(DataMessage::Event(e)) => SyncIn::Event(Box::new(e)),
                 Ok(DataMessage::Frame(f)) => match f.data {
-                    FrameData::Ka(meta) => SyncIn::Ka {
-                        stamp: f.stamp,
-                        meta: Box::new(meta),
-                        at,
-                        local_wall_ns,
-                    },
+                    FrameData::Ka(meta) => {
+                        // Heard from again: the network is back on.
+                        self.network_off.store(false, Ordering::Release);
+                        SyncIn::Ka {
+                            stamp: f.stamp,
+                            meta: Box::new(meta),
+                            at,
+                            local_wall_ns,
+                        }
+                    }
                     // Only `evt` and `ka` are subscribed on this socket.
                     _ => continue,
                 },

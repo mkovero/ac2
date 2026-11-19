@@ -291,6 +291,7 @@ impl Control {
             | Command::RecList
             | Command::SessionReplay { .. }
             | Command::ServerInfo
+            | Command::ServerNetwork { .. }
             | Command::ServerAuthorize { .. }
             | Command::ServerRevoke { .. }
             | Command::AuthAdmitRig { .. }

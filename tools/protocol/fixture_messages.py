@@ -854,6 +854,11 @@ def requests():
             },
         ),
         req(103, "sim.cancel"),
+        req(
+            104,
+            "server.network",
+            {"enabled": True, "bind": {"type": "addr", "addr": "192.168.1.20"}, "port": 47830},
+        ),
     ]
 
 
@@ -873,12 +878,23 @@ def data_requests():
 
 def notices():
     """samples::notices()."""
-    return ["resync_required", "rejoin"]
+    return ["resync_required", "rejoin", "network_off"]
 
 
 def events():
     """A subset of samples::events()."""
     return [
+        {
+            "kind": "server",
+            "rev": 98,
+            "payload": {
+                "status": "listening",
+                "ctrl": "tcp://192.168.1.20:47820",
+                "port": 47820,
+                "fingerprint": "SHA256:3f1c 9a2e 77b0 51d4",
+            },
+        },
+        {"kind": "server", "rev": 99, "payload": {"status": "off", "ctrl": None, "port": None, "fingerprint": None}},
         {"kind": "measurement", "rev": 43, "payload": {"type": "set", "value": measurement()}},
         {"kind": "measurement", "rev": 44, "payload": {"type": "deleted", "value": 3}},
         {"kind": "plan", "rev": 81, "payload": {"type": "deleted", "value": "Club"}},

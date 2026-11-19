@@ -204,7 +204,9 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
                 let result = c
                     .call(Command::ServerInfo)
                     .await
-                    .and_then(|r| expect_body!("server.info", r, ReplyBody::Server(s) => s))
+                    .and_then(
+                        |r| expect_body!("server.info", r, ReplyBody::Server(s) => Box::new(s)),
+                    )
                     .map_err(|e| e.to_string());
                 o.send(ConnEvent::Server { what: None, result });
             });
@@ -216,7 +218,7 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
                 let result = c
                     .call(cmd)
                     .await
-                    .and_then(|r| expect_body!(op, r, ReplyBody::Server(s) => s))
+                    .and_then(|r| expect_body!(op, r, ReplyBody::Server(s) => Box::new(s)))
                     .map_err(|e| e.to_string());
                 o.send(ConnEvent::Server {
                     what: Some(what),

@@ -469,6 +469,13 @@ pub fn commands() -> Vec<Command> {
             request: super::sim::sim_map_request(),
         },
         Command::SimCancel,
+        Command::ServerNetwork {
+            enabled: true,
+            bind: Some(NetBind::Addr {
+                addr: std::net::IpAddr::from([192, 168, 1, 20]),
+            }),
+            port: Some(47830),
+        },
     ])
     .collect()
 }

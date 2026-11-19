@@ -1,5 +1,5 @@
 {
-  "proto_version": 92,
+  "proto_version": 93,
   "value": {
     "autosave": {
       "log_failures": [],
@@ -24,6 +24,7 @@
       "firing": false,
       "last_action": null,
       "owner": null,
+      "owner_local": false,
       "settings": null
     },
     "inputs": [],
@@ -65,6 +66,12 @@
       },
       "osc_target": null,
       "rev": 0
+    },
+    "server": {
+      "ctrl": null,
+      "fingerprint": null,
+      "port": null,
+      "status": "off"
     },
     "session": {
       "epoch": 0,

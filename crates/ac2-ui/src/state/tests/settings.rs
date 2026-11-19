@@ -491,7 +491,7 @@ fn connection_page_asks_the_daemon_authorizes_and_revokes() {
     let info = ac2_proto::samples::server_info();
     t.conn(ConnEvent::Server {
         what: None,
-        result: Ok(info.clone()),
+        result: Ok(Box::new(info.clone())),
     });
     let lines = settings(&t).connection.lines();
     assert_eq!(lines[4], ConnLine::Authorized("laptop".into()));

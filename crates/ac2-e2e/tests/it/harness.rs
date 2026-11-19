@@ -509,11 +509,6 @@ impl Cli {
         &self.c
     }
 
-    /// The id the daemon knows this client by.
-    pub fn client_id(&self) -> ac2_proto::units::ClientId {
-        self.c.client_id()
-    }
-
     /// The stimulus lease taken and the generator set to `desired`; held (refreshed in the
     /// background) until the lease is dropped.
     pub fn lease(

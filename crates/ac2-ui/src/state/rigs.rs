@@ -156,7 +156,10 @@ impl AppState {
                     holder: g
                         .and_then(|g| g.owner.as_ref())
                         .filter(|o| Some(*o) != r.client_id())
-                        .map(|o| ac2_scene::stimulus::holder(o, &self.rig_label(r))),
+                        .map(|o| {
+                            let local = g.is_some_and(|g| g.owner_local);
+                            ac2_scene::stimulus::holder(o, local, &self.rig_label(r))
+                        }),
                 })
             })
             .collect()

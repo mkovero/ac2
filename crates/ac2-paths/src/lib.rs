@@ -129,12 +129,18 @@ pub fn recording_dir() -> PathBuf {
     data_dir().join("recordings")
 }
 
-/// A network-mode daemon's CURVE key pair: `<config>/server.key`.
+/// The daemon's network setting (on or off, interface, port): `<config>/network.json`.
+pub fn network_settings() -> PathBuf {
+    config_dir().join("network.json")
+}
+
+/// The daemon's CURVE key pair (created when the network is first turned on):
+/// `<config>/server.key`.
 pub fn server_key() -> PathBuf {
     config_dir().join("server.key")
 }
 
-/// The clients a network-mode daemon accepts: `<config>/authorized_clients`.
+/// The clients the daemon accepts over the network: `<config>/authorized_clients`.
 pub fn authorized_clients() -> PathBuf {
     config_dir().join("authorized_clients")
 }

@@ -102,7 +102,9 @@ pub fn relation_with_evidence(r: &RemoteState, c: &PeerClock) -> String {
 pub fn link_text(r: &RemoteRig) -> String {
     match &r.link {
         RemoteLink::NotPaired => "not paired: pair the rigs from the app".into(),
-        RemoteLink::NotNetworked => "this rig listens on this computer only".into(),
+        RemoteLink::NoServerKey => {
+            "this rig has no server key yet: turn its network on once".into()
+        }
         RemoteLink::Connecting => "connecting".into(),
         RemoteLink::Up => format!("up, {}", bit_rate(r.bytes_per_s)),
         RemoteLink::Unreachable { .. } => "unreachable".into(),
@@ -192,9 +194,10 @@ pub fn input_state(
                 "not paired with {rig}: add the input again from the app"
             ));
         }
-        Some(RemoteLink::NotNetworked) => {
+        Some(RemoteLink::NoServerKey) => {
             return problem(format!(
-                "no audio from {rig}: this rig listens on this computer only"
+                "no audio from {rig}: this rig has no server key yet (turn its network on \
+                 once)"
             ));
         }
         Some(RemoteLink::Unreachable { since }) => {

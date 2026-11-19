@@ -195,8 +195,9 @@ pub struct RemoteRig {
 pub enum RemoteLink {
     /// This rig is not paired with it (no `rig.peers` entry): pair the rigs from the app.
     NotPaired,
-    /// This rig listens only on its own computer: it has no key to show another rig.
-    NotNetworked,
+    /// This rig has no server key yet (its network was never turned on): it has no key to
+    /// show another rig.
+    NoServerKey,
     /// Connecting.
     Connecting,
     /// Connected and answering.

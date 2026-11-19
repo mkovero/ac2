@@ -486,6 +486,7 @@ pub fn apply_change(s: &mut State, c: Change) {
         Change::WalkPlan(p) => upsert(&mut s.walk_plans, p, |p| p.name.clone()),
         Change::Sim(r) => s.set_sim(r),
         Change::SimFit(f) => s.sim_fit = f,
+        Change::Server(v) => s.server = v,
     }
 }
 
@@ -505,6 +506,7 @@ mod tests {
             timing: TimingState::NoStimulus,
             generator: GenSummary {
                 owner: None,
+                owner_local: false,
                 armed: false,
                 firing: false,
             },

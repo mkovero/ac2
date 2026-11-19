@@ -9,8 +9,9 @@ use thiserror::Error;
 
 use crate::model::{
     Autosave, CalEntry, CalKey, Clocks, Generator, InputSetups, LineCalEntry, LineCalKey,
-    Measurement, Mic, OutputSetup, PlanSpec, RecordingRun, RemoteState, Rig, Session, SimFitKept,
-    SimState, SplLog, State, SweepRun, TimingStatus, TraceMeta, WalkState, WorkingSession,
+    Measurement, Mic, OutputSetup, PlanSpec, RecordingRun, RemoteState, Rig, ServerSummary,
+    Session, SimFitKept, SimState, SplLog, State, SweepRun, TimingStatus, TraceMeta, WalkState,
+    WorkingSession,
 };
 use crate::units::{DaemonIncarnation, MeasId, Rev, SessionEpoch, TraceId, WalkId};
 
@@ -83,6 +84,8 @@ pub enum Change {
     Sim(SimState),
     /// The absorption fit kept for later runs (`None`: dropped).
     SimFit(Option<SimFitKept>),
+    /// The network listener, in short (never deleted).
+    Server(ServerSummary),
 }
 
 /// One committed state change.
@@ -260,6 +263,13 @@ pub enum WireEvent {
         /// Payload.
         payload: Option<SimFitKept>,
     },
+    /// [`Change::Server`].
+    Server {
+        /// Rev.
+        rev: Rev,
+        /// Payload.
+        payload: ServerSummary,
+    },
 }
 
 impl From<Event> for WireEvent {
@@ -289,6 +299,7 @@ impl From<Event> for WireEvent {
             Change::WalkPlan(payload) => Self::WalkPlan { rev, payload },
             Change::Sim(payload) => Self::Sim { rev, payload },
             Change::SimFit(payload) => Self::SimFit { rev, payload },
+            Change::Server(payload) => Self::Server { rev, payload },
         }
     }
 }
@@ -319,6 +330,7 @@ impl From<WireEvent> for Event {
             WireEvent::WalkPlan { rev, payload } => (rev, Change::WalkPlan(payload)),
             WireEvent::Sim { rev, payload } => (rev, Change::Sim(payload)),
             WireEvent::SimFit { rev, payload } => (rev, Change::SimFit(payload)),
+            WireEvent::Server { rev, payload } => (rev, Change::Server(payload)),
         };
         Event { rev, change }
     }
@@ -351,6 +363,7 @@ impl Change {
             Self::WalkPlan(_) => "walk_plan",
             Self::Sim(_) => "sim",
             Self::SimFit(_) => "sim_fit",
+            Self::Server(_) => "server",
         }
     }
 }

@@ -4,10 +4,10 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     CalEntry, Clocks, Generator, InputSetup, LineCalEntry, Measurement, Mic, OutputSetup, Pair,
-    PlanSpec, RecordingRun, RemoteState, Rig, Session, SimFitKept, SimState, SplLog, SweepRun,
-    TraceMeta, WalkState, WorkingSession,
+    PlanSpec, RecordingRun, RemoteState, Rig, ServerSummary, Session, SimFitKept, SimState, SplLog,
+    SweepRun, TraceMeta, WalkState, WorkingSession,
 };
-use crate::units::{MeasId, RigId, SampleIndex, Samples, Seconds, WallNs};
+use crate::units::{MeasId, SampleIndex, Samples, Seconds, WallNs};
 
 /// Loopback timing monitor state (Q3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -140,6 +140,8 @@ pub struct State {
     pub sim_map: Option<SimState>,
     /// The absorption fit kept for later runs on its plan, if any.
     pub sim_fit: Option<SimFitKept>,
+    /// The network listener, in short (details and key lists: `server.info`).
+    pub server: ServerSummary,
 }
 
 /// Autosave of the measurements and traces: the daemon writes them, in the session file
@@ -199,76 +201,4 @@ pub enum AutosaveState {
         /// Why, as the file system said it.
         reason: String,
     },
-}
-
-/// How the daemon serves clients, and who may connect (`server.info`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ServerInfo {
-    /// Transport and its security.
-    pub mode: ServerMode,
-    /// Where raw capture files are recorded on the daemon host; `None`: this daemon does
-    /// not record.
-    pub recording_dir: Option<String>,
-}
-
-/// How the daemon listens.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-pub enum ServerMode {
-    /// In this process only (a daemon embedded in an app).
-    Embedded,
-    /// This machine only (`ipc://` or loopback TCP): the operating system's user boundary
-    /// is the trust boundary; there are no client keys.
-    Local {
-        /// Ctrl endpoint.
-        ctrl: String,
-    },
-    /// The network, CURVE on both sockets: only clients whose key is authorized connect.
-    Network {
-        /// Ctrl endpoint as bound.
-        ctrl: String,
-        /// Data endpoint as bound.
-        data: String,
-        /// The server's public key (Z85), which clients pin when pairing.
-        server_key: String,
-        /// Its fingerprint, as `ac2 discover` and the connect dialog show it.
-        fingerprint: String,
-        /// The name the rig is advertised under over mDNS; `None`: not advertised.
-        advertised_as: Option<String>,
-        /// The authorized clients, by name.
-        authorized: Vec<AuthorizedClient>,
-        /// Keys refused lately, newest first (bounded).
-        refused: Vec<RefusedKey>,
-    },
-}
-
-/// One authorized client key.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AuthorizedClient {
-    /// Its name (the identity its requests carry: lease owner, audit).
-    pub name: String,
-    /// Public key (Z85).
-    pub key: String,
-    /// Fingerprint of the key.
-    pub fingerprint: String,
-    /// The rig it is, for a key admitted as a rig (`auth.admit_rig`); `None` for an app.
-    pub rig: Option<RigId>,
-}
-
-/// A client key the daemon refused.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RefusedKey {
-    /// Public key (Z85); `None` when the peer did not use CURVE.
-    pub key: Option<String>,
-    /// Fingerprint of the key; `None` with `key`.
-    pub fingerprint: Option<String>,
-    /// Peer address.
-    pub address: String,
-    /// Refusals of this key from this address since the daemon started.
-    pub count: u64,
-    /// The latest refusal.
-    pub last_at: WallNs,
 }

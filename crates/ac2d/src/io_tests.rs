@@ -23,6 +23,7 @@ struct Rig {
     client: KeyPair,
     authorized: AuthorizedHandle,
     audit: Arc<AuthLog>,
+    interest: Arc<Interest>,
     _frames: outbox::FrameTx,
     _io: JoinHandle<()>,
     _dir: tempfile::TempDir,
@@ -45,6 +46,7 @@ impl Rig {
         let (frames, frames_rx) = outbox::frame_channel();
         let attach = AttachQueue::default();
         let (to_control, control) = mpsc::channel();
+        let interest = Arc::new(Interest::default());
         let io = spawn(
             IoSockets {
                 router,
@@ -54,7 +56,7 @@ impl Rig {
                 attach: attach.clone(),
             },
             to_control,
-            Arc::new(Interest::default()),
+            Arc::clone(&interest),
             10,
         )
         .unwrap();
@@ -72,6 +74,7 @@ impl Rig {
             client,
             authorized: AuthorizedHandle::new(keys),
             audit: Arc::new(AuthLog::new(&dir.path().join("authorized_clients"))),
+            interest,
             _frames: frames,
             _io: io,
             _dir: dir,
@@ -80,6 +83,11 @@ impl Rig {
 
     /// Binds a network pair on loopback and attaches it as `epoch`; its ctrl endpoint.
     fn attach(&self, epoch: u64) -> String {
+        self.attach_pair(epoch).0
+    }
+
+    /// [`Self::attach`]; its ctrl and data endpoints.
+    fn attach_pair(&self, epoch: u64) -> (String, String) {
         let pair = bind_pair(
             Host::Addr(IpAddr::V4(Ipv4Addr::LOCALHOST)),
             NetPort::Any,
@@ -88,11 +96,11 @@ impl Rig {
             Arc::clone(&self.audit),
         )
         .unwrap();
-        let ctrl = pair.ctrl_ep.clone();
+        let eps = (pair.ctrl_ep.clone(), pair.data_ep.clone());
         let epoch = NetEpoch(epoch);
         self.attach.put(Attach { epoch, pair });
         assert!(self.outbox.attach(epoch));
-        ctrl
+        eps
     }
 
     fn dealer(&self, rid: &[u8], curve: bool, ep: &str) -> Socket {
@@ -161,7 +169,7 @@ fn a_reply_for_an_older_pair_is_dropped_though_its_routing_id_is_reused() {
     let old = rig.dealer(b"c", true, &first);
     let (stale, _) = rig.request(&old, b"asked on 1");
     drop(old);
-    assert!(rig.outbox.detach(NetEpoch(1)));
+    assert!(rig.outbox.detach(NetEpoch(1), false));
     let second = rig.attach(2);
     let new = rig.dealer(b"c", true, &second);
     let (fresh, _) = rig.request(&new, b"asked on 2");
@@ -184,5 +192,45 @@ fn an_attach_without_its_pair_is_reported_back_to_control() {
             assert_eq!(reason, NetReason::NotHandedOver);
             break;
         }
+    }
+}
+
+/// Turned off, the network's data peers hear `network_off` before the pair closes, and
+/// what they subscribed no longer counts as wanted.
+#[test]
+fn turned_off_the_network_peers_are_told_and_their_interest_dropped() {
+    use ac2_proto::flow::FlowNotice;
+    use ac2_proto::{DataRequest, DataUp, Subscription, Topic, decode_notice, encode_data_request};
+    let rig = Rig::start("off");
+    let (_, data) = rig.attach_pair(1);
+    let d = rig.dealer(b"d", true, &data);
+    for msg in [
+        DataUp::Window { bytes: 1 << 20 },
+        DataUp::Subscribe {
+            sub: Subscription::Topic(Topic::Evt),
+        },
+    ] {
+        d.send(&[encode_data_request(&DataRequest::new(msg)).unwrap()])
+            .unwrap();
+    }
+    let t0 = std::time::Instant::now();
+    while rig.interest.count(b"evt") == 0 {
+        assert!(t0.elapsed() < WAIT, "the subscription never counted");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(rig.outbox.detach(NetEpoch(1), true));
+    let mut told = false;
+    while let Some(m) = d.recv_timeout(WAIT).unwrap() {
+        let f = m.frames();
+        if f.len() == 2 && decode_notice(&f[1]).ok() == Some(FlowNotice::NetworkOff) {
+            told = true;
+            break;
+        }
+    }
+    assert!(told, "no network_off before the pair closed");
+    let t0 = std::time::Instant::now();
+    while rig.interest.count(b"evt") != 0 {
+        assert!(t0.elapsed() < WAIT, "the detached peer is still counted");
+        std::thread::sleep(Duration::from_millis(5));
     }
 }

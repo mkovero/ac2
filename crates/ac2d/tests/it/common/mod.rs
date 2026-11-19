@@ -119,7 +119,9 @@ pub fn local(dir: &std::path::Path) -> Listen {
 pub fn net_config(backend: FakeBackend, security: ac2d::NetworkSecurity) -> DaemonConfig {
     let mut cfg = config(backend, local_tcp());
     cfg.network = ac2d::NetworkChoice::Fixed(ac2d::NetListen {
-        bind: ac2d::NetBind::Addr(std::net::Ipv4Addr::LOCALHOST.into()),
+        bind: ac2d::NetBind::Addr {
+            addr: std::net::Ipv4Addr::LOCALHOST.into(),
+        },
         port: ac2d::NetPort::Any,
     });
     cfg.keys = Some(security);

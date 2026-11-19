@@ -11,10 +11,10 @@ use crate::model::{
     ArtnetTarget, AverageMethod, BackendKind, Ballistic, CalRef, ColourFamily, CorrelationWindow,
     DelayPick, DelayReference, DeviceId, DmxSet, ElectricalConnection, ExportFormat, FinderBand,
     GeneratorDesired, ImportFormat, ImportRole, InputSetup, IrImport, MeasConfig, MicCurveId,
-    MicLoading, OscMessage, OutputSetup, OwnedTraces, Pair, PaneLayout, PlanSpec, PreviewInput,
-    RecordRequest, RecordingRef, ReplayPace, RigPeer, SessionConfig, SessionRef, SimFitRequest,
-    SimMapRequest, SimRequest, SplLogWhich, TargetCurve, TraceEdit, TraceOwner, WalkKind,
-    WalkPointSpec,
+    MicLoading, NetBind, OscMessage, OutputSetup, OwnedTraces, Pair, PaneLayout, PlanSpec,
+    PreviewInput, RecordRequest, RecordingRef, ReplayPace, RigPeer, SessionConfig, SessionRef,
+    SimFitRequest, SimMapRequest, SimRequest, SplLogWhich, TargetCurve, TraceEdit, TraceOwner,
+    WalkKind, WalkPointSpec,
 };
 use crate::units::{
     Blob, Db, DbSpl, Dbfs, Dbtp, Hz, LeaseToken, Lufs, MeasId, MvPerPa, Rev, RigId, Seconds,
@@ -933,12 +933,21 @@ pub enum Command {
     /// Recordings in the daemon's recording directory.
     #[serde(rename = "rec.list")]
     RecList,
-    /// How the daemon serves clients: transport, server key, mDNS name, the authorized
-    /// client keys and the keys refused lately.
+    /// How the daemon serves clients (`ServerInfo`) and who may connect.
     #[serde(rename = "server.info")]
     ServerInfo,
-    /// Authorize a client key under `name` (network mode). Applies to connections from now
-    /// on; written to the authorized-clients file.
+    /// Turn the network listener on or off live; the session and local clients run on.
+    /// Local clients only; refused while `ac2d --listen` fixes it. Replies `server.info`.
+    #[serde(rename = "server.network")]
+    ServerNetwork {
+        enabled: bool,
+        /// Where to bind; `None` keeps the stored choice (first: every interface).
+        bind: Option<NetBind>,
+        /// Ctrl port, data on the next (not 0 or 65535); `None` keeps the stored one.
+        port: Option<u16>,
+    },
+    /// Authorize a client key under `name`. Applies to connections from now on, network on
+    /// or off; written to the authorized-clients file.
     #[serde(rename = "server.authorize")]
     ServerAuthorize {
         /// Name the client's requests will carry (1 … 64 characters, no spaces).
@@ -946,14 +955,14 @@ pub enum Command {
         /// The client's public key (Z85, 40 characters).
         key: String,
     },
-    /// Revoke the client key named `name` (network mode): its requests are refused at once,
+    /// Revoke the client key named `name`: its requests are refused at once,
     /// and it cannot connect again. A client cannot revoke its own key.
     #[serde(rename = "server.revoke")]
     ServerRevoke {
         /// The authorized name.
         name: String,
     },
-    /// Admit another rig's key as a rig (network mode): it may then take this rig's captured
+    /// Admit another rig's key as a rig, network on or off: it may then take this rig's captured
     /// inputs (`audio/` topics) and read `source.state`, and nothing else. The operator's app,
     /// authorized on both rigs, gives this rig the other's key. Removed with `server.revoke`
     /// under `name`, which ends its stream at once.

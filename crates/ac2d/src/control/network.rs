@@ -8,16 +8,19 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
+use ac2_proto::ProtoError;
+use ac2_proto::model::{NetSaved, NetSetting, NotSavedReason, ServerSummary};
 use ac2_zmq::{AuthorizedHandle, AuthorizedKeys, KeyPair, PublicKey};
 
 use crate::authlog::{AuthLog, RefusedList};
-use crate::config::{Mdns, NetworkSecurity};
+use crate::config::{Listen, Mdns, NetworkSecurity};
 use crate::damage::Damage;
 use crate::io::{Attach, AttachQueue};
 use crate::network::{
     Backoff, Host, Interfaces, NetBind, NetListen, NetPort, NetReason, NetStatus, NetworkChoice,
-    bind_pair, resolve,
+    bind_pair, check_port, resolve,
 };
+use crate::network_store::{NetSettings, NetStore};
 use crate::outbox::Outbox;
 use crate::remote::follow::PeerBrowse;
 use crate::route::NetEpoch;
@@ -30,6 +33,7 @@ use super::ControlMsg;
 pub(crate) struct NetView {
     pub(crate) status: Arc<Mutex<NetStatus>>,
     pub(crate) advertised_as: Arc<Mutex<Option<String>>>,
+    pub(crate) server_key: Arc<Mutex<Option<PublicKey>>>,
     #[cfg(feature = "fault-injection")]
     pub(crate) fault: Arc<Mutex<Option<ac2_zmq::ZapFault>>>,
 }
@@ -45,6 +49,10 @@ impl NetView {
 
     pub(crate) fn advertised_as(&self) -> Option<String> {
         lock(&self.advertised_as).clone()
+    }
+
+    pub(crate) fn server_key(&self) -> Option<PublicKey> {
+        *lock(&self.server_key)
     }
 }
 
@@ -62,11 +70,15 @@ struct Bound {
     /// Its `TAG_DETACH` was refused by a full pipe and is sent again: until it goes
     /// through the pair holds its port, and every rebind would find it in use.
     detaching: bool,
+    /// The detach turns the network off: its peers are told so before it closes.
+    off: bool,
 }
 
 /// What [`NetCtl::new`] needs.
 pub(crate) struct NetSetup {
     pub(crate) choice: NetworkChoice,
+    /// The local endpoints, which a network port must not take.
+    pub(crate) local: Listen,
     pub(crate) files: Option<NetworkSecurity>,
     pub(crate) interfaces: Interfaces,
     pub(crate) retry: Backoff,
@@ -79,6 +91,11 @@ pub(crate) struct NetSetup {
 /// The network's state on the control thread.
 pub(crate) struct NetCtl {
     choice: NetworkChoice,
+    local: Listen,
+    /// The setting of a [`NetworkChoice::FromSettings`] network and where it is kept.
+    settings: NetSettings,
+    store: Option<NetStore>,
+    files: Option<NetworkSecurity>,
     /// The server key pair, once one exists: outgoing rig links use it on or off.
     pub(crate) keys: Option<KeyPair>,
     /// `None` without key files (in-process daemons): no client keys at all.
@@ -104,7 +121,19 @@ impl NetCtl {
     /// read when it is off (it then exists only once the network was on).
     pub(crate) fn new(s: NetSetup) -> Result<(Self, Vec<Damage>), StartError> {
         let mut damage = Vec::new();
-        let on = matches!(s.choice, NetworkChoice::Fixed(_));
+        let (store, settings) = match &s.choice {
+            NetworkChoice::FromSettings { store } => {
+                let (store, settings, d) = NetStore::load(store.clone());
+                damage.extend(d);
+                (Some(store), settings)
+            }
+            NetworkChoice::Off | NetworkChoice::Fixed(_) => (None, NetSettings::default()),
+        };
+        let on = match &s.choice {
+            NetworkChoice::Fixed(_) => true,
+            NetworkChoice::FromSettings { .. } => settings.enabled,
+            NetworkChoice::Off => false,
+        };
         let mut keys = None;
         let mut authorized = None;
         let refused = match &s.files {
@@ -143,15 +172,21 @@ impl NetCtl {
             None => RefusedList::default(),
         };
         let retry = s.retry;
+        let server_key = keys.as_ref().map(|k| k.public);
         Ok((
             Self {
                 choice: s.choice,
+                local: s.local,
+                settings,
+                store,
+                files: s.files,
                 keys,
                 authorized,
                 refused,
                 view: NetView {
                     status: Arc::new(Mutex::new(NetStatus::Off)),
                     advertised_as: Arc::new(Mutex::new(None)),
+                    server_key: Arc::new(Mutex::new(server_key)),
                     #[cfg(feature = "fault-injection")]
                     fault: Arc::new(Mutex::new(None)),
                 },
@@ -172,6 +207,15 @@ impl NetCtl {
         ))
     }
 
+    /// The host's interfaces a network could bind, loopback left out.
+    pub(crate) fn interfaces(&self) -> Vec<ac2_proto::model::NetInterface> {
+        self.interfaces
+            .list()
+            .into_iter()
+            .filter(|i| !i.addrs.is_empty() && !i.addrs.iter().all(std::net::IpAddr::is_loopback))
+            .collect()
+    }
+
     pub(crate) fn view(&self) -> NetView {
         self.view.clone()
     }
@@ -185,11 +229,151 @@ impl NetCtl {
     }
 
     /// The setting when the network is on.
-    pub(crate) fn listen(&self) -> Option<&NetListen> {
+    pub(crate) fn listen(&self) -> Option<NetListen> {
         match &self.choice {
             NetworkChoice::Off => None,
-            NetworkChoice::Fixed(l) => Some(l),
+            NetworkChoice::Fixed(l) => Some(l.clone()),
+            NetworkChoice::FromSettings { .. } => self.settings.enabled.then(|| NetListen {
+                bind: self.settings.bind.clone(),
+                port: NetPort::Port(self.settings.port),
+            }),
         }
+    }
+
+    /// The setting as `server.info` reports it.
+    pub(crate) fn setting(&self) -> NetSetting {
+        match (&self.choice, self.listen()) {
+            (NetworkChoice::Fixed(l), _) => NetSetting::Fixed {
+                listen: intended(l).0,
+            },
+            (_, Some(l)) => NetSetting::On {
+                bind: l.bind,
+                port: self.settings.port,
+            },
+            (_, None) => NetSetting::Off,
+        }
+    }
+
+    /// Whether the setting outlives a restart.
+    pub(crate) fn saved(&self) -> NetSaved {
+        self.store.as_ref().map_or(
+            NetSaved::NotSaved {
+                reason: NotSavedReason::NoStore,
+            },
+            NetStore::saved_state,
+        )
+    }
+
+    /// What `State.server` shows.
+    pub(crate) fn summary(&self) -> ServerSummary {
+        let status = self.status();
+        ServerSummary {
+            status: status.kind(),
+            ctrl: match status {
+                NetStatus::Listening { ctrl, .. } => Some(ctrl),
+                _ => None,
+            },
+            port: self.listen().and_then(|l| match l.port {
+                NetPort::Port(p) => Some(p),
+                NetPort::Any => None,
+            }),
+            fingerprint: self.keys.as_ref().map(|k| k.public.fingerprint()),
+        }
+    }
+
+    /// `server.network`: the new setting in force at once, kept, and the listener turned on,
+    /// moved or off to match. `Ok(true)` when the server key was created by it.
+    pub(crate) fn set(
+        &mut self,
+        enabled: bool,
+        bind: Option<NetBind>,
+        port: Option<u16>,
+        outbox: &Outbox,
+        now: Instant,
+    ) -> Result<bool, ProtoError> {
+        match &self.choice {
+            NetworkChoice::Fixed(l) => {
+                return Err(crate::util::refused(format!(
+                    "the network is fixed by ac2d --listen {}; restart ac2d without --listen                      to change it",
+                    intended(l).0
+                )));
+            }
+            NetworkChoice::Off => {
+                return Err(crate::util::perr(
+                    ac2_proto::ErrorCode::Unsupported,
+                    "this daemon serves in-process only: it has no network to turn on",
+                ));
+            }
+            NetworkChoice::FromSettings { .. } => {}
+        }
+        let new = NetSettings {
+            enabled,
+            bind: bind.unwrap_or_else(|| self.settings.bind.clone()),
+            port: port.unwrap_or(self.settings.port),
+        };
+        check_port(new.port, &self.local).map_err(|e| crate::util::invalid(e.0))?;
+        if let NetBind::Interface { name } = &new.bind
+            && (name.is_empty() || name.chars().any(char::is_control))
+        {
+            return Err(crate::util::invalid("an interface name must not be empty"));
+        }
+        let created = enabled && self.ensure_keys()?;
+        let old = std::mem::replace(&mut self.settings, new.clone());
+        if let Some(store) = &mut self.store {
+            store.save(&new);
+        }
+        let moved = old.bind != new.bind || old.port != new.port;
+        match (old.enabled, enabled) {
+            (_, false) => {
+                self.detach(outbox, true);
+                self.set_status(NetStatus::Off);
+                // A detach the pipe refused is sent again by the tick.
+                self.due = self.bound.as_ref().map(|_| now);
+            }
+            (true, true) if !moved => {}
+            (was_on, true) => {
+                if was_on {
+                    self.detach(outbox, false);
+                }
+                self.delay = self.retry.first;
+                if self.bound.is_some() {
+                    self.due = Some(now);
+                } else {
+                    self.attempt(outbox, now);
+                }
+            }
+        }
+        Ok(created)
+    }
+
+    /// Loads or creates the server key and the authorized-clients file before the first
+    /// enable. `Ok(true)`: the key is new.
+    fn ensure_keys(&mut self) -> Result<bool, ProtoError> {
+        if self.keys.is_some() {
+            return Ok(false);
+        }
+        let Some(f) = &self.files else {
+            return Ok(false);
+        };
+        let fail = |e: keys::KeyFileError| crate::util::internal(e.to_string());
+        let (kp, d) = keys::load_or_create_server_keys(&f.server_key_file).map_err(fail)?;
+        d.iter().for_each(Damage::log);
+        if let Some(a) = &self.authorized
+            && !f.authorized_clients_file.exists()
+        {
+            let (list, d) =
+                keys::load_or_create_authorized(&f.authorized_clients_file).map_err(fail)?;
+            d.iter().for_each(Damage::log);
+            a.handle.set(list);
+        }
+        tracing::info!(
+            "server key {} (fingerprint {}) created",
+            kp.public.to_z85(),
+            kp.public.fingerprint()
+        );
+        *lock(&self.view.server_key) = Some(kp.public);
+        self.keys = Some(kp);
+        Ok(true)
     }
 
     pub(crate) fn advertised_as(&self) -> Option<String> {
@@ -232,7 +416,8 @@ impl NetCtl {
             return;
         };
         if b.detaching {
-            self.detach(outbox);
+            let off = b.off;
+            self.detach(outbox, off);
             // Bound again only after the port is let go; a new bind in between would only
             // find it in use.
             self.due = Some(now + self.retry.first);
@@ -254,7 +439,7 @@ impl NetCtl {
                 let reason = r.err().unwrap_or(NetReason::AddressMissing);
                 tracing::warn!("network: the bound address went away ({reason}); rebinding");
                 self.set_status(NetStatus::Waiting { reason });
-                self.detach(outbox);
+                self.detach(outbox, false);
                 // The closing pair needs a moment to let go of the port.
                 self.delay = self.retry.first;
                 self.due = Some(now + self.retry.first);
@@ -264,7 +449,10 @@ impl NetCtl {
 
     /// Binds a new pair and attaches it; on failure `Waiting`, retried.
     pub(crate) fn attempt(&mut self, outbox: &Outbox, now: Instant) {
-        let Some(l) = self.listen().cloned() else {
+        if self.bound.is_some() {
+            return;
+        }
+        let Some(l) = self.listen() else {
             self.set_status(NetStatus::Off);
             return;
         };
@@ -305,6 +493,7 @@ impl NetCtl {
                     epoch,
                     host,
                     detaching: false,
+                    off: false,
                 });
                 self.delay = self.retry.first;
                 self.due = Some(now + self.retry.first);
@@ -326,16 +515,18 @@ impl NetCtl {
     }
 
     /// Detaches the pair in band, after everything queued before; a refused detach stays
-    /// bound, marked, and is sent again at the next tick.
-    fn detach(&mut self, outbox: &Outbox) {
+    /// bound, marked, and is sent again at the next tick. `off`: the network is turned off,
+    /// and the pair's peers are told so before it closes.
+    fn detach(&mut self, outbox: &Outbox, off: bool) {
         self.stop_advert();
         let Some(b) = &mut self.bound else {
             return;
         };
-        if outbox.detach(b.epoch) {
+        if outbox.detach(b.epoch, off) {
             self.bound = None;
         } else {
             b.detaching = true;
+            b.off |= off;
         }
     }
 
@@ -463,9 +654,11 @@ fn advertise(
 pub(crate) fn intended(l: &NetListen) -> (String, String) {
     let host = match &l.bind {
         crate::network::NetBind::All => "*".to_owned(),
-        crate::network::NetBind::Interface(i) => i.clone(),
-        crate::network::NetBind::Addr(std::net::IpAddr::V6(a)) => format!("[{a}]"),
-        crate::network::NetBind::Addr(a) => a.to_string(),
+        NetBind::Interface { name } => name.clone(),
+        NetBind::Addr {
+            addr: std::net::IpAddr::V6(a),
+        } => format!("[{a}]"),
+        NetBind::Addr { addr } => addr.to_string(),
     };
     match l.port {
         NetPort::Port(p) => (

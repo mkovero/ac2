@@ -174,7 +174,9 @@ fn an_interface_is_waited_for_and_followed_while_it_comes_and_goes() {
     };
     let mut cfg = net_config(manual_rig(), security(dir.path(), &laptop));
     cfg.network = NetworkChoice::Fixed(NetListen {
-        bind: NetBind::Interface("stage0".into()),
+        bind: NetBind::Interface {
+            name: "stage0".into(),
+        },
         port: NetPort::Any,
     });
     let list = Arc::clone(&present);
@@ -263,7 +265,9 @@ fn a_taken_port_waits_and_binds_once_it_is_free() {
     };
     let mut cfg = net_config(manual_rig(), security(dir.path(), &laptop));
     cfg.network = NetworkChoice::Fixed(NetListen {
-        bind: NetBind::Addr(IpAddr::V4(Ipv4Addr::LOCALHOST)),
+        bind: NetBind::Addr {
+            addr: IpAddr::V4(Ipv4Addr::LOCALHOST),
+        },
         port: NetPort::Port(port),
     });
     cfg.net_retry = FAST;

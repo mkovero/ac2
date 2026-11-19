@@ -92,6 +92,7 @@ impl Command {
             Self::RecList => "rec.list",
             Self::SessionReplay { .. } => "session.replay",
             Self::ServerInfo => "server.info",
+            Self::ServerNetwork { .. } => "server.network",
             Self::ServerAuthorize { .. } => "server.authorize",
             Self::ServerRevoke { .. } => "server.revoke",
             Self::AuthAdmitRig { .. } => "auth.admit_rig",

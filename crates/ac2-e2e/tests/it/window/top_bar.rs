@@ -131,11 +131,13 @@ fn top_bar_never_overlaps() -> R {
         armed: true,
         firing: false,
     })?;
-    // A client on the rig's own host has only a routing tag for an id: named by the rig.
-    assert!(rig.cli.client_id().is_local());
+    // A client on the rig's own host has only a routing tag for an id: named by the rig,
+    // which saw it connect locally.
     let holder = "held by an app on Simulated rig".to_owned();
     step_until(&mut h, "armed by the other client", |a| {
-        a.state.daemon().is_some_and(|s| s.generator.armed)
+        a.state
+            .daemon()
+            .is_some_and(|s| s.generator.armed && s.generator.owner_local)
     });
     for width in [2400.0, 1600.0, 1290.0, 1100.0, 900.0, 760.0, 640.0] {
         h.set_size(egui::vec2(width, 800.0));

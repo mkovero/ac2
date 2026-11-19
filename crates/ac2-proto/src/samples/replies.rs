@@ -272,16 +272,8 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
         Ok(ReplyBody::SourceState(Box::new(
             super::remote::source_state(),
         ))),
-        Ok(ReplyBody::Server(ServerInfo {
-            mode: ServerMode::Local {
-                ctrl: "ipc:///run/user/1000/ac2/ctrl.sock".into(),
-            },
-            recording_dir: None,
-        })),
-        Ok(ReplyBody::Server(ServerInfo {
-            mode: ServerMode::Embedded,
-            recording_dir: None,
-        })),
+        Ok(ReplyBody::Server(server_info_off())),
+        Ok(ReplyBody::Server(server_info_fixed())),
         Err(ProtoError {
             code: ErrorCode::Conflict,
             msg: "state moved".into(),

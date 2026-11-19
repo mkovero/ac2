@@ -147,7 +147,7 @@ pub enum ConnEvent {
     /// daemon's server info or why not.
     Server {
         what: Option<String>,
-        result: Result<ac2_proto::model::ServerInfo, String>,
+        result: Result<Box<ac2_proto::model::ServerInfo>, String>,
     },
     /// The Leq history of SPL meter `meas` as the daemon rebuilt it from the meter's log
     /// ([`Request::LeqBackfill`] number `ask`).

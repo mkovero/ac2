@@ -15,17 +15,7 @@ use ac2_zmq::{AuthorizedHandle, KeyPair, SecureContext, Socket, SocketType};
 
 use crate::config::{DEFAULT_PORT, Listen, ListenError, tcp_host_port};
 
-/// What the network binds to.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum NetBind {
-    /// Every IPv4 interface (`tcp://*`).
-    All,
-    /// One interface by name, resolved by the daemon to its address at each bind: its first
-    /// IPv4 address, else its first global IPv6 one.
-    Interface(String),
-    /// One address of this host.
-    Addr(IpAddr),
-}
+pub use ac2_proto::model::{NetBind, NetInterface, NetReason, NetStatus};
 
 /// The network's ctrl port; data is on the next one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,9 +62,10 @@ impl NetListen {
         }
         let bind = match host {
             "*" | "0.0.0.0" => NetBind::All,
-            h => h
-                .parse()
-                .map_or_else(|_| NetBind::Interface(h.to_owned()), NetBind::Addr),
+            h => h.parse().map_or_else(
+                |_| NetBind::Interface { name: h.to_owned() },
+                |addr| NetBind::Addr { addr },
+            ),
         };
         Ok(Self {
             bind,
@@ -86,81 +77,18 @@ impl NetListen {
 /// Whether and how the daemon serves the network.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NetworkChoice {
-    /// Local only.
+    /// Local only, for good: `server.network` is refused (in-process daemons).
     Off,
-    /// Fixed for the daemon's life (`ac2d --listen`).
+    /// Fixed for the daemon's life (`ac2d --listen`): `server.network` is refused and the
+    /// settings file neither read nor written.
     Fixed(NetListen),
-}
-
-/// Why the network is not listening.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum NetReason {
-    /// Another listener holds the port.
-    AddressInUse,
-    /// No interface of that name on this host.
-    InterfaceMissing,
-    /// The address (or any usable address of the interface) is not on this host.
-    AddressMissing,
-    /// The ZAP handler that authenticates the network's clients stopped.
-    ZapFailed,
-    /// No server key to serve CURVE with (no key files: an in-process or ephemeral daemon).
-    NoServerKey,
-    /// The I/O thread could not be handed the pair (its internal pipe stayed full).
-    NotHandedOver,
-    /// Anything else.
-    Other {
-        /// What failed.
-        detail: String,
+    /// As `server.network` sets it, kept in `store` (`ac2_paths::network_settings`) across
+    /// restarts; `None` keeps it in memory only. A missing, damaged or other-version file
+    /// means off.
+    FromSettings {
+        /// The settings file.
+        store: Option<std::path::PathBuf>,
     },
-}
-
-impl fmt::Display for NetReason {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::AddressInUse => f.write_str("the port is in use"),
-            Self::InterfaceMissing => f.write_str("no such interface"),
-            Self::AddressMissing => f.write_str("the address is not on this host"),
-            Self::ZapFailed => f.write_str("the authentication handler stopped"),
-            Self::NoServerKey => f.write_str("no server key"),
-            Self::NotHandedOver => f.write_str("the I/O thread did not take the network sockets"),
-            Self::Other { detail } => f.write_str(detail),
-        }
-    }
-}
-
-/// How the network is doing.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum NetStatus {
-    /// Not served.
-    Off,
-    /// Bound: the endpoints as bound.
-    Listening {
-        /// Ctrl endpoint.
-        ctrl: String,
-        /// Data endpoint.
-        data: String,
-    },
-    /// Not bound yet; retried.
-    Waiting {
-        /// Why.
-        reason: NetReason,
-    },
-    /// Was bound and failed; retried with a new context.
-    Failed {
-        /// Why.
-        reason: NetReason,
-    },
-}
-
-/// One interface of the host.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct NetInterface {
-    /// OS name (`eth0`, `en0`, `Ethernet 2`).
-    pub name: String,
-    /// Its addresses.
-    pub addrs: Vec<IpAddr>,
-    /// Operationally up.
-    pub up: bool,
 }
 
 /// Lists the host's interfaces; injectable so tests make interfaces appear and vanish.
@@ -288,15 +216,15 @@ fn global_v6(a: &IpAddr) -> bool {
 pub(crate) fn resolve(bind: &NetBind, ifs: &[NetInterface]) -> Result<Host, NetReason> {
     match bind {
         NetBind::All => Ok(Host::Any),
-        NetBind::Addr(a) if a.is_unspecified() => Ok(Host::Addr(*a)),
-        NetBind::Addr(a) => {
+        NetBind::Addr { addr: a } if a.is_unspecified() => Ok(Host::Addr(*a)),
+        NetBind::Addr { addr: a } => {
             if ifs.iter().any(|i| i.addrs.contains(a)) {
                 Ok(Host::Addr(*a))
             } else {
                 Err(NetReason::AddressMissing)
             }
         }
-        NetBind::Interface(name) => {
+        NetBind::Interface { name } => {
             let i = ifs
                 .iter()
                 .find(|i| i.name == *name)
@@ -446,19 +374,25 @@ mod tests {
     fn an_interface_resolves_to_its_first_ipv4_else_a_global_ipv6() {
         let r = |b: NetBind| resolve(&b, &ifs());
         assert_eq!(
-            r(NetBind::Interface("eth0".into())),
+            r(NetBind::Interface {
+                name: "eth0".into()
+            }),
             Ok(Host::Addr("10.0.0.2".parse().unwrap()))
         );
         assert_eq!(
-            r(NetBind::Interface("wg0".into())),
+            r(NetBind::Interface { name: "wg0".into() }),
             Ok(Host::Addr("2001:db8::9".parse().unwrap()))
         );
         assert_eq!(
-            r(NetBind::Interface("eth9".into())),
+            r(NetBind::Interface {
+                name: "eth9".into()
+            }),
             Err(NetReason::InterfaceMissing)
         );
         assert_eq!(
-            r(NetBind::Addr("10.0.0.3".parse().unwrap())),
+            r(NetBind::Addr {
+                addr: "10.0.0.3".parse().unwrap()
+            }),
             Err(NetReason::AddressMissing)
         );
         assert_eq!(r(NetBind::All), Ok(Host::Any));
@@ -477,13 +411,17 @@ mod tests {
         assert_eq!(
             p("tcp://eth0"),
             Ok(NetListen {
-                bind: NetBind::Interface("eth0".into()),
+                bind: NetBind::Interface {
+                    name: "eth0".into()
+                },
                 port: NetPort::Port(DEFAULT_PORT)
             })
         );
         assert_eq!(
             p("tcp://[::1]:7").map(|l| l.bind),
-            Ok(NetBind::Addr("::1".parse().unwrap()))
+            Ok(NetBind::Addr {
+                addr: "::1".parse().unwrap()
+            })
         );
         assert!(p("ipc:///x").is_err());
         assert!(p("tcp://:5").is_err());

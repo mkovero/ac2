@@ -258,6 +258,7 @@ impl Inner {
             connected: now,
             generator: Some(GenSummary {
                 owner: g.owner.clone(),
+                owner_local: g.owner_local,
                 armed: g.armed,
                 firing: g.firing,
             }),

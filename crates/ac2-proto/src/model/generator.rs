@@ -164,6 +164,9 @@ pub struct GenAudit {
 pub struct Generator {
     /// Lease holder.
     pub owner: Option<ClientId>,
+    /// The lease holder is connected on the rig's own host (the local pair), as the daemon
+    /// saw its connection: an id never says it. `false` without a holder.
+    pub owner_local: bool,
     /// Armed.
     pub armed: bool,
     /// Emitting.

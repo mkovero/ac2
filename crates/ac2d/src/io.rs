@@ -226,13 +226,17 @@ impl Slots {
 }
 
 /// Ends the network pair: its peers (and their interest) go now, its sockets and context
-/// on a closer thread.
-fn detach(n: Net, interest: &Interest) {
+/// on a closer thread. `off`: the network was turned off, which its peers are told first;
+/// the pair's linger lets that leave before it closes.
+fn detach(n: Net, interest: &Interest, off: bool) {
     let Net {
         epoch,
         pair,
         mut peers,
     } = n;
+    if off {
+        peers.notify_all(&pair.data, ac2_proto::flow::FlowNotice::NetworkOff);
+    }
     peers.drop_all(interest, "the network was detached");
     crate::network::close(pair);
     tracing::info!("network pair {} detached", epoch.0);
@@ -321,7 +325,7 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
             tracing::error!("{e}: closing the network sockets; local clients are served on");
             let epoch = n.epoch;
             if let Some(n) = net.take() {
-                detach(n, interest);
+                detach(n, interest, false);
             }
             let _ = to_control.send(ControlMsg::NetFailed {
                 epoch,
@@ -516,7 +520,7 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
                                 epoch.0,
                                 old.epoch.0
                             );
-                            detach(old, interest);
+                            detach(old, interest, false);
                         }
                         if let Some(a) = attach.take(epoch) {
                             tracing::info!("network pair {} attached", epoch.0);
@@ -538,11 +542,14 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
                         }
                     }
                     TAG_DETACH => {
-                        if let Some(epoch) = epoch_of(&msg)
+                        let (Some(e), Some(off)) = (msg.first(), msg.get(1)) else {
+                            continue;
+                        };
+                        if let Some(epoch) = epoch_of(std::slice::from_ref(e))
                             && net.as_ref().is_some_and(|n| n.epoch == epoch)
                             && let Some(n) = net.take()
                         {
-                            detach(n, interest);
+                            detach(n, interest, off.first() == Some(&1));
                         }
                     }
                     TAG_STOP => stop = true,

@@ -13,7 +13,7 @@ import zlib
 
 import msgpack
 
-PROTO_VERSION = 92
+PROTO_VERSION = 93
 MAX_HEADER_BYTES = 8192
 MAX_N = 1 << 16
 MAX_ARRAYS = 12
@@ -48,7 +48,7 @@ DATA_WINDOW_MIN = 20 * 1024
 DATA_WINDOW_MAX = 256 * 1024
 FRAME_CHARGE_MIN = 64
 EVENT_BOUND = 256
-NOTICES = ("resync_required", "rejoin")
+NOTICES = ("resync_required", "rejoin", "network_off")
 _DATA_UP = {
     "window": {"bytes"},
     "subscribe": {"sub"},
@@ -289,7 +289,7 @@ META = {
                ("window", ("opt", [("capture_start", None), ("offset", None), ("psr", None),
                                    ("loopback", None), ("stimulus", None)]))],
     "ka": [("rev", None), ("daemon_wall_ns", None), ("timing", _TIMING_STATE),
-           ("generator", [("owner", None), ("armed", None), ("firing", None)]),
+           ("generator", [("owner", None), ("owner_local", None), ("armed", None), ("firing", None)]),
            ("health", [("host", None), ("cpu", None),
                        ("audio", ("opt", [("load", None), ("peak", None), ("session_load", None),
                                           ("session_peak", None), ("xruns", None)]))])],

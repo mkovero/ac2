@@ -572,11 +572,12 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
             for l in ac2_scene::rig::server_lines(info) {
                 ui.label(RichText::new(l).color(ch.text));
             }
-            if let ac2_proto::model::ServerMode::Network {
+            if let ac2_proto::model::NetworkServer {
+                server_key: Some(_),
                 refused,
                 authorized,
                 ..
-            } = &info.mode
+            } = &info.network
             {
                 let is_rig = |n: &str| authorized.iter().any(|a| a.name == n && a.rig.is_some());
                 for (title, rigs) in [

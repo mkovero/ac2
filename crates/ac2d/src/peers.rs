@@ -585,6 +585,14 @@ impl Peers {
         }
     }
 
+    /// Tells every peer `n`, ahead of anything still waiting for credit; a peer whose
+    /// bound is full misses it (its app then reports a lost connection).
+    pub(crate) fn notify_all(&mut self, sock: &Socket, n: FlowNotice) {
+        for p in self.map.values_mut() {
+            let _ = p.notice(sock, n);
+        }
+    }
+
     /// Drops every peer: their pair is closing, and with them what they subscribed.
     pub(crate) fn drop_all(&mut self, interest: &Interest, why: &str) {
         let rids: Vec<Vec<u8>> = self.map.keys().cloned().collect();

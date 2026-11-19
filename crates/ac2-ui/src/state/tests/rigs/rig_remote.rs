@@ -6,7 +6,7 @@ use super::*;
 use ac2_proto::model::{
     Anchor, AuthorizedClient, CalStatus, CurveChoice, InputKind, InputSetup, PeerClock,
     PeerRelation, REMOTE_BASE, RemoteAudio, RemoteInput, RemoteInputStatus, RemoteLink, RemoteRig,
-    RemoteState, ServerInfo, ServerMode,
+    RemoteState, ServerInfo,
 };
 use ac2_proto::units::{Seconds, WallNs};
 use ac2_scene::remote_inputs as words;
@@ -15,24 +15,25 @@ const KEY_A: &str = "rq:rM>}U?@Lns47E1%kR.o@n%FcmmsL/@{H8]yf7";
 const KEY_B: &str = "Yne@$w-vo<fVvi]a<NY6T1ed:M$fCG*[IaLV{hID";
 
 fn network(key: &str, authorized: Vec<AuthorizedClient>) -> ServerInfo {
-    ServerInfo {
-        mode: ServerMode::Network {
-            ctrl: "tcp://0.0.0.0:7700".into(),
-            data: "tcp://0.0.0.0:7701".into(),
-            server_key: key.into(),
-            fingerprint: "ab12".into(),
-            advertised_as: None,
-            authorized,
-            refused: Vec::new(),
-        },
-        recording_dir: None,
-    }
+    let mut s = local_only();
+    s.network.status = ac2_proto::model::NetStatus::Listening {
+        ctrl: "tcp://0.0.0.0:7700".into(),
+        data: "tcp://0.0.0.0:7701".into(),
+    };
+    s.network.server_key = Some(key.into());
+    s.network.fingerprint = Some("ab12".into());
+    s.network.authorized = authorized;
+    s
+}
+
+fn local_only() -> ServerInfo {
+    ac2_proto::samples::server_info_off()
 }
 
 fn server(info: ServerInfo) -> ConnEvent {
     ConnEvent::Server {
         what: None,
-        result: Ok(info),
+        result: Ok(Box::new(info)),
     }
 }
 
@@ -156,16 +157,7 @@ fn picking_another_rigs_input_pairs_both_rigs_and_reopens_the_session() {
 #[test]
 fn the_dialog_refuses_in_words() {
     let mut t = paired_ready();
-    to(
-        &mut t,
-        PUPU,
-        server(ServerInfo {
-            mode: ServerMode::Local {
-                ctrl: "ipc:///run/ac2".into(),
-            },
-            recording_dir: None,
-        }),
-    );
+    to(&mut t, PUPU, server(local_only()));
     cmd(CommandId::AddRemoteInput, &mut t);
     assert_eq!(
         texts(&t),
@@ -192,12 +184,7 @@ fn the_dialog_refuses_in_words() {
     );
     assert!(texts(&t)[0].contains(&format!("already authorizes an app named {taken}")));
     // This rig on its own computer only.
-    t.conn(server(ServerInfo {
-        mode: ServerMode::Local {
-            ctrl: "ipc:///run/ac2".into(),
-        },
-        recording_dir: None,
-    }));
+    t.conn(server(local_only()));
     assert_eq!(texts(&t)[0], words::this_rig_local(&me));
     key(&mut t, "Escape");
     assert!(

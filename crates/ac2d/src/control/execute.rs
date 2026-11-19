@@ -89,6 +89,7 @@ impl Control {
                 self.out.lease = None;
                 let mut g = self.store.state().generator.clone();
                 g.owner = None;
+                g.owner_local = false;
                 g.armed = false;
                 g.firing = false;
                 self.audit(&mut g, GenAction::Release, Some(peer));
@@ -99,7 +100,12 @@ impl Control {
                 confirm_raise,
             } => self.gen_ceiling(peer, ceiling, confirm_raise),
             Command::SessionOutputs { outputs } => self.session_outputs(outputs),
-            Command::ServerInfo => Ok(ReplyBody::Server(self.server_info())),
+            Command::ServerInfo => Ok(ReplyBody::Server(self.server_info(peer))),
+            Command::ServerNetwork {
+                enabled,
+                bind,
+                port,
+            } => self.server_network(peer, enabled, bind, port),
             Command::ServerAuthorize { name, key } => self.server_authorize(peer, &name, &key),
             Command::ServerRevoke { name } => self.server_revoke(peer, &name),
             Command::AuthAdmitRig { key, rig_id, name } => {

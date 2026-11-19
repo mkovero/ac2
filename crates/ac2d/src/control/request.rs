@@ -56,6 +56,7 @@ impl Control {
                 timing: st.timing.state,
                 generator: GenSummary {
                     owner: st.generator.owner.clone(),
+                    owner_local: st.generator.owner_local,
                     armed: st.generator.armed,
                     firing: st.generator.firing,
                 },

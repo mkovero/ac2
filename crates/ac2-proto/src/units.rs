@@ -184,12 +184,6 @@ impl ClientId {
     pub fn local(tag: &str) -> Self {
         Self(format!("{}{tag}", Self::LOCAL_PREFIX))
     }
-
-    /// Whether the daemon assigned this id (see [`ClientId::local`]) rather than an
-    /// operator naming the client's key.
-    pub fn is_local(&self) -> bool {
-        self.0.starts_with(Self::LOCAL_PREFIX)
-    }
 }
 
 /// Stimulus lease token: 128 random bits, carried as a 16-byte msgpack `bin` (big-endian).

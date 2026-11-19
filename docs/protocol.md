@@ -31,7 +31,7 @@ keepalives to each connection as its credit allows (§5.8).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 92`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 93`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -193,6 +193,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `rec.list` | — | `recordings` | |
 | `session.replay` | `recording: RecordingRef`, `pace: realtime \| fast` | `session` | |
 | `server.info` | — | `server` | |
+| `server.network` | `enabled: bool`, `bind: NetBind \| nil`, `port: u16 \| nil` | `server` | local clients only |
 | `server.authorize` | `name`, `key` (Z85) | `server` | |
 | `server.revoke` | `name` | `server` | |
 | `auth.admit_rig` | `key` (Z85), `rig_id: RigId`, `name` | `server` | |
@@ -255,7 +256,8 @@ set), `cues` ([`RigCue`] {`meas`, `subject`:
 `reason`, `at`: `WallNs`}: state files found damaged at this start, set aside and replaced
 by their previous copy or a default; empty on a sound start, kept until the daemon restarts).
 `StateFile` is `autosave`, `trace`, `spl_log`, `band_log`, `working`, `rig_settings`,
-`rig_logs`, `calibrations`, `server_key`, `authorized_clients` or `rig_id`. `CueSubject` is
+`rig_logs`, `calibrations`, `server_key`, `authorized_clients`, `rig_id` or
+`network_settings`. `CueSubject` is
 tagged by `type`: `meter` (the whole meter: the worst state of its limits), `window`
 {duration, weighting}, `peak` {quantity}, `band` {duration, weighting, nominal},
 `predicted`. `CueState` is `ok` (under the limit, or none), `near`, `over` or `fault` (the rig
@@ -357,24 +359,54 @@ anything else fails to decode), `args`: [`OscArg`], `append_level`: bool (append
 level, dB SPL, as a trailing float)}; `OscArg` = {`type`: `int` \| `float` \| `str`, `value`:
 i32 \| f32 \| str}.
 
-**Server (`server.*`).** `server.info` → `ServerInfo`: `mode` (tagged by `type`):
-`embedded` (in its client's process; only test daemons, the app spawns `ac2d`) \| `local` {`ctrl`} (this machine only; the OS user is the
-trust boundary, there are no client keys) \| `network` {`ctrl`, `data`, `server_key` (Z85),
-`fingerprint`, `advertised_as`: string | nil (the mDNS name), `authorized`:
-[`AuthorizedClient` {`name`, `key`, `fingerprint`, `rig`: RigId \| nil}], `refused`: [`RefusedKey` {`key`:
-string | nil (nil: not CURVE), `fingerprint`: string | nil, `address`, `count`, `last_at`:
-WallNs}], newest first, at most 32}; `recording_dir`: string | nil (where `rec.start`
+**Server (`server.*`).** `server.info` → `ServerInfo` {`local`, `network`, `interfaces`,
+`recording_dir`}. `local`: `LocalServer` (tagged by `type`) \| nil: `embedded` (in its
+client's process; only test daemons, the app spawns `ac2d`) \| `local` {`ctrl`, `data`} (the
+pair served for the daemon's whole life, this machine only; the OS user is the trust
+boundary); nil to a network client, which has no use for this host's local endpoints.
+`network`: `NetworkServer` {`setting` (`NetSetting`, tagged by `type`: `off` \| `on`
+{`bind`: `NetBind`, `port`} \| `fixed` {`listen`: the `ac2d --listen` address as given}),
+`saved` (`NetSaved`: `saved` \| `not_saved` {`reason`: `store_read_only` \| `no_store` \|
+`write_failed` {`detail`}}: whether the setting outlives a restart), `status` (`NetStatus`:
+`off` \| `listening` {`ctrl`, `data`} \| `waiting` {`reason`} \| `failed` {`reason`}; `reason`
+`NetReason`: `address_in_use` \| `interface_missing` \| `address_missing` \| `zap_failed` \|
+`no_server_key` \| `not_handed_over` \| `other` {`detail`}), `server_key` (Z85) \| nil (made
+at the first turn-on), `fingerprint` \| nil, `advertised_as`: string \| nil (the mDNS name),
+`authorized`: [`AuthorizedClient` {`name`, `key`, `fingerprint`, `rig`: RigId \| nil}],
+`refused`: [`RefusedKey` {`key`: string \| nil (nil: not CURVE), `fingerprint`: string \|
+nil, `address`, `count`, `last_at`: WallNs}], newest first, at most 32}. `NetBind` is tagged
+by `type`: `all` (every IPv4 interface) \| `interface` {`name`} (resolved at each bind: its
+first IPv4 address, else its first global IPv6 one) \| `addr` {`addr`: the address as
+text}. `interfaces`: [`NetInterface` {`name`, `addrs`: [address as text], `up`}], the
+host's interfaces read at each `server.info`, loopback left out; empty to a network
+client. `recording_dir`: string \| nil (where `rec.start`
 records on the daemon host). `server.authorize` adds `key` under `name` to the
 authorized-clients file (atomic write) and to the running handshake check; `server.revoke`
 removes `name`: its requests are `refused` at once and it cannot connect again (a
 connection already up keeps receiving data frames until it drops). A connection is bound to
 the key it authenticated with, so authorizing a different key under a revoked name does not
 let a connection made with the old key act again. Both answer the new
-`server` info; outside network mode they are `unsupported`. A name is 1–64 characters
+`server` info, with the network on or off (the key list is kept either way); an `embedded`
+daemon, which has no key files, answers `unsupported`. A name is 1–64 characters
 without whitespace; `invalid` for a duplicate name or key, a malformed key, revoking an
 unknown name (`not_found`) or the requesting client's own name (`refused`: that would lock
 the operator out). Any authorized client may use them: every authorized client is equally
 trusted.
+
+`server.network` {`enabled`, `bind`, `port`} turns the network listener on or off while the
+daemon runs; a nil `bind` or `port` keeps the one set before (at first `all` and 47820, data
+on the next port). Only a client of the local pair may send it (`refused` over the network:
+a remote app could otherwise cut itself and every other one off); `refused` when `ac2d
+--listen` fixed the network for the daemon's life (`setting` `fixed`), `unsupported` on an
+`embedded` daemon; a port of 0 or 65535 (data needs the next one) is `invalid`. The first
+turn-on makes the server key. Turning on binds a new CURVE pair beside the local one, the
+session untouched: an open session is served to the new pair's clients at once. Turning
+off sends every network data connection the `network_off` notice (§5.8), then closes the
+pair: their subscriptions end and a lease they held runs out as on any lost connection
+(fading out). Turning on at another bind or port moves the pair. The daemon keeps the
+setting in `network.json` beside its other settings (`saved`); a damaged file, or one of
+another version, is set aside (`damaged_files`, kind `network_settings`) and the network
+starts off. Answers the new `server` info; `State.server` follows.
 
 **Remote inputs (`auth.admit_rig`, `rig.peers`, `source.state`).** A rig takes another rig's
 inputs over a link of its own: it connects to the other rig's ctrl and data endpoints under
@@ -393,8 +425,9 @@ times), `inputs`: [`SourceInput` {`channel`, `setup`: `InputSetup` \| nil,
 {`reference`: `MicCurveRef`, `freq`: [f64], `gain_db`: [f64]}}]}}: all of the session an
 admitted rig sees. `rig.peers` sets the rigs this rig takes inputs from: [`RigPeer`
 {`rig`, `name`, `ctrl`, `data`, `key` (the other rig's server key, Z85)}], the whole list,
-kept in the rig settings; the links follow at once. Outside network mode a rig has no key,
-so its links stay `not_networked`.
+kept in the rig settings; the links follow at once. A rig whose network was never turned
+on has no key yet, so its links stay `no_server_key`; once it has one they link with the
+network off too (a link is an outgoing connection).
 
 The stream carries every output of the session: arming routes the generator to
 `settings.outputs` without reopening the stream (same session epoch; running measurements,
@@ -1889,7 +1922,8 @@ math | eq | average | generated | sweep}, `grid_id`, `delay`, `depth`, `cal`, `m
 and `walk`), `captured_unsettled` (captured before the walk measurement was ready),
 `superseded` (a redone or skipped point's capture: kept, out of the walk's average);
 `kind` one of
-`transfer`, `target`, `spectrum`, `rta`, `sweep`), `generator` (`owner`,
+`transfer`, `target`, `spectrum`, `rta`, `sweep`), `generator` (`owner`, `owner_local` (the owner is a client of the local pair, which has
+no name of its own: show it as an app on this rig),
 `armed`, `firing`, `settings`, `ceiling`, `ceiling_bound`, `last_action` {`action`: acquire
 \| force \| arm \| fire \| set \| stop \| release \| expiry \| ceiling_lowered \|
 ceiling_raised, `client`, `at`}), `calibrations` (`CalEntry`:
@@ -1921,7 +1955,7 @@ whose stamps are its sample index; read every 5 s of audio; `stamp_map` (`StampM
 clock, `system = system_ns + (stamp − epoch_stamp_ns)·(1 + ppm·10⁻⁶)`; nil while no stream
 whose stamp clock can be read beside the system clock is open); committed when any changes),
 `remote` (`RemoteState`: `peers` ([RigPeer], as `rig.peers` set them), `rigs`
-([`RemoteRig` {`rig`, `name`, `link` {not_paired | not_networked | connecting | up |
+([`RemoteRig` {`rig`, `name`, `link` {not_paired | no_server_key | connecting | up |
 unreachable{since} | not_admitted | key_changed | other_rig{found}}, `clock`: `PeerClock`
 {`relation` {measuring | agree | not_locked{reason: cross_rate{ppm, over} |
 own_clock{rig, ppm}} | cant_tell{reason: system_clock_unsynced{rig} |
@@ -1955,7 +1989,11 @@ nil`, `log_failures: [LogWriteFailure]`; see §7.3), `recording` (`RecordingRun`
 `walks` ([WalkState]), `walk_plans` ([PlanSpec], the session's copies of the plans its
 walks walk), `sim` (`SimState` | nil: the latest room simulation run or fit), `sim_map`
 (`SimState` | nil: the latest coverage map) and `sim_fit` (`SimFitKept` | nil: the
-absorption fit kept for later runs); none saved with the session (§3.2 *Room simulation*).
+absorption fit kept for later runs); none saved with the session (§3.2 *Room simulation*),
+`server` (`ServerSummary` {`status`: off \| listening \| waiting \| failed, `ctrl` \| nil
+(while listening), `port` \| nil (set to; nil while off), `fingerprint` \| nil}: what every
+client sees of the network, so a change made elsewhere shows at once; details in
+`server.info`).
 
 
 #### 4.1.1 Audio stopped and recovery
@@ -1997,7 +2035,7 @@ samples). Every later recovery reopens the configuration as it then stands.
 `state.snapshot` → `{state, rev, daemon_incarnation, session_epoch}`.
 
 An event is `{rev, kind, payload}`. `kind` is one of `session`, `measurement`, `trace`,
-`generator`, `calibration`, `line_calibration`, `mic`, `inputs`, `outputs`, `spl_log`, `timing`, `clocks`, `remote`, `sweep`, `autosave`, `recording`, `working`, `rig`, `plan`, `walk`, `walk_plan`, `sim`, `sim_fit`. `payload` is the entity's
+`generator`, `calibration`, `line_calibration`, `mic`, `inputs`, `outputs`, `spl_log`, `timing`, `clocks`, `remote`, `sweep`, `autosave`, `recording`, `working`, `rig`, `plan`, `walk`, `walk_plan`, `sim`, `sim_fit`, `server`. `payload` is the entity's
 full new value (`inputs`: {`inputs`, `pairs`}, both whole lists; `outputs`: the whole list;
 `sim`: the `SimState`, which `State.sim` becomes, or `State.sim_map` for a map; `sim_fit`: the `SimFitKept` or nil); for keyed entities (`measurement`, `trace`,
 `calibration`, `line_calibration` (keyed by `LineCalKey`), `mic` (keyed by name), `spl_log`, `plan` and `walk_plan` (keyed by name), `walk` (keyed by
@@ -2223,7 +2261,7 @@ always `i8`).
 | `session_gonio` | `gonio_x`, `gonio_y`: gonio_unit — every pair's 256 points in turn (n = 256 × pairs), `x = (r − l)/√2`, `y = (l + r)/√2` divided by the pair's auto gain (a mono signal is a vertical line, a left-only one leans left), one pair drawn from a random position in each of 256 bins of the frame's samples | `pairs` ([`GonioPairMeta`] {`left`, `right`, `gain_dbfs`: the auto gain, dBFS of the pair magnitude `√(l² + r²)`}) |
 | `preview_gonio` | as `session_gonio`, for the previewed device's declared pairs | as `session_gonio` |
 | `timing` | none | `status` (TimingStatus), `window` {capture_start, offset, psr, loopback, stimulus} |
-| `ka` | none | `rev`, `daemon_wall_ns`, `timing` (TimingState), `generator` {owner, armed, firing}, `health` (`DaemonHealth`, below) |
+| `ka` | none | `rev`, `daemon_wall_ns`, `timing` (TimingState), `generator` {owner, owner_local, armed, firing}, `health` (`DaemonHealth`, below) |
 
 `SourceLoudness` (BS.1770-5 / EBU Tech 3341 and 3342; docs/design/programme-meter.md §6.1):
 `source` (`LoudnessSource`: {`type`: `pair`, `left`, `right`} or {`type`: `input`,
@@ -2382,6 +2420,7 @@ Daemon → client: frames (§5.2), `[evt][event]`, `[ka][frame]` and notices
 |---|---|
 | `resync_required` | events were dropped past the event bound: take a new `state.snapshot` (§4.3) |
 | `rejoin` | the daemon holds nothing for this connection (it was dropped as stalled): send `window` and every subscription again |
+| `network_off` | the rig's network was turned off (`server.network`): this connection is closed next, sent to network connections only; reconnecting is pointless until it is turned on |
 
 Credit:
 

@@ -57,10 +57,11 @@ struct Args {
     /// path; only when named here, never as a fallback).
     #[arg(long, value_name = "NAME")]
     backend: Option<BackendChoice>,
-    /// Also serve the network: ctrl on port (default 47820), data on port+1, CURVE on both;
-    /// IFACE is an interface name, an address or `*`. The local endpoints are served as
-    /// well. An interface or address not there yet, or a port taken, is retried until it
-    /// binds.
+    /// Also serve the network, fixed for this run: ctrl on port (default 47820), data on
+    /// port+1, CURVE on both; IFACE is an interface name, an address or `*`. The local
+    /// endpoints are served as well. An interface or address not there yet, or a port
+    /// taken, is retried until it binds. Without it the network follows the setting turned
+    /// on and off from the app (`server.network`, kept in network.json in the config dir).
     #[arg(long, value_name = "tcp://IFACE[:PORT]", conflicts_with = "ephemeral")]
     listen: Option<String>,
     /// Local ctrl endpoint (ipc:// or tcp://127.0.0.1:port).
@@ -252,7 +253,11 @@ fn listen(args: &Args) -> Result<(Listen, NetworkChoice), String> {
         _ => return Err("give both --ctrl and --data".into()),
     };
     let network = match &args.listen {
-        None => NetworkChoice::Off,
+        // An ephemeral daemon keeps no key to serve a network with.
+        None if args.ephemeral => NetworkChoice::Off,
+        None => NetworkChoice::FromSettings {
+            store: Some(ac2_paths::network_settings()),
+        },
         Some(l) => {
             let l = NetListen::parse(l).map_err(|e| e.to_string())?;
             if let NetPort::Port(p) = l.port {

@@ -604,6 +604,8 @@ pub struct TimingMeta {
 pub struct GenSummary {
     /// Owner.
     pub owner: Option<ClientId>,
+    /// The owner is connected on the rig's own host ([`crate::model::Generator::owner_local`]).
+    pub owner_local: bool,
     /// Armed.
     pub armed: bool,
     /// Firing.

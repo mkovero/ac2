@@ -82,7 +82,8 @@ pub fn source_refusal(rig: &str, why: &SourceRefusal) -> String {
     match why {
         SourceRefusal::Asking => format!("{rig}: asking…"),
         SourceRefusal::LocalOnly => format!(
-            "{rig} serves only this computer: start its ac2d in network mode to give its inputs"
+            "{rig} serves only this computer: turn its network on (Settings › Connection) to \
+             give its inputs"
         ),
         SourceRefusal::NoSession => {
             format!("{rig} has no session: open its audio I/O there first")
@@ -95,13 +96,10 @@ pub fn source_refusal(rig: &str, why: &SourceRefusal) -> String {
     }
 }
 
-/// The add dialog on a rig that listens on its own computer only: it has no key to show
-/// another rig.
+/// The add dialog on a rig without a server key: it has none to show another rig until
+/// its network is first turned on.
 pub fn this_rig_local(rig: &str) -> String {
-    format!(
-        "{rig} listens on this computer only: another rig's input needs its ac2d in network \
-         mode"
-    )
+    format!("{rig} has no server key yet: turn its network on once (Settings › Connection)")
 }
 
 /// The add dialog while this rig has not answered `server.info` yet.
@@ -165,10 +163,10 @@ mod tests {
     fn refusals_say_why_and_what_to_do() {
         assert_eq!(
             source_refusal("ketunkolo", &SourceRefusal::LocalOnly),
-            "ketunkolo serves only this computer: start its ac2d in network mode to give its \
-             inputs"
+            "ketunkolo serves only this computer: turn its network on (Settings › Connection) \
+             to give its inputs"
         );
         assert!(set_on("ketunkolo").starts_with("set on ketunkolo"));
-        assert!(this_rig_local("pupu").contains("network mode"));
+        assert!(this_rig_local("pupu").contains("turn its network on"));
     }
 }

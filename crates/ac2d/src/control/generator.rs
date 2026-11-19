@@ -140,6 +140,7 @@ impl Control {
             self.stop_output();
             let mut g = self.store.state().generator.clone();
             g.owner = None;
+            g.owner_local = false;
             g.armed = false;
             g.firing = false;
             self.audit(&mut g, GenAction::Expiry, owner.as_ref());
@@ -163,6 +164,7 @@ impl Control {
         self.stop_output();
         let mut g = self.store.state().generator.clone();
         g.owner = None;
+        g.owner_local = false;
         g.armed = false;
         g.firing = false;
         self.audit(&mut g, GenAction::Expiry, owner.as_ref());
@@ -213,6 +215,7 @@ impl Control {
             deadline,
         });
         g.owner = Some(client.id().clone());
+        g.owner_local = client.is_local();
         self.audit(&mut g, action, Some(client));
         self.commit(Change::Generator(g));
         Ok(ReplyBody::Lease(self.wire_lease(token)))

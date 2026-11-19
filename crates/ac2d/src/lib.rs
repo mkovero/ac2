@@ -59,6 +59,7 @@ pub mod keys;
 mod leq_history;
 mod leq_log;
 pub mod network;
+mod network_store;
 mod osc;
 mod outbox;
 mod peers;
@@ -175,7 +176,6 @@ pub struct Handle {
     ctrl: String,
     data: String,
     ctx: Context,
-    server_key: Option<PublicKey>,
     net: control::network::NetView,
     tx: Sender<ControlMsg>,
     control: Option<JoinHandle<Ended>>,
@@ -247,7 +247,7 @@ impl Handle {
 
     /// The server's CURVE public key, once one exists (the network was on at least once).
     pub fn server_public_key(&self) -> Option<PublicKey> {
-        self.server_key
+        self.net.server_key()
     }
 
     /// What the network listener is doing now.
@@ -427,6 +427,7 @@ impl Daemon {
         let attach = io::AttachQueue::default();
         let (mut network, damage) = control::network::NetCtl::new(control::network::NetSetup {
             choice: config.network.clone(),
+            local: config.listen.clone(),
             files: config.keys.clone(),
             interfaces: config.interfaces.clone(),
             retry: config.net_retry,
@@ -440,12 +441,14 @@ impl Daemon {
         // The first bind before anyone is told the daemon is up, so a network that can be
         // served is served from the start; one that cannot is retried by control.
         network.attempt(&outbox, std::time::Instant::now());
-        let server_key = network.server_key();
         let net = network.view();
         let server = control::rig::Server {
             local: match &config.listen {
                 Listen::Inproc { .. } => control::rig::LocalSetup::Embedded,
-                Listen::Local { .. } => control::rig::LocalSetup::Local { ctrl: ctrl.clone() },
+                Listen::Local { .. } => control::rig::LocalSetup::Local {
+                    ctrl: ctrl.clone(),
+                    data: data.clone(),
+                },
             },
             network,
         };
@@ -523,7 +526,6 @@ impl Daemon {
             ctrl,
             data,
             ctx,
-            server_key,
             net,
             tx,
             control: Some(control),

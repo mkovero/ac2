@@ -527,6 +527,7 @@ pub fn frames() -> Vec<Frame> {
                 },
                 generator: GenSummary {
                     owner: Some(ClientId("alice".into())),
+                    owner_local: true,
                     armed: true,
                     firing: true,
                 },

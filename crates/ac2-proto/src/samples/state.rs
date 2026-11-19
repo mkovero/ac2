@@ -8,11 +8,24 @@ use crate::units::*;
 /// A network-mode daemon's `server.info`.
 pub fn server_info() -> ServerInfo {
     ServerInfo {
-        mode: ServerMode::Network {
-            ctrl: "tcp://0.0.0.0:47820".into(),
-            data: "tcp://0.0.0.0:47821".into(),
-            server_key: "rq:rM>}U?@Lns47E1%kR.o@n%FcmmsL/@{H8]yf7".into(),
-            fingerprint: "SHA256:3f1c 9a2e 77b0 51d4".into(),
+        local: Some(LocalServer::Local {
+            ctrl: "ipc:///run/user/1000/ac2/ctrl.sock".into(),
+            data: "ipc:///run/user/1000/ac2/data.sock".into(),
+        }),
+        network: NetworkServer {
+            setting: NetSetting::On {
+                bind: NetBind::Interface {
+                    name: "eth0".into(),
+                },
+                port: 47820,
+            },
+            saved: NetSaved::Saved,
+            status: NetStatus::Listening {
+                ctrl: "tcp://192.168.1.20:47820".into(),
+                data: "tcp://192.168.1.20:47821".into(),
+            },
+            server_key: Some("rq:rM>}U?@Lns47E1%kR.o@n%FcmmsL/@{H8]yf7".into()),
+            fingerprint: Some("SHA256:3f1c 9a2e 77b0 51d4".into()),
             advertised_as: Some("foh-rig".into()),
             authorized: vec![
                 AuthorizedClient {
@@ -45,7 +58,73 @@ pub fn server_info() -> ServerInfo {
                 },
             ],
         },
+        interfaces: vec![
+            NetInterface {
+                name: "eth0".into(),
+                addrs: vec![
+                    std::net::IpAddr::from([192, 168, 1, 20]),
+                    std::net::IpAddr::from([0x2001, 0xdb8, 0, 0, 0, 0, 0, 0x20u16]),
+                ],
+                up: true,
+            },
+            NetInterface {
+                name: "wlan0".into(),
+                addrs: Vec::new(),
+                up: false,
+            },
+        ],
         recording_dir: Some("/home/fohtech/.local/share/ac2/recordings".into()),
+    }
+}
+
+/// A local daemon whose network is off, before any key exists.
+pub fn server_info_off() -> ServerInfo {
+    ServerInfo {
+        local: Some(LocalServer::Local {
+            ctrl: "ipc:///run/user/1000/ac2/ctrl.sock".into(),
+            data: "ipc:///run/user/1000/ac2/data.sock".into(),
+        }),
+        network: NetworkServer {
+            setting: NetSetting::Off,
+            saved: NetSaved::NotSaved {
+                reason: NotSavedReason::WriteFailed {
+                    detail: "read-only file system".into(),
+                },
+            },
+            status: NetStatus::Off,
+            server_key: None,
+            fingerprint: None,
+            advertised_as: None,
+            authorized: Vec::new(),
+            refused: Vec::new(),
+        },
+        interfaces: Vec::new(),
+        recording_dir: None,
+    }
+}
+
+/// A rig fixed by `ac2d --listen`, as a network client sees it while it cannot bind.
+pub fn server_info_fixed() -> ServerInfo {
+    ServerInfo {
+        local: None,
+        network: NetworkServer {
+            setting: NetSetting::Fixed {
+                listen: "tcp://10.0.0.2:47820".into(),
+            },
+            saved: NetSaved::NotSaved {
+                reason: NotSavedReason::NoStore,
+            },
+            status: NetStatus::Waiting {
+                reason: NetReason::AddressMissing,
+            },
+            server_key: Some("rq:rM>}U?@Lns47E1%kR.o@n%FcmmsL/@{H8]yf7".into()),
+            fingerprint: Some("SHA256:3f1c 9a2e 77b0 51d4".into()),
+            advertised_as: None,
+            authorized: Vec::new(),
+            refused: Vec::new(),
+        },
+        interfaces: Vec::new(),
+        recording_dir: None,
     }
 }
 
@@ -543,6 +622,17 @@ pub fn state() -> State {
         sim: Some(super::sim::sim_state()),
         sim_map: Some(super::sim::sim_map_state()),
         sim_fit: Some(super::sim::sim_fit_kept()),
+        server: server_summary(),
+    }
+}
+
+/// [`server_info`] in short, as `State.server` has it.
+pub fn server_summary() -> ServerSummary {
+    ServerSummary {
+        status: NetStatusKind::Listening,
+        ctrl: Some("tcp://192.168.1.20:47820".into()),
+        port: Some(47820),
+        fingerprint: Some("SHA256:3f1c 9a2e 77b0 51d4".into()),
     }
 }
 

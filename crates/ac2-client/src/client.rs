@@ -604,6 +604,11 @@ impl Client {
             })?
     }
 
+    /// The rig said it turned its network off and was not heard from since (network only).
+    pub fn network_turned_off(&self) -> bool {
+        self.inner.core.io.network_off()
+    }
+
     /// Ctrl and data messages dropped as malformed by the I/O thread so far.
     pub fn malformed_ctrl(&self) -> u64 {
         self.inner.core.io.malformed.load(Ordering::Relaxed)

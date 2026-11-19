@@ -64,7 +64,9 @@ fn rig(
     };
     let mut cfg = ac2d::DaemonConfig::new(std::sync::Arc::clone(&device), listen, -10.0);
     cfg.network = ac2d::NetworkChoice::Fixed(ac2d::NetListen {
-        bind: ac2d::NetBind::Addr(std::net::Ipv4Addr::LOCALHOST.into()),
+        bind: ac2d::NetBind::Addr {
+            addr: std::net::Ipv4Addr::LOCALHOST.into(),
+        },
         port: ac2d::NetPort::Any,
     });
     cfg.keys = Some(ac2d::NetworkSecurity {

@@ -7,7 +7,7 @@ use crate::common;
 
 use std::time::{Duration, Instant};
 
-use ac2_proto::model::{ServerInfo, ServerMode};
+use ac2_proto::model::{LocalServer, NetStatus, ServerInfo};
 use ac2_proto::{Command, ErrorCode};
 use ac2_zmq::{AuthorizedKeys, Context, CurveClient, KeyPair};
 use ac2d::{Daemon, NetworkSecurity};
@@ -18,12 +18,11 @@ fn info(c: &mut Client) -> ServerInfo {
 }
 
 fn names(s: &ServerInfo) -> Vec<String> {
-    match &s.mode {
-        ServerMode::Network { authorized, .. } => {
-            authorized.iter().map(|a| a.name.clone()).collect()
-        }
-        other => panic!("{other:?}"),
-    }
+    s.network
+        .authorized
+        .iter()
+        .map(|a| a.name.clone())
+        .collect()
 }
 
 #[test]
@@ -54,18 +53,11 @@ fn authorize_a_refused_key_and_revoke_it_over_the_protocol() {
     let mut c = Client::connect_with(&ctx, net_endpoints(&h).0.as_str(), Some(&as_laptop));
 
     let s = info(&mut c);
-    let ServerMode::Network {
-        server_key: key,
-        fingerprint,
-        refused,
-        ..
-    } = &s.mode
-    else {
-        panic!("{s:?}")
-    };
-    assert_eq!(key, &server_key.to_z85());
-    assert_eq!(fingerprint, &server_key.fingerprint());
-    assert!(refused.is_empty());
+    let n = &s.network;
+    assert!(matches!(n.status, NetStatus::Listening { .. }), "{s:?}");
+    assert_eq!(n.server_key, Some(server_key.to_z85()));
+    assert_eq!(n.fingerprint, Some(server_key.fingerprint()));
+    assert!(n.refused.is_empty());
     assert_eq!(names(&s), vec!["laptop"]);
 
     // The tablet knocks and is refused; its key shows in the refused list.
@@ -80,10 +72,9 @@ fn authorize_a_refused_key_and_revoke_it_over_the_protocol() {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let s = info(&mut c);
-        let ServerMode::Network { refused, .. } = &s.mode else {
-            unreachable!()
-        };
-        if let Some(r) = refused
+        if let Some(r) = s
+            .network
+            .refused
             .iter()
             .find(|r| r.key.as_deref() == Some(tablet.public.to_z85().as_str()))
         {
@@ -111,11 +102,10 @@ fn authorize_a_refused_key_and_revoke_it_over_the_protocol() {
         key: tablet.public.to_z85(),
     });
     assert_eq!(names(&authorized), vec!["laptop", "tablet"]);
-    let ServerMode::Network { refused, .. } = &authorized.mode else {
-        unreachable!()
-    };
     assert!(
-        refused
+        authorized
+            .network
+            .refused
             .iter()
             .all(|r| r.key.as_deref() != Some(&*tablet.public.to_z85()))
     );
@@ -233,7 +223,8 @@ fn a_local_daemon_has_no_client_keys() {
     let ctx = Context::new().unwrap();
     let mut c = Client::connect(&ctx, h.ctrl_endpoint());
     let s = info(&mut c);
-    assert!(matches!(s.mode, ServerMode::Local { .. }), "{s:?}");
+    assert!(matches!(s.local, Some(LocalServer::Local { .. })), "{s:?}");
+    assert_eq!(s.network.status, NetStatus::Off);
     let e = c
         .call(Command::ServerAuthorize {
             name: "x".into(),
@@ -245,6 +236,6 @@ fn a_local_daemon_has_no_client_keys() {
 
     let h = Daemon::start(config(manual_rig(), inproc("server-info"))).unwrap();
     let (mut c, _) = connect(&h, &[b"evt"]);
-    assert!(matches!(info(&mut c).mode, ServerMode::Embedded));
+    assert_eq!(info(&mut c).local, Some(LocalServer::Embedded));
     h.shutdown();
 }

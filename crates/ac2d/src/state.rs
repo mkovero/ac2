@@ -40,6 +40,7 @@ impl Store {
                 traces: Vec::new(),
                 generator: Generator {
                     owner: None,
+                    owner_local: false,
                     armed: false,
                     firing: false,
                     settings: None,
@@ -89,6 +90,12 @@ impl Store {
                 sim: None,
                 sim_map: None,
                 sim_fit: None,
+                server: ac2_proto::model::ServerSummary {
+                    status: ac2_proto::model::NetStatusKind::Off,
+                    ctrl: None,
+                    port: None,
+                    fingerprint: None,
+                },
             },
             rev: Rev(0),
             replay: VecDeque::new(),
@@ -121,6 +128,12 @@ impl Store {
     /// The initial rig entity, from the rig settings (rev 0, no events).
     pub(crate) fn with_rig(mut self, rig: Rig) -> Self {
         self.state.rig = rig;
+        self
+    }
+
+    /// The initial network summary (rev 0, no events).
+    pub(crate) fn with_server(mut self, server: ac2_proto::model::ServerSummary) -> Self {
+        self.state.server = server;
         self
     }
 
@@ -237,6 +250,7 @@ pub(crate) fn apply(s: &mut State, c: &Change) {
         Change::WalkPlan(p) => upsert(&mut s.walk_plans, p, |p| p.name.clone()),
         Change::Sim(r) => s.set_sim(r.clone()),
         Change::SimFit(f) => s.sim_fit.clone_from(f),
+        Change::Server(v) => s.server.clone_from(v),
     }
 }
 

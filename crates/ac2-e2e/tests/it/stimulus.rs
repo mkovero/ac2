@@ -414,7 +414,7 @@ fn settings_name_an_output_route_the_stimulus_and_set_the_max_level() -> R {
 /// mode, and lists the page's actions only (no client keys on a local socket).
 #[test]
 fn settings_pages() -> R {
-    use ac2_proto::model::ServerMode;
+    use ac2_proto::model::LocalServer;
     use ac2_ui::settings::Page;
     use ac2_ui::settings::{ConnLine, conn_lines};
     let (_daemon, mut d) = super::harness::measuring()?;
@@ -442,9 +442,9 @@ fn settings_pages() -> R {
         return Err("no answer".into());
     };
     assert!(
-        matches!(server.mode, ServerMode::Local { .. }),
+        matches!(server.local, Some(LocalServer::Local { .. })),
         "{:?}",
-        server.mode
+        server.local
     );
     assert_eq!(page.lines(), conn_lines(Some(server), false));
     assert_eq!(

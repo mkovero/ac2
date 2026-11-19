@@ -57,6 +57,7 @@ pub fn events() -> Vec<Event> {
             65,
             Change::Generator(Generator {
                 owner: None,
+                owner_local: false,
                 armed: false,
                 firing: false,
                 ceiling: Dbfs(-40.0),
@@ -138,5 +139,15 @@ pub fn events() -> Vec<Event> {
         ev(95, Change::Clocks(super::remote::source_clocks())),
         ev(96, Change::Remote(super::remote::remote_state())),
         ev(97, Change::Remote(Default::default())),
+        ev(98, Change::Server(server_summary())),
+        ev(
+            99,
+            Change::Server(ServerSummary {
+                status: NetStatusKind::Off,
+                ctrl: None,
+                port: None,
+                fingerprint: None,
+            }),
+        ),
     ]
 }

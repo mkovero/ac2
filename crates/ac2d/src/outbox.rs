@@ -94,8 +94,8 @@ impl Outbox {
 
     /// `false` when dropped: the pair then stays bound, and the sender must resend.
     #[must_use]
-    pub(crate) fn detach(&self, epoch: NetEpoch) -> bool {
-        self.send(TAG_DETACH, &[&epoch.0.to_le_bytes()])
+    pub(crate) fn detach(&self, epoch: NetEpoch, off: bool) -> bool {
+        self.send(TAG_DETACH, &[&epoch.0.to_le_bytes(), &[u8::from(off)]])
     }
 
     pub(crate) fn event(&self, body: &[u8]) {

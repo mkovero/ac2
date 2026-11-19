@@ -449,7 +449,8 @@ impl Control {
             | Change::Walk(_)
             | Change::WalkPlan(_)
             | Change::Sim(_)
-            | Change::SimFit(_) => return,
+            | Change::SimFit(_)
+            | Change::Server(_) => return,
         };
         let at_sample = self.session.as_ref().map_or(0, |r| {
             r.fanout.latest.load(std::sync::atomic::Ordering::Acquire)

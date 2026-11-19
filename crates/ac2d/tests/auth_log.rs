@@ -10,7 +10,6 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use ac2_proto::model::ServerMode;
 use ac2_proto::{Command, ReplyBody};
 use ac2_zmq::{AuthorizedKeys, Context, CurveClient, KeyPair};
 use ac2d::{Daemon, NetworkSecurity};
@@ -100,10 +99,9 @@ fn refused_key_is_logged_once_per_key_and_address() {
         let ReplyBody::Server(info) = laptop_c.ok(Command::ServerInfo) else {
             panic!("server.info: not a server reply");
         };
-        let ServerMode::Network { refused, .. } = info.mode else {
-            panic!("not network mode: {:?}", info.mode);
-        };
-        let n = refused
+        let n = info
+            .network
+            .refused
             .iter()
             .find(|r| r.fingerprint.as_deref() == Some(fp.as_str()))
             .map_or(0, |r| r.count);

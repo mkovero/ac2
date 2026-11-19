@@ -53,7 +53,10 @@ impl App {
         let held_by = generator
             .and_then(|g| g.owner.as_ref())
             .filter(|_| !mine)
-            .map(|o| ac2_scene::stimulus::holder(o, &st.rig_name(st.active())));
+            .map(|o| {
+                let local = generator.is_some_and(|g| g.owner_local);
+                ac2_scene::stimulus::holder(o, local, &st.rig_name(st.active()))
+            });
         // The mirrored generator is the truth; the local phase only adds "requested".
         let (badge, phase) = match (
             generator.map(|g| (g.armed, g.firing)),

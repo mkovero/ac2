@@ -40,5 +40,9 @@ pub fn data_requests() -> Vec<DataRequest> {
 
 /// Every notice.
 pub fn notices() -> Vec<FlowNotice> {
-    vec![FlowNotice::ResyncRequired, FlowNotice::Rejoin]
+    vec![
+        FlowNotice::ResyncRequired,
+        FlowNotice::Rejoin,
+        FlowNotice::NetworkOff,
+    ]
 }

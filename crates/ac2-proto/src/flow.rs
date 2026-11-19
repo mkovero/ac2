@@ -114,6 +114,10 @@ pub enum FlowNotice {
     /// The daemon holds no state for this connection (it was dropped as stalled): state the
     /// window and every subscription again.
     Rejoin,
+    /// The rig's network was turned off on the rig (`server.network`): this connection
+    /// closes next. Sent to network connections only, so an app can say so instead of
+    /// "connection lost".
+    NetworkOff,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -193,7 +197,11 @@ mod tests {
             decode_data_request(&b),
             Err(CtrlError::VersionMismatch { .. })
         ));
-        for n in [FlowNotice::ResyncRequired, FlowNotice::Rejoin] {
+        for n in [
+            FlowNotice::ResyncRequired,
+            FlowNotice::Rejoin,
+            FlowNotice::NetworkOff,
+        ] {
             let p = encode_notice(n).unwrap();
             assert_eq!(p[0], FLOW_TOPIC);
             assert_eq!(decode_notice(&p[1]).unwrap(), n);
