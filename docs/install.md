@@ -279,6 +279,9 @@ On the daemon host:
 ac2d --listen tcp://0.0.0.0 --name "FOH rack"
 ```
 
+(or, with `ac2d` already running, `ac2 server network on`: the same network, switched on
+live and kept for the next start; `ac2 server network` shows it and its key).
+
 It logs its key and fingerprint:
 
 ```
@@ -301,8 +304,9 @@ ac2 discover                                       # lists rigs, their fingerpri
 ac2 auth pair 10.0.0.20 --server-key '<the 40-character key from the daemon host>'
 ```
 
-`auth pair` pins the daemon key and prints this client's key as one line. Add that line to
-the daemon host's `authorized_clients` file and restart the daemon. Then
+`auth pair` pins the daemon key and prints this client's key, with the command that
+authorizes it: run `ac2 server authorize <name> --key '<key>'` on the daemon host (it applies
+at once, no restart). Then
 `ac2 --remote 10.0.0.20 status`, or open the app's connect dialog (`ac2-ui --connect`): paired
 rigs are selectable there, and an unpaired rig offers the same pairing steps. Quote the key:
 Z85 keys can contain `-` and other shell characters, and a key that starts with `-` is still
@@ -322,9 +326,10 @@ every refused key, once per key and address every 10 s:
 refused client key fingerprint 1a2b-3c4d-5e6f-7a8b-9c0d from 10.0.0.31: not in …/authorized_clients; …
 ```
 
-If that fingerprint matches what the client shows, add the key from that line to
-`authorized_clients` and restart the daemon. An app already connected to the rig does it
-without a restart: Settings › Connection lists the refused keys, and **A** on one authorizes
+If that fingerprint matches what the client shows, run `ac2 server authorize <name>
+--refused <fingerprint>` on the daemon host (`ac2 server info` lists the refused keys); it
+applies to the client's next try, no restart. An app already connected to the rig does it
+too: Settings › Connection lists the refused keys, and **A** on one authorizes
 it ([user guide](user-guide.md#connection)).
 
 Where the keys live (the ac2 config directory, shared by every ac2 program on a machine):

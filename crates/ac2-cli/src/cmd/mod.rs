@@ -26,6 +26,7 @@ mod selftest;
 mod selftest_frames;
 mod selftest_net;
 mod selftest_stamps;
+mod server;
 mod session;
 mod sessions;
 mod sim;
@@ -74,6 +75,7 @@ pub(crate) async fn dispatch(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliErro
         Cmd::Selftest { cmd } => selftest::run(cli, cmd, out).await,
         Cmd::Discover(a) => discover::run(cli, a, out),
         Cmd::Auth { cmd } => auth::run(cli, cmd, out).await,
+        Cmd::Server { cmd } => server::run(cli, cmd, out).await,
     }
 }
 

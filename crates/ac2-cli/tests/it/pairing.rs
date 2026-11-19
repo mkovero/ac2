@@ -8,7 +8,9 @@ use ac2_zmq::PublicKey;
 use ac2d::{BackendChoice, Daemon, DaemonConfig, Listen, NetworkSecurity};
 use clap::Parser;
 
-use super::common::cli as ac2;
+use ac2_client::Endpoints;
+
+use super::common::{ac2 as on, cli as ac2};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn unpaired_client_is_told_to_pair() {
@@ -95,9 +97,75 @@ async fn unauthorized_client_hears_its_fingerprint() {
         r.stderr
     );
     assert!(
-        r.stderr.contains("authorized_clients") && r.stderr.contains("restart ac2d"),
+        r.stderr
+            .contains(&format!("run `ac2 server authorize <name> --refused {fp}`")),
         "{}",
         r.stderr
+    );
+
+    // On the daemon's host, the refused key is authorized by the fingerprint it was shown
+    // under, and the client gets in on its next try, no restart.
+    let local = Endpoints {
+        ctrl: h.ctrl_endpoint().to_owned(),
+        data: h.data_endpoint().to_owned(),
+    };
+    let info = on(&local, true, &["server", "info"]).await;
+    let listed = info.json(&[]);
+    assert_eq!(listed["network"]["refused"][0]["fingerprint"], fp.as_str());
+    let text = on(&local, false, &["server", "info"]).await;
+    assert!(
+        text.stdout
+            .contains(&format!("ac2 server authorize <name> --refused {fp}")),
+        "{}",
+        text.stdout
+    );
+
+    let wrong = on(
+        &local,
+        false,
+        &["server", "authorize", "laptop", "--refused", "0000-0000"],
+    )
+    .await;
+    assert_eq!(wrong.code, 1);
+    assert_eq!(
+        wrong.stderr,
+        format!("ac2: no refused key has fingerprint 0000-0000; refused lately: {fp}\n")
+    );
+
+    let args = [
+        "server",
+        "authorize",
+        "laptop",
+        "--refused",
+        &fp.to_uppercase(),
+    ];
+    let ok = on(&local, true, &args).await;
+    assert_eq!(ok.code, 0, "{}", ok.stderr);
+    let a = ok.json(&args);
+    assert_eq!(a["authorized"]["name"], "laptop");
+    assert_eq!(a["authorized"]["fingerprint"], fp.as_str());
+    assert_eq!(a["authorized"]["rig"], serde_json::Value::Null);
+    let info = on(&local, true, &["server", "info"]).await.json(&[]);
+    assert_eq!(info["network"]["refused"], serde_json::json!([]));
+
+    let r = ac2(&["--key-dir", kd, "--remote", &remote, "status"]).await;
+    assert_eq!(r.code, 0, "{}", r.stderr);
+
+    // Authorized, it may still not switch the network it came in on.
+    let r = ac2(&[
+        "--key-dir",
+        kd,
+        "--remote",
+        &remote,
+        "server",
+        "network",
+        "off",
+    ])
+    .await;
+    assert_eq!(r.code, 1);
+    assert_eq!(
+        r.stderr,
+        "ac2: refused: the network can only be turned on or off on the rig's own machine\n"
     );
     h.shutdown();
 }

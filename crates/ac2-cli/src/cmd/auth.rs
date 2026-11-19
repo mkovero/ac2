@@ -3,7 +3,8 @@
 //!
 //! Pairing is two-sided and never automatic: this command pins the daemon key the operator
 //! typed in (after comparing fingerprints with what the daemon host shows) and prints this
-//! client's public key, which the operator adds to the daemon's `authorized_clients`.
+//! client's public key, which the operator authorizes on the daemon host (`ac2 server
+//! authorize`).
 
 use ac2_client::fingerprint;
 use ac2_zmq::PublicKey;
@@ -90,10 +91,11 @@ pub(crate) async fn run(cli: &Cli, cmd: &AuthCmd, out: &mut Out<'_>) -> Result<(
                         s.push_str(&format!("\n  replaced the earlier pin {}", fingerprint(&old)));
                     }
                     s.push_str(&format!(
-                        "\nthis client{}\n  key         {}\n  fingerprint {}\nauthorize it on the daemon host by adding this line to authorized_clients:\n  {line}",
+                        "\nthis client{}\n  key         {}\n  fingerprint {}\nauthorize it on the daemon host:\n  ac2 server authorize {name} --key '{}'",
                         if created { " (new keypair)" } else { "" },
                         kp.public.to_z85(),
-                        fingerprint(&kp.public)
+                        fingerprint(&kp.public),
+                        kp.public.to_z85()
                     ));
                     s
                 },

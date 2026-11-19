@@ -83,11 +83,11 @@ pub enum ClientError {
         source: std::io::Error,
     },
     /// The daemon refused this client's key: CURVE passed, but its `authorized_clients`
-    /// does not list the key, so it answers nothing until it is added there.
+    /// does not list the key, so it answers nothing until the key is authorized there,
+    /// which applies to the next try at once.
     #[error(
         "the daemon has not authorized this client (fingerprint {fingerprint}): on the daemon \
-         host, add the line `<name> {key}` to authorized_clients in the ac2 config directory \
-         (e.g. ~/.config/ac2/authorized_clients), then restart ac2d"
+         host, run `ac2 server authorize <name> --refused {fingerprint}`, then try again"
     )]
     NotAuthorized {
         /// This client's key fingerprint, as the daemon logs the refused key.

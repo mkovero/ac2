@@ -1,0 +1,294 @@
+//! `server info|network|authorize`: how the daemon serves clients, its network listener
+//! switched live (`server.network`), and the client keys it admits (`server.authorize`).
+//! Refusals (fixed by `--listen`, asked from the network, an in-process daemon, a bad port
+//! or interface) are the daemon's own words, printed as they come.
+
+use ac2_client::{Client, expect_body};
+use ac2_proto::model::{
+    AuthorizedClient, LocalServer, NetBind, NetReason, NetReasonKind, NetSaved, NetSetting,
+    NetSettingKind, NetSettingView, NetStatus, NetStatusView, NetworkServer, NotSavedReason,
+    PeerNetStatus, RefusedKey, ServerInfo,
+};
+use ac2_proto::{Command, ReplyBody};
+use serde_json::json;
+
+use super::connect;
+use crate::CliError;
+use crate::args::{Cli, NetworkCmd, ServerCmd};
+use crate::output::{Out, utc};
+
+pub(crate) async fn run(cli: &Cli, cmd: &ServerCmd, out: &mut Out<'_>) -> Result<(), CliError> {
+    let c = connect(cli, false).await?;
+    match cmd {
+        ServerCmd::Info => {
+            let info = info(&c).await?;
+            out.emit(&info, || info_text(&info))?;
+        }
+        ServerCmd::Network { cmd } => {
+            let info = match cmd {
+                None => info(&c).await?,
+                Some(NetworkCmd::On(a)) => network(&c, true, a.bind(), a.port).await?,
+                Some(NetworkCmd::Off) => network(&c, false, None, None).await?,
+            };
+            let n = &info.network;
+            out.emit(
+                &json!({
+                    "setting": n.setting,
+                    "status": n.status,
+                    "server_key": n.server_key,
+                    "fingerprint": n.fingerprint,
+                    "advertised_as": n.advertised_as,
+                }),
+                || network_text(n),
+            )?;
+        }
+        ServerCmd::Authorize { name, refused, key } => {
+            let key = match (refused, key) {
+                (Some(fp), _) => refused_key(&info(&c).await?.network.refused, fp)?,
+                (None, Some(k)) => k.trim().to_owned(),
+                (None, None) => {
+                    return Err(CliError::Usage("give --refused or --key".into()));
+                }
+            };
+            let r = c
+                .call(Command::ServerAuthorize {
+                    name: name.clone(),
+                    key: key.clone(),
+                })
+                .await?;
+            let info = expect_body!("server.authorize", r, ReplyBody::Server(s) => s)?;
+            let entry = info
+                .network
+                .authorized
+                .iter()
+                .find(|a| a.name == *name && a.key == key);
+            out.emit(&json!({ "authorized": entry }), || {
+                format!(
+                    "authorized {name} (fingerprint {}): its connections are admitted from now on",
+                    entry.map_or("?", |a| a.fingerprint.as_str())
+                )
+            })?;
+        }
+    }
+    Ok(())
+}
+
+async fn info(c: &Client) -> Result<ServerInfo, CliError> {
+    let r = c.call(Command::ServerInfo).await?;
+    Ok(expect_body!("server.info", r, ReplyBody::Server(s) => s)?)
+}
+
+async fn network(
+    c: &Client,
+    enabled: bool,
+    bind: Option<NetBind>,
+    port: Option<u16>,
+) -> Result<ServerInfo, CliError> {
+    let r = c
+        .call(Command::ServerNetwork {
+            enabled,
+            bind,
+            port,
+        })
+        .await?;
+    Ok(expect_body!("server.network", r, ReplyBody::Server(s) => s)?)
+}
+
+/// The key of the refused client whose fingerprint is `fp`, as the daemon lists it.
+fn refused_key(refused: &[RefusedKey], fp: &str) -> Result<String, CliError> {
+    let fp = fp.trim();
+    if let Some(k) = refused
+        .iter()
+        .filter(|r| {
+            r.fingerprint
+                .as_deref()
+                .is_some_and(|f| f.eq_ignore_ascii_case(fp))
+        })
+        .find_map(|r| r.key.clone())
+    {
+        return Ok(k);
+    }
+    let listed: Vec<&str> = refused
+        .iter()
+        .filter_map(|r| r.fingerprint.as_deref())
+        .collect();
+    Err(CliError::Usage(if listed.is_empty() {
+        format!("no refused key has fingerprint {fp}: the daemon has refused no key lately")
+    } else {
+        format!(
+            "no refused key has fingerprint {fp}; refused lately: {}",
+            listed.join(", ")
+        )
+    }))
+}
+
+fn bind_text(b: &NetBind) -> String {
+    match b {
+        NetBind::All => "every interface".into(),
+        NetBind::Interface { name } => format!("interface {name}"),
+        NetBind::Addr { addr } => format!("address {addr}"),
+    }
+}
+
+fn not_saved_text(r: &NotSavedReason) -> String {
+    match r {
+        NotSavedReason::StoreReadOnly => "the settings file cannot be written".into(),
+        NotSavedReason::Unreadable { detail } => {
+            format!("the settings file could not be read at start ({detail}); it is left as it is")
+        }
+        NotSavedReason::DamagedInPlace => "the damaged settings file could not be set aside".into(),
+        NotSavedReason::NoStore => "this daemon keeps no settings file".into(),
+        NotSavedReason::WriteFailed { detail } => format!("writing the settings failed: {detail}"),
+    }
+}
+
+fn saved_text(s: &NetSaved) -> String {
+    match s {
+        NetSaved::Saved => "kept across restarts".into(),
+        NetSaved::NotSaved { reason } => {
+            format!("NOT KEPT across restarts: {}", not_saved_text(reason))
+        }
+    }
+}
+
+/// The setting in a line: `on: every interface, port 47820; kept across restarts`.
+pub fn setting_text(v: &NetSettingView) -> String {
+    match v {
+        NetSettingView::Host { setting } => match setting {
+            NetSetting::Off { saved } => format!("off; {}", saved_text(saved)),
+            NetSetting::On { bind, port, saved } => format!(
+                "on: {}, port {port} (data {}); {}",
+                bind_text(bind),
+                u32::from(*port) + 1,
+                saved_text(saved)
+            ),
+            NetSetting::Fixed { listen } => format!("fixed by ac2d --listen {listen}"),
+        },
+        NetSettingView::Peer { setting } => match setting {
+            NetSettingKind::Off => "off".into(),
+            NetSettingKind::On => "on".into(),
+            NetSettingKind::Fixed => "fixed by ac2d --listen".into(),
+        },
+    }
+}
+
+fn reason_kind_text(k: NetReasonKind) -> &'static str {
+    match k {
+        NetReasonKind::AddressInUse => "the port is in use",
+        NetReasonKind::InterfaceMissing => "no interface of that name on this host",
+        NetReasonKind::AddressMissing => "the address is not on this host",
+        NetReasonKind::ZapFailed => "the authentication handler stopped",
+        NetReasonKind::NoServerKey => "the daemon has no server key",
+        NetReasonKind::NotHandedOver => "the daemon's I/O thread did not take the sockets",
+        NetReasonKind::Other => "a failure the rig's host reports",
+    }
+}
+
+fn reason_text(r: &NetReason) -> String {
+    match r {
+        NetReason::Other { detail } => detail.clone(),
+        r => reason_kind_text(r.kind()).into(),
+    }
+}
+
+/// The status in a line: `listening on tcp://…:47820 (data …:47821)`, `waiting: the port is
+/// in use; retried`.
+pub fn status_text(v: &NetStatusView) -> String {
+    let (word, reason) = match v {
+        NetStatusView::Host { status } => match status {
+            NetStatus::Off => return "off".into(),
+            NetStatus::Listening { ctrl, data } => {
+                return format!("listening on {ctrl} (data {data})");
+            }
+            NetStatus::Waiting { reason } => ("waiting", reason_text(reason)),
+            NetStatus::Failed { reason } => ("failed", reason_text(reason)),
+        },
+        NetStatusView::Peer { status } => match status {
+            PeerNetStatus::Off => return "off".into(),
+            PeerNetStatus::Listening { ctrl, data } => {
+                return format!("listening on {ctrl} (data {data})");
+            }
+            PeerNetStatus::Waiting { reason } => ("waiting", reason_kind_text(*reason).into()),
+            PeerNetStatus::Failed { reason } => ("failed", reason_kind_text(*reason).into()),
+        },
+    };
+    format!("{word}: {reason}; retried")
+}
+
+fn network_text(n: &NetworkServer) -> String {
+    let mut s = format!(
+        "network      {}\nstatus       {}\n",
+        setting_text(&n.setting),
+        status_text(&n.status)
+    );
+    match (&n.server_key, &n.fingerprint) {
+        (Some(k), Some(fp)) => s.push_str(&format!("server key   {k}\nfingerprint  {fp}\n")),
+        _ => s.push_str("server key   none yet (made when the network is first turned on)\n"),
+    }
+    match &n.advertised_as {
+        Some(a) => s.push_str(&format!("advertised   as {a}\n")),
+        None => s.push_str("advertised   no\n"),
+    }
+    s
+}
+
+fn authorized_line(a: &AuthorizedClient) -> String {
+    let kind = a
+        .rig
+        .map_or_else(String::new, |r| format!("  rig {:016x}", r.0));
+    format!("  {}  {}{kind}\n", a.name, a.fingerprint)
+}
+
+fn refused_line(r: &RefusedKey) -> String {
+    let when = format!(
+        "from {}, {}×, last {} UTC",
+        r.address,
+        r.count,
+        utc(r.last_at.0)
+    );
+    match &r.fingerprint {
+        Some(fp) => {
+            format!("  {fp}  {when}\n    authorize: ac2 server authorize <name> --refused {fp}\n")
+        }
+        None => format!("  (no key: not a CURVE client)  {when}\n"),
+    }
+}
+
+fn info_text(info: &ServerInfo) -> String {
+    let mut s = match &info.local {
+        Some(LocalServer::Local { ctrl, data }) => format!("local        {ctrl} (data {data})\n"),
+        Some(LocalServer::Embedded) => "local        in this process only\n".into(),
+        None => String::new(),
+    };
+    s.push_str(&network_text(&info.network));
+    if let Some(d) = &info.recording_dir {
+        s.push_str(&format!("recordings   {d}\n"));
+    }
+    s.push_str("authorized\n");
+    if info.network.authorized.is_empty() {
+        s.push_str("  none\n");
+    }
+    for a in &info.network.authorized {
+        s.push_str(&authorized_line(a));
+    }
+    s.push_str("refused lately\n");
+    if info.network.refused.is_empty() {
+        s.push_str("  none\n");
+    }
+    for r in &info.network.refused {
+        s.push_str(&refused_line(r));
+    }
+    if !info.interfaces.is_empty() {
+        s.push_str("interfaces\n");
+        for i in &info.interfaces {
+            let addrs: Vec<String> = i.addrs.iter().map(ToString::to_string).collect();
+            s.push_str(&format!(
+                "  {}  {}  {}\n",
+                i.name,
+                if i.up { "up" } else { "down" },
+                addrs.join(", ")
+            ));
+        }
+    }
+    s
+}

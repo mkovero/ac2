@@ -11,6 +11,7 @@ mod levels;
 mod math;
 mod meas;
 mod osc;
+mod server;
 mod session;
 mod sim;
 mod spl;
@@ -28,6 +29,7 @@ pub use levels::*;
 pub use math::*;
 pub use meas::*;
 pub use osc::*;
+pub use server::*;
 pub use session::*;
 pub use sim::*;
 pub use spl::*;
@@ -240,6 +242,13 @@ pub enum Cmd {
         /// Action.
         #[command(subcommand)]
         cmd: AuthCmd,
+    },
+    /// How the daemon serves clients: `info`, the network listener (`network on|off`), and
+    /// the client keys it admits (`authorize`).
+    Server {
+        /// Action.
+        #[command(subcommand)]
+        cmd: ServerCmd,
     },
 }
 

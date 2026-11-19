@@ -21,6 +21,7 @@ mod parse;
 mod rec_rig;
 mod recovery_rig;
 mod salvage_rig;
+mod server_rig;
 mod spl_rig;
 mod tree_rig;
 mod walk_rig;
