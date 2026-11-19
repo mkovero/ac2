@@ -443,7 +443,7 @@ stated system clocks); scene text asserted.
   Esc with another rig shown. **Link-loss fade:** drop the app's connection to the playing
   rig → disarmed within the lease expiry, the fake output ramps to zero; reconnect → still
   disarmed, no `gen.set` sent. Only the rig-to-rig link dropped → still playing. A one-rig
-  client: *connect there to stop*. A rig key's `gen.*` refused. §4.4's refusals.
+  client: *connect there to stop*; a rig key's `gen.*` and §4.4's cases refused.
 - **Rig acceptance** (operator present, sound only by his hand): both walk-throughs.
 
 ## 9. Stages
@@ -465,13 +465,12 @@ rewrites what this design builds on in `control/remote.rs`: the tap install in
 - **2 — the paired rig's generator** (wire). `loopback` and the stimulus in brief; the
   dialog by rig, client by key, routed stimulus keys, the one-rig and no-outputs words.
 - **3 — unattended** (no wire, no file bump). Rig meters on remote inputs; the widened
-  monitor at start with its words, audit and un-admit.
+  monitor at start with its words, audit and un-admit. Later: re-binding references to
+  another rig; route (b); a transfer function over two remote rigs.
 
 **Builder checks, not verified here:** levels frames are computed with no app subscribed;
 the levels publisher can reach block stamps; the fan-out's hand-off can be switched on a
 running stream; the untagged `InputRef` reads under `deny_unknown_fields` in every config.
-
-Later: re-binding references to another rig; route (b); a transfer function over two remote rigs.
 
 ## 10. Open questions for the operator
 
@@ -503,4 +502,4 @@ Operator, 2026-11-19:
   currently. reference could be remote also but both obviously initiated from rig in
   question (ie. no generator output over network)."
 - "if we're receiving input levels nevertheless from remotes, could we use that information
-  to estimate whether we are LOCKED or ?" (§5; tag words: §10 q1, open.) The tree and top bar: as at the top.
+  to estimate whether we are LOCKED or ?" (§5; tag words: §10 q1, open.)
