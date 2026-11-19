@@ -99,10 +99,7 @@ fn the_operators_rigs_two_agree_and_the_meter_has_its_own_rate() {
         rig("ketunkolo", 96_000, &ketunkolo),
         rig("cm4", 48_000, &cm4),
     ]);
-    assert_eq!(
-        tags(&d),
-        [Some("RATES AGREE"), Some("RATES AGREE"), Some("OWN CLOCK")]
-    );
+    assert_eq!(tags(&d), [Some("AGREE"), Some("AGREE"), Some("FREE")]);
     assert_eq!(
         tip(&d, 0),
         "rates agree with ketunkolo within 2 ppm (by each rig's system clock); two free \
@@ -141,13 +138,10 @@ fn a_loose_os_bound_at_the_same_rate_reads_cant_tell() {
         rig("ketunkolo", 96_000, &ketunkolo),
         rig("cm4", 96_000, &cm4),
     ]);
-    assert_eq!(
-        tags(&d),
-        [Some("RATES AGREE"), Some("RATES AGREE"), Some("CAN'T TELL")]
-    );
+    assert_eq!(tags(&d), [Some("AGREE"), Some("AGREE"), Some("UNKNOWN")]);
     let why = "cm4's system clock is synced, OS bound ±629.5 ms: too loose to compare rates \
                between rigs";
-    assert_eq!(tip(&d, 2), why);
+    assert_eq!(tip(&d, 2), format!("can't tell: {why}"));
     assert_eq!(d.rigs[2].domain, Domain::CantTell);
     assert_eq!(
         d.same_domain(2, 0),
@@ -159,7 +153,7 @@ fn a_loose_os_bound_at_the_same_rate_reads_cant_tell() {
 fn the_bound_must_be_under_what_one_window_adds() {
     // 59.9 s at 500 µs/s: 29.95 ms.
     let good = at(0.0, 3);
-    for (us, tag) in [(29_900, "RATES AGREE"), (30_000, "CAN'T TELL")] {
+    for (us, tag) in [(29_900, "AGREE"), (30_000, "UNKNOWN")] {
         let edge = at(0.0, us);
         let d = clock_domains(&[rig("a", 48_000, &good), rig("b", 48_000, &edge)]);
         assert_eq!(tags(&d), [Some(tag), Some(tag)], "{us} µs");
@@ -173,7 +167,7 @@ fn two_rates_are_never_one_clock_whatever_the_daemon_says() {
     let mut rigs = pair_with(&a, &b, &sees);
     rigs[1].rate_hz = Some(48_000);
     let d = clock_domains(&rigs);
-    assert_eq!(tags(&d), [Some("OWN CLOCK"), Some("OWN CLOCK")]);
+    assert_eq!(tags(&d), [Some("FREE"), Some("FREE")]);
     assert_eq!(tip(&d, 0), "96.0 kHz here; ketunkolo at 48.0 kHz");
     assert_eq!(tip(&d, 1), "48.0 kHz here; pupu at 96.0 kHz");
 }
@@ -222,7 +216,7 @@ fn a_daemons_difference_outweighs_figures_that_agree() {
         Some(5.6),
     );
     let d = clock_domains(&pair_with(&a, &a, &sees));
-    assert_eq!(tags(&d), [Some("OWN CLOCK"), Some("OWN CLOCK")]);
+    assert_eq!(tags(&d), [Some("FREE"), Some("FREE")]);
     assert_eq!(
         tip(&d, 0),
         "pupu runs −5.6 ppm against ketunkolo over 40 s, measured between the rigs"
@@ -251,7 +245,7 @@ fn an_interface_off_its_own_system_clock_is_named() {
             None,
         );
         let d = clock_domains(&pair_with(&a, &a, &sees));
-        assert_eq!(tags(&d), [Some("OWN CLOCK"), Some("OWN CLOCK")]);
+        assert_eq!(tags(&d), [Some("FREE"), Some("FREE")]);
         let text = format!("{who}'s interface runs +5.6 ppm off its system clock");
         assert_eq!(tip(&d, 0), text);
         assert_eq!(tip(&d, 1), text);
@@ -269,22 +263,22 @@ fn a_daemon_that_cannot_tell_is_not_overruled_and_one_still_measuring_is_no_verd
         None,
     );
     let d = clock_domains(&pair_with(&a, &a, &sees));
-    assert_eq!(tags(&d), [Some("CAN'T TELL"), Some("CAN'T TELL")]);
+    assert_eq!(tags(&d), [Some("UNKNOWN"), Some("UNKNOWN")]);
     assert_eq!(
         tip(&d, 1),
-        "the system clocks of pupu and ketunkolo disagree by 250.0 ms"
+        "can't tell: the system clocks of pupu and ketunkolo disagree by 250.0 ms"
     );
 
     let sees = remote(KETUNKOLO, PeerRelation::Measuring, None);
     let d = clock_domains(&pair_with(&a, &a, &sees));
-    assert_eq!(tags(&d), [Some("RATES AGREE"), Some("RATES AGREE")]);
+    assert_eq!(tags(&d), [Some("AGREE"), Some("AGREE")]);
 }
 
 #[test]
 fn figures_that_differ_by_each_system_clock_are_own_clocks() {
     let (a, b) = (at(0.2, 3), at(6.2, 3027));
     let d = clock_domains(&[rig("pupu", 48_000, &a), rig("usb mic", 48_000, &b)]);
-    assert_eq!(tags(&d), [Some("OWN CLOCK"), Some("OWN CLOCK")]);
+    assert_eq!(tags(&d), [Some("FREE"), Some("FREE")]);
     assert_eq!(
         tip(&d, 1),
         "usb mic runs +6.0 ppm against pupu (by each rig's system clock)"
@@ -324,15 +318,15 @@ fn a_figure_with_no_common_reference_is_no_evidence() {
     ];
     for (bad, why) in &cases {
         let d = clock_domains(&[rig("a", 48_000, &good), rig("b", 48_000, bad)]);
-        assert_eq!(tags(&d), [Some("CAN'T TELL"), Some("CAN'T TELL")], "{why}");
-        assert_eq!(tip(&d, 0), *why);
-        assert_eq!(tip(&d, 1), *why);
+        assert_eq!(tags(&d), [Some("UNKNOWN"), Some("UNKNOWN")], "{why}");
+        assert_eq!(tip(&d, 0), format!("can't tell: {why}"));
+        assert_eq!(tip(&d, 1), format!("can't tell: {why}"));
     }
     // Both rigs short of a fact: each is said, once.
     let d = clock_domains(&[rig("a", 48_000, &cases[0].0), rig("b", 48_000, &cases[1].0)]);
     assert_eq!(
         tip(&d, 0),
-        "a's system clock is not synced · b's system clock does not say"
+        "can't tell: a's system clock is not synced · b's system clock does not say"
     );
 }
 
@@ -344,11 +338,11 @@ fn a_chain_of_agreements_holding_a_difference_is_no_group() {
         rig("b", 48_000, &b),
         rig("c", 48_000, &c),
     ]);
-    assert_eq!(tags(&d), [Some("CAN'T TELL"); 3]);
+    assert_eq!(tags(&d), [Some("UNKNOWN"); 3]);
     let why = "the rates agree in a chain within 2 ppm, but a runs −3.0 ppm against c (by \
                each rig's system clock)";
     for i in 0..3 {
-        assert_eq!(tip(&d, i), why);
+        assert_eq!(tip(&d, i), format!("can't tell: {why}"));
     }
     assert_eq!(
         d.same_domain(0, 1),
@@ -363,13 +357,10 @@ fn a_broken_chain_keeps_the_group_the_daemon_measured() {
     let sees = remote(KETUNKOLO, PeerRelation::Agree, Some(1.4));
     let [pupu, ketunkolo] = pair_with(&a, &b, &sees);
     let d = clock_domains(&[pupu, ketunkolo, rig("c", 96_000, &c)]);
-    assert_eq!(
-        tags(&d),
-        [Some("LOCKED"), Some("LOCKED"), Some("CAN'T TELL")]
-    );
+    assert_eq!(tags(&d), [Some("LOCKED"), Some("LOCKED"), Some("UNKNOWN")]);
     assert_eq!(
         tip(&d, 2),
-        "the rates agree in a chain within 2 ppm, but pupu runs −3.0 ppm against c (by each \
+        "can't tell: the rates agree in a chain within 2 ppm, but pupu runs −3.0 ppm against c (by each \
          rig's system clock)"
     );
     assert!(matches!(d.same_domain(1, 2), SameDomain::CantTell { .. }));
@@ -381,7 +372,7 @@ fn a_rig_joined_only_by_its_system_clock_weakens_the_groups_tag() {
     let sees = remote(KETUNKOLO, PeerRelation::Agree, Some(0.5));
     let [pupu, ketunkolo] = pair_with(&a, &b, &sees);
     let d = clock_domains(&[pupu, ketunkolo, rig("c", 96_000, &c)]);
-    assert_eq!(tags(&d), [Some("RATES AGREE"); 3]);
+    assert_eq!(tags(&d), [Some("AGREE"); 3]);
     assert_eq!(
         tip(&d, 0),
         "rates agree with ketunkolo and c within 2 ppm (by each rig's system clock, or \
@@ -401,10 +392,10 @@ fn two_groups_are_lettered_in_list_order() {
     assert_eq!(
         tags(&d),
         [
-            Some("RATES AGREE A"),
-            Some("RATES AGREE B"),
-            Some("RATES AGREE A"),
-            Some("RATES AGREE B")
+            Some("AGREE A"),
+            Some("AGREE B"),
+            Some("AGREE A"),
+            Some("AGREE B")
         ]
     );
     assert!(tip(&d, 3).starts_with("rates agree with b within 2 ppm"));
@@ -422,9 +413,9 @@ fn two_groups_are_lettered_in_list_order() {
     assert_eq!(
         tags(&d),
         [
-            Some("RATES AGREE A"),
+            Some("AGREE A"),
             Some("LOCKED B"),
-            Some("RATES AGREE A"),
+            Some("AGREE A"),
             Some("LOCKED B")
         ]
     );
@@ -470,6 +461,6 @@ fn nothing_to_compare_is_no_tag() {
 
     // Between two that have one, it takes no part.
     let d = clock_domains(&[rig("pupu", 96_000, &c), idle, rig("ketunkolo", 96_000, &c)]);
-    assert_eq!(tags(&d), [Some("RATES AGREE"), None, Some("RATES AGREE")]);
+    assert_eq!(tags(&d), [Some("AGREE"), None, Some("AGREE")]);
     assert!(tip(&d, 0).starts_with("rates agree with ketunkolo within"));
 }

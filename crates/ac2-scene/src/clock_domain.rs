@@ -1,5 +1,5 @@
 //! Which rigs of a list share a sample clock, as a tag on each rig's row and the words
-//! behind it: `LOCKED`, `RATES AGREE`, `OWN CLOCK`, `CAN'T TELL`.
+//! behind it: `LOCKED`, `AGREE`, `FREE`, `UNKNOWN`.
 //!
 //! A transfer function between two rigs means something only when both count samples on
 //! one clock. Three kinds of evidence say whether they do, strongest first:
@@ -13,7 +13,7 @@
 //! Neither 2 nor 3 can prove a lock: block stamps resolve about 2 ppm over a minute, and
 //! two free crystals can sit that close. The daemon's verdict watches one stream over two
 //! windows and holds a failure for a minute, so it earns `LOCKED`; agreement of two
-//! separately measured figures earns only `RATES AGREE`. Every tooltip states its basis.
+//! separately measured figures earns only `AGREE`. Every tooltip states its basis.
 
 use ac2_proto::model::{
     CantTellReason, ClockBasis, Clocks, NotLockedReason, PeerClock, PeerRelation, RemoteRig,
@@ -85,7 +85,7 @@ pub enum Domain {
 /// One rig's row tag.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DomainTag {
-    /// The tag: `LOCKED`, `LOCKED A`, `RATES AGREE`, `OWN CLOCK`, `CAN'T TELL`; `None`
+    /// The tag: `LOCKED`, `LOCKED A`, `AGREE`, `FREE`, `UNKNOWN`; `None`
     /// where there is nothing to say (no session, or no other rig to compare with).
     pub tag: Option<String>,
     /// The tooltip: the other rigs of the group and the basis, or what differs, or what is
@@ -184,7 +184,7 @@ impl Pair {
 /// Groups are rigs joined by agreement, direct or through other rigs, with no two of them
 /// shown to differ. Where a chain of agreements holds a pair that differs (A and B within
 /// 2 ppm, B and C within 2 ppm, A and C not), the chain is no group: its rigs fall back to
-/// the groups the between-rigs verdicts alone make, and the rest read `CAN'T TELL`.
+/// the groups the between-rigs verdicts alone make, and the rest read `UNKNOWN`.
 ///
 /// ```
 /// use ac2_proto::model::{ClockBasis, Clocks, DeviceClock, DeviceId, SampleClock, SystemClock};
@@ -211,8 +211,8 @@ impl Pair {
 ///     between: &[],
 /// };
 /// let d = clock_domains(&[rig("pupu", 96_000), rig("ketunkolo", 96_000), rig("cm4", 48_000)]);
-/// assert_eq!(d.rigs[0].tag.as_deref(), Some("RATES AGREE"));
-/// assert_eq!(d.rigs[2].tag.as_deref(), Some("OWN CLOCK"));
+/// assert_eq!(d.rigs[0].tag.as_deref(), Some("AGREE"));
+/// assert_eq!(d.rigs[2].tag.as_deref(), Some("FREE"));
 /// assert_eq!(
 ///     d.rigs[2].tip.as_deref(),
 ///     Some("48.0 kHz here; pupu and ketunkolo at 96.0 kHz")
@@ -295,7 +295,7 @@ pub fn clock_domains(rigs: &[RigClockFacts<'_>]) -> ClockDomains {
     for (index, (members, basis)) in groups.iter().enumerate() {
         let word = match basis {
             Basis::BetweenRigs => "LOCKED",
-            Basis::SystemClocks => "RATES AGREE",
+            Basis::SystemClocks => "AGREE",
         };
         let tag = match groups.len() {
             1 => word.to_owned(),
@@ -320,13 +320,13 @@ pub fn clock_domains(rigs: &[RigClockFacts<'_>]) -> ClockDomains {
         let alone = others().all(|j| matches!(out.pairs[i][j], Pair::Differ(_)));
         out.rigs[i] = if alone {
             DomainTag {
-                tag: Some("OWN CLOCK".into()),
+                tag: Some("FREE".into()),
                 tip: Some(out.own_tip(i, others())),
                 domain: Domain::Own,
             }
         } else {
             DomainTag {
-                tag: Some("CAN'T TELL".into()),
+                tag: Some("UNKNOWN".into()),
                 tip: Some(out.cant_tell_tip(i, others())),
                 domain: Domain::CantTell,
             }
@@ -475,7 +475,8 @@ impl ClockDomains {
         parts.join(" · ")
     }
 
-    /// The tooltip of a rig the evidence cannot place: each missing fact once.
+    /// The tooltip of a rig the evidence cannot place, in the words the app's other texts use
+    /// for it: *can't tell*, then each missing fact once.
     fn cant_tell_tip(&self, i: usize, others: impl Iterator<Item = usize>) -> String {
         let mut parts = Vec::new();
         if let Some(why) = &self.broken[i] {
@@ -488,7 +489,7 @@ impl ClockDomains {
                 }
             }
         }
-        parts.join(" · ")
+        format!("can't tell: {}", parts.join(" · "))
     }
 }
 
