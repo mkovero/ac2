@@ -21,7 +21,7 @@ Two rigs, paired once from the app: **pupu** (96 kHz) and **ketunkolo**.
 3. Start. pupu's daemon subscribes that one channel of ketunkolo; the pane reads *audio from
    ketunkolo starting…*, then runs as a cross-rig transfer function does today. The
    Audio & I/O row reads *in use by TF 3*.
-4. Stop or delete the measurement: the audio stream ends at once. The row is *available*
+4. Stop or delete the measurement: the audio stream ends at once; the row is *available*
    again and keeps its live level.
 
 **The reverse: PA and loopback on ketunkolo, the mic on pupu.**
@@ -40,16 +40,11 @@ Two rigs, paired once from the app: **pupu** (96 kHz) and **ketunkolo**.
 ### 2.1 Identity: `InputRef`
 
 `REMOTE_BASE + slot` is a number handed out by the list this design removes; slots handed
-out on demand would renumber under saved measurements. A measurement names its input by what
-it is:
+out on demand would renumber under saved measurements. A measurement names its input by
+what it is: this rig's device input, or a paired rig's as that rig numbers it.
 
 ```rust
-pub enum InputRef {
-    /// A device input of the rig that holds the measurement (zero-based).
-    Local(u16),
-    /// A device input of a paired rig, as that rig numbers it.
-    Remote { rig: RigId, channel: u16 },
-}
+pub enum InputRef { Local(u16), Remote { rig: RigId, channel: u16 } }
 ```
 
 - **Where it goes:** the input fields of transfer, spectrum, RTA and SPL configs, a
@@ -61,14 +56,20 @@ pub enum InputRef {
   Sweeps and walk mics read local inputs only (§4.4) and keep `u16`; levels frames keep
   `u16` per rig (§3).
 - **Written form:** a local input is its bare channel number, as today; a remote one is
-  `{rig, channel}`. One encoding, and a file naming only local inputs keeps its bytes, so
-  **`rig.json` stays at version 11 throughout** (no stage adds a field to it). That matters:
-  a `rig.json` set aside puts the system max level back at the `--max-level` bound.
-- **The raw sidecar stays at version 3 too.** A recording is a closed thing with its own
-  column numbers (`RecordedChannel.input`, with `remote` saying whose a column was), and a
-  replay renumbers remote columns after the highest local one anyway (`replay_inputs`). Its
-  shape does not change: the `remote` entry's type moves from the protocol into
-  `ac2-traces` as the sidecar's own. A bump would only hide every local-only recording.
+  `{rig, channel}`. One encoding, and a rig meter naming a local input keeps its bytes, so
+  `rig.json` keeps version 11 and with it the kept system max level, peers and meters. Its
+  **`monitor_session` section does not survive**, see §6.
+- **The raw sidecar stays at version 3**: a bump would only hide every local-only
+  recording. A recording is a closed thing with its own column numbers. A column whose
+  `remote` is set **is** `Remote{rig, channel}` whatever its `input` says; a new recording
+  writes for it, as old ones hold, `input` = 0x8000 + its ordinal among the file's remote
+  columns and `remote` with that ordinal as `slot`. The constant and the entry's type move
+  from the protocol into `ac2-traces`, private to the sidecar. A bare number ≥ 0x8000 in a
+  sidecar's quoted measurements names the file's column of that number, so old sidecars
+  read on; `replay_inputs` and the listing key on `remote`, as built.
+- **SPL log:** `# input: N` stays that rig's 1-based number; a remote input adds a `# rig:`
+  line (name and id). Whether the log's format version moves depends on how strict the
+  header parser is: a builder check in 1b.
 - `Remote` naming the session's own rig is refused where a config is set (*that input is on
   this rig*); a session file loaded on that rig loads with the row marked so, as today.
 - **Not promised:** `channel` is the source's device channel, as a local measurement names
@@ -114,11 +115,10 @@ two independent anchors; nothing measures that pair directly.
 ### 2.4 Lifecycle and the joined feed
 
 **The daemon subscribes `audio/<channel>` of a paired rig while at least one running job
-reads that input, and unsubscribes when the last one stops.** A job is a running measurement
-or a recording that includes the input. Meters are not jobs: they read levels (§3). A
-stopped measurement keeps its config and curves and holds no stream. Readers are counted
-after the whole command, so a job restarted by an edit never drops its stream. Jobs on
-local inputs never get the joined feed.
+(a measurement, or a recording that includes the input) reads it, and unsubscribes when
+the last one stops.** Meters are not jobs: they read levels (§3). A stopped measurement
+keeps its config and curves and holds no stream. Readers are counted after the whole
+command, so an edit never drops a stream. Jobs on local inputs never get the joined feed.
 
 **What a start waits for**, in order: the subscribe round trip; one link offset of held
 local blocks (10 ms at 256 / 96 kHz, 66 ms at 1024 / 48 kHz); the source's stamp map (up to
@@ -133,11 +133,10 @@ its channels (`DATA_WINDOW_MAX`): 680 ms of one, 230 ms of three, 85 ms of eight
 that would put more channels on a link than its set link offset fits is refused, with figures.
 
 **Code fact:** today the joiner is built once per stream from `cfg.remote_inputs`
-(`remote_attach`, behind a once-per-stream guard) with fixed inputs, receivers and joined
-map; `k` is per input (`InputState.k`), set from one block's stamp; the cross-rig rate is
-fed by the rig's first listed input only (`first_of_rig`); a transfer function with both
-inputs on one remote rig bypasses the gate (`cross_side`); jobs and marks find a column by
-its position (`block_index`). The joiner is therefore reshaped:
+(`remote_attach`) with fixed inputs, receivers and joined map; `k` is per input, set from
+one block's stamp; the cross-rig rate is fed by the rig's first listed input only; a
+transfer function with both inputs on one remote rig bypasses the gate (`cross_side`);
+jobs and marks find a column by its position. The joiner is therefore reshaped:
 
 - **It lives as long as the stream**, built empty at open: state per **rig** (source
   state, incarnation, `k`) and per **column** (a ring). The first reader of any remote
@@ -148,11 +147,16 @@ its position (`block_index`). The joiner is therefore reshaped:
   minute-smoothed standing offset (§5.1) when that exists, else from the first block (on
   arrival, with its reason). It is **not** dropped when the rig's last column goes: one
   block's stamp is good to a few samples, and a cross-rig delay must not move by that on
-  every stop and start. A column added later takes `k` as it stands. Two channels of one
+  every stop and start. A column added later takes `k` as it stands; two channels of one
   rig are thus sample-aligned whatever the anchor, which makes §5's one-clock row true.
-- **Slips** are judged only on a column that has audio, and move `k` for all that rig's
-  columns in the same block; a new, still empty column never moves the rig. Audio that
-  returns after a pause and no longer fits the ring is a slip like any other, counted.
+- **One re-anchor is kept from today** (`join.rs`: an input on arrival for want of a synced
+  clock or a stamp map moves to system time once both are there). When a rig's arrival
+  reason clears, `ClocksDisagree` included, its `k` is set anew on system time, for all its
+  columns in the same block, counted and marked like a slip. Without it a rig meter started
+  before chrony synced after a power cut would leave every later cross-rig transfer
+  function refused (`gate_of` needs `Anchor::SystemTime`) until the session reopened.
+- **Slips** are judged only on a column that has audio and move `k` for all that rig's
+  columns in the same block; a new, still empty column never moves the rig.
 - **Column slots are stable.** A column is appended; a removed one stays a dead slot (no
   ring, zeros, no marks) until the joined feed has no reader, when the map is rebuilt.
 - **The rate evidence leaves the audio path** (§5.1), so no input is "first".
@@ -160,10 +164,9 @@ its position (`block_index`). The joiner is therefore reshaped:
 ### 2.5 Power cuts: what comes back unattended
 
 **Code fact:** restoring the autosave opens no audio (`control/autosave.rs`). The only
-unattended open is the monitor at start: with `rig.monitor_start` on, a restarted daemon
-reopens a recorded device capture-only, only while rig-scoped meters exist. The config is
-recorded only at a `session.open` made while that holds, or when the setting is switched
-on with audio open; with none recorded the monitor gives up (`rig_meas.rs`).
+unattended open is the monitor at start (`rig.monitor_start`): capture-only, only while
+rig-scoped meters exist, on a config recorded only at a `session.open` made while that
+holds or when the setting is switched on with audio open (`rig_meas.rs`).
 
 So after a cut **a session measurement does not restart by itself**, local or remote; that
 stays. What must come back alone is a **rig-scoped meter**; on a remote input (stage 3):
@@ -178,19 +181,18 @@ stays. What must come back alone is a **rig-scoped meter**; on a remote input (s
    `session.open`. (Open the session, then pair, is the normal order; recorded only at
    open, the first power cut would leave the source closed.)
 3. **Admission thereby keeps a device open for another machine**, which may subscribe any
-   captured channel unattended. The pairing dialog says so on the source when
-   `rig.monitor_start` is on (*ketunkolo will open its inputs at start for pupu*); the
-   admission's audit line and the log line of each such open name the rig. Removing the
-   rig ends its subscriptions at once (as built) and, with no rig meter left, forgets the
-   recorded config and closes a monitor-opened session no client has taken. Nothing
-   depends on which rig boots first: both sides wait in a named state.
+   captured channel unattended, and whose apps then see names, mic serials, levels,
+   loudness and stimulus state of every captured input, continuously. The pairing dialog
+   on the source says both; the admission's audit line and the log line of each such open
+   name the rig. Removing the rig ends its subscriptions at once (as built) and, with no
+   rig meter left, forgets the recorded config and closes a monitor-opened session no
+   client has taken. Nothing depends on which rig boots first.
 
 ## 3. Levels only
 
 **What exists.** Every daemon publishes `session/levels` to apps: one frame for all its
-inputs at up to 30 a second (`METER_FPS`), with one `ballistic` and whole-frame
-`pair_levels` and `loudness` in its meta. A few hundred bytes a frame for eight inputs, of
-the order of 100 kbit/s (read off the layout; stage 1a measures it).
+inputs at up to 30 a second, one `ballistic` and whole-frame `pair_levels` and `loudness`
+in its meta; of the order of 100 kbit/s for eight inputs (off the layout; 1a measures it).
 
 **No folding, no relay between rigs.** Who may subscribe what (`peers.rs`,
 `may_subscribe`: today audio only for a rig, everything else only for an app):
@@ -205,8 +207,8 @@ the order of 100 kbit/s (read off the layout; stage 1a measures it).
   block's sample index and its capture stamp **put on system time by the source** (block
   stamps are on the backend's clock, JACK's `CLOCK_MONOTONIC_RAW`, `ac2-audio`
   `stamp.rs`; the source applies its own map). No stamp or no map: no timing in the frame.
-- The session rig subscribes it on every link whose rig has a session, under the ordinary
-  credit rule (a waiting frame is replaced by the newer one; a hole, not an error).
+- The session rig subscribes it on every link whose rig has a session; a frame waiting
+  for credit is replaced by the newer one (a hole, not an error).
 - **`peer/<rig>/levels`** (new): what the session rig serves its apps, that peer's frame
   as received, whole, with the peer's channel numbers, ballistic, pairs and loudness.
   `session/levels` stays local. A rig never serves rows it received.
@@ -220,14 +222,13 @@ the order of 100 kbit/s (read off the layout; stage 1a measures it).
 ### 4.1 What the code has today
 
 - **A lease** (`gen.acquire` / `set` / `refresh` / `release`; `gen.stop` needs none): not
-  refreshed for 1.5 s (`lease_expiry`) it expires with a fade, a disarm and an audit line.
-  Arming and firing are two steps. **Two limits:** the bound fixed at start (`ac2d
-  --max-level`) and the system max level kept in `rig.json` (`gen.ceiling`), never above
-  it; a raise needs `confirm_raise` and nothing armed or playing. All audited by client.
+  refreshed for 1.5 s it expires with a fade, a disarm and an audit line. **Two limits:**
+  the bound fixed at start (`ac2d --max-level`) and the system max level kept in
+  `rig.json` (`gen.ceiling`); a raise needs `confirm_raise` and nothing armed or playing.
 - **Nothing is called consent in the code.** What the operator calls consent is the lease,
   arming before firing, and the typed confirmation of a raise. This design adds no fourth.
-- **An admitted rig drives nothing** (`control/request.rs` refuses all but `hello` and
-  `source.state`); **the app holds one client per rig** it is connected to.
+- **An admitted rig drives nothing** (`control/request.rs`); **the app holds one client
+  per rig** it is connected to.
 
 ### 4.2 Two routes, and the recommendation
 
@@ -239,9 +240,8 @@ and disarms by itself. Cost: an app connected only to the shown rig cannot play 
 **(b) The shown rig's daemon relays** generator commands. Every app admitted on pupu could
 then make sound on ketunkolo without ketunkolo admitting it, which pairing was built to
 rule out; it needs a switch, a relay wire, chained leases and an audit on pupu's word.
-
-**Recommended: (a).** Sound on another machine should need that machine's own admission of
-the hand that starts it; (b) stays possible later behind a default-off switch.
+**Recommended: (a)**: sound on another machine should need that machine's own admission of
+the hand that starts it. (b) stays possible later behind a default-off switch.
 
 - **The paired rig's limits always win**: its own daemon enforces them. The dialog shows
   the chosen rig's line (*ketunkolo: −40.0 dBFS · bound −10.0 dBFS (ac2d --max-level)*),
@@ -249,6 +249,14 @@ the hand that starts it; (b) stays possible later behind a default-off switch.
   state**: a level is never carried from one rig to another.
 - **Moving the dialog's output to another rig while one is armed or playing is refused**
   (*stop ketunkolo's stimulus first*): two machines never change hands in one keystroke.
+- **A session the monitor opened at start has no outputs** (`capture_only`; `gen.set`
+  refuses *no output channels*). The dialog's group reads *ketunkolo's session has no
+  outputs (opened at start): open it on ketunkolo*; reopening is a new incarnation, so the
+  clock minute starts again.
+- **A stimulus this app plays is always visible**, dialog closed or not: the tree heading
+  of the playing rig carries the stimulus words, beside the top bar's Stop. Esc stops the
+  shown rig's stimulus if it plays, else the one rig this app plays on; Shift+Esc stops
+  every rig the app holds.
 - **Which client.** The tree's paired rig is matched to a client the app holds by the
   **pinned server key** in `rig.peers`, not by the rig id a daemon states in its hello. No
   match: outputs greyed under *connect to ketunkolo to play from it* (the ordinary dialog).
@@ -280,25 +288,20 @@ stimulus line follows the generator of the rig its reference is on; for a one-ri
 
 ### 4.4 What works across rigs, and what does not
 
-| arrangement | works? |
-|---|---|
-| dual-channel TF, noise or programme: output + loopback on B, mic on A, job on A | yes, under the clock rule |
-| the same with the mic on B too; spectrum, RTA, SPL of any remote input | yes, no clock rule |
-| **sweep or walk sweep with the output or a mic on another rig** | **no** |
-| periodic-noise synchronous averaging against another rig's generator | no |
-
-A sweep is deconvolved against the played signal, sample for sample, on the stream that
-played it; 2 ppm over a 10 s sweep slides 20 µs between its ends, 72° at 10 kHz. **Code
-fact:** the sweep resolves inputs against the local map only and refuses a remote one. To
-sweep a PA on ketunkolo the operator clicks a ketunkolo row and sweeps there with its mics.
+**Works:** a dual-channel transfer function on noise or programme with output and loopback
+on B and the job on A, the mic on A (under the clock rule) or on B (one clock); spectrum,
+RTA and SPL of any remote input. **Does not:** a sweep or walk sweep with its output or a
+mic on another rig, and periodic-noise synchronous averaging against another rig's
+generator. A sweep is deconvolved against the played signal, sample for sample, on the
+stream that played it; 2 ppm over a 10 s sweep slides 20 µs between its ends, 72° at
+10 kHz. **Code fact:** the sweep resolves inputs against the local map only. To sweep a PA
+on ketunkolo the operator clicks a ketunkolo row and sweeps there with its mics.
 
 ## 5. Clocks
 
-| reference | measurement | needs |
-|---|---|---|
-| remote rig B | remote rig B | nothing between rigs, given §2.4's one `k` per rig; *one clock: ketunkolo* |
-| local | remote B (or the reverse) | `Agree` + system-time anchor (§2.3) |
-| remote B | remote C | refused |
+Both channels on one remote rig: one clock, nothing needed between rigs, given §2.4's one
+`k` per rig (*one clock: ketunkolo*). One local, one remote: `Agree` and a system-time
+anchor (§2.3). Two different remote rigs: refused.
 
 ### 5.1 Standing evidence: the relation without an audio stream
 
@@ -314,11 +317,10 @@ session opens; with streams on demand that minute would come at every start.
   (60 s, 40 s), bounds and judge do not change, only their feed. The difference of the 60 s
   fits each rig already publishes is a cross-check of the long window.
 - **Age:** the relation's minute counts from when both sessions are up with the link up
-  (`rig.since` and both windows are reset by an audio re-anchor today, `join.rs`; they
-  move to the standing feed and reset on either rig's incarnation). A link gap is a hole.
-- **Disagreeing system clocks** (`ClocksDisagree`) are found today on the first audio
-  block only; the same age check runs on every mark.
-- `CantTellReason::NoAudio` becomes `NoMarks` (no session there, or no timing in its frames).
+  (today an audio re-anchor resets `rig.since` and both windows, `join.rs`; they move to
+  the standing feed and reset on either rig's incarnation). A link gap is a hole.
+- `ClocksDisagree` is found today on the first audio block only; the same age check runs
+  on every mark. `CantTellReason::NoAudio` becomes `NoMarks`.
 
 ### 5.2 What the evidence can claim
 
@@ -342,9 +344,9 @@ on one word clock hold it; two free crystals do not for long.
   exclude a `timesyncd` host at hundreds of ms), and the test's own measured scatter small
   against the bound. What the test needs is the offset's *stability*; it measures that
   itself.
-- **Verdict** only after the spread has stayed within N for **≥ 30 min**. N is not fixed
-  here: one hour of data gives 45 µs of host wander, under 2× margin for 8 samples at
-  96 kHz. It is set from the rig check below.
+- **Verdict** only after the spread has stayed within N for **≥ 30 min**. N is set by the
+  rig check: 8 samples at 96 kHz (83 µs) over 30 min would bound 0.046 ppm, but one hour
+  of data shows 45 µs of host wander, under 2× margin.
 - **On exceedance:** the count resets and the tag falls back to rate agreement, with the
   figure (*drifted 0.2 ppm over 12 min*). **The drift test never says the clocks differ**:
   *not locked* comes only from the built 2 ppm rule. So a pair converging after a power
@@ -367,7 +369,6 @@ run is rate agreement or better; the drift verdict is never required, and never 
 
 **Removed:** `SessionConfig.remote_inputs`, `RemoteInput`, `REMOTE_BASE`, `remote_slot`,
 `RemoteInputStatus.slot`, `ac2 session open --remote-in`, the app's add dialog and remove.
-
 **Added or changed:** `InputRef` where §2.1 lists it. `remote.rigs`: every paired rig with
 link, rate, relation, offered inputs; `remote.inputs` keyed by `InputRef`, with the
 measurements using each and `RemoteAudio::Idle`. `source.state`: `SourceInput.loopback`,
@@ -376,12 +377,27 @@ drift figures (after the rig check). `CantTellReason::NoMarks`. No generator com
 
 **Versions.** `PROTO_VERSION` 92 → next free at merge, once per stage that touches the wire
 (1a, 1b, 2); `WIRE_LOCK`, `docs/protocol.md` and the Python fixtures with each. Session
-format 45 → 46 in stage 1b: `remote_inputs` goes with no reader for the old shape, so an
-older session file or autosave is set aside whole and measurements on remote inputs are
-made again by picking the inputs. Rig file and raw sidecar: no bump (§2.1).
+format 45 → 46 in 1b: `remote_inputs` goes with no reader for the old shape, so an older
+session file or autosave is set aside whole. Raw sidecar: no bump (§2.1).
 
-**Deploys.** All hosts together. Stage 1b sets the old autosave aside; `rig.json` (system
-max level, peers, monitor at start, rig meters) is never touched.
+**`rig.json`: version 11 stays; one section is lost once.** It stores `monitor_session` as
+the wire `SessionConfig` (`rig/file.rs`), which is `deny_unknown_fields` and always writes
+`remote_inputs`. In 1b the section gets a type of its own, capture-only by construction
+(backend, input device, input channels, spare inputs, rate, period, link offset), so the
+wire type never again decides what a restart can read. Today's bytes cannot stay valid
+without carrying dead fields (output device and channels, loopback, `remote_inputs`),
+which would be a shim. So the built section reader drops that one section at the first
+start after the 1b deploy, and the monitor at start finds none recorded. Chosen over a
+`VERSION` bump, which would also cost the max level, peers and meters; the rule in
+`rig/file.rs` (*a section's shape change bumps the version*) is amended to say so.
+
+**Deploy of 1b**, all hosts together, per rig with a monitor at start: (1) beforehand note
+its session's device, channels and rate, and copy out the rig meters' logs: their
+directory's manifest is a session file (`autosave/rig_logs.rs`), so 45 → 46 sets the logs
+and the running Leq windows aside. (2) Deploy. (3) Open the session once (`ac2 session
+open …` as noted), which records the config. (4) Restart the daemon with no client and
+read the audit line *monitor at start: audio opened capture-only on <device>*; *no
+session recorded yet* means step 3 did not take. The system max level is not touched.
 
 ## 7. UI
 
@@ -394,10 +410,9 @@ Real daemons on the fake backend (`ac2-e2e` `sim_daemon`, two or three in proces
 stated system clocks); scene text asserted.
 
 - **Offer:** a paired rig's captured inputs in `remote.rigs` and the picker with no command
-  sent; each row of §2.3, the hard ones refused by the daemon too.
-- **On demand:** no `audio/` subscription on the source while no job reads; start →
-  subscribed; second reader → one subscription; last stops → unsubscribed; stop and start
-  again → the same `k`, the delay unmoved.
+  sent; each row of §2.3, the hard ones refused by the daemon too. **On demand:** no
+  `audio/` subscription on the source while no job reads; second reader → one
+  subscription; last stops → unsubscribed; stop and start → the same `k`, delay unmoved.
 - **Joiner:** a second channel of one rig added mid-run → the first job's averages, `k` and
   column untouched, a shared impulse on the same sample in both (also on an arrival
   anchor); a removed column is a dead slot; an empty new column causes no slip.
@@ -409,19 +424,23 @@ stated system clocks); scene text asserted.
   a link gap does not.
 - **Power cut** (`slow_`, stage 3), in the normal order: open the source's session, *then*
   admit the metering rig; rig meter on the remote input; kill both; start the metering rig
-  first, the source 20 s later, no client: the meter reads again, its log carries on, the
-  source's log names the rig it opened for. Remove the rig: the monitor session closes. A
-  session measurement stays stopped. Generators disarmed.
+  first with its system clock unsynced, the source 20 s later, no client: the meter reads
+  again, its log carries on, the source's log names the rig; when the clock syncs, one
+  re-anchor, after which a cross-rig transfer function averages. Remove the rig: the
+  monitor session closes. A session measurement stays stopped. Generators disarmed.
+- **Files:** a `rig.json` with today's `monitor_session` → that section lost, the rest
+  kept, *no session recorded yet*; after one `session.open`, the monitor reopens. The
+  sidecar fixture (`raw/tests.rs`) with a remote column lists, replays and names its rig.
 - **Levels:** three rigs in a chain: `source/levels` from B holds B's rows only; each row
   of §3's table refused as it says; frames stop → *no level*.
 - **Generator on the paired rig**, through the app's second client matched by key: above
   that rig's level refused there; its audit names the app; the dialog's level is that
-  rig's; moving to another rig while playing refused; Esc stops the playing rig while
-  another is shown. **Link-loss fade:** drop the app's connection to the playing rig →
-  disarmed within the lease expiry, the fake output ramps to zero; reconnect → still
+  rig's; moving to another rig while playing refused; a monitor-opened session's words;
+  Esc with another rig shown. **Link-loss fade:** drop the app's connection to the playing
+  rig → disarmed within the lease expiry, the fake output ramps to zero; reconnect → still
   disarmed, no `gen.set` sent. Only the rig-to-rig link dropped → still playing. A one-rig
   client: *connect there to stop*. A rig key's `gen.*` refused. §4.4's refusals.
-  **Rig acceptance** (operator present, sound only by his hand): both walk-throughs.
+- **Rig acceptance** (operator present, sound only by his hand): both walk-throughs.
 
 ## 9. Stages
 
@@ -433,19 +452,22 @@ rewrites what this design builds on in `control/remote.rs`: the tap install in
 - **1a — standing evidence** (wire). `source/levels` between daemons with its timing; the
   standing relation computed and logged **beside** the audio-fed one; the input list and
   everything shown stay as built. Then the **rig check** of §5.2.
-- **1b — identity and on demand** (wire; session format). `InputRef`; `remote_inputs`
-  gone; the reshaped joiner on the standing relation; every paired rig offered; pickers
-  and Audio & I/O rows with *available* / *in use by*. Idle rows show **no level yet**
-  (§1 is complete with stage 2). A rig meter on a remote input is refused until stage 3.
-- **2 — levels to the apps, the paired rig's generator** (wire). `peer/<rig>/levels`,
-  remote meters from their own rig; `loopback` and the stimulus in brief; the dialog by
-  rig, client by key, routed stimulus keys, the one-rig words.
+- **1b — identity and on demand** (wire; session format; the `rig.json` section of §6).
+  `InputRef`; `remote_inputs` gone; the reshaped joiner on the standing relation; every
+  paired rig offered; pickers and Audio & I/O rows with *available* / *in use by*;
+  `peer/<rig>/levels`, since an in-use remote input must keep the meter it has today (it
+  rides `session/levels` now). A rig meter on a remote input is refused until stage 3.
+- **2 — the paired rig's generator** (wire). `loopback` and the stimulus in brief; the
+  dialog by rig, client by key, routed stimulus keys, the one-rig and no-outputs words.
 - **3 — unattended** (no wire, no file bump). Rig meters on remote inputs; the widened
   monitor at start with its words, audit and un-admit.
 
-Later, each its own design: re-binding a session's references to another rig and a cue
-when the source's device changed; the relay of route (b); a sweep with a remote mic; a
-transfer function over two remote rigs; resampling a rig that is not locked.
+**Builder checks, not verified here:** levels frames are computed with no app subscribed;
+the levels publisher can reach block stamps; the fan-out's hand-off can be switched on a
+running stream; the untagged `InputRef` reads under `deny_unknown_fields` in every config.
+
+Later, each its own design: re-binding a session's references to another rig; the relay of
+route (b); a sweep with a remote mic; a transfer function over two remote rigs; resampling.
 
 ## 10. Open questions for the operator
 
@@ -460,8 +482,8 @@ transfer function over two remote rigs; resampling a rig that is not locked.
    TELL`, `LOCKED` never shown.
 2. **Route (a): an app must hold the paired rig to play from it, and to stop it**; a kiosk
    on one rig sees the stimulus and cannot stop it. Recommended: accept; relay later.
-3. **Admission keeps the source's inputs open at start** (§2.5), for a rig that may take
-   any captured channel unattended. Recommended: yes, said in the pairing dialog, audited.
+3. **Admission keeps the source's inputs open at start** (§2.5). Recommended: yes, said in
+   the pairing dialog, audited.
 4. **Pupu's apps see ketunkolo's row text, levels, loudness and stimulus in brief** without
    ketunkolo admitting them. Recommended: accept; none of it is audio or control.
 5. **Pair both directions in one act** (not verified whether the app does today). Yes.
