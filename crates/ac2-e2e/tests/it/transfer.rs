@@ -582,8 +582,8 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     );
 
     // The sweep run as the reference: the steps move the live curve against it, alone.
-    // The drop gives the pane the sweep's group (V only selects the run); the live curve is
-    // ticked into that pane (C) after it.
+    // The delay keys act on the measurement the focused transfer pane shows, so the sweep
+    // is ticked (C) behind the measurement on its own pane and its run picked (V) there.
     d.send(Msg::SelectMeas(m.id));
     assert_eq!(d.st.rig.selected_trace, None);
     let sweep =
@@ -591,29 +591,12 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
             .ok()
             .and_then(|t| t.edit.owner.meas())
             .ok_or("the run's sweep")?;
-    for _ in 0..8 {
-        if d.st.rig.selected_trace == Some(run) {
-            break;
-        }
-        d.send(Msg::Command(CommandId::NextTrace));
-    }
-    assert_eq!(d.st.rig.selected_trace, Some(run));
-    assert_eq!(
-        d.st.kind_meas(PaneKind::Transfer).map(|x| x.id),
-        Some(m.id),
-        "V moved no pane"
-    );
     let tf = crate::common::pane(&d.st, PaneKind::Transfer);
-    d.drop_meas(tf, sweep);
-    assert_eq!(
-        d.st.rig.selected_trace,
-        Some(run),
-        "the drop keeps the selection"
-    );
+    assert_eq!(d.st.pane_meas(tf).map(|x| x.id), Some(m.id));
     let name =
-        d.st.meas(m.id)
+        d.st.meas(sweep)
             .map(|x| x.config.name.clone())
-            .ok_or("the live")?;
+            .ok_or("the sweep")?;
     d.send(Msg::FocusPane(tf));
     d.key("C");
     let Overlay::Choose(c) = &mut d.st.overlay else {
@@ -623,13 +606,25 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
         .choices
         .iter()
         .position(|c| c.label.contains(&name) && !c.label.contains("lead"))
-        .ok_or("the live measurement in the tick list")?;
+        .ok_or("the sweep in the tick list")?;
     d.key("Enter");
     d.key("Escape");
     assert!(
         d.st.compared_into(tf)
-            .contains(&ac2_proto::model::layout::EntryRef::Group { meas: m.id }),
-        "the live curve ticked into the sweep's pane"
+            .contains(&ac2_proto::model::layout::EntryRef::Group { meas: sweep }),
+        "the sweep ticked into the measurement's pane"
+    );
+    for _ in 0..8 {
+        if d.st.rig.selected_trace == Some(run) {
+            break;
+        }
+        d.send(Msg::Command(CommandId::NextTrace));
+    }
+    assert_eq!(d.st.rig.selected_trace, Some(run));
+    assert_eq!(
+        d.st.pane_meas(tf).map(|x| x.id),
+        Some(m.id),
+        "V moved no pane"
     );
     d.send(Msg::Command(CommandId::PhaseReference));
     let pre = drawn_phase(&d.st, 240);
@@ -667,11 +662,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     }
     d.stop()?;
 
-    // Stopped: no live curve to move, so the keys change nothing and say why. The pane was
-    // given the sweep; its list puts the measurement back first.
-    let tf = crate::common::pane(&d.st, PaneKind::Transfer);
-    d.drop_meas(tf, m.id);
-    assert_eq!(d.st.kind_meas(PaneKind::Transfer).map(|x| x.id), Some(m.id));
+    // Stopped: no live curve to move, so the keys change nothing and say why.
     d.send(Msg::Command(CommandId::StartStop));
     d.until("stopped", |s| {
         s.daemon()
