@@ -401,8 +401,7 @@ session recorded yet* means step 3 did not take. The system max level is not tou
 
 ## 7. UI
 
-Said where it arises (§1, §2.3, §3, §4.2, §10 q1): one quantity, one wording; a remote
-input is a rig name and row text, never a number; verdicts on evidence only; no new keys.
+Said where it arises (§1, §2.3, §3, §4.2, §10 q1); names, not numbers; no new keys.
 
 ## 8. Tests
 
@@ -466,8 +465,7 @@ rewrites what this design builds on in `control/remote.rs`: the tap install in
 the levels publisher can reach block stamps; the fan-out's hand-off can be switched on a
 running stream; the untagged `InputRef` reads under `deny_unknown_fields` in every config.
 
-Later, each its own design: re-binding a session's references to another rig; the relay of
-route (b); a sweep with a remote mic; a transfer function over two remote rigs; resampling.
+Later: re-binding references to another rig; route (b); a transfer function over two remote rigs.
 
 ## 10. Open questions for the operator
 
