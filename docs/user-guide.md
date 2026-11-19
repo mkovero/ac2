@@ -2896,6 +2896,13 @@ error (disk full: everything before is kept), when the session closes or reopens
 the daemon stops. Gaps (an xrun, a slow disk) are never filled: the sidecar says where
 samples do not follow each other.
 
+A remote input (another rig's) is recorded as the measurements read it, at this rig's
+sample index. Where its stream did not arrive (the other rig closed, the network dropped, a
+block came too late), the file holds zeros on that channel, and the sidecar marks every
+such span: the top bar adds `· 3 remote gaps`, and `ac2 rec list` counts them. A replay
+offers the remote input as an input after the local ones (`rig-b In 2`) and reads those
+spans as lost time, as live, never as silence.
+
 Files go to `recordings/` in the ac2 data directory on the daemon's machine (`ac2d
 --recordings <dir>` elsewhere); a name is never reused:
 

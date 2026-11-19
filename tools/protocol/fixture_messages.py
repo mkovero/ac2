@@ -990,6 +990,7 @@ def events():
                 "frames": 480000,
                 "bytes": 3840116,
                 "discontinuities": 1,
+                "remote_gaps": {"spans": 2, "frames": 960},
                 "max_duration": 10.0,
                 "max_bytes": 1073741824,
                 "status": {"type": "ended", "reason": {"type": "duration_limit"}},

@@ -302,6 +302,7 @@ impl Control {
         let to_self = self.s.to_self.clone();
         let limits = self.s.limits();
         let fps = self.s.fps;
+        let marks = self.replay_marks.clone();
         let spawned = std::thread::Builder::new()
             .name("ac2d-reopen".into())
             .spawn(move || {
@@ -316,6 +317,7 @@ impl Control {
                     epoch,
                     to_self.clone(),
                     fps,
+                    marks,
                 );
                 // A daemon gone meanwhile drops the stream with the message.
                 let _ = to_self.send(ControlMsg::Reopened {

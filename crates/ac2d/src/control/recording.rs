@@ -20,7 +20,7 @@ use ac2_audio::{
 use ac2_proto::event::Change;
 use ac2_proto::model::{
     CalEntry, DeviceSelector, DiscontinuityCause, MeasKind, RecordRequest, RecordingEnd,
-    RecordingRef, RecordingRun, RecordingStatus, ReplayInfo, ReplayPace, SessionConfig,
+    RecordingRef, RecordingRun, RecordingStatus, RemoteGaps, ReplayInfo, ReplayPace, SessionConfig,
 };
 use ac2_proto::units::{ClientId, SampleIndex, Seconds, SessionEpoch, WallNs};
 use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
@@ -32,6 +32,7 @@ use ac2_traces::raw::{
 use super::Control;
 use crate::jobs::record::{Progress, QUEUE_S, RecordCmd, Recorder, SharedProgress};
 use crate::jobs::{self, JobHandle, block_index};
+use crate::remote::replay::ReplayMarks;
 use crate::session::Runtime;
 use crate::util::{internal, invalid, missing, perr, refused, wall_ns};
 
@@ -141,17 +142,16 @@ impl Control {
         if req.inputs.is_empty() {
             return Err(invalid("no inputs to record"));
         }
+        // With a remote input the recorder reads the joined feed, whose blocks carry the
+        // remote columns after the local ones, and their marks.
+        let joined = self.job_map(rt, &req.inputs, false)?;
+        let map = joined.as_deref().unwrap_or(&rt.input_map);
         let mut cols = Vec::with_capacity(req.inputs.len());
         for (i, &input) in req.inputs.iter().enumerate() {
             if req.inputs[..i].contains(&input) {
                 return Err(invalid(format!("input {} listed twice", input + 1)));
             }
-            if ac2_proto::model::remote_slot(input).is_some() {
-                return Err(refused(
-                    "a remote input is not recorded yet: record it on its own rig",
-                ));
-            }
-            cols.push(block_index(&rt.input_map, input).ok_or_else(|| {
+            cols.push(block_index(map, input).ok_or_else(|| {
                 invalid(format!(
                     "input {} is not captured by the session",
                     input + 1
@@ -229,7 +229,11 @@ impl Control {
                     .iter()
                     .map(|&input| RecordedChannel {
                         input,
-                        name: names.get(usize::from(input)).cloned(),
+                        remote: self.remote_input(input).cloned(),
+                        name: match self.remote_input(input) {
+                            Some(r) => Some(format!("{} In {}", r.rig_name, r.channel + 1)),
+                            None => names.get(usize::from(input)).cloned(),
+                        },
                         mic: st
                             .inputs
                             .iter()
@@ -270,6 +274,8 @@ impl Control {
             },
             timeline: Vec::new(),
             discontinuities: Vec::new(),
+            remote_gaps: Vec::new(),
+            remote_slips: Vec::new(),
         };
         if let Err(e) = raw::write_sidecar(&dir, &name, &sidecar) {
             drop(writer);
@@ -303,7 +309,11 @@ impl Control {
             (QUEUE_S * f64::from(rt.sample_rate)) as u64,
             std::sync::atomic::Ordering::Relaxed,
         );
-        rt.fanout.attach(fid, feed);
+        if joined.is_some() {
+            rt.fanout.attach_joined(fid, feed);
+        } else {
+            rt.fanout.attach(fid, feed);
+        }
         let run = RecordingRun {
             name,
             path: path.to_string_lossy().into_owned(),
@@ -316,6 +326,7 @@ impl Control {
             frames: 0,
             bytes: raw::wav::HEADER_BYTES,
             discontinuities: 0,
+            remote_gaps: RemoteGaps::default(),
             max_duration: req.max_duration,
             max_bytes: req.max_bytes,
             status: RecordingStatus::Recording,
@@ -371,6 +382,7 @@ impl Control {
         run.frames = p.frames;
         run.bytes = p.bytes;
         run.discontinuities = p.discontinuities;
+        run.remote_gaps = p.remote_gaps;
         if let Some(s) = p.start_sample {
             run.start_sample = SampleIndex(s);
         }
@@ -390,6 +402,7 @@ impl Control {
         run.frames = p.frames;
         run.bytes = p.bytes.max(raw::wav::HEADER_BYTES);
         run.discontinuities = p.discontinuities;
+        run.remote_gaps = p.remote_gaps;
         if let Some(s) = p.start_sample {
             run.start_sample = SampleIndex(s);
         }
@@ -559,16 +572,21 @@ impl Control {
                 s.audio.sample_rate
             )));
         }
-        let inputs: Vec<u16> = s.audio.channels.iter().map(|c| c.input).collect();
+        let inputs = replay_inputs(&s.audio.channels);
         let max = inputs.iter().max().copied().unwrap_or(0);
         let input_names = (0..=max)
             .map(|i| {
-                s.audio.channels.iter().find(|c| c.input == i).map_or_else(
-                    || format!("In {} (not recorded)", i + 1),
-                    |c| c.name.clone().unwrap_or_else(|| format!("In {}", i + 1)),
-                )
+                inputs
+                    .iter()
+                    .position(|&c| c == i)
+                    .and_then(|k| s.audio.channels[k].name.clone())
+                    .unwrap_or_else(|| match inputs.contains(&i) {
+                        true => format!("In {}", i + 1),
+                        false => format!("In {} (not recorded)", i + 1),
+                    })
             })
             .collect();
+        let marks = replay_marks(&s);
         let open_path = path.clone();
         let open: OpenSource = Arc::new(move || {
             WavReader::open(&open_path)
@@ -631,13 +649,54 @@ impl Control {
             recorded_at: s.start.wall_ns,
         };
         self.replay_backend = Some(backend);
+        self.replay_marks = marks;
         let r = self.open_session(client, config, Some(replay));
         if r.is_err() {
             self.replay_backend = None;
+            self.replay_marks = None;
         }
         tracing::info!("replaying {name} ({:?})", pace);
         r.map(ReplyBody::Session)
     }
+}
+
+/// The device inputs a replay offers, in file channel order: a local input keeps its number;
+/// a remote one (another rig's, joined live) becomes an input after the highest local one,
+/// named as recorded.
+fn replay_inputs(channels: &[raw::RecordedChannel]) -> Vec<u16> {
+    let mut next = channels
+        .iter()
+        .filter(|c| c.remote.is_none() && ac2_proto::model::remote_slot(c.input).is_none())
+        .map(|c| c.input + 1)
+        .max()
+        .unwrap_or(0);
+    channels
+        .iter()
+        .map(|c| {
+            if c.remote.is_none() && ac2_proto::model::remote_slot(c.input).is_none() {
+                c.input
+            } else {
+                next += 1;
+                next - 1
+            }
+        })
+        .collect()
+}
+
+/// A recording's remote-channel marks in replay samples (the replay starts at sample 0); the
+/// replay's block columns are the file's channels.
+fn replay_marks(s: &Sidecar) -> Option<Arc<ReplayMarks>> {
+    let at = |sample: SampleIndex| sample.0.saturating_sub(s.start.session_sample.0);
+    ReplayMarks::new(
+        s.remote_gaps.iter().map(|g| {
+            let from = at(g.session_sample);
+            (g.channel, from..from + g.frames, g.late)
+        }),
+        s.remote_slips
+            .iter()
+            .map(|l| (l.channel, at(l.session_sample), l.samples)),
+    )
+    .map(Arc::new)
 }
 
 /// The `recording` entity of a finished recording read back from its sidecar.
@@ -656,6 +715,7 @@ fn run_of(dir: &std::path::Path, name: &str, s: &Sidecar) -> RecordingRun {
         frames,
         bytes: raw::wav::file_bytes(channels, frames),
         discontinuities: u32::try_from(s.discontinuities.len()).unwrap_or(u32::MAX),
+        remote_gaps: s.remote_gap_count(),
         max_duration: Seconds(s.limits.max_duration.0),
         max_bytes: s.limits.max_bytes,
         status: RecordingStatus::Ended {

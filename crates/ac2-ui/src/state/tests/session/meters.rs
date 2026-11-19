@@ -308,6 +308,7 @@ fn record_toggles_and_the_indicator_names_the_inputs() {
         frames: 48_000 * 5,
         bytes: 116 + 48_000 * 5 * 8,
         discontinuities: 0,
+        remote_gaps: Default::default(),
         max_duration: Seconds(RECORD_MAX_S),
         max_bytes: None,
         status: RecordingStatus::Recording,

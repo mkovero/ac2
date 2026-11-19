@@ -81,6 +81,7 @@ fn rig_at(
     cfg.name = name.into();
     cfg.system_clock = SystemClockSource::Stated(SystemClock::Synced { maxerror_us: 100 });
     cfg.advertise = mdns.map(|mdns| ac2d::Advertise { mdns });
+    cfg.recording_dir = Some(d.join("recordings"));
     Daemon::start(cfg).unwrap()
 }
 
@@ -619,4 +620,95 @@ fn free_pair() -> u16 {
             return p;
         }
     }
+}
+
+/// A recording of a remote input: while its rig's session is closed the file holds zeros on
+/// that channel, and the sidecar marks them; a replay offers the channel as a device input
+/// named as recorded.
+#[test]
+fn slow_a_remote_input_is_recorded_with_its_gaps_marked() {
+    use ac2_proto::model::{RecordRequest, RecordingRef, ReplayPace};
+    use ac2_proto::units::Seconds;
+    use ac2_traces::raw;
+    let Paired {
+        _dir,
+        a,
+        b,
+        mut ca,
+        mut cb,
+        ..
+    } = paired();
+    let streaming = |r: &RemoteState| {
+        r.inputs.first().map(|i| i.audio) == Some(RemoteAudio::Streaming)
+            && r.rigs.first().map(|r| &r.link) == Some(&RemoteLink::Up)
+    };
+    wait_remote(&mut ca, "streaming", streaming);
+    let rec = ca.recording(Command::RecStart {
+        request: RecordRequest {
+            inputs: vec![0, REMOTE_BASE],
+            name: Some("joined".into()),
+            max_duration: Seconds(60.0),
+            max_bytes: None,
+        },
+    });
+    std::thread::sleep(Duration::from_millis(700));
+    cb.ok(Command::SessionClose);
+    wait_remote(&mut ca, "the source gone", |r| !streaming(r));
+    std::thread::sleep(Duration::from_millis(700));
+    cb.ok(Command::SessionOpen {
+        config: session(false),
+    });
+    wait_remote(&mut ca, "streaming again", streaming);
+    std::thread::sleep(Duration::from_millis(700));
+    let run = ca.recording(Command::RecStop);
+
+    let dir = _dir.path().join("rig-a").join("recordings");
+    let s = raw::read_sidecar(&dir, &rec.name).unwrap();
+    let remote = s.audio.channels[1]
+        .remote
+        .clone()
+        .expect("the remote source");
+    assert_eq!((remote.rig_name.as_str(), remote.channel), ("rig-b", 1));
+    assert_eq!(s.audio.channels[1].name.as_deref(), Some("rig-b In 2"));
+    assert!(
+        s.remote_gaps.iter().all(|g| g.channel == 1),
+        "{:?}",
+        s.remote_gaps
+    );
+    let lost: u64 = s.remote_gaps.iter().map(|g| g.frames).sum();
+    assert!(
+        lost >= u64::from(FS) / 2,
+        "the closed source's time is marked: {:?}",
+        s.remote_gaps
+    );
+    let frames = s.end.as_ref().unwrap().frames;
+    assert!(lost < frames, "{lost} of {frames}");
+    assert_eq!(run.remote_gaps, s.remote_gap_count());
+    // The marked frames hold zeros.
+    let mut r = raw::WavReader::open(&raw::audio_path(&dir, &rec.name)).unwrap();
+    let mut all = vec![0.0f32; frames as usize * 2];
+    let mut got = 0;
+    while got < all.len() {
+        let n = r.read(&mut all[got..]).unwrap();
+        if n == 0 {
+            break;
+        }
+        got += n * 2;
+    }
+    for g in &s.remote_gaps {
+        for f in g.frame..g.frame + g.frames {
+            assert_eq!(all[f as usize * 2 + 1], 0.0, "frame {f}");
+        }
+    }
+
+    // The replay offers the remote channel as input 1, named as recorded.
+    let session = ca.session(Command::SessionReplay {
+        recording: RecordingRef::Name { name: rec.name },
+        pace: ReplayPace::Fast,
+    });
+    let open = session.open.expect("open");
+    assert_eq!(open.config.input_channels, vec![0, 1]);
+    assert!(open.config.remote_inputs.is_empty());
+    a.shutdown();
+    b.shutdown();
 }

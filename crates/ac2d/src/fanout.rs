@@ -382,6 +382,7 @@ impl Fanout {
         to_control: Sender<ControlMsg>,
         fps: u32,
         lossless: bool,
+        marks: Option<Arc<crate::remote::replay::ReplayMarks>>,
     ) -> std::io::Result<Self> {
         let n = stream.negotiated();
         let channels = usize::from(n.input_channels);
@@ -405,6 +406,7 @@ impl Fanout {
             block_period,
             lossless: lossless.then(|| u64::from(n.buffer_frames.unwrap_or(4096).max(1))),
             stall_after: stall_after(n.delivery, block_period),
+            marks,
         };
         let thread = std::thread::Builder::new()
             .name("ac2d-fanout".into())
@@ -530,6 +532,8 @@ struct Config {
     lossless: Option<u64>,
     /// No block for this long means the stream stopped ([`stall_after`]).
     stall_after: Option<Duration>,
+    /// A replayed recording's remote-channel marks, put back on its blocks.
+    marks: Option<Arc<crate::remote::replay::ReplayMarks>>,
 }
 
 fn run(
@@ -632,9 +636,12 @@ fn run(
             {
                 break;
             }
-            let Some(block) = pop_block_into(&mut stream, pool.spare_blocks.pop()) else {
+            let Some(mut block) = pop_block_into(&mut stream, pool.spare_blocks.pop()) else {
                 break;
             };
+            if let Some(m) = &cfg.marks {
+                m.stamp(&mut block);
+            }
             bursts.observe(now, block.frames);
             frames += u64::from(block.frames);
             if block.flags.contains(BlockFlags::CONFIG_CHANGE) {

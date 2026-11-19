@@ -31,7 +31,7 @@ keepalives to each connection as its credit allows (§5.8).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 90`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 91`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -1569,8 +1569,8 @@ Design: `docs/design/raw-capture.md`; file format §7.5. A daemon has a recordin
 or an in-process test daemon not given one) answers `rec.start` `unsupported`, `rec.list` with
 nothing and `session.replay` by name `not_found`.
 
-`RecordRequest`: `inputs` ([u16] device inputs, each captured by the open session, in file
-channel order), `name` (string \| nil: a file stem like a session name; nil =
+`RecordRequest`: `inputs` ([u16] session channels, each captured by the open session, in
+file channel order; a remote input is recorded from the joined feed, its gaps marked), `name` (string \| nil: a file stem like a session name; nil =
 `rec-<UTC date>T<hh-mm-ss>`, made unique), `max_duration` (Seconds, 0 < d ≤ 86 400),
 `max_bytes` (u64 \| nil, at least one second of audio).
 
@@ -1590,14 +1590,16 @@ channel order), `name` (string \| nil: a file stem like a session name; nil =
 - Progress and outcome are the `recording` entity (§4.1), `RecordingRun`: `name`, `path`
   (the audio file on the daemon host), `inputs`, `sample_rate_hz`, `session_epoch`,
   `start_sample` (session sample of the file's first frame), `started_at`, `started_by`,
-  `frames`, `bytes` (file size), `discontinuities`, `max_duration`, `max_bytes`, `status`
-  (tagged by `type`: `recording` \| `ended` {`reason`: `RecordingEnd`}). `frames`, `bytes`
-  and `discontinuities` are updated about once a second while recording. `RecordingEnd`
+  `frames`, `bytes` (file size), `discontinuities`, `remote_gaps` (`RemoteGaps` {`spans`,
+  `frames`}: the remote inputs' marked gaps, frames summed over channels), `max_duration`,
+  `max_bytes`, `status` (tagged by `type`: `recording` \| `ended` {`reason`:
+  `RecordingEnd`}). `frames`, `bytes`, `discontinuities` and `remote_gaps` are updated about once a second while recording. `RecordingEnd`
   (tagged by `type`): `stopped`, `duration_limit`, `size_limit`, `write_failed` {`msg`},
   `session_closed`, `session_reopened`, `audio_stopped` (the session's audio stopped, §4.1.1;
   the file ends at the last audio received), `daemon_shutdown`, `interrupted`.
 - `rec.list` → [`RecordingFile`]: `name`, `path`, `sample_rate_hz`, `inputs`, `frames`,
-  `started_at`, `discontinuities`, `end` (`RecordingEnd` \| nil while being written),
+  `started_at`, `discontinuities`, `remote_gaps`, `end` (`RecordingEnd` \| nil while being
+  written),
   oldest first.
 - Every committed change of a measurement, the generator, the input setup or a calibration
   while recording goes into the sidecar's timeline at the newest captured sample. Every
@@ -2585,9 +2587,10 @@ in the recording directory:
   `WAVE`, a 28-byte `JUNK` chunk, `fmt ` of 40 bytes, `fact`, `data`). Past 4 GiB the file
   becomes RF64 (EBU Tech 3306): `RIFF` → `RF64`, `JUNK` → `ds64` with the 64-bit sizes, the
   32-bit sizes 0xFFFFFFFF; the audio never moves.
-- `<name>.ac2rec.json`: the sidecar, JSON, `format: "ac2-raw-capture"`, `version: 2`
+- `<name>.ac2rec.json`: the sidecar, JSON, `format: "ac2-raw-capture"`, `version: 3`
   (another version is refused), `software` {`ac2`, `build`, `protocol`}, `audio`
-  {`file`, `sample_rate`, `channels`: [{`input`, `name`, `mic`, `roles`: [{type: loopback
+  {`file`, `sample_rate`, `channels`: [{`input` (session channel), `remote` (`RemoteInput`
+  \| nil: whose input a remote channel was), `name`, `mic`, `roles`: [{type: loopback
   \| reference \| measured \| analysed, `measurement`}]}]}, `device` {`backend`,
   `input_device`, `output_device`, `buffer_frames`, `clock`, `session_epoch`, `loopback`},
   `start` and `end.at` (`Mark` {`session_sample`, `wall_ns`, `utc`}), `end` {`at`,
@@ -2597,7 +2600,10 @@ in the recording directory:
   `frame`, `wall_ns`, `change`: {type: measurement \| generator \| inputs \| calibration,
   value}}], `discontinuities` [{`frame` (first file frame after it), `session_sample`,
   `lost_frames`, `estimated`, `causes`: [xrun \| gap \| overflow \| config_change \|
-  recorder_behind]}]. Entity values are the protocol types of `software.protocol` in JSON.
+  recorder_behind]}], `remote_gaps` [{`channel` (file channel), `frame`, `session_sample`,
+  `frames`, `late`}] (samples another rig never delivered; zeros in the file),
+  `remote_slips` [{`channel`, `frame`, `session_sample`, `samples`}] (the remote channel's
+  map moved by `samples` from there on). Entity values are the protocol types of `software.protocol` in JSON.
 
 The sidecar is written when recording starts and replaced atomically when it ends. Session
 sample of file frame f: `start.session_sample + f + Σ lost_frames` of the discontinuities at

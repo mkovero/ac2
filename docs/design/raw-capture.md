@@ -65,7 +65,7 @@ keeps the WAV header shape that most tools already read, and the reserved `JUNK`
 the switch free. Written by a small writer in `ac2-traces::raw::wav` (no codec dependency;
 the reader accepts plain float WAV too and refuses PCM).
 
-**Sidecar** (`format: ac2-raw-capture`, `version: 2`; another version is refused):
+**Sidecar** (`format: ac2-raw-capture`, `version: 3`; another version is refused):
 
 | field | content |
 |---|---|
@@ -103,6 +103,12 @@ measurements restart on it as on any reopen.
   consumer has room for. `fast` therefore never drops audio, however slow the analyses;
   `realtime` plays one second per second. The replay is held until the measurements are
   attached, so the first frame is seen by all of them.
+- **Remote inputs replay as recorded.** A recorded remote input (another rig's, from the
+  joined feed) is offered as a device input numbered after the highest local one, named as
+  recorded (`<rig> In <n>`). Its gaps hold zeros in the file; the sidecar's `remote_gaps`
+  and `remote_slips` are stamped back onto the replayed blocks' column marks, so meters, SPL
+  and transfer functions read a gap as lost time and a slip as a restart, as they did live,
+  never the zeros as silence.
 - Replay of a replay records the same samples again (tested bit for bit).
 
 ## Tolerance

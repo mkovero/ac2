@@ -69,6 +69,26 @@ fn shorten(s: &str, max: usize) -> String {
     }
 }
 
+fn remote_gaps(n: u32) -> String {
+    match n {
+        0 => String::new(),
+        1 => " · 1 remote gap".to_owned(),
+        n => format!(" · {n} remote gaps"),
+    }
+}
+
+/// How long the remote gaps of `r` last, summed over its channels: `12 ms`, `3.4 s`.
+fn gap_time(r: &RecordingRun) -> String {
+    let s = r.remote_gaps.frames as f64 / f64::from(r.sample_rate_hz.max(1));
+    if s < 1.0 {
+        format!("{:.0} ms", s * 1e3)
+    } else if s < 60.0 {
+        format!("{s:.1} s")
+    } else {
+        crate::format::duration(s)
+    }
+}
+
 fn dropouts(n: u32) -> String {
     match n {
         0 => String::new(),
@@ -96,12 +116,23 @@ pub fn recording_label(r: &RecordingRun, input_name: impl Fn(u16) -> String) -> 
         .map(|&i| input_name(i))
         .collect::<Vec<_>>()
         .join(", ");
-    let lost = dropouts(r.discontinuities);
-    let gaps = if r.discontinuities > 0 {
-        " The audio is not continuous where the sidecar lists dropouts."
-    } else {
-        ""
-    };
+    let lost = format!(
+        "{}{}",
+        dropouts(r.discontinuities),
+        remote_gaps(r.remote_gaps.spans)
+    );
+    let mut gaps = String::new();
+    if r.discontinuities > 0 {
+        gaps.push_str(" The audio is not continuous where the sidecar lists dropouts.");
+    }
+    if r.remote_gaps.spans > 0 {
+        gaps.push_str(&format!(
+            " {} of remote input audio never arrived from its rig: the file holds zeros \
+             there, and the sidecar marks them so a replay reads them as lost, not silence.",
+            gap_time(r)
+        ));
+    }
+    let lossy = r.discontinuities > 0 || r.remote_gaps.spans > 0;
     match &r.status {
         RecordingStatus::Recording => {
             let bound = match r.max_bytes {
@@ -114,7 +145,7 @@ pub fn recording_label(r: &RecordingRun, input_name: impl Fn(u16) -> String) -> 
             };
             RecordingLabel {
                 text: format!("REC {t} · {size}{lost}"),
-                tone: if r.discontinuities > 0 {
+                tone: if lossy {
                     RecordingTone::Warning
                 } else {
                     RecordingTone::Recording
@@ -177,11 +208,7 @@ pub fn recording_label(r: &RecordingRun, input_name: impl Fn(u16) -> String) -> 
             };
             RecordingLabel {
                 text,
-                tone: if r.discontinuities > 0 {
-                    RecordingTone::Warning
-                } else {
-                    tone
-                },
+                tone: if lossy { RecordingTone::Warning } else { tone },
                 detail: format!(
                     "{inputs}: {t} of audio in {}, ended because {why}{msg}.{gaps}",
                     r.path
@@ -236,6 +263,7 @@ mod tests {
             frames,
             bytes: 116 + frames * 8,
             discontinuities: gaps,
+            remote_gaps: Default::default(),
             max_duration: Seconds(600.0),
             max_bytes: None,
             status,
@@ -266,6 +294,35 @@ mod tests {
         assert!(l.detail.contains("10 min 00 s"), "{}", l.detail);
         let l = recording_label(&run(RecordingStatus::Recording, 48_000, 2), name);
         assert_eq!(l.text, "REC 0:01 · 384 kB · 2 dropouts");
+        assert_eq!(l.tone, RecordingTone::Warning);
+    }
+
+    #[test]
+    fn remote_gaps_are_counted_and_explained() {
+        let mut r = run(RecordingStatus::Recording, 48_000, 0);
+        r.remote_gaps = ac2_proto::model::RemoteGaps {
+            spans: 3,
+            frames: 576,
+        };
+        let l = recording_label(&r, name);
+        assert_eq!(l.text, "REC 0:01 · 384 kB · 3 remote gaps");
+        assert_eq!(l.tone, RecordingTone::Warning);
+        assert!(
+            l.detail
+                .contains("12 ms of remote input audio never arrived"),
+            "{}",
+            l.detail
+        );
+        assert!(l.detail.contains("lost, not silence"), "{}", l.detail);
+        r.discontinuities = 1;
+        r.status = RecordingStatus::Ended {
+            reason: RecordingEnd::Stopped,
+        };
+        let l = recording_label(&r, name);
+        assert_eq!(
+            l.text,
+            "recorded take 1 · 0:01 · 384 kB · 1 dropout · 3 remote gaps"
+        );
         assert_eq!(l.tone, RecordingTone::Warning);
     }
 

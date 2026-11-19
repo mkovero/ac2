@@ -112,6 +112,8 @@ pub struct RecordingRun {
     pub bytes: u64,
     /// Discontinuities recorded so far.
     pub discontinuities: u32,
+    /// Samples of remote inputs that never arrived, marked so far.
+    pub remote_gaps: RemoteGaps,
     /// Duration bound.
     pub max_duration: Seconds,
     /// Size bound.
@@ -145,8 +147,23 @@ pub struct RecordingFile {
     pub started_at: WallNs,
     /// Discontinuities in it.
     pub discontinuities: u32,
+    /// Samples of its remote inputs that never arrived, marked.
+    pub remote_gaps: RemoteGaps,
     /// Why it ended; `None` while it is being written.
     pub end: Option<RecordingEnd>,
+}
+
+/// The marked gaps of a recording's remote inputs: spans of samples another rig's stream
+/// never delivered (late, lost or slipped). The file holds zeros there to stay rectangular;
+/// the sidecar lists each span per channel, and a replay reads them as lost, never as
+/// silence.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteGaps {
+    /// Spans marked, over all remote channels.
+    pub spans: u32,
+    /// Samples in them, summed over the channels.
+    pub frames: u64,
 }
 
 /// Which recording `session.replay` plays.

@@ -662,7 +662,7 @@ impl Control {
     }
 
     /// The remote input of session channel `ch`, if it is one.
-    fn remote_input(&self, ch: u16) -> Option<&RemoteInput> {
+    pub(super) fn remote_input(&self, ch: u16) -> Option<&RemoteInput> {
         let slot = remote_slot(ch)?;
         self.session
             .as_ref()?

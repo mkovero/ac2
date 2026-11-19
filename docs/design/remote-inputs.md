@@ -68,7 +68,8 @@ loopback captured; the loopback input must be local). `input_map` (device channe
 channel), built today as a clone of `input_channels` at open, is built from the local channels
 only; the fan-out learns where the remote channels come from (§2.2). A raw recording that
 includes a remote channel keeps its session number and source (rig, channel) in its sidecar,
-so a replay names it as recorded.
+so a replay names it as recorded, and lists the channel's gaps and slips from the joined
+feed's marks, which a replay stamps back on its blocks (raw-capture.md, *Replay*).
 
 - **The stimulus and its loopback stay local.** `LoopbackRoute` is a pair on one converter;
   the timing monitor stays on the rig that plays. A transfer function's *reference input*

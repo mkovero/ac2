@@ -58,6 +58,7 @@ impl Control {
             epoch,
             self.s.to_self.clone(),
             self.s.fps,
+            self.replay_marks.clone(),
         ) {
             Ok(rt) => rt,
             Err(e) => {
@@ -224,6 +225,7 @@ impl Control {
             epoch,
             self.s.to_self.clone(),
             self.s.fps,
+            self.replay_marks.clone(),
         ) {
             Ok(mut rt) => {
                 rt.open.replay = replay;

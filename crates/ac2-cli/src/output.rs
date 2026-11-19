@@ -503,6 +503,7 @@ pub fn recordings(l: &[RecordingFile]) -> String {
         "inputs",
         "length",
         "dropouts",
+        "remote gaps",
         "ended",
         "path",
     ]);
@@ -514,6 +515,7 @@ pub fn recordings(l: &[RecordingFile]) -> String {
             channels_text(&r.inputs),
             ac2_scene::recording::clock(secs),
             r.discontinuities.to_string(),
+            r.remote_gaps.spans.to_string(),
             r.end.as_ref().map_or_else(
                 || "recording".to_owned(),
                 |e| match e {

@@ -181,6 +181,10 @@ pub fn recording_run() -> RecordingRun {
         frames: 480_000,
         bytes: 3_840_116,
         discontinuities: 1,
+        remote_gaps: RemoteGaps {
+            spans: 2,
+            frames: 960,
+        },
         max_duration: Seconds(10.0),
         max_bytes: Some(1 << 30),
         status: RecordingStatus::Ended {
@@ -198,6 +202,7 @@ pub(super) fn recording_file() -> RecordingFile {
         frames: 480_000,
         started_at: WallNs(1_789_999_100_000_000_000),
         discontinuities: 1,
+        remote_gaps: RemoteGaps::default(),
         end: Some(RecordingEnd::WriteFailed {
             msg: "No space left on device (os error 28)".into(),
         }),

@@ -445,6 +445,8 @@ pub(crate) struct Control {
     levels: crate::jobs::programme::SharedPolicy,
     /// The recording a replay session plays (`session.replay`).
     replay_backend: Option<Arc<ac2_audio::ReplayBackend>>,
+    /// The replayed recording's remote-channel marks, for every open of `replay_backend`.
+    replay_marks: Option<Arc<crate::remote::replay::ReplayMarks>>,
     /// What the working state belongs to (`State.working`).
     working: working::Persist,
     /// The working state the last `file.new` / `file.load` replaced with unsaved changes.
@@ -614,6 +616,7 @@ impl Control {
             },
             recording: None,
             replay_backend: None,
+            replay_marks: None,
             working: working::Persist::untitled(),
             replaced_working: None,
             transfers: transfer::Transfers::default(),

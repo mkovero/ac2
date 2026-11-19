@@ -13,6 +13,7 @@ pub(crate) mod follow;
 pub(crate) mod join;
 pub(crate) mod link;
 pub(crate) mod peer_clock;
+pub(crate) mod replay;
 pub(crate) mod tap;
 
 /// The longest link offset (a WAN's worth).
@@ -88,6 +89,15 @@ impl ColumnMarks {
         match gaps.last_mut() {
             Some(r) if r.end == frame => r.end += 1,
             _ => gaps.push(frame..frame + 1),
+        }
+    }
+
+    /// Marks frames `span` of `column` missing; spans come in order.
+    pub(crate) fn gap_span(&mut self, column: u16, span: Range<u32>) {
+        let gaps = &mut self.get_mut(column).gaps;
+        match gaps.last_mut() {
+            Some(r) if r.end == span.start => r.end = span.end,
+            _ => gaps.push(span),
         }
     }
 

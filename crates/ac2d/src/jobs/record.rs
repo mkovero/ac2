@@ -15,10 +15,11 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use ac2_audio::BlockFlags;
-use ac2_proto::model::{DiscontinuityCause, RecordingEnd};
+use ac2_proto::model::{DiscontinuityCause, RecordingEnd, RemoteGaps};
 use ac2_proto::units::{SampleIndex, WallNs};
 use ac2_traces::raw::{
-    self, Discontinuity, End, Mark, Sidecar, TimelineChange, TimelineEntry, WavWriter,
+    self, Discontinuity, End, Mark, RemoteGap, RemoteSlip, Sidecar, TimelineChange, TimelineEntry,
+    WavWriter,
 };
 
 use super::{Analysis, Emitter, Flush, JobCmd, StampArgs};
@@ -54,6 +55,7 @@ pub(crate) struct Progress {
     pub(crate) frames: u64,
     pub(crate) bytes: u64,
     pub(crate) discontinuities: u32,
+    pub(crate) remote_gaps: RemoteGaps,
     /// Set once finalised.
     pub(crate) end: Option<RecordingEnd>,
 }
@@ -158,11 +160,13 @@ impl Recorder {
         let frames = self.frames();
         let bytes = self.writer.as_ref().map_or(0, WavWriter::bytes);
         let n = u32::try_from(self.sidecar.discontinuities.len()).unwrap_or(u32::MAX);
+        let gaps = self.sidecar.remote_gap_count();
         {
             let mut p = self.lock();
             p.frames = frames;
             p.bytes = bytes;
             p.discontinuities = n;
+            p.remote_gaps = gaps;
         }
         let _ = self
             .to
@@ -203,10 +207,12 @@ impl Recorder {
             self.sidecar.discontinuities.len()
         );
         let n = u32::try_from(self.sidecar.discontinuities.len()).unwrap_or(u32::MAX);
+        let gaps = self.sidecar.remote_gap_count();
         let mut p = self.lock();
         p.frames = frames;
         p.bytes = bytes;
         p.discontinuities = n;
+        p.remote_gaps = gaps;
         p.end = Some(reason);
     }
 
@@ -244,6 +250,57 @@ impl Recorder {
             estimated: b.flags.contains(BlockFlags::GAP_ESTIMATED),
             causes,
         });
+    }
+
+    /// Lists the joined feed's marks on the remote columns of `b`'s first `take` frames,
+    /// written from file frame `base`: the zeros there are no signal, and a replay must
+    /// read them as lost. A gap running on from the previous block's is one span.
+    fn note_remote(&mut self, b: &Block, base: u64, take: u32) {
+        for (i, &col) in self.cols.iter().enumerate() {
+            let Some(m) = b.marks.get(col) else {
+                continue;
+            };
+            let channel = u16::try_from(i).unwrap_or(u16::MAX);
+            if m.slip != 0 && take > 0 {
+                self.sidecar.remote_slips.push(RemoteSlip {
+                    channel,
+                    frame: base,
+                    session_sample: SampleIndex(b.start_sample),
+                    samples: m.slip,
+                });
+            }
+            for r in &m.gaps {
+                let end = r.end.min(take);
+                if r.start >= end {
+                    continue;
+                }
+                let frame = base + u64::from(r.start);
+                let session_sample = b.start_sample + u64::from(r.start);
+                let frames = u64::from(end - r.start);
+                let last = self
+                    .sidecar
+                    .remote_gaps
+                    .iter_mut()
+                    .rev()
+                    .find(|g| g.channel == channel);
+                match last {
+                    Some(g)
+                        if g.frame + g.frames == frame
+                            && g.session_sample.0 + g.frames == session_sample
+                            && g.late == m.late =>
+                    {
+                        g.frames += frames;
+                    }
+                    _ => self.sidecar.remote_gaps.push(RemoteGap {
+                        channel,
+                        frame,
+                        session_sample: SampleIndex(session_sample),
+                        frames,
+                        late: m.late,
+                    }),
+                }
+            }
+        }
     }
 }
 
@@ -290,6 +347,7 @@ impl Analysis for Recorder {
             _ => (self.max_frames, RecordingEnd::DurationLimit),
         };
         let take = u64::from(b.frames).min(limit.saturating_sub(written)) as usize;
+        self.note_remote(b, written, u32::try_from(take).unwrap_or(u32::MAX));
         let n = usize::from(b.channels).max(1);
         self.buf.clear();
         for frame in b.data.chunks_exact(n).take(take) {

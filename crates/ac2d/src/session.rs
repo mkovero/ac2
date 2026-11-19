@@ -165,6 +165,7 @@ impl Runtime {
     /// Opens the stream with the generator routed to `routes`; silent until a source is set
     /// and started. The stream carries every output of the session, so a later routing
     /// change ([`Self::set_routes`]) never reopens it.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn open(
         backend: &dyn Backend,
         cfg: &SessionConfig,
@@ -173,6 +174,7 @@ impl Runtime {
         epoch: SessionEpoch,
         to_control: Sender<ControlMsg>,
         fps: u32,
+        marks: Option<Arc<crate::remote::replay::ReplayMarks>>,
     ) -> Result<Self, ProtoError> {
         validate(cfg)?;
         let (gen_handle, port) = generator(routes.to_vec()).map_err(|e| invalid(e.to_string()))?;
@@ -229,7 +231,8 @@ impl Runtime {
             epoch.0
         );
         let lossless = backend.kind() == ac2_audio::BackendKind::Replay;
-        let fanout = Fanout::spawn(stream, epoch, to_control, fps, lossless)
+        let marks = marks.filter(|_| lossless);
+        let fanout = Fanout::spawn(stream, epoch, to_control, fps, lossless, marks)
             .map_err(|e| internal(format!("cannot start fan-out: {e}")))?;
         let rt = Self {
             epoch,

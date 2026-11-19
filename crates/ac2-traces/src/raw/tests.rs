@@ -17,6 +17,7 @@ fn sidecar(name: &str) -> Sidecar {
             channels: vec![
                 RecordedChannel {
                     input: 0,
+                    remote: None,
                     name: Some("Loop return".into()),
                     mic: None,
                     roles: vec![
@@ -28,11 +29,24 @@ fn sidecar(name: &str) -> Sidecar {
                 },
                 RecordedChannel {
                     input: 1,
+                    remote: None,
                     name: Some("Room mic".into()),
                     mic: Some("M30".into()),
                     roles: vec![ChannelRole::Measured {
                         measurement: "main".into(),
                     }],
+                },
+                RecordedChannel {
+                    input: ac2_proto::model::REMOTE_BASE,
+                    remote: Some(RemoteInput {
+                        slot: 0,
+                        rig: ac2_proto::units::RigId(7),
+                        rig_name: "ketunkolo".into(),
+                        channel: 1,
+                    }),
+                    name: Some("ketunkolo In 2".into()),
+                    mic: None,
+                    roles: Vec::new(),
                 },
             ],
         },
@@ -83,6 +97,28 @@ fn sidecar(name: &str) -> Sidecar {
                 causes: vec![DiscontinuityCause::RecorderBehind],
             },
         ],
+        remote_gaps: vec![
+            RemoteGap {
+                channel: 2,
+                frame: 280,
+                session_sample: SampleIndex(1280),
+                frames: 64,
+                late: true,
+            },
+            RemoteGap {
+                channel: 2,
+                frame: 600,
+                session_sample: SampleIndex(2600),
+                frames: 200,
+                late: false,
+            },
+        ],
+        remote_slips: vec![RemoteSlip {
+            channel: 2,
+            frame: 800,
+            session_sample: SampleIndex(2800),
+            samples: -3,
+        }],
     }
 }
 
@@ -200,6 +236,15 @@ fn an_unfinished_recording_is_finished_as_interrupted() {
     assert_eq!(end.reason, RecordingEnd::Interrupted);
     assert_eq!(end.frames, 300);
     assert_eq!(end.at.session_sample, SampleIndex(1300));
+    // Remote marks past the last frame go; a gap the end cuts keeps the part recorded.
+    assert_eq!(
+        back.remote_gaps
+            .iter()
+            .map(|g| (g.frame, g.frames))
+            .collect::<Vec<_>>(),
+        vec![(280, 20)]
+    );
+    assert!(back.remote_slips.is_empty());
     let reader = WavReader::open(&audio_path(dir.path(), "cut")).expect("open");
     assert_eq!(reader.info().frames, 300);
     assert!(

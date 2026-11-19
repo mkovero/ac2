@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use ac2_proto::event::Patch;
 use ac2_proto::model::{
     BackendKind, CalEntry, CalKey, ClockRelation, DeviceId, DiscontinuityCause, Generator,
-    InputSetup, LoopbackRoute, Measurement, RecordingEnd, RecordingFile,
+    InputSetup, LoopbackRoute, Measurement, RecordingEnd, RecordingFile, RemoteGaps, RemoteInput,
 };
 use ac2_proto::units::{ClientId, MeasId, SampleIndex, Seconds, SessionEpoch, WallNs};
 use serde::{Deserialize, Serialize};
@@ -28,7 +28,7 @@ pub use wav::{WavError, WavInfo, WavReader, WavWriter};
 /// `format` of every sidecar.
 pub const FORMAT: &str = "ac2-raw-capture";
 /// The one sidecar version this build reads and writes.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 /// Sidecar file name suffix.
 pub const SIDECAR_SUFFIX: &str = ".ac2rec.json";
 /// Audio file name suffix.
@@ -50,8 +50,11 @@ pub struct Software {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RecordedChannel {
-    /// Device input (zero-based).
+    /// Session channel: a device input (zero-based), or a remote input's
+    /// (`REMOTE_BASE + slot`, with `remote` saying whose).
     pub input: u16,
+    /// The other rig's input it was, for a remote input.
+    pub remote: Option<RemoteInput>,
     /// The device's name for it, if it has one.
     pub name: Option<String>,
     /// The mic set on the input when recording started.
@@ -221,6 +224,39 @@ pub struct Discontinuity {
     pub causes: Vec<DiscontinuityCause>,
 }
 
+/// Samples of a remote channel that never arrived from its rig: late, lost or slipped. The
+/// file holds zeros there so its frames stay rectangular; they are no signal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteGap {
+    /// File channel (zero-based).
+    pub channel: u16,
+    /// Audio file frame of its first sample.
+    pub frame: u64,
+    /// Its session sample.
+    pub session_sample: SampleIndex,
+    /// Samples in it.
+    pub frames: u64,
+    /// Its samples arrived after they were needed (the link offset was too short), rather
+    /// than never.
+    pub late: bool,
+}
+
+/// Where a remote channel's map onto this rig's samples moved: its samples from here on sit
+/// `samples` later (negative: earlier) than before.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemoteSlip {
+    /// File channel (zero-based).
+    pub channel: u16,
+    /// Audio file frame of the first sample after it.
+    pub frame: u64,
+    /// Its session sample.
+    pub session_sample: SampleIndex,
+    /// By how much.
+    pub samples: i64,
+}
+
 /// The sidecar.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -249,6 +285,20 @@ pub struct Sidecar {
     pub timeline: Vec<TimelineEntry>,
     /// Discontinuities, oldest first.
     pub discontinuities: Vec<Discontinuity>,
+    /// Gaps of the remote channels, oldest first.
+    pub remote_gaps: Vec<RemoteGap>,
+    /// Slips of the remote channels, oldest first.
+    pub remote_slips: Vec<RemoteSlip>,
+}
+
+impl Sidecar {
+    /// The count of the remote channels' marked gaps.
+    pub fn remote_gap_count(&self) -> RemoteGaps {
+        RemoteGaps {
+            spans: u32::try_from(self.remote_gaps.len()).unwrap_or(u32::MAX),
+            frames: self.remote_gaps.iter().map(|g| g.frames).sum(),
+        }
+    }
 }
 
 /// An unusable recording.
@@ -372,6 +422,7 @@ pub fn listing(dir: &Path, name: &str, s: &Sidecar) -> RecordingFile {
         frames: s.end.as_ref().map_or(0, |e| e.frames),
         started_at: s.start.wall_ns,
         discontinuities: u32::try_from(s.discontinuities.len()).unwrap_or(u32::MAX),
+        remote_gaps: s.remote_gap_count(),
         end: s.end.as_ref().map(|e| e.reason.clone()),
     }
 }
@@ -442,6 +493,11 @@ pub fn recover(
                 })?;
                 let end_sample = session_sample_of(&s, info.frames);
                 s.discontinuities.retain(|d| d.frame < info.frames);
+                s.remote_slips.retain(|d| d.frame < info.frames);
+                s.remote_gaps.retain(|g| g.frame < info.frames);
+                for g in &mut s.remote_gaps {
+                    g.frames = g.frames.min(info.frames - g.frame);
+                }
                 s.end = Some(End {
                     at: Mark::new(end_sample, now_wall_ns),
                     frames: info.frames,
@@ -547,6 +603,7 @@ pub fn import_wav(src: &Path, dir: &Path, name: &str, now_ns: u64) -> Result<Sid
             channels: (0..info.channels)
                 .map(|input| RecordedChannel {
                     input,
+                    remote: None,
                     name: None,
                     mic: None,
                     roles: Vec::new(),
@@ -592,6 +649,8 @@ pub fn import_wav(src: &Path, dir: &Path, name: &str, now_ns: u64) -> Result<Sid
         },
         timeline: Vec::new(),
         discontinuities: Vec::new(),
+        remote_gaps: Vec::new(),
+        remote_slips: Vec::new(),
     };
     if let Err(e) = write_sidecar(dir, name, &sidecar) {
         let _ = fs::remove_file(&out);
