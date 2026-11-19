@@ -3,6 +3,7 @@
 
 use crate::common;
 
+use std::io::ErrorKind;
 use std::net::{SocketAddr, TcpStream};
 use std::sync::mpsc;
 use std::time::Duration;
@@ -16,21 +17,36 @@ use common::*;
 struct Unanswering {
     endpoint: String,
     _listener: socket2::Socket,
-    _queued: TcpStream,
+    _queued: Vec<TcpStream>,
 }
 
-fn unanswering() -> R<Unanswering> {
+/// `None` (with the reason printed) where the OS refuses a connect to a full queue instead.
+fn unanswering() -> R<Option<Unanswering>> {
     use socket2::{Domain, Socket, Type};
     let l = Socket::new(Domain::IPV4, Type::STREAM, None)?;
     l.bind(&SocketAddr::from(([127, 0, 0, 1], 0)).into())?;
-    l.listen(0)?;
+    // Each OS sizes the queue from the backlog its own way: it is filled until a connect
+    // goes unanswered.
+    l.listen(1)?;
     let addr = l.local_addr()?.as_socket().ok_or("not an inet address")?;
-    let queued = TcpStream::connect_timeout(&addr, TIMEOUT)?;
-    Ok(Unanswering {
-        endpoint: format!("tcp://{addr}"),
-        _listener: l,
-        _queued: queued,
-    })
+    let mut queued = Vec::new();
+    for _ in 0..1024 {
+        match TcpStream::connect_timeout(&addr, Duration::from_millis(200)) {
+            Ok(c) => queued.push(c),
+            Err(e) if matches!(e.kind(), ErrorKind::TimedOut | ErrorKind::WouldBlock) => {
+                return Ok(Some(Unanswering {
+                    endpoint: format!("tcp://{addr}"),
+                    _listener: l,
+                    _queued: queued,
+                }));
+            }
+            Err(e) => {
+                eprintln!("skipped: a connect to a full accept queue is refused here ({e})");
+                return Ok(None);
+            }
+        }
+    }
+    Err("the accept queue never filled".into())
 }
 
 /// A round trip through `router`, which only the context's I/O thread can carry.
@@ -70,7 +86,9 @@ fn on_own_context(f: impl FnOnce(&Context) -> TestResult + Send + 'static) -> Te
 /// A socket closed with a connect in progress, its monitor dropped `monitor_first` or right
 /// after it: libzmq's I/O thread then reports the connect's close.
 fn closed_mid_connect(monitor_first: bool) -> TestResult {
-    let gone = unanswering()?;
+    let Some(gone) = unanswering()? else {
+        return Ok(());
+    };
     let ep = gone.endpoint.clone();
     on_own_context(move |ctx| {
         let s = ctx.socket(SocketType::Dealer)?;
@@ -78,6 +96,19 @@ fn closed_mid_connect(monitor_first: bool) -> TestResult {
         s.connect(&ep)?;
         mon.wait_for(TIMEOUT, |e| *e == MonitorEvent::ConnectDelayed)?
             .ok_or("no connect in progress")?;
+        if let Some(e) = mon.wait_for(Duration::from_millis(200), |e| {
+            matches!(
+                e,
+                MonitorEvent::Connected | MonitorEvent::ConnectRetried { .. }
+            )
+        })? {
+            // Nothing to close mid-connect then: the test has no case here.
+            eprintln!(
+                "skipped: the connect did not stay in progress ({:?})",
+                e.event
+            );
+            return Ok(());
+        }
         if monitor_first {
             drop(mon);
             // libzmq's reaper closes the reader in the background: closed before the
@@ -89,6 +120,9 @@ fn closed_mid_connect(monitor_first: bool) -> TestResult {
             drop(s);
             drop(mon);
         }
+        // The reaper hands the close to the I/O thread in the background too: the probe
+        // goes after it, not before.
+        std::thread::sleep(Duration::from_millis(200));
         io_thread_answers(ctx)
     })
 }

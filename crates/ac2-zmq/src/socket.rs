@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use crate::curve::{CurveClient, PublicKey};
 use crate::error::{Error, Result, zmq};
-use crate::monitor::{self, Monitor, SharedWatch};
+use crate::monitor::{Monitor, SharedWatch};
 use crate::poll::{PollItem, poll};
 use crate::raw::{self, RawContext, RawSocket};
 use crate::zap::ZapGuard;
@@ -203,7 +203,7 @@ impl Drop for Socket {
         // `zmq_close` returns, reporting to the monitor meanwhile (see `Watch`).
         if let Some(w) = self.watch.get_mut().take() {
             let _ = self.raw.stop_monitor();
-            monitor::stopped(&w);
+            w.stopped();
         }
     }
 }
@@ -471,21 +471,36 @@ impl Socket {
     pub fn monitor(&self) -> Result<Monitor> {
         let ep = c_endpoint(&unique_inproc("monitor"))?;
         let pair = self.ctx.pair_socket()?;
-        // No limit on the inproc pipe (libzmq lifts it when either end's is 0): the I/O
-        // thread's send to a full pipe would block it like a send to no reader.
+        // No limit on the inproc pipe (libzmq lifts it when either end's is 0, also for a
+        // connect before the bind): the I/O thread's send to a full pipe would block it like
+        // a send to no reader.
         pair.set_recv_hwm(0)?;
-        // libzmq stops a previous monitor here, before starting this one.
-        zmq(self.raw.monitor(&ep, raw::ZMQ_EVENT_ALL))?;
-        if let Some(old) = self.watch.borrow_mut().take() {
-            monitor::stopped(&old);
-        }
-        if let Err(e) = zmq(pair.raw.connect(&ep)) {
+        // The reader connects first, so libzmq's end has its reader from its bind on, and a
+        // failed connect leaves no monitor without one.
+        zmq(pair.raw.connect(&ep))?;
+        let started = zmq(self.raw.monitor(&ep, raw::ZMQ_EVENT_ALL));
+        // libzmq stops a previous monitor before it starts the new one; on failure it may
+        // have stopped it or not, so it is stopped here to be sure.
+        if started.is_err() {
             let _ = self.raw.stop_monitor();
-            return Err(e);
         }
+        if let Some(old) = self.watch.borrow_mut().take() {
+            old.stopped();
+        }
+        started?;
         let watch = SharedWatch::default();
         *self.watch.borrow_mut() = Some(Arc::clone(&watch));
         Ok(Monitor::new(pair, watch))
+    }
+
+    /// Stops the monitor if it was dropped: its parked reader would otherwise keep every
+    /// event of this socket for as long as it lives. On every use, so on this socket's thread.
+    pub(crate) fn settle_monitor(&self) {
+        let parked = self.watch.borrow().as_ref().is_some_and(|w| w.parked());
+        if parked && let Some(w) = self.watch.borrow_mut().take() {
+            let _ = self.raw.stop_monitor();
+            w.stopped();
+        }
     }
 
     // --- messages --------------------------------------------------------------------------
@@ -502,6 +517,7 @@ impl Socket {
     }
 
     fn send_with<B: AsRef<[u8]>>(&self, frames: &[B], flags: c_int) -> Result<()> {
+        self.settle_monitor();
         let Some(last) = frames.len().checked_sub(1) else {
             return Err(Error::InvalidArgument("a message has at least one frame"));
         };
@@ -525,6 +541,7 @@ impl Socket {
     /// [`Socket::try_send_parts`] of parts held apart (a routing id kept per peer, the
     /// topic and body shared by every peer they go to).
     pub fn try_send_shared(&self, parts: &[&Part]) -> Result<()> {
+        self.settle_monitor();
         let Some(last) = parts.len().checked_sub(1) else {
             return Err(Error::InvalidArgument("a message has at least one frame"));
         };
@@ -540,6 +557,7 @@ impl Socket {
     /// Receives one whole multipart message if one is queued, its parts left in libzmq's
     /// buffers (no copy, no connection metadata); `Ok(None)` otherwise.
     pub fn try_recv_parts(&self) -> Result<Option<Vec<Part>>> {
+        self.settle_monitor();
         let (first, mut more) = match zmq(self.raw.recv_msg(raw::ZMQ_DONTWAIT)) {
             Ok(m) => m,
             Err(Error::WouldBlock) => return Ok(None),
@@ -588,6 +606,7 @@ impl Socket {
     /// Whether a message is queued now (`ZMQ_EVENTS`). Also clears the pending signal of
     /// [`Socket::notify_fd`], so it must be checked before every wait on that descriptor.
     pub fn has_message(&self) -> Result<bool> {
+        self.settle_monitor();
         let ev = zmq(self.raw.get_int(raw::ZMQ_EVENTS))?;
         Ok(ev & c_int::from(raw::ZMQ_POLLIN) != 0)
     }
@@ -604,6 +623,7 @@ impl Socket {
     }
 
     fn recv_with(&self, flags: c_int) -> Result<Message> {
+        self.settle_monitor();
         let first = zmq(self.raw.recv_frame(flags, true))?;
         let mut more = first.more;
         let mut msg = Message {

@@ -4,6 +4,7 @@
 //! [`MonitorEvent::HandshakeFailedAuth`] on both ends, a mechanism mismatch or wrong server
 //! key as [`MonitorEvent::HandshakeFailedProtocol`].
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -145,33 +146,51 @@ impl SocketEvent {
 /// whose host does not answer SYNs). With the reader gone that send never returns, and the I/O
 /// thread stops serving every socket of the context. So the reader stays open until the
 /// socket has stopped its monitor: a monitor dropped first parks its reader here, and the
-/// socket stops monitoring before it closes, then lets the parked reader go.
+/// socket stops monitoring the next time it is used (or closes), then lets the reader go.
+/// libzmq's monitor calls are made on the socket's own thread only.
 #[derive(Debug, Default)]
 pub(crate) struct Watch {
+    /// A reader is parked: checked on every use of the socket, so lock-free.
+    parked_flag: AtomicBool,
+    state: Mutex<WatchState>,
+}
+
+#[derive(Debug, Default)]
+struct WatchState {
     /// The socket stopped this monitor (it closed, or a new monitor replaced this one).
     stopped: bool,
     parked: Option<Socket>,
 }
 
-pub(crate) type SharedWatch = Arc<Mutex<Watch>>;
+pub(crate) type SharedWatch = Arc<Watch>;
 
-fn lock(w: &SharedWatch) -> MutexGuard<'_, Watch> {
-    // Two plain fields: a panic while held cannot leave them inconsistent.
-    w.lock().unwrap_or_else(PoisonError::into_inner)
-}
+impl Watch {
+    fn lock(&self) -> MutexGuard<'_, WatchState> {
+        // Two plain fields: a panic while held cannot leave them inconsistent.
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
 
-/// The socket's side: its monitor is stopped, so the parked reader may close.
-pub(crate) fn stopped(w: &SharedWatch) {
-    let parked = {
-        let mut w = lock(w);
-        w.stopped = true;
-        w.parked.take()
-    };
-    drop(parked);
+    /// Whether the monitor was dropped and the socket should stop it.
+    pub(crate) fn parked(&self) -> bool {
+        self.parked_flag.load(Ordering::Acquire)
+    }
+
+    /// The socket's side: its monitor is stopped, so the parked reader may close.
+    pub(crate) fn stopped(&self) {
+        let parked = {
+            let mut w = self.lock();
+            w.stopped = true;
+            w.parked.take()
+        };
+        drop(parked);
+    }
 }
 
 /// Reader of one socket's events (see [`Socket::monitor`]). Like a socket, used by one thread
 /// at a time; include [`Monitor::socket`] in a [`crate::poll`] to wait on events.
+///
+/// Dropped while its socket lives on, it keeps its reader (and the events queued for it)
+/// until the socket is next used: sent on, received from, polled, or closed.
 #[derive(Debug)]
 pub struct Monitor {
     /// `Some` until dropped.
@@ -184,9 +203,10 @@ impl Drop for Monitor {
         let Some(pair) = self.pair.take() else {
             return;
         };
-        let mut w = lock(&self.watch);
+        let mut w = self.watch.lock();
         if !w.stopped {
             w.parked = Some(pair);
+            self.watch.parked_flag.store(true, Ordering::Release);
         }
     }
 }

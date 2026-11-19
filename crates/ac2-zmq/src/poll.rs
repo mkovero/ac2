@@ -69,7 +69,10 @@ impl<'s> PollItem<'s> {
 pub fn poll(items: &mut [PollItem<'_>], timeout: Option<Duration>) -> Result<usize> {
     let raw_items: Vec<_> = items
         .iter()
-        .map(|i| (i.socket.raw(), i.interest.raw()))
+        .map(|i| {
+            i.socket.settle_monitor();
+            (i.socket.raw(), i.interest.raw())
+        })
         .collect();
     let deadline = timeout.map(|t| Instant::now() + t);
     loop {
