@@ -35,13 +35,33 @@ fn doc<T: Serialize>(value: &T) -> R<Value> {
     }))
 }
 
-/// The host's system clock as the daemon reports it is whatever the operating system states
-/// (Linux: synced or not, with the kernel's error bound; macOS and Windows: nothing): a
-/// property of the machine recording, not of the daemon, so every host records the same.
-fn pin_clock(mut v: Value) -> Value {
+/// What the machine recording puts in a state, not the daemon, pinned so every host records
+/// the same:
+/// - the system clock, whatever the operating system states (Linux: synced or not, with the
+///   kernel's error bound; macOS and Windows: nothing);
+/// - a local client's tag, the routing id libzmq gave its connection, which starts from the
+///   C library's random generator and so differs by platform.
+fn pin_host(mut v: Value) -> Value {
+    fn walk(v: &mut Value) {
+        match v {
+            Value::Object(m) => {
+                for (k, x) in m.iter_mut() {
+                    match x {
+                        Value::String(s) if k == "client" && s.starts_with("local-") => {
+                            *s = "local-006b8b4567".to_owned();
+                        }
+                        x => walk(x),
+                    }
+                }
+            }
+            Value::Array(a) => a.iter_mut().for_each(walk),
+            _ => {}
+        }
+    }
     if let Some(e) = v.pointer_mut("/clocks/system") {
         *e = serde_json::json!({"type": "synced", "maxerror_us": 1000});
     }
+    walk(&mut v);
     v
 }
 
@@ -173,7 +193,7 @@ fn record() -> R<Vec<(&'static str, Value)>> {
     Ok(vec![
         (
             "empty_state.json",
-            doc(&pin_clock(serde_json::to_value(&state)?))?,
+            doc(&pin_host(serde_json::to_value(&state)?))?,
         ),
         ("session_devices.json", doc(&backends)?),
         ("detect_loopback.json", doc(&detection)?),
@@ -284,7 +304,7 @@ fn scene(name: &str, build: fn(&Cli) -> R) -> R {
     }
     let value = pin_times(
         serde_json::json!({
-            "state": pin_clock(serde_json::to_value(&state)?),
+            "state": pin_host(serde_json::to_value(&state)?),
             "grids": grids,
             "traces": traces,
         }),

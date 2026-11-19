@@ -256,13 +256,8 @@ fn a_taken_port_waits_and_binds_once_it_is_free() {
     let dir = tempfile::tempdir().unwrap();
     let laptop = KeyPair::generate().unwrap();
     // Held: the ctrl port; data goes on the next, which must be free.
-    let (held, port) = loop {
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = l.local_addr().unwrap().port();
-        if port < u16::MAX && std::net::TcpListener::bind(("127.0.0.1", port + 1)).is_ok() {
-            break (l, port);
-        }
-    };
+    let port = free_pair();
+    let held = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
     let mut cfg = net_config(manual_rig(), security(dir.path(), &laptop));
     cfg.network = NetworkChoice::Fixed(NetListen {
         bind: NetBind::Addr {

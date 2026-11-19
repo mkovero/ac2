@@ -149,14 +149,36 @@ pub fn wait_listening(h: &Handle, limit: Duration) -> Option<(String, String)> {
     }
 }
 
-/// A loopback port whose next port looked free too, probed on the address the tests bind.
+/// Where [`free_pair`] looks: below every OS's ephemeral range (Linux from 32768, macOS and
+/// Windows from 49152). macOS and Windows hand ephemeral ports out in sequence, so the port
+/// after one the OS just picked is the next one it gives away, often to the very daemon
+/// under test binding its local pair on port 0.
+const PAIR_PORTS: std::ops::Range<u16> = 20_000..32_000;
+
+/// Whether `port` binds on loopback and on every address. Both, one after the other:
+/// BSD lets a wildcard bind share a port held on one address (and the reverse), so neither
+/// alone shows the port free for a daemon that binds either.
+fn binds(port: u16) -> bool {
+    use std::net::{Ipv4Addr, TcpListener};
+    TcpListener::bind((Ipv4Addr::LOCALHOST, port)).is_ok()
+        && TcpListener::bind((Ipv4Addr::UNSPECIFIED, port)).is_ok()
+}
+
+/// A port whose next port looked free too, for a daemon serving ctrl and data on them.
 /// Only a guess: another process may take it before the daemon binds, so a caller that
 /// must have it retries with another pair.
 pub fn free_pair() -> u16 {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    // A random start per call: test processes running side by side probe different ports,
+    // and calls within one move on past the pairs already handed out.
+    let mut seed = [0u8; 2];
+    getrandom::fill(&mut seed).unwrap();
+    let span = u64::from(PAIR_PORTS.end - PAIR_PORTS.start) / 2;
+    let start = u64::from(u16::from_le_bytes(seed));
     loop {
-        let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let p = l.local_addr().unwrap().port();
-        if p < u16::MAX && std::net::TcpListener::bind(("127.0.0.1", p + 1)).is_ok() {
+        let k = (start + NEXT.fetch_add(1, Ordering::Relaxed)) % span;
+        let p = PAIR_PORTS.start + u16::try_from(2 * k).unwrap();
+        if binds(p) && binds(p + 1) {
             return p;
         }
     }
