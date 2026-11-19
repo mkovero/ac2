@@ -201,6 +201,20 @@ pub fn check_port(port: u16, local: &Listen) -> Result<(), ListenError> {
     Ok(())
 }
 
+/// An interface name the OS could hold: one that is empty or holds a control character
+/// names nothing, and would reach the logs and every app's Connection page as given.
+pub(crate) fn check_bind(bind: &NetBind) -> Result<(), ListenError> {
+    match bind {
+        NetBind::Interface { name } if name.is_empty() => {
+            Err(ListenError("an interface name must not be empty".into()))
+        }
+        NetBind::Interface { name } if name.chars().any(char::is_control) => Err(ListenError(
+            format!("interface name {name:?}: control characters are not allowed"),
+        )),
+        _ => Ok(()),
+    }
+}
+
 /// What a bind resolves to on the host now.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Host {

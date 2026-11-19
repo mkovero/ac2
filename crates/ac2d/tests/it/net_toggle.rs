@@ -11,15 +11,17 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use ac2_proto::model::{
-    GeneratorDesired, GeneratorSettings, LocalServer, NetBind, NetSaved, NetSetting, NetStatus,
-    NetStatusKind, REMOTE_BASE, RemoteAudio, RemoteInput, RigPeer, ServerInfo, SessionConfig,
-    Signal, StateFile, SystemClock,
+    GeneratorDesired, GeneratorSettings, LocalServer, NetBind, NetSaved, NetSetting,
+    NetSettingKind, NetSettingView, NetStatus, NetStatusKind, NotSavedReason, REMOTE_BASE,
+    RemoteAudio, RemoteInput, RigPeer, ServerInfo, SessionConfig, Signal, StateFile, SystemClock,
 };
 use ac2_proto::units::{Dbfs, Hz};
 use ac2_proto::{Command, ErrorCode};
 use ac2_zmq::{AuthorizedKeys, Context, CurveClient, KeyPair};
 use ac2d::config::SystemClockSource;
-use ac2d::{Backoff, Daemon, Handle, Interfaces, NetInterface, NetworkChoice, NetworkSecurity};
+use ac2d::{
+    Backoff, Daemon, Handle, Interfaces, NetInterface, NetReason, NetworkChoice, NetworkSecurity,
+};
 use common::*;
 
 const T: Duration = Duration::from_secs(10);
@@ -105,6 +107,22 @@ fn turn_on(c: &mut Client, h: &Handle) -> u16 {
     panic!("no free port pair: {:?}", h.network_status());
 }
 
+/// The setting as a client on the rig's host is told it.
+fn setting(s: &ServerInfo) -> &NetSetting {
+    match &s.network.setting {
+        NetSettingView::Host { setting } => setting,
+        v => panic!("a local client is told the setting in full: {v:?}"),
+    }
+}
+
+/// Whether the setting in force outlives a restart.
+fn saved(s: &ServerInfo) -> &NetSaved {
+    match setting(s) {
+        NetSetting::Off { saved } | NetSetting::On { saved, .. } => saved,
+        NetSetting::Fixed { .. } => panic!("a fixed network keeps nothing"),
+    }
+}
+
 fn wait_status(h: &Handle, what: &str, ok: impl Fn(&NetStatus) -> bool) -> NetStatus {
     let t0 = Instant::now();
     loop {
@@ -151,7 +169,12 @@ fn on_change_the_port_on_again_and_kept_across_a_restart() {
 
     // Off from the start, without a key until the first enable.
     let s = c.server(Command::ServerInfo);
-    assert_eq!(s.network.setting, NetSetting::Off);
+    assert_eq!(
+        setting(&s),
+        &NetSetting::Off {
+            saved: NetSaved::Saved
+        }
+    );
     assert_eq!(s.network.status, NetStatus::Off);
     assert_eq!(s.network.server_key, None);
     assert!(h.server_public_key().is_none());
@@ -181,7 +204,7 @@ fn on_change_the_port_on_again_and_kept_across_a_restart() {
     let p1 = turn_on(&mut c, &h);
     let s = c.server(Command::ServerInfo);
     assert!(listening_on(p1)(&s.network.status), "{s:?}");
-    assert_eq!(s.network.saved, NetSaved::Saved);
+    assert_eq!(saved(&s), &NetSaved::Saved);
     assert!(s.network.server_key.is_some() && h.server_public_key().is_some());
     assert!(file_enabled(dir.path()));
     let summary = c.state().server;
@@ -202,10 +225,11 @@ fn on_change_the_port_on_again_and_kept_across_a_restart() {
     assert!(!file_enabled(dir.path()));
     let s = turn(&mut c, true, None);
     assert_eq!(
-        s.network.setting,
-        NetSetting::On {
+        setting(&s),
+        &NetSetting::On {
             bind: NetBind::Addr { addr: LOOPBACK },
             port: p2,
+            saved: NetSaved::Saved,
         }
     );
     wait_status(&h, "on again", listening_on(p2));
@@ -235,9 +259,11 @@ fn rapid_on_off_on_ends_listening() {
     }
     let s = turn(&mut c, true, Some(port));
     // In memory only: no store to keep it in.
-    assert!(
-        matches!(s.network.saved, NetSaved::NotSaved { .. }),
-        "{s:?}"
+    assert_eq!(
+        saved(&s),
+        &NetSaved::NotSaved {
+            reason: NotSavedReason::NoStore
+        }
     );
     // The closing pair may still hold the port: then it waits and the retry binds it.
     wait_status(&h, "on after the flurry", listening_on(port));
@@ -271,6 +297,21 @@ fn a_network_client_may_not_toggle_and_is_told_no_host_detail() {
     assert_eq!(s.local, None);
     assert!(s.interfaces.is_empty());
     assert!(matches!(s.network.status, NetStatus::Listening { .. }));
+    // Whether it is on, and nothing of where it binds or how it is kept.
+    assert_eq!(
+        s.network.setting,
+        NetSettingView::Peer {
+            setting: NetSettingKind::On
+        }
+    );
+    let told = serde_json::to_string(&s.network.setting).unwrap();
+    for detail in ["addr", "127.0.0.1", "port", "saved", "bind"] {
+        assert!(!told.contains(detail), "{detail} in {told}");
+    }
+    let host = serde_json::to_string(&local.server(Command::ServerInfo).network.setting).unwrap();
+    for detail in ["127.0.0.1", "saved", "bind"] {
+        assert!(host.contains(detail), "the host is told {detail}: {host}");
+    }
     for enabled in [false, true] {
         let e = remote
             .call(Command::ServerNetwork {
@@ -315,10 +356,7 @@ fn fixed_by_listen_or_in_process_the_toggle_is_refused() {
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
     let s = c.server(Command::ServerInfo);
-    assert!(
-        matches!(s.network.setting, NetSetting::Fixed { .. }),
-        "{s:?}"
-    );
+    assert!(matches!(setting(&s), NetSetting::Fixed { .. }), "{s:?}");
     assert!(matches!(s.network.status, NetStatus::Listening { .. }));
     assert!(!store(dir.path()).exists(), "--listen writes no setting");
     h.shutdown();
@@ -362,8 +400,10 @@ fn a_damaged_or_other_version_setting_is_set_aside_and_means_off() {
         assert!(d.set_aside_as.is_some(), "{what}");
         assert!(!store(dir.path()).exists(), "{what}: set aside");
         assert_eq!(
-            c.server(Command::ServerInfo).network.setting,
-            NetSetting::Off
+            setting(&c.server(Command::ServerInfo)),
+            &NetSetting::Off {
+                saved: NetSaved::Saved
+            }
         );
         h.shutdown();
     }
@@ -534,4 +574,185 @@ fn slow_turned_on_mid_session_a_paired_rig_gets_its_audio() {
     );
     a.shutdown();
     b.shutdown();
+}
+
+/// A network client's request retried on the pair turned on again is answered from the
+/// first reply, not run twice: requests are told apart by key and id, not by connection.
+#[test]
+fn a_request_retried_across_off_and_on_is_answered_once() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let laptop = KeyPair::generate().unwrap();
+    let h = Daemon::start(settings_config(manual_rig(), dir.path(), &laptop, None)).unwrap();
+    let ctx = Context::new().unwrap();
+    let mut local = Client::connect(&ctx, h.ctrl_endpoint());
+    let port = turn_on(&mut local, &h);
+    let curve = CurveClient {
+        keys: laptop.clone(),
+        server_key: h.server_public_key().unwrap(),
+    };
+    let ep = format!("tcp://127.0.0.1:{port}");
+    let tablet = KeyPair::generate().unwrap();
+    let req = ac2_proto::Request::new(
+        ac2_proto::units::RequestId(7),
+        Command::ServerAuthorize {
+            name: "tablet".into(),
+            key: tablet.public.to_z85(),
+        },
+    );
+    let first = Client::connect_with(&ctx, &ep, Some(&curve));
+    first.send(&req);
+    let reply = first.recv_raw(T).expect("the first reply");
+
+    turn(&mut local, false, None);
+    turn(&mut local, true, None);
+    wait_status(&h, "on again", listening_on(port));
+    let again = Client::connect_with(&ctx, &ep, Some(&curve));
+    again.send(&req);
+    assert_eq!(again.recv_raw(T).expect("the retry's reply"), reply);
+    let named: Vec<String> = local
+        .server(Command::ServerInfo)
+        .network
+        .authorized
+        .into_iter()
+        .map(|a| a.name)
+        .collect();
+    assert_eq!(named, ["laptop", "tablet"]);
+    h.shutdown();
+}
+
+/// Kept on, and its port held by another program at start: the network waits for the
+/// port and takes it once it is free.
+#[test]
+fn kept_on_and_its_port_busy_at_start_it_waits_then_listens() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let laptop = KeyPair::generate().unwrap();
+    let port = free_pair();
+    let squatter = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+    std::fs::write(
+        store(dir.path()),
+        format!(
+            r#"{{"version":1,"enabled":true,"bind":{{"type":"addr","addr":"127.0.0.1"}},"port":{port}}}"#
+        ),
+    )
+    .unwrap();
+    let cfg = settings_config(manual_rig(), dir.path(), &laptop, Some(store(dir.path())));
+    let h = Daemon::start(cfg).unwrap();
+    wait_status(
+        &h,
+        "waiting for the port",
+        |s| matches!(s, NetStatus::Waiting { reason } if *reason == NetReason::AddressInUse),
+    );
+    drop(squatter);
+    wait_status(&h, "the port taken once free", listening_on(port));
+    h.shutdown();
+}
+
+/// After its authentication handler died, the network turned off and on again from the
+/// app listens again at once, not at the next retry.
+#[test]
+fn turned_off_and_on_after_its_zap_handler_died_it_listens_again() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let laptop = KeyPair::generate().unwrap();
+    let mut cfg = settings_config(manual_rig(), dir.path(), &laptop, None);
+    // No retry within the test: only the toggle can bring it back.
+    cfg.net_retry = Backoff {
+        first: Duration::from_secs(60),
+        max: Duration::from_secs(60),
+    };
+    let h = Daemon::start(cfg).unwrap();
+    let ctx = Context::new().unwrap();
+    let mut c = Client::connect(&ctx, h.ctrl_endpoint());
+    let port = turn_on(&mut c, &h);
+    h.fail_zap_handler().unwrap();
+    wait_status(
+        &h,
+        "the pair failed",
+        |s| matches!(s, NetStatus::Failed { reason } if *reason == NetReason::ZapFailed),
+    );
+    turn(&mut c, false, None);
+    turn(&mut c, true, None);
+    wait_status(&h, "on again", listening_on(port));
+    hello_over_network(&ctx, &h, &laptop, &format!("tcp://127.0.0.1:{port}"));
+    h.shutdown();
+}
+
+/// Settings that cannot be written: the toggle works and says it is not kept.
+#[cfg(unix)]
+#[test]
+fn a_read_only_store_says_not_saved_and_the_toggle_still_works() {
+    use std::os::unix::fs::PermissionsExt;
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let ro = dir.path().join("config");
+    std::fs::create_dir(&ro).unwrap();
+    std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o500)).unwrap();
+    if std::fs::write(ro.join("probe"), b"").is_ok() {
+        return; // Permissions do not bind this user (root): nothing to test.
+    }
+    let laptop = KeyPair::generate().unwrap();
+    let cfg = settings_config(manual_rig(), dir.path(), &laptop, Some(store(&ro)));
+    let h = Daemon::start(cfg).unwrap();
+    let ctx = Context::new().unwrap();
+    let mut c = Client::connect(&ctx, h.ctrl_endpoint());
+    let port = turn_on(&mut c, &h);
+    let s = c.server(Command::ServerInfo);
+    assert_eq!(
+        saved(&s),
+        &NetSaved::NotSaved {
+            reason: NotSavedReason::StoreReadOnly
+        }
+    );
+    hello_over_network(&ctx, &h, &laptop, &format!("tcp://127.0.0.1:{port}"));
+    assert!(!store(&ro).exists());
+    turn(&mut c, false, None);
+    assert_eq!(h.network_status(), NetStatus::Off);
+    std::fs::set_permissions(&ro, std::fs::Permissions::from_mode(0o700)).unwrap();
+    h.shutdown();
+}
+
+/// A server key that cannot be made refuses the turn-on with the reason, and leaves the
+/// setting and its file as they were.
+#[cfg(unix)]
+#[test]
+fn a_key_that_cannot_be_made_refuses_and_changes_nothing() {
+    use std::os::unix::fs::PermissionsExt;
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let laptop = KeyPair::generate().unwrap();
+    let keys = dir.path().join("keys");
+    std::fs::create_dir(&keys).unwrap();
+    std::fs::set_permissions(&keys, std::fs::Permissions::from_mode(0o500)).unwrap();
+    if std::fs::write(keys.join("probe"), b"").is_ok() {
+        return; // Permissions do not bind this user (root): nothing to test.
+    }
+    let mut cfg = settings_config(manual_rig(), dir.path(), &laptop, Some(store(dir.path())));
+    let mut files = security(dir.path(), &laptop);
+    files.server_key_file = keys.join("server.key");
+    cfg.keys = Some(files);
+    let h = Daemon::start(cfg).unwrap();
+    let ctx = Context::new().unwrap();
+    let mut c = Client::connect(&ctx, h.ctrl_endpoint());
+    turn(&mut c, false, Some(free_pair()));
+    let before = std::fs::read(store(dir.path())).unwrap();
+    let setting_before = setting(&c.server(Command::ServerInfo)).clone();
+    let e = c
+        .call(Command::ServerNetwork {
+            enabled: true,
+            bind: None,
+            port: Some(free_pair()),
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
+    assert!(e.msg.contains("server key"), "{e:?}");
+    let s = c.server(Command::ServerInfo);
+    assert_eq!(setting(&s), &setting_before);
+    assert_eq!(s.network.status, NetStatus::Off);
+    assert_eq!(s.network.server_key, None);
+    assert_eq!(std::fs::read(store(dir.path())).unwrap(), before);
+    assert_eq!(c.state().server.status, NetStatusKind::Off);
+    std::fs::set_permissions(&keys, std::fs::Permissions::from_mode(0o700)).unwrap();
+    h.shutdown();
 }

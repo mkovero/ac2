@@ -13,13 +13,15 @@ pub fn server_info() -> ServerInfo {
             data: "ipc:///run/user/1000/ac2/data.sock".into(),
         }),
         network: NetworkServer {
-            setting: NetSetting::On {
-                bind: NetBind::Interface {
-                    name: "eth0".into(),
+            setting: NetSettingView::Host {
+                setting: NetSetting::On {
+                    bind: NetBind::Interface {
+                        name: "eth0".into(),
+                    },
+                    port: 47820,
+                    saved: NetSaved::Saved,
                 },
-                port: 47820,
             },
-            saved: NetSaved::Saved,
             status: NetStatus::Listening {
                 ctrl: "tcp://192.168.1.20:47820".into(),
                 data: "tcp://192.168.1.20:47821".into(),
@@ -85,10 +87,13 @@ pub fn server_info_off() -> ServerInfo {
             data: "ipc:///run/user/1000/ac2/data.sock".into(),
         }),
         network: NetworkServer {
-            setting: NetSetting::Off,
-            saved: NetSaved::NotSaved {
-                reason: NotSavedReason::WriteFailed {
-                    detail: "read-only file system".into(),
+            setting: NetSettingView::Host {
+                setting: NetSetting::Off {
+                    saved: NetSaved::NotSaved {
+                        reason: NotSavedReason::WriteFailed {
+                            detail: "read-only file system".into(),
+                        },
+                    },
                 },
             },
             status: NetStatus::Off,
@@ -108,11 +113,8 @@ pub fn server_info_fixed() -> ServerInfo {
     ServerInfo {
         local: None,
         network: NetworkServer {
-            setting: NetSetting::Fixed {
-                listen: "tcp://10.0.0.2:47820".into(),
-            },
-            saved: NetSaved::NotSaved {
-                reason: NotSavedReason::NoStore,
+            setting: NetSettingView::Peer {
+                setting: NetSettingKind::Fixed,
             },
             status: NetStatus::Waiting {
                 reason: NetReason::AddressMissing,

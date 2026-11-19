@@ -8,8 +8,8 @@
 
 use ac2_proto::event::Change;
 use ac2_proto::model::{
-    AuthorizedClient, GenAction, LocalServer, NetBind, NetworkServer, OutputSetup, RefusedKey,
-    ServerInfo, SweepFailure, check_output_label,
+    AuthorizedClient, GenAction, LocalServer, NetBind, NetSettingView, NetworkServer, OutputSetup,
+    RefusedKey, ServerInfo, SweepFailure, check_output_label,
 };
 use ac2_proto::units::{Dbfs, RigId, WallNs};
 use ac2_proto::{ErrorCode, ProtoError, ReplyBody};
@@ -211,8 +211,15 @@ impl Control {
                 },
             }),
             network: NetworkServer {
-                setting: n.setting(),
-                saved: n.saved(),
+                setting: if local {
+                    NetSettingView::Host {
+                        setting: n.setting(),
+                    }
+                } else {
+                    NetSettingView::Peer {
+                        setting: n.setting().kind(),
+                    }
+                },
                 status: n.status(),
                 server_key: key.map(|k| k.to_z85()),
                 fingerprint: key.map(|k| k.fingerprint()),
@@ -244,28 +251,34 @@ impl Control {
                 "the network can only be turned on or off on the rig's own machine",
             ));
         }
-        let created = self.s.server.network.set(
+        let had_key = self.s.server.network.server_key().is_some();
+        let r = self.s.server.network.set(
             enabled,
             bind,
             port,
             &self.s.outbox,
             std::time::Instant::now(),
-        )?;
+        );
+        // A key made by a change refused after it is still this rig's key from now on.
+        if !had_key && self.s.server.network.server_key().is_some() {
+            self.keys_created();
+        }
+        self.server_sync();
+        r?;
         tracing::warn!(
             target: "ac2d::audit",
             "network {} by {}",
             if enabled { "turned on" } else { "turned off" },
             client.id().0
         );
-        if created {
-            self.keys_created();
-        }
-        self.server_sync();
         Ok(ReplyBody::Server(self.server_info(client)))
     }
 
     /// `State.server` follows the network, whatever moved it (a request, a retry, a failure).
     pub(super) fn server_sync(&mut self) {
+        if !self.s.server.network.take_changed() {
+            return;
+        }
         let now = self.s.server.network.summary();
         if self.store.state().server != now {
             self.commit(ac2_proto::event::Change::Server(now));

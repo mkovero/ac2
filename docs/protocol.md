@@ -364,17 +364,23 @@ i32 \| f32 \| str}.
 client's process; only test daemons, the app spawns `ac2d`) \| `local` {`ctrl`, `data`} (the
 pair served for the daemon's whole life, this machine only; the OS user is the trust
 boundary); nil to a network client, which has no use for this host's local endpoints.
-`network`: `NetworkServer` {`setting` (`NetSetting`, tagged by `type`: `off` \| `on`
-{`bind`: `NetBind`, `port`} \| `fixed` {`listen`: the `ac2d --listen` address as given}),
-`saved` (`NetSaved`: `saved` \| `not_saved` {`reason`: `store_read_only` \| `no_store` \|
-`write_failed` {`detail`}}: whether the setting outlives a restart), `status` (`NetStatus`:
+`network`: `NetworkServer` {`setting` (`NetSettingView`, tagged by `type`: `host`
+{`setting`: `NetSetting`} to a client of the local pair \| `peer` {`setting`: `off` \| `on`
+\| `fixed`} to a network client, which is told neither where the rig binds nor whether
+the setting is kept), `status` (`NetStatus`:
 `off` \| `listening` {`ctrl`, `data`} \| `waiting` {`reason`} \| `failed` {`reason`}; `reason`
 `NetReason`: `address_in_use` \| `interface_missing` \| `address_missing` \| `zap_failed` \|
 `no_server_key` \| `not_handed_over` \| `other` {`detail`}), `server_key` (Z85) \| nil (made
 at the first turn-on), `fingerprint` \| nil, `advertised_as`: string \| nil (the mDNS name),
 `authorized`: [`AuthorizedClient` {`name`, `key`, `fingerprint`, `rig`: RigId \| nil}],
 `refused`: [`RefusedKey` {`key`: string \| nil (nil: not CURVE), `fingerprint`: string \|
-nil, `address`, `count`, `last_at`: WallNs}], newest first, at most 32}. `NetBind` is tagged
+nil, `address`, `count`, `last_at`: WallNs}], newest first, at most 32}. `NetSetting` is
+tagged by `type`: `off` {`saved`} \| `on` {`bind`: `NetBind`, `port`, `saved`} \| `fixed`
+{`listen`: the `ac2d --listen` address as given; nothing is kept, the command line is the
+setting}; `saved` (`NetSaved`: `saved` \| `not_saved` {`reason`: `store_read_only` \|
+`unreadable` {`detail`} (left as it is, never written over, until a restart reads it) \|
+`damaged_in_place` (could not be set aside; each change tries again before it writes) \|
+`no_store` \| `write_failed` {`detail`}}) says whether it outlives a restart. `NetBind` is tagged
 by `type`: `all` (every IPv4 interface) \| `interface` {`name`} (resolved at each bind: its
 first IPv4 address, else its first global IPv6 one) \| `addr` {`addr`: the address as
 text}. `interfaces`: [`NetInterface` {`name`, `addrs`: [address as text], `up`}], the
@@ -398,14 +404,16 @@ daemon runs; a nil `bind` or `port` keeps the one set before (at first `all` and
 on the next port). Only a client of the local pair may send it (`refused` over the network:
 a remote app could otherwise cut itself and every other one off); `refused` when `ac2d
 --listen` fixed the network for the daemon's life (`setting` `fixed`), `unsupported` on an
-`embedded` daemon; a port of 0 or 65535 (data needs the next one) is `invalid`. The first
-turn-on makes the server key. Turning on binds a new CURVE pair beside the local one, the
+`embedded` daemon or one without key files; a port of 0 or 65535 (data needs the next
+one) or one the local endpoints use, and an empty interface name or one with control
+characters, are `invalid`. The first turn-on makes the server key; when it cannot be made
+the turn-on is `refused` with the reason and the setting is left as it was. Turning on binds a new CURVE pair beside the local one, the
 session untouched: an open session is served to the new pair's clients at once. Turning
 off sends every network data connection the `network_off` notice (§5.8), then closes the
 pair: their subscriptions end and a lease they held runs out as on any lost connection
 (fading out). Turning on at another bind or port moves the pair. The daemon keeps the
-setting in `network.json` beside its other settings (`saved`); a damaged file, or one of
-another version, is set aside (`damaged_files`, kind `network_settings`) and the network
+setting in `network.json` beside its other settings (`saved`); a damaged file, one of
+another version, or one `server.network` would refuse, is set aside (`damaged_files`, kind `network_settings`) and the network
 starts off. Answers the new `server` info; `State.server` follows.
 
 **Remote inputs (`auth.admit_rig`, `rig.peers`, `source.state`).** A rig takes another rig's

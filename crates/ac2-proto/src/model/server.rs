@@ -46,10 +46,8 @@ pub enum LocalServer {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NetworkServer {
-    /// What it is set to.
-    pub setting: NetSetting,
-    /// Whether the setting outlives a restart.
-    pub saved: NetSaved,
+    /// What it is set to, as much as the asking client may know.
+    pub setting: NetSettingView,
     /// What it is doing.
     pub status: NetStatus,
     /// The server's public key (Z85), which clients pin when pairing; `None` until the
@@ -65,24 +63,71 @@ pub struct NetworkServer {
     pub refused: Vec<RefusedKey>,
 }
 
+/// The network setting as one client is told it. A network client learns only whether it
+/// is on: where the rig binds names this host's interfaces and addresses, and why a setting
+/// is not kept carries the file system's words, neither of which a remote app needs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum NetSettingView {
+    /// To a client on the rig's own host: all of it.
+    Host {
+        /// The setting.
+        setting: NetSetting,
+    },
+    /// To a network client.
+    Peer {
+        /// Its kind only.
+        setting: NetSettingKind,
+    },
+}
+
+/// [`NetSetting`] without its details.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NetSettingKind {
+    /// Local only.
+    Off,
+    /// On, from `server.network`.
+    On,
+    /// Fixed by `ac2d --listen`.
+    Fixed,
+}
+
 /// What the network is set to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum NetSetting {
     /// Local only.
-    Off,
-    /// On, from `server.network` (kept by the daemon across restarts when it can).
+    Off {
+        /// Whether that outlives a restart.
+        saved: NetSaved,
+    },
+    /// On, from `server.network`.
     On {
         /// Where it binds.
         bind: NetBind,
         /// Ctrl port; data is on the next one.
         port: u16,
+        /// Whether that outlives a restart.
+        saved: NetSaved,
     },
-    /// Fixed for the daemon's life by `ac2d --listen`: `server.network` is refused.
+    /// Fixed for the daemon's life by `ac2d --listen`: `server.network` is refused, and
+    /// nothing is kept (the command line is the setting).
     Fixed {
         /// The address as given, `tcp://<interface or address>:<port>`.
         listen: String,
     },
+}
+
+impl NetSetting {
+    /// Its kind, as a network client is told it.
+    pub fn kind(&self) -> NetSettingKind {
+        match self {
+            Self::Off { .. } => NetSettingKind::Off,
+            Self::On { .. } => NetSettingKind::On,
+            Self::Fixed { .. } => NetSettingKind::Fixed,
+        }
+    }
 }
 
 /// Where the network binds.
@@ -124,7 +169,17 @@ pub enum NetSaved {
 pub enum NotSavedReason {
     /// The settings file cannot be written (read-only file or directory).
     StoreReadOnly,
-    /// This daemon keeps no settings file (in-process, or fixed by `--listen`).
+    /// The settings file could not be read at start: it is left as it is, never written
+    /// over, until the daemon restarts and can read it.
+    Unreadable {
+        /// As the file system said it.
+        detail: String,
+    },
+    /// The settings file was damaged and could not be set aside: each change tries again,
+    /// and writes only once it is.
+    DamagedInPlace,
+    /// This daemon keeps no settings file (an in-process daemon, or one given no
+    /// settings path).
     NoStore,
     /// The write failed.
     WriteFailed {

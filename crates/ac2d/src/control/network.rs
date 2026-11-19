@@ -18,7 +18,7 @@ use crate::damage::Damage;
 use crate::io::{Attach, AttachQueue};
 use crate::network::{
     Backoff, Host, Interfaces, NetBind, NetListen, NetPort, NetReason, NetStatus, NetworkChoice,
-    bind_pair, check_port, resolve,
+    bind_pair, check_bind, check_port, resolve,
 };
 use crate::network_store::{NetSettings, NetStore};
 use crate::outbox::Outbox;
@@ -114,6 +114,8 @@ pub(crate) struct NetCtl {
     name: String,
     advert: Option<ac2_discovery::Advertiser>,
     browse: Option<PeerBrowse>,
+    /// What `State.server` shows may have changed since [`Self::take_changed`].
+    changed: bool,
 }
 
 impl NetCtl {
@@ -123,7 +125,7 @@ impl NetCtl {
         let mut damage = Vec::new();
         let (store, settings) = match &s.choice {
             NetworkChoice::FromSettings { store } => {
-                let (store, settings, d) = NetStore::load(store.clone());
+                let (store, settings, d) = NetStore::load(store.clone(), &s.local);
                 damage.extend(d);
                 (Some(store), settings)
             }
@@ -202,6 +204,7 @@ impl NetCtl {
                 name: s.name,
                 advert: None,
                 browse: None,
+                changed: true,
             },
             damage,
         ))
@@ -240,7 +243,7 @@ impl NetCtl {
         }
     }
 
-    /// The setting as `server.info` reports it.
+    /// The setting as `server.info` reports it to a client on this host.
     pub(crate) fn setting(&self) -> NetSetting {
         match (&self.choice, self.listen()) {
             (NetworkChoice::Fixed(l), _) => NetSetting::Fixed {
@@ -249,19 +252,27 @@ impl NetCtl {
             (_, Some(l)) => NetSetting::On {
                 bind: l.bind,
                 port: self.settings.port,
+                saved: self.saved(),
             },
-            (_, None) => NetSetting::Off,
+            (_, None) => NetSetting::Off {
+                saved: self.saved(),
+            },
         }
     }
 
-    /// Whether the setting outlives a restart.
-    pub(crate) fn saved(&self) -> NetSaved {
+    /// Whether a setting made with `server.network` outlives a restart.
+    fn saved(&self) -> NetSaved {
         self.store.as_ref().map_or(
             NetSaved::NotSaved {
                 reason: NotSavedReason::NoStore,
             },
             NetStore::saved_state,
         )
+    }
+
+    /// Whether what `State.server` shows may have changed since the last call.
+    pub(crate) fn take_changed(&mut self) -> bool {
+        std::mem::take(&mut self.changed)
     }
 
     /// What `State.server` shows.
@@ -282,7 +293,8 @@ impl NetCtl {
     }
 
     /// `server.network`: the new setting in force at once, kept, and the listener turned on,
-    /// moved or off to match. `Ok(true)` when the server key was created by it.
+    /// moved or off to match. The server key may be created though the change is refused
+    /// after it (the authorized-clients file could not be made).
     pub(crate) fn set(
         &mut self,
         enabled: bool,
@@ -290,11 +302,12 @@ impl NetCtl {
         port: Option<u16>,
         outbox: &Outbox,
         now: Instant,
-    ) -> Result<bool, ProtoError> {
+    ) -> Result<(), ProtoError> {
         match &self.choice {
             NetworkChoice::Fixed(l) => {
                 return Err(crate::util::refused(format!(
-                    "the network is fixed by ac2d --listen {}; restart ac2d without --listen                      to change it",
+                    "the network is fixed by ac2d --listen {}; restart ac2d without --listen \
+                     to change it",
                     intended(l).0
                 )));
             }
@@ -302,6 +315,12 @@ impl NetCtl {
                 return Err(crate::util::perr(
                     ac2_proto::ErrorCode::Unsupported,
                     "this daemon serves in-process only: it has no network to turn on",
+                ));
+            }
+            NetworkChoice::FromSettings { .. } if self.files.is_none() => {
+                return Err(crate::util::perr(
+                    ac2_proto::ErrorCode::Unsupported,
+                    "this daemon has no key files: it cannot serve a network",
                 ));
             }
             NetworkChoice::FromSettings { .. } => {}
@@ -312,12 +331,11 @@ impl NetCtl {
             port: port.unwrap_or(self.settings.port),
         };
         check_port(new.port, &self.local).map_err(|e| crate::util::invalid(e.0))?;
-        if let NetBind::Interface { name } = &new.bind
-            && (name.is_empty() || name.chars().any(char::is_control))
-        {
-            return Err(crate::util::invalid("an interface name must not be empty"));
+        check_bind(&new.bind).map_err(|e| crate::util::invalid(e.0))?;
+        if enabled {
+            self.ensure_keys()?;
         }
-        let created = enabled && self.ensure_keys()?;
+        self.changed = true;
         let old = std::mem::replace(&mut self.settings, new.clone());
         if let Some(store) = &mut self.store {
             store.save(&new);
@@ -343,45 +361,51 @@ impl NetCtl {
                 }
             }
         }
-        Ok(created)
+        Ok(())
     }
 
-    /// Loads or creates the server key and the authorized-clients file before the first
-    /// enable. `Ok(true)`: the key is new.
-    fn ensure_keys(&mut self) -> Result<bool, ProtoError> {
+    /// Loads or creates the server key, then the authorized-clients file, before the first
+    /// enable. The key is kept as soon as it exists: its file is on disk, and the next
+    /// attempt must not take it for missing.
+    fn ensure_keys(&mut self) -> Result<(), ProtoError> {
         if self.keys.is_some() {
-            return Ok(false);
+            return Ok(());
         }
         let Some(f) = &self.files else {
-            return Ok(false);
+            return Ok(());
         };
-        let fail = |e: keys::KeyFileError| crate::util::internal(e.to_string());
-        let (kp, d) = keys::load_or_create_server_keys(&f.server_key_file).map_err(fail)?;
+        let fail = |what: &str, e: keys::KeyFileError| {
+            crate::util::refused(format!("cannot turn the network on: {what}: {e}"))
+        };
+        let (kp, d) = keys::load_or_create_server_keys(&f.server_key_file)
+            .map_err(|e| fail("the server key", e))?;
         d.iter().for_each(Damage::log);
-        if let Some(a) = &self.authorized
-            && !f.authorized_clients_file.exists()
-        {
-            let (list, d) =
-                keys::load_or_create_authorized(&f.authorized_clients_file).map_err(fail)?;
-            d.iter().for_each(Damage::log);
-            a.handle.set(list);
-        }
         tracing::info!(
-            "server key {} (fingerprint {}) created",
+            "server key {} (fingerprint {}) ready",
             kp.public.to_z85(),
             kp.public.fingerprint()
         );
         *lock(&self.view.server_key) = Some(kp.public);
         self.keys = Some(kp);
-        Ok(true)
+        self.changed = true;
+        if let Some(a) = &self.authorized
+            && !f.authorized_clients_file.exists()
+        {
+            let (list, d) = keys::load_or_create_authorized(&f.authorized_clients_file)
+                .map_err(|e| fail("the authorized clients", e))?;
+            d.iter().for_each(Damage::log);
+            a.handle.set(list);
+        }
+        Ok(())
     }
 
     pub(crate) fn advertised_as(&self) -> Option<String> {
         self.view.advertised_as()
     }
 
-    fn set_status(&self, s: NetStatus) {
+    fn set_status(&mut self, s: NetStatus) {
         *lock(&self.view.status) = s;
+        self.changed = true;
     }
 
     /// Whether the authorization a CURVE connection was granted (`key` under `name`) is gone.

@@ -187,21 +187,30 @@ methods take the socket their peer's origin picks).
   neither port nor port + 1 equal to a local port. A clash under `--listen` is an argument
   error (exit 2) at start, not a `Waiting`. An enable that cannot bind now (address in use, interface missing) is
   stored and goes `Waiting`, the same as at start; the reply says so.
-- `ServerInfo { local: LocalServer, network: NetworkServer, interfaces, recording_dir }`;
-  `LocalServer = Embedded | Local { ctrl, data }`;
-  `NetworkServer { setting: Off | On { bind, port } | Fixed { listen }, saved: Saved |
-  NotSaved { reason: StoreReadOnly | NoStore | WriteFailed { detail } }, status: Off |
-  Listening { ctrl, data } | Waiting { reason } | Failed { reason }, server_key,
-  fingerprint (both `Option`, once a key exists), advertised_as, authorized, refused }`;
-  `NetReason = AddressInUse | InterfaceMissing | AddressMissing | ZapFailed | Other {
-  detail }`. `ServerMode` goes.
+- `ServerInfo { local: Option<LocalServer>, network: NetworkServer, interfaces,
+  recording_dir }`; `LocalServer = Embedded | Local { ctrl, data }`;
+  `NetworkServer { setting: NetSettingView, status: Off | Listening { ctrl, data } |
+  Waiting { reason } | Failed { reason }, server_key, fingerprint (both `Option`, once a key
+  exists), advertised_as, authorized, refused }`;
+  `NetSettingView = Host { setting: NetSetting } | Peer { setting: Off | On | Fixed }`:
+  a network client is told only the kind, never the bind (this host's interfaces and
+  addresses) nor whether it is kept (the file system's words);
+  `NetSetting = Off { saved } | On { bind, port, saved } | Fixed { listen }` (a fixed
+  network keeps nothing: the command line is the setting);
+  `saved: Saved | NotSaved { reason: StoreReadOnly | Unreadable { detail } |
+  DamagedInPlace | NoStore | WriteFailed { detail } }`;
+  `NetReason = AddressInUse | InterfaceMissing | AddressMissing | ZapFailed | NoServerKey |
+  NotHandedOver | Other { detail }`. `ServerMode` goes. To a network client `local` is
+  `None` and `interfaces` empty.
 - `State.server: ServerSummary { status kind, ctrl endpoint (when listening), port,
   fingerprint }` so every mirrored app
   sees a change made elsewhere; key lists stay in `server.info`.
-- Event `server.network_off`, sent to the network peers only (the local ones learn from
-  `State.server`) before the pair closes, so remote apps say "network turned off on the
-  rig" instead of "connection lost"; an app that misses it falls back to `State.server` on
-  reconnect or to "connection lost".
+- Flow notice `network_off` (`FlowNotice::NetworkOff`, on the data socket's `flow`
+  topic, outside the window), sent to each network peer of the closing pair only, not a
+  numbered state event: it concerns that connection, which is about to end, and is nothing
+  a mirror applies (the local clients learn from `State.server`). Remote apps then say
+  "network turned off on the rig" instead of "connection lost"; an app that misses it
+  falls back to "connection lost".
 - `server.authorize`, `server.revoke`, `auth.admit_rig` work with the network off (they
   edit the authorized-clients file).
 - Samples, Python fixtures (`tools/protocol`), `docs/protocol.md` follow.
@@ -248,9 +257,9 @@ do. `DaemonConfig.network: NetworkChoice`:
   `TAG_ATTACH { epoch }` on the outbox. The io thread takes the `Attach` from the channel
   only when it reads that tag, so attach and detach are ordered with every reply and event
   in the one outbox stream. A failed bind drops its sockets and context at once. Reply `ServerInfo` (`Listening`, or `Waiting` on a bind failure).
-- **Disable:** queue `server.network_off` and then `TAG_DETACH { epoch }` on the outbox,
-  in band like `TAG_REVOKE`/`TAG_CLEAR`, so the io thread sends the event before it
-  detaches; reply at once. A change of bind or port while on is `TAG_DETACH { e1 }` then
+- **Disable:** queue `TAG_DETACH { epoch, off }` on the outbox, in band like
+  `TAG_REVOKE`/`TAG_CLEAR`; with `off` the io thread sends each of the pair's data peers
+  the `network_off` notice before it drops them and closes the pair; reply at once. A change of bind or port while on is `TAG_DETACH { e1 }` then
   an attach of `e2`. The mDNS `Advertiser` is dropped on a helper thread: its goodbye blocks up
   to about 1 s, and the control thread must keep renewing leases (1.5 s expiry).
 - **io thread:** never sends an ack the control thread waits for. On `TAG_DETACH` it drops every `Network` peer (their
