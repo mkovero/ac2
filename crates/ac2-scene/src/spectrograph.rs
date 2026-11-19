@@ -46,7 +46,7 @@ use crate::view::Style;
 use crate::view::{FREQ_LIMIT_HI, FREQ_LIMIT_LO, SpectrumMode, ViewState};
 
 mod plates;
-pub(crate) use plates::{cursor_level, legend_over, legend_shows};
+pub(crate) use plates::{cursor_lines, legend_over, legend_shows};
 use plates::{history_cursor, tracked_marks};
 
 /// Time slots a second: one per 33 ms, the period frames are published at over the
@@ -256,6 +256,16 @@ impl SpectrographHistory {
             .map(|s| crate::spectrum::value_unit(s, self.quantity()))
     }
 
+    /// Displayed level `v` of the history as the spectrum's cursor reads one:
+    /// `−23.5 dBFS (tone)`, `94.0 dB SPL/Hz (density)`; a dash for none, or before the
+    /// first frame said what the levels are in.
+    pub fn level_noted(&self, v: f64) -> String {
+        match self.scale {
+            Some(s) => crate::spectrum::level_noted(v, s, self.quantity()),
+            None => format::NO_VALUE.to_string(),
+        }
+    }
+
     /// The unit with what the levels are, as the spectrum's cursor reads it:
     /// `dBFS (tone)`, `dB SPL/Hz (density)`.
     pub fn unit_noted(&self) -> Option<String> {
@@ -449,10 +459,9 @@ pub struct SpectrographInput<'a> {
 pub struct SpectrographCursor {
     pub freq_hz: f64,
     pub before_s: f64,
-    /// `1.00 kHz · 4.2 s ago · −23.5 dBFS`.
-    pub text: String,
-    /// Its line on the cursor values' plate, under the frequency: `4.2 s ago  −23.5 dBFS`.
-    pub line: String,
+    /// Its lines on the cursor values' plate ([`cursor_lines`]): the frequency, then
+    /// `4.2 s ago  −23.5 dBFS (tone)`.
+    pub lines: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -556,18 +565,21 @@ const BAR_ID: HeatmapId = HeatmapId(2);
 /// [`SPECTRUM_SHARE`], the spectrograph of `sg` below on the same frequency pixels; in
 /// [`SpectrumMode::Spectrograph`] the banners and the spectrograph alone, its caption
 /// carrying the calibration the spectrum's would. A colour bar with the level range right of
-/// it. `None` (no spectrum or RTA measurement) draws an empty plot that says so.
+/// it. `Err` (the pane has no measurement to draw a history of: none, or its own hidden or
+/// stopped before a frame) draws an empty plot with that text, which says why and what
+/// brings one ([`crate::missing`]).
 ///
 /// Asked for [`SpectrumMode::Spectrograph3d`], the GPU has no 3D view (the UI draws that
 /// one itself otherwise): the spectrograph alone, its caption ending in [`NO_3D`].
 pub fn spectrograph_scene(
     traces: &[SpectrumTrace<'_>],
     status: &Status,
-    sg: Option<&SpectrographInput<'_>>,
+    sg: Result<&SpectrographInput<'_>, &str>,
     view: &ViewState,
     theme: &Theme,
     size: Viewport,
 ) -> SpectrographScene {
+    let (sg, missing) = (sg.ok(), sg.err());
     let chrome = view.chrome;
     let cursor_hz = view.cursor_hz.filter(|_| chrome.cursor());
     let no_3d = view.spectrum.mode == SpectrumMode::Spectrograph3d;
@@ -593,7 +605,10 @@ pub fn spectrograph_scene(
             theme,
             Viewport::new(size.width, top_h),
             right,
-            cursor.as_ref().map(|c| c.line.as_str()),
+            cursor
+                .as_ref()
+                .and_then(|c| c.lines.get(1))
+                .map(String::as_str),
         );
         let layers = std::mem::take(&mut spectrum.scene.layers);
         (Some(spectrum), layers, Vec::new(), top_h + PANE_GAP)
@@ -702,7 +717,7 @@ pub fn spectrograph_scene(
     let xm = x_axis.mapping;
     let tm = time_axis.mapping;
     match sg {
-        None => message = Some("no spectrum or RTA measurement".to_string()),
+        None => message = missing.map(str::to_string),
         Some(s) => {
             // An offset measurement says so: its colours are of the offset level.
             let name = if s.offset_db != 0.0 {
@@ -749,7 +764,16 @@ pub fn spectrograph_scene(
                         data: s.history.ring().to_vec(),
                     });
                 }
-                _ => message = Some(format!("{}: no frames yet", s.name)),
+                _ => {
+                    message = Some(crate::missing::missing_text(
+                        &s.name,
+                        crate::missing::Missing::NotYet {
+                            what: "frames",
+                            after: None,
+                        },
+                        "",
+                    ))
+                }
             }
         }
     }
@@ -830,7 +854,7 @@ pub fn spectrograph_scene(
     let mut readout_box = None;
     let mut under = plot.y + crate::legend::INSET + crate::legend::PAD_Y;
     if let Some(cur) = cursor.as_ref().filter(|_| alone) {
-        let lines = vec![format::freq_readout(cur.freq_hz), cur.line.clone()];
+        let lines = cur.lines.clone();
         let (b, below) =
             crate::spectrum::readout_plate(&mut c.overlay, lines, plot, under, view, theme);
         under = below.unwrap_or(under);

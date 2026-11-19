@@ -24,10 +24,11 @@ pub struct PeakPoint3d {
 const BOX_HALF: f32 = 4.0;
 
 /// The points of `peaks` (loudest first, levels as stored) of a curve offset by `offset_db`
-/// and read in `unit`, on skyline `sk` (its rows drawn as `front`) within level range
+/// and read as `quantity` in `scale`, on skyline `sk` (its rows drawn as `front`) within level range
 /// `range`. A peak outside the frequency span, under the level range, over a cell the newest
 /// row has no level in, or behind the eye gets none; one above the range top stands on its
-/// spike, which keeps growing there. Its height is its level clamped to its cell's spike on
+/// spike, which keeps growing there. Its label is its row of the spectrum's peak list (rank,
+/// frequency, level), so a rank names the same peak in every view. Its height is its level clamped to its cell's spike on
 /// the newest row (a cell is a coarser grid than the peak's bin); the label keeps its own.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn peak_points(
@@ -37,7 +38,7 @@ pub(super) fn peak_points(
     front: DrawnRows,
     peaks: &[Peak],
     offset_db: f64,
-    unit: &str,
+    (scale, quantity): (ac2_proto::model::LevelScale, crate::spectrum::Quantity),
     range: Range,
     plot: Rect,
     small: f32,
@@ -61,7 +62,7 @@ pub(super) fn peak_points(
         )
     };
     let mut points = Vec::new();
-    for p in peaks {
+    for (rank, p) in peaks.iter().enumerate() {
         let level = p.level + offset_db;
         if !(lo..=hi).contains(&p.freq_hz) || !level.is_finite() || level < range.lo {
             continue;
@@ -83,11 +84,11 @@ pub(super) fn peak_points(
             level,
             world,
             pos,
-            label: Some(format!(
-                "{}  {} {unit}",
+            label: Some(crate::readout::row(&[
+                (rank + 1).to_string(),
                 format::freq_readout(p.freq_hz),
-                format::level(level)
-            )),
+                crate::spectrum::level_text(level, scale, quantity),
+            ])),
         });
     }
     // The field is dark in every theme: the dark theme's text, on the axis labels' plates.

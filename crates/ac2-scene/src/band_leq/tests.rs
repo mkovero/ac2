@@ -188,7 +188,9 @@ fn a_band_over_is_named_with_its_window_and_how_long_to_back_off() {
     assert_eq!(t.correction, None);
     assert_eq!(
         t.predicted.as_ref().map(|p| p.line.as_str()),
-        Some("predicted LAeq 60 min in flat 4 23.5 dB · at most 27.3 dB · limit 25.0 dB · NEAR")
+        Some(
+            "predicted LAeq 60 min in flat 4 23.5 dB SPL · at most 27.3 dB SPL · limit 25.0 dB SPL · NEAR"
+        )
     );
 }
 
@@ -355,7 +357,7 @@ fn uncalibrated_bands_are_dbfs_and_not_judged() {
     assert_eq!(t.rows[0].bars[5].limit_db, None);
     assert_eq!(
         t.predicted.expect("predicted").line,
-        "predicted LAeq 60 min in flat 4 — · limit 25.0 dB · not calibrated"
+        "predicted LAeq 60 min in flat 4 — · limit 25.0 dB SPL · not calibrated"
     );
 }
 
@@ -382,7 +384,7 @@ fn nothing_measured_no_band_limits_and_no_windows() {
     assert_eq!(t.headline, "no band limits");
     assert_eq!(
         t.predicted.expect("predicted").line,
-        "predicted LAeq 60 min in flat 4 24.0 dB · no limit now"
+        "predicted LAeq 60 min in flat 4 24.0 dB SPL · no limit now"
     );
     f.meta.windows.clear();
     f.leq.clear();
@@ -497,7 +499,7 @@ fn the_scene_stacks_a_row_of_columns_per_window_under_the_headline() {
     for want in [
         "63 Hz band LZeq 60 min 3.2 dB over its limit · cooling down in 6 min 52 s",
         "FOH SPL · band Leq 20–200 Hz, dB SPL",
-        "predicted LAeq 60 min in flat 4 23.5 dB · at most 27.3 dB · limit 25.0 dB · NEAR",
+        "predicted LAeq 60 min in flat 4 23.5 dB SPL · at most 27.3 dB SPL · limit 25.0 dB SPL · NEAR",
         "LZeq 60 min · night limits (22–07)",
         "LAeq 15 min · so far · 7:30 / 15:00",
         "31.5",
@@ -777,7 +779,7 @@ fn past_full_leaves_the_state_to_the_colours() {
     let p = t.predicted.as_ref().expect("predicted");
     assert_eq!(
         p.line,
-        "predicted LAeq 60 min in flat 4 23.5 dB · at most 27.3 dB"
+        "predicted LAeq 60 min in flat 4 23.5 dB SPL · at most 27.3 dB SPL"
     );
     assert_eq!(p.state, words.predicted.as_ref().expect("predicted").state);
 

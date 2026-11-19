@@ -98,13 +98,11 @@ pub fn spectrograph(
     size: Viewport,
     now: Now,
 ) -> SpectrographScene {
-    let shown = st.pane_meas(pane).and_then(|m| {
-        if st.meas_hidden(m) {
-            return None;
-        }
-        let stream = crate::state::spectrum_stream(m)?;
-        Some((m, stream))
-    });
+    let missing = st.spectrograph_missing(pane);
+    let shown = st
+        .pane_meas(pane)
+        .filter(|_| missing.is_none())
+        .and_then(|m| Some((m, crate::state::spectrum_stream(m)?)));
     let display = shown.map(|(m, _)| st.display_of(m)).unwrap_or_default();
     let empty = SpectrographHistory::new(display.spectrograph_span_s);
     let input = shown.map(|(m, stream)| {
@@ -128,7 +126,8 @@ pub fn spectrograph(
         }
     });
     with_spectrum(st, pane, theme, now, |traces, status, view| {
-        spectrograph_scene(traces, status, input.as_ref(), view, theme, size)
+        let sg = input.as_ref().ok_or(missing.as_deref().unwrap_or_default());
+        spectrograph_scene(traces, status, sg, view, theme, size)
     })
 }
 
@@ -148,13 +147,11 @@ pub fn spectrograph_3d(
     size: Viewport,
     now: Now,
 ) -> Spectrograph3dScene {
-    let shown = st.pane_meas(pane).and_then(|m| {
-        if st.meas_hidden(m) {
-            return None;
-        }
-        let stream = crate::state::spectrum_stream(m)?;
-        Some((m, stream))
-    });
+    let missing = st.spectrograph_missing(pane);
+    let shown = st
+        .pane_meas(pane)
+        .filter(|_| missing.is_none())
+        .and_then(|m| Some((m, crate::state::spectrum_stream(m)?)));
     let display = shown.map(|(m, _)| st.display_of(m)).unwrap_or_default();
     let empty = SpectrographHistory::new(display.spectrograph_span_s);
     let view = st.view_for(pane);
@@ -187,7 +184,8 @@ pub fn spectrograph_3d(
         }
     });
     with_spectrum(st, pane, theme, now, |traces, status, view| {
-        spectrograph_3d_scene(traces, status, input.as_ref(), view, theme, size)
+        let sg = input.as_ref().ok_or(missing.as_deref().unwrap_or_default());
+        spectrograph_3d_scene(traces, status, sg, view, theme, size)
     })
 }
 

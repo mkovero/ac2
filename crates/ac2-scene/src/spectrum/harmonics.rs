@@ -148,12 +148,10 @@ pub fn rows(h: &SpecHarmonics, scale: LevelScale) -> Vec<HarmonicRow> {
     };
     // The fundamental as the spectrum's cursor reads a tone there.
     out.push(HarmonicRow {
-        text: format!(
-            "{}  {} {}",
+        text: crate::readout::row(&[
             order_name(1),
-            format::level(fundamental),
-            value_unit(scale, Quantity::Tone)
-        ),
+            level_text(fundamental, scale, Quantity::Tone),
+        ]),
         order: Some(1),
     });
     for k in harmonics.iter().filter(|k| k.resolved) {

@@ -910,7 +910,9 @@ stored traces of the kinds the pane draws. A math trace dropped on a pane draws 
 owner's group. A stopped measurement keeps its last curve, tagged `stopped` in the legend
 and list; **S** starts it again. A pane never borrows another measurement's data: while its
 own has nothing to draw (hidden, stopped before its first frame, or not measured yet) it
-says so (`Spectrum 2: no frames yet`, `FOH SPL hidden — A shows it`).
+says so (`Spectrum 2: no frames yet`, `FOH SPL hidden — A shows it`), and a spectrum pane
+with no measurement to show says how to make one (`no spectrum or RTA measurement —
+Ctrl+M makes one`, on both spectrographs).
 
 | Pane | Draws |
 |---|---|
@@ -1278,8 +1280,8 @@ spacing), as it does on a spectrum pane: see [Peaks (P)](#peaks-p).
 The legend, the cursor values, the mark's readout, the list of tracked peaks and the
 Programme pane's loudness readout are plates, and every plate takes the same mouse
 (transfer, spectrum, both spectrographs and Programme panes; a spectrum's mark lines ride
-on the cursor values' plate; the impulse-response views and the alignment view have the
-cursor values' plate):
+on the cursor values' plate; the impulse-response views, the alignment view and an SPL
+pane's Leq history strip have the cursor values' plate):
 
 - **Drag** a plate anywhere inside its plot. It stays where it was dropped as the pane
   grows or shrinks (kept as a share of the room around it, so one dropped against an edge
@@ -1583,7 +1585,9 @@ bar spans the pane's level axis, so the level-axis keys change the colours.
   <meas> --span 60`); every length keeps a row per 33 ms. It starts afresh at each length
   and when the spectrograph comes into view.
 - A click puts the cursor; its values are on the cursor values' plate (drag it, size it,
-  as every plate): `1.00 kHz` over `4.2 s ago  −32.0 dBFS`. With the spectrum above, the
+  as every plate): `1.00 kHz` over `4.2 s ago  −32.0 dBFS (tone)`, the level read as the
+  spectrum's cursor reads it (a digital level signed: `+1.2 dBFS` is above full scale). With
+  the spectrum above, the
   line joins the spectrum's cursor values on its plate: one cursor, one plate. The cursor
   stays on the frame it was put on: live, it moves down with it, its age counting up,
   until the frame leaves the history.
@@ -1650,7 +1654,8 @@ per frequency and moment, as tall as its level. **G** once more is the spectrum 
   selects the measurement.
 - **Peaks**: while the measurement's peaks track (**P**, set one **G** back: the key is
   the 2D views'), its five peaks stand as boxes on the front (newest) row, each labelled
-  with frequency and level on a plate; a peak higher than its cell's spike sits on the
+  with its row of the peak list (rank, frequency, level: `1  1.00 kHz  −32.0 dBFS`) on a
+  plate; a peak higher than its cell's spike sits on the
   spike's top, its label keeping the peak's level. They show at rest, without the axes;
   *traces only* hides them.
 - **Colour** is the loudest spike along the line of sight, so a tall peak behind a low row
@@ -3428,9 +3433,18 @@ the time before.
   while the span is fetched) and the axis reads the clock; **Home** returns to live. Older
   spans come from the daemon at the strip's resolution: a point per second when zoomed in,
   else each point the **highest** of its seconds, red if any of them was over.
-- **The pointer on the strip** reads that time: the second (or `16:42:00–16:43:00 ·
-  highest` span) and each window's Leq, limit and state (`LAeq 15 min 101.0 dB · limit
-  100.0 · over`). **T** hides it with the grid.
+- **A click on the strip** puts its **cursor** there, as on every graph: a line in the
+  cursor's colour that stays at that time until it is moved or turned off. **Shift+T**
+  turns it off and on (on: at the middle of the span shown), **Shift+←** / **Shift+→** step
+  it, **I** / **O** zoom about it; with the strip shown and the SPL pane focused these keys
+  are the strip's. Its values are on the **cursor values plate**: the second (or
+  `16:42:00–16:43:00 · highest` span), then a row per window with its Leq, limit and state
+  (`LAeq 15 min  101.0 dB SPL · limit 100.0 dB SPL · over`; dBFS, signed, on an uncalibrated
+  meter). The plate hangs under the strip's caption; drag it anywhere on the pane, drag
+  its grip to scale it, double-click to put it back, as every plate ([Moving the plates and their
+  text size](#moving-the-plates-and-their-text-size)).
+  **T** hides the cursor and its plate with the grid.
+- The strip's axis reads in the meter's unit (`dB SPL`, `dBFS`), as the columns do.
 - Settings › Display › **Leq bars**: each column (and band bar) glides to a new reading over
   0.3 s; the number, colours and limit lines change at once. "jump to each new reading"
   turns it off.
@@ -3609,7 +3623,7 @@ transfer's summary).
   stay ≤ 81.2 dB".
 - Under it: where the limits come from ("limits moved from flat 4 bedroom through the band
   transfer", or estimated), a correction in force, and **"predicted LAeq 60 min in flat 4
-  bedroom 23.6 dB · at most 26.1 dB · limit 25.0 dB · NEAR"** ("at most" counts bound bands
+  bedroom 23.6 dB SPL · at most 26.1 dB SPL · limit 25.0 dB SPL · NEAR"** ("at most" counts bound bands
   at their bound).
 - Uncalibrated, bands read dBFS and nothing is judged. Going over or back toasts like a
   window.

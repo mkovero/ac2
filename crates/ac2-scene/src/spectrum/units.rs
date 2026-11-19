@@ -13,6 +13,28 @@ pub fn value_unit(scale: LevelScale, q: Quantity) -> &'static str {
     }
 }
 
+/// A level of `q` in `scale` with its unit, as a readout says it: `−23.5 dBFS`,
+/// `+3.0 dBFS/Hz`, `94.0 dB SPL` ([`format::scaled_level`]: a digital level is signed, so
+/// one above full scale cannot read as one below); a dash for none.
+pub fn level_text(v: f64, scale: LevelScale, q: Quantity) -> String {
+    let s = format::scaled_level(v, scale);
+    if q.is_density() && s != format::NO_VALUE {
+        s + "/Hz"
+    } else {
+        s
+    }
+}
+
+/// [`level_text`] with what the level is: `−23.5 dBFS (tone)`; a dash for none.
+pub fn level_noted(v: f64, scale: LevelScale, q: Quantity) -> String {
+    let s = level_text(v, scale, q);
+    if s == format::NO_VALUE {
+        s
+    } else {
+        format!("{s} ({})", quantity_note(q))
+    }
+}
+
 /// What a value of `q` is, as the axis unit's parentheses say it: `tone`, `density`,
 /// `band`, with the smoothing when there is one. A tone and a density of the same signal
 /// differ by the bin width in dB, so a reading without it can't be compared.

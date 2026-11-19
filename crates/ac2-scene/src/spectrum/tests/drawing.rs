@@ -646,6 +646,58 @@ fn cursor_rows_name_tone_or_density() {
     );
 }
 
+/// A digital level is signed wherever a graph reads one, so a level above full scale
+/// cannot read as one below it; a sound level is not, and a density keeps its `/Hz`.
+#[test]
+fn a_dbfs_reading_is_signed_and_a_db_spl_reading_is_not() {
+    let g = third_octaves();
+    let (f, e) = (g.centres(), g.edges());
+    let level: Vec<f32> = vec![3.0; f.len()];
+    let mut over = rta_trace(&f, &e, &level, LevelScale::Dbfs);
+    over.quantity = Quantity::Tone;
+    let mut density = over.clone();
+    density.quantity = Quantity::Density;
+    let mut spl = over.clone();
+    spl.scale = LevelScale::DbSpl;
+    let view = ViewState {
+        cursor_hz: Some(1000.0),
+        ..ViewState::default()
+    };
+    let s = spectrum_scene(
+        &[over, density, spl],
+        &Status::default(),
+        &view,
+        &Theme::dark(),
+        SIZE,
+    );
+    let cur = s.cursor.expect("cursor");
+    let values: Vec<&str> = cur.rows.iter().map(|(_, v)| v.as_str()).collect();
+    assert_eq!(
+        values,
+        [
+            "+3.0 dBFS (tone)",
+            "+3.0 dBFS/Hz (density)",
+            "3.0 dB SPL (tone)"
+        ]
+    );
+    assert_eq!(
+        level_text(-23.46, LevelScale::Dbfs, Quantity::Tone),
+        "−23.5 dBFS"
+    );
+    assert_eq!(
+        level_text(0.0, LevelScale::Dbfs, Quantity::Tone),
+        "0.0 dBFS"
+    );
+    assert_eq!(
+        level_text(94.0, LevelScale::DbSpl, Quantity::Density),
+        "94.0 dB SPL/Hz"
+    );
+    assert_eq!(
+        level_noted(f64::NAN, LevelScale::Dbfs, Quantity::Density),
+        "—"
+    );
+}
+
 /// The pane's own curve draws over the compared ones, the first compared over the second,
 /// and each layer down has a lighter fill / bars; every curve keeps its own style.
 #[test]

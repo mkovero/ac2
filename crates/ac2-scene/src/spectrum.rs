@@ -42,8 +42,9 @@ use legend::unit_forms;
 pub(crate) use legend::{SpectrumLegend, legend_of};
 pub use mark::jump;
 pub use units::{
-    BinWidth, cal_caption, density_unit_help, fraction_label, level_unit, level_unit_forms,
-    narrow_unit_help, quantity_note, tone_unit_help, value_unit, weighting_label, window_label,
+    BinWidth, cal_caption, density_unit_help, fraction_label, level_noted, level_text, level_unit,
+    level_unit_forms, narrow_unit_help, quantity_note, tone_unit_help, value_unit, weighting_label,
+    window_label,
 };
 
 /// What a level value means.

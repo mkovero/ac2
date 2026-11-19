@@ -656,6 +656,43 @@ impl AppState {
         Some(EmptyHint { text, place })
     }
 
+    /// Why spectrum pane `pane` has no history for its spectrograph to draw, in the words
+    /// every empty pane uses ([`ac2_scene::missing`]): no spectrum or RTA measurement and
+    /// how to make one, or its own hidden or stopped before its first frame, with the key
+    /// that brings it. `None`: it has one to draw (running, it says itself that no frame
+    /// came yet).
+    pub(crate) fn spectrograph_missing(&self, pane: PaneId) -> Option<String> {
+        use ac2_scene::missing::{Missing, missing_text, none_text};
+        let Some(m) = self
+            .pane_meas(pane)
+            .filter(|m| crate::state::spectrum_stream(m).is_some())
+        else {
+            return Some(none_text(
+                "spectrum or RTA measurement",
+                &self.new_meas_reach(),
+            ));
+        };
+        let (why, command, scope) = if self.meas_hidden(m) {
+            (Missing::Hidden, CommandId::ToggleSelected, Scope::Global)
+        } else if !m.running
+            && self
+                .rig
+                .folded
+                .spectrographs
+                .get(&m.id)
+                .is_none_or(|h| h.is_empty())
+        {
+            (Missing::Stopped, CommandId::StartStop, Scope::Spectrum)
+        } else {
+            return None;
+        };
+        let key = self
+            .keys
+            .first_chord(command, scope)
+            .map_or_else(|| "the palette".to_owned(), |c| c.label());
+        Some(missing_text(&m.config.name, why, &key))
+    }
+
     /// What pane `pane` of the rig in `rig` was given that the mirror does not list yet: the
     /// name it was kept by, else its lead's id. `None` when its lead is listed or it has none.
     pub fn pane_waits(&self, pane: PaneId) -> Option<String> {

@@ -374,7 +374,7 @@ fn spectrograph_3d_view_with_a_full_history() {
         std::hint::black_box(spectrograph_3d_scene(
             &[],
             &Status::default(),
-            Some(&input(1.5)),
+            Ok(&input(1.5)),
             &view,
             &theme,
             FULL_HD,
@@ -386,7 +386,7 @@ fn spectrograph_3d_view_with_a_full_history() {
         std::hint::black_box(spectrograph_3d_scene(
             &[],
             &Status::default(),
-            Some(&i),
+            Ok(&i),
             &view,
             &theme,
             FULL_HD,

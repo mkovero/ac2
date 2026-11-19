@@ -259,16 +259,7 @@ pub(crate) fn spectrum_scene_in(
             .filter_map(|t| {
                 let j = column_at(t.freqs, t.edges, hz)?;
                 let v = t.value(j);
-                let s = format::level(v);
-                let s = if v.is_finite() {
-                    format!(
-                        "{s} {} ({})",
-                        value_unit(t.scale, t.quantity),
-                        quantity_note(t.quantity)
-                    )
-                } else {
-                    s
-                };
+                let s = level_noted(v, t.scale, t.quantity);
                 // An offset trace reads its displayed (offset) level, and says so.
                 let name = if t.offset_db != 0.0 {
                     offset_note(&t.name, t.offset_db)
@@ -324,7 +315,7 @@ pub(crate) fn spectrum_scene_in(
         canvas::vline(&mut c.overlay, plot, xm.to_px(hz), theme.cursor);
         let mut lines = vec![freq];
         if let Some(cur) = &cursor {
-            lines.extend(cur.rows.iter().map(|(n, v)| format!("{n}  {v}")));
+            lines.extend(cur.rows.iter().map(|(n, v)| crate::readout::row(&[n, v])));
         }
         lines.extend(history.map(str::to_string));
         if let Some(m) = &mark {
@@ -578,14 +569,11 @@ pub(crate) fn tracked_peaks(
                         PeakRow {
                             freq_hz: p.freq_hz,
                             level,
-                            text: format!(
-                                "{}  {}  {} {} ({})",
-                                k + 1,
+                            text: crate::readout::row(&[
+                                (k + 1).to_string(),
                                 format::freq_readout(p.freq_hz),
-                                format::level(level),
-                                value_unit(t.scale, t.quantity),
-                                quantity_note(t.quantity)
-                            ),
+                                level_noted(level, t.scale, t.quantity),
+                            ]),
                             mark: crate::peak_marks::mark_rect(x, y, half, plot, marks),
                         }
                     })

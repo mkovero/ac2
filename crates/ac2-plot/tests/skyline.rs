@@ -885,7 +885,7 @@ fn bench_frame_cost() {
                 let sc = spectrograph_3d_scene(
                     &[],
                     &Status::default(),
-                    Some(&input),
+                    Ok(&input),
                     &ViewState::default(),
                     &Theme::dark(),
                     size,

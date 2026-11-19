@@ -50,11 +50,7 @@ pub(super) fn cursor_cell(
     } else {
         f64::NAN
     };
-    let level = crate::spectrograph::cursor_level(shown, s.history.unit_noted().as_deref());
-    let lines = vec![
-        crate::format::freq_readout(hz),
-        format!("{} ago  {level}", crate::format::age(before_s)),
-    ];
+    let lines = crate::spectrograph::cursor_lines(hz, before_s, &s.history.level_noted(shown));
     let pj = Projector::new(f.view_proj, f.plot);
     let (a, b) = ends(f, sk, (col, j), v, &pj);
     let colour = cursor_colour();

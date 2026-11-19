@@ -64,7 +64,7 @@ fn scene_3d_as(
     spectrograph_3d_scene(
         &[],
         &Status::default(),
-        Some(&input),
+        Ok(&input),
         view,
         &Theme::dark(),
         Viewport::new(1200.0, 600.0),
@@ -148,7 +148,7 @@ fn labels_stay_whole_inside_the_field() {
             let s = spectrograph_3d_scene(
                 &[],
                 &Status::default(),
-                Some(&input),
+                Ok(&input),
                 &view,
                 &Theme::dark(),
                 Viewport::new(w, h),
@@ -381,15 +381,12 @@ fn empty_and_missing_say_so() {
     let none = spectrograph_3d_scene(
         &[],
         &Status::default(),
-        None,
+        Err("Main L hidden — A shows it"),
         &ViewState::default(),
         &Theme::light(),
         Viewport::new(800.0, 400.0),
     );
-    assert_eq!(
-        none.message.as_deref(),
-        Some("no spectrum or RTA measurement")
-    );
+    assert_eq!(none.message.as_deref(), Some("Main L hidden — A shows it"));
     // The field is dark in the light theme too.
     assert!(
         none.scene
@@ -431,7 +428,7 @@ fn heights_follow_the_range_and_offset() {
     let s = spectrograph_3d_scene(
         &[],
         &Status::default(),
-        Some(&input),
+        Ok(&input),
         &ViewState {
             freq: FreqRange::default(),
             ..ViewState::default()

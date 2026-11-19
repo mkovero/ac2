@@ -61,10 +61,7 @@ pub fn run_settings(t: &TraceMeta) -> Option<String> {
         LfHarmonics::Standard => "",
         LfHarmonics::Fine => " · LF harmonics fine",
     };
-    Some(format!(
-        "{times}{secs} s {} dBFS{lf}",
-        format::level(level.0)
-    ))
+    Some(format!("{times}{secs} s {}{lf}", format::dbfs(level.0)))
 }
 
 /// What a curve that is not a measurement says after its kind: an EQ set's sections and

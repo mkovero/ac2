@@ -109,7 +109,7 @@ pub(super) fn scene_posed(
     spectrograph_3d_scene(
         &[trace(peaks)],
         &Status::default(),
-        Some(&input),
+        Ok(&input),
         view,
         &Theme::dark(),
         Viewport::new(1200.0, 600.0),
@@ -154,7 +154,10 @@ fn points_stand_on_the_sliding_newest_row_inside_the_plot() {
     }
     // Below the cells' top, a point stands at its own level: −40 of −80 … 0.
     assert!((s.points[0].world[1] - MAX_HEIGHT * 0.5).abs() < 1e-9);
-    assert_eq!(s.points[0].label.as_deref(), Some("1.00 kHz  −40.0 dBFS"));
+    assert_eq!(
+        s.points[0].label.as_deref(),
+        Some("1  1.00 kHz  −40.0 dBFS")
+    );
     assert!(
         s.points[0].pos[0] > s.points[1].pos[0],
         "1 kHz right of 100 Hz"
@@ -172,7 +175,25 @@ fn a_point_is_clamped_to_its_spike_and_keeps_its_value() {
         (p.world[1] - MAX_HEIGHT * 50.0 / 80.0).abs() < 1e-9,
         "{p:?}"
     );
-    assert_eq!(p.label.as_deref(), Some("1.00 kHz  −10.0 dBFS"));
+    assert_eq!(p.label.as_deref(), Some("1  1.00 kHz  −10.0 dBFS"));
+}
+
+/// A label is its peak's row of the spectrum's peak list: the rank the list gives it
+/// (loudest first), also when a louder peak has no point, and a signed digital level.
+#[test]
+fn a_label_carries_its_rank_and_a_signed_level() {
+    let b = flat_room();
+    // The loudest is outside the frequency span: no point, and its rank stays its own.
+    let peaks = [peak(40_000.0, 6.0), peak(1000.0, 3.0), peak(100.0, -40.0)];
+    let s = scene(&b, &peaks, &chrome(PlotChrome::Full), 1.0);
+    let labels: Vec<Option<&str>> = s.points.iter().map(|p| p.label.as_deref()).collect();
+    assert_eq!(
+        labels,
+        [
+            Some("2  1.00 kHz  +3.0 dBFS"),
+            Some("3  100 Hz  −40.0 dBFS")
+        ]
+    );
 }
 
 #[test]
@@ -206,7 +227,7 @@ fn points_show_at_rest_and_traces_only_hides_them() {
             .layers
             .iter()
             .flat_map(|l| &l.labels)
-            .any(|l| l.text == "1.00 kHz  −40.0 dBFS")
+            .any(|l| l.text == "1  1.00 kHz  −40.0 dBFS")
     };
     assert!(drawn(&s));
     // Traces only: none, even with the axes revealed.
@@ -247,7 +268,7 @@ fn the_legend_is_the_plate_of_every_view() {
     let none = spectrograph_3d_scene(
         &[],
         &Status::default(),
-        None,
+        Err(""),
         &ViewState::default(),
         &Theme::dark(),
         Viewport::new(1200.0, 600.0),

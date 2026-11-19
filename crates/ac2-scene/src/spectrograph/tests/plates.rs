@@ -69,7 +69,7 @@ fn alone_the_legend_plate_and_tracked_peaks_and_the_split_leaves_them_to_the_spe
         spectrograph_scene(
             &traces,
             &Status::default(),
-            Some(&input),
+            Ok(&input),
             view,
             &Theme::dark(),
             size,
@@ -191,7 +191,7 @@ fn alone_the_harmonics_plate_and_the_split_leaves_it_to_the_spectrum() {
         spectrograph_scene(
             &traces,
             &Status::default(),
-            Some(&input),
+            Ok(&input),
             view,
             &Theme::dark(),
             Viewport::new(800.0, 500.0),

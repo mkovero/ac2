@@ -43,9 +43,23 @@ pub fn missing_text(name: &str, why: Missing, key: &str) -> String {
     }
 }
 
+/// The text of a pane with no measurement of its kind to show (`what`: `spectrum or RTA
+/// measurement`); `reach` is how to make one (the key, or where the command is).
+pub fn none_text(what: &str, reach: &str) -> String {
+    format!("no {what} — {reach} makes one")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pane_with_no_measurement_says_how_to_make_one() {
+        assert_eq!(
+            none_text("spectrum or RTA measurement", "N"),
+            "no spectrum or RTA measurement — N makes one"
+        );
+    }
 
     #[test]
     fn a_pane_names_its_own_measurement() {

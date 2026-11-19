@@ -87,23 +87,21 @@ pub(super) fn history_cursor(
         .history
         .value_at(hz, before)
         .map_or(f64::NAN, |v| f64::from(v) + s.offset_db);
-    let level = cursor_level(v, s.history.unit_noted().as_deref());
-    let ago = format!("{} ago", format::age(before));
     Some(SpectrographCursor {
         freq_hz: hz,
         before_s: before,
-        text: format!("{} · {ago} · {level}", format::freq_readout(hz)),
-        line: format!("{ago}  {level}"),
+        lines: cursor_lines(hz, before, &s.history.level_noted(v)),
     })
 }
 
-/// A history cursor's level as the 2D and 3D views read it: `−23.5 dBFS (tone)` for
-/// displayed level `v` in `unit`, a dash for none.
-pub(crate) fn cursor_level(v: f64, unit: Option<&str>) -> String {
-    match unit {
-        Some(unit) if v.is_finite() => format!("{} {unit}", format::level(v)),
-        _ => format::level(f64::NAN),
-    }
+/// A history cursor's lines on the cursor values' plate, as the 2D and 3D views both read
+/// it: where it is (the frequency) on top as every cursor has it, then a row of how long
+/// ago and the `level` there (`4.2 s ago  −23.5 dBFS (tone)`).
+pub(crate) fn cursor_lines(hz: f64, before_s: f64, level: &str) -> Vec<String> {
+    vec![
+        format::freq_readout(hz),
+        crate::readout::row(&[format!("{} ago", format::age(before_s)).as_str(), level]),
+    ]
 }
 
 /// Whether a spectrograph's legend plate names curve `key`: not hidden, and the curve is

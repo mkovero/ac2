@@ -173,7 +173,7 @@ pub fn calibrator(e: &CalEntry) -> String {
 /// 449350_34804_0Grad.txt) · loaded 330 Ω → 2.0 kΩ −1.3 dB · ±1 dB` (the loading only
 /// when stated).
 pub fn method_detail(e: &CalEntry) -> String {
-    let read = format!("read {} dBFS", format::level(e.spl.measured.0));
+    let read = format!("read {}", format::dbfs(e.spl.measured.0));
     match &e.spl.method {
         CalMethod::Acoustic { .. } => format!("{} · {read}", calibrator(e)),
         CalMethod::Electrical {
@@ -339,9 +339,9 @@ pub fn sensitivity_state(s: &Sensitivity<'_>, client_now: WallNs, offset: ClockO
 /// A line calibration's record: `1.228 V read −9.0 dBFS · full scale 3.46 V (+13.0 dBu)`.
 pub fn line_detail(l: &ac2_proto::model::LineCal) -> String {
     format!(
-        "{} read {} dBFS · full scale {} ({} dBu)",
+        "{} read {} · full scale {} ({} dBu)",
         format::volts(l.volts.0),
-        format::level(l.measured.0),
+        format::dbfs(l.measured.0),
         format::volts(l.v_fs.0),
         format::signed(ac2_proto::cal::dbu_fs(l.v_fs.0).0, 1)
     )

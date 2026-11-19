@@ -187,10 +187,12 @@ fn spectrograph_from_an_empty_daemon() -> R {
         size,
         now(),
     );
-    let text = s.cursor.ok_or("cursor")?.text;
+    let lines = s.cursor.ok_or("cursor")?.lines;
     assert!(
-        text.starts_with("1.00 kHz · 0.1 s ago · ") && text.ends_with(" dBFS (tone)"),
-        "{text}"
+        lines[0] == "1.00 kHz"
+            && lines[1].starts_with("0.1 s ago  ")
+            && lines[1].ends_with(" dBFS (tone)"),
+        "{lines:?}"
     );
     // The cursor toggle turns it off, time and all.
     d.send(Msg::Command(CommandId::ToggleCursor));

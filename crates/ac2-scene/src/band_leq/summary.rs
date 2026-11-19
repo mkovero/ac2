@@ -9,15 +9,15 @@ pub fn predicted_text(p: &PredictedLeq, place: &str, chrome: PlotChrome) -> Pred
     let mut parts = vec![format!(
         "predicted LAeq {} in {place} {}",
         length(p.duration.0),
-        with_db(p.estimate)
+        format::spl(p.estimate)
     )];
     // The unusable bands at their bound can only raise it: shown when they do.
     if p.at_most.is_finite() && (!p.estimate.is_finite() || p.at_most - p.estimate >= 0.05) {
-        parts.push(format!("at most {} dB", format::level(p.at_most)));
+        parts.push(format!("at most {}", format::spl(p.at_most)));
     }
     match p.limit {
         Some(_) if !chrome.limit_text() => {}
-        Some(l) => parts.push(format!("limit {} dB", format::level(l.0))),
+        Some(l) => parts.push(format!("limit {}", format::spl(l.0))),
         None => parts.push("no limit now".to_owned()),
     }
     let state = TileState::from(p.judgement);
@@ -27,14 +27,6 @@ pub fn predicted_text(p: &PredictedLeq, place: &str, chrome: PlotChrome) -> Pred
     PredictedText {
         line: parts.join(" · "),
         state,
-    }
-}
-
-fn with_db(v: f64) -> String {
-    if v.is_finite() {
-        format!("{} dB", format::level(v))
-    } else {
-        format::NO_VALUE.to_owned()
     }
 }
 

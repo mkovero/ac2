@@ -247,7 +247,7 @@ fn scene_coloured(
     spectrograph_scene(
         &[],
         &Status::default(),
-        Some(&input),
+        Ok(&input),
         view,
         &Theme::dark(),
         Viewport::new(800.0, 500.0),
@@ -356,13 +356,13 @@ fn axes_bar_caption_and_cursor_read_as_numbers() {
     view.spectrum.spectrograph.cursor_at_s = ago(&h, 4.2);
     let s = scene_of(&h, &view);
     assert_eq!(
-        s.cursor.expect("cursor").text,
-        "1.00 kHz · 4.2 s ago · \u{2212}23.5 dBFS (tone)"
+        s.cursor.expect("cursor").lines,
+        ["1.00 kHz", "4.2 s ago  \u{2212}23.5 dBFS (tone)"]
     );
     // Before the first frame: no value.
     view.spectrum.spectrograph.cursor_at_s = ago(&h, 12.0);
     let s = scene_of(&h, &view);
-    assert_eq!(s.cursor.expect("cursor").text, "1.00 kHz · 12 s ago · —");
+    assert_eq!(s.cursor.expect("cursor").lines, ["1.00 kHz", "12 s ago  —"]);
 }
 
 #[test]
@@ -387,7 +387,7 @@ fn the_cursor_reads_on_the_plate_of_every_view() {
     };
     // Split: one cursor, one plate, the spectrum's, with the history's line on it.
     let split = scene_of(&h, &view);
-    assert_eq!(split.cursor.as_ref().expect("cursor").line, line);
+    assert_eq!(split.cursor.as_ref().expect("cursor").lines[1], line);
     assert!(split.readout_box.is_none());
     let sp = split.spectrum.as_ref().expect("the spectrum part");
     assert!(sp.readout_box.is_some());
@@ -436,15 +436,17 @@ fn stale_dims_offset_shifts_and_empty_says_so() {
             colours: Default::default(),
             lead_slots: 0.0,
         };
-        spectrograph_scene(&[], &Status::default(), Some(&s), &view, &theme, size)
+        spectrograph_scene(&[], &Status::default(), Ok(&s), &view, &theme, size)
     };
     let s = input(&h, 0.0, None);
     assert_eq!(s.message.as_deref(), Some("Sub: no frames yet"));
     assert_eq!(heatmaps(&s.scene).len(), 1, "colour bar only");
-    let none = spectrograph_scene(&[], &Status::default(), None, &view, &theme, size);
+    // No measurement to draw: the text the pane was given, which says what brings one.
+    let why = crate::missing::none_text("spectrum or RTA measurement", "N");
+    let none = spectrograph_scene(&[], &Status::default(), Err(&why), &view, &theme, size);
     assert_eq!(
         none.message.as_deref(),
-        Some("no spectrum or RTA measurement")
+        Some("no spectrum or RTA measurement — N makes one")
     );
     let mut f = Feed::new(&third_octaves());
     f.push(&mut h, T0, -40.0);
@@ -504,7 +506,7 @@ fn the_spectrum_part_keeps_its_legend_unit_and_selection() {
     let s = spectrograph_scene(
         &traces,
         &Status::default(),
-        Some(&input),
+        Ok(&input),
         &ViewState::default(),
         &theme,
         Viewport::new(800.0, 500.0),
@@ -618,7 +620,7 @@ fn the_spectrograph_alone_takes_the_pane() {
         spectrograph_scene(
             std::slice::from_ref(&trace),
             &status,
-            Some(&input),
+            Ok(&input),
             &view,
             &Theme::dark(),
             Viewport::new(w, 500.0),
@@ -727,7 +729,7 @@ fn multires_stitches_cross_the_history() {
     let split = spectrograph_scene(
         std::slice::from_ref(&trace),
         &Status::default(),
-        None,
+        Err(""),
         &view,
         &Theme::dark(),
         size,
@@ -739,7 +741,7 @@ fn multires_stitches_cross_the_history() {
     let alone = spectrograph_scene(
         std::slice::from_ref(&trace),
         &Status::default(),
-        None,
+        Err(""),
         &view,
         &Theme::dark(),
         size,
@@ -749,7 +751,7 @@ fn multires_stitches_cross_the_history() {
     let off = spectrograph_scene(
         std::slice::from_ref(&trace),
         &Status::default(),
-        None,
+        Err(""),
         &view,
         &Theme::dark(),
         size,
@@ -863,7 +865,7 @@ fn the_3d_view_on_a_gpu_without_it_is_the_spectrograph_with_a_note() {
     let none = spectrograph_scene(
         &[],
         &Status::default(),
-        None,
+        Err(""),
         &view,
         &Theme::dark(),
         Viewport::new(800.0, 500.0),

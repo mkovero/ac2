@@ -259,15 +259,17 @@ pub(super) fn thin<T>(candidates: Vec<(T, Label)>, plot: Rect, out: &mut Vec<(T,
 
 /// The spectrum pane's 3D spectrograph: the banners, a caption, and the skyline of `sg`'s
 /// history on a dark field with its labels, height scale and ceiling line as `view.chrome`
-/// says. `None` (no spectrum or RTA measurement) draws an empty field that says so.
+/// says. `Err` (no measurement to draw, as [`crate::spectrograph::spectrograph_scene`] takes
+/// it) draws an empty field with that text.
 pub fn spectrograph_3d_scene(
     traces: &[SpectrumTrace<'_>],
     status: &Status,
-    sg: Option<&Spectrograph3dInput<'_>>,
+    sg: Result<&Spectrograph3dInput<'_>, &str>,
     view: &ViewState,
     theme: &Theme,
     size: Viewport,
 ) -> Spectrograph3dScene {
+    let (sg, missing) = (sg.ok(), sg.err());
     // The axes come on demand: at rest the view is the skyline alone, as T's traces-only
     // tier draws it; while shown they fade as a whole, each part what the tier would show.
     let axes = sg.map_or(1.0, |s| s.axes.clamp(0.0, 1.0));
@@ -574,7 +576,7 @@ pub fn spectrograph_3d_scene(
     let mut pick = None;
     let mut caption = String::new();
     match sg {
-        None => message = Some("no spectrum or RTA measurement".to_string()),
+        None => message = missing.map(str::to_string),
         Some(s) => {
             let name = if s.offset_db != 0.0 {
                 offset_note(&s.name, s.offset_db)
@@ -594,7 +596,14 @@ pub fn spectrograph_3d_scene(
             }
             let sk = s.skyline;
             if s.history.is_empty() || sk.span_hz().is_none() || !range.is_valid() {
-                message = Some(format!("{}: no frames yet", s.name));
+                message = Some(crate::missing::missing_text(
+                    &s.name,
+                    crate::missing::Missing::NotYet {
+                        what: "frames",
+                        after: None,
+                    },
+                    "",
+                ));
             } else {
                 let off = s.offset_db;
                 let drawn = sk.drawn(s.lead_slots);
@@ -658,7 +667,7 @@ pub fn spectrograph_3d_scene(
                     s.skyline.drawn(s.lead_slots),
                     peaks,
                     t.offset_db,
-                    crate::spectrum::value_unit(t.scale, t.quantity),
+                    (t.scale, t.quantity),
                     range,
                     plot,
                     small,
