@@ -344,7 +344,8 @@ fn no_session_hint_stays_with_an_imported_target() -> R {
         d.st.empty_hint(d.st.layout.focus, &d.keys)
             .map(|h| h.text)
             .as_deref(),
-        Some("No session open — Alt+S, then New session")
+        // The chord is named as this platform's keyboard prints it.
+        Some(ac2_scene::sessions::no_session_hint(&d.keys.reach(CommandId::Sessions)).as_str())
     );
     import_target(&mut d)?;
     assert!(!d.st.pane_shows_stored(d.st.layout.focus));

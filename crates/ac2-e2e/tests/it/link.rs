@@ -149,8 +149,13 @@ fn link_with(config: ClientConfig) -> R<Conn> {
     )?)
 }
 
-fn wait_for(conn: &Conn, what: &str, mut ok: impl FnMut(&ConnEvent) -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+fn wait_for(conn: &Conn, what: &str, ok: impl FnMut(&ConnEvent) -> bool) {
+    wait_within(conn, what, Duration::from_secs(10), ok);
+}
+
+/// [`wait_for`] with its own limit, for a wait whose length is the work asked for.
+fn wait_within(conn: &Conn, what: &str, limit: Duration, mut ok: impl FnMut(&ConnEvent) -> bool) {
+    let deadline = Instant::now() + limit;
     loop {
         if conn.drain().iter().any(&mut ok) {
             return;
@@ -270,14 +275,21 @@ fn preview_requests_reach_the_daemon_in_order() -> R {
             .map(|f| f.frame.stamp.seq),
         _ => None,
     };
-    wait_for(&conn, "every preview answered", |e| {
-        if let ConnEvent::Preview { result, .. } = e {
-            assert!(result.is_ok(), "{result:?}");
-            answered += 1;
-        }
-        newest = newest.max(seq(e).unwrap_or(0));
-        answered == rounds
-    });
+    // A hundred devices opened and closed: how long that takes is the host's to say, so
+    // the limit is one only a hang reaches.
+    wait_within(
+        &conn,
+        "every preview answered",
+        Duration::from_secs(120),
+        |e| {
+            if let ConnEvent::Preview { result, .. } = e {
+                assert!(result.is_ok(), "{result:?}");
+                answered += 1;
+            }
+            newest = newest.max(seq(e).unwrap_or(0));
+            answered == rounds
+        },
+    );
     // Frames of the preview opened last, after every request was answered.
     let mut later = 0;
     wait_for(&conn, "the device's meters after the last round", |e| {
