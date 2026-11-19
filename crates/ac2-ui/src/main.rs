@@ -43,7 +43,7 @@ struct Args {
     /// Connect to a remote daemon over CURVE: `host` or `host:port`. Starts no ac2d.
     #[arg(long, value_name = "HOST[:PORT]", conflicts_with_all = ["ctrl", "backend"])]
     remote: Option<RemoteAddr>,
-    /// Explicit ctrl endpoint (with --data), e.g. `tcp://127.0.0.1:47820`. Starts no ac2d.
+    /// Explicit ctrl endpoint (with --data), e.g. `tcp://127.0.0.1:47822`. Starts no ac2d.
     #[arg(
         long,
         requires = "data",

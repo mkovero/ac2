@@ -136,7 +136,7 @@ measuring with a real audio interface is not yet verified ([testing/macos](../te
 `ac2-<version>-windows-x64.zip` holds the same three programs for use without installing.
 Uninstall from **Settings → Apps** like any other program.
 
-On Windows the local daemon listens on `tcp://127.0.0.1:47820` and `:47821` (loopback only).
+On Windows the local daemon listens on `tcp://127.0.0.1:47822` and `:47823` (loopback only).
 Audio goes through ASIO only: install the interface's ASIO driver, or
 [FlexASIO](https://github.com/dechamps/FlexASIO) for a device without one (a USB measurement
 mic, a class-compliant interface, built-in audio); with no ASIO driver, the device list says

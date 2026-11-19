@@ -58,7 +58,8 @@ impl Outbox {
         Ok(Self { sock })
     }
 
-    fn send(&self, tag: u8, parts: &[&[u8]]) {
+    /// `false` when the message was dropped.
+    fn send(&self, tag: u8, parts: &[&[u8]]) -> bool {
         let mut v: Vec<&[u8]> = Vec::with_capacity(parts.len() + 1);
         let t = [tag];
         v.push(&t);
@@ -67,29 +68,34 @@ impl Outbox {
         // means it has stopped, and blocking here would hang the sender with it.
         for _ in 0..1000 {
             match self.sock.try_send(&v) {
-                Ok(()) => return,
+                Ok(()) => return true,
                 Err(ZmqError::WouldBlock) => {
                     std::thread::sleep(std::time::Duration::from_millis(1))
                 }
                 Err(e) => {
                     tracing::warn!("internal pipe send failed: {e}");
-                    return;
+                    return false;
                 }
             }
         }
         tracing::warn!("internal pipe full for 1 s; message dropped");
+        false
     }
 
     pub(crate) fn reply(&self, route: &Route, reply: &[u8]) {
         self.send(TAG_REPLY, &[&route.encode(), reply]);
     }
 
-    pub(crate) fn attach(&self, epoch: NetEpoch) {
-        self.send(TAG_ATTACH, &[&epoch.0.to_le_bytes()]);
+    /// `false` when dropped: the pair is then not served, and the sender must know.
+    #[must_use]
+    pub(crate) fn attach(&self, epoch: NetEpoch) -> bool {
+        self.send(TAG_ATTACH, &[&epoch.0.to_le_bytes()])
     }
 
-    pub(crate) fn detach(&self, epoch: NetEpoch) {
-        self.send(TAG_DETACH, &[&epoch.0.to_le_bytes()]);
+    /// `false` when dropped: the pair then stays bound, and the sender must resend.
+    #[must_use]
+    pub(crate) fn detach(&self, epoch: NetEpoch) -> bool {
+        self.send(TAG_DETACH, &[&epoch.0.to_le_bytes()])
     }
 
     pub(crate) fn event(&self, body: &[u8]) {

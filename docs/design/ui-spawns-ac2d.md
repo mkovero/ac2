@@ -39,7 +39,7 @@ names the expected path. Dev builds find `target/<profile>/ac2d` after `cargo bu
 `Daemon::start` binds at once (`ac2d/src/lib.rs:393-397`). On Unix libzmq's ipc listener
 unlinks an existing socket path before binding, so a second `ac2d` silently takes over
 `ctrl.sock` while the first keeps the interface (libzmq behaviour as read; stage 1 proves it
-with a test). On Windows the second fails on `127.0.0.1:47820` (`AddressInUse`), but only
+with a test). On Windows the second fails on `127.0.0.1:47822` (`AddressInUse`), but only
 after rotating `ac2d.log` and opening audio. Fix (stage 1): every `ac2d` except `--ephemeral` takes an exclusive
 `std::fs::File::try_lock` (stable on the pinned 1.95) on `runtime_dir()/ac2d.lock`
 (`ac2-client/src/endpoint.rs`), on every OS, before log, audio or sockets, whatever it

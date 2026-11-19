@@ -456,4 +456,24 @@ mod tests {
         assert!(local.validate(&at(47_822)).is_ok());
         assert!(local.validate(&at(0)).is_err());
     }
+
+    /// Clients find the daemon at these ports without asking it: both sides must agree,
+    /// and the default local pair must never sit on the default network ports.
+    #[test]
+    fn the_daemons_ports_are_the_clients() {
+        assert_eq!(LOCAL_PORT, ac2_client::endpoint::LOCAL_PORT);
+        assert_eq!(DEFAULT_PORT, ac2_client::endpoint::DEFAULT_PORT);
+        let windows_local = Listen::Local {
+            ctrl: format!("tcp://127.0.0.1:{LOCAL_PORT}"),
+            data: format!("tcp://127.0.0.1:{}", LOCAL_PORT + 1),
+        };
+        assert!(
+            windows_local
+                .validate(&NetworkChoice::Fixed(NetListen {
+                    bind: NetBind::All,
+                    port: NetPort::Port(DEFAULT_PORT),
+                }))
+                .is_ok()
+        );
+    }
 }

@@ -33,7 +33,7 @@ audio interface ── ac2d (daemon) ──┬── ac2-ui  (the app: plots, ke
 The **daemon** owns the audio interface and does all measuring. The app and the CLI are
 clients; several can be connected at once (a laptop at FOH, another at a delay tower) and
 see the same measurements. Locally the daemon is reachable only by your user on Linux and
-macOS (sockets in your runtime directory); on Windows it listens on `127.0.0.1:47820`
+macOS (sockets in your runtime directory); on Windows it listens on `127.0.0.1:47822`
 without encryption, so any program on the same computer can reach it. Across the network it
 requires pairing ([install.md](install.md#remote-use-foh--stage)).
 

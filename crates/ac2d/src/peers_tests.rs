@@ -92,14 +92,16 @@ impl Rig {
     /// Takes the peers' requests.
     fn pump(&mut self) {
         while let Some(m) = self.router.recv_timeout(Duration::from_millis(5)).unwrap() {
-            let admission = self.admission;
+            let from = match &self.client {
+                None => DataClient::Local,
+                Some(c) => DataClient::Curve(c, self.admission),
+            };
             self.peers.request(
                 &self.router,
-                self.client.as_ref(),
+                from,
                 m.into_frames(),
                 &self.interest,
                 Instant::now(),
-                |_| admission,
             );
         }
     }

@@ -46,7 +46,7 @@ without one (§2).
    Windows refuses the input ("Access is denied", or FlexASIO fails to start) or hands ac2
    silence from every input, including line inputs. A maker's ASIO driver bypasses it. ac2
    reads your interface's inputs and nothing else.
-4. Firewall: on this computer the daemon listens on `127.0.0.1:47820` and `:47821` only
+4. Firewall: on this computer the daemon listens on `127.0.0.1:47822` and `:47823` only
    (loopback), so no firewall prompt is expected. If one appears anyway, note it in the
    report; denying it does not affect local use.
 

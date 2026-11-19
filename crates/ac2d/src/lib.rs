@@ -424,7 +424,7 @@ impl Daemon {
         let outbox = Outbox::connect(&ctx, &pull_ep, 100_000).map_err(zerr("internal pipe"))?;
 
         let (tx, rx) = std::sync::mpsc::channel();
-        let (attach, attach_rx) = std::sync::mpsc::channel();
+        let attach = io::AttachQueue::default();
         let (mut network, damage) = control::network::NetCtl::new(control::network::NetSetup {
             choice: config.network.clone(),
             files: config.keys.clone(),
@@ -432,7 +432,7 @@ impl Daemon {
             retry: config.net_retry,
             mdns: config.mdns.clone(),
             name: config.name.clone(),
-            attach,
+            attach: attach.clone(),
             to_control: tx.clone(),
         })?;
         let mut key_damage: Vec<_> = rig_id_damage.into_iter().collect();
@@ -459,7 +459,7 @@ impl Daemon {
                 data: data_sock,
                 pull,
                 frames: frames_rx,
-                attach: attach_rx,
+                attach,
             },
             tx.clone(),
             Arc::clone(&interest),

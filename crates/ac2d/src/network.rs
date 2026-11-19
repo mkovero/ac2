@@ -103,6 +103,10 @@ pub enum NetReason {
     AddressMissing,
     /// The ZAP handler that authenticates the network's clients stopped.
     ZapFailed,
+    /// No server key to serve CURVE with (no key files: an in-process or ephemeral daemon).
+    NoServerKey,
+    /// The I/O thread could not be handed the pair (its internal pipe stayed full).
+    NotHandedOver,
     /// Anything else.
     Other {
         /// What failed.
@@ -117,6 +121,8 @@ impl fmt::Display for NetReason {
             Self::InterfaceMissing => f.write_str("no such interface"),
             Self::AddressMissing => f.write_str("the address is not on this host"),
             Self::ZapFailed => f.write_str("the authentication handler stopped"),
+            Self::NoServerKey => f.write_str("no server key"),
+            Self::NotHandedOver => f.write_str("the I/O thread did not take the network sockets"),
             Self::Other { detail } => f.write_str(detail),
         }
     }

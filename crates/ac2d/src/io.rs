@@ -22,13 +22,13 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use ac2_proto::Topic;
-use ac2_zmq::{Admission, Error as ZmqError, Message, Part, PollItem, Socket, poll};
+use ac2_zmq::{Error as ZmqError, Message, Part, PollItem, Socket, poll};
 
 use crate::chain::Slot;
 use crate::control::ControlMsg;
@@ -37,7 +37,7 @@ use crate::outbox::{
     FrameRx, TAG_ATTACH, TAG_AUDIO, TAG_CLEAR, TAG_DETACH, TAG_EVENT, TAG_FRAME, TAG_KA, TAG_REPLY,
     TAG_REVOKE, TAG_STOP,
 };
-use crate::peers::{Outside, Peers};
+use crate::peers::{DataClient, Outside, Peers};
 use crate::route::{CurvePeer, NetEpoch, Origin, Peer, Route};
 
 /// Topics with at least one subscriber, shared with jobs that compute optional derivations
@@ -119,13 +119,52 @@ pub(crate) struct IoSockets {
     /// Frames from the jobs.
     pub(crate) frames: FrameRx,
     /// Network pairs, each taken when its `TAG_ATTACH` comes through the pipe.
-    pub(crate) attach: Receiver<Attach>,
+    pub(crate) attach: AttachQueue,
 }
 
 /// A network pair bound by control, to serve from its `TAG_ATTACH` on.
 pub(crate) struct Attach {
     pub(crate) epoch: NetEpoch,
     pub(crate) pair: Pair,
+}
+
+/// Pairs bound by control and not yet attached. A queue both ends can reach, not a
+/// channel: when the pipe refuses a pair's `TAG_ATTACH`, control takes the pair back and
+/// closes it, or it would hold its port until the next attach.
+#[derive(Clone, Default)]
+pub(crate) struct AttachQueue(Arc<Mutex<Vec<Attach>>>);
+
+impl AttachQueue {
+    fn lock(&self) -> MutexGuard<'_, Vec<Attach>> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    pub(crate) fn put(&self, a: Attach) {
+        self.lock().push(a);
+    }
+
+    /// Pair `epoch` back out, before its tag went through.
+    pub(crate) fn withdraw(&self, epoch: NetEpoch) -> Option<Attach> {
+        let mut q = self.lock();
+        let i = q.iter().position(|a| a.epoch == epoch)?;
+        Some(q.swap_remove(i))
+    }
+
+    /// Pair `epoch`, for its `TAG_ATTACH`; older ones still queued were never attached
+    /// (their tag lost) and are closed so they free their ports.
+    fn take(&self, epoch: NetEpoch) -> Option<Attach> {
+        let mut found = None;
+        for a in std::mem::take(&mut *self.lock()) {
+            if a.epoch == epoch {
+                found = Some(a);
+            } else if a.epoch < epoch {
+                crate::network::close(a.pair);
+            } else {
+                self.lock().push(a);
+            }
+        }
+        found
+    }
 }
 
 /// The attached network pair and its data peers.
@@ -197,20 +236,6 @@ fn detach(n: Net, interest: &Interest) {
     peers.drop_all(interest, "the network was detached");
     crate::network::close(pair);
     tracing::info!("network pair {} detached", epoch.0);
-}
-
-/// Takes the pair of `epoch` from the attach channel; older ones found first never served
-/// (their tags overtaken by a newer attach cannot happen, but a pair left behind must not
-/// stay bound).
-fn take_attach(rx: &Receiver<Attach>, epoch: NetEpoch) -> Option<Attach> {
-    while let Ok(a) = rx.try_recv() {
-        if a.epoch == epoch {
-            return Some(a);
-        }
-        crate::network::close(a.pair);
-    }
-    tracing::error!("bug: network pair {} attached but not handed over", epoch.0);
-    None
 }
 
 fn epoch_of(msg: &[Part]) -> Option<NetEpoch> {
@@ -349,9 +374,7 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
             for _ in 0..BATCH {
                 match data.try_recv() {
                     Ok(Some(m)) => {
-                        peers.request(&data, None, m.into_frames(), interest, now, |_| {
-                            Admission::Revoked
-                        })
+                        peers.request(&data, DataClient::Local, m.into_frames(), interest, now);
                     }
                     Ok(None) => break,
                     Err(e) => {
@@ -369,14 +392,13 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
                         let Some(client) = curve_peer(&m, "data") else {
                             continue;
                         };
-                        let secure = &n.pair.secure;
+                        let admission = n.pair.secure.admission(&client.name, &client.key);
                         n.peers.request(
                             &n.pair.data,
-                            Some(&client),
+                            DataClient::Curve(&client, admission),
                             m.into_frames(),
                             interest,
                             now,
-                            |c| secure.admission(&c.name, &c.key),
                         );
                     }
                     Ok(None) => break,
@@ -496,12 +518,22 @@ fn run(s: IoSockets, to_control: &Sender<ControlMsg>, interest: &Interest, fps: 
                             );
                             detach(old, interest);
                         }
-                        if let Some(a) = take_attach(&attach, epoch) {
+                        if let Some(a) = attach.take(epoch) {
                             tracing::info!("network pair {} attached", epoch.0);
                             net = Some(Net {
                                 epoch,
                                 pair: a.pair,
                                 peers: Peers::default(),
+                            });
+                        } else {
+                            // Control believes it listens: it must hear otherwise to retry.
+                            tracing::error!(
+                                "bug: network pair {} attached but not queued",
+                                epoch.0
+                            );
+                            let _ = to_control.send(ControlMsg::NetFailed {
+                                epoch,
+                                reason: NetReason::NotHandedOver,
                             });
                         }
                     }

@@ -17,7 +17,7 @@ struct Rig {
     ctx: Context,
     local_ctrl: String,
     outbox: Outbox,
-    attach: mpsc::Sender<Attach>,
+    attach: AttachQueue,
     control: mpsc::Receiver<ControlMsg>,
     server: KeyPair,
     client: KeyPair,
@@ -43,7 +43,7 @@ impl Rig {
         pull.bind(&pull_ep).unwrap();
         let outbox = Outbox::connect(&ctx, &pull_ep, 1000).unwrap();
         let (frames, frames_rx) = outbox::frame_channel();
-        let (attach, attach_rx) = mpsc::channel();
+        let attach = AttachQueue::default();
         let (to_control, control) = mpsc::channel();
         let io = spawn(
             IoSockets {
@@ -51,7 +51,7 @@ impl Rig {
                 data,
                 pull,
                 frames: frames_rx,
-                attach: attach_rx,
+                attach: attach.clone(),
             },
             to_control,
             Arc::new(Interest::default()),
@@ -90,8 +90,8 @@ impl Rig {
         .unwrap();
         let ctrl = pair.ctrl_ep.clone();
         let epoch = NetEpoch(epoch);
-        self.attach.send(Attach { epoch, pair }).unwrap();
-        self.outbox.attach(epoch);
+        self.attach.put(Attach { epoch, pair });
+        assert!(self.outbox.attach(epoch));
         ctrl
     }
 
@@ -161,7 +161,7 @@ fn a_reply_for_an_older_pair_is_dropped_though_its_routing_id_is_reused() {
     let old = rig.dealer(b"c", true, &first);
     let (stale, _) = rig.request(&old, b"asked on 1");
     drop(old);
-    rig.outbox.detach(NetEpoch(1));
+    assert!(rig.outbox.detach(NetEpoch(1)));
     let second = rig.attach(2);
     let new = rig.dealer(b"c", true, &second);
     let (fresh, _) = rig.request(&new, b"asked on 2");
@@ -170,4 +170,19 @@ fn a_reply_for_an_older_pair_is_dropped_though_its_routing_id_is_reused() {
     rig.outbox.reply(&fresh, b"meant for 2");
     assert_eq!(reply_of(&new, WAIT).as_deref(), Some(&b"meant for 2"[..]));
     assert_eq!(reply_of(&new, Duration::from_millis(200)), None);
+}
+
+#[test]
+fn an_attach_without_its_pair_is_reported_back_to_control() {
+    let rig = Rig::start("unqueued");
+    assert!(rig.outbox.attach(NetEpoch(5)));
+    loop {
+        if let ControlMsg::NetFailed { epoch, reason } =
+            rig.control.recv_timeout(WAIT).expect("control never heard")
+        {
+            assert_eq!(epoch, NetEpoch(5));
+            assert_eq!(reason, NetReason::NotHandedOver);
+            break;
+        }
+    }
 }

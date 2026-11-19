@@ -61,7 +61,7 @@ struct Args {
     /// IFACE is an interface name, an address or `*`. The local endpoints are served as
     /// well. An interface or address not there yet, or a port taken, is retried until it
     /// binds.
-    #[arg(long, value_name = "tcp://IFACE[:PORT]")]
+    #[arg(long, value_name = "tcp://IFACE[:PORT]", conflicts_with = "ephemeral")]
     listen: Option<String>,
     /// Local ctrl endpoint (ipc:// or tcp://127.0.0.1:port).
     #[arg(long, value_name = "ENDPOINT", requires = "data")]

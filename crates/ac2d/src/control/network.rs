@@ -13,10 +13,10 @@ use ac2_zmq::{AuthorizedHandle, AuthorizedKeys, KeyPair, PublicKey};
 use crate::authlog::{AuthLog, RefusedList};
 use crate::config::{Mdns, NetworkSecurity};
 use crate::damage::Damage;
-use crate::io::Attach;
+use crate::io::{Attach, AttachQueue};
 use crate::network::{
-    Backoff, Host, Interfaces, NetListen, NetPort, NetReason, NetStatus, NetworkChoice, bind_pair,
-    resolve,
+    Backoff, Host, Interfaces, NetBind, NetListen, NetPort, NetReason, NetStatus, NetworkChoice,
+    bind_pair, resolve,
 };
 use crate::outbox::Outbox;
 use crate::remote::follow::PeerBrowse;
@@ -59,6 +59,9 @@ pub(crate) struct Authorized {
 struct Bound {
     epoch: NetEpoch,
     host: Host,
+    /// Its `TAG_DETACH` was refused by a full pipe and is sent again: until it goes
+    /// through the pair holds its port, and every rebind would find it in use.
+    detaching: bool,
 }
 
 /// What [`NetCtl::new`] needs.
@@ -69,7 +72,7 @@ pub(crate) struct NetSetup {
     pub(crate) retry: Backoff,
     pub(crate) mdns: Option<Mdns>,
     pub(crate) name: String,
-    pub(crate) attach: Sender<Attach>,
+    pub(crate) attach: AttachQueue,
     pub(crate) to_control: Sender<ControlMsg>,
 }
 
@@ -88,7 +91,7 @@ pub(crate) struct NetCtl {
     delay: Duration,
     due: Option<Instant>,
     interfaces: Interfaces,
-    attach: Sender<Attach>,
+    attach: AttachQueue,
     to_control: Sender<ControlMsg>,
     mdns: Option<Mdns>,
     name: String,
@@ -218,7 +221,7 @@ impl NetCtl {
         self.due
     }
 
-    /// The retry or the check of the bound address, when due.
+    /// The retry, the resent detach or the check of the bound address, when due.
     pub(crate) fn tick(&mut self, outbox: &Outbox, now: Instant) {
         if self.due.is_none_or(|d| d > now) {
             return;
@@ -228,9 +231,21 @@ impl NetCtl {
             self.attempt(outbox, now);
             return;
         };
+        if b.detaching {
+            self.detach(outbox);
+            // Bound again only after the port is let go; a new bind in between would only
+            // find it in use.
+            self.due = Some(now + self.retry.first);
+            return;
+        }
         let Some(l) = self.listen() else {
             return;
         };
+        // Every address of the host is always there to listen on.
+        if l.bind == NetBind::All {
+            self.due = Some(now + self.retry.first);
+            return;
+        }
         // A listener on an address that went away silently accepts nothing; one bound
         // where the interface no longer resolves serves the wrong network.
         match resolve(&l.bind, &self.interfaces.list()) {
@@ -238,9 +253,11 @@ impl NetCtl {
             r => {
                 let reason = r.err().unwrap_or(NetReason::AddressMissing);
                 tracing::warn!("network: the bound address went away ({reason}); rebinding");
+                self.set_status(NetStatus::Waiting { reason });
                 self.detach(outbox);
+                // The closing pair needs a moment to let go of the port.
                 self.delay = self.retry.first;
-                self.attempt(outbox, now);
+                self.due = Some(now + self.retry.first);
             }
         }
     }
@@ -252,12 +269,7 @@ impl NetCtl {
             return;
         };
         let (Some(kp), Some(a)) = (&self.keys, &self.authorized) else {
-            self.wait(
-                NetReason::Other {
-                    detail: "no server key".into(),
-                },
-                now,
-            );
+            self.wait(NetReason::NoServerKey, now);
             return;
         };
         let host = match resolve(&l.bind, &self.interfaces.list()) {
@@ -273,16 +285,27 @@ impl NetCtl {
                 let epoch = self.epoch;
                 let (ctrl, data) = (pair.ctrl_ep.clone(), pair.data_ep.clone());
                 #[cfg(feature = "fault-injection")]
-                {
-                    *lock(&self.view.fault) = Some(pair.secure.zap_fault());
-                }
-                if self.attach.send(Attach { epoch, pair }).is_err() {
+                let fault = pair.secure.zap_fault();
+                self.attach.put(Attach { epoch, pair });
+                if !outbox.attach(epoch) {
+                    // Never served: taken back and closed, so its port is free for the retry.
+                    if let Some(a) = self.attach.withdraw(epoch) {
+                        crate::network::close(a.pair);
+                    }
+                    self.wait(NetReason::NotHandedOver, now);
                     return;
                 }
-                outbox.attach(epoch);
+                #[cfg(feature = "fault-injection")]
+                {
+                    *lock(&self.view.fault) = Some(fault);
+                }
                 tracing::info!("network: listening on ctrl {ctrl}, data {data}");
                 crate::firewall::report(&ctrl, &data);
-                self.bound = Some(Bound { epoch, host });
+                self.bound = Some(Bound {
+                    epoch,
+                    host,
+                    detaching: false,
+                });
                 self.delay = self.retry.first;
                 self.due = Some(now + self.retry.first);
                 self.start_advert(host, &ctrl);
@@ -302,12 +325,18 @@ impl NetCtl {
         self.delay = self.retry.after(self.delay);
     }
 
-    /// Detaches the pair in band, after everything queued before.
+    /// Detaches the pair in band, after everything queued before; a refused detach stays
+    /// bound, marked, and is sent again at the next tick.
     fn detach(&mut self, outbox: &Outbox) {
-        if let Some(b) = self.bound.take() {
-            outbox.detach(b.epoch);
-        }
         self.stop_advert();
+        let Some(b) = &mut self.bound else {
+            return;
+        };
+        if outbox.detach(b.epoch) {
+            self.bound = None;
+        } else {
+            b.detaching = true;
+        }
     }
 
     /// The I/O thread closed pair `epoch` (its ZAP handler died): `Failed`, retried with a

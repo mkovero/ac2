@@ -144,10 +144,11 @@ fn a_dead_zap_handler_closes_the_network_alone_and_it_comes_back() {
     let before = net_endpoints(&h);
 
     h.fail_zap_handler().unwrap();
-    wait_status(&h, "the pair failed", |s| {
-        *s == NetStatus::Failed {
-            reason: NetReason::ZapFailed,
-        }
+    // The failure shows until the retry; a slow poll may only see the new pair.
+    wait_status(&h, "the pair failed", |s| match s {
+        NetStatus::Failed { reason } => *reason == NetReason::ZapFailed,
+        NetStatus::Listening { ctrl, .. } => *ctrl != before.0,
+        _ => false,
     });
     local.ok(Command::ServerInfo);
     wait_status(
@@ -234,6 +235,75 @@ fn a_network_port_on_the_local_ones_is_refused_at_the_command_line() {
         .env("XDG_DATA_HOME", dir.path().join("xdg/data"))
         .env("XDG_STATE_HOME", dir.path().join("xdg/state"))
         .env("XDG_RUNTIME_DIR", dir.path().join("xdg/runtime"))
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(i32::from(ac2d::instance::exit::SETUP)),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// The rig case: the port is taken when the daemon starts (a previous instance still
+/// closing, another program). This machine is served at once; the network binds as soon as
+/// the port is free.
+#[test]
+fn a_taken_port_waits_and_binds_once_it_is_free() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let laptop = KeyPair::generate().unwrap();
+    // Held: the ctrl port; data goes on the next, which must be free.
+    let (held, port) = loop {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        if port < u16::MAX && std::net::TcpListener::bind(("127.0.0.1", port + 1)).is_ok() {
+            break (l, port);
+        }
+    };
+    let mut cfg = net_config(manual_rig(), security(dir.path(), &laptop));
+    cfg.network = NetworkChoice::Fixed(NetListen {
+        bind: NetBind::Addr(IpAddr::V4(Ipv4Addr::LOCALHOST)),
+        port: NetPort::Port(port),
+    });
+    cfg.net_retry = FAST;
+    let h = Daemon::start(cfg).unwrap();
+    assert_eq!(
+        h.network_status(),
+        NetStatus::Waiting {
+            reason: NetReason::AddressInUse
+        }
+    );
+    let ctx = Context::new().unwrap();
+    Client::connect(&ctx, h.ctrl_endpoint()).ok(Command::ServerInfo);
+
+    drop(held);
+    let s = wait_status(&h, "the port came free", listening);
+    assert_eq!(
+        s,
+        NetStatus::Listening {
+            ctrl: format!("tcp://127.0.0.1:{port}"),
+            data: format!("tcp://127.0.0.1:{}", port + 1),
+        }
+    );
+    Client::connect_with(&ctx, &net_endpoints(&h).0, Some(&curve(&h, &laptop)))
+        .ok(Command::ServerInfo);
+    h.shutdown();
+}
+
+#[test]
+fn an_ephemeral_daemon_takes_no_network() {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_ac2d"))
+        .args([
+            "--ephemeral",
+            "--ctrl",
+            "tcp://127.0.0.1:0",
+            "--data",
+            "tcp://127.0.0.1:0",
+            "--listen",
+            "tcp://127.0.0.1:47949",
+            "--stop-on-stdin-eof",
+        ])
         .output()
         .unwrap();
     assert_eq!(

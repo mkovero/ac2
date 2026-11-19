@@ -387,22 +387,28 @@ fn subscribe(interest: &Interest, s: &Subscription) {
     interest.add(&s.prefix());
 }
 
+/// Who sent a data message: a connection on the local pair, or a CURVE one with what its
+/// key is admitted as now.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum DataClient<'a> {
+    Local,
+    Curve(&'a CurvePeer, Admission),
+}
+
 impl Peers {
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.map.len()
     }
 
-    /// One message from a peer: `[routing id][request]`, from `client` when it passed CURVE;
-    /// `admission` tells what that client's key is admitted as now.
+    /// One message from a peer: `[routing id][request]`, from `from`.
     pub(crate) fn request(
         &mut self,
         sock: &Socket,
-        client: Option<&CurvePeer>,
+        from: DataClient<'_>,
         frames: Vec<Vec<u8>>,
         interest: &Interest,
         now: Instant,
-        admission: impl FnOnce(&CurvePeer) -> Admission,
     ) {
         let [rid, body] = frames.as_slice() else {
             tracing::warn!(
@@ -413,9 +419,13 @@ impl Peers {
         };
         // Checked on every message: the handshake checked the key once, and a connection
         // outlives a revoke (or a kind change) unless each message is held to the list.
-        let rig = match client.map(|c| (c, admission(c))) {
-            None => false,
-            Some((c, Admission::Revoked)) => {
+        let client = match from {
+            DataClient::Local => None,
+            DataClient::Curve(c, _) => Some(c),
+        };
+        let rig = match from {
+            DataClient::Local => false,
+            DataClient::Curve(c, Admission::Revoked) => {
                 if self.refusals.first(Some(c.key), "revoked") {
                     tracing::warn!(
                         "data from revoked client {:?} dropped (repeats at debug)",
@@ -425,8 +435,8 @@ impl Peers {
                 self.drop_peer(rid, interest, "its key was revoked");
                 return;
             }
-            Some((_, Admission::App)) => false,
-            Some((_, Admission::Rig(_))) => true,
+            DataClient::Curve(_, Admission::App) => false,
+            DataClient::Curve(_, Admission::Rig(_)) => true,
         };
         if self.map.get(rid.as_slice()).is_some_and(|p| p.rig != rig) {
             // What it may receive changed with its kind: it starts over as the new kind.
