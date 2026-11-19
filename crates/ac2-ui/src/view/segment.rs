@@ -1,44 +1,127 @@
-//! The top bar's middle segment: the session line and the health meter, in the room
-//! between the bar's two groups, scrolling through it when wider.
+//! The top bar's line: where the daemon runs and how it is doing, then the session, side
+//! by side in the room between the bar's fixed ends, scrolling through it when wider.
 
 use ac2_scene::health::HealthLine;
+use ac2_scene::top_bar::{Bar, Click, Lead, Tone};
 use eframe::egui::{self, Color32, RichText};
 
 use super::chrome::{BAR_GAP, text_width};
-use crate::app::App;
+use crate::keys::CommandId;
 use crate::marquee::Marquee;
 use crate::theme::Chrome;
 
-/// Narrower than this, a scrolling segment shows too little at once to follow: the bar
-/// shortens or drops other items first.
-pub(super) const SEGMENT_MIN_W: f32 = 200.0;
-/// The fade over the text where the segment's edge cuts it.
+/// With less room than this a scrolling line shows too little at once to follow: the
+/// bar's key hints go first.
+pub(super) const LINE_MIN_W: f32 = 320.0;
+/// The fade over the text where the room's edge cuts it.
 const FADE_W: f32 = 16.0;
 
-/// One piece of text at `x` from its part's start.
+/// One piece of text at `x` from its part's (or, for a separator, the line's) start.
 struct Piece {
     text: egui::WidgetText,
     x: f32,
 }
 
-/// One part of the segment, with its own tooltip: its pieces and the width it takes.
-pub(super) struct Part {
+/// One part of the line, with its own tooltip and click.
+struct Part {
     pieces: Vec<Piece>,
+    /// Where it starts in the line.
+    x: f32,
     width: f32,
     /// What a screen reader (and a test) reads for it.
     label: String,
     hover: Option<String>,
+    click: Option<CommandId>,
 }
 
-impl Part {
-    pub(super) fn single(ui: &egui::Ui, text: egui::WidgetText, hover: Option<String>) -> Self {
-        Self {
-            width: text_width(ui, &text),
-            label: text.text().to_owned(),
-            pieces: vec![Piece { text, x: 0.0 }],
-            hover,
-        }
+/// The line laid out: its parts, the dots and rules between them, and its width.
+pub(super) struct Line {
+    parts: Vec<Part>,
+    dots: Vec<Piece>,
+    /// Where each rule between two segments stands.
+    rules: Vec<f32>,
+    pub(super) width: f32,
+}
+
+fn tone_color(ch: &Chrome, t: Tone) -> Color32 {
+    match t {
+        Tone::Plain => ch.text,
+        Tone::Dim => ch.dim,
+        Tone::Warn => ch.warn,
+        Tone::Fault => ch.fault,
+        Tone::Armed => ch.armed,
     }
+}
+
+/// Lays `bar`'s line out from x = 0: each part after what its lead asks for (a space, a
+/// dot, a rule), the health meter in its fixed slots.
+pub(super) fn lay_out_line(ui: &egui::Ui, ch: &Chrome, bar: &Bar) -> Line {
+    let width = |s: &str| text_width(ui, &egui::WidgetText::from(RichText::new(s)));
+    // A lone space may measure as nothing: the space is what it adds between two glyphs.
+    let space = (width("x x") - width("xx")).max(0.0);
+    let mut line = Line {
+        parts: Vec::new(),
+        dots: Vec::new(),
+        rules: Vec::new(),
+        width: 0.0,
+    };
+    let mut x = 0.0;
+    for p in &bar.line {
+        match p.lead {
+            Lead::First => {}
+            Lead::Space => x += space,
+            Lead::Dot => {
+                line.dots.push(Piece {
+                    text: RichText::new(" · ").color(ch.dim).into(),
+                    x,
+                });
+                x += width(" · ");
+            }
+            Lead::Rule => {
+                x += BAR_GAP;
+                line.rules.push(x);
+                x += BAR_GAP;
+            }
+        }
+        let (pieces, w) = match &p.figures {
+            Some(h) => {
+                let (placed, w) = lay_out_health(h, width);
+                let pieces = placed
+                    .into_iter()
+                    .map(|s| Piece {
+                        text: RichText::new(s.text)
+                            .color(if s.warn { ch.warn } else { ch.dim })
+                            .into(),
+                        x: s.x,
+                    })
+                    .collect();
+                (pieces, w)
+            }
+            None => {
+                let mut t = RichText::new(&p.text).color(tone_color(ch, p.tone));
+                if p.strong {
+                    t = t.strong();
+                }
+                let text: egui::WidgetText = t.into();
+                let w = text_width(ui, &text);
+                (vec![Piece { text, x: 0.0 }], w)
+            }
+        };
+        line.parts.push(Part {
+            pieces,
+            x,
+            width: w,
+            label: p.text.clone(),
+            hover: p.hover.clone(),
+            click: p.click.map(|c| match c {
+                Click::Connection => CommandId::BetweenRigs,
+                Click::Sessions => CommandId::Sessions,
+            }),
+        });
+        x += w;
+    }
+    line.width = x;
+    line
 }
 
 /// What a placed span of the health meter is.
@@ -90,9 +173,12 @@ fn lay_out_health(line: &HealthLine, width: impl Fn(&str) -> f32) -> (Vec<Placed
                 warn: p.warn && span != Span::Sep,
             });
         };
-        let sep = if k == 0 { "· " } else { " · " };
-        put(Span::Sep, sep, x);
-        x += width(sep);
+        // The line puts its own dot before the meter.
+        if k > 0 {
+            let sep = " · ";
+            put(Span::Sep, sep, x);
+            x += width(sep);
+        }
         if !p.label.is_empty() {
             put(Span::Label, &p.label, x);
             x += width(&p.label) + space;
@@ -112,107 +198,104 @@ fn lay_out_health(line: &HealthLine, width: impl Fn(&str) -> f32) -> (Vec<Placed
     (out, x)
 }
 
-/// The health meter after the session line: its figures, warnings in the warning colour.
-pub(super) fn health_part(
-    app: &App,
-    ui: &egui::Ui,
-    ch: &Chrome,
-    now: std::time::Instant,
-) -> Option<Part> {
-    let st = &app.state;
-    // A daemon that stopped answering has no current figures.
-    let daemon = st
-        .rig
-        .mirror
-        .as_ref()
-        .filter(|m| m.responding(now))
-        .and_then(|m| m.health.as_ref());
-    let wanted_fps = 1.0 / st.display_period().as_secs_f64();
-    let inputs = app.health.inputs(
-        daemon,
-        app.state.rig.daemon_addr.as_deref(),
-        wanted_fps,
-        now,
-    );
-    let line = ac2_scene::health::health_line(&inputs)?;
-    let (placed, width) = lay_out_health(&line, |s| {
-        text_width(ui, &egui::WidgetText::from(RichText::new(s)))
-    });
-    let pieces = placed
-        .into_iter()
-        .map(|p| Piece {
-            text: RichText::new(p.text)
-                .color(if p.warn { ch.warn } else { ch.dim })
-                .into(),
-            x: p.x,
-        })
-        .collect();
-    Some(Part {
-        pieces,
-        width,
-        label: format!("· {}", line.text()),
-        hover: Some(line.detail),
-    })
+/// What [`draw_line`] reports back.
+pub(super) struct Drawn {
+    /// When to draw next, seconds from now, while the line scrolls.
+    pub(super) wake: Option<f64>,
+    /// The command of the part clicked.
+    pub(super) clicked: Option<CommandId>,
 }
 
-pub(super) fn segment_width(parts: &[Part]) -> f32 {
-    let texts: f32 = parts.iter().map(|p| p.width).sum();
-    texts + BAR_GAP * parts.len().saturating_sub(1) as f32
-}
-
-/// Draws the segment's parts in `room`: still when they fit, otherwise scrolled by
-/// `marquee` and clipped at the room's edges (faded into `fade`, the bar's fill). Each part
-/// is a label over its visible stretch, with its tooltip. Returns when to draw next.
-pub(super) fn draw_segment(
+/// Draws `line` in `room`: still when it fits, otherwise scrolled by `marquee`, following
+/// itself after a gap, and clipped at the room's edges (faded into `fade`, the bar's fill).
+/// Each part is a label over its visible stretch, with its tooltip and click. The scroll
+/// holds while the pointer is over the room, so a part can be read, hovered and clicked.
+pub(super) fn draw_line(
     ui: &mut egui::Ui,
     room: egui::Rect,
-    parts: &[Part],
+    line: &Line,
     marquee: &mut Marquee,
-    fade: Color32,
-) -> Option<f64> {
-    let text_w = segment_width(parts);
+    ch: &Chrome,
+) -> Drawn {
     let hovered = ui.rect_contains_pointer(room);
     let now = ui.input(|i| i.time);
-    let f = marquee.frame(now, text_w, room.width(), hovered);
+    let f = marquee.frame(now, line.width, room.width(), hovered);
     let painter = ui.painter_at(room);
-    let id = ui.id().with("session-segment");
-    let mut x = room.left() - f.offset;
-    for (k, p) in parts.iter().enumerate() {
-        let mut height: f32 = 0.0;
-        for piece in &p.pieces {
-            let g = piece.text.clone().into_galley(
-                ui,
-                Some(egui::TextWrapMode::Extend),
-                f32::INFINITY,
-                egui::TextStyle::Body,
-            );
-            height = height.max(g.size().y);
-            let at = egui::pos2(x + piece.x, room.center().y - g.size().y / 2.0);
-            painter.galley(at, g, ui.visuals().text_color());
-        }
-        let r = egui::Rect::from_min_size(
-            egui::pos2(x, room.center().y - height / 2.0),
-            egui::vec2(p.width, height),
-        );
-        x = r.right() + BAR_GAP;
-        let shown = r.intersect(room);
-        if shown.width() < 0.5 {
+    let id = ui.id().with("bar-line");
+    let mut clicked = None;
+    let galley = |ui: &egui::Ui, t: &egui::WidgetText| {
+        t.clone().into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::TextStyle::Body,
+        )
+    };
+    // Scrolling, the line is drawn twice: itself and, a period on, its start coming round.
+    let copies = [Some(0.0), f.period];
+    for (copy, shift) in copies.into_iter().enumerate() {
+        let Some(shift) = shift else { continue };
+        let left = room.left() - f.offset + shift;
+        if left >= room.right() {
             continue;
         }
-        let resp = ui.interact(shown, id.with(k), egui::Sense::hover());
-        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &p.label));
-        if let Some(h) = &p.hover {
-            resp.on_hover_text(h);
+        for d in &line.dots {
+            let g = galley(ui, &d.text);
+            let at = egui::pos2(left + d.x, room.center().y - g.size().y / 2.0);
+            painter.galley(at, g, ch.dim);
+        }
+        for x in &line.rules {
+            painter.vline(
+                left + x,
+                room.shrink2(egui::vec2(0.0, 3.0)).y_range(),
+                egui::Stroke::new(1.0, ch.border),
+            );
+        }
+        for (k, p) in line.parts.iter().enumerate() {
+            let mut height: f32 = 0.0;
+            for piece in &p.pieces {
+                let g = galley(ui, &piece.text);
+                height = height.max(g.size().y);
+                let at = egui::pos2(left + p.x + piece.x, room.center().y - g.size().y / 2.0);
+                painter.galley(at, g, ui.visuals().text_color());
+            }
+            let r = egui::Rect::from_min_size(
+                egui::pos2(left + p.x, room.center().y - height / 2.0),
+                egui::vec2(p.width, height),
+            );
+            let shown = r.intersect(room);
+            if shown.width() < 0.5 {
+                continue;
+            }
+            let sense = if p.click.is_some() {
+                egui::Sense::click()
+            } else {
+                egui::Sense::hover()
+            };
+            let mut resp = ui.interact(shown, id.with((copy, k)), sense);
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &p.label));
+            if p.click.is_some() {
+                resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+                if resp.clicked() {
+                    clicked = p.click;
+                }
+            }
+            if let Some(h) = &p.hover {
+                resp.on_hover_text(h);
+            }
         }
     }
-    let overflow = text_w - room.width();
-    if f.offset > 0.0 {
-        fade_edge(&painter, room, true, fade);
+    if f.period.is_some() {
+        // At its start the line's first letter stands whole at the room's edge.
+        if f.offset > 0.0 {
+            fade_edge(&painter, room, true, ch.panel);
+        }
+        fade_edge(&painter, room, false, ch.panel);
     }
-    if overflow > 0.0 && f.offset < overflow {
-        fade_edge(&painter, room, false, fade);
+    Drawn {
+        wake: f.wake,
+        clicked,
     }
-    f.wake
 }
 
 /// A strip at the room's left (or right) edge, `c` at the edge and clear inwards.

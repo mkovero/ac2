@@ -23,6 +23,14 @@ fn key(t: &mut T, s: &str) -> Vec<(RigId, Request)> {
 fn cross_tf(t: &mut T, relation: PeerRelation, state: CrossTfState) {
     with_remote(t, RemoteLink::Up, RemoteAudio::Streaming);
     t.remirror(|s| {
+        // The pairing the inputs are taken through, as the daemon lists it.
+        s.remote.peers = vec![ac2_proto::model::RigPeer {
+            rig: PUPU,
+            name: "pupu".into(),
+            ctrl: "tcp://192.168.9.27:7700".into(),
+            data: "tcp://192.168.9.27:7701".into(),
+            key: "Yne@$w-vo<fVvi]a<NY6T1ed:M$fCG*[IaLV{hID".into(),
+        }];
         s.remote.rigs[0].clock.relation = relation;
         s.remote.transfers = vec![CrossRigTransfer {
             meas: MeasId(1),
@@ -87,16 +95,30 @@ fn pane_banners(t: &T) -> Vec<(BannerKind, String)> {
         .collect()
 }
 
-/// Agreeing clocks: a quiet chip, the pane names the remote side and says the relation in
+/// What pupu's heading in the measurement list says of its pairing.
+fn pupu_pairing(t: &T) -> String {
+    let rows = t.st.list_rows();
+    let head = rows
+        .iter()
+        .map(|(_, r)| r)
+        .find(|r| r.depth == 0 && r.name.starts_with("pupu"))
+        .unwrap_or_else(|| panic!("no heading for pupu in {rows:?}"));
+    let line = head
+        .details
+        .iter()
+        .find(|d| d.to_lowercase().contains("paired"))
+        .unwrap_or_else(|| panic!("no pairing line in {:?}", head.details));
+    // Up to what a click on the heading does.
+    line.split(" · click ").next().unwrap_or(line).to_owned()
+}
+
+/// Agreeing clocks: said quietly on the rig's heading, the pane names the remote side and says the relation in
 /// its title, no banner and no cue.
 #[test]
 fn agreeing_clocks_are_said_quietly() {
     let mut t = two_mirrored();
     cross_tf(&mut t, PeerRelation::Agree, CrossTfState::Running);
-    let chips = t.st.rig_chips();
-    assert_eq!(chips.len(), 1);
-    assert_eq!(chips[0].text, "pupu · clocks agree");
-    assert!(!chips[0].warn);
+    assert_eq!(pupu_pairing(&t), "paired · streaming · clocks agree");
     assert!(t.st.cross_rig_banners().is_empty());
     let p = t.pane(PaneKind::Transfer);
     assert!(
@@ -124,16 +146,17 @@ fn agreeing_clocks_are_said_quietly() {
     );
 }
 
-/// Not locked: a warning chip in capitals, the top-bar banner says why and what to do, the
+/// Not locked: the rig's heading says it first and in capitals, the top-bar banner says why and what to do, the
 /// pane's verdict is a banner (it stays with the plot chrome hidden), the list row says
 /// *clocks* with the pane closed.
 #[test]
 fn clocks_not_locked_stop_it_and_say_so_everywhere() {
     let mut t = two_mirrored();
     cross_tf(&mut t, NOT_LOCKED, HELD);
-    let chips = t.st.rig_chips();
-    assert_eq!(chips[0].text, "pupu · CLOCKS NOT LOCKED +5.6 ppm");
-    assert!(chips[0].warn);
+    assert_eq!(
+        pupu_pairing(&t),
+        "CLOCKS NOT LOCKED +5.6 ppm · paired · streaming"
+    );
     let ours = t.st.rig_name(t.st.active());
     assert_eq!(
         t.st.cross_rig_banners(),
@@ -246,7 +269,10 @@ fn a_relock_and_the_cues_are_said_on_the_pane() {
             ),
         ]
     );
-    assert_eq!(t.st.rig_chips()[0].text, "pupu · LINK OFFSET TOO SMALL");
+    assert_eq!(
+        pupu_pairing(&t),
+        "LINK OFFSET TOO SMALL · paired · streaming"
+    );
     let row = t.st.meas_rows().into_iter().find(|r| r.id == MeasId(1));
     assert!(
         row.expect("Main L's row")

@@ -163,7 +163,7 @@ fn stopped_audio_shows_a_banner_until_the_session_is_back() {
     );
     let bar = crate::scenes::audio_stopped(&t.st, WallNs(0)).map(|a| a.bar);
     assert_eq!(
-        bar.as_ref().map(|b| b[0].as_str()),
+        bar.as_deref(),
         Some("audio stopped · reopening (attempt 2, next in 5 s)")
     );
     s.session.stopped = None;

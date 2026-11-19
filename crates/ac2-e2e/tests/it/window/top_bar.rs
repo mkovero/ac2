@@ -107,10 +107,10 @@ fn sweep_progress_strip() -> R {
     Ok(())
 }
 
-/// With the stimulus armed by another client (the "held by" warning shown, its level, the
-/// hint) and a session open, at every width from wide to narrow every label in the bar keeps
-/// its own space inside the window; lower-priority texts shorten or go first, the state
-/// badge always stays.
+/// With the stimulus armed by another client (said in brackets, with who holds it) and a
+/// session open, at every width from wide to narrow: the rig drop-down and the stop are
+/// whole and in the window, every label in the bar keeps its own space, and the daemon's
+/// software name is not in the bar. Wide, the whole line is there.
 #[test]
 fn top_bar_never_overlaps() -> R {
     use egui::accesskit::Role;
@@ -153,26 +153,21 @@ fn top_bar_never_overlaps() -> R {
             })
             .filter(|(_, r)| r.max.y <= 34.0)
             .collect();
-        assert!(
-            labels.iter().any(|(t, _)| t == "ARMED"),
-            "{width} px: no badge in {labels:?}"
-        );
         let has = |s: &str| labels.iter().any(|(t, _)| t.contains(s));
-        if width >= 2400.0 {
-            // Wide: everything in full.
-            for s in [holder.as_str(), "commands", "frames", DESCRIBE] {
-                assert!(has(s), "{width} px: no {s:?} in {labels:?}");
-            }
+        // Fixed at the bar's ends, whatever the line between them does.
+        for s in ["Simulated rig", "■ Stop"] {
+            assert!(has(s), "{width} px: no {s:?} in {labels:?}");
         }
-        if width >= 1600.0 {
-            for s in [holder.as_str(), DESCRIBE] {
+        assert!(!has(DESCRIBE), "{width} px: {labels:?}");
+        if width >= 2400.0 {
+            // Wide: the line in full, and the key hints.
+            for s in ["local", "(ARMED", holder.as_str(), "frames", "commands"] {
                 assert!(has(s), "{width} px: no {s:?} in {labels:?}");
             }
         }
         if width <= 640.0 {
-            // Narrow: the key help and the hint have given way to the stimulus state.
+            // Narrow: the key hints have given their room to the line.
             assert!(!has("commands"), "{width} px: {labels:?}");
-            assert!(has("dBFS") || has("no level"), "{width} px: {labels:?}");
         }
         for (i, (a, ra)) in labels.iter().enumerate() {
             assert!(

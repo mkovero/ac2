@@ -697,13 +697,22 @@ impl AppState {
 
 /// What a rig is called. This computer's `ac2d` is named by the host (`kettu`): one runs per
 /// user, and its own name cannot tell a default from one given. Any other rig: its daemon's
-/// name, else where it is reached.
+/// name, else the host it is reached at, by name where its advert gave one.
 fn label_of(r: &RigState, host: &str) -> String {
     if !host.is_empty() && matches!(r.addr, Some(crate::prefs::RigAddr::Local)) {
         return host.to_owned();
     }
     if !r.name.is_empty() {
         return r.name.clone();
+    }
+    if let (
+        ConnState::Connecting { .. } | ConnState::Failed { .. },
+        Some(crate::prefs::RigAddr::Network {
+            host, mdns_host, ..
+        }),
+    ) = (&r.conn, &r.addr)
+    {
+        return ac2_scene::top_bar::host_name(host, mdns_host.as_deref());
     }
     match &r.conn {
         ConnState::Connecting { target } | ConnState::Failed { target, .. } => target.clone(),

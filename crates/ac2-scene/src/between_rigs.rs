@@ -9,6 +9,7 @@ use ac2_proto::model::{
 };
 use ac2_proto::units::{RigId, WallNs};
 
+use crate::audio::rate_text;
 use crate::format;
 
 /// A rig's name among the remote rigs, else its id.
@@ -129,17 +130,15 @@ pub fn audio_text(a: RemoteAudio, rig: &str, channel: u16) -> String {
         RemoteAudio::NotCaptured => format!("{rig} does not capture in {n} (open it there)"),
         RemoteAudio::Replaying => format!("{rig} is replaying a recording"),
         RemoteAudio::RateMismatch { theirs, ours } => {
-            format!("{rig} runs {} kHz, this rig {} kHz", khz(theirs), khz(ours))
+            format!(
+                "{rig} runs {}, this rig {}",
+                rate_text(theirs),
+                rate_text(ours)
+            )
         }
         RemoteAudio::Starting => "starting".into(),
         RemoteAudio::Streaming => "streaming".into(),
     }
-}
-
-/// A rate in kHz, without a decimal where it has none (48, 44.1).
-pub(crate) fn khz(hz: u32) -> String {
-    let k = f64::from(hz) / 1e3;
-    format::fixed(k, if k.fract() == 0.0 { 0 } else { 1 })
 }
 
 /// How a remote input's samples are placed against this rig's.

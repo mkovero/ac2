@@ -22,9 +22,8 @@ pub struct AudioStoppedText {
     pub banner: String,
     /// Banner detail: where reopening stands, with what the backend said.
     pub detail: String,
-    /// Top bar, longest first: `audio stopped · reopening (attempt 3, next in 8 s)`, then
-    /// `audio stopped`.
-    pub bar: [String; 2],
+    /// Top bar: `audio stopped · reopening (attempt 3, next in 8 s)`.
+    pub bar: String,
     /// `ac2 status` line.
     pub status: String,
 }
@@ -87,7 +86,7 @@ pub fn audio_stopped_text(
     AudioStoppedText {
         banner: format!("AUDIO STOPPED · {what}"),
         detail: format!("{long} · measurements paused"),
-        bar: [format!("audio stopped · {short}"), "audio stopped".into()],
+        bar: format!("audio stopped · {short}"),
         status: format!("audio        STOPPED: {what}; {long}"),
     }
 }
@@ -186,18 +185,26 @@ pub fn stated_latency_text(l: &StatedLatency, rate_hz: u32) -> String {
     )
 }
 
-/// A sample rate as the session shows it: `48.0 kHz`, `44.1 kHz`.
+/// A session's sample rate, as every text says it: `96 kHz`, `44.1 kHz`. A whole number
+/// of kHz has no decimal: two rates are compared at a glance across the bar, the list's
+/// rig headings and the lines between rigs, and `48.0` beside `48` reads as two.
 pub fn rate_text(hz: u32) -> String {
-    format!("{} kHz", format::fixed(f64::from(hz) / 1000.0, 1))
+    let k = f64::from(hz) / 1000.0;
+    format!(
+        "{} kHz",
+        format::fixed(k, if k.fract() == 0.0 { 0 } else { 1 })
+    )
 }
 
 /// The running session's audio settings in words: the app's top bar, `ac2 session status`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SessionLine {
-    /// `Fireface USB · 44.1 kHz · 512 frames · driver changed from 48.0 kHz`.
+    /// `Fireface USB · 44.1 kHz · 512 frames · driver changed from 48 kHz`.
     pub full: String,
     /// The same without the device: `44.1 kHz · 512 frames`.
     pub short: String,
+    /// What the driver did under the session, as `full` ends: `driver changed from 48 kHz`.
+    pub change: Option<String>,
     /// The driver changed the rate or buffer size under the session (its control panel),
     /// or reset or changed its clock: the operator should notice, since every measurement
     /// restarted and a generator that was playing stopped.
@@ -208,7 +215,7 @@ pub struct SessionLine {
 }
 
 /// The driver's change of the session's settings, when it made one: `the driver changed
-/// the rate to 44.1 kHz (was 48.0 kHz) and the buffer to 512 frames (was 256); measurements
+/// the rate to 44.1 kHz (was 48 kHz) and the buffer to 512 frames (was 256); measurements
 /// restarted at the new settings`.
 pub fn driver_change_text(o: &OpenSession) -> Option<String> {
     let d = o.driver_change?;
@@ -264,18 +271,18 @@ pub fn session_line(o: &OpenSession) -> SessionLine {
     let rate = rate_text(o.sample_rate_hz);
     let short = format!("{rate} · {} frames", o.buffer_frames);
     let change = driver_change_text(o);
-    let mut full = format!("{} · {short}", o.input_device.0);
-    if let Some(d) = o.driver_change
+    let headline = if let Some(d) = o.driver_change
         && d.from_rate_hz != o.sample_rate_hz
     {
-        full.push_str(&format!(
-            " · driver changed from {}",
-            rate_text(d.from_rate_hz)
-        ));
+        Some(format!("driver changed from {}", rate_text(d.from_rate_hz)))
     } else if change.is_some() {
-        full.push_str(" · driver changed the buffer");
-    } else if let Some(d) = o.driver_reset {
-        full.push_str(&format!(" · {}", reset_headline(d.reason)));
+        Some("driver changed the buffer".to_owned())
+    } else {
+        o.driver_reset.map(|d| reset_headline(d.reason).to_owned())
+    };
+    let mut full = format!("{} · {short}", o.input_device.0);
+    if let Some(h) = &headline {
+        full.push_str(&format!(" · {h}"));
     }
     let reset = driver_reset_text(o);
     let parts: Vec<String> = [
@@ -294,6 +301,7 @@ pub fn session_line(o: &OpenSession) -> SessionLine {
     SessionLine {
         full,
         short,
+        change: headline,
         changed: change.is_some() || reset.is_some(),
         detail: (!parts.is_empty()).then(|| parts.join(" · ")),
     }
@@ -334,13 +342,7 @@ mod tests {
             t.detail,
             "attempt 3 failed: No JACK server: start JACK · next in 8 s · measurements paused"
         );
-        assert_eq!(
-            t.bar,
-            [
-                "audio stopped · reopening (attempt 3, next in 8 s)".to_owned(),
-                "audio stopped".to_owned()
-            ]
-        );
+        assert_eq!(t.bar, "audio stopped · reopening (attempt 3, next in 8 s)");
         assert_eq!(
             t.status,
             "audio        STOPPED: device not delivering since 20:36; attempt 3 failed: \
@@ -374,10 +376,7 @@ mod tests {
             "reopening: attempt 1 has had no answer from the audio host for 12 s · \
              measurements paused"
         );
-        assert_eq!(
-            hung.bar[0],
-            "audio stopped · reopening (attempt 1, no answer)"
-        );
+        assert_eq!(hung.bar, "audio stopped · reopening (attempt 1, no answer)");
         let changed = AudioStopped {
             cause: StopCause::DeviceChanged,
             ..s(0.0)
@@ -425,8 +424,8 @@ mod tests {
     #[test]
     fn a_session_as_opened_names_its_device_rate_and_buffer() {
         let l = session_line(&open(48_000, 256));
-        assert_eq!(l.full, "Fireface USB · 48.0 kHz · 256 frames");
-        assert_eq!(l.short, "48.0 kHz · 256 frames");
+        assert_eq!(l.full, "Fireface USB · 48 kHz · 256 frames");
+        assert_eq!(l.short, "48 kHz · 256 frames");
         assert!(!l.changed);
         assert_eq!(l.detail, None);
     }
@@ -442,13 +441,13 @@ mod tests {
         let l = session_line(&o);
         assert_eq!(
             l.full,
-            "Fireface USB · 44.1 kHz · 512 frames · driver changed from 48.0 kHz"
+            "Fireface USB · 44.1 kHz · 512 frames · driver changed from 48 kHz"
         );
         assert!(l.changed);
         assert_eq!(
             l.detail.as_deref(),
             Some(
-                "the driver changed the rate to 44.1 kHz (was 48.0 kHz) and the buffer to \
+                "the driver changed the rate to 44.1 kHz (was 48 kHz) and the buffer to \
                  512 frames (was 256); measurements restarted at the new settings · clock \
                  source: Word Clock"
             )
@@ -497,7 +496,7 @@ mod tests {
         let l = session_line(&o);
         assert_eq!(
             l.full,
-            "Fireface USB · 48.0 kHz · 512 frames · driver changed the buffer"
+            "Fireface USB · 48 kHz · 512 frames · driver changed the buffer"
         );
         assert_eq!(
             driver_change_text(&o).as_deref(),
@@ -543,7 +542,7 @@ mod tests {
         let l = session_line(&o);
         assert_eq!(
             l.full,
-            "Fireface USB · 48.0 kHz · 256 frames · audio clock changed"
+            "Fireface USB · 48 kHz · 256 frames · audio clock changed"
         );
         assert!(l.changed);
         assert_eq!(

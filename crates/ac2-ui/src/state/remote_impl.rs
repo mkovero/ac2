@@ -161,18 +161,6 @@ impl AppState {
             .unwrap_or_else(|| self.keys.palette_entry(CommandId::InsertDelay.title()))
     }
 
-    /// The top bar's chip per rig the session takes inputs from, beside the rig drop-down.
-    pub fn rig_chips(&self) -> Vec<ac2_scene::cross_rig::RigChip> {
-        let (Some(st), Some(o)) = (self.daemon(), self.open_session()) else {
-            return Vec::new();
-        };
-        st.remote
-            .rigs
-            .iter()
-            .map(|rig| ac2_scene::cross_rig::rig_chip(&st.remote, rig, &o.config.remote_inputs))
-            .collect()
-    }
-
     /// The top bar's banner while a transfer function across two rigs is stopped by the
     /// clocks: why and what to do, one per stopped measurement.
     pub fn cross_rig_banners(&self) -> Vec<String> {

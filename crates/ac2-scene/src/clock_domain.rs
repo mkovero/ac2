@@ -215,7 +215,7 @@ impl Pair {
 /// assert_eq!(d.rigs[2].tag.as_deref(), Some("FREE"));
 /// assert_eq!(
 ///     d.rigs[2].tip.as_deref(),
-///     Some("48.0 kHz here; pupu and ketunkolo at 96.0 kHz")
+///     Some("48 kHz here; pupu and ketunkolo at 96 kHz")
 /// );
 /// ```
 pub fn clock_domains(rigs: &[RigClockFacts<'_>]) -> ClockDomains {

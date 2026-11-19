@@ -195,32 +195,32 @@ fn slow_clocks_not_locked_across_rigs() -> R {
     d.st.set_prefs(p);
     // The relation is judged once the remote input has streamed for a minute.
     let end = Instant::now() + Duration::from_secs(150);
-    let chip = loop {
+    // Said on kettu's heading in the measurement list, first and in capitals.
+    let pairing = loop {
         d.pump();
-        let chips = d.st.rig_chips();
-        if let Some(c) = chips.iter().find(|c| c.text.contains("CLOCKS NOT LOCKED")) {
-            break c.clone();
+        let rows = d.st.list_rows();
+        let said = rows
+            .iter()
+            .filter(|(_, r)| r.depth == 0 && r.name.starts_with("kettu"))
+            .flat_map(|(_, r)| &r.details)
+            .find(|t| t.contains("CLOCKS NOT LOCKED"));
+        if let Some(t) = said {
+            break t.clone();
         }
         if Instant::now() > end {
             return Err(format!(
-                "never not locked: chips {chips:?}, remote {:?}",
+                "never not locked: rows {rows:?}, remote {:?}",
                 d.st.daemon().map(|s| &s.remote)
             )
             .into());
         }
         std::thread::sleep(Duration::from_millis(100));
     };
-    assert!(chip.warn);
-    assert!(
-        chip.text.starts_with("kettu · CLOCKS NOT LOCKED +3."),
-        "{}",
-        chip.text
-    );
-    let ppm = chip
-        .text
-        .strip_prefix("kettu · CLOCKS NOT LOCKED ")
-        .and_then(|t| t.strip_suffix(" ppm"))
-        .ok_or("the chip's figure")?
+    assert!(pairing.starts_with("CLOCKS NOT LOCKED +3."), "{pairing}");
+    let ppm = pairing
+        .strip_prefix("CLOCKS NOT LOCKED ")
+        .and_then(|t| t.split(" ppm").next())
+        .ok_or("the heading's figure")?
         .to_owned();
     d.until("Main L stopped by the clocks", |s| {
         s.cross_rig_banners().iter().any(|b| {

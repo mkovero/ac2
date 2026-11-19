@@ -110,7 +110,7 @@ fn the_operators_rigs_two_agree_and_the_meter_has_its_own_rate() {
         "rates agree with pupu within 2 ppm (by each rig's system clock); two free clocks \
          can meet that by chance"
     );
-    assert_eq!(tip(&d, 2), "48.0 kHz here; pupu and ketunkolo at 96.0 kHz");
+    assert_eq!(tip(&d, 2), "48 kHz here; pupu and ketunkolo at 96 kHz");
     assert_eq!(
         d.rigs[0].domain,
         Domain::Group {
@@ -123,7 +123,7 @@ fn the_operators_rigs_two_agree_and_the_meter_has_its_own_rate() {
     assert_eq!(
         d.same_domain(0, 2),
         SameDomain::No {
-            reason: "pupu runs at 96.0 kHz, cm4 at 48.0 kHz".into()
+            reason: "pupu runs at 96 kHz, cm4 at 48 kHz".into()
         }
     );
 }
@@ -168,8 +168,8 @@ fn two_rates_are_never_one_clock_whatever_the_daemon_says() {
     rigs[1].rate_hz = Some(48_000);
     let d = clock_domains(&rigs);
     assert_eq!(tags(&d), [Some("FREE"), Some("FREE")]);
-    assert_eq!(tip(&d, 0), "96.0 kHz here; ketunkolo at 48.0 kHz");
-    assert_eq!(tip(&d, 1), "48.0 kHz here; pupu at 96.0 kHz");
+    assert_eq!(tip(&d, 0), "96 kHz here; ketunkolo at 48 kHz");
+    assert_eq!(tip(&d, 1), "48 kHz here; pupu at 96 kHz");
 }
 
 #[test]

@@ -49,6 +49,7 @@ fn a_network_rig_keeps_its_own_name() {
         host: "192.168.9.27".into(),
         port: 47820,
         fingerprint: None,
+        mdns_host: None,
     };
     let (t, id) = on_kettu(Some(addr.clone()), "pupu");
     assert_eq!(t.st.rig_name(id), "pupu");
@@ -74,4 +75,48 @@ fn every_place_reads_the_same_name() {
         "{:?}",
         t.st.toasts.list
     );
+}
+
+/// A rig reached at a typed address is shown at that address until its advert is seen;
+/// from then on at the advert's host name, without the mDNS suffix. An advert of another
+/// daemon (another key) names nothing. This computer's own daemon has no host to show.
+#[test]
+fn a_typed_address_reads_as_the_adverts_host_once_seen() {
+    use crate::state::AdvertSeen;
+    let addr = RigAddr::Network {
+        host: "192.168.9.27".into(),
+        port: 47820,
+        fingerprint: Some("ab12".into()),
+        mdns_host: None,
+    };
+    let (mut t, id) = on_kettu(Some(addr), "ac2 on pupu");
+    fn rig(t: &mut T, id: RigId) -> &mut RigState {
+        std::iter::once(&mut t.st.rig)
+            .chain(&mut t.st.others.background)
+            .find(|r| r.id == id)
+            .expect("the rig")
+    }
+    rig(&mut t, id).daemon_addr = Some("192.168.9.27".into());
+    let host = |t: &T| t.st.find_rig(id).and_then(|r| t.st.rig_host(r));
+    assert_eq!(host(&t).as_deref(), Some("192.168.9.27"));
+    let advert = |fingerprint: &str| AdvertSeen {
+        host: "pupu.local".into(),
+        fingerprint: fingerprint.into(),
+        addresses: vec!["192.168.9.27".into()],
+    };
+    t.st.adverts_seen(&[advert("ffff")]);
+    assert_eq!(host(&t).as_deref(), Some("192.168.9.27"));
+    t.st.adverts_seen(&[advert("ab12")]);
+    assert_eq!(host(&t).as_deref(), Some("pupu"));
+    assert!(matches!(
+        &rig(&mut t, id).addr,
+        Some(RigAddr::Network { host, mdns_host: Some(m), .. })
+            if host == "192.168.9.27" && m == "pupu.local"
+    ));
+
+    // This computer: its own transport, or a loopback address.
+    let (mut t, id) = on_kettu(Some(RigAddr::Local), "ac2 on kettu");
+    assert_eq!(t.st.find_rig(id).and_then(|r| t.st.rig_host(r)), None);
+    rig(&mut t, id).daemon_addr = Some("127.0.0.1".into());
+    assert_eq!(t.st.find_rig(id).and_then(|r| t.st.rig_host(r)), None);
 }

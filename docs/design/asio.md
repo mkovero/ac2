@@ -286,7 +286,7 @@ Where the code settles an open point of §3 or departs from it, and why.
   delays in samples are re-derived from their seconds, the generator stays disarmed. The
   session carries `driver_change` (the old rate and buffer) until a client opens a session
   anew; the app's top bar shows it in the warning colour (`… · 44.1 kHz · 512 frames ·
-  driver changed from 48.0 kHz`), `ac2 session status` as a `NOTE` line. Every
+  driver changed from 48 kHz`), `ac2 session status` as a `NOTE` line. Every
   driver-reset reopen also carries `driver_reset` (reason, and whether the generator was
   emitting), shown the same way: `Audio clock changed (driver asked to resync): output
   stopped` as a `NOTE` line, in the session line's detail and, at the moment it happens, as

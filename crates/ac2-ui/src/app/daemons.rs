@@ -368,3 +368,29 @@ impl App {
         }
     }
 }
+
+impl App {
+    /// Shows the rig already in the list at the place `choice` names, even one still
+    /// retrying, and closes the connect dialog; `false` when no rig is held there. A rig
+    /// held is shown rather than added again: a second link to one daemon is a second row
+    /// that can never connect either.
+    pub(super) fn show_held(&mut self, choice: &Choice) -> bool {
+        let place = match choice {
+            Choice::Target(_, addr) => addr.clone(),
+            Choice::Local { .. } => Some(crate::prefs::RigAddr::Local),
+            Choice::Simulated => None,
+        };
+        let held = place.and_then(|a| {
+            self.state
+                .rigs()
+                .find(|r| r.link.is_some() && r.addr.as_ref().is_some_and(|b| b.same_place(&a)))
+                .map(|r| r.id)
+        });
+        let Some(id) = held else {
+            return false;
+        };
+        self.connect = None;
+        self.dispatch(Msg::RigPick(crate::state::RigRow::Rig(id)));
+        true
+    }
+}

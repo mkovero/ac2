@@ -107,7 +107,7 @@ fn audio_stopped_comes_and_goes_by_itself() -> R {
         .ok_or("stopped")?
         .bar;
     assert!(
-        bar[0].starts_with("audio stopped · reopening (attempt "),
+        bar.starts_with("audio stopped · reopening (attempt "),
         "{bar:?}"
     );
     assert!(d.st.open_session().is_some(), "the session stays open");

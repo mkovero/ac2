@@ -68,7 +68,7 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   --remote-in RIG:IN` on the taking one, or *Add an input from another rig…* in the app),
   streamed raw per device block and joined at a fixed link offset; per remote rig a clock
   relation (*clocks agree within 2 ppm*, *measuring clocks…*, *CLOCKS NOT LOCKED*, *CLOCKS:
-  CAN'T TELL*, never *locked*) on the top-bar chip, Settings › Connection › Between rigs and
+  CAN'T TELL*, never *locked*) on the rig's heading in the measurement list, Settings › Connection › Between rigs and
   `ac2 status`. A transfer function with a remote reference or measurement averages only
   while the clocks agree, else holds its last good result (phase faint) and says why; on
   return its delay is tracked again. Rig acceptance with the operator (§7 there: a cross-rig

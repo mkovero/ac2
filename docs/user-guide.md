@@ -81,8 +81,8 @@ ac2 meas start main-l
 ### Many rigs in one window
 
 One app can hold several rigs at once (a FOH rig and a delay-tower rig, each its own
-daemon). The top bar names the rig shown, after the session line: **pupu ▾**. Click it, or
-pick *Rigs…* in the palette (**Ctrl+K**), for the drop-down:
+daemon). The top bar starts with the rig shown, by name, with the dot of its link:
+**pupu ▾**. Click it, or pick *Rigs…* in the palette (**Ctrl+K**), for the drop-down:
 
 - every rig held, the one shown first in its place; a rig whose daemon stopped answering is
   greyed and reads *unreachable · retrying* (the app keeps reconnecting on its own); one
@@ -206,12 +206,15 @@ these lines per cross-rig transfer function.
 In the app the relation is said next to every cross-rig result, always in words (a problem
 is never only a colour):
 
-- **Top bar:** a chip per remote rig beside the rig drop-down — *ketunkolo · clocks
-  agree*, *ketunkolo · measuring clocks…*, or in the warning colour and capitals
-  *ketunkolo · CLOCKS NOT LOCKED +5.6 ppm*, *CLOCKS: CAN'T TELL*, *LINK OFFSET TOO SMALL*,
-  *NO AUDIO*, or *RUNS 48 kHz, THIS RIG 96 kHz* when the rates differ (a remote input
-  needs both rigs at one rate). A warning chip stays however narrow the bar. A click opens Settings ›
-  Connection. While a cross-rig transfer function is
+- **The rig's heading in the measurement list:** its second line says the pairing and,
+  while it streams, the clock relation: *paired · streaming · clocks agree*, *paired ·
+  streaming · measuring clocks…*, or first and in capitals *CLOCKS NOT LOCKED +5.6 ppm ·
+  paired · streaming*, *CLOCKS: CAN'T TELL · paired · streaming*, *LINK OFFSET TOO SMALL ·
+  paired · streaming*; with no audio from it *no audio*, and *ketunkolo runs 48 kHz, this
+  rig 96 kHz* when the rates differ (a remote input needs both rigs at one rate). The
+  heading's first line carries the rig's clock tag (`pupu · 96 kHz · LOCKED A`), its
+  tooltip the reason.
+- **Top bar:** while a cross-rig transfer function is
   stopped, the bar's status line carries why and what to do (*Main L stopped: pupu and
   ketunkolo are not on one clock (+5.6 ppm). Lock both interfaces to one reference.*).
 - **The pane:** its title names the remote side (*Transfer · TF 3 · meas from ketunkolo*,
@@ -228,7 +231,7 @@ is never only a colour):
   candidates to pick from.
 
 Settings › Connection has a *Between rigs* block per rig the
-session takes inputs from (*Between rigs* in the palette, or a click on the chip): the clock
+session takes inputs from (*Between rigs* in the palette, or a click on where the daemon runs in the top bar): the clock
 relation and why, the last change, the link and its bit rate, the link offset, late frames,
 slips and the arrival margin; `ac2 status` prints the same. Its last line, *Wait for remote
 inputs (link offset): default (10 ms)*, sets the link offset: **Enter** on it, type a time
@@ -466,11 +469,34 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
   rate, format and clock source are set (for every app using it). A change there resets the
   driver; the open audio I/O reopens at the driver's new rate and buffer by itself, its
   measurements restart at them, and the top bar says what changed in the warning colour
-  (`… · 44.1 kHz · 512 frames · driver changed from 48.0 kHz`, the hover has the
+  (`… · 44.1 kHz · 512 frames · driver changed from 48 kHz`, the hover has the
   details) until the session is next opened. The clock sources the driver offers are listed
   under the device, the one in use marked; choose among them in the driver's panel (Audio
   MIDI Setup on macOS).
-- After the session line the top bar shows how the rig holds up:
+- The top bar reads left to right: the rig shown (the rigs drop-down); where its daemon
+  runs and how it is doing; the session; and, fixed at the right, the stop while anything
+  is armed or playing, the key hints and the Settings gear:
+  `pupu ▾ | remote: ac2pi-0ab1c6 (STIM OFF) · 96 kHz · 256 frames · CPU remote 43 % · DSP
+  0 % · 0 xruns · 85 fps | untitled · unsaved changes`.
+  - **Where the daemon runs:** `local` for the daemon on this computer, `remote: <host>`
+    for one reached over the network, and just `remote` when the host is called what the
+    rig is (rig *pupu* on host `pupu`: `remote (STIM OFF) · …`). A host reads by its name
+    without the mDNS `.local` (`pupu`, never `pupu.local`, which would read as local), or
+    as the address you typed until the rig's advert has been seen in *Connect a rig…*;
+    the hover has the daemon's version and full address, which Settings › Connection
+    also shows. A click opens Settings › Connection.
+  - **The stimulus** in brackets: `(STIM OFF)`, or `(ARMED pink −24 dBFS → Main L)`,
+    `(FIRING …)` in the warning colours; *held by alice* after it when another client
+    holds the generator.
+  - **Link trouble takes this part over:** `connecting to pupu…`, `remote: pupu · not
+    responding`, `remote: pupu · syncing`, `remote: pupu · has not authorized this app`,
+    or the error and *retrying*.
+  - **The audio I/O:** rate and period, *no audio I/O* with the key that opens it, or
+    *audio stopped · reopening (attempt 3, next in 8 s)*; the device's name is in the
+    hover.
+  - After the session come an autosave, a recording or a replay under way, and what the
+    stimulus keys do next.
+- How the rig holds up, in that line:
   `CPU remote 23 % · local 41 % · DSP 14 % · 0 xruns · 14 Mbit/s · 30 fps`. **CPU** is the
   whole daemon host's use (every process, every core); with the daemon on another computer
   it reads **remote** and **local** is this one's, and with the daemon on this computer a
@@ -483,9 +509,12 @@ Sessions › New) opens, or reopens, the audio I/O as shown; **Esc** closes with
   warning colour; the hover names the hosts (`remote = pupu (192.168.9.27)`,
   `local = ketunkolo`) and gives the means and peaks since the session opened. Each number keeps a
   fixed width, so the words after it stay put as its digits change. A figure not known yet
-  is left out, never shown as zero. When the session line and these figures are wider than
-  the room between the bar's left and right groups, they scroll slowly back and forth
-  through it; resting the pointer on them holds them still.
+  is left out, never shown as zero.
+- When the line is wider than the room between the rig drop-down and the bar's right end,
+  the whole line scrolls slowly leftwards through it and comes round again after a gap;
+  resting the pointer on it holds it still, so any part can be read, hovered and clicked.
+  A line that fits does not move. The rig drop-down and the stop never scroll; in a very
+  narrow window the key hints give their room to the line.
 - **Enter** opens; what is missing is said in words (*Pick the stimulus output: the output
   that feeds your speakers and the loopback*). A reference and a stimulus output are not
   needed to open: one USB mic alone meters SPL, spectrum and RTA (an input-only device

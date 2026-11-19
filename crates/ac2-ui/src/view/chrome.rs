@@ -1,17 +1,14 @@
-//! Top bar (link, session, stimulus) and the measurement list.
+//! The top bar, the rigs drop-down, the progress strip and the measurement list.
 
-use ac2_scene::autosave::AutosaveTone;
-use ac2_scene::format;
-use ac2_scene::recording::RecordingTone;
 use eframe::egui::{self, Color32, RichText};
 
 use crate::app::App;
-use crate::keys::{CommandId, STOP_ANYWHERE, Scope};
-use crate::marquee::Marquee;
-use crate::state::{ConnState, Msg, StimPhase, outputs_text};
+use crate::keys::{CommandId, STOP_ANYWHERE};
+use crate::state::Msg;
 use crate::theme::Chrome;
 
-use super::segment::{Part, SEGMENT_MIN_W, draw_segment, health_part, segment_width};
+use super::segment::{LINE_MIN_W, draw_line, lay_out_line};
+use super::top_bar::key_hint;
 
 mod sidebar;
 mod tree_row;
@@ -39,109 +36,14 @@ fn chevron(ui: &mut egui::Ui, c: Color32) {
     ));
 }
 
-/// The first key of a global command, as shown in the bar.
-fn key_hint(app: &App, c: CommandId) -> String {
-    app.keymap
-        .chords(c, Scope::Global)
-        .first()
-        .map_or_else(|| "—".into(), |k| k.label())
-}
-
-/// One thing in the top bar: its texts from the longest to the shortest, and how much it
-/// matters. The bar is fitted before it is drawn, so nothing overlaps at any width: the
-/// least important items shorten first, then go.
-struct Item {
-    /// Higher stays longer.
-    prio: u8,
-    /// Longest first; the bar shows one of them.
-    variants: Vec<egui::WidgetText>,
-    /// May disappear entirely once its shortest text does not fit.
-    droppable: bool,
-    /// A status dot before the text.
-    dot: Option<Color32>,
-    /// A ▾ after the text: the item opens a list.
-    chevron: Option<Color32>,
-    /// A separator after it (on its far side from the bar's edge).
-    sep: bool,
-    hover: Option<String>,
-    /// A click (or tap) runs it.
-    click: Option<CommandId>,
-    /// The rigs drop-down: the menu opens under it.
-    rigs: bool,
-}
-
-impl Item {
-    fn new(prio: u8, variants: Vec<RichText>) -> Self {
-        Self::of(prio, variants.into_iter().map(Into::into).collect())
-    }
-
-    fn of(prio: u8, variants: Vec<egui::WidgetText>) -> Self {
-        Self {
-            prio,
-            variants,
-            droppable: true,
-            dot: None,
-            chevron: None,
-            sep: false,
-            hover: None,
-            click: None,
-            rigs: false,
-        }
-    }
-
-    fn kept(mut self) -> Self {
-        self.droppable = false;
-        self
-    }
-
-    fn sep(mut self) -> Self {
-        self.sep = true;
-        self
-    }
-}
-
 /// Item spacing in the bar.
 pub(super) const BAR_GAP: f32 = 8.0;
 /// A separator's own width (it also takes a gap on each side).
 const BAR_SEP: f32 = 6.0;
 /// The status dot.
 const BAR_DOT: f32 = 10.0;
-
-/// Which text of each item the bar shows (`None`: dropped) so that the sum of `widths`
-/// (per item: each variant's width, extras included) fits `available`. Starting from the
-/// longest texts, the lowest-priority item that can still give way shortens or, past its
-/// shortest text, goes, until everything fits or nothing more may give way.
-fn fit_bar(widths: &[(u8, Vec<f32>, bool)], available: f32) -> Vec<Option<usize>> {
-    let mut pick: Vec<Option<usize>> = widths
-        .iter()
-        .map(|(_, v, _)| (!v.is_empty()).then_some(0))
-        .collect();
-    let total = |pick: &[Option<usize>]| -> f32 {
-        widths
-            .iter()
-            .zip(pick)
-            .filter_map(|((_, v, _), p)| p.map(|i| v[i]))
-            .sum()
-    };
-    while total(&pick) > available {
-        let next = widths
-            .iter()
-            .enumerate()
-            .filter(|(i, (_, v, drop))| match pick[*i] {
-                Some(k) => k + 1 < v.len() || *drop,
-                None => false,
-            })
-            .min_by_key(|(_, (p, _, _))| *p)
-            .map(|(i, _)| i);
-        let Some(i) = next else { break };
-        let n = widths[i].1.len();
-        pick[i] = match pick[i] {
-            Some(k) if k + 1 < n => Some(k + 1),
-            _ => None,
-        };
-    }
-    pick
-}
+/// Room the Settings gear takes at the bar's right edge.
+const GEAR_W: f32 = 28.0;
 
 pub(super) fn text_width(ui: &egui::Ui, t: &egui::WidgetText) -> f32 {
     t.clone()
@@ -155,269 +57,94 @@ pub(super) fn text_width(ui: &egui::Ui, t: &egui::WidgetText) -> f32 {
         .x
 }
 
-/// Draws item `it` with its text `k`. Right to left, the code order flips: the text first,
-/// then the dot (shown before it), then the separator (shown inwards of it).
-/// Draws `it` in its variant `k`; returns its command when it was clicked.
-fn draw_item(ui: &mut egui::Ui, it: &Item, k: usize, rtl: bool) -> Option<CommandId> {
-    draw_item_at(ui, it, k, rtl).0
+/// A label at one of the bar's fixed ends, with its tooltip.
+fn fixed(ui: &mut egui::Ui, text: RichText, hover: Option<&str>) {
+    let r = ui.label(text);
+    if let Some(h) = hover {
+        r.on_hover_text(h);
+    }
 }
 
-/// [`draw_item`], with where its text went.
-fn draw_item_at(
-    ui: &mut egui::Ui,
-    it: &Item,
-    k: usize,
-    rtl: bool,
-) -> (Option<CommandId>, egui::Rect) {
-    let mut clicked = false;
-    let mut at = egui::Rect::NOTHING;
-    let mut text = |ui: &mut egui::Ui| {
-        let mut l = egui::Label::new(it.variants[k].clone());
-        if it.click.is_some() {
-            l = l.sense(egui::Sense::click());
-        }
-        let mut r = ui.add(l);
-        if it.click.is_some() {
-            r = r.on_hover_cursor(egui::CursorIcon::PointingHand);
-        }
-        if let Some(h) = &it.hover {
-            r = r.on_hover_text(h);
-        }
-        clicked = r.clicked();
-        at = r.rect;
-    };
-    if rtl {
-        if let Some(c) = it.chevron {
-            chevron(ui, c);
-        }
-        text(ui);
-        if let Some(c) = it.dot {
-            dot(ui, c);
-        }
-    } else {
-        if let Some(c) = it.dot {
-            dot(ui, c);
-        }
-        text(ui);
-        if let Some(c) = it.chevron {
-            chevron(ui, c);
-        }
-    }
-    if it.sep {
-        ui.separator();
-    }
-    (it.click.filter(|_| clicked), at)
-}
-
+/// The top bar: the rig shown as the rigs drop-down, with its link's dot, fixed at the
+/// left; the stop (while anything is armed or playing), the key hints and the Settings
+/// gear fixed at the right; between them the line of [`ac2_scene::top_bar`], which scrolls
+/// when it is wider than the room left.
 pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
+    let bar = app.top_bar(std::time::Instant::now());
+    let stop = app.bar_stop();
     let st = &app.state;
-    let now = std::time::Instant::now();
-    let link_state = match &st.rig.conn {
-        ConnState::Connecting { target } => ac2_scene::chrome::Link::Connecting { target },
-        ConnState::Failed { target, error, .. } => {
-            ac2_scene::chrome::Link::Failed { target, error }
-        }
-        ConnState::Connected { target, server, .. } => ac2_scene::chrome::Link::Connected {
-            target,
-            server,
-            responding: st.rig.mirror.as_ref().is_some_and(|m| m.responding(now)),
-            synced: st.rig.mirror.as_ref().is_some_and(|m| m.synced()),
-        },
-    };
-    let link_line = ac2_scene::chrome::link_line(link_state);
-    let color = match link_line.tone {
+    let line = lay_out_line(ui, ch, &bar);
+    let dot_color = match bar.tone {
         ac2_scene::chrome::LinkTone::Ok => ch.ok,
         ac2_scene::chrome::LinkTone::Warn => ch.warn,
         ac2_scene::chrome::LinkTone::Fault => ch.fault,
     };
-    let (link_full, link_short) = (link_line.full, link_line.short);
-    let dim = |s: String| RichText::new(s).color(ch.dim);
-    let stopped = crate::scenes::audio_stopped(st, super::now().wall);
-    // The session line in full: when it is wider than its room the segment scrolls.
-    let (session_prio, session) = match (st.daemon().and_then(|s| s.session.open.as_ref()), stopped)
-    {
-        (Some(_), Some(t)) => (
-            75,
-            Part::single(
-                ui,
-                RichText::new(t.bar.first().cloned().unwrap_or_default())
-                    .color(ch.fault)
-                    .into(),
-                Some(ac2_scene::chrome::stopped_hover(&t.banner, &t.detail)),
-            ),
-        ),
-        (Some(o), None) => {
-            let l = ac2_scene::audio::session_line(o);
-            let color = if l.changed { ch.warn } else { ch.dim };
-            (
-                40,
-                Part::single(ui, RichText::new(l.full).color(color).into(), l.detail),
-            )
-        }
-        (None, _) if st.daemon().is_some() => (
-            60,
-            Part::single(ui, dim(st.no_audio_line(&app.keymap)).into(), None),
-        ),
-        (None, _) => (40, Part::single(ui, dim("—".into()).into(), None)),
+    // Greyed and inert while a window is open: the window acts on the rig shown.
+    let free = matches!(
+        st.overlay,
+        crate::state::Overlay::None | crate::state::Overlay::RigMenu(_)
+    );
+    let rig_text: egui::WidgetText = RichText::new(&bar.rig)
+        .strong()
+        .color(if free { ch.text } else { ch.dim })
+        .into();
+    let rig_tip = if free {
+        ac2_scene::chrome::RIG_MENU_TIP
+    } else {
+        ac2_scene::chrome::RIG_SWITCH_WINDOW_OPEN
     };
-    let mut link = Item::new(
-        70,
-        vec![
-            RichText::new(link_full),
-            RichText::new(link_short),
-            RichText::new(""),
-        ],
-    )
-    .kept()
-    .sep();
-    link.dot = Some(color);
-    let working = st.daemon().map(|_| {
-        let l = st.working_label(super::now().wall);
-        let name = ac2_scene::sessions::origin_name(st.working().origin.as_ref());
-        let color = if l.unsaved { ch.warn } else { ch.text };
-        let short = if l.unsaved {
-            ac2_scene::chrome::unsaved_short(&name)
-        } else {
-            name
-        };
-        let mut it = Item::new(
-            if l.unsaved { 80 } else { 50 },
-            vec![
-                RichText::new(l.text).color(color),
-                RichText::new(short).color(color),
-            ],
-        )
-        .sep();
-        it.hover = Some(l.detail);
-        it.click = Some(CommandId::Sessions);
-        it
-    });
-    let mut segment = vec![session];
-    // A transfer function across two rigs stopped by the clocks: why and what to do, right
-    // after the session line. It scrolls there rather than push out the rig chips, which
-    // say the same in short.
-    let stopped_tf = st.cross_rig_banners();
-    if !stopped_tf.is_empty() {
-        let text = stopped_tf.join(" · ");
-        segment.push(Part::single(
-            ui,
-            RichText::new(text.clone()).color(ch.warn).into(),
-            Some(text),
-        ));
-    }
-    segment.extend(health_part(app, ui, ch, now));
-    let mut left = vec![
-        Item::new(100, vec![RichText::new("ac2").strong().size(16.0)])
-            .kept()
-            .sep(),
-        link,
-    ];
-    left.extend(working);
-
-    // Right side, from the edge inwards.
-    let [keys_full, keys_short] = ac2_scene::chrome::keys_hint(
+    let keys: egui::WidgetText = RichText::new(ac2_scene::chrome::keys_hint(
         &key_hint(app, CommandId::Help),
         &key_hint(app, CommandId::Palette),
-    );
-    let mut keys = Item::new(10, vec![dim(keys_full), dim(keys_short)]).sep();
-    keys.hover = Some(ac2_scene::chrome::keys_tip(
+    ))
+    .color(ch.dim)
+    .into();
+    let keys_tip = ac2_scene::chrome::keys_tip(
         &key_hint(app, CommandId::Help),
         &key_hint(app, CommandId::Palette),
         &key_hint(app, CommandId::KeyHints),
-    ));
-    let mut right = vec![keys];
-    if let Some(l) = st.autosave_label(super::now().wall) {
-        let color = match l.tone {
-            AutosaveTone::Quiet | AutosaveTone::Busy => ch.dim,
-            AutosaveTone::Warning => ch.warn,
-        };
-        let mut it = Item::new(
-            if l.tone == AutosaveTone::Warning {
-                65
-            } else {
-                30
-            },
-            vec![RichText::new(l.text).color(color)],
-        )
-        .sep();
-        it.hover = Some(l.detail);
-        right.push(it);
-    }
-    if let Some(l) = st.recording_label() {
-        let color = match l.tone {
-            RecordingTone::Recording => ch.fault,
-            RecordingTone::Quiet => ch.dim,
-            RecordingTone::Warning => ch.warn,
-        };
-        let active = l.tone != RecordingTone::Quiet;
-        let mut it = Item::new(
-            if active { 70 } else { 25 },
-            vec![RichText::new(l.text).color(color)],
-        )
-        .sep();
-        it.hover = Some(l.detail);
-        right.push(it);
-    }
-    if let Some(t) = st.replay_label() {
-        let mut it = Item::new(70, vec![RichText::new(t).color(ch.armed)]).sep();
-        it.hover = Some(ac2_scene::recording::REPLAY_DETAIL.to_owned());
-        right.push(it);
-    }
-    right.extend(stimulus(app, ch));
-    right.extend(rig_chips(st, ch));
-    // Innermost, right after the session line: the rig everything else in the bar is of.
-    right.push(rig_item(st, ch));
-
-    let segment_w = segment_width(&segment);
-    let item_w = |it: &Item| {
-        let extra = BAR_GAP
-            + it.dot.map_or(0.0, |_| BAR_DOT + BAR_GAP)
-            + it.chevron.map_or(0.0, |_| BAR_DOT + BAR_GAP)
-            + if it.sep { BAR_SEP + 2.0 * BAR_GAP } else { 0.0 };
-        let v = it
-            .variants
+    );
+    let stop_text =
+        |s: &str, c: Color32| -> egui::WidgetText { RichText::new(s).strong().color(c).into() };
+    // What the fixed ends take; the key hints give their room to a line that would
+    // otherwise have too little to be followed.
+    let sep_w = BAR_SEP + 2.0 * BAR_GAP;
+    let left_w =
+        BAR_DOT + BAR_GAP + text_width(ui, &rig_text) + BAR_GAP + BAR_DOT + BAR_GAP + sep_w;
+    let stop_w = stop.as_ref().map_or(0.0, |s| {
+        let chips: f32 = s
+            .elsewhere
             .iter()
-            .map(|t| text_width(ui, t) + extra)
-            .collect();
-        (it.prio, v, it.droppable)
-    };
-    // The segment takes all the room between the two groups. It enters the fit as two
-    // entries: the width past its scrolling minimum, given up early (at the session line's
-    // own priority: scrolling beats dropping other items), and the minimum itself, given
-    // up only after the link has shortened to its dot (the segment says what the audio
-    // does; the dot's colour still says how the link is).
-    let min_w = segment_w.min(SEGMENT_MIN_W);
-    let widths: Vec<(u8, Vec<f32>, bool)> = left
-        .iter()
-        .map(item_w)
-        .chain([
-            (session_prio, vec![segment_w - min_w, 0.0], false),
-            (
-                session_prio.max(SEGMENT_KEEP_PRIO),
-                vec![min_w + BAR_GAP],
-                true,
-            ),
-        ])
-        .chain(right.iter().map(item_w))
-        .collect();
-    // A little slack: egui rounds widget sizes to whole pixels; the gear keeps its place.
-    let pick = fit_bar(&widths, ui.available_width() - 4.0 - GEAR_W);
-    let (lp, rest) = pick.split_at(left.len());
-    let (segment_shown, rp) = (rest[1].is_some(), &rest[2..]);
+            .map(|(t, _)| text_width(ui, &stop_text(t, ch.fault)) + BAR_GAP)
+            .sum();
+        chips + text_width(ui, &stop_text(&s.label, ch.fault)) + BAR_GAP + sep_w
+    });
+    let keys_w = text_width(ui, &keys) + BAR_GAP + sep_w;
+    let room_with_keys = ui.available_width() - left_w - stop_w - GEAR_W - keys_w - 4.0;
+    let show_keys = room_with_keys >= line.width.min(LINE_MIN_W);
     let settings_tip = format!("Settings ({})", key_hint(app, CommandId::Settings));
     let mut open_settings = false;
     let mut run = None;
-    let fade = ch.panel;
     let marquee = &mut app.marquee;
     let mut wake = None;
     let mut rig_at = None;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = BAR_GAP;
-        for (it, p) in left.iter().zip(lp) {
-            if let Some(k) = p {
-                run = run.or(draw_item(ui, it, *k, false));
-            }
+        dot(ui, dot_color);
+        let mut l = egui::Label::new(rig_text);
+        if free {
+            l = l.sense(egui::Sense::click());
         }
+        let mut r = ui.add(l);
+        if free {
+            r = r.on_hover_cursor(egui::CursorIcon::PointingHand);
+        }
+        rig_at = Some(r.rect);
+        if r.on_hover_text(rig_tip).clicked() {
+            run = Some(CommandId::Rigs);
+        }
+        chevron(ui, ch.dim);
+        ui.separator();
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let gear = ui
                 .add(
@@ -427,21 +154,27 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
                 )
                 .on_hover_text(settings_tip);
             open_settings = gear.clicked();
-            for (it, p) in right.iter().zip(rp) {
-                if let Some(k) = p {
-                    let (c, at) = draw_item_at(ui, it, *k, true);
-                    if it.rigs {
-                        rig_at = Some(at);
-                    }
-                    run = run.or(c);
+            if show_keys {
+                ui.label(keys).on_hover_text(keys_tip);
+                ui.separator();
+            }
+            if let Some(s) = &stop {
+                fixed(
+                    ui,
+                    RichText::new(&s.label).strong().color(ch.fault),
+                    Some(&s.tip),
+                );
+                // A chip per rig not shown that is armed or playing, the stop beside them.
+                for (text, firing) in &s.elsewhere {
+                    let c = if *firing { ch.fault } else { ch.warn };
+                    fixed(ui, RichText::new(text).strong().color(c), None);
                 }
+                ui.separator();
             }
-            if segment_shown {
-                let room = ui.available_rect_before_wrap();
-                wake = draw_segment(ui, room, &segment, marquee, fade);
-            } else {
-                *marquee = Marquee::default();
-            }
+            let room = ui.available_rect_before_wrap();
+            let drawn = draw_line(ui, room, &line, marquee, ch);
+            wake = drawn.wake;
+            run = run.or(drawn.clicked);
         });
     });
     if let Some(w) = wake {
@@ -458,52 +191,6 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     if let Some(c) = run {
         app.dispatch(crate::state::Msg::Command(c));
     }
-}
-
-/// A chip per rig the session takes inputs from, beside the rig drop-down: the clocks
-/// between the rigs in words, a problem in capitals and the warning colour. A click opens
-/// the Connection page, where *Between rigs* says why.
-fn rig_chips(st: &crate::state::AppState, ch: &Chrome) -> Vec<Item> {
-    chip_items(st.rig_chips(), ch)
-}
-
-/// The chips' items. A warning chip is kept at any width: on a narrow bar (a kiosk) it
-/// would otherwise go and leave the clock problem said nowhere but in the scrolling line.
-fn chip_items(chips: Vec<ac2_scene::cross_rig::RigChip>, ch: &Chrome) -> Vec<Item> {
-    chips
-        .into_iter()
-        .map(|c| {
-            let (prio, color) = if c.warn { (66, ch.warn) } else { (35, ch.dim) };
-            let mut it = Item::new(prio, vec![RichText::new(c.text).color(color)]).sep();
-            if c.warn {
-                it = it.kept();
-            }
-            it.hover = Some(ac2_scene::cross_rig::CHIP_TIP.to_owned());
-            it.click = Some(CommandId::BetweenRigs);
-            it
-        })
-        .collect()
-}
-
-/// The rigs drop-down: the rig shown, by name (also with one rig, so the bar says whose
-/// it is). Greyed and inert while a window is open: the window acts on the rig shown.
-fn rig_item(st: &crate::state::AppState, ch: &Chrome) -> Item {
-    let name = st.rig_name(st.active());
-    let free = matches!(
-        st.overlay,
-        crate::state::Overlay::None | crate::state::Overlay::RigMenu(_)
-    );
-    let color = if free { ch.text } else { ch.dim };
-    let mut it = Item::new(68, vec![RichText::new(name).color(color)]).sep();
-    it.hover = Some(if free {
-        ac2_scene::chrome::RIG_MENU_TIP.to_owned()
-    } else {
-        ac2_scene::chrome::RIG_SWITCH_WINDOW_OPEN.to_owned()
-    });
-    it.click = free.then_some(CommandId::Rigs);
-    it.rigs = true;
-    it.chevron = Some(ch.dim);
-    it
 }
 
 /// The rigs drop-down's list, under its top-bar item: each rig (greyed when down), then
@@ -561,180 +248,6 @@ fn rig_row_text(
         RigRow::Connect => (ac2_scene::chrome::RIG_CONNECT.to_owned(), ch.text),
         RigRow::Close(id) => (ac2_scene::chrome::rig_close(&st.rig_name(id)), ch.text),
     }
-}
-
-/// The scrolling segment's minimum gives way after the link (70); a stopped stream's banner
-/// keeps its own, higher priority.
-const SEGMENT_KEEP_PRIO: u8 = 72;
-
-/// Room the Settings gear takes at the bar's right edge.
-const GEAR_W: f32 = 28.0;
-
-/// The stimulus items, from the bar's right edge inwards: what the keys do next, who holds
-/// the generator, the level and outputs, the state badge.
-fn stimulus(app: &App, ch: &Chrome) -> Vec<Item> {
-    let st = &app.state;
-    let generator = st.daemon().map(|s| &s.generator);
-    let mine = generator
-        .and_then(|g| g.owner.as_ref())
-        .zip(st.my_client_id())
-        .is_some_and(|(o, me)| o == me);
-    let other = generator
-        .and_then(|g| g.owner.as_ref())
-        .filter(|_| !mine)
-        .map(|o| ac2_scene::stimulus::holder(o, &st.rig_name(st.active())));
-    // The mirrored generator is the truth; the local phase only adds "requested".
-    // A lit badge is a filled chip: banner fills with their own text colour.
-    let firing = (ch.fault_fill, ch.on_fault_fill);
-    let armed = (ch.warn_fill, ch.on_warn_fill);
-    let (badge, (fill, ink)) = match (
-        generator.map(|g| (g.armed, g.firing)),
-        st.rig.stimulus.phase,
-    ) {
-        (Some((_, true)), _) => ("FIRING", firing),
-        (Some((true, false)), StimPhase::FireRequested) => ("FIRE…", armed),
-        (Some((true, false)), _) => ("ARMED", armed),
-        (_, StimPhase::Arming) => ("ARMING…", armed),
-        (_, StimPhase::Stopping) => ("STOPPING…", (ch.dim, ch.panel)),
-        _ => ("STIM OFF", (Color32::TRANSPARENT, ch.dim)),
-    };
-    let level = st.rig.stimulus.level.map_or_else(
-        || "no level".to_string(),
-        |l| format!("{} dBFS", format::signed(l.0, 1)),
-    );
-    let run = st
-        .daemon()
-        .and_then(|s| s.sweep.as_ref())
-        .filter(|r| r.active());
-    let sweep = st.rig.sweep.plan.is_some();
-    // What the keys do next, as the focused view decides. With a window open the window
-    // has Space, Enter and Esc; only the missing level is said then.
-    let window = st.overlay != crate::state::Overlay::None;
-    let hint = st
-        .stimulus_next()
-        .filter(|_| run.is_none())
-        .filter(|(next, what)| {
-            !window
-                || matches!(
-                    (next, what),
-                    (
-                        ac2_scene::stimulus::Next::Space,
-                        ac2_scene::stimulus::Stimulus::Generator { level: None, .. }
-                    )
-                )
-        })
-        .map(|(next, what)| {
-            let level_key = key_hint(app, CommandId::StimulusLevel);
-            if st.many_rigs() {
-                let rig = st.rig_name(st.active());
-                ac2_scene::stimulus::rig_hint(&rig, next, &what, &level_key)
-            } else {
-                ac2_scene::stimulus::hint(next, &what, &level_key)
-            }
-        });
-    let elsewhere = st.live_elsewhere();
-    // The level and outputs are the rig shown's: with more than one, say whose.
-    let rig = if st.many_rigs() {
-        format!("{}: ", st.rig_name(st.active()))
-    } else {
-        String::new()
-    };
-    // While anything is armed or playing: the stop that works from anywhere, windows
-    // included (Esc stops too while no window is open).
-    let live = run.is_some() || st.stimulus_live() || !elsewhere.is_empty();
-    let badge_text = RichText::new(badge)
-        .strong()
-        .color(ink)
-        .background_color(fill);
-    let prefix = if sweep {
-        "sweep ".to_owned()
-    } else {
-        ac2_scene::stimulus::level_prefix(st.generator_signal().as_ref())
-    };
-    let mut v = vec![
-        Item::new(100, vec![badge_text]).kept(),
-        Item::new(
-            90,
-            vec![
-                RichText::new(format!(
-                    "{rig}{prefix}{level} → {}",
-                    ac2_scene::rig::stimulus_outputs(
-                        &st.rig.stimulus.outputs,
-                        st.daemon()
-                            .map(|s| s.outputs.as_slice())
-                            .unwrap_or_default()
-                    )
-                )),
-                RichText::new(format!(
-                    "{rig}{prefix}{level} → out {}",
-                    outputs_text(&st.rig.stimulus.outputs)
-                )),
-                RichText::new(format!("{rig}{prefix}{level}")),
-            ],
-        )
-        .kept(),
-    ];
-    if let Some(it) = v.last_mut() {
-        it.hover = Some(ac2_scene::stimulus::level_tip(&key_hint(
-            app,
-            CommandId::StimulusLevel,
-        )));
-    }
-    if let Some(o) = other {
-        v.push(Item::new(
-            85,
-            vec![
-                RichText::new(format!("held by {o}")).color(ch.warn),
-                RichText::new("held").color(ch.warn),
-            ],
-        ));
-    }
-    if let Some((long, short)) = hint {
-        v.push(Item::new(20, vec![dim_text(long, ch), dim_text(short, ch)]));
-    }
-    if live {
-        let stop = STOP_ANYWHERE.label();
-        let mut it = Item::new(
-            95,
-            vec![
-                RichText::new(format!("■ Stop: {stop}"))
-                    .strong()
-                    .color(ch.fault),
-                RichText::new(format!("■ {stop}")).strong().color(ch.fault),
-            ],
-        )
-        .kept();
-        it.hover = Some(if st.many_rigs() {
-            ac2_scene::stimulus::stop_every_rig_tip(&stop)
-        } else {
-            format!(
-                "{stop} stops and disarms the stimulus from anywhere, also with a window open; \
-                 with no window open Esc does too"
-            )
-        });
-        v.push(it);
-        // A chip per rig not shown that is armed or playing, the stop beside them.
-        for e in &elsewhere {
-            v.push(
-                Item::new(
-                    96,
-                    vec![
-                        RichText::new(ac2_scene::stimulus::elsewhere_chip(e))
-                            .strong()
-                            .color(if e.firing { ch.fault } else { ch.warn }),
-                    ],
-                )
-                .kept(),
-            );
-        }
-    }
-    // From the bar's edge inwards: the hints are outermost, the badge innermost.
-    v.reverse();
-    v
-}
-
-fn dim_text(s: String, ch: &Chrome) -> RichText {
-    RichText::new(s).color(ch.dim)
 }
 
 /// The running operation: what, which step, a bar, time left, and Stop.
@@ -804,57 +317,5 @@ fn progress(app: &mut App, ui: &mut egui::Ui, ch: &Chrome, p: &ac2_scene::progre
     });
     if stop {
         app.dispatch(Msg::Command(CommandId::StimulusStop));
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{chip_items, fit_bar};
-
-    #[test]
-    fn a_warning_rig_chip_is_never_dropped() {
-        use ac2_scene::cross_rig::RigChip;
-        let ch = crate::theme::chrome(&ac2_scene::theme::Theme::dark());
-        let chip = |warn| RigChip {
-            text: "pupu · x".into(),
-            warn,
-        };
-        let items = chip_items(vec![chip(true), chip(false)], &ch);
-        assert!(!items[0].droppable, "a clock problem stays in the bar");
-        assert!(items[1].droppable, "a quiet chip may go");
-    }
-
-    #[test]
-    fn the_bar_shortens_then_drops_the_least_important_first() {
-        // (priority, widths of its texts longest first, may go)
-        let items = vec![
-            (100, vec![30.0], false),
-            (70, vec![200.0, 80.0, 20.0], false),
-            (40, vec![250.0, 120.0], true),
-            (10, vec![150.0, 60.0], true),
-            (100, vec![60.0], false),
-        ];
-        assert_eq!(
-            fit_bar(&items, 1000.0),
-            vec![Some(0), Some(0), Some(0), Some(0), Some(0)]
-        );
-        // The keys hint shortens first, then goes, then the session text shortens.
-        assert_eq!(
-            fit_bar(&items, 650.0),
-            vec![Some(0), Some(0), Some(0), Some(1), Some(0)]
-        );
-        assert_eq!(
-            fit_bar(&items, 545.0),
-            vec![Some(0), Some(0), Some(0), None, Some(0)]
-        );
-        assert_eq!(
-            fit_bar(&items, 420.0),
-            vec![Some(0), Some(0), Some(1), None, Some(0)]
-        );
-        // Kept items never go: at their shortest they stay even when nothing fits.
-        assert_eq!(
-            fit_bar(&items, 50.0),
-            vec![Some(0), Some(2), None, None, Some(0)]
-        );
     }
 }

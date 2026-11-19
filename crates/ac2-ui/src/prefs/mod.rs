@@ -322,11 +322,15 @@ pub enum RigAddr {
     /// the app when none serves (Settings › Connection).
     Local,
     /// A daemon at `host:port` over the network; `fingerprint` the server key this app
-    /// pinned for it, so a reconnect at start never talks to another key.
+    /// pinned for it, so a reconnect at start never talks to another key. `mdns_host`: the
+    /// host name of the rig's mDNS advert once one was seen for it (`pupu.local`); the rig
+    /// is shown by it, `host` being an address the operator never typed when the rig was
+    /// picked from the list.
     Network {
         host: String,
         port: u16,
         fingerprint: Option<String>,
+        mdns_host: Option<String>,
     },
     /// A daemon at given endpoints (`--ctrl`/`--data`), unencrypted.
     Endpoints { ctrl: String, data: String },

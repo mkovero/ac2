@@ -417,7 +417,7 @@ fn long_headlines_shorten_to_their_row() {
         audio_stopped: Some(crate::audio::AudioStoppedText {
             banner: text.into(),
             detail: "reopening (attempt 2) · measurements paused".into(),
-            bar: [String::new(), String::new()],
+            bar: String::new(),
             status: String::new(),
         }),
         ..Status::default()

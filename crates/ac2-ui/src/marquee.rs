@@ -1,66 +1,37 @@
-//! A line of text wider than its room scrolls through it: still at the start, slowly to the
-//! end, still there, quickly back. Pure animation of where the text sits, from its width,
-//! the room and the time; what the text says comes from the scene.
+//! A line of text wider than its room scrolls through it: leftwards at a steady pace, the
+//! line following itself after a gap, so its start comes round again without a jump back.
+//! Pure animation of where the text sits, from its width, the room and the time; what the
+//! text says comes from the scene.
 
-/// Still at each end long enough to read what is there.
-pub const PAUSE_S: f64 = 2.0;
 /// Slow enough to read while it moves.
-pub const SPEED_PX_S: f64 = 35.0;
-/// The way back carries nothing new to read.
-pub const RETURN_SPEED_PX_S: f64 = 3.0 * SPEED_PX_S;
-/// Frame period while the text moves: smooth at this speed (about one pixel per frame)
-/// without drawing at the display's full rate.
-pub const MOVING_FRAME_S: f64 = 1.0 / 30.0;
+pub const SPEED_PX_S: f64 = 30.0;
+/// The space between the line's end and its start coming round: wide enough to read as
+/// the end of the line, not as a space in it.
+pub const GAP_PX: f32 = 48.0;
+/// Frame period the scroll asks for on its own: 12.5 frames a second, about 2.4 px a step.
+/// A kiosk that draws nothing else then draws at this rate, not the display's; a window
+/// already drawing faster (live data) moves the line more smoothly for free.
+pub const STEP_S: f64 = 0.08;
 
 /// Where the text sits at one instant.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Frame {
-    /// How far the text is shifted left of the room's start, 0 up to its overflow.
+    /// How far the text is shifted left of the room's start, 0 up to its period.
     pub offset: f32,
-    /// When it next moves, in seconds from now; `None` while it fits (or is held).
+    /// The text follows itself this far behind (its width and the gap); `None` while it
+    /// fits and is drawn once.
+    pub period: Option<f32>,
+    /// When it next moves, in seconds from now; `None` while it fits or is held.
     pub wake: Option<f64>,
 }
 
-/// The text's place `t` seconds into its motion, `overflow` pixels wider than its room.
-/// The cycle: hold at 0, scroll to `overflow`, hold, return; then again.
-pub fn offset_at(overflow: f32, t: f64) -> Frame {
-    if overflow <= 0.0 {
-        return Frame {
-            offset: 0.0,
-            wake: None,
-        };
-    }
-    let d = f64::from(overflow);
-    let out = d / SPEED_PX_S;
-    let back = d / RETURN_SPEED_PX_S;
-    let cycle = PAUSE_S + out + PAUSE_S + back;
-    let t = t.max(0.0) % cycle;
-    let moving = |offset: f64| Frame {
-        offset: offset.clamp(0.0, d) as f32,
-        wake: Some(MOVING_FRAME_S),
-    };
-    if t < PAUSE_S {
-        Frame {
-            offset: 0.0,
-            wake: Some(PAUSE_S - t),
-        }
-    } else if t < PAUSE_S + out {
-        moving((t - PAUSE_S) * SPEED_PX_S)
-    } else if t < PAUSE_S + out + PAUSE_S {
-        Frame {
-            offset: overflow,
-            wake: Some(PAUSE_S + out + PAUSE_S - t),
-        }
-    } else {
-        moving(d - (t - PAUSE_S - out - PAUSE_S) * RETURN_SPEED_PX_S)
-    }
-}
-
-/// One scrolling line's clock: the time it has spent moving, which stands still while the
+/// One scrolling line's clock: how far it has scrolled, which stands still while the
 /// pointer rests on it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Marquee {
-    motion: f64,
+    /// Pixels scrolled, within the period. Kept as a distance, not a time: a text whose
+    /// width changes under way (a figure gaining a digit) then stays where it is.
+    offset: f64,
     last: Option<f64>,
     held: bool,
 }
@@ -69,35 +40,47 @@ impl Marquee {
     /// A line that has been moving for `motion` seconds; its next frame starts from there.
     pub fn at(motion: f64) -> Self {
         Self {
-            motion,
+            offset: motion * SPEED_PX_S,
             ..Self::default()
         }
     }
 
+    /// How far the line was scrolled at its last frame.
+    pub fn offset(&self) -> f32 {
+        self.offset as f32
+    }
+
     /// The text's place at `now` (seconds, any monotonic origin) for a text `text_w` wide
-    /// in `room`. Text that fits sits still and restarts the cycle from its start pause the
-    /// next time it does not.
+    /// in `room`; `hovered`: the pointer is over the room. Text that fits sits still, and
+    /// starts from its start the next time it does not.
     pub fn frame(&mut self, now: f64, text_w: f32, room: f32, hovered: bool) -> Frame {
-        let overflow = text_w - room;
-        if overflow <= 0.0 {
+        if text_w <= room {
             *self = Self::default();
-            return offset_at(0.0, 0.0);
+            return Frame {
+                offset: 0.0,
+                period: None,
+                wake: None,
+            };
         }
+        let period = f64::from(text_w + GAP_PX);
         // The time since the last pass counts only if the pointer was away for all of it.
         if let Some(last) = self.last
             && !hovered
             && !self.held
         {
-            self.motion += (now - last).max(0.0);
+            self.offset += (now - last).max(0.0) * SPEED_PX_S;
         }
+        self.offset %= period;
         self.last = Some(now);
         self.held = hovered;
-        let f = offset_at(overflow, self.motion);
-        if hovered {
-            // The pointer leaving wakes the window anyway.
-            Frame { wake: None, ..f }
-        } else {
-            f
+        // Narrowed to the drawing's precision, a hair under the period can round up to it.
+        let period = period as f32;
+        let offset = self.offset as f32;
+        Frame {
+            offset: if offset < period { offset } else { 0.0 },
+            period: Some(period),
+            // Held, the pointer leaving wakes the window anyway.
+            wake: (!hovered).then_some(STEP_S),
         }
     }
 }
@@ -119,6 +102,7 @@ mod tests {
                 f,
                 Frame {
                     offset: 0.0,
+                    period: None,
                     wake: None
                 }
             );
@@ -126,39 +110,35 @@ mod tests {
     }
 
     #[test]
-    fn the_start_pause_holds_still_and_wakes_once_when_it_ends() {
+    fn it_scrolls_at_a_steady_pace_and_asks_for_slow_frames() {
         let mut m = Marquee::default();
         let f = run(&mut m, 10.0, 500.0, 300.0);
         assert_eq!(f.offset, 0.0);
-        assert!((f.wake.expect("a wake") - PAUSE_S).abs() < 1e-9);
-        let f = run(&mut m, 11.5, 500.0, 300.0);
-        assert_eq!(f.offset, 0.0);
-        assert!((f.wake.expect("a wake") - 0.5).abs() < 1e-9);
-        let f = run(&mut m, 12.5, 500.0, 300.0);
-        assert!((f.offset - 0.5 * SPEED_PX_S as f32).abs() < 1e-3, "{f:?}");
-        assert_eq!(f.wake, Some(MOVING_FRAME_S));
+        assert_eq!(f.period, Some(500.0 + GAP_PX));
+        assert_eq!(f.wake, Some(STEP_S));
+        let f = run(&mut m, 12.0, 500.0, 300.0);
+        assert!((f.offset - 2.0 * SPEED_PX_S as f32).abs() < 1e-3, "{f:?}");
+        assert_eq!(f.wake, Some(STEP_S));
+        // No more than 15 frames a second of its own.
+        const { assert!(STEP_S >= 1.0 / 15.0) };
     }
 
     #[test]
-    fn the_offset_reaches_the_end_holds_there_and_returns() {
-        let overflow = 70.0;
-        let out = f64::from(overflow) / SPEED_PX_S;
-        let back = f64::from(overflow) / RETURN_SPEED_PX_S;
-        let end = offset_at(overflow, PAUSE_S + out + 0.1);
-        assert_eq!(end.offset, overflow);
-        assert!((end.wake.expect("a wake") - (PAUSE_S - 0.1)).abs() < 1e-9);
-        let mid_back = offset_at(overflow, PAUSE_S + out + PAUSE_S + back / 2.0);
+    fn it_wraps_around_after_its_width_and_the_gap() {
+        let mut m = Marquee::default();
+        let period = f64::from(500.0 + GAP_PX);
+        run(&mut m, 0.0, 500.0, 300.0);
+        let almost = run(&mut m, (period - 3.0) / SPEED_PX_S, 500.0, 300.0);
         assert!(
-            (mid_back.offset - overflow / 2.0).abs() < 1e-3,
-            "{mid_back:?}"
+            (almost.offset - (period as f32 - 3.0)).abs() < 1e-2,
+            "{almost:?}"
         );
-        // Then the cycle starts again from its start pause.
-        let again = offset_at(overflow, 2.0 * PAUSE_S + out + back + 0.5);
-        assert_eq!(again.offset, 0.0);
-        // Never past either end.
+        let round = run(&mut m, (period + 6.0) / SPEED_PX_S, 500.0, 300.0);
+        assert!((round.offset - 6.0).abs() < 1e-2, "{round:?}");
+        // Never past the period, however long between two frames.
         for k in 0..2000 {
-            let o = offset_at(overflow, f64::from(k) * 0.01).offset;
-            assert!((0.0..=overflow).contains(&o), "{o}");
+            let o = run(&mut m, 40.0 + f64::from(k) * 0.37, 500.0, 300.0).offset;
+            assert!((0.0..period as f32).contains(&o), "{o}");
         }
     }
 
@@ -184,17 +164,15 @@ mod tests {
     }
 
     #[test]
-    fn one_pixel_too_wide_scrolls_that_pixel() {
+    fn a_text_changing_width_under_way_stays_where_it_is() {
         let mut m = Marquee::default();
-        let f = run(&mut m, 0.0, 301.0, 300.0);
-        assert_eq!(f.offset, 0.0);
-        assert!(f.wake.is_some());
-        let end = run(&mut m, PAUSE_S + 1.0 / SPEED_PX_S + 0.01, 301.0, 300.0);
-        assert_eq!(end.offset, 1.0);
+        run(&mut m, 0.0, 600.0, 300.0);
+        let a = run(&mut m, 4.0, 600.0, 300.0);
+        let b = run(&mut m, 4.0, 640.0, 300.0);
+        assert_eq!(a.offset, b.offset);
         // And fitting again resets it to the start.
-        assert_eq!(run(&mut m, 4.0, 300.0, 300.0).offset, 0.0);
+        assert_eq!(run(&mut m, 5.0, 300.0, 300.0).offset, 0.0);
         let f = run(&mut m, 30.0, 301.0, 300.0);
         assert_eq!(f.offset, 0.0);
-        assert!((f.wake.expect("a wake") - PAUSE_S).abs() < 1e-9);
     }
 }

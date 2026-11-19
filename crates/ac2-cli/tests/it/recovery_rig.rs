@@ -142,7 +142,7 @@ async fn session_panel_opens_the_drivers_panel_and_status_says_what_it_changed()
     );
     assert!(
         text.contains(
-            "NOTE   the driver changed the rate to 44.1 kHz (was 48.0 kHz) and the buffer to \
+            "NOTE   the driver changed the rate to 44.1 kHz (was 48 kHz) and the buffer to \
              512 frames (was 256); measurements restarted at the new settings"
         ),
         "{text}"

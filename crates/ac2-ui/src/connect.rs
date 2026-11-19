@@ -86,9 +86,11 @@ impl Entry {
                     .into()
             }
             Entry::Rig { rig, status } => {
+                // By host name, as the rig reads everywhere once connected; the address
+                // it resolves to is the app's business.
                 let mut s = format!(
                     "{}:{}  ·  ac2d {}  ·  key {}",
-                    rig.connect_host(),
+                    ac2_scene::top_bar::host_name(&rig.connect_host(), Some(&rig.host)),
                     rig.port,
                     rig.advert.version,
                     rig.advert.fingerprint
@@ -148,6 +150,7 @@ pub fn reach(key_dir: &KeyDir, client_name: &str, addr: &RigAddr) -> Result<Choi
             host,
             port,
             fingerprint,
+            mdns_host: _,
         } => {
             let remote = RemoteAddr {
                 host: host.clone(),
@@ -265,6 +268,7 @@ impl ConnectDialog {
                 host: addr.host,
                 port: addr.port,
                 fingerprint: None,
+                mdns_host: None,
             },
         )
     }
@@ -283,6 +287,19 @@ impl ConnectDialog {
             }
         }
         changed
+    }
+
+    /// Where each advertised rig says it is.
+    pub fn adverts(&self) -> Vec<crate::state::AdvertSeen> {
+        self.table
+            .rigs()
+            .into_iter()
+            .map(|r| crate::state::AdvertSeen {
+                host: r.host.clone(),
+                fingerprint: r.advert.fingerprint.clone(),
+                addresses: r.addresses.iter().map(ToString::to_string).collect(),
+            })
+            .collect()
     }
 
     pub fn entries(&self) -> Vec<Entry> {
@@ -336,6 +353,7 @@ impl ConnectDialog {
                     host: addr.host.clone(),
                     port: addr.port,
                     fingerprint: Some(rig.advert.fingerprint.clone()),
+                    mdns_host: Some(rig.host.clone()),
                 };
                 Ok(Choice::Target(
                     Box::new(Target {

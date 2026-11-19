@@ -46,7 +46,8 @@ fn rig(name: &str, key: &PublicKey, addr: &str, port: u16) -> Rig {
     let addrs: Vec<IpAddr> = addr.parse().into_iter().collect();
     Rig::from_parts(
         &format!("{name}._ac2._tcp.local."),
-        "rig.local.",
+        // Each rig its own host, as on a real network: the list shows it by that name.
+        &format!("{}.local.", name.to_lowercase().replace(' ', "-")),
         port,
         addrs,
         txt,

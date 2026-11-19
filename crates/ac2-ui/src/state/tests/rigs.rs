@@ -586,6 +586,7 @@ fn a_connected_rig_is_remembered() {
         host: "pupu.local".into(),
         port: 47820,
         fingerprint: Some("ab12".into()),
+        mdns_host: None,
     };
     let slot = t.st.add_rig("pupu".into(), None, Some(addr.clone()));
     to(

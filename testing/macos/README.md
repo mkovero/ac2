@@ -121,8 +121,8 @@ errors.
    the session too (**Space** on its row). Optional: **D** (*Detect loopback…*) at −40 dBFS
    should mark input 1 as the Reference by itself.
 5. **Enter** opens the session. Accept the offered transfer measurement with **Enter**.
-6. Check the top bar: device, rate and buffer are shown (`<device> · 48.0 kHz · 1024
-   frames`); hovering over it shows the stated latency. The **Inputs** list on the left
+6. Check the top bar: rate and buffer are shown (`local (STIM OFF) · 48 kHz · 1024
+   frames · …`); hovering over them shows the device and the stated latency. The **Inputs** list on the left
    keeps a meter per input.
 
 Also worth a try: close the session (**⌘K → Close audio I/O**), reopen it at
@@ -263,7 +263,7 @@ latency of its own, cannot be unplugged, has no clock to change and has one stre
    (Test 2). In Settings › Audio I/O, on the device rows, **P** brings up **Audio MIDI
    Setup**. There, change the interface's format to another rate (e.g. 44.1 kHz). Pass:
    within a few seconds ac2 reopens by itself at the new rate, and the top bar says so in
-   the warning colour (`… · 44.1 kHz · … frames · driver changed from 48.0 kHz`; the hover
+   the warning colour (`… · 44.1 kHz · … frames · driver changed from 48 kHz`; the hover
    has the details). Change it back afterwards.
 3. **Unplug and replug.** With a session open, unplug the interface, wait 10 s, plug it
    back. Pass: the top bar says the audio stopped and that ac2 is reopening, then the

@@ -66,34 +66,35 @@ fn top_bar_health_meter() {
         .collect();
     assert!(
         bar.iter()
-            .any(|t| t == "· CPU remote 23 % · DSP 14 % · 0 xruns · 14 Mbit/s · 30 fps"),
+            .any(|t| t == "CPU remote 23 % · DSP 14 % · 0 xruns · 14 Mbit/s · 30 fps"),
         "{bar:?}"
     );
     snapshot(&mut h, "top_bar_health");
 }
 
-/// A narrow window: the session line and the health meter take the room between the bar's
-/// two groups and scroll through it, clipped at its edges, never over the stimulus items.
-/// A long daemon host name stays out of the bar (it is in the tooltip). Pictured in the
-/// start pause and part way along.
+/// The bar's line between its fixed ends. In a wide window it fits and stands still. In a
+/// narrow one it scrolls leftwards with time, clipped at its room's edges and never over
+/// the rig drop-down or the items at the right; it holds while the pointer rests on it;
+/// the rig drop-down stays where it is and opens on a click. Pictured at its start and
+/// part way along.
 #[test]
-fn top_bar_marquee_scrolls_when_narrow() {
+fn top_bar_line_scrolls_when_narrow() {
     use std::sync::atomic::Ordering;
 
     use ac2_proto::frame::{AudioHealth, DaemonHealth};
-    use ac2_ui::marquee::{Marquee, PAUSE_S};
+    use ac2_ui::marquee::{GAP_PX, Marquee, SPEED_PX_S};
     use egui::accesskit::Role;
     use egui_kittest::kittest::{By, NodeT};
-    if !have_gpu("top_bar_marquee_scrolls_when_narrow") {
+    if !have_gpu("top_bar_line_scrolls_when_narrow") {
         return;
     }
-    const HOST: &str = "pupu-stage-left-amp-rack-02.venue.example";
-    const WIDTH: f32 = 700.0;
+    const WIDE: f32 = 2400.0;
+    const NARROW: f32 = 700.0;
     let rig = Rig::start();
     let mut h = harness(options());
     step_until(&mut h, "live frames", live);
     rig.set_health(DaemonHealth {
-        host: HOST.into(),
+        host: "pupu".into(),
         cpu: Some(0.23),
         audio: Some(AudioHealth {
             load: Some(0.14),
@@ -109,7 +110,7 @@ fn top_bar_marquee_scrolls_when_narrow() {
             .mirror
             .as_ref()
             .and_then(|m| m.health.as_ref())
-            .is_some_and(|h| h.host == HOST)
+            .is_some_and(|h| h.cpu.is_some())
     });
     {
         let app = h.state_mut();
@@ -124,7 +125,6 @@ fn top_bar_marquee_scrolls_when_narrow() {
                 .frame(t0 + Duration::from_secs(1) * k as u32 / 30, false);
         }
     }
-    h.set_size(egui::vec2(WIDTH, 800.0));
     let bar = |h: &Harness<'_, App>| -> Vec<(String, egui::Rect)> {
         h.query_all(By::new().predicate(|n| n.role() == Role::Label))
             .map(|n| {
@@ -137,72 +137,96 @@ fn top_bar_marquee_scrolls_when_narrow() {
             .filter(|(_, r)| r.max.y <= 34.0)
             .collect()
     };
-    let session = |l: &[(String, egui::Rect)]| {
-        l.iter()
-            .find(|(t, _)| t.contains("frames"))
-            .map(|(_, r)| *r)
+    let find = |l: &[(String, egui::Rect)], what: &str| {
+        l.iter().find(|(t, _)| t.contains(what)).map(|(_, r)| *r)
     };
-    let health = |l: &[(String, egui::Rect)]| {
-        l.iter()
-            .find(|(t, _)| t.contains("CPU remote"))
-            .map(|(_, r)| *r)
-    };
+    let rig_name = h.state().state.rig_name(h.state().state.active());
+
+    // Wide: the whole line stands in its room, and stays.
+    h.set_size(egui::vec2(WIDE, 800.0));
+    for _ in 0..4 {
+        h.step();
+    }
+    let wide = bar(&h);
+    assert_eq!(h.state().marquee.offset(), 0.0, "{wide:?}");
+    let place = find(&wide, "local").unwrap_or_else(|| panic!("no place in {wide:?}"));
+    for _ in 0..4 {
+        h.step();
+    }
+    assert_eq!(h.state().marquee.offset(), 0.0);
+    assert_eq!(find(&bar(&h), "local"), Some(place));
+    assert!(find(&wide, "frames").is_some(), "{wide:?}");
+    assert!(find(&wide, "CPU remote 23 %").is_some(), "{wide:?}");
+
+    // Narrow: it moves with time.
+    h.set_size(egui::vec2(NARROW, 800.0));
+    h.step();
     let check = |labels: &[(String, egui::Rect)]| {
-        assert!(
-            labels.iter().all(|(t, _)| !t.contains(HOST)),
-            "host name in the bar: {labels:?}"
-        );
-        for (i, (a, ra)) in labels.iter().enumerate() {
+        let rig = find(labels, &rig_name).unwrap_or_else(|| panic!("no rig in {labels:?}"));
+        for (t, r) in labels {
             assert!(
-                ra.min.x >= 0.0 && ra.max.x <= WIDTH,
-                "{a:?} {ra:?} outside the window"
+                r.min.x >= 0.0 && r.max.x <= NARROW,
+                "{t:?} {r:?} outside the window"
             );
-            for (b, rb) in &labels[i + 1..] {
-                let o = ra.intersect(*rb);
-                assert!(
-                    o.width() <= 0.5 || o.height() <= 0.5,
-                    "{a:?} {ra:?} overlaps {b:?} {rb:?}"
-                );
-            }
+            // Nothing of the line under the drop-down at the left.
+            assert!(
+                *r == rig || r.min.x >= rig.max.x,
+                "{t:?} {r:?} over the rig drop-down {rig:?}"
+            );
         }
-        // The stimulus state keeps its place right of the segment.
-        let stim = labels
-            .iter()
-            .find(|(t, _)| t.contains("no level") || t.contains("dBFS"))
-            .unwrap_or_else(|| panic!("no stimulus level in {labels:?}"))
-            .1;
-        for r in [session(labels), health(labels)].into_iter().flatten() {
-            assert!(r.max.x < stim.min.x, "{r:?} reaches {stim:?}: {labels:?}");
-        }
+        rig
     };
+    let rig_at = check(&bar(&h));
+    let o0 = h.state().marquee.offset();
+    for _ in 0..3 {
+        h.step();
+    }
+    let o1 = h.state().marquee.offset();
+    assert!(o1 > o0 + 1.0, "{o0} → {o1}");
+    assert_eq!(check(&bar(&h)), rig_at, "the rig drop-down moved");
+
+    // The pointer on the line holds it; away, it goes on.
+    let on_line = egui::pos2(rig_at.max.x + 120.0, rig_at.center().y);
+    h.event(egui::Event::PointerMoved(on_line));
+    h.step();
+    h.step();
+    let held = h.state().marquee.offset();
+    for _ in 0..4 {
+        h.step();
+    }
+    assert_eq!(h.state().marquee.offset(), held);
+    h.event(egui::Event::PointerMoved(egui::pos2(300.0, 500.0)));
+    h.step();
+    h.step();
+    for _ in 0..3 {
+        h.step();
+    }
+    assert!(h.state().marquee.offset() != held);
 
     let pin_at = |t: f64| move |a: &mut App| a.marquee = Marquee::at(t);
-    snapshot_when(&mut h, "top_bar_marquee_start", pin_at(0.5), |_| true);
+    snapshot_when(&mut h, "top_bar_marquee_start", pin_at(0.0), |_| true);
     let start = bar(&h);
     check(&start);
-    let session_start = session(&start).unwrap_or_else(|| panic!("no session in {start:?}"));
-
-    snapshot_when(&mut h, "top_bar_marquee_mid", pin_at(PAUSE_S + 3.0), |_| {
-        true
-    });
+    let place_start = find(&start, "local").unwrap_or_else(|| panic!("no place in {start:?}"));
+    assert!((place_start.min.x - rig_at.max.x) < 60.0, "{place_start:?}");
+    snapshot_when(&mut h, "top_bar_marquee_mid", pin_at(8.0), |_| true);
     let mid = bar(&h);
     check(&mid);
-    // Scrolled left by about 100 px: the session line shows less of itself (or is gone),
-    // the health meter more, both inside the segment's room.
-    let session_mid = session(&mid);
+    // 240 px on: the line's start has left its room at the left.
+    assert!(8.0 * SPEED_PX_S > f64::from(place_start.width()));
     assert!(
-        session_mid.is_none_or(|r| r.width() < session_start.width() - 50.0),
-        "{session_start:?} → {session_mid:?}"
+        find(&mid, "local").is_none_or(|r| r.min.x > place_start.max.x + GAP_PX),
+        "{mid:?}"
     );
+
+    // The drop-down under the rig's name, wherever the line is.
+    h.get_by_label(&rig_name).click();
+    h.step();
+    h.step();
     assert!(
-        session_mid.is_none_or(|r| r.min.x >= session_start.min.x - 0.5),
-        "{session_mid:?} left of the segment"
-    );
-    let health_mid = health(&mid).unwrap_or_else(|| panic!("no health in {mid:?}"));
-    assert!(
-        health(&start).is_none_or(|r| health_mid.width() > r.width()),
-        "{:?} → {health_mid:?}",
-        health(&start)
+        matches!(h.state().state.overlay, ac2_ui::state::Overlay::RigMenu(_)),
+        "{:?}",
+        h.state().state.overlay
     );
 }
 

@@ -22,6 +22,8 @@ enum RigAddrFile {
         port: u16,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fingerprint: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mdns_host: Option<String>,
     },
     Endpoints {
         ctrl: String,
@@ -40,10 +42,12 @@ impl RigFile {
                     host,
                     port,
                     fingerprint,
+                    mdns_host,
                 } => RigAddrFile::Network {
                     host: host.clone(),
                     port: *port,
                     fingerprint: fingerprint.clone(),
+                    mdns_host: mdns_host.clone(),
                 },
                 RigAddr::Endpoints { ctrl, data } => RigAddrFile::Endpoints {
                     ctrl: ctrl.clone(),
@@ -65,10 +69,12 @@ impl RigFile {
                     host,
                     port,
                     fingerprint,
+                    mdns_host,
                 } => RigAddr::Network {
                     host,
                     port,
                     fingerprint,
+                    mdns_host,
                 },
                 RigAddrFile::Endpoints { ctrl, data } => RigAddr::Endpoints { ctrl, data },
             },

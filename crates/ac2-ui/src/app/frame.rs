@@ -168,10 +168,13 @@ impl eframe::App for App {
                 Box::new(crate::conn::ConnEvent::Reply { what, result }),
             ));
         }
-        if let Some(d) = self.connect.as_mut()
-            && let Some(choice) = d.show(&ctx, &theme::chrome(&t))
-        {
-            self.connect_to(&ctx, choice);
+        if let Some(d) = self.connect.as_mut() {
+            let choice = d.show(&ctx, &theme::chrome(&t));
+            // What the browse lists names the rigs held at a typed address.
+            self.state.adverts_seen(&d.adverts());
+            if let Some(choice) = choice {
+                self.connect_to(&ctx, choice);
+            }
         }
         if self.connect.as_ref().is_some_and(|d| d.closed) {
             self.connect = None;

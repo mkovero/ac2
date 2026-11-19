@@ -826,9 +826,10 @@ fn rigs_round_trip() {
                 id: RigId(0x9e9e),
                 name: "pupu".into(),
                 addr: RigAddr::Network {
-                    host: "pupu.local".into(),
+                    host: "192.168.9.27".into(),
                     port: 47820,
                     fingerprint: Some("1a2b-3c4d".into()),
+                    mdns_host: Some("pupu.local".into()),
                 },
             },
             RememberedRig {

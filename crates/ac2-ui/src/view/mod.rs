@@ -18,6 +18,7 @@ mod segment;
 mod session;
 mod sessions;
 mod settings;
+mod top_bar;
 mod walk;
 
 use ac2_scene::theme::Theme;

@@ -1,6 +1,7 @@
 use super::*;
 use ac2_proto::model::{
-    CantTellReason, DelaySlip, PeerClock, Relock, RemoteLink, RemoteRig, StopWhy,
+    CantTellReason, DelaySlip, PeerClock, Relock, RemoteAudio, RemoteInput, RemoteLink, RemoteRig,
+    StopWhy,
 };
 use ac2_proto::units::{MeasId, RigId, Seconds};
 
@@ -254,7 +255,7 @@ fn a_held_result_stays_faint_while_the_clocks_are_measured_again() {
 
 /// For a moment after a trip the transfer function still averages (the gate acts on audio
 /// past the link offset) while the relation already says not locked: the title must not
-/// claim agreement the chip denies.
+/// claim agreement the rig's heading denies.
 #[test]
 fn running_without_agreement_does_not_say_the_clocks_agree() {
     let r = remote(PeerRelation::NotLocked {
@@ -332,25 +333,21 @@ fn input(slot: u16, audio: RemoteAudio) -> (RemoteInput, ac2_proto::model::Remot
     )
 }
 
+/// What the top bar's chip per remote rig said, a rig's heading in the list says: the
+/// pairing as the list words it, a warning in capitals and first.
 #[test]
-fn the_rig_chip_says_the_relation_and_warns_in_words() {
-    let chip = |r: &RemoteState, inputs: &[RemoteInput]| {
-        let c = rig_chip(r, &r.rigs[0], inputs);
-        (c.text, c.warn)
+fn a_rigs_heading_says_the_relation_and_warns_in_words() {
+    let says = |r: &RemoteState, inputs: &[RemoteInput]| {
+        crate::rig_tree::pairing_text(r, inputs, KETUNKOLO)
     };
     let (i, st) = input(0, RemoteAudio::Streaming);
     let mut r = remote(PeerRelation::Agree);
     r.inputs = vec![st];
     let inputs = vec![i];
-    assert_eq!(
-        chip(&r, &inputs),
-        ("ketunkolo · clocks agree".to_string(), false)
-    );
+    assert_eq!(says(&r, &inputs), "paired · streaming · clocks agree");
+    assert_eq!(clock_words(&r, &r.rigs[0]), ("clocks agree".into(), false));
     r.rigs[0].clock.relation = PeerRelation::Measuring;
-    assert_eq!(
-        chip(&r, &inputs),
-        ("ketunkolo · measuring clocks…".to_string(), false)
-    );
+    assert_eq!(says(&r, &inputs), "paired · streaming · measuring clocks…");
     r.rigs[0].clock.relation = PeerRelation::NotLocked {
         reason: NotLockedReason::CrossRate {
             ppm: 5.6,
@@ -358,48 +355,37 @@ fn the_rig_chip_says_the_relation_and_warns_in_words() {
         },
     };
     assert_eq!(
-        chip(&r, &inputs),
-        ("ketunkolo · CLOCKS NOT LOCKED +5.6 ppm".to_string(), true)
+        says(&r, &inputs),
+        "CLOCKS NOT LOCKED +5.6 ppm · paired · streaming"
     );
+    assert!(clock_words(&r, &r.rigs[0]).1);
     r.rigs[0].clock.relation = PeerRelation::CantTell {
         reason: CantTellReason::SystemClockUnsynced { rig: KETUNKOLO },
     };
-    assert_eq!(
-        chip(&r, &inputs),
-        ("ketunkolo · CLOCKS: CAN'T TELL".to_string(), true)
-    );
+    assert_eq!(says(&r, &inputs), "CLOCKS: CAN'T TELL · paired · streaming");
     // Agreeing clocks under a transfer function whose audio keeps arriving late.
     r.rigs[0].clock.relation = PeerRelation::Agree;
     let mut x = tf(RemoteSide::Measurement, CrossTfState::Running);
     x.late = true;
     r.transfers = vec![x];
     assert_eq!(
-        chip(&r, &inputs),
-        ("ketunkolo · LINK OFFSET TOO SMALL".to_string(), true)
+        says(&r, &inputs),
+        "LINK OFFSET TOO SMALL · paired · streaming"
     );
-    // No audio outranks all: the link down, or no input carrying audio.
+    // No audio outranks all, and says why: the link down, or no input carrying audio.
     r.rigs[0].link = RemoteLink::Unreachable {
         since: ac2_proto::units::WallNs(0),
     };
-    assert_eq!(
-        chip(&r, &inputs),
-        ("ketunkolo · NO AUDIO".to_string(), true)
-    );
+    assert_eq!(says(&r, &inputs), "unreachable");
     r.rigs[0].link = RemoteLink::Up;
     r.inputs[0].audio = RemoteAudio::NoSession;
-    assert_eq!(
-        chip(&r, &inputs),
-        ("ketunkolo · NO AUDIO".to_string(), true)
-    );
-    // No audio because the rates differ: said, in the between-rigs line's words.
+    assert_eq!(says(&r, &inputs), "no audio from ketunkolo (no session)");
+    // No audio because the rates differ: both rates.
     r.inputs[0].audio = RemoteAudio::RateMismatch {
         theirs: 48_000,
         ours: 96_000,
     };
-    assert_eq!(
-        chip(&r, &inputs),
-        ("ketunkolo · RUNS 48 kHz, THIS RIG 96 kHz".to_string(), true)
-    );
+    assert_eq!(says(&r, &inputs), "ketunkolo runs 48 kHz, this rig 96 kHz");
 }
 
 #[test]

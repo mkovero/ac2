@@ -109,6 +109,7 @@ fn target(a: &Args) -> Option<Result<(Target, RigAddr), String>> {
                         host: r.host.clone(),
                         port: r.port,
                         fingerprint: Some(curve.server_key.fingerprint()),
+                        mdns_host: None,
                     };
                     config.curve = Some(curve);
                     let t = Target {

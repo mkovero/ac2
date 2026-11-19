@@ -31,11 +31,11 @@ pub enum RigAudio {
 }
 
 impl RigAudio {
-    /// `96 kHz`, `44.1 kHz`: the rate as the lines between rigs say it, since a pairing
-    /// refused for the rate reads beside it on the same heading.
+    /// `96 kHz`, `44.1 kHz`: the rate as the top bar and the lines between rigs say it,
+    /// since a pairing refused for the rate reads beside it on the same heading.
     pub fn text(self) -> String {
         match self {
-            RigAudio::Rate(hz) => format!("{} kHz", between_rigs::khz(hz)),
+            RigAudio::Rate(hz) => crate::audio::rate_text(hz),
             RigAudio::NoSession => NO_SESSION.to_owned(),
             RigAudio::NoAudio => NO_AUDIO.to_owned(),
         }
@@ -79,8 +79,10 @@ pub struct ClockTag<'a> {
 /// The pairing with `rig` as the rig shown's daemon reports it (`r`, with its session's
 /// remote inputs `inputs`), in the words the lines between rigs use: a link that is not up,
 /// else the first of that rig's inputs whose audio does not stream (*cm4 runs 48 kHz, this
-/// rig 96 kHz*). A daemon says nothing of a paired rig its session takes no input from:
-/// that one reads *paired*, no more.
+/// rig 96 kHz*), else that its audio streams and how the clocks between the two stand
+/// (*paired · streaming · clocks agree*, *CLOCKS NOT LOCKED +5.6 ppm · paired · streaming*).
+/// A daemon says nothing of a paired rig its session takes no input from: that one reads
+/// *paired*, no more.
 pub fn pairing_text(r: &RemoteState, inputs: &[RemoteInput], rig: RigId) -> String {
     let Some(remote) = r.rigs.iter().find(|x| x.rig == rig) else {
         return PAIRED.to_owned();
@@ -94,7 +96,12 @@ pub fn pairing_text(r: &RemoteState, inputs: &[RemoteInput], rig: RigId) -> Stri
     });
     match audio.clone().find(|(a, _)| *a != RemoteAudio::Streaming) {
         Some((a, channel)) => between_rigs::audio_text(a, &remote.name, channel),
-        None if audio.next().is_some() => format!("{PAIRED} · streaming"),
+        // Audio streams: the clocks between the two rigs are what is left to say. A
+        // warning leads, so the narrowest list still shows it.
+        None if audio.next().is_some() => match crate::cross_rig::clock_words(r, remote) {
+            (words, true) => format!("{words} · {PAIRED} · streaming"),
+            (words, false) => format!("{PAIRED} · streaming · {words}"),
+        },
         None => PAIRED.to_owned(),
     }
 }
@@ -404,7 +411,7 @@ mod tests {
         };
         assert_eq!(
             text(RemoteLink::Up, Some(RemoteAudio::Streaming)),
-            "paired · streaming"
+            "paired · streaming · measuring clocks…"
         );
         assert_eq!(
             text(

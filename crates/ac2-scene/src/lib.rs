@@ -86,6 +86,7 @@ pub mod tf;
 pub mod theme;
 pub mod time;
 pub mod toast;
+pub mod top_bar;
 pub mod trace;
 pub mod trace_list;
 pub mod unit_text;

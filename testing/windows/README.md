@@ -146,7 +146,7 @@ driver you used.
   `ac2 session panel` does the same from the command line (on the PC running ac2d). A rate
   or buffer change there resets the driver: the session reopens by itself **at the
   driver's new settings**, its measurements restart, and the top bar shows the new rate in
-  the warning colour (`… · 44.1 kHz · 512 frames · driver changed from 48.0 kHz`; hover for
+  the warning colour (`… · 44.1 kHz · 512 frames · driver changed from 48 kHz`; hover for
   details) until you open the session again. `ac2 session status` shows it as a `NOTE`.
 - **Clock source.** Settings lists the driver's clock sources under the device (`Clock
   source: Internal (in use) · Word Clock …`), `ac2 devices` after the table, and `ac2
@@ -183,7 +183,7 @@ errors.
    the session too (**Space** on its row); optional: **D** (*Detect loopback…*) at −40 dBFS
    plays on the driver's outputs and should mark input 1 as the Reference by itself.
 5. **Enter** opens the session. Accept the offered transfer measurement with **Enter**.
-6. Check the top bar: device, rate and buffer are shown. The **Inputs** list on the left
+6. Check the top bar: rate and buffer are shown (the device is in their hover). The **Inputs** list on the left
    keeps a meter per input.
 
 **Stimulus for the tests below.** ac2 plays its own pink noise on the driver's outputs (as
@@ -369,7 +369,7 @@ useful.
 | --- | --- |
 | PC model, CPU, GPU, VM or not; Windows version and build (`winver`) | |
 | Interface model; ASIO driver (maker's or FlexASIO) and version; with FlexASIO, its `FlexASIO.toml` | |
-| `ac2 --version` output (and the top bar's *build …*) | |
+| `ac2 --version` output (and the daemon's version in the hover of the top bar's *local*) | |
 | Test 1: device list entries for the interface; input meters move; output rows listed; clock note; session opens (rate / buffer shown) | |
 | Detect loopback found input 1? | |
 | Test 2: cables read 0 dB / 0° / coherence 1; delay finder result (ms, confidence); banners | |

@@ -515,16 +515,10 @@ impl App {
     /// The connect dialog's choice: a rig added (or, with no rig linked yet, the first
     /// one), shown at once. Nothing while the dialog is closed.
     pub fn connect_to(&mut self, ctx: &egui::Context, choice: Choice) {
-        if self.connect.is_none() {
+        if self.connect.is_none() || self.show_held(&choice) {
             return;
         }
         let fake = matches!(choice, Choice::Simulated);
-        // A rig already listed, even one retrying, is shown, never added again.
-        if let Some(id) = choice.place().and_then(|a| self.state.rig_at(&a)) {
-            self.connect = None;
-            self.dispatch(Msg::RigPick(crate::state::RigRow::Rig(id)));
-            return;
-        }
         let first = self.state.rigs().all(|r| r.link.is_none());
         let slot = if first {
             self.state.rig.slot

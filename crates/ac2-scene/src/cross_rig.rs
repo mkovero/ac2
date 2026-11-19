@@ -5,9 +5,8 @@
 //! appears its clock relation is said next to it, in words.
 
 use ac2_proto::model::{
-    CantTellReason, CrossRigTransfer, CrossTfState, Measurement, NotLockedReason, PeerRelation,
-    RelockOutcome, RemoteAudio, RemoteInput, RemoteLink, RemoteRig, RemoteSide, RemoteState,
-    StopWhy,
+    CrossRigTransfer, CrossTfState, Measurement, NotLockedReason, PeerRelation, RelockOutcome,
+    RemoteRig, RemoteSide, RemoteState, StopWhy,
 };
 
 use crate::between_rigs::{cant_tell_why, name_of};
@@ -250,41 +249,12 @@ pub fn status_cli(r: &RemoteState, measurements: &[Measurement], ours: &str) -> 
     out
 }
 
-/// A remote rig's chip in the top bar, beside the rig drop-down: *ketunkolo · clocks
-/// agree*, *ketunkolo · measuring clocks…*, or as a warning *ketunkolo · CLOCKS NOT LOCKED
-/// +5.6 ppm*. The warning is said in capitals as well as coloured: never only a colour.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RigChip {
-    pub text: String,
-    pub warn: bool,
-}
-
-/// The chip's tooltip: where a click leads.
-pub const CHIP_TIP: &str = "the clocks and the link between the rigs: Settings › Connection › \
-                            Between rigs";
-
-/// The chip of remote rig `rig`; `inputs`: the session's remote inputs. No audio comes
-/// first (no relation can be measured without it), named when it is the rates that differ
-/// (no setting on either rig's clocks helps then), then the relation, then a link offset
-/// too small for a transfer function on it.
-pub fn rig_chip(r: &RemoteState, rig: &RemoteRig, inputs: &[RemoteInput]) -> RigChip {
-    let chip = |what: String, warn: bool| RigChip {
-        text: format!("{} · {what}", rig.name),
-        warn,
-    };
-    if let Some((theirs, ours)) = rate_mismatch(r, rig, inputs) {
-        return chip(
-            format!(
-                "RUNS {} kHz, THIS RIG {} kHz",
-                crate::between_rigs::khz(theirs),
-                crate::between_rigs::khz(ours)
-            ),
-            true,
-        );
-    }
-    if no_audio(r, rig, inputs) {
-        return chip("NO AUDIO".into(), true);
-    }
+/// The clocks between this rig and remote rig `rig`, for that rig's heading in the
+/// measurement list, and whether it is a warning: *clocks agree*, *measuring clocks…*, or
+/// as a warning *CLOCKS NOT LOCKED +5.6 ppm*, *CLOCKS: CAN'T TELL*, and a link offset too
+/// small for a transfer function on it. A warning is said in capitals: a heading has one
+/// colour.
+pub fn clock_words(r: &RemoteState, rig: &RemoteRig) -> (String, bool) {
     match rig.clock.relation {
         PeerRelation::NotLocked { reason } => {
             let ppm = match reason {
@@ -292,68 +262,23 @@ pub fn rig_chip(r: &RemoteState, rig: &RemoteRig, inputs: &[RemoteInput]) -> Rig
                     ppm
                 }
             };
-            chip(
+            (
                 format!("CLOCKS NOT LOCKED {} ppm", format::signed(ppm, 1)),
                 true,
             )
         }
-        PeerRelation::CantTell { .. } => chip("CLOCKS: CAN'T TELL".into(), true),
+        PeerRelation::CantTell { .. } => ("CLOCKS: CAN'T TELL".into(), true),
         _ if r.transfers.iter().any(|x| x.rig == rig.rig && x.late) => {
-            chip("LINK OFFSET TOO SMALL".into(), true)
+            ("LINK OFFSET TOO SMALL".into(), true)
         }
-        PeerRelation::Measuring => chip("measuring clocks…".into(), false),
-        PeerRelation::Agree => chip("clocks agree".into(), false),
+        PeerRelation::Measuring => ("measuring clocks…".into(), false),
+        PeerRelation::Agree => ("clocks agree".into(), false),
     }
-}
-
-/// No audio comes from `rig`: its link is down or refused, the relation says so, or none of
-/// its inputs carries audio this rig can use.
-/// Both rates when the link is up and every remote input from `rig` is refused for its
-/// rate.
-fn rate_mismatch(r: &RemoteState, rig: &RemoteRig, inputs: &[RemoteInput]) -> Option<(u32, u32)> {
-    if !matches!(rig.link, RemoteLink::Up) {
-        return None;
-    }
-    let mut rates = None;
-    for i in inputs.iter().filter(|i| i.rig == rig.rig) {
-        match r.inputs.iter().find(|s| s.slot == i.slot).map(|s| s.audio) {
-            Some(RemoteAudio::RateMismatch { theirs, ours }) => rates = Some((theirs, ours)),
-            _ => return None,
-        }
-    }
-    rates
-}
-
-fn no_audio(r: &RemoteState, rig: &RemoteRig, inputs: &[RemoteInput]) -> bool {
-    if !matches!(rig.link, RemoteLink::Up | RemoteLink::Connecting) {
-        return true;
-    }
-    if matches!(
-        rig.clock.relation,
-        PeerRelation::CantTell {
-            reason: CantTellReason::NoAudio
-        }
-    ) {
-        return true;
-    }
-    let audio: Vec<RemoteAudio> = inputs
-        .iter()
-        .filter(|i| i.rig == rig.rig)
-        .filter_map(|i| r.inputs.iter().find(|s| s.slot == i.slot))
-        .map(|s| s.audio)
-        .collect();
-    !audio.is_empty()
-        && audio.iter().all(|a| {
-            !matches!(
-                a,
-                RemoteAudio::Streaming | RemoteAudio::Starting | RemoteAudio::Waiting
-            )
-        })
 }
 
 /// The clock line a pane's title carries while the transfer function averages and the
 /// clocks agree: *clocks agree within 2 ppm · ketunkolo*. Otherwise the pane's banner and
-/// the top bar's chip say it, and the title says nothing it would contradict.
+/// the rig's heading in the list say it, and the title says nothing it would contradict.
 pub fn caption(x: &CrossRigTransfer, r: &RemoteState) -> Option<String> {
     let agree = r
         .rigs
