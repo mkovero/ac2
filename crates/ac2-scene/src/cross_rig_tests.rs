@@ -391,6 +391,15 @@ fn the_rig_chip_says_the_relation_and_warns_in_words() {
         chip(&r, &inputs),
         ("ketunkolo · NO AUDIO".to_string(), true)
     );
+    // No audio because the rates differ: said, in the between-rigs line's words.
+    r.inputs[0].audio = RemoteAudio::RateMismatch {
+        theirs: 48_000,
+        ours: 96_000,
+    };
+    assert_eq!(
+        chip(&r, &inputs),
+        ("ketunkolo · RUNS 48 kHz, THIS RIG 96 kHz".to_string(), true)
+    );
 }
 
 #[test]

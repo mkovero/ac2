@@ -264,13 +264,24 @@ pub const CHIP_TIP: &str = "the clocks and the link between the rigs: Settings â
                             Between rigs";
 
 /// The chip of remote rig `rig`; `inputs`: the session's remote inputs. No audio comes
-/// first (no relation can be measured without it), then the relation, then a link offset
+/// first (no relation can be measured without it), named when it is the rates that differ
+/// (no setting on either rig's clocks helps then), then the relation, then a link offset
 /// too small for a transfer function on it.
 pub fn rig_chip(r: &RemoteState, rig: &RemoteRig, inputs: &[RemoteInput]) -> RigChip {
     let chip = |what: String, warn: bool| RigChip {
         text: format!("{} Â· {what}", rig.name),
         warn,
     };
+    if let Some((theirs, ours)) = rate_mismatch(r, rig, inputs) {
+        return chip(
+            format!(
+                "RUNS {} kHz, THIS RIG {} kHz",
+                crate::between_rigs::khz(theirs),
+                crate::between_rigs::khz(ours)
+            ),
+            true,
+        );
+    }
     if no_audio(r, rig, inputs) {
         return chip("NO AUDIO".into(), true);
     }
@@ -297,6 +308,22 @@ pub fn rig_chip(r: &RemoteState, rig: &RemoteRig, inputs: &[RemoteInput]) -> Rig
 
 /// No audio comes from `rig`: its link is down or refused, the relation says so, or none of
 /// its inputs carries audio this rig can use.
+/// Both rates when the link is up and every remote input from `rig` is refused for its
+/// rate.
+fn rate_mismatch(r: &RemoteState, rig: &RemoteRig, inputs: &[RemoteInput]) -> Option<(u32, u32)> {
+    if !matches!(rig.link, RemoteLink::Up) {
+        return None;
+    }
+    let mut rates = None;
+    for i in inputs.iter().filter(|i| i.rig == rig.rig) {
+        match r.inputs.iter().find(|s| s.slot == i.slot).map(|s| s.audio) {
+            Some(RemoteAudio::RateMismatch { theirs, ours }) => rates = Some((theirs, ours)),
+            _ => return None,
+        }
+    }
+    rates
+}
+
 fn no_audio(r: &RemoteState, rig: &RemoteRig, inputs: &[RemoteInput]) -> bool {
     if !matches!(rig.link, RemoteLink::Up | RemoteLink::Connecting) {
         return true;

@@ -190,7 +190,8 @@ is never only a colour):
 - **Top bar:** a chip per remote rig beside the rig drop-down — *ketunkolo · clocks
   agree*, *ketunkolo · measuring clocks…*, or in the warning colour and capitals
   *ketunkolo · CLOCKS NOT LOCKED +5.6 ppm*, *CLOCKS: CAN'T TELL*, *LINK OFFSET TOO SMALL*,
-  *NO AUDIO*. A warning chip stays however narrow the bar. A click opens Settings ›
+  *NO AUDIO*, or *RUNS 48 kHz, THIS RIG 96 kHz* when the rates differ (a remote input
+  needs both rigs at one rate). A warning chip stays however narrow the bar. A click opens Settings ›
   Connection. While a cross-rig transfer function is
   stopped, the bar's status line carries why and what to do (*Main L stopped: pupu and
   ketunkolo are not on one clock (+5.6 ppm). Lock both interfaces to one reference.*).

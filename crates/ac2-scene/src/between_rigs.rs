@@ -137,7 +137,7 @@ pub fn audio_text(a: RemoteAudio, rig: &str, channel: u16) -> String {
 }
 
 /// A rate in kHz, without a decimal where it has none (48, 44.1).
-fn khz(hz: u32) -> String {
+pub(crate) fn khz(hz: u32) -> String {
     let k = f64::from(hz) / 1e3;
     format::fixed(k, if k.fract() == 0.0 { 0 } else { 1 })
 }
