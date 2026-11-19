@@ -178,6 +178,9 @@ fn a_curve_goes_under_the_measurement_the_operator_is_on() {
     // A spectrum selected owns no target: the transfer pane's measurement does (from the
     // palette: the focused pane now shows the spectrum, where Z is not bound).
     t.st.apply(Msg::SelectMeas(MeasId(2)), &t.keys);
+    t.key("N");
+    t.drop_meas(t.st.layout.focus, MeasId(1));
+    assert_eq!(t.st.rig.selected, Some(MeasId(2)));
     let r = t.st.apply(Msg::Command(CommandId::TargetFlat), &t.keys);
     assert_eq!(target_owned(&r).3, TraceOwner::Meas { meas: MeasId(1) });
     // No transfer measurement at all: Imported, as a file without one.

@@ -57,7 +57,8 @@ fn select(t: &mut T, id: u32) -> Vec<Request> {
 }
 
 /// Selecting a measurement with its own panes puts them on screen, the focus in the pane
-/// of its kind; selecting one without keeps them; neither sends anything.
+/// of its kind, and sends nothing; so does selecting one without that a pane shows. One
+/// without that no pane shows gets the pane a new one of its kind does, stored on it.
 #[test]
 fn selecting_a_measurement_brings_its_panes() {
     let mut t = T::new();
@@ -73,15 +74,29 @@ fn selecting_a_measurement_brings_its_panes() {
         t.st.pane_meas(t.st.layout.focus).map(|m| m.id),
         Some(MeasId(1))
     );
-    // Sub has none of its own: the screen keeps Main L's panes as they are, and that is no
-    // edit.
+    // Sub has none of its own and neither of Main L's panes shows it: a spectrum pane of
+    // its own, sent as its layout.
     let r = select(&mut t, 2);
-    assert!(layout_calls(&r).is_empty(), "{r:?}");
-    let kinds: Vec<_> = t.st.pane_layout().panes().iter().map(|p| p.kind).collect();
-    assert_eq!(kinds, [wire::PaneKind::Transfer, wire::PaneKind::Transfer]);
-    // Back to Main L: its own panes again.
-    select(&mut t, 1);
+    let sub = t.st.pane_layout();
+    assert_eq!(layout_calls(&r), [(MeasId(2), Some(sub.clone()))]);
+    let panes: Vec<_> = sub
+        .panes()
+        .iter()
+        .map(|p| (p.kind, p.content.clone()))
+        .collect();
+    assert_eq!(
+        panes,
+        [(
+            wire::PaneKind::Spectrum,
+            wire::PaneContent::group(MeasId(2))
+        )]
+    );
+    // Back to Main L: its own panes again; Sub's are kept for its row, and nothing more
+    // is sent.
+    assert!(layout_calls(&select(&mut t, 1)).is_empty());
     assert_eq!(t.st.pane_layout(), two_transfer(1));
+    assert!(layout_calls(&select(&mut t, 2)).is_empty());
+    assert_eq!(t.st.pane_layout(), sub);
 }
 
 /// An edit while a measurement is selected is sent once as its layout; the daemon's echo
@@ -711,25 +726,25 @@ fn a_click_on_a_guest_pane_then_an_edit_leaves_its_own_layout() {
     assert_eq!(layout_targets(&r), [MeasId(4)], "{r:?}");
 }
 
-/// `FOH SPL`'s row chosen and dropped on the focused pane (an SPL pane now), then that pane
-/// closed: no pane shows `FOH SPL` any more, so an edit is not its layout — nothing is
+/// `FOH SPL`'s row chosen (an SPL pane of its own, stored on it), then `TF 1` dropped on
+/// that pane: no pane shows `FOH SPL` any more, so an edit is not its layout — nothing is
 /// sent, and its own panes have ended.
 #[test]
 fn an_edit_with_no_pane_showing_the_measurement_is_not_its_layout() {
     let mut t = desk_on_tf1();
-    select(&mut t, 1);
-    let r = t.drop_meas(t.st.layout.focus, MeasId(1));
+    let r = select(&mut t, 1);
+    assert_eq!(layout_targets(&r), [MeasId(1)]);
     answer_layout_calls(&mut t, &r);
     assert_eq!(t.st.layout.focus_kind(), PaneKind::Spl);
-    let r = t.key("Q");
-    assert!(layout_calls(&r).is_empty(), "Q: {r:?}");
+    let r = t.drop_meas(t.st.layout.focus, MeasId(2));
+    assert!(layout_calls(&r).is_empty(), "the drop: {r:?}");
     assert!(
         !t.st
             .layout
             .panes()
             .iter()
             .any(|p| t.st.layout.kind(*p) == PaneKind::Spl),
-        "the SPL pane closed"
+        "the SPL pane shows TF 1"
     );
     for k in ["G", "N"] {
         let r = t.key(k);

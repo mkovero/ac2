@@ -1,4 +1,6 @@
 //! A measurement row chosen in the list brings its own panes at once: SPL meters split.
+//! One with no panes of its own that no pane shows gets the panes a new one of its kind
+//! starts on.
 
 use super::*;
 use ac2_proto::model::PaneLayout;
@@ -106,10 +108,9 @@ fn a_meter_row_brings_its_split_panes_out_of_one_pane_alone() {
         t.st.layout.maximized && t.st.stage_view(),
         "W: its pane alone"
     );
-    // A measurement without panes of its own keeps the screen as it is: its meter in the
-    // focused one of `SPL 2`'s panes, still alone.
+    // `FOH SPL`'s panes are one: W still holds.
     click(&mut t, 4);
-    assert!(t.st.layout.maximized, "FOH SPL has no own panes");
+    assert!(t.st.layout.maximized, "FOH SPL has one pane");
     // `SPL 2` back in that pane makes the screen its layout already: both panes drawn.
     click(&mut t, 5);
     both_shown(&t, "SPL 2 chosen again");
@@ -240,4 +241,189 @@ fn the_field_layout_comes_back_whole() {
         let area = PaneRect::new(0.0, 0.0, 1000.0, 600.0);
         assert_eq!(t.st.pane_rects(area, 0.0).len(), 3, "behind {behind}");
     }
+}
+
+/// The panes on screen in reading order: kind, transfer view and the measurement shown.
+fn screen(t: &T) -> Vec<(PaneKind, TransferView, Option<u32>)> {
+    t.st.visible_panes()
+        .into_iter()
+        .map(|p| {
+            let v = t.st.layout.view(p).expect("a pane");
+            (v.kind, v.modes.transfer, t.st.pane_meas(p).map(|m| m.id.0))
+        })
+        .collect()
+}
+
+/// The `meas.layout` calls in `r`.
+fn stored_on(r: &[Request]) -> Vec<(MeasId, Option<PaneLayout>)> {
+    r.iter()
+        .filter_map(|r| match r {
+            Request::Call {
+                cmd: Command::MeasLayout { meas, layout },
+                ..
+            } => Some((*meas, layout.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+fn choose(t: &mut T, id: u32) -> Vec<Request> {
+    t.st.apply(Msg::SelectMeas(MeasId(id)), &t.keys)
+}
+
+/// A desk with no layout stored on any measurement, as a rig's `rig.json` and a salvaged
+/// session leave it: the row of a transfer, an SPL meter, a spectrum and a sweep each puts
+/// the panes a new one of its kind starts on on screen, showing it, and sends them as its
+/// layout once.
+#[test]
+fn a_row_without_own_panes_brings_its_kinds_first_panes() {
+    use TransferView as V;
+    let mut t = T::fresh();
+    let mut s = with_spl();
+    let sweep = sweep_measurement();
+    let sweep_id = sweep.id.0;
+    s.measurements.push(sweep);
+    t.connect(s);
+    assert_eq!(
+        screen(&t),
+        [(PaneKind::Transfer, V::Magnitude, Some(1))],
+        "the app's one pane starts on the transfer"
+    );
+    let cases: [(u32, Vec<(PaneKind, V)>); 4] = [
+        (4, vec![(PaneKind::Spl, V::Magnitude)]),
+        (
+            1,
+            vec![
+                (PaneKind::Transfer, V::Magnitude),
+                (PaneKind::Transfer, V::Phase),
+                (PaneKind::Transfer, V::Coherence),
+            ],
+        ),
+        (2, vec![(PaneKind::Spectrum, V::Magnitude)]),
+        (sweep_id, vec![(PaneKind::Distortion, V::Magnitude)]),
+    ];
+    for (id, panes) in &cases {
+        let r = choose(&mut t, *id);
+        let want: Vec<_> = panes.iter().map(|(k, v)| (*k, *v, Some(*id))).collect();
+        assert_eq!(screen(&t), want, "measurement {id}");
+        assert_eq!(t.st.rig.selected, Some(MeasId(*id)));
+        assert_eq!(
+            stored_on(&r),
+            [(MeasId(*id), Some(t.st.pane_layout()))],
+            "measurement {id}: its first panes are its layout"
+        );
+    }
+    // Each row again: the same panes, from what was sent, and nothing sent twice.
+    for (id, panes) in &cases {
+        let r = choose(&mut t, *id);
+        let want: Vec<_> = panes.iter().map(|(k, v)| (*k, *v, Some(*id))).collect();
+        assert_eq!(screen(&t), want, "measurement {id} again");
+        assert!(stored_on(&r).is_empty(), "measurement {id} again: {r:?}");
+    }
+}
+
+/// The child rows only select: a live curve's, a math trace's and a stored trace's row
+/// change no pane and store nothing, whatever the screen shows.
+#[test]
+fn child_rows_bring_no_panes() {
+    let mut t = T::fresh();
+    let mut s = tree_state();
+    s.measurements.push(meas(4, "FOH SPL", spl_meter()));
+    t.connect(s);
+    choose(&mut t, 4);
+    let before = t.st.layout.views.clone();
+    for msg in [
+        Msg::SelectLive(MeasId(1)),
+        Msg::SelectMath(MeasId(6)),
+        Msg::SelectTrace(TraceId(3)),
+    ] {
+        let what = format!("{msg:?}");
+        let r = t.st.apply(msg, &t.keys);
+        assert_eq!(t.st.layout.views, before, "{what}");
+        assert!(stored_on(&r).is_empty(), "{what}: {r:?}");
+    }
+    // A math trace has no screen of its own to start on: chosen as a measurement's row
+    // is, it is selected and the panes stay.
+    let r = choose(&mut t, 6);
+    assert_eq!(t.st.rig.selected, Some(MeasId(6)));
+    assert_eq!(t.st.layout.views, before);
+    assert!(stored_on(&r).is_empty(), "{r:?}");
+}
+
+/// A row dragged onto a pane changes that pane alone, also for a measurement with no
+/// panes of its own.
+#[test]
+fn a_row_dropped_on_a_pane_changes_that_pane_alone() {
+    let mut t = T::new();
+    t.conn(mirror(with_spl()));
+    let before = screen(&t);
+    let p = t.pane(PaneKind::Spectrum);
+    t.drop_meas(p, MeasId(4));
+    let after = screen(&t);
+    assert_eq!(after.len(), before.len());
+    let changed: Vec<_> = before.iter().zip(&after).filter(|(a, b)| a != b).collect();
+    assert_eq!(
+        changed,
+        [(
+            &(PaneKind::Spectrum, TransferView::Magnitude, Some(2)),
+            &(PaneKind::Spl, TransferView::Magnitude, Some(4))
+        )]
+    );
+}
+
+/// Ctrl+Z after a row brought its first panes puts the panes before it back, as after a
+/// row that brought stored ones, and stores nothing; redo shows the first panes again.
+#[test]
+fn undo_takes_back_the_panes_a_row_brought() {
+    for stored in [false, true] {
+        let mut t = T::new();
+        let mut s = two_meters();
+        if !stored {
+            s.measurements.last_mut().expect("SPL 2").layout = None;
+        }
+        t.conn(mirror(s));
+        let before = screen(&t);
+        choose(&mut t, 5);
+        let brought = screen(&t);
+        assert_ne!(brought, before, "stored {stored}");
+        let r = t.key("Ctrl+Z");
+        assert_eq!(screen(&t), before, "stored {stored}: undone");
+        assert!(stored_on(&r).is_empty(), "stored {stored}: {r:?}");
+        assert!(t.last_toast().starts_with("Undid: "), "{}", t.last_toast());
+        let r = t.key("Ctrl+Shift+Z");
+        assert_eq!(screen(&t), brought, "stored {stored}: redone");
+        assert!(stored_on(&r).is_empty(), "stored {stored}: {r:?}");
+    }
+}
+
+/// This computer's rig shown, pupu in the background: a click on a row of pupu's part of
+/// the list shows pupu and brings that measurement's panes — the stored ones of `SPL 2`,
+/// and for `FOH SPL`, which has none, an SPL meter's first pane, sent to pupu's daemon.
+#[test]
+fn another_rigs_row_brings_its_panes() {
+    let on_pupu = |id: u32| Msg::OnRig(PUPU, Box::new(Msg::SelectMeas(MeasId(id))));
+    let mut t = pupu_behind();
+    let r = t.st.update(on_pupu(5), &t.keys);
+    assert_eq!(t.st.active(), PUPU);
+    both_shown(&t, "pupu's SPL 2 chosen from the other rig");
+    assert!(
+        r.iter()
+            .all(|(_, q)| stored_on(std::slice::from_ref(q)).is_empty())
+    );
+
+    let mut t = pupu_behind();
+    let r = t.st.update(on_pupu(4), &t.keys);
+    assert_eq!(t.st.active(), PUPU);
+    assert_eq!(
+        screen(&t),
+        [(PaneKind::Spl, TransferView::Magnitude, Some(4))]
+    );
+    let p = t.st.layout.focus;
+    assert_eq!(t.st.layout.view(p).map(|v| t.st.pane_rig(v)), Some(PUPU));
+    let sent: Vec<_> = r
+        .iter()
+        .filter(|(_, q)| !stored_on(std::slice::from_ref(q)).is_empty())
+        .map(|(rig, q)| (*rig, stored_on(std::slice::from_ref(q))[0].0))
+        .collect();
+    assert_eq!(sent, [(PUPU, MeasId(4))]);
 }

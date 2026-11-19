@@ -1,5 +1,6 @@
 //! A measurement's own panes (`meas.layout`): choosing a measurement's row in the list
-//! puts its panes on screen; one without keeps the panes there are. Nothing else moves the
+//! puts its panes on screen; one without keeps the panes there are when one of them shows
+//! it, else starts on the panes a new one of its kind does. Nothing else moves the
 //! panes as a whole: a child row (live curve, math trace, stored trace) only selects, a
 //! click in a pane only focuses it, and a row dropped on a pane changes that pane alone.
 //! Editing the panes (N, Q, a pane's kind or view, T, a split dragged, the transfer stack, a
@@ -165,8 +166,20 @@ impl AppState {
                 self.layout.maximized = false;
                 self.panes_only |= self.fullscreen;
             }
-            if let Some(l) = own.filter(|l| !self.on_screen(l)) {
-                self.show_layout(&l);
+            match own {
+                Some(l) if !self.on_screen(&l) => self.show_layout(&l),
+                Some(_) => {}
+                // A row always shows its measurement. One with no layout that no pane
+                // shows starts as one just made does, and those panes are stored on it
+                // as a new one's are, so every client's row brings the same.
+                None => {
+                    if let Some(id) = self.rig.selected
+                        && !self.panes_show(id)
+                        && self.show_first_screen(id)
+                    {
+                        self.store_layout(id, out);
+                    }
+                }
             }
             return;
         }
@@ -451,12 +464,46 @@ impl AppState {
                     .copied()
             })
             .unwrap_or(order[0]);
-        let (root, views) = self.beside_other_rigs(root, views);
-        self.layout.install(root, views, focus);
-        self.prune_levels();
+        self.install_own(root, views, focus);
         for (id, w) in levels {
             self.set_operator_levels(id, &w);
         }
+    }
+
+    /// The panes a measurement of `id`'s kind starts on when made, on screen for one that
+    /// has no layout of its own: one pane of its kind showing it, a transfer's laid out as
+    /// the transfer stack ([`Self::stack_created`]). The other rigs' panes stay, as with a
+    /// stored layout. `false`, and no pane changes, for a math trace: made, it is a curve
+    /// in its owner's panes, with no screen of its own to start on.
+    fn show_first_screen(&mut self, id: MeasId) -> bool {
+        let Some(kind) = self.meas(id).map(|m| m.config.kind.clone()) else {
+            return false;
+        };
+        if matches!(kind, MeasKind::Math { .. }) {
+            return false;
+        }
+        let transfer = matches!(kind, MeasKind::Transfer { .. });
+        // The stack is laid out in the room its pane has among all panes.
+        if transfer && self.layout.maximized {
+            self.layout.maximized = false;
+            self.panes_only |= self.fullscreen;
+        }
+        let pane = self.layout.fresh_id();
+        let v = self.first_view(id, PaneKind::for_kind(&kind), TransferView::default());
+        self.install_own(PaneNode::Leaf(pane), BTreeMap::from([(pane, v)]), pane);
+        self.focus_pane(pane);
+        if transfer {
+            self.stack_created(id);
+        }
+        true
+    }
+
+    /// This rig's panes replaced by `root` and its `views` ([`Self::beside_other_rigs`]),
+    /// with nothing left waiting for the panes that went.
+    fn install_own(&mut self, root: PaneNode, views: BTreeMap<PaneId, View>, focus: PaneId) {
+        let (root, views) = self.beside_other_rigs(root, views);
+        self.layout.install(root, views, focus);
+        self.prune_levels();
         self.pane_auto = false;
         self.rig.pending.pane_meas.clear();
         self.rig.pending.deleted.clear();

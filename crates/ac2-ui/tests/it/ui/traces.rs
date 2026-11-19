@@ -13,13 +13,14 @@ fn measurement_hidden_and_delete_confirm() {
     let _rig = Rig::start();
     let mut h = harness(options());
     step_until(&mut h, "live frames", live);
+    // On the transfer pane first: its row then only selects, the panes staying as they are.
+    drop_on_kind(&mut h, PaneKind::Transfer, MeasId(2));
     // Past the first measurement's live curve row to the next measurement.
     h.key_press(Key::Tab);
     h.key_press(Key::Tab);
     step_until(&mut h, "delay tower", |a| {
         a.state.rig.selected == Some(MeasId(2))
     });
-    drop_on_kind(&mut h, PaneKind::Transfer, MeasId(2));
     h.key_press(Key::A);
     step_until(&mut h, "delay tower hidden", |a| {
         a.state.rig.hidden_meas.contains(&MeasId(2))

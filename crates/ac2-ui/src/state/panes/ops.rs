@@ -472,15 +472,27 @@ impl AppState {
         view: TransferView,
     ) {
         let id = self.layout.fresh_id();
-        let mut v = View::of(kind);
-        v.meas = Some(meas);
-        v.rig = self.here();
-        v.modes.transfer = view;
+        let v = self.first_view(meas, kind, view);
         self.layout
             .install(PaneNode::Leaf(id), BTreeMap::from([(id, v)]), id);
         self.layout.maximized = false;
         self.rig.pending.pane_meas.clear();
         self.focus_pane(id);
+    }
+
+    /// The pane a measurement's screen of its own starts with: `kind`, showing `meas` of
+    /// the rig in `rig` in transfer view `view`, everything else as a pane starts.
+    pub(in crate::state) fn first_view(
+        &self,
+        meas: MeasId,
+        kind: PaneKind,
+        view: TransferView,
+    ) -> View {
+        let mut v = View::of(kind);
+        v.meas = Some(meas);
+        v.rig = self.here();
+        v.modes.transfer = view;
+        v
     }
 
     /// Q: the focused pane closed, its neighbour taking its place and the focus; the

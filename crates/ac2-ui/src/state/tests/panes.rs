@@ -100,28 +100,35 @@ fn q_closes_and_keeps_the_last_pane() {
     assert_eq!(t.st.layout.focus, first);
 }
 
-/// Two transfer panes and a spectrum measurement: Tab through the measurement rows and a
-/// row clicked only select; no pane changes kind or what it shows, and the focus stays.
+/// Two panes on the first measurement and three more measurements, none with panes of its
+/// own: Tab onto a measurement's row, or a click on it, puts that measurement on screen;
+/// the row of one a pane shows already changes no pane.
 #[test]
-fn tab_and_a_row_click_change_no_pane() {
+fn tab_and_a_row_click_show_the_row() {
     let mut t = empty();
     t.conn(mirror(four()));
     t.key("N");
-    let b = t.st.layout.focus;
-    let views = |t: &T| t.st.layout.views.clone();
-    let before = views(&t);
+    let shows = |t: &T, id: MeasId| {
+        t.st.visible_panes()
+            .into_iter()
+            .any(|p| t.st.pane_meas(p).is_some_and(|m| m.id == id))
+    };
     let mut seen = std::collections::BTreeSet::new();
     for _ in 0..t.st.tree_meas_order().len() {
         t.key("Tab");
-        seen.insert(t.st.rig.selected);
-        assert_eq!(views(&t), before, "Tab only selects");
-        assert_eq!(t.st.layout.focus, b);
+        let id = t.st.rig.selected.expect("Tab selects");
+        seen.insert(id);
+        assert!(shows(&t, id), "Tab onto {id:?} shows it");
     }
     assert!(seen.len() > 1, "Tab stepped: {seen:?}");
     t.st.apply(Msg::SelectMeas(MeasId(2)), &t.keys);
     assert_eq!(t.st.rig.selected, Some(MeasId(2)));
-    assert_eq!(views(&t), before, "a row click only selects");
-    assert_eq!(t.st.layout.focus, b);
+    assert!(shows(&t, MeasId(2)));
+    // On screen now: its row again changes nothing, and neither does the focus.
+    t.key("N");
+    let before = (t.st.layout.views.clone(), t.st.layout.focus);
+    t.st.apply(Msg::SelectMeas(MeasId(2)), &t.keys);
+    assert_eq!((t.st.layout.views.clone(), t.st.layout.focus), before);
 }
 
 /// G steps the focused transfer pane through magnitude → phase → coherence → IR linear →

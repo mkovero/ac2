@@ -337,9 +337,9 @@ impl AppState {
         }
     }
 
-    /// A measurement's row in the tree chosen (click, Enter, Tab): selected, and its own
-    /// panes on screen when it has them. Without, no pane changes: what a pane shows
-    /// changes by a row dropped on it, so a click never takes over a pane.
+    /// A measurement's row in the tree chosen (click, Enter, Tab): selected, and on screen
+    /// ([`Self::sync_meas_layout`]) — its own panes when it has them, else the panes it is
+    /// shown on already, else the ones a measurement of its kind starts on.
     pub(in crate::state) fn select_meas_row(&mut self, id: MeasId) {
         if self.meas(id).is_none() {
             return;

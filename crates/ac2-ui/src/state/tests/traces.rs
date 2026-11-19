@@ -30,16 +30,17 @@ fn panes_show_what_is_dropped_and_leave_the_selection() {
     t.drop_meas(sp, MeasId(2));
     assert_eq!(t.st.pane_meas(sp).map(|m| m.id.0), Some(2));
 
-    // A measurement row without its own panes selects and changes no pane.
+    // The row of a measurement without its own panes that a pane shows selects and
+    // changes no pane: it is on screen.
     let before = picks(&t);
     t.st.apply(Msg::FocusPane(t.pane(PaneKind::Transfer)), &t.keys);
-    t.st.apply(Msg::SelectMeas(MeasId(3)), &t.keys);
-    assert_eq!(t.st.rig.selected, Some(MeasId(3)));
+    t.st.apply(Msg::SelectMeas(MeasId(1)), &t.keys);
+    assert_eq!(t.st.rig.selected, Some(MeasId(1)));
     assert_eq!(picks(&t), before, "a row click changes no pane");
     // Focus by key selects nothing either.
     t.key("Alt+2");
     t.key("Alt+3");
-    assert_eq!(t.st.rig.selected, Some(MeasId(3)));
+    assert_eq!(t.st.rig.selected, Some(MeasId(1)));
     assert_eq!(picks(&t), before);
 
     // A measurement the pane cannot draw turns it into the kind that does, and back.

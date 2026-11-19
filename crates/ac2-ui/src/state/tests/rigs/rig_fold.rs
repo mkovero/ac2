@@ -74,7 +74,9 @@ fn tab_skips_a_folded_rig() {
     }
     t.st.apply(Msg::FoldRig(PUPU), &t.keys);
     t.st.apply(Msg::FoldRig(RIG), &t.keys);
-    t.key("Tab");
+    // What the step onto pupu's row asks (its measurement's panes stored) is pupu's.
+    let tab = Chord::parse("Tab").expect("Tab");
+    t.st.update(Msg::Key(tab), &t.keys);
     assert_eq!(
         t.st.active(),
         PUPU,
@@ -112,4 +114,83 @@ fn rows_of_a_rig_drag_from_the_tree() {
     let v = *t.st.layout.view(p).expect("pane");
     assert_eq!((v.rig, v.meas), (PaneRig::Rig(PUPU), Some(MeasId(2))));
     assert!(TreeKey::RigName(PUPU).is_heading());
+}
+
+/// A click on another rig's row switches to that rig first, then selects the row there; a
+/// window open refuses the switch and selects nothing. The row's measurement, with no panes
+/// of its own, gets the pane a new one of its kind does, beside the panes of the rig shown
+/// before, and that rig's daemon is sent it as the measurement's layout.
+#[test]
+fn a_click_on_another_rigs_row_switches_rig_first() {
+    let (mut t, _) = two_lists();
+    let click = Msg::OnRig(PUPU, Box::new(Msg::SelectMeas(MeasId(2))));
+    t.st.overlay = Overlay::Help;
+    t.st.update(click.clone(), &t.keys);
+    assert_eq!(t.st.active(), RIG, "refused with a window open");
+    t.st.overlay = Overlay::None;
+    let before = t.st.visible_panes();
+    let r = t.st.update(click.clone(), &t.keys);
+    assert_eq!(t.st.active(), PUPU);
+    assert_eq!(t.st.rig.selected, Some(MeasId(2)));
+    let after = t.st.visible_panes();
+    let added: Vec<PaneId> = after
+        .iter()
+        .copied()
+        .filter(|p| !before.contains(p))
+        .collect();
+    assert_eq!(after.len(), before.len() + 1, "one pane beside the others");
+    assert!(before.iter().all(|p| after.contains(p)), "none taken away");
+    let [new] = added[..] else {
+        panic!("one pane added: {added:?}")
+    };
+    assert_eq!(t.st.layout.focus, new);
+    assert_eq!(t.st.layout.kind(new), PaneKind::Spectrum);
+    assert_eq!(t.st.layout.view(new).map(|v| t.st.pane_rig(v)), Some(PUPU));
+    assert_eq!(
+        t.st.pane_meas(new).map(|m| m.config.name.clone()),
+        Some("Pupu sub".into())
+    );
+    let sent: Vec<(RigId, MeasId)> = r
+        .iter()
+        .filter_map(|(rig, q)| match q {
+            Request::Call {
+                cmd: Command::MeasLayout { meas, .. },
+                ..
+            } => Some((*rig, *meas)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sent, [(PUPU, MeasId(2))]);
+    // The row again: on screen, nothing more.
+    t.st.update(click, &t.keys);
+    assert_eq!(t.st.visible_panes(), after);
+}
+
+/// Tab past the last row of the shown rig's list goes on to the next rig's first row,
+/// switching to that rig; Shift+Tab back past the first row returns to the last row before.
+/// With a window open it wraps within the rig shown.
+#[test]
+fn tab_steps_on_into_the_next_rigs_list() {
+    let (mut t, _) = two_lists();
+    let rows = t.st.tree_rows().len();
+    // What the step onto pupu's row asks (its measurement's panes stored) is pupu's.
+    let tab = |t: &mut T, s: &str| {
+        let c = Chord::parse(s).expect(s);
+        t.st.update(Msg::Key(c), &t.keys);
+    };
+    for _ in 0..rows + 2 {
+        if t.st.active() == PUPU {
+            break;
+        }
+        tab(&mut t, "Tab");
+    }
+    assert_eq!(t.st.active(), PUPU, "Tab went on to pupu's list");
+    assert!(t.st.rig.selected.is_some() || t.st.live_row_selected());
+    tab(&mut t, "Shift+Tab");
+    assert_eq!(t.st.active(), RIG, "Shift+Tab came back");
+    t.st.overlay = Overlay::Help;
+    for _ in 0..rows + 2 {
+        t.st.apply(Msg::Command(crate::keys::CommandId::NextInTree), &t.keys);
+    }
+    assert_eq!(t.st.active(), RIG, "a window open: within the rig shown");
 }

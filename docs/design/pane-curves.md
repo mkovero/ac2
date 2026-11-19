@@ -5,7 +5,8 @@ Status: stages 1 and 2 built (the chip and the pane list are gone; `PaneContent`
 … lets not do billions of different ways changing the pane view"; the chip was on some
 panes only, which made navigation "incredibly confusing". What a pane shows changes one way:
 **a row of the measurement list dragged onto it**. Clicking a measurement row still brings
-its own panes (P1, unchanged). C's tick list stays the one way to draw several curves in a
+its own panes (P1; since 2026-11-19 a new measurement's panes when it has none and no pane
+shows it). C's tick list stays the one way to draw several curves in a
 pane. The 2026-11-01 decisions stand where D10 … D14 do not replace them; all are settled
 and listed at the end.
 
@@ -117,10 +118,10 @@ every pane) out by construction.
 | a split of an SPL, Programme or Walk pane | a copy of it, as today |
 | a split of an empty pane | nothing picked |
 | a measurement row clicked, with an own layout | its panes come on screen (P1, D12) |
-| a measurement row clicked, no own layout | selection only; every pane keeps what it shows (D9) |
+| a measurement row clicked, no own layout | a pane shows it already: selection only, every pane keeps what it shows. None does: the panes a new measurement of its kind starts on (one pane of its kind, a transfer's stack) take the place of this rig's panes and are stored as its own (D9, revised 2026-11-19) |
 | any list selection while a pane is empty | nothing changes: an empty pane does not follow the selection (D6) |
 | the top-bar rig drop-down | that rig is shown; no layout comes (as today: `switch_rig` brings none); panes that follow the shown rig and show something are pinned to the old one, as today |
-| a row of another rig reached (click, Enter, Tab) | a rig switch first, as the drop-down (refused with a window open), then the row on that rig, as a click there: an own layout comes, else selection only (D15) |
+| a row of another rig reached (click, Enter, Tab) | a rig switch first, as the drop-down (refused with a window open), then the row on that rig, as a click there: an own layout comes, else a new measurement's panes beside the panes of the rig shown before, stored on that rig (D15) |
 
 Today `select_meas_row` (`state/queries/select.rs`) shows a measurement without an own layout
 in the focused pane and turns that pane's kind, or splits a pane off for it (`own_pane_for`,
@@ -345,7 +346,8 @@ Each stage lands alone, with its own user-guide rows, and is tested through `ac2
    - Inputs list rows (input, pair) drag onto panes (D16, a drag item enum); P
      (`CommandId::ProgrammePane`) goes, E on a Programme pane does nothing;
    - a measurement row without an own layout only selects: `select_meas_row`'s focused-pane
-     path, `own_pane_for` and W stage view's "another row shows in the pane alone" go;
+     path, `own_pane_for` and W stage view's "another row shows in the pane alone" go
+     (since 2026-11-19 such a row that no pane shows brings a new measurement's panes, D9);
    - an unpicked pane outside its owner's layout is *nothing picked* (the app's half of
      D6: `resolve_meas` / `kind_meas` no longer stand in from `rig.chosen` or the first of
      a kind; `content: None` in a measurement's own layout still reads as its owner: `show_layout`
@@ -412,7 +414,10 @@ Each stage lands alone, with its own user-guide rows, and is tested through `ac2
   by their hello name; no override, no wire change. The suffix is superseded by
   ui-spawns-ac2d D10: a locally reached rig reads `<this host>`.
 - **D9** Clicking a list row selects; a measurement row with an own layout also brings its
-  panes (P1); one without changes no pane.
+  panes (P1); one without changes no pane. Revised 2026-11-19 ("I would expect to see spl
+  meter when I click it"; no measurement on the rigs has a layout): one without that no pane
+  shows gets the panes a new measurement of its kind starts on, stored as its own; a pane
+  is still never taken over, the screen is. Child rows only select.
 
 2026-11-02 ("remove it as whole from all panes to avoid confusion, lets not do billions of
 different ways changing the pane view"):

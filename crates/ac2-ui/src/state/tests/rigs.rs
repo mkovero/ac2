@@ -731,47 +731,6 @@ fn a_drop_of_another_rigs_row_pins_the_pane() {
     );
 }
 
-/// A click on another rig's row switches to that rig first, then selects the row there; a
-/// window open refuses the switch and selects nothing.
-#[test]
-fn a_click_on_another_rigs_row_switches_rig_first() {
-    let (mut t, _) = two_lists();
-    let click = Msg::OnRig(PUPU, Box::new(Msg::SelectMeas(MeasId(2))));
-    t.st.overlay = Overlay::Help;
-    t.st.update(click.clone(), &t.keys);
-    assert_eq!(t.st.active(), RIG, "refused with a window open");
-    t.st.overlay = Overlay::None;
-    let before = t.st.visible_panes();
-    t.st.update(click, &t.keys);
-    assert_eq!(t.st.active(), PUPU);
-    assert_eq!(t.st.rig.selected, Some(MeasId(2)));
-    assert_eq!(t.st.visible_panes(), before, "no pane added");
-}
-
-/// Tab past the last row of the shown rig's list goes on to the next rig's first row,
-/// switching to that rig; Shift+Tab back past the first row returns to the last row before.
-/// With a window open it wraps within the rig shown.
-#[test]
-fn tab_steps_on_into_the_next_rigs_list() {
-    let (mut t, _) = two_lists();
-    let rows = t.st.tree_rows().len();
-    for _ in 0..rows + 2 {
-        if t.st.active() == PUPU {
-            break;
-        }
-        t.key("Tab");
-    }
-    assert_eq!(t.st.active(), PUPU, "Tab went on to pupu's list");
-    assert!(t.st.rig.selected.is_some() || t.st.live_row_selected());
-    t.key("Shift+Tab");
-    assert_eq!(t.st.active(), RIG, "Shift+Tab came back");
-    t.st.overlay = Overlay::Help;
-    for _ in 0..rows + 2 {
-        t.st.apply(Msg::Command(crate::keys::CommandId::NextInTree), &t.keys);
-    }
-    assert_eq!(t.st.active(), RIG, "a window open: within the rig shown");
-}
-
 /// A row of one rig dropped on a row of another makes no math trace: one rig's
 /// measurements combine.
 #[test]

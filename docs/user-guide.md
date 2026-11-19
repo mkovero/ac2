@@ -958,9 +958,10 @@ focused empty pane only while no pane shows anything; otherwise it opens on a sc
 
 A row of the measurement list clicked (or reached with **Tab** / **Shift+Tab**):
 
-- a **measurement row** selects the measurement. One with its own panes brings them
-  ([Layouts follow the measurement](#layouts-follow-the-measurement)); one without changes
-  no pane;
+- a **measurement row** selects the measurement and puts it on screen. One with its own
+  panes brings them ([Layouts follow the measurement](#layouts-follow-the-measurement)); one
+  without, which no pane shows yet, gets the panes a new measurement of its kind starts on —
+  click `FOH SPL` and its meter is there. One a pane shows already changes no pane;
 - a **child row** — a live curve, stored trace or math trace — only selects it, for the
   keys below; no pane changes. One no pane draws stays selected all the same.
 
@@ -1050,9 +1051,14 @@ A measurement can carry its own panes. Choose its row (click, **Tab**), then edi
 panes — split, close, change a pane's kind or view, **T**, drag a split, lay out the
 transfer stack, drop a row on a pane, zoom or pan
 a pane's level axis — and the layout is stored on that measurement. Choosing its row again
-brings its panes back, all of them even when one pane was alone on screen (**W**); a
-measurement without a layout keeps the panes on screen. Only a
-measurement row brings panes. A measurement picked into one of its panes is a guest there:
+brings its panes back, all of them even when one pane was alone on screen (**W**). A
+measurement's row always puts it on screen: one without a layout that a pane already shows
+keeps the panes as they are; one that no pane shows gets the panes a new measurement of its
+kind starts on (an SPL meter, a spectrum or a sweep one pane, a transfer the magnitude /
+phase / coherence stack), in place of the panes of its rig, and they are stored as its
+layout. **Ctrl+Z** brings the panes before back. Only a
+measurement row brings panes: a live curve, a math trace or a stored trace under it only
+selects. A measurement picked into one of its panes is a guest there:
 the edit is stored on the measurement whose row was chosen, never on the guest, and never on
 any other measurement, even one whose panes happen to look the same. An edit after which no
 pane shows that measurement is stored on nobody. The list says it: `· 3 own panes`.

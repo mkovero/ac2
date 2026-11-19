@@ -35,7 +35,6 @@ fn keyboard_focus_stays_in_the_open_dialog() -> R {
             );
         }
     };
-    wander(&mut h, "no dialog");
     type Open = (
         &'static str,
         fn(&mut Harness<'_, App>),
@@ -67,6 +66,9 @@ fn keyboard_focus_stays_in_the_open_dialog() -> R {
         h.key_press(Key::Escape);
         step_until(&mut h, "closed", |a| a.state.overlay == Overlay::None);
     }
+    // Last: Tab onto a measurement's row brings its panes, and the dialogs above open on
+    // the panes the app starts with.
+    wander(&mut h, "no dialog");
     Ok(())
 }
 
