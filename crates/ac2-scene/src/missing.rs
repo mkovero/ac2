@@ -16,6 +16,9 @@ pub enum Missing {
     },
     /// An SPL meter without a band meter, in the band view.
     NoBandMeter,
+    /// A sweep measurement none of whose runs has been played: the key arms one and Enter
+    /// (the stimulus's own key in every keymap) fires it.
+    NoRun,
 }
 
 /// The text for measurement `name`; `key` shows a hidden one or starts a stopped one.
@@ -28,6 +31,7 @@ pub fn missing_text(name: &str, why: Missing, key: &str) -> String {
             what,
             after: Some(after),
         } => format!("{name}: no {what} yet: {after}"),
+        Missing::NoRun => format!("{name}: no run yet — {key} arms the sweep, Enter fires it"),
         Missing::NoBandMeter => format!(
             "{name}: no band meter — turn it on in the SPL / Leq settings (or `ac2 spl bands set`)"
         ),
@@ -69,6 +73,10 @@ mod tests {
                 "S"
             ),
             "FOH SPL: no Leq windows yet: they show once the meter has measured a second"
+        );
+        assert_eq!(
+            missing_text("Genelec 1 m", Missing::NoRun, "Space"),
+            "Genelec 1 m: no run yet — Space arms the sweep, Enter fires it"
         );
     }
 }

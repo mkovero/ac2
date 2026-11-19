@@ -197,6 +197,8 @@ mod tests {
                 "V select trace",
                 "G/Shift+G view",
                 "E reference",
+                "Alt+P next peak",
+                "Alt+D mark",
                 "W maximise",
                 "Q close pane",
                 "H all keys"

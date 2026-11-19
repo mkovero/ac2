@@ -139,3 +139,78 @@ fn a_jump_needs_a_frequency_pane() {
     assert_eq!(t.st.view.cursor_hz, None);
     assert_eq!(t.last_toast(), ac2_scene::cursor_jump::NO_PANE);
 }
+
+/// Sweep run `id` with a fundamental at −6 dB but for a 12 dB notch at 250 Hz and a 12 dB
+/// peak at 1 kHz (twelfth-octave columns from 31.25 Hz).
+fn bumpy_sweep(id: u32) -> ConnEvent {
+    let (d, g) = sweep_data(id);
+    let mut d = (*d).clone();
+    d.mag_db[36] = -18.0;
+    d.mag_db[60] = 6.0;
+    ConnEvent::Trace(Arc::new(d), g)
+}
+
+fn sweep_scene(t: &T) -> Box<ac2_scene::distortion::DistortionScene> {
+    let pane = t.pane(PaneKind::Distortion);
+    match crate::scenes::sweep(&t.st, pane, &Theme::dark(), SIZE, now()) {
+        crate::scenes::SweepPane::Distortion(s) => s,
+        other => panic!("{other:?}"),
+    }
+}
+
+/// The sweep pane's response view takes the jumps and the mark as the transfer pane does,
+/// along its fundamental; its other views have no curve to jump along.
+#[test]
+fn jumps_and_mark_on_the_sweep_pane() {
+    let mut t = T::new();
+    super::sweep::sweep_once(&mut t);
+    t.conn(bumpy_sweep(7));
+    t.go(PaneKind::Distortion);
+    assert_eq!(t.st.scope(), Scope::Distortion);
+    let near = |t: &T, hz: f64| (cursor(t) / hz - 1.0).abs() < 1e-9;
+    t.st.view.cursor_hz = None;
+    t.key("Alt+P");
+    assert!(near(&t, 1000.0), "{}", cursor(&t));
+    t.key("Alt+P");
+    assert!(near(&t, 1000.0));
+    assert_eq!(t.last_toast(), "no higher peak in view stands out by 3 dB");
+    t.key("Alt+D");
+    t.key("Alt+N");
+    assert!(near(&t, 1000.0), "no notch above the peak");
+    t.key("Alt+Shift+N");
+    assert!(near(&t, 250.0), "{}", cursor(&t));
+    let s = sweep_scene(&t);
+    let m = s.mark.as_ref().expect("mark readout");
+    assert_eq!(m.lines, ["mark 1.00 kHz", "Δ −750 Hz · −24.0 dB"]);
+    assert!(s.mark_box.is_some() && s.readout_box.is_some());
+    // The legend is the pane's plate: a click on a row selects its run.
+    let pane = t.pane(PaneKind::Distortion);
+    let hit = s.legend_hits.first().expect("legend rows");
+    t.st.rig.selected_trace = None;
+    t.st.apply(Msg::LegendPick(pane, hit.key), &t.keys.clone());
+    assert_eq!(t.st.rig.selected_trace, Some(TraceId(7)));
+    t.key("Alt+Shift+D");
+    assert!(sweep_scene(&t).mark.is_none());
+    // The impulse response has no response curve: the jump says where it works.
+    t.key("G");
+    t.key("Alt+P");
+    assert!(near(&t, 250.0));
+    assert_eq!(t.last_toast(), ac2_scene::cursor_jump::NO_PANE);
+}
+
+/// A sweep pane with nothing to draw names its sweep and the keys that play a run of it;
+/// before any sweep measurement, the key that sets one up.
+#[test]
+fn an_empty_sweep_pane_says_what_fills_it() {
+    let mut t = T::new();
+    t.go(PaneKind::Distortion);
+    assert_eq!(
+        sweep_scene(&t).note.as_deref(),
+        Some("no sweep results yet: Shift+S sets one up")
+    );
+    super::sweep::sweep_armed(&mut t);
+    assert_eq!(
+        sweep_scene(&t).note.as_deref(),
+        Some("Sweep 1: no run yet — Space arms the sweep, Enter fires it")
+    );
+}

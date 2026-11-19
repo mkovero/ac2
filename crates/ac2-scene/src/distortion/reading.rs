@@ -2,6 +2,7 @@
 //! entries: the values the view, its cursor and the CLI print.
 
 use super::*;
+use crate::trace::TraceKey;
 
 /// What a distortion curve says at one column.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -52,13 +53,10 @@ pub fn percent_text(db: f64) -> String {
     format!("{} %", format::fixed(p, decimals))
 }
 
-/// `−40.1 dB`.
+/// `−40.1 dB`, `+1.5 dB`: a level re the fundamental is a difference, so it reads as every
+/// level difference does ([`format::db_readout`]).
 pub fn db_text(db: f64) -> String {
-    if db.is_finite() {
-        format!("{} dB", format::fixed(db, 1))
-    } else {
-        format::NO_VALUE.to_string()
-    }
+    format::db_readout(db)
 }
 
 /// A value in `unit`.
@@ -210,13 +208,22 @@ pub struct SweepView<'a> {
     pub freqs: &'a [f64],
     /// The colour its fundamental is drawn in ([`crate::families`]).
     pub color: Color,
+    /// The selected stored trace: marked in the legend, as on the transfer view.
+    pub selected: bool,
+}
+
+impl SweepView<'_> {
+    /// The run's stored trace, as a click on its legend rows selects it.
+    pub fn key(&self) -> TraceKey {
+        TraceKey::Stored(self.data.meta.id)
+    }
 }
 
 /// How a legend entry shows what it names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LegendMark {
-    /// The name in the curve's colour.
-    Name,
+    /// A swatch in the curve's colour.
+    Line,
     /// A dashed sample: an order within the noise, drawn at its floor in its own colour.
     Dashed,
     /// A shaded sample: under the lowest order's floor.
@@ -230,6 +237,11 @@ pub struct LegendEntry {
     pub name: String,
     pub color: Color,
     pub mark: LegendMark,
+    /// The run a click on the row selects: the row's own, or the run whose picture the
+    /// row explains.
+    pub key: TraceKey,
+    /// The row of the selected run itself.
+    pub selected: bool,
 }
 
 /// Legend name of the dashed floor lines.

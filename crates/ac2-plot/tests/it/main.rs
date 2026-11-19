@@ -10,3 +10,4 @@ mod programme;
 mod render;
 mod scene_e2e;
 mod sim_overlay;
+mod sweep_view;

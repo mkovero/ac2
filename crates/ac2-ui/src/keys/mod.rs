@@ -304,11 +304,11 @@ commands! {
     TargetLoudness => "target_loudness", "Loudness shift…", [Transfer];
     CoherenceMask => "coherence_mask", "Coherence mask", [Transfer];
     CoherencePlacement => "coherence_placement", "Coherence placement", [Transfer];
-    LegendTopLeft => "legend_top_left", "Legend top-left", [Transfer, Spectrum];
-    LegendTopRight => "legend_top_right", "Legend top-right", [Transfer, Spectrum];
-    LegendBottomLeft => "legend_bottom_left", "Legend bottom-left", [Transfer, Spectrum];
-    LegendBottomRight => "legend_bottom_right", "Legend bottom-right", [Transfer, Spectrum];
-    LegendHide => "legend_hide", "Show/hide legend", [Transfer, Spectrum];
+    LegendTopLeft => "legend_top_left", "Legend top-left", [Transfer, Spectrum, Distortion];
+    LegendTopRight => "legend_top_right", "Legend top-right", [Transfer, Spectrum, Distortion];
+    LegendBottomLeft => "legend_bottom_left", "Legend bottom-left", [Transfer, Spectrum, Distortion];
+    LegendBottomRight => "legend_bottom_right", "Legend bottom-right", [Transfer, Spectrum, Distortion];
+    LegendHide => "legend_hide", "Show/hide legend", [Transfer, Spectrum, Distortion];
     Average => "average", "Average power", [Transfer];
     AverageComplex => "average_complex", "Average complex", [Transfer];
     AverageCoherence => "average_coherence", "Average coherence-weighted", [Transfer];
@@ -321,12 +321,12 @@ commands! {
     Smooth12 => "smooth_12", "Smoothing 1/12 oct", [Transfer, Spectrum];
     Smooth6 => "smooth_6", "Smoothing 1/6 oct", [Transfer, Spectrum];
     Smooth3 => "smooth_3", "Smoothing 1/3 oct", [Transfer, Spectrum];
-    NextPeak => "next_peak", "Next peak", [Transfer, Spectrum];
-    PrevPeak => "prev_peak", "Previous peak", [Transfer, Spectrum];
-    NextNotch => "next_notch", "Next notch", [Transfer, Spectrum];
-    PrevNotch => "prev_notch", "Previous notch", [Transfer, Spectrum];
-    CursorMark => "cursor_mark", "Cursor mark", [Transfer, Spectrum];
-    ClearMark => "clear_mark", "Clear cursor mark", [Transfer, Spectrum];
+    NextPeak => "next_peak", "Next peak", [Transfer, Spectrum, Distortion];
+    PrevPeak => "prev_peak", "Previous peak", [Transfer, Spectrum, Distortion];
+    NextNotch => "next_notch", "Next notch", [Transfer, Spectrum, Distortion];
+    PrevNotch => "prev_notch", "Previous notch", [Transfer, Spectrum, Distortion];
+    CursorMark => "cursor_mark", "Cursor mark", [Transfer, Spectrum, Distortion];
+    ClearMark => "clear_mark", "Clear cursor mark", [Transfer, Spectrum, Distortion];
 
     SpectrumStyle => "spectrum_style", "Spectrum style", [Spectrum];
     Peaks => "peaks", "Peaks", [Transfer, Spectrum, Spectrograph3d];

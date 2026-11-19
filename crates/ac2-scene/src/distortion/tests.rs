@@ -1,11 +1,16 @@
 #![allow(clippy::unwrap_used)]
 
 use super::*;
+use crate::plate::PlateKind;
 use ac2_proto::GridDef;
 use ac2_proto::model::*;
 use ac2_proto::units::*;
 
+mod chrome;
+
 const SIZE: Viewport = Viewport::new(900.0, 500.0);
+/// What the pane is told to say without a run.
+const MISSING: &str = "Genelec 1 m: no run yet — Space arms the sweep, Enter fires it";
 
 pub(crate) fn grid() -> GridDef {
     GridDef::Log {
@@ -251,8 +256,10 @@ fn distortion_view_draws_valid_points_and_shades_the_floor() {
             data: &d,
             freqs: &f,
             color: Color::from_rgba8([1, 2, 3, 255]),
+            selected: false,
         }),
         &[],
+        MISSING,
         &status(),
         &view,
         &Theme::dark(),
@@ -264,9 +271,9 @@ fn distortion_view_draws_valid_points_and_shades_the_floor() {
         "fundamental above distortion"
     );
     let names: Vec<&str> = sc.legend.iter().map(|e| e.name.as_str()).collect();
-    assert_eq!(names, ["H2", "H3", "THD", "< floor", "noise"]);
-    assert_eq!(sc.legend[3].mark, LegendMark::Dashed);
-    assert_eq!(sc.legend[4].mark, LegendMark::Shade);
+    assert_eq!(names, ["1083 sweep", "H2", "H3", "THD", "< floor", "noise"]);
+    assert_eq!(sc.legend[4].mark, LegendMark::Dashed);
+    assert_eq!(sc.legend[5].mark, LegendMark::Shade);
     assert!(
         sc.info
             .starts_with("1083 sweep · arrival 3.32 ms · 2 × 3.10 s"),
@@ -274,11 +281,26 @@ fn distortion_view_draws_valid_points_and_shades_the_floor() {
         sc.info
     );
     assert_eq!(sc.caption, sc.info, "room for all of it");
-    // Wide: the legend is one row beside the axis title.
-    let legend_ys: Vec<f32> = legend_labels(&sc).iter().map(|l| l.pos[1]).collect();
+    // The legend is on its plate, a row each, as on the transfer view: every row a click
+    // selects the run by, the floor and the noise with a sample of their own.
+    assert_eq!(sc.legend_shown, names);
+    let b = sc.legend_box.as_ref().expect("legend plate");
+    assert_eq!(b.plate.kind, PlateKind::Legend);
+    assert!(b.rect.y >= sc.plot.y && b.rect.bottom() <= sc.plot.bottom());
+    assert_eq!(sc.legend_hits.len(), names.len());
+    let run = crate::trace::TraceKey::Stored(d.meta.id);
+    assert!(sc.legend_hits.iter().all(|h| h.key == run));
+    let overlay = &sc.scene.layers[2];
+    let dashed = b.swatch(4).unwrap();
     assert!(
-        legend_ys.iter().all(|y| *y == legend_ys[0]),
-        "{legend_ys:?}"
+        overlay.polylines.iter().any(
+            |p| p.stroke.dash.is_some() && p.points[0] == [dashed.x, dashed.y + dashed.h / 2.0]
+        ),
+        "the floor's dashed sample"
+    );
+    assert!(
+        overlay.rects.iter().any(|r| r.rect == b.swatch(5).unwrap()),
+        "the noise's shaded sample"
     );
     // H2 is drawn at −40 dB up to 2 kHz, solid; H3 (all within the noise) at its floor,
     // dashed, in its own colour.
@@ -310,6 +332,26 @@ fn distortion_view_draws_valid_points_and_shades_the_floor() {
         .count();
     assert_eq!(drawn_in_plot, 3, "H2, THD solid; H3 dashed at its floor");
     assert_eq!(data_layer.bands.len(), 1, "noise shaded");
+    // The cursor values on their plate, each a `name  value` row in its curve's colour.
+    let r = sc.readout_box.expect("cursor values' plate");
+    assert_eq!(r.kind, PlateKind::Readout);
+    assert_eq!(
+        sc.plates().len(),
+        2,
+        "legend and cursor values; no mark set"
+    );
+    let in_plate = |text: &str| {
+        overlay
+            .labels
+            .iter()
+            .find(|l| l.text == text && l.pos[1] > r.rect.y && l.pos[1] < r.rect.bottom())
+            .unwrap_or_else(|| panic!("{text:?} on the plate"))
+            .color
+    };
+    assert_eq!(in_plate("1.00 kHz"), Theme::dark().text);
+    assert_eq!(in_plate("fund  −6.0 dB"), Color::from_rgba8([1, 2, 3, 255]));
+    assert_eq!(in_plate("H2  −40.0 dB"), order_color(&Theme::dark(), 2));
+    assert_eq!(in_plate("H3  < −70.0 dB"), order_color(&Theme::dark(), 3));
     let cur = sc.cursor.expect("cursor");
     assert_eq!(cur.freq, "1.00 kHz");
     let row = |n: &str| cur.rows.iter().find(|r| r.0 == n).unwrap().1.clone();
@@ -325,8 +367,10 @@ fn distortion_view_draws_valid_points_and_shades_the_floor() {
             data: &d,
             freqs: &f,
             color: Color::from_rgba8([1, 2, 3, 255]),
+            selected: false,
         }),
         &[],
+        MISSING,
         &status(),
         &view,
         &Theme::dark(),
@@ -354,19 +398,8 @@ fn distortion_view_draws_valid_points_and_shades_the_floor() {
     assert_eq!(row("fund"), "−6.0 dB", "the response stays in dB");
 }
 
-/// The legend's names (overlay labels in the legend's colours along the plot's top).
-fn legend_labels(sc: &DistortionScene) -> Vec<crate::primitives::Label> {
-    let names: Vec<&str> = sc.legend.iter().map(|e| e.name.as_str()).collect();
-    sc.scene.layers[2]
-        .labels
-        .iter()
-        .filter(|l| names.contains(&l.text.as_str()))
-        .cloned()
-        .collect()
-}
-
 #[test]
-fn caption_and_legend_never_overlap_in_small_panes() {
+fn the_caption_and_the_plates_keep_their_places_in_small_panes() {
     use crate::canvas::tests::{intersects, label_box};
     let mut d = data();
     d.meta.edit.name = "Main L 1083 on stand".into();
@@ -393,27 +426,45 @@ fn caption_and_legend_never_overlap_in_small_panes() {
                     data: &d,
                     freqs: &f,
                     color: Color::from_rgba8([1, 2, 3, 255]),
+                    selected: false,
                 }),
                 &[],
+                MISSING,
                 &status(),
                 &view,
                 &Theme::dark(),
                 size,
             );
-            // Every text placed inside the two plots: axis titles, caption, legend, cursor.
-            let inside = |p: [f32; 2]| {
-                [sc.fundamental, sc.plot]
-                    .iter()
-                    .any(|r| p[0] >= r.x && p[0] <= r.right() && p[1] >= r.y && p[1] <= r.bottom())
+            // The plates stay whole inside the distortion plot (the operator moves one off
+            // another); the legend scrolls the rows a small pane has no room for.
+            let plates = sc.plates();
+            assert_eq!(plates.len(), 2, "{w}×{h}");
+            let legend = sc.legend_box.as_ref().unwrap();
+            let r = legend.rect;
+            assert!(
+                r.x >= sc.plot.x
+                    && r.right() <= sc.plot.right()
+                    && r.y >= sc.plot.y
+                    && r.bottom() <= sc.plot.bottom(),
+                "{w}×{h}: legend {r:?} in {:?}",
+                sc.plot
+            );
+            assert_eq!(legend.total, sc.legend.len());
+            assert!(legend.shown >= 1 && legend.shown == sc.legend_shown.len());
+            // Every text placed inside the two plots and on no plate: the axis titles and
+            // the caption.
+            let inside = |p: [f32; 2], r: &Rect| {
+                p[0] >= r.x && p[0] <= r.right() && p[1] >= r.y && p[1] <= r.bottom()
             };
             let labels: Vec<_> = sc
                 .scene
                 .layers
                 .iter()
                 .flat_map(|l| &l.labels)
-                .filter(|l| inside(l.pos))
+                .filter(|l| [sc.fundamental, sc.plot].iter().any(|r| inside(l.pos, r)))
+                .filter(|l| !plates.iter().any(|p| inside(l.pos, &p.rect)))
                 .collect();
-            assert!(labels.len() >= 2 + sc.legend.len(), "{w}×{h}");
+            assert!(labels.len() >= 2, "{w}×{h}");
             for (i, a) in labels.iter().enumerate() {
                 let ba = label_box(a);
                 assert!(
@@ -463,8 +514,10 @@ fn lone_valid_points_are_short_lines_and_noise_is_dashed() {
             data: &d,
             freqs: &f,
             color: Color::from_rgba8([1, 2, 3, 255]),
+            selected: false,
         }),
         &[],
+        MISSING,
         &status(),
         &ViewState::default(),
         &Theme::dark(),
@@ -529,12 +582,16 @@ fn without_a_sweep_the_view_says_so() {
     let sc = distortion_scene(
         None,
         &[],
+        MISSING,
         &status(),
         &ViewState::default(),
         &Theme::dark(),
         SIZE,
     );
-    assert_eq!(sc.note.as_deref(), Some("no sweep result"));
+    assert_eq!(sc.note.as_deref(), Some(MISSING));
+    let said = sc.scene.layers.iter().flat_map(|l| &l.labels);
+    assert_eq!(said.filter(|l| l.text == MISSING).count(), 1);
+    assert!(sc.legend_box.is_none() && sc.plates().is_empty());
     assert!(sc.legend.is_empty());
 }
 
@@ -638,8 +695,10 @@ fn unresolved_ranges_mark_both_panes() {
                 data: &d,
                 freqs: &f,
                 color: Color::from_rgba8([1, 2, 3, 255]),
+                selected: false,
             }),
             &[],
+            MISSING,
             &status(),
             view,
             &theme,
@@ -726,8 +785,10 @@ fn the_references_own_orders_are_drawn_dotted_and_hide() {
                 data: &d,
                 freqs: &f,
                 color: Color::from_rgba8([1, 2, 3, 255]),
+                selected: false,
             }),
             &[],
+            MISSING,
             &status(),
             view,
             &Theme::dark(),
@@ -736,8 +797,19 @@ fn the_references_own_orders_are_drawn_dotted_and_hide() {
     };
     let sc = scene(&view);
     let names: Vec<&str> = sc.legend.iter().map(|e| e.name.as_str()).collect();
-    assert_eq!(names, ["H2", "H3", "THD", "reference", "< floor", "noise"]);
-    assert_eq!(sc.legend[3].mark, LegendMark::Dotted);
+    assert_eq!(
+        names,
+        [
+            "1083 sweep",
+            "H2",
+            "H3",
+            "THD",
+            "reference",
+            "< floor",
+            "noise"
+        ]
+    );
+    assert_eq!(sc.legend[4].mark, LegendMark::Dotted);
     // Each reference order dotted, faint, in its order's colour, at its own level.
     let at = |db: f64| sc.y_axis.mapping.to_px(db);
     let on = |p: &Polyline, y: f32| p.points.iter().all(|q| (q[1] - y).abs() < 0.01);
@@ -758,7 +830,7 @@ fn the_references_own_orders_are_drawn_dotted_and_hide() {
     let row = |n: &str| cur.rows.iter().find(|r| r.0 == n).map(|r| r.1.clone());
     assert_eq!(row("reference H2").as_deref(), Some("−44.0 dB"));
     assert_eq!(row("reference H3").as_deref(), Some("−90.0 dB"));
-    // H2 within 6 dB of the loopback's own: the note, in the pane.
+    // H2 within 6 dB of the loopback's own: the note, in the pane at its full length.
     assert_eq!(sc.near_reference.len(), 1);
     assert!(
         sc.near_reference[0].starts_with("H2 within 6 dB of reference H2 at "),
@@ -777,7 +849,7 @@ fn the_references_own_orders_are_drawn_dotted_and_hide() {
     view.distortion.reference = false;
     let hidden = scene(&view);
     let names: Vec<&str> = hidden.legend.iter().map(|e| e.name.as_str()).collect();
-    assert_eq!(names, ["H2", "H3", "THD", "< floor", "noise"]);
+    assert_eq!(names, ["1083 sweep", "H2", "H3", "THD", "< floor", "noise"]);
     let in_plot = |sc: &DistortionScene| {
         sc.scene.layers[1]
             .polylines
@@ -802,8 +874,10 @@ fn a_sweep_without_the_references_own_orders_draws_no_reference() {
             data: &d,
             freqs: &f,
             color: Color::from_rgba8([1, 2, 3, 255]),
+            selected: false,
         }),
         &[],
+        MISSING,
         &status(),
         &ViewState::default(),
         &Theme::dark(),

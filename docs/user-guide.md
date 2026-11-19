@@ -1195,12 +1195,12 @@ Settings › Display and the palette (*Theme*).
 
 #### Cursor jumps and the mark (Alt+P, Alt+N, Alt+D)
 
-On a transfer magnitude or a spectrum pane the comparison cursor (**Shift+T**) can jump,
-along the focused pane's curve only (no other pane stands in):
+On a transfer magnitude, a spectrum or a sweep response pane the comparison cursor
+(**Shift+T**) can jump, along the focused pane's curve only (no other pane stands in):
 **Alt+P** to the next peak up in frequency, **Alt+Shift+P** to the one below, **Alt+N** /
 **Alt+Shift+N** the same for notches. A jump turns the cursor on when it is off. It reads
 one curve, the one peak tracking follows: the selected curve when the pane draws it,
-else the pane's own. It reads that curve as drawn (smoothed, with its offset, without
+else the pane's own; on a sweep pane the fundamental of the run it shows. It reads that curve as drawn (smoothed, with its offset, without
 blanked or invalid columns) and only the part the pane shows: a peak off screen is not
 jumped to, and a column at the edge of the view or of a gap is never one. A peak or notch
 counts when it stands out of the curve around it by the prominence in Settings › Display ›
@@ -1210,8 +1210,8 @@ none that way the cursor stays and a toast says so
 
 **Alt+D** drops a mark where the cursor is (a dashed line); **Alt+D** again moves it there.
 While the mark is set, the cursor reads against it on the same curve: under the cursor
-values on a spectrum, on a plate in a bottom corner of the transfer magnitude view
-(named when other curves are shown):
+values on a spectrum, on a plate in a bottom corner of the transfer magnitude view or of
+the sweep's fundamental plot (named when other curves are shown):
 
     mark 500 Hz
     Δ +1.00 kHz · +3.2 dB · +20°
@@ -2675,7 +2675,23 @@ It shows one run of the sweep measurement dropped on it — the selected run whe
 that sweep's, else its newest — the fundamental's response above, distortion below; the shown runs of
 sweeps ticked in (**C**) are drawn over it in their own colours and listed `Run 2 · cmp` in the
 legend. An order within the noise is drawn dashed
-at its own floor; the shading is the noise under every order's floor. A distortion value is
+at its own floor; the shading is the noise under every order's floor.
+
+The legend and the cursor values are on the plates the transfer and spectrum panes use:
+drag one to move it, drag its grip to size its text, double-click to put it back;
+*Show/hide legend* and the *Legend top-left* … entries of the palette, and the
+*plate background* setting, apply here too. The legend lists the run (its fundamental's
+colour), its orders and THD, the compared runs, then what the dotted (*reference*), dashed
+(*< floor*) and shaded (*noise*) parts of the picture are; a click on a row selects the
+row's run. The cursor (**Shift+T**, or a click) reads `fund`, every order, THD and the
+reference's orders at its frequency, each in its curve's colour. Every level in dB is
+signed, as a level difference is everywhere: the fundamental is the response re the
+reference, the orders are re the fundamental (`−40.1 dB`, `+1.5 dB`). **T** at *traces
+only* hides the cursor, its values and the mark.
+
+With no run to show the pane names its sweep and what plays one
+(`Genelec 1 m: no run yet — Space arms the sweep, Enter fires it`); with no sweep
+measurement yet, the key that sets one up. A distortion value is
 shown only where it is at least 6 dB above the noise in its window; elsewhere it reads
 `< −72.0 dB` (`< 0.0251 %`). Lower the floor with repeats or a longer sweep, not with more
 level than the speaker should take.
@@ -2696,6 +2712,8 @@ the note stays.
 | **Shift+I** | straight to the impulse response and back |
 | **E** | the reference input's own harmonics shown / hidden in this pane |
 | **V** / **Shift+V** | step through the pane's sweep's runs, selecting each |
+| **Alt+P** / **Alt+Shift+P**, **Alt+N** / **Alt+Shift+N** | on the response view, the cursor to the next peak / notch of the fundamental up / down in frequency ([Cursor jumps and the mark](#cursor-jumps-and-the-mark-altp-altn-altd)) |
+| **Alt+D** / **Alt+Shift+D** | drop the cursor's mark / clear it: the cursor then reads its difference from the mark on the fundamental, on a plate in a bottom corner of the fundamental's plot |
 
 ### Low-frequency harmonics (LF harmonics: fine)
 
@@ -4101,6 +4119,12 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 
 | Keys | Command | `keys.toml` |
 |---|---|---|
+| `Alt+P` | Next peak | `next_peak` |
+| `Alt+Shift+P` | Previous peak | `prev_peak` |
+| `Alt+N` | Next notch | `next_notch` |
+| `Alt+Shift+N` | Previous notch | `prev_notch` |
+| `Alt+D` | Cursor mark | `cursor_mark` |
+| `Alt+Shift+D` | Clear cursor mark | `clear_mark` |
 | `G` | Next view | `next_view` |
 | `Shift+G` | Previous view | `prev_view` |
 | `Shift+I` | Sweep IR view | `sweep_ir` |
@@ -4248,7 +4272,7 @@ The least used go first on a narrow pane; `G/Shift+G` steps the pane's views for
 | Spectrum / RTA | `S` start/stop · `P` peaks · `G/Shift+G` view · `K` smoothing · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
 | Transfer: impulse response view | `G/Shift+G` view · `S` start/stop · `X` find delay · `,/.` delay · `R` reset · `I` zoom time · `Shift+Home` fit level · `H` all keys |
 | SPL | `G/Shift+G` view · `Shift+F` F/S/I · `Z` A/C/Z · `Shift+L` windows · `W` maximise · `H` all keys |
-| Sweep / distortion | `Shift+S` new sweep · `V` select trace · `G/Shift+G` view · `E` reference · `W` maximise · `Q` close pane · `H` all keys |
+| Sweep / distortion | `Shift+S` new sweep · `V` select trace · `G/Shift+G` view · `E` reference · `Alt+P` next peak · `Alt+D` mark · `W` maximise · `Q` close pane · `H` all keys |
 | Programme | `R` reset · `Shift+R` reset all · `G/Shift+G` view · `T` grid · `W` maximise · `Q` close pane · `H` all keys |
 | Inputs list row | `R` reset · `Shift+R` reset all · `Tab` measurements · `Shift+Tab` back · `H` all keys |
 | Spatial walk | `Shift+W` walks · `Space` stimulus · `W` maximise · `Q` close pane · `H` all keys |

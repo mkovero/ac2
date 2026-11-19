@@ -301,6 +301,7 @@ fn build_scene(
         }
         PaneKind::Distortion => {
             let s = scenes::sweep(st, id, theme, vp, now);
+            (plates, legend, legend_hits) = s.plates();
             let axes = Axes {
                 x: s.x_axis(),
                 y_level: s.y_level(),

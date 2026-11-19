@@ -16,14 +16,17 @@ use crate::canvas::{self, Canvas, MARGINS, PANE_GAP, anchor, gapped, label, visi
 use crate::format;
 use crate::grid::nearest_column;
 use crate::primitives::{
-    Band, BandPoint, Color, Dash, FillRect, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport,
+    Band, BandPoint, Color, Dash, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport,
 };
 use crate::theme::Theme;
 use crate::view::Style;
 use crate::view::{DistortionUnit, ViewState};
 
+mod mark;
+mod plates;
 mod reading;
 mod sweep_ir;
+pub use mark::jump;
 pub use reading::*;
 pub use sweep_ir::{harmonic_marks, ir_frame, sweep_ir_scene};
 
@@ -47,18 +50,34 @@ pub struct DistortionScene {
     pub x_axis: Axis,
     pub y_fundamental: Axis,
     pub y_axis: Axis,
-    /// The orders (each name in its colour), THD, the reference's dotted mark when its
-    /// orders are drawn, then the two floor marks.
+    /// The legend's rows, on the legend plate as on the transfer view: the run (its
+    /// fundamental's colour), its orders and THD, the compared runs, the reference's dotted
+    /// mark when its orders are drawn, then the two floor marks.
     pub legend: Vec<LegendEntry>,
+    /// The legend's shown rows as drawn (cut to the plate's width; the rest scroll).
+    pub legend_shown: Vec<String>,
+    /// Where the legend went (`None`: hidden or nothing to name): the UI moves, resizes and
+    /// scrolls it.
+    pub legend_box: Option<crate::legend::LegendBox>,
+    /// Where each shown legend row is, for a click to select its run.
+    pub legend_hits: Vec<crate::legend::LegendHit>,
     /// `Main L sweep · arrival 3.32 ms · 2 × 3.10 s · window 8 + 87 ms`.
     pub info: String,
     /// The part of [`Self::info`] that fits beside the fundamental's axis title (empty when
     /// nothing does).
     pub caption: String,
     pub cursor: Option<DistortionCursor>,
+    /// The plate of the cursor's values.
+    pub readout_box: Option<crate::plate::PlateBox>,
+    /// The cursor read against its mark ([`ViewState::cursor_mark_hz`]) on the
+    /// fundamental's curve; `None` without a mark, or while the cursor is off or hidden.
+    pub mark: Option<crate::readout::MarkReadout>,
+    /// The mark's plate, in a bottom corner of the fundamental's plot unless dragged.
+    pub mark_box: Option<crate::plate::PlateBox>,
     /// Where an order reads within [`REFERENCE_BOUND_DB`] of the reference's own
-    /// ([`near_reference_text`]), one line each, along the bottom of the distortion plot;
-    /// shown whether or not the reference's lines are.
+    /// ([`near_reference_text`]), one line each, along the bottom of the distortion plot
+    /// at its full length (a plate cuts a line to its width, and this one says which
+    /// readings not to trust); shown whether or not the reference's lines are.
     pub near_reference: Vec<String>,
     /// Ranges the sweep's response does not resolve at its grid (shaded in the fundamental's
     /// pane) and those its harmonics do not (shaded in the distortion pane); empty when the
@@ -71,8 +90,24 @@ pub struct DistortionScene {
     pub banners: Vec<BannerRow>,
 }
 
+impl DistortionScene {
+    /// The plates the operator moves, in drawing order (the last on top).
+    pub fn plates(&self) -> Vec<crate::plate::PlateBox> {
+        self.legend_box
+            .as_ref()
+            .map(|b| b.plate)
+            .into_iter()
+            .chain(self.readout_box)
+            .chain(self.mark_box)
+            .collect()
+    }
+}
+
 /// Axis title of the fundamental's response.
 const FUNDAMENTAL_TITLE: &str = "Fundamental dB";
+
+/// The fundamental's row in the cursor values.
+pub const FUNDAMENTAL: &str = "fund";
 
 /// Colour of harmonic order `k` (and THD as order 0).
 pub fn order_color(theme: &Theme, order: u8) -> Color {
@@ -125,67 +160,6 @@ fn fitting(lines: &[String], width: f32, size: f32) -> String {
         .find(|t| canvas::text_width(t, size) <= width)
         .cloned()
         .unwrap_or_default()
-}
-
-/// Height of one legend row.
-fn legend_row_h(theme: &Theme) -> f32 {
-    theme.small_font_size * 1.25 + 2.0
-}
-
-/// Width of a legend entry's sample (before its name).
-const SAMPLE_W: f32 = 14.0;
-
-/// Draws `legend` in rows: the first from `x0` (beside the axis title), the next ones from
-/// `left`, wrapping before `right`. Returns the bottom of the last row.
-fn draw_legend(
-    c: &mut Canvas,
-    legend: &[LegendEntry],
-    x0: f32,
-    left: f32,
-    right: f32,
-    top: f32,
-    theme: &Theme,
-) -> f32 {
-    let size = theme.small_font_size;
-    let row_h = legend_row_h(theme);
-    let (mut x, mut y) = (x0, top);
-    for e in legend {
-        let sample = if e.mark == LegendMark::Name {
-            0.0
-        } else {
-            SAMPLE_W + 4.0
-        };
-        let w = sample + canvas::text_width(&e.name, size);
-        if x + w > right && x > left {
-            x = left;
-            y += row_h;
-        }
-        let mid = y + size * 0.62;
-        match e.mark {
-            LegendMark::Name => {}
-            LegendMark::Dashed => c.overlay.polylines.push(Polyline::new(
-                vec![[x, mid], [x + SAMPLE_W, mid]],
-                floor_stroke(e.color, theme),
-            )),
-            LegendMark::Dotted => c.overlay.polylines.push(Polyline::new(
-                vec![[x, mid], [x + SAMPLE_W, mid]],
-                reference_stroke(e.color, theme),
-            )),
-            LegendMark::Shade => c.overlay.rects.push(FillRect::new(
-                Rect::new(x, mid - 4.0, SAMPLE_W, 8.0),
-                noise_color(theme),
-            )),
-        }
-        c.overlay.labels.push(label(
-            e.name.clone(),
-            [x + sample, y],
-            anchor(HAlign::Left, VAlign::Top),
-            size,
-            e.color.with_alpha(1.0),
-        ));
-        x += w + 12.0;
-    }
-    y + row_h
 }
 
 /// An order within the noise, drawn at its floor: thin, dashed, its colour faded.
@@ -268,6 +242,17 @@ pub fn compared_name(name: &str) -> String {
     format!("{name} · {}", crate::trace::COMPARED)
 }
 
+/// A compared run's legend row, in the run's own colour.
+fn compared_entry(v: &SweepView<'_>) -> LegendEntry {
+    LegendEntry {
+        name: compared_name(&v.data.meta.edit.name),
+        color: v.color,
+        mark: LegendMark::Line,
+        key: v.key(),
+        selected: v.selected,
+    }
+}
+
 /// A compared run (C) over the pane's own: its fundamental in the upper pane, and its
 /// orders and THD where they are valid, all in the run's own colour — the order colours
 /// belong to the pane's run, and a compared run's floors would be clutter read as levels.
@@ -330,9 +315,12 @@ fn draw_compared(
 
 /// The distortion view of `t`: the fundamental's magnitude above, the distortion below.
 /// `compared` runs (C) are drawn over it in their own colours, tagged `cmp` in the legend.
+/// Without a run of its own the pane says `missing`: whose run it waits for and what
+/// starts one ([`crate::missing`]).
 pub fn distortion_scene(
     t: Option<SweepView<'_>>,
     compared: &[SweepView<'_>],
+    missing: &str,
     status: &Status,
     view: &ViewState,
     theme: &Theme,
@@ -454,7 +442,7 @@ pub fn distortion_scene(
         })
         .unwrap_or_default();
     let note = match sweep {
-        None => Some("no sweep result".to_string()),
+        None => Some(missing.to_string()),
         Some(_) => None,
     };
     // Under the pane's own run, so that one stays on top.
@@ -538,6 +526,13 @@ pub fn distortion_scene(
             .map(|h| (order_name(h.order), h.order, &h.curve))
             .chain(std::iter::once(("THD".to_string(), 0u8, &s.thd)))
             .collect();
+        legend.push(LegendEntry {
+            name: t.data.meta.edit.name.clone(),
+            color: t.color,
+            mark: LegendMark::Line,
+            key: t.key(),
+            selected: t.selected,
+        });
         for (name, order, curve) in &curves {
             let color = order_color(theme, *order);
             let readings: Vec<Reading> = cols.clone().map(|i| reading(curve, i, margin)).collect();
@@ -581,31 +576,26 @@ pub fn distortion_scene(
             legend.push(LegendEntry {
                 name: name.clone(),
                 color,
-                mark: LegendMark::Name,
+                mark: LegendMark::Line,
+                key: t.key(),
+                selected: false,
             });
         }
-        legend.extend(compared.iter().map(|(v, _)| LegendEntry {
-            name: compared_name(&v.data.meta.edit.name),
-            color: v.color,
-            mark: LegendMark::Name,
-        }));
+        legend.extend(compared.iter().map(|(v, _)| compared_entry(v)));
+        // What the dotted, dashed and shaded parts of the run's picture are: rows of the
+        // run's, so a click on one selects it as its other rows do.
+        let sample = |name: &str, mark| LegendEntry {
+            name: name.to_string(),
+            color: theme.text_dim,
+            mark,
+            key: t.key(),
+            selected: false,
+        };
         if !reference.is_empty() {
-            legend.push(LegendEntry {
-                name: REFERENCE.to_string(),
-                color: theme.text_dim,
-                mark: LegendMark::Dotted,
-            });
+            legend.push(sample(REFERENCE, LegendMark::Dotted));
         }
-        legend.push(LegendEntry {
-            name: BELOW_FLOOR.to_string(),
-            color: theme.text_dim,
-            mark: LegendMark::Dashed,
-        });
-        legend.push(LegendEntry {
-            name: NOISE.to_string(),
-            color: theme.text_dim,
-            mark: LegendMark::Shade,
-        });
+        legend.push(sample(BELOW_FLOOR, LegendMark::Dashed));
+        legend.push(sample(NOISE, LegendMark::Shade));
         // Fundamental magnitude.
         let fm = y_fundamental.mapping;
         let ys: Vec<f32> = cols
@@ -628,23 +618,20 @@ pub fn distortion_scene(
     }
 
     if sweep.is_none() {
-        legend.extend(compared.iter().map(|(v, _)| LegendEntry {
-            name: compared_name(&v.data.meta.edit.name),
-            color: v.color,
-            mark: LegendMark::Name,
-        }));
+        legend.extend(compared.iter().map(|(v, _)| compared_entry(v)));
     }
-    // Legend along the top of the distortion plot, beside its axis title, wrapping under it
-    // in a narrow pane.
-    let legend_bottom = draw_legend(
-        &mut c,
-        &legend,
-        plot.x + 6.0 + canvas::text_width(title, theme.small_font_size) + 18.0,
-        plot.x + 6.0,
-        plot.right() - 6.0,
-        plot.y + 4.0,
-        theme,
+    // On its plate, under the axis title at the distortion plot's top left unless dragged.
+    let legend_area = Rect::new(
+        plot.x,
+        plot.y + plates::LEGEND_TOP,
+        plot.w,
+        (plot.h - plates::LEGEND_TOP).max(1.0),
     );
+    let plates::SweepLegend {
+        shown: legend_shown,
+        b: legend_box,
+        hits: legend_hits,
+    } = plates::legend(&mut c.overlay, &legend, view, legend_area, plot, theme);
     if !caption.is_empty() {
         c.overlay.labels.push(label(
             caption.clone(),
@@ -656,28 +643,34 @@ pub fn distortion_scene(
     }
 
     let cursor_hz = view.cursor_hz.filter(|_| view.chrome.cursor());
+    // Each value in its curve's colour, as the transfer view's cursor values are.
+    let mut row_colors = vec![theme.text];
     let cursor = cursor_hz.zip(sweep).and_then(|(hz, (t, s))| {
         let i = nearest_column(t.freqs, hz)?;
         let f = t.freqs[i];
         let mut rows = vec![(
-            "fund".to_string(),
+            FUNDAMENTAL.to_string(),
             format::db_readout(t.data.mag_db.get(i).map_or(f64::NAN, |v| f64::from(*v))),
         )];
+        row_colors.push(t.color);
         for h in &s.harmonics {
             rows.push((
                 order_name(h.order),
                 reading_text(reading(&h.curve, i, margin), unit),
             ));
+            row_colors.push(order_color(theme, h.order));
         }
         rows.push((
             "THD".to_string(),
             reading_text(reading(&s.thd, i, margin), unit),
         ));
+        row_colors.push(order_color(theme, 0));
         for r in &reference {
             rows.push((
                 reference_order_name(r.order),
                 reading_text(reading(&r.curve, i, margin), unit),
             ));
+            row_colors.push(theme.text_dim);
         }
         // The harmonics' note first: the plate reads mostly harmonics.
         let freq = match crate::unresolved::at(&unresolved_harmonics, f)
@@ -692,22 +685,42 @@ pub fn distortion_scene(
             rows,
         })
     });
-    if let Some(cur) = &cursor {
+    let readout_box = cursor.as_ref().map(|cur| {
         let x = xm.to_px(cur.freq_hz);
         canvas::vline(&mut c.overlay, plot, x, theme.cursor);
         canvas::vline(&mut c.overlay, fundamental, x, theme.cursor);
-        let mut lines = vec![cur.freq.clone()];
-        lines.extend(cur.rows.iter().map(|(n, v)| format!("{n}  {v}")));
-        c.overlay.labels.push(label(
-            lines.join("\n"),
-            [plot.right() - 8.0, legend_bottom + 4.0],
-            anchor(HAlign::Right, VAlign::Top),
-            theme.small_font_size,
-            theme.text,
-        ));
-    }
+        let lines = std::iter::once(cur.freq.clone())
+            .chain(cur.rows.iter().map(|(n, v)| format!("{n}  {v}")))
+            .zip(row_colors.iter().copied())
+            .collect();
+        // Under the axis title at the plot's top.
+        plates::readout(&mut c.overlay, lines, plot, plot.y + 22.0, view, theme)
+    });
+    let mark = cursor
+        .as_ref()
+        .zip(sweep)
+        .and_then(|(_, (t, _))| mark::readout(&t, !compared.is_empty(), view));
+    let mark_box = mark.as_ref().map(|m| {
+        let x = xm.to_px(m.freq_hz);
+        for p in [plot, fundamental] {
+            canvas::vline(&mut c.overlay, p, x, canvas::mark_stroke(theme));
+        }
+        let hover = view
+            .plate_hover
+            .filter(|h| h.kind == crate::plate::PlateKind::Mark);
+        // In the plot of the curve it reads, as on the transfer view.
+        crate::tf::draw_mark(
+            &mut c,
+            &m.lines.join("\n"),
+            fundamental,
+            &[],
+            &view.plates.mark,
+            hover,
+            theme,
+        )
+    });
     // Bottom up from the plot's lower edge, clear of the frequency labels under it.
-    let row_h = legend_row_h(theme);
+    let row_h = theme.small_font_size * 1.25 + 2.0;
     for (k, line) in near_reference.iter().rev().enumerate() {
         c.overlay.labels.push(label(
             line.clone(),
@@ -734,9 +747,15 @@ pub fn distortion_scene(
         y_fundamental,
         y_axis,
         legend,
+        legend_shown,
+        legend_box,
+        legend_hits,
         info,
         caption,
         cursor,
+        readout_box,
+        mark,
+        mark_box,
         near_reference,
         unresolved_response,
         unresolved_harmonics,

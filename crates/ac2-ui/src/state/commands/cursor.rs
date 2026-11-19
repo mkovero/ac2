@@ -27,7 +27,8 @@ impl AppState {
     }
 
     /// The pane a jump reads: the focused one, when it is a frequency pane. A transfer pane
-    /// counts while it shows the magnitude: its peaks and notches are what a jump goes to.
+    /// counts while it shows the magnitude: its peaks and notches are what a jump goes to;
+    /// a sweep pane while it shows the response, whose fundamental has them.
     /// No other pane stands in: the cursor would move by a curve the operator is not on.
     fn jump_pane(&self) -> Option<(PaneId, PaneKind)> {
         let id = self.layout.focus;
@@ -35,6 +36,9 @@ impl AppState {
             PaneKind::Transfer => (self.pane_modes(id).transfer == TransferView::Magnitude)
                 .then_some((id, PaneKind::Transfer)),
             PaneKind::Spectrum => Some((id, PaneKind::Spectrum)),
+            PaneKind::Distortion => (self.pane_modes(id).sweep
+                == ac2_scene::view::SweepMode::Response)
+                .then_some((id, PaneKind::Distortion)),
             _ => None,
         }
     }
@@ -50,6 +54,7 @@ impl AppState {
         let shown = Range::new(t.lo, t.hi);
         let to = match pk {
             PaneKind::Spectrum => crate::scenes::spectrum_jump(self, pane, shown, kind, step),
+            PaneKind::Distortion => crate::scenes::sweep_jump(self, pane, shown, kind, step),
             _ => crate::scenes::transfer_jump(self, pane, shown, kind, step),
         };
         match to {

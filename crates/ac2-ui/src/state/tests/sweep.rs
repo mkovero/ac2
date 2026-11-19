@@ -12,7 +12,7 @@ fn sweep_state() -> State {
 
 /// The dialog makes the sweep measurement (−50 dBFS, 3 s, out 1); the mirror lists it;
 /// Space on the sweep pane arms its run.
-fn sweep_armed(t: &mut T) {
+pub(super) fn sweep_armed(t: &mut T) {
     // A sweep pane beside the grid, the transfer pane focused: the dialog goes there.
     if !t.shown(PaneKind::Distortion) {
         t.go(PaneKind::Distortion);

@@ -658,6 +658,21 @@ impl SweepPane {
         }
     }
 
+    /// The plates the operator moves, the legend's among them, and where each shown legend
+    /// row is (the response view's; the other views have none).
+    pub fn plates(
+        &self,
+    ) -> (
+        Vec<ac2_scene::plate::PlateBox>,
+        Option<ac2_scene::legend::LegendBox>,
+        Vec<ac2_scene::legend::LegendHit>,
+    ) {
+        match self {
+            SweepPane::Distortion(s) => (s.plates(), s.legend_box.clone(), s.legend_hits.clone()),
+            _ => Default::default(),
+        }
+    }
+
     /// The IR view's time and value axes, for navigation.
     pub fn ir_axes(&self) -> Option<(ac2_scene::axis::Mapping, ac2_scene::axis::Mapping)> {
         match self {
@@ -713,10 +728,12 @@ pub fn sweep(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now: No
     }
     let freqs = shown.map(|(_, g)| g.centres()).unwrap_or_default();
     let colours = st.curve_colours(theme);
+    let selected = |d: &ac2_proto::model::TraceData| st.rig.selected_trace == Some(d.meta.id);
     let view = shown.map(|(d, _)| SweepView {
         data: d,
         freqs: &freqs,
         color: colours.trace(d.meta.id),
+        selected: selected(d),
     });
     let others = st.compared_sweeps(pane);
     let other_freqs: Vec<Vec<f64>> = others.iter().map(|(_, g)| g.centres()).collect();
@@ -727,9 +744,46 @@ pub fn sweep(st: &AppState, pane: PaneId, theme: &Theme, size: Viewport, now: No
             data: d,
             freqs,
             color: colours.trace(d.meta.id),
+            selected: selected(d),
         })
         .collect();
+    // The pane's own sweep and the keys that play a run of it; with no sweep measurement
+    // on it, what the room view says there.
+    let missing = match st.pane_meas(pane) {
+        Some(m) => {
+            let arm = crate::keys::RESERVED
+                .iter()
+                .find(|(_, c)| *c == crate::keys::CommandId::StimulusArm)
+                .map_or_else(|| "the palette".to_owned(), |(chord, _)| chord.label());
+            ac2_scene::missing::missing_text(
+                &m.config.name,
+                ac2_scene::missing::Missing::NoRun,
+                &arm,
+            )
+        }
+        None => ac2_scene::room::no_sweep_results(&st.new_sweep_key()),
+    };
     SweepPane::Distortion(Box::new(distortion_scene(
-        view, &compared, &status, &pv, theme, size,
+        view, &compared, &missing, &status, &pv, theme, size,
     )))
+}
+
+/// Where the cursor jumps in sweep pane `pane` ([`ac2_scene::distortion::jump`]): along
+/// the fundamental of the run it draws.
+pub fn sweep_jump(
+    st: &AppState,
+    pane: PaneId,
+    shown: ac2_scene::axis::Range,
+    kind: ac2_scene::cursor_jump::Landmark,
+    step: ac2_scene::cursor_jump::Step,
+) -> Option<f64> {
+    let (d, g) = st.pane_sweep(pane)?;
+    let freqs = g.centres();
+    let t = SweepView {
+        data: d,
+        freqs: &freqs,
+        color: ac2_scene::Color::TRANSPARENT,
+        selected: false,
+    };
+    ac2_scene::distortion::jump(&t, &st.view_for(pane), shown, kind, step)
 }

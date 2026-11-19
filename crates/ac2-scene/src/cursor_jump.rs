@@ -170,7 +170,8 @@ pub fn jump(
 }
 
 /// Why a jump does nothing with no frequency pane to read.
-pub const NO_PANE: &str = "the cursor jumps along a transfer magnitude or a spectrum pane";
+pub const NO_PANE: &str =
+    "the cursor jumps along a transfer magnitude, a spectrum or a sweep response pane";
 
 /// The toast when a jump finds nothing: `no higher peak in view stands out by 3 dB`.
 pub fn none_text(kind: Landmark, step: Step, prominence_db: f64) -> String {

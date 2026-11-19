@@ -120,6 +120,20 @@ impl LegendBox {
             .map(|r| r.1)
     }
 
+    /// Where [`draw`] puts the swatch of shown row `k`: a view whose row stands for
+    /// something a plain swatch cannot show (a dashed line, a shade) draws its sample
+    /// there instead.
+    pub(crate) fn swatch(&self, k: usize) -> Option<Rect> {
+        let s = self.plate.scale;
+        let y = self.rows.get(k)?.1;
+        Some(Rect::new(
+            self.rect.x + PAD_X * s + 1.0,
+            y - 4.0 * s,
+            SWATCH_W * s,
+            8.0 * s,
+        ))
+    }
+
     /// The shown rows across the plate, `keys` naming every row of the whole legend (not
     /// only the shown ones).
     pub fn hits(&self, keys: &[TraceKey]) -> Vec<LegendHit> {

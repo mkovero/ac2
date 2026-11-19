@@ -218,7 +218,8 @@ pub fn defaults() -> Vec<Binding> {
         (C::SmoothCoarser, S::Spectrum, k(K::K)),
         (C::SmoothFiner, S::Spectrum, sh(K::K)),
         (C::PhaseView, S::Transfer, sh(K::P)),
-        // The cursor's jumps and mark, alike on both frequency panes: Alt+P to a peak, as
+        // The cursor's jumps and mark, alike on every pane with a response or a spectrum
+        // (the sweep pane's are along its fundamental): Alt+P to a peak, as
         // P tracks them, Alt+N to a notch; Shift with either goes down in frequency, as
         // Shift goes back with V and G. Alt+D drops the mark (Δ: the cursor then reads its
         // differences from there), Alt+Shift+D clears it; Esc stays the stimulus's stop.
@@ -234,6 +235,12 @@ pub fn defaults() -> Vec<Binding> {
         (C::PrevNotch, S::Spectrum, alt_sh(K::N)),
         (C::CursorMark, S::Spectrum, alt(K::D)),
         (C::ClearMark, S::Spectrum, alt_sh(K::D)),
+        (C::NextPeak, S::Distortion, alt(K::P)),
+        (C::PrevPeak, S::Distortion, alt_sh(K::P)),
+        (C::NextNotch, S::Distortion, alt(K::N)),
+        (C::PrevNotch, S::Distortion, alt_sh(K::N)),
+        (C::CursorMark, S::Distortion, alt(K::D)),
+        (C::ClearMark, S::Distortion, alt_sh(K::D)),
         (C::ResetAverage, S::Transfer, k(K::R)),
         (C::ResetAverage, S::Spectrum, k(K::R)),
         (C::ResetAverage, S::Spl, k(K::R)),
@@ -397,6 +404,8 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::NextTrace, "select trace", 80),
                     hint(C::NextView, "view", 75),
                     hint(C::ReferenceHarmonics, "reference", 60),
+                    hint(C::NextPeak, "next peak", 56),
+                    hint(C::CursorMark, "mark", 52),
                     hint(C::MaximisePane, "maximise", 50),
                     hint(C::ClosePane, "close pane", 40),
                 ]

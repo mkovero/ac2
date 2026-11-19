@@ -140,7 +140,7 @@ pub(super) fn corner(plot: Rect, avoid: &[Rect], w: f32, h: f32) -> Rect {
 /// Draws the cursor mark's `text` on its plate, one the operator moves and scales
 /// (`place`, with the pointer on it or not): where it was dropped, else in a bottom
 /// [`corner`] of `plot`. Returns the plate.
-pub(super) fn draw_mark(
+pub(crate) fn draw_mark(
     c: &mut Canvas,
     text: &str,
     plot: Rect,

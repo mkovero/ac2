@@ -815,6 +815,7 @@ pub fn transfer_scene(
 mod extremes;
 mod mark;
 mod values;
+pub(crate) use extremes::draw_mark;
 pub use extremes::{Comb, TfExtremes};
 pub use mark::jump;
 

@@ -813,7 +813,7 @@ fn a_column_reserve_lines_up_the_frequency_axes() {
     let cache = crate::trace::DisplayCache::default();
     let all = column(ViewState::default());
     let tf = crate::tf::transfer_scene(&[], &cache, &status, &all, &theme, size);
-    let dist = crate::distortion::distortion_scene(None, &[], &status, &all, &theme, size);
+    let dist = crate::distortion::distortion_scene(None, &[], "", &status, &all, &theme, size);
     // The spectrograph's own reserve changes nothing on it.
     assert_eq!(sg.plot.right(), size.width - RIGHT_MARGIN);
     let tf_right = tf.panes[0].plot.right();
