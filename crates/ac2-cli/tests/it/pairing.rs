@@ -63,7 +63,8 @@ async fn unauthorized_client_hears_its_fingerprint() {
     let paired: serde_json::Value = serde_json::from_str(&pair.stdout).unwrap();
     let fp = paired["client_fingerprint"].as_str().unwrap().to_owned();
 
-    // Paired, but the daemon's authorized_clients is empty: the handshake is refused.
+    // Paired, but the daemon's authorized_clients is empty: the handshake is refused, and
+    // said so, never taken for silence.
     let remote = format!("127.0.0.1:{port}");
     let r = ac2(&[
         "--key-dir",
@@ -75,11 +76,10 @@ async fn unauthorized_client_hears_its_fingerprint() {
         "status",
     ])
     .await;
-    assert_eq!(r.code, 3, "{}", r.stderr);
+    assert_eq!(r.code, 1, "{}", r.stderr);
     assert!(
         r.stderr.starts_with(&format!(
-            "ac2: daemon at {remote} is not responding — or this client is not authorized on \
-             it (this client's fingerprint: {fp};"
+            "ac2: the daemon has not authorized this client (fingerprint {fp})"
         )),
         "{}",
         r.stderr

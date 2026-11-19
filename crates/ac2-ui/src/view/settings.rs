@@ -506,7 +506,7 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
         ConnState::Connected { target, server, .. } => {
             (target.as_str(), "connected", Some(server.as_str()))
         }
-        ConnState::Failed { target, error } => (target.as_str(), error.as_str(), None),
+        ConnState::Failed { target, error, .. } => (target.as_str(), error.as_str(), None),
     };
     let me = st.my_client_id().map(|c| c.0.clone());
     section(ui, "This app", crate::settings::THIS_APP, ch);

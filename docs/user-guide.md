@@ -85,7 +85,10 @@ daemon). The top bar names the rig shown, after the session line: **pupu ▾**. 
 pick *Rigs…* in the palette (**Ctrl+K**), for the drop-down:
 
 - every rig held, the one shown first in its place; a rig whose daemon stopped answering is
-  greyed and reads *unreachable · retrying* (the app keeps reconnecting on its own);
+  greyed and reads *unreachable · retrying* (the app keeps reconnecting on its own); one
+  whose daemon refuses this app's key reads *has not authorized this app*: Settings ›
+  Connection names this app's key fingerprint and the line to add to `authorized_clients`
+  on that host (then restart its `ac2d`);
 - *Connect a rig…* (also in the palette) opens the connect dialog: *This computer* (its
   `ac2d`, started when none is running), *Simulated rig (no audio)*, a rig it finds or one
   you paired, or an address typed in (`host` or `host:port`). The rig joins the ones held
@@ -102,7 +105,8 @@ was opened on.
 The panes stay where they are when you switch: a pane showing another rig's measurement
 keeps showing it, its title starting with that rig's name (`pupu · Transfer 1`). Its
 windows (settings, edits) open only on its own rig: switch to it first. A pane of a rig
-that is down reads *pupu unreachable · retrying*; one of a closed rig reads *pupu not
+that is down reads *pupu unreachable · retrying* (or *pupu has not authorized this app ·
+Settings › Connection says what to add*); one of a closed rig reads *pupu not
 connected* and stays until you close or reuse it.
 
 **Another rig's measurement in a pane.** The measurement list is rooted at every connected

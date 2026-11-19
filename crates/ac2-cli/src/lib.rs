@@ -80,6 +80,7 @@ impl CliError {
 
     fn json(&self) -> serde_json::Value {
         let code = match self {
+            Self::Client(ClientError::NotAuthorized { .. }) => "not_authorized",
             Self::Client(e) => e.code().map_or("client", ac2_client::code_name),
             Self::NotRunning(_) => "not_running",
             Self::Usage(_) => "usage",

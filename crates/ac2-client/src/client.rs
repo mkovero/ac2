@@ -158,16 +158,11 @@ impl ClientConfig {
         }
     }
 
-    /// What follows "… is not responding" when the daemon does not answer (empty for a
-    /// local daemon): with CURVE, a refused key looks exactly like silence, so this names
-    /// the client's fingerprint and where to authorize it; for another host, the firewall
-    /// hint follows.
+    /// What follows "… is not responding" when the daemon does not answer: for another
+    /// host, the firewall hint (empty for a local daemon). A daemon that refuses this
+    /// client's key does answer, with [`ClientError::NotAuthorized`].
     pub fn not_responding_hints(&self) -> String {
         let mut s = String::new();
-        if let Some(c) = &self.curve {
-            s.push_str(" — ");
-            s.push_str(&crate::keys::unauthorized_hint(c));
-        }
         if let Some(h) = self.endpoints.firewall_hint() {
             s.push_str("; ");
             s.push_str(&h);
@@ -176,17 +171,31 @@ impl ClientConfig {
     }
 }
 
+/// How often a call waiting for its reply looks whether the daemon refused the key.
+const REFUSAL_POLL: Duration = Duration::from_millis(100);
+
 /// The request half: ids, encoding, retry. Shared with the sync and lease tasks.
 #[derive(Debug)]
 pub(crate) struct CallCore {
     io: Io,
     next_id: AtomicU64,
     retry: Retry,
+    /// This client's CURVE key, named when the daemon refuses it.
+    key: Option<ac2_zmq::PublicKey>,
 }
 
 impl CallCore {
     fn next_id(&self) -> RequestId {
         RequestId(self.next_id.fetch_add(1, Ordering::Relaxed))
+    }
+
+    /// The daemon refused this client's key: no reply will come until it is authorized.
+    fn refusal(&self) -> Option<ClientError> {
+        let key = self.key.as_ref()?;
+        self.io.refused().then(|| ClientError::NotAuthorized {
+            fingerprint: key.fingerprint(),
+            key: key.to_z85(),
+        })
     }
 
     pub(crate) async fn call(
@@ -231,19 +240,34 @@ impl CallCore {
         let attempts = retry.retries.saturating_add(1);
         for _ in 0..attempts {
             self.io.send(&bytes)?;
-            match tokio::time::timeout(retry.timeout, &mut rx).await {
-                Ok(Ok(reply)) => {
-                    let reply = reply?;
-                    return match reply.result {
-                        Ok(body) => Ok((body, reply.warnings)),
-                        Err(e) => Err(ClientError::from_proto(e)),
-                    };
+            // In slices: a refused key is known within a handshake, long before the
+            // attempt's timeout.
+            let until = tokio::time::Instant::now() + retry.timeout;
+            loop {
+                let left = until.saturating_duration_since(tokio::time::Instant::now());
+                if left.is_zero() {
+                    break;
                 }
-                Ok(Err(_)) => return Err(ClientError::Closed),
-                Err(_) => continue,
+                match tokio::time::timeout(left.min(REFUSAL_POLL), &mut rx).await {
+                    Ok(Ok(reply)) => {
+                        let reply = reply?;
+                        return match reply.result {
+                            Ok(body) => Ok((body, reply.warnings)),
+                            Err(e) => Err(ClientError::from_proto(e)),
+                        };
+                    }
+                    Ok(Err(_)) => return Err(ClientError::Closed),
+                    Err(_) => {
+                        if let Some(e) = self.refusal() {
+                            return Err(e);
+                        }
+                    }
+                }
             }
         }
-        Err(ClientError::Timeout { op, attempts })
+        Err(self
+            .refusal()
+            .unwrap_or(ClientError::Timeout { op, attempts }))
     }
 
     /// Sends without waiting for the reply (used from `Drop`).
@@ -376,6 +400,8 @@ impl Client {
         if let Some(c) = curve {
             dealer.set_curve_client(c)?;
         }
+        // Before the connect: the daemon's answer to the first handshake is the one wanted.
+        let dealer_mon = dealer.monitor()?;
         dealer.connect(&cfg.endpoints.ctrl)?;
 
         // Q5 step 1: evt and ka are subscribed before anything else is asked. Events get a
@@ -409,7 +435,7 @@ impl Client {
         let received = Arc::clone(&cfg.received_bytes);
         let io = Io::start(
             &ctx,
-            dealer,
+            (dealer, dealer_mon),
             crate::io::SyncSocket::new(sync, sync_mon, &Subscription::sync_set())?,
             sync_tx,
             received,
@@ -420,6 +446,7 @@ impl Client {
             // the daemon dedups by (client id, request id).
             next_id: AtomicU64::new(random_u64() >> 1),
             retry: cfg.retry,
+            key: curve.map(|c| c.keys.public),
         });
         let welcome = hello(&core, &cfg.name).await?;
         let mirror = Mirror::new(cfg.mirror);
@@ -884,17 +911,19 @@ mod retry_tests {
         let router = ctx.socket(SocketType::Router).unwrap();
         router.bind(&ep).unwrap();
         let dealer = ctx.socket(SocketType::Dealer).unwrap();
+        let dealer_mon = dealer.monitor().unwrap();
         dealer.connect(&ep).unwrap();
         // Events are not under test: the sync DEALER is connected to nothing.
         let sync = ctx.socket(SocketType::Dealer).unwrap();
         let mon = sync.monitor().unwrap();
         let sync = crate::io::SyncSocket::new(sync, mon, &[]).unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
-        let io = Io::start(&ctx, dealer, sync, tx, Arc::default()).unwrap();
+        let io = Io::start(&ctx, (dealer, dealer_mon), sync, tx, Arc::default()).unwrap();
         let core = CallCore {
             io,
             next_id: AtomicU64::new(7),
             retry,
+            key: None,
         };
         (core, router, ctx)
     }

@@ -261,21 +261,6 @@ impl KeyDir {
     }
 }
 
-/// The part of a "not responding" message for a CURVE client: a daemon refuses an
-/// unauthorized key by dropping the handshake, which the client cannot tell from silence.
-/// Names this client's fingerprint (what the daemon logs for a refused key) and where to
-/// authorize it.
-pub fn unauthorized_hint(curve: &CurveClient) -> String {
-    format!(
-        "or this client is not authorized on it (this client's fingerprint: {}; the daemon \
-         logs refused fingerprints. Authorize it on the daemon host by adding the line \
-         `<name> {}` to authorized_clients in the ac2 config directory, e.g. \
-         ~/.config/ac2/authorized_clients, then restart ac2d)",
-        curve.keys.public.fingerprint(),
-        curve.keys.public.to_z85()
-    )
-}
-
 fn write_file(path: &Path, text: &str, secret: bool) -> Result<(), ClientError> {
     if secret {
         ac2_paths::write_private_atomic(path, text.as_bytes())
@@ -418,37 +403,21 @@ mod tests {
     }
 
     #[test]
-    fn not_responding_names_the_fingerprint_for_curve_clients() -> Result<(), ClientError> {
+    fn not_responding_hints_only_the_firewall() -> Result<(), ClientError> {
         use crate::{ClientConfig, Endpoints, RemoteAddr};
         let r: RemoteAddr = "10.0.0.20".parse().map_err(ClientError::Invalid)?;
         let mut cfg = ClientConfig::new(Endpoints::remote(&r), "test");
-        // Without CURVE (plain endpoints) only the firewall hint applies.
         let plain = cfg.not_responding_hints();
         assert!(
             plain.starts_with("; if the daemon is running, a firewall"),
             "{plain}"
         );
-        let keys = KeyPair::generate()?;
-        let fp = keys.public.fingerprint();
+        // A refused key is an answer of its own, never part of silence's hints.
         cfg.curve = Some(CurveClient {
             server_key: KeyPair::generate()?.public,
-            keys: keys.clone(),
+            keys: KeyPair::generate()?,
         });
-        let h = cfg.not_responding_hints();
-        assert!(
-            h.starts_with(&format!(
-                " — or this client is not authorized on it (this client's fingerprint: {fp};"
-            )),
-            "{h}"
-        );
-        assert!(
-            h.contains(&format!("`<name> {}`", keys.public.to_z85()))
-                && h.contains("authorized_clients")
-                && h.contains("restart ac2d"),
-            "{h}"
-        );
-        assert!(h.contains("a firewall on its host"), "{h}");
-        // A local daemon: nothing to add.
+        assert_eq!(cfg.not_responding_hints(), plain);
         assert_eq!(
             ClientConfig::local("test").not_responding_hints(),
             String::new()

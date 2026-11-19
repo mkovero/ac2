@@ -127,7 +127,7 @@ fn a_rig_down_and_back() -> R {
     let ep = kettu.daemon.endpoints().clone();
     drop(kettu);
     step_until(&mut h, "kettu down", |a| !connected(a, kettu_id));
-    let away = ac2_scene::chrome::rig_pane_unreachable("kettu");
+    let away = ac2_scene::chrome::rig_pane_down("kettu", ac2_scene::chrome::RigDown::Unreachable);
     step_until(&mut h, "kettu's panes name it unreachable", |_| true);
     assert!(h.query_by_label(&away).is_some(), "{away}");
     assert!(connected(h.state(), pupu_id), "pupu is untouched");

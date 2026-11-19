@@ -971,6 +971,7 @@ fn picks_and_level_ranges_survive_a_reconnect_and_reach_a_fresh_app() {
     };
     t.conn(mirror(daemon()));
     t.conn(ConnEvent::Failed {
+        down: ac2_scene::chrome::RigDown::Unreachable,
         target: "local daemon".into(),
         error: "lost".into(),
         retry_in: std::time::Duration::from_secs(1),

@@ -236,7 +236,19 @@ pub enum ConnState {
     Failed {
         target: String,
         error: String,
+        down: ac2_scene::chrome::RigDown,
     },
+}
+
+impl ConnState {
+    /// Why the link is down: `None` while connected. Connecting is not yet an answer.
+    pub fn down(&self) -> Option<ac2_scene::chrome::RigDown> {
+        match self {
+            Self::Connected { .. } => None,
+            Self::Connecting { .. } => Some(ac2_scene::chrome::RigDown::Unreachable),
+            Self::Failed { down, .. } => Some(*down),
+        }
+    }
 }
 
 /// Display edits of a live trace this app keeps: polarity is display only and goes to the

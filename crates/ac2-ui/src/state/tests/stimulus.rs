@@ -145,6 +145,7 @@ fn space_during_a_stop_arms_once_the_stop_lands() {
     let mut t = T::new();
     stopping(&mut t);
     t.conn(ConnEvent::Failed {
+        down: ac2_scene::chrome::RigDown::Unreachable,
         target: "local daemon".into(),
         error: "not responding".into(),
         retry_in: std::time::Duration::from_secs(2),

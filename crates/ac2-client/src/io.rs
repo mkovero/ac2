@@ -15,7 +15,7 @@
 //! nothing to do, and an idle client should not wake the CPU.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -26,10 +26,10 @@ use ac2_proto::{
     CtrlError, DataMessage, DataUp, Event, FlowNotice, FrameData, FrameStamp, Reply, Subscription,
     decode_data_message, decode_reply, peek_envelope,
 };
-use ac2_zmq::{Context, Monitor, PollItem, Socket, SocketType, poll};
+use ac2_zmq::{Context, Monitor, MonitorEvent, PollItem, Socket, SocketType, poll};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::data::{handshook, send_up};
+use crate::data::send_up;
 use crate::error::ClientError;
 
 /// The sync DEALER, its monitor and what it subscribes to.
@@ -106,13 +106,16 @@ pub(crate) struct Io {
     pub(crate) pending: Pending,
     /// Ctrl or data messages the thread could not decode (dropped and counted).
     pub(crate) malformed: Arc<AtomicU64>,
+    /// The ZAP status of the daemon's last refusal of this client's key (0: none since the
+    /// last handshake that passed).
+    refused: Arc<AtomicU32>,
 }
 
 impl Io {
     /// Starts the thread with sockets already connected.
     pub(crate) fn start(
         ctx: &Context,
-        dealer: Socket,
+        (dealer, dealer_monitor): (Socket, Monitor),
         sync: SyncSocket,
         sync_tx: mpsc::UnboundedSender<SyncIn>,
         received: Arc<AtomicU64>,
@@ -131,8 +134,11 @@ impl Io {
         push.set_linger(Some(Duration::from_millis(500)))?;
         let pending: Pending = Arc::default();
         let malformed = Arc::new(AtomicU64::new(0));
+        let refused = Arc::new(AtomicU32::new(0));
         let worker = Worker {
+            refused: refused.clone(),
             dealer,
+            dealer_monitor,
             sync,
             pull,
             pending: pending.clone(),
@@ -149,7 +155,14 @@ impl Io {
             thread: Mutex::new(Some(thread)),
             pending,
             malformed,
+            refused,
         })
+    }
+
+    /// Whether the daemon refused this client's key at its last handshake on the ctrl
+    /// socket, the one every request goes through.
+    pub(crate) fn refused(&self) -> bool {
+        self.refused.load(Ordering::Acquire) != 0
     }
 
     /// Queues an encoded request for the DEALER.
@@ -184,6 +197,8 @@ impl Drop for Io {
 
 struct Worker {
     dealer: Socket,
+    /// The ctrl DEALER's monitor: how the daemon answered its handshakes.
+    dealer_monitor: Monitor,
     sync: SyncSocket,
     pull: Socket,
     pending: Pending,
@@ -191,9 +206,35 @@ struct Worker {
     malformed: Arc<AtomicU64>,
     /// Bytes received from the daemon ([`ClientConfig::received_bytes`](crate::ClientConfig)).
     received: Arc<AtomicU64>,
+    /// See [`Io::refused`].
+    refused: Arc<AtomicU32>,
 }
 
 impl Worker {
+    /// Drains the sync monitor: whether a handshake passed (a new connection to the
+    /// daemon, which knows nothing of this one's subscriptions).
+    fn sync_events(&self) -> bool {
+        let mut passed = false;
+        while let Ok(Some(ev)) = self.sync.monitor.try_recv() {
+            passed |= ev.event == MonitorEvent::HandshakeSucceeded;
+        }
+        passed
+    }
+
+    /// Drains the ctrl monitor: the daemon's refusal of the key, kept until a handshake
+    /// passes.
+    fn ctrl_events(&self) {
+        while let Ok(Some(ev)) = self.dealer_monitor.try_recv() {
+            match ev.event {
+                MonitorEvent::HandshakeSucceeded => self.refused.store(0, Ordering::Release),
+                MonitorEvent::HandshakeFailedAuth { status } => {
+                    self.refused.store(status.max(1), Ordering::Release);
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn count(&self, frames: &[Vec<u8>]) {
         let n: usize = frames.iter().map(Vec::len).sum();
         self.received.fetch_add(n as u64, Ordering::Relaxed);
@@ -206,6 +247,7 @@ impl Worker {
                 PollItem::readable(&self.sync.sock),
                 PollItem::readable(&self.pull),
                 PollItem::readable(self.sync.monitor.socket()),
+                PollItem::readable(self.dealer_monitor.socket()),
             ];
             match poll(&mut items, None) {
                 Ok(_) => {}
@@ -221,10 +263,13 @@ impl Worker {
                 items[2].is_readable(),
                 items[3].is_readable(),
             );
+            if items[4].is_readable() {
+                self.ctrl_events();
+            }
             if d && self.drain_dealer().is_err() {
                 return;
             }
-            if m && handshook(&self.sync.monitor) {
+            if m && self.sync_events() {
                 let _ = self.sync.state();
             }
             if s && self.drain_sync().is_err() {

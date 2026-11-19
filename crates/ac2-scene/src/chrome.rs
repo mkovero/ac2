@@ -115,17 +115,31 @@ pub const RIG_SWITCH_WINDOW_OPEN: &str = "close the window first: it acts on the
 /// What a rig whose link lost its daemon is, in the drop-down and on its panes.
 pub const RIG_UNREACHABLE: &str = "unreachable · retrying";
 
+/// What a rig whose daemon refuses this app's key is, in the drop-down and on its panes.
+pub const RIG_NOT_AUTHORIZED: &str = "has not authorized this app";
+
+/// Why a rig's link is down.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RigDown {
+    /// No answer yet: the daemon is not running or not reachable from here; the app
+    /// retries.
+    Unreachable,
+    /// The daemon answers but its authorized clients do not list this app's key: retrying
+    /// cannot help until the key is added on that host.
+    NotAuthorized,
+}
+
 /// The rigs drop-down's row closing the rig shown.
 pub fn rig_close(name: &str) -> String {
     format!("Close {name}")
 }
 
 /// A rig's row in the rigs drop-down: its name, and why it is greyed when its link is down.
-pub fn rig_row(name: &str, reachable: bool) -> String {
-    if reachable {
-        name.to_owned()
-    } else {
-        format!("{name} · {RIG_UNREACHABLE}")
+pub fn rig_row(name: &str, down: Option<RigDown>) -> String {
+    match down {
+        None => name.to_owned(),
+        Some(RigDown::Unreachable) => format!("{name} · {RIG_UNREACHABLE}"),
+        Some(RigDown::NotAuthorized) => format!("{name} · {RIG_NOT_AUTHORIZED}"),
     }
 }
 
@@ -134,9 +148,15 @@ pub fn rig_pane_title(rig: &str, title: &str) -> String {
     format!("{rig} · {title}")
 }
 
-/// What a pane of a rig whose link is down shows instead of its content.
-pub fn rig_pane_unreachable(rig: &str) -> String {
-    format!("{rig} {RIG_UNREACHABLE}")
+/// What a pane of a rig whose link is down shows instead of its content. A refused key
+/// points where the line to add is spelled out.
+pub fn rig_pane_down(rig: &str, down: RigDown) -> String {
+    match down {
+        RigDown::Unreachable => format!("{rig} {RIG_UNREACHABLE}"),
+        RigDown::NotAuthorized => {
+            format!("{rig} {RIG_NOT_AUTHORIZED} · Settings › Connection says what to add")
+        }
+    }
 }
 
 /// What a pane of a closed rig shows: it stays, saying which rig it was.
@@ -165,6 +185,23 @@ pub const RIG_MENU_TIP: &str = "The rig shown: switch to another, connect a rig,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rig_says_why_it_is_down() {
+        assert_eq!(rig_row("pupu", None), "pupu");
+        assert_eq!(
+            rig_row("pupu", Some(RigDown::Unreachable)),
+            "pupu · unreachable · retrying"
+        );
+        assert_eq!(
+            rig_row("kiosk", Some(RigDown::NotAuthorized)),
+            "kiosk · has not authorized this app"
+        );
+        assert_eq!(
+            rig_pane_down("kiosk", RigDown::NotAuthorized),
+            "kiosk has not authorized this app · Settings › Connection says what to add"
+        );
+    }
 
     #[test]
     fn link_lines_by_state() {

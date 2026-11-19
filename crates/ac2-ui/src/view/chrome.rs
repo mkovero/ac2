@@ -214,7 +214,9 @@ pub(super) fn top_bar(app: &mut App, ui: &mut egui::Ui, ch: &Chrome) {
     let now = std::time::Instant::now();
     let link_state = match &st.rig.conn {
         ConnState::Connecting { target } => ac2_scene::chrome::Link::Connecting { target },
-        ConnState::Failed { target, error } => ac2_scene::chrome::Link::Failed { target, error },
+        ConnState::Failed { target, error, .. } => {
+            ac2_scene::chrome::Link::Failed { target, error }
+        }
         ConnState::Connected { target, server, .. } => ac2_scene::chrome::Link::Connected {
             target,
             server,
@@ -552,11 +554,9 @@ fn rig_row_text(
     use crate::state::RigRow;
     match row {
         RigRow::Rig(id) => {
-            let up = st
-                .find_rig(id)
-                .is_some_and(|r| matches!(r.conn, ConnState::Connected { .. }));
-            let text = ac2_scene::chrome::rig_row(&st.rig_name(id), up);
-            (text, if up { ch.text } else { ch.dim })
+            let down = st.find_rig(id).and_then(|r| r.conn.down());
+            let text = ac2_scene::chrome::rig_row(&st.rig_name(id), down);
+            (text, if down.is_none() { ch.text } else { ch.dim })
         }
         RigRow::Connect => (ac2_scene::chrome::RIG_CONNECT.to_owned(), ch.text),
         RigRow::Close(id) => (ac2_scene::chrome::rig_close(&st.rig_name(id)), ch.text),

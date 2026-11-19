@@ -65,13 +65,18 @@ impl AppState {
                     out.push(Request::Devices);
                 }
             }
-            ConnEvent::Failed { target, error, .. } => {
+            ConnEvent::Failed {
+                target,
+                error,
+                down,
+                ..
+            } => {
                 // Whatever daemon answers next, its ids are its own: what is shown waits
                 // for its name.
                 let names = self.meas_names();
                 // The daemon reached next may be another, numbering afresh: names only.
                 self.park_gone_meas(&names, false, &BTreeSet::new(), |_| true);
-                self.rig.failed(target, error);
+                self.rig.failed(target, error, down);
             }
             ConnEvent::Mirror(v) => {
                 let names = self.meas_names();
@@ -863,8 +868,17 @@ impl RigState {
     }
 
     /// The link lost the daemon: nothing it mirrored or was asked holds any more.
-    pub(super) fn failed(&mut self, target: String, error: String) {
-        self.conn = ConnState::Failed { target, error };
+    pub(super) fn failed(
+        &mut self,
+        target: String,
+        error: String,
+        down: ac2_scene::chrome::RigDown,
+    ) {
+        self.conn = ConnState::Failed {
+            target,
+            error,
+            down,
+        };
         self.forget_layout_calls();
         self.pending.select = None;
         self.pending.stack = None;

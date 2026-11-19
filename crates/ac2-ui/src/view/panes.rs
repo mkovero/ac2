@@ -401,8 +401,11 @@ pub(super) fn panes(app: &mut App, ui: &mut egui::Ui, theme: &Theme, ch: &Chrome
                         pane(app, &mut pane_ui, theme, ch, id, rect, stage, &order)
                     });
                 }
-                Some(_) => {
-                    let text = ac2_scene::chrome::rig_pane_unreachable(&app.state.rig_name(r));
+                Some(conn) => {
+                    let down = conn
+                        .down()
+                        .unwrap_or(ac2_scene::chrome::RigDown::Unreachable);
+                    let text = ac2_scene::chrome::rig_pane_down(&app.state.rig_name(r), down);
                     rig_away(app, &mut pane_ui, ch, id, rect, &text);
                 }
                 None => {

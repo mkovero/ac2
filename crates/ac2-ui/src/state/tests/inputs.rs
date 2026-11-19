@@ -7,6 +7,7 @@ fn link_failure_clears_live_state() {
     let mut t = T::new();
     t.st.rig.stimulus.phase = StimPhase::Armed;
     t.conn(ConnEvent::Failed {
+        down: ac2_scene::chrome::RigDown::Unreachable,
         target: "local daemon".into(),
         error: "not responding".into(),
         retry_in: std::time::Duration::from_secs(2),

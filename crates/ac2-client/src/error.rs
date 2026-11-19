@@ -82,6 +82,19 @@ pub enum ClientError {
         /// Cause.
         source: std::io::Error,
     },
+    /// The daemon refused this client's key: CURVE passed, but its `authorized_clients`
+    /// does not list the key, so it answers nothing until it is added there.
+    #[error(
+        "the daemon has not authorized this client (fingerprint {fingerprint}): on the daemon \
+         host, add the line `<name> {key}` to authorized_clients in the ac2 config directory \
+         (e.g. ~/.config/ac2/authorized_clients), then restart ac2d"
+    )]
+    NotAuthorized {
+        /// This client's key fingerprint, as the daemon logs the refused key.
+        fingerprint: String,
+        /// This client's public key (Z85), the line's second word.
+        key: String,
+    },
     /// An argument was invalid before anything was sent.
     #[error("invalid: {0}")]
     Invalid(String),

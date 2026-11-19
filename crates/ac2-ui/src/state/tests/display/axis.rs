@@ -168,6 +168,7 @@ fn an_operator_level_range_is_not_refitted() {
     assert_eq!(t.level(PaneKind::Spectrum), zoomed, "a new run keeps it");
 
     t.conn(ConnEvent::Failed {
+        down: ac2_scene::chrome::RigDown::Unreachable,
         target: "local daemon".into(),
         error: "gone".into(),
         retry_in: std::time::Duration::from_secs(1),

@@ -93,6 +93,7 @@ pub enum ConnEvent {
     Failed {
         target: String,
         error: String,
+        down: ac2_scene::chrome::RigDown,
         retry_in: Duration,
     },
     Mirror(Arc<MirrorView>),
@@ -454,6 +455,7 @@ impl Conn {
                         out.send(ConnEvent::Failed {
                             target: target.describe.clone(),
                             error: format!("runtime: {e}"),
+                            down: ac2_scene::chrome::RigDown::Unreachable,
                             retry_in: Duration::MAX,
                         });
                         return;
@@ -611,6 +613,8 @@ struct Wants {
     period: Duration,
 }
 
+use ac2_scene::chrome::RigDown;
+
 async fn run(target: Target, mut ctl: mpsc::UnboundedReceiver<Ctl>, out: Out) {
     let mut wants = Wants {
         meters: false,
@@ -627,14 +631,26 @@ async fn run(target: Target, mut ctl: mpsc::UnboundedReceiver<Ctl>, out: Out) {
             Ok(Ok(c)) => c,
             Ok(Err(e)) => {
                 let why = describe_err(&e, &target);
-                if wait_retry(&target, &mut ctl, &out, why, &mut wants).await {
+                let down = match e {
+                    ac2_client::ClientError::NotAuthorized { .. } => RigDown::NotAuthorized,
+                    _ => RigDown::Unreachable,
+                };
+                if wait_retry(&target, &mut ctl, &out, (why, down), &mut wants).await {
                     continue;
                 }
                 return;
             }
             Err(_) => {
                 let why = not_responding(&target);
-                if wait_retry(&target, &mut ctl, &out, why, &mut wants).await {
+                if wait_retry(
+                    &target,
+                    &mut ctl,
+                    &out,
+                    (why, RigDown::Unreachable),
+                    &mut wants,
+                )
+                .await
+                {
                     continue;
                 }
                 return;
@@ -660,12 +676,13 @@ async fn wait_retry(
     target: &Target,
     ctl: &mut mpsc::UnboundedReceiver<Ctl>,
     out: &Out,
-    error: String,
+    (error, down): (String, RigDown),
     wants: &mut Wants,
 ) -> bool {
     out.send(ConnEvent::Failed {
         target: target.describe.clone(),
         error,
+        down,
         retry_in: RETRY_EVERY,
     });
     let deadline = tokio::time::sleep(RETRY_EVERY);

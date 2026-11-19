@@ -300,6 +300,7 @@ fn a_rig_going_down_leaves_the_other() {
         &mut t,
         PUPU,
         ConnEvent::Failed {
+            down: ac2_scene::chrome::RigDown::Unreachable,
             target: "pupu".into(),
             error: "gone".into(),
             retry_in: std::time::Duration::from_secs(2),

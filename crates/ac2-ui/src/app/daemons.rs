@@ -328,6 +328,7 @@ impl App {
             r.conn = crate::state::ConnState::Failed {
                 target,
                 error: error.clone(),
+                down: ac2_scene::chrome::RigDown::Unreachable,
             };
         }
         match &self.connect_setup {

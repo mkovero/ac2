@@ -354,6 +354,7 @@ fn hold_and_tracks_start_afresh_after_a_daemon_restart() {
     let held = t.st.daemon().expect("mirrored").clone();
     let restart = |t: &mut T, held: &State, incarnation: u64| {
         t.conn(ConnEvent::Failed {
+            down: ac2_scene::chrome::RigDown::Unreachable,
             target: "tcp://pupu".into(),
             error: "gone".into(),
             retry_in: std::time::Duration::from_secs(1),
