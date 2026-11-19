@@ -882,8 +882,8 @@ and impulse response (**N**, then **G** the new half). The layout is remembered.
 The transfer pane's **impulse response** views show the IR of that pane's measurement as
 linear amplitude, dB re its peak, or energy-time curve (**Shift+G** from magnitude reaches
 the ETC in one step). Coherence is always a view of its own; Settings › Display can also
-draw it over the magnitude. A stopped measurement draws no live IR (its other
-views keep the last curve, tagged `stopped`); a selected capture's stored IR still shows.
+draw it over the magnitude. A stopped measurement keeps its last IR, tagged `stopped`, as
+its other views keep the last curve; a selected capture's stored IR shows instead.
 The keys that act on the measurement work in these views as in the others: **S**, **R**,
 **X** / **Shift+X** (find the delay), **D**, **Y**, **,** / **.** and their Ctrl / Alt forms.
 The keys that read or dress the frequency plot do nothing here (smoothing **K**, peaks
@@ -1127,9 +1127,13 @@ sweep result fits the sweep panes' (as **Shift+Home**, frequency left alone); a 
 by hand stays until the pane shows another measurement (or the next sweep result). The impulse-response views' axes are shared by kind:
 one for the transfer panes' IR views, one for the sweep panes'.
 
-- **Ctrl+I** / **Ctrl+O** zoom it about its middle; **Ctrl+wheel** about the pointer.
+- **Ctrl+I** / **Ctrl+O** zoom it about its middle; **Ctrl+wheel** about the level under
+  the pointer (about the middle while the pointer is beside the level axis: a margin, the
+  banners).
 - **Ctrl+↑** / **Ctrl+↓** pan it by about a tenth of the range; **Shift+wheel** pans
   smoothly. Plain **↑/↓** stay the stimulus level.
+- A view that draws no level axis (the transfer pane's phase, coherence and alignment
+  views) takes none of these: its pane's range stays as it was.
 - **Shift+Home** fits it to what the pane shows (offsets included; a few empty bins far
   below do not stretch it) and resets frequency to 20 Hz – 20 kHz — the way to look at very
   low signals. **Ctrl+Home** restores the defaults (transfer ±30 dB, spectrum 0 … −100 dBFS
@@ -1274,7 +1278,8 @@ spacing), as it does on a spectrum pane: see [Peaks (P)](#peaks-p).
 The legend, the cursor values, the mark's readout, the list of tracked peaks and the
 Programme pane's loudness readout are plates, and every plate takes the same mouse
 (transfer, spectrum, both spectrographs and Programme panes; a spectrum's mark lines ride
-on the cursor values' plate):
+on the cursor values' plate; the impulse-response views and the alignment view have the
+cursor values' plate):
 
 - **Drag** a plate anywhere inside its plot. It stays where it was dropped as the pane
   grows or shrinks (kept as a share of the room around it, so one dropped against an edge
@@ -1322,7 +1327,10 @@ The transfer pane's IR views and the sweep pane's IR views share keys and mouse 
 - Time zooms no closer than four samples and pans at most one IR length outside the IR.
 - A click (or **Shift+T**, palette *Comparison cursor*) puts a time cursor; **Shift+←/→** step
   it (a sample when zoomed in, else 1/100 of the span); it reads `1.25 ms · +0.500 FS` or
-  `1.25 ms · −12.3 dB`.
+  `1.25 ms · −12.3 dB` on the cursor values' plate, under the origin line at the plot's
+  right edge until you drag it ([Moving the plates and their text
+  size](#moving-the-plates-and-their-text-size)). **T** hides the cursor and its plate with
+  the axis labels.
 - Transfer and sweep IR views keep their own zoom and cursor; the log / ETC ranges are in
   `ui.toml` (`[ir_levels]`: `transfer`, `sweep`). A selected transfer trace's stored IR is drawn on the
   transfer IR view ([The impulse-response view](#the-impulse-response-view)).
@@ -2148,6 +2156,18 @@ The curve of the alignment itself is the aligned sum (legend `Sub ↔ Main align
 reads **NO FIT** with the reason. ac2 applies no delay itself: dial it into the DSP and
 measure again.
 
+The frequency cursor is the other panes' (a click, **Shift+T**): a line through both plots
+and, on the cursor values' plate, the frequency and each pair of curves there:
+
+```
+99.2 Hz
+as measured  −130°  −7.5 dB
+aligned  +14°  −0.1 dB
+```
+
+The summation axis is fixed (−30 … +3 dB): the level keys and **Ctrl+wheel** /
+**Shift+wheel** change nothing here.
+
 ```
 ac2 align new "Sub" "trace:Main alone" --band 60..120 [--max-delay 50ms] [--temp 20c] [--json]
 ac2 align show "Sub ↔ Main alone" [--temp 18c] [--json]
@@ -2294,10 +2314,13 @@ ac2 delay set main-l 600.25samples          # move it to a value as D does (the 
 
 The inserted delay is the time origin of the transfer pane's IR view. It carries the
 measurement's banners (NO REFERENCE, NO SIGNAL, AUDIO STOPPED, DAEMON NOT RESPONDING); a
-kept IR is tagged and dimmed like its transfer curve. A stopped measurement's last IR is not
-drawn (it is no longer the system's). Without an IR it says why: `Main L stopped — S starts
-it`, `no reference: nothing is playing — Space arms, Enter starts the stimulus` (or
-`armed — …`, or `nothing is driving the loopback`), `no signal: …`.
+kept IR is tagged and dimmed like its transfer curve. A stopped measurement's last IR
+stays drawn at full brightness, tagged `stopped` after the origin line, with none of the
+stream's banners: what the magnitude view does with its last curve. Without an IR it says
+why: `Main L stopped — S starts it` (stopped before its first IR), `no reference: nothing
+is playing — Space arms, Enter starts the stimulus` (or `armed — …`, or `nothing is driving
+the loopback`), `no signal: …`; a pane whose pick is no transfer measurement says `no
+transfer measurement — Ctrl+M makes one`.
 
 **A stored IR.** A transfer capture keeps the IR shown at that moment (every sample, t = 0
 at the trace's inserted delay), unless there was none (no reference). **Select** the trace

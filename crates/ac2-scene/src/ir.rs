@@ -41,9 +41,18 @@ pub struct IrScene {
     pub room: Option<crate::room::RoomTable>,
     /// The cursor's reading, when the cursor is on.
     pub cursor: Option<IrCursor>,
+    /// The plate the cursor's reading is on.
+    pub readout_box: Option<crate::plate::PlateBox>,
     /// Simulated reflections marked over a sweep's measured response
     /// ([`crate::room::sim_marks`]); `None` when none are drawn.
     pub sim: Option<crate::room::sim_marks::SimMarks>,
+}
+
+impl IrScene {
+    /// The plates the operator moves.
+    pub fn plates(&self) -> Vec<crate::plate::PlateBox> {
+        self.readout_box.into_iter().collect()
+    }
 }
 
 /// What the IR cursor reads: the sample nearest its time, as the view draws it.
@@ -58,7 +67,7 @@ pub struct IrCursor {
 }
 
 impl IrCursor {
-    /// The readout line: `1.25 ms · +0.500 FS`.
+    /// The cursor values' row: `1.25 ms · +0.500 FS`.
     pub fn text(&self) -> String {
         format!("{} · {}", self.time, self.value)
     }
@@ -398,17 +407,24 @@ fn draw(
         .as_ref()
         .filter(|_| chrome.cursor())
         .and_then(|_| cursor_reading(frame, mode, axes));
-    if let Some(cur) = &cursor {
-        canvas::vline(&mut c.overlay, plot, xm.to_px(cur.t_ms), theme.cursor);
-        // Under the origin line, right-aligned with it.
-        c.overlay.labels.push(label(
-            cur.text(),
-            [plot.right() - 6.0, origin_y + 1.4 * theme.small_font_size],
-            anchor(HAlign::Right, VAlign::Top),
-            theme.small_font_size,
-            theme.text,
-        ));
-    }
+    let readout_box = cursor.as_ref().map(|cur| {
+        // Under the plate: the line runs behind it, never through its text.
+        canvas::vline(&mut c.data, plot, xm.to_px(cur.t_ms), theme.cursor);
+        // Placed by the scene: under the origin line, at the plot's right edge.
+        crate::plate::lines_plate(
+            &mut c.overlay,
+            crate::plate::PlateKind::Readout,
+            &[(cur.text(), theme.text)],
+            [
+                plot.right() - crate::legend::INSET,
+                origin_y + 1.4 * theme.small_font_size,
+            ],
+            &view.plates.readout,
+            view.plate_hover,
+            plot,
+            theme,
+        )
+    });
     if let Some(n) = &note {
         c.overlay.labels.push(label(
             n.clone(),
@@ -431,6 +447,7 @@ fn draw(
         banners: strip.rows,
         room: None,
         cursor,
+        readout_box,
         sim: None,
     }
 }
@@ -472,7 +489,8 @@ pub fn note_lines(note: &str, width: f32, theme: &Theme) -> (Vec<String>, f32) {
 /// Why the IR pane has no picture of its transfer measurement's impulse response.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IrMissing {
-    /// The measurement is stopped: its last IR is not drawn as live.
+    /// The measurement was stopped before its first IR frame arrived (its last IR stays
+    /// drawn, tagged stopped).
     Stopped,
     /// The session's audio stopped.
     AudioStopped,
@@ -557,6 +575,7 @@ pub fn missing_scene(
         banners: strip.rows,
         room: None,
         cursor: None,
+        readout_box: None,
         sim: None,
     }
 }

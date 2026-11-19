@@ -161,7 +161,8 @@ fn build_scene(
     let mut legend_hits = Vec::new();
     let (scene, axes) = match pane {
         PaneKind::Transfer if view.shows_ir() => {
-            let s = scenes::ir(st, id, &app.keymap, theme, vp, now)?;
+            let s = scenes::ir(st, id, &app.keymap, theme, vp, now);
+            plates = s.plates();
             // Navigation needs an IR: the empty pane's axes only frame its reason.
             let ir = st
                 .ir_extent(IrPane::Live)
@@ -176,6 +177,7 @@ fn build_scene(
         }
         PaneKind::Transfer if view.modes.transfer == TransferView::Alignment => {
             let s = scenes::alignment(st, id, theme, vp, now);
+            plates = s.plates();
             (
                 s.scene,
                 Axes {
@@ -353,9 +355,7 @@ fn build_scene(
 }
 
 fn placeholder(id: PaneId, app: &App) -> String {
-    let modes = app.state.pane_modes(id);
     match app.state.layout.kind(id) {
-        PaneKind::Transfer if modes.transfer.ir().is_some() => "no transfer measurement".into(),
         // An unpicked pane's hint box says what to do; the same words under it would only
         // be cut off by the pane's edges.
         PaneKind::Spl if app.state.pane_unpicked(id) => String::new(),

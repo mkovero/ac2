@@ -218,7 +218,7 @@ fn a_hides_and_shows_the_selected_measurement() {
             .map(String::as_str),
         Some("Main L hidden")
     );
-    let ir = crate::scenes::ir(&t.st, t.ir_pane(), &t.keys, &theme, SIZE, now()).expect("scene");
+    let ir = crate::scenes::ir(&t.st, t.ir_pane(), &t.keys, &theme, SIZE, now());
     assert_eq!(ir.note.as_deref(), Some("Main L hidden — A shows it"));
     // Remembered by name.
     assert_eq!(

@@ -244,3 +244,103 @@ fn view_without_an_alignment_says_how_to_make_one() {
     assert_eq!(s.readout, None);
     assert!(texts(&s.scene).contains(&why), "{:?}", texts(&s.scene));
 }
+
+/// The shared frequency cursor in the alignment view: a line in both plots at the column
+/// it snapped to and, on the cursor values' plate, the frequency and what each pair of
+/// curves reads there, in the units the magnitude view's readout gives them in.
+#[test]
+fn the_cursor_reads_both_plots_on_the_readout_plate() {
+    use crate::plate::PlateKind;
+    use crate::view::PlotChrome;
+    let freqs: Vec<f64> = (0..100).map(|i| 20.0 * 1.06f64.powi(i)).collect();
+    let state = fit_state();
+    let mut cv = curves(freqs.len());
+    // Column 40: 20 · 1.06⁴⁰ = 205.7 Hz.
+    cv.phase_before[40] = 120.04;
+    cv.sum_before[40] = -9.46;
+    cv.sum_after[40] = f32::NAN;
+    let color = Color::rgb(0.2, 0.6, 1.0);
+    let shown = Shown {
+        a: "Sub",
+        b: "Main",
+        band: band(60.0, 120.0),
+        state: &state,
+        curves: &cv,
+        freqs: &freqs,
+        color,
+    };
+    let theme = Theme::dark();
+    let draw = |v: &ViewState| {
+        alignment_scene(&Content::Shown(shown), &Status::default(), v, &theme, vp())
+    };
+    let off = draw(&ViewState::default());
+    assert_eq!((off.cursor.clone(), off.readout_box), (None, None));
+    let lines_off = off.scene.layers[1].polylines.len();
+
+    let mut v = ViewState {
+        cursor_hz: Some(200.0),
+        ..ViewState::default()
+    };
+    let s = draw(&v);
+    let cur = s.cursor.clone().expect("cursor");
+    assert!((cur.freq_hz - freqs[40]).abs() < 1e-9, "{cur:?}");
+    assert_eq!(cur.freq, "206 Hz");
+    assert_eq!(cur.measured, "as measured  +120°  −9.5 dB");
+    assert_eq!(cur.aligned, "aligned  +3°  —");
+    // A line in each plot, under the plate.
+    let x = s.x_axis.mapping.to_px(freqs[40]);
+    let cursor_lines: Vec<_> = s.scene.layers[1].polylines[lines_off..].iter().collect();
+    assert_eq!(cursor_lines.len(), 2);
+    for (l, (_, plot)) in cursor_lines.iter().zip(&s.plots) {
+        assert!((l.points[0][0] - x).abs() < 1e-3 && l.stroke == theme.cursor);
+        assert_eq!(l.clip, Some(*plot));
+    }
+    // The plate: three rows, the curves' rows in their colours, over both plots.
+    let b = s.readout_box.expect("plate");
+    assert_eq!(s.plates(), vec![b]);
+    assert_eq!(b.kind, PlateKind::Readout);
+    assert_eq!(b.area.y, s.plots[0].1.y);
+    assert_eq!(b.area.bottom(), s.plots[1].1.bottom());
+    let rows: Vec<(&str, Color)> = s.scene.layers[2]
+        .labels
+        .iter()
+        .filter(|l| l.pos[1] > b.rect.y && l.pos[1] < b.rect.bottom() && l.pos[0] > b.rect.x)
+        .map(|l| (l.text.as_str(), l.color))
+        .collect();
+    assert_eq!(
+        rows,
+        vec![
+            ("206 Hz", theme.text),
+            ("as measured  +120°  −9.5 dB", theme.text_dim),
+            ("aligned  +3°  —", color),
+        ]
+    );
+    // Dragged: where it was dropped, at the size set.
+    v.plates.readout.move_to(0.0, 1.0);
+    v.plates.readout.set_scale(1.5);
+    let m = draw(&v).readout_box.expect("plate");
+    assert_eq!(m.scale, 1.5);
+    assert_eq!(m.rect.x, b.area.x + crate::legend::INSET);
+    assert_eq!(m.rect.bottom(), b.area.bottom() - crate::legend::INSET);
+    // T's steps hide the cursor and its plate as in the other views.
+    for chrome in [PlotChrome::Full, PlotChrome::NoGrid, PlotChrome::Bare] {
+        v.chrome = chrome;
+        assert_eq!(
+            draw(&v).readout_box.is_some(),
+            chrome.cursor(),
+            "{chrome:?}"
+        );
+    }
+    // Nothing to read without curves.
+    let empty = alignment_scene(
+        &Content::Empty("none"),
+        &Status::default(),
+        &ViewState {
+            cursor_hz: Some(200.0),
+            ..ViewState::default()
+        },
+        &theme,
+        vp(),
+    );
+    assert_eq!((empty.cursor, empty.readout_box), (None, None));
+}

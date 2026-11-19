@@ -272,8 +272,7 @@ fn the_ir_pane_zooms_pans_and_reads_from_the_mouse() -> R {
         &Theme::dark(),
         size,
         now,
-    )
-    .ok_or("scene")?;
+    );
     let cur = s.cursor.ok_or("no cursor")?;
     assert!(cur.t_ms.abs() <= full.dt_ms / 2.0 + 1e-9, "{cur:?}");
     let f = d.st.ir_frame_of(IrPane::Live).ok_or("frame")?;
@@ -819,9 +818,8 @@ fn a_typed_delay_moves_only_its_live_curve() -> R {
     Ok(())
 }
 
-/// The IR pane of a stopped transfer measurement, maximised: its last IR is no longer the
-/// system's, so the plot says S starts it, with no STALE banner. Started again (S from
-/// here), the frequency panes' keys zoom its live IR: I twice the time axis, Ctrl+I the
+/// The IR pane of a stopped transfer measurement, maximised: its last IR stays drawn,
+/// tagged stopped, with no STALE banner. Started again (S from here), the frequency panes' keys zoom its live IR: I twice the time axis, Ctrl+I the
 /// amplitude, and the cursor toggle puts the time cursor on it.
 #[test]
 fn ir_pane_of_a_stopped_measurement() -> R {
@@ -852,10 +850,9 @@ fn ir_pane_of_a_stopped_measurement() -> R {
             && s.layout.focused().shows_ir()
             && s.meas(MAIN_L).is_some_and(|m| !m.running)
     })?;
-    let s = scene(&d.st, &d.keys).ok_or("IR scene")?;
-    let note = s.note.unwrap_or_default();
-    assert_eq!(note, "Main L stopped — S starts it");
-    assert_eq!(s.tag, None);
+    let s = scene(&d.st, &d.keys);
+    assert_eq!(s.note, None);
+    assert_eq!(s.tag.as_deref(), Some("stopped"));
     assert!(s.banners.iter().all(|b| !b.text.starts_with("STALE")));
 
     d.key("S");
@@ -864,7 +861,8 @@ fn ir_pane_of_a_stopped_measurement() -> R {
     })?;
     let keys = d.keys.clone();
     d.until("no note on the live IR", |s| {
-        scene(s, &keys).is_some_and(|x| x.note.is_none())
+        let x = scene(s, &keys);
+        x.note.is_none() && x.tag.is_none()
     })?;
     d.key("I");
     d.key("I");

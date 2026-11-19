@@ -70,7 +70,8 @@ fn no_reference_reminds_of_the_stimulus_keys() {
 }
 
 /// The alignment view of "Delay tower ↔ Main L": the readout says what to do, the phase
-/// difference and the summation before (dim) and after (bright), the band shaded.
+/// difference and the summation before (dim) and after (bright), the band shaded; the
+/// frequency cursor, a line through both plots, reads the four curves on its plate.
 #[test]
 fn alignment_view() {
     if !have_gpu("alignment_view") {
@@ -98,6 +99,8 @@ fn alignment_view() {
             v.modes.transfer = ac2_ui::state::TransferView::Alignment;
         }
     }
+    h.state_mut()
+        .dispatch(ac2_ui::state::Msg::CursorAt(Some(100.0)));
     {
         let st = &h.state().state;
         let s = ac2_ui::scenes::alignment(
@@ -114,6 +117,13 @@ fn alignment_view() {
         assert_eq!(
             r.headline,
             "Delay tower: delay 4.21 ms · 1.44 m @ 20 °C · polarity normal"
+        );
+        let cur = s.cursor.expect("the cursor's reading");
+        assert!(cur.measured.starts_with("as measured  "), "{cur:?}");
+        assert!(cur.aligned.starts_with("aligned  "), "{cur:?}");
+        assert_eq!(
+            s.readout_box.map(|b| b.kind),
+            Some(ac2_scene::plate::PlateKind::Readout)
         );
         assert_eq!(
             r.lines[1],

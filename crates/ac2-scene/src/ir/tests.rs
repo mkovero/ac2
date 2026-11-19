@@ -384,8 +384,8 @@ fn labels(s: &IrScene) -> Vec<String> {
         .collect()
 }
 
-/// The cursor reads the sample nearest its time as each view draws it, on the line under
-/// the origin, with a line at that sample's time.
+/// The cursor reads the sample nearest its time as each view draws it, on the cursor
+/// values' plate, with a line at that sample's time.
 #[test]
 fn the_cursor_reads_time_and_value_in_every_mode() {
     let mut f = frame();
@@ -419,7 +419,7 @@ fn the_cursor_reads_time_and_value_in_every_mode() {
     assert!(labels(&lin).contains(&cur.text()));
     let x = lin.x_axis.mapping.to_px(0.4);
     assert!(
-        lin.scene.layers[2]
+        lin.scene.layers[1]
             .polylines
             .iter()
             .any(|p| (p.points[0][0] - x).abs() < 1e-3),
@@ -462,7 +462,125 @@ fn the_cursor_reads_time_and_value_in_every_mode() {
         },
     );
     assert_eq!(off.cursor, None);
-    assert!(off.scene.layers[2].polylines.is_empty());
+    assert_eq!(off.readout_box, None);
+    assert_eq!(off.scene.layers[1].polylines.len(), 1, "the curve alone");
+}
+
+/// The cursor's reading is on the plate every frequency view puts its cursor values on:
+/// under the origin line at the plot's right edge until dragged, then where it was dropped
+/// at the text size set, inside the plot; T's step without a cursor takes it away.
+#[test]
+fn the_cursor_reading_is_on_the_readout_plate() {
+    use crate::plate::{PlateHover, PlateKind};
+    let f = frame();
+    let axes = IrAxes {
+        cursor_ms: Some(0.4),
+        ..IrAxes::default()
+    };
+    let theme = Theme::dark();
+    let draw = |v: &ViewState| {
+        ir_scene(
+            &f,
+            Color::WHITE,
+            None,
+            &IrCtx {
+                status: &Status::default(),
+                view: v,
+                axes: &axes,
+                style: Style {
+                    chrome: v.chrome,
+                    theme: &theme,
+                },
+                size: SIZE,
+            },
+        )
+    };
+    let text = "0.4 ms · +0.0500 FS";
+    let row = |s: &IrScene| {
+        s.scene.layers[2]
+            .labels
+            .iter()
+            .find(|l| l.text == text)
+            .cloned()
+            .expect("the reading's row")
+    };
+    let fill = |s: &IrScene, b: &crate::plate::PlateBox| {
+        s.scene.layers[2]
+            .rects
+            .iter()
+            .find(|r| r.rect == b.rect)
+            .expect("the plate's fill")
+            .color
+    };
+    let auto = draw(&view(IrMode::Linear));
+    let b = auto.readout_box.expect("plate");
+    assert_eq!(auto.plates(), vec![b]);
+    assert_eq!(
+        (b.kind, b.area, b.scale),
+        (PlateKind::Readout, auto.plot, 1.0)
+    );
+    assert_eq!(b.rect.right(), auto.plot.right() - crate::legend::INSET);
+    let origin = auto.scene.layers[0]
+        .labels
+        .iter()
+        .find(|l| l.text.starts_with("t = 0"))
+        .expect("origin line");
+    assert!(b.rect.y > origin.pos[1], "under the origin line");
+    let l = row(&auto);
+    assert_eq!(l.size, theme.small_font_size);
+    assert!(b.rect.x < l.pos[0] && l.pos[0] <= b.rect.right());
+    assert!(b.rect.y < l.pos[1] && l.pos[1] < b.rect.bottom());
+    assert_eq!(fill(&auto, &b).a, theme.plate_alpha);
+
+    // Dragged to the bottom-left at twice the text size.
+    let mut v = view(IrMode::Linear);
+    v.plates.readout.move_to(0.0, 1.0);
+    v.plates.readout.set_scale(2.0);
+    let moved = draw(&v);
+    let m = moved.readout_box.expect("plate");
+    assert_eq!(m.scale, 2.0);
+    assert_eq!(m.rect.x, moved.plot.x + crate::legend::INSET);
+    assert_eq!(m.rect.bottom(), moved.plot.bottom() - crate::legend::INSET);
+    assert_eq!(row(&moved).size, 2.0 * theme.small_font_size);
+    assert!(m.rect.w > 1.9 * b.rect.w && m.rect.h > 1.9 * b.rect.h);
+
+    // A solid plate background applies to it, and the pointer on it lights it.
+    let solid = Theme {
+        plate_alpha: crate::plate::PlateBackground::Solid.alpha(),
+        ..Theme::dark()
+    };
+    let s = ir_scene(
+        &f,
+        Color::WHITE,
+        None,
+        &IrCtx {
+            status: &Status::default(),
+            view: &view(IrMode::Linear),
+            axes: &axes,
+            style: Style {
+                chrome: PlotChrome::Full,
+                theme: &solid,
+            },
+            size: SIZE,
+        },
+    );
+    assert_eq!(fill(&s, &s.readout_box.expect("plate")).a, 1.0);
+    let mut v = view(IrMode::Linear);
+    v.plate_hover = Some(PlateHover {
+        kind: PlateKind::Readout,
+        grip: false,
+    });
+    let hot = draw(&v);
+    assert_eq!(fill(&hot, &hot.readout_box.expect("plate")).a, 1.0);
+
+    // Every chrome step without a cursor: no line, no plate.
+    for chrome in [PlotChrome::Full, PlotChrome::NoGrid, PlotChrome::Bare] {
+        let mut v = view(IrMode::Linear);
+        v.chrome = chrome;
+        let s = draw(&v);
+        assert_eq!(s.readout_box.is_some(), chrome.cursor(), "{chrome:?}");
+        assert_eq!(s.cursor.is_some(), chrome.cursor(), "{chrome:?}");
+    }
 }
 
 /// The axes as navigated: a chosen amplitude range (linear) or dB range (log / ETC) and

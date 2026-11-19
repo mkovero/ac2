@@ -145,3 +145,40 @@ fn ir_sim_overlay() {
     let img = render_on(gpu, &mut r, &sc.scene, 1.0, theme.background);
     golden(name, &img, TEXT);
 }
+
+/// The IR view's cursor: a line at the sample it reads and the reading on the cursor
+/// values' plate, under the origin line at the plot's right edge.
+#[test]
+fn ir_view_cursor_plate() {
+    let name = "ir_view_cursor_plate";
+    let Some(gpu) = gpu(name) else {
+        return;
+    };
+    let theme = Theme::dark();
+    let view = ViewState::default();
+    let axes = ac2_scene::view::IrAxes {
+        cursor_ms: Some(20.0),
+        ..view.ir.axes
+    };
+    let sc = ac2_scene::ir::ir_scene(
+        &frame(),
+        theme.traces[0],
+        Some(ac2_scene::time::Freshness::Stopped { age_s: 4.0 }),
+        &ac2_scene::ir::IrCtx {
+            status: &Status::default(),
+            view: &view,
+            axes: &axes,
+            style: Style {
+                chrome: view.chrome,
+                theme: &theme,
+            },
+            size: Viewport::new(900.0, 380.0),
+        },
+    );
+    assert_eq!(sc.tag.as_deref(), Some("stopped"));
+    let plate = sc.readout_box.expect("the cursor values' plate");
+    assert!(plate.rect.x >= sc.plot.x && plate.rect.right() <= sc.plot.right());
+    let mut r = renderer(gpu);
+    let img = render_on(gpu, &mut r, &sc.scene, 1.0, theme.background);
+    golden(name, &img, TEXT);
+}

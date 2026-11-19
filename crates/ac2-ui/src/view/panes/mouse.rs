@@ -240,18 +240,16 @@ pub(super) fn navigate(
     }
     let free = legend == LegendTook::Nothing;
     if let Some((which, x, y)) = axes.ir {
-        navigate_ir(app, ui, resp, plot_rect, which, x, y);
+        navigate_ir(app, ui, resp, plot_rect, which, x, y, free);
         return;
     }
     if pane == PaneKind::Spl {
         navigate_strip(app, ui, resp, id, plot_rect, axes.strip);
         return;
     }
-    if resp.hovered()
-        && app.state.level_range(id).is_some()
-        && (pane != PaneKind::Distortion
-            || app.state.pane_modes(id).sweep == ac2_scene::view::SweepMode::Response)
-    {
+    // Only a view that draws the pane's level axis takes its gestures: the range of a pane
+    // showing phase, coherence or an alignment is not on screen to be changed.
+    if resp.hovered() && app.state.draws_level_axis(id) {
         // egui turns Ctrl+wheel into a zoom factor and Shift+wheel into horizontal scroll.
         let (zoom, shift, dx, pos) = ui.input(|i| {
             let zoom = if i.modifiers.command {
@@ -266,19 +264,7 @@ pub(super) fn navigate(
                 i.pointer.hover_pos(),
             )
         });
-        // A log level axis is the distortion in percent of the fundamental: the level
-        // under the pointer is the dB that percent stands for.
-        let about_db = axes
-            .y_level
-            .zip(pos)
-            .map(|(m, p)| {
-                let v = m.from_px(p.y - plot_rect.min.y);
-                match m.scale {
-                    ac2_scene::axis::Scale::Linear => v,
-                    ac2_scene::axis::Scale::Log => ac2_scene::distortion::db_of_percent(v),
-                }
-            })
-            .filter(|v| v.is_finite());
+        let about_db = zoom_about_db(axes.y_level, pos.map(|p| p.y - plot_rect.min.y));
         if zoom != 1.0 {
             app.dispatch(Msg::LevelZoom {
                 pane: id,
@@ -376,6 +362,25 @@ pub(super) fn navigate(
             });
         }
     }
+}
+
+/// The level (dB) a Ctrl+wheel zoom with the pointer at height `y` (pixels of the pane's
+/// scene) is about: the level under the pointer while it is on the level axis `m`. Off the
+/// axis (a margin, the banners, the room under the plot) there is no level under it, and one
+/// extrapolated from beyond the axis would slide the range away from what is shown: `None`,
+/// the middle of the range. A log level axis is the distortion in percent of the
+/// fundamental: the level there is the dB that percent stands for.
+pub(super) fn zoom_about_db(m: Option<Mapping>, y: Option<f32>) -> Option<f64> {
+    let (m, y) = m.zip(y)?;
+    if !(m.px_lo.min(m.px_hi)..=m.px_lo.max(m.px_hi)).contains(&y) {
+        return None;
+    }
+    let v = m.from_px(y);
+    let db = match m.scale {
+        ac2_scene::axis::Scale::Linear => v,
+        ac2_scene::axis::Scale::Log => ac2_scene::distortion::db_of_percent(v),
+    };
+    db.is_finite().then_some(db)
 }
 
 /// The operator works on pane `id` while a pointer button is down on it and when the wheel
@@ -528,7 +533,9 @@ fn navigate_3d(app: &mut App, ui: &egui::Ui, resp: &egui::Response, id: PaneId) 
 
 /// The mouse on an IR picture, as on a frequency pane: wheel zooms time about the pointer,
 /// a drag pans it, Ctrl+wheel zooms the value axis about the pointer, Shift+wheel pans it,
-/// a click places the cursor.
+/// a click places the cursor. On a plate (`free` false) a click places no cursor behind it
+/// and a drag is the plate's.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn navigate_ir(
     app: &mut App,
     ui: &egui::Ui,
@@ -537,14 +544,16 @@ pub(super) fn navigate_ir(
     which: IrPane,
     x: Mapping,
     y: Mapping,
+    free: bool,
 ) {
     let ms_at = |pos: egui::Pos2| x.from_px(pos.x - plot_rect.min.x);
-    if resp.clicked()
+    if free
+        && resp.clicked()
         && let Some(p) = resp.interact_pointer_pos()
     {
         app.dispatch(Msg::IrNav(which, IrNavMsg::Cursor { t_ms: ms_at(p) }));
     }
-    if resp.dragged() {
+    if free && resp.dragged() {
         let dx = resp.drag_delta().x;
         let len = x.len_px();
         if dx != 0.0 && len > 0.0 {

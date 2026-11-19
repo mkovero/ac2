@@ -519,12 +519,12 @@ fn with_transfer<R>(
     f(&traces, &live)
 }
 
-/// The IR of the focused transfer measurement, under the banners of its transfer stream
-/// (protection flags, stopped, audio stopped, daemon silence), tagged as its transfer curve
-/// is; without its IR frame, an empty plot that says why. `None` without a transfer
-/// measurement. While the selected trace is a stored transfer trace with an IR that the
-/// pane's transfer group draws ([`AppState::stored_ir`]), that IR instead, named as its
-/// legend row is.
+/// The IR of the transfer measurement pane `pane` shows, under the banners of its transfer
+/// stream (protection flags, audio stopped, daemon silence), tagged as its transfer curve
+/// is: a stopped measurement keeps its last IR, tagged `stopped`, as its response is kept.
+/// Without its IR frame, or without a transfer measurement, an empty plot that says why.
+/// While the selected trace is a stored transfer trace with an IR that the pane's transfer
+/// group draws ([`AppState::stored_ir`]), that IR instead, named as its legend row is.
 pub fn ir(
     st: &AppState,
     pane: PaneId,
@@ -532,50 +532,68 @@ pub fn ir(
     theme: &Theme,
     size: Viewport,
     now: Now,
-) -> Option<IrScene> {
+) -> IrScene {
     use ac2_scene::ir::{IrMissing, missing_scene, missing_text};
     let view = st.view_for(pane);
-    if let Some(d) = st.stored_ir(Some(pane)) {
-        // A stored trace is no live stream: none of the measurement's banners apply to it.
-        let status = status(st, &[], None, now);
-        return ac2_scene::ir::stored_ir_scene(
+    let style = ac2_scene::view::Style {
+        chrome: view.chrome,
+        theme,
+    };
+    // A stored trace is no live stream: none of the measurement's banners apply to it.
+    let idle = || status(st, &[], None, now);
+    if let Some(d) = st.stored_ir(Some(pane))
+        && let Some(s) = ac2_scene::ir::stored_ir_scene(
             d,
             st.curve_colours(theme).trace(d.meta.id),
             &ac2_scene::ir::IrCtx {
-                status: &status,
+                status: &idle(),
                 view: &view,
                 axes: &view.ir.axes,
-                style: ac2_scene::view::Style {
-                    chrome: view.chrome,
-                    theme,
-                },
+                style,
                 size,
             },
-        );
+        )
+    {
+        return s;
     }
-    let m = st.pane_meas(pane)?;
+    let Some(m) = st.pane_meas(pane) else {
+        // The pane's hint box, when one is up in its centre, already says what to do; and
+        // without a daemon there is nothing to make a measurement on (the plot stays
+        // empty, as the magnitude view's does).
+        let said = !st.connected()
+            || st
+                .empty_hint(pane, keymap)
+                .is_some_and(|h| h.place == crate::state::HintPlace::Centre);
+        let note = if said {
+            String::new()
+        } else {
+            ac2_scene::missing::missing_text(
+                "",
+                ac2_scene::missing::Missing::NoMeasurement { kind: "transfer" },
+                &keymap.reach(crate::keys::CommandId::NewMeasurement),
+            )
+        };
+        return missing_scene(note, &idle(), &view.ir.axes, style, size);
+    };
     let tf = frame(st, m.id, Stream::Tf);
     let ir = frame(st, m.id, Stream::Ir);
     let shown: Vec<&TopicFrame> = [tf, ir].into_iter().flatten().collect();
     let status = status(st, &shown, Some(m), now);
-    // A stopped measurement's last IR describes a system no longer measured: like its
-    // response it is not drawn as live; the empty plot says it is stopped.
-    if let Some(ir) = ir.filter(|_| !st.meas_hidden(m) && m.running)
+    // A stopped measurement's last IR is its final result, as its last response is: it
+    // stays drawn, and its freshness tags it stopped.
+    if let Some(ir) = ir.filter(|_| !st.meas_hidden(m))
         && let FrameData::Ir(f) = &ir.frame.data
     {
         let ctx = ac2_scene::ir::IrCtx {
             status: &status,
             view: &view,
             axes: &view.ir.axes,
-            style: ac2_scene::view::Style {
-                chrome: view.chrome,
-                theme,
-            },
+            style,
             size,
         };
         let color = meas_color(st, theme, m.id);
         let fresh = Some(freshness(st, ir));
-        return Some(match st.cross_rig(m.id) {
+        return match st.cross_rig(m.id) {
             Some((x, r, ours)) => ac2_scene::ir::ir_scene_between(
                 f,
                 color,
@@ -585,7 +603,7 @@ pub fn ir(
                 &ac2_scene::between_rigs::name_of(r, x.rig),
             ),
             None => ir_scene(f, color, fresh, &ctx),
-        });
+        };
     }
     let hidden = st.meas_hidden(m);
     let why = if hidden {
@@ -612,16 +630,13 @@ pub fn ir(
     let start = keymap
         .first_chord(command, scope)
         .map_or_else(|| "the palette".to_owned(), |c| c.label());
-    Some(missing_scene(
+    missing_scene(
         missing_text(&m.config.name, why, &start),
         &status,
         &view.ir.axes,
-        ac2_scene::view::Style {
-            chrome: view.chrome,
-            theme,
-        },
+        style,
         size,
-    ))
+    )
 }
 
 /// What the sweep pane draws.
@@ -669,7 +684,8 @@ impl SweepPane {
     ) {
         match self {
             SweepPane::Distortion(s) => (s.plates(), s.legend_box.clone(), s.legend_hits.clone()),
-            _ => Default::default(),
+            SweepPane::Ir(s) => (s.plates(), None, Vec::new()),
+            SweepPane::Room(_) => Default::default(),
         }
     }
 

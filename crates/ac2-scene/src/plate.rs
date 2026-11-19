@@ -470,6 +470,45 @@ pub(crate) fn draw_lines(
     }
 }
 
+/// Draws a plate of kind `kind` with `lines` (text, colour) a row each in `area`, moved and
+/// sized as any plate: placed by the scene it hangs by its top-right corner from `hang`;
+/// dragged ([`PlatePlace::at`]) it sits where it was dropped. Its text shrinks when the
+/// plate at the scale set does not fit `area`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn lines_plate(
+    layer: &mut Layer,
+    kind: PlateKind,
+    lines: &[(String, Color)],
+    hang: [f32; 2],
+    place: &PlatePlace,
+    hover: Option<PlateHover>,
+    area: Rect,
+    theme: &Theme,
+) -> PlateBox {
+    let texts: Vec<&str> = lines.iter().map(|l| l.0.as_str()).collect();
+    let set = place.scale();
+    let (w, h) = Metrics::new(theme, set).size(&texts);
+    let s = fitted(set, area, w, h);
+    let m = Metrics::new(theme, s);
+    let (w, h) = m.size(&texts);
+    let rect = match place.at {
+        Some(at) => PlatePlace::rect_at(at, area, w, h),
+        None => Rect::new(hang[0] - w, hang[1], w, h),
+    };
+    draw_lines(
+        layer,
+        rect,
+        lines,
+        HAlign::Right,
+        m,
+        true,
+        hover.filter(|h| h.kind == kind),
+        area,
+        theme,
+    );
+    PlateBox::new(kind, area, rect, s)
+}
+
 /// The grip: three dots along the corner's diagonal, brighter while the pointer is on it.
 pub(crate) fn grip(layer: &mut Layer, rect: Rect, hot: bool, clip: Rect, theme: &Theme) {
     let dot = if hot { theme.text } else { theme.text_dim };

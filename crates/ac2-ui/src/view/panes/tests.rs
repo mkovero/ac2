@@ -189,3 +189,30 @@ fn walk_bar_buttons_are_their_commands() {
     seen.dedup();
     assert_eq!(seen.len(), Action::ALL.len());
 }
+
+/// Ctrl+wheel zooms the level axis about the level under the pointer only while the
+/// pointer is on that axis; anywhere else in the pane (a margin, the banners, under the
+/// plot) it zooms about the middle of the range, never about a level extrapolated from
+/// beyond the axis.
+#[test]
+fn level_zoom_is_about_the_pointer_only_on_the_level_axis() {
+    use ac2_scene::axis::{Range, Scale};
+    // A magnitude plot from y = 40 (+30 dB) down to y = 340 (−30 dB).
+    let m = Mapping::new(Range::new(-30.0, 30.0), Scale::Linear, 340.0, 40.0);
+    let about = |y: f32| zoom_about_db(Some(m), Some(y));
+    assert_eq!(about(190.0), Some(0.0));
+    assert_eq!(about(40.0), Some(30.0));
+    assert_eq!(about(340.0), Some(-30.0));
+    // Under the plot the mapping would say −92 dB; over it, +37 dB.
+    assert_eq!(m.from_px(650.0), -92.0);
+    assert_eq!(about(650.0), None);
+    assert_eq!(about(5.0), None);
+    // No pointer, or a view without a level axis mapping (a 3D spectrograph).
+    assert_eq!(zoom_about_db(Some(m), None), None);
+    assert_eq!(zoom_about_db(None, Some(190.0)), None);
+    // A log axis is percent of the fundamental: 1 % is −40 dB.
+    let pct = Mapping::new(Range::new(0.01, 100.0), Scale::Log, 400.0, 0.0);
+    let db = zoom_about_db(Some(pct), Some(200.0)).expect("on the axis");
+    assert!((db + 40.0).abs() < 1e-9, "{db}");
+    assert_eq!(zoom_about_db(Some(pct), Some(401.0)), None);
+}

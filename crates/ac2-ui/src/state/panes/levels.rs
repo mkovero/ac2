@@ -321,8 +321,9 @@ impl AppState {
     // ----- reducer -----------------------------------------------------------------------
 
     /// Pane `pane` draws a level axis now. The level axis is the magnitude's: the transfer
-    /// pane's phase, coherence and IR views do not draw it.
-    pub(in crate::state) fn draws_level_axis(&self, pane: PaneId) -> bool {
+    /// pane's phase, coherence, alignment and IR views do not draw it (the alignment's
+    /// summation axis is fixed).
+    pub fn draws_level_axis(&self, pane: PaneId) -> bool {
         let Some(v) = self.layout.view(pane) else {
             return false;
         };
@@ -351,6 +352,10 @@ impl AppState {
     /// Zoom pane `pane`'s level axis by `factor` (> 1 in) about `about` (dB; `None`: the
     /// middle).
     pub(in crate::state) fn level_zoom(&mut self, pane: PaneId, about: Option<f64>, factor: f64) {
+        // A range that is not on screen is not changed behind the operator's back.
+        if !self.draws_level_axis(pane) {
+            return;
+        }
         self.hold_level(pane);
         self.change_level(pane, |r| {
             level::zoom(r, about.unwrap_or((r.lo + r.hi) / 2.0), factor)
@@ -359,6 +364,9 @@ impl AppState {
 
     /// Pan pane `pane`'s level axis by `db`.
     pub(in crate::state) fn level_pan(&mut self, pane: PaneId, db: f64) {
+        if !self.draws_level_axis(pane) {
+            return;
+        }
         self.hold_level(pane);
         self.change_level(pane, |r| level::pan(r, db));
     }

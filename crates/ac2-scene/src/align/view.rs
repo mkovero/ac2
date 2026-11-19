@@ -1,6 +1,7 @@
 //! The alignment view of a transfer pane: the phase difference of the two systems as
 //! measured and as aligned (top), how fully they add as measured and as aligned (bottom),
-//! the band they were aligned in as a gentle hint in both, and the readout above.
+//! the band they were aligned in as a gentle hint in both, and the readout above. The
+//! shared frequency cursor reads all four curves on the cursor values' plate.
 
 use ac2_proto::model::{AlignBand, AlignCurves, AlignState};
 
@@ -8,6 +9,8 @@ use super::{Readout, readout};
 use crate::axis::{self, Axis, Range};
 use crate::banner::{BannerRow, Status};
 use crate::canvas::{self, Canvas, MARGINS, PANE_GAP, anchor, cut_to, gapped, label};
+use crate::format;
+use crate::plate::{self, PlateBox, PlateKind};
 use crate::primitives::{
     Anchor, Color, FillRect, HAlign, Polyline, Rect, Scene, Stroke, VAlign, Viewport,
 };
@@ -48,6 +51,42 @@ pub enum AlignPlot {
     Summation,
 }
 
+/// What the frequency cursor reads of the four curves, at their column nearest to it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AlignCursor {
+    /// The column read, Hz.
+    pub freq_hz: f64,
+    /// `1.00 kHz`.
+    pub freq: String,
+    /// `as measured  +120°  −9.5 dB`: the phase difference and the summation.
+    pub measured: String,
+    /// `aligned  +3°  −0.1 dB`.
+    pub aligned: String,
+}
+
+/// The cursor's reading of `curves` on `freqs` at `hz`; `None` without a column.
+pub fn cursor_reading(curves: &AlignCurves, freqs: &[f64], hz: f64) -> Option<AlignCursor> {
+    let i = crate::grid::nearest_column(freqs, hz)?;
+    let at = |v: &[f32]| v.get(i).map_or(f64::NAN, |x| f64::from(*x));
+    let row = |name: &str, phase: &[f32], sum: &[f32]| {
+        format!(
+            "{name}  {}  {}",
+            format::phase_readout(at(phase)),
+            format::db_readout(at(sum))
+        )
+    };
+    Some(AlignCursor {
+        freq_hz: freqs[i],
+        freq: format::freq_readout(freqs[i]),
+        measured: row(MEASURED, &curves.phase_before, &curves.sum_before),
+        aligned: row(ALIGNED, &curves.phase_after, &curves.sum_after),
+    })
+}
+
+/// The two curves of each plot, as the key and the cursor values name them.
+const MEASURED: &str = "as measured";
+const ALIGNED: &str = "aligned";
+
 /// The view, as data plus the scene.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AlignScene {
@@ -61,6 +100,17 @@ pub struct AlignScene {
     /// The empty view's text.
     pub empty: Option<String>,
     pub banners: Vec<BannerRow>,
+    /// The frequency cursor's reading, when the cursor is on and curves are drawn.
+    pub cursor: Option<AlignCursor>,
+    /// The plate the cursor's reading is on.
+    pub readout_box: Option<PlateBox>,
+}
+
+impl AlignScene {
+    /// The plates the operator moves.
+    pub fn plates(&self) -> Vec<PlateBox> {
+        self.readout_box.into_iter().collect()
+    }
 }
 
 fn band_hint(c: &mut Canvas, plot: Rect, x: &Axis, band: AlignBand, theme: &Theme) {
@@ -109,7 +159,7 @@ fn key(c: &mut Canvas, plot: Rect, color: Color, theme: &Theme) {
     let font = theme.small_font_size;
     let mut x = plot.right() - 8.0;
     let y = plot.y + 4.0 + font / 2.0;
-    for (text, col) in [("aligned", color), ("as measured", theme.text_dim)] {
+    for (text, col) in [(ALIGNED, color), (MEASURED, theme.text_dim)] {
         let w = canvas::text_width(text, font);
         x -= w;
         c.overlay.labels.push(label(
@@ -222,6 +272,37 @@ pub fn alignment_scene(
             key(&mut c, phase_plot, s.color, theme);
         }
     }
+    let cursor = shown.and_then(|s| {
+        let hz = view.cursor_hz.filter(|_| view.chrome.cursor())?;
+        cursor_reading(s.curves, s.freqs, hz)
+    });
+    let readout_box = cursor.as_ref().zip(shown).map(|(cur, s)| {
+        // Under the plate: the line runs behind it, never through its text.
+        let x = x_axis.mapping.to_px(cur.freq_hz);
+        canvas::vline(&mut c.data, phase_plot, x, theme.cursor);
+        canvas::vline(&mut c.data, sum_plot, x, theme.cursor);
+        // The plate moves over both plots; placed by the scene it hangs under the key.
+        let area = Rect::new(
+            plot_x,
+            phase_plot.y,
+            plot_w,
+            sum_plot.bottom() - phase_plot.y,
+        );
+        plate::lines_plate(
+            &mut c.overlay,
+            PlateKind::Readout,
+            &[
+                (cur.freq.clone(), theme.text),
+                (cur.measured.clone(), theme.text_dim),
+                (cur.aligned.clone(), s.color),
+            ],
+            [area.right() - crate::legend::INSET, area.y + 22.0],
+            &view.plates.readout,
+            view.plate_hover,
+            area,
+            theme,
+        )
+    });
     if let Some(why) = &empty {
         let font = theme.font_size;
         c.overlay.labels.push(label(
@@ -243,5 +324,7 @@ pub fn alignment_scene(
         titles,
         empty,
         banners: strip.rows,
+        cursor,
+        readout_box,
     }
 }

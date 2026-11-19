@@ -176,7 +176,6 @@ fn the_ir_cursor_reads_time_and_value() {
     let cursor = |t: &T| axes(t, IrPane::Live).cursor_ms;
     let reading = |t: &T| {
         crate::scenes::ir(&t.st, t.ir_pane(), &t.keys, &Theme::dark(), SIZE, now())
-            .expect("scene")
             .cursor
             .map(|c| c.text())
     };
@@ -316,12 +315,11 @@ fn stored_tf(id: u32, name: &str, ir: Option<TransferIr>) -> (TraceMeta, Arc<Tra
     (m, Arc::new(d))
 }
 
-/// A stopped transfer measurement's IR views draw no live IR: its last IR is no longer the
-/// system's, as its last response is not (the response view draws none either). The plot
-/// says it is stopped and how to start it, the title says it, the IR keys find no picture;
-/// a selected capture's stored IR still shows. Started again, the live IR is back.
+/// A stopped transfer measurement's IR views keep its last IR, as its response view keeps
+/// its last curve: drawn, tagged `stopped`, the title saying it, the IR keys acting on it;
+/// a selected capture's stored IR shows instead. Started again, the tag is gone.
 #[test]
-fn a_stopped_measurement_draws_no_live_ir() {
+fn a_stopped_measurement_keeps_its_last_ir() {
     let mut t = T::new();
     t.conn(ir_event(1));
     t.key("Alt+3");
@@ -348,8 +346,7 @@ fn a_stopped_measurement_draws_no_live_ir() {
     t.conn(ConnEvent::Trace(wd, grid));
     let theme = Theme::dark();
     let pane = t.ir_pane();
-    let scene =
-        |t: &T| crate::scenes::ir(&t.st, pane, &t.keys, &theme, SIZE, now()).expect("scene");
+    let scene = |t: &T| crate::scenes::ir(&t.st, pane, &t.keys, &theme, SIZE, now());
     let caption = |t: &T| t.st.pane_caption(pane).unwrap_or_default();
     assert_eq!(scene(&t).note, None, "running: the live IR");
     assert!(t.st.ir_frame_of(IrPane::Live).is_some());
@@ -357,14 +354,18 @@ fn a_stopped_measurement_draws_no_live_ir() {
     let main_l = s.measurements.iter().position(|m| m.id == MeasId(1));
     s.measurements[main_l.expect("Main L")].running = false;
     t.conn(mirror(s.clone()));
-    // Every IR display of the view: none draws the last frame.
+    // Every IR display of the view draws the last frame, tagged.
     for _ in 0..3 {
         assert!(t.st.layout.focused().shows_ir());
         let sc = scene(&t);
-        assert_eq!(sc.note.as_deref(), Some("Main L stopped — S starts it"));
-        assert_eq!(sc.tag, None);
+        // The frame carries no ETC: that display says so, of the stopped IR as of a live one.
+        let etc = t.st.view_for(pane).ir.mode == ac2_scene::view::IrMode::Etc;
+        assert_eq!(sc.note.is_some(), etc, "{:?}", sc.note);
+        assert_eq!(sc.tag.as_deref(), Some("stopped"));
+        assert_eq!(sc.scene.layers[1].polylines.len(), usize::from(!etc));
+        assert!(sc.banners.is_empty(), "{:?}", sc.banners);
         assert!(caption(&t).contains("Main L stopped"), "{}", caption(&t));
-        assert!(t.st.ir_frame_of(IrPane::Live).is_none());
+        assert!(t.st.ir_frame_of(IrPane::Live).is_some());
         t.key("G");
     }
     // Back on the linear display; the capture selected: its IR, stopped or not.
@@ -380,7 +381,12 @@ fn a_stopped_measurement_draws_no_live_ir() {
     t.st.set_selected_trace(None);
     s.measurements[main_l.expect("Main L")].running = true;
     t.conn(mirror(s));
-    assert_eq!(scene(&t).note, None, "started: the live IR again");
+    let sc = scene(&t);
+    assert_eq!(
+        (sc.note, sc.tag),
+        (None, None),
+        "started: the live IR again"
+    );
     assert!(!caption(&t).contains("stopped"), "{}", caption(&t));
 }
 
@@ -415,8 +421,7 @@ fn the_transfer_ir_view_shows_the_selected_stored_ir() {
     t.conn(ConnEvent::Trace(wd, grid.clone()));
     t.conn(ConnEvent::Trace(bd, grid));
     let theme = Theme::dark();
-    let scene =
-        |t: &T| crate::scenes::ir(&t.st, t.ir_pane(), &t.keys, &theme, SIZE, now()).expect("scene");
+    let scene = |t: &T| crate::scenes::ir(&t.st, t.ir_pane(), &t.keys, &theme, SIZE, now());
     // The curve: the longest polyline (axes and grid lines have two points).
     let curve = |s: &ac2_scene::ir::IrScene| {
         s.scene

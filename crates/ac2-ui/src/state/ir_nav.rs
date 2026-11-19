@@ -114,9 +114,7 @@ impl AppState {
                     return ac2_scene::ir::stored_frame(d).map(Cow::Owned);
                 }
                 let m = shown?;
-                // A stopped measurement's last IR is no longer the system's: as its response,
-                // it is not drawn as live (its captures keep theirs).
-                if self.meas_hidden(m) || !m.running {
+                if self.meas_hidden(m) {
                     return None;
                 }
                 match &crate::scenes::frame(self, m.id, Stream::Ir)?.frame.data {

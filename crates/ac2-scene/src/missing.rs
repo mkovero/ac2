@@ -19,9 +19,13 @@ pub enum Missing {
     /// A sweep measurement none of whose runs has been played: the key arms one and Enter
     /// (the stimulus's own key in every keymap) fires it.
     NoRun,
+    /// The pane has no measurement of the `kind` its view draws (`transfer`); the key
+    /// makes one. It has no name to say.
+    NoMeasurement { kind: &'static str },
 }
 
-/// The text for measurement `name`; `key` shows a hidden one or starts a stopped one.
+/// The text for measurement `name`; `key` shows a hidden one, starts a stopped one or
+/// makes the one that is missing.
 pub fn missing_text(name: &str, why: Missing, key: &str) -> String {
     match why {
         Missing::Hidden => format!("{name} hidden — {key} shows it"),
@@ -35,6 +39,7 @@ pub fn missing_text(name: &str, why: Missing, key: &str) -> String {
         Missing::NoBandMeter => format!(
             "{name}: no band meter — turn it on in the SPL / Leq settings (or `ac2 spl bands set`)"
         ),
+        Missing::NoMeasurement { kind } => format!("no {kind} measurement — {key} makes one"),
     }
 }
 
@@ -77,6 +82,10 @@ mod tests {
         assert_eq!(
             missing_text("Genelec 1 m", Missing::NoRun, "Space"),
             "Genelec 1 m: no run yet — Space arms the sweep, Enter fires it"
+        );
+        assert_eq!(
+            missing_text("", Missing::NoMeasurement { kind: "transfer" }, "Ctrl+M"),
+            "no transfer measurement — Ctrl+M makes one"
         );
     }
 }

@@ -325,3 +325,42 @@ fn an_automatic_fit_on_the_auto_pane_writes_no_layout() {
     u.connect(sub);
     assert_eq!(u.st.layout.focus_kind(), PaneKind::Spectrum);
 }
+
+/// Ctrl+wheel and Shift+wheel act on a level axis that is drawn. The alignment view's
+/// summation axis is fixed, and the phase, coherence and IR views draw no level axis: from
+/// them the pane's magnitude range, which is not on screen, stays as it was stored.
+#[test]
+fn level_gestures_leave_a_range_that_is_not_drawn() {
+    use crate::state::TransferView;
+    use ac2_scene::view::IrMode;
+    let mut t = T::new();
+    let p = t.pane(PaneKind::Transfer);
+    let before = t.st.pane_levels(p);
+    let gestures = |t: &mut T| {
+        t.st.apply(
+            Msg::LevelZoom {
+                pane: p,
+                about_db: Some(0.0),
+                factor: 2.0,
+            },
+            &t.keys,
+        );
+        t.st.apply(Msg::LevelPan { pane: p, db: 5.0 }, &t.keys);
+    };
+    for v in [
+        TransferView::Alignment,
+        TransferView::Phase,
+        TransferView::Coherence,
+        TransferView::Ir(IrMode::Log),
+    ] {
+        t.st.layout.view_mut(p).expect("pane").modes.transfer = v;
+        assert!(!t.st.draws_level_axis(p), "{v:?}");
+        gestures(&mut t);
+        assert_eq!(t.st.pane_levels(p), before, "{v:?}");
+    }
+    t.st.layout.view_mut(p).expect("pane").modes.transfer = TransferView::Magnitude;
+    assert_eq!(t.st.pane_levels(p), before);
+    gestures(&mut t);
+    // ±30 dB about 0 at twice the zoom, then 5 dB up.
+    assert_eq!(t.st.level_range(p), Some(Range::new(-10.0, 20.0)));
+}

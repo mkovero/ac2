@@ -175,7 +175,8 @@ fn stopped_audio_shows_a_banner_until_the_session_is_back() {
 
 /// The IR pane follows its transfer measurement's state: the transfer stream's NO
 /// REFERENCE as a banner and as the reason there is no IR; a stopped measurement says so and
-/// which key starts it; a kept IR of a stopped measurement is tagged `stopped`, no STALE.
+/// which key starts it; a kept IR of a stopped measurement stays drawn, tagged `stopped`,
+/// with no banner.
 #[test]
 fn the_ir_pane_says_why_there_is_no_ir() {
     use ac2_client::{Latest, TopicFrame};
@@ -223,13 +224,13 @@ fn the_ir_pane_says_why_there_is_no_ir() {
         s.banners.iter().map(|b| b.text.clone()).collect()
     };
     // Nothing yet from a running measurement.
-    let s = crate::scenes::ir(&t.st, t.ir_pane(), &t.keys, &theme, SIZE, now()).expect("scene");
+    let s = crate::scenes::ir(&t.st, t.ir_pane(), &t.keys, &theme, SIZE, now());
     assert_eq!(s.note.as_deref(), Some("Main L: no IR frame yet"));
     // Its transfer stream says nothing drives the reference: banner and reason, which
     // follow this app's stimulus.
     t.conn(snapshot(vec![tf.clone()]));
     let ir_and_banner = |t: &T| {
-        let s = crate::scenes::ir(&t.st, t.ir_pane(), &t.keys, &theme, SIZE, now()).expect("scene");
+        let s = crate::scenes::ir(&t.st, t.ir_pane(), &t.keys, &theme, SIZE, now());
         assert!(
             texts(&s).contains(&"NO REFERENCE".to_owned()),
             "{:?}",
@@ -293,7 +294,7 @@ fn the_ir_pane_says_why_there_is_no_ir() {
     let mut st = daemon_state();
     st.measurements[1].running = false;
     t.conn(mirror(st.clone()));
-    let s = crate::scenes::ir(&t.st, t.ir_pane(), &t.keys, &theme, SIZE, now()).expect("scene");
+    let s = crate::scenes::ir(&t.st, t.ir_pane(), &t.keys, &theme, SIZE, now());
     assert_eq!(s.note.as_deref(), Some("Main L stopped — S starts it"));
     assert!(!texts(&s).contains(&"NO REFERENCE".to_owned()));
     let r = t.key("S");
@@ -304,10 +305,42 @@ fn the_ir_pane_says_why_there_is_no_ir() {
         )),
         "{r:?}"
     );
-    // Its kept IR is no longer the system's: not drawn as live, the note stays.
+    // Its kept IR is its final result, as the magnitude view keeps its last curve: drawn,
+    // tagged stopped, with no fault of the stream it no longer measures.
     t.conn(snapshot(vec![tf, ir]));
-    let s = crate::scenes::ir(&t.st, t.ir_pane(), &t.keys, &theme, SIZE, now()).expect("scene");
-    assert_eq!(s.note.as_deref(), Some("Main L stopped — S starts it"));
-    assert_eq!(s.tag, None);
-    assert!(texts(&s).iter().all(|b| !b.starts_with("STALE")));
+    let s = crate::scenes::ir(&t.st, t.ir_pane(), &t.keys, &theme, SIZE, now());
+    assert_eq!(s.note, None);
+    assert_eq!(s.tag.as_deref(), Some("stopped"));
+    assert_eq!(s.scene.layers[1].polylines.len(), 1, "the IR curve");
+    assert_eq!(texts(&s), Vec::<String>::new());
+    assert!(t.st.ir_frame_of(ac2_scene::view::IrPane::Live).is_some());
+}
+
+/// An IR view whose pane has no transfer measurement says so in the plot's own text, as
+/// every empty pane does: what is missing and the key that makes one. While the pane's
+/// hint box is up in its centre, that says what to do and the plot adds nothing under it.
+#[test]
+fn the_ir_pane_without_a_transfer_measurement_says_how_to_make_one() {
+    let mut t = T::new();
+    t.key("Alt+3");
+    let pane = t.ir_pane();
+    let note = |t: &T| crate::scenes::ir(&t.st, pane, &t.keys, &Theme::dark(), SIZE, now()).note;
+    // Its pick is the spectrum measurement, which a transfer pane does not draw.
+    t.st.layout.view_mut(pane).expect("pane").meas = Some(MeasId(2));
+    assert!(t.st.pane_meas(pane).is_none());
+    assert_eq!(t.st.empty_hint(pane, &t.keys), None);
+    assert_eq!(
+        note(&t).as_deref(),
+        Some("no transfer measurement — Ctrl+M makes one")
+    );
+    // Nothing picked: the pane's hint box says to drop a row on it.
+    t.st.layout.view_mut(pane).expect("pane").meas = None;
+    let hint = t.st.empty_hint(pane, &t.keys).expect("hint");
+    assert_eq!(hint.place, crate::state::HintPlace::Centre);
+    assert_eq!(note(&t).as_deref(), Some(""));
+    // No daemon: an empty plot, as the magnitude view's.
+    assert_eq!(
+        crate::scenes::ir(&T::fresh().st, pane, &t.keys, &Theme::dark(), SIZE, now()).note,
+        Some(String::new())
+    );
 }

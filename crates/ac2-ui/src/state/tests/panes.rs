@@ -165,7 +165,6 @@ fn g_steps_the_transfer_views() {
         assert_eq!(view(&t), TransferView::Ir(m));
         assert_eq!(t.st.scope(), crate::keys::Scope::Ir);
         assert_eq!(t.st.view_for(f).ir.mode, m);
-        assert!(crate::scenes::ir(&t.st, f, &t.keys, &Theme::dark(), SIZE, now()).is_some());
     }
     t.key("G");
     assert_eq!(view(&t), TransferView::Magnitude);
