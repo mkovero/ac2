@@ -50,15 +50,16 @@ fn pick_rig(t: &mut T, rig: RigId) {
 }
 
 /// A rig the app holds that the rig shown is not paired with has no heading and no rows;
-/// the drop-down still lists it. Each heading says the rig's rate beside its name.
+/// the drop-down still lists it. Each heading says the rig's rate beside its name, then
+/// its clock's standing among the rigs listed (these rigs' clocks are not measured).
 #[test]
 fn a_rig_held_and_not_paired_is_not_listed() {
     let (t, _) = three_rigs();
     assert_eq!(
         heads(&t),
         [
-            (RIG, "test rig · 48 kHz".to_owned()),
-            (PUPU, "pupu · 48 kHz".to_owned())
+            (RIG, "test rig · 48 kHz · UNKNOWN".to_owned()),
+            (PUPU, "pupu · 48 kHz · UNKNOWN".to_owned())
         ]
     );
     assert!(t.st.list_rows().iter().all(|(r, _)| *r != KETTU));

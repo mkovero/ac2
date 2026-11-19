@@ -14,8 +14,9 @@
 
 use super::*;
 use crate::state::panes::drag::RowDrop;
+use ac2_scene::clock_domain::{DomainTag, RigClockFacts, clock_domains};
 use ac2_scene::meas_list::{Mark, TreeKey, TreeRow};
-use ac2_scene::rig_tree::{Away, RigAudio, RigRoot, rig_away_heading, rig_branch};
+use ac2_scene::rig_tree::{Away, ClockTag, RigAudio, RigRoot, rig_away_heading, rig_branch};
 
 /// A rig not shown, as its part of the measurement list was last read: its rows, and what
 /// each draggable row needs of a pane. Read with the rig swapped in, so between messages.
@@ -126,8 +127,53 @@ impl AppState {
         }
     }
 
-    /// Rig `r`'s branch of the list over its rows `rows`; `pairing` for a rig not shown.
-    fn rig_rows(&self, r: &RigState, rows: Vec<TreeRow>, pairing: Option<&str>) -> Vec<TreeRow> {
+    /// The clock domain of each rig listed, the rig shown first and then `paired` in order,
+    /// judged together: a tag says which of the others a rig agrees with. A rig this app
+    /// does not read (not held, or its link down) is given no session: the app knows
+    /// neither its rate nor its clocks, so it gets no tag and no other rig is compared
+    /// with it.
+    fn clock_tags(&self, shown: &RigState, paired: &[(RigId, String)]) -> Vec<DomainTag> {
+        let unread = ac2_proto::model::Clocks::default();
+        let read = |id: RigId| {
+            self.find_rig(id)
+                .filter(|r| matches!(r.conn, ConnState::Connected { .. }))
+                .and_then(|r| r.daemon())
+        };
+        let names: Vec<String> = std::iter::once(self.rig_label(shown))
+            .chain(paired.iter().map(|(_, n)| n.clone()))
+            .collect();
+        let facts: Vec<RigClockFacts<'_>> = std::iter::once(shown.id)
+            .chain(paired.iter().map(|(id, _)| *id))
+            .zip(&names)
+            .map(|(id, name)| match read(id) {
+                Some(s) => RigClockFacts {
+                    id: Some(id),
+                    name,
+                    rate_hz: s.session.open.as_ref().map(|o| o.sample_rate_hz),
+                    clocks: &s.clocks,
+                    between: &s.remote.rigs,
+                },
+                None => RigClockFacts {
+                    id: Some(id),
+                    name,
+                    rate_hz: None,
+                    clocks: &unread,
+                    between: &[],
+                },
+            })
+            .collect();
+        clock_domains(&facts).rigs
+    }
+
+    /// Rig `r`'s branch of the list over its rows `rows`; `pairing` for a rig not shown,
+    /// `clock` its tag among the rigs listed.
+    fn rig_rows(
+        &self,
+        r: &RigState,
+        rows: Vec<TreeRow>,
+        pairing: Option<&str>,
+        clock: &DomainTag,
+    ) -> Vec<TreeRow> {
         let count = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
         let (measurements, traces) = r.daemon().map_or((0, 0), |s| {
             (count(s.measurements.len()), count(s.traces.len()))
@@ -141,7 +187,11 @@ impl AppState {
             measurements,
             traces,
             audio: Self::rig_audio(r),
-            clock: None,
+            clock: clock
+                .tag
+                .as_deref()
+                .zip(clock.tip.as_deref())
+                .map(|(tag, tip)| ClockTag { tag, tip }),
             pairing,
         };
         rig_branch(&root, rows)
@@ -162,14 +212,15 @@ impl AppState {
         if paired.is_empty() && shown.daemon().is_none() {
             return v;
         }
-        let own = self.rig_rows(shown, self.tree_rows(), None);
+        let clocks = self.clock_tags(shown, &paired);
+        let own = self.rig_rows(shown, self.tree_rows(), None, &clocks[0]);
         v.extend(own.into_iter().map(|row| (shown.id, row)));
         let remote = shown.daemon().map(|s| &s.remote);
         let inputs = shown
             .daemon()
             .and_then(|s| s.session.open.as_ref())
             .map_or(&[][..], |o| &o.config.remote_inputs[..]);
-        for (id, name) in paired {
+        for ((id, name), clock) in paired.into_iter().zip(&clocks[1..]) {
             let pairing = remote.map_or_else(
                 || ac2_scene::rig_tree::PAIRED.to_owned(),
                 |r| ac2_scene::rig_tree::pairing_text(r, inputs, id),
@@ -178,7 +229,7 @@ impl AppState {
             let list = self.others.rig_lists.iter().find(|l| l.rig == id);
             match (held, list) {
                 (Some(r), Some(l)) => v.extend(
-                    self.rig_rows(r, l.rows.clone(), Some(&pairing))
+                    self.rig_rows(r, l.rows.clone(), Some(&pairing), clock)
                         .into_iter()
                         .map(|row| (id, row)),
                 ),

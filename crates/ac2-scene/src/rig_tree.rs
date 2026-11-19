@@ -59,10 +59,21 @@ pub struct RigRoot<'a> {
     /// Its audio session, said beside the name.
     pub audio: RigAudio,
     /// Its clock domain's tag, said after the rate; `None`: no tag.
-    pub clock: Option<&'a str>,
+    pub clock: Option<ClockTag<'a>>,
     /// A paired rig: the pairing as the rig shown reports it ([`pairing_text`]). `None` for
     /// the rig shown.
     pub pairing: Option<&'a str>,
+}
+
+/// A rig's clock domain among the rigs listed ([`crate::clock_domain::clock_domains`]): the
+/// tag on its heading and the words behind it, which the heading's tooltip carries since a
+/// tag alone states no basis.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClockTag<'a> {
+    /// `LOCKED`, `AGREE`, `FREE`, `UNKNOWN`.
+    pub tag: &'a str,
+    /// What the tag rests on.
+    pub tip: &'a str,
 }
 
 /// The pairing with `rig` as the rig shown's daemon reports it (`r`, with its session's
@@ -91,7 +102,7 @@ pub fn pairing_text(r: &RemoteState, inputs: &[RemoteInput], rig: RigId) -> Stri
 /// The heading's first line: the rig's name, its session's rate and its clock tag.
 fn name_line(root: &RigRoot<'_>) -> String {
     let mut parts = vec![root.name.to_owned(), root.audio.text()];
-    parts.extend(root.clock.map(str::to_owned));
+    parts.extend(root.clock.map(|c| c.tag.to_owned()));
     parts.join(" · ")
 }
 
@@ -133,6 +144,10 @@ pub fn rig_heading(root: &RigRoot<'_>) -> TreeRow {
         )
     };
     details.dedup();
+    let describe = match root.clock {
+        Some(c) => format!("{describe}\nclock {}: {}", c.tag, c.tip),
+        None => describe,
+    };
     let mut row = heading_row(
         TreeKey::RigName(root.rig),
         &name_line(root),
@@ -343,21 +358,36 @@ mod tests {
     /// without one; a clock tag follows the rate.
     #[test]
     fn a_heading_says_the_rigs_rate_beside_its_name() {
-        let name = |audio, clock| {
+        let head = |audio, clock: Option<&'static str>| {
             rig_heading(&RigRoot {
                 audio,
-                clock,
+                clock: clock.map(|tag| ClockTag {
+                    tag,
+                    tip: "with cm4, by the rate between the two rigs",
+                }),
                 ..root("pupu", true, false)
             })
-            .name
         };
+        let name = |audio, clock| head(audio, clock).name;
         assert_eq!(name(RigAudio::Rate(96_000), None), "pupu · 96 kHz");
         assert_eq!(name(RigAudio::Rate(44_100), None), "pupu · 44.1 kHz");
         assert_eq!(name(RigAudio::NoSession, None), "pupu · no session");
         assert_eq!(name(RigAudio::NoAudio, None), "pupu · no audio I/O");
         assert_eq!(
-            name(RigAudio::Rate(48_000), Some("clock A")),
-            "pupu · 48 kHz · clock A"
+            name(RigAudio::Rate(48_000), Some("LOCKED")),
+            "pupu · 48 kHz · LOCKED"
+        );
+        // The tag's basis is in the heading's tooltip, after what the heading is.
+        let tagged = head(RigAudio::Rate(48_000), Some("LOCKED")).describe;
+        assert_eq!(
+            tagged,
+            "pupu: the rig shown; new measurements and the keys go to it\n\
+             clock LOCKED: with cm4, by the rate between the two rigs"
+        );
+        assert!(
+            !head(RigAudio::Rate(48_000), None)
+                .describe
+                .contains("clock")
         );
     }
 
