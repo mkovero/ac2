@@ -31,10 +31,10 @@ cripple the other rigs. The math is the daemon's; the app renders streams. Both 
   changes. With more than one rig connected the arm line and the
   stimulus banner **name the rig** (*arm pupu's stimulus · Space*): sound must never leave a
   system the operator did not mean.
-- **Panes are the app's**, not a tab's: the pane tree stays when the tab changes, and a pane
-  shows a measurement, input set or pair of the rig shown or of a rig paired with it. A
-  pane's title names the rig when it is not the active one (*pupu · Stage*). Drag works
-  across paired rigs: the measurement list has a heading for the rig shown, then one per rig
+- **Each rig has its own screen** (*A screen per rig* below): the pane tree on screen is
+  the rig shown's, and a pane shows a measurement, input set or pair of that rig or of a
+  rig paired with it. A pane's title names the rig when it is not the active one (*pupu ·
+  Stage*). Drag works across paired rigs: the measurement list has a heading for the rig shown, then one per rig
   its daemon is paired with (N8, *The list and reach* below). A rig the app merely holds is
   the drop-down's.
 - **Remote inputs** (stage 3): a rig's session may include a mic or line input of another
@@ -207,17 +207,28 @@ crosses rigs only between paired ones.
   does not hold, or whose link is down, is its heading alone (`rig_tree::rig_away_heading`):
   the app has no measurements of it and connects to no rig on its own.
 - **A heading** (`rig_tree::RigRoot`): name, the session's rate (`RigAudio`; *no session* /
-  *no audio I/O* in the top bar's words), a clock tag when one is given (`clock`), and for a
-  paired rig the pairing as the rig shown's daemon reports it (`rig_tree::pairing_text`: a
-  link that is not up, else the first of its inputs whose audio does not stream, in
-  `between_rigs`' words; *paired* when the daemon takes no input from it and so reports
-  nothing).
+  *no audio I/O* in the top bar's words), a clock tag when one is given (`clock`: `AGREE`,
+  `FREE`, `UNKNOWN`, its basis in the heading's tooltip; `LOCKED` is reserved for a drift
+  test, [remote-auto.md](remote-auto.md) §5.2), and for a paired rig the pairing as the rig
+  shown's daemon reports it (`rig_tree::pairing_text`: a link that is not up, else the
+  first of its inputs whose audio does not stream, in `between_rigs`' words; *paired* when
+  the daemon takes no input from it and so reports nothing). A heading gives one verdict on
+  the clocks: with a tag, the pairing line says no *clocks agree* / *measuring clocks…* of
+  its own (`ClockVerdict::OnTag`; the tag is judged on more evidence than the one daemon's
+  verdict and the two could read apart), and keeps the warnings (*CLOCKS NOT LOCKED +5.6
+  ppm*, *CLOCKS: CAN'T TELL*, *LINK OFFSET TOO SMALL*), which say why a measurement
+  stopped.
 - **Reach** (`AppState::rig_in_reach`: the rig shown or one paired with it) is the one rule
   for: which rigs' lists are read (so what a drag offers and Tab steps onto), a row click
   (`Msg::OnRig`), a drop (`drop_row`, `pane_row_from`, `pane_meter_from`), the keys of a
-  focused pane of another rig, and what a pane draws. A pane on a rig out of reach keeps its
-  `View` untouched and reads `Missing::NotPaired`; layout prefs and stored measurement
-  layouts are written as before, so the pane draws again when its rig is shown or paired.
+  focused pane of another rig, and what a pane draws. Reach is judged as a pane is drawn,
+  against the rig shown, so a screen kept for a rig and the one `ui.toml` restores are
+  under the same rule as the screen up. With a screen per rig a switch leaves no pane of
+  the rig left behind, so a pane on a rig out of reach arises only from a curve dragged in
+  whose pairing was removed since (while the app ran, or between the run that wrote
+  `ui.toml` and this one). Such a pane keeps its `View` untouched and reads
+  `Missing::NotPaired`; layout prefs and stored measurement layouts are written as before,
+  so the pane draws again once the two rigs are paired.
 
 ### Stimulus awareness
 

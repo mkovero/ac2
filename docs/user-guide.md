@@ -218,14 +218,21 @@ these lines per cross-rig transfer function.
 In the app the relation is said next to every cross-rig result, always in words (a problem
 is never only a colour):
 
-- **The rig's heading in the measurement list:** its second line says the pairing and,
-  while it streams, the clock relation: *paired · streaming · clocks agree*, *paired ·
-  streaming · measuring clocks…*, or first and in capitals *CLOCKS NOT LOCKED +5.6 ppm ·
-  paired · streaming*, *CLOCKS: CAN'T TELL · paired · streaming*, *LINK OFFSET TOO SMALL ·
-  paired · streaming*; with no audio from it *no audio*, and *ketunkolo runs 48 kHz, this
-  rig 96 kHz* when the rates differ (a remote input needs both rigs at one rate). The
-  heading's first line carries the rig's clock tag (`pupu · 96 kHz · LOCKED A`), its
-  tooltip the reason.
+- **The rig's heading in the measurement list:** its first line carries the rig's clock
+  tag (`pupu · 96 kHz · AGREE`), and the heading's tooltip says what the tag rests on.
+  `AGREE`: its sample clock reads within 2 ppm of the other rigs' named in the tooltip,
+  either *measured between the rigs* (with the figure, *+0.3 ppm over the last 60 s*) or
+  *by each rig's system clock*, where two free clocks can meet by chance; with more than
+  one such group the tags carry a letter (`AGREE A`, `AGREE B`). `FREE`: shown to differ
+  from every other rig listed. `UNKNOWN`: *can't tell*, and what is missing. No tag says
+  the rigs are locked: agreement within 2 ppm does not prove one clock. The second line
+  says the pairing (*paired · streaming*) and leaves the clocks to the tag, except for a
+  warning, said first and in capitals: *CLOCKS NOT LOCKED +5.6 ppm · paired · streaming*,
+  *CLOCKS: CAN'T TELL · paired · streaming*, *LINK OFFSET TOO SMALL · paired · streaming*.
+  A paired rig this app does not read has no tag, and its line says the relation in words
+  (*paired · streaming · clocks agree*, *paired · streaming · measuring clocks…*). With no
+  audio from it the line reads *no audio*, and *ketunkolo runs 48 kHz, this rig 96 kHz*
+  when the rates differ (a remote input needs both rigs at one rate).
 - **Top bar:** while a cross-rig transfer function is
   stopped, the bar's status line carries why and what to do (*Main L stopped: pupu and
   ketunkolo are not on one clock (+5.6 ppm). Lock both interfaces to one reference.*).

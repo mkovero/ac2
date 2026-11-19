@@ -48,11 +48,11 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   and requests carry its `RigId`, `ui.toml` remembers devices per rig), still with one rig.
   Stage 1c landed: Connect… (drop-down or palette) adds a rig, the top-bar drop-down
   switches between them, `ui.toml` remembers the rigs and connects them again at start,
-  panes keep their rig across a switch (titles `pupu · …`, *unreachable · retrying* / *not
-  connected*), Shift+Esc stops every rig and quit releases them all in parallel. Stage 1d
+  each rig keeps its own screen across a switch (a dragged-in curve of another rig titled
+  `pupu · …`, *unreachable · retrying* / *not connected*), Shift+Esc stops every rig and quit releases them all in parallel. Stage 1d
   landed: the measurement list offers the rig shown's measurements and meters, then those of
   each rig its daemon is paired with, under a heading per rig with its session rate (N8,
-  2026-11-19: a rig merely held is the drop-down's; a pane left on a rig out of reach reads
+  2026-11-19: a rig merely held is the drop-down's; a dragged-in curve whose pairing was removed reads
   *not paired*), a row of a paired rig's dragged onto a pane pins the pane to it (panes have
   no chip), a list row chosen never
   takes another rig's pane, `ui.toml` keeps each pinned pane's rig by id (resolved when that
