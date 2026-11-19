@@ -347,7 +347,7 @@ on one word clock hold it; two free crystals do not for long.
   against the bound. What the test needs is the offset's *stability*; it measures that
   itself.
 - **Verdict** only after the spread has stayed within N for **≥ 30 min**. N is set by the
-  rig check: 8 samples at 96 kHz (83 µs) over 30 min would bound 0.046 ppm, but one hour
+  development check: 8 samples at 96 kHz (83 µs) over 30 min would bound 0.046 ppm, but one hour
   of data shows 45 µs of host wander, under 2× margin.
 - **On exceedance:** the count resets and the tag falls back to rate agreement, with the
   figure (*drifted 0.2 ppm over 12 min*). **The drift test never says the clocks differ**:
@@ -356,9 +356,12 @@ on one word clock hold it; two free crystals do not for long.
   verdict half an hour after it settles; it never reads *free*.
 - **Resets:** xrun, discontinuity, incarnation, clock step or unsync on either rig; not a
   link gap.
-- **Rig check before any drift field enters `PeerClock`** (stage 1a, nothing emitted): 24 h
-  of the locked pair logged, and a word clock pull. It fixes N, the cap and the scatter
-  bound, and shows whether the feed trips together with the audio-fed windows.
+- **Development check, done once before the drift test ships** (stage 1a, on the pupu
+  rigs, nothing emitted; never a step a user runs): 24 h of the locked pair logged, and a
+  word clock pull. It fixes N, the cap and the scatter bound in the code, and shows whether
+  the feed trips together with the audio-fed windows. A user only ever sees the tag move by
+  itself: `UNKNOWN`, `AGREE` within about a minute, `LOCKED` after about half an hour
+  without drift.
 
 **Did the earlier rule foresee this?** No. `remote-inputs.md` §3.1 withholds *locked*
 because a minute of stamps resolves 2 ppm, and names what would lift it: a backend reading
@@ -375,7 +378,7 @@ run is rate agreement or better; the drift verdict is never required, and never 
 link, rate, relation, offered inputs; `remote.inputs` keyed by `InputRef`, with the
 measurements using each and `RemoteAudio::Idle`. `source.state`: `SourceInput.loopback`,
 the stimulus in brief. Topics `source/levels` and `peer/<rig>/levels`. `PeerClock`: the
-drift figures (after the rig check). `CantTellReason::NoMarks`. No generator command.
+drift figures (after the development check). `CantTellReason::NoMarks`. No generator command.
 
 **Versions.** `PROTO_VERSION` 92 → next free at merge, once per stage that touches the wire
 (1a, 1b, 2); `WIRE_LOCK`, `docs/protocol.md` and the Python fixtures with each. Session
@@ -455,7 +458,8 @@ rewrites what this design builds on in `control/remote.rs`: the tap install in
 
 - **1a — standing evidence** (wire). `source/levels` between daemons with its timing; the
   standing relation computed and logged **beside** the audio-fed one; the input list and
-  everything shown stay as built. Then the **rig check** of §5.2.
+  everything shown stay as built. Then the one-time **development check** of §5.2 on the
+  pupu rigs (not a user step).
 - **1b — identity and on demand** (wire; session format; the `rig.json` section of §6).
   `InputRef`; `remote_inputs` gone; the reshaped joiner on the standing relation; every
   paired rig offered; pickers and Audio & I/O rows with *available* / *in use by*;
@@ -476,12 +480,13 @@ running stream; the untagged `InputRef` reads under `deny_unknown_fields` in eve
 
 All five were accepted as recommended (operator, 2026-11-19: "1-5 ok").
 
-1. **Clock tags.** Recommended, conditional on the rig check of stage 1a: **`LOCKED`** = no
+1. **Clock tags.** Recommended, conditional on the one-time development check of stage 1a (ours, on the
+   pupu rigs; users run nothing): **`LOCKED`** = no
    drift held ≥ 30 min, the figure on hover (*no drift: < 0.03 ppm over 42 min*);
    **`AGREE`** = rates within 2 ppm, measured (the gate passes; also the first half hour
    and after any reset); **`FREE`** = the built 2 ppm rule says not locked, or another
    nominal rate; **`UNKNOWN`** = no usable evidence, measuring included, the reason on
-   hover. Until the check passes the tree shows `AGREE` at best. This overrules
+   hover. Until that check has set the thresholds, the app ships with `AGREE` at best. This overrules
    `remote-inputs.md` §3.1 (*no rig is called locked*) on evidence that rule did not
    foresee. The alternative keeps §3.1: `AGREE` / `MEASURING` / `NOT LOCKED` / `CAN'T
    TELL`, `LOCKED` never shown.
