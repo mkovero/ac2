@@ -1,14 +1,14 @@
-//! What libzmq does when a daemon socket gains and loses its network endpoint at runtime: the
-//! facts the live network switch relies on (docs/design/network-toggle.md). One socket
-//! stays bound to its local endpoint while a tcp endpoint comes and goes beside it.
+//! What libzmq does for a daemon that serves local on plain sockets for its whole life and
+//! the network on a CURVE pair made and dropped at runtime: the facts the live network
+//! switch relies on (docs/design/network-toggle.md).
 
 use crate::common;
 
 use std::sync::{Arc, Mutex};
 
 use ac2_zmq::{
-    AuthorizedKeys, Context, CurveClient, KeyPair, MonitorEvent, SecureContext, Socket, SocketType,
-    ZapDecision,
+    AuthorizedKeys, Context, CurveClient, KeyPair, PollItem, SecureContext, Socket, SocketType,
+    ZapDecision, poll,
 };
 use common::*;
 
@@ -23,88 +23,6 @@ fn round_trip(router: &Socket, dealer: &Socket, n: u8) -> TestResult {
     router.send(&[f[0].as_slice(), f[1].as_slice()])?;
     let r = dealer.recv_timeout(TIMEOUT)?.ok_or("dealer got no reply")?;
     assert_eq!(r.frames(), &[vec![n]]);
-    Ok(())
-}
-
-fn tcp_router(ctx: &Context) -> R<(Socket, String)> {
-    let router = ctx.socket(SocketType::Router)?;
-    router.set_router_mandatory(true)?;
-    router.bind("tcp://127.0.0.1:*")?;
-    let ep = router.last_endpoint()?;
-    Ok((router, ep))
-}
-
-/// Unbinding the tcp endpoint ends the connections accepted through it at once on the
-/// server side (libzmq owns them as children of their listener), while the socket's
-/// connection on its other (local) endpoint stays up. Turning the network off is therefore
-/// enough to cut every remote client; nothing has to track them. The client notices at its
-/// next send (or its keepalive deadline), not at the unbind itself.
-#[cfg(unix)]
-#[test]
-fn unbind_ends_accepted_tcp_connections_and_keeps_local_ones() -> TestResult {
-    let dir = tempfile::tempdir()?;
-    let ctx = Context::new()?;
-    let (router, tcp) = tcp_router(&ctx)?;
-    let ipc = format!("ipc://{}", dir.path().join("ctrl").display());
-    router.bind(&ipc)?;
-
-    let remote = ctx.socket(SocketType::Dealer)?;
-    remote.set_routing_id(b"remote")?;
-    let remote_mon = remote.monitor()?;
-    remote.connect(&tcp)?;
-    let local = dealer(&ctx, &ipc, None)?;
-    round_trip(&router, &remote, 1)?;
-    round_trip(&router, &local, 2)?;
-    remote_mon.wait_for(TIMEOUT, |e| *e == MonitorEvent::HandshakeSucceeded)?;
-
-    router.unbind(&tcp)?;
-    // With ROUTER_MANDATORY a send to a vanished routing id fails instead of dropping.
-    wait_until(|| router.send(&[&b"remote"[..], &[9]]).is_err())?;
-    round_trip(&router, &local, 3)?;
-
-    remote.send(&[[4u8]])?;
-    let gone = remote_mon.wait_for(TIMEOUT, |e| *e == MonitorEvent::Disconnected)?;
-    assert!(gone.is_some(), "the tcp client never noticed");
-    let late = router.recv_timeout(std::time::Duration::from_millis(300))?;
-    assert!(late.is_none(), "a request crossed an unbound endpoint");
-    // The client keeps retrying and is refused at the TCP level; it never gets back in.
-    let back = remote_mon.wait_for(std::time::Duration::from_millis(500), |e| {
-        *e == MonitorEvent::HandshakeSucceeded
-    })?;
-    assert!(back.is_none(), "reconnected after unbind");
-    round_trip(&router, &local, 5)?;
-    Ok(())
-}
-
-/// Binding the same tcp endpoint right after unbind can fail with "address in use": unbind
-/// returns before libzmq's I/O thread has closed the listener (seen both ways here). A
-/// rebind on the same socket has to retry; TIME_WAIT of the closed connection is no
-/// obstacle, libzmq sets SO_REUSEADDR on its listeners.
-#[test]
-fn tcp_endpoint_rebind_after_unbind_needs_a_retry() -> TestResult {
-    let ctx = Context::new()?;
-    let (router, tcp) = tcp_router(&ctx)?;
-    let first = dealer(&ctx, &tcp, None)?;
-    round_trip(&router, &first, 1)?;
-
-    router.unbind(&tcp)?;
-    drop(first);
-    let started = std::time::Instant::now();
-    loop {
-        match router.bind(&tcp) {
-            Ok(()) => break,
-            Err(ac2_zmq::Error::AddressInUse) if started.elapsed() < TIMEOUT => {
-                std::thread::sleep(std::time::Duration::from_millis(1));
-            }
-            Err(e) => return Err(e.into()),
-        }
-    }
-    let second = dealer(&ctx, &tcp, None)?;
-    round_trip(&router, &second, 2)?;
-
-    // Unbinding what is not bound is an error, not a silent no-op.
-    router.unbind(&tcp)?;
-    assert!(router.unbind(&tcp).is_err());
     Ok(())
 }
 
@@ -201,5 +119,62 @@ fn new_secure_context_rebinds_the_port_of_a_dropped_one() -> TestResult {
         drop(secure);
         drop(d);
     }
+    Ok(())
+}
+
+/// A plain local ROUTER and a CURVE ROUTER from a separate secure context, polled together
+/// on one thread, each with a client that picked the same routing id: the id names a peer
+/// only together with the socket it came in on, and libzmq routes each reply on its own
+/// socket. The daemon's io thread keys peers by (origin, id) for this reason.
+#[test]
+fn local_and_network_routers_share_one_poll_and_routing_ids() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    let ctx = Context::new()?;
+    let local = ctx.socket(SocketType::Router)?;
+    let local_ep = bind_endpoint(Transport::Tcp, dir.path(), "local");
+    local.bind(&local_ep)?;
+    let local_ep = local.last_endpoint()?;
+
+    let alice = KeyPair::generate()?;
+    let server = KeyPair::generate()?;
+    let mut keys = AuthorizedKeys::new();
+    keys.insert("alice", alice.public)?;
+    let secure = SecureContext::new("ac2", keys, |_| {})?;
+    let net = secure.curve_server_socket(SocketType::Router, &server)?;
+    net.bind("tcp://127.0.0.1:*")?;
+    let net_ep = net.last_endpoint()?;
+
+    let a = ctx.socket(SocketType::Dealer)?;
+    a.set_routing_id(b"same")?;
+    a.connect(&local_ep)?;
+    let b = ctx.socket(SocketType::Dealer)?;
+    b.set_routing_id(b"same")?;
+    b.set_curve_client(&CurveClient {
+        keys: alice,
+        server_key: server.public,
+    })?;
+    b.connect(&net_ep)?;
+    a.send(&[b"from-local"])?;
+    b.send(&[b"from-net"])?;
+
+    let mut seen = Vec::new();
+    while seen.len() < 2 {
+        let mut items = [PollItem::readable(&local), PollItem::readable(&net)];
+        poll(&mut items, Some(TIMEOUT))?;
+        let (l, n) = (items[0].is_readable(), items[1].is_readable());
+        for (ready, sock, origin) in [(l, &local, "local"), (n, &net, "net")] {
+            if ready && let Some(m) = sock.try_recv()? {
+                assert_eq!(m.frames()[0], b"same");
+                // Only the network pair carries a ZAP identity.
+                assert_eq!(m.user_id().is_some(), origin == "net");
+                sock.send(&[b"same".as_slice(), origin.as_bytes()])?;
+                seen.push(origin);
+            }
+        }
+    }
+    let ra = a.recv_timeout(TIMEOUT)?.ok_or("no local reply")?;
+    let rb = b.recv_timeout(TIMEOUT)?.ok_or("no network reply")?;
+    assert_eq!(ra.frames(), &[b"local".to_vec()]);
+    assert_eq!(rb.frames(), &[b"net".to_vec()]);
     Ok(())
 }
