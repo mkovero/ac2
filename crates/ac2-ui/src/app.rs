@@ -544,6 +544,24 @@ impl App {
             return;
         }
         let fake = matches!(choice, Choice::Simulated);
+        // A rig already in the list, even one still retrying, is shown rather than added
+        // again: a second link to one daemon is a second row that can never connect
+        // either.
+        let place = match &choice {
+            Choice::Target(_, addr) => addr.clone(),
+            Choice::Local { .. } => Some(crate::prefs::RigAddr::Local),
+            Choice::Simulated => None,
+        };
+        if let Some(id) = place.and_then(|a| {
+            self.state
+                .rigs()
+                .find(|r| r.link.is_some() && r.addr.as_ref().is_some_and(|b| b.same_place(&a)))
+                .map(|r| r.id)
+        }) {
+            self.connect = None;
+            self.dispatch(Msg::RigPick(crate::state::RigRow::Rig(id)));
+            return;
+        }
         let first = self.state.rigs().all(|r| r.link.is_none());
         let slot = if first {
             self.state.rig.slot

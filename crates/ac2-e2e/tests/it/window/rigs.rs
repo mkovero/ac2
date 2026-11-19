@@ -539,3 +539,24 @@ fn another_rigs_measurement_dropped_into_a_pane() -> R {
     assert!(connected(h.state(), kettu_id));
     Ok(())
 }
+
+/// Connect a rig… to a daemon already in the list shows that rig, never a second row for
+/// it: a second link to a daemon that does not answer would only retry beside the first.
+#[test]
+fn connecting_a_rig_already_listed_shows_it() -> R {
+    if !have_gpu("connecting_a_rig_already_listed_shows_it") {
+        return Ok(());
+    }
+    let dir = tempfile::tempdir()?;
+    let keys = dir.path().join("keys");
+    let pupu = named("pupu", &dir.path().join("pupu-id"))?;
+    let kettu = named("kettu", &dir.path().join("kettu-id"))?;
+    let (mut h, pupu_id) = on_pupu(&pupu, &keys);
+    let kettu_id = connect_kettu(&mut h, pupu_id, &kettu, Duration::from_secs(5));
+    pick_first_rig(&mut h);
+    step_until(&mut h, "pupu shown", |a| a.state.active() == pupu_id);
+    let again = connect_kettu(&mut h, pupu_id, &kettu, Duration::from_secs(5));
+    assert_eq!(again, kettu_id);
+    assert_eq!(h.state().state.rigs().count(), 2, "kettu listed once");
+    Ok(())
+}

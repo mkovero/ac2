@@ -332,6 +332,26 @@ pub enum RigAddr {
     Endpoints { ctrl: String, data: String },
 }
 
+impl RigAddr {
+    /// Whether both reach the same daemon: one address is one daemon, whatever key was
+    /// pinned for it.
+    pub fn same_place(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Local, Self::Local) => true,
+            (
+                Self::Network { host, port, .. },
+                Self::Network {
+                    host: h, port: p, ..
+                },
+            ) => host.eq_ignore_ascii_case(h) && port == p,
+            (Self::Endpoints { ctrl, data }, Self::Endpoints { ctrl: c, data: d }) => {
+                ctrl == c && data == d
+            }
+            _ => false,
+        }
+    }
+}
+
 /// A rig the app held when it last ran: connected again at start.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RememberedRig {
