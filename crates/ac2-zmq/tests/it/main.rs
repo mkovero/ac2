@@ -6,6 +6,7 @@ mod common;
 mod ctrl;
 mod curve;
 mod latest;
+mod listen_toggle;
 mod liveness;
 mod parts;
 mod pubsub;

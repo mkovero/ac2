@@ -446,6 +446,16 @@ impl Socket {
         zmq(self.raw.bind(&c_endpoint(endpoint)?))
     }
 
+    /// Stops listening on `endpoint`, which must be spelled as bound with wildcards resolved
+    /// (see [`Socket::last_endpoint`]). Connections accepted through it end with it
+    /// (libzmq owns them as children of the listener); the socket's other endpoints and
+    /// their connections are untouched. The listener closes on libzmq's I/O thread after
+    /// this returns, so binding the same endpoint at once can fail with
+    /// [`Error::AddressInUse`] for a moment.
+    pub fn unbind(&self, endpoint: &str) -> Result<()> {
+        zmq(self.raw.unbind(&c_endpoint(endpoint)?))
+    }
+
     /// Connects to `endpoint`; libzmq connects (and reconnects) in the background.
     pub fn connect(&self, endpoint: &str) -> Result<()> {
         zmq(self.raw.connect(&c_endpoint(endpoint)?))

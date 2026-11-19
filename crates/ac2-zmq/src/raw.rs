@@ -109,6 +109,7 @@ unsafe extern "C" {
     fn zmq_getsockopt(s: *mut c_void, opt: c_int, val: *mut c_void, len: *mut usize) -> c_int;
     fn zmq_bind(s: *mut c_void, addr: *const c_char) -> c_int;
     fn zmq_connect(s: *mut c_void, addr: *const c_char) -> c_int;
+    fn zmq_unbind(s: *mut c_void, addr: *const c_char) -> c_int;
     fn zmq_socket_monitor(s: *mut c_void, addr: *const c_char, events: c_int) -> c_int;
 
     fn zmq_msg_init(msg: *mut zmq_msg_t) -> c_int;
@@ -310,6 +311,11 @@ impl RawSocket {
     pub(crate) fn bind(&self, endpoint: &CStr) -> RawResult<()> {
         // SAFETY: valid NUL-terminated string; libzmq copies it.
         check(unsafe { zmq_bind(self.ptr.as_ptr(), endpoint.as_ptr()) }).map(drop)
+    }
+
+    pub(crate) fn unbind(&self, endpoint: &CStr) -> RawResult<()> {
+        // SAFETY: valid NUL-terminated string; libzmq copies it.
+        check(unsafe { zmq_unbind(self.ptr.as_ptr(), endpoint.as_ptr()) }).map(drop)
     }
 
     pub(crate) fn connect(&self, endpoint: &CStr) -> RawResult<()> {
