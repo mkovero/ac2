@@ -477,5 +477,4 @@ Operator, 2026-11-19:
   currently. reference could be remote also but both obviously initiated from rig in
   question (ie. no generator output over network)."
 - "if we're receiving input levels nevertheless from remotes, could we use that information
-  to estimate whether we are LOCKED or ?" (§5; the tag words are §10 q1, open.)
-- The tree and top bar as stated at the top of this document.
+  to estimate whether we are LOCKED or ?" (§5; tag words: §10 q1, open.) The tree and top bar: as at the top.
