@@ -3,8 +3,8 @@
 //! the authorized client keys and the keys it refused).
 
 use ac2_proto::model::{
-    AuthorizedClient, GenAction, Generator, LocalServer, NetReason, NetReasonKind, NetStatus,
-    NetStatusKind, NetStatusView, OutputSetup, PeerNetStatus, RefusedKey, ServerInfo,
+    AuthorizedClient, GenAction, Generator, LocalServer, NetReason, NetReasonKind, OutputSetup,
+    RefusedKey, ServerInfo,
 };
 use ac2_proto::units::{Dbfs, WallNs};
 
@@ -130,9 +130,10 @@ pub fn stimulus_outputs(channels: &[u16], labels: &[OutputSetup]) -> String {
     }
 }
 
-/// How the daemon serves clients, in lines.
-pub fn server_lines(s: &ServerInfo) -> Vec<String> {
-    let mut v = match &s.local {
+/// How the daemon serves clients on its own computer, in lines (the network's rows come
+/// after them: [`crate::network`]).
+pub fn local_lines(s: &ServerInfo) -> Vec<String> {
+    match &s.local {
         Some(LocalServer::Embedded) => {
             vec!["In-process: no client outside its program can connect.".to_owned()]
         }
@@ -141,26 +142,16 @@ pub fn server_lines(s: &ServerInfo) -> Vec<String> {
             "Clients on this computer under the same user connect without keys.".to_owned(),
         ],
         None => Vec::new(),
-    };
-    let n = &s.network;
-    let why = match &n.status {
-        NetStatusView::Host {
-            status: NetStatus::Waiting { reason } | NetStatus::Failed { reason },
-        } => reason_text(reason),
-        NetStatusView::Peer {
-            status: PeerNetStatus::Waiting { reason } | PeerNetStatus::Failed { reason },
-        } => reason_kind_text(*reason).to_owned(),
-        _ => String::new(),
-    };
-    v.push(match (n.status.kind(), n.status.endpoints()) {
-        (_, Some((ctrl, _))) => format!("Network: {ctrl} (CURVE; paired clients only)"),
-        (NetStatusKind::Waiting, _) => format!("Network: waiting, {why}"),
-        (NetStatusKind::Failed, _) => format!("Network: failed, {why}; retrying"),
-        _ => "Network: off".to_owned(),
-    });
-    if let Some(f) = &n.fingerprint {
-        v.push(format!("Server key fingerprint: {f}"));
     }
+}
+
+/// What follows the network's rows: the server key, the advert, the recordings.
+pub fn server_lines(s: &ServerInfo) -> Vec<String> {
+    let n = &s.network;
+    let mut v = vec![match &n.fingerprint {
+        Some(f) => format!("Server key fingerprint: {f}"),
+        None => "Server key: created when the network is first turned on".to_owned(),
+    }];
     if n.status.endpoints().is_some() {
         v.push(match &n.advertised_as {
             Some(a) => format!("Advertised over mDNS as {a:?}"),
@@ -308,13 +299,16 @@ mod tests {
     #[test]
     fn server_texts() {
         let s = ac2_proto::samples::server_info();
-        let lines = server_lines(&s);
         assert_eq!(
-            lines,
+            local_lines(&s),
             vec![
                 "Local: ipc:///run/user/1000/ac2/ctrl.sock",
                 "Clients on this computer under the same user connect without keys.",
-                "Network: tcp://192.168.1.20:47820 (CURVE; paired clients only)",
+            ]
+        );
+        assert_eq!(
+            server_lines(&s),
+            vec![
                 "Server key fingerprint: SHA256:3f1c 9a2e 77b0 51d4",
                 "Advertised over mDNS as \"foh-rig\"",
                 "Recordings: /home/fohtech/.local/share/ac2/recordings",
@@ -340,8 +334,16 @@ mod tests {
         assert_eq!(
             server_lines(&ac2_proto::samples::server_info_fixed()),
             vec![
-                "Network: waiting, the address is not on this computer",
                 "Server key fingerprint: SHA256:3f1c 9a2e 77b0 51d4",
+                "Recordings: this daemon does not record",
+            ]
+        );
+        let off = ac2_proto::samples::server_info_off();
+        assert!(local_lines(&ac2_proto::samples::server_info_fixed()).is_empty());
+        assert_eq!(
+            server_lines(&off),
+            vec![
+                "Server key: created when the network is first turned on",
                 "Recordings: this daemon does not record",
             ]
         );

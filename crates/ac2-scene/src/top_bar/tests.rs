@@ -267,6 +267,17 @@ fn link_trouble_takes_the_segment_over() {
             format!("remote: ac2pi-0ab1c6 · connection refused · retrying{after}")
         )
     );
+    // Turned off on purpose: said so, and not in the fault colour.
+    assert_eq!(
+        says(BarLink::Failed {
+            error: "not responding",
+            down: RigDown::NetworkOff
+        }),
+        (
+            LinkTone::Warn,
+            format!("remote: ac2pi-0ab1c6 · turned its network off · retrying{after}")
+        )
+    );
     assert_eq!(
         says(BarLink::Failed {
             error: "the daemon refused this app's key",

@@ -65,6 +65,9 @@ pub enum RigDown {
     /// The daemon answers but its authorized clients do not list this app's key: retrying
     /// cannot help until the key is added on that host.
     NotAuthorized,
+    /// The rig said it turned its network off before the link went: on purpose, not a
+    /// fault. The app keeps trying, and connects once it is back on.
+    NetworkOff,
 }
 
 /// The rigs drop-down's row closing the rig shown.
@@ -78,6 +81,7 @@ pub fn rig_row(name: &str, down: Option<RigDown>) -> String {
         None => name.to_owned(),
         Some(RigDown::Unreachable) => format!("{name} · {RIG_UNREACHABLE}"),
         Some(RigDown::NotAuthorized) => format!("{name} · {RIG_NOT_AUTHORIZED}"),
+        Some(RigDown::NetworkOff) => format!("{name} · {}", crate::network::RIG_NETWORK_OFF),
     }
 }
 
@@ -94,6 +98,7 @@ pub fn rig_pane_down(rig: &str, down: RigDown) -> String {
         RigDown::NotAuthorized => {
             format!("{rig} {RIG_NOT_AUTHORIZED} · Settings › Connection says what to add")
         }
+        RigDown::NetworkOff => format!("{rig} {}", crate::network::RIG_NETWORK_OFF),
     }
 }
 

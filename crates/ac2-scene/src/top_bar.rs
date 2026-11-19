@@ -263,6 +263,14 @@ pub fn bar(i: &BarInputs<'_>) -> Bar {
             Some(error),
         )),
         BarLink::Failed {
+            down: RigDown::NetworkOff,
+            ..
+        } => Some((
+            LinkTone::Warn,
+            format!("{place} · {}", crate::network::RIG_NETWORK_OFF),
+            None,
+        )),
+        BarLink::Failed {
             error,
             down: RigDown::Unreachable,
         } => Some((
