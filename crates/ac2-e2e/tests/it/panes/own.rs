@@ -342,7 +342,7 @@ fn spl_texts(s: &AppState, pane: PaneId) -> Vec<String> {
     let keys = Keymap::default();
     ac2_ui::scenes::spl_pane(s, pane, &keys, &Theme::dark(), SIZE, now()).map_or_else(
         || vec![ac2_ui::scenes::spl_placeholder(s, pane, &keys)],
-        |(scene, _)| scene_texts(&scene),
+        |s| scene_texts(&s.scene),
     )
 }
 

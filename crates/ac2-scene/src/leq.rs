@@ -166,8 +166,17 @@ pub struct LeqScene {
     pub run: Option<String>,
     /// The strip's caption while it looks back (`history · 14:02–15:10 · Home: live`).
     pub strip_caption: Option<String>,
-    /// The cursor readout drawn over the strip.
+    /// What the strip's cursor reads, as on its plate.
     pub strip_readout: Option<StripReadout>,
+    /// The cursor values' plate as drawn; `None` without a cursor that reads something.
+    pub readout_box: Option<crate::plate::PlateBox>,
+}
+
+impl LeqScene {
+    /// The plates the operator moves.
+    pub fn plates(&self) -> Vec<crate::plate::PlateBox> {
+        self.readout_box.into_iter().collect()
+    }
 }
 
 /// Lays the view out in `size` below the banner strip: the meter and calibration on one
@@ -374,6 +383,7 @@ pub(crate) fn leq_scene_under<T>(
         .any(|t| matches!(t.state, TileState::Ok | TileState::Near | TileState::Over));
     let mut strip_caption = None;
     let mut readout = None;
+    let mut readout_box = None;
     let history = match (hist_area, v.history) {
         (Some(r), Some(h)) => {
             let pts = v.strip.points.unwrap_or(h);
@@ -393,10 +403,13 @@ pub(crate) fn leq_scene_under<T>(
             }
             if v.chrome.cursor()
                 && let Some(t) = v.strip.cursor.filter(|t| *t >= s.from && *t <= s.to)
-                && let Some(r) = strip_readout(v.cfg, pts, judged, t, off)
             {
-                draw::history_cursor(&mut c, &s, t, &r, theme);
-                readout = Some(r);
+                // The line stays where the cursor was put, also over a gap in the log,
+                // where there is nothing to read.
+                readout = strip_readout(v.cfg, pts, judged, t, off);
+                let area = Rect::new(0.0, top, size.width, (size.height - top).max(1.0));
+                readout_box =
+                    draw::history_cursor(&mut c, &s, t, readout.as_ref(), &v.strip, area, theme);
             }
             Some(s)
         }
@@ -413,6 +426,7 @@ pub(crate) fn leq_scene_under<T>(
         run: cap.run.map(|(t, ..)| t),
         strip_caption,
         strip_readout: readout,
+        readout_box,
     };
     (scene, extra)
 }

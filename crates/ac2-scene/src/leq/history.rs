@@ -450,7 +450,11 @@ pub(super) fn lay_out_strip(
         ylo = (mid - 10.0).floor();
         yhi = ylo + 20.0;
     }
-    let y = axis::linear_axis(Range::new(ylo, yhi), plot.bottom(), plot.y, "dB");
+    // The axis reads absolute levels, so its title is their unit (`dB SPL`, `dBFS`), never
+    // a bare dB, which is a difference. The windows' weightings may differ: their names
+    // carry them.
+    let unit = h.scale.map_or("", LevelScale::unit);
+    let y = axis::linear_axis(Range::new(ylo, yhi), plot.bottom(), plot.y, unit);
     let lines = cfg
         .windows
         .iter()
@@ -610,7 +614,8 @@ pub fn history_caption(
 pub struct ReadoutRow {
     /// Its index in the configuration (its colour).
     pub window: usize,
-    /// `LAeq 15 min 97.3 dB · limit 99 · over`.
+    /// `LAeq 15 min  97.3 dB SPL · limit 99.0 dB SPL · over`: the window's name, then its
+    /// level in the meter's unit as the columns say it (the name carries the weighting).
     pub text: String,
     pub over: bool,
 }
@@ -635,10 +640,7 @@ pub fn strip_readout(
     utc_offset_s: i32,
 ) -> Option<StripReadout> {
     let step = f64::from(h.step());
-    let unit = match h.scale {
-        Some(LevelScale::Dbfs) => "dBFS",
-        _ => "dB",
-    };
+    let scale = h.scale?;
     let mut at = None;
     let mut rows = Vec::new();
     for (i, w) in cfg.windows.iter().enumerate() {
@@ -652,21 +654,14 @@ pub fn strip_readout(
         };
         at.get_or_insert(p.t);
         let v = f64::from(p.leq);
-        let mut text = format!(
-            "{} {}",
-            window_name(w),
-            if v.is_finite() {
-                format!("{} {unit}", format::fixed(v, 1))
-            } else {
-                format::NO_VALUE.to_string()
-            }
-        );
+        let mut value = format::scaled_level(v, scale);
         if judged && let Some(l) = w.limit {
-            text.push_str(&format!(" · limit {}", format::fixed(l.0, 1)));
+            value.push_str(&format!(" · limit {}", format::spl(l.0)));
             if p.over {
-                text.push_str(" · over");
+                value.push_str(" · over");
             }
         }
+        let text = crate::readout::row(&[window_name(w), value]);
         rows.push(ReadoutRow {
             window: i,
             text,
@@ -684,7 +679,7 @@ pub fn strip_readout(
 }
 
 /// How the Leq view's history strip looks: live or back at a span, with what it draws
-/// then and the pointer over it.
+/// then, its cursor and the cursor values' plate.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LeqStripView<'a> {
     pub span: StripSpan,
@@ -693,8 +688,11 @@ pub struct LeqStripView<'a> {
     pub points: Option<&'a LeqHistory>,
     /// A fetch of the span is under way.
     pub loading: bool,
-    /// The pointer over the strip, daemon wall clock s.
+    /// The cursor, where a click put it: daemon wall clock s.
     pub cursor: Option<f64>,
+    /// Where the operator put the cursor values' plate, and the pointer on it.
+    pub plate: crate::plate::PlatePlace,
+    pub plate_hover: Option<crate::plate::PlateHover>,
     /// The key that returns the strip to live (`Home`).
     pub live_key: Option<String>,
 }

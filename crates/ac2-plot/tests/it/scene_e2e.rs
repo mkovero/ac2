@@ -527,3 +527,122 @@ fn spectrum_golden_with(
     let img = render_on(gpu, &mut r, &s.scene, 1.0, theme.background);
     golden(name, &img, TEXT);
 }
+
+/// The SPL pane's Leq columns over the history strip looked back at, its cursor placed:
+/// the line in the cursor's colour as on every plot, and its values (the bucket's time,
+/// a row per window in its colour, red where over) on the cursor values' plate under the
+/// strip's caption; the strip's axis titled with the meter's unit.
+#[test]
+fn leq_strip_cursor_on_the_readout_plate() {
+    use ac2_proto::frame::{LeqFlags, LeqFrame, LeqMeta};
+    use ac2_proto::model::{CalBasis, CalStatus, LeqConfig, LevelScale, SplHistory};
+    use ac2_proto::units::{DbSpl, WallNs};
+    use ac2_scene::leq::{LeqHistory, LeqStripView, LeqView, StripSpan, leq_scene, leq_tiles};
+    use ac2_scene::view::{LeqLayout, LeqStyle, PlotChrome};
+    let Some(gpu) = gpu("leq_strip_cursor_on_the_readout_plate") else {
+        return;
+    };
+    let cfg = LeqConfig::default_windows();
+    let n = cfg.windows.len();
+    let judged = LeqFlags::LIMIT.with(LeqFlags::JUDGED);
+    let frame = LeqFrame {
+        meas: MeasId(4),
+        meta: LeqMeta {
+            scale: LevelScale::DbSpl,
+            cal: CalStatus::Verified {
+                calibrated_at: WallNs(1),
+                basis: CalBasis::Acoustic {
+                    calibrator_level: DbSpl(94.0),
+                },
+            },
+            mic_curve: false,
+            horizon: Seconds(60.0),
+            logged: 3600,
+            run: None,
+            lcpeak: None,
+            lafmax: None,
+            position: None,
+        },
+        leq: vec![96.0; n],
+        elapsed: cfg.windows.iter().map(|w| w.duration.0 as f32).collect(),
+        measured: cfg.windows.iter().map(|w| w.duration.0 as f32).collect(),
+        allowed: vec![f32::NAN; n],
+        recover: vec![f32::NAN; n],
+        least: vec![96.0; n],
+        over_in: vec![f32::NAN; n],
+        flags: cfg
+            .windows
+            .iter()
+            .map(|w| {
+                if w.limit.is_some() {
+                    judged
+                } else {
+                    LeqFlags::NONE
+                }
+            })
+            .collect(),
+    };
+    // 30 one-minute buckets ending 17:10 UTC; the first window over in the 8th to 12th.
+    let end_s: u64 = 1_791_046_920 + 480;
+    let at: Vec<WallNs> = (0..30u64)
+        .map(|k| WallNs((end_s - (29 - k) * 60) * 1_000_000_000))
+        .collect();
+    let level = |i: usize, k: usize| 92.0 + i as f32 * 1.5 + 6.0 * (k as f32 / 5.0).sin();
+    let over = |i: usize, k: usize| i == 0 && (7..12).contains(&k);
+    let log = SplHistory {
+        meas: MeasId(4),
+        windows: cfg.windows.clone(),
+        scale: LevelScale::DbSpl,
+        step_s: 60,
+        log_start: Some(WallNs((end_s - 86_400) * 1_000_000_000)),
+        log_until: Some(WallNs(end_s * 1_000_000_000)),
+        at,
+        leq: (0..n)
+            .map(|i| (0..30).map(|k| level(i, k)).collect())
+            .collect(),
+        over: (0..n)
+            .map(|i| (0..30).map(|k| over(i, k)).collect())
+            .collect(),
+    };
+    let span = LeqHistory::from_span(&log);
+    let live = LeqHistory::default();
+    let (from, to) = ((end_s - 30 * 60) as f64, end_s as f64);
+    let view = LeqView {
+        meter: "FOH SPL".into(),
+        cal: "M30 · cal 3 h ago".into(),
+        cfg: &cfg,
+        tiles: leq_tiles(&cfg, &frame),
+        history: Some(&live),
+        stale: None,
+        scale: LevelScale::DbSpl,
+        layout: LeqLayout {
+            style: LeqStyle::Columns,
+            history: true,
+        },
+        run: None,
+        stage: false,
+        chrome: PlotChrome::Full,
+        strip: LeqStripView {
+            span: StripSpan {
+                span: Some((from, to)),
+                utc_offset_s: 0,
+            },
+            points: Some(&span),
+            cursor: Some(from + 9.5 * 60.0),
+            live_key: Some("Home".into()),
+            ..Default::default()
+        },
+        shared: None,
+    };
+    let theme = Theme::dark();
+    let s = leq_scene(
+        &view,
+        &Status::default(),
+        &theme,
+        Viewport::new(760.0, 520.0),
+    );
+    assert!(s.readout_box.is_some(), "the cursor values' plate");
+    let mut r = renderer(gpu);
+    let img = render_on(gpu, &mut r, &s.scene, 1.0, theme.background);
+    golden("leq_strip_cursor_on_the_readout_plate", &img, TEXT);
+}

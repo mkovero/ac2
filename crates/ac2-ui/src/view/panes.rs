@@ -292,11 +292,12 @@ fn build_scene(
             )
         }
         PaneKind::Spl => {
-            let (scene, strip) = scenes::spl_pane(st, id, &app.keymap, theme, vp, now)?;
+            let s = scenes::spl_pane(st, id, &app.keymap, theme, vp, now)?;
+            plates = s.plates;
             (
-                scene,
+                s.scene,
                 Axes {
-                    strip,
+                    strip: s.strip,
                     ..Axes::default()
                 },
             )

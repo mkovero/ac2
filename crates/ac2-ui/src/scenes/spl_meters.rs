@@ -464,6 +464,15 @@ fn strip_place(s: &LeqScene) -> Option<StripPlace> {
     })
 }
 
+/// An SPL pane's picture, its history strip's place when one is drawn, and the plates the
+/// operator moves on it (the strip's cursor values).
+#[derive(Clone, Debug)]
+pub struct SplPaneScene {
+    pub scene: Scene,
+    pub strip: Option<StripPlace>,
+    pub plates: Vec<ac2_scene::plate::PlateBox>,
+}
+
 /// The SPL pane's picture in the chosen view ([`SplMode`]), with its history strip's place
 /// when one is drawn. The meter + Leq view shows whichever part has frames until both have
 /// (the windows' first second).
@@ -474,18 +483,24 @@ pub fn spl_pane(
     theme: &Theme,
     size: Viewport,
     now: Now,
-) -> Option<(Scene, Option<StripPlace>)> {
-    let leq = |s: LeqScene| {
-        let place = strip_place(&s);
-        (s.scene, place)
+) -> Option<SplPaneScene> {
+    let leq = |s: LeqScene| SplPaneScene {
+        strip: strip_place(&s),
+        plates: s.plates(),
+        scene: s.scene,
+    };
+    let plain = |scene: Scene| SplPaneScene {
+        scene,
+        strip: None,
+        plates: Vec::new(),
     };
     match st.pane_modes(pane).spl {
-        SplMode::Meter => spl(st, pane, keymap, theme, size, now).map(|s| (s.scene, None)),
+        SplMode::Meter => spl(st, pane, keymap, theme, size, now).map(|s| plain(s.scene)),
         SplMode::Leq => leq_keyed(st, pane, Some(keymap), theme, size, now).map(leq),
-        SplMode::Bands => band_leq(st, pane, theme, size, now).map(|s| (s.scene, None)),
+        SplMode::Bands => band_leq(st, pane, theme, size, now).map(|s| plain(s.scene)),
         SplMode::MeterLeq => meter_leq(st, pane, keymap, theme, size, now)
             .map(|s| leq(s.leq))
-            .or_else(|| spl(st, pane, keymap, theme, size, now).map(|s| (s.scene, None)))
+            .or_else(|| spl(st, pane, keymap, theme, size, now).map(|s| plain(s.scene)))
             .or_else(|| leq_keyed(st, pane, Some(keymap), theme, size, now).map(leq)),
     }
 }

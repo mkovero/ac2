@@ -112,9 +112,9 @@ fn keys_walk_the_strip_and_fetch_what_is_not_held() {
 }
 
 /// The wheel zooms time about the pointer, a drag pans it, never past the newest second or
-/// the log's start; the pointer's time is the cursor.
+/// the log's start.
 #[test]
-fn the_mouse_zooms_pans_and_reads_the_strip() {
+fn the_mouse_zooms_and_pans_the_strip() {
     let (mut t, pane) = browsing();
     let shown = (49_000.0, 50_000.0);
     let m = |m| Msg::LeqStrip(pane, m);
@@ -180,12 +180,81 @@ fn the_mouse_zooms_pans_and_reads_the_strip() {
     );
     let (a, b) = t.st.leq_panes.strips[&pane];
     assert!((b - a - STRIP_MIN_S).abs() < 1e-6);
-    // The pointer on the strip, and off it.
-    t.st.apply(m(StripMsg::Hover(Some(a + 5.0))), &t.keys);
-    assert_eq!(t.st.leq_panes.cursor, Some((pane, a + 5.0)));
-    assert_eq!(t.st.strip_view(pane, MeasId(4), None).cursor, Some(a + 5.0));
-    t.st.apply(m(StripMsg::Hover(None)), &t.keys);
-    assert_eq!(t.st.leq_panes.cursor, None);
+    // Neither places a cursor: only a click does.
+    assert!(t.st.leq_panes.cursors.is_empty());
+}
+
+/// The strip's cursor is placed as every plot's is: a click puts it at a time and it stays
+/// there (the pointer leaving, a pan, a zoom about it); Shift+T takes it away and brings it
+/// back at the middle of the span shown, Shift+← / → step it within the span. None of
+/// that moves the frequency panes' cursor.
+#[test]
+fn a_click_places_the_strip_cursor_and_the_cursor_keys_move_it() {
+    let (mut t, pane) = browsing();
+    let m = |m| Msg::LeqStrip(pane, m);
+    let shown = (49_000.0, 50_000.0);
+    assert_eq!(t.st.strip_view(pane, MeasId(4), None).cursor, None);
+    t.st.apply(m(StripMsg::Cursor(49_700.0)), &t.keys);
+    assert_eq!(t.st.leq_panes.cursors.get(&pane), Some(&49_700.0));
+    assert_eq!(
+        t.st.strip_view(pane, MeasId(4), None).cursor,
+        Some(49_700.0)
+    );
+    // The pointer on a plate and off it, a pan: the cursor stays where it was put.
+    t.st.apply(Msg::Plate(PlateMsg::Hover(None)), &t.keys);
+    t.st.apply(
+        m(StripMsg::Pan {
+            shown,
+            by: -100.0,
+            width_px: 800.0,
+        }),
+        &t.keys,
+    );
+    assert_eq!(t.st.leq_panes.cursors.get(&pane), Some(&49_700.0));
+    // I zooms about it: its time keeps its place on the strip.
+    let (a, b) = t.st.leq_panes.strips[&pane];
+    let k = (49_700.0 - a) / (b - a);
+    t.key("I");
+    let (a, b) = t.st.leq_panes.strips[&pane];
+    assert!(((49_700.0 - a) / (b - a) - k).abs() < 1e-9, "{a}..{b}");
+    // Shift+→ / ← step it by a step of the log's points, within the span.
+    let hz = t.st.view.cursor_hz;
+    t.key("Shift+ArrowRight");
+    let stepped = t.st.leq_panes.cursors[&pane];
+    assert!(stepped > 49_700.0 && stepped <= b, "{stepped}");
+    assert_eq!((stepped - 49_700.0).fract(), 0.0, "whole seconds");
+    t.key("Shift+ArrowLeft");
+    assert_eq!(t.st.leq_panes.cursors[&pane], 49_700.0);
+    for _ in 0..500 {
+        t.key("Shift+ArrowRight");
+    }
+    assert_eq!(t.st.leq_panes.cursors[&pane], b);
+    // Shift+T: off, then on at the middle of what is shown.
+    t.key("Shift+T");
+    assert!(t.st.leq_panes.cursors.is_empty());
+    assert_eq!(t.st.strip_view(pane, MeasId(4), None).cursor, None);
+    t.key("Shift+T");
+    assert_eq!(t.st.leq_panes.cursors[&pane], (a + b) / 2.0);
+    assert_eq!(t.st.view.cursor_hz, hz, "the frequency cursor is another");
+    // Its values' plate is the pane's cursor values plate, moved as on any pane.
+    t.st.apply(
+        Msg::Plate(PlateMsg::Move {
+            pane,
+            kind: ac2_scene::plate::PlateKind::Readout,
+            x: 0.25,
+            y: 0.5,
+        }),
+        &t.keys,
+    );
+    assert_eq!(
+        t.st.strip_view(pane, MeasId(4), None).plate.at,
+        Some([0.25, 0.5])
+    );
+    // Without the strip the keys are the frequency cursor's again.
+    t.st.view.spl.layout.history = false;
+    t.key("Shift+T");
+    assert_eq!(t.st.leq_panes.cursors[&pane], (a + b) / 2.0);
+    assert_ne!(t.st.view.cursor_hz, hz);
 }
 
 /// A stale or failed fetch: a reply to an earlier ask is not kept; a failure is said once.

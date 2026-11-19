@@ -1,8 +1,9 @@
 //! The Leq history strip looked back at: per SPL pane, a span of the meter's log that the
 //! mouse and the navigation keys move (the wheel zooms time about the pointer, a drag pans,
 //! I / O zoom, ← / → pan, Home returns to live), the spans of each meter's log fetched at
-//! the strip's resolution (`spl.history_get` with a range), and the pointer's time for the
-//! cursor readout. The values are the daemon's: this only picks which span to ask for.
+//! the strip's resolution (`spl.history_get` with a range), and each strip's cursor: a
+//! time a click or the cursor keys put it at, as on every plot. The values are the
+//! daemon's: this only picks which span to ask for and where the cursor reads it.
 
 use crate::state::*;
 use ac2_proto::model::{LeqConfig, SplHistory};
@@ -69,8 +70,8 @@ pub enum StripMsg {
         by: f64,
         width_px: f32,
     },
-    /// The pointer over the strip at a time (s), or off it.
-    Hover(Option<f64>),
+    /// Click: the cursor goes to a time (s).
+    Cursor(f64),
 }
 
 /// The commands that move a strip when its pane is focused.
@@ -78,7 +79,14 @@ pub(in crate::state) fn is_strip_nav(c: CommandId) -> bool {
     use CommandId as C;
     matches!(
         c,
-        C::ZoomIn | C::ZoomOut | C::PanLeft | C::PanRight | C::ResetView
+        C::ZoomIn
+            | C::ZoomOut
+            | C::PanLeft
+            | C::PanRight
+            | C::ResetView
+            | C::ToggleCursor
+            | C::CursorLeft
+            | C::CursorRight
     )
 }
 
@@ -172,9 +180,11 @@ impl AppState {
                 // About the cursor while it is on the strip, else the middle.
                 let about = self
                     .leq_panes
-                    .cursor
-                    .filter(|(p, t)| *p == pane && *t > from && *t < to)
-                    .map_or((from + to) / 2.0, |(_, t)| t);
+                    .cursors
+                    .get(&pane)
+                    .copied()
+                    .filter(|t| *t > from && *t < to)
+                    .unwrap_or((from + to) / 2.0);
                 let f = if c == C::ZoomIn {
                     ZOOM_FACTOR
                 } else {
@@ -218,6 +228,24 @@ impl AppState {
             C::ResetView if self.leq_panes.strips.remove(&pane).is_some() => {
                 self.toast("Leq history: live");
             }
+            C::ToggleCursor => match self.leq_panes.cursors.remove(&pane) {
+                Some(_) => {}
+                None => {
+                    self.leq_panes.cursors.insert(pane, (from + to) / 2.0);
+                }
+            },
+            C::CursorLeft | C::CursorRight => {
+                // A hundredth of the span shown, on the steps the log's points come in: a
+                // press moves the readout to other points at any zoom.
+                let step = f64::from(step_for(span / 100.0));
+                let k = if c == C::CursorLeft { -1.0 } else { 1.0 };
+                let at = self
+                    .leq_panes
+                    .cursors
+                    .get(&pane)
+                    .map_or((from + to) / 2.0, |t| t + k * step);
+                self.leq_panes.cursors.insert(pane, at.clamp(from, to));
+            }
             _ => {}
         }
     }
@@ -230,8 +258,10 @@ impl AppState {
         out: &mut Vec<Request>,
     ) {
         match m {
-            StripMsg::Hover(t) => {
-                self.leq_panes.cursor = t.map(|t| (pane, t));
+            StripMsg::Cursor(t) => {
+                if t.is_finite() {
+                    self.leq_panes.cursors.insert(pane, t);
+                }
             }
             StripMsg::Zoom {
                 shown,
@@ -437,22 +467,25 @@ impl AppState {
         }
     }
 
-    /// The strips on the active rig's meter `meas` go back to live.
+    /// The strips on the active rig's meter `meas` go back to live, their cursors with
+    /// them: a cursor is a time in the log they looked at.
     pub(in crate::state) fn forget_leq_strips(&mut self, meas: MeasId) {
         let panes: Vec<PaneId> = self
             .leq_panes
             .strips
             .keys()
+            .chain(self.leq_panes.cursors.keys())
             .copied()
             .filter(|p| self.strip_meter(*p).is_some_and(|(m, _)| m == meas))
             .collect();
         for p in panes {
             self.leq_panes.strips.remove(&p);
+            self.leq_panes.cursors.remove(&p);
         }
     }
 
     /// How pane `pane`'s strip of meter `meas` is drawn: live or the span it looks at, the
-    /// points that cover it, the pointer. `live_key` names the key back to live.
+    /// points that cover it, its cursor and the cursor values' plate. `live_key` names the key back to live.
     pub(crate) fn strip_view(
         &self,
         pane: PaneId,
@@ -460,11 +493,17 @@ impl AppState {
         live_key: Option<String>,
     ) -> LeqStripView<'_> {
         let offset = |t: f64| self.local_zone.offset_s(WallNs((t.max(0.0) * 1e9) as u64));
-        let cursor = self
-            .leq_panes
-            .cursor
+        let cursor = self.leq_panes.cursors.get(&pane).copied();
+        let plate = self
+            .layout
+            .view(pane)
+            .map(|v| v.plates.readout)
+            .unwrap_or_default();
+        let plate_hover = self
+            .pane_local
+            .plate_hover
             .filter(|(p, _)| *p == pane)
-            .map(|(_, t)| t);
+            .map(|(_, h)| h);
         let Some(&(from, to)) = self.leq_panes.strips.get(&pane) else {
             let newest = self
                 .rig
@@ -478,6 +517,8 @@ impl AppState {
                     utc_offset_s: offset(newest.unwrap_or(0.0)),
                 },
                 cursor,
+                plate,
+                plate_hover,
                 ..LeqStripView::default()
             };
         };
@@ -508,6 +549,8 @@ impl AppState {
             points,
             loading,
             cursor,
+            plate,
+            plate_hover,
             live_key,
         }
     }

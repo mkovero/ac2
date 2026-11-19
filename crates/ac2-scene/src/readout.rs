@@ -65,6 +65,17 @@ pub fn arrival_difference(a_s: f64, b_s: f64, temp_c: f64) -> String {
     )
 }
 
+/// A row of a readout plate: its cells two spaces apart (`Main L  −3.2 dB  +41°`,
+/// `4.2 s ago  −23.5 dBFS (tone)`), the gap every plate uses so a row reads the same on
+/// each of them. What belongs to one cell (a value and its notes) is joined by ` · `.
+pub fn row<S: AsRef<str>>(cells: &[S]) -> String {
+    cells
+        .iter()
+        .map(AsRef::as_ref)
+        .collect::<Vec<_>>()
+        .join("  ")
+}
+
 /// One trace's values at the cursor.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CursorRow {

@@ -1,6 +1,7 @@
 //! Drawing the tiles and the history strip into the scene.
 
 use super::*;
+use crate::plate::{self, Metrics, PlateBox, PlateKind, PlatePlace};
 use crate::view::Style;
 
 /// Columns of a grid of `n` tiles in `w × h` that makes the tiles largest at about 2:1.
@@ -154,7 +155,15 @@ pub(super) fn draw_history(
     chrome: crate::view::PlotChrome,
     theme: &Theme,
 ) {
-    canvas::pane_frame(c, s.plot, &s.x, &s.y, true, "dB", Style { chrome, theme });
+    canvas::pane_frame(
+        c,
+        s.plot,
+        &s.x,
+        &s.y,
+        true,
+        &s.y.title,
+        Style { chrome, theme },
+    );
     for l in &s.lines {
         if let Some(y) = l.limit_y {
             canvas::hline(
@@ -187,8 +196,9 @@ pub(super) fn draw_history(
             ));
         }
     }
-    // Legend: each window's name in its colour, along the top of the strip.
-    let mut x = s.plot.x + 30.0;
+    // Legend: each window's name in its colour, along the top of the strip, after the
+    // axis's unit.
+    let mut x = s.plot.x + 6.0 + canvas::text_width(&s.y.title, theme.small_font_size) + 12.0;
     for l in &s.lines {
         let name = shown_name(&l.name, shared);
         c.overlay.labels.push(label(
@@ -213,58 +223,70 @@ pub(super) fn history_note(c: &mut Canvas, s: &HistoryStrip, text: &str, theme: 
     ));
 }
 
-/// The cursor at daemon wall time `t` over the strip: a line across it and the readout
-/// beside it (on the side with room), a line per window in its colour, red where over.
+/// Below the strip's top: its unit, legend and caption line.
+const READOUT_TOP: f32 = 22.0;
+
+/// The cursor at daemon wall time `t` over the strip: its line in the cursor's colour, as
+/// every plot draws one, and what it reads (`r`: the time, then a row per window in its
+/// colour, red where over) on the cursor values' plate. Placed by the scene, the plate
+/// hangs from the strip's right edge under its caption; dragged, it sits where it was
+/// dropped in `area` (the pane under its banners). Its box, for the mouse; `None` with
+/// nothing read there.
 pub(super) fn history_cursor(
     c: &mut Canvas,
     s: &HistoryStrip,
     t: f64,
-    r: &StripReadout,
+    r: Option<&StripReadout>,
+    view: &LeqStripView<'_>,
+    area: Rect,
     theme: &Theme,
-) {
+) -> Option<PlateBox> {
     let span = (s.to - s.from).max(1e-9);
     let x = s.plot.x + ((t - s.from) / span) as f32 * s.plot.w;
-    canvas::vline(
-        &mut c.overlay,
-        s.plot,
-        x,
-        Stroke::solid(theme.text_dim, 1.0),
-    );
-    let fs = theme.small_font_size;
-    let line_h = fs * 1.35;
-    let lines: Vec<(&str, Color)> = std::iter::once((r.time.as_str(), theme.text))
+    canvas::vline(&mut c.overlay, s.plot, x, theme.cursor);
+    let r = r?;
+    let lines: Vec<(String, Color)> = std::iter::once((r.time.clone(), theme.text))
         .chain(r.rows.iter().map(|row| {
             let color = if row.over {
                 theme.banner_fault.background
             } else {
                 theme.trace_color(row.window)
             };
-            (row.text.as_str(), color)
+            (row.text.clone(), color)
         }))
         .collect();
-    let w = lines
-        .iter()
-        .map(|(t, _)| canvas::text_width(t, fs))
-        .fold(0.0, f32::max)
-        + 12.0;
-    let h = line_h * lines.len() as f32 + 8.0;
-    let left = if x + 8.0 + w <= s.plot.right() {
-        x + 8.0
-    } else {
-        (x - 8.0 - w).max(s.plot.x)
+    let texts: Vec<&str> = lines.iter().map(|l| l.0.as_str()).collect();
+    let set = view.plate.scale();
+    let (w, h) = Metrics::new(theme, set).size(&texts);
+    let scale = plate::fitted(set, area, w, h);
+    let m = Metrics::new(theme, scale);
+    let (w, h) = m.size(&texts);
+    let rect = match view.plate.at {
+        Some(at) => PlatePlace::rect_at(at, area, w, h),
+        // A strip shorter than the plate: the plate rises over what is above it rather
+        // than leave the pane.
+        None => Rect::new(
+            s.plot.right() - crate::legend::INSET - w,
+            (s.plot.y + READOUT_TOP)
+                .min(area.bottom() - crate::legend::INSET - h)
+                .max(area.y),
+            w,
+            h,
+        ),
     };
-    let top = s.plot.y + 20.0;
-    c.overlay.rects.push(FillRect::new(
-        Rect::new(left, top, w, h),
-        theme.plot_background.with_alpha(0.88),
-    ));
-    for (i, (text, color)) in lines.into_iter().enumerate() {
-        c.overlay.labels.push(label(
-            text.to_string(),
-            [left + 6.0, top + 4.0 + i as f32 * line_h],
-            anchor(HAlign::Left, VAlign::Top),
-            fs,
-            color,
-        ));
-    }
+    let hover = view.plate_hover.filter(|h| h.kind == PlateKind::Readout);
+    // The last layer: a layer's labels draw over its fills, so on the overlay the strip's
+    // legend and caption would show through a plate standing over them.
+    plate::draw_lines(
+        &mut c.banners,
+        rect,
+        &lines,
+        HAlign::Left,
+        m,
+        true,
+        hover,
+        area,
+        theme,
+    );
+    Some(PlateBox::new(PlateKind::Readout, area, rect, scale))
 }

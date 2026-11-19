@@ -36,8 +36,8 @@ pub use programme::programme;
 pub(crate) use spectrum_pane::with_spectrum;
 pub use spectrum_pane::{spectrograph, spectrograph_3d, spectrum, spectrum_jump, spectrum_scale};
 pub use spl_meters::{
-    LocalZone, StripPlace, band_leq, has_band_meter, leq, leq_keyed, leq_meter, meter_leq,
-    refresh_spl_scales, spl, spl_pane, spl_placeholder,
+    LocalZone, SplPaneScene, StripPlace, band_leq, has_band_meter, leq, leq_keyed, leq_meter,
+    meter_leq, refresh_spl_scales, spl, spl_pane, spl_placeholder,
 };
 pub use walk::{walk, walk_controls};
 

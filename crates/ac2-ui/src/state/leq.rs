@@ -37,8 +37,9 @@ pub struct LeqPanes {
     /// The span (daemon wall clock, s) each SPL pane's history strip looks back at; a
     /// pane not here follows live.
     pub strips: BTreeMap<PaneId, (f64, f64)>,
-    /// The pointer over a history strip: its pane and time (s).
-    pub cursor: Option<(PaneId, f64)>,
+    /// Each history strip's cursor, where a click or its keys put it (daemon wall clock,
+    /// s); a pane not here has none.
+    pub cursors: BTreeMap<PaneId, f64>,
     /// Width of the strip last moved by the mouse, px: the resolution fetched at.
     pub strip_px: f32,
     /// The SPL / Leq page's cue fold as the operator last set it, for the app's run: Apply,
@@ -50,7 +51,7 @@ impl Default for LeqPanes {
     fn default() -> Self {
         Self {
             strips: BTreeMap::new(),
-            cursor: None,
+            cursors: BTreeMap::new(),
             strip_px: 600.0,
             cues_shown: false,
         }

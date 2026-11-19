@@ -244,7 +244,7 @@ pub(super) fn navigate(
         return;
     }
     if pane == PaneKind::Spl {
-        navigate_strip(app, ui, resp, id, plot_rect, axes.strip);
+        navigate_strip(app, ui, resp, id, plot_rect, axes.strip, free);
         return;
     }
     // Only a view that draws the pane's level axis takes its gestures: the range of a pane
@@ -618,8 +618,9 @@ pub(super) fn navigate_ir(
 }
 
 /// The mouse on an SPL pane's Leq history strip, as on the other graphs' time axes: the
-/// wheel zooms time about the pointer, a drag pans it, the pointer reads the windows at its
-/// time. Off the strip it does nothing.
+/// wheel zooms time about the pointer, a drag pans it, a click puts the cursor at its
+/// time. Off the strip it does nothing; nor on a plate (`free` false), whose clicks and
+/// drags are the plate's.
 pub(super) fn navigate_strip(
     app: &mut App,
     ui: &egui::Ui,
@@ -627,11 +628,9 @@ pub(super) fn navigate_strip(
     id: PaneId,
     plot_rect: egui::Rect,
     strip: Option<scenes::StripPlace>,
+    free: bool,
 ) {
-    let Some(s) = strip else {
-        if app.state.leq_panes.cursor.is_some_and(|(p, _)| p == id) {
-            app.dispatch(Msg::LeqStrip(id, StripMsg::Hover(None)));
-        }
+    let Some(s) = strip.filter(|_| free) else {
         return;
     };
     let r = egui::Rect::from_min_size(
@@ -661,18 +660,12 @@ pub(super) fn navigate_strip(
             ));
         }
     }
-    let pos = resp.hover_pos().filter(|p| r.contains(*p));
-    let t = pos.map(t_at);
-    if app
-        .state
-        .leq_panes
-        .cursor
-        .filter(|(p, _)| *p == id)
-        .map(|(_, t)| t)
-        != t
+    if resp.clicked()
+        && let Some(p) = resp.interact_pointer_pos().filter(|p| r.contains(*p))
     {
-        app.dispatch(Msg::LeqStrip(id, StripMsg::Hover(t)));
+        app.dispatch(Msg::LeqStrip(id, StripMsg::Cursor(t_at(p))));
     }
+    let t = resp.hover_pos().filter(|p| r.contains(*p)).map(t_at);
     let scroll = ui.input(|i| i.smooth_scroll_delta.y);
     if scroll != 0.0
         && let Some(about) = t
