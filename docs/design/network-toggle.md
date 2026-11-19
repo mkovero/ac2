@@ -22,7 +22,8 @@ One agent per stage; each stage lands with its tests on the quick tier.
    control/remote.rs, lib.rs}`, `ac2-scene/src/stimulus.rs`, ac2d and ac2-e2e tests;
    all-OS CI.
 4. CLI: `ac2-cli/src/cmd/` (`server network`, `server authorize --refused`).
-5. App rows: `ac2-ui` Settings › Connection, keytips, `docs/user-guide.md`.
+5. App rows, done: `ac2-scene/src/network.rs`, `ac2-ui/src/settings/network.rs`, Settings ›
+   Connection (no new key), `docs/user-guide.md`, `ac2-e2e/tests/it/network.rs`.
 6. Docs: `docs/rigs/pupu.md` (line 86: units keep `--listen`), STATUS.md.
 
 ## Behaviour

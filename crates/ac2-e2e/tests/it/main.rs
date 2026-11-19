@@ -25,6 +25,7 @@ mod harness;
 mod keep;
 mod link;
 mod math;
+mod network;
 mod panes;
 mod recorded;
 mod session;

@@ -411,7 +411,8 @@ fn settings_name_an_output_route_the_stimulus_and_set_the_max_level() -> R {
 
 /// Settings, then Alt+4, Alt+5 and Alt+6: the Recording, Display and Connection pages; the
 /// last asks the daemon what it serves, which a daemon on a local socket answers with its
-/// mode, and lists the page's actions only (no client keys on a local socket).
+/// mode, and lists the page's actions and the network's rows (no client keys before a
+/// server key exists).
 #[test]
 fn settings_pages() -> R {
     use ac2_proto::model::LocalServer;
@@ -454,6 +455,9 @@ fn settings_pages() -> R {
             ConnLine::ConnectOther,
             ConnLine::StartLocal,
             ConnLine::StopOnQuit,
+            ConnLine::Network,
+            ConnLine::Interface,
+            ConnLine::Port,
         ]
     );
     assert!(page.error.is_none());

@@ -384,7 +384,42 @@ treats this computer's `ac2d` (**←/→** or **Enter** toggles; this app's, in 
   start of `ac2d`. In the AppImage it is always on: the AppImage's files go away when the app
   quits.
 
-In network mode the page lists the clients the rig accepts (name, key fingerprint) and the
+*Server* says how the rig's `ac2d` serves: locally (this computer, this user, no keys) and,
+beside that, its **network**, which apps and rigs on other computers reach with an
+authorized key. On a rig whose `ac2d` runs on this computer the network is switched here,
+live (the session, audio and local apps run on):
+
+- *Network* (**Enter** or **←/→**): off, the rig still pairs with, authorizes and reads other
+  rigs; only connections to it are off. Turning it on asks first (a second **Enter**), naming
+  the interface and port. Turning it off goes at once and cuts every app and rig connected to
+  this rig over the network (the row says so); this rig's own links to other rigs stay.
+- *Interface* (**←/→**, or the ‹ › buttons): *all interfaces*, then each interface with its
+  addresses as `ac2d` lists them, then *an address…* (**Enter** types one). While the network
+  is off nothing picked here has been sent: a pick says *as last set on this rig* until you
+  change it, and goes with the next turn-on. While it is on, **Enter** moves it to the pick.
+- *Port* (**Enter** types it): the ctrl port; data takes the next one. A port the local
+  connection holds is refused before it is sent: on Windows apps on this computer reach
+  `ac2d` over TCP 47822 and 47823, so the network may not take those.
+- *Status*, live: *listening on 192.168.1.20:47820*, *waiting: the port is in use ·
+  retrying*, *failed: … · retrying*, *off*. `ac2d` retries a network that cannot bind on its
+  own; nothing needs an operator. *Not saved: …* means the setting could not be written and
+  `ac2d` starts without it next time.
+
+A network fixed by `ac2d --listen` (how the rig hosts' services run it) reads *set by --listen
+(systemd)* and is changed in the service's command line. A rig reached over the network shows
+whether its network is on and its status, never a switch: change it on the rig's own
+computer. A refusal from `ac2d` is shown on the page in its words.
+
+When a rig you are connected to over the network turns its network off, the app says *pupu
+turned its network off* (a toast, the rigs drop-down, its panes, the top bar) instead of a
+lost link, and connects again once it is back on.
+
+On Windows the local connection is loopback TCP: any user of the computer, and anything
+forwarded to its loopback (ssh `-L`, a port proxy), counts as local and can turn the network
+on and authorize a key. Key files there get no ACL of their own; the per-user config
+folder's default ACL protects them.
+
+With a server key the page lists the clients the rig accepts (name, key fingerprint) and the
 keys it refused lately (fingerprint, address, how often, when).
 
 *Clocks* gives a line per connected rig (named when there are several), what its daemon
