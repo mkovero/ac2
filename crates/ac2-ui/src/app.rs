@@ -420,17 +420,6 @@ impl App {
         }
     }
 
-    /// A notice from the app itself (startup), as a failed reply.
-    fn startup_notice(&mut self, text: String) {
-        self.dispatch(Msg::Conn(
-            self.state.active(),
-            Box::new(crate::conn::ConnEvent::Reply {
-                what: "startup".into(),
-                result: Err(text),
-            }),
-        ));
-    }
-
     /// Starts the link of the rig in slot `slot` to `choice` (this computer's `ac2d` or the
     /// simulated rig started for it first).
     fn start_rig(&mut self, ctx: &egui::Context, slot: u32, choice: Choice) -> Result<(), String> {
@@ -464,20 +453,6 @@ impl App {
         r.due.open_session_when_empty = !simulated;
         r.quit_loses = simulated;
         Ok(())
-    }
-
-    /// The first rig (`AppOptions::start`): one that cannot start opens the connect dialog
-    /// with the reason, never a silent switch to another daemon.
-    fn start_first(&mut self, ctx: &egui::Context, choice: Choice) {
-        let slot = if self.state.rig.link.is_none() {
-            self.state.rig.slot
-        } else {
-            self.state.add_rig(String::new(), None, None)
-        };
-        if let Err(e) = self.start_rig(ctx, slot, choice) {
-            tracing::error!("ac2-ui: {e}");
-            self.daemon_failed(slot, e);
-        }
     }
 
     /// Follows the window's geometry, and once, makes a restored window fit its screen
@@ -544,20 +519,8 @@ impl App {
             return;
         }
         let fake = matches!(choice, Choice::Simulated);
-        // A rig already in the list, even one still retrying, is shown rather than added
-        // again: a second link to one daemon is a second row that can never connect
-        // either.
-        let place = match &choice {
-            Choice::Target(_, addr) => addr.clone(),
-            Choice::Local { .. } => Some(crate::prefs::RigAddr::Local),
-            Choice::Simulated => None,
-        };
-        if let Some(id) = place.and_then(|a| {
-            self.state
-                .rigs()
-                .find(|r| r.link.is_some() && r.addr.as_ref().is_some_and(|b| b.same_place(&a)))
-                .map(|r| r.id)
-        }) {
+        // A rig already listed, even one retrying, is shown, never added again.
+        if let Some(id) = choice.place().and_then(|a| self.state.rig_at(&a)) {
             self.connect = None;
             self.dispatch(Msg::RigPick(crate::state::RigRow::Rig(id)));
             return;

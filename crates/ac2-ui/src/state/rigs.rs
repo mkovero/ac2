@@ -188,6 +188,13 @@ impl AppState {
         slot
     }
 
+    /// The rig held at `addr`, linked (even while it retries): one daemon is one rig.
+    pub fn rig_at(&self, addr: &crate::prefs::RigAddr) -> Option<RigId> {
+        self.rigs()
+            .find(|r| r.link.is_some() && r.addr.as_ref().is_some_and(|b| b.same_place(addr)))
+            .map(|r| r.id)
+    }
+
     /// Drops the rig in slot `slot` that never got a link (its connect failed).
     pub fn forget_rig(&mut self, slot: u32) {
         self.others

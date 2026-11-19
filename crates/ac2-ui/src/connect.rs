@@ -34,6 +34,17 @@ pub enum Choice {
     Simulated,
 }
 
+impl Choice {
+    /// Where the choice reaches its daemon: the simulated rig is another one each time.
+    pub fn place(&self) -> Option<RigAddr> {
+        match self {
+            Self::Target(_, addr) => addr.clone(),
+            Self::Local { .. } => Some(RigAddr::Local),
+            Self::Simulated => None,
+        }
+    }
+}
+
 /// One row of the dialog.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Entry {

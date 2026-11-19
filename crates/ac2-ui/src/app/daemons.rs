@@ -93,6 +93,31 @@ impl Daemons {
 }
 
 impl App {
+    /// A notice from the app itself (startup), as a failed reply.
+    pub(super) fn startup_notice(&mut self, text: String) {
+        self.dispatch(Msg::Conn(
+            self.state.active(),
+            Box::new(crate::conn::ConnEvent::Reply {
+                what: "startup".into(),
+                result: Err(text),
+            }),
+        ));
+    }
+
+    /// The first rig (`AppOptions::start`): one that cannot start opens the connect dialog
+    /// with the reason, never a silent switch to another daemon.
+    pub(super) fn start_first(&mut self, ctx: &egui::Context, choice: Choice) {
+        let slot = if self.state.rig.link.is_none() {
+            self.state.rig.slot
+        } else {
+            self.state.add_rig(String::new(), None, None)
+        };
+        if let Err(e) = self.start_rig(ctx, slot, choice) {
+            tracing::error!("ac2-ui: {e}");
+            self.daemon_failed(slot, e);
+        }
+    }
+
     /// Starts `exe` wherever the app would start the `ac2d` beside it: for a test whose own
     /// binary has no `ac2d` beside it.
     pub fn use_ac2d(&mut self, exe: std::path::PathBuf) {
