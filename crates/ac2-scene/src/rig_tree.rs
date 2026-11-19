@@ -62,7 +62,7 @@ pub struct RigRoot<'a> {
     pub clock: Option<ClockTag<'a>>,
     /// A paired rig: the pairing as the rig shown reports it ([`pairing_text`]). `None` for
     /// the rig shown.
-    pub pairing: Option<&'a str>,
+    pub pairing: Option<&'a Pairing>,
 }
 
 /// A rig's clock domain among the rigs listed ([`crate::clock_domain::clock_domains`]): the
@@ -89,6 +89,39 @@ pub enum ClockVerdict {
     OnTag,
 }
 
+/// A pairing as the rig shown's daemon reports it: its words ([`Pairing::text`]), and
+/// whether a heading has to say them beside its rig's rate and clock tag.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Pairing {
+    /// Paired and nothing more reported: a rig listed under the rig shown is paired anyway.
+    Plain,
+    /// Its audio is refused for the rate (*cm4 runs 48 kHz, this rig 96 kHz*): the two
+    /// headings' rates already say it.
+    RateMismatch(String),
+    /// Anything else the rig shown reports: a link not up, audio not streaming, a clock
+    /// warning, streaming.
+    Said(String),
+}
+
+impl Pairing {
+    /// The pairing in full, as the heading's tooltip says it.
+    pub fn text(&self) -> &str {
+        match self {
+            Pairing::Plain => PAIRED,
+            Pairing::RateMismatch(t) | Pairing::Said(t) => t,
+        }
+    }
+
+    /// What the heading's second line says of it after the rate and the clock tag: only
+    /// what nothing else on screen says.
+    pub fn on_heading(&self) -> Option<&str> {
+        match self {
+            Pairing::Plain | Pairing::RateMismatch(_) => None,
+            Pairing::Said(t) => Some(t),
+        }
+    }
+}
+
 /// The pairing with `rig` as the rig shown's daemon reports it (`r`, with its session's
 /// remote inputs `inputs`), in the words the lines between rigs use: a link that is not up,
 /// else the first of that rig's inputs whose audio does not stream (*cm4 runs 48 kHz, this
@@ -101,52 +134,64 @@ pub fn pairing_text(
     inputs: &[RemoteInput],
     rig: RigId,
     clocks: ClockVerdict,
-) -> String {
+) -> Pairing {
     let Some(remote) = r.rigs.iter().find(|x| x.rig == rig) else {
-        return PAIRED.to_owned();
+        return Pairing::Plain;
     };
     if remote.link != RemoteLink::Up {
-        return between_rigs::link_text(remote);
+        return Pairing::Said(between_rigs::link_text(remote));
     }
     let mut audio = inputs.iter().filter(|i| i.rig == rig).filter_map(|i| {
         let st = r.inputs.iter().find(|s| s.slot == i.slot)?;
         Some((st.audio, i.channel))
     });
     match audio.clone().find(|(a, _)| *a != RemoteAudio::Streaming) {
-        Some((a, channel)) => between_rigs::audio_text(a, &remote.name, channel),
+        Some((a @ RemoteAudio::RateMismatch { .. }, channel)) => {
+            Pairing::RateMismatch(between_rigs::audio_text(a, &remote.name, channel))
+        }
+        Some((a, channel)) => Pairing::Said(between_rigs::audio_text(a, &remote.name, channel)),
         // Audio streams: the clocks between the two rigs are what is left to say. A
         // warning leads, so the narrowest list still shows it.
         None if audio.next().is_some() => {
-            match (crate::cross_rig::clock_words(r, remote), clocks) {
+            Pairing::Said(match (crate::cross_rig::clock_words(r, remote), clocks) {
                 ((words, true), _) => format!("{words} · {PAIRED} · streaming"),
                 ((words, false), ClockVerdict::InWords) => {
                     format!("{PAIRED} · streaming · {words}")
                 }
                 ((_, false), ClockVerdict::OnTag) => format!("{PAIRED} · streaming"),
-            }
+            })
         }
-        None => PAIRED.to_owned(),
+        None => Pairing::Plain,
     }
 }
 
-/// The heading's first line: the rig's name, its session's rate and its clock tag.
-fn name_line(root: &RigRoot<'_>) -> String {
-    let mut parts = vec![root.name.to_owned(), root.audio.text()];
-    parts.extend(root.clock.map(|c| c.tag.to_owned()));
-    parts.join(" · ")
+/// The heading's second line at its narrowest: its session's rate and its clock tag,
+/// `48 kHz FREE`. Between two rigs' headings these say what a pairing refused for the rate
+/// would.
+fn audio_line(root: &RigRoot<'_>) -> String {
+    match root.clock {
+        Some(c) => format!("{} {}", root.audio.text(), c.tag),
+        None => root.audio.text(),
+    }
 }
 
-/// Rig `root`'s heading, with its fold arrow.
+/// Rig `root`'s heading, with its fold arrow: its name, and under it its rate and clock tag
+/// and what else the list cannot show of it.
 pub fn rig_heading(root: &RigRoot<'_>) -> TreeRow {
     let name = root.name;
-    // A paired rig's pairing leads every line: the narrowest list still says it.
-    let lead = |rest: &str| match root.pairing {
-        Some(p) => format!("{p} · {rest}"),
-        None => rest.to_owned(),
+    let audio = audio_line(root);
+    // The rate and tag lead every line, the pairing next: a narrower list drops the counts
+    // first and the pairing's words last.
+    let said = root.pairing.and_then(Pairing::on_heading);
+    let lead = |rest: &[&str]| {
+        let mut parts = vec![audio.as_str()];
+        parts.extend(said);
+        parts.extend(rest);
+        parts.join(" · ")
     };
     let whose = match root.pairing {
         None => "the rig shown".to_owned(),
-        Some(p) => format!("another rig, {p}"),
+        Some(p) => format!("another rig, {}", p.text()),
     };
     let (mut details, describe) = if root.folded {
         // The counts read as the Sessions dialog says a session's.
@@ -154,23 +199,21 @@ pub fn rig_heading(root: &RigRoot<'_>) -> TreeRow {
         let meas = all.split(" · ").next().unwrap_or_default().to_owned();
         (
             vec![
-                lead(&format!("{all} · folded")),
-                lead(&format!("{meas} · folded")),
+                lead(&[&all, "folded"]),
+                lead(&[&meas, "folded"]),
+                lead(&[]),
+                audio.clone(),
             ],
             format!("{name}: {whose}, folded: {all} under it"),
         )
-    } else if let Some(p) = root.pairing {
-        (
-            vec![
-                lead("click shows this rig; its rows drag onto panes"),
-                p.to_owned(),
-            ],
-            format!("{name}: {whose}; a click shows it, its rows drag onto panes as they are"),
-        )
     } else {
+        let does = match root.pairing {
+            Some(_) => "a click shows it, its rows drag onto panes as they are",
+            None => "new measurements and the keys go to it",
+        };
         (
-            vec!["shown: new measurements and the keys go here".to_owned()],
-            format!("{name}: {whose}; new measurements and the keys go to it"),
+            vec![lead(&[]), audio.clone()],
+            format!("{name}: {whose}; {does}"),
         )
     };
     details.dedup();
@@ -178,12 +221,7 @@ pub fn rig_heading(root: &RigRoot<'_>) -> TreeRow {
         Some(c) => format!("{describe}\nclock {}: {}", c.tag, c.tip),
         None => describe,
     };
-    let mut row = heading_row(
-        TreeKey::RigName(root.rig),
-        &name_line(root),
-        details,
-        describe,
-    );
+    let mut row = heading_row(TreeKey::RigName(root.rig), name, details, describe);
     row.collapsed = Some(root.folded);
     row
 }
@@ -200,7 +238,8 @@ pub enum Away {
 /// The heading of rig `name`, paired with the rig shown (`pairing`: [`pairing_text`]) and
 /// not read by this app: the pairing is the rig shown's to report, the measurements are
 /// not, so none is listed and the heading has no fold.
-pub fn rig_away_heading(rig: RigId, name: &str, pairing: &str, away: Away) -> TreeRow {
+pub fn rig_away_heading(rig: RigId, name: &str, pairing: &Pairing, away: Away) -> TreeRow {
+    let pairing = pairing.text();
     let (details, why) = match away {
         Away::NotConnected => (
             vec![
@@ -272,13 +311,14 @@ mod tests {
             traces: 5,
             audio: RigAudio::Rate(if shown { 96_000 } else { 48_000 }),
             clock: None,
-            pairing: (!shown).then_some(PAIRED),
+            pairing: (!shown).then_some(&Pairing::Plain),
         }
     }
 
     /// The rig shown and a rig paired with it: each is a root over its own rows, a level in,
-    /// its session's rate beside its name; the folded one lists only its heading, saying the
-    /// pairing and how many measurements and traces it hides.
+    /// its session's rate under its name; the folded one lists only its heading, saying how
+    /// many measurements and traces it hides. Plain *paired* is not said: a rig listed under
+    /// the rig shown is paired with it.
     #[test]
     fn each_rig_is_a_root_and_a_folded_one_says_what_it_hides() {
         let r = rig();
@@ -291,7 +331,7 @@ mod tests {
         assert_eq!(
             text(&list),
             [
-                "▾ ketunkolo · 96 kHz · shown: new measurements and the keys go here",
+                "▾ ketunkolo · 96 kHz",
                 "  ▾ TF  Main L · running",
                 "    ├ Main L (live) · live",
                 "    ├ pre-EQ · capture",
@@ -303,14 +343,19 @@ mod tests {
                 "  ▾ SPL  FOH SPL · running",
                 "  ▾ Imported · 1 trace",
                 "    └ 1083 94cm · imported",
-                "▸ pupu · 48 kHz · paired · 4 measurements · 5 traces · folded",
+                "▸ pupu · 48 kHz · 4 measurements · 5 traces · folded",
             ]
         );
         let pupu = list.last().expect("pupu");
         assert_eq!(pupu.key, TreeKey::RigName(RigId(2)));
+        assert_eq!(pupu.name, "pupu");
         assert_eq!(
-            pupu.details.last().map(String::as_str),
-            Some("paired · 4 measurements · folded")
+            pupu.details,
+            [
+                "48 kHz · 4 measurements · 5 traces · folded",
+                "48 kHz · 4 measurements · folded",
+                "48 kHz"
+            ]
         );
         assert_eq!(
             pupu.describe,
@@ -329,7 +374,11 @@ mod tests {
         };
         assert_eq!(
             rig_heading(&one).details,
-            ["1 measurement · 1 trace · folded", "1 measurement · folded"]
+            [
+                "96 kHz · 1 measurement · 1 trace · folded",
+                "96 kHz · 1 measurement · folded",
+                "96 kHz"
+            ]
         );
         assert_eq!(
             rig_heading(&one).describe,
@@ -384,8 +433,10 @@ mod tests {
         (state, inputs)
     }
 
-    /// A rig beside its name says its session's rate, or what the top bar says of a rig
-    /// without one; a clock tag follows the rate.
+    /// A rig's name stands alone on its heading's first line; the second says its session's
+    /// rate, or what the top bar says of a rig without one, and its clock tag after the rate.
+    /// The rig shown says nothing more: where new measurements and the keys go is its
+    /// tooltip's.
     #[test]
     fn a_heading_says_the_rigs_rate_beside_its_name() {
         let head = |audio, clock: Option<&'static str>| {
@@ -398,14 +449,18 @@ mod tests {
                 ..root("pupu", true, false)
             })
         };
-        let name = |audio, clock| head(audio, clock).name;
-        assert_eq!(name(RigAudio::Rate(96_000), None), "pupu · 96 kHz");
-        assert_eq!(name(RigAudio::Rate(44_100), None), "pupu · 44.1 kHz");
-        assert_eq!(name(RigAudio::NoSession, None), "pupu · no session");
-        assert_eq!(name(RigAudio::NoAudio, None), "pupu · no audio I/O");
+        let lines = |audio, clock| {
+            let h = head(audio, clock);
+            (h.name, h.details)
+        };
+        let says = |line: &str| ("pupu".to_owned(), vec![line.to_owned()]);
+        assert_eq!(lines(RigAudio::Rate(96_000), None), says("96 kHz"));
+        assert_eq!(lines(RigAudio::Rate(44_100), None), says("44.1 kHz"));
+        assert_eq!(lines(RigAudio::NoSession, None), says("no session"));
+        assert_eq!(lines(RigAudio::NoAudio, None), says("no audio I/O"));
         assert_eq!(
-            name(RigAudio::Rate(48_000), Some("AGREE")),
-            "pupu · 48 kHz · AGREE"
+            lines(RigAudio::Rate(96_000), Some("FREE")),
+            says("96 kHz FREE")
         );
         // The tag's basis is in the heading's tooltip, after what the heading is.
         let tagged = head(RigAudio::Rate(48_000), Some("AGREE")).describe;
@@ -430,60 +485,97 @@ mod tests {
         let words = ClockVerdict::InWords;
         assert_eq!(
             pairing_text(&RemoteState::default(), &[], rig, words),
-            "paired"
+            Pairing::Plain
         );
-        let text = |link, audio| {
+        assert_eq!(Pairing::Plain.text(), "paired");
+        let pairing = |link, audio| {
             let (r, inputs) = remote(link, audio);
             pairing_text(&r, &inputs, rig, words)
         };
+        let text = |link, audio| pairing(link, audio).text().to_owned();
         // With a clock tag on the heading the tag is the verdict: the pairing gives none.
         let (r, inputs) = remote(RemoteLink::Up, Some(RemoteAudio::Streaming));
         assert_eq!(
             pairing_text(&r, &inputs, rig, ClockVerdict::OnTag),
-            "paired · streaming"
+            Pairing::Said("paired · streaming".into())
         );
         assert_eq!(
             text(RemoteLink::Up, Some(RemoteAudio::Streaming)),
             "paired · streaming · measuring clocks…"
         );
+        // Told apart from the rest: the two headings' rates say it.
         assert_eq!(
-            text(
+            pairing(
                 RemoteLink::Up,
                 Some(RemoteAudio::RateMismatch {
                     theirs: 48_000,
                     ours: 96_000
                 })
             ),
-            "cm4 runs 48 kHz, this rig 96 kHz"
+            Pairing::RateMismatch("cm4 runs 48 kHz, this rig 96 kHz".into())
         );
         assert_eq!(text(RemoteLink::Connecting, None), "connecting");
         assert_eq!(
             text(RemoteLink::NotAdmitted, None),
             "cm4 has not admitted this rig"
         );
-        assert_eq!(text(RemoteLink::Up, None), "paired");
+        assert_eq!(pairing(RemoteLink::Up, None), Pairing::Plain);
     }
 
-    /// A paired rig unfolded: the pairing leads its line and is all of the narrowest one.
+    /// A paired rig unfolded at another rate: its rate and tag are all of its second line,
+    /// the rate-refused pairing, the click and the drag its tooltip's.
     #[test]
-    fn a_paired_rigs_heading_says_the_pairing() {
+    fn a_paired_rig_at_another_rate_says_its_rate_and_tag() {
+        let refused = Pairing::RateMismatch("cm4 runs 48 kHz, this rig 96 kHz".into());
+        let free = ClockTag {
+            tag: "FREE",
+            tip: "no clock in common with ketunkolo",
+        };
         let h = rig_heading(&RigRoot {
-            pairing: Some("cm4 runs 48 kHz, this rig 96 kHz"),
+            pairing: Some(&refused),
+            clock: Some(free),
             ..root("cm4", false, false)
         });
-        assert_eq!(h.name, "cm4 · 48 kHz");
-        assert_eq!(
-            h.details,
-            [
-                "cm4 runs 48 kHz, this rig 96 kHz · click shows this rig; its rows drag onto \
-                 panes",
-                "cm4 runs 48 kHz, this rig 96 kHz"
-            ]
-        );
+        assert_eq!(h.name, "cm4");
+        assert_eq!(h.details, ["48 kHz FREE"]);
         assert_eq!(
             h.describe,
             "cm4: another rig, cm4 runs 48 kHz, this rig 96 kHz; a click shows it, its rows \
-             drag onto panes as they are"
+             drag onto panes as they are\n\
+             clock FREE: no clock in common with ketunkolo"
+        );
+    }
+
+    /// What the rig shown reports beyond the rates follows the rate and tag, a warning as
+    /// loud as the rest of the line; narrower, the counts go first, the words next, the rate
+    /// and tag never.
+    #[test]
+    fn a_paired_rigs_heading_says_what_else_the_pairing_reports() {
+        let warned = Pairing::Said("CLOCKS NOT LOCKED +5.6 ppm · paired · streaming".into());
+        let unfolded = rig_heading(&RigRoot {
+            pairing: Some(&warned),
+            ..root("cm4", false, false)
+        });
+        assert_eq!(
+            unfolded.details,
+            [
+                "48 kHz · CLOCKS NOT LOCKED +5.6 ppm · paired · streaming",
+                "48 kHz"
+            ]
+        );
+        let late = Pairing::Said("cm4 has not admitted this rig".into());
+        let folded = rig_heading(&RigRoot {
+            pairing: Some(&late),
+            ..root("cm4", false, true)
+        });
+        assert_eq!(
+            folded.details,
+            [
+                "48 kHz · cm4 has not admitted this rig · 4 measurements · 5 traces · folded",
+                "48 kHz · cm4 has not admitted this rig · 4 measurements · folded",
+                "48 kHz · cm4 has not admitted this rig",
+                "48 kHz"
+            ]
         );
     }
 
@@ -491,7 +583,12 @@ mod tests {
     /// measurement is listed; nothing to fold.
     #[test]
     fn a_paired_rig_not_connected_is_a_heading_alone() {
-        let h = rig_away_heading(RigId(2), "cm4", "connecting", Away::NotConnected);
+        let h = rig_away_heading(
+            RigId(2),
+            "cm4",
+            &Pairing::Said("connecting".into()),
+            Away::NotConnected,
+        );
         assert_eq!((h.name.as_str(), h.collapsed), ("cm4", None));
         assert_eq!(
             h.details,
@@ -505,7 +602,7 @@ mod tests {
             "cm4: another rig, connecting; this app is not connected to it, so its \
              measurements are not listed: Connect a rig… in the rig drop-down adds it"
         );
-        let h = rig_away_heading(RigId(2), "cm4", PAIRED, Away::Unreachable);
+        let h = rig_away_heading(RigId(2), "cm4", &Pairing::Plain, Away::Unreachable);
         assert_eq!(h.details, ["paired · unreachable · retrying"]);
         assert_eq!(
             h.describe,

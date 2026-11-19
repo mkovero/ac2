@@ -40,7 +40,10 @@ fn heads(t: &T) -> Vec<(RigId, String)> {
     t.st.list_rows()
         .into_iter()
         .filter(|(_, r)| matches!(r.key, TreeKey::RigName(_)))
-        .map(|(rig, r)| (rig, r.name))
+        .map(|(rig, r)| {
+            let line = r.details.last().map_or("", String::as_str);
+            (rig, format!("{} / {line}", r.name))
+        })
         .collect()
 }
 
@@ -58,8 +61,8 @@ fn a_rig_held_and_not_paired_is_not_listed() {
     assert_eq!(
         heads(&t),
         [
-            (RIG, "test rig · 48 kHz · UNKNOWN".to_owned()),
-            (PUPU, "pupu · 48 kHz · UNKNOWN".to_owned())
+            (RIG, "test rig / 48 kHz UNKNOWN".to_owned()),
+            (PUPU, "pupu / 48 kHz UNKNOWN".to_owned())
         ]
     );
     assert!(t.st.list_rows().iter().all(|(r, _)| *r != KETTU));
@@ -74,16 +77,23 @@ fn a_rig_held_and_not_paired_is_not_listed() {
 fn switching_the_rig_shown_changes_the_list() {
     let (mut t, _) = three_rigs();
     pick_rig(&mut t, KETTU);
-    assert_eq!(heads(&t), [(KETTU, "kettu · 48 kHz".to_owned())]);
+    assert_eq!(heads(&t), [(KETTU, "kettu / 48 kHz".to_owned())]);
     pick_rig(&mut t, PUPU);
     let listed: Vec<RigId> = heads(&t).into_iter().map(|(r, _)| r).collect();
     assert_eq!(listed, [PUPU, RIG]);
-    let pairing =
+    // Plain *paired* is the tooltip's: the rig is listed because it is paired.
+    let head =
         t.st.list_rows()
             .into_iter()
             .find(|(_, r)| r.key == TreeKey::RigName(RIG))
-            .and_then(|(_, r)| r.details.last().cloned());
-    assert_eq!(pairing.as_deref(), Some("paired"));
+            .map(|(_, r)| r)
+            .expect("test rig's heading");
+    assert_eq!(head.details, ["48 kHz UNKNOWN"]);
+    assert!(
+        head.describe.starts_with("test rig: another rig, paired;"),
+        "{}",
+        head.describe
+    );
 }
 
 /// A rig with nothing measured and no audio I/O says so where its rate would be, in the
@@ -94,10 +104,10 @@ fn a_rig_without_a_session_says_so_beside_its_name() {
     let mut s = pupu(&t).daemon().cloned().expect("pupu's state");
     s.session.open = None;
     to(&mut t, PUPU, mirror(s.clone()));
-    assert_eq!(heads(&t)[1].1, "pupu · no audio I/O");
+    assert_eq!(heads(&t)[1].1, "pupu / no audio I/O");
     s.measurements.clear();
     to(&mut t, PUPU, mirror(s));
-    assert_eq!(heads(&t)[1].1, "pupu · no session");
+    assert_eq!(heads(&t)[1].1, "pupu / no session");
 }
 
 /// Tab steps through the list as shown: past the rig shown's rows onto pupu's, never onto

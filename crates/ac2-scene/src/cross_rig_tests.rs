@@ -341,9 +341,13 @@ fn input(slot: u16, audio: RemoteAudio) -> (RemoteInput, ac2_proto::model::Remot
 fn a_rigs_heading_says_the_relation_and_warns_in_words() {
     let says = |r: &RemoteState, inputs: &[RemoteInput]| {
         crate::rig_tree::pairing_text(r, inputs, KETUNKOLO, ClockVerdict::InWords)
+            .text()
+            .to_owned()
     };
     let tagged = |r: &RemoteState, inputs: &[RemoteInput]| {
         crate::rig_tree::pairing_text(r, inputs, KETUNKOLO, ClockVerdict::OnTag)
+            .text()
+            .to_owned()
     };
     let (i, st) = input(0, RemoteAudio::Streaming);
     let mut r = remote(PeerRelation::Agree);

@@ -17,7 +17,7 @@ use crate::state::panes::drag::RowDrop;
 use ac2_scene::clock_domain::{DomainTag, RigClockFacts, clock_domains};
 use ac2_scene::meas_list::{Mark, TreeKey, TreeRow};
 use ac2_scene::rig_tree::{
-    Away, ClockTag, ClockVerdict, RigAudio, RigRoot, rig_away_heading, rig_branch,
+    Away, ClockTag, ClockVerdict, Pairing, RigAudio, RigRoot, rig_away_heading, rig_branch,
 };
 
 /// A rig not shown, as its part of the measurement list was last read: its rows, and what
@@ -173,7 +173,7 @@ impl AppState {
         &self,
         r: &RigState,
         rows: Vec<TreeRow>,
-        pairing: Option<&str>,
+        pairing: Option<&Pairing>,
         clock: &DomainTag,
     ) -> Vec<TreeRow> {
         let count = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
@@ -228,10 +228,9 @@ impl AppState {
                 Some(_) => ClockVerdict::OnTag,
                 None => ClockVerdict::InWords,
             };
-            let pairing = remote.map_or_else(
-                || ac2_scene::rig_tree::PAIRED.to_owned(),
-                |r| ac2_scene::rig_tree::pairing_text(r, inputs, id, verdict),
-            );
+            let pairing = remote.map_or(Pairing::Plain, |r| {
+                ac2_scene::rig_tree::pairing_text(r, inputs, id, verdict)
+            });
             let held = self.find_rig(id);
             let list = self.others.rig_lists.iter().find(|l| l.rig == id);
             match (held, list) {

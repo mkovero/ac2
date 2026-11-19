@@ -129,13 +129,18 @@ not paired with is not in the list: it is in the drop-down, and has nothing to d
 rig shown. Two rigs are paired when one takes an input of the other
 ([Inputs from another rig](#inputs-from-another-rig)); either one shown lists the other.
 
-A heading says the rig's name and its session's sample rate, `pupu · 96 kHz` (*no session*
-or *no audio I/O* when it has none, as the top bar says). A paired rig's heading also says
-the pairing as the rig shown reports it, in the words of *Between rigs*: *paired* (nothing
-taken from it right now), *paired · streaming*, *connecting*, *unreachable*, *cm4 runs
-48 kHz, this rig 96 kHz*, *cm4 has not admitted this rig*. A paired rig this app is not
-connected to is its heading alone, *paired · this app is not connected to it*: the app
-connects to no rig by itself, so *Connect a rig…* adds it and its measurements appear.
+A heading says the rig's name, and under it, smaller and greyer, its session's sample rate
+and its clock tag, `48 kHz FREE` (*no session* or *no audio I/O* when it has none, as the
+top bar says). Two rigs at different rates read so on their two headings; a remote input
+needs both at one rate, and the heading's tooltip says *cm4 runs 48 kHz, this rig 96 kHz*.
+After the rate and tag a paired rig's second line says what else the rig shown reports of
+the pairing, in the words of *Between rigs*: *paired · streaming*, *connecting*,
+*unreachable*, *cm4 has not admitted this rig*, a clock warning in capitals; plain
+*paired* (nothing taken from it right now) is not repeated there, a rig listed is paired.
+The tooltip says the whole pairing and what a click on the heading does. A paired rig this
+app is not connected to is its heading alone, *paired · this app is not connected to it*:
+the app connects to no rig by itself, so *Connect a rig…* adds it and its measurements
+appear.
 
 **Another rig's measurement in a pane.** Drag a row of a paired rig onto a pane and the
 pane shows it, by that rig's own
@@ -218,21 +223,22 @@ these lines per cross-rig transfer function.
 In the app the relation is said next to every cross-rig result, always in words (a problem
 is never only a colour):
 
-- **The rig's heading in the measurement list:** its first line carries the rig's clock
-  tag (`pupu · 96 kHz · AGREE`), and the heading's tooltip says what the tag rests on.
+- **The rig's heading in the measurement list:** its second line carries the rig's clock
+  tag after its rate (`96 kHz AGREE`), and the heading's tooltip says what the tag rests on.
   `AGREE`: its sample clock reads within 2 ppm of the other rigs' named in the tooltip,
   either *measured between the rigs* (with the figure, *+0.3 ppm over the last 60 s*) or
   *by each rig's system clock*, where two free clocks can meet by chance; with more than
   one such group the tags carry a letter (`AGREE A`, `AGREE B`). `FREE`: shown to differ
   from every other rig listed. `UNKNOWN`: *can't tell*, and what is missing. No tag says
-  the rigs are locked: agreement within 2 ppm does not prove one clock. The second line
-  says the pairing (*paired · streaming*) and leaves the clocks to the tag, except for a
-  warning, said first and in capitals: *CLOCKS NOT LOCKED +5.6 ppm · paired · streaming*,
+  the rigs are locked: agreement within 2 ppm does not prove one clock. After the tag the
+  line says the pairing (*paired · streaming*) and leaves the clocks to the tag, except for
+  a warning, said first and in capitals: *CLOCKS NOT LOCKED +5.6 ppm · paired · streaming*,
   *CLOCKS: CAN'T TELL · paired · streaming*, *LINK OFFSET TOO SMALL · paired · streaming*.
   A paired rig this app does not read has no tag, and its line says the relation in words
   (*paired · streaming · clocks agree*, *paired · streaming · measuring clocks…*). With no
-  audio from it the line reads *no audio*, and *ketunkolo runs 48 kHz, this rig 96 kHz*
-  when the rates differ (a remote input needs both rigs at one rate).
+  audio from it the line reads *no audio*; when the rates differ the two headings' rates say
+  it, and the tooltip *ketunkolo runs 48 kHz, this rig 96 kHz* (a remote input needs both
+  rigs at one rate).
 - **Top bar:** while a cross-rig transfer function is
   stopped, the bar's status line carries why and what to do (*Main L stopped: pupu and
   ketunkolo are not on one clock (+5.6 ppm). Lock both interfaces to one reference.*).
@@ -2425,7 +2431,8 @@ Beside the panes, one tree lists every measurement with what it owns
 ([measurement-tree.md](design/measurement-tree.md)), rooted at the rig it lives on:
 
 ```
-▾ pupu                  shown: new measurements and the keys go here
+▾ pupu
+  96 kHz FREE
   ▾ TF  Main L          running
       ├ Main L (live)
       ├ pre-EQ          capture
@@ -2437,7 +2444,8 @@ Beside the panes, one tree lists every measurement with what it owns
   ▾ SPL  FOH SPL        running
   ▾ Imported            1 trace
       └ 1083 94cm       imported
-▸ ketunkolo             4 measurements · 5 traces · folded
+▸ ketunkolo
+  48 kHz FREE · 4 measurements · 5 traces · folded
 ```
 
 | Item | Filed under |
@@ -2449,13 +2457,13 @@ Beside the panes, one tree lists every measurement with what it owns
 | **imports**, session traces of no measurement | **Imported**, listed last when it holds something |
 
 - The rig shown is the first root of the tree, even when it is the only one, then each rig
-  its daemon is paired with ([Many rigs](#many-rigs-in-one-window)): its heading with its
-  session's rate (`pupu · 96 kHz`, `ketunkolo · 48 kHz`; a paired rig's second line says the
-  pairing) and under it everything that lives on that rig (its Rig
+  its daemon is paired with ([Many rigs](#many-rigs-in-one-window)): its heading, the rig's
+  name over its session's rate and clock tag (`96 kHz FREE`; a paired rig's line adds what
+  else the pairing reports) and under it everything that lives on that rig (its Rig
   monitor meters, its Session measurements, its Imported group). A rig the app holds that
   the rig shown is not paired with has no root: the top bar's drop-down lists it. The arrow before the
   heading **folds** the rig's branch: only the heading stays, saying what it hides
-  (`6 measurements · 12 traces · folded`, counted as the Sessions dialog counts a
+  (`96 kHz FREE · 6 measurements · 12 traces · folded`, counted as the Sessions dialog counts a
   session). The fold is this app's, kept per rig in `ui.toml` across restarts. A click on
   the heading itself switches to that rig, as before.
 - The arrow before a measurement **folds** it (palette *Fold/unfold measurement*).

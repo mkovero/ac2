@@ -101,15 +101,9 @@ fn pupu_pairing(t: &T) -> String {
     let head = rows
         .iter()
         .map(|(_, r)| r)
-        .find(|r| r.depth == 0 && r.name.starts_with("pupu"))
+        .find(|r| r.depth == 0 && r.name == "pupu")
         .unwrap_or_else(|| panic!("no heading for pupu in {rows:?}"));
-    let line = head
-        .details
-        .iter()
-        .find(|d| d.to_lowercase().contains("paired"))
-        .unwrap_or_else(|| panic!("no pairing line in {:?}", head.details));
-    // Up to what a click on the heading does.
-    line.split(" · click ").next().unwrap_or(line).to_owned()
+    head.details[0].clone()
 }
 
 /// Agreeing clocks: said once on the rig's heading, by its clock tag with the words behind
@@ -119,14 +113,16 @@ fn pupu_pairing(t: &T) -> String {
 fn agreeing_clocks_are_said_quietly() {
     let mut t = two_mirrored();
     cross_tf(&mut t, PeerRelation::Agree, CrossTfState::Running);
-    assert_eq!(pupu_pairing(&t), "paired · streaming");
     let rows = t.st.list_rows();
     let head = rows
         .iter()
         .map(|(_, r)| r)
-        .find(|r| r.depth == 0 && r.name.starts_with("pupu"))
+        .find(|r| r.depth == 0 && r.name == "pupu")
         .expect("pupu's heading");
-    assert_eq!(head.name, "pupu · 48 kHz · AGREE");
+    assert_eq!(
+        head.details,
+        ["48 kHz AGREE · paired · streaming", "48 kHz AGREE"]
+    );
     assert!(
         head.describe
             .contains("\nclock AGREE: clocks agree with test rig: measured between the rigs"),
@@ -169,7 +165,7 @@ fn clocks_not_locked_stop_it_and_say_so_everywhere() {
     cross_tf(&mut t, NOT_LOCKED, HELD);
     assert_eq!(
         pupu_pairing(&t),
-        "CLOCKS NOT LOCKED +5.6 ppm · paired · streaming"
+        "48 kHz FREE · CLOCKS NOT LOCKED +5.6 ppm · paired · streaming"
     );
     let ours = t.st.rig_name(t.st.active());
     assert_eq!(
@@ -287,7 +283,7 @@ fn a_relock_and_the_cues_are_said_on_the_pane() {
     );
     assert_eq!(
         pupu_pairing(&t),
-        "LINK OFFSET TOO SMALL · paired · streaming"
+        "48 kHz AGREE · LINK OFFSET TOO SMALL · paired · streaming"
     );
     let row = t.st.meas_rows().into_iter().find(|r| r.id == MeasId(1));
     assert!(

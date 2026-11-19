@@ -115,11 +115,15 @@ fn measured(ppm: f64) -> Clocks {
 }
 
 /// The list's rig headings: the first line and the tooltip of each.
+/// Each heading as `name / its narrowest second line`, with its tooltip.
 fn headings(t: &T) -> Vec<(String, String)> {
     t.st.list_rows()
         .into_iter()
         .filter(|(_, r)| matches!(r.key, ac2_scene::meas_list::TreeKey::RigName(_)))
-        .map(|(_, r)| (r.name, r.describe))
+        .map(|(_, r)| {
+            let line = r.details.last().map_or("", String::as_str);
+            (format!("{} / {line}", r.name), r.describe)
+        })
         .collect()
 }
 
@@ -138,8 +142,8 @@ fn the_lists_headings_say_which_rigs_share_a_clock() {
     t.remirror(|s| s.clocks = measured(6.2));
     pupu_clocks(&mut t, measured(5.4));
     let h = headings(&t);
-    assert_eq!(h[0].0, "test rig · 48 kHz · AGREE");
-    assert_eq!(h[1].0, "pupu · 48 kHz · AGREE");
+    assert_eq!(h[0].0, "test rig / 48 kHz AGREE");
+    assert_eq!(h[1].0, "pupu / 48 kHz AGREE");
     assert!(
         h[0].1.ends_with(
             "\nclock AGREE: rates agree with pupu within 2 ppm (by each rig's system clock); \
@@ -158,15 +162,15 @@ fn the_lists_headings_say_which_rigs_share_a_clock() {
     // Pupu's crystal 40 ppm away: two clocks.
     pupu_clocks(&mut t, measured(46.2));
     let h = headings(&t);
-    assert_eq!(h[0].0, "test rig · 48 kHz · FREE");
-    assert_eq!(h[1].0, "pupu · 48 kHz · FREE");
+    assert_eq!(h[0].0, "test rig / 48 kHz FREE");
+    assert_eq!(h[1].0, "pupu / 48 kHz FREE");
     assert!(h[1].1.contains("\nclock FREE: "), "{}", h[1].1);
 
     // Pupu's clock not measured yet: neither rig can be placed, and says why.
     pupu_clocks(&mut t, Clocks::default());
     let h = headings(&t);
-    assert_eq!(h[0].0, "test rig · 48 kHz · UNKNOWN");
-    assert_eq!(h[1].0, "pupu · 48 kHz · UNKNOWN");
+    assert_eq!(h[0].0, "test rig / 48 kHz UNKNOWN");
+    assert_eq!(h[1].0, "pupu / 48 kHz UNKNOWN");
     assert!(
         h[0].1
             .ends_with("\nclock UNKNOWN: can't tell: pupu reports no sample clock"),
@@ -193,7 +197,7 @@ fn a_paired_rig_the_app_does_not_read_has_no_clock_tag() {
         },
     );
     let h = headings(&t);
-    assert_eq!(h[0].0, "test rig · 48 kHz");
-    assert_eq!(h[1].0, "pupu");
+    assert_eq!(h[0].0, "test rig / 48 kHz");
+    assert_eq!(h[1].0, "pupu / paired · unreachable · retrying");
     assert!(h.iter().all(|(_, tip)| !tip.contains("clock")), "{h:?}");
 }

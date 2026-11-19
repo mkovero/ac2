@@ -47,7 +47,7 @@ fn a_rigs_arrow_folds_its_branch() {
     assert_eq!(folded[0].collapsed, Some(true));
     let n = pupu(&t).daemon().expect("mirrored").measurements.len();
     assert!(
-        folded[0].details[0].starts_with(&format!("paired · {n} measurements · ")),
+        folded[0].details[0].starts_with(&format!("48 kHz UNKNOWN · {n} measurements · ")),
         "{:?}",
         folded[0].details
     );
