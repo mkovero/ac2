@@ -35,11 +35,12 @@ fn doc<T: Serialize>(value: &T) -> R<Value> {
     }))
 }
 
-/// The host clock's estimated error, which the daemon reports as the operating system gives
-/// it: a property of the machine recording, not of the daemon.
+/// The host's system clock as the daemon reports it is whatever the operating system states
+/// (Linux: synced or not, with the kernel's error bound; macOS and Windows: nothing): a
+/// property of the machine recording, not of the daemon, so every host records the same.
 fn pin_clock(mut v: Value) -> Value {
-    if let Some(e) = v.pointer_mut("/clocks/system/maxerror_us") {
-        *e = Value::from(1000);
+    if let Some(e) = v.pointer_mut("/clocks/system") {
+        *e = serde_json::json!({"type": "synced", "maxerror_us": 1000});
     }
     v
 }

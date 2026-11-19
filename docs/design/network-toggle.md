@@ -59,8 +59,9 @@ Kept as tests in `crates/ac2-zmq/tests/it/listen_toggle.rs`:
   fail "address in use"; tearing its context down and retrying binds once the closer is
   done.
 
-- **ZAP address** is set by libzmq from the accepted socket: `"localhost"` on ipc (this
-  build reads no SO_PEERCRED, so no uid), `"127.0.0.1"` on loopback tcp. Loopback is also
+- **ZAP address** is set by libzmq from the accepted socket: on ipc `"localhost"` on Linux
+  and empty on macOS (no peer credentials read, so no uid either way), `"127.0.0.1"` on
+  loopback tcp. Loopback is also
   every ssh tunnel, port proxy and other user on the host, so the address never decides
   "local"; the socket a message came in on does.
 - **Rebind:** a new `SecureContext` and socket, made after the previous ones were dropped,

@@ -80,23 +80,29 @@ fn store(dir: &Path) -> PathBuf {
     dir.join("network.json")
 }
 
-/// A free TCP port on loopback whose next port is free too.
-fn free_pair() -> u16 {
-    loop {
-        let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let p = l.local_addr().unwrap().port();
-        if p < u16::MAX && std::net::TcpListener::bind(("127.0.0.1", p + 1)).is_ok() {
-            return p;
-        }
-    }
-}
-
 fn turn(c: &mut Client, enabled: bool, port: Option<u16>) -> ServerInfo {
     c.server(Command::ServerNetwork {
         enabled,
         bind: Some(NetBind::Addr { addr: LOOPBACK }),
         port,
     })
+}
+
+/// Turns the network on at a free pair and returns its ctrl port. A probed pair can be taken
+/// before the daemon binds it, which leaves the network waiting: then another pair.
+fn turn_on(c: &mut Client, h: &Handle) -> u16 {
+    for _ in 0..5 {
+        let port = free_pair();
+        turn(c, true, Some(port));
+        let t0 = Instant::now();
+        while t0.elapsed() < Duration::from_secs(3) {
+            if listening_on(port)(&h.network_status()) {
+                return port;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+    panic!("no free port pair: {:?}", h.network_status());
 }
 
 fn wait_status(h: &Handle, what: &str, ok: impl Fn(&NetStatus) -> bool) -> NetStatus {
@@ -172,8 +178,8 @@ fn on_change_the_port_on_again_and_kept_across_a_restart() {
     .unwrap();
     assert_eq!(named(&c.server(Command::ServerInfo)), ["laptop"]);
 
-    let (p1, p2) = (free_pair(), free_pair());
-    let s = turn(&mut c, true, Some(p1));
+    let p1 = turn_on(&mut c, &h);
+    let s = c.server(Command::ServerInfo);
     assert!(listening_on(p1)(&s.network.status), "{s:?}");
     assert_eq!(s.network.saved, NetSaved::Saved);
     assert!(s.network.server_key.is_some() && h.server_public_key().is_some());
@@ -185,8 +191,8 @@ fn on_change_the_port_on_again_and_kept_across_a_restart() {
     hello_over_network(&ctx, &h, &laptop, &format!("tcp://127.0.0.1:{p1}"));
 
     // On again at another port: moved there.
-    let s = turn(&mut c, true, Some(p2));
-    assert!(listening_on(p2)(&s.network.status), "{s:?}");
+    let p2 = turn_on(&mut c, &h);
+    assert_ne!(p1, p2);
     hello_over_network(&ctx, &h, &laptop, &format!("tcp://127.0.0.1:{p2}"));
 
     // Off, then on with the port kept.
@@ -222,7 +228,7 @@ fn rapid_on_off_on_ends_listening() {
     let h = Daemon::start(settings_config(manual_rig(), dir.path(), &laptop, None)).unwrap();
     let ctx = Context::new().unwrap();
     let mut c = Client::connect(&ctx, h.ctrl_endpoint());
-    let port = free_pair();
+    let port = turn_on(&mut c, &h);
     for _ in 0..5 {
         turn(&mut c, true, Some(port));
         turn(&mut c, false, None);
@@ -249,8 +255,7 @@ fn a_network_client_may_not_toggle_and_is_told_no_host_detail() {
     let h = Daemon::start(settings_config(manual_rig(), dir.path(), &laptop, None)).unwrap();
     let ctx = Context::new().unwrap();
     let mut local = Client::connect(&ctx, h.ctrl_endpoint());
-    let port = free_pair();
-    turn(&mut local, true, Some(port));
+    let port = turn_on(&mut local, &h);
 
     let s = local.server(Command::ServerInfo);
     assert!(matches!(s.local, Some(LocalServer::Local { .. })), "{s:?}");
@@ -387,16 +392,9 @@ async fn turning_off_tells_the_network_app_and_its_lease_fades() {
     let mut cfg = settings_config(realtime_rig(), dir.path(), &laptop, None);
     cfg.lease_expiry = Duration::from_millis(600);
     let h = Daemon::start(cfg).unwrap();
-    let port = free_pair();
+    let ctx = Context::new().unwrap();
+    let port = turn_on(&mut Client::connect(&ctx, h.ctrl_endpoint()), &h);
     let local = mirror(&h, "local-test").await;
-    local
-        .call(Command::ServerNetwork {
-            enabled: true,
-            bind: Some(NetBind::Addr { addr: LOOPBACK }),
-            port: Some(port),
-        })
-        .await
-        .unwrap();
     local
         .call(Command::SessionOpen {
             config: session(false),
@@ -485,8 +483,7 @@ fn slow_turned_on_mid_session_a_paired_rig_gets_its_audio() {
         config: session(false),
     });
     let epoch = cb.state().session.epoch;
-    let port = free_pair();
-    turn(&mut cb, true, Some(port));
+    let port = turn_on(&mut cb, &b);
     let a_key = a.server_public_key().unwrap();
     let mut ca = Client::connect(&ctx, a.ctrl_endpoint());
     let a_id = ca

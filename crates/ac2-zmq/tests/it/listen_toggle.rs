@@ -68,8 +68,8 @@ impl Curve {
 }
 
 /// What the ZAP request's address frame carries per transport. libzmq fills it from the
-/// accepted socket, never from the peer's bytes: "localhost" on ipc, "127.0.0.1" on
-/// loopback tcp. Neither names a user: loopback is every local user and every tunnel or
+/// accepted socket, never from the peer's bytes: on ipc "localhost" (Linux) or empty
+/// (macOS), "127.0.0.1" on loopback tcp. Neither names a user: loopback is every local user and every tunnel or
 /// port forward ending on this host, so "127.0.0.1" is no proof of a local operator.
 #[test]
 fn zap_address_identifies_the_transport() -> TestResult {
@@ -84,9 +84,11 @@ fn zap_address_identifies_the_transport() -> TestResult {
         let dir = tempfile::tempdir()?;
         let ipc = format!("ipc://{}", dir.path().join("ctrl").display());
         router.bind(&ipc)?;
-        // The libzmq built here does not read the peer's credentials (SO_PEERCRED), so ipc
-        // says only "localhost"; the socket file's permissions are the whole boundary.
-        assert_eq!(c.refused_address(&ipc)?, "localhost");
+        // The libzmq built here reads no peer credentials, so ipc names no user, only the
+        // transport, and not the same way on every OS; the socket file's permissions are the
+        // whole boundary.
+        let a = c.refused_address(&ipc)?;
+        assert!(a == "localhost" || a.is_empty(), "{a:?}");
     }
     Ok(())
 }

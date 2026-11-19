@@ -563,15 +563,25 @@ fn slow_a_paired_rig_is_followed_to_its_new_address() {
     };
     let app = KeyPair::generate().unwrap();
     let a_keys = KeyPair::generate().unwrap();
-    // B as `ac2d` serves: data on the port after ctrl, which an advert does not carry.
-    let b = rig_at(
-        dir.path(),
-        "rig-b",
-        &app,
-        None,
-        Some(mdns.clone()),
-        Net::Port(free_pair()),
-    );
+    // B as `ac2d` serves: data on the port after ctrl, which an advert does not carry. A
+    // probed port can be taken before B binds it: then B on another pair.
+    let b = (0..5)
+        .find_map(|_| {
+            let b = rig_at(
+                dir.path(),
+                "rig-b",
+                &app,
+                None,
+                Some(mdns.clone()),
+                Net::Port(free_pair()),
+            );
+            if wait_listening(&b, Duration::from_secs(3)).is_some() {
+                return Some(b);
+            }
+            b.shutdown();
+            None
+        })
+        .expect("no free port pair for rig-b");
     // A follows with its own network off: the browse and the link need only its key.
     let a = rig_at(
         dir.path(),
@@ -647,17 +657,6 @@ fn slow_a_paired_rig_is_followed_to_its_new_address() {
     });
     a.shutdown();
     b.shutdown();
-}
-
-/// A free TCP port on loopback whose next port is free too.
-fn free_pair() -> u16 {
-    loop {
-        let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
-        let p = l.local_addr().unwrap().port();
-        if p < u16::MAX && std::net::TcpListener::bind(("127.0.0.1", p + 1)).is_ok() {
-            return p;
-        }
-    }
 }
 
 /// A recording of a remote input: while its rig's session is closed the file holds zeros on

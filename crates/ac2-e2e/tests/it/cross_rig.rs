@@ -81,10 +81,17 @@ fn rig(
 }
 
 /// The network ctrl and data endpoints of a daemon listening there.
+/// Once it listens: the network pair is bound beside the local one and may be on its way.
 fn net_endpoints(h: &ac2d::Handle) -> (String, String) {
-    match h.network_status() {
-        ac2d::NetStatus::Listening { ctrl, data } => (ctrl, data),
-        s => panic!("the network is not listening: {s:?}"),
+    let t0 = std::time::Instant::now();
+    loop {
+        match h.network_status() {
+            ac2d::NetStatus::Listening { ctrl, data } => return (ctrl, data),
+            s if t0.elapsed() > std::time::Duration::from_secs(10) => {
+                panic!("the network is not listening: {s:?}")
+            }
+            _ => std::thread::sleep(std::time::Duration::from_millis(10)),
+        }
     }
 }
 

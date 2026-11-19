@@ -128,11 +128,37 @@ pub fn net_config(backend: FakeBackend, security: ac2d::NetworkSecurity) -> Daem
     cfg
 }
 
-/// The network ctrl and data endpoints of a daemon listening there.
+/// The network ctrl and data endpoints of a daemon listening there, once it does: the pair
+/// is bound beside the local one and may still be on its way.
 pub fn net_endpoints(h: &Handle) -> (String, String) {
-    match h.network_status() {
-        ac2d::NetStatus::Listening { ctrl, data } => (ctrl, data),
-        s => panic!("the network is not listening: {s:?}"),
+    wait_listening(h, Duration::from_secs(10))
+        .unwrap_or_else(|| panic!("the network is not listening: {:?}", h.network_status()))
+}
+
+/// The network's endpoints once it listens, within `limit`.
+pub fn wait_listening(h: &Handle, limit: Duration) -> Option<(String, String)> {
+    let t0 = Instant::now();
+    loop {
+        if let ac2d::NetStatus::Listening { ctrl, data } = h.network_status() {
+            return Some((ctrl, data));
+        }
+        if t0.elapsed() > limit {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// A loopback port whose next port looked free too, probed on the address the tests bind.
+/// Only a guess: another process may take it before the daemon binds, so a caller that
+/// must have it retries with another pair.
+pub fn free_pair() -> u16 {
+    loop {
+        let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let p = l.local_addr().unwrap().port();
+        if p < u16::MAX && std::net::TcpListener::bind(("127.0.0.1", p + 1)).is_ok() {
+            return p;
+        }
     }
 }
 
