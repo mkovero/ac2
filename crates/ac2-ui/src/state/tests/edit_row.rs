@@ -1,5 +1,4 @@
-//! Editing from the measurement tree: F2 on the row selected last, a row's double click and
-//! its edit button.
+//! Editing from the measurement tree: F2 on the row selected last and a row's edit button.
 
 use ac2_scene::meas_list::TreeKey;
 
@@ -63,10 +62,33 @@ fn f2_edits_a_measurement_and_renames_a_trace() {
     );
 }
 
-/// A double click on a measurement's row (or its edit button) selects the row as a click
-/// does and opens its form, whatever was selected and whatever pane has the keys.
+/// A double click on a measurement's row is the two clicks it is made of: the row is
+/// selected and no form opens, on its header, its live curve and a math trace's row.
 #[test]
-fn a_row_double_clicked_is_selected_and_edited() {
+fn a_row_double_clicked_is_selected_and_opens_no_form() {
+    let mut t = t();
+    t.st.apply(Msg::SelectTrace(TraceId(3)), &t.keys);
+    for _ in 0..2 {
+        t.st.apply(Msg::SelectMeas(MeasId(2)), &t.keys);
+    }
+    assert_eq!(t.st.rig.selected, Some(MeasId(2)));
+    assert_eq!(t.st.overlay, Overlay::None);
+    for _ in 0..2 {
+        t.st.apply(Msg::SelectMath(MeasId(6)), &t.keys);
+    }
+    assert_eq!(t.st.rig.selected, Some(MeasId(6)));
+    assert_eq!(t.st.overlay, Overlay::None);
+    for _ in 0..2 {
+        t.st.apply(Msg::SelectLive(MeasId(1)), &t.keys);
+    }
+    assert_eq!(t.st.rig.selected_live, Some(MeasId(1)));
+    assert_eq!(t.st.overlay, Overlay::None);
+}
+
+/// A row's edit button selects the row as a click does and opens its form, whatever was
+/// selected and whatever pane has the keys.
+#[test]
+fn a_rows_edit_button_selects_and_edits_it() {
     let mut t = t();
     t.st.apply(Msg::SelectTrace(TraceId(3)), &t.keys);
     t.st.apply(Msg::EditRow(TreeKey::Meas(MeasId(2))), &t.keys);

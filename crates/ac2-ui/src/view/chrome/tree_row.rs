@@ -261,9 +261,11 @@ pub(super) fn tree_row(
                 );
                 edit = b.on_hover_text(&tips.edit).clicked();
             }
-            // A double click's second click also reads as a click: check it first, or it would
-            // deselect the trace (or select again the measurement) the first click selected.
-            if edit || (row.key.edits().is_some() && r.double_clicked()) {
+            // A measurement's row is clicked to choose what is on screen, often twice in a
+            // row: only its button opens the form, and a double click is two clicks. A
+            // trace's double click renames it; its second click also reads as a click, so
+            // it is checked first, or that click would deselect the trace the first selected.
+            if edit {
                 click = Some(on_rig(Msg::EditRow(row.key)));
             } else if let TreeKey::Trace(id) = row.key
                 && r.double_clicked()

@@ -253,9 +253,9 @@ impl TreeKey {
         )
     }
 
-    /// The measurement a double click on the row edits: the row's own (its header, its
-    /// live curve, a math trace). A stored trace's double click renames it, and a
-    /// heading stands for no measurement.
+    /// The measurement edited from the row: the row's own (its header, its live curve, a
+    /// math trace). A stored trace is renamed instead, and a heading stands for no
+    /// measurement.
     pub fn edits(self) -> Option<MeasId> {
         match self {
             TreeKey::Meas(m) | TreeKey::Live(m) | TreeKey::Math(m) => Some(m),
@@ -283,11 +283,12 @@ pub fn edit_tip(key: Option<&str>) -> String {
     )
 }
 
-/// What a measurement row's tooltip says about editing it: `double click or F2 edits it`.
+/// What a measurement row's tooltip says about editing it: `F2 edits it`, or the edit
+/// button when no key is bound.
 pub fn edit_hint(key: Option<&str>) -> String {
     key.map_or_else(
-        || "double click edits it".to_owned(),
-        |k| format!("double click or {k} edits it"),
+        || "the pencil button edits it".to_owned(),
+        |k| format!("{k} edits it"),
     )
 }
 

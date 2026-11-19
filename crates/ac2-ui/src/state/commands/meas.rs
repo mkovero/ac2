@@ -62,8 +62,8 @@ impl AppState {
         }
     }
 
-    /// A measurement's row asked to be edited (double click, its edit button): selected as
-    /// a click on the row selects it, then its form opened. The row names the measurement,
+    /// A measurement's row asked to be edited (its edit button): selected as a click on
+    /// the row selects it, then its form opened. The row names the measurement,
     /// so the focused pane has no say (unlike the command, which reads what is in focus).
     pub(in crate::state) fn edit_row(
         &mut self,

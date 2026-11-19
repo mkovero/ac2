@@ -868,7 +868,8 @@ fn the_tick_list_reads_as_the_tree_with_the_lead_first() {
     );
 }
 
-/// The rows a double click edits and the ones with the edit button, and what they say.
+/// The rows that are edited as a measurement and the ones with the edit button, and what
+/// they say.
 #[test]
 fn measurement_rows_are_edited_and_say_how() {
     let m = MeasId(1);
@@ -890,6 +891,6 @@ fn measurement_rows_are_edited_and_say_how() {
     }
     assert_eq!(edit_tip(Some("F2")), "Edit measurement… (F2)");
     assert_eq!(edit_tip(None), "Edit measurement…");
-    assert_eq!(edit_hint(Some("F2")), "double click or F2 edits it");
-    assert_eq!(edit_hint(None), "double click edits it");
+    assert_eq!(edit_hint(Some("F2")), "F2 edits it");
+    assert_eq!(edit_hint(None), "the pencil button edits it");
 }

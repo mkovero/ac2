@@ -120,11 +120,12 @@ fn a_list_row_dragged_onto_the_lower_pane() {
 }
 
 /// A measurement's row in the list: one click only selects it, its edit button (shown under
-/// the pointer) opens its form, and so does a double click, which starts no drag.
+/// the pointer) and the edit key open its form, and a double click is two clicks: it selects
+/// the row, opens nothing and starts no drag.
 #[test]
-fn a_measurement_row_is_edited_by_its_button_and_a_double_click() {
+fn a_measurement_row_is_edited_by_its_button_and_key_not_a_double_click() {
     use egui_kittest::kittest::By;
-    if !have_gpu("a_measurement_row_is_edited_by_its_button_and_a_double_click") {
+    if !have_gpu("a_measurement_row_is_edited_by_its_button_and_key_not_a_double_click") {
         return;
     }
     let _rig = Rig::start();
@@ -172,7 +173,7 @@ fn a_measurement_row_is_edited_by_its_button_and_a_double_click() {
     assert_eq!(editing(&h), Some(MeasId(3)), "the spectrum's form");
     h.state_mut().state.overlay = Overlay::None;
     settle(&mut h, 2);
-    // A double click on another row selects it and edits it. Both clicks go into one
+    // A double click on another row selects it and opens no form. Both clicks go into one
     // frame's input: the harness gives each queued event a frame of a quarter second, near
     // the longest gap egui takes for a double click.
     let row = labelled(&h, "TF  ").expect("the transfer's row in the list");
@@ -185,12 +186,16 @@ fn a_measurement_row_is_edited_by_its_button_and_a_double_click() {
     }
     settle(&mut h, 3);
     assert_eq!(h.state().state.rig.selected, Some(MeasId(1)));
-    assert_eq!(editing(&h), Some(MeasId(1)), "the transfer's form");
+    assert_eq!(h.state().state.overlay, Overlay::None, "no form opened");
     assert!(!h.state().state.row_drag_held());
+    // The edit key opens the form of the row the double click selected.
+    h.key_press(Key::F2);
+    settle(&mut h, 2);
+    assert_eq!(editing(&h), Some(MeasId(1)), "the transfer's form");
 }
 
-/// The Settings view covers the list and owns the keys: a double click where a row is and
-/// the edit key reach no row, so an edit never replaces the page Settings is open on.
+/// The Settings view covers the list and owns the keys: clicks where a row is and the edit
+/// key reach no row, so an edit never replaces the page Settings is open on.
 #[test]
 fn settings_open_no_row_is_edited() {
     use ac2_ui::keys::CommandId;
