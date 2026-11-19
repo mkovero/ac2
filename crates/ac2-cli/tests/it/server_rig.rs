@@ -182,12 +182,8 @@ async fn a_network_fixed_by_listen_is_shown_and_not_switched() {
         text.starts_with("network      fixed by ac2d --listen tcp://"),
         "{text}"
     );
-    assert!(
-        text.contains(
-            "\nswitch       fixed by ac2d --listen: restart ac2d without it to switch here\n"
-        ),
-        "{text}"
-    );
+    // The setting line says it is fixed; no switch line repeats it.
+    assert!(!text.contains("switch"), "{text}");
     let v = ac2(&ep, true, &["server", "network"]).await.json(&[]);
     assert_eq!(v["setting"]["setting"]["type"], "fixed");
     assert_eq!(v["toggle"], json!({ "type": "fixed" }));
@@ -244,6 +240,18 @@ async fn a_daemon_with_no_network_says_so() {
             .contains("authorized\n  none\nrefused lately\n  none\n"),
         "{}",
         info.stdout
+    );
+    let r = ac2(
+        &ep,
+        false,
+        &["server", "authorize", "laptop", "--refused", "1a2b"],
+    )
+    .await;
+    assert_eq!(
+        r.stderr,
+        "ac2: no refused key has fingerprint 1a2b: the daemon has refused no key lately; \
+         have the client try again, or give --key KEY (shown by `ac2 auth show` on the \
+         client)\n"
     );
     h.shutdown();
 }

@@ -3,7 +3,7 @@
 //! Refusals (fixed by `--listen`, asked from the network, an in-process daemon, a bad port
 //! or interface) are the daemon's own words, printed as they come.
 
-use ac2_client::{Client, expect_body};
+use ac2_client::{Client, ClientError, expect_body};
 use ac2_proto::model::{
     AuthorizedClient, LocalServer, NetBind, NetChoice, NetReason, NetReasonKind, NetSaved,
     NetSetting, NetSettingKind, NetSettingView, NetStatus, NetStatusView, NetToggle,
@@ -44,13 +44,21 @@ pub(crate) async fn run(cli: &Cli, cmd: &ServerCmd, out: &mut Out<'_>) -> Result
             )?;
         }
         ServerCmd::Authorize { name, refused, key } => {
+            let before = info(&c).await?;
             let key = match (refused, key) {
-                (Some(fp), _) => refused_key(&info(&c).await?.network.refused, fp)?,
+                (Some(fp), _) => refused_key(before.network.refused.as_deref(), fp)?,
                 (None, Some(k)) => k.trim().to_owned(),
                 (None, None) => {
                     return Err(CliError::Usage("give --refused or --key".into()));
                 }
             };
+            // The daemon replaces the key of a name given again (and drops its connections).
+            let replaced = before
+                .network
+                .authorized
+                .iter()
+                .find(|a| a.name == *name && a.key != key)
+                .map(|a| a.fingerprint.clone());
             let r = c
                 .call(Command::ServerAuthorize {
                     name: name.clone(),
@@ -62,13 +70,28 @@ pub(crate) async fn run(cli: &Cli, cmd: &ServerCmd, out: &mut Out<'_>) -> Result
                 .network
                 .authorized
                 .iter()
-                .find(|a| a.name == *name && a.key == key);
-            out.emit(&json!({ "authorized": entry }), || {
-                format!(
-                    "authorized {name} (fingerprint {}): its connections are admitted from now on",
-                    entry.map_or("?", |a| a.fingerprint.as_str())
-                )
-            })?;
+                .find(|a| a.name == *name && a.key == key)
+                .ok_or(ClientError::UnexpectedReply {
+                    op: "server.authorize",
+                    got: "server info without the authorized name",
+                })?;
+            out.emit(
+                &json!({ "authorized": entry, "replaced_fingerprint": replaced }),
+                || {
+                    let mut s = format!(
+                        "authorized {name} (fingerprint {}): its connections are admitted from \
+                         now on",
+                        entry.fingerprint
+                    );
+                    if let Some(old) = &replaced {
+                        s.push_str(&format!(
+                            "\nreplaced its earlier key (fingerprint {old}), whose connections \
+                             are dropped"
+                        ));
+                    }
+                    s
+                },
+            )?;
         }
     }
     Ok(())
@@ -95,8 +118,16 @@ async fn network(
     Ok(expect_body!("server.network", r, ReplyBody::Server(s) => s)?)
 }
 
-/// The key of the refused client whose fingerprint is `fp`, as the daemon lists it.
-fn refused_key(refused: &[RefusedKey], fp: &str) -> Result<String, CliError> {
+/// The key of the refused client whose fingerprint is `fp`, as the daemon lists it (`None`:
+/// it lists them only to a client on its own host).
+fn refused_key(refused: Option<&[RefusedKey]>, fp: &str) -> Result<String, CliError> {
+    let Some(refused) = refused else {
+        return Err(CliError::Usage(
+            "the daemon lists the keys it refused only on its own host: run this there, or \
+             give --key KEY"
+                .into(),
+        ));
+    };
     let fp = fp.trim();
     if let Some(k) = refused
         .iter()
@@ -109,15 +140,19 @@ fn refused_key(refused: &[RefusedKey], fp: &str) -> Result<String, CliError> {
     {
         return Ok(k);
     }
-    let listed: Vec<&str> = refused
-        .iter()
-        .filter_map(|r| r.fingerprint.as_deref())
-        .collect();
-    Err(CliError::Usage(if listed.is_empty() {
-        format!("no refused key has fingerprint {fp}: the daemon has refused no key lately")
+    let mut listed: Vec<&str> = Vec::new();
+    for f in refused.iter().filter_map(|r| r.fingerprint.as_deref()) {
+        if !listed.contains(&f) {
+            listed.push(f);
+        }
+    }
+    let then = "have the client try again, or give --key KEY (shown by `ac2 auth show` on the \
+                client)";
+    Err(CliError::NotFound(if listed.is_empty() {
+        format!("no refused key has fingerprint {fp}: the daemon has refused no key lately; {then}")
     } else {
         format!(
-            "no refused key has fingerprint {fp}; refused lately: {}",
+            "no refused key has fingerprint {fp} (refused lately: {}); {then}",
             listed.join(", ")
         )
     }))
@@ -144,14 +179,17 @@ fn choice_text(c: &NetChoice) -> String {
 /// Why `server.network` would be refused; `None` where it may switch the network.
 fn toggle_text(t: NetToggle) -> Option<&'static str> {
     match t {
-        NetToggle::Allowed => None,
-        NetToggle::Fixed => Some("fixed by ac2d --listen: restart ac2d without it to switch here"),
+        // The setting line already says it is fixed by --listen.
+        NetToggle::Allowed | NetToggle::Fixed => None,
         NetToggle::Unavailable {
             reason: NetUnavailable::InProcess,
         } => Some("unavailable: this daemon serves in-process only"),
         NetToggle::Unavailable {
             reason: NetUnavailable::NoKeyStore,
         } => Some("unavailable: this daemon has no key files"),
+        NetToggle::Unavailable {
+            reason: NetUnavailable::NotLocal,
+        } => Some("only on the rig's own machine"),
     }
 }
 
@@ -306,11 +344,10 @@ fn info_text(info: &ServerInfo) -> String {
         s.push_str(&authorized_line(a));
     }
     s.push_str("refused lately\n");
-    if info.network.refused.is_empty() {
-        s.push_str("  none\n");
-    }
-    for r in &info.network.refused {
-        s.push_str(&refused_line(r));
+    match &info.network.refused {
+        None => s.push_str("  listed on the rig's own host only\n"),
+        Some(r) if r.is_empty() => s.push_str("  none\n"),
+        Some(r) => r.iter().for_each(|r| s.push_str(&refused_line(r))),
     }
     if !info.interfaces.is_empty() {
         s.push_str("interfaces\n");

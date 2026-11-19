@@ -87,7 +87,8 @@ pub enum ClientError {
     /// which applies to the next try at once.
     #[error(
         "the daemon has not authorized this client (fingerprint {fingerprint}): on the daemon \
-         host, run `ac2 server authorize <name> --refused {fingerprint}`, then try again"
+         host, run `ac2 server authorize <name> --refused {fingerprint}` (or `--key '{key}'`), \
+         then try again"
     )]
     NotAuthorized {
         /// This client's key fingerprint, as the daemon logs the refused key.

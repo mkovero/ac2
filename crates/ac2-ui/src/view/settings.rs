@@ -579,6 +579,8 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
                 ..
             } = &info.network
             {
+                // A network client is not told who else was refused.
+                let refused = refused.as_deref().unwrap_or_default();
                 let is_rig = |n: &str| authorized.iter().any(|a| a.name == n && a.rig.is_some());
                 for (title, rigs) in [
                     ("Authorized clients", false),

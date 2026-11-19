@@ -205,11 +205,12 @@ methods take the socket their peer's origin picks).
   `NetReason = AddressInUse | InterfaceMissing | AddressMissing | ZapFailed | NoServerKey |
   NotHandedOver | Other { detail }`; `PeerNetStatus` carries `NetReasonKind` (the same
   without `Other`'s detail, which is the host OS's words). `ServerMode` goes. To a network client `local` is
-  `None` and `interfaces` empty.
+  `None`, `interfaces` empty and `refused` `None` (who else knocked, and from where, is for
+  the rig's own host; the authorized names and public keys stay, for pairing).
 - `ServerInfo.toggle: NetToggle = Allowed | Fixed | Unavailable { reason: InProcess |
-  NoKeyStore }` (PROTO 94), to every client: whether `server.network` may switch the
-  network. One function (`NetCtl::toggle`) gives both this and the command's refusal, so
-  the app offers the switch exactly where it works.
+  NoKeyStore | NotLocal }` (PROTO 94), per asker: whether `server.network` from this client
+  may switch the network. One function (`NetCtl::toggle_check`) gives both this and the
+  command's refusal, so the app offers the switch exactly where it works.
 - `State.server: ServerSummary { status kind, ctrl endpoint (when listening), port,
   fingerprint }` so every mirrored app
   sees a change made elsewhere; key lists stay in `server.info`.
@@ -219,8 +220,9 @@ methods take the socket their peer's origin picks).
   a mirror applies (the local clients learn from `State.server`). Remote apps then say
   "network turned off on the rig" instead of "connection lost"; an app that misses it
   falls back to "connection lost". A rig link that hears it reads
-  `RemoteLink::NetworkOff` (PROTO 94) until the source welcomes it again; a plain drop
-  still reads `Unreachable`.
+  `RemoteLink::NetworkOff` (PROTO 94) while nothing is heard from it: a welcome (from it or
+  another rig) or a failed handshake ends it, and a source followed to another address by
+  mDNS gets a new link; a plain drop still reads `Unreachable`.
 - `server.authorize`, `server.revoke`, `auth.admit_rig` work with the network off (they
   edit the authorized-clients file).
 - Samples, Python fixtures (`tools/protocol`), `docs/protocol.md` follow.

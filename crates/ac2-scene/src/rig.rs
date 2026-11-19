@@ -320,7 +320,10 @@ mod tests {
                 "Recordings: /home/fohtech/.local/share/ac2/recordings",
             ]
         );
-        let (authorized, refused) = (&s.network.authorized, &s.network.refused);
+        let authorized = &s.network.authorized;
+        let Some(refused) = &s.network.refused else {
+            panic!("the host sample lists refusals")
+        };
         assert_eq!(
             authorized_row(&authorized[0]),
             "laptop · fingerprint SHA256:b2aa 0c3d 9e41 7f60"

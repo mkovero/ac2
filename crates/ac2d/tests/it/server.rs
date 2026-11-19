@@ -51,14 +51,17 @@ fn authorize_a_refused_key_and_revoke_it_over_the_protocol() {
         server_key,
     };
     let mut c = Client::connect_with(&ctx, net_endpoints(&h).0.as_str(), Some(&as_laptop));
+    // Who else was refused, and from where, is told on the rig's own host only.
+    let mut on_host = Client::connect(&ctx, h.ctrl_endpoint());
 
     let s = info(&mut c);
     let n = &s.network;
     assert!(n.status.endpoints().is_some(), "{s:?}");
     assert_eq!(n.server_key, Some(server_key.to_z85()));
     assert_eq!(n.fingerprint, Some(server_key.fingerprint()));
-    assert!(n.refused.is_empty());
+    assert_eq!(n.refused, None);
     assert_eq!(names(&s), vec!["laptop"]);
+    assert_eq!(info(&mut on_host).network.refused, Some(Vec::new()));
 
     // The tablet knocks and is refused; its key shows in the refused list.
     let knock = Client::connect_with(&ctx, net_endpoints(&h).0.as_str(), Some(&as_tablet));
@@ -71,11 +74,12 @@ fn authorize_a_refused_key_and_revoke_it_over_the_protocol() {
     assert!(knock.recv(Duration::from_millis(500)).is_none());
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        let s = info(&mut c);
+        let s = info(&mut on_host);
         if let Some(r) = s
             .network
             .refused
             .iter()
+            .flatten()
             .find(|r| r.key.as_deref() == Some(tablet.public.to_z85().as_str()))
         {
             assert_eq!(r.fingerprint, Some(tablet.public.fingerprint()));
@@ -102,11 +106,13 @@ fn authorize_a_refused_key_and_revoke_it_over_the_protocol() {
         key: tablet.public.to_z85(),
     });
     assert_eq!(names(&authorized), vec!["laptop", "tablet"]);
+    assert_eq!(authorized.network.refused, None);
     assert!(
-        authorized
+        info(&mut on_host)
             .network
             .refused
             .iter()
+            .flatten()
             .all(|r| r.key.as_deref() != Some(&*tablet.public.to_z85()))
     );
     assert!(std::fs::read_to_string(&file).unwrap().contains("tablet"));

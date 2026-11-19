@@ -198,9 +198,9 @@ impl Control {
                         last_at: WallNs(r.last_at_ns),
                     })
                     .collect();
-                (authorized, refused)
+                (authorized, local.then_some(refused))
             }
-            None => (Vec::new(), Vec::new()),
+            None => (Vec::new(), local.then(Vec::new)),
         };
         ServerInfo {
             local: local.then(|| match &self.s.server.local {
@@ -234,7 +234,7 @@ impl Control {
                 refused,
             },
             interfaces: if local { n.interfaces() } else { Vec::new() },
-            toggle: n.toggle(),
+            toggle: n.toggle_for(local),
             recording_dir: self
                 .s
                 .recording_dir
@@ -253,13 +253,9 @@ impl Control {
         bind: Option<NetBind>,
         port: Option<u16>,
     ) -> Result<ReplyBody, ProtoError> {
-        if client.curve().is_some() {
-            return Err(refused(
-                "the network can only be turned on or off on the rig's own machine",
-            ));
-        }
         let had_key = self.s.server.network.server_key().is_some();
         let r = self.s.server.network.set(
+            client.curve().is_none(),
             enabled,
             bind,
             port,

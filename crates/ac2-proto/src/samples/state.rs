@@ -47,7 +47,7 @@ pub fn server_info() -> ServerInfo {
                     rig: Some(crate::units::RigId(0x7075_7075)),
                 },
             ],
-            refused: vec![
+            refused: Some(vec![
                 RefusedKey {
                     key: Some("D:)Q[IlAW!ahhC2ac:9*A}h:p?([4%wOTJ%JR%cs".into()),
                     fingerprint: Some("SHA256:51e0 c2b9 aa13 0d77".into()),
@@ -62,7 +62,7 @@ pub fn server_info() -> ServerInfo {
                     count: 1,
                     last_at: WallNs(1_790_000_000_000_000_000),
                 },
-            ],
+            ]),
         },
         interfaces: vec![
             NetInterface {
@@ -114,7 +114,7 @@ pub fn server_info_off() -> ServerInfo {
             fingerprint: None,
             advertised_as: None,
             authorized: Vec::new(),
-            refused: Vec::new(),
+            refused: Some(Vec::new()),
         },
         interfaces: Vec::new(),
         toggle: NetToggle::Allowed,
@@ -139,10 +139,13 @@ pub fn server_info_fixed() -> ServerInfo {
             fingerprint: Some("SHA256:3f1c 9a2e 77b0 51d4".into()),
             advertised_as: None,
             authorized: Vec::new(),
-            refused: Vec::new(),
+            refused: None,
         },
         interfaces: Vec::new(),
-        toggle: NetToggle::Fixed,
+        // Told per asker: a network client may never switch it.
+        toggle: NetToggle::Unavailable {
+            reason: NetUnavailable::NotLocal,
+        },
         recording_dir: None,
     }
 }

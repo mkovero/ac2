@@ -27,12 +27,12 @@ pub struct ServerInfo {
     pub recording_dir: Option<String>,
 }
 
-/// Whether `server.network` may switch the network on this daemon: the same answer the
-/// command itself gives, so an app offers the switch only where it works.
+/// Whether `server.network` from the asking client may switch the network: the same answer
+/// the command itself gives it, so an app offers the switch only where it works.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum NetToggle {
-    /// It may, from a client on the rig's own host.
+    /// It may.
     Allowed,
     /// Fixed by `ac2d --listen` for the daemon's life.
     Fixed,
@@ -43,7 +43,7 @@ pub enum NetToggle {
     },
 }
 
-/// Why a daemon has no network to switch.
+/// Why the network cannot be switched from the asking client.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NetUnavailable {
@@ -52,6 +52,8 @@ pub enum NetUnavailable {
     /// It keeps no key files (no config directory), so it has no server key to serve
     /// CURVE with.
     NoKeyStore,
+    /// The asker is a network client: only a client on the rig's own host may switch it.
+    NotLocal,
 }
 
 /// The local pair, served for the daemon's whole life.
@@ -88,8 +90,9 @@ pub struct NetworkServer {
     pub advertised_as: Option<String>,
     /// The authorized clients, by name.
     pub authorized: Vec<AuthorizedClient>,
-    /// Keys refused lately, newest first (bounded).
-    pub refused: Vec<RefusedKey>,
+    /// Keys refused lately, newest first (bounded); `None` to a network client: who else
+    /// tried this rig, and from where, is for its own host to judge.
+    pub refused: Option<Vec<RefusedKey>>,
 }
 
 /// The network setting as one client is told it. A network client learns only whether it

@@ -106,6 +106,7 @@ pub fn conn_lines(server: Option<&ServerInfo>, remote: bool) -> Vec<ConnLine> {
         v.extend(
             refused
                 .iter()
+                .flatten()
                 .map(|r| ConnLine::Refused(r.key.clone(), r.address.clone())),
         );
         v.push(ConnLine::AddKey);

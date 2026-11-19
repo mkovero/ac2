@@ -198,29 +198,109 @@ impl Handshakes {
     }
 }
 
-struct Link<'p> {
-    peer: &'p RigPeer,
-    ctrl: Socket,
-    ctrl_mon: Monitor,
-    data: Socket,
-    data_mon: Monitor,
+/// What the link's state is read from: the handshakes, the replies and the notices, apart
+/// from the sockets so that the reading is tested on its own.
+struct Health {
     ctrl_hs: Handshakes,
     data_hs: Handshakes,
     /// The other rig answered `hello` as the rig paired.
     welcomed: bool,
     /// It answered as another rig.
     other_rig: Option<ac2_proto::units::RigId>,
-    next_id: u64,
-    hello: Option<RequestId>,
-    poll: Option<(RequestId, Instant)>,
-    next_poll: Instant,
     /// When the last reply came, or the link began.
     heard: Instant,
     began: Instant,
     unreachable_since: Option<WallNs>,
-    /// The other rig said it turned its network off; cleared when it welcomes this one
-    /// again.
+    /// The other rig said it turned its network off and has not been heard since: cleared
+    /// by any welcome and by a handshake that fails (something else answers there), and the
+    /// link to an address it moved to is a new link.
     network_off: bool,
+}
+
+impl Health {
+    fn new(now: Instant) -> Self {
+        Self {
+            ctrl_hs: Handshakes::default(),
+            data_hs: Handshakes::default(),
+            welcomed: false,
+            other_rig: None,
+            heard: now,
+            began: now,
+            unreachable_since: None,
+            network_off: false,
+        }
+    }
+
+    /// The `network_off` notice: its connections are about to end.
+    fn told_network_off(&mut self) {
+        self.network_off = true;
+        self.welcomed = false;
+    }
+
+    /// A `hello` answered as `found`; whether that is the rig paired, `paired`.
+    fn welcome(&mut self, found: ac2_proto::units::RigId, paired: ac2_proto::units::RigId) -> bool {
+        self.network_off = false;
+        let ok = found == paired;
+        self.welcomed = ok;
+        self.other_rig = (!ok).then_some(found);
+        ok
+    }
+
+    /// One event of the ctrl (`ctrl`) or data socket; whether a handshake just completed.
+    fn event(&mut self, ctrl: bool, e: MonitorEvent) -> bool {
+        if matches!(
+            e,
+            MonitorEvent::HandshakeFailedAuth { .. }
+                | MonitorEvent::HandshakeFailedProtocol { .. }
+                | MonitorEvent::HandshakeFailedNoDetail { .. }
+        ) {
+            self.network_off = false;
+        }
+        if ctrl {
+            self.ctrl_hs.event(e)
+        } else {
+            self.data_hs.event(e)
+        }
+    }
+
+    fn status(&mut self, now: Instant) -> RemoteLink {
+        if let Some(found) = self.other_rig {
+            return RemoteLink::OtherRig { found };
+        }
+        if self.ctrl_hs.refused || self.data_hs.refused {
+            return RemoteLink::NotAdmitted;
+        }
+        if self.ctrl_hs.failed >= KEY_FAILURES || self.data_hs.failed >= KEY_FAILURES {
+            return RemoteLink::KeyChanged;
+        }
+        // Said before the connection ended: the reason, not a loss, until it is back.
+        if self.network_off {
+            return RemoteLink::NetworkOff;
+        }
+        let silent = now.saturating_duration_since(self.heard) > SILENT_AFTER;
+        if self.welcomed && !silent {
+            self.unreachable_since = None;
+            return RemoteLink::Up;
+        }
+        if now.saturating_duration_since(self.began) > UNREACHABLE_AFTER || silent {
+            let since = *self.unreachable_since.get_or_insert(WallNs(wall_ns()));
+            return RemoteLink::Unreachable { since };
+        }
+        RemoteLink::Connecting
+    }
+}
+
+struct Link<'p> {
+    peer: &'p RigPeer,
+    ctrl: Socket,
+    ctrl_mon: Monitor,
+    data: Socket,
+    data_mon: Monitor,
+    h: Health,
+    next_id: u64,
+    hello: Option<RequestId>,
+    poll: Option<(RequestId, Instant)>,
+    next_poll: Instant,
     channels: Vec<u16>,
     to: Option<SyncSender<LinkFrame>>,
     /// Owed credit: frame bytes and outside-window messages.
@@ -241,18 +321,11 @@ impl<'p> Link<'p> {
             ctrl_mon,
             data,
             data_mon,
-            ctrl_hs: Handshakes::default(),
-            data_hs: Handshakes::default(),
-            welcomed: false,
-            other_rig: None,
+            h: Health::new(now),
             next_id: 1,
             hello: None,
             poll: None,
             next_poll: now,
-            heard: now,
-            began: now,
-            unreachable_since: None,
-            network_off: false,
             channels: Vec::new(),
             to: None,
             owed: (0, 0),
@@ -311,32 +384,6 @@ impl<'p> Link<'p> {
         self.to = to;
     }
 
-    fn status(&mut self, now: Instant) -> RemoteLink {
-        if let Some(found) = self.other_rig {
-            return RemoteLink::OtherRig { found };
-        }
-        if self.ctrl_hs.refused || self.data_hs.refused {
-            return RemoteLink::NotAdmitted;
-        }
-        if self.ctrl_hs.failed >= KEY_FAILURES || self.data_hs.failed >= KEY_FAILURES {
-            return RemoteLink::KeyChanged;
-        }
-        // Said before the connection ended: the reason, not a loss, until it is back.
-        if self.network_off {
-            return RemoteLink::NetworkOff;
-        }
-        let silent = now.saturating_duration_since(self.heard) > SILENT_AFTER;
-        if self.welcomed && !silent {
-            self.unreachable_since = None;
-            return RemoteLink::Up;
-        }
-        if now.saturating_duration_since(self.began) > UNREACHABLE_AFTER || silent {
-            let since = *self.unreachable_since.get_or_insert(WallNs(wall_ns()));
-            return RemoteLink::Unreachable { since };
-        }
-        RemoteLink::Connecting
-    }
-
     fn run(&mut self, rx: &Receiver<LinkCmd>, to_control: &Sender<ControlMsg>) {
         loop {
             loop {
@@ -361,10 +408,10 @@ impl<'p> Link<'p> {
             let now = Instant::now();
             if ready[2] {
                 while let Ok(Some(e)) = self.ctrl_mon.try_recv() {
-                    if self.ctrl_hs.event(e.event) {
+                    if self.h.event(true, e.event) {
                         // A new connection: the other rig may be another daemon now.
-                        self.welcomed = false;
-                        self.other_rig = None;
+                        self.h.welcomed = false;
+                        self.h.other_rig = None;
                         self.poll = None;
                         self.hello = self.ask(Command::Hello {
                             client: format!("ac2d {}", env!("CARGO_PKG_VERSION")),
@@ -374,7 +421,7 @@ impl<'p> Link<'p> {
             }
             if ready[3] {
                 while let Ok(Some(e)) = self.data_mon.try_recv() {
-                    if self.data_hs.event(e.event) {
+                    if self.h.event(false, e.event) {
                         self.join();
                     }
                 }
@@ -385,7 +432,7 @@ impl<'p> Link<'p> {
             if ready[1] {
                 self.read_data();
             }
-            if self.welcomed && self.poll.is_none() && now >= self.next_poll {
+            if self.h.welcomed && self.poll.is_none() && now >= self.next_poll {
                 self.next_poll = now + SOURCE_EVERY;
                 self.poll = self.ask(Command::SourceState).map(|id| (id, now));
             }
@@ -400,7 +447,7 @@ impl<'p> Link<'p> {
                 let rate = self.bytes as f64 / elapsed.as_secs_f64().max(1e-3);
                 self.bytes = 0;
                 self.next_report = now + REPORT_EVERY;
-                let link = self.status(now);
+                let link = self.h.status(now);
                 if self.last.as_ref() != Some(&link) {
                     tracing::info!("link to {}: {link:?}", self.peer.name);
                     self.last = Some(link.clone());
@@ -422,14 +469,10 @@ impl<'p> Link<'p> {
                     continue;
                 }
             };
-            self.heard = now;
+            self.h.heard = now;
             match reply.result {
                 Ok(ReplyBody::Welcome(w)) if Some(reply.id) == self.hello => {
-                    if w.rig_id == self.peer.rig {
-                        self.welcomed = true;
-                        self.network_off = false;
-                        self.other_rig = None;
-                    } else {
+                    if !self.h.welcome(w.rig_id, self.peer.rig) {
                         tracing::warn!(
                             "link to {}: {} answers as rig {:x}, not {:x}",
                             self.peer.name,
@@ -437,7 +480,6 @@ impl<'p> Link<'p> {
                             w.rig_id.0,
                             self.peer.rig.0
                         );
-                        self.other_rig = Some(w.rig_id);
                     }
                 }
                 Ok(ReplyBody::SourceState(s)) => {
@@ -445,7 +487,7 @@ impl<'p> Link<'p> {
                     if s.rig != self.peer.rig {
                         continue;
                     }
-                    if std::mem::take(&mut self.ctrl_hs.refused) {
+                    if std::mem::take(&mut self.h.ctrl_hs.refused) {
                         // Admitted (as a rig) on the connection that was refused: the
                         // subscriptions it refused meanwhile are stated again.
                         self.join();
@@ -464,7 +506,7 @@ impl<'p> Link<'p> {
                     // A connection that outlived its admission, or a key admitted as an
                     // app rather than a rig, is refused request by request.
                     if e.code == ErrorCode::Refused {
-                        self.ctrl_hs.refused = true;
+                        self.h.ctrl_hs.refused = true;
                     }
                     tracing::warn!("link to {}: {}", self.peer.name, e.msg);
                 }
@@ -485,8 +527,7 @@ impl<'p> Link<'p> {
                         Ok(FlowNotice::Rejoin) => self.join(),
                         Ok(FlowNotice::NetworkOff) => {
                             tracing::info!("link to {}: it turned its network off", self.peer.name);
-                            self.network_off = true;
-                            self.welcomed = false;
+                            self.h.told_network_off();
                         }
                         _ => {}
                     }
@@ -497,7 +538,7 @@ impl<'p> Link<'p> {
             self.owed.0 += frame_charge(len);
             self.bytes += len as u64;
             // Audio of a rig that is not the one paired never reaches a session.
-            if !self.welcomed {
+            if !self.h.welcomed {
                 continue;
             }
             let parts: Vec<&[u8]> = f.iter().map(Vec::as_slice).collect();
@@ -520,3 +561,7 @@ impl<'p> Link<'p> {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "link_tests.rs"]
+mod tests;

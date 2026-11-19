@@ -377,11 +377,13 @@ without its `detail`: the OS's words about the host stay on it), `server_key` (Z
 at the first turn-on), `fingerprint` \| nil, `advertised_as`: string \| nil (the mDNS name),
 `authorized`: [`AuthorizedClient` {`name`, `key`, `fingerprint`, `rig`: RigId \| nil}],
 `refused`: [`RefusedKey` {`key`: string \| nil (nil: not CURVE), `fingerprint`: string \|
-nil, `address`, `count`, `last_at`: WallNs}], newest first, at most 32}. `toggle`
-(`NetToggle`, tagged by `type`, to every client): `allowed` \| `fixed` (`ac2d --listen`) \|
-`unavailable` {`reason`: `in_process` \| `no_key_store` (no key files, so no server key)}:
-whether `server.network` may switch the network, the same answer the command gives (one
-function decides both). `NetSetting` is tagged by `type`: `off` {`kept`: `NetChoice` \| nil
+nil, `address`, `count`, `last_at`: WallNs}] \| nil, newest first, at most 32; nil to a
+network client, which gets the authorized names and public keys (pairing shows them) but
+not who else knocked, or from where}. `toggle` (`NetToggle`, tagged by `type`, per asker):
+`allowed` \| `fixed` (`ac2d --listen`) \| `unavailable` {`reason`: `in_process` \|
+`no_key_store` (no key files, so no server key) \| `not_local` (the asker is a network
+client)}: whether `server.network` from this client may switch the network, the same
+answer the command gives it (one function decides both). `NetSetting` is tagged by `type`: `off` {`kept`: `NetChoice` \| nil
 (where it was last on, where a turn-on with nil `bind` and `port` goes; nil until it was
 first on), `saved`} \| `on` {`choice`: `NetChoice`, `saved`} \| `fixed`
 {`listen`: the `ac2d --listen` address as given; nothing is kept, the command line is the
@@ -403,7 +405,8 @@ the key it authenticated with, so authorizing a different key under a revoked na
 let a connection made with the old key act again. Both answer the new
 `server` info, with the network on or off (the key list is kept either way); an `embedded`
 daemon, which has no key files, answers `unsupported`. A name is 1–64 characters
-without whitespace; `invalid` for a duplicate name or key, a malformed key, revoking an
+without whitespace. A name given again replaces its key (and kind): the connections of the
+key it had are dropped, as a revoke would. `invalid` for a key already under another name, a malformed key, revoking an
 unknown name (`not_found`) or the requesting client's own name (`refused`: that would lock
 the operator out). Any authorized client may use them: every authorized client is equally
 trusted.
@@ -411,8 +414,9 @@ trusted.
 `server.network` {`enabled`, `bind`, `port`} turns the network listener on or off while the
 daemon runs; a nil `bind` or `port` keeps the one set before (at first `all` and 47820, data
 on the next port). Turning on keeps its choice; turning off keeps the one it was on at (or a
-`bind` or `port` given with it) as `kept`, in `network.json` too. Only a client of the local pair may send it (`refused` over the network:
-a remote app could otherwise cut itself and every other one off); `refused` when `ac2d
+`bind` or `port` given with it) as `kept`, in `network.json` too; a plain turn-off checks
+nothing it keeps. Only a client of the local pair may send it (`refused` over the network,
+`toggle` `not_local`: a remote app could otherwise cut itself and every other one off); `refused` when `ac2d
 --listen` fixed the network for the daemon's life (`setting` `fixed`), `unsupported` on an
 `embedded` daemon or one without key files; a port of 0 or 65535 (data needs the next
 one) or one the local endpoints use, and an empty interface name or one with control
@@ -1974,8 +1978,9 @@ clock, `system = system_ns + (stamp − epoch_stamp_ns)·(1 + ppm·10⁻⁶)`; n
 whose stamp clock can be read beside the system clock is open); committed when any changes),
 `remote` (`RemoteState`: `peers` ([RigPeer], as `rig.peers` set them), `rigs`
 ([`RemoteRig` {`rig`, `name`, `link` {not_paired | no_server_key | connecting | up |
-network_off (it sent the `network_off` notice, §5.8; read until it welcomes this rig
-again, where a plain loss reads unreachable) | unreachable{since} | not_admitted |
+network_off (it sent the `network_off` notice, §5.8, and is not heard since: read until
+anything answers there again, a welcome or a failed handshake, or it is followed to another
+address; a plain loss reads unreachable) | unreachable{since} | not_admitted |
 key_changed | other_rig{found}}, `clock`: `PeerClock`
 {`relation` {measuring | agree | not_locked{reason: cross_rate{ppm, over} |
 own_clock{rig, ppm}} | cant_tell{reason: system_clock_unsynced{rig} |

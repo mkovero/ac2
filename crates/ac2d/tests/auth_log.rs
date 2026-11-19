@@ -91,18 +91,18 @@ fn refused_key_is_logged_once_per_key_and_address() {
         std::thread::sleep(Duration::from_millis(20));
     }
     // The remaining handshakes reached the handler: the daemon counts all six refusals
-    // (`server.info`, asked by the authorized laptop).
-    let mut laptop_c =
-        Client::connect_with(&ctx, net_endpoints(&h).0.as_str(), Some(&curve(&laptop)));
+    // (`server.info`, asked on the rig's own host: a network client is listed none).
+    let mut on_host = Client::connect(&ctx, h.ctrl_endpoint());
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        let ReplyBody::Server(info) = laptop_c.ok(Command::ServerInfo) else {
+        let ReplyBody::Server(info) = on_host.ok(Command::ServerInfo) else {
             panic!("server.info: not a server reply");
         };
         let n = info
             .network
             .refused
             .iter()
+            .flatten()
             .find(|r| r.fingerprint.as_deref() == Some(fp.as_str()))
             .map_or(0, |r| r.count);
         if n >= 6 {

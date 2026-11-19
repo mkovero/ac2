@@ -302,31 +302,31 @@ impl NetCtl {
     /// after it (the authorized-clients file could not be made).
     pub(crate) fn set(
         &mut self,
+        local: bool,
         enabled: bool,
         bind: Option<NetBind>,
         port: Option<u16>,
         outbox: &Outbox,
         now: Instant,
     ) -> Result<(), ProtoError> {
-        self.toggle_refusal()?;
+        self.toggle_check(local).map_err(|(_, e)| e)?;
         let was = self.settings.effective();
         let given = bind.is_some() || port.is_some();
         let choice = NetChoice {
             bind: bind.unwrap_or_else(|| was.bind.clone()),
             port: port.unwrap_or(was.port),
         };
-        check_port(choice.port, &self.local).map_err(|e| crate::util::invalid(e.0))?;
-        check_bind(&choice.bind).map_err(|e| crate::util::invalid(e.0))?;
         // Turned on, the choice it is on at is kept; turned off, one given is kept for the
-        // next time, and none given leaves the kept one as it is.
-        let new = NetSettings {
-            enabled,
-            choice: if enabled || given {
-                Some(choice)
-            } else {
-                self.settings.choice.clone()
-            },
+        // next time, and none given leaves the kept one as it is, unchecked: a plain off
+        // must work whatever is kept.
+        let choice = if enabled || given {
+            check_port(choice.port, &self.local).map_err(|e| crate::util::invalid(e.0))?;
+            check_bind(&choice.bind).map_err(|e| crate::util::invalid(e.0))?;
+            Some(choice)
+        } else {
+            self.settings.choice.clone()
         };
+        let new = NetSettings { enabled, choice };
         if enabled {
             self.ensure_keys()?;
         }
@@ -359,44 +359,54 @@ impl NetCtl {
         Ok(())
     }
 
-    /// Whether `server.network` may switch the network here. [`Self::set`] refuses by the
-    /// same answer, so what `server.info` says is what the command does.
-    pub(crate) fn toggle(&self) -> NetToggle {
-        match &self.choice {
-            NetworkChoice::Fixed(_) => NetToggle::Fixed,
-            NetworkChoice::Off => NetToggle::Unavailable {
-                reason: NetUnavailable::InProcess,
-            },
-            NetworkChoice::FromSettings { .. } if self.files.is_none() => NetToggle::Unavailable {
-                reason: NetUnavailable::NoKeyStore,
-            },
-            NetworkChoice::FromSettings { .. } => NetToggle::Allowed,
-        }
+    /// Whether `server.network` from a client on this host (`local`) or the network may
+    /// switch the network: what `server.info` tells that client, from the same check
+    /// [`Self::set`] refuses by.
+    pub(crate) fn toggle_for(&self, local: bool) -> NetToggle {
+        self.toggle_check(local)
+            .err()
+            .map_or(NetToggle::Allowed, |(t, _)| t)
     }
 
-    /// [`Self::toggle`] as `server.network`'s refusal.
-    fn toggle_refusal(&self) -> Result<(), ProtoError> {
-        match (self.toggle(), &self.choice) {
-            (NetToggle::Allowed, _) => Ok(()),
-            (NetToggle::Fixed, NetworkChoice::Fixed(l)) => Err(crate::util::refused(format!(
-                "the network is fixed by ac2d --listen {}; restart ac2d without --listen to \
-                 change it",
-                intended(l).0
-            ))),
-            (NetToggle::Fixed, _) => Err(crate::util::refused(
-                "the network is fixed by ac2d --listen",
-            )),
-            (NetToggle::Unavailable { reason }, _) => Err(crate::util::perr(
-                ac2_proto::ErrorCode::Unsupported,
-                match reason {
-                    NetUnavailable::InProcess => {
-                        "this daemon serves in-process only: it has no network to turn on"
-                    }
-                    NetUnavailable::NoKeyStore => {
-                        "this daemon has no key files: it cannot serve a network"
-                    }
+    /// `Ok` where `server.network` may switch the network; else what `server.info` says
+    /// and the refusal.
+    fn toggle_check(&self, local: bool) -> Result<(), (NetToggle, ProtoError)> {
+        let unavailable = |reason, m| {
+            Err((
+                NetToggle::Unavailable { reason },
+                crate::util::perr(ac2_proto::ErrorCode::Unsupported, m),
+            ))
+        };
+        if !local {
+            // A network client could otherwise cut itself and every other one off, or open
+            // the rig on a network it reached some other way.
+            return Err((
+                NetToggle::Unavailable {
+                    reason: NetUnavailable::NotLocal,
                 },
+                crate::util::refused(
+                    "the network can only be turned on or off on the rig's own machine",
+                ),
+            ));
+        }
+        match &self.choice {
+            NetworkChoice::Fixed(l) => Err((
+                NetToggle::Fixed,
+                crate::util::refused(format!(
+                    "the network is fixed by ac2d --listen {}; restart ac2d without --listen \
+                     to change it",
+                    intended(l).0
+                )),
             )),
+            NetworkChoice::Off => unavailable(
+                NetUnavailable::InProcess,
+                "this daemon serves in-process only: it has no network to turn on",
+            ),
+            NetworkChoice::FromSettings { .. } if self.files.is_none() => unavailable(
+                NetUnavailable::NoKeyStore,
+                "this daemon has no key files: it cannot serve a network",
+            ),
+            NetworkChoice::FromSettings { .. } => Ok(()),
         }
     }
 

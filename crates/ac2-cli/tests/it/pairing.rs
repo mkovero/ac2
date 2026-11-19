@@ -74,6 +74,23 @@ async fn unauthorized_client_hears_its_fingerprint() {
     assert_eq!(pair.code, 0, "{} {}", pair.stdout, pair.stderr);
     let paired: serde_json::Value = serde_json::from_str(&pair.stdout).unwrap();
     let fp = paired["client_fingerprint"].as_str().unwrap().to_owned();
+    // A second client knocks too, so the right one of two is picked by fingerprint.
+    let other_keys = tempfile::tempdir().unwrap();
+    let okd = other_keys.path().to_str().unwrap();
+    let pair = ac2(&[
+        "--key-dir",
+        okd,
+        "--json",
+        "auth",
+        "pair",
+        "127.0.0.1",
+        "--server-key",
+        &server.to_z85(),
+    ])
+    .await;
+    assert_eq!(pair.code, 0, "{} {}", pair.stdout, pair.stderr);
+    let paired: serde_json::Value = serde_json::from_str(&pair.stdout).unwrap();
+    let other_fp = paired["client_fingerprint"].as_str().unwrap().to_owned();
 
     // Paired, but the daemon's authorized_clients is empty: the handshake is refused, and
     // said so, never taken for silence.
@@ -97,11 +114,25 @@ async fn unauthorized_client_hears_its_fingerprint() {
         r.stderr
     );
     assert!(
-        r.stderr
-            .contains(&format!("run `ac2 server authorize <name> --refused {fp}`")),
+        r.stderr.contains(&format!(
+            "run `ac2 server authorize <name> --refused {fp}` (or `--key '"
+        )),
         "{}",
         r.stderr
     );
+    for _ in 0..2 {
+        let r = ac2(&[
+            "--key-dir",
+            okd,
+            "--remote",
+            &remote,
+            "--timeout",
+            "200ms",
+            "status",
+        ])
+        .await;
+        assert_eq!(r.code, 1, "{}", r.stderr);
+    }
 
     // On the daemon's host, the refused key is authorized by the fingerprint it was shown
     // under, and the client gets in on its next try, no restart.
@@ -111,7 +142,16 @@ async fn unauthorized_client_hears_its_fingerprint() {
     };
     let info = on(&local, true, &["server", "info"]).await;
     let listed = info.json(&[]);
-    assert_eq!(listed["network"]["refused"][0]["fingerprint"], fp.as_str());
+    let refused: Vec<&str> = listed["network"]["refused"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["fingerprint"].as_str().unwrap())
+        .collect();
+    assert!(
+        refused.contains(&fp.as_str()) && refused.contains(&other_fp.as_str()),
+        "{listed}"
+    );
     let text = on(&local, false, &["server", "info"]).await;
     assert!(
         text.stdout
@@ -127,10 +167,19 @@ async fn unauthorized_client_hears_its_fingerprint() {
     )
     .await;
     assert_eq!(wrong.code, 1);
+    // Each refused key listed once, however often it knocked.
+    let (first, second) = (refused[0], refused[1]);
     assert_eq!(
         wrong.stderr,
-        format!("ac2: no refused key has fingerprint 0000-0000; refused lately: {fp}\n")
+        format!(
+            "ac2: no refused key has fingerprint 0000-0000 (refused lately: {first}, {second}); \
+             have the client try again, or give --key KEY (shown by `ac2 auth show` on the \
+             client)\n"
+        )
     );
+    let args = ["server", "authorize", "laptop", "--refused", "0000-0000"];
+    let wrong = on(&local, true, &args).await;
+    assert_eq!(wrong.json(&args)["error"]["code"], "not_found");
 
     let args = [
         "server",
@@ -146,10 +195,51 @@ async fn unauthorized_client_hears_its_fingerprint() {
     assert_eq!(a["authorized"]["fingerprint"], fp.as_str());
     assert_eq!(a["authorized"]["rig"], serde_json::Value::Null);
     let info = on(&local, true, &["server", "info"]).await.json(&[]);
-    assert_eq!(info["network"]["refused"], serde_json::json!([]));
+    let refused = info["network"]["refused"].as_array().unwrap();
+    assert!(
+        refused
+            .iter()
+            .all(|r| r["fingerprint"] == other_fp.as_str())
+            && !refused.is_empty(),
+        "only the other client is still refused: {info}"
+    );
 
     let r = ac2(&["--key-dir", kd, "--remote", &remote, "status"]).await;
     assert_eq!(r.code, 0, "{}", r.stderr);
+
+    // Over the network it is told it may not switch the network, and no refusals.
+    let r = ac2(&["--key-dir", kd, "--remote", &remote, "server", "network"]).await;
+    assert!(
+        r.stdout
+            .contains("\nswitch       only on the rig's own machine\n"),
+        "{}",
+        r.stdout
+    );
+    let r = ac2(&["--key-dir", kd, "--remote", &remote, "server", "info"]).await;
+    assert!(
+        r.stdout
+            .contains("refused lately\n  listed on the rig's own host only\n"),
+        "{}",
+        r.stdout
+    );
+    let r = ac2(&[
+        "--key-dir",
+        kd,
+        "--remote",
+        &remote,
+        "server",
+        "authorize",
+        "tablet",
+        "--refused",
+        &other_fp,
+    ])
+    .await;
+    assert_eq!(r.code, 1, "{}", r.stderr);
+    assert!(
+        r.stderr.contains("refused only on its own host"),
+        "{}",
+        r.stderr
+    );
 
     // Authorized, it may still not switch the network it came in on.
     let r = ac2(&[

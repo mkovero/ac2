@@ -1,5 +1,6 @@
 //! The network setting's own file, `<config>/network.json`: whether the network is on, and
-//! where it binds and its port, kept while it is off for the next time it goes on. Apart from `rig.json` so that a change of either never sets aside
+//! where it binds and its port, kept while it is off for the next time it goes on. Apart
+//! from `rig.json` so that a change of either never sets aside
 //! the other: a rig whose network setting is lost starts local only, which an operator on
 //! the rig fixes in a moment, while the meters and the max level must survive.
 //!

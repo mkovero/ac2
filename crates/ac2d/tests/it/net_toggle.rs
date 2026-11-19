@@ -343,8 +343,20 @@ fn a_network_client_may_not_toggle_and_is_told_no_host_detail() {
     ] {
         assert!(!told.contains(detail), "{detail} in {told}");
     }
-    // Whether this rig's network can be switched at all, as every client is told.
-    assert_eq!(s.toggle, NetToggle::Allowed);
+    // Told it may not switch it, as the command answers it; the host may.
+    assert_eq!(
+        s.toggle,
+        NetToggle::Unavailable {
+            reason: NetUnavailable::NotLocal
+        }
+    );
+    assert_eq!(local.server(Command::ServerInfo).toggle, NetToggle::Allowed);
+    // Nor who else was refused, and from where.
+    assert_eq!(s.network.refused, None);
+    assert_eq!(
+        local.server(Command::ServerInfo).network.refused,
+        Some(Vec::new())
+    );
     let host = serde_json::to_string(&local.server(Command::ServerInfo).network.setting).unwrap();
     for detail in ["127.0.0.1", "saved", "bind", "choice"] {
         assert!(host.contains(detail), "the host is told {detail}: {host}");
@@ -494,11 +506,50 @@ fn the_choice_is_kept_while_off_and_across_a_restart() {
     assert_eq!(
         setting(&s),
         &NetSetting::On {
-            choice: at,
+            choice: at.clone(),
             saved: NetSaved::Saved,
         }
     );
     wait_status(&h, "on again where it was", listening_on(port));
+
+    // Off with a place given keeps it for the next time, and listens nowhere meanwhile.
+    let next = NetChoice {
+        bind: NetBind::All,
+        port: free_pair(),
+    };
+    let s = c.server(Command::ServerNetwork {
+        enabled: false,
+        bind: Some(next.bind.clone()),
+        port: Some(next.port),
+    });
+    assert_eq!(
+        setting(&s),
+        &NetSetting::Off {
+            kept: Some(next),
+            saved: NetSaved::Saved,
+        }
+    );
+    wait_status(&h, "off", |s| *s == NetStatus::Off);
+    // Off again with only the address: the kept port stays.
+    c.server(Command::ServerNetwork {
+        enabled: false,
+        bind: Some(at.bind.clone()),
+        port: None,
+    });
+    // On with only a port: the kept address stays.
+    let s = c.server(Command::ServerNetwork {
+        enabled: true,
+        bind: None,
+        port: Some(port),
+    });
+    assert_eq!(
+        setting(&s),
+        &NetSetting::On {
+            choice: at,
+            saved: NetSaved::Saved,
+        }
+    );
+    wait_status(&h, "on at the kept address", listening_on(port));
     h.shutdown();
 }
 
@@ -722,6 +773,36 @@ fn slow_turned_on_mid_session_a_paired_rig_gets_its_audio() {
     let t0 = Instant::now();
     while link(&mut ca) != Some(RemoteLink::Up) {
         assert!(t0.elapsed() < T, "never up again: {:?}", link(&mut ca));
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    // Off, then back on another port: the peer's new address (as an mDNS follow or the
+    // operator sets it) is a new link, which finds it up rather than still off.
+    turn(&mut cb, false, None);
+    let t0 = Instant::now();
+    while link(&mut ca) != Some(RemoteLink::NetworkOff) {
+        assert!(t0.elapsed() < T, "never read off: {:?}", link(&mut ca));
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let moved = free_pair();
+    turn(&mut cb, true, Some(moved));
+    wait_status(&b, "on at another port", listening_on(moved));
+    ca.ok(Command::RigPeers {
+        peers: vec![RigPeer {
+            rig: b_id,
+            name: "rig-b".into(),
+            ctrl: format!("tcp://127.0.0.1:{moved}"),
+            data: format!("tcp://127.0.0.1:{}", moved + 1),
+            key: b.server_public_key().unwrap().to_z85(),
+        }],
+    });
+    let t0 = Instant::now();
+    while link(&mut ca) != Some(RemoteLink::Up) {
+        assert!(
+            t0.elapsed() < T,
+            "never up at the new port: {:?}",
+            link(&mut ca)
+        );
         std::thread::sleep(Duration::from_millis(50));
     }
     a.shutdown();

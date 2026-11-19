@@ -35,6 +35,8 @@ pub enum CliError {
     Usage(String),
     /// Refused locally for safety before anything was sent.
     Refused(String),
+    /// What the command names is not among what the daemon lists.
+    NotFound(String),
     /// Writing output or files failed.
     Io(std::io::Error),
     /// A check ran and failed; its report, already printed, names the reasons.
@@ -45,7 +47,7 @@ impl std::fmt::Display for CliError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Client(e) => write!(f, "{e}"),
-            Self::NotRunning(m) | Self::Usage(m) => f.write_str(m),
+            Self::NotRunning(m) | Self::Usage(m) | Self::NotFound(m) => f.write_str(m),
             Self::Refused(m) => write!(f, "refused: {m}"),
             Self::Io(e) => write!(f, "{e}"),
             Self::CheckFailed => f.write_str("self-test failed (reasons in the report above)"),
@@ -84,6 +86,7 @@ impl CliError {
             Self::Client(e) => e.code().map_or("client", ac2_client::code_name),
             Self::NotRunning(_) => "not_running",
             Self::Usage(_) => "usage",
+            Self::NotFound(_) => "not_found",
             Self::Refused(_) => "refused",
             Self::Io(_) => "io",
             Self::CheckFailed => "check_failed",
