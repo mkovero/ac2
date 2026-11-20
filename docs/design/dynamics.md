@@ -296,7 +296,8 @@ on an exponential-in-dB tail leaves a residual of about 0.05 dB/s × τ: a healt
 drift grows with its release (Studer card ch 2, 2026-11-20: −0.03 dB at 3 dB GR up to −0.12 dB
 at 13 dB, τ ≈ 3 s). So per curve and level the expected residual is `r = 0.05 dB/s × τ_tail`, where the tail
 constant is `τ_tail = max(release_tau, recovery_0_5db / ln(gr_end / 0.5 dB))` over the
-level's steps: `release_tau` alone reads the fast stage of a two-stage release (100 ms then a
+level's steps, the second term only where `gr_end` is at least 1 dB (near 0.5 dB the log goes
+to zero): `release_tau` alone reads the fast stage of a two-stage release (100 ms then a
 5 s tail would give r ≈ 0.005 dB against a real residual of about 0.25 dB), and a step's baseline **moved** when
 `|drift| > 2r + 0.1 dB` (bench: 0.41 dB at τ = 3.1 s; the card's ch 1 was at −0.85 dB). A step
 that hit `rest_max` reads "not recovered" instead; where neither term of `τ_tail` is a
