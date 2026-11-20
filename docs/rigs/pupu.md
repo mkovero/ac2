@@ -199,8 +199,8 @@ Last few only; `git log` and `STATUS.md` have the rest. All three hosts unless n
 
 ## FF400 line out, absolute level (2026-11-20)
 
-Measured with the operator's DMM on rear line out 5 (JACK playback 5), tip to ring, the cable
-to the Xone:62 off. The output level was at +4 (RME's +13 dBu at 0 dBFS). The signal was
+Measured with the operator's DMM on JACK playback 5, tip to ring, with that jack's cable off.
+Its printed label was not checked: the 2026-10-28 note below suggests "out 7". The output level was at +4 (RME's +13 dBu at 0 dBFS). The signal was
 `ac2 gen sine --freq 1khz --out 5 --level -20dbfs`. The generator's level is RMS with
 0 dBFS = a full-scale sine, the same convention as RME's spec.
 
