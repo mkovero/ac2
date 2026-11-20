@@ -38,3 +38,15 @@ pub struct DynamicsRunArgs {
     /// plays an identical programme.
     pub rests_from: Option<TraceId>,
 }
+
+/// One step's envelopes of one measured input of a dynamics trace (`dynamics.envelope`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DynamicsEnvelopeArgs {
+    /// A dynamics trace.
+    pub trace: TraceId,
+    /// The measured input, zero-based.
+    pub input: u16,
+    /// The step, zero-based.
+    pub step: u32,
+}

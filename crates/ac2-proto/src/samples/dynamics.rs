@@ -119,7 +119,7 @@ fn harmonics(first: DynamicsLevel) -> DynamicsHarmonics {
     }
 }
 
-pub(super) fn dynamics_data() -> DynamicsData {
+pub fn dynamics_data() -> DynamicsData {
     let level = |v| DynamicsLevel::Db { value: Db(v) };
     let row = DynamicsRow {
         gr_end: Db(7.5),

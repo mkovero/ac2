@@ -592,6 +592,7 @@ fn awaiting_pick_reaches_the_walk_pane_and_marks_the_capture_unsettled() {
         spl_view: SplView::MeterLeq,
         sweep_view: SweepView::Response,
         programme_view: ProgrammeView::Meters,
+        dynamics: ac2_proto::model::layout::DynamicsPane::default(),
         chrome: PlotChrome::Full,
         content: PaneContent::Walk {
             rig: RigRef::ThisRig,

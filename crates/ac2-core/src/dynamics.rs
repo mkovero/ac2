@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 mod analyse;
 
-pub use analyse::Analyser;
+pub use analyse::{Analyser, max_envelope_points};
 
 /// Length of each half of the linearity check, s.
 pub const CHECK_SECONDS: f64 = 2.0;

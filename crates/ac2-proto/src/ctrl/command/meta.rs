@@ -74,6 +74,7 @@ impl Command {
             Self::SweepRun(_) => "sweep.run",
             Self::DynamicsRun(_) => "dynamics.run",
             Self::DynamicsTable { .. } => "dynamics.table",
+            Self::DynamicsEnvelope(_) => "dynamics.envelope",
             Self::StateSnapshot => "state.snapshot",
             Self::StateSince { .. } => "state.since",
             Self::GridGet { .. } => "grid.get",
@@ -132,6 +133,7 @@ impl Command {
                 | Self::TraceList
                 | Self::TraceGet { .. }
                 | Self::DynamicsTable { .. }
+                | Self::DynamicsEnvelope(_)
                 | Self::TraceExport { .. }
                 | Self::CalList
                 | Self::StateSnapshot

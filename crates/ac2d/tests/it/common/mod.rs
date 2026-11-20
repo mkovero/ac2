@@ -436,6 +436,7 @@ reply_kinds! {
     traces: ReplyBody::Traces(v) => v, Vec<ac2_proto::model::TraceMeta>;
     trace_data: ReplyBody::TraceData(v) => *v, ac2_proto::model::TraceData;
     dynamics_table: ReplyBody::DynamicsTable(v) => *v, ac2_proto::model::DynamicsTable;
+    dynamics_envelope: ReplyBody::DynamicsEnvelope(v) => *v, ac2_proto::model::DynamicsEnvelope;
     calibration: ReplyBody::Calibration(v) => v, ac2_proto::model::CalEntry;
     mic: ReplyBody::Mic(v) => v, ac2_proto::model::Mic;
     outputs: ReplyBody::Outputs(v) => v, Vec<ac2_proto::model::OutputSetup>;

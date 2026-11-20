@@ -31,7 +31,7 @@ keepalives to each connection as its credit allows (§5.8).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 96`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 97`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -178,6 +178,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `sweep.run` | `lease_token`, `meas` (a sweep measurement), `name: string \| nil` | `sweep` (the run as started) | L (held for the run), armed |
 | `dynamics.run` | `lease_token`, `meas` (a dynamics measurement), `name: string \| nil`, `rests_from: TraceId \| nil` | `dynamics` (the run as started) | L (held for the run), armed |
 | `dynamics.table` | `trace` (a dynamics trace, else `invalid`) | `dynamics_table` (`DynamicsTable`: `info`, `inputs`, as in `DynamicsData` without `envelopes`) | non-mutating |
+| `dynamics.envelope` | `trace` (a dynamics trace), `input: u16` (a measured input, zero-based), `step: u32` (zero-based); else `invalid` | `dynamics_envelope` (`DynamicsEnvelope`: `input`, `step`, `start`, `end`, each edge a `DynamicsEdgeCurve` of parallel f32 arrays {`t`, `gr_db`, `h_db`: four arrays, H2…H5, NaN where blind}) | non-mutating |
 | `state.snapshot` | — | `snapshot` | |
 | `state.since` | `rev` | `events` or `resync_required` | |
 | `grid.get` | `grid_id` | `grid` | |
@@ -483,11 +484,19 @@ A `PaneLayout` is a tree: `{type: pane, pane: LayoutPane}` or `{type: split, axi
 column, ratio, a: PaneLayout, b: PaneLayout}` (`row`: `a` left; `column`: `a` on top;
 `ratio`: the share `a` takes, strictly between 0 and 1). `LayoutPane` is {`kind`,
 `transfer_view`, `spectrum_view`, `spectrum_camera`, `spl_view`, `sweep_view`,
-`programme_view`, `chrome`, `content`, `levels`, `plates`}
+`programme_view`, `dynamics`, `chrome`, `content`, `levels`, `plates`}
 (snake_case enums, `ac2_proto::model::layout`): its kind (`transfer`, `spectrum`, `spl`,
-`distortion`, `programme`, `walk`), the view of each kind it may be turned into (`spectrum_view`:
+`distortion`, `programme`, `walk`, `dynamics`), the view of each kind it may be turned into (`spectrum_view`:
 `spectrum`, `spectrum_spectrograph`, `spectrograph` or `spectrograph_3d`; `programme_view`:
-`meters` or `goniometer`; a goniometer on a pane that meters no pair draws its meters), where
+`meters` or `goniometer`; a goniometer on a pane that meters no pair draws its meters), the
+Dynamics pane's view and picks (`dynamics`, required: {`view`: `steps` \| `envelopes` \|
+`release` \| `table`; `a`, `b`: a `DynamicsSide`, `{type: default}`, `{type: off}` (B only;
+A off is `invalid`) or `{type: curve, rig, trace, input}`; `step`: {`level` dBFS, `burst` s},
+finite with the burst above 0, or nil for the middle level and longest burst; `metric`: the
+Steps column, `gr_end`, `attack_tau`, `attack_2db`, `settle_0_5db`, `overshoot`,
+`release_tau`, `recovery_2db`, `recovery_0_5db`, `thd_attack`, `thd_settled`,
+`thd_release`, `thump_start`, `thump_end` or `drift`; `thd`: Envelopes draw THD; `all_levels`:
+Release draws every level of A}), where
 its 3D spectrograph is seen from (`spectrum_camera`, required: {`yaw_deg` i8 within ±80,
 `pitch_deg` u8 within 2 … 75, `zoom_step` i8 within −8 … 4}; a camera outside a range is
 refused with `invalid`, never clamped), what it
@@ -509,7 +518,7 @@ plate's text size, 1 being the theme's; missing = all nil at 1).
 | `type` | fields | on |
 |---|---|---|
 | `nothing` | — | any pane: nothing picked |
-| `curves` | `entries: [PaneEntry]`, 1 … 33, the lead first | `transfer`, `spectrum`, `distortion` |
+| `curves` | `entries: [PaneEntry]`, 1 … 33, the lead first | `transfer`, `spectrum`, `distortion`, `dynamics` |
 | `meter` | `rig`, `meas` | `spl`: its one meter |
 | `inputs` | `rig`, `inputs: [u16]`, 1 … 8 zero-based device inputs | `programme` |
 | `pair` | `rig`, `left: u16`, `right: u16` | `programme`: the stereo pair it meters |
@@ -1613,7 +1622,8 @@ an A/B pair plays an identical programme. The generator's level is the highest b
   (as `inputs`), one [`DynamicsPoint` {`edge` (`start` \| `end`), `t` (s from the edge),
   `gr_db`, `h_db` (H2…H5 re the fundamental, NaN where blind)}] per step. A long run at a
   high carrier holds tens of MB of envelopes, over the ctrl message limit (`too_large`):
-  `dynamics.table` reads its step table, `trace.export` all of it. `DynamicsRow`: `gr_end`, `gr_settled`
+  `dynamics.table` reads its step table, `dynamics.envelope` one step's envelopes of one
+  input, `trace.export` all of it. `DynamicsRow`: `gr_end`, `gr_settled`
   (nil: no burst at the level settled), `settled`, `attack_tau`, `attack_2db`, `settle_0_5db`,
   `overshoot` ({`level`, `at`, `reference`} \| nil), `release_tau`, `recovery_2db`,
   `recovery_0_5db`, `harmonics` ({`attack`, `settled`, `release`, `rest`}, each {`h`: four
@@ -1984,7 +1994,7 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 `{type, value}` with `type` one of: `ack` (`{rev}`), `welcome`, `backends`, `preview`,
 `loopback_detection`, `session`,
 `lease`, `generator`, `measurement`, `delay_finding`, `trace`, `traces`, `trace_data`,
-`dynamics_table`, `calibration`, `line_calibration`, `calibrations`, `mic`, `inputs`, `outputs`, `server`, `source_state`,
+`dynamics_table`, `dynamics_envelope`, `calibration`, `line_calibration`, `calibrations`, `mic`, `inputs`, `outputs`, `server`, `source_state`,
 `spl_log_page`, `spl_history`, `spl_band_log`,
 `snapshot`, `events`,
 `grid`, `session_file`, `sessions`, `transfer`, `chunk`, `salvage`, `sweep`, `dynamics`, `recording`,
@@ -2642,7 +2652,7 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 <dir>/spl/<name>.bands.csv   its band log, when the meter's band meter logged (§7.4)
 ```
 
-`session.json`: `{format: "ac2-session", version: 46, saved_at, measurements:
+`session.json`: `{format: "ac2-session", version: 47, saved_at, measurements:
 [{id, config: MeasConfig, running, delay: {applied, nudged, tracking} | null, colour:
 ColourFamily | null, layout: PaneLayout | null, offset: Db, eq: [EqSet]}], spl_logs:
 [{meas, file, bands: file | null}], traces: [{meta: TraceMeta, grid: GridDef, file, mic_curve_points: [[Hz,

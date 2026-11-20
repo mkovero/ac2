@@ -78,6 +78,8 @@ pub enum ReplyBody {
     TraceData(Box<TraceData>),
     /// `dynamics.table`.
     DynamicsTable(Box<crate::model::DynamicsTable>),
+    /// `dynamics.envelope`.
+    DynamicsEnvelope(Box<crate::model::DynamicsEnvelope>),
     /// `cal.spl`, `cal.spl_electrical`.
     Calibration(CalEntry),
     /// `cal.curve_import`, `cal.curve_rename`: the mic with its curves.

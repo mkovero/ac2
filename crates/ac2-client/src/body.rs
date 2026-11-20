@@ -1,0 +1,51 @@
+//! Reply body names, for the errors that say which body came instead.
+
+use ac2_proto::ReplyBody;
+
+/// Name of a reply body, for errors.
+pub fn body_name(b: &ReplyBody) -> &'static str {
+    match b {
+        ReplyBody::Ack { .. } => "ack",
+        ReplyBody::Welcome(_) => "welcome",
+        ReplyBody::Backends(_) => "backends",
+        ReplyBody::Preview(_) => "preview",
+        ReplyBody::LoopbackDetection(_) => "loopback_detection",
+        ReplyBody::Session(_) => "session",
+        ReplyBody::Lease(_) => "lease",
+        ReplyBody::Generator(_) => "generator",
+        ReplyBody::Measurement(_) => "measurement",
+        ReplyBody::DelayFinding(_) => "delay_finding",
+        ReplyBody::Trace(_) => "trace",
+        ReplyBody::Traces(_) => "traces",
+        ReplyBody::TraceData(_) => "trace_data",
+        ReplyBody::DynamicsTable(_) => "dynamics_table",
+        ReplyBody::DynamicsEnvelope(_) => "dynamics_envelope",
+        ReplyBody::Plan(_) => "plan",
+        ReplyBody::Plans(_) => "plans",
+        ReplyBody::Walk(_) => "walk",
+        ReplyBody::Sim(_) => "sim",
+        ReplyBody::Calibration(_) => "calibration",
+        ReplyBody::LineCalibration(_) => "line_calibration",
+        ReplyBody::Mic(_) => "mic",
+        ReplyBody::Calibrations { .. } => "calibrations",
+        ReplyBody::Inputs(_) => "inputs",
+        ReplyBody::Outputs(_) => "outputs",
+        ReplyBody::Server(_) => "server",
+        ReplyBody::SourceState(_) => "source_state",
+        ReplyBody::SplLogPage(_) => "spl_log_page",
+        ReplyBody::SplHistory(_) => "spl_history",
+        ReplyBody::SplBandLog(_) => "spl_band_log",
+        ReplyBody::Snapshot(_) => "snapshot",
+        ReplyBody::Events(_) => "events",
+        ReplyBody::Grid(_) => "grid",
+        ReplyBody::SessionFile(_) => "session_file",
+        ReplyBody::Sessions(_) => "sessions",
+        ReplyBody::Transfer(_) => "transfer",
+        ReplyBody::Chunk(_) => "chunk",
+        ReplyBody::Salvage(_) => "salvage",
+        ReplyBody::Sweep(_) => "sweep",
+        ReplyBody::Dynamics(_) => "dynamics",
+        ReplyBody::Recording(_) => "recording",
+        ReplyBody::Recordings(_) => "recordings",
+    }
+}

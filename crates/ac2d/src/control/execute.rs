@@ -261,6 +261,7 @@ impl Control {
             }
             Command::TraceGet { trace } => self.trace_get(trace),
             Command::DynamicsTable { trace } => self.dynamics_table(trace),
+            Command::DynamicsEnvelope(a) => self.dynamics_envelope(a.trace, a.input, a.step),
             Command::TraceUpdate { trace, edit } => self.trace_update(trace, edit),
             Command::TraceDelete { trace } => self.trace_delete(trace),
             Command::TraceAverage {
@@ -435,6 +436,7 @@ impl Control {
     /// `meas.create`: the new measurement, stopped.
     pub(super) fn meas_create(&mut self, config: MeasConfig) -> Result<Measurement, ProtoError> {
         validate_meas(&config)?;
+        self.check_dynamics_ceiling(&config.kind)?;
         super::maths::new_average_has_two(&config.kind)?;
         self.spl_needs_mic(&config)?;
         self.check_meas_owner(None, &config.kind)?;
@@ -475,11 +477,13 @@ impl Control {
         config: MeasConfig,
     ) -> Result<ReplyBody, ProtoError> {
         validate_meas(&config)?;
+        self.check_dynamics_ceiling(&config.kind)?;
         self.spl_needs_mic(&config)?;
         let mut m = self.meas(meas)?.clone();
         if base != m.config_rev {
             return Err(stale_meas(meas, m.config_rev));
         }
+        self.check_dynamics_idle(meas)?;
         self.check_meas_owner(Some(meas), &config.kind)?;
         self.check_operand_update(meas, &config.kind)?;
         self.check_walk_meas_update(meas, &config.kind)?;

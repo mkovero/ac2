@@ -16,6 +16,7 @@
 //! mutex, drained by its consumer, which so paces what the daemon sends it).
 #![forbid(unsafe_code)]
 
+mod body;
 mod client;
 pub mod data;
 pub mod endpoint;
@@ -27,7 +28,8 @@ pub mod mirror;
 pub mod sessions;
 pub mod spl_log;
 
-pub use client::{Client, ClientConfig, DEAD_AFTER, Retry, body_name};
+pub use body::body_name;
+pub use client::{Client, ClientConfig, DEAD_AFTER, Retry};
 pub use data::{Arrival, Latest, TopicFrame, frame_age};
 pub use endpoint::{Endpoints, RemoteAddr};
 pub use error::{ClientError, code_name};

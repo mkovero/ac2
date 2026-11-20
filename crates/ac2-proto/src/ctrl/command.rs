@@ -3,7 +3,7 @@
 mod meta;
 mod run;
 
-pub use run::{DynamicsRunArgs, SweepRunArgs};
+pub use run::{DynamicsEnvelopeArgs, DynamicsRunArgs, SweepRunArgs};
 
 use std::net::SocketAddr;
 
@@ -655,10 +655,10 @@ pub enum Command {
     DynamicsRun(DynamicsRunArgs),
     /// A dynamics trace's step table, without the envelopes `trace.get` carries.
     #[serde(rename = "dynamics.table")]
-    DynamicsTable {
-        /// Trace.
-        trace: TraceId,
-    },
+    DynamicsTable { trace: TraceId },
+    /// One step's envelopes of one measured input of a dynamics trace.
+    #[serde(rename = "dynamics.envelope")]
+    DynamicsEnvelope(DynamicsEnvelopeArgs),
 
     // -- state, grid, file --------------------------------------------------------------
     /// Full state snapshot.

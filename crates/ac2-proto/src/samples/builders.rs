@@ -205,6 +205,22 @@ pub fn pane_layout() -> PaneLayout {
         spl_view: SplView::MeterLeq,
         sweep_view: SweepView::Response,
         programme_view: ProgrammeView::Meters,
+        dynamics: DynamicsPane {
+            view: DynamicsView::Envelopes,
+            a: DynamicsSide::Curve {
+                rig: RigRef::ThisRig,
+                trace: TraceId(14),
+                input: 1,
+            },
+            b: DynamicsSide::Off,
+            step: Some(DynamicsStepPick {
+                level: Dbfs(-8.0),
+                burst: Seconds(1.0),
+            }),
+            metric: DynamicsMetric::ReleaseTau,
+            thd: true,
+            all_levels: false,
+        },
         chrome: PlotChrome::Full,
         content: PaneContent::Nothing,
         levels: LayoutLevels::default(),

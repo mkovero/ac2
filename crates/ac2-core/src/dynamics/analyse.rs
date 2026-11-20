@@ -19,6 +19,7 @@
 mod dsp;
 mod pacing;
 mod step;
+pub use step::max_envelope_points;
 mod watch;
 
 #[cfg(test)]

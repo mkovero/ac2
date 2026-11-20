@@ -13,9 +13,9 @@ use ac2_audio::fake::{FakeDrive, FakePath};
 use ac2_audio::{FakeBackend, FakeConfig, FakeDriver};
 use ac2_proto::event::Change;
 use ac2_proto::model::{
-    DynamicsConfig, DynamicsFailure, DynamicsOnset, DynamicsRun, DynamicsStatus, DynamicsTime,
-    ExportFormat, GeneratorDesired, GeneratorSettings, ImportFormat, ImportRole, MeasConfig,
-    MeasKind, OwnedTraces, Signal, TraceKind, TraceOwner, TraceSource,
+    DynamicsConfig, DynamicsEdge, DynamicsFailure, DynamicsOnset, DynamicsRun, DynamicsStatus,
+    DynamicsTime, ExportFormat, GeneratorDesired, GeneratorSettings, ImportFormat, ImportRole,
+    MeasConfig, MeasKind, OwnedTraces, Signal, TraceKind, TraceOwner, TraceSource,
 };
 use ac2_proto::units::{Blob, Dbfs, Hz, LeaseToken, MeasId, Seconds, TraceId};
 use ac2_proto::{Command, ErrorCode};
@@ -53,13 +53,17 @@ fn config() -> DynamicsConfig {
     }
 }
 
+fn meas_config(config: DynamicsConfig) -> MeasConfig {
+    MeasConfig {
+        scope: ac2_proto::model::MeasScope::Session,
+        name: "VCA".into(),
+        kind: MeasKind::Dynamics { config },
+    }
+}
+
 fn create(c: &mut Client, config: DynamicsConfig) -> MeasId {
     let m = c.measurement(Command::MeasCreate {
-        config: MeasConfig {
-            scope: ac2_proto::model::MeasScope::Session,
-            name: "VCA".into(),
-            kind: MeasKind::Dynamics { config },
-        },
+        config: meas_config(config),
     });
     assert!(!m.running, "a dynamics measurement waits for dynamics.run");
     m.id
@@ -199,6 +203,10 @@ fn slow_dynamics_run_stores_one_trace_that_exports_and_imports() {
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{}", e.msg);
+    // Its settings hold too: the analysis reads the programme it was started with.
+    let e = c.update(meas, meas_config(config())).unwrap_err();
+    assert_eq!(e.code, ErrorCode::Refused, "{}", e.msg);
+    assert!(e.msg.contains("playing"), "{}", e.msg);
     let st = c.state();
     assert!(st.generator.firing);
     let e = c
@@ -260,6 +268,27 @@ fn slow_dynamics_run_stores_one_trace_that_exports_and_imports() {
         c.dynamics_table(Command::DynamicsTable { trace }),
         dyn_data.table()
     );
+    // One step's envelopes of one input are its points split by edge, in order.
+    let env = |input, step| {
+        Command::DynamicsEnvelope(ac2_proto::DynamicsEnvelopeArgs { trace, input, step })
+    };
+    let e1 = c.dynamics_envelope(env(1, 1));
+    let points = &dyn_data.envelopes[0][1];
+    let starts: Vec<f32> = points
+        .iter()
+        .filter(|p| p.edge == DynamicsEdge::Start)
+        .map(|p| p.t)
+        .collect();
+    assert_eq!(e1.start.t, starts);
+    assert_eq!(e1.start.t.len() + e1.end.t.len(), points.len());
+    assert_eq!(e1.end.gr_db.len(), e1.end.t.len());
+    assert!(e1.start.h_db.iter().all(|h| h.len() == starts.len()));
+    for bad in [env(0, 0), env(1, 2)] {
+        let e = c.call(bad).unwrap_err();
+        assert_eq!(e.code, ErrorCode::Invalid, "{}", e.msg);
+    }
+    // Ended, the measurement takes new settings again.
+    c.update_ok(meas, meas_config(config()));
 
     // Exported and imported back, it is the same trace.
     let csv = c.export_text(Command::TraceExport {
@@ -389,4 +418,104 @@ fn slow_an_ended_run_leaves_its_measurement_free() {
         meas,
         traces: OwnedTraces::Keep,
     });
+}
+
+#[test]
+fn a_programme_above_the_global_maximum_is_refused_where_it_is_typed() {
+    init_log();
+    let backend = rig();
+    let h = Daemon::start(common::config(backend.clone(), inproc("dynamics-ceiling"))).unwrap();
+    let (mut c, _sub) = connect(&h, &[b"evt"]);
+    c.ok(Command::Hello {
+        client: "dynamics test".into(),
+    });
+    c.ok(Command::SessionOpen {
+        config: session(true),
+    });
+    // The daemon's maximum is −10 dBFS.
+    let loud = DynamicsConfig {
+        bursts: vec![Dbfs(-20.0), Dbfs(-6.0)],
+        ..config()
+    };
+    let e = c
+        .call(Command::MeasCreate {
+            config: meas_config(loud.clone()),
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Refused, "{}", e.msg);
+    assert!(e.msg.contains("-6.0 dBFS"), "{}", e.msg);
+    let meas = create(&mut c, config());
+    let e = c.update(meas, meas_config(loud)).unwrap_err();
+    assert_eq!(e.code, ErrorCode::Refused, "{}", e.msg);
+    c.update_ok(
+        meas,
+        meas_config(DynamicsConfig {
+            bursts: vec![Dbfs(-10.0)],
+            ..config()
+        }),
+    );
+}
+
+/// The largest programme a dynamics measurement may hold: every measured input, every level,
+/// every length. Its step table and one step's envelopes each fit one ctrl message, at the
+/// highest sample rate and shortest carrier period, the longest burst and rest.
+#[test]
+fn the_largest_programmes_table_and_envelope_fit_a_ctrl_message() {
+    use ac2_core::dynamics::{
+        MAX_BURST_SECONDS, MAX_DURATIONS, MAX_LEVELS, MIN_PERIOD, REST_MAX_SECONDS,
+        max_envelope_points,
+    };
+    use ac2_proto::model::{DynamicsEdgeCurve, DynamicsEnvelope, DynamicsTable};
+    use ac2_proto::units::RequestId;
+    use ac2_proto::{MAX_CTRL_BYTES, Reply, ReplyBody, encode_reply};
+
+    const INPUTS: usize = 8;
+    let sample = ac2_proto::samples::dynamics_data();
+    let mut table: DynamicsTable = sample.table();
+    let step = table.info.steps[0];
+    table.info.bursts = vec![Dbfs(-8.0); MAX_LEVELS];
+    table.info.durations = vec![Seconds(0.001); MAX_DURATIONS];
+    table.info.steps = vec![step; MAX_LEVELS * MAX_DURATIONS];
+    let input = table.inputs[0].clone();
+    table.inputs = (0..INPUTS as u16)
+        .map(|i| ac2_proto::model::DynamicsInput {
+            input: i,
+            name: "x".repeat(64),
+            rows: vec![input.rows[0].clone(); MAX_LEVELS * MAX_DURATIONS],
+            ..input.clone()
+        })
+        .collect();
+    let size = |body| {
+        encode_reply(&Reply::new(RequestId(1), Ok(body)))
+            .unwrap()
+            .len()
+    };
+    let t = size(ReplyBody::DynamicsTable(Box::new(table)));
+    assert!(t <= MAX_CTRL_BYTES, "table {t} B");
+
+    let fs = 192_000.0;
+    let n = max_envelope_points(fs, MIN_PERIOD, MAX_BURST_SECONDS, REST_MAX_SECONDS);
+    // Not one value repeats or is NaN, so no encoding is shorter than the worst.
+    let curve = |k: usize| {
+        let v = |j: usize| {
+            (0..k)
+                .map(|i| (i * 7 + j) as f32 * 1.000_1)
+                .collect::<Vec<_>>()
+        };
+        DynamicsEdgeCurve {
+            t: v(0),
+            gr_db: v(1),
+            h_db: [v(2), v(3), v(4), v(5)],
+        }
+    };
+    let e = size(ReplyBody::DynamicsEnvelope(Box::new(DynamicsEnvelope {
+        input: 7,
+        step: 127,
+        start: curve(n),
+        end: curve(n),
+    })));
+    assert!(
+        e <= MAX_CTRL_BYTES,
+        "envelope of {n} points per edge: {e} B"
+    );
 }

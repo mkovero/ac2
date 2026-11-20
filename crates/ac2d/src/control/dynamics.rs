@@ -608,3 +608,41 @@ fn point(p: &core::EnvelopePoint) -> DynamicsPoint {
         h_db: p.h_db,
     }
 }
+
+impl Control {
+    /// A dynamics measurement whose loudest burst is above the global maximum is refused
+    /// when it is made or changed, so the form that sent it can say so where it is typed
+    /// (each run checks again: the maximum may come down in between).
+    pub(super) fn check_dynamics_ceiling(&self, kind: &MeasKind) -> Result<(), ProtoError> {
+        let MeasKind::Dynamics { config } = kind else {
+            return Ok(());
+        };
+        let top = config
+            .bursts
+            .iter()
+            .map(|b| b.0)
+            .fold(f64::NEG_INFINITY, f64::max);
+        if top > self.s.ceiling_dbfs {
+            return Err(refused(format!(
+                "{top:.1} dBFS is above the global maximum {:.1} dBFS",
+                self.s.ceiling_dbfs
+            )));
+        }
+        Ok(())
+    }
+
+    /// A measurement whose run is playing keeps its settings until the run ends: the run's
+    /// analysis reads the programme it was started with.
+    pub(super) fn check_dynamics_idle(&self, meas: MeasId) -> Result<(), ProtoError> {
+        if self
+            .dynamics
+            .as_ref()
+            .is_some_and(|d| d.run.meas == meas && d.run.active())
+        {
+            return Err(refused(
+                "its dynamics run is playing: change it once the run has ended",
+            ));
+        }
+        Ok(())
+    }
+}

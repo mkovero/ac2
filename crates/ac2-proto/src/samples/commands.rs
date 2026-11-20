@@ -483,6 +483,11 @@ pub fn commands() -> Vec<Command> {
             rests_from: Some(TraceId(14)),
         }),
         Command::DynamicsTable { trace: TraceId(14) },
+        Command::DynamicsEnvelope(crate::DynamicsEnvelopeArgs {
+            trace: TraceId(14),
+            input: 4,
+            step: 0,
+        }),
     ])
     .collect()
 }

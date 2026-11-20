@@ -251,6 +251,7 @@ impl Control {
             | Command::TraceList
             | Command::TraceGet { .. }
             | Command::DynamicsTable { .. }
+            | Command::DynamicsEnvelope(_)
             | Command::TraceUpdate { .. }
             | Command::TraceDelete { .. }
             | Command::TraceAverage { .. }

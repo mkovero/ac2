@@ -330,6 +330,15 @@ def _layout_pane(
         "spl_view": "meter_leq",
         "sweep_view": "response",
         "programme_view": programme_view,
+        "dynamics": {
+            "view": "envelopes",
+            "a": {"type": "curve", "rig": {"type": "this_rig"}, "trace": 14, "input": 1},
+            "b": {"type": "off"},
+            "step": {"level": -8.0, "burst": 1.0},
+            "metric": "release_tau",
+            "thd": True,
+            "all_levels": False,
+        },
         "chrome": chrome,
         "content": content or {"type": "nothing"},
         "levels": {
@@ -865,6 +874,7 @@ def requests():
             {"lease_token": TOKEN, "meas": 12, "name": None, "rests_from": 14},
         ),
         req(106, "dynamics.table", {"trace": 14}, mutation=False),
+        req(107, "dynamics.envelope", {"trace": 14, "input": 4, "step": 0}, mutation=False),
     ]
 
 

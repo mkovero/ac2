@@ -22,12 +22,13 @@ pub mod units;
 
 /// The one protocol version this build speaks. Peers on any other version are refused
 /// (`version_mismatch`); there is no negotiation and no fallback.
-pub const PROTO_VERSION: u16 = 96;
+pub const PROTO_VERSION: u16 = 97;
 
 pub use ctrl::{
-    Command, CtrlError, DynamicsRunArgs, Envelope, ErrorCode, ErrorDetail, ImportProblem,
-    MAX_CTRL_BYTES, MicCurveFileReason, ProtoError, Reply, ReplyBody, Request, SweepRunArgs,
-    Warning, Welcome, decode_reply, decode_request, encode_reply, encode_request, peek_envelope,
+    Command, CtrlError, DynamicsEnvelopeArgs, DynamicsRunArgs, Envelope, ErrorCode, ErrorDetail,
+    ImportProblem, MAX_CTRL_BYTES, MicCurveFileReason, ProtoError, Reply, ReplyBody, Request,
+    SweepRunArgs, Warning, Welcome, decode_reply, decode_request, encode_reply, encode_request,
+    peek_envelope,
 };
 pub use event::{Change, Event, EventError, Patch, StateSnapshot, decode_event, encode_event};
 pub use flow::{

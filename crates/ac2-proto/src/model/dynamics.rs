@@ -405,6 +405,70 @@ impl DynamicsData {
             inputs: self.inputs.clone(),
         }
     }
+
+    /// Step `step`'s envelopes of measured input `input` (a device input, zero-based), or
+    /// why there are none: no such input or step.
+    pub fn envelope(&self, input: u16, step: u32) -> Result<DynamicsEnvelope, String> {
+        let i = self
+            .inputs
+            .iter()
+            .position(|x| x.input == input)
+            .ok_or_else(|| format!("input {} is not measured in this run", input + 1))?;
+        let points = self
+            .envelopes
+            .get(i)
+            .and_then(|e| e.get(step as usize))
+            .ok_or_else(|| {
+                format!(
+                    "step {step} is not in this run of {} steps",
+                    self.info.steps.len()
+                )
+            })?;
+        let edge = |edge| {
+            let mut c = DynamicsEdgeCurve::default();
+            for p in points.iter().filter(|p| p.edge == edge) {
+                c.t.push(p.t);
+                c.gr_db.push(p.gr_db);
+                for (h, v) in c.h_db.iter_mut().zip(p.h_db) {
+                    h.push(v);
+                }
+            }
+            c
+        };
+        Ok(DynamicsEnvelope {
+            input,
+            step,
+            start: edge(DynamicsEdge::Start),
+            end: edge(DynamicsEdge::End),
+        })
+    }
+}
+
+/// One edge's envelope as parallel arrays: a reply of a few tens of kB where the same points
+/// as tagged structs would be several times that.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DynamicsEdgeCurve {
+    /// From the edge, s (negative before it).
+    pub t: Vec<f32>,
+    /// Gain reduction, dB.
+    pub gr_db: Vec<f32>,
+    /// `h2 … h5` re the fundamental, dB; NaN where blind or not above the floor.
+    pub h_db: [Vec<f32>; 4],
+}
+
+/// One step's envelopes of one measured input (`dynamics.envelope`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DynamicsEnvelope {
+    /// The measured input, zero-based.
+    pub input: u16,
+    /// The step, zero-based.
+    pub step: u32,
+    /// From the burst's first sample.
+    pub start: DynamicsEdgeCurve,
+    /// From the burst's last sample.
+    pub end: DynamicsEdgeCurve,
 }
 
 /// A dynamics trace's step table without its envelopes (`dynamics.table`): a few kB where

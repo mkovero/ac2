@@ -20,7 +20,7 @@ mod traces;
 pub use builders::{grids, log_grid, math_measurement, pane_layout, sweep_measurement, working};
 pub use chains::chains;
 pub use commands::commands;
-pub use dynamics::dynamics_measurement;
+pub use dynamics::{dynamics_data, dynamics_measurement};
 pub use eq::{eq_edits, eq_measurement};
 pub use events::events;
 pub use flow::{data_requests, notices};

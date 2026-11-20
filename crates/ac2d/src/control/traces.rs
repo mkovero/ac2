@@ -514,6 +514,22 @@ impl Control {
         Ok(ReplyBody::DynamicsTable(Box::new(d.table())))
     }
 
+    pub(super) fn dynamics_envelope(
+        &self,
+        id: TraceId,
+        input: u16,
+        step: u32,
+    ) -> Result<ReplyBody, ProtoError> {
+        self.trace_meta(id)?;
+        let d = self
+            .traces
+            .dynamics
+            .get(&id)
+            .ok_or_else(|| invalid(format!("trace {id} is not a dynamics trace")))?;
+        let e = d.envelope(input, step).map_err(invalid)?;
+        Ok(ReplyBody::DynamicsEnvelope(Box::new(e)))
+    }
+
     pub(super) fn trace_update(
         &mut self,
         id: TraceId,

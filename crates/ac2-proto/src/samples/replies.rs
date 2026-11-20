@@ -233,6 +233,11 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
         Ok(ReplyBody::DynamicsTable(Box::new(
             super::dynamics::dynamics_data().table(),
         ))),
+        Ok(ReplyBody::DynamicsEnvelope(Box::new(
+            super::dynamics::dynamics_data()
+                .envelope(4, 0)
+                .expect("the sample run measures input 4"),
+        ))),
         Ok(ReplyBody::Calibration(cal_entry())),
         Ok(ReplyBody::Calibration(electrical_cal_entry())),
         Ok(ReplyBody::LineCalibration(line_cal_entry())),

@@ -516,6 +516,18 @@ fn limiter_constants_read_back() {
         env.windows(2)
             .all(|w| w[0].edge != w[1].edge || w[1].t > w[0].t)
     );
+    // The bound a reply of one step's envelopes is sized by holds every step, and is near.
+    for (env, s) in ideal.envelopes.iter().zip(&res.steps) {
+        let secs = |n: u64| n as f64 / FS;
+        let bound = super::max_envelope_points(
+            FS,
+            prog.period,
+            secs(s.burst_samples),
+            secs(s.rest_samples),
+        );
+        assert!(env.len() <= bound, "{} > {bound}", env.len());
+        assert!(env.len() * 10 >= bound * 8, "{} ≪ {bound}", env.len());
+    }
 }
 
 #[test]

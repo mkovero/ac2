@@ -158,6 +158,27 @@
        "spl_view": "meter_leq",
        "sweep_view": "response",
        "programme_view": "meters",
+       "dynamics": {
+        "view": "envelopes",
+        "a": {
+         "type": "curve",
+         "rig": {
+          "type": "this_rig"
+         },
+         "trace": 14,
+         "input": 1
+        },
+        "b": {
+         "type": "off"
+        },
+        "step": {
+         "level": -8.0,
+         "burst": 1.0
+        },
+        "metric": "release_tau",
+        "thd": true,
+        "all_levels": false
+       },
        "chrome": "full",
        "content": {
         "type": "curves",
@@ -253,6 +274,27 @@
         "spl_view": "meter_leq",
         "sweep_view": "response",
         "programme_view": "meters",
+        "dynamics": {
+         "view": "envelopes",
+         "a": {
+          "type": "curve",
+          "rig": {
+           "type": "this_rig"
+          },
+          "trace": 14,
+          "input": 1
+         },
+         "b": {
+          "type": "off"
+         },
+         "step": {
+          "level": -8.0,
+          "burst": 1.0
+         },
+         "metric": "release_tau",
+         "thd": true,
+         "all_levels": false
+        },
         "chrome": "no_grid",
         "content": {
          "type": "meter",
@@ -311,6 +353,27 @@
         "spl_view": "meter_leq",
         "sweep_view": "response",
         "programme_view": "goniometer",
+        "dynamics": {
+         "view": "envelopes",
+         "a": {
+          "type": "curve",
+          "rig": {
+           "type": "this_rig"
+          },
+          "trace": 14,
+          "input": 1
+         },
+         "b": {
+          "type": "off"
+         },
+         "step": {
+          "level": -8.0,
+          "burst": 1.0
+         },
+         "metric": "release_tau",
+         "thd": true,
+         "all_levels": false
+        },
         "chrome": "full",
         "content": {
          "type": "pair",

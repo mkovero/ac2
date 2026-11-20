@@ -17,6 +17,21 @@ pub const ENVELOPE_LINEAR_SECONDS: f64 = 0.050;
 /// Log-spaced envelope points per decade.
 pub const ENVELOPE_POINTS_PER_DECADE: f64 = 48.0;
 
+/// The most envelope points one step can hold (both edges) at sample rate `fs` and carrier
+/// period `period` samples, for a burst of `burst` and a rest of `rest` seconds: a quarter
+/// period apart for the linear stretch on either side of the start and after the end, then
+/// log-spaced to the burst's and the rest's end. What a reply of one step's envelopes is
+/// sized for.
+pub fn max_envelope_points(fs: f64, period: u32, burst: f64, rest: f64) -> usize {
+    let q = f64::from(period) / 4.0;
+    let linear = (ENVELOPE_LINEAR_SECONDS * fs / q).ceil() + 1.0;
+    let log = |span: f64| {
+        (ENVELOPE_POINTS_PER_DECADE * (span / ENVELOPE_LINEAR_SECONDS).log10().max(0.0)).ceil()
+            + 1.0
+    };
+    (3.0 * linear + log(burst) + log(rest)) as usize
+}
+
 /// The harmonic window at the start of a burst, s.
 pub const ATTACK_WINDOW_SECONDS: f64 = 0.050;
 

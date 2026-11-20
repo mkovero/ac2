@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::units::{MeasId, RigId, TraceId, WalkId};
 
+mod dynamics_pane;
+pub use dynamics_pane::*;
+
 /// The pane tree: a leaf is a pane, a split shares its rectangle between two subtrees.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
@@ -227,6 +230,8 @@ pub struct LayoutPane {
     pub sweep_view: SweepView,
     /// The Programme pane's view; `goniometer` on a pane that meters no pair draws its meters.
     pub programme_view: ProgrammeView,
+    /// The Dynamics pane's view and picks.
+    pub dynamics: DynamicsPane,
     /// How much of the plot besides the curves.
     pub chrome: PlotChrome,
     /// What the pane shows, each reference with its rig. A reference naming something its
@@ -367,12 +372,17 @@ pub enum PaneKind {
     Programme,
     /// A spatial walk: the plan, the current point and its readout, the step.
     Walk,
+    /// Dynamics runs: the level × length grid, envelopes, release, the step table.
+    Dynamics,
 }
 
 impl PaneKind {
     /// A graph pane: it draws curves, several of them over each other.
     pub fn draws_curves(self) -> bool {
-        matches!(self, Self::Transfer | Self::Spectrum | Self::Distortion)
+        matches!(
+            self,
+            Self::Transfer | Self::Spectrum | Self::Distortion | Self::Dynamics
+        )
     }
 }
 
@@ -541,8 +551,8 @@ impl PaneLayout {
     /// not finite with its top above its bottom (no axis can be drawn on it), a plate
     /// placed outside 0 … 1 or with a text scale not finite and above 0, content
     /// [`PaneContent::check`] refuses, and content of another kind than the pane's:
-    /// [`PaneContent::Nothing`] on any pane, curves only on a Transfer, Spectrum / RTA or
-    /// Sweep / distortion pane, a meter only on an SPL pane, inputs or a pair only on a
+    /// [`PaneContent::Nothing`] on any pane, curves only on a Transfer, Spectrum / RTA,
+    /// Sweep / distortion or Dynamics pane, a meter only on an SPL pane, inputs or a pair only on a
     /// Programme pane, a walk only on a Walk pane, and a 3D spectrograph camera outside
     /// [`SpectrumCamera::check`]'s ranges (refused, never clamped: it came from another
     /// client or a file).
@@ -570,6 +580,7 @@ impl PaneLayout {
         }
         for p in self.panes() {
             p.spectrum_camera.check()?;
+            p.dynamics.check()?;
             let fits = match (&p.content, p.kind) {
                 (PaneContent::Nothing, _) => true,
                 (PaneContent::Curves { .. }, k) => k.draws_curves(),
@@ -582,8 +593,8 @@ impl PaneLayout {
             if !fits {
                 return Err(match &p.content {
                     PaneContent::Curves { .. } => {
-                        "curves are drawn on a Transfer, Spectrum / RTA or Sweep / distortion \
-                         pane only"
+                        "curves are drawn on a Transfer, Spectrum / RTA, Sweep / distortion or \
+                         Dynamics pane only"
                     }
                     PaneContent::Meter { .. } => "only an SPL pane shows a meter",
                     PaneContent::Inputs { .. } | PaneContent::Pair { .. } => {
@@ -704,7 +715,8 @@ mod tests {
         assert_eq!(
             programme(PaneContent::group(MeasId(1))).check(),
             Err(
-                "curves are drawn on a Transfer, Spectrum / RTA or Sweep / distortion pane only"
+                "curves are drawn on a Transfer, Spectrum / RTA, Sweep / distortion or Dynamics pane \
+                 only"
                     .into()
             )
         );
@@ -763,12 +775,14 @@ mod tests {
                 Err("only an SPL pane shows a meter"),
             ),
             (PaneKind::Distortion, PaneContent::group(MeasId(4)), Ok(())),
+            (PaneKind::Dynamics, PaneContent::group(MeasId(4)), Ok(())),
             (PaneKind::Spectrum, PaneContent::group(MeasId(4)), Ok(())),
             (
                 PaneKind::Spl,
                 PaneContent::group(MeasId(4)),
                 Err(
-                    "curves are drawn on a Transfer, Spectrum / RTA or Sweep / distortion pane only",
+                    "curves are drawn on a Transfer, Spectrum / RTA, Sweep / distortion or Dynamics pane \
+                 only",
                 ),
             ),
         ];
@@ -897,6 +911,28 @@ mod tests {
         let before = l.clone();
         assert!(l.check().is_err());
         assert_eq!(l, before);
+    }
+
+    #[test]
+    fn a_dynamics_pane_keeps_curve_a_and_a_finite_step() {
+        let mut l = crate::samples::pane_layout();
+        assert_eq!(l.check(), Ok(()));
+        let p = &mut l.panes_mut()[0];
+        p.dynamics.a = DynamicsSide::Off;
+        assert!(l.check().is_err_and(|e| e.contains("curve A")));
+        let p = &mut l.panes_mut()[0];
+        p.dynamics.a = DynamicsSide::Default;
+        p.dynamics.step = Some(DynamicsStepPick {
+            level: crate::units::Dbfs(f64::NAN),
+            burst: crate::units::Seconds(1.0),
+        });
+        assert!(l.check().is_err_and(|e| e.contains("step")));
+        let p = &mut l.panes_mut()[0];
+        p.dynamics.step = Some(DynamicsStepPick {
+            level: crate::units::Dbfs(-8.0),
+            burst: crate::units::Seconds(0.0),
+        });
+        assert!(l.check().is_err());
     }
 
     #[test]
