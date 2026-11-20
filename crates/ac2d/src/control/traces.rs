@@ -10,10 +10,10 @@ use ac2_core::mic_curve::Correction;
 use ac2_proto::event::{Change, Patch};
 use ac2_proto::frame::{Frame, MathState, OperandStatus};
 use ac2_proto::model::{
-    AverageMethod, CalState, DelayReference, ExportFormat, ImportFormat, ImportRole, IrImport,
-    MathConfig, MathExpr, MeasKind, Measurement, MicCurveId, MicCurveRef, MicState, NamedOperand,
-    Operand, Smoothing, SmoothingMode, SweepData, TargetCurve, TraceEdit, TraceIr, TraceKind,
-    TraceMeta, TraceMicCurve, TraceOwner, TracePosition, TraceSource, TransferIr,
+    AverageMethod, CalState, DelayReference, DynamicsData, ExportFormat, ImportFormat, ImportRole,
+    IrImport, MathConfig, MathExpr, MeasKind, Measurement, MicCurveId, MicCurveRef, MicState,
+    NamedOperand, Operand, Smoothing, SmoothingMode, SweepData, TargetCurve, TraceEdit, TraceIr,
+    TraceKind, TraceMeta, TraceMicCurve, TraceOwner, TracePosition, TraceSource, TransferIr,
 };
 use ac2_proto::units::{Hz, MeasId, Seconds, TraceId, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, FrameData, GridDef, ProtoError, ReplyBody};
@@ -36,6 +36,8 @@ pub(crate) struct TraceStore {
     irs: BTreeMap<TraceId, TransferIr>,
     /// Mic curves applied after capture.
     mic_curves: BTreeMap<TraceId, Correction>,
+    /// Step tables and envelopes of dynamics traces.
+    dynamics: BTreeMap<TraceId, Box<DynamicsData>>,
     next_id: u32,
 }
 
@@ -88,8 +90,21 @@ impl TraceStore {
         }
     }
 
+    /// A dynamics trace's step table and envelopes, set after its columns.
+    pub(crate) fn set_dynamics(&mut self, id: TraceId, d: Option<Box<DynamicsData>>) {
+        match d {
+            Some(d) => {
+                self.dynamics.insert(id, d);
+            }
+            None => {
+                self.dynamics.remove(&id);
+            }
+        }
+    }
+
     pub(crate) fn remove(&mut self, id: TraceId) {
         self.data.remove(&id);
+        self.dynamics.remove(&id);
         self.sweeps.remove(&id);
         self.irs.remove(&id);
         self.mic_curves.remove(&id);
@@ -97,6 +112,7 @@ impl TraceStore {
 
     pub(crate) fn clear(&mut self) {
         self.data.clear();
+        self.dynamics.clear();
         self.sweeps.clear();
         self.irs.clear();
         self.mic_curves.clear();
@@ -104,6 +120,11 @@ impl TraceStore {
 
     pub(crate) fn get(&self, id: TraceId) -> Option<&(GridDef, Columns)> {
         self.data.get(&id)
+    }
+
+    /// A dynamics trace's step table and envelopes.
+    pub(crate) fn dynamics(&self, id: TraceId) -> Option<&DynamicsData> {
+        self.dynamics.get(&id).map(|d| &**d)
     }
 
     /// A sweep trace's distortion, impulse response and room parameters.
@@ -182,6 +203,7 @@ impl Control {
             grid,
             columns,
             sweep: self.traces.sweeps.get(&id).cloned(),
+            dynamics: self.traces.dynamics.get(&id).cloned(),
             ir: self.traces.irs.get(&id).cloned(),
             mic_curve: self.traces.mic_curves.get(&id).cloned(),
         })
@@ -642,6 +664,7 @@ impl Control {
             superseded: false,
         };
         tracing::info!("trace {id} imported ({} rows)", imp.rows);
+        self.traces.set_dynamics(id, imp.dynamics);
         Ok(self.add_trace(t, imp.grid, imp.columns, imp.sweep, imp.ir, None))
     }
 

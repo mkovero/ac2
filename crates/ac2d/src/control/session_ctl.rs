@@ -84,7 +84,7 @@ impl Control {
     /// Stops what runs on a stream about to close: the sweep, the jobs, the generator source
     /// and the published frames of the session.
     pub(super) fn wind_down(&mut self, recording: ac2_proto::model::RecordingEnd) {
-        self.abort_sweep(SweepFailure::SessionClosed, "the audio I/O reopened");
+        self.abort_runs(SweepFailure::SessionClosed, "the audio I/O reopened");
         self.end_recording(recording);
         self.stop_all_jobs();
         self.out.level = None;
@@ -143,7 +143,7 @@ impl Control {
     }
 
     pub(super) fn session_close(&mut self, client: &Peer) {
-        self.abort_sweep(SweepFailure::SessionClosed, "the audio I/O closed");
+        self.abort_runs(SweepFailure::SessionClosed, "the audio I/O closed");
         self.end_recording(ac2_proto::model::RecordingEnd::SessionClosed);
         self.stop_sim(ac2_proto::model::SimCancel::SessionClosed);
         self.stop_all_jobs();

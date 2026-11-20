@@ -51,6 +51,7 @@ mod autosave;
 mod cal;
 mod clocks;
 mod cross_rig;
+mod dynamics;
 mod eq;
 mod execute;
 mod file_jobs;
@@ -176,6 +177,16 @@ pub(crate) enum ControlMsg {
     SweepAnalysed {
         id: SweepId,
         result: Vec<Result<SweepAnalysis, SweepError>>,
+    },
+    /// Dynamics run `id` moved on in its programme.
+    DynamicsProgress {
+        id: ac2_proto::units::DynamicsId,
+        phase: ac2_core::dynamics::Phase,
+    },
+    /// Dynamics run `id` has its whole analysis, or ended without one.
+    DynamicsDone {
+        id: ac2_proto::units::DynamicsId,
+        result: Box<Result<ac2_core::dynamics::DynamicsResult, jobs::dynamics::Failure>>,
     },
     /// The autosave write finished: the time it was written, or why it failed.
     Autosaved { result: Box<Result<WallNs, String>> },
@@ -425,6 +436,7 @@ pub(crate) struct Control {
     damaged: Vec<crate::damage::Damage>,
     traces: traces::TraceStore,
     sweep: Option<ActiveSweep>,
+    dynamics: Option<dynamics::ActiveDynamics>,
     /// Walk measurements of a loaded session whose first run still owes the restart a
     /// move gives: their delay and average belong to the mic's placement when it was saved.
     walk_resume: HashSet<MeasId>,
@@ -603,6 +615,7 @@ impl Control {
             },
             traces: traces::TraceStore::default(),
             sweep: None,
+            dynamics: None,
             walk_resume: HashSet::new(),
             autosave,
             restore,
@@ -655,6 +668,7 @@ impl Control {
             }
             self.check_lease(now);
             self.check_muted();
+            self.check_dynamics_deadline(now);
             if now >= self.ka.due {
                 self.send_ka();
                 self.ka.due = now + self.s.keepalive;
@@ -799,6 +813,8 @@ impl Control {
                 Ok(ControlMsg::SweepProgress { id, repeat }) => self.sweep_progress(id, repeat),
                 Ok(ControlMsg::SweepRecorded { id, result }) => self.sweep_recorded(id, *result),
                 Ok(ControlMsg::SweepAnalysed { id, result }) => self.sweep_analysed(id, result),
+                Ok(ControlMsg::DynamicsProgress { id, phase }) => self.dynamics_progress(id, phase),
+                Ok(ControlMsg::DynamicsDone { id, result }) => self.dynamics_done(id, *result),
                 Ok(ControlMsg::Autosaved { result }) => self.autosaved(*result),
                 Ok(ControlMsg::LogWrite { meas, log, failure }) => {
                     self.log_write(meas, log, failure);
@@ -865,7 +881,7 @@ impl Control {
             tracing::warn!("systemd notification failed: {e}");
         }
         self.osc_shutdown();
-        self.abort_sweep(SweepFailure::Stopped, "the daemon is shutting down");
+        self.abort_runs(SweepFailure::Stopped, "the daemon is shutting down");
         self.shutdown_sim();
         self.end_recording(ac2_proto::model::RecordingEnd::DaemonShutdown);
         self.close_preview();

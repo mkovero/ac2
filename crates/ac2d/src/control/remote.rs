@@ -125,7 +125,7 @@ pub(super) fn kind_inputs(kind: &MeasKind) -> Vec<u16> {
         MeasKind::Rta { config } => vec![config.input],
         MeasKind::Spl { config } => vec![config.input],
         MeasKind::Transfer { config } => vec![config.reference_input, config.measurement_input],
-        MeasKind::Math { .. } | MeasKind::Sweep { .. } => Vec::new(),
+        MeasKind::Math { .. } | MeasKind::Sweep { .. } | MeasKind::Dynamics { .. } => Vec::new(),
     }
 }
 

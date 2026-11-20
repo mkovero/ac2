@@ -441,6 +441,7 @@ impl Control {
             | Change::Clocks(_)
             | Change::Remote(_)
             | Change::Sweep(_)
+            | Change::Dynamics(_)
             | Change::Autosave(_)
             | Change::Recording(_)
             | Change::Working(_)

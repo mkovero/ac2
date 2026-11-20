@@ -29,6 +29,7 @@ use crate::io::Interest;
 use crate::outbox::{FrameTx, Outbox};
 
 pub(crate) mod cross_rig;
+pub(crate) mod dynamics;
 pub(crate) mod finder;
 mod loudness;
 pub(crate) mod math;

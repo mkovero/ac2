@@ -498,7 +498,7 @@ impl Control {
         let config = self.config_after_load(&data.remote_inputs)?;
 
         // Disarmed, no owner; a sweep run in progress is discarded.
-        self.abort_sweep(SweepFailure::Stopped, "a session was loaded");
+        self.abort_runs(SweepFailure::Stopped, "a session was loaded");
         self.stop_output();
         self.out.lease = None;
         let mut g = self.store.state().generator.clone();
@@ -574,6 +574,7 @@ impl Control {
             self.register_grid(t.grid.clone());
             self.traces
                 .insert(t.meta.id, t.grid, t.columns, t.sweep, t.ir, t.mic_curve);
+            self.traces.set_dynamics(t.meta.id, t.dynamics);
             self.commit(Change::Trace(Patch::Set(t.meta)));
         }
         let fs = self.session.as_ref().map(|r| f64::from(r.sample_rate));

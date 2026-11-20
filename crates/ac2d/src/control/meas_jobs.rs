@@ -69,7 +69,7 @@ impl Control {
                 // Its operands' mic curves are in their results already.
                 MeasKind::Math { .. } => continue,
                 // Runs only when fired; each run reads the input's mic then.
-                MeasKind::Sweep { .. } => continue,
+                MeasKind::Sweep { .. } | MeasKind::Dynamics { .. } => continue,
             };
             job.send(JobCmd::Cal(Box::new(self.input_cal(rt, input))));
         }
@@ -184,7 +184,7 @@ impl Control {
                     .map_err(invalid)?;
                 (Box::new(a), None)
             }
-            MeasKind::Sweep { .. } => return Ok(None),
+            MeasKind::Sweep { .. } | MeasKind::Dynamics { .. } => return Ok(None),
             MeasKind::Math { config } => {
                 let (grids, stored) = math.ok_or_else(|| internal("math trace without setup"))?;
                 let shown = grids

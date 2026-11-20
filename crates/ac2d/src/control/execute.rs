@@ -84,7 +84,7 @@ impl Control {
             }
             Command::GenRelease { lease_token } => {
                 self.lease_check(peer, lease_token)?;
-                self.abort_sweep(SweepFailure::Stopped, "the stimulus lease was released");
+                self.abort_runs(SweepFailure::Stopped, "the stimulus lease was released");
                 self.stop_output();
                 self.out.lease = None;
                 let mut g = self.store.state().generator.clone();
@@ -136,7 +136,7 @@ impl Control {
             ),
             Command::LevelsReset { channels } => self.levels_reset(channels),
             Command::GenStop => {
-                self.abort_sweep(SweepFailure::Stopped, "the stimulus was stopped");
+                self.abort_runs(SweepFailure::Stopped, "the stimulus was stopped");
                 self.stop_output();
                 let mut g = self.store.state().generator.clone();
                 g.armed = false;
@@ -348,6 +348,12 @@ impl Control {
                 meas,
                 name,
             } => self.sweep_run(peer, lease_token, meas, name),
+            Command::DynamicsRun {
+                lease_token,
+                meas,
+                name,
+                rests_from,
+            } => self.dynamics_run(peer, lease_token, meas, name, rests_from),
 
             Command::StateSnapshot => Ok(ReplyBody::Snapshot(Box::new(
                 self.store.snapshot(self.s.incarnation),

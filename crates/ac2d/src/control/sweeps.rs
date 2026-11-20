@@ -24,8 +24,8 @@ use super::{
 use crate::route::Peer;
 use crate::sweep;
 use crate::util::{internal, invalid, refused, wall_ns};
-use ac2_proto::model::Signal;
 use ac2_proto::model::TraceOwner;
+use ac2_proto::model::{DynamicsFailure, Signal};
 use ac2_proto::units::MeasId;
 use ac2_traces::meta;
 
@@ -331,9 +331,16 @@ impl Control {
             .unwrap_or_else(|| format!("Input {}", i + 1))
     }
 
-    /// Ends the run in progress without a result: its recorder stops, its audio is
-    /// discarded. The caller stops the output itself (it is stopping it anyway).
-    pub(super) fn abort_sweep(&mut self, reason: SweepFailure, msg: &str) {
+    /// Ends the sweep or dynamics run in progress without a result: its recorder stops,
+    /// its audio is discarded. The caller stops the output itself (it is stopping it
+    /// anyway).
+    pub(super) fn abort_runs(&mut self, reason: SweepFailure, msg: &str) {
+        let dynamics = match reason {
+            SweepFailure::LeaseExpired => DynamicsFailure::LeaseExpired,
+            SweepFailure::SessionClosed => DynamicsFailure::SessionClosed,
+            _ => DynamicsFailure::Stopped,
+        };
+        self.abort_dynamics(dynamics, msg);
         let Some(mut a) = self.sweep.take() else {
             return;
         };

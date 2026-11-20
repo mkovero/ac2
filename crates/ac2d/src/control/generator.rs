@@ -136,7 +136,7 @@ impl Control {
                 "stimulus lease of {} expired: output muted",
                 owner.as_ref().map_or_else(|| "?".to_owned(), describe)
             );
-            self.abort_sweep(SweepFailure::LeaseExpired, "the stimulus lease expired");
+            self.abort_runs(SweepFailure::LeaseExpired, "the stimulus lease expired");
             self.stop_output();
             let mut g = self.store.state().generator.clone();
             g.owner = None;
@@ -160,7 +160,7 @@ impl Control {
             "stimulus lease of {} expired: output muted",
             owner.as_ref().map_or_else(|| "?".to_owned(), describe)
         );
-        self.abort_sweep(SweepFailure::LeaseExpired, "the stimulus lease expired");
+        self.abort_runs(SweepFailure::LeaseExpired, "the stimulus lease expired");
         self.stop_output();
         let mut g = self.store.state().generator.clone();
         g.owner = None;
@@ -202,7 +202,7 @@ impl Control {
             } else {
                 "the stimulus lease was acquired again"
             };
-            self.abort_sweep(SweepFailure::Stopped, why);
+            self.abort_runs(SweepFailure::Stopped, why);
             self.stop_output();
             g.armed = false;
             g.firing = false;
@@ -272,6 +272,11 @@ impl Control {
         {
             return Err(refused(
                 "a sweep is playing: stop it (gen.stop) or let it finish",
+            ));
+        }
+        if self.dynamics.as_ref().is_some_and(|d| d.run.active()) {
+            return Err(refused(
+                "a dynamics run is playing: stop it (gen.stop) or let it finish",
             ));
         }
 

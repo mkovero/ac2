@@ -157,6 +157,7 @@ fn trace_domain(kind: TraceKind) -> Option<MathDomain> {
         TraceKind::Transfer | TraceKind::Sweep | TraceKind::Target => Some(MathDomain::Transfer),
         TraceKind::Spectrum { .. } => Some(MathDomain::Spectrum),
         TraceKind::Rta { .. } => Some(MathDomain::Rta),
+        TraceKind::Dynamics => None,
     }
 }
 

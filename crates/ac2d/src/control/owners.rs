@@ -108,6 +108,9 @@ impl Control {
             .filter_map(|t| match &t.source {
                 TraceSource::Sweep {
                     meas: m, number, ..
+                }
+                | TraceSource::Dynamics {
+                    meas: m, number, ..
                 } if *m == meas => Some(*number),
                 _ => None,
             })
@@ -124,7 +127,9 @@ impl Control {
         what: OwnedTraces,
     ) -> Result<ReplyBody, ProtoError> {
         let name = self.meas(meas)?.config.name.clone();
-        if self.sweep.as_ref().is_some_and(|s| s.run.meas == meas) {
+        if self.sweep.as_ref().is_some_and(|s| s.run.meas == meas)
+            || self.dynamics.as_ref().is_some_and(|d| d.run.meas == meas)
+        {
             return Err(refused(format!(
                 "a run of {name} is playing; stop it first"
             )));

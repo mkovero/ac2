@@ -104,11 +104,15 @@ impl Control {
             let sweep_above = self
                 .sweep
                 .as_ref()
-                .is_some_and(|s| s.run.active() && s.run.level.0 > new);
+                .is_some_and(|s| s.run.active() && s.run.level.0 > new)
+                || self
+                    .dynamics
+                    .as_ref()
+                    .is_some_and(|d| d.run.active() && d.run.bursts.iter().any(|b| b.0 > new));
             if sweep_above {
-                self.abort_sweep(
+                self.abort_runs(
                     SweepFailure::Stopped,
-                    "the system max level was lowered below the sweep's level",
+                    "the system max level was lowered below the run's level",
                 );
             }
             let above = g.settings.as_ref().is_some_and(|s| s.level.0 > new);

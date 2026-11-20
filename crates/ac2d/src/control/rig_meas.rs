@@ -271,6 +271,7 @@ impl Control {
             | Command::SplBandLogGet { .. }
             | Command::SplHistoryGet { .. }
             | Command::SweepRun { .. }
+            | Command::DynamicsRun { .. }
             | Command::StateSnapshot
             | Command::StateSince { .. }
             | Command::GridGet { .. }

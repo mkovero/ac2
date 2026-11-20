@@ -3,8 +3,8 @@
 use ac2_core::generator::GeneratorError;
 use ac2_proto::grid::GridDef;
 use ac2_proto::model::{
-    InputSetup, MeasConfig, MeasKind, MeasScope, Measurement, SpecAveraging, SpecResolution,
-    SpectrumConfig, SweepConfig,
+    DynamicsConfig, InputSetup, MeasConfig, MeasKind, MeasScope, Measurement, SpecAveraging,
+    SpecResolution, SpectrumConfig, SweepConfig,
 };
 use ac2_proto::units::{MeasId, Rev, Seconds};
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError};
@@ -213,6 +213,68 @@ pub(crate) fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
         }
         MeasKind::Math { config } => maths::validate(config)?,
         MeasKind::Sweep { config } => validate_sweep(config)?,
+        MeasKind::Dynamics { config } => validate_dynamics(config)?,
+    }
+    Ok(())
+}
+
+/// Checks of a dynamics measurement's settings that need no session (the carrier's period
+/// and the ceiling are checked at every run, at the session's rate).
+fn validate_dynamics(c: &DynamicsConfig) -> Result<(), ProtoError> {
+    let inv = |m: String| Err(invalid(m));
+    c.check_inputs().map_err(invalid)?;
+    if c.outputs.is_empty() {
+        return inv("no output channels".into());
+    }
+    for (i, o) in c.outputs.iter().enumerate() {
+        if c.outputs[..i].contains(o) {
+            return inv(format!("output {o} listed twice"));
+        }
+    }
+    if !(c.carrier.0.is_finite() && c.carrier.0 >= ac2_core::dynamics::MIN_CARRIER_HZ) {
+        return inv(format!(
+            "the carrier must be at least {} Hz",
+            ac2_core::dynamics::MIN_CARRIER_HZ
+        ));
+    }
+    if !(c.pilot.0.is_finite() && c.pilot.0 <= 0.0) {
+        return inv("the pilot must be a finite dBFS value ≤ 0".into());
+    }
+    let n = c.bursts.len();
+    if !(1..=ac2_core::dynamics::MAX_LEVELS).contains(&n) {
+        return inv(format!(
+            "1 … {} burst levels",
+            ac2_core::dynamics::MAX_LEVELS
+        ));
+    }
+    if c.bursts
+        .iter()
+        .any(|b| !(b.0.is_finite() && b.0 <= 0.0 && b.0 > c.pilot.0))
+    {
+        return inv("every burst level must be a finite dBFS value ≤ 0, above the pilot".into());
+    }
+    let n = c.durations.len();
+    if !(1..=ac2_core::dynamics::MAX_DURATIONS).contains(&n) {
+        return inv(format!(
+            "1 … {} burst lengths",
+            ac2_core::dynamics::MAX_DURATIONS
+        ));
+    }
+    let max = ac2_core::dynamics::MAX_BURST_SECONDS;
+    if c.durations
+        .iter()
+        .any(|d| !(d.0.is_finite() && d.0 > 0.0 && d.0 <= max))
+    {
+        return inv(format!(
+            "every burst lasts more than 0 s and at most {max} s"
+        ));
+    }
+    let (lo, hi) = (
+        ac2_core::dynamics::REST_MIN_SECONDS,
+        ac2_core::dynamics::REST_MAX_SECONDS,
+    );
+    if !(c.rest_max.0.is_finite() && (lo..=hi).contains(&c.rest_max.0)) {
+        return inv(format!("the longest rest is {lo} … {hi} s"));
     }
     Ok(())
 }

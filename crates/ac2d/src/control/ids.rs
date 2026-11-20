@@ -1,7 +1,7 @@
 //! The ids the control thread hands out: each kind counts on its own, and a number is
 //! read and stepped in one place so that no two things of a kind share one.
 
-use ac2_proto::units::{MeasId, SweepId, WalkId};
+use ac2_proto::units::{DynamicsId, MeasId, SweepId, WalkId};
 
 /// The next id of each kind.
 pub(super) struct Ids {
@@ -9,6 +9,7 @@ pub(super) struct Ids {
     meas: u32,
     token: u64,
     sweep: u32,
+    dynamics: u32,
     walk: u32,
 }
 
@@ -21,6 +22,7 @@ impl Ids {
             meas: first_meas,
             token: 1,
             sweep: 1,
+            dynamics: 1,
             walk: 1,
         }
     }
@@ -63,6 +65,13 @@ impl Ids {
     pub(super) fn sweep(&mut self) -> SweepId {
         let id = SweepId(self.sweep);
         self.sweep += 1;
+        id
+    }
+
+    /// An id for a new dynamics run.
+    pub(super) fn dynamics(&mut self) -> DynamicsId {
+        let id = DynamicsId(self.dynamics);
+        self.dynamics += 1;
         id
     }
 

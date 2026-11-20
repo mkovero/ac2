@@ -406,6 +406,7 @@ reply_kinds! {
     delay_finding: ReplyBody::DelayFinding(v) => v, ac2_proto::model::DelayFinding;
     trace: ReplyBody::Trace(v) => v, ac2_proto::model::TraceMeta;
     sweep: ReplyBody::Sweep(v) => v, ac2_proto::model::SweepRun;
+    dynamics: ReplyBody::Dynamics(v) => v, ac2_proto::model::DynamicsRun;
     traces: ReplyBody::Traces(v) => v, Vec<ac2_proto::model::TraceMeta>;
     trace_data: ReplyBody::TraceData(v) => *v, ac2_proto::model::TraceData;
     export: ReplyBody::Export { file_name, content } => (file_name, content), (String, ac2_proto::units::Blob);

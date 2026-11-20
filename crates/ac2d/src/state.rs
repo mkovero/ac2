@@ -71,6 +71,7 @@ impl Store {
                 },
                 remote: Default::default(),
                 sweep: None,
+                dynamics: None,
                 autosave: Autosave {
                     state: AutosaveState::Off,
                     saved_at: None,
@@ -241,6 +242,7 @@ pub(crate) fn apply(s: &mut State, c: &Change) {
         Change::Clocks(c) => s.clocks = c.clone(),
         Change::Remote(r) => s.remote = r.clone(),
         Change::Sweep(r) => s.sweep = Some(r.clone()),
+        Change::Dynamics(r) => s.dynamics = Some(r.clone()),
         Change::Autosave(a) => s.autosave = a.clone(),
         Change::Recording(r) => s.recording = Some(r.clone()),
         Change::Working(w) => s.working = w.clone(),
