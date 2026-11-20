@@ -2688,6 +2688,11 @@ no owner, a new session epoch, no audio I/O opened — logs what it restored, an
 on appending to the restored logs' files after their last whole line. An autosave of
 another session format version is renamed to `<dir>.v<N>`, an unreadable one to
 `<dir>.damaged` (a name taken gets the time appended), with a warning; neither is deleted.
+An autosave that reads but holds items `file.load` would refuse (a check added since they
+were written) costs only those items: each is taken out with what depended on it, kept as a
+session of its own in `<dir>.set-aside-<time>`, and reported in `rig.damaged_files` (kind
+`autosave`, the reason naming the item); a measurement's traces stay with owner `imported`,
+as `meas.delete` with `keep` leaves them. The rest is restored and written back without them.
 `--no-restore` starts empty and moves the autosave to `<dir>.unrestored`.
 
 Beside the manifest the autosave keeps `working.json` (`{origin, saved_hash, saved_at}`),

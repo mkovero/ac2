@@ -356,15 +356,8 @@ impl Control {
     /// Prepares a session about to replace the working one: refuses a rig meter in it and
     /// renumbers the measurements whose ids rig meters hold.
     pub(super) fn prepare_load(&mut self, data: &mut SessionData) -> Result<(), ProtoError> {
-        if let Some(m) = data
-            .measurements
-            .iter()
-            .find(|m| m.config.scope == MeasScope::Rig)
-        {
-            return Err(invalid(format!(
-                "measurement {} is a rig meter: a session holds session measurements only",
-                m.id
-            )));
+        for m in &data.measurements {
+            check_session_scope(m)?;
         }
         let taken: BTreeSet<MeasId> = self.rig.meas.saved.iter().map(|m| m.id).collect();
         let map = remap_ids(data, &taken, &mut self.ids);
@@ -403,12 +396,12 @@ impl Control {
             remote_inputs: Vec::new(),
         };
         // The logs a load would refuse are not read back; the meters start new ones.
-        let mut grids = match super::files::check_session(&data) {
+        let mut grids = match super::load_check::check_session(&data) {
             Ok(g) => g,
             Err(e) => {
                 tracing::warn!("rig SPL meters' logs not read back: {}", e.msg);
                 data.spl_logs.clear();
-                super::files::check_session(&data).unwrap_or_default()
+                super::load_check::check_session(&data).unwrap_or_default()
             }
         };
         for l in data.spl_logs {
@@ -755,4 +748,15 @@ pub(super) fn remap_ids(
     let mut moved: Vec<_> = map.into_iter().collect();
     moved.sort();
     moved
+}
+
+/// A session holds session measurements only: the rig meters are the rig settings'.
+pub(super) fn check_session_scope(m: &SavedMeasurement) -> Result<(), ProtoError> {
+    if m.config.scope == MeasScope::Rig {
+        return Err(invalid(format!(
+            "measurement {} is a rig meter: a session holds session measurements only",
+            m.id
+        )));
+    }
+    Ok(())
 }

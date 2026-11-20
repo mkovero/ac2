@@ -3110,6 +3110,7 @@ Support/ac2` on macOS, `%APPDATA%\ac2\data` on Windows):
 | `autosave/` | the current autosave (a session directory); inside it `session.prev.json` is the one before, used should the newest be damaged |
 | `autosave.v<N>/` | an autosave of another session format, set aside at start, not deleted |
 | `autosave.damaged/` | an unreadable autosave, set aside |
+| `autosave.set-aside-<time>/` | the measurements (traces, logs, plans, walks) of a readable autosave this build refuses — a check added since they were saved — set aside on their own while the rest is restored |
 | `autosave.unrestored/` | what `ac2d --no-restore` did not load |
 | `autosave.replaced/` | what the last New or Open replaced with unsaved changes (**Recover previous**) |
 
@@ -3138,7 +3139,12 @@ read from it: the daemon starts as with no file. In `rig.json` a part that canno
 outputs, the system max level…) costs only that part: the rest is read, and the copy set
 aside keeps what was lost. An SPL log cut mid-row keeps every whole row and carries on
 after it (nothing is reported). A damaged trace or SPL log costs only itself (moved to
-`<autosave>.damaged-files/`). The app shows **FILE DAMAGED · what** until the daemon
+`<autosave>.damaged-files/`). So does a measurement (trace, SPL log, plan, walk) the autosave
+holds but this build refuses, say a setting a newer check no longer allows: it is kept as a
+session of its own in `<autosave>.set-aside-<time>/`, the reason names it (id and name), the
+rest of the session is restored, and the traces it owned stay, filed under no measurement
+(as **Delete, keep traces** leaves them). Whatever depended on it (a math trace computed from
+it, a walk with it) is set aside with it. The app shows **FILE DAMAGED · what** until the daemon
 restarts, and `ac2 status` prints a `damaged` line for each file with what was done.
 
 | Flag | Does |

@@ -18,6 +18,7 @@ use ac2_proto::model::{
 use ac2_proto::units::{MeasId, Seconds, TraceId, WalkId};
 use ac2_proto::{ProtoError, ReplyBody};
 
+use super::load_check::Item;
 use super::{Control, walk_steps, walk_sweep};
 use crate::jobs::JobCmd;
 use crate::util::{internal, invalid, missing, refused};
@@ -649,27 +650,39 @@ pub(super) fn check_walks(
     plans: &[PlanSpec],
     meas: &[MeasId],
 ) -> Result<(), ProtoError> {
-    for p in plans {
-        ac2_room::plan::validate(p).map_err(|e| invalid(format!("plan {}: {e}", p.name)))?;
-        if plans.iter().filter(|o| o.name == p.name).count() > 1 {
-            return Err(invalid(format!(
+    check_walk_items(walks, plans, meas).map_err(|(_, e)| e)
+}
+
+/// [`check_walks`], naming the plan or walk each refusal is about. Of two with one name or
+/// id the later is the refused one.
+pub(super) fn check_walk_items(
+    walks: &[WalkState],
+    plans: &[PlanSpec],
+    meas: &[MeasId],
+) -> Result<(), (Item, ProtoError)> {
+    for (i, p) in plans.iter().enumerate() {
+        let item = |e| (Item::Plan(i), e);
+        ac2_room::plan::validate(p).map_err(|e| item(invalid(format!("plan {}: {e}", p.name))))?;
+        if plans[..i].iter().any(|o| o.name == p.name) {
+            return Err(item(invalid(format!(
                 "plan {} appears twice in the session",
                 p.name
-            )));
+            ))));
         }
     }
-    for w in walks {
-        if walks.iter().filter(|o| o.id == w.id).count() > 1 {
-            return Err(invalid(format!(
+    for (i, w) in walks.iter().enumerate() {
+        let item = |e| (Item::Walk(i), e);
+        if walks[..i].iter().any(|o| o.id == w.id) {
+            return Err(item(invalid(format!(
                 "walk {} appears twice in the session",
                 w.id
-            )));
+            ))));
         }
         if !plans.iter().any(|p| p.name == w.plan) {
-            return Err(invalid(format!(
+            return Err(item(invalid(format!(
                 "walk {} walks plan {}, which the session does not hold",
                 w.id, w.plan
-            )));
+            ))));
         }
         if let Some(m) = w
             .meas()
@@ -677,13 +690,13 @@ pub(super) fn check_walks(
             .chain(&w.average)
             .find(|m| !meas.contains(m))
         {
-            return Err(invalid(format!(
+            return Err(item(invalid(format!(
                 "walk {} names measurement {m}, which the session does not hold",
                 w.id
-            )));
+            ))));
         }
-        walk_steps::check(w)?;
-        check_walk_name(&w.name)?;
+        walk_steps::check(w).map_err(item)?;
+        check_walk_name(&w.name).map_err(item)?;
         let specs: Vec<WalkPointSpec> = w
             .points
             .iter()
@@ -692,7 +705,7 @@ pub(super) fn check_walks(
                 at: p.at,
             })
             .collect();
-        check_points(&specs)?;
+        check_points(&specs).map_err(item)?;
     }
     Ok(())
 }

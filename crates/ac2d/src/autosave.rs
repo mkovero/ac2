@@ -9,6 +9,7 @@
 //! <dir>.v<N>                an autosave of session format N that this build cannot read, set aside
 //! <dir>.damaged-<time>      an unreadable autosave, set aside
 //! <dir>.damaged-files/      trace and log files an autosave named but could not read
+//! <dir>.set-aside-<time>    the items of a readable autosave this build refuses, a session
 //! <dir>.unrestored          the autosave a `--no-restore` start did not load
 //! ```
 //!
@@ -241,7 +242,9 @@ fn note_torn_tails(dir: &Path, logs: &[SplLogOnDisk]) {
 /// The autosave in `dir`: its current manifest, else the previous one. An autosave of
 /// another session format version is set aside, as is an unreadable one; neither is
 /// deleted. A trace or log file that cannot be read costs only itself (moved out by
-/// [`set_dropped_aside`]). What was damaged comes back beside the autosave.
+/// [`set_dropped_aside`]). What was damaged comes back beside the autosave. An item that
+/// reads but that a load refuses is the control thread's to take out (its `salvage`, then
+/// [`keep_set_aside`]).
 pub(crate) fn restore(dir: &Path) -> (Option<Restored>, Vec<Damage>) {
     let (cur, prev) = (dir.join(MANIFEST), dir.join(PREV_MANIFEST));
     if !cur.exists() && !prev.exists() {
@@ -280,6 +283,26 @@ pub(crate) fn restore(dir: &Path) -> (Option<Restored>, Vec<Damage>) {
                 None,
                 vec![whole(&e, dir, to, "started with an empty session")],
             )
+        }
+    }
+}
+
+/// Writes the items a restore took out of the autosave in `dir` (`aside`) as a session of
+/// their own beside it, `<dir>.set-aside-<time>`: the next write leaves them out of the
+/// autosave, and there they stay to inspect or load by path. Returns where.
+pub(crate) fn keep_set_aside(dir: &Path, aside: &SessionData) -> Option<PathBuf> {
+    let t = crate::util::wall_ns() / 1_000_000_000;
+    let mut to = sibling(dir, "", &format!(".set-aside-{t}"));
+    let mut n = 2;
+    while to.exists() {
+        to = sibling(dir, "", &format!(".set-aside-{t}-{n}"));
+        n += 1;
+    }
+    match session::save(&to, aside) {
+        Ok(_) => Some(to),
+        Err(e) => {
+            tracing::warn!("autosave: cannot keep the items set aside: {e}");
+            None
         }
     }
 }
@@ -414,9 +437,10 @@ impl Autosaver {
         }
     }
 
-    /// `fp` is now on disk (a restore), its SPL logs `logs`.
-    pub(crate) fn restored(&mut self, fp: Fingerprint, logs: Vec<LogSpec>) {
-        self.on_disk = Some(fp);
+    /// A restore: `fp` is on disk (`None`: what was restored is not what is on disk, items
+    /// having been set aside, and is written next), its SPL logs `logs`.
+    pub(crate) fn restored(&mut self, fp: Option<Fingerprint>, logs: Vec<LogSpec>) {
+        self.on_disk = fp;
         self.dirty = None;
         self.writer.send(Job::Logs(logs));
     }

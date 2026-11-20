@@ -548,10 +548,161 @@ fn slow_spl_log_survives_a_restart() {
     assert_eq!(rows as u64, total);
 }
 
-/// An autosave whose transfer delay the live commands would refuse is not restored: it is
-/// set aside as damaged and the daemon starts empty.
+fn read_json(p: &Path) -> serde_json::Value {
+    serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap()
+}
+
+fn write_json(p: &Path, v: &serde_json::Value) {
+    std::fs::write(p, serde_json::to_string_pretty(v).unwrap()).unwrap();
+}
+
+/// The first value under `key` anywhere in `v`.
+fn find_mut<'a>(v: &'a mut serde_json::Value, key: &str) -> Option<&'a mut serde_json::Value> {
+    match v {
+        serde_json::Value::Object(m) => {
+            if m.contains_key(key) {
+                return m.get_mut(key);
+            }
+            m.values_mut().find_map(|x| find_mut(x, key))
+        }
+        serde_json::Value::Array(a) => a.iter_mut().find_map(|x| find_mut(x, key)),
+        _ => None,
+    }
+}
+
+/// The directories beside the autosave whose names start with `prefix`.
+fn beside(dir: &Path, prefix: &str) -> Vec<PathBuf> {
+    std::fs::read_dir(dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_name().to_string_lossy().starts_with(prefix))
+        .map(|e| e.path())
+        .collect()
+}
+
+/// A measurement the autosave holds that this build refuses (a dynamics burst shorter than
+/// the 3 carrier periods a check added since requires) costs only itself: the other
+/// measurements and their traces are restored, the refused one is reported by id, name and
+/// reason and kept as a session of its own beside the autosave, and the trace it owned stays,
+/// filed under no measurement. The next write leaves it out, so the next start finds nothing
+/// to set aside.
 #[test]
-fn an_autosave_with_a_delay_out_of_range_is_set_aside() {
+fn a_refused_measurement_costs_only_itself() {
+    let dir = tempfile::tempdir().unwrap();
+    let (h, backend) = start("autosave-item-seed", dir.path(), true);
+    let (mut c, _sub) = connect(&h, &[b"evt"]);
+    let kept = capture(&h, &backend, &mut c);
+    let kept_data = trace_data(&mut c, kept.id);
+    let orphan = c.trace(Command::TraceCapture {
+        meas: MeasId(1),
+        name: "orphan".into(),
+        slot: Some(2),
+    });
+    let vca = c.measurement(Command::MeasCreate {
+        config: MeasConfig {
+            scope: ac2_proto::model::MeasScope::Session,
+            name: "VCA".into(),
+            kind: MeasKind::Dynamics {
+                config: DynamicsConfig {
+                    reference_input: 0,
+                    measurement_inputs: vec![1],
+                    outputs: vec![0],
+                    carrier: Hz(100.0),
+                    onset: DynamicsOnset::Zero,
+                    pilot: Dbfs(-33.0),
+                    bursts: vec![Dbfs(-20.0)],
+                    durations: vec![Seconds(0.05), Seconds(0.1)],
+                    rest_max: Seconds(4.0),
+                },
+            },
+        },
+    });
+    let level = c.measurement(Command::MeasCreate {
+        config: spl("level", 1),
+    });
+    drop(c);
+    h.shutdown();
+
+    // A file this build wrote, but with a burst that today's check refuses, and the second
+    // trace filed under that measurement.
+    let m = dir.path().join("autosave/session.json");
+    let mut v = read_json(&m);
+    let meas = v["measurements"].as_array_mut().unwrap();
+    let saved = meas
+        .iter_mut()
+        .find(|x| x["id"] == serde_json::json!(vca.id.0))
+        .unwrap();
+    *find_mut(saved, "durations").unwrap() = serde_json::json!([0.003, 0.1]);
+    let traces = v["traces"].as_array_mut().unwrap();
+    let t = traces
+        .iter_mut()
+        .find(|x| x.to_string().contains("\"orphan\""))
+        .unwrap();
+    *find_mut(t, "owner").unwrap() = serde_json::json!({ "type": "meas", "meas": vca.id.0 });
+    write_json(&m, &v);
+
+    let (h, _backend) = start("autosave-item", dir.path(), true);
+    let (mut c, _sub) = connect(&h, &[b"evt"]);
+    let st = c.state();
+    let ids: Vec<MeasId> = st.measurements.iter().map(|m| m.id).collect();
+    assert_eq!(
+        ids,
+        [MeasId(1), level.id],
+        "the rest of the session is restored"
+    );
+    assert_eq!(st.traces.len(), 2);
+    let back = trace_data(&mut c, kept.id);
+    let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+    assert_eq!(bits(&back.mag_db), bits(&kept_data.mag_db));
+    assert_eq!(back.meta.edit, kept_data.meta.edit);
+    let o = st.traces.iter().find(|t| t.id == orphan.id).unwrap();
+    assert_eq!(
+        o.edit.owner,
+        TraceOwner::Imported,
+        "kept, as meas.delete keeps"
+    );
+    let damaged = &st.rig.damaged_files;
+    assert_eq!(damaged.len(), 1, "{damaged:?}");
+    let d = &damaged[0];
+    assert_eq!(d.kind, StateFile::Autosave);
+    assert!(
+        d.reason.contains(&format!("measurement {} (VCA)", vca.id))
+            && d.reason.contains("shorter than 3 carrier periods"),
+        "{}",
+        d.reason
+    );
+    let aside = PathBuf::from(d.set_aside_as.as_ref().unwrap());
+    assert_eq!(
+        beside(dir.path(), "autosave.set-aside-"),
+        std::slice::from_ref(&aside)
+    );
+    assert!(beside(dir.path(), "autosave.damaged").is_empty());
+    let kept_aside = ac2_traces::session::read_manifest(&aside).unwrap();
+    assert_eq!(kept_aside.measurements.len(), 1);
+    assert_eq!(kept_aside.measurements[0].id, vca.id);
+    drop(c);
+    h.shutdown();
+
+    let written = ac2_traces::session::read_manifest(&dir.path().join("autosave")).unwrap();
+    assert!(written.measurements.iter().all(|m| m.id != vca.id));
+    let (h, _backend) = start("autosave-item-again", dir.path(), true);
+    let (mut c, _sub) = connect(&h, &[b"evt"]);
+    let st = c.state();
+    assert!(
+        st.rig.damaged_files.is_empty(),
+        "{:?}",
+        st.rig.damaged_files
+    );
+    assert_eq!(st.measurements.len(), 2);
+    assert_eq!(beside(dir.path(), "autosave.set-aside-").len(), 1);
+    drop(c);
+    h.shutdown();
+}
+
+/// A transfer delay the live commands would refuse costs its measurement, set aside; the
+/// session it was the only measurement of starts empty.
+#[test]
+fn an_autosave_with_a_delay_out_of_range_sets_its_measurement_aside() {
     let dir = tempfile::tempdir().unwrap();
     let (h, _backend) = start("autosave-delay-seed", dir.path(), true);
     let (mut c, _sub) = connect(&h, &[b"evt"]);
@@ -561,22 +712,25 @@ fn an_autosave_with_a_delay_out_of_range_is_set_aside() {
     drop(c);
     h.shutdown();
     let m = dir.path().join("autosave/session.json");
-    let mut v: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&m).unwrap()).unwrap();
+    let mut v = read_json(&m);
     v["measurements"][0]["delay"] =
         serde_json::json!({ "applied": 1e12, "nudged": 0.0, "tracking": false });
-    std::fs::write(&m, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+    write_json(&m, &v);
 
     let (h, _backend) = start("autosave-delay", dir.path(), true);
     let (mut c, _sub) = connect(&h, &[b"evt"]);
-    assert!(c.state().measurements.is_empty());
-    let aside = std::fs::read_dir(dir.path())
-        .unwrap()
-        .filter_map(Result::ok)
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| n.starts_with("autosave.damaged"))
-        .count();
-    assert_eq!(aside, 1, "the refused autosave is set aside");
+    let st = c.state();
+    assert!(st.measurements.is_empty());
+    assert_eq!(st.rig.damaged_files.len(), 1);
+    assert!(
+        st.rig.damaged_files[0]
+            .reason
+            .contains("measurement 1 (tf)"),
+        "{}",
+        st.rig.damaged_files[0].reason
+    );
+    assert_eq!(beside(dir.path(), "autosave.set-aside-").len(), 1);
+    assert!(beside(dir.path(), "autosave.damaged").is_empty());
     drop(c);
     h.shutdown();
 }

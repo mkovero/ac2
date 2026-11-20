@@ -60,6 +60,7 @@ mod generator;
 mod ids;
 mod leq;
 mod levels;
+mod load_check;
 mod maths;
 mod meas_jobs;
 pub(crate) mod network;

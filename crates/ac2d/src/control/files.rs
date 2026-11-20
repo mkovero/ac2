@@ -7,11 +7,9 @@
 //! traces: a trace captured in another run must never look like it shares the live time
 //! base just because the epoch counters happen to match.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use ac2_proto::event::{Change, Patch};
-use ac2_proto::grid::GridDef;
 use ac2_proto::model::{
     DelayState, GenAction, ImportFormat, ImportRole, MeasKind, MeasScope, Measurement, RemoteInput,
     Salvage, SalvageRefusal, Session, SessionConfig, SessionFile, SessionOrigin, SessionRef,
@@ -19,13 +17,13 @@ use ac2_proto::model::{
 };
 use ac2_proto::units::{Db, MeasId, Rev, Seconds, SessionEpoch, TransferId, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, ProtoError, ReplyBody};
-use ac2_traces::meta;
 use ac2_traces::session::{
     self, Manifest, SavedDelay, SavedMeasurement, Session as SessionData, SessionError,
 };
 
 use super::file_jobs::{FileDone, Pending, ReplaceFrom, ReplaceRead, Work};
-use super::{Control, check_delay, delay_samples, maths, static_grid, validate_meas};
+use super::load_check::check_session;
+use super::{Control, delay_samples};
 use crate::route::Peer;
 use crate::util::{internal, invalid, missing, perr, perr_detail, refused, wall_ns};
 
@@ -654,162 +652,6 @@ impl Control {
         self.prune_layouts();
         Ok(epoch)
     }
-}
-
-/// Checks `data` before a load replaces anything with it: everything the live commands
-/// would refuse is refused here too. Returns the grid of each measurement that has one before
-/// a session runs; a transfer math trace's is its operands' (checked against the loaded
-/// measurements and traces).
-pub(super) fn check_session(data: &SessionData) -> Result<HashMap<MeasId, GridDef>, ProtoError> {
-    let mut grids: HashMap<MeasId, GridDef> = HashMap::new();
-    for sm in &data.measurements {
-        validate_meas(&sm.config)?;
-        // A saved delay meets the limits `delay.set` and `delay.nudge` enforce.
-        if let Some(d) = &sm.delay {
-            check_delay(&format!("measurement {} saved delay", sm.id), d.applied)?;
-            check_delay(&format!("measurement {} saved nudge", sm.id), d.nudged)?;
-        }
-        if data.measurements.iter().filter(|o| o.id == sm.id).count() > 1 {
-            return Err(invalid(format!(
-                "measurement {} appears twice in the session",
-                sm.id
-            )));
-        }
-        let grid = match &sm.config.kind {
-            MeasKind::Math { config } => {
-                let meas = |id| {
-                    data.measurements
-                        .iter()
-                        .find(|o: &&SavedMeasurement| o.id == id)
-                        .map(|o| (o.config.name.as_str(), &o.config.kind))
-                };
-                let trace = |id| {
-                    data.traces
-                        .iter()
-                        .find(|t: &&ac2_traces::StoredTrace| t.meta.id == id)
-                        .map(|t| (&t.meta, t.grid.clone()))
-                };
-                let eq = |id, set| {
-                    data.measurements
-                        .iter()
-                        .any(|o: &SavedMeasurement| o.id == id && o.eq.iter().any(|s| s.id == set))
-                };
-                maths::check_operands(
-                    Some(sm.id),
-                    config,
-                    &maths::Lookup {
-                        meas: &meas,
-                        trace: &trace,
-                        eq: &eq,
-                        epoch: None,
-                    },
-                )?
-            }
-            k => static_grid(k),
-        };
-        if let Some(g) = grid {
-            grids.insert(sm.id, g);
-        }
-    }
-    // EQ sets: ids unique in the session, each curve one of its traces.
-    let mut set_ids = std::collections::HashSet::new();
-    for sm in &data.measurements {
-        for s in &sm.eq {
-            if !set_ids.insert(s.id) {
-                return Err(invalid(format!(
-                    "EQ set {} appears twice in the session",
-                    s.id.0
-                )));
-            }
-            if s.body.sections.len() > ac2_proto::model::EqSet::MAX_SECTIONS
-                || !data.traces.iter().any(|t| t.meta.id == s.trace)
-            {
-                return Err(invalid(format!(
-                    "EQ set {} of measurement {} is not one ac2d keeps",
-                    s.id.0, sm.id
-                )));
-            }
-        }
-    }
-    // Every owner is a measurement of the session that can own (not a math trace).
-    let owner_ok = |o: TraceOwner| match o.meas() {
-        None => true,
-        Some(id) => data
-            .measurements
-            .iter()
-            .any(|m| m.id == id && !matches!(m.config.kind, MeasKind::Math { .. })),
-    };
-    let owners = data
-        .traces
-        .iter()
-        .map(|t| (format!("trace {}", t.meta.id), t.meta.edit.owner))
-        .chain(
-            data.measurements
-                .iter()
-                .filter_map(|m| match &m.config.kind {
-                    MeasKind::Math { config } => {
-                        Some((format!("math trace {}", m.id), config.owner))
-                    }
-                    _ => None,
-                }),
-        );
-    for (what, owner) in owners {
-        if !owner_ok(owner) {
-            return Err(invalid(format!(
-                "{what} is filed under a measurement the session does not hold"
-            )));
-        }
-    }
-    // An SPL log belongs to an SPL meter of the session, one log each, and holds rows the
-    // meter could have written: a log is the record of a meter, never kept without one.
-    for l in &data.spl_logs {
-        let id = l.info.meas;
-        match data.measurements.iter().find(|m| m.id == id) {
-            None => {
-                return Err(invalid(format!(
-                    "SPL log of measurement {id}, which the session does not hold"
-                )));
-            }
-            Some(m) if !matches!(m.config.kind, MeasKind::Spl { .. }) => {
-                return Err(invalid(format!(
-                    "SPL log of measurement {id}, which is not an SPL meter"
-                )));
-            }
-            Some(_) => {}
-        }
-        if data.spl_logs.iter().filter(|o| o.info.meas == id).count() > 1 {
-            return Err(invalid(format!("measurement {id} has two SPL logs")));
-        }
-        let row =
-            |i: usize, e: &str| invalid(format!("SPL log of measurement {id}, row {}: {e}", i + 1));
-        for (i, r) in l.rows.iter().enumerate() {
-            ac2_proto::spl_log::check_row(r).map_err(|e| row(i, e))?;
-        }
-        for (i, r) in l.bands.iter().enumerate() {
-            ac2_traces::band_log::check_row(r).map_err(|e| row(i, e))?;
-        }
-    }
-    for t in &data.traces {
-        // Data a crafted file could hold that no capture produces (columns off the grid,
-        // non-finite values, an unbounded impulse response).
-        ac2_traces::check::trace(t).map_err(|e| invalid(format!("trace {}: {e}", t.meta.id)))?;
-        // A saved edit meets the limits `trace.update` enforces.
-        meta::check_values(&t.meta.edit)
-            .map_err(|e| invalid(format!("trace {}: {e}", t.meta.id)))?;
-        if data
-            .traces
-            .iter()
-            .filter(|o| o.meta.id == t.meta.id)
-            .count()
-            > 1
-        {
-            return Err(invalid(format!(
-                "trace {} appears twice in the session",
-                t.meta.id
-            )));
-        }
-    }
-    Ok(grids)
 }
 
 /// What a replace reads its new working state from, on the worker.

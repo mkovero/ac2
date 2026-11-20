@@ -70,11 +70,32 @@ impl Control {
         for d in damage {
             self.note_damage(d);
         }
-        let Some(autosave::Restored { data, from, logs }) = restored else {
+        let Some(autosave::Restored {
+            mut data,
+            from,
+            logs,
+        }) = restored
+        else {
             tracing::info!("autosave: nothing to restore in {}", dir.display());
             self.start_working(false);
             return;
         };
+        // What this build refuses costs only itself: a check added since the write.
+        let aside = super::load_check::salvage(&mut data);
+        let salvaged = !aside.reasons.is_empty();
+        if salvaged {
+            let to = autosave::keep_set_aside(&dir, &aside.data);
+            for r in aside.reasons {
+                let d = crate::damage::Damage {
+                    kind: StateFile::Autosave,
+                    path: from.clone(),
+                    set_aside_as: to.clone(),
+                    reason: format!("{r}; set aside, the rest of the session restored"),
+                };
+                d.log();
+                self.note_damage(d);
+            }
+        }
         let (n_meas, n_traces, at) = (data.measurements.len(), data.traces.len(), data.saved_at);
         // The restore's own commits are not changes to write back.
         let saver = self.autosave.take();
@@ -91,9 +112,12 @@ impl Control {
                 let fp = self.fingerprint();
                 let specs = self.spl_log_specs(MeasScope::Session, &logs);
                 if let Some(a) = self.autosave.as_mut() {
-                    a.restored(fp, specs);
+                    a.restored((!salvaged).then_some(fp), specs);
                 }
                 self.set_autosave(AutosaveState::Saved, Some(at));
+                if salvaged {
+                    self.autosave_changed();
+                }
                 self.start_working(true);
             }
             Err(e) => {
