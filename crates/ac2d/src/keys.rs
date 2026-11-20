@@ -165,7 +165,12 @@ fn parse_authorized_lenient(text: &str) -> (AuthorizedKeys, Vec<String>) {
     for (i, line) in text.lines().enumerate() {
         let one = AuthorizedKeys::parse(line).and_then(|one| {
             for (name, key) in one.iter() {
-                keys.insert(name, *key)?;
+                // A rig line must come back as a rig: an admission read back as an app
+                // leaves the pairing refused after every restart until re-admitted.
+                match one.rig_of(name) {
+                    Some(rig) => keys.insert_rig(name, *key, rig)?,
+                    None => keys.insert(name, *key)?,
+                }
             }
             Ok(())
         });
@@ -279,6 +284,30 @@ mod tests {
         let (keys, d) = load_or_create_authorized(&p).expect("recover nul");
         assert!(keys.is_empty());
         assert!(d.is_some());
+    }
+
+    #[test]
+    fn an_admitted_rig_is_still_a_rig_after_a_reload() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let p = dir.path().join("authorized_clients");
+        let app = KeyPair::generate().expect("gen");
+        let rig = KeyPair::generate().expect("gen");
+        let mut keys = AuthorizedKeys::new();
+        keys.insert("laptop", app.public).expect("app");
+        keys.insert_rig("rig-pupu", rig.public, 0x26b1_c286_0000_0001)
+            .expect("rig");
+        fs::write(&p, keys.to_text()).expect("write");
+        let (back, none) = load_or_create_authorized(&p).expect("load");
+        assert!(none.is_none());
+        assert_eq!(back.rig_of("rig-pupu"), Some(0x26b1_c286_0000_0001));
+        assert_eq!(back.rig_of("laptop"), None);
+        // Also through the path that rewrites a damaged file.
+        fs::write(&p, format!("{}torn", keys.to_text())).expect("torn");
+        let (back, d) = load_or_create_authorized(&p).expect("recover");
+        assert!(d.is_some());
+        assert_eq!(back.rig_of("rig-pupu"), Some(0x26b1_c286_0000_0001));
+        let (again, _) = load_or_create_authorized(&p).expect("reload");
+        assert_eq!(again.rig_of("rig-pupu"), Some(0x26b1_c286_0000_0001));
     }
 
     #[test]

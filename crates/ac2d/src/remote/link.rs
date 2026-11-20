@@ -308,6 +308,9 @@ struct Link<'p> {
     bytes: u64,
     next_report: Instant,
     last: Option<RemoteLink>,
+    /// The source's last refusal as logged: the link polls about once a second, and a
+    /// standing refusal is one fact, not one log line per poll.
+    warned: Option<String>,
 }
 
 impl<'p> Link<'p> {
@@ -332,6 +335,7 @@ impl<'p> Link<'p> {
             bytes: 0,
             next_report: now,
             last: None,
+            warned: None,
         })
     }
 
@@ -487,6 +491,9 @@ impl<'p> Link<'p> {
                     if s.rig != self.peer.rig {
                         continue;
                     }
+                    if self.warned.take().is_some() {
+                        tracing::info!("link to {}: answered again", self.peer.name);
+                    }
                     if std::mem::take(&mut self.h.ctrl_hs.refused) {
                         // Admitted (as a rig) on the connection that was refused: the
                         // subscriptions it refused meanwhile are stated again.
@@ -508,7 +515,10 @@ impl<'p> Link<'p> {
                     if e.code == ErrorCode::Refused {
                         self.h.ctrl_hs.refused = true;
                     }
-                    tracing::warn!("link to {}: {}", self.peer.name, e.msg);
+                    if self.warned.as_deref() != Some(e.msg.as_str()) {
+                        tracing::warn!("link to {}: {}", self.peer.name, e.msg);
+                        self.warned = Some(e.msg);
+                    }
                 }
             }
         }
