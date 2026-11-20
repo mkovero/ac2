@@ -499,3 +499,294 @@ fn invalid_configurations_are_refused() {
         Some(GeneratorError::InvalidSampleRate)
     );
 }
+
+mod programme {
+    use super::*;
+    use crate::dynamics::{
+        CHECK_SECONDS, Onset, Programme, ProgrammeConfig, ProgrammeError, REST_MIN_SECONDS,
+        Release, snap_period,
+    };
+
+    fn programme(onset: Onset, rest_max_s: f64, replay: Option<Vec<f64>>) -> Arc<Programme> {
+        Arc::new(
+            Programme::new(
+                &ProgrammeConfig {
+                    carrier_hz: 1000.0,
+                    onset,
+                    pilot_dbfs: -40.0,
+                    bursts_dbfs: vec![-20.0, -10.0],
+                    durations_s: vec![0.005, 0.0101],
+                    rest_max_s,
+                    replay_rests_s: replay,
+                },
+                FS,
+            )
+            .expect("programme"),
+        )
+    }
+
+    fn generator(p: &Arc<Programme>, release: &Release) -> Generator {
+        Generator::new(&GeneratorConfig {
+            signal: Signal::Programme {
+                programme: Arc::clone(p),
+                release: release.clone(),
+            },
+            sample_rate: FS,
+            seed: 0,
+            band: BandLimit::NONE,
+            level_dbfs: p.highest_dbfs(),
+            ceiling_dbfs: -6.0,
+        })
+        .expect("generator")
+    }
+
+    fn render_blocks(g: &mut Generator, n: usize, block: usize) -> Vec<f32> {
+        let mut out = vec![0.0; n];
+        for c in out.chunks_mut(block) {
+            g.fill(c);
+        }
+        out
+    }
+
+    fn peak(x: &[f32]) -> f64 {
+        x.iter().fold(0.0f64, |m, v| m.max(f64::from(v.abs())))
+    }
+
+    fn amp(dbfs: f64) -> f64 {
+        dbfs_to_rms(dbfs) * SQRT_2
+    }
+
+    #[test]
+    fn the_carrier_snaps_to_a_whole_period() {
+        let p = snap_period(1000.0, 44_100.0, Onset::Zero).expect("1 kHz");
+        assert_eq!(p, 44);
+        assert!((44_100.0 / f64::from(p) - 1002.27).abs() < 0.01);
+        assert_eq!(snap_period(1000.0, 48_000.0, Onset::Peak), Ok(48));
+        assert_eq!(
+            snap_period(1100.0, 48_000.0, Onset::Peak).map(|p| p % 4),
+            Ok(0)
+        );
+        assert_eq!(
+            snap_period(1100.0, 48_000.0, Onset::Zero).map(|p| p % 2),
+            Ok(0)
+        );
+        assert_eq!(snap_period(8000.0, 96_000.0, Onset::Peak), Ok(12));
+        assert_eq!(
+            snap_period(9000.0, 96_000.0, Onset::Zero),
+            Err(ProgrammeError::Carrier)
+        );
+        assert_eq!(
+            snap_period(10.0, 48_000.0, Onset::Zero),
+            Err(ProgrammeError::Carrier)
+        );
+    }
+
+    #[test]
+    fn steps_land_at_the_onset_point() {
+        for onset in [Onset::Zero, Onset::Peak] {
+            let p = programme(onset, 2.0, None);
+            let release = Release::new();
+            let mut g = generator(&p, &release);
+            let period = p.period as usize;
+            let check = p.check_periods as usize * period;
+            let first = 2 * check;
+            let x = render_blocks(&mut g, first + 3 * period, 509);
+            // The rms gain is the highest burst's; the first burst is 10 dB below it.
+            let burst = amp(-20.0);
+            let pilot = amp(-40.0);
+            assert!((peak(&x[check - period..check]) - amp(-46.0)).abs() < 1e-5);
+            assert!((peak(&x[first - period..first]) - pilot).abs() < 1e-5);
+            assert!((peak(&x[first..first + period]) - burst).abs() < 1e-5);
+            match onset {
+                // A zero-crossing onset: the burst starts at sin 0, rising.
+                Onset::Zero => {
+                    assert!(x[first].abs() < 1e-6, "{}", x[first]);
+                    assert!(x[first + 1] > 0.0);
+                    assert!((f64::from(x[first + period / 4]) - burst).abs() < 1e-5);
+                }
+                // A peak onset: the burst's first sample is its peak.
+                Onset::Peak => {
+                    assert!((f64::from(x[first]) - burst).abs() < 1e-5);
+                    let before = pilot * (TAU / period as f64).cos();
+                    assert!((f64::from(x[first - 1]) - before).abs() < 1e-5);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rests_end_at_rest_max_without_a_release() {
+        let p = programme(Onset::Zero, 3.0, None);
+        let release = Release::new();
+        let mut g = generator(&p, &release);
+        let period = p.period as usize;
+        let first = 2 * p.check_periods as usize * period;
+        let burst = p.step_periods(0) as usize * period;
+        let rest_max = p.rest_max_periods as usize * period;
+        let second = first + burst + rest_max;
+        let x = render_blocks(&mut g, second + period, 4096);
+        assert!((peak(&x[second - period..second]) - amp(-40.0)).abs() < 1e-5);
+        assert!((peak(&x[second..second + period]) - amp(-20.0)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_release_ends_the_rest_at_the_first_onset_after_its_block_starts() {
+        let p = programme(Onset::Zero, 3.0, None);
+        let period = p.period as usize;
+        let first = 2 * p.check_periods as usize * period;
+        let burst_end = first + p.step_periods(0) as usize * period;
+        let rest_min = p.rest_min_periods as usize * period;
+        assert_eq!(rest_min, (REST_MIN_SECONDS * FS) as usize);
+        for block in [64usize, 509, 1000] {
+            let release = Release::new();
+            let mut g = generator(&p, &release);
+            // Published after rest_min: the block that sees it starts the next onset.
+            let at = burst_end + rest_min + 300;
+            let block_start = at.div_ceil(block) * block;
+            let mut x = vec![0.0f32; block_start + 4 * period + block];
+            let mut pos = 0;
+            for c in x.chunks_mut(block) {
+                if pos >= at {
+                    release.publish(1);
+                }
+                g.fill(c);
+                pos += c.len();
+            }
+            let land = block_start.div_ceil(period) * period;
+            assert!((peak(&x[land - period..land]) - amp(-40.0)).abs() < 1e-5);
+            assert!((peak(&x[land..land + period]) - amp(-20.0)).abs() < 1e-5);
+        }
+        // Released early: the rest still lasts rest_min.
+        let release = Release::new();
+        release.publish(1);
+        let mut g = generator(&p, &release);
+        let second = burst_end + rest_min;
+        let x = render_blocks(&mut g, second + period, 333);
+        assert!((peak(&x[second - period..second]) - amp(-40.0)).abs() < 1e-5);
+        assert!((peak(&x[second..second + period]) - amp(-20.0)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn without_releases_the_output_does_not_depend_on_blocks() {
+        let p = programme(Onset::Peak, 2.0, None);
+        let n = (p.longest_seconds() * FS) as usize + 100;
+        let a = render_blocks(&mut generator(&p, &Release::new()), n, 1);
+        let b = render_blocks(&mut generator(&p, &Release::new()), n, 777);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn replayed_rests_ignore_the_release() {
+        let rests = vec![2.5, 2.0, 2.0, 2.0];
+        let p = programme(Onset::Zero, 30.0, Some(rests));
+        let release = Release::new();
+        release.publish(4);
+        let mut g = generator(&p, &release);
+        let period = p.period as usize;
+        let first = 2 * p.check_periods as usize * period;
+        let second = first + p.step_periods(0) as usize * period + (2.5 * FS) as usize;
+        let x = render_blocks(&mut g, second + period, 509);
+        assert!((peak(&x[second - period..second]) - amp(-40.0)).abs() < 1e-5);
+        assert!((peak(&x[second..second + period]) - amp(-20.0)).abs() < 1e-5);
+        assert_eq!(
+            Programme::new(
+                &ProgrammeConfig {
+                    replay_rests_s: Some(vec![2.0; 3]),
+                    ..config()
+                },
+                FS
+            ),
+            Err(ProgrammeError::Replay)
+        );
+    }
+
+    fn config() -> ProgrammeConfig {
+        ProgrammeConfig {
+            carrier_hz: 1000.0,
+            onset: Onset::Zero,
+            pilot_dbfs: -40.0,
+            bursts_dbfs: vec![-20.0, -10.0],
+            durations_s: vec![0.005, 0.01],
+            rest_max_s: 30.0,
+            replay_rests_s: None,
+        }
+    }
+
+    #[test]
+    fn rest_max_is_bounded_and_the_run_time_is_a_bound() {
+        for bad in [1.9, 30.5, f64::NAN] {
+            assert_eq!(
+                Programme::new(
+                    &ProgrammeConfig {
+                        rest_max_s: bad,
+                        ..config()
+                    },
+                    FS
+                ),
+                Err(ProgrammeError::RestMax)
+            );
+        }
+        let p = programme(Onset::Zero, 2.0, None);
+        let n = (p.longest_seconds() * FS).ceil() as usize;
+        let mut g = generator(&p, &Release::new());
+        let x = render_blocks(&mut g, n + 10, 1024);
+        assert!(
+            g.is_finished(),
+            "the programme ends within its longest run time"
+        );
+        assert!(x[n..].iter().all(|v| *v == 0.0));
+        // Its own fade: no step to silence after the last rest.
+        let last = x.iter().rposition(|v| *v != 0.0).expect("played");
+        let fade = (FADE_OUT_SECONDS * FS) as usize;
+        assert!(peak(&x[last + 1 - fade / 4..=last]) < 0.3 * amp(-40.0));
+        assert!(CHECK_SECONDS * FS < n as f64);
+    }
+
+    #[test]
+    fn the_level_is_the_highest_burst_and_checked_against_the_ceiling() {
+        let p = programme(Onset::Zero, 2.0, None);
+        let mut c = GeneratorConfig {
+            signal: Signal::Programme {
+                programme: Arc::clone(&p),
+                release: Release::new(),
+            },
+            sample_rate: FS,
+            seed: 0,
+            band: BandLimit::NONE,
+            level_dbfs: -20.0,
+            ceiling_dbfs: 0.0,
+        };
+        assert_eq!(
+            Generator::new(&c).map(|_| ()),
+            Err(GeneratorError::ProgrammeLevel)
+        );
+        c.level_dbfs = -10.0;
+        c.ceiling_dbfs = -12.0;
+        assert!(matches!(
+            Generator::new(&c).map(|_| ()),
+            Err(GeneratorError::AboveCeiling { .. })
+        ));
+        c.ceiling_dbfs = 0.0;
+        let g = Generator::new(&c).expect("at the ceiling");
+        assert!((g.crest_factor() - SQRT_2).abs() < 1e-12);
+        // Built for another rate: refused.
+        c.sample_rate = 44_100.0;
+        assert_eq!(
+            Generator::new(&c).map(|_| ()),
+            Err(GeneratorError::InvalidSampleRate)
+        );
+    }
+
+    #[test]
+    fn a_stop_fades_out_within_the_ramp() {
+        let p = programme(Onset::Zero, 2.0, None);
+        let mut g = generator(&p, &Release::new());
+        let first = 2 * p.check_periods as usize * p.period as usize;
+        render_blocks(&mut g, first + 100, 512);
+        g.fade_out();
+        let ramp = g.ramp_samples() as usize;
+        let x = render_blocks(&mut g, ramp + 4800, 512);
+        assert!(x[ramp..].iter().all(|v| *v == 0.0));
+        assert!(peak(&x[..ramp / 2]) > 0.0);
+    }
+}
