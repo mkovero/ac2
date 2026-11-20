@@ -102,7 +102,7 @@ the generator.
 - **Delay.** The processor's own group delay `δ` would make `R` step before `Y` inside the
   averaging window and fake a gain dip at every burst start (2 samples read about −1.5 dB on a
   20 dB step at 1 kHz / 96 kHz). `δ` is measured on the linearity check's 6 dB edge, after its
-  gate passes: the interpolated midpoints of `|Y_1|` and `|R_1|` (envelope delay; the phase of
+  gate passes: the centroids of the rises of `|Y_1|` and `|R_1|` (envelope delay; a midpoint crossing moved by about 1.5 samples with even-order distortion's DC shift; the phase of
   `Y_1/R_1` is phase delay and reads half a period on an inverting device). `Y` is shifted by
   the whole samples; the threshold searches below skip the first period plus one sample after
   each edge.
@@ -144,7 +144,7 @@ Per step and measured input, `t = 0` at the burst's first sample, `t_e` at its l
 | `release_tau` | time after `t_e` for GR to fall to 37 % of `gr_end` (in dB) |
 | `recovery_2db`, `recovery_0_5db` | time after `t_e` until GR stays under 2 dB / 0.5 dB |
 | `h2`…`h5`, THD | per window: attack (first 50 ms of the burst), settled (last 10 %), release (first 1 s after `t_e`), rest (last second) |
-| `thump_peak`, `thump_rms` | in the 200 ms after each edge: the output low-passed at 200 Hz (8th-order Butterworth), dB re burst peak; carrier ≥ 1 kHz only, otherwise "can't tell". Floor: what an ideal gain change alone would put through the same filter, `r(t − δ)·|Y_1|/|R_1|` low-passed the same way (an enveloped sine has low-frequency content of its own: a 1 kHz zero-onset step reads −24 dB re burst peak through the filter with no thump at all); "≤ floor" where not 6 dB above it. The one-period gain envelope cannot follow a gain change shorter than about a period, so the floor under-reads there (an ideal limiter with a 1 ms attack on a 1 kHz carrier reads 9 dB over it): thump is printed only where `attack_tau` is at least 3 carrier periods (the synthetic test pins the exact limit), otherwise "can't tell" |
+| `thump_peak`, `thump_rms` | in the 200 ms after each edge: the output low-passed at 200 Hz (8th-order Butterworth), dB re burst peak; carrier ≥ 950 Hz only, otherwise "can't tell". Floor: what an ideal gain change alone would put through the same filter, `r(t − δ)·|Y_1|/|R_1|` low-passed the same way (an enveloped sine has low-frequency content of its own: a 1 kHz zero-onset step reads −24 dB re burst peak through the filter with no thump at all); "≤ floor" where not 6 dB above it. The one-period gain envelope cannot follow a gain change shorter than about a period, so the floor under-reads there (an ideal limiter with a 1 ms attack on a 1 kHz carrier reads 9 dB over it): thump at a burst's start is printed only where `attack_tau` is at least 4 carrier periods, and at its end only where `release_tau` is (an ideal limiter at 3 periods, peak onset, reads 3.6 dB over the floor; at 4 periods 2.8 dB), otherwise "can't tell" |
 | `drift` | final gain of the following rest re `g₀` |
 | flags | not settled, not recovered |
 
