@@ -1,5 +1,5 @@
 {
-  "proto_version": 94,
+  "proto_version": 95,
   "value": {
     "autosave": {
       "log_failures": [],
@@ -17,6 +17,7 @@
         "type": "synced"
       }
     },
+    "dynamics": null,
     "generator": {
       "armed": false,
       "ceiling": -10.0,

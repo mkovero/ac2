@@ -1,5 +1,5 @@
 {
-  "proto_version": 94,
+  "proto_version": 95,
   "value": {
     "grids": [
       {
@@ -37,6 +37,7 @@
           "type": "synced"
         }
       },
+      "dynamics": null,
       "generator": {
         "armed": false,
         "ceiling": -10.0,
@@ -431,7 +432,7 @@
           "driver_change": null,
           "driver_reset": null,
           "input_device": "fake",
-          "opened_at": "now-64249593",
+          "opened_at": "now-135621377",
           "output_device": "fake",
           "replay": null,
           "sample_rate_hz": 48000,
@@ -450,11 +451,11 @@
           "peaks": {
             "lafmax": {
               "judgement": "no_limit",
-              "since": "now-22621929"
+              "since": "now-52706025"
             },
             "lcpeak": {
               "judgement": "no_limit",
-              "since": "now-22621929"
+              "since": "now-52706025"
             }
           },
           "started_at": null,
@@ -462,31 +463,31 @@
             {
               "duration": 60.0,
               "judgement": "no_limit",
-              "since": "now-22621929",
+              "since": "now-52706025",
               "weighting": "a"
             },
             {
               "duration": 300.0,
               "judgement": "no_limit",
-              "since": "now-22621929",
+              "since": "now-52706025",
               "weighting": "a"
             },
             {
               "duration": 600.0,
               "judgement": "no_limit",
-              "since": "now-22621929",
+              "since": "now-52706025",
               "weighting": "a"
             },
             {
               "duration": 1800.0,
               "judgement": "no_limit",
-              "since": "now-22621929",
+              "since": "now-52706025",
               "weighting": "a"
             },
             {
               "duration": 3600.0,
               "judgement": "no_limit",
-              "since": "now-22621929",
+              "since": "now-52706025",
               "weighting": "a"
             }
           ]
@@ -497,11 +498,11 @@
           "peaks": {
             "lafmax": {
               "judgement": "no_limit",
-              "since": "now-18209677"
+              "since": "now-35229487"
             },
             "lcpeak": {
               "judgement": "no_limit",
-              "since": "now-18209677"
+              "since": "now-35229487"
             }
           },
           "started_at": null,
@@ -509,31 +510,31 @@
             {
               "duration": 60.0,
               "judgement": "not_calibrated",
-              "since": "now-18209677",
+              "since": "now-35229487",
               "weighting": "a"
             },
             {
               "duration": 300.0,
               "judgement": "no_limit",
-              "since": "now-18209677",
+              "since": "now-35229487",
               "weighting": "a"
             },
             {
               "duration": 600.0,
               "judgement": "no_limit",
-              "since": "now-18209677",
+              "since": "now-35229487",
               "weighting": "a"
             },
             {
               "duration": 1800.0,
               "judgement": "no_limit",
-              "since": "now-18209677",
+              "since": "now-35229487",
               "weighting": "a"
             },
             {
               "duration": 3600.0,
               "judgement": "no_limit",
-              "since": "now-18209677",
+              "since": "now-35229487",
               "weighting": "a"
             }
           ]
@@ -559,7 +560,7 @@
           "type": "name"
         },
         "recover": null,
-        "saved_at": "now-5206980"
+        "saved_at": "now-8078171"
       }
     },
     "traces": []

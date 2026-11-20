@@ -2972,6 +2972,41 @@ prints the octave table; the CSV export carries it.
 The silence after the sweep must hold the decay: **Silence after** or `--tail 4s`; a 2 s
 hall wants 4 s.
 
+## Dynamics measurement: attack, release and programme dependence
+
+A dynamics measurement times a compressor, limiter or VCA
+([dynamics.md](design/dynamics.md)): a carrier at a pilot level below the threshold, with
+bursts at each burst level and length, each followed by a rest that lasts until the
+processor has recovered (at least 2 s, at most `--rest-max`). Every measured input is read
+against the reference, so the source's own level never enters. Stage 1 is the CLI and the
+stored trace; the app lists the trace but has no view of it yet.
+
+```sh
+ac2 meas new dynamics --name "Studer VCA" --ref 7 --meas 5,6 --out 3,4,5 \
+    --carrier 1khz --pilot -33dbfs --bursts -8dbfs,-5dbfs,0dbfs \
+    [--durations 1ms,3ms,10ms,30ms,100ms,300ms,1s,3s,10s --rest-max 30s --onset zero|peak]
+ac2 dynamics run "Studer VCA" [--name …] [--rests-from "Run 1"]
+ac2 trace export "Run 1" --csv vca.csv
+```
+
+- The carrier plays as the nearest frequency whose period is a whole number of samples
+  (1 kHz at 44.1 kHz plays as 1002.27 Hz); burst lengths are whole periods. Both are stored.
+- The run arms at the highest burst level and shows the longest it can take (every rest at
+  `--rest-max`); **Enter** plays, **Esc**/**q**/**Ctrl-C** stops and discards it. The daemon
+  disarms once the last rest is in.
+- It starts with a linearity check: the pilot and 6 dB below it must have the same gain,
+  else the run fails (`pilot is not below threshold`): lower `--pilot`.
+- The printed step table has a row per measured input and step: `in`, `step`, `dBFS` (burst
+  level), `burst`, `rest` (as played; `*` reached `--rest-max` without recovering), `GR end`
+  and `GR set` (gain reduction at the burst's end and the level's settled value), `attack τ`,
+  `attack 2dB`, `settle 0.5`, `overshoot`, `release τ`, `recov 2dB`, `recov 0.5`, `THD atk`,
+  `THD set`, `thump end`, `drift`. A time reads `≤1 period`, `can't tell` or `no GR` where
+  there is nothing to time; a level under its floor reads `≤ floor`.
+- `--rests-from` replays a stored run's rests instead of adapting them, so a before / after
+  pair plays an identical programme and its rows compare one to one.
+- The CSV export holds the whole step table (every harmonic window and thump) and each
+  step's gain and harmonic envelopes; `ac2 trace import` restores the trace.
+
 ## Sessions
 
 The measurements and traces on the daemon are the **working state**. It belongs to a saved

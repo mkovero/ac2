@@ -31,6 +31,9 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   Connection), one `ac2d` per user by a lock, the simulated rig a spawned
   `ac2d --backend fake --ephemeral`; e2e tests with a daemon are the `ac2-e2e` crate. Design:
   `docs/design/ui-spawns-ac2d.md` (N7); the AppImage and the macOS app bundle carry that `ac2d`.
+- **Dynamics measurement** (`docs/design/dynamics.md`) stage 1: the programme source, the
+  envelope / edge / step analysis, `dynamics.run` and its trace (CSV, session), `ac2 meas new
+  dynamics`, `ac2 dynamics run`; no app view yet (stages 2–3).
 - **3D spectrograph** (`docs/design/spectrograph-3d.md`): v1a + v1b landed
   (PROTO 86, session format 42, rig file 10): a fourth spectrum view (G) drawing the
   spectrograph's history as a skyline of spikes, camera on ←/→, PageUp/PageDown, I/O, Home
