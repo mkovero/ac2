@@ -83,57 +83,56 @@ pub(super) fn centred_at(s: Signal<'_>, u: u64, mx: &Mixers) -> Complex64 {
     acc * (2.0 / mx.p as f64)
 }
 
-/// [`centred_at`] sliding one sample at a time.
-#[derive(Debug)]
-pub(super) struct Boxcar<'a> {
-    s: Signal<'a>,
-    mx: &'a Mixers,
+/// [`centred_at`] sliding one sample at a time. It holds no reference to the audio, which
+/// every call passes, so a pass can stop between blocks and resume on the same sums.
+#[derive(Debug, Clone)]
+pub(super) struct Boxcar {
     u: u64,
     /// Full-weight sum over `[u − P/2, u + P/2]`.
     sum: Complex64,
     since: u32,
 }
 
-impl<'a> Boxcar<'a> {
-    pub(super) fn new(s: Signal<'a>, mx: &'a Mixers, u: u64) -> Self {
+impl Boxcar {
+    pub(super) fn new(s: Signal<'_>, mx: &Mixers, u: u64) -> Self {
         let mut b = Self {
-            s,
-            mx,
             u,
             sum: Complex64::new(0.0, 0.0),
             since: 0,
         };
-        b.sync();
+        b.sync(s, mx);
         b
     }
 
     #[inline]
-    fn term(&self, v: u64) -> Complex64 {
-        self.mx.carrier(v) * self.s.get(v)
+    fn term(s: Signal<'_>, mx: &Mixers, v: u64) -> Complex64 {
+        mx.carrier(v) * s.get(v)
     }
 
-    fn sync(&mut self) {
-        let h = (self.mx.p / 2) as u64;
-        self.sum = (self.u - h..=self.u + h).map(|v| self.term(v)).sum();
+    fn sync(&mut self, s: Signal<'_>, mx: &Mixers) {
+        let h = (mx.p / 2) as u64;
+        self.sum = (self.u - h..=self.u + h)
+            .map(|v| Self::term(s, mx, v))
+            .sum();
         self.since = 0;
     }
 
     /// The envelope at the current sample.
     #[inline]
-    pub(super) fn value(&self) -> Complex64 {
-        let h = (self.mx.p / 2) as u64;
-        (self.sum - 0.5 * (self.term(self.u - h) + self.term(self.u + h)))
-            * (2.0 / self.mx.p as f64)
+    pub(super) fn value(&self, s: Signal<'_>, mx: &Mixers) -> Complex64 {
+        let h = (mx.p / 2) as u64;
+        (self.sum - 0.5 * (Self::term(s, mx, self.u - h) + Self::term(s, mx, self.u + h)))
+            * (2.0 / mx.p as f64)
     }
 
     #[inline]
-    pub(super) fn advance(&mut self) {
-        let h = (self.mx.p / 2) as u64;
-        self.sum += self.term(self.u + h + 1) - self.term(self.u - h);
+    pub(super) fn advance(&mut self, s: Signal<'_>, mx: &Mixers) {
+        let h = (mx.p / 2) as u64;
+        self.sum += Self::term(s, mx, self.u + h + 1) - Self::term(s, mx, self.u - h);
         self.u += 1;
         self.since += 1;
         if self.since >= RESYNC {
-            self.sync();
+            self.sync(s, mx);
         }
     }
 }
@@ -146,10 +145,8 @@ impl<'a> Boxcar<'a> {
 /// sums: one at `k·f_c` and one a quarter of the carrier on either side. A Hann of 4 periods
 /// puts the fundamental 4 bins from harmonic 2 and every other harmonic, on its zeros: a
 /// steady fundamental leaks nothing, and a moving one far less than through a boxcar.
-#[derive(Debug)]
-pub(super) struct HannBank<'a> {
-    s: Signal<'a>,
-    mx: &'a Mixers,
+#[derive(Debug, Clone)]
+pub(super) struct HannBank {
     u: u64,
     /// Per harmonic: the sums at `4k`, `4k − 1` and `4k + 1` quarter-carriers.
     sums: [[Complex64; 3]; HARMONICS],
@@ -165,29 +162,27 @@ const fn steps(j: usize) -> [usize; 3] {
     [q, q - 1, q + 1]
 }
 
-impl<'a> HannBank<'a> {
-    pub(super) fn new(s: Signal<'a>, mx: &'a Mixers, u: u64) -> Self {
+impl HannBank {
+    pub(super) fn new(s: Signal<'_>, mx: &Mixers, u: u64) -> Self {
         let mut b = Self {
-            s,
-            mx,
             u,
             sums: [[Complex64::new(0.0, 0.0); 3]; HARMONICS],
             idx: [[0; 3]; HARMONICS],
             since: 0,
         };
-        b.sync();
+        b.sync(s, mx);
         b
     }
 
-    fn sync(&mut self) {
-        let two_p = 2 * self.mx.p as u64;
-        let n = self.mx.tab.len() as u64;
+    fn sync(&mut self, s: Signal<'_>, mx: &Mixers) {
+        let two_p = 2 * mx.p as u64;
+        let n = mx.tab.len() as u64;
         let first = self.u - two_p;
         for j in 0..HARMONICS {
             for (m, q) in steps(j).into_iter().enumerate() {
                 self.idx[j][m] = ((q as u64 * (first % n)) % n) as usize;
                 self.sums[j][m] = (first..self.u + two_p)
-                    .map(|v| self.mx.at(q, v) * self.s.get(v))
+                    .map(|v| mx.at(q, v) * s.get(v))
                     .sum();
             }
         }
@@ -196,23 +191,23 @@ impl<'a> HannBank<'a> {
 
     /// Peak amplitude of harmonics 2 … 5 around the current sample.
     #[inline]
-    pub(super) fn value(&self) -> [f64; HARMONICS] {
+    pub(super) fn value(&self, mx: &Mixers) -> [f64; HARMONICS] {
         // The window's Σw is 2P; a cosine of amplitude A mixes to A/2 · Σw = A·P.
-        let rot = self.mx.at(1, self.u);
-        let p = self.mx.p as f64;
+        let rot = mx.at(1, self.u);
+        let p = mx.p as f64;
         self.sums
             .map(|s| ((0.5 * s[0] + 0.25 * rot * s[1] + 0.25 * rot.conj() * s[2]) / p).norm())
     }
 
     #[inline]
-    pub(super) fn advance(&mut self) {
-        let two_p = 2 * self.mx.p as u64;
-        let n = self.mx.tab.len();
-        let d = self.s.get(self.u + two_p) - self.s.get(self.u - two_p);
+    pub(super) fn advance(&mut self, s: Signal<'_>, mx: &Mixers) {
+        let two_p = 2 * mx.p as u64;
+        let n = mx.tab.len();
+        let d = s.get(self.u + two_p) - s.get(self.u - two_p);
         for j in 0..HARMONICS {
             for (m, q) in steps(j).into_iter().enumerate() {
                 let i = self.idx[j][m];
-                self.sums[j][m] += self.mx.tab[i] * d;
+                self.sums[j][m] += mx.tab[i] * d;
                 let next = i + q;
                 self.idx[j][m] = if next >= n { next - n } else { next };
             }
@@ -220,7 +215,7 @@ impl<'a> HannBank<'a> {
         self.u += 1;
         self.since += 1;
         if self.since >= RESYNC {
-            self.sync();
+            self.sync(s, mx);
         }
     }
 }
@@ -280,9 +275,9 @@ mod tests {
         let mut b = Boxcar::new(s, &mx, 1100);
         for u in 1100..4000 {
             let direct = centred_at(s, u, &mx);
-            assert!((b.value() - direct).norm() < 1e-9);
+            assert!((b.value(s, &mx) - direct).norm() < 1e-9);
             assert!((direct.norm() - 0.5).abs() < 1e-6, "{}", direct.norm());
-            b.advance();
+            b.advance(s, &mx);
         }
     }
 
@@ -297,10 +292,10 @@ mod tests {
         let s = Signal { x: &x, abs0: 0 };
         let mut h = HannBank::new(s, &mx, 500);
         for _ in 0..5000 - 500 - 4 * p - 1 {
-            let v = h.value();
+            let v = h.value(&mx);
             assert!(v[0] < 1e-7 && v[2] < 1e-7 && v[3] < 1e-7, "{v:?}");
             assert!((v[1] - 0.01).abs() < 1e-7, "{v:?}");
-            h.advance();
+            h.advance(s, &mx);
             if h.u + 2 * p as u64 >= 4000 {
                 break;
             }

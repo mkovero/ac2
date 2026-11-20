@@ -754,3 +754,78 @@ fn default_durations_are_three_periods_or_longer() {
         assert!(Programme::new(&cfg, fs).is_ok(), "{fs}");
     }
 }
+
+#[test]
+fn step_analysis_is_spread_over_the_following_blocks() {
+    // A 10 s burst and its rest is the longest step there is; analysing it in the block
+    // that completes it held a 96 kHz daemon past its capture queue. Each block may carry
+    // only its share, the steps behind may not pile up, and the run's last block
+    // finishes the rest.
+    let block = 256;
+    let inputs = 2;
+    let prog = programme(
+        &config(
+            1000.0,
+            Onset::Zero,
+            &[-4.0],
+            &[0.003, 10.0, 0.01, 0.03],
+            30.0,
+        ),
+        FS,
+    );
+    let lim = Limiter::new(&prog, THRESHOLD, 0.010, 0.040).delay(3);
+    let mut procs = vec![lim; inputs];
+    let release = Release::new();
+    let mut generator = match Generator::new(&GeneratorConfig {
+        signal: Signal::Programme {
+            programme: Arc::new(prog.clone()),
+            release: release.clone(),
+        },
+        sample_rate: FS,
+        seed: 0,
+        band: BandLimit::NONE,
+        level_dbfs: prog.highest_dbfs(),
+        ceiling_dbfs: f64::INFINITY,
+    }) {
+        Ok(g) => g,
+        Err(e) => panic!("generator: {e}"),
+    };
+    let mut an = Analyser::new(&prog, inputs);
+    let bound = ((prog.longest_seconds() + 1.0) * FS) as usize;
+    let longest_step = ((10.0 + 30.0) * FS) as usize;
+    let share = (block * inputs) as u64 * super::analyse::WORK_PER_SAMPLE;
+    let (mut fed, mut busy, mut most_kept) = (0, 0, 0);
+    let mut buf = vec![0f32; block];
+    while fed < bound && an.phase() != Phase::Done {
+        generator.fill(&mut buf);
+        let outs: Vec<Vec<f32>> = procs.iter_mut().map(|p| p.process(&buf)).collect();
+        let views: Vec<&[f32]> = outs.iter().map(Vec::as_slice).collect();
+        if let Err(e) = an.push(&buf, &views) {
+            panic!("analysis failed at {fed}: {e}");
+        }
+        fed += block;
+        release.publish(an.released());
+        if an.phase() != Phase::Done {
+            assert!(
+                an.last_work <= share,
+                "{} samples of step analysis in one block at {fed}",
+                an.last_work
+            );
+            busy += usize::from(an.last_work > 0);
+            most_kept = most_kept.max(an.retained());
+        }
+    }
+    assert_eq!(an.phase(), Phase::Done);
+    assert!(busy > 0, "no step was analysed before the run's end");
+    // The 10 s step's analysis runs through the short steps after it, keeping its audio
+    // that much longer, but never a second long step's worth.
+    assert!(
+        most_kept < 2 * longest_step,
+        "{most_kept} samples kept, a step is at most {longest_step}"
+    );
+    let r = match an.finish() {
+        Ok(r) => r,
+        Err(e) => panic!("analysis failed: {e}"),
+    };
+    assert_eq!(r.steps.len(), 4);
+}

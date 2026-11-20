@@ -11,10 +11,13 @@
 //! 2. the rest watch, during each rest: the gain of every input once per millisecond or so,
 //!    and from `rest_min` on, whether the medians of its last two 1 s windows agree — the
 //!    release the programme source waits for;
-//! 3. once a rest is over, that step's full analysis (`step::analyse`) on the raw audio kept
-//!    since just before its burst; a level's rows are finished when its last step is.
+//! 3. once a rest is over, that step's full analysis (`step::StepJob`) on the raw audio kept
+//!    since just before its burst, run `WORK_PER_SAMPLE` samples per input for each sample
+//!    fed (so no block carries a whole step) and finished at once in the run's last block; a
+//!    level's rows are finished when its last step is.
 
 mod dsp;
+mod pacing;
 mod step;
 mod watch;
 
@@ -26,6 +29,9 @@ use std::collections::VecDeque;
 use num_complex::Complex64;
 
 use self::dsp::{Boxcar, Mixers, Signal, centred_at, median};
+use self::pacing::Job;
+#[cfg(test)]
+pub(super) use self::pacing::WORK_PER_SAMPLE;
 use self::step::{Bounds, Ctx, Partial};
 use super::{DynamicsError, DynamicsResult, InputResult, Onset, Phase, Programme, Rests, StepInfo};
 
@@ -184,6 +190,7 @@ enum Task {
     Check,
     WatchPoint,
     WatchEnd,
+    /// The step's audio is all in: its analysis may run.
     Step(usize),
 }
 
@@ -225,8 +232,13 @@ pub struct Analyser {
     cal: Option<Cal>,
     watch: Option<Watch>,
     released: u32,
+    /// Steps whose rests are decided (recovered or not).
+    watched: usize,
+    /// Steps whose audio is all in.
+    queued: usize,
     /// Steps analysed so far.
     analysed: usize,
+    job: Option<Job>,
     /// The current level's partials, per input.
     level: Vec<Vec<Partial>>,
     infos: Vec<StepInfo>,
@@ -235,6 +247,9 @@ pub struct Analyser {
     /// Per input and step: the thump's peak and RMS over their floors, dB, before any gate.
     #[cfg(test)]
     pub(super) thump_excess: Vec<Vec<[[f64; 2]; 2]>>,
+    /// Samples of step analysis the last push ran.
+    #[cfg(test)]
+    pub(super) last_work: u64,
 }
 
 /// The mean time of the step in `|X₁|` around `at`: the centroid of its rise over two
@@ -242,12 +257,12 @@ pub struct Analyser {
 fn rise_centroid(x: Signal<'_>, at: u64, p: u64, mx: &Mixers) -> f64 {
     let from = at - 2 * p;
     let mut b = Boxcar::new(x, mx, from);
-    let first = b.value().norm();
+    let first = b.value(x, mx).norm();
     let mut prev = first;
     let mut moment = 0.0;
     for u in from + 1..=at + 2 * p {
-        b.advance();
-        let v = b.value().norm();
+        b.advance(x, mx);
+        let v = b.value(x, mx).norm();
         moment += (u as f64 - 0.5) * (v - prev);
         prev = v;
     }
@@ -284,7 +299,10 @@ impl Analyser {
             cal: None,
             watch: None,
             released: 0,
+            watched: 0,
+            queued: 0,
             analysed: 0,
+            job: None,
             level: vec![Vec::new(); inputs],
             infos: Vec::new(),
             results: vec![
@@ -299,6 +317,8 @@ impl Analyser {
             done: false,
             #[cfg(test)]
             thump_excess: vec![Vec::new(); inputs],
+            #[cfg(test)]
+            last_work: 0,
         }
     }
 
@@ -331,9 +351,18 @@ impl Analyser {
         if let Err(e) = &r {
             self.error = Some(e.clone());
             // Nothing more is analysed: the raw audio can go.
+            self.job = None;
             self.store.trim(self.store.end());
+            return r;
         }
-        r
+        self.work(reference.len() as u64);
+        Ok(())
+    }
+
+    /// Samples of raw audio kept.
+    #[cfg(test)]
+    pub(super) fn retained(&self) -> usize {
+        self.store.refr.len()
     }
 
     /// Rests found recovered so far (1-based count, monotonic): what the source may end.
@@ -365,7 +394,7 @@ impl Analyser {
                 Seg::Waiting => DynamicsError::NoReference,
                 _ => DynamicsError::Mismatch(format!(
                     "the capture ended at step {} of {}",
-                    self.analysed + 1,
+                    self.queued + 1,
                     self.prog.steps()
                 )),
             });
@@ -412,24 +441,29 @@ impl Analyser {
                 Task::Check,
             ));
         };
-        if self.done {
+        if self.queued == self.prog.steps() {
             return None;
         }
-        if let Some(w) = &self.watch {
+        let watch = self.watch.as_ref().map(|w| {
             if self
                 .watch_limit(w)
                 .is_some_and(|l| w.next + self.h() + cal.shift_max() >= l)
             {
-                return Some((0, Task::WatchEnd));
+                (0, Task::WatchEnd)
+            } else {
+                // The edge finder has looked past the point's window, and refined any edge
+                // there, by then.
+                (w.next + 3 * self.p + cal.shift_max() + 3, Task::WatchPoint)
             }
-            // The edge finder has looked past the point's window, and refined any edge
-            // there, by then.
-            return Some((w.next + 3 * self.p + cal.shift_max() + 3, Task::WatchPoint));
+        });
+        let step = self.steps.get(self.queued).and_then(|f| {
+            f.recovered?;
+            Some((f.end? + self.step_lookahead(cal), Task::Step(self.queued)))
+        });
+        match (watch, step) {
+            (Some(w), Some(s)) => Some(if s.0 < w.0 { s } else { w }),
+            (w, s) => w.or(s),
         }
-        let f = self.steps.get(self.analysed)?;
-        let end = f.end?;
-        f.recovered?;
-        Some((end + self.step_lookahead(cal), Task::Step(self.analysed)))
     }
 
     fn advance(&mut self) -> Result<(), DynamicsError> {
@@ -445,9 +479,10 @@ impl Analyser {
                 Some((_, Task::Check)) => self.run_check()?,
                 Some((_, Task::WatchPoint)) => self.watch_point(),
                 Some((_, Task::WatchEnd)) => self.watch_end(),
-                Some((_, Task::Step(i))) => self.run_step(i),
+                Some((_, Task::Step(i))) => self.queued = i + 1,
             }
-            if self.done {
+            if self.queued == self.prog.steps() {
+                // The run's audio is all in; what follows is not the programme's.
                 return Ok(());
             }
         }
@@ -864,11 +899,11 @@ impl Analyser {
             let th = (yl + yh) / 2.0;
             let from = grid.e6 - p - 1;
             let mut b = Boxcar::new(y, &self.mx, from);
-            let mut prev = b.value().norm();
+            let mut prev = b.value(y, &self.mx).norm();
             let mut x_y = None;
             for u in from + 1..=grid.e6 + sec(MAX_DELAY_SECONDS) {
-                b.advance();
-                let v = b.value().norm();
+                b.advance(y, &self.mx);
+                let v = b.value(y, &self.mx).norm();
                 if prev < th && v >= th {
                     x_y = Some((u - 1) as f64 + (th - prev) / (v - prev));
                     break;
@@ -892,9 +927,12 @@ impl Analyser {
                 let mut yb = Boxcar::new(ys, &self.mx, from);
                 let mut v = Vec::with_capacity((to - from) as usize);
                 for _ in from..to {
-                    v.push(20.0 * (yb.value().norm() / rb.value().norm()).log10());
-                    rb.advance();
-                    yb.advance();
+                    v.push(
+                        20.0 * (yb.value(ys, &self.mx).norm() / rb.value(r, &self.mx).norm())
+                            .log10(),
+                    );
+                    rb.advance(r, &self.mx);
+                    yb.advance(ys, &self.mx);
                 }
                 median(&mut v)
             };
@@ -928,48 +966,4 @@ impl Analyser {
 
     // -----------------------------------------------------------------------------------
     // Steps
-
-    fn run_step(&mut self, i: usize) {
-        let (Some(cal), Some(f)) = (self.cal.clone(), self.steps.get(i).copied()) else {
-            return;
-        };
-        let (Some(e), Some(end)) = (f.e, f.end) else {
-            return;
-        };
-        let b = Bounds { s: f.s, e, end };
-        let ctx = self.ctx();
-        let r = self.store.reference();
-        let parts: Vec<Partial> = (0..self.store.inputs.len())
-            .map(|k| step::analyse(&ctx, r, self.store.input(k, cal.shift[k]), cal.g0[k], b))
-            .collect();
-        #[cfg(test)]
-        for (x, part) in self.thump_excess.iter_mut().zip(&parts) {
-            x.push(part.thump_excess);
-        }
-        for (lvl, part) in self.level.iter_mut().zip(parts) {
-            lvl.push(part);
-        }
-        self.infos.push(StepInfo {
-            level_dbfs: self.prog.step_level_dbfs(i),
-            burst_samples: e - f.s,
-            rest_samples: end - e,
-            recovered: f.recovered.unwrap_or(false),
-        });
-        if self.prog.step(i).1 + 1 == self.prog.burst_periods.len() {
-            for (res, lvl) in self.results.iter_mut().zip(self.level.iter_mut()) {
-                for (row, env) in step::finish_level(std::mem::take(lvl), self.fs, self.p) {
-                    res.rows.push(row);
-                    res.envelopes.push(env);
-                }
-            }
-        }
-        self.analysed = i + 1;
-        if self.analysed == self.prog.steps() {
-            self.done = true;
-            self.store.trim(self.store.end());
-        } else {
-            let keep = self.ctx().pre() + self.ctx().margin() + cal.shift_abs() + self.p;
-            self.store.trim(end.saturating_sub(keep));
-        }
-    }
 }

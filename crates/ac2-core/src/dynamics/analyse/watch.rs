@@ -14,14 +14,14 @@ impl Analyser {
         if self.watch.is_some() || self.cal.is_none() {
             return;
         }
-        let Some(f) = self.steps.get(self.analysed) else {
+        let Some(f) = self.steps.get(self.watched) else {
             return;
         };
         let (Some(e), None) = (f.e, f.recovered) else {
             return;
         };
         self.watch = Some(Watch {
-            step: self.analysed,
+            step: self.watched,
             e,
             next: e + self.watch_step(),
             g: vec![Vec::new(); self.store.inputs.len()],
@@ -62,6 +62,7 @@ impl Analyser {
             let i = w.step;
             self.released = self.released.max(i as u32 + 1);
             self.steps[i].recovered = Some(true);
+            self.watched = i + 1;
             if i + 1 == self.prog.steps() {
                 // The source plays at least one more period of pilot before its fade (it
                 // reads the release only after this point was computed), and a replay of
@@ -83,6 +84,7 @@ impl Analyser {
             Rests::Adaptive => false,
         };
         self.steps[i].recovered = Some(recovered);
+        self.watched = i + 1;
         if self.steps[i].end.is_none() {
             self.steps[i].end = self.watch_limit(&w);
         }

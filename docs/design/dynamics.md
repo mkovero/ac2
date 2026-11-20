@@ -131,7 +131,15 @@ the generator.
 - **Reference required.** A dynamics measurement without a loopback reference is refused at
   create (settled decision 3b).
 - **Memory.** The analysis runs on the job thread as the audio arrives, step by step; raw audio
-  is kept only for the step in progress (burst + rest ≤ 40 s × 3 inputs at 96 kHz, about 46 MB).
+  is kept only from the step being analysed on (burst + rest ≤ 40 s × 3 inputs at 96 kHz, about
+  46 MB, plus the audio that arrives while it is analysed).
+- **Pacing.** A step is analysed once its rest is over, but not in one go: its passes (sliding
+  sums and filters whose state is kept between blocks) run 4 samples per input for every
+  sample fed, so each block carries a few blocks' worth of work and a 40 s step is done about
+  20 s later, while the next steps play. Analysing it at once held the job thread for about a
+  second at 96 kHz on a desktop (more on a Pi), and behind the other jobs past the fan-out's
+  2 s queue the run lost audio. Only the run's last step is analysed in the block that completes
+  the run: no audio is needed after it, and the result is due.
 
 ### Gates
 

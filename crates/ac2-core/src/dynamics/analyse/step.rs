@@ -1,5 +1,6 @@
-//! One step of one input, analysed once its rest is over, and a level's rows, finished once
-//! its last step is (attack, settle and overshoot refer to the level's settled burst).
+//! One step of one input, analysed a slice at a time once its rest is over, and a level's
+//! rows, finished once its last step is (attack, settle and overshoot refer to the level's
+//! settled burst).
 
 use num_complex::Complex64;
 
@@ -7,6 +8,7 @@ use super::dsp::{Boxcar, HARMONICS, HannBank, Mixers, Signal, butterworth_lowpas
 use crate::dynamics::{
     Edge, EnvelopePoint, Overshoot, Reading, StepRow, Thump, Time, WindowHarmonics,
 };
+use crate::weighting::Biquad;
 
 /// Envelope points are a quarter period apart for this long after each edge (and before the
 /// burst), then log-spaced.
@@ -343,85 +345,249 @@ fn envelope_points(b: Bounds, ctx: &Ctx<'_>) -> Vec<(u64, Edge, f64)> {
     out
 }
 
-/// Analyses one step of one input. `r` and `y` (the input, already shifted by its whole
-/// delay) must hold `[s − pre − margin − P/2, end + margin + P/2]`.
-pub(super) fn analyse(ctx: &Ctx<'_>, r: Signal<'_>, y: Signal<'_>, g0: f64, b: Bounds) -> Partial {
-    let p = ctx.p();
-    let h = p / 2;
-    let fs = ctx.fs;
-    let lo = b.s - ctx.pre();
-    let hi = b.end;
-    let a0 = lo - ctx.margin() + h;
-    let a1 = hi + ctx.margin() - h;
-    let n = (a1 - a0) as usize;
+/// Where a [`StepJob`] is: its passes in order, each at its next sample.
+#[derive(Debug, Clone, Copy)]
+enum Stage {
+    /// The fundamental's envelopes, at offset `i` from `a0`.
+    Envelope(usize),
+    /// The harmonics, at sample `u`.
+    Harmonics(u64),
+    /// The thump low-pass, at sample `u`.
+    Thump(u64),
+    /// The raw waveforms' peaks, at sample `u`.
+    Peaks(u64),
+}
 
-    // Pass 1: the fundamental's envelopes, gain reduction, and the reconstructed
-    // fundamental the harmonic floor is read from.
-    let mut r_amp = vec![0f32; n];
-    let mut y_amp = vec![0f32; n];
-    let mut gr = vec![0f32; n];
-    let mut rec = vec![0f32; n];
-    {
-        let mut rb = Boxcar::new(r, ctx.mx, a0);
-        let mut yb = Boxcar::new(y, ctx.mx, a0);
-        for i in 0..n {
-            let u = a0 + i as u64;
-            let (rc, yc) = (rb.value(), yb.value());
-            r_amp[i] = rc.norm() as f32;
-            y_amp[i] = yc.norm() as f32;
-            gr[i] = (-(20.0 * (yc.norm() / rc.norm()).log10() - g0)) as f32;
-            rec[i] = (yc * ctx.mx.carrier(u).conj()).re as f32;
-            if i + 1 < n {
-                rb.advance();
-                yb.advance();
+/// The analysis of one step of one input, run a bounded number of samples at a time
+/// ([`StepJob::run`]): every pass is a sliding sum or a filter whose state lives here, so
+/// stopping between samples and resuming changes no arithmetic, and the result is the same
+/// however the work is cut. `r` and `y` (the input, already shifted by its whole delay) must
+/// hold `[s − pre − margin − P/2, end + margin + P/2]` until the job is done.
+#[derive(Debug)]
+pub(super) struct StepJob {
+    b: Bounds,
+    g0: f64,
+    lo: u64,
+    hi: u64,
+    a0: u64,
+    n: usize,
+    stage: Stage,
+    r_amp: Vec<f32>,
+    y_amp: Vec<f32>,
+    gr: Vec<f32>,
+    rec: Vec<f32>,
+    rb: Boxcar,
+    yb: Boxcar,
+    points: Vec<(u64, Edge, f64)>,
+    next_point: usize,
+    windows: [(u64, u64); 4],
+    /// The output's and the reconstructed fundamental's harmonic banks, once pass 2 starts.
+    banks: Option<(HannBank, HannBank)>,
+    envelope: Vec<EnvelopePoint>,
+    sums: [HarmonicSums; 4],
+    lp_y: [Biquad; 4],
+    lp_f: [Biquad; 4],
+    /// Per edge: peak and sum of squares of the output, then of the floor.
+    th: [[f64; 4]; 2],
+    thump_len: u64,
+    thump_end: u64,
+    /// Largest |y| in the burst and its sample offset, over the burst's last stretch, and
+    /// the reference's two.
+    y_peak: f64,
+    y_at: u64,
+    y_tail: f64,
+    r_peak: f64,
+    r_tail: f64,
+}
+
+impl StepJob {
+    pub(super) fn new(ctx: &Ctx<'_>, r: Signal<'_>, y: Signal<'_>, g0: f64, b: Bounds) -> Self {
+        let h = ctx.p() / 2;
+        let lo = b.s - ctx.pre();
+        let hi = b.end;
+        let a0 = lo - ctx.margin() + h;
+        let a1 = hi + ctx.margin() - h;
+        let n = (a1 - a0) as usize;
+        let tail = b.tail();
+        let thump_len = ctx.secs(THUMP_WINDOW_SECONDS);
+        Self {
+            b,
+            g0,
+            lo,
+            hi,
+            a0,
+            n,
+            stage: Stage::Envelope(0),
+            r_amp: vec![0f32; n],
+            y_amp: vec![0f32; n],
+            gr: vec![0f32; n],
+            rec: vec![0f32; n],
+            rb: Boxcar::new(r, ctx.mx, a0),
+            yb: Boxcar::new(y, ctx.mx, a0),
+            points: envelope_points(b, ctx),
+            next_point: 0,
+            windows: [
+                (b.s, (b.s + ctx.secs(ATTACK_WINDOW_SECONDS)).min(b.e)),
+                (b.e - tail, b.e),
+                (b.e, (b.e + ctx.secs(RELEASE_WINDOW_SECONDS)).min(b.end)),
+                (
+                    b.end.saturating_sub(ctx.secs(REST_WINDOW_SECONDS)).max(b.e),
+                    b.end,
+                ),
+            ],
+            banks: None,
+            envelope: Vec::new(),
+            sums: [HarmonicSums::default(); 4],
+            lp_y: butterworth_lowpass_8(THUMP_CORNER_HZ, ctx.fs),
+            lp_f: butterworth_lowpass_8(THUMP_CORNER_HZ, ctx.fs),
+            th: [[0f64; 4]; 2],
+            thump_len,
+            thump_end: (b.e + thump_len).min(hi),
+            y_peak: 0.0,
+            y_at: 0,
+            y_tail: 0.0,
+            r_peak: 0.0,
+            r_tail: 0.0,
+        }
+    }
+
+    fn at(&self, u: u64) -> usize {
+        (u - self.a0) as usize
+    }
+
+    /// Where pass 2 starts: the first envelope point, which lies before the burst.
+    fn first(&self) -> u64 {
+        self.points.first().map_or(self.b.s, |q| q.0).min(self.b.s)
+    }
+
+    /// Runs up to `budget` samples of the passes, taking what it used from `budget`; the
+    /// step's partial once the last pass is done.
+    pub(super) fn run(
+        &mut self,
+        ctx: &Ctx<'_>,
+        r: Signal<'_>,
+        y: Signal<'_>,
+        budget: &mut u64,
+    ) -> Option<Partial> {
+        loop {
+            if *budget == 0 {
+                return None;
+            }
+            match self.stage {
+                Stage::Envelope(i0) => {
+                    let end = self
+                        .n
+                        .min(i0.saturating_add(usize::try_from(*budget).unwrap_or(usize::MAX)));
+                    self.envelope_pass(ctx, r, y, i0, end);
+                    *budget -= (end - i0) as u64;
+                    self.stage = if end == self.n {
+                        let first = self.first();
+                        let rec = Signal {
+                            x: &self.rec,
+                            abs0: self.a0,
+                        };
+                        self.banks = Some((
+                            HannBank::new(y, ctx.mx, first),
+                            HannBank::new(rec, ctx.mx, first),
+                        ));
+                        Stage::Harmonics(first)
+                    } else {
+                        Stage::Envelope(end)
+                    };
+                }
+                Stage::Harmonics(u0) => {
+                    let end = self.hi.min(u0.saturating_add(*budget));
+                    self.harmonic_pass(ctx, y, u0, end);
+                    *budget -= end - u0;
+                    self.stage = if end == self.hi {
+                        self.banks = None;
+                        Stage::Thump(self.lo)
+                    } else {
+                        Stage::Harmonics(end)
+                    };
+                }
+                Stage::Thump(u0) => {
+                    let end = self.thump_end.max(u0).min(u0.saturating_add(*budget));
+                    self.thump_pass(r, y, u0, end);
+                    *budget -= end - u0;
+                    self.stage = if end >= self.thump_end {
+                        Stage::Peaks(self.b.s)
+                    } else {
+                        Stage::Thump(end)
+                    };
+                }
+                Stage::Peaks(u0) => {
+                    let end = self.b.e.min(u0.saturating_add(*budget));
+                    self.peak_pass(ctx, r, y, u0, end);
+                    *budget -= end - u0;
+                    if end == self.b.e {
+                        return Some(self.finish(ctx, r, y));
+                    }
+                    self.stage = Stage::Peaks(end);
+                }
             }
         }
     }
-    let at = |u: u64| (u - a0) as usize;
 
-    // Pass 2: harmonics over the windows and at the envelope points, blind wherever the
-    // 4-period window holds an edge and for 4 periods after it.
-    let edges = [b.s, b.e, b.end];
-    let blind = |u: u64| edges.iter().any(|&x| u + 2 * p >= x && u <= x + 4 * p);
-    let tail = b.tail();
-    let windows = [
-        (b.s, (b.s + ctx.secs(ATTACK_WINDOW_SECONDS)).min(b.e)),
-        (b.e - tail, b.e),
-        (b.e, (b.e + ctx.secs(RELEASE_WINDOW_SECONDS)).min(b.end)),
-        (
-            b.end.saturating_sub(ctx.secs(REST_WINDOW_SECONDS)).max(b.e),
-            b.end,
-        ),
-    ];
-    let points = envelope_points(b, ctx);
-    let mut envelope = Vec::with_capacity(points.len());
-    let mut sums = [HarmonicSums::default(); 4];
-    {
-        let rec_sig = Signal { x: &rec, abs0: a0 };
-        let first = points.first().map_or(b.s, |q| q.0).min(b.s);
-        let mut hy = HannBank::new(y, ctx.mx, first);
-        let mut hf = HannBank::new(rec_sig, ctx.mx, first);
-        let mut next = points.iter().peekable();
+    /// Pass 1: the fundamental's envelopes, gain reduction, and the reconstructed
+    /// fundamental the harmonic floor is read from.
+    fn envelope_pass(&mut self, ctx: &Ctx<'_>, r: Signal<'_>, y: Signal<'_>, i0: usize, i1: usize) {
+        let mx = ctx.mx;
+        for i in i0..i1 {
+            let u = self.a0 + i as u64;
+            let (rc, yc) = (self.rb.value(r, mx), self.yb.value(y, mx));
+            self.r_amp[i] = rc.norm() as f32;
+            self.y_amp[i] = yc.norm() as f32;
+            self.gr[i] = (-(20.0 * (yc.norm() / rc.norm()).log10() - self.g0)) as f32;
+            self.rec[i] = (yc * mx.carrier(u).conj()).re as f32;
+            if i + 1 < self.n {
+                self.rb.advance(r, mx);
+                self.yb.advance(y, mx);
+            }
+        }
+    }
+
+    /// Pass 2: harmonics over the windows and at the envelope points, blind wherever the
+    /// 4-period window holds an edge and for 4 periods after it.
+    fn harmonic_pass(&mut self, ctx: &Ctx<'_>, y: Signal<'_>, u0: u64, u1: u64) {
+        let p = ctx.p();
+        let b = self.b;
+        let edges = [b.s, b.e, b.end];
+        let blind = |u: u64| edges.iter().any(|&x| u + 2 * p >= x && u <= x + 4 * p);
         let arith = 10f64.powf(ARITHMETIC_FLOOR_DB / 10.0);
         let margin = 10f64.powf(FLOOR_MARGIN_DB / 10.0);
-        for u in first..hi {
-            let point = next.next_if(|q| q.0 == u).copied();
+        let rec = Signal {
+            x: &self.rec,
+            abs0: self.a0,
+        };
+        let Some((hy, hf)) = self.banks.as_mut() else {
+            return;
+        };
+        for u in u0..u1 {
+            let point = self
+                .points
+                .get(self.next_point)
+                .filter(|q| q.0 == u)
+                .copied();
+            if point.is_some() {
+                self.next_point += 1;
+            }
             let mut in_window = [false; 4];
             for (w, f) in in_window.iter_mut().enumerate() {
-                *f = u >= windows[w].0 && u < windows[w].1;
+                *f = u >= self.windows[w].0 && u < self.windows[w].1;
             }
-            let y1 = f64::from(y_amp[at(u)]).powi(2);
+            let y1 = f64::from(self.y_amp[(u - self.a0) as usize]).powi(2);
             let mut h_db = [f32::NAN; HARMONICS];
             if (point.is_some() || in_window.contains(&true)) && !blind(u) && y1 > 0.0 {
-                let (yk, fk) = (hy.value(), hf.value());
+                let (yk, fk) = (hy.value(ctx.mx), hf.value(ctx.mx));
                 let rh = yk.map(|v| v * v / y1);
                 let rf = fk.map(|v| (v * v / y1).max(arith));
                 for w in (0..4).filter(|&w| in_window[w]) {
                     for k in 0..HARMONICS {
-                        sums[w].h[k] += rh[k];
-                        sums[w].floor[k] += rf[k];
+                        self.sums[w].h[k] += rh[k];
+                        self.sums[w].floor[k] += rf[k];
                     }
-                    sums[w].n += 1;
+                    self.sums[w].n += 1;
                 }
                 for k in 0..HARMONICS {
                     if rh[k] >= rf[k] * margin {
@@ -430,137 +596,148 @@ pub(super) fn analyse(ctx: &Ctx<'_>, r: Signal<'_>, y: Signal<'_>, g0: f64, b: B
                 }
             }
             if let Some(q) = point {
-                envelope.push(EnvelopePoint {
+                self.envelope.push(EnvelopePoint {
                     edge: q.1,
                     t: q.2,
-                    gr_db: gr[at(u)],
+                    gr_db: self.gr[(u - self.a0) as usize],
                     h_db,
                 });
             }
-            if u + 1 < hi {
-                hy.advance();
-                hf.advance();
+            if u + 1 < self.hi {
+                hy.advance(y, ctx.mx);
+                hf.advance(rec, ctx.mx);
             }
         }
     }
 
-    // Thump: the output and the floor (the reference through the gain the envelope reads)
-    // through the same low-pass, run from before the burst so the filters have settled.
-    let thump_len = ctx.secs(THUMP_WINDOW_SECONDS);
-    let (mut lp_y, mut lp_f) = (
-        butterworth_lowpass_8(THUMP_CORNER_HZ, fs),
-        butterworth_lowpass_8(THUMP_CORNER_HZ, fs),
-    );
-    // Per edge: peak and sum of squares of the output, then of the floor.
-    let mut th = [[0f64; 4]; 2];
-    let thump_end = (b.e + thump_len).min(hi);
-    let starts = [b.s, b.e];
-    for u in lo..thump_end {
-        let i = at(u);
-        let ratio = f64::from(y_amp[i]) / f64::from(r_amp[i]);
-        let fy = cascade(&mut lp_y, y.get(u));
-        let ff = cascade(
-            &mut lp_f,
-            r.get(u) * if ratio.is_finite() { ratio } else { 0.0 },
-        );
-        for (w, &st) in starts.iter().enumerate() {
-            if u >= st && u < st + thump_len {
-                th[w][0] = th[w][0].max(fy.abs());
-                th[w][1] += fy * fy;
-                th[w][2] = th[w][2].max(ff.abs());
-                th[w][3] += ff * ff;
-            }
-        }
-    }
-
-    // Peaks of the raw waveforms (an overshoot shorter than a period is averaged away in
-    // the envelope).
-    let (mut y_peak, mut y_at, mut y_tail, mut r_peak, mut r_tail) = (0f64, 0u64, 0f64, 0f64, 0f64);
-    for u in b.s..b.e {
-        let (yv, rv) = (y.get(u).abs(), r.get(u).abs());
-        if yv > y_peak {
-            y_peak = yv;
-            y_at = u - b.s;
-        }
-        r_peak = r_peak.max(rv);
-        if u >= b.e - tail.max(p).min(b.burst_len()) {
-            y_tail = y_tail.max(yv);
-            r_tail = r_tail.max(rv);
-        }
-    }
-    let thump = if ctx.carrier_hz < THUMP_MIN_CARRIER_HZ || y_peak <= 0.0 {
-        [Thump {
-            peak: Reading::CantTell,
-            rms: Reading::CantTell,
-        }; 2]
-    } else {
-        th.map(|t| {
-            let n = thump_len as f64;
-            let read = |v: f64, floor: f64| {
-                if v < floor * 10f64.powf(FLOOR_MARGIN_DB / 20.0) || v <= 0.0 {
-                    Reading::BelowFloor
-                } else {
-                    Reading::Db(20.0 * (v / y_peak).log10())
+    /// Thump: the output and the floor (the reference through the gain the envelope reads)
+    /// through the same low-pass, run from before the burst so the filters have settled.
+    fn thump_pass(&mut self, r: Signal<'_>, y: Signal<'_>, u0: u64, u1: u64) {
+        let starts = [self.b.s, self.b.e];
+        for u in u0..u1 {
+            let i = self.at(u);
+            let ratio = f64::from(self.y_amp[i]) / f64::from(self.r_amp[i]);
+            let fy = cascade(&mut self.lp_y, y.get(u));
+            let ff = cascade(
+                &mut self.lp_f,
+                r.get(u) * if ratio.is_finite() { ratio } else { 0.0 },
+            );
+            for (w, &st) in starts.iter().enumerate() {
+                if u >= st && u < st + self.thump_len {
+                    let th = &mut self.th[w];
+                    th[0] = th[0].max(fy.abs());
+                    th[1] += fy * fy;
+                    th[2] = th[2].max(ff.abs());
+                    th[3] += ff * ff;
                 }
-            };
-            Thump {
-                peak: read(t[0], t[2]),
-                rms: read((t[1] / n).sqrt(), (t[3] / n).sqrt()),
             }
-        })
-    };
+        }
+    }
 
-    // Settled: the gain over the burst's last 10 %, where the centred envelope lies wholly
-    // inside the burst.
-    let settle_from = (b.e - tail).max(b.s + p + 1);
-    let settle_to = b.e.saturating_sub(h);
-    let settled = settle_to > settle_from && settle_to - settle_from >= p && {
-        let w = &gr[at(settle_from)..at(settle_to)];
-        let q = (w.len() / 4).max(1);
-        let mean = |s: &[f32]| s.iter().map(|&v| f64::from(v)).sum::<f64>() / s.len() as f64;
-        (mean(&w[..q]) - mean(&w[w.len() - q..])).abs() < SETTLED_DB
-    };
+    /// Peaks of the raw waveforms (an overshoot shorter than a period is averaged away in
+    /// the envelope).
+    fn peak_pass(&mut self, ctx: &Ctx<'_>, r: Signal<'_>, y: Signal<'_>, u0: u64, u1: u64) {
+        let b = self.b;
+        let tail_from = b.e - b.tail().max(ctx.p()).min(b.burst_len());
+        for u in u0..u1 {
+            let (yv, rv) = (y.get(u).abs(), r.get(u).abs());
+            if yv > self.y_peak {
+                self.y_peak = yv;
+                self.y_at = u - b.s;
+            }
+            self.r_peak = self.r_peak.max(rv);
+            if u >= tail_from {
+                self.y_tail = self.y_tail.max(yv);
+                self.r_tail = self.r_tail.max(rv);
+            }
+        }
+    }
 
-    // The searches skip the first period plus one sample after each edge, where the
-    // one-period envelope still holds the other side of the step.
-    let a_from = b.s + p + 1;
-    let attack = if settle_to > a_from {
-        GrTrace::new(&gr[at(a_from)..at(settle_to)], a_from)
-    } else {
-        GrTrace::default()
-    };
-    let gr_end = window_gr(r, y, b.e - p.min(b.burst_len()), b.e, ctx.mx, g0);
-    let te = b.e - 1;
-    let r_from = te + p + 1;
-    let r_to = b.end.saturating_sub(h);
-    let rest = if r_to > r_from {
-        &gr[at(r_from)..at(r_to)]
-    } else {
-        &[][..]
-    };
-    let release_tau = first_at_most(rest, TAU_FALL * gr_end, r_from, te, fs);
-    let recovery_2db = last_at_least(rest, 2.0, r_from, te, fs);
-    let recovery_0_5db = last_at_least(rest, 0.5, r_from, te, fs);
-    let drift = -window_gr(r, y, b.end - p, b.end, ctx.mx, g0);
+    /// What the passes leave, read off: each a scan of the stored gain reduction or a
+    /// single period.
+    fn finish(&mut self, ctx: &Ctx<'_>, r: Signal<'_>, y: Signal<'_>) -> Partial {
+        let p = ctx.p();
+        let h = p / 2;
+        let fs = ctx.fs;
+        let b = self.b;
+        let tail = b.tail();
+        let (y_peak, th, thump_len) = (self.y_peak, self.th, self.thump_len);
+        let thump = if ctx.carrier_hz < THUMP_MIN_CARRIER_HZ || y_peak <= 0.0 {
+            [Thump {
+                peak: Reading::CantTell,
+                rms: Reading::CantTell,
+            }; 2]
+        } else {
+            th.map(|t| {
+                let n = thump_len as f64;
+                let read = |v: f64, floor: f64| {
+                    if v < floor * 10f64.powf(FLOOR_MARGIN_DB / 20.0) || v <= 0.0 {
+                        Reading::BelowFloor
+                    } else {
+                        Reading::Db(20.0 * (v / y_peak).log10())
+                    }
+                };
+                Thump {
+                    peak: read(t[0], t[2]),
+                    rms: read((t[1] / n).sqrt(), (t[3] / n).sqrt()),
+                }
+            })
+        };
 
-    Partial {
-        bounds: b,
-        gr_end,
-        settled,
-        attack,
-        y_peak: (y_peak, y_at as f64 / fs),
-        y_tail_peak: y_tail,
-        r_peak,
-        r_tail_peak: r_tail,
-        release_tau,
-        recovery_2db,
-        recovery_0_5db,
-        harmonics: sums.map(|s| s.reading()),
-        thump,
-        drift,
-        envelope,
-        #[cfg(test)]
-        thump_excess: th.map(|t| [20.0 * (t[0] / t[2]).log10(), 10.0 * (t[1] / t[3]).log10()]),
+        let gr = &self.gr;
+        let at = |u: u64| (u - self.a0) as usize;
+        // Settled: the gain over the burst's last 10 %, where the centred envelope lies
+        // wholly inside the burst.
+        let settle_from = (b.e - tail).max(b.s + p + 1);
+        let settle_to = b.e.saturating_sub(h);
+        let settled = settle_to > settle_from && settle_to - settle_from >= p && {
+            let w = &gr[at(settle_from)..at(settle_to)];
+            let q = (w.len() / 4).max(1);
+            let mean = |s: &[f32]| s.iter().map(|&v| f64::from(v)).sum::<f64>() / s.len() as f64;
+            (mean(&w[..q]) - mean(&w[w.len() - q..])).abs() < SETTLED_DB
+        };
+
+        // The searches skip the first period plus one sample after each edge, where the
+        // one-period envelope still holds the other side of the step.
+        let a_from = b.s + p + 1;
+        let attack = if settle_to > a_from {
+            GrTrace::new(&gr[at(a_from)..at(settle_to)], a_from)
+        } else {
+            GrTrace::default()
+        };
+        let gr_end = window_gr(r, y, b.e - p.min(b.burst_len()), b.e, ctx.mx, self.g0);
+        let te = b.e - 1;
+        let r_from = te + p + 1;
+        let r_to = b.end.saturating_sub(h);
+        let rest = if r_to > r_from {
+            &gr[at(r_from)..at(r_to)]
+        } else {
+            &[][..]
+        };
+        let release_tau = first_at_most(rest, TAU_FALL * gr_end, r_from, te, fs);
+        let recovery_2db = last_at_least(rest, 2.0, r_from, te, fs);
+        let recovery_0_5db = last_at_least(rest, 0.5, r_from, te, fs);
+        let drift = -window_gr(r, y, b.end - p, b.end, ctx.mx, self.g0);
+
+        Partial {
+            bounds: b,
+            gr_end,
+            settled,
+            attack,
+            y_peak: (y_peak, self.y_at as f64 / fs),
+            y_tail_peak: self.y_tail,
+            r_peak: self.r_peak,
+            r_tail_peak: self.r_tail,
+            release_tau,
+            recovery_2db,
+            recovery_0_5db,
+            harmonics: self.sums.map(|s| s.reading()),
+            thump,
+            drift,
+            envelope: std::mem::take(&mut self.envelope),
+            #[cfg(test)]
+            thump_excess: th.map(|t| [20.0 * (t[0] / t[2]).log10(), 10.0 * (t[1] / t[3]).log10()]),
+        }
     }
 }
 
