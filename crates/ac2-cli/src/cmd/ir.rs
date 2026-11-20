@@ -331,11 +331,11 @@ async fn foreground(
                 }
                 Some(Input::Key(Key::Enter)) if run.is_none() => {
                     let r = c
-                        .call(Command::SweepRun {
+                        .call(Command::SweepRun(ac2_proto::SweepRunArgs {
                             lease_token: lease.token(),
                             meas: meas.id,
                             name: name.clone(),
-                        })
+                        }))
                         .await
                         .and_then(|r| expect_body!("sweep.run", r, ReplyBody::Sweep(s) => s));
                     match r {

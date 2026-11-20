@@ -71,11 +71,11 @@ pub(crate) fn create(c: &mut Client, name: &str, config: SweepConfig) -> MeasId 
 }
 
 pub(crate) fn start(c: &mut Client, token: LeaseToken, meas: MeasId) -> SweepRun {
-    c.sweep(Command::SweepRun {
+    c.sweep(Command::SweepRun(ac2_proto::SweepRunArgs {
         lease_token: token,
         meas,
         name: None,
-    })
+    }))
 }
 
 pub(crate) fn arm(c: &mut Client, token: LeaseToken) {
@@ -188,11 +188,11 @@ fn slow_sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
 
     // Refused before it is armed, above the ceiling.
     let capture = |c: &mut Client, meas: MeasId| {
-        c.call(Command::SweepRun {
+        c.call(Command::SweepRun(ac2_proto::SweepRunArgs {
             lease_token: token,
             meas,
             name: None,
-        })
+        }))
     };
     let e = capture(&mut c, meas).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{}", e.msg);

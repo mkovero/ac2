@@ -1,6 +1,9 @@
 //! Every ctrl command and its wire name, mutation flag and lease token.
 
 mod meta;
+mod run;
+
+pub use run::{DynamicsRunArgs, SweepRunArgs};
 
 use std::net::SocketAddr;
 
@@ -642,39 +645,14 @@ pub enum Command {
     },
 
     // -- sweep --------------------------------------------------------------------------
-    /// Run a sweep measurement with its settings: plays its `repeats` synchronised sweeps,
-    /// records the reference and measurement inputs and stores a `sweep` trace it owns
-    /// (response, harmonic distortion, IR, room parameters). Like firing, it needs the
-    /// stimulus lease and the generator armed; the reply is the started run, whose progress
-    /// and outcome follow as `sweep` events.
+    /// Run a sweep measurement ([`SweepRunArgs`]).
     #[serde(rename = "sweep.run")]
-    SweepRun {
-        /// Lease.
-        lease_token: LeaseToken,
-        /// The sweep measurement.
-        meas: MeasId,
-        /// Name of the resulting trace; `None` = `Run <number>`.
-        name: Option<String>,
-    },
+    SweepRun(SweepRunArgs),
 
     // -- dynamics -----------------------------------------------------------------------
-    /// Run a dynamics measurement with its settings: plays its tone-burst programme,
-    /// records the reference and measured inputs and stores one `dynamics` trace it owns
-    /// (step table and envelopes per input). Like a sweep it needs the stimulus lease and
-    /// the generator armed; the reply is the started run, whose progress and outcome follow
-    /// as `dynamics` events.
+    /// Run a dynamics measurement ([`DynamicsRunArgs`]).
     #[serde(rename = "dynamics.run")]
-    DynamicsRun {
-        /// Lease.
-        lease_token: LeaseToken,
-        /// The dynamics measurement.
-        meas: MeasId,
-        /// Name of the resulting trace; `None` = `Run <number>`.
-        name: Option<String>,
-        /// A dynamics trace whose rests to replay instead of adapting them, so an A/B pair
-        /// plays an identical programme.
-        rests_from: Option<TraceId>,
-    },
+    DynamicsRun(DynamicsRunArgs),
 
     // -- state, grid, file --------------------------------------------------------------
     /// Full state snapshot.

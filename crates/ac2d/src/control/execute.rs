@@ -343,17 +343,17 @@ impl Control {
                 step,
             } => self.spl_band_log_get(meas, from, until, step),
 
-            Command::SweepRun {
+            Command::SweepRun(ac2_proto::SweepRunArgs {
                 lease_token,
                 meas,
                 name,
-            } => self.sweep_run(peer, lease_token, meas, name),
-            Command::DynamicsRun {
+            }) => self.sweep_run(peer, lease_token, meas, name),
+            Command::DynamicsRun(ac2_proto::DynamicsRunArgs {
                 lease_token,
                 meas,
                 name,
                 rests_from,
-            } => self.dynamics_run(peer, lease_token, meas, name, rests_from),
+            }) => self.dynamics_run(peer, lease_token, meas, name, rests_from),
 
             Command::StateSnapshot => Ok(ReplyBody::Snapshot(Box::new(
                 self.store.snapshot(self.s.incarnation),

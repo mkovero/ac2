@@ -145,11 +145,11 @@ pub fn commands() -> Vec<Command> {
             from: 120,
             max: 3600,
         },
-        Command::SweepRun {
+        Command::SweepRun(crate::SweepRunArgs {
             lease_token: token(),
             meas: MeasId(7),
             name: Some("1083 sweep".into()),
-        },
+        }),
         Command::StateSnapshot,
         Command::StateSince { rev: Rev(41) },
         Command::GridGet {
@@ -476,12 +476,12 @@ pub fn commands() -> Vec<Command> {
             }),
             port: Some(47830),
         },
-        Command::DynamicsRun {
+        Command::DynamicsRun(crate::DynamicsRunArgs {
             lease_token: token(),
             meas: MeasId(12),
             name: None,
             rests_from: Some(TraceId(14)),
-        },
+        }),
     ])
     .collect()
 }

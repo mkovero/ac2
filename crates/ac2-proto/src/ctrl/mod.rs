@@ -10,7 +10,7 @@ mod error;
 mod reply;
 mod warning;
 
-pub use command::Command;
+pub use command::{Command, DynamicsRunArgs, SweepRunArgs};
 pub use error::{ErrorCode, ErrorDetail, ImportProblem, MicCurveFileReason, ProtoError};
 pub use reply::{Reply, ReplyBody, Welcome};
 pub use warning::Warning;

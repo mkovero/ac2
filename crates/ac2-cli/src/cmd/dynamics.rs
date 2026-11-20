@@ -193,12 +193,12 @@ async fn foreground(
                 }
                 Some(Input::Key(Key::Enter)) if run.is_none() => {
                     let r = c
-                        .call(Command::DynamicsRun {
+                        .call(Command::DynamicsRun(ac2_proto::DynamicsRunArgs {
                             lease_token: lease.token(),
                             meas: meas.id,
                             name: name.clone(),
                             rests_from,
-                        })
+                        }))
                         .await
                         .and_then(|r| expect_body!("dynamics.run", r, ReplyBody::Dynamics(s) => s));
                     match r {

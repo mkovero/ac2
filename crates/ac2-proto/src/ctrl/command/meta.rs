@@ -71,8 +71,8 @@ impl Command {
             Self::SplBandTransfer { .. } => "spl.band_transfer",
             Self::SplBandLogGet { .. } => "spl.band_log_get",
             Self::SplHistoryGet { .. } => "spl.history_get",
-            Self::SweepRun { .. } => "sweep.run",
-            Self::DynamicsRun { .. } => "dynamics.run",
+            Self::SweepRun(_) => "sweep.run",
+            Self::DynamicsRun(_) => "dynamics.run",
             Self::StateSnapshot => "state.snapshot",
             Self::StateSince { .. } => "state.since",
             Self::GridGet { .. } => "grid.get",
@@ -159,8 +159,8 @@ impl Command {
             | Self::GenRefresh { lease_token }
             | Self::GenRelease { lease_token }
             | Self::SessionDetectLoopback { lease_token, .. }
-            | Self::SweepRun { lease_token, .. }
-            | Self::DynamicsRun { lease_token, .. } => Some(*lease_token),
+            | Self::SweepRun(super::SweepRunArgs { lease_token, .. })
+            | Self::DynamicsRun(super::DynamicsRunArgs { lease_token, .. }) => Some(*lease_token),
             _ => None,
         }
     }

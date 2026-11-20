@@ -67,11 +67,11 @@ fn sweep_progress_strip() -> R {
         armed: true,
         firing: false,
     })?;
-    rig.cli.call(Command::SweepRun {
+    rig.cli.call(Command::SweepRun(ac2_proto::SweepRunArgs {
         lease_token: lease.token(),
         meas: m.id,
         name: None,
-    })?;
+    }))?;
     step_until(&mut h, "the progress strip", |a| {
         a.state
             .operation()

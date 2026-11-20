@@ -304,11 +304,11 @@ fn inputs_that_make_no_run_are_refused() {
     );
     arm(&mut c, token);
     let e = c
-        .call(Command::SweepRun {
+        .call(Command::SweepRun(ac2_proto::SweepRunArgs {
             lease_token: token,
             meas: uncaptured,
             name: None,
-        })
+        }))
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
     assert!(

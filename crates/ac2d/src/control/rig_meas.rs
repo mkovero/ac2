@@ -270,8 +270,8 @@ impl Control {
             | Command::SplBandTransfer { .. }
             | Command::SplBandLogGet { .. }
             | Command::SplHistoryGet { .. }
-            | Command::SweepRun { .. }
-            | Command::DynamicsRun { .. }
+            | Command::SweepRun(..)
+            | Command::DynamicsRun(..)
             | Command::StateSnapshot
             | Command::StateSince { .. }
             | Command::GridGet { .. }

@@ -117,12 +117,12 @@ fn play(
 ) -> TraceId {
     arm(c, token);
     let r = c
-        .call(Command::DynamicsRun {
+        .call(Command::DynamicsRun(ac2_proto::DynamicsRunArgs {
             lease_token: token,
             meas,
             name: None,
             rests_from,
-        })
+        }))
         .unwrap()
         .dynamics();
     assert!(r.active(), "{:?}", r.status);
@@ -167,24 +167,24 @@ fn slow_dynamics_run_stores_one_trace_that_exports_and_imports() {
     assert_eq!(e.code, ErrorCode::Invalid, "{}", e.msg);
     let meas = create(&mut c, config());
     let e = c
-        .call(Command::DynamicsRun {
+        .call(Command::DynamicsRun(ac2_proto::DynamicsRunArgs {
             lease_token: token,
             meas,
             name: None,
             rests_from: None,
-        })
+        }))
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{}", e.msg);
     assert!(e.msg.contains("arm"), "{}", e.msg);
 
     arm(&mut c, token);
     let r = c
-        .call(Command::DynamicsRun {
+        .call(Command::DynamicsRun(ac2_proto::DynamicsRunArgs {
             lease_token: token,
             meas,
             name: None,
             rests_from: None,
-        })
+        }))
         .unwrap()
         .dynamics();
     // 1 kHz is a 48-sample period at 48 kHz: played as typed.

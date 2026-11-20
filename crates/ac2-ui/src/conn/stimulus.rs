@@ -55,11 +55,11 @@ pub(super) async fn stimulus_task(
                                     .await?;
                             }
                             client
-                                .call(Command::SweepRun {
+                                .call(Command::SweepRun(ac2_proto::SweepRunArgs {
                                     lease_token: l.token(),
                                     meas,
                                     name: None,
-                                })
+                                }))
                                 .await
                                 .and_then(|r| expect_body!("sweep.run", r, ReplyBody::Sweep(s) => s))
                         }
