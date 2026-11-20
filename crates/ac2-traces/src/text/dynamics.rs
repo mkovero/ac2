@@ -270,6 +270,9 @@ fn flag(no: usize, col: &str, v: &str) -> Result<bool, ImportError> {
     }
 }
 
+/// A table's rows, each with its line number and its cells.
+type Rows<'a> = Vec<(usize, Vec<&'a str>)>;
+
 /// The table announced at `lines[at]` (header line next, then its rows): its rows split
 /// into cells, after checking the column header.
 fn table<'a>(
@@ -277,7 +280,7 @@ fn table<'a>(
     at: usize,
     header: &str,
     max: usize,
-) -> Result<(Vec<(usize, Vec<&'a str>)>, usize), ImportError> {
+) -> Result<(Rows<'a>, usize), ImportError> {
     let (no, l) = lines[at];
     let v = l.split_once(": ").map_or("", |(_, v)| v);
     let a: Announce = serde_json::from_str(v).map_err(|e| bad(no, "table", &e))?;

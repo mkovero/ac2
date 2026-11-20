@@ -45,7 +45,7 @@ fn trace(id: u32) -> StoredTrace {
         DynamicsRow {
             gr_end: Db(6.5 + k as f64 / 7.0),
             gr_settled: (k != 1).then_some(Db(7.0)),
-            settled: k % 2 == 0,
+            settled: k.is_multiple_of(2),
             attack_tau: times[k % 4],
             attack_2db: times[(k + 1) % 4],
             settle_0_5db: times[(k + 2) % 4],
