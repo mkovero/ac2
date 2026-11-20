@@ -48,7 +48,7 @@ fn config() -> DynamicsConfig {
         pilot: Dbfs(-33.0),
         bursts: vec![Dbfs(-20.0)],
         durations: vec![Seconds(0.01), Seconds(0.1)],
-        rest_max: Seconds(2.0),
+        rest_max: Seconds(4.0),
     }
 }
 
@@ -250,9 +250,9 @@ fn slow_dynamics_run_stores_one_trace_that_exports_and_imports() {
         assert_eq!(row.attack_tau, DynamicsTime::NoGainReduction, "{row:?}");
         assert_eq!(row.release_tau, DynamicsTime::NoGainReduction, "{row:?}");
     }
-    // A linear path recovers at once: every rest is the shortest.
+    // A linear path is flat at once: every rest ends at the first flat reading after `rest_min`.
     for s in &dyn_data.info.steps {
-        assert!(s.recovered && s.rest.0 < 2.5, "{s:?}");
+        assert!(s.recovered && s.rest.0 < 3.0, "{s:?}");
     }
 
     // Exported and imported back, it is the same trace.
@@ -266,12 +266,28 @@ fn slow_dynamics_run_stores_one_trace_that_exports_and_imports() {
         format: ImportFormat::Auto,
         role: ImportRole::Trace,
         ir: None,
-        content: Blob(csv.into_bytes()),
+        content: Blob(csv.clone().into_bytes()),
         owner: TraceOwner::Imported,
     });
     assert_eq!(back.kind, TraceKind::Dynamics);
     let again = c.trace_data(Command::TraceGet { trace: back.id });
-    assert_eq!(again.dynamics, data.dynamics);
+    assert_eq!(
+        again.dynamics.as_ref().map(|d| &d.info),
+        data.dynamics.as_ref().map(|d| &d.info)
+    );
+    // Harmonics under the analysis floor are NaN points, so the data is compared as the
+    // text it exports to; the CSV carries its own header lines, which name the trace.
+    let csv_again = c.export_text(Command::TraceExport {
+        trace: back.id,
+        format: ExportFormat::Ac2Csv,
+    });
+    let body = |t: &str| {
+        t.lines()
+            .skip_while(|l| !l.starts_with("# dynamics_info: "))
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(body(&csv_again), body(&csv));
 
     // A replayed run plays the first run's rests and is numbered after it.
     let replay = play(&mut d, &mut c, &sub, &ka, token, meas, Some(back.id));

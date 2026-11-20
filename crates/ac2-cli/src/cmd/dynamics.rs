@@ -619,7 +619,7 @@ mod tests {
         let _ = driver.join();
         let text = String::from_utf8(buf)?;
         assert!(
-            text.contains("ARMED  VCA · 2 steps at 1000.00 Hz, up to -20.0 dBFS"),
+            text.contains("ARMED  VCA · 2 steps at 1000.00 Hz, up to −20.0 dBFS"),
             "{text}"
         );
         let header = STEP_COLUMNS.join("  ");
