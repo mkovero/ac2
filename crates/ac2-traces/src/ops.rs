@@ -213,7 +213,7 @@ pub fn average(
     let grid = traces[0].grid.clone();
     let freqs = grid.centres();
     match kind {
-        TraceKind::Target => Err(OpError::KindNotSupported(kind)),
+        TraceKind::Target | TraceKind::Dynamics => Err(OpError::KindNotSupported(kind)),
         TraceKind::Spectrum { .. } | TraceKind::Rta { .. } => {
             if method != AverageMethod::Power {
                 return Err(OpError::PowerOnly);

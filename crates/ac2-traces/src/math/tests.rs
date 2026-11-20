@@ -478,6 +478,7 @@ fn level_trace(grid: GridDef, columns: Columns) -> StoredTrace {
         grid,
         columns,
         sweep: None,
+        dynamics: None,
         ir: None,
         mic_curve: None,
     }

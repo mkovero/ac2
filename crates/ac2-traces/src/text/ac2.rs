@@ -33,7 +33,58 @@ pub(super) fn kind_from_header(v: &str) -> Option<TraceKind> {
             scale: LevelScale::DbSpl,
         },
         "sweep" => TraceKind::Sweep,
+        "dynamics" => TraceKind::Dynamics,
         _ => return None,
+    })
+}
+
+fn header_kind_of(lines: &[(usize, &str)]) -> Option<TraceKind> {
+    lines
+        .iter()
+        .map(|(_, l)| l.trim())
+        .take_while(|l| l.is_empty() || l.starts_with('#'))
+        .find_map(|l| l.strip_prefix("# kind: "))
+        .and_then(kind_from_header)
+}
+
+/// A dynamics export: its name, `delay_ms` and the dynamics part
+/// ([`super::dynamics`]); it has no frequency rows.
+fn import_dynamics(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
+    let mut name = None;
+    let mut delay = None;
+    for &(no, l) in lines {
+        let l = l.trim();
+        if !l.starts_with('#') && !l.is_empty() {
+            break;
+        }
+        if let Some(v) = l.strip_prefix("# name: ") {
+            name = Some(v.to_owned());
+        } else if let Some(v) = l.strip_prefix("# delay_ms: ") {
+            let ms = number(v).filter(|d| d.is_finite()).ok_or_else(|| {
+                fail(
+                    Some(no),
+                    ImportProblem::BadHeader,
+                    format!("delay_ms: {v:?} is not a number"),
+                )
+            })?;
+            delay = Some(Seconds(ms / 1000.0));
+        }
+    }
+    let d = super::dynamics::read(lines)?;
+    let rows = d.inputs.iter().map(|i| i.rows.len()).sum();
+    Ok(Imported {
+        name,
+        format: ImportFormat::Ac2Csv,
+        kind: TraceKind::Dynamics,
+        grid: super::dynamics::grid(d.info.carrier),
+        columns: super::dynamics::columns(),
+        rows,
+        delay,
+        sweep: None,
+        dynamics: Some(Box::new(d)),
+        ir: None,
+        notes: Vec::new(),
+        ir_file: None,
     })
 }
 
@@ -66,6 +117,7 @@ pub(super) fn kind_header(k: TraceKind) -> &'static str {
             scale: LevelScale::DbSpl,
         } => "rta dB SPL",
         TraceKind::Sweep => "sweep",
+        TraceKind::Dynamics => "dynamics",
     }
 }
 
@@ -94,6 +146,9 @@ pub(super) fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportErro
             format!("not an ac2 CSV file (expected {AC2_CSV_MAGIC:?})")
         };
         return Err(fail(Some(first.0), ImportProblem::BadHeader, msg));
+    }
+    if header_kind_of(lines) == Some(TraceKind::Dynamics) {
+        return import_dynamics(lines);
     }
     let mut name = None;
     let mut grid = None;
@@ -332,6 +387,7 @@ pub(super) fn import_ac2(lines: &[(usize, &str)]) -> Result<Imported, ImportErro
         rows,
         delay,
         sweep,
+        dynamics: None,
         ir: transfer_ir,
         notes,
         ir_file: None,

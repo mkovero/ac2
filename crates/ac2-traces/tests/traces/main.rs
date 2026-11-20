@@ -16,6 +16,7 @@ use ac2_traces::text::{export_csv, import};
 
 mod averaging;
 mod core_proto;
+mod dynamics;
 mod import;
 mod load_checks;
 mod mic_curve;
@@ -106,6 +107,7 @@ fn delayed(id: u32, epoch: u32, arrival: f64, inserted: f64, coh: f32) -> Stored
         },
         grid: g,
         sweep: None,
+        dynamics: None,
         ir: None,
         mic_curve: None,
     }

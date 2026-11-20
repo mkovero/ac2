@@ -163,6 +163,7 @@ fn a_over_b_of_stored_traces() {
         grid: target.grid,
         columns: target.columns,
         sweep: None,
+        dynamics: None,
         ir: None,
         mic_curve: None,
     };
@@ -190,6 +191,7 @@ pub(super) fn level_trace(id: u32, kind: TraceKind, g: GridDef) -> StoredTrace {
         },
         grid: g,
         sweep: None,
+        dynamics: None,
         ir: None,
         mic_curve: None,
     }

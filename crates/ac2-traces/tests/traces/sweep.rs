@@ -33,6 +33,7 @@ pub(super) fn sweep_trace(id: u32) -> StoredTrace {
             phase_deg: Some(ramp(10.0)),
             coherence: None,
         },
+        dynamics: None,
         sweep: Some(SweepData {
             harmonics: vec![
                 HarmonicCurve {

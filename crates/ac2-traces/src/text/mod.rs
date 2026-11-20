@@ -72,6 +72,7 @@
 
 mod ac2;
 pub mod apo;
+pub mod dynamics;
 pub mod eq;
 mod export;
 mod table;
@@ -238,6 +239,8 @@ pub struct Imported {
     /// A sweep export's distortion, impulse response and analysis facts (`kind` is then
     /// `sweep`).
     pub sweep: Option<SweepData>,
+    /// A dynamics export's step table and envelopes (`kind` is then `dynamics`).
+    pub dynamics: Option<Box<ac2_proto::model::DynamicsData>>,
     /// A transfer export's impulse response (`kind` is then `transfer`).
     pub ir: Option<TransferIr>,
     /// What the file held that the import does not keep.
@@ -272,6 +275,7 @@ fn import_text(lines: &[(usize, &str)]) -> Result<Imported, ImportError> {
         rows,
         delay: None,
         sweep: None,
+        dynamics: None,
         ir: None,
         notes: Vec::new(),
         ir_file: None,
@@ -307,12 +311,20 @@ pub fn import(
             ));
         }
     };
+    if role == ImportRole::Target && imported.kind == TraceKind::Dynamics {
+        return Err(fail(
+            None,
+            ImportProblem::NoData,
+            "a dynamics export holds no magnitude to be a target",
+        ));
+    }
     if role == ImportRole::Target {
         // A target is a specified magnitude: nothing measured comes with it.
         imported.kind = TraceKind::Target;
         imported.columns.phase_deg = None;
         imported.columns.coherence = None;
         imported.sweep = None;
+        imported.dynamics = None;
         imported.ir = None;
         imported.delay = None;
         imported.notes.clear();

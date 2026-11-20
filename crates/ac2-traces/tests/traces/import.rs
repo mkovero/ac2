@@ -180,6 +180,7 @@ fn linear_grid_spectrum_round_trips_with_dc_bin() {
             coherence: None,
         },
         sweep: None,
+        dynamics: None,
         ir: None,
         mic_curve: None,
     };

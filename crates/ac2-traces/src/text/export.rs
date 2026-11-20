@@ -131,6 +131,16 @@ fn source_text(s: &TraceSource) -> String {
             u32::from(*reference_input) + 1,
             epoch.0
         ),
+        TraceSource::Dynamics {
+            meas,
+            meas_name,
+            run,
+            number,
+            epoch,
+        } => format!(
+            "run {number} of dynamics measurement {meas_name:?} (measurement {meas}, run {}), session epoch {}",
+            run.0, epoch.0
+        ),
     }
 }
 
@@ -217,6 +227,11 @@ pub fn export_csv(t: &StoredTrace) -> String {
          after capture are display edits"
             .into(),
     );
+    if let Some(d) = &t.dynamics {
+        let mut out = format!("{AC2_CSV_MAGIC}\n{s}");
+        super::dynamics::write(&mut out, d);
+        return out;
+    }
     line(
         "grid",
         serde_json::to_string(&t.grid).unwrap_or_else(|_| "null".into()),

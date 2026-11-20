@@ -8,7 +8,9 @@
 
 use ac2_proto::GridDef;
 use ac2_proto::frame::MAX_N;
-use ac2_proto::model::{DistortionCurve, SweepData, SweepInfo, TraceIr, TransferIr};
+use ac2_proto::model::{
+    DistortionCurve, DynamicsData, DynamicsInfo, SweepData, SweepInfo, TraceIr, TransferIr,
+};
 
 use crate::columns::{Columns, StoredTrace};
 
@@ -243,6 +245,9 @@ pub fn trace(t: &StoredTrace) -> Result<(), String> {
     if let Some(i) = &t.ir {
         transfer_ir(i)?;
     }
+    if let Some(d) = &t.dynamics {
+        dynamics(d)?;
+    }
     if !t.meta.delay.0.is_finite() {
         return Err("delay is not finite".into());
     }
@@ -265,4 +270,112 @@ pub fn mic_f_norm(f: f64) -> Result<(), String> {
     } else {
         Err("mic curve normalisation frequency must be finite and above 0 Hz".into())
     }
+}
+
+/// Most measured inputs a dynamics trace holds.
+pub const DYNAMICS_MAX_INPUTS: usize = 8;
+
+/// Most steps a dynamics trace holds: 8 levels × 16 durations.
+pub const DYNAMICS_MAX_STEPS: usize = 128;
+
+/// Checks a dynamics run's settings: a carrier period of at least 12 samples at a positive
+/// rate, finite levels and lengths, and at most [`DYNAMICS_MAX_STEPS`] steps.
+pub fn dynamics_info(i: &DynamicsInfo) -> Result<(), String> {
+    let finite = |v: f64| v.is_finite();
+    if !(finite(i.sample_rate.0) && i.sample_rate.0 > 0.0) || i.period < 12 {
+        return Err("dynamics: sample rate or carrier period out of range".into());
+    }
+    if !finite(i.carrier.0) || i.carrier.0 <= 0.0 {
+        return Err("dynamics: carrier not a positive frequency".into());
+    }
+    if i.steps.is_empty() || i.steps.len() > DYNAMICS_MAX_STEPS {
+        return Err(format!(
+            "dynamics: {} steps (1 … {DYNAMICS_MAX_STEPS})",
+            i.steps.len()
+        ));
+    }
+    let values = [i.pilot.0, i.rest_max.0]
+        .into_iter()
+        .chain(i.bursts.iter().map(|b| b.0))
+        .chain(i.durations.iter().map(|d| d.0))
+        .chain(
+            i.steps
+                .iter()
+                .flat_map(|s| [s.level.0, s.burst.0, s.rest.0]),
+        );
+    if values.into_iter().any(|v| !finite(v)) {
+        return Err("dynamics: a level or length is not finite".into());
+    }
+    Ok(())
+}
+
+/// Checks a dynamics trace's data: its settings ([`dynamics_info`]), 1 …
+/// [`DYNAMICS_MAX_INPUTS`] inputs, each with one row and one envelope per step, and finite
+/// numbers where a measurement always has one (envelope harmonics may be NaN, a blind
+/// stretch).
+pub fn dynamics(d: &DynamicsData) -> Result<(), String> {
+    use ac2_proto::model::{DynamicsLevel, DynamicsTime};
+    dynamics_info(&d.info)?;
+    if d.inputs.is_empty() || d.inputs.len() > DYNAMICS_MAX_INPUTS {
+        return Err(format!(
+            "dynamics: {} inputs (1 … {DYNAMICS_MAX_INPUTS})",
+            d.inputs.len()
+        ));
+    }
+    let n = d.info.steps.len();
+    let time = |t: DynamicsTime| match t {
+        DynamicsTime::Seconds { value } => value.0.is_finite(),
+        _ => true,
+    };
+    let level = |l: DynamicsLevel| match l {
+        DynamicsLevel::Db { value } => value.0.is_finite(),
+        _ => true,
+    };
+    for i in &d.inputs {
+        if i.rows.len() != n || i.envelopes.len() != n {
+            return Err("dynamics: an input without one row and one envelope per step".into());
+        }
+        if !i.delay.0.is_finite() || !i.g0.0.is_finite() {
+            return Err("dynamics: an input's delay or baseline gain is not finite".into());
+        }
+        for r in &i.rows {
+            let w = &r.harmonics;
+            let ok = r.gr_end.0.is_finite()
+                && r.drift.0.is_finite()
+                && r.gr_settled.is_none_or(|g| g.0.is_finite())
+                && r.overshoot.is_none_or(|o| {
+                    o.level.0.is_finite() && o.at.0.is_finite() && o.reference.0.is_finite()
+                })
+                && [
+                    r.attack_tau,
+                    r.attack_2db,
+                    r.settle_0_5db,
+                    r.release_tau,
+                    r.recovery_2db,
+                    r.recovery_0_5db,
+                ]
+                .into_iter()
+                .all(time)
+                && [w.attack, w.settled, w.release, w.rest]
+                    .iter()
+                    .flat_map(|h| h.h.iter().copied().chain(std::iter::once(h.thd)))
+                    .chain([
+                        r.thump_start.peak,
+                        r.thump_start.rms,
+                        r.thump_end.peak,
+                        r.thump_end.rms,
+                    ])
+                    .all(level);
+            if !ok {
+                return Err("dynamics: a step value is not finite".into());
+            }
+        }
+        let points = i.envelopes.iter().flatten();
+        if points.into_iter().any(|p| {
+            !p.t.is_finite() || p.gr_db.is_infinite() || p.h_db.iter().any(|h| h.is_infinite())
+        }) {
+            return Err("dynamics: an envelope point is not finite".into());
+        }
+    }
+    Ok(())
 }

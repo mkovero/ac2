@@ -182,6 +182,7 @@ fn export_then_import_is_bit_exact() {
         grid: imp.grid.clone(),
         columns: imp.columns.clone(),
         sweep: None,
+        dynamics: None,
         ir: imp.ir.clone(),
         mic_curve: None,
     };
@@ -245,6 +246,7 @@ fn a_trace_without_an_ir_or_with_a_decimated_one_is_not_exported() {
         grid: imp.grid.clone(),
         columns: imp.columns.clone(),
         sweep: None,
+        dynamics: None,
         ir: None,
         mic_curve: None,
     };

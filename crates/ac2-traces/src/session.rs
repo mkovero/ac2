@@ -59,7 +59,7 @@ use ac2_proto::spl_log::{self, SplLogInfo};
 /// `format` of every manifest.
 pub const FORMAT: &str = "ac2-session";
 /// The one manifest version this build reads and writes.
-pub const VERSION: u32 = 45;
+pub const VERSION: u32 = 46;
 /// Manifest file name.
 pub const MANIFEST: &str = "session.json";
 /// The autosave's previous manifest, beside [`MANIFEST`].
@@ -612,6 +612,11 @@ fn load_trace(dir: &Path, name: &str, t: &SavedTrace) -> Result<StoredTrace, Ses
     if imp.grid != t.grid || t.grid.id() != t.meta.grid_id {
         return Err(corrupt("data is not on the trace's grid".into()));
     }
+    if (t.meta.kind == TraceKind::Dynamics) != imp.dynamics.is_some() {
+        return Err(corrupt(
+            "a dynamics trace without its step table and envelopes".into(),
+        ));
+    }
     if (t.meta.kind == TraceKind::Sweep) != imp.sweep.is_some() {
         return Err(corrupt(
             "a sweep trace without its distortion, analysis facts or impulse response".into(),
@@ -643,6 +648,7 @@ fn load_trace(dir: &Path, name: &str, t: &SavedTrace) -> Result<StoredTrace, Ses
         grid: t.grid.clone(),
         columns: imp.columns,
         sweep: imp.sweep,
+        dynamics: imp.dynamics,
         ir: imp.ir,
         mic_curve,
     };

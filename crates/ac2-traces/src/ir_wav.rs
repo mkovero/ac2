@@ -178,6 +178,7 @@ pub fn import(content: &[u8], opts: IrImport) -> Result<Imported, ImportError> {
         rows: kept.len(),
         delay: Some(Seconds(start_s + resp.delay_s)),
         sweep: None,
+        dynamics: None,
         ir: Some(ir),
         notes,
         ir_file: Some(Box::new(ir_file)),
