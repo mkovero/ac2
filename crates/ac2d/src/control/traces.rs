@@ -15,7 +15,7 @@ use ac2_proto::model::{
     NamedOperand, Operand, Smoothing, SmoothingMode, SweepData, TargetCurve, TraceEdit, TraceIr,
     TraceKind, TraceMeta, TraceMicCurve, TraceOwner, TracePosition, TraceSource, TransferIr,
 };
-use ac2_proto::units::{Hz, MeasId, Seconds, TraceId, WallNs};
+use ac2_proto::units::{Hz, MeasId, Seconds, TraceId, TransferId, WallNs};
 use ac2_proto::{ErrorCode, ErrorDetail, FrameData, GridDef, ProtoError, ReplyBody};
 use ac2_traces::columns::{Columns, StoredTrace};
 use ac2_traces::meta;
@@ -645,7 +645,24 @@ impl Control {
         self.derived(name, source, d, &refs, smoothing)
     }
 
+    /// `trace.import` of a complete upload, used up whatever the outcome: a salvage imports
+    /// file after file, and a refused one must not hold one of the few transfer slots.
     pub(super) fn trace_import(
+        &mut self,
+        client: &Peer,
+        transfer: TransferId,
+        format: ImportFormat,
+        role: ImportRole,
+        ir: Option<IrImport>,
+        owner: TraceOwner,
+    ) -> Result<ReplyBody, ProtoError> {
+        let (file, content) = self.transfers.take_upload(client, transfer)?;
+        let file_name = super::transfer::file_part(&file).to_owned();
+        self.import_trace_file(file_name, format, role, ir, &content, owner)
+    }
+
+    /// The file `file_name` read as a new trace.
+    pub(super) fn import_trace_file(
         &mut self,
         file_name: String,
         format: ImportFormat,

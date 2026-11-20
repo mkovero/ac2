@@ -99,6 +99,18 @@ pub enum ClientError {
     /// An argument was invalid before anything was sent.
     #[error("invalid: {0}")]
     Invalid(String),
+    /// The request is over the ctrl message limit: not sent, as the daemon would refuse it.
+    /// A file goes up in chunks instead (`sessions::upload_file`).
+    #[error(
+        "`{op}` is {bytes} bytes, over the {max}-byte ctrl message limit: not sent",
+        max = ac2_proto::MAX_CTRL_BYTES
+    )]
+    TooLarge {
+        /// Command name.
+        op: &'static str,
+        /// Encoded size, bytes.
+        bytes: usize,
+    },
 }
 
 impl ClientError {

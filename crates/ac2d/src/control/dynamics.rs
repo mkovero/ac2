@@ -132,6 +132,8 @@ impl Control {
             fs,
         )
         .map_err(|e| invalid(e.to_string()))?;
+        // Checked when it plays, against the maximum in force now, as a sweep's level is: a
+        // measurement louder than the maximum is kept between the runs the maximum is raised for.
         let top = programme.highest_dbfs();
         if top > self.s.ceiling_dbfs {
             return Err(refused(format!(
@@ -610,27 +612,6 @@ fn point(p: &core::EnvelopePoint) -> DynamicsPoint {
 }
 
 impl Control {
-    /// A dynamics measurement whose loudest burst is above the global maximum is refused
-    /// when it is made or changed, so the form that sent it can say so where it is typed
-    /// (each run checks again: the maximum may come down in between).
-    pub(super) fn check_dynamics_ceiling(&self, kind: &MeasKind) -> Result<(), ProtoError> {
-        let MeasKind::Dynamics { config } = kind else {
-            return Ok(());
-        };
-        let top = config
-            .bursts
-            .iter()
-            .map(|b| b.0)
-            .fold(f64::NEG_INFINITY, f64::max);
-        if top > self.s.ceiling_dbfs {
-            return Err(refused(format!(
-                "{top:.1} dBFS is above the global maximum {:.1} dBFS",
-                self.s.ceiling_dbfs
-            )));
-        }
-        Ok(())
-    }
-
     /// A measurement whose run is playing keeps its settings until the run ends: the run's
     /// analysis reads the programme it was started with.
     pub(super) fn check_dynamics_idle(&self, meas: MeasId) -> Result<(), ProtoError> {

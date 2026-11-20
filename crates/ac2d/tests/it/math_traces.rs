@@ -483,7 +483,7 @@ fn ratio_edit_capture_and_summation() {
         let f = 20.0 * 1000f64.powf(f64::from(k) / 30.0);
         text.push_str(&format!("{f} 0.0 0.0\n"));
     }
-    let imp = c.trace(Command::TraceImport {
+    let imp = c.import_trace(Import {
         file_name: "flat.txt".into(),
         format: ImportFormat::AnalyzerText,
         role: ImportRole::Trace,
@@ -740,7 +740,7 @@ fn an_imported_impulse_response_filters_live_measurements() {
         },
     });
     let wav = impulse_wav(4096, 100, 0.5);
-    let ir = c.trace(Command::TraceImport {
+    let ir = c.import_trace(Import {
         file_name: "speaker.wav".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Trace,

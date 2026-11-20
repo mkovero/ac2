@@ -358,6 +358,38 @@ impl Client {
         (t.file_name, ac2_proto::units::Blob(data))
     }
 
+    /// `trace.import` of `i`: its file uploaded in chunks, then imported.
+    pub fn import(&mut self, i: Import) -> Result<ReplyBody, ProtoError> {
+        let data = i.content.0;
+        let t = self.transfer(Command::FileUploadBegin {
+            file: i.file_name,
+            bytes: data.len() as u64,
+            sha256: ac2_archive::sha256_hex(&data),
+        });
+        for (k, chunk) in data.chunks(t.chunk_bytes as usize).enumerate() {
+            self.ok(Command::FileUploadChunk {
+                transfer: t.transfer,
+                offset: (k * t.chunk_bytes as usize) as u64,
+                data: ac2_proto::units::Blob(chunk.to_vec()),
+            });
+        }
+        self.call(Command::TraceImport {
+            transfer: t.transfer,
+            format: i.format,
+            role: i.role,
+            ir: i.ir,
+            owner: i.owner,
+        })
+    }
+
+    /// An [`Self::import`] that must succeed.
+    #[track_caller]
+    pub fn import_trace(&mut self, i: Import) -> ac2_proto::model::TraceMeta {
+        self.import(i)
+            .unwrap_or_else(|e| panic!("trace.import failed: {e:?}"))
+            .trace()
+    }
+
     /// [`Self::export`] of a text format.
     pub fn export_text(&mut self, cmd: Command) -> String {
         String::from_utf8(self.export(cmd).1.0).unwrap()
@@ -472,6 +504,16 @@ pub fn fixture(name: &str) -> Vec<u8> {
     std::fs::read(dir.join(name)).unwrap()
 }
 
+/// What `trace.import` reads, with the file itself: [`Client::import`] uploads it first.
+pub struct Import {
+    pub file_name: String,
+    pub format: ac2_proto::model::ImportFormat,
+    pub role: ac2_proto::model::ImportRole,
+    pub ir: Option<ac2_proto::model::IrImport>,
+    pub content: ac2_proto::units::Blob,
+    pub owner: ac2_proto::model::TraceOwner,
+}
+
 /// Imports the fixture `fixture_name` as a trace, as if from the file `file_name`, under `owner`.
 pub fn import_fixture(
     c: &mut Client,
@@ -479,7 +521,7 @@ pub fn import_fixture(
     file_name: &str,
     owner: ac2_proto::model::TraceOwner,
 ) -> ac2_proto::model::TraceMeta {
-    c.trace(Command::TraceImport {
+    c.import_trace(Import {
         file_name: file_name.into(),
         format: ac2_proto::model::ImportFormat::Auto,
         role: ac2_proto::model::ImportRole::Trace,

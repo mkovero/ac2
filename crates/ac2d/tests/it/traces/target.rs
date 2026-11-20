@@ -83,7 +83,7 @@ fn a_target_is_filed_under_the_measurement_it_was_made_for_and_stays_there() {
     });
     assert_eq!(loud.edit.owner, main);
     // A file loaded as a target goes under the same measurement.
-    let file = c.trace(Command::TraceImport {
+    let file = c.import_trace(Import {
         file_name: "house.txt".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Target,

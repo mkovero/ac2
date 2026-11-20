@@ -14,14 +14,14 @@ mod read;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use ac2_client::{Client, expect_body};
+use ac2_client::Client;
+use ac2_proto::Command;
 use ac2_proto::model::layout::{EntryRef, PaneContent, RigRef};
 use ac2_proto::model::{
     ImportFormat, ImportRole, MathConfig, MathExpr, MathReference, MeasConfig, MeasKind, Operand,
     PaneLayout, TraceEdit, TraceKind, TraceOwner,
 };
-use ac2_proto::units::{Blob, MeasId, TraceId};
-use ac2_proto::{Command, ReplyBody};
+use ac2_proto::units::{MeasId, TraceId};
 use serde::Serialize;
 
 use super::meas::meas_call;
@@ -473,18 +473,17 @@ async fn restore_trace(
     } else {
         ImportRole::Trace
     };
-    let imported = c
-        .call(Command::TraceImport {
-            file_name: t.file.clone(),
-            format: ImportFormat::Ac2Csv,
-            role,
-            ir: None,
-            content: Blob(content),
-            owner: ac2_proto::model::TraceOwner::Imported,
-        })
-        .await
-        .map_err(CliError::from)
-        .and_then(|r| Ok(expect_body!("trace.import", r, ReplyBody::Trace(t) => t)?));
+    let imported = ac2_client::sessions::import_trace(
+        c,
+        t.file.clone(),
+        &content,
+        ImportFormat::Ac2Csv,
+        role,
+        None,
+        ac2_proto::model::TraceOwner::Imported,
+    )
+    .await
+    .map_err(CliError::from);
     let imported = match imported {
         Ok(m) => m,
         Err(e) => {

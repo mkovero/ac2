@@ -311,7 +311,7 @@ fn slow_sweep_measures_the_rigs_harmonics_from_an_empty_daemon() {
     assert_eq!(trace, TraceId(1));
     // Re-imported, the export is the same sweep again: the distortion pane draws it, the
     // delay readout reads the arrival.
-    let back = c.trace(Command::TraceImport {
+    let back = c.import_trace(Import {
         file_name: "sweep.csv".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Trace,
@@ -561,7 +561,7 @@ fn a_sweep_in_a_hall_reads_its_reverberation_time() {
         csv.contains("\n# band_hz,edt_s,t20_s,t30_s,"),
         "no room table"
     );
-    let back = c.trace(Command::TraceImport {
+    let back = c.import_trace(Import {
         file_name: "hall.csv".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Trace,

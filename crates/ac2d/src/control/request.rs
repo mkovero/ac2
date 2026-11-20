@@ -7,7 +7,7 @@ use ac2_proto::frame::{Frame, FrameData, FrameStamp, GenSummary, KaMeta, Protect
 use ac2_proto::topic::Topic;
 use ac2_proto::units::{RequestId, SampleIndex, WallNs};
 use ac2_proto::{
-    Command, ErrorCode, MAX_CTRL_BYTES, PROTO_VERSION, ProtoError, Reply, ReplyBody,
+    Command, CtrlError, ErrorCode, MAX_CTRL_BYTES, PROTO_VERSION, ProtoError, Reply, ReplyBody,
     decode_request, encode_reply, peek_envelope,
 };
 
@@ -73,6 +73,29 @@ impl Control {
         let now = Instant::now();
         let env = match peek_envelope(payload) {
             Ok(e) => e,
+            // Answered, not dropped: the sender would otherwise retry it unread until it
+            // gives up, with no word of why.
+            Err(CtrlError::TooLarge {
+                bytes,
+                id: Some(id),
+            }) => {
+                tracing::warn!("ctrl request {} of {bytes} bytes refused: too large", id.0);
+                self.send_reply(
+                    route,
+                    &Reply::new(
+                        id,
+                        Err(perr(
+                            ErrorCode::TooLarge,
+                            format!(
+                                "the request is {bytes} bytes, over the {MAX_CTRL_BYTES}-byte \
+                                 ctrl message limit; a file goes up in chunks \
+                                 (file.upload_begin)"
+                            ),
+                        )),
+                    ),
+                );
+                return;
+            }
             Err(e) => {
                 tracing::warn!("undecodable ctrl message dropped: {e}");
                 return;

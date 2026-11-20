@@ -220,6 +220,12 @@ impl CallCore {
         let mut req = Request::new(self.next_id(), cmd);
         req.expect_rev = expect_rev;
         let bytes = encode_request(&req).map_err(ClientError::Encode)?;
+        if bytes.len() > ac2_proto::MAX_CTRL_BYTES {
+            return Err(ClientError::TooLarge {
+                op,
+                bytes: bytes.len(),
+            });
+        }
         let (tx, mut rx) = oneshot::channel();
         let id = req.id.0;
         self.io

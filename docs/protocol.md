@@ -31,7 +31,7 @@ keepalives to each connection as its credit allows (§5.8).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 97`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 98`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -88,8 +88,10 @@ Warning { type: "<name>", … }
   with `detail: {type: conflict, rev}` (the current rev). Commits are serial.
 - Largest ctrl message: 4 MiB, checked before parsing. A reply that would be larger is
   sent as `too_large` instead (a client discards an oversize message unread, so it would
-  only time out); what can be that large comes another way (`trace.export` as a download,
-  `dynamics.table` for a dynamics trace's step table).
+  only time out); a larger request is answered `too_large` to its `id` (read from its
+  envelope alone), and a client refuses to send one. What can be that large goes another
+  way: `trace.export` as a download, `trace.import` from an upload, `dynamics.table` for a
+  dynamics trace's step table.
 
 ### 3.2 Commands
 
@@ -143,7 +145,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `trace.update` | `trace`, `edit: TraceEdit` (full replacement) | `trace` | |
 | `trace.delete` | `trace` | `ack` | |
 | `trace.average` | `traces`, `method`, `reference`, `name` | `trace` | |
-| `trace.import` | `file_name`, `format: ac2_csv \| analyzer_text \| ir_wav \| auto`, `role: trace \| target`, `ir: IrImport \| nil`, `content: bin`, `owner: TraceOwner` | `trace` | |
+| `trace.import` | `transfer` (a complete upload, used up), `format: ac2_csv \| analyzer_text \| ir_wav \| auto`, `role: trace \| target`, `ir: IrImport \| nil`, `owner: TraceOwner` | `trace` | |
 | `trace.target` | `curve: TargetCurve`, `name`, `owner: TraceOwner` | `trace` | |
 | `trace.export` | `trace`, `format: ac2_csv \| ir_wav` | `transfer` (`file_name` the suggested name, `bytes`, `sha256`): fetch with `file.download_chunk`, close with `file.download_end` | non-mutating |
 | `trace.mic_curve` | `trace`, `curve: MicCurveId \| nil` (nil removes) | `trace` | |
@@ -744,7 +746,9 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   Seconds` (2…30 s, default 30 s)). Settings only, as a sweep measurement: no stream,
   `meas.start` / `meas.stop` / `meas.reset` of it are `invalid`; `dynamics.run` plays it and
   each run is one stored `dynamics` trace it owns. `invalid` at create / update: settings
-  outside those bounds.
+  outside those bounds. A burst above the ceiling is accepted at create / update (and in a
+  loaded session), as a sweep's level is: `dynamics.run` refuses it against the ceiling in
+  force when it plays.
 
 #### Ownership (`TraceOwner`) and `meas.delete`
 
@@ -1690,12 +1694,14 @@ with the autosave (§7.3).
   (edits made meanwhile stay unsaved). A load, new or recover whose working state changed
   (content or saved standing) while it read is refused with `conflict`, nothing changed.
   A salvage imports onto the working state as it is when its read is done.
-- Archives travel in chunks of at most `chunk_bytes` (1 MiB). Upload: `file.upload_begin`
+- Archives and trace files travel in chunks of at most `chunk_bytes` (1 MiB). Upload: `file.upload_begin`
   (at most 64 MiB, else `invalid`) → `transfer` {`transfer`, `file_name`, `bytes`, `sha256`,
   `chunk_bytes`}; `file.upload_chunk` in order (`offset` = bytes so far, else `invalid`);
   after the last byte the SHA-256 is checked (`invalid` on a mismatch, the upload dropped).
   Then `file.load` / `file.salvage` with `{type: upload}` or `file.import` (stores it as a
-  named session; `session_exists` unless `overwrite`). Download: `file.download_begin`
+  named session; `session_exists` unless `overwrite`), or `trace.import` (reads it as a
+  trace file, named after the last component of the upload's `file` when the file names
+  no trace; the upload is used up whether the import succeeds or not). Download: `file.download_begin`
   packs (`file_name` `<name>.ac2session`), `file.download_chunk` reads, and
   `file.download_end` drops it; with `saved_as` after a working-state download, the
   working state's origin becomes `client` {saved_as}, clean if it has not changed since
@@ -2004,8 +2010,8 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 
 `code` is one of `invalid`, `not_found`, `conflict`, `lease_required`, `lease_held`,
 `refused` (safety: level ceiling, firing unarmed, …), `resync_required`, `unsupported`,
-`internal`, `version_mismatch`, `too_large` (the reply would exceed the 4 MiB ctrl message
-limit, §3.1).
+`internal`, `version_mismatch`, `too_large` (the request, or the reply it would have,
+exceeds the 4 MiB ctrl message limit, §3.1).
 
 `detail` (optional, tagged by `type`): `conflict` {rev}, `lease_held` {owner},
 `version` {daemon, client}, `resync` {oldest}, `import` {line, problem} (§3.2 traces),

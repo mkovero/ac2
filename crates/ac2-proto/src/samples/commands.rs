@@ -106,7 +106,7 @@ pub fn commands() -> Vec<Command> {
             name: "avg".into(),
         },
         Command::TraceImport {
-            file_name: "genelec.wav".into(),
+            transfer: TransferId(3),
             format: ImportFormat::IrWav,
             role: ImportRole::Trace,
             ir: Some(IrImport {
@@ -118,7 +118,6 @@ pub fn commands() -> Vec<Command> {
                 align: IrAlign::Peak,
                 resolution: Resolution::FortyEighth,
             }),
-            content: Blob(b"RIFF".to_vec()),
             owner: crate::model::TraceOwner::Imported,
         },
         Command::TraceExport {

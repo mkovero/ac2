@@ -170,7 +170,8 @@ impl AppState {
             && top > c.0
         {
             self.warn(format!(
-                "{}'s loudest burst {} is above the daemon's ceiling {}: edit it",
+                "{}'s loudest burst {} is above the daemon's ceiling {}: raise the max level or \
+                 edit it",
                 m.config.name,
                 format::dbfs(top),
                 format::dbfs(c.0)

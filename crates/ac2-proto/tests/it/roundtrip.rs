@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use ac2_proto::frame::{MAX_HEADER_BYTES, ValidityMask};
 use ac2_proto::samples;
-use ac2_proto::units::RequestId;
+use ac2_proto::units::{Blob, RequestId, TransferId};
 use ac2_proto::*;
 
 /// Names serde lists in its "unknown variant" error: the complete variant set of an enum,
@@ -556,9 +556,31 @@ fn grids_roundtrip_and_ids() {
 }
 
 #[test]
-fn oversized_ctrl_is_refused_before_parsing() {
+fn oversized_ctrl_is_refused_naming_its_request_id() {
     let b = vec![0u8; ctrl::MAX_CTRL_BYTES + 1];
-    assert_eq!(decode_request(&b), Err(CtrlError::TooLarge(b.len())));
+    assert_eq!(
+        decode_request(&b),
+        Err(CtrlError::TooLarge {
+            bytes: b.len(),
+            id: None
+        })
+    );
+    let req = Request::new(
+        RequestId(42),
+        Command::FileUploadChunk {
+            transfer: TransferId(1),
+            offset: 0,
+            data: Blob(vec![7; ctrl::MAX_CTRL_BYTES]),
+        },
+    );
+    let b = encode_request(&req).expect("a request");
+    assert_eq!(
+        decode_request(&b),
+        Err(CtrlError::TooLarge {
+            bytes: b.len(),
+            id: Some(RequestId(42))
+        })
+    );
 }
 
 #[test]

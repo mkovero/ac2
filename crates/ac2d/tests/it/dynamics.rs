@@ -70,12 +70,16 @@ fn create(c: &mut Client, config: DynamicsConfig) -> MeasId {
 }
 
 fn arm(c: &mut Client, token: LeaseToken) {
+    arm_at(c, token, Dbfs(-20.0));
+}
+
+fn arm_at(c: &mut Client, token: LeaseToken, level: Dbfs) {
     c.ok(Command::GenSet {
         lease_token: token,
         desired: GeneratorDesired {
             settings: GeneratorSettings {
                 signal: Signal::Sine { freq: Hz(1000.0) },
-                level: Dbfs(-20.0),
+                level,
                 band: None,
                 outputs: vec![0],
             },
@@ -296,7 +300,7 @@ fn slow_dynamics_run_stores_one_trace_that_exports_and_imports() {
         format: ExportFormat::Ac2Csv,
     });
     assert!(csv.contains("# dynamics_info: "), "{}", &csv[..400]);
-    let back = c.trace(Command::TraceImport {
+    let back = c.import_trace(Import {
         file_name: "dynamics.csv".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Trace,
@@ -420,8 +424,10 @@ fn slow_an_ended_run_leaves_its_measurement_free() {
     });
 }
 
+/// A programme louder than the global maximum is made, changed and kept like any other; it is
+/// refused when it would play, against the maximum in force at that moment.
 #[test]
-fn a_programme_above_the_global_maximum_is_refused_where_it_is_typed() {
+fn a_programme_above_the_global_maximum_is_kept_and_refused_when_run() {
     init_log();
     let backend = rig();
     let h = Daemon::start(common::config(backend.clone(), inproc("dynamics-ceiling"))).unwrap();
@@ -432,28 +438,53 @@ fn a_programme_above_the_global_maximum_is_refused_where_it_is_typed() {
     c.ok(Command::SessionOpen {
         config: session(true),
     });
+    let token = c.acquire();
+    let run = |c: &mut Client, meas| {
+        c.call(Command::DynamicsRun(ac2_proto::DynamicsRunArgs {
+            lease_token: token,
+            meas,
+            name: None,
+            rests_from: None,
+        }))
+    };
     // The daemon's maximum is −10 dBFS.
     let loud = DynamicsConfig {
         bursts: vec![Dbfs(-20.0), Dbfs(-6.0)],
         ..config()
     };
-    let e = c
-        .call(Command::MeasCreate {
-            config: meas_config(loud.clone()),
-        })
-        .unwrap_err();
+    let meas = create(&mut c, loud.clone());
+    let quiet = create(&mut c, config());
+    c.update_ok(quiet, meas_config(loud));
+    c.update_ok(quiet, meas_config(config()));
+
+    arm(&mut c, token);
+    let e = run(&mut c, meas).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{}", e.msg);
     assert!(e.msg.contains("-6.0 dBFS"), "{}", e.msg);
-    let meas = create(&mut c, config());
-    let e = c.update(meas, meas_config(loud)).unwrap_err();
+
+    // Brought down below the quiet one's −20 dBFS: it is refused too.
+    c.ok(Command::GenSet {
+        lease_token: token,
+        desired: GeneratorDesired {
+            settings: GeneratorSettings {
+                signal: Signal::Sine { freq: Hz(1000.0) },
+                level: Dbfs(-40.0),
+                band: None,
+                outputs: vec![0],
+            },
+            armed: false,
+            firing: false,
+        },
+    });
+    c.ok(Command::GenCeiling {
+        ceiling: Dbfs(-30.0),
+        confirm_raise: false,
+    });
+    arm_at(&mut c, token, Dbfs(-40.0));
+    let e = run(&mut c, quiet).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{}", e.msg);
-    c.update_ok(
-        meas,
-        meas_config(DynamicsConfig {
-            bursts: vec![Dbfs(-10.0)],
-            ..config()
-        }),
-    );
+    assert!(e.msg.contains("-20.0 dBFS"), "{}", e.msg);
+    assert!(e.msg.contains("-30.0 dBFS"), "{}", e.msg);
 }
 
 /// The largest programme a dynamics measurement may hold: every measured input, every level,
@@ -518,4 +549,171 @@ fn the_largest_programmes_table_and_envelope_fit_a_ctrl_message() {
         e <= MAX_CTRL_BYTES,
         "envelope of {n} points per edge: {e} B"
     );
+}
+
+/// An 8 kHz run's trace, as the rig made one: 4 levels × 9 lengths at 96 kHz, 2 inputs with
+/// their envelopes; its CSV is several ctrl messages long.
+fn big_dynamics_csv() -> Vec<u8> {
+    use ac2_proto::model::{
+        CalState, DynamicsData, DynamicsInfo, DynamicsPoint, DynamicsStep, TraceMeta,
+    };
+    use ac2_proto::units::{DynamicsId, SessionEpoch, WallNs};
+    use ac2_traces::StoredTrace;
+
+    const POINTS: usize = 1500;
+    let sample = ac2_proto::samples::dynamics_data();
+    let bursts = [-14.0, -10.0, -6.0, -1.0].map(Dbfs).to_vec();
+    let durations = [0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0]
+        .map(Seconds)
+        .to_vec();
+    let steps: Vec<DynamicsStep> = bursts
+        .iter()
+        .flat_map(|&level| {
+            durations.iter().map(move |&burst| DynamicsStep {
+                level,
+                burst,
+                rest: Seconds(4.5),
+                recovered: true,
+            })
+        })
+        .collect();
+    let n = steps.len();
+    let envelope = |seed: usize| -> Vec<DynamicsPoint> {
+        (0..POINTS)
+            .map(|j| {
+                let start = j < POINTS * 2 / 3;
+                let k = if start { j } else { j - POINTS * 2 / 3 };
+                DynamicsPoint {
+                    edge: if start {
+                        DynamicsEdge::Start
+                    } else {
+                        DynamicsEdge::End
+                    },
+                    t: -0.05 + k as f32 * 0.000_125,
+                    gr_db: ((seed * 31 + j) % 977) as f32 * 0.010_3,
+                    h_db: [-40.5 - (j % 13) as f32, -55.25, -70.0, -81.5],
+                }
+            })
+            .collect()
+    };
+    let input = |i: u16| ac2_proto::model::DynamicsInput {
+        input: i,
+        name: format!("Studer {i}"),
+        rows: vec![sample.inputs[0].rows[0].clone(); n],
+        ..sample.inputs[0].clone()
+    };
+    let d = DynamicsData {
+        info: DynamicsInfo {
+            sample_rate: Hz(96_000.0),
+            carrier: Hz(8000.0),
+            period: 12,
+            bursts,
+            durations,
+            steps,
+            ..sample.info.clone()
+        },
+        inputs: vec![input(4), input(5)],
+        envelopes: (0..2)
+            .map(|i| (0..n).map(|s| envelope(i * n + s)).collect())
+            .collect(),
+    };
+    let grid = ac2_traces::text::dynamics::grid(d.info.carrier);
+    let id = TraceId(1);
+    let t = StoredTrace {
+        meta: TraceMeta {
+            id,
+            edit: ac2_traces::meta::new_edit(id, "8k-1617".into(), None, TraceOwner::Imported),
+            kind: TraceKind::Dynamics,
+            source: TraceSource::Dynamics {
+                meas: MeasId(2),
+                meas_name: "Studer dyn 8k".into(),
+                run: DynamicsId(1),
+                number: 1,
+                epoch: SessionEpoch(3),
+            },
+            grid_id: grid.id(),
+            delay: Seconds(0.0),
+            depth: None,
+            cal: CalState::Uncalibrated,
+            mic: None,
+            mic_curve: None,
+            created_at: WallNs(1_790_000_000_000_000_000),
+            eq_in: Vec::new(),
+            position: None,
+            captured_unsettled: false,
+            superseded: false,
+        },
+        grid,
+        columns: ac2_traces::text::dynamics::columns(),
+        sweep: None,
+        dynamics: Some(Box::new(d)),
+        ir: None,
+        mic_curve: None,
+    };
+    ac2_traces::text::export_csv(&t).into_bytes()
+}
+
+/// A trace file bigger than one ctrl message goes up in chunks and comes down in chunks, the
+/// same trace both ways; the file sent whole in one message is answered `too_large`.
+#[test]
+fn a_trace_bigger_than_a_ctrl_message_imports_and_exports() {
+    use ac2_proto::MAX_CTRL_BYTES;
+    use ac2_proto::model::DynamicsTable;
+    init_log();
+    let backend = rig();
+    let h = Daemon::start(common::config(backend.clone(), inproc("dynamics-big"))).unwrap();
+    let (mut c, _sub) = connect(&h, &[b"evt"]);
+    c.ok(Command::Hello {
+        client: "dynamics test".into(),
+    });
+    let csv = big_dynamics_csv();
+    assert!(csv.len() > MAX_CTRL_BYTES, "{} B", csv.len());
+
+    let e = c
+        .call(Command::FileUploadChunk {
+            transfer: ac2_proto::units::TransferId(1),
+            offset: 0,
+            data: Blob(csv.clone()),
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::TooLarge, "{}", e.msg);
+
+    let import = |c: &mut Client, file_name: &str, content: Vec<u8>| {
+        c.import_trace(Import {
+            file_name: file_name.into(),
+            format: ImportFormat::Ac2Csv,
+            role: ImportRole::Trace,
+            ir: None,
+            content: Blob(content),
+            owner: TraceOwner::Imported,
+        })
+    };
+    let a = import(&mut c, "8k-1617.csv", csv);
+    assert_eq!(a.kind, TraceKind::Dynamics);
+    let (_, out) = c.export(Command::TraceExport {
+        trace: a.id,
+        format: ExportFormat::Ac2Csv,
+    });
+    assert!(out.0.len() > MAX_CTRL_BYTES, "{} B", out.0.len());
+    let b = import(&mut c, "again.csv", out.0);
+
+    let table = |c: &mut Client, trace| -> DynamicsTable {
+        c.dynamics_table(Command::DynamicsTable { trace })
+    };
+    let (ta, tb) = (table(&mut c, a.id), table(&mut c, b.id));
+    assert_eq!(ta.info, tb.info);
+    assert_eq!(ta.info.steps.len(), 36);
+    assert_eq!(ta.inputs, tb.inputs);
+    for (input, step) in [(4, 0), (5, 35)] {
+        let env = |c: &mut Client, trace| {
+            c.dynamics_envelope(Command::DynamicsEnvelope(ac2_proto::DynamicsEnvelopeArgs {
+                trace,
+                input,
+                step,
+            }))
+        };
+        let (ea, eb) = (env(&mut c, a.id), env(&mut c, b.id));
+        assert_eq!(ea, eb);
+        assert_eq!(ea.start.t.len() + ea.end.t.len(), 1500);
+    }
 }

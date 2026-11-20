@@ -216,7 +216,7 @@ fn live_smoothing_and_resmoothed_captures() {
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused);
-    let tgt = c.trace(Command::TraceImport {
+    let tgt = c.import_trace(Import {
         file_name: "house_curve.txt".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Target,

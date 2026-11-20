@@ -142,7 +142,7 @@ fn capture_average_math_export_import() {
         "{csv}"
     );
     assert!(csv.contains("# source: captured from \"main\" (measurement 1)"));
-    let imp = c.trace(Command::TraceImport {
+    let imp = c.import_trace(Import {
         file_name: file_name.clone(),
         format: ImportFormat::Auto,
         role: ImportRole::Trace,
@@ -168,7 +168,7 @@ fn capture_average_math_export_import() {
     );
 
     // A target curve: magnitude only.
-    let tgt = c.trace(Command::TraceImport {
+    let tgt = c.import_trace(Import {
         file_name: "house_curve.txt".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Target,
@@ -215,7 +215,7 @@ fn capture_average_math_export_import() {
 
     // Typed refusal of a bad file.
     let e = c
-        .call(Command::TraceImport {
+        .import(Import {
             file_name: "bad.txt".into(),
             format: ImportFormat::AnalyzerText,
             role: ImportRole::Trace,
@@ -249,7 +249,7 @@ fn capture_average_math_export_import() {
 fn old_sweep_export_imports_as_transfer_with_its_delay() {
     let mut r = rig("trace-v1-sweep");
     let c = &mut r.c;
-    let t = c.trace(Command::TraceImport {
+    let t = c.import_trace(Import {
         file_name: "ac2-v1-sweep1.csv".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Trace,
@@ -347,7 +347,7 @@ fn transfer_capture_keeps_its_ir() {
             format: ExportFormat::Ac2Csv,
         })
         .1;
-    let back = c.trace(Command::TraceImport {
+    let back = c.import_trace(Import {
         file_name: "aligned.csv".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Trace,

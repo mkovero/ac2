@@ -315,9 +315,11 @@ baseline. No wire change: `drift` and `release_tau` are in the step table.
 - **New measurement**: a form beside the sweep form, opening on a screen of its own with one
   Dynamics pane. Fields: reference input, measured inputs, outputs, carrier, onset, pilot,
   burst levels (dBFS), burst lengths (1 ms … 10 s by default; a length under 3 carrier
-  periods is refused by the daemon at create, naming the shortest), longest rest. The form
-  checks the loudest burst against the daemon's ceiling in place; the daemon checks it again
-  against `--max-level` in create and update validation.
+  periods is refused by the daemon at create, naming the shortest), longest rest. A loudest
+  burst above the daemon's ceiling is kept, as a sweep's level is: the form makes it with a
+  note to raise the max level before running, and create, update, salvage and session load
+  accept it; the run is refused against the ceiling in force when it plays (the operator
+  raises the ceiling for an approved run only).
 - **Edit**: the same form through `meas.update`, which already takes any kind that validates;
   the daemon refuses it while that measurement's run plays. Traces keep the settings they ran
   with.
@@ -341,8 +343,7 @@ baseline. No wire change: `drift` and `release_tau` are in the step table.
 
 `PaneKind::Dynamics`, `DynamicsView`, the A/B pair, the picked step, metric and toggles in
 `PaneLayout` (a layout change: `PROTO_VERSION`, session `VERSION`, `rig.json` meter layouts,
-`ui.toml`); `dynamics.envelope`; the `--max-level` check in create/update validation; the
-run-plays guard on `meas.update`.
+`ui.toml`); `dynamics.envelope`; the run-plays guard on `meas.update`.
 
 ## Stages
 

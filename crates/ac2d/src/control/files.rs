@@ -411,7 +411,7 @@ impl Control {
             } else {
                 ImportRole::Trace
             };
-            match self.trace_import(
+            match self.import_trace_file(
                 rel.clone(),
                 ImportFormat::Ac2Csv,
                 role,

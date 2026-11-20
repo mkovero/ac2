@@ -582,7 +582,7 @@ def requests():
             26,
             "trace.import",
             {
-                "file_name": "genelec.wav",
+                "transfer": 3,
                 "format": "ir_wav",
                 "role": "trace",
                 "ir": {
@@ -591,7 +591,6 @@ def requests():
                     "align": "peak",
                     "resolution": "forty_eighth",
                 },
-                "content": b"RIFF",
                 "owner": {"type": "imported"},
             },
         ),

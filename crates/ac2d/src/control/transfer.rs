@@ -155,6 +155,19 @@ impl Transfers {
         }
     }
 
+    /// A complete upload's client path and bytes, taken: the transfer ends here.
+    pub(crate) fn take_upload(
+        &mut self,
+        client: &Peer,
+        id: TransferId,
+    ) -> Result<(String, Vec<u8>), ProtoError> {
+        self.upload(client, id)?;
+        match self.map.remove(&id).map(|x| x.kind) {
+            Some(Kind::Upload { file, data, .. }) => Ok((file, data)),
+            _ => Err(gone(id)),
+        }
+    }
+
     pub(crate) fn remove(&mut self, id: TransferId) {
         self.map.remove(&id);
     }

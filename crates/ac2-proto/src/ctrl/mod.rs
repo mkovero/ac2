@@ -62,9 +62,15 @@ pub struct Envelope {
 /// Ctrl decode failures.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum CtrlError {
-    /// Larger than [`MAX_CTRL_BYTES`].
-    #[error("ctrl message of {0} bytes exceeds the limit")]
-    TooLarge(usize),
+    /// Larger than [`MAX_CTRL_BYTES`]; `id`: the request id it carries, read anyway so the
+    /// sender hears why instead of waiting out its retries (`None` when unreadable).
+    #[error("ctrl message of {bytes} bytes exceeds the limit")]
+    TooLarge {
+        /// Size, bytes.
+        bytes: usize,
+        /// Its request id, when its envelope reads.
+        id: Option<RequestId>,
+    },
     /// No `v` field.
     #[error("ctrl message without protocol version")]
     MissingVersion,
@@ -86,10 +92,14 @@ pub enum CtrlError {
 
 /// Read `v` and `id` of any ctrl message without decoding the rest.
 pub fn peek_envelope(b: &[u8]) -> Result<Envelope, CtrlError> {
+    let env = rmp_serde::from_slice::<Envelope>(b);
     if b.len() > MAX_CTRL_BYTES {
-        return Err(CtrlError::TooLarge(b.len()));
+        return Err(CtrlError::TooLarge {
+            bytes: b.len(),
+            id: env.ok().and_then(|e| e.id),
+        });
     }
-    rmp_serde::from_slice(b).map_err(|e| CtrlError::Malformed(e.to_string()))
+    env.map_err(|e| CtrlError::Malformed(e.to_string()))
 }
 
 pub(crate) fn check_version(b: &[u8]) -> Result<(), CtrlError> {

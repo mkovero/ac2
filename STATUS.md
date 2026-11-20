@@ -35,7 +35,9 @@ Short orientation; read this instead of the whole of `PLAN.md`. Versions live in
   envelope / edge / step analysis, `dynamics.run` and its trace (CSV, session), `ac2 meas new
   dynamics`, `ac2 dynamics run`; the app's Dynamics pane (Steps, Envelopes, Release, Table;
   A/B; `dynamics.table` and on-demand `dynamics.envelope`), form, edit and run (PROTO 97,
-  session format 47). Stage 3 (repeatability tolerances) open.
+  session format 47). A measurement louder than the max level is kept and refused only when
+  it runs; `trace.import` reads a chunked upload, so traces of any size round-trip
+  (PROTO 98). Stage 3 (repeatability tolerances) open.
 - **3D spectrograph** (`docs/design/spectrograph-3d.md`): v1a + v1b landed
   (PROTO 86, session format 42, rig file 10): a fourth spectrum view (G) drawing the
   spectrograph's history as a skyline of spikes, camera on ←/→, PageUp/PageDown, I/O, Home

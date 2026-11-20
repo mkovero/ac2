@@ -2,7 +2,6 @@
 
 use ac2_client::expect_body;
 use ac2_proto::model::*;
-use ac2_proto::units::Blob;
 use ac2_proto::{Command, ReplyBody};
 use serde_json::json;
 
@@ -227,26 +226,25 @@ pub(crate) async fn trace(cli: &Cli, cmd: &TraceCmd, out: &mut Out<'_>) -> Resul
                 || file.display().to_string(),
                 |n| n.to_string_lossy().into_owned(),
             );
-            let r = c
-                .call(Command::TraceImport {
-                    file_name,
-                    format: match format {
-                        ImportFormatArg::Auto => ImportFormat::Auto,
-                        ImportFormatArg::Ac2 => ImportFormat::Ac2Csv,
-                        ImportFormatArg::Text => ImportFormat::AnalyzerText,
-                        ImportFormatArg::Wav => ImportFormat::IrWav,
-                    },
-                    role: if *target {
-                        ImportRole::Target
-                    } else {
-                        ImportRole::Trace
-                    },
-                    ir,
-                    content: Blob(content),
-                    owner,
-                })
-                .await?;
-            let mut t = expect_body!("trace.import", r, ReplyBody::Trace(t) => t)?;
+            let mut t = ac2_client::sessions::import_trace(
+                &c,
+                file_name,
+                &content,
+                match format {
+                    ImportFormatArg::Auto => ImportFormat::Auto,
+                    ImportFormatArg::Ac2 => ImportFormat::Ac2Csv,
+                    ImportFormatArg::Text => ImportFormat::AnalyzerText,
+                    ImportFormatArg::Wav => ImportFormat::IrWav,
+                },
+                if *target {
+                    ImportRole::Target
+                } else {
+                    ImportRole::Trace
+                },
+                ir,
+                owner,
+            )
+            .await?;
             if let Some(n) = name {
                 let mut edit = t.edit.clone();
                 edit.name = n.clone();

@@ -21,7 +21,7 @@ fn session_save_load_round_trip() {
         trace: a.id,
         edit: ae,
     });
-    let tgt = c.trace(Command::TraceImport {
+    let tgt = c.import_trace(Import {
         file_name: "house_curve.txt".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Target,

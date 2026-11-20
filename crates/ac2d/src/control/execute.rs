@@ -271,13 +271,12 @@ impl Control {
                 name,
             } => self.trace_average(&traces, method, reference, name),
             Command::TraceImport {
-                file_name,
+                transfer,
                 format,
                 role,
                 ir,
-                content,
                 owner,
-            } => self.trace_import(file_name, format, role, ir, &content.0, owner),
+            } => self.trace_import(peer, transfer, format, role, ir, owner),
             Command::TraceTarget { curve, name, owner } => self.trace_target(curve, name, owner),
             Command::TraceExport { trace, format } => self.trace_export(peer, trace, format),
             Command::TraceMicCurve { trace, curve } => self.trace_mic_curve(trace, curve),
@@ -436,7 +435,6 @@ impl Control {
     /// `meas.create`: the new measurement, stopped.
     pub(super) fn meas_create(&mut self, config: MeasConfig) -> Result<Measurement, ProtoError> {
         validate_meas(&config)?;
-        self.check_dynamics_ceiling(&config.kind)?;
         super::maths::new_average_has_two(&config.kind)?;
         self.spl_needs_mic(&config)?;
         self.check_meas_owner(None, &config.kind)?;
@@ -477,7 +475,6 @@ impl Control {
         config: MeasConfig,
     ) -> Result<ReplyBody, ProtoError> {
         validate_meas(&config)?;
-        self.check_dynamics_ceiling(&config.kind)?;
         self.spl_needs_mic(&config)?;
         let mut m = self.meas(meas)?.clone();
         if base != m.config_rev {

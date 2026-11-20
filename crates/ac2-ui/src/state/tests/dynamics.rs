@@ -139,18 +139,8 @@ fn the_chooser_opens_the_dynamics_form_and_it_creates_without_playing() {
         f.error
     );
     f.set_text(crate::forms::FieldId::Pilot, "-33");
-    // Above the daemon's ceiling: refused in place.
-    f.set_text(crate::forms::FieldId::Bursts, "-14, -8");
-    assert!(t.key("Enter").is_empty());
-    let Overlay::Form(f) = &mut t.st.overlay else {
-        panic!("the form closed");
-    };
-    assert!(
-        f.error.as_deref().is_some_and(|e| e.contains("ceiling")),
-        "{:?}",
-        f.error
-    );
-    f.set_text(crate::forms::FieldId::Bursts, "-20, -14");
+    // Above the daemon's ceiling (−10 dBFS): made all the same, with a note; its run refuses.
+    f.set_text(crate::forms::FieldId::Bursts, "-20, -8");
     f.set_text(crate::forms::FieldId::Durations, "10ms, 1s");
     let r = t.key("Enter");
     let Some(Request::CreateMeas { config }) = r.first() else {
@@ -162,7 +152,13 @@ fn the_chooser_opens_the_dynamics_form_and_it_creates_without_playing() {
     assert_eq!(c.reference_input, 0);
     assert_eq!(c.measurement_inputs, vec![1]);
     assert_eq!(c.pilot, Dbfs(-33.0));
-    assert_eq!(c.bursts, vec![Dbfs(-20.0), Dbfs(-14.0)]);
+    assert_eq!(c.bursts, vec![Dbfs(-20.0), Dbfs(-8.0)]);
+    assert!(
+        t.last_toast().contains("above the daemon's ceiling")
+            && t.last_toast().contains("raise the max level"),
+        "{}",
+        t.last_toast()
+    );
     assert_eq!(c.durations, vec![Seconds(0.01), Seconds(1.0)]);
     assert!(!r.iter().any(|x| matches!(x, Request::StimArm { .. })));
 }

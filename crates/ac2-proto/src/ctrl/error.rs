@@ -30,8 +30,9 @@ pub enum ErrorCode {
     Internal,
     /// Protocol version differs.
     VersionMismatch,
-    /// The reply would exceed the ctrl message limit (`MAX_CTRL_BYTES`); a smaller command
-    /// (`dynamics.table` for `trace.get`) or a download (`trace.export`) carries it.
+    /// The request, or the reply it would have, exceeds the ctrl message limit
+    /// (`MAX_CTRL_BYTES`); a smaller command (`dynamics.table` for `trace.get`), a download
+    /// (`trace.export`) or an upload (`trace.import`) carries it.
     TooLarge,
 }
 

@@ -428,11 +428,12 @@ pub enum Command {
         /// Name of the result.
         name: String,
     },
-    /// Import a file sent by the client.
+    /// Import a file the client uploaded in chunks (`file.upload_begin`), so one of any size
+    /// arrives, as an export leaves; the upload is used up whether it succeeds or not.
     #[serde(rename = "trace.import")]
     TraceImport {
-        /// Original file name.
-        file_name: String,
+        /// The complete upload; its `file`'s last component names a trace its file does not.
+        transfer: TransferId,
         /// Format.
         format: ImportFormat,
         /// Measured trace or target curve.
@@ -440,8 +441,6 @@ pub enum Command {
         /// How to read an impulse-response WAV file; `None` takes [`IrImport::default`].
         /// Refused (`invalid`) with a text file.
         ir: Option<IrImport>,
-        /// File content.
-        content: Blob,
         /// The measurement it is listed under, or the imported group: a target loaded for
         /// the system being tuned belongs with that system's measurement. Refused for a
         /// math trace or a measurement that does not exist.
@@ -718,7 +717,8 @@ pub enum Command {
     /// Sessions in the daemon's session directory.
     #[serde(rename = "file.list")]
     FileList,
-    /// Start uploading a session archive (`.ac2session`) of at most 64 MiB.
+    /// Start uploading a file of at most 64 MiB: a session archive (`.ac2session`) for
+    /// `file.import`, `file.load` or `file.salvage`, or a trace file for `trace.import`.
     #[serde(rename = "file.upload_begin")]
     FileUploadBegin {
         /// The archive (or session folder) as the client names it: its path on the

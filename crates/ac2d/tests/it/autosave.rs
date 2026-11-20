@@ -257,7 +257,7 @@ fn slow_a_burst_of_edits_is_one_write() {
     let dir = tempfile::tempdir().unwrap();
     let (h, _backend) = start("autosave-burst", dir.path(), true);
     let (mut c, sub) = connect(&h, &[b"evt"]);
-    let t = c.trace(Command::TraceImport {
+    let t = c.import_trace(Import {
         file_name: "target.txt".into(),
         format: ImportFormat::Auto,
         role: ImportRole::Target,

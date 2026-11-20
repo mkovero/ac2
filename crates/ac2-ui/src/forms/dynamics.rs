@@ -163,13 +163,9 @@ impl Form {
     }
 
     /// `meas.create` (or `meas.update`) of the dialog. The daemon checks the programme as a
-    /// whole (carrier against the rate, levels against the maximum, burst counts); what is
-    /// checked here is what a field alone can say.
-    pub fn dynamics_meas(
-        &self,
-        open: Option<&OpenSession>,
-        ceiling: Option<Dbfs>,
-    ) -> Result<MeasConfig, String> {
+    /// whole (carrier against the rate, burst counts); what is checked here is what a field
+    /// alone can say. Levels above the maximum are kept: a run checks them when it plays.
+    pub fn dynamics_meas(&self, open: Option<&OpenSession>) -> Result<MeasConfig, String> {
         let open = open.ok_or("no audio I/O: open one first")?;
         let reference = self
             .channel(FieldId::Reference)
@@ -207,16 +203,6 @@ impl Form {
         })?;
         if bursts.is_empty() {
             return Err("type the burst levels (dBFS), loudest last or in any order".into());
-        }
-        if let Some(c) = ceiling
-            && let Some(top) = bursts.iter().map(|b| b.0).reduce(f64::max)
-            && top > c.0
-        {
-            return Err(format!(
-                "a burst at {} dBFS is above the daemon's ceiling {} dBFS",
-                fixed(top, 1),
-                fixed(c.0, 1)
-            ));
         }
         let durations = list(self.text(FieldId::Durations), |t| {
             Ok(in_field::<Time>(t, "s")?.0)

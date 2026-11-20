@@ -2996,6 +2996,8 @@ ac2 trace export "Run 1" --csv vca.csv
   `--durations` entry is refused, naming the shortest at that carrier, at `meas new` and
   again at every run (the carrier snaps to the session's rate). Without `--durations`, the
   defaults are those of 1, 3, 10, 30, 100, 300 ms, 1, 3, 10 s at least 3 periods long.
+- A burst louder than the max level (`ac2 gen ceiling`) is kept in the measurement, as a
+  sweep's level is; the run refuses it until the max level is raised.
 - The run arms at the highest burst level and shows the longest it can take (every rest at
   `--rest-max`); **Enter** plays, **Esc**/**q**/**Ctrl-C** stops and discards it. The daemon
   disarms once the last rest is in.
@@ -3017,8 +3019,9 @@ ac2 trace export "Run 1" --csv vca.csv
 **New measurement… › Dynamics** opens the dynamics form on a screen of its own with one
 Dynamics pane: reference, measured inputs (one row each, as the sweep's), output, carrier,
 onset, pilot, burst levels and lengths, longest rest, name. Pilot and bursts have no default:
-they depend on the processor's threshold. **Edit** on its row opens the same form; a change
-while a run plays is refused. **Space** on the pane arms its measurement (the carrier at the
+they depend on the processor's threshold. A loudest burst above the max level is kept, with a
+note: its run is refused until the max level is raised. **Edit** on its row opens the same
+form; a change while a run plays is refused. **Space** on the pane arms its measurement (the carrier at the
 loudest burst; a measurement with runs first asks whether to adapt the rests or replay a
 run's), **Enter** plays, **Esc** stops and discards it. The pane title shows the step and
 phase while it plays; a failed run raises a banner with the daemon's reason; the stored run
@@ -3106,12 +3109,13 @@ sets its old autosave aside as `autosave.vN` and starts empty. `ac2 session salv
 or .ac2session file>`, where that path is readable, rebuilds it on top of what is there:
 
 - each measurement with its name, kind, settings, colour, own pane layout, and a transfer's
-  delay and tracking; a pane layout of an older shape is not mapped: that measurement opens
+  delay and tracking (a dynamics measurement louder than the max level too: only its run is
+  refused); a pane layout of an older shape is not mapped: that measurement opens
   with the default layout, and the summary says so; a compare list of an older version is
   dropped and named in the summary (pick its curves into a pane again); pane references to
   what was not restored are dropped;
 - each stored trace with its name, colour, slot, offset, polarity, nudge, smoothing and
-  lock, under its measurement; math traces on the restored items;
+  lock, under its measurement (uploaded in chunks: a trace of any size); math traces on the restored items;
 - measurements that were running are started when the open audio I/O captures their
   inputs (open the audio I/O first);
 - panes and the selection that showed a measurement come back to it once it is recreated.

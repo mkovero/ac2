@@ -671,18 +671,9 @@ pub(super) async fn import(
         || path.display().to_string(),
         |n| n.to_string_lossy().into_owned(),
     );
-    let r = c
-        .call(Command::TraceImport {
-            file_name,
-            format: ImportFormat::Auto,
-            role,
-            ir,
-            content: ac2_proto::units::Blob(content),
-            owner,
-        })
+    ac2_client::sessions::import_trace(c, file_name, &content, ImportFormat::Auto, role, ir, owner)
         .await
-        .map_err(|e| e.to_string())?;
-    expect_body!("trace.import", r, ReplyBody::Trace(t) => t).map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())
 }
 
 /// `trace.export`s `trace` and writes it to `path` (into it, under the daemon's suggested

@@ -164,36 +164,33 @@ async fn traces_and_sessions() {
     )
     .await;
     assert!(matches!(avg.source, TraceSource::Average { .. }));
-    let content = Blob(
-        ac2_client::sessions::export_trace(&c, a.id, ExportFormat::Ac2Csv)
-            .await
-            .unwrap()
-            .1,
-    );
-    let imp = trace(
+    let content = ac2_client::sessions::export_trace(&c, a.id, ExportFormat::Ac2Csv)
+        .await
+        .unwrap()
+        .1;
+    let imp = ac2_client::sessions::import_trace(
         &c,
-        Command::TraceImport {
-            file_name: "a.csv".into(),
-            format: ImportFormat::Auto,
-            role: ImportRole::Trace,
-            ir: None,
-            content,
-            owner: TraceOwner::Imported,
-        },
+        "a.csv".into(),
+        &content,
+        ImportFormat::Auto,
+        ImportRole::Trace,
+        None,
+        TraceOwner::Imported,
     )
-    .await;
+    .await
+    .unwrap();
     // The export re-imports on the capture's own grid.
     assert_eq!(imp.grid_id, a.grid_id);
-    let bad = c
-        .call(Command::TraceImport {
-            file_name: "x.txt".into(),
-            format: ImportFormat::AnalyzerText,
-            role: ImportRole::Trace,
-            ir: None,
-            content: Blob(b"1 2\n".to_vec()),
-            owner: TraceOwner::Imported,
-        })
-        .await;
+    let bad = ac2_client::sessions::import_trace(
+        &c,
+        "x.txt".into(),
+        b"1 2\n",
+        ImportFormat::AnalyzerText,
+        ImportRole::Trace,
+        None,
+        TraceOwner::Imported,
+    )
+    .await;
     assert_eq!(bad.err().and_then(|e| e.code()), Some(ErrorCode::Invalid));
 
     // A reply can arrive before the events that put its trace in the mirror: the state

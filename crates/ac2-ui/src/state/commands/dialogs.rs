@@ -66,9 +66,10 @@ impl AppState {
             && f.is_dynamics()
         {
             // Made (or changed) without playing, as a sweep: Space on its pane arms a run.
-            match f.dynamics_meas(open.as_ref(), ceiling) {
+            match f.dynamics_meas(open.as_ref()) {
                 Ok(config) => {
                     let edit = f.sweep_edit;
+                    let above = above_ceiling(&config, ceiling);
                     let req = match edit {
                         Some(meas) => Request::Call {
                             what: format!("{} changed: its next run uses it", config.name),
@@ -83,6 +84,9 @@ impl AppState {
                     self.overlay = Overlay::None;
                     if edit.is_some() {
                         self.focus_lead(PaneKind::Dynamics);
+                    }
+                    if let Some(note) = above {
+                        self.warn(note);
                     }
                 }
                 Err(e) => f.error = Some(e),
@@ -577,4 +581,23 @@ impl AppState {
     ) -> Vec<crate::math_dialog::Candidate> {
         crate::math_dialog::Candidate::all(&self.measurements(), &self.trace_list(), owner)
     }
+}
+
+/// A dynamics measurement louder than the daemon's ceiling is made all the same, kept for the
+/// run the ceiling is raised for; this says so when it is made, as its run would refuse it.
+fn above_ceiling(config: &ac2_proto::model::MeasConfig, ceiling: Option<Dbfs>) -> Option<String> {
+    let MeasKind::Dynamics { config: d } = &config.kind else {
+        return None;
+    };
+    let top = d.bursts.iter().map(|b| b.0).reduce(f64::max)?;
+    let c = ceiling?;
+    (top > c.0).then(|| {
+        format!(
+            "{}'s loudest burst {} is above the daemon's ceiling {}: raise the max level before \
+             running it",
+            config.name,
+            ac2_scene::format::dbfs(top),
+            ac2_scene::format::dbfs(c.0)
+        )
+    })
 }

@@ -2,14 +2,16 @@
 //! another host (`docs/design/sessions.md`): a session folder or `.ac2session` archive is
 //! read here and uploaded in chunks; the working state (or a named session) is downloaded
 //! in chunks, checked against its SHA-256 and written here. A trace export comes down the
-//! same way.
+//! same way, and a trace import goes up the same way.
 //!
 //! Used by the CLI and the app alike, so both move sessions the same way.
 
 use std::path::{Path, PathBuf};
 
 use ac2_archive::{ArchiveError, MAX_ARCHIVE_BYTES};
-use ac2_proto::model::{ExportFormat, SessionRef, Transfer};
+use ac2_proto::model::{
+    ExportFormat, ImportFormat, ImportRole, IrImport, SessionRef, TraceMeta, TraceOwner, Transfer,
+};
 use ac2_proto::units::{Blob, TraceId, TransferId};
 use ac2_proto::{Command, ReplyBody};
 
@@ -75,20 +77,37 @@ impl LocalSession {
 pub async fn upload(
     c: &Client,
     local: &LocalSession,
-    mut progress: impl FnMut(u64, u64),
+    progress: impl FnMut(u64, u64),
 ) -> Result<TransferId, ClientError> {
     let bytes = local.archive()?;
+    upload_file(
+        c,
+        local.path().to_string_lossy().into_owned(),
+        &bytes,
+        progress,
+    )
+    .await
+}
+
+/// Uploads `bytes` as `file` (the client's name for it) in chunks; returns the complete
+/// upload.
+pub async fn upload_file(
+    c: &Client,
+    file: String,
+    bytes: &[u8],
+    mut progress: impl FnMut(u64, u64),
+) -> Result<TransferId, ClientError> {
     let t = c
         .call(Command::FileUploadBegin {
-            file: local.path().to_string_lossy().into_owned(),
+            file,
             bytes: bytes.len() as u64,
-            sha256: ac2_archive::sha256_hex(&bytes),
+            sha256: ac2_archive::sha256_hex(bytes),
         })
         .await?;
     let t = expect_body!("file.upload_begin", t, ReplyBody::Transfer(t) => t)?;
     let step = (t.chunk_bytes as usize).max(1);
     let mut offset = 0usize;
-    // An empty archive cannot be valid, but the daemon says so, not this loop.
+    // An empty file cannot be valid, but the daemon says so, not this loop.
     while offset < bytes.len() {
         let end = (offset + step).min(bytes.len());
         c.call(Command::FileUploadChunk {
@@ -115,6 +134,30 @@ pub async fn download(
     let data = pull(c, &t, &mut progress).await?;
     ac2_archive::verify(&data, &t.sha256).map_err(ClientError::Archive)?;
     Ok((t, data))
+}
+
+/// Imports `content` (the file `file_name`) as a trace: uploaded in chunks, then read by
+/// `trace.import`, so a file of any size up to the upload limit arrives.
+pub async fn import_trace(
+    c: &Client,
+    file_name: String,
+    content: &[u8],
+    format: ImportFormat,
+    role: ImportRole,
+    ir: Option<IrImport>,
+    owner: TraceOwner,
+) -> Result<TraceMeta, ClientError> {
+    let transfer = upload_file(c, file_name, content, |_, _| {}).await?;
+    let r = c
+        .call(Command::TraceImport {
+            transfer,
+            format,
+            role,
+            ir,
+            owner,
+        })
+        .await?;
+    expect_body!("trace.import", r, ReplyBody::Trace(t) => t)
 }
 
 /// Exports `trace` as `format`: its suggested file name and content. The daemon offers the
