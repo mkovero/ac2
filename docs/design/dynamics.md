@@ -220,79 +220,118 @@ row; the envelopes overlay on a shared time axis from each edge.
 
 ## App: the Dynamics pane
 
-What the first card bench (2026-11-20) needed to read, in the order it needed them:
+What the first card bench (2026-11-20) needed to read, in the order it needed them: whether each
+burst left the processor where it started; where in the level × length grid one channel departs
+from the other; the release's programme dependence; single envelopes. The pane follows every
+pane rule: curves by drag from any rig, the shared legend and readout plates, `T` for plot
+chrome, every key with its keytip, key-table row and guide row, no Ctrl chord, no second y axis.
+`ac2_scene::dynamics` computes every number and string; `ac2-plot` places pixels.
 
-1. whether each burst left the processor where it started;
-2. where in the level × length grid one channel departs from the other;
-3. the release's programme dependence;
-4. single envelopes.
+### Curves, A and B
 
-The pane follows the rules every other pane follows. It picks its curves by drag, from any rig. It carries the shared legend and readout plates. `T` toggles plot chrome. Every key ships with its keytip, a key-table row and a guide row. `ac2_scene::dynamics` computes every number and string; `ac2-plot` only places pixels.
+A pane entry stays an `EntryRef` (a measurement's group or one trace); a dynamics trace holds
+several measured inputs, and **every input of every entry is a curve**, named
+`<input name> · Run <n>` (with the measurement's name when the pane holds more than one), in the
+pane's per-curve colours. Envelopes and Release draw every curve.
 
-### Curves and the step picker
+Steps and Table compare two curves, **A** and **B**, stored in the pane's layout as
+`{trace, input}` pairs. Default A: the first input of the first trace; default B: the trace's
+second input if it has one (one channel against the other, the bench case), else the first
+input of the second trace, else none. `C` / `Shift+C` cycle A / B through the pane's curves;
+clicking a legend entry with Alt makes it B. Other curves are not in Steps or Table.
 
-A **curve** is one measured input of one dynamics trace, named `<measurement> · <input name> · Run <n>` like other traces' curves. Its colour is the pane's per-curve colour, as in the transfer and distortion panes. Curves from different runs compare row by row only when their programmes match: same carrier, onset, levels and burst lengths, each within the rounding the programme allows.
+Two curves compare row by row when their programmes match: same carrier, onset, pilot, levels,
+burst lengths and sample rate. Two inputs of one trace always match. Rests may differ (adaptive
+rests end where each run's processor recovered): then the comparison carries the caption
+`rests differ`, since a different rest changes the next step's start. Otherwise Steps and Table
+say "programmes differ" and show A alone; Envelopes still overlays any curves.
 
-- Where programmes differ, the views that compare rows (Steps and Release) say "programmes differ" and show the first curve only.
-- The Envelopes view still overlays any curves, picked by level and length.
+### The picked step
 
-The **step picker** chooses one level and one burst length. The Envelopes view shows that step; the Release view uses only the level. Default: the middle level, the longest burst. It is a pair of segmented controls in the pane's title strip, with keys; at narrow widths it collapses to a single `level · length` label that cycles. The readout names the step in full: `−8 dBFS (+10.95 dBu if the output is calibrated) · 1 s`.
+One level and one burst length, shared by all views and stored in the layout as values (dBFS,
+seconds), not indices: a curve from another run picks its nearest step, and a curve without a
+step within 0.5 dB / 10 % reads "no such step". Default: the middle level, the longest burst.
+`Alt+↑` / `Alt+↓` pick the level, `Alt+←` / `Alt+→` the length (plain ↑ ↓ are the reserved
+level keys); a click on a Steps cell picks it, a double click also switches to Envelopes. The
+pick is printed as caption text in the title strip, `−8 dBFS · 1 s` (P2: the title is text, no
+controls), and in full in the readout.
 
-### Views
+### Views (`G` / `Shift+G`)
 
-The pane has four views, switched like the transfer pane's views (`DynamicsView`, in `PaneLayout`).
+`PaneKind::Dynamics`, `DynamicsView` in `PaneLayout`, `Scope::Dynamics` in the key table, both
+`draws_curves` copies updated.
 
-- **Steps**, the default view: the level × burst-length grid, one row per level and one column per burst length.
-  - Each cell shows one step-table column for the first curve, chosen by a metric control: GR end, attack τ, attack 2 dB, settle 0.5 dB, overshoot, release τ, recovery 2 dB, recovery 0.5 dB, THD attack/settled/release, thump start/end, or drift.
-  - With a second curve, a cell shows A, B and A − B. Cells where |A − B| exceeds the metric's tolerance are marked with the gentle hint style: faint shade and dashed edge. Tolerances: 0.3 dB for gains and THD; 20 % or one carrier period, whichever is larger, for times.
-  - Values that are not numbers ("≤ 1 period", "can't tell", "≤ floor", "no gain reduction") print as words. They never enter a difference: the difference cell then reads "can't compare".
-  - Hovering or keyboard-selecting a cell gives the readout plate every column of that step for each curve. `Enter` on a cell opens the Envelopes view on that step.
-- **Envelopes**: two stacked plots of gain reduction (dB) against time from the edge, for the picked step.
-  - Upper plot: onset, from −5 ms to the end of the burst. Lower plot: release, from the burst's end to the end of the rest.
-  - The time axis is log from one carrier period, and linear before the edge: the stored samples are quarter-period for 50 ms, then 1/48 decade.
-  - Both plots share one GR scale, matched across every curve shown.
-  - A `GR | THD` toggle in the title swaps each plot's y-axis to H2–H5 summed (dB re carrier), on the same time axes. This is a toggle, never a second axis.
-  - The readout gives time, then GR or THD per curve.
-- **Release**: the programme dependence, for the picked level.
-  - Upper plot: release τ against burst length, log x, one line per curve with marks at the measured lengths.
-  - Lower plot: recovery to 0.5 dB, on the same x axis.
-  - "≤ 1 period" and "can't tell" points are drawn hollow at the bound, as the distortion pane draws values within the noise.
-  - An `all levels` switch draws every level of the first curve instead. Levels are ordered magnitude, so they use one sequential ramp, not the curve colours.
-- **Table**: the step table as rows (level, length, every column) for up to two curves side by side plus the difference. This is the view to read, print and copy (`trace export` stays the file path).
+- **Steps** (default). The level × length grid. `M` / `Shift+M` cycle the metric: GR end,
+  attack τ, attack 2 dB, settle 0.5 dB, overshoot, release τ, recovery 2 dB, recovery 0.5 dB,
+  THD attack / settled / release, thump start / end, drift. A cell shows A's value, or A − B
+  when B is set; the readout plate gives A, B and A − B for every column of the hovered (or
+  picked) step. Non-numbers print as words ("≤ 1 period", "can't tell", "≤ floor", "no gain
+  reduction") and never enter a difference ("can't compare"). A − B beyond the metric's
+  tolerance gets the gentle hint (faint shade, dashed edge). Starting tolerances: 0.3 dB for
+  GR end and overshoot; for times the larger of 25 % and one carrier period; 3 dB for THD and
+  thump, and only where both values are numbers above their floors. A step baseline-flagged in
+  either curve reads "can't compare" and is never shaded. The tolerances are constants in
+  `ac2_scene::dynamics` until a bench repeat run (one channel, rests replayed with
+  `rests_from`) measures run-to-run spread per metric; that run sets them.
+- **Envelopes.** Two stacked plots for the picked step: onset (−5 ms to the burst's end) above,
+  release (burst's end to the rest's end) below; time from the edge, linear before it and log
+  from one carrier period after it; one GR scale shared by both plots and matched across all
+  curves. `D` toggles the y quantity between GR and THD (H2–H5 summed, dB re carrier); where
+  the stored harmonics are blind (NaN) the THD line has a gap, never a zero. Readout: time and
+  the value per curve.
+- **Release.** For the picked level: release τ against burst length (log x, a mark per measured
+  length) above, recovery to 0.5 dB on the same x below; "≤ 1 period" and "can't tell" points
+  are hollow at their bound. `V` toggles to every level of curve A, drawn in one sequential
+  ramp (levels are an ordered magnitude) with a level legend.
+- **Table.** The step table for A and B and the difference, one row per step, scrolling;
+  exported as a file with the trace's existing CSV export, as today.
 
-### Baseline check (the bypass sentinel)
+### Baseline check
 
-The threshold is 0.3 dB, set from the first bench run:
-
-- A rest ends when two 1 s medians agree within 0.05 dB, which is before a multi-second release tail has fully gone.
-- So a healthy channel's `drift` collects up to −0.15 dB after long, deep bursts (Studer card ch 2, 2026-11-20: −0.03 dB at 3 dB GR, −0.12 dB at 13 dB).
-- In the same run, the card's ch 1 bypass state moved it by about −0.85 dB.
-
-A step whose `drift` is beyond ±0.3 dB started its next burst from a moved baseline. The processor did not come back to where it was, which is the signature of the card's bypass or latch state. That step and the next are flagged:
-- a hatched corner on their cells in Steps and Table;
-- "baseline moved −0.85 dB" in their readout;
-- a dashed line in Envelopes, for the following step.
-
-The flags warn; they do not hide data. The Steps view's metric list includes drift itself, so the moved steps show as a block. No wire change: `drift` is already in the step table.
+`drift` (the gain at the end of the step's rest re `g₀`) is the pilot gain the next burst
+starts from. A rest ends when the gain moves under `FLAT_DB` over `FLAT_WINDOW_SECONDS`, which
+on an exponential-in-dB tail leaves a residual of about 0.05 dB/s × τ: a healthy processor's
+drift grows with its release (Studer card ch 2, 2026-11-20: −0.03 dB at 3 dB GR up to −0.12 dB
+at 13 dB, τ ≈ 3 s). So per curve and level the expected residual is `r = 0.05 dB/s × τ_max`,
+`τ_max` the level's longest measured `release_tau`, and a step's baseline **moved** when
+`|drift| > 2r + 0.1 dB` (bench: 0.41 dB at τ = 3.1 s; the card's ch 1 was at −0.85 dB). A step
+that hit `rest_max` reads "not recovered" instead; where `τ_max` is not a number the check
+reads "can't tell". A moved step and the step after it carry a hatched corner in Steps and
+Table, "baseline moved −0.85 dB" in the readout (a measured number, no cause), and Envelopes
+draws the following step's curve dashed. The drift metric in Steps shows the whole picture,
+including a slow thermal ramp, which crosses the threshold only once it is as large as a moved
+baseline. No wire change: `drift` and `release_tau` are in the step table.
 
 ### Making and running one
 
-- **New measurement form**, the sweep form's sibling, opening on a screen of its own (one Dynamics pane):
-  - fields: reference input; measured inputs; outputs; carrier; onset; pilot; burst levels; burst lengths (default per carrier, with the 3-period rule shown as the shortest allowed); rest bounds;
-  - levels in dBFS, with dBu beside them where the output's calibration is known;
-  - the daemon's `--max-level` refuses anything louder at create, and the form shows that error in the form, not as a toast.
-- **Edit**: the same form on the measurement's settings. `meas.set` accepts a dynamics config while no run plays. Each trace keeps the settings it was run with.
-- **Run**: the pane's run control, the palette, and the measurement's context menu send `dynamics.run`.
-  - While it runs, the pane's title shows step n of m and the phase (check, burst, rest, analysis) from the mirrored `dynamics` entity. `Stop` ends it the way a sweep's stop does, and the stop fades the output.
-  - The finished trace adds itself as a curve to the pane that started it.
-  - Running needs the stimulus lease, like a sweep; the app shows the same lease conflict a sweep would.
-- **Data**: the app gets a dynamics trace's step table and envelopes as it gets a sweep trace's data, within the reply size limit (`trace.get` in parts if a trace is larger). Session save and load already carry the CSV.
+- **New measurement**: a form beside the sweep form, opening on a screen of its own with one
+  Dynamics pane. Fields: reference input, measured inputs, outputs, carrier, onset, pilot,
+  burst levels (dBFS), burst lengths (defaults per carrier; the 3-period minimum shown),
+  rest bounds. The daemon checks the levels against `--max-level` in create and update
+  validation (today only `dynamics.run` does) so the form shows the refusal in place.
+- **Edit**: the same form through `meas.update`, which already takes any kind that validates;
+  the daemon refuses it while that measurement's run plays. Traces keep the settings they ran
+  with.
+- **Run**: the stimulus cluster, as for a sweep: `Space` arms the focused pane's dynamics
+  measurement (showing the run-time bound and its loudest level), `Enter` fires, `Esc` stops
+  (fade-out as any stop). The palette and the measurement's context menu reach the same path.
+  An arm offers "replay rests of Run n" (`rests_from`) when the measurement has a run. During
+  the run the title shows step n of m and the phase (`Waiting`, `Check`, `Burst`, `Rest`). A
+  failed run (`DynamicsStatus::Failed`: pilot not below threshold, no reference, dropout,
+  programme mismatch, stopped) shows a U1 banner with its message. The finished trace joins
+  the pane that started it.
+- **Data**: the step tables come from `dynamics.table` (settings and step table, no envelopes);
+  the Envelopes view fetches `dynamics.envelope {trace, input, step}` on demand: both edges'
+  points as parallel `f32` arrays (`t`, `gr_db`, `h_db[4]`), a few tens of kB per step even at
+  an 8 kHz carrier. A test builds the largest legal programme (8 inputs × the most levels and
+  lengths) and checks every reply against `MAX_CTRL_BYTES`. Session save and load keep the CSV.
 
 ### What changes on the wire and on disk
 
-- `PaneKind::Dynamics` and `DynamicsView` in `PaneLayout`, plus the picker, metric and toggles. This is a layout change: it bumps `PROTO_VERSION` and the session `VERSION`, and touches `rig.json` meter layouts and `ui.toml` as any layout field does.
-- `meas.set` for `MeasKind::Dynamics`.
-- Anything needed to fetch a large dynamics trace.
+`PaneKind::Dynamics`, `DynamicsView`, the A/B pair, the picked step, metric and toggles in
+`PaneLayout` (a layout change: `PROTO_VERSION`, session `VERSION`, `rig.json` meter layouts,
+`ui.toml`); `dynamics.envelope`; the `--max-level` check in create/update validation; the
+run-plays guard on `meas.update`.
 
 ## Stages
 
@@ -303,6 +342,8 @@ The flags warn; they do not hide data. The Steps view's metric list includes dri
    step, and the ideal distortion-free, thump-free limiter, which must read "≤ floor" for every
    harmonic and thump column), the measurement kind, `dynamics.run`, trace storage, CSV export and import, session
    save. CLI: `meas new dynamics`, `dynamics run` (prints the step table), `trace export`.
-2. **App.** The Dynamics pane (*App: the Dynamics pane*): the Steps, Envelopes, Release and Table views, the baseline check, the new/edit form, running from the app, and `meas.set` for dynamics.
+2. **App.** The Dynamics pane (*App: the Dynamics pane*): curves and A/B, the picked step,
+   the Steps, Envelopes, Release and Table views, the baseline check, the new/edit form,
+   running from the stimulus cluster, `dynamics.envelope`, and the daemon's level and run guards.
 3. **Link.** Bursts on a subset of the outputs while the others hold `pilot`, to measure how far
    a linked channel follows. Needs a per-output level in the programme source.
