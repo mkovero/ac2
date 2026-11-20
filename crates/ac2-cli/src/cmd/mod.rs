@@ -9,6 +9,7 @@ mod daemon;
 mod delay;
 mod devsel;
 mod discover;
+mod dynamics;
 mod eq;
 mod gen_;
 mod ir;
@@ -61,6 +62,7 @@ pub(crate) async fn dispatch(cli: &Cli, out: &mut Out<'_>) -> Result<(), CliErro
         Cmd::Timing { watch } => readouts::timing(cli, *watch, out).await,
         Cmd::Ir { cmd } => ir::run(cli, cmd, out).await,
         Cmd::Sweep { cmd } => ir::sweep(cli, cmd, out).await,
+        Cmd::Dynamics { cmd } => dynamics::run(cli, cmd, out).await,
         Cmd::Rec { cmd } => rec::run(cli, cmd, out).await,
         Cmd::Trace { cmd } => traces::trace(cli, cmd, out).await,
         Cmd::Plan { cmd } => walk::plan(cli, cmd, out).await,

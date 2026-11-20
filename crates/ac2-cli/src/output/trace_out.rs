@@ -33,6 +33,9 @@ fn source_text(s: &TraceSource) -> String {
         }
         TraceSource::Sweep {
             meas_name, number, ..
+        }
+        | TraceSource::Dynamics {
+            meas_name, number, ..
         } => format!("run {number} of {meas_name}"),
         TraceSource::Eq { set, rev, .. } => format!("EQ {} (rev {rev})", set.0),
         TraceSource::Generated { curve } => {
@@ -150,7 +153,9 @@ pub fn trace_meta(t: &TraceMeta) -> String {
         | TraceSource::Math {
             epoch, at_sample, ..
         } => format!("\n  epoch       {} (sample {})", epoch.0, at_sample.0),
-        TraceSource::Sweep { epoch, .. } => format!("\n  epoch       {}", epoch.0),
+        TraceSource::Sweep { epoch, .. } | TraceSource::Dynamics { epoch, .. } => {
+            format!("\n  epoch       {}", epoch.0)
+        }
         _ => String::new(),
     };
     format!(

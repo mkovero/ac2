@@ -159,6 +159,21 @@ pub fn meas_kind(k: &MeasKind) -> String {
             format::dbfs(config.level.0),
             ac2_scene::unit_text::channels_text(&config.outputs)
         ),
+        MeasKind::Dynamics { config } => format!(
+            "dynamics in {} re in {}, {} carrier, pilot {}, bursts {} × {} lengths on out {}",
+            ac2_scene::unit_text::channels_text(&config.measurement_inputs),
+            config.reference_input + 1,
+            format::freq_readout(config.carrier.0),
+            format::dbfs(config.pilot.0),
+            config
+                .bursts
+                .iter()
+                .map(|b| format::dbfs(b.0))
+                .collect::<Vec<_>>()
+                .join(", "),
+            config.durations.len(),
+            ac2_scene::unit_text::channels_text(&config.outputs)
+        ),
     }
 }
 

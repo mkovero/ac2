@@ -124,8 +124,26 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
         ("tail", n.tail.is_some()),
         ("lf-harmonics", n.lf_harmonics.is_some()),
     ];
+    let dynamics_only = [
+        ("carrier", n.carrier.is_some()),
+        ("onset", n.onset.is_some()),
+        ("pilot", n.pilot.is_some()),
+        ("bursts", n.bursts.is_some()),
+        ("durations", n.durations.is_some()),
+        ("rest-max", n.rest_max.is_some()),
+    ];
+    if n.kind != MeasKindArg::Dynamics
+        && let Some((flag, _)) = dynamics_only.iter().find(|(_, given)| *given)
+    {
+        return Err(CliError::Usage(format!(
+            "--{flag} applies to a dynamics measurement, not {:?}",
+            n.kind
+        )));
+    }
     if n.kind != MeasKindArg::Sweep
-        && let Some((flag, _)) = sweep_only.iter().find(|(_, given)| *given)
+        && let Some((flag, _)) = sweep_only
+            .iter()
+            .find(|(f, given)| *given && !(n.kind == MeasKindArg::Dynamics && *f == "out"))
     {
         let hint = if *flag == "level" && n.kind == MeasKindArg::Spectrum {
             " (a spectrum takes --level tone|density)"
@@ -178,6 +196,54 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
         )));
     }
     let kind = match n.kind {
+        MeasKindArg::Dynamics => {
+            refuse(n.input, "input")?;
+            if n.smooth.is_some() || n.start {
+                return Err(CliError::Usage(
+                    "a dynamics measurement has no smoothing and no job to start: `ac2 \
+                     dynamics run` plays it"
+                        .into(),
+                ));
+            }
+            let usage = |m: &str| CliError::Usage(m.into());
+            let config = DynamicsConfig {
+                reference_input: need(n.reference, "ref")?,
+                measurement_inputs: meas_inputs()?,
+                outputs: n
+                    .outputs
+                    .as_ref()
+                    .map(|o| o.0.clone())
+                    .ok_or_else(|| usage("dynamics needs --out"))?,
+                carrier: n
+                    .carrier
+                    .map(|c| c.0)
+                    .ok_or_else(|| usage("dynamics needs --carrier, e.g. 1khz"))?,
+                onset: n.onset.unwrap_or_default().into(),
+                pilot: n.pilot.map(|p| p.0).ok_or_else(|| {
+                    usage("dynamics needs --pilot: the rest level, below the threshold")
+                })?,
+                bursts: n
+                    .bursts
+                    .as_ref()
+                    .map(|b| b.iter().map(|l| l.0).collect())
+                    .ok_or_else(|| usage("dynamics needs --bursts, e.g. -8dbfs,-5dbfs,0dbfs"))?,
+                durations: n.durations.as_ref().map_or_else(
+                    || {
+                        DynamicsConfig::DEFAULT_DURATIONS
+                            .iter()
+                            .map(|&s| ac2_proto::units::Seconds(s))
+                            .collect()
+                    },
+                    |d| d.iter().map(|t| t.0).collect(),
+                ),
+                rest_max: n.rest_max.map_or(
+                    ac2_proto::units::Seconds(DynamicsConfig::DEFAULT_REST_MAX),
+                    |t| t.0,
+                ),
+            };
+            config.check_inputs().map_err(CliError::Usage)?;
+            MeasKind::Dynamics { config }
+        }
         MeasKindArg::Sweep => {
             refuse(n.input, "input")?;
             if n.smooth.is_some() || n.start {
@@ -409,6 +475,7 @@ pub(crate) fn meas_set(config: &MeasConfig, set: MeasSet) -> Result<MeasConfig, 
         MeasKind::Spl { .. } => "spl",
         MeasKind::Math { .. } => "math",
         MeasKind::Sweep { .. } => "sweep",
+        MeasKind::Dynamics { .. } => "dynamics",
     };
     let not = |flag: &str, applies: &str| {
         Err(CliError::Usage(format!(
@@ -523,7 +590,7 @@ pub(crate) fn uncaptured(kind: &MeasKind, captured: &[u16]) -> Result<(), CliErr
         MeasKind::Rta { config } => &[config.input],
         MeasKind::Spl { config } => &[config.input],
         MeasKind::Transfer { config } => &[config.reference_input, config.measurement_input],
-        MeasKind::Math { .. } | MeasKind::Sweep { .. } => &[],
+        MeasKind::Math { .. } | MeasKind::Sweep { .. } | MeasKind::Dynamics { .. } => &[],
     };
     match inputs.iter().find(|i| !captured.contains(i)) {
         Some(i) => Err(CliError::Usage(format!(

@@ -4,6 +4,7 @@ mod align;
 mod artnet;
 mod cal;
 mod delay;
+mod dynamics;
 mod eq;
 mod gen_;
 mod ir;
@@ -22,6 +23,7 @@ pub use align::*;
 pub use artnet::*;
 pub use cal::*;
 pub use delay::*;
+pub use dynamics::*;
 pub use eq::*;
 pub use gen_::*;
 pub use ir::*;
@@ -145,6 +147,13 @@ pub enum Cmd {
         /// Action.
         #[command(subcommand)]
         cmd: SweepCmd,
+    },
+    /// Run a dynamics measurement (`meas new dynamics`) with its settings: each run is
+    /// stored as one dynamics trace under it.
+    Dynamics {
+        /// Action.
+        #[command(subcommand)]
+        cmd: DynamicsCmd,
     },
     /// Sweep measurement: response, harmonic distortion and impulse response.
     Ir {

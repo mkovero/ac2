@@ -131,7 +131,9 @@ fn domain_of(s: &State, o: Operand) -> Result<MathDomain, CliError> {
                 MeasKind::Math { .. } => Err(CliError::Usage(format!(
                     "{name} is a math trace: capture it (`ac2 trace capture`) and use the stored trace"
                 ))),
-                MeasKind::Spl { .. } | MeasKind::Sweep { .. } => Err(not()),
+                MeasKind::Spl { .. } | MeasKind::Sweep { .. } | MeasKind::Dynamics { .. } => {
+                    Err(not())
+                }
             }
         }
         Operand::Trace { trace } => {
@@ -140,6 +142,7 @@ fn domain_of(s: &State, o: Operand) -> Result<MathDomain, CliError> {
                 TraceKind::Transfer | TraceKind::Sweep | TraceKind::Target => MathDomain::Transfer,
                 TraceKind::Spectrum { .. } => MathDomain::Spectrum,
                 TraceKind::Rta { .. } => MathDomain::Rta,
+                TraceKind::Dynamics => return Err(not()),
             })
         }
         Operand::Eq { .. } => Ok(MathDomain::Transfer),

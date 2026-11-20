@@ -6,7 +6,7 @@ use clap::{Args, Subcommand, ValueEnum};
 
 use super::{ColourArg, ResolutionArg};
 use ac2_scene::unit_text::{
-    Channel, Channels, Freq, MeasLevel, SampleCount, SpecAveragingArg, Time,
+    Channel, Channels, Freq, LevelDbfs, MeasLevel, SampleCount, SpecAveragingArg, Time,
 };
 
 /// Kind of a new measurement.
@@ -23,6 +23,29 @@ pub enum MeasKindArg {
     /// Sweep measurement: settings only (`--ref`, `--meas`, `--out`, `--level`, …); `ac2
     /// sweep run` plays it.
     Sweep,
+    /// Dynamics measurement (attack, release, their programme dependence): settings only
+    /// (`--ref`, `--meas`, `--out`, `--carrier`, `--pilot`, `--bursts`, …); `ac2 dynamics
+    /// run` plays it.
+    Dynamics,
+}
+
+/// Where a dynamics burst starts in the carrier's cycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+pub enum OnsetArg {
+    /// At a zero crossing.
+    #[default]
+    Zero,
+    /// At a peak: the hardest step for a peak detector.
+    Peak,
+}
+
+impl From<OnsetArg> for ac2_proto::model::DynamicsOnset {
+    fn from(a: OnsetArg) -> Self {
+        match a {
+            OnsetArg::Zero => Self::Zero,
+            OnsetArg::Peak => Self::Peak,
+        }
+    }
 }
 
 /// Sweep harmonic windows at the lowest columns.
@@ -366,6 +389,31 @@ pub struct MeasNew {
     /// higher floor there, a longer silence after the sweep.
     #[arg(long, value_enum)]
     pub lf_harmonics: Option<LfHarmonicsArg>,
+    /// Dynamics: the carrier, e.g. `1khz` (snapped to a whole-sample period at run time).
+    #[arg(long, value_name = "FREQ")]
+    pub carrier: Option<Freq>,
+    /// Dynamics: where each burst starts in the carrier's cycle (default zero).
+    #[arg(long, value_enum)]
+    pub onset: Option<OnsetArg>,
+    /// Dynamics: the rest level, below the processor's threshold, e.g. `-33dbfs`.
+    #[arg(long, allow_hyphen_values = true, value_name = "LEVEL")]
+    pub pilot: Option<LevelDbfs>,
+    /// Dynamics: burst levels, e.g. `-8dbfs,-5dbfs,0dbfs` (at most 8, each above the
+    /// pilot).
+    #[arg(
+        long,
+        allow_hyphen_values = true,
+        value_delimiter = ',',
+        value_name = "LEVELS"
+    )]
+    pub bursts: Option<Vec<LevelDbfs>>,
+    /// Dynamics: burst lengths, e.g. `10ms,100ms,1s` (at most 16, each ≤ 10 s; default
+    /// 1, 3, 10, 30, 100, 300 ms, 1, 3, 10 s).
+    #[arg(long, value_delimiter = ',', value_name = "TIMES")]
+    pub durations: Option<Vec<Time>>,
+    /// Dynamics: the longest rest after a burst, 2 … 30 s (default 30 s).
+    #[arg(long, value_name = "TIME")]
+    pub rest_max: Option<Time>,
     /// Input (spectrum, rta, spl).
     #[arg(long)]
     pub input: Option<Channel>,
