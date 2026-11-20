@@ -161,6 +161,61 @@ struct Run {
     thump_excess: Vec<Vec<[[f64; 2]; 2]>>,
 }
 
+/// A modelled analogue loop for the reference: an AC-coupling first-order high-pass, a
+/// converter's pure delay and a second-order Butterworth low-pass (bilinear transforms).
+#[derive(Debug, Clone)]
+struct RefPath {
+    hp: (f64, f64, f64),
+    hp_state: (f64, f64),
+    line: VecDeque<f64>,
+    lp: [f64; 5],
+    lp_state: [f64; 4],
+}
+
+impl RefPath {
+    fn new(fs: f64, high_pass_hz: f64, delay: usize, low_pass_hz: f64) -> Self {
+        let k = (std::f64::consts::PI * high_pass_hz / fs).tan();
+        let hp = (1.0 / (1.0 + k), -1.0 / (1.0 + k), (1.0 - k) / (1.0 + k));
+        let w = (std::f64::consts::PI * low_pass_hz / fs).tan();
+        let q = std::f64::consts::FRAC_1_SQRT_2;
+        let n = 1.0 / (1.0 + w / q + w * w);
+        let b0 = w * w * n;
+        let lp = [
+            b0,
+            2.0 * b0,
+            b0,
+            2.0 * (w * w - 1.0) * n,
+            (1.0 - w / q + w * w) * n,
+        ];
+        Self {
+            hp,
+            hp_state: (0.0, 0.0),
+            line: std::iter::repeat_n(0.0, delay).collect(),
+            lp,
+            lp_state: [0.0; 4],
+        }
+    }
+
+    fn process(&mut self, x: &[f32]) -> Vec<f32> {
+        x.iter()
+            .map(|&v| {
+                let v = f64::from(v);
+                let (b0, b1, a1) = self.hp;
+                let (x1, y1) = self.hp_state;
+                let h = b0 * v + b1 * x1 + a1 * y1;
+                self.hp_state = (v, h);
+                self.line.push_back(h);
+                let d = self.line.pop_front().unwrap_or(0.0);
+                let [b0, b1, b2, a1, a2] = self.lp;
+                let [x1, x2, y1, y2] = self.lp_state;
+                let y = b0 * d + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+                self.lp_state = [d, x1, y, y1];
+                y as f32
+            })
+            .collect()
+    }
+}
+
 /// Plays `played` through the processors in a closed loop (the analysis's releases end the
 /// rests), analysing as `analysed`, after `lead` samples of silence (the loop's latency).
 fn run_with(
@@ -169,6 +224,18 @@ fn run_with(
     procs: &mut [Limiter],
     block: usize,
     lead: usize,
+) -> Run {
+    run_path(played, analysed, procs, block, lead, None)
+}
+
+/// [`run_with`], the reference taken through `path` (the processors see the programme).
+fn run_path(
+    played: &Programme,
+    analysed: &Programme,
+    procs: &mut [Limiter],
+    block: usize,
+    lead: usize,
+    mut path: Option<&mut RefPath>,
 ) -> Run {
     let release = Release::new();
     let mut generator = match Generator::new(&GeneratorConfig {
@@ -206,12 +273,16 @@ fn run_with(
         }
         let outs: Vec<Vec<f32>> = procs.iter_mut().map(|p| p.process(&buf)).collect();
         let views: Vec<&[f32]> = outs.iter().map(Vec::as_slice).collect();
-        run.reference.extend_from_slice(&buf);
+        let reference = match path.as_deref_mut() {
+            Some(p) => p.process(&buf),
+            None => buf.clone(),
+        };
+        run.reference.extend_from_slice(&reference);
         for (o, x) in run.outputs.iter_mut().zip(&outs) {
             o.extend_from_slice(x);
         }
         fed += block;
-        if let Err(e) = an.push(&buf, &views) {
+        if let Err(e) = an.push(&reference, &views) {
             error = Some(e);
             break;
         }
@@ -828,4 +899,51 @@ fn step_analysis_is_spread_over_the_following_blocks() {
         Err(e) => panic!("analysis failed: {e}"),
     };
     assert_eq!(r.steps.len(), 4);
+}
+
+/// A zero-onset 100 Hz programme read through a modelled analogue reference loop at 96 kHz
+/// (5 Hz AC-coupling high-pass, 5 samples of converter delay, 40 kHz low-pass) finds every
+/// edge on the programme, as do 1 kHz and 8 kHz; a burst one period longer than the
+/// programme's is still refused.
+#[test]
+fn edges_through_an_ac_coupled_reference_loop() {
+    let fs = 96_000.0;
+    let field = |carrier: f64, onset, durations: &[f64]| {
+        let mut cfg = config(carrier, onset, &[-11.0, -8.0, -4.0, -1.0], durations, 2.0);
+        cfg.pilot_dbfs = -39.0;
+        programme(&cfg, fs)
+    };
+    let path = || RefPath::new(fs, 5.0, 5, 40_000.0);
+    for (carrier, onset) in [
+        (100.0, Onset::Zero),
+        (100.0, Onset::Peak),
+        (1000.0, Onset::Zero),
+        (1000.0, Onset::Peak),
+        (8000.0, Onset::Zero),
+        (8000.0, Onset::Peak),
+    ] {
+        let prog = field(carrier, onset, &[0.03, 0.3]);
+        let lim = Limiter::new(&prog, THRESHOLD, 0.010, 0.040).delay(3);
+        let run = run_path(&prog, &prog, &mut [lim], 256, 777, Some(&mut path()));
+        assert!(
+            run.result.is_ok(),
+            "{carrier} Hz {onset:?}: {:?}",
+            run.result
+        );
+    }
+    // One period longer than the programme says, and one period shorter.
+    for (played, analysed, want) in [
+        (0.04, 0.03, "step 1's burst did not end after 3 periods"),
+        (0.03, 0.04, "step 1's end is -960"),
+    ] {
+        let played = field(100.0, Onset::Zero, &[played, 0.3]);
+        let analysed = field(100.0, Onset::Zero, &[analysed, 0.3]);
+        let lim = Limiter::new(&played, THRESHOLD, 0.010, 0.040).delay(3);
+        let run = run_path(&played, &analysed, &mut [lim], 256, 777, Some(&mut path()));
+        assert!(
+            matches!(&run.result, Err(DynamicsError::Mismatch(m)) if m.contains(want)),
+            "{want}: {:?}",
+            run.result
+        );
+    }
 }

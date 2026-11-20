@@ -220,8 +220,8 @@ pub struct Analyser {
     /// Envelope samples awaiting the guard, which looks back far enough that an edge
     /// nearby has been found.
     lagged: VecDeque<(u64, f64)>,
-    /// The last four periods of envelope, for refining an edge.
-    hist: VecDeque<(u64, f64)>,
+    /// The last four periods of the envelope's phasor `2R₁`, for refining an edge.
+    hist: VecDeque<(u64, Complex64)>,
     /// A coarse edge crossing waiting for two periods after it: midpoint, rising.
     pending: Option<(f64, bool)>,
     grid: Option<Grid>,
@@ -499,10 +499,11 @@ impl Analyser {
         // The guard looks back past the two periods an edge waits for its refinement.
         let lag = 3 * self.p + 4;
         while self.c + h < target.min(self.pos) {
-            let env = self.env_next();
+            let z = self.env_next();
+            let env = z.norm();
             let c = self.c;
             self.c += 1;
-            self.hist.push_back((c, env));
+            self.hist.push_back((c, z));
             if self.hist.len() > keep {
                 self.hist.pop_front();
             }
@@ -527,8 +528,8 @@ impl Analyser {
         Ok(false)
     }
 
-    /// `2|R₁|` at `self.c`, from the running sum.
-    fn env_next(&mut self) -> f64 {
+    /// `2R₁` at `self.c`, from the running sum.
+    fn env_next(&mut self) -> Complex64 {
         let h = self.h();
         let c = self.c;
         let r = self.store.reference();
@@ -540,7 +541,7 @@ impl Analyser {
             self.sum += term(c + h) - term(c - h - 1);
             self.since_sync += 1;
         }
-        ((self.sum - 0.5 * (term(c - h) + term(c + h))) * (2.0 / self.p as f64)).norm()
+        (self.sum - 0.5 * (term(c - h) + term(c + h))) * (2.0 / self.p as f64)
     }
 
     /// Reference level of burst `i` (peak amplitude).
@@ -563,10 +564,16 @@ impl Analyser {
         DynamicsError::Mismatch(what)
     }
 
-    /// A found midpoint `x` against the edge expected at first sample `at`.
+    /// A found midpoint `x` against the edge expected at first sample `at`. Every edge of the
+    /// programme is on the period grid, so a dropped, added or shifted period puts an edge a
+    /// whole period off; what limits a true edge's midpoint is the reference loop's own
+    /// transient (an AC-coupled path's decaying offset after a zero-onset step, read in
+    /// phase by [`Self::refine`]), which scales with the period: a 10 Hz high-pass leaves
+    /// about a thousandth of a 100 Hz period. A 64th of a period stays far inside that
+    /// whole period, and a sample covers the interpolation at the shortest periods.
     fn check_edge(&self, grid: &Grid, x: f64, at: u64, what: &str) -> Result<(), DynamicsError> {
         let off = x - (at as f64 + grid.x6 - grid.e6 as f64);
-        if off.abs() > 1.0 {
+        if off.abs() > (self.p as f64 / 64.0).max(1.0) {
             return Err(self.mismatch(format!("{what} is {off:+.1} samples off the programme")));
         }
         Ok(())
@@ -577,6 +584,17 @@ impl Analyser {
     /// midpoint (both ends of the window sit on zero crossings of the carrier), so a
     /// threshold from the nominal levels can land samples off; the midpoint of the levels
     /// actually there is crossed exactly at the edge.
+    ///
+    /// The envelope read is the phasor's component in phase with the louder plateau, not its
+    /// magnitude. A reference path that is not flat around the carrier (an AC-coupled
+    /// converter's high-pass) adds to a zero-onset step a slowly decaying offset, itself a
+    /// step whose carrier content is partly in quadrature with the carrier. The in-phase
+    /// component is linear in the step, so that transient moves every edge's midpoint by the
+    /// same fraction of a period whatever the two levels are, and the grid's calibration on
+    /// the 6 dB edge cancels it. The magnitude adds the quadrature part in proportion to the
+    /// step's size over the level beside it (`√(x² + y²)`), which differs between the 6 dB
+    /// edge and a 28 dB burst edge: on the flat midpoint of a 100 Hz zero-onset edge through
+    /// a 5 Hz high-pass that was 2.7 samples.
     fn refine(&self, xc: f64, up: bool) -> f64 {
         let i0 = xc.round() as u64;
         let p = self.p;
@@ -584,9 +602,20 @@ impl Analyser {
         let (Some(a), Some(b)) = (at(i0 - 2 * p), at(i0 + 2 * p)) else {
             return xc;
         };
-        let th = (a + b) / 2.0;
+        let loud = if up { b } else { a };
+        if loud.norm() == 0.0 {
+            return xc;
+        }
+        let unit = loud.conj() / loud.norm();
+        let along = |z: Complex64| (z * unit).re;
+        let th = (along(a) + along(b)) / 2.0;
         let mut prev: Option<(u64, f64)> = None;
-        for &(u, v) in self.hist.iter().filter(|q| q.0 + p >= i0 && q.0 <= i0 + p) {
+        for (u, v) in self
+            .hist
+            .iter()
+            .filter(|q| q.0 + p >= i0 && q.0 <= i0 + p)
+            .map(|&(u, z)| (u, along(z)))
+        {
             if let Some((pu, pv)) = prev {
                 let hit = if up {
                     pv < th && v >= th

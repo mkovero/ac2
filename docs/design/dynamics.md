@@ -124,7 +124,14 @@ the generator.
   each edge.
 - **Edges.** Each step's start and end are found in the reference envelope `|R_1|` (the midpoint
   of its one-period rise or fall, exact for a step) and checked against the programme (step
-  count, burst lengths within one sample). A mismatch or a capture gap aborts the run as a
+  count, burst lengths within `max(1, P/64)` samples, against the 6 dB edge's midpoint). The
+  midpoint is read on `R_1`'s component in phase with the louder plateau, not on `|R_1|`: an
+  AC-coupled reference loop adds a decaying offset to a zero-onset step whose carrier
+  content is partly in quadrature, and `|R_1|` weighs that by the step's size over the level
+  beside it, so the 6 dB edge and a 28 dB burst edge moved differently (2.7 samples at
+  100 Hz through a 5 Hz high-pass at 96 kHz); in phase, the shift is the same fraction of a
+  period on every edge and the grid cancels it (0.24 samples left there). Any real mismatch
+  is a whole period off. A mismatch or a capture gap aborts the run as a
   dropout, as a sweep capture does (`crates/ac2d/src/jobs/sweep.rs`).
 - **Resolution** is one carrier period. A crossing inside the skipped window after an edge reads
   "≤ one period"; one that never happens reads "can't tell"; neither is printed as a number.
