@@ -12,6 +12,7 @@ pub enum NewKind {
     Rta,
     Spl,
     Sweep,
+    Dynamics,
     Math,
     Alignment,
     SpatialAverage,
@@ -22,12 +23,13 @@ impl NewKind {
     /// The rows, top to bottom: the live two-channel measurement first, then one input's,
     /// then what is played and what is computed from the others; last the meter, which is
     /// not a measurement.
-    pub const ALL: [NewKind; 9] = [
+    pub const ALL: [NewKind; 10] = [
         NewKind::Transfer,
         NewKind::Spectrum,
         NewKind::Rta,
         NewKind::Spl,
         NewKind::Sweep,
+        NewKind::Dynamics,
         NewKind::Math,
         NewKind::Alignment,
         NewKind::SpatialAverage,
@@ -42,6 +44,7 @@ impl NewKind {
             NewKind::Rta => "RTA",
             NewKind::Spl => "SPL meter",
             NewKind::Sweep => "Sweep",
+            NewKind::Dynamics => "Dynamics",
             NewKind::Math => "Math trace",
             NewKind::Alignment => "Alignment",
             NewKind::SpatialAverage => "Spatial average",
@@ -57,6 +60,7 @@ impl NewKind {
             NewKind::Rta => "one input's level in fractional-octave bands",
             NewKind::Spl => "sound level: A / C / Z weighting, Leq windows and limits",
             NewKind::Sweep => "a played sweep: response and harmonic distortion",
+            NewKind::Dynamics => "tone bursts: a processor's attack, release and recovery",
             NewKind::Math => "A ÷ × + − B of two curves, or the average of several",
             NewKind::Alignment => {
                 "delay and polarity of two systems in their overlap (sub + main, delay tower)"
@@ -247,6 +251,7 @@ mod tests {
                 "RTA — one input's level in fractional-octave bands",
                 "SPL meter — sound level: A / C / Z weighting, Leq windows and limits",
                 "Sweep — a played sweep: response and harmonic distortion  ·  Shift+S",
+                "Dynamics — tone bursts: a processor's attack, release and recovery",
                 "Math trace — A ÷ × + − B of two curves, or the average of several",
                 "Alignment — delay and polarity of two systems in their overlap (sub + main, \
                  delay tower)  ·  Alt+M",
@@ -257,7 +262,7 @@ mod tests {
             ]
         );
         assert_eq!(q.default, 1);
-        assert_eq!(q.choices[5].blocked.as_deref(), Some("no curves"));
+        assert_eq!(q.choices[6].blocked.as_deref(), Some("no curves"));
         assert_eq!(q.title, "New measurement");
     }
 
@@ -273,17 +278,17 @@ mod tests {
             },
         );
         assert_eq!(
-            q.choices[6].blocked.as_deref(),
+            q.choices[7].blocked.as_deref(),
             Some("an alignment needs two transfer curves")
         );
         assert_eq!(
-            q.choices[8].blocked.as_deref(),
+            q.choices[9].blocked.as_deref(),
             Some("no inputs in the session to meter")
         );
         // The meter preselected but blocked: the first row that can be made.
         assert_eq!(q.default, 0);
         let open = new_choices(NewKind::Programme, |_| None, |_| None);
-        assert_eq!(open.default, 8);
+        assert_eq!(open.default, 9);
         assert_eq!(
             open.hint,
             "↑/↓ choose · Enter opens its settings · Esc cancels"
@@ -297,7 +302,7 @@ mod tests {
             |_| None,
             |k| (k == NewKind::SpatialAverage).then(|| SPATIAL_AVERAGE_NEEDS.to_owned()),
         );
-        let row = &q.choices[7];
+        let row = &q.choices[8];
         assert!(row.label.starts_with("Spatial average — "), "{}", row.label);
         assert_eq!(
             row.blocked.as_deref(),
@@ -337,7 +342,7 @@ mod tests {
         assert_eq!(
             no_measurements("Ctrl+M"),
             "No measurements — Ctrl+M → New measurement… (transfer, spectrum, RTA, SPL meter, \
-             sweep, math trace, alignment, spatial average)"
+             sweep, dynamics, math trace, alignment, spatial average)"
         );
     }
 }

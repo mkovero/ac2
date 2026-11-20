@@ -40,6 +40,7 @@ pub mod cross_rig;
 pub mod cursor_jump;
 pub mod curve_ease;
 pub mod distortion;
+pub mod dynamics;
 pub mod eq;
 pub mod families;
 pub mod finding;

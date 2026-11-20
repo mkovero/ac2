@@ -10,7 +10,7 @@ use crate::primitives::{FillRect, Layer};
 pub(super) const LEGEND_TOP: f32 = 18.0;
 
 /// The sweep view's legend as drawn ([`legend`]).
-pub(super) struct SweepLegend {
+pub(crate) struct SweepLegend {
     /// The shown rows' texts as drawn (cut to the plate's width).
     pub shown: Vec<String>,
     /// The plate; `None` when hidden or empty.
@@ -23,7 +23,7 @@ pub(super) struct SweepLegend {
 /// `clip`. A row that names a line style rather than a curve (the
 /// floor's dashes, the reference's dots, the noise's shade) has a sample of that style
 /// where the other rows have their swatch.
-pub(super) fn legend(
+pub(crate) fn legend(
     layer: &mut Layer,
     entries: &[LegendEntry],
     view: &ViewState,
@@ -87,7 +87,7 @@ pub(super) fn legend(
 /// Draws the cursor values `lines` (text, colour) on their plate. Placed by the scene, it
 /// hangs from the plot's right edge with its text's top at `top`; dragged, it sits where it
 /// was dropped. A plate too large for the plot shrinks its text to stay whole inside it.
-pub(super) fn readout(
+pub(crate) fn readout(
     layer: &mut Layer,
     lines: Vec<(String, Color)>,
     plot: Rect,

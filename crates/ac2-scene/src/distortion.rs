@@ -23,7 +23,7 @@ use crate::view::Style;
 use crate::view::{DistortionUnit, ViewState};
 
 mod mark;
-mod plates;
+pub(crate) mod plates;
 mod reading;
 mod sweep_ir;
 pub use mark::jump;
