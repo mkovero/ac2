@@ -269,6 +269,20 @@ fn validate_dynamics(c: &DynamicsConfig) -> Result<(), ProtoError> {
             "every burst lasts more than 0 s and at most {max} s"
         ));
     }
+    // Checked again at every run, on the carrier as snapped to the session's rate.
+    let period_s = 1.0 / c.carrier.0;
+    if let Some(d) = c
+        .durations
+        .iter()
+        .find(|d| !ac2_core::dynamics::burst_long_enough(d.0, period_s))
+    {
+        return inv(ac2_core::dynamics::ProgrammeError::ShortBurst {
+            duration_s: d.0,
+            shortest_s: ac2_core::dynamics::shortest_burst_seconds(period_s),
+            carrier_hz: c.carrier.0,
+        }
+        .to_string());
+    }
     let (lo, hi) = (
         ac2_core::dynamics::REST_MIN_SECONDS,
         ac2_core::dynamics::REST_MAX_SECONDS,

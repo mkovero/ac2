@@ -407,8 +407,9 @@ pub struct MeasNew {
         value_name = "LEVELS"
     )]
     pub bursts: Option<Vec<LevelDbfs>>,
-    /// Dynamics: burst lengths, e.g. `10ms,100ms,1s` (at most 16, each ≤ 10 s; default
-    /// 1, 3, 10, 30, 100, 300 ms, 1, 3, 10 s).
+    /// Dynamics: burst lengths, e.g. `10ms,100ms,1s` (at most 16, each ≤ 10 s and at least
+    /// 3 carrier periods; default those of 1, 3, 10, 30, 100, 300 ms, 1, 3, 10 s that last
+    /// 3 carrier periods: 3 ms … 10 s at 1 kHz).
     #[arg(long, value_delimiter = ',', value_name = "TIMES")]
     pub durations: Option<Vec<Time>>,
     /// Dynamics: the longest rest after a burst, 2 … 30 s (default 30 s).

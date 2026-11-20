@@ -206,6 +206,10 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
                 ));
             }
             let usage = |m: &str| CliError::Usage(m.into());
+            let carrier = n
+                .carrier
+                .map(|c| c.0)
+                .ok_or_else(|| usage("dynamics needs --carrier, e.g. 1khz"))?;
             let config = DynamicsConfig {
                 reference_input: need(n.reference, "ref")?,
                 measurement_inputs: meas_inputs()?,
@@ -214,10 +218,7 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
                     .as_ref()
                     .map(|o| o.0.clone())
                     .ok_or_else(|| usage("dynamics needs --out"))?,
-                carrier: n
-                    .carrier
-                    .map(|c| c.0)
-                    .ok_or_else(|| usage("dynamics needs --carrier, e.g. 1khz"))?,
+                carrier,
                 onset: n.onset.unwrap_or_default().into(),
                 pilot: n.pilot.map(|p| p.0).ok_or_else(|| {
                     usage("dynamics needs --pilot: the rest level, below the threshold")
@@ -229,9 +230,9 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
                     .ok_or_else(|| usage("dynamics needs --bursts, e.g. -8dbfs,-5dbfs,0dbfs"))?,
                 durations: n.durations.as_ref().map_or_else(
                     || {
-                        DynamicsConfig::DEFAULT_DURATIONS
-                            .iter()
-                            .map(|&s| ac2_proto::units::Seconds(s))
+                        ac2_core::dynamics::default_durations(carrier.0)
+                            .into_iter()
+                            .map(ac2_proto::units::Seconds)
                             .collect()
                     },
                     |d| d.iter().map(|t| t.0).collect(),

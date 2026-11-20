@@ -686,3 +686,71 @@ fn slow_thump_gate_is_the_smallest_safe_whole_period_count() {
     let pinned = (1..=8).find(|&n| (n..=8).all(safe));
     assert_eq!(pinned, Some(THUMP_MIN_PERIODS));
 }
+
+/// The field run that failed: 1 kHz at 96 kHz, a 1 ms (one-period) burst. Its one-period
+/// envelope is a triangle with no plateau, so the programme is refused before it plays,
+/// naming the shortest burst; the shortest allowed is found and read at either onset, at
+/// 1 kHz and at the highest carrier.
+#[test]
+fn a_burst_shorter_than_three_periods_is_refused_and_three_are_read() {
+    let fs = 96_000.0;
+    let field = config(
+        1000.0,
+        Onset::Zero,
+        &[-11.0, -8.0, -4.0, -1.0],
+        &[0.001, 0.003],
+        2.0,
+    );
+    assert_eq!(
+        Programme::new(&field, fs),
+        Err(ProgrammeError::ShortBurst {
+            duration_s: 0.001,
+            shortest_s: 0.003,
+            carrier_hz: 1000.0,
+        })
+    );
+    let msg = Programme::new(&field, fs).map_or_else(|e| e.to_string(), |_| String::new());
+    assert!(msg.contains("1 ms") && msg.contains("3 ms"), "{msg}");
+    // Two periods of the highest carrier (12 samples) are refused too.
+    let top = fs / f64::from(MIN_PERIOD);
+    assert!(matches!(
+        Programme::new(&config(top, Onset::Zero, &[BURST], &[24.0 / fs], 2.0), fs),
+        Err(ProgrammeError::ShortBurst { .. })
+    ));
+
+    for (carrier, d) in [(1000.0, 0.003), (top, 36.0 / fs)] {
+        for onset in [Onset::Zero, Onset::Peak] {
+            let prog = programme(&config(carrier, onset, &[-11.0, -1.0], &[d, 0.1], 2.0), fs);
+            assert_eq!(prog.burst_periods[0], MIN_BURST_PERIODS);
+            let lim = Limiter::new(&prog, THRESHOLD, 0.010, 0.040).delay(3);
+            let run = run(&prog, &mut [lim], 256);
+            let res = result(&run);
+            let p = u64::from(prog.period);
+            for (i, s) in res.steps.iter().enumerate() {
+                let want = u64::from(prog.step_periods(i)) * p;
+                assert_eq!(s.burst_samples, want, "{carrier} Hz {onset:?} step {i}");
+            }
+        }
+    }
+}
+
+#[test]
+fn default_durations_are_three_periods_or_longer() {
+    assert_eq!(
+        default_durations(1000.0),
+        vec![0.003, 0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0]
+    );
+    assert_eq!(default_durations(8000.0), DEFAULT_DURATIONS.to_vec());
+    assert_eq!(default_durations(100.0)[0], 0.03);
+    // Every default at 1 kHz plays at every common rate.
+    for fs in [44_100.0, 48_000.0, 88_200.0, 96_000.0, 192_000.0] {
+        let cfg = config(
+            1000.0,
+            Onset::Peak,
+            &[BURST],
+            &default_durations(1000.0),
+            2.0,
+        );
+        assert!(Programme::new(&cfg, fs).is_ok(), "{fs}");
+    }
+}

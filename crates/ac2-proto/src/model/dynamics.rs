@@ -49,9 +49,6 @@ impl DynamicsConfig {
     /// Most measured inputs of one run.
     pub const MAX_INPUTS: usize = 8;
 
-    /// Default burst durations, s.
-    pub const DEFAULT_DURATIONS: [f64; 9] = [0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0];
-
     /// Default longest rest, s.
     pub const DEFAULT_REST_MAX: f64 = 30.0;
 

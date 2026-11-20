@@ -38,8 +38,44 @@ pub const REST_MAX_SECONDS: f64 = 30.0;
 pub const MAX_BURST_SECONDS: f64 = 10.0;
 
 /// Default burst durations, s: the release knee of a programme-dependent detector sits
-/// between 10 ms and 1 s.
+/// between 10 ms and 1 s. A carrier plays those of at least [`MIN_BURST_PERIODS`] of its
+/// periods ([`default_durations`]).
 pub const DEFAULT_DURATIONS: [f64; 9] = [0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0];
+
+/// Shortest burst, carrier periods. A burst's edges are found in the reference's centred
+/// one-period envelope, which ramps for a period around each edge, and each edge's midpoint
+/// is refined against the levels two periods either side of it: two periods after the start
+/// must still be on the burst's plateau, half a period before its end, so the burst lasts at
+/// least 2.5 periods (3 whole ones). A shorter burst's envelope is a ramp that never
+/// plateaus: neither edge nor any time inside the burst can be read.
+pub const MIN_BURST_PERIODS: u32 = 3;
+
+/// Whole carrier periods a burst or rest of `seconds` plays at a period of `period_s` (at
+/// least one).
+pub fn whole_periods(seconds: f64, period_s: f64) -> u32 {
+    ((seconds / period_s).round() as u32).max(1)
+}
+
+/// The shortest burst, s, at a carrier period of `period_s`.
+pub fn shortest_burst_seconds(period_s: f64) -> f64 {
+    f64::from(MIN_BURST_PERIODS) * period_s
+}
+
+/// Whether a burst of `seconds` plays at least [`MIN_BURST_PERIODS`] at a period of
+/// `period_s`.
+pub fn burst_long_enough(seconds: f64, period_s: f64) -> bool {
+    whole_periods(seconds, period_s) >= MIN_BURST_PERIODS
+}
+
+/// The default durations a carrier of `carrier_hz` plays: [`DEFAULT_DURATIONS`] without
+/// those shorter than [`MIN_BURST_PERIODS`] of its periods (1 kHz: 3 ms … 10 s; 8 kHz: all;
+/// 100 Hz: 30 ms … 10 s).
+pub fn default_durations(carrier_hz: f64) -> Vec<f64> {
+    DEFAULT_DURATIONS
+        .into_iter()
+        .filter(|d| burst_long_enough(*d, 1.0 / carrier_hz))
+        .collect()
+}
 
 /// Most burst levels in one programme.
 pub const MAX_LEVELS: usize = 8;
@@ -114,7 +150,8 @@ pub struct ProgrammeConfig {
     pub pilot_dbfs: f64,
     /// Burst levels, dBFS RMS, in play order; each above the pilot.
     pub bursts_dbfs: Vec<f64>,
-    /// Burst durations, s, in play order (rounded to whole periods, at least one).
+    /// Burst durations, s, in play order (rounded to whole periods, at least
+    /// [`MIN_BURST_PERIODS`]).
     pub durations_s: Vec<f64>,
     /// Longest rest, s.
     pub rest_max_s: f64,
@@ -132,6 +169,15 @@ pub enum ProgrammeError {
     Levels,
     /// No duration, more than [`MAX_DURATIONS`], or one not in (0, [`MAX_BURST_SECONDS`]].
     Durations,
+    /// A duration plays fewer than [`MIN_BURST_PERIODS`] carrier periods.
+    ShortBurst {
+        /// The duration, s.
+        duration_s: f64,
+        /// The shortest burst at the carrier played, s.
+        shortest_s: f64,
+        /// The carrier played, Hz.
+        carrier_hz: f64,
+    },
     /// The longest rest is not in [[`REST_MIN_SECONDS`], [`REST_MAX_SECONDS`]].
     RestMax,
     /// Replayed rests are not one per step, or one is shorter than [`REST_MIN_SECONDS`] or
@@ -151,6 +197,16 @@ impl std::fmt::Display for ProgrammeError {
                 f,
                 "1 … {MAX_DURATIONS} burst durations, each above 0 and at most {MAX_BURST_SECONDS} s, are needed"
             ),
+            Self::ShortBurst {
+                duration_s,
+                shortest_s,
+                carrier_hz,
+            } => write!(
+                f,
+                "a {} ms burst is shorter than {MIN_BURST_PERIODS} carrier periods: the shortest at {carrier_hz:.2} Hz is {} ms",
+                ms(*duration_s),
+                ms(*shortest_s)
+            ),
             Self::RestMax => write!(
                 f,
                 "the longest rest must be {REST_MIN_SECONDS} … {REST_MAX_SECONDS} s"
@@ -164,6 +220,11 @@ impl std::fmt::Display for ProgrammeError {
 }
 
 impl std::error::Error for ProgrammeError {}
+
+/// `s` in ms to the µs, without trailing zeros.
+fn ms(s: f64) -> f64 {
+    (s * 1e6).round() / 1e3
+}
 
 /// A planned programme, all lengths in whole carrier periods.
 #[derive(Debug, Clone, PartialEq)]
@@ -195,7 +256,7 @@ impl Programme {
     pub fn new(cfg: &ProgrammeConfig, fs: f64) -> Result<Self, ProgrammeError> {
         let period = snap_period(cfg.carrier_hz, fs, cfg.onset)?;
         let p_s = f64::from(period) / fs;
-        let periods = |s: f64| ((s / p_s).round() as u32).max(1);
+        let periods = |s: f64| whole_periods(s, p_s);
         if !cfg.pilot_dbfs.is_finite()
             || cfg.bursts_dbfs.is_empty()
             || cfg.bursts_dbfs.len() > MAX_LEVELS
@@ -214,6 +275,17 @@ impl Programme {
                 .any(|d| !d.is_finite() || *d <= 0.0 || *d > MAX_BURST_SECONDS)
         {
             return Err(ProgrammeError::Durations);
+        }
+        if let Some(&d) = cfg
+            .durations_s
+            .iter()
+            .find(|d| !burst_long_enough(**d, p_s))
+        {
+            return Err(ProgrammeError::ShortBurst {
+                duration_s: d,
+                shortest_s: shortest_burst_seconds(p_s),
+                carrier_hz: fs / f64::from(period),
+            });
         }
         if !(REST_MIN_SECONDS..=REST_MAX_SECONDS).contains(&cfg.rest_max_s) {
             return Err(ProgrammeError::RestMax);

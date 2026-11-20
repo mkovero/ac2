@@ -2984,13 +2984,18 @@ stored trace; the app lists the trace but has no view of it yet.
 ```sh
 ac2 meas new dynamics --name "Studer VCA" --ref 7 --meas 5,6 --out 3,4,5 \
     --carrier 1khz --pilot -33dbfs --bursts -8dbfs,-5dbfs,0dbfs \
-    [--durations 1ms,3ms,10ms,30ms,100ms,300ms,1s,3s,10s --rest-max 30s --onset zero|peak]
+    [--durations 3ms,10ms,30ms,100ms,300ms,1s,3s,10s --rest-max 30s --onset zero|peak]
 ac2 dynamics run "Studer VCA" [--name …] [--rests-from "Run 1"]
 ac2 trace export "Run 1" --csv vca.csv
 ```
 
 - The carrier plays as the nearest frequency whose period is a whole number of samples
   (1 kHz at 44.1 kHz plays as 1002.27 Hz); burst lengths are whole periods. Both are stored.
+- A burst lasts at least 3 carrier periods (3 ms at 1 kHz, 0.375 ms at 8 kHz, 30 ms at
+  100 Hz): a shorter one has no steady part to find its edges or time anything in. A shorter
+  `--durations` entry is refused, naming the shortest at that carrier, at `meas new` and
+  again at every run (the carrier snaps to the session's rate). Without `--durations`, the
+  defaults are those of 1, 3, 10, 30, 100, 300 ms, 1, 3, 10 s at least 3 periods long.
 - The run arms at the highest burst level and shows the longest it can take (every rest at
   `--rest-max`); **Enter** plays, **Esc**/**q**/**Ctrl-C** stops and discards it. The daemon
   disarms once the last rest is in.

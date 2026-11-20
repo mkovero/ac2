@@ -571,7 +571,9 @@ mod tests {
         let MeasKind::Dynamics { config: x } = &defaults.kind else {
             return Err("not a dynamics measurement".into());
         };
-        assert_eq!(x.durations.len(), 9);
+        // 1 ms is one period of 1 kHz, too short to read: the defaults start at 3 ms.
+        assert_eq!(x.durations.len(), 8);
+        assert_eq!(x.durations[0].0, 0.003);
         assert_eq!(x.rest_max.0, 30.0);
         assert_eq!(x.bursts.len(), 3);
         let m = expect_body!(

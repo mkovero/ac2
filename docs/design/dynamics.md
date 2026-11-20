@@ -57,8 +57,24 @@ reference loop's output alike). The level follows a programme:
   periods; the actual lengths are stored. Highest carrier `fs / 12` (8 kHz at 96 kHz: 0.125 ms
   periods, for attack). One carrier per run: a 100 Hz run, a 1 kHz run and an 8 kHz run of the
   same measurement are three traces.
-- **Defaults.** `durations` 1, 3, 10, 30, 100, 300 ms, 1, 3, 10 s (the release knee of a
-  programme-dependent detector sits between 10 ms and 1 s); `onset` zero.
+- **Shortest burst: 3 carrier periods.** Edges are found in the reference's centred
+  one-period envelope (*Edges* below), which ramps over the period around each edge; each
+  edge's midpoint is refined against the levels two periods either side of it, so two periods
+  after the start must still be on the burst's plateau, half a period before its end: 2.5
+  periods, 3 whole ones. A shorter burst's envelope is a ramp that never plateaus (one period:
+  a triangle), so neither its edges nor any time inside it can be read. A burst played as
+  fewer than 3 periods is refused, naming the shortest at that carrier: at `meas new` on the
+  typed carrier, and again at every run on the carrier as snapped to the session's rate. Three
+  periods leave the attack searches a period and a half after the skipped first period;
+  `settled` needs a longer burst (its last 10 % must hold a period of envelope wholly inside
+  the burst: 15 periods), and the 4-period harmonic windows and the thump gate read "can't
+  tell" on short bursts by their own rules.
+- **Defaults.** `durations`: those of 1, 3, 10, 30, 100, 300 ms, 1, 3, 10 s (the release knee
+  of a programme-dependent detector sits between 10 ms and 1 s) that last at least 3 periods
+  of the carrier, chosen at `meas new`: 3 ms … 10 s at 1 kHz, all nine at 8 kHz, 30 ms … 10 s
+  at 100 Hz. One fixed list cannot suit every carrier (3 periods are 0.375 ms at 8 kHz and
+  30 ms at 100 Hz), and a default the run then refuses would read as a fault; an explicit
+  list is the operator's and is refused, not trimmed. `onset` zero.
 
 ### Generator contract
 
