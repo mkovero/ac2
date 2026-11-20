@@ -197,6 +197,23 @@ Last few only; `git log` and `STATUS.md` have the rest. All three hosts unless n
 | c7bd24b1 | 2026-10-11 | 42 / 24 | first format change restored with `session salvage`; only the per-second Leq history skipped |
 | 6f0e5b57 | 2026-10-11 | 39 / 22 | `transfer_view = "response"` in `ui.toml` changed to `"magnitude"` by hand; session cleared by the operator before (`autosave.scratched-2026-10-11`) |
 
+## FF400 line out, absolute level (2026-11-20)
+
+Measured with the operator's DMM on rear line out 5 (JACK playback 5), tip to ring, the cable
+to the Xone:62 off. The output level was at +4 (RME's +13 dBu at 0 dBFS). The signal was
+`ac2 gen sine --freq 1khz --out 5 --level -20dbfs`. The generator's level is RMS with
+0 dBFS = a full-scale sine, the same convention as RME's spec.
+
+| played | expected (RME spec) | DMM | result |
+|---|---|---|---|
+| −20.0 dBFS | 346.0 mV (−7.00 dBu) | 344.1 mV AC | −7.05 dBu: **0 dBFS = +12.95 dBu** on the output, −0.05 dB from spec, inside the DMM's accuracy |
+
+The inputs at +4 were not metered directly. Out 5 → in 5 loops back at −0.2 dB, which puts
+0 dBFS in at about +13.1 dBu.
+
+The operator approved this one point. It needed the bound raised to `--max-level -20` for the
+run; afterwards the bound went back to −50 and the session was reopened as before.
+
 ## Network test (2026-10-03)
 
 ketunkolo → pupu over the LAN, CURVE: remote CLI, the app on ketunkolo with live JACK data, CLI
