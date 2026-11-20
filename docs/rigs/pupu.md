@@ -200,7 +200,7 @@ Last few only; `git log` and `STATUS.md` have the rest. All three hosts unless n
 ## FF400 line out, absolute level (2026-11-20)
 
 Measured with the operator's DMM on JACK playback 5, tip to ring, with that jack's cable off.
-Its printed label was not checked: the 2026-10-28 note below suggests "out 7". The output level was at +4 (RME's +13 dBu at 0 dBFS). The signal was
+That is the rear jack labelled "out 5", as the operator confirmed. The output level was at +4 (RME's +13 dBu at 0 dBFS). The signal was
 `ac2 gen sine --freq 1khz --out 5 --level -20dbfs`. The generator's level is RMS with
 0 dBFS = a full-scale sine, the same convention as RME's spec.
 
@@ -333,8 +333,10 @@ The FF400's jacks: ins 1–4 on the front, 5–8 on the back. In silence ins 5/6
 noise (−90 dBFS rms) and hum at −111 dBFS (50, 150 Hz). Findings below dated before 2026-10-08
 used the old wiring (out 3 → Xone, unbalanced, −14.8 dB → in 5; outs 4–6 → ins 6–8 at −6 dB).
 
-Rewired 2026-10-28: outs 5/6 loop straight to ins 7/8 (cabled as "out 7/8 → in 5/6" by the
-jack labels; JACK's numbering, found with a −60 dBFS tone per output, is the one above); ins 5/6
+Rewired 2026-10-28: outs 5/6 loop straight to ins 7/8 (JACK's numbering was found with a
+−60 dBFS tone per output). An early note said "out 7/8 → in 5/6" by the jack labels. That is
+wrong for the outputs: on 2026-11-20 the operator's DMM found JACK playback 5 on the rear jack
+labelled "out 5". The input labels are not checked yet.; ins 5/6
 read their floor, no Xone signal. In 1 is the MM1, in 2 the Behringer "Vilppu behringer #3" (both
 phantom, mic gain 20, written by `ff400-recover` after a reset); ins 3–6 are empty. Session:
 `session open --backend jack --in 1-8 --outputs 6 --loopback-out 5 --loopback-in 7 --mic "1=MM1 34804" --mic "2=Vilppu behringer #3"`.
