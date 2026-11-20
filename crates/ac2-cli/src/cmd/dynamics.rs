@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use ac2_client::{Client, LeaseLost, OnDrop, StimulusLease, expect_body};
 use ac2_core::dynamics::{Onset, Programme, ProgrammeConfig};
 use ac2_proto::model::{
-    DynamicsConfig, DynamicsData, DynamicsLevel, DynamicsOnset, DynamicsPhase, DynamicsStatus,
+    DynamicsConfig, DynamicsLevel, DynamicsOnset, DynamicsPhase, DynamicsStatus, DynamicsTable,
     DynamicsTime, GeneratorDesired, GeneratorSettings, MeasKind, Measurement, Signal, State,
 };
 use ac2_proto::units::{Dbfs, DynamicsId, Hz, TraceId};
@@ -90,7 +90,7 @@ async fn dynamics_run(cli: &Cli, a: &DynamicsRunArgs, out: &mut Out<'_>) -> Resu
         None => (None, None),
         Some(r) => {
             let t = find_trace(&st, r)?.id;
-            let d = dynamics_data(&c, t).await?;
+            let d = dynamics_table(&c, t).await?;
             (
                 Some(t),
                 Some(d.info.steps.iter().map(|s| s.rest.0).collect()),
@@ -114,11 +114,11 @@ async fn dynamics_run(cli: &Cli, a: &DynamicsRunArgs, out: &mut Out<'_>) -> Resu
     .await
 }
 
-async fn dynamics_data(c: &Client, trace: TraceId) -> Result<Box<DynamicsData>, CliError> {
-    let data = c.call(Command::TraceGet { trace }).await?;
-    let data = expect_body!("trace.get", data, ReplyBody::TraceData(d) => d)?;
-    data.dynamics
-        .ok_or_else(|| CliError::Usage(format!("trace {trace} is not a dynamics trace")))
+/// The step table: what the CLI prints and replays, without the envelopes `trace.get`
+/// carries (tens of MB for a long high-carrier run).
+async fn dynamics_table(c: &Client, trace: TraceId) -> Result<Box<DynamicsTable>, CliError> {
+    let r = c.call(Command::DynamicsTable { trace }).await?;
+    Ok(expect_body!("dynamics.table", r, ReplyBody::DynamicsTable(d) => d)?)
 }
 
 #[expect(
@@ -274,7 +274,7 @@ async fn foreground(
         return end.map_err(CliError::from);
     };
     end.map_err(CliError::from)?;
-    let d = dynamics_data(c, trace).await?;
+    let d = dynamics_table(c, trace).await?;
     if out.json {
         let _ = out.json_line(&json!({ "event": "stored", "trace": trace, "dynamics": d }));
     } else {
@@ -363,7 +363,7 @@ fn level(l: DynamicsLevel) -> String {
 
 /// The step table of a stored run: one row per measured input and step, the rest
 /// marked `*` where it reached the longest rest without recovering.
-pub(crate) fn step_table(trace: TraceId, d: &DynamicsData) -> String {
+pub(crate) fn step_table(trace: TraceId, d: &DynamicsTable) -> String {
     let i = &d.info;
     let mut rows: Vec<Vec<String>> = vec![STEP_COLUMNS.iter().map(|s| (*s).to_owned()).collect()];
     for input in &d.inputs {

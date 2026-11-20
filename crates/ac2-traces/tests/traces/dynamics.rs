@@ -96,10 +96,13 @@ fn trace(id: u32) -> StoredTrace {
             delay: Seconds(3.0 / 44_100.0),
             g0: Db(-0.02),
             rows: (0..4).map(row).collect(),
-            envelopes: (0..4).map(envelope).collect(),
         })
         .collect();
-    let d = DynamicsData { info, inputs };
+    let d = DynamicsData {
+        info,
+        inputs,
+        envelopes: (0..2).map(|_| (0..4).map(envelope).collect()).collect(),
+    };
     let grid = ac2_traces::text::dynamics::grid(d.info.carrier);
     let source = TraceSource::Dynamics {
         meas: MeasId(2),
@@ -127,20 +130,23 @@ fn same(a: &DynamicsData, b: &DynamicsData) {
             (x.input, &x.name, x.delay, x.g0, &x.rows),
             (y.input, &y.name, y.delay, y.g0, &y.rows)
         );
-        let bits = |e: &Vec<Vec<DynamicsPoint>>| -> Vec<(DynamicsEdge, u32, u32, [u32; 4])> {
-            e.iter()
-                .flatten()
-                .map(|p| {
-                    (
-                        p.edge,
-                        p.t.to_bits(),
-                        p.gr_db.to_bits(),
-                        p.h_db.map(f32::to_bits),
-                    )
-                })
-                .collect()
-        };
-        assert_eq!(bits(&x.envelopes), bits(&y.envelopes));
+    }
+    let bits = |e: &Vec<Vec<DynamicsPoint>>| -> Vec<(DynamicsEdge, u32, u32, [u32; 4])> {
+        e.iter()
+            .flatten()
+            .map(|p| {
+                (
+                    p.edge,
+                    p.t.to_bits(),
+                    p.gr_db.to_bits(),
+                    p.h_db.map(f32::to_bits),
+                )
+            })
+            .collect()
+    };
+    assert_eq!(a.envelopes.len(), b.envelopes.len());
+    for (x, y) in a.envelopes.iter().zip(&b.envelopes) {
+        assert_eq!(bits(x), bits(y));
     }
     assert_eq!(a.inputs.len(), b.inputs.len());
 }

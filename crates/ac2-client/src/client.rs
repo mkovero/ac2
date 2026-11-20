@@ -295,7 +295,7 @@ pub fn body_name(b: &ReplyBody) -> &'static str {
         ReplyBody::Trace(_) => "trace",
         ReplyBody::Traces(_) => "traces",
         ReplyBody::TraceData(_) => "trace_data",
-        ReplyBody::Export { .. } => "export",
+        ReplyBody::DynamicsTable(_) => "dynamics_table",
         ReplyBody::Plan(_) => "plan",
         ReplyBody::Plans(_) => "plans",
         ReplyBody::Walk(_) => "walk",

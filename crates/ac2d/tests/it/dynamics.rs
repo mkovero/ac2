@@ -255,6 +255,11 @@ fn slow_dynamics_run_stores_one_trace_that_exports_and_imports() {
     for s in &dyn_data.info.steps {
         assert!(s.recovered && s.rest.0 < 3.0, "{s:?}");
     }
+    // The step table alone is what `trace.get` holds without the envelopes.
+    assert_eq!(
+        c.dynamics_table(Command::DynamicsTable { trace }),
+        dyn_data.table()
+    );
 
     // Exported and imported back, it is the same trace.
     let csv = c.export_text(Command::TraceExport {

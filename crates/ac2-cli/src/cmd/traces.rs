@@ -276,23 +276,15 @@ pub(crate) async fn trace(cli: &Cli, cmd: &TraceCmd, out: &mut Out<'_>) -> Resul
                 (Some(p), None) => (ExportFormat::Ac2Csv, p),
                 (None, None) => return Err(CliError::Usage("--csv FILE or --wav FILE".into())),
             };
-            let r = c
-                .call(Command::TraceExport {
-                    trace: t.id,
-                    format,
-                })
-                .await?;
-            let (file_name, content) = expect_body!(
-                "trace.export", r, ReplyBody::Export { file_name, content } => (file_name, content)
-            )?;
+            let (file_name, content) = ac2_client::sessions::export_trace(&c, t.id, format).await?;
             if path.as_os_str() == "-" {
                 // The file itself is the output; nothing else may be mixed in.
-                out.w.write_all(&content.0)?;
+                out.w.write_all(&content)?;
                 out.w.flush()?;
                 return Ok(());
             }
-            std::fs::write(path, &content.0)?;
-            let n = content.0.len();
+            std::fs::write(path, &content)?;
+            let n = content.len();
             out.emit(
                 &json!({ "trace": t.id, "file": path, "bytes": n, "suggested_name": file_name }),
                 || format!("wrote {} ({n} bytes)", path.display()),

@@ -164,16 +164,12 @@ async fn traces_and_sessions() {
     )
     .await;
     assert!(matches!(avg.source, TraceSource::Average { .. }));
-    let ReplyBody::Export { content, .. } = c
-        .call(Command::TraceExport {
-            trace: a.id,
-            format: ExportFormat::Ac2Csv,
-        })
-        .await
-        .unwrap()
-    else {
-        panic!("export");
-    };
+    let content = Blob(
+        ac2_client::sessions::export_trace(&c, a.id, ExportFormat::Ac2Csv)
+            .await
+            .unwrap()
+            .1,
+    );
     let imp = trace(
         &c,
         Command::TraceImport {

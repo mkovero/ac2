@@ -180,17 +180,12 @@ pub(super) fn write(out: &mut String, d: &DynamicsData) {
             let _ = writeln!(out, ",{}", r.drift.0);
         }
     }
-    let points: usize = d
-        .inputs
-        .iter()
-        .flat_map(|i| i.envelopes.iter())
-        .map(Vec::len)
-        .sum();
+    let points: usize = d.envelopes.iter().flatten().map(Vec::len).sum();
     let _ = writeln!(out, "# dynamics_envelopes: {{\"rows\":{points}}}");
     out.push_str(ENVELOPE_HEADER);
     out.push('\n');
-    for i in &d.inputs {
-        for (s, env) in i.envelopes.iter().enumerate() {
+    for (i, envelopes) in d.inputs.iter().zip(&d.envelopes) {
+        for (s, env) in envelopes.iter().enumerate() {
             for p in env {
                 let _ = writeln!(
                     out,
@@ -373,9 +368,9 @@ pub(super) fn read(lines: &[(usize, &str)]) -> Result<DynamicsData, ImportError>
             delay: f.delay,
             g0: f.g0,
             rows: Vec::with_capacity(n_steps),
-            envelopes: vec![Vec::new(); n_steps],
         })
         .collect();
+    let mut envelopes = vec![vec![Vec::new(); n_steps]; n_inputs];
     let header = step_header();
     let (rows, _) = table(lines, steps_at, &header, n_steps * n_inputs)?;
     let cols: Vec<&str> = header.split(',').collect();
@@ -466,7 +461,11 @@ pub(super) fn read(lines: &[(usize, &str)]) -> Result<DynamicsData, ImportError>
             .and_then(|x| x.checked_sub(1))
             .and_then(|x| u16::try_from(x).ok())
             .ok_or_else(|| cell_err(no, "input", c[0]))?;
-        let Some(inp) = inputs.iter_mut().find(|i| i.input == input_no) else {
+        let Some(env) = inputs
+            .iter()
+            .position(|i| i.input == input_no)
+            .map(|k| &mut envelopes[k])
+        else {
             return Err(cell_err(no, "input", c[0]));
         };
         let step = index(no, "step", c[1], n_steps)?;
@@ -490,7 +489,7 @@ pub(super) fn read(lines: &[(usize, &str)]) -> Result<DynamicsData, ImportError>
             }
             Ok(x)
         };
-        inp.envelopes[step].push(DynamicsPoint {
+        env[step].push(DynamicsPoint {
             edge,
             t: v32(3, true)?,
             gr_db: v32(4, false)?,
@@ -502,7 +501,11 @@ pub(super) fn read(lines: &[(usize, &str)]) -> Result<DynamicsData, ImportError>
             ],
         });
     }
-    let d = DynamicsData { info, inputs };
+    let d = DynamicsData {
+        info,
+        inputs,
+        envelopes,
+    };
     crate::check::dynamics(&d).map_err(|e| fail(None, ImportProblem::BadHeader, e))?;
     Ok(d)
 }

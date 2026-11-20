@@ -337,6 +337,32 @@ impl Client {
             .unwrap_or_else(|e| panic!("{name} failed: {e:?}"))
     }
 
+    /// `trace.export` (`cmd`) fetched whole: the suggested file name and the content,
+    /// downloaded in chunks and the transfer ended.
+    pub fn export(&mut self, cmd: Command) -> (String, ac2_proto::units::Blob) {
+        let t = self.transfer(cmd);
+        let mut data = Vec::new();
+        while (data.len() as u64) < t.bytes {
+            let chunk = self.chunk(Command::FileDownloadChunk {
+                transfer: t.transfer,
+                offset: data.len() as u64,
+            });
+            assert!(!chunk.0.is_empty(), "download ended early");
+            data.extend_from_slice(&chunk.0);
+        }
+        assert_eq!(data.len() as u64, t.bytes);
+        self.ok(Command::FileDownloadEnd {
+            transfer: t.transfer,
+            saved_as: None,
+        });
+        (t.file_name, ac2_proto::units::Blob(data))
+    }
+
+    /// [`Self::export`] of a text format.
+    pub fn export_text(&mut self, cmd: Command) -> String {
+        String::from_utf8(self.export(cmd).1.0).unwrap()
+    }
+
     /// The state the daemon holds now.
     #[track_caller]
     pub fn state(&mut self) -> ac2_proto::model::State {
@@ -409,8 +435,7 @@ reply_kinds! {
     dynamics: ReplyBody::Dynamics(v) => v, ac2_proto::model::DynamicsRun;
     traces: ReplyBody::Traces(v) => v, Vec<ac2_proto::model::TraceMeta>;
     trace_data: ReplyBody::TraceData(v) => *v, ac2_proto::model::TraceData;
-    export: ReplyBody::Export { file_name, content } => (file_name, content), (String, ac2_proto::units::Blob);
-    export_text: ReplyBody::Export { content, .. } => String::from_utf8(content.0).unwrap(), String;
+    dynamics_table: ReplyBody::DynamicsTable(v) => *v, ac2_proto::model::DynamicsTable;
     calibration: ReplyBody::Calibration(v) => v, ac2_proto::model::CalEntry;
     mic: ReplyBody::Mic(v) => v, ac2_proto::model::Mic;
     outputs: ReplyBody::Outputs(v) => v, Vec<ac2_proto::model::OutputSetup>;

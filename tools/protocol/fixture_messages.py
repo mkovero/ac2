@@ -864,6 +864,7 @@ def requests():
             "dynamics.run",
             {"lease_token": TOKEN, "meas": 12, "name": None, "rests_from": 14},
         ),
+        req(106, "dynamics.table", {"trace": 14}, mutation=False),
     ]
 
 

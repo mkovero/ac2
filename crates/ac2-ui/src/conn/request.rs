@@ -682,17 +682,9 @@ pub(super) async fn export_trace(
     trace: TraceId,
     path: std::path::PathBuf,
 ) -> Result<(std::path::PathBuf, usize), String> {
-    let r = c
-        .call(Command::TraceExport {
-            trace,
-            format: export_format(&path),
-        })
+    let (file_name, content) = ac2_client::sessions::export_trace(c, trace, export_format(&path))
         .await
         .map_err(|e| e.to_string())?;
-    let (file_name, content) = expect_body!(
-        "trace.export", r, ReplyBody::Export { file_name, content } => (file_name, content)
-    )
-    .map_err(|e| e.to_string())?;
     tokio::task::spawn_blocking(move || {
         let path = if path.is_dir() {
             path.join(file_name)
@@ -701,8 +693,8 @@ pub(super) async fn export_trace(
         };
         // Said back absolute: a relative path is relative to where the app was started.
         let path = std::path::absolute(&path).unwrap_or(path);
-        std::fs::write(&path, &content.0)
-            .map(|()| (path.clone(), content.0.len()))
+        std::fs::write(&path, &content)
+            .map(|()| (path.clone(), content.len()))
             .map_err(|e| format!("cannot write {}: {e}", path.display()))
     })
     .await

@@ -76,13 +76,8 @@ pub enum ReplyBody {
     Traces(Vec<TraceMeta>),
     /// `trace.get`.
     TraceData(Box<TraceData>),
-    /// `trace.export`.
-    Export {
-        /// Suggested file name.
-        file_name: String,
-        /// Content.
-        content: Blob,
-    },
+    /// `dynamics.table`.
+    DynamicsTable(Box<crate::model::DynamicsTable>),
     /// `cal.spl`, `cal.spl_electrical`.
     Calibration(CalEntry),
     /// `cal.curve_import`, `cal.curve_rename`: the mic with its curves.

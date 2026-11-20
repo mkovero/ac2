@@ -250,6 +250,7 @@ impl Control {
             | Command::TraceCapture { .. }
             | Command::TraceList
             | Command::TraceGet { .. }
+            | Command::DynamicsTable { .. }
             | Command::TraceUpdate { .. }
             | Command::TraceDelete { .. }
             | Command::TraceAverage { .. }

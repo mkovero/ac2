@@ -1,15 +1,16 @@
 //! Sessions on this machine's file system, moved to and from a daemon that may be on
 //! another host (`docs/design/sessions.md`): a session folder or `.ac2session` archive is
 //! read here and uploaded in chunks; the working state (or a named session) is downloaded
-//! in chunks, checked against its SHA-256 and written here.
+//! in chunks, checked against its SHA-256 and written here. A trace export comes down the
+//! same way.
 //!
 //! Used by the CLI and the app alike, so both move sessions the same way.
 
 use std::path::{Path, PathBuf};
 
 use ac2_archive::{ArchiveError, MAX_ARCHIVE_BYTES};
-use ac2_proto::model::{SessionRef, Transfer};
-use ac2_proto::units::{Blob, TransferId};
+use ac2_proto::model::{ExportFormat, SessionRef, Transfer};
+use ac2_proto::units::{Blob, TraceId, TransferId};
 use ac2_proto::{Command, ReplyBody};
 
 use crate::{Client, ClientError, expect_body};
@@ -111,6 +112,34 @@ pub async fn download(
 ) -> Result<(Transfer, Vec<u8>), ClientError> {
     let t = c.call(Command::FileDownloadBegin { session }).await?;
     let t = expect_body!("file.download_begin", t, ReplyBody::Transfer(t) => t)?;
+    let data = pull(c, &t, &mut progress).await?;
+    ac2_archive::verify(&data, &t.sha256).map_err(ClientError::Archive)?;
+    Ok((t, data))
+}
+
+/// Exports `trace` as `format`: its suggested file name and content. The daemon offers the
+/// file as a download, so an export of any size arrives in chunks.
+pub async fn export_trace(
+    c: &Client,
+    trace: TraceId,
+    format: ExportFormat,
+) -> Result<(String, Vec<u8>), ClientError> {
+    let t = c.call(Command::TraceExport { trace, format }).await?;
+    let t = expect_body!("trace.export", t, ReplyBody::Transfer(t) => t)?;
+    let data = pull(c, &t, &mut |_, _| {}).await;
+    let end = finish_download(c, t.transfer, None).await;
+    let data = data?;
+    end?;
+    ac2_archive::verify(&data, &t.sha256).map_err(ClientError::Archive)?;
+    Ok((t.file_name, data))
+}
+
+/// The bytes of download `t`, chunk by chunk.
+async fn pull(
+    c: &Client,
+    t: &Transfer,
+    progress: &mut impl FnMut(u64, u64),
+) -> Result<Vec<u8>, ClientError> {
     let mut data = Vec::with_capacity(usize::try_from(t.bytes).unwrap_or(0));
     while (data.len() as u64) < t.bytes {
         let r = c
@@ -133,8 +162,7 @@ pub async fn download(
             t.bytes
         ))));
     }
-    ac2_archive::verify(&data, &t.sha256).map_err(ClientError::Archive)?;
-    Ok((t, data))
+    Ok(data)
 }
 
 /// Ends a download; `saved_as`: where a working-state archive was written.

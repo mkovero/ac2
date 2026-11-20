@@ -1,5 +1,5 @@
 {
-  "proto_version": 95,
+  "proto_version": 96,
   "value": {
     "grids": [
       {
@@ -31,14 +31,14 @@
             "mic": "MM1 34804"
           },
           "spl": {
-            "calibrated_at": "now-8947097",
+            "calibrated_at": "now-5412758",
             "freq": 1000.0,
-            "measured": -25.99,
+            "measured": -25.98,
             "method": {
               "calibrator_level": 94.0,
               "type": "acoustic"
             },
-            "sensitivity": 119.99
+            "sensitivity": 119.98
           }
         }
       ],
@@ -63,7 +63,7 @@
         "firing": false,
         "last_action": {
           "action": "release",
-          "at": "now-7331202",
+          "at": "now-4348913",
           "client": "local-006b8b4567"
         },
         "owner": null,
@@ -299,7 +299,7 @@
               "f_hi": 19980.0,
               "f_lo": 50.0,
               "file_name": "449350_34804_0Grad.txt",
-              "imported_at": "now-4531419041",
+              "imported_at": "now-4575889027",
               "label": "0°",
               "points": 100,
               "stated_sensitivity": 15.0
@@ -309,7 +309,7 @@
               "f_hi": 19980.0,
               "f_lo": 50.0,
               "file_name": "449350_34804_90Grad.txt",
-              "imported_at": "now-4527714582",
+              "imported_at": "now-4574912007",
               "label": "90°",
               "points": 100,
               "stated_sensitivity": 15.0
@@ -395,7 +395,7 @@
           "driver_change": null,
           "driver_reset": null,
           "input_device": "fake",
-          "opened_at": "now-4633261845",
+          "opened_at": "now-4641742854",
           "output_device": "fake",
           "replay": null,
           "sample_rate_hz": 48000,
@@ -414,43 +414,43 @@
           "peaks": {
             "lafmax": {
               "judgement": "no_limit",
-              "since": "now-4544697279"
+              "since": "now-4586092601"
             },
             "lcpeak": {
               "judgement": "no_limit",
-              "since": "now-4544697279"
+              "since": "now-4586092601"
             }
           },
-          "started_at": "now-4547295920",
+          "started_at": "now-4593394296",
           "windows": [
             {
               "duration": 60.0,
               "judgement": "no_limit",
-              "since": "now-4544697279",
+              "since": "now-4586092601",
               "weighting": "a"
             },
             {
               "duration": 300.0,
               "judgement": "no_limit",
-              "since": "now-4544697279",
+              "since": "now-4586092601",
               "weighting": "a"
             },
             {
               "duration": 600.0,
               "judgement": "no_limit",
-              "since": "now-4544697279",
+              "since": "now-4586092601",
               "weighting": "a"
             },
             {
               "duration": 1800.0,
               "judgement": "no_limit",
-              "since": "now-4544697279",
+              "since": "now-4586092601",
               "weighting": "a"
             },
             {
               "duration": 3600.0,
               "judgement": "no_limit",
-              "since": "now-4544697279",
+              "since": "now-4586092601",
               "weighting": "a"
             }
           ]
@@ -476,7 +476,7 @@
           "type": "name"
         },
         "recover": null,
-        "saved_at": "now-6986864"
+        "saved_at": "now-4191387"
       }
     },
     "traces": []

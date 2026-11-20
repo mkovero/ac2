@@ -653,6 +653,12 @@ pub enum Command {
     /// Run a dynamics measurement ([`DynamicsRunArgs`]).
     #[serde(rename = "dynamics.run")]
     DynamicsRun(DynamicsRunArgs),
+    /// A dynamics trace's step table, without the envelopes `trace.get` carries.
+    #[serde(rename = "dynamics.table")]
+    DynamicsTable {
+        /// Trace.
+        trace: TraceId,
+    },
 
     // -- state, grid, file --------------------------------------------------------------
     /// Full state snapshot.
@@ -834,21 +840,19 @@ pub enum Command {
         step: u16,
     },
     /// Capture at every pending point of the current step in one step, each by its mic's
-    /// measurement, each trace named *<point> · <mic>* and carrying its position, and go to
-    /// the next step with a pending point. Before a measurement is ready (averages full, no
-    /// delay move since they restarted, no arrival to pick, no fault) its trace records
-    /// `captured_unsettled`. The walk's average is made at the second capture and follows
-    /// every capture, redo and skip. A sweep walk refuses it: its capture is a run of its
-    /// sweep measurement (`sweep.run`, under the stimulus lease), which records every
-    /// standing mic at its point.
+    /// measurement, each trace named *<point> · <mic>* and carrying its position, and go to the
+    /// next step with a pending point. Before a measurement is ready (averages full, no delay move
+    /// since they restarted, no arrival to pick, no fault) its trace records `captured_unsettled`.
+    /// The walk's average is made at the second capture and follows every capture, redo and skip. A
+    /// sweep walk refuses it: its capture is a run of its sweep measurement (`sweep.run`, under the
+    /// stimulus lease), which records every standing mic at its point.
     #[serde(rename = "walk.capture")]
     WalkCapture {
         /// The walk.
         walk: WalkId,
     },
-    /// Skip point `point` (a captured one's trace becomes superseded, out of the average);
-    /// when that leaves the current step nothing pending, go to the next step with a
-    /// pending point.
+    /// Skip point `point` (a captured one's trace becomes superseded, out of the average); when
+    /// that leaves the current step nothing pending, go to the next step with a pending point.
     #[serde(rename = "walk.skip")]
     WalkSkip {
         /// The walk.
@@ -894,9 +898,8 @@ pub enum Command {
         /// What to simulate.
         request: SimRequest,
     },
-    /// Fit the absorption per band to a sweep walk's measured T20, then simulate at its
-    /// captured positions with it (`absorption fitted`); later runs on the unchanged plan
-    /// keep the fit.
+    /// Fit the absorption per band to a sweep walk's measured T20, then simulate at its captured
+    /// positions with it (`absorption fitted`); later runs on the unchanged plan keep the fit.
     #[serde(rename = "sim.fit")]
     SimFit {
         /// What to fit.

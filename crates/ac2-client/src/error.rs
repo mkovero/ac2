@@ -141,5 +141,6 @@ pub fn code_name(c: ErrorCode) -> &'static str {
         ErrorCode::Unsupported => "unsupported",
         ErrorCode::Internal => "internal",
         ErrorCode::VersionMismatch => "version_mismatch",
+        ErrorCode::TooLarge => "too_large",
     }
 }

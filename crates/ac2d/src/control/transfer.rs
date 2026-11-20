@@ -361,6 +361,22 @@ impl Control {
         packed: Result<Vec<u8>, ProtoError>,
     ) -> Result<ReplyBody, ProtoError> {
         let data = packed?;
+        self.offer_download(
+            client,
+            format!("{stem}.{}", ac2_archive::EXTENSION),
+            data,
+            working,
+        )
+    }
+
+    /// Holds `data` for `client` to fetch in chunks (`file.download_chunk`), as `file_name`.
+    pub(super) fn offer_download(
+        &mut self,
+        client: &Peer,
+        file_name: String,
+        data: Vec<u8>,
+        working: Option<(u64, WallNs)>,
+    ) -> Result<ReplyBody, ProtoError> {
         let bytes = data.len() as u64;
         let sha256 = ac2_archive::sha256_hex(&data);
         let transfer = self
@@ -368,7 +384,7 @@ impl Control {
             .add(client, Kind::Download { data, working })?;
         Ok(ReplyBody::Transfer(Transfer {
             transfer,
-            file_name: format!("{stem}.{}", ac2_archive::EXTENSION),
+            file_name,
             bytes,
             sha256,
             chunk_bytes: CHUNK_BYTES,

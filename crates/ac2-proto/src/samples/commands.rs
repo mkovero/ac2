@@ -482,6 +482,7 @@ pub fn commands() -> Vec<Command> {
             name: None,
             rests_from: Some(TraceId(14)),
         }),
+        Command::DynamicsTable { trace: TraceId(14) },
     ])
     .collect()
 }

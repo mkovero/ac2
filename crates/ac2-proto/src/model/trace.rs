@@ -559,18 +559,19 @@ pub struct Recoverable {
     pub traces: u32,
 }
 
-/// A session archive transfer under way (reply to `file.upload_begin`,
-/// `file.download_begin`).
+/// A file transfer under way: a session archive (reply to `file.upload_begin`,
+/// `file.download_begin`) or a trace export (`trace.export`), fetched with
+/// `file.download_chunk` and closed with `file.download_end`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Transfer {
     /// Id for the chunks.
     pub transfer: TransferId,
-    /// Archive file name (download: suggested, `<session>.ac2session`).
+    /// File name (download: suggested, `<session>.ac2session` or the exported trace's).
     pub file_name: String,
-    /// Archive size, bytes.
+    /// Size, bytes.
     pub bytes: u64,
-    /// SHA-256 of the whole archive, lowercase hex.
+    /// SHA-256 of the whole file, lowercase hex.
     pub sha256: String,
     /// Largest chunk, bytes.
     pub chunk_bytes: u32,

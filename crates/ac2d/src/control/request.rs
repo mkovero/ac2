@@ -7,13 +7,13 @@ use ac2_proto::frame::{Frame, FrameData, FrameStamp, GenSummary, KaMeta, Protect
 use ac2_proto::topic::Topic;
 use ac2_proto::units::{RequestId, SampleIndex, WallNs};
 use ac2_proto::{
-    Command, PROTO_VERSION, ProtoError, Reply, ReplyBody, decode_request, encode_reply,
-    peek_envelope,
+    Command, ErrorCode, MAX_CTRL_BYTES, PROTO_VERSION, ProtoError, Reply, ReplyBody,
+    decode_request, encode_reply, peek_envelope,
 };
 
 use crate::dedup::Admit;
 use crate::health::SessionStream;
-use crate::util::{internal, invalid, refused, wall_ns};
+use crate::util::{internal, invalid, perr, refused, wall_ns};
 
 use super::{Control, PendingFind, PendingReply, mutation_conflict};
 use crate::route::{Peer, Route};
@@ -278,15 +278,8 @@ impl Control {
         now: Instant,
     ) {
         let reply = Reply::new(id, result).with_warnings(std::mem::take(&mut self.reply_warnings));
-        let bytes = match encode_reply(&reply) {
-            Ok(b) => b,
-            Err(e) => {
-                tracing::error!("reply not encodable: {e}");
-                match encode_reply(&Reply::new(id, Err(internal(e.to_string())))) {
-                    Ok(b) => b,
-                    Err(_) => return,
-                }
-            }
+        let Some(bytes) = encode_bounded(&reply) else {
+            return;
         };
         let owed = self.dedup.complete(client, id, route, &bytes, now);
         if owed.is_empty() {
@@ -298,9 +291,60 @@ impl Control {
     }
 
     pub(super) fn send_reply(&self, route: &Route, r: &Reply) {
-        match encode_reply(r) {
-            Ok(b) => self.s.outbox.reply(route, &b),
-            Err(e) => tracing::error!("reply not encodable: {e}"),
+        if let Some(b) = encode_bounded(r) {
+            self.s.outbox.reply(route, &b);
         }
+    }
+}
+
+/// `r` encoded, or in its place an error reply to the same id: `internal` when it cannot be
+/// encoded, `too_large` when it is over [`MAX_CTRL_BYTES`] (the client would discard it
+/// unread and wait out its deadline). `None` only when not even the error encodes.
+fn encode_bounded(r: &Reply) -> Option<Vec<u8>> {
+    let error = match encode_reply(r) {
+        Ok(b) if b.len() <= MAX_CTRL_BYTES => return Some(b),
+        Ok(b) => {
+            tracing::warn!("reply to request {} is {} bytes; refused", r.id.0, b.len());
+            perr(
+                ErrorCode::TooLarge,
+                format!(
+                    "the reply is {:.1} MiB, over the {} MiB limit of one message",
+                    b.len() as f64 / f64::from(1 << 20),
+                    MAX_CTRL_BYTES >> 20
+                ),
+            )
+        }
+        Err(e) => {
+            tracing::error!("reply not encodable: {e}");
+            internal(e.to_string())
+        }
+    };
+    encode_reply(&Reply::new(r.id, Err(error))).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use ac2_proto::units::Blob;
+    use ac2_proto::{ErrorCode, decode_reply};
+
+    use super::*;
+
+    /// A reply over the ctrl limit reaches the client as `too_large` to the same id, never
+    /// as a message the client would discard unread; one at the limit goes as it is.
+    #[test]
+    fn an_oversize_reply_is_answered_too_large() {
+        let id = RequestId(17);
+        let big = Reply::new(id, Ok(ReplyBody::Chunk(Blob(vec![7; MAX_CTRL_BYTES]))));
+        let b = encode_bounded(&big).expect("encoded");
+        assert!(b.len() <= MAX_CTRL_BYTES);
+        let r = decode_reply(&b).expect("decodes");
+        assert_eq!(r.id, id);
+        let e = r.result.expect_err("refused");
+        assert_eq!(e.code, ErrorCode::TooLarge);
+        assert!(e.msg.contains("4 MiB"), "{}", e.msg);
+
+        let fits = Reply::new(id, Ok(ReplyBody::Chunk(Blob(vec![7; 1 << 20]))));
+        let r = decode_reply(&encode_bounded(&fits).expect("encoded")).expect("decodes");
+        assert_eq!(r.result, Ok(ReplyBody::Chunk(Blob(vec![7; 1 << 20]))));
     }
 }

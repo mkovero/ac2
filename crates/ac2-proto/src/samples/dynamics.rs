@@ -189,11 +189,11 @@ pub(super) fn dynamics_data() -> DynamicsData {
             delay: Seconds(0.0000625),
             g0: Db(-0.25),
             rows: vec![row],
-            envelopes: vec![vec![
-                point(DynamicsEdge::Start, -0.05, 0.0),
-                point(DynamicsEdge::Start, 0.00025, 4.5),
-                point(DynamicsEdge::End, 0.5, 1.25),
-            ]],
         }],
+        envelopes: vec![vec![vec![
+            point(DynamicsEdge::Start, -0.05, 0.0),
+            point(DynamicsEdge::Start, 0.00025, 4.5),
+            point(DynamicsEdge::End, 0.5, 1.25),
+        ]]],
     }
 }

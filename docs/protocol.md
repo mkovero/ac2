@@ -31,7 +31,7 @@ keepalives to each connection as its credit allows (§5.8).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 95`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 96`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -86,7 +86,10 @@ Warning { type: "<name>", … }
   key) are not remembered. Revoking a client forgets its stored replies and running ids.
 - `expect_rev` applies to mutations: if state has moved past it the reply is `conflict`
   with `detail: {type: conflict, rev}` (the current rev). Commits are serial.
-- Largest ctrl message: 4 MiB, checked before parsing.
+- Largest ctrl message: 4 MiB, checked before parsing. A reply that would be larger is
+  sent as `too_large` instead (a client discards an oversize message unread, so it would
+  only time out); what can be that large comes another way (`trace.export` as a download,
+  `dynamics.table` for a dynamics trace's step table).
 
 ### 3.2 Commands
 
@@ -142,7 +145,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `trace.average` | `traces`, `method`, `reference`, `name` | `trace` | |
 | `trace.import` | `file_name`, `format: ac2_csv \| analyzer_text \| ir_wav \| auto`, `role: trace \| target`, `ir: IrImport \| nil`, `content: bin`, `owner: TraceOwner` | `trace` | |
 | `trace.target` | `curve: TargetCurve`, `name`, `owner: TraceOwner` | `trace` | |
-| `trace.export` | `trace`, `format: ac2_csv \| ir_wav` | `export` (`file_name`, `content: bin`) | |
+| `trace.export` | `trace`, `format: ac2_csv \| ir_wav` | `transfer` (`file_name` the suggested name, `bytes`, `sha256`): fetch with `file.download_chunk`, close with `file.download_end` | non-mutating |
 | `trace.mic_curve` | `trace`, `curve: MicCurveId \| nil` (nil removes) | `trace` | |
 | `cal.spl` | `input`, `mic`, `calibrator_level: DbSpl`, `calibrator_freq: Hz` | `calibration` | |
 | `cal.spl_electrical` | `input`, `mic`, `connection: in_line \| injected`, `volts: Volts`, `freq: Hz`, `mic_sensitivity: MvPerPa \| nil`, `loading: MicLoading \| nil`, `uncertainty: Db \| nil`, `replace_acoustic: bool` | `calibration` | |
@@ -174,6 +177,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `spl.band_log_get` | `meas`, `from`, `until: WallNs`, `step: u32 \| nil` | `spl_band_log` | non-mutating |
 | `sweep.run` | `lease_token`, `meas` (a sweep measurement), `name: string \| nil` | `sweep` (the run as started) | L (held for the run), armed |
 | `dynamics.run` | `lease_token`, `meas` (a dynamics measurement), `name: string \| nil`, `rests_from: TraceId \| nil` | `dynamics` (the run as started) | L (held for the run), armed |
+| `dynamics.table` | `trace` (a dynamics trace, else `invalid`) | `dynamics_table` (`DynamicsTable`: `info`, `inputs`, as in `DynamicsData` without `envelopes`) | non-mutating |
 | `state.snapshot` | — | `snapshot` | |
 | `state.since` | `rev` | `events` or `resync_required` | |
 | `grid.get` | `grid_id` | `grid` | |
@@ -1605,9 +1609,11 @@ an A/B pair plays an identical programme. The generator's level is the highest b
   `rest_max`, `replayed`, `reference_input`, `steps`: [`DynamicsStep` {`level`, `burst`,
   `rest` (as played), `recovered` (false: the rest reached `rest_max`)}]), `inputs`:
   [`DynamicsInput` {`input`, `name`, `delay` (the processor's envelope delay), `g0` (gain at
-  the pilot re the reference), `rows`: one `DynamicsRow` per step, `envelopes`: one
-  [`DynamicsPoint` {`edge` (`start` \| `end`), `t` (s from the edge), `gr_db`, `h_db` (H2…H5
-  re the fundamental, NaN where blind)}] per step}]. `DynamicsRow`: `gr_end`, `gr_settled`
+  the pilot re the reference), `rows`: one `DynamicsRow` per step}], `envelopes`: per input
+  (as `inputs`), one [`DynamicsPoint` {`edge` (`start` \| `end`), `t` (s from the edge),
+  `gr_db`, `h_db` (H2…H5 re the fundamental, NaN where blind)}] per step. A long run at a
+  high carrier holds tens of MB of envelopes, over the ctrl message limit (`too_large`):
+  `dynamics.table` reads its step table, `trace.export` all of it. `DynamicsRow`: `gr_end`, `gr_settled`
   (nil: no burst at the level settled), `settled`, `attack_tau`, `attack_2db`, `settle_0_5db`,
   `overshoot` ({`level`, `at`, `reference`} \| nil), `release_tau`, `recovery_2db`,
   `recovery_0_5db`, `harmonics` ({`attack`, `settled`, `release`, `rest`}, each {`h`: four
@@ -1683,7 +1689,8 @@ with the autosave (§7.3).
   packs (`file_name` `<name>.ac2session`), `file.download_chunk` reads, and
   `file.download_end` drops it; with `saved_as` after a working-state download, the
   working state's origin becomes `client` {saved_as}, clean if it has not changed since
-  the download began. Unpacking accepts regular files at `session.json`,
+  the download began. `trace.export` offers its file as such a download (no `saved_as`).
+  Unpacking accepts regular files at `session.json`,
   `session.prev.json`, `traces/<file>`, `spl/<file>` only, at most 512 MiB and 20 000
   entries. At most 4 transfers per daemon; one idle for 2 min is dropped (`not_found`
   after). A transfer belongs to the client that began it.
@@ -1977,7 +1984,7 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 `{type, value}` with `type` one of: `ack` (`{rev}`), `welcome`, `backends`, `preview`,
 `loopback_detection`, `session`,
 `lease`, `generator`, `measurement`, `delay_finding`, `trace`, `traces`, `trace_data`,
-`export`, `calibration`, `line_calibration`, `calibrations`, `mic`, `inputs`, `outputs`, `server`, `source_state`,
+`dynamics_table`, `calibration`, `line_calibration`, `calibrations`, `mic`, `inputs`, `outputs`, `server`, `source_state`,
 `spl_log_page`, `spl_history`, `spl_band_log`,
 `snapshot`, `events`,
 `grid`, `session_file`, `sessions`, `transfer`, `chunk`, `salvage`, `sweep`, `dynamics`, `recording`,
@@ -1987,7 +1994,8 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 
 `code` is one of `invalid`, `not_found`, `conflict`, `lease_required`, `lease_held`,
 `refused` (safety: level ceiling, firing unarmed, …), `resync_required`, `unsupported`,
-`internal`, `version_mismatch`.
+`internal`, `version_mismatch`, `too_large` (the reply would exceed the 4 MiB ctrl message
+limit, §3.1).
 
 `detail` (optional, tagged by `type`): `conflict` {rev}, `lease_held` {owner},
 `version` {daemon, client}, `resync` {oldest}, `import` {line, problem} (§3.2 traces),

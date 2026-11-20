@@ -24,6 +24,7 @@ use ac2_traces::ops::{self, Derived, OpError};
 use ac2_traces::text::{self, ImportError};
 
 use super::Control;
+use crate::route::Peer;
 use crate::util::{internal, invalid, missing, perr, perr_detail, refused, wall_ns};
 
 /// Columns and grids of the stored traces, by id.
@@ -503,6 +504,16 @@ impl Control {
         Ok(ReplyBody::TraceData(Box::new(self.stored(id)?.data())))
     }
 
+    pub(super) fn dynamics_table(&self, id: TraceId) -> Result<ReplyBody, ProtoError> {
+        self.trace_meta(id)?;
+        let d = self
+            .traces
+            .dynamics
+            .get(&id)
+            .ok_or_else(|| invalid(format!("trace {id} is not a dynamics trace")))?;
+        Ok(ReplyBody::DynamicsTable(Box::new(d.table())))
+    }
+
     pub(super) fn trace_update(
         &mut self,
         id: TraceId,
@@ -778,26 +789,27 @@ impl Control {
         Ok(ReplyBody::Trace(t))
     }
 
+    /// The file is offered as a download: a dynamics trace's envelopes alone outgrow one
+    /// ctrl message.
     pub(super) fn trace_export(
-        &self,
+        &mut self,
+        client: &Peer,
         id: TraceId,
         format: ExportFormat,
     ) -> Result<ReplyBody, ProtoError> {
         let t = self.stored(id)?;
-        match format {
-            ExportFormat::Ac2Csv => Ok(ReplyBody::Export {
-                file_name: meta::file_name(&t.meta.edit.name, "csv"),
-                content: ac2_proto::units::Blob(text::export_csv(&t).into_bytes()),
-            }),
-            ExportFormat::IrWav => {
-                let wav = ac2_traces::ir_wav::export(&t)
-                    .map_err(|e| invalid(format!("{}: {e}", t.meta.edit.name)))?;
-                Ok(ReplyBody::Export {
-                    file_name: meta::file_name(&t.meta.edit.name, "wav"),
-                    content: ac2_proto::units::Blob(wav),
-                })
-            }
-        }
+        let (file_name, data) = match format {
+            ExportFormat::Ac2Csv => (
+                meta::file_name(&t.meta.edit.name, "csv"),
+                text::export_csv(&t).into_bytes(),
+            ),
+            ExportFormat::IrWav => (
+                meta::file_name(&t.meta.edit.name, "wav"),
+                ac2_traces::ir_wav::export(&t)
+                    .map_err(|e| invalid(format!("{}: {e}", t.meta.edit.name)))?,
+            ),
+        };
+        self.offer_download(client, file_name, data, None)
     }
 }
 

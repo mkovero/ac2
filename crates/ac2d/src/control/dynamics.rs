@@ -466,7 +466,7 @@ impl Control {
             },
             inputs: r
                 .inputs
-                .into_iter()
+                .iter()
                 .zip(run.measurement_inputs.iter().zip(&a.input_names))
                 .map(|(i, (&input, name))| DynamicsInput {
                     input,
@@ -474,11 +474,16 @@ impl Control {
                     delay: Seconds(i.delay_samples / fs),
                     g0: Db(i.g0_db),
                     rows: i.rows.iter().map(row).collect(),
-                    envelopes: i
-                        .envelopes
+                })
+                .collect(),
+            envelopes: r
+                .inputs
+                .iter()
+                .map(|i| {
+                    i.envelopes
                         .iter()
                         .map(|e| e.iter().map(point).collect())
-                        .collect(),
+                        .collect()
                 })
                 .collect(),
         };

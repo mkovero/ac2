@@ -114,14 +114,12 @@ async fn two_curves_of_one_mic_switched_on_an_input() {
     let t = capture(&c, m.id.0, "tf-90").await;
     let used = t.mic.as_ref().and_then(|m| m.curve.clone()).unwrap();
     assert_eq!(used, m2.curves[1]);
-    let export = c
-        .call(Command::TraceExport {
-            trace: t.id,
-            format: ac2_proto::model::ExportFormat::Ac2Csv,
-        })
-        .await
-        .unwrap()
-        .export_text();
+    let export =
+        ac2_client::sessions::export_trace(&c, t.id, ac2_proto::model::ExportFormat::Ac2Csv)
+            .await
+            .unwrap()
+            .1;
+    let export = String::from_utf8(export).unwrap();
     assert!(
         export.contains("MM1 34804 (curve: 90°, in the columns; file \"449350_34804_90Grad.txt\""),
         "{}",

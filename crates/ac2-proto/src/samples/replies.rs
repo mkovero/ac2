@@ -230,10 +230,9 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
             status: SweepStatus::Playing { repeat: 1 },
             ..sweep_run()
         })),
-        Ok(ReplyBody::Export {
-            file_name: "main-l.csv".into(),
-            content: Blob(b"freq_hz,mag_db\n1000,0\n".to_vec()),
-        }),
+        Ok(ReplyBody::DynamicsTable(Box::new(
+            super::dynamics::dynamics_data().table(),
+        ))),
         Ok(ReplyBody::Calibration(cal_entry())),
         Ok(ReplyBody::Calibration(electrical_cal_entry())),
         Ok(ReplyBody::LineCalibration(line_cal_entry())),
@@ -354,6 +353,11 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
                 name: "friday show".into(),
                 saved_at: WallNs(1_790_000_000_000_000_000),
             }),
+        }),
+        Err(ProtoError {
+            code: ErrorCode::TooLarge,
+            msg: "the reply is 21.3 MiB, over the 4 MiB limit of one message".into(),
+            detail: None,
         }),
         Err(ProtoError {
             code: ErrorCode::Unsupported,

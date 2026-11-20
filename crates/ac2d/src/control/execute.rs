@@ -260,6 +260,7 @@ impl Control {
                 self.trace_capture(meas, name, slot, None)
             }
             Command::TraceGet { trace } => self.trace_get(trace),
+            Command::DynamicsTable { trace } => self.dynamics_table(trace),
             Command::TraceUpdate { trace, edit } => self.trace_update(trace, edit),
             Command::TraceDelete { trace } => self.trace_delete(trace),
             Command::TraceAverage {
@@ -277,7 +278,7 @@ impl Control {
                 owner,
             } => self.trace_import(file_name, format, role, ir, &content.0, owner),
             Command::TraceTarget { curve, name, owner } => self.trace_target(curve, name, owner),
-            Command::TraceExport { trace, format } => self.trace_export(trace, format),
+            Command::TraceExport { trace, format } => self.trace_export(peer, trace, format),
             Command::TraceMicCurve { trace, curve } => self.trace_mic_curve(trace, curve),
 
             Command::CalSpl {

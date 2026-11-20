@@ -331,8 +331,11 @@ pub fn dynamics(d: &DynamicsData) -> Result<(), String> {
         DynamicsLevel::Db { value } => value.0.is_finite(),
         _ => true,
     };
-    for i in &d.inputs {
-        if i.rows.len() != n || i.envelopes.len() != n {
+    if d.envelopes.len() != d.inputs.len() {
+        return Err("dynamics: not one set of envelopes per input".into());
+    }
+    for (i, envelopes) in d.inputs.iter().zip(&d.envelopes) {
+        if i.rows.len() != n || envelopes.len() != n {
             return Err("dynamics: an input without one row and one envelope per step".into());
         }
         if !i.delay.0.is_finite() || !i.g0.0.is_finite() {
@@ -370,7 +373,7 @@ pub fn dynamics(d: &DynamicsData) -> Result<(), String> {
                 return Err("dynamics: a step value is not finite".into());
             }
         }
-        let points = i.envelopes.iter().flatten();
+        let points = envelopes.iter().flatten();
         if points.into_iter().any(|p| {
             !p.t.is_finite() || p.gr_db.is_infinite() || p.h_db.iter().any(|h| h.is_infinite())
         }) {

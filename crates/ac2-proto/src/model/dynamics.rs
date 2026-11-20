@@ -341,8 +341,6 @@ pub struct DynamicsInput {
     pub g0: Db,
     /// One row per step.
     pub rows: Vec<DynamicsRow>,
-    /// One envelope per step.
-    pub envelopes: Vec<Vec<DynamicsPoint>>,
 }
 
 /// What every input shares about a step.
@@ -391,6 +389,29 @@ pub struct DynamicsInfo {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DynamicsData {
+    /// Settings and facts.
+    pub info: DynamicsInfo,
+    /// Per measured input.
+    pub inputs: Vec<DynamicsInput>,
+    /// Per measured input (as `inputs`), one envelope per step.
+    pub envelopes: Vec<Vec<Vec<DynamicsPoint>>>,
+}
+
+impl DynamicsData {
+    /// Its step table.
+    pub fn table(&self) -> DynamicsTable {
+        DynamicsTable {
+            info: self.info.clone(),
+            inputs: self.inputs.clone(),
+        }
+    }
+}
+
+/// A dynamics trace's step table without its envelopes (`dynamics.table`): a few kB where
+/// the envelopes of a long high-carrier run are tens of MB.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DynamicsTable {
     /// Settings and facts.
     pub info: DynamicsInfo,
     /// Per measured input.

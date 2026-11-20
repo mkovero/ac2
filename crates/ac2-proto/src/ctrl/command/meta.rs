@@ -73,6 +73,7 @@ impl Command {
             Self::SplHistoryGet { .. } => "spl.history_get",
             Self::SweepRun(_) => "sweep.run",
             Self::DynamicsRun(_) => "dynamics.run",
+            Self::DynamicsTable { .. } => "dynamics.table",
             Self::StateSnapshot => "state.snapshot",
             Self::StateSince { .. } => "state.since",
             Self::GridGet { .. } => "grid.get",
@@ -130,6 +131,7 @@ impl Command {
                 | Self::SessionStatus
                 | Self::TraceList
                 | Self::TraceGet { .. }
+                | Self::DynamicsTable { .. }
                 | Self::TraceExport { .. }
                 | Self::CalList
                 | Self::StateSnapshot
