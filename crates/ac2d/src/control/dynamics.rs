@@ -364,22 +364,23 @@ impl Control {
                 return;
             }
         };
-        let Some(mut a) = self.dynamics.take() else {
-            return;
-        };
-        if r.inputs.len() != a.run.measurement_inputs.len() || r.steps.len() != a.programme.steps()
-        {
-            self.dynamics = Some(a);
+        if self.dynamics.as_ref().is_some_and(|a| {
+            r.inputs.len() != a.run.measurement_inputs.len() || r.steps.len() != a.programme.steps()
+        }) {
             self.fail_dynamics(
                 DynamicsFailure::Mismatch,
                 "the analysis returned no result for every input and step".into(),
             );
             return;
         }
+        // The slot holds only a run in progress: an ended run is in the state store, and a
+        // slot left behind would refuse deleting its measurement.
+        let Some(mut a) = self.dynamics.take() else {
+            return;
+        };
         let trace = self.store_dynamics_trace(&a, r);
         a.run.status = DynamicsStatus::Done { trace };
-        self.commit(Change::Dynamics(a.run.clone()));
-        self.dynamics = Some(a);
+        self.commit(Change::Dynamics(a.run));
     }
 
     /// Detaches the job and silences the output; the generator is disarmed (the lease stays
@@ -428,14 +429,12 @@ impl Control {
     }
 
     fn fail_dynamics(&mut self, reason: DynamicsFailure, msg: String) {
-        let Some(a) = self.dynamics.as_mut() else {
+        let Some(mut a) = self.dynamics.take() else {
             return;
         };
-        a.job = None;
         tracing::warn!("dynamics {} failed: {msg}", a.run.id.0);
         a.run.status = DynamicsStatus::Failed { reason, msg };
-        let run = a.run.clone();
-        self.commit(Change::Dynamics(run));
+        self.commit(Change::Dynamics(a.run));
     }
 
     fn store_dynamics_trace(&mut self, a: &ActiveDynamics, r: DynamicsResult) -> TraceId {

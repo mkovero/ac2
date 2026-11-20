@@ -1,7 +1,8 @@
 //! Dynamics measurements (`MeasKind::Dynamics`, `dynamics.run`) end to end on the fake rig
 //! against the real daemon: a short programme through a linear path (no gain reduction, so
 //! every time reads "no gain reduction"), stored as one trace the measurement owns, exported
-//! as CSV and imported back as the same trace; a replayed run plays the same rests.
+//! as CSV and imported back as the same trace; a replayed run plays the same rests; a run
+//! that ends, failed, stopped or done, leaves its measurement free to run again or go.
 #![allow(clippy::unwrap_used)]
 
 use crate::common;
@@ -12,9 +13,9 @@ use ac2_audio::fake::{FakeDrive, FakePath};
 use ac2_audio::{FakeBackend, FakeConfig, FakeDriver};
 use ac2_proto::event::Change;
 use ac2_proto::model::{
-    DynamicsConfig, DynamicsOnset, DynamicsRun, DynamicsStatus, DynamicsTime, ExportFormat,
-    GeneratorDesired, GeneratorSettings, ImportFormat, ImportRole, MeasConfig, MeasKind,
-    OwnedTraces, Signal, TraceKind, TraceOwner, TraceSource,
+    DynamicsConfig, DynamicsFailure, DynamicsOnset, DynamicsRun, DynamicsStatus, DynamicsTime,
+    ExportFormat, GeneratorDesired, GeneratorSettings, ImportFormat, ImportRole, MeasConfig,
+    MeasKind, OwnedTraces, Signal, TraceKind, TraceOwner, TraceSource,
 };
 use ac2_proto::units::{Blob, Dbfs, Hz, LeaseToken, MeasId, Seconds, TraceId};
 use ac2_proto::{Command, ErrorCode};
@@ -301,4 +302,86 @@ fn slow_dynamics_run_stores_one_trace_that_exports_and_imports() {
     for (a, b) in s2.info.steps.iter().zip(&dyn_data.info.steps) {
         assert!((a.rest.0 - b.rest.0).abs() < 1e-3, "{a:?} vs {b:?}");
     }
+}
+
+#[test]
+fn slow_an_ended_run_leaves_its_measurement_free() {
+    init_log();
+    let backend = rig();
+    let h = Daemon::start(common::config(backend.clone(), inproc("dynamics-ended"))).unwrap();
+    let (mut c, sub) = connect(&h, &[b"evt"]);
+    let ka = Sub::connect(h.context(), h.data_endpoint(), &[b"ka"]);
+    c.ok(Command::Hello {
+        client: "dynamics test".into(),
+    });
+    c.ok(Command::SessionOpen {
+        config: ac2_proto::model::SessionConfig {
+            input_channels: vec![0, 1, 2],
+            ..session(true)
+        },
+    });
+    let mut d = driver(&backend);
+    let token = c.acquire();
+    let start = |c: &mut Client, meas: MeasId| {
+        arm(c, token);
+        c.call(Command::DynamicsRun(ac2_proto::DynamicsRunArgs {
+            lease_token: token,
+            meas,
+            name: None,
+            rests_from: None,
+        }))
+        .map(|b| b.dynamics())
+    };
+
+    // Input 3 is captured but has no path from the outputs: the job finds no programme and fails the run.
+    let meas = create(
+        &mut c,
+        DynamicsConfig {
+            reference_input: 2,
+            ..config()
+        },
+    );
+    start(&mut c, meas).unwrap();
+    let failed = run_to_end(&mut d, &mut c, &sub, &ka, token);
+    assert!(
+        matches!(
+            failed.status,
+            DynamicsStatus::Failed {
+                reason: DynamicsFailure::NoReference,
+                ..
+            }
+        ),
+        "{:?}",
+        failed.status
+    );
+
+    // A failed run holds nothing: the measurement runs again, and a stopped run likewise
+    // lets it go.
+    let again = start(&mut c, meas).unwrap();
+    assert!(again.active(), "{:?}", again.status);
+    c.ok(Command::GenStop);
+    let stopped = run_to_end(&mut d, &mut c, &sub, &ka, token);
+    assert!(
+        matches!(
+            stopped.status,
+            DynamicsStatus::Failed {
+                reason: DynamicsFailure::Stopped,
+                ..
+            }
+        ),
+        "{:?}",
+        stopped.status
+    );
+    c.ok(Command::MeasDelete {
+        meas,
+        traces: OwnedTraces::Delete,
+    });
+
+    // A run that ends with its trace likewise.
+    let meas = create(&mut c, config());
+    play(&mut d, &mut c, &sub, &ka, token, meas, None);
+    c.ok(Command::MeasDelete {
+        meas,
+        traces: OwnedTraces::Keep,
+    });
 }
