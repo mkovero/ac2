@@ -701,7 +701,7 @@ pub(in crate::state) struct WireRigs<'a> {
 }
 
 impl WireRigs<'_> {
-    fn of(&self, r: RigId) -> wire::RigRef {
+    pub(in crate::state) fn of(&self, r: RigId) -> wire::RigRef {
         if r == self.this {
             wire::RigRef::ThisRig
         } else {
@@ -735,7 +735,7 @@ pub(in crate::state) fn wire_content(v: &View, refs: &WireRigs) -> wire::PaneCon
         PaneKind::Spl => v.meas.map_or(wire::PaneContent::Nothing, |meas| {
             wire::PaneContent::Meter { rig, meas }
         }),
-        PaneKind::Transfer | PaneKind::Spectrum | PaneKind::Distortion => {
+        PaneKind::Transfer | PaneKind::Spectrum | PaneKind::Distortion | PaneKind::Dynamics => {
             let entries: Vec<wire::PaneEntry> = v
                 .meas
                 .map(|meas| Pick::here(wire::EntryRef::Group { meas }))
@@ -762,6 +762,7 @@ fn wire_pane(v: &View, levels: wire::LayoutLevels, refs: &WireRigs) -> wire::Lay
             PaneKind::Distortion => wire::PaneKind::Distortion,
             PaneKind::Programme => wire::PaneKind::Programme,
             PaneKind::Walk => wire::PaneKind::Walk,
+            PaneKind::Dynamics => wire::PaneKind::Dynamics,
         },
         transfer_view: match m.transfer {
             TransferView::Magnitude => wire::TransferView::Magnitude,
@@ -801,6 +802,7 @@ fn wire_pane(v: &View, levels: wire::LayoutLevels, refs: &WireRigs) -> wire::Lay
             PlotChrome::NoGrid => wire::PlotChrome::NoGrid,
             PlotChrome::Bare => wire::PlotChrome::TracesOnly,
         },
+        dynamics: super::dyn_layout::wire_dynamics(&m.dynamics, refs),
         content: wire_content(v, refs),
         levels,
         plates: super::plates::wire_plates(&v.plates),
@@ -820,6 +822,7 @@ fn ui_view(p: &wire::LayoutPane, this: RigId) -> View {
             wire::PaneKind::Distortion => PaneKind::Distortion,
             wire::PaneKind::Programme => PaneKind::Programme,
             wire::PaneKind::Walk => PaneKind::Walk,
+            wire::PaneKind::Dynamics => PaneKind::Dynamics,
         },
         meas,
         with,
@@ -872,6 +875,7 @@ fn ui_view(p: &wire::LayoutPane, this: RigId) -> View {
             },
             // Context, not part of what the measurement's layout shows: as a new pane.
             sweep_reference: true,
+            dynamics: super::dyn_layout::ui_dynamics(&p.dynamics, this, lead_rig.unwrap_or(this)),
             chrome: match p.chrome {
                 wire::PlotChrome::Full => PlotChrome::Full,
                 wire::PlotChrome::NoGrid => PlotChrome::NoGrid,

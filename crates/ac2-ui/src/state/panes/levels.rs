@@ -77,7 +77,7 @@ impl PaneLevels {
                 LevelScale::DbSpl => self.spectrum_spl,
             }),
             PaneKind::Distortion => Some(self.distortion),
-            PaneKind::Spl | PaneKind::Programme | PaneKind::Walk => None,
+            PaneKind::Spl | PaneKind::Programme | PaneKind::Walk | PaneKind::Dynamics => None,
         }
     }
 
@@ -89,7 +89,7 @@ impl PaneLevels {
                 LevelScale::DbSpl => &mut self.spectrum_spl,
             }),
             PaneKind::Distortion => Some(&mut self.distortion),
-            PaneKind::Spl | PaneKind::Programme | PaneKind::Walk => None,
+            PaneKind::Spl | PaneKind::Programme | PaneKind::Walk | PaneKind::Dynamics => None,
         }
     }
 }
@@ -126,7 +126,7 @@ impl LevelSlot {
                 LevelScale::DbSpl => Self::SpectrumSpl,
             }),
             PaneKind::Distortion => Some(Self::Distortion),
-            PaneKind::Spl | PaneKind::Programme | PaneKind::Walk => None,
+            PaneKind::Spl | PaneKind::Programme | PaneKind::Walk | PaneKind::Dynamics => None,
         }
     }
 
@@ -330,7 +330,7 @@ impl AppState {
             PaneKind::Distortion => v.modes.sweep == ac2_scene::view::SweepMode::Response,
             PaneKind::Transfer => v.modes.transfer == crate::state::TransferView::Magnitude,
             PaneKind::Spectrum => true,
-            PaneKind::Spl | PaneKind::Programme | PaneKind::Walk => false,
+            PaneKind::Spl | PaneKind::Programme | PaneKind::Walk | PaneKind::Dynamics => false,
         }
     }
 
@@ -615,7 +615,7 @@ impl AppState {
                     }
                 }
             }
-            PaneKind::Spl | PaneKind::Programme | PaneKind::Walk => {}
+            PaneKind::Spl | PaneKind::Programme | PaneKind::Walk | PaneKind::Dynamics => {}
         }
         v
     }

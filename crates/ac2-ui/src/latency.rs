@@ -80,10 +80,11 @@ pub enum View {
     Distortion,
     Programme,
     Walk,
+    Dynamics,
 }
 
 impl View {
-    const ALL: [View; 8] = [
+    const ALL: [View; 9] = [
         View::Transfer,
         View::Spectrum,
         View::Spectrograph,
@@ -92,6 +93,7 @@ impl View {
         View::Distortion,
         View::Programme,
         View::Walk,
+        View::Dynamics,
     ];
 
     pub fn name(self) -> &'static str {
@@ -104,10 +106,11 @@ impl View {
             View::Distortion => "distortion",
             View::Programme => "programme",
             View::Walk => "walk",
+            View::Dynamics => "dynamics",
         }
     }
 
-    fn bit(self) -> u8 {
+    fn bit(self) -> u16 {
         1 << (self as u8)
     }
 
@@ -128,6 +131,7 @@ impl View {
             PaneKind::Distortion => View::Distortion,
             PaneKind::Programme => View::Programme,
             PaneKind::Walk => View::Walk,
+            PaneKind::Dynamics => View::Dynamics,
         })
     }
 }
@@ -161,7 +165,7 @@ struct Row {
     pass_wall_ns: i64,
     ui_end_ns: Option<i64>,
     frame_cpu_ms: Option<f32>,
-    panes_drawn: u8,
+    panes_drawn: u16,
     pane: Option<u32>,
     view: Option<View>,
     built: bool,
@@ -199,7 +203,7 @@ struct Log {
     pass_start_ns: i64,
     pass_wall_ns: i64,
     ui_end_ns: Option<i64>,
-    views: u8,
+    views: u16,
     /// This pass's rows, waiting for its probe stamps.
     pending: Vec<Row>,
     batch: Vec<Row>,

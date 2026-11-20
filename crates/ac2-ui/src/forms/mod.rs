@@ -17,6 +17,7 @@ use ac2_proto::model::{
 use ac2_proto::units::{Dbfs, Hz, MeasId, Seconds};
 
 mod build;
+mod dynamics;
 mod options;
 mod sweep_inputs;
 
@@ -36,6 +37,10 @@ pub enum FormKind {
     Sweep,
     /// A sweep measurement's settings edited (for its next run).
     SweepEdit,
+    /// Dynamics measurement (attack and release with tone bursts): created, run later.
+    Dynamics,
+    /// A dynamics measurement's settings edited (for its next run).
+    DynamicsEdit,
     /// A new math trace ([`crate::math_dialog`]).
     Math,
     /// A math trace edited.
@@ -69,6 +74,8 @@ impl FormKind {
             FormKind::MathEdit => "Edit math trace",
             FormKind::Sweep => "New sweep measurement (response and harmonic distortion)",
             FormKind::SweepEdit => "Edit sweep measurement (its next run)",
+            FormKind::Dynamics => "New dynamics measurement (attack and release with tone bursts)",
+            FormKind::DynamicsEdit => "Edit dynamics measurement (its next run)",
             FormKind::SpectrumEdit => "Edit spectrum",
             FormKind::RtaEdit => "Edit RTA",
             FormKind::TransferEdit => "Edit transfer measurement (averaging restarts)",
@@ -86,12 +93,16 @@ impl FormKind {
             FormKind::Sweep => {
                 "Enter creates it; nothing plays · Space on the sweep pane arms a run, Enter plays it"
             }
+            FormKind::Dynamics => {
+                "Enter creates it; nothing plays · Space on its Dynamics pane arms a run, Enter plays it"
+            }
             FormKind::IrImport => "Enter imports it as a transfer trace",
             FormKind::TargetTilt | FormKind::TargetLoudness => ac2_scene::target_curve::SUBMIT,
             FormKind::Programme => ac2_scene::programme::form::NEW_SUBMIT,
             FormKind::StimulusSignal => ac2_scene::stimulus::SIGNAL_DIALOG_SUBMIT,
             FormKind::MathEdit
             | FormKind::SweepEdit
+            | FormKind::DynamicsEdit
             | FormKind::SpectrumEdit
             | FormKind::RtaEdit
             | FormKind::TransferEdit => "Enter applies",
@@ -108,13 +119,14 @@ impl FormKind {
     /// The button that does it.
     pub fn verb(self) -> &'static str {
         match self {
-            FormKind::Sweep => "Create",
+            FormKind::Sweep | FormKind::Dynamics => "Create",
             FormKind::IrImport => "Import",
             FormKind::TargetTilt | FormKind::TargetLoudness => "Add",
             FormKind::Programme => "Open",
             FormKind::StimulusSignal => ac2_scene::stimulus::SIGNAL_DIALOG_VERB,
             FormKind::MathEdit
             | FormKind::SweepEdit
+            | FormKind::DynamicsEdit
             | FormKind::SpectrumEdit
             | FormKind::RtaEdit
             | FormKind::TransferEdit => "Apply",
@@ -148,6 +160,18 @@ pub enum FieldId {
     Tail,
     /// Harmonic windows at a sweep's lowest columns.
     LfHarmonics,
+    /// A dynamics programme's carrier frequency.
+    Carrier,
+    /// Where a dynamics burst starts in the carrier's cycle.
+    Onset,
+    /// A dynamics programme's rest level.
+    Pilot,
+    /// A dynamics programme's burst levels.
+    Bursts,
+    /// A dynamics programme's burst lengths.
+    Durations,
+    /// A dynamics programme's longest rest.
+    RestMax,
     /// Frequency points per octave of a transfer or sweep curve.
     Resolution,
     /// A spectrum's resolution: one FFT's length, or the multi-resolution bands.

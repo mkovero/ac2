@@ -20,6 +20,7 @@ mod align;
 mod calibration;
 mod cursor;
 mod drop_math;
+mod dynamics;
 mod eq;
 mod harness;
 mod keep;

@@ -38,6 +38,7 @@ fn ctrl_m_lists_every_kind_with_its_own_key() {
             "RTA — one input's level in fractional-octave bands",
             "SPL meter — sound level: A / C / Z weighting, Leq windows and limits",
             "Sweep — a played sweep: response and harmonic distortion  ·  Shift+S",
+            "Dynamics — tone bursts: a processor's attack, release and recovery",
             "Math trace — A ÷ × + − B of two curves, or the average of several  ·  Shift+M",
             "Alignment — delay and polarity of two systems in their overlap (sub + main, delay \
              tower)  ·  Alt+M",
@@ -54,32 +55,32 @@ fn ctrl_m_lists_every_kind_with_its_own_key() {
     );
     // One transfer function: Alt+M would refuse, and the row says so in its words.
     assert!(
-        c.choices[6]
+        c.choices[7]
             .blocked
             .as_deref()
             .is_some_and(|w| w.starts_with(ALIGN_REFUSAL)),
         "{:?}",
-        c.choices[6]
+        c.choices[7]
     );
     // One transfer measurement: the spatial average row is dimmed with its reason.
     assert_eq!(
-        c.choices[7].blocked.as_deref(),
+        c.choices[8].blocked.as_deref(),
         Some(ac2_scene::new_meas::SPATIAL_AVERAGE_NEEDS)
     );
     assert_eq!(
-        c.choices[8].blocked, None,
+        c.choices[9].blocked, None,
         "the session has inputs to meter"
     );
     // One transfer function and one spectrum: Shift+M would refuse, and the row says so.
     assert!(
-        c.choices[5]
+        c.choices[6]
             .blocked
             .as_deref()
             .is_some_and(|w| w.starts_with(MATH_REFUSAL)),
         "{:?}",
-        c.choices[5]
+        c.choices[6]
     );
-    assert!(c.choices[..5].iter().all(|x| x.blocked.is_none()));
+    assert!(c.choices[..6].iter().all(|x| x.blocked.is_none()));
     t.key("Shift+M");
     // The window owns the keys: Shift+M did nothing behind it.
     assert_eq!(chooser(&t).index, 0);
@@ -123,7 +124,9 @@ fn the_focused_pane_picks_the_kind_highlighted() {
     t.go(PaneKind::Transfer);
     assert_eq!(at(&mut t), 0, "transfer");
     t.go(PaneKind::Programme);
-    assert_eq!(at(&mut t), 8, "the Programme meter");
+    assert_eq!(at(&mut t), 9, "the Programme meter");
+    t.go(PaneKind::Dynamics);
+    assert_eq!(at(&mut t), 5, "dynamics");
 }
 
 /// The Alignment row opens what Alt+M opens: the math dialog, its operator on align.
@@ -258,7 +261,7 @@ fn the_meter_row_is_blocked_without_inputs() {
     t.conn(mirror(s));
     t.key("Ctrl+M");
     assert_eq!(
-        chooser(&t).choices[8].blocked.as_deref(),
+        chooser(&t).choices[9].blocked.as_deref(),
         Some("no inputs in the session to meter")
     );
 }
@@ -337,11 +340,11 @@ fn enter_opens_the_kinds_form_and_a_refused_kind_stays_listed() {
     t.key("Esc");
     // The math row refused: the chooser stays and says why.
     t.key("Ctrl+M");
-    for _ in 0..5 {
+    for _ in 0..6 {
         t.key("ArrowDown");
     }
     t.key("Enter");
-    assert_eq!(chooser(&t).index, 5);
+    assert_eq!(chooser(&t).index, 6);
     assert!(
         t.last_toast()
             .starts_with(&format!("not possible: {MATH_REFUSAL}")),
@@ -352,8 +355,8 @@ fn enter_opens_the_kinds_form_and_a_refused_kind_stays_listed() {
     // Two transfer functions: the math trace's form.
     t.conn(mirror(four()));
     t.key("Ctrl+M");
-    assert_eq!(chooser(&t).choices[5].blocked, None);
-    t.st.apply(Msg::Choose(Some(5)), &t.keys);
+    assert_eq!(chooser(&t).choices[6].blocked, None);
+    t.st.apply(Msg::Choose(Some(6)), &t.keys);
     assert!(matches!(&t.st.overlay, Overlay::Form(f) if f.kind == FormKind::Math));
 }
 
@@ -444,7 +447,7 @@ fn empty_texts_name_the_chooser() {
             .as_deref(),
         Some(
             "No measurements — Ctrl+M → New measurement… (transfer, spectrum, RTA, SPL meter, \
-             sweep, math trace, alignment, spatial average)"
+             sweep, dynamics, math trace, alignment, spatial average)"
         )
     );
 }

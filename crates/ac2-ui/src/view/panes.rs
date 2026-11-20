@@ -159,6 +159,7 @@ fn build_scene(
     let mut legend = None;
     let mut plates = Vec::new();
     let mut legend_hits = Vec::new();
+    let mut dynamics_cells = Vec::new();
     let (scene, axes) = match pane {
         PaneKind::Transfer if view.shows_ir() => {
             let s = scenes::ir(st, id, &app.keymap, theme, vp, now);
@@ -322,6 +323,14 @@ fn build_scene(
             (s.scene, Axes::default())
         }
         PaneKind::Walk => (scenes::walk(st, id, theme, vp, now)?.scene, Axes::default()),
+        PaneKind::Dynamics => {
+            let s = scenes::dynamics(st, id, &app.keymap, theme, vp, now);
+            plates = s.readout_box.into_iter().collect();
+            legend = s.legend_box.clone();
+            legend_hits = s.legend_hits.clone();
+            dynamics_cells = s.cells.clone();
+            (s.scene, Axes::default())
+        }
     };
     let scene = Arc::new(scene);
     app.scenes.insert(
@@ -350,6 +359,7 @@ fn build_scene(
             legend,
             plates,
             legend_hits,
+            dynamics_cells,
         },
     );
     Some((scene, axes))

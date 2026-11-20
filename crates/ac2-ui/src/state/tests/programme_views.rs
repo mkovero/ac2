@@ -93,7 +93,7 @@ fn no_room_for_the_goniometer_opens_the_meters_alone() {
         t.st.layout.set_focus(p);
     }
     t.key("Ctrl+M");
-    t.st.apply(Msg::Choose(Some(8)), &t.keys);
+    t.st.apply(Msg::Choose(Some(9)), &t.keys);
     t.key("Enter");
     let p = programme_panes(&t);
     assert_eq!(p.len(), 1, "{:?}", t.visible());
@@ -128,7 +128,7 @@ fn the_forms_ember_decay_is_this_apps_setting() {
     let was = t.st.prefs.ember_decay_s;
     for (close, kept) in [("Escape", false), ("Enter", true)] {
         t.key("Ctrl+M");
-        t.st.apply(Msg::Choose(Some(8)), &t.keys);
+        t.st.apply(Msg::Choose(Some(9)), &t.keys);
         let Overlay::Form(f) = &t.st.overlay else {
             panic!("no form: {:?}", t.st.overlay)
         };
@@ -157,7 +157,7 @@ fn the_forms_ember_glow_is_this_apps_setting() {
     let mut t = meter_t();
     for (close, want) in [("Escape", 1.0), ("Enter", 1.5)] {
         t.key("Ctrl+M");
-        t.st.apply(Msg::Choose(Some(8)), &t.keys);
+        t.st.apply(Msg::Choose(Some(9)), &t.keys);
         let Overlay::Form(f) = &t.st.overlay else {
             panic!("no form: {:?}", t.st.overlay)
         };

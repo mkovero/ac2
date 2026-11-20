@@ -282,6 +282,20 @@ impl CommandId {
             C::DistortionUnit => &["thd", "harmonics", "percent"],
             C::SweepIr => &["impulse", "IR"],
             C::ReferenceHarmonics => &["thd", "distortion"],
+            C::DynamicsLevelDown | C::DynamicsLevelUp => &["dynamics", "step", "burst", "level"],
+            C::DynamicsShorter | C::DynamicsLonger => &["dynamics", "step", "burst", "duration"],
+            C::DynamicsMetricNext | C::DynamicsMetricPrev => &[
+                "dynamics",
+                "attack",
+                "release",
+                "settle",
+                "overshoot",
+                "thump",
+                "drift",
+            ],
+            C::DynamicsCycleA | C::DynamicsCycleB => &["dynamics", "compare", "input", "curve"],
+            C::DynamicsThd => &["dynamics", "distortion", "harmonics", "gain reduction"],
+            C::DynamicsAllLevels => &["dynamics", "release", "levels", "family"],
             C::LevelsReset | C::LevelsResetAll => &["peak", "ppm", "clear", "overs", "max"],
         }
     }

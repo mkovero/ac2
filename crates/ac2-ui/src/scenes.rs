@@ -25,12 +25,14 @@ use ac2_scene::trace::{TfTrace, TimeBase};
 use crate::state::{AppState, PaneId, PaneKind};
 
 mod alignment;
+mod dynamics;
 mod programme;
 mod sim;
 mod spectrum_pane;
 mod spl_meters;
 mod walk;
 pub use alignment::{alignment, is_alignment, pane_alignment};
+pub use dynamics::dynamics;
 pub use programme::programme;
 #[cfg(test)]
 pub(crate) use spectrum_pane::with_spectrum;

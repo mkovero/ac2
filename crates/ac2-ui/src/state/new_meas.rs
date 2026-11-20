@@ -18,6 +18,7 @@ impl AppState {
             PaneKind::Spl => NewKind::Spl,
             PaneKind::Programme => NewKind::Programme,
             PaneKind::Distortion => NewKind::Sweep,
+            PaneKind::Dynamics => NewKind::Dynamics,
         };
         // Each kind's own key, where bound: the direct route next time.
         let key = |k: NewKind| kind_command(k).and_then(|c| keymap.label(c, Scope::Global));
@@ -71,6 +72,10 @@ impl AppState {
                 let keymap = self.keys.clone();
                 self.command(c, &keymap, out);
             }
+            (NewKind::Dynamics, None) => {
+                let keymap = self.keys.clone();
+                self.open_dynamics_dialog(&keymap, out);
+            }
             (NewKind::SpatialAverage, None) => match self.spatial_average_form() {
                 Ok(f) => self.overlay = Overlay::Form(Box::new(f)),
                 Err(why) => self.warn(why),
@@ -91,12 +96,14 @@ impl AppState {
                 open_session_hint(keymap)
             )),
             NewKind::Programme => self.meter_form().err(),
-            NewKind::Transfer | NewKind::Sweep if self.open_session().is_some() => {
-                self.two_input_refusal(k == NewKind::Sweep, keymap)
+            NewKind::Transfer | NewKind::Sweep | NewKind::Dynamics
+                if self.open_session().is_some() =>
+            {
+                self.two_input_refusal(k != NewKind::Transfer, keymap)
             }
             _ if self.open_session().is_some() => None,
-            NewKind::Sweep => Some(format!(
-                "no audio I/O to sweep: {}",
+            NewKind::Sweep | NewKind::Dynamics => Some(format!(
+                "no audio I/O to play on: {}",
                 open_session_hint(keymap)
             )),
             _ => Some(format!(
@@ -271,8 +278,9 @@ impl AppState {
 }
 
 /// The command that opens kind `k`'s form; `None` for the meter, whose own key (P) needs
-/// a picked Inputs row the chooser has not got, and for the spatial average, a math form
-/// filled in that only the chooser opens: their forms open from the chooser alone.
+/// a picked Inputs row the chooser has not got, for the spatial average, a math form
+/// filled in that only the chooser opens, and for dynamics, a bench measurement that has
+/// no key of its own: their forms open from the chooser alone.
 fn kind_command(k: NewKind) -> Option<CommandId> {
     Some(match k {
         NewKind::Transfer => CommandId::NewTransfer,
@@ -282,6 +290,6 @@ fn kind_command(k: NewKind) -> Option<CommandId> {
         NewKind::Sweep => CommandId::SweepNew,
         NewKind::Math => CommandId::NewMath,
         NewKind::Alignment => CommandId::NewAlignment,
-        NewKind::SpatialAverage | NewKind::Programme => return None,
+        NewKind::SpatialAverage | NewKind::Programme | NewKind::Dynamics => return None,
     })
 }

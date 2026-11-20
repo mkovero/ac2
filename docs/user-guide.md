@@ -55,7 +55,7 @@ inputs to capture. **Measurements** run on it: transfer functions (`tf`), spectr
 SPL meters and sweeps. In the app, every setting lives in **Settings** (**Ctrl+P**, the ⚙ in
 the top bar); **Shift+O** opens its Audio I/O page; **Ctrl+M** (*New measurement…*, also
 the last row of every pane's list) lists every kind — transfer, spectrum, RTA, SPL meter,
-sweep, math trace, alignment, spatial average — with what each measures, and opens the chosen
+sweep, dynamics, math trace, alignment, spatial average — with what each measures, and opens the chosen
 kind's settings (created, started and selected on **Enter**, on a screen of its own); a row it
 cannot make now says why. *Spatial average* opens the math dialog filled in for
 [the average](#the-average-spatial-average) of every transfer measurement. Its last row, *Programme meter*, makes no measurement: **Enter** opens its form
@@ -2978,8 +2978,8 @@ A dynamics measurement times a compressor, limiter or VCA
 ([dynamics.md](design/dynamics.md)): a carrier at a pilot level below the threshold, with
 bursts at each burst level and length, each followed by a rest that lasts until the
 processor has recovered (at least 2 s, at most `--rest-max`). Every measured input is read
-against the reference, so the source's own level never enters. Stage 1 is the CLI and the
-stored trace; the app lists the trace but has no view of it yet.
+against the reference, so the source's own level never enters. It is made and run from the
+app ([below](#the-dynamics-pane)) or the CLI.
 
 ```sh
 ac2 meas new dynamics --name "Studer VCA" --ref 7 --meas 5,6 --out 3,4,5 \
@@ -3011,6 +3011,45 @@ ac2 trace export "Run 1" --csv vca.csv
   pair plays an identical programme and its rows compare one to one.
 - The CSV export holds the whole step table (every harmonic window and thump) and each
   step's gain and harmonic envelopes; `ac2 trace import` restores the trace.
+
+### The Dynamics pane
+
+**New measurement… › Dynamics** opens the dynamics form on a screen of its own with one
+Dynamics pane: reference, measured inputs (one row each, as the sweep's), output, carrier,
+onset, pilot, burst levels and lengths, longest rest, name. Pilot and bursts have no default:
+they depend on the processor's threshold. **Edit** on its row opens the same form; a change
+while a run plays is refused. **Space** on the pane arms its measurement (the carrier at the
+loudest burst; a measurement with runs first asks whether to adapt the rests or replay a
+run's), **Enter** plays, **Esc** stops and discards it. The pane title shows the step and
+phase while it plays; a failed run raises a banner with the daemon's reason; the stored run
+joins the pane.
+
+Every measured input of every run on the pane is a curve (its measurement's runs, then each
+entry dragged on). Curves **A** and **B** compare step by step; the picked step (a burst
+level and length) is shared by every view.
+
+| Key | Does |
+|---|---|
+| **G** / **Shift+G** | Steps → Envelopes → Release → Table |
+| **Z** / **Shift+Z** | picked step's level down / up |
+| **X** / **Shift+X** | picked step shorter / longer |
+| **K** / **Shift+K** | the metric a Steps cell shows (the Table's columns in order) |
+| **B** / **Shift+B** | next curve A / next curve B (B passes through none) |
+| **D** | Envelopes: gain reduction or THD (H2–H5) |
+| **E** | Release: every level of A, or the picked level of every curve |
+
+- **Steps**: a level × length grid of A's metric, A − B beside it where B is on. A
+  difference within the metric's tolerance (0.3 dB, 25 % of a time, 3 dB of a THD) is drawn
+  plain; beyond it the cell is shaded. A cell whose step started from a moved baseline is
+  hatched. Click a cell to pick it; double-click also shows its envelopes.
+- **Envelopes**: the picked step's onset above its release, every curve, one y scale. Time is
+  linear to one carrier period, log after. Fetched for the picked step only.
+- **Release**: release τ and recovery against burst length, log axes; a bound (`≤ 1
+  period`, `not recovered`) is a hollow ring.
+- **Table**: A's and B's rows and their difference.
+- Different programmes never compare (`programmes differ`); rests that differ say so. A time
+  or level that is not a number reads as the CLI's words and never enters a difference
+  (`can't compare`).
 
 ## Sessions
 
@@ -4386,6 +4425,23 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `G` | Next view | `next_view` |
 | `Shift+G` | Previous view | `prev_view` |
 
+#### Dynamics
+
+| Keys | Command | `keys.toml` |
+|---|---|---|
+| `G` | Next view | `next_view` |
+| `Shift+G` | Previous view | `prev_view` |
+| `Z` | Step level down | `dynamics_level_down` |
+| `Shift+Z` | Step level up | `dynamics_level_up` |
+| `X` | Shorter burst | `dynamics_shorter` |
+| `Shift+X` | Longer burst | `dynamics_longer` |
+| `K` | Next metric | `dynamics_metric_next` |
+| `Shift+K` | Previous metric | `dynamics_metric_prev` |
+| `B` | Next curve A | `dynamics_cycle_a` |
+| `Shift+B` | Next curve B | `dynamics_cycle_b` |
+| `D` | Gain reduction or THD | `dynamics_thd` |
+| `E` | Every level of A | `dynamics_all_levels` |
+
 #### Command palette only (`Ctrl+K`)
 
 | Command | `keys.toml` |
@@ -4503,6 +4559,7 @@ The least used go first on a narrow pane; `G/Shift+G` steps the pane's views for
 | Inputs list row | `R` reset · `Shift+R` reset all · `Tab` measurements · `Shift+Tab` back · `H` all keys |
 | Spatial walk | `Shift+W` walks · `Space` stimulus · `W` maximise · `Q` close pane · `H` all keys |
 | Spectrum / RTA: 3D spectrograph | `←/→` orbit · `PageUp/PageDown` tilt · `I/O` zoom · `Home` reset camera · `G/Shift+G` view · `S` start/stop · `P` peaks · `W` maximise · `H` all keys |
+| Dynamics | `G/Shift+G` view · `K` metric · `Z` level · `X` length · `Shift+B` curve B · `D` GR/THD · `W` maximise · `H` all keys |
 
 <!-- keymap:end -->
 

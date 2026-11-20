@@ -251,6 +251,7 @@ impl AppState {
             | Msg::LevelPan { pane, .. }
             | Msg::FocusPane(pane)
             | Msg::LegendPick(pane, _)
+            | Msg::DynamicsCell { pane, .. }
             | Msg::LeqStrip(pane, _) => Some(Some(*pane)),
             Msg::Cam3d(pane, m) if !matches!(m, Cam3dMsg::Hover(_) | Cam3dMsg::Point(_)) => {
                 Some(Some(*pane))

@@ -22,6 +22,7 @@ pub(super) fn request_name(r: &Request) -> String {
         Request::StimSet(_) => "stimulus".into(),
         Request::StimStop => "stop".into(),
         Request::Sweep { label, .. } => format!("sweep {label}"),
+        Request::DynamicsRun { .. } => "dynamics run".into(),
         Request::Capture { slot, .. } => format!("capture slot {slot}"),
         Request::Import { path, .. } => format!("import {}", path.display()),
         Request::ImportCurve { path, .. } => format!("import curve {}", path.display()),
@@ -39,6 +40,7 @@ pub(super) fn request_name(r: &Request) -> String {
         Request::LeqSpan { .. } => "SPL history span".into(),
         Request::ExportLeqLog { info, .. } => format!("export {} log", info.name),
         Request::BandLogGet(_) => "band log".into(),
+        Request::DynamicsEnvelope { .. } => "dynamics envelope".into(),
         Request::BandTransfer { .. } => "band transfer".into(),
         Request::Topics(_) => "subscribe".into(),
         Request::DisplayPeriod(_) => "display rate".into(),
@@ -379,6 +381,9 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
         Request::Sweep { meas, update, .. } => {
             let _ = stim.send(StimOp::Sweep { meas, update });
         }
+        Request::DynamicsRun { meas, rests_from } => {
+            let _ = stim.send(StimOp::Dynamics { meas, rests_from });
+        }
         Request::LeqBackfill { meas, ask } => {
             let (c, o) = (client.clone(), out.clone());
             tokio::spawn(async move {
@@ -426,6 +431,26 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
                         Err(_) => format!("export {name} log"),
                     },
                     result: result.map(|_| ()),
+                });
+            });
+        }
+        Request::DynamicsEnvelope { trace, input, step } => {
+            let (c, o) = (client.clone(), out.clone());
+            tokio::spawn(async move {
+                let result = c
+                    .call(Command::DynamicsEnvelope(ac2_proto::DynamicsEnvelopeArgs {
+                        trace,
+                        input,
+                        step,
+                    }))
+                    .await
+                    .and_then(|r| {
+                        expect_body!("dynamics.envelope", r, ReplyBody::DynamicsEnvelope(e) => e)
+                    })
+                    .map_err(|e| e.to_string());
+                o.send(ConnEvent::DynamicsEnvelope {
+                    key: (trace, input, step),
+                    result,
                 });
             });
         }
@@ -768,6 +793,13 @@ pub(super) async fn import_curve(
         .max_by_key(|c| c.imported_at)
         .map(|c| c.label.clone())
         .unwrap_or_default())
+}
+
+/// A dynamics trace's step table; a refusal leaves the run listed without curves.
+pub(super) async fn fetch_dynamics_table(c: Client, id: TraceId, out: Out) {
+    if let Ok(ReplyBody::DynamicsTable(t)) = c.call(Command::DynamicsTable { trace: id }).await {
+        out.send(ConnEvent::DynamicsTable(id, t));
+    }
 }
 
 pub(super) async fn fetch_trace(c: Client, id: TraceId, grid: GridId, out: Out) {

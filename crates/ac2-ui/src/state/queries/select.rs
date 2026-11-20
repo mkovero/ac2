@@ -297,6 +297,16 @@ impl AppState {
             (PaneKind::Programme, true) => m.programme = m.programme.next(has_pair),
             (PaneKind::Programme, false) => m.programme = m.programme.prev(has_pair),
             (PaneKind::Walk, _) => {}
+            (PaneKind::Dynamics, forward) => {
+                let all = ac2_scene::dynamics::DynamicsView::ALL;
+                let n = all.len();
+                let i = all.iter().position(|v| *v == m.dynamics.view).unwrap_or(0);
+                m.dynamics.view = all[if forward {
+                    (i + 1) % n
+                } else {
+                    (i + n - 1) % n
+                }];
+            }
         }
         // The history starts with the view and goes with the last pane showing it: nothing
         // is kept for a hidden spectrograph; from the split to the spectrograph alone it

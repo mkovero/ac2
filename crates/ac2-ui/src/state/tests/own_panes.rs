@@ -20,6 +20,7 @@ fn split_spl(id: u32) -> PaneLayout {
             spl_view,
             sweep_view: wire::SweepView::Response,
             programme_view: wire::ProgrammeView::Meters,
+            dynamics: ac2_proto::model::layout::DynamicsPane::default(),
             chrome: wire::PlotChrome::Full,
             content: wire::PaneContent::Meter {
                 rig: wire::RigRef::ThisRig,
@@ -194,6 +195,7 @@ fn field_layout(id: u32) -> PaneLayout {
                 sweep_view: wire::SweepView::Response,
                 programme_view,
                 chrome: wire::PlotChrome::Full,
+                dynamics: wire::DynamicsPane::default(),
                 content: wire::PaneContent::Pair {
                     rig: wire::RigRef::ThisRig,
                     left: 0,

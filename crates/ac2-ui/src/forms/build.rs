@@ -250,6 +250,8 @@ impl Form {
             // stimulus signal's by [`crate::signal_dialog`].
             FormKind::Sweep
             | FormKind::SweepEdit
+            | FormKind::Dynamics
+            | FormKind::DynamicsEdit
             | FormKind::Math
             | FormKind::MathEdit
             | FormKind::SpectrumEdit
@@ -646,6 +648,7 @@ impl Form {
         let base = self.meas_edit.as_ref().map(|m| &m.config.kind);
         let kind = match self.kind {
             FormKind::Sweep | FormKind::SweepEdit => return Err("a sweep dialog".into()),
+            FormKind::Dynamics | FormKind::DynamicsEdit => return Err("a dynamics dialog".into()),
             FormKind::IrImport => return Err("an import dialog".into()),
             FormKind::Programme => {
                 return Err("a programme meter dialog".into());
@@ -750,8 +753,7 @@ impl Form {
     }
 }
 
-/// The dialog that makes a measurement of kind `k`; a dynamics measurement is made by the
-/// CLI.
+/// The dialog that makes a measurement of kind `k`.
 pub(super) fn form_kind(k: &MeasKind) -> Option<FormKind> {
     Some(match k {
         MeasKind::Transfer { .. } => FormKind::Transfer,
@@ -760,6 +762,6 @@ pub(super) fn form_kind(k: &MeasKind) -> Option<FormKind> {
         MeasKind::Spl { .. } => FormKind::Spl,
         MeasKind::Math { .. } => FormKind::Math,
         MeasKind::Sweep { .. } => FormKind::Sweep,
-        MeasKind::Dynamics { .. } => return None,
+        MeasKind::Dynamics { .. } => FormKind::Dynamics,
     })
 }

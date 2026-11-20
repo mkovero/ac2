@@ -585,14 +585,18 @@ fn g_steps_the_views_of_every_pane() {
         Some(CommandId::SpectrographSpan)
     );
     assert_eq!(m.lookup(Scope::Global, c("Shift+B")), None);
-    // Shift+B only where a spectrograph is: no other scope's own key is shadowed.
+    // Shift+B only where a spectrograph is, and curve B on the Dynamics pane: no other
+    // scope's own key is shadowed.
     let scopes: Vec<Scope> = m
         .bindings()
         .iter()
         .filter(|b| b.chord == c("Shift+B"))
         .map(|b| b.scope)
         .collect();
-    assert_eq!(scopes, [Scope::Spectrum, Scope::Spectrograph3d]);
+    assert_eq!(
+        scopes,
+        [Scope::Dynamics, Scope::Spectrum, Scope::Spectrograph3d]
+    );
 }
 
 #[test]
@@ -783,15 +787,20 @@ fn the_3d_view_keeps_the_spectrum_panes_keys() {
     }
 }
 
-/// B is the spectrum's style key and nothing else: the transfer pane beside it leaves the
-/// letter free, its coherence mask is in the palette.
+/// B is the spectrum's style key and, on the Dynamics pane (which has no styles), curve A;
+/// the transfer pane beside the spectrum leaves the letter free, its coherence mask is in
+/// the palette.
 #[test]
 fn b_means_one_thing() {
     let m = Keymap::default();
     let b = Chord::parse("B").expect("B");
     assert_eq!(m.lookup(Scope::Spectrum, b), Some(CommandId::SpectrumStyle));
+    assert_eq!(
+        m.lookup(Scope::Dynamics, b),
+        Some(CommandId::DynamicsCycleA)
+    );
     for scope in Scope::ALL {
-        if scope != Scope::Spectrum {
+        if !matches!(scope, Scope::Spectrum | Scope::Dynamics) {
             assert_eq!(m.lookup(scope, b), None, "{scope:?}");
         }
     }

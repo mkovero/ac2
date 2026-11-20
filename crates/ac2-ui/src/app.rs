@@ -148,6 +148,11 @@ pub(crate) struct CachedScene {
     pub plates: Vec<ac2_scene::plate::PlateBox>,
     /// Where the scene drew each legend row and whose curve it names: a click selects it.
     pub legend_hits: Vec<ac2_scene::legend::LegendHit>,
+    /// Where a Dynamics pane's Steps view drew each cell and its step: a click picks it.
+    pub dynamics_cells: Vec<(
+        ac2_scene::primitives::Rect,
+        ac2_scene::dynamics::DynamicsStepPick,
+    )>,
 }
 
 /// A drag on a plate: which, and where on the plate (or its grip) the pointer took it, so

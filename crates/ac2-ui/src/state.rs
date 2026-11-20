@@ -91,6 +91,8 @@ mod link;
 use link::Pending;
 use panes::meas_layout::LayoutQueue;
 mod drop_math;
+pub(crate) mod dynamics;
+mod dynamics_run;
 mod programme;
 pub use programme::{MAX_METERED, Metered, ProgrammeUi, ballistic};
 mod meter_form;
@@ -402,6 +404,7 @@ impl AppState {
         let contents = self.pane_contents();
         let worked_on = self.worked_on(&msg);
         self.update_inner(msg, keymap, &mut out);
+        self.want_dynamics_envelopes(&mut out);
         if let Some(p) = worked_on {
             self.pane_input(p.unwrap_or(self.layout.focus));
         }
@@ -530,6 +533,11 @@ impl AppState {
                 self.rig.input_pick = (self.rig.input_pick != Some(c)).then_some(c);
             }
             Msg::LegendPick(p, key) => self.legend_pick(p, key),
+            Msg::DynamicsCell {
+                pane,
+                step,
+                envelopes,
+            } => self.dynamics_pick(pane, step, envelopes),
             Msg::RigPick(row) => self.rig_pick(row, out),
             Msg::DragSplit { path, ratio } => self.drag_split(&path, ratio),
             // The drag's step was closed before the message, as any other message closes it.

@@ -18,16 +18,19 @@ pub enum PaneKind {
     /// A spatial walk: its plan, its points and where the mic goes next. It shows no
     /// measurement: its walk is its view's [`crate::state::View::walk`].
     Walk,
+    /// Dynamics runs: the step grid, envelopes, release against length, the step table.
+    Dynamics,
 }
 
 impl PaneKind {
-    pub const ALL: [PaneKind; 6] = [
+    pub const ALL: [PaneKind; 7] = [
         PaneKind::Transfer,
         PaneKind::Spectrum,
         PaneKind::Spl,
         PaneKind::Distortion,
         PaneKind::Programme,
         PaneKind::Walk,
+        PaneKind::Dynamics,
     ];
 
     pub fn scope(self) -> Scope {
@@ -38,6 +41,7 @@ impl PaneKind {
             PaneKind::Distortion => Scope::Distortion,
             PaneKind::Programme => Scope::Programme,
             PaneKind::Walk => Scope::Walk,
+            PaneKind::Dynamics => Scope::Dynamics,
         }
     }
 
@@ -49,6 +53,7 @@ impl PaneKind {
             PaneKind::Distortion => "Sweep / distortion",
             PaneKind::Programme => "Programme",
             PaneKind::Walk => ac2_scene::walk::PANE_TITLE,
+            PaneKind::Dynamics => "Dynamics",
         }
     }
 
@@ -57,7 +62,7 @@ impl PaneKind {
     pub fn draws_curves(self) -> bool {
         matches!(
             self,
-            PaneKind::Transfer | PaneKind::Spectrum | PaneKind::Distortion
+            PaneKind::Transfer | PaneKind::Spectrum | PaneKind::Distortion | PaneKind::Dynamics
         )
     }
 
@@ -71,12 +76,16 @@ impl PaneKind {
             PaneKind::Spl => matches!(k, MeasKind::Spl { .. }),
             // Sweep measurements: the pane shows their runs.
             PaneKind::Distortion => matches!(k, MeasKind::Sweep { .. }),
+            PaneKind::Dynamics => matches!(k, MeasKind::Dynamics { .. }),
             PaneKind::Programme | PaneKind::Walk => false,
         }
     }
 
     /// The pane that shows measurements of kind `k`.
     pub fn for_kind(k: &MeasKind) -> PaneKind {
+        if matches!(k, MeasKind::Dynamics { .. }) {
+            return PaneKind::Dynamics;
+        }
         match k.stream() {
             Some(Stream::Spec | Stream::Rta) => PaneKind::Spectrum,
             Some(Stream::Spl) => PaneKind::Spl,
@@ -94,6 +103,7 @@ impl PaneKind {
             PaneKind::Distortion => "sweep",
             PaneKind::Programme => "programme",
             PaneKind::Walk => "walk",
+            PaneKind::Dynamics => "dynamics",
         }
     }
 }

@@ -235,7 +235,9 @@ several measured inputs, and **every input of every entry is a curve**, named
 pane's per-curve colours. Envelopes and Release draw every curve.
 
 Steps and Table compare two curves, **A** and **B**, stored in the pane's layout as
-`{trace, input}` pairs. Default A: the first input of the first trace; default B: the trace's
+`{rig, trace, input}` (trace ids are per daemon, so a curve names its rig as a pane entry
+does; `ui.toml` keeps the view, metric, step and toggles but not A and B, whose trace ids
+belong to the session they were picked in). Default A: the first input of the first trace; default B: the trace's
 second input if it has one (one channel against the other, the bench case), else the first
 input of the second trace, else none. `B` / `Shift+B` cycle A / B through the pane's curves.
 Other curves are not in Steps or Table. The Global `C` (Compare) and `V` (next trace) keep
@@ -266,11 +268,11 @@ controls), and in full in the readout.
 - **Steps** (default). The level × length grid. `K` / `Shift+K` cycle the metric (`Shift+M` is Global new math): GR end,
   attack τ, attack 2 dB, settle 0.5 dB, overshoot, release τ, recovery 2 dB, recovery 0.5 dB,
   THD attack / settled / release, thump start / end, drift. A cell shows A's value, or A − B
-  when B is set; the readout plate gives A, B and A − B for every column of the hovered (or
-  picked) step. Non-numbers print as words ("≤ 1 period", "can't tell", "≤ floor", "no gain
+  when B is set; the readout plate gives A, B and A − B for every column of the picked step
+  (the scene also takes a hovered step; the app passes the picked one). Non-numbers print as words ("≤ 1 period", "can't tell", "≤ floor", "no gain
   reduction") and never enter a difference ("can't compare"). A − B beyond the metric's
   tolerance gets the gentle hint (faint shade, dashed edge). Starting tolerances: 0.3 dB for
-  GR end and overshoot; for times the larger of 25 % and one carrier period; 3 dB for THD and
+  GR end, overshoot and drift; for times the larger of 25 % and one carrier period; 3 dB for THD and
   thump, and only where both values are numbers above their floors. A step baseline-flagged in
   either curve reads "can't compare" and is never shaded. The tolerances are constants in
   `ac2_scene::dynamics` until a bench repeat run (one channel, rests replayed with
@@ -285,7 +287,8 @@ controls), and in full in the readout.
   length) above, recovery to 0.5 dB on the same x below; "≤ 1 period" and "can't tell" points
   are hollow at their bound. `E` toggles to every level of curve A, drawn in one sequential
   ramp (levels are an ordered magnitude) with a level legend.
-- **Table.** The step table for A and B and the difference, one row per step, scrolling;
+- **Table.** The step table for A and B and the difference, one row per step; the rows shown
+  follow the picked step (`Z` / `X`);
   exported as a file with the trace's existing CSV export, as today.
 
 ### Baseline check
@@ -311,9 +314,10 @@ baseline. No wire change: `drift` and `release_tau` are in the step table.
 
 - **New measurement**: a form beside the sweep form, opening on a screen of its own with one
   Dynamics pane. Fields: reference input, measured inputs, outputs, carrier, onset, pilot,
-  burst levels (dBFS), burst lengths (defaults per carrier; the 3-period minimum shown),
-  rest bounds. The daemon checks the levels against `--max-level` in create and update
-  validation (today only `dynamics.run` does) so the form shows the refusal in place.
+  burst levels (dBFS), burst lengths (1 ms … 10 s by default; a length under 3 carrier
+  periods is refused by the daemon at create, naming the shortest), longest rest. The form
+  checks the loudest burst against the daemon's ceiling in place; the daemon checks it again
+  against `--max-level` in create and update validation.
 - **Edit**: the same form through `meas.update`, which already takes any kind that validates;
   the daemon refuses it while that measurement's run plays. Traces keep the settings they ran
   with.

@@ -424,6 +424,7 @@ pub(super) enum PaneFile {
     Distortion,
     Programme,
     Walk,
+    Dynamics,
 }
 
 impl PaneFile {
@@ -435,6 +436,7 @@ impl PaneFile {
             PaneKind::Distortion => Self::Distortion,
             PaneKind::Programme => Self::Programme,
             PaneKind::Walk => Self::Walk,
+            PaneKind::Dynamics => Self::Dynamics,
         }
     }
 
@@ -446,6 +448,7 @@ impl PaneFile {
             Self::Distortion => PaneKind::Distortion,
             Self::Programme => PaneKind::Programme,
             Self::Walk => PaneKind::Walk,
+            Self::Dynamics => PaneKind::Dynamics,
         }
     }
 }

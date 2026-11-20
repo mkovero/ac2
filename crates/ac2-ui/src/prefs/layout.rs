@@ -207,6 +207,9 @@ struct PaneEntryFile {
     sweep_reference: bool,
     #[serde(default, skip_serializing_if = "ChromeFile::is_full")]
     chrome: ChromeFile,
+    /// A Dynamics pane's view and picks; absent: the defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    dynamics: Option<DynamicsFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     levels: Option<PaneLevelsFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -262,6 +265,7 @@ impl PaneEntryFile {
             },
             sweep_reference: m.sweep_reference,
             chrome: ChromeFile::of(m.chrome),
+            dynamics: DynamicsFile::of(&m.dynamics),
             levels: PaneLevelsFile::of(&p.levels),
             plates: PanePlatesFile::of(&p.plates),
         }
@@ -319,6 +323,11 @@ impl PaneEntryFile {
                     ProgrammeViewFile::Goniometer => ac2_scene::view::ProgrammeMode::Goniometer,
                 },
                 sweep_reference: self.sweep_reference,
+                dynamics: self
+                    .dynamics
+                    .as_ref()
+                    .map(DynamicsFile::parse)
+                    .unwrap_or_default(),
                 chrome: self.chrome.chrome(),
             },
             levels: PaneLevelsFile::parse(self.levels.as_ref(), self.id),
@@ -455,6 +464,54 @@ impl LayoutFile {
                 .map(|p| p.views.iter().map(PaneEntryFile::of).collect())
                 .unwrap_or_default(),
             unknown: BTreeMap::new(),
+        }
+    }
+}
+
+/// A Dynamics pane's view, metric, toggles and picked step. Curves A and B are not kept:
+/// they name trace ids of the session they were picked in, and the pane falls back to its
+/// default pair, which every session has.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DynamicsFile {
+    view: ac2_proto::model::layout::DynamicsView,
+    metric: ac2_proto::model::layout::DynamicsMetric,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    step: Option<ac2_proto::model::layout::DynamicsStepPick>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    thd: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    all_levels: bool,
+}
+
+impl DynamicsFile {
+    fn of(m: &ac2_scene::dynamics::DynamicsModes) -> Option<Self> {
+        let d = ac2_scene::dynamics::DynamicsModes::default();
+        let plain = m.view == d.view
+            && m.metric == d.metric
+            && m.step.is_none()
+            && m.thd == d.thd
+            && m.all_levels == d.all_levels;
+        (!plain).then_some(Self {
+            view: m.view,
+            metric: m.metric,
+            step: m.step,
+            thd: m.thd,
+            all_levels: m.all_levels,
+        })
+    }
+
+    fn parse(&self) -> ac2_scene::dynamics::DynamicsModes {
+        ac2_scene::dynamics::DynamicsModes {
+            view: self.view,
+            metric: self.metric,
+            // A step edited to nonsense in the file picks the default step.
+            step: self
+                .step
+                .filter(|s| s.level.0.is_finite() && s.burst.0.is_finite() && s.burst.0 > 0.0),
+            thd: self.thd,
+            all_levels: self.all_levels,
+            ..Default::default()
         }
     }
 }

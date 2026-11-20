@@ -62,6 +62,33 @@ impl AppState {
             }
             return;
         }
+        if let Overlay::Form(f) = &mut self.overlay
+            && f.is_dynamics()
+        {
+            // Made (or changed) without playing, as a sweep: Space on its pane arms a run.
+            match f.dynamics_meas(open.as_ref(), ceiling) {
+                Ok(config) => {
+                    let edit = f.sweep_edit;
+                    let req = match edit {
+                        Some(meas) => Request::Call {
+                            what: format!("{} changed: its next run uses it", config.name),
+                            cmd: self.meas_update(meas, config),
+                        },
+                        None => {
+                            self.rig.due.pane_on_create = Some(config.name.clone());
+                            Request::CreateMeas { config }
+                        }
+                    };
+                    out.push(req);
+                    self.overlay = Overlay::None;
+                    if edit.is_some() {
+                        self.focus_lead(PaneKind::Dynamics);
+                    }
+                }
+                Err(e) => f.error = Some(e),
+            }
+            return;
+        }
         let Overlay::Form(f) = &mut self.overlay else {
             return;
         };

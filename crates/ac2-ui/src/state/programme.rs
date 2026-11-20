@@ -185,9 +185,13 @@ impl AppState {
                 None => m.config.name.clone(),
             })
         });
-        match name {
+        let heading = match name {
             Some(n) => format!("{title} \u{b7} {n}"),
             None => title,
+        };
+        match self.dynamics_progress(id) {
+            Some(p) => format!("{heading} \u{b7} {p}"),
+            None => heading,
         }
     }
 

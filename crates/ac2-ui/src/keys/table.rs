@@ -261,6 +261,21 @@ pub fn defaults() -> Vec<Binding> {
         (C::PrevView, S::Distortion, sh(K::G)),
         (C::NextView, S::Programme, k(K::G)),
         (C::PrevView, S::Programme, sh(K::G)),
+        (C::NextView, S::Dynamics, k(K::G)),
+        (C::PrevView, S::Dynamics, sh(K::G)),
+        // The Dynamics pane's picked step: Z / X for level and length (the arrows are the
+        // stimulus level, pan and Alt's pane size), Shift the other way; K the metric as it
+        // is the smoothing elsewhere; B / Shift+B curves A and B; D GR or THD; E every level.
+        (C::DynamicsLevelDown, S::Dynamics, k(K::Z)),
+        (C::DynamicsLevelUp, S::Dynamics, sh(K::Z)),
+        (C::DynamicsShorter, S::Dynamics, k(K::X)),
+        (C::DynamicsLonger, S::Dynamics, sh(K::X)),
+        (C::DynamicsMetricNext, S::Dynamics, k(K::K)),
+        (C::DynamicsMetricPrev, S::Dynamics, sh(K::K)),
+        (C::DynamicsCycleA, S::Dynamics, k(K::B)),
+        (C::DynamicsCycleB, S::Dynamics, sh(K::B)),
+        (C::DynamicsThd, S::Dynamics, k(K::D)),
+        (C::DynamicsAllLevels, S::Dynamics, k(K::E)),
         // Shift+B, beside B (line / fill / bars): the spectrograph's history length.
         (C::SpectrographSpan, S::Spectrum, sh(K::B)),
         // R resets the meter's display. A new log has no key: it discards show data, and
@@ -408,6 +423,19 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::CursorMark, "mark", 52),
                     hint(C::MaximisePane, "maximise", 50),
                     hint(C::ClosePane, "close pane", 40),
+                ]
+            }
+        }
+        Scope::Dynamics => {
+            const {
+                &[
+                    hint(C::NextView, "view", 90),
+                    hint(C::DynamicsMetricNext, "metric", 85),
+                    hint(C::DynamicsLevelDown, "level", 80),
+                    hint(C::DynamicsShorter, "length", 78),
+                    hint(C::DynamicsCycleB, "curve B", 70),
+                    hint(C::DynamicsThd, "GR/THD", 60),
+                    hint(C::MaximisePane, "maximise", 50),
                 ]
             }
         }

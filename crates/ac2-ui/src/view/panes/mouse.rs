@@ -229,6 +229,24 @@ pub(super) fn navigate(
         app.dispatch(Msg::LegendPick(id, key));
         return;
     }
+    if pane == PaneKind::Dynamics
+        && (resp.clicked() || resp.double_clicked())
+        && let Some(pos) = resp.interact_pointer_pos()
+        && let Some(step) = app.scenes.get(&id).and_then(|c| {
+            let p = pos - plot_rect.min.to_vec2();
+            c.dynamics_cells
+                .iter()
+                .find(|(r, _)| (r.x..=r.x + r.w).contains(&p.x) && (r.y..=r.y + r.h).contains(&p.y))
+                .map(|(_, s)| *s)
+        })
+    {
+        app.dispatch(Msg::DynamicsCell {
+            pane: id,
+            step,
+            envelopes: resp.double_clicked(),
+        });
+        return;
+    }
     if resp.clicked() || resp.drag_started() {
         app.dispatch(Msg::FocusPane(id));
     }

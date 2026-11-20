@@ -15,6 +15,10 @@ pub(super) enum StimOp {
         /// With the `config_rev` it was made on.
         update: Option<(ac2_proto::units::Rev, Box<ac2_proto::model::MeasConfig>)>,
     },
+    Dynamics {
+        meas: MeasId,
+        rests_from: Option<ac2_proto::units::TraceId>,
+    },
 }
 
 /// Owns the lease. Ops run strictly in order, so a stop can never overtake an arm.
@@ -66,6 +70,22 @@ pub(super) async fn stimulus_task(
                         .await
                         {
                             Ok(run) => StimEvent::SweepStarted(Box::new(run)),
+                            Err(e) => StimEvent::Failed(e.to_string()),
+                        },
+                        None => StimEvent::Failed("no stimulus lease held".into()),
+                    },
+                    StimOp::Dynamics { meas, rests_from } => match &lease {
+                        Some(l) => match client
+                            .call(Command::DynamicsRun(ac2_proto::DynamicsRunArgs {
+                                lease_token: l.token(),
+                                meas,
+                                name: None,
+                                rests_from,
+                            }))
+                            .await
+                            .and_then(|r| expect_body!("dynamics.run", r, ReplyBody::Dynamics(d) => d))
+                        {
+                            Ok(run) => StimEvent::DynamicsStarted(Box::new(run)),
                             Err(e) => StimEvent::Failed(e.to_string()),
                         },
                         None => StimEvent::Failed("no stimulus lease held".into()),

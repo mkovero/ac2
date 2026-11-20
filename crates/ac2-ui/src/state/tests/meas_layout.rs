@@ -15,6 +15,7 @@ fn two_transfer(owner: u32) -> PaneLayout {
             spl_view: wire::SplView::MeterLeq,
             sweep_view: wire::SweepView::Response,
             programme_view: wire::ProgrammeView::Meters,
+            dynamics: wire::DynamicsPane::default(),
             chrome: wire::PlotChrome::Full,
             content: wire::PaneContent::group(MeasId(owner)),
             levels: wire::LayoutLevels::default(),
@@ -292,8 +293,7 @@ fn spectrum_2_layout(t: &T) -> Option<PaneLayout> {
 
 /// The operator's sequence: `Spectrum 1`'s row chosen, C on one of its traces, then a click
 /// on a `Spectrum 2` trace. Two layouts alike are still two: the trace's row brings
-/// `Spectrum 2`'s own panes, without the compared trace, and nothing is sent for
-/// `Spectrum 2`.
+/// `Spectrum 2`'s own panes, without the compared trace, and nothing is sent for it.
 #[test]
 fn a_trace_compared_then_another_measurements_trace_chosen_leaves_its_layout() {
     let mut t = desk_on_twin_spectra();
@@ -420,6 +420,7 @@ fn three_transfer(owner: u32) -> PaneLayout {
             spl_view: wire::SplView::Leq,
             sweep_view: wire::SweepView::Response,
             programme_view: wire::ProgrammeView::Meters,
+            dynamics: wire::DynamicsPane::default(),
             chrome: wire::PlotChrome::TracesOnly,
             content: wire::PaneContent::group(MeasId(owner)),
             levels: wire::LayoutLevels::default(),
@@ -543,8 +544,7 @@ fn g_on_a_viewer_gives_no_measurement_its_pane() {
 }
 
 /// A click in a pane that shows another measurement selects nothing, and another client's
-/// layout for that measurement stays off this screen. Its row chosen here, the screen
-/// follows its layout.
+/// layout for it stays off this screen. Its row chosen here, the screen follows its layout.
 #[test]
 fn a_layout_received_for_a_measurement_picked_by_its_pane_waits_for_its_row() {
     let mut t = T::new();
@@ -626,6 +626,7 @@ fn three_spectrum(owner: u32) -> PaneLayout {
             spl_view: wire::SplView::Leq,
             sweep_view: wire::SweepView::Response,
             programme_view: wire::ProgrammeView::Meters,
+            dynamics: wire::DynamicsPane::default(),
             chrome: wire::PlotChrome::TracesOnly,
             content: wire::PaneContent::group(MeasId(owner)),
             levels: wire::LayoutLevels::default(),

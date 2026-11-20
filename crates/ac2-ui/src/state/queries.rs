@@ -109,7 +109,7 @@ impl AppState {
                 PaneKind::Distortion => {
                     format!("no sweep: {}", self.keys.reach(CommandId::SweepNew))
                 }
-                PaneKind::Programme | PaneKind::Walk => format!(
+                PaneKind::Programme | PaneKind::Walk | PaneKind::Dynamics => format!(
                     "the {} pane shows no measurement to start, stop or reset",
                     p.title()
                 ),
@@ -229,7 +229,7 @@ impl AppState {
                 meas_input(&m.config.kind).and_then(|i| self.curve_note(i, applied))
             }
             PaneKind::Distortion => self.pane_sweep(id).and_then(|(d, _)| stored(&d.meta)),
-            PaneKind::Spl | PaneKind::Programme | PaneKind::Walk => None,
+            PaneKind::Spl | PaneKind::Programme | PaneKind::Walk | PaneKind::Dynamics => None,
         }
     }
 
@@ -757,7 +757,11 @@ impl AppState {
         match kind {
             PaneKind::Transfer => m.config.kind.publishes_tf(),
             PaneKind::Spectrum => spectrum_stream(m).is_some(),
-            PaneKind::Spl | PaneKind::Distortion | PaneKind::Programme | PaneKind::Walk => false,
+            PaneKind::Spl
+            | PaneKind::Distortion
+            | PaneKind::Programme
+            | PaneKind::Walk
+            | PaneKind::Dynamics => false,
         }
     }
 

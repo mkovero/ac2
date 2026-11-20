@@ -207,6 +207,7 @@ impl AppState {
                 self.follow_output_device();
                 self.follow_settings();
                 self.follow_sweep(out);
+                self.follow_dynamics(out);
                 self.follow_leq_alarms();
                 let data = self.rig.data.clone();
                 self.follow_leq_logs(data.as_deref(), out);
@@ -334,6 +335,10 @@ impl AppState {
                 self.rig.keep_trace(t, g);
                 self.fit_new_sweep();
             }
+            ConnEvent::DynamicsTable(trace, t) => self.dynamics_table_arrived(trace, *t),
+            ConnEvent::DynamicsEnvelope { key, result } => {
+                self.dynamics_envelope_arrived(key, result);
+            }
             ConnEvent::Reply { what, result } if self.layout_reply(&what, &result, out) => {}
             ConnEvent::Reply { what, result } if self.eq_reply(&what, &result, out) => {}
             ConnEvent::Reply { what, result } => {
@@ -439,11 +444,26 @@ impl AppState {
                     self.resend_stimulus(out);
                 }
                 let d = self.rig.stimulus.describe();
-                if self.rig.sweep.plan.is_some() {
+                if let Some(p) = &self.rig.dynamics_run.plan {
+                    self.toast(format!(
+                        "armed: {d} · Enter plays the run of {} · Esc stops",
+                        p.name
+                    ));
+                } else if self.rig.sweep.plan.is_some() {
                     self.toast(format!("armed: {d} · Enter plays the sweep · Esc stops"));
                 } else {
                     self.toast(format!("armed: {d} · Enter fires · Esc stops"));
                 }
+            }
+            StimEvent::DynamicsStarted(run) => {
+                self.rig.stimulus.phase = StimPhase::Firing;
+                self.rig.dynamics_run.run = Some(run.id);
+                self.rig.dynamics_run.seen = Some(run.status.clone());
+                self.toast(format!(
+                    "dynamics run playing: {} · at most {} · Esc stops (and discards it)",
+                    run.name,
+                    format::duration(run.longest.0)
+                ));
             }
             StimEvent::SweepStarted(run) => {
                 self.rig.stimulus.phase = StimPhase::Firing;
@@ -928,6 +948,8 @@ impl RigState {
         // visibility and slots change by event). The smoothing stays the one the
         // columns were served with until the re-smoothed data arrives.
         self.traces.retain(|k, _| metas.contains_key(k));
+        self.dynamics
+            .keep_only(&metas.keys().copied().collect::<BTreeSet<TraceId>>());
         for (id, (data, _)) in &mut self.traces {
             if let Some(m) = metas.get(id) {
                 follow_meta(data, m);

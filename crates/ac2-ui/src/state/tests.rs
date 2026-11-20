@@ -236,7 +236,10 @@ impl T {
         };
         if v.meas.is_some()
             || v.rig != PaneRig::Active
-            || matches!(v.kind, PaneKind::Programme | PaneKind::Walk)
+            || matches!(
+                v.kind,
+                PaneKind::Programme | PaneKind::Walk | PaneKind::Dynamics
+            )
         {
             return;
         }
@@ -773,6 +776,8 @@ mod session;
 mod sessions;
 
 mod sweep;
+
+mod dynamics;
 
 mod new_meas;
 

@@ -122,6 +122,8 @@ pub struct PaneModes {
     pub programme: ac2_scene::view::ProgrammeMode,
     /// The sweep's reference input's own harmonics behind the measurement's (E).
     pub sweep_reference: bool,
+    /// A Dynamics pane's view, curves A and B and the picked step.
+    pub dynamics: ac2_scene::dynamics::DynamicsModes,
     /// Grid, labels and cursor (T), whatever the pane shows.
     pub chrome: PlotChrome,
 }
@@ -136,6 +138,7 @@ impl Default for PaneModes {
             sweep: SweepMode::Response,
             programme: ac2_scene::view::ProgrammeMode::Meters,
             sweep_reference: true,
+            dynamics: ac2_scene::dynamics::DynamicsModes::default(),
             chrome: PlotChrome::Full,
         }
     }

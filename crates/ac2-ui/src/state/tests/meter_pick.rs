@@ -15,6 +15,7 @@ fn spl_pane(meas: u32) -> PaneLayout {
             spl_view: wire::SplView::MeterLeq,
             sweep_view: wire::SweepView::Response,
             programme_view: wire::ProgrammeView::Meters,
+            dynamics: ac2_proto::model::layout::DynamicsPane::default(),
             chrome: wire::PlotChrome::Full,
             content: meter(meas),
             levels: wire::LayoutLevels::default(),

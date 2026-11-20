@@ -51,10 +51,12 @@ pub enum Scope {
     Walk,
     /// A spectrum pane in its 3D spectrograph view: camera keys.
     Spectrograph3d,
+    /// A Dynamics pane in focus.
+    Dynamics,
 }
 
 impl Scope {
-    pub const ALL: [Scope; 10] = [
+    pub const ALL: [Scope; 11] = [
         Scope::Global,
         Scope::Transfer,
         Scope::Spectrum,
@@ -65,6 +67,7 @@ impl Scope {
         Scope::Inputs,
         Scope::Walk,
         Scope::Spectrograph3d,
+        Scope::Dynamics,
     ];
 
     pub fn name(self) -> &'static str {
@@ -79,6 +82,7 @@ impl Scope {
             Scope::Inputs => "inputs",
             Scope::Walk => "walk",
             Scope::Spectrograph3d => "spectrograph_3d",
+            Scope::Dynamics => "dynamics",
         }
     }
 
@@ -94,6 +98,7 @@ impl Scope {
             Scope::Inputs => "Inputs list row",
             Scope::Walk => "Spatial walk",
             Scope::Spectrograph3d => "Spectrum / RTA: 3D spectrograph",
+            Scope::Dynamics => "Dynamics",
         }
     }
 
@@ -341,8 +346,8 @@ commands! {
     TiltUp => "tilt_up", "Tilt up", [Spectrograph3d];
     TiltDown => "tilt_down", "Tilt down", [Spectrograph3d];
 
-    NextView => "next_view", "Next view", [Transfer, Spectrum, Ir, Spl, Distortion, Programme, Spectrograph3d];
-    PrevView => "prev_view", "Previous view", [Transfer, Spectrum, Ir, Spl, Distortion, Programme, Spectrograph3d];
+    NextView => "next_view", "Next view", [Transfer, Spectrum, Ir, Spl, Distortion, Programme, Spectrograph3d, Dynamics];
+    PrevView => "prev_view", "Previous view", [Transfer, Spectrum, Ir, Spl, Distortion, Programme, Spectrograph3d, Dynamics];
 
     SplShowMeter => "spl_show_meter", "Meter view", [Spl];
     SplShowLeq => "spl_show_leq", "Leq view", [Spl];
@@ -359,6 +364,17 @@ commands! {
     DistortionUnit => "distortion_unit", "Distortion unit", [Distortion];
     SweepIr => "sweep_ir", "Sweep IR view", [Distortion];
     ReferenceHarmonics => "reference_harmonics", "Reference harmonics", [Distortion];
+
+    DynamicsLevelDown => "dynamics_level_down", "Step level down", [Dynamics];
+    DynamicsLevelUp => "dynamics_level_up", "Step level up", [Dynamics];
+    DynamicsShorter => "dynamics_shorter", "Shorter burst", [Dynamics];
+    DynamicsLonger => "dynamics_longer", "Longer burst", [Dynamics];
+    DynamicsMetricNext => "dynamics_metric_next", "Next metric", [Dynamics];
+    DynamicsMetricPrev => "dynamics_metric_prev", "Previous metric", [Dynamics];
+    DynamicsCycleA => "dynamics_cycle_a", "Next curve A", [Dynamics];
+    DynamicsCycleB => "dynamics_cycle_b", "Next curve B", [Dynamics];
+    DynamicsThd => "dynamics_thd", "Gain reduction or THD", [Dynamics];
+    DynamicsAllLevels => "dynamics_all_levels", "Every level of A", [Dynamics];
 
     LevelsReset => "levels_reset", "Reset overs, max, loudness", [Programme, Inputs];
     LevelsResetAll => "levels_reset_all", "Reset every input", [Programme, Inputs];

@@ -317,6 +317,18 @@ fn two_panes() -> PanesPrefs {
                     sweep: SweepMode::Ir(IrMode::Etc),
                     programme: ac2_scene::view::ProgrammeMode::Goniometer,
                     sweep_reference: false,
+                    // Curves A and B are not kept in the file: they stay the defaults.
+                    dynamics: ac2_scene::dynamics::DynamicsModes {
+                        view: ac2_proto::model::layout::DynamicsView::Release,
+                        metric: ac2_proto::model::layout::DynamicsMetric::Drift,
+                        step: Some(ac2_proto::model::layout::DynamicsStepPick {
+                            level: ac2_proto::units::Dbfs(-8.0),
+                            burst: ac2_proto::units::Seconds(0.3),
+                        }),
+                        thd: true,
+                        all_levels: true,
+                        ..Default::default()
+                    },
                     chrome: PlotChrome::Bare,
                 },
                 levels: LayoutLevels::default(),

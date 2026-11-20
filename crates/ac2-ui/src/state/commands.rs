@@ -310,6 +310,7 @@ impl AppState {
             C::StimulusArm => self.space(false, keymap, out),
             C::StimulusTakeOver => self.space(true, keymap, out),
             C::StimulusFire => match self.rig.stimulus.phase {
+                StimPhase::Armed if self.rig.dynamics_run.plan.is_some() => self.fire_dynamics(out),
                 StimPhase::Armed if self.rig.sweep.plan.is_some() => self.fire_sweep(out),
                 StimPhase::Armed => {
                     self.sync_generator_signal();
@@ -391,6 +392,16 @@ impl AppState {
             C::ShrinkPane => self.resize_pane(false),
             C::SweepNew => self.open_sweep_dialog(keymap, out),
             C::DistortionUnit => self.toggle_distortion_unit(),
+            C::DynamicsLevelDown => self.dynamics_step(-1, 0),
+            C::DynamicsLevelUp => self.dynamics_step(1, 0),
+            C::DynamicsShorter => self.dynamics_step(0, -1),
+            C::DynamicsLonger => self.dynamics_step(0, 1),
+            C::DynamicsMetricNext => self.dynamics_metric(true),
+            C::DynamicsMetricPrev => self.dynamics_metric(false),
+            C::DynamicsCycleA => self.dynamics_cycle(false),
+            C::DynamicsCycleB => self.dynamics_cycle(true),
+            C::DynamicsThd => self.dynamics_toggle_thd(),
+            C::DynamicsAllLevels => self.dynamics_toggle_all_levels(),
             C::NextView => self.step_view(true),
             C::PrevView => self.step_view(false),
             C::SweepIr => {

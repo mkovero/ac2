@@ -5,6 +5,7 @@
 //! (`state/panes/meas_layout.rs`).
 
 pub(super) mod drag;
+pub(super) mod dyn_layout;
 pub(super) mod entries;
 pub(super) mod follow;
 pub(super) mod levels;

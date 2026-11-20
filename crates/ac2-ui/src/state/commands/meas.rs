@@ -28,8 +28,9 @@ impl AppState {
     fn open_meas_edit(&mut self, m: &Measurement, out: &mut Vec<Request>) {
         let form = match &m.config.kind {
             MeasKind::Dynamics { .. } => {
-                self.warn("a dynamics measurement is edited with the CLI (`ac2 meas …`)");
-                return;
+                let open = self.open_session().cloned();
+                let (inputs, outputs) = (self.session_input_names(), self.session_output_names());
+                Form::edit_dynamics(m, open.as_ref(), &inputs, &outputs)
             }
             MeasKind::Sweep { .. } => {
                 let open = self.open_session().cloned();

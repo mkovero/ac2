@@ -74,6 +74,13 @@ pub enum ChoicePurpose {
         walk: ac2_proto::units::WalkId,
         sources: Vec<String>,
     },
+    /// Arming a run of dynamics measurement `meas`, which has runs: the first answer adapts
+    /// the rests, each next one replays the rests of the run in `runs` at its place.
+    DynamicsRests {
+        meas: MeasId,
+        force: bool,
+        runs: Vec<TraceId>,
+    },
     /// New measurement: the answer is a kind, in [`ac2_scene::new_meas::NewKind::ALL`]'s
     /// order; its form opens.
     NewMeasurement,
@@ -384,6 +391,9 @@ impl AppState {
         match c.purpose {
             ChoicePurpose::Compare { .. } => self.compare_pick(c, i, out),
             ChoicePurpose::NewMeasurement => self.new_measurement_pick(i, out),
+            ChoicePurpose::DynamicsRests { meas, force, runs } => {
+                self.dynamics_rests_pick(meas, force, &runs, i, out);
+            }
             ChoicePurpose::Target => self.target_pick(i, out),
             ChoicePurpose::Walks { walks } => self.walks_pick(&walks, i),
             ChoicePurpose::SimSource { walk, mut sources } => {

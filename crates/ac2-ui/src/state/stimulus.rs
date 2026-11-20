@@ -62,7 +62,7 @@ impl AppState {
     /// Makes the stimulus' signal the generator's as it resolves now, unless a sweep is
     /// set up (which keeps its own). `true` when that changed it.
     pub(super) fn sync_generator_signal(&mut self) -> bool {
-        if self.rig.sweep.plan.is_some() {
+        if self.rig.sweep.plan.is_some() || self.rig.dynamics_run.plan.is_some() {
             return false;
         }
         let Some(signal) = self.generator_signal() else {
@@ -240,7 +240,9 @@ impl AppState {
     /// stimulus to this view's, so what Enter fires is always what a Space on this view
     /// chose; a playing stimulus is never changed by it.
     pub(super) fn space(&mut self, force: bool, keymap: &Keymap, out: &mut Vec<Request>) {
-        if self.sweep_view() {
+        if self.layout.focus_kind() == PaneKind::Dynamics {
+            self.space_dynamics(force, keymap, out);
+        } else if self.sweep_view() {
             self.space_sweep(force, keymap, out);
         } else {
             self.space_generator(force, keymap, out);
@@ -546,7 +548,8 @@ impl AppState {
 
     /// A stop ends the sweep set-up: the next arm is the generator's chosen signal again.
     pub(super) fn end_sweep_mode(&mut self) {
-        if self.rig.sweep.plan.take().is_some() {
+        let dynamics = self.rig.dynamics_run.plan.take().is_some();
+        if self.rig.sweep.plan.take().is_some() || dynamics {
             // Before a choice was made nothing of the generator can be armed, so pink
             // here is only what the idle state holds; the first arm asks.
             self.rig.stimulus.signal = Signal::Pink;

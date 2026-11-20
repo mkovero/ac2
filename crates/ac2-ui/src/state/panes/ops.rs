@@ -64,7 +64,8 @@ impl AppState {
             | PaneKind::Distortion
             | PaneKind::Spl
             | PaneKind::Programme
-            | PaneKind::Walk => None,
+            | PaneKind::Walk
+            | PaneKind::Dynamics => None,
         }
     }
 

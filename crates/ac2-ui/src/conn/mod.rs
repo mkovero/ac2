@@ -163,6 +163,13 @@ pub enum ConnEvent {
         ask: u64,
         result: Result<Box<SplHistory>, String>,
     },
+    /// A dynamics trace's step table (`dynamics.table`), fetched as the trace is listed.
+    DynamicsTable(TraceId, Box<ac2_proto::model::DynamicsTable>),
+    /// One step's envelopes of one input ([`Request::DynamicsEnvelope`]).
+    DynamicsEnvelope {
+        key: crate::state::dynamics::EnvelopeKey,
+        result: Result<Box<ac2_proto::model::DynamicsEnvelope>, String>,
+    },
     /// A span of a band log read back ([`Request::BandLogGet`]).
     BandLog {
         ask: crate::leq_dialog::Ask,
@@ -184,7 +191,9 @@ pub enum StimEvent {
     /// Lease held and the generator armed (not emitting).
     Armed,
     /// A `gen.set` was accepted (fire, level change).
-    Set { firing: bool },
+    Set {
+        firing: bool,
+    },
     /// Output stopped and the lease released (or no lease was held and `gen.stop` was sent).
     Stopped,
     /// The daemon refused a refresh: the lease expired or was taken over.
@@ -193,6 +202,7 @@ pub enum StimEvent {
     Failed(String),
     /// `ir.capture` started this run.
     SweepStarted(Box<ac2_proto::model::SweepRun>),
+    DynamicsStarted(Box<ac2_proto::model::DynamicsRun>),
 }
 
 /// What the UI asks for.
@@ -218,6 +228,12 @@ pub enum Request {
         label: String,
         /// With the `config_rev` it was made on.
         update: Option<(ac2_proto::units::Rev, Box<ac2_proto::model::MeasConfig>)>,
+    },
+    /// `dynamics.run` of dynamics measurement `meas` under the held lease (the generator
+    /// armed with its carrier at the loudest burst), replaying `rests_from`'s rests if set.
+    DynamicsRun {
+        meas: MeasId,
+        rests_from: Option<TraceId>,
     },
     /// `delay.find` on `meas` in `band` over `observation`, to insert `pick` from; the
     /// reducer decides what to insert once the finding is back.
@@ -316,6 +332,12 @@ pub enum Request {
     },
     /// `spl.band_log_get` of a span, its average alone ([`ConnEvent::BandLog`]).
     BandLogGet(crate::leq_dialog::Ask),
+    /// `dynamics.envelope` of one step of one input ([`ConnEvent::DynamicsEnvelope`]).
+    DynamicsEnvelope {
+        trace: TraceId,
+        input: u16,
+        step: u32,
+    },
     /// `spl.band_transfer` into `meas` ([`ConnEvent::BandTransfer`]).
     BandTransfer {
         meas: MeasId,
@@ -756,6 +778,12 @@ async fn wait_retry(
                     ask,
                     result: Err("not connected".into()),
                 }),
+                Some(Ctl::Req(Request::DynamicsEnvelope { trace, input, step })) => {
+                    out.send(ConnEvent::DynamicsEnvelope {
+                        key: (trace, input, step),
+                        result: Err("not connected".into()),
+                    });
+                }
                 Some(Ctl::Req(Request::BandTransfer { .. })) => {
                     out.send(ConnEvent::BandTransfer(Err("not connected".into())));
                 }
@@ -861,7 +889,13 @@ async fn session(
                         };
                         let shown = (t.edit.smoothing, t.mic_curve.clone(), eq_rev);
                         if fetched.insert(t.id, shown.clone()) != Some(shown) {
-                            tokio::spawn(fetch_trace(client.clone(), t.id, t.grid_id, out.clone()));
+                            // A dynamics run's columns are its step table: the envelopes
+                            // are asked for one step at a time, as a pane shows them.
+                            if t.kind == ac2_proto::model::TraceKind::Dynamics {
+                                tokio::spawn(fetch_dynamics_table(client.clone(), t.id, out.clone()));
+                            } else {
+                                tokio::spawn(fetch_trace(client.clone(), t.id, t.grid_id, out.clone()));
+                            }
                         }
                     }
                 }

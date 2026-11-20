@@ -105,6 +105,8 @@ pub struct RigState {
     pub edits: BTreeMap<MeasId, LiveEdit>,
     pub stimulus: Stimulus,
     pub sweep: SweepUi,
+    /// Dynamics runs as this client runs them.
+    pub dynamics_run: super::dynamics_run::DynamicsRunUi,
     /// The output device the stimulus outputs belong to (the open session's).
     pub(super) stim_device: Option<String>,
     /// Band and observation X / Shift+X run the finder with.
@@ -129,6 +131,8 @@ pub struct RigState {
     pub leq: LeqUi,
     /// The Programme panes' flying peaks and ember rings.
     pub programme: ProgrammeUi,
+    /// The dynamics runs' step tables and the envelopes the panes asked for.
+    pub dynamics: super::dynamics::DynamicsUi,
     /// The Inputs-list row picked (its input, a pair's left): the keys go to its meters
     /// until a pane or another row is clicked.
     pub input_pick: Option<u16>,
@@ -186,6 +190,7 @@ impl RigState {
             edits: BTreeMap::new(),
             stimulus: Stimulus::default(),
             sweep: SweepUi::default(),
+            dynamics_run: super::dynamics_run::DynamicsRunUi::default(),
             stim_device: None,
             finder: FinderChoice::default(),
             quit_loses: false,
@@ -196,6 +201,7 @@ impl RigState {
             devices: None,
             leq: LeqUi::default(),
             programme: ProgrammeUi::default(),
+            dynamics: super::dynamics::DynamicsUi::default(),
             input_pick: None,
             layout_queue: LayoutQueue::default(),
         }

@@ -13,7 +13,10 @@ const MORE_HINT: &str = "another mic the same play records (its own trace); none
 
 impl Form {
     fn is_sweep(&self) -> bool {
-        matches!(self.kind, FormKind::Sweep | FormKind::SweepEdit)
+        matches!(
+            self.kind,
+            FormKind::Sweep | FormKind::SweepEdit | FormKind::Dynamics | FormKind::DynamicsEdit
+        )
     }
 
     /// Every measurement input the sweep dialog has picked, in row order.

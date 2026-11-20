@@ -445,6 +445,13 @@ pub enum Msg {
     },
     /// A click on the row of pane `p`'s legend that names `key`'s curve.
     LegendPick(PaneId, ac2_scene::trace::TraceKey),
+    /// A click on a Steps cell of Dynamics pane `p`: its step is picked; a double click
+    /// also shows its envelopes.
+    DynamicsCell {
+        pane: PaneId,
+        step: ac2_scene::dynamics::DynamicsStepPick,
+        envelopes: bool,
+    },
     /// Mouse on an open dialog.
     Form(FormMsg),
     /// Mouse on the session dialog.
