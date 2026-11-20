@@ -538,7 +538,13 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
                 *msg = Some(Msg::Settings(SettingsMsg::ConnectionStep(i, -1)));
             }
             let t = RichText::new(text).color(if focused { ch.focus } else { color });
-            if ui.add(egui::Button::selectable(focused, t)).clicked() {
+            let b = ui.add(egui::Button::selectable(focused, t));
+            // A network row says its state; what that means for the rig is its tip.
+            let b = match lines.get(i).and_then(|l| p.net_line_tip(l)) {
+                Some(tip) => b.on_hover_text(tip),
+                None => b,
+            };
+            if b.clicked() {
                 *msg = Some(Msg::Settings(SettingsMsg::Connection(i)));
             }
             if steps && ui.small_button("›").clicked() {
@@ -582,8 +588,8 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
                 ui.label(RichText::new(l).color(ch.text));
             }
             match crate::settings::read_only_row(info) {
-                Some(t) => {
-                    ui.label(RichText::new(t).color(ch.text));
+                Some((t, tip)) => {
+                    ui.label(RichText::new(t).color(ch.text)).on_hover_text(tip);
                 }
                 None => {
                     for (i, l) in lines.iter().enumerate() {
@@ -603,7 +609,7 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
             ui.label(RichText::new(ac2_scene::network::status_line(status)).color(tone));
             if let ac2_proto::model::NetSettingView::Host {
                 setting:
-                    ac2_proto::model::NetSetting::Off { saved }
+                    ac2_proto::model::NetSetting::Off { saved, .. }
                     | ac2_proto::model::NetSetting::On { saved, .. },
             } = &info.network.setting
                 && let Some(t) = ac2_scene::network::not_saved_line(saved)
@@ -620,7 +626,9 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
                 ..
             } = &info.network
             {
-                // A network client is not told who else was refused.
+                // A network client is not told who else was refused (`None`): not told is
+                // not "none refused", so the list is left out rather than shown empty.
+                let told = refused.is_some();
                 let refused = refused.as_deref().unwrap_or_default();
                 let is_rig = |n: &str| authorized.iter().any(|a| a.name == n && a.rig.is_some());
                 for (title, rigs) in [
@@ -648,9 +656,11 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
                         );
                     }
                 }
-                ui.add_space(6.0);
-                ui.label(RichText::new("Refused keys").strong().color(ch.text));
-                if refused.is_empty() {
+                if told {
+                    ui.add_space(6.0);
+                    ui.label(RichText::new("Refused keys").strong().color(ch.text));
+                }
+                if told && refused.is_empty() {
                     ui.label(RichText::new("none since the daemon started").color(ch.dim));
                 }
                 let now = crate::scenes::daemon_wall(st, super::now().wall);

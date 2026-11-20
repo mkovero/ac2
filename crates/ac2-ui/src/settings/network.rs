@@ -2,8 +2,10 @@
 //! off, where it binds and its port. What the rig has comes from its `server.info`; what is
 //! picked here waits for Enter (turning on, or moving a network that is on).
 
-use ac2_proto::model::{LocalServer, NetBind, NetSetting, NetSettingView, ServerInfo};
-use ac2_scene::network::{self as words, IfaceRow, NetChange};
+use ac2_proto::model::{
+    NetBind, NetChoice, NetSetting, NetSettingView, NetToggle, NetUnavailable, ServerInfo,
+};
+use ac2_scene::network::{self as words, ChoiceFrom, IfaceRow, NetChange};
 
 use super::connection::{ConnAction, ConnEdit, ConnLine, ConnectionPage};
 
@@ -27,44 +29,71 @@ pub struct NetPicks {
 /// The network as this app may switch it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Switch<'a> {
-    Off,
-    On { bind: &'a NetBind, port: u16 },
+    /// Off; `kept`: where turning it on goes unless told otherwise (`None`: the daemon's
+    /// default).
+    Off {
+        kept: Option<&'a NetChoice>,
+    },
+    On {
+        choice: &'a NetChoice,
+    },
 }
 
-/// The network of `info` when this app may switch it: the rig's own daemon on this computer
-/// (a client on its local pair is told the setting in full), set from the settings, not
-/// fixed by `--listen` and not inside its program.
+/// Where the daemon turns its network on when nothing is kept or picked: every interface,
+/// as `server.network` documents it, on the default port.
+static DEFAULT_BIND: NetBind = NetBind::All;
+const DEFAULT_PORT: u16 = ac2_client::endpoint::DEFAULT_PORT;
+
+/// The network of `info` when this app may switch it: the daemon says so
+/// ([`NetToggle::Allowed`]), and tells this client its setting in full.
 pub fn switch(info: &ServerInfo) -> Option<Switch<'_>> {
-    if !matches!(info.local, Some(LocalServer::Local { .. })) {
+    if info.toggle != NetToggle::Allowed {
         return None;
     }
     match &info.network.setting {
         NetSettingView::Host {
-            setting: NetSetting::Off { .. },
-        } => Some(Switch::Off),
+            setting: NetSetting::Off { kept, .. },
+        } => Some(Switch::Off {
+            kept: kept.as_ref(),
+        }),
         NetSettingView::Host {
-            setting: NetSetting::On { bind, port, .. },
-        } => Some(Switch::On { bind, port: *port }),
+            setting: NetSetting::On { choice, .. },
+        } => Some(Switch::On { choice }),
         _ => None,
     }
 }
 
-/// The network row when the page only reads it: fixed by `--listen`, a rig reached over the
-/// network, a daemon inside its program. `None` when it is switched here.
-pub fn read_only_row(info: &ServerInfo) -> Option<String> {
+/// The network row when the page only reads it, and its tip: why, as the daemon's
+/// [`NetToggle`] says. `None` when it is switched here.
+pub fn read_only_row(info: &ServerInfo) -> Option<(String, &'static str)> {
     if switch(info).is_some() {
         return None;
     }
-    Some(match (&info.local, &info.network.setting) {
-        (Some(LocalServer::Embedded), _) => words::EMBEDDED_ROW.to_owned(),
-        (
-            _,
-            NetSettingView::Host {
-                setting: NetSetting::Fixed { listen },
-            },
-        ) => words::fixed_row(listen),
-        (_, NetSettingView::Host { setting }) => words::peer_row(setting.kind()),
-        (_, NetSettingView::Peer { setting }) => words::peer_row(*setting),
+    let kind = match &info.network.setting {
+        NetSettingView::Host { setting } => setting.kind(),
+        NetSettingView::Peer { setting } => *setting,
+    };
+    Some(match info.toggle {
+        NetToggle::Fixed => {
+            let listen = match &info.network.setting {
+                NetSettingView::Host {
+                    setting: NetSetting::Fixed { listen },
+                } => Some(listen.as_str()),
+                _ => None,
+            };
+            (words::fixed_row(listen), words::FIXED_TIP)
+        }
+        NetToggle::Unavailable {
+            reason: NetUnavailable::InProcess,
+        } => (words::EMBEDDED_ROW.to_owned(), words::EMBEDDED_TIP),
+        NetToggle::Unavailable {
+            reason: NetUnavailable::NoKeyStore,
+        } => (words::no_key_store_row(kind), words::NO_KEY_STORE_TIP),
+        // Allowed, yet the setting is not told in full: read as a remote rig's.
+        NetToggle::Unavailable {
+            reason: NetUnavailable::NotLocal,
+        }
+        | NetToggle::Allowed => (words::peer_row(kind), words::PEER_TIP),
     })
 }
 
@@ -74,31 +103,58 @@ impl ConnectionPage {
         Some((info, switch(info)?))
     }
 
-    /// The interface row's choice: picked here, else the rig's while on.
+    /// The interface row's choice: picked here, else the rig's in force or kept, else the
+    /// daemon's default.
     fn iface_row(&self) -> Option<IfaceRow<'_>> {
-        let (_, sw) = self.net_info()?;
-        Some(match (&self.net.iface, sw) {
-            (Some(IfacePick::TypeAddress), _) => IfaceRow::TypeAddress,
-            (Some(IfacePick::Bind(b)), _) => IfaceRow::Bind(b),
-            (None, Switch::On { bind, .. }) => IfaceRow::Bind(bind),
-            (None, Switch::Off) => IfaceRow::Kept,
+        Some(match &self.net.iface {
+            Some(IfacePick::TypeAddress) => IfaceRow::TypeAddress,
+            Some(IfacePick::Bind(b)) => IfaceRow::Bind(b, ChoiceFrom::Picked),
+            None => {
+                let (b, from) = self.rig_bind()?;
+                IfaceRow::Bind(b, from)
+            }
         })
     }
 
-    /// The bind picked here that differs from the rig's.
+    /// The rig's bind: in force, kept, else the daemon's default.
+    fn rig_bind(&self) -> Option<(&NetBind, ChoiceFrom)> {
+        Some(match self.net_info()?.1 {
+            Switch::On { choice } => (&choice.bind, ChoiceFrom::InForce),
+            Switch::Off { kept: Some(k) } => (&k.bind, ChoiceFrom::Kept),
+            Switch::Off { kept: None } => (&DEFAULT_BIND, ChoiceFrom::Default),
+        })
+    }
+
+    /// The bind picked here that differs from the rig's in force.
     fn picked_bind(&self) -> Option<NetBind> {
         match (&self.net.iface, self.net_info()?.1) {
-            (Some(IfacePick::Bind(b)), Switch::On { bind, .. }) if b == bind => None,
+            (Some(IfacePick::Bind(b)), Switch::On { choice }) if *b == choice.bind => None,
             (Some(IfacePick::Bind(b)), _) => Some(b.clone()),
             _ => None,
         }
     }
 
-    fn shown_port(&self) -> Option<u16> {
-        match (self.net.port, self.net_info()?.1) {
-            (Some(p), _) => Some(p),
-            (None, Switch::On { port, .. }) => Some(port),
-            (None, Switch::Off) => None,
+    /// The port row's port and where it comes from.
+    fn shown_port(&self) -> Option<(u16, ChoiceFrom)> {
+        Some(match (self.net.port, self.net_info()?.1) {
+            (Some(p), _) => (p, ChoiceFrom::Picked),
+            (None, Switch::On { choice }) => (choice.port, ChoiceFrom::InForce),
+            (None, Switch::Off { kept: Some(k) }) => (k.port, ChoiceFrom::Kept),
+            (None, Switch::Off { kept: None }) => (DEFAULT_PORT, ChoiceFrom::Default),
+        })
+    }
+
+    /// The tip of a network line (`None` for any other).
+    pub fn net_line_tip(&self, l: &ConnLine) -> Option<&'static str> {
+        let (_, sw) = self.net_info()?;
+        match l {
+            ConnLine::Network => Some(words::network_tip(matches!(sw, Switch::On { .. }))),
+            ConnLine::Interface => match self.iface_row()? {
+                IfaceRow::Bind(_, from) => Some(words::choice_tip(from)),
+                IfaceRow::TypeAddress => None,
+            },
+            ConnLine::Port => Some(words::choice_tip(self.shown_port()?.1)),
+            _ => None,
         }
     }
 
@@ -108,12 +164,14 @@ impl ConnectionPage {
             return String::new();
         };
         match l {
-            ConnLine::Network => words::network_row(matches!(sw, Switch::On { .. })),
+            ConnLine::Network => words::network_row(matches!(sw, Switch::On { .. })).to_owned(),
             ConnLine::Interface => self.iface_row().map_or_else(String::new, |r| {
                 let pending = matches!(sw, Switch::On { .. }) && self.picked_bind().is_some();
                 words::interface_row(r, &info.interfaces, pending)
             }),
-            ConnLine::Port => words::port_row(self.shown_port()),
+            ConnLine::Port => self
+                .shown_port()
+                .map_or_else(String::new, |(p, from)| words::port_row(p, from)),
             _ => String::new(),
         }
     }
@@ -132,7 +190,7 @@ impl ConnectionPage {
             .map(IfacePick::Bind)
             .collect();
         let current = match self.iface_row() {
-            Some(IfaceRow::Bind(b)) => Some(IfacePick::Bind(b.clone())),
+            Some(IfaceRow::Bind(b, _)) => Some(IfacePick::Bind(b.clone())),
             Some(IfaceRow::TypeAddress) => Some(IfacePick::TypeAddress),
             _ => None,
         };
@@ -176,8 +234,14 @@ impl ConnectionPage {
             }
             (ConnLine::Network, false) => {
                 let info = self.server_info()?;
-                let bind = self.picked_bind();
-                let notice = words::turn_on_confirm(bind.as_ref(), self.net.port, &info.interfaces);
+                // An address still to be typed is no pick: the rig's bind goes on.
+                let (bind, bind_from) = match self.iface_row()? {
+                    IfaceRow::Bind(b, from) => (b, from),
+                    IfaceRow::TypeAddress => self.rig_bind()?,
+                };
+                let (port, port_from) = self.shown_port()?;
+                let default = bind_from == ChoiceFrom::Default && port_from == ChoiceFrom::Default;
+                let notice = words::turn_on_confirm(bind, port, default, &info.interfaces);
                 self.clear();
                 self.net.confirm_on = true;
                 self.notice = Some(notice);
@@ -206,8 +270,8 @@ impl ConnectionPage {
         let (info, sw) = self.net_info()?;
         let on = matches!(sw, Switch::On { .. });
         let in_force = match sw {
-            Switch::On { port, .. } => Some(port),
-            Switch::Off => None,
+            Switch::On { choice } => Some(choice.port),
+            Switch::Off { .. } => None,
         };
         let local = words::local_tcp_ports(info.local.as_ref());
         match kind {

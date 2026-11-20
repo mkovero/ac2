@@ -105,7 +105,7 @@ impl AppState {
                     rig: ac2_scene::between_rigs::rig_name(&st.remote, r),
                     text,
                     state: state.text,
-                    problem: state.problem,
+                    tone: state.tone,
                     reading: meters
                         .get(&ch)
                         .cloned()

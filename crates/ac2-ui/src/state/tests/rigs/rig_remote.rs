@@ -262,7 +262,7 @@ fn a_remote_input_reads_by_its_rig_and_name() {
         rows[0].state,
         "streaming, placed by capture time · 0 late frames in the last hour · 0 slips"
     );
-    assert!(!rows[0].problem);
+    assert!(!rows[0].tone.is_problem());
     let names = t.st.session_input_names();
     assert_eq!(
         names.last(),
@@ -295,7 +295,16 @@ fn a_remote_input_reads_by_its_rig_and_name() {
             .starts_with("no audio from pupu (unreachable since "),
         "{rows:?}"
     );
-    assert!(rows[0].problem);
+    assert_eq!(rows[0].tone, ac2_scene::between_rigs::InputTone::Fault);
+    // pupu turned its network off: said, in the warning colour, not as a fault.
+    with_remote(&mut t, RemoteLink::NetworkOff, RemoteAudio::Streaming);
+    let rows = t.st.remote_rows();
+    assert_eq!(
+        rows[0].state,
+        "no audio from pupu: pupu turned its network off and is not heard since (turn it on \
+         there)"
+    );
+    assert_eq!(rows[0].tone, ac2_scene::between_rigs::InputTone::Warn);
 }
 
 /// On a remote input's row the kind keys are refused (*set on pupu*); Delete asks, a

@@ -6,7 +6,9 @@
 use crate::harness::{Driver, NAME, R, connected};
 use ac2_client::{ClientConfig, Endpoints};
 use ac2_e2e::{Setup, sim_daemon_with};
-use ac2_proto::model::{NetSetting, NetSettingView, NetStatus, NetStatusView, ServerInfo};
+use ac2_proto::model::{
+    NetSetting, NetSettingView, NetStatus, NetStatusView, NetToggle, NetUnavailable, ServerInfo,
+};
 use ac2_scene::chrome::RigDown;
 use ac2_ui::settings::{ConnLine, ConnectionPage, Page};
 use ac2_ui::state::{AppState, ConnState};
@@ -43,28 +45,52 @@ fn focus(d: &mut Driver, l: ConnLine) -> R {
     Err(format!("no {l:?} line").into())
 }
 
-/// The test's simulated rig has no network: Enter twice on the switch, and the page says
-/// why in the daemon's words.
+/// The page's network row once the daemon answered, as the page reads it when it has no
+/// switch.
+fn read_only(s: &AppState) -> Option<String> {
+    ac2_ui::settings::read_only_row(info(s)?).map(|(t, _)| t)
+}
+
+/// The test's simulated rig serves in its own process: the daemon says it has no network to
+/// switch, and the page offers none.
 #[test]
 fn a_daemon_without_a_network_says_so() -> R {
     let (_daemon, mut d) = connected()?;
     open_connection(&mut d)?;
-    focus(&mut d, ConnLine::Network)?;
-    d.key("Enter");
-    d.key("Enter");
-    d.until("the refusal on the page", |s| {
-        page(s).and_then(|p| p.error.as_deref()).is_some_and(|e| {
-            e.starts_with("cannot turn the network on") && e.contains("in-process only")
+    assert_eq!(
+        info(&d.st).map(|i| i.toggle),
+        Some(NetToggle::Unavailable {
+            reason: NetUnavailable::InProcess
         })
+    );
+    assert!(focus(&mut d, ConnLine::Network).is_err(), "no switch");
+    assert_eq!(
+        read_only(&d.st).as_deref(),
+        Some(ac2_scene::network::EMBEDDED_ROW)
+    );
+    Ok(())
+}
+
+/// A daemon with a network but no key files (no config directory) cannot turn it on: the
+/// page says why, and offers no switch.
+#[test]
+fn a_daemon_without_a_key_store_cannot_turn_on() -> R {
+    let daemon = sim_daemon_with(Setup::Empty, |cfg| {
+        cfg.network = ac2d::NetworkChoice::FromSettings { store: None };
+        cfg.keys = None;
     })?;
-    assert!(
-        matches!(
-            info(&d.st).map(|i| &i.network.status),
-            Some(NetStatusView::Host {
-                status: NetStatus::Off
-            })
-        ),
-        "still off"
+    let mut d = Driver::connect(daemon.client_config(NAME), &daemon.describe())?;
+    open_connection(&mut d)?;
+    assert_eq!(
+        info(&d.st).map(|i| i.toggle),
+        Some(NetToggle::Unavailable {
+            reason: NetUnavailable::NoKeyStore
+        })
+    );
+    assert!(focus(&mut d, ConnLine::Network).is_err(), "no switch");
+    assert_eq!(
+        read_only(&d.st).as_deref(),
+        Some("Network: off · cannot be turned on: no config directory for a server key")
     );
     Ok(())
 }
@@ -125,9 +151,19 @@ fn network_on_and_off_from_the_page() -> R {
     assert!(matches!(
         &info(&d.st).ok_or("info")?.network.setting,
         NetSettingView::Host {
-            setting: NetSetting::Off { .. }
+            setting: NetSetting::Off { kept: None, .. }
         }
     ));
+    // Never on: the daemon's default, said as such.
+    assert!(
+        page(&d.st).is_some_and(|p| p.net_line_text(&ConnLine::Port)
+            == format!(
+                "Port: {}, the default · data on {} (Enter types another)",
+                ac2_client::endpoint::DEFAULT_PORT,
+                ac2_client::endpoint::DEFAULT_PORT + 1
+            )),
+        "the default port"
+    );
     // The interface's last choice types an address.
     focus(&mut d, ConnLine::Interface)?;
     d.key("Left");
@@ -159,9 +195,8 @@ fn network_on_and_off_from_the_page() -> R {
                 .is_some_and(|st| st.server.status == ac2_proto::model::NetStatusKind::Listening)
     })?;
     assert!(
-        page(&d.st).is_some_and(|p| p
-            .net_line_text(&ConnLine::Network)
-            .starts_with("Network: on")),
+        page(&d.st).is_some_and(|p| p.net_line_text(&ConnLine::Network)
+            == "Network: on · Enter turns it off: cuts apps and rigs connected to it"),
         "the switch reads on"
     );
 
@@ -194,6 +229,15 @@ fn network_on_and_off_from_the_page() -> R {
     })?;
     remote.until("the rig read as having turned its network off", |s| {
         s.rig.conn.down() == Some(RigDown::NetworkOff)
+    })?;
+    // Off, the page shows where turning on goes again: the choice the rig kept.
+    d.until("the kept choice on the page", |s| {
+        page(s).is_some_and(|p| {
+            p.net_line_text(&ConnLine::Interface)
+                == "Interface: address 127.0.0.1 (loopback) (←→ picks)"
+                && p.net_line_text(&ConnLine::Port)
+                    == format!("Port: {port} · data on {} (Enter types another)", port + 1)
+        })
     })?;
     assert!(
         remote

@@ -389,30 +389,40 @@ beside that, its **network**, which apps and rigs on other computers reach with 
 authorized key. On a rig whose `ac2d` runs on this computer the network is switched here,
 live (the session, audio and local apps run on):
 
-- *Network* (**Enter** or **←/→**): off, the rig still pairs with, authorizes and reads other
-  rigs; only connections to it are off. Turning it on asks first (a second **Enter**), naming
-  the interface and port. Turning it off goes at once and cuts every app and rig connected to
-  this rig over the network (the row says so); this rig's own links to other rigs stay.
+- *Network* (**Enter** or **←/→**): `Network: off · Enter turns it on` or `Network: on ·
+  Enter turns it off: cuts apps and rigs connected to it`; hovering the row says the rest.
+  Off, the rig still pairs with, authorizes and reads other rigs; only connections to it are
+  off. Turning it on asks first (a second **Enter**), naming the interface and port, and that
+  apps and rigs whose keys this rig authorized can then connect. Turning it off goes at once
+  and cuts every app and rig connected to this rig over the network; this rig's own links to
+  other rigs stay.
 - *Interface* (**←/→**, or the ‹ › buttons): *all interfaces*, then each interface with its
   addresses as `ac2d` lists them, then *an address…* (**Enter** types one). While the network
-  is off nothing picked here has been sent: a pick says *as last set on this rig* until you
-  change it, and goes with the next turn-on. While it is on, **Enter** moves it to the pick.
-- *Port* (**Enter** types it): the ctrl port; data takes the next one. A port the local
-  connection holds is refused before it is sent: on Windows apps on this computer reach
-  `ac2d` over TCP 47822 and 47823, so the network may not take those.
+  is off the row shows where turning it on goes: the interface the rig kept from when it was
+  last on, or *all interfaces, the default* if it never was. A pick here goes with the next
+  turn-on instead. While it is on, **Enter** moves it to the pick.
+- *Port* (**Enter** types it): the ctrl port; data takes the next one. Off, the kept port, or
+  *47820, the default*. A port the local connection holds is refused before it is sent: on
+  Windows apps on this computer reach `ac2d` over TCP 47822 and 47823, so the network may not
+  take those.
 - *Status*, live: *listening on 192.168.1.20:47820*, *waiting: the port is in use ·
   retrying*, *failed: … · retrying*, *off*. `ac2d` retries a network that cannot bind on its
   own; nothing needs an operator. *Not saved: …* means the setting could not be written and
   `ac2d` starts without it next time.
 
-A network fixed by `ac2d --listen` (how the rig hosts' services run it) reads *set by --listen
-(systemd)* and is changed in the service's command line. A rig reached over the network shows
+Whether the page offers the switch is `ac2d`'s answer. A network fixed by `ac2d --listen`
+(how the rig hosts' services run it) reads *set by --listen (systemd)* and is changed in the
+service's command line. A daemon inside its program reads *Network: none*. One started
+without a config directory reads *cannot be turned on: no config directory for a server
+key*: it has nowhere to keep the key the network needs. A rig reached over the network shows
 whether its network is on and its status, never a switch: change it on the rig's own
 computer. A refusal from `ac2d` is shown on the page in its words.
 
 When a rig you are connected to over the network turns its network off, the app says *pupu
 turned its network off* (a toast, the rigs drop-down, its panes, the top bar) instead of a
-lost link, and connects again once it is back on.
+lost link, and connects again once it is back on. A paired rig that turned its network off
+reads *pupu turned its network off; not heard since* on its heading in the measurement tree
+and on *Between rigs*, and its remote inputs say so in the warning colour, not as a fault.
 
 On Windows the local connection is loopback TCP: any user of the computer, and anything
 forwarded to its loopback (ssh `-L`, a port proxy), counts as local and can turn the network

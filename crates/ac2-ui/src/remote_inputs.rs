@@ -63,8 +63,8 @@ pub struct RemoteRow {
     pub text: String,
     /// Its link and audio in words.
     pub state: String,
-    /// The state is a problem (said in words, and coloured too).
-    pub problem: bool,
+    /// How the state is coloured (a problem is said in words too).
+    pub tone: ac2_scene::between_rigs::InputTone,
     pub reading: ac2_scene::meter::MeterReading,
 }
 

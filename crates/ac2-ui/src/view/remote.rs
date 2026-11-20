@@ -55,11 +55,12 @@ pub(super) fn remote_section(
         });
         ui.horizontal(|ui| {
             ui.add_space(18.0);
-            ui.label(RichText::new(&row.state).small().color(if row.problem {
-                ch.fault
-            } else {
-                ch.dim
-            }));
+            let tone = match row.tone {
+                ac2_scene::between_rigs::InputTone::Plain => ch.dim,
+                ac2_scene::between_rigs::InputTone::Warn => ch.warn,
+                ac2_scene::between_rigs::InputTone::Fault => ch.fault,
+            };
+            ui.label(RichText::new(&row.state).small().color(tone));
         });
     }
     let focused = focus == Some(Row::AddRemote);
