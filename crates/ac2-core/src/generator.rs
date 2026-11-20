@@ -11,11 +11,18 @@
 //!
 //! Every source produces a unit-RMS sequence; the output is that sequence times a gain that
 //! ramps linearly over [`RAMP_SECONDS`] whenever the level or mute changes, so level changes
-//! never step.
+//! never step. The one exception is the dynamics programme ([`Signal::Programme`]): its own
+//! steps, inside one constant generator level, are the stimulus a dynamics test needs.
+//!
+//! The programme is also the one source whose output depends on when blocks are cut: it
+//! reads its [`Release`] counter once per `fill`, so a rest the analysis releases ends at the
+//! first onset point after the start of the block that saw the release.
 
 use std::f64::consts::{FRAC_1_SQRT_2, SQRT_2, TAU};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+use crate::dynamics::{Programme, Release, Rests};
 
 use realfft::RealFftPlanner;
 use realfft::num_complex::Complex;
@@ -111,6 +118,9 @@ pub enum GeneratorError {
     InvalidSweep,
     /// A periodic-noise period cannot satisfy the requested search width and tail.
     InvalidSearchSpan,
+    /// A dynamics programme's level is not its highest burst level, where its unit-RMS
+    /// normalisation is taken.
+    ProgrammeLevel,
 }
 
 impl std::fmt::Display for GeneratorError {
@@ -138,6 +148,9 @@ impl std::fmt::Display for GeneratorError {
             Self::InvalidPeriod => write!(f, "period must be a power of two in 2^10..=2^24"),
             Self::InvalidSweep => write!(f, "invalid sweep duration or fades"),
             Self::InvalidSearchSpan => write!(f, "search width and tail must be non-negative"),
+            Self::ProgrammeLevel => {
+                write!(f, "a dynamics programme plays at its highest burst level")
+            }
         }
     }
 }
@@ -162,7 +175,7 @@ pub struct EssConfig {
 }
 
 /// Noise and tone sources.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Signal {
     /// Uniform white noise (crest factor √3 when not band-limited).
     White,
@@ -181,6 +194,14 @@ pub enum Signal {
     },
     /// One exponential sine sweep, then silence.
     Ess(EssConfig),
+    /// A dynamics programme (`crate::dynamics`), then silence. The generator's level is the
+    /// programme's highest burst level.
+    Programme {
+        /// The programme.
+        programme: Arc<Programme>,
+        /// The analysis's release counter for adaptive rests.
+        release: Release,
+    },
 }
 
 /// Butterworth order of band-limit filters.
@@ -217,7 +238,7 @@ impl BandLimit {
 }
 
 /// Everything needed to build a [`Generator`].
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct GeneratorConfig {
     /// What to emit.
     pub signal: Signal,
@@ -430,6 +451,7 @@ enum Source {
         plan: EssPlan,
         pos: usize,
     },
+    Programme(Box<ProgrammeSource>),
 }
 
 impl Source {
@@ -475,7 +497,152 @@ impl Source {
                 }
                 v
             }
+            Source::Programme(p) => p.next(),
         }
+    }
+}
+
+/// Where a programme is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Segment {
+    /// The linearity check at `pilot − 6 dB`.
+    CheckLow,
+    /// The linearity check at `pilot`.
+    CheckHigh,
+    /// The burst of step `n`.
+    Burst(usize),
+    /// The rest after step `n`.
+    Rest(usize),
+    /// The closing fade, samples into it.
+    Fade(u32),
+    /// Silence for good.
+    Done,
+}
+
+/// The programme as the audio thread plays it: one carrier period as a table, the amplitude
+/// of every segment relative to the highest burst, and the segment playing. Every segment
+/// boundary is a multiple of the period from the first sample, and the table starts at the
+/// onset point, so each boundary is an onset point.
+#[derive(Debug)]
+struct ProgrammeSource {
+    programme: Arc<Programme>,
+    release: Release,
+    /// One period, unit RMS at full amplitude, starting at the onset point.
+    table: Vec<f64>,
+    /// Sample within the period.
+    pos: usize,
+    /// Periods completed in the current segment.
+    periods: u32,
+    segment: Segment,
+    /// Amplitude of `pilot − 6 dB`, `pilot`, and each burst level, re the highest burst.
+    check_amp: f64,
+    pilot_amp: f64,
+    burst_amps: Vec<f64>,
+    fade_len: u32,
+    /// The release counter as read at the start of the current `fill`.
+    released: u32,
+}
+
+impl ProgrammeSource {
+    fn new(programme: Arc<Programme>, release: Release) -> Self {
+        let p = programme.period as usize;
+        let off = programme.onset.offset(programme.period) as usize;
+        let table = (0..p)
+            .map(|i| (TAU * ((i + off) % p) as f64 / p as f64).sin() * SQRT_2)
+            .collect();
+        let top = programme.highest_dbfs();
+        let amp = |l: f64| 10f64.powf((l - top) / 20.0);
+        let fade_len = ((FADE_OUT_SECONDS * programme.sample_rate).round() as u32).max(1);
+        Self {
+            check_amp: amp(programme.pilot_dbfs - 6.0),
+            pilot_amp: amp(programme.pilot_dbfs),
+            burst_amps: programme.bursts_dbfs.iter().map(|&l| amp(l)).collect(),
+            programme,
+            release,
+            table,
+            pos: 0,
+            periods: 0,
+            segment: Segment::CheckLow,
+            fade_len,
+            released: 0,
+        }
+    }
+
+    fn amplitude(&self) -> f64 {
+        match self.segment {
+            Segment::CheckLow => self.check_amp,
+            Segment::CheckHigh | Segment::Rest(_) => self.pilot_amp,
+            Segment::Burst(i) => self.burst_amps[self.programme.step(i).0],
+            Segment::Fade(k) => {
+                self.pilot_amp * (1.0 - f64::from(k) / f64::from(self.fade_len)).max(0.0)
+            }
+            Segment::Done => 0.0,
+        }
+    }
+
+    /// The segment after `self.periods` whole periods of the current one, at a period
+    /// boundary.
+    fn next_segment(&self) -> Option<Segment> {
+        let p = &*self.programme;
+        let e = self.periods;
+        let last = p.steps() - 1;
+        let after_rest = |i: usize| {
+            if i == last {
+                Segment::Fade(0)
+            } else {
+                Segment::Burst(i + 1)
+            }
+        };
+        match self.segment {
+            Segment::CheckLow => (e >= p.check_periods).then_some(Segment::CheckHigh),
+            Segment::CheckHigh => (e >= p.check_periods).then_some(Segment::Burst(0)),
+            Segment::Burst(i) => (e >= p.step_periods(i)).then_some(Segment::Rest(i)),
+            Segment::Rest(i) => {
+                let end = match &p.rests {
+                    Rests::Replay(r) => e >= r[i],
+                    // The source counts the longest rest itself: a stalled analysis can only
+                    // leave the rest at its longest, never the carrier playing.
+                    Rests::Adaptive => {
+                        e >= p.rest_max_periods
+                            || (e >= p.rest_min_periods && self.released as usize > i)
+                    }
+                };
+                end.then(|| after_rest(i))
+            }
+            Segment::Fade(_) | Segment::Done => None,
+        }
+    }
+
+    #[inline]
+    fn next(&mut self) -> f64 {
+        match self.segment {
+            Segment::Done => return 0.0,
+            Segment::Fade(k) => {
+                let v = self.table[self.pos] * self.amplitude();
+                self.pos = (self.pos + 1) % self.table.len();
+                self.segment = if k + 1 >= self.fade_len {
+                    Segment::Done
+                } else {
+                    Segment::Fade(k + 1)
+                };
+                return v;
+            }
+            _ => {}
+        }
+        // Every segment lasts at least one period, so at the first sample nothing ends.
+        if self.pos == 0 {
+            if let Some(s) = self.next_segment() {
+                self.segment = s;
+                self.periods = 0;
+            }
+        }
+        let v = self.table[self.pos] * self.amplitude();
+        self.pos += 1;
+        if self.pos == self.table.len() {
+            self.pos = 0;
+            self.periods += 1;
+        }
+        v
     }
 }
 
@@ -505,13 +672,13 @@ impl Generator {
             return Err(GeneratorError::NonFiniteLevel);
         }
         let noise = matches!(
-            cfg.signal,
+            &cfg.signal,
             Signal::White | Signal::Pink | Signal::PeriodicPink { .. }
         );
         if !noise && !cfg.band.is_none() {
             return Err(GeneratorError::BandLimitNotApplicable);
         }
-        let (source, crest) = match cfg.signal {
+        let (source, crest) = match cfg.signal.clone() {
             Signal::White | Signal::Pink => {
                 let pink = matches!(cfg.signal, Signal::Pink).then(|| PinkFilter::design(fs));
                 let band = band_filters(&cfg.band, fs)?;
@@ -548,6 +715,18 @@ impl Generator {
                 },
                 SQRT_2,
             ),
+            Signal::Programme { programme, release } => {
+                if programme.sample_rate.to_bits() != fs.to_bits() {
+                    return Err(GeneratorError::InvalidSampleRate);
+                }
+                if (cfg.level_dbfs - programme.highest_dbfs()).abs() > 1e-9 {
+                    return Err(GeneratorError::ProgrammeLevel);
+                }
+                (
+                    Source::Programme(Box::new(ProgrammeSource::new(programme, release))),
+                    SQRT_2,
+                )
+            }
         };
         let rms = validate_level(cfg.level_dbfs, crest, cfg.ceiling_dbfs)?;
         let control = LevelControl {
@@ -623,9 +802,13 @@ impl Generator {
         ramp_done || self.is_finished()
     }
 
-    /// True once a one-shot sweep has played to its end.
+    /// True once a one-shot sweep or a dynamics programme has played to its end.
     pub fn is_finished(&self) -> bool {
-        matches!(&self.source, Source::Ess { plan, pos } if *pos >= plan.len)
+        match &self.source {
+            Source::Ess { plan, pos } => *pos >= plan.len,
+            Source::Programme(p) => p.segment == Segment::Done,
+            _ => false,
+        }
     }
 
     /// Renders the next `out.len()` samples. No allocation, no locks.
@@ -635,6 +818,9 @@ impl Generator {
         } else {
             f64::from_bits(self.control.shared.target_rms.load(Ordering::Acquire))
         };
+        if let Source::Programme(p) = &mut self.source {
+            p.released = p.release.released();
+        }
         if target.to_bits() != self.gain_target.to_bits() {
             self.gain_target = target;
             self.remaining = self.ramp_len;

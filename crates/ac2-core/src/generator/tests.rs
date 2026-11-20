@@ -113,7 +113,7 @@ fn rms_accuracy_per_signal_type() {
     ];
     for (name, signal, band, n) in cases {
         for level in [-20.0, -40.0] {
-            let mut c = cfg(signal, level);
+            let mut c = cfg(signal.clone(), level);
             c.band = band;
             let mut g = Generator::new(&c).expect(name);
             let x = steady(&mut g, n);
@@ -452,8 +452,8 @@ fn deterministic_and_block_size_independent() {
         Signal::Pink,
         Signal::PeriodicPink { period: 1 << 12 },
     ] {
-        let mut a = Generator::new(&cfg(signal, -20.0)).expect("a");
-        let mut b = Generator::new(&cfg(signal, -20.0)).expect("b");
+        let mut a = Generator::new(&cfg(signal.clone(), -20.0)).expect("a");
+        let mut b = Generator::new(&cfg(signal.clone(), -20.0)).expect("b");
         let mut whole = vec![0.0; 10_000];
         a.fill(&mut whole);
         let mut parts = vec![0.0; 10_000];
@@ -464,7 +464,7 @@ fn deterministic_and_block_size_independent() {
             b.fill(chunk);
         }
         assert_eq!(whole, parts, "{signal:?}");
-        let mut other = cfg(signal, -20.0);
+        let mut other = cfg(signal.clone(), -20.0);
         other.seed ^= 1;
         let mut c = Generator::new(&other).expect("c");
         let mut diff = vec![0.0; 10_000];

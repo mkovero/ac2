@@ -24,7 +24,7 @@ fn fixed_offsets(signal: Signal) {
     for d in [0i64, 37, 4800, 48_000] {
         let cfg = TimingConfig::for_rate(FS);
         let mut mon = LoopbackTiming::new(cfg);
-        let mut sim = Sim::new(signal, 20.0, constant(d as f64));
+        let mut sim = Sim::new(signal.clone(), 20.0, constant(d as f64));
         let rec = run(&mut sim, &mut mon, d as u64 + cfg.window as u64, 5);
         let first_lock = rec
             .iter()
@@ -57,7 +57,7 @@ fn zero_db_snr(signal: Signal, seconds: f64) {
     let cfg = TimingConfig::for_rate(FS);
     let mut mon = LoopbackTiming::new(cfg);
     let d = 12_345;
-    let mut sim = Sim::new(signal, 0.0, constant(d as f64));
+    let mut sim = Sim::new(signal.clone(), 0.0, constant(d as f64));
     let windows = (seconds / HOP_SECONDS) as usize;
     let rec = run(&mut sim, &mut mon, cfg.window as u64 + d as u64, windows);
     let first_lock = rec

@@ -13,6 +13,7 @@ pub mod band_leq;
 pub mod clock_map;
 pub mod clock_rate;
 pub mod delay;
+pub mod dynamics;
 pub mod eq;
 pub mod generator;
 pub mod harmonics;
