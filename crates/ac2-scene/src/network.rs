@@ -11,53 +11,120 @@ use ac2_proto::model::{
 
 use crate::rig::{reason_kind_text, reason_text};
 
-/// The network row of a rig on this computer, which this app may switch. Off says what
-/// still works, on says who turning it off cuts: neither asks to be confirmed, so the row
-/// itself tells.
-pub fn network_row(on: bool) -> String {
+/// The network row of a rig on this computer, which this app may switch. Off acts at once,
+/// so the row itself says what turning it off cuts; what turning it on opens is said by the
+/// confirmation that turning on asks for ([`turn_on_confirm`]).
+pub fn network_row(on: bool) -> &'static str {
     if on {
-        "Network: on · Enter turns it off: every app and rig connected to this rig over the \
-         network is cut; this rig's own links to other rigs stay"
-            .into()
+        "Network: on · Enter turns it off: cuts apps and rigs connected to it"
     } else {
-        "Network: off · this rig still pairs with, authorizes and reads other rigs; only \
-         connections to it are off (Enter turns it on)"
-            .into()
+        "Network: off · Enter turns it on"
+    }
+}
+
+/// The network row's tip: what on and off mean for this rig's own links and for those to it.
+pub fn network_tip(on: bool) -> &'static str {
+    if on {
+        "turning it off cuts every app and rig connected to this rig over the network; this \
+         rig's own links to other rigs stay"
+    } else {
+        "while off, this rig still pairs with, authorizes and reads other rigs; only \
+         connections to it are off. Turned on, apps and rigs whose keys this rig authorized \
+         can connect to it"
     }
 }
 
 /// The network row of a rig whose `ac2d` was started with `--listen` (how a rig host's
 /// service runs it): the command line is the setting, so the page only reads it.
-pub fn fixed_row(listen: &str) -> String {
+pub fn fixed_row(listen: Option<&str>) -> String {
+    match listen {
+        Some(l) => format!(
+            "Network: on, set by --listen (systemd): {l} · change it in the service's command line"
+        ),
+        None => "Network: on, set by --listen (systemd) · change it in the service's command line"
+            .into(),
+    }
+}
+
+/// The fixed row's tip.
+pub const FIXED_TIP: &str =
+    "ac2d's command line is the setting for as long as it runs: this page only reads it";
+
+/// The network row of a daemon running inside its program: it has no network to turn on.
+pub const EMBEDDED_ROW: &str = "Network: none · this daemon runs inside its program";
+
+/// The in-process row's tip.
+pub const EMBEDDED_TIP: &str = "it serves its own program only: no other program can connect, so it has no network to \
+     turn on";
+
+/// The network row of a daemon that keeps no files: without a server key there is nothing
+/// to serve CURVE with, so its network cannot go on.
+pub fn no_key_store_row(kind: NetSettingKind) -> String {
     format!(
-        "Network: on, set by --listen (systemd): {listen} · change it in the service's command \
-         line"
+        "Network: {} · cannot be turned on: no config directory for a server key",
+        state_word(kind)
     )
 }
 
-/// The network row of a daemon running inside its program: it has no network to turn on.
-pub const EMBEDDED_ROW: &str =
-    "Network: none · this daemon runs inside its program: no other program can connect";
+/// The no-key-store row's tip.
+pub const NO_KEY_STORE_TIP: &str = "this ac2d runs without a config directory, so it has nowhere to keep the server key the \
+     network needs: its network cannot be turned on";
 
 /// The network row of a rig reached over the network: a network client may not switch it
 /// (it would cut itself off, or open the rig where it was reached some other way).
 pub fn peer_row(kind: NetSettingKind) -> String {
-    let state = match kind {
+    format!(
+        "Network: {} · change it on the rig's own computer",
+        state_word(kind)
+    )
+}
+
+/// The remote row's tip.
+pub const PEER_TIP: &str = "only an app on the rig's own computer may turn its network on or \
+     off: from here it could cut this app off";
+
+fn state_word(kind: NetSettingKind) -> &'static str {
+    match kind {
         NetSettingKind::Off => "off",
         NetSettingKind::On => "on",
         NetSettingKind::Fixed => "on, set by --listen (systemd)",
-    };
-    format!("Network: {state} · change it on the rig's own computer")
+    }
+}
+
+/// Where the interface or port a row shows comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChoiceFrom {
+    /// The network is on there.
+    InForce,
+    /// Picked on the page, not yet in force.
+    Picked,
+    /// Kept by the rig from when its network was last on: turning on uses it.
+    Kept,
+    /// The daemon's default: its network has never been on.
+    Default,
+}
+
+/// The interface and port rows' tip.
+pub fn choice_tip(from: ChoiceFrom) -> &'static str {
+    match from {
+        ChoiceFrom::InForce => "where the network is on now; another picked here moves it",
+        ChoiceFrom::Picked => "picked here: used when the network is turned on, or moved",
+        ChoiceFrom::Kept => {
+            "kept from when the network was last on: turning it on uses it unless another is \
+             picked here"
+        }
+        ChoiceFrom::Default => {
+            "the daemon's default, as its network has not been on yet: turning it on uses it \
+             unless another is picked here"
+        }
+    }
 }
 
 /// What the interface row shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IfaceRow<'a> {
-    /// Nothing picked while the network is off: the rig keeps the last choice, which a
-    /// network that is off does not report.
-    Kept,
-    /// A bind, picked or in force.
-    Bind(&'a NetBind),
+    /// A bind, and where it comes from.
+    Bind(&'a NetBind, ChoiceFrom),
     /// The choice that types an address.
     TypeAddress,
 }
@@ -102,8 +169,7 @@ fn addrs_text(addrs: &[IpAddr]) -> String {
 /// Enter moves it.
 pub fn interface_row(row: IfaceRow<'_>, interfaces: &[NetInterface], pending: bool) -> String {
     let what = match row {
-        IfaceRow::Kept => "as last set on this rig".to_owned(),
-        IfaceRow::Bind(b) => bind_text(b, interfaces),
+        IfaceRow::Bind(b, from) => default_marked(bind_text(b, interfaces), from),
         IfaceRow::TypeAddress => {
             return "Interface: an address… (Enter types it · ←→ picks)".into();
         }
@@ -115,15 +181,20 @@ pub fn interface_row(row: IfaceRow<'_>, interfaces: &[NetInterface], pending: bo
     }
 }
 
-/// The port row; `None`: nothing typed while the network is off, the rig keeps the last.
-pub fn port_row(port: Option<u16>) -> String {
-    match port {
-        Some(p) => format!(
-            "Port: {p} · data on {} (Enter types another)",
-            u32::from(p) + 1
-        ),
-        None => "Port: as last set on this rig (Enter types one)".into(),
+fn default_marked(what: String, from: ChoiceFrom) -> String {
+    match from {
+        ChoiceFrom::Default => format!("{what}, the default"),
+        _ => what,
     }
+}
+
+/// The port row.
+pub fn port_row(port: u16, from: ChoiceFrom) -> String {
+    format!(
+        "Port: {} · data on {} (Enter types another)",
+        default_marked(port.to_string(), from),
+        u32::from(port) + 1
+    )
 }
 
 /// Said when an interface or port is picked while the network is off.
@@ -227,29 +298,25 @@ pub fn not_saved_line(saved: &NetSaved) -> Option<String> {
     ))
 }
 
-/// The notice before the network goes on: where and on which port, and who can then
-/// connect. `bind`/`port` `None`: the rig's last choice, which is not reported while off.
+/// The notice before the network goes on: where and on which port (`default`: the
+/// daemon's, nothing kept or picked), and who can then connect.
 pub fn turn_on_confirm(
-    bind: Option<&NetBind>,
-    port: Option<u16>,
+    bind: &NetBind,
+    port: u16,
+    default: bool,
     interfaces: &[NetInterface],
 ) -> String {
-    let at = match (bind, port) {
-        (None, None) => "where it was last set on this rig".to_owned(),
-        (Some(b), None) => format!("{}, the port last set", bind_text(b, interfaces)),
-        (None, Some(p)) => format!(
-            "the interface last set, port {p} (data {})",
-            u32::from(p) + 1
-        ),
-        (Some(b), Some(p)) => format!(
-            "{}, port {p} (data {})",
-            bind_text(b, interfaces),
-            u32::from(p) + 1
-        ),
-    };
+    let mut at = format!(
+        "{}, port {port} (data {})",
+        bind_text(bind, interfaces),
+        u32::from(port) + 1
+    );
+    if default {
+        at.push_str(", the default");
+    }
     format!(
-        "Enter again turns the network on · {at} · apps and rigs whose keys this rig authorized \
-         can then connect"
+        "Enter again turns the network on at {at} · apps and rigs whose keys this rig \
+         authorized can then connect"
     )
 }
 

@@ -7,21 +7,58 @@ fn host(status: NetStatus) -> NetStatusView {
 }
 
 #[test]
-fn the_switch_says_what_off_keeps_and_what_on_cuts() {
-    assert_eq!(
-        network_row(false),
-        "Network: off · this rig still pairs with, authorizes and reads other rigs; only \
-         connections to it are off (Enter turns it on)"
-    );
+fn the_switch_says_its_state_and_its_tip_what_it_means() {
+    assert_eq!(network_row(false), "Network: off · Enter turns it on");
+    // Off acts at once: the row itself says what it cuts.
     assert_eq!(
         network_row(true),
-        "Network: on · Enter turns it off: every app and rig connected to this rig over the \
-         network is cut; this rig's own links to other rigs stay"
+        "Network: on · Enter turns it off: cuts apps and rigs connected to it"
     );
     assert_eq!(
-        fixed_row("tcp://eth0:47820"),
+        network_tip(false),
+        "while off, this rig still pairs with, authorizes and reads other rigs; only \
+         connections to it are off. Turned on, apps and rigs whose keys this rig authorized can \
+         connect to it"
+    );
+    assert_eq!(
+        network_tip(true),
+        "turning it off cuts every app and rig connected to this rig over the network; this \
+         rig's own links to other rigs stay"
+    );
+}
+
+#[test]
+fn a_switch_the_page_cannot_use_says_why() {
+    assert_eq!(
+        fixed_row(Some("tcp://eth0:47820")),
         "Network: on, set by --listen (systemd): tcp://eth0:47820 · change it in the service's \
          command line"
+    );
+    assert_eq!(
+        fixed_row(None),
+        "Network: on, set by --listen (systemd) · change it in the service's command line"
+    );
+    assert_eq!(
+        FIXED_TIP,
+        "ac2d's command line is the setting for as long as it runs: this page only reads it"
+    );
+    assert_eq!(
+        EMBEDDED_ROW,
+        "Network: none · this daemon runs inside its program"
+    );
+    assert_eq!(
+        EMBEDDED_TIP,
+        "it serves its own program only: no other program can connect, so it has no network to \
+         turn on"
+    );
+    assert_eq!(
+        no_key_store_row(NetSettingKind::Off),
+        "Network: off · cannot be turned on: no config directory for a server key"
+    );
+    assert_eq!(
+        NO_KEY_STORE_TIP,
+        "this ac2d runs without a config directory, so it has nowhere to keep the server key the \
+         network needs: its network cannot be turned on"
     );
     assert_eq!(
         peer_row(NetSettingKind::Fixed),
@@ -31,6 +68,11 @@ fn the_switch_says_what_off_keeps_and_what_on_cuts() {
         peer_row(NetSettingKind::Off),
         "Network: off · change it on the rig's own computer"
     );
+    assert_eq!(
+        PEER_TIP,
+        "only an app on the rig's own computer may turn its network on or off: from here it \
+         could cut this app off"
+    );
 }
 
 #[test]
@@ -38,18 +80,18 @@ fn interfaces_read_as_the_daemon_lists_them() {
     let s = server_info();
     let i = &s.interfaces;
     assert_eq!(
-        interface_row(IfaceRow::Bind(&NetBind::All), i, false),
+        interface_row(IfaceRow::Bind(&NetBind::All, ChoiceFrom::InForce), i, false),
         "Interface: all interfaces (←→ picks)"
     );
     let eth0 = NetBind::Interface {
         name: "eth0".into(),
     };
     assert_eq!(
-        interface_row(IfaceRow::Bind(&eth0), i, false),
+        interface_row(IfaceRow::Bind(&eth0, ChoiceFrom::Kept), i, false),
         "Interface: eth0 (192.168.1.20, 2001:db8::20) (←→ picks)"
     );
     assert_eq!(
-        interface_row(IfaceRow::Bind(&eth0), i, true),
+        interface_row(IfaceRow::Bind(&eth0, ChoiceFrom::Picked), i, true),
         "Interface: eth0 (192.168.1.20, 2001:db8::20) · Enter moves the network here (←→ picks)"
     );
     let wlan = NetBind::Interface {
@@ -75,21 +117,40 @@ fn interfaces_read_as_the_daemon_lists_them() {
         addr: IpAddr::from([127, 0, 0, 1]),
     };
     assert_eq!(bind_text(&lo, i), "address 127.0.0.1 (loopback)");
+    // Off and never on: the daemon's default, said as such.
     assert_eq!(
-        interface_row(IfaceRow::Kept, i, false),
-        "Interface: as last set on this rig (←→ picks)"
+        interface_row(IfaceRow::Bind(&NetBind::All, ChoiceFrom::Default), i, false),
+        "Interface: all interfaces, the default (←→ picks)"
     );
     assert_eq!(
         interface_row(IfaceRow::TypeAddress, i, false),
         "Interface: an address… (Enter types it · ←→ picks)"
     );
     assert_eq!(
-        port_row(Some(47820)),
-        "Port: 47820 · data on 47821 (Enter types another)"
+        port_row(5000, ChoiceFrom::Kept),
+        "Port: 5000 · data on 5001 (Enter types another)"
     );
     assert_eq!(
-        port_row(None),
-        "Port: as last set on this rig (Enter types one)"
+        port_row(47820, ChoiceFrom::Default),
+        "Port: 47820, the default · data on 47821 (Enter types another)"
+    );
+    assert_eq!(
+        choice_tip(ChoiceFrom::InForce),
+        "where the network is on now; another picked here moves it"
+    );
+    assert_eq!(
+        choice_tip(ChoiceFrom::Picked),
+        "picked here: used when the network is turned on, or moved"
+    );
+    assert_eq!(
+        choice_tip(ChoiceFrom::Kept),
+        "kept from when the network was last on: turning it on uses it unless another is picked \
+         here"
+    );
+    assert_eq!(
+        choice_tip(ChoiceFrom::Default),
+        "the daemon's default, as its network has not been on yet: turning it on uses it unless \
+         another is picked here"
     );
 }
 
@@ -146,7 +207,7 @@ fn status_follows_the_daemon() {
 #[test]
 fn a_setting_not_kept_says_so() {
     let NetSettingView::Host {
-        setting: NetSetting::Off { saved },
+        setting: NetSetting::Off { saved, .. },
     } = &server_info_off().network.setting
     else {
         panic!("the sample is a local daemon, off");
@@ -173,15 +234,18 @@ fn a_setting_not_kept_says_so() {
 #[test]
 fn turning_on_names_where() {
     let i = &server_info().interfaces;
+    let eth0 = NetBind::Interface {
+        name: "eth0".into(),
+    };
     assert_eq!(
-        turn_on_confirm(Some(&NetBind::All), Some(47820), i),
-        "Enter again turns the network on · all interfaces, port 47820 (data 47821) · apps and \
-         rigs whose keys this rig authorized can then connect"
+        turn_on_confirm(&eth0, 5000, false, i),
+        "Enter again turns the network on at eth0 (192.168.1.20, 2001:db8::20), port 5000 (data \
+         5001) · apps and rigs whose keys this rig authorized can then connect"
     );
     assert_eq!(
-        turn_on_confirm(None, None, i),
-        "Enter again turns the network on · where it was last set on this rig · apps and rigs \
-         whose keys this rig authorized can then connect"
+        turn_on_confirm(&NetBind::All, 47820, true, i),
+        "Enter again turns the network on at all interfaces, port 47820 (data 47821), the \
+         default · apps and rigs whose keys this rig authorized can then connect"
     );
 }
 

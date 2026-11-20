@@ -167,12 +167,31 @@ pub fn input_counts(st: &RemoteInputStatus) -> String {
     )
 }
 
-/// A remote input's state in words, and whether it is a problem (no audio, or audio that
-/// cannot be used): problems are said, never only coloured.
+/// A remote input's state in words, and how it is coloured: problems are said, never only
+/// coloured.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InputState {
     pub text: String,
-    pub problem: bool,
+    pub tone: InputTone,
+}
+
+/// How a remote input's state is coloured.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InputTone {
+    /// Streaming, or on its way.
+    Plain,
+    /// No audio because its rig was told to stop serving (its network turned off): meant,
+    /// so not a fault, yet nothing arrives.
+    Warn,
+    /// No audio, or audio that cannot be used.
+    Fault,
+}
+
+impl InputTone {
+    /// No audio, or audio that cannot be used, for whatever reason.
+    pub fn is_problem(self) -> bool {
+        self != Self::Plain
+    }
 }
 
 /// Remote input `i`'s state: its rig's link first (no audio comes over a link that is not
@@ -186,7 +205,7 @@ pub fn input_state(
     let rig = rig_name(r, i);
     let problem = |text: String| InputState {
         text,
-        problem: true,
+        tone: InputTone::Fault,
     };
     let link = r.rigs.iter().find(|x| x.rig == i.rig).map(|x| &x.link);
     match link {
@@ -202,9 +221,13 @@ pub fn input_state(
             ));
         }
         Some(RemoteLink::NetworkOff) => {
-            return problem(format!(
-                "no audio from {rig}: {rig} turned its network off and is not heard since (turn it on there)"
-            ));
+            return InputState {
+                text: format!(
+                    "no audio from {rig}: {rig} turned its network off and is not heard since \
+                     (turn it on there)"
+                ),
+                tone: InputTone::Warn,
+            };
         }
         Some(RemoteLink::Unreachable { since }) => {
             return problem(match at(*since) {
@@ -232,7 +255,7 @@ pub fn input_state(
         Some(RemoteLink::Connecting) => {
             return InputState {
                 text: format!("connecting to {rig}…"),
-                problem: false,
+                tone: InputTone::Plain,
             };
         }
         Some(RemoteLink::Up) | None => {}
@@ -246,10 +269,15 @@ pub fn input_state(
         text.push_str(&format!(", {}", anchor_text(a)));
     }
     text.push_str(&format!(" · {}", input_counts(st)));
+    let fault = !matches!(st.audio, RemoteAudio::Streaming | RemoteAudio::Starting)
+        || (streaming && st.late_frames_hour > 0);
     InputState {
         text,
-        problem: !matches!(st.audio, RemoteAudio::Streaming | RemoteAudio::Starting)
-            || (streaming && st.late_frames_hour > 0),
+        tone: if fault {
+            InputTone::Fault
+        } else {
+            InputTone::Plain
+        },
     }
 }
 
@@ -441,7 +469,7 @@ mod tests {
         r.rigs[0].link = RemoteLink::Unreachable { since: WallNs(7) };
         let s = input_state(&r, &i[0], &at);
         assert_eq!(s.text, "no audio from ketunkolo (unreachable since t7)");
-        assert!(s.problem);
+        assert_eq!(s.tone, InputTone::Fault);
         r.rigs[0].link = RemoteLink::KeyChanged;
         assert_eq!(
             input_state(&r, &i[0], &at).text,
@@ -460,7 +488,8 @@ mod tests {
             "no audio from ketunkolo: ketunkolo turned its network off and is not heard since (turn \
              it on there)"
         );
-        assert!(s.problem);
+        // Turned off on purpose: said as a warning, not a fault.
+        assert_eq!(s.tone, InputTone::Warn);
         assert_eq!(
             link_text(&r.rigs[0]),
             "ketunkolo turned its network off; not heard since"
@@ -472,7 +501,7 @@ mod tests {
                 .starts_with("ketunkolo does not capture in 1 (open it there)"),
             "{s:?}"
         );
-        assert!(s.problem);
+        assert!(s.tone.is_problem());
         // Unknown to the remote state (not answered yet): the session's name for it.
         let (mut r, i) = state(PeerRelation::Measuring, RemoteAudio::Streaming);
         r.rigs.clear();

@@ -519,6 +519,11 @@ mod tests {
             text(RemoteLink::NotAdmitted, None),
             "cm4 has not admitted this rig"
         );
+        // A rig that turned its network off says so on the heading's second line.
+        assert_eq!(
+            pairing(RemoteLink::NetworkOff, None).on_heading(),
+            Some("cm4 turned its network off; not heard since")
+        );
         assert_eq!(pairing(RemoteLink::Up, None), Pairing::Plain);
     }
 
