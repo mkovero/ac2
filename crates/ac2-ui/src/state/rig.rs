@@ -72,8 +72,9 @@ pub struct RigState {
     pub addr: Option<crate::prefs::RigAddr>,
     /// The host the link reaches the daemon at over the network; `None` on a local link.
     pub daemon_addr: Option<String>,
-    /// The daemon said hello as a rig this app already holds: the app closes this link.
-    pub duplicate: bool,
+    /// The daemon said hello as this rig, which the app already holds in another slot
+    /// (the same daemon reached at another address): the app closes this link.
+    pub duplicate: Option<RigId>,
     /// The transfer panes' phase reference while another rig is shown: it names this rig's
     /// traces.
     pub(super) phase_reference: Option<TraceKey>,
@@ -175,7 +176,7 @@ impl RigState {
             addr: None,
             daemon_addr: None,
             server: None,
-            duplicate: false,
+            duplicate: None,
             phase_reference: None,
             conn: ConnState::Connecting { target },
             mirror: None,

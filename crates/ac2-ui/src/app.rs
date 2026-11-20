@@ -391,9 +391,25 @@ impl App {
     ) {
         let mut first_free = !started;
         for r in rigs {
-            if Some(&r.addr) == started_addr {
+            // One address is one daemon: a remembered rig at the address started with is
+            // that rig, whatever else was remembered with it (its advert's host name, a
+            // key pinned before), and is never reached a second time.
+            if let Some(started) = started_addr
+                && r.addr.same_place(started)
+            {
                 self.state.rig.id = r.id;
                 self.state.rig.name = r.name;
+                if let (
+                    Some(crate::prefs::RigAddr::Network { mdns_host, .. }),
+                    crate::prefs::RigAddr::Network {
+                        mdns_host: Some(seen),
+                        ..
+                    },
+                ) = (&mut self.state.rig.addr, r.addr)
+                    && mdns_host.is_none()
+                {
+                    *mdns_host = Some(seen);
+                }
                 continue;
             }
             let Some(setup) = &self.connect_setup else {

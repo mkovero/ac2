@@ -45,7 +45,7 @@ impl AppState {
                 name,
             } => {
                 if self.is_duplicate(rig_id) {
-                    self.rig.duplicate = true;
+                    self.rig.duplicate = Some(rig_id);
                     return;
                 }
                 // A window opened before the hello acts on this rig, now named by it.

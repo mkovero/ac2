@@ -497,9 +497,10 @@ impl AppState {
 
     /// Closes each rig that said hello as one already held: the same daemon reached twice.
     fn close_duplicates(&mut self) {
+        self.show_held_for_duplicate();
         let dups: Vec<u32> = self
             .rigs()
-            .filter(|r| r.duplicate)
+            .filter(|r| r.duplicate.is_some())
             .map(|r| r.slot)
             .collect();
         for slot in dups {
@@ -512,6 +513,48 @@ impl AppState {
             ));
             self.others.closing.push(r);
         }
+    }
+
+    /// The rig shown said hello as one held in the background (the same daemon, reached at
+    /// another address too): the held rig takes its place on the screen shown, and the shown
+    /// link goes the way of any other duplicate. Left shown, its hello is never taken and it
+    /// says "connecting" for good while its link runs. Waits while a window is open: the
+    /// window acts on the rig it opened on.
+    fn show_held_for_duplicate(&mut self) {
+        let Some(held) = self.rig.duplicate else {
+            return;
+        };
+        if self.others.visiting.is_some()
+            || !matches!(self.overlay, Overlay::None | Overlay::RigMenu(_))
+        {
+            return;
+        }
+        let Some(i) = self
+            .others
+            .background
+            .iter()
+            .position(|r| r.id == held && r.duplicate.is_none())
+        else {
+            return;
+        };
+        std::mem::swap(
+            &mut self.view.tf.phase_reference,
+            &mut self.rig.phase_reference,
+        );
+        std::mem::swap(&mut self.rig, &mut self.others.background[i]);
+        self.view.tf.phase_reference = self.rig.phase_reference.take();
+        // The screen shown is the one the operator set up; one kept for the held rig is
+        // superseded by it.
+        self.others.screens.remove(&held);
+        let unpin = |l: &mut Layout| {
+            for v in l.views.values_mut() {
+                if v.rig == PaneRig::Rig(held) {
+                    v.rig = PaneRig::Active;
+                }
+            }
+        };
+        unpin(&mut self.layout);
+        self.history.layouts_mut(unpin);
     }
 
     /// Shows rig `to`: its windows and keys are the operator's, and its screen is the one
@@ -727,7 +770,7 @@ impl AppState {
     pub(super) fn is_duplicate(&self, id: RigId) -> bool {
         self.rigs()
             .chain(self.others.closing.iter())
-            .any(|r| r.slot != self.rig.slot && r.id == id && !r.duplicate)
+            .any(|r| r.slot != self.rig.slot && r.id == id && r.duplicate.is_none())
     }
 
     /// The rig in `rig` connected: remembered (where it was reached, its id and name) for
