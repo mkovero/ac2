@@ -630,11 +630,11 @@ impl ProgrammeSource {
             _ => {}
         }
         // Every segment lasts at least one period, so at the first sample nothing ends.
-        if self.pos == 0 {
-            if let Some(s) = self.next_segment() {
-                self.segment = s;
-                self.periods = 0;
-            }
+        if self.pos == 0
+            && let Some(s) = self.next_segment()
+        {
+            self.segment = s;
+            self.periods = 0;
         }
         let v = self.table[self.pos] * self.amplitude();
         self.pos += 1;
