@@ -60,6 +60,7 @@ fn two_groups() -> State {
 fn trace_data(meta: &TraceMeta) -> ConnEvent {
     ConnEvent::Trace(
         Arc::new(TraceData {
+            dynamics: None,
             meta: meta.clone(),
             mag_db: vec![0.0; 4],
             phase_deg: None,

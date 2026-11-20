@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::model::{
-    Autosave, CalEntry, CalKey, Clocks, Generator, InputSetups, LineCalEntry, LineCalKey,
-    Measurement, Mic, OutputSetup, PlanSpec, RecordingRun, RemoteState, Rig, ServerSummary,
-    Session, SimFitKept, SimState, SplLog, State, SweepRun, TimingStatus, TraceMeta, WalkState,
-    WorkingSession,
+    Autosave, CalEntry, CalKey, Clocks, DynamicsRun, Generator, InputSetups, LineCalEntry,
+    LineCalKey, Measurement, Mic, OutputSetup, PlanSpec, RecordingRun, RemoteState, Rig,
+    ServerSummary, Session, SimFitKept, SimState, SplLog, State, SweepRun, TimingStatus, TraceMeta,
+    WalkState, WorkingSession,
 };
 use crate::units::{DaemonIncarnation, MeasId, Rev, SessionEpoch, TraceId, WalkId};
 
@@ -65,6 +65,8 @@ pub enum Change {
     Remote(RemoteState),
     /// The latest sweep run (never deleted; a new run replaces it).
     Sweep(SweepRun),
+    /// The latest dynamics run (never deleted; a new run replaces it).
+    Dynamics(DynamicsRun),
     /// Autosave status (never deleted).
     Autosave(Autosave),
     /// The latest recording (never deleted; a new recording replaces it).
@@ -200,6 +202,13 @@ pub enum WireEvent {
         /// Payload.
         payload: SweepRun,
     },
+    /// [`Change::Dynamics`].
+    Dynamics {
+        /// Rev.
+        rev: Rev,
+        /// Payload.
+        payload: DynamicsRun,
+    },
     /// [`Change::Autosave`].
     Autosave {
         /// Rev.
@@ -290,6 +299,7 @@ impl From<Event> for WireEvent {
             Change::Clocks(payload) => Self::Clocks { rev, payload },
             Change::Remote(payload) => Self::Remote { rev, payload },
             Change::Sweep(payload) => Self::Sweep { rev, payload },
+            Change::Dynamics(payload) => Self::Dynamics { rev, payload },
             Change::Autosave(payload) => Self::Autosave { rev, payload },
             Change::Recording(payload) => Self::Recording { rev, payload },
             Change::Working(payload) => Self::Working { rev, payload },
@@ -321,6 +331,7 @@ impl From<WireEvent> for Event {
             WireEvent::Clocks { rev, payload } => (rev, Change::Clocks(payload)),
             WireEvent::Remote { rev, payload } => (rev, Change::Remote(payload)),
             WireEvent::Sweep { rev, payload } => (rev, Change::Sweep(payload)),
+            WireEvent::Dynamics { rev, payload } => (rev, Change::Dynamics(payload)),
             WireEvent::Autosave { rev, payload } => (rev, Change::Autosave(payload)),
             WireEvent::Recording { rev, payload } => (rev, Change::Recording(payload)),
             WireEvent::Working { rev, payload } => (rev, Change::Working(payload)),
@@ -354,6 +365,7 @@ impl Change {
             Self::Clocks(_) => "clocks",
             Self::Remote(_) => "remote",
             Self::Sweep(_) => "sweep",
+            Self::Dynamics(_) => "dynamics",
             Self::Autosave(_) => "autosave",
             Self::Recording(_) => "recording",
             Self::Working(_) => "working",

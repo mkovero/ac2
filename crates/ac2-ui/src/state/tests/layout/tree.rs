@@ -35,6 +35,7 @@ fn tree_dots_have_the_colours_of_their_curves() {
         };
         t.conn(ConnEvent::Trace(
             Arc::new(TraceData {
+                dynamics: None,
                 meta: m.clone(),
                 mag_db: vec![-10.0; 8],
                 phase_deg: None,

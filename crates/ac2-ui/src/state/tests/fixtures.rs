@@ -172,6 +172,7 @@ pub(super) fn sweep_data(id: u32) -> (Arc<TraceData>, Arc<GridDef>) {
         floor_db: vec![-80.0; n],
     };
     let data = TraceData {
+        dynamics: None,
         meta: sweep_meta(id),
         mag_db: vec![-6.0; n],
         phase_deg: Some(vec![0.0; n]),

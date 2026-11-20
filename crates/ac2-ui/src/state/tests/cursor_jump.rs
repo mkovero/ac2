@@ -12,6 +12,7 @@ fn bumpy(meta: &TraceMeta) -> ConnEvent {
     mag[7] = -6.0;
     ConnEvent::Trace(
         Arc::new(TraceData {
+            dynamics: None,
             meta: meta.clone(),
             mag_db: mag,
             phase_deg: None,

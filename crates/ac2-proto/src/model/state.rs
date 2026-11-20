@@ -3,9 +3,9 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    CalEntry, Clocks, Generator, InputSetup, LineCalEntry, Measurement, Mic, OutputSetup, Pair,
-    PlanSpec, RecordingRun, RemoteState, Rig, ServerSummary, Session, SimFitKept, SimState, SplLog,
-    SweepRun, TraceMeta, WalkState, WorkingSession,
+    CalEntry, Clocks, DynamicsRun, Generator, InputSetup, LineCalEntry, Measurement, Mic,
+    OutputSetup, Pair, PlanSpec, RecordingRun, RemoteState, Rig, ServerSummary, Session,
+    SimFitKept, SimState, SplLog, SweepRun, TraceMeta, WalkState, WorkingSession,
 };
 use crate::units::{MeasId, SampleIndex, Samples, Seconds, WallNs};
 
@@ -117,6 +117,8 @@ pub struct State {
     pub remote: RemoteState,
     /// The latest sweep run, if any.
     pub sweep: Option<SweepRun>,
+    /// The latest dynamics run, if any.
+    pub dynamics: Option<DynamicsRun>,
     /// Autosave of the measurements and traces.
     pub autosave: Autosave,
     /// The session the measurements and traces belong to, and unsaved changes.

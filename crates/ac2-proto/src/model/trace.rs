@@ -3,13 +3,14 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    AverageMethod, CalKey, DelayReference, DepthPolicy, EssSpec, LevelScale, LfHarmonics, MathExpr,
-    MathOp, MicCurveRef, Operand, PhaseBasis, Resolution, Smoothing, SpecLevel, SweepData, TraceIr,
-    TraceOwner, Unresolved,
+    AverageMethod, CalKey, DelayReference, DepthPolicy, DynamicsData, EssSpec, LevelScale,
+    LfHarmonics, MathExpr, MathOp, MicCurveRef, Operand, PhaseBasis, Resolution, Smoothing,
+    SpecLevel, SweepData, TraceIr, TraceOwner, Unresolved,
 };
 use crate::grid::GridId;
 use crate::units::{
-    Db, Dbfs, Hz, MeasId, SampleIndex, Seconds, SessionEpoch, SweepId, TraceId, TransferId, WallNs,
+    Db, Dbfs, DynamicsId, Hz, MeasId, SampleIndex, Seconds, SessionEpoch, SweepId, TraceId,
+    TransferId, WallNs,
 };
 
 /// Polarity.
@@ -155,6 +156,9 @@ pub enum TraceKind {
     /// function), harmonic distortion per order and the impulse response
     /// ([`TraceData::sweep`]).
     Sweep,
+    /// Dynamics measurement: a run's step table and gain-reduction envelopes per measured
+    /// input ([`TraceData::dynamics`]); no columns.
+    Dynamics,
 }
 
 /// Export format.
@@ -262,6 +266,21 @@ pub enum TraceSource {
         /// Measurement input.
         measurement_input: u16,
     },
+    /// A run of a dynamics measurement (`dynamics.run`); its settings are in
+    /// [`TraceData::dynamics`].
+    Dynamics {
+        /// The dynamics measurement.
+        meas: MeasId,
+        /// Its name at the run.
+        meas_name: String,
+        /// The run that made it.
+        run: DynamicsId,
+        /// Run number within the measurement (1, 2 …): one more than the highest of its
+        /// runs stored when it ran.
+        number: u32,
+        /// Epoch it ran in.
+        epoch: SessionEpoch,
+    },
 }
 
 impl TraceSource {
@@ -285,6 +304,7 @@ impl TraceSource {
                 (*phase == PhaseBasis::SharedTimeBase && !relative).then_some(*epoch)
             }
             TraceSource::Imported { .. }
+            | TraceSource::Dynamics { .. }
             | TraceSource::Average { .. }
             | TraceSource::Eq { .. }
             | TraceSource::Generated { .. } => None,
@@ -595,6 +615,8 @@ pub struct TraceData {
     pub coherence: Option<Vec<f32>>,
     /// Distortion and impulse response of a [`TraceKind::Sweep`] trace.
     pub sweep: Option<SweepData>,
+    /// Step table and envelopes of a [`TraceKind::Dynamics`] trace.
+    pub dynamics: Option<Box<DynamicsData>>,
     /// The impulse response a [`TraceKind::Transfer`] trace was captured with; `None` when
     /// the measurement had none to show at capture (no reference yet) and for traces that
     /// were not captured from a transfer measurement.

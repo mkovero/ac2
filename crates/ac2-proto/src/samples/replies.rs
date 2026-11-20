@@ -196,6 +196,7 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
             phase_deg: Some(vec![0.0, 45.0, f32::NAN]),
             coherence: None,
             sweep: None,
+            dynamics: None,
             ir: Some(TransferIr {
                 sample_rate: Hz(48_000.0),
                 ir: TraceIr {
@@ -212,8 +213,19 @@ pub fn replies() -> Vec<Result<ReplyBody, ProtoError>> {
             phase_deg: Some(vec![10.0, -20.0, f32::NAN]),
             coherence: None,
             sweep: Some(sweep_data()),
+            dynamics: None,
             ir: None,
         }))),
+        Ok(ReplyBody::TraceData(Box::new(TraceData {
+            meta: super::dynamics::dynamics_meta(),
+            mag_db: Vec::new(),
+            phase_deg: None,
+            coherence: None,
+            sweep: None,
+            dynamics: Some(Box::new(super::dynamics::dynamics_data())),
+            ir: None,
+        }))),
+        Ok(ReplyBody::Dynamics(super::dynamics::dynamics_playing())),
         Ok(ReplyBody::Sweep(SweepRun {
             status: SweepStatus::Playing { repeat: 1 },
             ..sweep_run()

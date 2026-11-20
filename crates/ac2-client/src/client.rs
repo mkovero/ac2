@@ -320,6 +320,7 @@ pub fn body_name(b: &ReplyBody) -> &'static str {
         ReplyBody::Chunk(_) => "chunk",
         ReplyBody::Salvage(_) => "salvage",
         ReplyBody::Sweep(_) => "sweep",
+        ReplyBody::Dynamics(_) => "dynamics",
         ReplyBody::Recording(_) => "recording",
         ReplyBody::Recordings(_) => "recordings",
     }

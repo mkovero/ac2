@@ -172,6 +172,7 @@ fn stored_trace_metadata_follows_the_mirror() {
     let meta = stored(9, Some(1), 2);
     t.conn(with_traces(vec![meta.clone()]));
     let data = TraceData {
+        dynamics: None,
         meta: meta.clone(),
         mag_db: vec![0.0; 3],
         phase_deg: None,

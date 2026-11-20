@@ -158,6 +158,10 @@ id_type!(
     SweepId(u32)
 );
 id_type!(
+    /// One `dynamics.run` run, per incarnation.
+    DynamicsId(u32)
+);
+id_type!(
     /// One `sim.run` or `sim.fit`, per incarnation.
     SimId(u32)
 );

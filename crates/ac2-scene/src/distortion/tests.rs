@@ -80,6 +80,7 @@ pub(crate) fn data() -> TraceData {
         phase_deg: Some(vec![0.0; n]),
         coherence: None,
         ir: None,
+        dynamics: None,
         sweep: Some(SweepData {
             unresolved: None,
             harmonics: vec![

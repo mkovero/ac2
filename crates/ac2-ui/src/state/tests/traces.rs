@@ -467,6 +467,7 @@ fn resmoothed_trace_data_keeps_its_smoothing_until_refetched() {
     let meta = stored(10, Some(3), 2);
     t.conn(with_traces(vec![meta.clone()]));
     let data = Arc::new(TraceData {
+        dynamics: None,
         meta: meta.clone(),
         mag_db: vec![0.0; 4],
         phase_deg: None,
@@ -490,6 +491,7 @@ fn resmoothed_trace_data_keeps_its_smoothing_until_refetched() {
     assert_eq!(held.edit.smoothing, None);
     assert_eq!(held.edit.name, "renamed");
     let fresh = Arc::new(TraceData {
+        dynamics: None,
         meta: m2.clone(),
         mag_db: vec![1.0; 4],
         phase_deg: None,

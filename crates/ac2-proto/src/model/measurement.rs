@@ -3,9 +3,9 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    AverageMethod, BandFraction, DelayState, PeakMode, PeakWeighting, Resolution, Smoothing,
-    SmoothingFraction, SpecAveraging, SpecLevel, SpecResolution, SpectrumDisplay, SweepConfig,
-    TfAveraging, TimeWeighting, Weighting, Window,
+    AverageMethod, BandFraction, DelayState, DynamicsConfig, PeakMode, PeakWeighting, Resolution,
+    Smoothing, SmoothingFraction, SpecAveraging, SpecLevel, SpecResolution, SpectrumDisplay,
+    SweepConfig, TfAveraging, TimeWeighting, Weighting, Window,
 };
 use crate::grid::GridId;
 use crate::topic::Stream;
@@ -347,6 +347,13 @@ pub enum MeasKind {
         /// Configuration.
         config: SweepConfig,
     },
+    /// Dynamics measurement: settings only. Nothing plays until `dynamics.run` fires it
+    /// (under the stimulus lease, armed, like a sweep); each run is stored as a dynamics
+    /// trace it owns (`docs/design/dynamics.md`).
+    Dynamics {
+        /// Configuration.
+        config: DynamicsConfig,
+    },
 }
 
 impl MeasKind {
@@ -359,7 +366,7 @@ impl MeasKind {
             MeasKind::Rta { .. } => Some(Stream::Rta),
             MeasKind::Spl { .. } => Some(Stream::Spl),
             MeasKind::Math { config } => Some(config.domain.stream()),
-            MeasKind::Sweep { .. } => None,
+            MeasKind::Sweep { .. } | MeasKind::Dynamics { .. } => None,
         }
     }
 
@@ -415,10 +422,10 @@ impl MeasKind {
         }
     }
 
-    /// Whether it runs as a job (`meas.start`): every kind but a sweep measurement, which
-    /// plays only when `sweep.run` fires it.
+    /// Whether it runs as a job (`meas.start`): every kind but a sweep or dynamics
+    /// measurement, which plays only when `sweep.run` / `dynamics.run` fires it.
     pub fn is_job(&self) -> bool {
-        !matches!(self, MeasKind::Sweep { .. })
+        !matches!(self, MeasKind::Sweep { .. } | MeasKind::Dynamics { .. })
     }
 }
 

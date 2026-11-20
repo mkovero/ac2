@@ -72,6 +72,7 @@ impl Command {
             Self::SplBandLogGet { .. } => "spl.band_log_get",
             Self::SplHistoryGet { .. } => "spl.history_get",
             Self::SweepRun { .. } => "sweep.run",
+            Self::DynamicsRun { .. } => "dynamics.run",
             Self::StateSnapshot => "state.snapshot",
             Self::StateSince { .. } => "state.since",
             Self::GridGet { .. } => "grid.get",
@@ -158,7 +159,8 @@ impl Command {
             | Self::GenRefresh { lease_token }
             | Self::GenRelease { lease_token }
             | Self::SessionDetectLoopback { lease_token, .. }
-            | Self::SweepRun { lease_token, .. } => Some(*lease_token),
+            | Self::SweepRun { lease_token, .. }
+            | Self::DynamicsRun { lease_token, .. } => Some(*lease_token),
             _ => None,
         }
     }

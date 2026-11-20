@@ -7,7 +7,7 @@ use crate::PROTO_VERSION;
 use crate::event::{Event, StateSnapshot};
 use crate::grid::GridDef;
 use crate::model::{
-    BackendInfo, CalEntry, DelayFinding, Generator, InputSetups, Lease, LineCalEntry,
+    BackendInfo, CalEntry, DelayFinding, DynamicsRun, Generator, InputSetups, Lease, LineCalEntry,
     LoopbackDetection, Measurement, Mic, OutputSetup, Preview, RecordingFile, RecordingRun,
     ServerInfo, Session, SessionFile, SourceState, SplHistory, SplLogPage, SweepRun, TraceData,
     TraceMeta,
@@ -70,6 +70,8 @@ pub enum ReplyBody {
     Trace(TraceMeta),
     /// `sweep.run`: the run, as started.
     Sweep(SweepRun),
+    /// `dynamics.run`: the run, as started.
+    Dynamics(DynamicsRun),
     /// `trace.list`.
     Traces(Vec<TraceMeta>),
     /// `trace.get`.

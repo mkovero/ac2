@@ -305,6 +305,7 @@ fn stored_tf(id: u32, name: &str, ir: Option<TransferIr>) -> (TraceMeta, Arc<Tra
     m.delay = Seconds(0.0125);
     let n = 480;
     let d = TraceData {
+        dynamics: None,
         meta: m.clone(),
         mag_db: vec![0.0; n],
         phase_deg: Some(vec![0.0; n]),

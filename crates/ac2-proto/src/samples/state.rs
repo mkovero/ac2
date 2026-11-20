@@ -626,6 +626,7 @@ pub fn state() -> State {
         clocks: clocks(),
         remote: super::remote::remote_state(),
         sweep: Some(sweep_run()),
+        dynamics: Some(super::dynamics::dynamics_run()),
         autosave: Autosave {
             state: AutosaveState::Saved,
             saved_at: Some(WallNs(1_790_000_000_000_000_000)),

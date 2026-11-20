@@ -15,6 +15,8 @@ pub fn kind_name(t: &TraceMeta) -> &'static str {
     match (t.kind, &t.source) {
         (TraceKind::Target, _) => "target",
         (_, TraceSource::Sweep { .. }) => "sweep run",
+        (_, TraceSource::Dynamics { .. }) => "dynamics run",
+        (TraceKind::Dynamics, _) => "dynamics",
         (TraceKind::Sweep, TraceSource::Imported { .. }) => "imported sweep",
         (_, TraceSource::Imported { .. }) => "imported",
         (_, TraceSource::Average { .. }) => "average",

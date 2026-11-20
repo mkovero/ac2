@@ -239,7 +239,7 @@ impl Form {
             .unwrap_or(reference);
         let n = existing
             .iter()
-            .filter(|m| form_kind(&m.config.kind) == kind)
+            .filter(|m| form_kind(&m.config.kind) == Some(kind))
             .count()
             + 1;
         let name = |base: &str| Field::text(FieldId::Name, "Name", format!("{base} {n}"), "");
@@ -750,14 +750,16 @@ impl Form {
     }
 }
 
-/// The dialog that makes a measurement of kind `k`.
-pub(super) fn form_kind(k: &MeasKind) -> FormKind {
-    match k {
+/// The dialog that makes a measurement of kind `k`; a dynamics measurement is made by the
+/// CLI.
+pub(super) fn form_kind(k: &MeasKind) -> Option<FormKind> {
+    Some(match k {
         MeasKind::Transfer { .. } => FormKind::Transfer,
         MeasKind::Spectrum { .. } => FormKind::Spectrum,
         MeasKind::Rta { .. } => FormKind::Rta,
         MeasKind::Spl { .. } => FormKind::Spl,
         MeasKind::Math { .. } => FormKind::Math,
         MeasKind::Sweep { .. } => FormKind::Sweep,
-    }
+        MeasKind::Dynamics { .. } => return None,
+    })
 }

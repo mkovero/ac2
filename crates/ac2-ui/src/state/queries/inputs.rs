@@ -62,6 +62,16 @@ impl AppState {
                 MeasKind::Spectrum { config } => vec![(config.input, InputUse::Measurement)],
                 MeasKind::Rta { config } => vec![(config.input, InputUse::Measurement)],
                 MeasKind::Spl { config } => vec![(config.input, InputUse::Measurement)],
+                MeasKind::Dynamics { config } => {
+                    std::iter::once((config.reference_input, InputUse::Reference))
+                        .chain(
+                            config
+                                .measurement_inputs
+                                .iter()
+                                .map(|&i| (i, InputUse::Measurement)),
+                        )
+                        .collect()
+                }
                 MeasKind::Sweep { config } => {
                     std::iter::once((config.reference_input, InputUse::Reference))
                         .chain(

@@ -95,6 +95,7 @@ fn run() -> TraceData {
         phase_deg: None,
         coherence: None,
         ir: None,
+        dynamics: None,
         sweep: Some(SweepData {
             unresolved: None,
             harmonics: vec![

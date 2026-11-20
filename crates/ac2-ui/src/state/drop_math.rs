@@ -42,7 +42,9 @@ impl AppState {
                     MeasKind::Spectrum { .. } => (Some(MathDomain::Spectrum), DropCurve::Live),
                     MeasKind::Rta { .. } => (Some(MathDomain::Rta), DropCurve::Live),
                     MeasKind::Math { config } => (Some(config.domain), DropCurve::Math),
-                    MeasKind::Spl { .. } | MeasKind::Sweep { .. } => (None, DropCurve::Live),
+                    MeasKind::Spl { .. } | MeasKind::Sweep { .. } | MeasKind::Dynamics { .. } => {
+                        (None, DropCurve::Live)
+                    }
                 };
                 Some(Side {
                     name: m.config.name.clone(),
@@ -73,14 +75,15 @@ impl AppState {
                 };
                 let domain = match t.kind {
                     TraceKind::Transfer | TraceKind::Sweep | TraceKind::Target => {
-                        MathDomain::Transfer
+                        Some(MathDomain::Transfer)
                     }
-                    TraceKind::Spectrum { .. } => MathDomain::Spectrum,
-                    TraceKind::Rta { .. } => MathDomain::Rta,
+                    TraceKind::Spectrum { .. } => Some(MathDomain::Spectrum),
+                    TraceKind::Rta { .. } => Some(MathDomain::Rta),
+                    TraceKind::Dynamics => None,
                 };
                 Some(Side {
                     name: t.edit.name.clone(),
-                    domain: Some(domain),
+                    domain,
                     curve,
                     operand: Some(operand),
                     group: ac2_scene::meas_list::group_of(&t, &ms),

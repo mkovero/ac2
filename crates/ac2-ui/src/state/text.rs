@@ -259,6 +259,10 @@ pub fn meas_input(k: &MeasKind) -> Option<u16> {
             [one] => Some(*one),
             _ => None,
         },
+        MeasKind::Dynamics { config } => match config.measurement_inputs.as_slice() {
+            [one] => Some(*one),
+            _ => None,
+        },
         MeasKind::Math { .. } => None,
     }
 }

@@ -32,6 +32,7 @@ fn data(meta: &TraceMeta, mag: Vec<f32>) -> ConnEvent {
     };
     ConnEvent::Trace(
         Arc::new(TraceData {
+            dynamics: None,
             meta: meta.clone(),
             mag_db: mag,
             phase_deg: None,

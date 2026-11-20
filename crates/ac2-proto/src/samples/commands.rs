@@ -476,6 +476,12 @@ pub fn commands() -> Vec<Command> {
             }),
             port: Some(47830),
         },
+        Command::DynamicsRun {
+            lease_token: token(),
+            meas: MeasId(12),
+            name: None,
+            rests_from: Some(TraceId(14)),
+        },
     ])
     .collect()
 }

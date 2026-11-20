@@ -63,7 +63,10 @@ impl Candidate {
                 MeasKind::Transfer { .. } => MathDomain::Transfer,
                 MeasKind::Spectrum { .. } => MathDomain::Spectrum,
                 MeasKind::Rta { .. } => MathDomain::Rta,
-                MeasKind::Spl { .. } | MeasKind::Math { .. } | MeasKind::Sweep { .. } => {
+                MeasKind::Spl { .. }
+                | MeasKind::Math { .. }
+                | MeasKind::Sweep { .. }
+                | MeasKind::Dynamics { .. } => {
                     return None;
                 }
             };
@@ -77,26 +80,33 @@ impl Candidate {
         // An EQ set's curve is offered as the set itself: the daemon evaluates the set on the
         // curve's grid, against what the curve already contains of it (its mark), as the
         // editor's prediction does.
-        let stored = traces.iter().map(|t| Candidate {
-            operand: match t.source {
-                TraceSource::Eq { meas, set, .. } => Operand::Eq { meas, set },
-                _ => Operand::Trace { trace: t.id },
-            },
-            name: t.edit.name.clone(),
-            label: match (&t.source, t.edit.slot) {
-                (TraceSource::Eq { meas, .. }, _) => match ms.iter().find(|m| m.id == *meas) {
-                    Some(m) => format!("{} (EQ set of {})", t.edit.name, m.config.name),
-                    None => format!("{} (EQ set)", t.edit.name),
+        let stored = traces
+            .iter()
+            .filter(|t| t.kind != TraceKind::Dynamics)
+            .map(|t| Candidate {
+                operand: match t.source {
+                    TraceSource::Eq { meas, set, .. } => Operand::Eq { meas, set },
+                    _ => Operand::Trace { trace: t.id },
                 },
-                (_, Some(s)) => format!("{} (stored, S{s})", t.edit.name),
-                (_, None) => format!("{} (stored)", t.edit.name),
-            },
-            domain: match t.kind {
-                TraceKind::Transfer | TraceKind::Sweep | TraceKind::Target => MathDomain::Transfer,
-                TraceKind::Spectrum { .. } => MathDomain::Spectrum,
-                TraceKind::Rta { .. } => MathDomain::Rta,
-            },
-        });
+                name: t.edit.name.clone(),
+                label: match (&t.source, t.edit.slot) {
+                    (TraceSource::Eq { meas, .. }, _) => match ms.iter().find(|m| m.id == *meas) {
+                        Some(m) => format!("{} (EQ set of {})", t.edit.name, m.config.name),
+                        None => format!("{} (EQ set)", t.edit.name),
+                    },
+                    (_, Some(s)) => format!("{} (stored, S{s})", t.edit.name),
+                    (_, None) => format!("{} (stored)", t.edit.name),
+                },
+                domain: match t.kind {
+                    TraceKind::Transfer | TraceKind::Sweep | TraceKind::Target => {
+                        MathDomain::Transfer
+                    }
+                    TraceKind::Spectrum { .. } => MathDomain::Spectrum,
+                    TraceKind::Rta { .. } => MathDomain::Rta,
+                    // Filtered out above: a dynamics trace has no curve to compute with.
+                    TraceKind::Dynamics => MathDomain::Transfer,
+                },
+            });
         live.chain(stored).collect()
     }
 }

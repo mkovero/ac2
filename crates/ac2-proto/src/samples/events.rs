@@ -149,5 +149,15 @@ pub fn events() -> Vec<Event> {
                 fingerprint: None,
             }),
         ),
+        ev(100, Change::Dynamics(super::dynamics::dynamics_playing())),
+        ev(101, Change::Dynamics(super::dynamics::dynamics_failed())),
+        ev(
+            102,
+            Change::Trace(Patch::Set(super::dynamics::dynamics_meta())),
+        ),
+        ev(
+            103,
+            Change::Measurement(Patch::Set(super::dynamics::dynamics_measurement())),
+        ),
     ]
 }

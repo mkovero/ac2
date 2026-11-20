@@ -16,7 +16,7 @@ use crate::format;
 use crate::primitives::Color;
 use crate::trace_list::{self, TraceItem};
 
-/// The short tag a row starts with: `TF`, `FFT`, `RTA`, `SPL`, `MATH`, `SWEEP`.
+/// The short tag a row starts with: `TF`, `FFT`, `RTA`, `SPL`, `MATH`, `SWEEP`, `DYN`.
 pub fn kind_tag(k: &MeasKind) -> &'static str {
     match k {
         MeasKind::Transfer { .. } => "TF",
@@ -25,6 +25,7 @@ pub fn kind_tag(k: &MeasKind) -> &'static str {
         MeasKind::Spl { .. } => "SPL",
         MeasKind::Math { .. } => "MATH",
         MeasKind::Sweep { .. } => "SWEEP",
+        MeasKind::Dynamics { .. } => "DYN",
     }
 }
 
@@ -37,6 +38,7 @@ pub fn kind_name(k: &MeasKind) -> &'static str {
         MeasKind::Spl { .. } => "SPL meter",
         MeasKind::Math { .. } => "math trace",
         MeasKind::Sweep { .. } => "sweep measurement",
+        MeasKind::Dynamics { .. } => "dynamics measurement",
     }
 }
 

@@ -31,7 +31,7 @@ keepalives to each connection as its credit allows (§5.8).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 94`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 95`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -173,6 +173,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `spl.band_transfer` | `meas`, `foh`, `at_place: BandLevelSource`, `background: BandLevelSource \| nil`, `place: str` | `measurement` (as `meas.update`) | |
 | `spl.band_log_get` | `meas`, `from`, `until: WallNs`, `step: u32 \| nil` | `spl_band_log` | non-mutating |
 | `sweep.run` | `lease_token`, `meas` (a sweep measurement), `name: string \| nil` | `sweep` (the run as started) | L (held for the run), armed |
+| `dynamics.run` | `lease_token`, `meas` (a dynamics measurement), `name: string \| nil`, `rests_from: TraceId \| nil` | `dynamics` (the run as started) | L (held for the run), armed |
 | `state.snapshot` | — | `snapshot` | |
 | `state.since` | `rev` | `events` or `resync_required` | |
 | `grid.get` | `grid_id` | `grid` | |
@@ -720,6 +721,17 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   1…8, a non-finite or positive level, a gate ≤ 0, a tail above 20 s, sweep parameters the
   generator refuses at the session's rate (checked again at every run, as are the
   session's inputs and outputs and the ceiling).
+
+- **Dynamics measurement** (`dynamics`, `DynamicsConfig`: `reference_input`,
+  `measurement_inputs` ([u16], 1…8, each a part of the same trace; none twice, none the
+  reference), `outputs` ([u16]), `carrier: Hz` (≥ 20 Hz; snapped at every run to a whole-sample
+  period, §3.2 *Dynamics runs*), `onset: DynamicsOnset` (`zero` \| `peak`), `pilot: Dbfs` (the
+  rest level), `bursts: [Dbfs]` (1…8, each ≤ 0 and above the pilot), `durations: [Seconds]`
+  (1…16, each > 0 and ≤ 10 s; default 1, 3, 10, 30, 100, 300 ms, 1, 3, 10 s), `rest_max:
+  Seconds` (2…30 s, default 30 s)). Settings only, as a sweep measurement: no stream,
+  `meas.start` / `meas.stop` / `meas.reset` of it are `invalid`; `dynamics.run` plays it and
+  each run is one stored `dynamics` trace it owns. `invalid` at create / update: settings
+  outside those bounds.
 
 #### Ownership (`TraceOwner`) and `meas.delete`
 
@@ -1549,6 +1561,61 @@ analysed band; responses are reported from `start`. `name` nil names the trace `
 - Smoothing, averages and math traces treat a sweep trace as a transfer function (magnitude and
   phase; the distortion stays with the sweep trace).
 
+#### Dynamics runs (`dynamics.run`)
+
+Design: `docs/design/dynamics.md`. `dynamics.run {lease_token, meas, name, rests_from}` plays
+the dynamics measurement `meas`'s programme, all in whole carrier periods: a linearity check
+(`pilot − 6 dB`, then `pilot`, 2 s each), then for each burst level (outer) and length (inner)
+a burst at that level followed by a rest at the pilot, then a 20 ms fade. The carrier is
+snapped to the nearest frequency whose period is a whole, even number of samples (a multiple
+of 4 for `peak` onset) at the session's rate; every burst starts and ends on an onset point.
+A rest ends at the first onset point after the analysis has seen the processor recover
+(gain within 0.05 dB of its baseline, at least 2 s), or at `rest_max`, which the source counts
+itself; with `rests_from` (a dynamics trace) the rests are those of that trace, replayed, so
+an A/B pair plays an identical programme. The generator's level is the highest burst level
+(crest factor √2), checked against the ceiling at every run. `name` nil names the trace
+`Run <number>`.
+
+- Refused (`refused`) above the ceiling, while the generator is not armed by the caller,
+  while it fires, while a loopback detection, a sweep or another dynamics run plays, or
+  without an open session. `invalid`: not a dynamics measurement, inputs not captured,
+  outputs not in the session, a carrier the session's rate cannot play (period below 12
+  samples), `rests_from` not a dynamics trace or with another step count.
+- While it plays the generator is `firing` with `sine` {`freq`: the carrier played} at the
+  highest level as its settings, and `gen.set` is `refused`; stop, release, lease expiry
+  and a closed session abort it with the ordinary fade-out. When the last rest is in, the
+  generator is disarmed (as after a sweep) and one trace of `kind: dynamics` is stored, owned
+  by the measurement (source `dynamics` {`meas`, `meas_name`, `run`, `number` — one more than
+  the highest run number of the measurement's stored runs —, `epoch`}), `cal`
+  `uncalibrated`, on a one-column grid at the carrier (`log`, 48 per octave) whose column is
+  a gap.
+- Progress and outcome are the `dynamics` entity (§4.1), `DynamicsRun`: `id`, `meas`,
+  `owner`, `name`, `reference_input`, `measurement_inputs`, `outputs`, `carrier` (played),
+  `onset`, `pilot`, `bursts`, `durations` (played: whole periods), `rest_max` (played),
+  `rests_from`, `longest` (the longest the run can take: every rest at its longest or
+  replayed length), `started_at`, `status` (`DynamicsStatus`, tagged by `type`): `playing`
+  {`step` (1-based; 0 before the first burst), `steps`, `phase` (`DynamicsPhase`: `waiting`
+  \| `check` \| `burst` \| `rest`)} → `done` {`trace`} or `failed` {`reason`, `msg`}.
+  `DynamicsFailure`: `stopped`, `lease_expired`, `session_closed`, `dropout`, `no_reference`
+  (the reference carries no programme), `pilot_not_below_threshold` (the gain at the pilot
+  differs from the gain 6 dB below it), `mismatch` (the reference's edges do not match the
+  programme, or its end never came).
+- `trace.get` of a dynamics trace: `dynamics` (`DynamicsData`): `info` (`DynamicsInfo`:
+  `sample_rate`, `carrier`, `period` (samples), `onset`, `pilot`, `bursts`, `durations`,
+  `rest_max`, `replayed`, `reference_input`, `steps`: [`DynamicsStep` {`level`, `burst`,
+  `rest` (as played), `recovered` (false: the rest reached `rest_max`)}]), `inputs`:
+  [`DynamicsInput` {`input`, `name`, `delay` (the processor's envelope delay), `g0` (gain at
+  the pilot re the reference), `rows`: one `DynamicsRow` per step, `envelopes`: one
+  [`DynamicsPoint` {`edge` (`start` \| `end`), `t` (s from the edge), `gr_db`, `h_db` (H2…H5
+  re the fundamental, NaN where blind)}] per step}]. `DynamicsRow`: `gr_end`, `gr_settled`
+  (nil: no burst at the level settled), `settled`, `attack_tau`, `attack_2db`, `settle_0_5db`,
+  `overshoot` ({`level`, `at`, `reference`} \| nil), `release_tau`, `recovery_2db`,
+  `recovery_0_5db`, `harmonics` ({`attack`, `settled`, `release`, `rest`}, each {`h`: four
+  levels, `thd`}), `thump_start`, `thump_end` ({`peak`, `rms`}), `drift`. A time is a
+  `DynamicsTime` (tagged by `type`): `seconds` {`value`}, `within_period`, `cant_tell`,
+  `no_gain_reduction`; a level a `DynamicsLevel`: `db` {`value`}, `below_floor`,
+  `cant_tell`. Smoothing, averages and math traces refuse a dynamics trace.
+
 #### Sessions (`file.*`)
 
 Design: `docs/design/sessions.md`. The **working state** is the measurements and traces the
@@ -1913,7 +1980,7 @@ decimated stage averages over a longer span; those stages show a higher coherenc
 `export`, `calibration`, `line_calibration`, `calibrations`, `mic`, `inputs`, `outputs`, `server`, `source_state`,
 `spl_log_page`, `spl_history`, `spl_band_log`,
 `snapshot`, `events`,
-`grid`, `session_file`, `sessions`, `transfer`, `chunk`, `salvage`, `sweep`, `recording`,
+`grid`, `session_file`, `sessions`, `transfer`, `chunk`, `salvage`, `sweep`, `dynamics`, `recording`,
 `recordings`, `plan`, `plans`, `walk`, `sim`.
 
 ### 3.4 Errors
@@ -1938,13 +2005,13 @@ AudioStopped | nil`; §4.1.1),
 `layout`, `offset`, `eq`),
 `traces` (`TraceMeta`: `id`, `edit` {name, color, visible, locked, order, offset,
 polarity, delay_nudge, slot, smoothing, owner}, `kind`, `source` {captured | imported |
-math | eq | average | generated | sweep}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_curve`, `created_at`,
+math | eq | average | generated | sweep | dynamics}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_curve`, `created_at`,
 `eq_in` ([`EqSnapshot`]: the EQ sets marked in the console when captured), `position`
 (`TracePosition` | nil: a walk's capture names its point `label`, `at: [x, y, z]`, `plan`
 and `walk`), `captured_unsettled` (captured before the walk measurement was ready),
 `superseded` (a redone or skipped point's capture: kept, out of the walk's average);
 `kind` one of
-`transfer`, `target`, `spectrum`, `rta`, `sweep`), `generator` (`owner`, `owner_local` (the owner is a client of the local pair, which has
+`transfer`, `target`, `spectrum`, `rta`, `sweep`, `dynamics`), `generator` (`owner`, `owner_local` (the owner is a client of the local pair, which has
 no name of its own: show it as an app on this rig),
 `armed`, `firing`, `settings`, `ceiling`, `ceiling_bound`, `last_action` {`action`: acquire
 \| force \| arm \| fire \| set \| stop \| release \| expiry \| ceiling_lowered \|
@@ -2006,6 +2073,7 @@ and `find_again` stay until a pick, a typed delay or a find), `slip` (`DelaySlip
 function with exactly one channel on a remote rig); committed when any of it changes; the
 clock relation is reported only, never corrected for),
 `sweep` (`SweepRun` | nil: the latest `sweep.run` run),
+`dynamics` (`DynamicsRun` | nil: the latest `dynamics.run` run),
 `autosave` (`Autosave`: `state` {off | saved | pending | failed{reason}}, `saved_at: WallNs |
 nil`, `log_failures: [LogWriteFailure]`; see §7.3), `recording` (`RecordingRun` | nil: the latest recording, §3.2), `working`
 (`WorkingSession`: the working state's session and unsaved changes, §3.2 sessions), `rig`
@@ -2060,7 +2128,7 @@ samples). Every later recovery reopens the configuration as it then stands.
 `state.snapshot` → `{state, rev, daemon_incarnation, session_epoch}`.
 
 An event is `{rev, kind, payload}`. `kind` is one of `session`, `measurement`, `trace`,
-`generator`, `calibration`, `line_calibration`, `mic`, `inputs`, `outputs`, `spl_log`, `timing`, `clocks`, `remote`, `sweep`, `autosave`, `recording`, `working`, `rig`, `plan`, `walk`, `walk_plan`, `sim`, `sim_fit`, `server`. `payload` is the entity's
+`generator`, `calibration`, `line_calibration`, `mic`, `inputs`, `outputs`, `spl_log`, `timing`, `clocks`, `remote`, `sweep`, `dynamics`, `autosave`, `recording`, `working`, `rig`, `plan`, `walk`, `walk_plan`, `sim`, `sim_fit`, `server`. `payload` is the entity's
 full new value (`inputs`: {`inputs`, `pairs`}, both whole lists; `outputs`: the whole list;
 `sim`: the `SimState`, which `State.sim` becomes, or `State.sim_map` for a map; `sim_fit`: the `SimFitKept` or nil); for keyed entities (`measurement`, `trace`,
 `calibration`, `line_calibration` (keyed by `LineCalKey`), `mic` (keyed by name), `spl_log`, `plan` and `walk_plan` (keyed by name), `walk` (keyed by
@@ -2533,6 +2601,20 @@ kept); a v5 sweep export imports without `reference_harmonics`; a v4 sweep expor
 as a sweep without room parameters; a v1 sweep export (no `sweep_info`) imports as
 its transfer function (note `sweep_without_analysis`).
 
+A dynamics trace (`kind: dynamics`) has no frequency rows: after the common header lines
+(without `grid`) come `# dynamics_info:` (the JSON `DynamicsInfo`), `# dynamics_inputs:`
+(JSON [{`input`, `name`, `delay`, `g0`}]), then the step table announced by
+`# dynamics_steps: {"rows":n}` with the header
+`input,step,level_dbfs,burst_s,rest_s,recovered,gr_end_db,gr_settled_db,settled,
+attack_tau_s,attack_2db_s,settle_0_5db_s,overshoot_db,overshoot_t_s,overshoot_ref_db,
+release_tau_s,recovery_2db_s,recovery_0_5db_s`, then `<w>_h2_db…<w>_h5_db,<w>_thd_db` for
+`w` = `attack`, `settled`, `release`, `rest`, then
+`thump_start_peak_db,thump_start_rms_db,thump_end_peak_db,thump_end_rms_db,drift_db`; then the
+envelopes announced by `# dynamics_envelopes: {"rows":m}` with the header
+`input,step,edge,t_s,gr_db,h2_db,h3_db,h4_db,h5_db`. Inputs and steps are 1-based; a time cell
+reads seconds, `within_period`, `cant_tell` or `no_gain_reduction`, a level cell dB,
+`below_floor` or `cant_tell`; envelope gaps read `nan`. Import restores the trace exactly.
+
 **Analyzer text** (`analyzer_text`): columns separated by `,`, `;` (decimal commas
 allowed), tabs or spaces; UTF-8 or Latin-1; comment lines starting with `#`, `*`, `;`,
 `%`, `!` or `//`; non-numeric lines before the first data row are headers, and a header
@@ -2552,7 +2634,7 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 <dir>/spl/<name>.bands.csv   its band log, when the meter's band meter logged (§7.4)
 ```
 
-`session.json`: `{format: "ac2-session", version: 45, saved_at, measurements:
+`session.json`: `{format: "ac2-session", version: 46, saved_at, measurements:
 [{id, config: MeasConfig, running, delay: {applied, nudged, tracking} | null, colour:
 ColourFamily | null, layout: PaneLayout | null, offset: Db, eq: [EqSet]}], spl_logs:
 [{meas, file, bands: file | null}], traces: [{meta: TraceMeta, grid: GridDef, file, mic_curve_points: [[Hz,

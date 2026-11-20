@@ -213,6 +213,7 @@ fn stored(id: u32, freqs: &[f64]) -> TraceData {
                 .collect(),
         ),
         sweep: None,
+        dynamics: None,
         ir: None,
     }
 }

@@ -859,6 +859,11 @@ def requests():
             "server.network",
             {"enabled": True, "bind": {"type": "addr", "addr": "192.168.1.20"}, "port": 47830},
         ),
+        req(
+            105,
+            "dynamics.run",
+            {"lease_token": TOKEN, "meas": 12, "name": None, "rests_from": 14},
+        ),
     ]
 
 

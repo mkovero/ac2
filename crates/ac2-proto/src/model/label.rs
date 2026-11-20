@@ -190,6 +190,7 @@ impl TraceKind {
             } => "spectrum density",
             TraceKind::Rta { .. } => "RTA",
             TraceKind::Sweep => "sweep",
+            TraceKind::Dynamics => "dynamics",
         }
     }
 }

@@ -468,9 +468,10 @@ fn new_measurements_start_and_become_selected() {
             MeasKind::Spectrum { config } => ("spectrum", config.input),
             MeasKind::Rta { config } => ("rta", config.input),
             MeasKind::Spl { config } => ("spl", config.input),
-            MeasKind::Transfer { .. } | MeasKind::Math { .. } | MeasKind::Sweep { .. } => {
-                ("tf", 99)
-            }
+            MeasKind::Transfer { .. }
+            | MeasKind::Math { .. }
+            | MeasKind::Sweep { .. }
+            | MeasKind::Dynamics { .. } => ("tf", 99),
         };
         assert_eq!(kind, (want, 1));
     }

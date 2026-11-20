@@ -172,7 +172,7 @@ fn topics_of(
                 _ => &[],
             },
             // Its results are stored traces, fetched as traces.
-            MeasKind::Sweep { .. } => &[],
+            MeasKind::Sweep { .. } | MeasKind::Dynamics { .. } => &[],
         };
         out.extend(
             streams

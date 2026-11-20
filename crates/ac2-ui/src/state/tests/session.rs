@@ -78,6 +78,7 @@ fn empty_hint_yields_to_stored_traces() {
     });
     let data = |meta: &TraceMeta| {
         Arc::new(TraceData {
+            dynamics: None,
             meta: meta.clone(),
             mag_db: vec![0.0; 4],
             phase_deg: None,

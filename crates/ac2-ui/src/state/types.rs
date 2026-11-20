@@ -144,13 +144,15 @@ impl SmoothTarget {
                 TraceKind::Transfer | TraceKind::Sweep => Smoothable::Transfer,
                 TraceKind::Spectrum { .. } => Smoothable::Spectrum,
                 TraceKind::Rta { .. } => Smoothable::Rta,
-                TraceKind::Target => Smoothable::No,
+                TraceKind::Target | TraceKind::Dynamics => Smoothable::No,
             },
             SmoothTarget::Meas(m) => match &m.config.kind {
                 MeasKind::Transfer { .. } => Smoothable::Transfer,
                 MeasKind::Spectrum { .. } => Smoothable::Spectrum,
                 MeasKind::Rta { .. } => Smoothable::Rta,
-                MeasKind::Spl { .. } | MeasKind::Sweep { .. } => Smoothable::No,
+                MeasKind::Spl { .. } | MeasKind::Sweep { .. } | MeasKind::Dynamics { .. } => {
+                    Smoothable::No
+                }
                 MeasKind::Math { config } => match config.domain {
                     MathDomain::Transfer => Smoothable::Transfer,
                     MathDomain::Spectrum => Smoothable::Spectrum,

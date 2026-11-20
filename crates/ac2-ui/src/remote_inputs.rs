@@ -135,6 +135,9 @@ pub fn meas_channels(kind: &MeasKind) -> Vec<u16> {
         MeasKind::Sweep { config } => std::iter::once(config.reference_input)
             .chain(config.measurement_inputs.iter().copied())
             .collect(),
+        MeasKind::Dynamics { config } => std::iter::once(config.reference_input)
+            .chain(config.measurement_inputs.iter().copied())
+            .collect(),
         MeasKind::Math { .. } => Vec::new(),
     }
 }
