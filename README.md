@@ -97,7 +97,7 @@ function in about two minutes, with or without hardware (a simulated rig is buil
 
 ## Status
 
-Pre-1.0 (version 0.0.0; no compatibility promised between builds: protocol, session and
+Pre-1.0 (version 0.1.0; no compatibility promised between builds: protocol, session and
 calibration-store versions are checked and a mismatch is refused or set aside, never
 guessed). Phases 0–6 of [PLAN.md](PLAN.md#9-phases) — audio, DSP, daemon and protocol, UI,
 calibration / SPL / sessions, packaging and documentation — meet their CI criteria; most
