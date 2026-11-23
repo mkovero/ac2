@@ -385,3 +385,22 @@ fn a_hidden_measurement_stays_hidden_across_a_daemon_restart() {
     t.conn(mirror_of(s, 2, Some("c1")));
     assert_eq!(t.st.rig.hidden_meas, [MeasId(7)].into());
 }
+
+/// A fold is kept by id, and a daemon restarting numbers afresh: the folded one waits by
+/// name and is folded again under its new id; one not folded stays open.
+#[test]
+fn a_folded_measurement_stays_folded_across_a_daemon_restart() {
+    use ac2_proto::model::TraceOwner;
+    let mut t = T::new();
+    t.st.apply(
+        Msg::ToggleGroup(TraceOwner::Meas { meas: MeasId(2) }),
+        &t.keys,
+    );
+    let mut s = daemon_state();
+    s.measurements = vec![meas(7, "Sub", spectrum()), meas(8, "Main L", transfer())];
+    t.conn(mirror_of(s, 2, Some("c1")));
+    assert_eq!(
+        t.st.rig.collapsed,
+        [TraceOwner::Meas { meas: MeasId(7) }].into()
+    );
+}

@@ -216,7 +216,8 @@ impl AppState {
     /// name no measurement has waits as a pane's remembered measurement does: while the
     /// daemon lists none, or once listed (it comes back with a session reopening).
     pub(in crate::state) fn restore_meas_choices(&mut self) {
-        if self.daemon().is_none() || self.rig.pending.hidden.is_empty() {
+        let p = &self.rig.pending;
+        if self.daemon().is_none() || (p.hidden.is_empty() && p.folded.is_empty()) {
             return;
         }
         let ms: Vec<(MeasId, String)> = self
@@ -239,6 +240,13 @@ impl AppState {
             });
         };
         resolve(&mut self.rig.pending.hidden, &mut self.rig.hidden_meas);
+        // A fold waits the same way, and a shared name folds none: rows missing from the
+        // list read as traces lost.
+        let mut folded = BTreeSet::new();
+        resolve(&mut self.rig.pending.folded, &mut folded);
+        self.rig
+            .collapsed
+            .extend(folded.into_iter().map(|meas| TraceOwner::Meas { meas }));
     }
 
     /// Saves the layout (with each pane's level axes), the IR axes and the legend with the

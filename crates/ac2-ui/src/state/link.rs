@@ -27,6 +27,10 @@ pub(crate) struct Pending {
     /// from `ui.toml`, or a hidden one the daemon took away (a session reopening, a daemon
     /// restarting renumbers them).
     pub(super) hidden: BTreeSet<String>,
+    /// Folded measurements by name, waiting as the hidden ones do: a fold is the
+    /// operator's arrangement of the list, and a daemon restarting takes the ids it was
+    /// kept by.
+    pub(super) folded: BTreeSet<String>,
 }
 
 impl AppState {
@@ -620,6 +624,19 @@ impl AppState {
             }
             if let Some(n) = names.get(id).filter(|n| !staying.contains(*n)) {
                 pending.insert(n.clone());
+            }
+            false
+        });
+        let folded = &mut self.rig.pending.folded;
+        self.rig.collapsed.retain(|g| {
+            let TraceOwner::Meas { meas } = g else {
+                return true;
+            };
+            if !gone(*meas) {
+                return true;
+            }
+            if let Some(n) = names.get(meas).filter(|n| !staying.contains(*n)) {
+                folded.insert(n.clone());
             }
             false
         });
