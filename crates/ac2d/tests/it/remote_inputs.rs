@@ -798,16 +798,21 @@ fn pairing_and_unpairing_touch_one_rig_only() {
         peer_names(&mut ca),
         vec![(b, "rig-b".into()), (c, "rig-c2".into())]
     );
-    // Another rig under a name already paired takes that entry's place.
-    ca.ok(Command::RigPair {
-        peer: unreachable_peer(d, "rig-b"),
-    });
+    // Another rig under a name already paired is refused, naming the holder: replacing it
+    // would drop rig B without a word.
+    let e = ca
+        .call(Command::RigPair {
+            peer: unreachable_peer(d, "rig-b"),
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
+    assert_eq!(e.msg, format!("name rig-b is rig {b}'s: unpair it first"));
     assert_eq!(
         peer_names(&mut ca),
-        vec![(c, "rig-c2".into()), (d, "rig-b".into())]
+        vec![(b, "rig-b".into()), (c, "rig-c2".into())]
     );
     ca.ok(Command::RigUnpair { rig: c });
-    assert_eq!(peer_names(&mut ca), vec![(d, "rig-b".into())]);
+    assert_eq!(peer_names(&mut ca), vec![(b, "rig-b".into())]);
     let e = ca.call(Command::RigUnpair { rig: c }).unwrap_err();
     assert_eq!(e.code, ErrorCode::NotFound, "{e:?}");
     let e = ca
@@ -816,7 +821,7 @@ fn pairing_and_unpairing_touch_one_rig_only() {
         })
         .unwrap_err();
     assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
-    assert_eq!(peer_names(&mut ca), vec![(d, "rig-b".into())]);
+    assert_eq!(peer_names(&mut ca), vec![(b, "rig-b".into())]);
     a.shutdown();
 }
 
@@ -899,16 +904,12 @@ fn a_running_feed_outlives_pairing_another_rig() {
         peer: unreachable_peer(c, "rig-c"),
     });
     ca.ok(Command::RigUnpair { rig: c });
-    // Past a report of the joined feed, whatever one is running.
-    let t0 = Instant::now();
-    while t0.elapsed() < Duration::from_millis(1500) {
-        let r = remote(&mut ca);
-        assert!(
-            r.inputs.first().is_some_and(|i| i.anchor.is_some()),
-            "the feed started over: {r:#?}"
-        );
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    // A feed started over is dropped within the command, before its answer.
+    let r = remote(&mut ca);
+    assert!(
+        r.inputs.first().is_some_and(|i| i.anchor.is_some()),
+        "the feed started over: {r:#?}"
+    );
     a.shutdown();
     b.shutdown();
 }

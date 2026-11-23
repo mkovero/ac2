@@ -984,8 +984,9 @@ pub enum Command {
         rig_id: RigId,
     },
     /// Pair with one more rig: this rig may take its inputs, at the address and with the key
-    /// the app pinned for it. It takes the place of an entry for the same rig or under the
-    /// same name; the other paired rigs stay as they are (kept in the rig settings file).
+    /// the app pinned for it. It takes the place of an entry for the same rig; a name another
+    /// paired rig holds is `invalid` (unpair that rig first). The other paired rigs stay as
+    /// they are (kept in the rig settings file).
     #[serde(rename = "rig.pair")]
     RigPair {
         /// The rig paired with.

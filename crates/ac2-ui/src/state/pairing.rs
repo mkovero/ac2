@@ -55,12 +55,12 @@ fn key_now(r: Result<&RigState, Unseen>) -> Result<Option<&str>, Unseen> {
 
 /// Whether an entry pinned to `pinned` is in place against the key its rig serves under
 /// now: an entry under another key is stale (the link would be refused), and one whose
-/// rig's key is not seen cannot be told.
+/// rig's key is not seen is there but unchecked.
 fn key_half(pinned: &str, now: Result<Option<&str>, Unseen>, side: Side) -> Half {
     match now {
         Ok(Some(k)) if k == pinned => Half::Yes,
         Ok(_) => Half::No,
-        Err(why) => Half::Unknown { side, why },
+        Err(why) => Half::Unchecked { side, why },
     }
 }
 
@@ -107,7 +107,7 @@ fn admits(
     } else {
         halves
             .into_iter()
-            .find(|h| matches!(h, Half::Unknown { .. }))
+            .find(|h| matches!(h, Half::Unchecked { .. }))
             .unwrap_or(Half::No)
     }
 }
@@ -226,12 +226,14 @@ impl AppState {
             .into_iter()
             .map(|(rig, name)| {
                 let h = self.pair_halves(rig);
+                let unreached = self.unreached(rig);
+                let reachable = unreached.is_none() && connected(&self.rig);
                 PairedRow {
                     rig,
                     text: words::row(&name, &h),
-                    tip: words::tip(&name, &h),
+                    tip: words::tip(&name, &h, reachable),
                     halves: h,
-                    unreached: self.unreached(rig),
+                    unreached,
                     name,
                 }
             })
@@ -415,15 +417,19 @@ impl AppState {
         match admitted(&self.rig.server) {
             Ok(a) if a.iter().any(|(id, ..)| *id == rig) => out.push(revoke(&me, rig, &name)),
             Ok(_) => {}
-            Err(why) => notes.push(words::unpair_admission_unseen(&name, why)),
+            Err(why) => notes.push(words::unpair_admission_unseen(&name, Side::Here, why)),
         }
         if let Some(t) = there {
             let mut reqs = Vec::new();
             if lists(t, self.rig.id) {
                 reqs.push(unlist(&name, self.rig.id, &me));
             }
-            if admitted(&t.server).is_ok_and(|a| a.iter().any(|(id, ..)| *id == self.rig.id)) {
-                reqs.push(revoke(&name, self.rig.id, &me));
+            match admitted(&t.server) {
+                Ok(a) if a.iter().any(|(id, ..)| *id == self.rig.id) => {
+                    reqs.push(revoke(&name, self.rig.id, &me));
+                }
+                Ok(_) => {}
+                Err(why) => notes.push(words::unpair_admission_unseen(&name, Side::There, why)),
             }
             self.others
                 .elsewhere

@@ -79,8 +79,8 @@ pub enum InputRef { Local(u16), Remote { rig: RigId, channel: u16 } }
 
 ### 2.2 What is offered
 
-**Code fact:** the daemon already links to every rig in `rig.peers` from start and reads
-its `source.state` every second (`remote/link.rs`). This design publishes what it holds:
+**Code fact:** the daemon already links to every paired rig (`remote.peers`, set by
+`rig.pair` / `rig.unpair`) from start and reads its `source.state` every second (`remote/link.rs`). This design publishes what it holds:
 `remote.rigs` lists **every paired rig** with link, rate, relation and offered inputs.
 
 **Code fact that narrows the brief:** a rig offers *the inputs its open session captures*
@@ -260,7 +260,8 @@ the hand that starts it. (b) stays possible later behind a default-off switch.
   shown rig's stimulus if it plays, else the one rig this app plays on; Shift+Esc stops
   every rig the app holds.
 - **Which client.** The tree's paired rig is matched to a client the app holds by the
-  **pinned server key** in `rig.peers`, not by the rig id a daemon states in its hello. No
+  **pinned server key** in its `remote.peers` entry (`rig.pair`), not by the rig id a
+  daemon states in its hello. No
   match: outputs greyed under *connect to ketunkolo to play from it* (the ordinary dialog).
 - **Routing.** Arm, start, level and Esc from the dialog act on the rig whose output is
   chosen. **Code fact:** a key or command without a pane goes to the shown rig

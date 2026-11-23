@@ -446,10 +446,11 @@ inputs over a link of its own: it connects to the other rig's ctrl and data endp
 CURVE with its own server key pair as the client key. The other rig must first admit that
 key with `auth.admit_rig` {`key`, `rig_id`, `name`}: an authorized-clients entry marked as
 a rig (`AuthorizedClient.rig` = the admitted rig's id; nil for an operator's client).
-Admitting a name already present replaces its entry; a replaced or `server.revoke`d key's
-requests are refused and its audio stopped at once. `auth.revoke_rig` {`rig_id`} removes
+Admitting a name already present replaces its entry, and admitting the rig's own id is
+`invalid`; a replaced or `server.revoke`d key's requests are refused and its audio stopped
+at once. `auth.revoke_rig` {`rig_id`} removes
 every entry admitted as that rig, and only those: an operator's client authorized under the
-same name stays (`missing` when no entry is that rig's). The rig's own id is `invalid`. An
+same name stays (`missing` when no entry is that rig's). An
 admitted rig may send `hello` and `source.state` and nothing else (`refused`), and is sent
 only `audio/<channel>` frames (§5.1). `source.state` → `SourceState` {`rig`, `name`,
 `clocks` (`Clocks`, with its `stamp_map`), `session`: `SourceSession` \| nil
@@ -460,7 +461,8 @@ times), `inputs`: [`SourceInput` {`channel`, `setup`: `InputSetup` \| nil,
 {`reference`: `MicCurveRef`, `freq`: [f64], `gain_db`: [f64]}}]}}: all of the session an
 admitted rig sees. `rig.pair` {`peer`: `RigPeer` {`rig`, `name`, `ctrl`, `data`, `key` (the
 other rig's server key, Z85)}} adds one rig this rig takes inputs from, in place of an entry
-for the same rig or under the same name; `rig.unpair` {`rig`} removes that rig's entry
+for the same rig; a name another paired rig holds is `invalid` (unpair that rig first: an
+entry is found by its name, and replacing it would drop that rig and its feed); `rig.unpair` {`rig`} removes that rig's entry
 (`missing` when there is none). Either leaves the other entries as they are, kept in the rig
 settings; the links follow at once. A running session's joined feed starts over only when
 an entry it takes inputs from changed or went; pairing or unpairing another rig leaves it

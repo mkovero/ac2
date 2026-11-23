@@ -470,15 +470,20 @@ lists every rig paired or half paired with the rig shown, each with what the dae
 - what is missing: *pupu · has not admitted this rig*, *pupu · does not list this rig*,
   *pupu · not listed by this rig*, *pupu · not admitted by this rig*;
 - *ketunkolo · its side: can't tell* when what is wanting is the other rig's: the app does
-  not hold it, is not connected to it now, it has not answered, or its network is off (a
-  listing is only counted against the key that rig serves under now, so even this rig's
-  own half waits on it);
+  not hold it, is not connected to it now, it has not answered, or its network is off;
+- *ketunkolo · listed and admitted by this rig · its side: can't tell* (or *listed by this
+  rig*, *admitted by this rig*) when this rig's own entries are there but the key they pin
+  cannot be checked against the one that rig serves under now: an entry under a stale key
+  is refused, so it is not counted in place until that rig is seen (hovering says *can't
+  check its key*);
 - *ketunkolo · can't tell* when this rig's own state is wanting: its network is off (it
   lists no admitted rigs then), it has not answered, or the app is not connected to it.
 
 Only what a daemon shows is said; hovering names whose state is wanting and why.
 
-Hovering a row says each of the four halves. Once paired, the other rig is listed in the
+Hovering a row says each of the four halves, and what **Enter** and **Delete** do there:
+**Enter** is offered only when a half is seen missing and the app is connected to both
+rigs. Once paired, the other rig is listed in the
 measurement tree beside the rig shown.
 
 - *Pair with rig…* (**Enter**) lists the rigs the app holds besides the one shown, by name,
@@ -491,7 +496,9 @@ measurement tree beside the rig shown.
 since only a change to a rig they come from starts them over. Both rigs must be in network
 mode on an address the other reaches; a rig that
   cannot be paired says why in the list instead, and nothing is sent (*serves only its own
-  computer*, *already authorizes an app named …*, *the app is not connected to …*). With no
+  computer*, *already authorizes an app named …*, *already pairs another rig named …*, *the
+app is not connected to …*). A rig lists its paired rigs by name, so two rigs that go by
+the same name cannot both be paired with one rig: unpair the one there first. With no
   other rig held it says *connect to it first*.
 - **Enter** on a half-paired row pairs the missing halves the same way; on a row that
   cannot be told it says what cannot be told, and why.
@@ -501,9 +508,10 @@ mode on an address the other reaches; a rig that
   keeps its key. When the app does not hold that rig, or is not connected to it now, only
   this rig's side is done, and the first **Delete** says so: the app cannot tell whether
   that rig's session takes this rig's inputs, and if it does they stop. Afterwards the page
-  says what remains: connect to that rig, show it and unpair this rig there to finish. With
-  this rig's network off its admissions are not listed, so the page says an admission, if
-  any, stays. While a session the app sees takes inputs from the other rig, unpairing is
+  says what remains: connect to that rig, show it and unpair this rig there to finish. When
+  either rig's admissions cannot be seen (its network off, or it did not answer), that
+  admission is not revoked: the first **Delete** promises no more than is sent, and the
+  page says an admission, if any, stays. While a session the app sees takes inputs from the other rig, unpairing is
   refused, naming them: remove those inputs first (Settings › Audio I/O). With the app not
   connected to the rig shown, unpairing is refused.
 

@@ -364,7 +364,7 @@ impl ConnectionPage {
             Some(ConnLine::Authorized(name)) => name,
             Some(ConnLine::Paired(rig)) => {
                 let r = self.pairing.row(rig)?;
-                let ask = ac2_scene::pairing::unpair_confirm(&r.name, r.unreached);
+                let ask = ac2_scene::pairing::unpair_confirm(&r.name, r.unreached, &r.halves);
                 if self.pairing.confirm == Some(rig) {
                     self.pairing.confirm = None;
                     return Some(ConnAction::Unpair(rig));

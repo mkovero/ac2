@@ -291,6 +291,7 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
         Request::RemoteSession { pair, config, what } => {
             let (c, o) = (client.clone(), out.clone());
             tokio::spawn(async move {
+                let paired = pair.as_ref().map(|p| p.name.clone());
                 if let Some(peer) = pair
                     && let Err(e) = c.call(Command::RigPair { peer }).await
                 {
@@ -305,7 +306,10 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
                         send_warnings(&o, warnings);
                         Ok(())
                     }
-                    Err(e) => Err(e.to_string()),
+                    Err(e) => Err(ac2_scene::remote_inputs::open_failed(
+                        &e.to_string(),
+                        paired.as_deref(),
+                    )),
                 };
                 o.send(ConnEvent::Reply { what, result });
             });

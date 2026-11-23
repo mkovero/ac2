@@ -295,6 +295,12 @@ fn enter_on_a_half_paired_row_sends_the_missing_halves_only() {
         .cloned()
         .expect("pupu's row");
     assert_eq!(row.text, "pupu · has not admitted this rig");
+    assert!(
+        row.tip
+            .ends_with("Enter pairs the missing halves · Delete twice unpairs"),
+        "{}",
+        row.tip
+    );
     let r = click(&mut t, &ConnLine::Paired(PUPU));
     assert_eq!(admits(&r, PUPU).len(), 1, "{r:?}");
     assert!(admits(&r, RIG).is_empty(), "{r:?}");
@@ -348,7 +354,7 @@ fn delete_twice_unpairs_both_ways() {
     assert!(lists(&r, RIG).is_empty(), "first Delete asks: {r:?}");
     assert_eq!(
         conn_page(&t).notice.as_deref(),
-        Some(words::unpair_confirm("pupu", None).as_str())
+        Some("Delete again unpairs pupu both ways")
     );
     let r = key(&mut t, "Delete");
     assert_eq!(
@@ -417,17 +423,27 @@ fn a_rig_not_held_is_unpaired_on_this_side_only() {
         .row(KETUNKOLO)
         .cloned()
         .expect("ketunkolo's row");
-    assert_eq!(row.text, "ketunkolo · its side: can't tell");
+    // This rig's own entries are there; only the key they pin cannot be checked.
+    assert_eq!(
+        row.text,
+        "ketunkolo · listed and admitted by this rig · its side: can't tell"
+    );
     assert_eq!(row.unreached, Some(words::Unseen::NotHeld));
     assert!(!row.mend());
-    // Its key is not seen, so even this rig's listing of it cannot be told in place.
     assert!(
         row.tip.contains(
-            "can't tell whether this rig lists ketunkolo (the app does not hold ketunkolo"
+            "  this rig lists ketunkolo as paired (can't check its key: the app does not hold \
+             ketunkolo"
         ),
         "{}",
         row.tip
     );
+    assert!(
+        !row.tip.contains("can't tell whether this rig"),
+        "{}",
+        row.tip
+    );
+    assert!(row.tip.ends_with("\nDelete twice unpairs"), "{}", row.tip);
     // Enter claims nothing: it says what cannot be told.
     click(&mut t, &ConnLine::Paired(KETUNKOLO));
     assert_eq!(
@@ -435,7 +451,7 @@ fn a_rig_not_held_is_unpaired_on_this_side_only() {
         Some(words::cant_tell("ketunkolo", &row.halves).as_str())
     );
     delete_on(&mut t, &ConnLine::Paired(KETUNKOLO));
-    let ask = words::unpair_confirm("ketunkolo", Some(words::Unseen::NotHeld));
+    let ask = words::unpair_confirm("ketunkolo", Some(words::Unseen::NotHeld), &row.halves);
     assert!(
         ask.contains("Can't tell whether ketunkolo's session"),
         "{ask}"
@@ -466,7 +482,10 @@ fn a_rig_held_but_lost_is_not_read_and_unpaired_on_this_side_only() {
         .row(PUPU)
         .cloned()
         .expect("pupu's row");
-    assert_eq!(row.text, "pupu · its side: can't tell");
+    assert_eq!(
+        row.text,
+        "pupu · listed and admitted by this rig · its side: can't tell"
+    );
     assert_eq!(row.unreached, Some(words::Unseen::NotConnected));
     assert!(
         row.tip.contains(
@@ -478,7 +497,9 @@ fn a_rig_held_but_lost_is_not_read_and_unpaired_on_this_side_only() {
     delete_on(&mut t, &ConnLine::Paired(PUPU));
     assert_eq!(
         conn_page(&t).notice.as_deref(),
-        Some(words::unpair_confirm("pupu", Some(words::Unseen::NotConnected)).as_str())
+        Some(
+            words::unpair_confirm("pupu", Some(words::Unseen::NotConnected), &row.halves).as_str()
+        )
     );
     let r = key(&mut t, "Delete");
     assert_eq!(unlists(&r, RIG).len(), 1, "{r:?}");
@@ -502,7 +523,10 @@ fn unpairing_is_refused_while_the_rig_shown_is_lost() {
         .row(PUPU)
         .cloned()
         .expect("pupu's row");
-    assert_eq!(row.text, "pupu · can't tell");
+    assert_eq!(
+        row.text,
+        "pupu · lists this rig · has admitted this rig · can't tell"
+    );
     delete_on(&mut t, &ConnLine::Paired(PUPU));
     let r = key(&mut t, "Delete");
     assert!(
@@ -544,12 +568,76 @@ fn this_rigs_unseen_admission_is_said_as_this_rigs() {
         Some(words::cant_tell("pupu", &row.halves).as_str())
     );
     delete_on(&mut t, &ConnLine::Paired(PUPU));
+    let ask = conn_page(&t).notice.clone().unwrap_or_default();
+    assert!(!ask.contains("both ways"), "{ask}");
     let r = key(&mut t, "Delete");
     assert_eq!(unlists(&r, RIG).len(), 1, "{r:?}");
     assert!(revokes(&r, RIG).is_empty(), "{r:?}");
     assert_eq!(revokes(&r, PUPU), vec![RIG]);
     assert_eq!(
         conn_page(&t).notice.as_deref(),
-        Some(words::unpair_admission_unseen("pupu", words::Unseen::NetworkOff).as_str())
+        Some(
+            words::unpair_admission_unseen("pupu", words::Side::Here, words::Unseen::NetworkOff)
+                .as_str()
+        )
+    );
+}
+
+/// The other rig's admissions unseen: the confirm does not promise both ways, its
+/// admission is not revoked blind, and the page says it may stay.
+#[test]
+fn the_other_rigs_unseen_admission_is_said_and_not_promised() {
+    let mut t = unpaired();
+    paired_both(&mut t);
+    to(
+        &mut t,
+        PUPU,
+        ConnEvent::Server {
+            what: None,
+            result: Err("timed out".into()),
+        },
+    );
+    tick(&mut t);
+    delete_on(&mut t, &ConnLine::Paired(PUPU));
+    let ask = conn_page(&t).notice.clone().unwrap_or_default();
+    assert_eq!(
+        ask,
+        "Delete again unpairs pupu as far as the app sees. Can't tell whether pupu admits \
+         this rig (pupu did not answer the app): an admission not seen stays"
+    );
+    let r = key(&mut t, "Delete");
+    assert_eq!(unlists(&r, RIG).len(), 1, "{r:?}");
+    assert_eq!(unlists(&r, PUPU).len(), 1, "{r:?}");
+    assert_eq!(revokes(&r, RIG), vec![PUPU]);
+    assert!(revokes(&r, PUPU).is_empty(), "{r:?}");
+    assert_eq!(
+        conn_page(&t).notice.as_deref(),
+        Some(
+            "Can't tell whether pupu admits this rig (pupu did not answer the app): if it \
+             does, that stays; revoke it there under Authorized clients once seen"
+        )
+    );
+}
+
+/// A rig the taker already pairs under the other rig's name is refused before anything
+/// is sent: the daemon would refuse it, and the operator is told which rig to unpair.
+#[test]
+fn pairing_under_a_name_another_rig_holds_is_refused() {
+    let mut t = unpaired();
+    let me = t.st.rig_label(&t.st.rig);
+    remirror(&mut t, |s| {
+        s.remote.peers = vec![peer(KETUNKOLO, "pupu", KEY_B)]
+    });
+    click(&mut t, &ConnLine::PairWith);
+    let offers = conn_page(&t).pairing.offers.clone().expect("the pick open");
+    let want = format!(
+        "{me} already pairs another rig named pupu: unpair that one on {me} first (Settings › \
+         Connection)"
+    );
+    assert_eq!(offers[0].refusal.as_deref(), Some(want.as_str()));
+    let r = key(&mut t, "Enter");
+    assert!(
+        admits(&r, PUPU).is_empty() && lists(&r, RIG).is_empty(),
+        "{r:?}"
     );
 }

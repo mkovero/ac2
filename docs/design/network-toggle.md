@@ -151,8 +151,9 @@ methods take the socket their peer's origin picks).
     `server.info` to a `Curve` peer leaves out the local endpoints and the interface list
     (host detail a remote client has no use for).
   - **PeerBrowse** (lib.rs, started today only with an advert and a key): started by the
-    control thread whenever a key exists and `rig.peers` is non-empty, stopped when either
-    goes, independent of the listener and of `--no-mdns` (which only suppresses the advert).
+    control thread whenever a key exists and some rig is paired (`remote.peers`, set by
+    `rig.pair` / `rig.unpair`), stopped when either goes, independent of the listener and
+    of `--no-mdns` (which only suppresses the advert).
 
 ## Interfaces and addresses
 

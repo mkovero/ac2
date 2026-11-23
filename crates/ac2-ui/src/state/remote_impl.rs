@@ -225,6 +225,15 @@ impl AppState {
         };
         let (ctrl, data) = peer_endpoints(ctrl, data, b.daemon_addr.as_deref(), &self.local_host)
             .ok_or(PairRefusal::LocalOnly)?;
+        let name = self.rig_label(b);
+        if taker.daemon().is_some_and(|s| {
+            s.remote
+                .peers
+                .iter()
+                .any(|p| p.name == name && p.rig != b.id)
+        }) {
+            return Err(PairRefusal::NamePaired(self.rig_label(taker)));
+        }
         let as_name = admit_name(&self.rig_label(taker));
         if n.authorized
             .iter()
@@ -234,7 +243,7 @@ impl AppState {
         }
         Ok(Source {
             id: b.id,
-            name: self.rig_label(b),
+            name,
             ctrl,
             data,
             key: server_key.clone(),

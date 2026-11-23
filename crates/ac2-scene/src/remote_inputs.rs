@@ -114,6 +114,15 @@ pub fn added_toast(name: &str) -> String {
     format!("{name} added to the audio I/O")
 }
 
+/// The fault once the session did not reopen with a remote input after its rig `paired`
+/// was paired for it: the pairing is not undone, so it says the rig stays listed.
+pub fn open_failed(e: &str, paired: Option<&str>) -> String {
+    match paired {
+        Some(rig) => format!("{e} ({rig} stays listed as paired)"),
+        None => e.to_owned(),
+    }
+}
+
 /// The first Delete on a remote input's row.
 pub fn remove_confirm(name: &str) -> String {
     format!("Delete again removes {name} (the audio I/O reopens)")
@@ -127,6 +136,16 @@ pub fn removed_toast(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A session that did not reopen after its rig was paired says the pairing stays.
+    #[test]
+    fn a_failed_reopen_says_the_rig_stays_paired() {
+        assert_eq!(
+            open_failed("refused: rig-b runs 48 kHz", Some("rig-b")),
+            "refused: rig-b runs 48 kHz (rig-b stays listed as paired)"
+        );
+        assert_eq!(open_failed("refused", None), "refused");
+    }
 
     #[test]
     fn a_remote_input_is_named_by_its_rig_and_that_rigs_input() {

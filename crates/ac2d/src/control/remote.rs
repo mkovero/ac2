@@ -237,13 +237,25 @@ impl Control {
         }
     }
 
-    /// `rig.pair`: `peer` in place of an entry for the same rig or under the same name.
+    /// `rig.pair`: `peer` in place of an entry for the same rig; refused under a name another
+    /// paired rig holds.
     pub(super) fn rig_pair(&mut self, peer: RigPeer) -> Result<ReplyBody, ProtoError> {
         if peer.rig == self.s.rig_id {
             return Err(invalid("a rig is not paired with itself"));
         }
         let mut peers = self.store.state().remote.peers.clone();
-        peers.retain(|p| p.rig != peer.rig && p.name != peer.name);
+        // A paired rig is named by the operator's tools and found by that name: another rig
+        // under it would take that rig's place, and its running feed with it.
+        if let Some(holder) = peers
+            .iter()
+            .find(|p| p.name == peer.name && p.rig != peer.rig)
+        {
+            return Err(invalid(format!(
+                "name {} is rig {}'s: unpair it first",
+                peer.name, holder.rig
+            )));
+        }
+        peers.retain(|p| p.rig != peer.rig);
         peers.push(peer);
         self.set_rig_peers(peers)
     }
