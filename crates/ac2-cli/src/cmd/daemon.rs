@@ -121,6 +121,12 @@ fn status_text(
         s.push('\n');
         s.push_str(&l);
     }
+    // Beside the audio-fed relation, never in its place: the clocks as each paired rig's
+    // always-on levels show them.
+    for l in ac2_scene::standing::status_lines(&st.remote) {
+        s.push('\n');
+        s.push_str(&l);
+    }
     for l in ac2_scene::cross_rig::status_cli(&st.remote, &st.measurements, &w.name) {
         s.push('\n');
         s.push_str(&l);
