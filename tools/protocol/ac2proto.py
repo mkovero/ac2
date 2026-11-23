@@ -187,6 +187,7 @@ _CAL = ("tagged", {
     "uncalibrated": [],
     "verified": [("calibrated_at", None), ("basis", _CAL_BASIS)],
     "other_mic_or_input": [("calibrated_at", None), ("basis", _CAL_BASIS)],
+    "line": [("calibrated_at", None), ("dbu_fs", None)],
 })
 _TIMING_STATE = ("tagged", {
     "no_stimulus": [],

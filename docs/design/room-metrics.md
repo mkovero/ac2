@@ -69,7 +69,7 @@ crossing point plus the same tail correction.
 | refusal | when | shown as |
 |---|---|---|
 | `insufficient_range` | decay range below what the parameter needs: EDT, C50, C80, D50 20 dB; T20 35 dB; T30 45 dB (ISO 3382-1: the bottom of the evaluation range plus 10 dB) | `noise` |
-| `filter_limited` | bandwidth × decay time below 8: the energy the reversed filter moves to the onset is a step at the top of the curve, and one band of one response has only about B·T degrees of freedom | `short` |
+| `filter_limited` | bandwidth × decay time below 8. Run backwards, the filter leaves a single exponential decay exactly exponential from the onset on, but the energy it moves before the onset (counted there) is a step at the top of the curve: at B·T = 8 it changes EDT by ≤ 1 % (≤ 6 % with a direct sound as strong as the whole reverberation), at B·T = 4 by up to 45 %. T20 and T30 start below that step, but one band of one response has only about B·T degrees of freedom, so they scatter as widely there and share the limit | `short` |
 | `no_decay` | no energy, no falling curve, or a curve that falls through its range in under 2 ms (a step: the direct sound alone, e.g. an anechoic path) | `—` |
 
 The legend under the table says what each word means; `ac2 ir metrics --json` carries the

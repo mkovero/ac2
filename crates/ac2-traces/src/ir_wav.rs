@@ -2,8 +2,9 @@
 //! trace that carries the samples and their frequency response, and a trace's impulse
 //! response exported as a mono float WAV, so IRs move to and from other analyzers.
 //!
-//! The response is [`ac2_core::ir_response`]'s, on the ten-octave log grid a transfer
-//! measurement uses. The trace's `delay` is the time zero of its phase re the file's first
+//! The response is [`ac2_core::ir_response`]'s, on the log grid a transfer measurement
+//! uses (fifteen octaves, the same at every sample rate), so the trace compares column for
+//! column with a captured one. The trace's `delay` is the time zero of its phase re the file's first
 //! sample (the peak with [`IrAlign::Peak`]), and its IR's `t0` puts that time zero at 0 in
 //! the IR views, as a captured transfer trace's inserted delay is.
 

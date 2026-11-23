@@ -51,8 +51,8 @@ pub struct IrImport {
     pub window: IrImportWindow,
     /// Time zero of the phase.
     pub align: IrAlign,
-    /// Columns per octave of the response (ten octaves around 1 kHz, as a transfer
-    /// measurement's).
+    /// Columns per octave of the response, on a transfer measurement's fifteen-octave grid
+    /// so the trace compares column for column with a captured one.
     pub resolution: Resolution,
 }
 

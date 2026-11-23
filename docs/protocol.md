@@ -1,9 +1,10 @@
 # ac2 protocol
 
 Normative description of the wire protocol between `ac2d` and its clients. The Rust types
-in `crates/ac2-proto` are the implementation; `crates/ac2-proto/tests/it/doc_parity.rs` fails
-when a command, reply body, event kind, error code, frame header field, frame kind, array
-name or unit exists in the code but not here. Background: PLAN.md §6,
+in `crates/ac2-proto` are the implementation; `crates/ac2-proto/tests/it/doc_parity.rs` checks
+one direction, code to document: it fails when a name of a type it lists (the type's variants
+and fields, one level deep) is missing here, and it checks `PROTO_VERSION`, `MAX_HEADER_BYTES`,
+`MAX_N` and the log grid id. A name written here that the code lacks is not caught. Background: PLAN.md §6,
 `docs/design/q2-q5-q6-protocol.md`, `docs/design/spike-zmq-curve.md`.
 
 The protocol is transport-agnostic bytes. Under ZeroMQ, ctrl is DEALER ↔ ROUTER (one
@@ -20,11 +21,17 @@ keepalives to each connection as its credit allows (§5.8).
 - Unknown fields are refused everywhere (strict in both directions). Fields are never
   defaulted when missing, except that an absent optional field reads as `nil`.
 - Enums are snake_case strings (`"db_spl"`) when they carry no data. Enums with data are
-  maps tagged by `type` (`{"type": "sine", "freq": 1000.0}`) unless stated otherwise.
+  maps tagged by `type` (`{"type": "sine", "freq": 1000.0}`) unless stated otherwise. A
+  variant without data of an enum tagged by `type` is `{type: x}` (`[x]` in a positional
+  frame header).
 - Physical quantities are floats (f64) in the unit their type names: `Hz`, `Seconds`, `Db`
-  (ratio), `Dbfs` (0 dBFS = RMS of a full-scale sine), `DbSpl`, `Degrees`. Sample counts
-  (`Samples`) are signed integers; sample indices and `WallNs` (Unix ns, daemon clock) are
-  u64.
+  (ratio), `Dbfs` (0 dBFS = RMS of a full-scale sine), `Dbtp` (true peak re full scale),
+  `Lufs` (programme loudness), `DbSpl`, `Dbu` (dB re 0.7746 V RMS), `Volts` (RMS),
+  `MvPerPa` (mic sensitivity), `Ohms`, `Phon`, `Degrees`. Sample counts (`Samples`) are
+  signed integers; sample indices and `WallNs` (Unix ns, daemon clock) are u64.
+- Indices on the wire (channels, inputs, outputs, steps, points) are zero-based except
+  `DynamicsStatus.step` (1-based; 0 is before the first burst) and the 1-based indices in
+  CSV files; counters (`repeat`, `pass`) and line numbers start at 1.
 - Opaque bytes (`lease_token`, file content) are msgpack `bin`, never base64. A lease
   token is 16 bytes (u128, big-endian).
 - Std `Result` values (the reply `result`) are `{"Ok": …}` or `{"Err": …}`.
@@ -35,16 +42,21 @@ keepalives to each connection as its credit allows (§5.8).
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
-- `v` missing → refused (`MissingVersion`); it is never assumed.
+- `v` missing → refused as `version_mismatch` with `detail.client` 0; it is never assumed.
 - `v` ≠ own version → refused. The daemon answers with a reply at its own version whose
   `result` is `Err{code: version_mismatch, detail: {type: version, daemon, client}}`. A
   client that receives a reply with another `v` treats it as the same refusal without
   decoding the body.
 - There is no negotiation, no range of accepted versions and no compatibility layer.
+- An envelope (`v`, `id`) that does not parse is dropped without a reply. An envelope that
+  parses with a body that does not decode is answered `invalid`. A request without `id` is
+  answered as id 0.
 
-The first request on a connection is `hello`; its reply `welcome` carries `server`
-(`ac2d <version> (build <id>)`), `client_id` (the identity the daemon bound to the connection: the ZAP User-Id under CURVE, otherwise a
+The first request on a connection is `hello` {`client`: string, the client software's
+name}; its reply `welcome` carries `server` (`ac2d <version> (build <id>)`), `client_id`
+(`ClientId`, a string: the identity the daemon bound to the connection: the ZAP User-Id under CURVE, otherwise a
 daemon-assigned id), `daemon_incarnation`, `session_epoch`, `rev`, `rig_id` and `name`.
+A `hello` that is not the first request gets another `welcome`.
 
 `rig_id` (u64, never 0) is the daemon's identity: random, made once and kept in a file
 (`rig-id` in the ac2 config directory, 16 lowercase hex digits and a newline), the same across reconnects,
@@ -77,8 +89,11 @@ Warning { type: "<name>", … }
   while they run). A client shows them to the operator; they change nothing in `result`.
 
 - `args` is absent for commands without arguments.
-- `id` is unique per client (a network client's authorized name; a local connection) within
-  the dedup window: the last 256 answered ids, each kept 30 s from its reply. An id executes
+- `id` is unique per client within the dedup window: the last 256 answered ids, each kept
+  30 s from its reply. The window is keyed by (authorized name, key) on the network pair and
+  by connection on the local pair, so a local retry across a reconnect executes again. A
+  client starts its ids at a random 63-bit value, since processes sharing one key share one
+  window. An id executes
   once, whichever command it carries. A copy sent while the request still runs (a panel, the
   delay finder, loopback detection) runs nothing: when the request completes, the reply goes
   to every copy, on whichever connection each arrived. A copy sent after the reply gets the
@@ -89,6 +104,10 @@ Warning { type: "<name>", … }
   `file.download_begin`); any other read is not stored, and a copy of it after the reply
   runs again. Requests refused before execution (protocol version, undecodable, revoked
   key) are not remembered. Revoking a client forgets its stored replies and running ids.
+- `session.control_panel`, `delay.find`, `session.detect_loopback` and the file jobs
+  (`file.list`, `file.save`, `file.load`, `file.new`, `file.recover`, `file.salvage`,
+  `file.import`, `file.download_begin`) run beside the ctrl loop: other requests are
+  answered while they run.
 - `expect_rev` applies to mutations: if state has moved past it the reply is `conflict`
   with `detail: {type: conflict, rev}` (the current rev). Commits are serial.
 - Largest ctrl message: 4 MiB, checked before parsing. A reply that would be larger is
@@ -105,19 +124,21 @@ Warning { type: "<name>", … }
 
 ### 3.2 Commands
 
-Lease column: **L** = `lease_token` required (Q6).
+Lease column: **L** = `lease_token` required (Q6); **non-mutating** = the command commits no
+state change (`expect_rev` does not apply). Every command not marked non-mutating is a
+mutation.
 
 | op | args | reply body | lease |
 |---|---|---|---|
-| `hello` | `client` | `welcome` | |
-| `session.devices` | — | `backends` | |
-| `session.preview` | `backend: BackendKind`, `device: DeviceId`, `inputs: [PreviewInput]` ({`channel`, `kind: InputKind`}), `pairs: [Pair]` | `preview` | |
-| `session.preview_stop` | — | `ack` | |
-| `session.control_panel` | `backend: BackendKind`, `device: DeviceId` | `ack` | |
-| `session.detect_loopback` | `lease_token`, `backend`, `input_device`, `output_device`, `output: u16`, `level: Dbfs \| nil` | `loopback_detection` | L |
+| `hello` | `client` | `welcome` | non-mutating |
+| `session.devices` | — | `backends` | non-mutating |
+| `session.preview` | `backend: BackendKind`, `device: DeviceId`, `inputs: [PreviewInput]` ({`channel`, `kind: InputKind`}), `pairs: [Pair]` | `preview` | non-mutating |
+| `session.preview_stop` | — | `ack` | non-mutating |
+| `session.control_panel` | `backend: BackendKind`, `device: DeviceId` | `ack` | non-mutating |
+| `session.detect_loopback` | `lease_token`, `backend`, `input_device`, `output_device`, `output: u16`, `level: Dbfs \| nil` | `loopback_detection` | L, non-mutating |
 | `session.open` | `config: SessionConfig` | `session` | |
 | `session.close` | — | `ack` | |
-| `session.status` | — | `session` | |
+| `session.status` | — | `session` | non-mutating |
 | `session.inputs` | `inputs: [InputSetup]` (upserted by channel), `pairs: [Pair]` (the whole list) | `inputs` (`inputs`: the whole setup, `pairs`) | |
 | `session.outputs` | `outputs: [OutputSetup]` (upserted by channel; `label: nil` clears) | `outputs` (every label) | |
 | `gen.acquire` | `force: bool` | `lease` (`lease_token`, `expires_in_ms`) | |
@@ -144,14 +165,14 @@ Lease column: **L** = `lease_token` required (Q6).
 | `meas.start` | `meas` | `measurement` | |
 | `meas.stop` | `meas` | `measurement` | |
 | `meas.reset` | `meas` | `ack` | |
-| `delay.find` | `meas`, `band: FinderBand`, `observation: Seconds \| nil` | `delay_finding` | |
+| `delay.find` | `meas`, `band: FinderBand`, `observation: Seconds \| nil` | `delay_finding` | non-mutating |
 | `delay.insert` | `meas`, `pick: first_arrival \| strongest \| ranked{index}` | `measurement` | |
 | `delay.set` | `meas`, `delay: Seconds` | `measurement` | |
 | `delay.nudge` | `meas`, `by: Seconds` | `measurement` | |
 | `delay.track` | `meas`, `enabled` | `measurement` | |
 | `trace.capture` | `meas`, `name`, `slot` (1…9 \| nil) | `trace` | |
-| `trace.list` | — | `traces` | |
-| `trace.get` | `trace` | `trace_data` | |
+| `trace.list` | — | `traces` | non-mutating |
+| `trace.get` | `trace` | `trace_data` | non-mutating |
 | `trace.update` | `trace`, `edit: TraceEdit` (full replacement) | `trace` | |
 | `trace.delete` | `trace` | `ack` | |
 | `trace.average` | `traces`, `method`, `reference`, `name` | `trace` | |
@@ -165,16 +186,16 @@ Lease column: **L** = `lease_token` required (Q6).
 | `cal.curve_rename` | `curve: MicCurveId`, `label` | `mic` | |
 | `cal.curve_delete` | `curve: MicCurveId` | `ack` | |
 | `cal.line` | `channel`, `volts: Volts` | `line_calibration` | |
-| `cal.list` | — | `calibrations` (`calibrations`, `line_calibrations`, `mics`) | |
+| `cal.list` | — | `calibrations` (`calibrations`, `line_calibrations`, `mics`) | non-mutating |
 | `cal.delete` | `key: CalRef` (`type`: `spl` {device, channel, mic} \| `line` {device, channel}) | `ack` | |
 | `plan.save` | `plan: PlanSpec` | `plan` | |
 | `plan.list` | — | `plans` | non-mutating |
 | `plan.delete` | `name` | `ack` | |
 | `walk.new` | `name`, `plan` (name), `kind: WalkKind` (`live_transfer` \| `sweep`), `meas: [MeasId]`, `points: [WalkPointSpec]` ({`label`, `at: [x, y, z]`}) | `walk` | |
 | `walk.update` | `walk: WalkId`, `name`, `points: [WalkPointSpec]` | `walk` | |
-| `walk.goto` | `walk`, `step: u16` | `walk` | |
+| `walk.goto` | `walk`, `step: u16` (zero-based) | `walk` | |
 | `walk.capture` | `walk` | `walk` | |
-| `walk.skip` | `walk`, `point: u16` | `walk` | |
+| `walk.skip` | `walk`, `point: u16` (zero-based) | `walk` | |
 | `walk.redo` | `walk`, `point: u16` | `walk` | |
 | `walk.swap` | `walk`, `points: [u16]` | `walk` | |
 | `walk.delete` | `walk` | `ack` | |
@@ -182,7 +203,7 @@ Lease column: **L** = `lease_token` required (Q6).
 | `sim.fit` | `request: SimFitRequest` | `sim` | |
 | `sim.map` | `request: SimMapRequest` | `sim` | |
 | `sim.cancel` | — | `sim` | |
-| `spl.log_get` | `meas`, `log: SplLogWhich`, `from: u64`, `max: u32` | `spl_log_page` | |
+| `spl.log_get` | `meas`, `log: SplLogWhich`, `from: u64`, `max: u32` | `spl_log_page` | non-mutating |
 | `spl.log_new` | `meas` | `ack` | |
 | `spl.history_get` | `meas`, `span: HistorySpan` | `spl_history` | non-mutating |
 | `spl.band_transfer` | `meas`, `foh`, `at_place: BandLevelSource`, `background: BandLevelSource \| nil`, `place: str` | `measurement` (as `meas.update`) | |
@@ -191,26 +212,26 @@ Lease column: **L** = `lease_token` required (Q6).
 | `dynamics.run` | `lease_token`, `meas` (a dynamics measurement), `name: string \| nil`, `rests_from: TraceId \| nil` | `dynamics` (the run as started) | L (held for the run), armed |
 | `dynamics.table` | `trace` (a dynamics trace, else `invalid`) | `dynamics_table` (`DynamicsTable`: `info`, `inputs`, as in `DynamicsData` without `envelopes`) | non-mutating |
 | `dynamics.envelope` | `trace` (a dynamics trace), `input: u16` (a measured input, zero-based), `step: u32` (zero-based); else `invalid` | `dynamics_envelope` (`DynamicsEnvelope`: `input`, `step`, `start`, `end`, each edge a `DynamicsEdgeCurve` of parallel f32 arrays {`t`, `gr_db`, `h_db`: four arrays, H2…H5, NaN where blind}) | non-mutating |
-| `state.snapshot` | — | `snapshot` | |
-| `state.since` | `rev` | `events` or `resync_required` | |
-| `grid.get` | `grid_id` | `grid` | |
+| `state.snapshot` | — | `snapshot` | non-mutating |
+| `state.since` | `rev` | `events` or `resync_required` | non-mutating |
+| `grid.get` | `grid_id` | `grid` | non-mutating |
 | `file.save` | `session: SessionRef`, `overwrite: bool` | `session_file`; the working state belongs to it, clean | |
 | `file.load` | `session: SessionRef`, `discard: bool` | `session_file`; loads disarmed, no owner, new epoch | |
-| `file.new` | `discard: bool` | `ack`; every measurement and trace deleted, untitled | |
+| `file.new` | `discard: bool` | `ack`; every session measurement and trace deleted (rig measurements stay), untitled | |
 | `file.recover` | — | `ack`; swaps in the replaced working state | |
 | `file.salvage` | `session: SessionRef` | `salvage` | |
-| `file.list` | — | `sessions` | |
+| `file.list` | — | `sessions` | non-mutating |
 | `file.upload_begin` | `file` (its path on the client), `bytes: u64`, `sha256: string` | `transfer` | non-mutating |
 | `file.upload_chunk` | `transfer`, `offset: u64`, `data: bin` | `ack` | non-mutating |
-| `file.import` | `transfer`, `name`, `overwrite: bool` | `session_file` | non-mutating |
+| `file.import` | `transfer`, `name`, `overwrite: bool` | `session_file` | non-mutating (writes a file, commits no state) |
 | `file.download_begin` | `session: SessionRef \| nil` (nil: the working state) | `transfer` | non-mutating |
 | `file.download_chunk` | `transfer`, `offset: u64` | `chunk` (bin) | non-mutating |
 | `file.download_end` | `transfer`, `saved_as: string \| nil` | `ack` | |
 | `rec.start` | `request: RecordRequest` | `recording` (the run as started) | |
 | `rec.stop` | — | `recording` (the run, finished) | |
-| `rec.list` | — | `recordings` | |
+| `rec.list` | — | `recordings` | non-mutating |
 | `session.replay` | `recording: RecordingRef`, `pace: realtime \| fast` | `session` | |
-| `server.info` | — | `server` | |
+| `server.info` | — | `server` | non-mutating |
 | `server.network` | `enabled: bool`, `bind: NetBind \| nil`, `port: u16 \| nil` | `server` | local clients only |
 | `server.authorize` | `name`, `key` (Z85) | `server` | |
 | `server.revoke` | `name` | `server` | |
@@ -219,6 +240,22 @@ Lease column: **L** = `lease_token` required (Q6).
 | `rig.pair` | `peer: RigPeer` | `ack` | |
 | `rig.unpair` | `rig: RigId` | `ack` | |
 | `source.state` | — | `source_state` | non-mutating; with `hello`, the only command an admitted rig may send |
+
+`session.status` returns `state.session`. `trace.list` returns `state.traces`. `plan.list`
+returns `state.plans`. `gen.refresh` checks the lease, moves its deadline out by the lease
+expiry and, while the generator fires, keeps the output gate open until that deadline.
+`delay.track` sets `delay.tracking` on a transfer measurement and tells its job.
+
+```
+GeneratorDesired  { settings: GeneratorSettings, armed: bool, firing: bool }
+GeneratorSettings { signal: Signal, level: Dbfs, band: BandLimit | nil, outputs: [u16] }
+Signal = {type: "white"} | {type: "pink"} | {type: "periodic_pink", period: Samples}
+       | {type: "sine", freq: Hz} | {type: "ess", sweep: EssSpec}
+BandLimit { highpass: Hz | nil, lowpass: Hz | nil, order: FilterOrder }
+```
+
+`GeneratorDesired` is `gen.set`'s `desired`. `level` is RMS; `band` applies to noise only;
+`outputs` are zero-based output channels; a `periodic_pink` `period` is a power of two.
 
 Rules (Q6): `firing` requires `armed`; arming does not emit. `gen.set` carries the full
 desired state and refreshes the lease. Refresh at least every 0.5 s; expiry 1.5 s after
@@ -234,15 +271,16 @@ expired deadline before the control side noticed, the daemon disarms with the sa
 event, so the state never says firing while the output is silent.
 
 **System max level (`gen.ceiling`).** `generator.ceiling` (dBFS RMS) is the system
-maximum: `gen.set`, `sweep.run` and `session.detect_loopback` above it are `refused`, and
-the output path limits every sample to the matching peak (6 × the RMS, at most full scale)
-on the running stream at once. `generator.ceiling_bound` is the hard upper bound fixed at
+maximum: `gen.set`, `sweep.run`, `dynamics.run` and `session.detect_loopback` above it are
+`refused`, and the output path limits every sample to 6 × the ceiling's RMS in amplitude
+(+15.6 dB of crest; at most full scale) on the running stream at once; generators already
+refuse a level whose own crest would pass it. `generator.ceiling_bound` is the hard upper bound fixed at
 daemon start (`ac2d --max-level`); `gen.ceiling` above it, above 0 dBFS or not finite is
 `invalid`. Any client may change it (no lease):
 
 - **Lowering** applies at once. A stimulus armed or playing at a level above the new
-  maximum, and a sweep running at one, is stopped and disarmed (faded out, 20 ms): stopping
-  is unambiguous where a quietly lowered level would leave the owner's level and the
+  maximum, and a sweep or dynamics run with any level above it, is stopped and disarmed
+  (faded out, 20 ms): stopping is unambiguous where a quietly lowered level would leave the owner's level and the
   measurement's level disagreeing. One at or below the new maximum carries on untouched.
 - **Raising** needs `confirm_raise: true` (`refused` without), and is `refused` while the
   generator is armed or firing, a sweep runs or a loopback detection plays.
@@ -252,7 +290,7 @@ daemon start (`ac2d --max-level`); `gen.ceiling` above it, above 0 dBFS or not f
   later, lower `--max-level` comes up at that bound. A change that cannot be written is
   `internal` and leaves the maximum as it was.
 
-**Output labels (`session.outputs`).** `OutputSetup` = {`channel`: u16, `label`: string |
+**Output labels (`session.outputs`).** `OutputSetup` = {`channel`: u16 (zero-based), `label`: string |
 nil}. Labels name the rig's outputs (`Main L`, `Sub`) for every client; they are kept with
 the rig settings (not in sessions) by channel number, whatever the device. A label is 1–32
 characters, no control characters, no surrounding space (`invalid` otherwise); `nil` clears
@@ -419,16 +457,17 @@ host's interfaces read at each `server.info`, loopback left out; empty to a netw
 client. `recording_dir`: string \| nil (where `rec.start`
 records on the daemon host). `server.authorize` adds `key` under `name` to the
 authorized-clients file (atomic write) and to the running handshake check; `server.revoke`
-removes `name`: its requests are `refused` at once and it cannot connect again (a
-connection already up keeps receiving data frames until it drops). A connection is bound to
-the key it authenticated with, so authorizing a different key under a revoked name does not
-let a connection made with the old key act again. Both answer the new
+removes `name`. A revoked or replaced key's requests are `refused`, its data connection is
+dropped at once (its subscriptions and audio end) and it cannot connect again. A connection
+is bound to the key it authenticated with, so authorizing a different key under a revoked
+name does not let a connection made with the old key act again: the rule above holds for
+the old key. Both answer the new
 `server` info, with the network on or off (the key list is kept either way); an `embedded`
 daemon, which has no key files, answers `unsupported`. A name is 1–64 characters
 without whitespace. A name given again replaces its key (and kind): the connections of the
-key it had are dropped, as a revoke would. `invalid` for a key already under another name, a malformed key, revoking an
-unknown name (`not_found`) or the requesting client's own name (`refused`: that would lock
-the operator out). Any authorized client may use them: every authorized client is equally
+key it had are dropped by the same rule. `invalid` for a key already under another name or
+a malformed key; `not_found` for revoking an unknown name; `refused` for revoking the
+requesting client's own name (that would lock the operator out). Any authorized client may use them: every authorized client is equally
 trusted.
 
 `server.network` {`enabled`, `bind`, `port`} turns the network listener on or off while the
@@ -457,12 +496,13 @@ CURVE with its own server key pair as the client key. The other rig must first a
 key with `auth.admit_rig` {`key`, `rig_id`, `name`}: an authorized-clients entry marked as
 a rig (`AuthorizedClient.rig` = the admitted rig's id; nil for an operator's client).
 Admitting a name already present replaces its entry, and admitting the rig's own id is
-`invalid`; a replaced or `server.revoke`d key's requests are refused and its audio stopped
-at once. `auth.revoke_rig` {`rig_id`} removes
+`invalid`; a replaced or `server.revoke`d key follows the revoke rule above (requests
+`refused`, data connection and audio dropped at once, no reconnect). `auth.revoke_rig` {`rig_id`} removes
 every entry admitted as that rig, and only those: an operator's client authorized under the
-same name stays (`missing` when no entry is that rig's). An
+same name stays (`not_found` when no entry is that rig's). An
 admitted rig may send `hello` and `source.state` and nothing else (`refused`), and is sent
-only `audio/<channel>` frames (§5.1). `source.state` → `SourceState` {`rig`, `name`,
+only `audio/<channel>` frames (§5.1) and the §5.8 notices (`network_off`, `rejoin`); no
+`ka`. `source.state` → `SourceState` {`rig`, `name`,
 `clocks` (`Clocks`, with its `stamp_map`), `session`: `SourceSession` \| nil
 {`incarnation` (`StreamIncarnation` {`daemon`, `epoch`}), `sample_rate_hz`,
 `buffer_frames`, `replaying`, `capture_stamps` (whether its backend stamps capture
@@ -473,7 +513,7 @@ admitted rig sees. `rig.pair` {`peer`: `RigPeer` {`rig`, `name`, `ctrl`, `data`,
 other rig's server key, Z85)}} adds one rig this rig takes inputs from, in place of an entry
 for the same rig; a name another paired rig holds is `invalid` (unpair that rig first: an
 entry is found by its name, and replacing it would drop that rig and its feed); `rig.unpair` {`rig`} removes that rig's entry
-(`missing` when there is none). Either leaves the other entries as they are, kept in the rig
+(`not_found` when there is none). Either leaves the other entries as they are, kept in the rig
 settings; the links follow at once. A running session's joined feed starts over only when
 an entry it takes inputs from changed or went; pairing or unpairing another rig leaves it
 running. A rig whose network was never turned
@@ -522,19 +562,20 @@ Steps column, `gr_end`, `attack_tau`, `attack_2db`, `settle_0_5db`, `overshoot`,
 Release draws every level of A}), where
 its 3D spectrograph is seen from (`spectrum_camera`, required: {`yaw_deg` i8 within ±80,
 `pitch_deg` u8 within 2 … 75, `zoom_step` i8 within −8 … 4}; a camera outside a range is
-refused with `invalid`, never clamped), what it
+refused with `invalid`, never clamped: a rule of `spectrum_camera` alone, other fields state
+their own), what it
 shows (`content`, required, a tagged map, each reference carrying the rig whose id it is), the
 level axis ranges the operator set on it (`levels`: {`transfer`, `spectrum_dbfs`,
 `spectrum_spl`, `distortion`}, each {`lo`, `hi`} dB or nil, nil being framed by the client
 when the pane first shows a curve) and where its readout plates sit (`plates`: {`legend`,
-`readout`, `mark`, `peaks`, `harmonics`, `loudness`}, each {`at`, `scale`}, all six required; a
-pane kind without a plate keeps its slot at the default; `harmonics` is the spectrum's reading
+`readout`, `mark`, `peaks`, `harmonics`, `loudness`}, each {`at`, `scale`}; a `plates` map
+holds all six; a pane kind without a plate keeps its slot at the default; `harmonics` is the spectrum's reading
 of the generator's sine (§3.2 *Harmonics of the generator's sine*); `loudness` is the Programme pane's loudness
 readout, docked beside or above the bars and sized from the room it gets while `at` is nil
 (its `scale` then only sizes it once floated): `at` nil for the client's own placement or
 [x, y], each in 0 … 1, the plate's top-left corner as a fraction of the room the plot leaves
 around the plate, so a dropped plate stays inside its plot at any pane size; `scale` the
-plate's text size, 1 being the theme's; missing = all nil at 1).
+plate's text size, 1 being the theme's).
 
 `PaneContent` is one of:
 
@@ -604,6 +645,22 @@ unstable biquad, a `response` naming no transfer trace…), for more than 8 sets
 sections, and for a `predict` curve not of this measurement. A capture records the marked
 snapshots of its measurement in `TraceMeta.eq_in`; a math capture of a prediction records
 the set as it was (its columns contain it).
+
+```
+MeasConfig     { name: string, kind: MeasKind, scope: MeasScope }
+MeasKind = {type: "transfer", config: TransferConfig} | {type: "spectrum", config: SpectrumConfig}
+         | {type: "rta", config: RtaConfig} | {type: "spl", config: SplConfig}
+         | {type: "math", config: MathConfig} | {type: "sweep", config: SweepConfig}
+         | {type: "dynamics", config: DynamicsConfig}
+TransferConfig { reference_input: u16, measurement_input: u16, averaging: TfAveraging,
+                 resolution: Resolution, smoothing: Smoothing | nil, depth: DepthPolicy,
+                 lf_window: LfWindow, peak: PeakMode }
+SpectrumConfig { input: u16, resolution: SpecResolution, window: Window,
+                 averaging: SpecAveraging, smoothing: SmoothingFraction | nil,
+                 level: SpecLevel, display: SpectrumDisplay }
+RtaConfig      { input: u16, fraction: BandFraction, f_lo: Hz, f_hi: Hz,
+                 weighting: Weighting, averaging: SpecAveraging, display: SpectrumDisplay }
+```
 
 `MeasConfig` = {`name`, `kind`, `scope`: `MeasScope`}. `scope` is `session` (the working
 session's: saved in session files, replaced by a load) or `rig` (the rig's, SPL meters only:
@@ -684,7 +741,8 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   is the published grid (a transfer result's is known before it runs; a spectrum's is the
   display grid of its operands' FFT, its capture every bin).
   - `expr` (`MathExpr`, tagged by `type`): `binary` {`a`, `op`, `b`}, `average` {`of`:
-    2 … 64 distinct operands, `method` `power` \| `complex` \| `coherence_weighted`} or
+    2 … 64 distinct operands when created (`meas.update` may leave fewer, and the frames
+    then carry no average, `FEW_OPERANDS`), `method` `power` \| `complex` \| `coherence_weighted`} or
     `align` {`a`, `b`, `band`: `AlignBand` {`lo`, `hi`} (Hz, 0 < `lo` < `hi`), `max_delay`
     (Seconds, 0 < … ≤ 1)}. An operand (`Operand`, tagged by `type`) is `meas` {`meas`},
     `trace` {`trace`} or `eq` {`meas`, `set`} (an EQ set: `B` of a transfer `multiply`
@@ -763,8 +821,8 @@ functions and narrowband spectra; RTA bands already are fractional-octave.
   reference), `outputs` ([u16]), `carrier: Hz` (≥ 20 Hz; snapped at every run to a whole-sample
   period, §3.2 *Dynamics runs*), `onset: DynamicsOnset` (`zero` \| `peak`), `pilot: Dbfs` (the
   rest level), `bursts: [Dbfs]` (1…8, each ≤ 0 and above the pilot), `durations: [Seconds]`
-  (1…16, each > 0 and ≤ 10 s; default 1, 3, 10, 30, 100, 300 ms, 1, 3, 10 s), `rest_max:
-  Seconds` (2…30 s, default 30 s)). Settings only, as a sweep measurement: no stream,
+  (1…16, each > 0 and ≤ 10 s; front ends send 1, 3, 10, 30, 100, 300 ms, 1, 3, 10 s), `rest_max:
+  Seconds` (2…30 s; front ends send 30 s)). Settings only, as a sweep measurement: no stream,
   `meas.start` / `meas.stop` / `meas.reset` of it are `invalid`; `dynamics.run` plays it and
   each run is one stored `dynamics` trace it owns. `invalid` at create / update: settings
   outside those bounds. A burst above the ceiling is accepted at create / update (and in a
@@ -793,10 +851,10 @@ plays or analyses.
 #### SPL log and Leq windows (`spl.log_get`, `spl.log_new`, `leq` frames)
 
 Design: `docs/design/leq.md`. `LeqConfig` = {`windows`: [`LeqWindow`] (at most 8, in
-display order), `horizon`: Seconds (1 s … 1 h, whole seconds; default 60), `peaks`:
+display order), `horizon`: Seconds (1 s … 1 h, whole seconds; front ends send 60), `peaks`:
 `PeakLimits` {`lcpeak`, `lafmax`: `PeakLimit` \| nil}}. `LeqWindow` =
 {`duration`: Seconds (1 s … 24 h, whole seconds), `weighting`: `a` \| `c` \| `z`, `limit`:
-DbSpl \| nil, `warn_margin`: Db ≥ 0 (default 3), `cue`: `Cue` \| nil}. `PeakLimit` = {`limit`:
+DbSpl \| nil, `warn_margin`: Db ≥ 0 (front ends send 3), `cue`: `Cue` \| nil}. `PeakLimit` = {`limit`:
 DbSpl, `warn_margin`: Db ≥ 0, `cue`: `Cue` \| nil}. `SplConfig.cue`: `Cue` \| nil, the
 meter's own cue (§3.2 *Rig monitor, OSC and Art-Net cues*). `SplConfig.position`: `PositionCorrection` \| nil = {`level`: Db, `peak`: Db, each
 within ±30}: the measuring-position correction (`docs/design/leq.md`, *Measuring-position
@@ -956,7 +1014,7 @@ judged and alarmed; every band is integrated and logged whatever the windows), `
 Seconds (whole seconds, 1 s … 24 h), `weighting`: `a` \| `c` \| `z` (the weighting at the
 band's exact mid-band frequency added to its unweighted level), `limit`: DbSpl \| nil,
 `day_offset`: Db \| nil (nil: `limit` holds day and night; else `limit` is the night's,
-22:00–07:00 local time, and 07:00–22:00 it is `limit` plus this), `warn_margin`: Db ≥ 0,
+22:00–07:00 in the daemon host's time zone, and 07:00–22:00 it is `limit` plus this), `warn_margin`: Db ≥ 0,
 `cue`: `Cue` \| nil}; the
 limit is at the transfer's place with a transfer, else at the mic. A range of bands is a
 front-end convenience that adds one window per band; nothing range-shaped is on the wire. `PredictedWindow` = {`duration`:
@@ -1081,8 +1139,8 @@ rig/channel pairs are unique, an input of this rig is `invalid` ("that input is 
 rig"), a remote rig at another rate or replaying is `refused`), `link_offset` (s \| nil:
 how long the joined feed waits for remote audio; nil = two remote periods, one of this
 rig's and 2 ms, at most 0.5 s). A remote input carries the session's measurements like a
-local one, except recording and calibration (`refused`: both on the rig the input is
-on); a transfer function with one channel on a remote rig averages only while the two
+local one, except calibration (`refused`: set on the rig the input is on); a recording
+takes it from the joined feed, its gaps marked; a transfer function with one channel on a remote rig averages only while the two
 rigs' clocks agree (`remote.transfers`, §4.1). `OpenSession` adds `backend` (the one used),
 `input_device`, `output_device`, `sample_rate_hz`, `buffer_frames`, `clock`, `opened_at`,
 `replay` (`ReplayInfo` \| nil: the recording a replay session plays, §3.2 raw capture
@@ -1132,8 +1190,9 @@ so nothing can be emitted — and publishes meters of every input on `session/pr
 (meta names the device; `audio_sample` counts from the preview's start, `session_epoch` is
 the epoch it opened in), with the same programme meters as the session's over the kinds and
 pairs declared, and the pairs' goniometer points on `preview/gonio`. Reply `Preview`: `backend`, `device`, `channels` (inputs metered,
-`0 .. channels`), `sample_rate_hz`, `expires_in_ms`. There is one preview per daemon;
-naming the same device again renews it, another device replaces it. It closes on
+`0 .. channels`), `sample_rate_hz`, `expires_in_ms`. There is one preview per daemon, and
+the last caller wins: naming the same device again renews it, another device replaces it,
+whichever client asks. It closes on
 `session.preview_stop`, `session.open`, `session.detect_loopback`, or when not renewed
 within `expires_in_ms` (5 s). Opening it may fail where the host allows a device only one
 stream (`unsupported` / `not_found` with the host's reason).
@@ -1141,7 +1200,7 @@ stream (`unsupported` / `not_found` with the host's reason).
 **Loopback detection.** `session.detect_loopback` needs the stimulus lease (`lease_required`
 otherwise) and an explicit `level` (`refused` when nil; there is no default level); a level
 above the global ceiling, or a request while the stimulus is armed or firing, is `refused`.
-The daemon closes the preview, opens `input_device` with every input and `output_device`
+It is allowed with a session open. The daemon closes the preview, opens `input_device` with every input and `output_device`
 with `output + 1` outputs (the same id for one device),
 plays a 0.5 s pink-noise burst band-limited to 100 Hz – 10 kHz at `level` (RMS) on `output`
 only — faded in and out (20 ms), under the global ceiling and the output path's peak limit —
@@ -1151,7 +1210,9 @@ then closes the stream. Each input's capture is cross-correlated with the burst 
 earlier arrival first among equally good ones), `loopback: u16 | nil` (the first-ranked
 input when its |correlation| ≥ 0.8, else nil), `clock`. `LoopbackCandidate`: `input`,
 `delay: Seconds`, `delay_samples: Samples`, `correlation` (−1 … 1), `gain: Db | nil` (nil:
-silent input). Delays are exact on a `single_callback` clock; otherwise they share an
+silent input). `clock` (`ClockRelation`) is `single_callback` (capture and playback in one callback, on
+one clock) or `unknown` (they may drift). Delays are exact on a `single_callback` clock;
+otherwise they share an
 unknown offset (the ranking is unaffected). The burst is audited in the daemon log; it is
 not generator state.
 
@@ -1172,7 +1233,7 @@ The reply `DelayFinding`:
 - `DelayOutcome` (tagged by `type`): `accepted` {`first`, `strongest`} | `ambiguous`
   {`reasons: [AmbiguityReason]`, `ranked: [DelayArrival]` (≤ 3, the rule pick first),
   `strongest`} | `no_estimate` {`reasons: [NoEstimateReason]`}.
-- `DelayArrival`: `delay`, `delay_samples` (fractional), `level` (dB re the strongest),
+- `DelayArrival`: `delay`, `delay_samples` (f64, fractional), `level` (dB re the strongest),
   `phase`, `uncertainty_samples` (1 σ), `misfit`, `refined`.
 - `DelayConfidence` (nil where the finder refused before reaching it): `psr_db`,
   `psr_acq_db`, `band_snr_db` (Db), `excited_fraction` (0…1), `uncertainty_samples` (of
@@ -1228,9 +1289,11 @@ again (a new finding that is not ambiguous clears it).
 
 A trace's metadata (`TraceMeta`, §4.1) is mirrored state; its columns leave the daemon only
 through `trace.get` (`TraceData`: `meta`, `mag_db`, `phase_deg` (nil = magnitude only),
-`coherence` (nil = unknown), `sweep` (`SweepData` of a sweep trace, else nil), `ir`
-(`TransferIr` of a transfer trace captured with one, else nil), column order =
-the trace's grid, NaN = no value), `trace.export` and `file.save`. Columns are stored as
+`coherence` (nil = unknown), `sweep` (`SweepData` of a sweep trace, else nil), `dynamics`
+(`DynamicsData` of a dynamics trace, else nil), `ir` (`TransferIr` of a transfer trace
+captured with one, else nil), column order = the trace's grid, NaN = no value),
+`trace.export` and `file.save`. A dynamics trace's `mag_db` is one NaN column at its
+carrier; its `phase_deg`, `coherence`, `sweep` and `ir` are nil. Columns are stored as
 measured: offset, polarity, nudge, smoothing and a mic curve applied after capture are
 display edits and are never applied to the stored data.
 
@@ -1290,8 +1353,10 @@ display edits and are never applied to the stored data.
 - **Slots.** `TraceEdit.slot` (1…9 or nil). A slot holds at most one trace: capturing or
   updating into a slot clears it on the trace that held it (a `trace` event for that one
   too).
-- **Lock.** `trace.update` on a locked trace may change only `visible`, `order`, `slot` and
-  `locked` (not `smoothing`); `trace.delete` and `trace.mic_curve` of a locked trace are
+- **Last write wins.** `trace.update` replaces the whole `TraceEdit` and carries no
+  `base` (`expect_rev` is the only guard): of two clients' edits, the later one stands whole.
+- **Lock.** `trace.update` on a locked trace may change only `visible`, `order`, `slot`,
+  `owner` and `locked` (not `smoothing`); `trace.delete` and `trace.mic_curve` of a locked trace are
   `refused`.
 - **Time base (decisions 8a / 8b).** Captured traces (`captured`, `sweep`) share the
   time base of their session epoch, and so does a `math` capture whose `phase` is
@@ -1331,7 +1396,7 @@ display edits and are never applied to the stored data.
   trace (math owns no traces). A refused file is `invalid` with
   `detail: {type: import, line (1-based) | nil, problem: ImportProblem}`.
   `ImportProblem`: `not_text`, `no_data`, `bad_number`, `column_count`, `too_few_columns`,
-  `not_ascending`, `out_of_range`, `too_many_rows` (> 65536, IR rows too),
+  `not_ascending`, `out_of_range`, `too_many_rows` (> 65536, IR rows too; a dynamics trace's envelopes > 6 144 000),
   `bad_header`, `bad_coherence`, `not_wav` (not a readable WAV / RF64 file),
   `pick_channel` (a multi-channel file without `ir.channel`, or a channel it lacks),
   `no_impulse` (every sample zero or not finite, fewer than 2), `bad_options` (above, or
@@ -1368,8 +1433,9 @@ one `<name>.json` per plan in its data directory (`plans/`), mirrored as `State.
   polygons, zones inside the outline, markers inside the room …) and replaces the one of
   that name; `invalid` with the reason, or for a name that is no file name (letters,
   digits, space, `-`, `_`, `.`, not starting with `.`); `refused` for a name another plan
-  holds in another case. `plan.delete` is `not_found` for a name the library lacks; the
-  session's copies stay.
+  holds in another case. Last write wins: `plan.save` carries no `base` (`expect_rev` is
+  the only guard). `plan.delete` is `not_found` for a name the library lacks; the session's
+  copies stay.
 - `walk.new` starts a walk (`WalkState`: `id`, `name`, `plan`, `kind` live_transfer \|
   sweep, `mics` [`WalkMic` {`meas`, `input`}], `points` [{`label`, `at`, `step: u16`, `mic:
   WalkMic`, `state` {`type`: pending \| captured {trace, context} \| skipped}}], `step: u16 |
@@ -1399,7 +1465,8 @@ one `<name>.json` per plan in its data directory (`plans/`), mirrored as `State.
   averages restarted (an older config rev) or an arrival awaiting the operator's pick. It
   goes to the next step with a pending point after the current one (wrapping round), `step`
   nil when none is left. `refused` at a step with nothing pending (redo a point), `invalid`
-  when `step` is nil. The point's `context` (`CaptureContext` {`at`, `mic: MicState | nil`,
+  when `step` is nil. The point's `context` (`CaptureContext` {`at`, `mic: MicState | nil`
+  (`MicState` {`name`: string, `curve`: `MicCurveRef` \| nil}),
   `eq_in: [EqMark {set, rev}]`}) records the same facts its trace records (`created_at`,
   `mic`, `eq_in`), so a client can say when a walk's captures were taken on different days
   or, for one mic, under another mic, mic curve or EQ. Calibration and generator level are
@@ -1426,7 +1493,8 @@ one `<name>.json` per plan in its data directory (`plans/`), mirrored as `State.
   from where it now stands (`refused` for a point not pending at the step). `walk.update`
   renames the walk and edits its points by label, grouping them into steps again: a kept
   point keeps its state (a captured one its position and mic too); a captured point cannot
-  be taken out (`refused`).
+  be taken out (`refused`). Last write wins: `walk.update` carries no `base`
+  (`expect_rev` is the only guard).
 - The walk's **average** is a power-average math trace of the captured points' traces,
   in point order, owned by the walk's first measurement and named `<walk> · average`: made
   (and started) at the second capture, its `of` updated after every capture, skip and redo
@@ -1454,9 +1522,9 @@ the session. One runs at a time (runs, fits and maps share the worker).
 
 - `sim.run` {`request`: `SimRequest` {`plan`, `sources` [speaker marker names], `receivers`
   {`type`: `walk` {`walk`} \| `points` {`points` [{`label`, `at`}]}}, `settings`}} simulates
-  every source at every receiver. `SimSettings` {`image_order` 0 … 4 (default 3),
-  `rays_per_band` 1 … 1 000 000 (default 20 000, per source), `budget` s > 0 … 600 (default
-  10; the ray tracing's wall time, shared by the sources), `seed` (default 0; the same seed
+  every source at every receiver. `SimSettings` {`image_order` 0 … 4 (front ends send 3),
+  `rays_per_band` 1 … 1 000 000 (front ends send 20 000, per source), `budget` s > 0 … 600
+  (front ends send 10; the ray tracing's wall time, shared by the sources), `seed` (front ends send 0; the same seed
   gives the same result)}. At most 64 receivers and 64 source × receiver results. The plan
   is the session's copy when it holds one, else the library's. Surfaces carry their
   `material` by the simulator's name; an untagged wall or ceiling is `plaster_on_masonry`,
@@ -1476,9 +1544,9 @@ the session. One runs at a time (runs, fits and maps share the worker).
   `not_a_sweep_walk`, `no_measured_t20`, `busy` (one is running), and `invalid` for
   settings out of range.
 - `sim.map` {`request`: `SimMapRequest` {`plan`, `sources` [speaker marker names; their
-  energies add as power], `spacing` m (default 1.0), `band` Hz \| nil (a nominal octave
-  centre 125 … 8000; nil: every band summed, broadband), `window` s (0 … 0.5, default 0.05:
-  the direct sound and early reflections), `image_order` (0 … 4, default 2)}} maps the
+  energies add as power], `spacing` m (front ends send 1.0), `band` Hz \| nil (a nominal octave
+  centre 125 … 8000; nil: every band summed, broadband), `window` s (0 … 0.5, front ends send 0.05:
+  the direct sound and early reflections), `image_order` (0 … 4, front ends send 2)}} maps the
   direct and early energy over the plan's zones, image sources only (no ray tracing): a
   grid of `spacing` squares over the zones' extent, a cell kept when its centre lies in a
   zone (the first that holds it gives its ear height) and inside the room. The result is
@@ -1536,7 +1604,9 @@ higher by the window's length over the shared one, and a `post_roll` of at least
 longest window; it changes the recording, so it is a setting of the measurement). The emitted sweep keeps the rate but starts up to two
 octaves below `start` (a whole number of cycles per rate constant, at least 1 Hz) and fades
 in up to `start` in place of `fade_in`, so a path's switch-on transient lies below the
-analysed band; responses are reported from `start`. `name` nil names the trace `Run <number>`.
+analysed band; responses are reported from `start`. `fade_in` applies to a `gen` ESS and to
+a sweep run whose start cannot be extended lower (a start of about 1 Hz, the lowest emitted
+start); otherwise the onset fade is derived. `name` nil names the trace `Run <number>`.
 
 - Refused (`refused`) above the ceiling, or while the generator is not armed by the caller
   (arm with `gen.set` first: like firing, the run needs it), while it fires, while a
@@ -1667,7 +1737,7 @@ client's machine (`.ac2session`: the directory as a gzip-compressed tar, §7.2).
 `SessionRef` (tagged by `type`): `name` {`name`} — a directory in the daemon's session
 directory (letters, digits, space, `-`, `_`, `.`; not starting with `.`) — `path`
 {`path`} — an absolute directory on the daemon host, accepted from local transports only
-(`refused` in network mode) — or `upload` {`transfer`} — a complete upload of this
+(`refused` to a network client) — or `upload` {`transfer`} — a complete upload of this
 client's (`file.load`, `file.salvage` only; used up by the command). `SessionFile`:
 `name`, `path`, `saved_at`, `measurements`, `traces`.
 
@@ -1723,7 +1793,8 @@ with the autosave (§7.3).
   named session; `session_exists` unless `overwrite`), or `trace.import` (reads it as a
   trace file, named after the last component of the upload's `file` when the file names
   no trace; the upload is used up whether the import succeeds or not). Download: `file.download_begin`
-  packs (`file_name` `<name>.ac2session`), `file.download_chunk` reads, and
+  packs (`file_name` `<name>.ac2session`; an archive over 64 MiB packed is `invalid`, as an
+  upload is), `file.download_chunk` reads, and
   `file.download_end` drops it; with `saved_as` after a working-state download, the
   working state's origin becomes `client` {saved_as}, clean if it has not changed since
   the download began. `trace.export` offers its file as such a download (no `saved_as`).
@@ -1782,7 +1853,7 @@ file channel order; a remote input is recorded from the joined feed, its gaps ma
 
 `RecordingRef` (tagged by `type`): `name` {`name`} in the recording directory, or `path`
 {`path`}: the absolute path of the `.wav` or `.ac2rec.json` file, local transports only
-(`refused` in network mode). `session.replay` closes any session and opens a new epoch on a
+(`refused` to a network client). `session.replay` closes any session and opens a new epoch on a
 `replay` backend: the recorded device's id (so its calibrations apply), the recorded inputs
 under their device numbers (an input not recorded cannot be captured), the recorded rate
 and period, no outputs (the generator cannot be armed). Running measurements restart on it
@@ -1823,9 +1894,9 @@ Each input chooses which of its mic's curves applies (`InputSetup.curve`).
   `full_scale`: Volts (V_FS), `mic_sensitivity`: MvPerPa, `mic_sensitivity_from:
   SensitivitySource` (tagged by `type`: `typed` | `data_sheet` {`label`, `file_name`}),
   `loading`: MicLoading | nil (as given; `mic_sensitivity` stays the open-circuit value and
-  `sensitivity` counts the loading), `uncertainty`: Db (± dB; 1 when nil; 0.05–6 accepted)}. Refused like `cal.spl`, and
-  also above −3 dBFS or below −70 dBFS (a poor reading), for `volts` outside 0.1 mV–100 V,
-  a mic sensitivity outside 0.1–1000 mV/Pa, or a `freq` outside 20 Hz–20 kHz (any `freq`
+  `sensitivity` counts the loading), `uncertainty`: Db (± dB; 1 when nil; 0.05–6 accepted)}. `refused` like `cal.spl`,
+  and above −3 dBFS or below −70 dBFS (a poor reading); `invalid` for `volts` outside
+  0.1 mV–100 V, a mic sensitivity outside 0.1–1000 mV/Pa, or a `freq` outside 20 Hz–20 kHz (any `freq`
   in that range is accepted; the mic curve is normalised at 1 kHz, where data sheets
   state the sensitivity). An existing `acoustic` calibration of the key is `refused`
   unless `replace_acoustic`.
@@ -1865,7 +1936,7 @@ Each input chooses which of its mic's curves applies (`InputSetup.curve`).
   fixes the dB reference; an input with no row is an unnamed `mic`). `CurveChoice` is
   tagged by `type`: `not_chosen` | `off` | `curve` {`label`}. `Pair` = {`left`, `right`,
   `name`: string | nil} (channels). `session.inputs` upserts its rows and replaces the pair
-  list; the daemon sets every row's `pair` side from the list. It refuses (`invalid`, naming
+  list (last write wins: it carries no `base`, `expect_rev` is the only guard); the daemon sets every row's `pair` side from the list. It refuses (`invalid`, naming
   the inputs by channel) a mic row whose chosen label is not stored for its mic (unless the
   row is unchanged), a pair of an input with itself, of two kinds, of an input
   in two pairs, or of an input the open session does not capture. The daemon chooses a
@@ -2008,7 +2079,8 @@ averaging starts over). Front ends default it by resolution: `tone` for `fixed`,
 for `multi`.
 
 - `tone`: folded bin power `F_k = c_k·|X_k|²` scaled by `2 / S₁²` (`S₁ = Σw`): a sine of
-  RMS `a` reads `a²` (0 dBFS at full scale). Units `dbfs` / `db_spl`.
+  RMS `a` reads `2a²` (`a²` re ½ FS², the mean square of a full-scale sine: 0 dBFS at full
+  scale). Units `dbfs` / `db_spl`.
 - `density`: power per hertz of noise bandwidth, keeping the same reference. `fixed`:
   `2·F_k / (fs·S₂)` (`S₂ = Σw²`), i.e. tone power over `ENBW · fs / N`; white noise of
   deviation σ reads `4σ²/fs`. `multi`: each band's mean bin over the column, blended as for
@@ -2116,7 +2188,7 @@ key_changed | other_rig{found}}, `clock`: `PeerClock`
 own_clock{rig, ppm}} | cant_tell{reason: system_clock_unsynced{rig} |
 system_clock_not_stated{rig} | not_against_system_clock{rig} | no_capture_stamps |
 clocks_disagree{by} | no_audio}}, `ppm`, `span`, `last_change`}, `bytes_per_s`, `window`
-(frames the link may have in flight)}], one per rig the session's remote inputs are on),
+(bytes of frames the link may have in flight)}], one per rig the session's remote inputs are on),
 `inputs` ([`RemoteInputStatus` {`slot`, `audio` {waiting | on_this_rig | no_session |
 not_captured | replaying | rate_mismatch{theirs, ours} | starting | streaming}, `anchor`
 (nil | system_time | arrival{reason: system_clock | no_capture_stamps | no_stamp_map |
@@ -2203,11 +2275,20 @@ would be larger is not sent on the data socket, and every connection taking even
 socket they go outside the byte window, within a bound of their own (§5.8): past it a
 connection's events are dropped and it is sent `resync_required`.
 
+Every event takes the next rev. A command changing N entities emits N events with
+consecutive revs, in order; clients may observe the states between them. `ack.rev` is the
+state's rev after the command: its last event's rev, unchanged if it changed nothing.
+
+Reply bodies are not state: a mirror applies events and snapshots only; a reply gives ids
+and tells the operator.
+
 ### 4.3 Sync procedure (client)
 
 1. On the data DEALER, state the window and subscribe to `evt` and `ka` (§5.8); buffer
    events.
-2. Wait for the first `ka` (subscription is live).
+2. Wait for the first `ka`. It is only a hint that the subscription is live: a `ka` also
+   goes to a connection not subscribed to it. Steps 4 and 6 repair an event missed before
+   the subscription took effect.
 3. `state.snapshot` → rev R. Apply buffered events with rev > R in order, then live ones.
 4. Event with rev > last + 1 → `state.since(last)`; the `resync_required` notice → back
    to 3.
@@ -2237,7 +2318,7 @@ Replay buffer: last 1024 events or 60 s, whichever holds fewer.
 | `timing` | loopback timing monitor |
 | `evt` | state events (§4.2) |
 | `audio/<channel>` | raw capture of device input `<channel>`, to admitted rigs only (below) |
-| `ka` | keepalive, every 250 ms to a connection subscribed to it; one a second to one that is not and was sent nothing else in that second |
+| `ka` | keepalive, every 250 ms to a connection subscribed to it; one a second to one that is not and was sent nothing else in that second (not to admitted rigs) |
 
 A measurement topic is formed and sent only while someone subscribes to it. `tf`, `ir`,
 `spec` and `rta` frames come when the result changes (at most at the daemon's publish rate);
@@ -2251,15 +2332,22 @@ the trailing slash keeps `d/1/` from matching `d/12/…`), `session/` (both inpu
 topics and the session's goniometer; the preview's goniometer is under `preview/`, so a
 client metering alone does not receive its points). Longest topic: 32 bytes.
 
-An `audio/<channel>` frame is three parts, `[topic][msgpack header][f32 LE samples]`, one
-per device block of that channel, never deflated: the header is {`v`, `start_sample` (the
-source rig's sample index of the first frame), `frames` (≤ 65536), `flags` (u8: `xrun` 1,
-the source's backend reported an xrun before the block; `gap` 2, the block does not
-continue the one before on the source rig), `capture_ns` (u64 \| nil: the capture stamp
-of the first frame on the source's stamp clock, which its `clocks.stamp_map` puts on
-system time), `rate`, `incarnation` (`StreamIncarnation`)}. Only connections whose key
-was admitted as a rig receive them, each from a queue of its own, so a slow rig never
-holds back the others; anyone else subscribing to `audio/` receives nothing.
+An `audio/<channel>` frame carries one device block of raw capture to an admitted rig
+(§5.9). Only connections whose key was admitted as a rig receive them; anyone else
+subscribing to `audio/` receives nothing.
+
+The kind a topic carries (§5.3 `kind`, and the `meta` key):
+
+| topic | kind |
+|---|---|
+| `d/<meas>/<stream>` | that stream's kind (`tf`, `ir`, `rta`, `spec`, `spl`, `leq`, `band_leq`, `levels`) |
+| `session/levels` | `session_levels` |
+| `session/preview` | `preview_levels` |
+| `session/gonio` | `session_gonio` |
+| `preview/gonio` | `preview_gonio` |
+| `timing` | `timing` |
+| `ka` | `ka` |
+| `evt`, `audio/<channel>` | none (not a frame of §5.2) |
 
 ### 5.2 Layout
 
@@ -2382,7 +2470,7 @@ layout as code.
 |---|---|---|
 | `v` | u16 | protocol version |
 | `form` | u8 | 0 (a keyframe; §5.2) |
-| `kind` | FrameKind | `tf`, `ir`, `rta`, `spec`, `spl`, `leq`, `band_leq`, `levels`, `session_levels`, `preview_levels`, `session_gonio`, `preview_gonio`, `timing`, `ka`; equals the topic and the `meta` key |
+| `kind` | FrameKind | `tf`, `ir`, `rta`, `spec`, `spl`, `leq`, `band_leq`, `levels`, `session_levels`, `preview_levels`, `session_gonio`, `preview_gonio`, `timing`, `ka`; the kind its topic carries (§5.1) and the `meta` key |
 | `seq` | u64 | per topic per incarnation, increasing; not contiguous (a frame replaced before it was sent never goes), so a delta names its base's |
 | `audio_sample` | u64 | session sample index (origin = session open) of the newest sample in the frame |
 | `session_epoch` | u32 | frames from older epochs are discarded |
@@ -2401,6 +2489,12 @@ layout as code.
 (γ², 0…1), `full_scale` (linear, full scale = 1), `seconds`, `bitmask` (always
 `u32`), `count` (an event count, always `u32`), `gonio_unit` (a goniometer coordinate,
 always `i8`).
+
+In frame age, `offset` is the daemon's clock minus the client's: the maximum, over a 10 s
+window, of a `ka`'s `daemon_wall_ns` minus the local wall time it was received at (the
+least delayed keepalive bounds it best). A client reads a topic as STALE when nothing new
+has come on it for 1 s (3 s for `leq` and `band_leq`, which come once a second), when its
+newest frame's age is over that, or when the daemon stopped responding.
 
 ### 5.4 Kinds
 
@@ -2519,7 +2613,7 @@ header parsed from at most its first 8192 bytes (≤ 8192 bytes); then for a key
 are listed, the payload inflating to exactly n × Σ element sizes plus one byte per `bfp16`
 array (inflation stops there: a
 payload that would inflate further is refused, so it cannot be a decompression bomb),
-`kind` = topic = `meta` key, then the per-kind array schema (each array's `elem` as fixed by
+`kind` = the topic's kind (§5.1) = `meta` key, then the per-kind array schema (each array's `elem` as fixed by
 its name), `crc`, undefined `u16` codes, `bfp16` exponents and bitmask bits. A delta's
 payload is sized by its base: applied, it inflates to exactly the base's codes' size, then
 `crc`. A malformed frame is dropped and counted by the client; decoders never panic.
@@ -2527,12 +2621,13 @@ payload is sized by its base: applied, it inflates to exactly the base's codes' 
 ### 5.7 Sizes
 
 Measured on the fake rig (`crates/ac2d/tests/wire_size.rs`, noisy high bands, so dearer
-than most real curves); bytes include topic, header and payload, not the transport:
+than most real curves); bytes include topic, header and payload, not the transport. The
+`spec` rows are at `fixed` resolution:
 
 | frame | as f32 arrays | keyframe | delta |
 |---|---|---|---|
-| `tf`, 480 columns | 7 863 B | ≈ 2 400 B (header ≈ 180 B) | ≈ 1 250 B |
-| `tf` power average with its range band | | ≈ 3 970 B | ≈ 2 720 B |
+| `tf`, 720 columns | 7 863 B `TODO(wire_size rerun)` | ≈ 2 400 B (header ≈ 180 B) `TODO(wire_size rerun)` | ≈ 1 250 B `TODO(wire_size rerun)` |
+| `tf` power average with its range band | | ≈ 3 970 B `TODO(wire_size rerun)` | ≈ 2 720 B `TODO(wire_size rerun)` |
 | `spec`, 65 536 points (897 columns) | 3 696 B | ≈ 1 590 B | ≈ 1 430 B |
 | `spec`, 4 096 points (513 columns) | 2 161 B | ≈ 1 025 B | ≈ 930 B |
 | `rta`, 1/3 octave (30 bands) | 368 B | ≈ 218 B | ≈ 116 B |
@@ -2547,9 +2642,10 @@ re-sent every 0.25 s of audio while nothing changes. About 7 % of a `tf` stream'
 as keyframes. A session of three transfer functions
 and their average, three default spectra and a 4 096-point one, a 1/3-octave RTA, two SPL
 meters with band meters and the input meters is ≈ 2.0 Mbit/s at 30 fps and ≈ 2.2 Mbit/s at
-60 fps (9.3 Mbit/s at 60 fps with f32 arrays, 3.2 with keyframes only); a pane in its IR
-view adds `ir` at ≈ 29 frames/s, ≈ 4.6 Mbit/s in all. Encoding and decoding a `tf` frame take ≈ 37
-and 17 µs on a desktop core.
+60 fps (9.3 Mbit/s at 60 fps with f32 arrays, 3.2 with keyframes only)
+`TODO(wire_size rerun)`; a pane in its IR view adds `ir` at ≈ 29 frames/s, ≈ 4.6 Mbit/s in
+all `TODO(wire_size rerun)`. Encoding and decoding a `tf` frame take ≈ 37
+and 17 µs on a desktop core `TODO(wire_size rerun)`.
 
 ### 5.8 Flow control
 
@@ -2601,15 +2697,36 @@ Credit:
 
 A connection is dropped (its subscriptions and chains with it) when a send to it fails
 because its connection is gone, or when it holds unacknowledged messages and has sent
-nothing for 60 s; one heard from again after that is sent `rejoin`. The data port is
-ctrl + 1 (§9).
+nothing for 60 s; one heard from again after that is sent `rejoin`. `rejoin` comes only
+after the connection sends something, so a client watches for the completed handshake
+(ZMQ socket monitor) and sends `window` and its subscriptions on every reconnect. The data
+port is ctrl + 1 (§9).
 
-`ac2-remote` (the Android viewer) speaks the XPUB/SUB data socket of `PROTO_VERSION` 82 and
-earlier: against this version it shows nothing until it moves to a data DEALER.
+### 5.9 Raw capture frames (`audio/<channel>`)
+
+An `audio/<channel>` frame is three parts, `[topic][msgpack header][f32 LE samples]`, one
+per device block of that channel, never deflated. The header is a msgpack map (it has no
+`form`): {`v`, `start_sample` (the source rig's sample index of the first frame),
+`frames` (≤ 65536), `flags` (u8: `xrun` 1, the source's backend reported an xrun before
+the block; `gap` 2, the block does not continue the one before on the source rig; other
+bits refused), `capture_ns` (u64 \| nil: the capture stamp of the first frame on the
+source's stamp clock, which its `clocks.stamp_map` puts on system time), `rate`,
+`incarnation` (`StreamIncarnation`)}.
+
+Bounds, checked before decoding: three parts; total ≤ 2 MiB; topic valid; header
+≤ 8192 bytes, `v` read on its own first; `frames` ≤ 65536; body exactly `frames` × 4
+bytes.
+
+Audio is charged to the same byte window as other frames (§5.8: its bytes, every part, at
+least 64). Each admitted rig has a FIFO of its own, so a slow rig never holds back the
+others. Its frames are never conflated: the FIFO holds up to the window, and past it the
+oldest frames are dropped and counted. A frame larger than the window goes alone. The
+receiver sees a loss as a jump in `start_sample`.
 
 ## 6. Grids
 
-`grid.get(grid_id)` returns a `GridDef`, valid for the incarnation:
+A `grid_id` always names the same `GridDef` (it is a content hash, below). `grid.get(grid_id)`
+answers the ids this daemon incarnation has published, else `not_found`:
 
 - `{type: "log", ppo, k_min, k_max}`: columns `1000 · 2^(k/ppo)` Hz, `k = k_min…k_max`.
 - `{type: "iec_bands", fraction, centres: [Hz]}`: exact IEC mid-band frequencies.
@@ -2628,10 +2745,21 @@ earlier: against this version it shows nothing until it moves to a data DEALER.
 bytes: tag byte (1 log, 2 iec_bands, 3 linear, 4 log_bins), then little-endian fields —
 log: `ppo` u32, `k_min` i32, `k_max` i32; iec_bands: band designator b u32 (1, 3, 6, 12,
 24), centre count u32, each centre f64; linear: `fs` f64, `n` u32; log_bins: `fs` f64, `n`
-u32, `ppo` u32. Example: log 48/−240/239 (480
-columns) = `0x79ec3d16ae0e94d0`.
+u32, `ppo` u32. Example (an example grid, not the transfer grid): log 48/−240/239
+(480 columns) = `0x79ec3d16ae0e94d0`.
 
 ## 7. Files
+
+What a daemon reads of each artefact; any other version is refused:
+
+| artefact | versions read |
+|---|---|
+| trace CSV (§7.1) | `v1` … `v6` |
+| session directory (§7.2) | manifest version 48 only |
+| raw capture sidecar (§7.5) | version 3 only; the protocol types it holds must still decode |
+| SPL log (§7.4) | `v2` only |
+| band log | `v1` only |
+| `file.salvage` | `traces/*.csv` of a session only (each as a trace CSV above) |
 
 ### 7.1 Trace text (`trace.import` / `trace.export`)
 
@@ -2680,6 +2808,8 @@ envelopes announced by `# dynamics_envelopes: {"rows":m}` with the header
 `input,step,edge,t_s,gr_db,h2_db,h3_db,h4_db,h5_db`. Inputs and steps are 1-based; a time cell
 reads seconds, `within_period`, `cant_tell` or `no_gain_reduction`, a level cell dB,
 `below_floor` or `cant_tell`; envelope gaps read `nan`. Import restores the trace exactly.
+Import takes at most 6 144 000 envelope rows (128 steps × 8 inputs × 6000 points), its own
+cap in place of the 65536-row table cap.
 
 **Analyzer text** (`analyzer_text`): columns separated by `,`, `;` (decimal commas
 allowed), tabs or spaces; UTF-8 or Latin-1; comment lines starting with `#`, `*`, `;`,
@@ -2856,7 +2986,7 @@ too), any sample rate and channel count. One channel is read: `IrImport.channel`
   samples on the band-limited interpolant; the trace's `delay` is that time re the file's
   first sample, and its phase is the response's own, bulk delay removed) or `start` (time
   zero is the first sample: `delay` 0, the phase carries the file's lead-in).
-- `resolution`: the ten-octave log grid of the trace (default `forty_eighth`).
+- `resolution`: the transfer grid of the trace (§3.2 *Resolution*; default `forty_eighth`).
 
 The result is a `transfer` trace: per column the mean over its edges of the zero-padded
 FFT's interpolant (power for the magnitude, complex for the phase), NaN above Nyquist; no
@@ -2873,8 +3003,9 @@ messages plus expected values (`expected/*.json`). See `tools/protocol/README.md
 
 ## 9. Discovery (mDNS)
 
-A daemon in network mode (`ac2d --listen tcp://…`) advertises one DNS-SD service over mDNS
-(RFC 6762 / 6763) unless started with `--no-mdns`. Local modes never advertise.
+A daemon whose network is on (`ac2d --listen tcp://…` or `server.network`) advertises one
+DNS-SD service over mDNS (RFC 6762 / 6763) unless started with `--no-mdns`; it stops when
+the network is turned off. Local modes never advertise.
 
 | field | value |
 |---|---|
