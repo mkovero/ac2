@@ -1,5 +1,6 @@
 //! Per-client request-id dedup: a request id executes once. A retry while it runs waits for
-//! the same reply; a retry after it finished gets the stored reply.
+//! the same reply; a retry after it finished gets the stored reply, unless the request only
+//! reads ([`Retry::Runs`]): that one runs again.
 
 use std::collections::{HashMap, VecDeque};
 use std::time::Instant;
@@ -13,8 +14,8 @@ use crate::route::{Peer, Route};
 #[derive(Debug)]
 enum Slot {
     /// Still running: the routes of every copy of the request received, each owed the
-    /// reply when it is known.
-    Pending(Vec<Route>),
+    /// reply when it is known, and what a retry after it finished gets.
+    Pending(Vec<Route>, Retry),
     /// Answered: the encoded reply.
     Done(Vec<u8>),
 }
@@ -29,8 +30,18 @@ struct Window {
 
 impl Window {
     fn pending(&self) -> bool {
-        self.slots.values().any(|s| matches!(s, Slot::Pending(_)))
+        self.slots.values().any(|s| matches!(s, Slot::Pending(..)))
     }
+}
+
+/// What a retry of a request gets once it has been answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Retry {
+    /// The stored reply: running it again would act twice.
+    Stored,
+    /// A new run: it only reads, so running it again acts on nothing, and its reply (which
+    /// may be megabytes) is not kept for the window.
+    Runs,
 }
 
 /// What to do with an incoming request.
@@ -82,18 +93,20 @@ impl Dedup {
         id: RequestId,
         route: &Route,
         now: Instant,
+        retry: Retry,
     ) -> Admit {
         let limits = self.limits;
         let w = self.clients.entry(client.clone()).or_default();
         Self::evict(w, limits, now);
         match w.slots.get_mut(&id) {
             Some(Slot::Done(reply)) => Admit::Stored(reply.clone()),
-            Some(Slot::Pending(waiters)) => {
+            Some(Slot::Pending(waiters, _)) => {
                 waiters.push(route.clone());
                 Admit::Attached
             }
             None => {
-                w.slots.insert(id, Slot::Pending(vec![route.clone()]));
+                w.slots
+                    .insert(id, Slot::Pending(vec![route.clone()], retry));
                 Admit::Execute
             }
         }
@@ -116,18 +129,26 @@ impl Dedup {
         let Some(w) = self.clients.get_mut(client) else {
             return Vec::new();
         };
-        let ours = matches!(
-            w.slots.get(&id),
-            Some(Slot::Pending(waiters)) if waiters.first().is_some_and(|r| r == route)
-        );
-        if !ours {
-            return Vec::new();
-        }
-        let waiters = match w.slots.insert(id, Slot::Done(reply.to_vec())) {
-            Some(Slot::Pending(waiters)) => waiters,
-            _ => Vec::new(),
+        let retry = match w.slots.get(&id) {
+            Some(Slot::Pending(waiters, retry)) if waiters.first().is_some_and(|r| r == route) => {
+                *retry
+            }
+            _ => return Vec::new(),
         };
-        w.order.push_back((id, now));
+        let waiters = if retry == Retry::Runs {
+            // Every copy received while it ran is answered; a later one runs anew.
+            match w.slots.remove(&id) {
+                Some(Slot::Pending(waiters, _)) => waiters,
+                _ => Vec::new(),
+            }
+        } else {
+            let waiters = match w.slots.insert(id, Slot::Done(reply.to_vec())) {
+                Some(Slot::Pending(waiters, _)) => waiters,
+                _ => Vec::new(),
+            };
+            w.order.push_back((id, now));
+            waiters
+        };
         Self::evict(w, limits, now);
         // Forget clients with nothing pending and nothing recent, so departed peers do not
         // accumulate.
@@ -170,10 +191,41 @@ mod tests {
     use std::time::Duration;
 
     fn done(d: &mut Dedup, c: &Peer, id: u64, reply: u8, t: Instant) {
-        assert_eq!(d.admit(c, RequestId(id), &r(b"r"), t), Admit::Execute);
+        assert_eq!(
+            d.admit(c, RequestId(id), &r(b"r"), t, Retry::Stored),
+            Admit::Execute
+        );
         assert_eq!(
             d.complete(c, RequestId(id), &r(b"r"), &[reply], t),
             vec![r(b"r")]
+        );
+    }
+
+    #[test]
+    fn a_read_answers_every_copy_and_is_not_stored() {
+        let mut d = Dedup::new(DedupLimits {
+            ids: 4,
+            age: Duration::from_secs(30),
+        });
+        let c = peer("a");
+        let t0 = Instant::now();
+        assert_eq!(
+            d.admit(&c, RequestId(1), &r(b"x"), t0, Retry::Runs),
+            Admit::Execute
+        );
+        assert_eq!(
+            d.admit(&c, RequestId(1), &r(b"y"), t0, Retry::Runs),
+            Admit::Attached
+        );
+        assert_eq!(
+            d.complete(&c, RequestId(1), &r(b"x"), &[5], t0),
+            vec![r(b"x"), r(b"y")]
+        );
+        // Nothing kept: a retry runs again, and a client that only read is forgotten.
+        assert!(d.clients.is_empty());
+        assert_eq!(
+            d.admit(&c, RequestId(1), &r(b"z"), t0, Retry::Runs),
+            Admit::Execute
         );
     }
 
@@ -188,19 +240,25 @@ mod tests {
         done(&mut d, &c, 1, 1, t0);
         done(&mut d, &c, 2, 2, t0);
         assert_eq!(
-            d.admit(&c, RequestId(1), &r(b"r"), t0),
+            d.admit(&c, RequestId(1), &r(b"r"), t0, Retry::Stored),
             Admit::Stored(vec![1])
         );
         done(&mut d, &c, 3, 3, t0);
         assert_eq!(
-            d.admit(&c, RequestId(3), &r(b"r"), t0),
+            d.admit(&c, RequestId(3), &r(b"r"), t0, Retry::Stored),
             Admit::Stored(vec![3])
         );
-        assert_eq!(d.admit(&c, RequestId(1), &r(b"r"), t0), Admit::Execute);
-        let late = t0 + Duration::from_secs(31);
-        assert_eq!(d.admit(&c, RequestId(3), &r(b"r"), late), Admit::Execute);
         assert_eq!(
-            d.admit(&peer("b"), RequestId(3), &r(b"r"), t0),
+            d.admit(&c, RequestId(1), &r(b"r"), t0, Retry::Stored),
+            Admit::Execute
+        );
+        let late = t0 + Duration::from_secs(31);
+        assert_eq!(
+            d.admit(&c, RequestId(3), &r(b"r"), late, Retry::Stored),
+            Admit::Execute
+        );
+        assert_eq!(
+            d.admit(&peer("b"), RequestId(3), &r(b"r"), t0, Retry::Stored),
             Admit::Execute
         );
     }
@@ -213,18 +271,24 @@ mod tests {
         });
         let c = peer("a");
         let t0 = Instant::now();
-        assert_eq!(d.admit(&c, RequestId(1), &r(b"x"), t0), Admit::Execute);
+        assert_eq!(
+            d.admit(&c, RequestId(1), &r(b"x"), t0, Retry::Stored),
+            Admit::Execute
+        );
         // Neither other answered ids nor time evict a request that has not replied.
         done(&mut d, &c, 2, 2, t0);
         done(&mut d, &c, 3, 3, t0);
         let late = t0 + Duration::from_secs(300);
-        assert_eq!(d.admit(&c, RequestId(1), &r(b"y"), late), Admit::Attached);
+        assert_eq!(
+            d.admit(&c, RequestId(1), &r(b"y"), late, Retry::Stored),
+            Admit::Attached
+        );
         assert_eq!(
             d.complete(&c, RequestId(1), &r(b"x"), &[9], late),
             vec![r(b"x"), r(b"y")]
         );
         assert_eq!(
-            d.admit(&c, RequestId(1), &r(b"z"), late),
+            d.admit(&c, RequestId(1), &r(b"z"), late, Retry::Stored),
             Admit::Stored(vec![9])
         );
         // A second completion of the same id owes nobody and changes nothing.
@@ -233,7 +297,7 @@ mod tests {
                 .is_empty()
         );
         assert_eq!(
-            d.admit(&c, RequestId(1), &r(b"z"), late),
+            d.admit(&c, RequestId(1), &r(b"z"), late, Retry::Stored),
             Admit::Stored(vec![9])
         );
     }
@@ -246,22 +310,31 @@ mod tests {
         });
         let c = peer("a");
         let t0 = Instant::now();
-        assert_eq!(d.admit(&c, RequestId(1), &r(b"old"), t0), Admit::Execute);
+        assert_eq!(
+            d.admit(&c, RequestId(1), &r(b"old"), t0, Retry::Stored),
+            Admit::Execute
+        );
         d.forget_name("a");
         // The name's next holder executes its own request 1; the old one's late reply
         // neither completes that reservation nor reaches the new connection.
-        assert_eq!(d.admit(&c, RequestId(1), &r(b"new"), t0), Admit::Execute);
+        assert_eq!(
+            d.admit(&c, RequestId(1), &r(b"new"), t0, Retry::Stored),
+            Admit::Execute
+        );
         assert!(
             d.complete(&c, RequestId(1), &r(b"old"), &[1], t0)
                 .is_empty()
         );
-        assert_eq!(d.admit(&c, RequestId(1), &r(b"new"), t0), Admit::Attached);
+        assert_eq!(
+            d.admit(&c, RequestId(1), &r(b"new"), t0, Retry::Stored),
+            Admit::Attached
+        );
         assert_eq!(
             d.complete(&c, RequestId(1), &r(b"new"), &[2], t0),
             vec![r(b"new"), r(b"new")]
         );
         assert_eq!(
-            d.admit(&c, RequestId(1), &r(b"new"), t0),
+            d.admit(&c, RequestId(1), &r(b"new"), t0, Retry::Stored),
             Admit::Stored(vec![2])
         );
     }
@@ -276,17 +349,23 @@ mod tests {
             id: id.to_vec(),
         };
         let t0 = Instant::now();
-        assert_eq!(d.admit(&c, RequestId(4), &on(1, b"x"), t0), Admit::Execute);
+        assert_eq!(
+            d.admit(&c, RequestId(4), &on(1, b"x"), t0, Retry::Stored),
+            Admit::Execute
+        );
         assert_eq!(
             d.complete(&c, RequestId(4), &on(1, b"x"), &[5], t0),
             vec![on(1, b"x")]
         );
         assert_eq!(
-            d.admit(&c, RequestId(4), &on(2, b"y"), t0),
+            d.admit(&c, RequestId(4), &on(2, b"y"), t0, Retry::Stored),
             Admit::Stored(vec![5])
         );
         // A local connection is its route: another one is another client.
         let local = Peer::local(b"x");
-        assert_eq!(d.admit(&local, RequestId(4), &r(b"x"), t0), Admit::Execute);
+        assert_eq!(
+            d.admit(&local, RequestId(4), &r(b"x"), t0, Retry::Stored),
+            Admit::Execute
+        );
     }
 }

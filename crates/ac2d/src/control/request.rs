@@ -11,7 +11,7 @@ use ac2_proto::{
     decode_request, encode_reply, peek_envelope,
 };
 
-use crate::dedup::Admit;
+use crate::dedup::{Admit, Retry};
 use crate::health::SessionStream;
 use crate::util::{internal, invalid, perr, refused, wall_ns};
 
@@ -179,7 +179,10 @@ impl Control {
         let client = peer;
         // Reserved before anything executes, the asynchronous branches below included: a
         // copy of a request still running waits for its reply rather than running it again.
-        match self.dedup.admit(&client, req.id, route, now) {
+        match self
+            .dedup
+            .admit(&client, req.id, route, now, retry(&req.cmd))
+        {
             Admit::Execute => {}
             Admit::Attached => {
                 tracing::debug!("{} retried running request {}", client.id().0, req.id.0);
@@ -317,6 +320,34 @@ impl Control {
         if let Some(b) = encode_bounded(r) {
             self.s.outbox.reply(route, &b);
         }
+    }
+}
+
+/// What a retry of `cmd` gets once it is answered. Every mutation keeps its reply, and so
+/// does every read that acts: asks the drivers for their devices, opens a device or a
+/// driver's panel, sounds a burst, keeps the finder's result, opens or feeds a transfer,
+/// files an upload as a session. The rest only
+/// read (a page of a log, a chunk of a download at its offset, a snapshot), so a retry runs
+/// them again and their replies, megabytes some of them, are not held for the window.
+fn retry(cmd: &Command) -> Retry {
+    let acts = matches!(
+        cmd,
+        Command::SessionDevices
+            | Command::SessionPreview { .. }
+            | Command::SessionPreviewStop
+            | Command::SessionControlPanel { .. }
+            | Command::SessionDetectLoopback { .. }
+            | Command::DelayFind { .. }
+            | Command::TraceExport { .. }
+            | Command::FileUploadBegin { .. }
+            | Command::FileUploadChunk { .. }
+            | Command::FileImport { .. }
+            | Command::FileDownloadBegin { .. }
+    );
+    if cmd.is_mutation() || acts {
+        Retry::Stored
+    } else {
+        Retry::Runs
     }
 }
 

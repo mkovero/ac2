@@ -82,7 +82,12 @@ Warning { type: "<name>", … }
   once, whichever command it carries. A copy sent while the request still runs (a panel, the
   delay finder, loopback detection) runs nothing: when the request completes, the reply goes
   to every copy, on whichever connection each arrived. A copy sent after the reply gets the
-  stored reply. Requests refused before execution (protocol version, undecodable, revoked
+  stored reply if the command is a mutation or a read that acts (`session.devices`,
+  `session.preview`,
+  `session.preview_stop`, `session.control_panel`, `session.detect_loopback`, `delay.find`,
+  `trace.export`, `file.upload_begin`, `file.upload_chunk`, `file.import`,
+  `file.download_begin`); any other read is not stored, and a copy of it after the reply
+  runs again. Requests refused before execution (protocol version, undecodable, revoked
   key) are not remembered. Revoking a client forgets its stored replies and running ids.
 - `expect_rev` applies to mutations: if state has moved past it the reply is `conflict`
   with `detail: {type: conflict, rev}` (the current rev). Commits are serial.

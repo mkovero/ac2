@@ -148,3 +148,75 @@ fn ids_are_per_connection_for_local_clients() {
     assert_eq!(opened.load(Ordering::SeqCst), 2);
     h.shutdown();
 }
+
+/// A read is not held for the dedup window: its retry after the answer runs again and sees
+/// the state as it is now, while a mutation's retry still gets its stored reply.
+#[test]
+fn a_retried_read_runs_again() {
+    init_log();
+    let h = Daemon::start(config(manual_rig(), inproc("dedup-read"))).unwrap();
+    let (mut c, _s) = connect(&h, &[]);
+    let rev = |r: ac2_proto::Reply| match r.result {
+        Ok(ReplyBody::Snapshot(s)) => s.rev,
+        other => panic!("{other:?}"),
+    };
+    let read = Request::new(c.next_id(), Command::StateSnapshot);
+    let before = rev(c.call_req(read.clone()));
+
+    let create = Request::new(
+        c.next_id(),
+        Command::MeasCreate {
+            config: transfer("tf"),
+        },
+    );
+    let created = c.call_req(create.clone());
+    assert!(created.result.is_ok(), "{created:?}");
+
+    let after = rev(c.call_req(read));
+    assert!(
+        after > before,
+        "the retried read was answered from {before:?}"
+    );
+
+    c.send(&create);
+    let again = c.recv(T).unwrap();
+    assert_eq!(again, created, "a mutation's retry gets its stored reply");
+    assert_eq!(c.state().measurements.len(), 1);
+    h.shutdown();
+}
+
+/// A repeated `file.upload_chunk` id gets its stored reply: run again, the chunk would be
+/// out of order (or appended twice).
+#[test]
+fn a_retried_upload_chunk_gets_its_stored_reply() {
+    use ac2_proto::units::Blob;
+    init_log();
+    let h = Daemon::start(config(manual_rig(), inproc("dedup-chunk"))).unwrap();
+    let (mut c, _s) = connect(&h, &[]);
+    let bytes = b"not an archive, only bytes".to_vec();
+    let t = c.transfer(Command::FileUploadBegin {
+        file: "x.ac2session".into(),
+        bytes: bytes.len() as u64,
+        sha256: ac2_archive::sha256_hex(&bytes),
+    });
+    let chunk = Request::new(
+        c.next_id(),
+        Command::FileUploadChunk {
+            transfer: t.transfer,
+            offset: 0,
+            data: Blob(bytes[..8].to_vec()),
+        },
+    );
+    let first = c.call_req(chunk.clone());
+    assert!(first.result.is_ok(), "{first:?}");
+    c.send(&chunk);
+    let again = c.recv(T).unwrap();
+    assert_eq!(again, first, "the retry ran again");
+    // The next chunk is expected right after the first, once.
+    c.ok(Command::FileUploadChunk {
+        transfer: t.transfer,
+        offset: 8,
+        data: Blob(bytes[8..].to_vec()),
+    });
+    h.shutdown();
+}
