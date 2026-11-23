@@ -49,6 +49,7 @@ fn trace(peaks: Option<&[Peak]>) -> SpectrumTrace<'_> {
         offset_db: 0.0,
         selected: false,
         compared: false,
+        mic_range: None,
         style: SpectrumStyle::Line,
         layer: 0,
         bands: None,

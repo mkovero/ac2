@@ -8,7 +8,7 @@
 
 use ac2_proto::frame::{RtaFrame, SpecBands, SpecFrame, ValidityMask};
 use ac2_proto::model::{
-    BandFraction, CalStatus, LevelScale, SmoothingFraction, SpecLevel, Weighting, Window,
+    BandFraction, CalStatus, FreqRange, LevelScale, SmoothingFraction, SpecLevel, Weighting, Window,
 };
 use ac2_proto::units::WallNs;
 
@@ -121,6 +121,9 @@ pub struct SpectrumTrace<'a> {
     /// Drawn for compare only (not of the pane's group): the legend tags it
     /// [`crate::trace::COMPARED`].
     pub compared: bool,
+    /// Span of the mic curve in the levels ([`crate::unresolved::mic_marks`]); `None`:
+    /// no curve applied, or not known (a stored or math trace).
+    pub mic_range: Option<FreqRange>,
     /// How it is drawn: its measurement's style (a stored trace: its owner's).
     pub style: SpectrumStyle,
     /// Stacking: 0 for the pane's own group, `n` for the `n`-th curve compared. A higher
@@ -207,6 +210,7 @@ impl<'a> SpectrumTrace<'a> {
             offset_db: 0.0,
             selected: false,
             compared: false,
+            mic_range: frame.meta.mic_range,
             style: SpectrumStyle::default(),
             layer: 0,
             bands: None,
@@ -258,6 +262,7 @@ impl<'a> SpectrumTrace<'a> {
             offset_db: 0.0,
             selected: false,
             compared: false,
+            mic_range: frame.meta.mic_range,
             style: SpectrumStyle::default(),
             layer: 0,
             bands: frame.meta.bands.as_deref(),
@@ -489,6 +494,29 @@ impl SpectrumScene {
 
 /// The bands of the selected curve that has them, else of the first that does; `None`
 /// when the valid-resolution marker is off.
+/// Where the mic curve of the selected corrected curve ends, else the first corrected
+/// curve's: one curve's, as for the valid-resolution marks.
+pub(crate) fn mic_marks(
+    traces: &[SpectrumTrace<'_>],
+    view: &ViewState,
+) -> Vec<crate::unresolved::RangeMark> {
+    if !view.marks() {
+        return Vec::new();
+    }
+    let with = || traces.iter().filter(|t| t.mic_range.is_some());
+    with()
+        .find(|t| t.selected)
+        .or_else(|| with().find(|t| !t.compared))
+        .and_then(|t| {
+            Some(crate::unresolved::mic_marks(
+                t.mic_range?,
+                t.freqs.first().copied()?,
+                t.freqs.last().copied()?,
+            ))
+        })
+        .unwrap_or_default()
+}
+
 pub(crate) fn marked_bands<'a>(
     traces: &[SpectrumTrace<'a>],
     view: &ViewState,

@@ -259,3 +259,38 @@ fn smoothing_keys_stay_with_the_focused_pane() {
         t.last_toast()
     );
 }
+
+/// Alt+K / Alt+Shift+K step the focused transfer pane's measurement through the
+/// resolutions and stop at the ends; another pane has no resolution to set.
+#[test]
+fn resolution_keys_step_the_transfer_measurement() {
+    use ac2_proto::model::Resolution;
+    fn sent(r: &[Request]) -> Resolution {
+        match r {
+            [
+                Request::Call {
+                    cmd: Command::MeasUpdate { config, .. },
+                    ..
+                },
+            ] => match &config.kind {
+                MeasKind::Transfer { config } => config.resolution,
+                other => panic!("{other:?}"),
+            },
+            other => panic!("{other:?}"),
+        }
+    }
+    let mut t = T::new();
+    // The measurement is at the default, 1/48: one step each way.
+    assert_eq!(sent(&t.key("Alt+K")), Resolution::TwentyFourth);
+    assert_eq!(sent(&t.key("Alt+Shift+K")), Resolution::NinetySixth);
+    // The SPL pane has no transfer measurement.
+    t.key("Alt+4");
+    let r =
+        t.st.apply(Msg::Command(CommandId::ResolutionCoarser), &t.keys.clone());
+    assert!(r.is_empty(), "{r:?}");
+    assert!(
+        t.last_toast().contains("no transfer measurement"),
+        "{}",
+        t.last_toast()
+    );
+}

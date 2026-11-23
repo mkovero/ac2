@@ -51,6 +51,7 @@ fn rta_trace<'a>(
         offset_db: 0.0,
         selected: false,
         compared: false,
+        mic_range: None,
         bands: None,
         harmonics: None,
         style: SpectrumStyle::Bars,

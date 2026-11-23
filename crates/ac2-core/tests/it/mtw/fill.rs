@@ -36,15 +36,22 @@ fn fill_after_restart() {
     let sr = 48_000.0;
     let mut m = engine(sr, Averaging::Fifo { blocks: 4 }, 0);
     assert_eq!(m.fill(), 0.0);
+    // Nothing accumulated: every stage is still filling, the whole band.
+    assert_eq!(m.settling_hz(), Some((0.0, f64::INFINITY)));
     let n = pairs_to_full(&m);
     let (x, y) = noise(n + 10_000);
     push_chunked(&mut m, 0, &x[..n - 1], &y[..n - 1]);
     let before = m.fill();
     assert!(before > 0.0 && before < 1.0, "{before}");
     assert_eq!(before, expected_fill(&m));
+    // One pair short of full only the deepest stage is still filling: from the bottom to
+    // the top of its blend with the stage above.
+    let deepest = *m.layout().crossovers.last().expect("crossovers");
+    assert_eq!(m.settling_hz(), Some((0.0, deepest.hi_hz)));
     m.push(n as u64 - 1, &x[n - 1..n], &y[n - 1..n], SampleGate::Accept)
         .expect("push");
     assert_eq!(m.fill(), 1.0);
+    assert_eq!(m.settling_hz(), None);
     let out = m
         .push(n as u64 + 5_000, &x[n..], &y[n..], SampleGate::Accept)
         .expect("push");

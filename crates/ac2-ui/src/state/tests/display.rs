@@ -288,6 +288,7 @@ fn spec_frame_captured(
             level: ac2_proto::model::SpecLevel::Tone,
             cal: CalStatus::Uncalibrated,
             mic_curve: false,
+            mic_range: None,
             smoothing: None,
             math: None,
             bands: None,

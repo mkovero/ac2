@@ -112,6 +112,7 @@ impl Data {
             selected: false,
             compared: false,
             mic_range: None,
+            settling: None,
             unresolved: None,
         }
     }
@@ -406,6 +407,7 @@ fn live_frame(freqs: &[f64], tau: f64, applied: f64, nudged: f64) -> TfFrame {
             mic_range: None,
             math: None,
             unresolved: None,
+            settling: None,
             filled: 1.0,
         },
         mag: vec![0.0; n],

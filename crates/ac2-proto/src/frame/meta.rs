@@ -40,6 +40,11 @@ pub struct TfMeta {
     /// Where the columns are finer than the analysis stage serving them resolves; `None`
     /// for a math trace.
     pub unresolved: Option<Unresolved>,
+    /// The frequencies whose averages are still filling: the span served by the analysis
+    /// stages that have not yet accumulated their full depth (the longer windows of the
+    /// low stages fill last). `None` once every stage is full; for a math trace the span
+    /// over its included live operands.
+    pub settling: Option<FreqRange>,
     /// How full the averages behind this frame are, 0 to 1: the least full analysis stage's
     /// accumulated blocks over the blocks it needs. Blocks, not elapsed time, so blocks that
     /// protection refused add nothing and a measurement that never averaged never reads 1.
@@ -145,6 +150,10 @@ pub struct RtaMeta {
     pub cal: CalStatus,
     /// A mic curve was subtracted from `level`.
     pub mic_curve: bool,
+    /// The lowest and highest point of that mic curve. Outside them the curve is held at
+    /// its end value, so those columns are not corrected for the mic. `None` without a
+    /// curve and for a math trace.
+    pub mic_range: Option<FreqRange>,
     /// What a math trace combined; `None` for an RTA measurement.
     pub math: Option<Box<MathState>>,
 }
@@ -163,6 +172,10 @@ pub struct SpecMeta {
     pub cal: CalStatus,
     /// A mic curve was subtracted from `level`.
     pub mic_curve: bool,
+    /// The lowest and highest point of that mic curve. Outside them the curve is held at
+    /// its end value, so those columns are not corrected for the mic. `None` without a
+    /// curve and for a math trace.
+    pub mic_range: Option<FreqRange>,
     /// Display smoothing applied to `level`: a smoothed bin is a fractional-octave power
     /// average of tone levels, not the tone level of the bin.
     pub smoothing: Option<SmoothingFraction>,

@@ -58,6 +58,8 @@ pub(crate) struct Rta {
     cal: InputCal,
     /// Mic-curve correction per band (dB subtracted).
     corr: Option<Vec<f64>>,
+    /// The span of the mic curve's points behind `corr`.
+    mic_range: Option<ac2_proto::model::FreqRange>,
     config_rev: Rev,
     applied_at: Option<u64>,
     levels: LevelsMeter,
@@ -100,6 +102,7 @@ impl Rta {
             avg,
             cal: InputCal::none(),
             corr: None,
+            mic_range: None,
             config_rev,
             applied_at: None,
             buf: Vec::new(),
@@ -114,6 +117,7 @@ impl Rta {
     }
 
     fn set_cal(&mut self, cal: InputCal) {
+        self.mic_range = cal.correction.as_deref().map(crate::conv::mic_range);
         self.corr = cal.correction.as_ref().map(|c| {
             self.bank
                 .bands()
@@ -179,6 +183,7 @@ impl Rta {
                 },
                 cal: self.cal.status,
                 mic_curve: self.corr.is_some(),
+                mic_range: self.mic_range,
                 math: None,
             },
             level,

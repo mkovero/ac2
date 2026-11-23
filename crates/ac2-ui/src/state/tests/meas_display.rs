@@ -54,6 +54,7 @@ fn spectra_of(t: &mut T, frames: &[(u32, Vec<f32>)], seq: u64, incarnation: Daem
                 level: ac2_proto::model::SpecLevel::Tone,
                 cal: CalStatus::Uncalibrated,
                 mic_curve: false,
+                mic_range: None,
                 smoothing: None,
                 math: None,
                 bands: None,

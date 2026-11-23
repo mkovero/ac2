@@ -481,6 +481,7 @@ fn multires_spectrum_marks_where_its_windows_change() {
             level: SpecLevel::Tone,
             cal: CalStatus::Uncalibrated,
             mic_curve: false,
+            mic_range: None,
             smoothing: None,
             math: None,
             bands: Some(Box::new(bands)),

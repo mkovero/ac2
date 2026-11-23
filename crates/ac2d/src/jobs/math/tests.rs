@@ -58,6 +58,7 @@ fn member(meas: u32, db: f32, arrival: f64, inserted: f64, prot: ProtectionFlags
                 mic_range: None,
                 math: None,
                 unresolved: None,
+                settling: None,
                 filled: 1.0,
             },
             mag: vec![db; f.len()],

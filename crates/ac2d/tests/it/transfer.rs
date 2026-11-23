@@ -888,6 +888,16 @@ fn filled_rises_after_a_reset_and_a_delay_step_restarts_it() {
             let f = run_tf(d, &sub, 0.1, min_rev);
             let filled = tf(&f).meta.filled;
             assert!((0.0..=1.0).contains(&filled), "{filled}");
+            // While filling the frame says where: from the grid's bottom, the low stages
+            // being the last to fill. Full, nowhere.
+            let settling = tf(&f).meta.settling;
+            assert_eq!(settling.is_some(), filled < 1.0, "{settling:?} at {filled}");
+            if let Some(r) = settling {
+                assert!(
+                    (r.lo.0 - grid_freq(0)).abs() < 1e-9 && r.hi.0 > r.lo.0,
+                    "{r:?}"
+                );
+            }
             if let Some(&last) = seen.last() {
                 assert!(filled >= last, "{seen:?} then {filled}");
             }

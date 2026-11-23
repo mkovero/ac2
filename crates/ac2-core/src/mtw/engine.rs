@@ -123,6 +123,27 @@ impl Mtw {
             .fold(1.0, f64::min)
     }
 
+    /// The frequency span served by the stages whose averages are not yet full, `None`
+    /// once all are. A stage serves from its hand-over to the next deeper stage (0 for the
+    /// deepest) up to the top of its blend with the next shallower one (∞ for the
+    /// shallowest): inside a blend both stages contribute, so the blend counts with either.
+    pub fn settling_hz(&self) -> Option<(f64, f64)> {
+        let x = &self.layout().crossovers;
+        self.stages
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| (s.est.held() as f64) < s.averaging.full_blocks())
+            .map(|(b, _)| {
+                let lo = x.get(b).map_or(0.0, |c| c.lo_hz);
+                let hi = b
+                    .checked_sub(1)
+                    .and_then(|a| x.get(a))
+                    .map_or(f64::INFINITY, |c| c.hi_hz);
+                (lo, hi)
+            })
+            .reduce(|a, b| (a.0.min(b.0), a.1.max(b.1)))
+    }
+
     /// Model effective averages of stage `stage` once its average is full (FIFO) or in
     /// steady state (exponential), for a single bin.
     pub fn steady_eff_avg(&self, stage: usize) -> f64 {

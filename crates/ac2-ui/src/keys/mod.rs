@@ -320,6 +320,8 @@ commands! {
     PhaseView => "phase_view", "Phase view", [Transfer];
     SmoothCoarser => "smooth_coarser", "Smoothing coarser", [Transfer, Spectrum];
     SmoothFiner => "smooth_finer", "Smoothing finer", [Transfer, Spectrum];
+    ResolutionCoarser => "resolution_coarser", "Resolution coarser", [Transfer];
+    ResolutionFiner => "resolution_finer", "Resolution finer", [Transfer];
     SmoothOff => "smooth_off", "Smoothing off", [Transfer, Spectrum];
     Smooth48 => "smooth_48", "Smoothing 1/48 oct", [Transfer, Spectrum];
     Smooth24 => "smooth_24", "Smoothing 1/24 oct", [Transfer, Spectrum];

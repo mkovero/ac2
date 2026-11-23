@@ -69,6 +69,10 @@ pub fn tf_frame() -> Frame {
                     lo: crate::units::Hz(20.0),
                     hi: crate::units::Hz(20_000.0),
                 }),
+                settling: Some(crate::model::FreqRange {
+                    lo: crate::units::Hz(7.8125),
+                    hi: crate::units::Hz(68.0),
+                }),
                 filled: 0.625,
                 unresolved: Some(Unresolved {
                     resolution: Resolution::NinetySixth,
@@ -220,6 +224,10 @@ pub fn frames() -> Vec<Frame> {
                         },
                     },
                     mic_curve: true,
+                    mic_range: Some(crate::model::FreqRange {
+                        lo: crate::units::Hz(20.0),
+                        hi: crate::units::Hz(20_000.0),
+                    }),
                     math: None,
                 },
                 level: vec![f32::NAN, 74.5, 61.25],
@@ -239,6 +247,7 @@ pub fn frames() -> Vec<Frame> {
                     scale: LevelScale::Dbfs,
                     cal: CalStatus::Uncalibrated,
                     mic_curve: false,
+                    mic_range: None,
                     smoothing: Some(SmoothingFraction::Sixth),
                     level: SpecLevel::Density,
                     math: Some(Box::new(MathState {
@@ -274,7 +283,7 @@ pub fn frames() -> Vec<Frame> {
                         unresolved: Unresolved {
                             resolution: Resolution::FortyEighth,
                             ranges: vec![FreqRange {
-                                lo: Hz(7.8125),
+                                lo: crate::units::Hz(7.8125),
                                 hi: Hz(101.5),
                             }],
                         },

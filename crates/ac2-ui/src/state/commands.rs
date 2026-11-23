@@ -94,6 +94,51 @@ impl AppState {
         }
     }
 
+    /// Alt+K / Alt+Shift+K: the focused transfer pane's measurement one resolution coarser
+    /// / finer. The daemon restarts the measurement on the new grid, so its averages fill
+    /// again: the toast says so, the step being one key away from smoothing, which does
+    /// not.
+    pub(super) fn resolution_step(&mut self, step: i32, out: &mut Vec<Request>) {
+        let f = self.layout.focus;
+        let Some(mut m) = (self.layout.kind(f) == PaneKind::Transfer)
+            .then(|| self.pane_meas(f))
+            .flatten()
+            .cloned()
+        else {
+            self.warn("this pane shows no transfer measurement to set the resolution of");
+            return;
+        };
+        let name = m.config.name.clone();
+        let MeasKind::Transfer { config } = &mut m.config.kind else {
+            self.warn(format!(
+                "{name}: resolution is a transfer measurement's setting"
+            ));
+            return;
+        };
+        let all = ac2_proto::model::Resolution::ALL;
+        let i = all
+            .iter()
+            .position(|r| *r == config.resolution)
+            .unwrap_or(0) as i32;
+        let j = (i + step).clamp(0, all.len() as i32 - 1);
+        let said = |r: ac2_proto::model::Resolution| format!("1/{} oct", r.ppo());
+        if i == j {
+            self.toast(format!(
+                "{name}: {} is the {} resolution",
+                said(config.resolution),
+                if step > 0 { "finest" } else { "coarsest" }
+            ));
+            return;
+        }
+        config.resolution = all[j as usize];
+        let what = format!(
+            "{name}: resolution {} (averaging starts over)",
+            said(config.resolution)
+        );
+        let cmd = self.meas_update(m.id, m.config);
+        self.call(out, cmd, what);
+    }
+
     /// V / Shift+V: the next / previous shown stored trace in the list's order (slotted
     /// or not), with the live measurement as the stop between the last and the first;
     /// `hidden` (Alt) steps through the hidden ones too. It only selects: no pane
@@ -504,6 +549,8 @@ impl AppState {
             C::DeleteSelected => self.ask_delete(),
             C::SmoothCoarser => self.smooth(1, None, out),
             C::SmoothFiner => self.smooth(-1, None, out),
+            C::ResolutionCoarser => self.resolution_step(-1, out),
+            C::ResolutionFiner => self.resolution_step(1, out),
             C::SmoothOff => self.smooth(0, Some(None), out),
             C::Smooth48 => self.smooth(0, Some(Some(SmoothingFraction::FortyEighth)), out),
             C::Smooth24 => self.smooth(0, Some(Some(SmoothingFraction::TwentyFourth)), out),

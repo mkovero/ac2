@@ -215,6 +215,10 @@ pub fn defaults() -> Vec<Binding> {
         // K steps smoothing coarser, Shift+K finer (off → 1/48 … 1/3 octave).
         (C::SmoothCoarser, S::Transfer, k(K::K)),
         (C::SmoothFiner, S::Transfer, sh(K::K)),
+        // Alt+K steps the transfer's resolution (points per octave) as K steps smoothing:
+        // coarser, with Shift finer (1/96 … 1/12 octave).
+        (C::ResolutionCoarser, S::Transfer, alt(K::K)),
+        (C::ResolutionFiner, S::Transfer, alt_sh(K::K)),
         (C::SmoothCoarser, S::Spectrum, k(K::K)),
         (C::SmoothFiner, S::Spectrum, sh(K::K)),
         (C::PhaseView, S::Transfer, sh(K::P)),
@@ -370,6 +374,7 @@ pub fn hints(scope: Scope) -> &'static [Hint] {
                     hint(C::InsertDelay, "find delay", 70),
                     hint(C::Peaks, "peaks", 55),
                     hint(C::SmoothCoarser, "smoothing", 60),
+                    hint(C::ResolutionCoarser, "resolution", 50),
                 ]
             }
         }

@@ -363,6 +363,7 @@ pub(crate) fn with_spectrum<R>(
     {
         let compared = st.trace_compared_on(kind, &data.meta, pane);
         traces.push(SpectrumTrace {
+            mic_range: None,
             key: TraceKey::Stored(data.meta.id),
             name: data.meta.edit.name.clone(),
             color: colours.trace(data.meta.id),

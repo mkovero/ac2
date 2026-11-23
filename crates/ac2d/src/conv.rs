@@ -600,3 +600,12 @@ pub(crate) fn stamp_map(l: ac2_core::clock_map::StampLine) -> pm::StampMap {
         ppm: l.ppm,
     }
 }
+
+/// The span of a mic curve's points: where the correction is the mic's measured response
+/// (outside it the curve is held at its end value).
+pub(crate) fn mic_range(c: &core::mic_curve::Correction) -> pm::FreqRange {
+    pm::FreqRange {
+        lo: ac2_proto::units::Hz(c.curve().f_lo()),
+        hi: ac2_proto::units::Hz(c.curve().f_hi()),
+    }
+}

@@ -119,6 +119,36 @@ pub fn mic_marks(range: FreqRange, first_hz: f64, last_hz: f64) -> Vec<RangeMark
     below.into_iter().chain(above).collect()
 }
 
+/// The mark of a curve whose averages are still filling over `range`, on columns from
+/// `first_hz` to `last_hz`: the longer windows of the low analysis stages take longer to
+/// reach their depth, so the bottom of a curve can still be moving when the rest has
+/// settled.
+pub fn settling_marks(range: FreqRange, first_hz: f64, last_hz: f64) -> Vec<RangeMark> {
+    const NOTE: &str = "still averaging";
+    let (lo, hi) = (range.lo.0.max(first_hz), range.hi.0.min(last_hz));
+    if hi <= lo {
+        return Vec::new();
+    }
+    let from_bottom = lo <= first_hz;
+    let text = match (from_bottom, hi >= last_hz) {
+        (true, true) => NOTE.to_owned(),
+        (true, false) => format!("below {}: {NOTE}", format::freq_rough(hi)),
+        (false, true) => format!("above {}: {NOTE}", format::freq_rough(lo)),
+        (false, false) => format!(
+            "{} – {}: {NOTE}",
+            format::freq_rough(lo),
+            format::freq_rough(hi)
+        ),
+    };
+    vec![RangeMark {
+        lo_hz: lo,
+        hi_hz: hi,
+        from_bottom,
+        text,
+        note: NOTE.to_owned(),
+    }]
+}
+
 /// What the marks covering `hz` say, joined; `None` outside every mark.
 pub fn note_at(marks: &[RangeMark], hz: f64) -> Option<String> {
     let notes: Vec<&str> = marks
@@ -247,6 +277,22 @@ mod mic_tests {
         assert!(m[0].from_bottom && !m[1].from_bottom);
         assert_eq!((m[0].lo_hz, m[0].hi_hz), (7.8, 20.0));
         assert_eq!((m[1].lo_hz, m[1].hi_hz), (20_000.0, 256_000.0));
+    }
+
+    #[test]
+    fn a_curve_still_averaging_says_where() {
+        let text = |lo, hi| {
+            let m = settling_marks(span(lo, hi), 7.8, 21_600.0);
+            assert_eq!(m.len(), 1);
+            assert_eq!(m[0].note, "still averaging");
+            m[0].text.clone()
+        };
+        assert_eq!(text(7.8, 90.0), "below 90 Hz: still averaging");
+        assert_eq!(text(7.8, 21_600.0), "still averaging");
+        assert_eq!(text(68.0, 350.0), "68 Hz – 350 Hz: still averaging");
+        assert_eq!(text(2000.0, 21_600.0), "above 2 kHz: still averaging");
+        // Outside the columns there is nothing to mark.
+        assert!(settling_marks(span(1.0, 5.0), 7.8, 21_600.0).is_empty());
     }
 
     #[test]

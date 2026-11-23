@@ -279,6 +279,7 @@ fn tf(n_mag: Vec<(f32, f32)>, phase: Vec<(f32, f32)>, coh: Vec<(f32, f32)>, firs
                 mic_range: None,
                 math: None,
                 unresolved: None,
+                settling: None,
                 filled: if first { 0.5 } else { 0.625 },
             },
             mag: pick(&n_mag),

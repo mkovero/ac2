@@ -150,6 +150,7 @@ mod tests {
                 "X find delay",
                 "P peaks",
                 "K smoothing",
+                "Alt+K resolution",
                 "H all keys"
             ]
         );

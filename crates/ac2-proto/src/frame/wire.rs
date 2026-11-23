@@ -18,6 +18,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::PROTO_VERSION;
 use crate::grid::GridId;
+use crate::model::FreqRange;
 use crate::packing::{self, array_size};
 use crate::topic::Topic;
 use crate::units::{DaemonIncarnation, Rev, SampleIndex, Seconds, SessionEpoch, WallNs};
@@ -73,6 +74,7 @@ impl<'de> Deserialize<'de> for Form {
 #[serde(deny_unknown_fields)]
 struct TfPerFrame {
     filled: f32,
+    settling: Option<FreqRange>,
 }
 
 /// The per-frame metadata of an `spl` delta: its readings.
@@ -87,7 +89,8 @@ struct SplPerFrame {
     duration: Seconds,
 }
 
-/// What a delta carries of the metadata, fixed per kind: `tf` its `filled`, `spl` its
+/// What a delta carries of the metadata, fixed per kind: `tf` how full its averages are
+/// and where they are still filling, `spl` its
 /// readings, every other kind nothing (any change of its metadata goes as a keyframe).
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum PerFrame {
@@ -98,7 +101,10 @@ enum PerFrame {
 
 fn per_frame(m: &FrameMeta) -> PerFrame {
     match m {
-        FrameMeta::Tf(t) => PerFrame::Tf(TfPerFrame { filled: t.filled }),
+        FrameMeta::Tf(t) => PerFrame::Tf(TfPerFrame {
+            filled: t.filled,
+            settling: t.settling,
+        }),
         FrameMeta::Spl(s) => PerFrame::Spl(SplPerFrame {
             level: s.level,
             lmax: s.lmax,
@@ -128,7 +134,10 @@ fn per_frame(m: &FrameMeta) -> PerFrame {
 fn with_per_frame(base: &FrameMeta, p: PerFrame) -> Option<FrameMeta> {
     let mut m = base.clone();
     match (&mut m, p) {
-        (FrameMeta::Tf(t), PerFrame::Tf(p)) => t.filled = p.filled,
+        (FrameMeta::Tf(t), PerFrame::Tf(p)) => {
+            t.filled = p.filled;
+            t.settling = p.settling;
+        }
         (FrameMeta::Spl(s), PerFrame::Spl(p)) => {
             s.level = p.level;
             s.lmax = p.lmax;

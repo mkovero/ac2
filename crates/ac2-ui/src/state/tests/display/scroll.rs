@@ -24,6 +24,7 @@ fn frame(t: &mut T, i: u64, drained: Instant) {
             level: ac2_proto::model::SpecLevel::Tone,
             cal: CalStatus::Uncalibrated,
             mic_curve: false,
+            mic_range: None,
             smoothing: None,
             math: None,
             bands: None,

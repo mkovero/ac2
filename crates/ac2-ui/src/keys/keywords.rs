@@ -238,6 +238,9 @@ impl CommandId {
             C::Average | C::AverageComplex => &["math", "combine", "mean"],
             C::AverageCoherence => &["math", "combine", "mean", "coherence"],
             C::PhaseView => &["unwrap", "unwrapped", "wrapped", "group delay"],
+            C::ResolutionCoarser | C::ResolutionFiner => {
+                &["points per octave", "columns", "grid", "ppo"]
+            }
             C::SmoothCoarser
             | C::SmoothFiner
             | C::SmoothOff

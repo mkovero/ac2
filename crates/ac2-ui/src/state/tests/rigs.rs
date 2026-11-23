@@ -101,6 +101,7 @@ fn spectrum_at(seq: u64, level: f32) -> ConnEvent {
             level: ac2_proto::model::SpecLevel::Tone,
             cal: CalStatus::Uncalibrated,
             mic_curve: false,
+            mic_range: None,
             smoothing: None,
             math: None,
             bands: None,

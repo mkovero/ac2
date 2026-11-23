@@ -98,6 +98,7 @@ fn trace<'a>(c: &'a Cols, meas: u32, color: usize, delay: f64) -> TfTrace<'a> {
         selected: false,
         compared: false,
         mic_range: None,
+        settling: None,
         unresolved: None,
     }
 }
@@ -488,6 +489,7 @@ fn spectrum_golden_with(
             level: ac2_proto::model::SpecLevel::Tone,
             cal: CalStatus::Uncalibrated,
             mic_curve: false,
+            mic_range: None,
             smoothing: None,
             math: None,
             bands: Some(Box::new(bands)),

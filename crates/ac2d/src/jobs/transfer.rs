@@ -195,14 +195,6 @@ fn column_correction(grid: &LogGrid, c: &Correction) -> ColumnCorrection {
     ColumnCorrection { db, gain }
 }
 
-/// The span of the mic curve's points: where the correction is the mic's measured response.
-fn mic_range(c: &Correction) -> FreqRange {
-    FreqRange {
-        lo: Hz(c.curve().f_lo()),
-        hi: Hz(c.curve().f_hi()),
-    }
-}
-
 /// The kernel for `smoothing` on `grid`.
 fn smoother(
     grid: LogGrid,
@@ -290,7 +282,7 @@ impl Transfer {
         Ok(Self {
             unresolved,
             corr: correction.map(|c| column_correction(&grid, c)),
-            mic_range: correction.map(mic_range),
+            mic_range: correction.map(crate::conv::mic_range),
             generation: 0,
             tf_pace: Pace::new(Duration::ZERO),
             ir_pace: Pace::new(Duration::ZERO),
@@ -457,6 +449,7 @@ impl Transfer {
                 mic_range: self.mic_range,
                 math: None,
                 unresolved: Some(self.unresolved.clone()),
+                settling: self.settling(),
                 filled: 0.0,
             },
             mag: vec![f32::NAN; n],
@@ -469,7 +462,17 @@ impl Transfer {
 
     fn set_correction(&mut self, c: Option<&Correction>) {
         self.corr = c.map(|c| column_correction(&self.grid, c));
-        self.mic_range = c.map(mic_range);
+        self.mic_range = c.map(crate::conv::mic_range);
+    }
+
+    /// Where the averages are still filling, within the grid.
+    fn settling(&self) -> Option<FreqRange> {
+        let (lo, hi) = self.mtw.settling_hz()?;
+        let top = self.grid.frequency(self.grid.len() - 1);
+        Some(FreqRange {
+            lo: Hz(lo.max(self.grid.frequency(0))),
+            hi: Hz(hi.min(top)),
+        })
     }
 
     fn mark_discontinuity(&mut self, at: u64) {
@@ -589,6 +592,7 @@ impl Transfer {
                 mic_range: self.mic_range,
                 math: None,
                 unresolved: Some(self.unresolved.clone()),
+                settling: self.settling(),
                 filled: self.mtw.fill() as f32,
             },
             mag,

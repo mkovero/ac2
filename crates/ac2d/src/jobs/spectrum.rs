@@ -482,6 +482,7 @@ impl Spectrum {
             cal: self.cal.status,
             level: self.cfg.level,
             mic_curve: self.cal.correction.is_some(),
+            mic_range: self.cal.correction.as_deref().map(crate::conv::mic_range),
             smoothing: self.cfg.smoothing,
             math: None,
             bands: self.bands(end),

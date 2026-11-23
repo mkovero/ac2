@@ -1,7 +1,7 @@
 {
  "topic": "d/3/rta",
  "header": {
-  "v": 100,
+  "v": 101,
   "kind": "rta",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -39,6 +39,10 @@
      }
     },
     "mic_curve": true,
+    "mic_range": {
+     "lo": 20.0,
+     "hi": 20000.0
+    },
     "math": null
    }
   }

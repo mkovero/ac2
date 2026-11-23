@@ -138,6 +138,7 @@ def tf_frame():
                 "resolution": "ninety_sixth",
                 "ranges": [{"lo": 31.25, "hi": 135.5}, {"lo": 1625.0, "hi": 3250.0}],
             },
+            "settling": {"lo": 7.8125, "hi": 68.0},
             "filled": 0.625,
         },
         [
@@ -247,6 +248,7 @@ def frames():
                     "basis": {"type": "acoustic", "calibrator_level": 94.0},
                 },
                 "mic_curve": True,
+                "mic_range": {"lo": 20.0, "hi": 20000.0},
                 "math": None,
             },
             [
@@ -264,6 +266,7 @@ def frames():
                 "level": "density",
                 "cal": {"type": "uncalibrated"},
                 "mic_curve": False,
+                "mic_range": None,
                 "smoothing": "sixth",
                 "math": {
                     "operands": [

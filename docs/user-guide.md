@@ -1901,13 +1901,22 @@ shows where: a faint grey shade with dashed edges, and the cursor says it
   135 Hz, about 200–410 Hz and 1.6–3.3 kHz (at 48 kHz the last is 810 Hz–1.6 kHz); 1/24
   below about 34 Hz; 1/12 below about 17 Hz. A live curve shows **gaps** where columns have
   no estimate of their own.
+- **Alt+K** / **Alt+Shift+K** step the focused transfer pane's measurement one
+  resolution coarser / finer (1/12 … 1/96 octave), as **K** steps smoothing. Unlike
+  smoothing it restarts the measurement on the new grid: the averages fill again. Coarser
+  moves the marked range down (1/24: marked below about 34 Hz; 1/12: below about 17 Hz).
 - **LF window** (New / Edit dialog, `ac2 meas new tf … --long-lf`): **4 s** adds a longer
   window for the bottom octaves, for subwoofers: 1/48 is then marked only below about 17 Hz
   (1/24 below 8.5 Hz). Those columns need four times as long to settle, so keep **1 s** for
   aligning by phase and use 4 s to see detail below 68 Hz.
-- **Outside the mic curve**: where a transfer curve runs below the lowest or above the
-  highest point of the mic's curve file it is not corrected for the mic. The same shade
-  marks it, and the cursor says `outside the mic curve`.
+- **Outside the mic curve**: where a transfer, spectrum or RTA curve runs below the lowest
+  or above the highest point of the mic's curve file it is not corrected for the mic. The
+  same shade marks it, and the cursor says `outside the mic curve`.
+- **Still averaging**: after a start, a reset or a delay change the low end of a transfer
+  curve fills last (its windows are the longest; with the 4 s LF window it takes four
+  times as long). The same shade marks the part still filling until it has its full
+  depth, and the cursor says `still averaging`. Where several of these apply the cursor
+  lists them all.
 - **Sweep**: the window is the gate (or the response up to the noise); its edge is about
   69/W Hz at 1/48 (138/W at 1/96) for W seconds: an ungated room response marks at most the
   lowest columns, a 10 ms gate everything below about 7 kHz. The curve is **interpolated**
@@ -4397,6 +4406,8 @@ Keys as on Linux and Windows; on macOS `Ctrl` is `⌘` and `Alt` is `⌥`. Every
 | `Shift+P` | Phase view | `phase_view` |
 | `K` | Smoothing coarser | `smooth_coarser` |
 | `Shift+K` | Smoothing finer | `smooth_finer` |
+| `Alt+K` | Resolution coarser | `resolution_coarser` |
+| `Alt+Shift+K` | Resolution finer | `resolution_finer` |
 | `Alt+P` | Next peak | `next_peak` |
 | `Alt+Shift+P` | Previous peak | `prev_peak` |
 | `Alt+N` | Next notch | `next_notch` |
@@ -4628,7 +4639,7 @@ The least used go first on a narrow pane; `G/Shift+G` steps the pane's views for
 
 | Pane | Hint line |
 |---|---|
-| Transfer function | `V` select trace · `G/Shift+G` view · `A` show/hide · `Ctrl+1` capture · `X` find delay · `P` peaks · `K` smoothing · `H` all keys |
+| Transfer function | `V` select trace · `G/Shift+G` view · `A` show/hide · `Ctrl+1` capture · `X` find delay · `P` peaks · `K` smoothing · `Alt+K` resolution · `H` all keys |
 | Spectrum / RTA | `S` start/stop · `P` peaks · `G/Shift+G` view · `K` smoothing · `Shift+Home` fit level · `Ctrl+1` capture · `W` maximise · `H` all keys |
 | Transfer: impulse response view | `G/Shift+G` view · `S` start/stop · `X` find delay · `,/.` delay · `R` reset · `I` zoom time · `Shift+Home` fit level · `H` all keys |
 | SPL | `G/Shift+G` view · `Shift+F` F/S/I · `Z` A/C/Z · `Shift+L` windows · `W` maximise · `H` all keys |

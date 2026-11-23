@@ -174,7 +174,32 @@ fn unresolved_marks(
         .unwrap_or_default()
         .into_iter()
         .chain(mic_marks(traces, shown))
+        .chain(settling_marks(traces, shown))
         .collect()
+}
+
+/// Where the selected shown curve is still averaging, else the first of the pane's own
+/// curves that is: one curve's, as for the valid-resolution marks.
+fn settling_marks(
+    traces: &[TfTrace<'_>],
+    shown: &[DisplayTrace],
+) -> Vec<crate::unresolved::RangeMark> {
+    let known = || {
+        traces
+            .iter()
+            .filter(|t| t.settling.is_some() && shown.iter().any(|d| d.key == t.key))
+    };
+    known()
+        .find(|t| t.selected)
+        .or_else(|| known().find(|t| !t.compared))
+        .and_then(|t| {
+            Some(crate::unresolved::settling_marks(
+                t.settling?,
+                t.freqs.first().copied()?,
+                t.freqs.last().copied()?,
+            ))
+        })
+        .unwrap_or_default()
 }
 
 /// Where the selected shown curve's mic curve ends, else the first of the pane's own

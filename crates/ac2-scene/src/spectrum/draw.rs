@@ -99,7 +99,7 @@ pub(crate) fn spectrum_scene_in(
     let (xm, ym) = (x_axis.mapping, y_axis.mapping);
     let marked = marked_bands(traces, view);
     let stitches = marked.map_or_else(Vec::new, |(b, _)| crate::stitch::stitches(b));
-    let unresolved = marked.map_or_else(Vec::new, |(b, first)| {
+    let mut unresolved = marked.map_or_else(Vec::new, |(b, first)| {
         crate::unresolved::marks(
             crate::unresolved::Source {
                 unresolved: &b.unresolved,
@@ -109,6 +109,7 @@ pub(crate) fn spectrum_scene_in(
             None,
         )
     });
+    unresolved.extend(super::mic_marks(traces, view));
     crate::unresolved::draw(&mut c, plot, &xm, &unresolved, theme);
     let foot = crate::stitch::draw(&mut c, plot, &xm, &stitches, true, theme);
 
@@ -270,13 +271,13 @@ pub(crate) fn spectrum_scene_in(
             })
             .collect();
         let mut freq = format::freq_readout(f);
-        if let Some((b, _)) = marked {
-            if let Some(w) = crate::stitch::windows_at(b, f) {
-                freq = format!("{freq} · {w}");
-            }
-            if let Some(m) = crate::unresolved::at(&unresolved, f) {
-                freq = format!("{freq} · {}", m.note);
-            }
+        if let Some((b, _)) = marked
+            && let Some(w) = crate::stitch::windows_at(b, f)
+        {
+            freq = format!("{freq} · {w}");
+        }
+        if let Some(note) = crate::unresolved::note_at(&unresolved, f) {
+            freq = format!("{freq} · {note}");
         }
         Some(SpectrumCursor {
             freq_hz: f,

@@ -13,7 +13,7 @@ import zlib
 
 import msgpack
 
-PROTO_VERSION = 100
+PROTO_VERSION = 101
 MAX_HEADER_BYTES = 8192
 MAX_N = 1 << 16
 MAX_ARRAYS = 12
@@ -252,11 +252,12 @@ META = {
     "tf": [("delay", None), ("nudged", None), ("smoothing", ("opt", _SMOOTHING)), ("mic_curve", None),
            ("mic_range", ("opt", [("lo", None), ("hi", None)])), ("math", _MATH),
            ("unresolved", ("opt", [("resolution", None), ("ranges", ("list", [("lo", None), ("hi", None)]))])),
-           ("filled", None)],
+           ("settling", ("opt", [("lo", None), ("hi", None)])), ("filled", None)],
     "ir": [("sample_rate", None), ("t0", None), ("dt", None), ("inserted_delay", None)],
     "rta": [("fraction", None), ("weighting", None), ("scale", None), ("cal", _CAL), ("mic_curve", None),
-            ("math", _MATH)],
-    "spec": [("window", None), ("scale", None), ("level", None), ("cal", _CAL), ("mic_curve", None), ("smoothing", None),
+            ("mic_range", ("opt", [("lo", None), ("hi", None)])), ("math", _MATH)],
+    "spec": [("window", None), ("scale", None), ("level", None), ("cal", _CAL), ("mic_curve", None),
+             ("mic_range", ("opt", [("lo", None), ("hi", None)])), ("smoothing", None),
              ("math", _MATH),
              ("bands", ("opt", [("bands", ("list", [("window", None), ("hop", None), ("sole", None),
                                                      ("age", None)])),
@@ -305,7 +306,7 @@ HEADER = [
 FORM_KEY, FORM_DELTA = 0, 1
 # What a delta carries of the metadata, per kind; every other kind nothing (nil).
 DELTA_META = {
-    "tf": [("filled", None)],
+    "tf": [("filled", None), ("settling", ("opt", [("lo", None), ("hi", None)]))],
     "spl": [("level", None), ("lmax", None), ("lmin", None), ("leq", None), ("lpeak", None),
             ("duration", None)],
 }
@@ -734,7 +735,7 @@ def encode_key(c: dict) -> list:
 def _per_frame(h: dict):
     (kind, m), = h["meta"].items()
     fields = DELTA_META.get(kind)
-    return None if fields is None else [m[f] for f, _ in fields]
+    return None if fields is None else positional(fields, {f: m[f] for f, _ in fields})
 
 
 def _static_meta(h: dict) -> bytes:

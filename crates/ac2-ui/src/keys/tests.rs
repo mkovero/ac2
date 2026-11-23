@@ -210,6 +210,8 @@ fn learned_bindings_carry_over() {
         ("O", CommandId::ZoomOut),
         ("K", CommandId::SmoothCoarser),
         ("Shift+K", CommandId::SmoothFiner),
+        ("Alt+K", CommandId::ResolutionCoarser),
+        ("Alt+Shift+K", CommandId::ResolutionFiner),
         ("V", CommandId::NextTrace),
         ("Shift+V", CommandId::PrevTrace),
         ("Alt+V", CommandId::NextAnyTrace),

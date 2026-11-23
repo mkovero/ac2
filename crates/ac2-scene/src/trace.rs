@@ -124,6 +124,9 @@ pub struct TfTrace<'a> {
     /// Span of the mic curve in the columns ([`crate::unresolved::mic_marks`]); `None`:
     /// no curve, or not known (math traces, stored curves).
     pub mic_range: Option<ac2_proto::model::FreqRange>,
+    /// Where the averages behind the curve are still filling
+    /// ([`crate::unresolved::settling_marks`]); `None`: settled, or a stored curve.
+    pub settling: Option<ac2_proto::model::FreqRange>,
     /// An average's range across positions ([`crate::range_band`]); `None` for every other
     /// curve.
     pub range: Option<crate::range_band::Source<'a>>,
@@ -207,6 +210,7 @@ impl<'a> TfTrace<'a> {
                     fill: crate::unresolved::Fill::Gaps,
                 }),
             mic_range: frame.meta.mic_range,
+            settling: frame.meta.settling,
             range: frame
                 .meta
                 .math
@@ -271,6 +275,7 @@ impl<'a> TfTrace<'a> {
             selected: false,
             compared: false,
             mic_range: None,
+            settling: None,
             unresolved: data
                 .sweep
                 .as_ref()

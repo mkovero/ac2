@@ -30,11 +30,11 @@ use ac2_proto::frame::{
 use ac2_proto::grid::{GridDef, GridId};
 use ac2_proto::model::{
     AlignCurves, AlignNoFit, AlignOutcome, AlignState, AverageMethod, BandFraction, CalStatus,
-    LevelScale, MathConfig, MathDomain, MathExpr, MathOp, MathReference, Operand, PhaseBasis,
-    SpecLevel, Weighting, Window,
+    FreqRange, LevelScale, MathConfig, MathDomain, MathExpr, MathOp, MathReference, Operand,
+    PhaseBasis, SpecLevel, Weighting, Window,
 };
 use ac2_proto::topic::Topic;
-use ac2_proto::units::{MeasId, Rev, Seconds, SessionEpoch};
+use ac2_proto::units::{Hz, MeasId, Rev, Seconds, SessionEpoch};
 use ac2_traces::columns::Columns;
 use ac2_traces::math::{self, Combine, Input};
 use ac2_traces::ops::capture_columns;
@@ -355,6 +355,8 @@ struct Value {
     /// How full a live transfer's averages are (`TfMeta::filled`); 1 for a stored operand,
     /// whose average is complete.
     filled: f32,
+    /// Where a live transfer's averages are still filling (`TfMeta::settling`).
+    settling: Option<FreqRange>,
     frame: Option<FrameData>,
 }
 
@@ -369,15 +371,18 @@ fn value(a: &Answer, f: Option<&Frame>, epoch: SessionEpoch) -> Option<Value> {
             level: h.level,
             mic_curve: h.mic_curve,
             filled: 1.0,
+            settling: None,
             frame: None,
         });
     }
     let f = f?;
     let (_, columns) = capture_columns(&f.data)?;
     let mut filled = 1.0;
+    let mut settling = None;
     let (delay, validity, scale, level, mic_curve) = match &f.data {
         FrameData::Tf(t) => {
             filled = t.meta.filled;
+            settling = t.meta.settling;
             (
                 t.meta.delay.0,
                 Some(t.validity.clone()),
@@ -411,6 +416,7 @@ fn value(a: &Answer, f: Option<&Frame>, epoch: SessionEpoch) -> Option<Value> {
         level,
         mic_curve,
         filled,
+        settling,
         frame: Some(f.data.clone()),
     })
 }
@@ -635,6 +641,14 @@ pub(crate) fn combine(
     } else {
         included.iter().map(|(_, v)| v.filled).fold(1.0, f32::min)
     };
+    // Still filling wherever any included operand is.
+    let settling = included
+        .iter()
+        .filter_map(|(_, v)| v.settling)
+        .reduce(|a, b| FreqRange {
+            lo: Hz(a.lo.0.min(b.lo.0)),
+            hi: Hz(a.hi.0.max(b.hi.0)),
+        });
     let first_frame = included.iter().find_map(|(_, v)| v.frame.as_ref());
     let fixed_delay = match reference {
         CoreReference::Fixed(d) => d,
@@ -660,6 +674,7 @@ pub(crate) fn combine(
                 mic_range: None,
                 math: state,
                 unresolved: None,
+                settling,
                 filled,
             },
             mag,
@@ -678,6 +693,7 @@ pub(crate) fn combine(
             FrameData::Spec(SpecFrame {
                 meas,
                 meta: SpecMeta {
+                    mic_range: None,
                     window,
                     scale: level_scale(&included),
                     level: included
@@ -710,6 +726,7 @@ pub(crate) fn combine(
             FrameData::Rta(RtaFrame {
                 meas,
                 meta: RtaMeta {
+                    mic_range: None,
                     fraction,
                     weighting,
                     scale: level_scale(&included),

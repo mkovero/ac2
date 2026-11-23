@@ -259,6 +259,7 @@ fn transfer_view_with_a_live_trace_and_eight_stored() {
         selected: false,
         compared: false,
         mic_range: None,
+        settling: None,
         unresolved: None,
     };
     let traces: Vec<TfTrace<'_>> = std::iter::once(live)

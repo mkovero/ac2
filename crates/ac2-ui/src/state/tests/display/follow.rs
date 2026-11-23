@@ -63,6 +63,7 @@ fn frames(t: &mut T, meas: &[(u32, f32)], seq: u64, incarnation: u64) {
                 level: ac2_proto::model::SpecLevel::Tone,
                 cal: CalStatus::Uncalibrated,
                 mic_curve: false,
+                mic_range: None,
                 smoothing: None,
                 math: None,
                 bands: None,
