@@ -221,14 +221,14 @@ fn paired() -> Paired {
         .unwrap_err();
     assert!(e.msg.contains("that input is on this rig"), "{e:?}");
 
-    ca.ok(Command::RigPeers {
-        peers: vec![RigPeer {
+    ca.ok(Command::RigPair {
+        peer: RigPeer {
             rig: b_id,
             name: "rig-b".into(),
             ctrl: net_endpoints(&b).0.as_str().to_owned(),
             data: net_endpoints(&b).1.as_str().to_owned(),
             key: b.server_public_key().unwrap().to_z85(),
-        }],
+        },
     });
     ca.ok(Command::SessionOpen {
         config: with_remote(b_id, FS),
@@ -417,14 +417,14 @@ fn a_rig_whose_key_changed_is_named() {
     let (mut ca, _) = client(&ctx, &a, &app);
     // The key the app pinned is not the one rig B holds.
     let other: PublicKey = KeyPair::generate().unwrap().public;
-    ca.ok(Command::RigPeers {
-        peers: vec![RigPeer {
+    ca.ok(Command::RigPair {
+        peer: RigPeer {
             rig: b_id,
             name: "rig-b".into(),
             ctrl: net_endpoints(&b).0.as_str().to_owned(),
             data: net_endpoints(&b).1.as_str().to_owned(),
             key: other.to_z85(),
-        }],
+        },
     });
     ca.ok(Command::SessionOpen {
         config: with_remote(b_id, FS),
@@ -456,14 +456,14 @@ fn slow_a_rig_admitted_as_an_app_is_told_so_until_admitted_as_a_rig() {
         name: "rig-a".into(),
         key: a_keys.public.to_z85(),
     });
-    ca.ok(Command::RigPeers {
-        peers: vec![RigPeer {
+    ca.ok(Command::RigPair {
+        peer: RigPeer {
             rig: b_id,
             name: "rig-b".into(),
             ctrl: net_endpoints(&b).0.as_str().to_owned(),
             data: net_endpoints(&b).1.as_str().to_owned(),
             key: b.server_public_key().unwrap().to_z85(),
-        }],
+        },
     });
     ca.ok(Command::SessionOpen {
         config: with_remote(b_id, FS),
@@ -610,14 +610,14 @@ fn slow_a_paired_rig_is_followed_to_its_new_address() {
     });
     // Paired where B was: nothing answers there now.
     let gone = "tcp://127.0.0.1:9";
-    ca.ok(Command::RigPeers {
-        peers: vec![RigPeer {
+    ca.ok(Command::RigPair {
+        peer: RigPeer {
             rig: b_id,
             name: "rig-b".into(),
             ctrl: gone.into(),
             data: "tcp://127.0.0.1:10".into(),
             key: b.server_public_key().unwrap().to_z85(),
-        }],
+        },
     });
     ca.ok(Command::SessionOpen {
         config: with_remote(b_id, FS),
@@ -746,6 +746,169 @@ fn slow_a_remote_input_is_recorded_with_its_gaps_marked() {
     let open = session.open.expect("open");
     assert_eq!(open.config.input_channels, vec![0, 1]);
     assert!(open.config.remote_inputs.is_empty());
+    a.shutdown();
+    b.shutdown();
+}
+
+/// A paired rig no link can reach: an address nothing listens on and a fresh key.
+fn unreachable_peer(rig: RigId, name: &str) -> RigPeer {
+    RigPeer {
+        rig,
+        name: name.into(),
+        ctrl: "tcp://127.0.0.1:9".into(),
+        data: "tcp://127.0.0.1:10".into(),
+        key: KeyPair::generate().unwrap().public.to_z85(),
+    }
+}
+
+fn peer_names(c: &mut Client) -> Vec<(RigId, String)> {
+    remote(c)
+        .peers
+        .iter()
+        .map(|p| (p.rig, p.name.clone()))
+        .collect()
+}
+
+/// `rig.pair` adds one rig, in place of an entry for the same rig or under the same name;
+/// `rig.unpair` removes one by its identity; the other paired rigs stay as they were.
+#[test]
+fn pairing_and_unpairing_touch_one_rig_only() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let app = KeyPair::generate().unwrap();
+    let a = rig(dir.path(), "rig-a", &app, None);
+    let ctx = Context::new().unwrap();
+    let (mut ca, a_id) = client(&ctx, &a, &app);
+    let (b, c, d) = (RigId(0xb), RigId(0xc), RigId(0xd));
+    ca.ok(Command::RigPair {
+        peer: unreachable_peer(b, "rig-b"),
+    });
+    ca.ok(Command::RigPair {
+        peer: unreachable_peer(c, "rig-c"),
+    });
+    assert_eq!(
+        peer_names(&mut ca),
+        vec![(b, "rig-b".into()), (c, "rig-c".into())]
+    );
+    // The same rig under a new name takes its own entry's place.
+    ca.ok(Command::RigPair {
+        peer: unreachable_peer(c, "rig-c2"),
+    });
+    assert_eq!(
+        peer_names(&mut ca),
+        vec![(b, "rig-b".into()), (c, "rig-c2".into())]
+    );
+    // Another rig under a name already paired takes that entry's place.
+    ca.ok(Command::RigPair {
+        peer: unreachable_peer(d, "rig-b"),
+    });
+    assert_eq!(
+        peer_names(&mut ca),
+        vec![(c, "rig-c2".into()), (d, "rig-b".into())]
+    );
+    ca.ok(Command::RigUnpair { rig: c });
+    assert_eq!(peer_names(&mut ca), vec![(d, "rig-b".into())]);
+    let e = ca.call(Command::RigUnpair { rig: c }).unwrap_err();
+    assert_eq!(e.code, ErrorCode::NotFound, "{e:?}");
+    let e = ca
+        .call(Command::RigPair {
+            peer: unreachable_peer(a_id, "self"),
+        })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Invalid, "{e:?}");
+    assert_eq!(peer_names(&mut ca), vec![(d, "rig-b".into())]);
+    a.shutdown();
+}
+
+/// `auth.revoke_rig` removes the keys admitted as that rig and nothing else: an app
+/// authorized under the same name since keeps its key.
+#[test]
+fn revoking_a_rig_by_identity_leaves_apps_alone() {
+    init_log();
+    let dir = tempfile::tempdir().unwrap();
+    let app = KeyPair::generate().unwrap();
+    let b = rig(dir.path(), "rig-b", &app, None);
+    let ctx = Context::new().unwrap();
+    let (mut cb, _) = client(&ctx, &b, &app);
+    let (a_id, c_id) = (RigId(0xa), RigId(0xc));
+    let key = || KeyPair::generate().unwrap().public.to_z85();
+    let kinds = |c: &mut Client| -> Vec<(String, Option<RigId>)> {
+        let mut v: Vec<_> = c
+            .server(Command::ServerInfo)
+            .network
+            .authorized
+            .iter()
+            .map(|a| (a.name.clone(), a.rig))
+            .collect();
+        v.sort();
+        v
+    };
+    cb.ok(Command::AuthAdmitRig {
+        key: key(),
+        rig_id: a_id,
+        name: "rig-a".into(),
+    });
+    cb.ok(Command::AuthAdmitRig {
+        key: key(),
+        rig_id: c_id,
+        name: "rig-c".into(),
+    });
+    // An app authorized under rig-c's name takes that entry: it is an app's now.
+    cb.ok(Command::ServerAuthorize {
+        name: "rig-c".into(),
+        key: key(),
+    });
+    let before = kinds(&mut cb);
+    assert!(before.contains(&("rig-a".into(), Some(a_id))), "{before:?}");
+    assert!(before.contains(&("rig-c".into(), None)), "{before:?}");
+    cb.ok(Command::AuthRevokeRig { rig_id: a_id });
+    let e = cb
+        .call(Command::AuthRevokeRig { rig_id: c_id })
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::NotFound, "{e:?}");
+    let after = kinds(&mut cb);
+    assert!(!after.iter().any(|(n, _)| n == "rig-a"), "{after:?}");
+    assert!(after.contains(&("rig-c".into(), None)), "{after:?}");
+    b.shutdown();
+}
+
+/// Pairing and unpairing a rig the session takes nothing from leaves the joined feed
+/// running: B's stream ended first, so a feed started over could never anchor again,
+/// and the anchor the running one keeps stays.
+#[test]
+fn a_running_feed_outlives_pairing_another_rig() {
+    let Paired {
+        _dir,
+        a,
+        b,
+        mut ca,
+        mut cb,
+        ..
+    } = paired();
+    wait_remote(&mut ca, "rig-b's input anchored", |r| {
+        r.inputs.first().is_some_and(|i| i.anchor.is_some())
+    });
+    cb.ok(Command::ServerRevoke {
+        name: "rig-a".into(),
+    });
+    wait_remote(&mut ca, "not admitted", |r| {
+        r.rigs.first().map(|r| &r.link) == Some(&RemoteLink::NotAdmitted)
+    });
+    let c = RigId(0xc);
+    ca.ok(Command::RigPair {
+        peer: unreachable_peer(c, "rig-c"),
+    });
+    ca.ok(Command::RigUnpair { rig: c });
+    // Past a report of the joined feed, whatever one is running.
+    let t0 = Instant::now();
+    while t0.elapsed() < Duration::from_millis(1500) {
+        let r = remote(&mut ca);
+        assert!(
+            r.inputs.first().is_some_and(|i| i.anchor.is_some()),
+            "the feed started over: {r:#?}"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
     a.shutdown();
     b.shutdown();
 }

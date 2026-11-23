@@ -91,6 +91,34 @@ fn click(t: &mut T, l: &ConnLine) -> Vec<(RigId, Request)> {
     t.st.update(Msg::Settings(SettingsMsg::Connection(i)), &t.keys)
 }
 
+/// A frame tick: the pairing rows are worked out again.
+fn tick(t: &mut T) {
+    t.st.update(
+        Msg::Tick {
+            now_s: 0.0,
+            dt_s: 0.0,
+        },
+        &t.keys,
+    );
+}
+
+/// The app has lost rig `rig`: its last mirror and `server.info` stay, stale.
+fn lose(t: &mut T, rig: RigId) {
+    let r = if t.st.rig.id == rig {
+        &mut t.st.rig
+    } else {
+        t.st.others
+            .background
+            .iter_mut()
+            .find(|r| r.id == rig)
+            .expect("held")
+    };
+    r.conn = ConnState::Connecting {
+        target: "tcp://192.168.9.27:7700".into(),
+    };
+    tick(t);
+}
+
 fn key(t: &mut T, s: &str) -> Vec<(RigId, Request)> {
     let c = Chord::parse(s).expect(s);
     t.st.update(Msg::Key(c), &t.keys)
@@ -122,26 +150,39 @@ fn admits(r: &[(RigId, Request)], on: RigId) -> Vec<(String, RigId, String, Stri
         .collect()
 }
 
-fn lists(r: &[(RigId, Request)], on: RigId) -> Vec<(Vec<RigPeer>, String)> {
+fn lists(r: &[(RigId, Request)], on: RigId) -> Vec<(RigPeer, String)> {
     r.iter()
         .filter_map(|(rig, q)| match q {
             Request::Act {
-                cmd: Command::RigPeers { peers },
+                cmd: Command::RigPair { peer },
                 done,
                 ..
-            } if *rig == on => Some((peers.clone(), done.clone())),
+            } if *rig == on => Some((peer.clone(), done.clone())),
             _ => None,
         })
         .collect()
 }
 
-fn revokes(r: &[(RigId, Request)], on: RigId) -> Vec<String> {
+fn unlists(r: &[(RigId, Request)], on: RigId) -> Vec<(RigId, String)> {
+    r.iter()
+        .filter_map(|(rig, q)| match q {
+            Request::Act {
+                cmd: Command::RigUnpair { rig: gone },
+                done,
+                ..
+            } if *rig == on => Some((*gone, done.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+fn revokes(r: &[(RigId, Request)], on: RigId) -> Vec<RigId> {
     r.iter()
         .filter_map(|(rig, q)| match q {
             Request::ServerCall {
-                cmd: Command::ServerRevoke { name },
+                cmd: Command::AuthRevokeRig { rig_id },
                 ..
-            } if *rig == on => Some(name.clone()),
+            } if *rig == on => Some(*rig_id),
             _ => None,
         })
         .collect()
@@ -191,13 +232,12 @@ fn pair_with_rig_pairs_both_ways_in_one_act() {
     );
     let here = lists(&r, RIG);
     assert_eq!(here.len(), 1);
-    assert_eq!(here[0].0, vec![peer(PUPU, "pupu", KEY_B)]);
+    assert_eq!(here[0].0, peer(PUPU, "pupu", KEY_B));
     assert_eq!(here[0].1, words::listed_toast(&me, "pupu"));
     let there = lists(&r, PUPU);
     assert_eq!(there.len(), 1);
-    assert_eq!(there[0].0.len(), 1);
-    assert_eq!(there[0].0[0].rig, RIG);
-    assert_eq!(there[0].0[0].key, KEY_A);
+    assert_eq!(there[0].0.rig, RIG);
+    assert_eq!(there[0].0.key, KEY_A);
     assert_eq!(there[0].1, words::listed_toast("pupu", &me));
     assert!(
         !r.iter().any(|(_, q)| matches!(
@@ -209,7 +249,7 @@ fn pair_with_rig_pairs_both_ways_in_one_act() {
     assert!(conn_page(&t).pairing.offers.is_none(), "the pick closed");
     // This rig's half is in place, pupu's not yet: the row says what is missing.
     remirror(&mut t, |s| s.remote.peers = vec![peer(PUPU, "pupu", KEY_B)]);
-    key(&mut t, "Down");
+    tick(&mut t);
     let row = conn_page(&t)
         .pairing
         .row(PUPU)
@@ -219,7 +259,7 @@ fn pair_with_rig_pairs_both_ways_in_one_act() {
         row.text,
         "pupu · has not admitted this rig · does not list this rig · not admitted by this rig"
     );
-    assert!(row.mend && row.held);
+    assert!(row.mend() && row.unreached.is_none());
     assert!(
         row.tip.contains("  this rig lists pupu as paired"),
         "{}",
@@ -227,14 +267,14 @@ fn pair_with_rig_pairs_both_ways_in_one_act() {
     );
     // Both daemons show both halves.
     paired_both(&mut t);
-    key(&mut t, "Down");
+    tick(&mut t);
     let row = conn_page(&t)
         .pairing
         .row(PUPU)
         .cloned()
         .expect("pupu's row");
     assert_eq!(row.text, "pupu · paired both ways");
-    assert!(!row.mend);
+    assert!(!row.mend());
     // Paired both ways: not offered again, and the pick says so.
     click(&mut t, &ConnLine::PairWith);
     assert!(conn_page(&t).pairing.offers.is_none());
@@ -248,7 +288,7 @@ fn enter_on_a_half_paired_row_sends_the_missing_halves_only() {
     paired_both(&mut t);
     // pupu's admission of this rig is gone.
     to(&mut t, PUPU, server(network(KEY_B, Vec::new())));
-    key(&mut t, "Down");
+    tick(&mut t);
     let row = conn_page(&t)
         .pairing
         .row(PUPU)
@@ -303,24 +343,26 @@ fn delete_twice_unpairs_both_ways() {
     let mut t = unpaired();
     let me = t.st.rig_label(&t.st.rig);
     paired_both(&mut t);
-    key(&mut t, "Down");
+    tick(&mut t);
     let r = delete_on(&mut t, &ConnLine::Paired(PUPU));
     assert!(lists(&r, RIG).is_empty(), "first Delete asks: {r:?}");
     assert_eq!(
         conn_page(&t).notice.as_deref(),
-        Some(words::unpair_confirm("pupu", true).as_str())
+        Some(words::unpair_confirm("pupu", None).as_str())
     );
     let r = key(&mut t, "Delete");
     assert_eq!(
-        lists(&r, RIG),
-        vec![(Vec::new(), words::unlisted_toast(&me, "pupu"))]
+        unlists(&r, RIG),
+        vec![(PUPU, words::unlisted_toast(&me, "pupu"))]
     );
     assert_eq!(
-        lists(&r, PUPU),
-        vec![(Vec::new(), words::unlisted_toast("pupu", &me))]
+        unlists(&r, PUPU),
+        vec![(RIG, words::unlisted_toast("pupu", &me))]
     );
-    assert_eq!(revokes(&r, RIG), vec![admit_name("pupu")]);
-    assert_eq!(revokes(&r, PUPU), vec![admit_name(&me)]);
+    // By the rig's identity, never by a name an app could hold.
+    assert_eq!(revokes(&r, RIG), vec![PUPU]);
+    assert_eq!(revokes(&r, PUPU), vec![RIG]);
+    assert_eq!(conn_page(&t).notice, None);
 }
 
 /// A session taking an input from the other rig refuses the unpairing, naming it.
@@ -339,11 +381,11 @@ fn unpairing_is_refused_while_a_session_takes_that_rigs_input() {
             }];
         }
     });
-    key(&mut t, "Down");
+    tick(&mut t);
     delete_on(&mut t, &ConnLine::Paired(PUPU));
     let r = key(&mut t, "Delete");
     assert!(
-        lists(&r, RIG).is_empty() && revokes(&r, PUPU).is_empty(),
+        unlists(&r, RIG).is_empty() && revokes(&r, PUPU).is_empty(),
         "{r:?}"
     );
     assert_eq!(
@@ -369,28 +411,145 @@ fn a_rig_not_held_is_unpaired_on_this_side_only() {
             vec![admitted("rig-ketunkolo", KEY_B, KETUNKOLO)],
         )),
     );
-    key(&mut t, "Down");
+    tick(&mut t);
     let row = conn_page(&t)
         .pairing
         .row(KETUNKOLO)
         .cloned()
         .expect("ketunkolo's row");
     assert_eq!(row.text, "ketunkolo · its side: can't tell");
-    assert!(!row.held && !row.mend);
-    delete_on(&mut t, &ConnLine::Paired(KETUNKOLO));
+    assert_eq!(row.unreached, Some(words::Unseen::NotHeld));
+    assert!(!row.mend());
+    // Its key is not seen, so even this rig's listing of it cannot be told in place.
+    assert!(
+        row.tip.contains(
+            "can't tell whether this rig lists ketunkolo (the app does not hold ketunkolo"
+        ),
+        "{}",
+        row.tip
+    );
+    // Enter claims nothing: it says what cannot be told.
+    click(&mut t, &ConnLine::Paired(KETUNKOLO));
     assert_eq!(
         conn_page(&t).notice.as_deref(),
-        Some(words::unpair_confirm("ketunkolo", false).as_str())
+        Some(words::cant_tell("ketunkolo", &row.halves).as_str())
     );
+    delete_on(&mut t, &ConnLine::Paired(KETUNKOLO));
+    let ask = words::unpair_confirm("ketunkolo", Some(words::Unseen::NotHeld));
+    assert!(
+        ask.contains("Can't tell whether ketunkolo's session"),
+        "{ask}"
+    );
+    assert_eq!(conn_page(&t).notice.as_deref(), Some(ask.as_str()));
     let r = key(&mut t, "Delete");
     assert_eq!(
-        lists(&r, RIG),
-        vec![(Vec::new(), words::unlisted_toast(&me, "ketunkolo"))]
+        unlists(&r, RIG),
+        vec![(KETUNKOLO, words::unlisted_toast(&me, "ketunkolo"))]
     );
-    assert_eq!(revokes(&r, RIG), vec!["rig-ketunkolo".to_string()]);
+    assert_eq!(revokes(&r, RIG), vec![KETUNKOLO]);
     assert!(r.iter().all(|(rig, _)| *rig == RIG), "{r:?}");
     assert_eq!(
         conn_page(&t).notice.as_deref(),
-        Some(words::unpair_rest("ketunkolo").as_str())
+        Some(words::unpair_rest("ketunkolo", words::Unseen::NotHeld).as_str())
+    );
+}
+
+/// A rig held but not connected now is one the app cannot reach: its stale state is not
+/// read, its halves are not told, and unpairing does this rig's side only and says so.
+#[test]
+fn a_rig_held_but_lost_is_not_read_and_unpaired_on_this_side_only() {
+    let mut t = unpaired();
+    paired_both(&mut t);
+    lose(&mut t, PUPU);
+    let row = conn_page(&t)
+        .pairing
+        .row(PUPU)
+        .cloned()
+        .expect("pupu's row");
+    assert_eq!(row.text, "pupu · its side: can't tell");
+    assert_eq!(row.unreached, Some(words::Unseen::NotConnected));
+    assert!(
+        row.tip.contains(
+            "can't tell whether pupu has admitted this rig (the app is not connected to pupu now)"
+        ),
+        "{}",
+        row.tip
+    );
+    delete_on(&mut t, &ConnLine::Paired(PUPU));
+    assert_eq!(
+        conn_page(&t).notice.as_deref(),
+        Some(words::unpair_confirm("pupu", Some(words::Unseen::NotConnected)).as_str())
+    );
+    let r = key(&mut t, "Delete");
+    assert_eq!(unlists(&r, RIG).len(), 1, "{r:?}");
+    assert_eq!(revokes(&r, RIG), vec![PUPU]);
+    assert!(r.iter().all(|(rig, _)| *rig == RIG), "{r:?}");
+    assert_eq!(
+        conn_page(&t).notice.as_deref(),
+        Some(words::unpair_rest("pupu", words::Unseen::NotConnected).as_str())
+    );
+}
+
+/// The rig shown not connected: its halves are not told, and unpairing is refused.
+#[test]
+fn unpairing_is_refused_while_the_rig_shown_is_lost() {
+    let mut t = unpaired();
+    let me = t.st.rig_label(&t.st.rig);
+    paired_both(&mut t);
+    lose(&mut t, RIG);
+    let row = conn_page(&t)
+        .pairing
+        .row(PUPU)
+        .cloned()
+        .expect("pupu's row");
+    assert_eq!(row.text, "pupu · can't tell");
+    delete_on(&mut t, &ConnLine::Paired(PUPU));
+    let r = key(&mut t, "Delete");
+    assert!(
+        unlists(&r, RIG).is_empty() && unlists(&r, PUPU).is_empty(),
+        "{r:?}"
+    );
+    assert_eq!(
+        conn_page(&t).error.as_deref(),
+        Some(words::refusal(&me, &words::PairRefusal::NotConnected).as_str())
+    );
+}
+
+/// This rig's own network off: its admissions are not listed, so its half is said as
+/// this rig's that cannot be told; Enter says so, and unpairing says the admission stays.
+#[test]
+fn this_rigs_unseen_admission_is_said_as_this_rigs() {
+    let mut t = unpaired();
+    paired_both(&mut t);
+    // Off the network a rig keeps its key: only its admitted rigs go unlisted.
+    let mut off = local_only();
+    off.network.server_key = Some(KEY_A.into());
+    to(&mut t, RIG, server(off));
+    let row = conn_page(&t)
+        .pairing
+        .row(PUPU)
+        .cloned()
+        .expect("pupu's row");
+    assert_eq!(row.text, "pupu · can't tell");
+    assert!(
+        row.tip
+            .contains("can't tell whether this rig has admitted pupu (this rig's network is off)"),
+        "{}",
+        row.tip
+    );
+    assert!(!row.tip.contains("pupu's network"), "{}", row.tip);
+    click(&mut t, &ConnLine::Paired(PUPU));
+    assert_eq!(
+        conn_page(&t).notice.as_deref(),
+        Some(words::cant_tell("pupu", &row.halves).as_str())
+    );
+    delete_on(&mut t, &ConnLine::Paired(PUPU));
+    let r = key(&mut t, "Delete");
+    assert_eq!(unlists(&r, RIG).len(), 1, "{r:?}");
+    assert!(revokes(&r, RIG).is_empty(), "{r:?}");
+    assert_eq!(revokes(&r, PUPU), vec![RIG]);
+    assert_eq!(
+        conn_page(&t).notice.as_deref(),
+        Some(words::unpair_admission_unseen("pupu", words::Unseen::NetworkOff).as_str())
     );
 }

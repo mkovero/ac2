@@ -110,7 +110,7 @@ impl AppState {
                 let mut config = open.config.clone();
                 config.link_offset = offset.map(ac2_proto::units::Seconds);
                 out.push(Request::RemoteSession {
-                    peers: None,
+                    pair: None,
                     config,
                     what: ac2_scene::cross_rig::link_offset_toast(offset),
                 });

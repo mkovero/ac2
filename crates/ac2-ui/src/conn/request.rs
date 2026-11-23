@@ -288,15 +288,11 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
                 o.send(ConnEvent::SessionOpened);
             });
         }
-        Request::RemoteSession {
-            peers,
-            config,
-            what,
-        } => {
+        Request::RemoteSession { pair, config, what } => {
             let (c, o) = (client.clone(), out.clone());
             tokio::spawn(async move {
-                if let Some(peers) = peers
-                    && let Err(e) = c.call(Command::RigPeers { peers }).await
+                if let Some(peer) = pair
+                    && let Err(e) = c.call(Command::RigPair { peer }).await
                 {
                     o.send(ConnEvent::Reply {
                         what: format!("{what}: pairing the rigs"),

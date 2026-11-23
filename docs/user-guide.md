@@ -469,8 +469,14 @@ lists every rig paired or half paired with the rig shown, each with what the dae
 - *pupu · paired both ways*;
 - what is missing: *pupu · has not admitted this rig*, *pupu · does not list this rig*,
   *pupu · not listed by this rig*, *pupu · not admitted by this rig*;
-- *ketunkolo · its side: can't tell* when the app does not hold that rig (or it has not
-  answered, or its network is off): only what a daemon shows is said.
+- *ketunkolo · its side: can't tell* when what is wanting is the other rig's: the app does
+  not hold it, is not connected to it now, it has not answered, or its network is off (a
+  listing is only counted against the key that rig serves under now, so even this rig's
+  own half waits on it);
+- *ketunkolo · can't tell* when this rig's own state is wanting: its network is off (it
+  lists no admitted rigs then), it has not answered, or the app is not connected to it.
+
+Only what a daemon shows is said; hovering names whose state is wanting and why.
 
 Hovering a row says each of the four halves. Once paired, the other rig is listed in the
 measurement tree beside the rig shown.
@@ -481,16 +487,25 @@ measurement tree beside the rig shown.
   input: each rig admits the other (it shows under *Rigs admitted to this rig* there) and
   lists the other. Only the halves not in place are sent, and each toast says what its rig
   did (*pupu lists ketunkolo as paired*, *ketunkolo admitted pupu: it may take ketunkolo's
-  inputs*). Both rigs must be in network mode on an address the other reaches; a rig that
+  inputs*). A session running on either rig carries on: its remote inputs keep streaming,
+since only a change to a rig they come from starts them over. Both rigs must be in network
+mode on an address the other reaches; a rig that
   cannot be paired says why in the list instead, and nothing is sent (*serves only its own
   computer*, *already authorizes an app named …*, *the app is not connected to …*). With no
   other rig held it says *connect to it first*.
-- **Enter** on a half-paired row pairs the missing halves the same way.
+- **Enter** on a half-paired row pairs the missing halves the same way; on a row that
+  cannot be told it says what cannot be told, and why.
 - **Delete** twice on a row unpairs: this rig drops the other from its paired rigs and
-  revokes its admission, and the other rig does the same when the app holds it. When it does
-  not, only this rig's side is done and the page says so: connect to that rig, show it and
-  unpair this rig there to finish. While either session takes inputs from the other rig,
-  unpairing is refused, naming them: remove those inputs first (Settings › Audio I/O).
+  revokes its admission, and the other rig does the same when the app is connected to it.
+  The admission is revoked by the rig's identity, so an app authorized under the same name
+  keeps its key. When the app does not hold that rig, or is not connected to it now, only
+  this rig's side is done, and the first **Delete** says so: the app cannot tell whether
+  that rig's session takes this rig's inputs, and if it does they stop. Afterwards the page
+  says what remains: connect to that rig, show it and unpair this rig there to finish. With
+  this rig's network off its admissions are not listed, so the page says an admission, if
+  any, stays. While a session the app sees takes inputs from the other rig, unpairing is
+  refused, naming them: remove those inputs first (Settings › Audio I/O). With the app not
+  connected to the rig shown, unpairing is refused.
 
 ### Audio I/O
 

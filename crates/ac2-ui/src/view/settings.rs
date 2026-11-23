@@ -707,7 +707,7 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
             ConnLine::Paired(r) => {
                 if let Some(x) = p.pairing.row(*r) {
                     let pending = p.pairing.confirm == Some(*r);
-                    let tone = match (pending, x.mend) {
+                    let tone = match (pending, x.mend()) {
                         (true, _) => ch.fault,
                         (false, true) => ch.warn,
                         (false, false) => ch.text,

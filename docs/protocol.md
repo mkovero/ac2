@@ -31,7 +31,7 @@ keepalives to each connection as its credit allows (§5.8).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 99`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 100`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -205,7 +205,9 @@ Lease column: **L** = `lease_token` required (Q6).
 | `server.authorize` | `name`, `key` (Z85) | `server` | |
 | `server.revoke` | `name` | `server` | |
 | `auth.admit_rig` | `key` (Z85), `rig_id: RigId`, `name` | `server` | |
-| `rig.peers` | `peers: [RigPeer]` | `ack` | |
+| `auth.revoke_rig` | `rig_id: RigId` | `server` | |
+| `rig.pair` | `peer: RigPeer` | `ack` | |
+| `rig.unpair` | `rig: RigId` | `ack` | |
 | `source.state` | — | `source_state` | non-mutating; with `hello`, the only command an admitted rig may send |
 
 Rules (Q6): `firing` requires `armed`; arming does not emit. `gen.set` carries the full
@@ -438,13 +440,16 @@ setting in `network.json` beside its other settings (`saved`); a damaged file, o
 another version, or one `server.network` would refuse, is set aside (`damaged_files`, kind `network_settings`) and the network
 starts off. Answers the new `server` info; `State.server` follows.
 
-**Remote inputs (`auth.admit_rig`, `rig.peers`, `source.state`).** A rig takes another rig's
+**Remote inputs (`auth.admit_rig`, `auth.revoke_rig`, `rig.pair`, `rig.unpair`,
+`source.state`).** A rig takes another rig's
 inputs over a link of its own: it connects to the other rig's ctrl and data endpoints under
 CURVE with its own server key pair as the client key. The other rig must first admit that
 key with `auth.admit_rig` {`key`, `rig_id`, `name`}: an authorized-clients entry marked as
 a rig (`AuthorizedClient.rig` = the admitted rig's id; nil for an operator's client).
 Admitting a name already present replaces its entry; a replaced or `server.revoke`d key's
-requests are refused and its audio stopped at once. The rig's own id is `invalid`. An
+requests are refused and its audio stopped at once. `auth.revoke_rig` {`rig_id`} removes
+every entry admitted as that rig, and only those: an operator's client authorized under the
+same name stays (`missing` when no entry is that rig's). The rig's own id is `invalid`. An
 admitted rig may send `hello` and `source.state` and nothing else (`refused`), and is sent
 only `audio/<channel>` frames (§5.1). `source.state` → `SourceState` {`rig`, `name`,
 `clocks` (`Clocks`, with its `stamp_map`), `session`: `SourceSession` \| nil
@@ -453,9 +458,13 @@ only `audio/<channel>` frames (§5.1). `source.state` → `SourceState` {`rig`, 
 times), `inputs`: [`SourceInput` {`channel`, `setup`: `InputSetup` \| nil,
 `cal_status`, `calibration`: `CalEntry` \| nil, `curve`: `SourceCurve` \| nil
 {`reference`: `MicCurveRef`, `freq`: [f64], `gain_db`: [f64]}}]}}: all of the session an
-admitted rig sees. `rig.peers` sets the rigs this rig takes inputs from: [`RigPeer`
-{`rig`, `name`, `ctrl`, `data`, `key` (the other rig's server key, Z85)}], the whole list,
-kept in the rig settings; the links follow at once. A rig whose network was never turned
+admitted rig sees. `rig.pair` {`peer`: `RigPeer` {`rig`, `name`, `ctrl`, `data`, `key` (the
+other rig's server key, Z85)}} adds one rig this rig takes inputs from, in place of an entry
+for the same rig or under the same name; `rig.unpair` {`rig`} removes that rig's entry
+(`missing` when there is none). Either leaves the other entries as they are, kept in the rig
+settings; the links follow at once. A running session's joined feed starts over only when
+an entry it takes inputs from changed or went; pairing or unpairing another rig leaves it
+running. A rig whose network was never turned
 on has no key yet, so its links stay `no_server_key`; once it has one they link with the
 network off too (a link is an outgoing connection).
 
@@ -2078,7 +2087,7 @@ whose stamps are its sample index; read every 5 s of audio; `stamp_map` (`StampM
 {`epoch_stamp_ns`, `system_ns`, `ppm`}: the capture stream's stamp clock on the system
 clock, `system = system_ns + (stamp − epoch_stamp_ns)·(1 + ppm·10⁻⁶)`; nil while no stream
 whose stamp clock can be read beside the system clock is open); committed when any changes),
-`remote` (`RemoteState`: `peers` ([RigPeer], as `rig.peers` set them), `rigs`
+`remote` (`RemoteState`: `peers` ([RigPeer], as `rig.pair` / `rig.unpair` left them), `rigs`
 ([`RemoteRig` {`rig`, `name`, `link` {not_paired | no_server_key | connecting | up |
 network_off (it sent the `network_off` notice, §5.8, and is not heard since: read until
 anything answers there again, a welcome or a failed handshake, or it is followed to another

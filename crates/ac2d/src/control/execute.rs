@@ -111,7 +111,9 @@ impl Control {
             Command::AuthAdmitRig { key, rig_id, name } => {
                 self.admit_rig(peer, &name, &key, rig_id)
             }
-            Command::RigPeers { peers } => self.set_rig_peers(peers),
+            Command::AuthRevokeRig { rig_id } => self.auth_revoke_rig(peer, rig_id),
+            Command::RigPair { peer: p } => self.rig_pair(p),
+            Command::RigUnpair { rig } => self.rig_unpair(rig),
             Command::SourceState => Ok(ReplyBody::SourceState(Box::new(self.source_state()))),
             Command::RigMonitorStart { base, on } => self.rig_monitor_start(base, on),
             Command::OscTarget { base, addr } => self.osc_target(base, addr),

@@ -38,7 +38,7 @@ impl RemoteInput {
     }
 }
 
-/// Another rig this rig may take audio from (`rig.peers`), as the operator's app paired
+/// Another rig this rig may take audio from (`rig.pair`), as the operator's app paired
 /// them: the app held both and gave each the other's key.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -158,7 +158,7 @@ pub struct SourceCurve {
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RemoteState {
-    /// The rigs paired with this one (`rig.peers`).
+    /// The rigs paired with this one (`rig.pair`, `rig.unpair`).
     pub peers: Vec<RigPeer>,
     /// The rigs the open session takes inputs from.
     pub rigs: Vec<RemoteRig>,
@@ -193,7 +193,7 @@ pub struct RemoteRig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RemoteLink {
-    /// This rig is not paired with it (no `rig.peers` entry): pair the rigs from the app.
+    /// This rig is not paired with it (no `rig.pair` entry): pair the rigs from the app.
     NotPaired,
     /// This rig has no server key yet (its network was never turned on): it has no key to
     /// show another rig.

@@ -712,7 +712,7 @@ def requests():
             "auth.admit_rig",
             {"key": "D:)Q[IlAW!ahhC2ac:9*A}h:p?([4%wOTJ%JR%cs", "rig_id": 0x70757075, "name": "pupu"},
         ),
-        req(61, "rig.peers", {"peers": [KETUNKOLO_PEER]}),
+        req(61, "rig.pair", {"peer": KETUNKOLO_PEER}),
         req(62, "source.state", mutation=False),
         req(
             63,
@@ -875,6 +875,8 @@ def requests():
         ),
         req(106, "dynamics.table", {"trace": 14}, mutation=False),
         req(107, "dynamics.envelope", {"trace": 14, "input": 4, "step": 0}, mutation=False),
+        req(108, "rig.unpair", {"rig": 0x6B657475}),
+        req(109, "auth.revoke_rig", {"rig_id": 0x70757075}),
     ]
 
 

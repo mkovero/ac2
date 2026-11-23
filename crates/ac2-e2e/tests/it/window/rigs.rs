@@ -69,20 +69,20 @@ fn connect_kettu(
 }
 
 /// `taker`'s daemon paired with rig `source`, by the command the app's pairing sends it
-/// (`rig.peers`): the rig may take that rig's inputs. These daemons listen on this computer
+/// (`rig.pair`): the rig may take that rig's inputs. These daemons listen on this computer
 /// only, so no link between them comes up and the source's half of a pairing (admitting
 /// the taker's key) has no key to admit; the pairing itself is the daemon's, and the
 /// address is where a networked rig would be.
 fn pair(taker: &Rig, source: RigId, name: &str) -> R {
     use ac2_proto::model::RigPeer;
-    taker.call(Command::RigPeers {
-        peers: vec![RigPeer {
+    taker.call(Command::RigPair {
+        peer: RigPeer {
             rig: source,
             name: name.into(),
             ctrl: "tcp://127.0.0.1:7700".into(),
             data: "tcp://127.0.0.1:7701".into(),
             key: ac2_zmq::KeyPair::generate()?.public.to_z85(),
-        }],
+        },
     })?;
     Ok(())
 }
@@ -528,7 +528,7 @@ fn rigs_not_paired_share_neither_the_list_nor_panes() -> R {
         "paired: kettu's curve draws on pupu's screen"
     );
 
-    pupu.call(Command::RigPeers { peers: Vec::new() })?;
+    pupu.call(Command::RigUnpair { rig: kettu_id })?;
     step_until(&mut h, "pupu's list alone again", |a| {
         listed(a) == [pupu_id]
     });
@@ -724,6 +724,9 @@ fn networked(name: &'static str, dir: &std::path::Path) -> R<Rig> {
         c.name = name.into();
         c.rig_id = ac2d::RigIdSource::File(id_file);
         c.network = ac2d::NetworkChoice::Fixed(ac2d::NetListen {
+            // Pairing needs an address another rig reaches, never loopback; the one other
+            // such address every test host has is the wildcard (a runner may have no
+            // interface besides loopback). CURVE with an empty authorized file keeps it shut.
             bind: ac2d::NetBind::All,
             port: ac2d::NetPort::Any,
         });

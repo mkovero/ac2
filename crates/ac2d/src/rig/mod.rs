@@ -95,7 +95,7 @@ pub(crate) struct RigSettings {
     pub(crate) artnet_fade: ArtnetFade,
     /// The programme meters: ballistic, correlation window, over threshold, gate.
     pub(crate) levels: LevelsSettings,
-    /// The rigs this one may take audio from (`rig.peers`).
+    /// The rigs this one may take audio from (`rig.pair`, `rig.unpair`).
     pub(crate) peers: Vec<RigPeer>,
 }
 

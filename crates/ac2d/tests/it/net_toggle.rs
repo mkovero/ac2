@@ -717,14 +717,14 @@ fn slow_turned_on_mid_session_a_paired_rig_gets_its_audio() {
         rig_id: a_id,
         name: "rig-a".into(),
     });
-    ca.ok(Command::RigPeers {
-        peers: vec![RigPeer {
+    ca.ok(Command::RigPair {
+        peer: RigPeer {
             rig: b_id,
             name: "rig-b".into(),
             ctrl: format!("tcp://127.0.0.1:{port}"),
             data: format!("tcp://127.0.0.1:{}", port + 1),
             key: b.server_public_key().unwrap().to_z85(),
-        }],
+        },
     });
     ca.ok(Command::SessionOpen {
         config: SessionConfig {
@@ -787,14 +787,14 @@ fn slow_turned_on_mid_session_a_paired_rig_gets_its_audio() {
     let moved = free_pair();
     turn(&mut cb, true, Some(moved));
     wait_status(&b, "on at another port", listening_on(moved));
-    ca.ok(Command::RigPeers {
-        peers: vec![RigPeer {
+    ca.ok(Command::RigPair {
+        peer: RigPeer {
             rig: b_id,
             name: "rig-b".into(),
             ctrl: format!("tcp://127.0.0.1:{moved}"),
             data: format!("tcp://127.0.0.1:{}", moved + 1),
             key: b.server_public_key().unwrap().to_z85(),
-        }],
+        },
     });
     let t0 = Instant::now();
     while link(&mut ca) != Some(RemoteLink::Up) {

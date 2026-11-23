@@ -125,20 +125,17 @@ fn picking_another_rigs_input_pairs_both_rigs_and_reopens_the_session() {
     let (peers, config, what) = r
         .iter()
         .find_map(|(rig, q)| match q {
-            Request::RemoteSession {
-                peers,
-                config,
-                what,
-            } if *rig == RIG => Some((peers.clone(), config.clone(), what.clone())),
+            Request::RemoteSession { pair, config, what } if *rig == RIG => {
+                Some((pair.clone(), config.clone(), what.clone()))
+            }
             _ => None,
         })
         .expect("this rig pairs and reopens");
-    let peers = peers.expect("pairs with pupu");
-    assert_eq!(peers.len(), 1);
-    assert_eq!(peers[0].rig, PUPU);
-    assert_eq!(peers[0].key, KEY_B);
-    assert_eq!(peers[0].ctrl, "tcp://192.168.9.27:7700");
-    assert_eq!(peers[0].data, "tcp://192.168.9.27:7701");
+    let peer = peers.expect("pairs with pupu");
+    assert_eq!(peer.rig, PUPU);
+    assert_eq!(peer.key, KEY_B);
+    assert_eq!(peer.ctrl, "tcp://192.168.9.27:7700");
+    assert_eq!(peer.data, "tcp://192.168.9.27:7701");
     assert_eq!(
         config.remote_inputs,
         vec![RemoteInput {
@@ -333,7 +330,7 @@ fn a_remote_inputs_row_refuses_setup_and_removes_on_a_second_delete() {
         .iter()
         .find_map(|(_, q)| match q {
             Request::RemoteSession {
-                peers: None,
+                pair: None,
                 config,
                 what,
             } => {

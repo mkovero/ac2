@@ -290,15 +290,25 @@ impl ConnectionPage {
                 }
             }
             ConnLine::Paired(rig) => {
+                use ac2_scene::pairing as words;
                 let r = self.pairing.row(rig)?;
-                match (r.mend, r.held) {
-                    (true, true) => Some(ConnAction::Pair(rig)),
-                    (true, false) => {
-                        self.error = Some(ac2_scene::pairing::not_held(&r.name));
+                if r.halves.both_ways() {
+                    self.notice = Some(words::unpair_hint(&r.name));
+                    return None;
+                }
+                if !r.mend() {
+                    self.notice = Some(words::cant_tell(&r.name, &r.halves));
+                    return None;
+                }
+                match r.unreached {
+                    None => Some(ConnAction::Pair(rig)),
+                    Some(words::Unseen::NotConnected) => {
+                        self.error =
+                            Some(words::refusal(&r.name, &words::PairRefusal::NotConnected));
                         None
                     }
-                    (false, _) => {
-                        self.notice = Some(ac2_scene::pairing::unpair_hint(&r.name));
+                    Some(_) => {
+                        self.error = Some(words::not_held(&r.name));
                         None
                     }
                 }
@@ -354,7 +364,7 @@ impl ConnectionPage {
             Some(ConnLine::Authorized(name)) => name,
             Some(ConnLine::Paired(rig)) => {
                 let r = self.pairing.row(rig)?;
-                let ask = ac2_scene::pairing::unpair_confirm(&r.name, r.held);
+                let ask = ac2_scene::pairing::unpair_confirm(&r.name, r.unreached);
                 if self.pairing.confirm == Some(rig) {
                     self.pairing.confirm = None;
                     return Some(ConnAction::Unpair(rig));

@@ -975,12 +975,28 @@ pub enum Command {
         /// The name its connections carry (1 … 64 characters, no spaces).
         name: String,
     },
-    /// The rigs this rig may take inputs from, each with the address and key the app
-    /// pinned for it; replaces the list (kept in the rig settings file).
-    #[serde(rename = "rig.peers")]
-    RigPeers {
-        /// The paired rigs.
-        peers: Vec<RigPeer>,
+    /// Remove another rig's admission by its identity: every key admitted as that rig
+    /// (`auth.admit_rig`) goes, its stream ends at once; an app's key under the same name is
+    /// never touched, whatever was authorized since.
+    #[serde(rename = "auth.revoke_rig")]
+    AuthRevokeRig {
+        /// The admitted rig's identity.
+        rig_id: RigId,
+    },
+    /// Pair with one more rig: this rig may take its inputs, at the address and with the key
+    /// the app pinned for it. It takes the place of an entry for the same rig or under the
+    /// same name; the other paired rigs stay as they are (kept in the rig settings file).
+    #[serde(rename = "rig.pair")]
+    RigPair {
+        /// The rig paired with.
+        peer: RigPeer,
+    },
+    /// Unpair one rig: this rig no longer takes its inputs; the other paired rigs stay as
+    /// they are.
+    #[serde(rename = "rig.unpair")]
+    RigUnpair {
+        /// The paired rig's identity.
+        rig: RigId,
     },
     /// What a rig taking this rig's inputs may know: its clocks with the stamp map, and its
     /// session's rate and captured inputs with their setup and calibration.

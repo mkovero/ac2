@@ -298,7 +298,9 @@ impl Control {
             | Command::ServerAuthorize { .. }
             | Command::ServerRevoke { .. }
             | Command::AuthAdmitRig { .. }
-            | Command::RigPeers { .. }
+            | Command::AuthRevokeRig { .. }
+            | Command::RigPair { .. }
+            | Command::RigUnpair { .. }
             | Command::SourceState
             | Command::PlanSave { .. }
             | Command::PlanList

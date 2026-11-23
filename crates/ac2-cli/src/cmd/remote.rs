@@ -1,7 +1,6 @@
 //! Remote inputs from the CLI: admit another rig (`auth admit-rig`), pair with one
 //! (`auth peer-add` / `peer-remove`), and the remote inputs of `session open --remote-in`.
 
-use ac2_client::Client;
 use ac2_client::endpoint::{Endpoints, RemoteAddr};
 use ac2_proto::Command;
 use ac2_proto::model::{RemoteInput, RigPeer, State};
@@ -48,11 +47,6 @@ pub(crate) async fn admit_rig(
     Ok(())
 }
 
-async fn set_peers(c: &Client, peers: Vec<RigPeer>) -> Result<(), CliError> {
-    c.call(Command::RigPeers { peers }).await?;
-    Ok(())
-}
-
 /// `auth peer-add`.
 pub(crate) async fn peer_add(
     cli: &Cli,
@@ -71,10 +65,7 @@ pub(crate) async fn peer_add(
         key: key(k)?,
     };
     let c = connect(cli, false).await?;
-    let mut peers = super::state(&c).await?.remote.peers;
-    peers.retain(|p| p.rig != peer.rig && p.name != peer.name);
-    peers.push(peer.clone());
-    set_peers(&c, peers).await?;
+    c.call(Command::RigPair { peer: peer.clone() }).await?;
     out.emit(&peer, || {
         format!(
             "paired with {name} at {}: admit this rig there (`ac2 auth admit-rig`)",
@@ -87,13 +78,18 @@ pub(crate) async fn peer_add(
 /// `auth peer-remove`.
 pub(crate) async fn peer_remove(cli: &Cli, name: &str, out: &mut Out<'_>) -> Result<(), CliError> {
     let c = connect(cli, false).await?;
-    let mut peers = super::state(&c).await?.remote.peers;
-    let before = peers.len();
-    peers.retain(|p| p.name != name);
-    if peers.len() == before {
+    // Named by the operator, removed by its identity: the daemon drops that entry only.
+    let Some(rig) = super::state(&c)
+        .await?
+        .remote
+        .peers
+        .into_iter()
+        .find(|p| p.name == name)
+        .map(|p| p.rig)
+    else {
         return Err(CliError::Usage(format!("not paired with {name:?}")));
-    }
-    set_peers(&c, peers).await?;
+    };
+    c.call(Command::RigUnpair { rig }).await?;
     out.emit(&json!({ "removed": name }), || {
         format!("unpaired from {name}")
     })?;

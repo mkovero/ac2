@@ -1,14 +1,14 @@
 //! Pairing the rig shown with another rig the app holds, both ways in one act, and
 //! unpairing it (Settings › Connection, *Paired rigs*). A direction is two halves: the
-//! taking rig lists the other (`rig.peers`) and the other has admitted it
+//! taking rig lists the other (`rig.pair`) and the other has admitted it
 //! (`auth.admit_rig`). Each half is read from the daemons' mirrored state and `server.info`
 //! answers, matched by rig id; a half of a rig the app does not hold is not known.
 
 use super::*;
 use crate::remote_inputs::admit_name;
 use crate::settings::{PairOffer, PairedRow};
-use ac2_proto::model::{RigPeer, ServerInfo};
-use ac2_scene::pairing::{self as words, Half, Halves, PairRefusal, Unseen};
+use ac2_proto::model::ServerInfo;
+use ac2_scene::pairing::{self as words, Half, Halves, PairRefusal, Side, Unseen};
 
 use super::remote_impl::Source;
 
@@ -17,7 +17,8 @@ fn admitted(
     info: &Option<Result<ServerInfo, String>>,
 ) -> Result<Vec<(RigId, String, String)>, Unseen> {
     match info {
-        None | Some(Err(_)) => Err(Unseen::Asking),
+        None => Err(Unseen::Asking),
+        Some(Err(_)) => Err(Unseen::Unanswered),
         // Off the network a daemon lists no keys: what it admitted is not known.
         Some(Ok(i)) if i.network.status.endpoints().is_none() => Err(Unseen::NetworkOff),
         Some(Ok(i)) => Ok(i
@@ -29,65 +30,106 @@ fn admitted(
     }
 }
 
-/// The server key a rig's `server.info` gives, when known.
-fn server_key(r: &RigState) -> Option<&str> {
-    match &r.server {
-        Some(Ok(i)) => i.network.server_key.as_deref(),
-        _ => None,
-    }
-}
-
 fn connected(r: &RigState) -> bool {
     matches!(r.conn, ConnState::Connected { .. }) && r.daemon().is_some()
 }
 
-/// `peers` with `s` in, in place of any entry for the same rig or under the same name.
-pub(super) fn peers_with(peers: &[RigPeer], s: &Source) -> Vec<RigPeer> {
-    let mut v: Vec<RigPeer> = peers
+/// A rig's state when the app holds it and is connected to it now; else why it is not
+/// seen. A rig the app lost keeps its last mirror and `server.info`, which are stale.
+fn seen(r: Option<&RigState>) -> Result<&RigState, Unseen> {
+    match r {
+        None => Err(Unseen::NotHeld),
+        Some(r) if !connected(r) => Err(Unseen::NotConnected),
+        Some(r) => Ok(r),
+    }
+}
+
+/// The server key a rig serves under now (`None`: it has none yet), or why it is not seen.
+fn key_now(r: Result<&RigState, Unseen>) -> Result<Option<&str>, Unseen> {
+    match &r?.server {
+        None => Err(Unseen::Asking),
+        Some(Err(_)) => Err(Unseen::Unanswered),
+        Some(Ok(i)) => Ok(i.network.server_key.as_deref()),
+    }
+}
+
+/// Whether an entry pinned to `pinned` is in place against the key its rig serves under
+/// now: an entry under another key is stale (the link would be refused), and one whose
+/// rig's key is not seen cannot be told.
+fn key_half(pinned: &str, now: Result<Option<&str>, Unseen>, side: Side) -> Half {
+    match now {
+        Ok(Some(k)) if k == pinned => Half::Yes,
+        Ok(_) => Half::No,
+        Err(why) => Half::Unknown { side, why },
+    }
+}
+
+/// Whether `r` (on `side`) lists rig `of`, whose key now is `of_key` (on the other side).
+fn lists(
+    r: Result<&RigState, Unseen>,
+    side: Side,
+    of: RigId,
+    of_key: Result<Option<&str>, Unseen>,
+    of_side: Side,
+) -> Half {
+    let r = match r {
+        Ok(r) => r,
+        Err(why) => return Half::Unknown { side, why },
+    };
+    match r
+        .daemon()
+        .and_then(|s| s.remote.peers.iter().find(|p| p.rig == of))
+    {
+        None => Half::No,
+        Some(p) => key_half(&p.key, of_key, of_side),
+    }
+}
+
+/// Whether `r` (on `side`) has admitted rig `of`, whose key now is `of_key`.
+fn admits(
+    r: Result<&RigState, Unseen>,
+    side: Side,
+    of: RigId,
+    of_key: Result<Option<&str>, Unseen>,
+    of_side: Side,
+) -> Half {
+    let a = match r.and_then(|r| admitted(&r.server)) {
+        Ok(a) => a,
+        Err(why) => return Half::Unknown { side, why },
+    };
+    let halves: Vec<Half> = a
         .iter()
-        .filter(|p| p.rig != s.id && p.name != s.name)
-        .cloned()
+        .filter(|(id, ..)| *id == of)
+        .map(|(_, _, k)| key_half(k, of_key, of_side))
         .collect();
-    v.push(s.peer());
-    v
+    if halves.contains(&Half::Yes) {
+        Half::Yes
+    } else {
+        halves
+            .into_iter()
+            .find(|h| matches!(h, Half::Unknown { .. }))
+            .unwrap_or(Half::No)
+    }
 }
 
 impl AppState {
     /// The four halves between the rig shown and rig `other`.
     pub fn pair_halves(&self, other: RigId) -> Halves {
-        let here = &self.rig;
-        let there = self.others.background.iter().find(|r| r.id == other);
-        // A listing or an admission under another key than the rig serves now is stale: the
-        // link would be refused, so it is not counted as a half in place.
-        let key_ok =
-            |r: Option<&RigState>, key: &str| r.and_then(server_key).is_none_or(|k| k == key);
-        let lists = |r: &RigState, of: RigId, of_rig: Option<&RigState>| match r.daemon() {
-            Some(s) => {
-                if s.remote
-                    .peers
-                    .iter()
-                    .any(|p| p.rig == of && key_ok(of_rig, &p.key))
-                {
-                    Half::Yes
-                } else {
-                    Half::No
-                }
-            }
-            None => Half::Unknown(Unseen::Asking),
-        };
-        let admits = |r: &RigState, of: RigId, of_rig: Option<&RigState>| match admitted(&r.server)
-        {
-            Ok(a) if a.iter().any(|(id, _, k)| *id == of && key_ok(of_rig, k)) => Half::Yes,
-            Ok(_) => Half::No,
-            Err(u) => Half::Unknown(u),
-        };
-        let not_held = Half::Unknown(Unseen::NotHeld);
+        let here = seen(Some(&self.rig));
+        let there = seen(self.others.background.iter().find(|r| r.id == other));
+        let (here_key, there_key) = (key_now(here), key_now(there));
+        let (h, t) = (Side::Here, Side::There);
         Halves {
-            here_lists: lists(here, other, there),
-            here_admits: admits(here, other, there),
-            there_lists: there.map_or(not_held.clone(), |t| lists(t, here.id, Some(here))),
-            there_admits: there.map_or(not_held, |t| admits(t, here.id, Some(here))),
+            here_lists: lists(here, h, other, there_key, t),
+            here_admits: admits(here, h, other, there_key, t),
+            there_lists: lists(there, t, self.rig.id, here_key, h),
+            there_admits: admits(there, t, self.rig.id, here_key, h),
         }
+    }
+
+    /// Why the app cannot reach held rig `rig`'s daemon now, if it cannot.
+    fn unreached(&self, rig: RigId) -> Option<Unseen> {
+        seen(self.others.background.iter().find(|r| r.id == rig)).err()
     }
 
     /// The rigs linked with the rig shown by any half its own state or a held rig's shows,
@@ -111,11 +153,13 @@ impl AppState {
         {
             add(p.rig, named(p.rig, &p.name));
         }
-        for (id, name, _) in admitted(&here.server).unwrap_or_default() {
-            add(id, named(id, &name));
+        if connected(here) {
+            for (id, name, _) in admitted(&here.server).unwrap_or_default() {
+                add(id, named(id, &name));
+            }
         }
         for b in self.rigs_in_order() {
-            if b.id == here.id {
+            if b.id == here.id || !connected(b) {
                 continue;
             }
             let lists = b
@@ -186,8 +230,8 @@ impl AppState {
                     rig,
                     text: words::row(&name, &h),
                     tip: words::tip(&name, &h),
-                    mend: h.missing(),
-                    held: self.find_rig(rig).is_some(),
+                    halves: h,
+                    unreached: self.unreached(rig),
                     name,
                 }
             })
@@ -270,14 +314,6 @@ impl AppState {
             Err(e) => return self.pair_error(e),
         };
         let h = self.pair_halves(rig);
-        let peers_here = self
-            .daemon()
-            .map(|s| s.remote.peers.clone())
-            .unwrap_or_default();
-        let peers_there = b
-            .daemon()
-            .map(|s| s.remote.peers.clone())
-            .unwrap_or_default();
         let admit = |admitter: &Source, rig: &Source| Request::ServerCall {
             cmd: Command::AuthAdmitRig {
                 key: rig.key.clone(),
@@ -287,10 +323,8 @@ impl AppState {
             what: ac2_scene::remote_inputs::admitted_toast(&admitter.name, &rig.name),
             failed: words::not_admitted(&admitter.name, &rig.name),
         };
-        let list = |lister: &Source, peers: &[RigPeer], peer: &Source| Request::Act {
-            cmd: Command::RigPeers {
-                peers: peers_with(peers, peer),
-            },
+        let list = |lister: &Source, peer: &Source| Request::Act {
+            cmd: Command::RigPair { peer: peer.peer() },
             done: words::listed_toast(&lister.name, &peer.name),
             failed: words::not_listed(&lister.name, &peer.name),
         };
@@ -302,12 +336,10 @@ impl AppState {
             out.push(admit(&here, &there));
         }
         if h.here_lists != Half::Yes {
-            out.push(list(&here, &peers_here, &there));
+            out.push(list(&here, &there));
         }
         if h.there_lists != Half::Yes {
-            self.others
-                .elsewhere
-                .push((rig, list(&there, &peers_there, &here)));
+            self.others.elsewhere.push((rig, list(&there, &here)));
         }
         if let Overlay::Settings(s) = &mut self.overlay {
             s.connection.pairing.offers = None;
@@ -330,14 +362,19 @@ impl AppState {
     }
 
     /// Unpairs the rig shown and rig `rig`: this rig drops it from its paired rigs and
-    /// revokes its admission, and so does `rig` when the app holds it. Refused, with
-    /// nothing sent, while either session takes inputs from the other: those inputs would
-    /// lose their link under a running session.
+    /// revokes its admission, and so does `rig` when the app reaches it. Refused, with
+    /// nothing sent, while the app is not connected to the rig shown (its halves are not
+    /// known), or while a session the app sees takes inputs from the other rig: those inputs
+    /// would lose their link under a running session.
     pub(super) fn unpair(&mut self, rig: RigId, out: &mut Vec<Request>) {
         let me = self.rig_label(&self.rig);
-        let there = self.others.background.iter().find(|r| r.id == rig);
-        let held = there.is_some();
-        let name = there.map_or_else(
+        if !connected(&self.rig) {
+            return self.pair_error(words::refusal(&me, &PairRefusal::NotConnected));
+        }
+        let held = self.others.background.iter().find(|r| r.id == rig);
+        let there = held.filter(|r| connected(r));
+        let unreached = self.unreached(rig);
+        let name = held.map_or_else(
             || {
                 self.paired_with_shown()
                     .into_iter()
@@ -356,54 +393,51 @@ impl AppState {
                 return self.pair_error(words::unpair_inputs(&name, &inputs));
             }
         }
-        let unlist = |lister: &str, peers: &[RigPeer], drop: RigId, peer: &str| Request::Act {
-            cmd: Command::RigPeers {
-                peers: peers.iter().filter(|p| p.rig != drop).cloned().collect(),
-            },
+        let unlist = |lister: &str, drop: RigId, peer: &str| Request::Act {
+            cmd: Command::RigUnpair { rig: drop },
             done: words::unlisted_toast(lister, peer),
             failed: words::not_unlisted(lister, peer),
         };
-        let revoke = |admitter: &str, admitted_name: String, rig: &str| Request::ServerCall {
-            cmd: Command::ServerRevoke {
-                name: admitted_name,
-            },
+        // By the rig's identity, so an app authorized under the same name keeps its key.
+        let revoke = |admitter: &str, rig_id: RigId, rig: &str| Request::ServerCall {
+            cmd: Command::AuthRevokeRig { rig_id },
             what: words::revoked_toast(admitter, rig),
             failed: words::not_revoked(admitter, rig),
         };
-        let mut here_reqs = Vec::new();
-        if let Some(s) = self.daemon()
-            && s.remote.peers.iter().any(|p| p.rig == rig)
-        {
-            here_reqs.push(unlist(&me, &s.remote.peers, rig, &name));
+        let lists = |r: &RigState, of: RigId| {
+            r.daemon()
+                .is_some_and(|s| s.remote.peers.iter().any(|p| p.rig == of))
+        };
+        let mut notes: Vec<String> = Vec::new();
+        if lists(&self.rig, rig) {
+            out.push(unlist(&me, rig, &name));
         }
-        for (id, admitted_name, _) in admitted(&self.rig.server).unwrap_or_default() {
-            if id == rig {
-                here_reqs.push(revoke(&me, admitted_name, &name));
-            }
+        match admitted(&self.rig.server) {
+            Ok(a) if a.iter().any(|(id, ..)| *id == rig) => out.push(revoke(&me, rig, &name)),
+            Ok(_) => {}
+            Err(why) => notes.push(words::unpair_admission_unseen(&name, why)),
         }
-        let mut there_reqs = Vec::new();
         if let Some(t) = there {
-            if let Some(s) = t.daemon()
-                && s.remote.peers.iter().any(|p| p.rig == self.rig.id)
-            {
-                there_reqs.push(unlist(&name, &s.remote.peers, self.rig.id, &me));
+            let mut reqs = Vec::new();
+            if lists(t, self.rig.id) {
+                reqs.push(unlist(&name, self.rig.id, &me));
             }
-            for (id, admitted_name, _) in admitted(&t.server).unwrap_or_default() {
-                if id == self.rig.id {
-                    there_reqs.push(revoke(&name, admitted_name, &me));
-                }
+            if admitted(&t.server).is_ok_and(|a| a.iter().any(|(id, ..)| *id == self.rig.id)) {
+                reqs.push(revoke(&name, self.rig.id, &me));
             }
+            self.others
+                .elsewhere
+                .extend(reqs.into_iter().map(|q| (rig, q)));
         }
-        out.extend(here_reqs);
-        self.others
-            .elsewhere
-            .extend(there_reqs.into_iter().map(|q| (rig, q)));
-        if !held {
-            let rest = words::unpair_rest(&name);
-            if let Overlay::Settings(s) = &mut self.overlay {
-                s.connection.notice = Some(rest.clone());
-            }
-            self.warn(rest);
+        if let Some(why) = unreached {
+            let rest = words::unpair_rest(&name, why);
+            self.warn(rest.clone());
+            notes.insert(0, rest);
+        }
+        if !notes.is_empty()
+            && let Overlay::Settings(s) = &mut self.overlay
+        {
+            s.connection.notice = Some(notes.join(" · "));
         }
     }
 }

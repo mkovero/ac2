@@ -1,6 +1,6 @@
 //! The words of pairing two rigs on the app's Connection page: the *Paired rigs* rows, the
 //! pick of a rig to pair with, the refusals and the toasts. A pairing has four halves, two
-//! per direction: a rig takes another's inputs when it lists that rig (`rig.peers`) and
+//! per direction: a rig takes another's inputs when it lists that rig (`rig.pair`) and
 //! that rig has admitted it (`auth.admit_rig`). Each half is said as the daemons' state
 //! shows it, and a half the app cannot see is said as not known, never as missing.
 
@@ -24,21 +24,37 @@ pub const ALL_PAIRED: &str = "Every rig the app holds is paired with this rig bo
 pub const PICK_HEADING: &str = "Pair this rig with (Enter pairs both ways · Esc closes):";
 
 /// One half of a pairing as the daemons' state shows it.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Half {
     Yes,
     No,
-    /// The app cannot see this half.
-    Unknown(Unseen),
+    /// The app cannot see this half: what it would need is `side`'s, and `why` it lacks it.
+    Unknown {
+        side: Side,
+        why: Unseen,
+    },
 }
 
-/// Why the app cannot see the other rig's halves.
+/// Which rig's state a half that cannot be told waits on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Side {
+    /// The rig shown.
+    Here,
+    /// The other rig.
+    There,
+}
+
+/// Why the app cannot see a rig's state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Unseen {
     /// The app does not hold that rig: its daemon's state is not here.
     NotHeld,
+    /// The app holds that rig but is not connected to it now: what it showed is stale.
+    NotConnected,
     /// That rig has not answered yet.
     Asking,
+    /// That rig did not answer `server.info` (the request failed).
+    Unanswered,
     /// That rig serves only its own computer: its admitted rigs are not listed to the app.
     NetworkOff,
 }
@@ -81,7 +97,7 @@ impl Halves {
         .any(|h| **h == Half::No)
     }
 
-    /// The halves the shown rig's own state shows: something links the two rigs.
+    /// Some half is seen in place: something already links the two rigs.
     pub fn any(&self) -> bool {
         [
             &self.here_lists,
@@ -92,10 +108,26 @@ impl Halves {
         .iter()
         .any(|h| **h == Half::Yes)
     }
+
+    /// The halves that cannot be told, with whose state each waits on.
+    fn unknown(&self) -> impl Iterator<Item = (Side, Unseen)> + '_ {
+        [
+            &self.here_lists,
+            &self.there_admits,
+            &self.there_lists,
+            &self.here_admits,
+        ]
+        .into_iter()
+        .filter_map(|h| match h {
+            Half::Unknown { side, why } => Some((*side, *why)),
+            _ => None,
+        })
+    }
 }
 
 /// A *Paired rigs* row: `ketunkolo · paired both ways`, else what is missing
-/// (`ketunkolo · has not admitted this rig`), else what cannot be told.
+/// (`ketunkolo · has not admitted this rig`), else what cannot be told: `its side` when
+/// only the other rig's state is wanting, plain `can't tell` when this rig's is.
 pub fn row(rig: &str, h: &Halves) -> String {
     if h.both_ways() {
         return format!("{rig} · paired both ways");
@@ -110,19 +142,44 @@ pub fn row(rig: &str, h: &Halves) -> String {
     .filter(|(half, _)| **half == Half::No)
     .map(|(_, w)| w)
     .collect();
-    if missing.is_empty() {
-        format!("{rig} · its side: can't tell")
-    } else {
+    if !missing.is_empty() {
         format!("{rig} · {}", missing.join(" · "))
+    } else if h.unknown().any(|(side, _)| side == Side::Here) {
+        format!("{rig} · can't tell")
+    } else {
+        format!("{rig} · its side: can't tell")
     }
 }
 
-fn unseen(rig: &str, u: Unseen) -> String {
+/// Why `side`'s state is not seen; `rig` is the other rig's name.
+fn unseen(rig: &str, side: Side, u: Unseen) -> String {
+    let who = match side {
+        Side::Here => "this rig",
+        Side::There => rig,
+    };
     match u {
-        Unseen::NotHeld => format!("the app does not hold {rig}: connect to it to see"),
-        Unseen::Asking => format!("asking {rig}…"),
-        Unseen::NetworkOff => format!("{rig}'s network is off"),
+        Unseen::NotHeld => format!("the app does not hold {who}: connect to it to see"),
+        Unseen::NotConnected => format!("the app is not connected to {who} now"),
+        Unseen::Asking => format!("asking {who}…"),
+        Unseen::Unanswered => format!("{who} did not answer the app"),
+        Unseen::NetworkOff => format!("{who}'s network is off"),
     }
+}
+
+/// Enter on a row that is not paired both ways although no half is seen missing: what
+/// cannot be told, and why.
+pub fn cant_tell(rig: &str, h: &Halves) -> String {
+    let mut why: Vec<String> = Vec::new();
+    for (side, u) in h.unknown() {
+        let w = unseen(rig, side, u);
+        if !why.contains(&w) {
+            why.push(w);
+        }
+    }
+    format!(
+        "can't tell whether {rig} is paired both ways: {}",
+        why.join("; ")
+    )
 }
 
 /// A *Paired rigs* row's hover: each half in words, then what the keys do there.
@@ -130,7 +187,9 @@ pub fn tip(rig: &str, h: &Halves) -> String {
     let line = |half: &Half, yes: String, no: String, what: String| match half {
         Half::Yes => yes,
         Half::No => no,
-        Half::Unknown(u) => format!("can't tell whether {what} ({})", unseen(rig, *u)),
+        Half::Unknown { side, why } => {
+            format!("  can't tell whether {what} ({})", unseen(rig, *side, *why))
+        }
     };
     let mut lines = vec![
         format!("This rig takes {rig}'s inputs when both of these hold:"),
@@ -168,8 +227,8 @@ pub fn tip(rig: &str, h: &Halves) -> String {
     lines.join("\n")
 }
 
-/// A rig offered by *Pair with rig…*: `ketunkolo`, or `ketunkolo · mends a half` when
-/// some half is already in place.
+/// A rig offered by *Pair with rig…*: `ketunkolo`, or `ketunkolo · pairs the missing
+/// halves` when some half is already in place.
 pub fn offer_row(rig: &str, h: &Halves) -> String {
     if h.any() {
         format!("{rig} · pairs the missing halves")
@@ -199,8 +258,8 @@ pub enum PairRefusal {
     LocalOnly,
     /// It already authorizes an app under the name the other rig would be admitted as.
     NameTaken(String),
-    /// The app is not connected to it now: its paired rigs are not known, and a pairing
-    /// replaces that list.
+    /// The app is not connected to it now: which halves it holds is not known, and its
+    /// half could not be sent.
     NotConnected,
 }
 
@@ -257,24 +316,44 @@ pub fn not_revoked(admitter: &str, rig: &str) -> String {
     format!("{admitter} still admits {rig}")
 }
 
-/// The first Delete on a *Paired rigs* row; `held`: the app holds that rig, so both
-/// sides are unpaired, else this rig's side only.
-pub fn unpair_confirm(rig: &str, held: bool) -> String {
-    if held {
-        format!("Delete again unpairs {rig} both ways")
-    } else {
-        format!(
-            "Delete again unpairs this rig's side only: the app does not hold {rig}, whose \
-             side stays"
-        )
+/// Why the app cannot reach rig `rig`'s daemon to unpair its side.
+fn unreached(rig: &str, why: Unseen) -> String {
+    match why {
+        Unseen::NotConnected => format!("the app is not connected to {rig} now"),
+        _ => format!("the app does not hold {rig}"),
     }
 }
 
-/// After this rig's side was unpaired from a rig the app does not hold: what remains.
-pub fn unpair_rest(rig: &str) -> String {
+/// The first Delete on a *Paired rigs* row. `unreached`: why the app cannot reach the
+/// other rig, so only this rig's side is unpaired; `None`: both sides are. A session there
+/// cannot be seen, so the confirm says what revoking its admission here does to it.
+pub fn unpair_confirm(rig: &str, unreached_why: Option<Unseen>) -> String {
+    match unreached_why {
+        None => format!("Delete again unpairs {rig} both ways"),
+        Some(u) => format!(
+            "Delete again unpairs this rig's side only ({}; its side stays). Can't tell \
+             whether {rig}'s session takes this rig's inputs: if it does, they stop",
+            unreached(rig, u)
+        ),
+    }
+}
+
+/// After this rig's side was unpaired from a rig the app cannot reach: what remains.
+pub fn unpair_rest(rig: &str, why: Unseen) -> String {
     format!(
-        "{rig}'s side is unchanged (the app does not hold it): connect to {rig}, show it and \
-         unpair this rig there to finish"
+        "{rig}'s side is unchanged ({}): connect to {rig}, show it and unpair this rig there \
+         to finish",
+        unreached(rig, why)
+    )
+}
+
+/// Unpairing while this rig's admitted rigs cannot be seen: its admission of `rig`, if
+/// any, was not revoked.
+pub fn unpair_admission_unseen(rig: &str, why: Unseen) -> String {
+    format!(
+        "Can't tell whether this rig admits {rig} ({}): if it does, that stays; revoke it \
+         under Authorized clients once seen",
+        unseen(rig, Side::Here, why)
     )
 }
 
@@ -332,7 +411,11 @@ mod tests {
     #[test]
     fn an_unseen_half_is_not_claimed() {
         use Half::*;
-        let h = halves(Yes, Unknown(Unseen::NotHeld), Unknown(Unseen::NotHeld), Yes);
+        let there = Unknown {
+            side: Side::There,
+            why: Unseen::NotHeld,
+        };
+        let h = halves(Yes, there, there, Yes);
         assert_eq!(row("ketunkolo", &h), "ketunkolo · its side: can't tell");
         let t = tip("ketunkolo", &h);
         assert!(
@@ -344,6 +427,35 @@ mod tests {
         );
         assert!(!t.contains("has not admitted"), "{t}");
         assert!(!h.missing() && !h.both_ways() && h.any());
+        assert_eq!(
+            cant_tell("ketunkolo", &h),
+            "can't tell whether ketunkolo is paired both ways: the app does not hold \
+             ketunkolo: connect to it to see"
+        );
+    }
+
+    /// A half of this rig that cannot be told is this rig's, not the other rig's.
+    #[test]
+    fn this_rigs_unseen_half_is_said_as_this_rigs() {
+        use Half::*;
+        let here = Unknown {
+            side: Side::Here,
+            why: Unseen::NetworkOff,
+        };
+        let h = halves(Yes, Yes, Yes, here);
+        assert_eq!(row("ketunkolo", &h), "ketunkolo · can't tell");
+        let t = tip("ketunkolo", &h);
+        assert!(
+            t.contains(
+                "can't tell whether this rig has admitted ketunkolo (this rig's network is off)"
+            ),
+            "{t}"
+        );
+        assert!(!t.contains("ketunkolo's network"), "{t}");
+        assert_eq!(
+            cant_tell("ketunkolo", &h),
+            "can't tell whether ketunkolo is paired both ways: this rig's network is off"
+        );
     }
 
     #[test]
@@ -355,10 +467,23 @@ mod tests {
         );
         assert!(NO_OTHER_RIG.contains("connect to it first"));
         assert_eq!(
-            unpair_confirm("ketunkolo", true),
+            unpair_confirm("ketunkolo", None),
             "Delete again unpairs ketunkolo both ways"
         );
-        assert!(unpair_rest("ketunkolo").contains("unpair this rig there to finish"));
+        assert_eq!(
+            unpair_confirm("ketunkolo", Some(Unseen::NotConnected)),
+            "Delete again unpairs this rig's side only (the app is not connected to ketunkolo \
+             now; its side stays). Can't tell whether ketunkolo's session takes this rig's \
+             inputs: if it does, they stop"
+        );
+        assert!(
+            unpair_rest("ketunkolo", Unseen::NotHeld).contains("unpair this rig there to finish")
+        );
+        assert_eq!(
+            unpair_admission_unseen("ketunkolo", Unseen::Unanswered),
+            "Can't tell whether this rig admits ketunkolo (this rig did not answer the app): if \
+             it does, that stays; revoke it under Authorized clients once seen"
+        );
         assert_eq!(
             unpair_inputs("pupu", &["ketunkolo in 1".into()]),
             "ketunkolo in 1 on pupu come from that rig: remove them first (Settings › Audio I/O)"

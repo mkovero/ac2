@@ -383,7 +383,7 @@ fn the_connection_page_sets_the_link_offset() {
         .iter()
         .find_map(|(_, q)| match q {
             Request::RemoteSession {
-                peers: None,
+                pair: None,
                 config,
                 what,
             } => Some((config.clone(), what.clone())),

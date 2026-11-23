@@ -283,8 +283,8 @@ pub fn commands() -> Vec<Command> {
             rig_id: crate::units::RigId(0x7075_7075),
             name: "pupu".into(),
         },
-        Command::RigPeers {
-            peers: vec![super::remote::rig_peer()],
+        Command::RigPair {
+            peer: super::remote::rig_peer(),
         },
         Command::SourceState,
         Command::SplBandTransfer {
@@ -487,6 +487,12 @@ pub fn commands() -> Vec<Command> {
             input: 4,
             step: 0,
         }),
+        Command::RigUnpair {
+            rig: crate::units::RigId(0x6b65_7475),
+        },
+        Command::AuthRevokeRig {
+            rig_id: crate::units::RigId(0x7075_7075),
+        },
     ])
     .collect()
 }

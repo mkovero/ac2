@@ -1,5 +1,5 @@
 //! Remote inputs on the control thread (`docs/design/remote-inputs.md`): the links to the
-//! paired rigs (`rig.peers`), the source side's filtered state (`source.state`) and tap, the
+//! paired rigs (`rig.pair`, `rig.unpair`), the source side's filtered state (`source.state`) and tap, the
 //! joined feed of a session with remote inputs, and the `remote` entity they report into.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -27,7 +27,7 @@ use crate::remote::tap::SourceTap;
 use crate::remote::{InputReport, RemoteMsg, RemoteRun, RigReport};
 use crate::rig::RigSettings;
 use crate::session::Runtime;
-use crate::util::{invalid, refused, wall_ns};
+use crate::util::{invalid, missing, refused, wall_ns};
 
 /// Audio queued for other rigs while the I/O thread does not take it, s: well past the
 /// longest link offset, so a hiccup loses nothing a rig could still use, and no more, since
@@ -91,7 +91,7 @@ impl RemoteCtl {
     }
 }
 
-/// Checks a `rig.peers` list: each rig once, with a name, endpoints and a server key.
+/// Checks a list of paired rigs: each rig once, with a name, endpoints and a server key.
 pub(crate) fn check_peers(peers: &[RigPeer]) -> Result<(), String> {
     if peers.len() > MAX_PEERS {
         return Err(format!("{} paired rigs; at most {MAX_PEERS}", peers.len()));
@@ -237,24 +237,51 @@ impl Control {
         }
     }
 
-    /// `rig.peers`.
-    pub(super) fn set_rig_peers(&mut self, peers: Vec<RigPeer>) -> Result<ReplyBody, ProtoError> {
-        check_peers(&peers).map_err(invalid)?;
-        if peers.iter().any(|p| p.rig == self.s.rig_id) {
+    /// `rig.pair`: `peer` in place of an entry for the same rig or under the same name.
+    pub(super) fn rig_pair(&mut self, peer: RigPeer) -> Result<ReplyBody, ProtoError> {
+        if peer.rig == self.s.rig_id {
             return Err(invalid("a rig is not paired with itself"));
         }
-        if peers != self.store.state().remote.peers {
+        let mut peers = self.store.state().remote.peers.clone();
+        peers.retain(|p| p.rig != peer.rig && p.name != peer.name);
+        peers.push(peer);
+        self.set_rig_peers(peers)
+    }
+
+    /// `rig.unpair`.
+    pub(super) fn rig_unpair(&mut self, rig: RigId) -> Result<ReplyBody, ProtoError> {
+        let mut peers = self.store.state().remote.peers.clone();
+        let before = peers.len();
+        peers.retain(|p| p.rig != rig);
+        if peers.len() == before {
+            return Err(missing(format!("not paired with rig {rig}")));
+        }
+        self.set_rig_peers(peers)
+    }
+
+    /// The paired rigs become `peers`: kept, linked, published. A running session's joined
+    /// feed starts over only when an entry it takes inputs from changed or went: a link
+    /// started again feeds nothing until attached anew, while the links to the other rigs
+    /// never fed it.
+    pub(super) fn set_rig_peers(&mut self, peers: Vec<RigPeer>) -> Result<ReplyBody, ProtoError> {
+        check_peers(&peers).map_err(invalid)?;
+        let before = self.store.state().remote.peers.clone();
+        if peers != before {
             self.rig.settings.persist(&RigSettings {
                 peers: peers.clone(),
                 ..self.rig_settings_now()
             })?;
             self.respawn_links(&peers);
             let mut r = self.store.state().remote.clone();
-            r.peers = peers;
+            r.peers = peers.clone();
             self.commit(Change::Remote(r));
-            // A link started again feeds nothing: the session's joined feed starts over.
             if let Some(rt) = &mut self.session {
-                rt.remote = None;
+                let fed_changed = rt.open.config.remote_inputs.iter().any(|i| {
+                    before.iter().find(|p| p.rig == i.rig) != peers.iter().find(|p| p.rig == i.rig)
+                });
+                if fed_changed {
+                    rt.remote = None;
+                }
             }
             self.remote_attach();
             self.remote_publish();

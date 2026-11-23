@@ -368,6 +368,43 @@ impl Control {
         Ok(ReplyBody::Server(self.server_info(client)))
     }
 
+    /// `auth.revoke_rig`: every key admitted as rig `rig`, by its identity. The entries are
+    /// picked by their rig kind, never by name, so an app the operator authorized since
+    /// under that name keeps its key.
+    pub(super) fn auth_revoke_rig(
+        &mut self,
+        client: &Peer,
+        rig: RigId,
+    ) -> Result<ReplyBody, ProtoError> {
+        let Some(n) = &self.s.server.network.authorized else {
+            return Err(network_only());
+        };
+        let mut keys = n.handle.get();
+        let names: Vec<String> = keys
+            .iter()
+            .filter(|(name, _)| keys.rig_of(name) == Some(rig.0))
+            .map(|(name, _)| name.to_owned())
+            .collect();
+        if names.is_empty() {
+            return Err(missing(format!("no rig {rig} admitted")));
+        }
+        let gone: Vec<PublicKey> = names.iter().filter_map(|name| keys.remove(name)).collect();
+        keys.save(&n.file)
+            .map_err(|e| internal(format!("cannot write {}: {e}", n.file.display())))?;
+        n.handle.set(keys);
+        for (name, key) in names.iter().zip(&gone) {
+            self.s.outbox.revoke(key.as_bytes());
+            self.dedup.forget_name(name);
+            tracing::warn!(
+                target: "ac2d::audit",
+                "rig {name:?} (fingerprint {}) revoked by {}",
+                key.fingerprint(),
+                client.id().0
+            );
+        }
+        Ok(ReplyBody::Server(self.server_info(client)))
+    }
+
     /// `server.revoke`.
     pub(super) fn server_revoke(
         &mut self,

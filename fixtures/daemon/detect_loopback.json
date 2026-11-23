@@ -1,5 +1,5 @@
 {
-  "proto_version": 99,
+  "proto_version": 100,
   "value": {
     "backend": "fake",
     "clock": "single_callback",
@@ -24,10 +24,10 @@
         "input": 1
       },
       {
-        "correlation": 0.738,
+        "correlation": 0.723,
         "delay": 0.010666666666666666,
         "delay_samples": 512,
-        "gain": -12.0,
+        "gain": -12.2,
         "input": 2
       },
       {

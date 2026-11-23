@@ -4,6 +4,7 @@
 //! is what the page keeps of them between frames. Every word is `ac2_scene::pairing`'s.
 
 use ac2_proto::units::RigId;
+use ac2_scene::pairing::{Halves, Unseen};
 
 /// A rig paired with the rig shown, or half paired.
 #[derive(Clone, Debug, PartialEq)]
@@ -13,10 +14,18 @@ pub struct PairedRow {
     pub text: String,
     /// The hover: each half in words.
     pub tip: String,
+    /// The four halves as the daemons' state shows them.
+    pub halves: Halves,
+    /// Why the app cannot reach that rig's daemon now (it is not held, or not connected):
+    /// pairing waits and unpairing reaches this rig's side only. `None`: it can.
+    pub unreached: Option<Unseen>,
+}
+
+impl PairedRow {
     /// Some half is seen missing: Enter pairs both ways again.
-    pub mend: bool,
-    /// The app holds that rig: unpairing reaches both sides.
-    pub held: bool,
+    pub fn mend(&self) -> bool {
+        self.halves.missing()
+    }
 }
 
 /// A rig *Pair with rig…* offers.

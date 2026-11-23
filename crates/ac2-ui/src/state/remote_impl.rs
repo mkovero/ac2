@@ -448,12 +448,6 @@ impl AppState {
         let mut config = open.config.clone();
         config.input_channels.push(input.session_channel());
         config.remote_inputs.push(input);
-        let peers = super::pairing::peers_with(
-            self.daemon()
-                .map(|s| s.remote.peers.as_slice())
-                .unwrap_or_default(),
-            &src,
-        );
         let me = self.rig_label(&self.rig);
         self.others.elsewhere.push((
             src.id,
@@ -468,7 +462,7 @@ impl AppState {
         ));
         let name = words::remote_name(&src.name, channel, None);
         out.push(Request::RemoteSession {
-            peers: Some(peers),
+            pair: Some(src.peer()),
             config,
             what: words::added_toast(&name),
         });
@@ -500,7 +494,7 @@ impl AppState {
         s.remote.confirm = None;
         s.session.notice = None;
         out.push(Request::RemoteSession {
-            peers: None,
+            pair: None,
             config: without(&open, slot),
             what: words::removed_toast(&name),
         });

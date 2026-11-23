@@ -31,7 +31,7 @@ pub(crate) struct RigList {
 
 impl AppState {
     /// The rigs the rig shown's daemon is paired with, each by its id with the name it
-    /// goes by: the rigs that daemon may take inputs from (its `rig.peers`, in its order),
+    /// goes by: the rigs that daemon may take inputs from (its `remote.peers`, in its order),
     /// then the rigs this app holds whose daemon lists the rig shown among its own. A
     /// pairing is the two daemons', whichever side takes: either side shown lists the other.
     /// Both sides are read from the daemons' mirrored state, matched by rig id: a name is

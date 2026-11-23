@@ -404,8 +404,21 @@ impl AppState {
         self.history.undoing = false;
         let contents = self.pane_contents();
         let worked_on = self.worked_on(&msg);
+        // The pairing rows read only rig state, so they follow the frame tick and what
+        // changes that state; data frames, many a second, change none of it.
+        let pairing_input = tick
+            || matches!(&msg, Msg::Conn(_, e) if matches!(
+                **e,
+                ConnEvent::Mirror(_)
+                    | ConnEvent::Server { .. }
+                    | ConnEvent::Connected { .. }
+                    | ConnEvent::Connecting { .. }
+                    | ConnEvent::Failed { .. }
+            ));
         self.update_inner(msg, keymap, &mut out);
-        self.refresh_pairing();
+        if pairing_input {
+            self.refresh_pairing();
+        }
         self.frame_new_pictures();
         self.want_dynamics_envelopes(&mut out);
         if let Some(p) = worked_on {
