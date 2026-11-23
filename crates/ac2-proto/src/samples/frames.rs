@@ -3,14 +3,14 @@
 use super::builders::*;
 use super::state::*;
 use crate::frame::{
-    AudioHealth, BandLeqFrame, BandLeqMeta, BandWindowState, ClipFlags, DaemonHealth, Frame,
-    FrameData, FrameStamp, GONIO_POINTS, GenSummary, GonioFrame, GonioPair, HarmonicLevel,
-    HarmonicReading, IrFrame, IrMeta, KaMeta, LeqFlags, LeqFrame, LeqMeta, LeqPeak, LeqRun,
-    LevelsFrame, LevelsMark, LevelsMeta, LoudnessSource, MathState, OperandState, OperandStatus,
-    PairLevels, PreviewLevelsFrame, PreviewLevelsMeta, ProtectionFlags, RtaFrame, RtaMeta,
-    SessionLevelsFrame, SessionLevelsMeta, SourceLevelsFrame, SourceLevelsMeta, SourceLoudness,
-    SpecBand, SpecBands, SpecFrame, SpecHarmonics, SpecMeta, SplFrame, SplMeta, TfFrame, TfMeta,
-    TimingMeta, TimingWindow, ValidityMask,
+    AudioHealth, BandLeqFrame, BandLeqMeta, BandWindowState, BinLayout, BinStage, BinsFrame,
+    BinsMeta, ClipFlags, DaemonHealth, Frame, FrameData, FrameStamp, GONIO_POINTS, GenSummary,
+    GonioFrame, GonioPair, HarmonicLevel, HarmonicReading, IrFrame, IrMeta, KaMeta, LeqFlags,
+    LeqFrame, LeqMeta, LeqPeak, LeqRun, LevelsFrame, LevelsMark, LevelsMeta, LoudnessSource,
+    MathState, OperandState, OperandStatus, PairLevels, PreviewLevelsFrame, PreviewLevelsMeta,
+    ProtectionFlags, RtaFrame, RtaMeta, SessionLevelsFrame, SessionLevelsMeta, SourceLevelsFrame,
+    SourceLevelsMeta, SourceLoudness, SpecBand, SpecBands, SpecFrame, SpecHarmonics, SpecMeta,
+    SplFrame, SplMeta, TfFrame, TfMeta, TimingMeta, TimingWindow, ValidityMask,
 };
 use crate::grid::GridDef;
 use crate::model::*;
@@ -87,6 +87,7 @@ pub fn tf_frame() -> Frame {
                         bin_hz: Hz(23.4375),
                     },
                 ]),
+                bins: Some(Box::new(bin_layout())),
                 math: Some(Box::new(MathState {
                     operands: vec![
                         OperandState {
@@ -188,6 +189,66 @@ pub fn tf_frame() -> Frame {
     }
 }
 
+/// The stages of a transfer at the `bins` resolution at 48 kHz, standard ladder.
+pub fn bin_layout() -> BinLayout {
+    let stage = |first_bin, bins, bin_hz| BinStage {
+        first_bin,
+        bins,
+        bin_hz: Hz(bin_hz),
+    };
+    let blend = |lo, hi| crate::model::FreqRange {
+        lo: Hz(lo),
+        hi: Hz(hi),
+    };
+    BinLayout {
+        stages: vec![
+            stage(88, 1756, 11.718_75),
+            stage(88, 189, 2.929_687_5),
+            stage(1, 207, 0.976_562_5),
+        ],
+        blends: vec![blend(812.5, 1023.75), blend(203.125, 256.0)],
+    }
+}
+
+/// Sixteen bins of stage 1 of [`bin_layout`]'s measurement; bins 3 and 9 without a
+/// reference (NaN). Values on the wire's grids, as [`tf_frame`]'s.
+pub fn bins_frame() -> Frame {
+    let n = 16;
+    let val = |i: usize, v: f32| if i == 3 || i == 9 { f32::NAN } else { v };
+    Frame {
+        stamp: stamp(None),
+        data: FrameData::Bins(BinsFrame {
+            meas: MeasId(1),
+            meta: BinsMeta {
+                stage: 1,
+                factor: 4,
+                rate: Hz(12_000.0),
+                bin_hz: Hz(2.929_687_5),
+                first_bin: 88,
+                hop: Samples(4096),
+                delay: Seconds(0.0125),
+                nudged: Seconds(0.0),
+                mic_curve: true,
+                mic_range: Some(crate::model::FreqRange {
+                    lo: Hz(20.0),
+                    hi: Hz(20_000.0),
+                }),
+                blocks: 12,
+                eff_avg: 9.5,
+            },
+            mag: (0..n)
+                .map(|i| val(i, (25 * i as i32 - 300) as f32 / 100.0))
+                .collect(),
+            phase: (0..n)
+                .map(|i| val(i, (i * 23 % 360) as f32 - 180.0))
+                .collect(),
+            coh: (0..n)
+                .map(|i| val(i, (9_000 + 61 * i) as f32 / 10_000.0))
+                .collect(),
+        }),
+    }
+}
+
 /// One frame of every kind.
 pub fn frames() -> Vec<Frame> {
     let mut g = grids();
@@ -195,6 +256,7 @@ pub fn frames() -> Vec<Frame> {
     let bands = g.remove(1);
     vec![
         tf_frame(),
+        bins_frame(),
         Frame {
             stamp: stamp(None),
             data: FrameData::Ir(IrFrame {

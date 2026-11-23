@@ -23,6 +23,9 @@ MAX_TOPIC_BYTES = 32
 
 STREAMS = ("tf", "ir", "rta", "spec", "spl", "leq", "band_leq", "levels")
 _DATA_TOPIC = re.compile(r"^d/(0|[1-9][0-9]*)/(" + "|".join(STREAMS) + r")$")
+# A transfer's bins of one analysis stage, beside `d/`; the stage is one digit.
+MAX_BIN_STAGES = 10
+_BINS_TOPIC = re.compile(r"^bins/(0|[1-9][0-9]*)/([0-9])$")
 
 
 # Input-meter topics and the frame kind each carries.
@@ -138,6 +141,12 @@ def parse_topic(b: bytes):
         return {"topic": s}
     if s in _METER_TOPICS:
         return {"topic": s, "kind": _METER_TOPICS[s]}
+    b = _BINS_TOPIC.match(s)
+    if b:
+        meas = int(b.group(1))
+        if meas >= 1 << 32:
+            raise DecodeError("meas id out of range")
+        return {"topic": "bins", "kind": "bins", "meas": meas, "stage": int(b.group(2))}
     m = _DATA_TOPIC.match(s)
     if not m:
         raise DecodeError(f"bad topic {s!r}")
@@ -256,7 +265,12 @@ META = {
     "tf": [("delay", None), ("nudged", None), ("smoothing", ("opt", _SMOOTHING)), ("mic_curve", None),
            ("mic_range", ("opt", [("lo", None), ("hi", None)])), ("math", _MATH),
            ("unresolved", ("opt", ("list", [("lo", None), ("hi", None), ("bin_hz", None)]))),
+           ("bins", ("opt", [("stages", ("list", [("first_bin", None), ("bins", None), ("bin_hz", None)])),
+                             ("blends", ("list", [("lo", None), ("hi", None)]))])),
            ("settling", ("opt", [("lo", None), ("hi", None)])), ("filled", None)],
+    "bins": [("stage", None), ("factor", None), ("rate", None), ("bin_hz", None), ("first_bin", None),
+             ("hop", None), ("delay", None), ("nudged", None), ("mic_curve", None),
+             ("mic_range", ("opt", [("lo", None), ("hi", None)])), ("blocks", None), ("eff_avg", None)],
     "ir": [("sample_rate", None), ("t0", None), ("dt", None), ("inserted_delay", None)],
     "rta": [("fraction", None), ("weighting", None), ("scale", None), ("cal", _CAL), ("mic_curve", None),
             ("mic_range", ("opt", [("lo", None), ("hi", None)])), ("math", _MATH)],
@@ -314,6 +328,7 @@ FORM_KEY, FORM_DELTA = 0, 1
 # What a delta carries of the metadata, per kind; every other kind nothing (nil).
 DELTA_META = {
     "tf": [("filled", None), ("settling", ("opt", [("lo", None), ("hi", None)]))],
+    "bins": [("blocks", None), ("eff_avg", None)],
     "spl": [("level", None), ("lmax", None), ("lmin", None), ("leq", None), ("lpeak", None),
             ("duration", None)],
     "source_levels": [("mark", ("opt", _LEVELS_MARK))],
@@ -821,6 +836,8 @@ def decode_wire(parts: list):
             raise DecodeError(f"elem {d['elem']!r}")
     if h["kind"] != expected_kind or list(h["meta"].keys()) != [h["kind"]]:
         raise DecodeError("kind mismatch")
+    if expected_kind == "bins" and h["meta"]["bins"]["stage"] != topic["stage"]:
+        raise DecodeError("stage mismatch")
     codes = b""
     if descs:
         expected = sum(array_size(d["elem"], n) for d in descs)

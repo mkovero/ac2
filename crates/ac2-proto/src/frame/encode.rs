@@ -83,6 +83,12 @@ pub(super) fn quantise(frame: &Frame) -> Result<CodedFrame, EncodeError> {
             }
             FrameMeta::Tf(f.meta.clone())
         }
+        FrameData::Bins(f) => {
+            cols.push((desc(ArrayName::Mag, Unit::Db), Col::F(&f.mag)));
+            cols.push((desc(ArrayName::Phase, Unit::Deg), Col::F(&f.phase)));
+            cols.push((desc(ArrayName::Coh, Unit::Coherence), Col::F(&f.coh)));
+            FrameMeta::Bins(f.meta.clone())
+        }
         FrameData::Ir(f) => {
             cols.push((
                 desc(ArrayName::IrLinear, Unit::FullScale),

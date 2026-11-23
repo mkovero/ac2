@@ -98,6 +98,7 @@ impl Control {
         self.out.level = None;
         self.out.source = None;
         self.s.outbox.clear(b"d/");
+        self.s.outbox.clear(b"bins/");
         self.s.outbox.clear(b"timing");
         self.s.outbox.clear(b"session/levels");
     }
@@ -178,6 +179,7 @@ impl Control {
         if had {
             self.health.session_closed();
             self.s.outbox.clear(b"d/");
+            self.s.outbox.clear(b"bins/");
             self.s.outbox.clear(b"timing");
             self.s.outbox.clear(b"session/levels");
             let epoch = SessionEpoch(self.epoch().0 + 1);

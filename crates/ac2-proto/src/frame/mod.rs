@@ -19,6 +19,7 @@ pub const MAX_PARTS: usize = 2;
 pub const MAX_FRAME_BYTES: usize = 2 << 20;
 
 mod audio;
+mod bins;
 mod coded;
 mod data;
 mod decode;
@@ -33,6 +34,7 @@ pub use audio::{
     AudioFlags, AudioFrame, AudioHeader, MAX_AUDIO_FRAMES, decode_audio, encode_audio,
     encode_audio_header,
 };
+pub use bins::{BinLayout, BinStage, BinsFrame, BinsMeta};
 pub use coded::CodedFrame;
 pub use data::{
     BandLeqFrame, DataMessage, Frame, FrameData, FrameStamp, GONIO_POINTS, GonioFrame, GonioPair,

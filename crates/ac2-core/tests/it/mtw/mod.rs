@@ -10,6 +10,7 @@ use ac2_testkit::golden::GoldenSet;
 use num_complex::Complex64;
 use std::f64::consts::PI;
 
+mod bins;
 mod fast_lf;
 mod fill;
 mod golden;

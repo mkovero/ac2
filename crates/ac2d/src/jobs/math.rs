@@ -723,6 +723,7 @@ pub(crate) fn combine(
                 mic_range: None,
                 math: state,
                 unresolved,
+                bins: None,
                 settling,
                 filled,
             },

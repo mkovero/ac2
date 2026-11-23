@@ -28,6 +28,7 @@ use crate::fanout::{Batch, Block, JobFeed, Queue};
 use crate::io::Interest;
 use crate::outbox::{FrameTx, Outbox};
 
+mod bins;
 pub(crate) mod cross_rig;
 pub(crate) mod dynamics;
 pub(crate) mod finder;
@@ -415,6 +416,10 @@ pub(crate) trait Analysis: Send {
     /// to form and publish a new result only when an operand has one. `None` for analyses
     /// a math trace cannot use as an operand.
     fn result_generation(&self) -> Option<u64>;
+    /// On stop, the frames that outlive the job: a transfer at the `bins` resolution sends
+    /// its `tf` and every stage's bins from the same averages under one stamp, past its
+    /// publish schedule, so a stage subscribed after the stop matches the curve.
+    fn final_frames(&mut self, _e: &Emitter) {}
 }
 
 /// Longest `trace.capture` waits for a job to form its result. The request wakes the job like
@@ -669,7 +674,10 @@ fn run(
                     let _ = reply.send(c);
                     false
                 }
-                JobMsg::Stop => return,
+                JobMsg::Stop => {
+                    a.final_frames(em);
+                    return;
+                }
             };
             handled += 1;
             if handled < DRAIN_MAX {

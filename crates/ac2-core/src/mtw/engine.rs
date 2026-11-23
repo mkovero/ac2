@@ -414,7 +414,7 @@ impl Mtw {
     }
 
     /// One past the newest measurement input index stage `s`'s newest block depends on.
-    fn stage_block_end(&self, s: &StageRuntime) -> Option<u64> {
+    pub(super) fn stage_block_end(&self, s: &StageRuntime) -> Option<u64> {
         let start = s.est.last_block_start?;
         let origin = self.aligner.origin()?;
         let m = s.spec.factor as u64;

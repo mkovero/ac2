@@ -407,6 +407,7 @@ fn live_frame(freqs: &[f64], tau: f64, applied: f64, nudged: f64) -> TfFrame {
             mic_range: None,
             math: None,
             unresolved: None,
+            bins: None,
             settling: None,
             filled: 1.0,
         },

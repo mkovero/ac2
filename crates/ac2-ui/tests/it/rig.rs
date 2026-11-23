@@ -531,6 +531,7 @@ fn tf_frame(grid: &GridDef, meas: u32, gain: f64, tau: f64, bump_hz: f64) -> TfF
             mic_range: None,
             math: None,
             unresolved: None,
+            bins: None,
             settling: None,
             filled: 1.0,
         },

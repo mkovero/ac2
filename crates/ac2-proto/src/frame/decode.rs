@@ -8,10 +8,10 @@ use crate::units::MeasId;
 use super::flags::MaskBits;
 use super::schema::{desc, level_unit, spec_unit};
 use super::{
-    ArrayDesc, ArrayName, BandLeqFrame, CodedFrame, DataMessage, DecodeError, Frame, FrameData,
-    FrameKind, FrameMeta, GONIO_POINTS, GonioFrame, GonioPair, IrFrame, LeqFrame, LevelsFrame,
-    PreviewLevelsFrame, RtaFrame, SessionLevelsFrame, SourceLevelsFrame, SpecFrame, SplFrame,
-    TfFrame, Unit,
+    ArrayDesc, ArrayName, BandLeqFrame, BinsFrame, CodedFrame, DataMessage, DecodeError, Frame,
+    FrameData, FrameKind, FrameMeta, GONIO_POINTS, GonioFrame, GonioPair, IrFrame, LeqFrame,
+    LevelsFrame, PreviewLevelsFrame, RtaFrame, SessionLevelsFrame, SourceLevelsFrame, SpecFrame,
+    SplFrame, TfFrame, Unit,
 };
 
 /// An alignment's four view curves: all of them or none.
@@ -211,6 +211,7 @@ pub(super) fn stream_kind(s: Stream) -> FrameKind {
 pub(super) fn topic_kind(topic: Topic) -> Option<FrameKind> {
     Some(match topic {
         Topic::Data { stream, .. } => stream_kind(stream),
+        Topic::Bins { .. } => FrameKind::Bins,
         Topic::SessionLevels => FrameKind::SessionLevels,
         Topic::PreviewLevels => FrameKind::PreviewLevels,
         Topic::SourceLevels => FrameKind::SourceLevels,
@@ -245,7 +246,7 @@ pub(super) fn to_frame(c: &CodedFrame) -> Result<Frame, DecodeError> {
     }
     let h = c;
     let meas = match topic {
-        Topic::Data { meas, .. } => meas,
+        Topic::Data { meas, .. } | Topic::Bins { meas, .. } => meas,
         _ => MeasId(0),
     };
     let mut rest = c.codes.as_slice();
@@ -274,6 +275,23 @@ pub(super) fn to_frame(c: &CodedFrame) -> Result<Frame, DecodeError> {
             align: align_curves(&mut a)?,
             range: range_band(&mut a, mag_codes)?,
         }),
+        FrameMeta::Bins(meta) => {
+            if topic
+                != (Topic::Bins {
+                    meas,
+                    stage: meta.stage,
+                })
+            {
+                return Err(DecodeError::KindMismatch);
+            }
+            FrameData::Bins(BinsFrame {
+                meas,
+                meta,
+                mag: a.f32(ArrayName::Mag, Unit::Db)?,
+                phase: a.f32(ArrayName::Phase, Unit::Deg)?,
+                coh: a.f32(ArrayName::Coh, Unit::Coherence)?,
+            })
+        }
         FrameMeta::Ir(meta) => FrameData::Ir(IrFrame {
             meas,
             meta,

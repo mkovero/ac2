@@ -2,9 +2,13 @@
 //!
 //! Topic strings: `d/<meas>/<stream>` (measurement streams), `session/levels` and
 //! `session/preview` (input meters of the session and of a device preview), `timing`,
-//! `evt`, `ka`, and `audio/<channel>` (raw capture, rig to rig).
+//! `evt`, `ka`, `audio/<channel>` (raw capture, rig to rig) and `bins/<meas>/<stage>` (a
+//! transfer's bins of one analysis stage).
 //! `<meas>` is the decimal [`MeasId`] without sign or leading zeros, so every topic has
 //! exactly one spelling and ZMQ prefix matching on `d/<meas>/` selects one measurement.
+//! `bins/` stands beside `d/`, so a subscription to every measurement stream does not take
+//! the stage bins, which a view asks for stage by stage. `<stage>` is one digit: a topic is
+//! never a byte prefix of another stage's.
 
 use std::fmt;
 
@@ -15,6 +19,9 @@ use crate::units::MeasId;
 
 /// Longest valid topic, bytes.
 pub const MAX_TOPIC_BYTES: usize = 32;
+
+/// Analysis stages a `bins/<meas>/<stage>` topic can name: one decimal digit.
+pub const MAX_BIN_STAGES: u8 = 10;
 
 /// A measurement's published stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -113,6 +120,13 @@ pub enum Topic {
         /// Device input channel (zero-based).
         channel: u16,
     },
+    /// `bins/<meas>/<stage>`: a transfer's bins of one analysis stage, sent only to apps.
+    Bins {
+        /// Measurement.
+        meas: MeasId,
+        /// Stage, below [`MAX_BIN_STAGES`].
+        stage: u8,
+    },
 }
 
 /// A topic that does not parse.
@@ -156,7 +170,7 @@ impl Topic {
             return Ok(Self::Audio { channel });
         }
         let mut it = s.split('/');
-        let (Some("d"), Some(id), Some(kind), None) = (it.next(), it.next(), it.next(), it.next())
+        let (Some(root), Some(id), Some(last), None) = (it.next(), it.next(), it.next(), it.next())
         else {
             return Err(err());
         };
@@ -166,12 +180,18 @@ impl Topic {
         if !canonical {
             return Err(err());
         }
-        let meas = id.parse::<u32>().map_err(|_| err())?;
-        let stream = Stream::parse(kind).ok_or_else(err)?;
-        Ok(Self::Data {
-            meas: MeasId(meas),
-            stream,
-        })
+        let meas = MeasId(id.parse::<u32>().map_err(|_| err())?);
+        match (root, last.as_bytes()) {
+            ("d", _) => Ok(Self::Data {
+                meas,
+                stream: Stream::parse(last).ok_or_else(err)?,
+            }),
+            ("bins", &[d]) if d.is_ascii_digit() => Ok(Self::Bins {
+                meas,
+                stage: d - b'0',
+            }),
+            _ => Err(err()),
+        }
     }
 }
 
@@ -188,6 +208,7 @@ impl fmt::Display for Topic {
             Self::Evt => f.write_str("evt"),
             Self::Ka => f.write_str("ka"),
             Self::Audio { channel } => write!(f, "audio/{channel}"),
+            Self::Bins { meas, stage } => write!(f, "bins/{}/{stage}", meas.0),
         }
     }
 }

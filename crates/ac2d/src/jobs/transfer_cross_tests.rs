@@ -535,3 +535,66 @@ fn a_relock_says_tracked_again_only_on_the_delay_tracking_holds() {
     let now = relocked.expect("relocked");
     assert!((now - 528.0).abs() < 1.0, "tracked again at {now}");
 }
+
+/// Each stage's bins frame as the job would form it now: blocks, and whether every element
+/// is NaN.
+fn stage_frames(job: &mut Transfer) -> Vec<(u64, bool)> {
+    let shared = job.shared();
+    let b = job.bins.as_mut().expect("at the bins resolution");
+    (0..b.layout().stages.len())
+        .map(|i| {
+            let f = b.frame(i, &job.mtw, &shared);
+            let nan = f
+                .mag
+                .iter()
+                .chain(&f.phase)
+                .chain(&f.coh)
+                .all(|v| v.is_nan());
+            (f.meta.blocks, nan)
+        })
+        .collect()
+}
+
+/// A stopped cross-rig job shows a kept snapshot, which no stage's average matches: every
+/// stage says it holds nothing until the clocks agree again.
+#[test]
+fn a_stopped_cross_rig_job_shows_no_stage_bins() {
+    let mut r = rig(480, false, true);
+    let mut cfg = TransferConfig::with_inputs(0, REMOTE);
+    cfg.resolution = ac2_proto::model::TransferResolution::Bins;
+    let (tx, rx) = channel();
+    r.rx = rx;
+    r.job = Transfer::new(
+        JobCtx {
+            meas: MeasId(3),
+            cfg,
+            config_rev: Rev(1),
+            epoch: SessionEpoch(1),
+        },
+        FS,
+        (0, 1),
+        &DelayState {
+            applied: Seconds(480.0 / f64::from(FS)),
+            applied_samples: 480.0,
+            nudged: Seconds(0.0),
+            nudged_samples: 0.0,
+            tracking: false,
+            awaiting_pick: false,
+            last_finding: None,
+        },
+        tx,
+        None,
+        true,
+    )
+    .expect("a transfer job");
+    r.gate(ClockGate::Run);
+    r.run(5.0);
+    let running = stage_frames(&mut r.job);
+    assert_eq!(running.len(), 3);
+    assert!(running.iter().all(|&(b, nan)| b > 0 && !nan), "{running:?}");
+    r.gate(NOT_LOCKED_40);
+    assert_eq!(stage_frames(&mut r.job), [(0, true); 3]);
+    r.gate(ClockGate::Run);
+    r.run(5.0);
+    assert!(stage_frames(&mut r.job).iter().all(|&(b, _)| b > 0));
+}

@@ -50,6 +50,7 @@ fn tf_strategy() -> impl Strategy<Value = Frame> {
                         mic_range: None,
                         math: None,
                         unresolved: None,
+                        bins: None,
                         settling: None,
                         filled: 1.0,
                     },

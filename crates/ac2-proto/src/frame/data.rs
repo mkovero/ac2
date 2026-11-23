@@ -6,9 +6,9 @@ use crate::topic::{Stream, Topic};
 use crate::units::{DaemonIncarnation, MeasId, Rev, SampleIndex, SessionEpoch, WallNs};
 
 use super::{
-    BandLeqMeta, ClipFlags, FrameKind, GonioMeta, GonioPairMeta, IrMeta, KaMeta, LeqFlags, LeqMeta,
-    LevelsMeta, PreviewLevelsMeta, ProtectionFlags, RtaMeta, SessionLevelsMeta, SourceLevelsMeta,
-    SpecMeta, SplMeta, TfMeta, TimingMeta, ValidityMask,
+    BandLeqMeta, BinsFrame, ClipFlags, FrameKind, GonioMeta, GonioPairMeta, IrMeta, KaMeta,
+    LeqFlags, LeqMeta, LevelsMeta, PreviewLevelsMeta, ProtectionFlags, RtaMeta, SessionLevelsMeta,
+    SourceLevelsMeta, SpecMeta, SplMeta, TfMeta, TimingMeta, ValidityMask,
 };
 
 /// Header fields shared by every kind.
@@ -310,6 +310,8 @@ impl GonioFrame {
 pub enum FrameData {
     /// `d/<meas>/tf`.
     Tf(TfFrame),
+    /// `bins/<meas>/<stage>`.
+    Bins(BinsFrame),
     /// `d/<meas>/ir`.
     Ir(IrFrame),
     /// `d/<meas>/rta`.
@@ -354,6 +356,7 @@ impl FrameData {
     pub fn kind(&self) -> FrameKind {
         match self {
             Self::Tf(_) => FrameKind::Tf,
+            Self::Bins(_) => FrameKind::Bins,
             Self::Ir(_) => FrameKind::Ir,
             Self::Rta(_) => FrameKind::Rta,
             Self::Spec(_) => FrameKind::Spec,
@@ -376,6 +379,10 @@ impl FrameData {
         let data = |meas, stream| Topic::Data { meas, stream };
         match self {
             Self::Tf(f) => data(f.meas, Stream::Tf),
+            Self::Bins(f) => Topic::Bins {
+                meas: f.meas,
+                stage: f.meta.stage,
+            },
             Self::Ir(f) => data(f.meas, Stream::Ir),
             Self::Rta(f) => data(f.meas, Stream::Rta),
             Self::Spec(f) => data(f.meas, Stream::Spec),

@@ -39,6 +39,7 @@
 //! response, which cancels in H1 and γ² but not in Gxx or Gyy.
 
 mod align;
+mod bins;
 mod engine;
 pub mod estimator;
 pub mod fir;
@@ -47,6 +48,7 @@ pub mod layout;
 use num_complex::Complex64;
 
 use crate::grid::LogGrid;
+pub use bins::DrawnBins;
 pub use estimator::{Averaging, DepthPolicy, MIN_FAST_LF_BLOCKS, OverlapModel, StageAveraging};
 use estimator::{StageEstimator, matched_alpha, matched_fifo_blocks};
 pub use fir::{FirDesign, PairDecimator};

@@ -10,6 +10,8 @@ use crate::model::{LevelScale, SpecLevel};
 pub enum FrameKind {
     /// Transfer function.
     Tf,
+    /// A transfer's bins of one analysis stage.
+    Bins,
     /// Impulse response view.
     Ir,
     /// RTA.

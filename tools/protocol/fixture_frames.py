@@ -80,6 +80,49 @@ def frame(topic, kind, grid, meta, arrays, protection=WEAK_REFERENCE):
     return {"topic": topic, "header": header, "arrays": values}
 
 
+BIN_LAYOUT = {
+    "stages": [
+        {"first_bin": 88, "bins": 1756, "bin_hz": 11.71875},
+        {"first_bin": 88, "bins": 189, "bin_hz": 2.9296875},
+        {"first_bin": 1, "bins": 207, "bin_hz": 0.9765625},
+    ],
+    "blends": [{"lo": 812.5, "hi": 1023.75}, {"lo": 203.125, "hi": 256.0}],
+}
+
+
+def bins_frame():
+    """Sixteen bins of stage 1; bins 3 and 9 without a reference (samples::bins_frame)."""
+    n = 16
+
+    def val(i, v):
+        return NAN if i in (3, 9) else v
+
+    return frame(
+        "bins/1/1",
+        "bins",
+        None,
+        {
+            "stage": 1,
+            "factor": 4,
+            "rate": 12000.0,
+            "bin_hz": 2.9296875,
+            "first_bin": 88,
+            "hop": 4096,
+            "delay": 0.0125,
+            "nudged": 0.0,
+            "mic_curve": True,
+            "mic_range": {"lo": 20.0, "hi": 20000.0},
+            "blocks": 12,
+            "eff_avg": 9.5,
+        },
+        [
+            (arr("mag", "db"), [val(i, (25 * i - 300) / 100.0) for i in range(n)]),
+            (arr("phase", "deg"), [val(i, float(i * 23 % 360) - 180.0) for i in range(n)]),
+            (arr("coh", "coherence"), [val(i, (9000 + 61 * i) / 10000.0) for i in range(n)]),
+        ],
+    )
+
+
 def tf_frame():
     n = 480
 
@@ -138,6 +181,7 @@ def tf_frame():
                 {"lo": 31.25, "hi": 135.5, "bin_hz": 0.9765625},
                 {"lo": 1625.0, "hi": 3250.0, "bin_hz": 23.4375},
             ],
+            "bins": BIN_LAYOUT,
             "settling": {"lo": 7.8125, "hi": 68.0},
             "filled": 0.625,
         },
@@ -221,6 +265,7 @@ def gonio_frame(topic, kind):
 def frames():
     return {
         "tf": tf_frame(),
+        "bins": bins_frame(),
         "ir": frame(
             "d/1/ir",
             "ir",

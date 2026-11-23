@@ -44,6 +44,9 @@ pub struct TfMeta {
     /// resolves); `None` when it includes a stored trace, which keeps no ranges, or no
     /// operand at all.
     pub unresolved: Option<Vec<BinRange>>,
+    /// The analysis stages whose own bins go on `bins/<meas>/<stage>`, for a transfer at
+    /// the `bins` resolution; `None` for any other resolution.
+    pub bins: Option<Box<super::BinLayout>>,
     /// The frequencies whose averages are still filling: the span served by the analysis
     /// stages that have not yet accumulated their full depth (the longer windows of the
     /// low stages fill last). `None` once every stage is full; for a math trace the span
@@ -729,6 +732,8 @@ pub struct AudioHealth {
 pub enum FrameMeta {
     /// TF.
     Tf(TfMeta),
+    /// A stage's bins.
+    Bins(super::BinsMeta),
     /// IR.
     Ir(IrMeta),
     /// RTA.
@@ -763,6 +768,7 @@ impl FrameMeta {
     pub(super) fn kind(&self) -> FrameKind {
         match self {
             Self::Tf(_) => FrameKind::Tf,
+            Self::Bins(_) => FrameKind::Bins,
             Self::Ir(_) => FrameKind::Ir,
             Self::Rta(_) => FrameKind::Rta,
             Self::Spec(_) => FrameKind::Spec,

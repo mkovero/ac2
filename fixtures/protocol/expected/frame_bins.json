@@ -1,0 +1,109 @@
+{
+ "topic": "bins/1/1",
+ "header": {
+  "v": 104,
+  "kind": "bins",
+  "seq": 1234,
+  "audio_sample": 172800000,
+  "session_epoch": 2,
+  "daemon_incarnation": 6840227782638526189,
+  "config_rev": 40,
+  "config_applied_at": 168000000,
+  "capture_wall_ns": 1790000000123456789,
+  "grid_id": null,
+  "protection": 8,
+  "n": 16,
+  "arrays": [
+   {
+    "name": "mag",
+    "unit": "db",
+    "elem": "i16"
+   },
+   {
+    "name": "phase",
+    "unit": "deg",
+    "elem": "i16"
+   },
+   {
+    "name": "coh",
+    "unit": "coherence",
+    "elem": "u16"
+   }
+  ],
+  "meta": {
+   "bins": {
+    "stage": 1,
+    "factor": 4,
+    "rate": 12000.0,
+    "bin_hz": 2.9296875,
+    "first_bin": 88,
+    "hop": 4096,
+    "delay": 0.0125,
+    "nudged": 0.0,
+    "mic_curve": true,
+    "mic_range": {
+     "lo": 20.0,
+     "hi": 20000.0
+    },
+    "blocks": 12,
+    "eff_avg": 9.5
+   }
+  }
+ },
+ "arrays": {
+  "mag": [
+   -3.0,
+   -2.75,
+   -2.5,
+   NaN,
+   -2.0,
+   -1.75,
+   -1.5,
+   -1.25,
+   -1.0,
+   NaN,
+   -0.5,
+   -0.25,
+   0.0,
+   0.25,
+   0.5,
+   0.75
+  ],
+  "phase": [
+   -180.0,
+   -157.0,
+   -134.0,
+   NaN,
+   -88.0,
+   -65.0,
+   -42.0,
+   -19.0,
+   4.0,
+   NaN,
+   50.0,
+   73.0,
+   96.0,
+   119.0,
+   142.0,
+   165.0
+  ],
+  "coh": [
+   0.9,
+   0.9061,
+   0.9122,
+   NaN,
+   0.9244,
+   0.9305,
+   0.9366,
+   0.9427,
+   0.9488,
+   NaN,
+   0.961,
+   0.9671,
+   0.9732,
+   0.9793,
+   0.9854,
+   0.9915
+  ]
+ }
+}

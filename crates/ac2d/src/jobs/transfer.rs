@@ -13,7 +13,7 @@ use ac2_proto::frame::{
     FrameData, IrFrame, IrMeta, ProtectionFlags, TfFrame, TfMeta, ValidityMask,
 };
 use ac2_proto::grid::GridId;
-use ac2_proto::model::{DelayState, FreqRange, TransferConfig};
+use ac2_proto::model::{DelayState, FreqRange, TransferConfig, TransferResolution};
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{Hz, MeasId, Rev, Seconds};
 use num_complex::Complex64;
@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 
 use ac2_proto::units::SessionEpoch;
 
+use super::bins::{Shared, StageStreams, send_final};
 use super::cross_rig::{ClockGate, CrossEvent, CrossRig};
 use super::finder::{Finder, RelockSeen};
 use super::{
@@ -142,6 +143,8 @@ pub(crate) struct Transfer {
     /// Where the grid is finer than the stage serving it, with that stage's bin width;
     /// fixed by the layout and grid.
     unresolved: Vec<ac2_proto::model::BinRange>,
+    /// Each analysis stage's own bins, at the `bins` resolution only.
+    bins: Option<StageStreams>,
     /// Span of the applied mic curve's points, if one is applied.
     mic_range: Option<FreqRange>,
     delay_s: f64,
@@ -288,8 +291,11 @@ impl Transfer {
                 bin_hz: Hz(bin),
             })
             .collect();
+        let bins = (cfg.resolution == TransferResolution::Bins)
+            .then(|| StageStreams::new(meas, &mtw, correction));
         Ok(Self {
             unresolved,
+            bins,
             corr: correction.map(|c| column_correction(&grid, c)),
             mic_range: correction.map(crate::conv::mic_range),
             generation: 0,
@@ -458,6 +464,7 @@ impl Transfer {
                 mic_range: self.mic_range,
                 math: None,
                 unresolved: Some(self.unresolved.clone()),
+                bins: self.bins.as_ref().map(StageStreams::layout),
                 settling: self.settling(),
                 filled: 0.0,
             },
@@ -472,6 +479,19 @@ impl Transfer {
     fn set_correction(&mut self, c: Option<&Correction>) {
         self.corr = c.map(|c| column_correction(&self.grid, c));
         self.mic_range = c.map(crate::conv::mic_range);
+        if let Some(b) = &mut self.bins {
+            b.set_correction(c);
+        }
+    }
+
+    /// What every stage frame repeats from the `tf` formed beside it.
+    fn shared(&self) -> Shared {
+        Shared {
+            delay: Seconds(self.delay_s),
+            nudged: Seconds(self.nudged_samples / self.fs),
+            mic_range: self.mic_range,
+            stopped: self.cross.as_ref().is_some_and(|x| !x.running()),
+        }
     }
 
     /// Where the averages are still filling, within the grid.
@@ -601,6 +621,7 @@ impl Transfer {
                 mic_range: self.mic_range,
                 math: None,
                 unresolved: Some(self.unresolved.clone()),
+                bins: self.bins.as_ref().map(StageStreams::layout),
                 settling: self.settling(),
                 filled: self.mtw.fill() as f32,
             },
@@ -837,6 +858,11 @@ impl Analysis for Transfer {
                 self.tf_pace.unsent();
             }
         }
+        let shared = self.shared();
+        let bins_flush = match &mut self.bins {
+            Some(b) => b.emit(e, &self.mtw, stamp, &shared, now),
+            None => Flush::Done,
+        };
 
         let ir_topic = Topic::Data {
             meas: self.meas,
@@ -860,7 +886,25 @@ impl Analysis for Transfer {
             }
         }
         self.levels.send(e, self.meas, stamp);
-        Flush::from_due(tf_due).and(Flush::from_due(ir_due))
+        Flush::from_due(tf_due)
+            .and(Flush::from_due(ir_due))
+            .and(bins_flush)
+    }
+
+    fn final_frames(&mut self, e: &Emitter) {
+        let Some(end) = self.end.filter(|_| self.bins.is_some()) else {
+            return;
+        };
+        let stamp = self.stamp(end, self.last_prot);
+        let tf = match self.stopped_frame(false) {
+            Some(f) => f,
+            None => self.tf_frame(true),
+        };
+        send_final(e, stamp, FrameData::Tf(tf));
+        let shared = self.shared();
+        if let Some(b) = &mut self.bins {
+            b.final_frames(e, &self.mtw, stamp, &shared);
+        }
     }
 
     fn capture(&mut self) -> Option<(StampArgs, FrameData)> {

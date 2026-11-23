@@ -630,3 +630,42 @@ fn a_rig_made_an_app_loses_its_audio_and_no_rig_gets_keepalives() {
     assert_eq!(r.peers.len(), 1);
     assert_eq!(r.interest.count(b"audio/1"), 0);
 }
+
+/// A rig is served raw audio only: a transfer's stage bins are a curve topic like `d/`'s.
+#[test]
+fn a_rig_is_refused_stage_bins() {
+    let mut r = Rig::new();
+    r.client = Some(CurvePeer {
+        name: "pupu".into(),
+        key: ac2_zmq::KeyPair::generate().unwrap().public,
+    });
+    r.admission = Admission::Rig(1);
+    let d = r.ctx.socket(SocketType::Dealer).unwrap();
+    d.set_linger(Some(Duration::ZERO)).unwrap();
+    d.connect(&r.endpoint).unwrap();
+    up(
+        &d,
+        DataUp::Window {
+            bytes: DATA_WINDOW_MIN,
+        },
+    );
+    let bins = Topic::Bins {
+        meas: ac2_proto::units::MeasId(1),
+        stage: 0,
+    };
+    up(
+        &d,
+        DataUp::Subscribe {
+            sub: Subscription::Topic(bins),
+        },
+    );
+    // Sent after it: once the audio subscription is in, the bins one was handled.
+    up(
+        &d,
+        DataUp::Subscribe {
+            sub: Subscription::Topic(Topic::Audio { channel: 2 }),
+        },
+    );
+    r.pump_until(|r| r.interest.count(b"audio/2") == 1);
+    assert_eq!(r.interest.count(&bins.to_bytes()), 0);
+}
