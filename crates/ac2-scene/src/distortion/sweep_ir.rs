@@ -90,7 +90,10 @@ pub fn sweep_ir_scene(
     sc.origin = origin;
     let xm = sc.x_axis.mapping;
     let plot = sc.plot;
-    if let Some(overlay) = sc.scene.layers.get_mut(2) {
+    // The harmonics' arrival marks are marks like the spectrum's harmonic and peak marks:
+    // traces only (T) takes them with those, so the same key clears every pane alike.
+    let marks_on = view.chrome.peak_marks();
+    if let Some(overlay) = sc.scene.layers.get_mut(2).filter(|_| marks_on) {
         for (t_ms, name) in harmonic_marks(s) {
             let x = xm.to_px(t_ms);
             if !(x >= plot.x && x <= plot.right()) {

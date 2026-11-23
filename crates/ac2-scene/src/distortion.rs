@@ -77,7 +77,8 @@ pub struct DistortionScene {
     /// Where an order reads within [`REFERENCE_BOUND_DB`] of the reference's own
     /// ([`near_reference_text`]), one line each, along the bottom of the distortion plot
     /// at its full length (a plate cuts a line to its width, and this one says which
-    /// readings not to trust); shown whether or not the reference's lines are.
+    /// readings not to trust); shown whether or not the reference's lines are, and with the
+    /// readings: none at traces only (T).
     pub near_reference: Vec<String>,
     /// Ranges the sweep's response does not resolve at its grid (shaded in the fundamental's
     /// pane) and those its harmonics do not (shaded in the distortion pane); empty when the
@@ -423,7 +424,10 @@ pub fn distortion_scene(
     let mut legend = Vec::new();
     let mut info = String::new();
     let mut caption = String::new();
+    // They qualify the readings; traces only (T) shows no readings, so they go with the
+    // axis labels and the cursor's values.
     let near_reference: Vec<String> = sweep
+        .filter(|_| view.chrome.labels())
         .map(|(t, s)| summary(s, t.freqs).near_reference)
         .unwrap_or_default()
         .iter()

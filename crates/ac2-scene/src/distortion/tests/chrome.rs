@@ -144,3 +144,92 @@ fn levels_re_the_fundamental_read_signed() {
         "126 %"
     );
 }
+
+/// Every text a scene draws, whichever layer it is on.
+fn drawn(s: &crate::primitives::Scene) -> Vec<String> {
+    s.layers
+        .iter()
+        .flat_map(|l| l.labels.iter().map(|l| l.text.clone()))
+        .collect()
+}
+
+/// Traces only (T) leaves each of the sweep's plot views its curves, its legend and its
+/// caption, as the transfer and spectrum views keep theirs: no axis text, cursor values,
+/// mark, note about the readings or harmonic marks over the curves.
+#[test]
+fn traces_only_leaves_every_view_its_curves_legend_and_caption() {
+    use crate::view::{IrMode, PlotChrome};
+    let d = with_reference();
+    let f = grid().centres();
+    let t = SweepView {
+        data: &d,
+        freqs: &f,
+        color: Color::from_rgba8([1, 2, 3, 255]),
+        selected: false,
+    };
+    let mut view = ViewState {
+        cursor_hz: Some(500.0),
+        cursor_mark_hz: Some(200.0),
+        ..ViewState::default()
+    };
+    view.distortion.ir.cursor_ms = Some(0.2);
+    let response = |view: &ViewState| {
+        distortion_scene(Some(t), &[], MISSING, &status(), view, &Theme::dark(), SIZE)
+    };
+    let ir = |view: &ViewState| {
+        sweep_ir_scene(
+            &d,
+            Color::from_rgba8([255, 0, 0, 255]),
+            &status(),
+            view,
+            &Theme::dark(),
+            SIZE,
+        )
+        .expect("ir")
+    };
+
+    // Response and distortion: the note about the readings stays while they do.
+    for chrome in [PlotChrome::Full, PlotChrome::NoGrid] {
+        view.chrome = chrome;
+        let sc = response(&view);
+        assert_eq!(sc.near_reference.len(), 1, "{chrome:?}");
+        assert!(
+            drawn(&sc.scene).contains(&sc.near_reference[0]),
+            "{chrome:?}"
+        );
+    }
+    view.chrome = PlotChrome::Bare;
+    let bare = response(&view);
+    assert!(bare.cursor.is_none() && bare.readout_box.is_none() && bare.mark_box.is_none());
+    assert!(bare.near_reference.is_empty());
+    assert!(!bare.legend_shown.is_empty() && !bare.caption.is_empty());
+    for text in drawn(&bare.scene) {
+        assert!(
+            bare.legend_shown.contains(&text) || text == bare.caption,
+            "{text:?} over the traces"
+        );
+    }
+
+    // The impulse response in each of its forms: the harmonics' marks go with the marks.
+    for mode in [IrMode::Linear, IrMode::Log, IrMode::Etc] {
+        view.ir.mode = mode;
+        view.chrome = PlotChrome::NoGrid;
+        let kept = drawn(&ir(&view).scene);
+        assert!(kept.iter().any(|t| t == "H2"), "{mode:?}: {kept:?}");
+        view.chrome = PlotChrome::Bare;
+        let bare = ir(&view);
+        assert!(
+            bare.cursor.is_none() && bare.readout_box.is_none(),
+            "{mode:?}"
+        );
+        assert_eq!(
+            drawn(&bare.scene),
+            std::slice::from_ref(&bare.origin),
+            "{mode:?}"
+        );
+        assert!(
+            bare.scene.layers[2].polylines.is_empty(),
+            "{mode:?}: marks over the traces"
+        );
+    }
+}

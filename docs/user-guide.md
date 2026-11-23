@@ -2879,12 +2879,12 @@ It is the converters' and the path's share. Where an order reads within 6 dB of 
 reference's own, a note along the bottom of the plot says so (*H2 within 6 dB of reference
 H2 at 12 points, 100 Hz – 1.00 kHz*): there the system's harmonic cannot be told from the
 interface's. **E** hides the reference's lines in the focused pane (and shows them again);
-the note stays.
+the note stays. **T** to traces only hides it with the cursor's values.
 
 | Key | Does |
 |---|---|
 | the **dB \| %** toggle in the title (or Settings › Display › Distortion in) | distortion in dB re fundamental or percent (log axis), readouts included |
-| **G** / **Shift+G** | response & distortion → **impulse response** (harmonics' impulses marked) linear → log → ETC → **room parameters** table alone, as large as it fits (read across a room; **W** maximises) → back |
+| **G** / **Shift+G** | response & distortion → **impulse response** (harmonics' impulses marked; **T** to traces only hides the marks) linear → log → ETC → **room parameters** table alone, as large as it fits (read across a room; **W** maximises) → back |
 | **Shift+I** | straight to the impulse response and back |
 | **E** | the reference input's own harmonics shown / hidden in this pane |
 | **V** / **Shift+V** | step through the pane's sweep's runs, selecting each |
