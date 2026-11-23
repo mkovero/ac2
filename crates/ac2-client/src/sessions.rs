@@ -13,7 +13,7 @@ use ac2_proto::model::{
     ExportFormat, ImportFormat, ImportRole, IrImport, SessionRef, TraceMeta, TraceOwner, Transfer,
 };
 use ac2_proto::units::{Blob, TraceId, TransferId};
-use ac2_proto::{Command, ReplyBody};
+use ac2_proto::{Command, ReplyBody, TraceImportArgs};
 
 use crate::{Client, ClientError, expect_body};
 
@@ -149,13 +149,13 @@ pub async fn import_trace(
 ) -> Result<TraceMeta, ClientError> {
     let transfer = upload_file(c, file_name, content, |_, _| {}).await?;
     let r = c
-        .call(Command::TraceImport {
+        .call(Command::TraceImport(TraceImportArgs {
             transfer,
             format,
             role,
             ir,
             owner,
-        })
+        }))
         .await?;
     expect_body!("trace.import", r, ReplyBody::Trace(t) => t)
 }

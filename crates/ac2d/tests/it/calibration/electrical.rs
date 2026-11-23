@@ -1,6 +1,7 @@
 //! Electrical calibration from a measured voltage and the mic's data-sheet sensitivity.
 
 use super::*;
+use ac2_proto::CalSplElectricalArgs;
 
 fn electrical(
     mic: &str,
@@ -8,7 +9,7 @@ fn electrical(
     mic_sensitivity: Option<f64>,
     replace_acoustic: bool,
 ) -> Command {
-    Command::CalSplElectrical {
+    Command::CalSplElectrical(CalSplElectricalArgs {
         input: 1,
         mic: mic.into(),
         connection: ElectricalConnection::InLine,
@@ -18,12 +19,12 @@ fn electrical(
         loading: None,
         uncertainty: None,
         replace_acoustic,
-    }
+    })
 }
 
 /// `cmd` with the mic's output and the preamp's input impedance, Ω.
 fn loaded(mut cmd: Command, mic_ohms: f64, input_ohms: f64) -> Command {
-    if let Command::CalSplElectrical { loading, .. } = &mut cmd {
+    if let Command::CalSplElectrical(CalSplElectricalArgs { loading, .. }) = &mut cmd {
         *loading = Some(MicLoading {
             mic_impedance: Ohms(mic_ohms),
             input_impedance: Ohms(input_ohms),

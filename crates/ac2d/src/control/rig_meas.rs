@@ -255,12 +255,12 @@ impl Control {
             | Command::TraceUpdate { .. }
             | Command::TraceDelete { .. }
             | Command::TraceAverage { .. }
-            | Command::TraceImport { .. }
+            | Command::TraceImport(..)
             | Command::TraceTarget { .. }
             | Command::TraceMicCurve { .. }
             | Command::TraceExport { .. }
             | Command::CalSpl { .. }
-            | Command::CalSplElectrical { .. }
+            | Command::CalSplElectrical(..)
             | Command::CalCurveImport { .. }
             | Command::CalCurveRename { .. }
             | Command::CalCurveDelete { .. }

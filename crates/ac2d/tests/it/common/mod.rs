@@ -17,8 +17,8 @@ use ac2_proto::model::{
 use ac2_proto::units::{MeasId, RequestId, Rev};
 use ac2_proto::{
     CodedFrame, Command, DataMessage, DataRequest, DataUp, DecodeError, Event, FlowNotice,
-    ProtoError, Reply, ReplyBody, Request, Subscription, Topic, WireFrame, decode_data_message,
-    decode_reply, decode_wire, encode_data_request, encode_request,
+    ProtoError, Reply, ReplyBody, Request, Subscription, Topic, TraceImportArgs, WireFrame,
+    decode_data_message, decode_reply, decode_wire, encode_data_request, encode_request,
 };
 use ac2_zmq::{Context, CurveClient, Socket, SocketType};
 use ac2d::{DaemonConfig, Handle, Listen};
@@ -374,13 +374,13 @@ impl Client {
                 data: ac2_proto::units::Blob(chunk.to_vec()),
             });
         }
-        self.call(Command::TraceImport {
+        self.call(Command::TraceImport(TraceImportArgs {
             transfer: t.transfer,
             format: i.format,
             role: i.role,
             ir: i.ir,
             owner: i.owner,
-        })
+        }))
     }
 
     /// An [`Self::import`] that must succeed.

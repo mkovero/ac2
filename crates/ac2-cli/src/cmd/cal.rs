@@ -9,7 +9,7 @@ use ac2_proto::model::{
     LineCalKey, Mic, MicCurveId, MicLoading, State,
 };
 use ac2_proto::units::Blob;
-use ac2_proto::{Command, ReplyBody};
+use ac2_proto::{CalSplElectricalArgs, Command, ReplyBody};
 use serde_json::json;
 
 use super::{connect, state};
@@ -153,7 +153,7 @@ async fn cal_electrical(cli: &Cli, a: &CalElectrical, out: &mut Out<'_>) -> Resu
         ElectricalMethodArg::Injected => ElectricalConnection::Injected,
     };
     let r = c
-        .call(Command::CalSplElectrical {
+        .call(Command::CalSplElectrical(CalSplElectricalArgs {
             input: a.input.0,
             mic,
             connection,
@@ -169,7 +169,7 @@ async fn cal_electrical(cli: &Cli, a: &CalElectrical, out: &mut Out<'_>) -> Resu
                 }),
             uncertainty: a.uncertainty.map(|x| x.0),
             replace_acoustic: a.replace_acoustic,
-        })
+        }))
         .await?;
     let e = expect_body!("cal.spl_electrical", r, ReplyBody::Calibration(e) => e)?;
     out.emit(&e, || output::electrical_calibration(&e, connection))?;

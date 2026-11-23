@@ -14,10 +14,10 @@
 //! Pure data: the reducer turns Enter into a `cal.spl_electrical` request and hands the
 //! reply back through [`ElectricalDialog::reply`].
 
-use ac2_proto::Command;
 use ac2_proto::cal::{self, DataSheet};
 use ac2_proto::model::{CalMethod, ElectricalConnection, MicLoading, State};
 use ac2_proto::units::MvPerPa;
+use ac2_proto::{CalSplElectricalArgs, Command};
 use ac2_scene::unit_text::{Freq, MicSensitivityArg, OhmsArg, VoltsArg, in_field};
 
 /// The fields, top to bottom.
@@ -334,7 +334,7 @@ impl ElectricalDialog {
         self.confirm_replace = false;
         self.notice = None;
         self.pending = Some(self.what());
-        Some(Command::CalSplElectrical {
+        Some(Command::CalSplElectrical(CalSplElectricalArgs {
             input: self.input,
             mic: self.mic.clone(),
             connection: self.connection,
@@ -344,7 +344,7 @@ impl ElectricalDialog {
             loading,
             uncertainty: None,
             replace_acoustic,
-        })
+        }))
     }
 
     /// The request's `what`.
@@ -450,7 +450,7 @@ mod tests {
         let cmd = d.submit().expect("request");
         assert_eq!(
             cmd,
-            Command::CalSplElectrical {
+            Command::CalSplElectrical(CalSplElectricalArgs {
                 input: 1,
                 mic: "MM1 34804".into(),
                 connection: ElectricalConnection::InLine,
@@ -460,7 +460,7 @@ mod tests {
                 loading: None,
                 uncertainty: None,
                 replace_acoustic: false,
-            }
+            })
         );
         // One request at a time; a refusal stays in the dialog, a success closes it.
         assert_eq!(d.submit(), None);
@@ -493,12 +493,12 @@ mod tests {
         }
         d.type_text("-40 dBV/Pa");
         assert_eq!(d.sensitivity_source(), "typed");
-        let Some(Command::CalSplElectrical {
+        let Some(Command::CalSplElectrical(CalSplElectricalArgs {
             connection,
             freq,
             mic_sensitivity,
             ..
-        }) = d.submit()
+        })) = d.submit()
         else {
             panic!("{:?}", d.error)
         };
@@ -525,11 +525,11 @@ mod tests {
         assert_eq!(d.focus, Field::InputImpedance);
         d.type_text("2 k");
         assert_eq!(d.loading_text(), "loaded 330 Ω → 2.0 kΩ −1.3 dB");
-        let Some(Command::CalSplElectrical {
+        let Some(Command::CalSplElectrical(CalSplElectricalArgs {
             mic_sensitivity,
             loading,
             ..
-        }) = d.submit()
+        })) = d.submit()
         else {
             panic!("{:?}", d.error)
         };
@@ -583,9 +583,9 @@ mod tests {
                 .as_deref()
                 .is_some_and(|n| n.contains("Enter again"))
         );
-        let Some(Command::CalSplElectrical {
+        let Some(Command::CalSplElectrical(CalSplElectricalArgs {
             replace_acoustic, ..
-        }) = d.submit()
+        })) = d.submit()
         else {
             panic!("{:?}", d.error)
         };

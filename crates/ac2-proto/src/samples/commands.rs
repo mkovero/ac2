@@ -2,7 +2,7 @@
 
 use super::builders::*;
 use super::state::*;
-use crate::ctrl::Command;
+use crate::ctrl::{CalSplElectricalArgs, Command, TraceImportArgs};
 use crate::model::*;
 use crate::units::*;
 
@@ -105,7 +105,7 @@ pub fn commands() -> Vec<Command> {
             reference: DelayReference::Trace { trace: TraceId(7) },
             name: "avg".into(),
         },
-        Command::TraceImport {
+        Command::TraceImport(TraceImportArgs {
             transfer: TransferId(3),
             format: ImportFormat::IrWav,
             role: ImportRole::Trace,
@@ -119,7 +119,7 @@ pub fn commands() -> Vec<Command> {
                 resolution: Resolution::FortyEighth,
             }),
             owner: crate::model::TraceOwner::Imported,
-        },
+        }),
         Command::TraceExport {
             trace: TraceId(8),
             format: ExportFormat::IrWav,
@@ -212,7 +212,7 @@ pub fn commands() -> Vec<Command> {
         },
         Command::CalCurveDelete { curve: curve_id() },
         Command::SplLogNew { meas: MeasId(4) },
-        Command::CalSplElectrical {
+        Command::CalSplElectrical(CalSplElectricalArgs {
             input: 1,
             mic: "M30 #1234".into(),
             connection: ElectricalConnection::InLine,
@@ -225,7 +225,7 @@ pub fn commands() -> Vec<Command> {
             }),
             uncertainty: None,
             replace_acoustic: false,
-        },
+        }),
         Command::SplHistoryGet {
             meas: MeasId(4),
             span: HistorySpan::Range {

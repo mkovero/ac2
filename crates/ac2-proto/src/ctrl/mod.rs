@@ -10,7 +10,10 @@ mod error;
 mod reply;
 mod warning;
 
-pub use command::{Command, DynamicsEnvelopeArgs, DynamicsRunArgs, SweepRunArgs};
+pub use command::{
+    CalSplElectricalArgs, Command, DynamicsEnvelopeArgs, DynamicsRunArgs, SweepRunArgs,
+    TraceImportArgs,
+};
 pub use error::{ErrorCode, ErrorDetail, ImportProblem, MicCurveFileReason, ProtoError};
 pub use reply::{Reply, ReplyBody, Welcome};
 pub use warning::Warning;

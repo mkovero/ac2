@@ -8,7 +8,10 @@ use ac2_proto::model::{
     ColourFamily, DelayState, GenAction, MeasConfig, MeasKind, Measurement, SweepFailure,
 };
 use ac2_proto::units::{Db, MeasId, Rev, Seconds};
-use ac2_proto::{Command, ErrorCode, ErrorDetail, ProtoError, ReplyBody, Welcome};
+use ac2_proto::{
+    CalSplElectricalArgs, Command, ErrorCode, ErrorDetail, ProtoError, ReplyBody, TraceImportArgs,
+    Welcome,
+};
 
 use crate::jobs::JobCmd;
 use crate::route::Peer;
@@ -272,13 +275,13 @@ impl Control {
                 reference,
                 name,
             } => self.trace_average(&traces, method, reference, name),
-            Command::TraceImport {
+            Command::TraceImport(TraceImportArgs {
                 transfer,
                 format,
                 role,
                 ir,
                 owner,
-            } => self.trace_import(peer, transfer, format, role, ir, owner),
+            }) => self.trace_import(peer, transfer, format, role, ir, owner),
             Command::TraceTarget { curve, name, owner } => self.trace_target(curve, name, owner),
             Command::TraceExport { trace, format } => self.trace_export(peer, trace, format),
             Command::TraceMicCurve { trace, curve } => self.trace_mic_curve(trace, curve),
@@ -289,7 +292,7 @@ impl Control {
                 calibrator_level,
                 calibrator_freq,
             } => self.cal_spl(input, mic, calibrator_level, calibrator_freq),
-            Command::CalSplElectrical {
+            Command::CalSplElectrical(CalSplElectricalArgs {
                 input,
                 mic,
                 connection,
@@ -299,7 +302,7 @@ impl Control {
                 loading,
                 uncertainty,
                 replace_acoustic,
-            } => self.cal_spl_electrical(cal::ElectricalArgs {
+            }) => self.cal_spl_electrical(cal::ElectricalArgs {
                 input,
                 mic,
                 connection,

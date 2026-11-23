@@ -680,14 +680,14 @@ fn electrical_calibration_from_the_input_setup_view() {
         [
             Request::Call {
                 cmd:
-                    Command::CalSplElectrical {
+                    Command::CalSplElectrical(ac2_proto::CalSplElectricalArgs {
                         input: 1,
                         volts,
                         mic_sensitivity: None,
                         connection: ElectricalConnection::InLine,
                         replace_acoustic: false,
                         ..
-                    },
+                    }),
                 what,
             },
         ] if *volts == Volts(0.01503) => what.clone(),

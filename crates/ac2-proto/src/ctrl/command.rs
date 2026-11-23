@@ -1,8 +1,10 @@
 //! Every ctrl command and its wire name, mutation flag and lease token.
 
+mod import;
 mod meta;
 mod run;
 
+pub use import::{CalSplElectricalArgs, TraceImportArgs};
 pub use run::{DynamicsEnvelopeArgs, DynamicsRunArgs, SweepRunArgs};
 
 use std::net::SocketAddr;
@@ -12,16 +14,15 @@ use serde::{Deserialize, Serialize};
 use crate::grid::GridId;
 use crate::model::{
     ArtnetTarget, AverageMethod, BackendKind, Ballistic, CalRef, ColourFamily, CorrelationWindow,
-    DelayPick, DelayReference, DeviceId, DmxSet, ElectricalConnection, ExportFormat, FinderBand,
-    GeneratorDesired, ImportFormat, ImportRole, InputSetup, IrImport, MeasConfig, MicCurveId,
-    MicLoading, NetBind, OscMessage, OutputSetup, OwnedTraces, Pair, PaneLayout, PlanSpec,
-    PreviewInput, RecordRequest, RecordingRef, ReplayPace, RigPeer, SessionConfig, SessionRef,
-    SimFitRequest, SimMapRequest, SimRequest, SplLogWhich, TargetCurve, TraceEdit, TraceOwner,
-    WalkKind, WalkPointSpec,
+    DelayPick, DelayReference, DeviceId, DmxSet, ExportFormat, FinderBand, GeneratorDesired,
+    InputSetup, MeasConfig, MicCurveId, NetBind, OscMessage, OutputSetup, OwnedTraces, Pair,
+    PaneLayout, PlanSpec, PreviewInput, RecordRequest, RecordingRef, ReplayPace, RigPeer,
+    SessionConfig, SessionRef, SimFitRequest, SimMapRequest, SimRequest, SplLogWhich, TargetCurve,
+    TraceEdit, TraceOwner, WalkKind, WalkPointSpec,
 };
 use crate::units::{
-    Blob, Db, DbSpl, Dbfs, Dbtp, Hz, LeaseToken, Lufs, MeasId, MvPerPa, Rev, RigId, Seconds,
-    TraceId, TransferId, Volts, WalkId,
+    Blob, Db, DbSpl, Dbfs, Dbtp, Hz, LeaseToken, Lufs, MeasId, Rev, RigId, Seconds, TraceId,
+    TransferId, Volts, WalkId,
 };
 
 /// Every command. Wire: `{"op": "<group>.<name>", "args": {…}}`; `args` is absent for
@@ -431,21 +432,7 @@ pub enum Command {
     /// Import a file the client uploaded in chunks (`file.upload_begin`), so one of any size
     /// arrives, as an export leaves; the upload is used up whether it succeeds or not.
     #[serde(rename = "trace.import")]
-    TraceImport {
-        /// The complete upload; its `file`'s last component names a trace its file does not.
-        transfer: TransferId,
-        /// Format.
-        format: ImportFormat,
-        /// Measured trace or target curve.
-        role: ImportRole,
-        /// How to read an impulse-response WAV file; `None` takes [`IrImport::default`].
-        /// Refused (`invalid`) with a text file.
-        ir: Option<IrImport>,
-        /// The measurement it is listed under, or the imported group: a target loaded for
-        /// the system being tuned belongs with that system's measurement. Refused for a
-        /// math trace or a measurement that does not exist.
-        owner: TraceOwner,
-    },
+    TraceImport(TraceImportArgs),
     /// Generate a target curve as a new target trace (`trace.import` of a target, without a
     /// file), listed under `owner`. Refused (`invalid`) for parameters
     /// [`TargetCurve::check`] refuses, and for an owner `trace.import` refuses.
@@ -497,28 +484,7 @@ pub enum Command {
     /// sensitivity `S` (`None`: the data-sheet value of `mic`'s curve files, when they
     /// state exactly one), loaded by `loading` when given: `S · Z_in / (Z_in + Z_out)`.
     #[serde(rename = "cal.spl_electrical")]
-    CalSplElectrical {
-        /// Input channel.
-        input: u16,
-        /// Mic name.
-        mic: String,
-        /// Where the voltage was measured.
-        connection: ElectricalConnection,
-        /// Voltage measured, RMS.
-        volts: Volts,
-        /// Frequency of the tone.
-        freq: Hz,
-        /// Mic sensitivity; `None` = the data sheet's.
-        mic_sensitivity: Option<MvPerPa>,
-        /// Mic output and preamp input impedance: the sensitivity is divided down by them
-        /// (`cal::loaded_sensitivity`). `None` = unloaded.
-        loading: Option<MicLoading>,
-        /// Stated uncertainty, ± dB; `None` = 1 dB.
-        uncertainty: Option<Db>,
-        /// Replace an acoustic calibration of this input and mic (refused otherwise: a
-        /// calibrator reading is the better one).
-        replace_acoustic: bool,
-    },
+    CalSplElectrical(CalSplElectricalArgs),
     /// Import a mic curve file into the mic library as `mic`'s curve `label` (default:
     /// the angle the file names, `90°`, else its file stem); a curve with that label is
     /// replaced. With `input`, that input's mic name is set to `mic`, and the curve becomes
