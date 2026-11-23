@@ -1,5 +1,5 @@
 {
-  "proto_version": 103,
+  "proto_version": 104,
   "value": {
     "backend": "fake",
     "clock": "single_callback",

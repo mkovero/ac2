@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 
 use ac2_proto::model::{
     CueState, MeasKind, Measurement, Resolution, Rig, SpecAveraging, SpecResolution, SweepRun,
-    TraceMeta, TraceOwner, TraceSource,
+    TraceMeta, TraceOwner, TraceSource, TransferResolution,
 };
 use ac2_proto::units::{MeasId, TraceId};
 
@@ -129,12 +129,14 @@ pub fn meas_row(item: &MeasItem<'_>, selected: Option<MeasId>, active: bool) -> 
     }
     // A resolution other than the default is said: it changes what the curve can show.
     let resolution = match &m.config.kind {
-        MeasKind::Transfer { config } => Some(config.resolution),
-        MeasKind::Sweep { config } => Some(config.resolution),
+        MeasKind::Transfer { config } => (config.resolution != TransferResolution::default())
+            .then(|| format::transfer_resolution(config.resolution)),
+        MeasKind::Sweep { config } => (config.resolution != Resolution::default())
+            .then(|| format::resolution(config.resolution)),
         _ => None,
     };
-    if let Some(r) = resolution.filter(|r| *r != Resolution::default()) {
-        text.push_str(&format!(" · resolution {}", format::resolution(r)));
+    if let Some(r) = resolution {
+        text.push_str(&format!(" · resolution {r}"));
     }
     match &m.config.kind {
         MeasKind::Transfer { config } if config.smoothing.is_some() => {

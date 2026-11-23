@@ -78,7 +78,7 @@ fn measurement_defaults_match_the_cli() {
                 reference_input: 0,
                 measurement_input: 1,
                 averaging: TfAveraging::Fifo { blocks: 8 },
-                resolution: Resolution::FortyEighth,
+                resolution: Resolution::FortyEighth.into(),
                 smoothing: None,
                 depth: DepthPolicy::EqualConfidence,
                 lf_window: ac2_proto::model::LfWindow::Standard,
@@ -451,14 +451,14 @@ fn resolution_in_the_transfer_and_sweep_dialogs() {
     let i = at(&f, FieldId::Resolution);
     assert_eq!(f.fields[i].label, "Resolution");
     assert_eq!(f.fields[i].display(), "1/48 oct");
-    assert_eq!(f.fields[i].hint, RESOLUTION_HINT);
+    assert_eq!(f.fields[i].hint, TRANSFER_RESOLUTION_HINT);
     f.focus = i;
     f.cycle(1);
     let c = f.meas_config(Some(&o)).expect("tf");
     let MeasKind::Transfer { config } = &c.kind else {
         panic!("kind");
     };
-    assert_eq!(config.resolution, Resolution::NinetySixth);
+    assert_eq!(config.resolution, Resolution::NinetySixth.into());
     let m = Measurement {
         id: MeasId(3),
         config: MeasConfig {
@@ -467,7 +467,7 @@ fn resolution_in_the_transfer_and_sweep_dialogs() {
             kind: MeasKind::Transfer {
                 config: TransferConfig {
                     averaging: TfAveraging::Fifo { blocks: 32 },
-                    resolution: Resolution::TwentyFourth,
+                    resolution: Resolution::TwentyFourth.into(),
                     depth: DepthPolicy::FastLf {
                         max_settle_s: Seconds(2.5),
                     },
@@ -496,8 +496,21 @@ fn resolution_in_the_transfer_and_sweep_dialogs() {
     let MeasKind::Transfer { config: edited } = e.meas_config(Some(&o)).expect("tf").kind else {
         panic!("kind");
     };
-    assert_eq!(edited.resolution, Resolution::Twelfth);
+    assert_eq!(edited.resolution, Resolution::Twelfth.into());
     assert_eq!(edited.averaging, TfAveraging::Fifo { blocks: 32 });
+    // The finest choice is the bins, and a bins measurement saves as bins.
+    f.cycle(1);
+    let MeasKind::Transfer { config } = f.meas_config(Some(&o)).expect("tf").kind else {
+        panic!("kind");
+    };
+    assert_eq!(config.resolution, TransferResolution::Bins);
+    let mut bins = m.clone();
+    if let MeasKind::Transfer { config } = &mut bins.config.kind {
+        config.resolution = TransferResolution::Bins;
+    }
+    let b = Form::edit_spec(&bins, &names(&o), Some(&o)).expect("edit");
+    assert_eq!(b.fields[at(&b, FieldId::Resolution)].display(), "bins");
+    assert_eq!(b.meas_config(Some(&o)).expect("same"), bins.config);
 
     let mut s = Form::sweep(Some(&o), 0, &names(&o), &outs(), &[], Some(Dbfs(-50.0)));
     assert_eq!(

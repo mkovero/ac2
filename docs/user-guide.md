@@ -1938,11 +1938,14 @@ per frequency and moment, as tall as its level. **G** once more is the spectrum 
 ### Resolution and the resolution marker
 
 **Resolution** is how many points per octave a transfer or sweep curve has: **1/12, 1/24,
-1/48 (default) or 1/96 oct**. It is the grid the curve is computed on, not smoothing.
+1/48 (default) or 1/96 oct**. It is the grid the curve is computed on, not smoothing. A
+transfer has one finer step, **bins**: the analysis's own FFT bins; for now a transfer at
+`bins` measures, captures and compares exactly as at 1/96.
 
-- **Setting it**: *Resolution* in the New / Edit dialogs, `ac2 meas new tf|sweep …
-  --resolution 1/96`, `ac2 meas set <meas> --resolution 1/24` (`ac2 ir capture
-  --resolution`). The list shows a non-default one (`resolution 1/96 oct`). A transfer restarts its
+- **Setting it**: *Resolution* in the New / Edit dialogs (a transfer's also offers `bins`),
+  `ac2 meas new tf|sweep … --resolution 1/96`, `ac2 meas set <meas> --resolution 1/24`
+  (`--resolution bins` for a transfer only; `ac2 ir capture --resolution`). The list shows
+  a non-default one (`resolution 1/96 oct`, `resolution bins`). A transfer restarts its
   averaging on change; a sweep uses it from its next run.
 
 Every estimate has a **resolution cell**, 1/T for a window of T seconds. Where it is wider
@@ -1969,7 +1972,7 @@ on a sweep).
   neighbours, so a room mode down there can be jumped to. A math trace of live transfers
   marks where its operands do, at the widest bins among them.
 - **Alt+K** / **Alt+Shift+K** step the focused transfer pane's measurement one
-  resolution coarser / finer (1/12 … 1/96 octave), as **K** steps smoothing. Unlike
+  resolution coarser / finer (1/12 … 1/96 octave, then `bins`), as **K** steps smoothing. Unlike
   smoothing it restarts the measurement on the new grid: the averages fill again. Coarser
   moves the marked range down (1/24: marked below about 34 Hz; 1/12: below about 17 Hz).
 - **LF window** (New / Edit dialog, `ac2 meas new tf … --long-lf`): **4 s** adds a longer

@@ -55,7 +55,7 @@ fn transfer() -> MeasKind {
             averaging: TfAveraging::Exponential {
                 time_constant: Seconds(1.0),
             },
-            resolution: Resolution::FortyEighth,
+            resolution: Resolution::FortyEighth.into(),
             smoothing: None,
             depth: ac2_proto::model::DepthPolicy::EqualConfidence,
             lf_window: ac2_proto::model::LfWindow::Standard,

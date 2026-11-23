@@ -12,7 +12,7 @@ use ac2_proto::model::{
     BandFraction, DepthPolicy, EssSpec, LfHarmonics, LfWindow, MeasConfig, MeasKind, Measurement,
     OpenSession, Operand, Resolution, RtaConfig, Smoothing, SmoothingFraction, SpecAveraging,
     SpecLevel, SpecResolution, SpectrumConfig, SplConfig, SweepConfig, TimeWeighting,
-    TransferConfig, Weighting, Window,
+    TransferConfig, TransferResolution, Weighting, Window,
 };
 use ac2_proto::units::{Dbfs, Hz, MeasId, Seconds};
 
@@ -24,7 +24,9 @@ mod sweep_inputs;
 use options::*;
 
 pub(crate) use options::resolution_field;
-pub use options::{LF_HARMONICS_HINT, RESOLUTION_HINT, parse_buffer, parse_rate};
+pub use options::{
+    LF_HARMONICS_HINT, RESOLUTION_HINT, TRANSFER_RESOLUTION_HINT, parse_buffer, parse_rate,
+};
 
 /// Which dialog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

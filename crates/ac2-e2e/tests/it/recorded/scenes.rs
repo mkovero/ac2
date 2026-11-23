@@ -43,7 +43,7 @@ fn transfer(input: u16) -> MeasKind {
             averaging: TfAveraging::Exponential {
                 time_constant: Seconds(1.0),
             },
-            resolution: Resolution::TwentyFourth,
+            resolution: Resolution::TwentyFourth.into(),
             smoothing: Some(Smoothing {
                 fraction: SmoothingFraction::Sixth,
                 mode: SmoothingMode::MagnitudePhase,

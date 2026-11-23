@@ -264,8 +264,8 @@ fn smoothing_keys_stay_with_the_focused_pane() {
 /// resolutions and stop at the ends; another pane has no resolution to set.
 #[test]
 fn resolution_keys_step_the_transfer_measurement() {
-    use ac2_proto::model::Resolution;
-    fn sent(r: &[Request]) -> Resolution {
+    use ac2_proto::model::{Resolution, TransferResolution};
+    fn sent(r: &[Request]) -> TransferResolution {
         match r {
             [
                 Request::Call {
@@ -281,8 +281,32 @@ fn resolution_keys_step_the_transfer_measurement() {
     }
     let mut t = T::new();
     // The measurement is at the default, 1/48: one step each way.
-    assert_eq!(sent(&t.key("Alt+K")), Resolution::TwentyFourth);
-    assert_eq!(sent(&t.key("Alt+Shift+K")), Resolution::NinetySixth);
+    assert_eq!(sent(&t.key("Alt+K")), Resolution::TwentyFourth.into());
+    assert_eq!(sent(&t.key("Alt+Shift+K")), Resolution::NinetySixth.into());
+    // Finer than 1/96: the analysis's own bins, the finest step.
+    t.key_answered("Alt+Shift+K");
+    assert_eq!(
+        sent(&t.key_answered("Alt+Shift+K")),
+        TransferResolution::Bins
+    );
+    assert_eq!(
+        t.last_toast(),
+        "Main L: resolution bins (averaging starts over)"
+    );
+    assert!(t.key("Alt+Shift+K").is_empty());
+    assert_eq!(t.last_toast(), "Main L: bins is the finest resolution");
+    assert_eq!(
+        sent(&t.key_answered("Alt+K")),
+        Resolution::NinetySixth.into()
+    );
+    for _ in 0..3 {
+        t.key_answered("Alt+K");
+    }
+    assert!(t.key("Alt+K").is_empty());
+    assert_eq!(
+        t.last_toast(),
+        "Main L: 1/12 oct is the coarsest resolution"
+    );
     // The SPL pane has no transfer measurement.
     t.key("Alt+4");
     let r =

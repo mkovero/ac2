@@ -223,28 +223,38 @@ impl FromStr for TraceSlot {
     }
 }
 
-/// A Resolution argument: `1/N` or `N`, N one of 12, 24, 48, 96; for a spectrum `multi`
-/// or `multi:1/N` (the multi-resolution bands on a 1/N-octave grid, 1/48 by default).
+/// A Resolution argument: `1/N` or `N`, N one of 12, 24, 48, 96; for a tf also `bins` (the
+/// analysis's own bins); for a spectrum `multi` or `multi:1/N` (the multi-resolution bands
+/// on a 1/N-octave grid, 1/48 by default).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ResolutionArg {
-    /// Points per octave.
-    pub grid: ac2_proto::model::Resolution,
-    /// `multi[:1/N]`: a spectrum's multi-resolution bands.
-    pub multi: bool,
+pub enum ResolutionArg {
+    /// `1/N`: columns at N points per octave.
+    Grid(ac2_proto::model::Resolution),
+    /// `multi[:1/N]`: a spectrum's multi-resolution bands on that grid.
+    Multi(ac2_proto::model::Resolution),
+    /// `bins`: a tf's finest resolution, the analysis's own bins.
+    Bins,
 }
 
 impl ResolutionArg {
-    /// `1/N` without `multi`.
-    pub fn grid(grid: ac2_proto::model::Resolution) -> Self {
-        Self { grid, multi: false }
+    /// The points per octave of a sweep or an imported IR, which have neither `multi` nor
+    /// `bins`.
+    pub fn columns(self) -> Result<ac2_proto::model::Resolution, String> {
+        match self {
+            Self::Grid(grid) => Ok(grid),
+            Self::Multi(_) => Err("--resolution multi is a spectrum's; this takes 1/N".into()),
+            Self::Bins => Err("--resolution bins is a tf's; this takes 1/N".into()),
+        }
     }
 
-    /// The points per octave of a tf or sweep, which have no `multi`.
-    pub fn columns(self) -> Result<ac2_proto::model::Resolution, String> {
-        if self.multi {
-            Err("--resolution multi is a spectrum's; tf and sweep take 1/N".into())
-        } else {
-            Ok(self.grid)
+    /// A tf's resolution: a grid or the bins, never `multi`.
+    pub fn transfer(self) -> Result<ac2_proto::model::TransferResolution, String> {
+        match self {
+            Self::Grid(grid) => Ok(grid.into()),
+            Self::Bins => Ok(ac2_proto::model::TransferResolution::Bins),
+            Self::Multi(_) => {
+                Err("--resolution multi is a spectrum's; a tf takes 1/N or bins".into())
+            }
         }
     }
 }
@@ -254,6 +264,9 @@ impl FromStr for ResolutionArg {
 
     fn from_str(s: &str) -> Result<Self, String> {
         let t = s.trim();
+        if t == "bins" {
+            return Ok(Self::Bins);
+        }
         let (multi, rest) = match t.strip_prefix("multi") {
             Some("") => (true, None),
             Some(r) => match r.strip_prefix(':') {
@@ -273,11 +286,15 @@ impl FromStr for ResolutionArg {
                 .ok_or_else(|| {
                     format!(
                         "{s:?}: the resolution is 1/12, 1/24, 1/48 or 1/96 octave \
-                         (a spectrum: multi or multi:1/N)"
+                         (a tf also bins; a spectrum: multi or multi:1/N)"
                     )
                 })?,
         };
-        Ok(Self { grid, multi })
+        Ok(if multi {
+            Self::Multi(grid)
+        } else {
+            Self::Grid(grid)
+        })
     }
 }
 

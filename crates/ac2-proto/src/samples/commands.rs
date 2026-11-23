@@ -35,7 +35,7 @@ pub fn commands() -> Vec<Command> {
         },
         Command::GenStop,
         Command::MeasCreate {
-            config: meas_config(),
+            config: bins_meas_config(),
         },
         Command::MeasUpdate {
             meas: MeasId(3),

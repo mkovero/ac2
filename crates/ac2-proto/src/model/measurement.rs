@@ -3,9 +3,9 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    AverageMethod, BandFraction, DelayState, DynamicsConfig, PeakMode, PeakWeighting, Resolution,
-    Smoothing, SmoothingFraction, SpecAveraging, SpecLevel, SpecResolution, SpectrumDisplay,
-    SweepConfig, TfAveraging, TimeWeighting, Weighting, Window,
+    AverageMethod, BandFraction, DelayState, DynamicsConfig, PeakMode, PeakWeighting, Smoothing,
+    SmoothingFraction, SpecAveraging, SpecLevel, SpecResolution, SpectrumDisplay, SweepConfig,
+    TfAveraging, TimeWeighting, TransferResolution, Weighting, Window,
 };
 use crate::grid::GridId;
 use crate::topic::Stream;
@@ -33,9 +33,9 @@ pub struct TransferConfig {
     pub measurement_input: u16,
     /// Averaging.
     pub averaging: TfAveraging,
-    /// Points per octave of the column grid ([`TransferConfig::grid`]); smoothing is a
-    /// separate display edit.
-    pub resolution: Resolution,
+    /// The column grid ([`TransferConfig::grid`]), or the analysis's own bins over the 1/96
+    /// grid; smoothing is a separate display edit.
+    pub resolution: TransferResolution,
     /// Live smoothing, if any.
     pub smoothing: Option<Smoothing>,
     /// How deep the decimated stages average (decision M1).

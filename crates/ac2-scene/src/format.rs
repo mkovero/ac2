@@ -347,6 +347,15 @@ pub fn resolution(r: ac2_proto::model::Resolution) -> String {
     format!("1/{} oct", r.ppo())
 }
 
+/// A transfer's resolution: its grid as [`resolution`] (`1/96 oct`), or `bins`.
+pub fn transfer_resolution(r: ac2_proto::model::TransferResolution) -> String {
+    use ac2_proto::model::TransferResolution;
+    match r {
+        TransferResolution::Grid { grid } => resolution(grid),
+        TransferResolution::Bins => "bins".into(),
+    }
+}
+
 /// `1/6 oct`.
 pub fn octave_fraction(f: ac2_proto::model::SmoothingFraction) -> String {
     format!("1/{} oct", f.b())
@@ -624,6 +633,23 @@ mod tests {
         assert_eq!(bin_width(24_000.0 / 4096.0), "5.9 Hz");
         assert_eq!(bin_width(48_000.0 / 4096.0), "12 Hz");
         assert_eq!(bin_width(f64::NAN), NO_VALUE);
+    }
+
+    #[test]
+    fn transfer_resolutions() {
+        use ac2_proto::model::{Resolution, TransferResolution};
+        let said: Vec<String> = TransferResolution::ALL
+            .into_iter()
+            .map(transfer_resolution)
+            .collect();
+        assert_eq!(
+            said,
+            ["1/12 oct", "1/24 oct", "1/48 oct", "1/96 oct", "bins"]
+        );
+        assert_eq!(
+            transfer_resolution(Resolution::NinetySixth.into()),
+            resolution(Resolution::NinetySixth)
+        );
     }
 
     #[test]

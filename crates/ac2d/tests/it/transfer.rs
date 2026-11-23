@@ -26,7 +26,7 @@ fn grid_freq(i: usize) -> f64 {
 }
 
 /// Runs audio until a TF frame covering it arrives; returns the newest such frame.
-fn run_tf(d: &mut FakeDriver, sub: &Sub, seconds: f64, min_rev: u64) -> Frame {
+pub(crate) fn run_tf(d: &mut FakeDriver, sub: &Sub, seconds: f64, min_rev: u64) -> Frame {
     run(d, seconds);
     let end = end_sample(d);
     sub.frame(T, |f| {
@@ -37,7 +37,7 @@ fn run_tf(d: &mut FakeDriver, sub: &Sub, seconds: f64, min_rev: u64) -> Frame {
     .expect("tf frame covering the audio")
 }
 
-fn tf(f: &Frame) -> &TfFrame {
+pub(crate) fn tf(f: &Frame) -> &TfFrame {
     match &f.data {
         FrameData::Tf(t) => t,
         _ => unreachable!(),
@@ -123,7 +123,7 @@ fn resolution_sets_the_grid_and_frames_say_what_is_unresolved() {
     let rev = f.stamp.config_rev.0;
 
     if let MeasKind::Transfer { config } = &mut m.kind {
-        config.resolution = Resolution::NinetySixth;
+        config.resolution = Resolution::NinetySixth.into();
     }
     c.update_ok(MeasId(1), m.clone());
     let f = run_tf(&mut d, &sub, 0.5, rev + 1);
@@ -144,7 +144,7 @@ fn resolution_sets_the_grid_and_frames_say_what_is_unresolved() {
     // The long window adds a stage two octaves down: four times the window, so the bottom
     // range ends at a quarter of the frequency (κ(48) · 0.244 Hz ≈ 17 Hz).
     if let MeasKind::Transfer { config } = &mut m.kind {
-        config.resolution = Resolution::FortyEighth;
+        config.resolution = Resolution::FortyEighth.into();
         config.lf_window = LfWindow::Long;
     }
     c.update_ok(MeasId(1), m);

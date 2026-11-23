@@ -15,7 +15,7 @@ pub(crate) fn tf(id: u32, name: &str) -> Measurement {
                     averaging: TfAveraging::Exponential {
                         time_constant: Seconds(1.0),
                     },
-                    resolution: Resolution::FortyEighth,
+                    resolution: Resolution::FortyEighth.into(),
                     smoothing: None,
                     depth: DepthPolicy::EqualConfidence,
                     lf_window: ac2_proto::model::LfWindow::Standard,
@@ -109,12 +109,25 @@ fn tf_rows_say_a_resolution_other_than_the_default() {
     let MeasKind::Transfer { config } = &mut m.config.kind else {
         unreachable!()
     };
-    config.resolution = Resolution::NinetySixth;
+    config.resolution = Resolution::NinetySixth.into();
     config.smoothing = Some(Smoothing::of(SmoothingFraction::Sixth));
     let smoothing = format::smoothing(config.smoothing);
     assert_eq!(
         meas_row(&item(&m), None, true).text,
         format!("TF  Room\n     running · resolution 1/96 oct · {smoothing}")
+    );
+}
+
+#[test]
+fn tf_rows_say_a_bins_resolution() {
+    let mut m = tf(4, "Room");
+    let MeasKind::Transfer { config } = &mut m.config.kind else {
+        unreachable!()
+    };
+    config.resolution = TransferResolution::Bins;
+    assert_eq!(
+        meas_row(&item(&m), None, true).text,
+        "TF  Room\n     running · resolution bins"
     );
 }
 

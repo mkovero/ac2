@@ -304,7 +304,7 @@ fn power_average_of_three_positions() {
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
     let mut other_grid = tf_on("Seat 2", 2);
     if let MeasKind::Transfer { config } = &mut other_grid.kind {
-        config.resolution = ac2_proto::model::Resolution::TwentyFourth;
+        config.resolution = ac2_proto::model::Resolution::TwentyFourth.into();
     }
     let e = c.update(MeasId(2), other_grid).unwrap_err();
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");

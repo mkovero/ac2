@@ -33,7 +33,7 @@ fn transfer(id: u32, name: &str) -> Measurement {
                     averaging: TfAveraging::Exponential {
                         time_constant: Seconds(1.0),
                     },
-                    resolution: Resolution::FortyEighth,
+                    resolution: Resolution::FortyEighth.into(),
                     smoothing: None,
                     depth: DepthPolicy::EqualConfidence,
                     lf_window: ac2_proto::model::LfWindow::Standard,

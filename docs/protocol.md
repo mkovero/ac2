@@ -43,7 +43,7 @@ daemon answered there.
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 103`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 104`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -1994,9 +1994,12 @@ the pure functions of `ac2_proto::cal`, which clients use to word what is in use
 
 #### Resolution and unresolved ranges
 
-`TransferConfig.resolution` and `SweepConfig.resolution` (`Resolution`: `twelfth` \|
-`twenty_fourth` \| `forty_eighth` \| `ninety_sixth`, 12 … 96 points per octave; front ends
-default to `forty_eighth`) set the stored column grid: a transfer function's is fifteen
+`SweepConfig.resolution` (`Resolution`: `twelfth` \| `twenty_fourth` \| `forty_eighth` \|
+`ninety_sixth`, 12 … 96 points per octave; front ends default to `forty_eighth`) and
+`TransferConfig.resolution` (`TransferResolution`, tagged by `type`: `grid` {`grid`:
+`Resolution`} \| `bins`, the analysis's own bins over the `ninety_sixth` grid; default
+`{type: grid, grid: forty_eighth}`) set the stored column grid (`bins`: the `ninety_sixth`
+one, which a `bins` transfer measures, captures and compares on): a transfer function's is fifteen
 octaves, 7.8 Hz … 256 kHz (`{type: log, ppo, k_min: −7·ppo, k_max: 8·ppo − 1}`), the same at
 every sample rate (columns above the band a session's rate measures are invalid), a sweep's covers its
 `start … end`. It is not smoothing (a display edit over these columns). `meas.update` with a

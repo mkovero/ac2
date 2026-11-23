@@ -1,5 +1,5 @@
 {
-  "proto_version": 103,
+  "proto_version": 104,
   "value": {
     "grids": [
       {
@@ -112,7 +112,10 @@
                 "measurement_input": 1,
                 "peak": "off",
                 "reference_input": 0,
-                "resolution": "twenty_fourth",
+                "resolution": {
+                  "grid": "twenty_fourth",
+                  "type": "grid"
+                },
                 "smoothing": {
                   "fraction": "sixth",
                   "mode": "magnitude_phase"
@@ -156,7 +159,10 @@
                 "measurement_input": 2,
                 "peak": "off",
                 "reference_input": 0,
-                "resolution": "twenty_fourth",
+                "resolution": {
+                  "grid": "twenty_fourth",
+                  "type": "grid"
+                },
                 "smoothing": {
                   "fraction": "sixth",
                   "mode": "magnitude_phase"

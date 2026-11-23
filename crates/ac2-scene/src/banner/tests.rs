@@ -232,7 +232,7 @@ fn no_delay_estimate_says_why() {
                     reference_input: 0,
                     measurement_input: 1,
                     averaging: TfAveraging::Fifo { blocks: 4 },
-                    resolution: Resolution::Twelfth,
+                    resolution: Resolution::Twelfth.into(),
                     smoothing: None,
                     depth: ac2_proto::model::DepthPolicy::EqualConfidence,
                     lf_window: ac2_proto::model::LfWindow::Standard,

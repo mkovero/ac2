@@ -115,13 +115,13 @@ impl AppState {
             ));
             return;
         };
-        let all = ac2_proto::model::Resolution::ALL;
+        let all = ac2_proto::model::TransferResolution::ALL;
         let i = all
             .iter()
             .position(|r| *r == config.resolution)
             .unwrap_or(0) as i32;
         let j = (i + step).clamp(0, all.len() as i32 - 1);
-        let said = |r: ac2_proto::model::Resolution| format!("1/{} oct", r.ppo());
+        let said = ac2_scene::format::transfer_resolution;
         if i == j {
             self.toast(format!(
                 "{name}: {} is the {} resolution",

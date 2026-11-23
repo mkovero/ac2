@@ -105,7 +105,9 @@ pub(super) fn meas_config() -> MeasConfig {
                 reference_input: 0,
                 measurement_input: 1,
                 averaging: TfAveraging::Fifo { blocks: 8 },
-                resolution: Resolution::NinetySixth,
+                resolution: TransferResolution::Grid {
+                    grid: Resolution::NinetySixth,
+                },
                 smoothing: Some(Smoothing {
                     fraction: SmoothingFraction::Sixth,
                     mode: SmoothingMode::Magnitude,
@@ -118,6 +120,15 @@ pub(super) fn meas_config() -> MeasConfig {
             },
         },
     }
+}
+
+/// [`meas_config`] at the analysis's own bins.
+pub(super) fn bins_meas_config() -> MeasConfig {
+    let mut config = meas_config();
+    if let MeasKind::Transfer { config } = &mut config.kind {
+        config.resolution = TransferResolution::Bins;
+    }
+    config
 }
 
 pub(super) fn cal_key() -> CalKey {

@@ -2,9 +2,9 @@
 
 use super::{
     BandFraction, DepthPolicy, LeqConfig, LeqPreset, LeqWindow, LogGridSpec, PeakLimit, PeakLimits,
-    PeakQuantity, PeakWeighting, PositionCorrection, Resolution, RtaConfig, SpecAveraging,
-    SpecLevel, SpecResolution, SpectrumConfig, SplConfig, TfAveraging, TimeWeighting,
-    TransferConfig, Weighting, Window,
+    PeakQuantity, PeakWeighting, PositionCorrection, RtaConfig, SpecAveraging, SpecLevel,
+    SpecResolution, SpectrumConfig, SplConfig, TfAveraging, TimeWeighting, TransferConfig,
+    TransferResolution, Weighting, Window,
 };
 use crate::units::{Db, DbSpl, Hz, Seconds};
 
@@ -36,7 +36,7 @@ impl LogGridSpec {
 impl TransferConfig {
     /// The column grid ([`LogGridSpec::transfer`]) at the measurement's resolution.
     pub fn grid(&self) -> LogGridSpec {
-        LogGridSpec::transfer(self.resolution.ppo())
+        LogGridSpec::transfer(self.resolution.grid().ppo())
     }
 
     /// Default FIFO blocks of the full-rate stage.
@@ -51,7 +51,7 @@ impl TransferConfig {
             averaging: TfAveraging::Fifo {
                 blocks: Self::DEFAULT_BLOCKS,
             },
-            resolution: Resolution::default(),
+            resolution: TransferResolution::default(),
             smoothing: None,
             depth: DepthPolicy::EqualConfidence,
             lf_window: crate::model::LfWindow::Standard,

@@ -25,19 +25,31 @@ pub(super) const LF_HARMONICS: [(&str, LfHarmonics); 2] = [
     ("standard", LfHarmonics::Standard),
     ("fine", LfHarmonics::Fine),
 ];
-/// Points per octave of a transfer or sweep curve, coarsest first, the CLI's `--resolution`
-/// values; index [`DEFAULT_RESOLUTION`] is the default.
+/// Points per octave of a sweep or imported IR curve, coarsest first, the CLI's
+/// `--resolution` values; index [`DEFAULT_RESOLUTION`] is the default.
 pub(super) const RESOLUTIONS: [(&str, Resolution); 4] = [
     ("1/12 oct", Resolution::Twelfth),
     ("1/24 oct", Resolution::TwentyFourth),
     ("1/48 oct", Resolution::FortyEighth),
     ("1/96 oct", Resolution::NinetySixth),
 ];
+/// A transfer's resolutions, coarsest first: the four grids, then the analysis's own bins,
+/// read as the measurement list says them ([`ac2_scene::format::transfer_resolution`]);
+/// index [`DEFAULT_RESOLUTION`] is the default.
+pub(super) const TRANSFER_RESOLUTIONS: [(&str, TransferResolution); 5] = [
+    ("1/12 oct", TransferResolution::ALL[0]),
+    ("1/24 oct", TransferResolution::ALL[1]),
+    ("1/48 oct", TransferResolution::ALL[2]),
+    ("1/96 oct", TransferResolution::ALL[3]),
+    ("bins", TransferResolution::ALL[4]),
+];
 pub(super) const DEFAULT_RESOLUTION: usize = 2;
 /// Under the Resolution choice: it is the grid, not smoothing, and below some frequency
 /// the analysis cannot fill a fine one (the plot marks where).
 pub const RESOLUTION_HINT: &str =
     "points per octave, not smoothing; the plot shades where the analysis is coarser";
+/// Under a transfer's Resolution choice, which also offers the analysis's own bins.
+pub const TRANSFER_RESOLUTION_HINT: &str = "points per octave, or bins: the analysis's own; not smoothing; the plot shades where the analysis is coarser";
 
 pub(crate) fn resolution_field(r: Resolution) -> Field {
     Field {
@@ -47,6 +59,21 @@ pub(crate) fn resolution_field(r: Resolution) -> Field {
             "Resolution",
             &RESOLUTIONS.map(|r| r.0),
             RESOLUTIONS
+                .iter()
+                .position(|x| x.1 == r)
+                .unwrap_or(DEFAULT_RESOLUTION),
+        )
+    }
+}
+
+pub(super) fn transfer_resolution_field(r: TransferResolution) -> Field {
+    Field {
+        hint: TRANSFER_RESOLUTION_HINT.into(),
+        ..Field::choice(
+            FieldId::Resolution,
+            "Resolution",
+            &TRANSFER_RESOLUTIONS.map(|r| r.0),
+            TRANSFER_RESOLUTIONS
                 .iter()
                 .position(|x| x.1 == r)
                 .unwrap_or(DEFAULT_RESOLUTION),

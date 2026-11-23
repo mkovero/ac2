@@ -113,6 +113,62 @@ impl Resolution {
     }
 }
 
+/// A transfer function's resolution: a column grid, or the MTW stages' own bins, which are
+/// finer than any grid at low frequencies. The bins are offered beside a 1/96 grid, so a
+/// `Bins` measurement stores, captures and compares as 1/96 ([`Self::grid`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TransferResolution {
+    /// Columns at `grid` points per octave.
+    Grid {
+        /// The column grid.
+        grid: Resolution,
+    },
+    /// The analysis's own bins, over the 1/96 grid.
+    Bins,
+}
+
+impl Default for TransferResolution {
+    fn default() -> Self {
+        Self::Grid {
+            grid: Resolution::default(),
+        }
+    }
+}
+
+impl From<Resolution> for TransferResolution {
+    fn from(grid: Resolution) -> Self {
+        Self::Grid { grid }
+    }
+}
+
+impl TransferResolution {
+    /// Every transfer resolution, coarsest first: the four grids, then the bins.
+    pub const ALL: [TransferResolution; 5] = [
+        Self::Grid {
+            grid: Resolution::Twelfth,
+        },
+        Self::Grid {
+            grid: Resolution::TwentyFourth,
+        },
+        Self::Grid {
+            grid: Resolution::FortyEighth,
+        },
+        Self::Grid {
+            grid: Resolution::NinetySixth,
+        },
+        Self::Bins,
+    ];
+
+    /// The column grid the transfer function is stored on: the finest one under the bins.
+    pub fn grid(self) -> Resolution {
+        match self {
+            Self::Grid { grid } => grid,
+            Self::Bins => Resolution::NinetySixth,
+        }
+    }
+}
+
 /// How a spectrum resolves frequency.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]

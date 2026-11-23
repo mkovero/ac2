@@ -219,7 +219,7 @@ pub fn transfer(name: &str) -> MeasConfig {
                 reference_input: 0,
                 measurement_input: 1,
                 averaging: TfAveraging::Fifo { blocks: 4 },
-                resolution: Resolution::FortyEighth,
+                resolution: Resolution::FortyEighth.into(),
                 smoothing: None,
                 depth: ac2_proto::model::DepthPolicy::EqualConfidence,
                 lf_window: ac2_proto::model::LfWindow::Standard,

@@ -105,12 +105,20 @@ MEAS_CONFIG = {
             "reference_input": 0,
             "measurement_input": 1,
             "averaging": {"type": "fifo", "blocks": 8},
-            "resolution": "ninety_sixth",
+            "resolution": {"type": "grid", "grid": "ninety_sixth"},
             "smoothing": {"fraction": "sixth", "mode": "magnitude"},
             "depth": {"type": "fast_lf", "max_settle_s": 1.0},
             "lf_window": "long",
             "peak": "hold",
         },
+    },
+}
+
+BINS_MEAS_CONFIG = {
+    **MEAS_CONFIG,
+    "kind": {
+        "type": "transfer",
+        "config": {**MEAS_CONFIG["kind"]["config"], "resolution": {"type": "bins"}},
     },
 }
 
@@ -571,7 +579,7 @@ def requests():
             },
         ),
         req(9, "gen.stop"),
-        req(10, "meas.create", {"config": MEAS_CONFIG}),
+        req(10, "meas.create", {"config": BINS_MEAS_CONFIG}),
         req(
             16,
             "delay.find",

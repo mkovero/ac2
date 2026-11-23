@@ -229,14 +229,18 @@ fn tf_and_sweep_take_a_resolution_and_meas_set_changes_it() {
             other => panic!("{other:?}"),
         })
     };
-    assert_eq!(tf(&[]).expect("default"), Resolution::FortyEighth);
+    assert_eq!(tf(&[]).expect("default"), Resolution::FortyEighth.into());
     assert_eq!(
         tf(&["--resolution", "1/96"]).expect("1/96"),
-        Resolution::NinetySixth
+        Resolution::NinetySixth.into()
     );
     assert_eq!(
         tf(&["--resolution", "12"]).expect("12"),
-        Resolution::Twelfth
+        Resolution::Twelfth.into()
+    );
+    assert_eq!(
+        tf(&["--resolution", "bins"]).expect("bins"),
+        TransferResolution::Bins
     );
     let e = tf(&["--resolution", "1/6"]).expect_err("refused");
     assert!(e.to_string().contains("1/12, 1/24, 1/48 or 1/96"), "{e}");
@@ -270,9 +274,54 @@ fn tf_and_sweep_take_a_resolution_and_meas_set_changes_it() {
     );
     let e = tf(&["--resolution", "multi"]).expect_err("refused");
     assert!(e.to_string().contains("a spectrum's"), "{e}");
+    // The bins are a tf's: a sweep, a spectrum and `meas set` on a sweep refuse them.
+    let e = config(&[
+        "sweep",
+        "--name",
+        "s",
+        "--ref",
+        "2",
+        "--meas",
+        "1",
+        "--out",
+        "1,2",
+        "--level",
+        "-50dbfs",
+        "--resolution",
+        "bins",
+    ])
+    .expect_err("refused");
+    assert!(matches!(e, CliError::Usage(_)), "{e}");
+    assert!(e.to_string().contains("bins is a tf's"), "{e}");
+    let e = config(&[
+        "spectrum",
+        "--name",
+        "s",
+        "--input",
+        "1",
+        "--resolution",
+        "bins",
+    ])
+    .expect_err("refused");
+    assert!(matches!(e, CliError::Usage(_)), "{e}");
+    let bins = MeasSet {
+        resolution: Some(crate::args::ResolutionArg::Bins),
+        ..MeasSet::default()
+    };
+    let e = meas_set(&sweep, bins).expect_err("refused");
+    assert!(e.to_string().contains("bins is a tf's"), "{e}");
+    let set = meas_set(
+        &config(&["tf", "--name", "t", "--ref", "2", "--meas", "1"]).expect("tf"),
+        bins,
+    )
+    .expect("set");
+    assert!(matches!(
+        set.kind,
+        MeasKind::Transfer { config } if config.resolution == TransferResolution::Bins
+    ));
 
     let fine = MeasSet {
-        resolution: Some(crate::args::ResolutionArg::grid(Resolution::NinetySixth)),
+        resolution: Some(crate::args::ResolutionArg::Grid(Resolution::NinetySixth)),
         ..MeasSet::default()
     };
     let set = meas_set(&sweep, fine).expect("set");

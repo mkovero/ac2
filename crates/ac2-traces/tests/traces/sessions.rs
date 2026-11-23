@@ -36,7 +36,7 @@ pub(super) fn session_sample() -> Session {
                             reference_input: 0,
                             measurement_input: 1,
                             averaging: TfAveraging::Fifo { blocks: 8 },
-                            resolution: Resolution::FortyEighth,
+                            resolution: Resolution::FortyEighth.into(),
                             smoothing: None,
                             depth: DepthPolicy::EqualConfidence,
                             lf_window: ac2_proto::model::LfWindow::Standard,

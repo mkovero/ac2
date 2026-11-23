@@ -212,7 +212,7 @@ impl Form {
                     .position(|w| w.1 == c.lf_window)
                     .unwrap_or(0),
             ),
-            resolution_field(c.resolution),
+            transfer_resolution_field(c.resolution),
         ];
         let mut f = Self::new(FormKind::TransferEdit, fields);
         f.meas_edit = Some(Box::new(m.clone()));
@@ -290,7 +290,7 @@ impl Form {
                 Field::choice(FieldId::Smoothing, "Smoothing", &SMOOTHING.map(|s| s.0), 0),
                 Field::choice(FieldId::Depth, "Depth", &DEPTH, 0),
                 Field::choice(FieldId::LfWindow, "LF window", &LF_WINDOW.map(|w| w.0), 0),
-                resolution_field(Resolution::default()),
+                transfer_resolution_field(TransferResolution::default()),
             ],
             FormKind::Spectrum => vec![
                 input_field,
@@ -630,6 +630,15 @@ impl Form {
             .min(RESOLUTIONS.len() - 1)]
         .1
     }
+
+    /// The transfer dialog's resolution, a grid or the bins.
+    fn transfer_resolution(&self) -> TransferResolution {
+        TRANSFER_RESOLUTIONS[self
+            .choice_index(FieldId::Resolution)
+            .unwrap_or(DEFAULT_RESOLUTION)
+            .min(TRANSFER_RESOLUTIONS.len() - 1)]
+        .1
+    }
 }
 
 impl Form {
@@ -699,7 +708,7 @@ impl Form {
                     _ => DepthPolicy::EqualConfidence,
                 };
                 config.lf_window = LF_WINDOW[pick(FieldId::LfWindow).min(LF_WINDOW.len() - 1)].1;
-                config.resolution = self.resolution();
+                config.resolution = self.transfer_resolution();
                 MeasKind::Transfer { config }
             }
             FormKind::Spectrum | FormKind::SpectrumEdit => {

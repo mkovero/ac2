@@ -272,7 +272,7 @@ async fn session_meas_delay_trace_flow() -> R {
             "reference_input": 0,
             "measurement_input": 1,
             "averaging": { "type": "fifo", "blocks": 8 },
-            "resolution": "forty_eighth",
+            "resolution": { "type": "grid", "grid": "forty_eighth" },
             "smoothing": { "fraction": "sixth", "mode": "magnitude_phase" },
             "depth": { "type": "equal_confidence" },
             "lf_window": "standard",
@@ -449,6 +449,16 @@ async fn session_meas_delay_trace_flow() -> R {
     let tracked = ok_json(&f, &["meas", "set", "main-l", "--peak", "track", "--json"]).await?;
     assert_eq!(tracked["config"]["kind"]["config"]["peak"], "track");
     assert_eq!(tracked["config_rev"], held["config_rev"]);
+    // The finest step: the analysis's own bins.
+    let bins = ok_json(
+        &f,
+        &["meas", "set", "main-l", "--resolution", "bins", "--json"],
+    )
+    .await?;
+    assert_eq!(
+        bins["config"]["kind"]["config"]["resolution"],
+        json!({ "type": "bins" })
+    );
     Ok(())
 }
 

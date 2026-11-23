@@ -56,5 +56,6 @@ mod sweep_inputs;
 mod sync;
 mod traces;
 mod transfer;
+mod transfer_bins;
 mod walk;
 mod walk_sweep;

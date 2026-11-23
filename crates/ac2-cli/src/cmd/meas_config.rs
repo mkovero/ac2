@@ -50,12 +50,12 @@ fn spec_resolution(
     fft: Option<SampleCount>,
 ) -> Result<SpecResolution, CliError> {
     match (r, fft) {
-        (Some(r), _) if !r.multi => Err(CliError::Usage(
+        (Some(ResolutionArg::Multi(grid)), _) => Ok(SpecResolution::Multi { grid }),
+        (Some(_), _) => Err(CliError::Usage(
             "a spectrum takes --resolution multi or multi:1/N (the multi-resolution bands), \
              or --fft for one FFT"
                 .into(),
         )),
-        (Some(r), _) => Ok(SpecResolution::Multi { grid: r.grid }),
         (None, Some(n)) => Ok(SpecResolution::Fixed {
             fft_len: fft_len(n)?,
         }),
@@ -175,15 +175,6 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
             n.kind
         )));
     }
-    let resolution = match n.kind {
-        MeasKindArg::Spectrum => Resolution::default(),
-        _ => n
-            .resolution
-            .map(ResolutionArg::columns)
-            .transpose()
-            .map_err(CliError::Usage)?
-            .unwrap_or_default(),
-    };
     if n.average.is_some() && !matches!(n.kind, MeasKindArg::Spectrum | MeasKindArg::Rta) {
         return Err(CliError::Usage(format!(
             "--average applies to spectrum and rta, not {:?}{}",
@@ -288,7 +279,12 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
                     gate: n.gate.map(|g| g.0),
                     tail: n.tail.map(|t| t.0),
                     lf_harmonics: n.lf_harmonics.unwrap_or_default().into(),
-                    resolution,
+                    resolution: n
+                        .resolution
+                        .map(ResolutionArg::columns)
+                        .transpose()
+                        .map_err(CliError::Usage)?
+                        .unwrap_or_default(),
                 })?,
             }
         }
@@ -309,7 +305,12 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
                         }
                     },
                     averaging: TfAveraging::Fifo { blocks: n.blocks },
-                    resolution,
+                    resolution: n
+                        .resolution
+                        .map(ResolutionArg::transfer)
+                        .transpose()
+                        .map_err(CliError::Usage)?
+                        .unwrap_or_default(),
                     smoothing: n
                         .smooth
                         .map(|f| {
@@ -462,7 +463,7 @@ pub(crate) fn meas_set(config: &MeasConfig, set: MeasSet) -> Result<MeasConfig, 
     if set.is_empty() {
         return Err(CliError::Usage(
             "say what changes: --average (spectrum, rta), --blocks (tf), --fft, --window or \
-             --level (spectrum), --resolution (tf, sweep; multi[:1/N] for a spectrum), \
+             --level (spectrum), --resolution (tf, sweep; bins for a tf; multi[:1/N] for a spectrum), \
              --peak (tf, spectrum, rta), --style, --span or --colours (spectrum, rta), \
              --colour or --offset"
                 .into(),
@@ -526,7 +527,7 @@ pub(crate) fn meas_set(config: &MeasConfig, set: MeasSet) -> Result<MeasConfig, 
     if let Some(r) = set.resolution {
         match &mut config.kind {
             MeasKind::Transfer { config: c } => {
-                c.resolution = r.columns().map_err(CliError::Usage)?;
+                c.resolution = r.transfer().map_err(CliError::Usage)?;
             }
             MeasKind::Sweep { config: c } => {
                 c.resolution = r.columns().map_err(CliError::Usage)?;

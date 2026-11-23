@@ -269,9 +269,10 @@ pub enum MeasCmd {
         #[arg(long, value_enum)]
         level: Option<SpecLevelArg>,
         /// tf and sweep: Resolution, points per octave stored: `1/12`, `1/24`, `1/48`,
-        /// `1/96` (not smoothing). Spectrum: `multi` or `multi:1/N`, the multi-resolution
-        /// bands (long windows low, short high) on a 1/N-octave grid.
-        #[arg(long, value_name = "1/N|multi[:1/N]")]
+        /// `1/96` (not smoothing); a tf also `bins`, the analysis's own bins (measured as
+        /// 1/96). Spectrum: `multi` or `multi:1/N`, the multi-resolution bands (long windows
+        /// low, short high) on a 1/N-octave grid.
+        #[arg(long, value_name = "1/N|bins|multi[:1/N]")]
         resolution: Option<ResolutionArg>,
         /// The colour its curves are drawn in: `1` … `8` (the app's `colour N`), `grey`,
         /// or `auto` (by its id, the default). Not for a math trace (its measurement's).
@@ -421,10 +422,11 @@ pub struct MeasNew {
     /// tf and sweep: Resolution, the points per octave stored, `1/12`, `1/24`, `1/48`
     /// (default) or `1/96`. Not smoothing (a display edit, `--smooth`): a finer resolution
     /// adds columns, and below a frequency set by the analysis window they are
-    /// interpolation, not detail (the plot marks where). Spectrum: `multi` or `multi:1/N`
-    /// instead of one `--fft`: six windows from 0.68 s at the lowest frequencies to 21 ms
-    /// at the highest, on 1/N-octave columns (1/48 by default).
-    #[arg(long, value_name = "1/N|multi[:1/N]")]
+    /// interpolation, not detail (the plot marks where). A tf also takes `bins`, the
+    /// analysis's own bins, finer than any grid (measured as 1/96). Spectrum: `multi` or
+    /// `multi:1/N` instead of one `--fft`: six windows from 0.68 s at the lowest
+    /// frequencies to 21 ms at the highest, on 1/N-octave columns (1/48 by default).
+    #[arg(long, value_name = "1/N|bins|multi[:1/N]")]
     pub resolution: Option<ResolutionArg>,
     /// Display smoothing, 1/N octave (tf: magnitude and phase; spectrum: power, and the
     /// level then no longer reads as tone level).

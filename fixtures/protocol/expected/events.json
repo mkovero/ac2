@@ -38,7 +38,10 @@
         "type": "fifo",
         "blocks": 8
        },
-       "resolution": "ninety_sixth",
+       "resolution": {
+        "type": "grid",
+        "grid": "ninety_sixth"
+       },
        "smoothing": {
         "fraction": "sixth",
         "mode": "magnitude"

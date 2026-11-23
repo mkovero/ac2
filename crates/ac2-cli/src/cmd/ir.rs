@@ -596,7 +596,7 @@ mod tests {
             gate: None,
             tail: None,
             lf_harmonics: LfHarmonicsArg::Standard,
-            resolution: crate::args::ResolutionArg::grid(Resolution::FortyEighth),
+            resolution: crate::args::ResolutionArg::Grid(Resolution::FortyEighth),
             name: None,
             force: false,
         }
@@ -637,6 +637,14 @@ mod tests {
         assert!(describe(&r).contains("in 1,3 re in 2"));
         assert!(request(&args(), (1, vec![0, 1])).is_err());
         assert!(request(&args(), (1, vec![])).is_err());
+        // A sweep has no bins of its own to offer.
+        let mut a = args();
+        a.resolution = crate::args::ResolutionArg::Bins;
+        let e = request(&a, (1, vec![0])).expect_err("bins");
+        assert!(
+            matches!(&e, CliError::Usage(m) if m.contains("bins is a tf's")),
+            "{e}"
+        );
     }
 
     #[test]

@@ -9,3 +9,4 @@ mod fuzz;
 mod leq_presets;
 mod roundtrip;
 mod spl_log_history_band_log_caps;
+mod transfer_resolution;
