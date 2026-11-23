@@ -1,5 +1,5 @@
 {
-  "proto_version": 102,
+  "proto_version": 103,
   "value": {
     "autosave": {
       "log_failures": [],
@@ -41,6 +41,7 @@
       "link_offset": null,
       "peers": [],
       "rigs": [],
+      "standing": [],
       "transfers": []
     },
     "rig": {

@@ -233,7 +233,7 @@ fn every_frame_kind_roundtrips() {
         assert_eq!(back.topic(), f.topic());
         kinds.insert(format!("{:?}", f.data.kind()));
     }
-    assert_eq!(kinds.len(), 14);
+    assert_eq!(kinds.len(), 15);
 }
 
 #[test]

@@ -13,7 +13,7 @@ import zlib
 
 import msgpack
 
-PROTO_VERSION = 102
+PROTO_VERSION = 103
 MAX_HEADER_BYTES = 8192
 MAX_N = 1 << 16
 MAX_ARRAYS = 12
@@ -29,6 +29,7 @@ _DATA_TOPIC = re.compile(r"^d/(0|[1-9][0-9]*)/(" + "|".join(STREAMS) + r")$")
 _METER_TOPICS = {
     "session/levels": "session_levels",
     "session/preview": "preview_levels",
+    "source/levels": "source_levels",
     "session/gonio": "session_gonio",
     "preview/gonio": "preview_gonio",
 }
@@ -242,6 +243,8 @@ _HARMONIC_READING = ("tagged", {
     "unreadable": [("reason", None)],
 })
 _PEAK = [("level", None), ("judgement", None)]
+# A block's sample index with its capture time on system time, and the capture's breaks so far.
+_LEVELS_MARK = [("sample", None), ("system_ns", None), ("breaks", None)]
 _PAIR_LEVELS = [("left", None), ("right", None), ("correlation", None), ("quiet", None)]
 _LOUDNESS = [("source", ("tagged", {"pair": [("left", None), ("right", None)],
                                      "input": [("channel", None)]})),
@@ -281,6 +284,9 @@ META = {
     "levels": _LEVELS,
     "session_levels": [("channels", None), ("ballistic", None), ("pair_levels", ("list", _PAIR_LEVELS)),
                        ("loudness", ("list", _LOUDNESS))],
+    "source_levels": [("channels", None), ("ballistic", None), ("pair_levels", ("list", _PAIR_LEVELS)),
+                      ("loudness", ("list", _LOUDNESS)), ("sample_rate_hz", None),
+                      ("mark", ("opt", _LEVELS_MARK))],
     "preview_levels": [("backend", None), ("device", None), ("channels", None),
                        ("inputs", ("list", _PREVIEW_INPUT)), ("pairs", ("list", _PAIR)),
                        ("ballistic", None), ("pair_levels", ("list", _PAIR_LEVELS)),
@@ -310,6 +316,7 @@ DELTA_META = {
     "tf": [("filled", None), ("settling", ("opt", [("lo", None), ("hi", None)]))],
     "spl": [("level", None), ("lmax", None), ("lmin", None), ("leq", None), ("lpeak", None),
             ("duration", None)],
+    "source_levels": [("mark", ("opt", _LEVELS_MARK))],
 }
 DELTA_HEADER = [
     ("v", None), ("form", None), ("seq", None), ("base", None), ("audio_sample", None),

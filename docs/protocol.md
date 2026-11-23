@@ -43,7 +43,7 @@ daemon answered there.
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 102`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 103`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -520,8 +520,8 @@ Admitting a name already present replaces its entry, and admitting the rig's own
 every entry admitted as that rig, and only those: an operator's client authorized under the
 same name stays (`not_found` when no entry is that rig's). An
 admitted rig may send `hello` and `source.state` and nothing else (`refused`), and is sent
-only `audio/<channel>` frames (§5.1) and the §5.8 notices (`network_off`, `rejoin`); no
-`ka`. `source.state` → `SourceState` {`rig`, `name`,
+only `audio/<channel>` and `source/levels` frames (§5.1) and the §5.8 notices (`network_off`,
+`rejoin`); no `ka`. `source.state` → `SourceState` {`rig`, `name`,
 `clocks` (`Clocks`, with its `stamp_map`), `session`: `SourceSession` \| nil
 {`incarnation` (`StreamIncarnation` {`daemon`, `epoch`}), `sample_rate_hz`,
 `buffer_frames`, `replaying`, `capture_stamps` (whether its backend stamps capture
@@ -2209,10 +2209,11 @@ anything answers there again, a welcome or a failed handshake, or it is followed
 address; a plain loss reads unreachable) | unreachable{since} | not_admitted |
 key_changed | other_rig{found}}, `clock`: `PeerClock`
 {`relation` {measuring | agree | not_locked{reason: cross_rate{ppm, over} |
-own_clock{rig, ppm}} | cant_tell{reason: system_clock_unsynced{rig} |
+own_clock{rig, ppm} | other_rate{theirs, ours}} | cant_tell{reason: system_clock_unsynced{rig} |
 system_clock_not_stated{rig} | not_against_system_clock{rig} | no_capture_stamps |
-clocks_disagree{by} | no_audio}}, `ppm`, `span`, `last_change`}, `bytes_per_s`, `window`
-(bytes of frames the link may have in flight)}], one per rig the session's remote inputs are on),
+clocks_disagree{by} | no_audio | no_marks | no_session{rig} | link_down}}, `ppm`, `span`,
+`last_change`}, `bytes_per_s`, `window` (bytes of frames the link may have in flight)}], one
+per rig the session's remote inputs are on),
 `inputs` ([`RemoteInputStatus` {`slot`, `audio` {waiting | on_this_rig | no_session |
 not_captured | replaying | rate_mismatch{theirs, ours} | starting | streaming}, `anchor`
 (nil | system_time | arrival{reason: system_clock | no_capture_stamps | no_stamp_map |
@@ -2229,8 +2230,17 @@ and `find_again` stay until a pick, a typed delay or a find), `slip` (`DelaySlip
 {`by` (s)}: the remote audio slipped and the delay moved by exactly that; said a minute),
 `delay_drift` (s per minute \| nil: the delay drifts above 0.05 ms/min over 2 min),
 `late` (remote audio keeps arriving after the link offset: raise it)}], one per transfer
-function with exactly one channel on a remote rig); committed when any of it changes; the
-clock relation is reported only, never corrected for),
+function with exactly one channel on a remote rig), `standing` ([`StandingRig` {`rig`,
+`name`, `link` (as `RemoteRig`), `session` (`StandingSession` \| nil {`sample_rate_hz`,
+`channels` (its captured inputs)}: while its `source/levels` frames come), `clock`
+(`PeerClock` from the marks on those frames alone, §5.1, by the same windows and rules as
+`rigs`; `other_rate` when the two sessions' nominal rates differ, nothing fitted;
+`no_marks` while frames come without marks; `no_session` naming the rig without one;
+`link_down` while the link is not up), `marks_for` (s \| nil: how long marks have been
+paired since both rigs' runs began; a link gap leaves a hole and does not start it again,
+either rig's new session or daemon does)}], one per paired rig, with or without remote
+inputs or audio); committed when any of it changes; the clock relations are reported only,
+never corrected for),
 `sweep` (`SweepRun` | nil: the latest `sweep.run` run),
 `dynamics` (`DynamicsRun` | nil: the latest `dynamics.run` run),
 `autosave` (`Autosave`: `state` {off | saved | pending | failed{reason}}, `saved_at: WallNs |
@@ -2343,6 +2353,7 @@ Replay buffer: last 1024 events or 60 s, whichever holds fewer.
 | `timing` | loopback timing monitor |
 | `evt` | state events (§4.2) |
 | `audio/<channel>` | raw capture of device input `<channel>`, to admitted rigs only (below) |
+| `source/levels` | input meters of this rig's own captured inputs with a timing mark, to admitted rigs only (below) |
 | `ka` | keepalive, every 250 ms to a connection subscribed to it; one a second to one that is not and was sent nothing else in that second (not to admitted rigs) |
 
 A measurement topic is formed and sent only while someone subscribes to it. `tf`, `ir`,
@@ -2368,11 +2379,18 @@ The kind a topic carries (§5.3 `kind`, and the `meta` key):
 | `d/<meas>/<stream>` | that stream's kind (`tf`, `ir`, `rta`, `spec`, `spl`, `leq`, `band_leq`, `levels`) |
 | `session/levels` | `session_levels` |
 | `session/preview` | `preview_levels` |
+| `source/levels` | `source_levels` |
 | `session/gonio` | `session_gonio` |
 | `preview/gonio` | `preview_gonio` |
 | `timing` | `timing` |
 | `ka` | `ka` |
 | `evt`, `audio/<channel>` | none (not a frame of §5.2) |
+
+`source/levels` is formed while a session is open whether or not anyone subscribes, at the
+meter rate, and sent only to connections admitted as a rig; anyone else subscribing to it
+receives nothing. A paired rig subscribes it whenever its link is up, with or without remote
+inputs: each frame's `mark` (§5.4) pairs with this rig's own capture at the same system
+time, and that pairing over a minute is the clock relation in `remote.standing` (§4.1).
 
 ### 5.2 Layout
 
@@ -2402,7 +2420,7 @@ A frame goes in one of two forms, the header's second element (`form`):
 | `capture_wall_ns` | u64 | as §5.3 |
 | `protection` | u32 | as §5.3 |
 | `crc` | u32 | CRC of the frame's codes (below) |
-| `meta` | […] \| nil | the per-frame metadata: `tf` [filled, settling], `spl` [level, lmax, lmin, leq, lpeak, duration]; nil for every other kind |
+| `meta` | […] \| nil | the per-frame metadata: `tf` [filled, settling], `spl` [level, lmax, lmin, leq, lpeak, duration], `source_levels` [mark]; nil for every other kind |
 
 The **codes** of a frame are its arrays quantised to their `elem` encoding (below),
 concatenated in the header's array order, each code little-endian, a `bfp16` array's
@@ -2495,7 +2513,7 @@ layout as code.
 |---|---|---|
 | `v` | u16 | protocol version |
 | `form` | u8 | 0 (a keyframe; §5.2) |
-| `kind` | FrameKind | `tf`, `ir`, `rta`, `spec`, `spl`, `leq`, `band_leq`, `levels`, `session_levels`, `preview_levels`, `session_gonio`, `preview_gonio`, `timing`, `ka`; the kind its topic carries (§5.1) and the `meta` key |
+| `kind` | FrameKind | `tf`, `ir`, `rta`, `spec`, `spl`, `leq`, `band_leq`, `levels`, `session_levels`, `preview_levels`, `source_levels`, `session_gonio`, `preview_gonio`, `timing`, `ka`; the kind its topic carries (§5.1) and the `meta` key |
 | `seq` | u64 | per topic per incarnation, increasing; not contiguous (a frame replaced before it was sent never goes), so a delta names its base's |
 | `audio_sample` | u64 | session sample index (origin = session open) of the newest sample in the frame |
 | `session_epoch` | u32 | frames from older epochs are discarded |
@@ -2535,6 +2553,7 @@ newest frame's age is over that, or when the daemon stopped responding.
 | `levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask | `channels` (device input per column; length n) |
 | `session_levels` | `peak`: dbfs, `rms`: dbfs, `clip`: bitmask, `ppm`: dbfs (the `ballistic`'s reading; the true peak where VU is chosen but not offered on the input, and under `momentary` / `short_term`), `true_peak`: dbtp, `max`: dbfs (highest `ppm` of the chosen ballistic since `levels.reset`), `overs`: count (since `levels.reset`) | `channels` (device input per column; length n), `ballistic` (`Ballistic`), `pair_levels` ([`PairLevels`] {`left`, `right`, `correlation`: f32 \| nil (−1 … 1 over the rig's window), `quiet`: `left` \| `right` \| nil (the side below the gate; then `correlation` is nil)}: every declared pair whose both inputs are captured), `loudness` ([`SourceLoudness`], below) |
 | `preview_levels` | as `session_levels` | `backend`, `device`, `channels` (device input per column; length n), `inputs` ([PreviewInput] as `session.preview` declared them), `pairs` ([Pair]), `ballistic`, `pair_levels` ([`PairLevels`], one per declared pair), `loudness` ([`SourceLoudness`]; a preview's sources never carry into the session) |
+| `source_levels` | as `session_levels`, over the rig's own captured inputs (no remote input) | `channels`, `ballistic`, `pair_levels`, `loudness` as `session_levels`; `sample_rate_hz` (the session's nominal rate); `mark` (`LevelsMark` \| nil {`sample` (session sample index of the newest block's first frame), `system_ns` (its capture time on the rig's system clock, ns since the Unix epoch), `breaks` (continuity breaks of the capture so far)}; nil while the rig stamps no capture times or its stamp clock is not yet mapped onto system time) |
 | `session_gonio` | `gonio_x`, `gonio_y`: gonio_unit — every pair's 256 points in turn (n = 256 × pairs), `x = (r − l)/√2`, `y = (l + r)/√2` divided by the pair's auto gain (a mono signal is a vertical line, a left-only one leans left), one pair drawn from a random position in each of 256 bins of the frame's samples | `pairs` ([`GonioPairMeta`] {`left`, `right`, `gain_dbfs`: the auto gain, dBFS of the pair magnitude `√(l² + r²)`}) |
 | `preview_gonio` | as `session_gonio`, for the previewed device's declared pairs | as `session_gonio` |
 | `timing` | none | `status` (TimingStatus), `window` {capture_start, offset, psr, loopback, stimulus} |
@@ -2748,6 +2767,10 @@ least 64). Each admitted rig has a FIFO of its own, so a slow rig never holds ba
 others. Its frames are never conflated: the FIFO holds up to the window, and past it the
 oldest frames are dropped and counted. A frame larger than the window goes alone. The
 receiver sees a loss as a jump in `start_sample`.
+
+A rig's `source/levels` frames are charged to the same window as any topic's frames, outside
+the audio FIFO: one waiting for credit is replaced by a newer one. The rig's link returns
+credit for them as for audio.
 
 ## 6. Grids
 
