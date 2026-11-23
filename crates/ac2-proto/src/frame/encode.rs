@@ -171,6 +171,16 @@ pub(super) fn quantise(frame: &Frame) -> Result<CodedFrame, EncodeError> {
             programme_cols(&mut cols, &f.ppm, &f.true_peak, &f.max, &f.overs);
             FrameMeta::PreviewLevels(f.meta.clone())
         }
+        FrameData::SourceLevels(f) => {
+            cols.push((desc(ArrayName::Peak, Unit::Dbfs), Col::F(&f.peak)));
+            cols.push((desc(ArrayName::Rms, Unit::Dbfs), Col::F(&f.rms)));
+            cols.push((
+                desc(ArrayName::Clip, Unit::Bitmask),
+                Col::U(mask_slice(&f.clip)),
+            ));
+            programme_cols(&mut cols, &f.ppm, &f.true_peak, &f.max, &f.overs);
+            FrameMeta::SourceLevels(f.meta.clone())
+        }
         FrameData::SessionGonio(f) => {
             gonio_cols(&mut cols, f);
             FrameMeta::SessionGonio(f.meta())

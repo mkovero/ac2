@@ -103,6 +103,7 @@ fn topic_panes(topic: &Topic) -> &'static [PaneKind] {
         | Topic::Timing
         | Topic::Evt
         | Topic::Ka
+        | Topic::SourceLevels
         | Topic::Audio { .. } => &[],
     }
 }

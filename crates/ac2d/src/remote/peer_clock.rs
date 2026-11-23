@@ -37,6 +37,11 @@ pub(crate) struct Evidence<'a> {
     pub(crate) streaming_for: Option<Duration>,
     /// The system-time anchor fell outside the link offset: the clocks disagree by this, s.
     pub(crate) disagree: Option<f64>,
+    /// Why there is no feed when there is none: no audio for the joined feed; for the
+    /// standing feed what stopped its marks.
+    pub(crate) absent: CantTellReason,
+    /// The two sessions' nominal rates differ: (theirs, ours).
+    pub(crate) other_rate: Option<(u32, u32)>,
 }
 
 /// The relation as it stands, with what it needs to hold *not locked*.
@@ -49,11 +54,16 @@ pub(crate) struct PeerClockWatch {
 
 impl Default for PeerClockWatch {
     fn default() -> Self {
+        Self::absent(CantTellReason::NoAudio)
+    }
+}
+
+impl PeerClockWatch {
+    /// A watch with no evidence yet, for `reason`.
+    pub(crate) fn absent(reason: CantTellReason) -> Self {
         Self {
             clock: PeerClock {
-                relation: PeerRelation::CantTell {
-                    reason: CantTellReason::NoAudio,
-                },
+                relation: PeerRelation::CantTell { reason },
                 ppm: None,
                 span: None,
                 last_change: None,
@@ -92,10 +102,15 @@ fn own_line(rig: RigId, c: &Clocks) -> Result<Option<f64>, CantTellReason> {
 fn judge(e: &Evidence<'_>) -> PeerRelation {
     let cant = |reason| PeerRelation::CantTell { reason };
     let Some(theirs) = e.theirs.1 else {
-        return cant(CantTellReason::NoAudio);
+        return cant(e.absent);
     };
+    if let Some((theirs, ours)) = e.other_rate {
+        return PeerRelation::NotLocked {
+            reason: NotLockedReason::OtherRate { theirs, ours },
+        };
+    }
     let Some(streaming) = e.streaming_for else {
-        return cant(CantTellReason::NoAudio);
+        return cant(e.absent);
     };
     for (rig, c) in [(e.ours.0, e.ours.1), (e.theirs.0, theirs)] {
         if let Some(r) = system_reason(rig, c) {
@@ -165,7 +180,12 @@ impl PeerClockWatch {
     /// time `wall`; whether the relation changed.
     pub(crate) fn update(&mut self, e: &Evidence<'_>, now: Duration, wall: WallNs) -> bool {
         let judged = judge(e);
-        let held = matches!(self.clock.relation, PeerRelation::NotLocked { .. });
+        // Another nominal rate is a fact of the two sessions, not of a wandering rate: it
+        // holds exactly as long as it is so.
+        let held = matches!(
+            self.clock.relation,
+            PeerRelation::NotLocked { reason } if !matches!(reason, NotLockedReason::OtherRate { .. })
+        );
         let relation = match (&judged, held) {
             // Held not locked until a minute of clean evidence; measuring is clean too, as it
             // only says the windows are short.
@@ -234,6 +254,8 @@ mod tests {
             short: long.map(|p| (p, 40.0)),
             streaming_for: Some(Duration::from_secs(secs)),
             disagree: None,
+            absent: CantTellReason::NoAudio,
+            other_rate: None,
         }
     }
 

@@ -14,6 +14,7 @@ pub(crate) mod join;
 pub(crate) mod link;
 pub(crate) mod peer_clock;
 pub(crate) mod replay;
+pub(crate) mod standing;
 pub(crate) mod tap;
 
 /// The longest link offset (a WAN's worth).
@@ -164,6 +165,11 @@ pub(crate) enum RemoteMsg {
         inputs: Vec<InputReport>,
         rigs: Vec<RigReport>,
         link_offset: Seconds,
+    },
+    /// A paired rig's standing feed, once a second.
+    Standing {
+        rig: RigId,
+        report: Box<standing::StandingReport>,
     },
     /// A rig's mDNS advert, resolved: where a paired rig with its key answers now.
     Advert(Box<ac2_discovery::Rig>),

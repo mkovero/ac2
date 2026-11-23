@@ -505,6 +505,40 @@ fn an_app_is_never_served_audio() {
     );
 }
 
+/// `source/levels` is another rig's to read: an app's subscription is not taken, a rig's is.
+#[test]
+fn source_levels_go_to_a_rig_and_never_to_an_app() {
+    let mut r = Rig::new();
+    let d = r.dealer(DATA_WINDOW_DEFAULT);
+    for t in [Topic::SourceLevels, Topic::Ka] {
+        up(
+            &d,
+            DataUp::Subscribe {
+                sub: Subscription::Topic(t),
+            },
+        );
+    }
+    r.pump_until(|r| r.interest.count(b"ka") >= 2);
+    assert_eq!(r.interest.count(b"source/levels"), 0);
+
+    let mut r = Rig::new();
+    r.client = Some(CurvePeer {
+        name: "pupu".into(),
+        key: ac2_zmq::KeyPair::generate().unwrap().public,
+    });
+    r.admission = Admission::Rig(1);
+    let d = r.ctx.socket(SocketType::Dealer).unwrap();
+    d.set_linger(Some(Duration::ZERO)).unwrap();
+    d.connect(&r.endpoint).unwrap();
+    up(
+        &d,
+        DataUp::Subscribe {
+            sub: Subscription::Topic(Topic::SourceLevels),
+        },
+    );
+    r.pump_until(|r| r.interest.count(b"source/levels") == 1);
+}
+
 /// Revoking a key drops its connection at once, subscriptions and all.
 #[test]
 fn a_revoked_key_is_dropped_at_once() {

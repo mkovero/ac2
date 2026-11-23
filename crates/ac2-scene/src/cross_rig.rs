@@ -170,6 +170,11 @@ pub fn banner(label: &str, x: &CrossRigTransfer, r: &RemoteState, ours: &str) ->
                     format::signed(ppm, 1)
                 )
             }
+            NotLockedReason::OtherRate { theirs: t, ours: o } => format!(
+                "{label} stopped: {theirs} runs {}, {ours} {}.",
+                crate::audio::rate_text(t),
+                crate::audio::rate_text(o)
+            ),
         }),
         (StopWhy::NotLocked, _) => Some(format!(
             "{label} stopped: {ours} and {theirs} are not on one clock. Lock both interfaces \
@@ -256,17 +261,13 @@ pub fn status_cli(r: &RemoteState, measurements: &[Measurement], ours: &str) -> 
 /// colour.
 pub fn clock_words(r: &RemoteState, rig: &RemoteRig) -> (String, bool) {
     match rig.clock.relation {
-        PeerRelation::NotLocked { reason } => {
-            let ppm = match reason {
-                NotLockedReason::CrossRate { ppm, .. } | NotLockedReason::OwnClock { ppm, .. } => {
-                    ppm
-                }
-            };
-            (
+        PeerRelation::NotLocked { reason } => match reason {
+            NotLockedReason::CrossRate { ppm, .. } | NotLockedReason::OwnClock { ppm, .. } => (
                 format!("CLOCKS NOT LOCKED {} ppm", format::signed(ppm, 1)),
                 true,
-            )
-        }
+            ),
+            NotLockedReason::OtherRate { .. } => ("CLOCKS NOT LOCKED: another rate".into(), true),
+        },
         PeerRelation::CantTell { .. } => ("CLOCKS: CAN'T TELL".into(), true),
         _ if r.transfers.iter().any(|x| x.rig == rig.rig && x.late) => {
             ("LINK OFFSET TOO SMALL".into(), true)

@@ -46,6 +46,11 @@ pub fn relation_text(r: &RemoteState, rel: &PeerRelation) -> String {
                 name_of(r, *rig),
                 ppm(*p)
             ),
+            NotLockedReason::OtherRate { theirs, ours } => format!(
+                "CLOCKS NOT LOCKED: runs {}, this rig {}",
+                rate_text(*theirs),
+                rate_text(*ours)
+            ),
         },
         PeerRelation::CantTell { reason } => {
             format!("CLOCKS: CAN'T TELL ({})", cant_tell_why(r, reason))
@@ -57,6 +62,9 @@ pub fn relation_text(r: &RemoteState, rel: &PeerRelation) -> String {
 pub fn cant_tell_why(r: &RemoteState, reason: &CantTellReason) -> String {
     match reason {
         CantTellReason::NoAudio => "no audio".to_owned(),
+        CantTellReason::NoMarks => "no timing in its levels".to_owned(),
+        CantTellReason::NoSession { rig } => format!("{} has no audio session", name_of(r, *rig)),
+        CantTellReason::LinkDown => "link down".to_owned(),
         CantTellReason::SystemClockUnsynced { rig } => {
             format!("{}'s system clock is not synced", name_of(r, *rig))
         }
@@ -403,6 +411,7 @@ mod tests {
             }],
             link_offset: Some(Seconds(0.01)),
             transfers: Vec::new(),
+            standing: Vec::new(),
         };
         let inputs = vec![RemoteInput {
             slot: 0,

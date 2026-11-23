@@ -169,6 +169,40 @@ pub struct RemoteState {
     pub link_offset: Option<Seconds>,
     /// The running transfer functions between this rig and one remote rig, by measurement.
     pub transfers: Vec<CrossRigTransfer>,
+    /// Every paired rig as its levels frames show it, audio or none: alive, its session, and
+    /// the clocks between it and this rig from the timing those frames carry.
+    pub standing: Vec<StandingRig>,
+}
+
+/// A paired rig as its always-on levels frames (`source/levels`) show it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StandingRig {
+    /// The rig.
+    pub rig: RigId,
+    /// Its name.
+    pub name: String,
+    /// The connection to it.
+    pub link: RemoteLink,
+    /// Its audio session as its levels frames last showed it; `None`: no session, or no
+    /// frame for a second.
+    pub session: Option<StandingSession>,
+    /// The clocks between the two rigs from the frames' timing marks, judged as the audio's
+    /// are (`clock.span`: how much of a window the figure covers).
+    pub clock: PeerClock,
+    /// How long marks have been paired since both rigs' sessions (re)started with the link
+    /// up; a link gap leaves a hole in them and does not start this again.
+    pub marks_for: Option<Seconds>,
+}
+
+/// A paired rig's open session as its levels frames show it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StandingSession {
+    /// Its nominal sample rate, Hz.
+    pub sample_rate_hz: u32,
+    /// The device input channels it meters (zero-based).
+    pub channels: Vec<u16>,
 }
 
 /// A rig the session takes inputs from.
@@ -364,6 +398,13 @@ pub enum NotLockedReason {
         /// Its rate against its system clock, ppm.
         ppm: f64,
     },
+    /// The two sessions run at different nominal rates.
+    OtherRate {
+        /// The remote rig's, Hz.
+        theirs: u32,
+        /// This rig's, Hz.
+        ours: u32,
+    },
 }
 
 /// Why the relation cannot be told.
@@ -395,6 +436,16 @@ pub enum CantTellReason {
     },
     /// No audio from the remote rig.
     NoAudio,
+    /// The remote rig's levels frames carry no timing marks (its capture is not stamped or
+    /// its stamps are not yet on its system clock), or none came for a while.
+    NoMarks,
+    /// A rig has no audio session, so no sample clock to relate.
+    NoSession {
+        /// Which rig.
+        rig: RigId,
+    },
+    /// The link to the remote rig is not up.
+    LinkDown,
 }
 
 /// A transfer function with one channel on this rig and one on a remote rig

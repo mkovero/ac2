@@ -24,7 +24,12 @@ const T: Duration = Duration::from_secs(20);
 
 /// A network-mode daemon on a real-time fake device whose system clock is stated synced,
 /// with `app` authorized and, when given, `keys` as its server key pair.
-fn rig(dir: &std::path::Path, name: &str, app: &KeyPair, keys: Option<&KeyPair>) -> Handle {
+pub(super) fn rig(
+    dir: &std::path::Path,
+    name: &str,
+    app: &KeyPair,
+    keys: Option<&KeyPair>,
+) -> Handle {
     rig_on(dir, name, app, keys, None)
 }
 
@@ -40,7 +45,7 @@ fn rig_on(
 }
 
 /// Where a test rig's network listens.
-enum Net {
+pub(super) enum Net {
     /// Any free ports.
     Any,
     /// Ctrl on this port and data on the next, as `ac2d` binds them.
@@ -57,6 +62,19 @@ fn rig_at(
     keys: Option<&KeyPair>,
     mdns: Option<ac2_discovery::Options>,
     net: Net,
+) -> Handle {
+    rig_with(dir, name, app, keys, mdns, net, realtime_rig())
+}
+
+/// [`rig_at`] on `backend`.
+pub(super) fn rig_with(
+    dir: &std::path::Path,
+    name: &str,
+    app: &KeyPair,
+    keys: Option<&KeyPair>,
+    mdns: Option<ac2_discovery::Options>,
+    net: Net,
+    backend: ac2_audio::FakeBackend,
 ) -> Handle {
     let d = dir.join(name);
     std::fs::create_dir_all(&d).unwrap();
@@ -78,7 +96,7 @@ fn rig_at(
         }
     }
     let mut cfg = net_config(
-        realtime_rig(),
+        backend,
         NetworkSecurity {
             server_key_file: d.join("server.key"),
             authorized_clients_file: d.join("authorized_clients"),
@@ -106,7 +124,7 @@ fn rig_at(
     Daemon::start(cfg).unwrap()
 }
 
-fn client(ctx: &Context, h: &Handle, keys: &KeyPair) -> (Client, RigId) {
+pub(super) fn client(ctx: &Context, h: &Handle, keys: &KeyPair) -> (Client, RigId) {
     let curve = CurveClient {
         keys: keys.clone(),
         server_key: h.server_public_key().unwrap(),
@@ -118,12 +136,12 @@ fn client(ctx: &Context, h: &Handle, keys: &KeyPair) -> (Client, RigId) {
     (c, w.rig_id)
 }
 
-fn remote(c: &mut Client) -> RemoteState {
+pub(super) fn remote(c: &mut Client) -> RemoteState {
     let s = c.snapshot(Command::StateSnapshot);
     s.state.remote
 }
 
-fn wait_remote(c: &mut Client, what: &str, mut pred: impl FnMut(&RemoteState) -> bool) {
+pub(super) fn wait_remote(c: &mut Client, what: &str, mut pred: impl FnMut(&RemoteState) -> bool) {
     let t0 = Instant::now();
     loop {
         let r = remote(c);

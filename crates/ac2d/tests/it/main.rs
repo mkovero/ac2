@@ -49,6 +49,7 @@ mod server;
 mod sessions;
 mod sim;
 mod spawn;
+mod standing;
 mod stimulus;
 mod sweep;
 mod sweep_inputs;

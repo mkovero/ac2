@@ -423,6 +423,7 @@ mod tests {
                 .collect(),
             link_offset: None,
             transfers: Vec::new(),
+            standing: Vec::new(),
         };
         let inputs = vec![RemoteInput {
             slot: 0,

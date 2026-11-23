@@ -7,8 +7,8 @@ use crate::units::{DaemonIncarnation, MeasId, Rev, SampleIndex, SessionEpoch, Wa
 
 use super::{
     BandLeqMeta, ClipFlags, FrameKind, GonioMeta, GonioPairMeta, IrMeta, KaMeta, LeqFlags, LeqMeta,
-    LevelsMeta, PreviewLevelsMeta, ProtectionFlags, RtaMeta, SessionLevelsMeta, SpecMeta, SplMeta,
-    TfMeta, TimingMeta, ValidityMask,
+    LevelsMeta, PreviewLevelsMeta, ProtectionFlags, RtaMeta, SessionLevelsMeta, SourceLevelsMeta,
+    SpecMeta, SplMeta, TfMeta, TimingMeta, ValidityMask,
 };
 
 /// Header fields shared by every kind.
@@ -212,6 +212,29 @@ pub struct SessionLevelsFrame {
     pub overs: Vec<u32>,
 }
 
+/// A rig's own input meters as served to a rig admitted to it ([`SourceLevelsMeta`]): the
+/// columns of [`SessionLevelsFrame`] over its captured inputs, none it joined from another
+/// rig.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SourceLevelsFrame {
+    /// Channels, ballistic, pairs, loudness, rate and the timing mark.
+    pub meta: SourceLevelsMeta,
+    /// As [`SessionLevelsFrame::peak`].
+    pub peak: Vec<f32>,
+    /// As [`SessionLevelsFrame::rms`].
+    pub rms: Vec<f32>,
+    /// As [`SessionLevelsFrame::clip`].
+    pub clip: Vec<ClipFlags>,
+    /// As [`SessionLevelsFrame::ppm`].
+    pub ppm: Vec<f32>,
+    /// As [`SessionLevelsFrame::true_peak`].
+    pub true_peak: Vec<f32>,
+    /// As [`SessionLevelsFrame::max`].
+    pub max: Vec<f32>,
+    /// As [`SessionLevelsFrame::overs`].
+    pub overs: Vec<u32>,
+}
+
 /// Meters of every input of a previewed device, with the same programme meters as
 /// [`SessionLevelsFrame`] over the kinds and pairs `session.preview` declared.
 #[derive(Debug, Clone, PartialEq)]
@@ -305,6 +328,8 @@ pub enum FrameData {
     SessionLevels(SessionLevelsFrame),
     /// `session/preview`.
     PreviewLevels(PreviewLevelsFrame),
+    /// `source/levels`.
+    SourceLevels(SourceLevelsFrame),
     /// `session/gonio`.
     SessionGonio(GonioFrame),
     /// `preview/gonio`.
@@ -338,6 +363,7 @@ impl FrameData {
             Self::Levels(_) => FrameKind::Levels,
             Self::SessionLevels(_) => FrameKind::SessionLevels,
             Self::PreviewLevels(_) => FrameKind::PreviewLevels,
+            Self::SourceLevels(_) => FrameKind::SourceLevels,
             Self::SessionGonio(_) => FrameKind::SessionGonio,
             Self::PreviewGonio(_) => FrameKind::PreviewGonio,
             Self::Timing(_) => FrameKind::Timing,
@@ -359,6 +385,7 @@ impl FrameData {
             Self::Levels(f) => data(f.meas, Stream::Levels),
             Self::SessionLevels(_) => Topic::SessionLevels,
             Self::PreviewLevels(_) => Topic::PreviewLevels,
+            Self::SourceLevels(_) => Topic::SourceLevels,
             Self::SessionGonio(_) => Topic::SessionGonio,
             Self::PreviewGonio(_) => Topic::PreviewGonio,
             Self::Timing(_) => Topic::Timing,

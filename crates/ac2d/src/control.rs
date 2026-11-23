@@ -73,6 +73,7 @@ pub(crate) mod rig;
 mod rig_meas;
 mod session_ctl;
 mod sim;
+mod standing;
 mod startup;
 mod sweeps;
 mod traces;

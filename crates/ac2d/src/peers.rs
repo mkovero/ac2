@@ -18,8 +18,8 @@
 //!   latest value: a frame waiting for credit queues behind the ones before it instead of
 //!   replacing them, up to the peer's window, the oldest dropped and counted past that.
 //!   Queued audio goes before the rotation, so a remote input's samples arrive in order and
-//!   on time while credit lasts. An app is never served audio, and a rig is served nothing
-//!   else.
+//!   on time while credit lasts. An app is never served audio nor `source/levels`, and a
+//!   rig is served nothing else.
 //! - **Lifecycle.** A peer is born with its first message. libzmq gives every connection a
 //!   routing id of its own, so a reconnect is a new peer, whose subscriptions bring
 //!   keyframes. A peer is dropped when a send to it fails `EHOSTUNREACH`, or when it holds
@@ -196,12 +196,16 @@ impl Peer {
         Ok(())
     }
 
-    /// Whether this peer may hold `sub`: audio only for a rig, everything else only for an
-    /// app. A rig is sent no keepalive either: it carries this rig's generator and health,
-    /// and the other rig learns this one is up from its `source.state` reads.
+    /// Whether this peer may hold `sub`: audio and this rig's own levels (`source/levels`)
+    /// only for a rig, everything else only for an app. A rig is sent no keepalive either: it
+    /// carries this rig's generator and health, and the other rig learns this one is up from
+    /// its `source.state` reads.
     fn may_subscribe(&self, sub: &Subscription) -> bool {
-        let audio = matches!(sub, Subscription::Topic(Topic::Audio { .. }));
-        audio == self.rig
+        let for_rigs = matches!(
+            sub,
+            Subscription::Topic(Topic::Audio { .. } | Topic::SourceLevels)
+        );
+        for_rigs == self.rig
     }
 
     fn wants(&self, t: &Topic) -> bool {
@@ -527,8 +531,8 @@ impl Peers {
                         .first(client.map(|c| c.key), "subscription not served")
                     {
                         tracing::warn!(
-                            "{who} may not subscribe {:?}: audio goes only to another rig, \
-                             and a rig is sent only audio (repeats at debug)",
+                            "{who} may not subscribe {:?}: audio and source levels go only \
+                             to another rig, and a rig is sent only those (repeats at debug)",
                             sub
                         );
                     }

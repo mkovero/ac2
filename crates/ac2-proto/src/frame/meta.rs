@@ -549,6 +549,42 @@ pub struct SessionLevelsMeta {
     pub loudness: Vec<SourceLoudness>,
 }
 
+/// A rig's own input meters for another rig: [`SessionLevelsMeta`] over its captured inputs
+/// only, with its rate and the timing mark the clocks between the rigs are measured from.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SourceLevelsMeta {
+    /// Device input channel of each column.
+    pub channels: Vec<u16>,
+    /// As [`SessionLevelsMeta::ballistic`].
+    pub ballistic: Ballistic,
+    /// As [`SessionLevelsMeta::pair_levels`].
+    pub pair_levels: Vec<PairLevels>,
+    /// As [`SessionLevelsMeta::loudness`].
+    pub loudness: Vec<SourceLoudness>,
+    /// The session's nominal sample rate, Hz.
+    pub sample_rate_hz: u32,
+    /// The newest block's timing; `None` where the rig stamps no capture times or its stamp
+    /// clock is not yet mapped onto its system clock.
+    pub mark: Option<LevelsMark>,
+}
+
+/// A block's sample index with its capture time put on system time by the rig that captured
+/// it: two rigs disciplined from one source share system time, so marks of both taken at the
+/// same system time relate their sample clocks with no audio exchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LevelsMark {
+    /// Session sample index of the block's first frame.
+    pub sample: SampleIndex,
+    /// Its capture time on the rig's system clock, ns since the Unix epoch.
+    pub system_ns: u64,
+    /// Continuity breaks (xruns, estimated gaps) of the capture so far: a count that moved
+    /// since the last mark seen says the sample index broke between them, which a counter
+    /// tells even when frames between were replaced by newer ones on the way.
+    pub breaks: u64,
+}
+
 /// Device preview meters metadata.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -711,6 +747,8 @@ pub enum FrameMeta {
     SessionLevels(SessionLevelsMeta),
     /// Preview levels.
     PreviewLevels(PreviewLevelsMeta),
+    /// A rig's own levels for another rig.
+    SourceLevels(SourceLevelsMeta),
     /// Session goniometer.
     SessionGonio(GonioMeta),
     /// Preview goniometer.
@@ -734,6 +772,7 @@ impl FrameMeta {
             Self::Levels(_) => FrameKind::Levels,
             Self::SessionLevels(_) => FrameKind::SessionLevels,
             Self::PreviewLevels(_) => FrameKind::PreviewLevels,
+            Self::SourceLevels(_) => FrameKind::SourceLevels,
             Self::SessionGonio(_) => FrameKind::SessionGonio,
             Self::PreviewGonio(_) => FrameKind::PreviewGonio,
             Self::Timing(_) => FrameKind::Timing,

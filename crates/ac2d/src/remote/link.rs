@@ -2,18 +2,21 @@
 //! own with two sync DEALERs on the other rig's ctrl and data sockets, under CURVE with this
 //! rig's own server key pair as the client key, pinned to the key the app gave.
 //!
-//! It reads the other rig's filtered state (`source.state`) once a second and subscribes the
+//! It reads the other rig's filtered state (`source.state`) once a second, subscribes the
 //! audio of the channels the open session takes from it, handing each frame to the fan-out
-//! through a bounded channel. libzmq reconnects on its own (backing off up to
-//! [`RECONNECT_MAX`]); a completed handshake brings `hello` again and the subscriptions
-//! again. The link never runs on the fan-out's thread and needs no async runtime.
+//! through a bounded channel, and always subscribes its levels (`source/levels`), whose
+//! timing marks relate the two rigs' clocks with no audio ([`super::standing`]). libzmq
+//! reconnects on its own (backing off up to [`RECONNECT_MAX`]); a completed handshake
+//! brings `hello` again and the subscriptions again. The link never runs on the fan-out's
+//! thread and needs no async runtime.
 
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, SyncSender, TryRecvError, TrySendError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use ac2_proto::flow::{DATA_WINDOW_MAX, FLOW_TOPIC, frame_charge, outside_window};
-use ac2_proto::frame::{AudioFrame, decode_audio};
+use ac2_proto::frame::{AudioFrame, CodedFrame, FrameData, WireFrame, decode_audio, decode_wire};
 use ac2_proto::model::{RemoteLink, RigPeer, SourceState};
 use ac2_proto::units::{RequestId, WallNs};
 use ac2_proto::{
@@ -29,6 +32,7 @@ use crate::control::ControlMsg;
 use crate::util::wall_ns;
 
 use super::RemoteMsg;
+use super::standing::{LocalClock, StandingFeed};
 
 /// How often the other rig's filtered state is read: its clocks' map is refitted every 5 s,
 /// and a session it reopens should show here within a second or so.
@@ -96,6 +100,7 @@ pub(crate) fn spawn(
     keys: KeyPair,
     ctx: Context,
     to_control: Sender<ControlMsg>,
+    local: Arc<LocalClock>,
 ) -> std::io::Result<LinkHandle> {
     let server_key = PublicKey::from_z85(&peer.key)
         .map_err(|_| std::io::Error::other(format!("{}: not a server key", peer.name)))?;
@@ -105,7 +110,7 @@ pub(crate) fn spawn(
         .name(format!("ac2d-link-{:x}", peer.rig.0))
         .spawn(move || {
             let curve = CurveClient { keys, server_key };
-            match Link::open(&ctx, &p, &curve) {
+            match Link::open(&ctx, &p, &curve, local) {
                 Ok(mut l) => l.run(&rx, &to_control),
                 Err(e) => {
                     tracing::error!("link to {}: {e}", p.name);
@@ -315,10 +320,27 @@ struct Link<'p> {
     /// The source's last refusal as logged: the link polls about once a second, and a
     /// standing refusal is one fact, not one log line per poll.
     warned: Option<String>,
+    /// This rig's own timing, as the fan-out writes it.
+    local: Arc<LocalClock>,
+    standing: StandingFeed,
+    /// The newest `source/levels` frame as coded, the base of the next delta.
+    held: Option<CodedFrame>,
+    /// When a keyframe was last asked for, after a delta that did not apply.
+    asked: Option<Instant>,
+    /// The other rig's device period, frames, from its last `source.state`.
+    their_period: Option<u32>,
 }
 
+/// A delta that does not apply asks for a keyframe, at most this often.
+const KEYFRAME_ASK_GAP: Duration = Duration::from_millis(500);
+
 impl<'p> Link<'p> {
-    fn open(ctx: &Context, peer: &'p RigPeer, curve: &CurveClient) -> ac2_zmq::Result<Self> {
+    fn open(
+        ctx: &Context,
+        peer: &'p RigPeer,
+        curve: &CurveClient,
+        local: Arc<LocalClock>,
+    ) -> ac2_zmq::Result<Self> {
         let (ctrl, ctrl_mon) = dealer(ctx, curve, &peer.ctrl, ac2_proto::MAX_CTRL_BYTES)?;
         let (data, data_mon) = dealer(ctx, curve, &peer.data, ac2_proto::MAX_DATA_PART_BYTES)?;
         let now = Instant::now();
@@ -340,6 +362,11 @@ impl<'p> Link<'p> {
             next_report: now,
             last: None,
             warned: None,
+            local,
+            standing: StandingFeed::new(),
+            held: None,
+            asked: None,
+            their_period: None,
         })
     }
 
@@ -365,6 +392,9 @@ impl<'p> Link<'p> {
     fn join(&self) {
         self.up(DataUp::Window {
             bytes: DATA_WINDOW_MAX,
+        });
+        self.up(DataUp::Subscribe {
+            sub: Subscription::Topic(Topic::SourceLevels),
         });
         for &channel in &self.channels {
             self.up(DataUp::Subscribe {
@@ -461,6 +491,11 @@ impl<'p> Link<'p> {
                     self.last = Some(link.clone());
                 }
                 report(to_control, self.peer, link, rate, DATA_WINDOW_MAX);
+                let report = self.standing.report(now);
+                let _ = to_control.send(ControlMsg::Remote(RemoteMsg::Standing {
+                    rig: self.peer.rig,
+                    report: Box::new(report),
+                }));
             }
         }
     }
@@ -495,6 +530,7 @@ impl<'p> Link<'p> {
                     if s.rig != self.peer.rig {
                         continue;
                     }
+                    self.their_period = s.session.as_ref().map(|x| x.buffer_frames);
                     if self.warned.take().is_some() {
                         tracing::info!("link to {}: answered again", self.peer.name);
                     }
@@ -556,6 +592,10 @@ impl<'p> Link<'p> {
                 continue;
             }
             let parts: Vec<&[u8]> = f.iter().map(Vec::as_slice).collect();
+            if topic == b"source/levels" {
+                self.levels(&parts);
+                continue;
+            }
             match decode_audio(&parts) {
                 Ok(a) => {
                     if let Some(to) = &self.to {
@@ -572,6 +612,45 @@ impl<'p> Link<'p> {
         let (bytes, events) = std::mem::take(&mut self.owed);
         if bytes > 0 || events > 0 {
             self.up(DataUp::Credit { bytes, events });
+        }
+    }
+
+    /// A `source/levels` frame: a keyframe whole, a delta on the one held; its mark goes to
+    /// the standing feed.
+    fn levels(&mut self, parts: &[&[u8]]) {
+        let now = Instant::now();
+        let coded = match decode_wire(parts) {
+            Ok(w @ WireFrame::Key(_)) => w.apply(None),
+            Ok(w @ WireFrame::Delta(_)) => w.apply(self.held.as_ref()),
+            Err(e) => Err(e),
+        };
+        let coded = match coded {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::debug!("link to {}: levels not read: {e}", self.peer.name);
+                if self
+                    .asked
+                    .is_none_or(|t| now.saturating_duration_since(t) >= KEYFRAME_ASK_GAP)
+                {
+                    self.asked = Some(now);
+                    self.up(DataUp::Keyframe {
+                        topic: Topic::SourceLevels,
+                    });
+                }
+                return;
+            }
+        };
+        let frame = coded.to_frame();
+        self.held = Some(coded);
+        match frame {
+            Ok(f) => {
+                if let FrameData::SourceLevels(l) = f.data {
+                    let local = self.local.get(now);
+                    self.standing
+                        .frame(&f.stamp, l, local, self.their_period, now);
+                }
+            }
+            Err(e) => tracing::debug!("link to {}: levels not read: {e}", self.peer.name),
         }
     }
 }

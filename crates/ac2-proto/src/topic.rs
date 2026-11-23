@@ -104,6 +104,9 @@ pub enum Topic {
     Evt,
     /// `ka`: keepalive.
     Ka,
+    /// `source/levels`: meters of this rig's own captured inputs with the timing mark the
+    /// clocks between rigs are measured from, served only to a rig admitted to this one.
+    SourceLevels,
     /// `audio/<channel>`: raw capture of one device input channel, one frame per device
     /// block, served only to a rig admitted to this one.
     Audio {
@@ -133,6 +136,7 @@ impl Topic {
         match s {
             "timing" => return Ok(Self::Timing),
             "session/levels" => return Ok(Self::SessionLevels),
+            "source/levels" => return Ok(Self::SourceLevels),
             "session/preview" => return Ok(Self::PreviewLevels),
             "session/gonio" => return Ok(Self::SessionGonio),
             "preview/gonio" => return Ok(Self::PreviewGonio),
@@ -176,6 +180,7 @@ impl fmt::Display for Topic {
         match self {
             Self::Data { meas, stream } => write!(f, "d/{}/{}", meas.0, stream.as_str()),
             Self::SessionLevels => f.write_str("session/levels"),
+            Self::SourceLevels => f.write_str("source/levels"),
             Self::PreviewLevels => f.write_str("session/preview"),
             Self::SessionGonio => f.write_str("session/gonio"),
             Self::PreviewGonio => f.write_str("preview/gonio"),
@@ -311,6 +316,7 @@ mod tests {
             Topic::PreviewLevels,
             Topic::SessionGonio,
             Topic::PreviewGonio,
+            Topic::SourceLevels,
             Topic::Audio { channel: 0 },
             Topic::Audio { channel: u16::MAX },
         ] {
@@ -320,6 +326,13 @@ mod tests {
             assert!(Topic::parse(bad.as_bytes()).is_err(), "{bad}");
         }
         assert!(!Subscription::InputMeters.matches(&Topic::PreviewGonio));
+        // A rig's own meters for another rig are not among an app's input meters.
+        assert!(!Subscription::InputMeters.matches(&Topic::SourceLevels));
+        assert!(
+            !Topic::SourceLevels
+                .to_bytes()
+                .starts_with(&Subscription::InputMeters.prefix())
+        );
         for t in [
             Topic::SessionLevels,
             Topic::PreviewLevels,

@@ -21,8 +21,9 @@ use std::time::{Duration, Instant};
 
 use ac2_audio::timer::{Sleeper, Waker};
 use ac2_audio::{BlockFlags, Delivery, DuplexStream};
+use ac2_proto::frame::LevelsMark;
 use ac2_proto::model::StopCause;
-use ac2_proto::units::{Rev, SessionEpoch, WallNs};
+use ac2_proto::units::{Rev, SampleIndex, SessionEpoch, WallNs};
 
 use crate::batch_pool::Pool;
 use crate::burst::BurstDetector;
@@ -34,6 +35,7 @@ use crate::jobs::programme::Programme;
 use crate::jobs::{Emitter, JobEnv, JobMsg};
 use crate::remote::ColumnMarks;
 use crate::remote::join::Joiner;
+use crate::remote::standing::{LocalClock, LocalMark};
 use crate::remote::tap::SourceTap;
 use crate::util::wall_ns;
 
@@ -263,6 +265,8 @@ pub(crate) enum FanoutMsg {
         remote: Vec<u16>,
         config_rev: Rev,
         programme: Box<Programme>,
+        /// Where this rig's own timing mark goes for the links to other rigs.
+        local: Arc<LocalClock>,
     },
     Stop,
 }
@@ -467,6 +471,7 @@ impl Fanout {
         remote: Vec<u16>,
         config_rev: Rev,
         programme: Programme,
+        local: Arc<LocalClock>,
     ) {
         self.send(FanoutMsg::Levels {
             env,
@@ -474,6 +479,7 @@ impl Fanout {
             remote,
             config_rev,
             programme: Box::new(programme),
+            local,
         });
     }
 
@@ -551,6 +557,15 @@ fn run(
     let mut joiner: Option<Box<Joiner>> = None;
     let mut ms: Vec<(f64, f64)> = vec![(0.0, 0.0); meters.ms.len()];
     let mut levels: Option<(SessionLevels, Emitter)> = None;
+    // This rig's timing (`remote::standing`): continuity breaks so far, the newest stamped
+    // block, and the cell the links read it from.
+    let mut breaks = 0u64;
+    let mut stamped: Option<(u64, u64)> = None;
+    let mut local_clock: Option<Arc<LocalClock>> = None;
+    let period_frames = cfg
+        .block_period
+        .map_or(0, |p| (p.as_secs_f64() * cfg.rate).round() as u32);
+    let slack = (cfg.handoff.as_secs_f64() * cfg.rate) as u64 + u64::from(period_frames);
     let mut gaps = Discontinuities::default();
     let mut pool = Pool::default();
     let queue_limit = (JOB_QUEUE_S * cfg.rate) as u64;
@@ -594,6 +609,7 @@ fn run(
                     remote,
                     config_rev,
                     programme,
+                    local,
                 } => match Emitter::connect(env) {
                     Ok(em) => {
                         let l = SessionLevels::new(
@@ -605,10 +621,14 @@ fn run(
                             *programme,
                         );
                         levels = Some((l, em));
+                        local_clock = Some(local);
                     }
                     Err(e) => tracing::error!("cannot start the session meters: {e}"),
                 },
                 FanoutMsg::Stop => {
+                    if let Some(c) = &local_clock {
+                        c.set(None);
+                    }
                     let outcome = stream.stop(STOP_TIMEOUT);
                     tracing::info!("audio stream stopped: {outcome:?}");
                     return;
@@ -653,6 +673,10 @@ fn run(
             }
             if block.flags.breaks_continuity() {
                 gaps.observe(now, block.start_sample, block.flags);
+                breaks += 1;
+            }
+            if block.capture_stamp {
+                stamped = Some((block.start_sample, block.host_ns));
             }
             if let Some((w, _)) = &mut clock {
                 w.block(
@@ -703,6 +727,29 @@ fn run(
                 });
             }
         }
+        let line = clock.as_ref().and_then(|(w, _)| w.stamp_line());
+        // The newest stamped block on system time: the mark another rig relates its own
+        // clock to. No stamps or no map yet: no mark, never one made up.
+        let levels_mark = line.zip(stamped).map(|(l, (sample, ns))| LevelsMark {
+            sample: SampleIndex(sample),
+            system_ns: l.system_of(ns) as u64,
+            breaks,
+        });
+        if let (Some(c), Some(l), Some(reference), false) =
+            (&local_clock, line, stamped, batch.is_empty())
+        {
+            c.set(Some(LocalMark {
+                epoch: cfg.epoch,
+                rate: cfg.sample_rate,
+                reference,
+                line: l,
+                latest: latest.load(Ordering::Relaxed),
+                slack,
+                period: period_frames.max(1),
+                breaks,
+                at: now,
+            }));
+        }
         stamp_arrivals(&mut batch, cfg.rate);
         // The jobs first: a frame waits on its job, the meters below on nothing, and they
         // cost the fan-out more per block than anything else here.
@@ -727,7 +774,6 @@ fn run(
             blocks.iter().for_each(|b| t.send(b));
         }
         if let Some(j) = &mut joiner {
-            let line = clock.as_ref().and_then(|(w, _)| w.stamp_line());
             let joined = j.push(blocks, line, now);
             for b in &joined {
                 if let Some((l, _)) = &mut levels {
@@ -744,7 +790,7 @@ fn run(
             None => pool.give_back(batch),
         }
         if let Some((l, em)) = &mut levels {
-            l.emit(em);
+            l.emit(em, levels_mark);
         }
         // Audio for another rig and a remote input waiting on this rig's blocks each add a
         // hand-off to the latency: they go every device period instead. A live spectrum

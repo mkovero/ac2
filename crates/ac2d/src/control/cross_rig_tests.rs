@@ -94,6 +94,8 @@ impl Sim {
             short: self.window(40),
             streaming_for: Some(Duration::from_secs(self.t - self.stream_from)),
             disagree: None,
+            absent: ac2_proto::model::CantTellReason::NoAudio,
+            other_rate: None,
         };
         self.watch
             .update(&e, Duration::from_secs(self.t), WallNs(self.t));
@@ -316,6 +318,8 @@ fn a_source_without_capture_stamps_cannot_tell() {
         short: s.window(40),
         streaming_for: Some(Duration::from_secs(100)),
         disagree: None,
+        absent: ac2_proto::model::CantTellReason::NoAudio,
+        other_rate: None,
     };
     s.watch.update(&e, Duration::from_secs(101), WallNs(101));
     let rel = s.watch.clock.relation;

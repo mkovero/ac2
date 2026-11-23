@@ -23,6 +23,7 @@ use crate::outbox::Outbox;
 use crate::remote::join::{JoinInput, JoinSetup, Joiner};
 use crate::remote::link::{self, LinkFrame, LinkHandle};
 use crate::remote::peer_clock::{Evidence, PeerClockWatch};
+use crate::remote::standing::{LocalClock, StandingReport};
 use crate::remote::tap::SourceTap;
 use crate::remote::{InputReport, RemoteMsg, RemoteRun, RigReport};
 use crate::rig::RigSettings;
@@ -58,7 +59,7 @@ pub(super) struct RemoteCtl {
     at_start: Vec<RigPeer>,
     links: BTreeMap<RigId, LinkHandle>,
     /// Each link's last report: state, bytes per second, window.
-    link_state: BTreeMap<RigId, (RemoteLink, f64, u32)>,
+    pub(super) link_state: BTreeMap<RigId, (RemoteLink, f64, u32)>,
     pub(super) sources: BTreeMap<RigId, Box<SourceState>>,
     joined: Option<Joined>,
     pub(super) watches: BTreeMap<RigId, PeerClockWatch>,
@@ -70,7 +71,13 @@ pub(super) struct RemoteCtl {
     /// its link here notices the old one is gone, or before it is paired.
     adverts: BTreeMap<String, ac2_discovery::Rig>,
     system_synced: Arc<AtomicBool>,
-    started: Instant,
+    pub(super) started: Instant,
+    /// This rig's own timing, written by the fan-out, read by every link.
+    pub(super) local_clock: Arc<LocalClock>,
+    /// Each link's last standing-feed report.
+    pub(super) standing: BTreeMap<RigId, StandingReport>,
+    /// The clocks between this rig and each paired rig from the standing feed.
+    pub(super) standing_watches: BTreeMap<RigId, PeerClockWatch>,
 }
 
 impl RemoteCtl {
@@ -87,6 +94,9 @@ impl RemoteCtl {
             adverts: BTreeMap::new(),
             system_synced: Arc::new(AtomicBool::new(false)),
             started: Instant::now(),
+            local_clock: Arc::new(LocalClock::default()),
+            standing: BTreeMap::new(),
+            standing_watches: BTreeMap::new(),
         }
     }
 }
@@ -130,7 +140,7 @@ pub(super) fn kind_inputs(kind: &MeasKind) -> Vec<u16> {
 }
 
 /// Whether blocks of `backend` carry the time their samples were captured.
-fn capture_stamps(backend: BackendKind) -> bool {
+pub(super) fn capture_stamps(backend: BackendKind) -> bool {
     match backend {
         BackendKind::Jack | BackendKind::CoreAudio | BackendKind::Fake | BackendKind::Replay => {
             true
@@ -211,6 +221,9 @@ impl Control {
             .sources
             .retain(|rig, _| peers.iter().any(|p| p.rig == *rig));
         self.remote
+            .standing
+            .retain(|rig, _| peers.iter().any(|p| p.rig == *rig));
+        self.remote
             .fed
             .retain(|rig| self.remote.links.contains_key(rig));
         let Some(keys) = keys else {
@@ -225,6 +238,7 @@ impl Control {
                 keys.clone(),
                 self.s.ctx.clone(),
                 self.s.to_self.clone(),
+                Arc::clone(&self.remote.local_clock),
             ) {
                 Ok(h) => {
                     self.remote
@@ -566,6 +580,12 @@ impl Control {
                     self.refresh_cal();
                 }
             }
+            RemoteMsg::Standing { rig, report } => {
+                if !self.remote.links.contains_key(&rig) {
+                    return;
+                }
+                self.remote.standing.insert(rig, *report);
+            }
             RemoteMsg::Joined {
                 epoch,
                 inputs,
@@ -641,6 +661,8 @@ impl Control {
                 short: report.and_then(|x| x.short),
                 streaming_for: report.and_then(|x| x.streaming_for),
                 disagree: report.and_then(|x| x.disagree),
+                absent: ac2_proto::model::CantTellReason::NoAudio,
+                other_rate: None,
             };
             let watch = self.remote.watches.entry(r.rig).or_default();
             watch.update(&evidence, now, wall);
@@ -691,6 +713,7 @@ impl Control {
         let link_offset = joined.map(|j| j.link_offset);
         self.cross_sync(&inputs, link_offset);
         let transfers = self.cross_entries();
+        let standing = self.standing_entries(network);
         let next = RemoteState {
             peers,
             rigs,
@@ -701,6 +724,7 @@ impl Control {
                 link_offset
             },
             transfers,
+            standing,
         };
         if next != self.store.state().remote {
             self.commit(Change::Remote(next));

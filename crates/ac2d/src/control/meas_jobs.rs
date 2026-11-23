@@ -290,6 +290,7 @@ impl Control {
             Self::remote_channels(rt),
             self.store.rev(),
             programme,
+            Arc::clone(&self.remote.local_clock),
         );
     }
 

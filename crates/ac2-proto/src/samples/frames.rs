@@ -6,10 +6,11 @@ use crate::frame::{
     AudioHealth, BandLeqFrame, BandLeqMeta, BandWindowState, ClipFlags, DaemonHealth, Frame,
     FrameData, FrameStamp, GONIO_POINTS, GenSummary, GonioFrame, GonioPair, HarmonicLevel,
     HarmonicReading, IrFrame, IrMeta, KaMeta, LeqFlags, LeqFrame, LeqMeta, LeqPeak, LeqRun,
-    LevelsFrame, LevelsMeta, LoudnessSource, MathState, OperandState, OperandStatus, PairLevels,
-    PreviewLevelsFrame, PreviewLevelsMeta, ProtectionFlags, RtaFrame, RtaMeta, SessionLevelsFrame,
-    SessionLevelsMeta, SourceLoudness, SpecBand, SpecBands, SpecFrame, SpecHarmonics, SpecMeta,
-    SplFrame, SplMeta, TfFrame, TfMeta, TimingMeta, TimingWindow, ValidityMask,
+    LevelsFrame, LevelsMark, LevelsMeta, LoudnessSource, MathState, OperandState, OperandStatus,
+    PairLevels, PreviewLevelsFrame, PreviewLevelsMeta, ProtectionFlags, RtaFrame, RtaMeta,
+    SessionLevelsFrame, SessionLevelsMeta, SourceLevelsFrame, SourceLevelsMeta, SourceLoudness,
+    SpecBand, SpecBands, SpecFrame, SpecHarmonics, SpecMeta, SplFrame, SplMeta, TfFrame, TfMeta,
+    TimingMeta, TimingWindow, ValidityMask,
 };
 use crate::grid::GridDef;
 use crate::model::*;
@@ -461,6 +462,38 @@ pub fn frames() -> Vec<Frame> {
                 ..stamp(None)
             },
             data: FrameData::SessionGonio(gonio_frame()),
+        },
+        Frame {
+            stamp: FrameStamp {
+                protection: ProtectionFlags::NONE,
+                ..stamp(None)
+            },
+            data: FrameData::SourceLevels(SourceLevelsFrame {
+                meta: SourceLevelsMeta {
+                    channels: vec![0, 1],
+                    ballistic: Ballistic::Type1,
+                    pair_levels: vec![PairLevels {
+                        left: 0,
+                        right: 1,
+                        correlation: Some(0.875),
+                        quiet: None,
+                    }],
+                    loudness: vec![pair_loudness()],
+                    sample_rate_hz: 96_000,
+                    mark: Some(LevelsMark {
+                        sample: SampleIndex(4_800_256),
+                        system_ns: 1_790_000_000_123_456_789,
+                        breaks: 1,
+                    }),
+                },
+                peak: vec![-6.0, -0.0625],
+                rms: vec![-18.5, -3.25],
+                clip: vec![ClipFlags::NONE, ClipFlags::HELD],
+                ppm: vec![-7.5, -1.25],
+                true_peak: vec![-5.75, 0.5],
+                max: vec![-2.0, 0.25],
+                overs: vec![0, 3],
+            }),
         },
         Frame {
             stamp: FrameStamp {

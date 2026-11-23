@@ -548,9 +548,13 @@ fn verdict(by: &RigClockFacts<'_>, other: &RigClockFacts<'_>) -> Option<Pair> {
                 who: name(*rig).to_owned(),
                 ppm: *ppm,
             },
+            NotLockedReason::OtherRate { .. } => Differ::Rates,
         }),
         PeerRelation::CantTell { reason } => Pair::CantTell(vec![match reason {
             CantTellReason::NoAudio => format!("no audio between {} and {}", by.name, other.name),
+            CantTellReason::NoMarks => format!("no timing in {}'s levels", other.name),
+            CantTellReason::NoSession { rig } => format!("{} has no audio session", name(*rig)),
+            CantTellReason::LinkDown => format!("no link between {} and {}", by.name, other.name),
             CantTellReason::SystemClockUnsynced { rig } => {
                 format!("{}'s system clock is not synced", name(*rig))
             }

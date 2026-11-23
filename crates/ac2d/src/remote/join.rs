@@ -55,9 +55,9 @@ const REPORT_EVERY: Duration = Duration::from_secs(1);
 const LATE_WINDOW: Duration = Duration::from_secs(3600);
 const MARGIN_WINDOW: Duration = Duration::from_secs(60);
 /// The cross-rig rate is fitted over a minute and over 40 s (§3.1), a point per 50 ms.
-const CROSS_LONG_S: f64 = 60.0;
-const CROSS_SHORT_S: f64 = 40.0;
-const CROSS_STEP_S: f64 = 0.05;
+pub(crate) const CROSS_LONG_S: f64 = 60.0;
+pub(crate) const CROSS_SHORT_S: f64 = 40.0;
+pub(crate) const CROSS_STEP_S: f64 = 0.05;
 /// The local blocks held back are bounded: past this the oldest go without remote audio.
 const MAX_HELD_S: f64 = 1.0;
 
@@ -344,10 +344,12 @@ impl Joiner {
     /// Local sample index (fractional) captured at the same system time as remote `stamp`.
     fn local_of(&self, r: usize, stamp: u64, line: Option<StampLine>) -> Option<f64> {
         let map = self.rigs[r].source.as_ref()?.clocks.stamp_map?;
-        let line = line?;
-        let (ref_sample, ref_stamp) = self.reference?;
-        let ours = line.stamp_of(map.system_of(stamp));
-        Some(ref_sample as f64 + (ours - ref_stamp as f64) * self.rate / 1e9)
+        Some(super::standing::local_at(
+            self.reference?,
+            line?,
+            self.rate,
+            map.system_of(stamp),
+        ))
     }
 
     fn audio(&mut self, r: usize, a: &AudioFrame, line: Option<StampLine>, now: Instant) {

@@ -79,6 +79,9 @@ pub(super) fn gate_of(rel: &PeerRelation, basis: &GateBasis) -> ClockGate {
             match reason {
                 NotLockedReason::CrossRate { over, .. } => over.0,
                 NotLockedReason::OwnClock { .. } => basis.own_line_s.unwrap_or(OWN_LINE_S),
+                // Never from the audio-fed relation: the joined feed refuses another rate
+                // per input before any window is fitted.
+                NotLockedReason::OtherRate { .. } => 0.0,
             },
         ),
         PeerRelation::CantTell { .. } => stop(StopWhy::CantTell, 0.0),

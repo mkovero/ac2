@@ -4,8 +4,8 @@ use crate::model::{
     Anchor, ArrivalReason, CalBasis, CalStatus, CantTellReason, Clocks, CrossRigTransfer,
     CrossTfState, DelaySlip, NotLockedReason, PeerClock, PeerRelation, Relock, RelockOutcome,
     RemoteAudio, RemoteInput, RemoteInputStatus, RemoteLink, RemoteRig, RemoteSide, RemoteState,
-    RigPeer, SourceCurve, SourceInput, SourceSession, SourceState, StampMap, StopWhy,
-    StreamIncarnation,
+    RigPeer, SourceCurve, SourceInput, SourceSession, SourceState, StampMap, StandingRig,
+    StandingSession, StopWhy, StreamIncarnation,
 };
 use crate::units::{DaemonIncarnation, DbSpl, MeasId, RigId, Seconds, SessionEpoch, WallNs};
 
@@ -242,7 +242,60 @@ pub fn remote_state() -> RemoteState {
         ],
         link_offset: Some(Seconds(0.0101)),
         transfers: cross_rig_transfers(),
+        standing: standing_rigs(),
     }
+}
+
+/// Paired rigs as their levels frames show them, in every verdict the marks give.
+fn standing_rigs() -> Vec<StandingRig> {
+    let s =
+        |link: RemoteLink, session: bool, relation: PeerRelation, ppm: Option<f64>| StandingRig {
+            rig: ketunkolo(),
+            name: "ketunkolo".into(),
+            link,
+            session: session.then(|| StandingSession {
+                sample_rate_hz: 96_000,
+                channels: vec![0, 1, 4],
+            }),
+            clock: PeerClock {
+                relation,
+                ppm,
+                span: ppm.map(|_| Seconds(59.95)),
+                last_change: Some(WallNs(1_790_000_000_000_000_000)),
+            },
+            marks_for: ppm.map(|_| Seconds(312.5)),
+        };
+    let cant = |reason| PeerRelation::CantTell { reason };
+    vec![
+        s(RemoteLink::Up, true, PeerRelation::Agree, Some(0.12)),
+        s(RemoteLink::Up, true, PeerRelation::Measuring, None),
+        s(
+            RemoteLink::Up,
+            true,
+            PeerRelation::NotLocked {
+                reason: NotLockedReason::OtherRate {
+                    theirs: 48_000,
+                    ours: 96_000,
+                },
+            },
+            None,
+        ),
+        s(RemoteLink::Up, true, cant(CantTellReason::NoMarks), None),
+        s(
+            RemoteLink::Up,
+            false,
+            cant(CantTellReason::NoSession { rig: ketunkolo() }),
+            None,
+        ),
+        s(
+            RemoteLink::Unreachable {
+                since: WallNs(1_790_000_000_000_000_000),
+            },
+            false,
+            cant(CantTellReason::LinkDown),
+            Some(0.12),
+        ),
+    ]
 }
 
 /// Cross-rig transfer functions in every state, relock and cue.

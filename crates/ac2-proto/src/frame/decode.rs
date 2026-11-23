@@ -10,7 +10,8 @@ use super::schema::{desc, level_unit, spec_unit};
 use super::{
     ArrayDesc, ArrayName, BandLeqFrame, CodedFrame, DataMessage, DecodeError, Frame, FrameData,
     FrameKind, FrameMeta, GONIO_POINTS, GonioFrame, GonioPair, IrFrame, LeqFrame, LevelsFrame,
-    PreviewLevelsFrame, RtaFrame, SessionLevelsFrame, SpecFrame, SplFrame, TfFrame, Unit,
+    PreviewLevelsFrame, RtaFrame, SessionLevelsFrame, SourceLevelsFrame, SpecFrame, SplFrame,
+    TfFrame, Unit,
 };
 
 /// An alignment's four view curves: all of them or none.
@@ -212,6 +213,7 @@ pub(super) fn topic_kind(topic: Topic) -> Option<FrameKind> {
         Topic::Data { stream, .. } => stream_kind(stream),
         Topic::SessionLevels => FrameKind::SessionLevels,
         Topic::PreviewLevels => FrameKind::PreviewLevels,
+        Topic::SourceLevels => FrameKind::SourceLevels,
         Topic::SessionGonio => FrameKind::SessionGonio,
         Topic::PreviewGonio => FrameKind::PreviewGonio,
         Topic::Timing => FrameKind::Timing,
@@ -363,6 +365,23 @@ pub(super) fn to_frame(c: &CodedFrame) -> Result<Frame, DecodeError> {
                 ));
             }
             FrameData::PreviewLevels(PreviewLevelsFrame {
+                meta,
+                peak: a.f32(ArrayName::Peak, Unit::Dbfs)?,
+                rms: a.f32(ArrayName::Rms, Unit::Dbfs)?,
+                clip: a.mask(ArrayName::Clip)?,
+                ppm: a.f32(ArrayName::Ppm, Unit::Dbfs)?,
+                true_peak: a.f32(ArrayName::TruePeak, Unit::Dbtp)?,
+                max: a.f32(ArrayName::Max, Unit::Dbfs)?,
+                overs: a.counts(ArrayName::Overs)?,
+            })
+        }
+        FrameMeta::SourceLevels(meta) => {
+            if meta.channels.len() != h.n as usize {
+                return Err(DecodeError::Schema(
+                    "source levels: channels.len() != n".into(),
+                ));
+            }
+            FrameData::SourceLevels(SourceLevelsFrame {
                 meta,
                 peak: a.f32(ArrayName::Peak, Unit::Dbfs)?,
                 rms: a.f32(ArrayName::Rms, Unit::Dbfs)?,

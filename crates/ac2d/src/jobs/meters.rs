@@ -7,7 +7,8 @@
 use std::time::{Duration, Instant};
 
 use ac2_proto::frame::{
-    FrameData, METER_FPS, ProtectionFlags, SessionLevelsFrame, SessionLevelsMeta,
+    FrameData, LevelsMark, METER_FPS, ProtectionFlags, SessionLevelsFrame, SessionLevelsMeta,
+    SourceLevelsFrame, SourceLevelsMeta,
 };
 use ac2_proto::topic::Topic;
 use ac2_proto::units::Rev;
@@ -27,6 +28,7 @@ pub(crate) struct SessionLevels {
     /// The remote inputs' meters, from the joined feed (its columns after the local ones).
     remote: Option<LevelsMeter>,
     programme: Programme,
+    sample_rate: u32,
     config_rev: Rev,
     wall: u64,
     cadence: Cadence,
@@ -58,6 +60,7 @@ impl SessionLevels {
                 )
             }),
             programme,
+            sample_rate,
             config_rev,
             wall: 0,
             cadence: Cadence::new(meter_period(), early),
@@ -77,8 +80,9 @@ impl SessionLevels {
         }
     }
 
-    /// Publishes a frame if one is due.
-    pub(crate) fn emit(&mut self, e: &Emitter) {
+    /// Publishes a frame if one is due; `mark`: the newest stamped block on system time,
+    /// carried on the frame other rigs read (`source/levels`).
+    pub(crate) fn emit(&mut self, e: &Emitter, mark: Option<LevelsMark>) {
         // Between frames the meter keeps accumulating: the next frame's peak covers the
         // whole gap, so no transient is lost to the rate limit.
         let now = Instant::now();
@@ -98,6 +102,30 @@ impl SessionLevels {
         };
         let gonio = e.wants(Topic::SessionGonio);
         let mut r = self.programme.take(gonio);
+        // Another rig reads this rig's own inputs only, published whether or not an app
+        // watches: its clocks are related to this one's through the mark.
+        if e.wants(Topic::SourceLevels) {
+            e.send(
+                stamp,
+                FrameData::SourceLevels(SourceLevelsFrame {
+                    meta: SourceLevelsMeta {
+                        channels: meta.channels.clone(),
+                        ballistic: r.ballistic,
+                        pair_levels: r.pair_levels.clone(),
+                        loudness: r.loudness.clone(),
+                        sample_rate_hz: self.sample_rate,
+                        mark,
+                    },
+                    peak: peak.clone(),
+                    rms: rms.clone(),
+                    clip: clip.clone(),
+                    ppm: r.ppm.clone(),
+                    true_peak: r.true_peak.clone(),
+                    max: r.max.clone(),
+                    overs: r.overs.clone(),
+                }),
+            );
+        }
         let (mut channels, mut peak, mut rms, mut clip) = (meta.channels, peak, rms, clip);
         // The programme meters run on the local inputs; a remote input's ballistic reads its
         // sample peak, the one peak its block statistics give. Its true peak and maximum

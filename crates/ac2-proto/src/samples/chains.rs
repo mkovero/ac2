@@ -88,7 +88,32 @@ fn spl_chain() -> Vec<Frame> {
     vec![f0, f1]
 }
 
+fn source_levels_chain() -> Vec<Frame> {
+    let f0 = of_kind(|d| matches!(d, FrameData::SourceLevels(_)));
+    let mut f1 = later(&f0, 1);
+    let FrameData::SourceLevels(l) = &mut f1.data else {
+        unreachable!("a source levels sample")
+    };
+    l.peak[0] = -5.5;
+    if let Some(m) = &mut l.meta.mark {
+        m.sample = SampleIndex(m.sample.0 + 3_200);
+        m.system_ns += 33_333_333;
+    }
+    // A rig whose stamp map lapsed: no mark, the rest the same.
+    let mut f2 = later(&f1, 1);
+    let FrameData::SourceLevels(l) = &mut f2.data else {
+        unreachable!("a source levels sample")
+    };
+    l.meta.mark = None;
+    vec![f0, f1, f2]
+}
+
 /// Every chain, by name.
 pub fn chains() -> Vec<(&'static str, Vec<Frame>)> {
-    vec![("tf", tf_chain()), ("ir", ir_chain()), ("spl", spl_chain())]
+    vec![
+        ("tf", tf_chain()),
+        ("ir", ir_chain()),
+        ("spl", spl_chain()),
+        ("source_levels", source_levels_chain()),
+    ]
 }

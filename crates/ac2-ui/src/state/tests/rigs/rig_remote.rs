@@ -241,6 +241,7 @@ pub(super) fn with_remote(t: &mut T, link: RemoteLink, audio: RemoteAudio) {
             }],
             link_offset: Some(Seconds(0.01)),
             transfers: Vec::new(),
+            standing: Vec::new(),
         };
     });
 }

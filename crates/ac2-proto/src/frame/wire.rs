@@ -89,13 +89,22 @@ struct SplPerFrame {
     duration: Seconds,
 }
 
+/// The per-frame metadata of a `source/levels` delta: its timing mark, which moves with every
+/// frame while the rest of its metadata may stand.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SourcePerFrame {
+    mark: Option<super::LevelsMark>,
+}
+
 /// What a delta carries of the metadata, fixed per kind: `tf` how full its averages are
-/// and where they are still filling, `spl` its
-/// readings, every other kind nothing (any change of its metadata goes as a keyframe).
+/// and where they are still filling, `spl` its readings, `source/levels` its timing mark,
+/// every other kind nothing (any change of its metadata goes as a keyframe).
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum PerFrame {
     Tf(TfPerFrame),
     Spl(SplPerFrame),
+    Source(SourcePerFrame),
     Static,
 }
 
@@ -113,6 +122,7 @@ fn per_frame(m: &FrameMeta) -> PerFrame {
             lpeak: s.lpeak,
             duration: s.duration,
         }),
+        FrameMeta::SourceLevels(s) => PerFrame::Source(SourcePerFrame { mark: s.mark }),
         // Named one by one: a new kind of metadata has to say here whether any of it
         // moves from frame to frame.
         FrameMeta::Ir(_)
@@ -146,7 +156,9 @@ fn with_per_frame(base: &FrameMeta, p: PerFrame) -> Option<FrameMeta> {
             s.lpeak = p.lpeak;
             s.duration = p.duration;
         }
-        (FrameMeta::Tf(_) | FrameMeta::Spl(_), _) | (_, PerFrame::Tf(_) | PerFrame::Spl(_)) => {
+        (FrameMeta::SourceLevels(s), PerFrame::Source(p)) => s.mark = p.mark,
+        (FrameMeta::Tf(_) | FrameMeta::Spl(_) | FrameMeta::SourceLevels(_), _)
+        | (_, PerFrame::Tf(_) | PerFrame::Spl(_) | PerFrame::Source(_)) => {
             return None;
         }
         (_, PerFrame::Static) => {}
@@ -307,6 +319,7 @@ pub fn encode_delta(
     let hb = match per_frame(&f.meta) {
         PerFrame::Tf(p) => msgpack(&head.with(p))?,
         PerFrame::Spl(p) => msgpack(&head.with(p))?,
+        PerFrame::Source(p) => msgpack(&head.with(p))?,
         PerFrame::Static => msgpack(&head)?,
     };
     let payload = (!f.arrays.is_empty()).then(|| packing::deflate(&raw));
@@ -600,6 +613,11 @@ fn decode_delta(topic: Topic, kind: FrameKind, body: &[u8]) -> Result<DeltaFrame
         FrameKind::Spl => {
             let (h, p): (DeltaHeader<SplPerFrame>, _) = header(body)?;
             let m = PerFrame::Spl(h.meta);
+            (h.with(()), m, p)
+        }
+        FrameKind::SourceLevels => {
+            let (h, p): (DeltaHeader<SourcePerFrame>, _) = header(body)?;
+            let m = PerFrame::Source(h.meta);
             (h.with(()), m, p)
         }
         _ => {

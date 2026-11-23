@@ -28,6 +28,8 @@ pub enum FrameKind {
     SessionLevels,
     /// Input meters of a device preview.
     PreviewLevels,
+    /// A rig's own input meters with its timing mark, for another rig.
+    SourceLevels,
     /// Goniometer points of the open session's pairs.
     SessionGonio,
     /// Goniometer points of a device preview's pairs.
