@@ -304,11 +304,12 @@ fn network_text(info: &ServerInfo) -> String {
     s
 }
 
+/// `  laptop  app  <fingerprint>`, `  rig-pupu  rig 00000000000000a1  <fingerprint>`: the
+/// kind in the app's word for it, a rig's id after it.
 fn authorized_line(a: &AuthorizedClient) -> String {
-    let kind = a
-        .rig
-        .map_or_else(String::new, |r| format!("  rig {:016x}", r.0));
-    format!("  {}  {}{kind}\n", a.name, a.fingerprint)
+    let kind = ac2_scene::rig::key_kind(a);
+    let id = a.rig.map_or_else(String::new, |r| format!(" {:016x}", r.0));
+    format!("  {}  {kind}{id}  {}\n", a.name, a.fingerprint)
 }
 
 fn refused_line(r: &RefusedKey) -> String {
@@ -362,4 +363,30 @@ fn info_text(info: &ServerInfo) -> String {
         }
     }
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An authorized key reads as an app or a rig, the app's words for it.
+    #[test]
+    fn an_authorized_key_says_app_or_rig() {
+        let app = AuthorizedClient {
+            name: "laptop".into(),
+            key: String::new(),
+            fingerprint: "ab12".into(),
+            rig: None,
+        };
+        assert_eq!(authorized_line(&app), "  laptop  app  ab12\n");
+        let rig = AuthorizedClient {
+            name: "rig-pupu".into(),
+            rig: Some(ac2_proto::units::RigId(0xa1)),
+            ..app
+        };
+        assert_eq!(
+            authorized_line(&rig),
+            "  rig-pupu  rig 00000000000000a1  ab12\n"
+        );
+    }
 }

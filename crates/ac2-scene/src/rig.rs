@@ -186,16 +186,32 @@ pub fn reason_kind_text(k: NetReasonKind) -> &'static str {
     }
 }
 
-/// One authorized client: `laptop · fingerprint 1a2b-…`.
+/// What an authorized key is: an app an operator authorized, or a rig admitted to take
+/// this rig's inputs. Every list of keys says it with the same word.
+pub fn key_kind(a: &AuthorizedClient) -> &'static str {
+    match a.rig {
+        Some(_) => "rig",
+        None => "app",
+    }
+}
+
+/// One authorized client: `laptop · app · fingerprint 1a2b-…`, `rig-pupu · rig · may take
+/// this rig's inputs · fingerprint 1a2b-…`.
 pub fn authorized_row(a: &AuthorizedClient) -> String {
     match a.rig {
         // A rig admitted to take this rig's inputs: what it may do, not only who it is.
         Some(_) => format!(
-            "{} · fingerprint {}",
-            crate::remote_inputs::admitted_row(&a.name),
+            "{} · {} · may take this rig's inputs · fingerprint {}",
+            a.name,
+            key_kind(a),
             a.fingerprint
         ),
-        None => format!("{} · fingerprint {}", a.name, a.fingerprint),
+        None => format!(
+            "{} · {} · fingerprint {}",
+            a.name,
+            key_kind(a),
+            a.fingerprint
+        ),
     }
 }
 
@@ -320,7 +336,16 @@ mod tests {
         };
         assert_eq!(
             authorized_row(&authorized[0]),
-            "laptop · fingerprint SHA256:b2aa 0c3d 9e41 7f60"
+            "laptop · app · fingerprint SHA256:b2aa 0c3d 9e41 7f60"
+        );
+        let rig = AuthorizedClient {
+            name: "rig-pupu".into(),
+            rig: Some(ac2_proto::units::RigId(7)),
+            ..authorized[0].clone()
+        };
+        assert_eq!(
+            authorized_row(&rig),
+            "rig-pupu · rig · may take this rig's inputs · fingerprint SHA256:b2aa 0c3d 9e41 7f60"
         );
         let now = WallNs(1_790_000_000_000_000_000 + 180_000_000_000);
         assert_eq!(

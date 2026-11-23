@@ -247,7 +247,7 @@ fn connection_lines_authorize_and_revoke() {
     );
     assert_eq!(
         conn_line_text(&ConnLine::Authorized("laptop".into()), Some(&s)),
-        "laptop · fingerprint SHA256:b2aa 0c3d 9e41 7f60"
+        "laptop · app · fingerprint SHA256:b2aa 0c3d 9e41 7f60"
     );
 }
 
