@@ -16,7 +16,7 @@ use ac2_proto::model::{
 use ac2_proto::units::{RigId, Seconds, WallNs};
 
 /// Each rig's own clock line and the cross-rig rate over a minute.
-const BOUND_PPM: f64 = 2.0;
+pub(crate) const BOUND_PPM: f64 = 2.0;
 /// The cross-rig rate over the short window.
 const SHORT_BOUND_PPM: f64 = 3.0;
 const LONG_S: f64 = 60.0;
@@ -37,6 +37,9 @@ pub(crate) struct Evidence<'a> {
     pub(crate) streaming_for: Option<Duration>,
     /// The system-time anchor fell outside the link offset: the clocks disagree by this, s.
     pub(crate) disagree: Option<f64>,
+    /// Marks arrive later than the link offset allows by this, s: transit, or the other
+    /// rig's system clock behind; the age alone cannot tell which.
+    pub(crate) late: Option<f64>,
     /// Why there is no feed when there is none: no audio for the joined feed; for the
     /// standing feed what stopped its marks.
     pub(crate) absent: CantTellReason,
@@ -130,6 +133,9 @@ fn judge(e: &Evidence<'_>) -> PeerRelation {
     if let Some(by) = e.disagree {
         return cant(CantTellReason::ClocksDisagree { by: Seconds(by) });
     }
+    if let Some(by) = e.late {
+        return cant(CantTellReason::MarksLate { by: Seconds(by) });
+    }
     for &(rig, l) in &lines {
         if let Some(ppm) = l
             && ppm.abs() > BOUND_PPM
@@ -165,7 +171,7 @@ fn judge(e: &Evidence<'_>) -> PeerRelation {
     PeerRelation::Agree
 }
 
-fn same_kind(a: &PeerRelation, b: &PeerRelation) -> bool {
+pub(crate) fn same_kind(a: &PeerRelation, b: &PeerRelation) -> bool {
     std::mem::discriminant(a) == std::mem::discriminant(b)
         && match (a, b) {
             (PeerRelation::CantTell { reason: x }, PeerRelation::CantTell { reason: y }) => {
@@ -254,6 +260,7 @@ mod tests {
             short: long.map(|p| (p, 40.0)),
             streaming_for: Some(Duration::from_secs(secs)),
             disagree: None,
+            late: None,
             absent: CantTellReason::NoAudio,
             other_rate: None,
         }

@@ -59,10 +59,7 @@ fn the_pane_title_names_the_remote_side() {
 fn agreeing_clocks_say_so_on_the_pane_and_nowhere_loudly() {
     let r = remote(PeerRelation::Agree);
     let x = tf(RemoteSide::Measurement, CrossTfState::Running);
-    assert_eq!(
-        status_lines(&x, &r, "X"),
-        vec!["clocks agree within 2 ppm · ketunkolo"]
-    );
+    assert_eq!(status_lines(&x, &r, "X"), vec!["clocks agree · ketunkolo"]);
     assert_eq!(banner("TF 3", &x, &r, "pupu"), None);
     assert_eq!(list_cue(&x), None);
     assert_eq!(faint_phase(&x), None);
@@ -176,7 +173,7 @@ fn a_relock_says_how_long_and_where_the_delay_went() {
     assert_eq!(
         status_lines(&x, &r, "X"),
         vec![
-            "clocks agree within 2 ppm · ketunkolo",
+            "clocks agree · ketunkolo",
             "clocks were not locked for 3 min 10 s · delay tracked again: 13.41 ms (was \
              12.38 ms)"
         ]
@@ -287,7 +284,7 @@ fn slip_drift_and_late_are_cues_not_refusals() {
     assert_eq!(
         status_lines(&x, &r, "X"),
         vec![
-            "clocks agree within 2 ppm · ketunkolo",
+            "clocks agree · ketunkolo",
             "ketunkolo's audio slipped 4.90 ms · delay moved with it",
             "delay drifting 0.09 ms/min: path or clocks",
             "link offset too small: raise Wait for remote inputs (now 10 ms)",
@@ -374,7 +371,10 @@ fn a_rigs_heading_says_the_relation_and_warns_in_words() {
     r.rigs[0].clock.relation = PeerRelation::CantTell {
         reason: CantTellReason::SystemClockUnsynced { rig: KETUNKOLO },
     };
-    assert_eq!(says(&r, &inputs), "CLOCKS: CAN'T TELL · paired · streaming");
+    assert_eq!(
+        says(&r, &inputs),
+        "CLOCKS: CAN'T TELL (ketunkolo's system clock is not synced) · paired · streaming"
+    );
     // Agreeing clocks under a transfer function whose audio keeps arriving late.
     r.rigs[0].clock.relation = PeerRelation::Agree;
     let mut x = tf(RemoteSide::Measurement, CrossTfState::Running);
@@ -462,10 +462,7 @@ fn the_pane_banner_says_the_stop_why_and_the_cues() {
     // Running: the clock line goes in the title; the cues are banners.
     let r = remote(PeerRelation::Agree);
     let mut x = tf(RemoteSide::Measurement, CrossTfState::Running);
-    assert_eq!(
-        caption(&x, &r).as_deref(),
-        Some("clocks agree within 2 ppm · ketunkolo")
-    );
+    assert_eq!(caption(&x, &r).as_deref(), Some("clocks agree · ketunkolo"));
     assert!(pane_banners("TF 3", &x, &r, "pupu", "X").is_empty());
     x.relock = Some(Relock {
         after: Seconds(16.0),

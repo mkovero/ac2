@@ -5,8 +5,8 @@
 //! appears its clock relation is said next to it, in words.
 
 use ac2_proto::model::{
-    CrossRigTransfer, CrossTfState, Measurement, NotLockedReason, PeerRelation, RelockOutcome,
-    RemoteRig, RemoteSide, RemoteState, StopWhy,
+    CantTellReason, CrossRigTransfer, CrossTfState, Measurement, NotLockedReason, PeerRelation,
+    RelockOutcome, RemoteRig, RemoteSide, RemoteState, StopWhy,
 };
 
 use crate::between_rigs::{cant_tell_why, name_of};
@@ -94,7 +94,7 @@ fn drift_text(x: &CrossRigTransfer) -> Option<String> {
     })
 }
 
-/// The pane's status lines: the clock line first (*clocks agree within 2 ppm · ketunkolo*,
+/// The pane's status lines: the clock line first (*clocks agree · ketunkolo*,
 /// or why it stopped), then a relock for a minute, a slip, the drift and late cues.
 /// `find`: as for [`relock_text`].
 pub fn status_lines(x: &CrossRigTransfer, r: &RemoteState, find: &str) -> Vec<String> {
@@ -129,9 +129,15 @@ fn running_clock_line(x: &CrossRigTransfer, r: &RemoteState) -> String {
         .find(|g| g.rig == x.rig)
         .map(|g| &g.clock.relation)
     {
-        Some(PeerRelation::Agree) => "clocks agree within 2 ppm".to_owned(),
-        Some(rel) => crate::between_rigs::relation_text(r, rel),
-        None => "clocks: can't tell".to_owned(),
+        Some(rel) => crate::between_rigs::relation_text(r, &name_of(r, x.rig), rel),
+        // No record of the rig at all: as a link that is down.
+        None => crate::between_rigs::relation_text(
+            r,
+            &name_of(r, x.rig),
+            &PeerRelation::CantTell {
+                reason: CantTellReason::LinkDown,
+            },
+        ),
     }
 }
 
@@ -171,9 +177,8 @@ pub fn banner(label: &str, x: &CrossRigTransfer, r: &RemoteState, ours: &str) ->
                 )
             }
             NotLockedReason::OtherRate { theirs: t, ours: o } => format!(
-                "{label} stopped: {theirs} runs {}, {ours} {}.",
-                crate::audio::rate_text(t),
-                crate::audio::rate_text(o)
+                "{label} stopped: {}.",
+                crate::between_rigs::other_rate(theirs, t, o)
             ),
         }),
         (StopWhy::NotLocked, _) => Some(format!(
@@ -182,7 +187,7 @@ pub fn banner(label: &str, x: &CrossRigTransfer, r: &RemoteState, ours: &str) ->
         )),
         (StopWhy::CantTell, PeerRelation::CantTell { reason }) => Some(format!(
             "{label} stopped: can't tell whether {ours} and {theirs} share a clock: {}.",
-            cant_tell_why(r, &reason)
+            cant_tell_why(r, theirs, &reason)
         )),
         (StopWhy::CantTell, _) => Some(format!(
             "{label} stopped: can't tell whether {ours} and {theirs} share a clock."
@@ -266,9 +271,17 @@ pub fn clock_words(r: &RemoteState, rig: &RemoteRig) -> (String, bool) {
                 format!("CLOCKS NOT LOCKED {} ppm", format::signed(ppm, 1)),
                 true,
             ),
-            NotLockedReason::OtherRate { .. } => ("CLOCKS NOT LOCKED: another rate".into(), true),
+            NotLockedReason::OtherRate { theirs, ours } => (
+                format!(
+                    "CLOCKS NOT LOCKED: {}",
+                    crate::between_rigs::other_rate(&rig.name, theirs, ours)
+                ),
+                true,
+            ),
         },
-        PeerRelation::CantTell { .. } => ("CLOCKS: CAN'T TELL".into(), true),
+        rel @ PeerRelation::CantTell { .. } => {
+            (crate::between_rigs::relation_text(r, &rig.name, &rel), true)
+        }
         _ if r.transfers.iter().any(|x| x.rig == rig.rig && x.late) => {
             ("LINK OFFSET TOO SMALL".into(), true)
         }
@@ -278,7 +291,7 @@ pub fn clock_words(r: &RemoteState, rig: &RemoteRig) -> (String, bool) {
 }
 
 /// The clock line a pane's title carries while the transfer function averages and the
-/// clocks agree: *clocks agree within 2 ppm · ketunkolo*. Otherwise the pane's banner and
+/// clocks agree: *clocks agree · ketunkolo*. Otherwise the pane's banner and
 /// the rig's heading in the list say it, and the title says nothing it would contradict.
 pub fn caption(x: &CrossRigTransfer, r: &RemoteState) -> Option<String> {
     let agree = r
@@ -286,7 +299,7 @@ pub fn caption(x: &CrossRigTransfer, r: &RemoteState) -> Option<String> {
         .iter()
         .any(|g| g.rig == x.rig && g.clock.relation == PeerRelation::Agree);
     (matches!(x.state, CrossTfState::Running) && agree)
-        .then(|| format!("clocks agree within 2 ppm · {}", name_of(r, x.rig)))
+        .then(|| format!("clocks agree · {}", name_of(r, x.rig)))
 }
 
 /// A line of a cross-rig transfer function's banner strip on its pane: its stop verdict

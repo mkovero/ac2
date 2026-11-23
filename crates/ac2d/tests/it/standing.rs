@@ -130,12 +130,14 @@ fn the_clocks_are_measured_from_levels_alone_and_start_again_on_a_reopen() {
         cant_tell(r, CantTellReason::NoSession { rig: t.b_id })
             && standing(r).is_some_and(|s| s.session.is_none())
     });
+    // Absent: no count shown as if it went on.
+    assert_eq!(marks_for(&remote(&mut t.ca)), 0.0);
     // B again: a new run, the marks counted from its start.
-    let before = marks_for(&remote(&mut t.ca));
+    let opened = Instant::now();
     t.cb.ok(Command::SessionOpen { config: at(FS) });
-    wait_remote(&mut t.ca, "measuring again", |r| {
-        measuring_for(r, 0.5) && marks_for(r) < before
-    });
+    wait_remote(&mut t.ca, "measuring again", |r| measuring_for(r, 1.0));
+    let since = opened.elapsed().as_secs_f64();
+    assert!(marks_for(&remote(&mut t.ca)) <= since + 1.0);
 
     // A closes: B's frames still come, A has nothing to pair them with.
     t.ca.ok(Command::SessionClose);
@@ -144,14 +146,14 @@ fn the_clocks_are_measured_from_levels_alone_and_start_again_on_a_reopen() {
     });
     t.ca.ok(Command::SessionOpen { config: at(FS) });
     wait_remote(&mut t.ca, "measuring after A's reopen", |r| {
-        measuring_for(r, 0.5) && marks_for(r) < 5.0
+        measuring_for(r, 1.0) && marks_for(r) < 5.0
     });
     t.a.shutdown();
     t.b.shutdown();
 }
 
 #[test]
-fn a_link_gap_leaves_a_hole_and_the_marks_carry_on() {
+fn a_link_gap_starts_the_marks_again() {
     let mut t = rigs(FS);
     wait_remote(&mut t.ca, "measuring", |r| measuring_for(r, 2.0));
     t.cb.ok(Command::AuthRevokeRig { rig_id: t.a_id });
@@ -159,16 +161,25 @@ fn a_link_gap_leaves_a_hole_and_the_marks_carry_on() {
         cant_tell(r, CantTellReason::LinkDown)
             && standing(r).is_some_and(|s| s.link == RemoteLink::NotAdmitted)
     });
-    let during = marks_for(&remote(&mut t.ca));
+    // Down: no figure shown as if it were current.
+    let r = remote(&mut t.ca);
+    let s = standing(&r).unwrap();
+    assert!(s.marks_for.is_none() && s.clock.ppm.is_none(), "{s:#?}");
+    // Longer than a lapse: a hole either clock may have moved across.
+    std::thread::sleep(Duration::from_secs(3));
+    let admitted = Instant::now();
     t.cb.ok(Command::AuthAdmitRig {
         key: t.a_keys.public.to_z85(),
         rig_id: t.a_id,
         name: "rig-a".into(),
     });
-    // Neither run changed: the marks count from before the gap.
     wait_remote(&mut t.ca, "measuring after the gap", |r| {
-        measuring_for(r, during + 0.5)
+        measuring_for(r, 1.0)
     });
+    // Counted from after the gap, not from before it.
+    let since = admitted.elapsed().as_secs_f64();
+    let r = remote(&mut t.ca);
+    assert!(marks_for(&r) <= since + 1.0, "{since} s: {r:#?}");
     t.a.shutdown();
     t.b.shutdown();
 }
@@ -205,14 +216,19 @@ fn source_levels_go_to_an_admitted_rig_only() {
         server_key: t.b.server_public_key().unwrap(),
     };
     let levels = |f: &ac2_proto::frame::Frame| matches!(f.data, FrameData::SourceLevels(_));
-    // An app asks: refused, nothing comes.
+    let session = |f: &ac2_proto::frame::Frame| matches!(f.data, FrameData::SessionLevels(_));
+    // An app asks for both: its session's levels come, the source levels never do.
     let app = Sub::connect_with(
         &ctx,
         net_endpoints(&t.b).1.as_str(),
-        &[Topic::SourceLevels.to_string().as_bytes()],
+        &[
+            Topic::SourceLevels.to_string().as_bytes(),
+            Topic::SessionLevels.to_string().as_bytes(),
+        ],
         Some(&curve),
         None,
     );
+    assert!(app.frame(Duration::from_secs(5), session).is_some());
     assert!(app.frame(Duration::from_secs(2), levels).is_none());
     // The admitted rig had them all along: its marks kept counting.
     let r = remote(&mut t.ca);
@@ -221,24 +237,24 @@ fn source_levels_go_to_an_admitted_rig_only() {
     t.b.shutdown();
 }
 
-/// A minute and more of marks between two fake rigs on one true clock: rates agree.
+/// A minute and more of marks between two fake rigs on one true clock: the rate within the
+/// rule, still measuring (a verdict waits for the hold, minutes on).
 #[test]
-fn slow_marks_alone_reach_agreement() {
+fn slow_marks_alone_measure_the_rate_in_a_minute() {
     let mut t = rigs(FS);
     let t0 = Instant::now();
     loop {
         let r = remote(&mut t.ca);
         let s = standing(&r);
-        if s.is_some_and(|s| s.clock.relation == PeerRelation::Agree) {
+        // The long window's figure: the short one shows first.
+        let long = s.filter(|s| s.clock.span.is_some_and(|x| x.0 > 54.0));
+        if let Some(p) = long.and_then(|s| s.clock.ppm) {
             let s = s.unwrap();
-            assert!(s.clock.ppm.unwrap().abs() < 2.0, "{s:#?}");
-            assert!(s.marks_for.unwrap().0 >= 60.0, "{s:#?}");
+            assert!(p.abs() < 2.0, "{s:#?}");
+            assert_eq!(s.clock.relation, PeerRelation::Measuring, "{s:#?}");
             break;
         }
-        assert!(
-            t0.elapsed() < Duration::from_secs(150),
-            "no agreement: {r:#?}"
-        );
+        assert!(t0.elapsed() < Duration::from_secs(150), "no rate: {r:#?}");
         std::thread::sleep(Duration::from_millis(500));
     }
     t.a.shutdown();

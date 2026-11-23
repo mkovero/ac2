@@ -379,7 +379,7 @@ words; a problem is never only a colour.
 - **Delay drifting** (§3.2) is a measurement's, not the rig's: it shows on that pane and as
   the measurement's cue in the list (*TF 3 · delay drifting 0.3 ms/min*), not as a rig chip.
 - **The pane.** A cross-rig transfer function's title names the remote side (*TF 3 · meas
-  from ketunkolo*, *· ref from ketunkolo*). Its status line: *clocks agree within 2 ppm ·
+  from ketunkolo*, *· ref from ketunkolo*). Its status line: *clocks agree ·
   ketunkolo*;
   stopped, the held curve's phase faint under *Clocks not locked: averaging stopped*, a verdict
   that stays with T (plot chrome hidden); after a relock, §3.4's line for a minute.

@@ -329,6 +329,8 @@ struct Link<'p> {
     asked: Option<Instant>,
     /// The other rig's device period, frames, from its last `source.state`.
     their_period: Option<u32>,
+    /// `source/levels` as it leads a message, to tell its frames from audio.
+    levels_topic: Vec<u8>,
 }
 
 /// A delta that does not apply asks for a keyframe, at most this often.
@@ -367,6 +369,7 @@ impl<'p> Link<'p> {
             held: None,
             asked: None,
             their_period: None,
+            levels_topic: Topic::SourceLevels.to_bytes(),
         })
     }
 
@@ -586,13 +589,17 @@ impl<'p> Link<'p> {
             }
             let len: usize = f.iter().map(Vec::len).sum();
             self.owed.0 += frame_charge(len);
-            self.bytes += len as u64;
+            let levels = topic == self.levels_topic.as_slice();
+            // The rate said beside the link is its audio: levels flow on every link.
+            if !levels {
+                self.bytes += len as u64;
+            }
             // Audio of a rig that is not the one paired never reaches a session.
             if !self.h.welcomed {
                 continue;
             }
             let parts: Vec<&[u8]> = f.iter().map(Vec::as_slice).collect();
-            if topic == b"source/levels" {
+            if levels {
                 self.levels(&parts);
                 continue;
             }

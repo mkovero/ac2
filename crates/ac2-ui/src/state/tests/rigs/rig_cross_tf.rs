@@ -140,12 +140,10 @@ fn agreeing_clocks_are_said_quietly() {
     let caption = t.st.pane_caption_variants(p);
     assert_eq!(
         caption.first().map(String::as_str),
-        Some("clocks agree within 2 ppm · pupu · smoothing off")
+        Some("clocks agree · pupu · smoothing off")
     );
     assert!(
-        caption
-            .iter()
-            .any(|c| c == "clocks agree within 2 ppm · pupu"),
+        caption.iter().any(|c| c == "clocks agree · pupu"),
         "{caption:?}"
     );
     assert!(pane_banners(&t).is_empty());

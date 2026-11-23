@@ -15,7 +15,8 @@ pub fn status_lines(r: &RemoteState) -> Vec<String> {
 }
 
 fn line(r: &RemoteState, s: &StandingRig) -> String {
-    let mut parts = vec![format!("from levels {}", s.name), relation(r, s)];
+    let rel = relation_text(r, &s.name, &s.clock.relation);
+    let mut parts = vec![format!("from levels {}", s.name), rel];
     if let (Some(p), Some(span)) = (s.clock.ppm, s.clock.span) {
         parts.push(format!(
             "{} ppm over {} s",
@@ -37,25 +38,19 @@ fn line(r: &RemoteState, s: &StandingRig) -> String {
             None => "no session".into(),
         });
     }
-    parts.push(format!("link {}", link_words(s)));
-    parts.join(" · ")
-}
-
-/// The relation; a missing session is named by whose it is, the rig's own or this one's.
-fn relation(r: &RemoteState, s: &StandingRig) -> String {
-    match s.clock.relation {
+    // The relation already says the link is down; the link's own state says why.
+    let down = matches!(
+        s.clock.relation,
         PeerRelation::CantTell {
-            reason: CantTellReason::NoSession { rig },
-        } => {
-            let who = if rig == s.rig {
-                s.name.as_str()
-            } else {
-                "this rig"
-            };
-            format!("CLOCKS: CAN'T TELL ({who} has no audio session)")
+            reason: CantTellReason::LinkDown
         }
-        rel => relation_text(r, &rel),
-    }
+    );
+    parts.push(if down {
+        link_words(s)
+    } else {
+        format!("link {}", link_words(s))
+    });
+    parts.join(" · ")
 }
 
 /// The link in short: its state without the audio rate, which a levels feed does not have.
@@ -128,8 +123,8 @@ mod tests {
                 },
                 None
             )),
-            "from levels ketunkolo · CLOCKS NOT LOCKED: runs 48 kHz, this rig 96 kHz · \
-             96 kHz, 3 inputs · link up"
+            "from levels ketunkolo · CLOCKS NOT LOCKED: ketunkolo runs 48 kHz, this rig \
+             96 kHz · 96 kHz, 3 inputs · link up"
         );
         assert_eq!(
             one(&rig(
@@ -139,8 +134,19 @@ mod tests {
                 },
                 None
             )),
-            "from levels ketunkolo · CLOCKS: CAN'T TELL (no timing in its levels) · \
+            "from levels ketunkolo · CLOCKS: CAN'T TELL (no timing in ketunkolo's levels) · \
              96 kHz, 3 inputs · link up"
+        );
+        assert_eq!(
+            one(&rig(
+                up.clone(),
+                PeerRelation::CantTell {
+                    reason: CantTellReason::MarksLate { by: Seconds(0.25) }
+                },
+                None
+            )),
+            "from levels ketunkolo · CLOCKS: CAN'T TELL (ketunkolo's levels arrive 250 ms \
+             late: the network, or its system clock behind) · 96 kHz, 3 inputs · link up"
         );
         assert_eq!(
             one(&rig(
@@ -159,10 +165,9 @@ mod tests {
                 PeerRelation::CantTell {
                     reason: CantTellReason::LinkDown
                 },
-                Some(0.12)
+                None
             )),
-            "from levels ketunkolo · CLOCKS: CAN'T TELL (link down) · +0.12 ppm over 60 s · \
-             marks for 5 min 12 s · link unreachable"
+            "from levels ketunkolo · CLOCKS: CAN'T TELL (no link to ketunkolo) · unreachable"
         );
     }
 }

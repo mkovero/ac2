@@ -243,7 +243,7 @@ is never only a colour):
   stopped, the bar's status line carries why and what to do (*Main L stopped: pupu and
   ketunkolo are not on one clock (+5.6 ppm). Lock both interfaces to one reference.*).
 - **The pane:** its title names the remote side (*Transfer · TF 3 · meas from ketunkolo*,
-  *· ref from ketunkolo*), its caption starts *clocks agree within 2 ppm · ketunkolo*
+  *· ref from ketunkolo*), its caption starts *clocks agree · ketunkolo*
   while it averages and the clocks agree. Stopped, its banner strip says *Clocks not locked: averaging stopped*
   (with **T** too: banners are not plot chrome) and the held curve's phase is faint; the
   relock, slip, drift and *link offset too small* lines show there as well. The legend's

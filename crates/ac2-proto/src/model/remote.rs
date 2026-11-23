@@ -446,6 +446,13 @@ pub enum CantTellReason {
     },
     /// The link to the remote rig is not up.
     LinkDown,
+    /// The remote rig's timing marks arrive later than the link offset allows: the network
+    /// holds them, or its system clock is behind this rig's; their age alone cannot tell
+    /// which.
+    MarksLate {
+        /// By at least this much past the link offset.
+        by: Seconds,
+    },
 }
 
 /// A transfer function with one channel on this rig and one on a remote rig

@@ -25,6 +25,7 @@ use ac2_proto::model::{
 use ac2_proto::units::RigId;
 
 use crate::audio::rate_text;
+use crate::between_rigs;
 use crate::clock::system_clock_text;
 use crate::format;
 
@@ -552,9 +553,10 @@ fn verdict(by: &RigClockFacts<'_>, other: &RigClockFacts<'_>) -> Option<Pair> {
         }),
         PeerRelation::CantTell { reason } => Pair::CantTell(vec![match reason {
             CantTellReason::NoAudio => format!("no audio between {} and {}", by.name, other.name),
-            CantTellReason::NoMarks => format!("no timing in {}'s levels", other.name),
-            CantTellReason::NoSession { rig } => format!("{} has no audio session", name(*rig)),
-            CantTellReason::LinkDown => format!("no link between {} and {}", by.name, other.name),
+            CantTellReason::NoMarks => between_rigs::no_marks(other.name),
+            CantTellReason::NoSession { rig } => between_rigs::no_session(name(*rig)),
+            CantTellReason::LinkDown => between_rigs::link_down(other.name),
+            CantTellReason::MarksLate { by: late } => between_rigs::marks_late(other.name, late.0),
             CantTellReason::SystemClockUnsynced { rig } => {
                 format!("{}'s system clock is not synced", name(*rig))
             }

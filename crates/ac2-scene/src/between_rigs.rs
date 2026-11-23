@@ -29,8 +29,8 @@ pub fn rig_name(r: &RemoteState, i: &RemoteInput) -> String {
         .map_or_else(|| i.rig_name.clone(), |x| x.name.clone())
 }
 
-/// The relation in words: *clocks agree*, *CLOCKS NOT LOCKED +5.6 ppm*, …
-pub fn relation_text(r: &RemoteState, rel: &PeerRelation) -> String {
+/// The relation with rig `other` in words: *clocks agree*, *CLOCKS NOT LOCKED +5.6 ppm*, …
+pub fn relation_text(r: &RemoteState, other: &str, rel: &PeerRelation) -> String {
     let ppm = |p: f64| format!("{} ppm", format::signed(p, 1));
     match rel {
         PeerRelation::Agree => "clocks agree".into(),
@@ -46,25 +46,47 @@ pub fn relation_text(r: &RemoteState, rel: &PeerRelation) -> String {
                 name_of(r, *rig),
                 ppm(*p)
             ),
-            NotLockedReason::OtherRate { theirs, ours } => format!(
-                "CLOCKS NOT LOCKED: runs {}, this rig {}",
-                rate_text(*theirs),
-                rate_text(*ours)
-            ),
+            NotLockedReason::OtherRate { theirs, ours } => {
+                format!("CLOCKS NOT LOCKED: {}", other_rate(other, *theirs, *ours))
+            }
         },
         PeerRelation::CantTell { reason } => {
-            format!("CLOCKS: CAN'T TELL ({})", cant_tell_why(r, reason))
+            format!("CLOCKS: CAN'T TELL ({})", cant_tell_why(r, other, reason))
         }
     }
 }
 
-/// Why the relation cannot be told: *ketunkolo's system clock is not synced*, …
-pub fn cant_tell_why(r: &RemoteState, reason: &CantTellReason) -> String {
+/// Rig `other` and this one at two nominal rates: *ketunkolo runs 48 kHz, this rig 96 kHz*,
+/// as a refused remote input says it.
+pub fn other_rate(other: &str, theirs: u32, ours: u32) -> String {
+    format!(
+        "{other} runs {}, this rig {}",
+        rate_text(theirs),
+        rate_text(ours)
+    )
+}
+
+/// A rig the remote state names (a remote or a paired rig), else this one: the state holds
+/// only the others.
+fn who(r: &RemoteState, rig: RigId) -> String {
+    r.rigs
+        .iter()
+        .map(|x| (x.rig, &x.name))
+        .chain(r.standing.iter().map(|x| (x.rig, &x.name)))
+        .chain(r.peers.iter().map(|x| (x.rig, &x.name)))
+        .find(|(id, _)| *id == rig)
+        .map_or_else(|| "this rig".to_owned(), |(_, n)| n.clone())
+}
+
+/// Why the relation with rig `other` cannot be told: *ketunkolo's system clock is not
+/// synced*, …
+pub fn cant_tell_why(r: &RemoteState, other: &str, reason: &CantTellReason) -> String {
     match reason {
         CantTellReason::NoAudio => "no audio".to_owned(),
-        CantTellReason::NoMarks => "no timing in its levels".to_owned(),
-        CantTellReason::NoSession { rig } => format!("{} has no audio session", name_of(r, *rig)),
-        CantTellReason::LinkDown => "link down".to_owned(),
+        CantTellReason::NoMarks => no_marks(other),
+        CantTellReason::NoSession { rig } => no_session(&who(r, *rig)),
+        CantTellReason::LinkDown => link_down(other),
+        CantTellReason::MarksLate { by } => marks_late(other, by.0),
         CantTellReason::SystemClockUnsynced { rig } => {
             format!("{}'s system clock is not synced", name_of(r, *rig))
         }
@@ -83,11 +105,35 @@ pub fn cant_tell_why(r: &RemoteState, reason: &CantTellReason) -> String {
     }
 }
 
+/// Rig `other`'s levels carry no timing: *no timing in ketunkolo's levels*.
+pub fn no_marks(other: &str) -> String {
+    format!("no timing in {other}'s levels")
+}
+
+/// *ketunkolo has no audio session*, *this rig has no audio session*.
+pub fn no_session(who: &str) -> String {
+    format!("{who} has no audio session")
+}
+
+/// *no link to ketunkolo*.
+pub fn link_down(other: &str) -> String {
+    format!("no link to {other}")
+}
+
+/// Marks of rig `other` later than the link offset allows by `by` s; the network or its
+/// clock, which the age alone cannot tell apart.
+pub fn marks_late(other: &str, by: f64) -> String {
+    format!(
+        "{other}'s levels arrive {} ms late: the network, or its system clock behind",
+        format::fixed(by * 1e3, 0)
+    )
+}
+
 /// The relation with the evidence behind it, for the Connection page: an agreement says
 /// over how long and what it does not prove (stamps resolve about 2 ppm a minute, which two
 /// free crystals can meet), a measurement in progress says why it has no answer yet.
-pub fn relation_with_evidence(r: &RemoteState, c: &PeerClock) -> String {
-    let rel = relation_text(r, &c.relation);
+pub fn relation_with_evidence(r: &RemoteState, other: &str, c: &PeerClock) -> String {
+    let rel = relation_text(r, other, &c.relation);
     match (&c.relation, c.ppm, c.span) {
         (PeerRelation::Agree, Some(p), Some(span)) => format!(
             "{rel}: {} ppm over the last {} s, both system clocks synced; a lock is not proven \
@@ -301,7 +347,7 @@ pub fn rig_block(
     let mut out = vec![format!(
         "{}: {}",
         rig.name,
-        relation_with_evidence(r, &rig.clock)
+        relation_with_evidence(r, &rig.name, &rig.clock)
     )];
     if let Some(t) = rig.clock.last_change.and_then(at) {
         out.push(format!("last change {t}"));
@@ -351,7 +397,7 @@ pub fn status_lines(r: &RemoteState, inputs: &[RemoteInput]) -> Vec<String> {
         out.push(format!(
             "between rigs {} · {} · link {}",
             rig.name,
-            relation_text(r, &rig.clock.relation),
+            relation_text(r, &rig.name, &rig.clock.relation),
             link_text(rig)
         ));
     }
@@ -466,7 +512,7 @@ mod tests {
             RemoteAudio::Streaming,
         );
         assert_eq!(
-            relation_text(&r, &r.rigs[0].clock.relation),
+            relation_text(&r, "ketunkolo", &r.rigs[0].clock.relation),
             "CLOCKS: CAN'T TELL (ketunkolo's system clock is not synced)"
         );
     }

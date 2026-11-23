@@ -10,9 +10,9 @@ use std::time::Instant;
 use ac2_core::mic_curve::MicCurve;
 use ac2_proto::event::Change;
 use ac2_proto::model::{
-    BackendKind, CalStatus, InputKind, MeasKind, RemoteAudio, RemoteInput, RemoteInputStatus,
-    RemoteLink, RemoteRig, RemoteState, RigPeer, SessionConfig, SourceCurve, SourceInput,
-    SourceSession, SourceState, StreamIncarnation, SystemClock, remote_slot,
+    BackendKind, CalStatus, InputKind, MeasKind, PeerClock, RemoteAudio, RemoteInput,
+    RemoteInputStatus, RemoteLink, RemoteRig, RemoteState, RigPeer, SessionConfig, SourceCurve,
+    SourceInput, SourceSession, SourceState, StreamIncarnation, SystemClock, remote_slot,
 };
 use ac2_proto::units::{RigId, Seconds, SessionEpoch, WallNs};
 use ac2_proto::{ProtoError, ReplyBody};
@@ -78,6 +78,8 @@ pub(super) struct RemoteCtl {
     pub(super) standing: BTreeMap<RigId, StandingReport>,
     /// The clocks between this rig and each paired rig from the standing feed.
     pub(super) standing_watches: BTreeMap<RigId, PeerClockWatch>,
+    /// The standing relation as last shown, for its time of change.
+    pub(super) standing_shown: BTreeMap<RigId, PeerClock>,
 }
 
 impl RemoteCtl {
@@ -97,6 +99,7 @@ impl RemoteCtl {
             local_clock: Arc::new(LocalClock::default()),
             standing: BTreeMap::new(),
             standing_watches: BTreeMap::new(),
+            standing_shown: BTreeMap::new(),
         }
     }
 }
@@ -661,6 +664,7 @@ impl Control {
                 short: report.and_then(|x| x.short),
                 streaming_for: report.and_then(|x| x.streaming_for),
                 disagree: report.and_then(|x| x.disagree),
+                late: None,
                 absent: ac2_proto::model::CantTellReason::NoAudio,
                 other_rate: None,
             };

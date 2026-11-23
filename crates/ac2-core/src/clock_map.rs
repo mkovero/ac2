@@ -57,12 +57,13 @@ impl MapWindow {
         }
     }
 
-    /// The stamp clock read `stamp_ns` while the system clock read `system_ns`.
-    pub fn push(&mut self, stamp_ns: u64, system_ns: u64) {
+    /// The stamp clock read `stamp_ns` while the system clock read `system_ns`; whether the
+    /// pair was kept (only then can the line move).
+    pub fn push(&mut self, stamp_ns: u64, system_ns: u64) -> bool {
         match self.points.back() {
             // Another stream's stamps (the clock went back): nothing before belongs to it.
             Some(&(last, _)) if stamp_ns < last => self.points.clear(),
-            Some(&(last, _)) if stamp_ns - last < self.step_ns => return,
+            Some(&(last, _)) if stamp_ns - last < self.step_ns => return false,
             _ => {}
         }
         self.points.push_back((stamp_ns, system_ns));
@@ -73,6 +74,7 @@ impl MapWindow {
         {
             self.points.pop_front();
         }
+        true
     }
 
     /// Forgets every pair.

@@ -30,6 +30,8 @@ pub(crate) struct CaptureClock {
     /// The stamp clock against the system clock (`CLOCK_REALTIME`), the time two hosts
     /// share: another rig puts this rig's capture stamps on it.
     system: MapWindow,
+    /// `system`'s line, refitted only when it keeps a pair: it is read at every hand-off.
+    line: Option<StampLine>,
 }
 
 /// The system map is given once its pairs span this much.
@@ -43,6 +45,7 @@ impl CaptureClock {
             audio: RateWindow::new(rate, WINDOW_S, STEP_S),
             stamps: stamps.map(|c| (c, RateWindow::new(NS_PER_S, WINDOW_S, PAIR_STEP_S))),
             system: MapWindow::new(WINDOW_S, PAIR_STEP_S, MAP_MIN_SPAN_S),
+            line: None,
         }
     }
 
@@ -58,15 +61,17 @@ impl CaptureClock {
             if let Some(p) = clock.pair() {
                 w.push(p.disciplined_ns, p.stamp_ns, false);
             }
-            if let Some(p) = clock.system_pair() {
-                self.system.push(p.stamp_ns, p.system_ns);
+            if let Some(p) = clock.system_pair()
+                && self.system.push(p.stamp_ns, p.system_ns)
+            {
+                self.line = self.system.line();
             }
         }
     }
 
     /// The stamp clock on the system clock, once fitted.
     pub(crate) fn stamp_line(&self) -> Option<StampLine> {
-        self.system.line()
+        self.line
     }
 
     /// The reading now.

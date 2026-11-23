@@ -10,8 +10,15 @@
 //! there whether or not any audio streams.
 //!
 //! Either rig's new incarnation or reopened session starts the windows again: a sample index
-//! then means something new. A link gap only leaves a hole: both sample indices kept
-//! counting through it, so the marks after it still fit the line of those before.
+//! then means something new. So does a gap in the marks longer than [`LAPSED`]: both sample
+//! indices kept counting through it, but a fit bridging it would rest on two ends whose
+//! system clocks may have moved meanwhile, so the minute counts again with the link up.
+//!
+//! The feed runs always, on hosts whose system clocks are slewed (chrony corrects an offset
+//! by running the clock a little fast or slow for a while), and a slew reads in a minute's
+//! fit as a rate: 100 µs over a minute is about 2 ppm. A slew passes, a rate difference
+//! stays, so a verdict from this feed needs the figure on one side of the 2 ppm rule, with
+//! one sign, over [`HOLD_WINDOWS`] consecutive minutes ([`StandingReport::held`]).
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
@@ -20,12 +27,22 @@ use std::time::{Duration, Instant};
 use ac2_core::clock_map::StampLine;
 use ac2_core::clock_rate::RateWindow;
 use ac2_proto::frame::{FrameStamp, METER_FPS, SourceLevelsFrame};
+use ac2_proto::model::{NotLockedReason, PeerRelation};
 use ac2_proto::units::{DaemonIncarnation, SessionEpoch};
 
 use super::join::{CROSS_LONG_S, CROSS_SHORT_S, CROSS_STEP_S};
+use super::peer_clock::BOUND_PPM;
+
+/// Consecutive whole minutes of marks (disjoint long windows) a verdict needs. chrony slews
+/// a measured offset over about three of its update intervals; to read past 2 ppm through
+/// ten minutes running, one correction would have to move the clock 1.2 ms or more at an
+/// update interval of 256 s or longer, and chrony lengthens its interval only while the
+/// offsets it measures stay far below that. A step (`maxerror` and the kernel's unsync
+/// flag) is the system clock checks' to catch, not this.
+pub(crate) const HOLD_WINDOWS: usize = 10;
 
 /// A mark waits up to one meter period for its frame beside the link offset's transit and
-/// periods; the age check allows it.
+/// periods; the late side allows it.
 fn meter_period_s() -> f64 {
     1.0 / f64::from(METER_FPS)
 }
@@ -33,12 +50,13 @@ fn meter_period_s() -> f64 {
 /// This rig's own mark is taken as gone this long after the fan-out last wrote it (it
 /// writes at every hand-off, tens of times a second): the stream stopped.
 const LOCAL_STALE: Duration = Duration::from_secs(1);
-/// No frame, or no mark paired, for this long: the feed lapsed. The link reports once a
-/// second, so one second of silence must not flip on a report's timing.
-const LAPSED: Duration = Duration::from_secs(2);
-/// Marks placed further back than the bound may only have waited on the way (transit and
-/// credit only ever add age): the least age over this long is taken, as the joined feed's
-/// anchor does.
+/// No frame, or no mark paired, for this long: the feed lapsed, and marks after it start
+/// the windows again. The link reports once a second, so one second of silence must not
+/// flip on a report's timing.
+pub(crate) const LAPSED: Duration = Duration::from_secs(2);
+/// A mark's age says something about the system clocks only when it holds this long: transit
+/// and credit only ever add age, so the least age over it bounds the late side, and one
+/// stamp's jitter must not read as a clock ahead, so the greatest bounds the early side.
 const AGE_WINDOW: Duration = Duration::from_secs(1);
 
 /// Local sample index (fractional) captured at system time `system_ns`, given a reference
@@ -92,10 +110,19 @@ impl LocalClock {
 pub(crate) enum Absent {
     /// This rig has no session (or its stream stopped).
     OurSession,
-    /// No frame from the other rig: it has no session.
-    TheirSession,
+    /// No frame from the other rig.
+    TheirFrames,
     /// Frames come without marks, or none could be paired.
     Marks,
+}
+
+/// What the last [`HOLD_WINDOWS`] minutes of marks agree on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Held {
+    /// Every one within the 2 ppm rule.
+    Agree,
+    /// Every one beyond it, all of one sign.
+    Apart,
 }
 
 /// What the standing feed reports, once a second.
@@ -104,11 +131,19 @@ pub(crate) struct StandingReport {
     /// The cross-rig rate over the long and the short window: (ppm, span s).
     pub(crate) long: Option<(f64, f64)>,
     pub(crate) short: Option<(f64, f64)>,
-    /// Marks paired since both sessions (re)started.
+    /// How long marks were paired, from the first since the windows (re)started to the
+    /// newest.
     pub(crate) marks_for: Option<Duration>,
-    /// The marks place the other rig's system clock outside the span transit allows, by
-    /// this, s (positive: the other rig's ahead).
-    pub(crate) disagree: Option<f64>,
+    /// The marks held in this rig's future over a second: the other rig's system clock is
+    /// ahead by at least this, s.
+    pub(crate) ahead: Option<f64>,
+    /// The least age of the marks over a second, s, and what the link offset in force may
+    /// leave beside it (this rig's hand-off lag, a period of jitter, a meter period); the
+    /// device periods (ours, theirs), s, for the default link offset.
+    pub(crate) least_age: Option<f64>,
+    pub(crate) allow: f64,
+    pub(crate) periods: (f64, f64),
+    pub(crate) held: Option<Held>,
     pub(crate) absent: Option<Absent>,
     /// The two sessions' nominal rates differ: (theirs, ours).
     pub(crate) other_rate: Option<(u32, u32)>,
@@ -129,9 +164,16 @@ pub(crate) struct StandingFeed {
     last_frame: Option<Instant>,
     last_mark: Option<Instant>,
     breaks: Option<(u64, u64)>,
-    /// Ages of the marks over the last [`AGE_WINDOW`], s.
+    /// Ages of the marks over the last [`AGE_WINDOW`], s, and since when they are kept.
     ages: VecDeque<(Instant, f64)>,
-    disagree: Option<f64>,
+    ages_since: Option<Instant>,
+    /// This rig's hand-off lag and a period of stamp jitter, s, as its last mark said.
+    slack: f64,
+    periods: (f64, f64),
+    /// The long window's figure at the end of each whole minute of marks, newest last, and
+    /// the other rig's sample index the current minute began at.
+    minutes: VecDeque<f64>,
+    minute_from: Option<u64>,
     other_rate: Option<(u32, u32)>,
     no_local: bool,
     levels: Option<Box<SourceLevelsFrame>>,
@@ -155,13 +197,18 @@ impl StandingFeed {
             last_mark: None,
             breaks: None,
             ages: VecDeque::new(),
-            disagree: None,
+            ages_since: None,
+            slack: 0.0,
+            periods: (0.0, 0.0),
+            minutes: VecDeque::new(),
+            minute_from: None,
             other_rate: None,
             no_local: false,
             levels: None,
         }
     }
 
+    /// The windows and everything counted with them start again.
     fn restart(&mut self, run: Run, rate: u32) {
         let r = f64::from(rate);
         self.long = RateWindow::new(r, CROSS_LONG_S, CROSS_STEP_S);
@@ -169,9 +216,12 @@ impl StandingFeed {
         self.run = Some(run);
         self.rate = rate;
         self.since = None;
+        self.last_mark = None;
         self.breaks = None;
         self.ages.clear();
-        self.disagree = None;
+        self.ages_since = None;
+        self.minutes.clear();
+        self.minute_from = None;
     }
 
     /// One frame of the other rig as received at `now`, stamped `stamp`; `local`: this
@@ -190,6 +240,8 @@ impl StandingFeed {
         self.levels = Some(Box::new(f));
         self.no_local = local.is_none();
         let Some(local) = local else {
+            // Without a session here there is no rate of this rig's to differ from.
+            self.other_rate = None;
             return;
         };
         if theirs != local.rate {
@@ -204,7 +256,10 @@ impl StandingFeed {
             return;
         };
         let run = (stamp.daemon_incarnation, stamp.session_epoch, local.epoch);
-        if self.run != Some(run) {
+        let gap = self
+            .last_mark
+            .is_some_and(|t| now.saturating_duration_since(t) > LAPSED);
+        if self.run != Some(run) || gap {
             self.restart(run, local.rate);
         }
         let rate = f64::from(local.rate);
@@ -220,18 +275,32 @@ impl StandingFeed {
         self.short.push(mark.sample.0, ns, broke);
         self.since.get_or_insert(now);
         self.last_mark = Some(now);
-        self.age_check(local, at, their_period, now);
+        self.minute(mark.sample.0, rate);
+        self.age(local, at, their_period, now);
     }
 
-    /// How long before the present the mark was captured, by system time, against what
-    /// transit allows: none (less this rig's own hand-off lag and a period of jitter) up to
-    /// the link offset of both periods and a meter period. Outside it the two system clocks
-    /// disagree by at least that much.
-    fn age_check(&mut self, local: LocalMark, at: f64, their_period: Option<u32>, now: Instant) {
+    /// Closes a whole minute of marks at the other rig's sample `sample`, keeping the long
+    /// window's figure then.
+    fn minute(&mut self, sample: u64, rate: f64) {
+        let from = *self.minute_from.get_or_insert(sample);
+        if (sample.saturating_sub(from) as f64) < CROSS_LONG_S * rate {
+            return;
+        }
+        self.minute_from = Some(sample);
+        if let Some(r) = self.long.rate() {
+            if self.minutes.len() == HOLD_WINDOWS {
+                self.minutes.pop_front();
+            }
+            self.minutes.push_back(r.ppm);
+        }
+    }
+
+    /// How long before the present the mark was captured, by system time: transit only ever
+    /// adds to it, this rig's hand-off lag and a period of stamp jitter may take from it.
+    fn age(&mut self, local: LocalMark, at: f64, their_period: Option<u32>, now: Instant) {
         let rate = f64::from(local.rate);
         let present =
             local.latest as f64 + now.saturating_duration_since(local.at).as_secs_f64() * rate;
-        let age = (present - at) / rate;
         while self
             .ages
             .front()
@@ -239,24 +308,26 @@ impl StandingFeed {
         {
             self.ages.pop_front();
         }
-        self.ages.push_back((now, age));
-        let slack = local.slack as f64 / rate;
-        if age < -slack {
-            self.disagree = Some(-age - slack);
-            return;
-        }
+        self.ages.push_back((now, (present - at) / rate));
+        self.ages_since.get_or_insert(now);
+        self.slack = local.slack as f64 / rate;
         let ours = f64::from(local.period) / rate;
-        let theirs = their_period.map_or(ours, |p| f64::from(p) / rate);
-        let bound = super::default_link_offset(ours, theirs) + meter_period_s() + slack;
-        let settled = self
-            .since
-            .is_some_and(|t| now.saturating_duration_since(t) >= AGE_WINDOW);
-        let least = self
-            .ages
-            .iter()
-            .map(|(_, a)| *a)
-            .fold(f64::INFINITY, f64::min);
-        self.disagree = (settled && least > bound).then(|| -(least - bound));
+        self.periods = (ours, their_period.map_or(ours, |p| f64::from(p) / rate));
+    }
+
+    /// The last [`HOLD_WINDOWS`] minutes, if they agree on a side.
+    fn held(&self) -> Option<Held> {
+        if self.minutes.len() < HOLD_WINDOWS {
+            return None;
+        }
+        let all = |f: fn(f64) -> bool| self.minutes.iter().all(|&p| f(p));
+        if all(|p| p.abs() <= BOUND_PPM) {
+            Some(Held::Agree)
+        } else if all(|p| p > BOUND_PPM) || all(|p| p < -BOUND_PPM) {
+            Some(Held::Apart)
+        } else {
+            None
+        }
     }
 
     /// The feed as it stands at `now`.
@@ -264,7 +335,7 @@ impl StandingFeed {
         let fresh =
             |t: Option<Instant>| t.is_some_and(|t| now.saturating_duration_since(t) < LAPSED);
         let absent = if !fresh(self.last_frame) {
-            Some(Absent::TheirSession)
+            Some(Absent::TheirFrames)
         } else if self.no_local {
             Some(Absent::OurSession)
         } else if self.other_rate.is_some() {
@@ -275,19 +346,43 @@ impl StandingFeed {
             None
         };
         let cross = |r: ac2_core::clock_rate::ClockRate| (r.ppm, r.span_s);
-        let fed = self.run.is_some();
+        let fed = self.run.is_some() && absent.is_none() && self.other_rate.is_none();
+        let settled = fed
+            && self
+                .ages_since
+                .is_some_and(|t| now.saturating_duration_since(t) >= AGE_WINDOW);
+        let ages = || self.ages.iter().map(|(_, a)| *a);
+        let greatest = ages().fold(f64::NEG_INFINITY, f64::max);
+        let slack = self.slack;
         StandingReport {
             long: self.long.rate().filter(|_| fed).map(cross),
             short: self.short.rate().filter(|_| fed).map(cross),
             marks_for: self
                 .since
+                .zip(self.last_mark)
                 .filter(|_| fed)
-                .map(|t| now.saturating_duration_since(t)),
-            disagree: self.disagree.filter(|_| absent.is_none()),
+                .map(|(s, l)| l.saturating_duration_since(s)),
+            ahead: (settled && greatest < -slack).then(|| -greatest - slack),
+            least_age: settled.then(|| ages().fold(f64::INFINITY, f64::min)),
+            allow: slack + meter_period_s(),
+            periods: self.periods,
+            held: self.held().filter(|_| fed),
             absent,
             other_rate: self.other_rate.filter(|_| fresh(self.last_frame)),
             levels: self.levels.clone().filter(|_| fresh(self.last_frame)),
         }
+    }
+}
+
+/// The relation this feed may show: the judge's, but a verdict from the rate only once
+/// [`HOLD_WINDOWS`] minutes held it, measuring until then.
+pub(crate) fn shown(judged: PeerRelation, held: Option<Held>) -> PeerRelation {
+    match judged {
+        PeerRelation::Agree if held != Some(Held::Agree) => PeerRelation::Measuring,
+        PeerRelation::NotLocked {
+            reason: NotLockedReason::CrossRate { .. },
+        } if held != Some(Held::Apart) => PeerRelation::Measuring,
+        r => r,
     }
 }
 
