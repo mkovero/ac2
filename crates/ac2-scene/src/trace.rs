@@ -405,13 +405,13 @@ pub struct DisplayTrace {
     /// An EQ set's filter curve: drawn dashed, so it does not read as a measured curve.
     pub dashed: bool,
     /// Per column, where the curve joins its estimates over thinned columns
-    /// ([`crate::unresolved::Fill::Joined`]): `None` outside those ranges. Empty when the
+    /// ([`crate::unresolved::Source::Joined`]): `None` outside those ranges. Empty when the
     /// curve has none.
     pub joined: Vec<Option<Joined>>,
 }
 
 /// A column inside a range where a curve joins its estimates
-/// ([`crate::unresolved::Fill::Joined`]).
+/// ([`crate::unresolved::Source::Joined`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Joined {
     /// A column with a bin of its own: drawn as a point as well, so the straight line to
