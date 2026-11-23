@@ -11,12 +11,12 @@ use std::path::Path;
 
 use ac2_proto::model::{
     BandFraction, ColourFamily, MeasConfig, MeasKind, PaneLayout, RtaConfig, SpectrumConfig,
-    SplConfig, TimeWeighting, TraceOwner, TransferConfig, Weighting,
+    SplConfig, TimeWeighting, TraceOwner, TransferConfig, TransferResolution, Weighting,
 };
 use ac2_proto::units::{MeasId, TraceId};
 use ac2_traces::session::{self, SavedDelay, SavedMeasurement};
-use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// A session read leniently.
@@ -507,11 +507,32 @@ fn overlay(
                 overlay(doc, &p, v, fits, at, notes);
             }
         }
-        _ => notes.push(format!(
-            "{}= {old} does not fit this version: kept {cur}",
-            label(at, ptr)
-        )),
+        _ => notes.push(match transfer_resolution(ptr, &cur) {
+            Some(now) => format!(
+                "{}the transfer's resolution was not kept ({old} in the old session): now {now}",
+                label(at, ptr)
+            ),
+            None => format!(
+                "{}= {old} does not fit this version: kept {cur}",
+                label(at, ptr)
+            ),
+        }),
     }
+}
+
+/// A transfer's resolution as an operator reads it, when `cur` at `ptr` is one: the old
+/// session's value is quoted as found, never read as a grid, so the note says what it
+/// became rather than leave the operator a tagged value.
+fn transfer_resolution(ptr: &str, cur: &Value) -> Option<String> {
+    if !ptr.ends_with("/resolution") {
+        return None;
+    }
+    Some(match TransferResolution::deserialize(cur).ok()? {
+        TransferResolution::Grid { grid } => {
+            format!("1/{} oct", grid.ppo())
+        }
+        TransferResolution::Bins => "bins".into(),
+    })
 }
 
 /// A cue of format 26 held one OSC message per state; this version holds an action (an OSC
@@ -798,6 +819,28 @@ mod tests {
         );
         assert_eq!(m.notes.len(), 1, "{:?}", m.notes);
         assert!(m.notes[0].contains("kind.config.display"), "{:?}", m.notes);
+    }
+
+    #[test]
+    fn a_transfer_resolution_of_the_old_shape_is_named_plainly() {
+        let v = json!({"name": "Main", "kind": {"type": "transfer", "config": {
+            "reference_input": 0, "measurement_input": 1, "resolution": "ninety_sixth"}}});
+        let mut notes = Vec::new();
+        let got = meas_config(&v, &mut notes).unwrap();
+        let MeasKind::Transfer { config } = got.kind else {
+            panic!("{got:?}")
+        };
+        assert_eq!(config.resolution, TransferResolution::default());
+        assert_eq!((config.reference_input, config.measurement_input), (0, 1));
+        let note = notes
+            .iter()
+            .find(|n| n.contains("kind.config.resolution"))
+            .unwrap_or_else(|| panic!("{notes:?}"));
+        assert_eq!(
+            note,
+            "`kind.config.resolution` the transfer's resolution was not kept \
+             (\"ninety_sixth\" in the old session): now 1/48 oct"
+        );
     }
 
     #[test]

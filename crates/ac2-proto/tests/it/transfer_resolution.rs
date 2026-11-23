@@ -80,3 +80,25 @@ fn the_default_is_the_forty_eighth_grid_and_bins_store_on_the_ninety_sixth() {
     );
     assert_eq!(at(TransferResolution::Bins), LogGridSpec::transfer(96));
 }
+
+/// Only the two shapes read: a grid names its grid and nothing else, and the tag is one of
+/// the two.
+#[test]
+fn other_shapes_are_refused() {
+    for bad in [
+        json!({ "type": "grid" }),
+        json!({ "type": "octave", "grid": "ninety_sixth" }),
+        json!({ "type": "grid", "grid": "ninety_sixth", "ppo": 96 }),
+        json!({ "grid": "ninety_sixth" }),
+    ] {
+        assert!(
+            serde_json::from_value::<TransferResolution>(bad.clone()).is_err(),
+            "{bad}"
+        );
+        let m = rmp_serde::to_vec_named(&bad).expect("msgpack");
+        assert!(
+            rmp_serde::from_slice::<TransferResolution>(&m).is_err(),
+            "{bad}"
+        );
+    }
+}
