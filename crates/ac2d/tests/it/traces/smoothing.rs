@@ -15,8 +15,8 @@ fn core_smoothed(raw: &TraceData, s: Smoothing) -> (Vec<f64>, Vec<f64>) {
     use ac2_core::smoothing as sm;
     let grid = ac2_core::grid::LogGrid {
         ppo: 48,
-        k_min: -240,
-        k_max: 239,
+        k_min: -336,
+        k_max: 383,
     };
     let phase = raw.phase_deg.as_ref().unwrap();
     let h: Vec<num_complex::Complex64> = raw

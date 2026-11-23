@@ -6,14 +6,14 @@
 use ac2_core::grid::LogGrid;
 use ac2_core::ir_view::{IrEngine, UniformTf, amp_db};
 use ac2_core::mic_curve::Correction;
-use ac2_core::mtw::{Ladder, Mtw, MtwConfig, MtwFrame, SampleGate, Validity};
+use ac2_core::mtw::{Mtw, MtwConfig, MtwFrame, SampleGate, Validity};
 use ac2_core::protection::{BlockDecision, BlockLevels, Guard, ProtectionConfig};
 use ac2_core::smoothing::{Smoother, SmoothingMode, TfColumns};
 use ac2_proto::frame::{
     FrameData, IrFrame, IrMeta, ProtectionFlags, TfFrame, TfMeta, ValidityMask,
 };
 use ac2_proto::grid::GridId;
-use ac2_proto::model::{DelayState, TransferConfig};
+use ac2_proto::model::{DelayState, FreqRange, TransferConfig};
 use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{Hz, MeasId, Rev, Seconds};
 use num_complex::Complex64;
@@ -141,6 +141,8 @@ pub(crate) struct Transfer {
     grid_id: GridId,
     /// Where the grid is finer than the stage serving it; fixed by the layout and grid.
     unresolved: ac2_proto::model::Unresolved,
+    /// Span of the applied mic curve's points, if one is applied.
+    mic_range: Option<FreqRange>,
     delay_s: f64,
     /// Applied delay in samples, fractions included.
     delay_samples: f64,
@@ -191,6 +193,14 @@ fn column_correction(grid: &LogGrid, c: &Correction) -> ColumnCorrection {
     let db: Vec<f64> = grid.frequencies().into_iter().map(|f| c.db(f)).collect();
     let gain = db.iter().map(|d| 10f64.powf(-d / 20.0)).collect();
     ColumnCorrection { db, gain }
+}
+
+/// The span of the mic curve's points: where the correction is the mic's measured response.
+fn mic_range(c: &Correction) -> FreqRange {
+    FreqRange {
+        lo: Hz(c.curve().f_lo()),
+        hi: Hz(c.curve().f_hi()),
+    }
 }
 
 /// The kernel for `smoothing` on `grid`.
@@ -253,7 +263,7 @@ impl Transfer {
         let averaging = conv::tf_averaging(cfg.averaging).ok_or("invalid averaging")?;
         let mut mtw = Mtw::new(MtwConfig {
             sample_rate_hz: fs,
-            ladder: Ladder::Standard,
+            ladder: conv::ladder(cfg.lf_window),
             depth: conv::depth(cfg.depth).ok_or("invalid depth policy")?,
             averaging,
             grid,
@@ -280,6 +290,7 @@ impl Transfer {
         Ok(Self {
             unresolved,
             corr: correction.map(|c| column_correction(&grid, c)),
+            mic_range: correction.map(mic_range),
             generation: 0,
             tf_pace: Pace::new(Duration::ZERO),
             ir_pace: Pace::new(Duration::ZERO),
@@ -443,6 +454,7 @@ impl Transfer {
                 nudged: Seconds(self.nudged_samples / self.fs),
                 smoothing: self.cfg.smoothing,
                 mic_curve: self.corr.is_some(),
+                mic_range: self.mic_range,
                 math: None,
                 unresolved: Some(self.unresolved.clone()),
                 filled: 0.0,
@@ -457,6 +469,7 @@ impl Transfer {
 
     fn set_correction(&mut self, c: Option<&Correction>) {
         self.corr = c.map(|c| column_correction(&self.grid, c));
+        self.mic_range = c.map(mic_range);
     }
 
     fn mark_discontinuity(&mut self, at: u64) {
@@ -573,6 +586,7 @@ impl Transfer {
                 nudged: Seconds(self.nudged_samples / self.fs),
                 smoothing: self.cfg.smoothing,
                 mic_curve: self.corr.is_some(),
+                mic_range: self.mic_range,
                 math: None,
                 unresolved: Some(self.unresolved.clone()),
                 filled: self.mtw.fill() as f32,

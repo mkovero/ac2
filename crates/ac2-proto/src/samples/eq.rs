@@ -143,6 +143,7 @@ pub(super) fn eq_trace_meta() -> TraceMeta {
         },
         delay: Seconds(0.0),
         depth: None,
+        lf_window: None,
         cal: CalState::Uncalibrated,
         mic: None,
         eq_in: Vec::new(),

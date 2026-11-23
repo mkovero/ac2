@@ -111,6 +111,7 @@ impl Data {
             stored: None,
             selected: false,
             compared: false,
+            mic_range: None,
             unresolved: None,
         }
     }
@@ -402,6 +403,7 @@ fn live_frame(freqs: &[f64], tau: f64, applied: f64, nudged: f64) -> TfFrame {
             nudged: Seconds(nudged),
             smoothing: None,
             mic_curve: false,
+            mic_range: None,
             math: None,
             unresolved: None,
             filled: 1.0,

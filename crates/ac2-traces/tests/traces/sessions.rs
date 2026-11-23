@@ -39,6 +39,7 @@ pub(super) fn session_sample() -> Session {
                             resolution: Resolution::FortyEighth,
                             smoothing: None,
                             depth: DepthPolicy::EqualConfidence,
+                            lf_window: ac2_proto::model::LfWindow::Standard,
                             peak: ac2_proto::model::PeakMode::Off,
                         },
                     },

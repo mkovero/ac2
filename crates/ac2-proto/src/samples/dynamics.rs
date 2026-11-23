@@ -102,6 +102,7 @@ pub(super) fn dynamics_meta() -> TraceMeta {
             epoch: SessionEpoch(2),
         },
         depth: None,
+        lf_window: None,
         cal: CalState::Uncalibrated,
         ..trace_meta()
     }

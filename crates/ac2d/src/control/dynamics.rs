@@ -510,6 +510,7 @@ impl Control {
             grid_id: grid.id(),
             delay: Seconds(0.0),
             depth: None,
+            lf_window: None,
             // Gains of an input re the reference: no calibration applies.
             cal: CalState::Uncalibrated,
             mic: None,

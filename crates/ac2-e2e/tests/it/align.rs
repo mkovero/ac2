@@ -26,7 +26,7 @@ fn readout(s: &AppState) -> Option<ac2_scene::align::Readout> {
 fn alignment_from_an_empty_daemon() -> R {
     let (_daemon, mut d) = measuring()?;
     let live = d.st.selected_meas().map(|m| m.id).ok_or("measurement")?;
-    d.tf_frames(live, 240)?;
+    d.tf_frames(live, 336)?;
     d.key("Ctrl+1");
     d.until("the capture in slot 1", |s| {
         s.daemon()

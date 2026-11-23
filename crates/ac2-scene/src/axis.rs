@@ -584,6 +584,27 @@ mod tests {
         assert_eq!(y.to_px(0.0), 100.0);
     }
 
+    /// Below 20 Hz and above 20 kHz the axis labels as it does in between: a sub's bottom
+    /// octaves and the top of a 192 or 384 kHz session read off the same decade ticks.
+    #[test]
+    fn the_axis_labels_infrasonic_and_ultrasonic_ranges() {
+        assert_eq!(
+            f_axis(1.0, 256_000.0, 900.0).labels(),
+            [
+                "1", "2", "5", "10", "20", "50", "100", "200", "500", "1k", "2k", "5k", "10k",
+                "20k", "50k", "100k", "200k"
+            ]
+        );
+        assert_eq!(
+            f_axis(5.0, 200.0, 900.0).labels(),
+            ["5", "10", "20", "50", "100", "200"]
+        );
+        assert_eq!(
+            f_axis(10_000.0, 172_800.0, 900.0).labels(),
+            ["10k", "20k", "50k", "100k"]
+        );
+    }
+
     #[test]
     fn default_log_axis_is_1_2_5() {
         let a = f_axis(20.0, 20_000.0, 900.0);

@@ -113,6 +113,7 @@ pub(super) fn meas_config() -> MeasConfig {
                 depth: DepthPolicy::FastLf {
                     max_settle_s: Seconds(1.0),
                 },
+                lf_window: crate::model::LfWindow::Long,
                 peak: crate::model::PeakMode::Hold,
             },
         },
@@ -413,6 +414,7 @@ pub(super) fn spectrum_trace_meta() -> TraceMeta {
         },
         delay: Seconds(0.0),
         depth: None,
+        lf_window: None,
         ..trace_meta()
     }
 }
@@ -444,6 +446,7 @@ pub(super) fn math_trace_meta() -> TraceMeta {
         },
         delay: Seconds(0.0),
         depth: None,
+        lf_window: None,
         cal: CalState::Uncalibrated,
         mic: None,
         ..trace_meta()

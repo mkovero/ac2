@@ -56,10 +56,10 @@ async fn two_curves_of_one_mic_switched_on_an_input() {
     let lease = c.acquire_lease(false, OnDrop::Release).await.unwrap();
     fire(&lease, Signal::Pink).await;
     let grid_f = |k: i32| 1000.0 * 2f64.powf(f64::from(k) / 48.0);
-    // Columns at 5, 8, 12.5 and 16 kHz (k_min = −240).
+    // Columns at 5, 8, 12.5 and 16 kHz (k_min = −336).
     let cols: Vec<usize> = [5000.0f64, 8000.0, 12_500.0, 16_000.0]
         .iter()
-        .map(|f| ((48.0 * (f / 1000.0).log2()).round() as i32 + 240) as usize)
+        .map(|f| ((48.0 * (f / 1000.0).log2()).round() as i32 + 336) as usize)
         .collect();
     let tf_with = |want: bool| {
         let c = &c;
@@ -87,8 +87,14 @@ async fn two_curves_of_one_mic_switched_on_an_input() {
     let off = tf_with(false).await;
     let c0 = MicCurve::parse(&zero).unwrap().normalised(1000.0);
     let c90 = MicCurve::parse(&ninety).unwrap().normalised(1000.0);
+    // Frames say how far the applied curve reaches: outside its points it is held flat,
+    // so those columns are uncorrected. No curve, no range.
+    let r = at90.meta.mic_range.expect("the applied curve's range");
+    let points = MicCurve::parse(&ninety).unwrap();
+    assert_eq!((r.lo.0, r.hi.0), (points.f_lo(), points.f_hi()));
+    assert_eq!(off.meta.mic_range, None);
     for &k in &cols {
-        let f = grid_f(k as i32 - 240);
+        let f = grid_f(k as i32 - 336);
         // Displayed = raw − cₙ(f): 0° → 90° moves it by c0ₙ − c90ₙ, off by +c0ₙ.
         let want = c0.db(f) - c90.db(f);
         let got = f64::from(at90.mag[k] - at0.mag[k]);

@@ -466,6 +466,7 @@ fn level_trace(grid: GridDef, columns: Columns) -> StoredTrace {
             grid_id: grid.id(),
             delay: Seconds(0.0),
             depth: None,
+            lf_window: None,
             cal: CalState::Uncalibrated,
             mic: None,
             mic_curve: None,

@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     AverageMethod, CalKey, DelayReference, DepthPolicy, DynamicsData, EssSpec, LevelScale,
-    LfHarmonics, MathExpr, MathOp, MicCurveRef, Operand, PhaseBasis, Resolution, Smoothing,
-    SpecLevel, SweepData, TraceIr, TraceOwner, Unresolved,
+    LfHarmonics, LfWindow, MathExpr, MathOp, MicCurveRef, Operand, PhaseBasis, Resolution,
+    Smoothing, SpecLevel, SweepData, TraceIr, TraceOwner, Unresolved,
 };
 use crate::grid::GridId;
 use crate::units::{
@@ -448,6 +448,8 @@ pub struct TraceMeta {
     pub delay: Seconds,
     /// Averaging depth policy at capture (transfer captures).
     pub depth: Option<DepthPolicy>,
+    /// Longest analysis window at capture (transfer captures).
+    pub lf_window: Option<LfWindow>,
     /// Calibration at capture.
     pub cal: CalState,
     /// Mic at capture.

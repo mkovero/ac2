@@ -97,6 +97,7 @@ fn trace<'a>(c: &'a Cols, meas: u32, color: usize, delay: f64) -> TfTrace<'a> {
         stored: None,
         selected: false,
         compared: false,
+        mic_range: None,
         unresolved: None,
     }
 }

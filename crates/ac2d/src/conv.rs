@@ -353,6 +353,14 @@ pub(crate) fn last_lock(l: core::timing::LastLock, at: WallNs) -> pm::LastLock {
     }
 }
 
+/// MTW ladder of a transfer measurement's longest window.
+pub(crate) fn ladder(w: pm::LfWindow) -> core::mtw::Ladder {
+    match w {
+        pm::LfWindow::Standard => core::mtw::Ladder::Standard,
+        pm::LfWindow::Long => core::mtw::Ladder::LongLf,
+    }
+}
+
 /// MTW depth policy; `None` when the span cap is not a positive finite time.
 pub(crate) fn depth(d: pm::DepthPolicy) -> Option<core::mtw::DepthPolicy> {
     match d {

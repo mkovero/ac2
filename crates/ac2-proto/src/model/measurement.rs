@@ -40,6 +40,8 @@ pub struct TransferConfig {
     pub smoothing: Option<Smoothing>,
     /// How deep the decimated stages average (decision M1).
     pub depth: DepthPolicy,
+    /// Longest analysis window: how far down the columns are resolved.
+    pub lf_window: LfWindow,
     /// What P draws over the live magnitude; the hold and the tracking are each client's.
     pub peak: PeakMode,
 }
@@ -57,6 +59,20 @@ pub enum DepthPolicy {
         /// Longest averaging span of a decimated stage (> 0).
         max_settle_s: Seconds,
     },
+}
+
+/// Longest analysis window of a transfer measurement's MTW ladder. A window of `T` seconds
+/// resolves `1/T` Hz, so the bottom octaves need a long one, and every independent
+/// estimate there takes that long to arrive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LfWindow {
+    /// About 1 s (the ~4 kHz stage): 1/48 octave is resolved from about 68 Hz.
+    #[default]
+    Standard,
+    /// About 4 s (a further ~1 kHz stage below about 68 Hz): 1/48 octave is resolved from
+    /// about 17 Hz, and those columns settle four times as slowly.
+    Long,
 }
 
 /// Narrowband spectrum.

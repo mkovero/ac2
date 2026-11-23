@@ -66,7 +66,7 @@ fn mic_curves_imported_and_switched_in_the_input_setup() -> R {
         meter_label(s, 1) == "MM1 34804 · no curve stored · mic (in 2)"
     })?;
     d.fire()?;
-    d.tf_frames(m.id, 240)?;
+    d.tf_frames(m.id, 336)?;
     d.until("the caption without a curve", |s| {
         s.pane_caption(crate::common::pane(s, PaneKind::Transfer))
             .is_some_and(|c| c.contains("no mic curve stored for MM1 34804"))

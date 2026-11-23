@@ -521,6 +521,7 @@ fn tf_frame(grid: &GridDef, meas: u32, gain: f64, tau: f64, bump_hz: f64) -> TfF
                 mode: SmoothingMode::MagnitudePhase,
             }),
             mic_curve: false,
+            mic_range: None,
             math: None,
             unresolved: None,
             filled: 1.0,

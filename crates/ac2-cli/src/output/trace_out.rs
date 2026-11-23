@@ -107,6 +107,11 @@ pub fn trace_meta(t: &TraceMeta) -> String {
             format!("fast LF (≤ {} s)", format::fixed(max_settle_s.0, 1))
         }
     };
+    let lf_window = match t.lf_window {
+        None => "—",
+        Some(LfWindow::Standard) => "1 s",
+        Some(LfWindow::Long) => "4 s",
+    };
     let cal = match &t.cal {
         CalState::Uncalibrated => "uncalibrated".to_owned(),
         CalState::Calibrated {
@@ -159,7 +164,7 @@ pub fn trace_meta(t: &TraceMeta) -> String {
         _ => String::new(),
     };
     format!(
-        "trace {} {:?}{}\n  under       {}\n  kind        {}\n  source      {}\n  time base   {}{epoch}\n  delay       {}{reference}\n  from arrival {}\n  polarity    {}\n  offset      {}\n  smoothing   {smoothing}\n  depth       {depth}\n  cal         {cal}\n  mic         {mic}\n  shown       {}{}\n  created     {} ns{notes}",
+        "trace {} {:?}{}\n  under       {}\n  kind        {}\n  source      {}\n  time base   {}{epoch}\n  delay       {}{reference}\n  from arrival {}\n  polarity    {}\n  offset      {}\n  smoothing   {smoothing}\n  depth       {depth}\n  LF window   {lf_window}\n  cal         {cal}\n  mic         {mic}\n  shown       {}{}\n  created     {} ns{notes}",
         t.id,
         t.edit.name,
         t.edit

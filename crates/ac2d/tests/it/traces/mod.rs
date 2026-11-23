@@ -26,11 +26,11 @@ mod target;
 const T: Duration = Duration::from_secs(10);
 
 fn grid_freq(i: usize) -> f64 {
-    1000.0 * 2f64.powf((i as f64 - 240.0) / 48.0)
+    1000.0 * 2f64.powf((i as f64 - 336.0) / 48.0)
 }
 
 fn band() -> Vec<usize> {
-    (0..480)
+    (0..720)
         .filter(|&i| (300.0..=800.0).contains(&grid_freq(i)))
         .collect()
 }

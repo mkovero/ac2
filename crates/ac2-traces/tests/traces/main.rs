@@ -67,6 +67,7 @@ fn meta(id: u32, source: TraceSource, delay: f64, kind: TraceKind, g: &GridDef) 
         grid_id: g.id(),
         delay: Seconds(delay),
         depth: Some(DepthPolicy::EqualConfidence),
+        lf_window: Some(ac2_proto::model::LfWindow::Standard),
         cal: CalState::Uncalibrated,
         mic: None,
         mic_curve: None,

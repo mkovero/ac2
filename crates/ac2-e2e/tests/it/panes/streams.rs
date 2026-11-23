@@ -434,7 +434,7 @@ fn record_and_replay_from_the_app() -> R {
                     && match &f.frame.data {
                         FrameData::Tf(tf) => tf
                             .mag
-                            .get(240)
+                            .get(336)
                             .is_some_and(|m| m.is_finite() && (m - (-6.02)).abs() < 0.5),
                         _ => false,
                     }

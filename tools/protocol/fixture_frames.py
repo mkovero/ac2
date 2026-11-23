@@ -95,6 +95,7 @@ def tf_frame():
             "nudged": 0.0,
             "smoothing": {"fraction": "sixth", "mode": "magnitude"},
             "mic_curve": True,
+            "mic_range": {"lo": 20.0, "hi": 20000.0},
             "math": {
                 "operands": [
                     {"operand": {"type": "meas", "meas": 2}, "status": {"type": "included"}},

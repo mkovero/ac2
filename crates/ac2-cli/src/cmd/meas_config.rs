@@ -330,6 +330,11 @@ pub fn meas_config(n: &MeasNew) -> Result<MeasConfig, CliError> {
                             return Err(CliError::Usage("--fast-lf must be longer than 0".into()));
                         }
                     },
+                    lf_window: if n.long_lf {
+                        LfWindow::Long
+                    } else {
+                        LfWindow::Standard
+                    },
                     peak: PeakMode::Off,
                 },
             }

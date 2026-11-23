@@ -275,7 +275,7 @@ fn slow_the_stimulus_follows_the_view_from_the_app() -> R {
                     .is_some_and(|g| g.signal == Signal::Pink)
         })
     })?;
-    d.tf_frames(meas, 240)?;
+    d.tf_frames(meas, 336)?;
     d.stop()?;
     Ok(())
 }

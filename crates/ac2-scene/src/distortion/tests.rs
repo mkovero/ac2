@@ -67,6 +67,7 @@ pub(crate) fn data() -> TraceData {
             grid_id: grid().id(),
             delay: Seconds(0.00332),
             depth: None,
+            lf_window: None,
             cal: CalState::Uncalibrated,
             mic: None,
             mic_curve: None,

@@ -366,8 +366,8 @@ fn v_only_selects_from_an_empty_daemon() -> R {
     // The level typed for the first is kept: arm and fire.
     d.arm()?;
     d.play()?;
-    d.tf_frames(first, 240)?;
-    d.tf_frames(second, 240)?;
+    d.tf_frames(first, 336)?;
+    d.tf_frames(second, 336)?;
     let owned = |s: &AppState, meas: MeasId| {
         s.daemon().and_then(|x| {
             x.traces

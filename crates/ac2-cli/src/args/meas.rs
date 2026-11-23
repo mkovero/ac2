@@ -440,6 +440,10 @@ pub struct MeasNew {
     /// at a higher coherence floor there. Default: equal confidence at every frequency.
     #[arg(long, num_args = 0..=1, default_missing_value = "1s", value_name = "TIME")]
     pub fast_lf: Option<Time>,
+    /// tf: add a window of about 4 s for the bottom octaves, which resolves 1/48 octave
+    /// from about 17 Hz instead of 68 Hz; those columns settle four times as slowly.
+    #[arg(long)]
+    pub long_lf: bool,
     /// tf, spectrum and RTA: peak hold, peak and dip tracking, or neither (the app's P;
     /// default off).
     #[arg(long, value_enum)]

@@ -14,6 +14,10 @@ use super::fir::FirDesign;
 pub const NFFT: usize = 4096;
 /// Target rates of the decimated stages; the factor is `round(sr / target)`.
 pub const DECIMATED_TARGET_RATES_HZ: [f64; 2] = [12_000.0, 4_000.0];
+/// Target rate of the stage [`Ladder::LongLf`] adds below those. Its window is four times
+/// the deepest standard stage's, so it resolves the design density two octaves lower
+/// (from about 17 Hz) at four times the time per independent estimate.
+pub const LONG_LF_TARGET_RATE_HZ: f64 = 1_000.0;
 /// Density (points per base-2 octave) the crossovers are designed for.
 pub const LADDER_DESIGN_PPO: u32 = 48;
 /// A stage serves frequencies up to this fraction of its own sample rate at most.
@@ -35,6 +39,9 @@ pub fn validity_factor(ppo: u32) -> f64 {
 pub enum Ladder {
     /// Full rate plus the ~12 kHz and ~4 kHz stages at NFFT 4096, overlap 50/75/87.5 %.
     Standard,
+    /// [`Ladder::Standard`] plus a ~1 kHz stage at overlap 93.75 %: a window of about four
+    /// seconds for the bottom octaves.
+    LongLf,
     /// One full-rate stage with the given FFT length and hop: fixed-FFT analysis, and a
     /// configuration that is directly comparable with a plain Welch estimate.
     Single {
@@ -57,8 +64,7 @@ pub enum LayoutError {
         /// Requested hop.
         hop: usize,
     },
-    /// A stage would have to serve above `SERVED_BAND_FRACTION` of its rate. The three-stage
-    /// ladder covers rates up to about 260 kHz; higher rates need an intermediate stage.
+    /// A stage would have to serve above `SERVED_BAND_FRACTION` of its rate.
     StageOverReach {
         /// Stage index.
         stage: usize,
@@ -218,7 +224,11 @@ impl Layout {
                     crossovers: Vec::new(),
                 })
             }
-            Ladder::Standard => Self::standard(sample_rate_hz),
+            Ladder::Standard => Self::decimated(sample_rate_hz, &DECIMATED_TARGET_RATES_HZ),
+            Ladder::LongLf => {
+                let [a, b] = DECIMATED_TARGET_RATES_HZ;
+                Self::decimated(sample_rate_hz, &[a, b, LONG_LF_TARGET_RATE_HZ])
+            }
         }
     }
 
@@ -245,22 +255,43 @@ impl Layout {
         crate::resolution::unresolved_ranges(grid, |f| self.cell_hz(f))
     }
 
-    fn standard(sr: f64) -> Result<Self, LayoutError> {
-        let mut factors = vec![1usize];
-        for target in DECIMATED_TARGET_RATES_HZ {
-            let m = (sr / target).round().max(1.0) as usize;
-            if m > *factors.last().unwrap_or(&1) {
-                factors.push(m);
-            }
-        }
+    /// The full-rate stage and one decimated stage per target rate, each at [`NFFT`].
+    fn decimated(sr: f64, targets: &[f64]) -> Result<Self, LayoutError> {
         let kappa = validity_factor(LADDER_DESIGN_PPO);
         let half_col = 2f64.powf(0.5 / f64::from(LADDER_DESIGN_PPO));
         let blend = 2f64.powf(BLEND_OCTAVES);
+        // A stage serves up to the top of the blend above the previous stage's validity
+        // edge, `reach` times the previous rate, and that must lie within
+        // `SERVED_BAND_FRACTION` of its own rate: a stage can sit at most about 21 times
+        // below the one before. A wider gap (a rate above about 260 kHz down to the first
+        // target) is bridged by stages four times the target rate apart.
+        let reach = kappa * blend * half_col / NFFT as f64;
+        let factor = |rate: f64| (sr / rate).round().max(1.0) as usize;
+        let mut factors = vec![1usize];
+        for &target in targets {
+            loop {
+                let prev = *factors.last().unwrap_or(&1);
+                let prev_rate = sr / prev as f64;
+                let mut rate = target;
+                while reach * prev_rate > SERVED_BAND_FRACTION * sr / factor(rate) as f64
+                    && factor(4.0 * rate) > prev
+                {
+                    rate *= 4.0;
+                }
+                let m = factor(rate);
+                if m > prev {
+                    factors.push(m);
+                }
+                if rate == target {
+                    break;
+                }
+            }
+        }
         let mut stages = Vec::with_capacity(factors.len());
         let mut crossovers = Vec::new();
         for (b, &m) in factors.iter().enumerate() {
             let rate = sr / m as f64;
-            // Overlap deepens 50 / 75 / 87.5 %: deeper stages have longer windows, and the
+            // Overlap deepens 50 / 75 / 87.5 / 93.75 %: deeper stages have longer windows, and the
             // extra overlap keeps their update interval from growing with the window.
             let hop = NFFT >> (b + 1);
             let bin_hz = rate / NFFT as f64;
@@ -343,6 +374,79 @@ mod tests {
     }
 
     #[test]
+    fn rates_above_260k_get_bridging_stages() {
+        for (sr, want) in [
+            (352_800.0, vec![1, 7, 29, 88]),
+            (384_000.0, vec![1, 8, 32, 96]),
+            (768_000.0, vec![1, 16, 64, 192]),
+        ] {
+            let l = Layout::new(sr, Ladder::Standard).expect("layout");
+            let got: Vec<usize> = l.stages.iter().map(|s| s.factor).collect();
+            assert_eq!(got, want, "{sr}");
+            for s in &l.stages {
+                assert!(s.served_hi_hz <= SERVED_BAND_FRACTION * s.rate_hz);
+            }
+            // The deepest stage is the same ~4 kHz one as at every other rate.
+            let deep = l.stages.last().expect("stage");
+            assert!(
+                (deep.rate_hz - 4_000.0).abs() < 20.0,
+                "{sr}: {}",
+                deep.rate_hz
+            );
+        }
+    }
+
+    #[test]
+    fn long_lf_adds_a_stage_two_octaves_down() {
+        for (sr, want) in [
+            (44_100.0, vec![1, 4, 11, 44]),
+            (48_000.0, vec![1, 4, 12, 48]),
+            (96_000.0, vec![1, 8, 24, 96]),
+            (192_000.0, vec![1, 16, 48, 192]),
+        ] {
+            let std = Layout::new(sr, Ladder::Standard).expect("layout");
+            let l = Layout::new(sr, Ladder::LongLf).expect("layout");
+            let got: Vec<usize> = l.stages.iter().map(|s| s.factor).collect();
+            assert_eq!(got, want, "{sr}");
+            // The shallower stages and their crossovers are the standard ladder's.
+            assert_eq!(l.stages[..3], std.stages[..]);
+            assert_eq!(l.crossovers[..2], std.crossovers[..]);
+            let (deep, c) = (&l.stages[3], l.crossovers[2]);
+            assert_eq!(deep.hop, NFFT / 16);
+            assert!(deep.served_hi_hz <= SERVED_BAND_FRACTION * deep.rate_hz);
+            assert!((c.lo_hz - std.stages[2].validity_edge_hz()).abs() < 1e-9);
+        }
+        // 48 kHz: a 1 kHz stage, bin 0.2441 Hz, window 4.096 s; 1/48 octave is resolved
+        // from κ(48)·0.2441 = 16.9 Hz and 1/24 from κ(24)·0.2441 = 8.5 Hz.
+        let l = Layout::new(48_000.0, Ladder::LongLf).expect("layout");
+        assert!((l.stages[3].window_s() - 4.096).abs() < 1e-9);
+        let deep = LogGrid48::down_to_8_hz();
+        let r48 = l.unresolved_ranges(&deep.0);
+        assert_eq!(r48.len(), 1, "{r48:?}");
+        assert!(near(r48[0].1, 16.9, 48), "{r48:?}");
+        let r24 = l.unresolved_ranges(&crate::grid::LogGrid {
+            ppo: 24,
+            k_min: -7 * 24,
+            k_max: 5 * 24 - 1,
+        });
+        assert_eq!(r24.len(), 1, "{r24:?}");
+        assert!(near(r24[0].1, 8.45, 24), "{r24:?}");
+    }
+
+    /// 1/48 octave from 2⁻⁷ kHz (7.8 Hz) to 32 kHz.
+    struct LogGrid48(crate::grid::LogGrid);
+
+    impl LogGrid48 {
+        fn down_to_8_hz() -> Self {
+            Self(crate::grid::LogGrid {
+                ppo: 48,
+                k_min: -7 * 48,
+                k_max: 5 * 48 - 1,
+            })
+        }
+    }
+
+    #[test]
     fn crossovers_at_48k() {
         let l = Layout::new(48_000.0, Ladder::Standard).expect("layout");
         assert!((l.crossovers[0].lo_hz - 811.51).abs() < 0.01);
@@ -412,14 +516,6 @@ mod tests {
             near(r96[2].0, 811.5, 96) && near(r96[2].1, 1623.0, 96),
             "{r96:?}"
         );
-    }
-
-    #[test]
-    fn very_high_rate_is_refused_not_silently_wrong() {
-        assert!(matches!(
-            Layout::new(384_000.0, Ladder::Standard),
-            Err(LayoutError::StageOverReach { stage: 1, .. })
-        ));
     }
 
     #[test]

@@ -55,6 +55,7 @@ fn member(meas: u32, db: f32, arrival: f64, inserted: f64, prot: ProtectionFlags
                 nudged: Seconds(0.0),
                 smoothing: None,
                 mic_curve: false,
+                mic_range: None,
                 math: None,
                 unresolved: None,
                 filled: 1.0,

@@ -138,6 +138,14 @@ pub(super) const DEPTH: [&str; 2] = [
     "equal confidence (every frequency alike)",
     "fast LF (low stages settle within 1 s)",
 ];
+/// Longest transfer window, in [`LfWindow`] order.
+pub(super) const LF_WINDOW: [(&str, LfWindow); 2] = [
+    ("1 s (1/48 octave from 68 Hz)", LfWindow::Standard),
+    (
+        "4 s (1/48 octave from 17 Hz, settles slower)",
+        LfWindow::Long,
+    ),
+];
 pub(super) const FRACTIONS: [(&str, BandFraction); 5] = [
     ("1/1 octave", BandFraction::Octave),
     ("1/3 octave", BandFraction::Third),

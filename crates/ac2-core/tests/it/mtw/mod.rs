@@ -14,6 +14,7 @@ mod fast_lf;
 mod fill;
 mod golden;
 mod layout;
+mod long_lf;
 mod loopback;
 mod stream;
 

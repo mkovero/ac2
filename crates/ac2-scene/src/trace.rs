@@ -121,6 +121,9 @@ pub struct TfTrace<'a> {
     /// marker, [`crate::unresolved`]); `None`: not known (math traces, stored transfer
     /// curves).
     pub unresolved: Option<crate::unresolved::Source<'a>>,
+    /// Span of the mic curve in the columns ([`crate::unresolved::mic_marks`]); `None`:
+    /// no curve, or not known (math traces, stored curves).
+    pub mic_range: Option<ac2_proto::model::FreqRange>,
     /// An average's range across positions ([`crate::range_band`]); `None` for every other
     /// curve.
     pub range: Option<crate::range_band::Source<'a>>,
@@ -203,6 +206,7 @@ impl<'a> TfTrace<'a> {
                     unresolved: u,
                     fill: crate::unresolved::Fill::Gaps,
                 }),
+            mic_range: frame.meta.mic_range,
             range: frame
                 .meta
                 .math
@@ -266,6 +270,7 @@ impl<'a> TfTrace<'a> {
             stored: Some(data),
             selected: false,
             compared: false,
+            mic_range: None,
             unresolved: data
                 .sweep
                 .as_ref()

@@ -30,7 +30,7 @@ const SWEEP_EQ_PPO: u32 = 48;
 /// octaves at a fine resolution.
 fn eq_grid(kind: &MeasKind) -> GridDef {
     static_grid(kind).unwrap_or_else(|| {
-        let g = LogGridSpec::ten_octaves(SWEEP_EQ_PPO);
+        let g = LogGridSpec::transfer(SWEEP_EQ_PPO);
         GridDef::Log {
             ppo: g.ppo,
             k_min: g.k_min,
@@ -174,6 +174,7 @@ impl Control {
                     grid_id: grid.id(),
                     delay: Seconds(0.0),
                     depth: None,
+                    lf_window: None,
                     cal: CalState::Uncalibrated,
                     mic: None,
                     mic_curve: None,

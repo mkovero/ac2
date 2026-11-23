@@ -172,6 +172,30 @@ fn unresolved_marks(
             ))
         })
         .unwrap_or_default()
+        .into_iter()
+        .chain(mic_marks(traces, shown))
+        .collect()
+}
+
+/// Where the selected shown curve's mic curve ends, else the first of the pane's own
+/// corrected curves': one curve's, as for the valid-resolution marks.
+fn mic_marks(traces: &[TfTrace<'_>], shown: &[DisplayTrace]) -> Vec<crate::unresolved::RangeMark> {
+    let known = || {
+        traces
+            .iter()
+            .filter(|t| t.mic_range.is_some() && shown.iter().any(|d| d.key == t.key))
+    };
+    known()
+        .find(|t| t.selected)
+        .or_else(|| known().find(|t| !t.compared))
+        .and_then(|t| {
+            Some(crate::unresolved::mic_marks(
+                t.mic_range?,
+                t.freqs.first().copied()?,
+                t.freqs.last().copied()?,
+            ))
+        })
+        .unwrap_or_default()
 }
 
 /// `nudge_s`: a stored trace's delay from its arrival (its display nudge); `stepped_s`: a
@@ -636,9 +660,9 @@ pub fn transfer_scene(
         .filter(|_| view.chrome.cursor())
         .and_then(|hz| readout::cursor_readout(&shown, hz, view.tf.phase));
     if let Some(cr) = cursor.as_mut()
-        && let Some(m) = crate::unresolved::at(&marks, cr.freq_hz)
+        && let Some(note) = crate::unresolved::note_at(&marks, cr.freq_hz)
     {
-        cr.freq = format!("{} · {}", cr.freq, m.note);
+        cr.freq = format!("{} · {note}", cr.freq);
     }
     let delay = reference.as_ref().map(|r| {
         let name = shown

@@ -301,6 +301,7 @@ mod tests {
             grid_id: ac2_proto::GridId(1),
             delay: Seconds(0.0),
             depth: None,
+            lf_window: None,
             cal: CalState::Uncalibrated,
             mic: None,
             mic_curve: None,

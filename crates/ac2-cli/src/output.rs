@@ -6,10 +6,10 @@ use ac2_proto::GridDef;
 use ac2_proto::model::layout::{EntryRef, PaneContent, PaneEntry, RigRef};
 use ac2_proto::model::{
     Autosave, AutosaveState, Availability, BackendInfo, CalEntry, CalState, CalStatus,
-    ClockRelation, DelayReference, DepthPolicy, InputKind, LineCalEntry, MeasKind, Measurement,
-    Mic, Pair, PeakMode, Polarity, RecordingEnd, RecordingFile, RecordingRun, Session, SessionFile,
-    SmoothingFraction, SmoothingMode, State, TimingState, TimingStatus, TraceData, TraceMeta,
-    TraceSource,
+    ClockRelation, DelayReference, DepthPolicy, InputKind, LfWindow, LineCalEntry, MeasKind,
+    Measurement, Mic, Pair, PeakMode, Polarity, RecordingEnd, RecordingFile, RecordingRun, Session,
+    SessionFile, SmoothingFraction, SmoothingMode, State, TimingState, TimingStatus, TraceData,
+    TraceMeta, TraceSource,
 };
 use ac2_proto::units::{MeasId, WallNs};
 use ac2_scene::format;

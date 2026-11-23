@@ -7,8 +7,9 @@ use crate::trace::TraceKey;
 
 /// Lowest frequency the view can zoom out to.
 pub const FREQ_LIMIT_LO: f64 = 1.0;
-/// Highest frequency the view can zoom out to.
-pub const FREQ_LIMIT_HI: f64 = 100_000.0;
+/// Highest frequency the view can zoom out to: the top of a transfer function's grid,
+/// above what a 384 kHz session measures.
+pub const FREQ_LIMIT_HI: f64 = 256_000.0;
 /// Narrowest frequency span (hi / lo): about 1/7 octave.
 pub const FREQ_MIN_RATIO: f64 = 1.1;
 

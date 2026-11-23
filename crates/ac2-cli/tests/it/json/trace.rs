@@ -92,6 +92,7 @@ async fn trace_commands_json() -> R {
             "grid_id": null,
             "delay": 0.01,
             "depth": { "type": "equal_confidence" },
+            "lf_window": "standard",
             "cal": { "type": "uncalibrated" },
             "mic": null,
             "mic_curve": null,
@@ -119,7 +120,7 @@ async fn trace_commands_json() -> R {
     assert_eq!(s, actual);
     let d = ok_json(&f, &["trace", "show", "1", "--data", "--json"]).await?;
     assert_eq!(d["meta"], actual);
-    assert_eq!(d["mag_db"].as_array().map(Vec::len), Some(480));
+    assert_eq!(d["mag_db"].as_array().map(Vec::len), Some(720));
     assert!(d["coherence"].is_array());
     // Both captured at the same applied delay: no difference.
     let dd = ok_json(&f, &["trace", "delay-diff", "a", "b", "--json"]).await?;

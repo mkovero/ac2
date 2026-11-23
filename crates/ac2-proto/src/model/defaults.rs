@@ -12,22 +12,31 @@ use crate::units::{Db, DbSpl, Hz, Seconds};
 // made from either is the same measurement.
 
 impl LogGridSpec {
-    /// Ten octaves around 1 kHz (≈ 31 Hz … 32 kHz) at `ppo` points per octave.
-    pub fn ten_octaves(ppo: u32) -> Self {
+    /// Lowest column of a transfer function's grid, octaves from 1 kHz (2⁻⁷ kHz ≈ 7.8 Hz,
+    /// the lowest column of a spectrum's grid too).
+    pub const TRANSFER_LOWEST_OCTAVE: i64 = -7;
+    /// Octave above the highest column of a transfer function's grid, from 1 kHz
+    /// (2⁸ kHz = 256 kHz): above what a 384 kHz session measures.
+    pub const TRANSFER_TOP_OCTAVE: i64 = 8;
+
+    /// A transfer function's grid at `ppo` points per octave: 7.8 Hz … 256 kHz, the same at
+    /// every sample rate so that traces of any session share it. A session's columns are
+    /// valid up to the band its rate measures.
+    pub fn transfer(ppo: u32) -> Self {
         let p = i64::from(ppo);
         let k = |v: i64| i32::try_from(v).unwrap_or(if v < 0 { i32::MIN } else { i32::MAX });
         Self {
             ppo,
-            k_min: k(-5 * p),
-            k_max: k(5 * p - 1),
+            k_min: k(Self::TRANSFER_LOWEST_OCTAVE * p),
+            k_max: k(Self::TRANSFER_TOP_OCTAVE * p - 1),
         }
     }
 }
 
 impl TransferConfig {
-    /// The column grid: ten octaves around 1 kHz at the measurement's resolution.
+    /// The column grid ([`LogGridSpec::transfer`]) at the measurement's resolution.
     pub fn grid(&self) -> LogGridSpec {
-        LogGridSpec::ten_octaves(self.resolution.ppo())
+        LogGridSpec::transfer(self.resolution.ppo())
     }
 
     /// Default FIFO blocks of the full-rate stage.
@@ -45,6 +54,7 @@ impl TransferConfig {
             resolution: Resolution::default(),
             smoothing: None,
             depth: DepthPolicy::EqualConfidence,
+            lf_window: crate::model::LfWindow::Standard,
             peak: crate::model::PeakMode::Off,
         }
     }

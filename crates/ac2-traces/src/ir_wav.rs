@@ -95,7 +95,7 @@ pub fn import(content: &[u8], opts: IrImport) -> Result<Imported, ImportError> {
         0
     };
     let kept: Vec<f64> = all[first..all.len().min(first + max)].to_vec();
-    let grid_spec = LogGridSpec::ten_octaves(opts.resolution.ppo());
+    let grid_spec = LogGridSpec::transfer(opts.resolution.ppo());
     let grid = LogGrid {
         ppo: grid_spec.ppo,
         k_min: grid_spec.k_min,

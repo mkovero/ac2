@@ -254,7 +254,7 @@ fn a_hides_and_backspace_deletes_the_selected_measurement() -> R {
     // The level typed for the first is kept: arm and fire.
     d.arm()?;
     d.play()?;
-    d.tf_frames(second.id, 240)?;
+    d.tf_frames(second.id, 336)?;
     // The first's row chosen, its transfer pane draws its group; the second ticked into it
     // (C, Enter on its row) draws behind it.
     d.send(Msg::SelectMeas(first.id));

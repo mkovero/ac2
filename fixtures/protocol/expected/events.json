@@ -47,6 +47,7 @@
         "type": "fast_lf",
         "max_settle_s": 1.0
        },
+       "lf_window": "long",
        "peak": "hold"
       }
      }

@@ -1248,7 +1248,9 @@ whose measurement has since been deleted comes back empty, of its kind.
 ### Zoom, pan and the level axis
 
 The frequency axis is shared by the panes: **I** / **O** zoom, **←** / **→** pan, **Home**
-resets to 20 Hz – 20 kHz; the wheel zooms about the pointer, a drag pans.
+resets to 20 Hz – 20 kHz; the wheel zooms about the pointer, a drag pans. The axis zooms
+out to 1 Hz – 256 kHz: what a measurement has below 20 Hz or above 20 kHz (a sub's bottom
+octave, a 96 or 192 kHz session's top) is there once you zoom out or pan to it.
 
 Each pane's **level axis** (transfer magnitude, spectrum / RTA level, sweep distortion) is
 its own: two transfer panes side by side zoom and pan apart, and the keys and the wheel move
@@ -1835,10 +1837,19 @@ than a grid column, neighbouring columns share one estimate. The **resolution ma
 shows where: a faint grey shade with dashed edges, and the cursor says it
 (`52.0 Hz · coarser than 1/96 oct (gaps)`).
 
-- **Transfer**: the FFT ladder's windows are fixed. At 96 kHz: 1/48 is marked only below
-  about 68 Hz; 1/96 below about 135 Hz, about 200–410 Hz and 1.6–3.3 kHz (at 48 kHz the last
-  is 810 Hz–1.6 kHz); 1/24 only about 31–34 Hz; 1/12 nowhere. A live curve shows **gaps**
-  where columns have no estimate of their own.
+- **Transfer**: the curve runs from 7.8 Hz to the top of the band the session's rate
+  measures (0.45 of the rate: 21.6 kHz at 48 kHz, 86 kHz at 192 kHz). The FFT ladder's
+  longest window is about 1 s. At 96 kHz: 1/48 is marked below about 68 Hz; 1/96 below about
+  135 Hz, about 200–410 Hz and 1.6–3.3 kHz (at 48 kHz the last is 810 Hz–1.6 kHz); 1/24
+  below about 34 Hz; 1/12 below about 17 Hz. A live curve shows **gaps** where columns have
+  no estimate of their own.
+- **LF window** (New / Edit dialog, `ac2 meas new tf … --long-lf`): **4 s** adds a longer
+  window for the bottom octaves, for subwoofers: 1/48 is then marked only below about 17 Hz
+  (1/24 below 8.5 Hz). Those columns need four times as long to settle, so keep **1 s** for
+  aligning by phase and use 4 s to see detail below 68 Hz.
+- **Outside the mic curve**: where a transfer curve runs below the lowest or above the
+  highest point of the mic's curve file it is not corrected for the mic. The same shade
+  marks it, and the cursor says `outside the mic curve`.
 - **Sweep**: the window is the gate (or the response up to the noise); its edge is about
   69/W Hz at 1/48 (138/W at 1/96) for W seconds: an ungated room response marks at most the
   lowest columns, a 10 ms gate everything below about 7 kHz. The curve is **interpolated**

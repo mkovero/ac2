@@ -508,6 +508,7 @@ impl Control {
             grid_id: grid.id(),
             delay: Seconds(a.arrival_s),
             depth: None,
+            lf_window: None,
             // A ratio of two inputs: no calibration applies.
             cal: CalState::Uncalibrated,
             mic: si.mic.clone(),

@@ -285,7 +285,7 @@ fn mic_curve_on_a_stored_trace() {
     assert_eq!((mc.mic.as_str(), mc.curve.label.as_str()), ("M30", "M30"));
     assert_eq!(mc.f_norm, Hz(1000.0));
     let d = data(c, raw.id);
-    for i in 0..480 {
+    for i in 0..raw_data.mag_db.len() {
         let f = grid_freq(i);
         let want = if f <= 4000.0 {
             0.0

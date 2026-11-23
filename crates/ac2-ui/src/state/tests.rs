@@ -58,6 +58,7 @@ fn transfer() -> MeasKind {
             resolution: Resolution::FortyEighth,
             smoothing: None,
             depth: ac2_proto::model::DepthPolicy::EqualConfidence,
+            lf_window: ac2_proto::model::LfWindow::Standard,
             peak: ac2_proto::model::PeakMode::Off,
         },
     }
@@ -560,6 +561,7 @@ fn stored(id: u32, slot: Option<u8>, epoch: u32) -> TraceMeta {
         grid_id: ac2_proto::GridId(1),
         delay: Seconds(0.0),
         depth: Some(DepthPolicy::EqualConfidence),
+        lf_window: Some(ac2_proto::model::LfWindow::Standard),
         cal: CalState::Uncalibrated,
         mic: None,
         mic_curve: None,

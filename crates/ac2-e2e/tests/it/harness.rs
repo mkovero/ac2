@@ -360,7 +360,7 @@ pub fn measure_from_empty(d: &mut Driver) -> R {
     d.key("Escape");
 
     d.fire()?;
-    d.tf_frames(m.id, 240)?;
+    d.tf_frames(m.id, 336)?;
     d.stop()
 }
 

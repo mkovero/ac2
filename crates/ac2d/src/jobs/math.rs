@@ -657,6 +657,7 @@ pub(crate) fn combine(
                 nudged: Seconds(0.0),
                 smoothing: None,
                 mic_curve,
+                mic_range: None,
                 math: state,
                 unresolved: None,
                 filled,

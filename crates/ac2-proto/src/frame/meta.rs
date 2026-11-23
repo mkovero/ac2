@@ -4,10 +4,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::grid::GridId;
 use crate::model::{
-    BackendKind, Ballistic, BandFraction, CalStatus, DeviceId, LeqJudgement, LevelScale, Operand,
-    Pair, PairSide, PeakWeighting, PhaseBasis, PositionCorrection, PreviewInput, Smoothing,
-    SmoothingFraction, SpecLevel, TimeWeighting, TimingState, TimingStatus, Unresolved, Weighting,
-    Window,
+    BackendKind, Ballistic, BandFraction, CalStatus, DeviceId, FreqRange, LeqJudgement, LevelScale,
+    Operand, Pair, PairSide, PeakWeighting, PhaseBasis, PositionCorrection, PreviewInput,
+    Smoothing, SmoothingFraction, SpecLevel, TimeWeighting, TimingState, TimingStatus, Unresolved,
+    Weighting, Window,
 };
 use crate::units::{
     ClientId, DaemonIncarnation, Db, Dbfs, Dbtp, Hz, Lufs, Rev, SampleIndex, Samples, Seconds,
@@ -31,6 +31,10 @@ pub struct TfMeta {
     pub smoothing: Option<Smoothing>,
     /// A mic curve was subtracted from `mag` (for a math trace: from every operand).
     pub mic_curve: bool,
+    /// The lowest and highest point of that mic curve. Outside them the curve is held at
+    /// its end value, so those columns are not corrected for the mic. `None` without a
+    /// curve and for a math trace.
+    pub mic_range: Option<FreqRange>,
     /// What a math trace combined; `None` for a transfer measurement.
     pub math: Option<Box<MathState>>,
     /// Where the columns are finer than the analysis stage serving them resolves; `None`

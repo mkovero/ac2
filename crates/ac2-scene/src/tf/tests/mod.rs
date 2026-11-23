@@ -69,6 +69,7 @@ fn trace(c: &Cols, key: TraceKey, delay: f64) -> TfTrace<'_> {
         stored: None,
         selected: false,
         compared: false,
+        mic_range: None,
         unresolved: None,
     }
 }

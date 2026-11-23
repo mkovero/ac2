@@ -222,6 +222,7 @@ pub fn transfer(name: &str) -> MeasConfig {
                 resolution: Resolution::FortyEighth,
                 smoothing: None,
                 depth: ac2_proto::model::DepthPolicy::EqualConfidence,
+                lf_window: ac2_proto::model::LfWindow::Standard,
                 peak: ac2_proto::model::PeakMode::Off,
             },
         },

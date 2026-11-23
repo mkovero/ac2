@@ -95,7 +95,7 @@ fn eq_editor_from_an_empty_daemon() -> R {
         })
     })?;
 
-    d.tf_frames(m.id, 240)?;
+    d.tf_frames(m.id, 336)?;
     let name = format!("{} after EQ 1 · assumes none of it in", m.config.name);
     d.until("the prediction's legend", |s| {
         legend(s).iter().any(|l| l.starts_with(&name))

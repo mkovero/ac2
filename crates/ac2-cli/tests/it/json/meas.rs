@@ -275,6 +275,7 @@ async fn session_meas_delay_trace_flow() -> R {
             "resolution": "forty_eighth",
             "smoothing": { "fraction": "sixth", "mode": "magnitude_phase" },
             "depth": { "type": "equal_confidence" },
+            "lf_window": "standard",
             "peak": "off"
         }})
     );
@@ -371,7 +372,7 @@ async fn session_meas_delay_trace_flow() -> R {
     // capture carries one, follows in a table of its own).
     let data = ok_json(&f, &["trace", "show", "l-pre-eq", "--data", "--json"]).await?;
     let points = data["mag_db"].as_array().map_or(0, Vec::len);
-    assert_eq!(points, 480, "1/48 octave over the analysis range");
+    assert_eq!(points, 720, "1/48 octave over the analysis range");
     let rows = csv
         .stdout
         .split_once("\nfreq_hz,mag_db,phase_deg,coherence\n")

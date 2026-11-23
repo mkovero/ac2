@@ -116,7 +116,7 @@ fn simulated_rig_starts_measuring() -> R {
     assert_eq!(d.st.empty_hint(f, &d.keys), None);
 
     d.fire()?;
-    d.tf_frames(m.id, 240)?;
+    d.tf_frames(m.id, 336)?;
     d.stop()?;
     Ok(())
 }
@@ -301,7 +301,7 @@ fn delay_nudges_from_the_keys_keep_the_curve() -> R {
     // The level typed there stays: arm and fire.
     d.arm()?;
     d.play()?;
-    d.tf_frames(m.id, 240)?;
+    d.tf_frames(m.id, 336)?;
     let applied = |s: &AppState| {
         s.selected_meas()
             .and_then(|m| m.delay.as_ref())
@@ -331,7 +331,7 @@ fn delay_nudges_from_the_keys_keep_the_curve() -> R {
             x.latest.get(&topic).is_some_and(|f| match &f.frame.data {
                 FrameData::Tf(tf) => {
                     (tf.meta.delay.0 - secs).abs() < 1e-12
-                        && tf.validity[240] == ac2_proto::frame::ValidityMask::NONE
+                        && tf.validity[336] == ac2_proto::frame::ValidityMask::NONE
                 }
                 _ => false,
             })
@@ -460,7 +460,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     // The level typed before stays: arm and fire.
     d.arm()?;
     d.play()?;
-    d.tf_frames(m.id, 240)?;
+    d.tf_frames(m.id, 336)?;
     d.send(Msg::Command(CommandId::Slot1));
     d.until("the capture in slot 1", |s| {
         s.daemon()
@@ -474,7 +474,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     d.until("the capture's data", |s| s.rig.traces.contains_key(&cap))?;
     d.until("the run's data", |s| s.rig.traces.contains_key(&run))?;
     let live = TraceKey::Live(m.id);
-    let before = drawn_phase(&d.st, 240);
+    let before = drawn_phase(&d.st, 336);
     let live_before = drawn_curve(&d.st, live);
     let legend = |v: &[(TraceKey, f64, String)], k| {
         v.iter()
@@ -506,7 +506,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
             })
         })
     })?;
-    let after = drawn_phase(&d.st, 240);
+    let after = drawn_phase(&d.st, 336);
     let live_after = drawn_curve(&d.st, live);
     let wrap = |x: f64| (x + 180.0).rem_euclid(360.0) - 180.0;
     // Ten samples later the curve leads by 360°·f·10/fs at every frequency (75° at 1 kHz).
@@ -544,7 +544,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     d.until("the second capture's data", |s| {
         s.rig.traces.contains_key(&cap2.id)
     })?;
-    let with2 = drawn_phase(&d.st, 240);
+    let with2 = drawn_phase(&d.st, 336);
     let off = wrap(phase_of(&with2, TraceKey::Stored(cap2.id)) - phase_of(&with2, live));
     assert!(
         off.abs() < 3.0,
@@ -558,7 +558,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
         d.send(Msg::Command(CommandId::NextTrace));
     }
     assert_eq!(d.st.rig.selected_trace, Some(cap));
-    let pre = drawn_phase(&d.st, 240);
+    let pre = drawn_phase(&d.st, 336);
     let n0 =
         d.st.daemon()
             .and_then(|x| x.traces.iter().find(|t| t.id == cap))
@@ -572,7 +572,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
                 .any(|t| t.id == cap && t.edit.delay_nudge.0 > n0 + 0.000_05)
         })
     })?;
-    let post = drawn_phase(&d.st, 240);
+    let post = drawn_phase(&d.st, 336);
     let nudged =
         wrap(phase_of(&post, TraceKey::Stored(cap)) - phase_of(&pre, TraceKey::Stored(cap)));
     // Ctrl+. made the live curve lead (checked above); `.` must turn the capture the same way.
@@ -627,7 +627,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
         "V moved no pane"
     );
     d.send(Msg::Command(CommandId::PhaseReference));
-    let pre = drawn_phase(&d.st, 240);
+    let pre = drawn_phase(&d.st, 336);
     let live_pre = drawn_curve(&d.st, live);
     assert!(
         legend(&pre, TraceKey::Stored(run)).contains("· ref"),
@@ -644,7 +644,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
             })
         })
     })?;
-    let post = drawn_phase(&d.st, 240);
+    let post = drawn_phase(&d.st, 336);
     let live_post = drawn_curve(&d.st, live);
     let off = rotation_residual(&live_pre, &live_post, -10.0, rate);
     assert!(
@@ -702,7 +702,7 @@ fn a_typed_delay_moves_only_its_live_curve() -> R {
     d.until("running", running)?;
     d.arm()?;
     d.play()?;
-    d.tf_frames(m.id, 240)?;
+    d.tf_frames(m.id, 336)?;
     d.send(Msg::Command(CommandId::Slot1));
     d.until("the capture in slot 1", |s| {
         s.daemon()
@@ -723,7 +723,7 @@ fn a_typed_delay_moves_only_its_live_curve() -> R {
     let d0 = delay(&d.st).ok_or("delay")?;
     let arrival = d0.applied_samples - d0.nudged_samples;
     let rate = f64::from(d.st.open_session().ok_or("session")?.sample_rate_hz);
-    let before = drawn_phase(&d.st, 240);
+    let before = drawn_phase(&d.st, 336);
     let live_before = drawn_curve(&d.st, live);
 
     let want = d0.applied_samples + 10.0;
@@ -759,7 +759,7 @@ fn a_typed_delay_moves_only_its_live_curve() -> R {
         (st.nudged_samples - (d0.nudged_samples + 10.0)).abs() < 1e-6,
         "{st:?}"
     );
-    let after = drawn_phase(&d.st, 240);
+    let after = drawn_phase(&d.st, 336);
     let live_after = drawn_curve(&d.st, live);
     // Ten samples later the curve leads by 360°·f·10/fs, as ten Ctrl+. steps make it.
     let off = rotation_residual(&live_before, &live_after, 10.0, rate);
@@ -793,7 +793,7 @@ fn a_typed_delay_moves_only_its_live_curve() -> R {
         (stepped.applied_samples - stepped.nudged_samples - arrival).abs() < 1e-6,
         "the arrival moved: {arrival} → {stepped:?}"
     );
-    let after_dot = drawn_phase(&d.st, 240);
+    let after_dot = drawn_phase(&d.st, 336);
     let live_dot = drawn_curve(&d.st, live);
     let off = rotation_residual(&live_after, &live_dot, step, rate);
     assert!(

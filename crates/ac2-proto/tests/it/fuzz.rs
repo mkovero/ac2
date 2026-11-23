@@ -47,6 +47,7 @@ fn tf_strategy() -> impl Strategy<Value = Frame> {
                         nudged: Seconds(0.0),
                         smoothing: None,
                         mic_curve: eff,
+                        mic_range: None,
                         math: None,
                         unresolved: None,
                         filled: 1.0,

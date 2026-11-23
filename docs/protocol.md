@@ -31,7 +31,7 @@ keepalives to each connection as its credit allows (§5.8).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 98`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 99`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -1880,8 +1880,9 @@ the pure functions of `ac2_proto::cal`, which clients use to word what is in use
 
 `TransferConfig.resolution` and `SweepConfig.resolution` (`Resolution`: `twelfth` \|
 `twenty_fourth` \| `forty_eighth` \| `ninety_sixth`, 12 … 96 points per octave; front ends
-default to `forty_eighth`) set the stored column grid: a transfer function's is ten octaves
-around 1 kHz (`{type: log, ppo, k_min: −5·ppo, k_max: 5·ppo − 1}`), a sweep's covers its
+default to `forty_eighth`) set the stored column grid: a transfer function's is fifteen
+octaves, 7.8 Hz … 256 kHz (`{type: log, ppo, k_min: −7·ppo, k_max: 8·ppo − 1}`), the same at
+every sample rate (columns above the band a session's rate measures are invalid), a sweep's covers its
 `start … end`. It is not smoothing (a display edit over these columns). `meas.update` with a
 new transfer resolution restarts the job (new columns, averages start over); a sweep's
 applies to its next run, and stored traces keep their grid.
@@ -1892,7 +1893,8 @@ window sets — is wider than one column at that resolution, so the columns ther
 interpolation, not detail. Transfer (`TfMeta.unresolved`; nil for a math trace): the cell
 is the bin spacing of the coarsest MTW stage serving the column (stages switch over where a
 bin fills a 1/48-octave column, so at 1/96 the band just above each crossover is
-unresolved too; at 96 kHz: below ≈ 135 Hz, ≈ 203–406 Hz and ≈ 1.62–3.25 kHz). Sweep
+unresolved too; at 96 kHz: below ≈ 135 Hz, ≈ 203–406 Hz and ≈ 1.62–3.25 kHz; with
+`lf_window: long` the lowest range ends two octaves lower). Sweep
 (`SweepData.unresolved`: `SweepUnresolved` {`response`, `harmonics`} \| nil): the response's
 cell is 1/(its linear window), set by `gate`; a distortion point's is, on the fundamental's
 axis, 1/(k · its harmonic window) for every order k it reports, with `lf_harmonics: fine`
@@ -1995,6 +1997,15 @@ bins (§5.4). Captures carry it in their kind (`TraceKind` `spectrum` {`scale`, 
 reaches the same effective-average count) or `fast_lf` {`max_settle_s`: Seconds > 0} (no
 decimated stage averages over a longer span; those stages show a higher coherence floor).
 
+#### Longest window
+
+`TransferConfig.lf_window: LfWindow`: `standard` (the deepest MTW stage runs at about 4 kHz,
+a window of about 1 s: 1/48 octave is resolved from about 68 Hz) or `long` (a further stage
+at about 1 kHz serves the columns below about 68 Hz with a window of about 4 s: 1/48 octave
+is resolved from about 17 Hz, and those columns settle four times as slowly). `meas.update`
+with a new value restarts the job. Captures record it (`TraceMeta.lf_window`, nil for
+other kinds).
+
 ### 3.3 Reply bodies
 
 `{type, value}` with `type` one of: `ack` (`{rev}`), `welcome`, `backends`, `preview`,
@@ -2029,7 +2040,7 @@ AudioStopped | nil`; §4.1.1),
 `layout`, `offset`, `eq`),
 `traces` (`TraceMeta`: `id`, `edit` {name, color, visible, locked, order, offset,
 polarity, delay_nudge, slot, smoothing, owner}, `kind`, `source` {captured | imported |
-math | eq | average | generated | sweep | dynamics}, `grid_id`, `delay`, `depth`, `cal`, `mic`, `mic_curve`, `created_at`,
+math | eq | average | generated | sweep | dynamics}, `grid_id`, `delay`, `depth`, `lf_window`, `cal`, `mic`, `mic_curve`, `created_at`,
 `eq_in` ([`EqSnapshot`]: the EQ sets marked in the console when captured), `position`
 (`TracePosition` | nil: a walk's capture names its point `label`, `at: [x, y, z]`, `plan`
 and `walk`), `captured_unsettled` (captured before the walk measurement was ready),
@@ -2365,7 +2376,7 @@ always `i8`).
 
 | kind | arrays (name: unit) | meta |
 |---|---|---|
-| `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask; an alignment's (all four or none) `align_phase_before`, `align_phase_after`: deg (A − B as measured and with the fit applied), `align_sum_before`, `align_sum_after`: db (the summation per column); an average's range across positions (all three or none) `range_lo`, `range_hi`: db, `range_coh`: coherence | `delay`, `nudged` (Seconds: the part of `delay` `delay.nudge` steps added to the arrival; 0 for a math trace), `smoothing`, `mic_curve`, `math` (`MathState` \| nil: a math trace's operands, below), `unresolved` (`Unresolved` \| nil, §3.2 *Resolution*), `filled` (f32, 0…1: how full the averages are, counted in accumulated blocks of the least full analysis stage, so refused blocks add nothing; a math trace's is the least of its included live operands, 1 for traces) |
+| `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask; an alignment's (all four or none) `align_phase_before`, `align_phase_after`: deg (A − B as measured and with the fit applied), `align_sum_before`, `align_sum_after`: db (the summation per column); an average's range across positions (all three or none) `range_lo`, `range_hi`: db, `range_coh`: coherence | `delay`, `nudged` (Seconds: the part of `delay` `delay.nudge` steps added to the arrival; 0 for a math trace), `smoothing`, `mic_curve`, `mic_range` (`FreqRange` \| nil: the lowest and highest point of that mic curve; outside them the curve is held at its end value, so those columns are not corrected; nil without a curve and for a math trace), `math` (`MathState` \| nil: a math trace's operands, below), `unresolved` (`Unresolved` \| nil, §3.2 *Resolution*), `filled` (f32, 0…1: how full the averages are, counted in accumulated blocks of the least full analysis stage, so refused blocks add nothing; a math trace's is the least of its included live operands, 1 for traces) |
 | `ir` | `ir_linear`: full_scale, `ir_etc`: db (optional) | `sample_rate`, `t0`, `dt`, `inserted_delay`; point i at `t0 + i·dt` |
 | `rta` | `level`: dbfs or db_spl (band power), `validity`: bitmask | `fraction`, `weighting`, `scale`, `cal`, `mic_curve`, `math` (`MathState` \| nil) |
 | `spec` | `level`: dbfs or db_spl (tone level), dbfs_per_hz or db_spl_per_hz (density; §3.2 *Spectrum level*); smoothed when `smoothing` is set; NaN for no power; on a `log_bins` grid (`fixed`) or a `log` grid (`multi`, §3.2 *Spectrum resolution*): each column the highest level among its bins (tone) or their mean power (density) | `window`, `scale`, `level` (`SpecLevel`), `cal`, `mic_curve`, `smoothing`, `math` (`MathState` \| nil), `bands` (`SpecBands` \| nil), `harmonics` (`SpecHarmonics` \| nil, §3.2 *Harmonics of the generator's sine*) |
@@ -2597,7 +2608,7 @@ columns) = `0x79ec3d16ae0e94d0`.
 `# ac2 trace export v6` (`v5`, `v4`, `v3`, `v2` and `v1` are read too; another version is `bad_header`); then
 `# key: value` lines with every metadata field (`name`, `kind`, `source`, `time_base`,
 `delay_ms`, `delay_nudge_ms`, `polarity`, `offset_db`, `smoothing` (display only, not
-applied), `depth`, `cal`, `mic` (`name (curve: <label>, …; file …, hash …)`: in the
+applied), `depth`, `lf_window`, `cal`, `mic` (`name (curve: <label>, …; file …, hash …)`: in the
 columns for a capture with a curve, or applied after capture as a display edit, not in the
 columns), `mic_curve` (the
 JSON `TraceMicCurve`, only when one is applied after capture), `created_ns`, `note`, `grid`
@@ -2658,7 +2669,7 @@ need a magnitude. `auto` picks ac2 CSV when the first line starts with
 <dir>/spl/<name>.bands.csv   its band log, when the meter's band meter logged (§7.4)
 ```
 
-`session.json`: `{format: "ac2-session", version: 47, saved_at, measurements:
+`session.json`: `{format: "ac2-session", version: 48, saved_at, measurements:
 [{id, config: MeasConfig, running, delay: {applied, nudged, tracking} | null, colour:
 ColourFamily | null, layout: PaneLayout | null, offset: Db, eq: [EqSet]}], spl_logs:
 [{meas, file, bands: file | null}], traces: [{meta: TraceMeta, grid: GridDef, file, mic_curve_points: [[Hz,

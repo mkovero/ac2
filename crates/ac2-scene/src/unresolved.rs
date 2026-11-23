@@ -7,7 +7,7 @@
 //! on a sweep the log grid interpolates the linear bins. The scene shades those ranges
 //! faintly, edges them with a dashed line and names them on the cursor's frequency line.
 
-use ac2_proto::model::Unresolved;
+use ac2_proto::model::{FreqRange, Unresolved};
 
 use crate::axis::Mapping;
 use crate::canvas::Canvas;
@@ -94,6 +94,39 @@ pub fn marks(src: Source<'_>, first_hz: f64, what: Option<&str>) -> Vec<RangeMar
 /// The mark covering `hz`, if any.
 pub fn at(marks: &[RangeMark], hz: f64) -> Option<&RangeMark> {
     marks.iter().find(|m| hz >= m.lo_hz && hz <= m.hi_hz)
+}
+
+/// The marks of a curve corrected with a mic curve whose points span `range`, on columns
+/// from `first_hz` to `last_hz`: outside the span the curve is held at its end value, so
+/// the columns there show the mic's own response uncorrected.
+pub fn mic_marks(range: FreqRange, first_hz: f64, last_hz: f64) -> Vec<RangeMark> {
+    const NOTE: &str = "outside the mic curve";
+    let (lo, hi) = (range.lo.0, range.hi.0);
+    let below = (first_hz < lo).then(|| RangeMark {
+        lo_hz: first_hz,
+        hi_hz: lo,
+        from_bottom: true,
+        text: format!("below {}: {NOTE}", format::freq_rough(lo)),
+        note: NOTE.to_owned(),
+    });
+    let above = (last_hz > hi).then(|| RangeMark {
+        lo_hz: hi,
+        hi_hz: last_hz,
+        from_bottom: false,
+        text: format!("above {}: {NOTE}", format::freq_rough(hi)),
+        note: NOTE.to_owned(),
+    });
+    below.into_iter().chain(above).collect()
+}
+
+/// What the marks covering `hz` say, joined; `None` outside every mark.
+pub fn note_at(marks: &[RangeMark], hz: f64) -> Option<String> {
+    let notes: Vec<&str> = marks
+        .iter()
+        .filter(|m| hz >= m.lo_hz && hz <= m.hi_hz)
+        .map(|m| m.note.as_str())
+        .collect();
+    (!notes.is_empty()).then(|| notes.join(" · "))
 }
 
 /// Shade and edges of `marks` in `plot`, under the grid and the curves.
@@ -185,5 +218,63 @@ mod tests {
             m[0].text,
             "below 68 Hz: harmonics coarser than 1/48 oct (interpolated)"
         );
+    }
+}
+
+#[cfg(test)]
+mod mic_tests {
+    use super::*;
+    use ac2_proto::units::Hz;
+
+    fn span(lo: f64, hi: f64) -> FreqRange {
+        FreqRange {
+            lo: Hz(lo),
+            hi: Hz(hi),
+        }
+    }
+
+    #[test]
+    fn a_curve_shorter_than_the_columns_is_marked_at_both_ends() {
+        let m = mic_marks(span(20.0, 20_000.0), 7.8, 256_000.0);
+        let texts: Vec<&str> = m.iter().map(|m| m.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            [
+                "below 20 Hz: outside the mic curve",
+                "above 20 kHz: outside the mic curve"
+            ]
+        );
+        assert!(m[0].from_bottom && !m[1].from_bottom);
+        assert_eq!((m[0].lo_hz, m[0].hi_hz), (7.8, 20.0));
+        assert_eq!((m[1].lo_hz, m[1].hi_hz), (20_000.0, 256_000.0));
+    }
+
+    #[test]
+    fn a_curve_covering_the_columns_marks_nothing() {
+        assert!(mic_marks(span(5.0, 300_000.0), 7.8, 256_000.0).is_empty());
+    }
+
+    #[test]
+    fn the_cursor_says_every_mark_it_is_in() {
+        let mut marks = mic_marks(span(20.0, 20_000.0), 7.8, 256_000.0);
+        marks.insert(
+            0,
+            RangeMark {
+                lo_hz: 7.8,
+                hi_hz: 68.0,
+                from_bottom: true,
+                text: String::new(),
+                note: "coarser than 1/48 oct (gaps)".into(),
+            },
+        );
+        assert_eq!(
+            note_at(&marks, 12.0).as_deref(),
+            Some("coarser than 1/48 oct (gaps) · outside the mic curve")
+        );
+        assert_eq!(
+            note_at(&marks, 40.0).as_deref(),
+            Some("coarser than 1/48 oct (gaps)")
+        );
+        assert_eq!(note_at(&marks, 1_000.0), None);
     }
 }

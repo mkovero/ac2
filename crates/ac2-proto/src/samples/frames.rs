@@ -65,6 +65,10 @@ pub fn tf_frame() -> Frame {
                     mode: SmoothingMode::Magnitude,
                 }),
                 mic_curve: true,
+                mic_range: Some(crate::model::FreqRange {
+                    lo: crate::units::Hz(20.0),
+                    hi: crate::units::Hz(20_000.0),
+                }),
                 filled: 0.625,
                 unresolved: Some(Unresolved {
                     resolution: Resolution::NinetySixth,

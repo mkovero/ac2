@@ -13,7 +13,7 @@ import zlib
 
 import msgpack
 
-PROTO_VERSION = 98
+PROTO_VERSION = 99
 MAX_HEADER_BYTES = 8192
 MAX_N = 1 << 16
 MAX_ARRAYS = 12
@@ -250,7 +250,7 @@ _LOUDNESS = [("source", ("tagged", {"pair": [("left", None), ("right", None)],
 _GONIO_PAIR = [("left", None), ("right", None), ("gain_dbfs", None)]
 META = {
     "tf": [("delay", None), ("nudged", None), ("smoothing", ("opt", _SMOOTHING)), ("mic_curve", None),
-           ("math", _MATH),
+           ("mic_range", ("opt", [("lo", None), ("hi", None)])), ("math", _MATH),
            ("unresolved", ("opt", [("resolution", None), ("ranges", ("list", [("lo", None), ("hi", None)]))])),
            ("filled", None)],
     "ir": [("sample_rate", None), ("t0", None), ("dt", None), ("inserted_delay", None)],

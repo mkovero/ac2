@@ -156,6 +156,7 @@ pub(super) fn sweep_meta(id: u32) -> TraceMeta {
             measurement_input: 1,
         },
         depth: None,
+        lf_window: None,
         ..stored(id, None, 2)
     }
 }

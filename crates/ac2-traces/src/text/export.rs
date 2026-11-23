@@ -3,9 +3,9 @@
 use std::fmt::Write as _;
 
 use ac2_proto::model::{
-    CalState, DepthPolicy, DistortionCurve, LfHarmonics, MicState, Polarity, RoomAcoustics,
-    RoomRefusal, RoomValue, SmoothingFraction, SmoothingMode, TraceIr, TraceKind, TraceMicCurve,
-    TraceSource,
+    CalState, DepthPolicy, DistortionCurve, LfHarmonics, LfWindow, MicState, Polarity,
+    RoomAcoustics, RoomRefusal, RoomValue, SmoothingFraction, SmoothingMode, TraceIr, TraceKind,
+    TraceMicCurve, TraceSource,
 };
 
 use crate::columns::StoredTrace;
@@ -194,6 +194,15 @@ pub fn export_csv(t: &StoredTrace) -> String {
                 format!("fast LF (max {} s)", max_settle_s.0)
             }
         },
+    );
+    line(
+        "lf_window",
+        match m.lf_window {
+            None => "n/a",
+            Some(LfWindow::Standard) => "1 s",
+            Some(LfWindow::Long) => "4 s",
+        }
+        .into(),
     );
     line(
         "cal",

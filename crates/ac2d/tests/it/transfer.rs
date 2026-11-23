@@ -11,7 +11,7 @@ use ac2_audio::FakeDriver;
 use ac2_proto::frame::{Frame, FrameData, ProtectionFlags, TfFrame, ValidityMask};
 use ac2_proto::model::{
     DelayOutcome, DelayPick, DepthPolicy, FinderBand, GeneratorDesired, GeneratorSettings,
-    MeasKind, NoEstimateReason, Resolution, Signal, TimingState,
+    LfWindow, MeasKind, NoEstimateReason, Resolution, Signal, TimingState,
 };
 use ac2_proto::units::{Dbfs, Hz, MeasId, Samples, Seconds};
 use ac2_proto::{Command, ErrorCode, ReplyBody};
@@ -21,8 +21,8 @@ use common::*;
 const T: Duration = Duration::from_secs(10);
 
 fn grid_freq(i: usize) -> f64 {
-    // The test measurement's grid: 48 ppo, k from -240.
-    1000.0 * 2f64.powf((i as f64 - 240.0) / 48.0)
+    // The test measurement's grid: 48 ppo, k from -336.
+    1000.0 * 2f64.powf((i as f64 - 336.0) / 48.0)
 }
 
 /// Runs audio until a TF frame covering it arrives; returns the newest such frame.
@@ -124,14 +124,28 @@ fn resolution_sets_the_grid_and_frames_say_what_is_unresolved() {
     if let MeasKind::Transfer { config } = &mut m.kind {
         config.resolution = Resolution::NinetySixth;
     }
-    c.update_ok(MeasId(1), m);
+    c.update_ok(MeasId(1), m.clone());
     let f = run_tf(&mut d, &sub, 0.5, rev + 1);
     let t = tf(&f);
-    assert_eq!(t.mag.len(), 960);
+    assert_eq!(t.mag.len(), 1440);
     let u = t.meta.unresolved.clone().expect("unresolved");
     assert_eq!(u.resolution, Resolution::NinetySixth);
     // The bottom, and the octave above each crossover.
     assert_eq!(u.ranges.len(), 3, "{u:?}");
+
+    // The long window adds a stage two octaves down: four times the window, so the bottom
+    // range ends at a quarter of the frequency (κ(48) · 0.244 Hz ≈ 17 Hz).
+    if let MeasKind::Transfer { config } = &mut m.kind {
+        config.resolution = Resolution::FortyEighth;
+        config.lf_window = LfWindow::Long;
+    }
+    c.update_ok(MeasId(1), m);
+    let f = run_tf(&mut d, &sub, 0.5, rev + 2);
+    let t = tf(&f);
+    assert_eq!(t.mag.len(), 720);
+    let u = t.meta.unresolved.clone().expect("unresolved");
+    assert_eq!(u.ranges.len(), 1, "{u:?}");
+    assert!(u.ranges[0].hi.0 > 15.0 && u.ranges[0].hi.0 < 17.5, "{u:?}");
     h.shutdown();
 }
 
@@ -237,7 +251,7 @@ fn transfer_magnitude_delay_timing_and_ir() {
             t.coh[i]
         );
     }
-    let i500 = 240 - 48;
+    let i500 = 336 - 48;
     let expect = -360.0 * 500.0 * f64::from(ACOUSTIC_DELAY) / f64::from(FS);
     let wrapped = (expect + 180.0).rem_euclid(360.0) - 180.0;
     assert!(

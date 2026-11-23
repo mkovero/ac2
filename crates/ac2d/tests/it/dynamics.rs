@@ -634,6 +634,7 @@ fn big_dynamics_csv() -> Vec<u8> {
             grid_id: grid.id(),
             delay: Seconds(0.0),
             depth: None,
+            lf_window: None,
             cal: CalState::Uncalibrated,
             mic: None,
             mic_curve: None,

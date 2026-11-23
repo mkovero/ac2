@@ -105,6 +105,7 @@ pub(super) fn trace_meta() -> TraceMeta {
         grid_id: log_grid().id(),
         delay: Seconds(0.0125),
         depth: Some(DepthPolicy::EqualConfidence),
+        lf_window: Some(crate::model::LfWindow::Long),
         cal: CalState::Calibrated {
             key: cal_key(),
             sensitivity: Db(120.5),
@@ -153,6 +154,7 @@ pub(super) fn imported_trace_meta() -> TraceMeta {
         },
         delay: Seconds(0.003_25),
         depth: None,
+        lf_window: None,
         cal: CalState::Uncalibrated,
         mic: None,
         mic_curve: Some(Box::new(TraceMicCurve {
@@ -178,6 +180,7 @@ pub(super) fn generated_trace_meta() -> TraceMeta {
         },
         delay: Seconds(0.0),
         depth: None,
+        lf_window: None,
         cal: CalState::Uncalibrated,
         mic: None,
         mic_curve: None,
@@ -231,6 +234,7 @@ pub(super) fn sweep_meta() -> TraceMeta {
             measurement_input: 0,
         },
         depth: None,
+        lf_window: None,
         cal: CalState::Uncalibrated,
         ..trace_meta()
     }

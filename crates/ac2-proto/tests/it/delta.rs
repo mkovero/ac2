@@ -276,6 +276,7 @@ fn tf(n_mag: Vec<(f32, f32)>, phase: Vec<(f32, f32)>, coh: Vec<(f32, f32)>, firs
                 nudged: Seconds(0.0),
                 smoothing: None,
                 mic_curve: false,
+                mic_range: None,
                 math: None,
                 unresolved: None,
                 filled: if first { 0.5 } else { 0.625 },

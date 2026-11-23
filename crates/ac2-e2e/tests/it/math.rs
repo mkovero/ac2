@@ -127,7 +127,7 @@ fn math_traces_from_an_empty_daemon() -> R {
     // Two positions of the same −6 dB path average to −6 dB (the level is still typed).
     d.arm()?;
     d.play()?;
-    d.tf_frames(avg, 240)?;
+    d.tf_frames(avg, 336)?;
     assert!(
         tf_legend(&d.st, avg).starts_with("Average of 2 · 2 positions · power avg"),
         "{}",
@@ -182,7 +182,7 @@ fn math_traces_from_an_empty_daemon() -> R {
                 x.latest.get(&topic).is_some_and(|f| match &f.frame.data {
                     FrameData::Tf(tf) => tf
                         .mag
-                        .get(240)
+                        .get(336)
                         .is_some_and(|m| m.is_finite() && m.abs() < 0.5),
                     _ => false,
                 })

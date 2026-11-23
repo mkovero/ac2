@@ -9,7 +9,7 @@
 //! shares live here.
 
 use ac2_proto::model::{
-    BandFraction, DepthPolicy, EssSpec, LfHarmonics, MeasConfig, MeasKind, Measurement,
+    BandFraction, DepthPolicy, EssSpec, LfHarmonics, LfWindow, MeasConfig, MeasKind, Measurement,
     OpenSession, Operand, Resolution, RtaConfig, Smoothing, SmoothingFraction, SpecAveraging,
     SpecLevel, SpecResolution, SpectrumConfig, SplConfig, SweepConfig, TimeWeighting,
     TransferConfig, Weighting, Window,
@@ -146,6 +146,8 @@ pub enum FieldId {
     /// Spectrum / RTA averaging (on power).
     Averaging,
     Depth,
+    /// Longest window of a transfer measurement.
+    LfWindow,
     Fraction,
     Weighting,
     TimeWeighting,

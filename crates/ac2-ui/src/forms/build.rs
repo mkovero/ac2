@@ -203,6 +203,15 @@ impl Form {
                 smoothing,
             ),
             Field::choice(FieldId::Depth, "Depth", &DEPTH, depth),
+            Field::choice(
+                FieldId::LfWindow,
+                "LF window",
+                &LF_WINDOW.map(|w| w.0),
+                LF_WINDOW
+                    .iter()
+                    .position(|w| w.1 == c.lf_window)
+                    .unwrap_or(0),
+            ),
             resolution_field(c.resolution),
         ];
         let mut f = Self::new(FormKind::TransferEdit, fields);
@@ -280,6 +289,7 @@ impl Form {
                 name("TF"),
                 Field::choice(FieldId::Smoothing, "Smoothing", &SMOOTHING.map(|s| s.0), 0),
                 Field::choice(FieldId::Depth, "Depth", &DEPTH, 0),
+                Field::choice(FieldId::LfWindow, "LF window", &LF_WINDOW.map(|w| w.0), 0),
                 resolution_field(Resolution::default()),
             ],
             FormKind::Spectrum => vec![
@@ -688,6 +698,7 @@ impl Form {
                     },
                     _ => DepthPolicy::EqualConfidence,
                 };
+                config.lf_window = LF_WINDOW[pick(FieldId::LfWindow).min(LF_WINDOW.len() - 1)].1;
                 config.resolution = self.resolution();
                 MeasKind::Transfer { config }
             }

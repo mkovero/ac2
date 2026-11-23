@@ -51,8 +51,10 @@ fn stage_table() {
 /// Every decimator meets its passband and stopband specification at the common rates.
 #[test]
 fn decimator_passband_and_stopband() {
-    for sr in [44_100.0, 48_000.0, 96_000.0, 192_000.0] {
-        let l = Layout::new(sr, Ladder::Standard).expect("layout");
+    for sr in [44_100.0, 48_000.0, 96_000.0, 192_000.0, 384_000.0] {
+        // The long-LF ladder is the standard one plus a stage, so it covers both.
+        let l = Layout::new(sr, Ladder::LongLf).expect("layout");
+        assert_eq!(l.stages.len(), if sr > 260_000.0 { 5 } else { 4 });
         for s in &l.stages[1..] {
             let d = s.decimator.as_ref().expect("decimator");
             let mut ripple: f64 = 0.0;

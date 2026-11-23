@@ -190,6 +190,7 @@ fn stored(id: u32, freqs: &[f64]) -> TraceData {
             grid_id: grid().id(),
             delay: Seconds(0.0),
             depth: None,
+            lf_window: None,
             cal: CalState::Uncalibrated,
             mic: None,
             mic_curve: None,
@@ -257,6 +258,7 @@ fn transfer_view_with_a_live_trace_and_eight_stored() {
         stored: None,
         selected: false,
         compared: false,
+        mic_range: None,
         unresolved: None,
     };
     let traces: Vec<TfTrace<'_>> = std::iter::once(live)

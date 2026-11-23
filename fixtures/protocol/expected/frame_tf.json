@@ -1,7 +1,7 @@
 {
  "topic": "d/1/tf",
  "header": {
-  "v": 98,
+  "v": 99,
   "kind": "tf",
   "seq": 1234,
   "audio_sample": 172800000,
@@ -79,6 +79,10 @@
      "mode": "magnitude"
     },
     "mic_curve": true,
+    "mic_range": {
+     "lo": 20.0,
+     "hi": 20000.0
+    },
     "math": {
      "operands": [
       {

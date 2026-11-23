@@ -17,6 +17,7 @@ fn meta(imp: &Imported) -> TraceMeta {
         grid_id: imp.grid.id(),
         delay: imp.delay.unwrap_or(Seconds(0.0)),
         depth: None,
+        lf_window: None,
         cal: CalState::Uncalibrated,
         mic: None,
         mic_curve: None,

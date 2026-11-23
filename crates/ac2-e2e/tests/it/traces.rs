@@ -172,7 +172,7 @@ fn a_capture_re_smoothed_by_the_daemon() -> R {
     let _noise = noise(&rig.cli)?;
     let mut d = on_rig(&rig)?;
     // Wait for the curve to settle: a capture of the first frames is all settling.
-    d.tf_frames(MAIN_L, 240)?;
+    d.tf_frames(MAIN_L, 336)?;
     d.key("Ctrl+1");
     d.until("slot 1 with its data", |s| {
         s.slots()[0].is_some() && s.rig.traces.len() == 1
