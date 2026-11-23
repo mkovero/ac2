@@ -494,6 +494,21 @@ impl Control {
         let ids: Vec<MeasId> = data.measurements.iter().map(|m| m.id).collect();
         super::walks::check_walks(&data.walks, &data.plans, &ids)?;
         let config = self.config_after_load(&data.remote_inputs)?;
+        // A new epoch, newer than every epoch the loaded traces were captured in.
+        // `check_session` bounds those, so only a rig whose own epoch ran out is refused.
+        let newest = data
+            .traces
+            .iter()
+            .filter_map(|t| t.meta.source.shared_epoch().map(|e| e.0))
+            .max()
+            .unwrap_or(0);
+        let epoch = self
+            .epoch()
+            .0
+            .max(newest)
+            .checked_add(1)
+            .map(SessionEpoch)
+            .ok_or_else(|| internal("the session epoch is exhausted"))?;
 
         // Disarmed, no owner; a sweep run in progress is discarded.
         self.abort_runs(SweepFailure::Stopped, "a session was loaded");
@@ -530,14 +545,6 @@ impl Control {
         }
         self.traces.clear();
 
-        // A new epoch, newer than every epoch the loaded traces were captured in.
-        let newest = data
-            .traces
-            .iter()
-            .filter_map(|t| t.meta.source.shared_epoch().map(|e| e.0))
-            .max()
-            .unwrap_or(0);
-        let epoch = SessionEpoch(self.epoch().0.max(newest) + 1);
         if let Some(rt) = &mut self.session {
             if let Some(c) = config {
                 rt.open.config = c;
