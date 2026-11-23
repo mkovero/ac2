@@ -114,8 +114,10 @@ pub fn peer_endpoints(
 ) -> Option<(String, String)> {
     let (bound, ctrl_port) = split_endpoint(ctrl)?;
     let (_, data_port) = split_endpoint(data)?;
-    let loopback = matches!(bound.as_str(), "127.0.0.1" | "::1" | "localhost");
-    let wildcard = matches!(bound.as_str(), "*" | "0.0.0.0" | "::");
+    let ip = bound.parse::<std::net::IpAddr>().ok();
+    // Any address in 127/8 or ::1 is this computer only, as is the name `localhost`.
+    let loopback = ip.is_some_and(|a| a.is_loopback()) || bound.eq_ignore_ascii_case("localhost");
+    let wildcard = bound == "*" || ip.is_some_and(|a| a.is_unspecified());
     let host = match via {
         Some(h) if !loopback => h.to_owned(),
         _ if loopback => return None,
@@ -189,6 +191,18 @@ mod tests {
             Some("tcp://10.0.0.5:7700".into())
         );
         assert_eq!(ep("tcp://127.0.0.1:7700", None, "ketunkolo"), None);
+        // Every loopback address, written any way, and the name localhost.
+        for lo in ["127.0.1.1", "[::1]", "[0:0:0:0:0:0:0:1]", "LOCALHOST"] {
+            assert_eq!(
+                ep(&format!("tcp://{lo}:7700"), Some("192.168.9.27"), "k"),
+                None,
+                "{lo}"
+            );
+        }
+        assert_eq!(
+            ep("tcp://[0:0:0:0:0:0:0:0]:7700", None, "ketunkolo").map(|e| e.0),
+            Some("tcp://ketunkolo:7700".into())
+        );
         assert_eq!(
             ep("tcp://[::]:7700", Some("fe80::1"), "x").map(|e| e.0),
             Some("tcp://[fe80::1]:7700".into())
