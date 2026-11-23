@@ -300,8 +300,10 @@ fn a_child_row_brings_its_measurements_panes_from_an_empty_daemon() -> R {
         .ok_or("the capture")?;
     d.key("G");
     d.key("Shift+G");
+    // Each step is a call of its own, the second held until the first is answered: the
+    // daemon's copy is the screen's only once both are in.
     d.until("Spectrum 2's own panes", |s| {
-        s.meas(s2).is_some_and(|m| m.layout.is_some())
+        s.meas(s2).and_then(|m| m.layout.as_ref()) == Some(&s.pane_layout())
     })?;
     // B back on Spectrum 1; A (the left half) stepped to its spectrograph.
     d.drop_meas(b, s1);
