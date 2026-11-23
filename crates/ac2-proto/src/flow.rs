@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::PROTO_VERSION;
 use crate::ctrl::{CtrlError, check_version};
+use crate::event::MAX_EVENT_BYTES;
+use crate::frame::MAX_FRAME_BYTES;
 use crate::topic::{Subscription, Topic};
 
 /// Window a client states unless it chooses another, bytes. Four of the largest frames (an
@@ -34,6 +36,21 @@ pub const FRAME_CHARGE_MIN: u32 = 64;
 pub const EVENT_BOUND: u32 = 256;
 /// First part of a notice: `[flow][msgpack notice]`.
 pub const FLOW_TOPIC: &[u8] = b"flow";
+/// Largest data request accepted, bytes. A request names at most one topic (at most
+/// [`crate::topic::MAX_TOPIC_BYTES`]), so every legal one is a small fraction of this.
+pub const MAX_DATA_REQUEST_BYTES: usize = 4096;
+/// Largest part the daemon sends on a data connection, bytes: a frame's body (at most
+/// [`MAX_FRAME_BYTES`] with every part) or an event's (at most [`MAX_EVENT_BYTES`]).
+pub const MAX_DATA_PART_BYTES: usize = if MAX_FRAME_BYTES > MAX_EVENT_BYTES {
+    MAX_FRAME_BYTES
+} else {
+    MAX_EVENT_BYTES
+};
+/// What a receiving socket's part bound allows beyond the largest legal part, bytes: room
+/// for the transport's own framing of a part (CURVE seals each one in a box a few dozen
+/// bytes larger), and on the daemon's ctrl socket for a request a little over
+/// [`crate::MAX_CTRL_BYTES`] to still be read and answered `too_large`.
+pub const TRANSPORT_SLACK_BYTES: usize = 64 << 10;
 
 /// What a frame message of `bytes` (every part) costs of the window.
 pub fn frame_charge(bytes: usize) -> u32 {
@@ -134,6 +151,12 @@ pub fn encode_data_request(r: &DataRequest) -> Result<Vec<u8>, CtrlError> {
 
 /// Decode a data request; the version is checked before the body.
 pub fn decode_data_request(b: &[u8]) -> Result<DataRequest, CtrlError> {
+    if b.len() > MAX_DATA_REQUEST_BYTES {
+        return Err(CtrlError::TooLarge {
+            bytes: b.len(),
+            id: None,
+        });
+    }
     check_version(b)?;
     rmp_serde::from_slice(b).map_err(|e| CtrlError::Malformed(e.to_string()))
 }
@@ -162,6 +185,42 @@ mod tests {
     use super::*;
     use crate::topic::Stream;
     use crate::units::MeasId;
+
+    /// The largest request a client can state (a subscription to the longest topic) fits
+    /// the bound with room to spare, and one over it is refused before it is decoded.
+    #[test]
+    fn every_request_fits_the_request_bound() {
+        let mut largest = 0;
+        for stream in Stream::ALL {
+            let topic = Topic::Data {
+                meas: MeasId(u32::MAX),
+                stream,
+            };
+            for msg in [
+                DataUp::Subscribe {
+                    sub: Subscription::Topic(topic),
+                },
+                DataUp::Unsubscribe {
+                    sub: Subscription::Topic(topic),
+                },
+                DataUp::Keyframe { topic },
+                DataUp::Credit {
+                    bytes: u32::MAX,
+                    events: u32::MAX,
+                },
+            ] {
+                let b = encode_data_request(&DataRequest::new(msg)).unwrap();
+                largest = largest.max(b.len());
+            }
+        }
+        assert!(largest * 8 < MAX_DATA_REQUEST_BYTES, "{largest} B");
+        let mut big = encode_data_request(&DataRequest::new(DataUp::Window { bytes: 1 })).unwrap();
+        big.resize(MAX_DATA_REQUEST_BYTES + 1, 0);
+        assert!(matches!(
+            decode_data_request(&big),
+            Err(CtrlError::TooLarge { .. })
+        ));
+    }
 
     #[test]
     fn requests_round_trip() {

@@ -92,6 +92,11 @@ Warning { type: "<name>", … }
   envelope alone), and a client refuses to send one. What can be that large goes another
   way: `trace.export` as a download, `trace.import` from an upload, `dynamics.table` for a
   dynamics trace's step table.
+- Every receiving socket bounds a message part before buffering it (`ZMQ_MAXMSGSIZE`): the
+  largest legal part plus 64 KiB of slack (CURVE's framing; a request a little over 4 MiB is
+  still read and answered `too_large`). A part past that closes the connection that carried
+  it, unanswered. The bounds: ctrl 4 MiB both ways; a data request 4 KiB; a frame or event
+  part toward a client or rig 2 MiB.
 
 ### 3.2 Commands
 

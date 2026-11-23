@@ -32,8 +32,8 @@ pub use ctrl::{
 };
 pub use event::{Change, Event, EventError, Patch, StateSnapshot, decode_event, encode_event};
 pub use flow::{
-    DataRequest, DataUp, FlowNotice, decode_data_request, decode_notice, encode_data_request,
-    encode_notice,
+    DataRequest, DataUp, FlowNotice, MAX_DATA_PART_BYTES, MAX_DATA_REQUEST_BYTES,
+    TRANSPORT_SLACK_BYTES, decode_data_request, decode_notice, encode_data_request, encode_notice,
 };
 pub use frame::{
     CodedFrame, DataMessage, DecodeError, DeltaFrame, EncodeError, Form, Frame, FrameData,

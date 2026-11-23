@@ -342,6 +342,12 @@ pub(crate) fn ctrl_socket_options(router: &Socket) -> Result<(), StartError> {
     router
         .set_router_mandatory(true)
         .map_err(zerr("ROUTER_MANDATORY"))?;
+    // libzmq would otherwise buffer a part of any size before the ctrl bound is checked.
+    router
+        .set_max_message_size(Some(
+            ac2_proto::MAX_CTRL_BYTES + ac2_proto::TRANSPORT_SLACK_BYTES,
+        ))
+        .map_err(zerr("ROUTER MAXMSGSIZE"))?;
     router
         .set_tcp_liveness(Some(PEER_LIVENESS))
         .map_err(zerr("ROUTER liveness"))
@@ -352,6 +358,12 @@ pub(crate) fn data_socket_options(data: &Socket, network: bool) -> Result<(), St
     // known to be gone; a full queue fails `EAGAIN` instead of dropping silently.
     data.set_router_mandatory(true)
         .map_err(zerr("data ROUTER_MANDATORY"))?;
+    // A client sends only small requests here; a larger part closes its connection
+    // before it is buffered.
+    data.set_max_message_size(Some(
+        ac2_proto::MAX_DATA_REQUEST_BYTES + ac2_proto::TRANSPORT_SLACK_BYTES,
+    ))
+    .map_err(zerr("data MAXMSGSIZE"))?;
     // Set once before the socket binds. It is never changed on the live socket: libzmq
     // applies a new SNDHWM to existing pipes by sending commands to their peers, and such a
     // command racing with a disconnecting peer's pipe teardown is a use-after-free in

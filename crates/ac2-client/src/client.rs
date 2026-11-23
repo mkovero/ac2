@@ -115,6 +115,9 @@ const DATA_RCVHWM: u32 = 2
         + 1
         + ac2_proto::flow::EVENT_BOUND);
 
+/// Largest part a data socket accepts from the daemon, bytes.
+const DATA_MAX_PART: usize = ac2_proto::MAX_DATA_PART_BYTES + ac2_proto::TRANSPORT_SLACK_BYTES;
+
 /// A data socket's `ZMQ_FD` (the DEALER's or its monitor's), owned by libzmq: registered
 /// with the runtime for readiness only, never read or closed here.
 #[cfg(unix)]
@@ -354,6 +357,11 @@ impl Client {
         };
         let curve = cfg.curve.as_ref();
         let dealer = ctx.socket(SocketType::Dealer)?;
+        // Every receiving socket is bounded: libzmq would otherwise buffer a part of any
+        // size before the protocol's own bound is checked.
+        dealer.set_max_message_size(Some(
+            ac2_proto::MAX_CTRL_BYTES + ac2_proto::TRANSPORT_SLACK_BYTES,
+        ))?;
         // A lease release queued on shutdown still leaves.
         dealer.set_linger(Some(Duration::from_millis(500)))?;
         liveness(&dealer)?;
@@ -368,6 +376,7 @@ impl Client {
         // data connection of their own, read by the I/O thread, so that frames waiting to be
         // drained never delay an event.
         let sync = ctx.socket(SocketType::Dealer)?;
+        sync.set_max_message_size(Some(DATA_MAX_PART))?;
         liveness(&sync)?;
         if let Some(c) = curve {
             sync.set_curve_client(c)?;
@@ -376,6 +385,7 @@ impl Client {
         sync.connect(&cfg.endpoints.data)?;
 
         let data = ctx.socket(SocketType::Dealer)?;
+        data.set_max_message_size(Some(DATA_MAX_PART))?;
         liveness(&data)?;
         data.set_recv_hwm(DATA_RCVHWM)?;
         if let Some(c) = curve {

@@ -41,6 +41,7 @@ pub(crate) const ZMQ_SUBSCRIBE: c_int = 6;
 pub(crate) const ZMQ_UNSUBSCRIBE: c_int = 7;
 pub(crate) const ZMQ_SNDBUF: c_int = 11;
 pub(crate) const ZMQ_RCVBUF: c_int = 12;
+pub(crate) const ZMQ_MAXMSGSIZE: c_int = 22;
 #[cfg(unix)]
 pub(crate) const ZMQ_FD: c_int = 14;
 pub(crate) const ZMQ_EVENTS: c_int = 15;
@@ -278,6 +279,29 @@ impl RawSocket {
             )
         })
         .map(drop)
+    }
+
+    pub(crate) fn set_i64(&self, opt: c_int, value: i64) -> RawResult<()> {
+        // SAFETY: pointer and length describe a live i64; libzmq copies the value.
+        check(unsafe {
+            zmq_setsockopt(
+                self.ptr.as_ptr(),
+                opt,
+                (&raw const value).cast(),
+                size_of::<i64>(),
+            )
+        })
+        .map(drop)
+    }
+
+    pub(crate) fn get_i64(&self, opt: c_int) -> RawResult<i64> {
+        let mut value: i64 = 0;
+        let mut len = size_of::<i64>();
+        // SAFETY: pointer and in/out length describe a live, writable i64.
+        check(unsafe {
+            zmq_getsockopt(self.ptr.as_ptr(), opt, (&raw mut value).cast(), &mut len)
+        })?;
+        Ok(value)
     }
 
     pub(crate) fn set_bytes(&self, opt: c_int, value: &[u8]) -> RawResult<()> {

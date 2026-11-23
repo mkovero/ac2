@@ -97,3 +97,38 @@ fn wait_parts(s: &ac2_zmq::Socket) -> R<Vec<Part>> {
     s.try_recv_parts()?
         .ok_or_else(|| "readable but empty".into())
 }
+
+/// A part over the receiver's bound never arrives: the connection that carried it closes and
+/// the sender's next message comes over a new one.
+#[test]
+fn a_part_over_the_bound_closes_its_connection() -> TestResult {
+    let ctx = Context::new()?;
+    let pull = ctx.socket(SocketType::Pull)?;
+    assert_eq!(pull.max_message_size()?, None);
+    pull.set_max_message_size(Some(1024))?;
+    assert_eq!(pull.max_message_size()?, Some(1024));
+    pull.bind("tcp://127.0.0.1:*")?;
+    let push = ctx.socket(SocketType::Push)?;
+    push.set_reconnect_interval(std::time::Duration::from_millis(10))?;
+    push.connect(&pull.last_endpoint()?)?;
+
+    push.send(&[pattern(1024, 1)])?;
+    assert_eq!(wait_parts(&pull)?[0].len(), 1024);
+    push.send(&[pattern(4096, 2)])?;
+    // Sent until one arrives: the first sends may land on the closed connection's pipe.
+    let deadline = std::time::Instant::now() + TIMEOUT;
+    loop {
+        push.try_send(&[b"after".as_slice()]).ok();
+        if let Some(p) = pull.recv_timeout(std::time::Duration::from_millis(50))? {
+            assert_eq!(
+                p.frames()[0].as_slice(),
+                b"after",
+                "the oversize part arrived"
+            );
+            return Ok(());
+        }
+        if std::time::Instant::now() > deadline {
+            return Err("nothing arrived after the oversize part".into());
+        }
+    }
+}

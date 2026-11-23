@@ -309,6 +309,26 @@ impl Socket {
         self.set_int(raw::ZMQ_RCVBUF, v)
     }
 
+    /// Largest message part accepted from a peer, bytes; `None` = no limit (libzmq's
+    /// default). A peer that sends a larger part has its connection closed before the part
+    /// is buffered whole, so a bound checked after receipt never has to hold it. The size
+    /// is the part as framed on the wire (CURVE adds a few dozen bytes to each); `inproc`
+    /// passes messages without framing them and is not checked.
+    pub fn set_max_message_size(&self, bytes: Option<usize>) -> Result<()> {
+        let v = match bytes {
+            None => -1,
+            Some(b) => i64::try_from(b)
+                .map_err(|_| Error::InvalidArgument("max message size exceeds i64"))?,
+        };
+        zmq(self.raw.set_i64(raw::ZMQ_MAXMSGSIZE, v))
+    }
+
+    /// The bound set by [`Socket::set_max_message_size`].
+    pub fn max_message_size(&self) -> Result<Option<usize>> {
+        let v = zmq(self.raw.get_i64(raw::ZMQ_MAXMSGSIZE))?;
+        Ok(usize::try_from(v).ok())
+    }
+
     /// Delay before a disconnected connecting socket retries.
     pub fn set_reconnect_interval(&self, interval: Duration) -> Result<()> {
         let v = millis(interval, "reconnect interval exceeds i32 milliseconds")?;

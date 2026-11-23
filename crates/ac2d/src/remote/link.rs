@@ -147,8 +147,12 @@ fn dealer(
     ctx: &Context,
     curve: &CurveClient,
     endpoint: &str,
+    max_part: usize,
 ) -> ac2_zmq::Result<(Socket, Monitor)> {
     let s = ctx.socket(SocketType::Dealer)?;
+    // The other rig is trusted only as far as its key: a part past what the protocol
+    // allows closes the connection instead of being buffered whole.
+    s.set_max_message_size(Some(max_part + ac2_proto::TRANSPORT_SLACK_BYTES))?;
     s.set_linger(Some(Duration::ZERO))?;
     s.set_reconnect_interval(RECONNECT_FIRST)?;
     s.set_reconnect_interval_max(Some(RECONNECT_MAX))?;
@@ -315,8 +319,8 @@ struct Link<'p> {
 
 impl<'p> Link<'p> {
     fn open(ctx: &Context, peer: &'p RigPeer, curve: &CurveClient) -> ac2_zmq::Result<Self> {
-        let (ctrl, ctrl_mon) = dealer(ctx, curve, &peer.ctrl)?;
-        let (data, data_mon) = dealer(ctx, curve, &peer.data)?;
+        let (ctrl, ctrl_mon) = dealer(ctx, curve, &peer.ctrl, ac2_proto::MAX_CTRL_BYTES)?;
+        let (data, data_mon) = dealer(ctx, curve, &peer.data, ac2_proto::MAX_DATA_PART_BYTES)?;
         let now = Instant::now();
         Ok(Self {
             peer,
