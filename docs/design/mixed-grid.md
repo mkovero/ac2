@@ -247,3 +247,21 @@ C's key is cheap and worth having beside B, without `Auto`.
    change (only matters if today's path restarts the job)?
 6. If A is still wanted later: should sweeps get the mixed grid too (their unresolved ranges
    come from the sweep window, not the ladder)?
+
+## Decisions
+
+The operator chose B, then bins on the wire as a further step.
+
+1. In the unresolved range: a point per bin, joined by a line.
+2. The marker says the bin width (`1 Hz bins`), not `coarser than 1/48 oct`.
+3. Smoothing does what its label says everywhere: a true fractional-octave average over
+   the bins below the edge too.
+4. Text export skips the rows without an estimate of their own.
+5. A resolution change may start the averages over; keeping them is wanted if it is cheap.
+6. Sweeps and transfers behave alike: what is drawn, marked, smoothed and exported in a
+   range the analysis does not resolve follows the same rules for both.
+
+Bins on the wire: the analysis already holds one set of bins per stage. Each stage's bins
+can be a stream of its own, so a viewer zoomed into the low end need not receive the
+high-rate stage's bins. The uniform grid stays the form captures, trace math and EQ work
+on; the bins are for viewing. Its design is a note of its own (`bin-streams.md`).
