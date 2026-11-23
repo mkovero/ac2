@@ -145,6 +145,16 @@ impl Rig {
         );
     }
 
+    /// An event of `bytes` (its body), outside the window.
+    fn event_of(&mut self, bytes: usize) {
+        self.peers.outside(
+            &self.router,
+            &[part(b"evt"), Part::from_vec(vec![0; bytes]).unwrap()],
+            Outside::Event,
+            &self.interest,
+        );
+    }
+
     fn peer(&self, i: usize) -> &Peer {
         let mut v: Vec<&Peer> = self.peers.map.values().collect();
         v.sort_by_key(|p| p.heard);
@@ -253,6 +263,34 @@ fn events_past_the_bound_bring_resync_required() {
 }
 
 const FLOW_TOPIC_BYTES: &[u8] = ac2_proto::flow::FLOW_TOPIC;
+
+/// Events far below the count bound but past the byte bound stop the same way: the rest are
+/// dropped, and the credit for what was read brings `resync_required` first.
+#[test]
+fn events_past_the_byte_bound_bring_resync_required() {
+    let mut r = Rig::new();
+    let a = r.dealer(DATA_WINDOW_DEFAULT);
+    let size = ac2_proto::event::MAX_EVENT_BYTES * 3 / 5;
+    let fit = EVENT_BYTES_BOUND / (size + 3);
+    for _ in 0..fit + 3 {
+        r.event_of(size);
+    }
+    assert!(r.peer(0).resync_owed);
+    assert!(r.peer(0).outside_bytes <= EVENT_BYTES_BOUND);
+    let mut events = 0;
+    while let Some(m) = a.recv_timeout(Duration::from_millis(200)).unwrap() {
+        assert_eq!(m.frames()[0], b"evt");
+        events += 1;
+    }
+    assert_eq!(events, fit as u32);
+
+    up(&a, DataUp::Credit { bytes: 0, events });
+    r.pump_until(|r| !r.peer(0).resync_owed);
+    assert_eq!(r.peer(0).events_out, 1, "the notice alone is outstanding");
+    let m = recv(&a);
+    assert_eq!(m[0], FLOW_TOPIC_BYTES);
+    assert_eq!(decode_notice(&m[1]).unwrap(), FlowNotice::ResyncRequired);
+}
 
 /// A peer with the largest window that reads nothing: the daemon fills the window with
 /// the smallest deltas and the event bound with events, and every one of them is queued:

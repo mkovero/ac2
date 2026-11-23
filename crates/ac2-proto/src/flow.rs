@@ -34,6 +34,10 @@ pub const FRAME_CHARGE_MIN: u32 = 64;
 /// Events, keepalives and notices queued per peer, unacknowledged. Past it a peer's events
 /// stop, and once it has room again it is sent `resync_required` before anything else.
 pub const EVENT_BOUND: u32 = 256;
+/// Bytes of events, keepalives and notices queued per peer, unacknowledged, beside
+/// [`EVENT_BOUND`] and with the same outcome past it: a few of the largest events, so a slow
+/// connection holds megabytes, never [`EVENT_BOUND`] times the largest event.
+pub const EVENT_BYTES_BOUND: usize = 4 * crate::event::MAX_EVENT_BYTES;
 /// First part of a notice: `[flow][msgpack notice]`.
 pub const FLOW_TOPIC: &[u8] = b"flow";
 /// Largest data request accepted, bytes. A request names at most one topic (at most

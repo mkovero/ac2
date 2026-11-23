@@ -9,7 +9,7 @@
 //!   round stopped, one message per topic per round: a large frame waiting for credit goes
 //!   first when the credit comes, so small topics cannot starve it.
 //! - **Events and keepalives** go at once, outside the window, at most [`EVENT_BOUND`]
-//!   unacknowledged; past it a peer's events stop, and once it has room it is told
+//!   unacknowledged and [`EVENT_BYTES_BOUND`] bytes of them; past either a peer's events stop, and once it has room it is told
 //!   `resync_required` first. A peer that does not subscribe to `ka` still receives one when
 //!   nothing else went to it for [`KA_IDLE`]: a send is what tells the daemon a peer is
 //!   gone, since a send to a vanished connection fails `EHOSTUNREACH` (`ROUTER_MANDATORY`),
@@ -30,9 +30,10 @@ use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use ac2_proto::event::MAX_EVENT_BYTES;
 use ac2_proto::flow::{
-    DATA_WINDOW_DEFAULT, DATA_WINDOW_MAX, DATA_WINDOW_MIN, EVENT_BOUND, FRAME_CHARGE_MIN,
-    frame_charge,
+    DATA_WINDOW_DEFAULT, DATA_WINDOW_MAX, DATA_WINDOW_MIN, EVENT_BOUND, EVENT_BYTES_BOUND,
+    FRAME_CHARGE_MIN, frame_charge,
 };
 use ac2_proto::{DataUp, FlowNotice, Subscription, Topic, decode_data_request, encode_notice};
 use ac2_zmq::{Admission, Error as ZmqError, Part, PublicKey, Socket};
@@ -79,6 +80,10 @@ struct Peer {
     in_flight: u64,
     /// Events, keepalives and notices sent and not yet credited.
     events_out: u32,
+    /// The size of each of those, oldest first (a client reads them in order, so a credit
+    /// of n acknowledges the first n), and their sum.
+    outside_sizes: VecDeque<usize>,
+    outside_bytes: usize,
     subs: Vec<Subscription>,
     chains: HashMap<Topic, Chain>,
     /// Where the next round starts, an index into the topic order.
@@ -122,6 +127,8 @@ impl Peer {
             window: DATA_WINDOW_DEFAULT,
             in_flight: 0,
             events_out: 0,
+            outside_sizes: VecDeque::new(),
+            outside_bytes: 0,
             subs: Vec::new(),
             chains: HashMap::new(),
             cursor: 0,
@@ -223,11 +230,30 @@ impl Peer {
         self.outside(sock, &parts)
     }
 
+    /// Whether a message of `bytes` outside the window fits both bounds now.
+    fn outside_room(&self, bytes: usize) -> bool {
+        self.events_out < EVENT_BOUND && self.outside_bytes + bytes <= EVENT_BYTES_BOUND
+    }
+
+    /// `events` messages outside the window acknowledged, the oldest first.
+    fn credit_outside(&mut self, events: u32) {
+        self.events_out = self.events_out.saturating_sub(events);
+        for _ in 0..events {
+            match self.outside_sizes.pop_front() {
+                Some(b) => self.outside_bytes -= b,
+                None => break,
+            }
+        }
+    }
+
     /// One message outside the window. `Ok(false)`: not queued.
     fn outside(&mut self, sock: &Socket, parts: &[Part]) -> Result<bool, Gone> {
         match send(sock, &self.rid, parts) {
             Ok(()) => {
+                let bytes = parts.iter().map(|p| p.len()).sum();
                 self.events_out += 1;
+                self.outside_sizes.push_back(bytes);
+                self.outside_bytes += bytes;
                 self.last_out = Some(Instant::now());
                 Ok(true)
             }
@@ -246,10 +272,13 @@ impl Peer {
         }
     }
 
-    /// `resync_required`, owed since events were dropped, once there is room for it.
+    /// `resync_required`, owed since events were dropped, once there is room for it and
+    /// for the largest event after it: an event dropped on the byte bound leaves less than
+    /// that, so the peer is told once it has read some, not at once and again on every
+    /// event that follows.
     fn flush_resync(&mut self, sock: &Socket) -> Result<(), Gone> {
         if self.resync_owed
-            && self.events_out < EVENT_BOUND
+            && self.outside_room(MAX_EVENT_BYTES)
             && self.notice(sock, FlowNotice::ResyncRequired)?
         {
             self.resync_owed = false;
@@ -278,7 +307,8 @@ impl Peer {
             return Ok(());
         }
         self.flush_resync(sock)?;
-        if self.resync_owed || self.events_out >= EVENT_BOUND {
+        let bytes = parts.iter().map(|p| p.len()).sum();
+        if self.resync_owed || !self.outside_room(bytes) {
             // A keepalive is superseded by the next one; an event is covered by the snapshot
             // `resync_required` brings.
             if kind == Outside::Event {
@@ -519,7 +549,7 @@ impl Peers {
             }
             DataUp::Credit { bytes, events } => {
                 p.in_flight = p.in_flight.saturating_sub(u64::from(bytes));
-                p.events_out = p.events_out.saturating_sub(events);
+                p.credit_outside(events);
                 p.blocked = false;
                 gone = p.flush_resync(sock).is_err() || p.flush_audio(sock).is_err();
             }

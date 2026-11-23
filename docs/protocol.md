@@ -2590,8 +2590,9 @@ Credit:
   rate.
 - **Events, keepalives, notices** go at once, outside the window: an event can be neither
   replaced nor dropped, and a keepalive must reach a connection whose window frames fill.
-  At most 256 are unacknowledged per connection; past that its events are dropped and,
-  once it has room again, the first thing it is sent is `resync_required`.
+  At most 256 are unacknowledged per connection, and at most 4 MiB of them; past either
+  its events are dropped and, once it has room again, the first thing it is sent is
+  `resync_required`.
 - **Credit on receipt.** A client credits every message it reads, frame or not, whether
   or not it uses it (a refused delta consumed link all the same), at least once per read
   burst and whenever half the window is owed.
