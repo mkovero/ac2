@@ -416,6 +416,8 @@ fn meas_deleted(r: &[Request]) -> Option<(MeasId, String)> {
 
 mod axis;
 
+mod view_fit;
+
 mod follow;
 
 mod delete;

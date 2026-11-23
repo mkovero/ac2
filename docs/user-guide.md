@@ -1258,11 +1258,16 @@ its pane: in `ui.toml` once the panes are a layout of the operator's (the app's 
 pane, still taking the first measurement's kind, keeps its axis only while the app runs),
 and with the chosen measurement's own panes in the session, so its row brings the range
 back on any app; Settings → Display → *level axes* resets every pane's. A range the app
-framed by itself is not remembered: a spectrum pane fits its level axis to the first frame
-it shows, a spectrum that starts fits the spectrum panes' on its first frame, and a new
-sweep result fits the sweep panes' (as **Shift+Home**, frequency left alone); a range set
-by hand stays until the pane shows another measurement (or the next sweep result). The impulse-response views' axes are shared by kind:
-one for the transfer panes' IR views, one for the sweep panes'.
+framed by itself is not remembered. The app frames a picture by itself, as **Shift+Home**
+does (frequency left alone), whenever it is new: a pane fits its level axis to the first
+data it shows (a new measurement, another one chosen, a spectrum that starts, a new sweep
+result), and **G** / **Shift+G** fit the view they step to (transfer magnitude, every
+spectrum view, the sweep response, the IR views). A picture with no data yet is framed when
+its first data arrives. A level range set by hand in a view stays when **G** comes back to
+it, and until the pane shows another measurement (or the next sweep result). The phase,
+coherence, alignment, room, SPL, programme and dynamics views keep their fixed scales. The
+impulse-response views' axes are shared by kind: one for the transfer panes' IR views, one
+for the sweep panes'; they are framed on every entry under **G**.
 
 - **Ctrl+I** / **Ctrl+O** zoom it about its middle; **Ctrl+wheel** about the level under
   the pointer (about the middle while the pointer is beside the level axis: a margin, the
@@ -1457,7 +1462,7 @@ The transfer pane's IR views and the sweep pane's IR views share keys and mouse 
 |---|---|---|
 | zoom | **I** / **O** and the wheel (about the pointer; the keys about the cursor while it is in view) | **Ctrl+I** / **Ctrl+O**, **Ctrl+wheel** |
 | pan | **←** / **→**, a drag | **Ctrl+↑** / **Ctrl+↓**, **Shift+wheel** |
-| show all | **Home**: the whole IR | **Shift+Home**: the whole IR, the value axis framing the curve (linear: ±110 % of its peak; log / ETC: from the noise to the peak) |
+| show all | **Home**: the whole IR | **Shift+Home**: the whole IR, the value axis framing the curve (linear: ±110 % of its peak; log / ETC: from the noise to the peak); **G** into an IR view, or its first IR, does the same |
 | defaults | **Ctrl+Home**: the whole IR, ±110 % of the peak, −60 … +3 dB | |
 
 - The value axis is amplitude in FS (linear) or dB re the peak (log, ETC).

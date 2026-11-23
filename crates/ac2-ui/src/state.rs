@@ -404,6 +404,7 @@ impl AppState {
         let contents = self.pane_contents();
         let worked_on = self.worked_on(&msg);
         self.update_inner(msg, keymap, &mut out);
+        self.frame_new_pictures();
         self.want_dynamics_envelopes(&mut out);
         if let Some(p) = worked_on {
             self.pane_input(p.unwrap_or(self.layout.focus));

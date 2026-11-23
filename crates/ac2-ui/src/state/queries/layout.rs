@@ -332,6 +332,7 @@ impl AppState {
         self.level_axes.pane_levels.clear();
         self.level_axes.level_set.clear();
         self.level_axes.spectrum_hold.clear();
+        self.level_axes.framed.clear();
         match &l.panes {
             Some(p) => {
                 let views = p

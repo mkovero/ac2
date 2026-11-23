@@ -287,35 +287,60 @@ impl AppState {
     /// Shift+Home: the whole IR, its value axis framing the curve: the linear view
     /// symmetric about its peak, the log and ETC views from the noise to the peak.
     fn ir_fit(&mut self, p: IrPane) {
-        let mode = self.modes().ir(p);
-        let fit = match mode {
-            IrMode::Linear => None,
-            IrMode::Log | IrMode::Etc => {
-                let Some(f) = self.ir_frame_of(p) else {
-                    return;
-                };
-                match ac2_scene::ir::ir_values(&f, mode).and_then(level::fit) {
-                    Some(r) => Some(r),
-                    None => {
-                        self.warn(format!("{}: no curve shown to fit", Self::ir_title(p)));
-                        return;
-                    }
-                }
+        let fit = match self.ir_fit_of(p) {
+            IrFit::Framed(fit) => fit,
+            IrFit::NoFrame => return,
+            IrFit::NoCurve => {
+                self.warn(format!("{}: no curve shown to fit", Self::ir_title(p)));
+                return;
             }
         };
+        self.frame_ir(p, fit);
+        if let Some(r) = fit {
+            self.toast(format!(
+                "{}: level {} … {} dB",
+                Self::ir_title(p),
+                format::fixed(r.lo, 0),
+                format::fixed(r.hi, 0)
+            ));
+        }
+    }
+
+    /// What Shift+Home frames IR picture `p` to: `None` for the linear view (its amplitude
+    /// follows the peak), else the log or ETC curve's level range.
+    pub(in crate::state) fn ir_fit_of(&self, p: IrPane) -> IrFit {
+        let mode = self.modes().ir(p);
+        match mode {
+            IrMode::Linear => IrFit::Framed(None),
+            IrMode::Log | IrMode::Etc => {
+                let Some(f) = self.ir_frame_of(p) else {
+                    return IrFit::NoFrame;
+                };
+                match ac2_scene::ir::ir_values(&f, mode).and_then(level::fit) {
+                    Some(r) => IrFit::Framed(Some(r)),
+                    None => IrFit::NoCurve,
+                }
+            }
+        }
+    }
+
+    /// IR picture `p` shows the whole IR, its value axis on `fit` ([`Self::ir_fit_of`]).
+    pub(in crate::state) fn frame_ir(&mut self, p: IrPane, fit: Option<Range>) {
         let axes = self.view.ir_axes_mut(p);
         axes.time_ms = None;
         match fit {
             None => axes.amplitude = None,
-            Some(r) => {
-                axes.level_db = r;
-                self.toast(format!(
-                    "{}: level {} … {} dB",
-                    Self::ir_title(p),
-                    format::fixed(r.lo, 0),
-                    format::fixed(r.hi, 0)
-                ));
-            }
+            Some(r) => axes.level_db = r,
         }
     }
+}
+
+/// What a fit of an IR picture frames ([`AppState::ir_fit_of`]).
+pub(in crate::state) enum IrFit {
+    /// The range to frame (`None`: the linear view's, following the peak).
+    Framed(Option<Range>),
+    /// No IR to frame yet.
+    NoFrame,
+    /// An IR without a curve to frame.
+    NoCurve,
 }

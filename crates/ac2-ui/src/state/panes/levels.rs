@@ -12,12 +12,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use ac2_proto::model::layout::{LayoutLevels, LevelRange};
 use ac2_proto::model::{LevelScale, Measurement};
 use ac2_proto::topic::{Stream, Topic};
+use ac2_proto::units::TraceId;
 use ac2_scene::axis::Range;
 use ac2_scene::format;
-use ac2_scene::view::{ViewState, level};
+use ac2_scene::view::{IrMode, IrPane, SweepMode, ViewState, level};
 
 use super::follow::LevelFollow;
-use crate::state::{AppState, PaneId, PaneKind};
+use crate::state::ir_nav::IrFit;
+use crate::state::{AppState, PaneId, PaneKind, TransferView};
 
 /// The panes' level axes as the app holds them: each pane's ranges, which of them the
 /// operator set, and the spectrum panes' framing and following of what they show.
@@ -33,6 +35,9 @@ pub(in crate::state) struct LevelAxes {
     /// The level ranges the operator set, by pane: each is stored with the panes and kept
     /// (never framed again automatically) until the pane shows another measurement.
     pub(in crate::state) level_set: BTreeSet<(PaneId, LevelSlot)>,
+    /// The transfer and sweep panes' pictures as they were last framed ([`Framed`]): a
+    /// pane whose picture differs from it frames its data, once it has some.
+    pub(in crate::state) framed: BTreeMap<PaneId, Framed>,
 }
 
 /// Zoom factor of one level-zoom key press.
@@ -172,6 +177,32 @@ pub(in crate::state) struct SpectrumHold {
 /// measurement), and the scale its curves are in (each scale has a range of its own).
 pub(in crate::state) type SpectrumShown = (Option<String>, LevelScale);
 
+/// A picture of a transfer or sweep pane as framed: the axis its view draws its data on,
+/// and the data. Another view (G) or other data (a new measurement, a new sweep result)
+/// is another picture, framed afresh: a range framed for one rarely suits the other.
+#[derive(Clone, Debug, PartialEq)]
+pub(in crate::state) struct Framed {
+    axis: FramedAxis,
+    shown: Option<FramedData>,
+}
+
+/// The axis a pane's view frames its data on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum FramedAxis {
+    /// The level axis, in its slot of the pane's ranges.
+    Level(LevelSlot),
+    /// An impulse-response picture, drawn as `IrMode`.
+    Ir(IrPane, IrMode),
+}
+
+/// What a pane's picture draws: the measurement by name (the identity a pane keeps across
+/// daemons), or the sweep result.
+#[derive(Clone, Debug, PartialEq)]
+enum FramedData {
+    Meas(String),
+    Sweep(TraceId),
+}
+
 impl AppState {
     /// Pane `pane`'s level ranges (a pane never zoomed: the defaults).
     pub fn pane_levels(&self, pane: PaneId) -> PaneLevels {
@@ -224,6 +255,7 @@ impl AppState {
         self.level_axes.pane_levels.retain(|id, _| kept(id));
         self.level_axes.spectrum_hold.retain(|id, _| kept(id));
         self.level_axes.level_set.retain(|(id, _)| kept(id));
+        self.level_axes.framed.retain(|id, _| kept(id));
     }
 
     /// The ranges the operator set on pane `pane`, as the panes are kept.
@@ -242,6 +274,8 @@ impl AppState {
     /// Pane `pane` (just on screen) takes the ranges the operator set on it when its panes
     /// were kept; the others are framed when it first shows a curve.
     pub(in crate::state) fn set_operator_levels(&mut self, pane: PaneId, w: &LayoutLevels) {
+        // Just on screen: its first picture is drawn on the ranges set here.
+        self.level_axes.framed.remove(&pane);
         let mut w = *w;
         let mut l = self.pane_levels(pane);
         for s in LevelSlot::ALL {
@@ -413,13 +447,121 @@ impl AppState {
             if self.layout.kind(pane) != kind {
                 continue;
             }
-            if let Some(fit) = self.level_fit(pane) {
-                // Framed for the new curves: no longer a range the operator set.
-                let scale = crate::scenes::spectrum_scale(self, pane);
-                if let Some(s) = LevelSlot::of(kind, scale) {
-                    self.level_axes.level_set.remove(&(pane, s));
+            self.frame_level(pane);
+        }
+    }
+
+    /// Pane `pane`'s level axis frames what it shows, as Shift+Home does, as an automatic
+    /// range (no longer one the operator set); `false` when it shows nothing to frame.
+    fn frame_level(&mut self, pane: PaneId) -> bool {
+        let Some(fit) = self.level_fit(pane) else {
+            return false;
+        };
+        let scale = crate::scenes::spectrum_scale(self, pane);
+        if let Some(s) = LevelSlot::of(self.layout.kind(pane), scale) {
+            self.level_axes.level_set.remove(&(pane, s));
+        }
+        self.change_level(pane, |_| fit);
+        true
+    }
+
+    /// G took focused spectrum pane `pane` to another view: its level axis frames what it
+    /// shows, as Shift+Home does (now, or with its next frame when nothing is in yet); a
+    /// range the operator set stays.
+    pub(in crate::state) fn frame_spectrum_view(&mut self, pane: PaneId) {
+        let scale = crate::scenes::spectrum_scale(self, pane);
+        let set = LevelSlot::of(PaneKind::Spectrum, scale)
+            .is_some_and(|s| self.level_axes.level_set.contains(&(pane, s)));
+        if set {
+            return;
+        }
+        self.level_axes.spectrum_hold.remove(&pane);
+        self.fit_first_shows();
+    }
+
+    /// The picture transfer or sweep pane `pane` draws now, if its view has an axis that
+    /// Shift+Home frames (the magnitude, a sweep's response, an impulse response); the
+    /// phase, coherence, alignment and room views are on fixed scales.
+    fn framing(&self, pane: PaneId) -> Option<Framed> {
+        let v = self.layout.view(pane)?;
+        let (axis, shown) = match v.kind {
+            PaneKind::Transfer => {
+                let axis = match v.modes.transfer {
+                    TransferView::Magnitude => FramedAxis::Level(LevelSlot::Transfer),
+                    TransferView::Ir(m) => FramedAxis::Ir(IrPane::Live, m),
+                    _ => return None,
+                };
+                let shown = self
+                    .pane_meas(pane)
+                    .map(|m| FramedData::Meas(m.config.name.clone()));
+                (axis, shown)
+            }
+            PaneKind::Distortion => {
+                let run = self.pane_sweep(pane).map(|(t, _)| t);
+                let axis = match v.modes.sweep {
+                    SweepMode::Response => FramedAxis::Level(LevelSlot::Distortion),
+                    // Without an IR the pane draws the response's view, on its keys.
+                    SweepMode::Ir(m) if run.is_some_and(|t| t.sweep.is_some()) => {
+                        FramedAxis::Ir(IrPane::Sweep, m)
+                    }
+                    _ => return None,
+                };
+                (axis, run.map(|t| FramedData::Sweep(t.meta.id)))
+            }
+            PaneKind::Spectrum
+            | PaneKind::Spl
+            | PaneKind::Programme
+            | PaneKind::Walk
+            | PaneKind::Dynamics => return None,
+        };
+        Some(Framed { axis, shown })
+    }
+
+    /// After each message: each transfer and sweep pane whose picture is new — another view
+    /// (G), another measurement or sweep result, or just on screen — frames it as
+    /// Shift+Home does, once its data is in. A level range the operator set in that view
+    /// stays until the pane shows other data; an impulse response's axes, one set for all
+    /// panes of a kind and never told apart from a default, frame on every entry, on the
+    /// focused pane (the one they belong to).
+    pub(in crate::state) fn frame_new_pictures(&mut self) {
+        for pane in self.layout.root.leaves() {
+            let Some(now) = self.framing(pane) else {
+                self.level_axes.framed.remove(&pane);
+                continue;
+            };
+            let was = self.level_axes.framed.get(&pane);
+            if was == Some(&now) {
+                continue;
+            }
+            let framed = match now.axis {
+                FramedAxis::Level(slot) => {
+                    let set = self.level_axes.level_set.contains(&(pane, slot));
+                    let other_data = now.shown.is_some()
+                        && was.is_some_and(|w| w.axis == now.axis && w.shown.is_some());
+                    if set && !other_data {
+                        // Kept as set; data still to come is framed on it too.
+                        now.shown.is_some()
+                    } else {
+                        // Set for other data: no longer the operator's for this.
+                        self.level_axes.level_set.remove(&(pane, slot));
+                        self.frame_level(pane)
+                    }
                 }
-                self.change_level(pane, |_| fit);
+                FramedAxis::Ir(p, _) if pane == self.layout.focus => match self.ir_fit_of(p) {
+                    IrFit::Framed(fit) => {
+                        self.frame_ir(p, fit);
+                        true
+                    }
+                    IrFit::NoFrame | IrFit::NoCurve => false,
+                },
+                // The IR axes are the focused pane's: another pane's picture leaves them.
+                FramedAxis::Ir(..) => true,
+            };
+            // Not framed yet (no data): the picture is new until it is.
+            if framed {
+                self.level_axes.framed.insert(pane, now);
+            } else {
+                self.level_axes.framed.remove(&pane);
             }
         }
     }

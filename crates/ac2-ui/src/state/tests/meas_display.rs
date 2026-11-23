@@ -418,7 +418,7 @@ fn hold_and_tracks_start_afresh_after_a_daemon_restart() {
 
 /// Live transfer frames of measurement 1, numbered `seq`: every column at `mag` dB with
 /// coherence `coh`.
-fn transfer_frame(t: &mut T, seq: u64, mag: f32, coh: f32) {
+pub(super) fn transfer_frame(t: &mut T, seq: u64, mag: f32, coh: f32) {
     use ac2_client::{Latest, TopicFrame};
     use ac2_proto::FrameData;
     let mut f = ac2_proto::samples::tf_frame();

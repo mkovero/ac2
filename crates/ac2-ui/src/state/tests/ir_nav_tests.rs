@@ -128,12 +128,15 @@ fn the_ir_pane_zooms_and_pans_time_and_value() {
     t.key("Shift+Home");
     assert_eq!((live(&t).time_ms, live(&t).amplitude), (None, None));
 
-    // Log: the dB axis. Ctrl+wheel about −30 dB, Shift+wheel pans.
+    // Log: the dB axis, framed on entry as Shift+Home does. Ctrl+wheel about −30 dB,
+    // Shift+wheel pans.
     t.key("G");
     assert_eq!(
         t.st.layout.focused().modes.transfer,
         TransferView::Ir(IrMode::Log)
     );
+    let entered = live(&t).level_db;
+    assert_ne!(entered, IrAxes::DEFAULT_LEVEL_DB);
     nav(
         &mut t,
         IrPane::Live,
@@ -143,7 +146,7 @@ fn the_ir_pane_zooms_and_pans_time_and_value() {
         },
     );
     let d = live(&t).level_db;
-    assert!((d.span() - 31.5).abs() < 1e-9, "{d:?}");
+    assert!((d.span() - entered.span() / 2.0).abs() < 1e-9, "{d:?}");
     nav(&mut t, IrPane::Live, IrNavMsg::ValuePan { by: -10.0 });
     assert!((live(&t).level_db.lo - (d.lo - 10.0)).abs() < 1e-9);
     // Shift+Home frames the decay (−20 dB, −6 dB and the peak) and says so.
