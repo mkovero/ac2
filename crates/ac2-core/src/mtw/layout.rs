@@ -255,6 +255,13 @@ impl Layout {
         crate::resolution::unresolved_ranges(grid, |f| self.cell_hz(f))
     }
 
+    /// [`Self::unresolved_ranges`] with the bin width of the stage serving each, Hz:
+    /// `(lo, hi, bin_hz)`, split where another stage takes over
+    /// ([`crate::resolution::unresolved_cells`]).
+    pub fn unresolved_bins(&self, grid: &crate::grid::LogGrid) -> Vec<(f64, f64, f64)> {
+        crate::resolution::unresolved_cells(grid, |f| self.cell_hz(f))
+    }
+
     /// The full-rate stage and one decimated stage per target rate, each at [`NFFT`].
     fn decimated(sr: f64, targets: &[f64]) -> Result<Self, LayoutError> {
         let kappa = validity_factor(LADDER_DESIGN_PPO);
@@ -516,6 +523,33 @@ mod tests {
             near(r96[2].0, 811.5, 96) && near(r96[2].1, 1623.0, 96),
             "{r96:?}"
         );
+    }
+
+    #[test]
+    fn unresolved_bins_name_the_serving_stage() {
+        // 48 kHz, 1/96: below the LF edge the deepest stage's 0.9766 Hz bins; above each
+        // crossover the shallower stage's, 2.930 Hz and 11.72 Hz, though the blend also
+        // takes the deep stage's bins (at column spacing) where the shallow one has none.
+        let l = Layout::new(48_000.0, Ladder::Standard).expect("layout");
+        let r = l.unresolved_bins(&ten_octaves(96));
+        let bins: Vec<f64> = r.iter().map(|x| x.2).collect();
+        assert_eq!(
+            bins,
+            [48_000.0 / 49_152.0, 12_000.0 / 4096.0, 48_000.0 / 4096.0]
+        );
+        let plain = l.unresolved_ranges(&ten_octaves(96));
+        let edges: Vec<(f64, f64)> = r.iter().map(|x| (x.0, x.1)).collect();
+        assert_eq!(edges, plain);
+        // The long LF window adds a deeper stage below: its range is its own, with its bin.
+        let l = Layout::new(48_000.0, Ladder::LongLf).expect("layout");
+        let grid = crate::grid::LogGrid {
+            ppo: 48,
+            k_min: -7 * 48,
+            k_max: 8 * 48 - 1,
+        };
+        let r = l.unresolved_bins(&grid);
+        assert_eq!(r.len(), 1, "{r:?}");
+        assert!((r[0].2 - 48_000.0 / 196_608.0).abs() < 1e-9, "{r:?}");
     }
 
     #[test]

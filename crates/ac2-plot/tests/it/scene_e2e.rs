@@ -229,18 +229,21 @@ fn transfer_view_advice() {
 /// by a line across the thinned columns.
 #[test]
 fn transfer_view_unresolved() {
-    use ac2_proto::model::{FreqRange, Resolution, Unresolved};
+    use ac2_proto::model::BinRange;
     use ac2_proto::units::Hz;
-    let un = Unresolved {
-        resolution: Resolution::NinetySixth,
-        ranges: [(19.9, 135.4), (203.0, 406.0), (1625.0, 3250.0)]
-            .iter()
-            .map(|&(lo, hi)| FreqRange {
-                lo: Hz(lo),
-                hi: Hz(hi),
-            })
-            .collect(),
-    };
+    // The 1/96 ranges at 96 kHz with the bins of the stages serving them.
+    let un: Vec<BinRange> = [
+        (19.9, 135.4, 96_000.0 / 98_304.0),
+        (203.0, 406.0, 24_000.0 / 8192.0),
+        (1625.0, 3250.0, 96_000.0 / 4096.0),
+    ]
+    .iter()
+    .map(|&(lo, hi, bin)| BinRange {
+        lo: Hz(lo),
+        hi: Hz(hi),
+        bin_hz: Hz(bin),
+    })
+    .collect();
     let mut a = cols(0.0, 0.0);
     for (i, f) in a.freqs.iter().enumerate() {
         if *f < 135.4 && i % 2 == 1 {
@@ -248,13 +251,7 @@ fn transfer_view_unresolved() {
         }
     }
     let mut t = trace(&a, 1, 0, 0.010);
-    t.unresolved = Some(ac2_scene::unresolved::Source {
-        unresolved: &un,
-        fill: ac2_scene::unresolved::Fill::Joined {
-            freqs: &a.freqs,
-            validity: &a.validity,
-        },
-    });
+    t.unresolved = Some(ac2_scene::unresolved::Source::Joined(&un));
     for theme in [Theme::dark(), Theme::light()] {
         let name = format!("transfer_view_unresolved_{:?}", theme.name).to_lowercase();
         let Some(gpu) = gpu(&name) else {

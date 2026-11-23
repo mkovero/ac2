@@ -242,6 +242,24 @@ pub struct Unresolved {
     pub ranges: Vec<FreqRange>,
 }
 
+/// A range of a live transfer curve's grid (column edges, Hz) whose columns are narrower
+/// than the FFT bins of the analysis stage serving it, with that width. Below the deepest
+/// stage's edge a column holds at most one bin and many hold none
+/// ([`crate::frame::ValidityMask::THINNED`]); in a crossover's blend the deeper stage's
+/// finer bins fill some columns the serving stage leaves empty. Either way the column
+/// spacing is not the bin width, so the width is stated.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BinRange {
+    /// Lower edge.
+    pub lo: Hz,
+    /// Upper edge.
+    pub hi: Hz,
+    /// Bin spacing of the serving stage. A range is split where another stage takes over,
+    /// so it states one.
+    pub bin_hz: Hz,
+}
+
 /// What smoothing averages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

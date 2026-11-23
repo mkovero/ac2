@@ -506,28 +506,19 @@ fn legend_corners_and_hidden() {
 /// named in the scene and on the cursor's frequency line; off by the view switch.
 #[test]
 fn unresolved_ranges_are_shaded_and_named() {
-    use ac2_proto::model::{FreqRange, Resolution, Unresolved};
+    use ac2_proto::model::BinRange;
     use ac2_proto::units::Hz;
     let c = cols(100);
-    let un = Unresolved {
-        resolution: Resolution::NinetySixth,
-        ranges: [(50.0, 135.0), (1625.0, 3250.0)]
-            .iter()
-            .map(|&(lo, hi)| FreqRange {
-                lo: Hz(lo),
-                hi: Hz(hi),
-            })
-            .collect(),
-    };
+    let un: Vec<BinRange> = [(50.0, 135.0, 0.977), (1625.0, 3250.0, 23.4)]
+        .iter()
+        .map(|&(lo, hi, bin)| BinRange {
+            lo: Hz(lo),
+            hi: Hz(hi),
+            bin_hz: Hz(bin),
+        })
+        .collect();
     let mut t = trace(&c, TraceKey::Live(MeasId(1)), 0.0);
-    t.unresolved = Some(crate::unresolved::Source {
-        unresolved: &un,
-        // No estimates to measure the bins by: the marks keep the resolution's words.
-        fill: crate::unresolved::Fill::Joined {
-            freqs: &[],
-            validity: &[],
-        },
-    });
+    t.unresolved = Some(crate::unresolved::Source::Joined(&un));
     let theme = Theme::dark();
     let view = ViewState {
         cursor_hz: Some(2000.0),
@@ -544,17 +535,10 @@ fn unresolved_ranges_are_shaded_and_named() {
     let texts: Vec<&str> = s.unresolved.iter().map(|m| m.text.as_str()).collect();
     assert_eq!(
         texts,
-        [
-            "below 140 Hz: coarser than 1/96 oct (gaps)",
-            "1.6 kHz–3.3 kHz: coarser than 1/96 oct (gaps)",
-        ]
+        ["below 140 Hz: 1 Hz bins", "1.6 kHz–3.3 kHz: 23 Hz bins",]
     );
     let cur = s.cursor.as_ref().expect("cursor");
-    assert!(
-        cur.freq.ends_with(" · coarser than 1/96 oct (gaps)"),
-        "{}",
-        cur.freq
-    );
+    assert!(cur.freq.ends_with(" · 23 Hz bins"), "{}", cur.freq);
     let shades = s.scene.layers[0]
         .rects
         .iter()
@@ -582,7 +566,7 @@ fn unresolved_ranges_are_shaded_and_named() {
         &theme,
         SIZE,
     );
-    assert!(!at_1k.cursor.expect("cursor").freq.contains("coarser"));
+    assert!(!at_1k.cursor.expect("cursor").freq.contains("bins"));
     let off = transfer_scene(
         std::slice::from_ref(&t),
         &DisplayCache::default(),
@@ -595,7 +579,7 @@ fn unresolved_ranges_are_shaded_and_named() {
         SIZE,
     );
     assert!(off.unresolved.is_empty());
-    assert!(!off.cursor.expect("cursor").freq.contains("coarser"));
+    assert!(!off.cursor.expect("cursor").freq.contains("bins"));
     assert!(
         !off.scene.layers[0]
             .rects

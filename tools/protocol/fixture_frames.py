@@ -134,10 +134,10 @@ def tf_frame():
                 },
                 "range": {"type": "percentiles", "positions": 8},
             },
-            "unresolved": {
-                "resolution": "ninety_sixth",
-                "ranges": [{"lo": 31.25, "hi": 135.5}, {"lo": 1625.0, "hi": 3250.0}],
-            },
+            "unresolved": [
+                {"lo": 31.25, "hi": 135.5, "bin_hz": 0.9765625},
+                {"lo": 1625.0, "hi": 3250.0, "bin_hz": 23.4375},
+            ],
             "settling": {"lo": 7.8125, "hi": 68.0},
             "filled": 0.625,
         },

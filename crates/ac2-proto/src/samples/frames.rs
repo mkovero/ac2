@@ -74,19 +74,18 @@ pub fn tf_frame() -> Frame {
                     hi: crate::units::Hz(68.0),
                 }),
                 filled: 0.625,
-                unresolved: Some(Unresolved {
-                    resolution: Resolution::NinetySixth,
-                    ranges: vec![
-                        FreqRange {
-                            lo: Hz(31.25),
-                            hi: Hz(135.5),
-                        },
-                        FreqRange {
-                            lo: Hz(1625.0),
-                            hi: Hz(3250.0),
-                        },
-                    ],
-                }),
+                unresolved: Some(vec![
+                    BinRange {
+                        lo: Hz(31.25),
+                        hi: Hz(135.5),
+                        bin_hz: Hz(0.9765625),
+                    },
+                    BinRange {
+                        lo: Hz(1625.0),
+                        hi: Hz(3250.0),
+                        bin_hz: Hz(23.4375),
+                    },
+                ]),
                 math: Some(Box::new(MathState {
                     operands: vec![
                         OperandState {

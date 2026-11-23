@@ -1,5 +1,5 @@
 {
-  "proto_version": 101,
+  "proto_version": 102,
   "value": {
     "grids": [
       {
@@ -422,7 +422,7 @@
           "driver_change": null,
           "driver_reset": null,
           "input_device": "fake",
-          "opened_at": "now-97391903",
+          "opened_at": "now-72780574",
           "output_device": "fake",
           "replay": null,
           "sample_rate_hz": 48000,
@@ -441,11 +441,11 @@
           "peaks": {
             "lafmax": {
               "judgement": "no_limit",
-              "since": "now-28576459"
+              "since": "now-27738604"
             },
             "lcpeak": {
               "judgement": "no_limit",
-              "since": "now-28576459"
+              "since": "now-27738604"
             }
           },
           "started_at": null,
@@ -453,31 +453,31 @@
             {
               "duration": 60.0,
               "judgement": "no_limit",
-              "since": "now-28576459",
+              "since": "now-27738604",
               "weighting": "a"
             },
             {
               "duration": 300.0,
               "judgement": "no_limit",
-              "since": "now-28576459",
+              "since": "now-27738604",
               "weighting": "a"
             },
             {
               "duration": 600.0,
               "judgement": "no_limit",
-              "since": "now-28576459",
+              "since": "now-27738604",
               "weighting": "a"
             },
             {
               "duration": 1800.0,
               "judgement": "no_limit",
-              "since": "now-28576459",
+              "since": "now-27738604",
               "weighting": "a"
             },
             {
               "duration": 3600.0,
               "judgement": "no_limit",
-              "since": "now-28576459",
+              "since": "now-27738604",
               "weighting": "a"
             }
           ]
@@ -499,7 +499,7 @@
             "type": "uncalibrated"
           },
           "captured_unsettled": false,
-          "created_at": "now-18157650",
+          "created_at": "now-17368910",
           "delay": 0.0,
           "depth": null,
           "edit": {
@@ -550,7 +550,7 @@
           "type": "name"
         },
         "recover": null,
-        "saved_at": "now-13199409"
+        "saved_at": "now-14614711"
       }
     },
     "traces": [
@@ -1286,7 +1286,7 @@
             "type": "uncalibrated"
           },
           "captured_unsettled": false,
-          "created_at": "now-18157650",
+          "created_at": "now-17368910",
           "delay": 0.0,
           "depth": null,
           "edit": {

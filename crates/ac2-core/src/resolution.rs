@@ -41,6 +41,32 @@ pub fn unresolved_columns(
     out
 }
 
+/// [`unresolved_ranges`] with each range's cell, Hz: `(lo, hi, cell)`. A range is split
+/// where the cell changes (another window takes over), so each states one cell; two
+/// neighbouring columns with equal cells stay one range.
+pub fn unresolved_cells(
+    grid: &LogGrid,
+    cell_hz: impl Fn(f64) -> Option<f64>,
+) -> Vec<(f64, f64, f64)> {
+    let mut out: Vec<(f64, f64, f64)> = Vec::new();
+    let mut open: Option<(f64, f64, f64)> = None;
+    for i in 0..grid.len() {
+        let (lo, hi) = grid.edges(i);
+        // As in `unresolved_columns`: a column as wide as the cell stays resolved.
+        let coarse = cell_hz(grid.frequency(i)).filter(|c| *c > (hi - lo) * (1.0 + 1e-9));
+        match (coarse, open.as_mut()) {
+            (Some(c), Some(r)) if r.2 == c => r.1 = hi,
+            (Some(c), _) => {
+                out.extend(open.take());
+                open = Some((lo, hi, c));
+            }
+            (None, _) => out.extend(open.take()),
+        }
+    }
+    out.extend(open);
+    out
+}
+
 /// Lowest frequency at which a cell of `cell_hz` fills no more than one column of `ppo`
 /// points per octave: `κ(ppo) · cell`.
 pub fn resolved_from_hz(cell_hz: f64, ppo: u32) -> f64 {
@@ -93,5 +119,19 @@ mod tests {
         let r = unresolved_ranges(&g, |f| Some(if f < 1000.0 { 4.0 } else { 100.0 }));
         assert_eq!(r.len(), 2, "{r:?}");
         assert!(r[0].1 <= 1000.0 && r[1].0 >= 1000.0 / 1.1);
+    }
+
+    #[test]
+    fn cells_split_where_the_window_changes() {
+        let g = ten_octaves(48);
+        // Two windows whose unresolved bands touch: one range each, meeting on a column
+        // edge, each with its own cell.
+        let cell = |f: f64| Some(if f < 40.0 { 0.75 } else { 1.0 });
+        let r = unresolved_cells(&g, cell);
+        assert_eq!(r.len(), 2, "{r:?}");
+        assert_eq!((r[0].2, r[1].2), (0.75, 1.0));
+        assert!((r[0].1 / r[1].0 - 1.0).abs() < 1e-12, "{r:?}");
+        // Over the same columns as the plain ranges.
+        assert_eq!(unresolved_ranges(&g, cell), [(r[0].0, r[1].1)]);
     }
 }

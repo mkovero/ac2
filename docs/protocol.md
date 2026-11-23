@@ -31,7 +31,7 @@ keepalives to each connection as its credit allows (§5.8).
 
 ## 2. Version and hello
 
-`PROTO_VERSION = 101`. Every ctrl message of every version is a map containing `v` (u16) and
+`PROTO_VERSION = 102`. Every ctrl message of every version is a map containing `v` (u16) and
 `id` (u64); that is the only layout fixed across versions. A receiver reads those two
 fields first:
 
@@ -1901,11 +1901,18 @@ applies to its next run, and stored traces keep their grid.
 `Unresolved` {`resolution`, `ranges`: [`FreqRange` {`lo`, `hi`: Hz}], ascending, disjoint,
 on column edges} lists where one estimate's resolution cell — the bandwidth its analysis
 window sets — is wider than one column at that resolution, so the columns there are
-interpolation, not detail. Transfer (`TfMeta.unresolved`; nil for a math trace): the cell
-is the bin spacing of the coarsest MTW stage serving the column (stages switch over where a
-bin fills a 1/48-octave column, so at 1/96 the band just above each crossover is
-unresolved too; at 96 kHz: below ≈ 135 Hz, ≈ 203–406 Hz and ≈ 1.62–3.25 kHz; with
-`lf_window: long` the lowest range ends two octaves lower). Sweep
+interpolation, not detail. Transfer: `TfMeta.unresolved` is [`BinRange` {`lo`, `hi`,
+`bin_hz`: Hz}] instead (ascending, disjoint, on column edges; empty: all resolved), each
+range with the bin spacing of the coarsest MTW stage serving it, split where another stage
+takes over (stages switch over where a bin fills a 1/48-octave column, so at 1/96 the band
+just above each crossover is unresolved too; at 96 kHz: below ≈ 135 Hz with 0.98 Hz bins,
+≈ 203–406 Hz with 2.9 Hz and ≈ 1.62–3.25 kHz with 23 Hz; with `lf_window: long` the lowest
+range ends two octaves lower, with 0.24 Hz bins). There a column holds at most one bin of the
+serving stage and many hold none (`THINNED`); in a crossover's blend the deeper stage's bins
+fill some of those columns, so the column spacing is not the bin width. A math trace whose
+included operands are all live transfers states their ranges, each piece at the coarsest
+width among the operands covering it; nil when it includes a stored trace (which keeps no
+ranges) or nothing. Sweep
 (`SweepData.unresolved`: `SweepUnresolved` {`response`, `harmonics`} \| nil): the response's
 cell is 1/(its linear window), set by `gate`; a distortion point's is, on the fundamental's
 axis, 1/(k · its harmonic window) for every order k it reports, with `lf_harmonics: fine`
@@ -2387,7 +2394,7 @@ always `i8`).
 
 | kind | arrays (name: unit) | meta |
 |---|---|---|
-| `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask; an alignment's (all four or none) `align_phase_before`, `align_phase_after`: deg (A − B as measured and with the fit applied), `align_sum_before`, `align_sum_after`: db (the summation per column); an average's range across positions (all three or none) `range_lo`, `range_hi`: db, `range_coh`: coherence | `delay`, `nudged` (Seconds: the part of `delay` `delay.nudge` steps added to the arrival; 0 for a math trace), `smoothing`, `mic_curve`, `mic_range` (`FreqRange` \| nil: the lowest and highest point of that mic curve; outside them the curve is held at its end value, so those columns are not corrected; nil without a curve and for a math trace), `math` (`MathState` \| nil: a math trace's operands, below), `unresolved` (`Unresolved` \| nil, §3.2 *Resolution*), `settling` (`FreqRange` \| nil: the frequencies whose averages are still filling, the span served by the analysis stages short of their depth; nil once all are full; a math trace's spans its included live operands'), `filled` (f32, 0…1: how full the averages are, counted in accumulated blocks of the least full analysis stage, so refused blocks add nothing; a math trace's is the least of its included live operands, 1 for traces) |
+| `tf` | `mag`: db, `phase`: deg, `coh`: coherence, `validity`: bitmask; an alignment's (all four or none) `align_phase_before`, `align_phase_after`: deg (A − B as measured and with the fit applied), `align_sum_before`, `align_sum_after`: db (the summation per column); an average's range across positions (all three or none) `range_lo`, `range_hi`: db, `range_coh`: coherence | `delay`, `nudged` (Seconds: the part of `delay` `delay.nudge` steps added to the arrival; 0 for a math trace), `smoothing`, `mic_curve`, `mic_range` (`FreqRange` \| nil: the lowest and highest point of that mic curve; outside them the curve is held at its end value, so those columns are not corrected; nil without a curve and for a math trace), `math` (`MathState` \| nil: a math trace's operands, below), `unresolved` ([`BinRange`] \| nil: where the columns are finer than the bins serving them, with their width, §3.2 *Resolution*), `settling` (`FreqRange` \| nil: the frequencies whose averages are still filling, the span served by the analysis stages short of their depth; nil once all are full; a math trace's spans its included live operands'), `filled` (f32, 0…1: how full the averages are, counted in accumulated blocks of the least full analysis stage, so refused blocks add nothing; a math trace's is the least of its included live operands, 1 for traces) |
 | `ir` | `ir_linear`: full_scale, `ir_etc`: db (optional) | `sample_rate`, `t0`, `dt`, `inserted_delay`; point i at `t0 + i·dt` |
 | `rta` | `level`: dbfs or db_spl (band power), `validity`: bitmask | `fraction`, `weighting`, `scale`, `cal`, `mic_curve`, `mic_range` (as `tf`'s), `math` (`MathState` \| nil) |
 | `spec` | `level`: dbfs or db_spl (tone level), dbfs_per_hz or db_spl_per_hz (density; §3.2 *Spectrum level*); smoothed when `smoothing` is set; NaN for no power; on a `log_bins` grid (`fixed`) or a `log` grid (`multi`, §3.2 *Spectrum resolution*): each column the highest level among its bins (tone) or their mean power (density) | `window`, `scale`, `level` (`SpecLevel`), `cal`, `mic_curve`, `mic_range` (as `tf`'s), `smoothing`, `math` (`MathState` \| nil), `bands` (`SpecBands` \| nil), `harmonics` (`SpecHarmonics` \| nil, §3.2 *Harmonics of the generator's sine*) |

@@ -777,7 +777,7 @@ fn unresolved_marks(
     Vec<crate::unresolved::RangeMark>,
     Vec<crate::unresolved::RangeMark>,
 ) {
-    use crate::unresolved::{Fill, Source, marks};
+    use crate::unresolved::{Source, marks};
     let Some((t, Some(u))) = sweep.map(|(t, s)| (t, s.unresolved.as_ref())) else {
         return (Vec::new(), Vec::new());
     };
@@ -787,13 +787,9 @@ fn unresolved_marks(
     if !view.marks() {
         return (Vec::new(), Vec::new());
     }
-    let src = |unresolved| Source {
-        unresolved,
-        fill: Fill::Interpolated,
-    };
     (
-        marks(src(&u.response), first, None),
-        marks(src(&u.harmonics), first, Some("harmonics")),
+        marks(Source::Interpolated(&u.response), first, None),
+        marks(Source::Interpolated(&u.harmonics), first, Some("harmonics")),
     )
 }
 

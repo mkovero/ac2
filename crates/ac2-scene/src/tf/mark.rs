@@ -5,12 +5,11 @@
 use super::*;
 use crate::comb::{self, End};
 use crate::cursor_jump::{self, Landmark, Step};
-use crate::grid::nearest_column;
 use crate::readout::{MarkPoint, MarkReadout, mark_readout};
 
 /// `d` at its column nearest `hz` (returned beside it) and its phase in the pane's mode.
 fn point(d: &DisplayTrace, hz: f64, phase: PhaseView) -> Option<(MarkPoint, End)> {
-    let i = nearest_column(&d.freqs, hz)?;
+    let i = d.nearest_estimate(hz)?;
     let ph = match phase {
         PhaseView::Wrapped => &d.phase_wrapped_deg,
         PhaseView::Unwrapped { .. } => &d.phase_unwrapped_deg,
@@ -40,14 +39,21 @@ pub(super) fn readout(
     let name = (shown.len() > 1).then_some(d.name.as_str());
     let (mark, m_end) = point(d, m, view.tf.phase)?;
     let (cursor, c_end) = point(d, c, view.tf.phase)?;
+    // Over the estimates, as the jumps read them: a peak the jump lands on in a joined
+    // range has the bins beside it as neighbours here too.
+    let (freqs, values) = d.own_estimates(&d.magnitude_db);
+    let own = |e: End| End {
+        col: d.own_index(e.col),
+        hz: e.hz,
+    };
     let comb = comb::evidence(
-        &d.freqs,
-        &d.magnitude_db,
+        &freqs,
+        &values,
         view.freq.range(),
         view.jump_prominence_db,
         d.smoothing.map(|s| s.fraction),
-        m_end,
-        c_end,
+        own(m_end),
+        own(c_end),
     );
     Some(mark_readout(
         mark,

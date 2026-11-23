@@ -4,10 +4,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::grid::GridId;
 use crate::model::{
-    BackendKind, Ballistic, BandFraction, CalStatus, DeviceId, FreqRange, LeqJudgement, LevelScale,
-    Operand, Pair, PairSide, PeakWeighting, PhaseBasis, PositionCorrection, PreviewInput,
-    Smoothing, SmoothingFraction, SpecLevel, TimeWeighting, TimingState, TimingStatus, Unresolved,
-    Weighting, Window,
+    BackendKind, Ballistic, BandFraction, BinRange, CalStatus, DeviceId, FreqRange, LeqJudgement,
+    LevelScale, Operand, Pair, PairSide, PeakWeighting, PhaseBasis, PositionCorrection,
+    PreviewInput, Smoothing, SmoothingFraction, SpecLevel, TimeWeighting, TimingState,
+    TimingStatus, Unresolved, Weighting, Window,
 };
 use crate::units::{
     ClientId, DaemonIncarnation, Db, Dbfs, Dbtp, Hz, Lufs, Rev, SampleIndex, Samples, Seconds,
@@ -37,9 +37,13 @@ pub struct TfMeta {
     pub mic_range: Option<FreqRange>,
     /// What a math trace combined; `None` for a transfer measurement.
     pub math: Option<Box<MathState>>,
-    /// Where the columns are finer than the analysis stage serving them resolves; `None`
-    /// for a math trace.
-    pub unresolved: Option<Unresolved>,
+    /// Where the columns are finer than the bins of the analysis stage serving them, with
+    /// that width; ascending and disjoint, empty: every column is resolved. A math trace
+    /// whose included operands are all live transfers states their ranges, each piece at
+    /// the coarsest width among the operands covering it (the limit on what the result
+    /// resolves); `None` when it includes a stored trace, which keeps no ranges, or no
+    /// operand at all.
+    pub unresolved: Option<Vec<BinRange>>,
     /// The frequencies whose averages are still filling: the span served by the analysis
     /// stages that have not yet accumulated their full depth (the longer windows of the
     /// low stages fill last). `None` once every stage is full; for a math trace the span

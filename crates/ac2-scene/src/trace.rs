@@ -205,13 +205,7 @@ impl<'a> TfTrace<'a> {
                 .meta
                 .unresolved
                 .as_ref()
-                .map(|u| crate::unresolved::Source {
-                    unresolved: u,
-                    fill: crate::unresolved::Fill::Joined {
-                        freqs,
-                        validity: &frame.validity,
-                    },
-                }),
+                .map(|u| crate::unresolved::Source::Joined(u)),
             mic_range: frame.meta.mic_range,
             settling: frame.meta.settling,
             range: frame
@@ -290,10 +284,7 @@ impl<'a> TfTrace<'a> {
                     } => Some(&f.unresolved),
                     _ => None,
                 })
-                .map(|u| crate::unresolved::Source {
-                    unresolved: u,
-                    fill: crate::unresolved::Fill::Interpolated,
-                }),
+                .map(crate::unresolved::Source::Interpolated),
             // Stored captures keep no range (the band is live only).
             range: None,
             faint_phase: false,
@@ -442,6 +433,31 @@ impl DisplayTrace {
         self.joined.get(i) == Some(&Some(Joined::Thinned))
     }
 
+    /// The column nearest `hz` (as [`crate::grid::nearest_column`]) among those the line
+    /// does not pass over: inside a joined range the nearest estimate, so a readout never
+    /// reads a column that has no value while the line runs through it.
+    pub fn nearest_estimate(&self, hz: f64) -> Option<usize> {
+        if hz.is_nan() || hz <= 0.0 {
+            return None;
+        }
+        self.freqs
+            .iter()
+            .enumerate()
+            .filter(|(i, f)| **f > 0.0 && !self.thinned(*i))
+            .min_by(|(_, a), (_, b)| {
+                (a.ln() - hz.ln())
+                    .abs()
+                    .total_cmp(&(b.ln() - hz.ln()).abs())
+            })
+            .map(|(i, _)| i)
+    }
+
+    /// Where column `col` sits in [`Self::own_estimates`]: the columns before it that the
+    /// line does not pass over.
+    pub fn own_index(&self, col: usize) -> usize {
+        (0..col).filter(|i| !self.thinned(*i)).count()
+    }
+
     /// `values` (column-aligned) without the columns the line passes over, with their
     /// frequencies: (freqs, values). A search over neighbouring columns then sees the
     /// nearest estimates as neighbours, as the drawn line does.
@@ -457,26 +473,21 @@ impl DisplayTrace {
 }
 
 /// Where a live curve joins its estimates ([`DisplayTrace::joined`]): the columns of its
-/// `Fill::Joined` ranges. Only [`ValidityMask::THINNED`] alone is passed over; any other
-/// bit is a reason the curve has no value there, which the line must keep showing.
+/// joined ranges. Only [`ValidityMask::THINNED`] alone is passed over; any other bit is a
+/// reason the curve has no value there, which the line must keep showing.
 fn joined_columns(t: &TfTrace<'_>, n: usize) -> Vec<Option<Joined>> {
-    let (
-        Some(crate::unresolved::Source {
-            unresolved,
-            fill: crate::unresolved::Fill::Joined { .. },
-        }),
-        Some(validity),
-    ) = (t.unresolved, t.validity)
+    let (Some(crate::unresolved::Source::Joined(ranges)), Some(validity)) =
+        (t.unresolved, t.validity)
     else {
         return Vec::new();
     };
-    if unresolved.ranges.is_empty() {
+    if ranges.is_empty() {
         return Vec::new();
     }
     (0..n)
         .map(|i| {
             let f = t.freqs[i];
-            let inside = unresolved.ranges.iter().any(|r| f >= r.lo.0 && f <= r.hi.0);
+            let inside = ranges.iter().any(|r| f >= r.lo.0 && f <= r.hi.0);
             let v = validity.get(i).copied().unwrap_or(ValidityMask::NONE);
             if !inside {
                 None

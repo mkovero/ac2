@@ -2,7 +2,6 @@
 
 use crate::comb::Comb;
 use crate::format;
-use crate::grid::nearest_column;
 use crate::trace::{DisplayTrace, TraceKey};
 use crate::view::PhaseView;
 
@@ -104,7 +103,7 @@ pub fn cursor_readout(traces: &[DisplayTrace], hz: f64, phase: PhaseView) -> Opt
     let rows = traces
         .iter()
         .filter_map(|t| {
-            let i = nearest_column(&t.freqs, hz)?;
+            let i = t.nearest_estimate(hz)?;
             let f = t.freqs[i];
             snapped.get_or_insert(f);
             let phase = match phase {

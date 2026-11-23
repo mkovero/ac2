@@ -29,9 +29,9 @@ use ac2_proto::frame::{
 };
 use ac2_proto::grid::{GridDef, GridId};
 use ac2_proto::model::{
-    AlignCurves, AlignNoFit, AlignOutcome, AlignState, AverageMethod, BandFraction, CalStatus,
-    FreqRange, LevelScale, MathConfig, MathDomain, MathExpr, MathOp, MathReference, Operand,
-    PhaseBasis, SpecLevel, Weighting, Window,
+    AlignCurves, AlignNoFit, AlignOutcome, AlignState, AverageMethod, BandFraction, BinRange,
+    CalStatus, FreqRange, LevelScale, MathConfig, MathDomain, MathExpr, MathOp, MathReference,
+    Operand, PhaseBasis, SpecLevel, Weighting, Window,
 };
 use ac2_proto::topic::Topic;
 use ac2_proto::units::{Hz, MeasId, Rev, Seconds, SessionEpoch};
@@ -357,7 +357,45 @@ struct Value {
     filled: f32,
     /// Where a live transfer's averages are still filling (`TfMeta::settling`).
     settling: Option<FreqRange>,
+    /// Where a live transfer's columns are finer than its bins (`TfMeta::unresolved`);
+    /// `None` for a stored operand, which keeps no ranges.
+    unresolved: Option<Vec<BinRange>>,
     frame: Option<FrameData>,
+}
+
+/// The unresolved ranges of a result combining operands with `each`'s: every piece covered
+/// by any operand, at the coarsest (largest) bin width among the operands covering it,
+/// since a column can only be as fine as the coarsest estimate that went into it.
+/// Neighbouring pieces with one width stay one range.
+fn coarsest_bins(each: &[&[BinRange]]) -> Vec<BinRange> {
+    let mut edges: Vec<f64> = each
+        .iter()
+        .flat_map(|r| r.iter().flat_map(|b| [b.lo.0, b.hi.0]))
+        .collect();
+    edges.sort_by(f64::total_cmp);
+    edges.dedup();
+    let mut out: Vec<BinRange> = Vec::new();
+    for w in edges.windows(2) {
+        let mid = 0.5 * (w[0] + w[1]);
+        let Some(bin) = each
+            .iter()
+            .flat_map(|r| r.iter())
+            .filter(|b| b.lo.0 <= mid && mid <= b.hi.0)
+            .map(|b| b.bin_hz.0)
+            .reduce(f64::max)
+        else {
+            continue;
+        };
+        match out.last_mut() {
+            Some(last) if last.hi.0 == w[0] && last.bin_hz.0 == bin => last.hi = Hz(w[1]),
+            _ => out.push(BinRange {
+                lo: Hz(w[0]),
+                hi: Hz(w[1]),
+                bin_hz: Hz(bin),
+            }),
+        }
+    }
+    out
 }
 
 fn value(a: &Answer, f: Option<&Frame>, epoch: SessionEpoch) -> Option<Value> {
@@ -372,6 +410,7 @@ fn value(a: &Answer, f: Option<&Frame>, epoch: SessionEpoch) -> Option<Value> {
             mic_curve: h.mic_curve,
             filled: 1.0,
             settling: None,
+            unresolved: None,
             frame: None,
         });
     }
@@ -379,10 +418,12 @@ fn value(a: &Answer, f: Option<&Frame>, epoch: SessionEpoch) -> Option<Value> {
     let (_, columns) = capture_columns(&f.data)?;
     let mut filled = 1.0;
     let mut settling = None;
+    let mut unresolved = None;
     let (delay, validity, scale, level, mic_curve) = match &f.data {
         FrameData::Tf(t) => {
             filled = t.meta.filled;
             settling = t.meta.settling;
+            unresolved.clone_from(&t.meta.unresolved);
             (
                 t.meta.delay.0,
                 Some(t.validity.clone()),
@@ -417,6 +458,7 @@ fn value(a: &Answer, f: Option<&Frame>, epoch: SessionEpoch) -> Option<Value> {
         mic_curve,
         filled,
         settling,
+        unresolved,
         frame: Some(f.data.clone()),
     })
 }
@@ -649,6 +691,13 @@ pub(crate) fn combine(
             lo: Hz(a.lo.0.min(b.lo.0)),
             hi: Hz(a.hi.0.max(b.hi.0)),
         });
+    // Known only when every included operand states its ranges.
+    let unresolved = included
+        .iter()
+        .map(|(_, v)| v.unresolved.as_deref())
+        .collect::<Option<Vec<&[BinRange]>>>()
+        .filter(|each| !each.is_empty())
+        .map(|each| coarsest_bins(&each));
     let first_frame = included.iter().find_map(|(_, v)| v.frame.as_ref());
     let fixed_delay = match reference {
         CoreReference::Fixed(d) => d,
@@ -673,7 +722,7 @@ pub(crate) fn combine(
                 mic_curve,
                 mic_range: None,
                 math: state,
-                unresolved: None,
+                unresolved,
                 settling,
                 filled,
             },

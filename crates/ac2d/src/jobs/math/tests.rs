@@ -213,6 +213,81 @@ fn filled_is_the_least_of_the_included_live_operands() {
     assert_eq!(run(&ratio, &[None; 2], &none).meta.filled, 0.0);
 }
 
+fn bins(a: Answer, ranges: &[(f64, f64, f64)]) -> Answer {
+    let Answer::Result(mut f) = a else {
+        panic!("live operand");
+    };
+    let FrameData::Tf(t) = &mut f.data else {
+        panic!("transfer");
+    };
+    t.meta.unresolved = Some(
+        ranges
+            .iter()
+            .map(|&(lo, hi, bin)| ac2_proto::model::BinRange {
+                lo: ac2_proto::units::Hz(lo),
+                hi: ac2_proto::units::Hz(hi),
+                bin_hz: ac2_proto::units::Hz(bin),
+            })
+            .collect(),
+    );
+    Answer::Result(f)
+}
+
+fn spans(f: &TfFrame) -> Option<Vec<(f64, f64, f64)>> {
+    f.meta
+        .unresolved
+        .as_ref()
+        .map(|r| r.iter().map(|b| (b.lo.0, b.hi.0, b.bin_hz.0)).collect())
+}
+
+/// Live operands' ranges carry into the result, each piece at the coarsest width covering
+/// it; with a stored operand included the ranges are not known.
+#[test]
+fn unresolved_ranges_take_the_coarsest_bins() {
+    let c = avg(&[1, 2], AverageMethod::Power);
+    let same = [
+        bins(flat(1, 0.0), &[(7.8, 68.0, 1.0)]),
+        bins(flat(2, 0.0), &[(7.8, 68.0, 1.0)]),
+    ];
+    assert_eq!(
+        spans(&run(&c, &[None; 2], &same)),
+        Some(vec![(7.8, 68.0, 1.0)])
+    );
+    // A long-LF operand (0.25 Hz bins below 17 Hz) with a standard one: where both cover,
+    // the standard one's 1 Hz bins limit the result; an operand's own range elsewhere keeps
+    // its width.
+    let mixed = [
+        bins(flat(1, 0.0), &[(7.8, 17.0, 0.25), (203.0, 406.0, 2.9)]),
+        bins(flat(2, 0.0), &[(7.8, 68.0, 1.0)]),
+    ];
+    assert_eq!(
+        spans(&run(&c, &[None; 2], &mixed)),
+        Some(vec![(7.8, 68.0, 1.0), (203.0, 406.0, 2.9)])
+    );
+    let overlap = [
+        bins(flat(1, 0.0), &[(7.8, 100.0, 0.5)]),
+        bins(flat(2, 0.0), &[(50.0, 68.0, 1.0)]),
+    ];
+    assert_eq!(
+        spans(&run(&c, &[None; 2], &overlap)),
+        Some(vec![
+            (7.8, 50.0, 0.5),
+            (50.0, 68.0, 1.0),
+            (68.0, 100.0, 0.5)
+        ])
+    );
+    let ratio = binary(
+        meas(1),
+        MathOp::Divide,
+        Operand::Trace { trace: TraceId(4) },
+    );
+    let with_stored = [
+        bins(flat(1, 0.0), &[(7.8, 68.0, 1.0)]),
+        stored(0.0, 0.0, Some(EPOCH)),
+    ];
+    assert_eq!(spans(&run(&ratio, &[None; 2], &with_stored)), None);
+}
+
 /// A weak reference only holds an operand's averaging: it stays in.
 #[test]
 fn weak_reference_does_not_refuse() {

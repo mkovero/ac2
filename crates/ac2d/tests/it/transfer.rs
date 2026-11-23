@@ -115,10 +115,11 @@ fn resolution_sets_the_grid_and_frames_say_what_is_unresolved() {
     let mut d = driver(&backend);
     let f = run_tf(&mut d, &sub, 0.5, 0);
     let u = tf(&f).meta.unresolved.clone().expect("unresolved");
-    assert_eq!(u.resolution, Resolution::FortyEighth);
-    // At 1/48 only below the deepest stage's edge (κ(48) · 0.977 Hz ≈ 68 Hz).
-    assert_eq!(u.ranges.len(), 1, "{u:?}");
-    assert!(u.ranges[0].hi.0 > 60.0 && u.ranges[0].hi.0 < 70.0, "{u:?}");
+    // At 1/48 only below the deepest stage's edge (κ(48) · 0.977 Hz ≈ 68 Hz), with that
+    // stage's bins.
+    assert_eq!(u.len(), 1, "{u:?}");
+    assert!(u[0].hi.0 > 60.0 && u[0].hi.0 < 70.0, "{u:?}");
+    assert_eq!(bin_widths(&u), [48_000.0 / 49_152.0]);
     let rev = f.stamp.config_rev.0;
 
     if let MeasKind::Transfer { config } = &mut m.kind {
@@ -129,9 +130,16 @@ fn resolution_sets_the_grid_and_frames_say_what_is_unresolved() {
     let t = tf(&f);
     assert_eq!(t.mag.len(), 1440);
     let u = t.meta.unresolved.clone().expect("unresolved");
-    assert_eq!(u.resolution, Resolution::NinetySixth);
-    // The bottom, and the octave above each crossover.
-    assert_eq!(u.ranges.len(), 3, "{u:?}");
+    // The bottom, and the octave above each crossover, each with the bins of the shallower
+    // stage serving it: in the blend the deeper stage's bins fill columns too, so the
+    // columns alone would read the width low.
+    assert_eq!(u.len(), 3, "{u:?}");
+    assert_eq!(
+        bin_widths(&u),
+        [48_000.0 / 49_152.0, 12_000.0 / 4096.0, 48_000.0 / 4096.0]
+    );
+    assert!(u[1].lo.0 > 190.0 && u[1].hi.0 < 420.0, "{u:?}");
+    assert!(u[2].lo.0 > 790.0 && u[2].hi.0 < 1700.0, "{u:?}");
 
     // The long window adds a stage two octaves down: four times the window, so the bottom
     // range ends at a quarter of the frequency (κ(48) · 0.244 Hz ≈ 17 Hz).
@@ -144,9 +152,14 @@ fn resolution_sets_the_grid_and_frames_say_what_is_unresolved() {
     let t = tf(&f);
     assert_eq!(t.mag.len(), 720);
     let u = t.meta.unresolved.clone().expect("unresolved");
-    assert_eq!(u.ranges.len(), 1, "{u:?}");
-    assert!(u.ranges[0].hi.0 > 15.0 && u.ranges[0].hi.0 < 17.5, "{u:?}");
+    assert_eq!(u.len(), 1, "{u:?}");
+    assert!(u[0].hi.0 > 15.0 && u[0].hi.0 < 17.5, "{u:?}");
+    assert_eq!(bin_widths(&u), [48_000.0 / 196_608.0]);
     h.shutdown();
+}
+
+fn bin_widths(u: &[ac2_proto::model::BinRange]) -> Vec<f64> {
+    u.iter().map(|b| b.bin_hz.0).collect()
 }
 
 #[test]

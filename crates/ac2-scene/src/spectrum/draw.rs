@@ -100,14 +100,7 @@ pub(crate) fn spectrum_scene_in(
     let marked = marked_bands(traces, view);
     let stitches = marked.map_or_else(Vec::new, |(b, _)| crate::stitch::stitches(b));
     let mut unresolved = marked.map_or_else(Vec::new, |(b, first)| {
-        crate::unresolved::marks(
-            crate::unresolved::Source {
-                unresolved: &b.unresolved,
-                fill: crate::unresolved::Fill::Steps,
-            },
-            first,
-            None,
-        )
+        crate::unresolved::marks(crate::unresolved::Source::Steps(&b.unresolved), first, None)
     });
     unresolved.extend(super::mic_marks(traces, view));
     crate::unresolved::draw(&mut c, plot, &xm, &unresolved, theme);

@@ -132,21 +132,17 @@ pub fn freq_rough(hz: f64) -> String {
     }
 }
 
-/// An FFT bin width as measured off a curve's columns: two significant digits, `0.24 Hz`,
-/// `2.9 Hz`, held to one where that is within [`BIN_SNAP`] (`0.98 Hz` reads `1 Hz`). A bin
-/// is a sample rate over a power of two, so `48 kHz / 2¹⁶ = 0.73 Hz` genuinely needs two
-/// digits, while a measured 0.98 is an even 1 Hz bin (`48 kHz / 49152 = 0.977`) seen
-/// through column centres, not a width worth reading as 0.98.
+/// An FFT bin width: two significant digits, and no finer than a tenth of a hertz once it
+/// reads 1 Hz or more at that step: `0.24 Hz`, `0.49 Hz`, `1 Hz`, `2.9 Hz`, `12 Hz`. A bin
+/// is a sample rate over a power of two, so the even-looking widths are not exact
+/// (`48 kHz / 49152 = 0.977 Hz`); below 1 Hz the hundredths tell the stages apart, above
+/// it a tenth already does, and `0.98 Hz` would read as a different width from `1 Hz`.
 pub fn bin_width(hz: f64) -> String {
     if !hz.is_finite() || hz <= 0.0 {
         return NO_VALUE.to_string();
     }
-    let one = round_sig(hz, 1);
-    let r = if ((hz - one) / hz).abs() <= BIN_SNAP {
-        one
-    } else {
-        round_sig(hz, 2)
-    };
+    let tenth = (hz * 10.0).round() / 10.0;
+    let r = round_sig(if tenth >= 1.0 { tenth } else { hz }, 2);
     if r >= 1000.0 {
         let k = r / 1000.0;
         format!("{} kHz", fixed(k, needed_decimals(k, 3)))
@@ -154,10 +150,6 @@ pub fn bin_width(hz: f64) -> String {
         format!("{} Hz", fixed(r, needed_decimals(r, 4)))
     }
 }
-
-/// How near a bin width must lie to one significant digit to be read as it: the spread the
-/// median of column-centre spacings leaves on an even bin.
-const BIN_SNAP: f64 = 0.03;
 
 /// Voltage, four significant digits (a bench meter's resolution) in µV, mV or V:
 /// `15.03 mV`, `1.500 V`, `250.0 µV`.
@@ -623,11 +615,14 @@ mod tests {
 
     #[test]
     fn bin_widths_read_as_their_bins() {
-        assert_eq!(bin_width(0.977), "1 Hz");
-        assert_eq!(bin_width(0.244), "0.24 Hz");
-        assert_eq!(bin_width(0.732), "0.73 Hz");
-        assert_eq!(bin_width(2.9), "2.9 Hz");
-        assert_eq!(bin_width(46.9), "47 Hz");
+        // The stages' bins at 48 kHz: the deepest (standard and long LF window), and the
+        // shallower ones above each crossover.
+        assert_eq!(bin_width(48_000.0 / 196_608.0), "0.24 Hz");
+        assert_eq!(bin_width(48_000.0 / 98_304.0), "0.49 Hz");
+        assert_eq!(bin_width(48_000.0 / 49_152.0), "1 Hz");
+        assert_eq!(bin_width(12_000.0 / 4096.0), "2.9 Hz");
+        assert_eq!(bin_width(24_000.0 / 4096.0), "5.9 Hz");
+        assert_eq!(bin_width(48_000.0 / 4096.0), "12 Hz");
         assert_eq!(bin_width(f64::NAN), NO_VALUE);
     }
 

@@ -139,8 +139,9 @@ pub(crate) struct Transfer {
     guard: Guard,
     smoother: Option<(Smoother, SmoothingMode)>,
     grid_id: GridId,
-    /// Where the grid is finer than the stage serving it; fixed by the layout and grid.
-    unresolved: ac2_proto::model::Unresolved,
+    /// Where the grid is finer than the stage serving it, with that stage's bin width;
+    /// fixed by the layout and grid.
+    unresolved: Vec<ac2_proto::model::BinRange>,
     /// Span of the applied mic curve's points, if one is applied.
     mic_range: Option<FreqRange>,
     delay_s: f64,
@@ -277,8 +278,16 @@ impl Transfer {
             CrossRig::new(fs, settle_s(&mtw))
         });
         let frame = mtw.frame();
-        let unresolved =
-            crate::sweep::unresolved(cfg.resolution, &mtw.layout().unresolved_ranges(&grid));
+        let unresolved = mtw
+            .layout()
+            .unresolved_bins(&grid)
+            .into_iter()
+            .map(|(lo, hi, bin)| ac2_proto::model::BinRange {
+                lo: Hz(lo),
+                hi: Hz(hi),
+                bin_hz: Hz(bin),
+            })
+            .collect();
         Ok(Self {
             unresolved,
             corr: correction.map(|c| column_correction(&grid, c)),

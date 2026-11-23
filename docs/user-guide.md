@@ -1900,14 +1900,19 @@ on a sweep).
   measures (0.45 of the rate: 21.6 kHz at 48 kHz, 86 kHz at 192 kHz). The FFT ladder's
   longest window is about 1 s. At 96 kHz: 1/48 is marked below about 68 Hz; 1/96 below about
   135 Hz, about 200–410 Hz and 1.6–3.3 kHz (at 48 kHz the last is 810 Hz–1.6 kHz); 1/24
-  below about 34 Hz; 1/12 below about 17 Hz. There a column holds at most one FFT bin and
-  many hold none: a live curve draws each bin as a **point** and joins the points with a
-  straight line across the columns without a bin of their own, so the line between two
-  points is no detail, only the way to the next bin. The marker says how wide the bins are
-  (`below 68 Hz: 1 Hz bins`; with the 4 s LF window `below 17 Hz: 0.24 Hz bins`). A column
-  empty for another reason (no reference energy, protection) still breaks the line, and
-  wrapped phase still breaks where it wraps. Peak and notch jumps and the tracked peaks
-  read the bins as neighbours, so a room mode down there can be jumped to.
+  below about 34 Hz; 1/12 below about 17 Hz. There the columns are narrower than the FFT
+  bins serving them: below the lowest edge many columns hold no bin at all, and above a
+  crossover the longer window's finer bins fill some columns between the wider ones. A live
+  curve draws every column that has an estimate as a **point** and joins the points with a
+  straight line across the columns without one, so the line between two points is no
+  detail, only the way to the next estimate. The marker says how wide the bins of the
+  serving window are, as the daemon states them (`below 68 Hz: 1 Hz bins`, `200 Hz–410 Hz:
+  2.9 Hz bins` at 1/96 and 48 kHz; with the 4 s LF window `below 17 Hz: 0.24 Hz bins`). A
+  column empty for another reason (no reference energy, protection) still breaks the line,
+  and wrapped phase still breaks where it wraps. The cursor reads the nearest point, and
+  peak and notch jumps, the mark's comb reading and the tracked peaks read the points as
+  neighbours, so a room mode down there can be jumped to. A math trace of live transfers
+  marks where its operands do, at the widest bins among them.
 - **Alt+K** / **Alt+Shift+K** step the focused transfer pane's measurement one
   resolution coarser / finer (1/12 … 1/96 octave), as **K** steps smoothing. Unlike
   smoothing it restarts the measurement on the new grid: the averages fill again. Coarser
