@@ -69,6 +69,8 @@ mod remote;
 mod rig;
 mod rig_id;
 mod route;
+#[cfg(unix)]
+mod runtime_dir;
 mod session;
 mod sim;
 mod state;
@@ -143,6 +145,13 @@ pub enum StartError {
     Io(std::io::Error),
     /// No audio backend was given.
     NoBackend,
+    /// The directory of the local sockets is not this user's alone.
+    RuntimeDir {
+        /// The directory.
+        dir: std::path::PathBuf,
+        /// What is wrong with it.
+        problem: String,
+    },
 }
 
 impl fmt::Display for StartError {
@@ -154,6 +163,12 @@ impl fmt::Display for StartError {
             Self::Zmq { what, source } => write!(f, "{what}: {source}"),
             Self::Io(e) => write!(f, "{e}"),
             Self::NoBackend => f.write_str("no audio backend"),
+            Self::RuntimeDir { dir, problem } => write!(
+                f,
+                "socket directory {}: {problem}; it must be a directory of this user's, \
+                 mode 700",
+                dir.display()
+            ),
         }
     }
 }
@@ -321,15 +336,7 @@ impl Drop for Handle {
 
 #[cfg(unix)]
 fn prepare_ipc(endpoint: &str) -> Result<(), StartError> {
-    if let Some(path) = endpoint.strip_prefix("ipc://")
-        && let Some(dir) = std::path::Path::new(path).parent()
-        && !dir.as_os_str().is_empty()
-    {
-        std::fs::create_dir_all(dir).map_err(StartError::Io)?;
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
-    }
-    Ok(())
+    runtime_dir::prepare(endpoint)
 }
 
 #[cfg(not(unix))]
