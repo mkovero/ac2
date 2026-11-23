@@ -11,7 +11,10 @@ use ac2_scene::pairing::{Halves, Unseen};
 pub struct PairedRow {
     pub rig: RigId,
     pub name: String,
+    /// The row: the name, then `state`.
     pub text: String,
+    /// What the row says after the name, drawn whole while a long name is elided.
+    pub state: String,
     /// The hover: each half in words.
     pub tip: String,
     /// The four halves as the daemons' state shows them.

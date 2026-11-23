@@ -146,47 +146,118 @@ impl Halves {
     }
 }
 
-/// A *Paired rigs* row: `ketunkolo · paired both ways`, else what is missing
-/// (`ketunkolo · has not admitted this rig`), else the entries there whose key cannot be
-/// checked and what cannot be told: `its side` when only the other rig's state is wanting,
-/// plain `can't tell` when this rig's is.
-pub fn row(rig: &str, h: &Halves) -> String {
-    if h.both_ways() {
-        return format!("{rig} · paired both ways");
+/// How one direction of a pairing stands: a rig takes the other's inputs when it lists that
+/// rig and that rig has admitted it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Way {
+    /// Both halves seen in place.
+    Done,
+    /// A half seen missing.
+    Missing,
+    /// Neither: a half cannot be told.
+    Open,
+}
+
+fn way(a: &Half, b: &Half) -> Way {
+    if *a == Half::No || *b == Half::No {
+        Way::Missing
+    } else if *a == Half::Yes && *b == Half::Yes {
+        Way::Done
+    } else {
+        Way::Open
     }
-    let missing: Vec<&str> = [
-        (&h.here_lists, "not listed by this rig"),
-        (&h.there_admits, "has not admitted this rig"),
-        (&h.there_lists, "does not list this rig"),
-        (&h.here_admits, "not admitted by this rig"),
-    ]
-    .into_iter()
-    .filter(|(half, _)| **half == Half::No)
-    .map(|(_, w)| w)
-    .collect();
-    if !missing.is_empty() {
-        return format!("{rig} · {}", missing.join(" · "));
-    }
-    let unchecked = |x: &Half| matches!(x, Half::Unchecked { .. });
-    let mut parts: Vec<&str> = Vec::new();
-    match (unchecked(&h.here_lists), unchecked(&h.here_admits)) {
-        (true, true) => parts.push("listed and admitted by this rig"),
-        (true, false) => parts.push("listed by this rig"),
-        (false, true) => parts.push("admitted by this rig"),
-        (false, false) => {}
-    }
-    if unchecked(&h.there_lists) {
-        parts.push("lists this rig");
-    }
-    if unchecked(&h.there_admits) {
-        parts.push("has admitted this rig");
-    }
-    parts.push(if h.unknown().any(|(side, _)| side == Side::Here) {
+}
+
+/// What cannot be told among `halves`: plain `can't tell` when this rig's state is
+/// wanting, `can't tell its side` when only the other rig's is.
+fn cant(halves: &[&Half]) -> &'static str {
+    let here = halves.iter().any(|h| {
+        matches!(
+            h,
+            Half::Unknown {
+                side: Side::Here,
+                ..
+            } | Half::Unchecked {
+                side: Side::Here,
+                ..
+            }
+        )
+    });
+    if here {
         "can't tell"
     } else {
-        "its side: can't tell"
-    });
-    format!("{rig} · {}", parts.join(" · "))
+        "can't tell its side"
+    }
+}
+
+/// A *Paired rigs* row: the rig's name, then [`row_state`].
+pub fn row(rig: &str, h: &Halves) -> String {
+    format!("{rig} · {}", row_state(h))
+}
+
+/// A *Paired rigs* row's state, short enough to stand beside a long rig name; each half in
+/// words is the row's [`tip`]. `paired both ways`; one direction in place and what the
+/// other does (`this rig takes its inputs · not the other way`, `… · other way: can't
+/// tell`); neither in place: `not paired · 1 of 4 halves in place`, or with a direction that
+/// cannot be told how many halves are in place and what cannot be told. A half that cannot
+/// be told is never counted missing: `can't tell` when this rig's state is wanting, `can't
+/// tell its side` when only the other rig's is. Nothing seen missing and nothing in place
+/// both ways: this rig's entries whose key cannot be checked, and what cannot be told.
+pub fn row_state(h: &Halves) -> String {
+    let all = [
+        &h.here_lists,
+        &h.there_admits,
+        &h.there_lists,
+        &h.here_admits,
+    ];
+    let takes = way(&h.here_lists, &h.there_admits);
+    let gives = way(&h.there_lists, &h.here_admits);
+    let other = |done: &str, a: &Half, b: &Half, rest: Way| match rest {
+        Way::Missing => format!("{done} · not the other way"),
+        _ => format!("{done} · other way: {}", cant(&[a, b])),
+    };
+    const TAKES: &str = "this rig takes its inputs";
+    const GIVES: &str = "it takes this rig's inputs";
+    let unknown = |x: &Half| matches!(x, Half::Unknown { .. } | Half::Unchecked { .. });
+    let unchecked = |x: &Half| matches!(x, Half::Unchecked { .. });
+    let count = || {
+        let yes = all.iter().filter(|x| ***x == Half::Yes).count();
+        let u = all.iter().filter(|x| unchecked(x)).count();
+        if u == 0 {
+            format!("{yes} of 4 halves in place")
+        } else {
+            format!("{yes} of 4 halves in place, {u} unchecked")
+        }
+    };
+    match (takes, gives) {
+        (Way::Done, Way::Done) => "paired both ways".into(),
+        (Way::Done, rest) => other(TAKES, &h.there_lists, &h.here_admits, rest),
+        (rest, Way::Done) => other(GIVES, &h.here_lists, &h.there_admits, rest),
+        (Way::Missing, Way::Missing) if all.iter().any(|x| unknown(x)) => {
+            format!("not paired · {} · {}", count(), cant(&all))
+        }
+        (Way::Missing, Way::Missing) => format!("not paired · {}", count()),
+        (Way::Missing, Way::Open) | (Way::Open, Way::Missing) => {
+            format!("{} · {}", count(), cant(&all))
+        }
+        (Way::Open, Way::Open) => {
+            let mut parts: Vec<&str> = Vec::new();
+            match (unchecked(&h.here_lists), unchecked(&h.here_admits)) {
+                (true, true) => parts.push("listed and admitted by this rig"),
+                (true, false) => parts.push("listed by this rig"),
+                (false, true) => parts.push("admitted by this rig"),
+                (false, false) => {}
+            }
+            if unchecked(&h.there_lists) {
+                parts.push("lists this rig");
+            }
+            if unchecked(&h.there_admits) {
+                parts.push("has admitted this rig");
+            }
+            parts.push(cant(&all));
+            parts.join(" · ")
+        }
+    }
 }
 
 /// Why `side`'s state is not seen; `rig` is the other rig's name.
@@ -486,7 +557,7 @@ mod tests {
         let one = halves(Yes, No, Yes, Yes);
         assert_eq!(
             row("ketunkolo", &one),
-            "ketunkolo · has not admitted this rig"
+            "ketunkolo · it takes this rig's inputs · not the other way"
         );
         assert!(
             tip("ketunkolo", &one, None, true).contains("  ketunkolo has not admitted this rig"),
@@ -510,7 +581,7 @@ mod tests {
         let two = halves(No, Yes, Yes, No);
         assert_eq!(
             row("ketunkolo", &two),
-            "ketunkolo · not listed by this rig · not admitted by this rig"
+            "ketunkolo · not paired · 2 of 4 halves in place"
         );
         assert_eq!(
             offer_row("ketunkolo", &two),
@@ -528,7 +599,7 @@ mod tests {
             why: Unseen::NotHeld,
         };
         let h = halves(Yes, there, there, Yes);
-        assert_eq!(row("ketunkolo", &h), "ketunkolo · its side: can't tell");
+        assert_eq!(row("ketunkolo", &h), "ketunkolo · can't tell its side");
         let t = tip("ketunkolo", &h, None, false);
         assert!(t.ends_with("\nDelete twice unpairs"), "{t}");
         assert!(
@@ -556,7 +627,10 @@ mod tests {
             why: Unseen::NetworkOff,
         };
         let h = halves(Yes, Yes, Yes, here);
-        assert_eq!(row("ketunkolo", &h), "ketunkolo · can't tell");
+        assert_eq!(
+            row("ketunkolo", &h),
+            "ketunkolo · this rig takes its inputs · other way: can't tell"
+        );
         let t = tip("ketunkolo", &h, None, true);
         assert!(t.ends_with("\nDelete twice unpairs"), "{t}");
         assert!(
@@ -595,15 +669,15 @@ mod tests {
         assert!(!h.missing() && !h.both_ways());
         assert_eq!(
             row("ketunkolo", &h),
-            "ketunkolo · listed and admitted by this rig · its side: can't tell"
+            "ketunkolo · listed and admitted by this rig · can't tell its side"
         );
         assert_eq!(
             row("ketunkolo", &halves(key, unseen, unseen, No)),
-            "ketunkolo · not admitted by this rig"
+            "ketunkolo · 0 of 4 halves in place, 1 unchecked · can't tell its side"
         );
         assert_eq!(
             row("ketunkolo", &halves(key, unseen, unseen, unseen)),
-            "ketunkolo · listed by this rig · its side: can't tell"
+            "ketunkolo · listed by this rig · can't tell its side"
         );
         let t = tip("ketunkolo", &h, None, false);
         assert!(
@@ -614,6 +688,103 @@ mod tests {
             "{t}"
         );
         assert!(!t.contains("can't tell whether this rig lists"), "{t}");
+    }
+
+    /// The row says how the two directions stand in a few words, every class of halves:
+    /// the rig's name and state together stay short beside a long name.
+    #[test]
+    fn a_row_says_how_the_directions_stand() {
+        use Half::*;
+        let there = Unknown {
+            side: Side::There,
+            why: Unseen::NotHeld,
+        };
+        let here = Unknown {
+            side: Side::Here,
+            why: Unseen::NetworkOff,
+        };
+        let key = Unchecked {
+            side: Side::There,
+            why: Unseen::NotConnected,
+        };
+        let cases = [
+            (halves(Yes, Yes, Yes, Yes), "paired both ways"),
+            // One direction in place, the other seen missing.
+            (
+                halves(Yes, Yes, No, Yes),
+                "this rig takes its inputs · not the other way",
+            ),
+            (
+                halves(Yes, Yes, No, No),
+                "this rig takes its inputs · not the other way",
+            ),
+            (
+                halves(No, Yes, Yes, Yes),
+                "it takes this rig's inputs · not the other way",
+            ),
+            // One direction in place, the other cannot be told: whose state is wanting.
+            (
+                halves(Yes, Yes, there, Yes),
+                "this rig takes its inputs · other way: can't tell its side",
+            ),
+            (
+                halves(Yes, Yes, Yes, here),
+                "this rig takes its inputs · other way: can't tell",
+            ),
+            (
+                halves(Yes, there, Yes, Yes),
+                "it takes this rig's inputs · other way: can't tell its side",
+            ),
+            (
+                halves(key, Yes, Yes, Yes),
+                "it takes this rig's inputs · other way: can't tell its side",
+            ),
+            // Neither direction in place.
+            (
+                halves(Yes, No, No, No),
+                "not paired · 1 of 4 halves in place",
+            ),
+            (
+                halves(No, No, No, No),
+                "not paired · 0 of 4 halves in place",
+            ),
+            (
+                halves(Yes, No, there, No),
+                "not paired · 1 of 4 halves in place · can't tell its side",
+            ),
+            (
+                halves(Yes, No, there, here),
+                "1 of 4 halves in place · can't tell",
+            ),
+            (
+                halves(Yes, No, there, there),
+                "1 of 4 halves in place · can't tell its side",
+            ),
+            // Nothing seen missing, nothing in place both ways.
+            (halves(Yes, there, there, Yes), "can't tell its side"),
+            (
+                halves(Yes, Yes, here, here),
+                "this rig takes its inputs · other way: can't tell",
+            ),
+            (halves(here, there, there, here), "can't tell"),
+            (
+                halves(key, there, there, key),
+                "listed and admitted by this rig · can't tell its side",
+            ),
+            (
+                halves(Yes, key, key, Yes),
+                "lists this rig · has admitted this rig · can't tell its side",
+            ),
+        ];
+        for (h, want) in cases {
+            assert_eq!(row_state(&h), want, "{h:?}");
+            // Never more than a 25-character name leaves room for on the page.
+            assert!(want.chars().count() <= 60, "{want}");
+            assert_eq!(
+                row("ac2 on ac2pi-0ab1c6", &h),
+                format!("ac2 on ac2pi-0ab1c6 · {want}")
+            );
+        }
     }
 
     #[test]

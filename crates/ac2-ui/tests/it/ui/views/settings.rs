@@ -126,3 +126,61 @@ fn stimulus_signal_dialog() {
     h.step();
     snapshot(&mut h, "stimulus_signal_dialog");
 }
+
+/// *Paired rigs* in a window as narrow as a small rig screen: a row with a 25-character name
+/// fits whole beside its state, and a name too long for the page is elided, never the state.
+#[test]
+fn connection_paired_rigs_long_names() {
+    use ac2_proto::model::RigPeer;
+    use ac2_proto::units::RigId;
+    if !have_gpu("connection_paired_rigs_long_names") {
+        return;
+    }
+    let peer = |rig: u64, name: &str| RigPeer {
+        rig: RigId(rig),
+        name: name.into(),
+        ctrl: "tcp://192.168.9.27:7700".into(),
+        data: "tcp://192.168.9.27:7701".into(),
+        key: "k".repeat(40),
+    };
+    const NAME: &str = "ac2 on ac2pi-0ab1c6-front";
+    const LONGER: &str = "ac2 on the delay tower at the back of the hall, stage left, upper";
+    assert_eq!(NAME.chars().count(), 25);
+    let rig = Rig::start();
+    rig.set_peers(vec![peer(0x7a01, NAME), peer(0x7a02, LONGER)]);
+    let mut h = harness(options());
+    let size = egui::vec2(760.0, 800.0);
+    h.set_size(size);
+    step_until(&mut h, "live frames", live);
+    h.state_mut().dispatch(ac2_ui::state::Msg::Command(
+        ac2_ui::keys::CommandId::BetweenRigs,
+    ));
+    step_until(&mut h, "both paired rows", |a| {
+        a.state
+            .overlay
+            .settings()
+            .is_some_and(|s| s.connection.pairing.rows.len() == 2)
+    });
+    h.event(Event::PointerGone);
+    h.state_mut().state.toasts.list.clear();
+    h.step();
+    let rows = h
+        .state()
+        .state
+        .overlay
+        .settings()
+        .map(|s| s.connection.pairing.rows.clone());
+    let rows = rows.expect("the Connection page");
+    snapshot(&mut h, "settings_connection_paired_long_names");
+    // The page's right edge (the view's 16 px margin): a row past it is cut off.
+    let edge = size.x - 16.0;
+    for r in &rows {
+        let rect = h.get_by_label(&r.text).rect();
+        assert!(
+            rect.max.x <= edge,
+            "{} reaches {} past {edge}",
+            r.text,
+            rect.max.x
+        );
+    }
+}

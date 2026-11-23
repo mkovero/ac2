@@ -255,10 +255,7 @@ fn pair_with_rig_pairs_both_ways_in_one_act() {
         .row(PUPU)
         .cloned()
         .expect("pupu's row");
-    assert_eq!(
-        row.text,
-        "pupu · has not admitted this rig · does not list this rig · not admitted by this rig"
-    );
+    assert_eq!(row.text, "pupu · not paired · 1 of 4 halves in place");
     assert!(row.mend() && row.unreached.is_none());
     assert!(
         row.tip.contains("  this rig lists pupu as paired"),
@@ -294,7 +291,10 @@ fn enter_on_a_half_paired_row_sends_the_missing_halves_only() {
         .row(PUPU)
         .cloned()
         .expect("pupu's row");
-    assert_eq!(row.text, "pupu · has not admitted this rig");
+    assert_eq!(
+        row.text,
+        "pupu · it takes this rig's inputs · not the other way"
+    );
     assert!(
         row.tip
             .ends_with("Enter pairs the missing halves · Delete twice unpairs"),
@@ -426,7 +426,7 @@ fn a_rig_not_held_is_unpaired_on_this_side_only() {
     // This rig's own entries are there; only the key they pin cannot be checked.
     assert_eq!(
         row.text,
-        "ketunkolo · listed and admitted by this rig · its side: can't tell"
+        "ketunkolo · listed and admitted by this rig · can't tell its side"
     );
     assert_eq!(row.unreached, Some(words::Unseen::NotHeld));
     assert!(!row.mend());
@@ -484,7 +484,7 @@ fn a_rig_held_but_lost_is_not_read_and_unpaired_on_this_side_only() {
         .expect("pupu's row");
     assert_eq!(
         row.text,
-        "pupu · listed and admitted by this rig · its side: can't tell"
+        "pupu · listed and admitted by this rig · can't tell its side"
     );
     assert_eq!(row.unreached, Some(words::Unseen::NotConnected));
     assert!(
@@ -554,7 +554,10 @@ fn this_rigs_unseen_admission_is_said_as_this_rigs() {
         .row(PUPU)
         .cloned()
         .expect("pupu's row");
-    assert_eq!(row.text, "pupu · can't tell");
+    assert_eq!(
+        row.text,
+        "pupu · this rig takes its inputs · other way: can't tell"
+    );
     assert!(
         row.tip
             .contains("can't tell whether this rig has admitted pupu (this rig's network is off)"),

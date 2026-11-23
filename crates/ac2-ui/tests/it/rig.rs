@@ -135,6 +135,13 @@ impl Rig {
             .unwrap_or_else(|| panic!("{name} takes no peak mode")) = mode;
     }
 
+    /// The rigs the rig lists as paired, in the state the app is about to mirror.
+    pub fn set_peers(&self, peers: Vec<RigPeer>) {
+        let mut inner = self.inner.borrow_mut();
+        assert!(!inner.connected, "the app has the state already");
+        Arc::make_mut(&mut inner.state).remote.peers = peers;
+    }
+
     /// The recorded state.
     pub fn state(&self) -> Arc<State> {
         Arc::clone(&self.inner.borrow().state)

@@ -240,6 +240,7 @@ impl AppState {
                 PairedRow {
                     rig,
                     text: words::row(&name, &h),
+                    state: words::row_state(&h),
                     tip: words::tip(&name, &h, clocks.as_deref(), reachable),
                     halves: h,
                     unreached,

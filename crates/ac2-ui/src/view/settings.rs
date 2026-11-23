@@ -4,7 +4,7 @@
 //! `ac2_scene::rig` or `ac2_scene::network`.
 
 use ac2_proto::model::NetStatusKind;
-use eframe::egui::{self, RichText};
+use eframe::egui::{self, AtomExt as _, RichText};
 
 use crate::app::App;
 use crate::keys::{Chord, CommandId, LabelStyle, STOP_ANYWHERE};
@@ -242,6 +242,27 @@ fn page(
 
 /// Height the footer's separator takes (egui's default separator spacing).
 const SEPARATOR_H: f32 = 6.0;
+
+/// `add` with the space it lays out in ending at `right`.
+fn within<R>(ui: &mut egui::Ui, right: f32, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let room = (right - ui.cursor().left()).max(0.0);
+    ui.scope(|ui| {
+        ui.set_max_width(room);
+        add(ui)
+    })
+    .inner
+}
+
+/// How a Connection page row's text meets the page's width.
+enum Fit {
+    /// One line, as wide as it is.
+    Line(String),
+    /// Wrapped to the page: a sentence (why a rig cannot be paired) read whole.
+    Wrap(String),
+    /// A rig's name then its state on one line: a name too long for the page is elided,
+    /// never the state.
+    Named { name: String, state: String },
+}
 
 /// A section title with whose its settings are (`whose` empty: the page header's).
 pub(super) fn section(ui: &mut egui::Ui, title: &str, whose: &str, ch: &Chrome) {
@@ -523,11 +544,15 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
     ) {
         ui.label(RichText::new(l).color(ch.text));
     }
+    // The page's right edge as laid out, before any row: a row wider than the page (it
+    // scrolls sideways) widens the space every later widget is laid out in, so the rows that
+    // wrap or elide, and the notes below, are held to this edge instead.
+    let right = ui.max_rect().right();
     let p = &s.connection;
     let info = p.server.as_ref().and_then(|r| r.as_ref().ok());
     let lines = p.lines();
     let focus = p.focus.min(lines.len().saturating_sub(1));
-    let mut row = |ui: &mut egui::Ui, i: usize, text: String, color| {
+    let mut row = |ui: &mut egui::Ui, i: usize, text: Fit, color| {
         let focused = i == focus;
         // The interface is picked from a list: ‹/› step it as ←/→ do.
         let steps = matches!(lines.get(i), Some(ConnLine::Interface));
@@ -537,10 +562,22 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
             if steps && ui.small_button("‹").clicked() {
                 *msg = Some(Msg::Settings(SettingsMsg::ConnectionStep(i, -1)));
             }
-            let t = RichText::new(text).color(if focused { ch.focus } else { color });
-            let b = ui.add(egui::Button::selectable(focused, t));
+            let tone = if focused { ch.focus } else { color };
+            let t = |s: String| RichText::new(s).color(tone);
+            let button = match text {
+                Fit::Line(s) => egui::Button::selectable(focused, t(s)),
+                Fit::Wrap(s) => {
+                    egui::Button::selectable(focused, t(s)).wrap_mode(egui::TextWrapMode::Wrap)
+                }
+                Fit::Named { name, state } => egui::Button::selectable(
+                    focused,
+                    (t(name).atom_shrink(true), t(format!("· {state}"))),
+                )
+                .wrap_mode(egui::TextWrapMode::Truncate),
+            };
+            let b = within(ui, right, |ui| ui.add(button));
             // A network row says its state; what that means for the rig is its tip. A paired
-            // rig's row says what is missing; each half in words is its tip.
+            // rig's row says how its two directions stand; each half in words is its tip.
             let tip = match lines.get(i) {
                 Some(ConnLine::Paired(r)) => p.pairing.row(*r).map(|x| x.tip.clone()),
                 Some(l) => p.net_line_tip(l).map(str::to_owned),
@@ -562,20 +599,23 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
     for (i, l) in lines.iter().enumerate() {
         match l {
             ConnLine::Reconnect | ConnLine::ConnectOther => {
-                row(ui, i, conn_line_text(l, info), ch.text);
+                row(ui, i, Fit::Line(conn_line_text(l, info)), ch.text);
             }
             ConnLine::StartLocal => {
                 row(
                     ui,
                     i,
-                    start_local_text(st.prefs.daemon.start_local),
+                    Fit::Line(start_local_text(st.prefs.daemon.start_local)),
                     ch.text,
                 );
             }
             ConnLine::StopOnQuit => row(
                 ui,
                 i,
-                stop_on_quit_text(st.prefs.daemon.stop_on_quit, crate::spawn::stop_forced()),
+                Fit::Line(stop_on_quit_text(
+                    st.prefs.daemon.stop_on_quit,
+                    crate::spawn::stop_forced(),
+                )),
                 ch.text,
             ),
             _ => {}
@@ -600,7 +640,7 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
                 None => {
                     for (i, l) in lines.iter().enumerate() {
                         if matches!(l, ConnLine::Network | ConnLine::Interface | ConnLine::Port) {
-                            row(ui, i, p.net_line_text(l), ch.text);
+                            row(ui, i, Fit::Line(p.net_line_text(l)), ch.text);
                         }
                     }
                 }
@@ -657,7 +697,7 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
                         row(
                             ui,
                             i,
-                            conn_line_text(l, Some(info)),
+                            Fit::Line(conn_line_text(l, Some(info))),
                             if pending { ch.fault } else { ch.text },
                         );
                     }
@@ -677,11 +717,11 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
                             row(
                                 ui,
                                 i,
-                                ac2_scene::rig::refused_row(
+                                Fit::Line(ac2_scene::rig::refused_row(
                                     r,
                                     now,
                                     ac2_scene::time::ClockOffset(0),
-                                ),
+                                )),
                                 ch.armed,
                             );
                         }
@@ -690,7 +730,7 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
                 }
                 for (i, l) in lines.iter().enumerate() {
                     if let ConnLine::AddKey = l {
-                        row(ui, i, conn_line_text(l, Some(info)), ch.text);
+                        row(ui, i, Fit::Line(conn_line_text(l, Some(info))), ch.text);
                     }
                 }
             }
@@ -712,19 +752,22 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
                         (false, true) => ch.warn,
                         (false, false) => ch.text,
                     };
-                    row(ui, i, x.text.clone(), tone);
+                    let (name, state) = (x.name.clone(), x.state.clone());
+                    row(ui, i, Fit::Named { name, state }, tone);
                 }
             }
             ConnLine::PairWith => {
-                row(ui, i, conn_line_text(l, info), ch.text);
+                row(ui, i, Fit::Line(conn_line_text(l, info)), ch.text);
                 if p.pairing.offers.is_some() {
-                    ui.label(RichText::new(ac2_scene::pairing::PICK_HEADING).color(ch.dim));
+                    within(ui, right, |ui| {
+                        ui.label(RichText::new(ac2_scene::pairing::PICK_HEADING).color(ch.dim))
+                    });
                 }
             }
             ConnLine::PairOffer(r) => {
                 if let Some(o) = p.pairing.offer(*r) {
                     let tone = if o.refusal.is_some() { ch.dim } else { ch.text };
-                    row(ui, i, format!("  {}", o.text), tone);
+                    row(ui, i, Fit::Wrap(format!("  {}", o.text)), tone);
                 }
             }
             _ => {}
@@ -746,10 +789,10 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
             row(
                 ui,
                 i,
-                format!(
+                Fit::Line(format!(
                     "{} (Enter)",
                     ac2_scene::cross_rig::link_offset_line(set, &d.remote)
-                ),
+                )),
                 ch.text,
             );
         }
@@ -770,7 +813,7 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
         (p.error.as_deref(), ch.fault),
     ] {
         if let Some(t) = text {
-            ui.label(RichText::new(t).color(color));
+            within(ui, right, |ui| ui.label(RichText::new(t).color(color)));
         }
     }
 }

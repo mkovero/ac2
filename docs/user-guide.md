@@ -510,20 +510,29 @@ measures and what its OS says, nothing more:
 Two rigs are paired when each lists the other among its paired rigs and has admitted the
 other's key: each half is kept by its own rig's `ac2d`, and a direction needs both (this rig
 takes pupu's inputs when this rig lists pupu and pupu has admitted this rig). *Paired rigs*
-lists every rig paired or half paired with the rig shown, each with what the daemons show:
+lists every rig paired or half paired with the rig shown, each with how the two directions
+stand as the daemons show them, in a few words:
 
 - *pupu · paired both ways*;
-- what is missing: *pupu · has not admitted this rig*, *pupu · does not list this rig*,
-  *pupu · not listed by this rig*, *pupu · not admitted by this rig*;
-- *ketunkolo · its side: can't tell* when what is wanting is the other rig's: the app does
-  not hold it, is not connected to it now, it has not answered, or its network is off;
-- *ketunkolo · listed and admitted by this rig · its side: can't tell* (or *listed by this
+- one direction in place: *pupu · this rig takes its inputs · not the other way* (or *it
+  takes this rig's inputs · …*), or *… · other way: can't tell* when the other direction
+  cannot be told;
+- neither: *pupu · not paired · 1 of 4 halves in place*; with a direction that cannot be
+  told, *1 of 4 halves in place · can't tell*;
+- *ketunkolo · can't tell its side* when nothing is seen missing and what is wanting is the
+  other rig's: the app does not hold it, is not connected to it now, it has not answered,
+  or its network is off;
+- *ketunkolo · listed and admitted by this rig · can't tell its side* (or *listed by this
   rig*, *admitted by this rig*) when this rig's own entries are there but the key they pin
   cannot be checked against the one that rig serves under now: an entry under a stale key
   is refused, so it is not counted in place until that rig is seen (hovering says *can't
-  check its key*);
-- *ketunkolo · can't tell* when this rig's own state is wanting: its network is off (it
-  lists no admitted rigs then), it has not answered, or the app is not connected to it.
+  check its key*; a count says *1 unchecked*);
+- plain *can't tell* (no *its side*) when this rig's own state is wanting: its network is
+  off (it lists no admitted rigs then), it has not answered, or the app is not connected
+  to it.
+
+A half that cannot be told is never counted missing. A name too long for the page is cut
+short with *…*; the state after it always shows whole.
 
 Only what a daemon shows is said; hovering names whose state is wanting and why.
 
