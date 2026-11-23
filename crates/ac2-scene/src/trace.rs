@@ -207,7 +207,10 @@ impl<'a> TfTrace<'a> {
                 .as_ref()
                 .map(|u| crate::unresolved::Source {
                     unresolved: u,
-                    fill: crate::unresolved::Fill::Gaps,
+                    fill: crate::unresolved::Fill::Joined {
+                        freqs,
+                        validity: &frame.validity,
+                    },
                 }),
             mic_range: frame.meta.mic_range,
             settling: frame.meta.settling,
@@ -410,12 +413,82 @@ pub struct DisplayTrace {
     pub note: Option<String>,
     /// An EQ set's filter curve: drawn dashed, so it does not read as a measured curve.
     pub dashed: bool,
+    /// Per column, where the curve joins its estimates over thinned columns
+    /// ([`crate::unresolved::Fill::Joined`]): `None` outside those ranges. Empty when the
+    /// curve has none.
+    pub joined: Vec<Option<Joined>>,
+}
+
+/// A column inside a range where a curve joins its estimates
+/// ([`crate::unresolved::Fill::Joined`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Joined {
+    /// A column with a bin of its own: drawn as a point as well, so the straight line to
+    /// the next one is not read as detail between them.
+    Estimate,
+    /// A column with no bin of its own and no other reason to be empty: the line runs past
+    /// it. A column also invalid for another reason (out of band, no reference) still
+    /// breaks the line.
+    Thinned,
 }
 
 impl DisplayTrace {
     pub fn is_stale(&self) -> bool {
         self.freshness.is_some_and(|f| f.is_stale())
     }
+
+    /// Whether column `i` is one the line passes over ([`Joined::Thinned`]).
+    pub fn thinned(&self, i: usize) -> bool {
+        self.joined.get(i) == Some(&Some(Joined::Thinned))
+    }
+
+    /// `values` (column-aligned) without the columns the line passes over, with their
+    /// frequencies: (freqs, values). A search over neighbouring columns then sees the
+    /// nearest estimates as neighbours, as the drawn line does.
+    pub fn own_estimates(&self, values: &[f64]) -> (Vec<f64>, Vec<f64>) {
+        self.freqs
+            .iter()
+            .zip(values)
+            .enumerate()
+            .filter(|(i, _)| !self.thinned(*i))
+            .map(|(_, (f, v))| (*f, *v))
+            .unzip()
+    }
+}
+
+/// Where a live curve joins its estimates ([`DisplayTrace::joined`]): the columns of its
+/// `Fill::Joined` ranges. Only [`ValidityMask::THINNED`] alone is passed over; any other
+/// bit is a reason the curve has no value there, which the line must keep showing.
+fn joined_columns(t: &TfTrace<'_>, n: usize) -> Vec<Option<Joined>> {
+    let (
+        Some(crate::unresolved::Source {
+            unresolved,
+            fill: crate::unresolved::Fill::Joined { .. },
+        }),
+        Some(validity),
+    ) = (t.unresolved, t.validity)
+    else {
+        return Vec::new();
+    };
+    if unresolved.ranges.is_empty() {
+        return Vec::new();
+    }
+    (0..n)
+        .map(|i| {
+            let f = t.freqs[i];
+            let inside = unresolved.ranges.iter().any(|r| f >= r.lo.0 && f <= r.hi.0);
+            let v = validity.get(i).copied().unwrap_or(ValidityMask::NONE);
+            if !inside {
+                None
+            } else if v == ValidityMask::THINNED {
+                Some(Joined::Thinned)
+            } else if v.0 & ValidityMask::THINNED.0 == 0 {
+                Some(Joined::Estimate)
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 /// Unsmoothed phase gets its group delay over 1/12 octave (±1/24): about five columns of a
@@ -561,13 +634,24 @@ pub fn display_trace(
     let rot = |i: usize| -360.0 * t.freqs[i] * shift_s;
 
     // Group delay of the measured phase, then shifted by Δ: −dφ/df / 360 of the rotation
-    // term is exactly Δ, so it is added rather than fitted.
-    let mut group_delay_s = fitted_group_delay(
-        &t.freqs[..n],
-        &unwrapped,
-        &coherence,
+    // term is exactly Δ, so it is added rather than fitted. Where the line joins its
+    // estimates the slope is fitted over the estimates alone, so its nearest neighbours
+    // are the next bins, not the empty columns between them.
+    let joined = joined_columns(t, n);
+    let own: Vec<usize> = (0..n)
+        .filter(|&i| joined.get(i) != Some(&Some(Joined::Thinned)))
+        .collect();
+    let pick = |v: &[f64]| own.iter().map(|&i| v[i]).collect::<Vec<f64>>();
+    let fitted = fitted_group_delay(
+        &pick(&t.freqs[..n]),
+        &pick(&unwrapped),
+        &pick(&coherence),
         group_delay_span(t.smoothing),
     );
+    let mut group_delay_s = vec![f64::NAN; n];
+    for (&i, g) in own.iter().zip(fitted) {
+        group_delay_s[i] = g;
+    }
     group_delay_s.iter_mut().for_each(|g| *g += shift_s);
 
     let phase_unwrapped_deg: Vec<f64> = (0..n)
@@ -626,6 +710,7 @@ pub fn display_trace(
         dashed: t
             .stored
             .is_some_and(|d| matches!(d.meta.source, TraceSource::Eq { .. })),
+        joined,
     }
 }
 

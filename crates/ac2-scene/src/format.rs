@@ -132,6 +132,33 @@ pub fn freq_rough(hz: f64) -> String {
     }
 }
 
+/// An FFT bin width as measured off a curve's columns: two significant digits, `0.24 Hz`,
+/// `2.9 Hz`, held to one where that is within [`BIN_SNAP`] (`0.98 Hz` reads `1 Hz`). A bin
+/// is a sample rate over a power of two, so `48 kHz / 2¹⁶ = 0.73 Hz` genuinely needs two
+/// digits, while a measured 0.98 is an even 1 Hz bin (`48 kHz / 49152 = 0.977`) seen
+/// through column centres, not a width worth reading as 0.98.
+pub fn bin_width(hz: f64) -> String {
+    if !hz.is_finite() || hz <= 0.0 {
+        return NO_VALUE.to_string();
+    }
+    let one = round_sig(hz, 1);
+    let r = if ((hz - one) / hz).abs() <= BIN_SNAP {
+        one
+    } else {
+        round_sig(hz, 2)
+    };
+    if r >= 1000.0 {
+        let k = r / 1000.0;
+        format!("{} kHz", fixed(k, needed_decimals(k, 3)))
+    } else {
+        format!("{} Hz", fixed(r, needed_decimals(r, 4)))
+    }
+}
+
+/// How near a bin width must lie to one significant digit to be read as it: the spread the
+/// median of column-centre spacings leaves on an even bin.
+const BIN_SNAP: f64 = 0.03;
+
 /// Voltage, four significant digits (a bench meter's resolution) in µV, mV or V:
 /// `15.03 mV`, `1.500 V`, `250.0 µV`.
 pub fn volts(v: f64) -> String {
@@ -593,6 +620,16 @@ pub fn celsius(t: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bin_widths_read_as_their_bins() {
+        assert_eq!(bin_width(0.977), "1 Hz");
+        assert_eq!(bin_width(0.244), "0.24 Hz");
+        assert_eq!(bin_width(0.732), "0.73 Hz");
+        assert_eq!(bin_width(2.9), "2.9 Hz");
+        assert_eq!(bin_width(46.9), "47 Hz");
+        assert_eq!(bin_width(f64::NAN), NO_VALUE);
+    }
 
     #[test]
     fn fft_readouts() {

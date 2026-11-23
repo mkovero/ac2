@@ -1893,14 +1893,21 @@ per frequency and moment, as tall as its level. **G** once more is the spectrum 
 Every estimate has a **resolution cell**, 1/T for a window of T seconds. Where it is wider
 than a grid column, neighbouring columns share one estimate. The **resolution marker**
 shows where: a faint grey shade with dashed edges, and the cursor says it
-(`52.0 Hz · coarser than 1/96 oct (gaps)`).
+(`52.0 Hz · 1 Hz bins` on a live transfer curve, `coarser than 1/48 oct (interpolated)`
+on a sweep).
 
 - **Transfer**: the curve runs from 7.8 Hz to the top of the band the session's rate
   measures (0.45 of the rate: 21.6 kHz at 48 kHz, 86 kHz at 192 kHz). The FFT ladder's
   longest window is about 1 s. At 96 kHz: 1/48 is marked below about 68 Hz; 1/96 below about
   135 Hz, about 200–410 Hz and 1.6–3.3 kHz (at 48 kHz the last is 810 Hz–1.6 kHz); 1/24
-  below about 34 Hz; 1/12 below about 17 Hz. A live curve shows **gaps** where columns have
-  no estimate of their own.
+  below about 34 Hz; 1/12 below about 17 Hz. There a column holds at most one FFT bin and
+  many hold none: a live curve draws each bin as a **point** and joins the points with a
+  straight line across the columns without a bin of their own, so the line between two
+  points is no detail, only the way to the next bin. The marker says how wide the bins are
+  (`below 68 Hz: 1 Hz bins`; with the 4 s LF window `below 17 Hz: 0.24 Hz bins`). A column
+  empty for another reason (no reference energy, protection) still breaks the line, and
+  wrapped phase still breaks where it wraps. Peak and notch jumps and the tracked peaks
+  read the bins as neighbours, so a room mode down there can be jumped to.
 - **Alt+K** / **Alt+Shift+K** step the focused transfer pane's measurement one
   resolution coarser / finer (1/12 … 1/96 octave), as **K** steps smoothing. Unlike
   smoothing it restarts the measurement on the new grid: the averages fill again. Coarser

@@ -522,7 +522,11 @@ fn unresolved_ranges_are_shaded_and_named() {
     let mut t = trace(&c, TraceKey::Live(MeasId(1)), 0.0);
     t.unresolved = Some(crate::unresolved::Source {
         unresolved: &un,
-        fill: crate::unresolved::Fill::Gaps,
+        // No estimates to measure the bins by: the marks keep the resolution's words.
+        fill: crate::unresolved::Fill::Joined {
+            freqs: &[],
+            validity: &[],
+        },
     });
     let theme = Theme::dark();
     let view = ViewState {

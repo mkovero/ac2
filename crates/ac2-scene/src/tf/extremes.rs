@@ -58,9 +58,11 @@ pub(super) fn extremes(
 ) -> Option<TfExtremes> {
     let d = shown.get(tracked(traces)?)?;
     // The displayed magnitude is NaN wherever the curve is not drawn (invalid or
-    // coherence-blanked columns), so no mark lands on what is not shown.
-    let max = find_extremes(&d.freqs, &d.magnitude_db, Extreme::Max, true);
-    let min = find_extremes(&d.freqs, &d.magnitude_db, Extreme::Min, true);
+    // coherence-blanked columns), so no mark lands on what is not shown; where the line
+    // joins bins across empty columns, each bin's neighbours are the bins beside it.
+    let (freqs, mag) = d.own_estimates(&d.magnitude_db);
+    let max = find_extremes(&freqs, &mag, Extreme::Max, true);
+    let min = find_extremes(&freqs, &mag, Extreme::Min, true);
     let comb = peaks::comb_spacing(&min).map(|spacing_hz| Comb {
         spacing_hz,
         delay_s: 1.0 / spacing_hz,

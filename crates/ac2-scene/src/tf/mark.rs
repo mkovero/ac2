@@ -81,9 +81,12 @@ pub fn jump(
 ) -> Option<f64> {
     let (_, drawn) = display_traces(traces, cache, view.tf.phase_reference, &view.tf.coherence);
     let d = drawn.get(extremes::tracked(traces)?)?;
+    // Over the estimates alone: where the line joins bins across empty columns, a room
+    // mode's neighbours are the bins beside it, as drawn.
+    let (freqs, values) = d.own_estimates(&d.magnitude_db);
     cursor_jump::jump(
-        &d.freqs,
-        &d.magnitude_db,
+        &freqs,
+        &values,
         shown,
         view.cursor_hz,
         kind,

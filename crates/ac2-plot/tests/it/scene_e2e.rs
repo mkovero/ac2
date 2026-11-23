@@ -224,7 +224,9 @@ fn transfer_view_advice() {
 }
 
 /// The valid-resolution marker of a 1/96-oct curve at 96 kHz: faint shade and dashed edges
-/// under the grid and the curves, in every pane, in the dark and the light theme.
+/// under the grid and the curves, in every pane, in the dark and the light theme. In the
+/// lowest range every other column has no bin of its own: the bins there are points joined
+/// by a line across the thinned columns.
 #[test]
 fn transfer_view_unresolved() {
     use ac2_proto::model::{FreqRange, Resolution, Unresolved};
@@ -239,11 +241,19 @@ fn transfer_view_unresolved() {
             })
             .collect(),
     };
-    let a = cols(0.0, 0.0);
+    let mut a = cols(0.0, 0.0);
+    for (i, f) in a.freqs.iter().enumerate() {
+        if *f < 135.4 && i % 2 == 1 {
+            a.validity[i] = ValidityMask::THINNED;
+        }
+    }
     let mut t = trace(&a, 1, 0, 0.010);
     t.unresolved = Some(ac2_scene::unresolved::Source {
         unresolved: &un,
-        fill: ac2_scene::unresolved::Fill::Gaps,
+        fill: ac2_scene::unresolved::Fill::Joined {
+            freqs: &a.freqs,
+            validity: &a.validity,
+        },
     });
     for theme in [Theme::dark(), Theme::light()] {
         let name = format!("transfer_view_unresolved_{:?}", theme.name).to_lowercase();

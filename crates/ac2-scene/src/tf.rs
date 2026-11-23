@@ -5,7 +5,7 @@
 
 use crate::axis::{self, Axis, Range, Steps};
 use crate::banner::{BannerRow, Status};
-use crate::canvas::{self, Canvas, MARGINS, PANE_GAP, anchor, gapped, label, visible_columns};
+use crate::canvas::{self, Canvas, MARGINS, PANE_GAP, anchor, label, visible_columns};
 use crate::format;
 use crate::legend::{INSET, LegendBox, RowStyle};
 use crate::primitives::{
@@ -19,6 +19,7 @@ use crate::trace::{
 };
 use crate::view::Style;
 use crate::view::{CoherencePlacement, PhaseView, TfView, ViewState};
+use line::{bin_points, trace_line};
 
 /// Relative heights of the panes.
 const WEIGHT_MAGNITUDE: f32 = 3.0;
@@ -378,28 +379,6 @@ fn layout(view: &ViewState, size: Viewport, top: f32, right: f32) -> Vec<(TfPane
         .collect()
 }
 
-/// One trace's values on one mapping, as a gapped polyline; `None` when nothing is visible.
-fn trace_line(
-    xs: &[f32],
-    values: &[f64],
-    to_px: impl Fn(f64) -> f32,
-    alpha: Option<&[f32]>,
-    wrapped: bool,
-    stroke: Stroke,
-    clip: Rect,
-) -> Option<Polyline> {
-    let ys: Vec<f32> = values.iter().map(|v| to_px(*v)).collect();
-    let (points, alpha) = gapped(xs, &ys, alpha, |a, b| {
-        wrapped && (values[b] - values[a]).abs() > 180.0
-    });
-    (!points.is_empty()).then_some(Polyline {
-        points,
-        alpha,
-        stroke,
-        clip: Some(clip),
-    })
-}
-
 /// Right-margin axis of the overlaid coherence and a dashed line at γ² = 0.
 fn overlay_frame(c: &mut Canvas, plot: Rect, o: &CoherenceOverlay, style: Style) {
     let Style { chrome, theme } = style;
@@ -609,12 +588,23 @@ pub fn transfer_scene(
             if kind == TfPaneKind::Phase && traces.iter().any(|s| s.key == t.key && s.faint_phase) {
                 stroke.color = stroke.color.with_alpha(FAINT_PHASE_ALPHA);
             }
+            let joined = t.joined.get(cols.clone()).unwrap_or_default();
             c.data.polylines.extend(trace_line(
                 &xs,
                 &values[cols.clone()],
                 |v| ym.to_px(v * scale),
                 alpha,
+                joined,
                 wrapped,
+                stroke,
+                plot,
+            ));
+            c.data.points.extend(bin_points(
+                &xs,
+                &values[cols.clone()],
+                |v| ym.to_px(v * scale),
+                alpha,
+                joined,
                 stroke,
                 plot,
             ));
@@ -626,6 +616,7 @@ pub fn transfer_scene(
                     &hold[cols.clone()],
                     |v| ym.to_px(v),
                     None,
+                    joined,
                     false,
                     Stroke::solid(stroke.color.with_alpha(theme.peak_alpha), theme.trace_width),
                     plot,
@@ -642,6 +633,7 @@ pub fn transfer_scene(
                     &t.coherence[cols.clone()],
                     |v| om.to_px(v),
                     None,
+                    joined,
                     false,
                     stroke,
                     plot,
@@ -862,6 +854,7 @@ pub fn transfer_scene(
 }
 
 mod extremes;
+mod line;
 mod mark;
 mod values;
 pub(crate) use extremes::draw_mark;

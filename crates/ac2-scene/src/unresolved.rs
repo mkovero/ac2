@@ -3,10 +3,12 @@
 //! The daemon says which ranges of a curve's grid are finer than the analysis behind them
 //! ([`ac2_proto::model::Unresolved`], computed in `ac2_core::resolution`). There the curve
 //! is no less correct, but neighbouring columns share one estimate: on a live transfer
-//! curve the columns without an FFT bin of their own are left out (the line shows gaps),
-//! on a sweep the log grid interpolates the linear bins. The scene shades those ranges
-//! faintly, edges them with a dashed line and names them on the cursor's frequency line.
+//! curve the columns without an FFT bin of their own are passed over (the line joins the
+//! bins, each drawn as a point), on a sweep the log grid interpolates the linear bins. The
+//! scene shades those ranges faintly, edges them with a dashed line and names them on the
+//! cursor's frequency line.
 
+use ac2_proto::frame::ValidityMask;
 use ac2_proto::model::{FreqRange, Unresolved};
 
 use crate::axis::Mapping;
@@ -16,20 +18,26 @@ use crate::primitives::{FillRect, Polyline, Rect};
 use crate::theme::Theme;
 
 /// What the curve does where its grid is finer than its analysis.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Fill {
-    /// Columns without an estimate of their own are left out (a live transfer curve).
-    Gaps,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Fill<'a> {
+    /// Columns without an estimate of their own ([`ValidityMask::THINNED`] alone) are passed
+    /// over: the estimates are joined by a line and each is drawn as a point (a live
+    /// transfer curve). The curve's columns come along because the estimates in a range,
+    /// one bin apart, are what say how wide its bins are.
+    Joined {
+        freqs: &'a [f64],
+        validity: &'a [ValidityMask],
+    },
     /// Columns between estimates are interpolated (a sweep's response and harmonics).
     Interpolated,
     /// Neighbouring columns repeat the bin they lie in (a multi-resolution spectrum).
     Steps,
 }
 
-impl Fill {
+impl Fill<'_> {
     fn text(self) -> &'static str {
         match self {
-            Fill::Gaps => "gaps",
+            Fill::Joined { .. } => "gaps",
             Fill::Interpolated => "interpolated",
             Fill::Steps => "steps",
         }
@@ -40,7 +48,33 @@ impl Fill {
 #[derive(Clone, Copy, Debug)]
 pub struct Source<'a> {
     pub unresolved: &'a Unresolved,
-    pub fill: Fill,
+    pub fill: Fill<'a>,
+}
+
+/// The width of the bins serving `lo..=hi` of a joined curve, from the columns there that
+/// carry an estimate. Below the edge a column is narrower than a bin, so it holds at most
+/// one, and every bin lands in some column: consecutive estimates are exactly one bin apart.
+/// Each is drawn at its column's centre, up to half a column off its bin, and those offsets
+/// do not average out pairwise (columns widen along the range, so the spacings skew); the
+/// span from the first estimate to the last over the bins between them leaves only the two
+/// end columns' offsets, spread over every bin in the range. `None` with fewer than two
+/// estimates, or with no thinned column: then the columns are no narrower than the bins and
+/// their spacing says nothing of how wide a bin is.
+pub fn bin_width(freqs: &[f64], validity: &[ValidityMask], lo: f64, hi: f64) -> Option<f64> {
+    let inside = || {
+        freqs
+            .iter()
+            .zip(validity)
+            .filter(move |(f, _)| **f >= lo && **f <= hi)
+    };
+    let thinned = |v: &ValidityMask| v.0 & ValidityMask::THINNED.0 != 0;
+    if !inside().any(|(_, v)| thinned(v)) {
+        return None;
+    }
+    let mut own = inside().filter(|(_, v)| !thinned(v)).map(|(f, _)| *f);
+    let first = own.next()?;
+    let (n, last) = own.fold((0usize, first), |(n, _), f| (n + 1, f));
+    (n > 0 && last > first).then(|| (last - first) / n as f64)
 }
 
 /// One marked range.
@@ -50,9 +84,10 @@ pub struct RangeMark {
     pub hi_hz: f64,
     /// Whether the range runs from the curve's lowest column (drawn without a lower edge).
     pub from_bottom: bool,
-    /// The whole statement: `below 68 Hz: coarser than 1/48 oct (gaps)`.
+    /// The whole statement: `below 68 Hz: 1 Hz bins`, `below 68 Hz: coarser than 1/48 oct
+    /// (interpolated)`.
     pub text: String,
-    /// What the cursor's frequency line adds inside the range: `coarser than 1/48 oct (gaps)`.
+    /// What the cursor's frequency line adds inside the range: `1 Hz bins`.
     pub note: String,
 }
 
@@ -61,7 +96,7 @@ pub struct RangeMark {
 /// than one kind (`harmonics`).
 pub fn marks(src: Source<'_>, first_hz: f64, what: Option<&str>) -> Vec<RangeMark> {
     let res = format::resolution(src.unresolved.resolution);
-    let note = match what {
+    let coarser = match what {
         Some(w) => format!("{w} coarser than {res} ({})", src.fill.text()),
         None => format!("coarser than {res} ({})", src.fill.text()),
     };
@@ -70,6 +105,15 @@ pub fn marks(src: Source<'_>, first_hz: f64, what: Option<&str>) -> Vec<RangeMar
         .iter()
         .filter(|r| r.hi.0 > r.lo.0)
         .map(|r| {
+            let bins = match src.fill {
+                Fill::Joined { freqs, validity } => bin_width(freqs, validity, r.lo.0, r.hi.0),
+                Fill::Interpolated | Fill::Steps => None,
+            };
+            let note = match (bins, what) {
+                (Some(b), Some(w)) => format!("{w} {} bins", format::bin_width(b)),
+                (Some(b), None) => format!("{} bins", format::bin_width(b)),
+                (None, _) => coarser.clone(),
+            };
             let from_bottom = r.lo.0 <= first_hz;
             let span = if from_bottom {
                 format!("below {}", format::freq_rough(r.hi.0))
@@ -85,7 +129,7 @@ pub fn marks(src: Source<'_>, first_hz: f64, what: Option<&str>) -> Vec<RangeMar
                 hi_hz: r.hi.0,
                 from_bottom,
                 text: format!("{span}: {note}"),
-                note: note.clone(),
+                note,
             }
         })
         .collect()
@@ -211,10 +255,14 @@ mod tests {
             Resolution::NinetySixth,
             &[(31.1, 135.4), (203.0, 406.0), (1625.0, 3250.0)],
         );
+        // A curve with no estimates to measure its bins by keeps the resolution's words.
         let m = marks(
             Source {
                 unresolved: &un,
-                fill: Fill::Gaps,
+                fill: Fill::Joined {
+                    freqs: &[],
+                    validity: &[],
+                },
             },
             31.3,
             None,
@@ -248,6 +296,100 @@ mod tests {
             m[0].text,
             "below 68 Hz: harmonics coarser than 1/48 oct (interpolated)"
         );
+    }
+}
+
+#[cfg(test)]
+mod bin_tests {
+    use super::*;
+    use ac2_proto::model::Resolution;
+    use ac2_proto::units::Hz;
+
+    /// A 1/48-octave grid from 7.8 Hz whose columns hold the bins `k·df` (at most one each
+    /// below the edge): a column with a bin is valid, the rest thinned, as the daemon sends.
+    fn grid(df: f64) -> (Vec<f64>, Vec<ValidityMask>) {
+        let freqs: Vec<f64> = (0..200)
+            .map(|i| 7.8 * 2f64.powf(f64::from(i) / 48.0))
+            .collect();
+        let validity = freqs
+            .iter()
+            .map(|f| {
+                let (lo, hi) = (f * 2f64.powf(-1.0 / 96.0), f * 2f64.powf(1.0 / 96.0));
+                let has_bin = (lo / df).ceil() * df < hi;
+                if has_bin {
+                    ValidityMask::NONE
+                } else {
+                    ValidityMask::THINNED
+                }
+            })
+            .collect();
+        (freqs, validity)
+    }
+
+    fn mark(df: f64) -> RangeMark {
+        let (freqs, validity) = grid(df);
+        // The range ends where a column grows as wide as a bin.
+        let edge = df / (2f64.powf(1.0 / 48.0) - 1.0);
+        let un = Unresolved {
+            resolution: Resolution::FortyEighth,
+            ranges: vec![FreqRange {
+                lo: Hz(freqs[0]),
+                hi: Hz(edge),
+            }],
+        };
+        let m = marks(
+            Source {
+                unresolved: &un,
+                fill: Fill::Joined {
+                    freqs: &freqs,
+                    validity: &validity,
+                },
+            },
+            freqs[0],
+            None,
+        );
+        assert_eq!(m.len(), 1);
+        m[0].clone()
+    }
+
+    #[test]
+    fn a_joined_range_says_its_bin_width() {
+        // 48 kHz / 49152 and / 196608: the bins of the standard and long low stages.
+        let m = mark(48_000.0 / 49_152.0);
+        assert_eq!(m.text, "below 67 Hz: 1 Hz bins");
+        assert_eq!(m.note, "1 Hz bins");
+        let m = mark(48_000.0 / 196_608.0);
+        assert_eq!(m.text, "below 17 Hz: 0.24 Hz bins");
+        assert_eq!(m.note, "0.24 Hz bins");
+    }
+
+    #[test]
+    fn a_range_with_one_estimate_keeps_the_resolution() {
+        let freqs = [20.0, 20.3, 20.6];
+        let validity = [
+            ValidityMask::THINNED,
+            ValidityMask::NONE,
+            ValidityMask::THINNED,
+        ];
+        let un = Unresolved {
+            resolution: Resolution::FortyEighth,
+            ranges: vec![FreqRange {
+                lo: Hz(20.0),
+                hi: Hz(21.0),
+            }],
+        };
+        let m = marks(
+            Source {
+                unresolved: &un,
+                fill: Fill::Joined {
+                    freqs: &freqs,
+                    validity: &validity,
+                },
+            },
+            20.0,
+            None,
+        );
+        assert_eq!(m[0].note, "coarser than 1/48 oct (gaps)");
     }
 }
 

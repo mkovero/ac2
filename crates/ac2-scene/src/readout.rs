@@ -399,6 +399,7 @@ mod tests {
             smoothing: None,
             note: None,
             dashed: false,
+            joined: Vec::new(),
         }
     }
 

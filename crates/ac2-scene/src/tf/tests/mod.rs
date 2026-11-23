@@ -7,6 +7,7 @@ use ac2_proto::model::{Polarity, Smoothing, SmoothingFraction, SmoothingMode};
 use ac2_proto::units::{MeasId, Seconds, SessionEpoch, TraceId};
 
 mod extremes;
+mod joined;
 mod layout;
 mod mark;
 mod panes;
