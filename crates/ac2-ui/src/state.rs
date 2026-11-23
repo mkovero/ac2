@@ -55,6 +55,7 @@ mod display;
 pub use display::{ChoicePrompt, ChoicePurpose, DeletePrompt, DeleteTarget, MoveWhat};
 pub use panes::levels::{LEVEL_ZOOM_FACTOR, PaneLevels};
 pub use panes::local::PaneLocal;
+mod pairing;
 mod remote_impl;
 mod settings_conn;
 mod settings_display;
@@ -404,6 +405,7 @@ impl AppState {
         let contents = self.pane_contents();
         let worked_on = self.worked_on(&msg);
         self.update_inner(msg, keymap, &mut out);
+        self.refresh_pairing();
         self.frame_new_pictures();
         self.want_dynamics_envelopes(&mut out);
         if let Some(p) = worked_on {

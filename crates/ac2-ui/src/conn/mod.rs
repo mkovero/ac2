@@ -210,6 +210,13 @@ pub enum StimEvent {
 pub enum Request {
     /// A command whose reply only matters as success / failure.
     Call { cmd: Command, what: String },
+    /// As [`Request::Call`], with words for each outcome: `done` once it is done, `failed`
+    /// (then the daemon's words) when refused, so a refusal never reads as done.
+    Act {
+        cmd: Command,
+        done: String,
+        failed: String,
+    },
     /// Acquire the lease (taking it over with `force`) and arm with `settings`.
     StimArm {
         settings: GeneratorSettings,
@@ -788,6 +795,10 @@ async fn wait_retry(
                     out.send(ConnEvent::BandTransfer(Err("not connected".into())));
                 }
                 Some(Ctl::Req(Request::PreviewStop)) => {}
+                Some(Ctl::Req(Request::Act { failed, .. })) => out.send(ConnEvent::Reply {
+                    what: failed,
+                    result: Err("not connected".into()),
+                }),
                 Some(Ctl::Req(r)) => out.send(ConnEvent::Reply {
                     what: request_name(&r),
                     result: Err("not connected".into()),

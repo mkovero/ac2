@@ -4,6 +4,7 @@
 //! and the toasts.
 
 use crate::meter::InputRole;
+use crate::pairing::PairRefusal;
 
 /// The Audio I/O row that adds one.
 pub const ADD: &str = "Add an input from another rig…";
@@ -63,36 +64,27 @@ pub fn pick_row(rig: &str, row: &str, added: bool) -> String {
 /// Why rig `rig`'s inputs cannot be taken, as its heading in the add dialog says it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceRefusal {
-    /// It has not answered `server.info` yet.
-    Asking,
-    /// It listens on its own computer only: no other rig reaches it.
-    LocalOnly,
+    /// The two rigs cannot be paired (taking an input pairs them).
+    Pair(PairRefusal),
     /// It has no session: nothing captured to give.
     NoSession,
     /// Its session replays a recording: no device clock to pair with.
     Replaying,
-    /// It already authorizes an app under the name this rig would be admitted as.
-    NameTaken(String),
-    /// The app cannot ask it (`server.info` failed).
-    Unanswered(String),
 }
 
 /// The add dialog's line for a rig whose inputs cannot be taken.
 pub fn source_refusal(rig: &str, why: &SourceRefusal) -> String {
     match why {
-        SourceRefusal::Asking => format!("{rig}: asking…"),
-        SourceRefusal::LocalOnly => format!(
+        SourceRefusal::Pair(PairRefusal::Asking) => format!("{rig}: asking…"),
+        SourceRefusal::Pair(PairRefusal::LocalOnly) => format!(
             "{rig} serves only this computer: turn its network on (Settings › Connection) to \
              give its inputs"
         ),
+        SourceRefusal::Pair(p) => crate::pairing::refusal(rig, p),
         SourceRefusal::NoSession => {
             format!("{rig} has no session: open its audio I/O there first")
         }
         SourceRefusal::Replaying => format!("{rig} is replaying a recording"),
-        SourceRefusal::NameTaken(n) => {
-            format!("{rig} already authorizes an app named {n}: revoke it there first (Connection)")
-        }
-        SourceRefusal::Unanswered(e) => format!("{rig}: cannot ask it ({e})"),
     }
 }
 
@@ -132,11 +124,6 @@ pub fn removed_toast(name: &str) -> String {
     format!("{name} removed from the audio I/O")
 }
 
-/// A row of the rigs admitted to this rig: `pupu · may take this rig's inputs`.
-pub fn admitted_row(name: &str) -> String {
-    format!("{name} · may take this rig's inputs")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,7 +149,7 @@ mod tests {
     #[test]
     fn refusals_say_why_and_what_to_do() {
         assert_eq!(
-            source_refusal("ketunkolo", &SourceRefusal::LocalOnly),
+            source_refusal("ketunkolo", &SourceRefusal::Pair(PairRefusal::LocalOnly)),
             "ketunkolo serves only this computer: turn its network on (Settings › Connection) \
              to give its inputs"
         );

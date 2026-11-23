@@ -11,10 +11,10 @@ use ac2_proto::model::{
 use ac2_proto::units::{Seconds, WallNs};
 use ac2_scene::remote_inputs as words;
 
-const KEY_A: &str = "rq:rM>}U?@Lns47E1%kR.o@n%FcmmsL/@{H8]yf7";
-const KEY_B: &str = "Yne@$w-vo<fVvi]a<NY6T1ed:M$fCG*[IaLV{hID";
+pub(super) const KEY_A: &str = "rq:rM>}U?@Lns47E1%kR.o@n%FcmmsL/@{H8]yf7";
+pub(super) const KEY_B: &str = "Yne@$w-vo<fVvi]a<NY6T1ed:M$fCG*[IaLV{hID";
 
-fn network(key: &str, authorized: Vec<AuthorizedClient>) -> ServerInfo {
+pub(super) fn network(key: &str, authorized: Vec<AuthorizedClient>) -> ServerInfo {
     let mut s = local_only();
     s.network.status = ac2_proto::model::NetStatusView::Peer {
         status: ac2_proto::model::PeerNetStatus::Listening {
@@ -28,11 +28,11 @@ fn network(key: &str, authorized: Vec<AuthorizedClient>) -> ServerInfo {
     s
 }
 
-fn local_only() -> ServerInfo {
+pub(super) fn local_only() -> ServerInfo {
     ac2_proto::samples::server_info_off()
 }
 
-fn server(info: ServerInfo) -> ConnEvent {
+pub(super) fn server(info: ServerInfo) -> ConnEvent {
     ConnEvent::Server {
         what: None,
         result: Ok(Box::new(info)),
@@ -165,7 +165,7 @@ fn the_dialog_refuses_in_words() {
         texts(&t),
         vec![words::source_refusal(
             "pupu",
-            &words::SourceRefusal::LocalOnly
+            &words::SourceRefusal::Pair(ac2_scene::pairing::PairRefusal::LocalOnly)
         )]
     );
     // An app already authorized on pupu under the name this rig would take.

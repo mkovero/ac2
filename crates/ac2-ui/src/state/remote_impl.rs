@@ -9,17 +9,31 @@ use ac2_proto::model::{
     InputSetup, NetworkServer, OpenSession, RemoteInput, RemoteState, RigPeer, ServerInfo,
     remote_slot,
 };
+use ac2_scene::pairing::PairRefusal;
 use ac2_scene::remote_inputs::{self as words, SourceRefusal};
 use eframe::egui::Key;
 
 /// What pairing needs of the source rig: where this rig reaches it, its key and name, and
 /// the name this rig is admitted under there.
-struct Source {
-    id: RigId,
-    name: String,
+pub(super) struct Source {
+    pub(super) id: RigId,
+    pub(super) name: String,
     ctrl: String,
     data: String,
-    key: String,
+    pub(super) key: String,
+}
+
+impl Source {
+    /// It as an entry of a rig's paired rigs.
+    pub(super) fn peer(&self) -> RigPeer {
+        RigPeer {
+            rig: self.id,
+            name: self.name.clone(),
+            ctrl: self.ctrl.clone(),
+            data: self.data.clone(),
+            key: self.key.clone(),
+        }
+    }
 }
 
 impl AppState {
@@ -197,33 +211,26 @@ impl AppState {
         }
     }
 
-    /// Rig `b` as a source this rig can pair with, or why not.
-    fn source(&self, b: &RigState) -> Result<Source, SourceRefusal> {
+    /// Rig `b` as one end of a pairing with rig `taker`: where `taker` reaches it, its key
+    /// and name, or why `taker` cannot pair with it. Both rigs may be any the app holds.
+    pub(super) fn pair_end(&self, b: &RigState, taker: &RigState) -> Result<Source, PairRefusal> {
         let info = match &b.server {
-            None => return Err(SourceRefusal::Asking),
-            Some(Err(e)) => return Err(SourceRefusal::Unanswered(e.clone())),
+            None => return Err(PairRefusal::Asking),
+            Some(Err(e)) => return Err(PairRefusal::Unanswered(e.clone())),
             Some(Ok(i)) => i,
         };
         let n = &info.network;
         let (Some((ctrl, data)), Some(server_key)) = (n.status.endpoints(), &n.server_key) else {
-            return Err(SourceRefusal::LocalOnly);
+            return Err(PairRefusal::LocalOnly);
         };
-        let authorized = &n.authorized;
-        let st = b.daemon();
-        let open = st.and_then(|s| s.session.open.as_ref());
-        match open {
-            None => return Err(SourceRefusal::NoSession),
-            Some(o) if o.replay.is_some() => return Err(SourceRefusal::Replaying),
-            Some(_) => {}
-        }
         let (ctrl, data) = peer_endpoints(ctrl, data, b.daemon_addr.as_deref(), &self.local_host)
-            .ok_or(SourceRefusal::LocalOnly)?;
-        let as_name = admit_name(&self.rig_label(&self.rig));
-        if authorized
+            .ok_or(PairRefusal::LocalOnly)?;
+        let as_name = admit_name(&self.rig_label(taker));
+        if n.authorized
             .iter()
-            .any(|a| a.name == as_name && a.rig != Some(self.rig.id))
+            .any(|a| a.name == as_name && a.rig != Some(taker.id))
         {
-            return Err(SourceRefusal::NameTaken(as_name));
+            return Err(PairRefusal::NameTaken(as_name));
         }
         Ok(Source {
             id: b.id,
@@ -232,6 +239,16 @@ impl AppState {
             data,
             key: server_key.clone(),
         })
+    }
+
+    /// Rig `b` as a source this rig can take inputs from, or why not.
+    fn source(&self, b: &RigState) -> Result<Source, SourceRefusal> {
+        let src = self.pair_end(b, &self.rig).map_err(SourceRefusal::Pair)?;
+        match b.daemon().and_then(|s| s.session.open.as_ref()) {
+            None => Err(SourceRefusal::NoSession),
+            Some(o) if o.replay.is_some() => Err(SourceRefusal::Replaying),
+            Some(_) => Ok(src),
+        }
     }
 
     /// The add dialog's lines: per rig held besides this one, its heading and inputs, or
@@ -256,7 +273,7 @@ impl AppState {
             if let Err(why) = self.source(b) {
                 v.push(text(
                     words::source_refusal(&name, &why),
-                    why != SourceRefusal::Asking,
+                    why != SourceRefusal::Pair(PairRefusal::Asking),
                 ));
                 continue;
             }
@@ -431,18 +448,12 @@ impl AppState {
         let mut config = open.config.clone();
         config.input_channels.push(input.session_channel());
         config.remote_inputs.push(input);
-        let mut peers: Vec<RigPeer> = self
-            .daemon()
-            .map(|s| s.remote.peers.clone())
-            .unwrap_or_default();
-        peers.retain(|p| p.rig != src.id && p.name != src.name);
-        peers.push(RigPeer {
-            rig: src.id,
-            name: src.name.clone(),
-            ctrl: src.ctrl,
-            data: src.data,
-            key: src.key,
-        });
+        let peers = super::pairing::peers_with(
+            self.daemon()
+                .map(|s| s.remote.peers.as_slice())
+                .unwrap_or_default(),
+            &src,
+        );
         let me = self.rig_label(&self.rig);
         self.others.elsewhere.push((
             src.id,

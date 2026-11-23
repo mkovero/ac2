@@ -352,7 +352,7 @@ once).
 | SPL / Leq | the SPL meter's Leq windows, limits and band meter ([below](#leq-windows-and-limits)) | **Shift+L** |
 | Recording | how long the record toggle records (this app); where the daemon records (the rig) | |
 | Display | theme, key hints, warning toasts, how long the SPL number holds, the goniometer's ember decay and glow, Leq windows / history strip / bars / scale, what the spectrum and sweep panes show, spectrum glide, 3D quality, invert vertical drag (3D), distortion unit, coherence placement, resolution marker, plate background (see-through / solid), level axes | |
-| Connection | the daemon, whether the app starts and stops this computer's `ac2d`, this client's id and key, reconnect, another daemon / pairing; the daemon's mode, mDNS name, authorized clients and refused keys | |
+| Connection | the daemon, whether the app starts and stops this computer's `ac2d`, this client's id and key, reconnect, another daemon; the daemon's mode, mDNS name, authorized clients (each an *app* or a *rig*) and refused keys; *Paired rigs* and *Pair with rig…* (**Enter**), unpairing (**Delete** twice) | |
 | Rig monitor | where the rig's OSC cues and Art-Net universe go, whether it meters at start (the rig); how its programme meters read: *Programme meters read*, *Loudness target* (−23 LUFS by default, −36 … −5 in 1 LU steps; past either end the row says the range), *Correlation window*, *An over is above*, *Correlation gate* — **←/→** steps a value and sends each step ([Programme pane](#programme-pane)) | |
 
 #### System max level
@@ -429,8 +429,10 @@ forwarded to its loopback (ssh `-L`, a port proxy), counts as local and can turn
 on and authorize a key. Key files there get no ACL of their own; the per-user config
 folder's default ACL protects them.
 
-With a server key the page lists the clients the rig accepts (name, key fingerprint) and the
-keys it refused lately (fingerprint, address, how often, when).
+With a server key the page lists the clients the rig accepts (name, *app* or *rig*, key
+fingerprint: `laptop · app · fingerprint …`, `rig-pupu · rig · may take this rig's inputs ·
+fingerprint …`) and the keys it refused lately (fingerprint, address, how often, when).
+`ac2 server info` lists them the same way (`laptop  app  …`, `rig-pupu  rig <id>  …`).
 
 *Clocks* gives a line per connected rig (named when there are several), what its daemon
 measures and what its OS says, nothing more:
@@ -456,6 +458,39 @@ measures and what its OS says, nothing more:
 - *Authorize a client by its key…* takes a name and the key `ac2 auth show` prints.
 - **Delete** twice revokes a client: its requests are refused at once. You cannot revoke
   your own.
+
+##### Paired rigs
+
+Two rigs are paired when each lists the other among its paired rigs and has admitted the
+other's key: each half is kept by its own rig's `ac2d`, and a direction needs both (this rig
+takes pupu's inputs when this rig lists pupu and pupu has admitted this rig). *Paired rigs*
+lists every rig paired or half paired with the rig shown, each with what the daemons show:
+
+- *pupu · paired both ways*;
+- what is missing: *pupu · has not admitted this rig*, *pupu · does not list this rig*,
+  *pupu · not listed by this rig*, *pupu · not admitted by this rig*;
+- *ketunkolo · its side: can't tell* when the app does not hold that rig (or it has not
+  answered, or its network is off): only what a daemon shows is said.
+
+Hovering a row says each of the four halves. Once paired, the other rig is listed in the
+measurement tree beside the rig shown.
+
+- *Pair with rig…* (**Enter**) lists the rigs the app holds besides the one shown, by name,
+  except those already paired both ways; **↑/↓** and **Enter** pick one, **Esc** closes the
+  list. Picking one pairs both ways in one act, without a session and without adding an
+  input: each rig admits the other (it shows under *Rigs admitted to this rig* there) and
+  lists the other. Only the halves not in place are sent, and each toast says what its rig
+  did (*pupu lists ketunkolo as paired*, *ketunkolo admitted pupu: it may take ketunkolo's
+  inputs*). Both rigs must be in network mode on an address the other reaches; a rig that
+  cannot be paired says why in the list instead, and nothing is sent (*serves only its own
+  computer*, *already authorizes an app named …*, *the app is not connected to …*). With no
+  other rig held it says *connect to it first*.
+- **Enter** on a half-paired row pairs the missing halves the same way.
+- **Delete** twice on a row unpairs: this rig drops the other from its paired rigs and
+  revokes its admission, and the other rig does the same when the app holds it. When it does
+  not, only this rig's side is done and the page says so: connect to that rig, show it and
+  unpair this rig there to finish. While either session takes inputs from the other rig,
+  unpairing is refused, naming them: remove those inputs first (Settings › Audio I/O).
 
 ### Audio I/O
 

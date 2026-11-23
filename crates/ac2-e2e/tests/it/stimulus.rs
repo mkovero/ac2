@@ -412,7 +412,8 @@ fn settings_name_an_output_route_the_stimulus_and_set_the_max_level() -> R {
 /// Settings, then Alt+4, Alt+5 and Alt+6: the Recording, Display and Connection pages; the
 /// last asks the daemon what it serves, which a daemon on a local socket answers with its
 /// mode, and lists the page's actions; the test's daemon serves in its own process, so it
-/// offers no network switch (and no client keys before a server key exists).
+/// offers no network switch (and no client keys before a server key exists); *Pair with
+/// rig…* is there either way, and says why when it cannot pair.
 #[test]
 fn settings_pages() -> R {
     use ac2_proto::model::LocalServer;
@@ -453,7 +454,7 @@ fn settings_pages() -> R {
             reason: ac2_proto::model::NetUnavailable::InProcess
         }
     );
-    assert_eq!(page.lines(), conn_lines(Some(server), false));
+    assert_eq!(page.lines(), conn_lines(Some(server), &page.pairing, false));
     assert_eq!(
         page.lines(),
         [
@@ -461,6 +462,7 @@ fn settings_pages() -> R {
             ConnLine::ConnectOther,
             ConnLine::StartLocal,
             ConnLine::StopOnQuit,
+            ConnLine::PairWith,
         ]
     );
     assert!(page.error.is_none());

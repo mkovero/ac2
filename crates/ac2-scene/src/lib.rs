@@ -62,6 +62,7 @@ pub mod missing;
 pub mod network;
 pub mod new_meas;
 pub mod osc;
+pub mod pairing;
 pub mod pane_edit;
 mod peak_marks;
 pub mod plate;

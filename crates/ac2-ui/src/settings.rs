@@ -29,6 +29,7 @@ use crate::session_dialog::SessionDialog;
 mod connection;
 mod display;
 mod network;
+mod pairing;
 mod rig;
 mod signal;
 pub use connection::{
@@ -44,6 +45,7 @@ pub use display::{
     theme_name, warning_toasts_text,
 };
 pub use network::{IfacePick, NetPicks, Switch, read_only_row, switch};
+pub use pairing::{PairOffer, PairedRow, Pairing};
 pub use rig::{RigPage, RigRow, levels_set};
 pub use signal::SignalRows;
 
@@ -154,7 +156,9 @@ impl Page {
             Page::Display => "↑↓ move · ←→ change · Enter resets the level axes · Esc closes",
             Page::Connection => {
                 "↑↓ move · Enter acts on the line · ←→ or Enter on the ac2d rows · A authorizes a \
-                 refused key (type its name) · Delete revokes a client (twice) · Esc closes"
+                 refused key (type its name) · Delete revokes a client (twice) · Enter on Pair \
+                 with rig… lists the rigs held, Enter on one pairs both ways · Delete unpairs a \
+                 paired rig (twice) · Esc closes"
             }
             Page::Rig => {
                 "↑↓ Tab move · type a target or a test, ←→ Home End move the caret, Delete \
@@ -490,6 +494,7 @@ impl Settings {
             Page::Calibration => self.cal.electrical.is_some() || self.cal.acoustic.is_some(),
             Page::AudioIo => self.ceiling.confirm.is_some() || self.remote.pick.is_some(),
             Page::Leq => self.leq.as_ref().is_some_and(|d| d.transfer.is_some()),
+            Page::Connection => self.connection.pairing.offers.is_some(),
             _ => false,
         }
     }
@@ -510,6 +515,7 @@ impl Settings {
                 .leq
                 .as_mut()
                 .is_some_and(|d| d.transfer.take().is_some()),
+            Page::Connection => self.connection.pairing.offers.take().is_some(),
             _ => false,
         }
     }

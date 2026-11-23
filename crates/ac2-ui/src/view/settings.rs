@@ -539,8 +539,14 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
             }
             let t = RichText::new(text).color(if focused { ch.focus } else { color });
             let b = ui.add(egui::Button::selectable(focused, t));
-            // A network row says its state; what that means for the rig is its tip.
-            let b = match lines.get(i).and_then(|l| p.net_line_tip(l)) {
+            // A network row says its state; what that means for the rig is its tip. A paired
+            // rig's row says what is missing; each half in words is its tip.
+            let tip = match lines.get(i) {
+                Some(ConnLine::Paired(r)) => p.pairing.row(*r).map(|x| x.tip.clone()),
+                Some(l) => p.net_line_tip(l).map(str::to_owned),
+                None => None,
+            };
+            let b = match tip {
                 Some(tip) => b.on_hover_text(tip),
                 None => b,
             };
@@ -688,6 +694,40 @@ fn connection_page(app: &App, ui: &mut egui::Ui, s: &Settings, ch: &Chrome, msg:
                     }
                 }
             }
+        }
+    }
+    section(
+        ui,
+        ac2_scene::pairing::SECTION,
+        ac2_scene::pairing::WHOSE,
+        ch,
+    );
+    for (i, l) in lines.iter().enumerate() {
+        match l {
+            ConnLine::Paired(r) => {
+                if let Some(x) = p.pairing.row(*r) {
+                    let pending = p.pairing.confirm == Some(*r);
+                    let tone = match (pending, x.mend) {
+                        (true, _) => ch.fault,
+                        (false, true) => ch.warn,
+                        (false, false) => ch.text,
+                    };
+                    row(ui, i, x.text.clone(), tone);
+                }
+            }
+            ConnLine::PairWith => {
+                row(ui, i, conn_line_text(l, info), ch.text);
+                if p.pairing.offers.is_some() {
+                    ui.label(RichText::new(ac2_scene::pairing::PICK_HEADING).color(ch.dim));
+                }
+            }
+            ConnLine::PairOffer(r) => {
+                if let Some(o) = p.pairing.offer(*r) {
+                    let tone = if o.refusal.is_some() { ch.dim } else { ch.text };
+                    row(ui, i, format!("  {}", o.text), tone);
+                }
+            }
+            _ => {}
         }
     }
     let clocks = st.clock_lines();

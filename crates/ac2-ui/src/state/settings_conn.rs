@@ -115,6 +115,9 @@ impl AppState {
                     what: ac2_scene::cross_rig::link_offset_toast(offset),
                 });
             }
+            ConnAction::PairPick => self.open_pair_pick(out),
+            ConnAction::Pair(rig) => self.pair_with(rig, out),
+            ConnAction::Unpair(rig) => self.unpair(rig, out),
         }
     }
 }

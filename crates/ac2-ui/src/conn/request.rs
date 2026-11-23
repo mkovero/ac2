@@ -18,6 +18,7 @@ pub(super) fn not_responding(target: &Target) -> String {
 pub(super) fn request_name(r: &Request) -> String {
     match r {
         Request::Call { what, .. } => what.clone(),
+        Request::Act { failed, .. } => failed.clone(),
         Request::StimArm { .. } => "arm".into(),
         Request::StimSet(_) => "stimulus".into(),
         Request::StimStop => "stop".into(),
@@ -211,6 +212,18 @@ pub(super) fn handle(client: &Client, r: Request, stim: &mpsc::UnboundedSender<S
                     )
                     .map_err(|e| e.to_string());
                 o.send(ConnEvent::Server { what: None, result });
+            });
+        }
+        Request::Act { cmd, done, failed } => {
+            let (c, o) = (client.clone(), out.clone());
+            tokio::spawn(async move {
+                let result = c
+                    .call_warned(cmd)
+                    .await
+                    .map(|(_, warnings)| send_warnings(&o, warnings))
+                    .map_err(|e| e.to_string());
+                let what = if result.is_ok() { done } else { failed };
+                o.send(ConnEvent::Reply { what, result });
             });
         }
         Request::ServerCall { cmd, what, failed } => {

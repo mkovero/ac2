@@ -117,6 +117,10 @@ impl AppState {
             s.connection.asked_s = Some(self.now_s);
             s.connection.seen = seen;
             out.push(Request::ServerInfo);
+            // The paired rigs' rows read the other rigs' admissions too.
+            if s.page == Page::Connection {
+                self.ask_others_server_info();
+            }
         }
     }
 
@@ -140,6 +144,7 @@ impl AppState {
             s.connection.asked_s = Some(now);
             s.connection.seen = seen;
             out.push(Request::ServerInfo);
+            self.ask_others_server_info();
         }
     }
 

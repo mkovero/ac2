@@ -6,6 +6,8 @@ use ac2_proto::model::{NetBind, NetworkServer, ServerInfo, ServerSummary};
 use ac2_scene::network::NetChange;
 
 use super::network::NetPicks;
+use super::pairing::Pairing;
+use ac2_proto::units::RigId;
 
 /// A line of the Connection page.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,6 +33,12 @@ pub enum ConnLine {
     Refused(Option<String>, String),
     /// Authorize a key typed with its name.
     AddKey,
+    /// A rig paired with this one, or half paired (Enter mends, Delete twice unpairs).
+    Paired(RigId),
+    /// *Pair with rig…*: Enter opens the pick of the rigs the app holds.
+    PairWith,
+    /// A rig in that pick (Enter pairs both ways).
+    PairOffer(RigId),
     /// *Wait for remote inputs*: the session's link offset (Enter types it), while it has
     /// remote inputs.
     LinkOffset,
@@ -57,6 +65,12 @@ pub enum ConnAction {
     },
     /// Reopen the session with this link offset, seconds (`None`: the least that works).
     LinkOffset(Option<f64>),
+    /// Open *Pair with rig…*'s pick.
+    PairPick,
+    /// Pair this rig with that one, both ways.
+    Pair(RigId),
+    /// Unpair this rig and that one, both ways where the app holds it.
+    Unpair(RigId),
 }
 
 /// A typed edit of the Connection page.
@@ -94,15 +108,18 @@ pub struct ConnectionPage {
     /// `State.server` when `server.info` was last asked: a change made anywhere (another
     /// app, the CLI, a retry in the daemon) asks again at once.
     pub seen: Option<ServerSummary>,
+    /// *Paired rigs* and *Pair with rig…*'s pick.
+    pub pairing: Pairing,
 }
 
 /// Seconds between `server.info` while the Connection page is shown: refused keys appear
 /// while the operator watches for a new client to knock.
 pub const SERVER_INFO_EVERY_S: f64 = 2.0;
 
-/// The page's lines for `server` (the actions, then the network mode's keys, then with
-/// remote inputs the link offset, as *Between rigs* closes the page).
-pub fn conn_lines(server: Option<&ServerInfo>, remote: bool) -> Vec<ConnLine> {
+/// The page's lines for `server` (the actions, then the network mode's keys, then the
+/// paired rigs and *Pair with rig…*, then with remote inputs the link offset, as *Between
+/// rigs* closes the page).
+pub fn conn_lines(server: Option<&ServerInfo>, pairing: &Pairing, remote: bool) -> Vec<ConnLine> {
     let mut v = vec![
         ConnLine::Reconnect,
         ConnLine::ConnectOther,
@@ -140,6 +157,15 @@ pub fn conn_lines(server: Option<&ServerInfo>, remote: bool) -> Vec<ConnLine> {
         );
         v.push(ConnLine::AddKey);
     }
+    v.extend(pairing.rows.iter().map(|r| ConnLine::Paired(r.rig)));
+    v.push(ConnLine::PairWith);
+    v.extend(
+        pairing
+            .offers
+            .iter()
+            .flatten()
+            .map(|o| ConnLine::PairOffer(o.rig)),
+    );
     if remote {
         v.push(ConnLine::LinkOffset);
     }
@@ -153,7 +179,7 @@ impl ConnectionPage {
 
     /// The lines as of the last answer.
     pub fn lines(&self) -> Vec<ConnLine> {
-        conn_lines(self.server_info(), self.remote)
+        conn_lines(self.server_info(), &self.pairing, self.remote)
     }
 
     /// The focused line (clamped: lines come and go with the daemon's answers).
@@ -165,6 +191,7 @@ impl ConnectionPage {
     pub(super) fn clear(&mut self) {
         self.net.confirm_on = false;
         self.confirm = None;
+        self.pairing.confirm = None;
         self.notice = None;
         self.error = None;
     }
@@ -247,6 +274,35 @@ impl ConnectionPage {
                 self.edit = Some((ConnEdit::LinkOffset, String::new()));
                 None
             }
+            ConnLine::PairWith if self.pairing.offers.is_some() => {
+                self.pairing.offers = None;
+                None
+            }
+            ConnLine::PairWith => Some(ConnAction::PairPick),
+            ConnLine::PairOffer(rig) => {
+                let o = self.pairing.offer(rig)?;
+                match &o.refusal {
+                    Some(why) => {
+                        self.error = Some(why.clone());
+                        None
+                    }
+                    None => Some(ConnAction::Pair(rig)),
+                }
+            }
+            ConnLine::Paired(rig) => {
+                let r = self.pairing.row(rig)?;
+                match (r.mend, r.held) {
+                    (true, true) => Some(ConnAction::Pair(rig)),
+                    (true, false) => {
+                        self.error = Some(ac2_scene::pairing::not_held(&r.name));
+                        None
+                    }
+                    (false, _) => {
+                        self.notice = Some(ac2_scene::pairing::unpair_hint(&r.name));
+                        None
+                    }
+                }
+            }
         }
     }
 
@@ -289,13 +345,31 @@ impl ConnectionPage {
         }
     }
 
-    /// Delete: revokes the focused authorized client on the second press.
+    /// Delete: revokes the focused authorized client, or unpairs the focused paired rig, on
+    /// the second press.
     pub fn delete(&mut self) -> Option<ConnAction> {
         self.notice = None;
         self.error = None;
-        let Some(ConnLine::Authorized(name)) = self.focused() else {
-            self.notice = Some("Delete revokes an authorized client: move to one".into());
-            return None;
+        let name = match self.focused() {
+            Some(ConnLine::Authorized(name)) => name,
+            Some(ConnLine::Paired(rig)) => {
+                let r = self.pairing.row(rig)?;
+                let ask = ac2_scene::pairing::unpair_confirm(&r.name, r.held);
+                if self.pairing.confirm == Some(rig) {
+                    self.pairing.confirm = None;
+                    return Some(ConnAction::Unpair(rig));
+                }
+                self.pairing.confirm = Some(rig);
+                self.notice = Some(ask);
+                return None;
+            }
+            _ => {
+                self.notice = Some(
+                    "Delete revokes an authorized client or unpairs a paired rig: move to one"
+                        .into(),
+                );
+                return None;
+            }
         };
         if self.confirm.as_deref() == Some(name.as_str()) {
             self.confirm = None;
@@ -428,7 +502,10 @@ pub fn conn_line_text(l: &ConnLine, server: Option<&ServerInfo>) -> String {
         | ConnLine::Refused(..)
         | ConnLine::StartLocal
         | ConnLine::StopOnQuit
-        | ConnLine::LinkOffset => String::new(),
+        | ConnLine::LinkOffset
+        | ConnLine::Paired(_)
+        | ConnLine::PairOffer(_) => String::new(),
+        ConnLine::PairWith => ac2_scene::pairing::PAIR_WITH.into(),
         ConnLine::AddKey => "Authorize a client by its key… (Enter)".into(),
     }
 }

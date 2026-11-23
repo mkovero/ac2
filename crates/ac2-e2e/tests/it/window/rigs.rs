@@ -695,3 +695,145 @@ fn connecting_a_rig_already_listed_shows_it() -> R {
     assert_eq!(h.state().state.rigs().count(), 2, "kettu listed once");
     Ok(())
 }
+
+/// A network-mode rig named `name` with its own server key and no key admitted yet,
+/// listening on every interface: a rig bound to loopback only is one no other rig reaches,
+/// which pairing refuses. Only keys in its (empty) authorized file get in.
+fn networked(name: &'static str, dir: &std::path::Path) -> R<Rig> {
+    let d = dir.join(name);
+    std::fs::create_dir_all(&d)?;
+    let keys = ac2_zmq::KeyPair::generate()?;
+    let authorized = d.join("authorized_clients");
+    ac2_zmq::AuthorizedKeys::new().save(&authorized)?;
+    let key_file = d.join("server.key");
+    std::fs::write(
+        &key_file,
+        format!(
+            "public {}\nsecret {}\n",
+            keys.public.to_z85(),
+            keys.secret.to_z85()
+        ),
+    )?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&key_file, std::fs::Permissions::from_mode(0o600))?;
+    }
+    let id_file = d.join("id");
+    Rig::start_with(move |c| {
+        c.name = name.into();
+        c.rig_id = ac2d::RigIdSource::File(id_file);
+        c.network = ac2d::NetworkChoice::Fixed(ac2d::NetListen {
+            bind: ac2d::NetBind::All,
+            port: ac2d::NetPort::Any,
+        });
+        c.keys = Some(ac2d::NetworkSecurity {
+            server_key_file: key_file,
+            authorized_clients_file: authorized,
+        });
+    })
+}
+
+/// Rig `rig` lists rig `peer` and has admitted it, as its own daemon says.
+fn lists_and_admits(rig: &Rig, peer: RigId) -> R<bool> {
+    let lists = rig
+        .cli
+        .state()
+        .is_some_and(|s| s.remote.peers.iter().any(|p| p.rig == peer));
+    let ReplyBody::Server(info) = rig.call(Command::ServerInfo)? else {
+        return Err("server.info: no server info".into());
+    };
+    let admits = info.network.authorized.iter().any(|a| a.rig == Some(peer));
+    Ok(lists && admits)
+}
+
+/// Settings › Connection › *Pair with rig…* on pupu, kettu picked: in that one act both
+/// daemons list the other and admit the other, no session touched; the row then says
+/// paired both ways. Delete twice on it unpairs both daemons the same way.
+#[test]
+fn pair_with_rig_pairs_both_daemons_in_one_act() -> R {
+    use ac2_ui::settings::ConnLine;
+    if !have_gpu("pair_with_rig_pairs_both_daemons_in_one_act") {
+        return Ok(());
+    }
+    let dir = tempfile::tempdir()?;
+    let keys = dir.path().join("keys");
+    let pupu = networked("pupu", dir.path())?;
+    let kettu = networked("kettu", dir.path())?;
+    let (mut h, pupu_id) = on_pupu(&pupu, &keys);
+    let kettu_id = connect_kettu(&mut h, pupu_id, &kettu, Duration::from_secs(5));
+    pick_first_rig(&mut h);
+    step_until(&mut h, "pupu shown", |a| a.state.active() == pupu_id);
+    // Between rigs (the palette) opens the Connection page.
+    h.key_press_modifiers(Modifiers::COMMAND, Key::K);
+    h.event(Event::Text("between rigs".into()));
+    step_until(&mut h, "palette typed", |a| {
+        matches!(&a.state.overlay, Overlay::Palette(_))
+    });
+    h.key_press(Key::Enter);
+    let page = |a: &App| match &a.state.overlay {
+        Overlay::Settings(s) => Some(s.connection.clone()),
+        _ => None,
+    };
+    step_until(&mut h, "the Connection page", |a| page(a).is_some());
+    let at = |a: &App, l: &ConnLine| page(a).and_then(|p| p.lines().iter().position(|x| x == l));
+    let i = at(h.state(), &ConnLine::PairWith).expect("Pair with rig…");
+    if let Overlay::Settings(s) = &mut h.state_mut().state.overlay {
+        s.connection.focus = i;
+    }
+    h.key_press(Key::Enter);
+    // Kettu offered once both rigs have told the app their keys.
+    step_until(&mut h, "kettu offered", |a| {
+        page(a)
+            .and_then(|p| p.pairing.offer(kettu_id).cloned())
+            .is_some_and(|o| o.refusal.is_none())
+    });
+    assert_eq!(
+        page(h.state()).and_then(|p| p.focused()),
+        Some(ConnLine::PairOffer(kettu_id))
+    );
+    h.key_press(Key::Enter);
+    let t0 = Instant::now();
+    while !(lists_and_admits(&pupu, kettu_id)? && lists_and_admits(&kettu, pupu_id)?) {
+        assert!(t0.elapsed() < WAIT, "both daemons paired");
+        h.step();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    step_until(&mut h, "the row says paired both ways", |a| {
+        page(a)
+            .and_then(|p| p.pairing.row(kettu_id).cloned())
+            .is_some_and(|r| r.text == "kettu · paired both ways")
+    });
+    let session = |r: &Rig| r.cli.state().and_then(|s| s.session.open.clone());
+    assert!(
+        session(&pupu).is_some_and(|o| o.config.remote_inputs.is_empty()),
+        "no remote input added"
+    );
+    // Delete twice on the row: both sides unpaired.
+    let i = at(h.state(), &ConnLine::Paired(kettu_id)).expect("kettu's row");
+    if let Overlay::Settings(s) = &mut h.state_mut().state.overlay {
+        s.connection.focus = i;
+    }
+    h.key_press(Key::Delete);
+    h.key_press(Key::Delete);
+    let none = |r: &Rig, peer: RigId| -> R<bool> {
+        let lists = r
+            .cli
+            .state()
+            .is_some_and(|s| s.remote.peers.iter().any(|p| p.rig == peer));
+        let ReplyBody::Server(info) = r.call(Command::ServerInfo)? else {
+            return Err("server.info: no server info".into());
+        };
+        Ok(!lists && !info.network.authorized.iter().any(|a| a.rig == Some(peer)))
+    };
+    let t0 = Instant::now();
+    while !(none(&pupu, kettu_id)? && none(&kettu, pupu_id)?) {
+        assert!(t0.elapsed() < WAIT, "both daemons unpaired");
+        h.step();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    step_until(&mut h, "the row gone", |a| {
+        page(a).is_some_and(|p| p.pairing.row(kettu_id).is_none())
+    });
+    Ok(())
+}
