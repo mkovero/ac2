@@ -292,6 +292,25 @@ fn events_past_the_byte_bound_bring_resync_required() {
     assert_eq!(decode_notice(&m[1]).unwrap(), FlowNotice::ResyncRequired);
 }
 
+/// An event over the event limit is not sent (a client would drop it unread): the peer is
+/// sent `resync_required` in its place, and the events after it go as before.
+#[test]
+fn an_event_over_the_limit_brings_resync_required_instead() {
+    let mut r = Rig::new();
+    let a = r.dealer(DATA_WINDOW_DEFAULT);
+    r.event_of(16);
+    r.event_of(ac2_proto::event::MAX_EVENT_BYTES + 1);
+    r.event_of(16);
+    let first = recv(&a);
+    assert_eq!((first[0].as_slice(), first[1].len()), (&b"evt"[..], 16));
+    let m = recv(&a);
+    assert_eq!(m[0], FLOW_TOPIC_BYTES, "the oversize event went");
+    assert_eq!(decode_notice(&m[1]).unwrap(), FlowNotice::ResyncRequired);
+    let last = recv(&a);
+    assert_eq!((last[0].as_slice(), last[1].len()), (&b"evt"[..], 16));
+    assert!(!r.peer(0).resync_owed);
+}
+
 /// A peer with the largest window that reads nothing: the daemon fills the window with
 /// the smallest deltas and the event bound with events, and every one of them is queued:
 /// credit stops the sends, never a full queue.

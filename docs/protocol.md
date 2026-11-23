@@ -2197,7 +2197,9 @@ full new value (`inputs`: {`inputs`, `pairs`}, both whole lists; `outputs`: the 
 `calibration`, `line_calibration` (keyed by `LineCalKey`), `mic` (keyed by name), `spl_log`, `plan` and `walk_plan` (keyed by name), `walk` (keyed by
 `WalkId`)) it is `{type: "set", value: <entity>}` or `{type: "deleted", value: <key>}`.
 Applying an event is assignment. Events travel on the data socket as
-`[b"evt"][msgpack event]` and in `state.since` replies. Largest event: 1 MiB. On the data
+`[b"evt"][msgpack event]` and in `state.since` replies. Largest event: 1 MiB; one that
+would be larger is not sent on the data socket, and every connection taking events is sent
+`resync_required` in its place (the snapshot holds the value). On the data
 socket they go outside the byte window, within a bound of their own (§5.8): past it a
 connection's events are dropped and it is sent `resync_required`.
 

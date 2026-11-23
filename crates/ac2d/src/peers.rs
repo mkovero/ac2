@@ -306,9 +306,13 @@ impl Peer {
         if !wanted {
             return Ok(());
         }
+        // An event over the limit is never sent: a client would drop it unread and never
+        // learn what changed. The snapshot `resync_required` brings holds it instead.
+        let oversize =
+            kind == Outside::Event && parts.get(1).is_some_and(|b| b.len() > MAX_EVENT_BYTES);
         self.flush_resync(sock)?;
         let bytes = parts.iter().map(|p| p.len()).sum();
-        if self.resync_owed || !self.outside_room(bytes) {
+        if oversize || self.resync_owed || !self.outside_room(bytes) {
             // A keepalive is superseded by the next one; an event is covered by the snapshot
             // `resync_required` brings.
             if kind == Outside::Event {

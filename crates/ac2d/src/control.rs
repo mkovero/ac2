@@ -922,7 +922,22 @@ impl Control {
             self.sync_tone();
         }
         match ac2_proto::encode_event(&ev) {
-            Ok(b) => self.s.outbox.event(&b),
+            Ok(b) => {
+                if b.len() > ac2_proto::event::MAX_EVENT_BYTES {
+                    // A client drops it unread; the I/O thread sends every connection that
+                    // takes events `resync_required` in its place, and the snapshot that
+                    // brings holds the value.
+                    tracing::warn!(
+                        "event rev {} ({}) is {} bytes, over the {}-byte event limit: not \
+                         sent; event connections resync instead",
+                        ev.rev.0,
+                        ev.change.kind(),
+                        b.len(),
+                        ac2_proto::event::MAX_EVENT_BYTES
+                    );
+                }
+                self.s.outbox.event(&b);
+            }
             Err(e) => tracing::error!("event not encodable: {e}"),
         }
         if saved {
