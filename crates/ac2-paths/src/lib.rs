@@ -18,11 +18,14 @@
 //! Logs are neither: they are disposable diagnostics of this machine, so each OS's own log
 //! location ([`log_dir`]). With the `log` feature, [`log`] installs the shared tracing
 //! subscriber (stderr plus a per-program file there).
-#![forbid(unsafe_code)]
+// The one exception is asking the OS for this process's user (`socket_dir`).
+#![deny(unsafe_code)]
 
 #[cfg(feature = "log")]
 pub mod log;
 pub mod notify;
+#[cfg(unix)]
+pub mod socket_dir;
 
 use std::fs;
 use std::io::{self, Write};

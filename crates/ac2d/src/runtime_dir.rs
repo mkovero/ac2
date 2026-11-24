@@ -1,10 +1,11 @@
 //! The directory that holds the local ipc sockets. Whoever can enter it can connect to the
 //! daemon, which answers every local connection as the operator, or put a socket of its own
 //! in place of the daemon's before the bind: so it must be the user's own and closed to
-//! everyone else, and the daemon does not start otherwise.
+//! everyone else, and the daemon does not start otherwise. The check itself is shared with
+//! the clients ([`ac2_paths::socket_dir`]), which refuse to connect through such a
+//! directory.
 
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
-use std::path::Path;
+use std::os::unix::fs::PermissionsExt;
 
 use crate::StartError;
 
@@ -15,59 +16,29 @@ pub(crate) fn prepare(endpoint: &str) -> Result<(), StartError> {
 }
 
 fn prepare_as(endpoint: &str, uid: u32) -> Result<(), StartError> {
-    let Some(path) = endpoint.strip_prefix("ipc://") else {
-        return Ok(());
-    };
-    let Some(dir) = Path::new(path)
-        .parent()
-        .filter(|d| !d.as_os_str().is_empty())
-    else {
+    let Some(dir) = ac2_paths::socket_dir::of_endpoint(endpoint) else {
         return Ok(());
     };
     std::fs::create_dir_all(dir).map_err(StartError::Io)?;
     // Not checked here: a directory this user cannot change is refused by the check below,
     // with what is wrong with it.
     let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
-    check(dir, uid)
+    ac2_paths::socket_dir::check_as(dir, uid).map_err(|e| StartError::RuntimeDir {
+        dir: e.dir,
+        problem: e.problem,
+    })
 }
 
-fn check(dir: &Path, uid: u32) -> Result<(), StartError> {
-    let refuse = |problem: String| StartError::RuntimeDir {
-        dir: dir.to_owned(),
-        problem,
-    };
-    // Not followed: a link would let whoever owns its target choose where the sockets go.
-    let m = std::fs::symlink_metadata(dir).map_err(StartError::Io)?;
-    if !m.file_type().is_dir() {
-        return Err(refuse(
-            "it is not a directory (a symbolic link is not followed)".into(),
-        ));
-    }
-    if m.uid() != uid {
-        return Err(refuse(format!(
-            "it is owned by user {}, not by this user ({uid})",
-            m.uid()
-        )));
-    }
-    let mode = m.mode() & 0o7777;
-    if mode != 0o700 {
-        return Err(refuse(format!(
-            "its mode is {mode:o} and could not be set to 700"
-        )));
-    }
-    Ok(())
-}
-
-#[allow(unsafe_code)]
 fn effective_uid() -> u32 {
-    // SAFETY: geteuid takes nothing, touches no memory and cannot fail.
-    unsafe { libc::geteuid() }
+    ac2_paths::socket_dir::effective_uid()
 }
 
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+    use std::os::unix::fs::MetadataExt;
+    use std::path::Path;
 
     fn endpoint(dir: &Path) -> String {
         format!("ipc://{}", dir.join("ctrl.sock").display())

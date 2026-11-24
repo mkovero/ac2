@@ -10,7 +10,10 @@ and fields, one level deep) is missing here, and it checks `PROTO_VERSION`, `MAX
 The protocol is transport-agnostic bytes. Under ZeroMQ, ctrl is DEALER ↔ ROUTER (one
 message frame per request or reply) and data is DEALER ↔ ROUTER too: the client subscribes
 and returns credit on its data DEALER, the daemon sends multipart frames, events and
-keepalives to each connection as its credit allows (§5.8).
+keepalives to each connection as its credit allows (§5.8). The local pair's `ipc://` sockets
+lie in a directory that must be a directory of the user's own (not a link), mode 700: the
+daemon does not start, and a client does not connect, through one that is not, since
+whoever can enter it can reach the daemon or put a socket in its place.
 
 ## 1. Encoding rules
 

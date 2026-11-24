@@ -351,6 +351,10 @@ impl Client {
     /// Connects, says `hello` (refusing another protocol version) and starts the sync task.
     /// Must be called inside a tokio runtime.
     pub async fn connect(cfg: ClientConfig) -> Result<Self, ClientError> {
+        #[cfg(unix)]
+        for ep in [&cfg.endpoints.ctrl, &cfg.endpoints.data] {
+            ac2_paths::socket_dir::check_endpoint(ep).map_err(ClientError::SocketDir)?;
+        }
         let ctx = match &cfg.context {
             Some(c) => c.clone(),
             None => Context::new()?,
@@ -915,6 +919,29 @@ mod retry_tests {
             out.push((f[0].clone(), decode_request(&f[f.len() - 1]).unwrap()));
         }
         out
+    }
+
+    /// A local socket in a directory others may enter could be anyone's: no connect,
+    /// whatever answers there.
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_socket_directory_open_to_others_is_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        let t = tempfile::tempdir().unwrap();
+        let dir = t.path().join("run");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let ctx = Context::new().unwrap();
+        let router = ctx.socket(SocketType::Router).unwrap();
+        let eps = crate::Endpoints::local_in(&dir);
+        router.bind(&eps.ctrl).unwrap();
+        let mut cfg = ClientConfig::new(eps, "socket-dir test");
+        cfg.context = Some(ctx.clone());
+        let Err(e) = Client::connect(cfg).await else {
+            panic!("connected through a directory open to others");
+        };
+        assert!(matches!(e, ClientError::SocketDir(_)), "{e}");
+        assert!(e.to_string().contains("mode is 777"), "{e}");
     }
 
     #[tokio::test(flavor = "multi_thread")]

@@ -213,9 +213,12 @@ impl LockHolder {
         lines.next().is_none().then_some(Self { endpoints })
     }
 
-    /// Reads [`endpoints_file`]; `None` while there is none (the holder is still binding)
-    /// or it does not parse.
+    /// Reads [`endpoints_file`]; `None` while there is none (the holder is still binding),
+    /// it does not parse, or the directory it lies in is not this user's own (whoever can
+    /// write there could point the app at a daemon of their own).
     pub fn read() -> Option<Self> {
+        #[cfg(unix)]
+        ac2_paths::socket_dir::check(&runtime_dir()).ok()?;
         Self::parse(&std::fs::read_to_string(endpoints_file()).ok()?)
     }
 }
