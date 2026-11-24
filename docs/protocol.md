@@ -272,7 +272,13 @@ Every acquire, force, arm, fire, set, stop, release
 and expiry is a `generator` event naming the client (`last_action.client`; for `expiry` the
 owner whose lease expired). The output path enforces the deadline itself; if it mutes on an
 expired deadline before the control side noticed, the daemon disarms with the same `expiry`
-event, so the state never says firing while the output is silent.
+event, so the state never says firing while the output is silent. `session.devices` and
+`session.preview` ask the driver on their own threads, so refreshes are answered while it
+takes its time. Opening a stream (`session.open`, a reopen) holds the daemon until the
+driver answers: that time is not counted against the lease (its deadline, and the output
+path's after the open, move out by it), since a refresh that waited unanswered is no sign
+the holder walked away. A `session.preview` for another device while one is still opening
+is `refused`; the same one asked again is answered with it.
 
 **System max level (`gen.ceiling`).** `generator.ceiling` (dBFS RMS) is the system
 maximum: `gen.set`, `sweep.run`, `dynamics.run` and `session.detect_loopback` above it are

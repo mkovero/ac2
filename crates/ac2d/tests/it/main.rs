@@ -19,6 +19,7 @@ mod dedup;
 mod devices;
 mod discovery;
 mod drift;
+mod driver_stall;
 mod dynamics;
 mod eq;
 mod file_jobs;

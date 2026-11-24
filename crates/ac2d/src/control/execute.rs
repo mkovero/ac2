@@ -44,15 +44,12 @@ impl Control {
                     name: self.s.name.clone(),
                 }))
             }
-            Command::SessionDevices => Ok(ReplyBody::Backends(self.backend_infos())),
-            Command::SessionPreview {
-                backend,
-                device,
-                inputs,
-                pairs,
-            } => self.session_preview(backend, device, inputs, pairs),
+            Command::SessionDevices => Err(internal("session.devices is answered asynchronously")),
+            Command::SessionPreview { .. } => {
+                Err(internal("session.preview is answered asynchronously"))
+            }
             Command::SessionPreviewStop => {
-                self.close_preview();
+                self.stop_preview();
                 ack(self.store.rev())
             }
             Command::SessionDetectLoopback { .. } => Err(internal(

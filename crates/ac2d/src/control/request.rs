@@ -15,7 +15,7 @@ use crate::dedup::{Admit, Retry};
 use crate::health::SessionStream;
 use crate::util::{internal, invalid, perr, refused, wall_ns};
 
-use super::{Control, PendingFind, PendingReply, mutation_conflict};
+use super::{Control, PendingFind, PendingReply, PreviewKey, mutation_conflict};
 use crate::route::{Peer, Route};
 
 impl Control {
@@ -234,6 +234,48 @@ impl Control {
                             ));
                             return;
                         }
+                        Err(e) => Err(e),
+                    }
+                }
+                // Asking a driver for its devices, or opening one, can outlast a stimulus
+                // lease's refresh margin: on their own threads, so a running sweep's refreshes
+                // are answered meanwhile.
+                Command::SessionDevices => match self.start_devices() {
+                    Ok(token) => {
+                        self.pending.devices.insert(
+                            token,
+                            PendingReply {
+                                route: route.clone(),
+                                client,
+                                id: req.id,
+                            },
+                        );
+                        return;
+                    }
+                    Err(e) => Err(e),
+                },
+                Command::SessionPreview {
+                    backend,
+                    device,
+                    inputs,
+                    pairs,
+                } => {
+                    let waiter = PendingReply {
+                        route: route.clone(),
+                        client: client.clone(),
+                        id: req.id,
+                    };
+                    match self.start_preview(
+                        PreviewKey {
+                            backend,
+                            device,
+                            inputs,
+                            pairs,
+                        },
+                        waiter,
+                    ) {
+                        Ok(None) => return,
+                        Ok(Some(body)) => Ok(body),
                         Err(e) => Err(e),
                     }
                 }

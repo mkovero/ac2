@@ -155,6 +155,14 @@ pub(crate) enum ControlMsg {
         epoch: SessionEpoch,
         event: crate::jobs::cross_rig::CrossEvent,
     },
+    /// The `session.devices` enumeration started under `token` finished.
+    Devices {
+        token: u64,
+        backends: Vec<ac2_proto::model::BackendInfo>,
+    },
+    /// The preview opening under `token` opened or failed (its result waits in its
+    /// channel).
+    PreviewOpened { token: u64 },
     /// The `session.control_panel` call started under `token` answered (or is showing a
     /// modal panel).
     PanelShown {
@@ -325,6 +333,30 @@ struct Pending {
     panels: HashMap<u64, PendingReply>,
     /// The `delay.find` runs under way, by token.
     finds: HashMap<u64, PendingFind>,
+    /// `session.devices` enumerations under way, by token.
+    devices: HashMap<u64, PendingReply>,
+    /// The preview opening on its own thread.
+    preview: Option<PreviewOpening>,
+}
+
+/// A `session.preview` whose device opens on its own thread: every request for the same
+/// preview meanwhile is answered with it.
+struct PreviewOpening {
+    token: u64,
+    key: PreviewKey,
+    waiters: Vec<PendingReply>,
+    /// Stopped (or replaced) before it opened: closed as soon as it has.
+    stopped: bool,
+    result: std::sync::mpsc::Receiver<Result<crate::preview::Preview, ProtoError>>,
+}
+
+/// What a preview is of: a request for another one is a new preview.
+#[derive(PartialEq)]
+struct PreviewKey {
+    backend: ac2_proto::model::BackendKind,
+    device: ac2_proto::model::DeviceId,
+    inputs: Vec<ac2_proto::model::PreviewInput>,
+    pairs: Vec<ac2_proto::model::Pair>,
 }
 
 /// The keepalive this loop publishes.
@@ -785,6 +817,13 @@ impl Control {
                     }
                 }
                 Ok(ControlMsg::DelayFound { token, result }) => self.finish_find(token, *result),
+                Ok(ControlMsg::Devices { token, backends }) => {
+                    if let Some(p) = self.pending.devices.remove(&token) {
+                        let r = Ok(ReplyBody::Backends(backends));
+                        self.answer(&p.route, &p.client, p.id, r, Instant::now());
+                    }
+                }
+                Ok(ControlMsg::PreviewOpened { token }) => self.preview_opened(token),
                 Ok(ControlMsg::PanelShown { token, result }) => {
                     if let Some(p) = self.pending.panels.remove(&token) {
                         let r = result.map(|()| ReplyBody::Ack {

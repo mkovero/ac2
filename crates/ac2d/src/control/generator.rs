@@ -135,6 +135,19 @@ impl Control {
         }
     }
 
+    /// The control loop was blocked since `since` in a backend call (opening a stream):
+    /// the lease holder's refreshes waited unanswered meanwhile, which is no sign it walked
+    /// away, so that time does not count against its lease. The gate moves by the same
+    /// time only now, after the call: while the loop was blocked the output path still
+    /// enforced the old deadline.
+    pub(super) fn excuse_blocked(&mut self, since: Instant) {
+        let blocked = since.elapsed();
+        if let Some(l) = &mut self.out.lease {
+            l.deadline += blocked;
+            self.out.gate.extend(blocked);
+        }
+    }
+
     /// The network went off: a network client holding the lease can no longer refresh or
     /// stop it, so its stimulus must not play on for the rest of the lease.
     pub(super) fn drop_network_lease(&mut self) {

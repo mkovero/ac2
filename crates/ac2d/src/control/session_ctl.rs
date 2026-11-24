@@ -17,7 +17,9 @@ use crate::route::Peer;
 use crate::session::{self, Runtime};
 use crate::util::{internal, invalid, missing, refused};
 
-use super::{Control, ControlMsg, delay_samples, recovery};
+use super::{
+    Control, ControlMsg, PendingReply, PreviewKey, PreviewOpening, delay_samples, recovery,
+};
 
 impl Control {
     pub(super) fn session_open(
@@ -45,13 +47,14 @@ impl Control {
     ) -> Result<Session, ProtoError> {
         session::validate(&config)?;
         let backend = self.backend_for(config.backend)?;
+        let blocked = Instant::now();
         // The preview may hold the very device the session is about to open.
         self.close_preview();
         if self.session.is_some() || self.audio_recovery.is_some() {
             self.session_close(client);
         }
         let epoch = SessionEpoch(self.epoch().0 + 1);
-        let mut rt = match Runtime::open(
+        let rt = Runtime::open(
             &*backend,
             &config,
             &[],
@@ -60,7 +63,9 @@ impl Control {
             self.s.to_self.clone(),
             self.s.fps,
             self.replay_marks.clone(),
-        ) {
+        );
+        self.excuse_blocked(blocked);
+        let mut rt = match rt {
             Ok(rt) => rt,
             Err(e) => {
                 tracing::warn!("session open failed: {}", e.msg);
@@ -215,10 +220,11 @@ impl Control {
                 return Err(e);
             }
         };
+        let blocked = Instant::now();
         self.wind_down(ac2_proto::model::RecordingEnd::SessionReopened);
         self.keep_spare_links(&rt);
         recovery::close_bounded(rt, recovery::CLOSE_BOUND);
-        match Runtime::open(
+        let rt = Runtime::open(
             &*backend,
             &config,
             routes,
@@ -227,7 +233,9 @@ impl Control {
             self.s.to_self.clone(),
             self.s.fps,
             self.replay_marks.clone(),
-        ) {
+        );
+        self.excuse_blocked(blocked);
+        match rt {
             Ok(mut rt) => {
                 rt.open.replay = replay;
                 rt.link_spares(&self.spare_links);
@@ -286,53 +294,57 @@ impl Control {
         .ok_or_else(|| missing(format!("this daemon offers no {kind:?} backend")))
     }
 
-    pub(super) fn backend_infos(&self) -> Vec<BackendInfo> {
-        self.s
-            .backends
-            .iter()
-            .map(|b| {
-                let (availability, devices) = match b.enumerate() {
-                    Ok(d) => (
-                        Availability::Available,
-                        d.iter().map(conv::device_info).collect(),
-                    ),
-                    Err(ac2_audio::AudioError::Unavailable { reason, .. }) => (
-                        Availability::Unavailable {
-                            reason: reason.to_string(),
-                        },
-                        Vec::new(),
-                    ),
-                    Err(e) => (
-                        Availability::Unavailable {
-                            reason: e.to_string(),
-                        },
-                        Vec::new(),
-                    ),
-                };
-                BackendInfo {
-                    kind: conv::backend_kind(b.kind()),
-                    description: crate::backend::describe(b.kind()),
-                    availability,
-                    devices,
-                }
+    /// Starts `session.devices` on its own thread: a driver may take its time to list its
+    /// devices. Answered with [`ControlMsg::Devices`].
+    pub(super) fn start_devices(&mut self) -> Result<u64, ProtoError> {
+        let backends = self.s.backends.clone();
+        let token = self.ids.token();
+        let to = self.s.to_self.clone();
+        std::thread::Builder::new()
+            .name("ac2d-devices".into())
+            .spawn(move || {
+                let backends = backend_infos(&backends);
+                let _ = to.send(ControlMsg::Devices { token, backends });
             })
-            .collect()
+            .map_err(|e| internal(format!("cannot list the devices: {e}")))?;
+        Ok(token)
     }
 
+    /// Closes the preview, and one still opening as soon as it has: whatever comes next
+    /// needs its device. Waits for an opening one, at most [`PREVIEW_OPEN_WAIT`].
     pub(super) fn close_preview(&mut self) {
+        if let Some(o) = self.pending.preview.take() {
+            let r = o
+                .result
+                .recv_timeout(PREVIEW_OPEN_WAIT)
+                .unwrap_or_else(|_| Err(internal("the preview did not open in time")));
+            self.preview_settled(o, r, true);
+        }
         if let Some(p) = self.preview.take() {
             p.close();
             self.s.outbox.clear(b"session/preview");
         }
     }
 
-    pub(super) fn session_preview(
+    /// `session.preview_stop`: the preview closes; one still opening closes once it has,
+    /// without waiting for it here.
+    pub(super) fn stop_preview(&mut self) {
+        if let Some(o) = &mut self.pending.preview {
+            o.stopped = true;
+        }
+        if let Some(p) = self.preview.take() {
+            p.close();
+            self.s.outbox.clear(b"session/preview");
+        }
+    }
+
+    /// `session.preview`: the running preview renewed (`Some`), or `waiter` answered once
+    /// the device opens on its own thread (`None`).
+    pub(super) fn start_preview(
         &mut self,
-        kind: ac2_proto::model::BackendKind,
-        device: ac2_proto::model::DeviceId,
-        inputs: Vec<ac2_proto::model::PreviewInput>,
-        pairs: Vec<ac2_proto::model::Pair>,
-    ) -> Result<ReplyBody, ProtoError> {
+        key: PreviewKey,
+        waiter: PendingReply,
+    ) -> Result<Option<ReplyBody>, ProtoError> {
         if self.pending.detecting.is_some() {
             // The burst holds the device; a preview asked for before the detection started
             // must not reopen it under the burst.
@@ -340,38 +352,105 @@ impl Control {
                 "a loopback detection holds the device; the meters return with its result",
             ));
         }
+        if let Some(o) = &mut self.pending.preview {
+            if o.key != key {
+                return Err(refused(
+                    "another preview is still opening; ask again once it has answered",
+                ));
+            }
+            o.stopped = false;
+            o.waiters.push(waiter);
+            return Ok(None);
+        }
         // The declared kinds and pairs travel in every frame's meta, fixed when the stream
         // opens: a changed declaration reopens the preview like another device would.
         if let Some(p) = &mut self.preview
-            && p.backend == kind
-            && p.device == device
-            && p.meta.inputs == inputs
-            && p.meta.pairs == pairs
+            && p.backend == key.backend
+            && p.device == key.device
+            && p.meta.inputs == key.inputs
+            && p.meta.pairs == key.pairs
         {
             match p.dead(Instant::now()) {
                 None => {
                     p.renew();
-                    return Ok(ReplyBody::Preview(p.wire()));
+                    return Ok(Some(ReplyBody::Preview(p.wire())));
                 }
                 Some(why) => {
-                    tracing::warn!("preview of {kind:?} {:?}: {why}; reopening it", device.0);
+                    tracing::warn!(
+                        "preview of {:?} {:?}: {why}; reopening it",
+                        key.backend,
+                        key.device.0
+                    );
                 }
             }
         }
-        let backend = self.backend_for(Some(kind))?;
+        let backend = self.backend_for(Some(key.backend))?;
         self.close_preview();
-        let p = Preview::open(
-            &*backend,
-            (kind, device),
-            inputs,
-            pairs,
+        let token = self.ids.token();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let to = self.s.to_self.clone();
+        let what = (key.backend, key.device.clone());
+        let (inputs, pairs) = (key.inputs.clone(), key.pairs.clone());
+        let (max_level, env, levels) = (
             self.s.max_level,
             self.env_at(self.epoch()),
             Arc::clone(&self.levels),
-        )?;
-        let wire = p.wire();
-        self.preview = Some(p);
-        Ok(ReplyBody::Preview(wire))
+        );
+        std::thread::Builder::new()
+            .name("ac2d-preview-open".into())
+            .spawn(move || {
+                let r = Preview::open(&*backend, what, inputs, pairs, max_level, env, levels);
+                // The result first: the message only says it is there.
+                let _ = tx.send(r);
+                let _ = to.send(ControlMsg::PreviewOpened { token });
+            })
+            .map_err(|e| internal(format!("cannot open the preview: {e}")))?;
+        self.pending.preview = Some(PreviewOpening {
+            token,
+            key,
+            waiters: vec![waiter],
+            stopped: false,
+            result: rx,
+        });
+        Ok(None)
+    }
+
+    /// The preview opening under `token` reported back.
+    pub(super) fn preview_opened(&mut self, token: u64) {
+        let Some(o) = self.pending.preview.take_if(|o| o.token == token) else {
+            return;
+        };
+        let r = o
+            .result
+            .try_recv()
+            .unwrap_or_else(|_| Err(internal("the preview opening ended without a result")));
+        self.preview_settled(o, r, false);
+    }
+
+    /// An opening preview's result `r`: kept and sent to every waiter, or closed when it was
+    /// stopped (or `closing`) meanwhile.
+    fn preview_settled(
+        &mut self,
+        o: PreviewOpening,
+        r: Result<Preview, ProtoError>,
+        closing: bool,
+    ) {
+        let r = match r {
+            Ok(p) if o.stopped || closing => {
+                p.close();
+                Err(refused("the preview was stopped before its device opened"))
+            }
+            Ok(p) => {
+                let wire = p.wire();
+                self.preview = Some(p);
+                Ok(ReplyBody::Preview(wire))
+            }
+            Err(e) => Err(e),
+        };
+        let now = Instant::now();
+        for w in o.waiters {
+            self.answer(&w.route, &w.client, w.id, r.clone(), now);
+        }
     }
 
     /// Checks a `session.detect_loopback` and starts it on its own thread.
@@ -478,6 +557,43 @@ impl Control {
         Ok(token)
     }
 }
+
+/// Every backend with its devices, or why it offers none.
+fn backend_infos(backends: &[Arc<dyn Backend>]) -> Vec<BackendInfo> {
+    backends
+        .iter()
+        .map(|b| {
+            let (availability, devices) = match b.enumerate() {
+                Ok(d) => (
+                    Availability::Available,
+                    d.iter().map(conv::device_info).collect(),
+                ),
+                Err(ac2_audio::AudioError::Unavailable { reason, .. }) => (
+                    Availability::Unavailable {
+                        reason: reason.to_string(),
+                    },
+                    Vec::new(),
+                ),
+                Err(e) => (
+                    Availability::Unavailable {
+                        reason: e.to_string(),
+                    },
+                    Vec::new(),
+                ),
+            };
+            BackendInfo {
+                kind: conv::backend_kind(b.kind()),
+                description: crate::backend::describe(b.kind()),
+                availability,
+                devices,
+            }
+        })
+        .collect()
+}
+
+/// How long closing the preview waits for one still opening before it goes on: what comes
+/// next needs the device, and a driver that has not opened it by then is not going to.
+const PREVIEW_OPEN_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// How long `session.control_panel` waits for the driver before answering that its panel
 /// is showing: within a client's reply deadline (1.5 s per try).
