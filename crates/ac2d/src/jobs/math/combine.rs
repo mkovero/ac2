@@ -346,7 +346,7 @@ pub(crate) fn combine(
     // difference or average refers each to the reference delay; a cascade and an alignment
     // refer nothing. A ratio on one time base turns A/B by −2π·centre·(d_a − d_b);
     // what it should turn by is −2π·f·(d_a − d_b) at the operands' common column frequency
-    // f, so A alone takes the extra 2π·(f − centre)·(d_a − d_b): A referred to B's delay,
+    // f, so A alone takes the extra −2π·(f − centre)·(d_a − d_b): A referred to B's delay,
     // and equal delays leave the ratio untouched.
     // Only operands that all state the same column frequencies (one ladder, one grid) are
     // turned: a column of a stored operand, or of a live one on another ladder, belongs to
