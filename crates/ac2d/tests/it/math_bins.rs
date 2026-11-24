@@ -28,13 +28,13 @@ use common::*;
 use num_complex::Complex64;
 
 /// Input 1 hears the speaker +3 dB one acoustic delay late, input 2 −3 dB two late, input 3
-/// nothing.
+/// nothing, input 4 −3 dB five late.
 fn backend() -> FakeBackend {
     let db = |g: f32| 10f32.powf(g / 20.0);
     FakeBackend::new(FakeConfig {
         sample_rate: FS,
         block_frames: BLOCK,
-        inputs: 4,
+        inputs: 5,
         outputs: 2,
         drive: ac2_audio::fake::FakeDrive::Manual,
         seed: 5,
@@ -42,6 +42,7 @@ fn backend() -> FakeBackend {
             FakePath::loopback(0, 0, LOOP_DELAY),
             FakePath::acoustic(0, 1, LOOP_DELAY + ACOUSTIC_DELAY, vec![db(3.0)], 1e-5),
             FakePath::acoustic(0, 2, LOOP_DELAY + 2 * ACOUSTIC_DELAY, vec![db(-3.0)], 1e-5),
+            FakePath::acoustic(0, 4, LOOP_DELAY + 5 * ACOUSTIC_DELAY, vec![db(-3.0)], 1e-5),
         ],
         ..FakeConfig::default()
     })
@@ -101,7 +102,7 @@ fn rig(name: &str, seats: &[(u16, TransferResolution, LfWindow, u32)], prefixes:
     let h = Daemon::start(cfg).unwrap();
     let (mut c, sub) = connect(&h, prefixes);
     let mut s = session(false);
-    s.input_channels = vec![0, 1, 2, 3];
+    s.input_channels = vec![0, 1, 2, 3, 4];
     c.ok(Command::SessionOpen { config: s });
     for (i, (input, res, lf, n)) in seats.iter().enumerate() {
         let m = MeasId(i as u32 + 1);
@@ -261,9 +262,7 @@ fn a_difference_of_live_bins_digs_down() {
 
     // Stage 0 bin 100 (1 171.9 Hz) and stage 1 bin 110 (322 Hz) are alone in their 1/96
     // columns, where the operands' columns are their bins: the math's column is the same
-    // difference, but with the delays referred at the column's centre rather than at the
-    // bin, as a column has no other frequency. Between them lies 2π·Δf·(delay difference),
-    // a fraction of a degree here but some hundredths of a dB on the difference.
+    // difference, the delays referred at the bin's frequency as the column's estimate is.
     for (s, bin) in [(0u8, 100u32), (1, 110)] {
         let (m, a, b) = (
             bins(&got[&stage(3, s)]),
@@ -272,10 +271,9 @@ fn a_difference_of_live_bins_digs_down() {
         );
         let i = (bin - m.meta.first_bin) as usize;
         let c = column(bin_hz(m, i));
-        let centre = 1000.0 * 2f64.powf((c as f64 - 672.0) / 96.0);
         let tt = tf(t);
         assert_eq!(tt.validity[c], ValidityMask::NONE);
-        let want = difference(a, b, i, to, centre);
+        let want = difference(a, b, i, to, bin_hz(m, i));
         let col = Complex64::from_polar(
             10f64.powf(f64::from(tt.mag[c]) / 20.0),
             f64::from(tt.phase[c]).to_radians(),
@@ -470,6 +468,118 @@ fn an_average_of_live_bins_is_formed_per_bin() {
             }
         }
         assert!(checked > 1500, "{method:?}: {checked}");
+    }
+    r.h.shutdown();
+}
+
+/// The math `A − B` at its column `c`, as a complex response.
+fn column_z(t: &Frame, c: usize) -> Complex64 {
+    let t = tf(t);
+    Complex64::from_polar(
+        10f64.powf(f64::from(t.mag[c]) / 20.0),
+        f64::from(t.phase[c]).to_radians(),
+    )
+}
+
+/// A difference's grid column is the difference of its operands' bins, each referred at its
+/// bin's frequency, for operands 2.5 ms and 10 ms apart: a column holding one bin equals that
+/// bin's difference, and one of several lies among their differences. Referred at the column
+/// centre instead, a column would miss by `2π·(centre − bin)·Δd`, which the test prints.
+#[test]
+fn a_math_column_is_its_bins_math() {
+    let mut r = rig(
+        "math-bins-columns",
+        &[(1, BINS, STD, 1), (2, BINS, STD, 2), (4, BINS, STD, 5)],
+        &[b"d/"],
+    );
+    for (m, other) in [(4u32, 2u32), (5, 3)] {
+        assert_eq!(
+            create(&mut r, math("A - B", minus(live(1), live(other)))),
+            MeasId(m)
+        );
+    }
+    run(&mut r.d, 1.5);
+    for (m, other) in [(4u32, 2u32), (5, 3)] {
+        let got = newest(&mut r, m, &[1, other, m]);
+        let t = &got[&tf_topic(m)];
+        let to = tf(t).meta.delay.0;
+        let (mut alone, mut several) = (0, 0);
+        let (mut miss, mut centre_miss) = (0f64, 0f64);
+        for s in 0..2u8 {
+            let (a, b) = (bins(&got[&stage(1, s)]), bins(&got[&stage(other, s)]));
+            let delays = (a.meta.delay.0 - b.meta.delay.0).abs();
+            assert!(
+                (delays - [0.0025, 0.01][(m - 4) as usize]).abs() < 1e-9,
+                "{delays}"
+            );
+            // Bins by the 1/96 column holding them, the stage's outermost columns left out:
+            // a column there may blend with the next stage.
+            let mut columns: Vec<(usize, Vec<usize>)> = Vec::new();
+            for i in 0..a.mag.len() {
+                let c = column(bin_hz(a, i));
+                match columns.last_mut() {
+                    Some((last, v)) if *last == c => v.push(i),
+                    _ => columns.push((c, vec![i])),
+                }
+            }
+            let inner = &columns[1..columns.len().saturating_sub(1)];
+            for (c, held) in inner {
+                if tf(t).validity[*c] != ValidityMask::NONE
+                    || held.iter().any(|&i| a.mag[i].is_nan() || b.mag[i].is_nan())
+                {
+                    continue;
+                }
+                let col = column_z(t, *c);
+                let each: Vec<Complex64> = held
+                    .iter()
+                    .map(|&i| difference(a, b, i, to, bin_hz(a, i)))
+                    .collect();
+                let scale = held
+                    .iter()
+                    .map(|&i| z(a, i).norm() + z(b, i).norm())
+                    .fold(0.0, f64::max);
+                if let [i] = held[..] {
+                    let want = each[0];
+                    assert!(
+                        (col - want).norm() <= 2e-3 * scale,
+                        "math {m} stage {s} column {c}: {col} {want}"
+                    );
+                    let centre = 1000.0 * 2f64.powf((*c as f64 - 672.0) / 96.0);
+                    let off = difference(a, b, i, to, centre);
+                    centre_miss = centre_miss.max((off - want).norm() / scale);
+                    miss = miss.max((col - want).norm() / scale);
+                    alone += 1;
+                } else {
+                    // Inside the box the bins' differences span, widened by the bulge of the
+                    // curve between neighbouring bins (at most half their distance).
+                    let step = each
+                        .windows(2)
+                        .map(|w| (w[1] - w[0]).norm())
+                        .fold(0.0, f64::max);
+                    let tol = 0.5 * step + 2e-3 * scale;
+                    let inside = |part: fn(&Complex64) -> f64| {
+                        let (lo, hi) = each
+                            .iter()
+                            .map(part)
+                            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
+                                (lo.min(v), hi.max(v))
+                            });
+                        (lo - tol..=hi + tol).contains(&part(&col))
+                    };
+                    assert!(
+                        inside(|z| z.re) && inside(|z| z.im),
+                        "math {m} stage {s} column {c}: {col} among {each:?}"
+                    );
+                    several += 1;
+                }
+            }
+        }
+        eprintln!(
+            "math {m}: {alone} columns of one bin, {several} of several; a column of one bin \
+             misses its bin by up to {miss:.5} of |A| + |B|, at the centre it would by \
+             {centre_miss:.4}"
+        );
+        assert!(alone > 100 && several > 100, "math {m}: {alone} {several}");
     }
     r.h.shutdown();
 }

@@ -79,6 +79,31 @@ impl Mtw {
         self.stages.get(stage).map_or(0, |s| s.est.held())
     }
 
+    /// Per grid column, the frequency its estimate belongs to: the mean of the bins its
+    /// ΣGxy / ΣGxx sums, for a crossover blend `(1 − w)·deep + w·shallow` of the two stages'
+    /// means, and the column centre where no stage serves. Every bin's phase is referred to
+    /// the delay at its own frequency, so a later change of delay turns a column that holds
+    /// one bin exactly at that bin, and one of several about at their mean, not at the column
+    /// centre. Fixed by the layout and grid.
+    pub fn column_hz(&self) -> Vec<f64> {
+        let mean = |b: &super::StageBins| {
+            0.5 * (b.lo + b.hi - 1) as f64 * self.layout.stages[b.stage].bin_hz
+        };
+        self.plan
+            .iter()
+            .enumerate()
+            .map(|(i, src)| match src {
+                super::ColumnSource::None => self.config.grid.frequency(i),
+                super::ColumnSource::Stage(b) => mean(b),
+                super::ColumnSource::Blend {
+                    deep,
+                    shallow,
+                    shallow_weight: w,
+                } => (1.0 - w) * mean(deep) + w * mean(shallow),
+            })
+            .collect()
+    }
+
     /// One past the newest measurement input index stage `stage`'s newest averaged block
     /// depends on; `None` before its first block (or after its averages were reset).
     pub fn stage_last_block_end(&self, stage: usize) -> Option<u64> {

@@ -12,13 +12,13 @@ use std::time::{Duration, Instant};
 
 use ac2_core::mic_curve::Correction;
 use ac2_core::mtw::{DrawnBins, Mtw};
-use ac2_proto::frame::{BinLayout, BinStage, BinsFrame, BinsMeta, Frame, FrameData};
+use ac2_proto::frame::{BinLayout, BinStage, BinsFrame, BinsMeta, FrameData};
 use ac2_proto::model::FreqRange;
 use ac2_proto::topic::{MAX_BIN_STAGES, Topic};
 use ac2_proto::units::{Hz, MeasId, Rev, Samples, Seconds};
 use num_complex::Complex64;
 
-use super::{Due, Emitter, Flush, JobMsg, Pace, Probe, StampArgs};
+use super::{Due, Emitter, Flush, JobMsg, Live, Pace, Probe, StampArgs};
 
 /// What every stage frame of an emit repeats from that emit's `tf`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -269,7 +269,7 @@ impl StageStreams {
 /// averages and stamp, every stage's frame (`None` when it keeps no stage bins).
 #[derive(Debug)]
 pub(crate) struct OperandBins {
-    pub(crate) tf: Frame,
+    pub(crate) tf: Live,
     pub(crate) stages: Option<Vec<BinsFrame>>,
 }
 

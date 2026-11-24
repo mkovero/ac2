@@ -44,7 +44,7 @@ pub(super) fn layout(
         let Answer::Result(f) = a else {
             return None;
         };
-        let FrameData::Tf(t) = &f.data else {
+        let FrameData::Tf(t) = &f.frame.data else {
             return None;
         };
         let l = t.meta.bins.as_deref()?;
@@ -80,7 +80,7 @@ pub(super) fn frames(
     let delays: Option<Vec<f64>> = answers
         .iter()
         .map(|a| match a {
-            Answer::Result(f) => match &f.data {
+            Answer::Result(f) => match &f.frame.data {
                 FrameData::Tf(t) => Some(t.meta.delay.0),
                 _ => None,
             },

@@ -18,6 +18,7 @@ use ac2_proto::topic::{Stream, Topic};
 use ac2_proto::units::{Hz, MeasId, Rev, Seconds};
 use num_complex::Complex64;
 
+use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
@@ -143,6 +144,8 @@ pub(crate) struct Transfer {
     /// Where the grid is finer than the stage serving it, with that stage's bin width;
     /// fixed by the layout and grid.
     unresolved: Vec<ac2_proto::model::BinRange>,
+    /// Per column, the frequency its estimate belongs to; fixed by the layout and grid.
+    column_hz: Arc<[f64]>,
     /// Each analysis stage's own bins, at the `bins` resolution only.
     bins: Option<StageStreams>,
     /// Span of the applied mic curve's points, if one is applied.
@@ -295,6 +298,7 @@ impl Transfer {
             .then(|| StageStreams::new(meas, &mtw, correction));
         Ok(Self {
             unresolved,
+            column_hz: mtw.column_hz().into(),
             bins,
             corr: correction.map(|c| column_correction(&grid, c)),
             mic_range: correction.map(crate::conv::mic_range),
@@ -916,6 +920,10 @@ impl Analysis for Transfer {
         }
         let stamp = self.stamp(end, self.last_prot);
         Some((stamp, FrameData::Tf(self.tf_frame(false))))
+    }
+
+    fn column_hz(&self) -> Option<Arc<[f64]>> {
+        Some(Arc::clone(&self.column_hz))
     }
 
     fn stage_bins(&mut self) -> Option<Vec<BinsFrame>> {

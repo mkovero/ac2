@@ -246,7 +246,7 @@ pub(crate) enum JobMsg {
     Blocks(Batch),
     Cmd(JobCmd),
     /// Form the current result for a math trace's operand and answer on the channel.
-    Capture(SyncSender<Option<Frame>>),
+    Capture(SyncSender<Option<Live>>),
     /// As `Capture`, with every analysis stage's bins of the same averages and stamp.
     CaptureBins(SyncSender<Option<bins::OperandBins>>),
     /// Form the current result with its impulse response for `trace.capture`.
@@ -276,6 +276,12 @@ pub(crate) trait Analysis: Send {
     /// read when called right after it; `None` for an analysis that keeps no stage bins (one
     /// not at the `bins` resolution), which a math then cannot combine per bin.
     fn stage_bins(&mut self) -> Option<Vec<BinsFrame>> {
+        None
+    }
+    /// Per column of [`Analysis::capture`]'s result, the frequency its estimate belongs to
+    /// (`ac2_core::mtw::Mtw::column_hz`), where that is not the column centre; `None` for
+    /// an analysis whose columns are their centres' or that does not know.
+    fn column_hz(&self) -> Option<Arc<[f64]>> {
         None
     }
     /// Frames of further audio without which the job can form nothing new, so it sleeps
@@ -308,6 +314,14 @@ pub(crate) trait Analysis: Send {
 /// any message and is answered after at most one drain of queued audio, so only a stuck job
 /// takes this long.
 const CAPTURE_WAIT: Duration = Duration::from_secs(1);
+
+/// A job's current result as a math takes it (through a [`Probe`]).
+#[derive(Debug)]
+pub(crate) struct Live {
+    pub(crate) frame: Frame,
+    /// [`Analysis::column_hz`].
+    pub(crate) column_hz: Option<Arc<[f64]>>,
+}
 
 /// A job's result as `trace.capture` stores it.
 #[derive(Debug)]
@@ -388,7 +402,7 @@ pub(crate) struct Probe {
 impl Probe {
     /// Sends the request; the answer arrives on the returned channel (nothing if the job
     /// has stopped).
-    pub(crate) fn request(&self) -> Option<Receiver<Option<Frame>>> {
+    pub(crate) fn request(&self) -> Option<Receiver<Option<Live>>> {
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         self.tx.send(JobMsg::Capture(tx)).ok()?;
         self.thread.unpark();
@@ -544,7 +558,10 @@ fn run(
                     true
                 }
                 JobMsg::Capture(reply) => {
-                    let f = a.capture().map(|(s, d)| em.frame(s, 0, d));
+                    let f = a.capture().map(|(s, d)| Live {
+                        frame: em.frame(s, 0, d),
+                        column_hz: a.column_hz(),
+                    });
                     let _ = reply.send(f);
                     false
                 }
@@ -552,7 +569,10 @@ fn run(
                     // Nothing comes between the two reads, so the stages are of the same
                     // averages as the result.
                     let c = a.capture().map(|(s, d)| bins::OperandBins {
-                        tf: em.frame(s, 0, d),
+                        tf: Live {
+                            frame: em.frame(s, 0, d),
+                            column_hz: a.column_hz(),
+                        },
                         stages: a.stage_bins(),
                     });
                     let _ = reply.send(c);

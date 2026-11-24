@@ -2,7 +2,9 @@
 //! known responses, a ratio and a sum of live and stored operands, operands left out and
 //! why, and the per-operand delay reference.
 
-use ac2_proto::frame::{FrameStamp, OperandStatus, ProtectionFlags, TfFrame, TfMeta, ValidityMask};
+use ac2_proto::frame::{
+    Frame, FrameStamp, OperandStatus, ProtectionFlags, TfFrame, TfMeta, ValidityMask,
+};
 use ac2_proto::grid::GridDef;
 use ac2_proto::model::{
     AverageMethod, MathConfig, MathDomain, MathExpr, MathOp, MathReference, Operand, PhaseBasis,
@@ -14,7 +16,7 @@ use ac2_proto::units::{
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use super::*;
-use crate::jobs::Probe;
+use crate::jobs::{Live, Probe};
 
 const EPOCH: SessionEpoch = SessionEpoch(3);
 
@@ -35,7 +37,7 @@ fn member(meas: u32, db: f32, arrival: f64, inserted: f64, prot: ProtectionFlags
         .iter()
         .map(|f| ac2_traces::columns::wrap_deg(-360.0 * f * (arrival - inserted)) as f32)
         .collect();
-    Answer::Result(Box::new(Frame {
+    let frame = Frame {
         stamp: FrameStamp {
             seq: 0,
             audio_sample: SampleIndex(48_000),
@@ -68,6 +70,10 @@ fn member(meas: u32, db: f32, arrival: f64, inserted: f64, prot: ProtectionFlags
             validity: vec![ValidityMask::NONE; f.len()],
             align: None,
         }),
+    };
+    Answer::Result(Box::new(Live {
+        frame,
+        column_hz: None,
     }))
 }
 
@@ -172,7 +178,7 @@ fn filled(a: Answer, filled: f32) -> Answer {
     let Answer::Result(mut f) = a else {
         panic!("live operand");
     };
-    let FrameData::Tf(t) = &mut f.data else {
+    let FrameData::Tf(t) = &mut f.frame.data else {
         panic!("transfer");
     };
     t.meta.filled = filled;
@@ -218,7 +224,7 @@ fn bins(a: Answer, ranges: &[(f64, f64, f64)]) -> Answer {
     let Answer::Result(mut f) = a else {
         panic!("live operand");
     };
-    let FrameData::Tf(t) = &mut f.data else {
+    let FrameData::Tf(t) = &mut f.frame.data else {
         panic!("transfer");
     };
     t.meta.unresolved = Some(
@@ -376,7 +382,7 @@ fn an_operand_gap_is_a_gap_in_the_result() {
     let c = avg(&[1, 2], AverageMethod::Power);
     let mut b = flat(2, 0.0);
     if let Answer::Result(fr) = &mut b
-        && let FrameData::Tf(tf) = &mut fr.data
+        && let FrameData::Tf(tf) = &mut fr.frame.data
     {
         tf.validity[0] = ValidityMask::SETTLING;
         tf.mag[0] = f32::NAN;
@@ -741,7 +747,7 @@ fn range_band_needs_three_positions() {
 fn range_band_gap_follows_the_average() {
     let mut b = flat(2, 0.0);
     if let Answer::Result(fr) = &mut b
-        && let FrameData::Tf(tf) = &mut fr.data
+        && let FrameData::Tf(tf) = &mut fr.frame.data
     {
         tf.validity[0] = ValidityMask::SETTLING;
         tf.mag[0] = f32::NAN;
@@ -762,7 +768,7 @@ fn at_bins(a: Answer, mic: (f64, f64)) -> Answer {
     let Answer::Result(mut f) = a else {
         panic!("live operand");
     };
-    let FrameData::Tf(t) = &mut f.data else {
+    let FrameData::Tf(t) = &mut f.frame.data else {
         panic!("transfer");
     };
     t.meta.bins = Some(Box::new(ac2_proto::frame::BinLayout {
@@ -786,7 +792,7 @@ fn stage_of(a: &Answer, mag: Vec<f32>) -> Option<Vec<BinsFrame>> {
     let Answer::Result(f) = a else {
         panic!("live operand");
     };
-    let FrameData::Tf(t) = &f.data else {
+    let FrameData::Tf(t) = &f.frame.data else {
         panic!("transfer");
     };
     let n = mag.len();
@@ -854,4 +860,59 @@ fn a_stage_bin_without_an_operand_value_has_none() {
     let tf = run(&c, &[None; 2], &answers);
     let without = [bins[0].clone(), None];
     assert!(stages::frames(&c, &tf, &answers, &without, &[None; 2], EPOCH, &[0]).is_empty());
+}
+
+/// A live operand whose columns' estimates belong to `hz`, not their centres.
+fn at_hz(a: Answer, hz: Vec<f64>) -> Answer {
+    let Answer::Result(mut f) = a else {
+        panic!("live operand");
+    };
+    f.column_hz = Some(hz.into());
+    Answer::Result(f)
+}
+
+/// A live operand's column is referred to the math's delay at the frequency its estimate
+/// belongs to: `A − B` with B 10 ms later and its columns' bins 1 % above their centres is
+/// `1 − e^{−j2π·f·10 ms}` at those frequencies; a stored operand is taken at the centres.
+#[test]
+fn a_live_column_is_referred_at_its_bins() {
+    let centres = grid().centres();
+    let hz: Vec<f64> = centres.iter().map(|f| f * 1.01).collect();
+    let c = binary(meas(1), MathOp::Subtract, meas(2));
+    let d = 0.01;
+    let answers = [
+        flat(1, 0.0),
+        at_hz(member(2, 0.0, d, d, ProtectionFlags::NONE), hz.clone()),
+    ];
+    let f = run(&c, &[None; 2], &answers);
+    assert_eq!(f.meta.delay, Seconds(0.0));
+    let at = |f: f64| {
+        num_complex::Complex64::new(1.0, 0.0)
+            - num_complex::Complex64::from_polar(1.0, -std::f64::consts::TAU * f * d)
+    };
+    let mut apart = 0;
+    for (i, (h, c)) in hz.iter().zip(&centres).enumerate() {
+        let got = num_complex::Complex64::from_polar(
+            10f64.powf(f64::from(f.mag[i]) / 20.0),
+            f64::from(f.phase[i]).to_radians(),
+        );
+        assert!((got - at(*h)).norm() < 1e-4, "column {i}: {got} {}", at(*h));
+        apart += usize::from((got - at(*c)).norm() > 1e-2);
+    }
+    assert!(apart > centres.len() / 2, "{apart}");
+    // The same operand stored keeps its centres.
+    let stored_b = binary(
+        meas(1),
+        MathOp::Subtract,
+        Operand::Trace { trace: TraceId(4) },
+    );
+    let answers = [flat(1, 0.0), stored(0.0, d, Some(EPOCH))];
+    let f = run(&stored_b, &[None; 2], &answers);
+    for (i, c) in centres.iter().enumerate() {
+        let got = num_complex::Complex64::from_polar(
+            10f64.powf(f64::from(f.mag[i]) / 20.0),
+            f64::from(f.phase[i]).to_radians(),
+        );
+        assert!((got - at(*c)).norm() < 1e-4, "column {i}");
+    }
 }

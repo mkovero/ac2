@@ -2,6 +2,8 @@
 //! and why the others do not, the delay a phase-combining result is referred to, and the
 //! frame that states it all.
 
+use std::sync::Arc;
+
 use ac2_core::average::DelayReference as CoreReference;
 use ac2_proto::frame::{
     Frame, FrameData, MathState, OperandState, OperandStatus, ProtectionFlags, RtaFrame, RtaMeta,
@@ -14,7 +16,7 @@ use ac2_proto::model::{
     PhaseBasis, SpecLevel, Weighting, Window,
 };
 use ac2_proto::units::{Hz, MeasId, Seconds, SessionEpoch};
-use ac2_traces::columns::Columns;
+use ac2_traces::columns::{Columns, wrap_deg};
 use ac2_traces::math::{self, Combine, Input};
 use ac2_traces::ops::capture_columns;
 
@@ -31,7 +33,7 @@ pub(super) fn usable(
         Answer::Stopped => return Err(OperandStatus::Stopped),
         Answer::NoResult => return Err(OperandStatus::Settling),
         Answer::Stored(_) => return Err(OperandStatus::Mismatch),
-        Answer::Result(f) => f,
+        Answer::Result(f) => &f.frame,
     };
     let kind_ok = matches!(
         (&f.data, domain),
@@ -90,7 +92,32 @@ struct Value {
     /// Where a live transfer's columns are finer than its bins (`TfMeta::unresolved`);
     /// `None` for a stored operand, which keeps no ranges.
     unresolved: Option<Vec<BinRange>>,
+    /// Per column, the frequency a live transfer's estimate belongs to
+    /// ([`super::Live::column_hz`]); `None` for a stored operand, whose columns are taken at
+    /// their centres.
+    column_hz: Option<Arc<[f64]>>,
     frame: Option<FrameData>,
+}
+
+impl Value {
+    /// Turns the phase so that referring it from `delay` to `to` at the column centres, as
+    /// the math does, refers it at [`Value::column_hz`]: a live column's bins were each
+    /// referred to `delay` at their own frequency, so a change of delay turns the column at
+    /// theirs, and at the centre it would miss by `2π·(centre − column_hz)·(delay − to)`.
+    fn refer_at_bins(&mut self, centres: &[f64], to: f64) {
+        let (Some(hz), Some(phase)) = (&self.column_hz, self.columns.phase_deg.as_mut()) else {
+            return;
+        };
+        if hz.len() != centres.len() || phase.len() != centres.len() {
+            return;
+        }
+        for ((p, f), c) in phase.iter_mut().zip(hz.iter()).zip(centres) {
+            let turn = 360.0 * (f - c) * (self.delay - to);
+            if p.is_finite() && turn.is_finite() {
+                *p = wrap_deg(f64::from(*p) - turn) as f32;
+            }
+        }
+    }
 }
 
 /// The unresolved ranges of a result combining operands with `each`'s: every piece covered
@@ -142,6 +169,7 @@ fn value(a: &Answer, f: Option<&Frame>, epoch: SessionEpoch) -> Option<Value> {
             filled: 1.0,
             settling: None,
             unresolved: None,
+            column_hz: None,
             frame: None,
         });
     }
@@ -193,6 +221,10 @@ fn value(a: &Answer, f: Option<&Frame>, epoch: SessionEpoch) -> Option<Value> {
         filled,
         settling,
         unresolved,
+        column_hz: match a {
+            Answer::Result(l) => l.column_hz.clone(),
+            _ => None,
+        },
         frame: Some(f.data.clone()),
     })
 }
@@ -309,6 +341,39 @@ pub(crate) fn combine(
     };
     let included_at: Vec<usize> = included.iter().map(|(k, _)| *k).collect();
     let reference = delay_reference(cfg, &included_at, seen_delay);
+    // Live columns go in referred at the frequencies their bins were measured at: a sum,
+    // difference or average refers each to the reference delay, a ratio on one time base
+    // to none (only their difference is kept); a cascade and an alignment refer nothing.
+    let one_time_base = included
+        .first()
+        .and_then(|(_, v)| v.time_base)
+        .is_some_and(|t| included.iter().all(|(_, v)| v.time_base == Some(t)));
+    let refer_to = match (&cfg.expr, cfg.domain) {
+        (_, MathDomain::Spectrum | MathDomain::Rta) => None,
+        (
+            MathExpr::Binary {
+                op: MathOp::Divide, ..
+            },
+            _,
+        ) if one_time_base => Some(0.0),
+        (
+            MathExpr::Binary {
+                op: MathOp::Add | MathOp::Subtract,
+                ..
+            }
+            | MathExpr::Average { .. },
+            _,
+        ) if one_time_base => match reference {
+            CoreReference::Fixed(d) => Some(d),
+            CoreReference::Trace(j) => included.get(j).map(|(_, v)| v.delay),
+        },
+        _ => None,
+    };
+    if let Some(to) = refer_to {
+        for (_, v) in &mut included {
+            v.refer_at_bins(freqs, to);
+        }
+    }
     let mask_of = |i: usize| {
         included.iter().fold(ValidityMask::NONE, |m, (_, v)| {
             m.with(

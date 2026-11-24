@@ -22,7 +22,7 @@ use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use ac2_core::spectrum::{column_max, column_mean};
-use ac2_proto::frame::{BinsFrame, Frame, FrameData, ProtectionFlags};
+use ac2_proto::frame::{BinsFrame, FrameData, ProtectionFlags};
 use ac2_proto::grid::{GridDef, GridId};
 use ac2_proto::model::{LevelScale, MathConfig, Operand, SpecLevel};
 use ac2_proto::topic::Topic;
@@ -31,7 +31,7 @@ use ac2_traces::columns::Columns;
 
 use super::bins::OperandBins;
 use super::{
-    Analysis, Due, Emitter, Flush, JobCmd, JobCtx, Pace, Probes, SmoothingChange, StampArgs,
+    Analysis, Due, Emitter, Flush, JobCmd, JobCtx, Live, Pace, Probes, SmoothingChange, StampArgs,
 };
 use crate::fanout::Block;
 
@@ -64,7 +64,7 @@ type Pending = Result<Option<Asked>, Arc<Held>>;
 
 /// A live operand's request: for its result alone, or with its stage bins.
 enum Asked {
-    Result(Receiver<Option<Frame>>),
+    Result(Receiver<Option<Live>>),
     Bins(Receiver<Option<OperandBins>>),
 }
 
@@ -76,7 +76,7 @@ pub(crate) enum Answer {
     /// A live operand running, but without an answer in time, or nothing formed yet.
     NoResult,
     /// A live operand's current result.
-    Result(Box<Frame>),
+    Result(Box<Live>),
     /// A stored operand.
     Stored(Arc<Held>),
 }
@@ -223,7 +223,7 @@ impl MathJob {
         let (answers, operand_bins) = self.ask_operands(!wanted.is_empty());
         for (seen, a) in self.seen_delay.iter_mut().zip(&answers) {
             if let Answer::Result(f) = a
-                && let FrameData::Tf(tf) = &f.data
+                && let FrameData::Tf(tf) = &f.frame.data
             {
                 *seen = Some(tf.meta.delay.0);
             }

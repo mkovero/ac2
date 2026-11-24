@@ -177,3 +177,60 @@ fn a_silent_measurement_leaves_nan() {
     assert!(h1.iter().all(|h| h.re.is_nan() && h.im.is_nan()));
     assert!(coh.iter().all(|c| c.is_nan()));
 }
+
+/// A column's phase turns with the delay at the frequency `column_hz` gives, as each bin's
+/// phase is referred at its own frequency: averages kept through a change of delay by `Δ`
+/// (each bin turned at its own frequency) read, turned back by `Δ` at that frequency, as
+/// before, exactly where the column holds one bin. At the column centre they would miss by
+/// up to half a column's worth of turn.
+#[test]
+fn a_column_turns_with_the_delay_at_its_bins() {
+    let (d, delta) = (48usize, 40usize);
+    let n = 6 * 48_000;
+    // The measurement is the reference `d` samples later.
+    let s = Noise(21).vec(n + d, 0.1);
+    let (reference, late_by_d) = (s[d..].to_vec(), s[..n].to_vec());
+    let mut m = Mtw::new(MtwConfig {
+        delay_samples: d as f64,
+        ..fine_engine(Ladder::LongLf).config().clone()
+    })
+    .expect("engine");
+    push_chunked(&mut m, 0, &reference, &late_by_d);
+    let at = m.frame();
+    assert!(!m.set_delay((d + delta) as f64).restarted);
+    let turned = m.frame();
+    let hz = m.column_hz();
+    assert_eq!(hz.len(), at.h1.len());
+    let tau = delta as f64 / 48_000.0;
+    let miss = |f: f64, i: usize| {
+        let back = Complex64::from_polar(1.0, -std::f64::consts::TAU * f * tau);
+        (turned.h1[i] * back / at.h1[i]).arg().to_degrees().abs()
+    };
+    let (mut alone, mut centre_miss) = (0, 0f64);
+    for (i, c) in turned.columns.iter().enumerate() {
+        let ColumnSource::Stage(b) = c.source else {
+            continue;
+        };
+        if b.count() != 1
+            || c.validity != Validity::Valid
+            || at.columns[i].validity != Validity::Valid
+        {
+            continue;
+        }
+        let bin = b.lo as f64 * m.layout().stages[b.stage].bin_hz;
+        assert!((hz[i] - bin).abs() < 1e-9, "column {i}: {} {bin}", hz[i]);
+        assert!(miss(hz[i], i) < 1e-6, "column {i}: {}°", miss(hz[i], i));
+        centre_miss = centre_miss.max(miss(turned.freq_hz[i], i));
+        alone += 1;
+    }
+    assert!(alone > 100, "{alone}");
+    assert!(centre_miss > 1.0, "{centre_miss}°");
+    // A column of several bins lies within them.
+    for (i, c) in turned.columns.iter().enumerate() {
+        if let ColumnSource::Stage(b) = c.source {
+            let bin_hz = m.layout().stages[b.stage].bin_hz;
+            let (lo, hi) = (b.lo as f64 * bin_hz, (b.hi - 1) as f64 * bin_hz);
+            assert!(lo <= hz[i] && hz[i] <= hi, "column {i}");
+        }
+    }
+}
