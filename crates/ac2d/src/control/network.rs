@@ -299,7 +299,8 @@ impl NetCtl {
 
     /// `server.network`: the new setting in force at once, kept, and the listener turned on,
     /// moved or off to match. The server key may be created though the change is refused
-    /// after it (the authorized-clients file could not be made).
+    /// after it (the authorized-clients file could not be made). Returns whether the
+    /// network clients were cut off (the listener turned off or moved).
     pub(crate) fn set(
         &mut self,
         local: bool,
@@ -308,7 +309,7 @@ impl NetCtl {
         port: Option<u16>,
         outbox: &Outbox,
         now: Instant,
-    ) -> Result<(), ProtoError> {
+    ) -> Result<bool, ProtoError> {
         self.toggle_check(local).map_err(|(_, e)| e)?;
         let was = self.settings.effective();
         let given = bind.is_some() || port.is_some();
@@ -336,14 +337,15 @@ impl NetCtl {
             store.save(&new);
         }
         let moved = was != new.effective();
-        match (old.enabled, enabled) {
+        Ok(match (old.enabled, enabled) {
             (_, false) => {
                 self.detach(outbox, true);
                 self.set_status(NetStatus::Off);
                 // A detach the pipe refused is sent again by the tick.
                 self.due = self.bound.as_ref().map(|_| now);
+                true
             }
-            (true, true) if !moved => {}
+            (true, true) if !moved => false,
             (was_on, true) => {
                 if was_on {
                     self.detach(outbox, false);
@@ -354,9 +356,9 @@ impl NetCtl {
                 } else {
                     self.attempt(outbox, now);
                 }
+                was_on
             }
-        }
-        Ok(())
+        })
     }
 
     /// Whether `server.network` from a client on this host (`local`) or the network may
@@ -602,9 +604,11 @@ impl NetCtl {
 
     /// The I/O thread closed pair `epoch` (its ZAP handler died): `Failed`, retried with a
     /// new context.
-    pub(crate) fn failed(&mut self, epoch: NetEpoch, reason: NetReason, now: Instant) {
+    /// The listener of `epoch` failed; returns whether that was the listener in use (its
+    /// clients are cut off).
+    pub(crate) fn failed(&mut self, epoch: NetEpoch, reason: NetReason, now: Instant) -> bool {
         if self.bound.as_ref().is_none_or(|b| b.epoch != epoch) {
-            return;
+            return false;
         }
         self.bound = None;
         self.stop_advert();
@@ -615,6 +619,7 @@ impl NetCtl {
         self.set_status(NetStatus::Failed { reason });
         self.due = Some(now + self.delay);
         self.delay = self.retry.after(self.delay);
+        true
     }
 
     fn start_advert(&mut self, host: Host, ctrl: &str) {

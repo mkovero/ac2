@@ -333,8 +333,9 @@ struct Pending {
     panels: HashMap<u64, PendingReply>,
     /// The `delay.find` runs under way, by token.
     finds: HashMap<u64, PendingFind>,
-    /// `session.devices` enumerations under way, by token.
-    devices: HashMap<u64, PendingReply>,
+    /// The `session.devices` enumeration under way, by token, and every request waiting
+    /// for it: a driver that hangs in its listing holds one thread, however often asked.
+    devices: Option<(u64, Vec<PendingReply>)>,
     /// The preview opening on its own thread.
     preview: Option<PreviewOpening>,
 }
@@ -730,7 +731,7 @@ impl Control {
             self.remote_sync();
             if self.preview.as_ref().is_some_and(|p| p.deadline <= now) {
                 tracing::info!("preview not renewed: closing it");
-                self.close_preview();
+                self.close_running_preview();
             }
             self.osc_sync();
             self.osc_tick(now);
@@ -780,7 +781,9 @@ impl Control {
                     payload,
                 }) => self.on_request(&route, peer, &payload),
                 Ok(ControlMsg::NetFailed { epoch, reason }) => {
-                    self.s.server.network.failed(epoch, reason, Instant::now());
+                    if self.s.server.network.failed(epoch, reason, Instant::now()) {
+                        self.drop_network_lease();
+                    }
                     self.server_sync();
                 }
                 Ok(ControlMsg::DeviceChanged { epoch }) => {
@@ -818,9 +821,13 @@ impl Control {
                 }
                 Ok(ControlMsg::DelayFound { token, result }) => self.finish_find(token, *result),
                 Ok(ControlMsg::Devices { token, backends }) => {
-                    if let Some(p) = self.pending.devices.remove(&token) {
-                        let r = Ok(ReplyBody::Backends(backends));
-                        self.answer(&p.route, &p.client, p.id, r, Instant::now());
+                    if let Some((_, waiters)) = self.pending.devices.take_if(|(t, _)| *t == token)
+                    {
+                        let now = Instant::now();
+                        for p in waiters {
+                            let r = Ok(ReplyBody::Backends(backends.clone()));
+                            self.answer(&p.route, &p.client, p.id, r, now);
+                        }
                     }
                 }
                 Ok(ControlMsg::PreviewOpened { token }) => self.preview_opened(token),
@@ -924,7 +931,8 @@ impl Control {
         self.abort_runs(SweepFailure::Stopped, "the daemon is shutting down");
         self.shutdown_sim();
         self.end_recording(ac2_proto::model::RecordingEnd::DaemonShutdown);
-        self.close_preview();
+        // A preview still opening past the wait is dropped when its open returns.
+        let _ = self.close_preview();
         self.stop_output();
         self.stop_all_jobs();
         self.audio_recovery = None;

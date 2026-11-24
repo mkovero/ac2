@@ -266,19 +266,25 @@ stops and disarms before handing over. A lease belongs to the instance holding i
 not to the key: an acquire by the current owner's key (a reconnect, or a second process
 with the same key) also fades out, disarms and invalidates the old token, so a new lease
 always starts disarmed. A transport hiccup keeps the lease only by refreshing with the
-held token. Turning the network off (`server.network`) ends a network client's lease at
-once the same way, with an `expiry` event: that client can no longer refresh or stop it.
+held token. Turning the network off or moving it (`server.network`), the listener failing,
+and `server.revoke` of the holder's key end a network client's lease at once the same way,
+with an `expiry` event: that client can no longer refresh or stop it.
 Every acquire, force, arm, fire, set, stop, release
 and expiry is a `generator` event naming the client (`last_action.client`; for `expiry` the
 owner whose lease expired). The output path enforces the deadline itself; if it mutes on an
 expired deadline before the control side noticed, the daemon disarms with the same `expiry`
 event, so the state never says firing while the output is silent. `session.devices` and
 `session.preview` ask the driver on their own threads, so refreshes are answered while it
-takes its time. Opening a stream (`session.open`, a reopen) holds the daemon until the
-driver answers: that time is not counted against the lease (its deadline, and the output
-path's after the open, move out by it), since a refresh that waited unanswered is no sign
-the holder walked away. A `session.preview` for another device while one is still opening
-is `refused`; the same one asked again is answered with it.
+takes its time; a `session.devices` while a listing runs is answered with that listing.
+Opening a stream (`session.open`, a reopen) holds the daemon until the driver answers, and
+`session.open` or `session.detect_loopback` while a preview is still opening waits for it
+up to 1.2 s: that time is not counted against the lease (its deadline moves out by it),
+since a refresh that waited unanswered is no sign the holder walked away. A preview still
+opening after that wait is closed once it opens, and the request that needed its device is
+`refused`, to be asked again. A reopen after a device or configuration change disarms the
+generator (`stop` event, no owner change): the stimulus does not survive the old stream. A
+`session.preview` for another device while one is still opening is `refused`; the same one
+asked again is answered with it.
 
 **System max level (`gen.ceiling`).** `generator.ceiling` (dBFS RMS) is the system
 maximum: `gen.set`, `sweep.run`, `dynamics.run` and `session.detect_loopback` above it are

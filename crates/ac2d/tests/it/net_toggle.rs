@@ -602,10 +602,23 @@ fn desired(firing: bool) -> GeneratorDesired {
     }
 }
 
-/// A network app holding the stimulus is told the network went off before its connection
-/// ends, and the stimulus it held stops at once, not when its lease would have run out.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn turning_off_tells_the_network_app_and_ends_its_lease() {
+/// How the network app loses its connection.
+#[derive(Clone, Copy, Debug)]
+enum Cut {
+    /// The network turned off.
+    Off,
+    /// The network moved to another port.
+    Moved,
+    /// The app's key revoked.
+    Revoked,
+    /// The listener failed (its authentication handler died).
+    Failed,
+}
+
+/// A network app holding the stimulus loses its connection (`cut`): the stimulus it held
+/// stops at once, not when its lease would have run out, since the app can no longer
+/// refresh or stop it. Turned off, the app is told before its connection ends.
+async fn cut_network_app_loses_its_lease(cut: Cut) {
     init_log();
     let dir = tempfile::tempdir().unwrap();
     let laptop = KeyPair::generate().unwrap();
@@ -649,31 +662,69 @@ async fn turning_off_tells_the_network_app_and_ends_its_lease() {
     .await;
     assert!(!remote.network_turned_off());
 
-    local
-        .call(Command::ServerNetwork {
-            enabled: false,
-            bind: None,
-            port: None,
-        })
-        .await
-        .unwrap();
-    let t0 = Instant::now();
-    while !remote.network_turned_off() {
-        assert!(t0.elapsed() < T, "the remote app was not told");
-        tokio::time::sleep(Duration::from_millis(10)).await;
+    match cut {
+        Cut::Off | Cut::Moved => {
+            let moved = matches!(cut, Cut::Moved);
+            local
+                .call(Command::ServerNetwork {
+                    enabled: moved,
+                    bind: None,
+                    port: moved.then(free_pair),
+                })
+                .await
+                .unwrap();
+        }
+        Cut::Revoked => {
+            local
+                .call(Command::ServerRevoke {
+                    name: "laptop".into(),
+                })
+                .await
+                .unwrap();
+        }
+        Cut::Failed => h.fail_zap_handler().unwrap(),
+    }
+    if matches!(cut, Cut::Off) {
+        let t0 = Instant::now();
+        while !remote.network_turned_off() {
+            assert!(t0.elapsed() < T, "the remote app was not told");
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
     }
     let (s, last) = mirror_until(&local, poll, "the lease ended", |s| {
         (s.generator.owner.is_none() && !s.generator.firing)
             .then(|| (s.server.clone(), s.generator.last_action.clone()))
     })
     .await;
-    assert_eq!(s.status, NetStatusKind::Off);
+    if matches!(cut, Cut::Off) {
+        assert_eq!(s.status, NetStatusKind::Off);
+    }
     let last = last.expect("audited");
     assert_eq!(last.action, ac2_proto::model::GenAction::Expiry);
     assert_eq!(last.client.map(|c| c.0), Some("laptop".to_owned()));
     drop(lease);
     drop(remote);
     h.shutdown();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn turning_off_tells_the_network_app_and_ends_its_lease() {
+    cut_network_app_loses_its_lease(Cut::Off).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn moving_the_network_ends_a_network_apps_lease() {
+    cut_network_app_loses_its_lease(Cut::Moved).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn revoking_its_key_ends_a_network_apps_lease() {
+    cut_network_app_loses_its_lease(Cut::Revoked).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_failed_listener_ends_a_network_apps_lease() {
+    cut_network_app_loses_its_lease(Cut::Failed).await;
 }
 
 /// A rig whose network is turned on while its session runs serves a paired rig its input

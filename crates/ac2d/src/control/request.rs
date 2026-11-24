@@ -240,18 +240,12 @@ impl Control {
                 // Asking a driver for its devices, or opening one, can outlast a stimulus
                 // lease's refresh margin: on their own threads, so a running sweep's refreshes
                 // are answered meanwhile.
-                Command::SessionDevices => match self.start_devices() {
-                    Ok(token) => {
-                        self.pending.devices.insert(
-                            token,
-                            PendingReply {
-                                route: route.clone(),
-                                client,
-                                id: req.id,
-                            },
-                        );
-                        return;
-                    }
+                Command::SessionDevices => match self.start_devices(PendingReply {
+                    route: route.clone(),
+                    client: client.clone(),
+                    id: req.id,
+                }) {
+                    Ok(()) => return,
                     Err(e) => Err(e),
                 },
                 Command::SessionPreview {

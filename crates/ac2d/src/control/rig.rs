@@ -271,8 +271,7 @@ impl Control {
             self.keys_created();
         }
         self.server_sync();
-        r?;
-        if !enabled {
+        if r? {
             self.drop_network_lease();
         }
         tracing::warn!(
@@ -433,6 +432,7 @@ impl Control {
         // Its data connection, audio included, ends now rather than at its next request.
         self.s.outbox.revoke(key.as_bytes());
         self.dedup.forget_name(name);
+        self.drop_lease_of_key(&key);
         tracing::warn!(
             target: "ac2d::audit",
             "client {name:?} (fingerprint {}) revoked by {}",

@@ -450,3 +450,42 @@ fn lease_refresh_with_token_survives_a_new_socket() {
     call_as(&mut a2, 1002, Command::GenRelease { lease_token: tok }).unwrap();
     h.shutdown();
 }
+
+/// A device change reopens the stream, and the stimulus source goes with the old one: the
+/// generator is disarmed then, as after an outage, never left firing with nothing to play.
+#[test]
+fn a_device_change_disarms_the_stimulus() {
+    init_log();
+    let mut rig_config = manual_rig().config().clone();
+    rig_config.faults = vec![ac2_audio::fake::FakeFault::ConfigChange { at_block: 4 }];
+    let backend = FakeBackend::new(rig_config).unwrap();
+    let h = Daemon::start(config(backend.clone(), inproc("reopen-disarms"))).unwrap();
+    let mut c = Client::connect(h.context(), h.ctrl_endpoint());
+    c.ok(Command::SessionOpen {
+        config: session(true),
+    });
+    let mut d = driver(&backend);
+    let tok = acquire(&mut c, false).unwrap();
+    c.ok(Command::GenSet {
+        lease_token: tok,
+        desired: fire(-20.0),
+    });
+    assert!(c.state().generator.firing);
+    let epoch = c.state().session.epoch;
+    d.run_blocks(8);
+    let deadline = Instant::now() + T;
+    let s = loop {
+        let s = c.state();
+        if s.session.epoch != epoch {
+            break s;
+        }
+        assert!(Instant::now() < deadline, "the stream did not reopen");
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    assert!(
+        !s.generator.armed && !s.generator.firing,
+        "{:?}",
+        s.generator
+    );
+    drop(h);
+}

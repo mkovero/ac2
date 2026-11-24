@@ -254,7 +254,7 @@ impl Control {
 
     /// The generator never comes back armed (principle 9): an outage disarms it at once.
     /// Returns whether it was emitting.
-    fn disarm_for_outage(&mut self) -> bool {
+    pub(super) fn disarm_for_outage(&mut self) -> bool {
         let g = self.store.state().generator.clone();
         let firing = g.firing;
         self.out.gate.close();

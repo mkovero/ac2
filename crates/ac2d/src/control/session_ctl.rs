@@ -49,7 +49,10 @@ impl Control {
         let backend = self.backend_for(config.backend)?;
         let blocked = Instant::now();
         // The preview may hold the very device the session is about to open.
-        self.close_preview();
+        if let Err(e) = self.close_preview() {
+            self.excuse_blocked(blocked);
+            return Err(e);
+        }
         if self.session.is_some() || self.audio_recovery.is_some() {
             self.session_close(client);
         }
@@ -221,6 +224,8 @@ impl Control {
             }
         };
         let blocked = Instant::now();
+        // The stimulus source goes with the old stream; the reopened one plays none.
+        self.disarm_for_outage();
         self.wind_down(ac2_proto::model::RecordingEnd::SessionReopened);
         self.keep_spare_links(&rt);
         recovery::close_bounded(rt, recovery::CLOSE_BOUND);
@@ -295,8 +300,13 @@ impl Control {
     }
 
     /// Starts `session.devices` on its own thread: a driver may take its time to list its
-    /// devices. Answered with [`ControlMsg::Devices`].
-    pub(super) fn start_devices(&mut self) -> Result<u64, ProtoError> {
+    /// devices. Answered with [`ControlMsg::Devices`]; a request while one runs waits for
+    /// that one's answer.
+    pub(super) fn start_devices(&mut self, waiter: PendingReply) -> Result<(), ProtoError> {
+        if let Some((_, waiters)) = &mut self.pending.devices {
+            waiters.push(waiter);
+            return Ok(());
+        }
         let backends = self.s.backends.clone();
         let token = self.ids.token();
         let to = self.s.to_self.clone();
@@ -307,19 +317,38 @@ impl Control {
                 let _ = to.send(ControlMsg::Devices { token, backends });
             })
             .map_err(|e| internal(format!("cannot list the devices: {e}")))?;
-        Ok(token)
+        self.pending.devices = Some((token, vec![waiter]));
+        Ok(())
     }
 
     /// Closes the preview, and one still opening as soon as it has: whatever comes next
-    /// needs its device. Waits for an opening one, at most [`PREVIEW_OPEN_WAIT`].
-    pub(super) fn close_preview(&mut self) {
-        if let Some(o) = self.pending.preview.take() {
-            let r = o
-                .result
-                .recv_timeout(PREVIEW_OPEN_WAIT)
-                .unwrap_or_else(|_| Err(internal("the preview did not open in time")));
-            self.preview_settled(o, r, true);
+    /// needs its device. Waits for an opening one at most [`PREVIEW_OPEN_WAIT`]; one still
+    /// opening then holds the device, so the caller is refused and asks again (the opening
+    /// one closes when it opens).
+    pub(super) fn close_preview(&mut self) -> Result<(), ProtoError> {
+        if let Some(mut o) = self.pending.preview.take() {
+            match o.result.recv_timeout(PREVIEW_OPEN_WAIT) {
+                Ok(r) => self.preview_settled(o, r, true),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    o.stopped = true;
+                    self.pending.preview = Some(o);
+                    return Err(refused(
+                        "the preview is still opening the device; ask again once it has",
+                    ));
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => self.preview_settled(
+                    o,
+                    Err(internal("the preview opening ended without a result")),
+                    true,
+                ),
+            }
         }
+        self.close_running_preview();
+        Ok(())
+    }
+
+    /// Closes the running preview (not one still opening).
+    pub(super) fn close_running_preview(&mut self) {
         if let Some(p) = self.preview.take() {
             p.close();
             self.s.outbox.clear(b"session/preview");
@@ -332,10 +361,7 @@ impl Control {
         if let Some(o) = &mut self.pending.preview {
             o.stopped = true;
         }
-        if let Some(p) = self.preview.take() {
-            p.close();
-            self.s.outbox.clear(b"session/preview");
-        }
+        self.close_running_preview();
     }
 
     /// `session.preview`: the running preview renewed (`Some`), or `waiter` answered once
@@ -385,7 +411,8 @@ impl Control {
             }
         }
         let backend = self.backend_for(Some(key.backend))?;
-        self.close_preview();
+        // Nothing is opening here (refused or joined above): only a running one closes.
+        self.close_running_preview();
         let token = self.ids.token();
         let (tx, rx) = std::sync::mpsc::channel();
         let to = self.s.to_self.clone();
@@ -489,7 +516,11 @@ impl Control {
             return Err(refused("a loopback detection is already running"));
         }
         let backend = self.backend_for(Some(kind))?;
-        self.close_preview();
+        // Waiting for a preview still opening blocks the loop as a session open does.
+        let blocked = Instant::now();
+        let closed = self.close_preview();
+        self.excuse_blocked(blocked);
+        closed?;
         let token = self.ids.token();
         let req = crate::detect::DetectRequest {
             backend,
@@ -591,9 +622,10 @@ fn backend_infos(backends: &[Arc<dyn Backend>]) -> Vec<BackendInfo> {
         .collect()
 }
 
-/// How long closing the preview waits for one still opening before it goes on: what comes
-/// next needs the device, and a driver that has not opened it by then is not going to.
-const PREVIEW_OPEN_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+/// How long closing the preview waits for one still opening before the request that needs
+/// the device is refused: within a client's reply deadline (1.5 s per try), so the client
+/// hears the refusal and asks again instead of giving the daemon up.
+const PREVIEW_OPEN_WAIT: std::time::Duration = std::time::Duration::from_millis(1200);
 
 /// How long `session.control_panel` waits for the driver before answering that its panel
 /// is showing: within a client's reply deadline (1.5 s per try).

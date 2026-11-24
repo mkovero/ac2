@@ -49,16 +49,6 @@ impl LeaseGate {
         self.deadline_ns.store(ns, Ordering::Release);
     }
 
-    /// An open deadline moved `by` later; a closed gate stays closed.
-    pub(crate) fn extend(&self, by: std::time::Duration) {
-        let by = u64::try_from(by.as_nanos()).unwrap_or(u64::MAX);
-        let _ = self
-            .deadline_ns
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |d| {
-                (d != 0).then(|| d.saturating_add(by))
-            });
-    }
-
     /// Output must fade now.
     pub(crate) fn close(&self) {
         self.deadline_ns.store(0, Ordering::Release);

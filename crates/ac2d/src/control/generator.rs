@@ -137,22 +137,33 @@ impl Control {
 
     /// The control loop was blocked since `since` in a backend call (opening a stream):
     /// the lease holder's refreshes waited unanswered meanwhile, which is no sign it walked
-    /// away, so that time does not count against its lease. The gate moves by the same
-    /// time only now, after the call: while the loop was blocked the output path still
-    /// enforced the old deadline.
+    /// away, so that time does not count against its lease. Only the lease moves: every
+    /// call that blocks closes or replaces the stream the gate guards, so no stimulus plays
+    /// on through the excused time.
     pub(super) fn excuse_blocked(&mut self, since: Instant) {
-        let blocked = since.elapsed();
         if let Some(l) = &mut self.out.lease {
-            l.deadline += blocked;
-            self.out.gate.extend(blocked);
+            l.deadline += since.elapsed();
         }
     }
 
-    /// The network went off: a network client holding the lease can no longer refresh or
-    /// stop it, so its stimulus must not play on for the rest of the lease.
+    /// The network went off, moved or failed: a network client holding the lease can no
+    /// longer refresh or stop it, so its stimulus must not play on for the rest of the lease.
     pub(super) fn drop_network_lease(&mut self) {
         if self.out.lease.as_ref().is_some_and(|l| !l.owner.is_local()) {
             self.end_lease("ended with the network");
+        }
+    }
+
+    /// Client key `key` was revoked: its connections are cut, so a lease it holds ends
+    /// now for the same reason.
+    pub(super) fn drop_lease_of_key(&mut self, key: &ac2_zmq::PublicKey) {
+        if self
+            .out
+            .lease
+            .as_ref()
+            .is_some_and(|l| l.owner.curve().is_some_and(|(_, k)| k == key))
+        {
+            self.end_lease("ended with its key revoked");
         }
     }
 
