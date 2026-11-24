@@ -260,7 +260,9 @@ store records its rev as not replayable, so a `state.since` spanning it answers
   keys them; two connections with one key share them), 1 for a viewer, and 8 per daemon;
   over either is `refused` with the count in the message.
 - **`file.upload_abort {transfer: TransferId}`** replies `ack`, deletes the spool file and
-  frees the slot. A download ends with `file.download_end` as today.
+  frees the slot. A download ends with `file.download_end` as today. A `trace.import`
+  refused with `pick_channel` or `bad_options` keeps its upload; the client retries on the
+  same `transfer` id and aborts it when the operator cancels.
 - **Ending.** A peer's transfers are dropped, spool files deleted, after 2 minutes without a
   chunk, on `file.upload_abort`, and when the peer is revoked or demoted. The daemon has no
   signal for a ctrl connection's end, so the idle timeout is what frees a vanished client's
@@ -514,8 +516,7 @@ These change nothing on the wire or in a stored format and land on their own bra
   on that branch. Deploy check per host
   anyway: units that create the directory set `RuntimeDirectoryMode=0700`.
 - **T-04** a `SessionRef.path` is mirrored to other clients as its base name only; **T-07**
-  network off stops a network client's stimulus at once; **L-07** a `trace.import` refused
-  with `pick_channel` or `bad_options` keeps its upload; **D-05** a client resends on `ka`
+  network off stops a network client's stimulus at once; **D-05** a client resends on `ka`
   silence; **`meas.create`** checks the name as `meas.update` does.
 - **S-11.** Device open, enumeration, preview and the reopen after a file load run off the
   ctrl loop; their reply follows when the work ends, and leases keep being refreshed.

@@ -58,17 +58,6 @@ struct Xfer {
     kind: Kind,
 }
 
-/// A complete upload taken out of [`Transfers`].
-#[derive(Debug)]
-pub(crate) struct TakenUpload {
-    id: TransferId,
-    client: Peer,
-    sha256: String,
-    /// The last component of the client's path.
-    pub(crate) file: String,
-    pub(crate) data: Vec<u8>,
-}
-
 /// The transfers under way.
 #[derive(Debug, Default)]
 pub(crate) struct Transfers {
@@ -167,47 +156,17 @@ impl Transfers {
         }
     }
 
-    /// A complete upload, taken: the transfer ends here unless it is
-    /// [put back](Self::put_back).
+    /// A complete upload's client path and bytes, taken: the transfer ends here.
     pub(crate) fn take_upload(
         &mut self,
         client: &Peer,
         id: TransferId,
-    ) -> Result<TakenUpload, ProtoError> {
+    ) -> Result<(String, Vec<u8>), ProtoError> {
         self.upload(client, id)?;
-        match self.map.remove(&id) {
-            Some(Xfer {
-                client,
-                kind: Kind::Upload {
-                    file, sha256, data, ..
-                },
-                ..
-            }) => Ok(TakenUpload {
-                id,
-                client,
-                sha256,
-                file,
-                data,
-            }),
+        match self.map.remove(&id).map(|x| x.kind) {
+            Some(Kind::Upload { file, data, .. }) => Ok((file, data)),
             _ => Err(gone(id)),
         }
-    }
-
-    /// Returns a taken upload under its id, as complete as it was taken.
-    pub(crate) fn put_back(&mut self, t: TakenUpload) {
-        self.map.insert(
-            t.id,
-            Xfer {
-                client: t.client,
-                last: Instant::now(),
-                kind: Kind::Upload {
-                    file: t.file,
-                    bytes: t.data.len() as u64,
-                    sha256: t.sha256,
-                    data: t.data,
-                },
-            },
-        );
     }
 
     pub(crate) fn remove(&mut self, id: TransferId) {
