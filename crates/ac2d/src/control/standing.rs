@@ -9,9 +9,9 @@ use ac2_proto::model::{
 };
 use ac2_proto::units::{RigId, Seconds, WallNs};
 
-use crate::remote::peer_clock::{Evidence, PeerClockWatch, same_kind};
-use crate::remote::standing::{Absent, StandingReport, shown};
-use crate::remote::{MAX_LINK_OFFSET_S, link_offset};
+use crate::remote::peer_clock::{Evidence, same_kind};
+use crate::remote::standing::Absent;
+use crate::remote::standing_verdict::{StandingWatch, late};
 use crate::util::wall_ns;
 
 use super::Control;
@@ -79,18 +79,18 @@ impl Control {
                 absent: absent.unwrap_or(CantTellReason::NoMarks),
                 other_rate: report.and_then(|r| r.other_rate).filter(|_| up),
             };
-            let watch = self
+            let shown = self
                 .remote
                 .standing_watches
                 .entry(p.rig)
-                .or_insert_with(|| PeerClockWatch::absent(CantTellReason::LinkDown));
-            watch.update(&evidence, now, wall);
+                .or_insert_with(StandingWatch::new)
+                .update(evidence, fed.and_then(|r| r.minutes), now, wall);
             let relation = if early {
                 PeerRelation::Measuring
             } else {
-                shown(watch.clock.relation, report.and_then(|r| r.held))
+                shown.relation
             };
-            let figures = (watch.clock.ppm, watch.clock.span);
+            let figures = (shown.ppm, shown.span);
             let name = src.map_or_else(|| p.name.clone(), |s| s.name.clone());
             let clock = standing_clock(
                 &mut self.remote.standing_shown,
@@ -113,10 +113,8 @@ impl Control {
                 link,
                 session,
                 clock,
-                // Whole seconds: the entry changes once a second at most while marks come.
-                marks_for: fed
-                    .and_then(|r| r.marks_for)
-                    .map(|d| Seconds(d.as_secs() as f64)),
+                marks_since: fed.and_then(|r| r.marks_since),
+                counting: shown.counting.filter(|_| !early),
             });
         }
         let kept = |rig: &RigId| peers.iter().any(|p| p.rig == *rig);
@@ -158,14 +156,4 @@ fn standing_clock(
     }
     shown.insert(rig, clock.clone());
     clock
-}
-
-/// How far past the link offset the marks arrive, s: the one in force when set, else the
-/// longest any link may run, since the operator may need that much and this rig cannot tell
-/// a long path from a late clock.
-fn late(r: &StandingReport, set: Option<f64>) -> Option<f64> {
-    let (ours, theirs) = r.periods;
-    let offset = set.map_or(MAX_LINK_OFFSET_S, |s| link_offset(Some(s), ours, theirs));
-    let by = r.least_age? - (offset + r.allow);
-    (by > 0.0).then_some(by)
 }

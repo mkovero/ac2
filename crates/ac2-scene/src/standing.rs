@@ -3,18 +3,20 @@
 //! evidence: rates within the 2 ppm rule read *clocks agree*, never *locked*.
 
 use ac2_proto::model::{CantTellReason, PeerRelation, RemoteLink, RemoteState, StandingRig};
+use ac2_proto::units::WallNs;
 
 use crate::audio::rate_text;
 use crate::between_rigs::relation_text;
 use crate::format;
 
-/// `from levels` lines for `ac2 status`, one per paired rig: *from levels ketunkolo · clocks
-/// agree +0.12 ppm over 60 s · marks for 5 min 12 s · 96 kHz, 3 inputs · link up*.
-pub fn status_lines(r: &RemoteState) -> Vec<String> {
-    r.standing.iter().map(|s| line(r, s)).collect()
+/// `from levels` lines for `ac2 status` at wall time `now`, one per paired rig: *from levels
+/// ketunkolo · clocks agree · +0.12 ppm over 60 s · marks for 5 min 12 s · 96 kHz, 3 inputs ·
+/// link up*.
+pub fn status_lines(r: &RemoteState, now: WallNs) -> Vec<String> {
+    r.standing.iter().map(|s| line(r, s, now)).collect()
 }
 
-fn line(r: &RemoteState, s: &StandingRig) -> String {
+fn line(r: &RemoteState, s: &StandingRig, now: WallNs) -> String {
     let rel = relation_text(r, &s.name, &s.clock.relation);
     let mut parts = vec![format!("from levels {}", s.name), rel];
     if let (Some(p), Some(span)) = (s.clock.ppm, s.clock.span) {
@@ -24,8 +26,12 @@ fn line(r: &RemoteState, s: &StandingRig) -> String {
             format::fixed(span.0, 0)
         ));
     }
-    if let Some(m) = s.marks_for {
-        parts.push(format!("marks for {}", format::duration(m.0)));
+    if let Some(c) = s.counting {
+        parts.push(format!("{} of {} min beyond 2 ppm", c.minutes, c.of));
+    }
+    if let Some(since) = s.marks_since {
+        let s = now.0.saturating_sub(since.0) / 1_000_000_000;
+        parts.push(format!("marks for {}", format::duration(s as f64)));
     }
     if s.link == RemoteLink::Up {
         parts.push(match &s.session {
@@ -71,8 +77,8 @@ fn link_words(s: &StandingRig) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ac2_proto::model::{NotLockedReason, PeerClock, StandingSession};
-    use ac2_proto::units::{RigId, Seconds, WallNs};
+    use ac2_proto::model::{MinuteCount, NotLockedReason, PeerClock, StandingSession};
+    use ac2_proto::units::{RigId, Seconds};
 
     fn rig(link: RemoteLink, relation: PeerRelation, ppm: Option<f64>) -> RemoteState {
         RemoteState {
@@ -90,14 +96,17 @@ mod tests {
                     span: ppm.map(|_| Seconds(59.96)),
                     last_change: None,
                 },
-                marks_for: ppm.map(|_| Seconds(312.4)),
+                marks_since: ppm.map(|_| WallNs(NOW - 312_400_000_000)),
+                counting: None,
             }],
             ..RemoteState::default()
         }
     }
 
+    const NOW: u64 = 1_790_000_000_000_000_000;
+
     fn one(r: &RemoteState) -> String {
-        status_lines(r).remove(0)
+        status_lines(r, WallNs(NOW)).remove(0)
     }
 
     #[test]
@@ -111,6 +120,41 @@ mod tests {
         assert_eq!(
             one(&rig(up.clone(), PeerRelation::Measuring, None)),
             "from levels ketunkolo · measuring clocks… · 96 kHz, 3 inputs · link up"
+        );
+        let mut counting = rig(up.clone(), PeerRelation::Measuring, Some(2.71));
+        counting.standing[0].counting = Some(MinuteCount { minutes: 4, of: 10 });
+        assert_eq!(
+            one(&counting),
+            "from levels ketunkolo · measuring clocks… · +2.71 ppm over 60 s · 4 of 10 min \
+             beyond 2 ppm · marks for 5 min 12 s · 96 kHz, 3 inputs · link up"
+        );
+        assert_eq!(
+            one(&rig(
+                up.clone(),
+                PeerRelation::NotLocked {
+                    reason: NotLockedReason::CrossRate {
+                        ppm: 3.12,
+                        over: Seconds(60.0)
+                    }
+                },
+                Some(3.12)
+            )),
+            "from levels ketunkolo · CLOCKS NOT LOCKED +3.1 ppm over 60 s · +3.12 ppm over \
+             60 s · marks for 5 min 12 s · 96 kHz, 3 inputs · link up"
+        );
+        assert_eq!(
+            one(&rig(
+                up.clone(),
+                PeerRelation::CantTell {
+                    reason: CantTellReason::NotSteady {
+                        low: 0.42,
+                        high: 3.13
+                    }
+                },
+                Some(1.85)
+            )),
+            "from levels ketunkolo · CLOCKS: CAN'T TELL (figure not steady: +0.4 … +3.1 ppm) · \
+             +1.85 ppm over 60 s · marks for 5 min 12 s · 96 kHz, 3 inputs · link up"
         );
         assert_eq!(
             one(&rig(

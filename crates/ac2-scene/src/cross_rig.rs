@@ -5,8 +5,8 @@
 //! appears its clock relation is said next to it, in words.
 
 use ac2_proto::model::{
-    CantTellReason, CrossRigTransfer, CrossTfState, Measurement, NotLockedReason, PeerRelation,
-    RelockOutcome, RemoteRig, RemoteSide, RemoteState, StopWhy,
+    CrossRigTransfer, CrossTfState, Measurement, NotLockedReason, PeerRelation, RelockOutcome,
+    RemoteRig, RemoteSide, RemoteState, StopWhy,
 };
 
 use crate::between_rigs::{cant_tell_why, name_of};
@@ -130,13 +130,10 @@ fn running_clock_line(x: &CrossRigTransfer, r: &RemoteState) -> String {
         .map(|g| &g.clock.relation)
     {
         Some(rel) => crate::between_rigs::relation_text(r, &name_of(r, x.rig), rel),
-        // No record of the rig at all: as a link that is down.
-        None => crate::between_rigs::relation_text(
-            r,
-            &name_of(r, x.rig),
-            &PeerRelation::CantTell {
-                reason: CantTellReason::LinkDown,
-            },
+        // The remote state holds no relation for the rig: that much is known, not why.
+        None => format!(
+            "CLOCKS: CAN'T TELL (no clock reading for {})",
+            name_of(r, x.rig)
         ),
     }
 }

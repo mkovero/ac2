@@ -15,6 +15,7 @@ pub(crate) mod link;
 pub(crate) mod peer_clock;
 pub(crate) mod replay;
 pub(crate) mod standing;
+pub(crate) mod standing_verdict;
 pub(crate) mod tap;
 
 /// The longest link offset (a WAN's worth).

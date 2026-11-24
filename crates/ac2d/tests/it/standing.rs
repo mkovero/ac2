@@ -11,7 +11,7 @@ use ac2_proto::model::{
     CantTellReason, NotLockedReason, PeerRelation, RemoteLink, RemoteState, RigPeer, SessionConfig,
     StandingRig,
 };
-use ac2_proto::units::RigId;
+use ac2_proto::units::{RigId, WallNs};
 use ac2_proto::{Command, Topic};
 use ac2_zmq::{Context, CurveClient, KeyPair};
 use ac2d::Handle;
@@ -96,8 +96,17 @@ fn standing(r: &RemoteState) -> Option<&StandingRig> {
     r.standing.first()
 }
 
+fn marks_since(r: &RemoteState) -> Option<WallNs> {
+    standing(r).and_then(|s| s.marks_since)
+}
+
+/// How long marks have been paired, s, by this host's wall clock (both rigs run on it).
 fn marks_for(r: &RemoteState) -> f64 {
-    standing(r).and_then(|s| s.marks_for).map_or(0.0, |m| m.0)
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as u64;
+    marks_since(r).map_or(0.0, |s| now.saturating_sub(s.0) as f64 * 1e-9)
 }
 
 fn measuring_for(r: &RemoteState, s: f64) -> bool {
@@ -153,9 +162,10 @@ fn the_clocks_are_measured_from_levels_alone_and_start_again_on_a_reopen() {
 }
 
 #[test]
-fn a_link_gap_starts_the_marks_again() {
+fn a_link_gap_leaves_a_hole_and_keeps_the_count() {
     let mut t = rigs(FS);
     wait_remote(&mut t.ca, "measuring", |r| measuring_for(r, 2.0));
+    let since = marks_since(&remote(&mut t.ca)).unwrap();
     t.cb.ok(Command::AuthRevokeRig { rig_id: t.a_id });
     wait_remote(&mut t.ca, "link down", |r| {
         cant_tell(r, CantTellReason::LinkDown)
@@ -164,22 +174,30 @@ fn a_link_gap_starts_the_marks_again() {
     // Down: no figure shown as if it were current.
     let r = remote(&mut t.ca);
     let s = standing(&r).unwrap();
-    assert!(s.marks_for.is_none() && s.clock.ppm.is_none(), "{s:#?}");
-    // Longer than a lapse: a hole either clock may have moved across.
+    assert!(s.marks_since.is_none() && s.clock.ppm.is_none(), "{s:#?}");
+    // Longer than a hole: the windows break there, the count goes on.
     std::thread::sleep(Duration::from_secs(3));
-    let admitted = Instant::now();
     t.cb.ok(Command::AuthAdmitRig {
         key: t.a_keys.public.to_z85(),
         rig_id: t.a_id,
         name: "rig-a".into(),
     });
     wait_remote(&mut t.ca, "measuring after the gap", |r| {
-        measuring_for(r, 1.0)
+        measuring_for(r, 1.0) && marks_since(r) == Some(since)
     });
-    // Counted from after the gap, not from before it.
-    let since = admitted.elapsed().as_secs_f64();
-    let r = remote(&mut t.ca);
-    assert!(marks_for(&r) <= since + 1.0, "{since} s: {r:#?}");
+    t.a.shutdown();
+    t.b.shutdown();
+}
+
+#[test]
+fn a_steady_pair_commits_no_state_second_after_second() {
+    let mut t = rigs(FS);
+    wait_remote(&mut t.ca, "measuring", |r| measuring_for(r, 2.0));
+    let first = remote(&mut t.ca);
+    for _ in 0..8 {
+        std::thread::sleep(Duration::from_millis(500));
+        assert_eq!(remote(&mut t.ca), first);
+    }
     t.a.shutdown();
     t.b.shutdown();
 }
@@ -237,24 +255,25 @@ fn source_levels_go_to_an_admitted_rig_only() {
     t.b.shutdown();
 }
 
-/// A minute and more of marks between two fake rigs on one true clock: the rate within the
-/// rule, still measuring (a verdict waits for the hold, minutes on).
+/// A minute of marks between two fake rigs on one true clock: the first whole minute within
+/// the rule is agreement.
 #[test]
-fn slow_marks_alone_measure_the_rate_in_a_minute() {
+fn slow_marks_alone_agree_after_a_minute() {
     let mut t = rigs(FS);
     let t0 = Instant::now();
     loop {
         let r = remote(&mut t.ca);
-        let s = standing(&r);
-        // The long window's figure: the short one shows first.
-        let long = s.filter(|s| s.clock.span.is_some_and(|x| x.0 > 54.0));
-        if let Some(p) = long.and_then(|s| s.clock.ppm) {
-            let s = s.unwrap();
-            assert!(p.abs() < 2.0, "{s:#?}");
-            assert_eq!(s.clock.relation, PeerRelation::Measuring, "{s:#?}");
+        let s = standing(&r).filter(|s| s.clock.relation == PeerRelation::Agree);
+        if let Some(s) = s {
+            assert!(s.clock.ppm.unwrap().abs() < 2.0, "{s:#?}");
+            assert!(marks_for(&r) >= 59.0, "{s:#?}");
+            assert_eq!(s.counting, None);
             break;
         }
-        assert!(t0.elapsed() < Duration::from_secs(150), "no rate: {r:#?}");
+        assert!(
+            t0.elapsed() < Duration::from_secs(150),
+            "no agreement: {r:#?}"
+        );
         std::thread::sleep(Duration::from_millis(500));
     }
     t.a.shutdown();

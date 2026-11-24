@@ -2,10 +2,10 @@
 
 use crate::model::{
     Anchor, ArrivalReason, CalBasis, CalStatus, CantTellReason, Clocks, CrossRigTransfer,
-    CrossTfState, DelaySlip, NotLockedReason, PeerClock, PeerRelation, Relock, RelockOutcome,
-    RemoteAudio, RemoteInput, RemoteInputStatus, RemoteLink, RemoteRig, RemoteSide, RemoteState,
-    RigPeer, SourceCurve, SourceInput, SourceSession, SourceState, StampMap, StandingRig,
-    StandingSession, StopWhy, StreamIncarnation,
+    CrossTfState, DelaySlip, MinuteCount, NotLockedReason, PeerClock, PeerRelation, Relock,
+    RelockOutcome, RemoteAudio, RemoteInput, RemoteInputStatus, RemoteLink, RemoteRig, RemoteSide,
+    RemoteState, RigPeer, SourceCurve, SourceInput, SourceSession, SourceState, StampMap,
+    StandingRig, StandingSession, StopWhy, StreamIncarnation,
 };
 use crate::units::{DaemonIncarnation, DbSpl, MeasId, RigId, Seconds, SessionEpoch, WallNs};
 
@@ -263,12 +263,43 @@ fn standing_rigs() -> Vec<StandingRig> {
                 span: ppm.map(|_| Seconds(59.95)),
                 last_change: Some(WallNs(1_790_000_000_000_000_000)),
             },
-            marks_for: ppm.map(|_| Seconds(312.5)),
+            marks_since: ppm.map(|_| WallNs(1_789_999_687_500_000_000)),
+            counting: None,
         };
     let cant = |reason| PeerRelation::CantTell { reason };
     vec![
         s(RemoteLink::Up, true, PeerRelation::Agree, Some(0.12)),
         s(RemoteLink::Up, true, PeerRelation::Measuring, None),
+        StandingRig {
+            counting: Some(MinuteCount { minutes: 4, of: 10 }),
+            ..s(RemoteLink::Up, true, PeerRelation::Measuring, Some(2.71))
+        },
+        s(
+            RemoteLink::Up,
+            true,
+            PeerRelation::NotLocked {
+                reason: NotLockedReason::CrossRate {
+                    ppm: 3.12,
+                    over: Seconds(60.0),
+                },
+            },
+            Some(3.12),
+        ),
+        s(
+            RemoteLink::Up,
+            true,
+            cant(CantTellReason::MarksLate { by: Seconds(0.25) }),
+            None,
+        ),
+        s(
+            RemoteLink::Up,
+            true,
+            cant(CantTellReason::NotSteady {
+                low: 0.4,
+                high: 3.1,
+            }),
+            Some(1.85),
+        ),
         s(
             RemoteLink::Up,
             true,
@@ -293,7 +324,7 @@ fn standing_rigs() -> Vec<StandingRig> {
             },
             false,
             cant(CantTellReason::LinkDown),
-            Some(0.12),
+            None,
         ),
     ]
 }

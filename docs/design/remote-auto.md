@@ -321,7 +321,27 @@ session opens; with streams on demand that minute would come at every start.
   fits each rig already publishes is a cross-check of the long window.
 - **Age:** the relation's minute counts from when both sessions are up with the link up
   (today an audio re-anchor resets `rig.since` and both windows, `join.rs`; they move to
-  the standing feed and reset on either rig's incarnation). A link gap is a hole.
+  the standing feed and reset on either rig's incarnation or reopened session). A hole is
+  judged on the marks' own sample index and system time, not on when they arrive: a link
+  that stalls and then delivers everything late has lost nothing. A real hole (over 2 s)
+  is a break in the windows (the two sides fitted as segments, so a clock that moved
+  meanwhile is no rate) and the minute open across it counts again; the minutes closed
+  before it stand, and so does the count of marks.
+- **Hold (the standing feed only):** hosts' system clocks are slewed (chrony), and a slew
+  reads in a minute's fit as a rate (100 µs over a minute is about 2 ppm), on the
+  cross-rig figure and on each rig's own line alike. A slew only ever makes a locked pair
+  look apart, so the two verdicts are held unequally: *agree* once the first whole minute
+  closes within the rule, back to *measuring* whenever a minute closes outside it; *not
+  locked* (the cross-rig rate or either rig's own line) only after ten whole minutes in a
+  row beyond the rule, one side and one sign, with *measuring* and the count (*4 of 10
+  min*) meanwhile. Ten counted and not of one mind is *can't tell (figure not steady: +0.4
+  … +3.1 ppm)*, never *measuring* for ever. Two minutes in a row within the rule end a
+  count; a minute too thin to fit, or anything the judge cannot tell (an unsynced system
+  clock), clears it. Ten minutes: one chrony correction would have to move the clock 1.2
+  ms or more at an update interval of 256 s or longer to read past 2 ppm that long.
+- **Late marks:** marks older than the link offset in force (else the longest a link may
+  run, 0.5 s) for 3 s running are *can't tell (… levels arrive N ms late: the network, or
+  its system clock behind)*, and clean for 3 s before that goes.
 - `ClocksDisagree` is found today on the first audio block only; the same age check runs
   on every mark. `CantTellReason::NoAudio` becomes `NoMarks`.
 
@@ -425,6 +445,8 @@ stated system clocks); scene text asserted.
   column untouched, a shared impulse on the same sample in both (also on an arrival
   anchor); a removed column is a dead slot; an empty new column causes no slip.
 - **Standing evidence:** two rigs with sessions and no stream read *Agree* after a minute;
+  +5 ppm reads *not locked* after ten minutes, a slew on one host never does; a link that
+  stalls and catches up keeps its minutes;
   a transfer function started then averages at once, one started 20 s after the source
   reopened waits the rest; +5 ppm, and system clocks 10 ms apart, are found with no
   stream. **Drift:** 0 ppm → the verdict after 30 min of fake time with its figure;

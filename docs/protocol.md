@@ -2211,9 +2211,9 @@ key_changed | other_rig{found}}, `clock`: `PeerClock`
 {`relation` {measuring | agree | not_locked{reason: cross_rate{ppm, over} |
 own_clock{rig, ppm} | other_rate{theirs, ours}} | cant_tell{reason: system_clock_unsynced{rig} |
 system_clock_not_stated{rig} | not_against_system_clock{rig} | no_capture_stamps |
-clocks_disagree{by} | no_audio | no_marks | no_session{rig} | link_down | marks_late{by}}},
-`ppm`, `span`, `last_change`}, `bytes_per_s`, `window` (bytes of frames the link may have in
-flight)}], one per rig the session's remote inputs are on),
+clocks_disagree{by} | no_audio | no_marks | no_session{rig} | link_down | marks_late{by} |
+not_steady{low, high}}}, `ppm`, `span`, `last_change`}, `bytes_per_s`, `window` (bytes of
+frames the link may have in flight)}], one per rig the session's remote inputs are on),
 `inputs` ([`RemoteInputStatus` {`slot`, `audio` {waiting | on_this_rig | no_session |
 not_captured | replaying | rate_mismatch{theirs, ours} | starting | streaming}, `anchor`
 (nil | system_time | arrival{reason: system_clock | no_capture_stamps | no_stamp_map |
@@ -2234,18 +2234,24 @@ function with exactly one channel on a remote rig), `standing` ([`StandingRig` {
 `name`, `link` (as `RemoteRig`), `session` (`StandingSession` \| nil {`sample_rate_hz`,
 `channels` (its captured inputs)}: while its `source/levels` frames come), `clock`
 (`PeerClock` from the marks on those frames alone, §5.1, by the same windows and rules as
-`rigs`, except that `agree` and `cross_rate` are said only once ten whole minutes in a row
-each fitted on one side of the 2 ppm rule (a system clock slewed by its time sync moves
-the marks for minutes; until then `measuring` with the figure); `other_rate` when the two
-sessions' nominal rates differ, nothing fitted; `no_marks` while frames come without marks
-or not at all from a rig whose session is open; `no_session` naming the rig without one;
-`link_down` while the link is not up; `clocks_disagree` when its marks land in this rig's
-future for a second; `marks_late{by}` when they arrive later than the link offset in force
-(else the longest one, 0.5 s) allows for a second, by `by` s: a slow network and a system
-clock behind look the same; `ppm` and `span` nil while no marks come), `marks_for` (s
-\| nil, whole seconds: how long marks have been paired since the count began; nil while
-none come; the count starts again on either rig's new session or daemon, and after any
-gap over 2 s, which no fit bridges)}], one per paired rig, with or without remote
+`rigs`, held as §5.1 of `docs/design/remote-auto.md` says: `agree` once a whole minute
+closes within the 2 ppm rule, `measuring` again when one closes outside it;
+`cross_rate` and `own_clock` only after ten whole minutes in a row beyond it, one side and
+one sign (a system clock slewed by its time sync moves the marks for minutes; until then
+`measuring`); ten counted and not of one mind `not_steady{low, high}` (ppm, the least and
+the greatest minute); `other_rate` when the two sessions' nominal rates differ, nothing
+fitted; `no_marks` while frames come without marks or not at all from a rig whose session
+is open; `no_session` naming the rig without one; `link_down` while the link is not up;
+`clocks_disagree` when its marks land in this rig's future for a second; `marks_late{by}`
+when they arrive later than the link offset in force (else the longest one, 0.5 s) allows
+for 3 s running, until 3 s clean, by `by` s: a slow network and a system clock behind look
+the same; `ppm` and `span` nil while no marks come; figures to 0.01 ppm, whole seconds and
+whole ms, so the entry changes only when a shown digit does), `marks_since` (`WallNs` \|
+nil: when this rig began pairing marks, nil while none come; either rig's new session or
+daemon starts it again, a hole in the marks (over 2 s by their own sample index or system
+time, not by arrival) breaks the windows and the open minute but not this), `counting`
+(`MinuteCount` \| nil {`minutes`, `of`}: minutes counted toward `not_locked` while the
+figure is beyond the rule)}], one per paired rig, with or without remote
 inputs or audio); committed when any of it changes; the clock relations are reported only,
 never corrected for),
 `sweep` (`SweepRun` | nil: the latest `sweep.run` run),

@@ -10,15 +10,13 @@
 //! there whether or not any audio streams.
 //!
 //! Either rig's new incarnation or reopened session starts the windows again: a sample index
-//! then means something new. So does a gap in the marks longer than [`LAPSED`]: both sample
-//! indices kept counting through it, but a fit bridging it would rest on two ends whose
-//! system clocks may have moved meanwhile, so the minute counts again with the link up.
-//!
-//! The feed runs always, on hosts whose system clocks are slewed (chrony corrects an offset
-//! by running the clock a little fast or slow for a while), and a slew reads in a minute's
-//! fit as a rate: 100 µs over a minute is about 2 ppm. A slew passes, a rate difference
-//! stays, so a verdict from this feed needs the figure on one side of the 2 ppm rule, with
-//! one sign, over [`HOLD_WINDOWS`] consecutive minutes ([`StandingReport::held`]).
+//! then means something new. A hole in the marks themselves (by their own sample index and
+//! system time, not by when they arrive: a link that stalls and then delivers everything
+//! late has lost nothing) is a break in the windows: both sample indices kept counting
+//! through it, but either system clock may have moved meanwhile, so the fit takes the two
+//! sides as segments of their own, and the minute open at the hole counts again. The
+//! minutes closed before it stand. What the closed minutes may say is
+//! [`super::standing_verdict`]'s.
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
@@ -27,19 +25,10 @@ use std::time::{Duration, Instant};
 use ac2_core::clock_map::StampLine;
 use ac2_core::clock_rate::RateWindow;
 use ac2_proto::frame::{FrameStamp, METER_FPS, SourceLevelsFrame};
-use ac2_proto::model::{NotLockedReason, PeerRelation};
-use ac2_proto::units::{DaemonIncarnation, SessionEpoch};
+use ac2_proto::units::{DaemonIncarnation, SessionEpoch, WallNs};
 
 use super::join::{CROSS_LONG_S, CROSS_SHORT_S, CROSS_STEP_S};
-use super::peer_clock::BOUND_PPM;
-
-/// Consecutive whole minutes of marks (disjoint long windows) a verdict needs. chrony slews
-/// a measured offset over about three of its update intervals; to read past 2 ppm through
-/// ten minutes running, one correction would have to move the clock 1.2 ms or more at an
-/// update interval of 256 s or longer, and chrony lengthens its interval only while the
-/// offsets it measures stay far below that. A step (`maxerror` and the kernel's unsync
-/// flag) is the system clock checks' to catch, not this.
-pub(crate) const HOLD_WINDOWS: usize = 10;
+use crate::util::wall_ns;
 
 /// A mark waits up to one meter period for its frame beside the link offset's transit and
 /// periods; the late side allows it.
@@ -50,10 +39,13 @@ fn meter_period_s() -> f64 {
 /// This rig's own mark is taken as gone this long after the fan-out last wrote it (it
 /// writes at every hand-off, tens of times a second): the stream stopped.
 const LOCAL_STALE: Duration = Duration::from_secs(1);
-/// No frame, or no mark paired, for this long: the feed lapsed, and marks after it start
-/// the windows again. The link reports once a second, so one second of silence must not
-/// flip on a report's timing.
+/// No frame, or no mark paired, for this long by arrival: the feed is shown absent. The
+/// link reports once a second, so one second of silence must not flip on a report's
+/// timing.
 pub(crate) const LAPSED: Duration = Duration::from_secs(2);
+/// Marks this far apart by their own sample index or system time leave a hole in the
+/// evidence: frames come 30 a second, so this is some sixty missing, not a late one.
+const HOLE_S: f64 = 2.0;
 /// A mark's age says something about the system clocks only when it holds this long: transit
 /// and credit only ever add age, so the least age over it bounds the late side, and one
 /// stamp's jitter must not read as a clock ahead, so the greatest bounds the early side.
@@ -116,13 +108,14 @@ pub(crate) enum Absent {
     Marks,
 }
 
-/// What the last [`HOLD_WINDOWS`] minutes of marks agree on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Held {
-    /// Every one within the 2 ppm rule.
-    Agree,
-    /// Every one beyond it, all of one sign.
-    Apart,
+/// The whole minutes of marks closed since the windows last started.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Minutes {
+    /// Counts the starts: a new one is a new count.
+    pub(crate) series: u64,
+    pub(crate) closed: u64,
+    /// The long window's figure as the newest closed, ppm; `None`: too thin to fit.
+    pub(crate) last: Option<f64>,
 }
 
 /// What the standing feed reports, once a second.
@@ -132,8 +125,9 @@ pub(crate) struct StandingReport {
     pub(crate) long: Option<(f64, f64)>,
     pub(crate) short: Option<(f64, f64)>,
     /// How long marks were paired, from the first since the windows (re)started to the
-    /// newest.
+    /// newest, and when the first was (this rig's wall time).
     pub(crate) marks_for: Option<Duration>,
+    pub(crate) marks_since: Option<WallNs>,
     /// The marks held in this rig's future over a second: the other rig's system clock is
     /// ahead by at least this, s.
     pub(crate) ahead: Option<f64>,
@@ -143,7 +137,8 @@ pub(crate) struct StandingReport {
     pub(crate) least_age: Option<f64>,
     pub(crate) allow: f64,
     pub(crate) periods: (f64, f64),
-    pub(crate) held: Option<Held>,
+    /// While fed.
+    pub(crate) minutes: Option<Minutes>,
     pub(crate) absent: Option<Absent>,
     /// The two sessions' nominal rates differ: (theirs, ours).
     pub(crate) other_rate: Option<(u32, u32)>,
@@ -160,9 +155,11 @@ pub(crate) struct StandingFeed {
     short: RateWindow,
     run: Option<Run>,
     rate: u32,
-    since: Option<Instant>,
+    since: Option<(Instant, WallNs)>,
     last_frame: Option<Instant>,
     last_mark: Option<Instant>,
+    /// The newest mark's sample index and system time, for holes.
+    newest: Option<(u64, u64)>,
     breaks: Option<(u64, u64)>,
     /// Ages of the marks over the last [`AGE_WINDOW`], s, and since when they are kept.
     ages: VecDeque<(Instant, f64)>,
@@ -170,9 +167,8 @@ pub(crate) struct StandingFeed {
     /// This rig's hand-off lag and a period of stamp jitter, s, as its last mark said.
     slack: f64,
     periods: (f64, f64),
-    /// The long window's figure at the end of each whole minute of marks, newest last, and
-    /// the other rig's sample index the current minute began at.
-    minutes: VecDeque<f64>,
+    /// The minutes closed, and the other rig's sample index the open one began at.
+    minutes: Minutes,
     minute_from: Option<u64>,
     other_rate: Option<(u32, u32)>,
     no_local: bool,
@@ -195,12 +191,17 @@ impl StandingFeed {
             since: None,
             last_frame: None,
             last_mark: None,
+            newest: None,
             breaks: None,
             ages: VecDeque::new(),
             ages_since: None,
             slack: 0.0,
             periods: (0.0, 0.0),
-            minutes: VecDeque::new(),
+            minutes: Minutes {
+                series: 0,
+                closed: 0,
+                last: None,
+            },
             minute_from: None,
             other_rate: None,
             no_local: false,
@@ -217,10 +218,15 @@ impl StandingFeed {
         self.rate = rate;
         self.since = None;
         self.last_mark = None;
+        self.newest = None;
         self.breaks = None;
         self.ages.clear();
         self.ages_since = None;
-        self.minutes.clear();
+        self.minutes = Minutes {
+            series: self.minutes.series + 1,
+            closed: 0,
+            last: None,
+        };
         self.minute_from = None;
     }
 
@@ -256,24 +262,34 @@ impl StandingFeed {
             return;
         };
         let run = (stamp.daemon_incarnation, stamp.session_epoch, local.epoch);
-        let gap = self
-            .last_mark
-            .is_some_and(|t| now.saturating_duration_since(t) > LAPSED);
-        if self.run != Some(run) || gap {
+        if self.run != Some(run) {
             self.restart(run, local.rate);
         }
         let rate = f64::from(local.rate);
+        let hole = self.newest.is_some_and(|(sample, system)| {
+            mark.sample.0 <= sample
+                || mark.system_ns <= system
+                || (mark.sample.0 - sample) as f64 > HOLE_S * rate
+                || (mark.system_ns - system) as f64 > HOLE_S * 1e9
+        });
+        if hole {
+            // The open minute spans the hole: it counts again from here.
+            self.minute_from = None;
+            self.ages.clear();
+            self.ages_since = None;
+        }
+        self.newest = Some((mark.sample.0, mark.system_ns));
         let at = local_at(local.reference, local.line, rate, mark.system_ns as f64);
         if at < 0.0 {
             return;
         }
         let breaks = (mark.breaks, local.breaks);
-        let broke = self.breaks.is_some_and(|b| b != breaks);
+        let broke = hole || self.breaks.is_some_and(|b| b != breaks);
         self.breaks = Some(breaks);
         let ns = (at * 1e9 / rate) as u64;
         self.long.push(mark.sample.0, ns, broke);
         self.short.push(mark.sample.0, ns, broke);
-        self.since.get_or_insert(now);
+        self.since.get_or_insert_with(|| (now, WallNs(wall_ns())));
         self.last_mark = Some(now);
         self.minute(mark.sample.0, rate);
         self.age(local, at, their_period, now);
@@ -287,12 +303,8 @@ impl StandingFeed {
             return;
         }
         self.minute_from = Some(sample);
-        if let Some(r) = self.long.rate() {
-            if self.minutes.len() == HOLD_WINDOWS {
-                self.minutes.pop_front();
-            }
-            self.minutes.push_back(r.ppm);
-        }
+        self.minutes.closed += 1;
+        self.minutes.last = self.long.rate().map(|r| r.ppm);
     }
 
     /// How long before the present the mark was captured, by system time: transit only ever
@@ -313,21 +325,6 @@ impl StandingFeed {
         self.slack = local.slack as f64 / rate;
         let ours = f64::from(local.period) / rate;
         self.periods = (ours, their_period.map_or(ours, |p| f64::from(p) / rate));
-    }
-
-    /// The last [`HOLD_WINDOWS`] minutes, if they agree on a side.
-    fn held(&self) -> Option<Held> {
-        if self.minutes.len() < HOLD_WINDOWS {
-            return None;
-        }
-        let all = |f: fn(f64) -> bool| self.minutes.iter().all(|&p| f(p));
-        if all(|p| p.abs() <= BOUND_PPM) {
-            Some(Held::Agree)
-        } else if all(|p| p > BOUND_PPM) || all(|p| p < -BOUND_PPM) {
-            Some(Held::Apart)
-        } else {
-            None
-        }
     }
 
     /// The feed as it stands at `now`.
@@ -361,28 +358,17 @@ impl StandingFeed {
                 .since
                 .zip(self.last_mark)
                 .filter(|_| fed)
-                .map(|(s, l)| l.saturating_duration_since(s)),
+                .map(|((s, _), l)| l.saturating_duration_since(s)),
+            marks_since: self.since.filter(|_| fed).map(|(_, w)| w),
             ahead: (settled && greatest < -slack).then(|| -greatest - slack),
             least_age: settled.then(|| ages().fold(f64::INFINITY, f64::min)),
             allow: slack + meter_period_s(),
             periods: self.periods,
-            held: self.held().filter(|_| fed),
+            minutes: fed.then_some(self.minutes),
             absent,
             other_rate: self.other_rate.filter(|_| fresh(self.last_frame)),
             levels: self.levels.clone().filter(|_| fresh(self.last_frame)),
         }
-    }
-}
-
-/// The relation this feed may show: the judge's, but a verdict from the rate only once
-/// [`HOLD_WINDOWS`] minutes held it, measuring until then.
-pub(crate) fn shown(judged: PeerRelation, held: Option<Held>) -> PeerRelation {
-    match judged {
-        PeerRelation::Agree if held != Some(Held::Agree) => PeerRelation::Measuring,
-        PeerRelation::NotLocked {
-            reason: NotLockedReason::CrossRate { .. },
-        } if held != Some(Held::Apart) => PeerRelation::Measuring,
-        r => r,
     }
 }
 

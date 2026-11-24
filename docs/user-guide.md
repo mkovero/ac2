@@ -265,6 +265,20 @@ as `ac2 session link-offset` does. A time below the least that works is raised t
 the line says both (*1 ms set · 17 ms in force, the least that works*). On the rig that gives its inputs, the rigs admitted to
 it are listed there and removed with **Delete** twice.
 
+`ac2 status` also prints a `from levels` line for every paired rig, with or without remote
+inputs or audio: the clocks between the two rigs as the timing in its always-on levels
+shows them (*from levels ketunkolo · clocks agree · +0.12 ppm over 60 s · marks for 5 min
+12 s · 96 kHz, 3 inputs · link up*). *measuring clocks…* means there is no verdict yet:
+the first whole minute of timing is not in, or the figure is beyond 2 ppm and is being
+watched before it is called (*+2.71 ppm over 60 s · 4 of 10 min beyond 2 ppm*). A time
+sync slewing either computer's clock looks like a rate for a minute or two, so *clocks
+agree* comes after one minute within 2 ppm, while *CLOCKS NOT LOCKED +3.1 ppm over 60 s*
+waits for ten minutes in a row beyond it, all one way. Ten minutes that do not agree among
+themselves read *CLOCKS: CAN'T TELL (figure not steady: +0.4 … +3.1 ppm)*. Other reasons:
+*no timing in ketunkolo's levels*, *ketunkolo has no audio session*, *no link to
+ketunkolo*, *ketunkolo's levels arrive 250 ms late: the network, or its system clock
+behind*.
+
 ### Log files
 
 The app and a daemon started by hand log sessions opened, devices lost, capture

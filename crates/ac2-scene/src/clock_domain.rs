@@ -557,6 +557,7 @@ fn verdict(by: &RigClockFacts<'_>, other: &RigClockFacts<'_>) -> Option<Pair> {
             CantTellReason::NoSession { rig } => between_rigs::no_session(name(*rig)),
             CantTellReason::LinkDown => between_rigs::link_down(other.name),
             CantTellReason::MarksLate { by: late } => between_rigs::marks_late(other.name, late.0),
+            CantTellReason::NotSteady { low, high } => between_rigs::not_steady(*low, *high),
             CantTellReason::SystemClockUnsynced { rig } => {
                 format!("{}'s system clock is not synced", name(*rig))
             }

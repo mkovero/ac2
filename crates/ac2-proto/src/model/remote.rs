@@ -188,11 +188,26 @@ pub struct StandingRig {
     /// frame for a second.
     pub session: Option<StandingSession>,
     /// The clocks between the two rigs from the frames' timing marks, judged as the audio's
-    /// are (`clock.span`: how much of a window the figure covers).
+    /// are, a verdict held as `docs/design/remote-auto.md` §5.1 says (`clock.span`: how much
+    /// of a window the figure covers). Figures to 0.01 ppm and whole seconds, so the entry
+    /// changes only when a shown digit does.
     pub clock: PeerClock,
-    /// How long marks have been paired since both rigs' sessions (re)started with the link
-    /// up; a link gap leaves a hole in them and does not start this again.
-    pub marks_for: Option<Seconds>,
+    /// When this rig began pairing marks, since both rigs' sessions (re)started; `None`
+    /// while none come. A link gap leaves a hole in them and does not move this.
+    pub marks_since: Option<WallNs>,
+    /// Whole minutes counted toward *not locked*, of the number it needs, while the figure
+    /// is beyond the rule but not yet for long enough.
+    pub counting: Option<MinuteCount>,
+}
+
+/// Minutes counted toward a held verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MinuteCount {
+    /// Counted so far.
+    pub minutes: u32,
+    /// Needed.
+    pub of: u32,
 }
 
 /// A paired rig's open session as its levels frames show it.
@@ -452,6 +467,13 @@ pub enum CantTellReason {
     MarksLate {
         /// By at least this much past the link offset.
         by: Seconds,
+    },
+    /// The levels-fed figure did not stay on one side of the rule, with one sign, over the
+    /// minutes a verdict needs: near the bound, or system clocks too noisy to tell.
+    NotSteady {
+        /// The least and the greatest minute's figure, ppm.
+        low: f64,
+        high: f64,
     },
 }
 

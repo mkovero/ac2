@@ -87,6 +87,7 @@ pub fn cant_tell_why(r: &RemoteState, other: &str, reason: &CantTellReason) -> S
         CantTellReason::NoSession { rig } => no_session(&who(r, *rig)),
         CantTellReason::LinkDown => link_down(other),
         CantTellReason::MarksLate { by } => marks_late(other, by.0),
+        CantTellReason::NotSteady { low, high } => not_steady(*low, *high),
         CantTellReason::SystemClockUnsynced { rig } => {
             format!("{}'s system clock is not synced", name_of(r, *rig))
         }
@@ -103,6 +104,16 @@ pub fn cant_tell_why(r: &RemoteState, other: &str, reason: &CantTellReason) -> S
             format::fixed(by.0 * 1e3, 1)
         ),
     }
+}
+
+/// The levels-fed figure over the minutes a verdict needs, on both sides of the rule or
+/// of both signs: *figure not steady: +0.4 … +3.1 ppm*.
+pub fn not_steady(low: f64, high: f64) -> String {
+    format!(
+        "figure not steady: {} … {} ppm",
+        format::signed(low, 1),
+        format::signed(high, 1)
+    )
 }
 
 /// Rig `other`'s levels carry no timing: *no timing in ketunkolo's levels*.

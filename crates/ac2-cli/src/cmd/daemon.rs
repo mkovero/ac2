@@ -123,7 +123,7 @@ fn status_text(
     }
     // Beside the audio-fed relation, never in its place: the clocks as each paired rig's
     // always-on levels show them.
-    for l in ac2_scene::standing::status_lines(&st.remote) {
+    for l in ac2_scene::standing::status_lines(&st.remote, crate::watch::now_wall()) {
         s.push('\n');
         s.push_str(&l);
     }

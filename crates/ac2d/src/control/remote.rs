@@ -24,6 +24,7 @@ use crate::remote::join::{JoinInput, JoinSetup, Joiner};
 use crate::remote::link::{self, LinkFrame, LinkHandle};
 use crate::remote::peer_clock::{Evidence, PeerClockWatch};
 use crate::remote::standing::{LocalClock, StandingReport};
+use crate::remote::standing_verdict::StandingWatch;
 use crate::remote::tap::SourceTap;
 use crate::remote::{InputReport, RemoteMsg, RemoteRun, RigReport};
 use crate::rig::RigSettings;
@@ -77,7 +78,7 @@ pub(super) struct RemoteCtl {
     /// Each link's last standing-feed report.
     pub(super) standing: BTreeMap<RigId, StandingReport>,
     /// The clocks between this rig and each paired rig from the standing feed.
-    pub(super) standing_watches: BTreeMap<RigId, PeerClockWatch>,
+    pub(super) standing_watches: BTreeMap<RigId, StandingWatch>,
     /// The standing relation as last shown, for its time of change.
     pub(super) standing_shown: BTreeMap<RigId, PeerClock>,
 }
