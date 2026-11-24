@@ -435,6 +435,11 @@ pub enum Msg {
         octaves: f64,
     },
     CursorAt(Option<f64>),
+    /// A transfer pane's plot was drawn `px` logical pixels wide.
+    PlotWidth {
+        pane: PaneId,
+        px: f32,
+    },
     /// The dB | % toggle of the distortion pane.
     DistortionUnit(DistortionUnit),
     /// The mouse on a plate over a plot.

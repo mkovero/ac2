@@ -1939,8 +1939,18 @@ per frequency and moment, as tall as its level. **G** once more is the spectrum 
 
 **Resolution** is how many points per octave a transfer or sweep curve has: **1/12, 1/24,
 1/48 (default) or 1/96 oct**. It is the grid the curve is computed on, not smoothing. A
-transfer has one finer step, **bins**: the analysis's own FFT bins; for now a transfer at
-`bins` measures, captures and compares exactly as at 1/96.
+transfer has one finer step, **bins**: the analysis's own FFT bins. Its curve is the 1/96
+grid until you zoom in: once the bins of an FFT window land at least a pixel apart, the
+curve is drawn through those bins instead, one point per bin, where they are finer than the
+grid (at 48 kHz above about 1.6 kHz, 410–810 Hz and 135–200 Hz; at 1/96 below those every
+column already holds a bin). On a 1900-pixel-wide plot the full 20 Hz–20 kHz view shows the
+135–200 Hz bins; 10–20 kHz shows the 12 Hz bins of the top window. The cursor then reads the
+nearest bin and says so (`15.0 kHz · 12 Hz bin`), a grid column reads `1/96 oct`, and the
+peak and notch jumps run over the bins as drawn. Where two windows hand over the grid is
+drawn, and the cursor adds `grid` while a neighbouring window draws its bins. Smoothing, a
+peak hold, peak tracking (**P**), the unwrapped phase and group delay keep the grid (the list
+row says `resolution bins (grid: peak hold)` or `(grid: peaks)`), and a capture is a 1/96
+trace.
 
 - **Setting it**: *Resolution* in the New / Edit dialogs (a transfer's also offers `bins`),
   `ac2 meas new tf|sweep … --resolution 1/96`, `ac2 meas set <meas> --resolution 1/24`

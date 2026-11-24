@@ -71,6 +71,8 @@ impl Touches {
                 | crate::state::DragMsg::Over(_)
                 | crate::state::DragMsg::OverRow(_),
             ) => Self::Toasts,
+            // The pane was just drawn at that width; only what the link receives follows.
+            Msg::PlotWidth { .. } => Self::Toasts,
             Msg::Plate(_) | Msg::LegendScroll { .. } => Self::Plates,
             Msg::Cam3d(_, crate::state::Cam3dMsg::Point(_)) => Self::Spectrum,
             Msg::LeqStrip(..) => Self::Spl,

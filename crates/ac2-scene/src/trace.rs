@@ -145,6 +145,8 @@ pub struct TfTrace<'a> {
     /// Its measurement's peak mode tracks: the pane marks and lists the peaks and dips of
     /// the curve it follows when this is the one.
     pub tracks: bool,
+    /// The measurement's own analysis bins ([`crate::tf::bins`]); `None` for a stored curve.
+    pub bins: Option<crate::tf::bins::BinSource<'a>>,
 }
 
 /// A live transfer frame's magnitude as a peak hold may take it: NaN where the curve is
@@ -221,6 +223,7 @@ impl<'a> TfTrace<'a> {
             delay_between: None,
             hold: None,
             tracks: false,
+            bins: None,
         }
     }
 
@@ -291,6 +294,7 @@ impl<'a> TfTrace<'a> {
             delay_between: None,
             hold: None,
             tracks: false,
+            bins: None,
         }
     }
 }

@@ -798,6 +798,8 @@ mod layout;
 
 mod tf_group;
 
+mod bin_wants;
+
 mod panes;
 
 mod meas_layout;

@@ -162,6 +162,7 @@ fn a_peak_between_thinned_columns_is_jumped_to() {
         &t,
         &DisplayCache::default(),
         &ViewState::default(),
+        800.0,
         shown,
         Landmark::Peak,
         Step::Up,
@@ -173,6 +174,7 @@ fn a_peak_between_thinned_columns_is_jumped_to() {
         &bare,
         &DisplayCache::default(),
         &ViewState::default(),
+        800.0,
         shown,
         Landmark::Peak,
         Step::Up,
@@ -209,9 +211,9 @@ fn the_comb_readout_reads_the_bins_the_jump_lands_on() {
     let cache = DisplayCache::default();
     let shown = Range::new(20.0, 20_000.0);
     let mut v = ViewState::default();
-    let first = jump(&t, &cache, &v, shown, Landmark::Peak, Step::Up).expect("peak");
+    let first = jump(&t, &cache, &v, 800.0, shown, Landmark::Peak, Step::Up).expect("peak");
     v.cursor_hz = Some(first);
-    let second = jump(&t, &cache, &v, shown, Landmark::Peak, Step::Up).expect("peak");
+    let second = jump(&t, &cache, &v, 800.0, shown, Landmark::Peak, Step::Up).expect("peak");
     assert_eq!((first, second), (c.freqs[16], c.freqs[22]));
     v.cursor_mark_hz = Some(first);
     v.cursor_hz = Some(second);

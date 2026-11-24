@@ -6,6 +6,7 @@ use ac2_proto::frame::ValidityMask;
 use ac2_proto::model::{Polarity, Smoothing, SmoothingFraction, SmoothingMode};
 use ac2_proto::units::{MeasId, Seconds, SessionEpoch, TraceId};
 
+mod bins;
 mod extremes;
 mod joined;
 mod layout;
@@ -42,6 +43,7 @@ fn trace(c: &Cols, key: TraceKey, delay: f64) -> TfTrace<'_> {
     TfTrace {
         hold: None,
         tracks: false,
+        bins: None,
         range: None,
         faint_phase: false,
         delay_between: None,

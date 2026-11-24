@@ -270,6 +270,9 @@ pub struct AppState {
     pub settings_reveal: bool,
     /// The SPL panes' history strips and the Leq page's cue fold.
     pub leq_panes: LeqPanes,
+    /// Each transfer pane's plot width as last drawn, logical px: how far apart a stage's
+    /// bins land on screen, so which stages it receives and draws.
+    pub plot_px: BTreeMap<PaneId, f32>,
     /// The Settings page last shown: the Settings key opens it again.
     settings_page_last: Page,
     /// The keymap of the latest update: toasts and warnings name the keys it binds.
@@ -313,6 +316,7 @@ impl AppState {
             rig: RigState::new(target),
             others: OtherRigs::default(),
             leq_panes: LeqPanes::default(),
+            plot_px: BTreeMap::new(),
             theme,
             view: ViewState::default(),
             nav: FreqNav::new(FreqRange::default()),
@@ -573,6 +577,9 @@ impl AppState {
                 self.view.freq = t;
             }
             Msg::CursorAt(hz) => self.view.cursor_hz = hz,
+            Msg::PlotWidth { pane, px } => {
+                self.plot_px.insert(pane, px);
+            }
             Msg::SpectrographCursor { hz, before_s } => {
                 self.view.cursor_hz = Some(hz);
                 // The cursor holds the frame it is put on: its time on the history's clock,

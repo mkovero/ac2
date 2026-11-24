@@ -59,6 +59,30 @@ pub fn frame(st: &AppState, meas: MeasId, stream: Stream) -> Option<&TopicFrame>
         .get(&Topic::Data { meas, stream })
 }
 
+/// The newest frame of each of measurement `meas`'s `n` analysis stages held
+/// (`bins/<meas>/<stage>`), beside its `tf`: what its curve draws where a stage's bins are
+/// finer than its grid ([`ac2_scene::tf::bins`]).
+pub fn stage_frames(
+    st: &AppState,
+    meas: MeasId,
+    n: usize,
+) -> Vec<Option<ac2_scene::tf::bins::StageFrame<'_>>> {
+    let latest = st.rig.data.as_ref().map(|d| &d.latest);
+    (0..n)
+        .map(|b| {
+            let stage = u8::try_from(b).ok()?;
+            let f = latest?.get(&Topic::Bins { meas, stage })?;
+            match &f.frame.data {
+                FrameData::Bins(frame) => Some(ac2_scene::tf::bins::StageFrame {
+                    stamp: &f.frame.stamp,
+                    frame,
+                }),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
 /// Freshness of a received frame: its age, or STALE when the client says so (no new frame
 /// within the stream's threshold — 3 s for the once-a-second Leq and band streams, 1 s
 /// otherwise — or the daemon not responding), or stopped when its measurement no longer runs (no frame is due).
@@ -372,6 +396,7 @@ pub fn transfer_jump(
             traces,
             &st.rig.folded.tf_display,
             &st.view_for(pane),
+            st.plot_px.get(&pane).copied().unwrap_or(0.0),
             shown,
             kind,
             step,
@@ -479,6 +504,17 @@ fn with_transfer<R>(
         t.tracks = tracks;
         if st.rig.peak_of(l.meas).holds() {
             t.hold = st.rig.folded.peaks.get(&l.meas.id).map(|p| p.2.values());
+        }
+        if let Some(layout) = f.meta.bins.as_deref() {
+            t.bins = Some(ac2_scene::tf::bins::BinSource {
+                layout,
+                tf_meta: &f.meta,
+                tf_stamp: &l.tf.frame.stamp,
+                stages: stage_frames(st, l.meas.id, layout.stages.len()),
+                running: l.meas.running,
+                math: matches!(l.meas.config.kind, MeasKind::Math { .. }),
+                holds: st.rig.peak_of(l.meas).holds(),
+            });
         }
         if let Some((x, r, ours)) = st.cross_rig(l.meas.id) {
             t.faint_phase = ac2_scene::cross_rig::faint_phase(x).is_some();

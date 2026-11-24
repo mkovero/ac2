@@ -55,7 +55,9 @@ impl AppState {
             .filter_map(|id| self.pane_meas(*id).map(|m| m.id))
             .collect();
         let spectrum = shows(PaneKind::Spectrum) || self.spectrograph_shown();
-        topics_of(&self.rig, shows, &ir_of, spectrum)
+        let mut out = topics_of(&self.rig, shows, &ir_of, spectrum);
+        out.extend(self.bin_topics(&visible));
+        out
     }
 
     /// How often new frames may reach the UI: [`DISPLAY_PERIOD`], or [`SPL_ONLY_PERIOD`]
@@ -106,6 +108,8 @@ impl AppState {
         out
     }
 }
+
+mod bins;
 
 /// The requests that bring `rig`'s link to `topics` at `period`.
 fn sync(

@@ -72,6 +72,7 @@ fn trace<'a>(c: &'a Cols, meas: u32, color: usize, delay: f64) -> TfTrace<'a> {
     TfTrace {
         hold: None,
         tracks: false,
+        bins: None,
         range: None,
         faint_phase: false,
         delay_between: None,

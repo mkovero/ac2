@@ -465,6 +465,7 @@ impl AppState {
                     cue: self
                         .cross_rig(m.id)
                         .and_then(|(x, ..)| ac2_scene::cross_rig::list_cue(x)),
+                    peak: self.rig.peak_of(m),
                 }
             })
             .collect()

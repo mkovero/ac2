@@ -130,6 +130,9 @@ pub struct TfScene {
     /// Ranges the marked curve does not resolve at its grid (the selected curve, else the
     /// first of the pane's own), shaded in every pane; empty when the marker is off.
     pub unresolved: Vec<crate::unresolved::RangeMark>,
+    /// The curves as drawn where a stage's own bins replace the grid, with where; `None`
+    /// when every curve is drawn on its grid ([`bins`]).
+    pub bins: Option<bins::Spliced>,
 }
 
 impl TfScene {
@@ -461,7 +464,15 @@ pub fn transfer_scene(
     let x_axis = axis::freq_axis(view.freq.range(), plot_x, plot_x + plot_w);
     let xm = x_axis.mapping;
     let last = panes_at.len().saturating_sub(1);
-    let marks = unresolved_marks(traces, &shown, view);
+    let mut marks = unresolved_marks(traces, &shown, view);
+    let spliced = bins::splice(traces, &shown, view, f64::from(plot_w));
+    let drawn: &[DisplayTrace] = spliced.as_ref().map_or(&shown, |s| &s.traces);
+    // The unwrapped phase and group delay are the grid's: read there, as drawn there.
+    let read = if bins::reads_bins(view.tf.phase) {
+        drawn
+    } else {
+        &shown
+    };
 
     let mut panes = Vec::new();
     let mut coherence_overlay = None;
@@ -531,9 +542,12 @@ pub fn transfer_scene(
         crate::unresolved::draw(&mut c, plot, &xm, &marks, theme);
         let ym = y_axis.mapping;
         if kind == TfPaneKind::Magnitude && view.range_band_shown() {
-            for (t, d) in traces.iter().zip(&shown) {
+            for (i, (t, d)) in traces.iter().zip(&shown).enumerate() {
                 if let Some(band) = t.range.and_then(|r| r.band) {
-                    let edges = crate::range_band::edges(band, d.offset_db, &view.tf.coherence);
+                    let mut edges = crate::range_band::edges(band, d.offset_db, &view.tf.coherence);
+                    if let Some(s) = &spliced {
+                        bins::band_outside(&d.freqs, &mut edges, &s.traces[i], &s.spans[i]);
+                    }
                     let cols = visible_columns(&d.freqs, xm.range.lo, xm.range.hi);
                     crate::range_band::draw(
                         &mut c,
@@ -562,7 +576,11 @@ pub fn transfer_scene(
             );
         }
 
-        for t in &shown {
+        let src = match kind {
+            TfPaneKind::Phase if !bins::reads_bins(view.tf.phase) => &shown,
+            _ => drawn,
+        };
+        for t in src {
             let cols = visible_columns(&t.freqs, xm.range.lo, xm.range.hi);
             let xs: Vec<f32> = t.freqs[cols.clone()].iter().map(|f| xm.to_px(*f)).collect();
             let values: &[f64] = match kind {
@@ -656,18 +674,35 @@ pub fn transfer_scene(
         .iter()
         .map(|t| (t.nudge.0, t.delay_nudge.0, t.compared))
         .collect();
+    if view.marks()
+        && let Some(s) = &spliced
+    {
+        marks.extend(bins::blend_marks(traces, s));
+    }
+    let forced = bins::forced(traces);
     let legend: Vec<LegendEntry> = shown
         .iter()
         .zip(&nudges)
         .zip(traces)
-        .map(|((t, (n, s, c)), src)| {
+        .enumerate()
+        .map(|(i, ((t, (n, s, c)), src))| {
             let mut e = legend_entry(t, *n, *s, selected == Some(t.key), *c);
+            let said = e.tags.len();
+            let spans = spliced.as_ref().and_then(|s| s.spans.get(i));
+            let tags = bins::legend_tags(
+                src,
+                spans.map_or(&[][..], Vec::as_slice),
+                forced,
+                view.range_band_shown(),
+            );
             if view.range_band
                 && let Some(r) = src.range
             {
-                let tag = crate::range_band::legend_text(r.spread);
+                e.tags.push(crate::range_band::legend_text(r.spread));
+            }
+            e.tags.extend(tags);
+            for tag in &e.tags[said..] {
                 e.text = format!("{} · {tag}", e.text);
-                e.tags.push(tag);
             }
             e
         })
@@ -675,11 +710,23 @@ pub fn transfer_scene(
     let mut cursor = view
         .cursor_hz
         .filter(|_| view.chrome.cursor())
-        .and_then(|hz| readout::cursor_readout(&shown, hz, view.tf.phase));
-    if let Some(cr) = cursor.as_mut()
-        && let Some(note) = crate::unresolved::note_at(&marks, cr.freq_hz)
-    {
-        cr.freq = format!("{} · {note}", cr.freq);
+        .and_then(|hz| readout::cursor_readout(read, hz, view.tf.phase));
+    if let Some(cr) = cursor.as_mut() {
+        // The form of what the cursor reads, on the curve it snapped to: a bin or a column.
+        let at = view.cursor_hz.and_then(|hz| {
+            read.iter()
+                .enumerate()
+                .find_map(|(i, d)| d.nearest_estimate(hz).map(|c| (i, c)))
+        });
+        let spliced_read = spliced.as_ref().filter(|_| bins::reads_bins(view.tf.phase));
+        if let Some(form) =
+            at.and_then(|(i, c)| bins::form_note(traces, spliced_read, i, c, cr.freq_hz))
+        {
+            cr.freq = format!("{} · {form}", cr.freq);
+        }
+        if let Some(note) = crate::unresolved::note_at(&marks, cr.freq_hz) {
+            cr.freq = format!("{} · {note}", cr.freq);
+        }
     }
     let delay = reference.as_ref().map(|r| {
         let name = shown
@@ -739,7 +786,7 @@ pub fn transfer_scene(
             readout_box = values::draw(
                 &mut c,
                 cr,
-                &shown,
+                read,
                 placed.as_ref(),
                 &view.plates.readout,
                 view.plate_hover,
@@ -758,7 +805,7 @@ pub fn transfer_scene(
     let mag = panes.iter().find(|p| p.kind == TfPaneKind::Magnitude);
     let mark = cursor
         .as_ref()
-        .and_then(|_| mark::readout(traces, &shown, view));
+        .and_then(|_| mark::readout(traces, read, view));
     let mark_box = mark.as_ref().and_then(|m| {
         let plots: Vec<Rect> = panes_at.iter().map(|(_, r)| *r).collect();
         mark::line(&mut c, &plots, xm.to_px(m.freq_hz), theme);
@@ -850,9 +897,11 @@ pub fn transfer_scene(
         strip: strip.rect,
         banners: strip.rows,
         unresolved: marks,
+        bins: spliced,
     }
 }
 
+pub mod bins;
 mod extremes;
 mod line;
 mod mark;

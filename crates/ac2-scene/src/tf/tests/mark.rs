@@ -22,9 +22,9 @@ fn the_mark_reads_the_comb_between_two_notches() {
     let cache = DisplayCache::default();
     let shown = Range::new(200.0, 4000.0);
     let mut v = ViewState::default();
-    let first = jump(&t, &cache, &v, shown, Landmark::Notch, Step::Up).expect("notch");
+    let first = jump(&t, &cache, &v, 800.0, shown, Landmark::Notch, Step::Up).expect("notch");
     v.cursor_hz = Some(first);
-    let second = jump(&t, &cache, &v, shown, Landmark::Notch, Step::Up).expect("notch");
+    let second = jump(&t, &cache, &v, 800.0, shown, Landmark::Notch, Step::Up).expect("notch");
     assert!((first - 500.0).abs() < 10.0 && (second - 1500.0).abs() < 25.0);
     v.cursor_mark_hz = Some(first);
     v.cursor_hz = Some(second);
@@ -53,7 +53,7 @@ fn the_mark_reads_the_comb_between_two_notches() {
     );
     // The peak between the notches is half the comb's spacing from either, and a column
     // that is neither has none: no comb.
-    let peak = jump(&t, &cache, &v, shown, Landmark::Peak, Step::Down).expect("peak");
+    let peak = jump(&t, &cache, &v, 800.0, shown, Landmark::Peak, Step::Down).expect("peak");
     assert!((peak - 1000.0).abs() < 25.0, "{peak}");
     for hz in [peak, 1200.0] {
         v.cursor_hz = Some(hz);
@@ -62,8 +62,8 @@ fn the_mark_reads_the_comb_between_two_notches() {
     }
     // Up from the peak between the two notches is the upper notch, down the lower.
     v.cursor_hz = Some(1000.0);
-    let up = jump(&t, &cache, &v, shown, Landmark::Notch, Step::Up);
-    let down = jump(&t, &cache, &v, shown, Landmark::Notch, Step::Down);
+    let up = jump(&t, &cache, &v, 800.0, shown, Landmark::Notch, Step::Up);
+    let down = jump(&t, &cache, &v, 800.0, shown, Landmark::Notch, Step::Down);
     assert_eq!((down, up), (Some(first), Some(second)));
 }
 

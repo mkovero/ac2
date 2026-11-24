@@ -160,6 +160,7 @@ fn build_scene(
     let mut plates = Vec::new();
     let mut legend_hits = Vec::new();
     let mut dynamics_cells = Vec::new();
+    let mut plot_px = None;
     let (scene, axes) = match pane {
         PaneKind::Transfer if view.shows_ir() => {
             let s = scenes::ir(st, id, &app.keymap, theme, vp, now);
@@ -189,6 +190,7 @@ fn build_scene(
         }
         PaneKind::Transfer => {
             let s = scenes::transfer(st, id, theme, vp, now);
+            plot_px = s.panes.first().map(|p| p.plot.w);
             plates = s.plates();
             legend = s.legend_box;
             legend_hits = s.legend_hits;
@@ -333,6 +335,12 @@ fn build_scene(
         }
     };
     let scene = Arc::new(scene);
+    // How far apart a stage's bins land decides which stages the link receives.
+    if let Some(px) = plot_px
+        && app.state.plot_px.get(&id) != Some(&px)
+    {
+        app.dispatch(Msg::PlotWidth { pane: id, px });
+    }
     app.scenes.insert(
         id,
         CachedScene {

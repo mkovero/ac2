@@ -17,6 +17,7 @@ mod cross_rig;
 
 mod advice;
 mod align;
+mod bins;
 mod calibration;
 mod cursor;
 mod drop_math;

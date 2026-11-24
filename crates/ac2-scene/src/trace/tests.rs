@@ -89,6 +89,7 @@ impl Data {
         TfTrace {
             hold: None,
             tracks: false,
+            bins: None,
             range: None,
             faint_phase: false,
             delay_between: None,

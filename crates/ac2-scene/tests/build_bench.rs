@@ -233,6 +233,7 @@ fn transfer_view_with_a_live_trace_and_eight_stored() {
     let live = TfTrace {
         hold: None,
         tracks: false,
+        bins: None,
         range: None,
         faint_phase: false,
         delay_between: None,
