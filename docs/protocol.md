@@ -2625,8 +2625,8 @@ than most real curves); bytes include topic, header and payload, not the transpo
 
 | frame | as f32 arrays | keyframe | delta |
 |---|---|---|---|
-| `tf`, 720 columns | 7 863 B `TODO(wire_size rerun)` | ≈ 2 400 B (header ≈ 180 B) `TODO(wire_size rerun)` | ≈ 1 250 B `TODO(wire_size rerun)` |
-| `tf` power average with its range band | | ≈ 3 970 B `TODO(wire_size rerun)` | ≈ 2 720 B `TODO(wire_size rerun)` |
+| `tf`, 720 columns | | ≈ 2 700 B (header ≈ 180 B) | ≈ 1 350 B |
+| `tf` power average with its range band | | ≈ 4 440 B | ≈ 2 800 B |
 | `spec`, 65 536 points (897 columns) | 3 696 B | ≈ 1 590 B | ≈ 1 430 B |
 | `spec`, 4 096 points (513 columns) | 2 161 B | ≈ 1 025 B | ≈ 930 B |
 | `rta`, 1/3 octave (30 bands) | 368 B | ≈ 218 B | ≈ 116 B |
@@ -2640,11 +2640,10 @@ rate), a math trace's whenever an operand changes (up to the publish rate), a de
 re-sent every 0.25 s of audio while nothing changes. About 7 % of a `tf` stream's frames go
 as keyframes. A session of three transfer functions
 and their average, three default spectra and a 4 096-point one, a 1/3-octave RTA, two SPL
-meters with band meters and the input meters is ≈ 2.0 Mbit/s at 30 fps and ≈ 2.2 Mbit/s at
-60 fps (9.3 Mbit/s at 60 fps with f32 arrays, 3.2 with keyframes only)
-`TODO(wire_size rerun)`; a pane in its IR view adds `ir` at ≈ 29 frames/s, ≈ 4.6 Mbit/s in
-all `TODO(wire_size rerun)`. Encoding and decoding a `tf` frame take ≈ 37
-and 17 µs on a desktop core `TODO(wire_size rerun)`.
+meters with band meters and the input meters is ≈ 2.2 Mbit/s at 30 fps and ≈ 2.4 Mbit/s at
+60 fps (3.7 with keyframes only); a pane in its IR view adds `ir` at ≈ 30 frames/s,
+≈ 4.6 Mbit/s in all at 30 fps and ≈ 4.8 at 60 fps. Encoding and decoding a 720-column `tf`
+frame take ≈ 88 and 25 µs on a desktop core.
 
 ### 5.8 Flow control
 
