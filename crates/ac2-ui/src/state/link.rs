@@ -103,6 +103,7 @@ impl AppState {
                     .map(|s| s.traces.iter().map(|t| t.id).collect())
                     .unwrap_or_default();
                 self.rig.mirror = Some(v);
+                self.bind_own_file();
                 let gone_traces: BTreeSet<TraceId> = match self.daemon() {
                     Some(s) if !reborn => {
                         let now: BTreeSet<TraceId> = s.traces.iter().map(|t| t.id).collect();

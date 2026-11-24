@@ -3162,7 +3162,7 @@ Click the name, **Alt+S** or palette *Sessions…* opens the Sessions dialog
 |---|---|
 | **New session** | no measurements or traces, then the **Audio I/O** settings for the new session's interface and channels |
 | **Open…** | a session file (`.ac2session`) or folder on this computer (home, USB sticks and other removable media) in a browser with finger-sized rows |
-| **Save** | back to where it came from; untitled: asks for a name first |
+| **Save** | back to where it came from; untitled, or a file this app did not open or export: asks for a name first |
 | **Save as…** | a new session on the daemon; it then belongs to that one |
 | **Export…** | an `.ac2session` file on this computer; a session opened from a file saves back to it |
 | **Recover previous: …** | brings back what the last New or Open replaced while it had unsaved changes |

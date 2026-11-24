@@ -60,15 +60,30 @@ impl AppState {
         )
     }
 
-    /// Where on this machine the working state's client file `name` lies: the most recent
-    /// file of that name this app opened or exported. The daemon knows the file's name
-    /// only; the folder is this machine's own business.
-    pub(super) fn client_file(&self, name: &str) -> Option<std::path::PathBuf> {
-        self.prefs
-            .recent_sessions
-            .iter()
-            .find(|r| text::file_part(&r.path) == name)
-            .map(|r| std::path::PathBuf::from(&r.path))
+    /// Where on this machine the client file working state `w` belongs to lies: only the
+    /// file this app itself opened it from or exported it to. The daemon knows the file's
+    /// name only, and a same-named file this machine once had may be another session.
+    pub(super) fn client_file(&self, w: &WorkingSession) -> Option<std::path::PathBuf> {
+        let Some(SessionOrigin::Client { path: name }) = &w.origin else {
+            return None;
+        };
+        let own = self.rig.own_file.as_ref()?;
+        let same_name = text::file_part(&own.path.to_string_lossy()) == name.as_str();
+        let same_state = own.saved_at.is_none_or(|at| w.saved_at == Some(at));
+        (same_name && same_state).then(|| own.path.clone())
+    }
+
+    /// Ties an export this app made to the working state's save time once the daemon's
+    /// state shows the export.
+    pub(super) fn bind_own_file(&mut self) {
+        let w = self.working();
+        if let Some(o) = &mut self.rig.own_file
+            && o.saved_at.is_none()
+            && let Some(SessionOrigin::Client { path }) = &w.origin
+            && text::file_part(&o.path.to_string_lossy()) == path.as_str()
+        {
+            o.saved_at = w.saved_at;
+        }
     }
 
     /// The daemon clock's offset from this machine's.
@@ -286,18 +301,15 @@ impl AppState {
             Action::Save => self.save(Vec::new(), out),
             Action::SaveAs => self.save_as(Vec::new(), &w),
             Action::Export => {
-                let b = match &w.origin {
-                    Some(SessionOrigin::Client { path }) => self
-                        .client_file(path)
-                        .as_deref()
-                        .and_then(std::path::Path::parent)
-                        .filter(|p| p.is_dir())
-                        .map_or_else(
-                            || Browser::new(BrowsePurpose::Export),
-                            |p| Browser::at(BrowsePurpose::Export, p),
-                        ),
-                    _ => Browser::new(BrowsePurpose::Export),
-                };
+                let b = self
+                    .client_file(&w)
+                    .as_deref()
+                    .and_then(std::path::Path::parent)
+                    .filter(|p| p.is_dir())
+                    .map_or_else(
+                        || Browser::new(BrowsePurpose::Export),
+                        |p| Browser::at(BrowsePurpose::Export, p),
+                    );
                 self.set_page(Page::Browse(b));
             }
             Action::Recover => self.run_job(vec![SessionStep::Recover], out),
@@ -353,9 +365,9 @@ impl AppState {
                 session: SessionRef::Path { path },
                 overwrite: true,
             },
-            SessionOrigin::Client { path } => {
-                // Written by another machine, or its stick is gone: name it again.
-                let p = self.client_file(&path)?;
+            SessionOrigin::Client { .. } => {
+                // Moved by another app or machine, or its stick is gone: name it again.
+                let p = self.client_file(w)?;
                 if !p.parent().is_some_and(std::path::Path::is_dir) {
                     return None;
                 }
@@ -547,6 +559,10 @@ impl AppState {
                     if working {
                         self.prefs.note_recent_session(&p, now);
                         self.prefs_dirty = true;
+                        self.rig.own_file = Some(super::rig::OwnFile {
+                            path: path.clone(),
+                            saved_at: None,
+                        });
                     }
                     self.toast(text::exported_toast(&p, bytes));
                 }
@@ -558,6 +574,10 @@ impl AppState {
                     if let Some(p) = here {
                         self.prefs.note_recent_session(&p.to_string_lossy(), now);
                         self.prefs_dirty = true;
+                        self.rig.own_file = Some(super::rig::OwnFile {
+                            path: p,
+                            saved_at: Some(file.saved_at),
+                        });
                     }
                     self.toast(text::opened_toast(&file));
                 }

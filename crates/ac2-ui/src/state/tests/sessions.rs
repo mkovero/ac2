@@ -430,43 +430,128 @@ fn save_as_esc_backs_out_without_saving() {
     assert_eq!(t.st.overlay, Overlay::None);
 }
 
+/// Save from the dialog: what it asks for (no request while it goes to the name page).
+fn press_save(t: &mut T) -> Vec<Request> {
+    dialog(t);
+    let i = row(t, "friday");
+    click(t, SessionsMsg::Row(i));
+    t.key("Enter")
+}
+
+fn on_name_page(t: &T) -> bool {
+    matches!(
+        t.st.sessions_dialog().map(|d| &d.page),
+        Some(SPage::Name(_))
+    )
+}
+
+fn client(name: &str, saved_at: u64) -> SessionsWorking {
+    (
+        Some(SessionOrigin::Client { path: name.into() }),
+        WallNs(saved_at),
+    )
+}
+
+type SessionsWorking = (Option<SessionOrigin>, WallNs);
+
+fn set_working(t: &mut T, (origin, saved_at): SessionsWorking) {
+    let mut s = daemon_state();
+    s.working = WorkingSession {
+        origin,
+        dirty: true,
+        saved_at: Some(saved_at),
+        recover: None,
+    };
+    t.conn(mirror(s));
+}
+
+fn opened_here(t: &mut T, here: &std::path::Path, saved_at: u64) {
+    t.conn(ConnEvent::Sessions(Box::new(SessionOutcome {
+        done: vec![SessionDone::Opened {
+            file: SessionFile {
+                name: "fri.ac2session".into(),
+                path: "fri.ac2session".into(),
+                saved_at: WallNs(saved_at),
+                measurements: 0,
+                traces: 0,
+            },
+            here: Some(here.to_owned()),
+        }],
+        failed: None,
+    })));
+}
+
 #[test]
-fn a_client_file_saves_where_this_machine_last_had_it() {
-    // The daemon names the client's file only; the folder comes from this app's recents.
+fn a_client_file_saves_where_this_app_opened_it() {
+    // The daemon names the client's file only; the folder is where this app opened it.
     let here = std::env::temp_dir().join("fri.ac2session");
-    let mut t = with_working(
-        true,
-        Some(SessionOrigin::Client {
-            path: "fri.ac2session".into(),
-        }),
-    );
-    t.st.prefs
-        .note_recent_session(&here.to_string_lossy(), WallNs(1));
-    dialog(&mut t);
-    let i = row(&t, "friday");
-    click(&mut t, SessionsMsg::Row(i));
-    let r = t.key("Enter");
+    let mut t = with_working(true, None);
+    opened_here(&mut t, &here, 1);
+    set_working(&mut t, client("fri.ac2session", 1));
     assert_eq!(
-        job(&r)[0],
+        job(&press_save(&mut t))[0],
         SessionStep::Export {
             session: None,
-            path: here,
+            path: here.clone(),
+        }
+    );
+}
+
+#[test]
+fn a_same_named_file_another_app_loaded_is_named_again() {
+    let here = std::env::temp_dir().join("fri.ac2session");
+    // Recents alone: this app never moved the working state through that file.
+    let mut t = with_working(true, None);
+    t.st.prefs
+        .note_recent_session(&here.to_string_lossy(), WallNs(1));
+    set_working(&mut t, client("fri.ac2session", 1));
+    assert!(press_save(&mut t).is_empty());
+    assert!(on_name_page(&t));
+
+    // This app opened its own fri.ac2session, then another machine loaded its own file
+    // of that name: the save time says it is another working state.
+    let mut t = with_working(true, None);
+    opened_here(&mut t, &here, 1);
+    set_working(&mut t, client("fri.ac2session", 7));
+    assert!(press_save(&mut t).is_empty());
+    assert!(on_name_page(&t));
+
+    // A file of another name: named again.
+    let mut t = with_working(true, None);
+    opened_here(&mut t, &here, 1);
+    set_working(&mut t, client("sat.ac2session", 1));
+    assert!(press_save(&mut t).is_empty());
+    assert!(on_name_page(&t));
+}
+
+#[test]
+fn an_export_is_tied_to_the_working_state_it_made() {
+    let here = std::env::temp_dir().join("fri.ac2session");
+    let exported = |t: &mut T| {
+        t.conn(ConnEvent::Sessions(Box::new(SessionOutcome {
+            done: vec![SessionDone::Exported {
+                path: here.clone(),
+                bytes: 10,
+                working: true,
+            }],
+            failed: None,
+        })));
+        set_working(t, client("fri.ac2session", 3));
+    };
+    let mut t = with_working(true, None);
+    exported(&mut t);
+    assert_eq!(
+        job(&press_save(&mut t))[0],
+        SessionStep::Export {
+            session: None,
+            path: here.clone(),
         }
     );
 
-    // A file of that name this machine never had: named again.
-    let mut t = with_working(
-        true,
-        Some(SessionOrigin::Client {
-            path: "sat.ac2session".into(),
-        }),
-    );
-    dialog(&mut t);
-    let i = row(&t, "friday");
-    click(&mut t, SessionsMsg::Row(i));
-    assert!(t.key("Enter").is_empty());
-    assert!(matches!(
-        t.st.sessions_dialog().map(|d| &d.page),
-        Some(SPage::Name(_))
-    ));
+    // Another machine then loads its own fri.ac2session: not this app's export.
+    let mut t = with_working(true, None);
+    exported(&mut t);
+    set_working(&mut t, client("fri.ac2session", 9));
+    assert!(press_save(&mut t).is_empty());
+    assert!(on_name_page(&t));
 }

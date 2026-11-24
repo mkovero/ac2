@@ -139,6 +139,20 @@ pub struct RigState {
     pub input_pick: Option<u16>,
     /// `meas.layout` calls in flight and the edits waiting for them.
     pub(super) layout_queue: LayoutQueue,
+    /// The file on this machine this app last opened the working state from or exported
+    /// it to ([`OwnFile`]).
+    pub(super) own_file: Option<OwnFile>,
+}
+
+/// A session file on this machine that this app moved the working state through. The
+/// daemon names a client's file by its name only, which a file on another machine can
+/// share; the save time ties the file to the one working state it was opened as or
+/// exported from, so Save writes over it only while that state is the daemon's.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct OwnFile {
+    pub path: std::path::PathBuf,
+    /// The working state's save time; `None` until the daemon's state shows the export.
+    pub saved_at: Option<ac2_proto::units::WallNs>,
 }
 
 /// What folding a rig's frames takes from the app: the operator's settings, the time, and
@@ -205,6 +219,7 @@ impl RigState {
             dynamics: super::dynamics::DynamicsUi::default(),
             input_pick: None,
             layout_queue: LayoutQueue::default(),
+            own_file: None,
         }
     }
 
