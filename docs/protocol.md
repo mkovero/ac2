@@ -672,8 +672,9 @@ MeasKind = {type: "transfer", config: TransferConfig} | {type: "spectrum", confi
          | {type: "math", config: MathConfig} | {type: "sweep", config: SweepConfig}
          | {type: "dynamics", config: DynamicsConfig}
 TransferConfig { reference_input: u16, measurement_input: u16, averaging: TfAveraging,
-                 resolution: Resolution, smoothing: Smoothing | nil, depth: DepthPolicy,
-                 lf_window: LfWindow, peak: PeakMode }
+                 resolution: TransferResolution, smoothing: Smoothing | nil,
+                 depth: DepthPolicy, lf_window: LfWindow, peak: PeakMode }
+TransferResolution = {type: "grid", grid: Resolution} | {type: "bins"}
 SpectrumConfig { input: u16, resolution: SpecResolution, window: Window,
                  averaging: SpecAveraging, smoothing: SmoothingFraction | nil,
                  level: SpecLevel, display: SpectrumDisplay }
@@ -2420,6 +2421,7 @@ The kind a topic carries (§5.3 `kind`, and the `meta` key):
 | topic | kind |
 |---|---|
 | `d/<meas>/<stream>` | that stream's kind (`tf`, `ir`, `rta`, `spec`, `spl`, `leq`, `band_leq`, `levels`) |
+| `bins/<meas>/<stage>` | `bins` |
 | `session/levels` | `session_levels` |
 | `session/preview` | `preview_levels` |
 | `source/levels` | `source_levels` |
@@ -2723,6 +2725,10 @@ than most real curves); bytes include topic, header and payload, not the transpo
 | `ir`, 4 096 points (`ir_linear`, `ir_etc`) | 32 896 B | ≈ 13 050 B | ≈ 10 400 B |
 | `spl` (no arrays) | 138 B | ≈ 141 B | ≈ 85 B |
 
+A `bins` stage frame (§5.4) holds at most 0.45 × 4 096 = 1 843 bins, whatever the rate or
+LF window (every stage's window is 4 096 points of its own rate), in three 2-byte arrays:
+stage 0 at 48 kHz is 1 756 bins, 10 536 B of codes before compression.
+
 A `tf` stream goes out at its analysis hop (≈ 26 frames/s at 48 kHz, whatever the publish
 rate), a math trace's whenever an operand changes (up to the publish rate), a default
 `spec` with each new spectrum (every `n/8` samples: ≈ 6 per second at 65 536 points),
@@ -2848,7 +2854,7 @@ What a daemon reads of each artefact; any other version is refused:
 | artefact | versions read |
 |---|---|
 | trace CSV (§7.1) | `v1` … `v6` |
-| session directory (§7.2) | manifest version 48 only |
+| session directory (§7.2) | manifest version 49 only |
 | raw capture sidecar (§7.5) | version 3 only; the protocol types it holds must still decode |
 | SPL log (§7.4) | `v2` only |
 | band log | `v1` only |
