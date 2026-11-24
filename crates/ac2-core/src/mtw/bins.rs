@@ -87,7 +87,8 @@ impl Mtw {
 
     /// H1 = Gxy / Gxx and γ² = |Gxy|² / (Gxx·Gyy) (clamped to 1) of stage `stage`'s bins
     /// `bins`, into `h1` and `coh` (cleared first, one entry per bin). NaN in both where the
-    /// reference has no energy; γ² is 0 where only the measurement has none. Every entry is
+    /// reference or the measurement has no energy, as a column of such bins reads. Every
+    /// entry is
     /// NaN before the stage's first block. Returns the blocks the average holds.
     pub fn stage_bins_into(
         &self,
@@ -115,15 +116,12 @@ impl Mtw {
         }
         for k in bins {
             let (xx, yy, xy) = (sums.xx[k], sums.yy[k], sums.xy[k]);
-            if xx > 0.0 && xx.is_finite() {
+            // A column whose bins hold no reference or no measurement energy measures nothing,
+            // so a bin alone in its column must read the same; rounding can push |Gxy|² a hair
+            // above Gxx·Gyy.
+            if xx > 0.0 && xx.is_finite() && yy > 0.0 && yy.is_finite() {
                 h1.push(xy / xx);
-                // As in a column: a bin without measurement energy holds no coherent power,
-                // and rounding can push |Gxy|² a hair above Gxx·Gyy.
-                coh.push(if yy > 0.0 {
-                    (xy.norm_sqr() / (xx * yy)).min(1.0)
-                } else {
-                    0.0
-                });
+                coh.push((xy.norm_sqr() / (xx * yy)).min(1.0));
             } else {
                 h1.push(Complex64::new(nan, nan));
                 coh.push(nan);

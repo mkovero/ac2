@@ -208,7 +208,11 @@ impl fmt::Display for Topic {
             Self::Evt => f.write_str("evt"),
             Self::Ka => f.write_str("ka"),
             Self::Audio { channel } => write!(f, "audio/{channel}"),
-            Self::Bins { meas, stage } => write!(f, "bins/{}/{stage}", meas.0),
+            Self::Bins { meas, stage } => {
+                // One digit is the whole stage field: a wider one would not parse back.
+                debug_assert!(*stage < MAX_BIN_STAGES, "bin stage {stage}");
+                write!(f, "bins/{}/{stage}", meas.0)
+            }
         }
     }
 }

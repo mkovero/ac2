@@ -159,3 +159,21 @@ fn a_silent_reference_leaves_nan() {
     assert!(h1.iter().all(|h| h.re.is_nan() && h.im.is_nan()));
     assert!(coh.iter().all(|c| c.is_nan()));
 }
+
+/// Where the measurement has no energy the column holding a bin reads no measurement, so the
+/// bin has no H1 and no γ² either.
+#[test]
+fn a_silent_measurement_leaves_nan() {
+    let mut m = fine_engine(Ladder::Standard);
+    let n = 2 * 48_000;
+    let x = Noise(3).vec(n, 0.1);
+    let y = vec![0.0; n];
+    push_chunked(&mut m, 0, &x, &y);
+    let f = m.frame();
+    assert!(f.columns.iter().all(|c| c.validity != Validity::Valid));
+    let d = m.layout().drawn_bins()[0];
+    let (mut h1, mut coh) = (Vec::new(), Vec::new());
+    assert!(m.stage_bins_into(0, d.range(), &mut h1, &mut coh) > 0);
+    assert!(h1.iter().all(|h| h.re.is_nan() && h.im.is_nan()));
+    assert!(coh.iter().all(|c| c.is_nan()));
+}

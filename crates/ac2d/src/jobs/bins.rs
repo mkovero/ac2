@@ -179,7 +179,13 @@ impl StageStreams {
     }
 
     /// The stage's pace generation: advances whenever what its frame is formed from does.
-    fn generation(&mut self, i: usize, mtw: &Mtw, stamp: &StampArgs, shared: &Shared) -> u64 {
+    pub(super) fn generation(
+        &mut self,
+        i: usize,
+        mtw: &Mtw,
+        stamp: &StampArgs,
+        shared: &Shared,
+    ) -> u64 {
         let s = &mut self.stages[i];
         let key = Key {
             block_end: mtw.stage_last_block_end(s.drawn.stage),

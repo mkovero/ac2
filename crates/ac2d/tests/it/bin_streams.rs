@@ -159,7 +159,7 @@ fn bin_equals_its_column(s: &Frame, tf_frame: &Frame, bin: u32) {
         t.phase[c]
     );
     assert!(
-        (b.coh[i] - t.coh[c]).abs() <= 0.006,
+        (b.coh[i] - t.coh[c]).abs() <= 2e-4,
         "{what}: {} {}",
         b.coh[i],
         t.coh[c]
@@ -208,11 +208,14 @@ fn stages_arrive_while_subscribed_stamped_as_their_tf() {
     }
 
     // Stage 2 was never formed while unsubscribed: its first frame is its topic's first.
+    // The subscription lands asynchronously: audio keeps running until an emit sees it.
     r.sub.subscribe(Subscription::Topic(stage(1, 2)));
-    run(&mut r.d, 0.3);
-    let first = r
-        .sub
-        .frame(T, |f| f.topic() == stage(1, 2))
+    let first = (0..100)
+        .find_map(|_| {
+            run(&mut r.d, 0.1);
+            r.sub
+                .frame(Duration::from_millis(100), |f| f.topic() == stage(1, 2))
+        })
         .expect("stage 2");
     assert_eq!(first.stamp.seq, 1);
     run(&mut r.d, 0.3);
