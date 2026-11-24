@@ -266,11 +266,11 @@ impl StageStreams {
 }
 
 /// A live operand's answer to a math over its stage bins: its `tf` and, from the same
-/// averages and stamp, every stage's frame (none when it is not at the `bins` resolution).
+/// averages and stamp, every stage's frame (`None` when it keeps no stage bins).
 #[derive(Debug)]
 pub(crate) struct OperandBins {
     pub(crate) tf: Frame,
-    pub(crate) stages: Vec<BinsFrame>,
+    pub(crate) stages: Option<Vec<BinsFrame>>,
 }
 
 impl Probe {

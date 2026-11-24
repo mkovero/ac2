@@ -9,15 +9,18 @@ use crate::bin_streams::{bins, column, covering, layout, stage, tf_topic};
 use crate::common;
 use crate::transfer::tf;
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use ac2_audio::fake::FakePath;
 use ac2_audio::{FakeBackend, FakeConfig, FakeDriver};
-use ac2_proto::frame::{BinsFrame, OperandStatus, ValidityMask};
+use ac2_core::average::coherence_weight;
+use ac2_proto::frame::{BinsFrame, Frame, OperandStatus, ValidityMask};
 use ac2_proto::model::{
-    GeneratorDesired, GeneratorSettings, LfWindow, MathConfig, MathDomain, MathExpr, MathOp,
-    MeasConfig, MeasKind, Operand, Resolution, Signal, TransferResolution,
+    AverageMethod, GeneratorDesired, GeneratorSettings, LfWindow, MathConfig, MathDomain, MathExpr,
+    MathOp, MeasConfig, MeasKind, Operand, Resolution, Signal, TransferResolution,
 };
+use ac2_proto::topic::Topic;
 use ac2_proto::units::{Dbfs, MeasId, Seconds};
 use ac2_proto::{Command, Subscription};
 use ac2d::{Daemon, Handle};
@@ -230,7 +233,13 @@ fn a_difference_of_live_bins_digs_down() {
             (a.meta.first_bin, a.mag.len())
         );
         assert_ne!(a.meta.delay, b.meta.delay);
+        // A difference has no coherence, in its columns or its bins.
+        assert!(m.coh.iter().all(|v| v.is_nan()), "stage {s}");
         for i in 0..m.mag.len() {
+            if a.mag[i].is_nan() || b.mag[i].is_nan() {
+                assert!(m.mag[i].is_nan(), "stage {s} bin {i}");
+                continue;
+            }
             let want = difference(a, b, i, to, bin_hz(a, i));
             let got = Complex64::from_polar(
                 10f64.powf(f64::from(m.mag[i]) / 20.0),
@@ -248,6 +257,7 @@ fn a_difference_of_live_bins_digs_down() {
         }
     }
     assert!(checked > 1500, "{checked}");
+    assert!(tf(t).coh.iter().all(|v| v.is_nan()));
 
     // Stage 0 bin 100 (1 171.9 Hz) and stage 1 bin 110 (322 Hz) are alone in their 1/96
     // columns, where the operands' columns are their bins: the math's column is the same
@@ -318,7 +328,7 @@ fn only_operands_with_one_layout_dig_down() {
     });
     let average = |of: &[u32]| MathExpr::Average {
         of: of.iter().map(|m| live(*m)).collect(),
-        method: ac2_proto::model::AverageMethod::Complex,
+        method: AverageMethod::Complex,
     };
     let maths = [
         create(&mut r, math("avg", average(&[1, 2, 6]))),
@@ -351,5 +361,115 @@ fn only_operands_with_one_layout_dig_down() {
     }
     let st = &tf(&got[&tf_topic(10)]).meta.math.as_ref().unwrap().operands;
     assert!(!matches!(st[2].status, OperandStatus::Included), "{st:?}");
+    r.h.shutdown();
+}
+
+/// Subscribes to stages 0 and 1 of every one of `meas`, runs audio until math `math`'s first
+/// stage frame comes and a second more, and returns the newest frame of each stage and of
+/// the math's `tf`, all from after the last audio.
+fn newest(r: &mut Rig, math: u32, meas: &[u32]) -> HashMap<Topic, Frame> {
+    let topics: Vec<Topic> = std::iter::once(tf_topic(math))
+        .chain(meas.iter().flat_map(|m| [0, 1].map(|s| stage(*m, s))))
+        .collect();
+    for t in &topics[1..] {
+        r.sub.subscribe(Subscription::Topic(*t));
+    }
+    // Subscriptions land asynchronously: audio runs until the math's stage frames come.
+    (0..100)
+        .find_map(|_| {
+            run(&mut r.d, 0.1);
+            r.sub
+                .frame(Duration::from_millis(100), |f| f.topic() == stage(math, 0))
+        })
+        .expect("a math stage frame");
+    run(&mut r.d, 1.0);
+    let end = end_sample(&r.d);
+    let mut got = covering(&r.sub, end, 0, &topics);
+    while let Some(f) = r
+        .sub
+        .frame(Duration::from_millis(500), |f| topics.contains(&f.topic()))
+    {
+        got.insert(f.topic(), f);
+    }
+    got
+}
+
+/// A power average (the dialog's default) and a coherence-weighted one of two live positions
+/// at bins: each bin is the average of the operands' own bins of its stage, the delays
+/// referred at the bin's frequency, and its coherence their mean; a bin an operand has no
+/// value at has none.
+#[test]
+fn an_average_of_live_bins_is_formed_per_bin() {
+    let mut r = rig(
+        "math-bins-avg",
+        &[(1, BINS, STD, 1), (2, BINS, STD, 2)],
+        &[b"d/"],
+    );
+    let average = |method| MathExpr::Average {
+        of: vec![live(1), live(2)],
+        method,
+    };
+    for (m, method) in [
+        (3, AverageMethod::Power),
+        (4, AverageMethod::CoherenceWeighted),
+    ] {
+        assert_eq!(create(&mut r, math("avg", average(method))), MeasId(m));
+    }
+    run(&mut r.d, 1.5);
+    for (m, method) in [
+        (3u32, AverageMethod::Power),
+        (4, AverageMethod::CoherenceWeighted),
+    ] {
+        let got = newest(&mut r, m, &[m, 1, 2]);
+        let t = &got[&tf_topic(m)];
+        let to = tf(t).meta.delay.0;
+        let mut checked = 0;
+        for s in 0..2u8 {
+            let (mf, a, b) = (
+                bins(&got[&stage(m, s)]),
+                bins(&got[&stage(1, s)]),
+                bins(&got[&stage(2, s)]),
+            );
+            assert_eq!(got[&stage(m, s)].stamp.audio_sample, t.stamp.audio_sample);
+            assert_eq!(mf.mag.len(), a.mag.len());
+            for i in 0..mf.mag.len() {
+                if a.mag[i].is_nan() || b.mag[i].is_nan() {
+                    assert!(mf.mag[i].is_nan(), "{method:?} stage {s} bin {i}");
+                    continue;
+                }
+                let f = bin_hz(a, i);
+                let rot =
+                    |d: f64| Complex64::from_polar(1.0, -std::f64::consts::TAU * f * (d - to));
+                let (za, zb) = (z(a, i) * rot(a.meta.delay.0), z(b, i) * rot(b.meta.delay.0));
+                let want = match method {
+                    AverageMethod::Power => Complex64::from_polar(
+                        (0.5 * (za.norm_sqr() + zb.norm_sqr())).sqrt(),
+                        (za + zb).arg(),
+                    ),
+                    _ => {
+                        let w = |c: f32| coherence_weight(f64::from(c));
+                        let (wa, wb) = (w(a.coh[i]), w(b.coh[i]));
+                        (za * wa + zb * wb) / (wa + wb)
+                    }
+                };
+                // Quantisation as for the difference: 0.01 dB and 0.01° of each operand
+                // and of the result.
+                let scale = za.norm() + zb.norm();
+                assert!(
+                    (z(mf, i) - want).norm() <= 2e-3 * scale,
+                    "{method:?} stage {s} bin {i}: {} {want}",
+                    z(mf, i)
+                );
+                let coh = 0.5 * (a.coh[i] + b.coh[i]);
+                assert!(
+                    (mf.coh[i] - coh).abs() <= 2e-3,
+                    "{method:?} stage {s} bin {i}: γ² {} {coh}",
+                    mf.coh[i]
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 1500, "{method:?}: {checked}");
+    }
     r.h.shutdown();
 }

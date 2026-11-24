@@ -1954,7 +1954,8 @@ and its legend says why (`bins (grid: peak hold)`, `bins (grid: peaks)`); the un
 and group delay exist on the grid only, so with either chosen every transfer pane draws
 and reads the grid, its magnitude and coherence too. A capture is a 1/96 trace. A transfer math trace (a difference, ratio, sum or average) digs down the same way
 when all its operands are live transfers at bins with the same rate and LF window: each bin
-is the operands' own bins combined. With a stored trace, an operand at 1/96 or another LF
+is the operands' own bins combined, and a stopped math shows bins only for the stages that
+were on screen when it stopped. With a stored trace, an operand at 1/96 or another LF
 window, one left out or stopped, it stays on the 1/96 grid; an alignment always does.
 
 - **Setting it**: *Resolution* in the New / Edit dialogs (a transfer's also offers `bins`),

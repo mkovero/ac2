@@ -14,13 +14,14 @@ use ac2_proto::frame::{
     BinLayout, BinsFrame, BinsMeta, FrameData, OperandState, OperandStatus, TfFrame,
 };
 use ac2_proto::grid::GridDef;
-use ac2_proto::model::{FreqRange, MathConfig, MathDomain, MathExpr};
+use ac2_proto::model::{MathConfig, MathDomain, MathExpr};
 use ac2_proto::topic::Topic;
-use ac2_proto::units::{Hz, MeasId, SessionEpoch};
+use ac2_proto::units::{MeasId, SessionEpoch};
 use ac2_traces::columns::Columns;
 use ac2_traces::math::{self, Combine, Input};
 
-use super::{Answer, delay_reference};
+use super::Answer;
+use super::combine::{delay_reference, intersection};
 use crate::jobs::{Due, Emitter, Flush, Pace, StampArgs};
 
 /// The layout every operand's `tf` states, when the math is eligible for stage bins.
@@ -57,12 +58,13 @@ pub(super) fn layout(
 
 /// Stage frames `wanted` of the math result `tf`, from the operands' `answers` and their
 /// stage bins `bins` (`bins[k]` operand `k`'s, from the same averages as its answer). None
-/// unless `tf` states a layout and every operand sent that many stages.
+/// unless `tf` states a layout and every operand sent that many stages: one that keeps no
+/// stage bins makes the result ineligible.
 pub(super) fn frames(
     cfg: &MathConfig,
     tf: &TfFrame,
     answers: &[Answer],
-    bins: &[Vec<BinsFrame>],
+    bins: &[Option<Vec<BinsFrame>>],
     seen_delay: &[Option<f64>],
     epoch: SessionEpoch,
     wanted: &[usize],
@@ -88,7 +90,14 @@ pub(super) fn frames(
     let Some(delays) = delays else {
         return Vec::new();
     };
-    if bins.len() != delays.len() || bins.iter().any(|b| b.len() != l.stages.len()) {
+    let Some(bins) = bins
+        .iter()
+        .map(|b| b.as_deref().filter(|b| b.len() == l.stages.len()))
+        .collect::<Option<Vec<&[BinsFrame]>>>()
+    else {
+        return Vec::new();
+    };
+    if bins.len() != delays.len() {
         return Vec::new();
     }
     // Every operand is included: the grid result's reference, with all of them going in.
@@ -99,7 +108,7 @@ pub(super) fn frames(
         .filter(|&&s| s < l.stages.len())
         .map(|&s| {
             let ops: Vec<(f64, &BinsFrame)> =
-                delays.iter().zip(bins).map(|(d, b)| (*d, &b[s])).collect();
+                delays.iter().zip(&bins).map(|(d, b)| (*d, &b[s])).collect();
             stage_frame(how, &ops, tf, reference, epoch)
         })
         .collect()
@@ -154,18 +163,8 @@ fn stage_frame(
         ),
         None => (nan(), nan(), nan()),
     };
-    // Where every operand's curve corrects: the intersection of their ranges.
-    let mic_range = ops
-        .iter()
-        .map(|(_, f)| f.meta.mic_range)
-        .reduce(|a, b| match (a, b) {
-            (Some(a), Some(b)) if a.lo.0.max(b.lo.0) <= a.hi.0.min(b.hi.0) => Some(FreqRange {
-                lo: Hz(a.lo.0.max(b.lo.0)),
-                hi: Hz(a.hi.0.min(b.hi.0)),
-            }),
-            _ => None,
-        })
-        .flatten();
+    // As the math `tf`'s: where every operand's curve corrects.
+    let mic_range = intersection(ops.iter().map(|(_, f)| f.meta.mic_range));
     BinsFrame {
         meas: tf.meas,
         meta: BinsMeta {

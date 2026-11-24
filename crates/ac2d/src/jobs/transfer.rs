@@ -918,14 +918,10 @@ impl Analysis for Transfer {
         Some((stamp, FrameData::Tf(self.tf_frame(false))))
     }
 
-    fn capture_bins(&mut self) -> Option<(StampArgs, FrameData, Vec<BinsFrame>)> {
-        let (stamp, tf) = self.capture()?;
+    fn stage_bins(&mut self) -> Option<Vec<BinsFrame>> {
         let shared = self.shared();
-        let stages = match &mut self.bins {
-            Some(b) => b.all_frames(&self.mtw, &shared),
-            None => Vec::new(),
-        };
-        Some((stamp, tf, stages))
+        let b = self.bins.as_mut()?;
+        Some(b.all_frames(&self.mtw, &shared))
     }
 
     fn capture_ir(&mut self) -> Option<IrFrame> {

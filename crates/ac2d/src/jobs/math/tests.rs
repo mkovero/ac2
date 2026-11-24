@@ -5,7 +5,7 @@
 use ac2_proto::frame::{FrameStamp, OperandStatus, ProtectionFlags, TfFrame, TfMeta, ValidityMask};
 use ac2_proto::grid::GridDef;
 use ac2_proto::model::{
-    AverageMethod, MathConfig, MathDomain, MathExpr, MathOp, MathReference, Operand,
+    AverageMethod, MathConfig, MathDomain, MathExpr, MathOp, MathReference, Operand, PhaseBasis,
 };
 use ac2_proto::units::{
     DaemonIncarnation, MeasId, Rev, SampleIndex, Seconds, SessionEpoch, TraceId, WallNs,
@@ -754,4 +754,104 @@ fn range_band_gap_follows_the_average() {
     let r = f.range.as_ref().expect("a band");
     assert!(r.lo[0].is_nan() && r.hi[0].is_nan());
     assert_eq!((r.lo[1], r.hi[1]), (0.0, 2.0));
+}
+
+/// A live operand at the `bins` resolution with one stage of four bins from bin 10 at
+/// 10 Hz, its curve's points spanning `mic` Hz.
+fn at_bins(a: Answer, mic: (f64, f64)) -> Answer {
+    let Answer::Result(mut f) = a else {
+        panic!("live operand");
+    };
+    let FrameData::Tf(t) = &mut f.data else {
+        panic!("transfer");
+    };
+    t.meta.bins = Some(Box::new(ac2_proto::frame::BinLayout {
+        stages: vec![ac2_proto::frame::BinStage {
+            first_bin: 10,
+            bins: 4,
+            bin_hz: ac2_proto::units::Hz(10.0),
+        }],
+        blends: Vec::new(),
+    }));
+    t.meta.mic_curve = true;
+    t.meta.mic_range = Some(ac2_proto::model::FreqRange {
+        lo: ac2_proto::units::Hz(mic.0),
+        hi: ac2_proto::units::Hz(mic.1),
+    });
+    Answer::Result(f)
+}
+
+/// That operand's stage: `mag`, phase 0, γ² 0.9, its curve as its `tf`'s.
+fn stage_of(a: &Answer, mag: Vec<f32>) -> Option<Vec<BinsFrame>> {
+    let Answer::Result(f) = a else {
+        panic!("live operand");
+    };
+    let FrameData::Tf(t) = &f.data else {
+        panic!("transfer");
+    };
+    let n = mag.len();
+    Some(vec![BinsFrame {
+        meas: t.meas,
+        meta: ac2_proto::frame::BinsMeta {
+            stage: 0,
+            factor: 1,
+            rate: ac2_proto::units::Hz(48_000.0),
+            bin_hz: ac2_proto::units::Hz(10.0),
+            first_bin: 10,
+            hop: ac2_proto::units::Samples(2400),
+            delay: t.meta.delay,
+            nudged: t.meta.nudged,
+            mic_curve: t.meta.mic_curve,
+            mic_range: t.meta.mic_range,
+            blocks: 5,
+            eff_avg: 5.0,
+        },
+        mag,
+        phase: vec![0.0; n],
+        coh: vec![0.9; n],
+    }])
+}
+
+/// A math stage is formed bin by bin: a bin where an operand has no value has none, a
+/// difference carries no coherence in its stage as in its columns, and the stage's mic range
+/// is the math `tf`'s, both the intersection of the operands'.
+#[test]
+fn a_stage_bin_without_an_operand_value_has_none() {
+    let answers = [
+        at_bins(flat(1, 0.0), (20.0, 20_000.0)),
+        at_bins(flat(2, -6.0), (10.0, 16_000.0)),
+    ];
+    let bins = [
+        stage_of(&answers[0], vec![0.0, f32::NAN, 0.0, 0.0]),
+        stage_of(&answers[1], vec![-6.0; 4]),
+    ];
+    let both = Some(ac2_proto::model::FreqRange {
+        lo: ac2_proto::units::Hz(20.0),
+        hi: ac2_proto::units::Hz(16_000.0),
+    });
+    for (c, coherence) in [
+        (binary(meas(1), MathOp::Subtract, meas(2)), false),
+        (avg(&[1, 2], AverageMethod::Power), true),
+        (avg(&[1, 2], AverageMethod::CoherenceWeighted), true),
+    ] {
+        let tf = run(&c, &[None; 2], &answers);
+        assert!(tf.meta.bins.is_some(), "{c:?}");
+        assert_eq!(tf.meta.mic_range, both);
+        let s = stages::frames(&c, &tf, &answers, &bins, &[None; 2], EPOCH, &[0]);
+        let [s] = &s[..] else {
+            panic!("one stage: {s:?}");
+        };
+        assert_eq!(s.meta.mic_range, both);
+        assert!(s.mag[1].is_nan() && s.phase[1].is_nan(), "{c:?}: {s:?}");
+        for i in [0, 2, 3] {
+            assert!(s.mag[i].is_finite(), "{c:?}: {s:?}");
+            assert_eq!(s.coh[i].is_finite(), coherence, "{c:?}: {s:?}");
+        }
+        assert_eq!(tf.coh.iter().any(|v| v.is_finite()), coherence, "{c:?}");
+    }
+    // An operand that keeps no stage bins leaves the stage unformed.
+    let c = binary(meas(1), MathOp::Subtract, meas(2));
+    let tf = run(&c, &[None; 2], &answers);
+    let without = [bins[0].clone(), None];
+    assert!(stages::frames(&c, &tf, &answers, &without, &[None; 2], EPOCH, &[0]).is_empty());
 }
