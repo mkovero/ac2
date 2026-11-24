@@ -10,7 +10,7 @@ use ac2_proto::{Command, ReplyBody};
 use ac2_scene::standing::FROM_LEVELS;
 use ac2_ui::state::AppState;
 use ac2_zmq::KeyPair;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Pupu and kettu on one true clock, each pairing the other and admitting it, both sessions
 /// open with no remote input; the app connected to pupu alone. The daemons live while the
@@ -115,30 +115,20 @@ fn a_paired_rig_with_no_input_is_measured_from_its_levels() -> R {
 fn slow_a_paired_rig_agrees_from_its_levels() -> R {
     let dir = tempfile::tempdir()?;
     let (pupu, kettu, mut d) = paired_both_ways(dir.path())?;
-    let end = Instant::now() + Duration::from_secs(150);
-    loop {
-        d.pump();
-        if let (Some((line, tip)), Some(rate)) = (kettu_heading(&d.st), heard_rate(&d.st))
-            && line == format!("{rate} AGREE")
-        {
-            assert!(
-                tip.contains(&format!(
-                    "\nclock AGREE: clocks agree with pupu: {FROM_LEVELS}"
-                )),
-                "{tip}"
-            );
-            break;
-        }
-        if Instant::now() > end {
-            return Err(format!(
-                "never agreed: {:?}, standing {:?}",
-                kettu_heading(&d.st),
-                d.st.daemon().map(|s| &s.remote.standing)
-            )
-            .into());
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    let agreed = |st: &AppState| {
+        matches!(
+            (kettu_heading(st), heard_rate(st)),
+            (Some((line, _)), Some(rate)) if line == format!("{rate} AGREE")
+        )
+    };
+    d.until_within(Duration::from_secs(150), "ketunkolo tagged AGREE", agreed)?;
+    let (_, tip) = kettu_heading(&d.st).ok_or("ketunkolo's heading")?;
+    assert!(
+        tip.contains(&format!(
+            "\nclock AGREE: clocks agree with pupu: {FROM_LEVELS}"
+        )),
+        "{tip}"
+    );
     pupu.shutdown();
     kettu.shutdown();
     Ok(())

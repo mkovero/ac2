@@ -86,7 +86,18 @@ impl Driver {
 
     /// Pumps the link until `cond` holds; on timeout fails with the toasts seen.
     pub fn until(&mut self, what: &str, cond: impl Fn(&AppState) -> bool) -> R {
-        let end = Instant::now() + DEADLINE;
+        self.until_within(DEADLINE, what, cond)
+    }
+
+    /// [`Self::until`] for a wait longer than [`DEADLINE`]: one a daemon's own timing
+    /// sets, such as the minutes a clock verdict needs.
+    pub fn until_within(
+        &mut self,
+        within: Duration,
+        what: &str,
+        cond: impl Fn(&AppState) -> bool,
+    ) -> R {
+        let end = Instant::now() + within;
         loop {
             self.pump();
             if cond(&self.st) {

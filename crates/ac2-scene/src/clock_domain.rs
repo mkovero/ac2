@@ -70,8 +70,9 @@ pub struct RigClockFacts<'a> {
 pub struct Levels<'a> {
     /// The daemon's remote state, `standing` in it.
     pub remote: &'a RemoteState,
-    /// Its wall time now, which the marks' age is read against.
-    pub now: WallNs,
+    /// Its wall time now, which the marks' age is read against; `None` while the app does
+    /// not know that daemon's clock, which leaves the age out.
+    pub now: Option<WallNs>,
 }
 
 /// What a group's agreement rests on. Both read `AGREE`: the tooltip says which, and a
@@ -147,17 +148,18 @@ pub struct ClockDomains {
     pairs: Vec<Vec<Pair>>,
     /// Per rig: why a chain of agreements it belongs to makes no group.
     broken: Vec<Option<String>>,
-    /// Per pair judged on a stream's verdict: what the levels say beside it, as the tag it
-    /// would earn and its line.
-    beside: Vec<Vec<Option<Beside>>>,
+    /// Per pair: each standing relation its tag does not rest on, as the tag it would earn
+    /// and its line.
+    beside: Vec<Vec<Vec<Beside>>>,
 }
 
-/// A standing relation beside a stream's verdict on the same two rigs.
+/// A standing relation beside the verdict a pair's tag rests on: a stream's, or the other
+/// daemon's from levels.
 #[derive(Debug, Clone, PartialEq)]
 struct Beside {
     /// The tag it would earn alone: `AGREE`, `FREE` or `UNKNOWN`.
     tag: &'static str,
-    /// It in words ([`standing::evidence_line`]).
+    /// It in words ([`standing::evidence_line_at`]).
     line: String,
 }
 
@@ -171,7 +173,8 @@ enum Pair {
         direct: bool,
         /// That verdict's figure: ppm, span s.
         figure: Option<(f64, f64)>,
-        /// The verdict is from the rigs' levels: what backs it ([`standing::details`]).
+        /// The verdict is from the rigs' levels: what backs it beside the figure (the count,
+        /// how long marks have come).
         levels: Option<Vec<String>>,
     },
     Differ(Differ),
@@ -271,12 +274,12 @@ pub fn clock_domains(rigs: &[RigClockFacts<'_>]) -> ClockDomains {
     let n = rigs.len();
     // Each pair is judged once, from its earlier rig, and mirrored for the later one, so the
     // two rigs can never read each other differently.
-    let (pairs, beside): (Vec<Vec<Pair>>, Vec<Vec<Option<Beside>>>) = (0..n)
+    let (pairs, beside): (Vec<Vec<Pair>>, Vec<Vec<Vec<Beside>>>) = (0..n)
         .map(|i| {
             (0..n)
                 .map(|j| match i.cmp(&j) {
                     std::cmp::Ordering::Less => pair(rigs, i, j),
-                    std::cmp::Ordering::Equal => (Pair::Skip, None),
+                    std::cmp::Ordering::Equal => (Pair::Skip, Vec::new()),
                     std::cmp::Ordering::Greater => {
                         let (p, b) = pair(rigs, j, i);
                         (p.mirrored(), b)
@@ -394,6 +397,7 @@ impl ClockDomains {
                 continue;
             };
             for b in self.beside[i].iter().flatten() {
+                // Already in the tip as what the tag rests on, or the same tag again.
                 if !tag.starts_with(b.tag) {
                     tip.push('\n');
                     tip.push_str(&b.line);
@@ -489,9 +493,27 @@ impl ClockDomains {
                 // One other rig: the figure the verdict rests on reads beside it.
                 let figure = match (others.as_slice(), &self.pairs[i][others[0]]) {
                     (
+                        [j],
+                        Pair::Agree {
+                            figure,
+                            levels: Some(rest),
+                            ..
+                        },
+                    ) if figure.is_some() || !rest.is_empty() => {
+                        let mut parts: Vec<String> = figure
+                            .map(|(ppm, span)| {
+                                standing::figure_text(&self.names[i], &self.names[*j], ppm, span)
+                            })
+                            .into_iter()
+                            .collect();
+                        parts.extend(rest.iter().cloned());
+                        format!(" ({})", parts.join(" · "))
+                    }
+                    (
                         [_],
                         Pair::Agree {
                             figure: Some((ppm, span)),
+                            levels: None,
                             ..
                         },
                     ) => format!(
@@ -499,12 +521,6 @@ impl ClockDomains {
                         format::signed(*ppm, 1),
                         format::fixed(*span, 0)
                     ),
-                    (
-                        [_],
-                        Pair::Agree {
-                            levels: Some(d), ..
-                        },
-                    ) if !d.is_empty() => format!(" ({})", d.join(" · ")),
                     _ => String::new(),
                 };
                 let from_levels = |j: &usize| {
@@ -594,39 +610,51 @@ impl ClockDomains {
 }
 
 /// What the evidence says of rigs `i` and `j`, strongest evidence first.
-fn pair(rigs: &[RigClockFacts<'_>], i: usize, j: usize) -> (Pair, Option<Beside>) {
+fn pair(rigs: &[RigClockFacts<'_>], i: usize, j: usize) -> (Pair, Vec<Beside>) {
     let (a, b) = (&rigs[i], &rigs[j]);
     let (Some(ra), Some(rb)) = (a.rate_hz, b.rate_hz) else {
-        return (Pair::Skip, None);
+        return (Pair::Skip, Vec::new());
     };
     if ra != rb {
-        return (Pair::Differ(Differ::Rates), None);
+        return (Pair::Differ(Differ::Rates), Vec::new());
     }
-    // The levels' word on the two, from `i`'s daemon where it has one: the same as the
-    // Connection page's line beside the shown rig's pairing.
-    let standing = standing_of(a, b)
-        .map(|(l, s)| (a, b, l, s))
-        .or_else(|| standing_of(b, a).map(|(l, s)| (b, a, l, s)));
-    let streams = takes_from(a, b) || takes_from(b, a);
-    if !streams && let Some((by, other, l, s)) = standing {
-        let p = judged(by, other, &s.clock, Some(standing::details(s, l.now)));
-        // A verdict from `j`'s daemon is seen from `j`; mirrored, it reads from `i`.
-        let p = p.map(|p| if std::ptr::eq(by, a) { p } else { p.mirrored() });
-        return (p.expect("a standing relation always judges"), None);
-    }
-    let beside = standing.map(|(_, _, l, s)| Beside {
-        tag: tag_of(&s.clock.relation),
-        line: standing::evidence_line(l.remote, s, l.now),
-    });
-    // Each daemon's verdict on the other, as seen from `i`. One that differs outweighs one
-    // that cannot tell, which outweighs one that agrees: the two daemons watch different
-    // streams, and a difference seen on either is a difference.
-    let verdicts = [verdict(a, b), verdict(b, a).map(|p| p.mirrored())];
+    // One that differs outweighs one that cannot tell, which outweighs one that agrees: two
+    // daemons watch different feeds, and a difference seen on either is a difference.
     let rank = |p: &Pair| match p {
         Pair::Differ(_) => 0,
         Pair::CantTell(_) => 1,
         _ => 2,
     };
+    // Each daemon's standing relation with the other, as seen from `i`.
+    let mut levels: Vec<(Pair, Beside)> = [(a, b), (b, a)]
+        .into_iter()
+        .filter_map(|(by, other)| {
+            let (l, s) = standing_of(by, other)?;
+            let words = LevelsWords {
+                figure: standing::figure(s, other.name, by.name),
+                rest: standing::count(s)
+                    .into_iter()
+                    .chain(l.now.and_then(|n| standing::marks(s, n)))
+                    .collect(),
+            };
+            let p = judged(by, other, &s.clock, Some(words))?;
+            // A verdict from `j`'s daemon is seen from `j`; mirrored, it reads from `i`.
+            let p = if std::ptr::eq(by, a) { p } else { p.mirrored() };
+            let beside = Beside {
+                tag: tag_of(&s.clock.relation),
+                line: standing::evidence_line_at(l.remote, s, l.now, by.name),
+            };
+            Some((p, beside))
+        })
+        .collect();
+    let streams = takes_from(a, b) || takes_from(b, a);
+    if !streams && let Some(k) = (0..levels.len()).min_by_key(|&k| rank(&levels[k].0)) {
+        let (p, _) = levels.remove(k);
+        return (p, levels.into_iter().map(|(_, b)| b).collect());
+    }
+    let beside: Vec<Beside> = levels.into_iter().map(|(_, b)| b).collect();
+    // Each daemon's verdict on the stream it takes from the other, as seen from `i`.
+    let verdicts = [verdict(a, b), verdict(b, a).map(|p| p.mirrored())];
     if let Some(v) = verdicts.into_iter().flatten().min_by_key(rank) {
         return (v, beside);
     }
@@ -640,6 +668,13 @@ fn pair(rigs: &[RigClockFacts<'_>], i: usize, j: usize) -> (Pair, Option<Beside>
         (ea, eb) => Pair::CantTell(ea.err().into_iter().chain(eb.err()).collect()),
     };
     (p, beside)
+}
+
+/// What backs a standing verdict in words: its figure as the reporting daemon sees it
+/// (named, so it reads the same from either rig), then the count and the marks' age.
+struct LevelsWords {
+    figure: Option<String>,
+    rest: Vec<String>,
 }
 
 /// `by`'s session takes an input from `other`: its daemon has a stream's verdict on the two.
@@ -692,15 +727,19 @@ fn judged(
     by: &RigClockFacts<'_>,
     other: &RigClockFacts<'_>,
     clock: &PeerClock,
-    levels: Option<Vec<String>>,
+    levels: Option<LevelsWords>,
 ) -> Option<Pair> {
     let id = other.id?;
     // A verdict names one of its two rigs: the remote one by its id, else the measuring one.
     let name = |rig: RigId| if rig == id { other.name } else { by.name };
     let said = |why: String| match &levels {
         None => why,
-        Some(d) => with_levels(why, d),
+        Some(w) => {
+            let parts: Vec<String> = w.figure.iter().chain(&w.rest).cloned().collect();
+            with_levels(why, &parts)
+        }
     };
+    let rest = levels.as_ref().map(|w| w.rest.clone());
     // The wire figure is the remote rig against the measuring one.
     Some(match &clock.relation {
         PeerRelation::Measuring => match &levels {
@@ -709,22 +748,19 @@ fn judged(
         },
         PeerRelation::Agree => Pair::Agree {
             direct: true,
-            figure: match levels {
-                None => clock.ppm.zip(clock.span).map(|(p, s)| (-p, s.0)),
-                Some(_) => None,
-            },
-            levels: levels.clone(),
+            figure: clock.ppm.zip(clock.span).map(|(p, s)| (-p, s.0)),
+            levels: rest,
         },
         PeerRelation::NotLocked { reason } => Pair::Differ(match reason {
             NotLockedReason::CrossRate { ppm, over } => Differ::Cross {
                 ppm: -ppm,
                 over: over.0,
-                levels: levels.clone(),
+                levels: rest.clone(),
             },
             NotLockedReason::OwnClock { rig, ppm } => Differ::OwnClock {
                 who: name(*rig).to_owned(),
                 ppm: *ppm,
-                levels: levels.clone(),
+                levels: rest,
             },
             NotLockedReason::OtherRate { .. } => Differ::Rates,
         }),

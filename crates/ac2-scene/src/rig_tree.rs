@@ -101,6 +101,15 @@ pub enum Pairing {
     /// Anything else the rig shown reports: a link not up, audio not streaming, a clock
     /// warning, streaming.
     Said(String),
+    /// No input taken from it, and the link its levels come over not up: a few words that
+    /// say whose link it is (*link from pupu: unreachable*), and the sentence for the
+    /// tooltip ([`between_rigs::link_down_text`]).
+    Link {
+        /// The few words, for the heading's line.
+        short: String,
+        /// The sentence.
+        full: String,
+    },
 }
 
 impl Pairing {
@@ -109,7 +118,25 @@ impl Pairing {
         match self {
             Pairing::Plain => PAIRED,
             Pairing::RateMismatch(t) | Pairing::Said(t) => t,
+            Pairing::Link { full, .. } => full,
         }
+    }
+
+    /// The pairing as a heading's line says it, where a sentence has no room.
+    pub fn line(&self) -> &str {
+        match self {
+            Pairing::Link { short, .. } => short,
+            other => other.text(),
+        }
+    }
+
+    /// The link from rig `from` (the rig shown) to rig `to` not up (`link`), as the rig
+    /// shown's daemon reports it with the levels; `None` while it is up.
+    pub fn link(from: &str, to: &str, link: &RemoteLink) -> Option<Self> {
+        Some(Pairing::Link {
+            short: format!("link from {from}: {}", crate::standing::link_short(link)),
+            full: between_rigs::link_down_text(to, link)?,
+        })
     }
 
     /// What the heading's second line says of it after the rate and the clock tag: only
@@ -117,7 +144,7 @@ impl Pairing {
     pub fn on_heading(&self) -> Option<&str> {
         match self {
             Pairing::Plain | Pairing::RateMismatch(_) => None,
-            Pairing::Said(t) => Some(t),
+            Pairing::Said(t) | Pairing::Link { short: t, .. } => Some(t),
         }
     }
 }
@@ -257,14 +284,14 @@ pub fn rig_away_heading(
     away: Away,
     heard: Option<Heard<'_>>,
 ) -> TreeRow {
-    let pairing = pairing.text();
+    let (said, pairing) = (pairing.line(), pairing.text());
     let lead = heard.map(|h| match h.clock {
         Some(c) => format!("{} {}", h.audio.text(), c.tag),
         None => h.audio.text(),
     });
     let line = |rest: &[&str]| {
         let mut parts: Vec<&str> = lead.iter().map(String::as_str).collect();
-        parts.push(pairing);
+        parts.push(said);
         parts.extend(rest);
         parts.join(" · ")
     };

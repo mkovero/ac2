@@ -88,8 +88,8 @@ fn a_paired_rig_with_no_input_is_tagged_from_its_levels() {
     assert_eq!(h[1].0, "pupu / 48 kHz AGREE");
     assert!(
         h[1].1.ends_with(&format!(
-            "\nclock AGREE: clocks agree with test rig: {FROM_LEVELS}, within 2 ppm (+0.12 \
-             ppm over 60 s); a lock is not proven below 2 ppm"
+            "\nclock AGREE: clocks agree with test rig: {FROM_LEVELS}, within 2 ppm (pupu runs \
+             +0.12 ppm against test rig over 60 s); a lock is not proven below 2 ppm"
         )),
         "{}",
         h[1].1
@@ -135,7 +135,40 @@ fn a_paired_rigs_session_and_link_read_from_its_levels() {
         )]
     });
     let h = headings(&t);
-    assert_eq!(h[1].0, "pupu / unreachable · not connected");
+    assert_eq!(
+        h[1].0,
+        "pupu / link from test rig: unreachable · not connected"
+    );
+    // The sentence is the tooltip's.
+    assert!(
+        h[1].1.starts_with("pupu: another rig, unreachable; "),
+        "{}",
+        h[1].1
+    );
+
+    t.remirror(|s| {
+        s.remote.standing = vec![heard(
+            PeerRelation::CantTell { reason: down },
+            None,
+            false,
+            RemoteLink::NoServerKey,
+        )]
+    });
+    let rows = t.st.list_rows();
+    let pupu = &rows.iter().find(|(id, _)| *id == PUPU).expect("pupu").1;
+    assert_eq!(
+        pupu.details,
+        [
+            "link from test rig: no server key · this app is not connected to it",
+            "link from test rig: no server key · not connected"
+        ]
+    );
+    assert!(
+        pupu.describe
+            .contains("this rig has no server key yet: turn its network on once"),
+        "{}",
+        pupu.describe
+    );
 }
 
 /// A daemon that lists no standing relation (an older one, or the pairing not its) leaves
@@ -186,7 +219,7 @@ fn levels_outweigh_system_clocks_and_a_stream_outweighs_levels() {
         h[1].1.ends_with(&format!(
             "\nclock AGREE: clocks agree with test rig: measured between the rigs, within 2 \
              ppm (+0.1 ppm over the last 60 s); a lock is not proven below 2 ppm\n\
-             CLOCKS NOT LOCKED: pupu runs +3.1 ppm against this rig over 60 s · {FROM_LEVELS}"
+             CLOCKS NOT LOCKED: pupu runs +3.1 ppm against test rig over 60 s · {FROM_LEVELS}"
         )),
         "{}",
         h[1].1
@@ -212,4 +245,55 @@ fn the_paired_rigs_row_says_the_clocks_from_levels_in_its_hover() {
         "{}",
         row.tip
     );
+}
+
+/// The marks' age reads on the reporting daemon's own clock, and not at all while the app
+/// does not know that clock.
+#[test]
+fn marks_age_on_the_reporting_daemons_clock() {
+    let since = super::super::sessions_impl::wall_now().0 - 312_400_000_000;
+    let mut s = up(PeerRelation::Agree, Some(0.12));
+    s.marks_since = Some(ac2_proto::units::WallNs(since));
+    let t = pupu_not_held(Some(s.clone()));
+    let h = headings(&t);
+    assert!(
+        h[1].1
+            .contains("(test rig runs −0.12 ppm against pupu over 60 s · marks for 5 min 12 s)")
+            || h[1].1.contains(
+                "(pupu runs +0.12 ppm against test rig over 60 s · marks for 5 min 12 s)"
+            ),
+        "{}",
+        h[1].1
+    );
+
+    // The same state, the link to the daemon not yet holding an offset.
+    let mut t = T::new();
+    let mut st = paired(with_spl());
+    st.remote.standing = vec![s];
+    let ConnEvent::Mirror(m) = mirror(st) else {
+        unreachable!("a mirror event")
+    };
+    let mut v = (*m).clone();
+    v.clock_offset_ns = None;
+    t.conn(ConnEvent::Mirror(std::sync::Arc::new(v)));
+    let h = headings(&t);
+    assert_eq!(h[1].0, "pupu / 48 kHz AGREE");
+    assert!(!h[1].1.contains("marks for"), "{}", h[1].1);
+}
+
+/// The rig shown reconnecting: its mirror's standing entry is what was, so nothing of it shows.
+#[test]
+fn a_lost_rig_shown_shows_nothing_from_its_levels() {
+    let mut t = pupu_not_held(Some(up(PeerRelation::Agree, Some(0.12))));
+    // Reconnecting keeps the last mirror until the daemon answers again.
+    t.conn(ConnEvent::Connecting {
+        target: "test".into(),
+    });
+    assert!(
+        t.st.daemon().is_some(),
+        "the lost rig keeps its last mirror"
+    );
+    let h = headings(&t);
+    assert_eq!(h[1].0, "pupu / paired · not connected");
+    assert!(!h[1].1.contains("clock"), "{}", h[1].1);
 }

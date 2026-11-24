@@ -226,14 +226,16 @@ is never only a colour):
 - **The rig's heading in the measurement list:** its second line carries the rig's clock
   tag after its rate (`96 kHz AGREE`), and the heading's tooltip says what the tag rests on.
   `AGREE`: its sample clock reads within 2 ppm of the other rigs' named in the tooltip,
-  either *measured between the rigs* (with the figure, *+0.3 ppm over the last 60 s*) or
+  either *measured between the rigs* (with the figure: *+0.3 ppm over the last 60 s* from a
+  stream, *ketunkolo runs +0.12 ppm against pupu over 60 s* from levels) or
   *by each rig's system clock*, where two free clocks can meet by chance; with more than
   one such group the tags carry a letter (`AGREE A`, `AGREE B`). `FREE`: shown to differ
   from every other rig listed. `UNKNOWN`: *can't tell*, and what is missing. No tag says
   the rigs are locked: agreement within 2 ppm does not prove one clock. After the tag the
   line says the pairing (*paired · streaming*) and leaves the clocks to the tag, except for
-  a warning, said first and in capitals: *CLOCKS NOT LOCKED +5.6 ppm · paired · streaming*,
-  *CLOCKS: CAN'T TELL · paired · streaming*, *LINK OFFSET TOO SMALL · paired · streaming*.
+  a warning, said first and in capitals: *96 kHz FREE · CLOCKS NOT LOCKED +5.6 ppm · paired ·
+  streaming*, *CLOCKS: CAN'T TELL (no audio) · paired ·
+  streaming*, *LINK OFFSET TOO SMALL · paired · streaming*.
   A paired rig needs no remote input for its tag: paired daemons time-stamp the levels
   they always send each other, and the rig shown's daemon judges the clocks from those
   (`ac2 status`, *from levels*). About a minute after both sessions are open the tag reads
@@ -247,7 +249,10 @@ is never only a colour):
   the tag, as it is what a cross-rig measurement rests on; if the levels would tag the rig
   otherwise, the tooltip adds their line. A paired rig this app does not read takes its
   rate from its levels too (*48 kHz UNKNOWN · paired · not connected*, *no session* when its
-  session is closed, the link's words when the link between the daemons is down); a
+  session is closed); while the link between the daemons is down the line says whose link
+  and how (*link from pupu: unreachable · not connected*) and the tooltip the sentence. What
+  a rig's daemon reports of its levels shows only while this app is connected to that rig;
+  the marks' age shows once the app knows that daemon's clock. A
   daemon that lists no levels relation leaves such a rig untagged, its line saying the
   relation in words (*paired · streaming · clocks agree*, *paired · streaming · measuring
   clocks…*). With no audio from it the line reads *no audio*; when the rates differ the two

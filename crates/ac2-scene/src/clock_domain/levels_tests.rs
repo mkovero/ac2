@@ -66,7 +66,7 @@ fn judge(remote: &RemoteState, pupu_sees: &[RemoteRig]) -> ClockDomains {
             between: pupu_sees,
             levels: Some(Levels {
                 remote,
-                now: WallNs(NOW),
+                now: Some(WallNs(NOW)),
             }),
         },
         RigClockFacts {
@@ -116,8 +116,16 @@ fn levels_that_agree_tag_both_rigs_and_say_what_backs_it() {
     assert_eq!(
         tip(&d, 1),
         format!(
-            "clocks agree with pupu: {LEVELS}, within 2 ppm (+0.12 ppm over 60 s · marks for \
-             5 min 12 s); a lock is not proven below 2 ppm"
+            "clocks agree with pupu: {LEVELS}, within 2 ppm (ketunkolo runs +0.12 ppm against \
+             pupu over 60 s · marks for 5 min 12 s); a lock is not proven below 2 ppm"
+        )
+    );
+    // Each row reads its own rig against the other.
+    assert_eq!(
+        tip(&d, 0),
+        format!(
+            "clocks agree with ketunkolo: {LEVELS}, within 2 ppm (pupu runs −0.12 ppm against \
+             ketunkolo over 60 s · marks for 5 min 12 s); a lock is not proven below 2 ppm"
         )
     );
 }
@@ -142,8 +150,8 @@ fn levels_still_measuring_cannot_tell_and_say_the_count() {
     assert_eq!(
         tip(&d, 1),
         format!(
-            "can't tell: measuring clocks… · +2.71 ppm over 60 s · beyond 2 ppm for 4 of the \
-             10 min a verdict needs · marks for 5 min 12 s · {LEVELS}"
+            "can't tell: measuring clocks… · ketunkolo runs +2.71 ppm against pupu over 60 s · \
+             beyond 2 ppm for 4 of the 10 min a verdict needs · marks for 5 min 12 s · {LEVELS}"
         )
     );
 }
@@ -213,7 +221,7 @@ fn levels_at_another_rate_read_as_the_rates() {
             between: &[],
             levels: Some(Levels {
                 remote: &r,
-                now: WallNs(NOW),
+                now: Some(WallNs(NOW)),
             }),
         },
         RigClockFacts {
@@ -293,7 +301,7 @@ fn a_streams_verdict_stays_the_tag_and_levels_that_differ_add_a_line() {
         format!(
             "clocks agree with pupu: measured between the rigs, within 2 ppm (+0.1 ppm over \
              the last 60 s); a lock is not proven below 2 ppm\nmeasuring clocks… · ketunkolo \
-             runs +0.40 ppm against this rig over 60 s · marks for 5 min 12 s · {LEVELS}"
+             runs +0.40 ppm against pupu over 60 s · marks for 5 min 12 s · {LEVELS}"
         )
     );
 
@@ -312,7 +320,7 @@ fn a_streams_verdict_stays_the_tag_and_levels_that_differ_add_a_line() {
         tip(&d, 1),
         format!(
             "can't tell: no audio between pupu and ketunkolo\nCLOCKS NOT LOCKED: ketunkolo runs \
-             +3.1 ppm against this rig over 60 s · marks for 5 min 12 s · {LEVELS}"
+             +3.1 ppm against pupu over 60 s · marks for 5 min 12 s · {LEVELS}"
         )
     );
 }
@@ -325,4 +333,160 @@ fn no_standing_entry_leaves_the_evidence_as_it_was() {
     let d = judge(&none, &[]);
     assert_eq!(tags(&d), [Some("UNKNOWN"), Some("UNKNOWN")]);
     assert_eq!(tip(&d, 1), "can't tell: ketunkolo reports no sample clock");
+}
+
+/// Both rigs read, only ketunkolo's daemon listing the relation: it is seen from ketunkolo
+/// and mirrored, so each row still reads its own rig against the other.
+#[test]
+fn the_other_daemons_entry_reads_from_each_rig() {
+    let mut theirs = standing(PeerRelation::Agree, Some(0.12));
+    theirs.standing[0].rig = PUPU;
+    theirs.standing[0].name = "pupu".into();
+    let none = RemoteState::default();
+    let d = both(&none, &theirs);
+    assert_eq!(tags(&d), [Some("AGREE"), Some("AGREE")]);
+    // The wire figure is pupu against ketunkolo, as ketunkolo's daemon reports it.
+    assert!(
+        tip(&d, 0).contains("(pupu runs +0.12 ppm against ketunkolo over 60 s"),
+        "{}",
+        tip(&d, 0)
+    );
+    assert!(
+        tip(&d, 1).contains("(ketunkolo runs −0.12 ppm against pupu over 60 s"),
+        "{}",
+        tip(&d, 1)
+    );
+}
+
+/// The two daemons disagree: the one that differs is the tag, the other's line in the tip.
+#[test]
+fn two_daemons_that_disagree_tag_by_the_difference() {
+    let ours = standing(PeerRelation::Agree, Some(0.12));
+    let mut theirs = standing(
+        PeerRelation::NotLocked {
+            reason: NotLockedReason::CrossRate {
+                ppm: 3.12,
+                over: Seconds(60.0),
+            },
+        },
+        Some(3.12),
+    );
+    theirs.standing[0].rig = PUPU;
+    theirs.standing[0].name = "pupu".into();
+    let d = both(&ours, &theirs);
+    assert_eq!(tags(&d), [Some("FREE"), Some("FREE")]);
+    assert_eq!(
+        tip(&d, 1),
+        format!(
+            "ketunkolo runs −3.1 ppm against pupu over 60 s · marks for 5 min 12 s · \
+             {LEVELS}\nclocks agree · ketunkolo runs +0.12 ppm against pupu over 60 s · marks \
+             for 5 min 12 s · {LEVELS}"
+        )
+    );
+
+    // Measuring on one side, agreeing on the other: can't tell, the agreement beside it.
+    let mut counting = standing(PeerRelation::Measuring, Some(2.7));
+    counting.standing[0].rig = PUPU;
+    counting.standing[0].name = "pupu".into();
+    let d = both(&ours, &counting);
+    assert_eq!(tags(&d), [Some("UNKNOWN"), Some("UNKNOWN")]);
+    assert!(
+        tip(&d, 1).starts_with(
+            "can't tell: measuring clocks… · pupu runs +2.70 ppm against \
+             ketunkolo over 60 s"
+        ),
+        "{}",
+        tip(&d, 1)
+    );
+    assert!(tip(&d, 1).contains("\nclocks agree · "), "{}", tip(&d, 1));
+}
+
+/// A daemon whose clock the app does not know: the marks' age is left out, not guessed.
+#[test]
+fn an_unknown_daemon_clock_leaves_the_marks_age_out() {
+    let r = standing(PeerRelation::Agree, Some(0.12));
+    let (pupu, unread) = (pupu_clocks(), Clocks::default());
+    let d = clock_domains(&[
+        RigClockFacts {
+            id: Some(PUPU),
+            name: "pupu",
+            rate_hz: Some(96_000),
+            clocks: &pupu,
+            between: &[],
+            levels: Some(Levels {
+                remote: &r,
+                now: None,
+            }),
+        },
+        RigClockFacts {
+            id: Some(KETUNKOLO),
+            name: "ketunkolo",
+            rate_hz: Some(96_000),
+            clocks: &unread,
+            between: &[],
+            levels: None,
+        },
+    ]);
+    assert_eq!(
+        tip(&d, 1),
+        format!(
+            "clocks agree with pupu: {LEVELS}, within 2 ppm (ketunkolo runs +0.12 ppm against \
+             pupu over 60 s); a lock is not proven below 2 ppm"
+        )
+    );
+}
+
+#[test]
+fn the_newer_reasons_cannot_tell_and_say_why() {
+    let why = |reason| {
+        let d = judge(&standing(cant_tell(reason), None), &[]);
+        assert_eq!(tags(&d), [Some("UNKNOWN"), Some("UNKNOWN")]);
+        tip(&d, 1).to_owned()
+    };
+    assert_eq!(
+        why(CantTellReason::NotSteady {
+            low: 0.42,
+            high: 3.13,
+            line: Some(KETUNKOLO),
+        }),
+        format!(
+            "can't tell: ketunkolo's interface against its system clock not steady: +0.4 … \
+             +3.1 ppm · {LEVELS}"
+        )
+    );
+    assert_eq!(
+        why(CantTellReason::MarksKeepBreaking),
+        format!(
+            "can't tell: ketunkolo's timing keeps breaking off before a minute is in · {LEVELS}"
+        )
+    );
+}
+
+/// pupu and ketunkolo both read, each daemon's state `ours` / `theirs`.
+fn both(ours: &RemoteState, theirs: &RemoteState) -> ClockDomains {
+    let (pupu, kettu) = (pupu_clocks(), pupu_clocks());
+    clock_domains(&[
+        RigClockFacts {
+            id: Some(PUPU),
+            name: "pupu",
+            rate_hz: Some(96_000),
+            clocks: &pupu,
+            between: &[],
+            levels: Some(Levels {
+                remote: ours,
+                now: Some(WallNs(NOW)),
+            }),
+        },
+        RigClockFacts {
+            id: Some(KETUNKOLO),
+            name: "ketunkolo",
+            rate_hz: Some(96_000),
+            clocks: &kettu,
+            between: &[],
+            levels: Some(Levels {
+                remote: theirs,
+                now: Some(WallNs(NOW)),
+            }),
+        },
+    ])
 }

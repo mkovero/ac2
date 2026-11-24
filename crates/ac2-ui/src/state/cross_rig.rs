@@ -131,9 +131,26 @@ impl AppState {
     }
 
     /// The rig shown's daemon's standing relation with paired rig `id`: the clocks and the
-    /// session it hears in that rig's levels.
+    /// session it hears in that rig's levels. None while the app is not connected to the
+    /// rig shown: its mirror then holds what was, not what is.
     fn standing_with(shown: &RigState, id: RigId) -> Option<&StandingRig> {
+        if !matches!(shown.conn, ConnState::Connected { .. }) {
+            return None;
+        }
         shown.daemon()?.remote.standing.iter().find(|s| s.rig == id)
+    }
+
+    /// Rig `r`'s daemon's wall time at the app's `client_now`, by the offset the link to it
+    /// estimated; `None` before one is known.
+    pub(super) fn rig_now(
+        r: &RigState,
+        client_now: ac2_proto::units::WallNs,
+    ) -> Option<ac2_proto::units::WallNs> {
+        let offset = r.mirror.as_ref()?.clock_offset_ns?;
+        let t = i128::from(client_now.0) + offset;
+        Some(ac2_proto::units::WallNs(
+            t.clamp(0, i128::from(u64::MAX)) as u64
+        ))
     }
 
     /// A paired rig's session as its levels have it, for a rig this app does not read; `None`
@@ -153,13 +170,13 @@ impl AppState {
     /// so it gets no tag and no other rig is compared with it.
     fn clock_tags(&self, shown: &RigState, paired: &[(RigId, String)]) -> Vec<DomainTag> {
         let unread = ac2_proto::model::Clocks::default();
-        // The marks' ages read against the rig shown's daemon's clock; another daemon's
-        // differs from it by the offset between the two, far under the seconds they show.
-        let now = crate::scenes::daemon_wall(self, super::sessions_impl::wall_now());
+        // Each daemon's marks age on its own clock.
+        let client_now = super::sessions_impl::wall_now();
         let read = |id: RigId| {
-            self.find_rig(id)
-                .filter(|r| matches!(r.conn, ConnState::Connected { .. }))
-                .and_then(|r| r.daemon())
+            let r = self
+                .find_rig(id)
+                .filter(|r| matches!(r.conn, ConnState::Connected { .. }))?;
+            Some((r.daemon()?, Self::rig_now(r, client_now)))
         };
         let names: Vec<String> = std::iter::once(self.rig_label(shown))
             .chain(paired.iter().map(|(_, n)| n.clone()))
@@ -168,7 +185,7 @@ impl AppState {
             .chain(paired.iter().map(|(id, _)| *id))
             .zip(&names)
             .map(|(id, name)| match read(id) {
-                Some(s) => RigClockFacts {
+                Some((s, now)) => RigClockFacts {
                     id: Some(id),
                     name,
                     rate_hz: s.session.open.as_ref().map(|o| o.sample_rate_hz),
@@ -264,8 +281,8 @@ impl AppState {
             }) {
                 // No input from it: the link the levels come over is what the pairing says.
                 Pairing::Plain => standing
-                    .and_then(|s| ac2_scene::between_rigs::link_down_text(&name, &s.link))
-                    .map_or(Pairing::Plain, Pairing::Said),
+                    .and_then(|s| Pairing::link(&self.rig_label(shown), &name, &s.link))
+                    .unwrap_or(Pairing::Plain),
                 p => p,
             };
             let heard = standing.and_then(Self::heard_audio).map(|audio| Heard {

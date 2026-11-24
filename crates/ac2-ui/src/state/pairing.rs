@@ -221,7 +221,7 @@ impl AppState {
         if !on_page || self.others.visiting.is_some() {
             return;
         }
-        let now = crate::scenes::daemon_wall(self, super::sessions_impl::wall_now());
+        let now = Self::rig_now(&self.rig, super::sessions_impl::wall_now());
         let rows: Vec<PairedRow> = self
             .paired_with_shown()
             .into_iter()
@@ -229,10 +229,14 @@ impl AppState {
                 let h = self.pair_halves(rig);
                 let unreached = self.unreached(rig);
                 let reachable = unreached.is_none() && connected(&self.rig);
-                let clocks = self.daemon().and_then(|st| {
-                    let s = st.remote.standing.iter().find(|s| s.rig == rig)?;
-                    Some(ac2_scene::standing::evidence_line(&st.remote, s, now))
-                });
+                // What the rig shown's daemon reports, only while it reports it.
+                let clocks = self
+                    .daemon()
+                    .filter(|_| connected(&self.rig))
+                    .and_then(|st| {
+                        let s = st.remote.standing.iter().find(|s| s.rig == rig)?;
+                        Some(ac2_scene::standing::evidence_line(&st.remote, s, now))
+                    });
                 PairedRow {
                     rig,
                     text: words::row(&name, &h),

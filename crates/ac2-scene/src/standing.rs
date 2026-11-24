@@ -17,7 +17,7 @@ pub fn status_lines(r: &RemoteState, now: WallNs) -> Vec<String> {
 }
 
 fn line(r: &RemoteState, s: &StandingRig, now: WallNs) -> String {
-    let mut parts = vec![format!("from levels {}", s.name), evidence(r, s, now)];
+    let mut parts = vec![format!("from levels {}", s.name), evidence(r, s, Some(now))];
     if s.link == RemoteLink::Up {
         parts.push(match &s.session {
             Some(x) => format!(
@@ -49,56 +49,83 @@ pub const FROM_LEVELS: &str = "measured from the rigs' level frames, no audio st
 
 /// What rig `s`'s levels say of the clocks, in `status_lines`' words without its session
 /// or its link, the figure naming whose clock runs against whose: *clocks agree · ketunkolo
-/// runs +0.12 ppm against this rig over 60 s · marks for 5 min 12 s*.
-pub fn evidence(r: &RemoteState, s: &StandingRig, now: WallNs) -> String {
-    let mut parts = vec![relation_text(r, &s.name, &s.clock.relation)];
-    parts.extend(parts_of(s, now, Some(&s.name)));
+/// runs +0.12 ppm against this rig over 60 s · marks for 5 min 12 s*. `now`: the reporting
+/// daemon's wall time; `None` while it is not known, which leaves the marks' age out.
+pub fn evidence(r: &RemoteState, s: &StandingRig, now: Option<WallNs>) -> String {
+    evidence_at(r, s, now, "this rig")
+}
+
+/// [`evidence`] where the reporting rig has a name of its own beside others (the app's
+/// tree): the daemon's words call that rig *this rig*, the tree names it `here`.
+pub fn evidence_at(r: &RemoteState, s: &StandingRig, now: Option<WallNs>, here: &str) -> String {
+    let rel = relation_text(r, &s.name, &s.clock.relation);
+    // Every *this rig* in a relation's words is the reporting daemon's own rig.
+    let mut parts = vec![rel.replace("this rig", here)];
+    parts.extend(figure(s, &s.name, here));
+    parts.extend(count(s));
+    parts.extend(now.and_then(|n| marks(s, n)));
     parts.join(" · ")
 }
 
-/// [`evidence`] with what it is measured from: the line a hover adds beside the audio-fed
-/// relation or the pairing.
-pub fn evidence_line(r: &RemoteState, s: &StandingRig, now: WallNs) -> String {
+/// [`evidence`] with what it is measured from: the line a hover adds beside the pairing.
+pub fn evidence_line(r: &RemoteState, s: &StandingRig, now: Option<WallNs>) -> String {
     format!("{} · {FROM_LEVELS}", evidence(r, s, now))
 }
 
-/// What backs rig `s`'s verdict, each a part of its own: the figure (a not-locked verdict
-/// states its own), the count toward a not-locked verdict, how long marks have come.
-pub fn details(s: &StandingRig, now: WallNs) -> Vec<String> {
-    parts_of(s, now, None)
+/// [`evidence_at`] with what it is measured from: the line a tree tip adds beside a
+/// stream's verdict or the other daemon's.
+pub fn evidence_line_at(
+    r: &RemoteState,
+    s: &StandingRig,
+    now: Option<WallNs>,
+    here: &str,
+) -> String {
+    format!("{} · {FROM_LEVELS}", evidence_at(r, s, now, here))
 }
 
-/// [`details`], the figure said as rig `named`'s against this rig when given.
-fn parts_of(s: &StandingRig, now: WallNs, named: Option<&str>) -> Vec<String> {
-    let mut parts = Vec::new();
-    // A verdict that is not locked says its own figure; a second one beside it would be
-    // another window's and could disagree.
-    let verdict = matches!(s.clock.relation, PeerRelation::NotLocked { .. });
-    if let (Some(p), Some(span), false) = (s.clock.ppm, s.clock.span, verdict) {
-        let (p, span) = (format::signed(p, 2), format::fixed(span.0, 0));
-        parts.push(match named {
-            Some(n) => format!("{n} runs {p} ppm against this rig over {span} s"),
-            None => format!("{p} ppm over {span} s"),
-        });
+/// Rig `who`'s sample clock against rig `against`'s: *ketunkolo runs +0.12 ppm against
+/// pupu over 60 s*. Levels resolve a fit to hundredths; the wire figure is the paired rig's
+/// clock against the reporting one, positive when fast.
+pub fn figure_text(who: &str, against: &str, ppm: f64, span_s: f64) -> String {
+    format!(
+        "{who} runs {} ppm against {against} over {} s",
+        format::signed(ppm, 2),
+        format::fixed(span_s, 0)
+    )
+}
+
+/// The verdict's figure as [`figure_text`] says it, the paired rig `who` against the
+/// reporting rig `against`; none for a not-locked verdict, which states its own (a second
+/// figure beside it would be another window's and could disagree).
+pub fn figure(s: &StandingRig, who: &str, against: &str) -> Option<String> {
+    if matches!(s.clock.relation, PeerRelation::NotLocked { .. }) {
+        return None;
     }
-    if let Some(c) = s.counting {
-        parts.push(if c.beyond == c.counted {
-            format!(
-                "beyond 2 ppm for {} of the {} min a verdict needs",
-                c.beyond, c.needed
-            )
-        } else {
-            format!(
-                "beyond 2 ppm in {} of {} min, of the {} a verdict needs",
-                c.beyond, c.counted, c.needed
-            )
-        });
-    }
-    if let Some(since) = s.marks_since {
-        let s = now.0.saturating_sub(since.0) / 1_000_000_000;
-        parts.push(format!("marks for {}", whole_seconds(s)));
-    }
-    parts
+    let (p, span) = s.clock.ppm.zip(s.clock.span)?;
+    Some(figure_text(who, against, p, span.0))
+}
+
+/// The count toward a not-locked verdict, while one runs.
+pub fn count(s: &StandingRig) -> Option<String> {
+    let c = s.counting?;
+    Some(if c.beyond == c.counted {
+        format!(
+            "beyond 2 ppm for {} of the {} min a verdict needs",
+            c.beyond, c.needed
+        )
+    } else {
+        format!(
+            "beyond 2 ppm in {} of {} min, of the {} a verdict needs",
+            c.beyond, c.counted, c.needed
+        )
+    })
+}
+
+/// How long marks have come, at the reporting daemon's wall time `now`.
+pub fn marks(s: &StandingRig, now: WallNs) -> Option<String> {
+    let since = s.marks_since?;
+    let secs = now.0.saturating_sub(since.0) / 1_000_000_000;
+    Some(format!("marks for {}", whole_seconds(secs)))
 }
 
 /// A time in whole seconds: *12 s*, *5 min 12 s*, *2 h 05 min*.
@@ -112,7 +139,13 @@ fn whole_seconds(s: u64) -> String {
 
 /// The link in short: its state without the audio rate, which a levels feed does not have.
 fn link_words(s: &StandingRig) -> String {
-    match &s.link {
+    link_short(&s.link)
+}
+
+/// A link's state in a word or two, for a line with no room for a sentence: *unreachable*,
+/// *not admitted*.
+pub fn link_short(link: &RemoteLink) -> String {
+    match link {
         RemoteLink::Up => "up".into(),
         RemoteLink::NotPaired => "not paired".into(),
         RemoteLink::NoServerKey => "no server key".into(),
