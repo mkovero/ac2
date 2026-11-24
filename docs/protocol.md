@@ -89,21 +89,20 @@ Warning { type: "<name>", … }
   while they run). A client shows them to the operator; they change nothing in `result`.
 
 - `args` is absent for commands without arguments.
-- `id` is unique per client within the dedup window: the last 256 answered ids, each kept
-  30 s from its reply. The window is keyed by (authorized name, key) on the network pair and
-  by connection on the local pair, so a local retry across a reconnect executes again. A
-  client starts its ids at a random 63-bit value, since processes sharing one key share one
-  window. An id executes
-  once, whichever command it carries. A copy sent while the request still runs (a panel, the
-  delay finder, loopback detection) runs nothing: when the request completes, the reply goes
-  to every copy, on whichever connection each arrived. A copy sent after the reply gets the
-  stored reply if the command is a mutation or a read that acts (`session.devices`,
-  `session.preview`,
-  `session.preview_stop`, `session.control_panel`, `session.detect_loopback`, `delay.find`,
-  `trace.export`, `file.upload_begin`, `file.upload_chunk`, `file.import`,
-  `file.download_begin`); any other read is not stored, and a copy of it after the reply
-  runs again. Requests refused before execution (protocol version, undecodable, revoked
-  key) are not remembered. Revoking a client forgets its stored replies and running ids.
+- `id` is unique per client within the dedup window. The window is keyed by (authorized
+  name, key) on the network pair and by connection on the local pair, so a local retry
+  across a reconnect executes again. A client starts its ids at a random 63-bit value,
+  since processes sharing one key share one window. A copy of an id sent while the request
+  still runs (a panel, the delay finder, loopback detection) runs nothing: when the request
+  completes, the reply goes to every copy, on whichever connection each arrived. A mutation
+  or a read that acts (`session.devices`, `session.preview`, `session.preview_stop`,
+  `session.control_panel`, `session.detect_loopback`, `delay.find`, `trace.export`,
+  `file.upload_begin`, `file.upload_chunk`, `file.import`, `file.download_begin`) executes
+  once per id, whichever command it carries: its reply is stored, the last 256 stored
+  replies each kept 30 s, and a copy sent after the reply gets the stored reply. Any other
+  read is not stored: a copy of it sent after the reply runs again. Requests refused before
+  execution (protocol version, undecodable, revoked key) are not remembered. Revoking a
+  client forgets its stored replies and running ids.
 - `session.control_panel`, `delay.find`, `session.detect_loopback` and the file jobs
   (`file.list`, `file.save`, `file.load`, `file.new`, `file.recover`, `file.salvage`,
   `file.import`, `file.download_begin`) run beside the ctrl loop: other requests are
