@@ -2465,7 +2465,7 @@ A frame goes in one of two forms, the header's second element (`form`):
 | `capture_wall_ns` | u64 | as §5.3 |
 | `protection` | u32 | as §5.3 |
 | `crc` | u32 | CRC of the frame's codes (below) |
-| `meta` | […] \| nil | the per-frame metadata: `tf` [filled, settling], `spl` [level, lmax, lmin, leq, lpeak, duration], `source_levels` [mark]; nil for every other kind |
+| `meta` | […] \| nil | the per-frame metadata: `tf` [filled, settling], `bins` [blocks, eff_avg], `spl` [level, lmax, lmin, leq, lpeak, duration], `source_levels` [mark]; nil for every other kind |
 
 The **codes** of a frame are its arrays quantised to their `elem` encoding (below),
 concatenated in the header's array order, each code little-endian, a `bfp16` array's
@@ -2558,7 +2558,7 @@ layout as code.
 |---|---|---|
 | `v` | u16 | protocol version |
 | `form` | u8 | 0 (a keyframe; §5.2) |
-| `kind` | FrameKind | `tf`, `ir`, `rta`, `spec`, `spl`, `leq`, `band_leq`, `levels`, `session_levels`, `preview_levels`, `source_levels`, `session_gonio`, `preview_gonio`, `timing`, `ka`; the kind its topic carries (§5.1) and the `meta` key |
+| `kind` | FrameKind | `tf`, `bins`, `ir`, `rta`, `spec`, `spl`, `leq`, `band_leq`, `levels`, `session_levels`, `preview_levels`, `source_levels`, `session_gonio`, `preview_gonio`, `timing`, `ka`; the kind its topic carries (§5.1) and the `meta` key |
 | `seq` | u64 | per topic per incarnation, increasing; not contiguous (a frame replaced before it was sent never goes), so a delta names its base's |
 | `audio_sample` | u64 | session sample index (origin = session open) of the newest sample in the frame |
 | `session_epoch` | u32 | frames from older epochs are discarded |

@@ -631,7 +631,8 @@ fn a_rig_made_an_app_loses_its_audio_and_no_rig_gets_keepalives() {
     assert_eq!(r.interest.count(b"audio/1"), 0);
 }
 
-/// A rig is served raw audio only: a transfer's stage bins are a curve topic like `d/`'s.
+/// A rig is served raw audio and source levels only: a transfer's stage bins are a curve topic
+/// like `d/`'s.
 #[test]
 fn a_rig_is_refused_stage_bins() {
     let mut r = Rig::new();
