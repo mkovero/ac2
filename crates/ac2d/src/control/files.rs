@@ -357,7 +357,7 @@ impl Control {
                     Some(SessionOrigin::Client { path: file.clone() }),
                     m.saved_at,
                 );
-                let mut f = info(super::transfer::file_part(&file), &stage, &m);
+                let mut f = info(&file, &stage, &m);
                 f.path = file;
                 Ok(ReplyBody::SessionFile(f))
             }

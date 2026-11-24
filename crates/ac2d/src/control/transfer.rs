@@ -37,7 +37,8 @@ const STAGING: &str = ".incoming";
 #[derive(Debug)]
 enum Kind {
     Upload {
-        /// The client's path of it.
+        /// The last component of the client's path: the rest names directories on a
+        /// machine every other client would read it from.
         file: String,
         bytes: u64,
         sha256: String,
@@ -137,7 +138,7 @@ impl Transfers {
         }
     }
 
-    /// A complete upload's client path and bytes.
+    /// A complete upload's file name and bytes.
     pub(crate) fn upload(
         &mut self,
         client: &Peer,
@@ -213,7 +214,7 @@ impl Control {
         let transfer = self.transfers.add(
             client,
             Kind::Upload {
-                file,
+                file: file_name.clone(),
                 bytes,
                 sha256: sha256.to_ascii_lowercase(),
                 data: Vec::with_capacity(usize::try_from(bytes).unwrap_or(0)),
@@ -438,6 +439,9 @@ impl Control {
         let working = *working;
         self.transfers.remove(id);
         if let (Some(path), Some((hash, at))) = (saved_as, working) {
+            // The origin is mirrored to every client: the file's name only, not where on the
+            // writing client's machine it lies.
+            let path = file_part(&path).to_owned();
             tracing::info!("working state exported by {} to {path:?}", client.id().0);
             self.set_working(super::working::Persist {
                 origin: Some(SessionOrigin::Client { path }),

@@ -429,3 +429,44 @@ fn save_as_esc_backs_out_without_saving() {
     assert!(t.key("Escape").is_empty());
     assert_eq!(t.st.overlay, Overlay::None);
 }
+
+#[test]
+fn a_client_file_saves_where_this_machine_last_had_it() {
+    // The daemon names the client's file only; the folder comes from this app's recents.
+    let here = std::env::temp_dir().join("fri.ac2session");
+    let mut t = with_working(
+        true,
+        Some(SessionOrigin::Client {
+            path: "fri.ac2session".into(),
+        }),
+    );
+    t.st.prefs
+        .note_recent_session(&here.to_string_lossy(), WallNs(1));
+    dialog(&mut t);
+    let i = row(&t, "friday");
+    click(&mut t, SessionsMsg::Row(i));
+    let r = t.key("Enter");
+    assert_eq!(
+        job(&r)[0],
+        SessionStep::Export {
+            session: None,
+            path: here,
+        }
+    );
+
+    // A file of that name this machine never had: named again.
+    let mut t = with_working(
+        true,
+        Some(SessionOrigin::Client {
+            path: "sat.ac2session".into(),
+        }),
+    );
+    dialog(&mut t);
+    let i = row(&t, "friday");
+    click(&mut t, SessionsMsg::Row(i));
+    assert!(t.key("Enter").is_empty());
+    assert!(matches!(
+        t.st.sessions_dialog().map(|d| &d.page),
+        Some(SPage::Name(_))
+    ));
+}

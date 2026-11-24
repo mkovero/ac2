@@ -527,7 +527,8 @@ pub enum SessionOrigin {
     /// A session archive on a client's machine (opened from or exported to it); only that
     /// client can write it again.
     Client {
-        /// The path as that client named it.
+        /// The last component of the path that client named it (the daemon never keeps a
+        /// client's folders).
         path: String,
     },
 }

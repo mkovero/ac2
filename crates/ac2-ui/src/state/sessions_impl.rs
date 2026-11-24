@@ -60,6 +60,17 @@ impl AppState {
         )
     }
 
+    /// Where on this machine the working state's client file `name` lies: the most recent
+    /// file of that name this app opened or exported. The daemon knows the file's name
+    /// only; the folder is this machine's own business.
+    pub(super) fn client_file(&self, name: &str) -> Option<std::path::PathBuf> {
+        self.prefs
+            .recent_sessions
+            .iter()
+            .find(|r| text::file_part(&r.path) == name)
+            .map(|r| std::path::PathBuf::from(&r.path))
+    }
+
     /// The daemon clock's offset from this machine's.
     pub fn clock_offset(&self) -> ClockOffset {
         ClockOffset(
@@ -276,8 +287,10 @@ impl AppState {
             Action::SaveAs => self.save_as(Vec::new(), &w),
             Action::Export => {
                 let b = match &w.origin {
-                    Some(SessionOrigin::Client { path }) => std::path::Path::new(path)
-                        .parent()
+                    Some(SessionOrigin::Client { path }) => self
+                        .client_file(path)
+                        .as_deref()
+                        .and_then(std::path::Path::parent)
                         .filter(|p| p.is_dir())
                         .map_or_else(
                             || Browser::new(BrowsePurpose::Export),
@@ -341,8 +354,8 @@ impl AppState {
                 overwrite: true,
             },
             SessionOrigin::Client { path } => {
-                let p = std::path::PathBuf::from(&path);
                 // Written by another machine, or its stick is gone: name it again.
+                let p = self.client_file(&path)?;
                 if !p.parent().is_some_and(std::path::Path::is_dir) {
                     return None;
                 }

@@ -242,8 +242,14 @@ fn archives_round_trip_in_checked_chunks() {
         transfer: t.transfer,
         saved_as: Some(stick.into()),
     });
+    // Every client mirrors the origin: the file's name, never where it lies on that machine.
     let w = working(c);
-    assert_eq!(w.origin, Some(SessionOrigin::Client { path: stick.into() }));
+    assert_eq!(
+        w.origin,
+        Some(SessionOrigin::Client {
+            path: "friday.ac2session".into()
+        })
+    );
     assert!(!w.dirty);
     c.ok(Command::FileNew { discard: false });
 
@@ -253,7 +259,7 @@ fn archives_round_trip_in_checked_chunks() {
         discard: false,
     });
     assert_eq!(loaded.name, "friday.ac2session");
-    assert_eq!(loaded.path, stick);
+    assert_eq!(loaded.path, "friday.ac2session");
     assert_eq!(loaded.traces, 2);
     let after = traces(c);
     assert_eq!(
@@ -264,7 +270,12 @@ fn archives_round_trip_in_checked_chunks() {
     let m = s.state.measurements.iter().find(|m| m.id == meter.id);
     assert_eq!(m.and_then(|m| m.layout.clone()), Some(layout.clone()));
     let w = working(c);
-    assert_eq!(w.origin, Some(SessionOrigin::Client { path: stick.into() }));
+    assert_eq!(
+        w.origin,
+        Some(SessionOrigin::Client {
+            path: "friday.ac2session".into()
+        })
+    );
     assert!(!w.dirty);
     // Used up.
     let e = c

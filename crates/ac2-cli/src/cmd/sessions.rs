@@ -194,7 +194,12 @@ pub(crate) async fn session(
                     ));
                 }
                 Some(SessionOrigin::Client { path }) => {
-                    export_working(c, Path::new(&path), out).await?;
+                    // The daemon keeps the file's name only, never the folder on the
+                    // machine that wrote it.
+                    return Err(CliError::Usage(format!(
+                        "{path} is a file on a client's machine: write it with \
+                         `ac2 session save-as PATH`"
+                    )));
                 }
                 Some(SessionOrigin::Name { name }) => {
                     save(c, SessionRef::Name { name }, true, out).await?;

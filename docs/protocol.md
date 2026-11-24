@@ -1741,9 +1741,10 @@ client's (`file.load`, `file.salvage` only; used up by the command). `SessionFil
 `name`, `path`, `saved_at`, `measurements`, `traces`.
 
 The `working` entity (`WorkingSession`): `origin` (`SessionOrigin` | nil = untitled:
-`name` {name}, `path` {path}, `client` {path} — an archive on a client's machine, the path
-as that client named it), `dirty` (the saved content differs from the origin's last save
-or open: measurement configurations, delays — not a tracking delay's applied value —,
+`name` {name}, `path` {path}, `client` {path} — an archive on a client's machine, by the
+last component of the path that client named it: the daemon never keeps a client's
+folders), `dirty` (the saved content differs from the origin's last save or open:
+measurement configurations, delays — not a tracking delay's applied value —,
 trace metadata; not running/stopped or SPL logs;
 untitled: holds anything), `saved_at` (when the origin's content was saved), `recover`
 (`Recoverable` | nil: `replaced_at`, `origin`, `measurements`, `traces` of the state the
@@ -1795,8 +1796,9 @@ with the autosave (§7.3).
   packs (`file_name` `<name>.ac2session`; an archive over 64 MiB packed is `invalid`, as an
   upload is), `file.download_chunk` reads, and
   `file.download_end` drops it; with `saved_as` after a working-state download, the
-  working state's origin becomes `client` {saved_as}, clean if it has not changed since
-  the download began. `trace.export` offers its file as such a download (no `saved_as`).
+  working state's origin becomes `client` {the last component of `saved_as`}, clean if it
+  has not changed since the download began. `trace.export` offers its file as such a
+  download (no `saved_as`).
   Unpacking accepts regular files at `session.json`,
   `session.prev.json`, `traces/<file>`, `spl/<file>` only, at most 512 MiB and 20 000
   entries. At most 4 transfers per daemon; one idle for 2 min is dropped (`not_found`
