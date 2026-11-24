@@ -122,7 +122,8 @@ Warning { type: "<name>", … }
   largest legal part plus 64 KiB of slack (CURVE's framing; a request a little over 4 MiB is
   still read and answered `too_large`). A part past that closes the connection that carried
   it, unanswered. The bounds: ctrl 4 MiB both ways; a data request 4 KiB; a frame or event
-  part toward a client or rig 2 MiB.
+  part toward a client or rig 2 MiB. The daemon never sends a frame whose message is over
+  2 MiB: it logs and counts it, and the topic's next frame that fits goes instead.
 
 ### 3.2 Commands
 
@@ -2291,7 +2292,8 @@ full new value (`inputs`: {`inputs`, `pairs`}, both whole lists; `outputs`: the 
 Applying an event is assignment. Events travel on the data socket as
 `[b"evt"][msgpack event]` and in `state.since` replies. Largest event: 1 MiB; one that
 would be larger is not sent on the data socket, and every connection taking events is sent
-`resync_required` in its place (the snapshot holds the value). On the data
+`resync_required` ahead of its next event, credit answer or keepalive, within about a
+second (the snapshot holds the value). On the data
 socket they go outside the byte window, within a bound of their own (§5.8): past it a
 connection's events are dropped and it is sent `resync_required`.
 

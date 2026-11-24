@@ -234,7 +234,7 @@ practice one.
 takes a snapshot, which goes the transfer path if it must. No entity is capped.
 
 **Events.** An event over `MAX_EVENT_BYTES` is committed (state moved, rev taken) and every
-connection taking events is sent `resync_required` in its place; the snapshot that follows
+connection taking events is sent `resync_required` with its next message; the snapshot that follows
 holds the value, as today. The event is no longer pushed to the store's replay queue: the
 store records its rev as not replayable, so a `state.since` spanning it answers
 `resync_required` rather than holding an event no client can take. A maximal finished
@@ -501,8 +501,9 @@ These change nothing on the wire or in a stored format and land on their own bra
 
 - **Dedup (L-03).** Pure reads are not stored; the reply of a mutation and of a read that
   acts is (`retry` in `control/request.rs`). `pn-edit` turns that into `is_read` (§2).
-- **Oversize events (L-02, events).** An event over `MAX_EVENT_BYTES` goes to every event
-  connection as `resync_required` in its place; §4 adds that its rev is not replayable.
+- **Oversize events (L-02, events).** An event over `MAX_EVENT_BYTES` is not sent; every
+  event connection is sent `resync_required` ahead of its next event, credit answer or
+  keepalive; §4 adds that its rev is not replayable.
 - **Event byte bound (L-10).** Events kept for replay are bounded by bytes as well as count;
   a `state.since` reaching past what the bound kept answers `resync_required`, as for count.
 - **`ZMQ_MAXMSGSIZE` and the epoch (L-12).** Every socket sets `ZMQ_MAXMSGSIZE` to its

@@ -18,6 +18,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use ac2_proto::frame::MAX_FRAME_BYTES;
 use ac2_proto::{CodedFrame, Topic, encode_delta, encode_key};
 use ac2_zmq::Part;
 
@@ -73,9 +74,13 @@ type EncodeKey = (Topic, u64, Option<u64>);
 /// The encodes of one send round, by (topic, frame generation, base generation or none for
 /// a keyframe). `None`: no delta of that pair (it does not fit), or not encodable.
 #[derive(Debug, Default)]
-pub(crate) struct Encodes(HashMap<EncodeKey, Option<Rc<Encoded>>>);
+pub(crate) struct Encodes {
+    by: HashMap<EncodeKey, Option<Rc<Encoded>>>,
+    /// Encodes refused for their size, over every round.
+    oversize: u64,
+}
 
-fn encode(f: &CodedFrame, base: Option<&CodedFrame>) -> Option<Rc<Encoded>> {
+fn encode(f: &CodedFrame, base: Option<&CodedFrame>, oversize: &mut u64) -> Option<Rc<Encoded>> {
     let (r, form) = match base {
         Some(b) => (encode_delta(f, b), Form::Delta),
         None => (encode_key(f).map(Some), Form::Key),
@@ -89,6 +94,20 @@ fn encode(f: &CodedFrame, base: Option<&CodedFrame>) -> Option<Rc<Encoded>> {
         }
     };
     let len = parts.iter().map(Vec::len).sum();
+    if len > MAX_FRAME_BYTES {
+        // Every client closes a data connection carrying a message over the frame limit,
+        // and a reconnect would bring the same frame again: the frame is not sent.
+        *oversize += 1;
+        if oversize.is_power_of_two() {
+            tracing::error!(
+                "{}: frame of {len} bytes is over the {MAX_FRAME_BYTES}-byte frame limit: not \
+                 sent ({} refused so far)",
+                f.topic,
+                oversize
+            );
+        }
+        return None;
+    }
     let mut it = parts.into_iter().map(Part::from_vec);
     match (it.next(), it.next(), it.next()) {
         (Some(Ok(t)), Some(Ok(b)), None) => Some(Rc::new(Encoded {
@@ -105,14 +124,21 @@ fn encode(f: &CodedFrame, base: Option<&CodedFrame>) -> Option<Rc<Encoded>> {
 
 impl Encodes {
     pub(crate) fn clear(&mut self) {
-        self.0.clear();
+        self.by.clear();
+    }
+
+    /// Encodes refused for their size so far.
+    #[cfg(test)]
+    pub(crate) fn oversize(&self) -> u64 {
+        self.oversize
     }
 
     fn get(&mut self, slot: &Slot, base: Option<&(u64, Arc<CodedFrame>)>) -> Option<Rc<Encoded>> {
         let f = &slot.frame;
-        self.0
+        let oversize = &mut self.oversize;
+        self.by
             .entry((f.topic, slot.put, base.map(|b| b.0)))
-            .or_insert_with(|| encode(f, base.map(|b| &*b.1)))
+            .or_insert_with(|| encode(f, base.map(|b| &*b.1), oversize))
             .clone()
     }
 }
@@ -231,6 +257,41 @@ mod tests {
         assert_eq!(applied(&da, &s[1].frame).codes, s[2].frame.codes);
         assert_eq!(applied(&db, &s[0].frame).codes, s[2].frame.codes);
         assert!(a.dirty(&s[2]) && !a.dirty(&s[1]));
+    }
+
+    /// A frame whose message would pass the frame limit is never formed, as a keyframe or a
+    /// delta: a client would close the connection over it. Counted, not sent.
+    #[test]
+    fn a_frame_over_the_frame_limit_is_not_sent() {
+        let s = slots();
+        let now = Instant::now();
+        let mut enc = Encodes::default();
+        let mut c = Chain::default();
+        let k = c.form(&s[0], now, &mut enc).unwrap();
+        c.sent(&s[0], &k, now);
+
+        // The same arrays over many more elements, of codes that do not compress.
+        let mut big = (*s[1].frame).clone();
+        let per = big.codes.len() / big.n as usize;
+        big.n = u32::try_from(MAX_FRAME_BYTES / per + 1).unwrap();
+        let mut x = 0x9e37_79b9_u32;
+        big.codes = (0..big.n as usize * per)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 17;
+                x ^= x << 5;
+                x.to_le_bytes()[0]
+            })
+            .collect();
+        let slot = Slot {
+            frame: Arc::new(big),
+            put: s[1].put,
+        };
+        assert!(c.form(&slot, now, &mut enc).is_none());
+        assert!(enc.oversize() >= 1);
+        // The next frame of normal size goes again.
+        let t = now + Duration::from_millis(20);
+        assert!(c.form(&s[2], t, &mut enc).is_some());
     }
 
     /// A refused send keeps the base and turns the next frame into a keyframe; a request
