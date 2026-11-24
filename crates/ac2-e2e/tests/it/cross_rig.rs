@@ -216,7 +216,8 @@ fn slow_clocks_not_locked_across_rigs() -> R {
     d.st.set_prefs(p);
     // The relation is judged once the remote input has streamed for a minute.
     let end = Instant::now() + Duration::from_secs(150);
-    // Said on kettu's heading in the measurement list, first and in capitals.
+    // Said on kettu's heading in the measurement list, in capitals, after the rate and clock
+    // tag that lead the heading.
     let pairing = loop {
         d.pump();
         let rows = d.st.list_rows();
@@ -237,8 +238,13 @@ fn slow_clocks_not_locked_across_rigs() -> R {
         }
         std::thread::sleep(Duration::from_millis(100));
     };
-    assert!(pairing.starts_with("CLOCKS NOT LOCKED +3."), "{pairing}");
-    let ppm = pairing
+    assert!(pairing.starts_with("48 kHz FREE · "), "{pairing}");
+    let verdict = pairing
+        .split(" · ")
+        .find(|t| t.starts_with("CLOCKS NOT LOCKED"))
+        .ok_or("the verdict")?;
+    assert!(verdict.starts_with("CLOCKS NOT LOCKED +3."), "{pairing}");
+    let ppm = verdict
         .strip_prefix("CLOCKS NOT LOCKED ")
         .and_then(|t| t.split(" ppm").next())
         .ok_or("the heading's figure")?
