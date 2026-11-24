@@ -164,7 +164,11 @@ mod tests {
         assert!(!close_as(&link, effective_uid()).unwrap());
         assert_eq!(mode(&target), 0o755, "the link's target is left as it was");
         assert!(!close_as(&target, effective_uid().wrapping_add(1)).unwrap());
-        assert_eq!(mode(&target), 0o755, "another user's directory is left as it was");
+        assert_eq!(
+            mode(&target),
+            0o755,
+            "another user's directory is left as it was"
+        );
         assert!(close_as(&target, effective_uid()).unwrap());
         assert_eq!(mode(&target), 0o700);
     }

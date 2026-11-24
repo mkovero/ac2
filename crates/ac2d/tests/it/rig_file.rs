@@ -297,7 +297,11 @@ fn a_rig_meter_with_a_blank_stored_name_still_loads() {
     let h = start("rig-file-blank-name", dir.path());
     let (mut c, _sub) = connect(&h, &[]);
     let st = c.state();
-    assert!(st.rig.damaged_files.is_empty(), "{:?}", st.rig.damaged_files);
+    assert!(
+        st.rig.damaged_files.is_empty(),
+        "{:?}",
+        st.rig.damaged_files
+    );
     let m = st.measurements.iter().find(|m| m.id == MeasId(1));
     assert_eq!(m.map(|m| m.config.name.as_str()), Some(""));
     drop(c);

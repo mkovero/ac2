@@ -357,9 +357,7 @@ impl Client {
         let mut absent = Vec::new();
         #[cfg(unix)]
         for ep in [&cfg.endpoints.ctrl, &cfg.endpoints.data] {
-            if !ac2_paths::socket_dir::check_endpoint_present(ep)
-                .map_err(ClientError::SocketDir)?
-            {
+            if !ac2_paths::socket_dir::check_endpoint_present(ep).map_err(ClientError::SocketDir)? {
                 absent.push(ep.clone());
             }
         }

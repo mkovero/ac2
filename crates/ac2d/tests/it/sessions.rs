@@ -596,7 +596,12 @@ fn a_session_with_values_out_of_range_refuses_to_load() {
     };
     edited_copy(dir.path(), "good", "epoch", captured_in(u32::MAX));
     edited_copy(dir.path(), "good", "epoch-edge", captured_in(u32::MAX / 2));
-    edited_copy(dir.path(), "good", "epoch-last", captured_in(u32::MAX / 2 - 1));
+    edited_copy(
+        dir.path(),
+        "good",
+        "epoch-last",
+        captured_in(u32::MAX / 2 - 1),
+    );
     // The good session still loads with an in-range delay.
     edited_copy(dir.path(), "good", "near", delay(-10.0, 0.5));
 
@@ -895,7 +900,10 @@ fn a_stored_measurement_name_outside_the_rule_still_loads() {
     let meas = meas.expect("the measurement loaded with its stored name");
     let mut config = meas.config.clone();
     let id = meas.id;
-    assert_eq!(c.update(id, config.clone()).unwrap_err().code, ErrorCode::Invalid);
+    assert_eq!(
+        c.update(id, config.clone()).unwrap_err().code,
+        ErrorCode::Invalid
+    );
     config.name = "Main".into();
     c.update_ok(id, config);
     h.shutdown();

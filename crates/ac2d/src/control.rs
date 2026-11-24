@@ -821,8 +821,7 @@ impl Control {
                 }
                 Ok(ControlMsg::DelayFound { token, result }) => self.finish_find(token, *result),
                 Ok(ControlMsg::Devices { token, backends }) => {
-                    if let Some((_, waiters)) = self.pending.devices.take_if(|(t, _)| *t == token)
-                    {
+                    if let Some((_, waiters)) = self.pending.devices.take_if(|(t, _)| *t == token) {
                         let now = Instant::now();
                         for p in waiters {
                             let r = Ok(ReplyBody::Backends(backends.clone()));

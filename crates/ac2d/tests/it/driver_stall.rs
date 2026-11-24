@@ -194,7 +194,11 @@ fn a_detection_while_a_preview_opens_is_refused_in_time_and_keeps_the_lease() {
             level: Some(Dbfs(-30.0)),
         })
         .unwrap_err();
-    assert!(t.elapsed() < REPLY_DEADLINE, "answered after {:?}", t.elapsed());
+    assert!(
+        t.elapsed() < REPLY_DEADLINE,
+        "answered after {:?}",
+        t.elapsed()
+    );
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
     // The wait for the preview does not count against the lease.
     a.ok(Command::GenRefresh { lease_token: tok });
@@ -214,7 +218,11 @@ fn an_open_while_a_preview_opens_is_refused_in_time_and_keeps_the_lease() {
             config: session(false),
         })
         .unwrap_err();
-    assert!(t.elapsed() < REPLY_DEADLINE, "answered after {:?}", t.elapsed());
+    assert!(
+        t.elapsed() < REPLY_DEADLINE,
+        "answered after {:?}",
+        t.elapsed()
+    );
     assert_eq!(e.code, ErrorCode::Refused, "{e:?}");
     a.ok(Command::GenRefresh { lease_token: tok });
     hold(&mut a, tok, 2 * SLOW);
