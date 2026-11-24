@@ -1,6 +1,7 @@
 //! Which analysis stages of a transfer at `bins` the link receives: from the shown range and
 //! the transfer pane's plot width, nothing under a peak hold, peak tracking or smoothing,
-//! for a coarser resolution or for a curve the pane does not draw.
+//! in a view that draws the grid, for a coarser resolution or for a curve the pane does not
+//! draw; each rig's from its own link.
 
 use super::*;
 use ac2_client::{Latest, TopicFrame};
@@ -8,7 +9,7 @@ use ac2_proto::FrameData;
 use ac2_proto::model::{BinRange, PeakMode, TransferResolution};
 use ac2_proto::topic::Topic;
 use ac2_proto::units::Hz;
-use ac2_scene::view::FreqRange;
+use ac2_scene::view::{FreqRange, PhaseView};
 
 /// Main L (1) at `bins`, a transfer pane showing it.
 fn at_bins() -> T {
@@ -250,4 +251,273 @@ fn the_pane_draws_a_held_stage() {
     assert_eq!(drawn.spans[0][0].stage, 0);
     // The scene's plot width is what the view reports.
     assert!(s.panes[0].plot.w > 1800.0);
+}
+
+#[test]
+fn unwrapped_phase_or_group_delay_wants_no_stage_in_any_view() {
+    let mut t = at_bins();
+    view(&mut t, 10_000.0, 20_000.0);
+    width(&mut t, 1900.0);
+    assert_eq!(stages(&t), [(1, 0)]);
+    // The magnitude view alone: the whole pane draws the grid once the phase does.
+    for phase in [
+        PhaseView::Unwrapped {
+            range: ac2_scene::axis::Range::new(-720.0, 180.0),
+        },
+        PhaseView::GroupDelay {
+            range_ms: ac2_scene::axis::Range::new(-2.0, 10.0),
+        },
+    ] {
+        t.st.view.tf.phase = phase;
+        assert_eq!(stages(&t), [], "{phase:?}");
+    }
+}
+
+#[test]
+fn a_closed_pane_drops_its_width() {
+    let mut t = at_bins();
+    let pane = t.pane(PaneKind::Transfer);
+    width(&mut t, 1900.0);
+    assert!(t.st.plot_px.contains_key(&pane));
+    t.st.apply(Msg::FocusPane(pane), &t.keys);
+    t.st.apply(Msg::Command(crate::keys::CommandId::ClosePane), &t.keys);
+    assert!(t.st.layout.view(pane).is_none());
+    assert!(!t.st.plot_px.contains_key(&pane));
+}
+
+/// Transfer `tf` frames of measurements `ids`, each stating the layout (as at `bins`).
+fn laid_out(ids: &[u32]) -> ConnEvent {
+    let mut latest = Latest::default();
+    for id in ids {
+        let mut f = ac2_proto::samples::tf_frame();
+        if let FrameData::Tf(tf) = &mut f.data {
+            tf.meas = MeasId(*id);
+            tf.meta.math = None;
+            tf.meta.smoothing = None;
+            tf.meta.bins = Some(Box::new(ac2_proto::samples::bin_layout()));
+            tf.meta.unresolved = Some(vec![BinRange {
+                lo: Hz(812.5),
+                hi: Hz(1623.0),
+                bin_hz: Hz(11.72),
+            }]);
+        }
+        let f = TopicFrame {
+            topic: f.data.topic(),
+            frame: Arc::new(f),
+            received: Instant::now(),
+            since_new: std::time::Duration::ZERO,
+            age: Some(0.0),
+            stale: false,
+        };
+        latest.frames.insert(f.topic.to_string().into(), f);
+    }
+    let mut grids = std::collections::BTreeMap::new();
+    let g = ac2_proto::samples::log_grid();
+    grids.insert(g.id(), Arc::new(g));
+    ConnEvent::Data(Arc::new(crate::conn::DataSnapshot {
+        latest,
+        grids,
+        drained: Instant::now(),
+    }))
+}
+
+/// Main L (1) and Delay tower (3) at `bins`, "tower ÷ L" (6), a transfer math filed under
+/// Delay tower, each with a layout; the grid's transfer pane (1) leads Main L, the second
+/// pane (2) is a transfer pane leading Delay tower; zoomed to 10–20 kHz.
+fn three_curves() -> T {
+    use ac2_proto::model::{MathConfig, MathDomain, MathExpr, MathOp, Operand};
+    let mut s = four();
+    for m in &mut s.measurements {
+        if let MeasKind::Transfer { config } = &mut m.config.kind {
+            config.resolution = TransferResolution::Bins;
+        }
+    }
+    s.measurements.push(meas(
+        6,
+        "tower ÷ L",
+        MeasKind::Math {
+            config: MathConfig::of(
+                TraceOwner::Meas { meas: MeasId(3) },
+                MathDomain::Transfer,
+                MathExpr::Binary {
+                    a: Operand::Meas { meas: MeasId(3) },
+                    op: MathOp::Divide,
+                    b: Operand::Meas { meas: MeasId(1) },
+                },
+            ),
+        },
+    ));
+    let mut t = T::new();
+    t.conn(mirror(s));
+    t.conn(laid_out(&[1, 3, 6]));
+    t.st.set_pane_kind(PaneId(2), PaneKind::Transfer);
+    for (p, m) in [(1, 1), (2, 3)] {
+        t.st.layout.view_mut(PaneId(p)).expect("pane").meas = Some(MeasId(m));
+    }
+    view(&mut t, 10_000.0, 20_000.0);
+    t
+}
+
+#[test]
+fn what_each_view_wants() {
+    /// A case: its name, what it changes, the stages then wanted.
+    type Case = (&'static str, fn(&mut T), &'static [(u32, u8)]);
+    let cases: [Case; 9] = [
+        ("magnitude", |_| {}, &[(1, 0)]),
+        (
+            "alignment view",
+            |t| {
+                t.st.layout
+                    .view_mut(PaneId(1))
+                    .expect("pane")
+                    .modes
+                    .transfer = TransferView::Alignment
+            },
+            &[],
+        ),
+        (
+            "IR view",
+            |t| {
+                t.st.layout
+                    .view_mut(PaneId(1))
+                    .expect("pane")
+                    .modes
+                    .transfer = TransferView::Ir(ac2_scene::view::IrMode::Linear)
+            },
+            &[],
+        ),
+        (
+            "phase only, wrapped",
+            |t| {
+                t.st.layout
+                    .view_mut(PaneId(1))
+                    .expect("pane")
+                    .modes
+                    .transfer = TransferView::Phase
+            },
+            &[(1, 0)],
+        ),
+        (
+            "phase only, unwrapped",
+            |t| {
+                t.st.layout
+                    .view_mut(PaneId(1))
+                    .expect("pane")
+                    .modes
+                    .transfer = TransferView::Phase;
+                t.st.view.tf.phase = PhaseView::Unwrapped {
+                    range: ac2_scene::axis::Range::new(-720.0, 180.0),
+                };
+            },
+            &[],
+        ),
+        (
+            "a math with a layout, in its owner's group",
+            |t| t.st.layout.view_mut(PaneId(1)).expect("pane").meas = Some(MeasId(3)),
+            &[(3, 0), (6, 0)],
+        ),
+        (
+            "a compared curve",
+            |t| {
+                let picks = [Pick::here(EntryRef::Live { meas: MeasId(3) })];
+                t.st.layout.view_mut(PaneId(1)).expect("pane").with = With::of(&picks);
+            },
+            &[(1, 0), (3, 0)],
+        ),
+        (
+            "two panes, each its own width: the union",
+            |t| {
+                t.st.apply(
+                    Msg::PlotWidth {
+                        pane: PaneId(2),
+                        px: 1200.0,
+                    },
+                    &t.keys,
+                );
+            },
+            &[(1, 0), (3, 0), (6, 0)],
+        ),
+        (
+            "the second pane too narrow for its curves",
+            |t| {
+                t.st.apply(
+                    Msg::PlotWidth {
+                        pane: PaneId(2),
+                        px: 800.0,
+                    },
+                    &t.keys,
+                );
+            },
+            &[(1, 0)],
+        ),
+    ];
+    for (name, setup, want) in cases {
+        let mut t = three_curves();
+        t.st.apply(
+            Msg::PlotWidth {
+                pane: PaneId(1),
+                px: 1900.0,
+            },
+            &t.keys,
+        );
+        setup(&mut t);
+        assert_eq!(stages(&t), want, "{name}");
+    }
+}
+
+/// The second rig, as its hello names it.
+const PUPU: RigId = RigId(0x9e9e);
+
+#[test]
+fn a_pane_on_another_rig_asks_that_rigs_link() {
+    let mut s = daemon_state();
+    for m in &mut s.measurements {
+        if let MeasKind::Transfer { config } = &mut m.config.kind {
+            config.resolution = TransferResolution::Bins;
+        }
+    }
+    let mut t = T::new();
+    t.conn(mirror(paired_with(s.clone(), PUPU, "pupu")));
+    let slot = t.st.add_rig("pupu".into(), None, None);
+    let to =
+        |t: &mut T, rig: RigId, e: ConnEvent| t.st.update(Msg::Conn(rig, Box::new(e)), &t.keys);
+    to(
+        &mut t,
+        RigId(u64::from(slot)),
+        ConnEvent::Connected {
+            target: "pupu".into(),
+            server: "ac2d test".into(),
+            client_id: ClientId("c2".into()),
+            rig_id: PUPU,
+            name: "pupu".into(),
+        },
+    );
+    to(&mut t, PUPU, mirror(s));
+    to(&mut t, PUPU, laid_out(&[1]));
+    // The transfer pane shows pupu's Main L; the rig shown has no frame of its own.
+    let pane = t.pane(PaneKind::Transfer);
+    let v = t.st.layout.view_mut(pane).expect("pane");
+    (v.rig, v.meas) = (PaneRig::Rig(PUPU), Some(MeasId(1)));
+    view(&mut t, 10_000.0, 20_000.0);
+    width(&mut t, 1900.0);
+    let sync = t.st.sync_link();
+    let bins = |rig: RigId| -> Vec<Topic> {
+        sync.iter()
+            .filter(|(r, _)| *r == rig)
+            .flat_map(|(_, q)| match q {
+                Request::Topics(x) => x.iter().cloned().collect(),
+                _ => Vec::new(),
+            })
+            .filter(|tp| matches!(tp, Topic::Bins { .. }))
+            .collect()
+    };
+    assert_eq!(
+        bins(PUPU),
+        [Topic::Bins {
+            meas: MeasId(1),
+            stage: 0
+        }],
+        "{sync:?}"
+    );
+    assert_eq!(bins(RIG), [], "{sync:?}");
 }

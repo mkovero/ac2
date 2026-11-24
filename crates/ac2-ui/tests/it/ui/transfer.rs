@@ -324,3 +324,65 @@ fn transfer_peak_tracking() {
     h.state_mut().state.toasts.list.clear();
     snapshot(&mut h, "transfer_peak_tracking");
 }
+
+/// Main L at `bins`, its pane maximised and zoomed to 10–16 kHz: the top window's bins are
+/// more than a pixel apart there, so the curve is drawn through them (a comb the 1/96 grid
+/// averages away) and the cursor, on a bin, reads it with its width.
+#[test]
+fn transfer_bins_zoomed() {
+    if !have_gpu("transfer_bins_zoomed") {
+        return;
+    }
+    let rig = Rig::start();
+    rig.set_bins("Main L");
+    let main = rig.id("Main L");
+    let mut h = harness(options());
+    step_until(&mut h, "live frames", live);
+    {
+        let st = &mut h.state_mut().state;
+        let p = common::pane(st, PaneKind::Transfer);
+        st.layout.set_focus(p);
+        st.view.freq = ac2_scene::view::FreqRange {
+            lo: 10_000.0,
+            hi: 16_000.0,
+        };
+        st.nav = ac2_ui::anim::FreqNav::new(st.view.freq);
+    }
+    h.key_press(Key::W);
+    // Bin 1024 of the 4096-point window is at 12 kHz exactly.
+    h.state_mut()
+        .dispatch(ac2_ui::state::Msg::CursorAt(Some(12_000.0)));
+    step_until(&mut h, "stage 0's bins", |a| {
+        a.state.layout.maximized
+            && a.state.rig.data.as_ref().is_some_and(|d| {
+                d.latest
+                    .get(&Topic::Bins {
+                        meas: main,
+                        stage: 0,
+                    })
+                    .is_some()
+            })
+    });
+    {
+        let st = &h.state().state;
+        let p = common::pane(st, PaneKind::Transfer);
+        let px = st.plot_px.get(&p).copied().expect("the pane was drawn");
+        let s = ac2_ui::scenes::transfer(
+            st,
+            p,
+            &ac2_scene::theme::Theme::dark(),
+            ac2_scene::primitives::Viewport::new(px + 200.0, 600.0),
+            ac2_ui::scenes::Now {
+                instant: Instant::now(),
+                wall: ac2_proto::units::WallNs(0),
+            },
+        );
+        let drawn = s.bins.as_ref().expect("stage 0 drawn");
+        assert!(drawn.spans[0].iter().any(|sp| sp.stage == 0), "{drawn:?}");
+        let cur = s.cursor.expect("the cursor's reading");
+        assert!(cur.freq.ends_with(" · 12 Hz bin"), "{}", cur.freq);
+        assert!(s.legend[0].text.contains(" · bins"), "{}", s.legend[0].text);
+    }
+    h.state_mut().state.toasts.list.clear();
+    snapshot(&mut h, "transfer_bins_zoomed");
+}

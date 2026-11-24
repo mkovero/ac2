@@ -73,9 +73,6 @@ pub struct MeasItem<'a> {
     /// A transfer function across two rigs: its short cue ([`crate::cross_rig::list_cue`]),
     /// so a stop by the clocks shows with its pane closed.
     pub cue: Option<String>,
-    /// Its peak mode (this app's): a hold or peak tracking keeps a transfer at `bins` on
-    /// its grid, since both work on grid columns.
-    pub peak: ac2_proto::model::PeakMode,
 }
 
 /// What the list highlights on a row.
@@ -140,15 +137,6 @@ pub fn meas_row(item: &MeasItem<'_>, selected: Option<MeasId>, active: bool) -> 
     };
     if let Some(r) = resolution {
         text.push_str(&format!(" · resolution {r}"));
-        let bins = matches!(&m.config.kind, MeasKind::Transfer { config }
-            if config.resolution == TransferResolution::Bins);
-        if bins {
-            text.push_str(match item.peak {
-                ac2_proto::model::PeakMode::Off => "",
-                ac2_proto::model::PeakMode::Hold => " (grid: peak hold)",
-                ac2_proto::model::PeakMode::Track => " (grid: peaks)",
-            });
-        }
     }
     match &m.config.kind {
         MeasKind::Transfer { config } if config.smoothing.is_some() => {

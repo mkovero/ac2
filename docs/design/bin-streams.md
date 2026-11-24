@@ -206,18 +206,22 @@ landmarks. **A math average's range band** (`jobs/math.rs:596-611`) is per colum
 hidden where bins are drawn, with a legend note. A per-bin band is not on the wire and would
 need a PROTO bump.
 
-**Legend.** A transfer's legend reads its config (`· resolution bins`); a math's, which has
-no resolution, reads `· bins` only while a stage is drawn in that pane.
+**Legend.** A transfer's list row reads its config (`· resolution bins`) and nothing more:
+what forces the grid is per pane. In each pane the legend of a curve with bins (a transfer
+at `Bins`, an eligible math) reads `· bins` while a stage is drawn there, and `· bins (grid:
+peak hold)` / `(grid: peaks)` while that pane forces the grid. While the phase view is
+unwrapped or group delay no pane splices bins at all (magnitude and coherence included), so
+cursor, mark, jumps and drawing read one grid.
 
 | case | legend | readout |
 |---|---|---|
 | below `138.5·Δf` (unresolved grid part) | `· resolution bins` | `2.9 Hz bins` (unresolved note) |
 | `s` < 1 px; before the first frame; cross-rig blank (`TfMeta.bins` `None`); smoothed (adds `· 1/6 oct smoothing`) | `· resolution bins` | grid |
-| peak hold or P on | `· resolution bins (grid: peak hold)` / `(grid: peaks)` | grid |
+| peak hold or P on | `· resolution bins`; legend `· bins (grid: peak hold)` / `(grid: peaks)` | grid |
 | unwrapped phase, group delay; Alignment view; stale or settling stage (`blocks: 0`); just stepped 1/96 → `bins` (job restarted) | `· resolution bins` | grid |
-| blend span | `· resolution bins` | grid; `…: grid` text while a neighbour draws bins |
+| blend span | `· resolution bins` | grid; `…: grid` text while a neighbour on the marked curve draws bins, marker on or off |
 | stored curve captured at `Bins` | `1/96 oct` (its grid) | grid |
-| eligible math, a stage drawn (an average adds `· range band on grid parts`) | `· bins` | bin |
+| transfer or eligible math, a stage drawn (an average adds `· range band on grid parts`) | legend `· bins` | bin |
 | eligible math, peak hold or P on | `· bins (grid: peak hold)` / `(grid: peaks)` | grid |
 | math with no stage drawn (zoom, smoothing, stale) or not eligible (stored operand, other ladders, operand not at `Bins` or stopped) | no `bins` | grid |
 

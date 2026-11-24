@@ -512,7 +512,6 @@ fn with_transfer<R>(
                 tf_stamp: &l.tf.frame.stamp,
                 stages: stage_frames(st, l.meas.id, layout.stages.len()),
                 running: l.meas.running,
-                math: matches!(l.meas.config.kind, MeasKind::Math { .. }),
                 holds: st.rig.peak_of(l.meas).holds(),
             });
         }

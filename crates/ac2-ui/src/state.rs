@@ -454,6 +454,9 @@ impl AppState {
                 self.record_edit(w, ran);
             }
             self.remember_layout();
+            // A closed pane reports no width again: its last one would only linger.
+            let views = &self.layout.views;
+            self.plot_px.retain(|p, _| views.contains_key(p));
         }
         out
     }

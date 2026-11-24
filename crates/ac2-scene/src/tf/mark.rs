@@ -75,8 +75,8 @@ pub(super) fn line(c: &mut Canvas, plots: &[Rect], x: f32, theme: &Theme) {
 
 /// Where the cursor jumps on the transfer view from where it is (`view.cursor_hz`): the
 /// next `kind` of the tracked curve's magnitude as drawn (smoothed as served, offset,
-/// coherence-blanked columns left out, on its bins where a plot `plot_px` wide draws them
-/// and the pane reads them, [`super::bins::reads_bins`]) inside `shown`, standing out by
+/// coherence-blanked columns left out, on its bins where a plot `plot_px` wide draws them,
+/// [`super::bins::splice`]) inside `shown`, standing out by
 /// the view's prominence.
 #[allow(clippy::too_many_arguments)]
 pub fn jump(
@@ -89,9 +89,7 @@ pub fn jump(
     step: Step,
 ) -> Option<f64> {
     let (_, grid) = display_traces(traces, cache, view.tf.phase_reference, &view.tf.coherence);
-    let spliced = super::bins::reads_bins(view.tf.phase)
-        .then(|| super::bins::splice(traces, &grid, view, f64::from(plot_px)))
-        .flatten();
+    let spliced = super::bins::splice(traces, &grid, view, f64::from(plot_px));
     let drawn = spliced.as_ref().map_or(&grid, |s| &s.traces);
     let d = drawn.get(extremes::tracked(traces)?)?;
     // Over the estimates alone: where the line joins bins across empty columns, a room

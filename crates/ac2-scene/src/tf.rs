@@ -159,15 +159,9 @@ fn unresolved_marks(
     if !view.marks() {
         return Vec::new();
     }
-    let known = || {
-        traces
-            .iter()
-            .filter(|t| t.unresolved.is_some() && shown.iter().any(|d| d.key == t.key))
-    };
-    known()
-        .find(|t| t.selected)
-        .or_else(|| known().find(|t| !t.compared))
-        .and_then(|t| {
+    bins::marked(traces, shown)
+        .and_then(|i| {
+            let t = &traces[i];
             let src = t.unresolved?;
             Some(crate::unresolved::marks(
                 src,
@@ -467,12 +461,6 @@ pub fn transfer_scene(
     let mut marks = unresolved_marks(traces, &shown, view);
     let spliced = bins::splice(traces, &shown, view, f64::from(plot_w));
     let drawn: &[DisplayTrace] = spliced.as_ref().map_or(&shown, |s| &s.traces);
-    // The unwrapped phase and group delay are the grid's: read there, as drawn there.
-    let read = if bins::reads_bins(view.tf.phase) {
-        drawn
-    } else {
-        &shown
-    };
 
     let mut panes = Vec::new();
     let mut coherence_overlay = None;
@@ -576,11 +564,7 @@ pub fn transfer_scene(
             );
         }
 
-        let src = match kind {
-            TfPaneKind::Phase if !bins::reads_bins(view.tf.phase) => &shown,
-            _ => drawn,
-        };
-        for t in src {
+        for t in drawn {
             let cols = visible_columns(&t.freqs, xm.range.lo, xm.range.hi);
             let xs: Vec<f32> = t.freqs[cols.clone()].iter().map(|f| xm.to_px(*f)).collect();
             let values: &[f64] = match kind {
@@ -674,10 +658,10 @@ pub fn transfer_scene(
         .iter()
         .map(|t| (t.nudge.0, t.delay_nudge.0, t.compared))
         .collect();
-    if view.marks()
-        && let Some(s) = &spliced
-    {
-        marks.extend(bins::blend_marks(traces, s));
+    // After the panes are drawn: a blend is never drawn, only said by the cursor, with the
+    // marker off too, since it is why a grid column is read among drawn bins.
+    if let Some(s) = &spliced {
+        marks.extend(bins::blend_marks(traces, s, bins::marked(traces, &shown)));
     }
     let forced = bins::forced(traces);
     let legend: Vec<LegendEntry> = shown
@@ -710,17 +694,17 @@ pub fn transfer_scene(
     let mut cursor = view
         .cursor_hz
         .filter(|_| view.chrome.cursor())
-        .and_then(|hz| readout::cursor_readout(read, hz, view.tf.phase));
+        .and_then(|hz| readout::cursor_readout(drawn, hz, view.tf.phase));
     if let Some(cr) = cursor.as_mut() {
         // The form of what the cursor reads, on the curve it snapped to: a bin or a column.
         let at = view.cursor_hz.and_then(|hz| {
-            read.iter()
+            drawn
+                .iter()
                 .enumerate()
                 .find_map(|(i, d)| d.nearest_estimate(hz).map(|c| (i, c)))
         });
-        let spliced_read = spliced.as_ref().filter(|_| bins::reads_bins(view.tf.phase));
         if let Some(form) =
-            at.and_then(|(i, c)| bins::form_note(traces, spliced_read, i, c, cr.freq_hz))
+            at.and_then(|(i, c)| bins::form_note(traces, spliced.as_ref(), i, c, cr.freq_hz))
         {
             cr.freq = format!("{} · {form}", cr.freq);
         }
@@ -786,7 +770,7 @@ pub fn transfer_scene(
             readout_box = values::draw(
                 &mut c,
                 cr,
-                read,
+                drawn,
                 placed.as_ref(),
                 &view.plates.readout,
                 view.plate_hover,
@@ -805,7 +789,7 @@ pub fn transfer_scene(
     let mag = panes.iter().find(|p| p.kind == TfPaneKind::Magnitude);
     let mark = cursor
         .as_ref()
-        .and_then(|_| mark::readout(traces, read, view));
+        .and_then(|_| mark::readout(traces, drawn, view));
     let mark_box = mark.as_ref().and_then(|m| {
         let plots: Vec<Rect> = panes_at.iter().map(|(_, r)| *r).collect();
         mark::line(&mut c, &plots, xm.to_px(m.freq_hz), theme);

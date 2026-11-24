@@ -43,7 +43,6 @@ fn item(m: &Measurement) -> MeasItem<'_> {
         hidden: false,
         color: Color::from_rgba8([0, 0, u8::try_from(m.id.0).unwrap_or(0), 255]),
         cue: None,
-        peak: ac2_proto::model::PeakMode::Off,
     }
 }
 
@@ -129,16 +128,6 @@ fn tf_rows_say_a_bins_resolution() {
     assert_eq!(
         meas_row(&item(&m), None, true).text,
         "TF  Room\n     running · resolution bins"
-    );
-    // A hold or peak tracking keeps the curve on its grid, and the row says so.
-    let said = |peak| meas_row(&MeasItem { peak, ..item(&m) }, None, true).text;
-    assert_eq!(
-        said(ac2_proto::model::PeakMode::Hold),
-        "TF  Room\n     running · resolution bins (grid: peak hold)"
-    );
-    assert_eq!(
-        said(ac2_proto::model::PeakMode::Track),
-        "TF  Room\n     running · resolution bins (grid: peaks)"
     );
 }
 

@@ -14,9 +14,10 @@ impl AppState {
     /// The stages each visible transfer pane wants of the curves it draws as their own
     /// (live, running or stopped; a transfer at `bins` or a transfer-domain math with a
     /// layout), from the shown range and the pane's plot width ([`bins::wanted`]). None
-    /// for a pane in its IR or alignment view, showing only an unwrapped phase or group
-    /// delay, with a peak hold or peak tracking on (both work on the grid), for a smoothed
-    /// curve, or before the pane was drawn. A function of what is shown alone: the same
+    /// for a pane in its IR or alignment view, with its phase unwrapped or as group delay
+    /// (the whole pane then draws the grid, [`bins::reads_bins`]), with a peak hold or peak
+    /// tracking on (both work on the grid), for a smoothed curve, or before the pane was
+    /// drawn. A function of what is shown alone: the same
     /// view wants the same stages.
     pub(super) fn bin_topics(&self, visible: &[PaneId]) -> HashSet<Topic> {
         let mut out = HashSet::new();
@@ -35,9 +36,8 @@ impl AppState {
             };
             let view = self.view_for(pane);
             let tf = view.tf;
-            if !(tf.show_magnitude
-                || tf.show_coherence
-                || (tf.show_phase && bins::reads_bins(tf.phase)))
+            if !bins::reads_bins(tf.phase)
+                || !(tf.show_magnitude || tf.show_coherence || tf.show_phase)
             {
                 continue;
             }

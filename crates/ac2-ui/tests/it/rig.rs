@@ -19,8 +19,9 @@ use std::time::{Duration, Instant};
 use ac2_client::data::{Latest, TopicFrame};
 use ac2_client::{MirrorView, Phase};
 use ac2_proto::frame::{
-    DaemonHealth, GenSummary, IrFrame, IrMeta, MathState, OperandState, OperandStatus,
-    ProtectionFlags, SpecFrame, SpecMeta, SplFrame, SplMeta, TfFrame, TfMeta, ValidityMask,
+    BinLayout, BinStage, BinsFrame, BinsMeta, DaemonHealth, GenSummary, IrFrame, IrMeta, MathState,
+    OperandState, OperandStatus, ProtectionFlags, SpecFrame, SpecMeta, SplFrame, SplMeta, TfFrame,
+    TfMeta, ValidityMask,
 };
 use ac2_proto::model::*;
 use ac2_proto::units::*;
@@ -140,6 +141,26 @@ impl Rig {
         let mut inner = self.inner.borrow_mut();
         assert!(!inner.connected, "the app has the state already");
         Arc::make_mut(&mut inner.state).remote.peers = peers;
+    }
+
+    /// Transfer measurement `name` at the `bins` resolution, unsmoothed, in the state the app
+    /// is about to mirror: its `tf` frames state the 48 kHz standard ladder, and the rig
+    /// sends each stage's bins the app asks for.
+    pub fn set_bins(&self, name: &str) {
+        let mut inner = self.inner.borrow_mut();
+        assert!(!inner.connected, "the app has the state already");
+        let state = Arc::make_mut(&mut inner.state);
+        let m = state
+            .measurements
+            .iter_mut()
+            .find(|m| m.config.name == name)
+            .unwrap_or_else(|| panic!("no measurement {name}"));
+        let MeasKind::Transfer { config } = &mut m.config.kind else {
+            panic!("{name} is no transfer");
+        };
+        config.resolution = TransferResolution::Bins;
+        // A smoothed curve keeps its grid: the bins are drawn unsmoothed only.
+        config.smoothing = None;
     }
 
     /// The recorded state.
@@ -307,7 +328,17 @@ impl Inner {
             let id = m.id.0;
             match m.config.name.as_str() {
                 "Main L" => {
-                    out.push((FrameData::Tf(self.tf(id, 0.0, 0.0, 2000.0)), Some(tf)));
+                    let mut f = self.tf(id, 0.0, 0.0, 2000.0);
+                    if at_bins(m) {
+                        f.meta.smoothing = None;
+                        f.meta.bins = Some(Box::new(ladder()));
+                        f.meta.unresolved = Some(ladder_unresolved());
+                        out.extend(
+                            (0..LADDER.len())
+                                .map(|b| (FrameData::Bins(stage_frame(&f, b, 2000.0)), None)),
+                        );
+                    }
+                    out.push((FrameData::Tf(f), Some(tf)));
                     out.push((FrameData::Ir(ir_frame(id)), None));
                 }
                 "Delay tower" => {
@@ -498,16 +529,104 @@ fn wrap(d: f64) -> f64 {
     (d + 180.0).rem_euclid(360.0) - 180.0
 }
 
+/// The pictures' transfer magnitude at `f`: a bump at `bump_hz`, rolled off at both ends.
+fn shape_db(f: f64, gain: f64, bump_hz: f64) -> f64 {
+    let x = (f / bump_hz).log2();
+    gain + 5.0 * (-x * x * 2.0).exp()
+        - 12.0 * (60.0 / f).powi(4).min(1.0)
+        - 6.0 * (f / 16_000.0).powi(2).min(1.0)
+}
+
+/// The 48 kHz standard ladder: per stage its bin spacing, first bin, bins, decimation and
+/// hop.
+const LADDER: [(f64, u32, u32, u32, i64); 3] = [
+    (48_000.0 / 4096.0, 88, 1756, 1, 2048),
+    (48_000.0 / 16_384.0, 88, 189, 4, 4096),
+    (48_000.0 / 49_152.0, 1, 207, 12, 6144),
+];
+
+fn at_bins(m: &Measurement) -> bool {
+    matches!(&m.config.kind, MeasKind::Transfer { config }
+        if config.resolution == TransferResolution::Bins)
+}
+
+fn ladder() -> BinLayout {
+    let range = |lo, hi| FreqRange {
+        lo: Hz(lo),
+        hi: Hz(hi),
+    };
+    BinLayout {
+        stages: LADDER
+            .iter()
+            .map(|&(bin_hz, first_bin, bins, ..)| BinStage {
+                first_bin,
+                bins,
+                bin_hz: Hz(bin_hz),
+            })
+            .collect(),
+        blends: vec![range(811.0, 1031.25), range(202.2, 257.8)],
+    }
+}
+
+/// Where the 1/96 columns are coarser than the ladder's bins: up to 138.5 bins of each stage.
+fn ladder_unresolved() -> Vec<BinRange> {
+    [
+        (0.5, 135.3, LADDER[2].0),
+        (202.2, 405.8, LADDER[1].0),
+        (811.0, 1623.0, LADDER[0].0),
+    ]
+    .into_iter()
+    .map(|(lo, hi, b)| BinRange {
+        lo: Hz(lo),
+        hi: Hz(hi),
+        bin_hz: Hz(b),
+    })
+    .collect()
+}
+
+/// Stage `b`'s bins beside `tf`: its shape with a reflection's comb (a 1.5 dB ripple every
+/// 150 Hz) that the 1/96 grid, wider than a period up high, averages away.
+fn stage_frame(tf: &TfFrame, b: usize, bump_hz: f64) -> BinsFrame {
+    let (bin_hz, first_bin, bins, factor, hop) = LADDER[b];
+    let freqs: Vec<f64> = (first_bin..first_bin + bins)
+        .map(|k| f64::from(k) * bin_hz)
+        .collect();
+    BinsFrame {
+        meas: tf.meas,
+        meta: BinsMeta {
+            stage: b as u8,
+            factor,
+            rate: Hz(48_000.0 / f64::from(factor)),
+            bin_hz: Hz(bin_hz),
+            first_bin,
+            hop: Samples(hop),
+            delay: tf.meta.delay,
+            nudged: tf.meta.nudged,
+            mic_curve: false,
+            mic_range: None,
+            blocks: 8,
+            eff_avg: 8.0,
+        },
+        mag: freqs
+            .iter()
+            .map(|f| {
+                let comb = 1.5 * (2.0 * std::f64::consts::PI * f / 150.0).cos();
+                (shape_db(*f, 0.0, bump_hz) + comb) as f32
+            })
+            .collect(),
+        phase: freqs
+            .iter()
+            .map(|f| wrap(-40.0 * (bump_hz / f).min(3.0)) as f32)
+            .collect(),
+        coh: vec![0.97; freqs.len()],
+    }
+}
+
 fn tf_frame(grid: &GridDef, meas: u32, gain: f64, tau: f64, bump_hz: f64) -> TfFrame {
     let freqs = grid.centres();
     let mag = freqs
         .iter()
-        .map(|f| {
-            let x = (f / bump_hz).log2();
-            (gain + 5.0 * (-x * x * 2.0).exp()
-                - 12.0 * (60.0 / f).powi(4).min(1.0)
-                - 6.0 * (f / 16_000.0).powi(2).min(1.0)) as f32
-        })
+        .map(|f| shape_db(*f, gain, bump_hz) as f32)
         .collect();
     let phase = freqs
         .iter()

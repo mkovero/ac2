@@ -156,7 +156,6 @@ impl Fx {
                 .map(|(stamp, frame)| Some(StageFrame { stamp, frame }))
                 .collect(),
             running: self.running,
-            math: false,
             holds: false,
         };
         TfTrace {
@@ -223,6 +222,13 @@ fn each_stage_is_fine_above_its_unresolved_range() {
         fine,
         [Some((139, 1843)), Some((139, 276)), Some((139, 207))]
     );
+    // No unresolved ranges stated: no bin is known to be finer, none is wanted or drawn.
+    assert!((0..3).all(|b| bins::fine_bins(&l, None, b).is_none()));
+    let full = Range::new(20.0, 20_000.0);
+    assert_eq!(bins::wanted(&l, None, full, 2500.0), Vec::<u8>::new());
+    let mut fx = Fx::new();
+    fx.meta.unresolved = None;
+    assert_eq!(drawn(&fx.trace(), &view(10_000.0, 20_000.0), 1900.0), []);
 }
 
 #[test]
@@ -302,6 +308,17 @@ fn the_blend_keeps_the_grid_and_says_so_while_a_neighbour_draws_bins() {
         "{}",
         readout_freq(&s)
     );
+    // With the resolution marker off the blend is still said: it is why a column is read.
+    let unmarked = ViewState {
+        unresolved: false,
+        ..v
+    };
+    let off = scene(&[fx.trace()], &unmarked, size(1900.0));
+    assert_eq!(
+        readout_freq(&off),
+        readout_freq(&s).replace(" · 12 Hz bins", "")
+    );
+    assert!(readout_freq(&off).ends_with(" · grid"));
     // Not shaded: the unresolved ranges alone are.
     let theme = Theme::dark();
     let shades = |s: &TfScene| {
@@ -324,6 +341,98 @@ fn the_blend_keeps_the_grid_and_says_so_while_a_neighbour_draws_bins() {
     // Zoomed out, no stage draws: no blend mark.
     let s = scene(&[fx.trace()], &view(20.0, 20_000.0), size(800.0));
     assert!(!s.unresolved.iter().any(|m| m.note == "grid"));
+}
+
+/// `fx`'s curve as a second measurement's.
+fn second(fx: &Fx) -> TfTrace<'_> {
+    TfTrace {
+        key: TraceKey::Live(MeasId(2)),
+        ..fx.trace()
+    }
+}
+
+/// `Fx::new()` on a ladder of twice the FFT lengths (a long-LF transfer's): every bin,
+/// unresolved range and blend at half the frequency, stage 0 covering the band again.
+fn long_lf() -> Fx {
+    let mut fx = Fx::new();
+    let half = |r: &mut FreqRange| {
+        r.lo = Hz(r.lo.0 / 2.0);
+        r.hi = Hz(r.hi.0 / 2.0);
+    };
+    if let Some(l) = fx.meta.bins.as_mut() {
+        for (b, st) in l.stages.iter_mut().enumerate() {
+            st.bin_hz = Hz(DF[b] / 2.0);
+            if b == 0 {
+                st.bins = 2 * BINS[0];
+            }
+        }
+        l.blends.iter_mut().for_each(half);
+    }
+    for r in fx.meta.unresolved.iter_mut().flatten() {
+        r.lo = Hz(r.lo.0 / 2.0);
+        r.hi = Hz(r.hi.0 / 2.0);
+        r.bin_hz = Hz(r.bin_hz.0 / 2.0);
+    }
+    for (b, (_, f)) in fx.stages.iter_mut().enumerate() {
+        f.meta.bin_hz = Hz(DF[b] / 2.0);
+        if b == 0 {
+            let n = 2 * BINS[0] as usize;
+            f.mag = (0..n).map(|i| bin_db(0, FIRST[0] + i as u32)).collect();
+            f.phase = vec![30.0; n];
+            f.coh = vec![0.9; n];
+        }
+    }
+    fx
+}
+
+#[test]
+fn blends_are_marked_on_the_marked_curves_own_ladder() {
+    let (std, long) = (Fx::new(), long_lf());
+    let mut stale = Fx::new();
+    stale.stages.iter_mut().for_each(|(_, f)| f.meta.blocks = 0);
+    let mark = |lo: f64, hi: f64| {
+        format!(
+            "{}–{}: grid",
+            format::freq_rough(lo),
+            format::freq_rough(hi)
+        )
+    };
+    let blends = |s: &TfScene| -> Vec<String> {
+        s.unresolved
+            .iter()
+            .filter(|m| m.note == "grid")
+            .map(|m| m.text.clone())
+            .collect()
+    };
+    let v = view(300.0, 900.0);
+    // The standard curve first (marked) draws stage 1: its own two blends, never the
+    // long-LF curve's at half their frequencies.
+    let s = scene(&[std.trace(), second(&long)], &v, size(1900.0));
+    let sp = s.bins.as_ref().expect("bins drawn");
+    assert!(!sp.spans[0].is_empty() && !sp.spans[1].is_empty());
+    assert_eq!(
+        blends(&s),
+        [mark(811.0, 1031.25), mark(202.2, 257.8)],
+        "{:?}",
+        s.unresolved
+    );
+    // The marked curve draws none of its stages: no blend is marked, whatever the other
+    // curve draws.
+    let s = scene(&[stale.trace(), second(&long)], &v, size(1900.0));
+    assert!(s.bins.is_some());
+    assert_eq!(blends(&s), Vec::<String>::new());
+    // The long-LF curve selected: its own blends.
+    let selected = TfTrace {
+        selected: true,
+        ..second(&long)
+    };
+    let s = scene(&[std.trace(), selected], &v, size(1900.0));
+    assert_eq!(
+        blends(&s),
+        [mark(405.5, 515.625), mark(101.1, 128.9)],
+        "{:?}",
+        s.unresolved
+    );
 }
 
 #[test]
@@ -383,6 +492,11 @@ fn a_stage_frame_not_of_the_shown_curve_draws_the_grid() {
     assert!(draws(&fx));
     fx.stages[0].0.audio_sample = SampleIndex(T - slack - 1);
     assert!(!draws(&fx), "too old");
+    // A stage sent alone after the `tf`: ahead by as much, no more.
+    fx.stages[0].0.audio_sample = SampleIndex(T + slack);
+    assert!(draws(&fx));
+    fx.stages[0].0.audio_sample = SampleIndex(T + slack + 1);
+    assert!(!draws(&fx), "too far ahead");
     // Stopped: the final frames carry the final `tf`'s stamp, and only those are drawn.
     let mut fx = Fx::new();
     fx.running = false;
@@ -502,7 +616,8 @@ fn what_the_cursor_says_in_each_case() {
         ..fx.trace()
     };
     assert_eq!(said(tracking, &zoom, 1900.0), grid);
-    // The unwrapped phase and group delay read the grid; the magnitude still draws bins.
+    // The unwrapped phase and group delay exist on the grid only: the whole pane draws and
+    // reads the grid, magnitude and coherence too, and its jumps find no bin's peak.
     for phase in [
         PhaseView::Unwrapped {
             range: Range::new(-720.0, 180.0),
@@ -516,8 +631,32 @@ fn what_the_cursor_says_in_each_case() {
             ..zoom
         };
         let s = scene(&[fx.trace()], &v, size(1900.0));
-        assert_eq!(readout_freq(&s), grid);
-        assert!(s.bins.is_some());
+        assert_eq!(readout_freq(&s), grid, "{phase:?}");
+        assert!(s.bins.is_none(), "{phase:?}");
+        assert!(!s.legend[0].text.contains("bins"), "{}", s.legend[0].text);
+        let found = crate::tf::jump(
+            &[fx.trace()],
+            &DisplayCache::default(),
+            &v,
+            1900.0,
+            v.freq.range(),
+            crate::cursor_jump::Landmark::Peak,
+            crate::cursor_jump::Step::Up,
+        );
+        assert_eq!(found, None, "{phase:?}");
+        // Nor is a blend marked as grid where every column is.
+        let blend = ViewState {
+            tf: TfView { phase, ..zoom.tf },
+            cursor_hz: Some(900.0),
+            ..view(700.0, 1200.0)
+        };
+        let s = scene(&[fx.trace()], &blend, size(1900.0));
+        assert!(!s.unresolved.iter().any(|m| m.note == "grid"), "{phase:?}");
+        assert!(
+            !readout_freq(&s).ends_with(" · grid"),
+            "{}",
+            readout_freq(&s)
+        );
     }
     // A stale stage.
     let mut stale = Fx::new();
@@ -540,47 +679,44 @@ fn what_the_cursor_says_in_each_case() {
     assert_eq!(said(stored, &zoom, 1900.0), column(15_000.0));
 }
 
+/// A transfer's legend and a math's alike: what forces the grid is per pane, so the pane says
+/// it, not the measurement's row.
 #[test]
-fn a_transfer_legend_says_nothing_of_its_bins() {
-    let fx = Fx::new();
-    let s = scene(&[fx.trace()], &view(10_000.0, 20_000.0), size(1900.0));
-    assert!(s.bins.is_some());
-    assert!(!s.legend[0].text.contains("bins"), "{}", s.legend[0].text);
-}
-
-/// `fx`'s curve as a transfer-domain math's.
-fn math(fx: &Fx) -> TfTrace<'_> {
-    let mut t = fx.trace();
-    if let Some(b) = t.bins.as_mut() {
-        b.math = true;
-    }
-    t
-}
-
-#[test]
-fn a_math_legend_says_bins_while_a_stage_is_drawn() {
+fn a_legend_says_bins_while_a_stage_is_drawn() {
     let fx = Fx::new();
     let zoom = view(10_000.0, 20_000.0);
     let tags =
         |t: TfTrace<'_>, v: &ViewState, px: f32| scene(&[t], v, size(px)).legend[0].tags.clone();
     let has = |tags: &[String], s: &str| tags.iter().any(|t| t == s);
-    assert!(has(&tags(math(&fx), &zoom, 1900.0), "bins"));
+    assert!(has(&tags(fx.trace(), &zoom, 1900.0), "bins"));
     // Its cursor reads the bin.
     let v = ViewState {
         cursor_hz: Some(15_000.0),
         ..zoom
     };
-    assert!(said(math(&fx), &v, 1900.0).ends_with(" · 12 Hz bin"));
+    assert!(said(fx.trace(), &v, 1900.0).ends_with(" · 12 Hz bin"));
     // No stage drawn: zoomed out, smoothed, stale.
     assert!(
-        !tags(math(&fx), &zoom, 800.0)
+        !tags(fx.trace(), &zoom, 800.0)
+            .iter()
+            .any(|t| t.contains("bins"))
+    );
+    let smoothed = TfTrace {
+        smoothing: Some(Smoothing {
+            fraction: SmoothingFraction::Sixth,
+            mode: SmoothingMode::Magnitude,
+        }),
+        ..fx.trace()
+    };
+    assert!(
+        !tags(smoothed, &zoom, 1900.0)
             .iter()
             .any(|t| t.contains("bins"))
     );
     let mut stale = Fx::new();
     stale.stages[0].1.meta.blocks = 0;
     assert!(
-        !tags(math(&stale), &zoom, 1900.0)
+        !tags(stale.trace(), &zoom, 1900.0)
             .iter()
             .any(|t| t.contains("bins"))
     );
@@ -588,12 +724,12 @@ fn a_math_legend_says_bins_while_a_stage_is_drawn() {
     let hold = vec![0.0_f32; fx.c.freqs.len()];
     let held = TfTrace {
         hold: Some(&hold),
-        ..math(&fx)
+        ..fx.trace()
     };
     assert!(has(&tags(held, &zoom, 1900.0), "bins (grid: peak hold)"));
     let tracking = TfTrace {
         tracks: true,
-        ..math(&fx)
+        ..fx.trace()
     };
     assert!(has(&tags(tracking, &zoom, 1900.0), "bins (grid: peaks)"));
     // An average: its range band stays on the grid parts, and is not drawn under the bins.
@@ -608,7 +744,7 @@ fn a_math_legend_says_bins_while_a_stage_is_drawn() {
             spread: RangeSpread::of(4),
             band: Some(&band),
         }),
-        ..math(&fx)
+        ..fx.trace()
     };
     let v = ViewState {
         range_band: true,

@@ -54,9 +54,6 @@ pub struct BinSource<'a> {
     /// The measurement runs: its stage frames follow the `tf` within a hop. Stopped, both
     /// carry the final stamp.
     pub running: bool,
-    /// A math trace: its legend says `bins` while a stage is drawn (a transfer's list row
-    /// says its resolution).
-    pub math: bool,
     /// Its measurement's peak hold is on.
     pub holds: bool,
 }
@@ -94,12 +91,15 @@ pub fn forced(traces: &[TfTrace<'_>]) -> Option<Forced> {
 }
 
 /// The bins of stage `b` finer than the grid: its first and last bin outside every
-/// unresolved range and every blend; `None` when it has none.
+/// unresolved range and every blend; `None` when it has none, or when the curve states no
+/// unresolved ranges (where its columns are coarser than a stage's bins is then unknown,
+/// so no bin can be said to be finer).
 pub fn fine_bins(
     layout: &BinLayout,
     unresolved: Option<&[BinRange]>,
     b: usize,
 ) -> Option<(u32, u32)> {
+    let unresolved = unresolved?;
     let s = layout.stages.get(b)?;
     let dx = s.bin_hz.0;
     if dx.is_nan() || dx <= 0.0 || s.bins == 0 {
@@ -107,10 +107,7 @@ pub fn fine_bins(
     }
     let coarse = |k: u32| {
         let f = f64::from(k) * dx;
-        unresolved
-            .unwrap_or_default()
-            .iter()
-            .any(|r| f >= r.lo.0 && f <= r.hi.0)
+        unresolved.iter().any(|r| f >= r.lo.0 && f <= r.hi.0)
             || layout.blends.iter().any(|r| f >= r.lo.0 && f <= r.hi.0)
     };
     let ks = s.first_bin..s.first_bin + s.bins;
@@ -178,7 +175,7 @@ pub fn wanted(
 
 /// Whether stage `b`'s frame can stand beside the shown `tf`: same configuration, delay
 /// and nudge, an average to show, and of the same time (within a hop and the publish
-/// refresh while running; the same stamp once stopped).
+/// refresh either way while running; the same stamp once stopped).
 pub fn fresh<'s, 'a>(src: &'s BinSource<'a>, b: usize) -> Option<&'s StageFrame<'a>> {
     let s = src.stages.get(b)?.as_ref()?;
     let m = &s.frame.meta;
@@ -193,9 +190,13 @@ pub fn fresh<'s, 'a>(src: &'s BinSource<'a>, b: usize) -> Option<&'s StageFrame<
     }
     let (tf_at, at) = (src.tf_stamp.audio_sample.0, s.stamp.audio_sample.0);
     let timely = if src.running {
+        // A stage frame and the `tf` of one emit share a stamp, but a stage is also sent
+        // alone between `tf` refreshes, and the `tf` shown may be the older of the two:
+        // either may lead by up to a hop of that stage plus the refresh. Further apart they
+        // are averages of different times.
         let full_rate = m.rate.0 * f64::from(m.factor);
-        let behind = i128::from(tf_at) - i128::from(at);
-        (behind as f64) <= m.hop.0 as f64 + REFRESH_S * full_rate
+        let apart = (i128::from(tf_at) - i128::from(at)).unsigned_abs();
+        (apart as f64) <= m.hop.0 as f64 + REFRESH_S * full_rate
     } else {
         tf_at == at
     };
@@ -225,10 +226,11 @@ impl Spliced {
         self.spans.get(i)?.iter().find(|s| s.cols.contains(&col))
     }
 
-    /// Whether any stage next to blend `j` (between stages `j` and `j + 1`) is drawn.
-    fn beside_blend(&self, j: usize) -> bool {
+    /// Whether curve `i` draws a stage next to blend `j` (between stages `j` and `j + 1`).
+    fn beside_blend(&self, i: usize, j: usize) -> bool {
         self.spans
-            .iter()
+            .get(i)
+            .into_iter()
             .flatten()
             .any(|s| usize::from(s.stage) == j || usize::from(s.stage) == j + 1)
     }
@@ -281,14 +283,16 @@ fn runs<'f>(t: &'f TfTrace<'_>, view: Range, plot_px: f64) -> Vec<Run<'f>> {
 }
 
 /// The curves as a pane `plot_px` wide draws them in `view`; `None` when none draws a bin
-/// (every curve as `shown`).
+/// (every curve as `shown`): under `forced`, and in a pane whose phase is not wrapped
+/// ([`reads_bins`]), so that every part of the pane, its cursor, mark and jumps read the
+/// one grid it draws.
 pub fn splice(
     traces: &[TfTrace<'_>],
     shown: &[DisplayTrace],
     view: &ViewState,
     plot_px: f64,
 ) -> Option<Spliced> {
-    if forced(traces).is_some() {
+    if forced(traces).is_some() || !reads_bins(view.tf.phase) {
         return None;
     }
     let range = view.freq.range();
@@ -408,8 +412,9 @@ fn with_bins(
     (out, spans)
 }
 
-/// Whether a pane in `phase` view reads its cursor, mark and jumps on the bins: the
-/// unwrapped phase and group delay exist on the grid only, so those views read the grid.
+/// Whether a pane in `phase` view draws and reads bins at all: the unwrapped phase and
+/// group delay exist on the grid only, and a pane whose phase reads the grid draws its
+/// magnitude and coherence there too, so one column is under the cursor in every part.
 pub fn reads_bins(phase: PhaseView) -> bool {
     phase == PhaseView::Wrapped
 }
@@ -440,13 +445,32 @@ pub fn form_note(
     (!unresolved).then(|| format::resolution(Resolution::NinetySixth))
 }
 
-/// The blends next to a drawn stage, as marks that say the grid is drawn there; never
+/// The curve whose unresolved ranges a pane marks: the selected shown curve that states
+/// them, else the first of the pane's own (not compared) that does; an index into `traces`.
+pub fn marked(traces: &[TfTrace<'_>], shown: &[DisplayTrace]) -> Option<usize> {
+    let known = || {
+        traces
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.unresolved.is_some() && shown.iter().any(|d| d.key == t.key))
+    };
+    known()
+        .find(|(_, t)| t.selected)
+        .or_else(|| known().find(|(_, t)| !t.compared))
+        .map(|(i, _)| i)
+}
+
+/// The blends next to a stage drawn on the curve the unresolved marks are of (`marked`,
+/// an index into `traces`), as marks that say the grid is drawn there: its own layout and
+/// its own drawn stages, since curves of other ladders or rates blend elsewhere. Never
 /// shaded (each lies inside an unresolved mark already).
-pub fn blend_marks(traces: &[TfTrace<'_>], spliced: &Spliced) -> Vec<crate::unresolved::RangeMark> {
+pub fn blend_marks(
+    traces: &[TfTrace<'_>],
+    spliced: &Spliced,
+    marked: Option<usize>,
+) -> Vec<crate::unresolved::RangeMark> {
     const NOTE: &str = "grid";
-    let Some(layout) = traces
-        .iter()
-        .find_map(|t| t.bins.as_ref().map(|b| b.layout))
+    let Some((i, layout)) = marked.and_then(|i| Some((i, traces.get(i)?.bins.as_ref()?.layout)))
     else {
         return Vec::new();
     };
@@ -454,7 +478,7 @@ pub fn blend_marks(traces: &[TfTrace<'_>], spliced: &Spliced) -> Vec<crate::unre
         .blends
         .iter()
         .enumerate()
-        .filter(|(j, _)| spliced.beside_blend(*j))
+        .filter(|(j, _)| spliced.beside_blend(i, *j))
         .map(|(_, r)| crate::unresolved::RangeMark {
             lo_hz: r.lo.0,
             hi_hz: r.hi.0,
@@ -469,17 +493,17 @@ pub fn blend_marks(traces: &[TfTrace<'_>], spliced: &Spliced) -> Vec<crate::unre
         .collect()
 }
 
-/// What a math curve's legend adds about its bins: `bins` while one of its stages is
-/// drawn (with `range band on grid parts` when its range band shows), `bins (grid: peak
-/// hold)` while the pane forces the grid; nothing for a transfer, whose list row says its
-/// resolution, or when no stage is drawn.
+/// What the legend of a curve with bins (a transfer at `bins`, a math over such) adds about
+/// them in this pane: `bins` while one of its stages is drawn (with `range band on grid
+/// parts` when its range band shows), `bins (grid: peak hold)` while the pane forces the
+/// grid; nothing when no stage is drawn. Per pane, since what forces the grid is.
 pub fn legend_tags(
     t: &TfTrace<'_>,
     spans: &[BinSpan],
     forced: Option<Forced>,
     band_shown: bool,
 ) -> Vec<String> {
-    if !t.bins.as_ref().is_some_and(|b| b.math) {
+    if t.bins.is_none() {
         return Vec::new();
     }
     match forced {

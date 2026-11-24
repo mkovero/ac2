@@ -1946,11 +1946,13 @@ grid (at 48 kHz above about 1.6 kHz, 410–810 Hz and 135–200 Hz; at 1/96 belo
 column already holds a bin). On a 1900-pixel-wide plot the full 20 Hz–20 kHz view shows the
 135–200 Hz bins; 10–20 kHz shows the 12 Hz bins of the top window. The cursor then reads the
 nearest bin and says so (`15.0 kHz · 12 Hz bin`), a grid column reads `1/96 oct`, and the
-peak and notch jumps run over the bins as drawn. Where two windows hand over the grid is
-drawn, and the cursor adds `grid` while a neighbouring window draws its bins. Smoothing, a
-peak hold, peak tracking (**P**), the unwrapped phase and group delay keep the grid (the list
-row says `resolution bins (grid: peak hold)` or `(grid: peaks)`), and a capture is a 1/96
-trace. A transfer math trace (a difference, ratio, sum or average) digs down the same way
+peak and notch jumps run over the bins as drawn; the curve's legend adds `bins` while any
+are drawn. Where two windows hand over the grid is drawn, and the cursor adds `grid` there
+while a neighbouring window draws its bins, with the resolution marker on or off. Smoothing
+keeps that curve on the grid; a peak hold or peak tracking (**P**) keeps a whole pane on it,
+and its legend says why (`bins (grid: peak hold)`, `bins (grid: peaks)`); the unwrapped phase
+and group delay exist on the grid only, so with either chosen every transfer pane draws
+and reads the grid, its magnitude and coherence too. A capture is a 1/96 trace. A transfer math trace (a difference, ratio, sum or average) digs down the same way
 when all its operands are live transfers at bins with the same rate and LF window: each bin
 is the operands' own bins combined. With a stored trace, an operand at 1/96 or another LF
 window, one left out or stopped, it stays on the 1/96 grid; an alignment always does.
