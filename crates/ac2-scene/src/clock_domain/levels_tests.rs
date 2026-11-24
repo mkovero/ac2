@@ -250,7 +250,8 @@ fn levels_that_cannot_tell_say_why() {
     assert_eq!(
         why(CantTellReason::NotSteady {
             low: 0.42,
-            high: 3.13
+            high: 3.13,
+            line: None
         }),
         format!("can't tell: figure not steady: +0.4 … +3.1 ppm · {LEVELS}")
     );
@@ -291,8 +292,8 @@ fn a_streams_verdict_stays_the_tag_and_levels_that_differ_add_a_line() {
         tip(&d, 1),
         format!(
             "clocks agree with pupu: measured between the rigs, within 2 ppm (+0.1 ppm over \
-             the last 60 s); a lock is not proven below 2 ppm\nmeasuring clocks… · +0.40 ppm \
-             over 60 s · marks for 5 min 12 s · {LEVELS}"
+             the last 60 s); a lock is not proven below 2 ppm\nmeasuring clocks… · ketunkolo \
+             runs +0.40 ppm against this rig over 60 s · marks for 5 min 12 s · {LEVELS}"
         )
     );
 
@@ -310,8 +311,8 @@ fn a_streams_verdict_stays_the_tag_and_levels_that_differ_add_a_line() {
     assert_eq!(
         tip(&d, 1),
         format!(
-            "can't tell: no audio between pupu and ketunkolo\nCLOCKS NOT LOCKED +3.1 ppm over \
-             60 s · marks for 5 min 12 s · {LEVELS}"
+            "can't tell: no audio between pupu and ketunkolo\nCLOCKS NOT LOCKED: ketunkolo runs \
+             +3.1 ppm against this rig over 60 s · marks for 5 min 12 s · {LEVELS}"
         )
     );
 }

@@ -301,8 +301,25 @@ fn standing_rigs() -> Vec<StandingRig> {
             cant(CantTellReason::NotSteady {
                 low: 0.4,
                 high: 3.1,
+                line: None,
             }),
             Some(1.85),
+        ),
+        s(
+            RemoteLink::Up,
+            true,
+            cant(CantTellReason::NotSteady {
+                low: 0.4,
+                high: 4.0,
+                line: Some(ketunkolo()),
+            }),
+            Some(0.21),
+        ),
+        s(
+            RemoteLink::Up,
+            true,
+            cant(CantTellReason::MarksKeepBreaking),
+            None,
         ),
         s(
             RemoteLink::Up,

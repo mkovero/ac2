@@ -240,8 +240,9 @@ is never only a colour):
   `AGREE`, or stays `UNKNOWN`; a not-locked verdict from levels needs ten minutes beyond
   2 ppm, and until then `UNKNOWN`'s tooltip says *measuring clocks…* with the figure, how
   many of the ten minutes have been beyond 2 ppm and how long the marks have come, or why it
-  can't tell (*no timing in ketunkolo's levels*, *figure not steady*, *no link to
-  ketunkolo*). A tooltip resting on the levels says *measured from the rigs' level frames,
+  can't tell (*no timing in ketunkolo's levels*, *figure not steady*, *ketunkolo's
+  interface against its system clock not steady*, *ketunkolo's timing keeps breaking off
+  before a minute is in*, *no link to ketunkolo*). A tooltip resting on the levels says *measured from the rigs' level frames,
   no audio streamed*. Where a remote input from the rig is in use, its stream's verdict is
   the tag, as it is what a cross-rig measurement rests on; if the levels would tag the rig
   otherwise, the tooltip adds their line. A paired rig this app does not read takes its
@@ -281,19 +282,26 @@ it are listed there and removed with **Delete** twice.
 
 `ac2 status` also prints a `from levels` line for every paired rig, with or without remote
 inputs or audio: the clocks between the two rigs as the timing in its always-on levels
-shows them (*from levels ketunkolo · clocks agree · +0.12 ppm over 60 s · marks for 5 min
-12 s · 96 kHz, 3 inputs · link up*). *measuring clocks…* means there is no verdict yet:
+shows them (*from levels ketunkolo · clocks agree · ketunkolo runs +0.12 ppm against this
+rig over 60 s · marks for 5 min 12 s · 96 kHz, 3 inputs · link up*). *measuring clocks…* means there is no verdict yet:
 the first whole minute of timing is not in, or the figure is beyond 2 ppm and is being
-watched before it is called (*+2.71 ppm over 60 s · beyond 2 ppm for 4 of the 10 min a
-verdict needs*). A time sync slewing either computer's clock looks like a rate for a minute
+watched before it is called (*ketunkolo runs +2.71 ppm against this rig over 60 s ·
+beyond 2 ppm for 4 of the 10 min a verdict needs*); the figure is always the other rig's
+clock against the rig shown. A time sync slewing either computer's clock looks like a rate for a minute
 or two, so *clocks agree* comes after one minute within 2 ppm, and again after two minutes
-running below 1.8 ppm once a minute went beyond, while *CLOCKS NOT LOCKED +3.1 ppm over 60
-s* waits for ten measured minutes running beyond it, all one way; a gap in the timing of a
+running below 1.8 ppm once a minute went beyond, while *CLOCKS NOT LOCKED: ketunkolo runs
++3.1 ppm against this rig over 60 s* waits for ten measured minutes running beyond it, all one way; a gap in the timing of a
 few seconds drops only the minute it fell in, one of over a minute starts the count again.
 After the link or the timing drops out, *clocks agree* waits for a whole minute after it.
 *marks for* counts from the start of the sessions or the last gap of over a minute in the
 timing. Ten minutes that do not agree among
-themselves read *CLOCKS: CAN'T TELL (figure not steady: +0.4 … +3.1 ppm)*. Other reasons:
+themselves read *CLOCKS: CAN'T TELL (figure not steady: +0.4 … +3.1 ppm)*; when the
+figure between the rigs stayed within and only a rig's own interface wandered against its
+system clock, *(ketunkolo's interface against its system clock not steady: +0.4 … +4.0
+ppm)*. A figure that keeps going beyond 2 ppm and back, three times in half an hour, reads
+*figure not steady* in place of *clocks agree* until half an hour passes without. Gaps in
+the timing that keep any minute from closing for five minutes read *ketunkolo's timing
+keeps breaking off before a minute is in*. Other reasons:
 *no timing in ketunkolo's levels*, *ketunkolo has no audio session*, *no link to
 ketunkolo*, *ketunkolo's levels arrive 250 ms late: the network, or its system clock
 behind*.

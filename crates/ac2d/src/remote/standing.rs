@@ -166,6 +166,8 @@ pub(crate) struct StandingFeed {
     last_mark: Option<Instant>,
     /// The newest mark's sample index and system time, for holes.
     newest: Option<(u64, u64)>,
+    /// A hole came at a mark that was not pushed: the next pushed one breaks the windows.
+    unpushed_hole: bool,
     breaks: Option<(u64, u64)>,
     /// Ages of the marks over the last [`AGE_WINDOW`], s, and since when they are kept.
     ages: VecDeque<(Instant, f64)>,
@@ -198,6 +200,7 @@ impl StandingFeed {
             last_frame: None,
             last_mark: None,
             newest: None,
+            unpushed_hole: false,
             breaks: None,
             ages: VecDeque::new(),
             ages_since: None,
@@ -227,6 +230,7 @@ impl StandingFeed {
         self.since = None;
         self.last_mark = None;
         self.newest = None;
+        self.unpushed_hole = false;
         self.breaks = None;
         self.ages.clear();
         self.ages_since = None;
@@ -307,10 +311,13 @@ impl StandingFeed {
         self.newest = Some((mark.sample.0, mark.system_ns));
         let at = local_at(local.reference, local.line, rate, mark.system_ns as f64);
         if at < 0.0 {
+            self.unpushed_hole |= hole;
             return;
         }
         let breaks = (mark.breaks, local.breaks);
-        let broke = hole || self.breaks.is_some_and(|b| b != breaks);
+        let broke = hole
+            || std::mem::take(&mut self.unpushed_hole)
+            || self.breaks.is_some_and(|b| b != breaks);
         self.breaks = Some(breaks);
         let ns = (at * 1e9 / rate) as u64;
         self.long.push(mark.sample.0, ns, broke);

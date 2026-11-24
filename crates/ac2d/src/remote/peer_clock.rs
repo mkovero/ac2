@@ -86,7 +86,7 @@ fn system_reason(rig: RigId, c: &Clocks) -> Option<CantTellReason> {
 
 /// A rig's sample clock against its system clock, ppm; `Err` when it is measured against
 /// the computer's own crystal instead; `Ok(None)` while measuring.
-fn own_line(rig: RigId, c: &Clocks) -> Result<Option<f64>, CantTellReason> {
+pub(crate) fn own_line(rig: RigId, c: &Clocks) -> Result<Option<f64>, CantTellReason> {
     match c.capture.as_ref().map(|d| d.rate) {
         Some(SampleClock::Measured {
             ppm,

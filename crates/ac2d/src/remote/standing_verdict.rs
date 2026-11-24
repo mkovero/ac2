@@ -10,20 +10,27 @@
 //! - *agree* once a whole minute closes within the rule with no count running and the judge
 //!   agreeing: a slew only ever makes a locked pair look apart, never an apart pair look
 //!   locked for a minute running;
-//! - *not locked* (the cross-rig rate or either rig's own line, each as the judge reads it
-//!   at the minute's close) only once [`HOLD_MINUTES`] measured minutes in a row are all
-//!   beyond the rule, on one side with one sign;
+//! - *not locked* only once [`HOLD_MINUTES`] measured minutes in a row are all beyond the
+//!   rule: the cross-rig figure on one sign, else one rig's own line on one sign, else some
+//!   line in every one of them;
 //! - ten minutes counted and not of one mind: *can't tell*, the figure not steady, with its
 //!   spread; never *measuring* for ever.
 //!
-//! A count begins at a minute beyond [`BOUND_PPM`] and ends at two minutes in a row below
-//! [`ENTER_PPM`], or at ten all within the rule: the gap between the two bounds keeps a
-//! figure that sits at the rule from leaving and re-entering agreement every minute. What is
-//! shown changes as minutes close, or as the evidence stops; between closes only a shown
-//! figure beyond the rule takes agreement away.
+//! Each minute keeps both of its facts: the cross-rig figure it closed at, and the worst
+//! either rig's own line read while it was open. It is beyond when either is beyond
+//! [`BOUND_PPM`]; a count begins at a minute beyond and ends at two minutes in a row with
+//! both below [`ENTER_PPM`], or at ten all within the rule: the gap between the two bounds
+//! keeps a figure that sits at the rule from leaving and re-entering agreement every
+//! minute. Counts that keep starting ([`FLAP_COUNTS`] within [`FLAP_WINDOW`]) are a figure
+//! wandering across the rule: *not steady* in place of agreement until a quiet window.
+//!
+//! What is shown changes as minutes close, or as the evidence stops; between closes only a
+//! shown figure beyond the rule takes agreement away, and only [`AGREE_REPORTS`] agreeing
+//! reports in a row give it.
 //!
 //! Evidence that stops says nothing (no link, no marks, a hole of a few seconds in them):
-//! the count stands, and agreement waits for a minute closing after it. Evidence the judge
+//! the count stands, and both agreement and a verdict wait for a minute closing after it.
+//! Holes that keep every minute from closing for [`BREAKING`] say so. Evidence the judge
 //! cannot tell from (marks late or in this rig's future, an unsynced system clock, another
 //! nominal rate) says a system clock may have moved: the count goes, and so does the minute
 //! open then, which spans the disturbance. A hole of over a minute starts the count again:
@@ -37,7 +44,7 @@ use std::time::Duration;
 use ac2_proto::model::{CantTellReason, MinuteCount, NotLockedReason, PeerRelation};
 use ac2_proto::units::{RigId, Seconds, WallNs};
 
-use super::peer_clock::{BOUND_PPM, Evidence, judge};
+use super::peer_clock::{BOUND_PPM, Evidence, judge, own_line};
 use super::standing::{Minutes, StandingReport};
 use super::{MAX_LINK_OFFSET_S, link_offset};
 
@@ -51,6 +58,17 @@ pub(crate) const HOLD_MINUTES: usize = 10;
 /// A count ends at two minutes in a row below this, ppm: below the rule by a margin, so a
 /// figure that sits at the rule counts on rather than flipping in and out.
 pub(crate) const ENTER_PPM: f64 = 1.8;
+/// Agreeing reports in a row that give agreement between closes: one report's windows can
+/// agree for a moment while sliding past a minute that did not.
+pub(crate) const AGREE_REPORTS: u32 = 3;
+/// Counts started within [`FLAP_WINDOW`] that read as a figure wandering across the rule.
+/// A slew starts one count and ends it; three in half an hour is more than chrony's
+/// corrections at the intervals [`HOLD_MINUTES`] assumes.
+pub(crate) const FLAP_COUNTS: usize = 3;
+pub(crate) const FLAP_WINDOW: Duration = Duration::from_secs(30 * 60);
+/// No minute closed this long, with holes in the marks between: the marks keep breaking.
+/// Five minutes of marks would have closed four or five minutes.
+pub(crate) const BREAKING: Duration = Duration::from_secs(5 * 60);
 /// Marks late (or ahead) for this long before they say so: a link's queue that fills for a
 /// moment is not a clock behind.
 pub(crate) const LATE_IN: Duration = Duration::from_secs(3);
@@ -80,48 +98,76 @@ pub(crate) fn late(r: &StandingReport, set: Option<f64>) -> Option<f64> {
     (by > 0.0).then_some(by)
 }
 
-/// A closed minute as counted: the cross-rig figure it was fitted to, and how it was classed.
+/// A rig's own line: its sample clock against its system clock, ppm.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct Line {
+    pub(super) rig: RigId,
+    pub(super) ppm: f64,
+}
+
+/// A closed minute: the cross-rig figure it closed at (hundredths, as shown), and the worst
+/// own line read while it was open.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Minute {
     cross: f64,
-    class: Class,
-}
-
-/// Which side of the rule a minute is on, and whose line put it there: one sign throughout
-/// is a rate, a sign that changes is noise.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Class {
-    Within,
-    Cross { fast: bool },
-    Own { rig: RigId, ppm: f64 },
+    line: Option<Line>,
 }
 
 impl Minute {
-    /// `cross` (hundredths, as shown) with the judge's `raw` relation at its close.
-    fn classed(cross: f64, raw: &Raw) -> Self {
-        let class = match *raw {
-            Raw::Own { rig, ppm } => Class::Own { rig, ppm },
-            _ if cross.abs() > BOUND_PPM => Class::Cross { fast: cross > 0.0 },
-            _ => Class::Within,
-        };
-        Self { cross, class }
+    fn cross_beyond(self) -> bool {
+        self.cross.abs() > BOUND_PPM
+    }
+
+    fn line_beyond(self) -> Option<Line> {
+        self.line.filter(|l| l.ppm.abs() > BOUND_PPM)
     }
 
     fn within(self) -> bool {
-        self.class == Class::Within
+        !self.cross_beyond() && self.line_beyond().is_none()
     }
 
     fn settled(self) -> bool {
-        self.within() && self.cross.abs() < ENTER_PPM
+        self.cross.abs() < ENTER_PPM && self.line.is_none_or(|l| l.ppm.abs() < ENTER_PPM)
     }
 
-    /// One side and sign: whose line, and fast or slow.
-    fn side(self) -> Option<(Option<RigId>, bool)> {
-        match self.class {
-            Class::Within => None,
-            Class::Cross { fast } => Some((None, fast)),
-            Class::Own { rig, ppm } => Some((Some(rig), ppm > 0.0)),
+    /// Why a minute beyond the rule is: the cross-rig figure first, the two clocks' own
+    /// relation, else the own line.
+    fn reason(self) -> NotLockedReason {
+        match self.line_beyond().filter(|_| !self.cross_beyond()) {
+            Some(Line { rig, ppm }) => NotLockedReason::OwnClock { rig, ppm },
+            None => NotLockedReason::CrossRate {
+                ppm: self.cross,
+                over: Seconds(MINUTE_S),
+            },
         }
+    }
+}
+
+/// Whether `values` hold no more than one value.
+fn one_value<T: PartialEq>(mut values: impl Iterator<Item = T>) -> bool {
+    let first = values.next();
+    values.all(|v| Some(v) == first)
+}
+
+/// The spread of `minutes`: of the cross-rig figure, or, where that stayed within the rule
+/// and only an own line went beyond it, of that line.
+fn spread(minutes: &[Minute]) -> CantTellReason {
+    let line = minutes
+        .iter()
+        .rev()
+        .find_map(|m| m.line_beyond())
+        .filter(|_| minutes.iter().all(|m| !m.cross_beyond()));
+    let ppms: Vec<f64> = match line {
+        Some(l) => minutes
+            .iter()
+            .filter_map(|m| m.line.filter(|x| x.rig == l.rig).map(|x| x.ppm))
+            .collect(),
+        None => minutes.iter().map(|m| m.cross).collect(),
+    };
+    CantTellReason::NotSteady {
+        low: ppms.iter().copied().fold(f64::INFINITY, f64::min),
+        high: ppms.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+        line: line.map(|l| l.rig),
     }
 }
 
@@ -129,14 +175,9 @@ impl Minute {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum Raw {
     Agree,
-    /// Measuring, or the cross-rig rate beyond the rule now: neither is agreement, and the
-    /// minute's own figure says which side it closed on.
+    /// Measuring, or a rate beyond the rule now: neither is agreement, and the minute's own
+    /// figures say which side it closed on.
     NotAgree,
-    /// A rig's own line beyond the rule.
-    Own {
-        rig: RigId,
-        ppm: f64,
-    },
     /// Evidence stopped: shown as it is, the count stands.
     Missing(PeerRelation),
     /// The judge cannot tell, or the nominal rates differ: shown as it is, the count and
@@ -150,11 +191,8 @@ impl Raw {
             PeerRelation::Agree => Self::Agree,
             PeerRelation::Measuring => Self::NotAgree,
             PeerRelation::NotLocked {
-                reason: NotLockedReason::CrossRate { .. },
+                reason: NotLockedReason::CrossRate { .. } | NotLockedReason::OwnClock { .. },
             } => Self::NotAgree,
-            PeerRelation::NotLocked {
-                reason: NotLockedReason::OwnClock { rig, ppm },
-            } => Self::Own { rig, ppm },
             PeerRelation::CantTell { reason } if only_missing(&reason) => Self::Missing(r),
             _ => Self::Stop(r),
         }
@@ -165,7 +203,8 @@ impl Raw {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum Event {
     None,
-    /// A minute closed at this cross-rig figure (`None`: too thin to fit).
+    /// A minute closed at this cross-rig figure (`None`: too thin to fit, or more than one
+    /// closed since the last report, which leaves a minute unread).
     Close(Option<f64>),
     /// A hole of a few seconds: the open minute was dropped, and a minute that closed in
     /// the same report is not counted, since which side of the hole it ends on is unknown
@@ -190,8 +229,10 @@ impl Event {
             Self::Restart
         } else if was.1 != now.1 {
             Self::Gap
-        } else if was.3 != now.3 {
+        } else if now.3 == was.3 + 1 {
             Self::Close(m.last)
+        } else if now.3 != was.3 {
+            Self::Close(None)
         } else {
             Self::None
         }
@@ -205,9 +246,13 @@ pub(super) struct Input {
     pub(super) event: Event,
     /// The live long-window figure, (ppm, span s).
     pub(super) live: Option<(f64, f64)>,
+    /// The worse of the two rigs' own lines now.
+    pub(super) line: Option<Line>,
+    /// Time since the daemon's start.
+    pub(super) now: Duration,
 }
 
-/// What must happen before agreement may show again.
+/// What must happen before agreement or a verdict may show again.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Wait {
     Nothing,
@@ -229,6 +274,18 @@ pub(super) struct Hold {
     /// What was shown, and its figure (ppm, span s).
     shown: PeerRelation,
     figure: Option<(f64, f64)>,
+    /// The worst own line while the open minute was open.
+    worst: Option<Line>,
+    /// Agreeing reports in a row.
+    agrees: u32,
+    /// Since when no minute closed, and whether a hole kept one from closing since.
+    open_from: Option<Duration>,
+    gapped: bool,
+    /// Counts started and minutes closed within [`FLAP_WINDOW`], and whether counts kept
+    /// starting.
+    starts: VecDeque<Duration>,
+    recent: VecDeque<(Duration, Minute)>,
+    wandering: bool,
 }
 
 impl Default for Hold {
@@ -239,6 +296,13 @@ impl Default for Hold {
             wait: Wait::Nothing,
             shown: PeerRelation::Measuring,
             figure: None,
+            worst: None,
+            agrees: 0,
+            open_from: None,
+            gapped: false,
+            starts: VecDeque::new(),
+            recent: VecDeque::new(),
+            wandering: false,
         }
     }
 }
@@ -246,9 +310,19 @@ impl Default for Hold {
 impl Hold {
     /// The relation shown after `input`.
     pub(super) fn step(&mut self, input: Input) -> PeerRelation {
-        let Input { raw, event, live } = input;
+        let Input {
+            raw,
+            event,
+            live,
+            line,
+            now,
+        } = input;
+        self.forget(now);
         if event == Event::Restart {
             self.start_again();
+            self.starts.clear();
+            self.recent.clear();
+            self.wandering = false;
         }
         match raw {
             Raw::Stop(r) => {
@@ -262,10 +336,24 @@ impl Hold {
                     self.wait = Wait::Close;
                 }
                 self.figure = None;
+                self.agrees = 0;
                 self.shown = r;
                 return r;
             }
-            _ => {}
+            Raw::Agree | Raw::NotAgree => {}
+        }
+        self.agrees = if raw == Raw::Agree {
+            self.agrees + 1
+        } else {
+            0
+        };
+        if let Some(l) = line
+            && self.worst.is_none_or(|w| l.ppm.abs() > w.ppm.abs())
+        {
+            self.worst = Some(Line {
+                rig: l.rig,
+                ppm: hundredths(l.ppm),
+            });
         }
         let closed = match event {
             Event::Close(p) => {
@@ -274,16 +362,22 @@ impl Hold {
                 if self.wait == Wait::Discard {
                     self.last = None;
                 } else {
-                    self.close(p, &raw);
+                    self.close(p, now);
                 }
                 self.wait = Wait::Nothing;
                 self.figure = p.map(|p| (p, MINUTE_S));
+                self.worst = None;
+                self.open_from = None;
+                self.gapped = false;
                 true
             }
             Event::Gap => {
                 if self.wait == Wait::Nothing {
                     self.wait = Wait::Close;
                 }
+                self.figure = None;
+                self.worst = None;
+                self.gapped = true;
                 false
             }
             Event::None | Event::Restart => false,
@@ -294,16 +388,27 @@ impl Hold {
         {
             self.figure = Some((hundredths(p), span.round()));
         }
+        let open = *self.open_from.get_or_insert(now);
         let figure_within = self.figure.is_some_and(|(p, _)| p.abs() <= BOUND_PPM);
-        let shown = if self.count.len() == HOLD_MINUTES {
+        let shown = if self.gapped && now.saturating_sub(open) >= BREAKING {
+            PeerRelation::CantTell {
+                reason: CantTellReason::MarksKeepBreaking,
+            }
+        } else if self.wait != Wait::Nothing {
+            PeerRelation::Measuring
+        } else if self.count.len() == HOLD_MINUTES {
             self.verdict()
-        } else if !self.count.is_empty()
-            || self.wait != Wait::Nothing
-            || !self.last.is_some_and(Minute::within)
-            || !figure_within
+        } else if !self.count.is_empty() || !self.last.is_some_and(Minute::within) || !figure_within
         {
             PeerRelation::Measuring
-        } else if raw == Raw::Agree || (!closed && self.shown == PeerRelation::Agree) {
+        } else if self.wandering {
+            let recent: Vec<Minute> = self.recent.iter().map(|(_, m)| *m).collect();
+            PeerRelation::CantTell {
+                reason: spread(&recent),
+            }
+        } else if (closed && raw == Raw::Agree)
+            || (!closed && (self.shown == PeerRelation::Agree || self.agrees >= AGREE_REPORTS))
+        {
             // At a close the judge must agree as well; between closes agreement shown
             // stays, since a live window still filling is what the minutes wait out.
             PeerRelation::Agree
@@ -314,25 +419,52 @@ impl Hold {
         shown
     }
 
+    /// Counts and minutes older than [`FLAP_WINDOW`] go; a window with no count started
+    /// ends the wandering.
+    fn forget(&mut self, now: Duration) {
+        let old = |t: Duration| now.saturating_sub(t) > FLAP_WINDOW;
+        while self.starts.front().is_some_and(|t| old(*t)) {
+            self.starts.pop_front();
+        }
+        while self.recent.front().is_some_and(|(t, _)| old(*t)) {
+            self.recent.pop_front();
+        }
+        if self.starts.is_empty() {
+            self.wandering = false;
+        }
+    }
+
     fn start_again(&mut self) {
         self.last = None;
         self.count.clear();
         self.wait = Wait::Nothing;
         self.figure = None;
+        self.worst = None;
+        self.agrees = 0;
+        self.open_from = None;
+        self.gapped = false;
     }
 
-    /// A minute closed at `cross` (`None`: thin), with the judge's `raw` relation then.
-    fn close(&mut self, cross: Option<f64>, raw: &Raw) {
+    /// A minute closed at `cross` (`None`: thin) at `now`, with the worst own line while it
+    /// was open.
+    fn close(&mut self, cross: Option<f64>, now: Duration) {
         let Some(cross) = cross else {
             // A minute too thin to fit breaks the run.
             self.last = None;
             self.count.clear();
             return;
         };
-        let minute = Minute::classed(cross, raw);
+        let minute = Minute {
+            cross,
+            line: self.worst,
+        };
         if minute.settled() && self.last.is_some_and(Minute::settled) {
             self.count.clear();
         } else if !minute.within() || !self.count.is_empty() {
+            if self.count.is_empty() {
+                self.starts.push_back(now);
+                self.wandering |= self.starts.len() >= FLAP_COUNTS;
+            }
             if self.count.len() == HOLD_MINUTES {
                 self.count.pop_front();
             }
@@ -342,48 +474,58 @@ impl Hold {
                 self.count.clear();
             }
         }
+        self.recent.push_back((now, minute));
         self.last = Some(minute);
     }
 
-    /// Ten minutes counted: of one side and sign, or not steady.
+    /// Ten minutes counted: the cross-rig figure beyond on one sign, else one rig's own line
+    /// on one sign, else some line beyond in every one; or not steady.
     fn verdict(&self) -> PeerRelation {
-        let first = self.count.front().and_then(|m| m.side());
-        if let (Some(side), Some(last)) = (first, self.count.back())
-            && self.count.iter().all(|m| m.side() == Some(side))
+        let minutes: Vec<Minute> = self.count.iter().copied().collect();
+        let newest = minutes[minutes.len() - 1];
+        let fast = newest.cross > 0.0;
+        if minutes
+            .iter()
+            .all(|m| m.cross_beyond() && (m.cross > 0.0) == fast)
         {
-            let reason = match last.class {
-                Class::Own { rig, ppm } => NotLockedReason::OwnClock { rig, ppm },
-                _ => NotLockedReason::CrossRate {
-                    ppm: last.cross,
+            return PeerRelation::NotLocked {
+                reason: NotLockedReason::CrossRate {
+                    ppm: newest.cross,
                     over: Seconds(MINUTE_S),
                 },
             };
-            return PeerRelation::NotLocked { reason };
         }
-        // One quantity per figure: the cross-rig figures, or the own lines' when no minute
-        // was the cross figure's.
-        let cross: Vec<f64> = self
-            .count
+        if let Some(l) = newest.line_beyond()
+            && minutes.iter().all(|m| {
+                m.line_beyond()
+                    .is_some_and(|x| x.rig == l.rig && (x.ppm > 0.0) == (l.ppm > 0.0))
+            })
+        {
+            return PeerRelation::NotLocked {
+                reason: NotLockedReason::OwnClock {
+                    rig: l.rig,
+                    ppm: l.ppm,
+                },
+            };
+        }
+        // Beyond every minute, on one line or the other, each line keeping its sign: a
+        // free interface whose own line reads about the cross-rig rate, either side of the
+        // rule in turn. A sign that turns is noise, not a rate.
+        let cross_sign = minutes
             .iter()
-            .filter(|m| !matches!(m.class, Class::Own { .. }))
-            .map(|m| m.cross)
-            .collect();
-        let ppms = if cross.is_empty() {
-            self.count
-                .iter()
-                .filter_map(|m| match m.class {
-                    Class::Own { ppm, .. } => Some(ppm),
-                    _ => None,
-                })
-                .collect()
-        } else {
-            cross
-        };
+            .filter(|m| m.cross_beyond())
+            .map(|m| m.cross > 0.0);
+        let line_side = minutes
+            .iter()
+            .filter_map(|m| m.line_beyond())
+            .map(|l| (l.rig, l.ppm > 0.0));
+        if minutes.iter().all(|m| !m.within()) && one_value(cross_sign) && one_value(line_side) {
+            return PeerRelation::NotLocked {
+                reason: newest.reason(),
+            };
+        }
         PeerRelation::CantTell {
-            reason: CantTellReason::NotSteady {
-                low: ppms.iter().copied().fold(f64::INFINITY, f64::min),
-                high: ppms.iter().copied().fold(f64::NEG_INFINITY, f64::max),
-            },
+            reason: spread(&minutes),
         }
     }
 
@@ -496,10 +638,23 @@ impl StandingWatch {
     ) -> Shown {
         e.late = self.late.update(e.late, now);
         e.disagree = self.ahead.update(e.disagree, now);
+        let lines = [Some(e.ours), e.theirs.1.map(|c| (e.theirs.0, c))];
+        let line = lines
+            .into_iter()
+            .flatten()
+            .filter_map(|(rig, c)| {
+                Some(Line {
+                    rig,
+                    ppm: own_line(rig, c).ok()??,
+                })
+            })
+            .max_by(|a, b| a.ppm.abs().total_cmp(&b.ppm.abs()));
         let input = Input {
             raw: Raw::of(judge(&e)),
             event: Event::of(&mut self.seen, minutes),
             live: e.long,
+            line,
+            now,
         };
         let relation = self.hold.step(input);
         // Kept through a gap in the reports: marks that come back to the same count land on
@@ -549,9 +704,10 @@ fn quantise(r: PeerRelation) -> PeerRelation {
                     CantTellReason::ClocksDisagree { by: millis(by) }
                 }
                 CantTellReason::MarksLate { by } => CantTellReason::MarksLate { by: millis(by) },
-                CantTellReason::NotSteady { low, high } => CantTellReason::NotSteady {
+                CantTellReason::NotSteady { low, high, line } => CantTellReason::NotSteady {
                     low: hundredths(low),
                     high: hundredths(high),
+                    line,
                 },
                 other => other,
             },

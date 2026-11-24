@@ -186,7 +186,7 @@ fn levels_outweigh_system_clocks_and_a_stream_outweighs_levels() {
         h[1].1.ends_with(&format!(
             "\nclock AGREE: clocks agree with test rig: measured between the rigs, within 2 \
              ppm (+0.1 ppm over the last 60 s); a lock is not proven below 2 ppm\n\
-             CLOCKS NOT LOCKED +3.1 ppm over 60 s · {FROM_LEVELS}"
+             CLOCKS NOT LOCKED: pupu runs +3.1 ppm against this rig over 60 s · {FROM_LEVELS}"
         )),
         "{}",
         h[1].1
@@ -207,7 +207,7 @@ fn the_paired_rigs_row_says_the_clocks_from_levels_in_its_hover() {
     assert!(!row.text.contains("clocks"), "{}", row.text);
     assert!(
         row.tip.contains(&format!(
-            "\nclocks agree · +0.12 ppm over 60 s · {FROM_LEVELS}\n"
+            "\nclocks agree · pupu runs +0.12 ppm against this rig over 60 s · {FROM_LEVELS}\n"
         )),
         "{}",
         row.tip

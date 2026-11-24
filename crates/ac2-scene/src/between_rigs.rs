@@ -40,7 +40,7 @@ pub fn relation_text(r: &RemoteState, other: &str, rel: &PeerRelation) -> String
         PeerRelation::Measuring => MEASURING.into(),
         PeerRelation::NotLocked { reason } => match reason {
             NotLockedReason::CrossRate { ppm: p, over } => format!(
-                "CLOCKS NOT LOCKED {} over {} s",
+                "CLOCKS NOT LOCKED: {other} runs {} against this rig over {} s",
                 ppm(*p),
                 format::fixed(over.0, 0)
             ),
@@ -90,7 +90,17 @@ pub fn cant_tell_why(r: &RemoteState, other: &str, reason: &CantTellReason) -> S
         CantTellReason::NoSession { rig } => no_session(&who(r, *rig)),
         CantTellReason::LinkDown => link_down(other),
         CantTellReason::MarksLate { by } => marks_late(other, by.0),
-        CantTellReason::NotSteady { low, high } => not_steady(*low, *high),
+        CantTellReason::NotSteady {
+            low,
+            high,
+            line: None,
+        } => not_steady(*low, *high),
+        CantTellReason::NotSteady {
+            low,
+            high,
+            line: Some(rig),
+        } => line_not_steady(&who(r, *rig), *low, *high),
+        CantTellReason::MarksKeepBreaking => marks_keep_breaking(other),
         CantTellReason::SystemClockUnsynced { rig } => {
             format!("{}'s system clock is not synced", name_of(r, *rig))
         }
@@ -117,6 +127,22 @@ pub fn not_steady(low: f64, high: f64) -> String {
         format::signed(low, 1),
         format::signed(high, 1)
     )
+}
+
+/// Rig `who`'s own line came and went beyond the rule over the minutes a verdict needs:
+/// *ketunkolo's interface against its system clock not steady: +0.4 … +4.0 ppm*.
+pub fn line_not_steady(who: &str, low: f64, high: f64) -> String {
+    format!(
+        "{who}'s interface against its system clock not steady: {} … {} ppm",
+        format::signed(low, 1),
+        format::signed(high, 1)
+    )
+}
+
+/// Holes in rig `other`'s timing keep every minute from closing: *ketunkolo's timing keeps
+/// breaking off before a minute is in*.
+pub fn marks_keep_breaking(other: &str) -> String {
+    format!("{other}'s timing keeps breaking off before a minute is in")
 }
 
 /// Rig `other`'s levels carry no timing: *no timing in ketunkolo's levels*.
@@ -520,7 +546,7 @@ mod tests {
         );
         let l = status_lines(&r, &i);
         assert!(
-            l[0].contains("CLOCKS NOT LOCKED +5.6 ppm over 40 s"),
+            l[0].contains("CLOCKS NOT LOCKED: ketunkolo runs +5.6 ppm against this rig over 40 s"),
             "{l:?}"
         );
         assert!(

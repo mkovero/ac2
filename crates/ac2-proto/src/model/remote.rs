@@ -474,10 +474,18 @@ pub enum CantTellReason {
     /// The levels-fed figure did not stay on one side of the rule, with one sign, over the
     /// minutes a verdict needs: near the bound, or system clocks too noisy to tell.
     NotSteady {
-        /// The least and the greatest minute's figure, ppm.
+        /// The least and the greatest minute's figure, ppm: the cross-rig rate (the other
+        /// rig's sample clock against this rig's), or with `line` that rig's own line.
         low: f64,
         high: f64,
+        /// Whose own line (its interface against its system clock) came and went beyond
+        /// the rule while the cross-rig figure stayed within it; `None`: the cross-rig
+        /// figure is what was not steady.
+        line: Option<RigId>,
     },
+    /// Holes in the remote rig's timing marks keep every minute from closing: no figure
+    /// over a whole minute to judge.
+    MarksKeepBreaking,
 }
 
 /// A transfer function with one channel on this rig and one on a remote rig

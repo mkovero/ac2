@@ -47,11 +47,12 @@ fn line(r: &RemoteState, s: &StandingRig, now: WallNs) -> String {
 /// What a standing relation rests on, where a reader could take it for the audio-fed one.
 pub const FROM_LEVELS: &str = "measured from the rigs' level frames, no audio streamed";
 
-/// What rig `s`'s levels say of the clocks, in `status_lines`' words without the rig, its
-/// session or its link: *clocks agree · +0.12 ppm over 60 s · marks for 5 min 12 s*.
+/// What rig `s`'s levels say of the clocks, in `status_lines`' words without its session
+/// or its link, the figure naming whose clock runs against whose: *clocks agree · ketunkolo
+/// runs +0.12 ppm against this rig over 60 s · marks for 5 min 12 s*.
 pub fn evidence(r: &RemoteState, s: &StandingRig, now: WallNs) -> String {
     let mut parts = vec![relation_text(r, &s.name, &s.clock.relation)];
-    parts.extend(details(s, now));
+    parts.extend(parts_of(s, now, Some(&s.name)));
     parts.join(" · ")
 }
 
@@ -64,16 +65,21 @@ pub fn evidence_line(r: &RemoteState, s: &StandingRig, now: WallNs) -> String {
 /// What backs rig `s`'s verdict, each a part of its own: the figure (a not-locked verdict
 /// states its own), the count toward a not-locked verdict, how long marks have come.
 pub fn details(s: &StandingRig, now: WallNs) -> Vec<String> {
+    parts_of(s, now, None)
+}
+
+/// [`details`], the figure said as rig `named`'s against this rig when given.
+fn parts_of(s: &StandingRig, now: WallNs, named: Option<&str>) -> Vec<String> {
     let mut parts = Vec::new();
     // A verdict that is not locked says its own figure; a second one beside it would be
     // another window's and could disagree.
     let verdict = matches!(s.clock.relation, PeerRelation::NotLocked { .. });
     if let (Some(p), Some(span), false) = (s.clock.ppm, s.clock.span, verdict) {
-        parts.push(format!(
-            "{} ppm over {} s",
-            format::signed(p, 2),
-            format::fixed(span.0, 0)
-        ));
+        let (p, span) = (format::signed(p, 2), format::fixed(span.0, 0));
+        parts.push(match named {
+            Some(n) => format!("{n} runs {p} ppm against this rig over {span} s"),
+            None => format!("{p} ppm over {span} s"),
+        });
     }
     if let Some(c) = s.counting {
         parts.push(if c.beyond == c.counted {
@@ -159,8 +165,8 @@ mod tests {
         let up = RemoteLink::Up;
         assert_eq!(
             one(&rig(up.clone(), PeerRelation::Agree, Some(0.12))),
-            "from levels ketunkolo · clocks agree · +0.12 ppm over 60 s · marks for 5 min 12 s · \
-             96 kHz, 3 inputs · link up"
+            "from levels ketunkolo · clocks agree · ketunkolo runs +0.12 ppm against this rig \
+             over 60 s · marks for 5 min 12 s · 96 kHz, 3 inputs · link up"
         );
         assert_eq!(
             one(&rig(up.clone(), PeerRelation::Measuring, None)),
@@ -174,9 +180,9 @@ mod tests {
         });
         assert_eq!(
             one(&counting),
-            "from levels ketunkolo · measuring clocks… · +2.71 ppm over 60 s · beyond 2 ppm \
-             for 4 of the 10 min a verdict needs · marks for 5 min 12 s · 96 kHz, 3 inputs · \
-             link up"
+            "from levels ketunkolo · measuring clocks… · ketunkolo runs +2.71 ppm against this \
+             rig over 60 s · beyond 2 ppm for 4 of the 10 min a verdict needs · marks for 5 min \
+             12 s · 96 kHz, 3 inputs · link up"
         );
         counting.standing[0].counting = Some(MinuteCount {
             beyond: 2,
@@ -186,9 +192,9 @@ mod tests {
         counting.standing[0].marks_since = Some(WallNs(NOW - 12_400_000_000));
         assert_eq!(
             one(&counting),
-            "from levels ketunkolo · measuring clocks… · +2.71 ppm over 60 s · beyond 2 ppm \
-             in 2 of 3 min, of the 10 a verdict needs · marks for 12 s · 96 kHz, 3 inputs · \
-             link up"
+            "from levels ketunkolo · measuring clocks… · ketunkolo runs +2.71 ppm against this \
+             rig over 60 s · beyond 2 ppm in 2 of 3 min, of the 10 a verdict needs · marks for \
+             12 s · 96 kHz, 3 inputs · link up"
         );
         assert_eq!(
             one(&rig(
@@ -201,8 +207,8 @@ mod tests {
                 },
                 Some(3.12)
             )),
-            "from levels ketunkolo · CLOCKS NOT LOCKED +3.1 ppm over 60 s · marks for 5 min \
-             12 s · 96 kHz, 3 inputs · link up"
+            "from levels ketunkolo · CLOCKS NOT LOCKED: ketunkolo runs +3.1 ppm against this \
+             rig over 60 s · marks for 5 min 12 s · 96 kHz, 3 inputs · link up"
         );
         assert_eq!(
             one(&rig(
@@ -210,13 +216,42 @@ mod tests {
                 PeerRelation::CantTell {
                     reason: CantTellReason::NotSteady {
                         low: 0.42,
-                        high: 3.13
+                        high: 3.13,
+                        line: None
                     }
                 },
                 Some(1.85)
             )),
             "from levels ketunkolo · CLOCKS: CAN'T TELL (figure not steady: +0.4 … +3.1 ppm) · \
-             +1.85 ppm over 60 s · marks for 5 min 12 s · 96 kHz, 3 inputs · link up"
+             ketunkolo runs +1.85 ppm against this rig over 60 s · marks for 5 min 12 s · 96 \
+             kHz, 3 inputs · link up"
+        );
+        assert_eq!(
+            one(&rig(
+                up.clone(),
+                PeerRelation::CantTell {
+                    reason: CantTellReason::NotSteady {
+                        low: 0.42,
+                        high: 4.0,
+                        line: Some(RigId(2))
+                    }
+                },
+                Some(0.21)
+            )),
+            "from levels ketunkolo · CLOCKS: CAN'T TELL (ketunkolo's interface against its \
+             system clock not steady: +0.4 … +4.0 ppm) · ketunkolo runs +0.21 ppm against this \
+             rig over 60 s · marks for 5 min 12 s · 96 kHz, 3 inputs · link up"
+        );
+        assert_eq!(
+            one(&rig(
+                up.clone(),
+                PeerRelation::CantTell {
+                    reason: CantTellReason::MarksKeepBreaking
+                },
+                None
+            )),
+            "from levels ketunkolo · CLOCKS: CAN'T TELL (ketunkolo's timing keeps breaking off \
+             before a minute is in) · 96 kHz, 3 inputs · link up"
         );
         assert_eq!(
             one(&rig(

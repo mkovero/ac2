@@ -734,7 +734,17 @@ fn judged(
             CantTellReason::NoSession { rig } => between_rigs::no_session(name(*rig)),
             CantTellReason::LinkDown => between_rigs::link_down(other.name),
             CantTellReason::MarksLate { by: late } => between_rigs::marks_late(other.name, late.0),
-            CantTellReason::NotSteady { low, high } => between_rigs::not_steady(*low, *high),
+            CantTellReason::NotSteady {
+                low,
+                high,
+                line: None,
+            } => between_rigs::not_steady(*low, *high),
+            CantTellReason::NotSteady {
+                low,
+                high,
+                line: Some(rig),
+            } => between_rigs::line_not_steady(name(*rig), *low, *high),
+            CantTellReason::MarksKeepBreaking => between_rigs::marks_keep_breaking(other.name),
             CantTellReason::SystemClockUnsynced { rig } => {
                 format!("{}'s system clock is not synced", name(*rig))
             }

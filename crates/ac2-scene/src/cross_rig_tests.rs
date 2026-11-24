@@ -266,7 +266,7 @@ fn running_without_agreement_does_not_say_the_clocks_agree() {
     assert_eq!(caption(&x, &r), None);
     assert_eq!(
         status_lines(&x, &r, "X")[0],
-        "CLOCKS NOT LOCKED +5.6 ppm over 40 s · ketunkolo"
+        "CLOCKS NOT LOCKED: ketunkolo runs +5.6 ppm against this rig over 40 s · ketunkolo"
     );
     let r = remote(PeerRelation::Measuring);
     assert_eq!(caption(&x, &r), None);

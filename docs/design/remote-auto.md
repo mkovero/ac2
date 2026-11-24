@@ -332,23 +332,39 @@ session opens; with streams on demand that minute would come at every start.
   cross-rig figure and on each rig's own line alike. A slew only ever makes a locked pair
   look apart, so the two verdicts are held unequally. Minutes are measured minutes: a hole
   of a few seconds drops the minute open across it, one of over a minute starts the count
-  again. *Agree* once a whole minute closes within the rule with no count running and the
-  judge agreeing at the close, never beside a shown figure beyond the rule; a minute
-  closing outside it starts a count, *measuring* with the count (*beyond 2 ppm for 4 of the
-  10 min a verdict needs*) while it runs; *not locked* (the cross-rig rate or either rig's
-  own line, each minute classed by the judge's reading at its close) only once ten
-  consecutive measured minutes are counted all beyond the rule, one side and one sign. Ten
-  counted and not of one mind is *can't tell (figure not steady: +0.4 … +3.1 ppm)*, the
-  spread of the cross-rig figure alone, never *measuring* for ever. Two consecutive minutes
-  below 1.8 ppm end a count (a margin, so a figure sitting at the rule does not flip in and
-  out), and so do ten all within the rule. A minute too thin to fit, or anything the judge
-  cannot tell (an unsynced system clock, marks late or in the future, another nominal
-  rate), clears it and the minute open then, which spans the disturbance. Evidence that
-  only stops (no link, no marks, a hole of a few seconds) keeps the count, and agreement
-  waits for a minute closing after it. The figure shown is the closed minute's own, none
-  before the first; between closes it follows the live one only when that is more than 1
-  ppm away. The hold is one function of its state and each report (`Hold::step`), tested
-  state by input. Ten minutes: one chrony correction would have to move the clock 1.2 ms or
+  again. Each closed minute keeps two facts: its cross-rig figure, and the worst own line
+  either rig stated over it (the rig and its value), so an own line beyond the rule between
+  closes is not lost by being back within at the close. A minute is beyond when either is
+  over 2 ppm, settled when both are below 1.8. *Agree* once a whole minute closes within
+  the rule with no count running and the judge agreeing at the close, never beside a shown
+  figure beyond the rule; between closes, after anything took it away, once the judge
+  agrees three reports running. A minute closing beyond starts a count, *measuring* with
+  the count (*beyond 2 ppm for 4 of the 10 min a verdict needs*) while it runs. At ten
+  counted: all ten cross figures beyond, one sign, is *not locked* by the cross-rig rate;
+  else all ten own lines beyond, one rig and one sign, *not locked* by that rig's own line;
+  else all ten beyond on one line or the other, each line keeping its sign (a free
+  interface whose own line reads about the cross-rig rate, either side of the rule in
+  turn), *not locked* by the newest minute's reason; else *can't tell (figure not steady:
+  +0.4 … +3.1 ppm)*, the spread of the ten cross figures, never *measuring* for ever. When
+  the ten cross figures are all within and only an own line came and went, the spread is
+  that line's: *can't tell (ketunkolo's interface against its system clock not steady: +0.4
+  … +4.0 ppm)*. Two consecutive settled minutes end a count (a margin, so a figure sitting
+  at the rule does not flip in and out), and so do ten all within the rule; until then the
+  count shows, so a minute beyond among ten within reads *not steady* for the minute before
+  the count ends. Counts that keep starting are a clock that wanders: three started within
+  30 min read *not steady* with their spread in place of *agree*, until 30 min pass with
+  none started. A minute too thin to fit, or a jump of more than one in the closed minutes
+  (more closed between two reports than one), breaks the run and clears the count. Anything
+  the judge cannot tell (an unsynced system clock, marks late or in the future, another
+  nominal rate) clears it too, and the minute open then, which spans the disturbance, is
+  dropped at its close. Evidence that only stops (no link, no marks, a hole of a few
+  seconds) keeps the count, and both *agree* and *not locked* wait for a minute closing
+  after it; a hole drops the figure shown with the open minute. Holes that keep any minute
+  from closing for 5 min read *can't tell (ketunkolo's timing keeps breaking off before a
+  minute is in)*. The figure shown is the closed minute's own, none before the first;
+  between closes it follows the live one only when that is more than 1 ppm away. A link
+  respawned starts the hold again. The hold is one function of its state and each report
+  (`Hold::step`), tested state by input. Ten minutes: one chrony correction would have to move the clock 1.2 ms or
   more at an update interval of 256 s or longer to read past 2 ppm that long.
 - **Late marks:** marks older than the link offset in force (else the longest a link may
   run, 0.5 s) for 3 s running are *can't tell (… levels arrive N ms late: the network, or

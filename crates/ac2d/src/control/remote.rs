@@ -245,6 +245,9 @@ impl Control {
                 Arc::clone(&self.remote.local_clock),
             ) {
                 Ok(h) => {
+                    // A new link's feed counts its minutes from scratch; the hold over the
+                    // old one's must not carry over.
+                    self.remote.standing_watches.remove(&p.rig);
                     self.remote
                         .link_state
                         .insert(p.rig, (RemoteLink::Connecting, 0.0, 0));

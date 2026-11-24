@@ -245,7 +245,7 @@ fn cross_rate(r: &PeerRelation) -> bool {
 fn not_steady(r: &PeerRelation) -> Option<(f64, f64)> {
     match r {
         PeerRelation::CantTell {
-            reason: CantTellReason::NotSteady { low, high },
+            reason: CantTellReason::NotSteady { low, high, .. },
         } => Some((*low, *high)),
         _ => None,
     }
@@ -386,13 +386,13 @@ fn a_rigs_own_line_beyond_the_rule_waits_its_ten_minutes() {
 
 #[test]
 fn an_own_line_that_comes_back_is_not_held_into_a_tenth_minute() {
-    // Its own line 4 ppm off for nine minutes, then back: the watch holds it a minute
-    // more, but the minutes count it as the judge reads it.
+    // Its own line 4 ppm off through nine minutes, back before the tenth opens: that one
+    // counts within.
     let mut r = Rigs::new(0.0);
     r.own_ppm = 4.0;
-    r.run(0.0, held_at() - 50.0);
+    r.run(0.0, held_at() - 70.0);
     r.own_ppm = 0.0;
-    r.run_checking(held_at() - 50.0, held_at() + 200.0, |t, _, shown| {
+    r.run_checking(held_at() - 70.0, held_at() + 200.0, |t, _, shown| {
         assert!(
             !matches!(shown.relation, PeerRelation::NotLocked { .. }),
             "{t} s: {shown:?}"
