@@ -203,7 +203,8 @@ async fn slow_calibration_mic_curve_and_matching_end_to_end() {
     .await
     .unwrap();
     fire(&lease, Signal::Pink).await;
-    let col = 399; // k = 159: 1000·2^(159/48) ≈ 9.9 kHz
+    // Inside the curve's +6 dB shelf (8 kHz up).
+    let col = crate::common::tf_column(10_000.0);
     // The RTA averages exponentially (1 s): let the 10 kHz tone decay out of it.
     tokio::time::sleep(Duration::from_millis(5000)).await;
     let off = wait(&c, 2, Stream::Tf, "tf off", |d| {

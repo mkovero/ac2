@@ -94,11 +94,11 @@ fn backend() -> FakeBackend {
 }
 
 fn index(f: f64) -> usize {
-    (240.0 + 48.0 * (f / 1000.0).log2()).round() as usize
+    tf_column(f)
 }
 
 fn freq(i: usize) -> f64 {
-    1000.0 * 2f64.powf((i as f64 - 336.0) / 48.0)
+    tf_freq(i)
 }
 
 fn peaking(gain: f64) -> EqSection {

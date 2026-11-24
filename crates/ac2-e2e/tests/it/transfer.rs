@@ -350,8 +350,10 @@ fn delay_nudges_from_the_keys_keep_the_curve() -> R {
     Ok(())
 }
 
-/// The transfer pane as drawn: each curve's wrapped phase at column `col`, and its legend.
-fn drawn_phase(s: &AppState, col: usize) -> Vec<(ac2_scene::trace::TraceKey, f64, String)> {
+/// The transfer pane as drawn: each curve's wrapped phase at its column nearest `f` Hz, and
+/// its legend. Curves sit on different grids (a sweep run's is not the live transfer grid),
+/// so the column is looked up per curve by frequency.
+fn drawn_phase(s: &AppState, f: f64) -> Vec<(ac2_scene::trace::TraceKey, f64, String)> {
     let now = ac2_ui::scenes::Now {
         instant: Instant::now(),
         wall: ac2_proto::units::WallNs(0),
@@ -372,6 +374,12 @@ fn drawn_phase(s: &AppState, col: usize) -> Vec<(ac2_scene::trace::TraceKey, f64
                 .iter()
                 .find(|l| l.key == t.key)
                 .map_or(String::new(), |l| l.text.clone());
+            let col = t
+                .freqs
+                .iter()
+                .enumerate()
+                .min_by(|a, b| (a.1 / f).log2().abs().total_cmp(&(b.1 / f).log2().abs()))
+                .map_or(0, |(i, _)| i);
             (t.key, t.phase_wrapped_deg[col], legend)
         })
         .collect()
@@ -474,7 +482,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     d.until("the capture's data", |s| s.rig.traces.contains_key(&cap))?;
     d.until("the run's data", |s| s.rig.traces.contains_key(&run))?;
     let live = TraceKey::Live(m.id);
-    let before = drawn_phase(&d.st, 336);
+    let before = drawn_phase(&d.st, 1000.0);
     let live_before = drawn_curve(&d.st, live);
     let legend = |v: &[(TraceKey, f64, String)], k| {
         v.iter()
@@ -506,7 +514,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
             })
         })
     })?;
-    let after = drawn_phase(&d.st, 336);
+    let after = drawn_phase(&d.st, 1000.0);
     let live_after = drawn_curve(&d.st, live);
     let wrap = |x: f64| (x + 180.0).rem_euclid(360.0) - 180.0;
     // Ten samples later the curve leads by 360°·f·10/fs at every frequency (75° at 1 kHz).
@@ -544,7 +552,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
     d.until("the second capture's data", |s| {
         s.rig.traces.contains_key(&cap2.id)
     })?;
-    let with2 = drawn_phase(&d.st, 336);
+    let with2 = drawn_phase(&d.st, 1000.0);
     let off = wrap(phase_of(&with2, TraceKey::Stored(cap2.id)) - phase_of(&with2, live));
     assert!(
         off.abs() < 3.0,
@@ -558,7 +566,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
         d.send(Msg::Command(CommandId::NextTrace));
     }
     assert_eq!(d.st.rig.selected_trace, Some(cap));
-    let pre = drawn_phase(&d.st, 336);
+    let pre = drawn_phase(&d.st, 1000.0);
     let n0 =
         d.st.daemon()
             .and_then(|x| x.traces.iter().find(|t| t.id == cap))
@@ -572,7 +580,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
                 .any(|t| t.id == cap && t.edit.delay_nudge.0 > n0 + 0.000_05)
         })
     })?;
-    let post = drawn_phase(&d.st, 336);
+    let post = drawn_phase(&d.st, 1000.0);
     let nudged =
         wrap(phase_of(&post, TraceKey::Stored(cap)) - phase_of(&pre, TraceKey::Stored(cap)));
     // Ctrl+. made the live curve lead (checked above); `.` must turn the capture the same way.
@@ -627,7 +635,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
         "V moved no pane"
     );
     d.send(Msg::Command(CommandId::PhaseReference));
-    let pre = drawn_phase(&d.st, 336);
+    let pre = drawn_phase(&d.st, 1000.0);
     let live_pre = drawn_curve(&d.st, live);
     assert!(
         legend(&pre, TraceKey::Stored(run)).contains("· ref"),
@@ -644,7 +652,7 @@ fn slow_a_measurement_delay_step_moves_only_its_live_curve() -> R {
             })
         })
     })?;
-    let post = drawn_phase(&d.st, 336);
+    let post = drawn_phase(&d.st, 1000.0);
     let live_post = drawn_curve(&d.st, live);
     let off = rotation_residual(&live_pre, &live_post, -10.0, rate);
     assert!(
@@ -723,7 +731,7 @@ fn a_typed_delay_moves_only_its_live_curve() -> R {
     let d0 = delay(&d.st).ok_or("delay")?;
     let arrival = d0.applied_samples - d0.nudged_samples;
     let rate = f64::from(d.st.open_session().ok_or("session")?.sample_rate_hz);
-    let before = drawn_phase(&d.st, 336);
+    let before = drawn_phase(&d.st, 1000.0);
     let live_before = drawn_curve(&d.st, live);
 
     let want = d0.applied_samples + 10.0;
@@ -759,7 +767,7 @@ fn a_typed_delay_moves_only_its_live_curve() -> R {
         (st.nudged_samples - (d0.nudged_samples + 10.0)).abs() < 1e-6,
         "{st:?}"
     );
-    let after = drawn_phase(&d.st, 336);
+    let after = drawn_phase(&d.st, 1000.0);
     let live_after = drawn_curve(&d.st, live);
     // Ten samples later the curve leads by 360°·f·10/fs, as ten Ctrl+. steps make it.
     let off = rotation_residual(&live_before, &live_after, 10.0, rate);
@@ -793,7 +801,7 @@ fn a_typed_delay_moves_only_its_live_curve() -> R {
         (stepped.applied_samples - stepped.nudged_samples - arrival).abs() < 1e-6,
         "the arrival moved: {arrival} → {stepped:?}"
     );
-    let after_dot = drawn_phase(&d.st, 336);
+    let after_dot = drawn_phase(&d.st, 1000.0);
     let live_dot = drawn_curve(&d.st, live);
     let off = rotation_residual(&live_after, &live_dot, step, rate);
     assert!(

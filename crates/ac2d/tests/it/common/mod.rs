@@ -229,6 +229,29 @@ pub fn transfer(name: &str) -> MeasConfig {
     }
 }
 
+/// The column grid of a [`transfer`] measurement.
+pub fn transfer_grid() -> ac2_proto::model::LogGridSpec {
+    let MeasKind::Transfer { config } = transfer("").kind else {
+        unreachable!("transfer() builds a transfer measurement")
+    };
+    config.grid()
+}
+
+/// The column of [`transfer_grid`] whose centre is nearest `f` Hz.
+pub fn tf_column(f: f64) -> usize {
+    let g = transfer_grid();
+    let k = (f64::from(g.ppo) * (f / 1000.0).log2()).round() as i32;
+    assert!((g.k_min..=g.k_max).contains(&k), "{f} Hz is off the grid");
+    usize::try_from(k - g.k_min).unwrap()
+}
+
+/// Centre frequency of column `i` of [`transfer_grid`], Hz.
+pub fn tf_freq(i: usize) -> f64 {
+    let g = transfer_grid();
+    let k = g.k_min + i32::try_from(i).unwrap();
+    1000.0 * (f64::from(k) / f64::from(g.ppo)).exp2()
+}
+
 pub fn spl(name: &str, input: u16) -> MeasConfig {
     MeasConfig {
         scope: ac2_proto::model::MeasScope::Session,
