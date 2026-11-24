@@ -470,7 +470,7 @@ network mode.
 |---|---|---|
 | `session.devices`, `.preview`, `.preview_stop`, `.control_panel`, `.detect_loopback`, `.open`, `.close`, `.status`, `.inputs`, `.outputs`, `.replay` | `stream.*` (same suffixes) | proto, ac2d, client, cli, ui, e2e, tools/protocol |
 | `State.session`, event kind `session`, `Session`, `SessionConfig`, `SessionEpoch`, `session_epoch` (header, welcome, snapshot) | `State.stream`, `stream`, `Stream`, `StreamConfig`, `StreamEpoch`, `stream_epoch` | same + traces (sidecar) |
-| `StandingSession`, `StandingRig.session`, `CantTellReason::NoSession` (`no_session`) | `StandingStream`, `StandingRig.stream`, `NoStream` (`no_stream`) | proto, ac2d, scene, ui, cli |
+| `StandingSession`, `StandingRig.session`, `CantTellReason::NoSession` (`no_session`), `SourceSession`, `SourceState.session`, `RemoteAudio::NoSession` (`RemoteInputStatus.audio` `no_session`) | `StandingStream`, `StandingRig.stream`, `NoStream` (`no_stream`), `SourceStream`, `SourceState.stream`, `RemoteAudio::NoStream` (`no_stream`): one thing, one name | proto, ac2d, scene, ui, cli |
 | frame kinds `session_levels`, `session_gonio`; topics `session/levels`, `session/gonio`, `session/preview`, prefix `session/` | `stream_levels`, `stream_gonio`; `stream/levels`, `stream/gonio`, `preview/levels`, `stream/` | proto, ac2d, client, ui, plot |
 | `Result` as `{"Ok"}` / `{"Err"}`; `CtrlError::MissingVersion` text | `{"ok"}` / `{"err"}` (snake_case); `missing_version` | proto, tools/protocol |
 | tag keys `kind` (`InputKind`, `Surface`), `state` (`Recovery`), `shape` (`TargetCurve`), `status` (`BandTransferBand`) | `type` | proto, traces, ac2d (calstore, plans), ui |
@@ -481,6 +481,7 @@ network mode.
 | `rig.monitor_start {base, on}` | `rig.monitor_at_start {base, on}` | proto, ac2d, cli, ui |
 | `sample_rate: Hz` / `u32` (sweep info, `ir` meta, dynamics, trace, sidecar), `BinsMeta.rate` | `sample_rate_hz` | proto, traces, ac2d, ui, scene |
 | `AlignBand.lo/hi`, `FreqRange.lo/hi` | `lo_hz`, `hi_hz` | proto, core conv, ui, scene |
+| `NotLockedReason::OtherRate {theirs, ours}` | `{theirs_hz, ours_hz}` | proto, ac2d, scene |
 | `sim` event setting `State.sim_map` | event kind `sim_map: Option<SimState>` | proto, ac2d, client |
 | delta header `…, crc, meta` | `…, config_rev, config_applied_at, …, meta, crc` (§6) | proto |
 | `RigPeer.data` | dropped; data endpoint is ctrl port + 1 | proto, ac2d, rig.json |
@@ -545,10 +546,11 @@ changes it again does so under the same number and extends the converter. Nothin
 until the last has landed.
 
 1. `pn-stream`: `session.*` to `stream.*` alone (largest diff, no logic), with the standing
-   names (`StandingSession`, `NoSession`); `jobs/meters.rs` builds both the `stream_levels`
+   names (`StandingSession`, `NoSession`, `SourceSession`); `jobs/meters.rs` builds both the `stream_levels`
    and the `source_levels` meta.
 2. `pn-names`: the pure renames of §9 (tag keys, `colour`, `channel`, `rig_id`, `auth.*`,
-   `rig.monitor_at_start`, unit suffixes, snake_case `Result`). `TransferResolution` is
+   `rig.monitor_at_start`, unit suffixes with `OtherRate`'s `theirs_hz` / `ours_hz`,
+   snake_case `Result`). `TransferResolution` is
    already tagged `type`, and the `sample_rate_hz` of `SourceLevelsMeta` and the standing
    entries already carry the suffix; `BinsMeta.rate` joins the sample-rate renames.
 3. `pn-shapes`: the §9 rows that change a shape but not frames or files: `sim_map`, dynamics
