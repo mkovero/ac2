@@ -220,9 +220,11 @@ pub fn cant_tell(rig: &str, h: &Halves) -> String {
     )
 }
 
-/// A *Paired rigs* row's hover: each half in words, then what the keys do there.
-/// `reachable`: the app is connected to both rigs, so Enter can pair the missing halves.
-pub fn tip(rig: &str, h: &Halves, reachable: bool) -> String {
+/// A *Paired rigs* row's hover: each half in words, then the clocks as this rig's daemon
+/// hears them in `rig`'s levels (`clocks`: [`crate::standing::evidence_line`], `None` when it
+/// lists no standing relation with it), then what the keys do there. `reachable`: the app
+/// is connected to both rigs, so Enter can pair the missing halves.
+pub fn tip(rig: &str, h: &Halves, clocks: Option<&str>, reachable: bool) -> String {
     let line = |half: &Half, yes: String, no: String, what: String| match half {
         Half::Yes => yes,
         Half::No => no,
@@ -261,6 +263,7 @@ pub fn tip(rig: &str, h: &Halves, reachable: bool) -> String {
             format!("this rig has admitted {rig}"),
         ),
     ];
+    lines.extend(clocks.map(str::to_owned));
     lines.push(if h.both_ways() {
         "Delete twice unpairs both ways".into()
     } else if h.missing() && reachable {
@@ -479,23 +482,31 @@ mod tests {
         use Half::*;
         let all = halves(Yes, Yes, Yes, Yes);
         assert_eq!(row("ketunkolo", &all), "ketunkolo · paired both ways");
-        assert!(tip("ketunkolo", &all, true).ends_with("Delete twice unpairs both ways"));
+        assert!(tip("ketunkolo", &all, None, true).ends_with("Delete twice unpairs both ways"));
         let one = halves(Yes, No, Yes, Yes);
         assert_eq!(
             row("ketunkolo", &one),
             "ketunkolo · has not admitted this rig"
         );
         assert!(
-            tip("ketunkolo", &one, true).contains("  ketunkolo has not admitted this rig"),
+            tip("ketunkolo", &one, None, true).contains("  ketunkolo has not admitted this rig"),
             "{}",
-            tip("ketunkolo", &one, true)
+            tip("ketunkolo", &one, None, true)
         );
         // Enter is promised only where it can pair the missing halves.
         assert!(
-            tip("ketunkolo", &one, true)
+            tip("ketunkolo", &one, None, true)
                 .ends_with("Enter pairs the missing halves · Delete twice unpairs")
         );
-        assert!(tip("ketunkolo", &one, false).ends_with("\nDelete twice unpairs"));
+        assert!(tip("ketunkolo", &one, None, false).ends_with("\nDelete twice unpairs"));
+        // The clocks the levels show read between the halves and the keys.
+        let clocks = "clocks agree · +0.12 ppm over 60 s · marks for 5 min 12 s · measured \
+                      from the rigs' level frames, no audio streamed";
+        assert!(
+            tip("ketunkolo", &all, Some(clocks), true).ends_with(&format!(
+                "  this rig has admitted ketunkolo\n{clocks}\nDelete twice unpairs both ways"
+            ))
+        );
         let two = halves(No, Yes, Yes, No);
         assert_eq!(
             row("ketunkolo", &two),
@@ -518,7 +529,7 @@ mod tests {
         };
         let h = halves(Yes, there, there, Yes);
         assert_eq!(row("ketunkolo", &h), "ketunkolo · its side: can't tell");
-        let t = tip("ketunkolo", &h, false);
+        let t = tip("ketunkolo", &h, None, false);
         assert!(t.ends_with("\nDelete twice unpairs"), "{t}");
         assert!(
             t.contains(
@@ -546,7 +557,7 @@ mod tests {
         };
         let h = halves(Yes, Yes, Yes, here);
         assert_eq!(row("ketunkolo", &h), "ketunkolo · can't tell");
-        let t = tip("ketunkolo", &h, true);
+        let t = tip("ketunkolo", &h, None, true);
         assert!(t.ends_with("\nDelete twice unpairs"), "{t}");
         assert!(
             t.contains(
@@ -594,7 +605,7 @@ mod tests {
             row("ketunkolo", &halves(key, unseen, unseen, unseen)),
             "ketunkolo · listed by this rig · its side: can't tell"
         );
-        let t = tip("ketunkolo", &h, false);
+        let t = tip("ketunkolo", &h, None, false);
         assert!(
             t.contains(
                 "  this rig lists ketunkolo as paired (can't check its key: the app does not \

@@ -899,3 +899,4 @@ mod rig_pairing;
 mod rig_reach;
 mod rig_remote;
 mod rig_screens;
+mod rig_standing;

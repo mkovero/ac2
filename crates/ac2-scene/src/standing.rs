@@ -17,8 +17,54 @@ pub fn status_lines(r: &RemoteState, now: WallNs) -> Vec<String> {
 }
 
 fn line(r: &RemoteState, s: &StandingRig, now: WallNs) -> String {
-    let rel = relation_text(r, &s.name, &s.clock.relation);
-    let mut parts = vec![format!("from levels {}", s.name), rel];
+    let mut parts = vec![format!("from levels {}", s.name), evidence(r, s, now)];
+    if s.link == RemoteLink::Up {
+        parts.push(match &s.session {
+            Some(x) => format!(
+                "{}, {} input{}",
+                rate_text(x.sample_rate_hz),
+                x.channels.len(),
+                if x.channels.len() == 1 { "" } else { "s" }
+            ),
+            None => "no session".into(),
+        });
+    }
+    // The relation already says the link is down; the link's own state says why.
+    let down = matches!(
+        s.clock.relation,
+        PeerRelation::CantTell {
+            reason: CantTellReason::LinkDown
+        }
+    );
+    parts.push(if down {
+        link_words(s)
+    } else {
+        format!("link {}", link_words(s))
+    });
+    parts.join(" · ")
+}
+
+/// What a standing relation rests on, where a reader could take it for the audio-fed one.
+pub const FROM_LEVELS: &str = "measured from the rigs' level frames, no audio streamed";
+
+/// What rig `s`'s levels say of the clocks, in `status_lines`' words without the rig, its
+/// session or its link: *clocks agree · +0.12 ppm over 60 s · marks for 5 min 12 s*.
+pub fn evidence(r: &RemoteState, s: &StandingRig, now: WallNs) -> String {
+    let mut parts = vec![relation_text(r, &s.name, &s.clock.relation)];
+    parts.extend(details(s, now));
+    parts.join(" · ")
+}
+
+/// [`evidence`] with what it is measured from: the line a hover adds beside the audio-fed
+/// relation or the pairing.
+pub fn evidence_line(r: &RemoteState, s: &StandingRig, now: WallNs) -> String {
+    format!("{} · {FROM_LEVELS}", evidence(r, s, now))
+}
+
+/// What backs rig `s`'s verdict, each a part of its own: the figure (a not-locked verdict
+/// states its own), the count toward a not-locked verdict, how long marks have come.
+pub fn details(s: &StandingRig, now: WallNs) -> Vec<String> {
+    let mut parts = Vec::new();
     // A verdict that is not locked says its own figure; a second one beside it would be
     // another window's and could disagree.
     let verdict = matches!(s.clock.relation, PeerRelation::NotLocked { .. });
@@ -46,30 +92,7 @@ fn line(r: &RemoteState, s: &StandingRig, now: WallNs) -> String {
         let s = now.0.saturating_sub(since.0) / 1_000_000_000;
         parts.push(format!("marks for {}", whole_seconds(s)));
     }
-    if s.link == RemoteLink::Up {
-        parts.push(match &s.session {
-            Some(x) => format!(
-                "{}, {} input{}",
-                rate_text(x.sample_rate_hz),
-                x.channels.len(),
-                if x.channels.len() == 1 { "" } else { "s" }
-            ),
-            None => "no session".into(),
-        });
-    }
-    // The relation already says the link is down; the link's own state says why.
-    let down = matches!(
-        s.clock.relation,
-        PeerRelation::CantTell {
-            reason: CantTellReason::LinkDown
-        }
-    );
-    parts.push(if down {
-        link_words(s)
-    } else {
-        format!("link {}", link_words(s))
-    });
-    parts.join(" · ")
+    parts
 }
 
 /// A time in whole seconds: *12 s*, *5 min 12 s*, *2 h 05 min*.

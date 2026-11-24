@@ -29,12 +29,15 @@ pub fn rig_name(r: &RemoteState, i: &RemoteInput) -> String {
         .map_or_else(|| i.rig_name.clone(), |x| x.name.clone())
 }
 
+/// A relation with no verdict yet.
+pub const MEASURING: &str = "measuring clocks…";
+
 /// The relation with rig `other` in words: *clocks agree*, *CLOCKS NOT LOCKED +5.6 ppm*, …
 pub fn relation_text(r: &RemoteState, other: &str, rel: &PeerRelation) -> String {
     let ppm = |p: f64| format!("{} ppm", format::signed(p, 1));
     match rel {
         PeerRelation::Agree => "clocks agree".into(),
-        PeerRelation::Measuring => "measuring clocks…".into(),
+        PeerRelation::Measuring => MEASURING.into(),
         PeerRelation::NotLocked { reason } => match reason {
             NotLockedReason::CrossRate { ppm: p, over } => format!(
                 "CLOCKS NOT LOCKED {} over {} s",
@@ -166,20 +169,28 @@ pub fn relation_with_evidence(r: &RemoteState, other: &str, c: &PeerClock) -> St
 /// admitted this rig*, …
 pub fn link_text(r: &RemoteRig) -> String {
     match &r.link {
+        RemoteLink::Up => format!("up, {}", bit_rate(r.bytes_per_s)),
+        link => link_down_text(&r.name, link).unwrap_or_default(),
+    }
+}
+
+/// The link to rig `name` in [`link_text`]'s words when it is not up; `None` when it is.
+pub fn link_down_text(name: &str, link: &RemoteLink) -> Option<String> {
+    Some(match link {
+        RemoteLink::Up => return None,
         RemoteLink::NotPaired => "not paired: pair the rigs from the app".into(),
         RemoteLink::NoServerKey => {
             "this rig has no server key yet: turn its network on once".into()
         }
         RemoteLink::Connecting => "connecting".into(),
-        RemoteLink::Up => format!("up, {}", bit_rate(r.bytes_per_s)),
-        RemoteLink::NetworkOff => format!("{} turned its network off; not heard since", r.name),
+        RemoteLink::NetworkOff => format!("{name} turned its network off; not heard since"),
         RemoteLink::Unreachable { .. } => "unreachable".into(),
-        RemoteLink::NotAdmitted => format!("{} has not admitted this rig", r.name),
+        RemoteLink::NotAdmitted => format!("{name} has not admitted this rig"),
         RemoteLink::KeyChanged => {
-            format!("{}'s key changed: pair the rigs again from the app", r.name)
+            format!("{name}'s key changed: pair the rigs again from the app")
         }
         RemoteLink::OtherRig { found } => format!("another rig answers there ({found})"),
-    }
+    })
 }
 
 /// Audio received, `3.1 Mbit/s`.

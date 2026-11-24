@@ -234,11 +234,25 @@ is never only a colour):
   line says the pairing (*paired · streaming*) and leaves the clocks to the tag, except for
   a warning, said first and in capitals: *CLOCKS NOT LOCKED +5.6 ppm · paired · streaming*,
   *CLOCKS: CAN'T TELL · paired · streaming*, *LINK OFFSET TOO SMALL · paired · streaming*.
-  A paired rig this app does not read has no tag, and its line says the relation in words
-  (*paired · streaming · clocks agree*, *paired · streaming · measuring clocks…*). With no
-  audio from it the line reads *no audio*; when the rates differ the two headings' rates say
-  it, and the tooltip *ketunkolo runs 48 kHz, this rig 96 kHz* (a remote input needs both
-  rigs at one rate).
+  A paired rig needs no remote input for its tag: paired daemons time-stamp the levels
+  they always send each other, and the rig shown's daemon judges the clocks from those
+  (`ac2 status`, *from levels*). About a minute after both sessions are open the tag reads
+  `AGREE`, or stays `UNKNOWN`; a not-locked verdict from levels needs ten minutes beyond
+  2 ppm, and until then `UNKNOWN`'s tooltip says *measuring clocks…* with the figure, how
+  many of the ten minutes have been beyond 2 ppm and how long the marks have come, or why it
+  can't tell (*no timing in ketunkolo's levels*, *figure not steady*, *no link to
+  ketunkolo*). A tooltip resting on the levels says *measured from the rigs' level frames,
+  no audio streamed*. Where a remote input from the rig is in use, its stream's verdict is
+  the tag, as it is what a cross-rig measurement rests on; if the levels would tag the rig
+  otherwise, the tooltip adds their line. A paired rig this app does not read takes its
+  rate from its levels too (*48 kHz UNKNOWN · paired · not connected*, *no session* when its
+  session is closed, the link's words when the link between the daemons is down); a
+  daemon that lists no levels relation leaves such a rig untagged, its line saying the
+  relation in words (*paired · streaming · clocks agree*, *paired · streaming · measuring
+  clocks…*). With no audio from it the line reads *no audio*; when the rates differ the two
+  headings' rates say it, and the tooltip *ketunkolo runs 48 kHz, this rig 96 kHz* (a
+  remote input needs both rigs at one rate). Settings › Connection's *Paired rigs* row
+  says the clocks from levels in its hover, in the same words.
 - **Top bar:** while a cross-rig transfer function is
   stopped, the bar's status line carries why and what to do (*Main L stopped: pupu and
   ketunkolo are not on one clock (+5.6 ppm). Lock both interfaces to one reference.*).

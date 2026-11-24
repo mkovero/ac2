@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 /// A rig's interface `ppm` fast against true time: its loop return on in 1, a room path to
 /// in 2. Each rig's own interface stays within the bound against its (simulated, synced)
 /// system clock; two of them, one fast and one slow, are further apart than either.
-fn device(ppm: f64) -> R<std::sync::Arc<dyn ac2_audio::Backend>> {
+pub(crate) fn device(ppm: f64) -> R<std::sync::Arc<dyn ac2_audio::Backend>> {
     use ac2_audio::fake::{FakeConfig, FakeDrive, FakePath, Pace};
     const LOOP: u32 = 32;
     let backend = ac2_audio::FakeBackend::new(FakeConfig {
@@ -32,7 +32,7 @@ fn device(ppm: f64) -> R<std::sync::Arc<dyn ac2_audio::Backend>> {
 
 /// A network-mode daemon named `name` on `device`, its system clock stated synced (a
 /// relation between rigs needs both clocks disciplined), `app` authorized, `keys` its own.
-fn rig(
+pub(crate) fn rig(
     dir: &std::path::Path,
     name: &str,
     device: std::sync::Arc<dyn ac2_audio::Backend>,
@@ -82,7 +82,7 @@ fn rig(
 
 /// The network ctrl and data endpoints of a daemon listening there.
 /// Once it listens: the network pair is bound beside the local one and may be on its way.
-fn net_endpoints(h: &ac2d::Handle) -> (String, String) {
+pub(crate) fn net_endpoints(h: &ac2d::Handle) -> (String, String) {
     let t0 = std::time::Instant::now();
     loop {
         match h.network_status() {
@@ -96,7 +96,7 @@ fn net_endpoints(h: &ac2d::Handle) -> (String, String) {
 }
 
 /// The app's settings for `h`: its endpoints and the CURVE keys.
-fn config(h: &ac2d::Handle, app: &KeyPair, name: &str) -> R<ClientConfig> {
+pub(crate) fn config(h: &ac2d::Handle, app: &KeyPair, name: &str) -> R<ClientConfig> {
     let mut c = ClientConfig::new(
         Endpoints {
             ctrl: net_endpoints(h).0,
@@ -111,7 +111,7 @@ fn config(h: &ac2d::Handle, app: &KeyPair, name: &str) -> R<ClientConfig> {
     Ok(c)
 }
 
-fn session(inputs: Vec<u16>, remote: Vec<RemoteInput>) -> SessionConfig {
+pub(crate) fn session(inputs: Vec<u16>, remote: Vec<RemoteInput>) -> SessionConfig {
     SessionConfig {
         backend: None,
         input_device: ac2_proto::model::DeviceSelector::Default,

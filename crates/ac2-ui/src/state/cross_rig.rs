@@ -14,10 +14,11 @@
 
 use super::*;
 use crate::state::panes::drag::RowDrop;
-use ac2_scene::clock_domain::{DomainTag, RigClockFacts, clock_domains};
+use ac2_proto::model::{RemoteLink, StandingRig};
+use ac2_scene::clock_domain::{DomainTag, Levels, RigClockFacts, clock_domains};
 use ac2_scene::meas_list::{Mark, TreeKey, TreeRow};
 use ac2_scene::rig_tree::{
-    Away, ClockTag, ClockVerdict, Pairing, RigAudio, RigRoot, rig_away_heading, rig_branch,
+    Away, ClockTag, ClockVerdict, Heard, Pairing, RigAudio, RigRoot, rig_away_heading, rig_branch,
 };
 
 /// A rig not shown, as its part of the measurement list was last read: its rows, and what
@@ -129,13 +130,32 @@ impl AppState {
         }
     }
 
+    /// The rig shown's daemon's standing relation with paired rig `id`: the clocks and the
+    /// session it hears in that rig's levels.
+    fn standing_with(shown: &RigState, id: RigId) -> Option<&StandingRig> {
+        shown.daemon()?.remote.standing.iter().find(|s| s.rig == id)
+    }
+
+    /// A paired rig's session as its levels have it, for a rig this app does not read; `None`
+    /// while the link between the daemons is down, when nothing is heard of it.
+    fn heard_audio(s: &StandingRig) -> Option<RigAudio> {
+        (s.link == RemoteLink::Up).then(|| {
+            s.session
+                .as_ref()
+                .map_or(RigAudio::NoSession, |x| RigAudio::Rate(x.sample_rate_hz))
+        })
+    }
+
     /// The clock domain of each rig listed, the rig shown first and then `paired` in order,
     /// judged together: a tag says which of the others a rig agrees with. A rig this app
-    /// does not read (not held, or its link down) is given no session: the app knows
-    /// neither its rate nor its clocks, so it gets no tag and no other rig is compared
-    /// with it.
+    /// does not read (not held, or its link down) has the session the rig shown's daemon
+    /// hears in its levels, else none: the app then knows neither its rate nor its clocks,
+    /// so it gets no tag and no other rig is compared with it.
     fn clock_tags(&self, shown: &RigState, paired: &[(RigId, String)]) -> Vec<DomainTag> {
         let unread = ac2_proto::model::Clocks::default();
+        // The marks' ages read against the rig shown's daemon's clock; another daemon's
+        // differs from it by the offset between the two, far under the seconds they show.
+        let now = crate::scenes::daemon_wall(self, super::sessions_impl::wall_now());
         let read = |id: RigId| {
             self.find_rig(id)
                 .filter(|r| matches!(r.conn, ConnState::Connected { .. }))
@@ -154,13 +174,23 @@ impl AppState {
                     rate_hz: s.session.open.as_ref().map(|o| o.sample_rate_hz),
                     clocks: &s.clocks,
                     between: &s.remote.rigs,
+                    levels: Some(Levels {
+                        remote: &s.remote,
+                        now,
+                    }),
                 },
                 None => RigClockFacts {
                     id: Some(id),
                     name,
-                    rate_hz: None,
+                    rate_hz: Self::standing_with(shown, id)
+                        .and_then(Self::heard_audio)
+                        .and_then(|a| match a {
+                            RigAudio::Rate(hz) => Some(hz),
+                            RigAudio::NoSession | RigAudio::NoAudio => None,
+                        }),
                     clocks: &unread,
                     between: &[],
+                    levels: None,
                 },
             })
             .collect();
@@ -228,8 +258,23 @@ impl AppState {
                 Some(_) => ClockVerdict::OnTag,
                 None => ClockVerdict::InWords,
             };
-            let pairing = remote.map_or(Pairing::Plain, |r| {
+            let standing = Self::standing_with(shown, id);
+            let pairing = match remote.map_or(Pairing::Plain, |r| {
                 ac2_scene::rig_tree::pairing_text(r, inputs, id, verdict)
+            }) {
+                // No input from it: the link the levels come over is what the pairing says.
+                Pairing::Plain => standing
+                    .and_then(|s| ac2_scene::between_rigs::link_down_text(&name, &s.link))
+                    .map_or(Pairing::Plain, Pairing::Said),
+                p => p,
+            };
+            let heard = standing.and_then(Self::heard_audio).map(|audio| Heard {
+                audio,
+                clock: clock
+                    .tag
+                    .as_deref()
+                    .zip(clock.tip.as_deref())
+                    .map(|(tag, tip)| ClockTag { tag, tip }),
             });
             let held = self.find_rig(id);
             let list = self.others.rig_lists.iter().find(|l| l.rig == id);
@@ -241,11 +286,14 @@ impl AppState {
                 ),
                 (Some(r), None) => {
                     let name = self.rig_label(r);
-                    v.push((id, rig_away_heading(id, &name, &pairing, Away::Unreachable)));
+                    v.push((
+                        id,
+                        rig_away_heading(id, &name, &pairing, Away::Unreachable, heard),
+                    ));
                 }
                 (None, _) => v.push((
                     id,
-                    rig_away_heading(id, &name, &pairing, Away::NotConnected),
+                    rig_away_heading(id, &name, &pairing, Away::NotConnected, heard),
                 )),
             }
         }

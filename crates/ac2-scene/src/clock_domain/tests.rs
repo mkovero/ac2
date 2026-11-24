@@ -44,6 +44,7 @@ fn rig<'a>(name: &'a str, rate_hz: u32, clocks: &'a Clocks) -> RigClockFacts<'a>
         rate_hz: Some(rate_hz),
         clocks,
         between: &[],
+        levels: None,
     }
 }
 

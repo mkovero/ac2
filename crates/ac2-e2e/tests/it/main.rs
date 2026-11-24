@@ -34,6 +34,7 @@ mod session;
 mod session_dialog;
 mod spatial;
 mod spl;
+mod standing;
 mod stimulus;
 mod sweep;
 mod traces;

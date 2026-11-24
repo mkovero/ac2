@@ -221,6 +221,7 @@ impl AppState {
         if !on_page || self.others.visiting.is_some() {
             return;
         }
+        let now = crate::scenes::daemon_wall(self, super::sessions_impl::wall_now());
         let rows: Vec<PairedRow> = self
             .paired_with_shown()
             .into_iter()
@@ -228,10 +229,14 @@ impl AppState {
                 let h = self.pair_halves(rig);
                 let unreached = self.unreached(rig);
                 let reachable = unreached.is_none() && connected(&self.rig);
+                let clocks = self.daemon().and_then(|st| {
+                    let s = st.remote.standing.iter().find(|s| s.rig == rig)?;
+                    Some(ac2_scene::standing::evidence_line(&st.remote, s, now))
+                });
                 PairedRow {
                     rig,
                     text: words::row(&name, &h),
-                    tip: words::tip(&name, &h, reachable),
+                    tip: words::tip(&name, &h, clocks.as_deref(), reachable),
                     halves: h,
                     unreached,
                     name,

@@ -235,16 +235,44 @@ pub enum Away {
     Unreachable,
 }
 
+/// What the rig shown's daemon hears of a paired rig in its levels
+/// (`State.remote.standing`) while the link between the two is up: its session, and the
+/// clock tag that rests on it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Heard<'a> {
+    /// Its session's rate, or [`RigAudio::NoSession`].
+    pub audio: RigAudio,
+    /// Its clock domain's tag; `None`: no tag.
+    pub clock: Option<ClockTag<'a>>,
+}
+
 /// The heading of rig `name`, paired with the rig shown (`pairing`: [`pairing_text`]) and
 /// not read by this app: the pairing is the rig shown's to report, the measurements are
-/// not, so none is listed and the heading has no fold.
-pub fn rig_away_heading(rig: RigId, name: &str, pairing: &Pairing, away: Away) -> TreeRow {
+/// not, so none is listed and the heading has no fold. `heard`: its rate and tag lead the
+/// line, as on a heading the app reads, and the narrowest line keeps them.
+pub fn rig_away_heading(
+    rig: RigId,
+    name: &str,
+    pairing: &Pairing,
+    away: Away,
+    heard: Option<Heard<'_>>,
+) -> TreeRow {
     let pairing = pairing.text();
-    let (details, why) = match away {
+    let lead = heard.map(|h| match h.clock {
+        Some(c) => format!("{} {}", h.audio.text(), c.tag),
+        None => h.audio.text(),
+    });
+    let line = |rest: &[&str]| {
+        let mut parts: Vec<&str> = lead.iter().map(String::as_str).collect();
+        parts.push(pairing);
+        parts.extend(rest);
+        parts.join(" · ")
+    };
+    let (mut details, why) = match away {
         Away::NotConnected => (
             vec![
-                format!("{pairing} · this app is not connected to it"),
-                format!("{pairing} · not connected"),
+                line(&["this app is not connected to it"]),
+                line(&["not connected"]),
             ],
             format!(
                 "this app is not connected to it, so its measurements are not listed: \
@@ -253,14 +281,18 @@ pub fn rig_away_heading(rig: RigId, name: &str, pairing: &Pairing, away: Away) -
             ),
         ),
         Away::Unreachable => (
-            vec![format!("{pairing} · {}", crate::chrome::RIG_UNREACHABLE)],
+            vec![line(&[crate::chrome::RIG_UNREACHABLE])],
             format!(
                 "{} from this app, so its measurements are not listed",
                 crate::chrome::RIG_UNREACHABLE
             ),
         ),
     };
-    let describe = format!("{name}: another rig, {pairing}; {why}");
+    details.extend(lead.clone());
+    let mut describe = format!("{name}: another rig, {pairing}; {why}");
+    if let Some(c) = heard.and_then(|h| h.clock) {
+        describe.push_str(&format!("\nclock {}: {}", c.tag, c.tip));
+    }
     heading_row(TreeKey::RigName(rig), name, details, describe)
 }
 
@@ -594,6 +626,7 @@ mod tests {
             "cm4",
             &Pairing::Said("connecting".into()),
             Away::NotConnected,
+            None,
         );
         assert_eq!((h.name.as_str(), h.collapsed), ("cm4", None));
         assert_eq!(
@@ -608,12 +641,76 @@ mod tests {
             "cm4: another rig, connecting; this app is not connected to it, so its \
              measurements are not listed: Connect a rig… in the rig drop-down adds it"
         );
-        let h = rig_away_heading(RigId(2), "cm4", &Pairing::Plain, Away::Unreachable);
+        let h = rig_away_heading(RigId(2), "cm4", &Pairing::Plain, Away::Unreachable, None);
         assert_eq!(h.details, ["paired · unreachable · retrying"]);
         assert_eq!(
             h.describe,
             "cm4: another rig, paired; unreachable · retrying from this app, so its \
              measurements are not listed"
+        );
+    }
+
+    /// A paired rig the app does not read leads with what the rig shown's daemon hears in
+    /// its levels: the rate and tag, which the narrowest line keeps.
+    #[test]
+    fn a_paired_rig_not_read_says_its_rate_and_tag_from_its_levels() {
+        let unknown = ClockTag {
+            tag: "UNKNOWN",
+            tip: "can't tell: measuring clocks… · measured from the rigs' level frames, no \
+                  audio streamed",
+        };
+        let heard = Heard {
+            audio: RigAudio::Rate(96_000),
+            clock: Some(unknown),
+        };
+        let h = rig_away_heading(
+            RigId(2),
+            "ketunkolo",
+            &Pairing::Plain,
+            Away::NotConnected,
+            Some(heard),
+        );
+        assert_eq!(
+            h.details,
+            [
+                "96 kHz UNKNOWN · paired · this app is not connected to it",
+                "96 kHz UNKNOWN · paired · not connected",
+                "96 kHz UNKNOWN",
+            ]
+        );
+        assert!(h.describe.ends_with(
+            "\nclock UNKNOWN: can't tell: measuring clocks… · measured from the rigs' level \
+             frames, no audio streamed"
+        ));
+        let idle = Heard {
+            audio: RigAudio::NoSession,
+            clock: None,
+        };
+        let h = rig_away_heading(
+            RigId(2),
+            "ketunkolo",
+            &Pairing::Plain,
+            Away::Unreachable,
+            Some(idle),
+        );
+        assert_eq!(
+            h.details,
+            ["no session · paired · unreachable · retrying", "no session"]
+        );
+        // The link between the daemons down: its words, nothing heard.
+        let h = rig_away_heading(
+            RigId(2),
+            "ketunkolo",
+            &Pairing::Said("unreachable".into()),
+            Away::NotConnected,
+            None,
+        );
+        assert_eq!(
+            h.details,
+            [
+                "unreachable · this app is not connected to it",
+                "unreachable · not connected"
+            ]
         );
     }
 }
