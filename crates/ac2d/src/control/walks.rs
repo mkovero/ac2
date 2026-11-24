@@ -696,7 +696,6 @@ pub(super) fn check_walk_items(
             ))));
         }
         walk_steps::check(w).map_err(item)?;
-        check_walk_name(&w.name).map_err(item)?;
         let specs: Vec<WalkPointSpec> = w
             .points
             .iter()

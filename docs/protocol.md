@@ -681,7 +681,8 @@ RtaConfig      { input: u16, fraction: BandFraction, f_lo: Hz, f_hi: Hz,
 
 `MeasConfig` = {`name`, `kind`, `scope`: `MeasScope`}. `name` follows the rule of every name
 an operator gives (`meas.create`, `meas.update`, a trace's `TraceEdit.name`, a walk's
-`name`): not blank, at most 128 characters (a walk's 64), else `invalid`. `scope` is
+`name`): not blank, at most 128 characters (a walk's 64), else `invalid`. A name a session
+file or the rig settings keep is not held to it on load; it is checked when renamed. `scope` is
 `session` (the working session's: saved in session files, replaced by a load) or `rig`
 (the rig's, SPL meters only: kept with the daemon's rig settings, never in a session file; a load, a new session, a salvage
 or the autosave restore leaves it running with its log, Leq history and judgements, and a

@@ -18,7 +18,8 @@ use crate::route::Peer;
 use crate::util::{internal, invalid, missing, perr_detail, refused};
 
 use super::validate::{
-    display_only, not_a_sweep, smoothing_only, spl_in_place, stale_meas, validate_meas,
+    check_meas_name, display_only, not_a_sweep, smoothing_only, spl_in_place, stale_meas,
+    validate_meas,
 };
 use super::{Control, DelaySource, cal, owners};
 
@@ -436,6 +437,7 @@ impl Control {
 
     /// `meas.create`: the new measurement, stopped.
     pub(super) fn meas_create(&mut self, config: MeasConfig) -> Result<Measurement, ProtoError> {
+        check_meas_name(&config)?;
         validate_meas(&config)?;
         super::maths::new_average_has_two(&config.kind)?;
         self.spl_needs_mic(&config)?;
@@ -476,6 +478,7 @@ impl Control {
         base: Rev,
         config: MeasConfig,
     ) -> Result<ReplyBody, ProtoError> {
+        check_meas_name(&config)?;
         validate_meas(&config)?;
         self.spl_needs_mic(&config)?;
         let mut m = self.meas(meas)?.clone();

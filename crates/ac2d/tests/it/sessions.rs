@@ -861,3 +861,40 @@ fn a_session_with_crafted_logs_or_trace_data_refuses_to_load() {
     assert_eq!(m.len(), 2);
     h.shutdown();
 }
+
+/// The name rule holds for names an operator gives, not for what a session file keeps: a
+/// session whose measurement has a blank name loads, and the name is checked again only
+/// when the measurement is renamed.
+#[test]
+fn a_stored_measurement_name_outside_the_rule_still_loads() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = start("stored-name", dir.path(), false);
+    let (mut c, _sub) = connect(&h, &[]);
+    let c = &mut c;
+    c.ok(Command::MeasCreate {
+        config: transfer("Unnamed-later"),
+    });
+    save(c, "kept", false).unwrap();
+    let sdir = dir.path().join("sessions/kept");
+    let m = std::fs::read_to_string(sdir.join("session.json")).unwrap();
+    assert!(m.contains("\"Unnamed-later\""));
+    std::fs::write(
+        sdir.join("session.json"),
+        m.replace("\"Unnamed-later\"", "\"  \""),
+    )
+    .unwrap();
+    c.ok(Command::FileNew { discard: true });
+    c.ok(Command::FileLoad {
+        session: named("kept"),
+        discard: false,
+    });
+    let s = c.state();
+    let meas = s.measurements.iter().find(|m| m.config.name == "  ");
+    let meas = meas.expect("the measurement loaded with its stored name");
+    let mut config = meas.config.clone();
+    let id = meas.id;
+    assert_eq!(c.update(id, config.clone()).unwrap_err().code, ErrorCode::Invalid);
+    config.name = "Main".into();
+    c.update_ok(id, config);
+    h.shutdown();
+}
