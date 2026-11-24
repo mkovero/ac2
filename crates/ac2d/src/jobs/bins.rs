@@ -7,17 +7,18 @@
 //! would stall then while the `tf`'s moves on. A stage goes out when its average changed,
 //! and is refreshed like any topic while audio comes, only while subscribed.
 
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use ac2_core::mic_curve::Correction;
 use ac2_core::mtw::{DrawnBins, Mtw};
-use ac2_proto::frame::{BinLayout, BinStage, BinsFrame, BinsMeta, FrameData};
+use ac2_proto::frame::{BinLayout, BinStage, BinsFrame, BinsMeta, Frame, FrameData};
 use ac2_proto::model::FreqRange;
 use ac2_proto::topic::{MAX_BIN_STAGES, Topic};
 use ac2_proto::units::{Hz, MeasId, Rev, Samples, Seconds};
 use num_complex::Complex64;
 
-use super::{Due, Emitter, Flush, Pace, StampArgs};
+use super::{Due, Emitter, Flush, JobMsg, Pace, Probe, StampArgs};
 
 /// What every stage frame of an emit repeats from that emit's `tf`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -178,6 +179,14 @@ impl StageStreams {
         }
     }
 
+    /// Every stage's frame as it would go out now, unquantised: what a math over this
+    /// transfer combines per bin.
+    pub(crate) fn all_frames(&mut self, mtw: &Mtw, shared: &Shared) -> Vec<BinsFrame> {
+        (0..self.stages.len())
+            .map(|i| self.frame(i, mtw, shared))
+            .collect()
+    }
+
     /// The stage's pace generation: advances whenever what its frame is formed from does.
     pub(super) fn generation(
         &mut self,
@@ -253,6 +262,24 @@ impl StageStreams {
             phase,
             coh,
         }
+    }
+}
+
+/// A live operand's answer to a math over its stage bins: its `tf` and, from the same
+/// averages and stamp, every stage's frame (none when it is not at the `bins` resolution).
+#[derive(Debug)]
+pub(crate) struct OperandBins {
+    pub(crate) tf: Frame,
+    pub(crate) stages: Vec<BinsFrame>,
+}
+
+impl Probe {
+    /// As [`Probe::request`], answered with every stage's bins beside the `tf`.
+    pub(crate) fn request_bins(&self) -> Option<Receiver<Option<OperandBins>>> {
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        self.tx.send(JobMsg::CaptureBins(tx)).ok()?;
+        self.thread.unpark();
+        Some(rx)
     }
 }
 

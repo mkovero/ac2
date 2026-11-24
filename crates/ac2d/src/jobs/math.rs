@@ -24,8 +24,8 @@ use std::time::{Duration, Instant};
 use ac2_core::average::DelayReference as CoreReference;
 use ac2_core::spectrum::{column_max, column_mean};
 use ac2_proto::frame::{
-    Frame, FrameData, MathState, OperandState, OperandStatus, ProtectionFlags, RtaFrame, RtaMeta,
-    SpecFrame, SpecMeta, TfFrame, TfMeta, ValidityMask,
+    BinsFrame, Frame, FrameData, MathState, OperandState, OperandStatus, ProtectionFlags, RtaFrame,
+    RtaMeta, SpecFrame, SpecMeta, TfFrame, TfMeta, ValidityMask,
 };
 use ac2_proto::grid::{GridDef, GridId};
 use ac2_proto::model::{
@@ -39,6 +39,7 @@ use ac2_traces::columns::Columns;
 use ac2_traces::math::{self, Combine, Input};
 use ac2_traces::ops::capture_columns;
 
+use super::bins::OperandBins;
 use super::{
     Analysis, Due, Emitter, Flush, JobCmd, JobCtx, Pace, Probes, SmoothingChange, StampArgs,
 };
@@ -67,7 +68,13 @@ pub(crate) struct Held {
 }
 
 /// A live operand's request in flight (`Ok`), or a stored operand's columns (`Err`).
-type Pending = Result<Option<Receiver<Option<Frame>>>, Arc<Held>>;
+type Pending = Result<Option<Asked>, Arc<Held>>;
+
+/// A live operand's request: for its result alone, or with its stage bins.
+enum Asked {
+    Result(Receiver<Option<Frame>>),
+    Bins(Receiver<Option<OperandBins>>),
+}
 
 /// What one operand gave the math.
 #[derive(Debug)]
@@ -117,6 +124,8 @@ pub(crate) struct MathJob {
     pace: Pace,
     /// Newest inserted delay seen per operand: the reference while that operand is left out.
     seen_delay: Vec<Option<f64>>,
+    /// The `bins/<meas>/<stage>` streams of the layout the newest result states.
+    stages: stages::Streams,
 }
 
 impl MathJob {
@@ -153,6 +162,7 @@ impl MathJob {
             operand_states: Vec::new(),
             pace: Pace::new(Duration::ZERO),
             seen_delay,
+            stages: stages::Streams::new(meas),
         }
     }
 
@@ -168,42 +178,57 @@ impl MathJob {
         }
     }
 
-    /// Every operand's current result: all requests to live operands go out first, so they
-    /// form their results in parallel and the wait is the slowest one's, not the sum.
-    fn ask_operands(&self) -> Vec<Answer> {
+    /// Every operand's current result, with each live one's stage bins when `bins` (empty
+    /// where it has none): all requests to live operands go out first, so they form their
+    /// results in parallel and the wait is the slowest one's, not the sum.
+    fn ask_operands(&self, bins: bool) -> (Vec<Answer>, Vec<Vec<BinsFrame>>) {
         let operands = self.cfg.expr.operands();
         let pending: Vec<Pending> = operands
             .iter()
             .zip(&self.stored)
             .map(|(o, s)| match (o, s) {
                 (_, Some(h)) => Err(Arc::clone(h)),
-                (Operand::Meas { meas }, None) => {
-                    Ok(self.probes.get(*meas).and_then(|p| p.request()))
-                }
+                (Operand::Meas { meas }, None) => Ok(self.probes.get(*meas).and_then(|p| {
+                    if bins {
+                        p.request_bins().map(Asked::Bins)
+                    } else {
+                        p.request().map(Asked::Result)
+                    }
+                })),
                 (Operand::Trace { .. } | Operand::Eq { .. }, None) => Ok(None),
             })
             .collect();
         let deadline = Instant::now() + OPERAND_WAIT;
         pending
             .into_iter()
-            .map(|p| match p {
-                Err(h) => Answer::Stored(h),
-                Ok(None) => Answer::Stopped,
-                Ok(Some(rx)) => {
-                    let wait = deadline.saturating_duration_since(Instant::now());
-                    match rx.recv_timeout(wait) {
-                        Ok(Some(f)) => Answer::Result(Box::new(f)),
-                        Ok(None) | Err(_) => Answer::NoResult,
-                    }
+            .map(|p| {
+                let wait = || deadline.saturating_duration_since(Instant::now());
+                match p {
+                    Err(h) => (Answer::Stored(h), Vec::new()),
+                    Ok(None) => (Answer::Stopped, Vec::new()),
+                    Ok(Some(Asked::Result(rx))) => match rx.recv_timeout(wait()) {
+                        Ok(Some(f)) => (Answer::Result(Box::new(f)), Vec::new()),
+                        Ok(None) | Err(_) => (Answer::NoResult, Vec::new()),
+                    },
+                    Ok(Some(Asked::Bins(rx))) => match rx.recv_timeout(wait()) {
+                        Ok(Some(b)) => (Answer::Result(Box::new(b.tf)), b.stages),
+                        Ok(None) | Err(_) => (Answer::NoResult, Vec::new()),
+                    },
                 }
             })
-            .collect()
+            .unzip()
     }
 
     /// The current result before display smoothing, on the combining grid, formed from the
     /// operands now.
     fn current(&mut self) -> FrameData {
-        let answers = self.ask_operands();
+        self.current_with(&[]).0
+    }
+
+    /// [`MathJob::current`], with the frames of stages `wanted` when the result states a
+    /// layout: each combined per bin from the operands' own bins of the same answers.
+    fn current_with(&mut self, wanted: &[usize]) -> (FrameData, Vec<BinsFrame>) {
+        let (answers, operand_bins) = self.ask_operands(!wanted.is_empty());
         for (seen, a) in self.seen_delay.iter_mut().zip(&answers) {
             if let Answer::Result(f) = a
                 && let FrameData::Tf(tf) = &f.data
@@ -220,12 +245,24 @@ impl MathJob {
             &self.seen_delay,
             &answers,
         );
+        let frames = match &c {
+            FrameData::Tf(tf) if !wanted.is_empty() => stages::frames(
+                &self.cfg,
+                tf,
+                &answers,
+                &operand_bins,
+                &self.seen_delay,
+                self.epoch,
+                wanted,
+            ),
+            _ => Vec::new(),
+        };
         match &mut c {
             FrameData::Tf(f) => f.meta.smoothing = self.cfg.smoothing,
             FrameData::Spec(f) => f.meta.smoothing = self.cfg.smoothing.map(|s| s.fraction),
             _ => {}
         }
-        c
+        (c, frames)
     }
 
     fn stamp(&self, end: u64) -> StampArgs {
@@ -487,6 +524,32 @@ pub(crate) fn needs_shared_time_base(c: &MathConfig) -> bool {
         }
 }
 
+/// The delay a phase-combining transfer math refers its result to, with the operands at
+/// expression positions `included` going in, in order: the named operand's delay (its
+/// newest, while it is left out), else an explicit delay. An operand never seen falls back to
+/// the first included operand's, and the frame states whichever delay was used.
+fn delay_reference(
+    cfg: &MathConfig,
+    included: &[usize],
+    seen_delay: &[Option<f64>],
+) -> CoreReference {
+    match cfg.reference {
+        MathReference::Fixed { delay } => CoreReference::Fixed(delay.0),
+        MathReference::Operand { operand: r } => {
+            match cfg.expr.operands().iter().position(|o| *o == r) {
+                Some(k) => match included.iter().position(|i| *i == k) {
+                    Some(j) => CoreReference::Trace(j),
+                    None => match seen_delay.get(k).copied().flatten() {
+                        Some(d) => CoreReference::Fixed(d),
+                        None => CoreReference::Trace(0),
+                    },
+                },
+                None => CoreReference::Trace(0),
+            }
+        }
+    }
+}
+
 /// The math trace's result from its operands' answers (`answers[k]` is the expression's
 /// `k`-th operand's), before display smoothing, on `grid`. `seen_delay[k]` is the newest
 /// inserted delay seen from operand `k`.
@@ -547,22 +610,8 @@ pub(crate) fn combine(
         MathExpr::Binary { .. } | MathExpr::Align { .. } => included.len() == 2,
         MathExpr::Average { .. } => included.len() >= MathConfig::MIN_AVERAGE,
     };
-    // The reference: the named operand's delay (its newest, while it is left out), else an
-    // explicit delay. An operand never seen falls back to the first included operand's, and
-    // the frame states whichever delay was used.
-    let reference = match cfg.reference {
-        MathReference::Fixed { delay } => CoreReference::Fixed(delay.0),
-        MathReference::Operand { operand: r } => match operands.iter().position(|o| *o == r) {
-            Some(k) => match included.iter().position(|(i, _)| *i == k) {
-                Some(j) => CoreReference::Trace(j),
-                None => match seen_delay.get(k).copied().flatten() {
-                    Some(d) => CoreReference::Fixed(d),
-                    None => CoreReference::Trace(0),
-                },
-            },
-            None => CoreReference::Trace(0),
-        },
-    };
+    let included_at: Vec<usize> = included.iter().map(|(k, _)| *k).collect();
+    let reference = delay_reference(cfg, &included_at, seen_delay);
     let mask_of = |i: usize| {
         included.iter().fold(ValidityMask::NONE, |m, (_, v)| {
             m.with(
@@ -663,6 +712,7 @@ pub(crate) fn combine(
             sum_after: vec![f32::NAN; n],
         });
     }
+    let bins = stages::layout(cfg, answers, &states);
     let state = Some(Box::new(MathState {
         operands: states,
         phase,
@@ -723,7 +773,7 @@ pub(crate) fn combine(
                 mic_range: None,
                 math: state,
                 unresolved,
-                bins: None,
+                bins,
                 settling,
                 filled,
             },
@@ -860,17 +910,30 @@ impl Analysis for MathJob {
             meas: self.meas,
             stream: self.cfg.domain.stream(),
         };
-        let due = self
-            .pace
-            .due(e, topic, self.generation, &stamp, Instant::now());
-        if due == Due::Send {
-            let c = self.current();
-            let f = self.shown(c);
-            if !e.send(stamp, f) {
+        let now = Instant::now();
+        let due = self.pace.due(e, topic, self.generation, &stamp, now);
+        // Stage frames carry the stamp of the result formed beside them, as a transfer's do.
+        let bins_stamp = StampArgs {
+            grid_id: None,
+            ..stamp
+        };
+        let (wanted, stages_flush) = self.stages.due(e, self.generation, &bins_stamp, now);
+        if due == Due::Send || !wanted.is_empty() {
+            let (c, frames) = self.current_with(&wanted);
+            if let FrameData::Tf(tf) = &c {
+                self.stages.follow(tf.meta.bins.as_deref());
+            }
+            for f in frames {
+                let stage = f.meta.stage;
+                if !e.send(bins_stamp, FrameData::Bins(f)) {
+                    self.stages.unsent(stage);
+                }
+            }
+            if due == Due::Send && !e.send(stamp, self.shown(c)) {
                 self.pace.unsent();
             }
         }
-        Flush::from_due(due)
+        Flush::from_due(due).and(stages_flush)
     }
 
     fn capture(&mut self) -> Option<(StampArgs, FrameData)> {
@@ -881,5 +944,6 @@ impl Analysis for MathJob {
 }
 
 mod pace;
+mod stages;
 #[cfg(test)]
 mod tests;

@@ -16,7 +16,8 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use ac2_proto::frame::{
-    ClipFlags, Frame, FrameData, FrameStamp, IrFrame, LevelsFrame, LevelsMeta, ProtectionFlags,
+    BinsFrame, ClipFlags, Frame, FrameData, FrameStamp, IrFrame, LevelsFrame, LevelsMeta,
+    ProtectionFlags,
 };
 use ac2_proto::grid::GridId;
 use ac2_proto::topic::Topic;
@@ -373,6 +374,8 @@ pub(crate) enum JobMsg {
     Cmd(JobCmd),
     /// Form the current result for a math trace's operand and answer on the channel.
     Capture(SyncSender<Option<Frame>>),
+    /// As `Capture`, with every analysis stage's bins of the same averages and stamp.
+    CaptureBins(SyncSender<Option<bins::OperandBins>>),
     /// Form the current result with its impulse response for `trace.capture`.
     CaptureTrace(SyncSender<Option<Captured>>),
     Stop,
@@ -395,6 +398,11 @@ pub(crate) trait Analysis: Send {
     /// there is one (a transfer job that has accepted no block with a reference yet).
     fn capture_ir(&mut self) -> Option<IrFrame> {
         None
+    }
+    /// [`Analysis::capture`] with each analysis stage's unquantised bins from the same
+    /// averages: none for an analysis without stage bins.
+    fn capture_bins(&mut self) -> Option<(StampArgs, FrameData, Vec<BinsFrame>)> {
+        self.capture().map(|(s, d)| (s, d, Vec::new()))
     }
     /// Frames of further audio without which the job can form nothing new, so it sleeps
     /// through the hand-offs until that much is queued and takes them together; commands and
@@ -664,6 +672,14 @@ fn run(
                 JobMsg::Capture(reply) => {
                     let f = a.capture().map(|(s, d)| em.frame(s, 0, d));
                     let _ = reply.send(f);
+                    false
+                }
+                JobMsg::CaptureBins(reply) => {
+                    let c = a.capture_bins().map(|(s, d, stages)| bins::OperandBins {
+                        tf: em.frame(s, 0, d),
+                        stages,
+                    });
+                    let _ = reply.send(c);
                     false
                 }
                 JobMsg::CaptureTrace(reply) => {

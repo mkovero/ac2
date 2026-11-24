@@ -1950,7 +1950,10 @@ peak and notch jumps run over the bins as drawn. Where two windows hand over the
 drawn, and the cursor adds `grid` while a neighbouring window draws its bins. Smoothing, a
 peak hold, peak tracking (**P**), the unwrapped phase and group delay keep the grid (the list
 row says `resolution bins (grid: peak hold)` or `(grid: peaks)`), and a capture is a 1/96
-trace.
+trace. A transfer math trace (a difference, ratio, sum or average) digs down the same way
+when all its operands are live transfers at bins with the same rate and LF window: each bin
+is the operands' own bins combined. With a stored trace, an operand at 1/96 or another LF
+window, one left out or stopped, it stays on the 1/96 grid; an alignment always does.
 
 - **Setting it**: *Resolution* in the New / Edit dialogs (a transfer's also offers `bins`),
   `ac2 meas new tf|sweep … --resolution 1/96`, `ac2 meas set <meas> --resolution 1/24`

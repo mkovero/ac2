@@ -22,21 +22,21 @@ use common::*;
 
 const T: Duration = Duration::from_secs(20);
 
-fn stage(meas: u32, stage: u8) -> Topic {
+pub(crate) fn stage(meas: u32, stage: u8) -> Topic {
     Topic::Bins {
         meas: MeasId(meas),
         stage,
     }
 }
 
-fn tf_topic(meas: u32) -> Topic {
+pub(crate) fn tf_topic(meas: u32) -> Topic {
     Topic::Data {
         meas: MeasId(meas),
         stream: ac2_proto::Stream::Tf,
     }
 }
 
-fn bins(f: &Frame) -> &BinsFrame {
+pub(crate) fn bins(f: &Frame) -> &BinsFrame {
     match &f.data {
         FrameData::Bins(b) => b,
         other => panic!("{other:?}"),
@@ -97,7 +97,7 @@ fn start(
 
 /// The frames of `topics` covering the audio up to `end`, at config rev `rev` or later: the
 /// newest emit's, one per topic.
-fn covering(sub: &Sub, end: u64, rev: u64, topics: &[Topic]) -> HashMap<Topic, Frame> {
+pub(crate) fn covering(sub: &Sub, end: u64, rev: u64, topics: &[Topic]) -> HashMap<Topic, Frame> {
     let mut got = HashMap::new();
     while got.len() < topics.len() {
         let f = sub
@@ -113,7 +113,7 @@ fn covering(sub: &Sub, end: u64, rev: u64, topics: &[Topic]) -> HashMap<Topic, F
 }
 
 /// A stage frame carries the stamp of the `tf` formed beside it, its grid aside.
-fn same_emit(s: &Frame, tf: &Frame) {
+pub(crate) fn same_emit(s: &Frame, tf: &Frame) {
     assert_eq!(s.stamp.audio_sample, tf.stamp.audio_sample, "{}", s.topic());
     assert_eq!(s.stamp.config_rev, tf.stamp.config_rev);
     assert_eq!(s.stamp.config_applied_at, tf.stamp.config_applied_at);
@@ -122,12 +122,12 @@ fn same_emit(s: &Frame, tf: &Frame) {
     assert_eq!(s.stamp.grid_id, None);
 }
 
-fn layout(f: &Frame) -> BinLayout {
+pub(crate) fn layout(f: &Frame) -> BinLayout {
     *tf(f).meta.bins.clone().expect("a layout at bins")
 }
 
 /// The 1/96 column nearest a frequency (the grid runs from 1 kHz · 2^(−672/96)).
-fn column(hz: f64) -> usize {
+pub(crate) fn column(hz: f64) -> usize {
     ((96.0 * (hz / 1000.0).log2()).round() as i64 + 672) as usize
 }
 

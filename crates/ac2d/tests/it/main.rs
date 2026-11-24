@@ -32,6 +32,7 @@ mod levels;
 mod limits;
 mod loudness;
 mod loudness_bars;
+mod math_bins;
 mod math_traces;
 mod meas_display;
 mod net_pairs;

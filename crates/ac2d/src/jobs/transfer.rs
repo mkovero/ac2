@@ -10,7 +10,7 @@ use ac2_core::mtw::{Mtw, MtwConfig, MtwFrame, SampleGate, Validity};
 use ac2_core::protection::{BlockDecision, BlockLevels, Guard, ProtectionConfig};
 use ac2_core::smoothing::{Smoother, SmoothingMode, TfColumns};
 use ac2_proto::frame::{
-    FrameData, IrFrame, IrMeta, ProtectionFlags, TfFrame, TfMeta, ValidityMask,
+    BinsFrame, FrameData, IrFrame, IrMeta, ProtectionFlags, TfFrame, TfMeta, ValidityMask,
 };
 use ac2_proto::grid::GridId;
 use ac2_proto::model::{DelayState, FreqRange, TransferConfig, TransferResolution};
@@ -916,6 +916,16 @@ impl Analysis for Transfer {
         }
         let stamp = self.stamp(end, self.last_prot);
         Some((stamp, FrameData::Tf(self.tf_frame(false))))
+    }
+
+    fn capture_bins(&mut self) -> Option<(StampArgs, FrameData, Vec<BinsFrame>)> {
+        let (stamp, tf) = self.capture()?;
+        let shared = self.shared();
+        let stages = match &mut self.bins {
+            Some(b) => b.all_frames(&self.mtw, &shared),
+            None => Vec::new(),
+        };
+        Some((stamp, tf, stages))
     }
 
     fn capture_ir(&mut self) -> Option<IrFrame> {
