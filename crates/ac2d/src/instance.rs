@@ -97,11 +97,8 @@ impl Instance {
         let io_err = |e| LockError::Io(path.clone(), e);
         std::fs::create_dir_all(dir).map_err(io_err)?;
         #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
-                .map_err(io_err)?;
-        }
+        ac2_paths::socket_dir::close_as(dir, ac2_paths::socket_dir::effective_uid())
+            .map_err(io_err)?;
         // Never truncated: the file's content is nothing, only its lock counts.
         let file = OpenOptions::new()
             .read(true)

@@ -5,8 +5,6 @@
 //! the clients ([`ac2_paths::socket_dir`]), which refuse to connect through such a
 //! directory.
 
-use std::os::unix::fs::PermissionsExt;
-
 use crate::StartError;
 
 /// Creates the directory of `endpoint`'s socket (an `ipc://` one; others need none), closes
@@ -20,9 +18,9 @@ fn prepare_as(endpoint: &str, uid: u32) -> Result<(), StartError> {
         return Ok(());
     };
     std::fs::create_dir_all(dir).map_err(StartError::Io)?;
-    // Not checked here: a directory this user cannot change is refused by the check below,
-    // with what is wrong with it.
-    let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+    // Not checked here: a directory this user cannot change, or a link, is refused by the
+    // check below, with what is wrong with it.
+    let _ = ac2_paths::socket_dir::close_as(dir, uid);
     ac2_paths::socket_dir::check_as(dir, uid).map_err(|e| StartError::RuntimeDir {
         dir: e.dir,
         problem: e.problem,
@@ -37,7 +35,7 @@ fn effective_uid() -> u32 {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
-    use std::os::unix::fs::MetadataExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
     use std::path::Path;
 
     fn endpoint(dir: &Path) -> String {
@@ -76,8 +74,11 @@ mod tests {
         std::fs::create_dir(&target).unwrap();
         let link = t.path().join("link");
         std::os::unix::fs::symlink(&target, &link).unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).unwrap();
         let e = prepare(&endpoint(&link)).unwrap_err();
         assert!(matches!(e, StartError::RuntimeDir { .. }), "{e}");
+        let mode = std::fs::metadata(&target).unwrap().mode() & 0o7777;
+        assert_eq!(mode, 0o755, "nothing is changed through the link");
     }
 
     #[test]

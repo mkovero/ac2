@@ -13,7 +13,9 @@ and returns credit on its data DEALER, the daemon sends multipart frames, events
 keepalives to each connection as its credit allows (§5.8). The local pair's `ipc://` sockets
 lie in a directory that must be a directory of the user's own (not a link), mode 700: the
 daemon does not start, and a client does not connect, through one that is not, since
-whoever can enter it can reach the daemon or put a socket in its place.
+whoever can enter it can reach the daemon or put a socket in its place. A directory not
+there yet is a daemon not running, as a missing socket is; a client checks it once a
+daemon answered there.
 
 ## 1. Encoding rules
 

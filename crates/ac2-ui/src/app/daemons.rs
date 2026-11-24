@@ -234,11 +234,7 @@ impl App {
                         self.retarget(ctx, slot, endpoints);
                     }
                 }
-                None if since.elapsed() > HOLDER_WAIT => self.state.fault(format!(
-                    "another ac2d is running for this user, but {} does not say where it \
-                     listens",
-                    ac2_client::endpoint::endpoints_file().display()
-                )),
+                None if since.elapsed() > HOLDER_WAIT => self.state.fault(holder_unread()),
                 None => self.daemons.lost.push((slot, since)),
             }
         }
@@ -361,4 +357,18 @@ impl App {
         self.dispatch(Msg::RigPick(crate::state::RigRow::Rig(id)));
         true
     }
+}
+
+/// Why the instance lock's holder cannot be reached after waiting for it: its directory is
+/// not this user's own (the file is not read from there), or the file does not say where it
+/// listens.
+fn holder_unread() -> String {
+    #[cfg(unix)]
+    if let Err(e) = ac2_paths::socket_dir::check(&ac2_client::endpoint::runtime_dir()) {
+        return format!("another ac2d is running for this user, but {e}");
+    }
+    format!(
+        "another ac2d is running for this user, but {} does not say where it listens",
+        ac2_client::endpoint::endpoints_file().display()
+    )
 }

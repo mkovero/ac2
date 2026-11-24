@@ -351,9 +351,17 @@ impl Client {
     /// Connects, says `hello` (refusing another protocol version) and starts the sync task.
     /// Must be called inside a tokio runtime.
     pub async fn connect(cfg: ClientConfig) -> Result<Self, ClientError> {
+        // A socket directory not there yet is a daemon not running, as a missing socket
+        // is; it is checked once a daemon answered in it.
+        #[cfg(unix)]
+        let mut absent = Vec::new();
         #[cfg(unix)]
         for ep in [&cfg.endpoints.ctrl, &cfg.endpoints.data] {
-            ac2_paths::socket_dir::check_endpoint(ep).map_err(ClientError::SocketDir)?;
+            if !ac2_paths::socket_dir::check_endpoint_present(ep)
+                .map_err(ClientError::SocketDir)?
+            {
+                absent.push(ep.clone());
+            }
         }
         let ctx = match &cfg.context {
             Some(c) => c.clone(),
@@ -423,6 +431,10 @@ impl Client {
             key: curve.map(|c| c.keys.public),
         });
         let welcome = hello(&core, &cfg.name).await?;
+        #[cfg(unix)]
+        for ep in &absent {
+            ac2_paths::socket_dir::check_endpoint(ep).map_err(ClientError::SocketDir)?;
+        }
         let mirror = Mirror::new(cfg.mirror);
         let (view_tx, view_rx) = watch::channel(Arc::new(view_of(&mirror, &welcome)));
         let welcome = Arc::new(Mutex::new(welcome));
@@ -942,6 +954,24 @@ mod retry_tests {
         };
         assert!(matches!(e, ClientError::SocketDir(_)), "{e}");
         assert!(e.to_string().contains("mode is 777"), "{e}");
+    }
+
+    /// A socket directory not made yet (the daemon not started) is a daemon not running, as
+    /// a missing socket is: no answer, not a socket-directory fault.
+    #[cfg(unix)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_socket_directory_not_there_yet_is_no_daemon() {
+        let t = tempfile::tempdir().unwrap();
+        let eps = crate::Endpoints::local_in(&t.path().join("not-yet"));
+        let mut cfg = ClientConfig::new(eps, "socket-dir test");
+        cfg.retry = Retry {
+            timeout: Duration::from_millis(100),
+            retries: 1,
+        };
+        let Err(e) = Client::connect(cfg).await else {
+            panic!("connected with no daemon");
+        };
+        assert!(matches!(e, ClientError::Timeout { .. }), "{e}");
     }
 
     #[tokio::test(flavor = "multi_thread")]
