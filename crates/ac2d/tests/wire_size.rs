@@ -559,7 +559,7 @@ fn slow_tuning_session_fits_a_remote_link() {
     // periods near one display frame (about 60 a second each), so the eye sees sound as it
     // happens: that, not the link, sets the rate (2.7 Mbit/s here on Linux, 2.9 on Windows).
     assert!(mbit(false) < 3.2, "{:.2} Mbit/s", mbit(false));
-    // The IR view adds its own topic at the transfer functions' rate (5.2 Mbit/s on Linux).
+    // The IR view adds its own topic at the transfer functions' rate (4.8 Mbit/s on Linux).
     assert!(
         mbit(true) < 6.0,
         "{:.2} Mbit/s with the IR view",
@@ -567,13 +567,15 @@ fn slow_tuning_session_fits_a_remote_link() {
     );
     for (topic, c) in &sizes {
         if topic.ends_with("/tf") {
-            // The average (`d/4/tf`) also carries its operands' range band (`range_lo`,
-            // `range_hi` as offsets from `mag`, `range_coh` in hundredths): ≈ 3 970 B as a
-            // keyframe, ≈ 2 740 B as a delta at most; the budget is ≈ 10 % over that.
+            // On the 720-column grid a transfer function is ≈ 2 700 B as a keyframe and
+            // ≈ 1 350 B as a delta; the average (`d/4/tf`) also carries its operands' range
+            // band (`range_lo`, `range_hi` as offsets from `mag`, `range_coh` in hundredths):
+            // ≈ 4 440 B as a keyframe, ≈ 2 800 B as a delta. The budgets are 25 % and 20 %
+            // over a plain one, ≈ 11 % and 12 % over the average.
             let (key, delta) = if topic == "d/4/tf" {
-                (4_400, 3_050)
+                (4_920, 3_140)
             } else {
-                (3_000, 1_500)
+                (3_375, 1_620)
             };
             assert!(c.per_key() < key, "{topic}: keyframe {} B", c.per_key());
             assert!(c.per_delta() < delta, "{topic}: delta {} B", c.per_delta());

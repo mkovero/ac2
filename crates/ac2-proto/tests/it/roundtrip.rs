@@ -664,23 +664,53 @@ fn harmonic_readings_roundtrip_by_name() {
     assert_eq!((l.r#type.as_str(), l.thd, l.leakage), ("read", None, None));
 }
 
-/// Encode and decode time of a 480-column transfer function with measurement-like noise,
-/// printed (`cargo test --release -p ac2-proto --test it codec_cost -- --ignored
-/// --nocapture`).
+/// Encode and decode time of a transfer function on the live transfer grid (720 columns:
+/// 48 per octave, k −336…383) with measurement-like noise, printed (`cargo test --release
+/// -p ac2-proto --test it codec_cost -- --ignored --nocapture`).
 #[test]
 #[ignore = "measurement, not a check"]
 fn codec_cost() {
+    let n = 720;
     let mut f = samples::tf_frame();
+    f.stamp.grid_id = Some(
+        GridDef::Log {
+            ppo: 48,
+            k_min: -336,
+            k_max: 383,
+        }
+        .id(),
+    );
     let FrameData::Tf(t) = &mut f.data else {
         unreachable!()
     };
+    // The sample's other columns, repeated across the wider grid.
+    let widen = |v: &mut Vec<f32>| *v = (0..n).map(|i| v[i % v.len()]).collect();
+    for v in [&mut t.mag, &mut t.phase, &mut t.coh] {
+        widen(v);
+    }
+    if let Some(a) = &mut t.align {
+        for v in [
+            &mut a.phase_before,
+            &mut a.phase_after,
+            &mut a.sum_before,
+            &mut a.sum_after,
+        ] {
+            widen(v);
+        }
+    }
+    if let Some(r) = &mut t.range {
+        for v in [&mut r.lo, &mut r.hi, &mut r.coh] {
+            widen(v);
+        }
+    }
+    t.validity.resize(n, ValidityMask::NONE);
     let mut seed = 1u32;
     let mut noise = move || {
         seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         (seed >> 8) as f32 / (1u32 << 24) as f32 - 0.5
     };
-    for i in 0..t.mag.len() {
-        let hf = i as f32 / 480.0;
+    for i in 0..n {
+        let hf = i as f32 / n as f32;
         t.mag[i] = -3.0 * hf + noise() * hf;
         t.phase[i] = -40.0 * hf + 20.0 * noise() * hf;
         t.coh[i] = (1.0 - 0.5 * hf * hf + 0.05 * noise() * hf).clamp(0.0, 1.0);
@@ -698,7 +728,7 @@ fn codec_cost() {
     }
     let dec = t0.elapsed() / rounds;
     println!(
-        "tf 480 cols: {} B on the wire, encode {enc:?}, decode {dec:?}",
+        "tf {n} cols: {} B on the wire, encode {enc:?}, decode {dec:?}",
         parts.iter().map(Vec::len).sum::<usize>()
     );
 
