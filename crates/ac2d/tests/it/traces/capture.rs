@@ -390,3 +390,71 @@ fn transfer_capture_keeps_its_ir() {
     assert_eq!(data(c, none.id).ir, None);
     r.h.shutdown();
 }
+
+/// A refusal that asks for other options keeps the upload for the retry with them; a
+/// success or any other refusal uses it up.
+#[test]
+fn an_import_refused_for_its_options_keeps_the_upload() {
+    let mut r = rig("traces-retry");
+    let c = &mut r.c;
+    let upload = |c: &mut Client, data: Vec<u8>| {
+        let t = c.transfer(Command::FileUploadBegin {
+            file: "/home/foh/irs/stereo.wav".into(),
+            bytes: data.len() as u64,
+            sha256: ac2_archive::sha256_hex(&data),
+        });
+        c.ok(Command::FileUploadChunk {
+            transfer: t.transfer,
+            offset: 0,
+            data: Blob(data),
+        });
+        t.transfer
+    };
+    let import = |c: &mut Client, transfer, ir| {
+        c.call(Command::TraceImport(ac2_proto::TraceImportArgs {
+            transfer,
+            format: ImportFormat::Auto,
+            role: ImportRole::Trace,
+            ir,
+            owner: TraceOwner::Imported,
+        }))
+    };
+    let problem = |e: ac2_proto::ProtoError| match e.detail {
+        Some(ErrorDetail::Import { problem, .. }) => problem,
+        _ => panic!("{e:?}"),
+    };
+    // Two channels, an impulse on each.
+    let mut h = vec![0.0f32; 2 * 1024];
+    h[2 * 100] = 0.5;
+    h[2 * 200 + 1] = 0.5;
+    let wav = ac2_traces::raw::wav::to_bytes(2, 48_000, &h);
+
+    let t = upload(c, wav.clone());
+    let e = import(c, t, None).unwrap_err();
+    assert_eq!(problem(e), ImportProblem::PickChannel);
+    let ir = IrImport {
+        channel: Some(1),
+        ..IrImport::default()
+    };
+    let got = import(c, t, Some(ir)).unwrap().trace();
+    assert_eq!(got.kind, TraceKind::Transfer);
+    assert_eq!(
+        import(c, t, Some(ir)).unwrap_err().code,
+        ErrorCode::NotFound,
+        "used up by the import"
+    );
+
+    // Options on a text file: kept; then refused for its content: used up.
+    let t = upload(c, b"* REW\n20 1\n30 2\n25 3\n".to_vec());
+    let e = import(c, t, Some(ir)).unwrap_err();
+    assert_eq!(problem(e), ImportProblem::BadOptions);
+    let e = import(c, t, None).unwrap_err();
+    assert_eq!(problem(e), ImportProblem::NotAscending);
+    assert_eq!(
+        import(c, t, None).unwrap_err().code,
+        ErrorCode::NotFound,
+        "used up by a refusal of the file"
+    );
+    drop(r.backend);
+    r.h.shutdown();
+}

@@ -16,7 +16,7 @@ use ac2_proto::model::{
     TraceKind, TraceMeta, TraceMicCurve, TraceOwner, TracePosition, TraceSource, TransferIr,
 };
 use ac2_proto::units::{Hz, MeasId, Seconds, TraceId, TransferId, WallNs};
-use ac2_proto::{ErrorCode, ErrorDetail, FrameData, GridDef, ProtoError, ReplyBody};
+use ac2_proto::{ErrorCode, ErrorDetail, FrameData, GridDef, ImportProblem, ProtoError, ReplyBody};
 use ac2_traces::columns::{Columns, StoredTrace};
 use ac2_traces::meta;
 use ac2_traces::mic::{self, MicCurveError};
@@ -651,8 +651,10 @@ impl Control {
         self.derived(name, source, d, &refs, smoothing)
     }
 
-    /// `trace.import` of a complete upload, used up whatever the outcome: a salvage imports
-    /// file after file, and a refused one must not hold one of the few transfer slots.
+    /// `trace.import` of a complete upload, used up whatever the outcome — a salvage imports
+    /// file after file, and a refused one must not hold one of the few transfer slots —
+    /// except when the refusal asks for other options: the same bytes are imported again
+    /// with them, and sending up to 64 MiB once more would only be waste.
     pub(super) fn trace_import(
         &mut self,
         client: &Peer,
@@ -662,9 +664,20 @@ impl Control {
         ir: Option<IrImport>,
         owner: TraceOwner,
     ) -> Result<ReplyBody, ProtoError> {
-        let (file, content) = self.transfers.take_upload(client, transfer)?;
-        let file_name = super::transfer::file_part(&file).to_owned();
-        self.import_trace_file(file_name, format, role, ir, &content, owner)
+        let up = self.transfers.take_upload(client, transfer)?;
+        let r = self.import_trace_file(up.file.clone(), format, role, ir, &up.data, owner);
+        if let Err(ProtoError {
+            detail:
+                Some(ErrorDetail::Import {
+                    problem: ImportProblem::PickChannel | ImportProblem::BadOptions,
+                    ..
+                }),
+            ..
+        }) = &r
+        {
+            self.transfers.put_back(up);
+        }
+        r
     }
 
     /// The file `file_name` read as a new trace.

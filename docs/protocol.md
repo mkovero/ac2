@@ -1794,7 +1794,9 @@ with the autosave (§7.3).
   Then `file.load` / `file.salvage` with `{type: upload}` or `file.import` (stores it as a
   named session; `session_exists` unless `overwrite`), or `trace.import` (reads it as a
   trace file, named after the last component of the upload's `file` when the file names
-  no trace; the upload is used up whether the import succeeds or not). Download: `file.download_begin`
+  no trace; the upload is used up whether the import succeeds or not, except by a refusal
+  with problem `pick_channel` or `bad_options`, which keeps it for a retry with other
+  options). Download: `file.download_begin`
   packs (`file_name` `<name>.ac2session`; an archive over 64 MiB packed is `invalid`, as an
   upload is), `file.download_chunk` reads, and
   `file.download_end` drops it; with `saved_as` after a working-state download, the
