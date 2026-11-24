@@ -1949,10 +1949,13 @@ nearest bin and says so (`15.0 kHz · 12 Hz bin`), a grid column reads `1/96 oct
 peak and notch jumps run over the bins as drawn; the curve's legend adds `bins` while any
 are drawn. Where two windows hand over the grid is drawn, and the cursor adds `grid` there
 while a neighbouring window draws its bins, with the resolution marker on or off. Smoothing
-keeps that curve on the grid; a peak hold or peak tracking (**P**) keeps a whole pane on it,
-and its legend says why (`bins (grid: peak hold)`, `bins (grid: peaks)`); the unwrapped phase
-and group delay exist on the grid only, so with either chosen every transfer pane draws
-and reads the grid, its magnitude and coherence too. A capture is a 1/96 trace. A transfer math trace (a difference, ratio, sum or average) digs down the same way
+keeps that curve on the grid; the unwrapped phase and group delay exist on the grid only, so
+with either chosen every transfer pane draws and reads the grid, its magnitude and coherence
+too; a peak hold or peak tracking (**P**) keeps a whole pane on it. Whenever a setting keeps
+a curve on the grid its legend says which, one reason, the curve's own smoothing first:
+`bins (grid: smoothed)`, `bins (grid: unwrapped phase)`, `bins (grid: group delay)`,
+`bins (grid: peak hold)`, `bins (grid: peaks)`. Zoomed out with none of these, it says
+nothing. A capture is a 1/96 trace. A transfer math trace (a difference, ratio, sum or average) digs down the same way
 when all its operands are live transfers at bins with the same rate and LF window: each bin
 is the operands' own bins combined, and a stopped math shows bins only for the stages that
 were on screen when it stopped. With a stored trace, an operand at 1/96 or another LF

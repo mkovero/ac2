@@ -633,7 +633,20 @@ fn what_the_cursor_says_in_each_case() {
         let s = scene(&[fx.trace()], &v, size(1900.0));
         assert_eq!(readout_freq(&s), grid, "{phase:?}");
         assert!(s.bins.is_none(), "{phase:?}");
-        assert!(!s.legend[0].text.contains("bins"), "{}", s.legend[0].text);
+        let why = if matches!(phase, PhaseView::Unwrapped { .. }) {
+            "bins (grid: unwrapped phase)"
+        } else {
+            "bins (grid: group delay)"
+        };
+        assert!(s.legend[0].tags.iter().any(|t| t == why), "{phase:?}");
+        assert_eq!(
+            s.legend[0]
+                .tags
+                .iter()
+                .filter(|t| t.contains("bins"))
+                .count(),
+            1
+        );
         let found = crate::tf::jump(
             &[fx.trace()],
             &DisplayCache::default(),
@@ -695,21 +708,9 @@ fn a_legend_says_bins_while_a_stage_is_drawn() {
         ..zoom
     };
     assert!(said(fx.trace(), &v, 1900.0).ends_with(" · 12 Hz bin"));
-    // No stage drawn: zoomed out, smoothed, stale.
+    // No stage drawn for the zoom or a stale stage: nothing said, neither is a setting.
     assert!(
         !tags(fx.trace(), &zoom, 800.0)
-            .iter()
-            .any(|t| t.contains("bins"))
-    );
-    let smoothed = TfTrace {
-        smoothing: Some(Smoothing {
-            fraction: SmoothingFraction::Sixth,
-            mode: SmoothingMode::Magnitude,
-        }),
-        ..fx.trace()
-    };
-    assert!(
-        !tags(smoothed, &zoom, 1900.0)
             .iter()
             .any(|t| t.contains("bins"))
     );
@@ -720,7 +721,15 @@ fn a_legend_says_bins_while_a_stage_is_drawn() {
             .iter()
             .any(|t| t.contains("bins"))
     );
-    // Peak hold or peaks: said, with why the grid is drawn.
+    // A setting that keeps the grid: said, with which.
+    let smoothed = TfTrace {
+        smoothing: Some(Smoothing {
+            fraction: SmoothingFraction::Sixth,
+            mode: SmoothingMode::Magnitude,
+        }),
+        ..fx.trace()
+    };
+    assert!(has(&tags(smoothed, &zoom, 1900.0), "bins (grid: smoothed)"));
     let hold = vec![0.0_f32; fx.c.freqs.len()];
     let held = TfTrace {
         hold: Some(&hold),
@@ -782,17 +791,78 @@ fn a_legend_says_bins_while_a_stage_is_drawn() {
 #[test]
 fn forced_grid_names_its_reason() {
     let fx = Fx::new();
-    assert_eq!(bins::forced(&[fx.trace()]), None);
-    let t = TfTrace {
+    let wrapped = PhaseView::Wrapped;
+    let unwrapped = PhaseView::Unwrapped {
+        range: Range::new(-720.0, 180.0),
+    };
+    let delay = PhaseView::GroupDelay {
+        range_ms: Range::new(-2.0, 10.0),
+    };
+    assert_eq!(bins::forced(&[fx.trace()], wrapped), None);
+    let tracking = || TfTrace {
         tracks: true,
         ..fx.trace()
     };
-    assert_eq!(bins::forced(&[t]), Some(Forced::Peaks));
-    let mut t = fx.trace();
-    if let Some(b) = t.bins.as_mut() {
-        b.holds = true;
+    assert_eq!(bins::forced(&[tracking()], wrapped), Some(Forced::Peaks));
+    let held = || {
+        let mut t = tracking();
+        if let Some(b) = t.bins.as_mut() {
+            b.holds = true;
+        }
+        t
+    };
+    // A peak hold before peaks, a phase view before both.
+    assert_eq!(bins::forced(&[held()], wrapped), Some(Forced::PeakHold));
+    assert_eq!(
+        bins::forced(&[held()], unwrapped),
+        Some(Forced::UnwrappedPhase)
+    );
+    assert_eq!(bins::forced(&[held()], delay), Some(Forced::GroupDelay));
+    // The curve's own smoothing before anything the pane forces.
+    let smoothed = TfTrace {
+        smoothing: Some(Smoothing {
+            fraction: SmoothingFraction::Sixth,
+            mode: SmoothingMode::Magnitude,
+        }),
+        ..held()
+    };
+    for phase in [wrapped, unwrapped, delay] {
+        let pane = bins::forced(std::slice::from_ref(&smoothed), phase);
+        assert_eq!(bins::kept_on_grid(&smoothed, pane), Some(Forced::Smoothed));
     }
-    assert_eq!(bins::forced(&[t]), Some(Forced::PeakHold));
+    assert_eq!(bins::kept_on_grid(&fx.trace(), None), None);
+    // The legend says the one that wins, and only it, zoomed in or out.
+    let tags = |t: TfTrace<'_>, v: &ViewState, px: f32| -> Vec<String> {
+        scene(&[t], v, size(px)).legend[0]
+            .tags
+            .iter()
+            .filter(|t| t.contains("bins"))
+            .cloned()
+            .collect()
+    };
+    let at = |phase: PhaseView, lo: f64, hi: f64| {
+        let v = view(lo, hi);
+        ViewState {
+            tf: TfView { phase, ..v.tf },
+            ..v
+        }
+    };
+    for px in [1900.0, 800.0] {
+        let zoom = at(wrapped, 10_000.0, 20_000.0);
+        assert_eq!(tags(smoothed.clone(), &zoom, px), ["bins (grid: smoothed)"]);
+        assert_eq!(
+            tags(held(), &at(unwrapped, 10_000.0, 20_000.0), px),
+            ["bins (grid: unwrapped phase)"]
+        );
+        assert_eq!(
+            tags(held(), &at(delay, 10_000.0, 20_000.0), px),
+            ["bins (grid: group delay)"]
+        );
+        assert_eq!(tags(held(), &zoom, px), ["bins (grid: peak hold)"]);
+        assert_eq!(tags(tracking(), &zoom, px), ["bins (grid: peaks)"]);
+    }
+    // Zoomed out with no setting: nothing.
+    assert!(tags(fx.trace(), &at(wrapped, 20.0, 20_000.0), 800.0).is_empty());
 }
 
 #[test]

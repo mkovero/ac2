@@ -663,7 +663,7 @@ pub fn transfer_scene(
     if let Some(s) = &spliced {
         marks.extend(bins::blend_marks(traces, s, bins::marked(traces, &shown)));
     }
-    let forced = bins::forced(traces);
+    let forced = bins::forced(traces, view.tf.phase);
     let legend: Vec<LegendEntry> = shown
         .iter()
         .zip(&nudges)

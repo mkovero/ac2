@@ -209,21 +209,27 @@ need a PROTO bump.
 **Legend.** A transfer's list row reads its config (`· resolution bins`) and nothing more:
 what forces the grid is per pane. In each pane the legend of a curve with bins (a transfer
 at `Bins`, an eligible math) reads `· bins` while a stage is drawn there, and `· bins (grid:
-peak hold)` / `(grid: peaks)` while that pane forces the grid. While the phase view is
-unwrapped or group delay no pane splices bins at all (magnitude and coherence included), so
-cursor, mark, jumps and drawing read one grid.
+<reason>)` whenever a setting keeps it on the grid at any zoom, one reason in this order:
+`smoothed` (the curve's own smoothing), `unwrapped phase` / `group delay` (the pane's phase
+view), `peak hold`, `peaks`. Zoom alone adds nothing. The reason comes from the predicate
+that keeps the grid in drawing (`tf/bins.rs` `forced` for the pane, `kept_on_grid` per
+curve), so text and drawing agree. While the phase view is unwrapped or group delay no pane
+splices bins at all (magnitude and coherence included), so cursor, mark, jumps and drawing
+read one grid.
 
 | case | legend | readout |
 |---|---|---|
 | below `138.5·Δf` (unresolved grid part) | `· resolution bins` | `2.9 Hz bins` (unresolved note) |
-| `s` < 1 px; before the first frame; cross-rig blank (`TfMeta.bins` `None`); smoothed (adds `· 1/6 oct smoothing`) | `· resolution bins` | grid |
+| `s` < 1 px; before the first frame; cross-rig blank (`TfMeta.bins` `None`) | `· resolution bins` | grid |
+| smoothed (adds `· 1/6 oct smoothing`), at any zoom and before any pane reason | `· resolution bins`; legend `· bins (grid: smoothed)` | grid |
+| unwrapped phase, group delay | `· resolution bins`; legend `· bins (grid: unwrapped phase)` / `(grid: group delay)` | grid |
 | peak hold or P on | `· resolution bins`; legend `· bins (grid: peak hold)` / `(grid: peaks)` | grid |
-| unwrapped phase, group delay; Alignment view; stale or settling stage (`blocks: 0`); just stepped 1/96 → `bins` (job restarted) | `· resolution bins` | grid |
+| Alignment view; stale or settling stage (`blocks: 0`); just stepped 1/96 → `bins` (job restarted) | `· resolution bins` | grid |
 | blend span | `· resolution bins` | grid; `…: grid` text while a neighbour on the marked curve draws bins, marker on or off |
 | stored curve captured at `Bins` | `1/96 oct` (its grid) | grid |
 | transfer or eligible math, a stage drawn (an average adds `· range band on grid parts`) | legend `· bins` | bin |
-| eligible math, peak hold or P on | `· bins (grid: peak hold)` / `(grid: peaks)` | grid |
-| math with no stage drawn (zoom, smoothing, stale) or not eligible (stored operand, other ladders, operand not at `Bins` or stopped) | no `bins` | grid |
+| eligible math, smoothed, phase view, peak hold or P on | `· bins (grid: smoothed)` / `(grid: unwrapped phase)` / `(grid: group delay)` / `(grid: peak hold)` / `(grid: peaks)` | grid |
+| math with no stage drawn (zoom, stale) or not eligible (stored operand, other ladders, operand not at `Bins` or stopped) | no `bins` | grid |
 
 ## 7. Subscription from the view
 

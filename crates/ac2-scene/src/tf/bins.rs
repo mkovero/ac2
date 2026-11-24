@@ -58,10 +58,16 @@ pub struct BinSource<'a> {
     pub holds: bool,
 }
 
-/// Why a pane draws the grid everywhere: its peak hold folds grid columns, its peaks are
-/// picked on grid columns.
+/// Why a curve at bins is drawn on the grid however far the view is zoomed: a setting that
+/// works on grid columns only. Its smoothing is a 1/n-octave average of grid columns; the
+/// unwrapped phase and group delay are derived along the grid, and a pane reading its phase
+/// there reads every part on the same column; a peak hold folds grid columns; peaks are
+/// picked on grid columns. In that order of precedence: the curve's own setting first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Forced {
+    Smoothed,
+    UnwrappedPhase,
+    GroupDelay,
     PeakHold,
     Peaks,
 }
@@ -70,15 +76,30 @@ impl Forced {
     /// What a legend says after `bins`: `(grid: peak hold)`.
     pub fn text(self) -> &'static str {
         match self {
+            Forced::Smoothed => "(grid: smoothed)",
+            Forced::UnwrappedPhase => "(grid: unwrapped phase)",
+            Forced::GroupDelay => "(grid: group delay)",
             Forced::PeakHold => "(grid: peak hold)",
             Forced::Peaks => "(grid: peaks)",
         }
     }
 }
 
-/// Whether a pane with `traces` draws the grid everywhere, and why.
-pub fn forced(traces: &[TfTrace<'_>]) -> Option<Forced> {
-    if traces
+/// Whether a pane in `phase` view draws the grid everywhere for its phase view.
+fn phase_forces(phase: PhaseView) -> Option<Forced> {
+    match phase {
+        PhaseView::Wrapped => None,
+        PhaseView::Unwrapped { .. } => Some(Forced::UnwrappedPhase),
+        PhaseView::GroupDelay { .. } => Some(Forced::GroupDelay),
+    }
+}
+
+/// Whether a pane with `traces` in `phase` view draws the grid everywhere, and why: its phase
+/// view first, then a peak hold, then peaks.
+pub fn forced(traces: &[TfTrace<'_>], phase: PhaseView) -> Option<Forced> {
+    if let Some(f) = phase_forces(phase) {
+        Some(f)
+    } else if traces
         .iter()
         .any(|t| t.hold.is_some() || t.bins.as_ref().is_some_and(|b| b.holds))
     {
@@ -87,6 +108,16 @@ pub fn forced(traces: &[TfTrace<'_>]) -> Option<Forced> {
         Some(Forced::Peaks)
     } else {
         None
+    }
+}
+
+/// Why curve `t` in a pane forced by `pane` ([`forced`]) is drawn on the grid at any zoom:
+/// its own smoothing before what the pane forces.
+pub fn kept_on_grid(t: &TfTrace<'_>, pane: Option<Forced>) -> Option<Forced> {
+    if t.smoothing.is_some() {
+        Some(Forced::Smoothed)
+    } else {
+        pane
     }
 }
 
@@ -246,9 +277,10 @@ struct Run<'f> {
 
 /// The runs of bins curve `t` draws in `view` on a plot `plot_px` wide: of each fresh
 /// stage at least [`DRAW_PX`] apart, its fine bins in the view and the first beyond each
-/// edge. Empty for a smoothed curve (its bins are not), and under `forced`.
+/// edge. Empty for a curve [`kept_on_grid`] by its own smoothing (its bins are not
+/// smoothed); the pane's reasons are `splice`'s.
 fn runs<'f>(t: &'f TfTrace<'_>, view: Range, plot_px: f64) -> Vec<Run<'f>> {
-    let Some(src) = t.bins.as_ref().filter(|_| t.smoothing.is_none()) else {
+    let Some(src) = t.bins.as_ref().filter(|_| kept_on_grid(t, None).is_none()) else {
         return Vec::new();
     };
     let unresolved = src.tf_meta.unresolved.as_deref();
@@ -283,16 +315,16 @@ fn runs<'f>(t: &'f TfTrace<'_>, view: Range, plot_px: f64) -> Vec<Run<'f>> {
 }
 
 /// The curves as a pane `plot_px` wide draws them in `view`; `None` when none draws a bin
-/// (every curve as `shown`): under `forced`, and in a pane whose phase is not wrapped
-/// ([`reads_bins`]), so that every part of the pane, its cursor, mark and jumps read the
-/// one grid it draws.
+/// (every curve as `shown`): under [`forced`] (a phase view not wrapped, a peak hold,
+/// peaks), so that every part of the pane, its cursor, mark and jumps read the one grid it
+/// draws.
 pub fn splice(
     traces: &[TfTrace<'_>],
     shown: &[DisplayTrace],
     view: &ViewState,
     plot_px: f64,
 ) -> Option<Spliced> {
-    if forced(traces).is_some() || !reads_bins(view.tf.phase) {
+    if forced(traces, view.tf.phase).is_some() {
         return None;
     }
     let range = view.freq.range();
@@ -416,7 +448,7 @@ fn with_bins(
 /// group delay exist on the grid only, and a pane whose phase reads the grid draws its
 /// magnitude and coherence there too, so one column is under the cursor in every part.
 pub fn reads_bins(phase: PhaseView) -> bool {
-    phase == PhaseView::Wrapped
+    phase_forces(phase).is_none()
 }
 
 /// What the cursor's frequency line says of the column it reads on curve `i` (column `col`
@@ -495,8 +527,9 @@ pub fn blend_marks(
 
 /// What the legend of a curve with bins (a transfer at `bins`, a math over such) adds about
 /// them in this pane: `bins` while one of its stages is drawn (with `range band on grid
-/// parts` when its range band shows), `bins (grid: peak hold)` while the pane forces the
-/// grid; nothing when no stage is drawn. Per pane, since what forces the grid is.
+/// parts` when its range band shows), `bins (grid: smoothed)` and the like while a setting
+/// keeps it on the grid ([`kept_on_grid`] of the pane's [`forced`]); nothing when only the
+/// zoom does. Per pane, since what forces the grid is.
 pub fn legend_tags(
     t: &TfTrace<'_>,
     spans: &[BinSpan],
@@ -506,7 +539,7 @@ pub fn legend_tags(
     if t.bins.is_none() {
         return Vec::new();
     }
-    match forced {
+    match kept_on_grid(t, forced) {
         Some(f) => vec![format!("bins {}", f.text())],
         None if spans.is_empty() => Vec::new(),
         None if band_shown && t.range.is_some_and(|r| r.band.is_some()) => {
