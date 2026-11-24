@@ -2705,7 +2705,9 @@ A connection is dropped (its subscriptions and chains with it) when a send to it
 because its connection is gone, or when it holds unacknowledged messages and has sent
 nothing for 60 s; one heard from again after that is sent `rejoin`. `rejoin` comes only
 after the connection sends something, so a client watches for the completed handshake
-(ZMQ socket monitor) and sends `window` and its subscriptions on every reconnect. The data
+(ZMQ socket monitor) and sends `window` and its subscriptions on every reconnect, and also
+after 3 s with nothing read on its data connection (every connection is sent at least a
+`ka` a second): a reconnect the monitor did not report is caught that way. The data
 port is ctrl + 1 (§9).
 
 ### 5.9 Raw capture frames (`audio/<channel>`)

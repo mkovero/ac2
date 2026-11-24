@@ -104,7 +104,16 @@ pub(crate) struct DataState {
     asks: Vec<Topic>,
     /// Log every data frame read ([`crate::ClientConfig::record_arrivals`]).
     record: bool,
+    /// When the data DEALER last read anything, or last stated everything.
+    heard: Instant,
 }
+
+/// Silence on the data DEALER after which the daemon is told everything again. A daemon
+/// that knows a connection sends it something at least once a second (a `ka` when nothing
+/// else), so three missed seconds mean it may hold nothing for it: a reconnect whose
+/// handshake the monitor did not report (its event queue full, or a transport that
+/// reports none). Stating it again to a daemon that does know it changes nothing.
+pub(crate) const SILENT_RESTATE: Duration = Duration::from_secs(3);
 
 /// One data frame as a drain read it ([`crate::ClientConfig::record_arrivals`]).
 #[derive(Debug, Clone)]
@@ -281,6 +290,7 @@ impl DataState {
             owed: (0, 0),
             asks: Vec::new(),
             record,
+            heard: Instant::now(),
         })
     }
 
@@ -427,6 +437,7 @@ impl DataState {
         let epoch = view.session_epoch;
         if handshook(&self.monitor) {
             self.restate()?;
+            self.heard = now;
         }
         let mut read = 0;
         out.arrivals.clear();
@@ -435,6 +446,7 @@ impl DataState {
                 break;
             };
             read += 1;
+            self.heard = now;
             let bytes: usize = parts.iter().map(|p| p.len()).sum();
             self.received.fetch_add(bytes as u64, Ordering::Relaxed);
             let Some(first) = parts.first() else { continue };
@@ -482,6 +494,10 @@ impl DataState {
                 }
                 None => self.malformed += 1,
             }
+        }
+        if now.saturating_duration_since(self.heard) >= SILENT_RESTATE {
+            self.restate()?;
+            self.heard = now;
         }
         self.credit()?;
         // A chain that broke: its next frame as a keyframe. Not waited for; a lost request
@@ -639,6 +655,45 @@ mod chain_tests {
 
     fn delta(x: &CodedFrame, base: &CodedFrame) -> WireFrame {
         wire(encode_delta(x, base).unwrap().unwrap())
+    }
+
+    /// A reconnect whose handshake the monitor never reports (none on inproc): the daemon
+    /// sent nothing for [`SILENT_RESTATE`], so the window and subscriptions go again, and
+    /// again after each further silence; a daemon that keeps talking is not told twice.
+    #[test]
+    fn silence_states_the_window_and_subscriptions_again() {
+        let ctx = Context::new().unwrap();
+        let router = ctx.socket(SocketType::Router).unwrap();
+        router.bind("inproc://silent-restate").unwrap();
+        let sock = ctx.socket(SocketType::Dealer).unwrap();
+        let monitor = sock.monitor().unwrap();
+        sock.connect("inproc://silent-restate").unwrap();
+        let mut d = DataState::new(sock, monitor, 1 << 20, Arc::default(), false).unwrap();
+        let t0 = d.heard;
+        let sub = Subscription::Meas(MeasId(1));
+        d.subscribe(sub).unwrap();
+        let received = |r: &Socket| {
+            let mut got = Vec::new();
+            while let Some(m) = r.recv_timeout(Duration::from_millis(100)).unwrap() {
+                let f = m.frames();
+                got.push(ac2_proto::decode_data_request(&f[f.len() - 1]).unwrap().msg);
+            }
+            got
+        };
+        let stated = vec![DataUp::Window { bytes: 1 << 20 }, DataUp::Subscribe { sub }];
+        assert_eq!(received(&router), stated);
+        let mut out = Latest::default();
+        let drain = |d: &mut DataState, at: Instant, out: &mut Latest| {
+            d.drain(&view(at, 0), at, 0, out).unwrap();
+        };
+        drain(&mut d, t0 + SILENT_RESTATE / 2, &mut out);
+        assert_eq!(received(&router), [], "not silent long enough");
+        drain(&mut d, t0 + SILENT_RESTATE, &mut out);
+        assert_eq!(received(&router), stated);
+        drain(&mut d, t0 + SILENT_RESTATE * 3 / 2, &mut out);
+        assert_eq!(received(&router), [], "stated just now");
+        drain(&mut d, t0 + SILENT_RESTATE * 2, &mut out);
+        assert_eq!(received(&router), stated);
     }
 
     /// A drain at `now`, the local wall clock at the capture of `at` plus `late_ns`.
