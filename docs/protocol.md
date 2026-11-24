@@ -663,9 +663,11 @@ RtaConfig      { input: u16, fraction: BandFraction, f_lo: Hz, f_hi: Hz,
                  weighting: Weighting, averaging: SpecAveraging, display: SpectrumDisplay }
 ```
 
-`MeasConfig` = {`name`, `kind`, `scope`: `MeasScope`}. `scope` is `session` (the working
-session's: saved in session files, replaced by a load) or `rig` (the rig's, SPL meters only:
-kept with the daemon's rig settings, never in a session file; a load, a new session, a salvage
+`MeasConfig` = {`name`, `kind`, `scope`: `MeasScope`}. `name` follows the rule of every name
+an operator gives (`meas.create`, `meas.update`, a trace's `TraceEdit.name`, a walk's
+`name`): not blank, at most 128 characters (a walk's 64), else `invalid`. `scope` is
+`session` (the working session's: saved in session files, replaced by a load) or `rig`
+(the rig's, SPL meters only: kept with the daemon's rig settings, never in a session file; a load, a new session, a salvage
 or the autosave restore leaves it running with its log, Leq history and judgements, and a
 restarted daemon brings it back with its id). A `meas.update` changing `scope` moves the
 measurement between them under the same id; a change to a rig measurement is refused

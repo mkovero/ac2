@@ -762,18 +762,7 @@ fn check_plan_name(name: &str) -> Result<(), ProtoError> {
 }
 
 fn check_walk_name(name: &str) -> Result<(), ProtoError> {
-    if name.trim().is_empty() || name.trim() != name {
-        return Err(invalid(
-            "a walk needs a name, without leading or trailing spaces",
-        ));
-    }
-    if name.chars().count() > WalkState::MAX_NAME {
-        return Err(invalid(format!(
-            "walk names are at most {} characters",
-            WalkState::MAX_NAME
-        )));
-    }
-    Ok(())
+    ac2_traces::meta::check_name("walk", name, WalkState::MAX_NAME).map_err(invalid)
 }
 
 /// Points a walk can stand at: one to [`WalkState::MAX_POINTS`] (an average takes at most

@@ -136,6 +136,8 @@ pub(super) fn gen_err(e: GeneratorError) -> ProtoError {
 /// Checks a measurement configuration without a session.
 pub(crate) fn validate_meas(c: &MeasConfig) -> Result<(), ProtoError> {
     let inv = |m: &str| Err(invalid(m.to_owned()));
+    ac2_traces::meta::check_name("measurement", &c.name, ac2_traces::meta::MAX_NAME)
+        .map_err(invalid)?;
     if c.scope == MeasScope::Rig && !matches!(c.kind, MeasKind::Spl { .. }) {
         return inv("only an SPL meter can be the rig's");
     }

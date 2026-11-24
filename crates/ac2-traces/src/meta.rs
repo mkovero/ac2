@@ -64,14 +64,22 @@ pub fn new_edit(id: TraceId, name: String, slot: Option<u8>, owner: TraceOwner) 
     }
 }
 
+/// The rule every name an operator gives (a trace's, a measurement's, a walk's) follows:
+/// something to read, and at most `max` characters so lists, legends and the names
+/// derived from it stay bounded. `what` names the thing in the message.
+pub fn check_name(what: &str, name: &str, max: usize) -> Result<(), String> {
+    if name.trim().is_empty() {
+        return Err(format!("a {what} needs a name"));
+    }
+    if name.chars().count() > max {
+        return Err(format!("{what} names are at most {max} characters"));
+    }
+    Ok(())
+}
+
 /// Checks a name and slot.
 pub fn check_edit(name: &str, slot: Option<u8>) -> Result<(), String> {
-    if name.trim().is_empty() {
-        return Err("a trace needs a name".into());
-    }
-    if name.chars().count() > MAX_NAME {
-        return Err(format!("trace names are at most {MAX_NAME} characters"));
-    }
+    check_name("trace", name, MAX_NAME)?;
     if slot.is_some_and(|s| !(1..=9).contains(&s)) {
         return Err("slots are 1 … 9".into());
     }

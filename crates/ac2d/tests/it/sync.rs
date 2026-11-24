@@ -456,3 +456,36 @@ fn the_rig_id_outlives_a_restart_and_the_name_is_told() {
     a.shutdown();
     b.shutdown();
 }
+
+/// A measurement's name follows the rule of every name an operator gives: something to read,
+/// at most as long as a trace's, whether it is created or renamed.
+#[test]
+fn a_measurement_needs_a_readable_bounded_name() {
+    init_log();
+    let h = Daemon::start(config(manual_rig(), inproc("meas-names"))).unwrap();
+    let (mut a, _s) = connect(&h, &[]);
+    let longest = "m".repeat(ac2_traces::meta::MAX_NAME);
+    let too_long = "m".repeat(ac2_traces::meta::MAX_NAME + 1);
+    for bad in ["", "   ", too_long.as_str()] {
+        let e = a
+            .call(Command::MeasCreate {
+                config: spl(bad, 1),
+            })
+            .unwrap_err();
+        assert_eq!(e.code, ErrorCode::Invalid, "{bad:?}: {e:?}");
+    }
+    let m = a.measurement(Command::MeasCreate {
+        config: spl(&longest, 1),
+    });
+    for bad in ["", too_long.as_str()] {
+        let e = a
+            .call(Command::MeasUpdate {
+                meas: m.id,
+                base: m.config_rev,
+                config: spl(bad, 1),
+            })
+            .unwrap_err();
+        assert_eq!(e.code, ErrorCode::Invalid, "{bad:?}: {e:?}");
+    }
+    h.shutdown();
+}
